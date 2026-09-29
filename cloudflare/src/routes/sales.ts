@@ -98,7 +98,7 @@ import {
   type TaxSettings,
 } from '../lib/saleAmendments'
 import { DELIVERY_AMOUNT_ERROR_MESSAGES, deliveryAmountChanged, parseDeliveryAmountUsd } from '../lib/deliveryAmounts'
-import { applySaleBulkStatus, bulkAssertion, notifyBulkStatus, SaleBulkError, saleRevisionGuard } from '../lib/saleBulkStatus'
+import { applySaleBulkStatusOutcome, bulkAssertion, notifyBulkStatus, SaleBulkError, saleRevisionGuard, sendSaleBulkStatusTelegramEvent } from '../lib/saleBulkStatus'
 import { applySaleBulkUpdate, notifySaleBulkUpdate } from '../lib/saleBulkUpdate'
 import { prepareCustomerAssignments, preparePointsRedemption, isLoyaltyAssignmentError, LOYALTY_REASSIGNMENT_CODE, LOYALTY_REASSIGNMENT_MESSAGE } from '../lib/saleCustomerAssignmentGuard'
 import {
@@ -1909,9 +1909,12 @@ type SaleItemRow = {
 
 app.post('/bulk-status', async (c) => {
   try {
-    const result = await applySaleBulkStatus(c.env, c.get('user'), await c.req.json())
+    const user = c.get('user')
+    const { receipt, wrote } = await applySaleBulkStatusOutcome(c.env, user, await c.req.json())
     c.executionCtx.waitUntil(notifyBulkStatus(c.env))
-    return c.json(result)
+    if (wrote) c.executionCtx.waitUntil(sendSaleBulkStatusTelegramEvent(c.env, String(receipt.operationId), 'apply', actorSnapshot(user))
+      .catch((error) => console.error('[telegram] sale bulk status notification failed', error)))
+    return c.json(receipt)
   } catch (error) {
     return c.json({ error: (error as Error).message, ...(error instanceof SaleBulkError ? error.details : {}) }, error instanceof SaleBulkError ? error.statusCode : error instanceof SyntaxError ? 400 : 500)
   }

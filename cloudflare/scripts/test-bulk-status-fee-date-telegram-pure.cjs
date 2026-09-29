@@ -3,10 +3,11 @@
 //   U1  a grouped cancel dates its lost-fee expense with the Cambodia business
 //       day, as the single cancel does since M7 (00:30 local is the next UTC+7
 //       day, not the UTC day), and undo/redo keep that date.
-//   U8  every undo/redo of a grouped status change or of a settlement is
-//       announced on Telegram exactly as the single status change announces
-//       the same move: one message per action, in the direction the replay
-//       moved the sale, and nothing for a refused replay.
+//   U8  a grouped status change, and every undo/redo of one or of a
+//       settlement, is announced on Telegram exactly as the single status
+//       change announces the same move: one message per action, only from the
+//       call whose batch wrote it, in the direction the replay moved the sale,
+//       and nothing for a refused replay.
 // Only auth, cache bumps and the broadcast hub are stubbed. fetch to
 // api.telegram.org is recorded, never sent; the bot token and chat id are
 // made up.
@@ -114,7 +115,7 @@ function fixture() {
     try { parsed = JSON.parse(text) } catch { parsed = { error: text } }
     return { status: response.status, body: parsed }
   }
-  return { sql, call }
+  return { sql, env, call }
 }
 
 function seedSale(f, id, receipt, status = 'completed') {
@@ -190,6 +191,68 @@ async function check(name, fn) {
     assert.deepEqual(flagged.map((row) => row.fee_id), [-9101], 'only the UTC-dated grouped fee is flagged')
     assert.equal(flagged[0].writer, 'grouped')
     assert.equal(flagged[0].business_date, '2031-02-03')
+  })
+
+  await check('U8: a grouped cancel is announced once, exactly as the single cancel announces the same change', async () => {
+    seedSale(f, 11, 'R-SINGLE'); seedSale(f, 12, 'R-GROUP')
+    let mark = sent.length
+    assert.equal((await f.call(sales, '/11/status', { sale_status: 'cancelled', expected_updated_at: 'v1', client_request_id: 'u8-single-cancel', cancel_reason: 'buyer_refused', cancel_fee_usd: 1.5, cancel_fee_khr: 2000 }, 'PATCH')).status, 200)
+    const [singleMessage] = messagesSince(mark)
+    assert.ok(singleMessage && /Lost fee/.test(singleMessage.text), 'fixture: the single cancel announces its lost fee')
+    const groupRequest = { client_request_id: 'u8-group-cancel', target_status: 'cancelled', items: [member(f, 12, { cancel: cancelWithFee })] }
+    mark = sent.length
+    const grouped = await f.call(sales, '/bulk-status', groupRequest)
+    assert.equal(grouped.status, 200, JSON.stringify(grouped.body))
+    const messages = messagesSince(mark)
+    assert.equal(messages.length, 1, 'one grouped action is one Telegram message')
+    assert.equal(messages[0].message_thread_id, singleMessage.message_thread_id, 'same topic as the single status change')
+    assert.equal(messages[0].text, singleMessage.text.replace('R-SINGLE', 'R-GROUP'))
+    mark = sent.length
+    const retried = await f.call(sales, '/bulk-status', groupRequest)
+    assert.equal(retried.status, 200, JSON.stringify(retried.body))
+    assert.equal(retried.body.operationId, grouped.body.operationId, 'fixture: the retry is answered from the stored receipt')
+    assert.equal(messagesSince(mark).length, 0, 'a replayed request id announces nothing')
+  })
+
+  await check('U8: a grouped move announces only the members it changed, and a skipped-stock cancel says so', async () => {
+    seedSale(f, 24, 'R-APPLY-1', 'awaiting_delivery'); seedSale(f, 25, 'R-APPLY-2', 'awaiting_delivery'); seedSale(f, 26, 'R-APPLY-STAYS', 'completed')
+    let mark = sent.length
+    const moved = await f.call(sales, '/bulk-status', { client_request_id: 'u8-apply-mixed', target_status: 'completed', items: [24, 25, 26].map((id) => member(f, id)) })
+    assert.equal(moved.status, 200, JSON.stringify(moved.body))
+    const movedMessages = messagesSince(mark)
+    assert.equal(movedMessages.length, 1, 'one grouped action is one Telegram message')
+    const [movedMessage] = movedMessages
+    assert.deepEqual(movedMessage.text.split('\n').filter((line) => line.includes('Status updated: ')).map((line) => line.split('Status updated: ')[1]),
+      ['Awaiting Delivery → Completed', 'Awaiting Delivery → Completed'], movedMessage.text)
+    assert.ok(!movedMessage.text.includes('R-APPLY-STAYS'), 'an unchanged member is not announced')
+    seedSale(f, 43, 'R-SKIP-SINGLE-2'); seedSale(f, 44, 'R-SKIP-GROUP-2')
+    mark = sent.length
+    assert.equal((await f.call(sales, '/43/status', { sale_status: 'cancelled', expected_updated_at: 'v1', client_request_id: 'u8-apply-skip-single', cancel_reason: 'mistake', skip_stock: true }, 'PATCH')).status, 200)
+    const [singleSkip] = messagesSince(mark)
+    mark = sent.length
+    assert.equal((await f.call(sales, '/bulk-status', { client_request_id: 'u8-apply-skip-group', target_status: 'cancelled', cancel_reason: 'mistake', skip_stock: true, items: [member(f, 44)] })).status, 200)
+    assert.deepEqual(messagesSince(mark).map((message) => message.text), [singleSkip.text.replace('R-SKIP-SINGLE-2', 'R-SKIP-GROUP-2')])
+  })
+
+  await check('U8: two copies of one grouped request racing are announced once, by the copy whose batch wrote', async () => {
+    seedSale(f, 27, 'R-RACE', 'awaiting_delivery')
+    const request = { client_request_id: 'u8-race-copies', target_status: 'completed', items: [member(f, 27)] }
+    const realBatch = f.env.DB.batch
+    let winner
+    f.env.DB.batch = async (statements) => {
+      f.env.DB.batch = realBatch
+      winner = await f.call(sales, '/bulk-status', request)
+      return realBatch(statements)
+    }
+    const mark = sent.length
+    let loser
+    try { loser = await f.call(sales, '/bulk-status', request) } finally { f.env.DB.batch = realBatch }
+    assert.equal(loser.status, 200, JSON.stringify(loser.body))
+    assert.equal(winner?.status, 200, 'fixture: the winning copy wrote while the other copy was about to')
+    assert.equal(loser.body.operationId, winner.body.operationId, 'fixture: the losing copy is answered with the winner\'s stored receipt')
+    const messages = messagesSince(mark)
+    assert.equal(messages.length, 1, messages.map((message) => message.text).join('\n---\n'))
+    assert.ok(messages[0].text.includes('R-RACE'))
   })
 
   await check('U8: undoing a group announces only the members it moved, one block each, in one message', async () => {

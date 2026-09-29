@@ -343,7 +343,9 @@ export async function sendSaleBulkStatusTelegramEvent(env: Env, operationId: str
     const snapshot = JSON.parse(String(operation.payload_json)) as Snapshot;
     await sendSaleStatusTelegramEvent(env, telegramChanges(snapshot.members, via), by);
 }
-export async function applySaleBulkStatus(env: Env, user: SessionUser, raw: Row) {
+/** `wrote` is true only for the call whose own batch committed; every replay of the request id gets the stored receipt with false. */
+export type SaleBulkStatusOutcome = { receipt: Row; wrote: boolean };
+export async function applySaleBulkStatusOutcome(env: Env, user: SessionUser, raw: Row): Promise<SaleBulkStatusOutcome> {
     permission(user);
     const request = parseRequest(raw);
     if (request.skip_stock && !isAdminControlUser(user))
@@ -353,7 +355,7 @@ export async function applySaleBulkStatus(env: Env, user: SessionUser, raw: Row)
     if (previous) {
         if (previous.request_json !== canonical)
             fail('Request id was already used with different data.');
-        return JSON.parse(String(previous.receipt_json));
+        return { receipt: JSON.parse(String(previous.receipt_json)), wrote: false };
     }
     const ids = request.items.map(i => i.id);
     // The money columns feed only the S4-41 check below; the revision guard
@@ -533,12 +535,12 @@ export async function applySaleBulkStatus(env: Env, user: SessionUser, raw: Row)
     bounded(statements, snapshot, recordEvents?.eventsBytes || 0);
     try {
         const results = await db.batch(statements);
-        return { ...receipt, actionHistoryId: Number(results[historyStatementIndex].meta.last_row_id) };
+        return { receipt: { ...receipt, actionHistoryId: Number(results[historyStatementIndex].meta.last_row_id) }, wrote: true };
     }
     catch (error) {
         const retry = await db.prepare('SELECT request_json,receipt_json FROM sale_bulk_operations WHERE actor_id=@actor AND request_id=@request').get<Row>({ actor: user.id, request: request.client_request_id });
         if (retry?.request_json === canonical)
-            return JSON.parse(String(retry.receipt_json));
+            return { receipt: JSON.parse(String(retry.receipt_json)), wrote: false };
         if (/constraint/i.test(String(error)))
             fail('Sale or stock changed. The entire group was rejected; refresh before retrying.');
         throw error;
