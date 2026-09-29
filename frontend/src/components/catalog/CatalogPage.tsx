@@ -73,6 +73,7 @@ import {
 import {
   discardEditorDraft,
   isAboutImageRefusal,
+  keepEditedValues,
   markEdited,
   overlayStaffSettings,
   isLoadedOrEditedKey,
@@ -1188,6 +1189,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
   const editedKeysRef = useRef<ReadonlySet<string>>(editedKeys)
   const editorDirty = editedKeys.size > 0
   const staffSettingsRef = useRef<StaffSettings | null>(null)
+  const editorBaselineLoadedRef = useRef(false)
   const [refusedAboutImage, setRefusedAboutImage] = useState<string | null>(null)
   const [editorSaving, setEditorSaving] = useState(false)
   const [privateAi, setPrivateAi] = useState(createPrivateAiState)
@@ -1568,6 +1570,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     if (staffSettings) {
       staffSettingsRef.current = staffSettings
       setEditorDraft((current) => overlayStaffSettings(current, staffSettings, editedKeysRef.current))
+      editorBaselineLoadedRef.current = true
     }
     setPrivateAi((current) => applyPrivateAiRead(current, settings))
   }
@@ -1714,6 +1717,8 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     setConfig(nextConfig)
     setPortalConfigReady(true)
     if (editedKeysRef.current.size === 0) setEditorDraft(overlayStaffSettings(buildDraft(nextConfig), staffSettingsRef.current))
+    else if (!editorBaselineLoadedRef.current) setEditorDraft((current) => keepEditedValues(overlayStaffSettings(buildDraft(nextConfig), staffSettingsRef.current), current, editedKeysRef.current))
+    editorBaselineLoadedRef.current = true
     setCategories(nextMeta.categories)
     setBrands(nextMeta.brands)
     setBranches(nextMeta.branches)
@@ -2454,6 +2459,9 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
 
   async function savePortalDraft(): Promise<PortalSaveResult> {
     try {
+      if (!editorBaselineLoadedRef.current) {
+        return refuseSave('portalSettingsLoading', 'Wait for the website settings to finish loading before saving.')
+      }
       if (hasActiveMediaUpload) {
         return refuseSave('portalUploadPending', 'Wait for media uploads to finish before saving the website.')
       }

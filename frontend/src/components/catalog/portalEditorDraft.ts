@@ -61,6 +61,14 @@ export function replaceDraftValues(draft: EditorDraft, values: EditorDraft): Edi
   return { ...draft, ...values }
 }
 
+export function keepEditedValues(loadedDraft: EditorDraft, currentDraft: EditorDraft, edited: EditedKeys): EditorDraft {
+  const next: EditorDraft = { ...loadedDraft }
+  for (const key of edited) {
+    if (hasOwn(currentDraft, key)) next[key] = currentDraft[key]
+  }
+  return next
+}
+
 export function discardEditorDraft(loadedDraft: EditorDraft, staff: StaffSettings | null, privateAi: PrivateAiState): {
   draft: EditorDraft
   editedKeys: EditedKeys

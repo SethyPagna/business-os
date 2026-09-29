@@ -123,6 +123,33 @@ await runTest('T-S3: savePortalDraft answers { ok: true } only after a landed wr
   assert.match(page, /type PortalSaveResult = \{ ok: true \} \| \{ ok: false; field\?: string; messageKey\?: string \}/)
 })
 
+await runTest('R-AB-F 2: a Save before the first load settled writes nothing and says why', () => {
+  const save = savePortalDraftSource()
+  const guardAt = save.indexOf('if (!editorBaselineLoadedRef.current) {')
+  assert.ok(guardAt > 0, 'savePortalDraft refuses while nothing the draft holds came from the server')
+  assert.ok(guardAt < save.indexOf('setEditorSaving(true)'), 'before anything is sent')
+  assert.match(save.slice(guardAt), /^if \(!editorBaselineLoadedRef\.current\) \{\n\s*return refuseSave\('portalSettingsLoading', /, 'it answers false with the translated loading message')
+  assert.match(page, /const editorBaselineLoadedRef = useRef\(false\)/, 'nothing is loaded when the editor opens')
+  const reader = between(page, 'async function loadPrivateAiSettings(', '\n  }\n')
+  assert.match(reader, /if \(staffSettings\) \{[^}]*editorBaselineLoadedRef\.current = true/, 'a landed staff read is a loaded baseline')
+  const load = between(page, 'async function loadPortal() {', '\n  }\n')
+  const editorBranch = load.slice(load.indexOf('\n      return\n    }\n'))
+  const landedAt = editorBranch.indexOf('editorBaselineLoadedRef.current = true')
+  assert.ok(landedAt > editorBranch.indexOf("throw new Error('Failed to load the website')"), 'only a bootstrap that carried a config sets it')
+  assert.match(editorBranch, /else if \(!editorBaselineLoadedRef\.current\) setEditorDraft\(\(current\) => keepEditedValues\(overlayStaffSettings\(buildDraft\(nextConfig\), staffSettingsRef\.current\), current, editedKeysRef\.current\)\)/,
+    'a first load that lands after an early edit fills every key the owner did not touch')
+})
+
+await runTest('R-AB-F 2: the first load keeps what was typed and takes the stored value for everything else', () => {
+  const keepEditedValues = draftModule.keepEditedValues as ((loaded: Record<string, unknown>, current: Record<string, unknown>, edited: ReadonlySet<string>) => Record<string, unknown>) | undefined
+  assert.equal(typeof keepEditedValues, 'function', 'portalEditorDraft.ts exports keepEditedValues')
+  const stored = { business_name: 'Leang Cosmetics', customer_portal_business_tagline: 'Skincare and fragrance', customer_portal_logo_size: '120' }
+  const beforeLoad = { business_name: 'Leang', customer_portal_business_tagline: '', customer_portal_logo_size: '80' }
+  const draft = keepEditedValues!(stored, beforeLoad, new Set(['business_name']))
+  assert.deepEqual(draft, { business_name: 'Leang', customer_portal_business_tagline: 'Skincare and fragrance', customer_portal_logo_size: '120' },
+    'the default 80 and the empty tagline the editor opened with are never saved over the stored values')
+})
+
 if (failed) {
   console.error(`\n${failed} failing`)
   process.exit(1)
