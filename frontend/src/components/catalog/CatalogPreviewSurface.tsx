@@ -1,4 +1,4 @@
-import { Suspense, cloneElement, isValidElement, useMemo, useState } from 'react'
+import { Suspense, cloneElement, isValidElement } from 'react'
 import type { CSSProperties, ComponentType, Dispatch, ReactNode, RefObject, SetStateAction } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import ArrowDown from 'lucide-react/dist/esm/icons/arrow-down.js'
@@ -12,6 +12,7 @@ import LazyPortalMenu from '../shared/LazyPortalMenu'
 import CatalogProductImage from './catalogImages'
 import type { ProductDetailViewState } from './ProductDetailFlyout'
 import type { PortalFooterProps } from './legal/LegalPages.tsx'
+import { PUBLIC_STOREFRONT_LANGUAGE_OPTIONS } from './portalLanguageOptions.ts'
 import '../../styles/public-portal.css'
 
 const ImageGalleryLightbox = lazyRetry(() => import('../shared/ImageGalleryLightbox'), 'catalog-preview-image-gallery-lightbox')
@@ -72,12 +73,6 @@ type FilePickerModalProps = FilePickerState & {
   onSelect: (asset: unknown) => void
 }
 
-type TranslateOption = {
-  value: string
-  label: string
-  kind?: string
-}
-
 type HeaderLink = {
   key: string
   label: string
@@ -85,8 +80,6 @@ type HeaderLink = {
   icon: ComponentType<{ className?: string }>
   accentClassName?: string
 }
-
-type TranslateApplyState = 'idle' | 'applied' | 'failed' | string
 
 type CatalogPreviewSurfaceProps = {
   publicView: boolean
@@ -146,13 +139,8 @@ type CatalogPreviewSurfaceProps = {
   portalImageView: PortalImageViewState
   setPortalImageView: Dispatch<SetStateAction<PortalImageViewState>>
   toggleTheme: () => void
-  translateTarget: string
-  translateApplyState: TranslateApplyState
-  translateApplyMessage?: string
-  externalTranslateTarget?: string | null
-  translateReady: boolean
-  changeTranslateTarget: (target: string) => void
-  allPublicTranslateOptions: TranslateOption[]
+  pageLanguage: string
+  changePageLanguage: (language: string) => void
 }
 
 const FilePickerModal = lazyRetry(async () => ({
@@ -203,29 +191,9 @@ export default function CatalogPreviewSurface({
   portalImageView,
   setPortalImageView,
   toggleTheme,
-  translateTarget,
-  translateApplyState,
-  translateApplyMessage,
-  externalTranslateTarget,
-  translateReady,
-  changeTranslateTarget,
-  allPublicTranslateOptions,
+  pageLanguage,
+  changePageLanguage,
 }: CatalogPreviewSurfaceProps) {
-  const [translateSearch, setTranslateSearch] = useState('')
-  const trimmedTranslateSearch = translateSearch.trim().toLowerCase()
-  // Split into "first-party" (fast, real translations) vs "external" (the
-  // 9 Google-Translate-only languages) sections instead of one flat list
-  // of 28 -- matches the distinction the data already carries (`kind`)
-  // but the old flat list never surfaced visually, just via a per-item
-  // "External translation:" text prefix that was easy to miss while
-  // scanning a long list. Filtered by the search box below when there
-  // are enough options that scrolling to find one is real friction.
-  const filteredTranslateOptions = useMemo(() => {
-    if (!trimmedTranslateSearch) return allPublicTranslateOptions
-    return allPublicTranslateOptions.filter((option) => option.label.toLowerCase().includes(trimmedTranslateSearch))
-  }, [allPublicTranslateOptions, trimmedTranslateSearch])
-  const firstPartyTranslateOptions = filteredTranslateOptions.filter((option) => option.kind !== 'external')
-  const externalTranslateOptions = filteredTranslateOptions.filter((option) => option.kind === 'external')
 
   // P-public-9: the footer's quick links are the nav's own tabs. This
   // surface owns the tabs, so it hands them to whichever footer the caller
@@ -490,9 +458,6 @@ export default function CatalogPreviewSurface({
                     {displayConfig.translateWidgetEnabled ? (
                       <LazyPortalMenu
                         align="right"
-                        onOpenChange={(open) => {
-                          if (!open) setTranslateSearch('')
-                        }}
                         trigger={(
                           <button
                             type="button"
@@ -503,103 +468,36 @@ export default function CatalogPreviewSurface({
                             <Globe className="h-4 w-4 sm:h-[18px] sm:w-[18px]" />
                           </button>
                         )}
-                        content={({ closeMenu }) => {
-                          const renderOption = (option: TranslateOption) => {
-                            const active = translateTarget === option.value && (
-                              translateApplyState === 'applied'
-                              || (option.value === 'original' && translateApplyState === 'idle')
-                            )
-                            return (
-                              <button
-                                key={option.value}
-                                type="button"
-                                className={`flex w-full items-center justify-between gap-3 px-4 py-2.5 text-left text-sm transition ${
-                                  active
-                                    ? 'bg-blue-50 text-blue-700 dark:bg-amber-500/10 dark:text-amber-300'
-                                    : 'text-slate-700 hover:bg-slate-50 dark:text-neutral-200 dark:hover:bg-neutral-800'
-                                }`}
-                                onClick={() => {
-                                  changeTranslateTarget(option.value)
-                                  closeMenu()
-                                }}
-                              >
-                                <span>{option.value === 'original' ? copy('followApp', 'Original') : option.label}</span>
-                                {active ? <span className="text-[11px] font-semibold uppercase">{copy('active', 'Active')}</span> : null}
-                              </button>
-                            )
-                          }
-                          return (
-                            <div className="w-72 max-w-[85vw]">
-                              <div className="px-4 pb-2 pt-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-neutral-400">
-                                {copy('publicTranslation', 'Language tools')}
-                              </div>
-                              {allPublicTranslateOptions.length > 8 ? (
-                                <div className="px-3 pb-2">
-                                  <input
-                                    type="text"
-                                    value={translateSearch}
-                                    onChange={(event) => setTranslateSearch(event.target.value)}
-                                    placeholder={copy('searchLanguages', 'Search languages')}
-                                    aria-label={copy('searchLanguages', 'Search languages')}
-                                    // Same createPortal() problem as the
-                                    // filter menu's search field: this popup
-                                    // is mounted on document.body, outside
-                                    // every portal root, so the stylesheet's
-                                    // :focus-visible ring cannot reach it and
-                                    // focus:border-blue-400 alone is a 1px
-                                    // tint. It paints the ring itself.
-                                    className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:bg-white focus-visible:outline focus-visible:outline-[3px] focus-visible:outline-offset-2 focus-visible:outline-[#0369a1] dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100 dark:focus:border-amber-400 dark:focus:bg-neutral-900 dark:focus-visible:outline-[#fcd34d]"
-                                    // Real user requirement, not decorative:
-                                    // a flat 28-option list with no way to
-                                    // filter was the actual complaint behind
-                                    // "hard to find the right language" --
-                                    // this narrows the two sections below as
-                                    // you type instead of forcing a scroll
-                                    // through the full list every time.
-                                    autoFocus
-                                  />
-                                </div>
-                              ) : null}
-                              <div className="max-h-[min(calc(60*var(--app-vh)),20rem)] overflow-y-auto py-1">
-                                {firstPartyTranslateOptions.length ? firstPartyTranslateOptions.map(renderOption) : null}
-                                {externalTranslateOptions.length ? (
-                                  <>
-                                    <div className="mt-1 border-t border-slate-200 px-4 pb-1.5 pt-2.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:border-neutral-700 dark:text-neutral-400">
-                                      {copy('externalTranslation', 'More languages (auto-translated)')}
-                                    </div>
-                                    <p className="px-4 pb-2 text-xs leading-5 text-slate-500 dark:text-neutral-400">
-                                      {copy(
-                                        'externalTranslationDisclosure',
-                                        'Choosing one sends the text on this page to Google Translate and may set Google cookies.',
-                                        'ការជ្រើសរើសភាសាមួយនឹងផ្ញើអត្ថបទលើទំព័រនេះទៅ Google Translate ហើយអាចកំណត់ខូឃី Google។',
-                                      )}
-                                    </p>
-                                    {externalTranslateOptions.map(renderOption)}
-                                  </>
-                                ) : null}
-                                {!firstPartyTranslateOptions.length && !externalTranslateOptions.length ? (
-                                  <div className="px-4 py-6 text-center text-sm text-slate-500 dark:text-neutral-400">
-                                    {copy('noLanguagesFound', 'No languages match your search.')}
-                                  </div>
-                                ) : null}
-                              </div>
-                              {translateApplyMessage ? (
-                                <div className={`border-t border-slate-200 px-4 py-2 text-xs dark:border-neutral-700 ${
-                                  translateApplyState === 'failed'
-                                    ? 'text-rose-600 dark:text-rose-300'
-                                    : 'text-slate-500 dark:text-neutral-400'
-                                }`}>
-                                  {translateApplyMessage}
-                                </div>
-                              ) : null}
-                              {externalTranslateTarget && !translateReady ? (
-                                <div className="border-t border-slate-200 px-4 py-2 text-xs text-slate-500 dark:border-neutral-700 dark:text-neutral-400">
-                                  {copy('externalTranslationPreparing', 'Preparing external translation...')}
-                                </div>
-                              ) : null}
+                        content={({ closeMenu }) => (
+                          <div className="w-72 max-w-[85vw]">
+                            <div className="px-4 pb-2 pt-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-neutral-400">
+                              {copy('publicTranslation', 'Language tools')}
                             </div>
-                          )
-                        }}
+                            <div className="py-1">
+                              {PUBLIC_STOREFRONT_LANGUAGE_OPTIONS.map((option) => {
+                                const active = pageLanguage === option.value
+                                return (
+                                  <button
+                                    key={option.value}
+                                    type="button"
+                                    className={`flex w-full items-center justify-between gap-3 px-4 py-2.5 text-left text-sm transition ${
+                                      active
+                                        ? 'bg-blue-50 text-blue-700 dark:bg-amber-500/10 dark:text-amber-300'
+                                        : 'text-slate-700 hover:bg-slate-50 dark:text-neutral-200 dark:hover:bg-neutral-800'
+                                    }`}
+                                    onClick={() => {
+                                      changePageLanguage(option.value)
+                                      closeMenu()
+                                    }}
+                                  >
+                                    <span>{option.label}</span>
+                                    {active ? <span className="text-[11px] font-semibold uppercase">{copy('active', 'Active')}</span> : null}
+                                  </button>
+                                )
+                              })}
+                            </div>
+                          </div>
+                        )}
                       />
                     ) : null}
                     <button
@@ -752,7 +650,7 @@ export default function CatalogPreviewSurface({
             contactNote={productDetailContactNote}
             cautionDefault={productDetailCautionDefault}
             needMoreDetailsDefault={productDetailNeedMoreDetailsDefault}
-            language={translateTarget}
+            language={pageLanguage}
             onAddToBucket={onAddToBucket}
             bucketQty={productDetailView.product ? getBucketQty?.(productDetailView.product.id) : 0}
           />

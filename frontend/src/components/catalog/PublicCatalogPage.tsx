@@ -52,24 +52,7 @@ import { localizeDefaultConfigCopy, resolveStorefrontCopy } from './portalLangua
 import { ADMIN_MAX_PRODUCT_GALLERY_IMAGES } from '../products/helpers/productGalleryHelpers.ts'
 import InstallPromptBand from '../shared/InstallPromptBand.tsx'
 import { installBeforeInstallPromptCapture, installStandaloneExternalLinkGuard } from '../../utils/standaloneNavigation.ts'
-import {
-  PUBLIC_STOREFRONT_DEFAULT_LANGUAGE,
-  PUBLIC_STOREFRONT_TRANSLATE_OPTIONS,
-  normalizeFirstPartyPortalLanguage,
-  resolvePublicStorefrontLanguage,
-} from './portalLanguageOptions.ts'
-import {
-  applyGoogleTranslateSelection,
-  clearGoogleTranslateCookies,
-  hasPortalTranslatedMarker,
-  isPortalTranslateApplied,
-  readPublicStorefrontLanguage,
-  removePortalTranslateWidgetHost,
-  requestPortalTranslateReload,
-  setupPortalExternalTranslateWidget,
-  sleep,
-  storePortalTranslatePreference,
-} from './portalTranslateController.ts'
+import { normalizePortalLanguage, readPublicStorefrontLanguage, storePortalLanguage } from './portalLanguageOptions.ts'
 
 const loadCatalogProductsSection = () => import('./CatalogProductsSection')
 const CatalogProductsSection = lazyRetry(loadCatalogProductsSection, 'public-catalog-products-section')
@@ -88,10 +71,6 @@ const PUBLIC_PORTAL_AI_TIMEOUT_MS = 25000
 const STOREFRONT_ICON = '/leang-cosmetics-icon-512.png'
 const STOREFRONT_APPLE_TOUCH_ICON = '/leang-cosmetics-apple-touch-icon-v1.png'
 const STOREFRONT_MANIFEST = '/portal-manifest.json'
-// Every language the storefront hands to Google Translate (all but km/en).
-const PUBLIC_GOOGLE_TRANSLATE_LANGUAGES = PUBLIC_STOREFRONT_TRANSLATE_OPTIONS
-  .filter((option) => option.kind === 'external')
-  .map((option) => option.value)
 const PUBLIC_PORTAL_CACHE_KEY = 'business-os-catalog-portal-cache'
 const PUBLIC_PORTAL_BOOTSTRAP_ELEMENT_ID = 'business-os-portal-bootstrap'
 const PUBLIC_PORTAL_CACHE_MAX_AGE_MS = 1000 * 60 * 20
@@ -649,12 +628,7 @@ export default function PublicCatalogPage() {
   const [assistantRequestPolicy, setAssistantRequestPolicy] = useState<LooseRecord | null>(null)
   const [assistantDisclosure, setAssistantDisclosure] = useState<LooseRecord | null>(null)
   const [assistantDataUseConsent, setAssistantDataUseConsent] = useState(false)
-  // Khmer unless this visitor already chose another language (owner,
-  // 2026-09-25: "Default language of the public site = Khmer").
-  const [translateTarget, setTranslateTarget] = useState(() => readPublicStorefrontLanguage('en', PUBLIC_STOREFRONT_DEFAULT_LANGUAGE))
-  const [translateApplyState, setTranslateApplyState] = useState<'idle' | 'pending' | 'applied' | 'failed'>('idle')
-  const [translateApplyMessage, setTranslateApplyMessage] = useState('')
-  const [translateReady, setTranslateReady] = useState(true)
+  const [pageLanguage, setPageLanguage] = useState(readPublicStorefrontLanguage)
   const bucket = usePortalBucket()
   const wishlist = usePortalWishlist()
   // Storefront account state + cart/wishlist server sync (§2). Guests keep
@@ -766,19 +740,6 @@ export default function PublicCatalogPage() {
     }
   }, [])
 
-  // Merchant's own catalog-entry language (what product names/descriptions
-  // are actually typed in) -- the "from" side of a Google translation.
-  // Defaults to English same as the admin editor.
-  const configuredPortalLanguage = normalizeFirstPartyPortalLanguage(config.language) || 'en'
-  const translateWidgetEnabled = config.translateWidgetEnabled !== false
-  // pageLanguage: the hand-written pack every storefront string renders in
-  // (km or en). externalTranslateTarget: set only for a language Google
-  // translates the whole page into; that page renders in the source
-  // language first so Google is told the truth about what it receives.
-  const languageRoute = resolvePublicStorefrontLanguage(translateTarget, configuredPortalLanguage)
-  const pageLanguage = languageRoute.pageLanguage
-  const externalTranslateTarget = translateWidgetEnabled ? languageRoute.googleTarget : null
-
   const copy: CopyFunction = (key, fallback = '', fallbackKm = fallback) =>
     resolveStorefrontCopy(pageLanguage, t, key, fallback, fallbackKm)
 
@@ -787,14 +748,12 @@ export default function PublicCatalogPage() {
   // kept reading a Khmer storefront with English pronunciation (and a
   // translation tool kept offering to translate it into the language it was
   // already showing).
-  const portalDocumentLanguage = externalTranslateTarget || pageLanguage
-
   useEffect(() => {
-    if (typeof document === 'undefined' || !portalDocumentLanguage) return undefined
+    if (typeof document === 'undefined') return undefined
     const previous = document.documentElement.lang
-    document.documentElement.lang = portalDocumentLanguage
+    document.documentElement.lang = pageLanguage
     return () => { document.documentElement.lang = previous }
-  }, [portalDocumentLanguage])
+  }, [pageLanguage])
 
   // G5/B9: arm the same install-prompt capture and standalone external-link
   // guard App.tsx arms at boot for the admin app. The storefront never mounts
@@ -814,106 +773,12 @@ export default function PublicCatalogPage() {
     }
   }, [])
 
-  // Widget isn't "ready" while an external translation is pending setup.
-  useEffect(() => {
-    setTranslateReady(!externalTranslateTarget)
-  }, [externalTranslateTarget])
-
-  // Pick up whatever language the visitor last chose (cookie or
-  // localStorage) once we know the catalog's own source language.
-  useEffect(() => {
-    if (!translateWidgetEnabled) return
-    setTranslateTarget(readPublicStorefrontLanguage(configuredPortalLanguage, PUBLIC_STOREFRONT_DEFAULT_LANGUAGE))
-  }, [configuredPortalLanguage, translateWidgetEnabled])
-
-  // Built-in path (Khmer or English): no external widget needed, so tear one
-  // down if a prior Google selection left one mounted, and mark the choice
-  // applied at once -- the page itself is already in that language.
-  useEffect(() => {
-    if (!translateWidgetEnabled || externalTranslateTarget) return
-    removePortalTranslateWidgetHost()
-    setTranslateReady(true)
-    setTranslateApplyState('applied')
-    setTranslateApplyMessage('')
-  }, [externalTranslateTarget, pageLanguage, translateWidgetEnabled])
-
-  // One place a picker choice is taken and remembered. Leaving a Google
-  // translation clears its cookie, and -- because Google rewrote the DOM text
-  // in place -- reloads once so the page is rendered fresh in the chosen
-  // built-in language instead of staying machine-translated.
-  const changeTranslateTarget = (nextTarget: string) => {
-    const route = resolvePublicStorefrontLanguage(nextTarget, configuredPortalLanguage)
-    if (!route.googleTarget) {
-      clearGoogleTranslateCookies()
-      storePortalTranslatePreference(route.pageLanguage)
-      setTranslateTarget(route.pageLanguage)
-      if (hasPortalTranslatedMarker()) requestPortalTranslateReload('built-in-language-switch', 5000)
-      return
-    }
-    storePortalTranslatePreference(route.googleTarget)
-    setTranslateApplyState('pending')
-    setTranslateApplyMessage(copy('externalTranslationPreparing', 'Preparing external translation...'))
-    setTranslateTarget(route.googleTarget)
+  const changePageLanguage = (next: string) => {
+    const language = normalizePortalLanguage(next)
+    if (!language) return
+    storePortalLanguage(language)
+    setPageLanguage(language)
   }
-
-  // Google path: load/attach the Google Translate widget for every language
-  // other than Khmer and English.
-  useEffect(() => {
-    if (!translateWidgetEnabled || !externalTranslateTarget || typeof window === 'undefined' || typeof document === 'undefined') {
-      removePortalTranslateWidgetHost()
-      return undefined
-    }
-    let cancelled = false
-    const cleanupWidget = setupPortalExternalTranslateWidget({
-      sourceLanguage: configuredPortalLanguage,
-      includedLanguages: PUBLIC_GOOGLE_TRANSLATE_LANGUAGES,
-      onPending: () => setTranslateReady(false),
-      onReady: () => {
-        setTranslateReady(true)
-        setTranslateApplyMessage('')
-      },
-      onFailure: () => {
-        if (cancelled) return
-        setTranslateReady(false)
-        setTranslateApplyState('failed')
-        setTranslateApplyMessage(copy('translationFailed', 'Translation could not apply. Try again.'))
-      },
-    })
-    return () => {
-      cancelled = true
-      cleanupWidget?.()
-    }
-  }, [configuredPortalLanguage, externalTranslateTarget, translateWidgetEnabled])
-
-  // Once the widget's ready, repeatedly nudge Google's own select element to
-  // the chosen language and confirm it actually took (its DOM/cookie state can
-  // lag the widget being "ready"); fall back to a one-time page reload if
-  // it's still stuck after ~3.5s, same recovery CatalogPage.tsx's preview uses.
-  useEffect(() => {
-    if (!translateWidgetEnabled || !externalTranslateTarget || !translateReady) return undefined
-    let cancelled = false
-    const settleTimer = window.setTimeout(async () => {
-      const maxTries = 20
-      for (let tries = 0; tries < maxTries; tries += 1) {
-        if (cancelled) return
-        applyGoogleTranslateSelection(configuredPortalLanguage, externalTranslateTarget)
-        if (isPortalTranslateApplied(configuredPortalLanguage, externalTranslateTarget)) {
-          setTranslateApplyState('applied')
-          setTranslateApplyMessage(copy('externalTranslationApplied', 'External translation applied'))
-          return
-        }
-        await sleep(180)
-      }
-      if (cancelled) return
-      if (requestPortalTranslateReload('external-translate-stuck', 5000)) return
-      setTranslateApplyState('failed')
-      setTranslateApplyMessage(copy('translationFailed', 'Translation could not apply. Try again.'))
-    }, loading ? 650 : 260)
-    return () => {
-      cancelled = true
-      window.clearTimeout(settleTimer)
-    }
-  }, [configuredPortalLanguage, externalTranslateTarget, loading, translateWidgetEnabled, translateReady])
 
   useEffect(() => {
     if (embeddedPortalRef.current && reloadToken === 0) {
@@ -2083,13 +1948,8 @@ export default function PublicCatalogPage() {
       portalImageView={portalImageView}
       setPortalImageView={setPortalImageView}
       toggleTheme={toggleTheme}
-      translateTarget={externalTranslateTarget || pageLanguage}
-      translateApplyState={translateApplyState}
-      translateApplyMessage={translateApplyMessage}
-      externalTranslateTarget={externalTranslateTarget}
-      translateReady={translateReady}
-      changeTranslateTarget={changeTranslateTarget}
-      allPublicTranslateOptions={PUBLIC_STOREFRONT_TRANSLATE_OPTIONS}
+      pageLanguage={pageLanguage}
+      changePageLanguage={changePageLanguage}
     />
     </div>
   )

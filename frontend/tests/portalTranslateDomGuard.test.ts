@@ -1,6 +1,6 @@
-// Google Translate vs React (refuter follow-up to P-public-1): a node that a
-// translator (our widget, Chrome's own, an extension) has moved must not make
-// React's removeChild/insertBefore throw. The guard is installed on every
+// Page translation vs React (refuter follow-up to P-public-1): a node that a
+// translator (Chrome's own, an extension) has moved must not make React's
+// removeChild/insertBefore throw. The guard is installed on every
 // storefront load and never by the admin app.
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
@@ -36,7 +36,6 @@ class FakeNode {
 const nativeRemove = FakeNode.prototype.removeChild
 
 const guard = await import('../src/components/catalog/portalTranslateDomGuard.ts')
-const controller = await import('../src/components/catalog/portalTranslateController.ts')
 const languages = await import('../src/components/catalog/portalLanguageOptions.ts')
 
 // 1. Positive control: unguarded, the fake throws the way React sees it.
@@ -45,26 +44,12 @@ const languages = await import('../src/components/catalog/portalLanguageOptions.
   assert.throws(() => parent.removeChild(new FakeNode()), /not a child of this node/)
 }
 
-// 2. Admin: the admin app never installs it. Loading the translate modules
-//    and even setting up the widget (the admin portal editor's preview does)
-//    leaves the native methods alone.
-assert.equal(guard.isPortalTranslateDomGuardInstalled(), false, 'importing the translate modules must not patch Node')
-const combo = {}
-const host = { id: '', className: '', style: {}, parentNode: null as unknown, innerHTML: '', setAttribute() {}, querySelector: () => combo }
-const fakeDocument = {
-  querySelectorAll: () => [],
-  createElement: () => host,
-  body: { appendChild: (node: typeof host) => { node.parentNode = fakeDocument.body; return node } },
-}
-const TranslateElement = Object.assign(() => ({}), { InlineLayout: { SIMPLE: 0 } })
-;(globalThis as Record<string, unknown>).document = fakeDocument
-;(globalThis as Record<string, unknown>).window = { google: { translate: { TranslateElement } }, setTimeout }
-let ready = false
-controller.setupPortalExternalTranslateWidget({ sourceLanguage: 'km', includedLanguages: ['fr'], onReady: () => { ready = true } })
-assert.ok(ready, 'fixture sanity: the widget reached ready')
-assert.equal(FakeNode.prototype.removeChild, nativeRemove, 'widget setup (reachable from the admin editor preview) must not install the guard')
+// 2. Admin: the admin app never installs it. Importing the guard and the
+//    storefront language module leaves the native methods alone.
+assert.equal(guard.isPortalTranslateDomGuardInstalled(), false, 'importing the modules must not patch Node')
+assert.equal(FakeNode.prototype.removeChild, nativeRemove)
 const read = (relative: string) => fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', relative), 'utf8').replace(/\r\n/g, '\n')
-for (const adminFile of ['src/AdminRoot.tsx', 'src/App.tsx', 'src/index.tsx', 'src/components/catalog/portalTranslateController.ts', 'src/components/catalog/CatalogPage.tsx']) {
+for (const adminFile of ['src/AdminRoot.tsx', 'src/App.tsx', 'src/index.tsx', 'src/components/catalog/CatalogPage.tsx', 'src/components/catalog/CatalogPreviewSurface.tsx']) {
   assert.doesNotMatch(read(adminFile), /installPortalTranslateDomGuard/, `${adminFile} must not install the guard (admin path)`)
 }
 assert.match(read('src/index.tsx'), /const RootComponent = publicCatalogMode \? PublicCatalogRoot : AdminRoot/, 'PublicCatalogRoot is the storefront-only entry')
@@ -85,7 +70,7 @@ assert.equal(guard.isPortalTranslateDomGuardInstalled(), true)
   const stray = new FakeNode()
   const other = new FakeNode()
   other.appendChild(stray)
-  assert.equal(parent.removeChild(stray), stray, 'removing a node Google moved returns it instead of throwing')
+  assert.equal(parent.removeChild(stray), stray, 'removing a node a translator moved returns it instead of throwing')
   assert.equal(stray.parentNode, other, 'and leaves it where it is')
 
   const own = parent.appendChild(new FakeNode())

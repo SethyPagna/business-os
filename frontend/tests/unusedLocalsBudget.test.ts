@@ -40,7 +40,6 @@
 //    exist but nothing wires them up) -- NOT routine dead code, so left for a
 //    feature owner rather than deleted as a "no behaviour change" debloat:
 //    - CatalogProductsSection.tsx compactTwoColumnMobile prop
-//    - PublicCatalogPage.tsx translateApplyState / translateApplyMessage
 //    - SuppliersTab.tsx displayRows (section-header/collapse UI never wired
 //      into the rendered rows)
 //    - InventoryMovementsSurface.tsx actionHistory / visibleMovementQuantity /

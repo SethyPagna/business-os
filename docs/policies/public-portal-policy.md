@@ -13,7 +13,7 @@ Catalogue browsing remains available while those details are incomplete. Since 1
 - Account creation and sign-in require an unticked Terms and Privacy consent checkbox. The server records policy version, timestamp, and locale and refuses the write if migration 0130 is absent.
 - Screenshot submissions require a signed-in account plus separate rights and privacy consent. The server resolves the CRM customer from the session, ignores any submitted membership number, records both consent versions, and refuses success until the row persists. Customer screenshots stay in private R2 storage and do not enter the shared Cloudinary-capable image pipeline.
 - AI requests require an explicit data-use checkbox before each request flow. The notice names the configured provider and says processing may occur outside Cambodia. Questions and optional shopping preferences are sent only after that choice.
-- Google Maps remains blocked until the visitor chooses to load it. External translation options disclose that page text goes to Google Translate and Google may set cookies before the visitor selects one.
+- Google Maps remains blocked until the visitor chooses to load it. The public site offers English and Khmer only and loads no translation service.
 - Required and requested browser storage is listed in the Cookie Policy, including the session cookie, app-managed local/session storage, and service-worker Cache Storage. The page does not claim that one banner rule applies in every country.
 
 ## Collection, retention, and third parties
