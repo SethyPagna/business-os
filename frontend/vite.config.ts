@@ -843,6 +843,7 @@ function manualChunks(id: string): string | undefined {
       normalized.includes('/src/components/catalog/CatalogEditorSurface.tsx')
       || normalized.includes('/src/components/catalog/CatalogImageField.tsx')
       || normalized.includes('/src/components/catalog/CatalogPageContext.tsx')
+      || normalized.includes('/src/components/catalog/editor/')
     ) {
       return 'catalog-editor'
     }

@@ -45,3 +45,26 @@ assert.match(grip, /(?:^|\s)sm:block(?:\s|$)/, 'the drag grip is back from sm: u
 assert.match(actions, /<div className="mr-auto flex items-center gap-1 sm:mr-0">\s*\n\s*<button[\s\S]*?index - 1/, 'on a phone Up/Down start the actions line, apart from the rest')
 
 console.log('PASS websiteEditorLayout: strip cards give the title its own line on a phone')
+
+let failed = 0
+function runTest(name: string, fn: () => void): void {
+  try {
+    fn()
+    console.log(`PASS ${name}`)
+  } catch (error) {
+    failed += 1
+    console.error(`FAIL ${name}`)
+    console.error(error)
+  }
+}
+
+runTest('T-L9: every module under catalog/editor/ is pinned to the lazy catalog-editor chunk', () => {
+  const vite = read('../vite.config.ts')
+  const returnAt = vite.indexOf("return 'catalog-editor'")
+  assert.ok(returnAt > 0, 'vite.config.ts still names the catalog-editor chunk')
+  const rule = vite.slice(vite.lastIndexOf('if (', returnAt), returnAt)
+  assert.match(rule, /normalized\.includes\('\/src\/components\/catalog\/editor\/'\)/, 'editor modules left to the catch-all land in the catalog route chunk')
+  assert.match(rule, /CatalogPageContext\.tsx'\)\s*\n\s*\|\| normalized\.includes\('\/src\/components\/catalog\/editor\/'\)/, 'the editor/ line follows the CatalogPageContext line (performanceLoadingUx.test.ts reads that order)')
+})
+
+if (failed) process.exit(1)
