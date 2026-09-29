@@ -354,7 +354,7 @@ await runTest('the About tab and header show the skeleton while pending; the edi
   const surface = previewSurface()
   assert.match(surface, /configPending = false/, 'CatalogPreviewSurface defaults to the real look')
   const heading = between(surface, '<h1', '</h1>')
-  assert.match(heading, /configPending \?/, 'the header name keeps its height as a skeleton while pending')
+  assert.match(heading, /configPending\s*\?/, 'the header name keeps its height as a skeleton while pending')
   const page = publicPage()
   assert.match(page, /configPending=\{!realConfigInHand\}/)
   assert.match(page, /footer=\{realConfigInHand \? /, 'the footer waits for the real business details')

@@ -858,6 +858,8 @@ function manualChunks(id: string): string | undefined {
       || normalized.includes('/src/components/catalog/portalNoTranslate.ts')
       // portalFaqLayout.ts: same consumer, same reason.
       || normalized.includes('/src/components/catalog/portalFaqLayout.ts')
+      // The storefront skeleton is shared by PublicCatalogRoot, PublicCatalogPage and CatalogSecondaryTabs.
+      || normalized.includes('/src/components/catalog/PublicStorefrontSkeleton.tsx')
       // portalActiveFilters.ts (filter chips) is imported by
       // CatalogProductsSection (catalog-products); same reason.
       || normalized.includes('/src/components/catalog/portalActiveFilters.ts')
@@ -895,6 +897,8 @@ function manualChunks(id: string): string | undefined {
       // which is a TDZ ReferenceError ("Cannot access '<var>' before initialization")
       // that blanks the whole public portal on load. Keep it with its only consumer.
       || normalized.includes('/src/components/catalog/portalProductGrouping.ts')
+      // publicFirstPaint.ts: only PublicCatalogPage imports it; same reason.
+      || normalized.includes('/src/components/catalog/publicFirstPaint.ts')
       // PublicCatalogRoot installs it before its first render and already
       // imports this chunk statically; the generic catch-all is the admin chunk.
       || normalized.includes('/src/components/catalog/portalTranslateDomGuard.ts')

@@ -88,10 +88,9 @@ test.describe('admin shell boot', () => {
     //       at renderWithHooks / performConcurrentWorkOnRoot
     //   getStoredUserExpiry (AppContext.tsx:429) has the identical shape.
     //
-    // This was the 1defc523 class on the ADMIN root. The storefront's
-    // readPortalCache (PublicCatalogPage.tsx:381) already fixed it the right way
-    // and its own comment says why: "the store list has to be built INSIDE this
-    // guard".
+    // This was the 1defc523 class on the ADMIN root. The Website Editor's
+    // readPortalCache (CatalogPage.tsx) already does it the right way: the store
+    // list is built INSIDE the guard.
     //
     // Fix: move the global reads inside the try, e.g.
     //     function getStoredUserPayload() {

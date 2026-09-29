@@ -2642,6 +2642,7 @@
   "loading": "Loading...",
   "load_more": "Load more",
   "loadingPortal": "Loading website...",
+  "portalLoadFailed": "We couldn't open the shop. Check your connection and try again.",
   "loadingProducts": "Loading products...",
   "loading_account": "Loading account...",
   "loading_ai_responses": "Loading AI responses...",

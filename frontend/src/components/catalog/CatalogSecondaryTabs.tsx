@@ -23,6 +23,7 @@ import PortalEmbedConsent from './legal/PortalEmbedConsent.tsx'
 import { SectionShell } from './catalogUi'
 import { splitNoTranslateSegments, stripNoTranslateMarkers } from './portalNoTranslate.ts'
 import { nextOpenFaqKey, splitFaqColumns } from './portalFaqLayout.ts'
+import PublicStorefrontSkeleton from './PublicStorefrontSkeleton.tsx'
 
 type IdValue = string | number
 type CopyFn = (key: string, fallback?: string, fallbackKm?: string) => string
@@ -186,6 +187,7 @@ interface CatalogAboutSectionProps {
   socialLinks?: SocialLink[]
   versionedBusinessLogo?: string
   versionedBusinessCover?: string
+  imageFetchPriority?: 'high' | 'low' | 'auto'
   openPortalImage: (title: string, images: string[], index?: number) => void
 }
 
@@ -281,6 +283,7 @@ const ASSISTANT_AUTOMATED_KM = 'ជំនួយការនេះជាកម្
 
 type CatalogSecondaryTabsProps = {
   tab?: string
+  configPending?: boolean
 } & Record<string, unknown>
 
 /**
@@ -437,6 +440,7 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
     socialLinks,
     versionedBusinessLogo,
     versionedBusinessCover,
+    imageFetchPriority,
     openPortalImage,
   } = props
 
@@ -494,7 +498,10 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
             src={versionedBusinessCover}
             alt=""
             aria-hidden="true"
-            className="pointer-events-none absolute inset-0 -z-10 h-full w-full object-cover"
+            data-portal-cover="true"
+            fetchPriority={imageFetchPriority}
+            onLoad={(event) => { event.currentTarget.dataset.loaded = 'true' }}
+            className="portal-cover-image pointer-events-none absolute inset-0 -z-10 h-full w-full object-cover"
           />
         ) : null}
         <div
@@ -578,6 +585,7 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
               className="h-full w-full object-contain"
               loading="eager"
               decoding="async"
+              fetchPriority={imageFetchPriority}
             />
           </button>
         </figure>
@@ -1039,7 +1047,8 @@ function CatalogAiSection(props: CatalogAiSectionProps) {
   )
 }
 
-export default function CatalogSecondaryTabs({ tab, ...props }: CatalogSecondaryTabsProps) {
+export default function CatalogSecondaryTabs({ tab, configPending = false, ...props }: CatalogSecondaryTabsProps) {
+  if (configPending) return <PublicStorefrontSkeleton label={(props.copy as CopyFn)('loadingPortal', 'Loading website...')} />
   if (tab === 'membership') return <CatalogMembershipSection {...(props as unknown as CatalogMembershipSectionProps)} />
   if (tab === 'about') return <CatalogAboutSection {...(props as unknown as CatalogAboutSectionProps)} />
   if (tab === 'faq') return <CatalogFaqSection {...(props as unknown as CatalogFaqSectionProps)} />
