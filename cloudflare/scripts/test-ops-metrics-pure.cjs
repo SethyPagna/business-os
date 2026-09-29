@@ -109,6 +109,7 @@ function fakeAnalytics(answers) {
     assert.deepStrictEqual([double.double1, double.double3, double.double5, double.double6, double.double9, double.double10], [1, 3, 5, 6, 9, 10])
     const latency = metrics.buildQuery(templates['route-latency'], { windows })
     for (const [column, as] of [['blob2', 'route'], ['blob3', 'method'], ['blob5', 'cache']]) assert.ok(latency.includes(`${column} AS ${as}`), `${column} AS ${as}`)
+    assert.ok(latency.includes('quantileExactWeighted(0.50)(double1, _sample_interval) AS wall_p50_ms'), 'p50 of the wall time (double1), weighted like the p95')
     assert.ok(latency.includes('quantileExactWeighted(0.95)(double1, _sample_interval) AS wall_p95_ms'), 'p95 of the wall time (double1)')
     assert.ok(latency.includes('quantileExactWeighted(0.95)(double10, _sample_interval) AS d1_wall_p95_ms'), 'p95 of the D1 wall time (double10)')
     assert.ok(latency.includes('SUM(_sample_interval * double6) AS requests'), 'both samplings weigh the request count')
@@ -119,6 +120,27 @@ function fakeAnalytics(answers) {
     assert.ok(errors.includes("NOT (blob4 >= '200' AND blob4 < '400')") && errors.includes('blob4 AS status'), 'errors are the complement, by status')
     assert.ok(metrics.buildQuery(templates['build-revisions'], { windows }).includes('blob8 AS revision'), 'builds read blob8')
     for (const sql of Object.values(templates)) assert.ok(sql.includes(`FROM ${dataset[1]}`), 'the dataset wrangler.toml binds')
+  })
+
+  await check('the cron runs inside the trading window are bg rows that latency and errors leave out, and the window\'s comment names them', () => {
+    const cron = /^crons = \["0 \*\/(\d+) \* \* \*"\]$/m.exec(read('cloudflare', 'wrangler.toml').replace(/\r\n/g, '\n'))
+    assert.ok(cron, 'wrangler.toml runs the cron every N hours on the hour')
+    const everyHours = Number(cron[1])
+    const inside = Array.from({ length: 24 / everyHours }, (_, run) => run * everyHours)
+      .filter((hour) => hour >= metrics.TRADING_HOURS_UTC.start && hour < metrics.TRADING_HOURS_UTC.end)
+    const source = read('ops', 'scripts', 'ops-metrics.mjs').replace(/\r\n/g, '\n').split('\n')
+    const at = source.findIndex((line) => line.startsWith('export const TRADING_HOURS_UTC'))
+    let first = at
+    while (first > 0 && source[first - 1].startsWith('//')) first -= 1
+    const comment = source.slice(first, at).join(' ')
+    assert.ok(inside.length > 0, 'no cron run falls inside the window; this check would prove nothing')
+    for (const hour of inside) assert.ok(comment.includes(`${String(hour).padStart(2, '0')}:00`), `the comment must name the ${hour}:00 UTC cron run inside the window: ${comment}`)
+    assert.ok(!/cron[^.;]*fall outside/.test(comment), `the comment still says the cron falls outside: ${comment}`)
+    const rm = requestMetricsModule()
+    const cronPoint = { kind: 'bg', template: 'cron', method: '', status: '', cache: '', flags: '', wallMs: 1, weight: 1, acc: rm.createRequestMetrics('bg', 'cron', 0) }
+    assert.strictEqual(rm.datapointLabels(cronPoint)[0], 'bg')
+    for (const name of ['route-latency', 'route-errors']) assert.ok(metrics.buildQuery(templates[name], { windows }).includes("blob1 = 'api'"), `${name} reads API rows only`)
+    assert.ok(!metrics.buildQuery(templates['build-revisions'], { windows }).includes('blob1'), 'the builds list counts every kind')
   })
 
   await check('latency rows: flows attached, numbers normalised, p95 withheld below 100 stored rows', () => {
@@ -155,6 +177,15 @@ function fakeAnalytics(answers) {
   await check('a read that saw nothing fails, and so does any failed query; statuses reach the public log, bodies do not', async () => {
     const empty = await metrics.readMetrics({ fetchImpl: fakeAnalytics({}).fetchImpl, accountId: ACCOUNT, token: TOKEN, from: '2026-09-29', days: 1 })
     assert.deepStrictEqual([empty.ok, empty.problems], [false, ['metrics-no-datapoints']], 'no datapoint at all is a failed read, not a quiet day')
+    const served = fakeAnalytics({ 'build-revisions': { status: 200, data: [{ revision: 'c0ffee12ab34-dirty' }, { revision: 'dev' }] } }).fetchImpl
+    for (const revision of ['c0ffee12ab35', 'c0ffee12ab34', 'c0ffee12']) {
+      const unserved = await metrics.readMetrics({ fetchImpl: served, accountId: ACCOUNT, token: TOKEN, from: '2026-09-29', days: 1, revision })
+      assert.deepStrictEqual([unserved.ok, unserved.problems], [false, ['metrics-revision-not-served']], `a build filter that matches no build in the window (${revision}) is a failed read, not a quiet build`)
+      const unservedLog = metrics.publicLines({ result: unserved }).map(([t, v]) => common.formatPublic(t, v)).join('\n')
+      assert.ok(unservedLog.includes('problem: metrics-revision-not-served') && unservedLog.includes('metrics verdict: FAIL') && !unservedLog.includes('c0ffee'), unservedLog)
+    }
+    const matched = await metrics.readMetrics({ fetchImpl: served, accountId: ACCOUNT, token: TOKEN, from: '2026-09-29', days: 1, revision: 'c0ffee12ab34-dirty' })
+    assert.deepStrictEqual([matched.ok, matched.problems], [true, []], 'the exact stamp of a served build passes with no route rows')
     const denied = await metrics.readMetrics({
       fetchImpl: fakeAnalytics({ 'route-latency': { status: 403, raw: '{"errors":[{"code":10000,"message":"Authentication error for /api/secret-route"}]}' }, 'build-revisions': { status: 200, data: [{ revision: 'dev' }] } }).fetchImpl,
       accountId: ACCOUNT, token: TOKEN, from: '2026-09-29', days: 1,
