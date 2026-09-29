@@ -9,7 +9,7 @@ import { audit } from '../lib/audit'
 import { checkRateLimit, getClientIp } from '../lib/rateLimit'
 import { portalAbuseKey } from '../lib/portalAbuseKey'
 import { normalizePortalUploadPath, normalizeSafeLinkUrl } from '../lib/safeLinkUrl'
-import { capPortalText, normalizePortalImageAlt, plainText } from '../lib/portalText'
+import { AUTOMATIC_PORTAL_LANGUAGE, capPortalText, normalizePortalImageAlt, plainText, portalLanguageCode } from '../lib/portalText'
 import { buildUniqueStoredName } from '../lib/fileAssets'
 import { sanitizeMediaList } from '../lib/media'
 import { sanitizePortalImageMetadata } from '../lib/portalImagePrivacy'
@@ -195,14 +195,6 @@ function normalizePortalRecommendedProductIds(value: unknown): number[] {
     if (id !== null) ids.add(id)
   }
   return [...ids]
-}
-
-// Owner decision, 27 Sep 2026: the storefront is English and Khmer only (frontend PUBLIC_STOREFRONT_LANGUAGE_OPTIONS).
-const PORTAL_LANGUAGE_CODES: ReadonlySet<string> = new Set(['en', 'km'])
-
-function portalLanguageCode(value: unknown): string {
-  const code = typeof value === 'string' ? value.trim().toLowerCase() : ''
-  return PORTAL_LANGUAGE_CODES.has(code) ? code : ''
 }
 
 const MAX_PORTAL_TRANSLATIONS_JSON_LENGTH = 128 * 1024
@@ -434,7 +426,7 @@ export function buildPortalConfig(settings: SettingsMap, env: Env) {
     : 'usd'
   const pointsPerUsd = toNumber(settings.customer_portal_points_per_usd, 1)
   const derivedPointsPerKhr = pointsPerUsd > 0 && exchangeRate > 0 ? pointsPerUsd / exchangeRate : 0
-  const languageSetting = portalLanguageCode(settings.customer_portal_language) || 'auto'
+  const languageSetting = portalLanguageCode(settings.customer_portal_language) || AUTOMATIC_PORTAL_LANGUAGE
 
   return {
     businessName: settings.business_name || 'Business OS',
@@ -528,7 +520,7 @@ export function buildPortalConfig(settings: SettingsMap, env: Env) {
     // is `true`, so a missing field was silently read as "on").
     translateWidgetEnabled: normalizeBoolean(settings.customer_portal_translate_widget_enabled, true),
     languageSetting,
-    language: languageSetting === 'auto' ? 'en' : languageSetting,
+    language: languageSetting === AUTOMATIC_PORTAL_LANGUAGE ? 'en' : languageSetting,
     translations: normalizePortalTranslations(settings.customer_portal_translations),
     aiEnabled: normalizeBoolean(settings.customer_portal_ai_enabled, true),
     aiTitle: settings.customer_portal_ai_title || 'Beauty Assistant',
