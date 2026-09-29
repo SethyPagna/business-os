@@ -59,7 +59,8 @@ import { normalizePortalLanguage, readPublicStorefrontLanguage, storePortalLangu
 
 const loadCatalogProductsSection = () => import('./CatalogProductsSection')
 const CatalogProductsSection = lazyRetry(loadCatalogProductsSection, 'public-catalog-products-section')
-const CatalogSecondaryTabs = lazyRetry(() => import('./CatalogSecondaryTabs'), 'public-catalog-secondary-tabs')
+const loadCatalogSecondaryTabs = () => import('./CatalogSecondaryTabs')
+const CatalogSecondaryTabs = lazyRetry(loadCatalogSecondaryTabs, 'public-catalog-secondary-tabs')
 const CatalogAccountSection = lazyRetry(() => import('./CatalogAccountSection'), 'public-catalog-account-section')
 const PortalPromotionsBanner = lazyRetry(() => import('./PortalPromotionsBanner'), 'public-catalog-promotions-banner')
 
@@ -679,6 +680,8 @@ export default function PublicCatalogPage() {
 
   useEffect(() => {
     clearRetiredPortalCache()
+    // Warm the About chunk while the config is on its way; the real mount retries and reports a failure.
+    if (!paintConfigRef.current) loadCatalogSecondaryTabs().catch(() => undefined)
   }, [])
 
   useEffect(() => {
@@ -1157,7 +1160,7 @@ export default function PublicCatalogPage() {
       })
   }
 
-  const loadingLabel = copy('loadingPortal', 'Loading website...')
+  const storefrontSkeleton = <PublicStorefrontSkeleton label={copy('loadingPortal', 'Loading website...')} />
   const loadFailedText = copy('portalLoadFailed', "We couldn't open the shop. Check your connection and try again.", 'យើងមិនអាចបើកហាងបានទេ។ សូមពិនិត្យការតភ្ជាប់អ៊ីនធឺណិត ហើយព្យាយាមម្ដងទៀត។')
   const loadFailedPanel = (
     <div role="alert" data-portal-load-failed="true" className="mx-auto my-8 flex max-w-md flex-col items-center gap-4 rounded-2xl border border-slate-200 bg-white p-6 text-center text-sm leading-6 text-slate-700 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200">
@@ -1245,11 +1248,10 @@ export default function PublicCatalogPage() {
     </Suspense>
   ) : null
 
-  const secondaryTabSection = activeTab !== 'products' ? (
-    <Suspense fallback={<PublicStorefrontSkeleton label={loadingLabel} />}>
+  const secondaryTabSection = activeTab !== 'products' ? (realConfigInHand ? (
+    <Suspense fallback={storefrontSkeleton}>
       <CatalogSecondaryTabs
         tab={activeTab}
-        configPending={!realConfigInHand}
         imageFetchPriority="high"
         copy={copy}
         formatDateTime={formatDateTime}
@@ -1301,7 +1303,7 @@ export default function PublicCatalogPage() {
         accountSignedIn={!!portalAccount.account}
       />
     </Suspense>
-  ) : null
+  ) : storefrontSkeleton) : null
 
   const scrollPublicPortal = (direction: 'top' | 'bottom') => {
     const top = direction === 'bottom' ? Math.max(document.documentElement.scrollHeight, document.body.scrollHeight) : 0

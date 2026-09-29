@@ -23,7 +23,6 @@ import PortalEmbedConsent from './legal/PortalEmbedConsent.tsx'
 import { SectionShell } from './catalogUi'
 import { splitNoTranslateSegments, stripNoTranslateMarkers } from './portalNoTranslate.ts'
 import { nextOpenFaqKey, splitFaqColumns } from './portalFaqLayout.ts'
-import PublicStorefrontSkeleton from './PublicStorefrontSkeleton.tsx'
 
 type IdValue = string | number
 type CopyFn = (key: string, fallback?: string, fallbackKm?: string) => string
@@ -283,7 +282,6 @@ const ASSISTANT_AUTOMATED_KM = 'ជំនួយការនេះជាកម្
 
 type CatalogSecondaryTabsProps = {
   tab?: string
-  configPending?: boolean
 } & Record<string, unknown>
 
 /**
@@ -1047,8 +1045,7 @@ function CatalogAiSection(props: CatalogAiSectionProps) {
   )
 }
 
-export default function CatalogSecondaryTabs({ tab, configPending = false, ...props }: CatalogSecondaryTabsProps) {
-  if (configPending) return <PublicStorefrontSkeleton label={(props.copy as CopyFn)('loadingPortal', 'Loading website...')} />
+export default function CatalogSecondaryTabs({ tab, ...props }: CatalogSecondaryTabsProps) {
   if (tab === 'membership') return <CatalogMembershipSection {...(props as unknown as CatalogMembershipSectionProps)} />
   if (tab === 'about') return <CatalogAboutSection {...(props as unknown as CatalogAboutSectionProps)} />
   if (tab === 'faq') return <CatalogFaqSection {...(props as unknown as CatalogFaqSectionProps)} />

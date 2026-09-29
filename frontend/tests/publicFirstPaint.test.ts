@@ -347,15 +347,16 @@ await runTest('the skeleton is hero-shaped, busy, labelled, nameless, and not mi
   assert.doesNotMatch(skeleton, /Leang|Welcome to our store|aspect-square/, 'no name, no fallback story, no product-skeleton lookalike')
 })
 
-await runTest('the About tab and header show the skeleton while pending; the editor preview defaults to not pending', () => {
-  const tabs = secondaryTabs()
-  assert.match(tabs, /configPending = false/, 'CatalogSecondaryTabs defaults to the real look (the Website Editor preview)')
-  assert.match(tabs, /if \(configPending\) return <PublicStorefrontSkeleton /)
+await runTest('the About tab and header show the skeleton while pending; the Website Editor preview is untouched', () => {
+  const page = publicPage()
+  assert.match(page, /const secondaryTabSection = activeTab !== 'products' \? \(realConfigInHand \? \(\n\s*<Suspense fallback=\{storefrontSkeleton\}>/, 'the About tab holds the skeleton until a real config is in hand, and while its chunk loads')
+  assert.match(page, /\) : storefrontSkeleton\) : null/)
+  assert.match(page, /if \(!paintConfigRef\.current\) loadCatalogSecondaryTabs\(\)/, 'the About chunk downloads while the config is on its way')
+  assert.doesNotMatch(secondaryTabs(), /PublicStorefrontSkeleton|configPending/, 'the editor preview renders CatalogSecondaryTabs exactly as before, and the skeleton stays out of the catalog-products closure')
   const surface = previewSurface()
   assert.match(surface, /configPending = false/, 'CatalogPreviewSurface defaults to the real look')
   const heading = between(surface, '<h1', '</h1>')
   assert.match(heading, /configPending\s*\?/, 'the header name keeps its height as a skeleton while pending')
-  const page = publicPage()
   assert.match(page, /configPending=\{!realConfigInHand\}/)
   assert.match(page, /footer=\{realConfigInHand \? /, 'the footer waits for the real business details')
 })
@@ -372,12 +373,13 @@ await runTest('the landing cover is fetched first and fades in; the PublicCatalo
   assert.doesNotMatch(root, /Loading catalog\.\.\./)
 })
 
-await runTest('build placement: the skeleton sits in catalog-public-core, the first-paint logic with its only consumer', () => {
+await runTest('build placement: the skeleton and the first-paint logic live with the storefront page, outside the catalog-products closure', () => {
   const vite = read('../vite.config.ts')
   const core = between(vite, "normalized.includes('/src/components/catalog/catalogImages.tsx')", "return 'catalog-public-core'")
-  assert.match(core, /\/src\/components\/catalog\/PublicStorefrontSkeleton\.tsx/)
+  assert.doesNotMatch(core, /PublicStorefrontSkeleton|publicFirstPaint/, 'catalog-public-core is inside the catalog-products closure')
   const pub = between(vite, "normalized.includes('/src/components/catalog/PublicCatalogPage.tsx')", "return 'catalog-public'")
   assert.match(pub, /\/src\/components\/catalog\/publicFirstPaint\.ts/)
+  assert.match(pub, /\/src\/components\/catalog\/PublicStorefrontSkeleton\.tsx/)
 })
 
 if (failed) {
