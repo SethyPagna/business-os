@@ -16,6 +16,7 @@ const { loadAll } = require('./harness/load_migrations.cjs')
 
 const ROOT = path.resolve(__dirname, '..', '..')
 const PERSONAL_COLUMN = /(^|_)(name|phone|address|email|note|notes)(_|$)/
+const LARGE_TABLES = ['inventory_movements', 'sale_items', 'sales', 'products', 'product_batches', 'branch_batch_stock', 'returns', 'audit_logs', 'shift_sessions']
 
 const QUERY_RULES = {
   'forensics-u11-return-on-not-paid-sale': { minRows: 0, maxRows: 2000, expectZero: null },
@@ -86,6 +87,32 @@ async function main() {
       const columns = db.prepare(query.sql).columns().map((c) => c.name)
       assert.deepEqual(columns.filter((c) => PERSONAL_COLUMN.test(c)), [], `${name} returns a personal column`)
     }
+  })
+
+  await check('no N16 query scans a large table beneath a correlated sub-query (the SQLITE_NOMEM shape)', () => {
+    const db = migratedDatabase()
+    // The plan names an aliased table by its alias only ("SCAN si").
+    const largeScanNames = (sql) => {
+      const names = new Set(LARGE_TABLES)
+      for (const [, table, alias] of sql.matchAll(/\b(?:FROM|JOIN) ([a-z_]+)(?: (?:AS )?([a-z_]+))?/gi)) {
+        if (LARGE_TABLES.includes(table) && alias && !/^(WHERE|JOIN|LEFT|ON|GROUP|ORDER|UNION|CROSS|INNER|LIMIT)$/i.test(alias)) names.add(alias)
+      }
+      return names
+    }
+    const correlatedLargeScans = (sql) => {
+      const names = largeScanNames(sql)
+      const plan = db.prepare(`EXPLAIN QUERY PLAN ${sql}`).all()
+      const byId = new Map(plan.map((row) => [row.id, row]))
+      const underCorrelated = (row) => {
+        for (let node = byId.get(row.parent); node; node = byId.get(node.parent)) if (/^CORRELATED /.test(node.detail)) return true
+        return false
+      }
+      return plan.filter((row) => /^SCAN \w+$/.test(row.detail) && names.has(row.detail.slice(5)) && underCorrelated(row)).map((row) => row.detail)
+    }
+    assert.deepEqual(correlatedLargeScans('SELECT (SELECT COUNT(*) FROM audit_logs a WHERE a.details = s.notes) FROM sales s'), ['SCAN a'],
+      'the detector sees an aliased correlated scan')
+    const found = Object.keys(QUERY_RULES).flatMap((name) => correlatedLargeScans(guard.loadQuery(name).sql).map((detail) => `${name}: ${detail}`))
+    assert.deepEqual(found, [])
   })
 
   await check('U11 lists active customer returns on a sale still owed, with the shift that holds them', () => {
