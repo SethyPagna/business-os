@@ -244,6 +244,7 @@ async function main() {
     // test drives the CONSUMER, so the registration just has to not throw.
     './lib/queueDispatch': { registerInlineImportRunner: () => {} },
     './lib/importIncomingFiles': { purgeImportIncomingFiles: async () => ({ deleted: 0, errors: [] }) },
+    './lib/errorReporting': { reportError: async () => false },
     './lib/db': { getDb: () => activeState.db },
     './lib/importEngine': {
       runImportAnalyze: async () => {},
@@ -274,6 +275,7 @@ async function main() {
     // Same registration-only stub as the permanent-failure queue above.
     './lib/queueDispatch': { registerInlineImportRunner: () => {} },
     './lib/importIncomingFiles': { purgeImportIncomingFiles: async () => ({ deleted: 0, errors: [] }) },
+    './lib/errorReporting': { reportError: async () => false },
     './lib/db': { getDb: () => activeState.db },
     './lib/importEngine': {
       runImportAnalyze: async () => {},

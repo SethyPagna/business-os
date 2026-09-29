@@ -236,6 +236,54 @@ check('import retention lets its failure reach the step runner instead of report
   await assert.rejects(() => retention.maybeRunScheduledImportRetention({}), /database unavailable/)
 })
 
+function loadQueue(overrides) {
+  const reports = []
+  const failed = new Error('R2 unavailable')
+  const noop = new Proxy({}, { get: () => async () => undefined })
+  const queue = loadPure('queue.ts', {
+    './index': {},
+    './lib/errorReporting': { reportError: async (dsn, error, context) => { reports.push({ dsn, error, context }); return true } },
+    './lib/importMaintenanceFence': { getImportFencedDb: async () => ({ prepare: () => ({ run: async () => ({}) }) }), isImportMaintenanceFenceError: () => false },
+    './lib/importEngine': { runImportAnalyze: async () => {}, runImportApply: async () => {}, markJobFailed: async () => {}, isImportApplyAuthorizationError: () => false },
+    './lib/bulkDeleteEngine': noop,
+    './lib/backup': { continueCloudflareBackupAssetCopy: async () => { throw failed } },
+    './lib/driveSyncQueue': noop,
+    './lib/imageAudit': { normalizeStoredImage: async () => { throw failed } },
+    './lib/queueDispatch': { registerInlineImportRunner: () => {} },
+    './lib/importIncomingFiles': { purgeImportIncomingFiles: async () => ({ deleted: 0, errors: [] }) },
+    ...overrides,
+  })
+  return { queue, reports, failed }
+}
+
+function queueMessage(body, outcome) {
+  return { body, attempts: 1, timestamp: new Date(), ack() { outcome.acked++ }, retry() { outcome.retried++ } }
+}
+
+check('queue consumers report a failed media or backup message to Sentry and still retry it', async () => {
+  const { queue, reports, failed } = loadQueue({})
+  const env = { SENTRY_DSN }
+  const media = { acked: 0, retried: 0 }
+  await queue.handleMediaQueue({ messages: [queueMessage({ assetKey: 'uploads/a.jpg', kind: 'optimize-image' }, media)] }, env)
+  const backup = { acked: 0, retried: 0 }
+  await queue.handleBackupQueue({ messages: [queueMessage({ kind: 'backup-continue', backupName: 'b', nextIndex: 0 }, backup)] }, env)
+  assert.deepEqual([media, backup], [{ acked: 0, retried: 1 }, { acked: 0, retried: 1 }])
+  assert.deepEqual(reports.map((report) => [report.dsn, report.error, report.context.location]), [
+    [SENTRY_DSN, failed, 'queue:business-os-media'],
+    [SENTRY_DSN, failed, 'queue:business-os-backup-assets'],
+  ])
+})
+
+check('an import message that exhausted its retries is reported once, without its job id', async () => {
+  const { queue, reports } = loadQueue({})
+  const outcome = { acked: 0, retried: 0 }
+  await queue.handleImportDeadLetterQueue({ messages: [queueMessage({ jobId: 'job-9', kind: 'apply' }, outcome)] }, { SENTRY_DSN })
+  assert.equal(outcome.acked, 1)
+  assert.equal(reports.length, 1)
+  assert.equal(reports[0].context.location, 'queue:business-os-import-dlq')
+  assert.equal(reports[0].error.message, 'Import apply exhausted its queue retries')
+})
+
 async function main() {
   let failed = 0
   const originalError = console.error

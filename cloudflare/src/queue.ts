@@ -25,9 +25,14 @@ import { runQueuedDriveRestoreStage, runQueuedDriveSync, type DriveSyncQueueMess
 import { normalizeStoredImage } from './lib/imageAudit'
 import { registerInlineImportRunner, type ImportQueueMessage } from './lib/queueDispatch'
 import { purgeImportIncomingFiles } from './lib/importIncomingFiles'
+import { reportError } from './lib/errorReporting'
 
 type ImportJobMessage = ImportQueueMessage
 type MediaJobMessage = { assetKey: string; kind: 'optimize-video' | 'optimize-image' }
+
+function reportQueueFailure(env: Env, queue: string, error: unknown): Promise<boolean> {
+  return reportError(env.SENTRY_DSN, error, { source: 'worker', location: `queue:${queue}`, method: 'QUEUE', release: null, role: null })
+}
 
 // The same three runners the consumer below dispatches to, exposed to
 // lib/queueDispatch.ts for the no-binding fallback. Registered rather than
@@ -45,10 +50,52 @@ registerInlineImportRunner(async (env, message) => {
   else await runBulkDeleteJob(env, message.jobId)
 })
 
+// = max_retries of business-os-import in both wrangler files; one more retry dead-letters the job.
+export const IMPORT_QUEUE_MAX_RETRIES = 5
+const IMPORT_LEASE_SECONDS = 60
+const LEASE_EXPIRY_SLACK_SECONDS = 5
+const ACTIVE_STATUS_BY_KIND = { analyze: 'analyzing', apply: 'applying' } as const
+
+function isLeasedImportKind(kind: ImportJobMessage['kind']): kind is keyof typeof ACTIVE_STATUS_BY_KIND {
+  return kind in ACTIVE_STATUS_BY_KIND
+}
+
+// A killed chunk keeps its lease for up to a minute, and nothing else resumes the job if its redelivery is acked.
+// First deliveries, jobs past the phase and the last retry still ack: a live holder has the job, a retry past the budget dead-letters it.
+function heldLeaseRetryDelaySeconds(input: {
+  kind: ImportJobMessage['kind']
+  attempts: number
+  status: string | null | undefined
+  leaseExpiresAt: string | null | undefined
+  nowMs: number
+}): number | null {
+  if (!isLeasedImportKind(input.kind)) return null
+  if (input.attempts <= 1 || input.attempts > IMPORT_QUEUE_MAX_RETRIES) return null
+  if (input.status !== ACTIVE_STATUS_BY_KIND[input.kind]) return null
+  const expiresMs = Date.parse(String(input.leaseExpiresAt || ''))
+  if (!Number.isFinite(expiresMs) || expiresMs <= input.nowMs) return null
+  const remainingSeconds = Math.min(IMPORT_LEASE_SECONDS, Math.ceil((expiresMs - input.nowMs) / 1000))
+  return remainingSeconds + LEASE_EXPIRY_SLACK_SECONDS
+}
+
+async function redeliveryLeaseWaitSeconds(env: Env, message: Message<ImportJobMessage>): Promise<number | null> {
+  const { jobId, kind } = message.body
+  if (!isLeasedImportKind(kind) || message.attempts <= 1) return null
+  const db = await getImportFencedDb(env)
+  const job = await db.prepare(`SELECT status, lease_expires_at FROM import_jobs WHERE id = @id`)
+    .get<{ status: string; lease_expires_at: string | null }>({ id: jobId })
+  return heldLeaseRetryDelaySeconds({ kind, attempts: message.attempts, status: job?.status, leaseExpiresAt: job?.lease_expires_at, nowMs: Date.now() })
+}
+
 export async function handleImportQueue(batch: MessageBatch<ImportJobMessage>, env: Env): Promise<void> {
   for (const message of batch.messages) {
     try {
       const { jobId, kind } = message.body
+      const leaseWaitSeconds = await redeliveryLeaseWaitSeconds(env, message)
+      if (leaseWaitSeconds !== null) {
+        message.retry({ delaySeconds: leaseWaitSeconds })
+        continue
+      }
       // message.timestamp is when Cloudflare Queues accepted the message
       // (enqueue time); the delta to now is how long it sat queued before
       // this consumer picked it up -- one of the phases the backlog
@@ -134,6 +181,7 @@ export async function handleImportDeadLetterQueue(batch: MessageBatch<ImportJobM
     try {
       const { jobId, kind } = message.body
       console.error('[import-queue] job exhausted all retries, moved to DLQ', { jobId, kind })
+      await reportQueueFailure(env, 'business-os-import-dlq', new Error(`Import ${kind} exhausted its queue retries`))
       if (kind === 'bulk-delete') {
         // Same terminal-failure bookkeeping as the import branch below, but
         // against bulk_delete_jobs -- markJobFailed (import-specific) can't
@@ -181,6 +229,7 @@ export async function handleImportDeadLetterQueue(batch: MessageBatch<ImportJobM
       // -- log it and ack anyway. Retrying a DLQ message that's already
       // exhausted retries would just loop forever with no way out.
       console.error('[import-queue] dead-letter handling itself failed', message.body, error)
+      await reportQueueFailure(env, 'business-os-import-dlq', error)
     }
     message.ack()
   }
@@ -218,6 +267,8 @@ export async function handleMediaQueue(batch: MessageBatch<MediaJobMessage>, env
       }
       message.ack()
     } catch (error) {
+      console.error('[media-queue] job failed', message.body?.kind, error)
+      await reportQueueFailure(env, 'business-os-media', error)
       message.retry()
     }
   }
@@ -245,6 +296,7 @@ export async function handleBackupQueue(batch: MessageBatch<BackupQueueMessage |
       message.ack()
     } catch (error) {
       console.error('[backup-queue] continuation failed', message.body, error)
+      await reportQueueFailure(env, 'business-os-backup-assets', error)
       // Transient infra errors (a D1/R2 hiccup) are worth retrying -- the
       // manifest read+update is idempotent-ish (re-running the same
       // nextIndex just re-copies the same slice, which is safe: copyObject
