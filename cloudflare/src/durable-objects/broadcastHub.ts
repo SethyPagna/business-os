@@ -4,8 +4,8 @@
 // after most writes so every open tab refreshed live instead of waiting on
 // its own poll/refetch-on-focus.
 //
-// One Durable Object instance for the whole Worker (see index.ts: always
-// addressed via idFromName('global')) holds the live WebSocket connections
+// One Durable Object instance for the whole Worker (broadcastHubStub below,
+// named HUB_NAME) holds the live WebSocket connections
 // using the Hibernatable WebSockets API (state.acceptWebSocket), so idle
 // connections don't keep the DO billed as "active" between messages -- the
 // DO can hibernate and Cloudflare wakes it back up on the next message or
