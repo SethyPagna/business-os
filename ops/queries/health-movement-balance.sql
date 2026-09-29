@@ -9,6 +9,8 @@
 -- change). Old rows (legacy imports, direction-less 'set' rows) make it non-zero
 -- but CONSTANT, so this is a RATCHET check: compare every column with the last
 -- run's decrypted file; any change is new drift -> run health-movement-balance-rows.
+-- A products import writes stock with no movement, so it changes this too; the
+-- rows query names the import's lot (import_lot_id).
 -- One pass over inventory_movements, grouped per pair.
 -- ops:min-rows 1
 -- ops:max-rows 1

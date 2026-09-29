@@ -150,6 +150,9 @@ async function main() {
     const { LEDGER_OUT_TYPES } = loadRealLib('stockLedgerQuery.ts')
     const signed = `CASE WHEN movement_type IN (${LEDGER_OUT_TYPES.map((t) => `'${t}'`).join(', ')}) THEN -ABS(COALESCE(quantity, 0)) ELSE ABS(COALESCE(quantity, 0)) END`
     for (const name of ['health-movement-balance', 'health-movement-balance-rows']) assert.ok(guard.loadQuery(name).sql.includes(signed), `${name} lost the ledger's signed quantity`)
+    assert.match(fs.readFileSync(path.join(LIB, 'importEngine.ts'), 'utf8'), /notes: 'Received via product import',/)
+    assert.match(fs.readFileSync(path.join(LIB, 'productBatches.ts'), 'utf8'), /@receivedAt,1,'Stock reconciled from product import snapshot',/)
+    assert.ok(guard.loadQuery('health-movement-balance-rows').sql.includes("pb.notes IN ('Received via product import', 'Stock reconciled from product import snapshot')"))
     const { CATALOG_COST_DERIVE_SQL } = loadRealLib('catalogCostRecompute.ts')
     assert.ok(squash(guard.loadQuery('health-catalog-cost').sql).includes(squash(CATALOG_COST_DERIVE_SQL)), 'health-catalog-cost lost CATALOG_COST_DERIVE_SQL')
     const { UPLOAD_REFERENCE_SOURCES } = loadRealLib('uploadReferences.ts')
@@ -275,6 +278,31 @@ async function main() {
     const rows = all(db, 'health-movement-balance-rows')
     assert.deepEqual(rows.map((r) => [r.product_id, r.branch_id, r.implied_opening, r.on_hand, r.movement_net, r.movement_rows, r.last_movement_id, r.unbalanced_pairs_total]),
       [[1, 1, -1, 3, 4, 5, 5, 1]])
+  })
+
+  await check('health-movement-balance-rows names the newest movement-less products-import lot of a pair, and no other lot', () => {
+    const db = migratedDatabase()
+    insert(db, 'products', [{ id: 1, name: 'Hand loss' }, { id: 2, name: 'Imported new' }, { id: 3, name: 'Snapshot raised' }])
+    insert(db, 'branch_stock', [{ product_id: 1, branch_id: 1, quantity: 3 }, { product_id: 2, branch_id: 1, quantity: 5 }, { product_id: 3, branch_id: 1, quantity: 4 }])
+    insert(db, 'inventory_movements', [
+      { id: 1, product_id: 1, branch_id: 1, movement_type: 'add', quantity: 4 },
+      { id: 2, product_id: 3, branch_id: 1, movement_type: 'add', quantity: 3 },
+    ])
+    insert(db, 'product_batches', [
+      { id: 69, variant_product_id: 2, batch_key: 'snap-old', notes: 'Stock reconciled from product import snapshot' },
+      { id: 70, variant_product_id: 2, batch_key: 'import-new', notes: 'Received via product import' },
+      { id: 71, variant_product_id: 3, batch_key: 'received', notes: 'Received' },
+      { id: 72, variant_product_id: 3, batch_key: 'snap', notes: 'Stock reconciled from product import snapshot' },
+      { id: 73, variant_product_id: 1, batch_key: 'merged', notes: 'Stock merged via product import' },
+      { id: 74, variant_product_id: 1, batch_key: 'other-branch', notes: 'Received via product import' },
+    ])
+    insert(db, 'branch_batch_stock', [
+      { batch_id: 69, branch_id: 1, quantity: 0 }, { batch_id: 70, branch_id: 1, quantity: 5 },
+      { batch_id: 71, branch_id: 1, quantity: 3 }, { batch_id: 72, branch_id: 1, quantity: 1 },
+      { batch_id: 73, branch_id: 1, quantity: 3 }, { batch_id: 74, branch_id: 2, quantity: 0 },
+    ])
+    assert.deepEqual(all(db, 'health-movement-balance-rows').map((r) => [r.product_id, r.branch_id, r.implied_opening, r.import_lot_id]),
+      [[1, 1, -1, null], [2, 1, 5, 70], [3, 1, 1, 72]])
   })
 
   await check('health-sale-money counts v1 headers off their lines or rule, and the paid-within-half-a-cent rule both ways', () => {

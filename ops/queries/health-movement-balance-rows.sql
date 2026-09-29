@@ -5,6 +5,10 @@
 -- Diff two runs' decrypted files by (product_id, branch_id): a pair whose
 -- implied_opening changed between runs is where stock moved without a movement
 -- (or the reverse) in between; last_movement_id / last_movement_at date it.
+-- A products import writes stock with no movement (a new product's first stock,
+-- and the branch snapshot, lib/productBatches.ts planReconcileBranchSnapshot):
+-- import_lot_id is the newest lot those writers left at the pair. NULL does not
+-- rule an import out: a snapshot that lowered stock creates no lot.
 -- unbalanced_pairs_total is on every row so a truncated list is visible.
 -- Ids, dates and quantities only.
 -- ops:min-rows 0
@@ -32,6 +36,10 @@ bad AS MATERIALIZED (
 SELECT b.pid AS product_id, b.bid AS branch_id, ROUND(b.implied, 6) AS implied_opening, b.onhand AS on_hand,
   ROUND(b.net, 6) AS movement_net, b.n AS movement_rows, b.last_id AS last_movement_id,
   (SELECT COALESCE(strftime('%Y-%m-%d %H:%M:%S', m.created_at), m.created_at) FROM inventory_movements m WHERE m.id = b.last_id) AS last_movement_at,
+  (SELECT MAX(pb.id) FROM product_batches pb
+    JOIN branch_batch_stock bbs ON bbs.batch_id = pb.id AND bbs.branch_id = b.bid
+    WHERE pb.variant_product_id = b.pid
+      AND pb.notes IN ('Received via product import', 'Stock reconciled from product import snapshot')) AS import_lot_id,
   (SELECT COUNT(*) FROM bad) AS unbalanced_pairs_total
 FROM bad b
 ORDER BY b.pid, b.bid
