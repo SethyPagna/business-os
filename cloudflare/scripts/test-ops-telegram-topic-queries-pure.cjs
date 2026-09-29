@@ -32,7 +32,7 @@ function declarationsFrom(file, names) {
   return (inputs = {}) => new Function(...Object.keys(inputs), `${js}\nreturn { ${names.join(', ')} }`)(...Object.values(inputs))
 }
 
-const { firstCharacters } = declarationsFrom('telegramLang.ts', ['graphemeSegmenter', 'graphemes', 'codePoints', 'firstCharacters'])()
+const { firstCharacters } = declarationsFrom('telegramLang.ts', ['KHMER_COENG', 'ZERO_WIDTH_JOINER', 'JOINS_PREVIOUS_CHARACTER', 'REGIONAL_INDICATOR', 'regionalIndicatorsBefore', 'isCharacterBoundary', 'firstCharacters'])()
 const worker = declarationsFrom('telegram.ts', ['TELEGRAM_TOPIC_KEYS', 'parseTelegramTopicId', 'cleanLine', 'parseChatIds'])({ firstCharacters })
 
 const JS_TRIMMED = [...Array(0x10000).keys()].map((code) => String.fromCharCode(code)).filter((c) => c.trim() === '')

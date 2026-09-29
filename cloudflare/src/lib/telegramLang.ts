@@ -586,59 +586,37 @@ export function bi(en: string, km: string): string {
   return pair(en, km)
 }
 
-/**
- * The first `max` code points of `text`, cut only where a character ends.
- *
- * Every cap on text the bot sends goes through here (lib/telegram.ts's
- * cleanLine, and the command and the date a reply echoes back), and so does
- * the cashier part of a shift ID (routes/shifts.ts shiftCodeBase), which is
- * stored once and never rewritten.
- *
- * `slice` counts UTF-16 units, and an emoji -- any character past U+FFFF -- is
- * two of them, so a cut there can leave half a character behind: a lone
- * surrogate, which has no UTF-8 form, so Telegram can only refuse the message
- * or print a broken glyph in its place. Counting code points fixes that, but a
- * code point is still not what a reader calls a character: a Khmer vowel sign
- * or subscript (coeng), the halves of a flag and the parts of an emoji joined
- * by U+200D are each code points of their own. "ស្រស់" cut after its fourth
- * code point reads "ស្រស" -- a different word.
- *
- * So the budget stays in code points (every caller's length bound is
- * unchanged) and the cut keeps whole grapheme clusters: the result never has
- * more than `max` code points and never ends inside a character. A cluster
- * that would cross the cap is dropped whole. Where Intl.Segmenter is missing
- * the cut falls back to code points, which is still valid text.
- */
-let graphemeSegmenter: Intl.Segmenter | null | undefined
+const KHMER_COENG = '\u17D2'
+const ZERO_WIDTH_JOINER = '\u200D'
+const JOINS_PREVIOUS_CHARACTER = /^[\p{M}\p{Grapheme_Extend}\p{Emoji_Modifier}\u200D]$/u
+const REGIONAL_INDICATOR = /^\p{Regional_Indicator}$/u
 
-function graphemes(): Intl.Segmenter | null {
-  if (graphemeSegmenter === undefined) {
-    graphemeSegmenter = typeof Intl.Segmenter === 'function' ? new Intl.Segmenter(undefined, { granularity: 'grapheme' }) : null
-  }
-  return graphemeSegmenter
-}
-
-function codePoints(text: string): number {
+function regionalIndicatorsBefore(characters: readonly string[], index: number): number {
   let count = 0
-  for (const _ of text) count += 1
+  while (count < index && REGIONAL_INDICATOR.test(characters[index - count - 1])) count += 1
   return count
 }
 
+function isCharacterBoundary(characters: readonly string[], index: number): boolean {
+  const before = characters[index - 1]
+  const after = characters[index]
+  if (before === KHMER_COENG || before === ZERO_WIDTH_JOINER || JOINS_PREVIOUS_CHARACTER.test(after)) return false
+  return !REGIONAL_INDICATOR.test(after) || regionalIndicatorsBefore(characters, index) % 2 === 0
+}
+
+/**
+ * The first `max` code points of `text`, cut only where a character a reader sees ends: never half an emoji,
+ * a flag or a Khmer stack, never a sign without its consonant. Every Telegram cap and the stored shift ID use it.
+ * Not Intl.Segmenter: workerd's splits a Khmer coeng cluster ('ស្' + 'រ'), so its cut would end on a bare coeng
+ * in the Worker only.
+ */
 export function firstCharacters(text: string, max: number): string {
-  // Text of at most `max` UTF-16 units holds at most `max` code points, so an
-  // ordinary line never segments.
   if (text.length <= max) return text
-  const segmenter = graphemes()
-  if (!segmenter) return Array.from(text).slice(0, max).join('')
-  let kept = ''
-  let used = 0
-  for (const { segment } of segmenter.segment(text)) {
-    const size = codePoints(segment)
-    if (used + size > max) break
-    kept += segment
-    used += size
-  }
-  return kept
+  const characters = Array.from(text)
+  if (characters.length <= max) return text
+  let cut = max
+  while (cut > 0 && !isCharacterBoundary(characters, cut)) cut -= 1
+  return characters.slice(0, cut).join('')
 }
 
 /**
