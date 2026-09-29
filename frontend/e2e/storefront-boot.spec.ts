@@ -37,7 +37,7 @@ test.describe('leangbeauty storefront boot', () => {
     // loading shell -- a failed lazy chunk, a thrown module-scope initializer,
     // a Suspense fallback that never resolves. Asserting on real product CARDS
     // rather than on "body has text" is what makes it discriminating: the
-    // pre-paint shell in index.html already puts "Leang Beauty" on screen, so a
+    // pre-paint shell in index.html already puts "Leang Cosmetics" on screen, so a
     // text assertion would pass on a page whose React tree never mounted.
     const health = collectPageHealth(page)
     await page.goto(`${STOREFRONT_ORIGIN}/`, { waitUntil: 'load' })
@@ -152,7 +152,7 @@ test.describe('leangbeauty storefront boot', () => {
       // any script runs, so this proves a real document came back rather than
       // the browser's own network-error page.
       await expect(page.locator('#root'), JSON.stringify(health)).not.toBeEmpty()
-      await expect(page.locator('body')).toContainText('Leang Beauty')
+      await expect(page.locator('body')).toContainText('Leang Cosmetics')
     } finally {
       await context.setOffline(false)
     }
