@@ -3,21 +3,21 @@ import { loadLowStockConfig, lowStockThresholdSql } from './lowStockSettings'
 import { customerBilledDeliveryFeeUsd } from './saleTotals'
 import { BUSINESS_UTC_OFFSET_MINUTES, businessToday, localDateRangeClause } from './businessDateWindow'
 import {
-  bi, firstCharacters, getTelegramLanguage, HANGING_INDENT, label, labeled, localizeTelegramHeading, localizeTelegramLine, localizeTelegramValue, moreItems, normalizeTelegramLanguage, REPORT_SECTION_EDGE, ROW_BULLET, row, RULE, saleStatusMoneyLabel,
+  addCalendarDays, bi, firstCharacters, getTelegramLanguage, HANGING_INDENT, label, labeled, localizeTelegramHeading, localizeTelegramLine, localizeTelegramValue, moreItems, normalizeTelegramLanguage, REPORT_SECTION_EDGE, ROW_BULLET, row, RULE, saleStatusMoneyLabel,
   parseReportDate, resolveTopicFamilies, setTelegramLanguage, SHIFT_SECTION_EDGE, TELEGRAM_TOPIC_FAMILIES, telegramCommandReference, telegramUnauthorizedReply,
   topicFamilyName, topicGroupName,
 } from './telegramLang'
 import type { TelegramLabelKey, TelegramLanguage, TelegramTopicFamily } from './telegramLang'
 import {
-  getDeliveryContactTotals, getPaymentMethodBreakdown, getSalesGroupedTotals, getSalesTotals,
-  recognizedExpr, shiftWindowWhere, whereActiveSales, type SalesFilters,
+  getDeliveryContactTotals, getPaymentMethodBreakdown, getProductSalesRanking, getSalesGroupedTotals, getSalesTotals,
+  recognizedExpr, shiftWindowWhere, whereActiveSales, type SalesFilters, type SalesTotals,
 } from './salesAnalytics'
 // The drawer arithmetic is NOT defined here any more. lib/shiftReconciliation.ts
 // owns it, and the close routes, the current/history reads and this message all
 // call the same function -- see the header note there for what changed and why.
 import {
-  composeShiftFigures, computeShiftReconciliation, courierPayoutsWhere, FEE_SPLIT_COLUMNS, loadShiftReconciliation, shiftDeliveryFeeExpenses,
-  shiftExpenses, shiftFilters, summarizeShiftCash, type ShiftMoney, type ShiftReconciliation,
+  composeShiftFigures, computeShiftReconciliation, courierPayoutsWhere, expenseRowsWhere, FEE_SPLIT_COLUMNS, loadShiftReconciliation, shiftDeliveryFeeExpenses,
+  shiftExpenses, shiftFilters, summarizeShiftCash, tenderWhere, type ShiftCashResult, type ShiftMoney, type ShiftReconciliation,
 } from './shiftReconciliation'
 export { shiftExpenses, shiftFilters, summarizeShiftCash }
 import type { Env } from '../index'
@@ -46,6 +46,8 @@ type TelegramConfig = {
    * shift report is on"); `enabled` above still gates both.
    */
   shiftOverview: boolean
+  /** The overview's optional sections; each is on only when its switch says 'true'. */
+  summary: TelegramSummarySections
   /** Per-message-family forum topic (message_thread_id); undefined = General. */
   topics: Record<TelegramTopicKey, number | undefined>
 }
@@ -72,6 +74,25 @@ export const TELEGRAM_TOPIC_KEYS = [
 ] as const
 export type TelegramTopicKey = typeof TELEGRAM_TOPIC_KEYS[number]
 
+// Owner, 29 Sep 2026: the overview stays short, and each extra section is a
+// Settings switch that is off until the owner turns it on.
+export const TELEGRAM_SUMMARY_SWITCHES = {
+  sales: 'telegram_summary_sales_enabled',
+  cashiers: 'telegram_summary_cashiers_enabled',
+  products: 'telegram_summary_products_enabled',
+  returns: 'telegram_summary_returns_enabled',
+  expenses: 'telegram_summary_expenses_enabled',
+  compare: 'telegram_summary_compare_enabled',
+} as const
+export type TelegramSummarySection = keyof typeof TELEGRAM_SUMMARY_SWITCHES
+export type TelegramSummarySections = Record<TelegramSummarySection, boolean>
+const NO_SUMMARY_SECTIONS: TelegramSummarySections = { sales: false, cashiers: false, products: false, returns: false, expenses: false, compare: false }
+
+/** The WRITE rule for a summary switch, enforced by routes/settings.ts: 'true', 'false', or empty (off). */
+export function isTelegramSwitchValue(raw: string): boolean {
+  return raw === '' || raw === 'true' || raw === 'false'
+}
+
 // sql-bound-params: bounded by construction -- this fixed enum is owned by
 // this module and never grows from request or database input.
 const SETTING_KEYS = [
@@ -79,6 +100,7 @@ const SETTING_KEYS = [
   'telegram_sales_enabled', 'telegram_status_enabled', 'telegram_returns_enabled', 'telegram_fees_enabled', 'telegram_stock_in_enabled', 'telegram_stock_out_enabled',
   'telegram_shift_overview_enabled',
   ...TELEGRAM_TOPIC_KEYS,
+  ...Object.values(TELEGRAM_SUMMARY_SWITCHES),
 ] as const
 
 // Integer or empty -- a non-numeric or fractional value is treated as unset
@@ -224,6 +246,8 @@ async function getTelegramConfig(env: Env): Promise<TelegramConfig> {
     token: String(env.TELEGRAM_BOT_TOKEN || '').trim(),
     language: normalizeTelegramLanguage(values.telegram_language),
     shiftOverview: isEnabled(values.telegram_shift_overview_enabled, true),
+    summary: Object.fromEntries(Object.entries(TELEGRAM_SUMMARY_SWITCHES)
+      .map(([section, key]) => [section, String(values[key] ?? '').trim() === 'true'])) as TelegramSummarySections,
     // Everything is live after the first setup; individual category switches
     // remain available when a less noisy chat is preferred.
     categories: {
@@ -492,7 +516,7 @@ async function dayStats(env: Env, date: string): Promise<DayStats> {
     // without it this digest under-counted every session committed through
     // the Products page's "Add products" entry.
     db.prepare(`SELECT COUNT(*) AS count, COALESCE(SUM(quantity), 0) AS quantity FROM inventory_movements WHERE movement_type IN ('add', 'stock_in', 'transfer_in', 'move_in') AND ${dayClause('created_at')}`).get<{ count: number; quantity: number }>({ date }),
-    db.prepare(`SELECT COUNT(*) AS count, COALESCE(SUM(quantity), 0) AS quantity FROM inventory_movements WHERE movement_type IN ('remove', 'transfer_out', 'move_out') AND ${dayClause('created_at')}`).get<{ count: number; quantity: number }>({ date }),
+    db.prepare(`SELECT COUNT(*) AS count, COALESCE(SUM(quantity), 0) AS quantity FROM inventory_movements WHERE ${STOCK_OUT_MOVEMENT} AND ${dayClause('created_at')}`).get<{ count: number; quantity: number }>({ date }),
   ])
   return {
     date,
@@ -817,12 +841,14 @@ export function formatDaySummary(stats: DayStats, cashiers: CashierRow[], catego
   return lines.join('\n')
 }
 
-export async function sendTelegramTodaySummary(env: Env): Promise<void> {
+/** Settings → "Send today's summary": the after-shift overview's builder, for the whole shop's day so far. */
+export async function sendTelegramTodaySummary(env: Env, nowMs: number = Date.now()): Promise<void> {
   const config = await getTelegramConfig(env); const problem = configurationProblem(config)
   if (problem) throw problem
-  const today = businessToday()
-  const [stats, cashiers] = await Promise.all([dayStats(env, today), cashierTotals(env, today)])
-  await postTelegram(config, withLanguage(config.language, () => formatDaySummary(stats, cashiers, config.categories)), config.chatId, config.topics.telegram_topic_reports, 'telegram_topic_reports')
+  const today = businessToday(nowMs)
+  const otherLabel = withLanguage(config.language, () => label('other'))
+  const [name, figures] = await Promise.all([shopName(env), shiftOverviewFigures(env, { business_date: today, branch_id: null }, otherLabel, config.summary)])
+  await postTelegram(config, withLanguage(config.language, () => formatDayOverview(name, today, figures, config.categories)), config.chatId, config.topics.telegram_topic_reports, 'telegram_topic_reports')
 }
 
 async function dayReport(env: Env, date: string, language: TelegramLanguage, categories?: TelegramCategories): Promise<string> {
@@ -901,13 +927,38 @@ async function feesReport(env: Env, date: string, language: TelegramLanguage): P
   })
 }
 
+// Same OR as the notification bell: /stock and /lowstock report BOTH tiers
+// in one list, so filtering on the low fragment alone would take the
+// out-of-stock rows down with the low ones when the alert is switched off.
+const lowOrOutOfStockSql = (lowThresholdSql: string): string =>
+  `(COALESCE(stock_quantity, 0) <= ${lowThresholdSql} OR COALESCE(stock_quantity, 0) <= COALESCE(out_of_stock_threshold, 0))`
+
+function lowStockRowLines(row: LowStockRow): string[] {
+  const out = Number(row.stock_quantity || 0) <= Number(row.out_of_stock_threshold || 0)
+  return telegramRowLines(`${ROW_BULLET}${out ? bi('OUT', 'អស់ស្តុក') : bi('LOW', 'ស្តុកទាប')}: ${cleanLine(row.name, 120)}:`, [`${Number(row.stock_quantity || 0)} (⚠ ${Number(row.low_threshold)})`])
+}
+
+/** The day summary's "Stock out" movements. */
+const STOCK_OUT_MOVEMENT = "movement_type IN ('remove', 'transfer_out', 'move_out')"
+
+/** Items at or below their alert level now that were sold or taken out of stock on the scope's day and branch. */
+async function lowStockMovedOnDay(env: Env, filters: SalesFilters): Promise<{ rows: LowStockRow[]; more: number }> {
+  const lowThresholdSql = lowStockThresholdSql(await loadLowStockConfig(env), 'low_stock_threshold')
+  const sold = whereActiveSales('sales', filters)
+  const removed = [STOCK_OUT_MOVEMENT, localDateRangeClause('inventory_movements.created_at')]
+  if (filters.branchId != null) removed.push('inventory_movements.branch_id = @branchId')
+  const rows = await getDb(env).prepare(`SELECT name, stock_quantity, ${lowThresholdSql} AS low_threshold, out_of_stock_threshold, COUNT(*) OVER () AS matched
+    FROM products WHERE is_active = 1 AND ${lowOrOutOfStockSql(lowThresholdSql)}
+      AND (id IN (SELECT sale_items.product_id FROM sale_items JOIN sales ON sales.id = sale_items.sale_id WHERE ${sold.sql})
+        OR id IN (SELECT inventory_movements.product_id FROM inventory_movements WHERE ${removed.join(' AND ')}))
+    ORDER BY COALESCE(stock_quantity, 0) ASC, name ASC LIMIT ${SUMMARY_ROWS}`).all<LowStockRow & { matched: number }>(sold.params)
+  return { rows, more: Math.max(0, (Number(rows[0]?.matched) || 0) - rows.length) }
+}
+
 async function inventoryReport(env: Env, language: TelegramLanguage): Promise<string> {
   const db = getDb(env)
-  // Same OR as the notification bell: /stock and /lowstock report BOTH tiers
-  // in one list, so filtering on the low fragment alone would take the
-  // out-of-stock rows down with the low ones when the alert is switched off.
   const lowThresholdSql = lowStockThresholdSql(await loadLowStockConfig(env), 'low_stock_threshold')
-  const rows = await db.prepare(`SELECT name, stock_quantity, ${lowThresholdSql} AS low_threshold, out_of_stock_threshold FROM products WHERE is_active = 1 AND (COALESCE(stock_quantity, 0) <= ${lowThresholdSql} OR COALESCE(stock_quantity, 0) <= COALESCE(out_of_stock_threshold, 0)) ORDER BY COALESCE(stock_quantity, 0) ASC, name ASC LIMIT 12`).all<{ name: string; stock_quantity: number; low_threshold: number; out_of_stock_threshold: number }>()
+  const rows = await db.prepare(`SELECT name, stock_quantity, ${lowThresholdSql} AS low_threshold, out_of_stock_threshold FROM products WHERE is_active = 1 AND ${lowOrOutOfStockSql(lowThresholdSql)} ORDER BY COALESCE(stock_quantity, 0) ASC, name ASC LIMIT 12`).all<LowStockRow>()
   return withLanguage(language, () => {
     const title = reportTitle('📦', 'Low stock', 'ស្តុកទាប')
     if (!rows.length) return `${title}\n${bi('No active product is at or below its alert level.', 'គ្មានផលិតផលសកម្មណាមួយស្តុកទាបទេ។')}`
@@ -917,12 +968,7 @@ async function inventoryReport(env: Env, language: TelegramLanguage): Promise<st
     // rest of the reports took it on. One section carrying the count row it
     // already printed, then the capped list, unchanged; its header and its
     // `·` rows are the Sep 23 2026 ones every report shares.
-    const lines = [title, sectionHeader('stock', REPORT_SECTION_EDGE), labeled('products', rows.length)]
-    for (const row of rows) {
-      const out = Number(row.stock_quantity || 0) <= Number(row.out_of_stock_threshold || 0)
-      lines.push(...telegramRowLines(`${ROW_BULLET}${out ? bi('OUT', 'អស់ស្តុក') : bi('LOW', 'ស្តុកទាប')}: ${cleanLine(row.name, 120)}:`, [`${Number(row.stock_quantity || 0)} (⚠ ${Number(row.low_threshold)})`]))
-    }
-    return lines.join('\n')
+    return [title, sectionHeader('stock', REPORT_SECTION_EDGE), labeled('products', rows.length), ...rows.flatMap(lowStockRowLines)].join('\n')
   })
 }
 
@@ -1134,6 +1180,21 @@ export type ShiftReportFigures = {
   reconciliation?: ShiftReconciliation
 }
 
+const REVIEW_LABELS: Partial<Record<string, TelegramLabelKey>> = {
+  tender_incomplete: 'reviewTender',
+  change_ambiguous: 'reviewChange',
+  sale_limit_reached: 'reviewLimit',
+  cash_method_unresolved: 'reviewCashMethod',
+}
+/** A cash review's reasons, from lib/shiftReconciliation.ts's codes, in the chat's words. */
+function reviewReasons(codes: readonly string[]): string {
+  const reasons = codes
+    .map((code) => REVIEW_LABELS[code])
+    .filter((key): key is TelegramLabelKey => !!key)
+    .map((key) => label(key))
+  return reasons.length ? reasons.join(' · ') : NOT_APPLICABLE
+}
+
 /**
  * The whole message, pure -- no D1 and no clock: `nowMs` is only
  * formatBusinessDateTime's fallback for a stored time that does not parse.
@@ -1255,19 +1316,7 @@ export function formatShiftReport(shopName: string, shift: ShiftReportSession, f
       ? NOT_APPLICABLE
       : `${recon.difference.usd == null ? NOT_APPLICABLE : signed(recon.difference.usd, usd)} · ${recon.difference.khr == null ? NOT_APPLICABLE : signed(recon.difference.khr, riel)}`
     cash.push(labeled('difference', difference))
-    if (recon.needs_review) {
-      const reviewLabels: Partial<Record<string, TelegramLabelKey>> = {
-        tender_incomplete: 'reviewTender',
-        change_ambiguous: 'reviewChange',
-        sale_limit_reached: 'reviewLimit',
-        cash_method_unresolved: 'reviewCashMethod',
-      }
-      const reasons = recon.review_codes
-        .map((code) => reviewLabels[code])
-        .filter((key): key is TelegramLabelKey => !!key)
-        .map((key) => label(key))
-      cash.push(labeled('cashReview', reasons.length ? reasons.join(' · ') : NOT_APPLICABLE))
-    }
+    if (recon.needs_review) cash.push(labeled('cashReview', reviewReasons(recon.review_codes)))
   }
   lines.push(sectionHeader('cashCount', SHIFT_SECTION_EDGE), ...cash)
 
@@ -1622,7 +1671,26 @@ export type ShiftOverviewFigures = {
    *  all-branches overview, whose `expenses` already count them. */
   unbranchedFees: ShiftMoney | null
   returns: { count: number; refundUsd: number }
+  /** Only the sections whose Settings switch is on; the short overview has none. */
+  sections?: SummarySectionFigures
 }
+
+type CountedMoney = { name: string; count: number; usd: number }
+type LowStockRow = { name: string; stock_quantity: number; low_threshold: number; out_of_stock_threshold: number }
+export type SummarySectionFigures = {
+  sales?: { received: ShiftCashResult; notPaidCount: number; totalDiscountUsd: number }
+  /** `branches` is null on a branch's overview, whose header already names the branch. */
+  cashiers?: { cashiers: CountedMoney[]; branches: CountedMoney[] | null }
+  products?: { top: Array<{ name: string; qty: number; usd: number }>; low: LowStockRow[]; moreLow: number }
+  /** total_refund_khr of the same returns as the count: the refunds' riel row. */
+  returns?: { khr: number; items: number }
+  expenses?: Array<{ label: string; usd: number; khr: number }>
+  compare?: { yesterdayUsd: number; lastWeekUsd: number }
+}
+
+const overviewTitle = (date: string): string => `📈 ${label('reportsOverview')}: ${formatBusinessDay(date)}`
+const overviewBranch = (branchId: number | null, branchName: string | null): string =>
+  (branchId == null ? bi('All branches', 'គ្រប់សាខា') : cleanLine(branchName || `#${branchId}`, 60))
 
 /**
  * The overview message. Pure, exported for
@@ -1634,10 +1702,10 @@ export type ShiftOverviewFigures = {
  * per-category switch set, applied the way formatDaySummary applies it.
  */
 export function formatShiftOverview(shopName: string, shift: ShiftReportSession, figures: ShiftOverviewFigures, categories?: TelegramCategories, nowMs: number = Date.now()): string {
-  const lines = [
-    `📈 ${label('reportsOverview')}: ${formatBusinessDay(shift.business_date)}`,
+  return [
+    overviewTitle(shift.business_date),
     labeled('shop', cleanLine(shopName || 'Business OS', 80)),
-    labeled('branch', shift.branch_id == null ? bi('All branches', 'គ្រប់សាខា') : cleanLine(shift.branch_name || `#${shift.branch_id}`, 60)),
+    labeled('branch', overviewBranch(shift.branch_id, shift.branch_name)),
     // Who closed which shift, and when: the message is sent BECAUSE of it.
     labeled('cashier', localizeTelegramValue(cleanLine(shift.user_name || 'No cashier', 60))),
     labeled('shift', cleanLine(shift.shift_code, 80)),
@@ -1646,24 +1714,67 @@ export function formatShiftOverview(shopName: string, shift: ShiftReportSession,
     // and these two rows say which close sent them.
     labeled('open', formatBusinessDateTime(shift.opened_at, nowMs)),
     labeled('close', shift.closed_at ? formatBusinessDateTime(shift.closed_at, nowMs) : NOT_APPLICABLE),
-  ]
+    ...overviewSections(figures, categories),
+  ].join('\n')
+}
+
+/** "Send today's summary": the same overview for the whole shop's day, with no shift behind it. */
+export function formatDayOverview(shopName: string, date: string, figures: ShiftOverviewFigures, categories?: TelegramCategories): string {
+  return [
+    overviewTitle(date),
+    labeled('shop', cleanLine(shopName || 'Business OS', 80)),
+    labeled('branch', overviewBranch(null, null)),
+    ...overviewSections(figures, categories),
+  ].join('\n')
+}
+
+const countedRowLines = (row: CountedMoney, nameLength: number): string[] =>
+  telegramRowLines(`${ROW_BULLET}${cleanLine(row.name, nameLength)}:`, [`${Number(row.count) || 0} · ${usd(row.usd)}`])
+
+/** ` · +10%`: today's revenue against an earlier day's, in whole percent; nothing when that day took nothing. */
+function changeAgainst(today: number, before: number): string {
+  if (!(before > 0)) return ''
+  const percent = Math.round(((today - before) / before) * 100)
+  return ` · ${percent > 0 ? '+' : percent < 0 ? '−' : ''}${Math.abs(percent)}%`
+}
+
+function receivedRows(tender: ShiftCashResult): string[] {
+  const rows = [labeled('dollars', usd(tender.usd)), labeled('riel', riel(tender.khr)), labeled('bank', money(tender.digital.usd, tender.digital.khr))]
+  if (tender.needsReview) rows.push(labeled('cashReview', reviewReasons(tender.reviewCodes)))
+  return rows
+}
+
+function overviewSections(figures: ShiftOverviewFigures, categories?: TelegramCategories): string[] {
+  const lines: string[] = []
   const section = (key: TelegramLabelKey, rows: string[], enabled = true): void => {
     if (enabled) lines.push(sectionHeader(key, REPORT_SECTION_EDGE), ...(rows.length ? rows : [EMPTY_SECTION]))
   }
   const showSales = categories?.sales !== false
   const showExpenses = categories?.fees !== false
+  const extra = figures.sections ?? {}
 
   const sales = [labeled('revenue', usd(figures.revenueUsd))]
   if (figures.itemDiscountUsd) sales.push(labeled('itemDiscount', usd(figures.itemDiscountUsd)))
   if (figures.invoiceDiscountUsd) sales.push(labeled('invoiceDiscount', usd(figures.invoiceDiscountUsd)))
+  if (extra.sales && figures.itemDiscountUsd && figures.invoiceDiscountUsd) sales.push(labeled('totalDiscount', usd(extra.sales.totalDiscountUsd)))
   if (figures.itemDiscountUsd || figures.invoiceDiscountUsd) sales.push(labeled('grossSales', usd(figures.grossSalesUsd)))
   sales.push(labeled('profit', usd(figures.profitUsd)))
   if (figures.deliveryFeeUsd) sales.push(labeled('deliveryFee', usd(figures.deliveryFeeUsd)))
-  if (figures.creditUsd) sales.push(labeled('credit', usd(figures.creditUsd)))
+  if (figures.creditUsd) sales.push(labeled('credit', extra.sales ? `${extra.sales.notPaidCount} · ${usd(figures.creditUsd)}` : usd(figures.creditUsd)))
   if (figures.refundUsd) sales.push(labeled('refunds', usd(figures.refundUsd)))
   section('sales', sales, showSales)
   section('invoices', [countRow([['total', Number(figures.invoices) || 0], ['cancelled', Number(figures.cancelled) || 0]])], showSales)
-  section('paymentMethods', figures.paymentMethods.flatMap((row) => telegramRowLines(`${ROW_BULLET}${cleanLine(row.method, 40)}:`, [`${Number(row.count) || 0} · ${usd(row.usd)}`])), showSales)
+  section('paymentMethods', figures.paymentMethods.flatMap((row) => countedRowLines({ name: row.method, count: row.count, usd: row.usd }, 40)), showSales)
+  if (extra.sales) section('received', receivedRows(extra.sales.received), showSales)
+  if (extra.cashiers) {
+    section('cashiers', extra.cashiers.cashiers.flatMap((row) => countedRowLines(row, 60)), showSales)
+    if (extra.cashiers.branches) section('branches', extra.cashiers.branches.flatMap((row) => countedRowLines(row, 60)), showSales)
+  }
+  if (extra.products) {
+    section('topProducts', extra.products.top.flatMap((row) => countedRowLines({ name: row.name, count: row.qty, usd: row.usd }, 60)), showSales)
+    const more = extra.products.moreLow ? [`${ROW_BULLET}${moreItems(extra.products.moreLow)}`] : []
+    section('lowStock', [...extra.products.low.flatMap(lowStockRowLines), ...more], showSales)
+  }
 
   // The day summary's split and rows, switches applied the same way.
   const expenses = expenseTotals({
@@ -1677,27 +1788,48 @@ export function formatShiftOverview(shopName: string, shift: ShiftReportSession,
   const unbranched = figures.unbranchedFees
   if (unbranched && hasMoney(unbranched)) expenseRows.push(labeled('noBranchFees', money(unbranched.usd, unbranched.khr)))
   section('expenses', expenseRows, showExpenses)
+  if (extra.expenses) section('eachExpense', extra.expenses.flatMap((row) => telegramRowLines(`${ROW_BULLET}${cleanLine(row.label, 60)}:`, [money(row.usd, row.khr)])), showExpenses)
 
   // Returns by the day the RETURN was taken -- the Overview's returns block.
   // Its refund is not the Refunds row above (that one follows the SALE's
   // day), which is why it is its own section and never subtracted. Dollars
   // only: total_refund_khr is this same refund at the return's rate, not a second one.
+  // The optional riel row shows that same riel figure on its own line, for information.
   const returned = figures.returns
-  section('returns', returned.count ? [labeled('total', `${returned.count} · ${usd(returned.refundUsd)}`)] : [])
-  return lines.join('\n')
+  const returnRows = returned.count ? [labeled('total', `${returned.count} · ${usd(returned.refundUsd)}`)] : []
+  if (extra.returns && returned.count) returnRows.push(labeled('riel', riel(extra.returns.khr)), labeled('itemsReturned', extra.returns.items))
+  section('returns', returnRows)
+  if (extra.compare) {
+    section('compare', [
+      labeled('yesterday', `${usd(extra.compare.yesterdayUsd)}${changeAgainst(figures.revenueUsd, extra.compare.yesterdayUsd)}`),
+      labeled('sameDayLastWeek', `${usd(extra.compare.lastWeekUsd)}${changeAgainst(figures.revenueUsd, extra.compare.lastWeekUsd)}`),
+    ], showSales)
+  }
+  return lines
 }
 
 const OVERVIEW_SHIFT_COLUMNS = `id, revision, ${SHIFT_COLUMNS}`
 type OverviewShift = ShiftReportSession & { id: number; revision: number }
 
 /** The Overview's figures for one day and branch, off the same kernel calls. */
-export async function shiftOverviewFigures(env: Env, shift: { business_date: string; branch_id: number | null }, otherLabel = 'Other'): Promise<ShiftOverviewFigures> {
+export async function shiftOverviewFigures(
+  env: Env,
+  shift: { business_date: string; branch_id: number | null },
+  otherLabel = 'Other',
+  sections: TelegramSummarySections = NO_SUMMARY_SECTIONS,
+): Promise<ShiftOverviewFigures> {
   const filters = shiftOverviewFilters(shift)
   const params: Record<string, unknown> = { startDate: filters.startDate, endDate: filters.endDate }
   // routes/reports.ts reportRecordRange's date-only branch, per table; the
   // pure test compares the two clause for clause.
   const branch = (alias: string) => (filters.branchId == null ? '' : ` AND ${alias}.branch_id = @branchId`)
   if (filters.branchId != null) params.branchId = filters.branchId
+  const scope: OverviewScope = {
+    filters, params,
+    feeWhere: `fees.fee_date >= @startDate AND fees.fee_date <= @endDate${branch('fees')}`,
+    returnsWhere: `COALESCE(return_scope, 'customer') = 'customer' AND COALESCE(status, 'completed') <> 'cancelled'
+        AND ${localDateRangeClause('returns.created_at')}${branch('returns')}`,
+  }
   const db = getDb(env)
   // The courier half over the kernel's own sale set for these filters.
   const courierWhere = whereActiveSales('sales', filters)
@@ -1705,11 +1837,10 @@ export async function shiftOverviewFigures(env: Env, shift: { business_date: str
     getSalesTotals(env, filters),
     getSalesGroupedTotals(env, filters, 'payment_method'),
     db.prepare(`SELECT ${FEE_SPLIT_COLUMNS} FROM fees
-      WHERE fees.fee_date >= @startDate AND fees.fee_date <= @endDate${branch('fees')}`)
+      WHERE ${scope.feeWhere}`)
       .get<{ usd: number; khr: number; delivery_usd: number; delivery_khr: number }>(params),
     db.prepare(`SELECT COUNT(*) AS count, ROUND(COALESCE(SUM(total_refund_usd), 0), 2) AS usd FROM returns
-      WHERE COALESCE(return_scope, 'customer') = 'customer' AND COALESCE(status, 'completed') <> 'cancelled'
-        AND ${localDateRangeClause('returns.created_at')}${branch('returns')}`).get<{ count: number; usd: number }>(params),
+      WHERE ${scope.returnsWhere}`).get<{ count: number; usd: number }>(params),
     courierPayoutsWhere(env, [courierWhere.sql], courierWhere.params),
     // A branch's overview only: the same days' fees with no branch at all,
     // which the branch clause above cannot see (R-telegram X1).
@@ -1740,6 +1871,51 @@ export async function shiftOverviewFigures(env: Env, shift: { business_date: str
     },
     unbranchedFees: filters.branchId == null ? null : { usd: Number(unbranched?.usd) || 0, khr: Number(unbranched?.khr) || 0 },
     returns: { count: Number(returned?.count) || 0, refundUsd: Number(returned?.usd) || 0 },
+    sections: Object.values(sections).some(Boolean) ? await summarySectionFigures(env, scope, totals, sections, otherLabel) : undefined,
+  }
+}
+
+type OverviewScope = { filters: SalesFilters; params: Record<string, unknown>; feeWhere: string; returnsWhere: string }
+const SUMMARY_ROWS = 8
+const TOP_PRODUCTS = 5
+
+/** The switched-on sections' figures, over exactly the overview's day and branch. Nothing is read for a section that is off. */
+async function summarySectionFigures(env: Env, scope: OverviewScope, totals: SalesTotals, sections: TelegramSummarySections, otherLabel: string): Promise<SummarySectionFigures> {
+  const { filters } = scope
+  const sold = whereActiveSales('sales', filters)
+  const fold = (rows: CountedMoney[]) => foldRows(rows, SUMMARY_ROWS, (rest) => ({
+    name: otherLabel,
+    count: rest.reduce((sum, row) => sum + (Number(row.count) || 0), 0),
+    usd: round2(rest.reduce((sum, row) => sum + (Number(row.usd) || 0), 0)),
+  }))
+  const groupedBy = async (key: 'cashier' | 'branch') => fold((await getSalesGroupedTotals(env, filters, key, 50))
+    .map((row) => ({ name: row.label || 'Unknown', count: row.tx_count, usd: row.revenue_usd })))
+  const onDay = (offsetDays: number): SalesFilters => {
+    const date = addCalendarDays(String(filters.startDate), offsetDays)
+    return { startDate: date, endDate: date, branchId: filters.branchId }
+  }
+  const [received, cashiers, branches, top, low, returned, expenses, yesterday, lastWeek] = await Promise.all([
+    sections.sales ? tenderWhere(env, [sold.sql], sold.params) : null,
+    sections.cashiers ? groupedBy('cashier') : null,
+    sections.cashiers && filters.branchId == null ? groupedBy('branch') : null,
+    sections.products ? getProductSalesRanking(env, filters, TOP_PRODUCTS) : null,
+    sections.products ? lowStockMovedOnDay(env, filters) : null,
+    sections.returns
+      ? getDb(env).prepare(`SELECT COALESCE(SUM(total_refund_khr), 0) AS khr,
+        COALESCE(SUM((SELECT SUM(return_items.quantity) FROM return_items WHERE return_items.return_id = returns.id)), 0) AS items
+        FROM returns WHERE ${scope.returnsWhere}`).get<{ khr: number; items: number }>(scope.params)
+      : null,
+    sections.expenses ? expenseRowsWhere(env, [scope.feeWhere], scope.params, { excludeDeliveryFees: true, overflowLabel: otherLabel }) : null,
+    sections.compare ? getSalesTotals(env, onDay(-1)) : null,
+    sections.compare ? getSalesTotals(env, onDay(-7)) : null,
+  ])
+  return {
+    ...(received && { sales: { received, notPaidCount: Number(totals.pending_tx_count) || 0, totalDiscountUsd: Number(totals.total_discount_usd) || 0 } }),
+    ...(cashiers && { cashiers: { cashiers, branches } }),
+    ...(top && low && { products: { top: top.map((row) => ({ name: row.product_name, qty: row.qty, usd: row.line_sales_usd })), low: low.rows, moreLow: low.more } }),
+    ...(sections.returns && { returns: { khr: Number(returned?.khr) || 0, items: Number(returned?.items) || 0 } }),
+    ...(expenses && { expenses: expenses.details }),
+    ...(yesterday && lastWeek && { compare: { yesterdayUsd: yesterday.revenue_usd, lastWeekUsd: lastWeek.revenue_usd } }),
   }
 }
 
@@ -1816,7 +1992,7 @@ export async function deliverTelegramShiftOverview(env: Env, key: string, nowMs:
     // The fold label is the only text the DATA read produces; composed first,
     // synchronously, as shiftFigures does.
     const otherLabel = withLanguage(config.language, () => label('other'))
-    const [name, figures] = await Promise.all([shopName(env), shiftOverviewFigures(env, shift, otherLabel)])
+    const [name, figures] = await Promise.all([shopName(env), shiftOverviewFigures(env, shift, otherLabel, config.summary)])
     const topicKey = overviewTopicKey(config)
     await postTelegram(config, withLanguage(config.language, () => formatShiftOverview(name, shift, figures, config.categories, nowMs)), config.chatId, config.topics[topicKey], topicKey)
     await settle('sent', null, ', sent_at = @now')

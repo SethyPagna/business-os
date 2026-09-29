@@ -332,6 +332,18 @@ const LABELS = {
   // same words.
   reportsOverview: { en: 'Reports overview', km: 'ទិដ្ឋភាពរួមរបាយការណ៍' }, // km.json telegram_reports_overview
   returns: { en: 'Returns', km: 'ការប្រគល់មកវិញ' },                  // km.json returns
+  // The overview's optional sections (owner, 29 Sep 2026), each behind a Settings switch.
+  received: { en: 'Received', km: 'បានទទួល' },                       // km.json received
+  dollars: { en: 'Dollars', km: 'ដុល្លារ' },                          // km.json shift_float_usd (ដុល្លារ)
+  riel: { en: 'Riel', km: 'រៀល' },                                    // km.json riel
+  bank: { en: 'Bank', km: 'ធនាគារ' },
+  totalDiscount: { en: 'Total discount', km: 'បញ្ចុះតម្លៃសរុប' },      // km.json total_discount
+  branches: { en: 'Branches', km: 'សាខា' },                           // km.json branches
+  topProducts: { en: 'Top products', km: 'ទំនិញលក់ដាច់' },            // km.json top_products
+  itemsReturned: { en: 'Items returned', km: 'ទំនិញប្រគល់' },         // km.json items_returned
+  compare: { en: 'Compare', km: 'ប្រៀបធៀប' },                         // km.json rpt_compare
+  yesterday: { en: 'Yesterday', km: 'ម្សិលមិញ' },                     // km.json yesterday
+  sameDayLastWeek: { en: 'Same day last week', km: 'ថ្ងៃដដែលសប្តាហ៍មុន' }, // km.json rpt_week (សប្តាហ៍)
 } as const satisfies Record<string, LabelEntry>
 
 export type TelegramLabelKey = keyof typeof LABELS
@@ -984,7 +996,7 @@ export function telegramCommandReference(): string {
  */
 export type ParsedReportDate = { ok: true; date: string } | { ok: false; message: string }
 
-const shiftDays = (isoDate: string, days: number): string => {
+export const addCalendarDays = (isoDate: string, days: number): string => {
   const base = Date.parse(`${isoDate}T00:00:00Z`)
   if (!Number.isFinite(base)) return isoDate
   return new Date(base + days * 86_400_000).toISOString().slice(0, 10)
@@ -999,7 +1011,7 @@ function isRealDate(year: number, month: number, day: number): boolean {
 export function parseReportDate(argument: string | undefined, today: string): ParsedReportDate {
   const raw = String(argument ?? '').trim().toLowerCase()
   if (!raw || raw === 'today') return { ok: true, date: today }
-  if (raw === 'yesterday') return { ok: true, date: shiftDays(today, -1) }
+  if (raw === 'yesterday') return { ok: true, date: addCalendarDays(today, -1) }
 
   const iso = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/)
   if (iso && isRealDate(Number(iso[1]), Number(iso[2]), Number(iso[3]))) return { ok: true, date: raw }
