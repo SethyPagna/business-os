@@ -450,7 +450,7 @@ export const IMPORT_WARNING_LABELS: Record<ImportWarningKind, string> = {
   duplicate_row_match: 'Two rows in this file matched the same existing contact',
   stock_action_conflict: 'Stock action needs explicit confirmation',
   cost_outlier: 'Costs too far apart to average (highest kept)',
-  stock_receipt: 'Adds stock as a new receipt (needs a decision)',
+  stock_receipt: 'Stock receipt row (add or keep stock, decided per row)',
   other: 'Other warning',
 }
 
@@ -458,7 +458,7 @@ export const IMPORT_WARNING_LABELS: Record<ImportWarningKind, string> = {
 // specifically (as opposed to a routine "just so you know") -- used to
 // decide what surfaces in the import report / dashboard / audit log
 // without the caller needing its own copy of this list.
-export const SERIOUS_IMPORT_WARNING_KINDS: ReadonlySet<ImportWarningKind> = new Set(['negative_stock', 'unreadable_batch_date', 'barcode_collision', 'sku_collision', 'name_match', 'membership_mismatch', 'membership_phone_conflict', 'duplicate_row_match', 'stock_action_conflict', 'cost_outlier'])
+export const SERIOUS_IMPORT_WARNING_KINDS: ReadonlySet<ImportWarningKind> = new Set(['negative_stock', 'unreadable_batch_date', 'barcode_collision', 'sku_collision', 'name_match', 'membership_mismatch', 'membership_phone_conflict', 'duplicate_row_match', 'stock_action_conflict', 'cost_outlier', 'stock_receipt'])
 
 // Counts DISTINCT rows that carry at least one warning whose kind is in
 // `kinds` -- NOT the sum of summarizeImportWarnings' per-kind group counts.

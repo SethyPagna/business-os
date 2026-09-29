@@ -92,6 +92,7 @@ await runTest('both packs carry the new keys, the Khmer ones really translated',
     product_import_stock_receipt_hint: 'A stock receipt row adds its quantity to stock. Choose to add it, or to update the details and keep the stock.',
     products_import_conflicts_add_stock: 'Add stock',
     products_import_conflicts_keep_stock: 'Keep stock',
+    import_warning_kind_stock_receipt: 'Stock receipt row (add or keep stock, decided per row)',
   }
   for (const [key, english] of Object.entries(expected)) {
     assert.equal(en[key], english, `en.json ${key}`)
@@ -100,6 +101,21 @@ await runTest('both packs carry the new keys, the Khmer ones really translated',
     assert.match(km[key], /[ក-៿]/, `km.json ${key} carries no Khmer script`)
   }
   assert.equal(km.products_import_conflicts_add_stock, km.add_stock, 'Add stock reads the same as everywhere else in the app')
+})
+
+await runTest('the import report names a stock_receipt row in the reader\'s language, under needs attention', async () => {
+  const { PRODUCT_DECISION_WARNING_KINDS } = await loadKinds()
+  const report = read(frontend, 'src', 'components', 'shared', 'ImportReportModal.tsx')
+  assert.match(report, /stock_receipt: 'import_warning_kind_stock_receipt'/, 'without the key a Khmer reader sees the Worker\'s English label')
+  const seriousList = report.match(/const SERIOUS_KINDS = new Set\(\[([^\]]+)\]\)/)
+  assert.ok(seriousList, 'SERIOUS_KINDS is still declared in ImportReportModal.tsx')
+  const serious = [...seriousList[1].matchAll(/'([a-z_]+)'/g)].map((entry) => entry[1])
+  for (const kind of PRODUCT_DECISION_WARNING_KINDS) assert.ok(serious.includes(kind), `${kind} held the import for a decision, so the report lists it under needs attention`)
+  const engine = read(repo, 'cloudflare', 'src', 'lib', 'importEngine.ts')
+  const workerLabel = engine.match(/\n\s*stock_receipt: '([^']+)',/)
+  assert.ok(workerLabel, 'IMPORT_WARNING_LABELS carries stock_receipt')
+  const en = JSON.parse(read(frontend, 'src', 'lang', 'en.json'))
+  assert.equal(en.import_warning_kind_stock_receipt, workerLabel[1], 'the English pack reads like the Worker label it replaces')
 })
 
 if (failed > 0) {

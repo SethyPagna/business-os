@@ -36,6 +36,7 @@ const IMPORT_WARNING_KIND_KEYS: Record<string, string> = {
   duplicate_row_match: 'import_warning_kind_duplicate_row_match',
   stock_action_conflict: 'import_warning_kind_stock_action_conflict',
   cost_outlier: 'import_warning_kind_cost_outlier',
+  stock_receipt: 'import_warning_kind_stock_receipt',
   other: 'import_warning_kind_other',
 }
 
@@ -128,7 +129,7 @@ function formatRowNumbers(rows: number[]): string {
 // the row was written with a cost that matches NEITHER figure in front of the
 // operator, because the two were too far apart to average. Under "Other" it
 // would read as routine noise, which is exactly how a mistyped cost gets kept.
-const SERIOUS_KINDS = new Set(['negative_stock', 'unreadable_batch_date', 'barcode_collision', 'sku_collision', 'name_match', 'membership_mismatch', 'membership_phone_conflict', 'duplicate_row_match', 'stock_action_conflict', 'cost_outlier'])
+const SERIOUS_KINDS = new Set(['negative_stock', 'unreadable_batch_date', 'barcode_collision', 'sku_collision', 'name_match', 'membership_mismatch', 'membership_phone_conflict', 'duplicate_row_match', 'stock_action_conflict', 'cost_outlier', 'stock_receipt'])
 
 export default function ImportReportModal({ jobId, onClose, title }: ImportReportModalProps) {
   const { t } = useApp()

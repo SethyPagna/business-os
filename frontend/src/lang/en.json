@@ -2471,6 +2471,7 @@
   "import_warning_kind_other": "Other warning",
   "import_warning_kind_sku_collision": "Same SKU, different name",
   "import_warning_kind_stock_action_conflict": "Stock action needs explicit confirmation",
+  "import_warning_kind_stock_receipt": "Stock receipt row (add or keep stock, decided per row)",
   "imported": "Imported",
   "imported_records": "Imported Records",
   "imported_rows_count": "Imported {count} row(s)",
