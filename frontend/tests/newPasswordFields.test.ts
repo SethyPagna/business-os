@@ -91,10 +91,17 @@ await runTest('self: both inputs are named new-password fields that Safari\'s ge
   assert.equal('data-1p-ignore' in fresh, false)
 })
 
-await runTest('other-user: autocomplete off and every password-manager ignore attribute, on both inputs', () => {
-  const html = renderToStaticMarkup(React.createElement(loadFields([]), baseProps({ mode: 'other-user' })))
-  for (const input of inputsOf(html)) {
-    assert.equal(input.type, 'password')
+await runTest('other-user: masked text inputs, never type=password, with autocomplete off and every password-manager ignore attribute', () => {
+  const html = renderToStaticMarkup(React.createElement(loadFields([]), baseProps({ mode: 'other-user', inputClassName: 'input' })))
+  const inputs = inputsOf(html)
+  assert.equal(inputs.length, 2)
+  for (const input of inputs) {
+    assert.equal(input.type, 'text')
+    assert.match(input.class, /(?:^| )input(?: |$)/, 'the caller\'s input class is kept')
+    assert.match(input.class, /\[-webkit-text-security:disc\]/, 'the value stays masked on screen')
+    assert.equal(input.autocapitalize, 'off')
+    assert.equal(input.autocorrect, 'off')
+    assert.equal(input.spellcheck, 'false')
     assert.equal(input.autocomplete, 'off')
     assert.equal(input['data-1p-ignore'], 'true')
     assert.equal(input['data-lpignore'], 'true')
