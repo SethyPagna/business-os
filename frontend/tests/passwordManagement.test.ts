@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
+import { transformSync } from 'esbuild'
 import { passwordPersistenceNotice, persistChangedPassword } from '../src/utils/passwordManager.ts'
+import { newPasswordProblem, passwordProblemMessage } from '../src/utils/passwordRules.ts'
 import { isAdminControlUser } from '../src/utils/permissions.ts'
 
 type TestCallback = () => void | Promise<void>
@@ -282,8 +284,104 @@ await runTest('peer-admin reset uses dedicated admin endpoint and permits managi
   assert.match(usersSource, /return canManage && !!targetUser/)
   assert.doesNotMatch(usersSource, /return !targetUser\.is_primary_admin/)
   assert.doesNotMatch(usersSource, /return !targetUser\.has_admin_access/)
-  assert.match(usersSource, /administrator resets another account, including another admin account/i)
-  assert.match(usersSource, /copyPasswordToClipboard\(passwordForm\.newPassword\)/)
+})
+
+// Users block (AUTH-P1-users). Creating a user and resetting someone else's password set ANOTHER
+// person's password: never the administrator's own vault, never the clipboard unless Copy is pressed.
+const usersCode = usersSource.replace(/\r\n/g, '\n')
+function sliceFunction(source: string, name: string): string {
+  const start = source.indexOf(`\nfunction ${name}(`)
+  assert.ok(start >= 0, `function ${name} exists`)
+  return source.slice(start, source.indexOf('\n}\n', start) + 3)
+}
+function between(source: string, start: string, end: string): string {
+  const from = source.indexOf(start)
+  assert.ok(from >= 0, `missing ${start}`)
+  const to = source.indexOf(end, from + start.length)
+  assert.ok(to > from, `missing ${end} after ${start}`)
+  return source.slice(from, to)
+}
+const firstNewPasswordFields = (source: string) => /<NewPasswordFields\b[\s\S]*?\/>/.exec(source)?.[0] || ''
+
+await runTest('admin create and reset never store another person\'s password and never copy it unasked', () => {
+  assert.doesNotMatch(usersCode, /copyFallback|persistChangedPassword|passwordPersistenceNotice/)
+  const reset = sliceConst(usersCode, 'handleResetPassword')
+  assert.doesNotMatch(reset, /copyPasswordToClipboard/)
+  assert.equal((usersCode.match(/requestPasswordSave\(/g) || []).length, 1, 'one save request on the page')
+  assert.match(reset, /if \(ownAccount\) \{\s+const stored = await requestPasswordSave\(\{ username: String\(selectedUser\.username \|\| ''\),/, 'only the administrator\'s own password is offered to their manager')
+  const handover = sliceFunction(usersCode, 'PasswordHandover')
+  assert.equal((usersCode.match(/copyPasswordToClipboard\(/g) || []).length, (handover.match(/copyPasswordToClipboard\(/g) || []).length, 'the page copies only from the hand-over panel')
+  assert.match(handover, /onClick=\{\(\) => \{ void copy\(\) \}\}/)
+  assert.doesNotMatch(handover, /useEffect|requestPasswordSave/)
+})
+
+await runTest('create user stays a button, and neither field looks like the administrator\'s own sign-up (C18)', () => {
+  const modal = between(usersCode, "{modal === 'editUser' ? (", '{roleDeleteTarget ? (')
+  assert.doesNotMatch(modal, /<form\b/, 'a real submit makes Chrome likelier to offer saving the staff credential')
+  assert.match(modal, /<input id="user-username" name="new_user_username" autoComplete="off" data-1p-ignore="true" data-lpignore="true" data-bwignore="true"/)
+  assert.doesNotMatch(modal, /name="(?:username|password)"|autoComplete="(?:username|new-password|current-password)"|type="password"/)
+  const fields = firstNewPasswordFields(modal)
+  assert.match(fields, /idPrefix="new-user-password"/)
+  assert.match(fields, /mode="other-user"/)
+  assert.match(fields, /password=\{userForm\.password\}/)
+  assert.match(fields, /confirm=\{userForm\.passwordConfirm\}/)
+  assert.match(modal, /<button type="button" className=\{MAIN_ACTION_BUTTON_CLASS\} onClick=\{handleSaveUser\} disabled=\{saving\}>\s*<Save className="h-4 w-4" aria-hidden="true" \/>/)
+})
+
+await runTest('create and reset check the Worker\'s new-password rule on the client, and show its refusals translated', () => {
+  const compiled = transformSync(sliceFunction(usersCode, 'passwordEntryError'), { loader: 'ts' }).code
+  const passwordEntryError = new Function('newPasswordProblem', 'passwordProblemMessage', `${compiled}\nreturn passwordEntryError`)(newPasswordProblem, passwordProblemMessage) as
+    (password: string, confirm: string, missing: string, tr: (key: string, fallback: string) => string) => string
+  const tr = (key: string, fallback: string) => `${key}: ${fallback}`
+  const khmer = (letters: number) => 'ក'.repeat(letters)
+  assert.equal(passwordEntryError('', '', 'missing', tr), 'missing')
+  assert.match(passwordEntryError('abcde', 'abcde', 'missing', tr), /^password_too_short: /)
+  assert.match(passwordEntryError(' abcdef', ' abcdef', 'missing', tr), /^password_edge_whitespace: /)
+  assert.match(passwordEntryError(khmer(25), khmer(25), 'missing', tr), /^password_too_long: /, '25 Khmer letters are 75 bytes')
+  assert.equal(passwordEntryError(khmer(24), khmer(24), 'missing', tr), '')
+  assert.match(passwordEntryError('abcdef', 'abcdeg', 'missing', tr), /^new_password_confirm_mismatch: /)
+  assert.equal(passwordEntryError('abcdef', 'abcdef', 'missing', tr), '')
+
+  const save = sliceConst(usersCode, 'handleSaveUser')
+  assert.match(save, /passwordEntryError\(userForm\.password, userForm\.passwordConfirm, tr\('password_required_new_user'/)
+  assert.ok(save.indexOf('passwordEntryError(') < save.indexOf('setUserConfirmOpen(true)'), 'checked before the review dialog opens')
+  const reset = sliceConst(usersCode, 'handleResetPassword')
+  assert.match(reset, /passwordEntryError\(newPassword, confirmPassword, tr\('enter_new_password'/)
+  assert.doesNotMatch(usersCode, /length < 6/)
+  for (const [name, body] of [['create', sliceConst(usersCode, 'commitSaveUser')], ['reset', reset]]) {
+    assert.match(body, /newPasswordRefusalMessage\(result, tr\) \|\|/, `${name}: a { success: false } answer`)
+    assert.match(body, /newPasswordRefusalMessage\(error, tr\) \|\|/, `${name}: a thrown ApiError`)
+  }
+})
+
+await runTest('resetting another person\'s password: no current password, no username, other-user fields, then the hand-over panel (C19)', () => {
+  const modal = between(usersCode, "{modal === 'resetPw' && selectedUser ? (", "{modal === 'editRole' ? (")
+  assert.match(modal, /passwordHandover \? \(\s*<PasswordHandover\b[\s\S]*?\) : isCurrentAccount\(selectedUser\) \? \(\s*<OwnPasswordChangeForm\b[\s\S]*?\) : \(\s*<AdminPasswordResetForm\b/)
+  const admin = sliceFunction(usersCode, 'AdminPasswordResetForm')
+  assert.doesNotMatch(admin, /<form\b|<input\b|autoFocus|current_password|name="username"/)
+  assert.match(firstNewPasswordFields(admin), /mode="other-user"/)
+  assert.equal((admin.match(/<button\b/g) || []).length, 1, 'one main action')
+  assert.match(admin, /<button type="button" className=\{MAIN_ACTION_BUTTON_CLASS\} title=\{tr\('change_password', 'Change password'\)\} disabled=\{passwordSaving\} onClick=\{onSave\}>\s*<KeyRound\b/)
+  assert.match(sliceConst(usersCode, 'handleResetPassword'), /setPasswordHandover\(\{ name: [^}]*, password: newPassword \}\)/)
+
+  const handover = sliceFunction(usersCode, 'PasswordHandover')
+  assert.match(handover, /tr\('password_admin_handover_title', 'New password for \{name\}'\)\.replace\('\{name\}', name\)/)
+  assert.match(handover, /<div className="[^"]*\bselect-all\b[^"]*">\{password\}<\/div>/, 'shown once in a read-only line')
+  assert.match(handover, /<button type="button" className="[^"]*" aria-label=\{copyLabel\} title=\{copyLabel\} onClick=\{\(\) => \{ void copy\(\) \}\}>\s*<Copy\b[^>]*\/>\s*<\/button>/, 'Copy is icon-only with its name as tooltip')
+  assert.match(handover, /<button type="button" className=\{MAIN_ACTION_BUTTON_CLASS\} onClick=\{onDone\}>\s*<Check\b[\s\S]*?tr\('done', 'Done'\)/)
+  assert.match(usersCode, /useEffect\(\(\) => \{ if \(modal !== 'resetPw'\) setPasswordHandover\(null\) \}, \[modal\]\)/, 'the password leaves state with the dialog')
+})
+
+await runTest('an administrator changing their own password here keeps the paired form and the browser save request', () => {
+  const own = sliceFunction(usersCode, 'OwnPasswordChangeForm')
+  assert.match(own, /<form\b[^>]*onSubmit=\{\(event\) => \{ event\.preventDefault\(\); onSave\(\) \}\}/)
+  assertAccountUsername(inputBefore(own, 'reset-password-current'), /value=\{target\.username \|\| ''\}/, 'Users page own change')
+  assert.match(own, /id="reset-password-current"\s+name="current_password"\s+type="password"\s+autoComplete="current-password"[\s\S]*?autoFocus/)
+  const fields = firstNewPasswordFields(own)
+  assert.match(fields, /idPrefix="reset-password"/)
+  assert.doesNotMatch(fields, /mode=/, 'self mode: offered to the administrator\'s own manager')
+  assert.equal((own.match(/<button\b/g) || []).length, 1, 'one main action')
+  assert.match(own, /<button type="submit" className=\{MAIN_ACTION_BUTTON_CLASS\} title=\{tr\('change_password', 'Change password'\)\} disabled=\{passwordSaving\}>\s*<KeyRound\b[\s\S]*?tr\('save', 'Save'\)/)
 })
 
 if (failed > 0) process.exitCode = 1
