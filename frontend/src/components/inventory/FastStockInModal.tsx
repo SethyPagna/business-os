@@ -1,151 +1,98 @@
-// F2 (Part 419): fast stock-in -- one shipment's header (branch, received
-// date, supplier, paid/credit) entered ONCE, then rapid per-product lines:
-// type a name, pick the row, quantity/cost/expiry, and queue it. Queued
-// lines remain editable/removable until Complete writes them through the
-// same receiveBatchStock kernel used by every other add-stock surface.
-// Each outcome stays visible, so a partial failure can be fixed and retried.
+// The Stock Session float (UI-STOCK spec 3-5): one session of Add, Remove or
+// Set lines -- Items, then Payment (Add only), then Review, then Complete
+// Session. Every stock entry point opens this one component. Lines write
+// through the same kernels as before: POST /api/inventory/fast-stock-in/commit
+// (per-line 0192 ids, deferred rounds), with the per-line fallback for an old
+// Worker.
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useApp } from '../../AppContext'
-import { canEditAcquisitionCosts, canViewAcquisitionCosts } from '../../utils/acquisitionCostAccess.ts'
+import { canEditAcquisitionCosts, canViewAcquisitionCosts, omitUnauthorizedCatalogCosts } from '../../utils/acquisitionCostAccess.ts'
+import { effectivePermissions } from '../../utils/permissions.ts'
 import { useProtectedCostEntry } from '../../utils/useProtectedCostEntry.ts'
-import X from 'lucide-react/dist/esm/icons/x.js'
-import MinimizeButton from '../shared/MinimizeButton.tsx'
-import Pencil from 'lucide-react/dist/esm/icons/pencil.js'
-import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
-import AppSelect from '../shared/AppSelect.tsx'
-import ScanSearchButton from '../shared/ScanSearchButton.tsx'
-import SupplierPickerField, { type SupplierChoice } from '../shared/SupplierPickerField.tsx'
-import DateEntryInput from '../shared/DateEntryInput.tsx'
+import type { SupplierChoice } from '../shared/SupplierPickerField.tsx'
 import { receiveBatchStock, getProductBatches, type ProductBatch } from '../../api/batchesTransport.ts'
-import { adjustStock, commitFastStockIn, isDeferredStockInResult, type FastStockInCommitLine, type FastStockInCommitLineResult, type FastStockInCommitSettled } from '../../api/inventoryWriteTransport.ts'
-import StockConditionTagRow from './StockConditionTagRow'
-import { searchProducts } from '../../api/methods.ts'
+import { adjustStock, commitFastStockIn, isDeferredStockInResult, type FastStockInCommitLineResult, type FastStockInCommitSettled } from '../../api/inventoryWriteTransport.ts'
+import { getProductFilters, searchProducts } from '../../api/methods.ts'
 import { readWorkDraft, scheduleWorkDraftWrite, clearWorkDraft, flushPendingWorkDraft, writeWorkDraft, scopedWorkDraftKey } from '../../utils/workDrafts.ts'
 import { createClientRequestId } from '../../api/requestIds.ts'
 import { stockFailureText, stockLineNeedsRemoval } from '../../utils/stockAdjustOutcome.ts'
 import { lazyRetry } from '../../utils/lazyImport.ts'
-import ConfirmDialog, { type ConfirmReviewItem } from '../shared/ConfirmDialog.tsx'
-import { batchDisplayLabel, lotCodeAsDate } from '../../utils/batchLabel.ts'
-import { dateToBatchCode } from '../../utils/batchCode.ts'
+import { batchDisplayLabel, formatBatchReceivedDate, lotCodeAsDate } from '../../utils/batchLabel.ts'
 import { todayStr } from '../../utils/dateHelpers.ts'
 import { buildProductGroups, type ProductGroup, type ProductRecord } from '../../utils/productGrouping.ts'
+import { extractHistoryResultId } from '../../utils/historyHelpers.ts'
 import ProductOptionSheet from '../shared/ProductOptionSheet.tsx'
-import { adjustBranchQuantity, scopedSetPreview, stockReceiptGateCode, STOCK_RECEIPT_GATE_FALLBACKS, STOCK_RECEIPT_GATE_KEYS, type StockSetScope } from '../../utils/stockReceiptFields.ts'
-import InfoHint from '../shared/InfoHint.tsx'
-import StockReasonField from '../shared/StockReasonField.tsx'
-import { useSavedStockReasons } from '../../utils/useSavedStockReasons.ts'
+import { adjustBranchQuantity, STOCK_RECEIPT_GATE_FALLBACKS, STOCK_RECEIPT_GATE_KEYS } from '../../utils/stockReceiptFields.ts'
+import { useSavedStockReasonCatalog } from '../../utils/useSavedStockReasons.ts'
 import { stockLineReason } from '../../utils/stockLineReason.ts'
 import { findSessionProductDuplicate } from '../../utils/createProductsSession.ts'
 import UnsavedChangesPrompt from '../shared/UnsavedChangesPrompt.tsx'
 import { useCloseGuard } from '../../utils/useCloseGuard.ts'
 import { stableSnapshot } from '../../utils/formDirty.ts'
+import {
+  applyPaidToLines,
+  buildStockLineRequest,
+  catalogCostOf,
+  commitSessionBlock,
+  defaultLotChoice,
+  emptyStockSessionDraft,
+  lineEntryRefusal,
+  lineNeedsCreate,
+  modeSwitchBlocked,
+  normalizeStockSessionDraft,
+  openingDraft,
+  paymentDifference,
+  paymentStepRefusal,
+  resetLineCosts,
+  resolveOpeningMode,
+  reviewStockLine,
+  scopedSetPreviewForLot,
+  sessionItemsTotal,
+  sessionLotChoices,
+  sessionSteps,
+  STOCK_SESSION_FAILURE_KEYS,
+  type LineEntryRefusal,
+  type LotChoice,
+  type StockMode,
+  type StockSessionDraft,
+  type StockSessionLine,
+  type StockSessionProduct,
+  type StockSessionStep,
+} from '../../utils/stockSessionDraft.ts'
+import { convertLegacyStockDraft, type LegacyStockDraft } from '../../utils/legacyStockDrafts.ts'
+import StockSessionHeader, { StockSessionSteps, STOCK_MODE_KEYS } from '../stock-session/StockSessionHeader.tsx'
+import StockSessionSharedDetails from '../stock-session/StockSessionSharedDetails.tsx'
+import StockSessionLineEntry from '../stock-session/StockSessionLineEntry.tsx'
+import StockSessionItems from '../stock-session/StockSessionItems.tsx'
+import StockSessionPaymentStep from '../stock-session/StockSessionPaymentStep.tsx'
+import StockSessionReviewStep from '../stock-session/StockSessionReviewStep.tsx'
+import StockSessionFooter from '../stock-session/StockSessionFooter.tsx'
 
-// Keep product creation inside this receiving flow rather than sending the
-// operator to a separate page. The standard ProductForm and create transport
-// remain the only product-writing path; this modal only keeps the shipment
-// draft alive around that existing flow.
+// New products are made in the standard ProductForm, nested over the session.
 const ProductForm = lazyRetry(() => import('../products/forms/ProductForm'), 'fast-stock-in-create-product-form')
+const StockReasonsManagerModal = lazyRetry(() => import('../shared/StockReasonsManagerModal.tsx'), 'stock-session-reasons-manager')
 
 type TranslationWithFallback = (key: string, fallbackEn?: string, fallbackKm?: string) => string
 
-// N27 (2026-09-06): the one stock-change entry point. The owner asked for the
-// one-by-one Add / Remove / Set modal to be folded into this flow -- "remove
-// the one by one add and do fast stock in... keep the enter and able to
-// choose to switch option remove and set". The mode is chosen once, frozen
-// onto each queued line, and honoured by the write: add goes through the
-// batch-receipt kernel as before; remove and set go through POST
-// /api/inventory/adjust exactly as the one-by-one modal did (a set is
-// converted server-side into the add or remove of the difference).
-export type StockMode = 'add' | 'remove' | 'set'
+export type { StockMode }
+export type ProductCandidate = StockSessionProduct
 
-interface ProductCandidate extends ProductRecord {
-  id: number | string
-  name?: string | null
-  barcode?: string | null
-  stock_quantity?: number | string | null
-  cost_price_usd?: number | string | null
-  cost_price_khr?: number | string | null
-  purchase_price_usd?: number | string | null
-  purchase_price_khr?: number | string | null
-  selling_price_usd?: number | string | null
-  selling_price_khr?: number | string | null
-  wholesale_price_usd?: number | string | null
-  wholesale_price_khr?: number | string | null
-  discount_enabled?: boolean | number | null
-  discount_type?: string | null
-  discount_percent?: number | string | null
-  discount_amount_usd?: number | string | null
-  parent_id?: number | string | null
-  is_group?: boolean | number | null
-  branch_stock?: Array<{ branch_id?: number | string | null; branch_name?: string | null; quantity?: number | string | null }>
-}
-
-interface ReceivedLine {
-  key: string
-  // Migration 0192: the per-line dedup identity the Worker keys its receipt
-  // on. Minted ONCE, in the same tick the line is queued, and persisted
-  // synchronously with it -- never regenerated on retry, because that is
-  // exactly what makes a re-send after a lost response a duplicate stock
-  // movement. Kept stable across an edit too: a refused line has had its
-  // claim released server-side, so the same id retries cleanly, while a line
-  // that really did commit answers 409 idempotency_conflict instead of
-  // silently posting the delta twice.
-  requestId: string
-  // Set when the server answered with a 0192 guard refusal that this line can
-  // never come back from under its own id -- it was already recorded (the
-  // response was simply lost), or it wrote stock and died. Editing and
-  // re-sending would only earn another 409, and minting a fresh id would be
-  // the double-apply this whole guard exists to stop. The only honest way out
-  // is Remove, so the row hides Edit and says so.
-  needsRemoval?: boolean
+export type StockSessionInitialLine = {
   product: ProductCandidate
-  productName: string
   quantity: number
-  unitCost: string
-  // N14-D: frozen with the line, like everything else here -- the declaration
-  // belongs to THIS receipt, not to whatever the form shows when it commits.
-  freeGoods: boolean
-  createPriceVariant: boolean
-  expiryDate: string
-  // The lot this line lands in, frozen when it was queued. 'new' means
-  // create-or-match by the shipment date; a number tops up that exact lot.
-  // Frozen because the picker below re-fetches per product/branch, so the
-  // live batchChoice no longer describes a line once the next one starts.
-  batchChoice: 'new' | number
-  batchLabel: string
-  // Scoped Set (owner, 24 Sep): the selected received date (default) or the
-  // branch total, absorbed by that received date, plus the lot figure the
-  // line was previewed against -- the Worker refuses 409 if it moved since.
-  setScope?: StockSetScope
-  expectedLotQuantity?: number
-  // N27: frozen with the line -- the switch may move on to the next line.
-  mode: StockMode
-  // P3-L2: the operator's reason, frozen with the line and written to its
-  // movement exactly as typed. Blank -> stockLineReason() supplies the
-  // session label the write path carried before (N27 hardcoded it).
-  reason: string
-  // P3-L6: frozen with the line for the same reason. '' is the untagged
-  // default; a tag makes a remove KEEP the units in the product group as a
-  // non-sellable tagged row, and makes an add receive straight into that row
-  // ("Restock with tag") while still recording the supplier purchase.
-  conditionTag: string
-  // True when THIS session created the product (scan -> create), so the queue
-  // can tag New / Existing the way the session receipt does.
-  createdProduct: boolean
-  status: 'queued' | 'saving' | 'saved' | 'error'
-  detail: string
+  mode?: StockMode
+  batchId?: number | null
+  reason?: string
 }
 
 // One line's committed outcome folded into the queue, as a NEW array, so the
-// same value can be written to the draft synchronously and handed to React --
-// a functional setState updater cannot be persisted, because its result does
-// not exist until React decides to render.
+// same value can be written to the draft synchronously and handed to React.
 function applyLineOutcome(
-  lines: ReceivedLine[],
+  lines: StockSessionLine[],
   key: string,
-  outcome: { status: ReceivedLine['status']; detail?: string; needsRemoval?: boolean },
-): ReceivedLine[] {
+  outcome: { status: StockSessionLine['status']; detail?: string; needsRemoval?: boolean },
+): StockSessionLine[] {
   return lines.map((line) => (line.key === key ? { ...line, ...outcome } : line))
 }
 
@@ -156,63 +103,31 @@ interface FastStockInModalProps {
   notify: (message: string, kind?: string) => void
   onClose: () => void
   onDone: () => void
-  // F3 slice 2: park this shipment as a chip; the draft (slice 1) already
-  // holds everything, so minimize is just "close without finishing".
+  // Park the session as a chip; the draft already holds everything.
   onMinimize?: (label: string) => void
-  initialHeader?: Partial<Pick<FastStockInDraft, 'branchId' | 'receivedDate' | 'supplier' | 'paymentStatus' | 'creditDueDate'>>
-  // N27: which way the switch starts (the Adjust menu's Add / Remove /
-  // Adjust quantity entries). A saved draft's own mode wins over it.
+  initialHeader?: Partial<Pick<StockSessionDraft, 'branchId' | 'receivedDate' | 'supplier' | 'paymentStatus' | 'creditDueDate'>>
   initialMode?: StockMode
   exchangeRate?: number
+  /** Product detail / Branches row: the product already in the entry row. */
+  initialProduct?: ProductCandidate | null
+  /** Products select mode: the selected products queued as Items. */
+  initialLines?: StockSessionInitialLine[]
+  /** Products page: uploads the new product's images and returns the payload to hold. */
+  onPrepareProduct?: (payload: Record<string, unknown>) => Promise<Record<string, unknown>>
+  brandOptions?: string[]
+  canCreateProducts?: boolean
+  /** A chip parked by a retired stock surface (utils/legacyStockDrafts.ts). */
+  legacyDraft?: LegacyStockDraft | null
 }
 
-// F3 slice 1: the batch-in flow persists like add-product does -- the
-// shipment header, in-progress line, and queued lines survive navigation/
-// reload via the shared store.
-
-type FastStockInDraft = {
-  sessionId?: number
-  mode?: StockMode
-  conditionTag?: string
-  createdProductIds?: string[]
-  branchId: string
-  receivedDate: string
-  supplier: SupplierChoice
-  paymentStatus: 'paid' | 'credit'
-  creditDueDate: string
-  query: string
-  picked: ProductCandidate | null
-  quantity: string
-  unitCost: string
-  freeGoods?: boolean
-  createPriceVariant?: boolean
-  expiryDate: string
-  reason?: string
-  batchChoice?: 'new' | number
-  lines?: ReceivedLine[]
-  // Only set by a camera/scan-button result. Typed text must not turn every
-  // empty suggestion list into a prompt to create a new catalog record.
-  scannedBarcode?: string
-}
-
-type FastStockInCloseState = Pick<FastStockInDraft,
-  'mode' | 'conditionTag' | 'createdProductIds' | 'branchId' | 'receivedDate' | 'supplier' |
-  'paymentStatus' | 'creditDueDate' | 'query' | 'picked' | 'quantity' |
-  'unitCost' | 'freeGoods' | 'createPriceVariant' | 'expiryDate' | 'reason' | 'batchChoice' |
-  'lines' | 'scannedBarcode'>
+type FastStockInCloseState = Partial<StockSessionDraft> & Record<string, unknown>
 
 export function fastStockInHasUnsavedWork(current: FastStockInCloseState, pristine: FastStockInCloseState): boolean {
   return stableSnapshot(current) !== stableSnapshot(pristine)
 }
 
 type LookupOption = { id: number | string; name: string }
-type CreateProductResult = {
-  success?: boolean
-  pending?: boolean
-  error?: string
-  id?: number | string
-  item?: ProductCandidate
-}
+type CreateProductResult = { success?: boolean; pending?: boolean; error?: string; id?: number | string; item?: ProductCandidate }
 
 function normalizeLookupOptions(value: unknown): LookupOption[] {
   if (!Array.isArray(value)) return []
@@ -224,168 +139,199 @@ function normalizeLookupOptions(value: unknown): LookupOption[] {
   })
 }
 
-export default function FastStockInModal({ branchOptions, defaultBranchId, tr, notify, onClose, onDone, onMinimize, initialHeader, initialMode, exchangeRate: exchangeRateOverride }: FastStockInModalProps) {
-  // The rate and symbols come from Settings through the app context, like
-  // every other price surface; every host (Inventory, Stock Change, the
-  // stock-in session "add more", a minimized restore) gets them unasked.
+const brandKey = (value: unknown): string => String(value ?? '').trim().replace(/\s+/g, ' ').toLowerCase()
+
+function productMatchesBrand(product: ProductCandidate, brand: string): boolean {
+  const wanted = brandKey(brand)
+  if (!wanted) return true
+  const listed = Array.isArray(product.brands) ? product.brands : []
+  return [product.brand, ...listed].flatMap((value) => String(value ?? '').split(',')).some((value) => brandKey(value) === wanted)
+}
+
+// Draft storage must not carry inline images; without a host uploader they are dropped.
+function withoutInlineImages(payload: Record<string, unknown>): Record<string, unknown> {
+  const isInline = (value: unknown) => typeof value === 'string' && value.startsWith('data:')
+  const gallery = Array.isArray(payload.image_gallery) ? payload.image_gallery.filter((entry) => !isInline(entry)) : payload.image_gallery
+  return { ...payload, image_gallery: gallery, image_path: isInline(payload.image_path) ? (Array.isArray(gallery) ? gallery[0] || null : null) : payload.image_path }
+}
+
+const priceText = (value: unknown): string => (value == null || String(value).trim() === '' ? '' : String(Number(value)))
+
+export default function FastStockInModal({
+  branchOptions, defaultBranchId, tr, notify, onClose, onDone, onMinimize, initialHeader, initialMode,
+  exchangeRate: exchangeRateOverride, initialProduct, initialLines, onPrepareProduct, brandOptions, canCreateProducts, legacyDraft,
+}: FastStockInModalProps) {
   const app = useApp() as { user: any; exchangeRate: number; usdSymbol: string; khrSymbol: string }
   const { user, usdSymbol, khrSymbol } = app
   const exchangeRate = exchangeRateOverride ?? app.exchangeRate
   const canViewCosts = canViewAcquisitionCosts(user)
   const canEditCosts = canEditAcquisitionCosts(user)
-  // This modal only receives the fallback-aware tr(); DateEntryInput wants a
-  // bare pack lookup, so adapt rather than duplicate its strings.
+  const permissions = effectivePermissions(user)
+  const canEditPrice = permissions.getPermissionTier('products') === 'full' && permissions.can('products', 'edit')
+  const canReceive = permissions.can('inventory', 'adjust')
+  const canCreate = (canCreateProducts ?? true) && permissions.can('products', 'add')
   const packLookup = (key: string): string | undefined => tr(key, '') || undefined
   const fastStockInDraftKey = scopedWorkDraftKey('fast_stockin')
-  // ---- shipment header (entered once, applies to every line) ----
-  const draftRef = useRef<FastStockInDraft | null>(readWorkDraft<FastStockInDraft>(fastStockInDraftKey)?.data ?? null)
-  const draft = draftRef.current
-  const pristineCloseStateRef = useRef<FastStockInCloseState>({
-    mode: initialMode || 'add',
-    conditionTag: '',
-    createdProductIds: [],
-    branchId: String(initialHeader?.branchId || (defaultBranchId != null ? defaultBranchId : (branchOptions[0]?.value || ''))),
-    receivedDate: initialHeader?.receivedDate || todayStr(),
-    supplier: initialHeader?.supplier || { supplierId: null, supplierName: '' },
-    paymentStatus: initialHeader?.paymentStatus || 'paid',
-    creditDueDate: initialHeader?.creditDueDate || '',
-    query: '',
-    picked: null,
-    quantity: '1',
-    unitCost: '',
-    freeGoods: false,
-    createPriceVariant: false,
-    expiryDate: '',
-    reason: '',
-    batchChoice: 'new',
-    lines: [],
-    scannedBarcode: '',
-  })
-  const [branchId, setBranchId] = useState<string>(draft?.branchId || initialHeader?.branchId || (defaultBranchId != null ? String(defaultBranchId) : (branchOptions[0]?.value || '')))
-  // Received date defaults to TODAY (business day) rather than empty (user,
-  // Sep 3 2026): nearly every fast stock-in is for stock that just arrived,
-  // so the date the batch code derives from should already be filled in and
-  // the cashier only edits it for a late-entered delivery.
-  const [receivedDate, setReceivedDate] = useState<string>(draft?.receivedDate || initialHeader?.receivedDate || todayStr())
-  const [supplier, setSupplier] = useState<SupplierChoice>(draft?.supplier || initialHeader?.supplier || { supplierId: null, supplierName: '' })
-  const [paymentStatus, setPaymentStatus] = useState<'paid' | 'credit'>(draft?.paymentStatus || initialHeader?.paymentStatus || 'paid')
-  const [creditDueDate, setCreditDueDate] = useState(draft?.creditDueDate || initialHeader?.creditDueDate || '')
-  // N27: add / remove / set. Per line once queued; this is the switch for the
-  // NEXT line.
-  const [mode, setMode] = useState<StockMode>(draft?.mode || initialMode || 'add')
-  const [conditionTag, setConditionTag] = useState<string>(draft?.conditionTag || '')
-  // Products this session created (scan -> Create product), so the queue can
-  // say New / Existing with certainty rather than guessing.
-  const [createdProductIds, setCreatedProductIds] = useState<string[]>(draft?.createdProductIds || [])
+  const fallbackBranchId = String(initialHeader?.branchId || (defaultBranchId != null && defaultBranchId !== '' ? defaultBranchId : (branchOptions[0]?.value || '')))
 
-  // ---- per-line entry ----
-  const [query, setQuery] = useState(draft?.query || '')
-  const [candidates, setCandidates] = useState<ProductCandidate[]>([])
-  const [selectedGroup, setSelectedGroup] = useState<ProductGroup | null>(null)
-  const [picked, setPicked] = useState<ProductCandidate | null>(draft?.picked || null)
-  const [quantity, setQuantity] = useState(draft?.quantity || '1')
-  const [protectedUnitCost, setProtectedUnitCost] = useState(draft?.unitCost || '')
-  const [protectedFreeGoods, setProtectedFreeGoods] = useState(Boolean(draft?.freeGoods))
-  const costEntry = useProtectedCostEntry(user?.id, picked?.id, canViewCosts, canEditCosts)
-  const unitCost = String(costEntry.value('unitCost', protectedUnitCost, ''))
-  const freeGoods = Boolean(costEntry.value('freeGoods', protectedFreeGoods, false))
-  const setUnitCost = (next: string) => { costEntry.write('unitCost', next); setProtectedUnitCost(next) }
-  const setFreeGoods = (next: boolean) => { costEntry.write('freeGoods', next); setProtectedFreeGoods(next) }
-  // Retain the persisted field for draft compatibility, but receipt prices
-  // never request a separate product, including old price-variant drafts.
-  const [createPriceVariant, setCreatePriceVariant] = useState(false)
-  const [expiryDate, setExpiryDate] = useState(draft?.expiryDate || '')
-  // P3-L2: sticky across lines like the mode switch -- a damaged-goods removal
-  // of five products is typed once. Frozen onto each line as it queues.
-  const [reason, setReason] = useState(draft?.reason || '')
-  // The same saved-reason catalog the adjust form offers (type 'adjust'); a
-  // failed read leaves the free-text box, never blocks a line.
-  const savedReasons = useSavedStockReasons()
-  const [scannedBarcode, setScannedBarcode] = useState(draft?.scannedBarcode || '')
-  // Deliberately NOT persisted in the draft, same reasoning as
-  // ReceiveBatchModal: a lot id can go stale between sessions (merged,
-  // emptied, deactivated) and 'new' is always a safe default.
-  const [batchChoice, setBatchChoice] = useState<'new' | number>('new')
-  // Selected received date is the default Set scope (owner, 24 Sep).
-  const [setScope, setSetScope] = useState<StockSetScope>('lot')
-  const [batchOptions, setBatchOptions] = useState<ProductBatch[]>([])
-  const [batchLoading, setBatchLoading] = useState(false)
-  const [pendingCommit, setPendingCommit] = useState<ReceivedLine[] | null>(null)
-  const [searchCompleteFor, setSearchCompleteFor] = useState('')
-  const [createBarcode, setCreateBarcode] = useState('')
-  const [createCategories, setCreateCategories] = useState<LookupOption[]>([])
-  const [createUnits, setCreateUnits] = useState<LookupOption[]>([])
-  const [saving, setSaving] = useState(false)
-  // A draft saved before the mode switch existed holds add lines that never
-  // recorded a mode; they stay adds rather than reading as 'changes'. A draft
-  // saved before the per-line dedup id existed holds lines with no requestId,
-  // and those ids are minted HERE -- so they are also WRITTEN BACK here, in the
-  // same tick, rather than riding the 800ms autosave. A crash inside that
-  // window would otherwise reload the very same id-less draft, and the commit
-  // that followed would be unprotected all over again. Lazily, through a ref,
-  // so the ids are minted exactly once per mount.
-  const restoredLinesRef = useRef<ReceivedLine[] | null>(null)
-  if (restoredLinesRef.current === null) {
-    const restored = (draft?.lines || []).map((line) => ({ ...line, mode: line.mode || 'add', reason: line.reason || '', conditionTag: line.conditionTag || '', createdProduct: Boolean(line.createdProduct), requestId: line.requestId || createClientRequestId('stockline') }))
-    restoredLinesRef.current = restored
-    if (draft?.lines?.some((line) => !line.requestId)) {
-      writeWorkDraft<FastStockInDraft>(fastStockInDraftKey, { ...draft, lines: restored })
+  const entryFor = (product: ProductCandidate, mode: StockMode): Partial<StockSessionDraft> => {
+    const cost = catalogCostOf(product)
+    return {
+      query: String(product.name || ''), picked: product, quantity: mode === 'set' ? '' : '1', freeQuantity: '',
+      unitCost: canViewCosts && cost != null ? String(cost) : '', sellingPrice: priceText(product.selling_price_usd),
+      expiryDate: '', batchChoice: mode === 'add' ? 'new' : 'none', createPayload: null, createRequestId: '', scannedBarcode: '',
     }
   }
-  const [received, setReceived] = useState<ReceivedLine[]>(restoredLinesRef.current)
+
+  // Resolved once per mount (S1): the draft, the mode it opens in, and the
+  // pristine snapshot, all from the same resolution.
+  const initRef = useRef<{ draft: StockSessionDraft; pristine: StockSessionDraft; legacyBlocked: string } | null>(null)
+  if (initRef.current === null) {
+    const mintLineId = () => createClientRequestId('stockline')
+    const seed = (mode: StockMode, sessionId: number) => emptyStockSessionDraft({
+      sessionId, mode, branchId: fallbackBranchId, receivedDate: initialHeader?.receivedDate || todayStr(),
+      supplier: initialHeader?.supplier, paymentStatus: initialHeader?.paymentStatus, creditDueDate: initialHeader?.creditDueDate,
+    })
+    let stored: StockSessionDraft | null = null
+    let rewrite = false
+    let legacyBlocked = ''
+    if (legacyDraft) {
+      const converted = convertLegacyStockDraft(legacyDraft, mintLineId)
+      if (converted.draft) { stored = converted.draft; rewrite = true } else legacyBlocked = converted.blocked
+    }
+    if (!stored) {
+      const raw = readWorkDraft<unknown>(fastStockInDraftKey)?.data
+      const rawLines = raw && typeof raw === 'object' ? (raw as { lines?: unknown }).lines : null
+      stored = normalizeStockSessionDraft(raw, mintLineId)
+      // Ids minted for an older draft are written back now, not by the debounced autosave.
+      rewrite = Array.isArray(rawLines) && rawLines.some((line) => !line || typeof line !== 'object' || !(line as { requestId?: unknown }).requestId)
+    }
+    let opened = stored ? openingDraft(stored, initialMode) : seed(resolveOpeningMode(null, initialMode), Date.now())
+    if (!opened.branchId) opened = { ...opened, branchId: fallbackBranchId }
+    let pristine = seed(opened.mode, opened.sessionId)
+    if (initialLines?.length && !opened.lines.length) {
+      const lines: StockSessionLine[] = initialLines.map((entry, index) => {
+        const mode = entry.mode || opened.mode
+        const cost = catalogCostOf(entry.product)
+        return {
+          key: `${entry.product.id}-${Date.now()}-${index}`, requestId: mintLineId(), product: entry.product,
+          productName: String(entry.product.name || `#${entry.product.id}`), mode, quantity: Math.max(0, Math.floor(Number(entry.quantity) || 0)),
+          freeQuantity: 0, unitCost: mode === 'add' && canViewCosts && cost != null ? String(cost) : '',
+          sellingPrice: mode === 'add' ? priceText(entry.product.selling_price_usd) : '', freeGoods: false, expiryDate: '',
+          batchChoice: entry.batchId != null && Number(entry.batchId) > 0 ? Number(entry.batchId) : (mode === 'add' ? 'new' : 'none'),
+          batchLabel: '', ...(mode === 'set' && entry.batchId != null ? { setScope: 'lot' as const } : {}),
+          reason: String(entry.reason || ''), conditionTag: '', createdProduct: false, status: 'queued', detail: '',
+        }
+      })
+      opened = { ...opened, lines }
+      pristine = { ...pristine, lines }
+      rewrite = true
+    }
+    if (initialProduct) {
+      opened = { ...opened, ...entryFor(initialProduct, opened.mode) }
+      if (!stored) pristine = { ...pristine, ...entryFor(initialProduct, opened.mode) }
+    }
+    if (rewrite) writeWorkDraft<StockSessionDraft>(fastStockInDraftKey, opened)
+    initRef.current = { draft: opened, pristine, legacyBlocked }
+  }
+  const init = initRef.current
+
+  // ---- shared (applies to every line) ----
+  const [mode, setModeState] = useState<StockMode>(init.draft.mode)
+  const [step, setStep] = useState<StockSessionStep>(init.draft.step)
+  const [brand, setBrand] = useState(init.draft.brand)
+  const [branchId, setBranchId] = useState(init.draft.branchId)
+  const [receivedDate, setReceivedDate] = useState(init.draft.receivedDate)
+  const [supplier, setSupplier] = useState<SupplierChoice>(init.draft.supplier)
+  const [paymentStatus, setPaymentStatus] = useState(init.draft.paymentStatus)
+  const [creditDueDate, setCreditDueDate] = useState(init.draft.creditDueDate)
+  const [paidAmount, setPaidAmount] = useState(init.draft.paidAmount)
+  const [createdProductIds, setCreatedProductIds] = useState<string[]>(init.draft.createdProductIds)
+
+  // ---- entry row ----
+  const [query, setQuery] = useState(init.draft.query)
+  const [picked, setPicked] = useState<ProductCandidate | null>(init.draft.picked)
+  const [quantity, setQuantity] = useState(init.draft.quantity)
+  const [freeQuantity, setFreeQuantity] = useState(init.draft.freeQuantity)
+  const [protectedUnitCost, setProtectedUnitCost] = useState(init.draft.unitCost)
+  const costEntry = useProtectedCostEntry(user?.id, picked?.id, canViewCosts, canEditCosts)
+  const unitCost = String(costEntry.value('unitCost', protectedUnitCost, ''))
+  const setUnitCost = (next: string) => { costEntry.write('unitCost', next); setProtectedUnitCost(next) }
+  const [sellingPrice, setSellingPrice] = useState(init.draft.sellingPrice)
+  const [expiryDate, setExpiryDate] = useState(init.draft.expiryDate)
+  // Sticky across lines: a five-product damaged removal types its reason and tag once.
+  const [reason, setReason] = useState(init.draft.reason)
+  const [conditionTag, setConditionTag] = useState(init.draft.conditionTag)
+  const [batchChoice, setBatchChoice] = useState<LotChoice>(init.draft.batchChoice)
+  const [createPayload, setCreatePayload] = useState<Record<string, unknown> | null>(init.draft.createPayload)
+  const [createRequestId, setCreateRequestId] = useState(init.draft.createRequestId)
+  // Only set by a camera/scan-button result.
+  const [scannedBarcode, setScannedBarcode] = useState(init.draft.scannedBarcode)
+  const [addAttempted, setAddAttempted] = useState(false)
+  const { reasons: savedReasons, reload: reloadReasons } = useSavedStockReasonCatalog('adjust')
+
+  // ---- the session's lines ----
+  const [received, setReceived] = useState<StockSessionLine[]>(init.draft.lines)
   const [editingKey, setEditingKey] = useState('')
-  const duplicateRows = useMemo(() => received.map((line) => ({
-    ...line,
-    name: line.productName,
-    barcode: line.product.barcode,
-  })), [received])
-  // Set by editLine, consumed by the lot-options effect once that product's
-  // lots have loaded. Without it the effect's own setBatchChoice('new') wins
-  // the race and the reopened line loses the lot it was queued against.
-  const pendingBatchRestoreRef = useRef<'new' | number | null>(draft?.batchChoice ?? null)
+  const [saving, setSaving] = useState(false)
+
+  // ---- transient ----
+  const [candidates, setCandidates] = useState<ProductCandidate[]>([])
+  const [searchCompleteFor, setSearchCompleteFor] = useState('')
+  const [selectedGroup, setSelectedGroup] = useState<ProductGroup | null>(null)
+  const [batchOptions, setBatchOptions] = useState<ProductBatch[]>([])
+  const [lotsLoadedFor, setLotsLoadedFor] = useState('')
+  const [lotsFailed, setLotsFailed] = useState(false)
+  const [createForm, setCreateForm] = useState<{ name: string; barcode: string } | null>(null)
+  const [createCategories, setCreateCategories] = useState<LookupOption[]>([])
+  const [createUnits, setCreateUnits] = useState<LookupOption[]>([])
+  const [reasonsOpen, setReasonsOpen] = useState(false)
+  const [fallbackBrands, setFallbackBrands] = useState<string[] | null>(null)
+  const brandsRequestedRef = useRef(false)
+  const sheetBatchRef = useRef<number | null>(null)
+  // Set by editLine and restore: re-applied once that product's lots have loaded.
+  const pendingBatchRestoreRef = useRef<LotChoice | null>(init.draft.picked ? init.draft.batchChoice : null)
   const searchSeqRef = useRef(0)
-  const sessionIdRef = useRef(draft?.sessionId || Date.now())
+  const sessionIdRef = useRef(init.draft.sessionId)
   const searchInputRef = useRef<HTMLInputElement | null>(null)
   const parentPanelRef = useRef<HTMLDivElement | null>(null)
-  const scannedCreateUnits = useMemo(
-    () => (createUnits.length ? createUnits : [{ id: 'pcs', name: 'pcs' }]),
-    [createUnits],
-  )
-  const scannedCreateBranches = useMemo(
-    () => branchOptions.map((branch) => ({
-      id: branch.value,
-      name: branch.label,
-      is_default: String(branch.value) === String(defaultBranchId || ''),
-    })),
-    [branchOptions, defaultBranchId],
-  )
-  const productsById = useMemo(
-    () => new Map<unknown, ProductRecord>(candidates.map((product) => [product.id, product as ProductRecord])),
-    [candidates],
-  )
-  const candidateGroups = useMemo(
-    () => buildProductGroups(candidates, productsById, { preserveInputOrder: true }),
-    [candidates, productsById],
-  )
-  // The rows the option sheet actually offers for the open group.
-  const selectedGroupChoices = useMemo(
-    () => (selectedGroup ? (selectedGroup.sellableItems.length ? selectedGroup.sellableItems : selectedGroup.items) : []),
-    [selectedGroup],
-  )
 
-  // Autosave the header + in-progress line (debounced, shared cadence).
-  // Deliberately NO dirtyWork registration: with the draft persisting,
-  // leaving is SAFE -- everything is exactly here on reopen -- so the
-  // three-option navigation guard would only nag about work that cannot
-  // be lost.
+  const productIdNumber = Number(picked?.id) > 0 ? Number(picked?.id) : 0
+  const lotsKey = productIdNumber && Number(branchId) > 0 ? `${productIdNumber}:${Number(branchId)}` : ''
+  const lotsReady = !lotsKey || lotsLoadedFor === lotsKey
+  const steps = sessionSteps(mode, received)
+  const pendingLines = received.filter((line) => line.status !== 'saved')
+  const currentStep: StockSessionStep = steps.includes(step) && (step === 'items' || pendingLines.length > 0) ? step : 'items'
+
+  const currentDraft = (lines: StockSessionLine[] = received): StockSessionDraft => ({
+    version: 2, sessionId: sessionIdRef.current, mode, step: currentStep, brand, branchId, receivedDate, supplier,
+    paymentStatus, creditDueDate, paidAmount, query, picked, quantity, freeQuantity, unitCost: protectedUnitCost,
+    sellingPrice, expiryDate, reason, conditionTag, batchChoice, createPayload, createRequestId, scannedBarcode,
+    createdProductIds, lines,
+  })
+
+  // Keystrokes ride the debounced autosave. No dirtyWork registration: with the
+  // draft persisting, leaving is safe -- everything is here on reopen.
+  useEffect(() => scheduleWorkDraftWrite<StockSessionDraft>(fastStockInDraftKey, currentDraft()),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [mode, currentStep, brand, branchId, receivedDate, supplier, paymentStatus, creditDueDate, paidAmount, query, picked, quantity, freeQuantity, protectedUnitCost, sellingPrice, expiryDate, reason, conditionTag, batchChoice, createPayload, createRequestId, scannedBarcode, createdProductIds, received])
+
+  // Facts (a queued line's id, a committed line's status, a created product id)
+  // are written synchronously, before React renders them.
+  const persistSessionDraft = (lines: StockSessionLine[] = received) => {
+    writeWorkDraft<StockSessionDraft>(fastStockInDraftKey, currentDraft(lines))
+  }
+
   useEffect(() => {
-    return scheduleWorkDraftWrite<FastStockInDraft>(fastStockInDraftKey, {
-      sessionId: sessionIdRef.current, mode, conditionTag, createdProductIds,
-      branchId, receivedDate, supplier, paymentStatus, creditDueDate,
-      query, picked, quantity, unitCost: protectedUnitCost, freeGoods: protectedFreeGoods, createPriceVariant, expiryDate, reason, batchChoice, lines: received, scannedBarcode,
-    })
-  }, [branchId, receivedDate, supplier, paymentStatus, creditDueDate, query, picked, quantity, protectedUnitCost, protectedFreeGoods, createPriceVariant, expiryDate, reason, batchChoice, received, scannedBarcode, mode, conditionTag, createdProductIds])
+    if (init.legacyBlocked === 'submission_unknown') notify(tr('stock_request_partially_applied', 'Stock was recorded but the request did not finish. Check the Stock Change ledger, then remove this line.'), 'error')
+    else if (init.legacyBlocked) notify(tr('failed', 'Failed'), 'error')
+    if (!init.draft.picked && typeof window !== 'undefined' && window.matchMedia?.('(pointer: fine)').matches) {
+      window.setTimeout(() => searchInputRef.current?.focus(), 0)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
+  // ---- product search ----
   useEffect(() => {
     const text = query.trim()
     setSearchCompleteFor('')
@@ -393,22 +339,30 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
     const seq = ++searchSeqRef.current
     const timer = window.setTimeout(async () => {
       try {
-        const payload = await searchProducts({ query: text, pageSize: 8, surface: 'inventory' }) as { items?: ProductCandidate[] }
+        const payload = await searchProducts({ query: text, pageSize: brand.trim() ? 20 : 8, surface: 'inventory' }) as { items?: ProductCandidate[] }
         if (seq !== searchSeqRef.current) return
         setCandidates(Array.isArray(payload?.items) ? payload.items : [])
         setSearchCompleteFor(text)
       } catch { /* suggestions only -- typing again retries */ }
     }, 300)
     return () => window.clearTimeout(timer)
-  }, [query, picked, selectedGroup])
+  }, [query, picked, selectedGroup, brand])
+
+  const visibleCandidates = useMemo(() => candidates.filter((candidate) => productMatchesBrand(candidate, brand)), [candidates, brand])
+  const productsById = useMemo(() => new Map<unknown, ProductRecord>(visibleCandidates.map((product) => [product.id, product as ProductRecord])), [visibleCandidates])
+  const candidateGroups = useMemo(() => buildProductGroups(visibleCandidates, productsById, { preserveInputOrder: true }), [visibleCandidates, productsById])
+  const selectedGroupChoices = useMemo(
+    () => (selectedGroup ? (selectedGroup.sellableItems.length ? selectedGroup.sellableItems : selectedGroup.items) : []),
+    [selectedGroup],
+  )
 
   useEffect(() => {
     const panel = parentPanelRef.current
-    if (!panel || !selectedGroup) return
+    if (!panel || (!selectedGroup && !reasonsOpen)) return
     panel.setAttribute('inert', '')
     panel.setAttribute('aria-hidden', 'true')
     return () => { panel.removeAttribute('inert'); panel.removeAttribute('aria-hidden') }
-  }, [selectedGroup])
+  }, [selectedGroup, reasonsOpen])
 
   useEffect(() => {
     if (!selectedGroup) return
@@ -422,95 +376,161 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
     return () => window.removeEventListener('keydown', onEscape, true)
   })
 
-  // The same lot list every other add-stock surface shows, scoped to the
-  // picked product and this shipment's branch. Mirrors ReceiveBatchModal's
-  // effect exactly, including onlyAvailable=false: topping an empty lot back
-  // up is a normal receipt, so empty lots must stay selectable.
+  // ---- received dates (lots) of the picked product at the session branch ----
   useEffect(() => {
-    const productId = Number(picked?.id)
-    const parsedBranchId = Number(branchId)
-    setBatchChoice('new')
-    if (!productId || !parsedBranchId) { setBatchOptions([]); pendingBatchRestoreRef.current = null; return }
+    if (!lotsKey) { setBatchOptions([]); setLotsFailed(false); setLotsLoadedFor(''); return }
     let cancelled = false
-    setBatchLoading(true)
-    getProductBatches(productId, parsedBranchId, false)
+    getProductBatches(productIdNumber, Number(branchId), false)
       .then((res) => {
         if (cancelled) return
         const lots = res?.batches || []
         setBatchOptions(lots)
-        // Re-apply a lot the operator had already chosen for this line, but
-        // only while it still exists here -- otherwise leave 'new'.
+        setLotsFailed(false)
+        setLotsLoadedFor(lotsKey)
         const restore = pendingBatchRestoreRef.current
         pendingBatchRestoreRef.current = null
-        if (typeof restore === 'number' && lots.some((lot) => Number(lot.id) === restore)) setBatchChoice(restore)
+        const choices = mode === 'add' ? lots : sessionLotChoices(mode, lots, supplier)
+        if (typeof restore === 'number' && choices.some((lot) => Number(lot.id) === restore)) setBatchChoice(restore)
+        else if (restore === 'new' && mode === 'add') setBatchChoice('new')
+        else setBatchChoice(defaultLotChoice({ mode, choices, sheetBatchId: sheetBatchRef.current, sharedDate: receivedDate }))
+        sheetBatchRef.current = null
       })
       .catch((error: unknown) => {
-        // The transport rejects rather than resolving empty, precisely so a
-        // failed read can never read as "this product has no lots".
+        // A failed read must never read as "this product has no lots".
         if (cancelled) return
         console.error('[FastStockInModal] batch options load failed:', error)
         setBatchOptions([])
+        setLotsFailed(true)
+        setLotsLoadedFor(lotsKey)
       })
-      .finally(() => { if (!cancelled) setBatchLoading(false) })
     return () => { cancelled = true }
-  }, [picked?.id, branchId])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lotsKey])
 
-  // ProductForm needs the same lookup data as the normal catalog-create
-  // surface. Fetch it only when a real unmatched scan asks to create; empty
-  // arrays are safe while it loads because ProductForm has its normal `pcs`
-  // fallback and the backend remains the authority for identity validation.
+  const lotChoices = useMemo(() => (mode === 'add' ? batchOptions : sessionLotChoices(mode, batchOptions, supplier)), [mode, batchOptions, supplier])
+  // The shared Supplier narrows Remove/Set lots; a lot it filters out is not kept.
   useEffect(() => {
-    if (!createBarcode) return
-    let cancelled = false
-    void Promise.all([
-      import('../../api/lookupTransport.ts').then(({ getCategories }) => getCategories()),
-      import('../../api/lookupTransport.ts').then(({ getUnits }) => getUnits()),
-    ]).then(([categories, units]) => {
-      if (cancelled) return
-      setCreateCategories(normalizeLookupOptions(categories))
-      setCreateUnits(normalizeLookupOptions(units))
-    }).catch(() => {
-      // The form remains usable with its normal fallback unit; lookup reads
-      // are a convenience, not a reason to discard this stock-in session.
-    })
-    return () => { cancelled = true }
-  }, [createBarcode])
+    if (!lotsReady || !lotsKey || mode === 'add') return
+    const valid = typeof batchChoice === 'number' ? lotChoices.some((lot) => Number(lot.id) === batchChoice) : (batchChoice === 'none' && !lotChoices.length)
+    if (!valid) setBatchChoice(defaultLotChoice({ mode, choices: lotChoices, sharedDate: receivedDate }))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lotChoices, lotsReady])
 
-  // The refusal the Add button would produce, read from the SAME kernel that
-  // produces it (stockReceiptGateCode, below in addLine) rather than a second
-  // hand-written condition that can drift away from it. A primary control that
-  // cannot proceed must say why, next to itself, before the click -- a catalog
-  // cost prefetched as 0 otherwise makes the default Add path a guaranteed
-  // refusal with nothing on screen pointing at the box that clears it.
-  const pendingReceiptGate = mode === 'add' ? stockReceiptGateCode({
-    isStockIn: true,
-    supplierName: supplier.supplierName,
-    unitCostUsd: unitCost,
-    freeGoods,
-  }) : ''
-  const zeroCostNeedsDeclaration = pendingReceiptGate === 'free_goods_required'
+  useEffect(() => {
+    if (!createForm) return
+    let cancelled = false
+    void import('../../api/lookupTransport.ts').then(({ getCategories, getUnits }) => Promise.all([getCategories(), getUnits()]))
+      .then(([categories, units]) => {
+        if (cancelled) return
+        setCreateCategories(normalizeLookupOptions(categories))
+        setCreateUnits(normalizeLookupOptions(units))
+      })
+      .catch(() => { /* ProductForm keeps its own unit fallback */ })
+    return () => { cancelled = true }
+  }, [createForm])
+
+  const ensureBrands = () => {
+    if (brandOptions || brandsRequestedRef.current) return
+    brandsRequestedRef.current = true
+    void getProductFilters({})
+      .then((payload) => {
+        const rows = (payload as { brands?: unknown[] } | null)?.brands
+        setFallbackBrands(Array.isArray(rows) ? rows.map((value) => String(value || '').trim()).filter(Boolean) : [])
+      })
+      .catch(() => { brandsRequestedRef.current = false })
+  }
+
+  // ---- entry row ----
+  const branchQuantity = picked ? adjustBranchQuantity(picked.branch_stock, branchId, picked.stock_quantity) : 0
+  const chosenLot = typeof batchChoice === 'number' ? batchOptions.find((lot) => Number(lot.id) === batchChoice) || null : null
+  const setPreview = mode === 'set' && chosenLot ? scopedSetPreviewForLot(quantity, chosenLot, branchQuantity) : null
+  // Loss rule (24 Sep): only a Set that LOWERS the received date may be tagged.
+  const setLowers = Boolean(setPreview?.valid && setPreview.delta < 0)
+  const duplicateRows = useMemo(() => received.map((line) => ({ ...line, name: line.productName, barcode: line.product.barcode })), [received])
+
+  let refusal: LineEntryRefusal | null = lineEntryRefusal({
+    mode, hasProduct: Boolean(picked), branchId, quantity, freeQuantity, unitCost, supplierName: supplier.supplierName,
+    lotChoice: batchChoice, lot: chosenLot, canReceive, canEditCosts, branchQuantity,
+  })
+  if (!refusal && picked && lotsKey && !lotsReady) refusal = { key: 'loading', fallback: 'Loading...', field: 'lot' }
+  if (!refusal && picked && lotsKey && lotsFailed) refusal = { key: 'load_failed', fallback: 'Failed to load', field: 'lot' }
+  if (!refusal && picked && mode === 'set' && batchChoice === 'none' && Number(quantity) > branchQuantity) {
+    // Without a dated lot a Set can only lower the branch; raising is a receipt (Add).
+    refusal = { key: 'no_batches_for_branch', fallback: 'No received dates for this branch', field: 'lot' }
+  }
+  const refusalMessage = refusal
+    ? (refusal.gate
+      ? tr(STOCK_RECEIPT_GATE_KEYS[refusal.gate], STOCK_RECEIPT_GATE_FALLBACKS[refusal.gate])
+      : Object.entries(refusal.params || {}).reduce((text, [name, value]) => text.replace(`{${name}}`, String(value)), tr(refusal.key, refusal.fallback)))
+    : ''
+  // Ring a control for the receipt gate (it names the control to fix) or after a refused Add.
+  const invalidField = refusal && (addAttempted || (picked && refusal.gate)) ? refusal.field : null
+
+  const resetLine = () => {
+    setPicked(null)
+    setQuery('')
+    setQuantity(mode === 'set' ? '' : '1')
+    setFreeQuantity('')
+    setUnitCost('')
+    setSellingPrice('')
+    setExpiryDate('')
+    setScannedBarcode('')
+    setCreatePayload(null)
+    setCreateRequestId('')
+    setAddAttempted(false)
+    pendingBatchRestoreRef.current = null
+    setBatchChoice(mode === 'add' ? 'new' : 'none')
+    window.setTimeout(() => searchInputRef.current?.focus(), 0)
+  }
+
+  const applyEntry = (entry: Partial<StockSessionDraft>) => {
+    if (entry.picked !== undefined) setPicked(entry.picked)
+    if (entry.query !== undefined) setQuery(entry.query)
+    if (entry.quantity !== undefined) setQuantity(entry.quantity)
+    if (entry.freeQuantity !== undefined) setFreeQuantity(entry.freeQuantity)
+    if (entry.unitCost !== undefined) setUnitCost(entry.unitCost)
+    if (entry.sellingPrice !== undefined) setSellingPrice(entry.sellingPrice)
+    if (entry.expiryDate !== undefined) setExpiryDate(entry.expiryDate)
+    if (entry.createPayload !== undefined) setCreatePayload(entry.createPayload)
+    if (entry.createRequestId !== undefined) setCreateRequestId(entry.createRequestId)
+    if (entry.scannedBarcode !== undefined) setScannedBarcode(entry.scannedBarcode)
+    setAddAttempted(false)
+  }
+
+  function editLine(line: StockSessionLine) {
+    if (saving || line.status === 'saved' || line.needsRemoval) return
+    setEditingKey(line.key)
+    if (line.mode !== mode) setModeState(line.mode)
+    applyEntry({
+      picked: line.product, query: line.productName, quantity: String(line.quantity),
+      freeQuantity: line.freeQuantity > 0 ? String(line.freeQuantity) : '', unitCost: canViewCosts ? line.unitCost : '',
+      sellingPrice: line.sellingPrice, expiryDate: line.expiryDate, createPayload: line.createPayload || null,
+      createRequestId: line.createRequestId || '', scannedBarcode: '',
+    })
+    setReason(line.reason)
+    setConditionTag(line.conditionTag || '')
+    // Parked: the lots effect is about to re-key on this product.
+    pendingBatchRestoreRef.current = line.batchChoice
+    setBatchChoice(line.batchChoice)
+    setStep('items')
+  }
 
   const pick = (candidate: ProductCandidate) => {
     const duplicate = findSessionProductDuplicate(duplicateRows, candidate, editingKey)
     if (duplicate) {
       notify(tr('create_products_session_duplicate', 'Duplicate: You added this item already.'), 'error')
-      if (duplicate.row.status !== 'saved') editLine(duplicate.row)
+      if (duplicate.row.status !== 'saved') editLine(duplicate.row as unknown as StockSessionLine)
       return
     }
-    setPicked(candidate)
     setCandidates([])
-    setQuery(String(candidate.name || ''))
-    // A catalog cost of zero is a known value (free goods), not an unknown
-    // value. Keep the canonical cost field first, with the legacy purchase
-    // field as a compatibility fallback for older products.
-    const rawCost = candidate.cost_price_usd != null
-      ? candidate.cost_price_usd
-      : candidate.purchase_price_usd
-    const cost = Number(rawCost)
-    if (canViewCosts && rawCost != null && Number.isFinite(cost) && cost >= 0) setUnitCost(String(cost))
-    else setUnitCost('')
-    setCreatePriceVariant(false)
-    setScannedBarcode('')
+    applyEntry(entryFor(candidate, mode))
+    // Same product re-picked: the lots are already here, so apply the sheet's date now.
+    if (lotsKey && Number(candidate.id) === productIdNumber && lotsReady) {
+      setBatchChoice(defaultLotChoice({ mode, choices: lotChoices, sheetBatchId: sheetBatchRef.current, sharedDate: receivedDate }))
+      sheetBatchRef.current = null
+    } else {
+      setBatchChoice(mode === 'add' ? 'new' : 'none')
+    }
   }
 
   function closeCandidateOptions() {
@@ -518,201 +538,88 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
     window.setTimeout(() => searchInputRef.current?.focus(), 0)
   }
 
-  const pickFromGroup = (candidate: ProductCandidate, selection?: { branchId?: string | null }) => {
+  // S3: the option sheet's branch fills the shared Branch, its received date the line's.
+  const pickFromGroup = (candidate: ProductCandidate, selection?: { branchId?: string | null; batch?: { batchId?: number } }) => {
+    sheetBatchRef.current = selection?.batch?.batchId != null ? Number(selection.batch.batchId) : null
+    if (selection?.branchId != null && String(selection.branchId) !== String(branchId)) setBranchId(String(selection.branchId))
     pick(candidate)
-    // The branch the sheet resolved is the one whose count the operator was
-    // reading; carry it onto the line rather than silently re-deriving one.
-    if (selection?.branchId != null) setBranchId(String(selection.branchId))
     closeCandidateOptions()
   }
 
-  const resetLine = () => {
-    setPicked(null)
-    setQuery('')
-    setQuantity('1')
-    setUnitCost('')
-    setFreeGoods(false)
-    setCreatePriceVariant(false)
-    setExpiryDate('')
-    setScannedBarcode('')
-    pendingBatchRestoreRef.current = null
-    setBatchChoice('new')
-    window.setTimeout(() => searchInputRef.current?.focus(), 0)
+  const changeMode = (next: StockMode) => {
+    if (saving || modeSwitchBlocked(received) || next === mode) return
+    setModeState(next)
+    setStep('items')
+    setQuantity(next === 'set' ? '' : '1')
+    setFreeQuantity('')
+    setConditionTag('')
+    setAddAttempted(false)
+    setEditingKey('')
+    if (next !== 'add' && createPayload) resetLine()
+    const choices = next === 'add' ? batchOptions : sessionLotChoices(next, batchOptions, supplier)
+    setBatchChoice(lotsReady && lotsKey ? defaultLotChoice({ mode: next, choices, sharedDate: receivedDate }) : (next === 'add' ? 'new' : 'none'))
   }
 
-  // The SYNCHRONOUS draft write. The autosave effect above is debounced by
-  // 800ms, which is fine for keystrokes and wrong for facts: a queued line
-  // carries the dedup id its retry depends on, and a committed line carries
-  // the "saved" status that stops it being re-sent. A render crash (the POS
-  // defect: Chrome Translate mangling the DOM into a React removeChild
-  // error) or a killed tab between setState and the debounce loses both, and
-  // the operator retries a line the server already applied. So every
-  // state-changing FACT is written here first, in the same tick, and only
-  // then handed to React.
-  const persistSessionDraft = (lines: ReceivedLine[] = received) => {
-    writeWorkDraft<FastStockInDraft>(fastStockInDraftKey, {
-      sessionId: sessionIdRef.current,
-      mode, conditionTag, createdProductIds, branchId, receivedDate, supplier, paymentStatus, creditDueDate,
-      query, picked, quantity, unitCost: protectedUnitCost, freeGoods: protectedFreeGoods, createPriceVariant, expiryDate, reason, batchChoice, lines, scannedBarcode,
-    })
+  const lotLabelFor = (choice: LotChoice): string => {
+    if (choice === 'new') return formatBatchReceivedDate(receivedDate) || tr('new_batch', '+ New received date')
+    if (choice === 'none') return tr('stock_set_branch_total', 'Branch total')
+    const lot = batchOptions.find((entry) => Number(entry.id) === choice)
+    return lot ? batchDisplayLabel(lot, tr('batch', 'Received date')) : ''
   }
-
-  const openCreateForUnknownScan = () => {
-    const barcode = scannedBarcode.trim()
-    if (!barcode || barcode !== query.trim() || searchCompleteFor !== barcode || candidates.length) return
-    // Write synchronously before replacing the receiver UI with ProductForm.
-    // Cancelling that form returns here with the in-memory state too; this
-    // write additionally protects the session against a navigation/reload.
-    persistSessionDraft()
-    setCreateBarcode(barcode)
-  }
-
-  const createProductForScannedBarcode = async (payload: Record<string, unknown> = {}) => {
-    const { createProduct } = await import('../../api/productWriteTransport.ts')
-    const result = await createProduct({ ...payload, barcode: createBarcode, branch_id: branchId, stock_quantity: 0 }) as CreateProductResult
-    if (result?.success === false) throw new Error(result.error || tr('failed', 'Failed to create product'))
-    if (result?.pending) {
-      throw new Error(tr('product_creation_pending_review', 'Product creation is pending review and cannot be added to this stock-in session yet.'))
-    }
-    const item = result?.item
-    const productId = item?.id ?? result?.id
-    if (productId == null || productId === '') throw new Error(tr('failed', 'Created product could not be loaded'))
-    setCreatedProductIds((prev) => [...prev, String(productId)])
-    const created: ProductCandidate = {
-      ...(item || {}),
-      ...payload,
-      id: productId,
-      name: String(item?.name || payload.name || ''),
-      barcode: String(item?.barcode || createBarcode),
-    }
-    pick(created)
-    notify(tr('product_created_continue_stockin', 'Product created. Continue adding it to this stock-in session.'))
-  }
-
-  // Remove and Set name an EXISTING received date -- no FIFO or New default.
-  // Remove offers only lots with stock; Set offers every lot at the branch.
-  const lotChoices = mode === 'remove' ? batchOptions.filter((batch) => Number(batch.quantity) > 0) : batchOptions
-  const chosenOption = typeof batchChoice === 'number' ? lotChoices.find((batch) => Number(batch.id) === batchChoice) || null : null
-  const pickedBranchKnown = Array.isArray(picked?.branch_stock)
-  const fastSetPreview = mode === 'set' && chosenOption && (setScope === 'lot' || pickedBranchKnown)
-    ? scopedSetPreview({
-        scope: setScope, targetQuantity: Number(quantity), lotQuantity: chosenOption.quantity,
-        branchQuantity: pickedBranchKnown ? adjustBranchQuantity(picked?.branch_stock, branchId, 0) : 0,
-      })
-    : null
-  // Loss rule (24 Sep): only a Set that LOWERS the received date may be tagged.
-  const fastSetLowers = Boolean(fastSetPreview?.valid && fastSetPreview.delta < 0)
 
   const addLine = () => {
     if (saving) return
-    const rawQuantity = quantity.trim()
-    const qty = Math.floor(Number(rawQuantity)) || 0
-    if (!picked) { notify(tr('fast_stockin_pick_product', 'Pick a product first'), 'error'); return }
+    if (refusal || !picked) {
+      setAddAttempted(true)
+      notify(refusalMessage || tr('fast_stockin_pick_product', 'Pick a product first'), 'error')
+      return
+    }
     const duplicate = findSessionProductDuplicate(duplicateRows, picked, editingKey)
     if (duplicate) {
       notify(tr('create_products_session_duplicate', 'Duplicate: You added this item already.'), 'error')
-      if (duplicate.row.status !== 'saved') editLine(duplicate.row)
+      if (duplicate.row.status !== 'saved') editLine(duplicate.row as unknown as StockSessionLine)
       return
     }
-    if (!branchId) { notify(tr('fast_stockin_pick_branch', 'Pick a branch'), 'error'); return }
-    // N27: an add and a remove are MOVEMENTS -- zero moves nothing. A set is a
-    // TARGET, and zero is a number an operator counts: the last one sold, a
-    // branch being emptied. The route enforces the same split
-    // (routes/inventory.ts: `type === 'set' ? !(quantity >= 0) : !(quantity > 0)`),
-    // so this is the same rule read early, not a second one.
-    if (qty <= 0 && mode !== 'set') { notify(tr('fast_stockin_qty', 'Quantity must be at least 1'), 'error'); return }
-    // An empty box must not queue "set to 0" by accident -- `Number('')` is 0 --
-    // and a branch cannot hold less than nothing.
-    if (mode === 'set' && (!rawQuantity || qty < 0)) { notify(tr('fast_stockin_set_qty', 'Quantity must be 0 or more'), 'error'); return }
-    if (mode !== 'add' && !chosenOption) { notify(tr('select_batch_required', 'Select a received date first'), 'error'); return }
-    if (mode === 'remove' && chosenOption && qty > Number(chosenOption.quantity)) {
-      notify(`Cannot remove ${qty} - only ${chosenOption.quantity} available in the selected received date`, 'error'); return
+    const qty = Math.floor(Number(quantity.trim() || 0)) || 0
+    const free = mode === 'add' ? Math.floor(Number(freeQuantity.trim() || 0)) || 0 : 0
+    const fullyFree = mode === 'add' && qty === 0 && free > 0
+    const lineCost = mode !== 'add' ? '' : fullyFree ? '0' : unitCost.trim()
+    const linePrice = mode === 'add' ? sellingPrice.trim() : ''
+    // A product made in this session is created with the price and cost the line shows.
+    const heldPayload = createPayload ? {
+      ...createPayload,
+      ...(linePrice !== '' ? { selling_price_usd: Number(linePrice) } : {}),
+      ...(canEditCosts && lineCost !== '' && !fullyFree ? { cost_price_usd: Number(lineCost) } : {}),
+    } : null
+    const product: ProductCandidate = heldPayload && linePrice !== '' ? { ...picked, selling_price_usd: Number(linePrice) } : picked
+    const next: StockSessionLine = {
+      key: editingKey || `${picked.id || 'new'}-${Date.now()}`,
+      requestId: (editingKey ? received.find((line) => line.key === editingKey)?.requestId : '') || createClientRequestId('stockline'),
+      product,
+      productName: String(picked.name || `#${picked.id}`),
+      mode,
+      quantity: qty,
+      freeQuantity: free,
+      unitCost: lineCost,
+      sellingPrice: linePrice,
+      freeGoods: false,
+      expiryDate: mode === 'add' ? expiryDate : '',
+      batchChoice,
+      batchLabel: lotLabelFor(batchChoice),
+      ...(mode === 'set' && chosenLot ? { setScope: 'lot' as const } : {}),
+      ...(mode !== 'add' && chosenLot ? { expectedLotQuantity: Number(chosenLot.quantity) || 0 } : {}),
+      reason: reason.trim(),
+      conditionTag: mode === 'set' && !setLowers ? '' : conditionTag,
+      createdProduct: Boolean(heldPayload) || createdProductIds.includes(String(picked.id)),
+      ...(heldPayload ? { createPayload: heldPayload, createRequestId: createRequestId || createClientRequestId('product') } : {}),
+      status: 'queued',
+      detail: '',
     }
-    if (mode === 'set' && fastSetPreview && !fastSetPreview.valid) {
-      notify(tr('stock_set_lot_negative', 'The selected received date does not have enough stock for this branch total.'), 'error'); return
-    }
-    // Only an add is a receipt: a remove and a scoped Set (a count
-    // correction on an existing lot) have no payment, supplier or cost.
-    if (canEditCosts && mode === 'add' && paymentStatus === 'credit' && !creditDueDate.trim()) {
-      notify(tr('fast_stockin_credit_due', 'Not Yet Paid stock needs a due date'), 'error')
-      return
-    }
-    // N14-D: the same rule POST /api/batches and /api/inventory/adjust enforce
-    // (cloudflare/src/lib/stockReceiptGate.ts), checked as the line is queued
-    // so a whole session is not typed up before the first refusal. Adds only:
-    // a set's direction (and therefore whether it is a receipt) is decided
-    // server-side against live stock, and the route gates it there.
-    if (mode === 'add') {
-      if (!canEditCosts) { notify(tr('product_cost_edit_required', 'Cost edit permission is required to receive stock.'), 'error'); return }
-      const receiptGate = stockReceiptGateCode({
-        isStockIn: true,
-        supplierName: supplier.supplierName,
-        unitCostUsd: unitCost,
-        freeGoods,
-      })
-      if (receiptGate) {
-        notify(tr(STOCK_RECEIPT_GATE_KEYS[receiptGate], STOCK_RECEIPT_GATE_FALLBACKS[receiptGate]), 'error')
-        return
-      }
-    }
-    const lineName = String(picked.name || `#${picked.id}`)
-    // Every mode names its lot now: Add a lot or New, Remove and Set an
-    // existing one (a Set's scope says whether the target is that lot or the
-    // branch total it absorbs).
-    const effectiveBatchChoice: 'new' | number = batchChoice
-    const chosenLot = typeof effectiveBatchChoice === 'number'
-      ? batchOptions.find((batch) => Number(batch.id) === effectiveBatchChoice)
-      : null
-    const next: ReceivedLine = {
-        key: editingKey || `${picked.id}-${Date.now()}`,
-        requestId: (editingKey ? received.find((line) => line.key === editingKey)?.requestId : '') || createClientRequestId('stockline'),
-        product: picked,
-        productName: lineName,
-        quantity: qty,
-        unitCost: mode !== 'add' ? '' : unitCost,
-        freeGoods: mode !== 'add' ? false : freeGoods,
-        createPriceVariant: false,
-        expiryDate: mode !== 'add' ? '' : expiryDate,
-        batchChoice: effectiveBatchChoice,
-        batchLabel: chosenLot
-          ? `${batchDisplayLabel(chosenLot, tr('batch', 'Received date'))}${mode === 'set' && setScope === 'branch' ? ` · ${tr('stock_set_scope_branch', 'Branch total')}` : ''}`
-          : tr('new_batch', '+ New received date'),
-        ...(mode === 'set' && chosenLot ? { setScope, expectedLotQuantity: Number(chosenLot.quantity) || 0 } : {}),
-        mode,
-        reason: reason.trim(),
-        conditionTag: mode === 'set' && !fastSetLowers ? '' : conditionTag,
-        createdProduct: createdProductIds.includes(String(picked.id)),
-        status: 'queued',
-        detail: tr('ready_to_receive', 'Ready'),
-    }
-    const nextLines = editingKey
-      ? received.map((line) => line.key === editingKey ? next : line)
-      : [next, ...received]
-    // Synchronous first, React second -- see persistSessionDraft.
+    const nextLines = editingKey ? received.map((line) => (line.key === editingKey ? next : line)) : [next, ...received]
     persistSessionDraft(nextLines)
     setReceived(nextLines)
     setEditingKey('')
     resetLine()
-  }
-
-  function editLine(line: ReceivedLine) {
-    if (saving || line.status === 'saved') return
-    setEditingKey(line.key)
-    setMode(line.mode)
-    setConditionTag(line.conditionTag || '')
-    setPicked(line.product)
-    setQuery(line.productName)
-    setQuantity(String(line.quantity))
-    setUnitCost(canViewCosts ? line.unitCost : '')
-    setFreeGoods(canViewCosts && line.freeGoods)
-    setCreatePriceVariant(false)
-    setExpiryDate(line.expiryDate)
-    setReason(line.reason)
-    // Parked rather than set: the options effect is about to re-key on this
-    // product and would overwrite a direct set.
-    pendingBatchRestoreRef.current = line.batchChoice
-    setBatchChoice(line.batchChoice)
-    window.setTimeout(() => searchInputRef.current?.focus(), 0)
   }
 
   const removeLine = (key: string) => {
@@ -723,130 +630,80 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
     if (editingKey === key) { setEditingKey(''); resetLine() }
   }
 
-  // Validate, then park the batch for review. The write itself lives in
-  // performCommit -- ConfirmDialog replaces the old native browser confirm,
-  // which was off-brand and untranslatable.
-  const commitSession = () => {
-    if (saving) return
-    const pending = received.filter((line) => line.status !== 'saved')
-    if (!canEditCosts && pending.some((line) => line.mode === 'add')) { notify(tr('product_cost_edit_required', 'Cost edit permission is required to receive stock.'), 'error'); return }
-    if (!pending.length) {
-      if (received.some((line) => line.status === 'saved')) onDone()
-      clearWorkDraft(fastStockInDraftKey)
-      onClose()
-      return
-    }
-    if (!branchId) { notify(tr('fast_stockin_pick_branch', 'Pick a branch'), 'error'); return }
-    if (canEditCosts && pending.some((line) => line.mode === 'add') && paymentStatus === 'credit' && !creditDueDate.trim()) { notify(tr('fast_stockin_credit_due', 'Not Yet Paid stock needs a due date'), 'error'); return }
-    setPendingCommit(pending)
+  // ---- + Create "text" -> ProductForm -> the payload is held on the line ----
+  const createText = mode === 'add' && canCreate && !picked && query.trim().length >= 2 && searchCompleteFor === query.trim() ? query.trim() : null
+  const openCreate = () => {
+    const text = query.trim()
+    if (!text) return
+    persistSessionDraft()
+    const looksLikeBarcode = /^\d{6,}$/.test(text) || (scannedBarcode && scannedBarcode === text)
+    setCreateForm({ name: looksLikeBarcode ? '' : text, barcode: looksLikeBarcode ? text : '' })
   }
 
-  // N27: the mode frozen on the line decides the write. Remove and set take
-  // the same POST /api/inventory/adjust the one-by-one modal used, carrying
-  // this session id so the ledger groups them with the rest. P3-L6 "Restock
-  // with tag": the ordinary add wire is POST /api/batches (receiveBatchStock);
-  // the tagged one is POST /api/inventory/adjust, because that is the single
-  // writer that receives the purchase AND holds the units as a tagged row in
-  // one request. Split out from performCommit (P4-B) so the SAME per-line
-  // body this function builds can go either through one batched
-  // POST /api/inventory/fast-stock-in/commit request or, on a 404 fallback,
-  // through the original adjustStock / receiveBatchStock transports -- one
-  // source of the wire/body shape, not two that can drift apart.
-  const buildLineRequest = (line: ReceivedLine): FastStockInCommitLine => {
-    if (line.mode === 'remove') {
-      return { key: line.key, wire: 'adjust', body: {
-        productId: Number(line.product.id), type: 'remove', quantity: line.quantity,
-        // P3-L6: a tagged removal keeps the units in the group.
-        conditionTag: line.conditionTag || undefined,
-        reason: stockLineReason(line, tr), branchId: Number(branchId),
-        // A chosen lot is drained by id; otherwise the oldest lots first.
-        batchId: typeof line.batchChoice === 'number' ? line.batchChoice : null,
-        sessionId: sessionIdRef.current,
-        // Migration 0192: the per-line dedup identity, last so the pinned
-        // wire-shape regexes in tests/stockInModeSwitch.test.ts keep reading
-        // the receipt fields in their original order.
-        client_request_id: line.requestId,
-      } }
+  const holdNewProduct = async (payload: Record<string, unknown> = {}) => {
+    const cleaned = omitUnauthorizedCatalogCosts(payload, user)
+    const prepared = onPrepareProduct ? await onPrepareProduct(cleaned) : withoutInlineImages(cleaned)
+    const held: Record<string, unknown> = { ...prepared, stock_quantity: 0 }
+    const name = String(held.name || '').trim()
+    const openingQuantity = Math.max(0, Math.floor(Number(payload.stock_quantity) || 0))
+    const product: ProductCandidate = {
+      id: '', name, barcode: String(held.barcode || '') || null, brand: String(held.brand || brand || '') || null,
+      selling_price_usd: held.selling_price_usd as number | undefined, cost_price_usd: held.cost_price_usd as number | undefined,
+      stock_quantity: 0, branch_stock: [],
     }
-    if (line.mode === 'set') {
-      return { key: line.key, wire: 'adjust', body: {
-        productId: Number(line.product.id), type: 'set', quantity: line.quantity,
-        reason: stockLineReason(line, tr), branchId: Number(branchId),
-        // Scoped Set: a count correction on the chosen EXISTING received date
-        // (lib/stockLotAdjustment.ts) -- no receipt fields, the lot keeps its
-        // own cost, and a downward Set is a loss unless tagged.
-        setScope: line.setScope || 'lot',
-        batchId: typeof line.batchChoice === 'number' ? line.batchChoice : null,
-        expectedLotQuantity: line.expectedLotQuantity,
-        conditionTag: line.conditionTag || undefined,
-        sessionId: sessionIdRef.current,
-        // Migration 0192: the per-line dedup identity, last so the pinned
-        // wire-shape regexes in tests/stockInModeSwitch.test.ts keep reading
-        // the receipt fields in their original order.
-        client_request_id: line.requestId,
-      } }
-    }
-    if (line.mode === 'add' && line.conditionTag) {
-      return { key: line.key, wire: 'adjust', body: {
-        productId: Number(line.product.id), type: 'add', quantity: line.quantity,
-        reason: stockLineReason(line, tr), branchId: Number(branchId),
-        conditionTag: line.conditionTag,
-        batchId: typeof line.batchChoice === 'number' ? line.batchChoice : null,
-        receivedDate: receivedDate.trim() || null, expiryDate: line.expiryDate.trim() || null,
-        supplierId: supplier.supplierId, supplierName: supplier.supplierName.trim() || null,
-        unitCostUsd: Number(line.unitCost) >= 0 && line.unitCost !== '' ? Number(line.unitCost) : null,
-        freeGoods: line.freeGoods, paymentStatus,
-        creditDueDate: paymentStatus === 'credit' ? creditDueDate.trim() : null,
-        sessionId: sessionIdRef.current,
-        // Migration 0192: the per-line dedup identity, last so the pinned
-        // wire-shape regexes in tests/stockInModeSwitch.test.ts keep reading
-        // the receipt fields in their original order.
-        client_request_id: line.requestId,
-      } }
-    }
-    return { key: line.key, wire: 'receive', body: {
-      clientRequestId: line.requestId,
-      productId: Number(line.product.id), branchId: Number(branchId), quantity: line.quantity,
-      // Same two-line rule as ReceiveBatchModal: a chosen lot is topped up by
-      // id and keeps its own received date; only 'new' derives a lot code
-      // from this shipment's date.
-      batchId: typeof line.batchChoice === 'number' ? line.batchChoice : null,
-      receivedDate: line.batchChoice === 'new' ? (receivedDate.trim() || null) : null,
-      expiryDate: line.expiryDate.trim() || null,
-      supplierId: supplier.supplierId, supplierName: supplier.supplierName.trim() || null,
-      unitCostUsd: Number(line.unitCost) >= 0 && line.unitCost !== '' ? Number(line.unitCost) : null,
-      freeGoods: line.freeGoods,
-      // Typed text or null: a blank line keeps the Worker's own "Stock
-      // received (<lot>)" label (see utils/stockLineReason.ts).
-      reason: line.reason.trim() || null,
-      paymentStatus, creditDueDate: paymentStatus === 'credit' ? creditDueDate.trim() : null,
-      sessionId: sessionIdRef.current,
-    } }
+    applyEntry({
+      picked: product, query: name, quantity: canReceive ? String(openingQuantity || 1) : '0', freeQuantity: '',
+      unitCost: canViewCosts && held.cost_price_usd != null ? String(held.cost_price_usd) : '', sellingPrice: priceText(held.selling_price_usd),
+      expiryDate: String(held.expiry_date || ''), createPayload: held, createRequestId: createClientRequestId('product'), scannedBarcode: '',
+    })
+    setBatchChoice('new')
+    if (held.supplier && !supplier.supplierName.trim()) setSupplier({ supplierId: null, supplierName: String(held.supplier) })
   }
 
-  const describeLineResult = (line: ReceivedLine, result?: { lotCode?: string | null } | null): string => (
+  const createHeldProduct = async (line: StockSessionLine): Promise<number> => {
+    const { createProduct } = await import('../../api/productWriteTransport.ts')
+    const result = await createProduct({
+      ...(line.createPayload || {}),
+      client_request_id: line.createRequestId,
+      branch_id: branchId,
+      stock_quantity: 0,
+      userId: user?.id,
+      userName: user?.name,
+    }) as CreateProductResult
+    if (result?.success === false) throw new Error(result.error || tr('failed', 'Failed'))
+    if (result?.pending) throw Object.assign(new Error(tr('product_creation_pending_review', 'Product creation is pending review and cannot be added to this stock-in session yet.')), { code: 'product_pending_review' })
+    const id = extractHistoryResultId(result as never)
+    if (!id) throw new Error(tr('failed', 'Failed'))
+    return id
+  }
+
+  // ---- commit ----
+  const describeLineResult = (line: StockSessionLine, result?: { lotCode?: string | null } | null): string => (
     line.mode === 'remove'
       ? tr('stock_line_removed', 'Removed')
       : line.mode === 'set'
-      ? tr('stock_line_set', 'Set')
-      : result?.lotCode
-      // Z1a: the server hands back an MMDDYYYY lot code; show it as the
-      // received date it encodes, not as a raw 8-digit run.
-      ? `${tr('received_date', 'Received date')} ${lotCodeAsDate(result.lotCode) || result.lotCode}`
-      : tr('received', 'Received')
+        ? tr('stock_line_set', 'Set')
+        : result?.lotCode
+          ? `${tr('received_date', 'Received date')} ${lotCodeAsDate(result.lotCode) || result.lotCode}`
+          : tr('received', 'Received')
   )
 
-  // Fallback path: one POST per line, exactly as before P4-B. Reached only
-  // when the batched endpoint answers 404 (an old Worker build still live
-  // during a rolling deploy) -- receiveBatchStock and adjustStock are the
-  // same two transports the batched route's Worker-side kernels wrap, so a
-  // stale client and a stale server both keep working against each other.
-  const performCommitSequential = async (pending: ReceivedLine[]): Promise<number> => {
+  const buildLineRequest = (line: StockSessionLine) => buildStockLineRequest(line, {
+    branchId, receivedDate, supplier, paymentStatus, creditDueDate, sessionId: sessionIdRef.current, canEditPrice,
+    reasonFor: (entry) => stockLineReason(entry, tr),
+  })
+
+  const failureText = (error: unknown, fallback: string): string => {
+    const code = String((error as { code?: unknown } | null)?.code || '')
+    const key = STOCK_SESSION_FAILURE_KEYS[code]
+    return key ? tr(key, fallback) : stockFailureText(error, tr, fallback)
+  }
+
+  // Fallback: one POST per line, reached only when the batched route 404s (old Worker).
+  const performCommitSequential = async (pending: StockSessionLine[], start: StockSessionLine[]): Promise<{ failed: number; lines: StockSessionLine[] }> => {
     let failed = 0
-    let lines = received
+    let lines = start
     for (const line of pending) {
-      // Transient, so it is NOT persisted: only the committed outcome below is
-      // a fact the retry must not lose.
       lines = applyLineOutcome(lines, line.key, { status: 'saving' })
       setReceived(lines)
       const request = buildLineRequest(line)
@@ -857,181 +714,259 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
         lines = applyLineOutcome(lines, line.key, { status: 'saved', detail: describeLineResult(line, result) })
       } catch (error) {
         failed += 1
-        // Migration 0192: a guard refusal gets its translated sentence and
-        // marks the line for removal; everything else keeps the server's own
-        // words, which the operator acts on ("only 2 available").
         lines = applyLineOutcome(lines, line.key, {
           status: 'error',
-          detail: stockFailureText(error, tr, tr('error', 'Error')),
+          detail: failureText(error, tr('error', 'Error')),
           needsRemoval: stockLineNeedsRemoval(error),
         })
       }
-      // The committed outcome is durable BEFORE the render that shows it.
       persistSessionDraft(lines)
       setReceived(lines)
     }
-    return failed
+    return { failed, lines }
   }
 
-  const performCommit = async (pending: ReceivedLine[]) => {
-    if (saving) return
-    if (!canEditCosts && pending.some((line) => line.mode === 'add')) { notify(tr('product_cost_edit_required', 'Cost edit permission is required to receive stock.'), 'error'); return }
-    setSaving(true)
-    pending.forEach((line) => setReceived((prev) => prev.map((item) => item.key === line.key ? { ...item, status: 'saving' } : item)))
-    let failed = 0
-    // P4-B: one request for the whole session instead of one per line (see
-    // cloudflare/src/routes/stockInCommit.ts). `batched` stays null only when
-    // the endpoint 404s (old Worker build); any other failure of the request
-    // itself -- network/5xx -- fails every still-saving line with that one
-    // message rather than retrying the old N-request loop, which would just
-    // fail the same way N times.
-    //
-    // The Worker attempts only its plan's per-request line cap and defers
-    // the rest; commitFastStockIn re-sends only those. Each round is folded
-    // in and made durable here BEFORE the next round goes out, so a crash
-    // between rounds cannot lose a committed line's "saved" and re-send it.
-    // A line still deferred when the loop stops (a real failure elsewhere)
-    // was never attempted: it goes back to queued, not to an error.
-    let batched: FastStockInCommitLineResult[] | null = null
-    let lines = received
-    const unsettled = new Set(pending.map((line) => line.key))
-    const foldRound = (settled: FastStockInCommitSettled) => {
-      for (const { index, result } of settled) {
-        const line = pending[index]
-        unsettled.delete(line.key)
-        if (result?.ok) {
-          lines = applyLineOutcome(lines, line.key, { status: 'saved', detail: describeLineResult(line, result as { lotCode?: string | null }) })
-        } else if (isDeferredStockInResult(result)) {
-          failed += 1
-          lines = applyLineOutcome(lines, line.key, { status: 'queued', detail: '' })
-        } else {
-          failed += 1
-          lines = applyLineOutcome(lines, line.key, {
-            detail: stockFailureText(result, tr, tr('error', 'Error')),
-            status: 'error',
-            needsRemoval: stockLineNeedsRemoval(result),
-          })
-        }
-      }
-      // Durable before the render. A crash here used to leave every line
-      // reading "queued" in the draft, so the retry re-sent work the server
-      // had already applied.
-      persistSessionDraft(lines)
-      setReceived(lines.map((item) => (unsettled.has(item.key) ? { ...item, status: 'saving' as const } : item)))
-    }
-    try {
-      batched = await commitFastStockIn(pending.map(buildLineRequest), foldRound)
-    } catch (error) {
-      const message = error instanceof Error ? error.message : tr('error', 'Error')
-      // Only lines no round has answered yet: a line already folded in as
-      // saved must keep "saved", or the retry would re-send applied stock.
-      failed += unsettled.size
-      lines = lines.map((item) => (unsettled.has(item.key)
-        ? { ...item, status: 'error' as const, detail: stockFailureText(error, tr, message) }
-        : item))
-      persistSessionDraft(lines)
-      setReceived(lines)
-      batched = []
-    }
-    if (batched === null) {
-      // The deployed Worker predates POST /api/inventory/fast-stock-in/commit.
-      failed = await performCommitSequential(pending)
-    }
-    setSaving(false)
-    setPendingCommit(null)
-    const saved = pending.length - failed
-    // The pack string carries a {count} placeholder and tr() does not
-    // interpolate, so substitute here -- otherwise the operator reads a
-    // literal "{count}".
-    if (saved > 0) notify(tr('stock_session_completed', 'Received {count} stock-in line(s) successfully.').replace('{count}', String(saved)))
-    if (failed) {
-      // Refresh the parent only after the partial/complete decision, so the
-      // list reload cannot race the retry the operator is about to make.
-      onDone()
-      notify(tr('stock_session_partial', '{n} line(s) could not be saved. Fix them and complete again.').replace('{n}', String(failed)), 'error')
-      return
-    }
+  const finishSession = () => {
     onDone()
     clearWorkDraft(fastStockInDraftKey)
     onClose()
   }
 
-  const successCount = received.filter((line) => line.status === 'saved').length
-  const commitBranchName = branchOptions.find((option) => String(option.value) === String(branchId))?.label || tr('branch', 'selected branch')
-  const modeCount = (lines: ReceivedLine[], which: StockMode) => lines.filter((line) => line.mode === which).length
-  const pendingAllAdd = pendingCommit ? modeCount(pendingCommit, 'add') === pendingCommit.length : true
-  // The shipment fields (date, supplier, payment) belong to receipts; with the
-  // switch on remove and nothing else queued they have nothing to describe.
-  // Only an add is a receipt; a scoped Set is a count correction.
-  const receiptFieldsRelevant = mode === 'add' || received.some((line) => line.mode === 'add')
-  const commitReviewItems: ConfirmReviewItem[] = pendingCommit ? [
-    { label: tr('branch', 'Branch'), value: commitBranchName },
-    { label: tr('lines', 'Lines'), value: pendingCommit.length },
-    ...(pendingAllAdd ? [] : [
-      { label: tr('add', 'Add'), value: modeCount(pendingCommit, 'add') },
-      { label: tr('remove', 'Remove'), value: modeCount(pendingCommit, 'remove') },
-      { label: tr('set', 'Set'), value: modeCount(pendingCommit, 'set') },
-    ]),
-    { label: tr('total_units', 'Total units'), value: pendingCommit.reduce((total, line) => total + line.quantity, 0) },
-    ...(canViewCosts ? [{ label: tr('total_cost', 'Total cost'), value: `${usdSymbol}${pendingCommit.reduce((total, line) => total + (line.mode !== 'add' ? 0 : Math.max(0, line.quantity) * Math.max(0, Number(line.unitCost) || 0)), 0).toFixed(2)}` }] : []),
-    // Receipt fields describe adds (and sets, which may add); a pure
-    // remove session has none to review.
-    ...(pendingCommit.some((line) => line.mode === 'add') ? [
-    { label: tr('received_date', 'Received date'), value: receivedDate.trim() || tr('today', 'Today') },
-    { label: tr('supplier', 'Supplier'), value: supplier.supplierName.trim() || '—' },
-    { label: tr('payment', 'Payment'), value: paymentStatus === 'credit'
-      ? `${tr('on_credit', 'Not Yet Paid')}${creditDueDate.trim() ? ` · ${creditDueDate.trim()}` : ''}`
-      : tr('paid', 'Paid') },
-    ] : []),
-  ] : []
-  const sessionCostTotal = received.reduce((total, line) => (
-    total + (line.mode !== 'add' ? 0 : Math.max(0, Number(line.quantity) || 0) * Math.max(0, Number(line.unitCost) || 0))
-  ), 0)
-  const closeState: FastStockInCloseState = {
-    mode, conditionTag, createdProductIds, branchId, receivedDate, supplier, paymentStatus, creditDueDate,
-    query, picked, quantity, unitCost: protectedUnitCost, freeGoods: protectedFreeGoods, createPriceVariant, expiryDate, reason, batchChoice,
-    lines: received, scannedBarcode,
+  const performCommit = async () => {
+    if (saving) return
+    let lines = received
+    const pending = lines.filter((line) => line.status !== 'saved')
+    if (!pending.length) { finishSession(); return }
+    if (!(Number(branchId) > 0)) { notify(tr('fast_stockin_pick_branch', 'Pick a branch'), 'error'); return }
+    if (!canEditCosts && pending.some((line) => line.mode === 'add' && line.quantity + line.freeQuantity > 0)) {
+      notify(tr('product_cost_edit_required', 'Cost edit permission is required to receive stock.'), 'error')
+      return
+    }
+    setSaving(true)
+    let failed = 0
+
+    // 1. New products first, each id durable before the next request.
+    for (const line of pending.filter(lineNeedsCreate)) {
+      lines = applyLineOutcome(lines, line.key, { status: 'saving' })
+      setReceived(lines)
+      try {
+        const id = await createHeldProduct(line)
+        lines = lines.map((entry) => (entry.key === line.key ? { ...entry, product: { ...entry.product, id }, status: 'queued', detail: '' } : entry))
+        setCreatedProductIds((prev) => [...prev, String(id)])
+      } catch (error) {
+        failed += 1
+        const reviewPending = (error as { code?: string } | null)?.code === 'product_pending_review'
+        lines = applyLineOutcome(lines, line.key, { status: 'error', detail: failureText(error, tr('error', 'Error')), ...(reviewPending ? { needsRemoval: true } : {}) })
+      }
+      persistSessionDraft(lines)
+      setReceived(lines)
+    }
+    // A product created with nothing to receive is finished.
+    lines = lines.map((line) => (line.status === 'queued' && line.createPayload && Number(line.product.id) > 0 && line.quantity === 0 && line.freeQuantity === 0
+      ? { ...line, status: 'saved', detail: tr('product_created', 'Product created') }
+      : line))
+    // The paid amount covers every line; with a line missing, nothing is received this time.
+    if (failed) {
+      persistSessionDraft(lines)
+      setReceived(lines)
+      setSaving(false)
+      setStep('items')
+      notify(tr('stock_session_partial', '{n} line(s) could not be saved. Fix them and complete again.').replace('{n}', String(failed)), 'error')
+      return
+    }
+
+    // 2. The stock lines, one request per round; answered rounds durable before the next.
+    const toCommit = lines.filter((line) => line.status !== 'saved')
+    let requestFailure = ''
+    if (toCommit.length) {
+      const session = commitSessionBlock({ lines, paidAmount, paymentStatus, creditDueDate, canViewCosts })
+      let batched: FastStockInCommitLineResult[] | null = null
+      const unsettled = new Set(toCommit.map((line) => line.key))
+      lines = lines.map((line) => (unsettled.has(line.key) ? { ...line, status: 'saving' as const } : line))
+      setReceived(lines)
+      const foldRound = (settled: FastStockInCommitSettled) => {
+        for (const { index, result } of settled) {
+          const line = toCommit[index]
+          unsettled.delete(line.key)
+          if (result?.ok) {
+            lines = applyLineOutcome(lines, line.key, { status: 'saved', detail: describeLineResult(line, result as { lotCode?: string | null }) })
+          } else if (isDeferredStockInResult(result)) {
+            failed += 1
+            lines = applyLineOutcome(lines, line.key, { status: 'queued', detail: '' })
+          } else {
+            failed += 1
+            lines = applyLineOutcome(lines, line.key, {
+              detail: failureText(result, tr('error', 'Error')),
+              status: 'error',
+              needsRemoval: stockLineNeedsRemoval(result),
+            })
+          }
+        }
+        persistSessionDraft(lines)
+        setReceived(lines.map((item) => (unsettled.has(item.key) ? { ...item, status: 'saving' as const } : item)))
+      }
+      try {
+        batched = await commitFastStockIn(toCommit.map(buildLineRequest), foldRound, { session })
+      } catch (error) {
+        requestFailure = String((error as { code?: unknown } | null)?.code || 'request')
+        const message = failureText(error, error instanceof Error ? error.message : tr('error', 'Error'))
+        // Only lines no round has answered: a line already saved must stay saved.
+        failed += unsettled.size
+        lines = lines.map((item) => (unsettled.has(item.key) ? { ...item, status: 'error' as const, detail: message } : item))
+        persistSessionDraft(lines)
+        setReceived(lines)
+        batched = []
+      }
+      if (batched === null) {
+        const sequential = await performCommitSequential(toCommit, lines)
+        failed = sequential.failed
+        lines = sequential.lines
+      }
+    }
+    setSaving(false)
+    const saved = pending.length - failed
+    if (saved > 0) notify(tr('stock_session_completed', 'Received {count} stock-in line(s) successfully.').replace('{count}', String(saved)))
+    if (failed) {
+      onDone()
+      setStep(requestFailure === 'supplier_total_mismatch' ? 'payment' : 'items')
+      notify(tr('stock_session_partial', '{n} line(s) could not be saved. Fix them and complete again.').replace('{n}', String(failed)), 'error')
+      return
+    }
+    finishSession()
   }
-  const closeDirty = fastStockInHasUnsavedWork(closeState, pristineCloseStateRef.current)
-  // The minus is an explicit preserve action. It flushes the exact draft,
-  // parks the chip, then unmounts. The X/backdrop are dismissal requests and
-  // must never reuse this callback: dirty work goes through the shared
-  // Discard / Back / Minimize prompt instead.
+
+  // ---- payment ----
+  const itemsTotal = sessionItemsTotal(received)
+  const difference = paymentDifference(itemsTotal, paidAmount)
+  const paymentRefusal = paymentStepRefusal({ itemsTotal, paidAmount, paymentStatus, creditDueDate, canViewCosts })
+  const paymentLines = received.filter((line) => line.mode === 'add' && line.status !== 'saved')
+
+  const matchPaid = (force: boolean) => {
+    if (paidAmount.trim() === '' || (!force && Math.abs(difference) <= 0.005)) return
+    const result = applyPaidToLines(received, paidAmount)
+    if (!result.ok) {
+      notify(result.code === 'items_total_zero'
+        ? tr('items_total_zero', 'Items total is 0')
+        : tr(STOCK_RECEIPT_GATE_KEYS.free_goods_required, STOCK_RECEIPT_GATE_FALLBACKS.free_goods_required), 'error')
+      return
+    }
+    persistSessionDraft(result.lines)
+    setReceived(result.lines)
+  }
+  const resetCosts = () => {
+    const next = resetLineCosts(received)
+    persistSessionDraft(next)
+    setReceived(next)
+    setPaidAmount('')
+  }
+  const setLineCost = (key: string, value: string) => {
+    setReceived((prev) => prev.map((line) => (line.key === key ? { ...line, typedUnitCost: line.typedUnitCost ?? line.unitCost, unitCost: value } : line)))
+  }
+
+  // ---- steps ----
+  const stepIndex = steps.indexOf(currentStep)
+  const goBack = stepIndex > 0 ? () => setStep(steps[stepIndex - 1]) : undefined
+  const goNext = () => {
+    if (saving) return
+    if (currentStep === 'items') {
+      if (!pendingLines.length) { if (received.length) finishSession(); return }
+      if (!(Number(branchId) > 0)) { notify(tr('fast_stockin_pick_branch', 'Pick a branch'), 'error'); return }
+      setStep(steps[1])
+      return
+    }
+    if (currentStep === 'payment') {
+      if (paymentRefusal) {
+        notify(paymentRefusal === 'fast_stockin_credit_due'
+          ? tr('fast_stockin_credit_due', 'Not Yet Paid stock needs a due date')
+          : tr('supplier_total_mismatch', 'Paid to supplier does not match the items total'), 'error')
+        return
+      }
+      setStep('review')
+      return
+    }
+    void performCommit()
+  }
+
+  // ---- close / minimize ----
+  const modeLabel = tr(STOCK_MODE_KEYS[mode].key, STOCK_MODE_KEYS[mode].fallback)
+  const sessionLabel = `${modeLabel} ${tr('stock_session', 'Session')}`
+  const closeDirty = fastStockInHasUnsavedWork({ ...currentDraft(), sessionId: 0 }, { ...init.pristine, sessionId: 0 })
   const preserveAndMinimize = () => {
     if (saving || !onMinimize) return
     flushPendingWorkDraft(fastStockInDraftKey)
-    onMinimize(tr('fast_stockin_title', 'Fast stock-in'))
+    onMinimize(sessionLabel)
     onClose()
   }
   const discardAndClose = () => {
     clearWorkDraft(fastStockInDraftKey)
-    if (successCount > 0) onDone()
+    if (received.some((line) => line.status === 'saved')) onDone()
     onClose()
   }
   const closeGuard = useCloseGuard({ dirty: closeDirty }, discardAndClose, onMinimize ? preserveAndMinimize : undefined)
   const requestCloseIfIdle = () => { if (!saving) closeGuard.requestClose() }
-  const closeBackdropIfIdle = () => { if (!selectedGroup) requestCloseIfIdle() }
+  const closeBackdropIfIdle = () => { if (!selectedGroup && !reasonsOpen) requestCloseIfIdle() }
 
-  // The receiver stays mounted (and its session state stays in memory) while
-  // the standard product form is open. Cancel simply returns to the exact
-  // pending scan; a successful create calls `pick` above and resumes the
-  // quantity/cost line without re-entering shipment header data.
-  if (createBarcode) {
+  // ---- lot options ----
+  const lotOptions = (() => {
+    const newLabel = tr('received_date_new', 'New · {date}').replace('{date}', formatBatchReceivedDate(receivedDate) || receivedDate)
+    if (!picked) return [{ value: mode === 'add' ? 'new' : 'none', label: mode === 'add' ? newLabel : tr('received_date', 'Received date'), disabled: true }]
+    if (lotsKey && !lotsReady) return [{ value: String(batchChoice), label: tr('loading', 'Loading...'), disabled: true }]
+    const lotRow = (lot: ProductBatch) => ({
+      value: String(lot.id),
+      label: `${batchDisplayLabel(lot, tr('batch', 'Received date'))} · ${lot.quantity}${mode === 'add' && lot.supplier_name ? ` · ${lot.supplier_name}` : ''}`,
+    })
+    if (mode === 'add') return [{ value: 'new', label: newLabel }, ...batchOptions.map(lotRow)]
+    if (!lotChoices.length) return [{ value: 'none', label: `${tr('stock_set_branch_total', 'Branch total')} · ${branchQuantity}`, disabled: true }]
+    return lotChoices.map(lotRow)
+  })()
+
+  const onLot = (value: string) => {
+    if (value === 'new' || value === 'none') setBatchChoice(value)
+    else if (Number(value) > 0) setBatchChoice(Number(value))
+  }
+
+  // ---- review ----
+  const branchName = branchOptions.find((option) => String(option.value) === String(branchId))?.label || ''
+  const reviewSummary = (() => {
+    const first = [branchName, supplier.supplierName.trim()].filter(Boolean).join(' · ')
+    if (!received.some((line) => line.mode === 'add')) return [first].filter(Boolean)
+    const typedPaid = paidAmount.trim() === '' ? itemsTotal : Number(paidAmount)
+    const amount = canViewCosts ? ` ${usdSymbol}${(Number.isFinite(typedPaid) ? typedPaid : itemsTotal).toFixed(2)}` : ''
+    const payment = paymentStatus === 'credit'
+      ? `${tr('on_credit', 'Not Yet Paid')}${amount}${creditDueDate ? ` · ${tr('due', 'Due')} ${formatBatchReceivedDate(creditDueDate) || creditDueDate}` : ''}`
+      : `${tr('paid', 'Paid')}${amount}`
+    return [first, `${formatBatchReceivedDate(receivedDate) || receivedDate} · ${payment}`].filter(Boolean)
+  })()
+  const reviews = currentStep === 'review' ? pendingLines.map((line) => reviewStockLine(line, branchId)) : []
+
+  const footerPrimary = currentStep === 'review'
+    ? tr('complete_session', 'Complete Session')
+    : tr('next', 'Next')
+  const footerDisabled = currentStep === 'items' ? !received.length : currentStep === 'payment' ? Boolean(paymentRefusal) : !pendingLines.length
+  const footerTitle = currentStep === 'payment' && paymentRefusal
+    ? (paymentRefusal === 'fast_stockin_credit_due' ? tr('fast_stockin_credit_due', 'Not Yet Paid stock needs a due date') : tr('supplier_total_mismatch', 'Paid to supplier does not match the items total'))
+    : undefined
+  const footerTotal = canViewCosts && received.some((line) => line.mode === 'add') ? `${usdSymbol}${itemsTotal.toFixed(2)}` : null
+  const busy = saving
+
+  if (createForm) {
     return (
       <Suspense fallback={null}>
         <ProductForm
-          product={{ barcode: createBarcode, branch_id: branchId, name: '', stock_quantity: 0 }}
-          draftScope={`fast-stock-in-${sessionIdRef.current}-${createBarcode}`}
+          product={{ name: createForm.name, barcode: createForm.barcode, brand, supplier: supplier.supplierName, branch_id: branchId, stock_quantity: 0 }}
+          draftScope={`fast-stock-in-${sessionIdRef.current}-${createForm.barcode || createForm.name}`}
           categories={createCategories}
-          units={scannedCreateUnits}
-          branches={scannedCreateBranches}
+          units={createUnits.length ? createUnits : [{ id: 'pcs', name: 'pcs' }]}
+          branches={branchOptions.map((option) => ({ id: option.value, name: option.label, is_default: String(option.value) === String(defaultBranchId || '') }))}
+          brandOptions={brandOptions}
           sessionDuplicateCheck={(candidate) => Boolean(findSessionProductDuplicate(duplicateRows, candidate))}
-          onSave={(payload) => createProductForScannedBarcode((payload || {}) as Record<string, unknown>)}
-          onClose={() => setCreateBarcode('')}
+          onSave={(payload) => holdNewProduct((payload || {}) as Record<string, unknown>)}
+          onClose={() => setCreateForm(null)}
           t={(key: string) => tr(key, key)}
           usdSymbol={usdSymbol}
           khrSymbol={khrSymbol}
           exchangeRate={exchangeRate}
+          user={user}
         />
       </Suspense>
     )
@@ -1039,347 +974,158 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
 
   return createPortal(
     <>
-    {/* The commit review and the option sheet below are SIBLINGS of this
-        backdrop, never children. Both are portals, but React bubbles
-        synthetic events through the component tree: inside this
-        <div onClick={closeBackdropIfIdle}> every press in the confirm also
-        asked to close the receiver (see
-        tests/overlayNestedFloatBubbling.test.ts). */}
+    {/* The option sheet and the reasons manager are SIBLINGS of this backdrop:
+        React bubbles synthetic events through portals, so a press inside them
+        would otherwise ask the float to close (tests/overlayNestedFloatBubbling.test.ts). */}
     <div className="modal-viewport-safe pointer-events-auto fixed inset-0 z-[1050] flex items-end justify-center overflow-y-auto bg-black/50 sm:items-center" onClick={closeBackdropIfIdle}>
-      <div ref={parentPanelRef} className="modal-panel-safe flex w-full flex-col rounded-t-2xl bg-white shadow-2xl sm:max-w-2xl sm:rounded-2xl dark:bg-gray-800" onClick={(event) => event.stopPropagation()}>
-        <div className="flex flex-shrink-0 items-center justify-between border-b border-gray-200 p-4 dark:border-gray-700">
-          <h2 className="min-w-0 truncate text-lg font-bold text-gray-900 dark:text-white">⚡ {tr('fast_stockin_title', 'Fast stock-in')}</h2>
-          <div className="flex shrink-0 items-center gap-1">
-            {onMinimize ? (
-              <MinimizeButton
-                disabled={saving}
+      <div
+        ref={parentPanelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={sessionLabel}
+        className="modal-panel-safe flex w-full flex-col rounded-t-2xl bg-white shadow-2xl sm:max-w-2xl sm:rounded-2xl dark:bg-gray-800"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <StockSessionHeader
+          mode={mode}
+          onModeChange={changeMode}
+          modeLocked={modeSwitchBlocked(received)}
+          disabled={busy}
+          tr={tr}
+          onMinimize={onMinimize ? preserveAndMinimize : undefined}
+          onClose={requestCloseIfIdle}
+        />
+        <StockSessionSteps steps={steps} current={currentStep} onStep={setStep} disabled={busy} tr={tr} />
+
+        <div className="modal-scroll space-y-2 px-3 pb-3 pt-1 sm:px-4 sm:pb-4">
+          {currentStep === 'items' ? (
+            <>
+              <StockSessionSharedDetails
                 tr={tr}
-                onMinimize={preserveAndMinimize}
+                packLookup={packLookup}
+                brand={brand}
+                onBrand={setBrand}
+                brandOptions={brandOptions || fallbackBrands || []}
+                onRequestBrands={ensureBrands}
+                supplier={supplier}
+                onSupplier={setSupplier}
+                supplierInvalid={invalidField === 'supplier'}
+                branchId={branchId}
+                onBranch={(next) => { if (!modeSwitchBlocked(received) || !received.some((line) => line.status === 'saved')) setBranchId(next) }}
+                branchOptions={branchOptions}
+                receivedDate={receivedDate}
+                onReceivedDate={setReceivedDate}
+                disabled={busy}
               />
-            ) : null}
-            <button type="button" onClick={requestCloseIfIdle} disabled={saving} aria-label={tr('close', 'Close')} className="flex h-8 w-8 items-center justify-center text-gray-400 hover:text-gray-600 disabled:opacity-50"><X className="h-4 w-4" /></button>
-          </div>
-        </div>
-
-        <div className="modal-scroll space-y-4 p-4">
-          {/* Search comes first on phones and desktops; shipment details sit below it. */}
-          <div className="rounded-xl border border-emerald-200 bg-emerald-50/40 p-3 dark:border-emerald-800 dark:bg-emerald-900/10">
-            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-              <span className="text-xs font-semibold uppercase tracking-wide text-emerald-600 dark:text-emerald-400">
-                {editingKey ? tr('edit_stock_line', 'Edit product line') : tr('fast_stockin_line', 'Next product')}
-              </span>
-              {/* N27: add / remove / set for the NEXT line; each queued line
-                  keeps the mode it was queued with. */}
-              <span className="flex items-center gap-1">
-                <span className="inline-flex rounded-lg border border-gray-200 p-0.5 dark:border-gray-600" role="group" aria-label={tr('stock_action', 'Stock action')}>
-                  {(['add', 'remove', 'set'] as const).map((option) => (
-                    <button key={option} type="button" disabled={saving} aria-pressed={mode === option}
-                      onClick={() => setMode(option)}
-                      className={`rounded-md px-2.5 py-1 text-[11px] font-semibold transition-colors ${mode === option
-                        ? option === 'remove' ? 'bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-300' : option === 'set' ? 'bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300' : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200'
-                        : 'text-gray-500 hover:text-gray-700 dark:text-gray-400'}`}>
-                      {option === 'add' ? tr('add', 'Add') : option === 'remove' ? tr('remove', 'Remove') : tr('set', 'Set')}
-                    </button>
-                  ))}
-                </span>
-                <InfoHint label={tr('stock_action', 'Stock action')} text={tr('fast_stock_mode_hint', 'Add receives stock under a received date. Remove takes stock out — pick the received date, or the oldest received dates drain first. Set makes the branch total exactly this quantity; the difference posts as an add (supplier and cost required) or a remove.')} />
-              </span>
-            </div>
-            <div className="flex gap-2">
-              <div className="relative min-w-0 flex-1">
-                <input ref={searchInputRef} className="input w-full text-sm" placeholder={tr('fast_stockin_search', 'Type a product name or barcode…')} value={query}
-                  onChange={(event) => { setQuery(event.target.value); setPicked(null); setEditingKey(''); setScannedBarcode('') }} autoFocus />
-                {candidateGroups.length > 0 ? (
-                  <div className="absolute inset-x-0 top-full z-10 mt-1 max-h-48 overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-600 dark:bg-gray-800">
-                    {candidateGroups.map((group) => (
-                      <button key={group.key} type="button" onClick={() => setSelectedGroup(group)} className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm hover:bg-gray-50 dark:hover:bg-gray-700">
-                        <span className="scroll-x-clean text-gray-800 dark:text-gray-200">{group.name}</span>
-                        <span className="flex-shrink-0 text-[10px] text-gray-400">{group.sellableItems.length || group.items.length} {tr('options', 'options')} · {group.stockTotal}</span>
-                      </button>
-                    ))}
-                  </div>
-                ) : null}
-              </div>
-              <ScanSearchButton onDetected={(value) => {
-                const barcode = String(value || '').trim()
-                setQuery(barcode)
-                setPicked(null)
-                setEditingKey('')
-                setScannedBarcode(barcode)
-              }} t={(key) => tr(key, key)} title={tr('scan_product_for_stock_in', 'Scan product for this stock-in')} />
-            </div>
-            {scannedBarcode && scannedBarcode === query.trim() && searchCompleteFor === scannedBarcode && candidates.length === 0 ? (
-              <div className="mt-2 flex items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200">
-                <span className="min-w-0">{tr('unknown_barcode', 'No product matches this scanned barcode.')}</span>
-                <button type="button" className="btn-secondary shrink-0 px-2 py-1 text-xs" onClick={openCreateForUnknownScan}>
-                  {tr('create_product', 'Create product')}
-                </button>
-              </div>
-            ) : null}
-            {picked ? (
-              <>
-              {/* The same lot picker the three sibling add-stock surfaces
-                  already have. A batch is identified by its date: "New batch"
-                  derives the lot code from the shipment date, an existing chip
-                  tops up that exact lot. Chosen before the numbers. */}
-              {mode === 'set' ? (
-                <div className="mt-2 grid grid-cols-2 gap-2" role="group" aria-label={tr('stock_set_scope', 'Set quantity for')}>
-                  {([['lot', tr('stock_set_scope_lot', 'Selected received date')], ['branch', tr('stock_set_scope_branch', 'Branch total')]] as [StockSetScope, string][]).map(([scope, label]) => (
-                    <button key={scope} type="button" aria-pressed={setScope === scope}
-                      className={`min-h-8 min-w-0 rounded-lg border-2 px-2 text-[11px] font-medium ${setScope === scope ? 'border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'border-gray-200 text-gray-600 dark:border-gray-600 dark:text-gray-400'}`}
-                      onClick={() => setSetScope(scope)}>
-                      {label}
-                    </button>
-                  ))}
-                </div>
-              ) : null}
-              {(
-                <div className="mt-2">
-                  <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{mode === 'set' ? tr('selected_received_date', 'Selected received date') : tr('batch', 'Received date')}</span>
-                  {batchLoading ? (
-                    <div className="text-[11px] text-gray-400">{tr('loading', 'Loading...')}</div>
-                  ) : (
-                    <div className="flex flex-wrap gap-1.5">
-                      {/* New is an Add-only choice; Remove and Set name an existing lot. */}
-                      {mode === 'add' ? <button type="button"
-                        className={`rounded-full border px-2.5 py-1 text-[11px] font-medium ${batchChoice === 'new' ? 'border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'border-gray-200 text-gray-600 dark:border-gray-600 dark:text-gray-400'}`}
-                        onClick={() => setBatchChoice('new')}>
-                        {tr('new_batch', '+ New received date')}
-                      </button> : null}
-                      {!lotChoices.length && mode !== 'add' ? <span className="text-[11px] text-gray-400">{mode === 'remove' ? tr('no_batches_with_stock', 'No received dates with stock in this branch') : tr('no_batches_for_branch', 'No received dates for this branch')}</span> : null}
-                      {lotChoices.map((batch) => (
-                        <button key={batch.id} type="button"
-                          className={`rounded-full border px-2.5 py-1 text-[11px] font-medium ${batchChoice === Number(batch.id) ? 'border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'border-gray-200 text-gray-600 dark:border-gray-600 dark:text-gray-400'}`}
-                          onClick={() => setBatchChoice(Number(batch.id))}>
-                          {batchDisplayLabel(batch, tr('batch', 'Received date'))} ({batch.quantity})
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                  {/* Preview only -- the backend recomputes the authoritative
-                      code from whichever date is actually submitted. */}
-                  {mode === 'add' ? <span className="mt-1 block text-[11px] text-gray-400">
-                    {batchChoice === 'new'
-                      ? `${tr('batch_code_preview', 'Received date code')}: ${dateToBatchCode(receivedDate) || '--'}`
-                      : tr('existing_lot_keeps_date', 'Tops up the selected received date — that date stays.')}
-                  </span> : null}
-                  {fastSetPreview ? <span className={`mt-1 block text-[11px] tabular-nums ${fastSetPreview.valid ? 'text-gray-400' : 'text-rose-600 dark:text-rose-300'}`}>
-                    {tr('lot_quantity', 'Received-date quantity')}: {fastSetPreview.beforeLotQuantity} → {fastSetPreview.afterLotQuantity} (Δ {fastSetPreview.delta >= 0 ? '+' : ''}{fastSetPreview.delta})
-                  </span> : null}
-                </div>
-              )}
-              {/* P3-L6: keep-or-destroy (remove) and sellable-or-tagged
-                  (add) as ONE compact row on every screen size. A Set gets
-                  the remove row only once its preview LOWERS the lot (loss
-                  rule, 24 Sep); the route refuses a tag on any other Set. */}
-              {mode !== 'set' || fastSetLowers ? (
-                <div className="mt-2">
-                  <StockConditionTagRow
-                    mode={mode === 'add' ? 'add' : 'remove'}
-                    value={conditionTag}
-                    onChange={setConditionTag}
-                    tr={tr}
-                    id="fast-stockin-condition-tag"
-                  />
-                </div>
-              ) : null}
-              <div className={`mt-2 grid grid-cols-2 gap-2 sm:items-end ${mode !== 'add' ? 'sm:grid-cols-[5rem_1fr]' : 'sm:grid-cols-[5rem_8.5rem_8rem_1fr]'}`}>
-                <label className="block"><span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{mode === 'set' ? tr('set_to', 'Set to') : tr('quantity', 'Qty')}</span><input type="number" min={mode === 'set' ? 0 : 1} step="1" className="input text-center text-sm" value={quantity} onChange={(event) => setQuantity(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') addLine() }} /></label>
-                {mode === 'add' && (canViewCosts || canEditCosts) ? <>
-                <label className="block"><span className="mb-1 block whitespace-nowrap text-[11px] font-medium text-gray-600 dark:text-gray-400">{tr('cost_price_usd', 'Cost price $')} <span className="text-red-500" aria-hidden="true">*</span></span><input type="number" min="0" step="0.0001" className="input text-sm" required disabled={!canEditCosts || freeGoods} value={freeGoods ? 0 : unitCost} onChange={(event) => {
-                  const next = event.target.value
-                  setUnitCost(next)
-                  setFreeGoods(freeGoods)
-                  // A new receipt price belongs to a new lot of this product.
-                  // A separate product requires an explicit independent choice.
-                  setCreatePriceVariant(false)
-                }} /></label>
-                <label className="block"><span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{tr('expiry_optional', 'Expiry (optional)')}</span><DateEntryInput className="text-sm" t={packLookup} ariaLabel={tr('expiry_optional', 'Expiry (optional)')} value={expiryDate} onChange={(iso) => setExpiryDate(iso)} /></label>
-                <div className="flex min-w-0 items-end gap-1.5">
-                  {unitCost.trim() !== '' ? <span className="mb-2 whitespace-nowrap text-[10px] tabular-nums text-gray-500 sm:text-[11px]">{tr('total_cost', 'Total cost')}: {usdSymbol}{(Math.max(0, Number(quantity) || 0) * Math.max(0, Number(unitCost) || 0)).toFixed(2)}</span> : null}
-                </div>
-                {/* N14-D: $0.00 is a claim the operator makes, never a default.
-                    Its own row under the inputs: inside the cost cell it made that
-                    cell taller than its siblings, and sm:items-end then lifted the
-                    cost input off the line the other inputs sit on. */}
-                <label className={`col-span-2 flex w-fit cursor-pointer items-center gap-1.5 rounded text-[11px] text-gray-600 sm:col-span-4 dark:text-gray-400 ${zeroCostNeedsDeclaration ? 'bg-amber-50 px-1 py-0.5 font-medium text-amber-900 ring-1 ring-amber-300 dark:bg-amber-950/40 dark:text-amber-200 dark:ring-amber-700' : ''}`} title={tr('stock_receipt_free_goods_hint', 'Tick only when the supplier gave these goods at no cost. The declaration is written onto the receipt.')}>
-                  <input type="checkbox" className="h-3.5 w-3.5" checked={freeGoods} disabled={!canEditCosts} onChange={(event) => { setFreeGoods(event.target.checked); if (event.target.checked) { setUnitCost('0'); setCreatePriceVariant(false) } }} />
-                  {tr('stock_receipt_free_goods', 'Free')}
-                </label>
-                </> : null}
-                {/* P3-L2: the reason, per line. A full row for add and set;
-                    beside Qty for a remove, whose row has the room. */}
-                <StockReasonField
-                  id="fast-stockin-reason"
-                  className={`col-span-2 ${mode === 'remove' ? 'sm:col-span-1' : 'sm:col-span-4'}`}
-                  label={<span className="inline-flex items-center gap-1">{tr('reason', 'Reason')}<InfoHint label={tr('reason', 'Reason')} text={tr('fast_stock_reason_hint', "Written on each line's stock movement exactly as typed. Leave blank to use the session label.")} /></span>}
-                  labelClassName="text-[11px] font-medium text-gray-600 dark:text-gray-400"
-                  value={reason}
-                  onChange={setReason}
-                  onEnter={addLine}
-                  savedReasons={savedReasons}
-                  placeholder={tr('reason_placeholder', 'e.g. Physical count, Damaged goods…')}
-                />
-              </div>
-              {/* Its own row: this queues a line, Complete in the footer is
-                  what writes. Sharing a grid cell with the running total made
-                  it read as a field decoration rather than an action. */}
-              <div className="mt-2 flex flex-wrap items-center justify-end gap-2">
-                {pendingReceiptGate ? (
-                  <span className="min-w-0 flex-1 text-right text-[11px] text-amber-700 dark:text-amber-300">
-                    {tr(STOCK_RECEIPT_GATE_KEYS[pendingReceiptGate], STOCK_RECEIPT_GATE_FALLBACKS[pendingReceiptGate])}
-                  </span>
-                ) : null}
-                <button type="button" className="btn-primary h-10 shrink-0 px-3 text-xs disabled:opacity-50" disabled={saving} onClick={addLine}>
-                  {editingKey ? tr('update_line', 'Update line') : `＋ ${tr('fast_stockin_add', 'Add & next')}`}
-                </button>
-              </div>
-              </>
-            ) : null}
-          </div>
-
-          {/* shipment header -- once */}
-          <div className="rounded-xl border border-gray-200 p-3 dark:border-gray-700">
-            <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
-              {tr('fast_stockin_header', 'This shipment (applies to every line)')}
-            </div>
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-3">
-              <label className="block">
-                <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{tr('branch', 'Branch')}</span>
-                <AppSelect
-                  value={branchId}
-                  onChange={(next) => setBranchId(next)}
-                  ariaLabel={tr('branch', 'Branch')}
-                  buttonClassName="h-9 w-full text-sm"
-                  optionClassName="text-sm"
-                  options={branchOptions}
-                />
-              </label>
-              {receiptFieldsRelevant ? <>
-              <label className="block">
-                <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{tr('received_date', 'Received date')}</span>
-                <DateEntryInput className="h-9 w-full text-sm" t={packLookup} ariaLabel={tr('received_date', 'Received date')} value={receivedDate} onChange={(iso) => setReceivedDate(iso)} />
-              </label>
-              <div className="col-span-2"><SupplierPickerField
-                value={supplier}
-                onChange={setSupplier}
+              <StockSessionLineEntry
                 tr={tr}
-                idPrefix="fast-stockin"
-                hint={tr('fast_stockin_supplier_hint', 'Recorded on every received date this session receives (first attribution sticks).')}
-                hintDisplay="tooltip"
-              /></div>
-              <div className="col-span-2 sm:col-span-4">
-                <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{tr('payment', 'Payment')}</span>
-                <div className="flex gap-1.5">
-                  {(['paid', 'credit'] as const).map((mode) => (
-                    <button key={mode} type="button"
-                      onClick={() => setPaymentStatus(mode)}
-                      className={`rounded-lg border px-3 py-2 text-xs transition-colors ${paymentStatus === mode
-                        ? 'border-blue-500 bg-blue-100/70 font-semibold text-blue-700 dark:border-blue-500 dark:bg-blue-900/40 dark:text-blue-300'
-                        : 'border-gray-200 text-gray-500 hover:border-gray-300 dark:border-gray-600 dark:text-gray-400'}`}>
-                      {mode === 'paid' ? tr('paid', 'Paid') : tr('on_credit', 'Not Yet Paid')}
-                    </button>
-                  ))}
-                  {paymentStatus === 'credit' ? (
-                    <DateEntryInput className="flex-1 text-sm" t={packLookup} ariaLabel={tr('due', 'due')} value={creditDueDate} onChange={(iso) => setCreditDueDate(iso)} />
-                  ) : null}
-                </div>
-              </div>
-              </> : null}
-            </div>
-          </div>
-
-          {/* what landed */}
-          {received.length > 0 ? (
-            <div className="rounded-xl border border-gray-200 p-3 dark:border-gray-700">
-              <div className="mb-2 flex items-center justify-between gap-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                <span>{tr('fast_stockin_received', 'Received this session')} ({successCount})</span>
-                {canViewCosts ? <span className="shrink-0 tabular-nums normal-case">{tr('total_cost', 'Total cost')}: {usdSymbol}{sessionCostTotal.toFixed(2)}</span> : null}
-              </div>
-              <div className="max-h-40 space-y-1 overflow-y-auto">
-                {received.map((line) => (
-                  <div key={line.key} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-gray-50 px-2 py-1.5 text-sm dark:bg-gray-900/50">
-                    {/* N26 sibling: the full name wraps -- never "…" on the one
-                        thing a queued line is read by; barcode under it. */}
-                    <span className="min-w-0 flex-1 text-gray-700 dark:text-gray-300">
-                      <span className="block break-words">{line.status === 'saved' ? '✅' : line.status === 'error' ? '⚠️' : line.status === 'saving' ? '⏳' : '•'} {line.productName} <span className={`ml-1 inline-block rounded px-1 py-0.5 align-middle text-[10px] font-semibold ${line.createdProduct ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-300' : 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-300'}`}>{line.createdProduct ? tr('stock_session_new_product', 'New') : tr('stock_session_existing_product', 'Existing')}</span> <span className={`whitespace-nowrap ${line.mode === 'remove' ? 'text-red-600 dark:text-red-400' : line.mode === 'set' ? 'text-amber-700 dark:text-amber-300' : ''}`}>{line.mode === 'remove' ? '−' : line.mode === 'set' ? '=' : '×'} {line.quantity} · {line.batchLabel}</span></span>
-                      {line.product.barcode ? <span className="block break-all dense-id text-[10px] text-gray-400">{line.product.barcode}</span> : null}
-                      {line.reason ? <span className="block break-words text-[10px] text-gray-500 dark:text-gray-400">{line.reason}</span> : null}
-                    </span>
-                    <span className="flex min-w-0 flex-wrap items-center justify-end gap-1">
-                      {/* A server error reason wraps rather than being squeezed
-                          out -- never a dead-end ellipsis on the only
-                          explanation a failed line gets. */}
-                      <span className={`break-words text-[10px] ${line.status === 'error' ? 'text-red-500' : 'text-gray-400'}`}>{line.detail}</span>
-                      {line.status !== 'saved' && !line.needsRemoval ? <button type="button" disabled={saving} onClick={() => editLine(line)} className="rounded p-1 text-gray-400 hover:bg-gray-200 hover:text-blue-600 dark:hover:bg-gray-700" aria-label={tr('edit', 'Edit')}><Pencil className="h-3.5 w-3.5" /></button> : null}
-                      {/* Migration 0192: a line the server has already recorded can only be removed -- Edit is hidden above and Remove is emphasised here, because that is the signpost the message tells the operator to look for. */}
-                      {line.status !== 'saved' ? <button type="button" disabled={saving} onClick={() => removeLine(line.key)} className={`rounded p-1 ${line.needsRemoval ? 'bg-red-50 text-red-600 dark:bg-red-900/20' : 'text-gray-400'} hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20`} aria-label={tr('remove', 'Remove')}><Trash2 className="h-3.5 w-3.5" /></button> : null}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ) : null}
-
+                packLookup={packLookup}
+                mode={mode}
+                busy={busy}
+                searchInputRef={searchInputRef}
+                query={query}
+                onQuery={(text) => { setQuery(text); setPicked(null); setScannedBarcode(''); setCreatePayload(null) }}
+                groups={candidateGroups.map((group) => ({ key: group.key, name: group.name, options: group.sellableItems.length || group.items.length, stock: group.stockTotal }))}
+                onOpenGroup={(key) => { const group = candidateGroups.find((entry) => entry.key === key); if (group) setSelectedGroup(group) }}
+                createText={createText}
+                onCreate={openCreate}
+                onScan={(value) => {
+                  const barcode = String(value || '').trim()
+                  setQuery(barcode)
+                  setPicked(null)
+                  setScannedBarcode(barcode)
+                }}
+                picked={picked}
+                pickedStock={branchQuantity}
+                pickedIsNew={Boolean(createPayload) || (picked ? createdProductIds.includes(String(picked.id)) : false)}
+                onClearPick={() => { setEditingKey(''); resetLine() }}
+                quantity={quantity}
+                onQuantity={setQuantity}
+                freeQuantity={freeQuantity}
+                onFreeQuantity={setFreeQuantity}
+                unitCost={unitCost}
+                onUnitCost={setUnitCost}
+                canViewCosts={canViewCosts}
+                canEditCosts={canEditCosts}
+                canReceive={canReceive}
+                sellingPrice={sellingPrice}
+                onSellingPrice={setSellingPrice}
+                canEditPrice={canEditPrice || Boolean(createPayload)}
+                expiryDate={expiryDate}
+                onExpiryDate={setExpiryDate}
+                lotOptions={lotOptions}
+                lotValue={String(batchChoice)}
+                onLot={onLot}
+                conditionTag={conditionTag}
+                onConditionTag={setConditionTag}
+                tagDisabled={mode === 'set' && !setLowers}
+                reason={reason}
+                onReason={setReason}
+                savedReasons={savedReasons}
+                onManageReasons={() => setReasonsOpen(true)}
+                onAdd={addLine}
+                editing={Boolean(editingKey)}
+                refusal={refusal ? refusalMessage : null}
+                invalidField={invalidField}
+              />
+              <StockSessionItems
+                lines={received}
+                tr={tr}
+                usdSymbol={usdSymbol}
+                canViewCosts={canViewCosts}
+                busy={busy}
+                editingKey={editingKey}
+                onEdit={editLine}
+                onRemove={removeLine}
+              />
+            </>
+          ) : currentStep === 'payment' ? (
+            <StockSessionPaymentStep
+              tr={tr}
+              packLookup={packLookup}
+              usdSymbol={usdSymbol}
+              busy={busy}
+              paymentStatus={paymentStatus}
+              onPaymentStatus={(next) => { setPaymentStatus(next); if (next === 'paid') setCreditDueDate('') }}
+              creditDueDate={creditDueDate}
+              onCreditDueDate={setCreditDueDate}
+              dueInvalid={paymentStatus === 'credit' && !creditDueDate.trim()}
+              canViewCosts={canViewCosts}
+              canEditCosts={canEditCosts}
+              paidAmount={paidAmount === '' ? String(itemsTotal) : paidAmount}
+              onPaidAmount={setPaidAmount}
+              onPaidBlur={() => matchPaid(false)}
+              paidInvalid={paymentRefusal === 'supplier_total_mismatch'}
+              itemsTotal={itemsTotal}
+              difference={difference}
+              lines={paymentLines}
+              onLineCost={setLineCost}
+              onMatch={() => matchPaid(true)}
+              onReset={resetCosts}
+              canReset={paymentLines.some((line) => line.typedUnitCost != null)}
+            />
+          ) : (
+            <StockSessionReviewStep tr={tr} usdSymbol={usdSymbol} canViewCosts={canViewCosts} summary={reviewSummary} reviews={reviews} />
+          )}
         </div>
 
-        {/* A plain footer after the modal-scroll body is already pinned: the
-            panel is flex-col and the body carries flex-1 with min-height 0.
-            One commit control at every breakpoint, so Complete never scrolls
-            out of reach behind a long queue. */}
-        <div className="flex flex-shrink-0 flex-wrap items-center gap-2 border-t border-gray-200 p-4 dark:border-gray-700">
-          <span className="text-[11px] tabular-nums text-gray-500 dark:text-gray-400">
-            {received.length} {tr('lines_queued', 'queued')}{canViewCosts ? ` · ${usdSymbol}${sessionCostTotal.toFixed(2)}` : ''}
-          </span>
-          <button type="button" tabIndex={-1}
-            title={tr('add_next_hint', 'Add & next queues this line; nothing is written until Complete.')}
-            aria-label={tr('add_next_hint', 'Add & next queues this line; nothing is written until Complete.')}
-            className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-gray-300 text-[10px] text-gray-400 dark:border-gray-600 dark:text-gray-500">i</button>
-          <button type="button" className="btn-primary ml-auto flex h-10 w-fit max-w-full items-center text-sm" disabled={saving || !received.length} onClick={commitSession}>
-            {saving ? `⏳ ${tr('saving_label', 'Saving…')}` : `✓ ${received.every((line) => line.mode === 'add') ? tr('complete_stock_session', 'Complete stock-in session') : tr('complete_stock_session_changes', 'Post stock changes')}`}{successCount > 0 ? ` — ${successCount} ${tr('lines_received', 'line(s) received')}` : ''}
-          </button>
-        </div>
+        <StockSessionFooter
+          tr={tr}
+          onBack={goBack}
+          itemsCount={received.length}
+          total={footerTotal}
+          primaryLabel={footerPrimary}
+          onPrimary={goNext}
+          primaryDisabled={footerDisabled}
+          primaryTitle={footerTitle}
+          saving={saving}
+        />
       </div>
       <UnsavedChangesPrompt guard={closeGuard} />
     </div>
 
-      {pendingCommit ? (
-        <ConfirmDialog
-          title={pendingAllAdd ? tr('complete_stock_session', 'Complete stock-in session') : tr('complete_stock_session_changes', 'Post stock changes')}
-          message={pendingAllAdd
-            ? tr('confirm_complete_stock_session', 'Receive {lines} product line(s), {units} total unit(s), into {branch}?')
-              .replace('{lines}', String(pendingCommit.length))
-              .replace('{units}', String(pendingCommit.reduce((total, line) => total + line.quantity, 0)))
-              .replace('{branch}', commitBranchName)
-            : tr('confirm_complete_stock_session_mixed', 'Post {lines} stock line(s) — {adds} add · {removes} remove · {sets} set — for {branch}?')
-              .replace('{lines}', String(pendingCommit.length))
-              .replace('{adds}', String(modeCount(pendingCommit, 'add')))
-              .replace('{removes}', String(modeCount(pendingCommit, 'remove')))
-              .replace('{sets}', String(modeCount(pendingCommit, 'set')))
-              .replace('{branch}', commitBranchName)}
-          items={commitReviewItems}
-          note={tr('confirm_complete_stock_session_note', 'This posts stock movements and creates or updates the related received dates.')}
-          confirmLabel={pendingAllAdd ? tr('complete_stock_session', 'Complete stock-in session') : tr('complete_stock_session_changes', 'Post stock changes')}
-          working={saving}
-          workingLabel={tr('saving_label', 'Saving…')}
-          onConfirm={() => void performCommit(pendingCommit)}
-          onClose={() => { if (!saving) setPendingCommit(null) }}
-          t={(key: string) => tr(key, key)}
-        />
-      ) : null}
-
-      {/* One shared option sheet, not a private nested Modal: this popup
-          used to show name / barcode / a branch-summed quantity / unit cost
-          in its own layout, so the same product looked different here than
-          in the POS. Branch, option and received date are now chosen the
-          same way on every surface. */}
       {selectedGroup ? (
         <ProductOptionSheet
-          // The lead row is the first OFFERED one, not group.leadProduct: a
-          // family whose root is filtered out of the offer still has a root,
-          // and handing that root in as `product` resolved the sheet to a row
-          // it never listed. SaleDetailModal's addCandidateGroups already
-          // takes the lead this way (lead = choices[0]).
           product={{
             ...(selectedGroupChoices[0] || selectedGroup.leadProduct || selectedGroup.items[0]),
             name: selectedGroup.name,
@@ -1387,7 +1133,6 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
           choices={selectedGroupChoices as never[]}
           t={(key: string) => tr(key, key)}
           fmtUSD={(value: number) => `${usdSymbol}${Number(value || 0).toFixed(2)}`}
-          // Stock-in receives into either canonical branch.
           intent="stock"
           activeBranchId={branchId || defaultBranchId || null}
           pickLabel={tr('select', 'Select')}
@@ -1395,8 +1140,17 @@ export default function FastStockInModal({ branchOptions, defaultBranchId, tr, n
           onPick={(candidate, selection) => pickFromGroup(candidate as unknown as ProductCandidate, selection)}
         />
       ) : null}
+
+      {reasonsOpen ? (
+        <Suspense fallback={null}>
+          <StockReasonsManagerModal
+            initialTab="adjust"
+            onChanged={reloadReasons}
+            onClose={() => { setReasonsOpen(false); reloadReasons() }}
+          />
+        </Suspense>
+      ) : null}
     </>,
     document.body,
   )
 }
-

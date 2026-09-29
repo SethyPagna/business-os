@@ -353,6 +353,17 @@ export type StockReceiptGateInput = {
   unitCostUsd?: number | string | null
   freeGoods?: boolean | null
   attribution?: string | null
+  /** Paid units. Quantity 0 with freeQuantity > 0 is a declared-free receipt. */
+  quantity?: number | string | null
+  /** Units the supplier gave at no cost (Stock Session "Free"). */
+  freeQuantity?: number | string | null
+}
+
+/** Owner, 30 Sep: "qty 0 + free" is the free-goods declaration, the same as ticking it. */
+export function receiptDeclaresFree(input: Pick<StockReceiptGateInput, 'freeGoods' | 'quantity' | 'freeQuantity'>): boolean {
+  if (input.freeGoods) return true
+  const quantity = input.quantity == null || String(input.quantity).trim() === '' ? Number.NaN : Number(input.quantity)
+  return quantity === 0 && Number(input.freeQuantity) > 0
 }
 
 /** '' when the receipt may be submitted, otherwise the reason it may not. */
@@ -365,7 +376,7 @@ export function stockReceiptGateCode(input: StockReceiptGateInput): '' | StockRe
   const cost = Number(typed)
   if (!Number.isFinite(cost)) return 'cost_required'
   if (cost < 0) return 'cost_negative'
-  if (cost === 0 && !input.freeGoods) return 'free_goods_required'
+  if (cost === 0 && !receiptDeclaresFree(input)) return 'free_goods_required'
   return ''
 }
 

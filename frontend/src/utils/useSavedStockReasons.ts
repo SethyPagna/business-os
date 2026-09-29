@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { getInventoryReasons } from '../api/methods.ts'
 
 // The saved-reason catalog (settings.inventory_saved_reasons, GET
@@ -27,14 +27,21 @@ export function savedStockReasonOptions(result: unknown, type: string): SavedSto
     : [])
 }
 
-export function useSavedStockReasons(type = 'adjust'): SavedStockReason[] {
+export function useSavedStockReasonCatalog(type = 'adjust'): { reasons: SavedStockReason[]; reload: () => void } {
   const [reasons, setReasons] = useState<SavedStockReason[]>([])
+  // Bumped by reload() after the reasons manager closes, so the options re-read.
+  const [generation, setGeneration] = useState(0)
   useEffect(() => {
     let cancelled = false
     getInventoryReasons()
       .then((result) => { if (!cancelled) setReasons(savedStockReasonOptions(result, type)) })
       .catch(() => { if (!cancelled) setReasons([]) })
     return () => { cancelled = true }
-  }, [type])
-  return reasons
+  }, [type, generation])
+  const reload = useCallback(() => setGeneration((current) => current + 1), [])
+  return { reasons, reload }
+}
+
+export function useSavedStockReasons(type = 'adjust'): SavedStockReason[] {
+  return useSavedStockReasonCatalog(type).reasons
 }

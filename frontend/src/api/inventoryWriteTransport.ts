@@ -140,6 +140,23 @@ export type FastStockInCommitLineResult = {
   [field: string]: unknown
 }
 
+// Stock Session (spec 11.3): what the supplier was paid for the receipt lines
+// of this attempt; the Worker refuses supplier_total_mismatch before any line.
+export type FastStockInSessionBlock = {
+  supplierTotalUsd: number
+  paymentStatus: 'paid' | 'credit'
+  creditDueDate?: string
+}
+
+/**
+ * One commit request's body. The session block rides only the first request of
+ * an attempt: a later round re-sends just the deferred lines, whose subset
+ * could never add up to the paid total.
+ */
+export function fastStockInCommitPayload<L>(batch: L[], session: FastStockInSessionBlock | null | undefined, firstRequest: boolean): { lines: L[]; session?: FastStockInSessionBlock } {
+  return firstRequest && session ? { lines: batch, session } : { lines: batch }
+}
+
 // POST /api/inventory/fast-stock-in/commit -- the whole fast stock-in
 // session in one request instead of one per line (FastStockInModal.tsx used
 // to `for (const line of pending) await adjustStock(...)/receiveBatchStock(...)`,
@@ -161,14 +178,18 @@ export type FastStockInCommitLineResult = {
 export async function commitFastStockIn(
   lines: FastStockInCommitLine[],
   onSettled?: (settled: FastStockInCommitSettled) => void,
+  options?: { session?: FastStockInSessionBlock | null },
 ): Promise<FastStockInCommitLineResult[] | null> {
   const wireLines = lines.map((line) => (
     line.wire === 'receive' ? { key: line.key, wire: line.wire, body: receiveBatchWireBody(line.body) } : line
   ))
+  let firstRequest = true
   const send = async (batch: typeof wireLines): Promise<FastStockInCommitLineResult[]> => {
+    const payload = fastStockInCommitPayload(batch, options?.session, firstRequest)
+    firstRequest = false
     const result = await route(
       'inventory:fastStockIn:commit',
-      () => apiFetch('POST', '/api/inventory/fast-stock-in/commit', { ...getDevicePayload(), lines: batch }),
+      () => apiFetch('POST', '/api/inventory/fast-stock-in/commit', { ...getDevicePayload(), ...payload }),
       null,
       true,
     ) as { results?: FastStockInCommitLineResult[] } | null
