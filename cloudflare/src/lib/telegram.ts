@@ -2051,8 +2051,7 @@ function unknownCommandReply(command: string): string {
 /**
  * `categories` is the owner's per-category switch set, threaded in from the
  * SAME `getTelegramConfig` read that supplies `language` just above it, so
- * `/report` and "Send today's summary" (sendTelegramTodaySummary passes them
- * too) give the same answer for the same day.
+ * `/report` leaves out the same categories as the pushed messages.
  */
 export async function telegramCommandReply(env: Env, text: string, nowMs: number = Date.now(), language: TelegramLanguage = 'both', categories?: TelegramCategories): Promise<string> {
   const parts = String(text || '').trim().split(/\s+/)
