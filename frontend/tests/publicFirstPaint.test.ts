@@ -199,6 +199,16 @@ await runTest('the storefront uses the cover, logo and About picture URLs as-is 
   assert.match(page, /versionedBusinessLogo=\{businessLogoUrl\}/)
 })
 
+await runTest('with prices hidden, the promo strip names the promotion instead of printing a price (P2-7)', () => {
+  const strip = code(read('../src/components/catalog/PortalPromoStrip.tsx'))
+  const priceText = between(strip, "label: String(product.name || ''),", 'color: evaluation.badge_color')
+  assert.match(priceText, /priceText: showPrices && evaluation\.active\s*\?\s*formatPrice\(/, 'a price is formatted only while prices are shown')
+  assert.match(priceText, /:\s*\(evaluation\.title \|\| copy\('promotionBadge', 'Promo'\)\)/)
+  assert.equal(strip.match(/formatPrice\(/g)?.length, 1, 'no other path prints a price')
+  const section = code(read('../src/components/catalog/CatalogProductsSection.tsx'))
+  assert.match(between(section, '<PortalPromoStrip', '/>'), /showPrices=\{previewConfig\.showPrices === true\}/)
+})
+
 // ---------------------------------------------------------------------------
 // Bounded failure (R1, C9): the pending state always ends.
 // ---------------------------------------------------------------------------
