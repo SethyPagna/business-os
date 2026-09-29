@@ -97,10 +97,19 @@ export class BroadcastHub {
 // The original 'global' instance was created without one; the business, D1
 // and the pinned Worker placement are all in APAC, so sockets now connect to
 // an APAC-hinted instance. broadcast() also posts to the legacy instance so
-// tabs still attached to it keep receiving updates until they reconnect;
-// drop LEGACY_HUB_NAME once one release has cycled every open tab.
+// tabs still attached to it keep receiving updates until they reconnect.
 const HUB_NAME = 'global-apac'
 const LEGACY_HUB_NAME = 'global'
+
+// No socket attaches to the legacy hub any more, so once it reports none it
+// never gains one again; from then on this isolate stops waking it.
+let legacyHubDrained = false
+
+async function reportedRecipients(response: Response): Promise<number | null> {
+  if (!response.ok) return null
+  const body = await response.json<{ recipients?: unknown }>().catch(() => null)
+  return typeof body?.recipients === 'number' ? body.recipients : null
+}
 
 export function broadcastHubStub(env: Env): DurableObjectStub {
   return env.BROADCAST_HUB.get(env.BROADCAST_HUB.idFromName(HUB_NAME), { locationHint: 'apac' })
@@ -118,10 +127,15 @@ export async function broadcast(env: Env, channel: BroadcastChannel, payload?: u
       headers: { 'Content-Type': 'application/json' },
       body,
     })
-    await Promise.all([
+    if (legacyHubDrained) {
+      await post(broadcastHubStub(env))
+      return
+    }
+    const [, legacy] = await Promise.all([
       post(broadcastHubStub(env)),
       post(env.BROADCAST_HUB.get(env.BROADCAST_HUB.idFromName(LEGACY_HUB_NAME))),
     ])
+    if (await reportedRecipients(legacy) === 0) legacyHubDrained = true
   } catch (error) {
     console.error('[broadcastHub] failed to broadcast', channel, error)
   }
