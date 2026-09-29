@@ -19,6 +19,11 @@
 
 export const MAX_LINK_URL_LENGTH = 500
 
+// Browsers strip tab and newline before reading the scheme, so 'java\tscript:alert(1)' runs.
+const CONTROL_CHARACTER = /[\u0000-\u001f\u007f]/
+// URL parsing reads '\' as '/', so '/\host' opens another origin just like '//host'.
+const PROTOCOL_RELATIVE_START = /^\/(?:[/\\]|%2f|%5c)/i
+
 export function isSafeLinkUrl(value: unknown): boolean {
   return normalizeSafeLinkUrl(value) !== null
 }
@@ -30,14 +35,9 @@ export function isSafeLinkUrl(value: unknown): boolean {
  * for, not one that is silently turned into a different destination.
  */
 export function normalizeSafeLinkUrl(value: unknown): string | null {
-  const raw = String(value ?? '').trim()
+  const raw = typeof value === 'string' ? value.trim() : ''
   if (!raw || raw.length > MAX_LINK_URL_LENGTH) return null
-  // Control characters (including the tab/newline browsers strip out of a
-  // URL before resolving the scheme -- 'java\tscript:alert(1)' is a working
-  // javascript: URL in several engines).
-  if (/[\u0000-\u001f\u007f]/.test(raw)) return null
-
-  if (raw.startsWith('//')) return null
+  if (CONTROL_CHARACTER.test(raw) || raw.includes('\\') || PROTOCOL_RELATIVE_START.test(raw)) return null
   if (raw.startsWith('/')) return raw
 
   let parsed: URL
@@ -56,21 +56,28 @@ export function normalizeSafeLinkUrl(value: unknown): string | null {
 // let that host log every storefront visitor.
 const MAX_UPLOAD_PATH_LENGTH = 500
 const UPLOADS_PREFIX = '/uploads/'
+// Controls, invisible format characters (bidi overrides, zero-width, BOM) and '\'.
+const UNSAFE_UPLOAD_PATH_CHARACTER = /[\p{Cc}\p{Cf}\\]/u
+
+function percentDecoded(text: string): string | null {
+  try {
+    return decodeURIComponent(text)
+  } catch {
+    return null
+  }
+}
+
+function isFileNameSegment(segment: string): boolean {
+  const name = percentDecoded(segment)
+  return name !== null && name !== '.' && name !== '..' && !name.includes('/')
+}
 
 export function normalizePortalUploadPath(value: unknown): string | null {
-  const raw = String(value ?? '').trim()
-  if (!raw || raw.length > MAX_UPLOAD_PATH_LENGTH) return null
-  if (/[\u0000-\u001f\u007f\\]/.test(raw) || raw.includes('//')) return null
+  const raw = typeof value === 'string' ? value.trim() : ''
+  if (!raw || raw.length > MAX_UPLOAD_PATH_LENGTH || raw.includes('//')) return null
+  const decoded = percentDecoded(raw)
+  if (decoded === null || UNSAFE_UPLOAD_PATH_CHARACTER.test(decoded)) return null
   const pathPart = raw.split(/[?#]/)[0]
   if (!pathPart.startsWith(UPLOADS_PREFIX) || pathPart.length <= UPLOADS_PREFIX.length) return null
-  for (const segment of pathPart.split('/')) {
-    let decoded = ''
-    try {
-      decoded = decodeURIComponent(segment)
-    } catch {
-      return null
-    }
-    if (decoded === '.' || decoded === '..' || /[\u0000-\u001f\u007f/\\]/.test(decoded)) return null
-  }
-  return raw
+  return pathPart.split('/').every(isFileNameSegment) ? raw : null
 }

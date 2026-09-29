@@ -19,6 +19,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { safeLinkUrl, isSafeLinkUrl, MAX_LINK_URL_LENGTH } from '../src/utils/safeLinkUrl.ts'
+import { normalizeSafeLinkUrl as workerNormalize } from '../../cloudflare/src/lib/safeLinkUrl.ts'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const repo = path.join(here, '..', '..')
@@ -42,6 +43,17 @@ const CASES: Array<[string, string | null]> = [
   ['file:///c:/windows/system32', null],
   // Protocol-relative reads as a path and behaves as another origin.
   ['//evil.example/x', null],
+  // Browsers read '\' as '/', so these are '//evil.example' too.
+  ['/\\evil.example/x', null],
+  ['\\\\evil.example/x', null],
+  ['/%2fevil.example/x', null],
+  ['/%2F/evil.example/x', null],
+  ['/%5cevil.example/x', null],
+  ['/%5C/evil.example/x', null],
+  ['https://example.com\\@evil.example/x', null],
+  ['/promotions\\x', null],
+  ['/promotions/%2fsale', '/promotions/%2fsale'],
+  ['/', '/'],
   // Not a URL and not site-relative: refuse rather than invent an origin.
   ['example.com/promo', null],
   ['', null],
@@ -60,20 +72,11 @@ for (const [input, expected] of CASES) {
 assert.equal(safeLinkUrl('java\tscript:alert(1)'), null, 'a control character inside the scheme must not slip through')
 assert.equal(safeLinkUrl('java\nscript:alert(1)'), null)
 assert.equal(safeLinkUrl('https://example.com/' + 'a'.repeat(MAX_LINK_URL_LENGTH)), null, 'over the length cap is refused')
+const unprintable = JSON.parse('{"toString":"x"}')
+assert.equal(safeLinkUrl(unprintable), null, 'a stored value String() throws on is refused, never thrown')
+assert.equal(workerNormalize(unprintable), null)
 
 // --- parity: the Worker must answer the same way --------------------------
-// The Worker module is TypeScript on the other side of the repo and imports
-// nothing, so its body can be evaluated directly rather than mocked.
-const workerSource = fs.readFileSync(path.join(repo, 'cloudflare', 'src', 'lib', 'safeLinkUrl.ts'), 'utf8')
-const workerBody = workerSource
-  .replace(/export const /g, 'const ')
-  .replace(/export function /g, 'function ')
-  .replace(/: unknown/g, '')
-  .replace(/: string \| null/g, '')
-  .replace(/: boolean/g, '')
-  .replace(/let parsed: URL/g, 'let parsed')
-const workerNormalize = new Function(`${workerBody}; return normalizeSafeLinkUrl`)() as (value: unknown) => string | null
-
 for (const [input, expected] of CASES) {
   assert.equal(workerNormalize(input), expected, `worker normalizeSafeLinkUrl(${JSON.stringify(input)})`)
   assert.equal(workerNormalize(input), safeLinkUrl(input), `worker and frontend disagree on ${JSON.stringify(input)}`)
@@ -92,4 +95,4 @@ assert.doesNotMatch(banner, /window\.open\(promo\.link_url/, 'the raw stored val
 const modal = fs.readFileSync(path.join(here, '..', 'src', 'components', 'catalog', 'ManagePromotionsModal.tsx'), 'utf8')
 assert.match(modal, /isSafeLinkUrl\(form\.link_url\)/, 'the editor must tell the author what is wrong before the Worker 400s')
 
-console.log(`PASS promotion link_url: ${CASES.length + 3} cases agree across the storefront guard, the Worker guard and both call sites`)
+console.log(`PASS promotion link_url: ${CASES.length + 4} cases agree across the storefront guard, the Worker guard and both call sites`)
