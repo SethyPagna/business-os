@@ -10,9 +10,8 @@ export const RETIRED_PORTAL_CACHE_KEY = 'business-os-catalog-portal-cache'
 export const PUBLIC_PORTAL_BOOTSTRAP_TIMEOUT_MS = 15_000
 export const PUBLIC_PORTAL_CONFIG_TIMEOUT_MS = 8_000
 
-// The Worker's paint allow-list (PUBLIC-PAINT-FINAL D2). Prices, money, points,
-// submissions, the AI prompt and stock settings are never on it: product cards
-// wait for the bootstrap, which carries the full config with the products.
+// The Worker's paint allow-list (PUBLIC-PAINT-FINAL D2): never prices, money, points, submissions,
+// the AI prompt or stock settings; product cards wait for the bootstrap, which carries the full config.
 const PAINT_CONFIG_SCHEMA: Readonly<Record<string, PaintValueKind>> = {
   businessName: 'text',
   title: 'text',
