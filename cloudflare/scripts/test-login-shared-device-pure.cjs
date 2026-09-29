@@ -95,6 +95,15 @@ const signIn = (h, username, password, deviceId, ip = '203.0.113.20') =>
     assert.equal(verified.body.sharedDevice, true)
   })
 
+  await check('the authenticator step answers success like /login: the app completes the sign-in on it', async () => {
+    const h = harnessWithStaff()
+    const first = await signIn(h, 'vanna', 'vanna-pass-13', 'phone-13')
+    const verified = await h.request('/otp/verify', 'POST', { userId: 13, token: await h.codeAt(SECRET), otpChallenge: first.body.otpChallenge, deviceId: 'phone-13' }, { ip: '203.0.113.20' })
+    assert.equal(verified.status, 200, JSON.stringify(verified.body))
+    assert.equal(verified.body.success, true, 'Login.tsx handleOtp only completes on success && user')
+    assert.equal(verified.body.user.username, 'vanna')
+  })
+
   await check('the authenticator step on a personal device is not shared', async () => {
     const h = harnessWithStaff()
     seenOnDevice(h, 13, 'phone-13')

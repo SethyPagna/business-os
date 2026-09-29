@@ -833,6 +833,7 @@ app.post('/otp/verify', async (c) => {
   // their grants on the ROLE, and a login payload without them resolves to
   // no permissions whenever the bootstrap re-fetch can't run.
   return c.json({
+    success: true,
     user: { ...buildUserPayload(user), role_code: user.role_code, role_permissions: user.role_permissions, must_change_password: (await accountMustChangePassword(c.env, user.id)) ? 1 : 0 },
     sessionExpiresAt: session.expiresAt,
     authMode: 'cookie',
