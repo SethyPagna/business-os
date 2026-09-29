@@ -9,7 +9,9 @@
 //
 // Part A drives the REAL lib/passwordPolicy.ts. Part B drives the REAL
 // routes/users.ts (create, self change, admin reset) over in-memory SQLite
-// with a bcrypt stub that records exactly what was hashed.
+// with a bcrypt stub that records exactly what was hashed. Part C drives the
+// REAL routes/auth.ts resets (e-mail link, authenticator code) over the full
+// migrated schema: a refused password spends neither the link nor the code.
 //
 // Run: node scripts/test-new-password-policy-pure.cjs
 
@@ -17,7 +19,9 @@ const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
 const ts = require('typescript')
+const bcrypt = require('bcryptjs')
 const { openDb } = require('./harness/d1compat.cjs')
+const { createAuthHarness } = require('./harness/load_auth_route.cjs')
 
 function load(rel, overrides = {}) {
   const sourcePath = path.join(__dirname, '..', 'src', rel)
@@ -214,6 +218,63 @@ const REFUSED = [
     assert.doesNotMatch(source, /String\(body\.password \|\| ''\)\.trim\(\)/)
     assert.doesNotMatch(source, /String\(body\.newPassword \|\| body\.new_password \|\| ''\)\.trim\(\)/)
     assert.equal((source.match(/newPasswordProblem\(/g) || []).length, 2, 'create and the shared change/reset handler')
+  })
+
+  // ---- Part C: routes/auth.ts resets ---------------------------------------
+  const OTP_SECRET = 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ'
+  const RESET_USER = { id: 21, username: 'dara', name: 'Dara', password: 'old-pass-21', otpSecret: OTP_SECRET }
+  function resetHarness() {
+    const consumed = []
+    const h = createAuthHarness({
+      overrides: {
+        '../lib/verification': {
+          issuePasswordResetLink: async () => ({ issued: false }),
+          consumePasswordResetLink: async (_env, token) => { consumed.push(token); return { ok: true, userId: RESET_USER.id } },
+          normalizeEmail: (value) => String(value || '').trim().toLowerCase(),
+          isEmailConfigured: () => false,
+        },
+      },
+    })
+    h.addUser(RESET_USER)
+    return { h, consumed }
+  }
+  const passwordIs = (h, plain) => bcrypt.compareSync(plain, h.userRow(RESET_USER.id).password)
+
+  await check('e-mail link reset refuses each problem with its code, before the link is spent', async () => {
+    for (const { password, code } of REFUSED) {
+      const { h, consumed } = resetHarness()
+      const res = await h.request('/password-reset/complete', 'POST', { accessToken: 'link-token', newPassword: password })
+      assert.equal(res.status, 400, `${JSON.stringify(password)} -> ${JSON.stringify(res.body)}`)
+      assert.equal(res.body.success, false)
+      assert.equal(res.body.code, code, JSON.stringify(password))
+      assert.deepEqual(consumed, [], 'the link can still be used with a valid password')
+      assert.equal(passwordIs(h, 'old-pass-21'), true)
+    }
+  })
+
+  await check('authenticator reset refuses each problem with its code, before the code is checked', async () => {
+    for (const { password, code } of REFUSED) {
+      const { h } = resetHarness()
+      const res = await h.request('/password-reset/otp', 'POST', { identifier: 'dara', otp: await h.codeAt(OTP_SECRET), newPassword: password })
+      assert.equal(res.status, 400, `${JSON.stringify(password)} -> ${JSON.stringify(res.body)}`)
+      assert.equal(res.body.success, false)
+      assert.equal(res.body.code, code, JSON.stringify(password))
+      assert.equal(passwordIs(h, 'old-pass-21'), true)
+    }
+  })
+
+  await check('valid resets store the new password exactly as typed and answer the canonical username', async () => {
+    let { h, consumed } = resetHarness()
+    let res = await h.request('/password-reset/complete', 'POST', { accessToken: 'link-token', newPassword: 'fresh link 22' })
+    assert.equal(res.status, 200, JSON.stringify(res.body))
+    assert.equal(res.body.username, 'dara')
+    assert.deepEqual(consumed, ['link-token'])
+    assert.equal(passwordIs(h, 'fresh link 22'), true)
+    ;({ h } = resetHarness())
+    res = await h.request('/password-reset/otp', 'POST', { identifier: 'DARA', otp: await h.codeAt(OTP_SECRET), newPassword: KHMER_KA.repeat(24) })
+    assert.equal(res.status, 200, JSON.stringify(res.body))
+    assert.equal(res.body.username, 'dara', 'the account username, not what was typed')
+    assert.equal(passwordIs(h, KHMER_KA.repeat(24)), true)
   })
 
   if (failures) { console.error(`${failures} failing`); process.exit(1) }

@@ -216,7 +216,7 @@ async function check(name, fn) {
   await check('link is refused when the finishing browser has no session', async () => {
     const { status, html } = await callback(null)
     assert.equal(status, 400)
-    assert.match(html, /Sign in to Business OS in this browser/)
+    assert.match(html, /Sign in to Leang Cosmetics Admin in this browser/)
     assert.equal(googleSubjectOf(2), null)
   })
 
@@ -307,6 +307,12 @@ async function check(name, fn) {
     }, startEnv(), ctx)
     assert.equal(res.status, 200, await res.clone().text())
     assert.ok((await res.json()).url)
+  })
+
+  await check('the Google return pages name the staff app as the owner named it (28 Sep: Leang Cosmetics Admin)', async () => {
+    const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'auth.ts'), 'utf8')
+    assert.doesNotMatch(source, /Business OS/)
+    assert.match(source, /const ADMIN_APP_NAME = 'Leang Cosmetics Admin'/)
   })
 
   if (failures) { console.error(`${failures} failing`); process.exit(1) }
