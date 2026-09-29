@@ -299,8 +299,9 @@ const scopeOf = (call) => call.body.scope
     // AbortSignal.timeout's timer does not keep Node alive; this one does, until the abort arrives.
     const hung = await status((init) => new Promise((resolve, reject) => {
       const keepAlive = setTimeout(() => reject(new Error('the status call was never aborted')), 10000)
-      init.signal.addEventListener('abort', () => { clearTimeout(keepAlive); reject(init.signal.reason) })
+      init.signal?.addEventListener('abort', () => { clearTimeout(keepAlive); reject(init.signal.reason) })
     }))
+    assert.ok(calls.find((call) => call.method === 'getWebhookInfo').signal instanceof AbortSignal, 'getWebhookInfo carries a timeout signal')
     assert.equal(hung.commands, 'unknown')
     assert.ok(Date.now() - started < 6000, 'a hung getWebhookInfo gives up after about three seconds')
     const tokenless = await status(null, { BUSINESS_OS_ADMIN_URL: ADMIN_URL })
