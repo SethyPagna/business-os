@@ -69,10 +69,11 @@ const PUBLIC_PORTAL_AI_TIMEOUT_MS = 25000
 // Fixed storefront browser branding for the live storefront, served as
 // STATIC same-origin files (installable, unlike the old runtime blob: manifest
 // -- see the brand effect below). Not per-merchant customizable (11.14-16).
+const STOREFRONT_NAME = 'Leang Cosmetics'
+const STOREFRONT_HOME_SCREEN_NAME = 'Leang'
 const STOREFRONT_ICON = '/leang-cosmetics-icon-512.png'
 const STOREFRONT_APPLE_TOUCH_ICON = '/leang-cosmetics-apple-touch-icon-v1.png'
 const STOREFRONT_MANIFEST = '/portal-manifest.json'
-const STOREFRONT_HOME_SCREEN_NAME = 'Leang'
 const PUBLIC_PORTAL_CACHE_KEY = 'business-os-catalog-portal-cache'
 const PUBLIC_PORTAL_BOOTSTRAP_ELEMENT_ID = 'business-os-portal-bootstrap'
 const PUBLIC_PORTAL_CACHE_MAX_AGE_MS = 1000 * 60 * 20
@@ -202,12 +203,10 @@ type CatalogApi = {
   askPortalAi?: (payload?: Record<string, unknown>) => Promise<unknown>
 }
 
-const STOREFRONT_NAME = 'Leang Cosmetics'
-
 const DEFAULT_PUBLIC_CONFIG: PortalConfig = {
   aboutBlocks: [],
   aiEnabled: true,
-  businessName: STOREFRONT_NAME,
+  businessName: 'Leang Beauty',
   contactLinkLabels: { messenger: 'Messenger', telegram: 'Telegram', whatsapp: 'WhatsApp', phone: '', instagram: 'Instagram' },
   contactLinks: { messenger: '', telegram: '', whatsapp: '', phone: '', instagram: '' },
   exchangeRate: 4100,
@@ -265,7 +264,7 @@ const DEFAULT_PUBLIC_CONFIG: PortalConfig = {
   stockThresholdMode: 'product',
   submissionEnabled: true,
   submissionRewardPoints: 5,
-  title: STOREFRONT_NAME,
+  title: 'Leang Beauty',
   translateWidgetEnabled: true,
 }
 

@@ -152,7 +152,9 @@ for (const swapped of ['link[rel="icon"]', 'link[rel="manifest"]', 'link[rel="ap
 assert.match(publicCatalog, /import \{ isAdminHostname \} from '\.\.\/\.\.\/app\/pathRouting\.ts'/, 'the guard uses the one shared host predicate')
 assert.match(publicCatalog, /const STOREFRONT_HOME_SCREEN_NAME = 'Leang'/, 'the iPhone home-screen label is the owner\'s short name')
 assert.match(brandEffect, /appleTitle\.setAttribute\('content', STOREFRONT_HOME_SCREEN_NAME\)/)
-assert.doesNotMatch(publicCatalog, /Leang Beauty/, 'the retired storefront name is gone from the storefront')
+assert.match(publicCatalog, /const STOREFRONT_NAME = 'Leang Cosmetics'/)
+assert.match(brandEffect, /displayConfig\.title \|\| STOREFRONT_NAME\)/, 'the tab title falls back to the storefront name')
+assert.doesNotMatch(brandEffect, /Leang Beauty/, 'the retired storefront name is gone from the storefront identity')
 
 // --- every referenced icon file exists ------------------------------------
 
