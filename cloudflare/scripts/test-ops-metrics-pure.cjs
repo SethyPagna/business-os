@@ -44,7 +44,6 @@ function requestMetricsModule() {
   return m.exports
 }
 
-// Answers each query by its template, and records every request.
 function fakeAnalytics(answers) {
   const calls = []
   const fetchImpl = async (url, init) => {

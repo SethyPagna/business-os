@@ -35,7 +35,6 @@ process.on('exit', () => {
   if (!finished) { process.stderr.write(`test-telegram-command-menu-pure: stopped after ${checks} checks with work still pending\n`); process.exitCode = 1 }
 })
 
-// ---- a real schema behind D1's prepare/batch shape ------------------------------------------------------------
 const MIGRATED = (() => {
   const db = new DatabaseSync(':memory:')
   db.exec('PRAGMA foreign_keys = OFF;')
@@ -74,7 +73,6 @@ function useSettings(settings) {
 }
 const setting = (key) => MIGRATED.prepare('SELECT value FROM settings WHERE key = ?').get(key)?.value
 
-// ---- modules ----------------------------------------------------------------------------------------------------
 const businessDateWindow = load('lib/businessDateWindow.ts')
 const moneyPrecision = load('lib/moneyPrecision.ts')
 const reportMoneyPrecision = load('lib/reportMoneyPrecision.ts', { './moneyPrecision': moneyPrecision })
@@ -131,7 +129,6 @@ const WEBHOOK_URL = `${ADMIN_URL}/api/telegram/webhook`
 const env = { TELEGRAM_BOT_TOKEN: TOKEN, BUSINESS_OS_ADMIN_URL: ADMIN_URL }
 const BASE = { telegram_chat_id: `${ALERTS_CHAT},${OTHER_CHAT}`, telegram_language: 'both' }
 
-// ---- a fetch stub: records every Telegram call, answers per method -------------------------------------------------
 let calls = []
 const defaultAnswer = (method) => {
   if (method === 'getChatMember') return { status: 200, json: { ok: true, result: { status: 'administrator' } } }
@@ -178,7 +175,6 @@ const scopeOf = (call) => call.body.scope
 ;(async () => {
   const log = captureConsole()
   try {
-    // ---- 1. the plan (pure) ----------------------------------------------------------------------------------------
     const describe = (doc) => `${doc.en}|${doc.km}`
     const group = menu.commandMenuPlan({ alertsChatId: ALERTS_CHAT, chatIds: [ALERTS_CHAT, OTHER_CHAT], describe })
     assert.deepEqual(group.map((call) => [call.role, call.method, scopeOf(call)]), [
@@ -230,7 +226,6 @@ const scopeOf = (call) => call.body.scope
     }
     pass('plan: group = members, admins (all 9), each other chat (no /settopic, /topics), then four cleanup deletes; DM = one chat scope; ids only from settings; names are bare; descriptions follow the language')
 
-    // ---- 2. running the plan -------------------------------------------------------------------------------------------
     const plan = menu.commandMenuPlan({ alertsChatId: ALERTS_CHAT, chatIds: [ALERTS_CHAT, OTHER_CHAT], describe })
     const failWhen = (test, answer = { status: 400, json: { ok: false, description: 'Bad Request: chat not found' } }) => (method, body) => (test(method, body) ? answer : defaultAnswer(method))
     const isScope = (type, chat) => (method, body) => method === 'setMyCommands' && body.scope.type === type && (!chat || body.scope.chat_id === chat)
@@ -251,7 +246,6 @@ const scopeOf = (call) => call.body.scope
     assert.deepEqual(await menu.runCommandMenu(TOKEN, plan), { menu: 'partial', failed: ['cleanup'] }, 'a thrown fetch is a failed call, not a crash')
     pass('runner: one fetch per planned call with a timeout signal; alerts or admins failing = failed and no cleanup; another chat or cleanup failing = partial')
 
-    // ---- 3. who calls it -----------------------------------------------------------------------------------------------
     for (const message of [{ text: '/help', chat: { id: Number(ALERTS_CHAT) }, from: { id: 42 } }, { text: '/report', chat: { id: Number(ALERTS_CHAT) }, from: { id: 42 } }, inTopic('/settopic sales')]) {
       reset()
       const out = await webhook(message)
@@ -280,7 +274,6 @@ const scopeOf = (call) => call.body.scope
     assert.ok(!JSON.stringify(routeAudits).includes(OTHER_CHAT), 'the audit row names roles, never a chat id')
     pass('entry points: the webhook makes no menu call; Send test = sendMessage, setWebhook, menu; connect-commands = setWebhook, menu; a failed alerts scope is 400 telegram_menu_failed there and a warning on Send test')
 
-    // ---- 4. commands status ------------------------------------------------------------------------------------------------
     const status = async (answer, runEnv = env, settings = BASE) => {
       reset(settings)
       if (answer) respond = (method, body, init) => (method === 'getWebhookInfo' ? answer(init) : defaultAnswer(method))
@@ -309,7 +302,6 @@ const scopeOf = (call) => call.body.scope
     assert.ok(!methods().includes('getWebhookInfo'), 'no token: Telegram is not asked')
     pass('status: commands is connected / not_connected (empty or another url) / unknown (HTTP error, ok:false, a 3 s timeout, no token); nothing of WebhookInfo is returned')
 
-    // ---- 5. the webhook never 5xxs ---------------------------------------------------------------------------------------
     log.lines.length = 0
     reset(); respond = (method) => (method === 'sendMessage' ? { status: 429, json: { ok: false, description: 'Too Many Requests: retry after 5' } } : defaultAnswer(method))
     out = await webhook({ text: '/help', chat: { id: Number(ALERTS_CHAT) }, from: { id: 42 } })
@@ -326,7 +318,6 @@ const scopeOf = (call) => call.body.scope
     assert.ok(!log.lines.join('\n').includes(TOKEN) && !warned.join('\n').includes(ALERTS_CHAT), 'no token or chat id in the log')
     pass('webhook: a reply Telegram refuses (429) still answers 200 {ok:true}; a /settopic whose reply failed is saved once with one audit row; the log carries the code only')
 
-    // ---- 6. the /settopic refresh leaves the request path ------------------------------------------------------------------
     let release
     broadcastImpl = () => new Promise((resolve) => { release = resolve })
     reset()
@@ -358,7 +349,6 @@ const scopeOf = (call) => call.body.scope
     broadcastImpl = async () => {}
     pass('waitUntil: the topic save and audit resolve before the broadcast; without one the refresh is awaited; the webhook passes the request\'s waitUntil')
 
-    // ---- 7. the admin gate ------------------------------------------------------------------------------------------------
     assert.equal(permissions.hasPermission(MANAGER, 'settings'), true, 'the manager holds the full settings grant')
     assert.equal(permissions.isAdminControlUser(MANAGER), false)
     sessionUser = MANAGER
@@ -373,7 +363,6 @@ const scopeOf = (call) => call.body.scope
     assert.equal((await request('GET', '/api/telegram/status')).status, 200)
     pass('gate: a manager with the full settings grant gets 403 on status, test, today-summary and connect-commands; an administrator passes (the Settings screen shows Telegram to administrators only)')
 
-    // ---- 8. coded errors, same words ---------------------------------------------------------------------------------------
     assert.deepEqual([...telegram.TELEGRAM_ERROR_CODES].sort(), ['telegram_admin_url_invalid', 'telegram_chat_missing', 'telegram_menu_failed', 'telegram_rejected', 'telegram_token_missing', 'telegram_webhook_failed'])
     const failure = async (url, { settings = BASE, runEnv = env, answer } = {}) => {
       reset(settings)
@@ -399,7 +388,6 @@ const scopeOf = (call) => call.body.scope
     assert.deepEqual([res.status, res.json.code], [400, 'telegram_rejected'])
     pass('codes: token missing, chat missing, admin url invalid, webhook failed (HTTP and ok:false), rejected (test and today-summary) and menu failed, each with the message it always had')
 
-    // ---- 9. housekeeping ----------------------------------------------------------------------------------------------------
     for (const rel of ['lib/telegram.ts', 'lib/telegramLang.ts']) assert.ok(!/evening push/.test(fs.readFileSync(path.join(root, 'src', rel), 'utf8')), `${rel}: no evening push exists`)
     reset({ ...BASE, telegram_topic_alerts: '9008' })
     let first = true
