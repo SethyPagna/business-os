@@ -1,5 +1,6 @@
 import Eye from 'lucide-react/dist/esm/icons/eye.js'
 import Upload from 'lucide-react/dist/esm/icons/upload.js'
+import InfoHint from '../shared/InfoHint'
 import { createInitialUploadState } from '../../utils/mediaUpload.ts'
 
 type CatalogUploadState = ReturnType<typeof createInitialUploadState>
@@ -8,10 +9,14 @@ type CatalogImageFieldProps = {
   value?: string | null
   onUpload: () => void
   onChooseExisting?: (() => void) | null
-  onChange: (value: string) => void
+  onChange?: (value: string) => void
   onClear: () => void
   onPreview: () => void
   fieldId: string
+  allowLink?: boolean
+  infoHint?: string
+  error?: string
+  squarePreview?: boolean
   uploadLabel?: string
   chooseLabel?: string
   clearLabel?: string
@@ -35,6 +40,10 @@ export default function CatalogImageField({
   onClear,
   onPreview,
   fieldId,
+  allowLink = true,
+  infoHint = '',
+  error = '',
+  squarePreview = false,
   uploadLabel = 'Upload',
   chooseLabel = 'Files',
   clearLabel = 'Clear',
@@ -53,11 +62,20 @@ export default function CatalogImageField({
     ? 'uploaded-image-preview'
     : rawValue
   const isUploading = uploadState?.status === 'uploading'
+  const labelId = `${fieldId}-label`
+  const errorId = `${fieldId}-error`
 
   return (
-    <div className="space-y-2">
-      <label htmlFor={fieldId} className="block text-sm font-medium text-slate-700">{label}</label>
-      <input id={fieldId} name={fieldId} autoComplete="off" className="input" value={displayValue} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} />
+    <div className="space-y-2" data-testid={`${fieldId}-field`} role={allowLink ? undefined : 'group'} aria-labelledby={allowLink ? undefined : labelId}>
+      <div className="flex items-center gap-1.5">
+        {allowLink
+          ? <label id={labelId} htmlFor={fieldId} className="block text-sm font-medium text-slate-700">{label}</label>
+          : <span id={labelId} className="block text-sm font-medium text-slate-700">{label}</span>}
+        {infoHint ? <InfoHint label={label} text={infoHint} /> : null}
+      </div>
+      {allowLink ? (
+        <input id={fieldId} name={fieldId} autoComplete="off" className="input" value={displayValue} onChange={(event) => onChange?.(event.target.value)} placeholder={placeholder} aria-describedby={error ? errorId : undefined} />
+      ) : null}
       <div className="flex flex-wrap gap-2">
         <button type="button" className="btn-secondary text-sm" onClick={onUpload} disabled={isUploading}>
           <Upload className="mr-2 inline h-4 w-4" />
@@ -78,6 +96,7 @@ export default function CatalogImageField({
         ) : null}
       </div>
       {hint ? <p className="text-xs text-slate-500">{hint}</p> : null}
+      {error ? <p id={errorId} role="alert" className="rounded-2xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{error}</p> : null}
       {isUploading ? (
         <div className="rounded-2xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-700">
           <div className="flex items-center justify-between gap-3">
@@ -105,8 +124,8 @@ export default function CatalogImageField({
           className="block w-full overflow-hidden rounded-2xl border border-slate-200 bg-white p-3 text-left transition hover:border-slate-300 dark:border-slate-700 dark:bg-slate-900/90"
           onClick={onPreview}
         >
-          <div className="portal-image-checker flex h-40 items-center justify-center rounded-2xl p-4">
-            <img src={value} alt={label} className="max-h-full max-w-full object-contain" loading="lazy" decoding="async" />
+          <div className={`portal-image-checker flex items-center justify-center rounded-2xl ${squarePreview ? 'mx-auto aspect-square w-full max-w-[16rem] p-2' : 'h-40 p-4'}`}>
+            <img src={value} alt={label} className={squarePreview ? 'h-full w-full object-contain' : 'max-h-full max-w-full object-contain'} loading="lazy" decoding="async" />
           </div>
         </button>
       ) : null}

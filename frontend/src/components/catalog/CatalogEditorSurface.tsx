@@ -29,6 +29,7 @@ import type { PrivateAiStatus } from './portalPrivateAi.ts'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 
 const ManageAnnouncementStripModal = lazyRetry(() => import('./ManagePromotionsModal'), 'catalog-editor-announcement-strip-modal')
+const ABOUT_IMAGE_DESCRIPTION_MAX_LENGTH = 200
 
 type CatalogUploadState = ReturnType<typeof createInitialUploadState>
 type DraftPrimitive = string | number | boolean | null | undefined
@@ -44,6 +45,8 @@ type CatalogEditorDraft = Record<string, DraftPrimitive> & {
   business_name?: string
   business_phone?: string
   customer_portal_about_content?: string
+  customer_portal_about_image?: string | null
+  customer_portal_about_image_alt?: string
   customer_portal_about_title?: string
   customer_portal_product_caution_default?: string
   customer_portal_product_need_more_details_default?: string
@@ -169,6 +172,7 @@ type CatalogPreviewConfig = {
 
 type CatalogEditorSurfaceContext = {
   aboutBlocks: CatalogAboutBlock[]
+  aboutImageRefused: boolean
   activeEditorSection: EditorSectionKey
   // Part 557 slice 8: the display tab bundles portal CONFIG (customer_portal)
   // and the POSTS editor (portal_posts); these gate the two halves so a
@@ -302,6 +306,7 @@ export default function CatalogEditorSurface({ contextValue }: CatalogEditorSurf
 function CatalogEditorSurfaceContent() {
   const {
     aboutBlocks,
+    aboutImageRefused,
     activeEditorSection,
     canEditConfig,
     canEditPosts,
@@ -890,6 +895,46 @@ function CatalogEditorSurfaceContent() {
                 value={editorDraft.customer_portal_about_title || ''}
                 onChange={(event) => setDraft('customer_portal_about_title', event.target.value)}
               />
+            </div>
+            <div className="mt-4 grid min-w-0 gap-3">
+              <ImageField
+                label={copy('aboutImage', 'About picture')}
+                value={editorDraft.customer_portal_about_image}
+                fieldId="portal-about-image"
+                allowLink={false}
+                squarePreview
+                infoHint={copy('aboutImageHint', 'Shown whole on the About page. Square pictures fit best.')}
+                error={aboutImageRefused ? copy('aboutImageInvalid', 'The About picture must be a picture uploaded to this site. Upload it again.') : ''}
+                onUpload={() => uploadDraftImage('customer_portal_about_image')}
+                onCancelUpload={() => cancelPortalMediaUpload('customer_portal_about_image')}
+                onChooseExisting={() => openFilePicker('customer_portal_about_image', 'image', copy('aboutImage', 'About picture'))}
+                onClear={() => clearPortalMediaTarget('customer_portal_about_image')}
+                onPreview={() => openPortalImage(copy('aboutImage', 'About picture'), [editorDraft.customer_portal_about_image])}
+                uploadLabel={copy('uploadImage', 'Upload image')}
+                chooseLabel={copy('openFiles', 'Files')}
+                clearLabel={copy('clearImage', 'Clear')}
+                previewLabel={copy('openGallery', 'Open image gallery')}
+                cancelLabel={copy('cancelUpload', 'Cancel upload')}
+                uploadingLabel={copy('uploading', 'Uploading...')}
+                uploadedQueuedLabel={copy('portalUploadQueued', 'Uploaded. Background optimization is running now.')}
+                uploadedReadyLabel={copy('portalUploadReady', 'Uploaded and ready.')}
+                uploadState={getMediaUploadState('customer_portal_about_image')}
+              />
+              <div>
+                <div className="flex items-center gap-1.5">
+                  <label htmlFor="portal-about-image-alt" className="text-sm font-medium text-slate-700">{copy('aboutImageAlt', 'Picture description')}</label>
+                  <InfoHint label={copy('aboutImageAlt', 'Picture description')} text={copy('aboutImageAltHint', 'Short words describing the picture, for people who cannot see it.')} />
+                </div>
+                <input
+                  id="portal-about-image-alt"
+                  name="customer_portal_about_image_alt"
+                  className="input"
+                  autoComplete="off"
+                  maxLength={ABOUT_IMAGE_DESCRIPTION_MAX_LENGTH}
+                  value={editorDraft.customer_portal_about_image_alt || ''}
+                  onChange={(event) => setDraft('customer_portal_about_image_alt', event.target.value)}
+                />
+              </div>
             </div>
             <div className="mt-4">
               <div className="flex items-center gap-1.5">

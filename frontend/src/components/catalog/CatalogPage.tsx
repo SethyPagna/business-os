@@ -1,4 +1,4 @@
-import { Suspense, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { ClipboardEvent, Dispatch, RefObject, SetStateAction } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import { startVisibleInterval } from '../../utils/visibilityPolling.ts'
@@ -72,6 +72,18 @@ import {
   privateAiSaveChanges,
   settlePrivateAiSave,
 } from './portalPrivateAi.ts'
+import {
+  isAboutImageRefusal,
+  markEdited,
+  overlayStaffSettings,
+  pickLoadedOrEditedKeys,
+  readStaffSettings,
+  replaceDraftValues,
+  settleSavedEdits,
+  siteUploadPath,
+  type EditorDraft,
+  type StaffSettings,
+} from './portalEditorDraft.ts'
 import { resolveCatalogAssetUrl } from './catalogAssetUrls'
 import { FAQ_STARTER_TEXT, AI_FAQ_STARTER_TEXT } from './faqStarterText.ts'
 import { aggregateInitialOptions } from '../../utils/initials.ts'
@@ -710,6 +722,8 @@ function buildDraft(config: PortalConfig): PortalDraft {
     customer_portal_show_about: !!config.showAbout,
     customer_portal_about_title: config.aboutTitle || '',
     customer_portal_about_content: config.aboutContent || '',
+    customer_portal_about_image: config.aboutImage || '',
+    customer_portal_about_image_alt: config.aboutImageAlt || '',
     // Aug 24 request (Part 326 backlog item 3): a single Caution and a
     // single Need More Details block, set once here and shown on every
     // product's detail flyout -- not per-product, so these are plain
@@ -858,6 +872,8 @@ function applyDraft(config: PortalConfig, draft: PortalDraft): PortalConfig {
     showAbout: toBoolean(draft.customer_portal_show_about, config.showAbout),
     aboutTitle: String(draft.customer_portal_about_title || config.aboutTitle || 'About us').trim() || 'About us',
     aboutContent: String(draft.customer_portal_about_content || config.aboutContent || '').trim(),
+    aboutImage: String(draft.customer_portal_about_image || '').trim(),
+    aboutImageAlt: String(draft.customer_portal_about_image_alt || '').trim(),
     productCautionDefault: String(draft.customer_portal_product_caution_default ?? config.productCautionDefault ?? '').trim(),
     productNeedMoreDetailsDefault: String(draft.customer_portal_product_need_more_details_default ?? config.productNeedMoreDetailsDefault ?? '').trim(),
     aboutBlocks: normalizeAboutBlocks(draft.customer_portal_about_blocks || config.aboutBlocks || []),
@@ -1119,6 +1135,8 @@ const DEFAULT_CONFIG = {
   intro: '',
   aboutTitle: '',
   aboutContent: '',
+  aboutImage: '',
+  aboutImageAlt: '',
   productCautionDefault: '',
   productNeedMoreDetailsDefault: '',
   aboutBlocks: [],
@@ -1245,9 +1263,17 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
           ...(cachedPortal?.config || {}),
         })
   ))
-  const [editorDirty, setEditorDirty] = useState(false)
+  const [editedKeys, setEditedKeys] = useState<ReadonlySet<string>>(() => new Set())
+  const editedKeysRef = useRef<ReadonlySet<string>>(editedKeys)
+  const editorDirty = editedKeys.size > 0
+  const staffSettingsRef = useRef<StaffSettings | null>(null)
+  const [refusedAboutImage, setRefusedAboutImage] = useState<string | null>(null)
   const [editorSaving, setEditorSaving] = useState(false)
   const [privateAi, setPrivateAi] = useState(createPrivateAiState)
+  const editorFormRef = useRef<EditorDraft>({})
+  useLayoutEffect(() => {
+    editorFormRef.current = { ...editorDraft, ...privateAiFormValues(privateAi) }
+  }, [editorDraft, privateAi])
   // Same viewer-owned page size as the standalone storefront
   // (PublicCatalogPage.tsx): the in-app public route and the editor preview
   // mount the same pager, so the 20/50/100 choice has to behave identically on
@@ -1700,6 +1726,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
   // The assistant's prompt and provider come only from the server's own
   // settings answer (portalPrivateAi.ts): the public website config never
   // carries them, and the app's settings map may be empty or device-only.
+  // The same answer restores the stored values of every other editor key.
   async function loadPrivateAiSettings() {
     const readId = beginTrackedRequest(privateAiReadRef)
     let settings: unknown = null
@@ -1713,6 +1740,11 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
       settings = null
     }
     if (!aliveRef.current || !isTrackedRequestCurrent(privateAiReadRef, readId)) return
+    const staffSettings = readStaffSettings(settings)
+    if (staffSettings) {
+      staffSettingsRef.current = staffSettings
+      setEditorDraft((current) => overlayStaffSettings(current, staffSettings, editedKeysRef.current))
+    }
     setPrivateAi((current) => applyPrivateAiRead(current, settings))
   }
 
@@ -1857,7 +1889,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     const bootstrapMatchesViewer = bootstrapPageSizeMatchesViewer(catalogPage?.pageSize, viewerPageSizeRef.current)
     setConfig(nextConfig)
     setPortalConfigReady(true)
-    if (!editorDirty) setEditorDraft(buildDraft(nextConfig))
+    if (editedKeysRef.current.size === 0) setEditorDraft(overlayStaffSettings(buildDraft(nextConfig), staffSettingsRef.current))
     setCategories(nextMeta.categories)
     setBrands(nextMeta.brands)
     setBranches(nextMeta.branches)
@@ -2090,8 +2122,8 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     // installable.
     if (!publicView || typeof document === 'undefined') return undefined
     const previousTitle = document.title
-    const titleText = String(previewConfig.businessName || previewConfig.title || 'Leang Beauty').trim()
-    document.title = titleText || 'Leang Beauty'
+    const titleText = String(previewConfig.businessName || previewConfig.title || 'Leang Cosmetics').trim()
+    document.title = titleText || 'Leang Cosmetics'
     return () => { document.title = previousTitle }
   }, [publicView, previewConfig.businessName, previewConfig.title])
 
@@ -2326,8 +2358,18 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     setPortalProductInitial('all')
   }
 
+  function replaceEditedKeys(next: ReadonlySet<string>) {
+    editedKeysRef.current = next
+    setEditedKeys(next)
+  }
+
+  function markDraftEdited(key: string) {
+    const next = markEdited(editedKeysRef.current, key)
+    if (next !== editedKeysRef.current) replaceEditedKeys(next)
+  }
+
   function setDraft(key: string, value: unknown) {
-    setEditorDirty(true)
+    markDraftEdited(key)
     if (isPrivateAiKey(key)) {
       setPrivateAi((current) => editPrivateAi(current, key, value))
       return
@@ -2639,6 +2681,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
       targetKey === 'customer_portal_logo_image'
       || targetKey === 'customer_portal_favicon_image'
       || targetKey === 'customer_portal_cover_image'
+      || targetKey === 'customer_portal_about_image'
     ) {
       clearPortalUploadPreview(targetKey)
       setDraft(targetKey, selectedPath)
@@ -2656,6 +2699,12 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
       updatePromoItem(targetKey.slice('promo:'.length), 'mediaUrl', selectedPath)
       updateMediaUploadState(targetKey, { type: 'success', publicPath: selectedPath, processingStatus: 'ready' })
     }
+  }
+
+  function showAboutImageRefusal(refusedValue: string) {
+    setRefusedAboutImage(refusedValue)
+    setActiveEditorSection('about')
+    notify(copy('aboutImageInvalid', 'The About picture must be a picture uploaded to this site. Upload it again.'), 'error')
   }
 
   async function savePortalDraft() {
@@ -2715,6 +2764,14 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
         notify(copy('translationJsonInvalid', 'Translation overrides must be valid JSON.'), 'error')
         return
       }
+      const aboutImagePath = siteUploadPath(
+        sanitizePortalMediaValue(editorDraft.customer_portal_about_image, config.aboutImage || ''),
+        (path) => resolveCatalogAssetUrl(path),
+      )
+      if (aboutImagePath === null) {
+        showAboutImageRefusal(String(editorDraft.customer_portal_about_image || ''))
+        return
+      }
 
       const sanitizedLogoImage = sanitizePortalMediaValue(editorDraft.customer_portal_logo_image, previewConfig.logoImage || '')
       const sanitizedFaviconImage = sanitizePortalMediaValue(editorDraft.customer_portal_favicon_image, previewConfig.faviconImage || '')
@@ -2738,6 +2795,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
       }))
 
       setEditorSaving(true)
+      const sentDraft: EditorDraft = { ...editorDraft, ...privateAiFormValues(privateAi) }
       // `config` is the last state actually confirmed from the server
       // (before this save's edits are applied) -- `buildDraft(config)`
       // reuses the exact same flat-key transform this save's payload below
@@ -2751,7 +2809,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
       // the draft object below is built whole; the backend independently
       // rejects any unauthorized key, and this keeps a limited save from
       // 403ing on an unrelated field it never touched.
-      const fullSavePayload: Record<string, unknown> = {
+      const fullSavePayload: Record<string, unknown> = pickLoadedOrEditedKeys({
         business_name: editorDraft.business_name || '',
         business_phone: editorDraft.business_phone || '',
         business_email: editorDraft.business_email || '',
@@ -2816,6 +2874,8 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
         customer_portal_show_about: editorDraft.customer_portal_show_about ? 'true' : 'false',
         customer_portal_about_title: String(editorDraft.customer_portal_about_title || '').trim(),
         customer_portal_about_content: String(editorDraft.customer_portal_about_content || '').trim(),
+        customer_portal_about_image: aboutImagePath,
+        customer_portal_about_image_alt: String(editorDraft.customer_portal_about_image_alt || '').trim(),
         customer_portal_product_caution_default: String(editorDraft.customer_portal_product_caution_default || '').trim(),
         customer_portal_product_need_more_details_default: String(editorDraft.customer_portal_product_need_more_details_default || '').trim(),
         customer_portal_about_blocks: serializeAboutBlocks(sanitizedAboutBlocks),
@@ -2855,7 +2915,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
         customer_portal_submission_enabled: editorDraft.customer_portal_submission_enabled ? 'true' : 'false',
         customer_portal_submission_reward_points: String(Math.max(0, Math.floor(toNumber(editorDraft.customer_portal_submission_reward_points, previewConfig.submissionRewardPoints || 5)))),
         customer_portal_submission_instructions: editorDraft.customer_portal_submission_instructions || '',
-      }
+      }, staffSettingsRef.current, editedKeysRef.current)
       // The assistant's prompt and provider ride only when the person changed
       // one after it loaded; a change to blank is named in clearKeys, since
       // the Worker otherwise keeps a blank for them as stored.
@@ -2873,26 +2933,27 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
       // and answers { success: false }. Everything below marks the draft as
       // saved (posts and their order included), so a failed write stops here
       // and the edits stay unsaved for another try.
+      if (isAboutImageRefusal(result)) showAboutImageRefusal(String(sentDraft.customer_portal_about_image || ''))
       if (result?.success === false) return
       // What this save sent is now the stored value; a read begun before it
       // landed would bring back the old one, so it is dropped.
       invalidateTrackedRequest(privateAiReadRef)
       setPrivateAi((current) => settlePrivateAiSave(current, savePayload))
-      setDraft('customer_portal_logo_image', sanitizedLogoImage)
-      setDraft('customer_portal_favicon_image', sanitizedFaviconImage)
-      setDraft('customer_portal_cover_image', sanitizedCoverImage)
-      setAboutBlocksDraft(sanitizedAboutBlocks)
-      setPromoItemsDraft(sanitizedPromoItems)
-      const sanitizedDraft = {
-        ...editorDraft,
+      staffSettingsRef.current = { ...staffSettingsRef.current, ...savePayload }
+      setRefusedAboutImage(null)
+      const stillEdited = settleSavedEdits(editedKeysRef.current, sentDraft, editorFormRef.current)
+      replaceEditedKeys(stillEdited)
+      const savedMediaValues = {
         customer_portal_logo_image: sanitizedLogoImage,
         customer_portal_favicon_image: sanitizedFaviconImage,
         customer_portal_cover_image: sanitizedCoverImage,
+        customer_portal_about_image: aboutImagePath,
         customer_portal_about_blocks: serializeAboutBlocks(sanitizedAboutBlocks),
         customer_portal_promo_items: serializePromoItems(sanitizedPromoItems),
       }
-      setConfig((current) => applyDraft(current, sanitizedDraft))
-      setEditorDirty(false)
+      const settledMediaValues = Object.fromEntries(Object.entries(savedMediaValues).filter(([key]) => !stillEdited.has(key)))
+      setEditorDraft((current) => replaceDraftValues(current, settledMediaValues))
+      setConfig((current) => applyDraft(current, replaceDraftValues(editorDraft, savedMediaValues)))
       await loadPortal()
     } catch (error) {
       notify(getCatalogErrorMessage(error, 'Failed to save portal'), 'error')
@@ -3463,6 +3524,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     const effectiveEditorSection = availableSectionIds.includes(activeEditorSection)
       ? activeEditorSection
       : (availableSectionIds[0] || 'branding')
+    const aboutImageRefused = refusedAboutImage !== null && String(editorDraft.customer_portal_about_image || '') === refusedAboutImage
     const editorContextValue = {
       aboutBlocks,
       activeEditorSection: effectiveEditorSection,
@@ -3481,6 +3543,8 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
       dragAboutBlockId,
       dragPromoItemId,
       editorDirty,
+      editedKeys,
+      aboutImageRefused,
       editorDraft: { ...editorDraft, ...privateAiFormValues(privateAi) },
       editorSaving,
       editorSections,
