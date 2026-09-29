@@ -1327,7 +1327,10 @@ function CatalogEditorSurfaceContent() {
             </div>
             <label className="mt-3 flex min-h-11 items-center justify-between gap-4 rounded-xl border border-slate-200 bg-white px-3 py-2.5">
               <div>
-                <HintLabel title={copy('translateWidget', 'Enable public translate widget')} hint={copy('translateWidgetHint', 'Public customers switch English/Khmer instantly.')} />
+                <HintLabel
+                  title={ed('web_editor_lang_switch', 'Show the English/Khmer switch', 'បង្ហាញប៊ូតុងប្ដូរភាសា អង់គ្លេស/ខ្មែរ')}
+                  hint={ed('web_editor_lang_switch_hint', 'Only shows or hides the English/Khmer language switch on the website.', 'គ្រាន់តែបង្ហាញ ឬលាក់ប៊ូតុងប្ដូរភាសា អង់គ្លេស/ខ្មែរ នៅលើគេហទំព័រ។')}
+                />
               </div>
               <input id="portal-translate-widget-enabled" name="customer_portal_translate_widget_enabled" type="checkbox" checked={!!editorDraft.customer_portal_translate_widget_enabled} onChange={(event) => setDraft('customer_portal_translate_widget_enabled', event.target.checked)} />
             </label>

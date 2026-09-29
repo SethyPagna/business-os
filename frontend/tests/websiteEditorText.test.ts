@@ -52,7 +52,7 @@ const editorKeysIn = (pack: Record<string, string>) => Object.keys(pack).filter(
 const ED0_KEYS = [
   'web_editor_address', 'web_editor_blocks_max', 'web_editor_call', 'web_editor_caution', 'web_editor_cover_preview',
   'web_editor_email', 'web_editor_facebook', 'web_editor_group_product_page', 'web_editor_instagram',
-  'web_editor_lang_default', 'web_editor_link_invalid', 'web_editor_logo', 'web_editor_messenger',
+  'web_editor_lang_default', 'web_editor_lang_switch', 'web_editor_lang_switch_hint', 'web_editor_link_invalid', 'web_editor_logo', 'web_editor_messenger',
   'web_editor_more_details', 'web_editor_no_match', 'web_editor_no_questions', 'web_editor_phone',
   'web_editor_product_page_hint', 'web_editor_search_products', 'web_editor_section_about',
   'web_editor_selected_count', 'web_editor_shop_name', 'web_editor_telegram', 'web_editor_title', 'web_editor_website',
@@ -122,6 +122,31 @@ await runTest('T-X5: web_editor_ Khmer values use Latin only for platform names 
     const withoutAllowed = KM_LATIN_ALLOWED.reduce((rest, token) => rest.split(token).join(''), value.replace(/\{[a-z_]+\}/g, ''))
     assert.doesNotMatch(withoutAllowed, /[A-Za-z]/, `km.json ${key} mixes English into Khmer: ${value}`)
     for (const spelling of COENG_TA_SPELLINGS) assert.ok(!value.includes(spelling), `km.json ${key} spells ${spelling} with coeng TA; the editor uses coeng DA`)
+  }
+})
+
+// Lead ruling (29 Sep): the toggle only shows or hides the shop's
+// English/Khmer switch; "translate widget" / ឧបករណ៍បកប្រែ promised a translator.
+await runTest('T-X6: the language switch toggle says it shows or hides the English/Khmer switch, and the translator wording is retired', () => {
+  const editor = stripComments(read('../src/components/catalog/CatalogEditorSurface.tsx'))
+  const toggleAt = editor.indexOf('id="portal-translate-widget-enabled"')
+  assert.ok(toggleAt > 0, 'the toggle renders')
+  const row = editor.slice(editor.lastIndexOf('<label', toggleAt), toggleAt)
+  assert.match(row, /ed\('web_editor_lang_switch', /, 'the toggle label reads web_editor_lang_switch')
+  assert.match(row, /ed\('web_editor_lang_switch_hint', /, 'the toggle hint reads web_editor_lang_switch_hint')
+  assert.match(en.web_editor_lang_switch_hint ?? '', /shows or hides/i)
+  for (const key of ['web_editor_lang_switch', 'web_editor_lang_switch_hint']) {
+    assert.match(en[key] ?? '', /English\/Khmer/, `en.json ${key} names the English/Khmer switch`)
+    assert.doesNotMatch(en[key] ?? '', /translat/i, `en.json ${key} does not promise a translator`)
+    assert.match(km[key] ?? '', /ប្ដូរភាសា/, `km.json ${key} names the language switch`)
+    assert.doesNotMatch(km[key] ?? '', /បកប្រែ/, `km.json ${key} does not promise a translator`)
+  }
+  for (const [file, source] of editorModules()) assert.doesNotMatch(stripComments(source), /'translateWidget(?:Hint)?'/, `${file}: nothing reads the retired keys`)
+  const rawEn = JSON.stringify(JSON.parse(read('../src/lang/en.json')))
+  const rawKm = JSON.stringify(JSON.parse(read('../src/lang/km.json')))
+  for (const key of ['translateWidget', 'translateWidgetHint']) {
+    assert.ok(!rawEn.includes(`"${key}":`), `en.json still carries the retired ${key}`)
+    assert.ok(!rawKm.includes(`"${key}":`), `km.json still carries the retired ${key}`)
   }
 })
 
