@@ -15,16 +15,24 @@
 //     - Open https://dash.cloudflare.com/profile/api-tokens
 //     - Click "Create Token", then "Create Custom Token".
 //     - Name it: purge-uploads
-//     - Permissions, add two rows:
+//     - Permissions, add three rows:
 //         Account | Workers R2 Storage | Edit
 //         Account | D1                 | Edit
+//         Account | Workers Scripts    | Read
+//       (the last row lets it check which bucket the live website uses;
+//       without it the script refuses to start)
 //     - Account Resources: Include | (your account)
 //     - Click "Continue to summary", then "Create Token".
 //     - Copy the token. Keep the page open until step 3 is done.
 //
-//  2. Open a terminal in the business-os-v1 folder (the folder that holds
+//  2. Open a terminal in the BusinessOS checkout (the folder that holds
 //     the "ops" and "cloudflare" folders). In Windows Explorer: open that
 //     folder, click the address bar, type  powershell  and press Enter.
+//     Then take a fresh git pull of main, so this script is current:
+//         git checkout main
+//         git pull
+//     Always pull first: an older copy of this script has only the checks
+//     it was written with, and early copies name the wrong bucket.
 //
 //  3. Do a DRY RUN (lists and counts, changes nothing):
 //         node ops/scripts/purge-non-media-uploads.mjs
@@ -59,17 +67,29 @@
 //  Deleting the quarantine for good (only when you are sure, for example a
 //  month later -- after this, --restore cannot bring those files back):
 //  this script never does it. In the Cloudflare dashboard open R2 >
-//  business-os-assets > Settings > Object lifecycle rules > Add rule; set
-//  the prefix to the quarantine folder it printed (quarantine/<time>/),
-//  choose to delete objects 1 day after upload, and save. Remove the rule
-//  once the folder is empty.
+//  business-os-assets-apac > Settings > Object lifecycle rules > Add rule;
+//  set the prefix to the quarantine folder it printed (quarantine/<time>/)
+//  -- never leave the prefix empty, that would delete every file -- choose
+//  to delete objects 1 day after upload, and save. Remove the rule once the
+//  folder is empty. Never add a rule on business-os-assets (the spare photo copy).
 // =====================================================================
 //
 // What it does
-//   (a) Lists every object in R2 bucket business-os-assets under uploads/,
-//       private/ and imports/ through the Cloudflare API, with the token you
-//       paste (read from a hidden prompt, or from CLOUDFLARE_API_TOKEN if
-//       that is already set). The token is never printed or written.
+//   (0) Before any other request, reads the production Worker's live
+//       ASSETS binding (every version carrying traffic) and stops unless
+//       each one is BUCKET, the bucket this script works on; --move and
+//       --restore read it again after you type MOVE or RESTORE, before the
+//       first change. A token without Workers Scripts Read is refused the
+//       same way. Every file request names one file of BUCKET: a name with
+//       an empty, '.' or '..' part, a backslash, a percent-encoded dot,
+//       slash or backslash, or a control character is never sent (the
+//       listing keeps such a file for REVIEW; a manifest naming one is
+//       refused).
+//   (a) Lists every object in R2 bucket business-os-assets-apac (BUCKET)
+//       under uploads/, private/ and imports/ through the Cloudflare API,
+//       with the token you paste (read from a hidden prompt, or from
+//       CLOUDFLARE_API_TOKEN if that is already set). The token is never
+//       printed or written.
 //   (b) Classifies each object from its BYTES, never from its name
 //       (S-uploads2a, 2026-09-26: the first version went by the name and
 //       would have deleted real photos saved as .jfif, .jpe, .bin or with
@@ -133,8 +153,12 @@ import os from 'node:os'
 import path from 'node:path'
 import readline from 'node:readline'
 import { fileURLToPath } from 'node:url'
+import { PRODUCTION_WORKER, liveVersionBindings } from './ops-common.mjs'
 
-export const BUCKET = 'business-os-assets'
+// The ASSETS bucket of cloudflare/wrangler.toml and wrangler.free.toml
+// (cloudflare/scripts/test-purge-bucket-binding-pure.cjs pins it to both).
+export const BUCKET = 'business-os-assets-apac'
+export const ASSETS_BINDING = 'ASSETS'
 export const PREFIXES = ['uploads/', 'private/', 'imports/']
 const API = 'https://api.cloudflare.com/client/v4'
 // Every object's first bytes are read; that is enough to identify it.
@@ -1056,6 +1080,8 @@ export function classifyObject({ key, size, bytes, complete = true, activeJobIds
   const total = Number.isFinite(size) ? size : bytes.length
   const extension = extensionOf(key)
   const verdict = (group, format = '', extra = {}) => ({ action: GROUP_BY_ID.get(group).action, group, format, extension, ...extra })
+  const keyProblem = unsafeKeyReason(key)
+  if (keyProblem) return verdict('unrecognised', `not read: ${keyProblem}`)
   const jobId = jobIdOfImportKey(key)
   if (jobId && activeJobIds.has(jobId)) return verdict('running-import', describeBytes(bytes, total))
   const encoding = String(contentEncoding || '').trim().toLowerCase()
@@ -1260,8 +1286,25 @@ const HTTP_METADATA_HEADERS = [
 
 export const stampOf = (date) => date.toISOString().replace(/[:.]/g, '-')
 export const quarantineKeyFor = (stamp, key) => `${QUARANTINE_ROOT}${stamp}/${key}`
+const KEY_CONTROL_CHARACTER = /[\u0000-\u001f\u007f-\u009f]/
+const KEY_ENCODED_DOT_SLASH_OR_BACKSLASH = /%(?:25)*(?:2e|2f|5c)/i
+const KEY_DOT_SEGMENTS = new Set(['', '.', '..'])
+// Why `key` is never sent in a request ('' when it may be): fetch resolves '.'
+// and '..' segments, and a server may decode %2e, %2f or a backslash into one.
+export function unsafeKeyReason(key) {
+  const text = String(key)
+  if (KEY_CONTROL_CHARACTER.test(text)) return 'it contains a control character'
+  if (text.includes('\\')) return 'it contains a backslash'
+  if (KEY_ENCODED_DOT_SLASH_OR_BACKSLASH.test(text)) return 'it contains a percent-encoded dot, slash or backslash'
+  if (text.split('/').some((segment) => KEY_DOT_SEGMENTS.has(segment))) return "it has an empty, '.' or '..' part"
+  return ''
+}
 // Each segment of a key is percent-encoded; the slashes between them stay.
-export const objectPath = (key) => String(key).split('/').map((segment) => encodeURIComponent(segment)).join('/')
+export const objectPath = (key) => {
+  const reason = unsafeKeyReason(key)
+  if (reason) throw new Error(`refusing to send the file name ${printable(String(key))}: ${reason}`)
+  return String(key).split('/').map((segment) => encodeURIComponent(segment)).join('/')
+}
 export const sha256Hex = (bytes) => createHash('sha256').update(bytes).digest('hex')
 
 function normalizeHttpMetadata(raw) {
@@ -1275,8 +1318,8 @@ function normalizeHttpMetadata(raw) {
 }
 
 // Problems that make a manifest unusable for --restore (empty when fine).
-// Keys, quarantine keys, hashes and row columns are all checked, so an
-// edited file cannot make --restore write anywhere else.
+// One that passes can only make --restore write files under PREFIXES and in
+// its own quarantine folder of BUCKET, and only rows restorableRows accepts.
 export function validateManifest(manifest) {
   const problems = []
   if (!manifest || manifest.tool !== MANIFEST_TOOL) return ['it was not written by this script']
@@ -1289,7 +1332,9 @@ export function validateManifest(manifest) {
   if (!Array.isArray(manifest.moves)) problems.push('it has no list of moved files')
   for (const move of Array.isArray(manifest.moves) ? manifest.moves : []) {
     const key = String(move?.key ?? '')
+    const keyProblem = unsafeKeyReason(key)
     if (!PREFIXES.some((prefix) => key.startsWith(prefix)) || key.length <= 0) problems.push(`a file outside ${PREFIXES.join(', ')}: ${printable(key)}`)
+    else if (keyProblem) problems.push(`the file name ${printable(key)} cannot be used: ${keyProblem}`)
     else if (move.quarantineKey !== quarantineKeyFor(stamp, key)) problems.push(`the quarantine name of ${printable(key)} does not match`)
     if (!/^[0-9a-f]{64}$/.test(String(move?.sha256 ?? ''))) problems.push(`no SHA-256 for ${printable(key)}`)
     if (!Number.isSafeInteger(move?.size) || move.size < 0) problems.push(`no size for ${printable(key)}`)
@@ -1481,6 +1526,17 @@ export function makeClient({ token, accountId, databaseId, fetchImpl = globalThi
     return out
   }
   return {
+    // Any other API read, in the shape ops-common's liveVersionBindings
+    // takes: never throws, a network failure is status 0.
+    async api(method, pathname) {
+      try {
+        const response = await call(`${API}${pathname}`, { method })
+        const body = await response.json().catch(() => null)
+        return { ok: response.ok && body?.success !== false, status: response.status, json: body }
+      } catch {
+        return { ok: false, status: 0, json: null }
+      }
+    },
     async listObjects(prefix) {
       const objects = []
       let cursor = ''
@@ -1547,6 +1603,30 @@ export function makeClient({ token, accountId, databaseId, fetchImpl = globalThi
   }
 }
 
+// Why this run must stop (empty when every version of the production Worker
+// carrying traffic binds ASSETS to BUCKET). An unreadable answer stops it
+// too: the check never passes by default.
+export const WORKERS_READ_HINT = 'Add the permission row  Account | Workers Scripts | Read  to the token (step 1 at the top of this script) and run it again.'
+export async function liveBucketProblem(api, accountId) {
+  const live = await liveVersionBindings(api, accountId, PRODUCTION_WORKER)
+  if (!live.ok) {
+    const status = live.detail?.status ? `, HTTP ${live.detail.status}` : ''
+    const unreadable = live.reason === 'deployments-unreadable' || live.reason === 'bindings-unreadable'
+    return `could not read which bucket the live website uses (${live.reason}${status}).${unreadable ? ` ${WORKERS_READ_HINT}` : ''}`
+  }
+  for (const version of live.versions) {
+    const where = `the live website (version ${printable(version.versionId)}, ${version.percentage}% of traffic)`
+    const assets = version.bindings.filter((binding) => binding && binding.name === ASSETS_BINDING)
+    if (assets.length !== 1 || assets[0].type !== 'r2_bucket') return `${where} has no single R2 ${ASSETS_BINDING} binding.`
+    const bucket = printable(String(assets[0].bucket_name ?? ''))
+    const jurisdiction = assets[0].jurisdiction ? ` (jurisdiction ${printable(String(assets[0].jurisdiction))})` : ''
+    if (bucket !== BUCKET || jurisdiction) {
+      return `${where} stores its files in ${bucket}${jurisdiction}, not ${BUCKET}. Take a fresh git pull of main and run it again; if it still says this, send the printout.`
+    }
+  }
+  return ''
+}
+
 const rowsOf = (result) => (Array.isArray(result) ? result.flatMap((statement) => statement?.results || []) : [])
 
 async function readActiveJobIds(cf) {
@@ -1600,6 +1680,12 @@ else out of the website's storage into quarantine/, where it can be put back.
       file. Safe to run again.
 
   --help   shows this.
+
+Before anything else it checks that the live website stores its files in
+${BUCKET}, the bucket this script works on, and stops if not (the token
+needs Account | Workers Scripts | Read for that check). --move and
+--restore check it again after you type MOVE or RESTORE, before changing
+anything.
 
 There is no --delete: the quarantine copies stay until you delete them
 yourself, which this script never does (see "Deleting the quarantine for
@@ -1663,14 +1749,19 @@ export async function run({
     accountId = accountId || fromToml.accountId
     databaseId = databaseId || fromToml.databaseId
   }
-  if (!accountId || !databaseId) return fail('could not read the account id / database id from cloudflare/wrangler.toml. Run this from the business-os-v1 folder.')
+  if (!accountId || !databaseId) return fail('could not read the account id / database id from cloudflare/wrangler.toml. Run this from the BusinessOS checkout after a fresh git pull of main.')
   token = String(env.CLOUDFLARE_API_TOKEN || await prompts.hidden('Cloudflare API token: ') || '').trim()
   if (!token) return fail('no token given.')
+  const cf = makeClient({ token, accountId, databaseId, fetchImpl })
   const context = {
-    cf: makeClient({ token, accountId, databaseId, fetchImpl }), log, fail, prompts, homeDir, now, token,
+    cf, log, fail, prompts, homeDir, now, token,
     concurrency: Math.max(1, Math.floor(concurrency) || 1), moveMaxBytes, largeFileBytes,
+    readLiveBucketProblem: () => liveBucketProblem(cf.api, accountId),
   }
   try {
+    log(`Checking that the live website stores its files in ${BUCKET}...`)
+    const problem = await context.readLiveBucketProblem()
+    if (problem) return fail(`${problem} No stored file or database row was read or changed.`)
     if (options.mode === 'restore') return await restoreRun({ ...context, manifest, manifestPath })
     return await purgeRun({ ...context, move: options.mode === 'move' })
   } catch (error) {
@@ -1678,7 +1769,15 @@ export async function run({
   }
 }
 
-async function purgeRun({ cf, log, prompts, homeDir, now, token, concurrency, moveMaxBytes, largeFileBytes, move }) {
+// After MOVE or RESTORE is typed, before the first change: the website may
+// have been rolled back to another bucket while the run listed or waited.
+async function liveBucketChangedProblem({ log, readLiveBucketProblem }) {
+  log(`Checking again that the live website stores its files in ${BUCKET}...`)
+  const problem = await readLiveBucketProblem()
+  return problem ? `${problem} Nothing was changed.` : ''
+}
+
+async function purgeRun({ cf, log, fail, prompts, homeDir, now, token, concurrency, moveMaxBytes, largeFileBytes, move, readLiveBucketProblem }) {
   log(move ? 'Mode: MOVE to quarantine (asks before changing anything)' : 'Mode: DRY RUN (changes nothing)')
   log('Reading the database (read-only)...')
   const activeJobIds = await readActiveJobIds(cf)
@@ -1703,7 +1802,8 @@ async function purgeRun({ cf, log, prompts, homeDir, now, token, concurrency, mo
   const entries = new Array(objects.length)
   let checked = 0
   await mapLimit(objects, concurrency * 2, async (object, index) => {
-    let read = object.size > 0 ? await cf.readHead(object.key, Math.min(object.size, HEAD_BYTES)) : { bytes: new Uint8Array(0), contentEncoding: '' }
+    const readable = object.size > 0 && !unsafeKeyReason(object.key)
+    let read = readable ? await cf.readHead(object.key, Math.min(object.size, HEAD_BYTES)) : { bytes: new Uint8Array(0), contentEncoding: '' }
     // An image the app accepts is read whole, so hidden markup anywhere
     // in it is found.
     if (!read.contentEncoding && read.bytes.length < object.size && object.size <= FULL_SCAN_MAX_BYTES && detectUploadFormat(read.bytes)?.kind === 'image') {
@@ -1738,6 +1838,8 @@ async function purgeRun({ cf, log, prompts, homeDir, now, token, concurrency, mo
   const totalBytes = candidates.reduce((sum, entry) => sum + entry.size, 0)
   const answer = String(await prompts.visible(`\nType MOVE to move ${candidates.length} files (${megabytes(totalBytes)} MB) to ${quarantineKeyFor(stamp, '')} -- --restore can put them back: `) || '').trim()
   if (answer !== 'MOVE') { log('Not confirmed. Nothing was changed.'); return 0 }
+  const changed = await liveBucketChangedProblem({ log, readLiveBucketProblem })
+  if (changed) return fail(changed)
   return moveToQuarantine({ cf, log, now, token, concurrency, moveMaxBytes, largeFileBytes, entries, candidates, stamp, outDir })
 }
 
@@ -1989,13 +2091,15 @@ async function restoreRows(cf, manifest) {
   return result
 }
 
-async function restoreRun({ cf, log, prompts, now, token, concurrency, largeFileBytes, manifest, manifestPath }) {
+async function restoreRun({ cf, log, fail, prompts, now, token, concurrency, largeFileBytes, manifest, manifestPath, readLiveBucketProblem }) {
   const moves = manifest.moves
   const rows = manifest.rows || {}
   log(`Restore from ${manifestPath}`)
   log(`  files recorded: ${moves.length}; Library rows: ${(rows.file_assets || []).length}; import rows: ${(rows.import_job_files || []).length}`)
   const answer = String(await prompts.visible('Type RESTORE to put them back: ') || '').trim()
   if (answer !== 'RESTORE') { log('Not confirmed. Nothing was changed.'); return 0 }
+  const changed = await liveBucketChangedProblem({ log, readLiveBucketProblem })
+  if (changed) return fail(changed)
 
   // Files first, so a restored row never points at a missing file.
   const objects = new Array(moves.length)
