@@ -40,13 +40,12 @@ assert.equal(foldCloseMatches.length, 2, 'both of Fold.tsx close buttons (mobile
 // the close control only) -- proves the regexes above are discriminating,
 // not matching (or failing to match) everything in the file.
 assert.match(modal, /role="dialog"/, 'positive control: Modal.tsx dialog role attribute is still findable')
-assert.match(lightbox, /aria-label="Zoom out"/, 'positive control: ImageGalleryLightbox.tsx Zoom out label (out of this fix\'s scope) is untouched')
+assert.match(lightbox, /aria-label=\{copy\.zoomOut\}/, 'positive control: ImageGalleryLightbox.tsx zoom labels (their own convention) are still findable')
 assert.match(lightbox, /aria-label=\{copy\.prev\}/, 'positive control: ImageGalleryLightbox.tsx prev/next labels (existing convention) are untouched')
 
-// F11 follow-up: admin inventory/POS callers that own translated close copy
-// pass it next to prev/next. The catalogue's preview and product-detail
-// surfaces deliberately use the shared lightbox's English fallback; keep that
-// family explicit so a missing label at any admin caller cannot hide in it.
+// F11 follow-up: every caller passes its own translated close copy next to
+// prev/next -- the admin callers from t(), the storefront viewers from their
+// pack, since the storefront opens in Khmer (K1+, 30 Sep 2026).
 //
 // POS.tsx's <ImageGalleryLightbox> call site is resolved by SCANNING
 // components/pos/*.tsx rather than pinning the POS.tsx path: the additems
@@ -86,21 +85,18 @@ const productDetailFlyout = readFileSync(new URL('../src/components/catalog/Prod
 assert.match(products, /close:\s*t\('close'\)\s*\|\|\s*'Close',/, "Products.tsx's lightbox labels must pass a translated close label, not rely on the component default")
 const productDetailLabels = productDetailFlyout.match(/labels=\{\{[\s\S]*?\}\}/)?.[0] || ''
 assert.ok(productDetailLabels, 'ProductDetailFlyout.tsx must keep its lightbox labels object')
-assert.doesNotMatch(productDetailLabels, /\bclose\s*:/, "ProductDetailFlyout.tsx deliberately uses ImageGalleryLightbox's English close fallback")
+assert.match(productDetailLabels, /close:\s*copy\('close', 'Close'\)/, "ProductDetailFlyout.tsx's viewer passes the storefront pack's close name")
 assert.match(productDetailFlyout, /aria-label=\{copy\('close', 'Close'\)\}/, 'the flyout chrome itself keeps its labelled close button')
-// Derive the catalogue label blocks from its actual call sites. Every one uses
-// the same English fallback contract as ProductDetailFlyout.
+// Every catalogue viewer takes the one labels object that carries the close name.
 const catalogPreviewLightboxCallSites = (catalogPreview.match(/<ImageGalleryLightbox/g) || []).length
 assert.ok(catalogPreviewLightboxCallSites > 0, 'CatalogPreviewSurface.tsx must render at least one <ImageGalleryLightbox>')
-const catalogPreviewLabelBlocks = catalogPreview.match(/labels=\{\{[\s\S]*?\}\}/g) || []
 assert.equal(
-  catalogPreviewLabelBlocks.length,
+  (catalogPreview.match(/labels=\{lightboxLabels\}/g) || []).length,
   catalogPreviewLightboxCallSites,
-  `CatalogPreviewSurface.tsx has ${catalogPreviewLightboxCallSites} ImageGalleryLightbox call site(s); every one must retain a labels object`,
+  `CatalogPreviewSurface.tsx has ${catalogPreviewLightboxCallSites} ImageGalleryLightbox call site(s); every one must take lightboxLabels`,
 )
-for (const block of catalogPreviewLabelBlocks) {
-  assert.doesNotMatch(block, /\bclose\s*:/, "catalogue lightboxes deliberately use ImageGalleryLightbox's English close fallback")
-}
+const catalogPreviewLabels = catalogPreview.match(/const lightboxLabels = \{[\s\S]*?\n  \}/)?.[0] || ''
+assert.match(catalogPreviewLabels, /close:\s*copy\('close', 'Close'\)/, "CatalogPreviewSurface.tsx's viewers pass the storefront pack's close name")
 
 // Positive control: each caller's own prev/next siblings, right next to the
 // new close field, are untouched -- proves these regexes are scoped to the
