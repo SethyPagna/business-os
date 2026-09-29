@@ -960,9 +960,15 @@ function manualChunks(id: string): string | undefined {
     if (normalized.includes('/src/utils/mediaUpload.ts')) {
       return 'media-upload-utils'
     }
-    if (normalized.includes('/src/components/shared/ImageGalleryLightbox')) {
+    if (
+      normalized.includes('/src/components/shared/ImageGalleryLightbox')
+      || normalized.endsWith('/src/components/shared/lightboxSwipe.ts')
+    ) {
       return 'image-lightbox'
     }
+    // Both roots load app-shell at boot, so the overlays lock scroll without a request of
+    // their own; app-shared would put it in the catalog-products closure.
+    if (normalized.endsWith('/src/components/shared/documentScrollLock.ts')) return 'app-shell'
     if (normalized.includes('/src/components/shared/AppSelect.tsx')) return 'shared-ui'
     if (normalized.includes('/src/components/shared/LazyPortalMenu.tsx')) return 'shared-ui'
     if (normalized.includes('/src/components/shared/pageActivity.ts')) return 'route-sync-utils'
