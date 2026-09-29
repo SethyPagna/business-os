@@ -2335,6 +2335,16 @@ const STOCK_IN_REPORT_SOURCE = `
   AND (pb.received_quantity IS NULL OR pb.received_quantity > 0 OR COALESCE(pb.received_cost_usd, 0) > 0)
 `
 
+// Group rows carry only branch ids, so this list is their only label source:
+// a retired branch keeps its name for as long as a lot was received into it.
+const STOCK_IN_REPORT_BRANCHES_SQL = `
+  SELECT b.id, b.name, b.is_active
+  FROM branches b
+  WHERE b.is_active = 1
+     OR EXISTS (SELECT 1 FROM product_batches pb WHERE pb.received_branch_id = b.id)
+  ORDER BY b.id ASC
+`
+
 // Builds the WHERE clause + params both endpoints share. A date bound also
 // requires a recorded date -- a range filter that quietly matched no-date
 // rows would misreport; those rows stay reachable with no date filter set
@@ -2429,7 +2439,7 @@ app.get('/suppliers/reports/stock-in-invoices', async (c) => {
   }
 
   const [branches, supplierOptions] = await Promise.all([
-    db.prepare('SELECT id, name FROM branches WHERE is_active = 1 ORDER BY id ASC').all<{ id: number; name: string | null }>(),
+    db.prepare(STOCK_IN_REPORT_BRANCHES_SQL).all<{ id: number; name: string | null; is_active: number }>(),
     db.prepare(`
       SELECT t.supplier_key AS key, MAX(t.supplier_display) AS name
       FROM (${STOCK_IN_REPORT_SOURCE}) t
