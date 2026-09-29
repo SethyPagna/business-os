@@ -234,8 +234,7 @@ function canonicalProduct(raw: unknown, defaults: Row, openingQuantity: number, 
     } else if (field === 'expiry_date') {
       out.expiry_date = date(value, 'product.expiry_date')
     } else if (field === 'discount_starts_at' || field === 'discount_ends_at') {
-      const valueText = text(value, field, 64)
-      out[field] = valueText
+      out[field] = date(value, `product.${field}`)
     } else {
       out[field] = text(value, `product.${field}`, field === 'description' ? 4000 : 500)
     }

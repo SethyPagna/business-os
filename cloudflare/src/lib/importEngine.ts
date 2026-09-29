@@ -240,6 +240,30 @@ function keepStoredCostWhereCellRestatesIt(
   if (str(rawCostKhr) !== '' && costCellRestatesStoredCost(rawCostKhr, match.cost_price_khr)) data.cost_price_khr = Number(match.cost_price_khr) || 0
 }
 
+type DiscountDateCell = { iso: string | null } | { refusal: string }
+
+// A discount date column names no order, so a slash date is read only when a
+// single order gives a real date, or both orders give the same one.
+function readDiscountDate(cell: unknown, label: string): DiscountDateCell {
+  const raw = str(cell)
+  if (!raw) return { iso: null }
+  const dayFirst = normalizeToIsoDate(raw, 'day-first')
+  const monthFirst = normalizeToIsoDate(raw, 'month-first')
+  if (dayFirst && monthFirst && dayFirst !== monthFirst) {
+    return { refusal: `${label} "${raw}" reads as ${dayFirst} day-first or ${monthFirst} month-first; write it as YYYY-MM-DD.` }
+  }
+  const iso = dayFirst || monthFirst
+  return iso ? { iso } : { refusal: `${label} "${raw}" is not a date; write it as YYYY-MM-DD.` }
+}
+
+function readDiscountWindow(row: ParsedCsvRow): { startsAt: string | null; endsAt: string | null } | { refusal: string } {
+  const starts = readDiscountDate(row.discount_starts_at, 'Discount start date')
+  if ('refusal' in starts) return starts
+  const ends = readDiscountDate(row.discount_ends_at, 'Discount end date')
+  if ('refusal' in ends) return ends
+  return { startsAt: starts.iso, endsAt: ends.iso }
+}
+
 function stockReceiptWarning(quantity: number, branchName: string, reason: string): ImportRowWarning {
   return {
     kind: 'stock_receipt',
@@ -703,11 +727,7 @@ export function buildDescriptionFromColumns(row: Record<string, unknown>): strin
   return parts.join('\n\n')
 }
 
-// YYYY-MM-DD for today, matching the frontend's own
-// CreatedDateFilterOptions.tsx todayIso() and the date-only shape every
-// other date column here (expiry_date, discount_starts_at/ends_at) already
-// stores. Used as the default for a new product's received_date when the
-// CSV leaves that column blank (see normalizeProductImportRow below).
+// The received date of a row whose received-date cell is blank.
 function todayIso(): string {
   return new Date().toISOString().slice(0, 10)
 }
@@ -1750,8 +1770,13 @@ export async function classifyProducts(
     data.discount_amount_khr = importDiscountAmountKhr
     data.discount_label = str(row.discount_label) || null
     data.discount_badge_color = str(row.discount_badge_color) || '#e11d48'
-    data.discount_starts_at = str(row.discount_starts_at) || null
-    data.discount_ends_at = str(row.discount_ends_at) || null
+    const discountWindow = readDiscountWindow(row)
+    if ('refusal' in discountWindow) {
+      results.push({ rowNumber: row._rowNumber, action: 'error', identifier: sku || barcode || name, existingId: null, message: discountWindow.refusal, changes: {}, data: row })
+      continue
+    }
+    data.discount_starts_at = discountWindow.startsAt
+    data.discount_ends_at = discountWindow.endsAt
     data.expiry_date = str(row.expiry_date) || null
     // The batch/"Created" date a newly-imported product's initial stock
     // arrived -- separate from expiry_date (when it goes bad). Always
