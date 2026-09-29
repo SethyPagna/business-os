@@ -1,7 +1,6 @@
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
-import type { ClipboardEvent, Dispatch, RefObject, SetStateAction } from 'react'
+import type { Dispatch, RefObject, SetStateAction } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
-import { fmtTime } from '../../utils/formatters.ts'
 import { usePullToRefresh } from '../shared/usePullToRefresh.ts'
 import PullToRefreshIndicator from '../shared/PullToRefreshIndicator.tsx'
 import { getKhmerTextProps } from '../../utils/scriptTypography.ts'
@@ -62,8 +61,6 @@ const PortalPromotionsBanner = lazyRetry(() => import('./PortalPromotionsBanner'
 
 const PUBLIC_PORTAL_BOOTSTRAP_TIMEOUT_MS = 15000
 const PUBLIC_PORTAL_PRODUCT_SEARCH_TIMEOUT_MS = 12000
-const PUBLIC_PORTAL_MEMBERSHIP_TIMEOUT_MS = 12000
-const PUBLIC_PORTAL_SUBMISSION_TIMEOUT_MS = 12000
 const PUBLIC_PORTAL_AI_TIMEOUT_MS = 25000
 // Fixed Leang Beauty browser branding for the live storefront, served as
 // STATIC same-origin files (installable, unlike the old runtime blob: manifest
@@ -75,8 +72,6 @@ const PUBLIC_PORTAL_CACHE_KEY = 'business-os-catalog-portal-cache'
 const PUBLIC_PORTAL_BOOTSTRAP_ELEMENT_ID = 'business-os-portal-bootstrap'
 const PUBLIC_PORTAL_CACHE_MAX_AGE_MS = 1000 * 60 * 20
 const PUBLIC_PORTAL_CACHE_PRODUCT_LIMIT = 80
-const SUBMISSION_MAX_SCREENSHOTS = 8
-const IMAGE_READ_CONCURRENCY = 2
 
 type LooseRecord = Record<string, any>
 type PortalBootstrapWindow = Window & { __businessOsPortalBootstrap?: LooseRecord | null }
@@ -189,13 +184,10 @@ type PortalConfig = LooseRecord & {
 type GalleryViewState = { open: boolean; title: string; items: string[]; index: number }
 type PortalImageViewState = { open: boolean; title: string; images: string[]; index: number }
 type FilePickerState = { open: boolean; target?: unknown; mediaType: string; title: string }
-type SubmissionDraft = { platform: string; note: string; screenshots: string[]; rightsConsent: boolean; privacyConsent: boolean }
 type PortalTab = { key: string; label: string; icon: LucideIcon }
 type CatalogApi = {
   getPortalBootstrap?: () => Promise<unknown>
   searchPortalCatalogProducts?: (params?: Record<string, unknown>) => Promise<unknown>
-  lookupPortalMembership?: (membershipNumber: string) => Promise<unknown>
-  createPortalSubmission?: (payload?: Record<string, unknown>) => Promise<unknown>
   getPortalAiStatus?: () => Promise<unknown>
   askPortalAi?: (payload?: Record<string, unknown>) => Promise<unknown>
 }
@@ -464,58 +456,8 @@ function formatPortalPrice(usd: unknown, khr: unknown, config: { exchangeRate?: 
   return usdText
 }
 
-function formatDateTime(value: unknown): string {
-  if (!value) return '-'
-  const raw = String(value)
-  const date = new Date(raw.includes('T') ? raw : `${raw}Z`)
-  // dd/mm/yyyy + 24-hour in Phnom Penh business time (fmtTime, day-first
-  // since Sep 4 2026). This is a customer-facing surface; a bare
-  // toLocaleString() rendered whatever locale and timezone the visitor's
-  // device happened to use, which silently swaps day and month.
-  return Number.isNaN(date.getTime()) ? String(value) : fmtTime(raw)
-}
-
 function replaceVars(template: unknown, values: Record<string, unknown>): string {
   return String(template || '').replace(/\{(\w+)\}/g, (_match: string, key: string) => String(values?.[key] ?? ''))
-}
-
-function readImageFileAsDataUrl(file: Blob, errorMessage = 'Failed to read image'): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => resolve(String(reader.result || ''))
-    reader.onerror = () => reject(new Error(errorMessage))
-    reader.readAsDataURL(file)
-  })
-}
-
-async function readImageFilesAsDataUrls(files: Iterable<File> | ArrayLike<File> | null | undefined): Promise<string[]> {
-  const selected = Array.from(files || [])
-    .filter((file) => file && String(file.type || '').startsWith('image/'))
-    .slice(0, SUBMISSION_MAX_SCREENSHOTS)
-  if (!selected.length) return []
-  const results: string[] = new Array(selected.length)
-  let nextIndex = 0
-  const workers = Array.from({ length: Math.min(IMAGE_READ_CONCURRENCY, selected.length) }, async () => {
-    while (nextIndex < selected.length) {
-      const index = nextIndex
-      nextIndex += 1
-      results[index] = await readImageFileAsDataUrl(selected[index])
-    }
-  })
-  await Promise.all(workers)
-  return results.filter(Boolean)
-}
-
-async function pickMultipleImagesAsDataUrls(): Promise<string[]> {
-  const files = await new Promise<File[]>((resolve) => {
-    const input = document.createElement('input')
-    input.type = 'file'
-    input.accept = 'image/*'
-    input.multiple = true
-    input.onchange = () => resolve(Array.from(input.files || []))
-    input.click()
-  })
-  return readImageFilesAsDataUrls(files)
 }
 
 function normalizeBootstrapPayload(payload: unknown) {
@@ -612,12 +554,6 @@ export default function PublicCatalogPage() {
   const [portalImageView, setPortalImageView] = useState<PortalImageViewState>({ open: false, title: '', images: [], index: 0 })
   const [filePicker, setFilePicker] = useState<FilePickerState>({ open: false, mediaType: 'image', title: '' })
   const [expandedFaqId, setExpandedFaqId] = useState<string | number | null>(null)
-  const [membershipNumber, setMembershipNumber] = useState('')
-  const [membershipData, setMembershipData] = useState<LooseRecord | null>(null)
-  const [membershipError, setMembershipError] = useState('')
-  const [membershipLoading, setMembershipLoading] = useState(false)
-  const [submissionDraft, setSubmissionDraft] = useState<SubmissionDraft>({ platform: 'Facebook', note: '', screenshots: [], rightsConsent: false, privacyConsent: false })
-  const [submissionSaving, setSubmissionSaving] = useState(false)
   const [assistantProfile, setAssistantProfile] = useState({ brand: '', skinType: '', shoppingFor: '', goal: '', concerns: '' })
   const [assistantQuestion, setAssistantQuestion] = useState('')
   const [assistantLoading, setAssistantLoading] = useState(false)
@@ -1038,7 +974,6 @@ export default function PublicCatalogPage() {
     })),
     addressFact?.href ? { key: 'map', label: copy('map', 'Map'), value: addressFact.href, icon: MapPin, accentClassName: '' } : null,
   ].filter(Boolean) as Array<{ key: string; label: string; value: string; icon: LucideIcon; accentClassName: string }>
-  const redeemSummaryText = `${Number(displayConfig.redeemPoints || 100).toLocaleString()} ${copy('points', 'points')} = ${formatPortalPrice(displayConfig.redeemValueUsd, displayConfig.redeemValueKhr, displayConfig)}`
   const assistantCategoryOptions = useMemo(() => Array.from(new Set(products.map((item) => String(item.category || '').trim()).filter(Boolean))).slice(0, 40), [products])
 
   const toggleFilterValue = (values: string[], setter: Dispatch<SetStateAction<string[]>>, value: string) => {
@@ -1069,54 +1004,6 @@ export default function PublicCatalogPage() {
     const cleanImages = images.map((item) => resolveCatalogAssetUrl(item) || item).filter(Boolean)
     if (!cleanImages.length) return
     setPortalImageView({ open: true, title, images: cleanImages, index: Math.max(0, Math.min(index, cleanImages.length - 1)) })
-  }
-  const handleMembershipLookup = () => {
-    const value = membershipNumber.trim()
-    if (!value) {
-      setMembershipError(copy('membershipRequired', 'Enter a membership number first.'))
-      return
-    }
-    setMembershipLoading(true)
-    setMembershipError('')
-    withLoaderTimeout(() => getCatalogApi().lookupPortalMembership?.(value) || Promise.reject(new Error('Membership lookup API unavailable')), 'Membership lookup', PUBLIC_PORTAL_MEMBERSHIP_TIMEOUT_MS)
-      .then((result) => {
-        setMembershipData((result || null) as LooseRecord | null)
-        if (!result) setMembershipError(copy('membershipNotFound', 'No membership was found for that number.'))
-      })
-      .catch((error) => setMembershipError(getErrorMessage(error, 'Membership lookup failed')))
-      .finally(() => setMembershipLoading(false))
-  }
-  const handleSubmissionPaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
-    const files = Array.from(event.clipboardData?.files || []).filter((file) => file.type.startsWith('image/'))
-    if (!files.length) return
-    event.preventDefault()
-    readImageFilesAsDataUrls(files).then((screenshots) => {
-      setSubmissionDraft((current) => ({ ...current, screenshots: [...current.screenshots, ...screenshots].slice(0, SUBMISSION_MAX_SCREENSHOTS) }))
-    })
-  }
-  const handleUploadSubmissionImages = () => {
-    pickMultipleImagesAsDataUrls().then((screenshots) => {
-      setSubmissionDraft((current) => ({ ...current, screenshots: [...current.screenshots, ...screenshots].slice(0, SUBMISSION_MAX_SCREENSHOTS) }))
-    })
-  }
-  const handleSubmitShareProof = () => {
-    if (!portalAccount.account) {
-      setMembershipError(copy('submissionSignInRequired', 'Sign in before sending a screenshot.', 'សូមចូលគណនីមុនពេលផ្ញើរូបថតអេក្រង់។'))
-      return
-    }
-    if (!submissionDraft.rightsConsent || !submissionDraft.privacyConsent) {
-      setMembershipError(copy('submissionConsentRequired', 'Confirm both consent statements before sending.', 'សូមបញ្ជាក់សេចក្ដីយល់ព្រមទាំងពីរមុនពេលផ្ញើ។'))
-      return
-    }
-    setSubmissionSaving(true)
-    setMembershipError('')
-    const payload = { ...submissionDraft, consentLocale: String(displayConfig.language || 'en') }
-    withLoaderTimeout(() => getCatalogApi().createPortalSubmission?.(payload) || Promise.reject(new Error('Submission API unavailable')), 'Share submission', PUBLIC_PORTAL_SUBMISSION_TIMEOUT_MS)
-      .then(() => {
-        setSubmissionDraft({ platform: 'Facebook', note: '', screenshots: [], rightsConsent: false, privacyConsent: false })
-      })
-      .catch((error) => setMembershipError(getErrorMessage(error, 'Submission failed')))
-      .finally(() => setSubmissionSaving(false))
   }
   const clearAssistantState = () => {
     setAssistantError('')
@@ -1336,22 +1223,7 @@ export default function PublicCatalogPage() {
       <CatalogSecondaryTabs
         tab={activeTab}
         copy={copy}
-        formatDateTime={formatDateTime}
-        formatPortalPrice={formatPortalPrice}
-        membershipNumber={membershipNumber}
-        setMembershipNumber={setMembershipNumber}
-        handleMembershipLookup={handleMembershipLookup}
-        membershipLoading={membershipLoading}
-        membershipError={membershipError}
-        membershipData={membershipData}
         previewConfig={displayConfig}
-        redeemSummaryText={redeemSummaryText}
-        submissionDraft={submissionDraft}
-        setSubmissionDraft={setSubmissionDraft}
-        submissionSaving={submissionSaving}
-        handleSubmissionPaste={handleSubmissionPaste}
-        handleSubmitShareProof={handleSubmitShareProof}
-        handleUploadSubmissionImages={handleUploadSubmissionImages}
         openPortalImage={openPortalImage}
         mapEmbedUrl={mapEmbedUrl}
         addressFact={addressFact}
@@ -1589,10 +1461,7 @@ export default function PublicCatalogPage() {
     </div>
   ) : null
 
-  // Account drawer: the top-bar profile icon opens this. It reuses the same
-  // CatalogAccountSection body that used to be a nav tab (sign in / sign up /
-  // signed-in profile + the now-disabled membership lookup), just presented as
-  // a slide-in drawer with its own header instead.
+  // The top-bar profile icon opens CatalogAccountSection (sign in, sign up, signed-in profile) as a drawer.
   const accountDrawer = accountOpen ? (
     <div className="fixed inset-0 z-[60] flex items-end justify-center bg-slate-950/50 backdrop-blur-sm sm:items-center" onClick={() => setAccountOpen(false)}>
       <div
