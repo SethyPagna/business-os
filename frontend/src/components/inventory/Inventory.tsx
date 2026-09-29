@@ -1248,9 +1248,11 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
     { value: '', label: t('no_specific_branch') || 'No specific branch' },
     ...branchSelectOptions,
   ], [branchSelectOptions, t])
-  const chooseBranchLabel = tr('choose_branch', 'Choose a branch')
+  // The transfer selects carry no caption, so their empty option names them.
+  const sourceBranchLabel = tr('source_branch', 'Source branch')
+  const destinationBranchLabel = tr('destination_branch', 'Destination branch')
   const transferSourceBranchOptions = useMemo(() => [
-    { value: '', label: chooseBranchLabel },
+    { value: '', label: sourceBranchLabel },
     ...branches.map((branch) => {
       const branchQty = Number((transferModal?.branch_stock || []).find((item) => String(item.branch_id) === String(branch.id))?.quantity || 0)
       return {
@@ -1259,18 +1261,18 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
         disabled: !branchCanBeTransferSource(branch.name),
       }
     }),
-  ], [branches, chooseBranchLabel, transferModal])
+  ], [branches, sourceBranchLabel, transferModal])
   const transferDestinationBranchOptions = useMemo(() => {
     const selectedSource = branchesById.get(String(transferForm.from_branch_id))
     return [
-      { value: '', label: chooseBranchLabel },
+      { value: '', label: destinationBranchLabel },
       ...branches.map((branch) => ({
         value: String(branch.id),
         label: branch.name || String(branch.id),
         disabled: !branchCanTransferBetween(selectedSource?.name, branch.name),
       })),
     ]
-  }, [branches, branchesById, chooseBranchLabel, transferForm.from_branch_id])
+  }, [branches, branchesById, destinationBranchLabel, transferForm.from_branch_id])
   const handleTransferSourceChange = useCallback((sourceBranchId: string) => {
     setTransferForm((current) => ({
       ...current,

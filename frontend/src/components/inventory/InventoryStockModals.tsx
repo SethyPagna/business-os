@@ -6,12 +6,15 @@ import { createPortal } from 'react-dom'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import Info from 'lucide-react/dist/esm/icons/info.js'
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
+import ArrowRight from 'lucide-react/dist/esm/icons/arrow-right.js'
+import Settings2 from 'lucide-react/dist/esm/icons/settings-2.js'
 import AppSelect, { type AppSelectOption } from '../shared/AppSelect'
 import { getProductBatches, type ProductBatch } from '../../api/batchesTransport.ts'
 import { batchDisplayLabel } from '../../utils/batchLabel.ts'
 import { dateEntryDisplayValue } from '../../utils/dateEntry.ts'
 import SupplierPickerField from '../shared/SupplierPickerField.tsx'
 import DateEntryInput from '../shared/DateEntryInput.tsx'
+import SuggestionTextInput from '../shared/SuggestionTextInput.tsx'
 import { isBatchPickerVisible, isSetDownSubmission, isStockInSubmission, normalizeStockSetScope, scopedSetPreview, type StockSetScope } from '../../utils/stockReceiptFields.ts'
 import InfoHint from '../shared/InfoHint.tsx'
 import StockReasonField from '../shared/StockReasonField.tsx'
@@ -919,7 +922,7 @@ export default function InventoryStockModals({
       {transferModal ? (
         <div className="modal-viewport-safe pointer-events-auto fixed inset-0 z-[1050] flex items-end justify-center overflow-y-auto bg-black/50 sm:items-center sm:p-4" onClick={requestCloseTransfer}>
           <div className="modal-panel-safe flex w-full flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-md sm:rounded-2xl" onClick={(event) => event.stopPropagation()}>
-            <div className="flex items-center justify-between border-b border-gray-200 p-4 dark:border-gray-700">
+            <div className="flex items-center justify-between border-b border-gray-200 px-3 py-2 dark:border-gray-700 sm:px-4">
               <div className="min-w-0">
                 <h2 className="font-bold text-gray-900 dark:text-white">{tr('transfer', 'Transfer')}</h2>
                 <div className="mt-0.5 detail-scroll-text text-xs text-gray-400">{transferModal.name} - {getStockQty(transferModal)} {transferModal.unit}</div>
@@ -931,102 +934,96 @@ export default function InventoryStockModals({
                 </button>
               </div>
             </div>
-            <fieldset disabled={transferSaving || transferPending} className={`modal-scroll min-w-0 space-y-3 p-4 ${transferSaving || transferPending ? 'pointer-events-none opacity-60' : ''}`}>
-              <label className="block">
-                <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{tr('source_branch', 'Source branch')}</span>
+            {/* Section 10 (owner, 30 Sep): one row per pair, the name of each
+                control inside it, no captions. */}
+            <fieldset disabled={transferSaving || transferPending} className={`modal-scroll min-w-0 space-y-2 p-3 sm:p-4 ${transferSaving || transferPending ? 'pointer-events-none opacity-60' : ''}`}>
+              <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-1.5">
                 <AppSelect
                   value={transferForm.from_branch_id}
                   onChange={changeTransferSource}
                   ariaLabel={tr('source_branch', 'Source branch')}
-                  className="w-full"
-                  buttonClassName="h-10 w-full text-sm"
+                  className="w-full min-w-0"
+                  buttonClassName="h-9 w-full text-sm"
                   menuClassName="min-w-[13rem]"
                   optionClassName="text-sm"
                   options={transferSourceBranchOptions}
                 />
-              </label>
-              <label className="block">
-                <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{tr('destination_branch', 'Destination branch')}</span>
+                <ArrowRight className="h-4 w-4 shrink-0 text-gray-400" aria-hidden="true" />
                 <AppSelect
                   value={transferForm.to_branch_id}
                   onChange={(nextValue) => setTransferForm((current) => ({ ...current, to_branch_id: nextValue }))}
                   ariaLabel={tr('destination_branch', 'Destination branch')}
-                  className="w-full"
-                  buttonClassName="h-10 w-full text-sm"
+                  className="w-full min-w-0"
+                  buttonClassName="h-9 w-full text-sm"
                   menuClassName="min-w-[13rem]"
                   optionClassName="text-sm"
                   options={destinationBranchOptions}
                 />
-              </label>
-              <div>
-                <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{tr('transfer_pick_batch_optional', 'Received date (optional)')}</span>
-                {transferBatchesLoading ? (
-                  <div className="text-xs text-gray-400">{t('loading') || 'Loading...'}</div>
-                ) : (
-                  <div className="flex flex-wrap gap-1.5">
-                    {/* Automatic (FIFO) is the default and never blocks the
-                        transfer: a product whose stock has no dated lot at the
-                        source still moves, allocated by the Worker. */}
-                    <button
-                      type="button"
-                      aria-pressed={!(Number(transferForm.batch_id) > 0)}
-                      className={`rounded-full border px-2.5 py-1 text-[11px] font-medium ${!(Number(transferForm.batch_id) > 0) ? 'border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'border-gray-200 text-gray-600 dark:border-gray-600 dark:text-gray-400'}`}
-                      onClick={() => setTransferForm((current) => ({ ...current, batch_id: '', batch_quantity: '' }))}
-                    >
-                      {tr('transfer_auto_fifo', 'Automatic (FIFO)')}
-                    </button>
-                    {transferBatchOptions.map((batch) => (
-                      <button
-                        key={batch.id}
-                        type="button"
-                        aria-pressed={String(transferForm.batch_id) === String(batch.id)}
-                        className={`rounded-full border px-2.5 py-1 text-[11px] font-medium ${String(transferForm.batch_id) === String(batch.id) ? 'border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'border-gray-200 text-gray-600 dark:border-gray-600 dark:text-gray-400'}`}
-                        onClick={() => setTransferForm((current) => ({ ...current, batch_id: batch.id, batch_quantity: Number(batch.quantity || 0) }))}
-                      >
-                        {batchDisplayLabel(batch, tr('batch', 'Received date'))} ({batch.quantity})
-                      </button>
-                    ))}
-                  </div>
-                )}
               </div>
-              <label className="block">
-                <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{t('quantity') || 'Quantity'} *</span>
-                <input className="input text-sm" type="number" min="0" step="any" value={transferForm.quantity} onChange={(event) => setTransferForm((current) => ({ ...current, quantity: event.target.value }))} />
-              </label>
-              <label className="block">
-                <div className="mb-1 flex items-center justify-between gap-2">
-                  <span className="block text-xs font-medium text-gray-600 dark:text-gray-400">{t('reason') || 'Reason'} *</span>
-                  <button type="button" className="text-[11px] font-medium text-blue-600 hover:text-blue-700 dark:text-blue-300" onClick={() => setReasonManager({ open: true, type: 'transfer' })}>
-                    {tr('manage_reasons', 'Manage reasons')}
-                  </button>
-                </div>
-                {reasonsByType.transfer.length ? (
-                  <div className="mb-2 flex flex-wrap gap-1">
-                    {reasonsByType.transfer.map((entry) => (
-                      <button
-                        key={entry.id}
-                        type="button"
-                        className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${transferForm.reason === entry.label ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'}`}
-                        onClick={() => setTransferForm((current) => ({ ...current, reason: entry.label }))}
-                      >
-                        {entry.label}
-                      </button>
-                    ))}
-                  </div>
-                ) : null}
-                <textarea className="input min-h-[84px] text-sm" value={transferForm.reason} onChange={(event) => setTransferForm((current) => ({ ...current, reason: event.target.value }))} placeholder={tr('transfer_reason_placeholder')} />
-              </label>
+              <div className="grid grid-cols-[minmax(0,1.5fr)_minmax(0,0.8fr)] gap-1.5">
+                {/* Automatic (FIFO) is the default and never blocks the
+                    transfer: a product whose stock has no dated lot at the
+                    source still moves, allocated by the Worker. */}
+                <AppSelect
+                  value={Number(transferForm.batch_id) > 0 ? String(transferForm.batch_id) : ''}
+                  onChange={(nextValue) => {
+                    const batch = transferBatchOptions.find((option) => String(option.id) === nextValue)
+                    setTransferForm((current) => (batch
+                      ? { ...current, batch_id: batch.id, batch_quantity: Number(batch.quantity || 0) }
+                      : { ...current, batch_id: '', batch_quantity: '' }))
+                  }}
+                  ariaLabel={tr('transfer_pick_batch_optional', 'Received date (optional)')}
+                  disabled={transferBatchesLoading}
+                  className="w-full min-w-0"
+                  buttonClassName="h-9 w-full text-sm tabular-nums"
+                  menuClassName="min-w-[13rem]"
+                  optionClassName="text-sm tabular-nums"
+                  options={[
+                    { value: '', label: transferBatchesLoading ? (t('loading') || 'Loading...') : tr('transfer_auto_fifo', 'Automatic (FIFO)') },
+                    ...transferBatchOptions.map((batch) => ({
+                      value: String(batch.id),
+                      label: `${batchDisplayLabel(batch, tr('batch', 'Received date'))} · ${batch.quantity}`,
+                    })),
+                  ]}
+                />
+                <input
+                  className="input h-9 text-sm tabular-nums"
+                  type="number"
+                  min="0"
+                  step="any"
+                  aria-label={t('quantity') || 'Quantity'}
+                  title={t('quantity') || 'Quantity'}
+                  placeholder={t('quantity') || 'Quantity'}
+                  value={transferForm.quantity}
+                  onChange={(event) => setTransferForm((current) => ({ ...current, quantity: event.target.value }))}
+                />
+              </div>
+              <div className="flex min-w-0 items-center gap-1.5">
+                <SuggestionTextInput
+                  id="inventory-transfer-reason"
+                  name="inventory_transfer_reason"
+                  className="min-w-0 flex-1"
+                  inputClassName="h-9 text-sm"
+                  value={transferForm.reason}
+                  options={reasonsByType.transfer.map((entry) => entry.label)}
+                  onChange={(next) => setTransferForm((current) => ({ ...current, reason: next }))}
+                  ariaLabel={t('reason') || 'Reason'}
+                  placeholder={tr('transfer_reason_placeholder', 'Reason for this transfer')}
+                />
+                <button
+                  type="button"
+                  className={toolbarIconButtonClassName}
+                  onClick={() => setReasonManager({ open: true, type: 'transfer' })}
+                  aria-label={tr('manage_reasons', 'Manage reasons')}
+                  title={tr('manage_reasons', 'Manage reasons')}
+                >
+                  <Settings2 className="h-4 w-4" aria-hidden="true" />
+                </button>
+              </div>
             </fieldset>
-            {/* S4-20: the actions live at the END of the form -- outside
-                .modal-scroll, so they are the last thing in the panel
-                without being the last thing behind a scroll. There is no
-                second Save beside the ✕ any more. */}
-            <div className="flex flex-shrink-0 gap-2 border-t border-gray-200 p-4 dark:border-gray-700">
-              <button type="button" onClick={onTransfer} className={`btn-primary ${TOOLBAR_BUTTON_BASE} min-w-0 flex-1`} disabled={transferSaving || transferPending}>
+            <div className="flex-shrink-0 border-t border-gray-200 p-3 dark:border-gray-700 sm:p-4">
+              <button type="button" onClick={onTransfer} className={`btn-primary ${TOOLBAR_BUTTON_BASE} w-full`} disabled={transferSaving || transferPending}>
                 {transferSaving ? (t('saving') || 'Saving...') : tr('transfer', 'Transfer')}
-              </button>
-              <button type="button" onClick={requestCloseTransfer} className={`btn-secondary ${TOOLBAR_BUTTON_BASE}`} disabled={transferSaving}>
-                {t('cancel') || 'Cancel'}
               </button>
             </div>
           </div>
