@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import { readFileSync } from 'node:fs'
 import { expect, test, type BrowserContext, type Locator, type Page } from '@playwright/test'
-import { ADMIN_ORIGIN } from './support/harness'
+import { ADMIN_ORIGIN, DEVICE_SETTINGS_KEY } from './support/harness'
 import { E2E_ACCOUNTS, gotoAdminPage, signIn } from './support/session'
 
 /**
@@ -24,6 +24,9 @@ const POSTER_UPLOAD = '/uploads/about-poster-e2e.png'
 const POSTER_STORED = `${POSTER_UPLOAD}?v=e2e1`
 const SAVE_DELAY_MS = 1_500
 const BROADCAST_RELOAD_SETTLE_MS = 2_500
+const FILE_CHOOSER_ATTEMPT_MS = 3_000
+/** frontend/src/utils/standaloneNavigation.ts IOS_INSTALL_HINT_DISMISSED_KEY */
+const IOS_INSTALL_HINT_DISMISSED_KEY = `${DEVICE_SETTINGS_KEY}:ios-install-hint-dismissed-at-v1`
 
 type SettingsWrite = Record<string, unknown>
 
@@ -32,6 +35,11 @@ async function openEditor(page: Page, context: BrowserContext): Promise<string> 
   const seeded = await context.request.post(`${ADMIN_ORIGIN}/__e2e/settings?scope=${scope}`, { data: {} })
   expect(seeded.ok(), 'the fixture server takes the settings scope').toBe(true)
   await context.addCookies([{ name: 'e2e_settings_scope', value: scope, url: ADMIN_ORIGIN }])
+  // An owner who already snoozed the iOS install hint: on ios-webkit it covers the editor's lower buttons.
+  await context.addInitScript(({ key, origin }) => {
+    if (window.location.origin !== origin) return
+    try { window.localStorage.setItem(key, String(Date.now())) } catch { /* blocked storage */ }
+  }, { key: IOS_INSTALL_HINT_DISMISSED_KEY, origin: ADMIN_ORIGIN })
   await page.route('**/api/files/upload', (route) => route.fulfill({
     json: { public_path: POSTER_UPLOAD, processing_status: 'ready', cache_version: 'e2e1' },
   }))
@@ -50,11 +58,18 @@ async function openSection(page: Page, label: string): Promise<void> {
   await editor(page).getByRole('button', { name: label, exact: true }).first().click()
 }
 
+// Clicked from the top of the editor: on ios-webkit, scrolling to the sticky bar
+// during the click lost the tap (no request and no toast in the trace).
+async function clickSave(page: Page): Promise<void> {
+  await editor(page).evaluate((node) => node.scrollIntoView({ block: 'start' }))
+  await expect(saveButton(page)).toBeEnabled()
+  await saveButton(page).click()
+}
+
 async function saveAndCapture(page: Page): Promise<SettingsWrite> {
   const request = page.waitForRequest((candidate) => candidate.method() === 'POST' && new URL(candidate.url()).pathname === '/api/settings')
   const response = page.waitForResponse((candidate) => candidate.request().method() === 'POST' && new URL(candidate.url()).pathname === '/api/settings')
-  await expect(saveButton(page)).toBeEnabled()
-  await saveButton(page).click()
+  await clickSave(page)
   const body = (await request).postDataJSON() as SettingsWrite
   expect((await response).ok()).toBe(true)
   return body
@@ -67,9 +82,15 @@ async function storedSettings(page: Page, scope: string): Promise<{ settings: Se
 
 async function uploadAboutPicture(page: Page): Promise<void> {
   await openSection(page, 'About')
-  const chooser = page.waitForEvent('filechooser')
-  await aboutPicture(page).getByRole('button', { name: 'Upload image' }).click()
-  await (await chooser).setFiles(POSTER_FILE)
+  const upload = aboutPicture(page).getByRole('button', { name: 'Upload image' })
+  await upload.scrollIntoViewIfNeeded()
+  await expect(async () => {
+    const [chooser] = await Promise.all([
+      page.waitForEvent('filechooser', { timeout: FILE_CHOOSER_ATTEMPT_MS }),
+      upload.click({ timeout: FILE_CHOOSER_ATTEMPT_MS }),
+    ])
+    await chooser.setFiles(POSTER_FILE)
+  }, 'the Upload button opens the file chooser').toPass()
   await expect(aboutPicture(page).locator(`img[src*="${POSTER_UPLOAD}"]`)).toBeVisible()
 }
 
@@ -147,7 +168,7 @@ test.describe('Website Editor round trip', () => {
     await page.route('**/api/settings', (route) => (route.request().method() === 'POST'
       ? route.fulfill({ status: 400, json: { error: 'The About picture must be a picture uploaded to this site.', code: 'invalid_about_image' } })
       : route.fallback()))
-    await saveButton(page).click()
+    await clickSave(page)
     const message = 'The About picture must be a picture uploaded to this site. Upload it again.'
     await expect(aboutPicture(page).getByRole('alert')).toHaveText(message)
     await expect(page.getByText(message).first()).toBeVisible()
@@ -168,7 +189,7 @@ test.describe('Website Editor round trip', () => {
     const response = page.waitForResponse((candidate) => candidate.request().method() === 'POST' && new URL(candidate.url()).pathname === '/api/settings')
     let saveLanded = false
     void response.then(() => { saveLanded = true })
-    await saveButton(page).click()
+    await clickSave(page)
     await page.locator('#portal-business-tagline').fill('Typed while saving')
     expect(saveLanded, 'the text was typed while the Save was still in flight').toBe(false)
     expect((await response).ok()).toBe(true)
