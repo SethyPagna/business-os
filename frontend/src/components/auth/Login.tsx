@@ -17,7 +17,7 @@ import { STORAGE_KEYS } from '../../constants'
 import { getClientDeviceInfo } from '../../utils/deviceInfo.ts'
 import { localizeAuthError } from '../../utils/authErrorText.ts'
 import { requestPasswordSaveAfterSignIn } from '../../utils/passwordManager.ts'
-import { isNewPasswordProblem, newPasswordProblem, passwordProblemMessage } from '../../utils/passwordRules.ts'
+import { newPasswordProblem, newPasswordRefusalMessage, passwordProblemMessage } from '../../utils/passwordRules.ts'
 import { getPortalConfig } from '../../api/portalPublicTransport.ts'
 import { requestPasswordResetAdminApproval } from '../../api/authTransport.ts'
 import NewPasswordFields from './password/NewPasswordFields.tsx'
@@ -213,10 +213,7 @@ function getErrorMessage(error: unknown, fallback: string): string {
 // A reset refusal (a thrown API error or a { success: false } answer) in the
 // operator's language when the Worker sent a known code.
 function resetFailureMessage(value: unknown, tr: TranslationLookup, fallback: string): string {
-  const code = String((value as { code?: unknown } | null)?.code || '')
-  if (isNewPasswordProblem(code)) return passwordProblemMessage(code, tr)
-  if (code === 'password_known_leaked') return tr('password_known_leaked', 'This password is publicly known. Choose a different password.')
-  return localizeAuthError(value, tr, fallback)
+  return newPasswordRefusalMessage(value, tr) || localizeAuthError(value, tr, fallback)
 }
 
 function readPendingOauthLogin(): PendingOauthLogin | null {

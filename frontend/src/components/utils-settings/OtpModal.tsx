@@ -31,6 +31,7 @@ export type OtpModalProps = {
 
 type AppContextValue = {
   t?: Translate
+  user?: { username?: string | null } | null
 }
 
 type OtpApiResult = {
@@ -69,6 +70,9 @@ function normalizeOtpQrDataUrl(value: unknown): string | null {
 export default function OtpModal({ mode, userId, targetName, targetUsername, otpCurrentlyEnabled = false, onClose, onDone, t }: OtpModalProps) {
   const app = useApp()
   const tr = t || app.t || ((key: string) => key)
+  // Every password here is the signed-in person's own (in recovery, the
+  // administrator's), never the account being recovered.
+  const signedInUsername = String(app.user?.username || '')
   const [step, setStep] = useState<OtpStep>(mode === 'setup' ? 'reauth' : 'confirm_disable')
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null)
   const [otpAuthUrl, setOtpAuthUrl] = useState<string | null>(null)
@@ -330,6 +334,16 @@ export default function OtpModal({ mode, userId, targetName, targetUsername, otp
             <div>
               <label htmlFor="otp-setup-password" className="mb-1 block text-xs font-medium text-gray-700 dark:text-gray-300">{tr('current_password') || 'Current password'}</label>
               <input
+                type="text"
+                name="username"
+                autoComplete="username"
+                value={signedInUsername}
+                readOnly
+                className="sr-only"
+                tabIndex={-1}
+                aria-hidden="true"
+              />
+              <input
                 id="otp-setup-password"
                 name="otp_setup_password"
                 autoComplete="current-password"
@@ -453,6 +467,16 @@ export default function OtpModal({ mode, userId, targetName, targetUsername, otp
             <div>
               <label htmlFor="otp-disable-password" className="mb-1 block text-xs font-medium text-gray-700 dark:text-gray-300">{mode === 'recover' ? (tr('your_current_password', 'Your current password')) : (tr('current_password') || 'Current password')}</label>
               <input
+                type="text"
+                name="username"
+                autoComplete="username"
+                value={signedInUsername}
+                readOnly
+                className="sr-only"
+                tabIndex={-1}
+                aria-hidden="true"
+              />
+              <input
                 id="otp-disable-password"
                 name="otp_disable_password"
                 autoComplete="current-password"
@@ -460,7 +484,6 @@ export default function OtpModal({ mode, userId, targetName, targetUsername, otp
                 type="password"
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
-                placeholder="Enter your password"
                 autoFocus
               />
             </div>

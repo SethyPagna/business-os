@@ -2,6 +2,7 @@ import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import type { ChangeEvent, ComponentType, ReactNode } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import Chrome from 'lucide-react/dist/esm/icons/chrome.js'
+import KeyRound from 'lucide-react/dist/esm/icons/key-round.js'
 import Link2 from 'lucide-react/dist/esm/icons/link-2.js'
 import Mail from 'lucide-react/dist/esm/icons/mail.js'
 import ShieldCheck from 'lucide-react/dist/esm/icons/shield-check.js'
@@ -16,7 +17,8 @@ import { STORAGE_KEYS } from '../../constants'
 import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAppHook } from '../../AppContext.tsx'
 import { beginTrackedRequest, getFirstLoaderError, invalidateTrackedRequest, isTrackedRequestCurrent, settleLoaderMap, withLoaderTimeout } from '../../utils/loaders.ts'
 import { useActionHistory } from '../../utils/actionHistory.ts'
-import { copyPasswordToClipboard, passwordPersistenceNotice, persistChangedPassword } from '../../utils/passwordManager.ts'
+import NewPasswordFields from '../auth/password/NewPasswordFields.tsx'
+import { changeOwnPassword } from '../auth/password/ownPasswordChange.ts'
 import ShiftHistoryPanel from '../shifts/ShiftHistoryPanel.tsx'
 import { UserAvatarImage } from './UserAvatar.tsx'
 import { createAvatarRemoveFlow, uploadAndAttachAvatar } from './avatarFlow.ts'
@@ -799,40 +801,36 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
     }
   }
 
+  const accountUsername = String(savedProfile?.username || user?.username || '')
+  const accountName = String(savedProfile?.name || user?.name || '')
+
   const handlePasswordSave = async () => {
     if (savingPassword || savePasswordInFlightRef.current) return
-    if (newPassword.length < 6) return notify(tr('password_min_6', 'Use at least 6 characters for the new password.'), 'error')
-    if (newPassword !== confirmPassword) return notify(tr('new_password_confirm_mismatch', 'New password confirmation does not match'), 'error')
-    if (!currentPassword.trim()) return notify(tr('current_password_required_change', 'Current password is required to change password'), 'error')
-
     savePasswordInFlightRef.current = true
     setSavingPassword(true)
     try {
       const userId = requireCurrentUserId()
-      const result = await withLoaderTimeout(() => getProfileApi().changeUserPassword(userId, {
+      const outcome = await changeOwnPassword({
+        username: accountUsername,
+        displayName: accountName,
         currentPassword,
         newPassword,
-        userId,
-        userName: user?.name,
-      }), 'Change password', PROFILE_PASSWORD_TIMEOUT_MS)
-      if (result?.success === false) {
-        notify(currentPasswordRateLimitMessage(result, tr) || result.error || 'Failed to change password', 'error')
+        confirmPassword,
+        tr,
+        change: (passwords) => withLoaderTimeout(
+          () => getProfileApi().changeUserPassword(userId, { ...passwords, userId, userName: user?.name }),
+          'Change password',
+          PROFILE_PASSWORD_TIMEOUT_MS,
+        ),
+      })
+      if (!outcome.changed) {
+        notify(outcome.message, 'error')
         return
       }
-      const persistence = await persistChangedPassword({
-        username: String(profile?.username || user?.username || '').trim(),
-        displayName: String(profile?.name || user?.name || profile?.username || user?.username || '').trim(),
-        password: newPassword,
-        allowCredentialStore: true,
-        copyFallback: true,
-      })
-      const passwordSecured = persistence.credentialStoreSucceeded || persistence.copiedToClipboard
       setCurrentPassword('')
-      if (passwordSecured) {
-        setNewPassword('')
-        setConfirmPassword('')
-      }
-      notify(passwordPersistenceNotice(persistence), passwordSecured && !persistence.copiedToClipboard ? 'success' : 'warning')
+      setNewPassword('')
+      setConfirmPassword('')
+      notify(outcome.message, outcome.tone)
       actionHistory.pushAction({
         scope: 'profile',
         entity: 'user',
@@ -840,7 +838,7 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
         label: tr('password_updated', 'Password updated'),
       })
     } catch (error) {
-      notify(currentPasswordRateLimitMessage(error, tr) || getErrorMessage(error, 'Failed to change password'), 'error')
+      notify(getErrorMessage(error, 'Failed to change password'), 'error')
     } finally {
       savePasswordInFlightRef.current = false
       setSavingPassword(false)
@@ -1313,6 +1311,16 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
                         )}
                       </div>
                       <input
+                        type="text"
+                        name="username"
+                        autoComplete="username"
+                        value={accountUsername}
+                        readOnly
+                        className="sr-only"
+                        tabIndex={-1}
+                        aria-hidden="true"
+                      />
+                      <input
                         id="disconnect-google-password"
                         name="disconnect_google_password"
                         type="password"
@@ -1373,19 +1381,19 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
                 </div>
               </div>
               <form className="space-y-2" onSubmit={(event) => { event.preventDefault(); void handlePasswordSave() }}>
-                <input
-                  type="text"
-                  name="username"
-                  autoComplete="username"
-                  value={profile?.username || user?.username || ''}
-                  readOnly
-                  className="sr-only"
-                  tabIndex={-1}
-                  aria-hidden="true"
-                />
               <div className="grid gap-2 lg:grid-cols-3">
                 <div>
-                  <div className="mb-1 flex items-center gap-1">
+                  <input
+                    type="text"
+                    name="username"
+                    autoComplete="username"
+                    value={accountUsername}
+                    readOnly
+                    className="sr-only"
+                    tabIndex={-1}
+                    aria-hidden="true"
+                  />
+                  <div className="mb-1 flex items-center gap-1 lg:h-7">
                     <label htmlFor="security-current-password" className="block text-xs font-medium text-gray-700 dark:text-gray-300">
                       {tr('current_password', 'Current password')}
                     </label>
@@ -1401,37 +1409,25 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
                     onChange={(e) => setCurrentPassword(e.target.value)}
                   />
                 </div>
-                <div>
-                  <label htmlFor="new-password" className="mb-1 block text-xs font-medium text-gray-700 dark:text-gray-300">{tr('new_password', 'New password')}</label>
-                  <input id="new-password" name="new_password" type="password" autoComplete="new-password" className="input h-9 text-sm" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} />
-                </div>
-                <div>
-                  <label htmlFor="confirm-password" className="mb-1 block text-xs font-medium text-gray-700 dark:text-gray-300">{tr('confirm_new_password', 'Confirm new password')}</label>
-                  <input id="confirm-password" name="confirm_password" type="password" autoComplete="new-password" className="input h-9 text-sm" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} />
+                <div className="lg:col-span-2">
+                  <NewPasswordFields
+                    tr={tr}
+                    idPrefix="security-password"
+                    password={newPassword}
+                    confirm={confirmPassword}
+                    onPasswordChange={setNewPassword}
+                    onConfirmChange={setConfirmPassword}
+                    identity={{ username: accountUsername, name: accountName, phone: String(savedProfile?.phone || '') }}
+                    disabled={savingPassword}
+                    inputClassName="input h-9 text-sm"
+                    layout="columns"
+                  />
                 </div>
               </div>
-              <div className="flex min-w-0 items-center gap-2 overflow-x-auto">
-                <button type="submit" className="btn-primary h-9 shrink-0 px-3 text-xs" disabled={savingPassword}>
-                  {savingPassword ? tr('updating', 'Updating...') : tr('change_password', 'Change password')}
-                </button>
-                <button
-                  type="button"
-                  className="btn-secondary h-9 shrink-0 px-3 text-xs"
-                  disabled={!newPassword}
-                  onClick={() => {
-                    void copyPasswordToClipboard(newPassword).then((copied) => {
-                      notify(
-                        copied
-                          ? tr('new_password_copied', 'New password copied to clipboard.')
-                          : tr('new_password_copy_failed', 'Could not copy automatically. Select the new password field and copy it before leaving.'),
-                        copied ? 'success' : 'warning',
-                      )
-                    })
-                  }}
-                >
-                  {tr('copy_new_password', 'Copy new password')}
-                </button>
-              </div>
+              <button type="submit" className="btn-primary inline-flex h-9 items-center gap-1.5 px-3 text-xs" title={tr('change_password', 'Change password')} disabled={savingPassword}>
+                <KeyRound className="h-4 w-4" aria-hidden="true" />
+                {savingPassword ? tr('updating', 'Updating...') : tr('save', 'Save')}
+              </button>
               </form>
               <div className="grid gap-2 rounded-xl bg-gray-50 p-2.5 dark:bg-zinc-800/70 sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:items-end">
                 <button type="button" className="btn-secondary h-9 whitespace-nowrap px-3 text-xs" onClick={() => setOtpMode(otpEnabled ? 'disable' : 'setup')}>

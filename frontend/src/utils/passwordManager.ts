@@ -74,6 +74,13 @@ export async function requestPasswordSave(request: PasswordSaveRequest): Promise
   return tryStoreCredential(username, request.password, request.displayName)
 }
 
+// `stored` is requestPasswordSave's answer after the person's own change.
+export function passwordNoticeKey({ stored }: { stored: boolean }): { key: string; fallback: string } {
+  return stored
+    ? { key: 'password_saved_to_manager', fallback: 'Password updated. Your browser was asked to save it.' }
+    : { key: 'password_updated_save_it', fallback: 'Password updated. Save it in your password manager if the browser did not offer to.' }
+}
+
 type SignInAnswer = {
   success?: boolean
   sharedDevice?: boolean

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
-import { requestPasswordSave, requestPasswordSaveAfterSignIn } from '../src/utils/passwordManager.ts'
+import { passwordNoticeKey, requestPasswordSave, requestPasswordSaveAfterSignIn } from '../src/utils/passwordManager.ts'
 
 // AUTH-P1: after a successful sign-in or own password change the app asks the
 // browser's password manager to save the credential (Chromium's
@@ -125,6 +125,20 @@ await runTest('after sign-in: nothing is saved on a shared device, a refusal, a 
     assert.deepEqual(stored, [])
     assert.deepEqual(clipboardWrites, [])
   })
+})
+
+await runTest('the notice after an own password change says whether the browser was asked to save it, in both languages', () => {
+  const saved = passwordNoticeKey({ stored: true })
+  const unsaved = passwordNoticeKey({ stored: false })
+  assert.equal(saved.key, 'password_saved_to_manager')
+  assert.equal(unsaved.key, 'password_updated_save_it')
+  for (const lang of ['en', 'km']) {
+    const pack = JSON.parse(fs.readFileSync(new URL(`../src/lang/${lang}.json`, import.meta.url), 'utf8')) as Record<string, string>
+    for (const notice of [saved, unsaved]) assert.ok(String(pack[notice.key] || '').trim(), `${lang}.json has ${notice.key}`)
+  }
+  const en = JSON.parse(fs.readFileSync(new URL('../src/lang/en.json', import.meta.url), 'utf8')) as Record<string, string>
+  assert.equal(en[saved.key], saved.fallback)
+  assert.equal(en[unsaved.key], unsaved.fallback)
 })
 
 await runTest('factory reset: the password pairs with the signed-in username, the confirm word is never offered as one, and Enter cannot submit', () => {

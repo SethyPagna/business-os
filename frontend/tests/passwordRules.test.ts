@@ -4,6 +4,7 @@ import {
   MIN_PASSWORD_LENGTH,
   isNewPasswordProblem,
   newPasswordProblem,
+  newPasswordRefusalMessage,
   passwordProblemMessage,
 } from '../src/utils/passwordRules.ts'
 
@@ -77,6 +78,16 @@ await runTest('each problem has a message that names the number it enforces', ()
 await runTest('a server refusal code is recognised so the screen can say it in the operator\'s language', () => {
   for (const code of ['password_too_short', 'password_edge_whitespace', 'password_too_long']) assert.equal(isNewPasswordProblem(code), true)
   for (const code of ['incorrect_password', 'password_known_leaked', '', 'password']) assert.equal(isNewPasswordProblem(code), false)
+})
+
+await runTest('every refusal of a new password reads the same on every screen, from an answer or a thrown error', () => {
+  const tr = (key: string, fallback: string) => `${key}: ${fallback}`
+  assert.equal(newPasswordRefusalMessage({ success: false, code: 'password_too_long' }, tr), passwordProblemMessage('password_too_long', tr))
+  assert.equal(newPasswordRefusalMessage(Object.assign(new Error('English'), { code: 'password_edge_whitespace' }), tr), passwordProblemMessage('password_edge_whitespace', tr))
+  assert.match(newPasswordRefusalMessage({ code: 'password_known_leaked' }, tr) || '', /^password_known_leaked: /)
+  for (const other of [{ code: 'incorrect_password' }, { code: 'current_password_rate_limited' }, { error: 'x' }, null, undefined, 'password_too_short']) {
+    assert.equal(newPasswordRefusalMessage(other, tr), null, `not a new-password refusal: ${JSON.stringify(other)}`)
+  }
 })
 
 if (failed > 0) process.exitCode = 1

@@ -5,9 +5,9 @@ import { useApp as useAppHook } from '../../AppContext.tsx'
 import { changeUserPassword } from '../../api/userAdminTransport.ts'
 import { withLoaderTimeout } from '../../utils/loaders.ts'
 import { requestPasswordSave } from '../../utils/passwordManager.ts'
-import { isNewPasswordProblem, newPasswordProblem, passwordProblemMessage } from '../../utils/passwordRules.ts'
-import { currentPasswordRateLimitMessage } from '../users/currentPasswordErrors.ts'
+import { newPasswordProblem, passwordProblemMessage } from '../../utils/passwordRules.ts'
 import NewPasswordFields from './password/NewPasswordFields.tsx'
+import { passwordChangeFailureMessage } from './password/ownPasswordChange.ts'
 import { requestPasswordRecoveryAfterSignOut } from './passwordRecoveryHandoff.ts'
 
 // S-auth4b: shown instead of the app while the signed-in account is marked
@@ -38,18 +38,6 @@ type ForcedPasswordAppContext = {
 }
 const useApp = useAppHook as () => ForcedPasswordAppContext
 
-export const PASSWORD_KNOWN_LEAKED_CODE = 'password_known_leaked'
-
-function resultCode(value: unknown): string {
-  return value && typeof value === 'object' ? String((value as { code?: unknown }).code || '') : ''
-}
-
-function resultMessage(value: unknown): string {
-  if (value instanceof Error) return value.message
-  if (value && typeof value === 'object') return String((value as { error?: unknown; message?: unknown }).error || (value as { message?: unknown }).message || '')
-  return ''
-}
-
 type Translate = (key: string, fallback: string) => string
 type ForcedPasswordChangeInput = {
   user: ForcedPasswordUser
@@ -57,18 +45,6 @@ type ForcedPasswordChangeInput = {
   newPassword: string
   confirmPassword: string
   tr: Translate
-}
-
-function explainChangeFailure(value: unknown, tr: Translate): string {
-  const code = resultCode(value)
-  if (isNewPasswordProblem(code)) return passwordProblemMessage(code, tr)
-  if (code === PASSWORD_KNOWN_LEAKED_CODE) {
-    return tr('password_known_leaked', 'This password is publicly known. Choose a different password.')
-  }
-  if (code === 'incorrect_password') {
-    return tr('current_password_incorrect', 'The current password is not correct.')
-  }
-  return currentPasswordRateLimitMessage(value, tr) || resultMessage(value) || tr('forced_password_change_failed', 'Could not change the password. Try again.')
 }
 
 function inputError({ currentPassword, newPassword, confirmPassword, tr }: ForcedPasswordChangeInput): string {
@@ -92,9 +68,9 @@ export async function changeForcedPassword(input: ForcedPasswordChangeInput): Pr
       () => changeUserPassword(userId, { currentPassword, newPassword }),
       'Change password',
     )
-    if (result && typeof result === 'object' && (result as { success?: unknown }).success === false) return explainChangeFailure(result, tr)
+    if (result && typeof result === 'object' && (result as { success?: unknown }).success === false) return passwordChangeFailureMessage(result, tr)
   } catch (changeError) {
-    return explainChangeFailure(changeError, tr)
+    return passwordChangeFailureMessage(changeError, tr)
   }
   await requestPasswordSave({ username: String(user?.username || ''), password: newPassword, displayName: user?.name })
   // The Worker cleared must_change_password with the change; tell the app

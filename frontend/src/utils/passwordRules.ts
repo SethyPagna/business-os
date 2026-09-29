@@ -33,3 +33,14 @@ export function passwordProblemMessage(problem: NewPasswordProblem, tr: Translat
     .replace('{max}', String(MAX_PASSWORD_BYTES))
     .replace('{khmer}', String(MAX_PASSWORD_BYTES / KHMER_LETTER_BYTES))
 }
+
+const PASSWORD_KNOWN_LEAKED_CODE = 'password_known_leaked'
+
+// The Worker's refusal of a new password, from a `{ success: false, code }`
+// answer or a thrown ApiError carrying `code`; null for any other failure.
+export function newPasswordRefusalMessage(value: unknown, tr: Translate): string | null {
+  const code = value && typeof value === 'object' ? String((value as { code?: unknown }).code || '') : ''
+  if (isNewPasswordProblem(code)) return passwordProblemMessage(code, tr)
+  if (code === PASSWORD_KNOWN_LEAKED_CODE) return tr('password_known_leaked', 'This password is publicly known. Choose a different password.')
+  return null
+}

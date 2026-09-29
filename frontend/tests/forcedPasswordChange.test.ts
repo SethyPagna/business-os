@@ -83,7 +83,7 @@ function loadForcedScreen(spies: Spies, appContext: Record<string, unknown> = {}
       return { requestPasswordSave: async (request: { username: string; password: string }) => { spies.calls.push(`save:${request.username}:${request.password}`); return spies.saveAnswer } }
     }
     if (id.endsWith('/passwordRules.ts')) return require('../src/utils/passwordRules.ts')
-    if (id.endsWith('/currentPasswordErrors.ts')) return require('../src/components/users/currentPasswordErrors.ts')
+    if (id.endsWith('/ownPasswordChange.ts')) return require('../src/components/auth/password/ownPasswordChange.ts')
     if (id.endsWith('/NewPasswordFields.tsx')) {
       return compileModule('../src/components/auth/password/NewPasswordFields.tsx', (inner) => {
         if (inner.endsWith('/passwordManager.ts')) return require('../src/utils/passwordManager.ts')
@@ -224,7 +224,9 @@ await runTest('a wrong current password is an error in the operator\'s language,
   const shown = await withWindowEvents(spies, () => changeForcedPassword(input({ tr: trFrom({ current_password_incorrect: 'KM-WRONG' }) })))
   assert.equal(shown, 'KM-WRONG')
   assert.deepEqual(spies.calls, ['change:2:Brand-New-9x'], 'nothing saved, the screen is not left')
-  assert.match(forcedSource, /currentPasswordRateLimitMessage\(value, tr\)/, 'the usual limit keeps its own message')
+  const limited = createSpies(async () => ({ success: false, error: 'Too many attempts', code: 'current_password_rate_limited' }))
+  const limitedShown = await withWindowEvents(limited, () => loadForcedScreen(limited).changeForcedPassword(input({ tr: trFrom({ current_password_rate_limited: 'KM-LIMIT' }) })))
+  assert.equal(limitedShown, 'KM-LIMIT', 'the usual limit keeps its own message')
 })
 
 await runTest('the form pairs for password managers: username text input first, then named current, new and confirm', () => {

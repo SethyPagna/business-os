@@ -151,4 +151,16 @@ await runTest('the strength meter renders from the first paint and names the lev
   assert.match(renderToStaticMarkup(React.createElement(Fields, baseProps({ password: 'Abcdefgh1234xy' }))), /Strength: Strong/)
 })
 
+await runTest('columns: new and confirm side by side, both label rows as tall as the icon row so the inputs line up', () => {
+  const Fields = loadFields([])
+  const confirmLabelClass = (html: string) => /<label for="p-confirm" class="([^"]*)"/.exec(html)?.[1] || ''
+  const columns = renderToStaticMarkup(React.createElement(Fields, baseProps({ layout: 'columns' })))
+  assert.match(columns, /^<div class="grid gap-2 sm:grid-cols-2">/)
+  assert.match(confirmLabelClass(columns), /\bh-7\b/)
+  assert.match(columns, /<button[^>]*class="[^"]*\bh-7\b/, 'the icon buttons set the new-password row height')
+  const stacked = renderToStaticMarkup(React.createElement(Fields, baseProps()))
+  assert.match(stacked, /^<div class="space-y-2">/)
+  assert.doesNotMatch(confirmLabelClass(stacked), /\bh-7\b/, 'stacked screens stay compact')
+})
+
 if (failed > 0) process.exitCode = 1

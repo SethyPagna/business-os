@@ -25,6 +25,8 @@ type NewPasswordFieldsProps = {
   identity?: PasswordIdentity
   disabled?: boolean
   inputClassName?: string
+  // 'columns': new and confirm side by side from the sm breakpoint.
+  layout?: 'stack' | 'columns'
 }
 
 // Guides Safari's own generator; the app's rule is utils/passwordRules.ts.
@@ -78,6 +80,7 @@ export default function NewPasswordFields({
   identity,
   disabled = false,
   inputClassName = 'input h-10 text-sm',
+  layout = 'stack',
 }: NewPasswordFieldsProps) {
   const [revealed, setRevealed] = useState(false)
   const [copyNotice, setCopyNotice] = useState('')
@@ -88,6 +91,7 @@ export default function NewPasswordFields({
     fair: tr('password_strength_fair', 'Fair'),
     strong: tr('password_strength_strong', 'Strong'),
   }
+  const columns = layout === 'columns'
   const revealLabel = revealed ? tr('hide_password', 'Hide password') : tr('show_password', 'Show password')
 
   const suggest = () => {
@@ -106,7 +110,7 @@ export default function NewPasswordFields({
   }
 
   return (
-    <div className="space-y-2">
+    <div className={columns ? 'grid gap-2 sm:grid-cols-2' : 'space-y-2'}>
       <div>
         <div className="mb-1 flex items-center justify-between gap-2">
           <label htmlFor={`${idPrefix}-new`} className="min-w-0 truncate text-xs font-medium text-gray-700 dark:text-gray-300">
@@ -154,7 +158,8 @@ export default function NewPasswordFields({
         </div>
       </div>
       <div>
-        <label htmlFor={`${idPrefix}-confirm`} className="mb-1 block truncate text-xs font-medium text-gray-700 dark:text-gray-300">
+        {/* In columns the confirm label is as tall as the icon row, so both inputs line up. */}
+        <label htmlFor={`${idPrefix}-confirm`} className={`mb-1 block truncate text-xs font-medium text-gray-700 dark:text-gray-300${columns ? ' sm:h-7 sm:leading-7' : ''}`}>
           {tr('confirm_new_password', 'Confirm new password')}
         </label>
         <input
@@ -168,7 +173,7 @@ export default function NewPasswordFields({
           {...inputAttributes}
         />
       </div>
-      {copyNotice ? <p className="text-xs text-gray-600 dark:text-gray-300" role="status">{copyNotice}</p> : null}
+      {copyNotice ? <p className={`text-xs text-gray-600 dark:text-gray-300${columns ? ' sm:col-span-2' : ''}`} role="status">{copyNotice}</p> : null}
     </div>
   )
 }
