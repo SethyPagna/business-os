@@ -1,4 +1,4 @@
-import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ClipboardEvent, Dispatch, RefObject, SetStateAction } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import { fmtTime } from '../../utils/formatters.ts'
@@ -452,7 +452,7 @@ function normalizeConfigPayload(payload: unknown): PortalConfig {
 }
 
 function SignalOnMount({ onMount }: { onMount: () => void }) {
-  useLayoutEffect(onMount, [onMount])
+  useEffect(onMount, [onMount])
   return null
 }
 
@@ -1312,7 +1312,8 @@ export default function PublicCatalogPage() {
       <SignalOnMount onMount={markTabContentMounted} />
     </Suspense>
   ) : storefrontSkeleton) : null
-  // A footer painted under the skeleton is pushed off screen by the taller content (layout shift).
+  // A footer painted under the skeleton is pushed off screen by the taller content (layout shift);
+  // appended after the content it moves nothing, and the cover's fetch does not wait for it.
   const footerReady = realConfigInHand && (activeTab === 'products' || tabContentMounted)
 
   const scrollPublicPortal = (direction: 'top' | 'bottom') => {
