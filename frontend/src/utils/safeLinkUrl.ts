@@ -24,7 +24,7 @@ function resolvesToProtocolRelativePath(sitePath: string): boolean {
 /**
  * Returns the trimmed value if it is safe to navigate to, otherwise null:
  * an absolute http(s) URL that parses, or a site-relative path starting with
- * a single '/', resolved or not. Protocol-relative '//host' is refused -- it reads as a path
+ * a single '/' as written and once resolved. Protocol-relative '//host' is refused -- it reads as a path
  * and behaves as another origin. Never throws.
  */
 export function safeLinkUrl(value: unknown): string | null {

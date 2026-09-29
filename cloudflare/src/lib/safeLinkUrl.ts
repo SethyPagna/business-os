@@ -13,7 +13,7 @@
 // The rule is an allowlist, because a denylist of dangerous schemes is a list
 // somebody has to keep complete forever:
 //   - an absolute http:// or https:// URL that actually parses, or
-//   - a site-relative path beginning with a single '/', resolved or not
+//   - a site-relative path that begins with a single '/' as written and once resolved
 // and nothing else. Protocol-relative '//host' is refused too: it reads as a
 // path and behaves as an absolute URL to another origin.
 

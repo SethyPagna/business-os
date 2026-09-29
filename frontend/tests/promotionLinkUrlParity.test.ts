@@ -97,7 +97,6 @@ for (const [input, expected] of CASES) {
 }
 assert.equal(workerNormalize('java\tscript:alert(1)'), null)
 
-// --- controls: the browser behaviour the case comments describe -----------
 const shop = 'https://shop.example'
 assert.equal(new URL('/\t/evil.example/x', shop).host, 'evil.example')
 for (const input of ['/.//evil.example/x', '/%2e%2e//evil.example/x', '/promotions/..//evil.example/x']) {
