@@ -9,7 +9,11 @@
 //     a dated stock-count row -- none of them is a retry twin;
 //   * ISO 'T...Z' timestamps and a pair that straddles midnight -- both ARE
 //     twins, and a text-only time comparison misses them;
-//   * a twin already cancelled / voided / reverted is listed as class c.
+//   * a twin already cancelled / voided / reverted is listed as class c, and so
+//     is a stock twin the Inventory page's Undo reversed ('Undo: <reason>',
+//     no id link); an Undo at another branch, of another quantity, in the
+//     same direction or before the pair, and a plain opposite movement, are not
+//     compensation.
 // No network, no wrangler.
 'use strict'
 
@@ -116,6 +120,33 @@ function seed(db) {
   move(18, 37, 'remove', 2, 'Sold off-till', null, '2026-09-20 17:00:20', { branch: 2 }) // other branch: not a twin
   move(19, 38, 'remove', 2, 'Theft', null, '2026-09-20 18:00:00')
   move(20, 38, 'remove', 2, 'Theft', null, '2026-09-20 18:00:20', { user: 2 })   // other user: not a twin
+  move(21, 39, 'remove', 2, 'Damaged', null, '2026-09-20 19:00:00')
+  move(22, 39, 'remove', 2, 'Damaged', null, '2026-09-20 19:00:20')
+  move(23, 39, 'adjustment', 2, 'Undo: Damaged', null, '2026-09-20 19:02:00')
+  move(24, 40, 'add', 6, 'Restock', '1727400022222', '2026-09-20 20:00:00')
+  move(25, 40, 'add', 6, 'Restock', '1727400022222', '2026-09-20 20:00:15')
+  move(26, 40, 'remove', 6, 'Undo: Restock', '1727400022222', '2026-09-20 20:03:00')
+  move(27, 41, 'remove', 2, 'Expired', null, '2026-09-20 21:00:00')
+  move(28, 41, 'remove', 2, 'Expired', null, '2026-09-20 21:00:20')
+  move(29, 41, 'add', 2, 'Undo: Expired', null, '2026-09-20 21:02:00', { branch: 2 })
+  move(30, 42, 'remove', 2, 'Lost', null, '2026-09-20 21:30:00')
+  move(31, 42, 'remove', 2, 'Lost', null, '2026-09-20 21:30:20')
+  move(32, 42, 'add', 1, 'Undo: Lost', null, '2026-09-20 21:32:00')
+  move(33, 43, 'remove', 2, 'Sold off-till', null, '2026-09-20 22:00:00')
+  move(34, 43, 'remove', 2, 'Sold off-till', null, '2026-09-20 22:00:20')
+  move(35, 43, 'remove', 2, 'Undo: Restock', null, '2026-09-20 22:02:00')
+  move(36, 44, 'add', 2, 'Undo: Broken', null, '2026-09-20 22:59:00')
+  move(37, 44, 'remove', 2, 'Broken', null, '2026-09-20 23:00:00')
+  move(38, 44, 'remove', 2, 'Broken', null, '2026-09-20 23:00:20')
+  move(39, 45, 'remove', 2, 'Spoiled', null, '2026-09-20 23:30:00')
+  move(40, 45, 'remove', 2, 'Spoiled', null, '2026-09-20 23:30:20')
+  move(41, 45, 'add', 2, 'Restock', null, '2026-09-20 23:32:00')
+  move(42, 46, 'add', 3, 'Restock (Free goods (no cost))', '1727400033333', '2026-09-21 09:00:00')
+  move(43, 46, 'add', 3, 'Restock (Free goods (no cost))', '1727400033333', '2026-09-21 09:00:20')
+  move(44, 46, 'remove', 3, 'Undo: Restock', '1727400033333', '2026-09-21 09:05:00')
+  move(45, 47, 'remove', 2, 'Miscount', null, '2026-09-21 10:00:00', { batch: null })
+  move(46, 47, 'remove', 2, 'Miscount', null, '2026-09-21 10:00:20', { batch: null })
+  move(47, 47, 'add', 2, 'Undo: Miscount', null, '2026-09-21 10:04:00', { batch: 1001 })
 }
 
 const EXPECTED = [
@@ -131,6 +162,15 @@ const EXPECTED = [
   ['stock_adjust', 6, 7, 'a'],
   ['stock_adjust', 10, 11, 'b'],
   ['stock_adjust', 12, 13, 'c'],
+  ['stock_adjust', 21, 22, 'c'],
+  ['stock_adjust', 24, 25, 'c'],
+  ['stock_adjust', 42, 43, 'c'],
+  ['stock_adjust', 45, 46, 'c'],
+  ['stock_adjust', 27, 28, 'a'],
+  ['stock_adjust', 30, 31, 'a'],
+  ['stock_adjust', 33, 34, 'a'],
+  ['stock_adjust', 37, 38, 'a'],
+  ['stock_adjust', 39, 40, 'a'],
 ]
 
 async function main() {
@@ -184,6 +224,17 @@ async function main() {
     assert.strictEqual(out.same_reference, null)
     assert.strictEqual(out.amount, -2)
     assert.strictEqual(byKey.get(key('stock_adjust', 12, 13)).both_active, 0)
+  })
+
+  await check("an Inventory Undo ('Undo: <reason>', opposite direction, same product, branch and quantity) compensates a stock twin", () => {
+    assert.strictEqual(byKey.get(key('stock_adjust', 21, 22)).both_active, 0, 'a removal undone by a lot correction')
+    assert.strictEqual(byKey.get(key('stock_adjust', 24, 25)).both_active, 0, 'a stock-in undone by a removal')
+    assert.strictEqual(byKey.get(key('stock_adjust', 42, 43)).both_active, 0, 'the Undo reason lacks the receipt note the stock-in stored')
+    assert.strictEqual(byKey.get(key('stock_adjust', 45, 46)).both_active, 0, 'a removal spread over several lots (no batch) undone into one lot')
+    for (const [first, second, why] of [[27, 28, 'an Undo at another branch'], [30, 31, 'an Undo of another quantity'],
+      [33, 34, 'an Undo in the same direction'], [37, 38, 'an Undo before the pair'], [39, 40, 'a plain opposite movement']]) {
+      assert.strictEqual(byKey.get(key('stock_adjust', first, second)).both_active, 1, why)
+    }
   })
 
   await check('an empty ledger lists nothing (min-rows 0 lets the job pass)', () => {
