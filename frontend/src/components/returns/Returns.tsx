@@ -12,7 +12,7 @@ import ScanSearchButton from '../shared/ScanSearchButton'
 import { useConfirmDialog } from '../shared/useConfirmDialog.tsx'
 import Undo2 from 'lucide-react/dist/esm/icons/undo-2.js'
 import Plus from 'lucide-react/dist/esm/icons/plus.js'
-import Settings2 from 'lucide-react/dist/esm/icons/settings-2.js'
+import Tags from 'lucide-react/dist/esm/icons/tags.js'
 import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.tsx'
 import { fmtClock24, parseServerTimestampMs } from '../../utils/formatters'
 import ExportMenu from '../shared/ExportMenu'
@@ -1592,8 +1592,8 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
           />
         )}
         trailing={canEditReturn ? (
-          <button type="button" className="btn-secondary inline-flex h-8 min-h-8 w-8 items-center justify-center p-0" onClick={() => setShowReasonManager(true)} aria-label={tr('manage_return_reasons', 'Manage return reasons')} title={tr('manage_return_reasons', 'Manage return reasons')}>
-            <Settings2 className="h-3.5 w-3.5" />
+          <button type="button" className={toolbarIconButtonClassName} onClick={() => setShowReasonManager(true)} aria-label={tr('manage_return_reasons', 'Manage return reasons')} title={tr('manage_return_reasons', 'Manage return reasons')}>
+            <Tags className="h-4 w-4" />
           </button>
         ) : null}
       >

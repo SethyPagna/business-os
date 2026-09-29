@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from 'react'
-import Pencil from 'lucide-react/dist/esm/icons/pencil.js'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import Modal from '../shared/Modal.tsx'
+import ReasonListEditor from '../shared/ReasonListEditor.tsx'
 import { useConfirmDialog } from '../shared/useConfirmDialog.tsx'
 import AppSelect from '../shared/AppSelect.tsx'
 import {
@@ -27,6 +27,7 @@ export default function ExpenseLabelManagerModal({ canEdit, onClose, onChanged, 
   const [loading, setLoading] = useState(true)
   const [renaming, setRenaming] = useState<string | null>(null)
   const [classifying, setClassifying] = useState<string | null>(null)
+  const [editorDirty, setEditorDirty] = useState(false)
   const tr = useCallback((key: string, fallback: string) => {
     const value = t(key)
     return value && value !== key ? value : fallback
@@ -47,14 +48,13 @@ export default function ExpenseLabelManagerModal({ canEdit, onClose, onChanged, 
 
   useEffect(() => { void load() }, [load])
 
-  const rename = async (entry: FeeLabelSuggestion) => {
-    if (!canEdit()) return
-    const to = window.prompt(tr('rename_expense_label', 'Rename or merge expense label'), entry.label)?.trim().replace(/\s+/g, ' ')
-    if (!to || to.toLocaleLowerCase() === entry.label.toLocaleLowerCase()) return
+  const rename = async (entry: FeeLabelSuggestion, to: string): Promise<boolean> => {
+    if (!canEdit()) return false
+    if (to.toLocaleLowerCase() === entry.label.toLocaleLowerCase()) return true
     setRenaming(entry.label)
     try {
       const impact = await getFeeLabelImpact(entry.label, to) as { linked_records?: number; target_exists?: boolean }
-      if (!canEdit()) return
+      if (!canEdit()) return false
       const linked = Number(impact.linked_records || 0)
       if (!(await askToConfirm({
         title: impact.target_exists ? tr('expense_label_merge_title', 'Merge expense labels?') : tr('expense_label_rename_title', 'Rename expense label?'),
@@ -66,14 +66,16 @@ export default function ExpenseLabelManagerModal({ canEdit, onClose, onChanged, 
         ],
         note: tr('expense_label_rename_note', 'Only exact matches are replaced. Audit history remains unchanged.'),
         confirmLabel: impact.target_exists ? tr('merge', 'Merge') : tr('rename', 'Rename'),
-      }))) return
-      if (!canEdit()) return
+      }))) return false
+      if (!canEdit()) return false
       await replaceFeeLabel(entry.label, to)
-      if (!canEdit()) return
+      if (!canEdit()) return false
       notify(impact.target_exists ? 'Expense labels merged.' : 'Expense label and linked records updated.', 'success')
       await Promise.all([load(), Promise.resolve(onChanged())])
+      return true
     } catch (error) {
       notify(error instanceof Error ? error.message : 'Failed to update expense label', 'error')
+      return false
     } finally {
       setRenaming(null)
     }
@@ -114,32 +116,35 @@ export default function ExpenseLabelManagerModal({ canEdit, onClose, onChanged, 
     }
   }
 
+  const rows = useMemo(() => labels.map((entry) => ({
+    ...entry,
+    id: entry.label.toLocaleLowerCase(),
+    meta: `${entry.uses} ${tr('records', 'records')}${entry.type_counts && entry.type_counts.length > 1 ? ` · ${tr('mixed_categories', 'mixed categories')}` : ''}`,
+  })), [labels, tr])
+
+  // Labels come from expense records, so there is no add row and no delete:
+  // a label disappears when no record uses it.
   return (
-    <Modal title={tr('manage_expense_labels', 'Expense labels')} onClose={onClose} size="sm" unsavedChanges={{ dirty: renaming !== null }}>
-      <div className="space-y-2">
-        <p className="text-xs text-slate-500 dark:text-slate-400">{tr('expense_labels_help', 'Labels come from expense records. Preview exact linked records before renaming, merging, or changing their category.')}</p>
-        <div className="max-h-80 space-y-1 overflow-y-auto">
-          {loading ? <div className="py-8 text-center text-sm text-slate-400">{tr('loading', 'Loading…')}</div> : labels.length ? labels.map((entry) => (
-            <div key={entry.label.toLocaleLowerCase()} className="grid min-w-0 grid-cols-[minmax(0,1fr)_minmax(7rem,8.5rem)_1.75rem] items-center gap-1.5 rounded-lg border border-slate-200 px-2 py-1.5 dark:border-slate-700">
-              <div className="min-w-0 flex-1">
-                <div className="detail-scroll-text text-sm font-medium text-slate-700 dark:text-slate-200">{entry.label}</div>
-                <div className="detail-scroll-text text-[11px] text-slate-400">{entry.uses} {tr('records', 'records')}{entry.type_counts && entry.type_counts.length > 1 ? ` · ${tr('mixed_categories', 'mixed categories')}` : ''}</div>
-              </div>
-              <AppSelect
-                value={entry.fee_type}
-                ariaLabel={`${tr('fee_type', 'Type')}: ${entry.label}`}
-                buttonClassName="h-7 w-full px-2 py-0 text-xs"
-                options={FEE_TYPE_OPTIONS.map((option) => ({ value: option.value, label: t(option.labelKey) || option.fallback }))}
-                onChange={(value) => void classify(entry, value as FeeType)}
-                disabled={classifying !== null || renaming !== null}
-              />
-              <button type="button" className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-blue-600 hover:bg-blue-50 disabled:opacity-50 dark:text-blue-300 dark:hover:bg-blue-950" onClick={() => void rename(entry)} disabled={renaming !== null || classifying !== null} aria-label={`${tr('rename', 'Rename')} ${entry.label}`} title={tr('preview_and_replace', 'Preview and replace')}>
-                <Pencil className="h-3.5 w-3.5" />
-              </button>
-            </div>
-          )) : <div className="rounded-lg border border-dashed border-slate-300 py-8 text-center text-sm text-slate-400 dark:border-slate-700">{tr('no_expense_labels', 'No expense labels yet.')}</div>}
-        </div>
-      </div>
+    <Modal title={tr('manage_expense_labels', 'Expense labels')} onClose={onClose} size="sm" unsavedChanges={{ dirty: renaming !== null || editorDirty }}>
+      <ReasonListEditor
+        items={rows}
+        tr={tr}
+        loading={loading}
+        busy={renaming !== null || classifying !== null}
+        onRename={(entry, to) => rename(entry, to)}
+        onDirtyChange={setEditorDirty}
+        emptyText={tr('no_expense_labels', 'No expense labels yet.')}
+        renderExtra={(entry) => (
+          <AppSelect
+            value={entry.fee_type}
+            ariaLabel={`${tr('fee_type', 'Type')}: ${entry.label}`}
+            buttonClassName="h-8 w-[7.5rem] px-2 py-0 text-xs"
+            options={FEE_TYPE_OPTIONS.map((option) => ({ value: option.value, label: t(option.labelKey) || option.fallback }))}
+            onChange={(value) => void classify(entry, value as FeeType)}
+            disabled={classifying !== null || renaming !== null}
+          />
+        )}
+      />
       {confirmDialog}
     </Modal>
   )

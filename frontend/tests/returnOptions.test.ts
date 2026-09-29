@@ -91,7 +91,8 @@ const returnReasonManagerSource = readFileSync(new URL('../src/components/return
 const supplierReturnSource = readFileSync(new URL('../src/components/returns/NewSupplierReturnModal.tsx', import.meta.url), 'utf8')
 const expenseLabelManagerSource = readFileSync(new URL('../src/components/fees/ExpenseLabelManagerModal.tsx', import.meta.url), 'utf8')
 const settingsSource = readFileSync(new URL('../src/components/utils-settings/Settings.tsx', import.meta.url), 'utf8')
-const inventorySource = readFileSync(new URL('../src/components/inventory/Inventory.tsx', import.meta.url), 'utf8')
+// The saved stock reasons are managed by StockReasonsManagerModal through this hook.
+const stockReasonCatalogSource = readFileSync(new URL('../src/utils/useStockReasonCatalog.ts', import.meta.url), 'utf8')
 
 runTest('reference managers preview exact impact and keep custom return entry available', () => {
   assert.match(returnReasonManagerSource, /getReturnReasonImpact/)
@@ -104,8 +105,8 @@ runTest('reference managers preview exact impact and keep custom return entry av
   assert.match(expenseLabelManagerSource, /replaceFeeLabel/)
   assert.match(settingsSource, /getPaymentMethodImpact/)
   assert.match(settingsSource, /replacePaymentMethod/)
-  assert.match(inventorySource, /getInventoryReasonImpact/)
-  assert.match(inventorySource, /replaceInventoryReason/)
+  assert.match(stockReasonCatalogSource, /getInventoryReasonImpact/)
+  assert.match(stockReasonCatalogSource, /replaceInventoryReason/)
 })
 
 // ── A return is a return; a replacement is a sale ────────────────────────
