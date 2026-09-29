@@ -49,8 +49,10 @@ import {
   reviewStockLine,
   scopedSetPreviewForLot,
   sessionItemsTotal,
+  sessionLinesRefusal,
   sessionLotChoices,
   sessionSteps,
+  setLineFreeQuantity,
   STOCK_SESSION_FAILURE_KEYS,
   type LineEntryRefusal,
   type LotChoice,
@@ -61,6 +63,7 @@ import {
   type StockSessionStep,
 } from '../../utils/stockSessionDraft.ts'
 import { convertLegacyStockDraft, type LegacyStockDraft } from '../../utils/legacyStockDrafts.ts'
+import { discardStockAdjustDraft, stockAdjustDraftKey } from '../../utils/stockAdjustDraft.ts'
 import StockSessionHeader, { StockSessionSteps, STOCK_MODE_KEYS } from '../stock-session/StockSessionHeader.tsx'
 import StockSessionSharedDetails from '../stock-session/StockSessionSharedDetails.tsx'
 import StockSessionLineEntry from '../stock-session/StockSessionLineEntry.tsx'
@@ -177,7 +180,7 @@ export default function FastStockInModal({
   const entryFor = (product: ProductCandidate, mode: StockMode): Partial<StockSessionDraft> => {
     const cost = catalogCostOf(product)
     return {
-      query: String(product.name || ''), picked: product, quantity: mode === 'set' ? '' : '1', freeQuantity: '',
+      query: String(product.name || ''), picked: product, quantity: mode === 'set' ? '' : '1',
       unitCost: canViewCosts && cost != null ? String(cost) : '', sellingPrice: priceText(product.selling_price_usd),
       expiryDate: '', batchChoice: mode === 'add' ? 'new' : 'none', createPayload: null, createRequestId: '', scannedBarcode: '',
     }
@@ -195,9 +198,10 @@ export default function FastStockInModal({
     let stored: StockSessionDraft | null = null
     let rewrite = false
     let legacyBlocked = ''
+    let legacyConverted = false
     if (legacyDraft) {
       const converted = convertLegacyStockDraft(legacyDraft, mintLineId)
-      if (converted.draft) { stored = converted.draft; rewrite = true } else legacyBlocked = converted.blocked
+      if (converted.draft) { stored = converted.draft; rewrite = true; legacyConverted = true } else legacyBlocked = converted.blocked
     }
     if (!stored) {
       const raw = readWorkDraft<unknown>(fastStockInDraftKey)?.data
@@ -232,6 +236,16 @@ export default function FastStockInModal({
       if (!stored) pristine = { ...pristine, ...entryFor(initialProduct, opened.mode) }
     }
     if (rewrite) writeWorkDraft<StockSessionDraft>(fastStockInDraftKey, opened)
+    // The work now lives in the session draft, so the retired surface's copy goes.
+    // A blocked conversion keeps it: it is the evidence of an unknown outcome.
+    if (legacyDraft && legacyConverted) {
+      if (legacyDraft.kind === 'stock_adjust') {
+        const productId = (legacyDraft.data as { product?: { id?: unknown } } | null)?.product?.id
+        discardStockAdjustDraft(stockAdjustDraftKey(productId), user?.id ?? user?.username ?? null)
+      } else {
+        clearWorkDraft(scopedWorkDraftKey('create_products_session'))
+      }
+    }
     initRef.current = { draft: opened, pristine, legacyBlocked }
   }
   const init = initRef.current
@@ -252,7 +266,6 @@ export default function FastStockInModal({
   const [query, setQuery] = useState(init.draft.query)
   const [picked, setPicked] = useState<ProductCandidate | null>(init.draft.picked)
   const [quantity, setQuantity] = useState(init.draft.quantity)
-  const [freeQuantity, setFreeQuantity] = useState(init.draft.freeQuantity)
   const [protectedUnitCost, setProtectedUnitCost] = useState(init.draft.unitCost)
   const costEntry = useProtectedCostEntry(user?.id, picked?.id, canViewCosts, canEditCosts)
   const unitCost = String(costEntry.value('unitCost', protectedUnitCost, ''))
@@ -273,6 +286,8 @@ export default function FastStockInModal({
   // ---- the session's lines ----
   const [received, setReceived] = useState<StockSessionLine[]>(init.draft.lines)
   const [editingKey, setEditingKey] = useState('')
+  const [freeEditKey, setFreeEditKey] = useState('')
+  const [linesInvalidKey, setLinesInvalidKey] = useState('')
   const [saving, setSaving] = useState(false)
 
   // ---- transient ----
@@ -305,7 +320,7 @@ export default function FastStockInModal({
 
   const currentDraft = (lines: StockSessionLine[] = received): StockSessionDraft => ({
     version: 2, sessionId: sessionIdRef.current, mode, step: currentStep, brand, branchId, receivedDate, supplier,
-    paymentStatus, creditDueDate, paidAmount, query, picked, quantity, freeQuantity, unitCost: protectedUnitCost,
+    paymentStatus, creditDueDate, paidAmount, query, picked, quantity, unitCost: protectedUnitCost,
     sellingPrice, expiryDate, reason, conditionTag, batchChoice, createPayload, createRequestId, scannedBarcode,
     createdProductIds, lines,
   })
@@ -314,7 +329,7 @@ export default function FastStockInModal({
   // draft persisting, leaving is safe -- everything is here on reopen.
   useEffect(() => scheduleWorkDraftWrite<StockSessionDraft>(fastStockInDraftKey, currentDraft()),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [mode, currentStep, brand, branchId, receivedDate, supplier, paymentStatus, creditDueDate, paidAmount, query, picked, quantity, freeQuantity, protectedUnitCost, sellingPrice, expiryDate, reason, conditionTag, batchChoice, createPayload, createRequestId, scannedBarcode, createdProductIds, received])
+    [mode, currentStep, brand, branchId, receivedDate, supplier, paymentStatus, creditDueDate, paidAmount, query, picked, quantity, protectedUnitCost, sellingPrice, expiryDate, reason, conditionTag, batchChoice, createPayload, createRequestId, scannedBarcode, createdProductIds, received])
 
   // Facts (a queued line's id, a committed line's status, a created product id)
   // are written synchronously, before React renders them.
@@ -449,7 +464,7 @@ export default function FastStockInModal({
   const duplicateRows = useMemo(() => received.map((line) => ({ ...line, name: line.productName, barcode: line.product.barcode })), [received])
 
   let refusal: LineEntryRefusal | null = lineEntryRefusal({
-    mode, hasProduct: Boolean(picked), branchId, quantity, freeQuantity, unitCost, supplierName: supplier.supplierName,
+    mode, hasProduct: Boolean(picked), branchId, quantity, unitCost, supplierName: supplier.supplierName,
     lotChoice: batchChoice, lot: chosenLot, canReceive, canEditCosts, branchQuantity,
   })
   if (!refusal && picked && lotsKey && !lotsReady) refusal = { key: 'loading', fallback: 'Loading...', field: 'lot' }
@@ -470,7 +485,6 @@ export default function FastStockInModal({
     setPicked(null)
     setQuery('')
     setQuantity(mode === 'set' ? '' : '1')
-    setFreeQuantity('')
     setUnitCost('')
     setSellingPrice('')
     setExpiryDate('')
@@ -487,7 +501,6 @@ export default function FastStockInModal({
     if (entry.picked !== undefined) setPicked(entry.picked)
     if (entry.query !== undefined) setQuery(entry.query)
     if (entry.quantity !== undefined) setQuantity(entry.quantity)
-    if (entry.freeQuantity !== undefined) setFreeQuantity(entry.freeQuantity)
     if (entry.unitCost !== undefined) setUnitCost(entry.unitCost)
     if (entry.sellingPrice !== undefined) setSellingPrice(entry.sellingPrice)
     if (entry.expiryDate !== undefined) setExpiryDate(entry.expiryDate)
@@ -503,7 +516,7 @@ export default function FastStockInModal({
     if (line.mode !== mode) setModeState(line.mode)
     applyEntry({
       picked: line.product, query: line.productName, quantity: String(line.quantity),
-      freeQuantity: line.freeQuantity > 0 ? String(line.freeQuantity) : '', unitCost: canViewCosts ? line.unitCost : '',
+      unitCost: canViewCosts ? line.unitCost : '',
       sellingPrice: line.sellingPrice, expiryDate: line.expiryDate, createPayload: line.createPayload || null,
       createRequestId: line.createRequestId || '', scannedBarcode: '',
     })
@@ -551,7 +564,6 @@ export default function FastStockInModal({
     setModeState(next)
     setStep('items')
     setQuantity(next === 'set' ? '' : '1')
-    setFreeQuantity('')
     setConditionTag('')
     setAddAttempted(false)
     setEditingKey('')
@@ -581,15 +593,17 @@ export default function FastStockInModal({
       return
     }
     const qty = Math.floor(Number(quantity.trim() || 0)) || 0
-    const free = mode === 'add' ? Math.floor(Number(freeQuantity.trim() || 0)) || 0 : 0
-    const fullyFree = mode === 'add' && qty === 0 && free > 0
-    const lineCost = mode !== 'add' ? '' : fullyFree ? '0' : unitCost.trim()
+    const editingLine = editingKey ? received.find((line) => line.key === editingKey) : undefined
+    // The free row belongs to the item: an edit of the paid row keeps it.
+    const free = mode === 'add' ? editingLine?.freeQuantity || 0 : 0
+    // Kept on a Qty 0 item too: its free row shows it; the wire sends 0 (lineWireUnitCost).
+    const lineCost = mode !== 'add' ? '' : unitCost.trim()
     const linePrice = mode === 'add' ? sellingPrice.trim() : ''
     // A product made in this session is created with the price and cost the line shows.
     const heldPayload = createPayload ? {
       ...createPayload,
       ...(linePrice !== '' ? { selling_price_usd: Number(linePrice) } : {}),
-      ...(canEditCosts && lineCost !== '' && !fullyFree ? { cost_price_usd: Number(lineCost) } : {}),
+      ...(canEditCosts && lineCost !== '' && qty > 0 ? { cost_price_usd: Number(lineCost) } : {}),
     } : null
     const product: ProductCandidate = heldPayload && linePrice !== '' ? { ...picked, selling_price_usd: Number(linePrice) } : picked
     const next: StockSessionLine = {
@@ -619,7 +633,17 @@ export default function FastStockInModal({
     persistSessionDraft(nextLines)
     setReceived(nextLines)
     setEditingKey('')
+    setLinesInvalidKey('')
+    // A Qty 0 item is all free: its free row opens for the quantity.
+    if (mode === 'add' && canReceive && qty === 0 && free === 0 && !heldPayload) setFreeEditKey(next.key)
     resetLine()
+  }
+
+  const setLineFree = (key: string, value: string) => {
+    const nextLines = setLineFreeQuantity(received, key, value)
+    persistSessionDraft(nextLines)
+    setReceived(nextLines)
+    if (linesInvalidKey === key) setLinesInvalidKey('')
   }
 
   const removeLine = (key: string) => {
@@ -652,7 +676,7 @@ export default function FastStockInModal({
       stock_quantity: 0, branch_stock: [],
     }
     applyEntry({
-      picked: product, query: name, quantity: canReceive ? String(openingQuantity || 1) : '0', freeQuantity: '',
+      picked: product, query: name, quantity: canReceive ? String(openingQuantity || 1) : '0',
       unitCost: canViewCosts && held.cost_price_usd != null ? String(held.cost_price_usd) : '', sellingPrice: priceText(held.selling_price_usd),
       expiryDate: String(held.expiry_date || ''), createPayload: held, createRequestId: createClientRequestId('product'), scannedBarcode: '',
     })
@@ -871,6 +895,13 @@ export default function FastStockInModal({
     if (currentStep === 'items') {
       if (!pendingLines.length) { if (received.length) finishSession(); return }
       if (!(Number(branchId) > 0)) { notify(tr('fast_stockin_pick_branch', 'Pick a branch'), 'error'); return }
+      const linesRefusal = sessionLinesRefusal(received)
+      if (linesRefusal) {
+        setLinesInvalidKey(linesRefusal.key)
+        setFreeEditKey(linesRefusal.key)
+        notify(tr(linesRefusal.messageKey, linesRefusal.fallback), 'error')
+        return
+      }
       setStep(steps[1])
       return
     }
@@ -1041,8 +1072,6 @@ export default function FastStockInModal({
                 onClearPick={() => { setEditingKey(''); resetLine() }}
                 quantity={quantity}
                 onQuantity={setQuantity}
-                freeQuantity={freeQuantity}
-                onFreeQuantity={setFreeQuantity}
                 unitCost={unitCost}
                 onUnitCost={setUnitCost}
                 canViewCosts={canViewCosts}
@@ -1075,8 +1104,13 @@ export default function FastStockInModal({
                 canViewCosts={canViewCosts}
                 busy={busy}
                 editingKey={editingKey}
+                freeEditKey={freeEditKey}
+                invalidKey={linesInvalidKey}
+                canFree={canReceive && canEditCosts}
                 onEdit={editLine}
                 onRemove={removeLine}
+                onFree={(key) => setFreeEditKey(key || '')}
+                onFreeQuantity={setLineFree}
               />
             </>
           ) : currentStep === 'payment' ? (

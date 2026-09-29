@@ -83,7 +83,6 @@ export type StockSessionDraft = {
   query: string
   picked: StockSessionProduct | null
   quantity: string
-  freeQuantity: string
   unitCost: string
   sellingPrice: string
   expiryDate: string
@@ -169,7 +168,6 @@ export function emptyStockSessionDraft(seed: {
     query: '',
     picked: null,
     quantity: '1',
-    freeQuantity: '',
     unitCost: '',
     sellingPrice: '',
     expiryDate: '',
@@ -216,7 +214,6 @@ export function normalizeStockSessionDraft(raw: unknown, mintRequestId: () => st
     query: asString(draft.query),
     picked,
     quantity: asString(draft.quantity, '1'),
-    freeQuantity: asString(draft.freeQuantity),
     unitCost: asString(draft.unitCost),
     sellingPrice: asString(draft.sellingPrice),
     expiryDate: asString(draft.expiryDate),
@@ -567,7 +564,7 @@ export function scopedSetPreviewForLot(quantity: string, lot: SessionLot, branch
 
 // ---- line entry ----
 
-export type LineEntryField = 'product' | 'branch' | 'qty' | 'free' | 'cost' | 'supplier' | 'lot' | 'price'
+export type LineEntryField = 'product' | 'branch' | 'qty' | 'cost' | 'supplier' | 'lot' | 'price'
 export type LineEntryRefusal = { key: string; fallback: string; field: LineEntryField; gate?: StockReceiptGateCode; params?: Record<string, string | number> }
 
 /**
@@ -580,7 +577,6 @@ export function lineEntryRefusal(input: {
   hasProduct: boolean
   branchId: string
   quantity: string
-  freeQuantity: string
   unitCost: string
   supplierName: string
   lotChoice: LotChoice
@@ -607,27 +603,42 @@ export function lineEntryRefusal(input: {
     if (qty > available) return { key: 'transfer_only_available', fallback: 'Only {n} available', field: 'qty', params: { n: available } }
     return null
   }
-  const rawFree = String(input.freeQuantity ?? '').trim()
-  const free = rawFree === '' ? 0 : Number(rawFree)
-  if (!Number.isSafeInteger(free) || free < 0) return { key: 'fast_stockin_qty', fallback: 'Quantity must be at least 1', field: 'free' }
+  // products.add without inventory.adjust: a create-only item that receives nothing.
   if (!input.canReceive) {
-    return (Number.isSafeInteger(qty) && qty === 0 && free === 0) || rawQty === ''
+    return Number.isSafeInteger(qty) && qty === 0
       ? null
       : { key: 'product_cost_edit_required', fallback: 'Cost edit permission is required to receive stock.', field: 'qty' }
   }
-  if (!Number.isSafeInteger(qty) || qty < 0 || qty + free <= 0) return { key: 'fast_stockin_qty', fallback: 'Quantity must be at least 1', field: 'qty' }
+  if (!Number.isSafeInteger(qty) || qty < 0) return { key: 'fast_stockin_qty', fallback: 'Quantity must be at least 1', field: 'qty' }
   if (!input.canEditCosts) return { key: 'product_cost_edit_required', fallback: 'Cost edit permission is required to receive stock.', field: 'cost' }
   const lotSupplier = typeof input.lotChoice === 'number' ? String(input.lot?.supplier_name || '').trim() : ''
-  const gate = stockReceiptGateCode({
-    isStockIn: true,
-    supplierName: input.supplierName,
-    lotSupplierName: lotSupplier,
-    unitCostUsd: qty === 0 && free > 0 ? 0 : input.unitCost,
-    quantity: qty,
-    freeQuantity: free,
-  })
+  // Qty 0: every unit of this item comes from its free row, which is the free declaration.
+  const gate = stockReceiptGateCode(qty === 0
+    ? { isStockIn: true, supplierName: input.supplierName, lotSupplierName: lotSupplier, unitCostUsd: 0, freeGoods: true }
+    : { isStockIn: true, supplierName: input.supplierName, lotSupplierName: lotSupplier, unitCostUsd: input.unitCost, quantity: qty })
   if (!gate) return null
-  return { key: gate, fallback: gate, field: gate === 'supplier_required' ? 'supplier' : gate === 'free_goods_required' ? 'free' : 'cost', gate }
+  return { key: gate, fallback: gate, field: gate === 'supplier_required' ? 'supplier' : 'cost', gate }
+}
+
+/** Items' Next: an Add item with neither paid nor free units has nothing to receive. */
+export function sessionLinesRefusal(lines: readonly StockSessionLine[]): { key: string; messageKey: string; fallback: string } | null {
+  const empty = lines.find((line) => line.status !== 'saved' && line.mode === 'add' && !line.createPayload && line.quantity + line.freeQuantity <= 0)
+  return empty ? { key: empty.key, messageKey: 'fast_stockin_qty', fallback: 'Quantity must be at least 1' } : null
+}
+
+/** The free row of an Add item (owner, 30 Sep): only its quantity is typed. */
+export function setLineFreeQuantity(lines: readonly StockSessionLine[], key: string, value: string): StockSessionLine[] {
+  return lines.map((line) => {
+    if (line.key !== key || line.mode !== 'add' || line.status === 'saved' || line.needsRemoval) return line
+    const parsed = Math.floor(Number(String(value ?? '').trim() || 0))
+    return { ...line, freeQuantity: Number.isSafeInteger(parsed) && parsed > 0 ? parsed : 0 }
+  })
+}
+
+/** "2 × $3.50 (−$3.50) = $0.00": the free units as a fully discounted line. */
+export function freeRowText(line: Pick<StockSessionLine, 'freeQuantity' | 'unitCost'>, usdSymbol: string): string {
+  const cost = Math.max(0, toNumber(line.unitCost)).toFixed(2)
+  return `${line.freeQuantity} × ${usdSymbol}${cost} (−${usdSymbol}${cost}) = ${usdSymbol}0.00`
 }
 
 // ---- review (before -> after) ----
