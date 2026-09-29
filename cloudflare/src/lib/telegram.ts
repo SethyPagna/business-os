@@ -1922,7 +1922,6 @@ const SUMMARY_ROWS = 8
 const TOP_PRODUCTS = 5
 const DAY_MS = 86_400_000
 
-/** "18:31": the business clock (UTC+7) at `ms`. */
 const businessClock = (ms: number): string => new Date(ms + BUSINESS_UTC_OFFSET_MINUTES * 60_000).toISOString().slice(11, 16)
 
 /**
