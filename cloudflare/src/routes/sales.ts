@@ -3,7 +3,7 @@ import { acquisitionCostResponses, canViewAcquisitionCosts } from '../lib/acquis
 import { broadcast } from '../durable-objects/broadcastHub'
 import { getDb } from '../lib/db'
 import { ordinaryBusinessMaintenanceGuard, runOrdinaryBusinessWrite } from '../lib/businessMaintenanceGuard'
-import { hasColumn, tableColumnSet } from '../lib/schemaProbe'
+import { hasColumn, schemaObjectsPresent, tableColumnSet } from '../lib/schemaProbe'
 import { capturedPricingMetadata, capturePricingProduct, evaluateCapturedPricingPool, materializeCapturedPricingRow, parseSaleItemPricing, pricingRowsStatement, pricingSourceGuard, serializeSaleItemPricing, validateCapturedSaleBasket, SaleItemPricingError, type CapturedPricingPool, type PricingSource } from '../lib/saleItemPricing'
 import { planHistoricalSaleLine, recordedHistoricalLineTotal, HistoricalSalePricingError } from '../lib/historicalSalePricing'
 import { normalizePromotionRule } from '../lib/promotionRules'
@@ -406,7 +406,7 @@ app.get('/money-precision-capability', async (c) => {
 })
 
 async function historicalEditSchemaReady(db:ReturnType<typeof getDb>):Promise<boolean>{
-  return !!await db.prepare("SELECT 1 AS ready FROM sqlite_master WHERE type='trigger' AND name='sales_money_precision_update_0161'").get()
+  return schemaObjectsPresent(db, [{ type: 'trigger', name: 'sales_money_precision_update_0161' }])
 }
 
 const DELIVERY_FEE_PAYER_ERROR = 'Delivery fee must be paid by the customer or by the store.'

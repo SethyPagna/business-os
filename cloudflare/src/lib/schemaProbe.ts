@@ -43,9 +43,27 @@ export async function hasColumn(db: SchemaProbeDb, table: string, column: string
   return columns.has(column)
 }
 
+export type SchemaObject = { type: 'table' | 'trigger'; name: string }
+type SchemaObjectProbeDb = { prepare: (sql: string) => { get: <T = unknown>(params?: unknown[]) => Promise<T | undefined> } }
+
+// Only a present answer is cached: a release adds these objects and none
+// removes them, while an absent one may be migrated in under a warm isolate.
+const presentSchemaObjectSets = new Set<string>()
+
+export async function schemaObjectsPresent(db: SchemaObjectProbeDb, objects: readonly SchemaObject[]): Promise<boolean> {
+  const key = objects.map(({ type, name }) => `${type}:${name}`).sort().join('|')
+  if (presentSchemaObjectSets.has(key)) return true
+  const row = await db.prepare(`SELECT COUNT(*) AS present FROM sqlite_master WHERE ${objects.map(() => '(type = ? AND name = ?)').join(' OR ')}`)
+    .get<{ present: number }>(objects.flatMap(({ type, name }) => [type, name]))
+  const present = Number(row?.present) === objects.length
+  if (present) presentSchemaObjectSets.add(key)
+  return present
+}
+
 // Exported for pure tests only -- lets a test exercise "first call probes,
 // second call is cached" from a clean slate instead of depending on module
 // load order across the whole suite.
 export function __resetSchemaProbeCacheForTests(): void {
   tableColumnCache.clear()
+  presentSchemaObjectSets.clear()
 }

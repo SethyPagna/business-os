@@ -164,6 +164,8 @@ assert.equal(helper.planHistoricalSaleLine({...historical,manual_discount_type:n
   await assert.rejects(adapter.batch([{sql:'DELETE FROM sale_mutation_guards',params:{}},replayGuard]),/CHECK constraint failed|malformed JSON/)
  }finally{await mf.dispose()}
  f.raw.exec('DROP TRIGGER sales_money_precision_update_0161')
+ // A dropped trigger models a database that never had it; a warm isolate caches a present trigger.
+ h.load('lib/schemaProbe.ts').__resetSchemaProbeCacheForTests()
  assert.equal((await send(frozenFallback)).status,200,'committed receipt must precede readiness and repricing')
  const missingSchema=await send({...frozenFallback,client_request_id:'schema-unavailable'})
  assert.equal(missingSchema.status,409);assert.equal(missingSchema.body.code,'historical_sale_schema_not_ready')

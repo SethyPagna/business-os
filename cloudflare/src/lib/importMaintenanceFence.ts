@@ -23,16 +23,23 @@ export function isImportMaintenanceFenceError(error: unknown): error is ImportMa
   return error instanceof ImportMaintenanceFenceError
 }
 
+// Only a present answer is cached: no migration removes system_flags, while a
+// legacy database may gain it under a warm isolate.
+let systemFlagsTablePresent = false
+
 /**
  * Fence only this import/bulk workflow's main-D1 writes. A missing flag table
  * means the legacy database cannot start a restore; other lookup errors fail
- * closed. The capability lookup happens once per entry invocation, not once
- * per chunk or statement.
+ * closed. The capability lookup runs once per entry invocation until the
+ * table is seen, never once per chunk or statement.
  */
 export async function getImportFencedDb(env: { DB: D1Database; IMPORT_DB?: D1Database }): Promise<D1Compat> {
   const db = getDb(env)
-  const table = await db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'system_flags'").get<{ name: string }>()
-  if (!table) return db
+  if (!systemFlagsTablePresent) {
+    const table = await db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'system_flags'").get<{ name: string }>()
+    if (!table) return db
+    systemFlagsTablePresent = true
+  }
   const fenced = withImportMaintenanceWriteFence(db)
   if (db.staging === db) fenced.staging = fenced
   return fenced

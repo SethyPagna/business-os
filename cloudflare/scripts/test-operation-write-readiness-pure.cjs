@@ -11,11 +11,7 @@ async function main() {
       assert.deepEqual(h.getDb().serialize(),snapshot,'schema bridge must not change stock, receipt, audit or any other data')
     }
   }
-  h.fresh()
-  for(const [app,route] of [['branches','/transfer'],['branches','/transfer-bulk'],['inventory','/transfer']]) {
-    h.fresh()
-    assert.equal((await h.request(app,route,h.intent(1,1,'upgrade-ready-key',route.endsWith('bulk')))).status,200)
-  }
+  // A ready answer is cached for the isolate, so lookup failures run first.
   for(const [app,route] of [['branches','/transfer'],['branches','/transfer-bulk'],['inventory','/transfer']]) {
     h.fresh()
     const sqlite = h.getDb()
@@ -30,6 +26,11 @@ async function main() {
     assert.equal(result.status,503)
     assert.equal(result.body.code,'release_upgrade_in_progress')
     assert.deepEqual(sqlite.serialize(),before,'lookup errors fail closed before effects')
+  }
+  h.fresh()
+  for(const [app,route] of [['branches','/transfer'],['branches','/transfer-bulk'],['inventory','/transfer']]) {
+    h.fresh()
+    assert.equal((await h.request(app,route,h.intent(1,1,'upgrade-ready-key',route.endsWith('bulk')))).status,200)
   }
   console.log('PASS pre-0150/0151/0152 production schemas quiesce all three transfer routes without effects; full schema opens; lookup failures fail closed')
 }

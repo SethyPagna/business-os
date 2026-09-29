@@ -1,13 +1,19 @@
 import { Hono } from 'hono'
 import { getDb } from '../lib/db'
 
+// Only a present answer is cached: a release adds these objects and none
+// removes them, while an absent one may be migrated in under a warm isolate.
+let operationWriteSchemaPresent = false
+
 /** Fail closed until the complete additive release schema is available. */
 async function operationWritesReady(db: ReturnType<typeof getDb>): Promise<boolean> {
+  if (operationWriteSchemaPresent) return true
   try {
     const row = await db.prepare(`SELECT COUNT(*) AS ready FROM sqlite_master
       WHERE (type='table' AND name='fee_operation_receipts')
          OR (type='trigger' AND name='transfer_receipts_require_provenance_insert')`).get<{ ready: number }>()
-    return row?.ready === 2
+    operationWriteSchemaPresent = row?.ready === 2
+    return operationWriteSchemaPresent
   } catch {
     return false
   }
