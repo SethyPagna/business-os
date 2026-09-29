@@ -76,7 +76,7 @@ import {
   isAboutImageRefusal,
   markEdited,
   overlayStaffSettings,
-  pickLoadedOrEditedKeys,
+  isLoadedOrEditedKey,
   readStaffSettings,
   replaceDraftValues,
   settleSavedEdits,
@@ -2809,7 +2809,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
       // the draft object below is built whole; the backend independently
       // rejects any unauthorized key, and this keeps a limited save from
       // 403ing on an unrelated field it never touched.
-      const fullSavePayload: Record<string, unknown> = pickLoadedOrEditedKeys({
+      const fullSavePayload: Record<string, unknown> = {
         business_name: editorDraft.business_name || '',
         business_phone: editorDraft.business_phone || '',
         business_email: editorDraft.business_email || '',
@@ -2915,13 +2915,14 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
         customer_portal_submission_enabled: editorDraft.customer_portal_submission_enabled ? 'true' : 'false',
         customer_portal_submission_reward_points: String(Math.max(0, Math.floor(toNumber(editorDraft.customer_portal_submission_reward_points, previewConfig.submissionRewardPoints || 5)))),
         customer_portal_submission_instructions: editorDraft.customer_portal_submission_instructions || '',
-      }, staffSettingsRef.current, editedKeysRef.current)
+      }
       // The assistant's prompt and provider ride only when the person changed
       // one after it loaded; a change to blank is named in clearKeys, since
       // the Worker otherwise keeps a blank for them as stored.
       const privateAiChanges = privateAiSaveChanges(privateAi)
       const savePayload = Object.fromEntries(
-        Object.entries({ ...fullSavePayload, ...privateAiChanges.updates }).filter(([key]) => canWriteSettingKey(key, hasPermission)),
+        Object.entries({ ...fullSavePayload, ...privateAiChanges.updates }).filter(([key]) => canWriteSettingKey(key, hasPermission))
+          .filter(([key]) => isLoadedOrEditedKey(key, staffSettingsRef.current, editedKeysRef.current)),
       )
       const clearKeys = privateAiChanges.clearKeys.filter((key) => Object.prototype.hasOwnProperty.call(savePayload, key))
       const result = await saveSettings(savePayload, { baselineSettings, clearKeys }) as LegacyCatalogRecord

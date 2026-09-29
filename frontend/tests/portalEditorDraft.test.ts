@@ -111,6 +111,9 @@ const UNPUBLISHED = [
   'customer_portal_show_point_value',
   'customer_portal_show_membership',
 ]
+const sendable = (payload: Record<string, string>, staff: Record<string, unknown> | null, edited: ReadonlySet<string>) => (
+  Object.fromEntries(Object.entries(payload).filter(([key]) => need().isLoadedOrEditedKey(key, staff, edited)))
+)
 const FULL_PAYLOAD: Record<string, string> = {
   business_name: 'Leang Cosmetics',
   customer_portal_about_title: 'Our story',
@@ -119,8 +122,7 @@ const FULL_PAYLOAD: Record<string, string> = {
 }
 
 await runTest('T-D2: when the staff read failed, a Save leaves out every key the public config does not carry', () => {
-  const m = need()
-  const sent = m.pickLoadedOrEditedKeys(FULL_PAYLOAD, null, new Set(['customer_portal_about_title']))
+  const sent = sendable(FULL_PAYLOAD, null, new Set(['customer_portal_about_title']))
   for (const key of UNPUBLISHED) assert.equal(Object.prototype.hasOwnProperty.call(sent, key), false, `${key} is never written as a default`)
   assert.equal(sent.customer_portal_about_title, 'Our story', 'the edit is sent')
   assert.equal(sent.business_name, 'Leang Cosmetics', 'a key the public config carries is loaded, so it is sent')
@@ -128,8 +130,7 @@ await runTest('T-D2: when the staff read failed, a Save leaves out every key the
 })
 
 await runTest('T-D2: an unpublished key is sent once it was read from the staff settings or edited', () => {
-  const m = need()
-  const sent = m.pickLoadedOrEditedKeys(
+  const sent = sendable(
     FULL_PAYLOAD,
     { customer_portal_show_top_seller_badge: 'false' },
     new Set(['customer_portal_highlight_rank_limit']),
@@ -211,8 +212,7 @@ await runTest('AF-10: edited keys are in the editor context value', () => {
 await runTest('D7 wiring: the save sends only loaded or edited keys, and the staff read feeds the overlay', () => {
   const page = code(read('../src/components/catalog/CatalogPage.tsx'))
   const save = between(page, 'async function savePortalDraft(', '\n  async function ')
-  assert.match(save, /pickLoadedOrEditedKeys\(\{/)
-  assert.match(save, /staffSettingsRef\.current, editedKeysRef\.current\)/)
+  assert.match(save, /\.filter\(\(\[key\]\) => canWriteSettingKey\(key, hasPermission\)\)\s*\.filter\(\(\[key\]\) => isLoadedOrEditedKey\(key, staffSettingsRef\.current, editedKeysRef\.current\)\),/)
   const reader = between(page, 'async function loadPrivateAiSettings(', '\n  }\n')
   assert.match(reader, /staffSettingsRef\.current = /)
   assert.match(reader, /overlayStaffSettings\(current, staffSettings, editedKeysRef\.current\)/)

@@ -52,10 +52,8 @@ export function overlayStaffSettings(draft: EditorDraft, staff: StaffSettings | 
   return next
 }
 
-export function pickLoadedOrEditedKeys<T extends Record<string, unknown>>(payload: T, staff: StaffSettings | null, edited: EditedKeys): Partial<T> {
-  return Object.fromEntries(Object.entries(payload).filter(([key]) => (
-    !DRAFT_KEYS_NOT_IN_PUBLIC_CONFIG.has(key) || edited.has(key) || (staff !== null && hasOwn(staff, key))
-  ))) as Partial<T>
+export function isLoadedOrEditedKey(key: string, staff: StaffSettings | null, edited: EditedKeys): boolean {
+  return !DRAFT_KEYS_NOT_IN_PUBLIC_CONFIG.has(key) || edited.has(key) || (staff !== null && hasOwn(staff, key))
 }
 
 export function markEdited(edited: EditedKeys, key: string): EditedKeys {
