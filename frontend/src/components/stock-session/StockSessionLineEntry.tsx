@@ -39,8 +39,6 @@ type LineEntryProps = {
   // E2 / E3
   quantity: string
   onQuantity: (next: string) => void
-  freeQuantity: string
-  onFreeQuantity: (next: string) => void
   unitCost: string
   onUnitCost: (next: string) => void
   canViewCosts: boolean
@@ -74,7 +72,7 @@ type LineEntryProps = {
 export default function StockSessionLineEntry(props: LineEntryProps) {
   const {
     tr, packLookup, mode, busy, searchInputRef, query, onQuery, groups, onOpenGroup, createText, onCreate, onScan,
-    picked, pickedStock, pickedIsNew, onClearPick, quantity, onQuantity, freeQuantity, onFreeQuantity,
+    picked, pickedStock, pickedIsNew, onClearPick, quantity, onQuantity,
     unitCost, onUnitCost, canViewCosts, canEditCosts, canReceive, sellingPrice, onSellingPrice, canEditPrice,
     expiryDate, onExpiryDate, lotOptions, lotValue, onLot, conditionTag, onConditionTag, tagDisabled,
     reason, onReason, savedReasons, onManageReasons, onAdd, editing, refusal, invalidField,
@@ -159,9 +157,8 @@ export default function StockSessionLineEntry(props: LineEntryProps) {
       {/* E2 (+ E3 for Add) */}
       {mode === 'add' ? (
         <>
-          <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.2fr)_minmax(0,1.2fr)] gap-1.5">
+          <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)_minmax(0,1.2fr)] gap-1.5">
             <InsetNumberField label={tr('stock_line_qty', 'Qty')} value={quantity} onChange={onQuantity} disabled={busy || !canReceive} invalid={ring('qty')} onEnter={onAdd} />
-            <InsetNumberField label={tr('stock_receipt_free_goods', 'Free')} value={freeQuantity} onChange={onFreeQuantity} disabled={busy || !canReceive} invalid={ring('free')} placeholder="0" onEnter={onAdd} />
             {canViewCosts || canEditCosts ? (
               <InsetNumberField label={tr('cost', 'Cost')} value={unitCost} onChange={onUnitCost} step="0.0001" disabled={busy || !canEditCosts || !canReceive} invalid={ring('cost')} onEnter={onAdd} />
             ) : (

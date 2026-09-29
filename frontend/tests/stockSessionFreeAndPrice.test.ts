@@ -1,17 +1,23 @@
-// UI-STOCK S12 + S14: Free is a per-line QUANTITY on Add (stock in = qty + free,
-// the supplier is paid for qty), and an Add line may carry a new selling price
-// for the same product row (latest entered wins, rounded up to the cent).
+// UI-STOCK S12 + S14: Free is a per-item QUANTITY on Add (stock in = qty + free,
+// the supplier is paid for qty). Owner answer 30 Sep 06:40: it is not an entry
+// column -- each Add item gets a free row under it, added from the item with
+// only a quantity and shown as a discounted line. An Add line may also carry a
+// new selling price for the same product row (latest wins, rounded up).
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { stockReceiptGateCode } from '../src/utils/stockReceiptFields.ts'
 import {
   buildStockLineRequest,
+  freeRowText,
   lineDeclaresFree,
+  lineEntryRefusal,
   linePaidTotal,
   lineSellingPriceChange,
   lineWireUnitCost,
   reviewStockLine,
   sessionItemsTotal,
+  sessionLinesRefusal,
+  setLineFreeQuantity,
   type LineRequestContext,
   type StockSessionLine,
 } from '../src/utils/stockSessionDraft.ts'
@@ -141,12 +147,47 @@ runTest('Free and price are Add-only: Remove and Set bodies never carry them', (
   }
 })
 
-runTest('the entry row: Free and Price are per line cells, Price is disabled without products edit, Cost without cost access', () => {
+runTest('a free row is added from its item with only a quantity; Remove/Set and saved items take none', () => {
+  const lines = [line(), line({ key: 'rm', mode: 'remove', batchChoice: 3 }), line({ key: 'done', status: 'saved' })]
+  const withFree = setLineFreeQuantity(lines, 'k1', '2')
+  assert.equal(withFree[0].freeQuantity, 2)
+  assert.equal(withFree[0].quantity, 10, 'the paid units are untouched')
+  assert.equal(withFree[0].requestId, 'stockline_1', 'the line keeps its 0192 id')
+  assert.equal(setLineFreeQuantity(withFree, 'k1', '')[0].freeQuantity, 0, 'clearing the box removes the free row')
+  assert.equal(setLineFreeQuantity(lines, 'k1', '-3')[0].freeQuantity, 0)
+  assert.equal(setLineFreeQuantity(lines, 'rm', '2')[1].freeQuantity, 0, 'Remove carries no free units')
+  assert.equal(setLineFreeQuantity(lines, 'done', '2')[2].freeQuantity, 0, 'a saved item is history')
+})
+
+runTest('the free row reads as a discounted line: 2 x $3.50 (-$3.50) = $0.00', () => {
+  const usd = '$'
+  assert.equal(freeRowText(line({ freeQuantity: 2 }), usd), `2 × ${usd}3.50 (−${usd}3.50) = ${usd}0.00`)
+  assert.equal(freeRowText(line({ freeQuantity: 5, unitCost: '' }), usd), `5 × ${usd}0.00 (−${usd}0.00) = ${usd}0.00`)
+})
+
+runTest('a fully free product: the item may be added with Qty 0, then Next waits for its free row', () => {
+  const base = { mode: 'add' as const, hasProduct: true, branchId: '1', unitCost: '', lotChoice: 'new' as const, lot: null, canReceive: true, canEditCosts: true, branchQuantity: 0 }
+  assert.equal(lineEntryRefusal({ ...base, quantity: '0', supplierName: 'Bong Long' }), null, 'no cost is asked for units that cost nothing')
+  assert.equal(lineEntryRefusal({ ...base, quantity: '0', supplierName: '' })?.gate, 'supplier_required', 'free goods still name their supplier')
+  assert.equal(lineEntryRefusal({ ...base, quantity: '3', supplierName: 'Bong Long', unitCost: '0' })?.gate, 'free_goods_required', 'a typed $0 with paid units is still refused')
+  assert.equal(lineEntryRefusal({ ...base, quantity: '', supplierName: 'Bong Long', unitCost: '3' })?.field, 'qty', 'a blank Qty is not 0')
+  const empty = line({ quantity: 0, freeQuantity: 0 })
+  assert.equal(sessionLinesRefusal([empty])?.key, 'k1', 'an item with no units at all blocks Next')
+  assert.equal(sessionLinesRefusal([line({ quantity: 0, freeQuantity: 4 })]), null)
+  assert.equal(sessionLinesRefusal([line({ mode: 'set', quantity: 0 })]), null, 'Set to 0 is a count')
+})
+
+runTest('the entry row is [Qty][Cost][Price]; the free row lives in Items; Price is disabled without products edit, Cost without cost access', () => {
   const entry = src('components/stock-session/StockSessionLineEntry.tsx')
-  assert.match(entry, /stock_receipt_free_goods/, 'the Free cell')
+  assert.doesNotMatch(entry, /stock_receipt_free_goods/, 'owner: free units are NOT a column on the entry line')
+  assert.match(entry, /grid-cols-\[minmax\(0,1fr\)_minmax\(0,1\.2fr\)_minmax\(0,1\.2fr\)\]/, 'three cells: Qty, Cost, Price')
   assert.match(entry, /disabled=\{[^}]*!canEditPrice/, 'Price is inert without products edit')
   assert.match(entry, /canViewCosts \|\| canEditCosts \? \(/, 'the Cost input renders only for users who may see or enter costs')
   assert.match(entry, /<\/span>—/, 'everyone else sees an inert "—" cell in its place')
+  const items = src('components/stock-session/StockSessionItems.tsx')
+  assert.match(items, /Gift/, 'the Free action on the item is an icon')
+  assert.match(items, /aria-label=\{tr\('stock_receipt_free_goods', 'Free'\)\}/, 'named Free for screen readers and the tooltip')
+  assert.match(items, /freeRowText\(/, 'the free row reads as a discounted line')
   const modal = src('components/inventory/FastStockInModal.tsx')
   assert.match(modal, /getPermissionTier\('products'\) === 'full' && [a-zA-Z.]+\.can\('products', 'edit'\)/, 'price edit = full products tier + edit')
   const shared = src('components/stock-session/StockSessionSharedDetails.tsx')
