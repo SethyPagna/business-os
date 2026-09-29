@@ -1,14 +1,17 @@
 import { expect, test, type BrowserContext, type Page } from '@playwright/test'
 import {
   PAGE_SIZE_STORAGE_KEY,
+  STOREFRONT_EN_LABELS,
   STOREFRONT_ORIGIN,
   collectPageHealth,
   expectNoRuntimeErrors,
   fetchBootstrapPayload,
   productSkeletons,
   seedStorefrontCache,
+  seedStorefrontLanguage,
   seedViewerPageSize,
   storefrontCards,
+  storefrontSectionTab,
 } from './support/harness'
 
 /**
@@ -95,6 +98,11 @@ async function seedReturningShopper(context: BrowserContext, bootstrap: Record<s
 }
 
 test.describe('storefront pager', () => {
+  // These checks read the English labels; a first visit would open in Khmer.
+  test.beforeEach(async ({ context }) => {
+    await seedStorefrontLanguage(context, STOREFRONT_ORIGIN, 'en')
+  })
+
   test('reads [Back] [page / total] [Next], in that order', async ({ page }) => {
     // CATCHES: the control order regressing back to the admin layout (a
     // "Showing 1-50 of 137" summary on the left, a size selector beside Next)
@@ -104,7 +112,7 @@ test.describe('storefront pager', () => {
     // checking each control exists somewhere.
     const health = collectPageHealth(page)
     await page.goto(`${STOREFRONT_ORIGIN}/`, { waitUntil: 'load' })
-    await page.getByRole('button', { name: 'Products', exact: true }).click()
+    await storefrontSectionTab(page, STOREFRONT_EN_LABELS, 'products').click()
     await expect(page.locator(storefrontCards).first()).toBeVisible()
 
     const pager = page.locator(PAGER).first()
@@ -134,7 +142,7 @@ test.describe('storefront pager', () => {
     await seedViewerPageSize(context, STOREFRONT_ORIGIN, 20)
     const health = collectPageHealth(page)
     await page.goto(`${STOREFRONT_ORIGIN}/`, { waitUntil: 'load' })
-    await page.getByRole('button', { name: 'Products', exact: true }).click()
+    await storefrontSectionTab(page, STOREFRONT_EN_LABELS, 'products').click()
 
     const pager = page.locator(PAGER).first()
     await expect(page.locator(storefrontCards)).toHaveCount(20)
@@ -147,7 +155,7 @@ test.describe('storefront pager', () => {
     expect(stored).toBe('20')
 
     await page.reload({ waitUntil: 'load' })
-    await page.getByRole('button', { name: 'Products', exact: true }).click()
+    await storefrontSectionTab(page, STOREFRONT_EN_LABELS, 'products').click()
     await expect(page.locator(storefrontCards)).toHaveCount(20)
     await expect(page.locator(PAGER).first()).toContainText('/ 7')
 

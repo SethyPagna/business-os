@@ -1,4 +1,4 @@
-import { expect, type Browser, type BrowserContext, type ConsoleMessage, type Page, type Response } from '@playwright/test'
+import { expect, type Browser, type BrowserContext, type ConsoleMessage, type Locator, type Page, type Response } from '@playwright/test'
 import { ADMIN_ORIGIN, STOREFRONT_ORIGIN } from '../../playwright.config'
 
 export { ADMIN_ORIGIN, STOREFRONT_ORIGIN }
@@ -29,6 +29,21 @@ export const DEVICE_SETTINGS_KEY = 'businessos_device_settings'
 export const USER_STORAGE_KEY = 'businessos_user'
 /** frontend/src/constants.ts STORAGE_KEYS.USER_EXPIRY */
 export const USER_EXPIRY_STORAGE_KEY = 'businessos_user_expiry'
+/** frontend/src/components/catalog/portalTranslateController.ts */
+export const PORTAL_TRANSLATE_STORAGE_KEY = 'business-os:portal-translate-target'
+/** frontend/src/components/catalog/portalLanguagePacks.ts, km: the language a first visit opens in. */
+export const STOREFRONT_KM_LABELS = { sectionNavigation: 'ការរុករកផ្នែក', products: 'ផលិតផល', page: 'ទំព័រ', about: 'អំពី', faq: 'សំណួរ', membership: 'សមាជិកភាព' } as const
+/** The same labels for a shopper who picked English. */
+export const STOREFRONT_EN_LABELS = { sectionNavigation: 'Section navigation', products: 'Products' } as const
+
+/** A storefront section tab; the footer's quick links (P-public-9) repeat the same names. */
+export function storefrontSectionTab<Labels extends { sectionNavigation: string }>(
+  page: Page,
+  labels: Labels,
+  tab: Exclude<keyof Labels, 'sectionNavigation'>,
+): Locator {
+  return page.getByRole('navigation', { name: labels.sectionNavigation }).getByRole('button', { name: String(labels[tab]), exact: true })
+}
 
 export type PageHealth = {
   /** Uncaught exceptions and unhandled rejections. */
@@ -231,6 +246,14 @@ export async function seedViewerPageSize(context: BrowserContext, origin: string
     if (window.location.origin !== target) return
     try { window.localStorage.setItem(key, String(value)) } catch { /* blocked storage */ }
   }, { key: PAGE_SIZE_STORAGE_KEY, value: pageSize, target: origin })
+}
+
+/** A returning shopper who already picked a storefront language. */
+export async function seedStorefrontLanguage(context: BrowserContext, origin: string, language: 'en' | 'km'): Promise<void> {
+  await context.addInitScript(({ key, value, target }) => {
+    if (window.location.origin !== target) return
+    try { window.localStorage.setItem(key, value) } catch { /* blocked storage */ }
+  }, { key: PORTAL_TRANSLATE_STORAGE_KEY, value: language, target: origin })
 }
 
 /**

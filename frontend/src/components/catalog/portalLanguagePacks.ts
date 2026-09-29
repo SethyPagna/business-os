@@ -750,6 +750,10 @@ const PORTAL_PUBLIC_EXTRA_TEXT: PortalTextByLanguage = {
     publicTranslation: 'ភាសា',
     followApp: 'ភាសាដើម',
     externalTranslation: 'ការបកប្រែខាងក្រៅ',
+    externalTranslationPreparing: 'កំពុងរៀបចំការបកប្រែខាងក្រៅ...',
+    externalTranslationApplied: 'បានអនុវត្តការបកប្រែខាងក្រៅ',
+    searchLanguages: 'ស្វែងរកភាសា',
+    noLanguagesFound: 'គ្មានភាសាត្រូវនឹងការស្វែងរករបស់អ្នកទេ។',
     translationReady: 'ភាសារួចរាល់',
     translationApplied: 'បានប្ដូរភាសា',
     translationOriginalApplied: 'បានត្រឡប់ទៅភាសាដើម',
@@ -759,10 +763,35 @@ const PORTAL_PUBLIC_EXTRA_TEXT: PortalTextByLanguage = {
     about: 'អំពី',
     faq: 'សំណួរ',
     assistant: 'ជំនួយការ',
+    portalAssistant: 'ជំនួយការ AI',
+    account: 'គណនី',
+    wishlistTitle: 'បញ្ជីចង់បាន',
+    publicNavigation: 'ការរុករកផ្នែក',
     search: 'ស្វែងរកផលិតផល',
     searchPlaceholder: 'ស្វែងរកតាមឈ្មោះផលិតផល ពិពណ៌នា ប្រភេទ ឬម៉ាក',
+    searchCategories: 'ស្វែងរកប្រភេទ...',
+    searchBrands: 'ស្វែងរកម៉ាក...',
+    noMatches: 'គ្មានលទ្ធផលត្រូវគ្នា',
+    closeFilters: 'បិទតម្រង',
+    removeActiveFilter: 'ដកតម្រងចេញ៖ {label}',
     category: 'ប្រភេទ',
     brand: 'ម៉ាក',
+    noBrandHeader: 'ម៉ាកផ្សេងៗ',
+    promotionsHeader: 'ប្រូម៉ូសិន',
+    promotionsFilter: 'ប្រូម៉ូសិនតែប៉ុណ្ណោះ',
+    promotionsSectionFallback: 'ការផ្ដល់ជូនពិសេស',
+    promotionsSectionHint: 'ការផ្ដល់ជូន និងសេចក្ដីជូនដំណឹងថ្មីៗរបស់យើង។',
+    announcementStripSection: 'សេចក្ដីជូនដំណឹង',
+    promoStripJump: 'ទៅកាន់ប្រូម៉ូសិន',
+    portalPromotionsViewProduct: 'មើល',
+    open: 'បើកមើល',
+    viewProduct: 'មើលផលិតផល',
+    promotionBadge: 'ប្រូម៉ូ',
+    promotionBadgeBuy: 'ទិញ',
+    recommendedBadge: 'ណែនាំ',
+    topSellerBadge: 'លក់ដាច់បំផុត',
+    topProductBadge: 'ផលិតផលកំពូល',
+    newArrivalBadge: 'ថ្មី',
     branch: 'សាខា',
     stockStatus: 'ស្ថានភាពស្តុក',
     all: 'ទាំងអស់',
@@ -781,6 +810,31 @@ const PORTAL_PUBLIC_EXTRA_TEXT: PortalTextByLanguage = {
     checkingMembership: 'កំពុងពិនិត្យសមាជិក...',
     membershipRequired: 'សូមបញ្ចូលលេខសមាជិក។',
     membershipNotFound: 'រកមិនឃើញលេខសមាជិកនេះទេ។',
+    membershipPrivacyTitle: 'ការស្វែងរកសមាជិកត្រូវបានបិទ',
+    membershipDisabledSubtitle: 'ព័ត៌មានសមាជិកភាពរបស់អ្នកត្រូវបានរក្សាជាឯកជន។',
+    membershipDisabledMessage: 'មុខងារនេះមិនត្រូវបានបញ្ចូលក្នុងគណនីទេ ដើម្បីការពារឯកជនភាព និងសុវត្ថិភាព។',
+    accountLoading: 'កំពុងពិនិត្យគណនីរបស់អ្នក…',
+    signedInAs: 'បានចូលគណនីជា',
+    membershipId: 'លេខសមាជិក',
+    membershipIdOptional: 'លេខសមាជិក (ស្រេចចិត្ត)',
+    membershipIdHint: 'ទុកទទេ ហើយយើងនឹងបង្កើតលេខមួយជូនអ្នក។',
+    nameOrMembershipId: 'ឈ្មោះ ឬលេខសមាជិក',
+    inYourList: 'ក្នុងបញ្ជីរបស់អ្នក',
+    saved: 'បានរក្សាទុក',
+    accountMemoryHint: 'បញ្ជីរបស់អ្នក និងផលិតផលដែលបានរក្សាទុក ត្រូវបានរក្សាជាមួយគណនី ដូច្នេះអ្នកអាចមើលវាបាននៅលើគ្រប់ឧបករណ៍។',
+    signIn: 'ចូលគណនី',
+    signingIn: 'កំពុងចូលគណនី…',
+    signOut: 'ចាកចេញ',
+    signUp: 'ចុះឈ្មោះ',
+    createAccount: 'បង្កើតគណនី',
+    creatingAccount: 'កំពុងបង្កើតគណនី…',
+    yourName: 'ឈ្មោះរបស់អ្នក',
+    phoneNumber: 'លេខទូរស័ព្ទ',
+    password: 'ពាក្យសម្ងាត់',
+    createPassword: 'បង្កើតពាក្យសម្ងាត់',
+    forgotPasswordHint: 'ភ្លេចពាក្យសម្ងាត់? សូមទាក់ទងយើង ដើម្បីកំណត់វាឡើងវិញ។',
+    signupReminder: 'ប្រសិនបើអ្នកធ្លាប់ទិញពី Leang Cosmetics/Leang Beauty សូមទាក់ទងយើងដើម្បីទទួលលេខសមាជិករបស់អ្នក — លេខទូរស័ព្ទរបស់អ្នកត្រូវតែដូចគ្នា។ នេះគ្រាន់តែជាការរំលឹកប៉ុណ្ណោះ។',
+    points: 'ពិន្ទុ',
     customer: 'អតិថិជន',
     memberSince: 'សមាជិកតាំងពី',
     company: 'ក្រុមហ៊ុន',
@@ -802,6 +856,7 @@ const PORTAL_PUBLIC_EXTRA_TEXT: PortalTextByLanguage = {
     liveCatalog: 'ស្តុកបច្ចុប្បន្ន និងព័ត៌មានដែលសមស្របសម្រាប់អតិថិជន។',
     filterSummary: 'លទ្ធផល {count}',
     loadingProducts: 'កំពុងផ្ទុកផលិតផល...',
+    catalogLoading: 'កំពុងផ្ទុកផលិតផល...',
     refreshing: 'កំពុងធ្វើបច្ចុប្បន្នភាព...',
     selected: 'បានជ្រើស',
     filters: 'តម្រង',
@@ -818,6 +873,8 @@ const PORTAL_PUBLIC_EXTRA_TEXT: PortalTextByLanguage = {
     aboutTitle: 'អំពីយើង',
     faqTitle: 'សំណួរដែលសួរញឹកញាប់',
     faqHint: 'បន្ថែមសំណួរដែលអតិថិជនសួរញឹកញាប់។ អតិថិជនអាចបើកមើលចម្លើយម្តងមួយ។',
+    faqEmptyState: 'មិនទាន់មានសំណួរនៅឡើយទេ។ សូមទាក់ទងយើងគ្រប់ពេល យើងរីករាយជួយអ្នក។',
+    logoImage: 'រូបសញ្ញា',
     aiTitle: 'ជំនួយការសម្រស់',
     aiIntro: "ប្រាប់យើងថាអ្នកកំពុងរកអ្វី ហើយជំនួយការ AI នឹងណែនាំផលិតផលពី Leang Beauty។",
     aiDisclaimer: 'ចម្លើយ AI សម្រាប់យោងប៉ុណ្ណោះ។ សម្រាប់ការណែនាំត្រឹមត្រូវ សូមទាក់ទងហាងតាម Instagram ឬ Facebook។',
@@ -833,6 +890,14 @@ const PORTAL_PUBLIC_EXTRA_TEXT: PortalTextByLanguage = {
     askAssistant: "សួរ AI",
     assistantReset: 'សម្អាត',
     assistantLoading: 'កំពុងគិត...',
+    assistantQuestionRequired: 'សូមសួរសំណួរជាមុនសិន។',
+    assistantUsageCompact: 'មានអ្នកប្រើ {users} នាក់កំពុងប្រើឥឡូវនេះ។ ម្នាក់ៗអាចស្វែងរកបាន {searches} ដងក្នុងមួយនាទី។',
+    assistantResults: 'ផលិតផលដែលសមស្រប',
+    assistantFollowUps: 'សំណួរបន្តដែលមានប្រយោជន៍',
+    assistantWhy: 'ហេតុអ្វីបានជាសម',
+    assistantUse: 'របៀបប្រើ',
+    assistantCaution: 'ការប្រុងប្រយ័ត្ន',
+    assistantIngredients: 'គ្រឿងផ្សំសំខាន់',
     bucketTitle: 'បញ្ជីរបស់ខ្ញុំ',
     bucketHint: 'មិនមានការទូទាត់ទីនេះទេ -- គ្រាន់តែជាបញ្ជីខ្លីៗសម្រាប់បង្ហាញក្រុមការងាររបស់យើង។',
     bucketEmpty: 'បញ្ជីរបស់អ្នកនៅទទេ។ សូមចុច "បន្ថែម" លើផលិតផលដែលអ្នកចូលចិត្ត។',
@@ -843,10 +908,20 @@ const PORTAL_PUBLIC_EXTRA_TEXT: PortalTextByLanguage = {
     bucketCopyFailed: 'មិនអាចចម្លងដោយស្វ័យប្រវត្តិទេ -- សូមសាកល្បងទាញយកជំនួសវិញ។',
     addToBucket: 'បន្ថែមទៅបញ្ជី',
     addedToBucket: 'បានបន្ថែម',
+    addToBucketQty: 'បន្ថែមទៀត (បានបន្ថែម {qty})',
     removeFromBucket: 'លុបចេញ',
+    addToWishlist: 'រក្សាទុកក្នុងបញ្ជីចង់បាន',
+    removeFromWishlist: 'ដកចេញពីបញ្ជីចង់បាន',
     decreaseQty: 'បន្ថយចំនួន',
     increaseQty: 'បង្កើនចំនួន',
+    noPaymentNotice: 'យើង Leang Cosmetics/Leang Beauty មិនទទួលការទូទាត់តាមអនឡាញទេ — សូមទាក់ទងយើងដើម្បីទិញ។ ឯកជនភាពរបស់អ្នកគឺជាអាទិភាពរបស់យើង។',
+    noPaymentNoticeShort: 'មិនមានការទូទាត់តាមអនឡាញទេ — សូមទាក់ទងយើងដើម្បីទិញ។ ដើម្បីសុវត្ថិភាពរបស់អ្នក។',
     contactUs: 'ទាក់ទងយើង',
+    contactUsMinimize: 'បង្រួមប៊ូតុងទាក់ទងយើង',
+    phone: 'ទូរស័ព្ទ',
+    email: 'អ៊ីមែល',
+    address: 'អាសយដ្ឋាន',
+    call: 'ហៅទូរស័ព្ទ',
     messenger: 'Messenger',
     facebook: 'Facebook',
     instagram: 'Instagram',
@@ -1382,4 +1457,25 @@ export function getPortalLanguageText(language: unknown, key: unknown): string {
   const textKey = String(key || '')
   const text = PACK_BY_VALUE.get(normalized)?.text[textKey]
   return typeof text === 'string' && text.trim() ? text : ''
+}
+
+type AppTranslator = ((key: string) => string) | undefined
+
+// portal_a11y_* names are flat en/km pack keys, not portalEditor.* ones.
+const FLAT_PACK_KEY_PREFIX = 'portal_a11y_'
+const EDITOR_PACK_KEY_PREFIX = 'portalEditor.'
+
+export function resolveStorefrontCopy(pageLanguage: string, t: AppTranslator, key: string, fallback = '', fallbackKm = fallback): string {
+  if (key.startsWith(FLAT_PACK_KEY_PREFIX)) {
+    // `t` follows the app language, so an explicit Khmer storefront choice wins over it.
+    if (pageLanguage === 'km' && fallbackKm) return fallbackKm
+    const packed = typeof t === 'function' ? t(key) : ''
+    return packed && packed !== key ? packed : fallback
+  }
+  const localized = getPortalLanguageText(pageLanguage, key)
+  if (localized) return localized
+  const editorKey = `${EDITOR_PACK_KEY_PREFIX}${key}`
+  const translated = typeof t === 'function' ? t(editorKey) : ''
+  if (translated && translated !== editorKey) return translated
+  return pageLanguage === 'km' ? (fallbackKm || fallback) : fallback
 }
