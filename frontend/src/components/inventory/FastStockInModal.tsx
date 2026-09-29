@@ -1179,6 +1179,7 @@ export default function FastStockInModal({
         <Suspense fallback={null}>
           <StockReasonsManagerModal
             initialTab="adjust"
+            layer="nested"
             onChanged={reloadReasons}
             onClose={() => { setReasonsOpen(false); reloadReasons() }}
           />
