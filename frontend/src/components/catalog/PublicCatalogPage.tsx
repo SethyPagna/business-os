@@ -48,7 +48,7 @@ import { usePortalBucket, usePortalWishlist, formatPortalBucketText, downloadPor
 import { usePortalAccount } from './portalAccount.ts'
 import PortalNoPaymentNotice from './PortalNoPaymentNotice.tsx'
 import PortalFooter from './legal/LegalPages.tsx'
-import { getPortalLanguageText } from './portalLanguagePacks.ts'
+import { resolveStorefrontCopy } from './portalLanguagePacks.ts'
 import { ADMIN_MAX_PRODUCT_GALLERY_IMAGES } from '../products/helpers/productGalleryHelpers.ts'
 import InstallPromptBand from '../shared/InstallPromptBand.tsx'
 import { installBeforeInstallPromptCapture, installStandaloneExternalLinkGuard } from '../../utils/standaloneNavigation.ts'
@@ -779,30 +779,8 @@ export default function PublicCatalogPage() {
   const pageLanguage = languageRoute.pageLanguage
   const externalTranslateTarget = translateWidgetEnabled ? languageRoute.googleTarget : null
 
-  const copy: CopyFunction = (key, fallback = '', fallbackKm = fallback) => {
-    // This lane's assistive-technology names (portal_a11y_*) are flat keys in
-    // src/lang/en.json + km.json, not portalEditor.* ones, so they have to be
-    // looked up directly -- prefixed they resolve to nothing and the pack
-    // entries would be dead weight. `t` follows the APP's language, so an
-    // explicit Khmer choice for the storefront wins over it.
-    if (key.startsWith('portal_a11y_')) {
-      if (pageLanguage === 'km' && fallbackKm) return fallbackKm
-      const packed = typeof t === 'function' ? t(key) : ''
-      if (packed && packed !== key) return packed
-      return fallback
-    }
-    // Real fix: this used to only ever check the admin app's own EN/KM
-    // translator (`t`) and a hardcoded Khmer fallback, so picking any of
-    // the other 17 languages in the dropdown changed nothing on screen.
-    // `getPortalLanguageText` is the same first-party language-pack lookup
-    // the admin editor's live preview already used correctly.
-    const localized = getPortalLanguageText(pageLanguage, key)
-    if (localized) return localized
-    const fullKey = `portalEditor.${key}`
-    const translated = typeof t === 'function' ? t(fullKey) : ''
-    if (translated && translated !== fullKey) return translated
-    return pageLanguage === 'km' ? (fallbackKm || fallback) : fallback
-  }
+  const copy: CopyFunction = (key, fallback = '', fallbackKm = fallback) =>
+    resolveStorefrontCopy(pageLanguage, t, key, fallback, fallbackKm)
 
   // WCAG 3.1.1: the language selector changed every string on screen but
   // never what the DOCUMENT claimed to be written in, so a screen reader

@@ -16,6 +16,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { PORTAL_CONTRAST_PAIRS } from '../src/components/catalog/portalContrast.ts'
+import { resolveStorefrontCopy } from '../src/components/catalog/portalLanguagePacks.ts'
 
 let failed = 0
 
@@ -571,9 +572,11 @@ runTest('every portal_a11y_* key exists in both packs and is used', () => {
 
 runTest('the storefront copy() can actually reach a portal_a11y_ pack key', () => {
   const publicPage = read('PublicCatalogPage.tsx')
-  // copy() prefixes every key with `portalEditor.`, so a bare pack key was
-  // unreachable and the entry would have been dead weight.
-  assert.match(publicPage, /key\.startsWith\('portal_a11y_'\)/, 'the lane namespace resolves against the flat pack')
+  assert.match(publicPage, /resolveStorefrontCopy\(pageLanguage, t, key, fallback, fallbackKm\)/, 'the storefront copy() is resolveStorefrontCopy')
+  // Every other key is prefixed with `portalEditor.`, which would leave a bare pack key unreachable.
+  const packed = (key: string) => (key === 'portal_a11y_skip_to_content' ? 'Skip to the products' : key)
+  assert.equal(resolveStorefrontCopy('en', packed, 'portal_a11y_skip_to_content', 'Skip to products'), 'Skip to the products')
+  assert.equal(resolveStorefrontCopy('km', packed, 'portal_a11y_skip_to_content', 'Skip to products', 'រំលងទៅផលិតផល'), 'រំលងទៅផលិតផល')
 })
 
 if (failed > 0) {

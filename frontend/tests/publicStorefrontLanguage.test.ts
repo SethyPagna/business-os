@@ -12,6 +12,7 @@ import {
   resolvePublicStorefrontLanguage,
 } from '../src/components/catalog/portalLanguageOptions.ts'
 import { readPublicStorefrontLanguage, readStoredTranslateTarget } from '../src/components/catalog/portalTranslateController.ts'
+import { getPortalLanguageText, resolveStorefrontCopy } from '../src/components/catalog/portalLanguagePacks.ts'
 import { splitNoTranslateSegments, stripNoTranslateMarkers } from '../src/components/catalog/portalNoTranslate.ts'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
@@ -106,8 +107,11 @@ assert.equal(stripNoTranslateMarkers('Our [[Leang]] story'), 'Our Leang story')
 //    the routed page language, and offers the storefront picker.
 const page = read('src/components/catalog/PublicCatalogPage.tsx')
 assert.match(page, /useState\(\(\) => readPublicStorefrontLanguage\('en', PUBLIC_STOREFRONT_DEFAULT_LANGUAGE\)\)/)
-assert.match(page, /getPortalLanguageText\(pageLanguage, key\)/, 'storefront copy must follow the routed page language')
-assert.doesNotMatch(page, /getPortalLanguageText\(translateTarget, key\)/)
+assert.match(page, /resolveStorefrontCopy\(pageLanguage, t, key, fallback, fallbackKm\)/, 'storefront copy must follow the routed page language')
+assert.doesNotMatch(page, /resolveStorefrontCopy\(translateTarget/)
+const storefrontT = (key: string) => key
+assert.equal(resolveStorefrontCopy('km', storefrontT, 'products', 'Products'), getPortalLanguageText('km', 'products'))
+assert.equal(resolveStorefrontCopy('en', storefrontT, 'products', 'Products'), 'Products')
 assert.match(page, /allPublicTranslateOptions=\{PUBLIC_STOREFRONT_TRANSLATE_OPTIONS\}/)
 assert.match(page, /changeTranslateTarget=\{changeTranslateTarget\}/, 'a picker choice must be remembered, not only set in state')
 assert.match(page, /storePortalTranslatePreference\(/)
