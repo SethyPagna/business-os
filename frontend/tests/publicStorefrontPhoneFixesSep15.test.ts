@@ -281,7 +281,7 @@ check('5 the admin app keeps the same install behaviour via the shared band', ()
 
 check('5 InstallPromptBand supplies real Khmer fallback text for every translated string, not the English default', () => {
   const calls = [...installPromptBand.matchAll(/translate\(\s*'([^']+)',\s*'[^']*',\s*'([^']*)'/g)]
-  assert.ok(calls.length >= 3, 'expected install_app / ios_install_hint / ios_install_hint_detail / dismiss_notification calls')
+  assert.ok(calls.length >= 3, 'expected install_app / install_app_short / ios_install_hint / install_offer_detail / dismiss_notification calls')
   for (const [, key, khmerFallback] of calls) {
     assert.ok(/[ក-៿]/.test(khmerFallback), `translate('${key}', ...) must supply real Khmer script, not an English placeholder`)
   }

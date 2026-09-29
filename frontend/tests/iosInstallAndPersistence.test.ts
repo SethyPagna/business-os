@@ -146,11 +146,12 @@ check('G5 the install hint is excluded from the public storefront', () => {
 
 check('G5 the install hint is excluded from standalone mode and from desktop', () => {
   // CATCHES (a) offering "Add to Home Screen" to somebody already running the
-  // home-screen app; (b) showing an Install button on desktop Chrome, which
-  // fires beforeinstallprompt too but is not what the owner's iOS rule is
-  // about.
-  assert.match(standaloneNavigation, /if \(isStandaloneDisplayMode\(\)\) return false/, 'the iOS hint must bail in standalone')
-  assert.match(installBand, /if \(!isHandheldInstallTarget\(\)\) return undefined/, 'neither half may run on desktop')
+  // home-screen app; (b) showing the band on desktop Chrome, which fires
+  // beforeinstallprompt too: desktops get the account-menu entry only (owner
+  // default, 28 Sep 2026). installOffer.test.ts runs both against device doubles.
+  assert.match(standaloneNavigation, /if \(isStandaloneDisplayMode\(\) \|\| readDeviceTimestamp\(APP_INSTALLED_KEY\) > 0\) return null/, 'no offer in standalone or once installed')
+  assert.match(standaloneNavigation, /if \(!isHandheldInstallTarget\(\) \|\| isInstallBandDismissed\(\)\) return null/, 'the band never runs on desktop')
+  assert.match(installBand, /useSyncExternalStore\(subscribeInstallOffer, installBandRoute,/, 'the band reads the one install-offer store')
 })
 
 check('G5 only Mobile Safari on a real iOS device gets the Share hint', () => {
@@ -171,18 +172,21 @@ check('G5 the install hint renders its real content from first paint', () => {
   assert.match(installHint, /<InstallPromptBand translate=\{\(key, fallback\) => t\(key\) \|\| fallback\}/, 'IosInstallHint must adapt t() into the shared band, not duplicate its logic')
 })
 
-check('G5 the dismissal is a versioned, device-scoped, snoozed key', () => {
-  // CATCHES (a) an unversioned key that cannot be migrated later; (b) a
-  // permanent "never show again", which leaves a till that is still not
-  // installed two weeks later with no nudge at all.
-  assert.match(standaloneNavigation, /ios-install-hint-dismissed-at-v1/, 'the storage key must be versioned')
-  // Catches: a logout wiping the device-scoped snooze. clearStorage() deletes
-  // every businessos_* key it does not explicitly preserve, so the key has to
-  // be on the preserve list or the hint returns at the next cashier's sign-in.
+check('G5 a closed install bar stays closed on the device, and survives sign-out', () => {
+  // The owner replaced the 14-day snooze with "never again" on 28 Sep 2026
+  // (PWA-FINAL D7); the account-menu Install row keeps a closed bar recoverable.
+  // CATCHES (a) an unversioned key; (b) forgetting the old v1 dismissal, which
+  // would re-open the bar on every phone that closed it; (c) a logout wiping a
+  // device key: clearStorage() deletes every businessos_* key it does not
+  // preserve, so the next cashier would be asked again.
+  assert.match(standaloneNavigation, /install-offer-dismissed-at-v2/, 'the storage key must be versioned')
+  assert.match(standaloneNavigation, /ios-install-hint-dismissed-at-v1/, 'the old dismissal still counts')
   const clientRuntime = read('src/platform/runtime/clientRuntime.ts')
-  assert.match(clientRuntime, /localPreserveKeys\.add\(`\$\{STORAGE_KEYS\.DEVICE_SETTINGS\}:ios-install-hint-dismissed-at-v1`\)/, 'the snooze key must survive logout')
-  assert.match(standaloneNavigation, /IOS_INSTALL_HINT_SNOOZE_MS = 14 \* 24 \* 60 \* 60 \* 1000/, 'the snooze must be 14 days')
-  assert.match(standaloneNavigation, /if \(!stored \|\| !Number\.isFinite\(raw\) \|\| raw <= 0\) return 0/, 'a malformed or old value must fall back silently')
+  for (const key of ['install-offer-dismissed-at-v2', 'ios-install-hint-dismissed-at-v1', 'app-installed-at-v1']) {
+    assert.ok(clientRuntime.includes('localPreserveKeys.add(`${STORAGE_KEYS.DEVICE_SETTINGS}:' + key + '`)'), `${key} must survive logout`)
+  }
+  assert.doesNotMatch(standaloneNavigation, /SNOOZE/, 'no snooze: a closed bar never comes back')
+  assert.match(standaloneNavigation, /return Number\.isFinite\(stored\) && stored > 0 \? stored : 0/, 'a malformed or old value must fall back silently')
 })
 
 // --- B9: the standalone external-link guard -------------------------------
@@ -281,8 +285,9 @@ check('both packs carry every new key, with real Khmer', () => {
     'storage_eviction_title',
     'storage_eviction_detail',
     'install_app',
+    'install_app_short',
+    'install_offer_detail',
     'ios_install_hint',
-    'ios_install_hint_detail',
   ]
   for (const key of keys) {
     assert.equal(typeof en[key], 'string', `en.json is missing ${key}`)
@@ -300,7 +305,7 @@ check('each new key is defined exactly once in each pack', () => {
   // keeps only the last one.
   const rawEn = read('src/lang/en.json')
   const rawKm = read('src/lang/km.json')
-  for (const key of ['storage_eviction_title', 'storage_eviction_detail', 'install_app', 'ios_install_hint', 'ios_install_hint_detail']) {
+  for (const key of ['storage_eviction_title', 'storage_eviction_detail', 'install_app', 'install_app_short', 'install_offer_detail', 'ios_install_hint']) {
     const pattern = new RegExp(`"${key}":`, 'g')
     assert.equal((rawEn.match(pattern) || []).length, 1, `en.json defines ${key} more than once`)
     assert.equal((rawKm.match(pattern) || []).length, 1, `km.json defines ${key} more than once`)
