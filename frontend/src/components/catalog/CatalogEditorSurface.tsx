@@ -15,7 +15,7 @@ import Send from 'lucide-react/dist/esm/icons/send.js'
 import ShoppingBag from 'lucide-react/dist/esm/icons/shopping-bag.js'
 import Sparkles from 'lucide-react/dist/esm/icons/sparkles.js'
 import Upload from 'lucide-react/dist/esm/icons/upload.js'
-import { Suspense, useMemo, useState, type RefObject } from 'react'
+import { Suspense, useEffect, useMemo, useState, type RefObject } from 'react'
 import { useApp, type AppContextCoreValue } from '../../app/AppContextCore.tsx'
 import { ProductImg } from '../products/shared/primitives'
 import AppSelect, { type AppSelectOption } from '../shared/AppSelect.tsx'
@@ -134,6 +134,19 @@ type CatalogPromoItem = {
   title?: string
 }
 
+type PromoLinkMode = 'none' | 'product' | 'url'
+
+function promoLinkModeOf(item: CatalogPromoItem): PromoLinkMode {
+  return item.linkProductId ? 'product' : (item.linkUrl ? 'url' : 'none')
+}
+
+function linkFieldsOutside(mode: PromoLinkMode): Partial<CatalogPromoItem> {
+  return {
+    ...(mode === 'url' ? {} : { linkUrl: '' }),
+    ...(mode === 'product' ? {} : { linkProductId: '', linkProductName: '' }),
+  }
+}
+
 type CatalogAboutBlock = {
   id: string
   body?: string
@@ -243,6 +256,7 @@ type CatalogEditorSurfaceContext = {
   updateAboutBlock: (id: string, key: keyof CatalogAboutBlock, value: string) => void
   updateFaqItem: (id: string, key: keyof CatalogFaqItem, value: string) => void
   updatePromoItem: (id: string, key: keyof CatalogPromoItem, value: string) => void
+  updatePromoItemFields: (id: string, fields: Partial<CatalogPromoItem>) => void
   uploadAboutBlockMedia: (id: string) => void
   uploadDraftImage: (target: string) => void
   uploadPromoItemMedia: (id: string) => void
@@ -382,6 +396,7 @@ function CatalogEditorSurfaceContent() {
     updateAboutBlock,
     updateFaqItem,
     updatePromoItem,
+    updatePromoItemFields,
     uploadAboutBlockMedia,
     uploadDraftImage,
     uploadPromoItemMedia,
@@ -392,6 +407,10 @@ function CatalogEditorSurfaceContent() {
   const linkRefused = (field: string, value: unknown) => refusedLink?.field === field && refusedLink.value === String(value ?? '').trim()
   const aboutBlocksFull = aboutBlocks.length >= ABOUT_BLOCKS_MAX
   const [showAnnouncementStripModal, setShowAnnouncementStripModal] = useState(false)
+  const [promoLinkModes, setPromoLinkModes] = useState<Record<string, PromoLinkMode>>({})
+  useEffect(() => {
+    if (!editorDirty) setPromoLinkModes({})
+  }, [editorDirty])
   // Until the server's stored values arrive, the fields show nothing and are
   // locked, so nothing can be typed over a value the editor has not seen.
   const privateAiLocked = privateAiStatus !== 'loaded'
@@ -734,7 +753,10 @@ function CatalogEditorSurfaceContent() {
                 </div>
 
                 <div className="mt-4 space-y-4">
-                  {promoItems.length ? promoItems.map((item, index) => (
+                  {promoItems.length ? promoItems.map((item, index) => {
+                    const linkMode = promoLinkModes[item.id] ?? promoLinkModeOf(item)
+                    const productList = products as Array<{ id?: unknown; name?: unknown }>
+                    return (
                     <article
                       key={item.id}
                       draggable
@@ -782,62 +804,56 @@ function CatalogEditorSurfaceContent() {
                               <label htmlFor={`portal-promo-link-type-${item.id}`} className="block text-sm font-medium text-slate-700">{copy('promotionLinksTo', 'Button links to')}</label>
                               <AppSelect
                                 id={`portal-promo-link-type-${item.id}`}
-                                value={item.linkProductId ? 'product' : (item.linkUrl ? 'url' : 'none')}
+                                value={linkMode}
                                 buttonClassName="input h-auto w-full"
                                 options={[
                                   { value: 'none', label: copy('promotionLinkNone', 'No button') },
                                   { value: 'product', label: copy('promotionLinkProduct', 'A product') },
                                   { value: 'url', label: copy('promotionLinkUrl', 'A custom link') },
                                 ]}
-                                onChange={(nextType) => {
-                                  if (nextType === 'product') {
-                                    updatePromoItem(item.id, 'linkUrl', '')
-                                  } else if (nextType === 'url') {
-                                    updatePromoItem(item.id, 'linkProductId', '')
-                                    updatePromoItem(item.id, 'linkProductName', '')
-                                  } else {
-                                    updatePromoItem(item.id, 'linkUrl', '')
-                                    updatePromoItem(item.id, 'linkProductId', '')
-                                    updatePromoItem(item.id, 'linkProductName', '')
-                                  }
+                                onChange={(nextValue) => {
+                                  const nextMode = nextValue as PromoLinkMode
+                                  setPromoLinkModes((current) => ({ ...current, [item.id]: nextMode }))
+                                  updatePromoItemFields(item.id, linkFieldsOutside(nextMode))
                                 }}
                               />
                             </div>
                           </div>
-                          {(() => {
-                            const linkType = item.linkProductId ? 'product' : (item.linkUrl ? 'url' : 'none')
-                            if (linkType === 'product') {
-                              const productList = products as Array<{ id?: unknown; name?: unknown }>
-                              return (
-                                <div>
-                                  <label htmlFor={`portal-promo-product-${item.id}`} className="block text-sm font-medium text-slate-700">{copy('promotionProduct', 'Product')}</label>
-                                  <AppSelect
-                                    id={`portal-promo-product-${item.id}`}
-                                    value={item.linkProductId || ''}
-                                    buttonClassName="input h-auto w-full"
-                                    options={[
-                                      { value: '', label: copy('promotionSelectProduct', 'Select a product…') },
-                                      ...productList.map((product) => ({ value: String(product.id), label: String(product.name || '') })),
-                                    ]}
-                                    onChange={(nextId) => {
-                                      const match = productList.find((product) => String(product.id) === nextId)
-                                      updatePromoItem(item.id, 'linkProductId', nextId)
-                                      updatePromoItem(item.id, 'linkProductName', match ? String(match.name || '') : '')
-                                    }}
-                                  />
-                                </div>
-                              )
-                            }
-                            if (linkType === 'url') {
-                              return (
-                                <div>
-                                  <label htmlFor={`portal-promo-link-${item.id}`} className="block text-sm font-medium text-slate-700">{copy('promotionLink', 'Button link')}</label>
-                                  <input id={`portal-promo-link-${item.id}`} className="input" value={item.linkUrl || ''} onChange={(event) => updatePromoItem(item.id, 'linkUrl', event.target.value)} placeholder="https://..." />
-                                </div>
-                              )
-                            }
-                            return null
-                          })()}
+                          <div className="grid gap-3 sm:grid-cols-2">
+                            <div>
+                              <label htmlFor={`portal-promo-product-${item.id}`} className="block text-sm font-medium text-slate-700">{copy('promotionProduct', 'Product')}</label>
+                              <AppSelect
+                                id={`portal-promo-product-${item.id}`}
+                                value={item.linkProductId || ''}
+                                buttonClassName="input h-auto w-full"
+                                options={[
+                                  { value: '', label: copy('promotionSelectProduct', 'Select a product…') },
+                                  ...productList.map((product) => ({ value: String(product.id), label: String(product.name || '') })),
+                                ]}
+                                onChange={(nextId) => {
+                                  const match = productList.find((product) => String(product.id) === nextId)
+                                  updatePromoItemFields(item.id, { linkProductId: nextId, linkProductName: match ? String(match.name || '') : '' })
+                                }}
+                                disabled={linkMode !== 'product'}
+                              />
+                            </div>
+                            <div>
+                              <label htmlFor={`portal-promo-link-${item.id}`} className="block text-sm font-medium text-slate-700">{copy('promotionLink', 'Button link')}</label>
+                              <input
+                                id={`portal-promo-link-${item.id}`}
+                                className="input"
+                                value={item.linkUrl || ''}
+                                onChange={(event) => updatePromoItem(item.id, 'linkUrl', event.target.value)}
+                                placeholder="https://"
+                                disabled={linkMode !== 'url'}
+                                aria-invalid={linkRefused(`promo_items[${index}].linkUrl`, item.linkUrl)}
+                                aria-describedby={linkRefused(`promo_items[${index}].linkUrl`, item.linkUrl) ? `portal-promo-link-${item.id}-error` : undefined}
+                              />
+                              {linkRefused(`promo_items[${index}].linkUrl`, item.linkUrl) ? (
+                                <p id={`portal-promo-link-${item.id}-error`} role="alert" className="mt-1 rounded-2xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{linkInvalid}</p>
+                              ) : null}
+                            </div>
+                          </div>
                         </div>
                         <div className="space-y-3">
                           <ImageField
@@ -865,7 +881,8 @@ function CatalogEditorSurfaceContent() {
                         </div>
                       </div>
                     </article>
-                  )) : (
+                    )
+                  }) : (
                     <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-5 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-400">
                       {copy('noPromotionCards', 'No promotion cards yet. Add one to feature discounts, events, or new arrivals.')}
                     </div>

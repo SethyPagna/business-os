@@ -2274,10 +2274,14 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     )))
   }
 
-  function updatePromoItem(itemId: string, key: string, value: unknown) {
+  function updatePromoItemFields(itemId: string, fields: Record<string, unknown>) {
     setPromoItemsDraft(promoItems.map((item) => (
-      item.id === itemId ? { ...item, [key]: value } : item
+      item.id === itemId ? { ...item, ...fields } : item
     )))
+  }
+
+  function updatePromoItem(itemId: string, key: string, value: unknown) {
+    updatePromoItemFields(itemId, { [key]: value })
   }
 
   function addAboutBlock(type: unknown) {
@@ -3368,6 +3372,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
       updateAboutBlock,
       updateFaqItem,
       updatePromoItem,
+      updatePromoItemFields,
       uploadAboutBlockMedia,
       uploadDraftImage,
       uploadPromoItemMedia,
