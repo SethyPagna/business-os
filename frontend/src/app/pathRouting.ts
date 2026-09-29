@@ -99,11 +99,12 @@ export function isAdminAppPath(pathname: unknown): boolean {
   return ADMIN_AUTH_ROUTE_SEGMENTS.has(segment) || ADMIN_ROUTE_PAGE_BY_SEGMENT.has(segment)
 }
 
-function isAdminHostname(): boolean {
+export function isAdminHostname(): boolean {
   if (typeof window === 'undefined') return true
   const hostname = String(window.location?.hostname || '').toLowerCase()
   return hostname === 'localhost'
     || hostname === '127.0.0.1'
+    || hostname === '[::1]'
     || hostname === '::1'
     || hostname.startsWith('admin.')
 }

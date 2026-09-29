@@ -103,9 +103,12 @@ check('the raw storefront document carries the link-preview tags', () => {
     return match[1]
   }
   assert.equal(meta('og:type'), 'website')
-  assert.equal(meta('og:site_name'), 'Leang Beauty')
-  assert.equal(meta('og:title'), 'Leang Beauty')
-  assert.ok(meta('og:description').length > 20, 'a real description')
+  const shopManifest = JSON.parse(read(path.join(REPO, 'frontend', 'public', 'portal-manifest.json')))
+  assert.equal(meta('og:site_name'), shopManifest.name)
+  assert.equal(meta('og:title'), 'Leang Cosmetics')
+  assert.equal(meta('og:description'), shopManifest.description, 'the preview describes the shop the way its installed app does')
+  // Prices can be hidden from the public storefront, so the preview never promises them.
+  assert.doesNotMatch(meta('og:description'), /price/i)
   assert.match(meta('og:image'), /^https:\/\/leangbeauty\.com\/leang-cosmetics-icon-512\.png$/, 'absolute, on the public host')
   assert.match(head, /<meta name="twitter:card" content="summary" \/>/)
   assert.ok(fs.existsSync(path.join(REPO, 'frontend', 'public', 'leang-cosmetics-icon-512.png')), 'the preview image ships')

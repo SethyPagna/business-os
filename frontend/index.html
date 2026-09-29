@@ -14,8 +14,8 @@
          src/styles/main.css -- keep that rule, not this attribute, in mind
          when a field starts zooming again. -->
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
-    <meta name="theme-color" content="#1e3a8a" />
-    <meta name="description" content="Leang Beauty — product catalog, prices and store contact" />
+    <meta name="theme-color" content="#ffffff" />
+    <meta name="description" content="Browse Leang Cosmetics products and contact the store." />
     <!-- Canonical URL and link previews (Open Graph / Twitter card) for the
          storefront. All three absolute values name the PRIMARY host, for two
          reasons: crawlers do not resolve relative URLs, and any alias
@@ -34,13 +34,13 @@
          title and icons (cloudflare/src/lib/adminDocumentIdentity.ts). It
          replaces them with RELATIVE values on purpose: nothing should ever
          preview or index the admin app, and the point there is only that it is
-         not Leang Beauty. The inline bootstrap below leaves all of these
+         not the storefront. The inline bootstrap below leaves all of these
          alone. -->
     <link rel="canonical" href="https://leangbeauty.com/" />
     <meta property="og:type" content="website" />
-    <meta property="og:site_name" content="Leang Beauty" />
-    <meta property="og:title" content="Leang Beauty" />
-    <meta property="og:description" content="Leang Beauty — product catalog, prices and store contact" />
+    <meta property="og:site_name" content="Leang Cosmetics" />
+    <meta property="og:title" content="Leang Cosmetics" />
+    <meta property="og:description" content="Browse Leang Cosmetics products and contact the store." />
     <meta property="og:url" content="https://leangbeauty.com/" />
     <meta property="og:image" content="https://leangbeauty.com/leang-cosmetics-icon-512.png" />
     <meta name="twitter:card" content="summary" />
@@ -50,27 +50,23 @@
          status bar text WHITE and lets the page run underneath it, which only
          works over dark top chrome. Both hosts are near-white in the
          light-first default this app ships: the storefront ground is #ffffff
-         (src/components/catalog/portalContrast.ts:46 PORTAL_LIGHT_SURFACE) and
-         the admin's mobile top bar is the ivory --nav-surface #fffdf8
-         (src/components/navigation/nav-chrome.css:48 and .bos-nav-topbar at
-         :104) -- NOT the #1e3a8a the theme-color meta above advertises. So on
-         an iPhone the clock and battery were white on white on both. This is
-         deliberately one static value rather than a per-host swap in the
-         script below: both hosts want the same answer, and a branch that sets
-         the same string twice is dead code. -->
+         (PORTAL_LIGHT_SURFACE) and the admin's mobile top bar is the ivory
+         --nav-surface #fffdf8 (src/components/navigation/nav-chrome.css), the
+         two values the theme-color meta above carries per host. One static
+         value, not a per-host swap: both hosts want the same answer. -->
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-    <meta name="apple-mobile-web-app-title" content="Leang Beauty" />
+    <meta name="apple-mobile-web-app-title" content="Leang" />
     <meta name="format-detection" content="telephone=no" />
     <!-- Public-first metadata is intentional. iOS may snapshot the raw HTML
          before JavaScript runs, so the customer domain must never initially
-         advertise the internal Business OS app. The synchronous bootstrap
-         below swaps these to the admin assets on admin.* / localhost. -->
+         advertise the staff app. The synchronous bootstrap below swaps these
+         to the staff identity on admin.* / localhost. -->
     <link rel="manifest" href="/portal-manifest.json" />
     <link rel="icon" type="image/png" href="/leang-cosmetics-icon-512.png" />
     <link rel="icon" type="image/png" sizes="192x192" href="/leang-cosmetics-icon-192.png" />
     <link rel="icon" type="image/png" sizes="512x512" href="/leang-cosmetics-icon-512.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="/leang-cosmetics-apple-touch-icon-v1.png" />
-    <title>Leang Beauty</title>
+    <title>Leang Cosmetics</title>
     <script>
       (function setInitialBusinessOsRoute() {
         var pathname = String(window.location && window.location.pathname || '/')
@@ -80,15 +76,11 @@
           .replace(/\/+$/g, '')
           .toLowerCase() || '/'
         // MUST list every segment src/app/pathRouting.ts routes to the admin
-        // app -- ADMIN_ROUTE_PAGE_BY_SEGMENT plus ADMIN_AUTH_ROUTE_SEGMENTS.
-        // This table drifted once already: /notes, /promotions, /promos,
-        // /review, /review-queue, /fees and /delivery-contacts were missing,
-        // so an admin reload from any of those pages (AppContext pushes them
-        // through getAdminPathForPage) took the PUBLIC branch below -- the
-        // storefront title, manifest and icons on the admin app, and no
-        // machine-translation opt-out on the very pages that crash under it.
-        // tests/posCommittedCloseDurability.test.ts drives this table from
-        // pathRouting.ts's own maps, so the next added page fails there.
+        // app -- ADMIN_ROUTE_PAGE_BY_SEGMENT plus ADMIN_AUTH_ROUTE_SEGMENTS. A
+        // missing segment renders that admin page without the
+        // machine-translation opt-out below, on the very pages that crash
+        // under it. tests/posCommittedCloseDurability.test.ts drives this
+        // table from pathRouting.ts's own maps.
         var adminRoutes = {
           '/': true,
           '/admin': true,
@@ -147,6 +139,7 @@
         }
         var adminHostname = hostname === 'localhost'
           || hostname === '127.0.0.1'
+          || hostname === '[::1]'
           || hostname === '::1'
           || hostname.indexOf('admin.') === 0
         var segment = '/' + (pathname.split('/').filter(Boolean)[0] || '')
@@ -158,18 +151,26 @@
             && !/\.[a-z0-9]+$/i.test(pathname)
             && !adminRoutes[segment]
         document.documentElement.setAttribute('data-business-os-initial-route', publicRoute ? 'public' : 'admin')
+        // The storefront opens in Khmer by default (P-public-1, Sep 25 2026),
+        // so declare km before any script or crawler reads the static
+        // lang="en". PublicCatalogPage re-sets it on mount to the visitor's
+        // chosen language. Admin routes leave lang alone -- AppContext sets
+        // the staff member's own language.
         if (publicRoute) {
-          // The storefront opens in Khmer by default (P-public-1, Sep 25
-          // 2026), so declare km before any script or crawler reads the
-          // static lang="en". PublicCatalogPage re-sets it on mount to the
-          // visitor's chosen language. The admin branch leaves lang alone --
-          // AppContext sets the staff member's own language.
           document.documentElement.setAttribute('lang', 'km')
-          document.title = 'Leang Beauty'
+        }
+        // What installs follows the HOST, what renders follows the route:
+        // leangbeauty.com/login renders the staff sign-in but must never
+        // install as the staff app, and an unknown path on admin.* renders
+        // the storefront but must never install as the shop.
+        var themeColor = document.querySelector('meta[name="theme-color"]')
+        if (!adminHostname) {
+          document.title = 'Leang Cosmetics'
           var description = document.querySelector('meta[name="description"]')
-          if (description) description.setAttribute('content', 'Leang Beauty — product catalog, prices and store contact')
+          if (description) description.setAttribute('content', 'Browse Leang Cosmetics products and contact the store.')
           var appTitle = document.querySelector('meta[name="apple-mobile-web-app-title"]')
-          if (appTitle) appTitle.setAttribute('content', 'Leang Beauty')
+          if (appTitle) appTitle.setAttribute('content', 'Leang')
+          if (themeColor) themeColor.setAttribute('content', '#ffffff')
           var manifest = document.querySelector('link[rel="manifest"]')
           if (manifest) manifest.setAttribute('href', '/portal-manifest.json')
           var icons = document.querySelectorAll('link[rel="icon"]')
@@ -180,19 +181,12 @@
           var appleIcon = document.querySelector('link[rel="apple-touch-icon"]')
           if (appleIcon) appleIcon.setAttribute('href', '/leang-cosmetics-apple-touch-icon-v1.png')
         } else {
-          // The static <title>/apple-title default to the storefront brand so
-          // iOS "Add to Home Screen" -- which can snapshot the raw HTML title
-          // before this script's public branch runs -- never labels the
-          // customer storefront "Business OS". The admin shell keeps the
-          // internal platform name; reset it here, the same synchronous
-          // pre-paint mechanism the storefront relies on above. Icons and the
-          // manifest stay on their admin static defaults, so only the text
-          // needs resetting.
-          document.title = 'Business OS'
+          document.title = 'Leang Cosmetics Admin'
           var adminAppTitle = document.querySelector('meta[name="apple-mobile-web-app-title"]')
-          if (adminAppTitle) adminAppTitle.setAttribute('content', 'Business OS')
+          if (adminAppTitle) adminAppTitle.setAttribute('content', 'Leang Admin')
           var adminDescription = document.querySelector('meta[name="description"]')
-          if (adminDescription) adminDescription.setAttribute('content', 'Business OS - Offline-first POS, inventory and analytics')
+          if (adminDescription) adminDescription.setAttribute('content', 'Till, stock and sales for Leang Cosmetics staff')
+          if (themeColor) themeColor.setAttribute('content', '#fffdf8')
           var adminManifest = document.querySelector('link[rel="manifest"]')
           if (adminManifest) adminManifest.setAttribute('href', '/manifest.json')
           var adminIcons = document.querySelectorAll('link[rel="icon"]')
@@ -203,6 +197,8 @@
           }
           var adminAppleIcon = document.querySelector('link[rel="apple-touch-icon"]')
           if (adminAppleIcon) adminAppleIcon.setAttribute('href', '/apple-touch-icon.png')
+        }
+        if (!publicRoute) {
           // Opt the ADMIN shell out of machine translation (Sep 22 2026).
           // Chrome's built-in translator rewrites and re-parents text nodes
           // that React still believes it owns; React's next commit then calls
@@ -218,7 +214,7 @@
           //
           // Both signals, on purpose: the meta is what Chrome/Edge read to
           // suppress the offer entirely, translate="no" is the HTML standard
-          // attribute other engines honour. The PUBLIC branch above must stay
+          // attribute other engines honour. Storefront routes must stay
           // translatable -- a customer may still run the browser's page
           // translator on the storefront, which carries its own guard and
           // reload recovery for this crash class
