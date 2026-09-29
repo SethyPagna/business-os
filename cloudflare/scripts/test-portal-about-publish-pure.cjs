@@ -81,6 +81,16 @@ const FIXTURE = {
   customer_portal_logo_image: '/uploads/logo-1-aaa.png',
   customer_portal_cover_image: '/uploads/Leang cover 1-2-bbb.webp',
   customer_portal_favicon_image: '/uploads/fav-3-ccc.png',
+  customer_portal_show_top_seller_badge: 'false',
+  customer_portal_show_top_product_badge: 'false',
+  customer_portal_show_recommended_badge: 'false',
+  customer_portal_show_promotion_badge: 'true',
+  customer_portal_show_new_arrival_badge: 'true',
+  customer_portal_highlight_rank_limit: '7',
+  customer_portal_recommended_product_ids: '[12,5]',
+  customer_portal_language: 'km',
+  customer_portal_translations: JSON.stringify({ km: { aboutTitle: 'អំពីយើង', faqItems: [{ question: 'សំណួរ', answer: 'ចម្លើយ' }] } }),
+  customer_portal_ai_intro: 'សួស្តី! Ask me about sunscreen.',
 }
 
 const BIDI_CONTROLS = [...'\u202A\u202B\u202C\u202D\u202E\u2066\u2067\u2068\u2069']
@@ -179,6 +189,21 @@ async function main() {
     assert.equal(config.aboutImageAlt, 'Poster: new arrivals this month')
   })
 
+  await check('publish matrix (AB-W4): the ten editor settings the preview showed now follow their stored setting', () => {
+    const config = publish(FIXTURE)
+    assert.equal(config.showTopSellerBadge, false)
+    assert.equal(config.showTopProductBadge, false)
+    assert.equal(config.showRecommendedBadge, false)
+    assert.equal(config.showPromotionBadge, true)
+    assert.equal(config.showNewArrivalBadge, true)
+    assert.equal(config.highlightRankLimit, 7)
+    assert.deepEqual(config.recommendedProductIds, [12, 5])
+    assert.equal(config.languageSetting, 'km')
+    assert.equal(config.language, 'km')
+    assert.deepEqual(config.translations, { km: { aboutTitle: 'អំពីយើង', faqItems: [{ question: 'សំណួរ', answer: 'ចម្លើយ' }] } })
+    assert.equal(config.aiIntro, 'សួស្តី! Ask me about sunscreen.')
+  })
+
   await check('defaults: an untouched shop publishes the look the storefront already shows', () => {
     const config = publish({})
     assert.equal(config.aboutTitle, '', 'empty so the storefront uses its own translated "About"')
@@ -192,6 +217,17 @@ async function main() {
     assert.equal(config.logoPositionY, 50)
     assert.equal(config.aboutImage, '')
     assert.equal(config.aboutImageAlt, '')
+    assert.equal(config.showTopSellerBadge, true)
+    assert.equal(config.showTopProductBadge, true)
+    assert.equal(config.showRecommendedBadge, true)
+    assert.equal(config.showPromotionBadge, false, 'the storefront has never shown it without a stored choice')
+    assert.equal(config.showNewArrivalBadge, false)
+    assert.equal(config.highlightRankLimit, 3)
+    assert.deepEqual(config.recommendedProductIds, [])
+    assert.equal(config.languageSetting, 'auto')
+    assert.equal(config.language, 'en')
+    assert.deepEqual(config.translations, {})
+    assert.equal(config.aiIntro, '')
   })
 
   await check('AW-2: the stored cover, logo and favicon paths publish unchanged', () => {
@@ -463,16 +499,6 @@ async function main() {
   // unpublished editor key comes back as its default and is saved over the stored value.
   const KNOWN_UNPUBLISHED = [
     'customer_portal_title_size',
-    'customer_portal_ai_intro',
-    'customer_portal_translations',
-    'customer_portal_language',
-    'customer_portal_show_top_seller_badge',
-    'customer_portal_show_top_product_badge',
-    'customer_portal_show_recommended_badge',
-    'customer_portal_show_promotion_badge',
-    'customer_portal_show_new_arrival_badge',
-    'customer_portal_highlight_rank_limit',
-    'customer_portal_recommended_product_ids',
     'customer_portal_stock_threshold_mode',
     'customer_portal_low_stock_threshold',
     'customer_portal_out_of_stock_threshold',
@@ -480,7 +506,7 @@ async function main() {
     // Fixed false: membership history lives in the signed-in account only.
     'customer_portal_show_membership',
   ]
-  const MAX_KNOWN_UNPUBLISHED = 16
+  const MAX_KNOWN_UNPUBLISHED = 6
 
   function buildDraftEntries() {
     const src = fs.readFileSync(path.join(REPO, 'frontend', 'src', 'components', 'catalog', 'CatalogPage.tsx'), 'utf8').replace(/\r\n/g, '\n')
@@ -497,12 +523,13 @@ async function main() {
   }
 
   const PROBES = [
-    'true', 'false', '0', '1', '97', 'khr', 'contain', 'global', '#123456', 'zz-probe',
+    'true', 'false', '0', '1', '97', 'khr', 'km', 'contain', 'global', '#123456', 'zz-probe',
     'https://probe.example/x', '/uploads/probe.webp', 'https://www.google.com/maps/embed?pb=probe',
     JSON.stringify([{ id: 'f', question: 'q', answer: 'a' }]),
     JSON.stringify([{ id: 'a', type: 'text', title: 't', body: 'b', mediaUrl: '' }]),
     JSON.stringify([{ id: 'p', title: 't', subtitle: '', body: '', mediaUrl: '' }]),
     JSON.stringify({ km: { about: 'x' } }),
+    JSON.stringify({ km: { aboutTitle: 'x' } }),
     JSON.stringify([5, 6]),
   ]
   function publishedFrom(key, fields) {
