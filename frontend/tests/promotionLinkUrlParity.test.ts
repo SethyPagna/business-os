@@ -33,6 +33,11 @@ const CASES: Array<[string, string | null]> = [
   ['  https://example.com/x  ', 'https://example.com/x'],
   ['/promotions', '/promotions'],
   ['/products?category=serum', '/products?category=serum'],
+  ['/promotions/%2fsale', '/promotions/%2fsale'],
+  ['/', '/'],
+  ['/./promotions', '/./promotions'],
+  ['/promotions//sale', '/promotions//sale'],
+  ['/?from=https://example.com', '/?from=https://example.com'],
   // The whole reason this file exists.
   ['javascript:alert(1)', null],
   ['JavaScript:alert(1)', null],
@@ -55,9 +60,6 @@ const CASES: Array<[string, string | null]> = [
   ['/%2e%2e//evil.example/x', null],
   ['/%2E//evil.example/x', null],
   ['/promotions/..//evil.example/x', null],
-  ['/./promotions', '/./promotions'],
-  ['/promotions//sale', '/promotions//sale'],
-  ['/?from=https://example.com', '/?from=https://example.com'],
   // These stay on this site in a browser; refused because '\' and an encoded '/' change meaning between URL
   // parsers and after one decoding step.
   ['/%2fevil.example/x', null],
@@ -66,8 +68,6 @@ const CASES: Array<[string, string | null]> = [
   ['/%5C/evil.example/x', null],
   ['https://example.com\\@evil.example/x', null],
   ['/promotions\\x', null],
-  ['/promotions/%2fsale', '/promotions/%2fsale'],
-  ['/', '/'],
   // Not a URL and not site-relative: refuse rather than invent an origin.
   ['example.com/promo', null],
   ['', null],
