@@ -406,6 +406,7 @@ async function ensureFolder(token: string, folderName: string, existingFolderId:
 // this work through lib/driveSyncQueue.ts; this function is the queue worker's
 // idempotent upload operation and remains directly callable in focused tests.
 export async function pushBackupToDrive(env: Env): Promise<{ success: boolean; error?: string; fileId?: string; fileName?: string }> {
+  const startedAt = new Date().toISOString()
   const tokenResult = await getValidAccessToken(env)
   if ('error' in tokenResult) return { success: false, error: tokenResult.error }
   const token = tokenResult.token
@@ -428,7 +429,7 @@ export async function pushBackupToDrive(env: Env): Promise<{ success: boolean; e
     const existing = existingFiles.find((file) => file.appProperties?.backupKey === backup.key && file.appProperties?.status === 'finalized')
     if (existing) {
       await pruneDriveBackups(token, existingFiles, DRIVE_BACKUP_KEEP)
-      await setSettings(env, [['drive_sync_last_synced_at', new Date().toISOString()], ['drive_sync_last_error', '']])
+      await setSettings(env, [['drive_sync_last_synced_at', startedAt], ['drive_sync_last_error', '']])
       return { success: true, fileId: existing.id, fileName }
     }
 
@@ -472,7 +473,7 @@ export async function pushBackupToDrive(env: Env): Promise<{ success: boolean; e
     if (uploaded.size && Number(uploaded.size) !== object.size) throw new Error('Google Drive upload size verification failed.')
 
     await pruneDriveBackups(token, [{ id: uploaded.id, appProperties: metadata.appProperties }, ...existingFiles], DRIVE_BACKUP_KEEP)
-    await setSettings(env, [['drive_sync_last_synced_at', new Date().toISOString()], ['drive_sync_last_error', '']])
+    await setSettings(env, [['drive_sync_last_synced_at', startedAt], ['drive_sync_last_error', '']])
     return { success: true, fileId: uploaded.id, fileName }
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Google Drive sync failed.'
@@ -504,6 +505,10 @@ export function isTrustedDriveUploadSession(value: string): boolean {
 // `driveSyncScheduleDue` is intentionally separate from executing the upload:
 // index.ts can evaluate due-ness on cron and enqueue the expensive network/R2
 // work instead of holding the scheduled handler open for the full transfer.
+// A push is stamped minutes after the tick that queued it, so the next 6 h tick
+// lands a little short of the interval; without slack it skips every other tick.
+const DRIVE_SYNC_DUE_SLACK_MS = 30 * 60 * 1000
+
 export async function driveSyncScheduleDue(env: Env): Promise<{ due: boolean; reason?: string }> {
   const settings = await getSettings(env, [
     'drive_sync_enabled', 'drive_sync_refresh_token', 'drive_sync_last_synced_at', 'drive_sync_interval_seconds',
@@ -513,7 +518,7 @@ export async function driveSyncScheduleDue(env: Env): Promise<{ due: boolean; re
 
   const intervalSeconds = Math.min(24 * 60 * 60, Math.max(60 * 60, Number(settings.drive_sync_interval_seconds || 21600)))
   const lastSyncedMs = settings.drive_sync_last_synced_at ? Date.parse(settings.drive_sync_last_synced_at) : 0
-  if (lastSyncedMs && (Date.now() - lastSyncedMs) < intervalSeconds * 1000) {
+  if (lastSyncedMs && (Date.now() - lastSyncedMs) < intervalSeconds * 1000 - DRIVE_SYNC_DUE_SLACK_MS) {
     return { due: false, reason: 'not-due' }
   }
 
