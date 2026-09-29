@@ -99,8 +99,8 @@ const SETTING_KEYS = [
   'telegram_automation_enabled', 'telegram_chat_id', 'telegram_language',
   'telegram_sales_enabled', 'telegram_status_enabled', 'telegram_returns_enabled', 'telegram_fees_enabled', 'telegram_stock_in_enabled', 'telegram_stock_out_enabled',
   'telegram_shift_overview_enabled',
-  ...TELEGRAM_TOPIC_KEYS,
   ...Object.values(TELEGRAM_SUMMARY_SWITCHES),
+  ...TELEGRAM_TOPIC_KEYS,
 ] as const
 
 // Integer or empty -- a non-numeric or fractional value is treated as unset
