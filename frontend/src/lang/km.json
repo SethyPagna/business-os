@@ -3670,6 +3670,8 @@
   "password_updated": "បានកែប្រែពាក្យសម្ងាត់",
   "password_saved_to_manager": "បានប្ដូរពាក្យសម្ងាត់។ បានស្នើឱ្យកម្មវិធីរុករករក្សាទុកវា។",
   "password_updated_save_it": "បានប្ដូរពាក្យសម្ងាត់។ បើកម្មវិធីរុករកមិនបានស្នើរក្សាទុកទេ សូមរក្សាទុកវាក្នុងកម្មវិធីគ្រប់គ្រងពាក្យសម្ងាត់។",
+  "password_admin_handover_title": "ពាក្យសម្ងាត់ថ្មីសម្រាប់ {name}",
+  "password_admin_handover_body": "សូមផ្ដល់វាឱ្យគាត់ឥឡូវនេះ។ វាបង្ហាញតែម្ដងនេះប៉ុណ្ណោះ។",
   "payment_currency": "រូបិយប័ណ្ណ",
   "payment_method": "វិធីទូទាត់",
   "payment_method_placeholder": "វិធីទូទាត់",
