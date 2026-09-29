@@ -93,23 +93,23 @@ const BAD_ABOUT_IMAGES = [
   '/uploads/a\u0085b.png',
   '/uploads/x%c2%85.png',
   '/uploads/x%C2%9F.png',
-  '/uploads/a‮b.png',
+  '/uploads/a\u202Eb.png',
   '/uploads/a%E2%80%AEb.png',
-  '/uploads/a‪b.png',
-  '/uploads/a⁦b.png',
+  '/uploads/a\u202Ab.png',
+  '/uploads/a\u2066b.png',
   '/uploads/a%E2%81%A9b.png',
-  '/uploads/a​b.png',
+  '/uploads/a\u200Bb.png',
   '/uploads/a%E2%80%8Bb.png',
-  '/uploads/a‌b.png',
+  '/uploads/a\u200Cb.png',
   '/uploads/a%E2%80%8Db.png',
-  '/uploads/a﻿b.png',
+  '/uploads/a\uFEFFb.png',
   '/uploads/a%EF%BB%BFb.png',
-  '/uploads/x.png?v=‮',
+  '/uploads/x.png?v=\u202E',
   '/uploads/x.png?v=%E2%80%AE',
   '/uploads/x.png#%E2%80%8B',
-  '/uploads/a‎b.png',
+  '/uploads/a\u200Eb.png',
   '/uploads/a%C2%ADb.png',
-  '/uploads/a⁠b.png',
+  '/uploads/a\u2060b.png',
 ]
 // Visible non-ASCII names must keep working: the refusal is for invisible and control characters only.
 const GOOD_ABOUT_IMAGES = [
@@ -253,7 +253,7 @@ async function main() {
 
   // The cap is a code-point budget; the cut never lands inside a grapheme cluster.
   const KHMER_CLUSTER = 'ស្រ'
-  const ZWJ_EMOJI = '\u{1F469}‍\u{1F4BB}'
+  const ZWJ_EMOJI = '\u{1F469}\u200D\u{1F4BB}'
   const endsAtCap = (filler, max, cluster) => filler.repeat(max - 1) + cluster
 
   await check('S3: the picture description drops control characters', () => {
