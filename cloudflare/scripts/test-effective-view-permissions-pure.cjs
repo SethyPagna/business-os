@@ -10,6 +10,13 @@ const root = path.join(__dirname, '..', 'src')
 const cache = new Map()
 let user, db, opens, reads, checks = 0
 class Tripwire extends Error {}
+const passThroughEdgeCache = {
+  cachedJsonResponse: async (_request, _ctx, _version, _ttl, producer) => producer(),
+  getVersionWithFallback: async () => '0',
+  bumpVersion: async () => {},
+  bumpVersions: async () => {},
+}
+const isContactsRouter = filename => path.basename(filename) === 'contacts.ts' && path.basename(path.dirname(filename)) === 'routes'
 function load(filename) {
   if (cache.has(filename)) return cache.get(filename).exports
   const mod = { exports: {} }
@@ -24,7 +31,11 @@ function load(filename) {
       c.set('user', user)
       return next()
     } }
-    if (name === '../lib/db' || name === './db') return { getDb: () => { opens++; return db } }
+    if (name === '../lib/db' || name === './db') return {
+      getDb: () => { opens++; return db },
+      getImportFencedDb: async () => { opens++; return db },
+    }
+    if (name === '../lib/cache' && isContactsRouter(filename)) return passThroughEdgeCache
     if (name.startsWith('.')) return load(path.resolve(path.dirname(filename), `${name}.ts`))
     return require(name)
   }, mod, mod.exports)
@@ -41,6 +52,7 @@ for (const name of ['returns', 'fees', 'reports', 'batches']) {
 }
 // Match production mount order: import authority belongs to importJobs.
 app.route('/api/import-jobs', load(path.join(root, 'routes/importJobs.ts')).default)
+app.route('/api', load(path.join(root, 'routes/contacts.ts')).default)
 app.route('/api', load(path.join(root, 'routes/compat.ts')).default)
 const staff = (role = {}, overrides = {}) => ({
   id: 17, name: 'Employee', username: 'employee', role_code: 'employee',
@@ -50,7 +62,7 @@ async function request(url, session, options = {}, fixture) {
   user = session
   opens = reads = 0
   db = fixture || { prepare() { reads++; throw new Tripwire('Data access reached') } }
-  const response = await app.request(`http://local.test/api${url}`, options, {})
+  const response = await app.request(`http://local.test/api${url}`, options, {}, { waitUntil() {}, passThroughOnException() {} })
   checks++
   return response
 }
@@ -178,6 +190,53 @@ const batchUrls = ['/batches/tracked-product-ids', '/batches?productId=1&branchI
   assert.equal(hiddenImports.status, 200)
   assert.equal(reads, 0, 'financial imports without explicit cost-view grant are not read')
   await reachesData('/system/drive-sync/status', staff({ settings: true }, { 'settings:view': false }))
+  // Contacts "View and search" off hides the whole directory and every
+  // supplier ledger; the till and Sales pickers keep their own grants.
+  const directoryReads = [
+    '/customers', '/customers?page=1&pageSize=20', '/customers?ids=1', '/customers?fields=picker', '/customers?fields=names',
+    '/suppliers?page=1', '/suppliers?fields=picker', '/delivery-contacts', '/delivery-contacts?fields=picker', '/delivery-contacts?fields=names',
+    ...['customers', 'suppliers', 'delivery-contacts'].flatMap(prefix => [
+      `/${prefix}/1/rename-impact?to=Renamed`, `/${prefix}/check-duplicate?name=Dara`, `/${prefix}/duplicates`, `/${prefix}/bulk-delete-jobs/job-1`,
+    ]),
+    '/suppliers/1/purchases', '/suppliers/reports/stock-in-invoices', '/suppliers/reports/stock-in-invoice-lines?supplier_key=none&day=none',
+    '/suppliers/reports/ap-invoices', '/customers/reports/ar-invoices', '/customers/link-conflicts', '/customers/points-summary',
+  ]
+  const financialHistoryNeedsFullTier = '/customers/reports/ar-invoices'
+  const contactsRole = tier => ({ contacts: tier, contacts_suppliers: true })
+  const contactsAdmin = { ...staff({}, { 'contacts:view': false }), role_code: 'admin' }
+  for (const url of directoryReads) {
+    for (const tier of [true, 'review']) {
+      const viewOff = staff(contactsRole(tier), { 'contacts:view': false })
+      await denied(url, viewOff)
+      await denied(url, viewOff, 'HEAD')
+      if (tier === 'review' && url === financialHistoryNeedsFullTier) continue
+      await reachesData(url, staff(contactsRole(tier)))
+      await reachesData(url, staff({ ...contactsRole(tier), 'contacts:view': false }, { 'contacts:view': true }))
+    }
+    await reachesData(url, contactsAdmin)
+  }
+  const salesPicker = '/customers?fields=sales_picker&search=Dara'
+  const membership = '/customers/membership/M-1'
+  for (const role of [{ pos: true, contacts: 'review' }, { sales: 'view', contacts: 'review' }, { pos: true }]) {
+    await reachesData(salesPicker, staff(role, { 'contacts:view': false }))
+  }
+  await reachesData(membership, staff({ pos: true, contacts: 'review' }, { 'contacts:view': false }))
+  await denied(salesPicker, staff(contactsRole(true), { 'contacts:view': false }))
+  await denied(membership, staff(contactsRole(true), { 'contacts:view': false }))
+  // Supplier names (id + name) feed the product form and supplier returns.
+  for (const role of [contactsRole(true), { contacts: 'review' }]) {
+    await reachesData('/suppliers?fields=names', staff(role, { 'contacts:view': false }))
+  }
+  await denied('/suppliers?fields=names', staff({ products: true }))
+  const emptyContact = { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }
+  for (const prefix of ['/customers', '/suppliers', '/delivery-contacts']) {
+    const response = await request(prefix, staff(contactsRole(true), { 'contacts:view': false }), emptyContact)
+    assert.equal(response.status, 400, `POST ${prefix} keeps its own add gate when view is off`)
+    assert.equal(reads, 0)
+    const blocked = await request(prefix, staff(contactsRole(true), { 'contacts:view': false, 'contacts:add': false }), emptyContact)
+    assert.equal(blocked.status, 403)
+    assert.equal(reads, 0)
+  }
   assert.equal((await request('/returns', null)).status, 401)
   console.log(`PASS ${checks} real Hono requests: effective read denials, admin matrix, alternate grants, domain isolation and independent writes`)
 })().catch(error => { console.error(error); process.exitCode = 1 })

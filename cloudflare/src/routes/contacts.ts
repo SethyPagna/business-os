@@ -219,6 +219,17 @@ for (const prefix of CONTACT_PATH_PREFIXES) {
   app.use(prefix, requireAuth)
   app.use(`${prefix}/*`, requireAuth)
 }
+
+function isSupplierNamesRead(c: Context): boolean {
+  return c.req.method === 'GET' && /^\/(?:api\/)?suppliers\/?$/.test(c.req.path) && c.req.query('fields') === 'names'
+}
+
+// "View and search" off hides the directory. Writes keep their own action
+// gates, and supplier names stay pickable from the product and return forms.
+function isContactDirectoryRead(c: Context): boolean {
+  return (c.req.method === 'GET' || c.req.method === 'HEAD') && !isSupplierNamesRead(c)
+}
+
 // Legacy gates every customers/suppliers/delivery-contacts endpoint (reads
 // and writes alike) behind requirePermission('contacts') -- this Worker
 // only checked requireAuth (any logged-in user), a real gap.
@@ -246,6 +257,9 @@ const requireContactsAccess = async (c: Context<{ Bindings: Env; Variables: { us
     && c.req.query('fields') === 'sales_picker'
     && (getPermissionTier(user, 'pos') !== 'none' || getPermissionTier(user, 'sales') !== 'none')) return next()
   if (getPermissionTier(user, 'contacts') === 'none') return c.json({ error: 'You do not have permission to perform this action' }, 403)
+  if (isContactDirectoryRead(c) && getActionTier(user, 'contacts', 'view') === 'none') {
+    return c.json({ error: 'You do not have permission to perform this action' }, 403)
+  }
   return next()
 }
 
