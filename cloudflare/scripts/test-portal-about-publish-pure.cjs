@@ -32,8 +32,27 @@ function loadIsolated(rel) {
   return mod.exports
 }
 
+// workerd, the Worker's runtime, segments a Khmer coeng cluster as 'ស្' + 'រ' where Node keeps 'ស្រ' whole
+// (R-AB-W2 F1). Every module below loads under workerd's split, so no cap can pass by leaning on Node's.
+const HostSegmenter = Intl.Segmenter
+Intl.Segmenter = class WorkerdGraphemeSegmenter {
+  constructor(locales, options) {
+    this.host = new HostSegmenter(locales, options)
+  }
+  segment(text) {
+    const pieces = [...this.host.segment(text)].flatMap(({ segment }) => segment.split(/(?<=\u17D2)/))
+    let index = 0
+    return pieces.map((segment) => {
+      const piece = { segment, index, input: text }
+      index += segment.length
+      return piece
+    })
+  }
+}
+
 const portal = require('./harness/load_portal_route.cjs')
 const safeLink = loadIsolated('lib/safeLinkUrl.ts')
+const portalText = loadIsolated('lib/portalText.ts')
 const env = { BUSINESS_OS_PUBLIC_URL: 'https://shop.example' }
 const publish = (settings) => portal.buildPublicPortalConfig(settings, env)
 
@@ -64,6 +83,7 @@ const FIXTURE = {
   customer_portal_favicon_image: '/uploads/fav-3-ccc.png',
 }
 
+const BIDI_CONTROLS = [...'\u202A\u202B\u202C\u202D\u202E\u2066\u2067\u2068\u2069']
 const BAD_ABOUT_IMAGES = [
   'javascript:alert(1)',
   '//evil.example/p.png',
@@ -83,35 +103,27 @@ const BAD_ABOUT_IMAGES = [
   'uploads/p.png',
   '/files/p.png',
   '/uploads/%E0%A4%A.png',
+  '/uploads/%C0%AE%C0%AE/secret',
   `/uploads/${'a'.repeat(500)}.png`,
   '/UPLOADS/x.png',
   '/Uploads/x.png',
   '/uploads/x.png?v=\u0001',
   '/uploads/x.png#\u0007',
   '/uploads/x.png?v=%00',
-  '/uploads/x.png?v=%',
+  '/uploads/a\u0080b.png',
   '/uploads/a\u0085b.png',
+  '/uploads/a\u009Fb.png',
   '/uploads/x%c2%85.png',
   '/uploads/x%C2%9F.png',
-  '/uploads/a\u202Eb.png',
-  '/uploads/a%E2%80%AEb.png',
-  '/uploads/a\u202Ab.png',
-  '/uploads/a\u2066b.png',
-  '/uploads/a%E2%81%A9b.png',
-  '/uploads/a\u200Bb.png',
-  '/uploads/a%E2%80%8Bb.png',
-  '/uploads/a\u200Cb.png',
-  '/uploads/a%E2%80%8Db.png',
   '/uploads/a\uFEFFb.png',
   '/uploads/a%EF%BB%BFb.png',
   '/uploads/x.png?v=\u202E',
   '/uploads/x.png?v=%E2%80%AE',
-  '/uploads/x.png#%E2%80%8B',
-  '/uploads/a\u200Eb.png',
-  '/uploads/a%C2%ADb.png',
-  '/uploads/a\u2060b.png',
+  '/uploads/x.png#%e2%81%a6',
+  ...BIDI_CONTROLS.flatMap((control) => [`/uploads/a${control}b.png`, `/uploads/a${encodeURIComponent(control)}b.png`]),
 ]
-// Visible non-ASCII names must keep working: the refusal is for invisible and control characters only.
+// Visible non-ASCII names keep working, and so do the invisible characters people really type: a Khmer
+// keyboard puts U+200B between words and U+200D joins an emoji. A '%' that starts no escape is served as itself.
 const GOOD_ABOUT_IMAGES = [
   '/uploads/រូបភាព ហាង-1-abc.webp',
   '/uploads/%E1%9E%9A%E1%9E%BC%E1%9E%94-1-abc.webp',
@@ -119,6 +131,18 @@ const GOOD_ABOUT_IMAGES = [
   '/uploads/\u{1F484}-3-aaa.png',
   '/uploads/poster-4-bbb.webp?v=2',
   '/uploads/poster-4-bbb.webp#top',
+  '/uploads/រូបភាព\u200Bហាង-5-abc.webp',
+  '/uploads/a%E2%80%8Bb.png',
+  '/uploads/a\u200Cb.png',
+  '/uploads/\u{1F469}\u200D\u{1F469}\u200D\u{1F467}-6-abc.png',
+  '/uploads/a%E2%80%8Db.png',
+  '/uploads/x.png#%E2%80%8B',
+  '/uploads/a\u200Eb.png',
+  '/uploads/a%C2%ADb.png',
+  '/uploads/a\u2060b.png',
+  '/uploads/50% off-7-abc.webp',
+  '/uploads/100%-8-abc.webp',
+  '/uploads/x.png?v=%',
 ]
 const SHOP = new URL(env.BUSINESS_OS_PUBLIC_URL)
 const BACKSLASH_OR_DOUBLE_SLASH_LINKS = [
@@ -129,6 +153,14 @@ const BACKSLASH_OR_DOUBLE_SLASH_LINKS = [
   '/%5C/evil.example/p.png',
   'https://shop.example\\@evil.example/p.png',
   '/uploads\\x.png',
+]
+// On this site as written, but the resolved path is '//evil.example/p.png': anything that re-emits it leaves the site.
+const RESOLVES_TO_SECOND_SLASH_LINKS = [
+  '/.//evil.example/p.png',
+  '/..//evil.example/p.png',
+  '/%2e%2e//evil.example/p.png',
+  '/%2E//evil.example/p.png',
+  '/promotions/..//evil.example/p.png',
 ]
 
 async function main() {
@@ -172,7 +204,7 @@ async function main() {
   })
 
   await check('logo, cover and favicon never publish an unsafe link', () => {
-    for (const bad of ['javascript:alert(1)', '//evil.example/p.png', 'data:image/png;base64,AA', ' java\tscript:alert(1)', ...BACKSLASH_OR_DOUBLE_SLASH_LINKS]) {
+    for (const bad of ['javascript:alert(1)', '//evil.example/p.png', 'data:image/png;base64,AA', ' java\tscript:alert(1)', ...BACKSLASH_OR_DOUBLE_SLASH_LINKS, ...RESOLVES_TO_SECOND_SLASH_LINKS]) {
       const config = publish({ customer_portal_logo_image: bad, customer_portal_cover_image: bad, customer_portal_favicon_image: bad })
       assert.equal(config.businessLogo, '', `logo ${JSON.stringify(bad)}`)
       assert.equal(config.businessCover, '', `cover ${JSON.stringify(bad)}`)
@@ -185,10 +217,18 @@ async function main() {
     for (const bad of BACKSLASH_OR_DOUBLE_SLASH_LINKS) {
       assert.equal(safeLink.normalizeSafeLinkUrl(bad), null, JSON.stringify(bad))
     }
-    const kept = ['/uploads/logo-1-aaa.png', '/promotions', '/?legal=terms', '/uploads/a%2fb.png', '/', '/%E1%9E%9A']
+    const kept = ['/uploads/logo-1-aaa.png', '/promotions', '/?legal=terms', '/uploads/a%2fb.png', '/', '/%E1%9E%9A', '/./promotions', '/promotions//sale', '/?from=https://example.com']
     for (const good of kept) {
       assert.equal(safeLink.normalizeSafeLinkUrl(good), good, JSON.stringify(good))
       assert.equal(new URL(good, SHOP).origin, SHOP.origin, `${good} stays on this site`)
+      assert.equal(new URL(new URL(good, SHOP).pathname, SHOP).origin, SHOP.origin, `${good} re-emitted as its resolved path stays on this site`)
+    }
+  })
+
+  await check('F5: a site path is refused when its resolved path starts with two slashes', () => {
+    for (const bad of RESOLVES_TO_SECOND_SLASH_LINKS) {
+      assert.equal(new URL(new URL(bad, SHOP).pathname, SHOP).host, 'evil.example', `control: ${bad} re-emitted as its resolved path leaves the site`)
+      assert.equal(safeLink.normalizeSafeLinkUrl(bad), null, JSON.stringify(bad))
     }
   })
 
@@ -236,7 +276,7 @@ async function main() {
     assert.equal(safeLink.normalizePortalUploadPath(`/uploads/${'a'.repeat(487)}.png`).length, 500, 'exactly 500 characters is allowed')
   })
 
-  await check('P2: a visible Khmer, emoji or encoded name is still this site\'s own upload', () => {
+  await check('P2/F2: a Khmer, emoji, encoded, zero-width or literal-% name is still this site\'s own upload', () => {
     for (const good of GOOD_ABOUT_IMAGES) {
       assert.equal(safeLink.normalizePortalUploadPath(good), good, JSON.stringify(good))
       assert.equal(publish({ customer_portal_about_image: good }).aboutImage, good, JSON.stringify(good))
@@ -251,28 +291,82 @@ async function main() {
     assert.equal([...publish({ customer_portal_about_image_alt: emoji }).aboutImageAlt].length, 200, 'counted in characters, never splitting one')
   })
 
-  // The cap is a code-point budget; the cut never lands inside a grapheme cluster.
-  const KHMER_CLUSTER = 'ស្រ'
+  // The cap is a code-point budget, and wherever it falls inside a written character the whole character goes.
+  const KHMER_STACK = 'ស្ត្រី'
   const ZWJ_EMOJI = '\u{1F469}\u200D\u{1F4BB}'
-  const endsAtCap = (filler, max, cluster) => filler.repeat(max - 1) + cluster
+  const capFallsInside = (filler, max, character, inside) => filler.repeat(max - inside) + character
 
-  await check('S3: the picture description drops control characters', () => {
-    assert.equal(publish({ customer_portal_about_image_alt: '\u0000Poster\u0007 new\u0085' }).aboutImageAlt, 'Poster new')
-    assert.equal(publish({ customer_portal_about_image_alt: ZWJ_EMOJI }).aboutImageAlt, ZWJ_EMOJI, 'a ZWJ emoji is a picture, not a control')
+  await check('control: the caps run under the workerd segmenter, which splits a Khmer coeng cluster', () => {
+    const segments = [...new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment('ស្រ')].map(({ segment }) => segment)
+    assert.deepEqual(segments, ['ស្', 'រ'])
   })
 
-  await check('S4: caps cut between whole Khmer clusters and whole ZWJ emoji', () => {
-    assert.equal(publish({ customer_portal_about_image_alt: endsAtCap('ក', 200, KHMER_CLUSTER) }).aboutImageAlt, 'ក'.repeat(199))
-    assert.equal(publish({ customer_portal_about_image_alt: endsAtCap('a', 200, ZWJ_EMOJI) }).aboutImageAlt, 'a'.repeat(199))
-    assert.equal(publish({ customer_portal_about_image_alt: 'a'.repeat(197) + ZWJ_EMOJI }).aboutImageAlt, 'a'.repeat(197) + ZWJ_EMOJI, 'a cluster that fits is kept whole')
-    assert.equal(publish({ customer_portal_about_title: endsAtCap('ក', 160, KHMER_CLUSTER) }).aboutTitle, 'ក'.repeat(159))
-    assert.equal(publish({ customer_portal_about_content: endsAtCap('a', 4000, ZWJ_EMOJI) }).aboutContent, 'a'.repeat(3999))
-    const block = { id: 'k', type: 'text', title: endsAtCap('ក', 160, KHMER_CLUSTER), body: endsAtCap('a', 4000, ZWJ_EMOJI), mediaUrl: '' }
+  await check('S3: the picture description drops control characters before the cap counts', () => {
+    assert.equal(publish({ customer_portal_about_image_alt: '\u0000Poster\u0007 new\u0085' }).aboutImageAlt, 'Poster new')
+    assert.equal(publish({ customer_portal_about_image_alt: ZWJ_EMOJI }).aboutImageAlt, ZWJ_EMOJI, 'a ZWJ emoji is a picture, not a control')
+    assert.equal(publish({ customer_portal_about_image_alt: '\u0000'.repeat(10) + 'a'.repeat(200) }).aboutImageAlt, 'a'.repeat(200))
+  })
+
+  await check('S4 (F1): a published cap never ends on a Khmer coeng or inside a ZWJ emoji', () => {
+    assert.equal(publish({ customer_portal_about_image_alt: capFallsInside('ក', 200, KHMER_STACK, 2) }).aboutImageAlt, 'ក'.repeat(198))
+    assert.equal(publish({ customer_portal_about_image_alt: capFallsInside('a', 200, ZWJ_EMOJI, 2) }).aboutImageAlt, 'a'.repeat(198))
+    assert.equal(publish({ customer_portal_about_image_alt: 'a'.repeat(197) + ZWJ_EMOJI }).aboutImageAlt, 'a'.repeat(197) + ZWJ_EMOJI, 'a character that fits is kept whole')
+    assert.equal(publish({ customer_portal_about_title: capFallsInside('ក', 160, 'ស្រី', 2) }).aboutTitle, 'ក'.repeat(158))
+    assert.equal(publish({ customer_portal_about_content: capFallsInside('ក', 4000, KHMER_STACK, 4) }).aboutContent, 'ក'.repeat(3996))
+    const block = { id: 'k', type: 'text', title: capFallsInside('ក', 160, KHMER_STACK, 2), body: capFallsInside('a', 4000, ZWJ_EMOJI, 2), mediaUrl: '' }
     const [published] = publish({ customer_portal_about_blocks: JSON.stringify([block]) }).aboutBlocks
-    assert.equal(published.title, 'ក'.repeat(159))
-    assert.equal(published.body, 'a'.repeat(3999))
-    const zalgo = `a${'́'.repeat(5000)}`
+    assert.equal(published.title, 'ក'.repeat(158))
+    assert.equal(published.body, 'a'.repeat(3998))
+    const zalgo = `a${'\u0301'.repeat(5000)}`
     assert.ok([...publish({ customer_portal_about_content: zalgo }).aboutContent].length <= 4000, 'one huge cluster cannot slip past the cap')
+  })
+
+  const WHOLE_CHARACTERS = [
+    ['Khmer subscript stack', KHMER_STACK],
+    ['Khmer consonant with a vowel sign', 'កា'],
+    ['Latin letter with a combining accent', 'e\u0301'],
+    ['ZWJ emoji', ZWJ_EMOJI],
+    ['skin-tone emoji', '\u{1F44D}\u{1F3FD}'],
+    ['flag', '\u{1F1F0}\u{1F1ED}'],
+    ['subdivision flag', '\u{1F3F4}\u{E0067}\u{E0062}\u{E0073}\u{E0063}\u{E0074}\u{E007F}'],
+  ]
+
+  await check('S4: wherever the cap falls inside a character, the character is dropped whole and nothing after it is kept', () => {
+    const max = 20
+    for (const [label, character] of WHOLE_CHARACTERS) {
+      const size = [...character].length
+      for (let inside = 1; inside < size; inside += 1) {
+        const capped = portalText.capPortalText(`${capFallsInside('a', max, character, inside)}b`, max)
+        assert.equal(capped, 'a'.repeat(max - inside), `${label}, cap ${inside} code point(s) in`)
+      }
+      assert.equal(portalText.capPortalText(`${capFallsInside('a', max, character, size)}b`, max), 'a'.repeat(max - size) + character, `${label} that fits`)
+    }
+  })
+
+  await check('S4: flags pair up from the start of a run of regional indicators', () => {
+    const khmerFlag = '\u{1F1F0}\u{1F1ED}'
+    assert.equal(portalText.capPortalText(`${'a'.repeat(17)}${khmerFlag}${khmerFlag}`, 20), 'a'.repeat(17) + khmerFlag)
+  })
+
+  await check('S4: every Khmer vowel and sign stays with its consonant', () => {
+    const signs = [...Array.from({ length: 0x17d3 - 0x17b6 + 1 }, (_, i) => 0x17b6 + i), 0x17dd].map((cp) => String.fromCodePoint(cp))
+    for (const sign of signs) {
+      const label = `U+${sign.codePointAt(0).toString(16).toUpperCase()}`
+      assert.equal(portalText.capPortalText(`${'ក'.repeat(19)}ខ${sign}`, 20), 'ក'.repeat(19), label)
+    }
+  })
+
+  await check('S4: a Khmer phrase is cut only between its written characters, at every cap', () => {
+    const characters = ['គ្រឿ', 'ង', 'សំ', 'អា', 'ង', KHMER_STACK]
+    const phrase = characters.join('')
+    for (let max = 1; max <= [...phrase].length; max += 1) {
+      let expected = ''
+      for (const character of characters) {
+        if ([...expected + character].length > max) break
+        expected += character
+      }
+      assert.equal(portalText.capPortalText(phrase, max), expected, `cap ${max}`)
+    }
   })
 
   await check('S3: the About title and story are capped like a block (160 and 4000) and the story keeps its line breaks', () => {
@@ -514,6 +608,14 @@ async function main() {
     assert.equal(stored(IMAGE), '', 'null clears to empty, never the text "null"')
   })
 
+  await check('F2: a Khmer name typed with its zero-width spaces, a ZWJ emoji name or a literal % saves as the About picture', async () => {
+    for (const good of GOOD_ABOUT_IMAGES) {
+      const res = await save(ABOUT_ONLY, { [IMAGE]: good })
+      assert.equal(res.status, 200, `${JSON.stringify(good)} -> ${res.status} ${JSON.stringify(res.body)}`)
+      assert.equal(stored(IMAGE), good)
+    }
+  })
+
   await check('the picture description is stored trimmed to 200 characters', async () => {
     const res = await save(ABOUT_ONLY, { [ALT]: `   ${'ក'.repeat(250)}   ` })
     assert.equal(res.status, 200, JSON.stringify(res.body))
@@ -526,8 +628,9 @@ async function main() {
   await check('S3/S4 (write side): the stored description has no control characters and ends on a whole character', async () => {
     const cases = [
       ['\u0000Poster\u0007 new\u0085', 'Poster new'],
-      [endsAtCap('ក', 200, KHMER_CLUSTER), 'ក'.repeat(199)],
-      [endsAtCap('a', 200, ZWJ_EMOJI), 'a'.repeat(199)],
+      ['\u0000'.repeat(10) + 'a'.repeat(200), 'a'.repeat(200)],
+      [capFallsInside('ក', 200, KHMER_STACK, 2), 'ក'.repeat(198)],
+      [capFallsInside('a', 200, ZWJ_EMOJI, 2), 'a'.repeat(198)],
       ['a'.repeat(197) + ZWJ_EMOJI, 'a'.repeat(197) + ZWJ_EMOJI],
       [UNPRINTABLE, ''],
     ]

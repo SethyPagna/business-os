@@ -84,6 +84,8 @@ const UNSAFE_LINKS = [
   '/%5Cevil.example/p',
   'https://example.com\\@evil.example/p',
   'java\tscript:alert(1)',
+  '/\t/evil.example/p',
+  '/.//evil.example/p',
   `https://example.com/${'a'.repeat(600)}`,
 ]
 const SAFE_LINKS = ['https://example.com/promo', '/promotions', '/?legal=terms']

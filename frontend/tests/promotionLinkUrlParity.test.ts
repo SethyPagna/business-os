@@ -46,6 +46,20 @@ const CASES: Array<[string, string | null]> = [
   // Browsers read '\' as '/', so these are '//evil.example' too.
   ['/\\evil.example/x', null],
   ['\\\\evil.example/x', null],
+  // Browsers strip a tab or newline, leaving '//evil.example'.
+  ['/\t/evil.example/x', null],
+  ['/\n/evil.example/x', null],
+  // Written on this site, but the resolved path '//evil.example/x' leaves it wherever that path is re-emitted.
+  ['/.//evil.example/x', null],
+  ['/..//evil.example/x', null],
+  ['/%2e%2e//evil.example/x', null],
+  ['/%2E//evil.example/x', null],
+  ['/promotions/..//evil.example/x', null],
+  ['/./promotions', '/./promotions'],
+  ['/promotions//sale', '/promotions//sale'],
+  ['/?from=https://example.com', '/?from=https://example.com'],
+  // These stay on this site in a browser; refused because '\' and an encoded '/' change meaning between URL
+  // parsers and after one decoding step.
   ['/%2fevil.example/x', null],
   ['/%2F/evil.example/x', null],
   ['/%5cevil.example/x', null],
@@ -82,6 +96,23 @@ for (const [input, expected] of CASES) {
   assert.equal(workerNormalize(input), safeLinkUrl(input), `worker and frontend disagree on ${JSON.stringify(input)}`)
 }
 assert.equal(workerNormalize('java\tscript:alert(1)'), null)
+
+// --- controls: the browser behaviour the case comments describe -----------
+const shop = 'https://shop.example'
+assert.equal(new URL('/\t/evil.example/x', shop).host, 'evil.example')
+for (const input of ['/.//evil.example/x', '/%2e%2e//evil.example/x', '/promotions/..//evil.example/x']) {
+  assert.equal(new URL(new URL(input, shop).pathname, shop).host, 'evil.example', `${input} re-emitted as its resolved path`)
+}
+for (const input of ['/%2fevil.example/x', '/%5cevil.example/x', '/promotions\\x']) {
+  assert.equal(new URL(input, shop).host, 'shop.example', `${input} stays on this site in a browser`)
+}
+assert.equal(new URL('https://example.com\\@evil.example/x').host, 'example.com')
+
+const ODD_SITE_PATHS = ['/%', '/%zz', '/[', '/ x', '/..', '/.', '/#//x', '/?//x', `/${String.fromCharCode(0xd800)}`]
+for (const input of ODD_SITE_PATHS) {
+  assert.doesNotThrow(() => safeLinkUrl(input), `safeLinkUrl(${JSON.stringify(input)})`)
+  assert.equal(workerNormalize(input), safeLinkUrl(input), `worker and frontend disagree on ${JSON.stringify(input)}`)
+}
 
 // --- the guards are actually wired in -------------------------------------
 const portalRoute = fs.readFileSync(path.join(repo, 'cloudflare', 'src', 'routes', 'portal.ts'), 'utf8')

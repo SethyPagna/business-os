@@ -13,7 +13,7 @@
 // The rule is an allowlist, because a denylist of dangerous schemes is a list
 // somebody has to keep complete forever:
 //   - an absolute http:// or https:// URL that actually parses, or
-//   - a site-relative path beginning with a single '/'
+//   - a site-relative path beginning with a single '/', resolved or not
 // and nothing else. Protocol-relative '//host' is refused too: it reads as a
 // path and behaves as an absolute URL to another origin.
 
@@ -23,6 +23,13 @@ export const MAX_LINK_URL_LENGTH = 500
 const CONTROL_CHARACTER = /[\u0000-\u001f\u007f]/
 // URL parsing reads '\' as '/', so '/\host' opens another origin just like '//host'.
 const PROTOCOL_RELATIVE_START = /^\/(?:[/\\]|%2f|%5c)/i
+const ANY_ORIGIN = 'https://site.invalid'
+
+// '/.//host' stays on this site as written, but its resolved path '//host' is another origin
+// wherever something re-emits that path as a link.
+function resolvesToProtocolRelativePath(sitePath: string): boolean {
+  return new URL(sitePath, ANY_ORIGIN).pathname.startsWith('//')
+}
 
 export function isSafeLinkUrl(value: unknown): boolean {
   return normalizeSafeLinkUrl(value) !== null
@@ -38,7 +45,7 @@ export function normalizeSafeLinkUrl(value: unknown): string | null {
   const raw = typeof value === 'string' ? value.trim() : ''
   if (!raw || raw.length > MAX_LINK_URL_LENGTH) return null
   if (CONTROL_CHARACTER.test(raw) || raw.includes('\\') || PROTOCOL_RELATIVE_START.test(raw)) return null
-  if (raw.startsWith('/')) return raw
+  if (raw.startsWith('/')) return resolvesToProtocolRelativePath(raw) ? null : raw
 
   let parsed: URL
   try {
@@ -56,12 +63,15 @@ export function normalizeSafeLinkUrl(value: unknown): string | null {
 // let that host log every storefront visitor.
 const MAX_UPLOAD_PATH_LENGTH = 500
 const UPLOADS_PREFIX = '/uploads/'
-// Controls, invisible format characters (bidi overrides, zero-width, BOM) and '\'.
-const UNSAFE_UPLOAD_PATH_CHARACTER = /[\p{Cc}\p{Cf}\\]/u
+// Zero-width characters stay allowed: a Khmer keyboard types U+200B between words, and a browser
+// percent-encodes them in a src. Bidi controls would reorder how the stored name reads.
+const UNSAFE_UPLOAD_PATH_CHARACTER = /[\p{Cc}\u202A-\u202E\u2066-\u2069\uFEFF\\]/u
+// GET /uploads/* serves a '%' that starts no escape as a literal '%' (Hono's tryDecode).
+const PERCENT_STARTING_NO_ESCAPE = /%(?![0-9a-f]{2})/gi
 
 function percentDecoded(text: string): string | null {
   try {
-    return decodeURIComponent(text)
+    return decodeURIComponent(text.replace(PERCENT_STARTING_NO_ESCAPE, '%25'))
   } catch {
     return null
   }

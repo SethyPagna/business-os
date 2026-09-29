@@ -3,27 +3,34 @@ export function plainText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
 }
 
-// A cap is a code-point budget, so one huge grapheme cluster cannot slip past it.
-const graphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' })
+const KHMER_COENG = '\u17D2'
+const ZERO_WIDTH_JOINER = '\u200D'
+const JOINS_PREVIOUS_CHARACTER = /^[\p{M}\p{Grapheme_Extend}\p{Emoji_Modifier}\u200D]$/u
+const REGIONAL_INDICATOR = /^\p{Regional_Indicator}$/u
 
-function codePointCount(text: string): number {
+function regionalIndicatorsBefore(characters: readonly string[], index: number): number {
   let count = 0
-  for (const _ of text) count += 1
+  while (count < index && REGIONAL_INDICATOR.test(characters[index - count - 1])) count += 1
   return count
 }
 
-// Cuts between grapheme clusters, so a Khmer cluster or a ZWJ emoji is kept whole or dropped whole.
+function isCharacterBoundary(characters: readonly string[], index: number): boolean {
+  const before = characters[index - 1]
+  const after = characters[index]
+  if (before === KHMER_COENG || before === ZERO_WIDTH_JOINER || JOINS_PREVIOUS_CHARACTER.test(after)) return false
+  return !REGIONAL_INDICATOR.test(after) || regionalIndicatorsBefore(characters, index) % 2 === 0
+}
+
+// A cap is a code-point budget, so one huge cluster cannot slip past it. Not Intl.Segmenter: workerd's
+// splits a Khmer coeng cluster ('ស្' + 'រ'), so the cut would end on a bare coeng in the Worker only.
 export function capPortalText(value: unknown, maxCodePoints: number): string {
   const text = plainText(value)
   if (text.length <= maxCodePoints) return text
-  let kept = ''
-  let used = 0
-  for (const { segment } of graphemes.segment(text)) {
-    used += codePointCount(segment)
-    if (used > maxCodePoints) break
-    kept += segment
-  }
-  return kept
+  const characters = Array.from(text)
+  if (characters.length <= maxCodePoints) return text
+  let cut = maxCodePoints
+  while (cut > 0 && !isCharacterBoundary(characters, cut)) cut -= 1
+  return characters.slice(0, cut).join('')
 }
 
 export const MAX_PORTAL_IMAGE_ALT_LENGTH = 200
