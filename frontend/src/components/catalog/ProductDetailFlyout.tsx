@@ -24,7 +24,7 @@ import { lazyRetry } from '../../utils/lazyImport.ts'
 // storefront's first paint does not carry it.
 const ImageGalleryLightbox = lazyRetry(() => import('../shared/ImageGalleryLightbox'), 'portal-detail-image-gallery-lightbox')
 
-type CopyFn = (key: string, fallback?: string) => string
+type CopyFn = (key: string, fallback?: string, fallbackKm?: string) => string
 type StockStatus = 'in_stock' | 'low_stock' | 'out_of_stock' | string
 
 export type ProductDetailViewProduct = {
@@ -432,6 +432,9 @@ export default function ProductDetailFlyout({ view, copy, onClose, shopName, con
               next: copy('nextImage', 'Next image'),
               imageCount: copy('imageCount', '{current}/{total}'),
               dotsLabel: copy('dotsLabel', 'Image {current} of {total}'),
+              close: copy('close', 'Close'),
+              zoomIn: copy('portal_a11y_zoom_in', 'Zoom in', 'ពង្រីកចូល'),
+              zoomOut: copy('portal_a11y_zoom_out', 'Zoom out', 'បង្រួមចេញ'),
             }}
           />
         ) : null}

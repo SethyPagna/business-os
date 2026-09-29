@@ -25,6 +25,8 @@ type LightboxLabels = {
   // above -- the caller supplies the translated string and this component
   // only owns the English fallback.
   close?: string
+  zoomIn?: string
+  zoomOut?: string
 }
 
 const LIGHTBOX_FOCUSABLE_SELECTOR = 'button:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])'
@@ -84,6 +86,8 @@ export default function ImageGalleryLightbox({
     imageCount: labels.imageCount || '{current}/{total}',
     dotsLabel: labels.dotsLabel || 'Image {current} of {total}',
     close: labels.close || 'Close',
+    zoomIn: labels.zoomIn || 'Zoom in',
+    zoomOut: labels.zoomOut || 'Zoom out',
   }
 
   // Zoom/pan state for the CURRENT image only -- deliberately not part of
@@ -369,10 +373,10 @@ export default function ImageGalleryLightbox({
             {formatLabel(copy.imageCount, { current: safeIndex + 1, total })}
           </span>
           <div className="flex items-center gap-2">
-            <button type="button" className={`${barButton} hidden sm:flex`} onClick={() => applyZoom(zoom.scale - ZOOM_BUTTON_STEP)} disabled={!isZoomed} aria-label="Zoom out">
+            <button type="button" className={`${barButton} hidden sm:flex`} onClick={() => applyZoom(zoom.scale - ZOOM_BUTTON_STEP)} disabled={!isZoomed} aria-label={copy.zoomOut}>
               <ZoomOut className="h-5 w-5" />
             </button>
-            <button type="button" className={`${barButton} hidden sm:flex`} onClick={() => applyZoom(zoom.scale + ZOOM_BUTTON_STEP)} disabled={zoom.scale >= MAX_SCALE} aria-label="Zoom in">
+            <button type="button" className={`${barButton} hidden sm:flex`} onClick={() => applyZoom(zoom.scale + ZOOM_BUTTON_STEP)} disabled={zoom.scale >= MAX_SCALE} aria-label={copy.zoomIn}>
               <ZoomIn className="h-5 w-5" />
             </button>
             <button ref={immersiveCloseRef} type="button" className={barButton} onClick={() => onClose?.()} aria-label={copy.close}>
@@ -436,7 +440,7 @@ export default function ImageGalleryLightbox({
             className="rounded-full border border-white/20 bg-slate-950/45 p-2 text-white shadow-sm transition hover:bg-slate-950/65 disabled:cursor-not-allowed disabled:opacity-40"
             onClick={() => applyZoom(zoom.scale - ZOOM_BUTTON_STEP)}
             disabled={!isZoomed}
-            aria-label="Zoom out"
+            aria-label={copy.zoomOut}
           >
             <ZoomOut className="h-5 w-5" />
           </button>
@@ -445,7 +449,7 @@ export default function ImageGalleryLightbox({
             className="rounded-full border border-white/20 bg-slate-950/45 p-2 text-white shadow-sm transition hover:bg-slate-950/65 disabled:cursor-not-allowed disabled:opacity-40"
             onClick={() => applyZoom(zoom.scale + ZOOM_BUTTON_STEP)}
             disabled={zoom.scale >= MAX_SCALE}
-            aria-label="Zoom in"
+            aria-label={copy.zoomIn}
           >
             <ZoomIn className="h-5 w-5" />
           </button>

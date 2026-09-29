@@ -208,6 +208,15 @@ export default function CatalogPreviewSurface({
       target?.scrollIntoView({ block: 'start' })
     })
   }
+  const lightboxLabels = {
+    prev: copy('prevImage', 'Prev'),
+    next: copy('nextImage', 'Next'),
+    imageCount: copy('imageCount', '{current}/{total}'),
+    dotsLabel: copy('dotsLabel', 'Image {current} of {total}'),
+    close: copy('close', 'Close'),
+    zoomIn: copy('portal_a11y_zoom_in', 'Zoom in', 'ពង្រីកចូល'),
+    zoomOut: copy('portal_a11y_zoom_out', 'Zoom out', 'បង្រួមចេញ'),
+  }
   const footerWithQuickLinks = isValidElement<PortalFooterProps>(footer)
     ? cloneElement(footer, { quickLinks: portalTabs.map((tab) => ({ key: tab.key, label: tab.label, onSelect: () => handleFooterQuickLink(tab.key) })) })
     : footer
@@ -630,12 +639,7 @@ export default function CatalogPreviewSurface({
             onClose={() => setProductGalleryView({ open: false, title: '', items: [], index: 0 })}
             onIndexChange={(index: number) => setProductGalleryView((current) => ({ ...current, index }))}
             variant="immersive"
-            labels={{
-              prev: copy('prevImage', 'Prev'),
-              next: copy('nextImage', 'Next'),
-              imageCount: copy('imageCount', '{current}/{total}'),
-              dotsLabel: copy('dotsLabel', 'Image {current} of {total}'),
-            }}
+            labels={lightboxLabels}
             renderImage={(src, alt, className) => (
               <CatalogProductImage src={src} alt={alt} className={className} />
             )}
@@ -672,12 +676,7 @@ export default function CatalogPreviewSurface({
             index={portalImageView.index}
             onClose={() => setPortalImageView({ open: false, title: '', images: [], index: 0 })}
             onIndexChange={(index: number) => setPortalImageView((current) => ({ ...current, index }))}
-            labels={{
-              prev: copy('prevImage', 'Prev'),
-              next: copy('nextImage', 'Next'),
-              imageCount: copy('imageCount', '{current}/{total}'),
-              dotsLabel: copy('dotsLabel', 'Image {current} of {total}'),
-            }}
+            labels={lightboxLabels}
           />
         ) : null}
       </Suspense>

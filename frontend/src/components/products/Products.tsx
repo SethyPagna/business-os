@@ -5581,6 +5581,8 @@ function ProductsFullEditor() {
               imageCount: '{current}/{total}',
               dotsLabel: 'Image {current} of {total}',
               close: t('close') || 'Close',
+              zoomIn: t('zoom_in'),
+              zoomOut: t('zoom_out'),
             }}
           />
         </Suspense>

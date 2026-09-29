@@ -4549,6 +4549,8 @@ export default function POS() {
                 imageCount: t('imageCount'),
                 dotsLabel: t('dotsLabel'),
                 close: t('close') || 'Close',
+                zoomIn: t('zoom_in'),
+                zoomOut: t('zoom_out'),
               }}
             />
           ) : null}
