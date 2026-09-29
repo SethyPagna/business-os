@@ -332,10 +332,10 @@ const LABELS = {
   // same words.
   reportsOverview: { en: 'Reports overview', km: 'ទិដ្ឋភាពរួមរបាយការណ៍' }, // km.json telegram_reports_overview
   returns: { en: 'Returns', km: 'ការប្រគល់មកវិញ' },                  // km.json returns
-  // The overview's optional sections (owner, 29 Sep 2026), each behind a Settings switch.
   received: { en: 'Received', km: 'បានទទួល' },                       // km.json received
   dollars: { en: 'Dollars', km: 'ដុល្លារ' },                          // km.json shift_float_usd (ដុល្លារ)
   riel: { en: 'Riel', km: 'រៀល' },                                    // km.json riel
+  rielEquivalent: { en: 'Riel equivalent', km: 'ចំនួនស្មើជារៀល' },    // km.json rfd_total_khr (ចំនួនស្មើ) + riel
   bank: { en: 'Bank', km: 'ធនាគារ' },
   totalDiscount: { en: 'Total discount', km: 'បញ្ចុះតម្លៃសរុប' },      // km.json total_discount
   branches: { en: 'Branches', km: 'សាខា' },                           // km.json branches
@@ -344,6 +344,7 @@ const LABELS = {
   compare: { en: 'Compare', km: 'ប្រៀបធៀប' },                         // km.json rpt_compare
   yesterday: { en: 'Yesterday', km: 'ម្សិលមិញ' },                     // km.json yesterday
   sameDayLastWeek: { en: 'Same day last week', km: 'ថ្ងៃដដែលសប្តាហ៍មុន' }, // km.json rpt_week (សប្តាហ៍)
+  compareUntil: { en: 'Each day up to', km: 'ថ្ងៃនីមួយៗរហូតដល់' },  // km.json rpt_each_expense (នីមួយៗ) + until_browser_closes (រហូតដល់)
 } as const satisfies Record<string, LabelEntry>
 
 export type TelegramLabelKey = keyof typeof LABELS

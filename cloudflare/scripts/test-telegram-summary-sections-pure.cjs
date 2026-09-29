@@ -92,6 +92,7 @@ function seedShopA(db) {
   sale(7, { payment_method: 'Cash', payment_details: '[{"method":"Cash","amount_usd":30}]', amount_paid_usd: 30, total_usd: 30, created_at: '2026-09-22 03:00:00' })
   sale(8, { payment_method: '', sale_status: 'awaiting_payment', total_usd: 40 })
   sale(9, { payment_method: 'ABA Pay', payment_details: '[{"method":"ABA Pay","amount_usd":5}]', amount_paid_usd: 5, total_usd: 5, created_at: '2026-09-22 17:30:00' })
+  sale(10, { payment_method: 'Cash', payment_details: '[{"method":"Cash","amount_usd":25}]', amount_paid_usd: 25, total_usd: 25, created_at: '2026-09-22 12:00:00' })
   const product = (id, name, stock, extra = {}) => insert(db, 'products', { id, name, stock_quantity: stock, low_stock_threshold: 5, out_of_stock_threshold: 0, is_active: 1, ...extra })
   product(1, 'Rose Serum', 0)
   product(2, 'Lip Tint', 3)
@@ -305,12 +306,14 @@ async function main() {
   check('without the switch Not Paid is the amount alone and there is no total discount row',
     rowsUnder(quiet.text, '=====Sales=====').includes('· Not Paid: $40.00') && !quiet.text.includes('Total discount'))
   telegramLang.setTelegramLanguage('en')
-  const oneCut = telegram.formatDayOverview('Synthetic Shop A', DAY, {
+  const oneCut = telegram.formatShiftOverview('Synthetic Shop A', {
+    business_date: DAY, branch_id: null, branch_name: null, user_name: 'Za', shift_code: 'S-20260923-0807-Za', opened_at: '2026-09-23T01:07:00.000Z', closed_at: CLOSED_AT,
+  }, {
     revenueUsd: 90, profitUsd: 30, grossSalesUsd: 100, itemDiscountUsd: 10, invoiceDiscountUsd: 0, deliveryFeeUsd: 0, creditUsd: 0, refundUsd: 0,
     invoices: 4, cancelled: 0, paymentMethods: [], expenses: { fees: { usd: 0, khr: 0 }, deliveryFees: { usd: 0, khr: 0 }, courier: { usd: 0, khr: 0 } },
     unbranchedFees: null, returns: { count: 0, refundUsd: 0 },
     sections: { sales: { received: { usd: 0, khr: 0, digital: { usd: 0, khr: 0 }, needsReview: false, reviewCodes: [] }, notPaidCount: 0, totalDiscountUsd: 10 } },
-  })
+  }, undefined, T0)
   telegramLang.setTelegramLanguage('both')
   check('with only one kind of discount the total would repeat it, so it is not printed', oneCut.includes('· Discount on items: $10.00') && !oneCut.includes('Total discount'), oneCut)
 
@@ -324,8 +327,8 @@ async function main() {
     JSON.stringify(rowsUnder(single.products, '=====Low stock=====')) === JSON.stringify(['· OUT: Rose Serum: 0 (⚠ 5)', '· LOW: Soap Bar: 1 (⚠ 5)', '· LOW: Sunscreen: 2 (⚠ 5)', '· LOW: Lip Tint: 3 (⚠ 5)']),
     rowsUnder(single.products, '=====Low stock=====').join('\n'))
 
-  check('Returns: the riel row and the items returned, from the same returns as the count',
-    JSON.stringify(rowsUnder(single.returns, '=====Returns=====')) === JSON.stringify(['· Total: 2 · $10.00', '· Riel: 41,000៛', '· Items returned: 3']),
+  check('Returns: the refunds\' riel equivalent (not riel paid out) and the items returned, from the same returns as the count',
+    JSON.stringify(rowsUnder(single.returns, '=====Returns=====')) === JSON.stringify(['· Total: 2 · $10.00', '· Riel equivalent: 41,000៛', '· Items returned: 3']),
     rowsUnder(single.returns, '=====Returns=====').join('\n'))
   check('without the switch Returns is the one total row', JSON.stringify(rowsUnder(quiet.text, '=====Returns=====')) === JSON.stringify(['· Total: 2 · $10.00']))
 
@@ -333,11 +336,15 @@ async function main() {
   check('Each expense: this branch\'s non-delivery fees of the day, by label', JSON.stringify(eachExpense) === JSON.stringify(['· Ice: $4.00', '· Moto: 20,000៛']), eachExpense.join('\n'))
   check('the listed expenses add up to the Other expenses row above them', rowsUnder(single.expenses, '=====Expenses=====').includes('· Other expenses: $4.00 · 20,000៛'), single.expenses)
 
-  check('Compare: revenue yesterday and the same weekday last week, and today\'s change against each',
-    JSON.stringify(rowsUnder(single.compare, '=====Compare=====')) === JSON.stringify(['· Yesterday: $375.00 · +10%', '· Same day last week: $450.00 · −8%']),
+  check('Compare: the day is still running, so it says so; revenue yesterday and the same weekday last week up to the same time, and today\'s change against each',
+    JSON.stringify(rowsUnder(single.compare, '=====Compare=====')) === JSON.stringify(['· Each day up to: 18:31', '· Yesterday: $375.00 · +10%', '· Same day last week: $450.00 · −8%']),
     rowsUnder(single.compare, '=====Compare=====').join('\n'))
-  const compareCalls = kernelCalls.filter(([kind]) => kind === 'totals').map(([, filters]) => `${filters.startDate}..${filters.endDate}@${filters.branchId}`)
-  check('the comparison days are asked of the kernel on the same branch', [`${YESTERDAY}..${YESTERDAY}@1`, `${LAST_WEEK}..${LAST_WEEK}@1`].every((call) => compareCalls.includes(call)), compareCalls.join(' '))
+  const compareCalls = kernelCalls.filter(([kind]) => kind === 'totals').map(([, filters]) => `${filters.startDate}..${filters.endDate}@${filters.branchId}<${filters.createdTo}`)
+  check('the comparison days are asked of the kernel on the same branch, each cut at the same moment as today (the overview is sent at 18:31)',
+    [`${YESTERDAY}..${YESTERDAY}@1<2026-09-22T11:31:00.000Z`, `${LAST_WEEK}..${LAST_WEEK}@1<2026-09-16T11:31:00.000Z`].every((call) => compareCalls.includes(call)), compareCalls.join(' '))
+  const kernelTxCount = async (createdTo) => (await salesAnalyticsReal.getSalesTotals(envA, { startDate: YESTERDAY, endDate: YESTERDAY, branchId: 1, ...(createdTo && { createdTo }) })).tx_count
+  check('the real kernel cuts an earlier day at that moment: yesterday up to 18:31 leaves its 19:00 sale out',
+    await kernelTxCount(null) === 2 && await kernelTxCount('2026-09-22T11:31:00.000Z') === 1)
 
   for (const key of Object.values(SWITCH)) setting(shopA, key, 'true')
   kernelCalls.length = 0
@@ -354,8 +361,8 @@ async function main() {
     '=====Low stock=====', '· OUT: Rose Serum: 0 (⚠ 5)', '· LOW: Soap Bar: 1 (⚠ 5)', '· LOW: Sunscreen: 2 (⚠ 5)', '· LOW: Lip Tint: 3 (⚠ 5)',
     '=====Expenses=====', '· Actual delivery cost: $3.00', '· Other expenses: $4.00 · 20,000៛', '· Total: $7.00 · 20,000៛', '· No branch (not in total): $2.00',
     '=====Each expense=====', '· Ice: $4.00', '· Moto: 20,000៛',
-    '=====Returns=====', '· Total: 2 · $10.00', '· Riel: 41,000៛', '· Items returned: 3',
-    '=====Compare=====', '· Yesterday: $375.00 · +10%', '· Same day last week: $450.00 · −8%',
+    '=====Returns=====', '· Total: 2 · $10.00', '· Riel equivalent: 41,000៛', '· Items returned: 3',
+    '=====Compare=====', '· Each day up to: 18:31', '· Yesterday: $375.00 · +10%', '· Same day last week: $450.00 · −8%',
   ])
   check('every switch on: the whole message, line for line', true)
   check('every switch on: the sections in their fixed order', JSON.stringify(headersOf(full.text)) === JSON.stringify([
@@ -380,8 +387,17 @@ async function main() {
   setting(shopA, 'telegram_language', 'km')
   const khmer = await overview(envA)
   check('Khmer: the new section titles and labels come out in Khmer',
-    ['=====បានទទួល=====', '=====ទំនិញលក់ដាច់=====', '=====ប្រៀបធៀប=====', '· ដុល្លារ: $23.00', '· រៀល: 81,000៛', '· ធនាគារ: $30.00', '· ម្សិលមិញ: $375.00 · +10%'].every((line) => khmer.text.split('\n').includes(line)),
+    ['=====បានទទួល=====', '=====ទំនិញលក់ដាច់=====', '=====ប្រៀបធៀប=====', '· ដុល្លារ: $23.00', '· រៀល: 81,000៛', '· ធនាគារ: $30.00', '· ម្សិលមិញ: $375.00 · +10%',
+      '· ចំនួនស្មើជារៀល: 41,000៛', '· ថ្ងៃនីមួយៗរហូតដល់: 18:31'].every((line) => khmer.text.split('\n').includes(line)) && !khmer.text.split('\n').includes('· រៀល: 41,000៛'),
     khmer.text)
+  const packs = Object.fromEntries(['en', 'km'].map((pack) => [pack, JSON.parse(fs.readFileSync(path.join(root, '..', 'frontend', 'src', 'lang', `${pack}.json`), 'utf8'))]))
+  check('the Returns switch\'s Settings tooltip names the riel equivalent in the chat\'s own words, in both languages',
+    packs.en.telegram_summary_returns_desc.toLowerCase().includes(telegramLang.TELEGRAM_LABELS.rielEquivalent.en.toLowerCase())
+      && packs.km.telegram_summary_returns_desc.includes(telegramLang.TELEGRAM_LABELS.rielEquivalent.km),
+    `${packs.en.telegram_summary_returns_desc} | ${packs.km.telegram_summary_returns_desc}`)
+  check('the switches\' Settings hint names every message they extend, in both languages',
+    ['/report', 'Send today'].every((name) => packs.en.telegram_summary_sections_hint.includes(name)) && packs.km.telegram_summary_sections_hint.includes('/report'),
+    `${packs.en.telegram_summary_sections_hint} | ${packs.km.telegram_summary_sections_hint}`)
   setting(shopA, 'telegram_language', 'both')
   const both = await overview(envA)
   const previousMode = telegramLang.getTelegramLanguage()
@@ -392,16 +408,53 @@ async function main() {
   check('both: every section header is the shared one-row sectionHeader', JSON.stringify(headersOf(both.text)) === JSON.stringify(drawn) && drawn.includes('=====Received/បានទទួល====='), headersOf(both.text).join('\n'))
   setting(shopA, 'telegram_language', 'en')
 
+  const allOn = Object.fromEntries(Object.keys(SWITCH).map((section) => [section, true]))
+  for (const key of Object.values(SWITCH)) clearSetting(shopA, key)
+  const plainBefore = posts.length
+  await telegram.sendTelegramTodaySummary(envA, T0)
+  const plain = posts[plainBefore]
+  const plainReport = await telegram.telegramCommandReply(envA, '/report', T0, 'en')
+  const DAY_SUMMARY_HEADERS = ['=====Sales=====', '=====Invoices=====', '=====Expenses=====', '=====Stock=====', '=====Cashiers=====']
+  check('Send today\'s summary, switches off: today\'s /report, word for word, into the Summary topic',
+    plain.text === plainReport && plain.chat_id === CHAT_A && plain.message_thread_id === SUMMARY_TOPIC_A && plain.text.startsWith('📊 Business summary: 23/09/2026\n'),
+    `${plain.text}\n---\n${plainReport}`)
+  check('Send today\'s summary, switches off: it keeps the cashier list and the stock in/out counts',
+    JSON.stringify(headersOf(plain.text)) === JSON.stringify(DAY_SUMMARY_HEADERS)
+      && JSON.stringify(rowsUnder(plain.text, '=====Cashiers=====')) === JSON.stringify(['· Za: 12 · $300.00', '· Sok: 6 · $112.50'])
+      && rowsUnder(plain.text, '=====Stock=====').some((row) => row.startsWith('· Stock out: 2 movement(s)')),
+    plain.text)
+  for (const key of Object.values(SWITCH)) setting(shopA, key, 'true')
+
   const todayPostsBefore = posts.length
   kernelCalls.length = 0
   await telegram.sendTelegramTodaySummary(envA, T0)
+  const buttonCalls = kernelCalls.slice()
   const today = posts[todayPostsBefore]
   check('Send today\'s summary: one message, into the Summary topic', posts.length === todayPostsBefore + 1 && today.message_thread_id === SUMMARY_TOPIC_A && today.chat_id === CHAT_A, JSON.stringify(today))
-  check('Send today\'s summary: the overview builder, for the whole shop, with the switched-on sections and the Branches rows',
-    today.text.startsWith(`📈 Reports overview: 23/09/2026\n· Shop: Synthetic Shop A\n· Branch: All branches\n=====Sales=====`)
-      && JSON.stringify(rowsUnder(today.text, '=====Branches=====')) === JSON.stringify(['· Toul Kork: 15 · $362.50', '· Riverside: 3 · $50.00']),
+  check('Send today\'s summary and /report: one builder, the same message with every switch on',
+    today.text === await telegram.telegramCommandReply(envA, '/report', T0, 'en', undefined, allOn), today.text)
+  check('Send today\'s summary: the switched-on sections come on top of the day summary, nothing of it disappears',
+    JSON.stringify(headersOf(today.text)) === JSON.stringify(['=====Sales=====', '=====Invoices=====', '=====Received=====', '=====Expenses=====', '=====Each expense=====',
+      '=====Stock=====', '=====Cashiers=====', '=====Branches=====', '=====Top products=====', '=====Low stock=====', '=====Returns=====', '=====Compare====='])
+      && ['=====Invoices=====', '=====Expenses=====', '=====Stock=====', '=====Cashiers====='].every((header) => JSON.stringify(rowsUnder(today.text, header)) === JSON.stringify(rowsUnder(plain.text, header)))
+      && JSON.stringify(rowsUnder(today.text, '=====Branches=====')) === JSON.stringify(['· Toul Kork: 15 · $362.50', '· Riverside: 3 · $50.00'])
+      && rowsUnder(today.text, '=====Sales=====').includes('· Not Paid: 3 · $40.00') && rowsUnder(today.text, '=====Sales=====').includes('· Total discount: $37.50'),
     today.text)
-  check('Send today\'s summary: the kernel is asked for the whole shop', kernelCalls.length > 0 && kernelCalls.every(([, filters]) => filters.branchId == null), JSON.stringify(kernelCalls))
+  check('Send today\'s summary: the cashier list is read once, the day summary\'s own', JSON.stringify(buttonCalls.filter(([kind, , by]) => kind === 'grouped' && by === 'cashier').map(([, , , limit]) => limit)) === '[12]', JSON.stringify(buttonCalls))
+  check('Send today\'s summary: returns and the same-time comparison for the whole shop',
+    JSON.stringify(rowsUnder(today.text, '=====Returns=====')) === JSON.stringify(['· Total: 3 · $70.00', '· Riel equivalent: 287,000៛', '· Items returned: 7'])
+      && rowsUnder(today.text, '=====Compare=====')[0] === '· Each day up to: 18:30',
+    today.text)
+  const pastDay = await telegram.telegramCommandReply(envA, `/report 23/09/2026`, Date.parse('2026-09-25T05:00:00.000Z'), 'en', undefined, allOn)
+  check('a /report for a finished day compares whole days and does not claim a time',
+    JSON.stringify(rowsUnder(pastDay, '=====Compare=====')) === JSON.stringify(['· Yesterday: $375.00 · +10%', '· Same day last week: $450.00 · −8%'])
+      && kernelCalls.filter(([kind, filters]) => kind === 'totals' && filters.startDate !== DAY).slice(-2).every(([, filters]) => filters.createdTo === undefined),
+    pastDay)
+  const webhookBefore = posts.length
+  await telegram.handleTelegramWebhook(envA, { message: { text: '/report 23/09/2026', chat: { id: CHAT_A } } })
+  check('a typed /report carries the shop\'s switched-on sections', posts.length === webhookBefore + 1 && headersOf(posts[webhookBefore].text).includes('=====Branches=====') && posts[webhookBefore].chat_id === CHAT_A,
+    posts[webhookBefore] && posts[webhookBefore].text)
+  check('Send today\'s summary: the kernel is asked for the whole shop', buttonCalls.length > 0 && buttonCalls.every(([, filters]) => filters.branchId == null), JSON.stringify(buttonCalls))
   check('Send today\'s summary: the whole shop\'s dollars include the other branch', rowsUnder(today.text, '=====Received=====')[0] === '· Dollars: $73.00', today.text)
   check('Send today\'s summary: the whole shop\'s low stock includes items sold or moved out only on the other branch',
     rowsUnder(today.text, '=====Low stock=====').includes('· LOW: Night Cream: 4 (⚠ 5)') && rowsUnder(today.text, '=====Low stock=====').includes('· LOW: Clay Mask: 1 (⚠ 5)'), today.text)

@@ -501,13 +501,13 @@ const dayFilters = (date: string): SalesFilters => ({ startDate: date, endDate: 
 // SUM(total_khr) over every row including the voided ones -- a different
 // quantity from this one, not a translation of it. money() prints just the
 // dollars when the riel side is zero.
-async function dayStats(env: Env, date: string): Promise<DayStats> {
+async function dayStats(env: Env, date: string, salesTotals: Promise<SalesTotals> = getSalesTotals(env, dayFilters(date))): Promise<DayStats> {
   const db = getDb(env)
   // The kernel's own "active sales on this day" clause, so the courier half
   // is read over exactly the sales the revenue above is.
   const courierWhere = whereActiveSales('sales', dayFilters(date))
   const [totals, fees, courier, stockIn, stockOut] = await Promise.all([
-    getSalesTotals(env, dayFilters(date)),
+    salesTotals,
     db.prepare(`SELECT COUNT(*) AS count, ${FEE_SPLIT_COLUMNS} FROM fees WHERE fee_date = @date`)
       .get<{ count: number; usd: number; khr: number; delivery_usd: number; delivery_khr: number }>({ date }),
     courierPayoutsWhere(env, [courierWhere.sql], courierWhere.params),
@@ -751,12 +751,14 @@ function foldRows<T>(rows: T[], limit: number, fold: (rest: T[]) => T): T[] {
  * counts in Sales and Profit.
  *
  * `categories` is the owner's per-category switch set, unchanged: a category
- * that is off takes its own lines out and nothing else.
+ * that is off takes its own lines out and nothing else. `extra` holds the
+ * overview sections the owner switched on (TELEGRAM_SUMMARY_SWITCHES), added
+ * on top of these and never in place of them.
  *
  * Exported for scripts/test-telegram-shift-report-pure.cjs, which renders it
  * with no database at all -- the same reason formatShiftReport is exported.
  */
-export function formatDaySummary(stats: DayStats, cashiers: CashierRow[], categories?: TelegramCategories): string {
+export function formatDaySummary(stats: DayStats, cashiers: CashierRow[], categories?: TelegramCategories, extra: SummarySectionFigures = {}): string {
   const showSales = categories?.sales !== false
   const lines = [reportTitle('📊', 'Business summary', 'សង្ខេបអាជីវកម្ម', stats.date)]
   // A section with no rows still prints its heading and says N/A, the rule
@@ -790,7 +792,9 @@ export function formatDaySummary(stats: DayStats, cashiers: CashierRow[], catego
   // nothing is a fact the owner wants stated, not a blank. Every other line
   // is dropped when it is zero.
   if (showSales) {
-    const sales = [labeled('revenue', usd(stats.sales?.usd)), labeled('profit', usd(stats.sales?.profitUsd))]
+    const sales = [labeled('revenue', usd(stats.sales?.usd))]
+    if (extra.sales?.totalDiscountUsd) sales.push(labeled('totalDiscount', usd(extra.sales.totalDiscountUsd)))
+    sales.push(labeled('profit', usd(stats.sales?.profitUsd)))
     if (stats.sales?.deliveryFeeUsd) sales.push(labeled('deliveryFee', usd(stats.sales.deliveryFeeUsd)))
     // The courier money is a SALES figure -- it comes out of the day's
     // deliveries, not out of the fees table -- and it is normally reported
@@ -800,7 +804,7 @@ export function formatDaySummary(stats: DayStats, cashiers: CashierRow[], catego
     // was only ever about the fees table. With the fees switched off the
     // split's delivery cost is exactly that courier money, in both currencies.
     if (!showExpenses && hasMoney(expenses.deliveryCost)) sales.push(labeled('deliveryCost', money(expenses.deliveryCost.usd, expenses.deliveryCost.khr)))
-    if (stats.sales?.creditUsd) sales.push(labeled('credit', usd(stats.sales.creditUsd)))
+    if (stats.sales?.creditUsd) sales.push(labeled('credit', notPaidValue(stats.sales.creditUsd, extra.sales)))
     // Directly below Not Paid, the owner's "also add one row below unpaid in
     // reports as well". One number, no sentence. Like Not Paid it is a
     // POSITIVE memo and is never subtracted from the lines above -- those stay
@@ -812,6 +816,7 @@ export function formatDaySummary(stats: DayStats, cashiers: CashierRow[], catego
     // Revenue above (refunds subtracted, voids contributing nothing), never a
     // second total.
     section('invoices', [countRow([['total', Number(stats.sales?.count) || 0], ['cancelled', Number(stats.sales?.cancelled) || 0]])])
+    if (extra.sales) section('received', receivedRows(extra.sales.received))
   }
 
   // Expenses -- the SAME split the shift report prints, through the same
@@ -826,6 +831,7 @@ export function formatDaySummary(stats: DayStats, cashiers: CashierRow[], catego
   // section that is ON and had nothing today; that distinction is the whole
   // point of the `enabled` argument.
   section('expenses', expenseRows, showExpenses)
+  if (extra.expenses) section('eachExpense', eachExpenseRows(extra.expenses), showExpenses)
 
   // Stock
   const stock: string[] = []
@@ -838,22 +844,39 @@ export function formatDaySummary(stats: DayStats, cashiers: CashierRow[], catego
   // count needs no noun, and repeating a two-language word on every bullet is
   // what made this block long.
   section('cashiers', cashiers.flatMap((row) => telegramRowLines(`${ROW_BULLET}${cleanLine(row.cashier, 60)}:`, [`${Number(row.count) || 0} · ${usd(row.usd)}`])))
+  if (extra.cashiers?.branches) section('branches', extra.cashiers.branches.flatMap((row) => countedRowLines(row, 60)), showSales)
+  if (extra.products) {
+    section('topProducts', topProductRows(extra.products), showSales)
+    section('lowStock', lowStockSectionRows(extra.products), showSales)
+  }
+  if (extra.returns) section('returns', returnsRows(extra.returns.count, extra.returns.usd, extra.returns))
+  if (extra.compare) section('compare', compareRows(Number(stats.sales?.usd) || 0, extra.compare), showSales)
   return lines.join('\n')
 }
 
-/** Settings → "Send today's summary": the after-shift overview's builder, for the whole shop's day so far. */
+/** Settings → "Send today's summary": today's /report, into the Summary topic. */
 export async function sendTelegramTodaySummary(env: Env, nowMs: number = Date.now()): Promise<void> {
   const config = await getTelegramConfig(env); const problem = configurationProblem(config)
   if (problem) throw problem
-  const today = businessToday(nowMs)
-  const otherLabel = withLanguage(config.language, () => label('other'))
-  const [name, figures] = await Promise.all([shopName(env), shiftOverviewFigures(env, { business_date: today, branch_id: null }, otherLabel, config.summary)])
-  await postTelegram(config, withLanguage(config.language, () => formatDayOverview(name, today, figures, config.categories)), config.chatId, config.topics.telegram_topic_reports, 'telegram_topic_reports')
+  const report = await dayReport(env, businessToday(nowMs), config.language, config.categories, config.summary, nowMs)
+  await postTelegram(config, report, config.chatId, config.topics.telegram_topic_reports, 'telegram_topic_reports')
 }
 
-async function dayReport(env: Env, date: string, language: TelegramLanguage, categories?: TelegramCategories): Promise<string> {
-  const [stats, cashiers] = await Promise.all([dayStats(env, date), cashierTotals(env, date)])
-  return withLanguage(language, () => formatDaySummary(stats, cashiers, categories))
+/** The one day summary behind /report and "Send today's summary": the whole shop's day, switched-on sections on top. */
+async function dayReport(
+  env: Env, date: string, language: TelegramLanguage, categories?: TelegramCategories,
+  summary: TelegramSummarySections = NO_SUMMARY_SECTIONS, nowMs: number = Date.now(),
+): Promise<string> {
+  const totals = getSalesTotals(env, dayFilters(date))
+  const otherLabel = withLanguage(language, () => label('other'))
+  const [stats, cashiers, extra] = await Promise.all([
+    dayStats(env, date, totals),
+    cashierTotals(env, date),
+    anySummarySection(summary)
+      ? summarySectionFigures(env, summaryScope({ business_date: date, branch_id: null }, nowMs), totals, summary, { otherLabel, cashierListShown: true })
+      : undefined,
+  ])
+  return withLanguage(language, () => formatDaySummary(stats, cashiers, categories, extra))
 }
 
 async function salesReport(env: Env, date: string, language: TelegramLanguage): Promise<string> {
@@ -1678,18 +1701,63 @@ type CountedMoney = { name: string; count: number; usd: number }
 type LowStockRow = { name: string; stock_quantity: number; low_threshold: number; out_of_stock_threshold: number }
 export type SummarySectionFigures = {
   sales?: { received: ShiftCashResult; notPaidCount: number; totalDiscountUsd: number }
-  /** `branches` is null on a branch's overview, whose header already names the branch. */
-  cashiers?: { cashiers: CountedMoney[]; branches: CountedMoney[] | null }
+  /** `cashiers` is null where the message lists them anyway (the day summary); `branches` is null on a branch's overview. */
+  cashiers?: { cashiers: CountedMoney[] | null; branches: CountedMoney[] | null }
   products?: { top: Array<{ name: string; qty: number; usd: number }>; low: LowStockRow[]; moreLow: number }
-  /** total_refund_khr of the same returns as the count: the refunds' riel row. */
-  returns?: { khr: number; items: number }
+  /** Not the riel paid out: a refund does not record the currency it was paid in, so this is its riel equivalent. */
+  returns?: { count: number; usd: number; rielEquivalent: number; items: number }
   expenses?: Array<{ label: string; usd: number; khr: number }>
-  compare?: { yesterdayUsd: number; lastWeekUsd: number }
+  /** `until` is the local time all three days are cut at while the day is still running; null compares whole days. */
+  compare?: { yesterdayUsd: number; lastWeekUsd: number; until: string | null }
 }
 
 const overviewTitle = (date: string): string => `📈 ${label('reportsOverview')}: ${formatBusinessDay(date)}`
 const overviewBranch = (branchId: number | null, branchName: string | null): string =>
   (branchId == null ? bi('All branches', 'គ្រប់សាខា') : cleanLine(branchName || `#${branchId}`, 60))
+
+const countedRowLines = (row: CountedMoney, nameLength: number): string[] =>
+  telegramRowLines(`${ROW_BULLET}${cleanLine(row.name, nameLength)}:`, [`${Number(row.count) || 0} · ${usd(row.usd)}`])
+
+/** ` · +10%`: today's revenue against an earlier day's, in whole percent; nothing when that day took nothing. */
+function changeAgainst(today: number, before: number): string {
+  if (!(before > 0)) return ''
+  const percent = Math.round(((today - before) / before) * 100)
+  return ` · ${percent > 0 ? '+' : percent < 0 ? '−' : ''}${Math.abs(percent)}%`
+}
+
+function receivedRows(tender: ShiftCashResult): string[] {
+  const rows = [labeled('dollars', usd(tender.usd)), labeled('riel', riel(tender.khr)), labeled('bank', money(tender.digital.usd, tender.digital.khr))]
+  if (tender.needsReview) rows.push(labeled('cashReview', reviewReasons(tender.reviewCodes)))
+  return rows
+}
+
+const notPaidValue = (creditUsd: number, sales?: SummarySectionFigures['sales']): string =>
+  (sales ? `${sales.notPaidCount} · ${usd(creditUsd)}` : usd(creditUsd))
+
+const topProductRows = (products: NonNullable<SummarySectionFigures['products']>): string[] =>
+  products.top.flatMap((row) => countedRowLines({ name: row.name, count: row.qty, usd: row.usd }, 60))
+
+const lowStockSectionRows = (products: NonNullable<SummarySectionFigures['products']>): string[] =>
+  [...products.low.flatMap(lowStockRowLines), ...(products.moreLow ? [`${ROW_BULLET}${moreItems(products.moreLow)}`] : [])]
+
+const eachExpenseRows = (expenses: NonNullable<SummarySectionFigures['expenses']>): string[] =>
+  expenses.flatMap((row) => telegramRowLines(`${ROW_BULLET}${cleanLine(row.label, 60)}:`, [money(row.usd, row.khr)]))
+
+/** Returns by the day the RETURN was taken, apart from the Refunds row (that one follows the sale's day), never subtracted. */
+function returnsRows(count: number, refundUsd: number, extra?: SummarySectionFigures['returns']): string[] {
+  if (!count) return []
+  const rows = [labeled('total', `${count} · ${usd(refundUsd)}`)]
+  if (extra) rows.push(labeled('rielEquivalent', riel(extra.rielEquivalent)), labeled('itemsReturned', extra.items))
+  return rows
+}
+
+function compareRows(revenueUsd: number, compare: NonNullable<SummarySectionFigures['compare']>): string[] {
+  return [
+    ...(compare.until ? [labeled('compareUntil', compare.until)] : []),
+    labeled('yesterday', `${usd(compare.yesterdayUsd)}${changeAgainst(revenueUsd, compare.yesterdayUsd)}`),
+    labeled('sameDayLastWeek', `${usd(compare.lastWeekUsd)}${changeAgainst(revenueUsd, compare.lastWeekUsd)}`),
+  ]
+}
 
 /**
  * The overview message. Pure, exported for
@@ -1717,32 +1785,6 @@ export function formatShiftOverview(shopName: string, shift: ShiftReportSession,
   ].join('\n')
 }
 
-/** "Send today's summary": the same overview for the whole shop's day, with no shift behind it. */
-export function formatDayOverview(shopName: string, date: string, figures: ShiftOverviewFigures, categories?: TelegramCategories): string {
-  return [
-    overviewTitle(date),
-    labeled('shop', cleanLine(shopName || 'Business OS', 80)),
-    labeled('branch', overviewBranch(null, null)),
-    ...overviewSections(figures, categories),
-  ].join('\n')
-}
-
-const countedRowLines = (row: CountedMoney, nameLength: number): string[] =>
-  telegramRowLines(`${ROW_BULLET}${cleanLine(row.name, nameLength)}:`, [`${Number(row.count) || 0} · ${usd(row.usd)}`])
-
-/** ` · +10%`: today's revenue against an earlier day's, in whole percent; nothing when that day took nothing. */
-function changeAgainst(today: number, before: number): string {
-  if (!(before > 0)) return ''
-  const percent = Math.round(((today - before) / before) * 100)
-  return ` · ${percent > 0 ? '+' : percent < 0 ? '−' : ''}${Math.abs(percent)}%`
-}
-
-function receivedRows(tender: ShiftCashResult): string[] {
-  const rows = [labeled('dollars', usd(tender.usd)), labeled('riel', riel(tender.khr)), labeled('bank', money(tender.digital.usd, tender.digital.khr))]
-  if (tender.needsReview) rows.push(labeled('cashReview', reviewReasons(tender.reviewCodes)))
-  return rows
-}
-
 function overviewSections(figures: ShiftOverviewFigures, categories?: TelegramCategories): string[] {
   const lines: string[] = []
   const section = (key: TelegramLabelKey, rows: string[], enabled = true): void => {
@@ -1759,20 +1801,17 @@ function overviewSections(figures: ShiftOverviewFigures, categories?: TelegramCa
   if (figures.itemDiscountUsd || figures.invoiceDiscountUsd) sales.push(labeled('grossSales', usd(figures.grossSalesUsd)))
   sales.push(labeled('profit', usd(figures.profitUsd)))
   if (figures.deliveryFeeUsd) sales.push(labeled('deliveryFee', usd(figures.deliveryFeeUsd)))
-  if (figures.creditUsd) sales.push(labeled('credit', extra.sales ? `${extra.sales.notPaidCount} · ${usd(figures.creditUsd)}` : usd(figures.creditUsd)))
+  if (figures.creditUsd) sales.push(labeled('credit', notPaidValue(figures.creditUsd, extra.sales)))
   if (figures.refundUsd) sales.push(labeled('refunds', usd(figures.refundUsd)))
   section('sales', sales, showSales)
   section('invoices', [countRow([['total', Number(figures.invoices) || 0], ['cancelled', Number(figures.cancelled) || 0]])], showSales)
   section('paymentMethods', figures.paymentMethods.flatMap((row) => countedRowLines({ name: row.method, count: row.count, usd: row.usd }, 40)), showSales)
   if (extra.sales) section('received', receivedRows(extra.sales.received), showSales)
-  if (extra.cashiers) {
-    section('cashiers', extra.cashiers.cashiers.flatMap((row) => countedRowLines(row, 60)), showSales)
-    if (extra.cashiers.branches) section('branches', extra.cashiers.branches.flatMap((row) => countedRowLines(row, 60)), showSales)
-  }
+  if (extra.cashiers?.cashiers) section('cashiers', extra.cashiers.cashiers.flatMap((row) => countedRowLines(row, 60)), showSales)
+  if (extra.cashiers?.branches) section('branches', extra.cashiers.branches.flatMap((row) => countedRowLines(row, 60)), showSales)
   if (extra.products) {
-    section('topProducts', extra.products.top.flatMap((row) => countedRowLines({ name: row.name, count: row.qty, usd: row.usd }, 60)), showSales)
-    const more = extra.products.moreLow ? [`${ROW_BULLET}${moreItems(extra.products.moreLow)}`] : []
-    section('lowStock', [...extra.products.low.flatMap(lowStockRowLines), ...more], showSales)
+    section('topProducts', topProductRows(extra.products), showSales)
+    section('lowStock', lowStockSectionRows(extra.products), showSales)
   }
 
   // The day summary's split and rows, switches applied the same way.
@@ -1787,28 +1826,42 @@ function overviewSections(figures: ShiftOverviewFigures, categories?: TelegramCa
   const unbranched = figures.unbranchedFees
   if (unbranched && hasMoney(unbranched)) expenseRows.push(labeled('noBranchFees', money(unbranched.usd, unbranched.khr)))
   section('expenses', expenseRows, showExpenses)
-  if (extra.expenses) section('eachExpense', extra.expenses.flatMap((row) => telegramRowLines(`${ROW_BULLET}${cleanLine(row.label, 60)}:`, [money(row.usd, row.khr)])), showExpenses)
+  if (extra.expenses) section('eachExpense', eachExpenseRows(extra.expenses), showExpenses)
 
-  // Returns by the day the RETURN was taken -- the Overview's returns block.
-  // Its refund is not the Refunds row above (that one follows the SALE's
-  // day), which is why it is its own section and never subtracted. Dollars
-  // only: total_refund_khr is this same refund at the return's rate, not a second one.
-  // The Returns switch prints that riel figure as its own row; it is never added to the dollars.
-  const returned = figures.returns
-  const returnRows = returned.count ? [labeled('total', `${returned.count} · ${usd(returned.refundUsd)}`)] : []
-  if (extra.returns && returned.count) returnRows.push(labeled('riel', riel(extra.returns.khr)), labeled('itemsReturned', extra.returns.items))
-  section('returns', returnRows)
-  if (extra.compare) {
-    section('compare', [
-      labeled('yesterday', `${usd(extra.compare.yesterdayUsd)}${changeAgainst(figures.revenueUsd, extra.compare.yesterdayUsd)}`),
-      labeled('sameDayLastWeek', `${usd(extra.compare.lastWeekUsd)}${changeAgainst(figures.revenueUsd, extra.compare.lastWeekUsd)}`),
-    ], showSales)
-  }
+  section('returns', returnsRows(figures.returns.count, figures.returns.refundUsd, extra.returns))
+  if (extra.compare) section('compare', compareRows(figures.revenueUsd, extra.compare), showSales)
   return lines
 }
 
 const OVERVIEW_SHIFT_COLUMNS = `id, revision, ${SHIFT_COLUMNS}`
 type OverviewShift = ShiftReportSession & { id: number; revision: number }
+
+type SummaryScope = {
+  filters: SalesFilters
+  params: Record<string, unknown>
+  feeWhere: string
+  returnsWhere: string
+  /** Set while the day is still running: the earlier days are compared up to this same moment. */
+  runningAtMs: number | null
+}
+
+// routes/reports.ts reportRecordRange's date-only branch, per table; the
+// pure test compares the two clause for clause.
+function summaryScope(day: { business_date: string; branch_id: number | null }, nowMs: number): SummaryScope {
+  const filters = shiftOverviewFilters(day)
+  const params: Record<string, unknown> = { startDate: filters.startDate, endDate: filters.endDate }
+  const branch = (alias: string) => (filters.branchId == null ? '' : ` AND ${alias}.branch_id = @branchId`)
+  if (filters.branchId != null) params.branchId = filters.branchId
+  return {
+    filters, params,
+    feeWhere: `fees.fee_date >= @startDate AND fees.fee_date <= @endDate${branch('fees')}`,
+    returnsWhere: `COALESCE(return_scope, 'customer') = 'customer' AND COALESCE(status, 'completed') <> 'cancelled'
+        AND ${localDateRangeClause('returns.created_at')}${branch('returns')}`,
+    runningAtMs: day.business_date === businessToday(nowMs) ? nowMs : null,
+  }
+}
+
+const anySummarySection = (sections: TelegramSummarySections): boolean => Object.values(sections).some(Boolean)
 
 /** The Overview's figures for one day and branch, off the same kernel calls. */
 export async function shiftOverviewFigures(
@@ -1816,19 +1869,10 @@ export async function shiftOverviewFigures(
   shift: { business_date: string; branch_id: number | null },
   otherLabel = 'Other',
   sections: TelegramSummarySections = NO_SUMMARY_SECTIONS,
+  nowMs: number = Date.now(),
 ): Promise<ShiftOverviewFigures> {
-  const filters = shiftOverviewFilters(shift)
-  const params: Record<string, unknown> = { startDate: filters.startDate, endDate: filters.endDate }
-  // routes/reports.ts reportRecordRange's date-only branch, per table; the
-  // pure test compares the two clause for clause.
-  const branch = (alias: string) => (filters.branchId == null ? '' : ` AND ${alias}.branch_id = @branchId`)
-  if (filters.branchId != null) params.branchId = filters.branchId
-  const scope: OverviewScope = {
-    filters, params,
-    feeWhere: `fees.fee_date >= @startDate AND fees.fee_date <= @endDate${branch('fees')}`,
-    returnsWhere: `COALESCE(return_scope, 'customer') = 'customer' AND COALESCE(status, 'completed') <> 'cancelled'
-        AND ${localDateRangeClause('returns.created_at')}${branch('returns')}`,
-  }
+  const scope = summaryScope(shift, nowMs)
+  const { filters, params } = scope
   const db = getDb(env)
   // The courier half over the kernel's own sale set for these filters.
   const courierWhere = whereActiveSales('sales', filters)
@@ -1870,16 +1914,28 @@ export async function shiftOverviewFigures(
     },
     unbranchedFees: filters.branchId == null ? null : { usd: Number(unbranched?.usd) || 0, khr: Number(unbranched?.khr) || 0 },
     returns: { count: Number(returned?.count) || 0, refundUsd: Number(returned?.usd) || 0 },
-    sections: Object.values(sections).some(Boolean) ? await summarySectionFigures(env, scope, totals, sections, otherLabel) : undefined,
+    sections: anySummarySection(sections) ? await summarySectionFigures(env, scope, totals, sections, { otherLabel }) : undefined,
   }
 }
 
-type OverviewScope = { filters: SalesFilters; params: Record<string, unknown>; feeWhere: string; returnsWhere: string }
 const SUMMARY_ROWS = 8
 const TOP_PRODUCTS = 5
+const DAY_MS = 86_400_000
 
-/** The switched-on sections' figures, over exactly the overview's day and branch. Nothing is read for a section that is off. */
-async function summarySectionFigures(env: Env, scope: OverviewScope, totals: SalesTotals, sections: TelegramSummarySections, otherLabel: string): Promise<SummarySectionFigures> {
+/** "18:31": the business clock (UTC+7) at `ms`. */
+const businessClock = (ms: number): string => new Date(ms + BUSINESS_UTC_OFFSET_MINUTES * 60_000).toISOString().slice(11, 16)
+
+/**
+ * The switched-on sections' figures, over exactly the scope's day and branch. Nothing is read for a section that is
+ * off, nor the cashier list when the message prints its own (`cashierListShown`).
+ */
+async function summarySectionFigures(
+  env: Env,
+  scope: SummaryScope,
+  totals: SalesTotals | Promise<SalesTotals>,
+  sections: TelegramSummarySections,
+  { otherLabel, cashierListShown = false }: { otherLabel: string; cashierListShown?: boolean },
+): Promise<SummarySectionFigures> {
   const { filters } = scope
   const sold = whereActiveSales('sales', filters)
   const fold = (rows: CountedMoney[]) => foldRows(rows, SUMMARY_ROWS, (rest) => ({
@@ -1891,30 +1947,36 @@ async function summarySectionFigures(env: Env, scope: OverviewScope, totals: Sal
     .map((row) => ({ name: row.label || 'Unknown', count: row.tx_count, usd: row.revenue_usd })))
   const onDay = (offsetDays: number): SalesFilters => {
     const date = addCalendarDays(String(filters.startDate), offsetDays)
-    return { startDate: date, endDate: date, branchId: filters.branchId }
+    const sameMoment = scope.runningAtMs == null ? {} : { createdTo: new Date(scope.runningAtMs + offsetDays * DAY_MS).toISOString() }
+    return { startDate: date, endDate: date, branchId: filters.branchId, ...sameMoment }
   }
   const [received, cashiers, branches, top, low, returned, expenses, yesterday, lastWeek] = await Promise.all([
     sections.sales ? tenderWhere(env, [sold.sql], sold.params) : null,
-    sections.cashiers ? groupedBy('cashier') : null,
+    sections.cashiers && !cashierListShown ? groupedBy('cashier') : null,
     sections.cashiers && filters.branchId == null ? groupedBy('branch') : null,
     sections.products ? getProductSalesRanking(env, filters, TOP_PRODUCTS) : null,
     sections.products ? lowStockMovedOnDay(env, filters) : null,
     sections.returns
-      ? getDb(env).prepare(`SELECT COALESCE(SUM(total_refund_khr), 0) AS khr,
+      ? getDb(env).prepare(`SELECT COUNT(*) AS count, ROUND(COALESCE(SUM(total_refund_usd), 0), 2) AS usd, COALESCE(SUM(total_refund_khr), 0) AS khr,
         COALESCE(SUM((SELECT SUM(return_items.quantity) FROM return_items WHERE return_items.return_id = returns.id)), 0) AS items
-        FROM returns WHERE ${scope.returnsWhere}`).get<{ khr: number; items: number }>(scope.params)
+        FROM returns WHERE ${scope.returnsWhere}`).get<{ count: number; usd: number; khr: number; items: number }>(scope.params)
       : null,
     sections.expenses ? expenseRowsWhere(env, [scope.feeWhere], scope.params, { excludeDeliveryFees: true, overflowLabel: otherLabel }) : null,
     sections.compare ? getSalesTotals(env, onDay(-1)) : null,
     sections.compare ? getSalesTotals(env, onDay(-7)) : null,
   ])
+  const { pending_tx_count: notPaidCount, total_discount_usd: totalDiscountUsd } = await totals
   return {
-    ...(received && { sales: { received, notPaidCount: Number(totals.pending_tx_count) || 0, totalDiscountUsd: Number(totals.total_discount_usd) || 0 } }),
-    ...(cashiers && { cashiers: { cashiers, branches } }),
+    ...(received && { sales: { received, notPaidCount: Number(notPaidCount) || 0, totalDiscountUsd: Number(totalDiscountUsd) || 0 } }),
+    ...(sections.cashiers && { cashiers: { cashiers, branches } }),
     ...(top && low && { products: { top: top.map((row) => ({ name: row.product_name, qty: row.qty, usd: row.line_sales_usd })), low: low.rows, moreLow: low.more } }),
-    ...(sections.returns && { returns: { khr: Number(returned?.khr) || 0, items: Number(returned?.items) || 0 } }),
+    ...(sections.returns && {
+      returns: { count: Number(returned?.count) || 0, usd: Number(returned?.usd) || 0, rielEquivalent: Number(returned?.khr) || 0, items: Number(returned?.items) || 0 },
+    }),
     ...(expenses && { expenses: expenses.details }),
-    ...(yesterday && lastWeek && { compare: { yesterdayUsd: yesterday.revenue_usd, lastWeekUsd: lastWeek.revenue_usd } }),
+    ...(yesterday && lastWeek && {
+      compare: { yesterdayUsd: yesterday.revenue_usd, lastWeekUsd: lastWeek.revenue_usd, until: scope.runningAtMs == null ? null : businessClock(scope.runningAtMs) },
+    }),
   }
 }
 
@@ -1991,7 +2053,7 @@ export async function deliverTelegramShiftOverview(env: Env, key: string, nowMs:
     // The fold label is the only text the DATA read produces; composed first,
     // synchronously, as shiftFigures does.
     const otherLabel = withLanguage(config.language, () => label('other'))
-    const [name, figures] = await Promise.all([shopName(env), shiftOverviewFigures(env, shift, otherLabel, config.summary)])
+    const [name, figures] = await Promise.all([shopName(env), shiftOverviewFigures(env, shift, otherLabel, config.summary, nowMs)])
     const topicKey = overviewTopicKey(config)
     await postTelegram(config, withLanguage(config.language, () => formatShiftOverview(name, shift, figures, config.categories, nowMs)), config.chatId, config.topics[topicKey], topicKey)
     await settle('sent', null, ', sent_at = @now')
@@ -2049,11 +2111,14 @@ function unknownCommandReply(command: string): string {
 }
 
 /**
- * `categories` is the owner's per-category switch set, threaded in from the
+ * `categories` and `summary` are the owner's switches, threaded in from the
  * SAME `getTelegramConfig` read that supplies `language` just above it, so
- * `/report` leaves out the same categories as the pushed messages.
+ * `/report` and "Send today's summary" give the same answer for the same day.
  */
-export async function telegramCommandReply(env: Env, text: string, nowMs: number = Date.now(), language: TelegramLanguage = 'both', categories?: TelegramCategories): Promise<string> {
+export async function telegramCommandReply(
+  env: Env, text: string, nowMs: number = Date.now(), language: TelegramLanguage = 'both', categories?: TelegramCategories,
+  summary: TelegramSummarySections = NO_SUMMARY_SECTIONS,
+): Promise<string> {
   const parts = String(text || '').trim().split(/\s+/)
   // Group chats deliver "/report@shop_bot". Whose command it is was decided
   // by handleTelegramWebhook (addressedToThisBot); here the @name is dropped.
@@ -2073,7 +2138,7 @@ export async function telegramCommandReply(env: Env, text: string, nowMs: number
   // manager who types the plural should get the report rather than the
   // unknown-command help.
   if (command === '/shift' || command === '/shifts') return shiftReport(env, parsed.date, nowMs, language)
-  return dayReport(env, parsed.date, language, categories)
+  return dayReport(env, parsed.date, language, categories, summary, nowMs)
 }
 
 
@@ -2339,7 +2404,7 @@ export async function handleTelegramWebhook(env: Env, update: TelegramUpdate, de
     await postTelegram(config, await topicCommandReply(env, config, message as TelegramMessage, text, deps), chatId, threadId)
     return
   }
-  await postTelegram(config, await telegramCommandReply(env, text, Date.now(), config.language, config.categories), chatId, threadId)
+  await postTelegram(config, await telegramCommandReply(env, text, Date.now(), config.language, config.categories, config.summary), chatId, threadId)
 }
 export async function configureTelegramWebhook(env: Env): Promise<void> {
   const config = await getTelegramConfig(env); const problem = commandProblem(config)
