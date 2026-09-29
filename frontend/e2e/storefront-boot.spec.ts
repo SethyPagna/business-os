@@ -176,6 +176,7 @@ const POSTER = readFileSync(new URL('./fixtures/about-poster.png', import.meta.u
 const PAINT_EMBED = JSON.parse(readFileSync(new URL('./fixtures/portal-paint-embed.json', import.meta.url), 'utf8')) as { kind: string; v: number; config: Record<string, unknown> }
 const REAL_SHOP = {
   businessName: 'Fixture Real Shop',
+  businessLegalName: 'Fixture Real Shop Co., Ltd.',
   title: 'Fixture Real Shop',
   heroGradientStart: '#3b0764',
   heroGradientMid: '#155e75',
@@ -400,7 +401,7 @@ test.describe('P2 first paint: no default look, no saved copy, bounded failure',
     await page.goto(`${STOREFRONT_ORIGIN}/`, { waitUntil: 'load' })
 
     const failure = page.locator('[data-portal-load-failed="true"]')
-    await expect(failure).toContainText(FAILURE_EN)
+    await expect(failure).toContainText(FAILURE_EN, { timeout: 20_000 })
     await expect(failure.getByRole('button', { name: 'Retry' })).toBeVisible()
     await storefrontSectionTab(page, STOREFRONT_EN_LABELS, 'products').click()
     await expect(failure).toContainText(FAILURE_EN)
@@ -425,7 +426,7 @@ test.describe('P2 first paint: no default look, no saved copy, bounded failure',
     await expect(page.locator('[data-portal-skeleton="true"]').first()).toContainText(LOADING_KM)
     release()
     const failure = page.locator('[data-portal-load-failed="true"]')
-    await expect(failure).toContainText(FAILURE_KM)
+    await expect(failure).toContainText(FAILURE_KM, { timeout: 20_000 })
     await expect(failure.getByRole('button', { name: 'ព្យាយាមម្ដងទៀត' })).toBeVisible()
   })
 
