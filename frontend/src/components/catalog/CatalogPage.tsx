@@ -72,6 +72,7 @@ import {
 } from './portalPrivateAi.ts'
 import {
   discardEditorDraft,
+  findUnsafeLink,
   isAboutImageRefusal,
   keepEditedValues,
   markEdited,
@@ -82,6 +83,7 @@ import {
   settleSavedEdits,
   siteUploadPath,
   type EditorDraft,
+  type RefusedLink,
   type StaffSettings,
 } from './portalEditorDraft.ts'
 import { resolveCatalogAssetUrl } from './catalogAssetUrls'
@@ -408,6 +410,12 @@ function withAssetVersion(url: unknown, versionSeed: unknown): string {
   if (!seed) return raw
   const separator = raw.includes('?') ? '&' : '?'
   return `${raw}${separator}v=${encodeURIComponent(seed)}`
+}
+
+function sectionForLinkField(field: string): string {
+  if (field.startsWith('about_blocks[')) return 'about'
+  if (field.startsWith('promo_items[')) return 'display'
+  return 'media'
 }
 
 function sanitizePortalMediaValue(value: unknown, fallback = ''): string {
@@ -1191,6 +1199,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
   const staffSettingsRef = useRef<StaffSettings | null>(null)
   const editorBaselineLoadedRef = useRef(false)
   const [refusedAboutImage, setRefusedAboutImage] = useState<string | null>(null)
+  const [refusedLink, setRefusedLink] = useState<RefusedLink | null>(null)
   const [editorSaving, setEditorSaving] = useState(false)
   const [privateAi, setPrivateAi] = useState(createPrivateAiState)
   const editorFormRef = useRef<EditorDraft>({})
@@ -2455,6 +2464,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     setEditorDraft(discarded.draft)
     setPrivateAi(discarded.privateAi)
     setRefusedAboutImage(null)
+    setRefusedLink(null)
   }
 
   async function savePortalDraft(): Promise<PortalSaveResult> {
@@ -2537,8 +2547,14 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
           item?.mediaUrl,
           previewPromoItemMap.get(String(item?.id || ''))?.mediaUrl || '',
         ),
-        linkUrl: normalizeExternalUrl(item?.linkUrl || ''),
+        linkUrl: String(item?.linkUrl || '').trim(),
       }))
+      const refusedLink = findUnsafeLink({ logo: sanitizedLogoImage, cover: sanitizedCoverImage, aboutBlocks: sanitizedAboutBlocks, promoItems: sanitizedPromoItems })
+      if (refusedLink) {
+        setRefusedLink(refusedLink)
+        setActiveEditorSection(sectionForLinkField(refusedLink.field))
+        return refuseSave('web_editor_link_invalid', 'Use a full https:// link or a picture from this site.', refusedLink.field)
+      }
 
       setEditorSaving(true)
       const sentDraft: EditorDraft = { ...editorDraft, ...privateAiFormValues(privateAi) }
@@ -2687,6 +2703,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
       setPrivateAi((current) => settlePrivateAiSave(current, savePayload))
       staffSettingsRef.current = { ...staffSettingsRef.current, ...savePayload }
       setRefusedAboutImage(null)
+      setRefusedLink(null)
       const stillEdited = settleSavedEdits(editedKeysRef.current, sentDraft, editorFormRef.current)
       replaceEditedKeys(stillEdited)
       const savedMediaValues = {
@@ -3310,6 +3327,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
       editorDirty,
       editedKeys,
       aboutImageRefused,
+      refusedLink,
       editorDraft: { ...editorDraft, ...privateAiFormValues(privateAi) },
       editorSaving,
       editorSections,

@@ -67,4 +67,42 @@ runTest('T-L9: every module under catalog/editor/ is pinned to the lazy catalog-
   assert.match(rule, /CatalogPageContext\.tsx'\)\s*\n\s*\|\| normalized\.includes\('\/src\/components\/catalog\/editor\/'\)/, 'the editor/ line follows the CatalogPageContext line (performanceLoadingUx.test.ts reads that order)')
 })
 
+const workerAboutCap = (name: string): number => {
+  const portalRoute = read('../../cloudflare/src/routes/portal.ts')
+  const value = portalRoute.match(new RegExp(`const ${name} = (\\d+)`))?.[1]
+  assert.ok(value, `cloudflare/src/routes/portal.ts still defines ${name}`)
+  return Number(value)
+}
+const editorCap = (editor: string, name: string): number => {
+  const value = editor.match(new RegExp(`const ${name} = (\\d+)`))?.[1]
+  assert.ok(value, `CatalogEditorSurface.tsx defines ${name}`)
+  return Number(value)
+}
+const elementWithId = (source: string, id: string): string => {
+  const at = source.indexOf(id)
+  assert.ok(at > 0, `the editor renders ${id}`)
+  const start = Math.max(source.lastIndexOf('<input', at), source.lastIndexOf('<textarea', at))
+  return source.slice(start, source.indexOf('/>', at))
+}
+
+runTest('T-L7: the About block limits in the editor are the Worker\'s, so nothing typed is cut off on the shop (R2)', () => {
+  const editor = read('../src/components/catalog/CatalogEditorSurface.tsx')
+  assert.equal(editorCap(editor, 'ABOUT_TITLE_MAX_LENGTH'), workerAboutCap('MAX_PORTAL_ABOUT_TITLE_LENGTH'))
+  assert.equal(editorCap(editor, 'ABOUT_TEXT_MAX_LENGTH'), workerAboutCap('MAX_PORTAL_ABOUT_TEXT_LENGTH'))
+  assert.equal(editorCap(editor, 'ABOUT_BLOCKS_MAX'), workerAboutCap('MAX_PORTAL_ABOUT_BLOCKS'))
+  assert.match(elementWithId(editor, 'id={`portal-about-block-title-${block.id}`}'), /maxLength=\{ABOUT_TITLE_MAX_LENGTH\}/, 'a block title stops where the shop cuts it')
+  assert.match(elementWithId(editor, 'id={`portal-about-block-body-${block.id}`}'), /maxLength=\{ABOUT_TEXT_MAX_LENGTH\}/, 'block text stops where the shop cuts it')
+  assert.match(elementWithId(editor, 'id="portal-about-title"'), /maxLength=\{ABOUT_TITLE_MAX_LENGTH\}/, 'the About title is capped like a block title (portal.ts aboutTitle)')
+  assert.match(elementWithId(editor, 'id="portal-about-content"'), /maxLength=\{ABOUT_TEXT_MAX_LENGTH\}/, 'the About text is capped like block text (portal.ts aboutContent)')
+  const addButtons = [...editor.matchAll(/onClick=\{\(\) => addAboutBlock\('(?:text|image|video)'\)\}/g)]
+  assert.equal(addButtons.length, 3, 'three Add block buttons')
+  for (const button of addButtons) {
+    const tag = editor.slice(editor.lastIndexOf('<button', button.index), editor.indexOf('>', button.index))
+    assert.match(tag, /disabled=\{aboutBlocksFull\}/, 'Add block stops at the limit')
+    assert.match(tag, /aria-describedby=\{aboutBlocksFull \? 'portal-about-blocks-max' : undefined\}/, 'the disabled button is described by the reason')
+  }
+  assert.match(editor, /const aboutBlocksFull = aboutBlocks\.length >= ABOUT_BLOCKS_MAX/)
+  assert.match(editor, /\{aboutBlocksFull \? \(\s*<p id="portal-about-blocks-max" role="status"[^>]*>\{ed\('web_editor_blocks_max', 'Up to 30 blocks\.', 'រហូតដល់ ៣០ ប្លុក។'\)\}<\/p>/, 'the reason is shown, not only hovered')
+})
+
 if (failed) process.exit(1)

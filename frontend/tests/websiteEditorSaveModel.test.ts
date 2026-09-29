@@ -150,6 +150,42 @@ await runTest('R-AB-F 2: the first load keeps what was typed and takes the store
     'the default 80 and the empty tagline the editor opened with are never saved over the stored values')
 })
 
+type LinkFields = { logo: unknown; cover: unknown; aboutBlocks: Array<{ mediaUrl?: unknown }>; promoItems: Array<{ mediaUrl?: unknown; linkUrl?: unknown }> }
+type RefusedLink = { field: string; value: string } | null
+const noLinks: LinkFields = { logo: '', cover: '', aboutBlocks: [], promoItems: [] }
+
+await runTest('T-S4: an unsafe pasted link is refused with its field named, never silently dropped (R2)', () => {
+  const findUnsafeLink = draftModule.findUnsafeLink as ((fields: LinkFields) => RefusedLink) | undefined
+  assert.equal(typeof findUnsafeLink, 'function', 'portalEditorDraft.ts exports findUnsafeLink')
+  for (const unsafe of ['javascript:alert(1)', '/\\evil.example', '//evil.example/x.png', 'data:text/html,hi']) {
+    assert.deepEqual(findUnsafeLink!({ ...noLinks, aboutBlocks: [{ mediaUrl: '/uploads/a.png' }, { mediaUrl: unsafe }] }),
+      { field: 'about_blocks[1].mediaUrl', value: unsafe }, `${unsafe} in a block picture is refused on that block`)
+  }
+  assert.deepEqual(findUnsafeLink!({ ...noLinks, aboutBlocks: [{ mediaUrl: 'javascript:alert(1)' }] }), { field: 'about_blocks[0].mediaUrl', value: 'javascript:alert(1)' })
+  assert.deepEqual(findUnsafeLink!({ ...noLinks, promoItems: [{ mediaUrl: 'java\tscript:alert(1)' }] }), { field: 'promo_items[0].mediaUrl', value: 'java\tscript:alert(1)' })
+  assert.deepEqual(findUnsafeLink!({ ...noLinks, promoItems: [{ linkUrl: 'javascript:alert(1)' }] }), { field: 'promo_items[0].linkUrl', value: 'javascript:alert(1)' })
+  assert.deepEqual(findUnsafeLink!({ ...noLinks, promoItems: [{ linkUrl: 'www.example.test/sale' }] }), { field: 'promo_items[0].linkUrl', value: 'www.example.test/sale' },
+    'a bare domain is refused with the message that asks for a full https:// link, never rewritten behind the owner')
+  assert.deepEqual(findUnsafeLink!({ ...noLinks, logo: '//evil.example/logo.png' }), { field: 'customer_portal_logo_image', value: '//evil.example/logo.png' })
+  assert.deepEqual(findUnsafeLink!({ ...noLinks, cover: 'javascript:alert(1)' }), { field: 'customer_portal_cover_image', value: 'javascript:alert(1)' })
+  assert.equal(findUnsafeLink!({
+    logo: '/uploads/logo.webp?v=2',
+    cover: 'https://cdn.example.test/cover.jpg',
+    aboutBlocks: [{ mediaUrl: '' }, { mediaUrl: '/uploads/about.png' }, {}],
+    promoItems: [{ mediaUrl: '', linkUrl: 'https://example.test/sale' }, { linkUrl: '/catalog?promo=1' }],
+  }), null, 'uploads, full https links, site paths and empty fields all pass')
+})
+
+await runTest('T-S4 wiring: the Save checks every pasted link before it writes and publishes the link it checked', () => {
+  const save = savePortalDraftSource()
+  const checkAt = save.indexOf('const refusedLink = findUnsafeLink(')
+  assert.ok(checkAt > 0, 'savePortalDraft checks the links')
+  assert.ok(checkAt < save.indexOf('setEditorSaving(true)'), 'before anything is sent')
+  assert.match(save.slice(checkAt), /^const refusedLink = findUnsafeLink\(\{ logo: sanitizedLogoImage, cover: sanitizedCoverImage, aboutBlocks: sanitizedAboutBlocks, promoItems: sanitizedPromoItems \}\)\n\s*if \(refusedLink\) \{\n\s*setRefusedLink\(refusedLink\)\n\s*setActiveEditorSection\(sectionForLinkField\(refusedLink\.field\)\)\n\s*return refuseSave\('web_editor_link_invalid', /)
+  assert.match(save, /linkUrl: String\(item\?\.linkUrl \|\| ''\)\.trim\(\),/, 'the card link sent is the one the check accepted')
+  assert.doesNotMatch(save, /linkUrl: normalizeExternalUrl\(/, 'a refused link is never turned into an empty one instead')
+})
+
 if (failed) {
   console.error(`\n${failed} failing`)
   process.exit(1)

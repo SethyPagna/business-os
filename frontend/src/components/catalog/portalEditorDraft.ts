@@ -1,4 +1,5 @@
 import type { PrivateAiState } from './portalPrivateAi.ts'
+import { safeLinkUrl } from '../../utils/safeLinkUrl.ts'
 
 // The storefront config lacks some editor keys, so a Save writes only keys it
 // loaded (public config or staff settings) or saw edited.
@@ -95,6 +96,34 @@ export function siteUploadPath(value: unknown, resolveUploadUrl: (path: string) 
   }
   const path = `${url.pathname}${url.search}${url.hash}`
   return url.pathname.startsWith(SITE_UPLOADS_PREFIX) && resolveUploadUrl(path) === raw ? path : null
+}
+
+export type LinkFields = {
+  logo: unknown
+  cover: unknown
+  aboutBlocks: ReadonlyArray<{ mediaUrl?: unknown }>
+  promoItems: ReadonlyArray<{ mediaUrl?: unknown; linkUrl?: unknown }>
+}
+export type RefusedLink = { field: string; value: string }
+
+function pastedLinks(fields: LinkFields): Array<[field: string, value: unknown]> {
+  return [
+    ['customer_portal_logo_image', fields.logo],
+    ['customer_portal_cover_image', fields.cover],
+    ...fields.aboutBlocks.map((block, index): [string, unknown] => [`about_blocks[${index}].mediaUrl`, block.mediaUrl]),
+    ...fields.promoItems.flatMap((item, index): Array<[string, unknown]> => [
+      [`promo_items[${index}].mediaUrl`, item.mediaUrl],
+      [`promo_items[${index}].linkUrl`, item.linkUrl],
+    ]),
+  ]
+}
+
+export function findUnsafeLink(fields: LinkFields): RefusedLink | null {
+  for (const [field, raw] of pastedLinks(fields)) {
+    const value = String(raw ?? '').trim()
+    if (value && safeLinkUrl(value) === null) return { field, value }
+  }
+  return null
 }
 
 export function isAboutImageRefusal(result: unknown): boolean {

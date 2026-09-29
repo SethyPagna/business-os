@@ -32,6 +32,9 @@ import { createEditorText } from './editor/editorText.ts'
 
 const ManageAnnouncementStripModal = lazyRetry(() => import('./ManagePromotionsModal'), 'catalog-editor-announcement-strip-modal')
 const ABOUT_IMAGE_DESCRIPTION_MAX_LENGTH = 200
+const ABOUT_TITLE_MAX_LENGTH = 160
+const ABOUT_TEXT_MAX_LENGTH = 4000
+const ABOUT_BLOCKS_MAX = 30
 
 type CatalogUploadState = ReturnType<typeof createInitialUploadState>
 type DraftPrimitive = string | number | boolean | null | undefined
@@ -139,6 +142,8 @@ type CatalogAboutBlock = {
   type?: string
 }
 
+type RefusedLink = { field: string; value: string }
+
 type CatalogFaqItem = {
   id: string
   answer?: string
@@ -200,6 +205,7 @@ type CatalogEditorSurfaceContext = {
   editorLimits: EditorColumnLimits
   editorSaving: boolean
   editorSections: EditorSection[]
+  refusedLink: RefusedLink | null
   faqItems: CatalogFaqItem[]
   generatedPublicUrl: string
   getAboutBlockLabel: (type?: string) => string
@@ -339,6 +345,7 @@ function CatalogEditorSurfaceContent() {
     editorLimits,
     editorSaving,
     editorSections,
+    refusedLink,
     faqItems,
     generatedPublicUrl,
     getAboutBlockLabel,
@@ -381,6 +388,9 @@ function CatalogEditorSurfaceContent() {
   } = useCatalogPageContext<CatalogEditorSurfaceContext>()
   const { t, language } = useApp() as Pick<AppContextCoreValue, 't' | 'language'>
   const ed = useMemo(() => createEditorText(t, language), [t, language])
+  const linkInvalid = ed('web_editor_link_invalid', 'Use a full https:// link or a picture from this site.', 'សូមប្រើតំណ https:// ពេញលេញ ឬរូបភាពពីគេហទំព័រនេះ។')
+  const linkRefused = (field: string, value: unknown) => refusedLink?.field === field && refusedLink.value === String(value ?? '').trim()
+  const aboutBlocksFull = aboutBlocks.length >= ABOUT_BLOCKS_MAX
   const [showAnnouncementStripModal, setShowAnnouncementStripModal] = useState(false)
   // Until the server's stored values arrive, the fields show nothing and are
   // locked, so nothing can be typed over a value the editor has not seen.
@@ -724,7 +734,7 @@ function CatalogEditorSurfaceContent() {
                 </div>
 
                 <div className="mt-4 space-y-4">
-                  {promoItems.length ? promoItems.map((item) => (
+                  {promoItems.length ? promoItems.map((item, index) => (
                     <article
                       key={item.id}
                       draggable
@@ -840,6 +850,7 @@ function CatalogEditorSurfaceContent() {
                             onChange={(value) => updatePromoItem(item.id, 'mediaUrl', value)}
                             onClear={() => clearPortalMediaTarget(`promo:${item.id}`)}
                             onPreview={() => openPortalImage(item.title || copy('coverImage', 'Cover image'), [item.mediaUrl])}
+                            error={linkRefused(`promo_items[${index}].mediaUrl`, item.mediaUrl) ? linkInvalid : ''}
                             uploadLabel={copy('uploadImage', 'Upload image')}
                             chooseLabel={copy('openFiles', 'Files')}
                             clearLabel={copy('clearImage', 'Clear')}
@@ -911,6 +922,7 @@ function CatalogEditorSurfaceContent() {
                 id="portal-about-title"
                 name="customer_portal_about_title"
                 className="input"
+                maxLength={ABOUT_TITLE_MAX_LENGTH}
                 value={editorDraft.customer_portal_about_title || ''}
                 onChange={(event) => setDraft('customer_portal_about_title', event.target.value)}
               />
@@ -964,6 +976,7 @@ function CatalogEditorSurfaceContent() {
                 id="portal-about-content"
                 name="customer_portal_about_content"
                 className="input resize-none"
+                maxLength={ABOUT_TEXT_MAX_LENGTH}
                 rows={4}
                 value={editorDraft.customer_portal_about_content || ''}
                 onChange={(event) => setDraft('customer_portal_about_content', event.target.value)}
@@ -1001,19 +1014,22 @@ function CatalogEditorSurfaceContent() {
                   <HintLabel className="text-sm font-semibold text-slate-900" title={copy('aboutBlocks', 'About blocks')} hint={copy('aboutBlocksHint', 'Add text, image, and video sections, then move them into the order you want customers to see.')} />
                 </div>
 
-                <div className="flex flex-wrap gap-2">
-                  <button type="button" className="btn-secondary inline-flex items-center gap-1.5 px-3 py-1.5 text-xs sm:text-sm" onClick={() => addAboutBlock('text')}>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button type="button" className="btn-secondary inline-flex items-center gap-1.5 px-3 py-1.5 text-xs sm:text-sm" disabled={aboutBlocksFull} aria-describedby={aboutBlocksFull ? 'portal-about-blocks-max' : undefined} onClick={() => addAboutBlock('text')}>
                     <Plus className="h-4 w-4" />
                     {copy('addTextBlock', 'Text')}
                   </button>
-                  <button type="button" className="btn-secondary inline-flex items-center gap-1.5 px-3 py-1.5 text-xs sm:text-sm" onClick={() => addAboutBlock('image')}>
+                  <button type="button" className="btn-secondary inline-flex items-center gap-1.5 px-3 py-1.5 text-xs sm:text-sm" disabled={aboutBlocksFull} aria-describedby={aboutBlocksFull ? 'portal-about-blocks-max' : undefined} onClick={() => addAboutBlock('image')}>
                     <Images className="h-4 w-4" />
                     {copy('addImageBlock', 'Image')}
                   </button>
-                  <button type="button" className="btn-secondary inline-flex items-center gap-1.5 px-3 py-1.5 text-xs sm:text-sm" onClick={() => addAboutBlock('video')}>
+                  <button type="button" className="btn-secondary inline-flex items-center gap-1.5 px-3 py-1.5 text-xs sm:text-sm" disabled={aboutBlocksFull} aria-describedby={aboutBlocksFull ? 'portal-about-blocks-max' : undefined} onClick={() => addAboutBlock('video')}>
                     <Plus className="h-4 w-4" />
                     {copy('addVideoBlock', 'Video')}
                   </button>
+                  {aboutBlocksFull ? (
+                    <p id="portal-about-blocks-max" role="status" className="text-xs font-medium text-slate-500">{ed('web_editor_blocks_max', 'Up to 30 blocks.', 'រហូតដល់ ៣០ ប្លុក។')}</p>
+                  ) : null}
                 </div>
               </div>
               <div className="mt-4 space-y-4">
@@ -1047,11 +1063,11 @@ function CatalogEditorSurfaceContent() {
                       <div className="space-y-4">
                         <div>
                           <label htmlFor={`portal-about-block-title-${block.id}`} className="block text-sm font-medium text-slate-700">{copy('sectionTitle', 'Section title')}</label>
-                          <input id={`portal-about-block-title-${block.id}`} className="input" value={block.title || ''} onChange={(event) => updateAboutBlock(block.id, 'title', event.target.value)} />
+                          <input id={`portal-about-block-title-${block.id}`} className="input" maxLength={ABOUT_TITLE_MAX_LENGTH} value={block.title || ''} onChange={(event) => updateAboutBlock(block.id, 'title', event.target.value)} />
                         </div>
                         <div>
                           <label htmlFor={`portal-about-block-body-${block.id}`} className="block text-sm font-medium text-slate-700">{block.type === 'text' ? copy('textContent', 'Text content') : copy('captionDescription', 'Caption / description')}</label>
-                          <textarea id={`portal-about-block-body-${block.id}`} className="input resize-none" rows={block.type === 'text' ? 5 : 3} value={block.body || ''} onChange={(event) => updateAboutBlock(block.id, 'body', event.target.value)} />
+                          <textarea id={`portal-about-block-body-${block.id}`} className="input resize-none" rows={block.type === 'text' ? 5 : 3} maxLength={ABOUT_TEXT_MAX_LENGTH} value={block.body || ''} onChange={(event) => updateAboutBlock(block.id, 'body', event.target.value)} />
                         </div>
                       </div>
                       <div className="space-y-3">
@@ -1062,7 +1078,10 @@ function CatalogEditorSurfaceContent() {
                           return (
                             <>
                         <label htmlFor={`portal-about-block-media-${block.id}`} className="block text-sm font-medium text-slate-700">{block.type === 'video' ? copy('videoUrl', 'Video URL') : copy('imageUrl', 'Image URL')}</label>
-                        <input id={`portal-about-block-media-${block.id}`} className="input" value={block.mediaUrl || ''} placeholder={block.type === 'video' ? 'https://...' : 'https://... or upload below'} onChange={(event) => updateAboutBlock(block.id, 'mediaUrl', event.target.value)} />
+                        <input id={`portal-about-block-media-${block.id}`} className="input" value={block.mediaUrl || ''} placeholder={block.type === 'video' ? 'https://...' : 'https://... or upload below'} aria-invalid={linkRefused(`about_blocks[${index}].mediaUrl`, block.mediaUrl)} aria-describedby={linkRefused(`about_blocks[${index}].mediaUrl`, block.mediaUrl) ? `portal-about-block-media-${block.id}-error` : undefined} onChange={(event) => updateAboutBlock(block.id, 'mediaUrl', event.target.value)} />
+                        {linkRefused(`about_blocks[${index}].mediaUrl`, block.mediaUrl) ? (
+                          <p id={`portal-about-block-media-${block.id}-error`} role="alert" className="rounded-2xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{linkInvalid}</p>
+                        ) : null}
                         <div className="flex flex-wrap gap-2">
                           <button type="button" className="btn-secondary text-sm" onClick={() => uploadAboutBlockMedia(block.id)} disabled={blockUpload.status === 'uploading'}>
                             <Upload className="mr-2 inline h-4 w-4" />
@@ -1627,6 +1646,7 @@ function CatalogEditorSurfaceContent() {
               uploadedQueuedLabel={copy('portalUploadQueued', 'Uploaded. Background optimization is running now.')}
               uploadedReadyLabel={copy('portalUploadReady', 'Uploaded and ready.')}
               uploadState={getMediaUploadState('customer_portal_logo_image')}
+              error={linkRefused('customer_portal_logo_image', editorDraft.customer_portal_logo_image) ? linkInvalid : ''}
             />
             {/* The portal editor no longer sets a favicon / browser-tab
                 icon: that is DEFAULT app branding now, not per-portal (see
@@ -1777,6 +1797,7 @@ function CatalogEditorSurfaceContent() {
               uploadedQueuedLabel={copy('portalUploadQueued', 'Uploaded. Background optimization is running now.')}
               uploadedReadyLabel={copy('portalUploadReady', 'Uploaded and ready.')}
               uploadState={getMediaUploadState('customer_portal_cover_image')}
+              error={linkRefused('customer_portal_cover_image', editorDraft.customer_portal_cover_image) ? linkInvalid : ''}
             />
             {editorDraft.customer_portal_cover_image ? (
               <div className="xl:col-span-2 min-w-0 rounded-2xl border border-slate-200 bg-white p-4">

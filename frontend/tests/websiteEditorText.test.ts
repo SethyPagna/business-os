@@ -50,9 +50,9 @@ const editorKeysIn = (pack: Record<string, string>) => Object.keys(pack).filter(
 // pack-less labels, plus phone/email/address/call/logo, which P-RECON added to
 // the storefront pack after the design was written.
 const ED0_KEYS = [
-  'web_editor_address', 'web_editor_call', 'web_editor_caution', 'web_editor_cover_preview',
+  'web_editor_address', 'web_editor_blocks_max', 'web_editor_call', 'web_editor_caution', 'web_editor_cover_preview',
   'web_editor_email', 'web_editor_facebook', 'web_editor_group_product_page', 'web_editor_instagram',
-  'web_editor_lang_default', 'web_editor_logo', 'web_editor_messenger',
+  'web_editor_lang_default', 'web_editor_link_invalid', 'web_editor_logo', 'web_editor_messenger',
   'web_editor_more_details', 'web_editor_no_match', 'web_editor_no_questions', 'web_editor_phone',
   'web_editor_product_page_hint', 'web_editor_search_products', 'web_editor_section_about',
   'web_editor_selected_count', 'web_editor_shop_name', 'web_editor_telegram', 'web_editor_title', 'web_editor_website',
