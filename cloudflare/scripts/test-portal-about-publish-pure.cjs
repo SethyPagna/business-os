@@ -38,6 +38,9 @@ const env = { BUSINESS_OS_PUBLIC_URL: 'https://shop.example' }
 const publish = (settings) => portal.buildPublicPortalConfig(settings, env)
 
 const POSTER = '/uploads/Leang poster-1-abc.webp'
+// JSON.parse can return an object that String() throws on.
+const UNPRINTABLE_JSON = '{"toString":"x"}'
+const UNPRINTABLE = JSON.parse(UNPRINTABLE_JSON)
 const BLOCKS = [
   { id: 'b1', type: 'text', title: 'Since 2019', body: 'Family shop in Phnom Penh.', mediaUrl: '' },
   { id: 'b2', type: 'image', title: 'Our counter', body: '', mediaUrl: '/uploads/counter-2-def.webp' },
@@ -81,6 +84,48 @@ const BAD_ABOUT_IMAGES = [
   '/files/p.png',
   '/uploads/%E0%A4%A.png',
   `/uploads/${'a'.repeat(500)}.png`,
+  '/UPLOADS/x.png',
+  '/Uploads/x.png',
+  '/uploads/x.png?v=\u0001',
+  '/uploads/x.png#\u0007',
+  '/uploads/x.png?v=%00',
+  '/uploads/x.png?v=%',
+  '/uploads/a\u0085b.png',
+  '/uploads/x%c2%85.png',
+  '/uploads/x%C2%9F.png',
+  '/uploads/a‮b.png',
+  '/uploads/a%E2%80%AEb.png',
+  '/uploads/a‪b.png',
+  '/uploads/a⁦b.png',
+  '/uploads/a%E2%81%A9b.png',
+  '/uploads/a​b.png',
+  '/uploads/a%E2%80%8Bb.png',
+  '/uploads/a‌b.png',
+  '/uploads/a%E2%80%8Db.png',
+  '/uploads/a﻿b.png',
+  '/uploads/a%EF%BB%BFb.png',
+  '/uploads/x.png?v=‮',
+  '/uploads/x.png?v=%E2%80%AE',
+  '/uploads/x.png#%E2%80%8B',
+]
+// Visible non-ASCII names must keep working: the refusal is for invisible and control characters only.
+const GOOD_ABOUT_IMAGES = [
+  '/uploads/រូបភាព ហាង-1-abc.webp',
+  '/uploads/%E1%9E%9A%E1%9E%BC%E1%9E%94-1-abc.webp',
+  '/uploads/ស្រស់-2-def.webp',
+  '/uploads/\u{1F484}-3-aaa.png',
+  '/uploads/poster-4-bbb.webp?v=2',
+  '/uploads/poster-4-bbb.webp#top',
+]
+const SHOP = new URL(env.BUSINESS_OS_PUBLIC_URL)
+const BACKSLASH_OR_DOUBLE_SLASH_LINKS = [
+  '/\\evil.example/p.png',
+  '/%2fevil.example/p.png',
+  '/%2Fevil.example/p.png',
+  '/%5cevil.example/p.png',
+  '/%5C/evil.example/p.png',
+  'https://shop.example\\@evil.example/p.png',
+  '/uploads\\x.png',
 ]
 
 async function main() {
@@ -124,11 +169,23 @@ async function main() {
   })
 
   await check('logo, cover and favicon never publish an unsafe link', () => {
-    for (const bad of ['javascript:alert(1)', '//evil.example/p.png', 'data:image/png;base64,AA', ' java\tscript:alert(1)']) {
+    for (const bad of ['javascript:alert(1)', '//evil.example/p.png', 'data:image/png;base64,AA', ' java\tscript:alert(1)', ...BACKSLASH_OR_DOUBLE_SLASH_LINKS]) {
       const config = publish({ customer_portal_logo_image: bad, customer_portal_cover_image: bad, customer_portal_favicon_image: bad })
       assert.equal(config.businessLogo, '', `logo ${JSON.stringify(bad)}`)
       assert.equal(config.businessCover, '', `cover ${JSON.stringify(bad)}`)
       assert.equal(config.businessFavicon, '', `favicon ${JSON.stringify(bad)}`)
+    }
+  })
+
+  await check('P1: a link that starts with a slash is accepted only when the browser keeps it on this site', () => {
+    assert.equal(new URL('/\\evil.example/p.png', SHOP).host, 'evil.example', 'control: the browser reads /\\host as //host')
+    for (const bad of BACKSLASH_OR_DOUBLE_SLASH_LINKS) {
+      assert.equal(safeLink.normalizeSafeLinkUrl(bad), null, JSON.stringify(bad))
+    }
+    const kept = ['/uploads/logo-1-aaa.png', '/promotions', '/?legal=terms', '/uploads/a%2fb.png', '/', '/%E1%9E%9A']
+    for (const good of kept) {
+      assert.equal(safeLink.normalizeSafeLinkUrl(good), good, JSON.stringify(good))
+      assert.equal(new URL(good, SHOP).origin, SHOP.origin, `${good} stays on this site`)
     }
   })
 
@@ -176,12 +233,49 @@ async function main() {
     assert.equal(safeLink.normalizePortalUploadPath(`/uploads/${'a'.repeat(487)}.png`).length, 500, 'exactly 500 characters is allowed')
   })
 
+  await check('P2: a visible Khmer, emoji or encoded name is still this site\'s own upload', () => {
+    for (const good of GOOD_ABOUT_IMAGES) {
+      assert.equal(safeLink.normalizePortalUploadPath(good), good, JSON.stringify(good))
+      assert.equal(publish({ customer_portal_about_image: good }).aboutImage, good, JSON.stringify(good))
+    }
+  })
+
   await check('about picture description is trimmed and capped at 200 characters', () => {
     assert.equal(publish({ customer_portal_about_image_alt: '   shelf   ' }).aboutImageAlt, 'shelf')
     const long = 'ក'.repeat(250)
     assert.equal(publish({ customer_portal_about_image_alt: long }).aboutImageAlt, 'ក'.repeat(200))
     const emoji = '\u{1F484}'.repeat(201)
     assert.equal([...publish({ customer_portal_about_image_alt: emoji }).aboutImageAlt].length, 200, 'counted in characters, never splitting one')
+  })
+
+  // The cap is a code-point budget; the cut never lands inside a grapheme cluster.
+  const KHMER_CLUSTER = 'ស្រ'
+  const ZWJ_EMOJI = '\u{1F469}‍\u{1F4BB}'
+  const endsAtCap = (filler, max, cluster) => filler.repeat(max - 1) + cluster
+
+  await check('S3: the picture description drops control characters', () => {
+    assert.equal(publish({ customer_portal_about_image_alt: '\u0000Poster\u0007 new\u0085' }).aboutImageAlt, 'Poster new')
+    assert.equal(publish({ customer_portal_about_image_alt: ZWJ_EMOJI }).aboutImageAlt, ZWJ_EMOJI, 'a ZWJ emoji is a picture, not a control')
+  })
+
+  await check('S4: caps cut between whole Khmer clusters and whole ZWJ emoji', () => {
+    assert.equal(publish({ customer_portal_about_image_alt: endsAtCap('ក', 200, KHMER_CLUSTER) }).aboutImageAlt, 'ក'.repeat(199))
+    assert.equal(publish({ customer_portal_about_image_alt: endsAtCap('a', 200, ZWJ_EMOJI) }).aboutImageAlt, 'a'.repeat(199))
+    assert.equal(publish({ customer_portal_about_image_alt: 'a'.repeat(197) + ZWJ_EMOJI }).aboutImageAlt, 'a'.repeat(197) + ZWJ_EMOJI, 'a cluster that fits is kept whole')
+    assert.equal(publish({ customer_portal_about_title: endsAtCap('ក', 160, KHMER_CLUSTER) }).aboutTitle, 'ក'.repeat(159))
+    assert.equal(publish({ customer_portal_about_content: endsAtCap('a', 4000, ZWJ_EMOJI) }).aboutContent, 'a'.repeat(3999))
+    const block = { id: 'k', type: 'text', title: endsAtCap('ក', 160, KHMER_CLUSTER), body: endsAtCap('a', 4000, ZWJ_EMOJI), mediaUrl: '' }
+    const [published] = publish({ customer_portal_about_blocks: JSON.stringify([block]) }).aboutBlocks
+    assert.equal(published.title, 'ក'.repeat(159))
+    assert.equal(published.body, 'a'.repeat(3999))
+    const zalgo = `a${'́'.repeat(5000)}`
+    assert.ok([...publish({ customer_portal_about_content: zalgo }).aboutContent].length <= 4000, 'one huge cluster cannot slip past the cap')
+  })
+
+  await check('S3: the About title and story are capped like a block (160 and 4000) and the story keeps its line breaks', () => {
+    assert.equal(publish({ customer_portal_about_title: 'T'.repeat(200) }).aboutTitle, 'T'.repeat(160))
+    assert.equal(publish({ customer_portal_about_content: 'B'.repeat(5000) }).aboutContent, 'B'.repeat(4000))
+    assert.equal(publish({ customer_portal_about_content: 'Line one\nLine two' }).aboutContent, 'Line one\nLine two')
   })
 
   await check('about blocks: media only through the link allowlist, types and sizes bounded', () => {
@@ -208,6 +302,39 @@ async function main() {
     assert.equal(byId.x7.body.length, 4000)
     assert.equal(out.length, 6)
     for (const block of out) assert.deepEqual(Object.keys(block).sort(), ['body', 'id', 'mediaUrl', 'title', 'type'])
+  })
+
+  await check('S2: a block title or body that is not text publishes as empty, never "[object Object]"', () => {
+    const blocks = [
+      { id: 'o1', type: 'text', title: { a: 1 }, body: 'Kept body', mediaUrl: '' },
+      { id: 'o2', type: 'text', title: 'Kept title', body: ['x'], mediaUrl: '' },
+      { id: 'o3', type: 'text', title: 42, body: { toString: 'x' }, mediaUrl: '' },
+      { id: 'o4', type: 'image', title: 'Beacon', body: '', mediaUrl: '/\\evil.example/p.png' },
+      { id: UNPRINTABLE, type: UNPRINTABLE, title: UNPRINTABLE, body: 'Fifth body', mediaUrl: UNPRINTABLE },
+    ]
+    const out = publish({ customer_portal_about_blocks: JSON.stringify(blocks) }).aboutBlocks
+    const byId = Object.fromEntries(out.map((b) => [b.id, b]))
+    assert.deepEqual([byId.o1.title, byId.o1.body], ['', 'Kept body'])
+    assert.deepEqual([byId.o2.title, byId.o2.body], ['Kept title', ''])
+    assert.equal(byId.o3, undefined, 'a block left with no text is dropped')
+    assert.equal(byId.o4.mediaUrl, '', 'block media goes through the same link rule')
+    assert.deepEqual(byId['about-5'], { id: 'about-5', type: 'text', title: '', body: 'Fifth body', mediaUrl: '' })
+    assert.equal(JSON.stringify(out).includes('[object Object]'), false)
+  })
+
+  await check('S2 siblings: one crafted FAQ or promo card never takes the whole storefront config down', () => {
+    const faq = [{ id: UNPRINTABLE, question: UNPRINTABLE, answer: 'A' }, { id: 'f2', question: 'Open on Sunday?', answer: 'Yes' }]
+    assert.deepEqual(publish({ customer_portal_faq_items: JSON.stringify(faq) }).faqItems, [{ id: 'f2', question: 'Open on Sunday?', answer: 'Yes' }])
+    const cards = [
+      { id: UNPRINTABLE, eyebrow: UNPRINTABLE, title: UNPRINTABLE, subtitle: 'Sub', body: '', mediaUrl: UNPRINTABLE, ctaLabel: UNPRINTABLE, linkUrl: UNPRINTABLE, linkProductId: UNPRINTABLE, linkProductName: UNPRINTABLE },
+      { id: 'p2', title: 'Serum week', linkProductId: 42 },
+    ]
+    const [first, second] = publish({ customer_portal_promo_items: JSON.stringify(cards) }).promoItems
+    assert.deepEqual(first, { id: 'promo-1', eyebrow: '', title: '', subtitle: 'Sub', body: '', mediaUrl: '', ctaLabel: '', linkUrl: '', linkProductId: null, linkProductName: '' })
+    assert.equal(second.linkProductId, 42, 'a numeric product id still links')
+    for (const normalize of [safeLink.normalizeSafeLinkUrl, safeLink.normalizePortalUploadPath]) {
+      assert.equal(normalize(JSON.parse(UNPRINTABLE_JSON)), null, `${normalize.name} never throws`)
+    }
   })
 
   await check('about blocks: at most 30 shown, blanks never push a real block out, bad JSON is no blocks', () => {
@@ -391,6 +518,27 @@ async function main() {
     const plain = await save(ABOUT_ONLY, { [ALT]: '  Poster  ' })
     assert.equal(plain.status, 200)
     assert.equal(stored(ALT), 'Poster')
+  })
+
+  await check('S3/S4 (write side): the stored description has no control characters and ends on a whole character', async () => {
+    const cases = [
+      ['\u0000Poster\u0007 new\u0085', 'Poster new'],
+      [endsAtCap('ក', 200, KHMER_CLUSTER), 'ក'.repeat(199)],
+      [endsAtCap('a', 200, ZWJ_EMOJI), 'a'.repeat(199)],
+      ['a'.repeat(197) + ZWJ_EMOJI, 'a'.repeat(197) + ZWJ_EMOJI],
+      [UNPRINTABLE, ''],
+    ]
+    for (const [sent, expected] of cases) {
+      const res = await save(ABOUT_ONLY, { [ALT]: sent })
+      assert.equal(res.status, 200, JSON.stringify(res.body))
+      assert.equal(stored(ALT), expected, JSON.stringify(sent).slice(0, 40))
+    }
+  })
+
+  await check('the About picture refusal also holds for a value that is not text', async () => {
+    const res = await save(ABOUT_ONLY, { [IMAGE]: UNPRINTABLE })
+    assert.equal(res.status, 400, JSON.stringify(res.body))
+    assert.equal(res.body.code, 'invalid_about_image')
   })
 
   await check('AW-4: a posts-only or config-only grant gets the bucket 403 for both keys; About-only and full Settings succeed', async () => {

@@ -9,6 +9,7 @@ import { audit } from '../lib/audit'
 import { checkRateLimit, getClientIp } from '../lib/rateLimit'
 import { portalAbuseKey } from '../lib/portalAbuseKey'
 import { normalizePortalUploadPath, normalizeSafeLinkUrl } from '../lib/safeLinkUrl'
+import { capPortalText, normalizePortalImageAlt, plainText } from '../lib/portalText'
 import { buildUniqueStoredName } from '../lib/fileAssets'
 import { sanitizeMediaList } from '../lib/media'
 import { sanitizePortalImageMetadata } from '../lib/portalImagePrivacy'
@@ -62,9 +63,9 @@ function normalizePortalFaqItems(value: unknown): Array<{ id: string; question: 
     .map((item, index) => {
       const row = item && typeof item === 'object' ? item as Record<string, unknown> : {}
       return {
-        id: String(row.id || `faq-${index + 1}`).trim() || `faq-${index + 1}`,
-        question: String(row.question || '').trim(),
-        answer: String(row.answer || '').trim(),
+        id: plainText(row.id) || `faq-${index + 1}`,
+        question: plainText(row.question),
+        answer: plainText(row.answer),
       }
     })
     .filter((item) => item.question && item.answer)
@@ -102,8 +103,9 @@ export function normalizePortalPromoItems(value: unknown) {
     .slice(0, 50)
     .map((item, index) => {
       const row = item && typeof item === 'object' ? item as Record<string, unknown> : {}
-      const text = (key: string) => String(row[key] || '').trim()
-      const linkProductId = Number.parseInt(String(row.linkProductId || ''), 10)
+      const text = (key: string) => plainText(row[key])
+      const productIdText = typeof row.linkProductId === 'number' ? String(row.linkProductId) : plainText(row.linkProductId)
+      const linkProductId = Number.parseInt(productIdText, 10)
       return {
         id: text('id') || `promo-${index + 1}`,
         eyebrow: text('eyebrow'),
@@ -120,14 +122,12 @@ export function normalizePortalPromoItems(value: unknown) {
     .filter((item) => item.title || item.subtitle || item.body || item.mediaUrl)
 }
 
-function capPortalText(value: unknown, max: number): string {
-  const text = String(value ?? '').trim()
-  return text.length <= max ? text : Array.from(text).slice(0, max).join('')
-}
-
 // Reads the JSON the Website Editor writes (portalEditorUtils.ts serializeAboutBlocks).
 const PORTAL_ABOUT_BLOCK_TYPES = new Set(['text', 'image', 'video'])
 const MAX_PORTAL_ABOUT_BLOCKS = 30
+const MAX_PORTAL_ABOUT_BLOCK_ID_LENGTH = 80
+const MAX_PORTAL_ABOUT_TITLE_LENGTH = 160
+const MAX_PORTAL_ABOUT_TEXT_LENGTH = 4000
 
 export function normalizePortalAboutBlocks(value: unknown) {
   let parsed: unknown = value
@@ -143,12 +143,12 @@ export function normalizePortalAboutBlocks(value: unknown) {
   return parsed
     .map((item, index) => {
       const row = item && typeof item === 'object' ? item as Record<string, unknown> : {}
-      const type = String(row.type || '')
+      const type = plainText(row.type)
       return {
-        id: capPortalText(row.id, 80) || `about-${index + 1}`,
+        id: capPortalText(row.id, MAX_PORTAL_ABOUT_BLOCK_ID_LENGTH) || `about-${index + 1}`,
         type: PORTAL_ABOUT_BLOCK_TYPES.has(type) ? type : 'text',
-        title: capPortalText(row.title, 160),
-        body: capPortalText(row.body, 4000),
+        title: capPortalText(row.title, MAX_PORTAL_ABOUT_TITLE_LENGTH),
+        body: capPortalText(row.body, MAX_PORTAL_ABOUT_TEXT_LENGTH),
         mediaUrl: normalizeSafeLinkUrl(row.mediaUrl) || '',
       }
     })
@@ -330,11 +330,11 @@ export function buildPortalConfig(settings: SettingsMap, env: Env) {
     showAddress: normalizeBoolean(settings.customer_portal_show_address, true),
     showAbout: normalizeBoolean(settings.customer_portal_show_about, true),
     // Empty title: the storefront shows its own translated "About".
-    aboutTitle: String(settings.customer_portal_about_title || '').trim(),
-    aboutContent: String(settings.customer_portal_about_content || '').trim(),
+    aboutTitle: capPortalText(settings.customer_portal_about_title, MAX_PORTAL_ABOUT_TITLE_LENGTH),
+    aboutContent: capPortalText(settings.customer_portal_about_content, MAX_PORTAL_ABOUT_TEXT_LENGTH),
     aboutBlocks: normalizePortalAboutBlocks(settings.customer_portal_about_blocks),
     aboutImage: normalizePortalUploadPath(settings.customer_portal_about_image) || '',
-    aboutImageAlt: capPortalText(settings.customer_portal_about_image_alt, 200),
+    aboutImageAlt: normalizePortalImageAlt(settings.customer_portal_about_image_alt),
     showCatalog: normalizeBoolean(settings.customer_portal_show_catalog, true),
     // Guest membership lookup was removed. Signed-in customers see their own
     // membership ID in the account drawer instead of exposing an ID oracle.

@@ -45,6 +45,7 @@ const portal = load('routes/portal.ts', {
   },
   '../lib/requestBodyGuard': { SMALL_BODY_BYTES: 65536, PORTAL_SCREENSHOT_BODY_BYTES: 1 },
   '../lib/safeLinkUrl': load('lib/safeLinkUrl.ts'),
+  '../lib/portalText': load('lib/portalText.ts'),
   '../lib/sqlBinding': {},
 })
 
