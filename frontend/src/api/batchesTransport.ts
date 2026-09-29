@@ -65,6 +65,10 @@ export type ReceiveBatchPayload = {
   paymentStatus?: 'paid' | 'credit' | null
   creditDueDate?: string | null
   sessionId?: number | null
+  /** Stock Session "Free": units on top of `quantity` the supplier did not charge for. */
+  freeQuantity?: number
+  /** Stock Session: the product's new selling price, only when the line changes it. */
+  sellingPriceUsd?: number
 }
 
 // The lot a cashier picked at checkout for a batch-tracked product -- see
@@ -170,6 +174,9 @@ export function receiveBatchWireBody(payload: ReceiveBatchPayload): Record<strin
     // Migration 0192: the per-line dedup identity. Absent for a caller that
     // has none, which keeps the Worker's pre-0192 path.
     client_request_id: payload.clientRequestId || null,
+    // Absent rather than 0/null so a retried older line keeps its 0192 fingerprint.
+    ...(Number(payload.freeQuantity) > 0 ? { free_quantity: Number(payload.freeQuantity) } : {}),
+    ...(payload.sellingPriceUsd != null ? { selling_price_usd: payload.sellingPriceUsd } : {}),
   }
 }
 

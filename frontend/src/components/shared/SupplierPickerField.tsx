@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import Truck from 'lucide-react/dist/esm/icons/truck.js'
 import InfoHint from './InfoHint.tsx'
 import { captureActorReadScope, isActorReadScopeCurrent, type ActorReadScope } from '../../api/actorReadScope.ts'
 import { loadPickerOptions, invalidatePickerOptionsCache } from '../../api/pickerOptionsCache.ts'
@@ -102,6 +103,10 @@ type SupplierPickerFieldProps = {
   hintDisplay?: 'inline' | 'tooltip'
   disabled?: boolean
   idPrefix: string
+  /** 'compact': no caption or notes; the Truck icon and the placeholder name the field (Stock Session). */
+  variant?: 'default' | 'compact'
+  /** Compact only: ring the field when the receipt gate is waiting on it. */
+  invalid?: boolean
 }
 
 export default function SupplierPickerField({
@@ -113,6 +118,8 @@ export default function SupplierPickerField({
   hintDisplay = 'inline',
   disabled,
   idPrefix,
+  variant = 'default',
+  invalid = false,
 }: SupplierPickerFieldProps) {
   const [rows, setRows] = useState<SupplierNameRow[]>([])
   const rowsScope = useRef<ActorReadScope | null>(null)
@@ -149,6 +156,75 @@ export default function SupplierPickerField({
 
   const label = tr('supplier', 'Supplier')
 
+  // The input + floating list is the ONE shared SuggestionTextInput -- the
+  // same control ProductForm's Category/Brand/Unit/Supplier and the
+  // create-products header's Brand render. This field adds only what is
+  // supplier-specific: the contact id a pick carries, and the locked variant
+  // below. Before this, four supplier surfaces and the product form each had
+  // their own copy of "input plus a dropdown", and they disagreed (the
+  // product form's showed nothing until something was typed).
+  const suggestionOptions = useMemo<SuggestionOption[]>(
+    () => rows.map((row) => ({
+      value: row.name,
+      key: `supplier-${row.id}`,
+      selected: value.supplierId === row.id,
+      payload: row.id,
+    })),
+    [rows, value.supplierId],
+  )
+
+  // A pick carries the contact id outright. Typing does NOT carry a stale id
+  // forward -- it is re-resolved from the typed text every keystroke, so an
+  // edited name can never ride on the previous pick's id. P3-9: typing an
+  // existing supplier's name exactly resolves to that contact instead of
+  // falling through to a name-only attribution.
+  const handleChange = (next: string, option?: SuggestionOption) => {
+    if (option) {
+      onChange({ supplierId: Number(option.payload), supplierName: option.value })
+      return
+    }
+    // Same scope guard the suggestion list uses: rows captured for a
+    // different actor never resolve an id here either.
+    const resolvable = rowsScope.current && isActorReadScopeCurrent(rowsScope.current) ? rows : []
+    const resolved = resolveSupplierByExactName(resolvable, next)
+    onChange({ supplierId: resolved ? resolved.id : null, supplierName: next })
+  }
+  const liveOptions = rowsScope.current && isActorReadScopeCurrent(rowsScope.current) ? suggestionOptions : []
+
+  if (variant === 'compact') {
+    const shown = lockedName || value.supplierName.trim()
+    const iconClass = 'pointer-events-none absolute left-2.5 top-1/2 z-10 h-4 w-4 -translate-y-1/2 text-gray-400'
+    if (lockedName) {
+      return (
+        <div className="relative min-w-0" title={`${label}: ${lockedName}`}>
+          <Truck className={iconClass} aria-hidden="true" />
+          <div aria-label={label} className="flex h-10 min-w-0 items-center rounded-lg border border-gray-200 bg-gray-50 pl-8 pr-2 text-sm text-gray-700 dark:border-gray-600 dark:bg-gray-700/40 dark:text-gray-300">
+            <span className="detail-scroll-text min-w-0">{lockedName}</span>
+          </div>
+        </div>
+      )
+    }
+    return (
+      <div className="relative min-w-0" title={shown ? `${label}: ${shown}` : label}>
+        <Truck className={iconClass} aria-hidden="true" />
+        <SuggestionTextInput
+          id={`${idPrefix}-supplier`}
+          value={value.supplierName}
+          options={liveOptions}
+          limit={8}
+          disabled={disabled}
+          loading={loading}
+          loadingLabel={tr('loading', 'Loading...')}
+          onRequestOptions={ensureLoaded}
+          ariaLabel={label}
+          inputClassName={`input h-10 w-full min-w-0 pl-8 text-sm ${invalid ? 'ring-2 ring-red-400 dark:ring-red-500' : ''}`}
+          placeholder={label}
+          onChange={handleChange}
+        />
+      </div>
+    )
+  }
+
   if (lockedName) {
     return (
       <div className="block">
@@ -163,23 +239,6 @@ export default function SupplierPickerField({
     )
   }
 
-  // The input + floating list is the ONE shared SuggestionTextInput -- the
-  // same control ProductForm's Category/Brand/Unit/Supplier and the
-  // create-products header's Brand render. This field adds only what is
-  // supplier-specific: the contact id a pick carries, and the locked variant
-  // above. Before this, four supplier surfaces and the product form each had
-  // their own copy of "input plus a dropdown", and they disagreed (the
-  // product form's showed nothing until something was typed).
-  const suggestionOptions = useMemo<SuggestionOption[]>(
-    () => rows.map((row) => ({
-      value: row.name,
-      key: `supplier-${row.id}`,
-      selected: value.supplierId === row.id,
-      payload: row.id,
-    })),
-    [rows, value.supplierId],
-  )
-
   return (
     <div className="block">
       <span className="mb-1 flex items-center gap-1 text-[11px] font-medium text-gray-600 dark:text-gray-400">
@@ -189,7 +248,7 @@ export default function SupplierPickerField({
       <SuggestionTextInput
         id={`${idPrefix}-supplier`}
         value={value.supplierName}
-        options={rowsScope.current && isActorReadScopeCurrent(rowsScope.current) ? suggestionOptions : []}
+        options={liveOptions}
         limit={8}
         disabled={disabled}
         loading={loading}
@@ -198,24 +257,7 @@ export default function SupplierPickerField({
         ariaLabel={label}
         inputClassName="input min-h-11 w-full text-sm"
         placeholder={tr('supplier_optional_placeholder', 'Who this received date was bought from')}
-        onChange={(next, option) => {
-          // A pick carries the contact id outright. Typing does NOT carry a
-          // stale id forward -- it is re-resolved from the typed text every
-          // keystroke, so an edited name can never ride on the previous pick's
-          // id. P3-9: typing an existing supplier's name exactly now resolves
-          // to that contact instead of falling through to a name-only
-          // attribution, which is what made the same supplier get recorded two
-          // different ways depending on whether the suggestion was clicked.
-          if (option) {
-            onChange({ supplierId: Number(option.payload), supplierName: option.value })
-            return
-          }
-          // Same scope guard the suggestion list uses: rows captured for a
-          // different actor never resolve an id here either.
-          const resolvable = rowsScope.current && isActorReadScopeCurrent(rowsScope.current) ? rows : []
-          const resolved = resolveSupplierByExactName(resolvable, next)
-          onChange({ supplierId: resolved ? resolved.id : null, supplierName: next })
-        }}
+        onChange={handleChange}
       />
       {hint && hintDisplay === 'inline' ? <span className="mt-1 block text-[11px] text-gray-400">{hint}</span> : null}
       {value.supplierName.trim() !== '' ? (
