@@ -326,9 +326,8 @@ function skippedUnits(member: Member): number {
 function telegramChanges(members: Member[], via: StatusChangeVia): SaleStatusTelegramChange[] {
     return members.filter(member => member.changed).map(member => {
         const [from, to] = via === 'undo' ? [member.after, member.before] : [member.before, member.after];
-        const cancelling = statusOf(to) === 'cancelled';
-        const lostFee = !cancelling ? null : via === 'undo' ? member.fee : member.createdFee;
-        const reason = cancelling ? normalizeCancelReason(to.cancel_reason) : null;
+        const lostFee = via === 'undo' ? member.fee : member.createdFee;
+        const reason = statusOf(to) === 'cancelled' ? normalizeCancelReason(to.cancel_reason) : null;
         return {
             saleId: member.id, fromStatus: statusOf(from), toStatus: statusOf(to),
             reason: reason ? cancelReasonLabel(reason) : null,
