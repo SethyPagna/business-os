@@ -1459,6 +1459,46 @@ export function getPortalLanguageText(language: unknown, key: unknown): string {
   return typeof text === 'string' && text.trim() ? text : ''
 }
 
+// The Worker (routes/portal.ts) and the editor fill these in when the merchant left the
+// field empty; that English is system text, while a merchant's own wording is kept.
+const DEFAULT_CONFIG_COPY_KEYS: Record<string, [englishDefault: string, resourceKey: string]> = {
+  aboutTitle: ['About us', 'aboutTitle'],
+  aiTitle: ['Beauty Assistant', 'aiTitle'],
+  aiIntro: ['Tell us what you are shopping for and the assistant will compare products from the current public catalogue.', 'aiIntro'],
+  aiDisclaimer: ['AI generated, for reference only. For more accurate inquiries, please contact our store on Instagram or Facebook.', 'aiDisclaimer'],
+  faqTitle: ['Frequently asked questions', 'faqTitle'],
+  promotionsTitle: ['Featured offers', 'promotionsSectionFallback'],
+}
+const DEFAULT_LINK_LABEL_COPY_KEYS: Record<string, [englishDefault: string, resourceKey: string]> = {
+  website: ['Website', 'website'],
+}
+
+const sameText = (value: unknown, text: string) => String(value || '').normalize('NFC').trim() === text
+
+function localizedDefault(language: unknown, value: unknown, [englishDefault, resourceKey]: [string, string]): unknown {
+  return sameText(value, englishDefault) ? getPortalLanguageText(language, resourceKey) || value : value
+}
+
+export function defaultConfigText(language: unknown, field: string, value: unknown): unknown {
+  const entry = DEFAULT_CONFIG_COPY_KEYS[field]
+  return entry ? localizedDefault(language, value, entry) : value
+}
+
+export function localizeDefaultConfigCopy<Config extends { linkLabels?: Record<string, string> }>(config: Config, language: unknown): Config {
+  const next: Record<string, unknown> = { ...config }
+  for (const field of Object.keys(DEFAULT_CONFIG_COPY_KEYS)) {
+    if (field in next) next[field] = defaultConfigText(language, field, next[field])
+  }
+  if (config.linkLabels) {
+    const linkLabels: Record<string, string> = { ...config.linkLabels }
+    for (const [label, entry] of Object.entries(DEFAULT_LINK_LABEL_COPY_KEYS)) {
+      if (label in linkLabels) linkLabels[label] = String(localizedDefault(language, linkLabels[label], entry))
+    }
+    next.linkLabels = linkLabels
+  }
+  return next as Config
+}
+
 type AppTranslator = ((key: string) => string) | undefined
 
 // portal_a11y_* names are flat en/km pack keys, not portalEditor.* ones.

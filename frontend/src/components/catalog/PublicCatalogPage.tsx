@@ -48,7 +48,7 @@ import { usePortalBucket, usePortalWishlist, formatPortalBucketText, downloadPor
 import { usePortalAccount } from './portalAccount.ts'
 import PortalNoPaymentNotice from './PortalNoPaymentNotice.tsx'
 import PortalFooter from './legal/LegalPages.tsx'
-import { resolveStorefrontCopy } from './portalLanguagePacks.ts'
+import { localizeDefaultConfigCopy, resolveStorefrontCopy } from './portalLanguagePacks.ts'
 import { ADMIN_MAX_PRODUCT_GALLERY_IMAGES } from '../products/helpers/productGalleryHelpers.ts'
 import InstallPromptBand from '../shared/InstallPromptBand.tsx'
 import { installBeforeInstallPromptCapture, installStandaloneExternalLinkGuard } from '../../utils/standaloneNavigation.ts'
@@ -1081,7 +1081,10 @@ export default function PublicCatalogPage() {
     }
   }, [])
 
-  const displayConfig = useMemo<PortalConfig>(() => ({ ...DEFAULT_PUBLIC_CONFIG, ...config }), [config])
+  const displayConfig = useMemo<PortalConfig>(
+    () => localizeDefaultConfigCopy({ ...DEFAULT_PUBLIC_CONFIG, ...config }, pageLanguage),
+    [config, pageLanguage],
+  )
   const darkMode = theme === 'dark'
   const portalBackground = buildPortalBackground(displayConfig, darkMode)
   const previewTitle = String(displayConfig.businessName || displayConfig.title || '').trim()
