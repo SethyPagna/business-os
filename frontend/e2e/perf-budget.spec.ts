@@ -1,6 +1,6 @@
 import { expect, test, type Browser, type Page, type TestInfo } from '@playwright/test'
 import { PROJECT_CONTEXT_USE } from '../playwright.config'
-import { ADMIN_ORIGIN, STOREFRONT_ORIGIN, storefrontCards } from './support/harness'
+import { ADMIN_ORIGIN, STOREFRONT_KM_LABELS, STOREFRONT_ORIGIN, storefrontCards, storefrontSectionTab } from './support/harness'
 import { E2E_ACCOUNTS, APP_ROOT, USERNAME_FIELD, PASSWORD_FIELD } from './support/session'
 
 /**
@@ -191,7 +191,7 @@ test.describe('first-screen budgets', () => {
       const traffic = countRequests(page)
       const started = Date.now()
       await page.goto(`${STOREFRONT_ORIGIN}/`, { waitUntil: 'commit' })
-      const productsTab = page.getByRole('button', { name: 'Products', exact: true })
+      const productsTab = storefrontSectionTab(page, STOREFRONT_KM_LABELS, 'products')
       await expect(productsTab).toBeVisible({ timeout: 30_000 })
       const landingMs = Date.now() - started
       const landingRequests = traffic.all.length

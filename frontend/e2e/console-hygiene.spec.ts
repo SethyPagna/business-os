@@ -1,11 +1,13 @@
 import { expect, test, type Page } from '@playwright/test'
 import {
   ADMIN_ORIGIN,
+  STOREFRONT_KM_LABELS,
   STOREFRONT_ORIGIN,
   collectPageHealth,
   consoleErrorsExcludingKnown,
   pageErrorsExcludingKnown,
   storefrontCards,
+  storefrontSectionTab,
   type PageHealth,
 } from './support/harness'
 
@@ -142,14 +144,14 @@ test.describe('console hygiene', () => {
     // state. (Asserting the grid AFTER the walk instead was wrong: the last tab
     // visited is not the product tab, so the "missing" cards read as a product
     // defect when they are simply not that tab's content.)
-    const products = page.getByRole('button', { name: 'Products', exact: true })
+    const products = storefrontSectionTab(page, STOREFRONT_KM_LABELS, 'products')
     await expect(products).toBeVisible({ timeout: 30_000 })
     await products.click()
     await expect(page.locator(storefrontCards).first()).toBeVisible({ timeout: 30_000 })
 
     const visited: string[] = []
-    for (const tab of ['About', 'FAQ', 'Membership']) {
-      const button = page.getByRole('button', { name: tab, exact: true })
+    for (const tab of ['about', 'faq', 'membership'] as const) {
+      const button = storefrontSectionTab(page, STOREFRONT_KM_LABELS, tab)
       if (!(await button.count())) continue
       await button.first().click()
       await settle(page)
