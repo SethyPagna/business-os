@@ -137,6 +137,23 @@ assert.match(
   'the public storefront must replace the manifest link, not just the favicon',
 )
 
+// The storefront also renders at unknown paths on admin.*, where its identity
+// swap would re-advertise the shop app inside the staff origin.
+const brandEffect = publicCatalog.slice(
+  publicCatalog.lastIndexOf('useEffect(() => {', publicCatalog.indexOf('link[rel="manifest"]')),
+  publicCatalog.indexOf('}, [displayConfig.businessName, displayConfig.title])'),
+)
+assert.ok(brandEffect.includes('link[rel="manifest"]'), 'the storefront brand effect was read, not missed')
+const adminHostGuard = brandEffect.indexOf('if (isAdminHostname()) return')
+assert.ok(adminHostGuard > 0, 'the storefront identity swap must stop on an admin hostname')
+for (const swapped of ['link[rel="icon"]', 'link[rel="manifest"]', 'link[rel="apple-touch-icon"]', 'meta[name="apple-mobile-web-app-title"]']) {
+  assert.ok(brandEffect.indexOf(swapped) > adminHostGuard, `${swapped} is swapped before the admin-host guard`)
+}
+assert.match(publicCatalog, /import \{ isAdminHostname \} from '\.\.\/\.\.\/app\/pathRouting\.ts'/, 'the guard uses the one shared host predicate')
+assert.match(publicCatalog, /const STOREFRONT_HOME_SCREEN_NAME = 'Leang'/, 'the iPhone home-screen label is the owner\'s short name')
+assert.match(brandEffect, /appleTitle\.setAttribute\('content', STOREFRONT_HOME_SCREEN_NAME\)/)
+assert.doesNotMatch(publicCatalog, /Leang Beauty/, 'the retired storefront name is gone from the storefront')
+
 // --- every referenced icon file exists ------------------------------------
 
 const referenced = new Set<string>([
