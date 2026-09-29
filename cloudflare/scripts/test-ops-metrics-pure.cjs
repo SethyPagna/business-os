@@ -214,8 +214,10 @@ function fakeAnalytics(answers) {
       const text = lines.map(([t, v]) => common.formatPublic(t, v)).join('\n')
       assert.ok(text.includes('route groups: 1') && text.includes('metrics verdict: PASS') && text.includes('window: 1 trading days, one build only: no'), text)
       for (const secret of ['/api/', '87.25', '5000', '500', 'c0ffee', TOKEN, ACCOUNT]) assert.ok(!text.includes(secret), `public log carries ${secret}`)
-      assert.deepStrictEqual(fs.readdirSync(tmp), ['metrics-local.enc.json'])
-      const file = fs.readFileSync(path.join(tmp, 'metrics-local.enc.json'), 'utf8')
+      const written = fs.readdirSync(tmp)
+      assert.strictEqual(written.length, 1, `exactly one file on disk: ${written.join(', ')}`)
+      assert.match(written[0], /^metrics-[A-Za-z0-9-]+\.enc\.json$/, 'named metrics-<run id or local>.enc.json')
+      const file = fs.readFileSync(path.join(tmp, written[0]), 'utf8')
       for (const secret of ['/api/products/search', '87.25', TOKEN]) assert.ok(!file.includes(secret), `the report is not encrypted: ${secret}`)
       await assert.rejects(metrics.runMetrics({ env: { ...env, OPS_METRICS_FROM: '' }, fetchImpl: fake.fetchImpl }), (e) => e.code === 'missing-environment')
     } finally {
