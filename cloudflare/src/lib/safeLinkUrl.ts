@@ -51,3 +51,26 @@ export function normalizeSafeLinkUrl(value: unknown): string | null {
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null
   return raw
 }
+
+// Stricter than normalizeSafeLinkUrl: a picture served by another host would
+// let that host log every storefront visitor.
+const MAX_UPLOAD_PATH_LENGTH = 500
+const UPLOADS_PREFIX = '/uploads/'
+
+export function normalizePortalUploadPath(value: unknown): string | null {
+  const raw = String(value ?? '').trim()
+  if (!raw || raw.length > MAX_UPLOAD_PATH_LENGTH) return null
+  if (/[\u0000-\u001f\u007f\\]/.test(raw) || raw.includes('//')) return null
+  const pathPart = raw.split(/[?#]/)[0]
+  if (!pathPart.startsWith(UPLOADS_PREFIX) || pathPart.length <= UPLOADS_PREFIX.length) return null
+  for (const segment of pathPart.split('/')) {
+    let decoded = ''
+    try {
+      decoded = decodeURIComponent(segment)
+    } catch {
+      return null
+    }
+    if (decoded === '.' || decoded === '..' || /[\u0000-\u001f\u007f/\\]/.test(decoded)) return null
+  }
+  return raw
+}
