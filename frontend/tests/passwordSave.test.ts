@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import fs from 'node:fs'
 import { requestPasswordSave } from '../src/utils/passwordManager.ts'
 
 // AUTH-P1: after a successful sign-in or own password change the app asks the
@@ -100,6 +101,21 @@ await runTest('nothing to save without a username or a password', async () => {
     assert.deepEqual(stored, [])
     assert.deepEqual(clipboardWrites, [])
   })
+})
+
+await runTest('factory reset: the password pairs with the signed-in username, the confirm word is never offered as one, and Enter cannot submit', () => {
+  const source = fs.readFileSync(new URL('../src/components/utils-settings/ResetData.tsx', import.meta.url), 'utf8')
+  const start = source.indexOf('function FactoryReset(')
+  const factory = source.slice(start, source.indexOf('\nfunction ', start + 1))
+  assert.ok(start > 0 && factory.length > 0)
+  assert.doesNotMatch(factory, /<form\b/, 'not a form: Enter must never start a factory reset')
+  const confirmWord = factory.split('\n').find((line) => line.includes('placeholder={CONFIRM_WORD}')) || ''
+  assert.match(confirmWord, /name="reset_confirm_word"/)
+  assert.match(confirmWord, /autoComplete="off"/)
+  const username = /<input\b[^>]*name="username"[^>]*\/>/.exec(factory)
+  assert.ok(username, 'a username input for the password manager')
+  assert.match(username[0], /type="text"[\s\S]*autoComplete="username"[\s\S]*className="sr-only"/)
+  assert.ok(username.index < factory.indexOf('type="password"'), 'the username comes before the password')
 })
 
 if (failed > 0) process.exitCode = 1
