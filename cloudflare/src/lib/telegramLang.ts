@@ -332,6 +332,19 @@ const LABELS = {
   // same words.
   reportsOverview: { en: 'Reports overview', km: 'ទិដ្ឋភាពរួមរបាយការណ៍' }, // km.json telegram_reports_overview
   returns: { en: 'Returns', km: 'ការប្រគល់មកវិញ' },                  // km.json returns
+  received: { en: 'Received', km: 'បានទទួល' },                       // km.json received
+  dollars: { en: 'Dollars', km: 'ដុល្លារ' },                          // km.json shift_float_usd (ដុល្លារ)
+  riel: { en: 'Riel', km: 'រៀល' },                                    // km.json riel
+  rielEquivalent: { en: 'Riel equivalent', km: 'ចំនួនស្មើជារៀល' },    // km.json rfd_total_khr (ចំនួនស្មើ) + riel
+  bank: { en: 'Bank', km: 'ធនាគារ' },
+  totalDiscount: { en: 'Total discount', km: 'បញ្ចុះតម្លៃសរុប' },      // km.json total_discount
+  branches: { en: 'Branches', km: 'សាខា' },                           // km.json branches
+  topProducts: { en: 'Top products', km: 'ទំនិញលក់ដាច់' },            // km.json top_products
+  itemsReturned: { en: 'Items returned', km: 'ទំនិញប្រគល់' },         // km.json items_returned
+  compare: { en: 'Compare', km: 'ប្រៀបធៀប' },                         // km.json rpt_compare
+  yesterday: { en: 'Yesterday', km: 'ម្សិលមិញ' },                     // km.json yesterday
+  sameDayLastWeek: { en: 'Same day last week', km: 'ថ្ងៃដដែលសប្តាហ៍មុន' }, // km.json rpt_week (សប្តាហ៍)
+  compareUntil: { en: 'Each day up to', km: 'ថ្ងៃនីមួយៗរហូតដល់' },  // km.json rpt_each_expense (នីមួយៗ) + until_browser_closes (រហូតដល់)
 } as const satisfies Record<string, LabelEntry>
 
 export type TelegramLabelKey = keyof typeof LABELS
@@ -574,59 +587,37 @@ export function bi(en: string, km: string): string {
   return pair(en, km)
 }
 
-/**
- * The first `max` code points of `text`, cut only where a character ends.
- *
- * Every cap on text the bot sends goes through here (lib/telegram.ts's
- * cleanLine, and the command and the date a reply echoes back), and so does
- * the cashier part of a shift ID (routes/shifts.ts shiftCodeBase), which is
- * stored once and never rewritten.
- *
- * `slice` counts UTF-16 units, and an emoji -- any character past U+FFFF -- is
- * two of them, so a cut there can leave half a character behind: a lone
- * surrogate, which has no UTF-8 form, so Telegram can only refuse the message
- * or print a broken glyph in its place. Counting code points fixes that, but a
- * code point is still not what a reader calls a character: a Khmer vowel sign
- * or subscript (coeng), the halves of a flag and the parts of an emoji joined
- * by U+200D are each code points of their own. "ស្រស់" cut after its fourth
- * code point reads "ស្រស" -- a different word.
- *
- * So the budget stays in code points (every caller's length bound is
- * unchanged) and the cut keeps whole grapheme clusters: the result never has
- * more than `max` code points and never ends inside a character. A cluster
- * that would cross the cap is dropped whole. Where Intl.Segmenter is missing
- * the cut falls back to code points, which is still valid text.
- */
-let graphemeSegmenter: Intl.Segmenter | null | undefined
+const KHMER_COENG = '\u17D2'
+const ZERO_WIDTH_JOINER = '\u200D'
+const JOINS_PREVIOUS_CHARACTER = /^[\p{M}\p{Grapheme_Extend}\p{Emoji_Modifier}\u200D]$/u
+const REGIONAL_INDICATOR = /^\p{Regional_Indicator}$/u
 
-function graphemes(): Intl.Segmenter | null {
-  if (graphemeSegmenter === undefined) {
-    graphemeSegmenter = typeof Intl.Segmenter === 'function' ? new Intl.Segmenter(undefined, { granularity: 'grapheme' }) : null
-  }
-  return graphemeSegmenter
-}
-
-function codePoints(text: string): number {
+function regionalIndicatorsBefore(characters: readonly string[], index: number): number {
   let count = 0
-  for (const _ of text) count += 1
+  while (count < index && REGIONAL_INDICATOR.test(characters[index - count - 1])) count += 1
   return count
 }
 
+function isCharacterBoundary(characters: readonly string[], index: number): boolean {
+  const before = characters[index - 1]
+  const after = characters[index]
+  if (before === KHMER_COENG || before === ZERO_WIDTH_JOINER || JOINS_PREVIOUS_CHARACTER.test(after)) return false
+  return !REGIONAL_INDICATOR.test(after) || regionalIndicatorsBefore(characters, index) % 2 === 0
+}
+
+/**
+ * The first `max` code points of `text`, cut only where a character a reader sees ends: never half an emoji,
+ * a flag or a Khmer stack, never a sign without its consonant. Every Telegram cap and the stored shift ID use it.
+ * Not Intl.Segmenter: workerd's splits a Khmer coeng cluster ('ស្' + 'រ'), so its cut would end on a bare coeng
+ * in the Worker only.
+ */
 export function firstCharacters(text: string, max: number): string {
-  // Text of at most `max` UTF-16 units holds at most `max` code points, so an
-  // ordinary line never segments.
   if (text.length <= max) return text
-  const segmenter = graphemes()
-  if (!segmenter) return Array.from(text).slice(0, max).join('')
-  let kept = ''
-  let used = 0
-  for (const { segment } of segmenter.segment(text)) {
-    const size = codePoints(segment)
-    if (used + size > max) break
-    kept += segment
-    used += size
-  }
-  return kept
+  const characters = Array.from(text)
+  if (characters.length <= max) return text
+  let cut = max
+  while (cut > 0 && !isCharacterBoundary(characters, cut)) cut -= 1
+  return characters.slice(0, cut).join('')
 }
 
 /**
@@ -761,8 +752,8 @@ export const SHIFT_SECTION_EDGE = '='
 
 /**
  * The mark on either side of a section's name in every OTHER sectioned
- * report -- the `/report` day summary (and the evening push, which sends the
- * same text), `/sales`, `/fees`, `/stock` and `/inventory`:
+ * report -- the `/report` day summary (and "Send today's summary", which sends
+ * the same text), `/sales`, `/fees`, `/stock` and `/inventory`:
  * `=====Sales / ការលក់=====`, one line, no number and no rule above it.
  *
  * Owner, Sep 23 2026: "for telegram reports, instead of plain line ------we
@@ -984,7 +975,7 @@ export function telegramCommandReference(): string {
  */
 export type ParsedReportDate = { ok: true; date: string } | { ok: false; message: string }
 
-const shiftDays = (isoDate: string, days: number): string => {
+export const addCalendarDays = (isoDate: string, days: number): string => {
   const base = Date.parse(`${isoDate}T00:00:00Z`)
   if (!Number.isFinite(base)) return isoDate
   return new Date(base + days * 86_400_000).toISOString().slice(0, 10)
@@ -999,7 +990,7 @@ function isRealDate(year: number, month: number, day: number): boolean {
 export function parseReportDate(argument: string | undefined, today: string): ParsedReportDate {
   const raw = String(argument ?? '').trim().toLowerCase()
   if (!raw || raw === 'today') return { ok: true, date: today }
-  if (raw === 'yesterday') return { ok: true, date: shiftDays(today, -1) }
+  if (raw === 'yesterday') return { ok: true, date: addCalendarDays(today, -1) }
 
   const iso = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/)
   if (iso && isRealDate(Number(iso[1]), Number(iso[2]), Number(iso[3]))) return { ok: true, date: raw }

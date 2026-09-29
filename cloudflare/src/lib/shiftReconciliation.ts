@@ -179,7 +179,8 @@ export type ShiftCashOptions = {
   configuredMethods?: string[]
 }
 
-export type ShiftCashResult = { usd: number; khr: number; needsReview: boolean; reviewCodes: string[] }
+/** `usd`/`khr` are drawer cash net of change; `digital` is every other kind of tender. */
+export type ShiftCashResult = { usd: number; khr: number; digital: ShiftMoney; needsReview: boolean; reviewCodes: string[] }
 
 /**
  * Recorded tender only, split by kind. Old change columns hold equivalent
@@ -190,6 +191,7 @@ export function summarizeShiftCashDetail(rows: ShiftTenderRow[], options: ShiftC
   const kinds = options.kinds ?? {}
   const codes = new Set<string>()
   let usd = 0; let khr = 0; let tendered = false
+  let digitalUsd = 0; let digitalKhr = 0
   const amount = (value: unknown) => {
     const n = Number(value ?? 0)
     if (!Number.isFinite(n) || n < 0) { codes.add(SHIFT_REVIEW.tender); return 0 }
@@ -212,7 +214,7 @@ export function summarizeShiftCashDetail(rows: ShiftTenderRow[], options: ShiftC
       const partUsd = amount(detail.amount_usd); const partKhr = amount(detail.amount_khr)
       detailUsd += partUsd; detailKhr += partKhr
       if ((partUsd || partKhr) && (!method || method.includes(' + '))) { codes.add(SHIFT_REVIEW.tender); continue }
-      if (isCashPaymentMethod(method, kinds)) { usd += partUsd; khr += partKhr }
+      if (isCashPaymentMethod(method, kinds)) { usd += partUsd; khr += partKhr } else { digitalUsd += partUsd; digitalKhr += partKhr }
     }
     if (Math.abs(detailUsd - paidUsd) > 0.011 || Math.abs(detailKhr - paidKhr) > 1) codes.add(SHIFT_REVIEW.tender)
     const rate = Number(row.exchange_rate)
@@ -232,7 +234,10 @@ export function summarizeShiftCashDetail(rows: ShiftTenderRow[], options: ShiftC
   // an empty shift with a misconfigured list is not evidence of a lost drawer.
   if (tendered && options.configuredMethods && options.configuredMethods.length
     && !hasConfiguredCashMethod(options.configuredMethods, kinds)) codes.add(SHIFT_REVIEW.cashMethod)
-  return { usd: round2(usd), khr: roundKhr(khr), needsReview: codes.size > 0, reviewCodes: [...codes].sort() }
+  return {
+    usd: round2(usd), khr: roundKhr(khr), digital: { usd: round2(digitalUsd), khr: roundKhr(digitalKhr) },
+    needsReview: codes.size > 0, reviewCodes: [...codes].sort(),
+  }
 }
 
 /**
@@ -340,9 +345,17 @@ export async function shiftExpenses(
   env: Env,
   shift: ShiftReconciliationSession,
   nowMs: number,
-  options: { overflowLabel?: string; excludeDeliveryFees?: boolean } = {},
+  options: ExpenseRowOptions = {},
 ) {
-  const { clauses: feeClauses, params } = shiftFeeWhere(shift, nowMs)
+  const { clauses, params } = shiftFeeWhere(shift, nowMs)
+  return expenseRowsWhere(env, clauses, params, options)
+}
+
+export type ExpenseRowOptions = { overflowLabel?: string; excludeDeliveryFees?: boolean }
+
+/** The `fees` rows `clauses` select, summed by label: at most eight rows and one folded "other" row. */
+export async function expenseRowsWhere(env: Env, clauses: string[], params: Record<string, unknown>, options: ExpenseRowOptions = {}) {
+  const feeClauses = [...clauses]
   // The "other expenses" rows only: every fee minus the delivery half, which
   // composeShiftFigures moves into the delivery cost. The total this returns
   // is then that same "other" figure, row for row.
@@ -371,11 +384,21 @@ export async function shiftCashSales(
 ): Promise<ShiftCashResult> {
   const { clauses, params } = shiftWindowWhere('sales', shiftFilters(shift, nowMs))
   if (shift.branch_id) { clauses.push('sales.branch_id = @branchId'); params.branchId = shift.branch_id }
-  clauses.push("COALESCE(NULLIF(sales.sale_status, ''), 'completed') <> 'cancelled'")
+  return tenderWhere(env, clauses, params, options)
+}
+
+/** Recorded tender on the sales `clauses` select (alias `sales`), cancelled sales always excluded. */
+export async function tenderWhere(
+  env: Env,
+  clauses: string[],
+  params: Record<string, unknown>,
+  options?: ShiftCashOptions,
+): Promise<ShiftCashResult> {
+  const where = [...clauses, "COALESCE(NULLIF(sales.sale_status, ''), 'completed') <> 'cancelled'"]
   const rows = await getDb(env).prepare(`SELECT payment_method, payment_details, amount_paid_usd, amount_paid_khr,
       change_usd, change_khr, change_is_actual, change_exchange_rate, sale_status, total_usd, exchange_rate
-    FROM sales WHERE ${clauses.join(' AND ')} ORDER BY id LIMIT 5001`).all<ShiftTenderRow>(params)
-  const cash = summarizeShiftCashDetail(rows.slice(0, 5000), options)
+    FROM sales WHERE ${where.join(' AND ')} ORDER BY id LIMIT 5001`).all<ShiftTenderRow>(params)
+  const cash = summarizeShiftCashDetail(rows.slice(0, 5000), options ?? await readCashConfig(env))
   // Bound memory and refuse a partial drawer total rather than reporting one.
   if (rows.length > 5000) {
     return { ...cash, needsReview: true, reviewCodes: [...new Set([...cash.reviewCodes, SHIFT_REVIEW.limit])].sort() }

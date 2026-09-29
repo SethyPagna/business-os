@@ -87,11 +87,12 @@ sqlite.exec(`
   INSERT INTO sales VALUES (4, 1, '2026-09-22T04:00:00Z', 'completed', 70, NULL);
   INSERT INTO sales VALUES (5, 1, '2026-09-23T05:00:00Z', 'cancelled', 80, NULL);
   -- Two customer returns taken on the day (local UTC+7; 17:30Z on the 22nd is
-  -- 00:30 on the 23rd), one cancelled return, one on another branch.
-  INSERT INTO returns VALUES (1, 1, '2026-09-22T17:30:00Z', 'completed', 'customer', 'Damaged', 7.5, 0);
-  INSERT INTO returns VALUES (2, 1, '2026-09-23T09:00:00Z', 'completed', NULL, '', 2.5, 0);
-  INSERT INTO returns VALUES (3, 1, '2026-09-23T09:10:00Z', 'cancelled', 'customer', '', 40, 0);
-  INSERT INTO returns VALUES (4, 2, '2026-09-23T09:20:00Z', 'completed', 'customer', '', 60, 0);
+  -- 00:30 on the 23rd), one cancelled return, one on another branch. Each
+  -- carries its riel twin at 4,100, as every writer stores a refund.
+  INSERT INTO returns VALUES (1, 1, '2026-09-22T17:30:00Z', 'completed', 'customer', 'Damaged', 7.5, 30750);
+  INSERT INTO returns VALUES (2, 1, '2026-09-23T09:00:00Z', 'completed', NULL, '', 2.5, 10250);
+  INSERT INTO returns VALUES (3, 1, '2026-09-23T09:10:00Z', 'cancelled', 'customer', '', 40, 164000);
+  INSERT INTO returns VALUES (4, 2, '2026-09-23T09:20:00Z', 'completed', 'customer', '', 60, 246000);
 `)
 const preparedSql = []
 function d1() {
@@ -325,8 +326,8 @@ async function main() {
   const returnsRange = reports.exports.reportRecordRange('returns', 'returns', routeFilters).sql
   check('the expenses clause is reportRecordRange(\'expenses\')', feesSql.includes(`WHERE ${expensesRange}`), `${feesSql}\n${expensesRange}`)
   check('the returns clause is reportRecordRange(\'returns\')', returnsSql.includes(`AND ${returnsRange}`), `${returnsSql}\n${returnsRange}`)
-  check('the returns and expenses figures leave the other branch, day and cancelled rows out',
-    figures.returns.count === 2 && figures.returns.refundUsd === 10
+  check('the returns and expenses figures leave the other branch, day and cancelled rows out; a refund carries no riel twin',
+    JSON.stringify(figures.returns) === JSON.stringify({ count: 2, refundUsd: 10 })
       && JSON.stringify(figures.expenses) === JSON.stringify({ fees: { usd: 5, khr: 4000 }, deliveryFees: { usd: 0, khr: 0 }, courier: { usd: 4.5, khr: 0 } }),
     JSON.stringify(figures))
   // R-telegram X1 (FX-exc1 item 5): the day's shop-wide fees are reported
@@ -465,6 +466,56 @@ async function main() {
     (await telegram.deliverTelegramShiftOverview(envPaid, lateKey, T0 + 60_000)) === 'skipped' && posts.length === postsBeforeLate && rowFor(lateKey).status === 'skipped')
   clearSetting('telegram_shift_overview_enabled')
   check('a skipped send is final: turning it back on does not resend', (await telegram.deliverTelegramShiftOverview(envPaid, lateKey, T0 + 120_000)) === 'taken' && posts.length === postsBeforeLate)
+
+  const SHIFT_TOPIC = 9001
+  const SUMMARY_TOPIC = 9007
+  const deliverOne = async () => {
+    const routed = closedShift()
+    const key = telegram.shiftOverviewKey(routed.id, routed.revision)
+    await telegram.scheduleTelegramShiftOverview(envFree, routed.id, T0)
+    const before = posts.length
+    const outcome = await telegram.deliverTelegramShiftOverview(envFree, key, T0 + 60_000)
+    assert.equal(outcome, 'sent')
+    assert.equal(posts.length, before + 1)
+    return posts[posts.length - 1]
+  }
+  setting('telegram_topic_shift', String(SHIFT_TOPIC))
+  setting('telegram_topic_reports', String(SUMMARY_TOPIC))
+  const toSummary = await deliverOne()
+  check('the overview goes to the Summary topic when one is set', toSummary.message_thread_id === SUMMARY_TOPIC, JSON.stringify(toSummary))
+  clearSetting('telegram_topic_reports')
+  const toShift = await deliverOne()
+  check('with no Summary topic it falls back to the Shift topic', toShift.message_thread_id === SHIFT_TOPIC, JSON.stringify(toShift))
+  clearSetting('telegram_topic_shift')
+  const toGeneral = await deliverOne()
+  check('with neither topic set it goes to the group itself, with no thread id at all', !('message_thread_id' in toGeneral), JSON.stringify(toGeneral))
+  setting('telegram_topic_reports', String(SUMMARY_TOPIC))
+  const summaryOnly = await deliverOne()
+  check('a Summary topic alone is used without a Shift topic', summaryOnly.message_thread_id === SUMMARY_TOPIC, JSON.stringify(summaryOnly))
+
+  const warnings = []
+  const realWarn = console.warn
+  const stubFetch = globalThis.fetch
+  let deletedOnce = true
+  console.warn = (...args) => warnings.push(args.join(' '))
+  globalThis.fetch = async (url, init) => {
+    const body = JSON.parse(init.body)
+    if (deletedOnce && body.message_thread_id === SUMMARY_TOPIC) {
+      deletedOnce = false
+      return { ok: false, status: 400, text: async () => '{"ok":false,"description":"Bad Request: message thread not found"}' }
+    }
+    return stubFetch(url, init)
+  }
+  try {
+    const retried = await deliverOne()
+    check('a deleted Summary topic retries once into the group and the warning names telegram_topic_reports',
+      !('message_thread_id' in retried) && warnings.some((line) => line.includes('telegram_topic_reports')) && !warnings.some((line) => line.includes('telegram_topic_shift')),
+      warnings.join('\n'))
+  } finally {
+    console.warn = realWarn
+    globalThis.fetch = stubFetch
+    clearSetting('telegram_topic_reports')
+  }
 
   // ---- the table itself ---------------------------------------------------
   let rejected = false

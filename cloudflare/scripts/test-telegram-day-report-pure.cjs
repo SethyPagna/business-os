@@ -314,8 +314,8 @@ check('POSITIVE CONTROL: /report with no categories still prints every section',
   titlesOf(report).join(' | ') === 'Sales | Invoices | Expenses | Stock | Cashiers', report)
 // And the webhook has to HAND them over: the parameter existing proves
 // nothing if the one live caller still leaves it out.
-check('handleTelegramWebhook passes the shop\'s switches into the command reply',
-  /telegramCommandReply\(env, text, Date\.now\(\), config\.language, config\.categories\)/.test(
+check('handleTelegramWebhook passes the shop\'s switches, categories and summary sections, into the command reply',
+  /telegramCommandReply\(env, text, Date\.now\(\), config\.language, config\.categories, config\.summary\)/.test(
     fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'telegram.ts'), 'utf8')))
 
 // ---- /sales ------------------------------------------------------------------

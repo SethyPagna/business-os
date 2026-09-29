@@ -27,7 +27,7 @@ import { renameSalePaymentMethod } from '../lib/paymentSettlement'
 // is byte-identical and pinned by a test -- so frontend validation and backend
 // enforcement cannot drift apart.
 import { MAX_LOW_STOCK_THRESHOLD, validateLowStockSettingsWrite } from '../lib/lowStockSettings'
-import { isTelegramTopicSettingValue, TELEGRAM_TOPIC_KEYS } from '../lib/telegram'
+import { isTelegramSwitchValue, isTelegramTopicSettingValue, TELEGRAM_SUMMARY_SWITCHES, TELEGRAM_TOPIC_KEYS } from '../lib/telegram'
 import { normalizedHaystackSql } from '../lib/searchMatch'
 import type { Env } from '../index'
 import { actorSnapshot } from '../lib/actorSnapshot'
@@ -1077,6 +1077,15 @@ app.post('/', async (c) => {
         error: 'Telegram topic ID must be a whole number, or left empty for General.',
         code: 'invalid_telegram_topic_id',
       }, 400)
+    }
+    body[key] = raw
+  }
+
+  for (const key of Object.values(TELEGRAM_SUMMARY_SWITCHES)) {
+    if (!attemptedKeys.includes(key)) continue
+    const raw = String(body[key] ?? '').trim()
+    if (!isTelegramSwitchValue(raw)) {
+      return c.json({ error: 'A Telegram summary section switch must be on or off.', code: 'invalid_telegram_switch' }, 400)
     }
     body[key] = raw
   }

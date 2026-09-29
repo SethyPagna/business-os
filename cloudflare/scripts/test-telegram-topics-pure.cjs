@@ -12,8 +12,9 @@
 //      sales -> telegram_topic_sales, status -> telegram_topic_status,
 //      fees -> telegram_topic_expenses, stock_in/stock_out -> telegram_topic_stock.
 //   5. sendTelegramTest -> telegram_topic_alerts, sendTelegramTodaySummary ->
-//      telegram_topic_reports, sendTelegramShiftReport and
-//      deliverTelegramShiftOverview -> telegram_topic_shift.
+//      telegram_topic_reports, sendTelegramShiftReport -> telegram_topic_shift,
+//      deliverTelegramShiftOverview -> telegram_topic_reports, else
+//      telegram_topic_shift (owner, 29 Sep 2026).
 //   6. handleTelegramWebhook replies echo the INCOMING message_thread_id
 //      (a direct reply in the same thread the command was typed from), not a
 //      configured push topic.
@@ -300,11 +301,11 @@ const baseSettings = [
   // ---- shift report and shift overview: source-pinned, since a full close/
   // reopen fixture is already exercised end-to-end by
   // test-telegram-shift-report-pure.cjs and test-telegram-shift-overview-pure.cjs.
-  // This only pins that BOTH postTelegram calls carry telegram_topic_shift.
+  // The overview's own routing (Summary topic, else Shift) is driven end to end there.
   const telegramSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'telegram.ts'), 'utf8')
   assert.match(telegramSource, /shiftReportFor\(env, shift, nowMs, config\.language\), config\.chatId, config\.topics\.telegram_topic_shift, 'telegram_topic_shift'\)/, 'sendTelegramShiftReport must pass telegram_topic_shift')
-  assert.match(telegramSource, /formatShiftOverview\(name, shift, figures, config\.categories, nowMs\)\), config\.chatId, config\.topics\.telegram_topic_shift, 'telegram_topic_shift'\)/, 'deliverTelegramShiftOverview must pass telegram_topic_shift')
-  console.log('PASS sendTelegramShiftReport/deliverTelegramShiftOverview: both source-pinned to telegram_topic_shift')
+  assert.match(telegramSource, /return config\.topics\.telegram_topic_reports \? 'telegram_topic_reports' : 'telegram_topic_shift'/, 'the overview goes to the Summary topic, else the Shift topic')
+  console.log('PASS sendTelegramShiftReport stays on telegram_topic_shift; the overview prefers telegram_topic_reports')
 
   // ---- backend validation: routes/settings.ts rejects a non-integer, non-
   // empty topic id with the invalid_telegram_topic_id code, for EVERY one of
@@ -320,7 +321,7 @@ const baseSettings = [
   // Since 27 Sep 2026 the rule is ONE exported function, shared with the
   // Telegram /settopic save (lib/telegramTopicSetting.ts), pinned by value.
   assert.match(settingsSource, /if \(!isTelegramTopicSettingValue\(raw\)\)/, 'validation must use the shared topic value rule')
-  for (const good of ['', '7', '733']) assert.equal(bare.isTelegramTopicSettingValue(good), true, `${JSON.stringify(good)} is a valid topic value`)
+  for (const good of ['', '7', '9001']) assert.equal(bare.isTelegramTopicSettingValue(good), true, `${JSON.stringify(good)} is a valid topic value`)
   for (const bad of ['-5', '3.5', 'abc', ' 7x']) assert.equal(bare.isTelegramTopicSettingValue(bad), false, `${JSON.stringify(bad)} must be rejected`)
   console.log('PASS routes/settings.ts: every TELEGRAM_TOPIC_KEYS entry is validated integer-or-empty, rejected with invalid_telegram_topic_id')
 

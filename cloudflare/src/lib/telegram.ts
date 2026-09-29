@@ -3,21 +3,21 @@ import { loadLowStockConfig, lowStockThresholdSql } from './lowStockSettings'
 import { customerBilledDeliveryFeeUsd } from './saleTotals'
 import { BUSINESS_UTC_OFFSET_MINUTES, businessToday, localDateRangeClause } from './businessDateWindow'
 import {
-  bi, firstCharacters, getTelegramLanguage, HANGING_INDENT, label, labeled, localizeTelegramHeading, localizeTelegramLine, localizeTelegramValue, moreItems, normalizeTelegramLanguage, REPORT_SECTION_EDGE, ROW_BULLET, row, RULE, saleStatusMoneyLabel,
+  addCalendarDays, bi, firstCharacters, getTelegramLanguage, HANGING_INDENT, label, labeled, localizeTelegramHeading, localizeTelegramLine, localizeTelegramValue, moreItems, normalizeTelegramLanguage, REPORT_SECTION_EDGE, ROW_BULLET, row, RULE, saleStatusMoneyLabel,
   parseReportDate, resolveTopicFamilies, setTelegramLanguage, SHIFT_SECTION_EDGE, TELEGRAM_TOPIC_FAMILIES, telegramCommandReference, telegramUnauthorizedReply,
   topicFamilyName, topicGroupName,
 } from './telegramLang'
 import type { TelegramLabelKey, TelegramLanguage, TelegramTopicFamily } from './telegramLang'
 import {
-  getDeliveryContactTotals, getPaymentMethodBreakdown, getSalesGroupedTotals, getSalesTotals,
-  recognizedExpr, shiftWindowWhere, whereActiveSales, type SalesFilters,
+  getDeliveryContactTotals, getPaymentMethodBreakdown, getProductSalesRanking, getSalesGroupedTotals, getSalesTotals,
+  recognizedExpr, shiftWindowWhere, whereActiveSales, type SalesFilters, type SalesTotals,
 } from './salesAnalytics'
 // The drawer arithmetic is NOT defined here any more. lib/shiftReconciliation.ts
 // owns it, and the close routes, the current/history reads and this message all
 // call the same function -- see the header note there for what changed and why.
 import {
-  composeShiftFigures, computeShiftReconciliation, courierPayoutsWhere, FEE_SPLIT_COLUMNS, loadShiftReconciliation, shiftDeliveryFeeExpenses,
-  shiftExpenses, shiftFilters, summarizeShiftCash, type ShiftMoney, type ShiftReconciliation,
+  composeShiftFigures, computeShiftReconciliation, courierPayoutsWhere, expenseRowsWhere, FEE_SPLIT_COLUMNS, loadShiftReconciliation, shiftDeliveryFeeExpenses,
+  shiftExpenses, shiftFilters, summarizeShiftCash, tenderWhere, type ShiftCashResult, type ShiftMoney, type ShiftReconciliation,
 } from './shiftReconciliation'
 export { shiftExpenses, shiftFilters, summarizeShiftCash }
 import type { Env } from '../index'
@@ -46,6 +46,8 @@ type TelegramConfig = {
    * shift report is on"); `enabled` above still gates both.
    */
   shiftOverview: boolean
+  /** The overview's optional sections; each is on only when its switch says 'true'. */
+  summary: TelegramSummarySections
   /** Per-message-family forum topic (message_thread_id); undefined = General. */
   topics: Record<TelegramTopicKey, number | undefined>
 }
@@ -72,12 +74,32 @@ export const TELEGRAM_TOPIC_KEYS = [
 ] as const
 export type TelegramTopicKey = typeof TELEGRAM_TOPIC_KEYS[number]
 
+// Owner, 29 Sep 2026: the overview stays short, and each extra section is a
+// Settings switch that is off until the owner turns it on.
+export const TELEGRAM_SUMMARY_SWITCHES = {
+  sales: 'telegram_summary_sales_enabled',
+  cashiers: 'telegram_summary_cashiers_enabled',
+  products: 'telegram_summary_products_enabled',
+  returns: 'telegram_summary_returns_enabled',
+  expenses: 'telegram_summary_expenses_enabled',
+  compare: 'telegram_summary_compare_enabled',
+} as const
+export type TelegramSummarySection = keyof typeof TELEGRAM_SUMMARY_SWITCHES
+export type TelegramSummarySections = Record<TelegramSummarySection, boolean>
+const NO_SUMMARY_SECTIONS: TelegramSummarySections = { sales: false, cashiers: false, products: false, returns: false, expenses: false, compare: false }
+
+/** The WRITE rule for a summary switch, enforced by routes/settings.ts: 'true', 'false', or empty (off). */
+export function isTelegramSwitchValue(raw: string): boolean {
+  return raw === '' || raw === 'true' || raw === 'false'
+}
+
 // sql-bound-params: bounded by construction -- this fixed enum is owned by
 // this module and never grows from request or database input.
 const SETTING_KEYS = [
   'telegram_automation_enabled', 'telegram_chat_id', 'telegram_language',
   'telegram_sales_enabled', 'telegram_status_enabled', 'telegram_returns_enabled', 'telegram_fees_enabled', 'telegram_stock_in_enabled', 'telegram_stock_out_enabled',
   'telegram_shift_overview_enabled',
+  ...Object.values(TELEGRAM_SUMMARY_SWITCHES),
   ...TELEGRAM_TOPIC_KEYS,
 ] as const
 
@@ -224,6 +246,8 @@ async function getTelegramConfig(env: Env): Promise<TelegramConfig> {
     token: String(env.TELEGRAM_BOT_TOKEN || '').trim(),
     language: normalizeTelegramLanguage(values.telegram_language),
     shiftOverview: isEnabled(values.telegram_shift_overview_enabled, true),
+    summary: Object.fromEntries(Object.entries(TELEGRAM_SUMMARY_SWITCHES)
+      .map(([section, key]) => [section, String(values[key] ?? '').trim() === 'true'])) as TelegramSummarySections,
     // Everything is live after the first setup; individual category switches
     // remain available when a less noisy chat is preferred.
     categories: {
@@ -238,12 +262,28 @@ async function getTelegramConfig(env: Env): Promise<TelegramConfig> {
   }
 }
 
-function configurationProblem(config: TelegramConfig): string | null {
-  if (!config.token) return 'Telegram bot token is not configured on this Worker.'
-  if (!config.chatId) return 'Enter the Telegram alerts chat ID in Settings.'
+export const TELEGRAM_ERROR_CODES = [
+  'telegram_token_missing', 'telegram_chat_missing', 'telegram_admin_url_invalid', 'telegram_webhook_failed', 'telegram_rejected', 'telegram_menu_failed',
+] as const
+export type TelegramErrorCode = typeof TELEGRAM_ERROR_CODES[number]
+
+/** `code` names the failure for the caller; the message keeps its English wording. */
+export class TelegramError extends Error {
+  readonly code: TelegramErrorCode
+
+  constructor(code: TelegramErrorCode, message: string) {
+    super(message)
+    this.name = 'TelegramError'
+    this.code = code
+  }
+}
+
+function configurationProblem(config: TelegramConfig): TelegramError | null {
+  if (!config.token) return new TelegramError('telegram_token_missing', 'Telegram bot token is not configured on this Worker.')
+  if (!config.chatId) return new TelegramError('telegram_chat_missing', 'Enter the Telegram alerts chat ID in Settings.')
   return null
 }
-function commandProblem(config: TelegramConfig): string | null {
+function commandProblem(config: TelegramConfig): TelegramError | null {
   return configurationProblem(config)
 }
 export function splitTelegramMessage(text: string): string[] {
@@ -287,7 +327,7 @@ async function postTelegram(config: TelegramConfig, text: string, chatId = confi
         response = await sendTelegramApi(config, chatId, part)
         if (!response.ok) body = await response.text().catch(() => '')
       }
-      if (!response.ok) throw new Error(`Telegram rejected the message (${response.status})${body ? `: ${body.slice(0, 160)}` : ''}`)
+      if (!response.ok) throw new TelegramError('telegram_rejected', `Telegram rejected the message (${response.status})${body ? `: ${body.slice(0, 160)}` : ''}`)
     }
   }
 }
@@ -332,13 +372,49 @@ export async function sendTelegramEvent(env: Env, event: TelegramEvent): Promise
   return true
 }
 
-export async function getTelegramStatus(env: Env): Promise<{ configured: boolean; connected: boolean; enabled: boolean }> {
-  const config = await getTelegramConfig(env)
-  return { configured: Boolean(config.token), connected: !configurationProblem(config), enabled: config.enabled }
+export type TelegramCommandsState = 'connected' | 'not_connected' | 'unknown'
+const WEBHOOK_INFO_TIMEOUT_MS = 3000
+
+function commandWebhookUrl(env: Env): string {
+  return `${String(env.BUSINESS_OS_ADMIN_URL || '').replace(/\/$/, '')}/api/telegram/webhook`
 }
+
+// "Configured" is not "connected": a webhook that was never registered, or was lost with a token
+// change, leaves every command unanswered. Only the state is returned, nothing of WebhookInfo.
+async function commandsState(env: Env, config: TelegramConfig): Promise<TelegramCommandsState> {
+  if (configurationProblem(config)) return 'unknown'
+  try {
+    const response = await fetch(`https://api.telegram.org/bot${config.token}/getWebhookInfo`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}',
+      signal: AbortSignal.timeout(WEBHOOK_INFO_TIMEOUT_MS),
+    })
+    if (!response.ok) return 'unknown'
+    const result = await response.json<{ ok?: boolean; result?: { url?: string } }>().catch(() => null)
+    if (!result?.ok) return 'unknown'
+    return result.result?.url === commandWebhookUrl(env) ? 'connected' : 'not_connected'
+  } catch {
+    return 'unknown'
+  }
+}
+
+export async function getTelegramStatus(env: Env): Promise<{ configured: boolean; connected: boolean; enabled: boolean; commands: TelegramCommandsState }> {
+  const config = await getTelegramConfig(env)
+  return { configured: Boolean(config.token), connected: !configurationProblem(config), enabled: config.enabled, commands: await commandsState(env, config) }
+}
+
+/** What the command menu needs, all from this deployment's own settings: never from a request. */
+export async function telegramMenuSettings(env: Env): Promise<{ token: string; alertsChatId: string; chatIds: string[]; describe: (doc: { en: string; km: string }) => string }> {
+  const config = await getTelegramConfig(env); const problem = configurationProblem(config)
+  if (problem) throw problem
+  return {
+    token: config.token, alertsChatId: config.chatId, chatIds: config.chatIds,
+    describe: (doc) => withLanguage(config.language, () => bi(doc.en, doc.km)),
+  }
+}
+
 export async function sendTelegramTest(env: Env): Promise<void> {
   const config = await getTelegramConfig(env); const problem = configurationProblem(config)
-  if (problem) throw new Error(problem)
+  if (problem) throw problem
   // One confirmation line, then the reference. The sentence that used to sit
   // between them -- "Every notification category is on by default; turn any
   // off in Settings" -- explained Settings to a reader who was standing in
@@ -348,7 +424,7 @@ export async function sendTelegramTest(env: Env): Promise<void> {
     `✅ ${bi('Business OS alerts and commands are connected.', 'ការជូនដំណឹង និងពាក្យបញ្ជា Business OS បានភ្ជាប់រួចរាល់។')}`,
     '',
     telegramCommandReference(),
-  ].join('\n')), config.chatId, config.topics.telegram_topic_alerts)
+  ].join('\n')), config.chatId, config.topics.telegram_topic_alerts, 'telegram_topic_alerts')
   await configureTelegramWebhook(env)
 }
 
@@ -425,13 +501,13 @@ const dayFilters = (date: string): SalesFilters => ({ startDate: date, endDate: 
 // SUM(total_khr) over every row including the voided ones -- a different
 // quantity from this one, not a translation of it. money() prints just the
 // dollars when the riel side is zero.
-async function dayStats(env: Env, date: string): Promise<DayStats> {
+async function dayStats(env: Env, date: string, salesTotals: Promise<SalesTotals> = getSalesTotals(env, dayFilters(date))): Promise<DayStats> {
   const db = getDb(env)
   // The kernel's own "active sales on this day" clause, so the courier half
   // is read over exactly the sales the revenue above is.
   const courierWhere = whereActiveSales('sales', dayFilters(date))
   const [totals, fees, courier, stockIn, stockOut] = await Promise.all([
-    getSalesTotals(env, dayFilters(date)),
+    salesTotals,
     db.prepare(`SELECT COUNT(*) AS count, ${FEE_SPLIT_COLUMNS} FROM fees WHERE fee_date = @date`)
       .get<{ count: number; usd: number; khr: number; delivery_usd: number; delivery_khr: number }>({ date }),
     courierPayoutsWhere(env, [courierWhere.sql], courierWhere.params),
@@ -440,7 +516,7 @@ async function dayStats(env: Env, date: string): Promise<DayStats> {
     // without it this digest under-counted every session committed through
     // the Products page's "Add products" entry.
     db.prepare(`SELECT COUNT(*) AS count, COALESCE(SUM(quantity), 0) AS quantity FROM inventory_movements WHERE movement_type IN ('add', 'stock_in', 'transfer_in', 'move_in') AND ${dayClause('created_at')}`).get<{ count: number; quantity: number }>({ date }),
-    db.prepare(`SELECT COUNT(*) AS count, COALESCE(SUM(quantity), 0) AS quantity FROM inventory_movements WHERE movement_type IN ('remove', 'transfer_out', 'move_out') AND ${dayClause('created_at')}`).get<{ count: number; quantity: number }>({ date }),
+    db.prepare(`SELECT COUNT(*) AS count, COALESCE(SUM(quantity), 0) AS quantity FROM inventory_movements WHERE ${STOCK_OUT_MOVEMENT} AND ${dayClause('created_at')}`).get<{ count: number; quantity: number }>({ date }),
   ])
   return {
     date,
@@ -675,12 +751,14 @@ function foldRows<T>(rows: T[], limit: number, fold: (rest: T[]) => T): T[] {
  * counts in Sales and Profit.
  *
  * `categories` is the owner's per-category switch set, unchanged: a category
- * that is off takes its own lines out and nothing else.
+ * that is off takes its own lines out and nothing else. `extra` holds the
+ * overview sections the owner switched on (TELEGRAM_SUMMARY_SWITCHES), added
+ * on top of these and never in place of them.
  *
  * Exported for scripts/test-telegram-shift-report-pure.cjs, which renders it
  * with no database at all -- the same reason formatShiftReport is exported.
  */
-export function formatDaySummary(stats: DayStats, cashiers: CashierRow[], categories?: TelegramCategories): string {
+export function formatDaySummary(stats: DayStats, cashiers: CashierRow[], categories?: TelegramCategories, extra: SummarySectionFigures = {}): string {
   const showSales = categories?.sales !== false
   const lines = [reportTitle('📊', 'Business summary', 'សង្ខេបអាជីវកម្ម', stats.date)]
   // A section with no rows still prints its heading and says N/A, the rule
@@ -714,7 +792,9 @@ export function formatDaySummary(stats: DayStats, cashiers: CashierRow[], catego
   // nothing is a fact the owner wants stated, not a blank. Every other line
   // is dropped when it is zero.
   if (showSales) {
-    const sales = [labeled('revenue', usd(stats.sales?.usd)), labeled('profit', usd(stats.sales?.profitUsd))]
+    const sales = [labeled('revenue', usd(stats.sales?.usd))]
+    if (extra.sales?.totalDiscountUsd) sales.push(labeled('totalDiscount', usd(extra.sales.totalDiscountUsd)))
+    sales.push(labeled('profit', usd(stats.sales?.profitUsd)))
     if (stats.sales?.deliveryFeeUsd) sales.push(labeled('deliveryFee', usd(stats.sales.deliveryFeeUsd)))
     // The courier money is a SALES figure -- it comes out of the day's
     // deliveries, not out of the fees table -- and it is normally reported
@@ -724,7 +804,7 @@ export function formatDaySummary(stats: DayStats, cashiers: CashierRow[], catego
     // was only ever about the fees table. With the fees switched off the
     // split's delivery cost is exactly that courier money, in both currencies.
     if (!showExpenses && hasMoney(expenses.deliveryCost)) sales.push(labeled('deliveryCost', money(expenses.deliveryCost.usd, expenses.deliveryCost.khr)))
-    if (stats.sales?.creditUsd) sales.push(labeled('credit', usd(stats.sales.creditUsd)))
+    if (stats.sales?.creditUsd) sales.push(labeled('credit', notPaidValue(stats.sales.creditUsd, extra.sales)))
     // Directly below Not Paid, the owner's "also add one row below unpaid in
     // reports as well". One number, no sentence. Like Not Paid it is a
     // POSITIVE memo and is never subtracted from the lines above -- those stay
@@ -736,6 +816,7 @@ export function formatDaySummary(stats: DayStats, cashiers: CashierRow[], catego
     // Revenue above (refunds subtracted, voids contributing nothing), never a
     // second total.
     section('invoices', [countRow([['total', Number(stats.sales?.count) || 0], ['cancelled', Number(stats.sales?.cancelled) || 0]])])
+    if (extra.sales) section('received', receivedRows(extra.sales.received))
   }
 
   // Expenses -- the SAME split the shift report prints, through the same
@@ -750,6 +831,7 @@ export function formatDaySummary(stats: DayStats, cashiers: CashierRow[], catego
   // section that is ON and had nothing today; that distinction is the whole
   // point of the `enabled` argument.
   section('expenses', expenseRows, showExpenses)
+  if (extra.expenses) section('eachExpense', eachExpenseRows(extra.expenses), showExpenses)
 
   // Stock
   const stock: string[] = []
@@ -762,20 +844,39 @@ export function formatDaySummary(stats: DayStats, cashiers: CashierRow[], catego
   // count needs no noun, and repeating a two-language word on every bullet is
   // what made this block long.
   section('cashiers', cashiers.flatMap((row) => telegramRowLines(`${ROW_BULLET}${cleanLine(row.cashier, 60)}:`, [`${Number(row.count) || 0} · ${usd(row.usd)}`])))
+  if (extra.cashiers?.branches) section('branches', extra.cashiers.branches.flatMap((row) => countedRowLines(row, 60)), showSales)
+  if (extra.products) {
+    section('topProducts', topProductRows(extra.products), showSales)
+    section('lowStock', lowStockSectionRows(extra.products), showSales)
+  }
+  if (extra.returns) section('returns', returnsRows(extra.returns.count, extra.returns.usd, extra.returns))
+  if (extra.compare) section('compare', compareRows(Number(stats.sales?.usd) || 0, extra.compare), showSales)
   return lines.join('\n')
 }
 
-export async function sendTelegramTodaySummary(env: Env): Promise<void> {
+/** Settings → "Send today's summary": today's /report, into the Summary topic. */
+export async function sendTelegramTodaySummary(env: Env, nowMs: number = Date.now()): Promise<void> {
   const config = await getTelegramConfig(env); const problem = configurationProblem(config)
-  if (problem) throw new Error(problem)
-  const today = businessToday()
-  const [stats, cashiers] = await Promise.all([dayStats(env, today), cashierTotals(env, today)])
-  await postTelegram(config, withLanguage(config.language, () => formatDaySummary(stats, cashiers, config.categories)), config.chatId, config.topics.telegram_topic_reports, 'telegram_topic_reports')
+  if (problem) throw problem
+  const report = await dayReport(env, businessToday(nowMs), config.language, config.categories, config.summary, nowMs)
+  await postTelegram(config, report, config.chatId, config.topics.telegram_topic_reports, 'telegram_topic_reports')
 }
 
-async function dayReport(env: Env, date: string, language: TelegramLanguage, categories?: TelegramCategories): Promise<string> {
-  const [stats, cashiers] = await Promise.all([dayStats(env, date), cashierTotals(env, date)])
-  return withLanguage(language, () => formatDaySummary(stats, cashiers, categories))
+/** The one day summary behind /report and "Send today's summary": the whole shop's day, switched-on sections on top. */
+async function dayReport(
+  env: Env, date: string, language: TelegramLanguage, categories?: TelegramCategories,
+  summary: TelegramSummarySections = NO_SUMMARY_SECTIONS, nowMs: number = Date.now(),
+): Promise<string> {
+  const totals = getSalesTotals(env, dayFilters(date))
+  const otherLabel = withLanguage(language, () => label('other'))
+  const [stats, cashiers, extra] = await Promise.all([
+    dayStats(env, date, totals),
+    cashierTotals(env, date),
+    anySummarySection(summary)
+      ? summarySectionFigures(env, summaryScope({ business_date: date, branch_id: null }, nowMs), totals, summary, { otherLabel, cashierListShown: true })
+      : undefined,
+  ])
+  return withLanguage(language, () => formatDaySummary(stats, cashiers, categories, extra))
 }
 
 async function salesReport(env: Env, date: string, language: TelegramLanguage): Promise<string> {
@@ -849,13 +950,37 @@ async function feesReport(env: Env, date: string, language: TelegramLanguage): P
   })
 }
 
+// Same OR as the notification bell: /stock and /lowstock report BOTH tiers
+// in one list, so filtering on the low fragment alone would take the
+// out-of-stock rows down with the low ones when the alert is switched off.
+const lowOrOutOfStockSql = (lowThresholdSql: string): string =>
+  `(COALESCE(stock_quantity, 0) <= ${lowThresholdSql} OR COALESCE(stock_quantity, 0) <= COALESCE(out_of_stock_threshold, 0))`
+
+function lowStockRowLines(row: LowStockRow): string[] {
+  const out = Number(row.stock_quantity || 0) <= Number(row.out_of_stock_threshold || 0)
+  return telegramRowLines(`${ROW_BULLET}${out ? bi('OUT', 'អស់ស្តុក') : bi('LOW', 'ស្តុកទាប')}: ${cleanLine(row.name, 120)}:`, [`${Number(row.stock_quantity || 0)} (⚠ ${Number(row.low_threshold)})`])
+}
+
+const STOCK_OUT_MOVEMENT = "movement_type IN ('remove', 'transfer_out', 'move_out')"
+
+/** Items at or below their alert level now that were sold or taken out of stock on the scope's day and branch. */
+async function lowStockMovedOnDay(env: Env, filters: SalesFilters): Promise<{ rows: LowStockRow[]; more: number }> {
+  const lowThresholdSql = lowStockThresholdSql(await loadLowStockConfig(env), 'low_stock_threshold')
+  const sold = whereActiveSales('sales', filters)
+  const removed = [STOCK_OUT_MOVEMENT, localDateRangeClause('inventory_movements.created_at')]
+  if (filters.branchId != null) removed.push('inventory_movements.branch_id = @branchId')
+  const rows = await getDb(env).prepare(`SELECT name, stock_quantity, ${lowThresholdSql} AS low_threshold, out_of_stock_threshold, COUNT(*) OVER () AS matched
+    FROM products WHERE is_active = 1 AND ${lowOrOutOfStockSql(lowThresholdSql)}
+      AND (id IN (SELECT sale_items.product_id FROM sale_items JOIN sales ON sales.id = sale_items.sale_id WHERE ${sold.sql})
+        OR id IN (SELECT inventory_movements.product_id FROM inventory_movements WHERE ${removed.join(' AND ')}))
+    ORDER BY COALESCE(stock_quantity, 0) ASC, name ASC LIMIT ${SUMMARY_ROWS}`).all<LowStockRow & { matched: number }>(sold.params)
+  return { rows, more: Math.max(0, (Number(rows[0]?.matched) || 0) - rows.length) }
+}
+
 async function inventoryReport(env: Env, language: TelegramLanguage): Promise<string> {
   const db = getDb(env)
-  // Same OR as the notification bell: /stock and /lowstock report BOTH tiers
-  // in one list, so filtering on the low fragment alone would take the
-  // out-of-stock rows down with the low ones when the alert is switched off.
   const lowThresholdSql = lowStockThresholdSql(await loadLowStockConfig(env), 'low_stock_threshold')
-  const rows = await db.prepare(`SELECT name, stock_quantity, ${lowThresholdSql} AS low_threshold, out_of_stock_threshold FROM products WHERE is_active = 1 AND (COALESCE(stock_quantity, 0) <= ${lowThresholdSql} OR COALESCE(stock_quantity, 0) <= COALESCE(out_of_stock_threshold, 0)) ORDER BY COALESCE(stock_quantity, 0) ASC, name ASC LIMIT 12`).all<{ name: string; stock_quantity: number; low_threshold: number; out_of_stock_threshold: number }>()
+  const rows = await db.prepare(`SELECT name, stock_quantity, ${lowThresholdSql} AS low_threshold, out_of_stock_threshold FROM products WHERE is_active = 1 AND ${lowOrOutOfStockSql(lowThresholdSql)} ORDER BY COALESCE(stock_quantity, 0) ASC, name ASC LIMIT 12`).all<LowStockRow>()
   return withLanguage(language, () => {
     const title = reportTitle('📦', 'Low stock', 'ស្តុកទាប')
     if (!rows.length) return `${title}\n${bi('No active product is at or below its alert level.', 'គ្មានផលិតផលសកម្មណាមួយស្តុកទាបទេ។')}`
@@ -865,12 +990,7 @@ async function inventoryReport(env: Env, language: TelegramLanguage): Promise<st
     // rest of the reports took it on. One section carrying the count row it
     // already printed, then the capped list, unchanged; its header and its
     // `·` rows are the Sep 23 2026 ones every report shares.
-    const lines = [title, sectionHeader('stock', REPORT_SECTION_EDGE), labeled('products', rows.length)]
-    for (const row of rows) {
-      const out = Number(row.stock_quantity || 0) <= Number(row.out_of_stock_threshold || 0)
-      lines.push(...telegramRowLines(`${ROW_BULLET}${out ? bi('OUT', 'អស់ស្តុក') : bi('LOW', 'ស្តុកទាប')}: ${cleanLine(row.name, 120)}:`, [`${Number(row.stock_quantity || 0)} (⚠ ${Number(row.low_threshold)})`]))
-    }
-    return lines.join('\n')
+    return [title, sectionHeader('stock', REPORT_SECTION_EDGE), labeled('products', rows.length), ...rows.flatMap(lowStockRowLines)].join('\n')
   })
 }
 
@@ -1082,6 +1202,21 @@ export type ShiftReportFigures = {
   reconciliation?: ShiftReconciliation
 }
 
+const REVIEW_LABELS: Partial<Record<string, TelegramLabelKey>> = {
+  tender_incomplete: 'reviewTender',
+  change_ambiguous: 'reviewChange',
+  sale_limit_reached: 'reviewLimit',
+  cash_method_unresolved: 'reviewCashMethod',
+}
+/** A cash review's reasons, from lib/shiftReconciliation.ts's codes, in the chat's words. */
+function reviewReasons(codes: readonly string[]): string {
+  const reasons = codes
+    .map((code) => REVIEW_LABELS[code])
+    .filter((key): key is TelegramLabelKey => !!key)
+    .map((key) => label(key))
+  return reasons.length ? reasons.join(' · ') : NOT_APPLICABLE
+}
+
 /**
  * The whole message, pure -- no D1 and no clock: `nowMs` is only
  * formatBusinessDateTime's fallback for a stored time that does not parse.
@@ -1203,19 +1338,7 @@ export function formatShiftReport(shopName: string, shift: ShiftReportSession, f
       ? NOT_APPLICABLE
       : `${recon.difference.usd == null ? NOT_APPLICABLE : signed(recon.difference.usd, usd)} · ${recon.difference.khr == null ? NOT_APPLICABLE : signed(recon.difference.khr, riel)}`
     cash.push(labeled('difference', difference))
-    if (recon.needs_review) {
-      const reviewLabels: Partial<Record<string, TelegramLabelKey>> = {
-        tender_incomplete: 'reviewTender',
-        change_ambiguous: 'reviewChange',
-        sale_limit_reached: 'reviewLimit',
-        cash_method_unresolved: 'reviewCashMethod',
-      }
-      const reasons = recon.review_codes
-        .map((code) => reviewLabels[code])
-        .filter((key): key is TelegramLabelKey => !!key)
-        .map((key) => label(key))
-      cash.push(labeled('cashReview', reasons.length ? reasons.join(' · ') : NOT_APPLICABLE))
-    }
+    if (recon.needs_review) cash.push(labeled('cashReview', reviewReasons(recon.review_codes)))
   }
   lines.push(sectionHeader('cashCount', SHIFT_SECTION_EDGE), ...cash)
 
@@ -1569,7 +1692,71 @@ export type ShiftOverviewFigures = {
    *  they are not dropped without a trace (R-telegram X1). Null on the
    *  all-branches overview, whose `expenses` already count them. */
   unbranchedFees: ShiftMoney | null
-  returns: { count: number; refundUsd: number; refundKhr: number }
+  returns: { count: number; refundUsd: number }
+  /** Only the sections whose Settings switch is on; the short overview has none. */
+  sections?: SummarySectionFigures
+}
+
+type CountedMoney = { name: string; count: number; usd: number }
+type LowStockRow = { name: string; stock_quantity: number; low_threshold: number; out_of_stock_threshold: number }
+export type SummarySectionFigures = {
+  sales?: { received: ShiftCashResult; notPaidCount: number; totalDiscountUsd: number }
+  /** `cashiers` is null where the message lists them anyway (the day summary); `branches` is null on a branch's overview. */
+  cashiers?: { cashiers: CountedMoney[] | null; branches: CountedMoney[] | null }
+  products?: { top: Array<{ name: string; qty: number; usd: number }>; low: LowStockRow[]; moreLow: number }
+  /** Not the riel paid out: a refund does not record the currency it was paid in, so this is its riel equivalent. */
+  returns?: { count: number; usd: number; rielEquivalent: number; items: number }
+  expenses?: Array<{ label: string; usd: number; khr: number }>
+  /** `until` is the local time all three days are cut at while the day is still running; null compares whole days. */
+  compare?: { yesterdayUsd: number; lastWeekUsd: number; until: string | null }
+}
+
+const overviewTitle = (date: string): string => `📈 ${label('reportsOverview')}: ${formatBusinessDay(date)}`
+const overviewBranch = (branchId: number | null, branchName: string | null): string =>
+  (branchId == null ? bi('All branches', 'គ្រប់សាខា') : cleanLine(branchName || `#${branchId}`, 60))
+
+const countedRowLines = (row: CountedMoney, nameLength: number): string[] =>
+  telegramRowLines(`${ROW_BULLET}${cleanLine(row.name, nameLength)}:`, [`${Number(row.count) || 0} · ${usd(row.usd)}`])
+
+/** ` · +10%`: today's revenue against an earlier day's, in whole percent; nothing when that day took nothing. */
+function changeAgainst(today: number, before: number): string {
+  if (!(before > 0)) return ''
+  const percent = Math.round(((today - before) / before) * 100)
+  return ` · ${percent > 0 ? '+' : percent < 0 ? '−' : ''}${Math.abs(percent)}%`
+}
+
+function receivedRows(tender: ShiftCashResult): string[] {
+  const rows = [labeled('dollars', usd(tender.usd)), labeled('riel', riel(tender.khr)), labeled('bank', money(tender.digital.usd, tender.digital.khr))]
+  if (tender.needsReview) rows.push(labeled('cashReview', reviewReasons(tender.reviewCodes)))
+  return rows
+}
+
+const notPaidValue = (creditUsd: number, sales?: SummarySectionFigures['sales']): string =>
+  (sales ? `${sales.notPaidCount} · ${usd(creditUsd)}` : usd(creditUsd))
+
+const topProductRows = (products: NonNullable<SummarySectionFigures['products']>): string[] =>
+  products.top.flatMap((row) => countedRowLines({ name: row.name, count: row.qty, usd: row.usd }, 60))
+
+const lowStockSectionRows = (products: NonNullable<SummarySectionFigures['products']>): string[] =>
+  [...products.low.flatMap(lowStockRowLines), ...(products.moreLow ? [`${ROW_BULLET}${moreItems(products.moreLow)}`] : [])]
+
+const eachExpenseRows = (expenses: NonNullable<SummarySectionFigures['expenses']>): string[] =>
+  expenses.flatMap((row) => telegramRowLines(`${ROW_BULLET}${cleanLine(row.label, 60)}:`, [money(row.usd, row.khr)]))
+
+/** Returns by the day the RETURN was taken, apart from the Refunds row (that one follows the sale's day), never subtracted. */
+function returnsRows(count: number, refundUsd: number, extra?: SummarySectionFigures['returns']): string[] {
+  if (!count) return []
+  const rows = [labeled('total', `${count} · ${usd(refundUsd)}`)]
+  if (extra) rows.push(labeled('rielEquivalent', riel(extra.rielEquivalent)), labeled('itemsReturned', extra.items))
+  return rows
+}
+
+function compareRows(revenueUsd: number, compare: NonNullable<SummarySectionFigures['compare']>): string[] {
+  return [
+    ...(compare.until ? [labeled('compareUntil', compare.until)] : []),
+    labeled('yesterday', `${usd(compare.yesterdayUsd)}${changeAgainst(revenueUsd, compare.yesterdayUsd)}`),
+    labeled('sameDayLastWeek', `${usd(compare.lastWeekUsd)}${changeAgainst(revenueUsd, compare.lastWeekUsd)}`),
+  ]
 }
 
 /**
@@ -1582,10 +1769,10 @@ export type ShiftOverviewFigures = {
  * per-category switch set, applied the way formatDaySummary applies it.
  */
 export function formatShiftOverview(shopName: string, shift: ShiftReportSession, figures: ShiftOverviewFigures, categories?: TelegramCategories, nowMs: number = Date.now()): string {
-  const lines = [
-    `📈 ${label('reportsOverview')}: ${formatBusinessDay(shift.business_date)}`,
+  return [
+    overviewTitle(shift.business_date),
     labeled('shop', cleanLine(shopName || 'Business OS', 80)),
-    labeled('branch', shift.branch_id == null ? bi('All branches', 'គ្រប់សាខា') : cleanLine(shift.branch_name || `#${shift.branch_id}`, 60)),
+    labeled('branch', overviewBranch(shift.branch_id, shift.branch_name)),
     // Who closed which shift, and when: the message is sent BECAUSE of it.
     labeled('cashier', localizeTelegramValue(cleanLine(shift.user_name || 'No cashier', 60))),
     labeled('shift', cleanLine(shift.shift_code, 80)),
@@ -1594,24 +1781,38 @@ export function formatShiftOverview(shopName: string, shift: ShiftReportSession,
     // and these two rows say which close sent them.
     labeled('open', formatBusinessDateTime(shift.opened_at, nowMs)),
     labeled('close', shift.closed_at ? formatBusinessDateTime(shift.closed_at, nowMs) : NOT_APPLICABLE),
-  ]
+    ...overviewSections(figures, categories),
+  ].join('\n')
+}
+
+function overviewSections(figures: ShiftOverviewFigures, categories?: TelegramCategories): string[] {
+  const lines: string[] = []
   const section = (key: TelegramLabelKey, rows: string[], enabled = true): void => {
     if (enabled) lines.push(sectionHeader(key, REPORT_SECTION_EDGE), ...(rows.length ? rows : [EMPTY_SECTION]))
   }
   const showSales = categories?.sales !== false
   const showExpenses = categories?.fees !== false
+  const extra = figures.sections ?? {}
 
   const sales = [labeled('revenue', usd(figures.revenueUsd))]
   if (figures.itemDiscountUsd) sales.push(labeled('itemDiscount', usd(figures.itemDiscountUsd)))
   if (figures.invoiceDiscountUsd) sales.push(labeled('invoiceDiscount', usd(figures.invoiceDiscountUsd)))
+  if (extra.sales && figures.itemDiscountUsd && figures.invoiceDiscountUsd) sales.push(labeled('totalDiscount', usd(extra.sales.totalDiscountUsd)))
   if (figures.itemDiscountUsd || figures.invoiceDiscountUsd) sales.push(labeled('grossSales', usd(figures.grossSalesUsd)))
   sales.push(labeled('profit', usd(figures.profitUsd)))
   if (figures.deliveryFeeUsd) sales.push(labeled('deliveryFee', usd(figures.deliveryFeeUsd)))
-  if (figures.creditUsd) sales.push(labeled('credit', usd(figures.creditUsd)))
+  if (figures.creditUsd) sales.push(labeled('credit', notPaidValue(figures.creditUsd, extra.sales)))
   if (figures.refundUsd) sales.push(labeled('refunds', usd(figures.refundUsd)))
   section('sales', sales, showSales)
   section('invoices', [countRow([['total', Number(figures.invoices) || 0], ['cancelled', Number(figures.cancelled) || 0]])], showSales)
-  section('paymentMethods', figures.paymentMethods.flatMap((row) => telegramRowLines(`${ROW_BULLET}${cleanLine(row.method, 40)}:`, [`${Number(row.count) || 0} · ${usd(row.usd)}`])), showSales)
+  section('paymentMethods', figures.paymentMethods.flatMap((row) => countedRowLines({ name: row.method, count: row.count, usd: row.usd }, 40)), showSales)
+  if (extra.sales) section('received', receivedRows(extra.sales.received), showSales)
+  if (extra.cashiers?.cashiers) section('cashiers', extra.cashiers.cashiers.flatMap((row) => countedRowLines(row, 60)), showSales)
+  if (extra.cashiers?.branches) section('branches', extra.cashiers.branches.flatMap((row) => countedRowLines(row, 60)), showSales)
+  if (extra.products) {
+    section('topProducts', topProductRows(extra.products), showSales)
+    section('lowStock', lowStockSectionRows(extra.products), showSales)
+  }
 
   // The day summary's split and rows, switches applied the same way.
   const expenses = expenseTotals({
@@ -1625,26 +1826,53 @@ export function formatShiftOverview(shopName: string, shift: ShiftReportSession,
   const unbranched = figures.unbranchedFees
   if (unbranched && hasMoney(unbranched)) expenseRows.push(labeled('noBranchFees', money(unbranched.usd, unbranched.khr)))
   section('expenses', expenseRows, showExpenses)
+  if (extra.expenses) section('eachExpense', eachExpenseRows(extra.expenses), showExpenses)
 
-  // Returns by the day the RETURN was taken -- the Overview's returns block.
-  // Its refund is not the Refunds row above (that one follows the SALE's
-  // day), which is why it is its own section and never subtracted.
-  const returned = figures.returns
-  section('returns', returned.count ? [labeled('total', `${returned.count} · ${money(returned.refundUsd, returned.refundKhr)}`)] : [])
-  return lines.join('\n')
+  section('returns', returnsRows(figures.returns.count, figures.returns.refundUsd, extra.returns))
+  if (extra.compare) section('compare', compareRows(figures.revenueUsd, extra.compare), showSales)
+  return lines
 }
 
 const OVERVIEW_SHIFT_COLUMNS = `id, revision, ${SHIFT_COLUMNS}`
 type OverviewShift = ShiftReportSession & { id: number; revision: number }
 
-/** The Overview's figures for one day and branch, off the same kernel calls. */
-export async function shiftOverviewFigures(env: Env, shift: { business_date: string; branch_id: number | null }, otherLabel = 'Other'): Promise<ShiftOverviewFigures> {
-  const filters = shiftOverviewFilters(shift)
+type SummaryScope = {
+  filters: SalesFilters
+  params: Record<string, unknown>
+  feeWhere: string
+  returnsWhere: string
+  /** Set while the day is still running: the earlier days are compared up to this same moment. */
+  runningAtMs: number | null
+}
+
+// routes/reports.ts reportRecordRange's date-only branch, per table; the
+// pure test compares the two clause for clause.
+function summaryScope(day: { business_date: string; branch_id: number | null }, nowMs: number): SummaryScope {
+  const filters = shiftOverviewFilters(day)
   const params: Record<string, unknown> = { startDate: filters.startDate, endDate: filters.endDate }
-  // routes/reports.ts reportRecordRange's date-only branch, per table; the
-  // pure test compares the two clause for clause.
   const branch = (alias: string) => (filters.branchId == null ? '' : ` AND ${alias}.branch_id = @branchId`)
   if (filters.branchId != null) params.branchId = filters.branchId
+  return {
+    filters, params,
+    feeWhere: `fees.fee_date >= @startDate AND fees.fee_date <= @endDate${branch('fees')}`,
+    returnsWhere: `COALESCE(return_scope, 'customer') = 'customer' AND COALESCE(status, 'completed') <> 'cancelled'
+        AND ${localDateRangeClause('returns.created_at')}${branch('returns')}`,
+    runningAtMs: day.business_date === businessToday(nowMs) ? nowMs : null,
+  }
+}
+
+const anySummarySection = (sections: TelegramSummarySections): boolean => Object.values(sections).some(Boolean)
+
+/** The Overview's figures for one day and branch, off the same kernel calls. */
+export async function shiftOverviewFigures(
+  env: Env,
+  shift: { business_date: string; branch_id: number | null },
+  otherLabel = 'Other',
+  sections: TelegramSummarySections = NO_SUMMARY_SECTIONS,
+  nowMs: number = Date.now(),
+): Promise<ShiftOverviewFigures> {
+  const scope = summaryScope(shift, nowMs)
+  const { filters, params } = scope
   const db = getDb(env)
   // The courier half over the kernel's own sale set for these filters.
   const courierWhere = whereActiveSales('sales', filters)
@@ -1652,11 +1880,10 @@ export async function shiftOverviewFigures(env: Env, shift: { business_date: str
     getSalesTotals(env, filters),
     getSalesGroupedTotals(env, filters, 'payment_method'),
     db.prepare(`SELECT ${FEE_SPLIT_COLUMNS} FROM fees
-      WHERE fees.fee_date >= @startDate AND fees.fee_date <= @endDate${branch('fees')}`)
+      WHERE ${scope.feeWhere}`)
       .get<{ usd: number; khr: number; delivery_usd: number; delivery_khr: number }>(params),
-    db.prepare(`SELECT COUNT(*) AS count, ROUND(COALESCE(SUM(total_refund_usd), 0), 2) AS usd, ROUND(COALESCE(SUM(total_refund_khr), 0), 0) AS khr FROM returns
-      WHERE COALESCE(return_scope, 'customer') = 'customer' AND COALESCE(status, 'completed') <> 'cancelled'
-        AND ${localDateRangeClause('returns.created_at')}${branch('returns')}`).get<{ count: number; usd: number; khr: number }>(params),
+    db.prepare(`SELECT COUNT(*) AS count, ROUND(COALESCE(SUM(total_refund_usd), 0), 2) AS usd FROM returns
+      WHERE ${scope.returnsWhere}`).get<{ count: number; usd: number }>(params),
     courierPayoutsWhere(env, [courierWhere.sql], courierWhere.params),
     // A branch's overview only: the same days' fees with no branch at all,
     // which the branch clause above cannot see (R-telegram X1).
@@ -1686,7 +1913,69 @@ export async function shiftOverviewFigures(env: Env, shift: { business_date: str
       courier,
     },
     unbranchedFees: filters.branchId == null ? null : { usd: Number(unbranched?.usd) || 0, khr: Number(unbranched?.khr) || 0 },
-    returns: { count: Number(returned?.count) || 0, refundUsd: Number(returned?.usd) || 0, refundKhr: Number(returned?.khr) || 0 },
+    returns: { count: Number(returned?.count) || 0, refundUsd: Number(returned?.usd) || 0 },
+    sections: anySummarySection(sections) ? await summarySectionFigures(env, scope, totals, sections, { otherLabel }) : undefined,
+  }
+}
+
+const SUMMARY_ROWS = 8
+const TOP_PRODUCTS = 5
+const DAY_MS = 86_400_000
+
+const businessClock = (ms: number): string => new Date(ms + BUSINESS_UTC_OFFSET_MINUTES * 60_000).toISOString().slice(11, 16)
+
+/**
+ * The switched-on sections' figures, over exactly the scope's day and branch. Nothing is read for a section that is
+ * off, nor the cashier list when the message prints its own (`cashierListShown`).
+ */
+async function summarySectionFigures(
+  env: Env,
+  scope: SummaryScope,
+  totals: SalesTotals | Promise<SalesTotals>,
+  sections: TelegramSummarySections,
+  { otherLabel, cashierListShown = false }: { otherLabel: string; cashierListShown?: boolean },
+): Promise<SummarySectionFigures> {
+  const { filters } = scope
+  const sold = whereActiveSales('sales', filters)
+  const fold = (rows: CountedMoney[]) => foldRows(rows, SUMMARY_ROWS, (rest) => ({
+    name: otherLabel,
+    count: rest.reduce((sum, row) => sum + (Number(row.count) || 0), 0),
+    usd: round2(rest.reduce((sum, row) => sum + (Number(row.usd) || 0), 0)),
+  }))
+  const groupedBy = async (key: 'cashier' | 'branch') => fold((await getSalesGroupedTotals(env, filters, key, 50))
+    .map((row) => ({ name: row.label || 'Unknown', count: row.tx_count, usd: row.revenue_usd })))
+  const onDay = (offsetDays: number): SalesFilters => {
+    const date = addCalendarDays(String(filters.startDate), offsetDays)
+    const sameMoment = scope.runningAtMs == null ? {} : { createdTo: new Date(scope.runningAtMs + offsetDays * DAY_MS).toISOString() }
+    return { startDate: date, endDate: date, branchId: filters.branchId, ...sameMoment }
+  }
+  const [received, cashiers, branches, top, low, returned, expenses, yesterday, lastWeek] = await Promise.all([
+    sections.sales ? tenderWhere(env, [sold.sql], sold.params) : null,
+    sections.cashiers && !cashierListShown ? groupedBy('cashier') : null,
+    sections.cashiers && filters.branchId == null ? groupedBy('branch') : null,
+    sections.products ? getProductSalesRanking(env, filters, TOP_PRODUCTS) : null,
+    sections.products ? lowStockMovedOnDay(env, filters) : null,
+    sections.returns
+      ? getDb(env).prepare(`SELECT COUNT(*) AS count, ROUND(COALESCE(SUM(total_refund_usd), 0), 2) AS usd, COALESCE(SUM(total_refund_khr), 0) AS khr,
+        COALESCE(SUM((SELECT SUM(return_items.quantity) FROM return_items WHERE return_items.return_id = returns.id)), 0) AS items
+        FROM returns WHERE ${scope.returnsWhere}`).get<{ count: number; usd: number; khr: number; items: number }>(scope.params)
+      : null,
+    sections.expenses ? expenseRowsWhere(env, [scope.feeWhere], scope.params, { excludeDeliveryFees: true, overflowLabel: otherLabel }) : null,
+    sections.compare ? getSalesTotals(env, onDay(-1)) : null,
+    sections.compare ? getSalesTotals(env, onDay(-7)) : null,
+  ])
+  const { pending_tx_count: notPaidCount, total_discount_usd: totalDiscountUsd } = await totals
+  return {
+    ...(received && { sales: { received, notPaidCount: Number(notPaidCount) || 0, totalDiscountUsd: Number(totalDiscountUsd) || 0 } }),
+    ...(sections.cashiers && { cashiers: { cashiers, branches } }),
+    ...(top && low && { products: { top: top.map((row) => ({ name: row.product_name, qty: row.qty, usd: row.line_sales_usd })), low: low.rows, moreLow: low.more } }),
+    ...(sections.returns && {
+      returns: { count: Number(returned?.count) || 0, usd: Number(returned?.usd) || 0, rielEquivalent: Number(returned?.khr) || 0, items: Number(returned?.items) || 0 },
+    }),
+    ...(expenses && { expenses: expenses.details }),
+    ...(yesterday && lastWeek && {
+      compare: { yesterdayUsd: yesterday.revenue_usd, lastWeekUsd: lastWeek.revenue_usd, until: scope.runningAtMs == null ? null : businessClock(scope.runningAtMs) },
+    }),
   }
 }
 
@@ -1727,6 +2016,11 @@ export async function scheduleTelegramShiftOverview(env: Env, shiftId: number, n
   }
 }
 
+// Owner, 29 Sep 2026: the overview belongs in the Summary topic; the shift report stays in the Shift topic.
+function overviewTopicKey(config: TelegramConfig): TelegramTopicKey {
+  return config.topics.telegram_topic_reports ? 'telegram_topic_reports' : 'telegram_topic_shift'
+}
+
 export type ShiftOverviewDeliveryResult = 'sent' | 'skipped' | 'taken' | 'not-due' | 'retry' | 'failed'
 
 /**
@@ -1758,8 +2052,9 @@ export async function deliverTelegramShiftOverview(env: Env, key: string, nowMs:
     // The fold label is the only text the DATA read produces; composed first,
     // synchronously, as shiftFigures does.
     const otherLabel = withLanguage(config.language, () => label('other'))
-    const [name, figures] = await Promise.all([shopName(env), shiftOverviewFigures(env, shift, otherLabel)])
-    await postTelegram(config, withLanguage(config.language, () => formatShiftOverview(name, shift, figures, config.categories, nowMs)), config.chatId, config.topics.telegram_topic_shift, 'telegram_topic_shift')
+    const [name, figures] = await Promise.all([shopName(env), shiftOverviewFigures(env, shift, otherLabel, config.summary, nowMs)])
+    const topicKey = overviewTopicKey(config)
+    await postTelegram(config, withLanguage(config.language, () => formatShiftOverview(name, shift, figures, config.categories, nowMs)), config.chatId, config.topics[topicKey], topicKey)
     await settle('sent', null, ', sent_at = @now')
     return 'sent'
   } catch (error) {
@@ -1815,14 +2110,14 @@ function unknownCommandReply(command: string): string {
 }
 
 /**
- * `categories` is the owner's per-category switch set, threaded in from the
- * SAME `getTelegramConfig` read that supplies `language` just above it. It was
- * missing until Sep 23 2026, and the effect was that the switches worked on
- * the pushed evening summary (sendTelegramTodaySummary passes them) but did
- * nothing at all when someone typed `/report`: the same report, the same
- * builder, two different answers depending on how it was asked for.
+ * `categories` and `summary` are the owner's switches, threaded in from the
+ * SAME `getTelegramConfig` read that supplies `language` just above it, so
+ * `/report` and "Send today's summary" give the same answer for the same day.
  */
-export async function telegramCommandReply(env: Env, text: string, nowMs: number = Date.now(), language: TelegramLanguage = 'both', categories?: TelegramCategories): Promise<string> {
+export async function telegramCommandReply(
+  env: Env, text: string, nowMs: number = Date.now(), language: TelegramLanguage = 'both', categories?: TelegramCategories,
+  summary: TelegramSummarySections = NO_SUMMARY_SECTIONS,
+): Promise<string> {
   const parts = String(text || '').trim().split(/\s+/)
   // Group chats deliver "/report@shop_bot". Whose command it is was decided
   // by handleTelegramWebhook (addressedToThisBot); here the @name is dropped.
@@ -1842,7 +2137,7 @@ export async function telegramCommandReply(env: Env, text: string, nowMs: number
   // manager who types the plural should get the report rather than the
   // unknown-command help.
   if (command === '/shift' || command === '/shifts') return shiftReport(env, parsed.date, nowMs, language)
-  return dayReport(env, parsed.date, language, categories)
+  return dayReport(env, parsed.date, language, categories, summary, nowMs)
 }
 
 
@@ -1877,8 +2172,9 @@ export type TelegramTopicSave = {
   telegramUserId: string
   chatId: string
 }
-export type TelegramTopicWriter = (env: Env, save: TelegramTopicSave) => Promise<void>
-export type TelegramWebhookDeps = { saveTopics?: TelegramTopicWriter }
+export type TelegramWaitUntil = (work: Promise<unknown>) => void
+export type TelegramTopicWriter = (env: Env, save: TelegramTopicSave, waitUntil?: TelegramWaitUntil) => Promise<void>
+export type TelegramWebhookDeps = { saveTopics?: TelegramTopicWriter; waitUntil?: TelegramWaitUntil }
 
 const TOPIC_COMMANDS = new Set(['/settopic', '/topics'])
 const TOPIC_ID_LABEL = () => bi('Topic ID', 'លេខសម្គាល់ប្រធានបទ')
@@ -2013,7 +2309,7 @@ async function topicCommandReply(env: Env, config: TelegramConfig, message: Tele
   if (!deps.saveTopics) return withLanguage(language, topicSaveFailedReply)
   const { actor, userId } = telegramActor(message, chatId)
   try {
-    await deps.saveTopics(env, { keys: families.map((entry) => entry.key), threadId: target, actor, telegramUserId: userId, chatId })
+    await deps.saveTopics(env, { keys: families.map((entry) => entry.key), threadId: target, actor, telegramUserId: userId, chatId }, deps.waitUntil)
   } catch (error) {
     console.warn(`Telegram /settopic could not save: ${error instanceof Error ? error.message : String(error)}`)
     return withLanguage(language, topicSaveFailedReply)
@@ -2107,20 +2403,20 @@ export async function handleTelegramWebhook(env: Env, update: TelegramUpdate, de
     await postTelegram(config, await topicCommandReply(env, config, message as TelegramMessage, text, deps), chatId, threadId)
     return
   }
-  await postTelegram(config, await telegramCommandReply(env, text, Date.now(), config.language, config.categories), chatId, threadId)
+  await postTelegram(config, await telegramCommandReply(env, text, Date.now(), config.language, config.categories, config.summary), chatId, threadId)
 }
 export async function configureTelegramWebhook(env: Env): Promise<void> {
   const config = await getTelegramConfig(env); const problem = commandProblem(config)
-  if (problem) throw new Error(problem)
-  const webhookUrl = `${String(env.BUSINESS_OS_ADMIN_URL || '').replace(/\/$/, '')}/api/telegram/webhook`
-  if (!/^https:\/\//i.test(webhookUrl)) throw new Error('A public HTTPS Business OS admin URL is required for Telegram commands.')
+  if (problem) throw problem
+  const webhookUrl = commandWebhookUrl(env)
+  if (!/^https:\/\//i.test(webhookUrl)) throw new TelegramError('telegram_admin_url_invalid', 'A public HTTPS Business OS admin URL is required for Telegram commands.')
   const response = await fetch(`https://api.telegram.org/bot${config.token}/setWebhook`, {
     method: 'POST', headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ url: webhookUrl, secret_token: await webhookSecretFromToken(config.token), allowed_updates: ['message'], drop_pending_updates: false }),
   })
-  if (!response.ok) throw new Error(`Telegram could not connect the command webhook (${response.status}).`)
+  if (!response.ok) throw new TelegramError('telegram_webhook_failed', `Telegram could not connect the command webhook (${response.status}).`)
   const result = await response.json<{ ok?: boolean; description?: string }>().catch(() => ({} as { ok?: boolean; description?: string }))
-  if (!result.ok) throw new Error(result.description || 'Telegram could not connect the command webhook.')
+  if (!result.ok) throw new TelegramError('telegram_webhook_failed', result.description || 'Telegram could not connect the command webhook.')
 }
 export function telegramMoney(usd: unknown, khr: unknown): string { return money(usd, khr) }
 

@@ -516,7 +516,63 @@ assert.equal(lang.firstCharacters('ស្រស់ស្រស់', 4), 'ស្�
 assert.equal(lang.firstCharacters('ស្រស់'.repeat(5), 24), `${'ស្រស់'.repeat(4)}ស្រ`)
 assert.equal(lang.firstCharacters(`a${'🇰🇭'.repeat(12)}`, 24), `a${'🇰🇭'.repeat(11)}`, 'no half flag')
 assert.equal(lang.firstCharacters('👨‍👩‍👧'.repeat(6), 24), '👨‍👩‍👧'.repeat(4), 'no emoji family cut at a joiner')
-console.log('PASS character cut: a capped name and an echoed date never end on half a character')
+// workerd, the Worker's runtime, segments a Khmer coeng cluster as 'ស្' + 'រ' where Node keeps 'ស្រ' whole
+// (AB-W3), so every cut is also taken under a segmenter shaped like workerd's.
+const COENG = String.fromCodePoint(0x17d2)
+const COENG_WITHOUT_ITS_CONSONANT = new RegExp(`${COENG}(?![${String.fromCodePoint(0x1780)}-${String.fromCodePoint(0x17a2)}])`)
+const HostSegmenter = Intl.Segmenter
+class WorkerdGraphemeSegmenter {
+  constructor(locales, options) { this.host = new HostSegmenter(locales, options) }
+  segment(text) {
+    let index = 0
+    return [...this.host.segment(text)].flatMap(({ segment }) => segment.split(new RegExp(`(?<=${COENG})`))).map((segment) => {
+      const piece = { segment, index, input: text }
+      index += segment.length
+      return piece
+    })
+  }
+}
+const underWorkerdSegmenter = (run) => {
+  Intl.Segmenter = WorkerdGraphemeSegmenter
+  try { return run() } finally { Intl.Segmenter = HostSegmenter }
+}
+assert.deepEqual(underWorkerdSegmenter(() => [...new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment('ស្រ')].map(({ segment }) => segment)),
+  ['ស្', 'រ'], 'control: the stand-in splits a coeng cluster the way workerd does')
+const workerdLang = loadReal('lib/telegramLang.ts')
+const CUTS = [['Node', lang.firstCharacters], ['workerd', (text, max) => underWorkerdSegmenter(() => workerdLang.firstCharacters(text, max))]]
+// Real names, each split by hand into the characters a reader sees.
+const KHMER_NAMES = [['ស្រី', 'ពៅ'], ['សុ', 'ខា'], ['ច័', 'ន្ទ'], ['ក្រែ', 'ម', 'លា', 'ប', 'មុ', 'ខ'], ['ស្ត្រី'], ['គ្រឿ', 'ង', 'សំ', 'អា', 'ង']]
+for (const [runtime, cut] of CUTS) {
+  assert.equal(cut(`${'ក'.repeat(28)}ស្រី`, 30), 'ក'.repeat(28), `${runtime}: a cap inside ស្រី drops it whole`)
+  for (const written of KHMER_NAMES) {
+    const name = written.join('')
+    for (let max = 1; max <= [...name].length; max += 1) {
+      let expected = ''
+      for (const character of written) {
+        if ([...expected + character].length > max) break
+        expected += character
+      }
+      assert.equal(cut(name, max), expected, `${runtime}: "${name}" capped at ${max}`)
+    }
+  }
+}
+const workerdTelegram = loadReal('lib/telegram.ts', {
+  './lowStockSettings': lowStockStub,
+  './db': { getDb: () => { throw new Error('no DB in this test') } },
+  './businessDateWindow': businessDateWindow,
+  './telegramLang': workerdLang,
+  './saleTotals': saleTotals,
+  './nativeSaleChange': nativeSaleChange,
+  './salesAnalytics': salesAnalytics,
+  './shiftReconciliation': reconciliationFor(() => { throw new Error('no DB in this test') }, salesAnalytics),
+})
+const khmerSale = underWorkerdSegmenter(() => workerdTelegram.formatSaleTelegramLines({
+  receiptNumber: 'R-2', cashier: `${'ក'.repeat(58)}ស្រីពៅ`, exchangeRate: 4100,
+  items: [{ name: `${'ក'.repeat(98)}ស្ត្រី`, quantity: 1, unitPriceUsd: 1, lineTotalUsd: 1 }],
+  subtotalUsd: 1, discountUsd: 0, totalUsd: 1, paidUsd: 1,
+})).join('\n')
+assert.ok(khmerSale.includes(`1. ${'ក'.repeat(98)}`) && !khmerSale.includes(`${'ក'.repeat(98)}ស`) && !COENG_WITHOUT_ITS_CONSONANT.test(khmerSale), `workerd: a capped Khmer name never ends on a bare coeng:\n${khmerSale}`)
+console.log('PASS character cut: a capped name and an echoed date never end on half a character, under the Node and the workerd segmenter')
 
 // --- 5. the command reference -----------------------------------------------
 
@@ -673,6 +729,9 @@ const lastSent = () => sent[sent.length - 1].body.text
 
   await wired.handleTelegramWebhook(env, { message: { text: '/report', chat: { id: '-100222' } } })
   assert.ok(lastSent().includes('📊'), 'a second allow-listed chat id also works')
+  assert.equal(sent[sent.length - 1].body.chat_id, '-100222', 'a typed command is answered in the chat that asked, not the alerts chat')
+  await wired.handleTelegramWebhook(env, { message: { text: '/topics', chat: { id: '-100222' } } })
+  assert.equal(sent[sent.length - 1].body.chat_id, '-100222', 'a topic command from another approved chat is refused in that chat, not the alerts chat')
 
   const before = sent.length
   await wired.handleTelegramWebhook(env, { message: { text: '/report', chat: { id: -100999 } } })

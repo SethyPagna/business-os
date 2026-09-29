@@ -92,6 +92,9 @@ const packs = {
 // ---- a real settings table + the tables the return alerts read -------------
 const ALERTS_CHAT = '-1001111111111' // a made-up forum group id, not the shop's
 const OTHER_APPROVED_CHAT = '-1002222222222'
+// Made-up topic ids, a different one per family, so an assertion that tells two
+// families apart cannot pass by coincidence.
+const TOPIC = { shift: 9001, sales: 9002, status: 9003, returns: 9004, expenses: 9005, stock: 9006, reports: 9007, alerts: 9008 }
 function makeDb(settings) {
   const sql = new Database(':memory:')
   sql.exec(`
@@ -170,6 +173,8 @@ globalThis.fetch = async (url, init) => {
     const families = lang.TELEGRAM_TOPIC_FAMILIES
     assert.deepEqual(families.map((entry) => entry.family), ['shift', 'sales', 'status', 'returns', 'expenses', 'stock', 'reports', 'alerts'])
     assert.deepEqual([...families.map((entry) => entry.key)].sort(), [...telegram.TELEGRAM_TOPIC_KEYS].sort(), 'one family per settings key')
+    assert.deepEqual(Object.keys(TOPIC), families.map((entry) => entry.family), 'the fixture names every family')
+    assert.equal(new Set(Object.values(TOPIC)).size, families.length, 'every family has its own fixture topic id')
     for (const entry of families) {
       const packKey = `${entry.key}_label`
       assert.equal(entry.en, packs.en[packKey], `${entry.family}: English must be en.json ${packKey}`)
@@ -189,13 +194,13 @@ globalThis.fetch = async (url, init) => {
 
     // ---- 2. composed text -----------------------------------------------------
     lang.setTelegramLanguage('both')
-    const overview = telegram.formatTopicsOverview({ telegram_topic_sales: 734, telegram_topic_returns: 769 })
+    const overview = telegram.formatTopicsOverview({ telegram_topic_sales: TOPIC.sales, telegram_topic_returns: TOPIC.returns })
     assert.equal(overview, [
       '📌 Forum topics/ប្រធានបទក្នុងវេទិកា',
       '· Shift reports/របាយការណ៍វេន: Group (General)/ក្រុម (General)',
-      '· Sale invoices/វិក្កយបត្រលក់: 734',
+      `· Sale invoices/វិក្កយបត្រលក់: ${TOPIC.sales}`,
       '· Status updates/ការផ្លាស់ប្ដូរស្ថានភាព: Group (General)/ក្រុម (General)',
-      '· Returns/ការប្រគល់មកវិញ: 769',
+      `· Returns/ការប្រគល់មកវិញ: ${TOPIC.returns}`,
       '· Expenses & fees/ចំណាយ និងថ្លៃសេវា: Group (General)/ក្រុម (General)',
       '· Stock in/out/ស្តុកចូល/ចេញ: Group (General)/ក្រុម (General)',
       "· Day's summary/សេចក្តីសង្ខេបប្រចាំថ្ងៃ: Group (General)/ក្រុម (General)",
@@ -205,10 +210,10 @@ globalThis.fetch = async (url, init) => {
       'Back to the group/ត្រឡប់ទៅក្រុមវិញ: /settopic sales general',
     ].join('\n'))
     const salesFamily = families.find((entry) => entry.family === 'sales')
-    assert.equal(telegram.formatTopicSaved([salesFamily], 734), [
+    assert.equal(telegram.formatTopicSaved([salesFamily], TOPIC.sales), [
       '✅ This topic will now receive/ប្រធានបទនេះនឹងទទួល:',
       '· Sale invoices/វិក្កយបត្រលក់',
-      '· Topic ID/លេខសម្គាល់ប្រធានបទ: 734',
+      `· Topic ID/លេខសម្គាល់ប្រធានបទ: ${TOPIC.sales}`,
     ].join('\n'))
     assert.equal(telegram.formatTopicSaved([salesFamily], null), [
       '✅ These now go to the group/ទាំងនេះនឹងផ្ញើទៅក្រុមវិញ:',
@@ -216,13 +221,13 @@ globalThis.fetch = async (url, init) => {
       '· Sent to/ផ្ញើទៅ: Group (General)/ក្រុម (General)',
     ].join('\n'))
     lang.setTelegramLanguage('km')
-    assert.equal(telegram.formatTopicSaved([salesFamily], 734), '✅ ប្រធានបទនេះនឹងទទួល:\n· វិក្កយបត្រលក់\n· លេខសម្គាល់ប្រធានបទ: 734')
+    assert.equal(telegram.formatTopicSaved([salesFamily], TOPIC.sales), `✅ ប្រធានបទនេះនឹងទទួល:\n· វិក្កយបត្រលក់\n· លេខសម្គាល់ប្រធានបទ: ${TOPIC.sales}`)
     lang.setTelegramLanguage('en')
-    assert.equal(telegram.formatTopicSaved([salesFamily], 734), '✅ This topic will now receive:\n· Sale invoices\n· Topic ID: 734')
+    assert.equal(telegram.formatTopicSaved([salesFamily], TOPIC.sales), `✅ This topic will now receive:\n· Sale invoices\n· Topic ID: ${TOPIC.sales}`)
     assert.ok(!KHMER.test(telegram.formatTopicsOverview({})), 'English-only overview carries no Khmer')
     lang.setTelegramLanguage('both')
-    const usage = telegram.formatSetTopicUsage(734)
-    assert.ok(usage.startsWith('🧵 Topic ID/លេខសម្គាល់ប្រធានបទ: 734'), usage)
+    const usage = telegram.formatSetTopicUsage(TOPIC.sales)
+    assert.ok(usage.startsWith(`🧵 Topic ID/លេខសម្គាល់ប្រធានបទ: ${TOPIC.sales}`), usage)
     for (const entry of families) assert.ok(usage.includes(`· /settopic ${entry.family}: ${entry.en}/${entry.km}`), `usage lists ${entry.family}`)
     assert.ok(usage.includes('/settopic sales general'), 'usage shows the reset')
     const reference = lang.telegramCommandReference()
@@ -239,18 +244,18 @@ globalThis.fetch = async (url, init) => {
       await telegram.handleTelegramWebhook(runEnv, { message }, deps)
       return sent
     }
-    const inTopic = (text, extra = {}) => ({ text, chat: { id: Number(ALERTS_CHAT) }, from: { id: 42, username: 'owner' }, message_thread_id: 734, is_topic_message: true, ...extra })
+    const inTopic = (text, extra = {}) => ({ text, chat: { id: Number(ALERTS_CHAT) }, from: { id: 42, username: 'owner' }, message_thread_id: TOPIC.sales, is_topic_message: true, ...extra })
 
     let out = await run(inTopic('/settopic sales'))
-    assert.deepEqual(saves, [{ keys: ['telegram_topic_sales'], threadId: 734, actor: 'telegram:@owner', telegramUserId: '42', chatId: ALERTS_CHAT }])
+    assert.deepEqual(saves, [{ keys: ['telegram_topic_sales'], threadId: TOPIC.sales, actor: 'telegram:@owner', telegramUserId: '42', chatId: ALERTS_CHAT }])
     assert.deepEqual(memberCalls, [{ chat_id: ALERTS_CHAT, user_id: 42 }], 'admin rights were checked with Telegram for this chat and sender')
-    assert.equal(out.length, 1); assert.equal(out[0].message_thread_id, 734, 'the confirmation lands in the topic it was typed in')
+    assert.equal(out.length, 1); assert.equal(out[0].message_thread_id, TOPIC.sales, 'the confirmation lands in the topic it was typed in')
     assert.equal(out[0].chat_id, ALERTS_CHAT)
     assert.ok(out[0].text.startsWith('✅ This topic will now receive/ប្រធានបទនេះនឹងទទួល:\n· Sale invoices/វិក្កយបត្រលក់'), out[0].text)
-    pass('/settopic sales in topic 734 by an admin: saves telegram_topic_sales=734, confirms bilingually in topic 734')
+    pass(`/settopic sales in topic ${TOPIC.sales} by an admin: saves telegram_topic_sales=${TOPIC.sales}, confirms bilingually in topic ${TOPIC.sales}`)
 
-    out = await run(inTopic('/settopic@shop_bot returns'))
-    assert.deepEqual(saves.map((s) => [s.keys, s.threadId]), [[['telegram_topic_returns'], 734]], 'a command addressed to THIS bot runs')
+    out = await run(inTopic('/settopic@shop_bot returns', { message_thread_id: TOPIC.returns }))
+    assert.deepEqual(saves.map((s) => [s.keys, s.threadId]), [[['telegram_topic_returns'], TOPIC.returns]], 'a command addressed to THIS bot runs')
 
     // E4 (R-telegram, 27 Sep 2026): with privacy mode off every bot in the
     // group receives "/settopic@other_bot"; the name says whose it is. Our own
@@ -343,27 +348,27 @@ globalThis.fetch = async (url, init) => {
 
     out = await run(inTopic('/settopic'))
     assert.equal(saves.length, 0); assert.equal(memberCalls.length, 0, 'reading needs no admin check')
-    assert.ok(out[0].text.startsWith('🧵 Topic ID/លេខសម្គាល់ប្រធានបទ: 734'), out[0].text)
+    assert.ok(out[0].text.startsWith(`🧵 Topic ID/លេខសម្គាល់ប្រធានបទ: ${TOPIC.sales}`), out[0].text)
     out = await run(inTopic('/settopic salez'))
     assert.equal(saves.length, 0)
     assert.ok(out[0].text.startsWith('🤔 I do not know the type "salez"./មិនស្គាល់ប្រភេទ "salez" ទេ។'), out[0].text)
-    out = await run(inTopic('/topics'), { ...BASE, telegram_topic_shift: '733', telegram_topic_sales: '734' })
-    assert.ok(out[0].text.includes('· Shift reports/របាយការណ៍វេន: 733') && out[0].text.includes('· Status updates/ការផ្លាស់ប្ដូរស្ថានភាព: Group (General)/ក្រុម (General)'), out[0].text)
+    out = await run(inTopic('/topics'), { ...BASE, telegram_topic_shift: String(TOPIC.shift), telegram_topic_sales: String(TOPIC.sales) })
+    assert.ok(out[0].text.includes(`· Shift reports/របាយការណ៍វេន: ${TOPIC.shift}`) && out[0].text.includes(`· Sale invoices/វិក្កយបត្រលក់: ${TOPIC.sales}`) && out[0].text.includes('· Status updates/ការផ្លាស់ប្ដូរស្ថានភាព: Group (General)/ក្រុម (General)'), out[0].text)
     out = await run(inTopic('/settopic sales'), { ...BASE, telegram_language: 'km' })
-    assert.equal(out[0].text, '✅ ប្រធានបទនេះនឹងទទួល:\n· វិក្កយបត្រលក់\n· លេខសម្គាល់ប្រធានបទ: 734', 'the reply follows the shop\'s language setting')
+    assert.equal(out[0].text, `✅ ប្រធានបទនេះនឹងទទួល:\n· វិក្កយបត្រលក់\n· លេខសម្គាល់ប្រធានបទ: ${TOPIC.sales}`, 'the reply follows the shop\'s language setting')
     pass('/settopic with no type shows this topic\'s id; an unknown type lists the choices; /topics reads stored ids; replies follow the language setting')
 
     // ---- 4. the writer ----------------------------------------------------------
     dbHolder.db = makeDb({ ...BASE, telegram_topic_sales: '12' })
     audits.length = 0; bumps.length = 0; broadcasts.length = 0
-    await topicSetting.saveTelegramTopicSetting(env, { keys: ['telegram_topic_sales', 'telegram_topic_returns'], threadId: 734, actor: 'telegram:@owner', telegramUserId: '42', chatId: ALERTS_CHAT })
+    await topicSetting.saveTelegramTopicSetting(env, { keys: ['telegram_topic_sales', 'telegram_topic_returns'], threadId: TOPIC.sales, actor: 'telegram:@owner', telegramUserId: '42', chatId: ALERTS_CHAT })
     const stored = Object.fromEntries(dbHolder.db.sql.prepare("SELECT key, value FROM settings WHERE key LIKE 'telegram_topic_%'").all().map((row) => [row.key, row.value]))
-    assert.deepEqual(stored, { telegram_topic_sales: '734', telegram_topic_returns: '734' })
+    assert.deepEqual(stored, { telegram_topic_sales: String(TOPIC.sales), telegram_topic_returns: String(TOPIC.sales) })
     assert.equal(audits.length, 1)
     const [, userId, actor, action, entity, entityId, details, change] = audits[0]
     assert.deepEqual([userId, actor, action, entity, entityId], [null, 'telegram:@owner', 'update', 'settings', null])
-    assert.deepEqual(details, { keys: ['telegram_topic_sales', 'telegram_topic_returns'], source: 'telegram', command: '/settopic', telegram_user_id: '42', chat_id: ALERTS_CHAT, thread_id: 734 })
-    assert.equal(change.before.telegram_topic_sales, '12'); assert.equal(change.after.telegram_topic_sales, '734')
+    assert.deepEqual(details, { keys: ['telegram_topic_sales', 'telegram_topic_returns'], source: 'telegram', command: '/settopic', telegram_user_id: '42', chat_id: ALERTS_CHAT, thread_id: TOPIC.sales })
+    assert.equal(change.before.telegram_topic_sales, '12'); assert.equal(change.after.telegram_topic_sales, String(TOPIC.sales))
     assert.deepEqual(bumps, ['settings'], 'the settings cache version is bumped, as the settings route does')
     assert.deepEqual(broadcasts, [{ channel: 'settings', payload: { action: 'update', keys: ['telegram_topic_sales', 'telegram_topic_returns'] } }])
     await topicSetting.saveTelegramTopicSetting(env, { keys: ['telegram_topic_sales'], threadId: null, actor: 'telegram:@owner', telegramUserId: '42', chatId: ALERTS_CHAT })
@@ -374,15 +379,15 @@ globalThis.fetch = async (url, init) => {
     pass('writer: same digits-or-empty rule, upsert, audit row naming the Telegram sender with before/after, settings bump + broadcast; reset stores ""; cannot touch telegram_chat_id')
 
     // ---- 5. returns ---------------------------------------------------------------
-    const routed = { ...BASE, telegram_topic_sales: '734', telegram_topic_status: '738', telegram_topic_returns: '769', telegram_topic_stock: '55' }
+    const routed = { ...BASE, telegram_topic_sales: String(TOPIC.sales), telegram_topic_status: String(TOPIC.status), telegram_topic_returns: String(TOPIC.returns), telegram_topic_stock: String(TOPIC.stock) }
     dbHolder.db = makeDb(routed); sent = []
     await telegram.sendReturnTelegramEvent(env, 6, { kind: 'customer', returnNumber: 'RET-0006', receiptNumber: '20260927-111500', party: 'Sokha', branch: 'Store', reason: 'Wrong shade', returnType: 'refund', refundUsd: 4, refundKhr: 0, by: 'za' })
     assert.equal(sent.length, 1, 'one message, not one in Returns AND one in Sales')
-    assert.equal(sent[0].message_thread_id, 769, 'a customer return goes to the returns topic')
+    assert.equal(sent[0].message_thread_id, TOPIC.returns, 'a customer return goes to the returns topic')
     assert.ok(sent[0].text.startsWith('↩️ Return recorded/បានកត់ត្រាការប្រគល់មកវិញ'), sent[0].text)
     dbHolder.db = makeDb(routed); sent = []
     await telegram.sendReturnTelegramEvent(env, 7, { kind: 'supplier', returnNumber: 'SRET-0007', party: 'Acme', by: 'za' })
-    assert.equal(sent[0].message_thread_id, 55, 'a supplier return stays a stock-out')
+    assert.equal(sent[0].message_thread_id, TOPIC.stock, 'a supplier return stays a stock-out')
 
     // Default: unset returns switch follows Sales.
     for (const [settings, expected, why] of [
@@ -395,7 +400,7 @@ globalThis.fetch = async (url, init) => {
       await telegram.sendReturnTelegramEvent(env, 6, { kind: 'customer', returnNumber: 'RET-0006', by: 'za' })
       assert.equal(sent.length, expected, why)
     }
-    pass('returns: one message, in the returns topic (769) only; supplier returns stay stock; unset switch follows Sales')
+    pass(`returns: one message, in the returns topic (${TOPIC.returns}) only; supplier returns stay stock; unset switch follows Sales`)
 
     lang.setTelegramLanguage('both')
     assert.deepEqual(telegram.formatReturnStatusTelegramLines({ kind: 'customer', returns: [{ returnNumber: 'RET-0005', receiptNumber: '20260927-101500', party: 'Dara', branch: 'Store', refundUsd: 12.5, refundKhr: 0 }], by: 'za', nowMs: Date.parse('2026-09-27T03:00:00Z') }), [
@@ -408,7 +413,7 @@ globalThis.fetch = async (url, init) => {
     const restored = sent.find((m) => m.text.startsWith('♻️ Return restored'))
     const supplier = sent.find((m) => m.text.startsWith('🚫 Supplier return cancelled'))
     assert.ok(cancelled && restored && supplier, sent.map((m) => m.text).join('\n---\n'))
-    assert.equal(cancelled.message_thread_id, 769); assert.equal(restored.message_thread_id, 769); assert.equal(supplier.message_thread_id, 55)
+    assert.equal(cancelled.message_thread_id, TOPIC.returns); assert.equal(restored.message_thread_id, TOPIC.returns); assert.equal(supplier.message_thread_id, TOPIC.stock)
     const cancelledLines = cancelled.text.split('\n')
     assert.equal(cancelledLines[0], '🚫 Return cancelled/បានបោះបង់ការប្រគល់មកវិញ')
     assert.ok(KHMER.test(cancelledLines.slice(1).join('\n')), `the rows are bilingual too:\n${cancelled.text}`)
@@ -417,7 +422,7 @@ globalThis.fetch = async (url, init) => {
     dbHolder.db = makeDb({ ...routed, telegram_language: 'km' }); sent = []
     await telegram.sendReturnStatusTelegramEvents(env, [5], 'za')
     assert.equal(sent[0].text.split('\n')[0], '🚫 បានបោះបង់ការប្រគល់មកវិញ')
-    pass(`return cancel/restore: bilingual headings, returns topic 769 for customer, stock for supplier; sample:\n${cancelled.text}`)
+    pass(`return cancel/restore: bilingual headings, returns topic ${TOPIC.returns} for customer, stock for supplier; sample:\n${cancelled.text}`)
 
     // ---- 6. wiring ------------------------------------------------------------------
     const read = (rel) => fs.readFileSync(path.join(root, 'src', rel), 'utf8')
@@ -428,9 +433,11 @@ globalThis.fetch = async (url, init) => {
     assert.match(returnsRoute, /wrote && body\.field === 'status' && changedIds\.length\) \{\s*c\.executionCtx\.waitUntil\(sendReturnStatusTelegramEvents\(c\.env, changedIds, actorSnapshot\(user\)\)/, 'bulk status change announces only the changed ids, and only from the call whose batch wrote them')
     const historyRoute = read('routes/actionHistory.ts')
     assert.match(historyRoute, /applier\.name === RETURN_BULK_ACTION_KIND && payload\.field === 'status'[\s\S]{0,400}sendReturnStatusTelegramEvents/, 'undo/redo of a return status change is announced')
-    assert.match(read('routes/telegram.ts'), /handleTelegramWebhook\(c\.env, update, \{ saveTopics: saveTelegramTopicSetting \}\)/)
+    assert.match(read('routes/telegram.ts'), /handleTelegramWebhook\(c\.env, update, \{ saveTopics: saveTelegramTopicSetting, waitUntil: \(work\) => c\.executionCtx\.waitUntil\(work\) \}\)/)
     for (const rel of ['lib/telegram.ts', 'lib/telegramLang.ts', 'lib/telegramTopicSetting.ts', 'routes/telegram.ts']) {
-      assert.ok(!/\b(733|734|738|769)\b/.test(read(rel)), `${rel} must not hard-code the shop's topic ids`)
+      const source = read(rel)
+      assert.ok(!/(message_thread_id|messageThreadId|threadId|telegram_topic_[a-z]+)['"]?\s*[:=]\s*['"]?\d/.test(source), `${rel} must take every topic id from settings, never a literal`)
+      for (const id of Object.values(TOPIC)) assert.ok(!new RegExp(`\\b${id}\\b`).test(source), `${rel} must not carry this test's topic id ${id}`)
     }
     const settingsUi = fs.readFileSync(path.join(root, '..', 'frontend', 'src', 'components', 'utils-settings', 'Settings.tsx'), 'utf8')
     for (const key of telegram.TELEGRAM_TOPIC_KEYS) assert.ok(settingsUi.includes(`['${key}', t('${key}_label')`), `Settings has a field for ${key}`)

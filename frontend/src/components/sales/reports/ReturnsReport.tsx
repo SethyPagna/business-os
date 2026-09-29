@@ -173,7 +173,7 @@ export default function ReturnsReport(p: ReportViewProps) {
     <ReportFrame
       title={title}
       titleControl={p.titleControl}
-      hint={{ label: title, text: tr('rpt_hint_returns', 'Customer returns that are not cancelled, by the return’s business date. Refunds are shown in the currency they were recorded in; the same refunds are already subtracted from Revenue.') }}
+      hint={{ label: title, text: tr('rpt_hint_returns', 'Customer returns that are not cancelled, by the return’s business date. Refunds are shown in the display currency, like revenue; the same refunds are already subtracted from Revenue.') }}
       secondaryActions={
         <>
           {MODES.map((m) => (

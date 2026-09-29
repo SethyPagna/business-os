@@ -70,6 +70,7 @@
 //   double3 rows_read           double4 rows_written
 //   double5 statements          double6 sample weight (1 / sample rate)
 //   blob7 D1 region ('' unknown, 'mixed' when calls differ)
+//   blob8 build revision ('dev' unstamped, 'other' when not revision-shaped)
 //   double7 failed D1 calls     double8 late D1 calls (after seal)
 //   double9 D1 calls            double10 D1 wall ms (sum around each call)
 //   double11 D1 calls served by the primary
@@ -125,6 +126,19 @@ function finiteOrZero(value: unknown): number {
 function metaRecord(meta: unknown): Record<string, unknown> {
   return (meta && typeof meta === 'object' ? meta : {}) as Record<string, unknown>
 }
+
+// The esbuild define lib/buildStamp.ts reads, read directly so the pure tests
+// that load this module need no new stub.
+declare const __WORKER_BUILD_REVISION__: string | undefined
+
+/** The stamped git revision; 'dev' for an unstamped build, as /api/runtime/version says. */
+export function buildRevisionLabel(raw: unknown): string {
+  const revision = typeof raw === 'string' ? raw.trim() : ''
+  if (!revision || revision === 'dev') return 'dev'
+  return /^[A-Za-z0-9._-]{1,64}$/.test(revision) ? revision : 'other'
+}
+
+const BUILD_REVISION = buildRevisionLabel(typeof __WORKER_BUILD_REVISION__ !== 'undefined' ? __WORKER_BUILD_REVISION__ : undefined)
 
 /** Region codes are short identifiers (e.g. APAC); anything else is 'other'. */
 export function sanitizeRegion(region: unknown): string {
@@ -219,7 +233,7 @@ export type MetricsDatapoint = {
 }
 
 export function datapointLabels(point: MetricsDatapoint): string[] {
-  return [point.kind, point.template, point.method, point.status, point.cache, point.flags, point.acc.d1Region]
+  return [point.kind, point.template, point.method, point.status, point.cache, point.flags, point.acc.d1Region, BUILD_REVISION]
 }
 
 export function datapointValues(point: MetricsDatapoint): number[] {

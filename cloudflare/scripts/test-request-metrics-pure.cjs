@@ -22,6 +22,8 @@
 //     label and never added to the route; unwrapped waitUntil work that
 //     resolves after the response is counted as `late`, not as the route's.
 //  9. cachedJsonResponse marks miss then hit on the real cache module.
+// 10. blob8 is the stamped build revision ('dev' unstamped), so a before/after
+//     comparison can split by build instead of by deploy time.
 //
 // Real Hono (the package this Worker runs) so routePath-after-next() is the
 // real resolution, not an assumption.
@@ -273,7 +275,7 @@ check('privacy: only the route template and numbers reach Analytics Engine', asy
   assert.equal(dataset.points.length, 1)
   const [point] = dataset.points
   assert.deepEqual(point.indexes, ['req_metrics'])
-  assert.deepEqual(point.blobs, ['api', '/api/customers/:id', 'GET', '200', 'bypass', '', ''])
+  assert.deepEqual(point.blobs, ['api', '/api/customers/:id', 'GET', '200', 'bypass', '', '', 'dev'])
   // wall 17, D1 ms 1, rows_read 7, rows_written 0, statements 1, weight 1,
   // failed 0, late 0, D1 calls 1, D1 wall 3, primary 0.
   assert.deepEqual(point.doubles, [17, 1, 7, 0, 1, 1, 0, 0, 1, 3, 0])
@@ -343,7 +345,7 @@ check('background work gets its own label and never mixes into the route', async
   assert.equal(api.length, 1)
   assert.equal(api[0].doubles[4], 1)
   assert.equal(bg.length, 1)
-  assert.deepEqual(bg[0].blobs, ['bg', 'bg:telegram-drain', 'BG', 'ok', 'bypass', '', ''])
+  assert.deepEqual(bg[0].blobs, ['bg', 'bg:telegram-drain', 'BG', 'ok', 'bypass', '', '', 'dev'])
   assert.equal(bg[0].doubles[4], 2)
   assert.equal(bg[0].doubles[2], 200)
   // A failing cron step is recorded as an error and rethrown unchanged.
@@ -492,6 +494,39 @@ check('a read-only response header does not break the response', async () => {
   }))
   const res = await app.request('/api/ro', {}, {}, executionCtx())
   assert.equal(res.status, 302)
+})
+
+// esbuild's --define replaces the identifier with the literal, which this
+// prelude reproduces; the copy's global hook is put back so later checks
+// still count through the first copy.
+function loadWithRevisionDefine(revision) {
+  const hookKey = Symbol.for(metrics.REQUEST_METRICS_HOOK_KEY)
+  const liveHook = globalThis[hookKey]
+  const source = fs.readFileSync(process.env.REQUEST_METRICS_SOURCE || path.join(SRC, 'lib/requestMetrics.ts'), 'utf8')
+  const output = ts.transpileModule(source, {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true },
+  }).outputText
+  const mod = { exports: {} }
+  try {
+    new Function('require', 'module', 'exports', `var __WORKER_BUILD_REVISION__ = ${JSON.stringify(revision)};\n${output}`)(require, mod, mod.exports)
+  } finally {
+    globalThis[hookKey] = liveHook
+  }
+  return mod.exports
+}
+
+check('blob8 is the build revision the deploy stamped, on route and background datapoints', async () => {
+  for (const [define, label] of [['c0ffee12ab34', 'c0ffee12ab34'], ['c0ffee12ab34-dirty', 'c0ffee12ab34-dirty'], ['ci-1234', 'ci-1234'], ['', 'dev'], ['  ', 'dev'], ['a b<c>', 'other'], ['x'.repeat(65), 'other']]) {
+    const stamped = loadWithRevisionDefine(define)
+    const dataset = sink()
+    const app = new Hono()
+    app.use('/api/*', stamped.createRequestMetricsMiddleware({ random: () => 0 }))
+    app.get('/api/v', (c) => c.json({}))
+    await app.request('/api/v', {}, { Business_OS_Analytics: dataset }, executionCtx())
+    await stamped.runBackground({ Business_OS_Analytics: dataset }, 'cron:x', async () => 1)
+    assert.deepEqual(dataset.points.map((p) => p.blobs.length), [8, 8], `${JSON.stringify(define)}: eight blobs`)
+    assert.deepEqual(dataset.points.map((p) => p.blobs[7]), [label, label], `${JSON.stringify(define)} -> ${label}`)
+  }
 })
 
 ;(async () => {
