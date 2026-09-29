@@ -95,16 +95,6 @@ await runTest('T-D1: a stored blank or "0" switch is read the way the Worker rea
 
 const UNPUBLISHED = [
   'customer_portal_title_size',
-  'customer_portal_ai_intro',
-  'customer_portal_translations',
-  'customer_portal_language',
-  'customer_portal_show_top_seller_badge',
-  'customer_portal_show_top_product_badge',
-  'customer_portal_show_recommended_badge',
-  'customer_portal_show_promotion_badge',
-  'customer_portal_show_new_arrival_badge',
-  'customer_portal_highlight_rank_limit',
-  'customer_portal_recommended_product_ids',
   'customer_portal_stock_threshold_mode',
   'customer_portal_low_stock_threshold',
   'customer_portal_out_of_stock_threshold',
@@ -132,12 +122,12 @@ await runTest('T-D2: when the staff read failed, a Save leaves out every key the
 await runTest('T-D2: an unpublished key is sent once it was read from the staff settings or edited', () => {
   const sent = sendable(
     FULL_PAYLOAD,
-    { customer_portal_show_top_seller_badge: 'false' },
-    new Set(['customer_portal_highlight_rank_limit']),
+    { customer_portal_show_point_value: 'false' },
+    new Set(['customer_portal_title_size']),
   )
-  assert.equal(sent.customer_portal_show_top_seller_badge, 'editor default', 'loaded from the staff read')
-  assert.equal(sent.customer_portal_highlight_rank_limit, 'editor default', 'edited in this session')
-  assert.equal(Object.prototype.hasOwnProperty.call(sent, 'customer_portal_translations'), false, 'neither loaded nor edited')
+  assert.equal(sent.customer_portal_show_point_value, 'editor default', 'loaded from the staff read')
+  assert.equal(sent.customer_portal_title_size, 'editor default', 'edited in this session')
+  assert.equal(Object.prototype.hasOwnProperty.call(sent, 'customer_portal_low_stock_threshold'), false, 'neither loaded nor edited')
 })
 
 await runTest('T-D2: the unpublished list is exactly the Worker ratchet KNOWN_UNPUBLISHED', () => {
