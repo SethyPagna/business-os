@@ -267,7 +267,7 @@ export const TELEGRAM_ERROR_CODES = [
 ] as const
 export type TelegramErrorCode = typeof TELEGRAM_ERROR_CODES[number]
 
-/** The message stays as it always read; `code` is what the Settings screen translates. */
+/** `code` names the failure for the caller; the message keeps its English wording. */
 export class TelegramError extends Error {
   readonly code: TelegramErrorCode
 

@@ -387,6 +387,10 @@ const scopeOf = (call) => call.body.scope
     res = await failure('/api/telegram/today-summary', { answer: (method) => (method === 'sendMessage' ? { status: 403, json: { ok: false } } : defaultAnswer(method)) })
     assert.deepEqual([res.status, res.json.code], [400, 'telegram_rejected'])
     pass('codes: token missing, chat missing, admin url invalid, webhook failed (HTTP and ok:false), rejected (test and today-summary) and menu failed, each with the message it always had')
+    const settingsTranslatesCodes = /"telegram_error_/.test(fs.readFileSync(path.join(root, '..', 'frontend', 'src', 'lang', 'en.json'), 'utf8'))
+    const telegramSource = fs.readFileSync(path.join(root, 'src', 'lib', 'telegram.ts'), 'utf8')
+    assert.ok(settingsTranslatesCodes || !/Settings[^.\n]*translat|translat[^.\n]*Settings/.test(telegramSource), 'lib/telegram.ts must not say the Settings screen translates the codes: it shows the message and has no telegram_error_ keys')
+    pass('codes: the Worker claims no translation the Settings screen does not do')
 
     for (const rel of ['lib/telegram.ts', 'lib/telegramLang.ts']) assert.ok(!/evening push/.test(fs.readFileSync(path.join(root, 'src', rel), 'utf8')), `${rel}: no evening push exists`)
     reset({ ...BASE, telegram_topic_alerts: '9008' })
