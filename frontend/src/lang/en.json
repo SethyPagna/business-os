@@ -6029,7 +6029,6 @@
   "stock_changed_retry": "The stock changed while this was being saved. Nothing was changed. Refresh and try again.",
   "discard_changes": "Discard changes",
   "unsaved_changes_title": "Discard unsaved changes?",
-  "unsaved_changes_body": "This form has changes that were never saved. Go back to keep them, or discard them and close.",
   "discard_failed_adjustment": "Discard the unsaved adjustment?",
   "discard_failed_adjustment_desc": "This entry was never saved. Discard it, or keep editing to fix and retry.",
   "unsaved_not_applied": "Unsaved — not applied",
