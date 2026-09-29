@@ -153,6 +153,9 @@ const inventoryRequire = (id) => {
   if (id === '../lib/batchCode') return { ...batchCode, normalizeTypedDate: noop }
   if (id === '../lib/stockReason') return stockReason
   if (id === '../lib/stockReceiptGate') return { appendReceiptNotes: noop, FREE_GOODS_REASON_NOTE: '', stockReceiptGateCode: noop, stockReceiptGateMessage: noop }
+  // UI-STOCK 5.3: only a receipt with free units reaches these.
+  if (id === '../lib/stockSessionMath') return { effectiveUnitCost: noop }
+  if (id === '../lib/schemaProbe') return { hasColumn: asyncNoop }
   if (id === '../lib/datedStockCountRoute') return { parseDatedStockCountEntries: noop, buildDatedStockCountPlan: asyncNoop }
   if (id === '../lib/datedStockCountApply') return { applyDatedStockCountPlan: asyncNoop }
   if (id === '../lib/datedStockCountResolve') return { parseRawDatedCountRows: noop, resolveDatedStockCountRows: asyncNoop }
