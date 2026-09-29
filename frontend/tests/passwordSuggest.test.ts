@@ -81,6 +81,40 @@ await runTest('random bytes at or above 224 are rejected, not folded (no modulo 
   assert.equal(value.slice(0, 3), accepted.join(''), 'bytes 255, 224 and 250 are skipped; 0, 24 and 48 map straight in')
 })
 
+function byteTape(seed: number) {
+  let state = seed
+  return (buffer: Uint8Array) => {
+    for (let i = 0; i < buffer.length; i += 1) {
+      state = (state * 1103515245 + 12345) >>> 0
+      buffer[i] = state >>> 24
+    }
+    return buffer
+  }
+}
+
+await runTest('the Suggest button draws only from crypto.getRandomValues: the same bytes give the same suggestion, and Math.random is never read', () => {
+  const cryptoDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'crypto')
+  const originalMathRandom = Math.random
+  let cryptoCalls = 0
+  let tape = byteTape(7)
+  Object.defineProperty(globalThis, 'crypto', {
+    configurable: true,
+    value: { getRandomValues: (buffer: Uint8Array) => { cryptoCalls += 1; return tape(buffer) } },
+  })
+  Math.random = () => { throw new Error('Math.random is not a source for passwords') }
+  try {
+    const first = suggestPassword()
+    tape = byteTape(7)
+    const second = suggestPassword()
+    assert.ok(cryptoCalls > 0, 'crypto.getRandomValues supplied the bytes')
+    assert.equal(second, first, 'nothing but the crypto bytes decides the suggestion')
+    assert.equal(first, suggestPassword(byteTape(7)), 'the default source is exactly crypto.getRandomValues')
+  } finally {
+    Math.random = originalMathRandom
+    if (cryptoDescriptor) Object.defineProperty(globalThis, 'crypto', cryptoDescriptor)
+  }
+})
+
 await runTest('strength: weak, fair, strong', () => {
   assert.equal(passwordStrength(''), 'weak')
   assert.equal(passwordStrength('abcdef'), 'weak', 'under 10 characters')
