@@ -1,5 +1,6 @@
 import { SYNC } from '../constants.ts'
 import { apiFetch } from './http.ts'
+import type { BackupListing } from '../utils/backupFreshness.ts'
 
 export const LONG_SYSTEM_ACTION_TIMEOUT_MS = 10 * 60 * 1000
 const DEFAULT_SYSTEM_JOB_POLL_MS = 1200
@@ -102,6 +103,10 @@ export async function queueBackupFolderRestore(sourceDir: string): Promise<Recor
 
 export async function importBackupFolder(sourceDir: string): Promise<Record<string, unknown>> {
   return queueBackupFolderRestore(sourceDir)
+}
+
+export async function listBackups(): Promise<BackupListing> {
+  return apiFetch('GET', '/api/backups') as Promise<BackupListing>
 }
 
 // Restore maintenance (Part-77 slice C): while a restore runs -- or after

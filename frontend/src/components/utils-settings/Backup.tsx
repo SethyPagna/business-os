@@ -32,7 +32,9 @@ import { useConfirmDialog } from '../shared/useConfirmDialog.tsx'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
 import SectionSwitcher from '../shared/SectionSwitcher'
 import LoadingWatchdog from '../shared/LoadingWatchdog'
-import { clearBackupMaintenance, getBackupMaintenance, type RestoreMaintenanceState } from '../../api/systemJobs.ts'
+import InfoHint from '../shared/InfoHint'
+import { clearBackupMaintenance, getBackupMaintenance, listBackups, type RestoreMaintenanceState } from '../../api/systemJobs.ts'
+import { describeBackupFreshness, type BackupFreshness } from '../../utils/backupFreshness.ts'
 
 type TranslateFn = (key: string) => string
 type NotifyFn = (message: string, type?: string) => void
@@ -341,6 +343,54 @@ function RestoreMaintenanceBanner({ copy, notify }: { copy: CopyFn; notify: Noti
         </button>
       ) : null}
       {confirmDialog}
+    </div>
+  )
+}
+
+function formatBackupAge(copy: CopyFn, ageHours: number): string {
+  const hours = ageHours < 1 ? '<1' : String(Math.floor(ageHours))
+  return copy('backup_age_hours', '{hours} h ago').replace('{hours}', hours)
+}
+
+function BackupFreshnessNote({ copy, refreshKey }: { copy: CopyFn; refreshKey: string }) {
+  const [freshness, setFreshness] = useState<BackupFreshness | null>(null)
+  const pageActive = useIsPageActive('settings')
+  useEffect(() => {
+    if (!pageActive) return undefined
+    let alive = true
+    listBackups()
+      .then((listing) => { if (alive) setFreshness(describeBackupFreshness(listing, Date.now())) })
+      .catch(() => { /* advisory only: the page works without it */ })
+    return () => { alive = false }
+  }, [pageActive, refreshKey])
+  if (!freshness) return null
+  const Icon = freshness.overdue ? ShieldAlert : CheckCircle2
+  const overdueLabel = copy('backup_overdue', 'Overdue')
+  return (
+    <div
+      data-testid="backup-freshness"
+      className={`flex flex-wrap items-center gap-x-2 gap-y-1 rounded-xl border px-3 py-2 text-sm ${freshness.overdue
+        ? 'border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-900/60 dark:bg-amber-900/20 dark:text-amber-200'
+        : 'border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-700 dark:bg-slate-800/80 dark:text-slate-200'}`}
+    >
+      <Icon className="h-4 w-4 shrink-0" />
+      <span>{copy('backup_newest', 'Newest backup')}:</span>
+      <span className="font-semibold">
+        {freshness.takenAt && freshness.ageHours !== null
+          ? `${fmtDateTime24(freshness.takenAt)} · ${formatBackupAge(copy, freshness.ageHours)}`
+          : copy('backup_none_finished', 'None finished yet')}
+      </span>
+      {freshness.overdue ? (
+        <>
+          <span className="font-semibold">{overdueLabel}</span>
+          <InfoHint
+            label={overdueLabel}
+            text={copy('backup_overdue_hint', 'Automatic backups run every {interval} h, but none has finished in over {hours} h. Run the Doctor or create a backup now.')
+              .replace('{interval}', String(freshness.intervalHours))
+              .replace('{hours}', String(freshness.overdueAfterHours))}
+          />
+        </>
+      ) : null}
     </div>
   )
 }
@@ -1948,6 +1998,7 @@ export default function Backup() {
           historySlot={<ActionHistoryBar history={actionHistory} className="flex-shrink-0" t={t} showLabel />}
         />
         <RestoreMaintenanceBanner copy={copy} notify={notify} />
+        <BackupFreshnessNote copy={copy} refreshKey={activeJob?.status === 'completed' ? String(activeJob.id ?? '') : ''} />
         {/* Sections get their own full-width row now that History sits next
             to the page-guide icon in PageHeader's row above (per explicit
             user direction: the icon explaining what this page does, then

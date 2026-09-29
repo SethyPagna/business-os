@@ -16,6 +16,7 @@ import {
   validateCloudflareBackup,
 } from '../lib/backup'
 import { beginMaintenance, endMaintenance, getMaintenance, updateMaintenance, MaintenanceAdmissionConflictError } from '../lib/maintenance'
+import { getPlanLimits } from '../lib/planTier'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 
@@ -59,6 +60,7 @@ app.get('/', async (c) => {
     schedule: {
       runtime: 'cloudflare-workers',
       intervalHours: 6,
+      automatic: getPlanLimits(c.env).scheduledBackupEnabled,
       keep: CLOUDFLARE_BACKUP_KEEP,
       destination: 'R2 business-os-assets/backups/cloudflare/',
     },
