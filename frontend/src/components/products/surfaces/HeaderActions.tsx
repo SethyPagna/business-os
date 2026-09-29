@@ -1,9 +1,9 @@
 import PackagePlus from 'lucide-react/dist/esm/icons/package-plus.js'
-import Boxes from 'lucide-react/dist/esm/icons/boxes.js'
 import Settings2 from 'lucide-react/dist/esm/icons/settings-2.js'
 import FolderTree from 'lucide-react/dist/esm/icons/folder-tree.js'
 import Award from 'lucide-react/dist/esm/icons/award.js'
 import Ruler from 'lucide-react/dist/esm/icons/ruler.js'
+import Tags from 'lucide-react/dist/esm/icons/tags.js'
 import Upload from 'lucide-react/dist/esm/icons/upload.js'
 import ImagePlus from 'lucide-react/dist/esm/icons/image-plus.js'
 import Download from 'lucide-react/dist/esm/icons/download.js'
@@ -30,17 +30,12 @@ type ProductsHeaderActionsProps = {
   onManageCats?: () => void
   onManageBrands?: () => void
   onManageUnits?: () => void
+  // Saved stock reasons (add / remove / set, transfer, move, delete).
+  onManageReasons?: () => void
   onImport?: () => void
   onExport?: () => void
+  // Opens the Stock Session in Add: new products and stock for existing ones.
   onAdd?: () => void
-  // With this wired, the Add button becomes a 2-option menu: Add Stock and
-  // Add New Product. Add Stock is ONE merged function (user, Aug 31: "the
-  // fast stockin can also do one by one... can be merged into one Add stock
-  // function") -- the shipment receiver, whose shared header + line-by-line
-  // entry covers both a whole delivery and a single product. Left unwired
-  // (other embedders, or no inventory-adjust grant) the button stays the
-  // plain Add-product action.
-  onAddStock?: () => void
   // Retroactive catalog cleanup: folds already-imported products that are
   // really the same item (differ only by which branch's stock landed on
   // which row) into one. Optional so pages embedding this header outside
@@ -90,10 +85,10 @@ export default function ProductsHeaderActions({
   onManageCats,
   onManageBrands,
   onManageUnits,
+  onManageReasons,
   onImport,
   onExport,
   onAdd,
-  onAddStock,
   onMergeDuplicates,
   onZeroQuantityCleanup,
   onWireImages,
@@ -113,11 +108,8 @@ export default function ProductsHeaderActions({
   const importHint = tr('import_button_hint', 'Bring products in from a CSV or Excel file')
   const exportLabel = tr('export', 'Export')
   const exportHint = tr('export_button_hint', 'Download products as a customizable XLSX file')
-  const productLabel = tr('add_products', 'Add products')
+  const addLabel = tr('add', 'Add')
   const productHint = tr('add_products_button_hint', 'Add new products or receive stock for products you already have')
-  const addStockLabel = tr('add_stock', 'Add Stock')
-  const addStockHint = tr('add_stock_menu_hint', 'Receive stock — set the shipment info once, then add one product or many, line by line')
-  const addNewProductLabel = tr('add_new_product', 'Create Products')
   const mergeDuplicatesLabel = tr('merge_duplicate_products', 'Merge duplicate products')
   const mergeDuplicatesHint = tr('merge_duplicates_button_hint', 'Combine branch-only duplicate rows of the same item into one')
   const wireImagesLabel = tr('wire_images_title', 'Wire images to products')
@@ -130,6 +122,8 @@ export default function ProductsHeaderActions({
   const brandHint = tr('manage_brand_hint', 'Add, rename, or remove product brands')
   const unitsLabel = tr('units', 'Units')
   const unitsHint = tr('manage_units_hint', 'Add, rename, or remove units of measure')
+  const reasonsLabel = tr('reasons', 'Reasons')
+  const reasonsHint = tr('manage_reasons', 'Manage reasons')
   const historyLabel = tr('action_history', 'History')
   const historyHint = tr('action_history_button_hint', 'See and undo recent changes to products')
   const buttonGuideTitle = tr('button_guide_title', 'What these buttons do')
@@ -142,6 +136,7 @@ export default function ProductsHeaderActions({
     ...(onManageCats ? [{ label: categoriesLabel, onClick: onManageCats, icon: <FolderTree className={iconClass} /> }] : []),
     ...(onManageBrands ? [{ label: brandLabel, onClick: onManageBrands, icon: <Award className={iconClass} /> }] : []),
     ...(onManageUnits ? [{ label: unitsLabel, onClick: onManageUnits, icon: <Ruler className={iconClass} /> }] : []),
+    ...(onManageReasons ? [{ label: reasonsLabel, onClick: onManageReasons, icon: <Tags className={iconClass} /> }] : []),
   ]
   const transferItems: PortalMenuItem[] = [
     ...(onImport ? [{ label: importLabel, onClick: onImport, color: 'blue' as const, icon: <Upload className={iconClass} /> }] : []),
@@ -155,13 +150,6 @@ export default function ProductsHeaderActions({
   const manageItems: PortalMenuItem[] = [lookupItems, transferItems, cleanupItems]
     .filter((group) => group.length > 0)
     .flatMap((group, index) => (index === 0 ? group : ['divider' as const, ...group]))
-
-  // The Add button's menu: stock the existing catalog first, create a
-  // brand-new product last.
-  const addMenuItems: PortalMenuItem[] = [
-    ...(onAddStock ? [{ label: addStockLabel, onClick: onAddStock, color: 'blue' as const, icon: <Boxes className={iconClass} /> }] : []),
-    ...(onAdd ? [{ label: addNewProductLabel, onClick: onAdd, color: 'green' as const, icon: <PackagePlus className={iconClass} /> }] : []),
-  ]
 
   // flex-1 at the narrowest widths (matches the old mobile grid's equal-
   // share sizing so three buttons stay easy to tap edge-to-edge); from sm
@@ -204,13 +192,13 @@ export default function ProductsHeaderActions({
           ...(onManageCats ? [{ icon: <FolderTree className={iconClass} />, label: categoriesLabel, description: categoriesHint }] : []),
           ...(onManageBrands ? [{ icon: <Award className={iconClass} />, label: brandLabel, description: brandHint }] : []),
           ...(onManageUnits ? [{ icon: <Ruler className={iconClass} />, label: unitsLabel, description: unitsHint }] : []),
+          ...(onManageReasons ? [{ icon: <Tags className={iconClass} />, label: reasonsLabel, description: reasonsHint }] : []),
           ...(onImport ? [{ icon: <Upload className={iconClass} />, label: importLabel, description: importHint }] : []),
           ...(onExport ? [{ icon: <Download className={iconClass} />, label: exportLabel, description: exportHint }] : []),
           ...(onMergeDuplicates ? [{ icon: <Merge className={iconClass} />, label: mergeDuplicatesLabel, description: mergeDuplicatesHint }] : []),
           ...(onWireImages ? [{ icon: <ImagePlus className={iconClass} />, label: wireImagesLabel, description: wireImagesHint }] : []),
           ...(onZeroQuantityCleanup ? [{ icon: <Trash2 className={iconClass} />, label: zeroQuantityCleanupLabel, description: zeroQuantityCleanupHint }] : []),
-          ...(onAddStock ? [{ icon: <Boxes className={iconClass} />, label: addStockLabel, description: addStockHint }] : []),
-          ...(onAdd ? [{ icon: <PackagePlus className={iconClass} />, label: productLabel, description: productHint }] : []),
+          ...(onAdd ? [{ icon: <PackagePlus className={iconClass} />, label: addLabel, description: productHint }] : []),
           ...(historySlot ? [{ label: historyLabel, description: historyHint }] : []),
         ]}
       />
@@ -243,36 +231,16 @@ export default function ProductsHeaderActions({
           items={manageItems}
         />
       ) : null}
-      {addMenuItems.length > 1 ? (
-        <LazyPortalMenu
-          align="auto"
-          trigger={(
-            <button
-              type="button"
-              className={primaryToolbarButtonClassName}
-              aria-haspopup="true"
-              aria-label={productLabel}
-              title={productHint}
-            >
-              <PackagePlus className="h-4 w-4 shrink-0" />
-              <span className="min-w-0 truncate">{productLabel}</span>
-            </button>
-          )}
-          items={addMenuItems}
-        />
-      ) : addMenuItems.length === 1 ? (
-        // Only one add-flavored action permitted -- a one-item menu is just
-        // an extra click, so the button IS that action (usually plain
-        // Add product, exactly the pre-menu behavior).
+      {onAdd ? (
         <button
           type="button"
-          onClick={(addMenuItems[0] as { onClick?: () => void }).onClick}
+          onClick={onAdd}
           className={primaryToolbarButtonClassName}
-          aria-label={productLabel}
+          aria-label={addLabel}
           title={productHint}
         >
           <PackagePlus className="h-4 w-4 shrink-0" />
-          <span className="min-w-0 truncate">{productLabel}</span>
+          <span className="min-w-0 truncate">{addLabel}</span>
         </button>
       ) : null}
       {primaryActionSlot}
