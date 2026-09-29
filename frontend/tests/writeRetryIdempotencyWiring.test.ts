@@ -1,21 +1,17 @@
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import ts from 'typescript'
-import { compileHandler, findFunction, readComponent, type ComponentSource, type Scope } from './componentHandlerHarness.ts'
-import { accessibleText, createHarness, installSteppedClock as installOperatorClock, propsOf, type Harness, type MountedSurface, type SettleOptions } from './mountedComponentHarness.ts'
+import { accessibleText, createHarness, installSteppedClock as installOperatorClock, propsOf, type Harness, type MemoryNode, type MountedSurface, type SettleOptions } from './mountedComponentHarness.ts'
 import { __resetApiWriteDedupeForTests, setSyncServerUrl } from '../src/api/http.ts'
 import { awardCustomerPoints } from '../src/api/contactWriteTransport.ts'
 import { adjustStock } from '../src/api/inventoryWriteTransport.ts'
 import { createReturn, createSupplierReturn } from '../src/api/returnsTransport.ts'
-import { createWriteTimeoutError } from '../src/utils/writeIntent.ts'
 
 const km = JSON.parse(readFileSync(new URL('../src/lang/km.json', import.meta.url), 'utf8')) as Record<string, string>
-const translate = (key: string, fallback = ''): string => km[key] ?? fallback
-const UI_TIMEOUT_MS = 5
-const SETTLE_DEADLINE_MS = 10_000
-const OPERATOR_PAUSE_MS = 20_000
-const unknownOutcome = createWriteTimeoutError('write', UI_TIMEOUT_MS, (key: string) => km[key]).message
 const OPERATOR_DAY_BOUNDARY_MS = 25 * 60 * 60 * 1000
+const WRITE_INTENT_MODULE = 'utils/writeIntent.ts'
+const KEYED_HELPERS = ['identityForIntent', 'retryableRequestId']
 const escapeRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 const unknownOutcomeAfterAnyWait = new RegExp(km.write_outcome_unknown_timeout.split('{seconds}').map(escapeRegExp).join('\\d+'))
 const shown = (key: string, fallback: string): string => km[key] ?? fallback
@@ -36,7 +32,6 @@ type Call = unknown[]
 type Notice = { message: string; tone?: string }
 type Outcome = { kind: 'hang' } | { kind: 'lost' } | { kind: 'refused' } | { kind: 'answer'; value: unknown }
 type WireRequest = Record<string, unknown>
-type HistoryAction = { undo: () => Promise<void>; redo: () => Promise<void> }
 
 const HANG: Outcome = { kind: 'hang' }
 const LOST: Outcome = { kind: 'lost' }
@@ -73,34 +68,6 @@ function scriptedWrite() {
   }
 }
 type ScriptedWrite = ReturnType<typeof scriptedWrite>
-
-function installSteppedClock(): { advance(ms: number): void; restore(): void } {
-  const RealDate = globalThis.Date
-  let offsetMs = 0
-  const now = (): number => RealDate.now() + offsetMs
-  globalThis.Date = new Proxy(RealDate, {
-    construct: (target, args, newTarget) => Reflect.construct(target, args.length ? args : [now()], newTarget),
-    get: (target, property, receiver) => (property === 'now' ? now : Reflect.get(target, property, receiver)),
-  })
-  return {
-    advance: (ms: number) => { offsetMs += ms },
-    restore: () => { globalThis.Date = RealDate },
-  }
-}
-
-async function settled<T>(promise: Promise<T>, what: string): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined
-  try {
-    return await Promise.race([
-      promise,
-      new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(new Error(`${what} never settled: the write has no UI timeout`)), SETTLE_DEADLINE_MS)
-      }),
-    ])
-  } finally {
-    clearTimeout(timer)
-  }
-}
 
 function withoutIdentity(request: unknown): WireRequest {
   const { client_request_id: _id, return_number: _number, ...rest } = request as WireRequest
@@ -195,7 +162,9 @@ function adminApp(overrides: Record<string, unknown>): Record<string, unknown> {
 
 const harness: Harness = await createHarness({
   localStorage: { businessos_user: JSON.stringify(operator), businessos_read_session: 'read-session-of-dara' },
+  observe: [WRITE_INTENT_MODULE],
 })
+
 function pressing(write: ScriptedWrite): SettleOptions {
   const before = write.calls.length
   return { until: () => write.calls.length > before, waitingFor: 'the write this press sends', expireWaitsWhen: () => write.hanging }
@@ -361,107 +330,115 @@ await runTest('supplier return: the id survives a timeout, a lost answer and a f
 await runTest('inventory adjust: Save and Confirm keep one id per intent across failures; undo and redo keep their own until they fully succeed', async () => {
   const write = scriptedWrite()
   const notices: Notice[] = []
-  const pushed: HistoryAction[] = []
-  let reloadFailures = 0
-  const product = { id: 9, name: 'Serum', stock_quantity: 10, branch_stock: [{ branch_id: 1, quantity: 10 }], selling_price_usd: 12, selling_price_khr: 49200, cost_price_usd: 4 }
-  const state: Scope = { pendingAdjust: null, adjustSaving: false, adjustModal: null, adjustForm: {} }
-  const stable: Scope = {
-    adjustIdentityRef: { current: null },
-    receiptSessionIdRef: { current: 0 },
-    adjustStockInFlightRef: { current: false },
-    setPendingAdjust: (value: unknown) => { state.pendingAdjust = value },
-    setAdjustSaving: (value: unknown) => { state.adjustSaving = value },
-    setAdjustModal: (value: unknown) => { state.adjustModal = value },
-    setAdjustForm: (value: unknown) => { state.adjustForm = value },
-    notify: recordNotices(notices),
-    tr: translate,
-    getStockQty: (row?: { stock_quantity?: number }) => Number(row?.stock_quantity || 0),
-    canEditCosts: true,
-    canViewCosts: true,
-    adjustCurrentQuantity: 10,
-    user: { id: 3, name: 'Dara' },
-    defaultBranch: { id: 1 },
-    ensureInventoryReasonsLoaded: async () => {},
-    getInventoryApi: () => ({ adjustStock: write.fn }),
-    actionHistory: { pushAction: (action: HistoryAction) => { pushed.push(action) }, refreshServerItems: async () => {} },
-    load: async () => {
-      if (reloadFailures > 0) {
-        reloadFailures -= 1
-        throw new Error('The inventory list could not reload.')
-      }
+  const serum = { id: 9, name: 'Serum', unit: 'pcs', stock_quantity: 10, branch_stock: [{ branch_id: 1, quantity: 10 }], selling_price_usd: 12, selling_price_khr: 49200, cost_price_usd: 4 }
+  const lot = { id: 31, quantity: 10, received_date: '2026-09-01', batch_number: 1 }
+  const page = await harness.mount({
+    component: 'components/inventory/Inventory.tsx',
+    props: { hostSection: 'products' },
+    app: adminApp({ page: 'branches', notify: recordNotices(notices) }),
+    doubles: {
+      'api/branchTransport.ts': { getBranches: async () => [{ id: 1, name: 'Store', is_active: true, is_default: true }] },
+      'api/inventoryTransport.ts': {
+        searchInventoryProducts: async () => ({ items: [serum], total: 1, page: 1, pageSize: 20, totalPages: 1 }),
+        getInventoryStats: async () => ({}),
+        getInventoryMovements: async () => ({ items: [], total: 0 }),
+        getInventoryReasons: async () => ({ items: [{ id: 'damaged', type: 'adjust', label: 'Damaged' }] }),
+      },
+      'api/batchesTransport.ts': { getProductBatches: async () => ({ batches: [lot] }) },
+      'api/actionHistoryTransport.ts': { getActionHistory: async () => ({ items: [] }) },
+      'api/inventoryWriteTransport.ts': { adjustStock: write.fn },
     },
-    INVENTORY_STOCK_MUTATION_TIMEOUT_MS: UI_TIMEOUT_MS,
-  }
-  const inventory = readComponent('components/inventory/Inventory.tsx')
-  const locals = [...Object.keys(state), ...Object.keys(stable)]
-  const open = await compileHandler<(row: unknown) => void>(inventory, 'openAdjust', { locals })
-  const save = await compileHandler<() => Promise<void>>(inventory, 'handleAdjust', { locals })
-  const confirm = await compileHandler<() => Promise<void>>(inventory, 'commitAdjust', { locals, include: ['runInventoryMutation'] })
-  const scope = (): Scope => ({ ...state, ...stable })
-  const fillRemoval = (quantity: string) => { state.adjustForm = { ...(state.adjustForm as object), type: 'remove', quantity, reason: 'Damaged', batch_id: '31' } }
-  const parkedId = (): string => String((state.pendingAdjust as { request: WireRequest }).request.client_request_id)
+  })
+  const exactly = (text: string): RegExp => new RegExp(`^${escapeRegExp(text)}$`)
   const lastRequest = (): WireRequest => write.calls[write.calls.length - 1][0] as WireRequest
-  const clock = installSteppedClock()
+  const clock = installOperatorClock()
   try {
-    const pressSave = async () => { clock.advance(OPERATOR_PAUSE_MS); await save(scope())() }
-    const backOutOfReview = () => { state.pendingAdjust = null }
-    const pressConfirm = async (outcome: Outcome, label: string): Promise<WireRequest> => {
-      clock.advance(OPERATOR_PAUSE_MS)
+    const openAdjust = async () => {
+      await page.click(page.button(exactly(shown('adjust_stock', 'Adjust stock'))))
+      await page.waitFor(() => page.findAll((node) => node.getAttribute('name') === 'inventory_adjust_quantity').length > 0, 'the adjust form')
+    }
+    const fillRemoval = async (quantity: string) => {
+      await page.click(page.button(exactly(shown('adjust_remove', 'Remove'))))
+      await page.type(page.field('inventory_adjust_quantity'), quantity)
+      await page.type(page.field('inventory_adjust_reason'), 'Damaged')
+      const options = page.find((node) => node.tagName === 'BUTTON' && node.hasAttribute('aria-expanded') && node.textContent.startsWith(shown('options', 'Options')), 'the received-date options')
+      if (options.getAttribute('aria-expanded') !== 'true') await page.click(options)
+      await page.waitFor(() => page.findAll((node) => node.tagName === 'BUTTON' && node.textContent.endsWith(`(${lot.quantity})`)).length > 0, 'the received dates with stock')
+      await page.click(page.button(`(${lot.quantity})`))
+    }
+    const reviewConfirm = (): MemoryNode => page.button(exactly(shown('confirm', 'Confirm')))
+    const save = async () => {
+      clock.advance(OPERATOR_DAY_BOUNDARY_MS)
+      await page.click(page.button(exactly(shown('save', 'Save'))))
+      await page.waitFor(() => page.findAll((node) => node.tagName === 'BUTTON' && exactly(shown('confirm', 'Confirm')).test(node.textContent)).length > 0, 'the adjust review')
+    }
+    const confirm = async (outcome: Outcome, label: string): Promise<WireRequest> => {
+      clock.advance(OPERATOR_DAY_BOUNDARY_MS)
       write.will(outcome)
       const before = write.calls.length
-      await settled(confirm(scope())(), label)
+      await page.click(reviewConfirm(), pressing(write))
       assert.equal(write.calls.length, before + 1, `${label}: one write per confirm`)
       return lastRequest()
     }
-    open(scope())(product)
-    fillRemoval('2')
-    await pressSave()
-    const intentId = parkedId()
+    const backOutOfReview = async () => {
+      await page.click(page.button(exactly(shown('cancel', 'Cancel')), reviewConfirm().parentNode ?? undefined))
+    }
+    const closeAdjust = async () => {
+      await page.click(page.button(exactly(shown('cancel', 'Cancel'))))
+      const discard = page.findAll((node) => node.tagName === 'BUTTON' && node.textContent === shown('discard_changes', 'Discard changes'))
+      if (discard.length) await page.click(discard[0])
+    }
+
+    await page.waitFor(() => page.findAll((node) => node.tagName === 'BUTTON' && exactly(shown('adjust_stock', 'Adjust stock')).test(node.textContent)).length > 0, 'the product list')
+    await openAdjust()
+    await fillRemoval('2')
+    await save()
+    const timedOut = await confirm(HANG, 'the adjust the UI stopped waiting for')
+    const intentId = String(timedOut.client_request_id)
     assert.match(intentId, /^stockadjust_/)
-    const timedOut = await pressConfirm(HANG, 'the adjust the UI stopped waiting for')
-    assert.ok(notices.some((notice) => notice.message.includes(unknownOutcome)), `the UI timeout says the outcome is unknown; saw ${JSON.stringify(notices)}`)
-    backOutOfReview()
-    await pressSave()
-    assert.equal(parkedId(), intentId, 'Save pressed again after an unknown outcome parks the same identity')
-    const refused = await pressConfirm(answer({ success: false, error: 'Stock is busy' }), 'the adjust the Worker answered with success: false')
-    backOutOfReview()
-    await pressSave()
-    const lost = await pressConfirm(LOST, 'the adjust whose answer was lost')
-    const committed = await pressConfirm(answer({ success: true, batchId: 31 }), 'the re-confirmed adjust that committed')
-    for (const retry of [refused, lost, committed]) {
+    assert.deepEqual(
+      { product: timedOut.productId, type: timedOut.type, quantity: timedOut.quantity, reason: timedOut.reason, branch: timedOut.branchId, lot: timedOut.batchId },
+      { product: 9, type: 'remove', quantity: 2, reason: 'Damaged', branch: 1, lot: 31 },
+    )
+    assert.ok(notices.some((notice) => unknownOutcomeAfterAnyWait.test(notice.message)), `the UI timeout says the outcome is unknown; saw ${JSON.stringify(notices)}`)
+    await backOutOfReview()
+    await save()
+    const refused = await confirm(answer({ success: false, error: 'Stock is busy' }), 'the adjust the Worker answered with success: false')
+    await backOutOfReview()
+    await save()
+    const lost = await confirm(LOST, 'the adjust whose answer was lost')
+    await backOutOfReview()
+    await save()
+    const conflicted = await confirm(REFUSED, 'the adjust the Worker refused with a 409')
+    const reconfirmed = await confirm(LOST, 'the adjust re-confirmed from the same review')
+    await backOutOfReview()
+    await save()
+    const committed = await confirm(answer({ success: true, batchId: 31 }), 'the saved-again adjust that committed')
+    for (const retry of [refused, lost, conflicted, reconfirmed, committed]) {
       assert.equal(retry.client_request_id, intentId, 'a retry after a failed or unknown adjust resends its identity, so stock moves once')
       assert.deepEqual(retry, timedOut, 'the retry resends the same adjust')
     }
-    state.adjustModal = product
-    await pressSave()
-    const afterCommit = parkedId()
-    assert.notEqual(afterCommit, intentId, 'after a committed adjust, even an identical one is a new request')
-    backOutOfReview()
-    fillRemoval('3')
-    await pressSave()
-    const changed = parkedId()
-    assert.notEqual(changed, afterCommit, 'a changed adjust is a new request')
-    await pressConfirm(LOST, 'the changed adjust whose answer was lost')
-    open(scope())(product)
-    fillRemoval('3')
-    await pressSave()
-    assert.notEqual(parkedId(), changed, 'reopening the adjust modal is an explicit new intent')
 
-    assert.equal(pushed.length, 1, 'the committed adjust pushed one undo entry')
-    const [history] = pushed
-    const run = async (step: () => Promise<void>, outcome: Outcome, label: string, fails: boolean): Promise<WireRequest> => {
-      clock.advance(OPERATOR_PAUSE_MS)
+    const historyAction = async (label: string): Promise<MemoryNode> => {
+      const shownActions = () => page.findAll((node) => node.tagName === 'BUTTON' && node.textContent === label)
+      if (!shownActions().length) await page.click(page.button(new RegExp(`^${escapeRegExp(shown('history', 'History'))}`)))
+      return shownActions()[0] ?? page.button(exactly(label))
+    }
+    const run = async (label: string, outcome: Outcome, what: string): Promise<WireRequest> => {
+      clock.advance(OPERATOR_DAY_BOUNDARY_MS)
       write.will(outcome)
-      const attempt = settled(step(), label)
-      if (fails) await assert.rejects(attempt, `${label} fails`)
-      else await attempt
+      const before = write.calls.length
+      await page.click(await historyAction(label), pressing(write))
+      assert.equal(write.calls.length, before + 1, `${what}: one write per press`)
       return lastRequest()
     }
-    const undoTimedOut = await run(history.undo, HANG, 'the undo the UI stopped waiting for', true)
-    reloadFailures = 1
-    const undoReloadFailed = await run(history.undo, answer({ success: true }), 'the undo that committed but whose reload failed', true)
-    const undoDone = await run(history.undo, answer({ success: true }), 'the undo that fully succeeded', false)
-    for (const retry of [undoReloadFailed, undoDone]) {
+    const undo = shown('undo', 'Undo')
+    const redo = shown('redo', 'Redo')
+    const undoTimedOut = await run(undo, HANG, 'the undo the UI stopped waiting for')
+    const undoLost = await run(undo, LOST, 'the undo whose answer was lost')
+    const undoRefused = await run(undo, answer({ success: false, error: 'Stock is busy' }), 'the undo the Worker answered with success: false')
+    const undoDone = await run(undo, answer({ success: true }), 'the undo that fully succeeded')
+    for (const retry of [undoLost, undoRefused, undoDone]) {
       assert.equal(retry.client_request_id, undoTimedOut.client_request_id, 'a retried undo replays its own request instead of reversing the stock twice')
     }
     assert.match(String(undoTimedOut.client_request_id), /^stockadjust-undo_/)
@@ -472,17 +449,38 @@ await runTest('inventory adjust: Save and Confirm keep one id per intent across 
     )
     assert.match(String(undoTimedOut.reason), /^Undo: Damaged$/)
     assert.notEqual(undoTimedOut.client_request_id, intentId, 'the undo carries its own id, not the forward adjust id')
-    const redoLost = await run(history.redo, LOST, 'the redo whose answer was lost', true)
-    const redoDone = await run(history.redo, answer({ success: true }), 'the redo that fully succeeded', false)
+    const redoLost = await run(redo, LOST, 'the redo whose answer was lost')
+    const redoDone = await run(redo, answer({ success: true }), 'the redo that fully succeeded')
     assert.equal(redoDone.client_request_id, redoLost.client_request_id, 'a retried redo replays its own request')
     assert.match(String(redoLost.client_request_id), /^stockadjust-redo_/)
     assert.deepEqual({ type: redoLost.type, quantity: redoLost.quantity, batchId: redoLost.batchId }, { type: 'remove', quantity: 2, batchId: 31 })
     assert.match(String(redoLost.reason), /^Redo: Damaged$/)
     assert.notEqual(redoLost.client_request_id, undoTimedOut.client_request_id)
-    const nextUndo = await run(history.undo, answer({ success: true }), 'the undo after the redo', false)
+    const nextUndo = await run(undo, answer({ success: true }), 'the undo after the redo')
     assert.notEqual(nextUndo.client_request_id, undoDone.client_request_id, 'once an undo fully succeeded, the next undo is a new request')
+
+    await openAdjust()
+    await fillRemoval('2')
+    await save()
+    const afterCommit = await confirm(LOST, 'the same adjust again after a commit')
+    assert.notEqual(afterCommit.client_request_id, intentId, 'after a committed adjust, even an identical one is a new request')
+    await backOutOfReview()
+    await fillRemoval('3')
+    await save()
+    const changed = await confirm(LOST, 'the changed adjust whose answer was lost')
+    assert.notEqual(changed.client_request_id, afterCommit.client_request_id, 'a changed adjust is a new request')
+    await backOutOfReview()
+    await closeAdjust()
+    await openAdjust()
+    await fillRemoval('3')
+    await save()
+    const reopened = await confirm(LOST, 'the same values after reopening the adjust')
+    assert.notEqual(reopened.client_request_id, changed.client_request_id, 'reopening the adjust modal is an explicit new intent')
+    const reopenedRetry = await confirm(answer({ success: true, batchId: 31 }), 'the retry of the reopened adjust')
+    assert.equal(reopenedRetry.client_request_id, reopened.client_request_id)
   } finally {
     clock.restore()
+    await page.unmount()
   }
 })
 
@@ -588,170 +586,45 @@ await runTest('the write transports put a supplied identity on the wire unchange
   }
 })
 
-const VOLATILE_CALL = /\b(?:Date|now|random|randomUUID|performance|createClientRequestId|businessDateTimeId|getClientDeviceInfo)\b/
-const IDENTITY_FIELD = /^(?:client_request_id|return_number|client_time|clientTime)$/
-
-function lineOf(component: ComponentSource, node: ts.Node): string {
-  const { line } = component.file.getLineAndCharacterOfPosition(node.getStart(component.file))
-  return `${component.url.pathname.split('/src/')[1]}:${line + 1} ${node.getText(component.file).split('\n')[0]}`
-}
-
-function ancestors(node: ts.Node): ts.Node[] {
-  const chain: ts.Node[] = []
-  for (let current = node.parent; current; current = current.parent) chain.push(current)
-  return chain
-}
-
-function onFailurePath(node: ts.Node): boolean {
-  let child: ts.Node = node
-  for (const ancestor of ancestors(node)) {
-    if (ts.isCatchClause(ancestor)) return true
-    if (ts.isTryStatement(ancestor) && ancestor.finallyBlock === child) return true
-    child = ancestor
-  }
-  return false
-}
-
-function functionLabel(fn: ts.Node): string {
-  if (ts.isFunctionDeclaration(fn) && fn.name) return fn.name.text
-  const parent = fn.parent
-  if (ts.isVariableDeclaration(parent) && ts.isIdentifier(parent.name)) return parent.name.text
-  if (ts.isCallExpression(parent) && ts.isVariableDeclaration(parent.parent) && ts.isIdentifier(parent.parent.name)) return parent.parent.name.text
-  if (ts.isArrowFunction(parent) && parent.body === fn) return `${functionLabel(parent)} cleanup`
-  if (ts.isCallExpression(parent)) return parent.expression.getText()
-  return '<anonymous>'
-}
-
-function enclosingFunction(node: ts.Node): ts.Node {
-  const fn = ancestors(node).find((ancestor) => ts.isArrowFunction(ancestor) || ts.isFunctionExpression(ancestor) || ts.isFunctionDeclaration(ancestor))
-  assert.ok(fn, `no enclosing function for ${node.getText()}`)
-  return fn
-}
-
-function descendants(root: ts.Node, match: (node: ts.Node) => boolean): ts.Node[] {
-  const found: ts.Node[] = []
-  const visit = (node: ts.Node): void => {
-    if (match(node)) found.push(node)
-    ts.forEachChild(node, visit)
-  }
-  visit(root)
-  return found
-}
-
-function isRefCurrentAssignment(node: ts.Node, ref: string): node is ts.BinaryExpression {
-  return ts.isBinaryExpression(node)
-    && node.operatorToken.kind === ts.SyntaxKind.EqualsToken
-    && ts.isPropertyAccessExpression(node.left)
-    && node.left.name.text === 'current'
-    && node.left.expression.getText() === ref
-}
-
-function callsNamed(root: ts.Node, name: string): ts.CallExpression[] {
-  return descendants(root, (node) => ts.isCallExpression(node) && (
-    (ts.isIdentifier(node.expression) && node.expression.text === name)
-    || (ts.isPropertyAccessExpression(node.expression) && node.expression.name.text === name)
-  )) as ts.CallExpression[]
-}
-
-function releaseFollowsWrite(release: ts.Node, write: ts.CallExpression): boolean {
-  const tryStatement = ancestors(release).find((ancestor): ancestor is ts.TryStatement => ts.isTryStatement(ancestor) && ancestors(release).includes(ancestor.tryBlock))
-  return !!tryStatement
-    && ancestors(write).includes(tryStatement.tryBlock)
-    && release.getStart() > write.getEnd()
-}
-
-const identitySurfaces = [
-  { component: 'components/loyalty-points/LoyaltyPointsPage.tsx', ref: 'awardIdentityRef', handler: 'handleAwardPoints', write: 'awardCustomerPoints', newIntent: [] as string[] },
-  { component: 'components/returns/NewReturnModal.tsx', ref: 'legacyReturnIdentityRef', handler: 'handleSubmit', write: 'createReturnRequest', newIntent: [] as string[] },
-  { component: 'components/returns/NewSupplierReturnModal.tsx', ref: 'supplierReturnIdentityRef', handler: 'submit', write: 'createSupplierReturnRequest', newIntent: [] as string[] },
-  { component: 'components/inventory/Inventory.tsx', ref: 'adjustIdentityRef', handler: 'commitAdjust', write: 'adjustStock', newIntent: ['openAdjust'] },
-]
-
-await runTest('an intent identity is released only after its write committed or by an explicit new intent, never on a failure path', () => {
-  for (const surface of identitySurfaces) {
-    const component = readComponent(surface.component)
-    const uses = descendants(component.file, (node) => ts.isIdentifier(node) && node.text === surface.ref && !(ts.isPropertyAccessExpression(node.parent) && node.parent.name === node))
-    const releases: ts.BinaryExpression[] = []
-    for (const use of uses) {
-      const parent = use.parent
-      if (ts.isVariableDeclaration(parent) && parent.name === use) continue
-      if (ts.isCallExpression(parent) && parent.expression.getText() === 'identityForIntent' && parent.arguments[0] === use) continue
-      const assignment = parent.parent
-      if (ts.isPropertyAccessExpression(parent) && isRefCurrentAssignment(assignment, surface.ref) && assignment.right.kind === ts.SyntaxKind.NullKeyword) {
-        releases.push(assignment)
-        continue
+function keyedIntentCallers(): string[] {
+  const srcRoot = fileURLToPath(new URL('../src/', import.meta.url))
+  const callers: string[] = []
+  for (const entry of readdirSync(srcRoot, { recursive: true, encoding: 'utf8' })) {
+    const path = entry.replace(/\\/g, '/')
+    if (!/\.tsx?$/.test(path) || path === WRITE_INTENT_MODULE) continue
+    const text = readFileSync(`${srcRoot}${path}`, 'utf8')
+    if (!text.includes('writeIntent')) continue
+    const file = ts.createSourceFile(path, text, ts.ScriptTarget.Latest, true, path.endsWith('x') ? ts.ScriptKind.TSX : ts.ScriptKind.TS)
+    const helperNames = new Set<string>()
+    const namespaces = new Set<string>()
+    for (const statement of file.statements) {
+      if (!ts.isImportDeclaration(statement) || !/\/writeIntent(?:\.ts)?$/.test((statement.moduleSpecifier as ts.StringLiteral).text)) continue
+      const bindings = statement.importClause?.namedBindings
+      if (bindings && ts.isNamespaceImport(bindings)) namespaces.add(bindings.name.text)
+      if (bindings && ts.isNamedImports(bindings)) {
+        for (const element of bindings.elements) if (KEYED_HELPERS.includes((element.propertyName ?? element.name).text)) helperNames.add(element.name.text)
       }
-      assert.fail(`${surface.ref} may only be keyed by identityForIntent or released with \`.current = null\`; found ${lineOf(component, parent)}`)
     }
-    const handler = findFunction(component, surface.handler)
-    const [write] = callsNamed(handler, surface.write)
-    assert.ok(write, `${surface.handler} calls ${surface.write}`)
-    let releasedAfterCommit = 0
-    for (const release of releases) {
-      assert.ok(!onFailurePath(release), `a catch or finally must not release ${surface.ref}: ${lineOf(component, release)}`)
-      const owner = functionLabel(enclosingFunction(release))
-      if (surface.newIntent.includes(owner)) continue
-      assert.equal(owner, surface.handler, `${surface.ref} is released outside its write handler: ${lineOf(component, release)}`)
-      assert.ok(releaseFollowsWrite(release, write), `${surface.ref} is released before ${surface.write} answered: ${lineOf(component, release)}`)
-      releasedAfterCommit += 1
+    let keyed = false
+    const visit = (node: ts.Node): void => {
+      if (ts.isCallExpression(node)) {
+        const callee = node.expression
+        if (ts.isIdentifier(callee) && helperNames.has(callee.text)) keyed = true
+        if (ts.isPropertyAccessExpression(callee) && ts.isIdentifier(callee.expression) && namespaces.has(callee.expression.text) && KEYED_HELPERS.includes(callee.name.text)) keyed = true
+      }
+      ts.forEachChild(node, visit)
     }
-    assert.equal(releasedAfterCommit, 1, `${surface.handler} releases ${surface.ref} once, after the committed write`)
+    visit(file)
+    if (keyed) callers.push(path)
   }
-})
-
-await runTest('an undo/redo request id is settled only on the success path', () => {
-  const component = readComponent('components/inventory/Inventory.tsx')
-  const settles = callsNamed(findFunction(component, 'commitAdjust'), 'settle')
-  assert.equal(settles.length, 2, 'undo and redo each settle their id')
-  for (const settle of settles) assert.ok(!onFailurePath(settle), `settle() on a failure path re-mints the id a retry must replay: ${lineOf(component, settle)}`)
-})
-
-await runTest('the stock-action import releases its pending job only after it started, was cancelled, or the sheet was closed', () => {
-  const component = readComponent('components/products/import/StockActionImportModal.tsx')
-  const writes = descendants(component.file, (node) => isRefCurrentAssignment(node, 'pendingJobRef')) as ts.BinaryExpression[]
-  const releases = writes.filter((node) => node.right.getText() !== 'pending')
-  assert.equal(releases.length, 3, 'the pending job is released after a start, after a cancel, and on close')
-  for (const release of releases) {
-    assert.ok(!onFailurePath(release), `a catch or finally must not drop the pending job: ${lineOf(component, release)}`)
-    const owner = functionLabel(enclosingFunction(release))
-    if (owner === 'useEffect cleanup') continue
-    assert.equal(owner, 'handleImport', `the pending job is dropped outside handleImport: ${lineOf(component, release)}`)
-    const handler = findFunction(component, 'handleImport')
-    const settledJob = [...callsNamed(handler, 'startImportJob'), ...callsNamed(handler, 'cancelImportJob')]
-    assert.ok(settledJob.some((call) => releaseFollowsWrite(release, call)), `the pending job is dropped before it started or was cancelled: ${lineOf(component, release)}`)
-  }
-})
-
-function intentExpression(component: ComponentSource, call: ts.CallExpression): ts.Node {
-  const intent = call.arguments[1]
-  if (!ts.isIdentifier(intent)) return intent
-  const [declaration] = descendants(enclosingFunction(call), (node) => ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.name.text === intent.text) as ts.VariableDeclaration[]
-  assert.ok(declaration?.initializer, `${lineOf(component, call)}: the intent ${intent.text} is declared in the same handler`)
-  return declaration.initializer
+  return callers.sort()
 }
 
-function assertStableIntent(component: ComponentSource, intent: ts.Node): void {
-  for (const node of descendants(intent, () => true)) {
-    if ((ts.isCallExpression(node) || ts.isNewExpression(node)) && VOLATILE_CALL.test(node.expression.getText())) {
-      assert.fail(`the keyed intent holds a value that changes on every press, so a retry would mint a new id: ${lineOf(component, node)}`)
-    }
-    if ((ts.isPropertyAssignment(node) || ts.isShorthandPropertyAssignment(node)) && IDENTITY_FIELD.test(node.name.getText())) {
-      assert.fail(`the keyed intent must not carry an identity or a device clock: ${lineOf(component, node)}`)
-    }
-  }
-}
-
-await runTest('every keyed intent holds only the operator-entered values, nothing volatile', () => {
-  for (const surface of identitySurfaces) {
-    const component = readComponent(surface.component)
-    const keyed = callsNamed(component.file, 'identityForIntent')
-    assert.equal(keyed.length, 1, `${surface.component} keys exactly one write intent`)
-    assertStableIntent(component, intentExpression(component, keyed[0]))
-  }
-  const importModal = readComponent('components/products/import/StockActionImportModal.tsx')
-  const [intent] = descendants(findFunction(importModal, 'handleImport'), (node) => ts.isVariableDeclaration(node) && node.name.getText() === 'intent') as ts.VariableDeclaration[]
-  assert.ok(intent?.initializer)
-  assertStableIntent(importModal, intent.initializer)
+await runTest('every component that keys a write intent is driven above through a timeout and its retries', () => {
+  const driven = new Set(KEYED_HELPERS.flatMap((name) => harness.callersOf(WRITE_INTENT_MODULE, name)))
+  assert.ok(driven.size > 0, 'the mounted cases reached the keyed-intent helpers')
+  const undriven = keyedIntentCallers().filter((path) => !driven.has(path))
+  assert.deepEqual(undriven, [], `these files key a write intent that no mounted case above drives; mount each one and prove its retry keeps the id: ${undriven.join(', ')}`)
 })
 
 await harness.close()

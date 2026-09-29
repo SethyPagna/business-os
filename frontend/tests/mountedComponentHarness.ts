@@ -79,7 +79,9 @@ export class MemoryNode {
   get nextSibling(): MemoryNode | null { return this.sibling(1) }
   get previousSibling(): MemoryNode | null { return this.sibling(-1) }
   get id(): string { return this.getAttribute('id') ?? '' }
+  set id(value: string) { this.setAttribute('id', value) }
   get className(): string { return this.getAttribute('class') ?? '' }
+  set className(value: string) { this.setAttribute('class', value) }
   get isConnected(): boolean { return this.ownerDocument.documentElement.contains(this) }
 
   private sibling(step: number): MemoryNode | null {
@@ -115,6 +117,31 @@ export class MemoryNode {
   }
 
   remove(): void { this.parentNode?.removeChild(this) }
+  append(...nodes: Array<MemoryNode | string>): void {
+    for (const node of nodes) this.appendChild(typeof node === 'string' ? this.ownerDocument.createTextNode(node) : node)
+  }
+  prepend(...nodes: Array<MemoryNode | string>): void {
+    const first = this.firstChild
+    for (const node of nodes) this.insertBefore(typeof node === 'string' ? this.ownerDocument.createTextNode(node) : node, first)
+  }
+  replaceChildren(...nodes: Array<MemoryNode | string>): void {
+    this.textContent = ''
+    this.append(...nodes)
+  }
+  get classList() {
+    const classes = (): string[] => this.className.split(/\s+/).filter(Boolean)
+    const write = (next: string[]): void => this.setAttribute('class', next.join(' '))
+    return {
+      contains: (name: string) => classes().includes(name),
+      add: (...names: string[]) => write([...new Set([...classes(), ...names])]),
+      remove: (...names: string[]) => write(classes().filter((name) => !names.includes(name))),
+      toggle: (name: string, force?: boolean) => {
+        const on = force ?? !classes().includes(name)
+        write(on ? [...new Set([...classes(), name])] : classes().filter((existing) => existing !== name))
+        return on
+      },
+    }
+  }
   setAttribute(name: string, value: unknown): void { this.attributes.set(name, String(value)); domVersion += 1 }
   removeAttribute(name: string): void { this.attributes.delete(name); domVersion += 1 }
   getAttribute(name: string): string | null { return this.attributes.get(name) ?? null }
@@ -434,7 +461,7 @@ function doubleModuleSource(key: string): string {
   return lines.join('\n')
 }
 
-function harnessPlugin(): Plugin {
+function harnessPlugin(observed: ReadonlySet<string>): Plugin {
   return {
     name: 'mounted-component-harness',
     enforce: 'pre',
@@ -445,8 +472,9 @@ function harnessPlugin(): Plugin {
       if (!resolved || resolved.external) return null
       const [file, query] = resolved.id.split('?')
       const key = sourceKey(file)
+      // The provider module boots sync, websockets and the session; a mounted surface only needs the context it reads.
       if (key === APP_CONTEXT_PROVIDER) return resolve(srcRoot, APP_CONTEXT_CORE)
-      if (key && TRANSPORT_MODULE.test(key) && query !== 'actual') return `${DOUBLE_PREFIX}${key}`
+      if (key && (TRANSPORT_MODULE.test(key) || observed.has(key)) && query !== 'actual') return `${DOUBLE_PREFIX}${key}`
       return null
     },
     load(id) {
@@ -513,21 +541,40 @@ export interface MountedSurface {
 
 export interface Harness {
   mount(options: MountOptions): Promise<MountedSurface>
+  callersOf(module: string, exportName: string): string[]
   close(): Promise<void>
 }
 
 export interface HarnessOptions {
   localStorage?: Record<string, string>
+  observe?: readonly string[]
+}
+
+function callingSourceModule(): string | null {
+  for (const frame of (new Error().stack ?? '').split('\n').slice(2)) {
+    const normalized = frame.replace(/\\/g, '/')
+    const start = normalized.toLowerCase().indexOf(srcFrameMarker)
+    if (start < 0 || normalized.includes('?actual') || normalized.includes('/node_modules/')) continue
+    const path = normalized.slice(start + srcFrameMarker.length).match(/^[^:?)]+\.tsx?/)
+    if (path) return path[0]
+  }
+  return null
 }
 
 export async function createHarness(options: HarnessOptions = {}): Promise<Harness> {
   const restoreGlobals = installGlobals()
   const storage = memoryWindow.localStorage as Storage
   for (const [key, value] of Object.entries(options.localStorage ?? {})) storage.setItem(key, value)
+  const observed = new Set(options.observe ?? [])
+  const callers = new Map<string, Set<string>>()
   let doubles: ModuleDoubles = {}
   let doubleCalls = 0
   ;(globalThis as Record<symbol, unknown>)[DISPATCH] = (key: string, name: string, actual: Listener, args: unknown[]) => {
     doubleCalls += 1
+    if (observed.has(key)) {
+      const caller = callingSourceModule()
+      if (caller) callers.set(`${key}#${name}`, (callers.get(`${key}#${name}`) ?? new Set()).add(caller))
+    }
     const double = doubles[key]?.[name]
     return double ? (double as Listener)(...args) : actual(...args)
   }
@@ -540,7 +587,7 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
       logLevel: 'error',
       server: { middlewareMode: true, hmr: false, watch: null },
       optimizeDeps: { noDiscovery: true, include: [] },
-      plugins: [harnessPlugin(), react(), transformDonePlugin()],
+      plugins: [harnessPlugin(observed), react(), transformDonePlugin()],
     })
   } catch (error) {
     restoreGlobals()
@@ -598,17 +645,45 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
       if (!node) throw new Error(`the mounted surface shows no ${what}; it reads: ${memoryDocument.body.textContent.replace(/\s+/g, ' ').slice(0, 600)}`)
       return node
     }
-    const invoke = async (node: MemoryNode, handler: string, args: unknown[], settleOptions: SettleOptions = {}): Promise<void> => {
-      const callback = propsOf(node)[handler]
-      if (typeof callback !== 'function') throw new Error(`${node.tagName} ${accessibleText(node).slice(0, 80)} has no ${handler}`)
+    const run = async (callbacks: () => unknown[], settleOptions: SettleOptions): Promise<void> => {
       const pressMark = timerMark()
       await act(async () => {
-        const result = (callback as Listener)(...args)
-        if (result instanceof Promise) result.catch((error: unknown) => { handlerFailures.push(error) })
+        for (const result of callbacks()) {
+          if (result instanceof Promise) result.catch((error: unknown) => { handlerFailures.push(error) })
+        }
       })
       await settle(settleOptions, pressMark)
     }
+    const invoke = async (node: MemoryNode, handler: string, args: unknown[], settleOptions: SettleOptions = {}): Promise<void> => {
+      const callback = propsOf(node)[handler]
+      if (typeof callback !== 'function') throw new Error(`${node.tagName} ${accessibleText(node).slice(0, 80)} has no ${handler}`)
+      await run(() => [(callback as Listener)(...args)], settleOptions)
+    }
     const event = (node: MemoryNode) => ({ target: node, currentTarget: node, preventDefault() {}, stopPropagation() {}, nativeEvent: {} })
+    const dispatchClick = (node: MemoryNode): unknown[] => {
+      const path: MemoryNode[] = []
+      for (let current: MemoryNode | null = node; current && current !== memoryDocument.documentElement; current = current.parentNode) path.push(current)
+      let stopped = false
+      const click = {
+        type: 'click', target: node, currentTarget: node, button: 0, detail: 1, defaultPrevented: false, nativeEvent: {},
+        preventDefault() { click.defaultPrevented = true },
+        stopPropagation() { stopped = true },
+        isPropagationStopped: () => stopped,
+      }
+      const results: unknown[] = []
+      const phases: Array<[MemoryNode[], string]> = [[[...path].reverse(), 'onClickCapture'], [path, 'onClick']]
+      for (const [nodes, handler] of phases) {
+        for (const current of nodes) {
+          if (stopped) return results
+          const callback = propsOf(current)[handler]
+          if (typeof callback !== 'function') continue
+          click.currentTarget = current
+          results.push((callback as Listener)(click))
+        }
+      }
+      if (!results.length) throw new Error(`nothing handles a click on ${node.tagName} ${accessibleText(node).slice(0, 80)}`)
+      return results
+    }
     return {
       body: memoryDocument.body,
       text: () => memoryDocument.body.textContent,
@@ -621,9 +696,9 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
         return node
       },
       field: (name) => find((node) => node.getAttribute('name') === name || node.getAttribute('id') === name, `field ${name}`),
-      click: async (node, settleOptions) => {
+      click: async (node, settleOptions = {}) => {
         if (propsOf(node).disabled) throw new Error(`${accessibleText(node).slice(0, 80)} is disabled`)
-        await invoke(node, 'onClick', [event(node)], settleOptions)
+        await run(() => dispatchClick(node), settleOptions)
       },
       type: async (node, value) => {
         ;(node as unknown as { value: string }).value = value
@@ -639,6 +714,7 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
 
   return {
     mount,
+    callersOf: (module, exportName) => [...(callers.get(`${module}#${exportName}`) ?? [])].sort(),
     close: async () => {
       try {
         for (const unmount of [...mountedSurfaces]) await unmount()
