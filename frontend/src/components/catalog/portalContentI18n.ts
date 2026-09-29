@@ -1,4 +1,4 @@
-import { getPortalLanguageText } from './portalLanguagePacks.ts'
+import { defaultConfigText } from './portalLanguagePacks.ts'
 
 type PlainRecord = Record<string, unknown>
 type TextRecord = Record<string, string>
@@ -17,15 +17,6 @@ const TRANSLATABLE_CONFIG_FIELDS = [
   'promotionsIntro',
   'submissionInstructions',
 ]
-
-const DEFAULT_CONFIG_COPY_KEYS: Record<string, [englishDefault: string, resourceKey: string]> = {
-  aboutTitle: ['About us', 'aboutTitle'],
-  aiTitle: ['Beauty Assistant', 'aiTitle'],
-  aiIntro: ['Tell us what you are shopping for and the assistant will compare products from the current public catalogue.', 'aiIntro'],
-  aiDisclaimer: ['AI generated, for reference only. For more accurate inquiries, please contact our store on Instagram or Facebook.', 'aiDisclaimer'],
-  faqTitle: ['Frequently asked questions', 'faqTitle'],
-  promotionsTitle: ['Featured offers', 'promotionsSectionFallback'],
-}
 
 const PRODUCT_TRANSLATABLE_FIELDS = [
   'name',
@@ -716,10 +707,7 @@ function pickTranslatedText(block: unknown, field: string, fallback: unknown): u
 }
 
 function pickDefaultFirstPartyText(language: unknown, field: string, fallback: unknown): unknown {
-  const [englishDefault, resourceKey] = DEFAULT_CONFIG_COPY_KEYS[field] || []
-  if (!englishDefault || normalizeLanguageKey(language) === 'en') return fallback
-  if (normalizeText(fallback) !== normalizeText(englishDefault)) return fallback
-  return getPortalLanguageText(language, resourceKey) || fallback
+  return normalizeLanguageKey(language) === 'en' ? fallback : defaultConfigText(language, field, fallback)
 }
 
 function getCollectionEntry(collection: unknown, id: unknown, index: number): PlainRecord {

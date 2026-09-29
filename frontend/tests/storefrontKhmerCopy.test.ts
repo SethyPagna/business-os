@@ -8,7 +8,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import ts from 'typescript'
-import { resolveStorefrontCopy } from '../src/components/catalog/portalLanguagePacks.ts'
+import { localizeDefaultConfigCopy, resolveStorefrontCopy } from '../src/components/catalog/portalLanguagePacks.ts'
 import { PORTAL_LEGAL_EN, legalText } from '../src/components/catalog/legal/legalContent.ts'
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)))
@@ -269,4 +269,38 @@ for (const entry of entries) {
 const report = [...gaps].sort(([a], [b]) => a.localeCompare(b)).map(([key, gap]) => `${key} = "${gap.english}" -> km "${gap.khmer}" [${[...gap.sites].join(', ')}]`)
 assert.deepEqual(report, [], `${report.length} storefront string(s) render English on the Khmer storefront:\n  ${report.join('\n  ')}`)
 
-console.log(`storefrontKhmerCopy: ${renderedKeys.size} storefront keys from ${entries.length} translator calls resolve to Khmer`)
+// The Worker fills these config fields with English when the merchant left them empty;
+// that system text renders in Khmer too, while a merchant's own wording is kept.
+{
+  const worker = fs.readFileSync(path.join(ROOT, '..', 'cloudflare', 'src', 'routes', 'portal.ts'), 'utf8')
+  const workerDefault = (pattern: RegExp) => {
+    const match = pattern.exec(worker)
+    assert.ok(match, `the Worker no longer fills ${pattern}`)
+    return match[1]
+  }
+  const workerDefaults = {
+    faqTitle: workerDefault(/faqTitle: settings\.customer_portal_faq_title \|\| '([^']+)'/),
+    aiTitle: workerDefault(/aiTitle: settings\.customer_portal_ai_title \|\| '([^']+)'/),
+    aiDisclaimer: workerDefault(/aiDisclaimer: settings\.customer_portal_ai_disclaimer\s*\|\| '([^']+)'/),
+  }
+  const website = workerDefault(/website: settings\.customer_portal_website_label \|\| '([^']+)'/)
+  const config = { ...workerDefaults, linkLabels: { website, facebook: 'Facebook' } }
+
+  const khmer = localizeDefaultConfigCopy(config, 'km')
+  for (const [field, english] of Object.entries(workerDefaults)) {
+    const value = String(khmer[field as keyof typeof workerDefaults])
+    assert.ok(KHMER_SCRIPT.test(value) && value !== english, `the Worker default ${field} "${english}" renders "${value}" on the Khmer storefront`)
+  }
+  assert.ok(KHMER_SCRIPT.test(khmer.linkLabels.website), `the Worker default website label renders "${khmer.linkLabels.website}" on the Khmer storefront`)
+  assert.equal(khmer.linkLabels.facebook, 'Facebook')
+  assert.deepEqual(localizeDefaultConfigCopy(config, 'en'), config)
+  const merchantWording = { faqTitle: 'Ask us anything', aiTitle: 'Skin coach', linkLabels: { website: 'Our online shop' } }
+  assert.deepEqual(localizeDefaultConfigCopy(merchantWording, 'km'), merchantWording)
+  assert.match(
+    read('components/catalog/PublicCatalogPage.tsx'),
+    /localizeDefaultConfigCopy\(\{ \.\.\.DEFAULT_PUBLIC_CONFIG, \.\.\.config \}, pageLanguage\)/,
+    'the storefront displayConfig applies it in the routed page language',
+  )
+}
+
+console.log(`storefrontKhmerCopy: ${renderedKeys.size} storefront keys from ${entries.length} translator calls resolve to Khmer, and so do the Worker's default config texts`)
