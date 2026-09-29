@@ -47,8 +47,6 @@ import { useCopyFloat } from '../shared/CopyFloat.tsx'
 import EntityLink from '../shared/EntityLink.tsx'
 import CostCalculationFloat from '../shared/CostCalculationFloat.tsx'
 import { COPY_SELECTOR, deferCopySurfaceAction } from '../shared/textAffordances.ts'
-import LazyPortalMenu from '../shared/LazyPortalMenu'
-import type { PortalMenuItem } from '../shared/PortalMenu'
 import { primaryToolbarButtonClassName } from '../shared/toolbarButtonStyles'
 import type { StockChangeHeaderActions } from './StockChangeSection'
 import {
@@ -4869,36 +4867,21 @@ function ProductsFullEditor() {
             ) : (
               <div className="h-9 min-w-0 flex-1 sm:flex-none sm:min-w-[6.5rem]" aria-hidden="true" />
             )}
-            /* Stock Changes' primary "Adjust" action rides the header row here
-               (user, Aug 31: "Adjust should be moved to same row as the info
-               toolkit, History and Manage"). Its menu opens the section's own
-               modals via the registered callbacks; the section body no longer
-               renders this button. A portal menu (not a bare absolute one) so
-               it can't be clipped by the header row's horizontal overflow. */
+            /* Stock Changes' primary "Adjust" rides the header row (user, Aug 31).
+               One button, straight into the session in Add: the float's own
+               Add / Remove / Set header switches mode (owner, 30 Sep). */
             primaryActionSlot={
               activeProductSection === 'stock_changes' && ledgerActions?.canAdjust ? (
-                <LazyPortalMenu
-                  align="auto"
-                  trigger={(
-                    <button
-                      type="button"
-                      className={primaryToolbarButtonClassName}
-                      aria-haspopup="true"
-                      aria-label={tr('adjust', 'Adjust')}
-                      title={tr('adjust', 'Adjust')}
-                    >
-                      <Boxes className="h-4 w-4 shrink-0" />
-                      <span className="min-w-0 truncate">{tr('adjust', 'Adjust')}</span>
-                    </button>
-                  )}
-                  items={[
-                    // N27: one way to change stock -- the fast flow, opened in
-                    // the chosen mode (add / remove / set).
-                    { label: tr('add_stock', 'Add Stock'), onClick: () => ledgerActions?.openFastStockIn('add'), color: 'blue', icon: <Boxes className="h-4 w-4 shrink-0" /> },
-                    { label: tr('remove_stock', 'Remove Stock'), onClick: () => ledgerActions?.openFastStockIn('remove') },
-                    { label: tr('adjust_quantity', 'Adjust Quantity'), onClick: () => ledgerActions?.openFastStockIn('set') },
-                  ] as PortalMenuItem[]}
-                />
+                <button
+                  type="button"
+                  className={primaryToolbarButtonClassName}
+                  onClick={() => ledgerActions?.openFastStockIn('add')}
+                  aria-label={tr('adjust', 'Adjust')}
+                  title={tr('adjust', 'Adjust')}
+                >
+                  <Boxes className="h-4 w-4 shrink-0" />
+                  <span className="min-w-0 truncate">{tr('adjust', 'Adjust')}</span>
+                </button>
               ) : null
             }
             t={t}

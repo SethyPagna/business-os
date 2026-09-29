@@ -4,7 +4,7 @@ import { todayStr } from '../../utils/dateHelpers.ts'
 import { Suspense, useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import type { ReactNode } from 'react'
 import ClipboardList from 'lucide-react/dist/esm/icons/clipboard-list.js'
-import Zap from 'lucide-react/dist/esm/icons/zap.js'
+import Boxes from 'lucide-react/dist/esm/icons/boxes.js'
 import Download from 'lucide-react/dist/esm/icons/download.js'
 import Upload from 'lucide-react/dist/esm/icons/upload.js'
 import Settings2 from 'lucide-react/dist/esm/icons/settings-2.js'
@@ -604,6 +604,12 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
   // FastStockInModal.tsx; writes ride the same receive kernel as every
   // other add-stock surface.
   const [showFastStockIn, setShowFastStockIn] = useState(false)
+  // A row's Adjust pre-picks its product; the Manage menu opens the session blank.
+  const [fastStockInProduct, setFastStockInProduct] = useState<InventoryProduct | null>(null)
+  const openFastStockIn = useCallback((product: InventoryProduct | null) => {
+    setFastStockInProduct(product)
+    setShowFastStockIn(true)
+  }, [])
   const [inventoryReasons, setInventoryReasons] = useState<InventoryReason[]>([])
   const [reasonManager, setReasonManager] = useState<{ open: boolean; type: InventoryReasonType }>({ open: false, type: 'adjust' })
   const [reasonDraft, setReasonDraft] = useState('')
@@ -2979,7 +2985,7 @@ ${inventoryFeesFormulaText}`,
             // Import = Upload (data INTO the app), Export = Download -- same
             // icon convention as HeaderActions; these two were swapped.
             { label: tr('import', 'Import'), onClick: () => setShowImport(true), color: 'blue', icon: <Upload className="h-4 w-4 shrink-0" /> },
-            { label: tr('fast_stockin_title', 'Fast stock-in'), onClick: () => setShowFastStockIn(true), color: 'green', icon: <Zap className="h-4 w-4 shrink-0" /> },
+            { label: tr('adjust', 'Adjust'), onClick: () => openFastStockIn(null), color: 'green', icon: <Boxes className="h-4 w-4 shrink-0" /> },
           ] as PortalMenuItem[])}
         />
       </div>
@@ -3284,10 +3290,12 @@ ${inventoryFeesFormulaText}`,
           <FastStockInModal
             branchOptions={branchSelectOptions}
             defaultBranchId={branchFilter !== 'all' ? branchFilter : null}
+            initialProduct={fastStockInProduct}
+            initialMode="add"
             tr={tr}
             notify={notify}
             exchangeRate={exchangeRate}
-            onClose={() => setShowFastStockIn(false)}
+            onClose={() => { setShowFastStockIn(false); setFastStockInProduct(null) }}
             onDone={() => load(false)}
             // S4-20: minimizing is silent otherwise -- the panel just
             // vanishes, which reads as lost work. Say where it went.

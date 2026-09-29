@@ -43,24 +43,29 @@ const inventorySource = read('../src/components/inventory/Inventory.tsx')
 const en = JSON.parse(readFileSync(new URL('../src/lang/en.json', import.meta.url), 'utf8')) as Record<string, unknown>
 const km = JSON.parse(readFileSync(new URL('../src/lang/km.json', import.meta.url), 'utf8')) as Record<string, unknown>
 
-runTest('the Stock Changes header has one stock entry point: the fast flow, in the chosen mode', () => {
-  // the Adjust menu routes every entry to the fast modal
-  assert.match(productsSource, /\{ label: tr\('add_stock', 'Add Stock'\), onClick: \(\) => ledgerActions\?\.openFastStockIn\('add'\)/)
-  assert.match(productsSource, /\{ label: tr\('remove_stock', 'Remove Stock'\), onClick: \(\) => ledgerActions\?\.openFastStockIn\('remove'\)/)
-  assert.match(productsSource, /\{ label: tr\('adjust_quantity', 'Adjust Quantity'\), onClick: \(\) => ledgerActions\?\.openFastStockIn\('set'\)/)
+// Owner, 30 Sep 2026: "Adjust Stock click should directly open the page ...
+// default add stock can switch to other mode". The header Adjust is ONE
+// button that opens the session in Add; the mode switch lives in the float.
+runTest('the Stock Changes header Adjust is one button that opens the session in Add', () => {
+  const slot = productsSource.slice(productsSource.indexOf('primaryActionSlot={'), productsSource.indexOf('t={t}', productsSource.indexOf('primaryActionSlot={')))
+  assert.ok(slot.length > 0, 'primary action slot located')
+  assert.match(slot, /onClick=\{\(\) => ledgerActions\?\.openFastStockIn\('add'\)\}/)
+  assert.match(slot, /tr\('adjust', 'Adjust'\)/)
+  // no menu, so no second choice of mode before the float
+  assert.doesNotMatch(slot, /LazyPortalMenu|aria-haspopup/)
+  assert.doesNotMatch(slot, /openFastStockIn\('remove'\)|openFastStockIn\('set'\)/)
+  assert.doesNotMatch(productsSource, /tr\('remove_stock', 'Remove Stock'\)|tr\('adjust_quantity', 'Adjust Quantity'\)/)
   // ...and nothing on the header opens the one-by-one modal any more
   assert.doesNotMatch(productsSource, /openAdjust\(/)
   assert.doesNotMatch(ledgerSource, /openAdjust:/)
   assert.doesNotMatch(ledgerSource, /const openStockAdjustment = /)
   assert.match(ledgerSource, /openFastStockIn: \(mode\?: StockMode\) => void/)
   assert.match(ledgerSource, /initialMode=\{fastStockInMode\}/)
-  // the only other stock-in entry point (Inventory's Manage menu) opens the
-  // same modal and never carried the one-by-one entries; its per-row
-  // adjust (like the Products list's) is a different surface and stays
+  // Inventory's Manage menu names the same entry "Adjust", not "Fast stock-in"
   const manageMenu = inventorySource.slice(inventorySource.indexOf("{ label: tr('import', 'Import'), onClick: () => setShowImport(true)"), inventorySource.indexOf('] as PortalMenuItem[])}'))
   assert.ok(manageMenu.length > 0, 'Manage menu located')
-  assert.doesNotMatch(manageMenu, /add_stock|remove_stock|adjust_quantity|openAdjust/)
-  assert.match(inventorySource, /label: tr\('fast_stockin_title', 'Fast stock-in'\), onClick: \(\) => setShowFastStockIn\(true\)/)
+  assert.doesNotMatch(manageMenu, /add_stock|remove_stock|adjust_quantity|openAdjust|fast_stockin_title/)
+  assert.match(manageMenu, /\{ label: tr\('adjust', 'Adjust'\), onClick: \(\) => openFastStockIn\(null\)/)
 })
 
 runTest('the fast flow carries an add / remove / set switch; each line freezes its mode', () => {

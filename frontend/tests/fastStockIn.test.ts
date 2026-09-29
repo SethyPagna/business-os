@@ -133,9 +133,9 @@ runTest('F2: the modal portals, guards mid-save closes, and Done refreshes only 
   assert.match(modalSource, /if \(successCount > 0\) onDone\(\)\s+onClose\(\)/)
 })
 
-runTest('F2: Inventory launches it from the Manage menu and reloads after', () => {
+runTest('F2: Inventory launches it from the Manage menu (Adjust) and reloads after', () => {
   assert.match(inventorySource, /const FastStockInModal = lazyRetry\(\(\) => import\('\.\/FastStockInModal'\)/)
-  assert.match(inventorySource, /label: tr\('fast_stockin_title', 'Fast stock-in'\), onClick: \(\) => setShowFastStockIn\(true\)/)
+  assert.match(inventorySource, /label: tr\('adjust', 'Adjust'\), onClick: \(\) => openFastStockIn\(null\)/)
   assert.match(inventorySource, /branchOptions=\{branchSelectOptions\}/)
   assert.match(inventorySource, /onDone=\{\(\) => load\(false\)\}/)
 })
