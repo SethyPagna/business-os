@@ -42,6 +42,22 @@ function load(filename) {
   return mod.exports
 }
 const permissions = load(path.join(root, 'lib/permissions.ts'))
+const frontendRoot = path.join(__dirname, '..', '..', 'frontend', 'src')
+const frontendCache = new Map()
+function loadFrontend(filename) {
+  if (frontendCache.has(filename)) return frontendCache.get(filename).exports
+  const mod = { exports: {} }
+  frontendCache.set(filename, mod)
+  const output = ts.transpileModule(fs.readFileSync(filename, 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true },
+    fileName: filename,
+  }).outputText
+  new Function('require', 'module', 'exports', output)(name => (name === 'react' ? {} : loadFrontend(path.resolve(path.dirname(filename), name))), mod, mod.exports)
+  return mod.exports
+}
+const { effectivePermissions } = loadFrontend(path.join(frontendRoot, 'utils/permissions.ts'))
+const { getHubDestinations } = loadFrontend(path.join(frontendRoot, 'components/shared/hubNavigation.ts'))
+const showsSuppliersTab = session => getHubDestinations('contacts', effectivePermissions(session)).some(destination => destination.id === 'suppliers')
 const app = new Hono()
 app.onError((error, c) => {
   if (error instanceof Tripwire) return c.json({ tripwire: true }, 598)
@@ -237,6 +253,30 @@ const batchUrls = ['/batches/tracked-product-ids', '/batches?productId=1&branchI
     assert.equal(blocked.status, 403)
     assert.equal(reads, 0)
   }
+  // The Suppliers tab hosts the stock-in report: the screen offers it exactly when the Worker serves it.
+  const stockInReport = '/suppliers/reports/stock-in-invoices'
+  const suppliersRole = { contacts: true, contacts_suppliers: true }
+  const parity = { shown: 0, hidden: 0 }
+  for (const session of [
+    staff(suppliersRole),
+    staff({ ...suppliersRole, contacts: 'review' }),
+    staff({ ...suppliersRole, 'contacts:view': false }, { 'contacts:view': true }),
+    { ...staff({}, { 'contacts:view': false }), role_code: 'admin' },
+    staff({ all: true }, { 'contacts:view': false }),
+    staff(suppliersRole, { 'contacts:view': false }),
+    staff({ ...suppliersRole, contacts: 'review' }, { 'contacts:view': false }),
+    staff({ ...suppliersRole, pos: true, contacts: 'review' }, { 'contacts:view': false }),
+    staff({ contacts: true }),
+    staff({ contacts_suppliers: true }),
+    staff(suppliersRole, { contacts: false }),
+    staff(suppliersRole, { contacts_suppliers: false }),
+  ]) {
+    const shown = showsSuppliersTab(session)
+    const response = await request(stockInReport, session)
+    parity[shown ? 'shown' : 'hidden']++
+    assert.equal(reads > 0, shown, `stock-in report for role ${session.role_permissions} + ${session.permissions}: screen ${shown ? 'shows' : 'hides'} it, Worker answered ${response.status}`)
+  }
+  assert.deepEqual(parity, { shown: 5, hidden: 7 })
   assert.equal((await request('/returns', null)).status, 401)
   console.log(`PASS ${checks} real Hono requests: effective read denials, admin matrix, alternate grants, domain isolation and independent writes`)
 })().catch(error => { console.error(error); process.exitCode = 1 })
