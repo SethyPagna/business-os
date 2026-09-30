@@ -504,8 +504,11 @@ function LegalReader({
       </div>
 
       <div className="mx-auto max-w-3xl px-4 pb-16 pt-5 text-sm leading-7">
-        <p className="text-xs text-slate-500 dark:text-neutral-500">
+        <p data-portal-legal-last-updated="true" className="text-xs leading-6 text-slate-500 dark:text-neutral-500">
           {text('portal_legal_last_updated').replace('{date}', formatLegalLastUpdated())}
+        </p>
+        <p data-portal-legal-updated="true" className="mt-1 text-xs leading-6 text-slate-600 dark:text-neutral-400">
+          {fill('portal_legal_updated_notice')}
         </p>
 
         <BusinessIdentityCard text={text} details={details} />
