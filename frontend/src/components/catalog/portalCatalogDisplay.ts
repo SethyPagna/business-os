@@ -145,21 +145,37 @@ export function resolvePortalStockStatus(
   return 'in_stock'
 }
 
+export type ColumnRange = readonly [min: number, max: number]
+
+export const PORTAL_GRID_LIMITS = {
+  desktop: [2, 8],
+  phone: [2, 3],
+} as const satisfies Record<'desktop' | 'phone', ColumnRange>
+
+export function clampToRange(value: number, [min, max]: ColumnRange): number {
+  return value < min ? min : value > max ? max : value
+}
+
+// Indexed by column count (0 and 1 are below the limits); each class stays written out for Tailwind.
+const DESKTOP_GRID_CLASSES = [
+  '',
+  '',
+  'lg:grid-cols-2',
+  'lg:grid-cols-2 xl:grid-cols-3',
+  'lg:grid-cols-2 xl:grid-cols-4',
+  'lg:grid-cols-3 xl:grid-cols-5',
+  'lg:grid-cols-3 xl:grid-cols-6',
+  'lg:grid-cols-4 xl:grid-cols-7',
+  'lg:grid-cols-4 xl:grid-cols-8',
+] as const
+
 export function getPortalGridClass(desktopColumns: unknown): string {
-  const normalized = Math.min(10, Math.max(2, Math.round(Number(desktopColumns || 4))))
-  if (normalized === 2) return 'lg:grid-cols-2'
-  if (normalized === 3) return 'lg:grid-cols-2 xl:grid-cols-3'
-  if (normalized === 4) return 'lg:grid-cols-2 xl:grid-cols-4'
-  if (normalized === 5) return 'lg:grid-cols-3 xl:grid-cols-5'
-  if (normalized === 6) return 'lg:grid-cols-3 xl:grid-cols-6'
-  if (normalized === 7) return 'lg:grid-cols-4 xl:grid-cols-7'
-  if (normalized === 8) return 'lg:grid-cols-4 xl:grid-cols-8'
-  if (normalized === 9) return 'lg:grid-cols-5 xl:grid-cols-9'
-  return 'lg:grid-cols-5 xl:grid-cols-10'
+  return DESKTOP_GRID_CLASSES[clampToRange(Math.round(Number(desktopColumns || 4)), PORTAL_GRID_LIMITS.desktop)]
+    ?? DESKTOP_GRID_CLASSES[PORTAL_GRID_LIMITS.desktop[1]]
 }
 
 export function getPortalMobileGridClass(mobileColumns: unknown): string {
-  const normalized = Math.min(3, Math.max(2, Math.round(Number(mobileColumns || 2))))
+  const normalized = clampToRange(Math.round(Number(mobileColumns || 2)), PORTAL_GRID_LIMITS.phone)
   // Always at least 2 columns on phones (matches the reference storefront layout),
   // and step up at the `sm:` (tablet) breakpoint.
   if (normalized === 3) return 'grid-cols-2 sm:grid-cols-3'

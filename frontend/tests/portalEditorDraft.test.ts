@@ -178,6 +178,17 @@ await runTest('T-D4 wiring: after a landed Save the editor settles edits and nev
   assert.match(landed, /replaceDraftValues\(/)
 })
 
+await runTest('T-D3 wiring: edits are settled against the form as it is when the write lands, never the draft that was sent', () => {
+  const page = code(read('../src/components/catalog/CatalogPage.tsx'))
+  const save = between(page, 'async function savePortalDraft(', '\n  async function ')
+  const landed = save.slice(save.indexOf('if (result?.success === false) return'))
+  const settleCalls = [...landed.matchAll(/settleSavedEdits\(([^)]*)\)/g)].map((match) => match[1].trim())
+  assert.deepEqual(settleCalls, ['editedKeysRef.current, sentDraft, editorFormRef.current'],
+    'settling against sentDraft or the render-time editorDraft marks text typed during the Save as saved')
+  assert.match(page, /useLayoutEffect\(\(\) => \{\n\s+editorFormRef\.current = \{ \.\.\.editorDraft, \.\.\.privateAiFormValues\(privateAi\) \}\n\s+\}, \[editorDraft, privateAi\]\)/,
+    'editorFormRef follows every render of the draft and the private assistant fields')
+})
+
 await runTest('AF-A1: edited keys are React state read through a ref; the reload rebuild waits for them and overlays the staff read', () => {
   const page = code(read('../src/components/catalog/CatalogPage.tsx'))
   assert.match(page, /const \[editedKeys, setEditedKeys\] = useState<ReadonlySet<string>>/)

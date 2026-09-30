@@ -13,6 +13,7 @@ import {
   resolvePortalStockStatus,
   combinePortalStockStatus,
 } from '../src/components/catalog/portalCatalogDisplay.ts'
+import * as portalDisplay from '../src/components/catalog/portalCatalogDisplay.ts'
 
 const tailwindConfig = fs.readFileSync(new URL('../tailwind.config.ts', import.meta.url), 'utf8')
 const catalogPageSource = fs.readFileSync(new URL('../src/components/catalog/CatalogPage.tsx', import.meta.url), 'utf8')
@@ -58,10 +59,7 @@ runTest('portal grid helpers honor configured mobile and desktop columns', () =>
   assert.equal(getPortalMobileGridClass(3), 'grid-cols-2 sm:grid-cols-3')
   assert.equal(getPortalGridClass(7), 'lg:grid-cols-4 xl:grid-cols-7')
   assert.equal(getPortalGridClass(8), 'lg:grid-cols-4 xl:grid-cols-8')
-  assert.equal(getPortalGridClass(10), 'lg:grid-cols-5 xl:grid-cols-10')
   assert.match(tailwindConfig, /\{js,jsx,ts,tsx\}/, 'Tailwind must scan TypeScript helpers that contain portal grid classes')
-  assert.match(catalogEditorSource, /customer_portal_grid_columns_mobile \?\? '1'/, 'mobile grid input should allow in-progress edits')
-  assert.match(catalogEditorSource, /customer_portal_grid_columns_desktop \?\? '4'/, 'desktop grid input should allow in-progress edits')
   assert.match(catalogEditorSource, /customer_portal_show_product_brand/, 'portal display editor should persist brand chip toggles')
   // The description toggle is deliberately gone (owner, 2026-09-18: the card
   // description is replaced by a click-to-view-details link, so a control for
@@ -624,6 +622,73 @@ runTest('public media blocks ordinary save, drag, and long-press interactions', 
   assert.match(publicPortalCssSource, /-webkit-touch-callout:\s*none/)
   assert.match(publicPortalCssSource, /-webkit-user-drag:\s*none/)
   assert.match(publicPortalCssSource, /user-select:\s*none/)
+})
+
+type ColumnRange = readonly [number, number]
+const gridLimits = (): { desktop: ColumnRange; phone: ColumnRange } => {
+  const limits = (portalDisplay as Record<string, unknown>).PORTAL_GRID_LIMITS as { desktop: ColumnRange; phone: ColumnRange } | undefined
+  assert.ok(limits, 'portalCatalogDisplay.ts exports the one PORTAL_GRID_LIMITS object')
+  return limits
+}
+const workerClamp = (key: string): ColumnRange => {
+  const portalRoute = fs.readFileSync(new URL('../../cloudflare/src/routes/portal.ts', import.meta.url), 'utf8')
+  const clamp = portalRoute.split('\n').find((line) => line.includes(`toNumber(settings.${key},`))
+  const bounds = clamp?.match(/Math\.min\((\d+), Math\.max\((\d+),/)
+  assert.ok(bounds, `the Worker still clamps ${key}`)
+  return [Number(bounds[2]), Number(bounds[1])]
+}
+const inputTag = (source: string, id: string): string => {
+  const at = source.indexOf(`id="${id}"`)
+  assert.ok(at > 0, `the editor renders #${id}`)
+  return source.slice(source.lastIndexOf('<input', at), source.indexOf('/>', at))
+}
+const unixLines = (source: string): string => source.replace(/\r\n/g, '\n')
+const editorColumnsSource = unixLines(catalogEditorSource)
+const catalogPageColumnsSource = unixLines(catalogPageSource)
+
+runTest('T-G1: the storefront grid never offers more computer columns than the shop shows (B5)', () => {
+  assert.equal(getPortalGridClass(10), getPortalGridClass(8), 'ten columns render as the eight the Worker publishes')
+  assert.equal(getPortalGridClass(9), getPortalGridClass(8))
+  assert.notEqual(getPortalGridClass(7), getPortalGridClass(8), 'eight is still a column count of its own')
+  assert.deepEqual(gridLimits().desktop, workerClamp('customer_portal_grid_columns_desktop'), 'the computer range is the one the Worker publishes')
+})
+
+runTest('T-G2: the computer-columns input, the preview and the Save read the same limits object (B5)', () => {
+  const desktopInput = inputTag(editorColumnsSource, 'portal-grid-desktop')
+  assert.match(desktopInput, /\smin=\{editorLimits\.desktop\[0\]\}/, 'the computer-columns minimum comes from editorLimits')
+  assert.match(desktopInput, /\smax=\{editorLimits\.desktop\[1\]\}/, 'the computer-columns maximum comes from editorLimits (a literal 10 let the preview show 9 and 10)')
+  const contextStart = catalogPageColumnsSource.indexOf('const editorContextValue = {')
+  const context = catalogPageColumnsSource.slice(contextStart, catalogPageColumnsSource.indexOf('\n    }\n', contextStart))
+  assert.match(context, /\n\s+editorLimits: PORTAL_GRID_LIMITS,\n/, 'the editor gets the limits through the context value')
+  const applyDraftStart = catalogPageColumnsSource.indexOf('function applyDraft(')
+  const applyDraft = catalogPageColumnsSource.slice(applyDraftStart, catalogPageColumnsSource.indexOf('\n}\n', applyDraftStart))
+  assert.match(applyDraft, /gridColumnsDesktop: clampToRange\([^\n]*PORTAL_GRID_LIMITS\.desktop\)/, 'the preview config clamps with the same object')
+  assert.match(catalogPageColumnsSource, /const desktopGridColumns = clampToRange\([^\n]*PORTAL_GRID_LIMITS\.desktop\)/, 'the preview grid clamps with the same object')
+  assert.match(catalogPageColumnsSource, /const sanitizedGridDesktop = clampToRange\([^\n]*PORTAL_GRID_LIMITS\.desktop\)/, 'the Save clamps with the same object')
+  assert.doesNotMatch(catalogPageColumnsSource, /Math\.min\(\d+, Math\.max\(\d+, [^\n]*(?:grid_columns|sanitizedGrid|gridColumns)/, 'no grid column clamp keeps its own literal bounds')
+})
+
+runTest('T-G3: the phone-columns input starts at the smallest count the shop renders; a stored 1 still round-trips (B7)', () => {
+  const rendersOwnCount = (columns: number) => getPortalMobileGridClass(columns).split(' ').some((className) => className.endsWith(`grid-cols-${columns}`))
+  const storefrontFloor = [1, 2, 3].find(rendersOwnCount)
+  assert.equal(storefrontFloor, 2, 'the storefront shows at least two columns on a phone')
+  const phoneInput = inputTag(editorColumnsSource, 'portal-grid-mobile')
+  const literalMin = phoneInput.match(/\smin="(\d+)"/)?.[1]
+  assert.equal(literalMin, undefined, `the phone-columns input offers ${literalMin}, which the shop shows as ${storefrontFloor}`)
+  assert.match(phoneInput, /\smin=\{editorLimits\.phone\[0\]\}/)
+  assert.match(phoneInput, /\smax=\{editorLimits\.phone\[1\]\}/)
+  assert.equal(gridLimits().phone[0], storefrontFloor, 'the phone minimum is the storefront floor')
+  assert.equal(gridLimits().phone[1], workerClamp('customer_portal_grid_columns_mobile')[1])
+  const storedDeclaration = catalogPageColumnsSource.match(/^const STORED_PHONE_COLUMNS: ColumnRange = \[(\d+), PORTAL_GRID_LIMITS\.phone\[1\]\]$/m)
+  assert.ok(storedDeclaration, 'CatalogPage keeps the stored phone range beside its Save, capped by the one limits object')
+  const stored: ColumnRange = [Number(storedDeclaration[1]), gridLimits().phone[1]]
+  assert.deepEqual(stored, workerClamp('customer_portal_grid_columns_mobile'), 'the Save keeps the range the Worker stores, so an untouched 1 is sent back as 1')
+  assert.match(catalogPageColumnsSource, /const sanitizedGridMobile = clampToRange\([^\n]*STORED_PHONE_COLUMNS\)/)
+  const clamp = (portalDisplay as Record<string, unknown>).clampToRange as ((value: number, range: ColumnRange) => number) | undefined
+  assert.equal(typeof clamp, 'function', 'one clamp helper for every column range')
+  assert.equal(clamp!(1, gridLimits().phone), 2, 'a stored 1 is shown as 2')
+  assert.equal(clamp!(1, stored), 1, 'and saved back as 1 when not edited')
+  assert.equal(clamp!(10, gridLimits().desktop), 8)
 })
 
 runTest('public mobile controls and overlays keep accessible touch/dialog contracts', () => {

@@ -843,6 +843,7 @@ function manualChunks(id: string): string | undefined {
       normalized.includes('/src/components/catalog/CatalogEditorSurface.tsx')
       || normalized.includes('/src/components/catalog/CatalogImageField.tsx')
       || normalized.includes('/src/components/catalog/CatalogPageContext.tsx')
+      || normalized.includes('/src/components/catalog/editor/')
     ) {
       return 'catalog-editor'
     }
@@ -905,7 +906,12 @@ function manualChunks(id: string): string | undefined {
     ) {
       return 'catalog-public'
     }
-    if (normalized.includes('/src/components/catalog/CatalogProductsSection.tsx')) {
+    if (
+      normalized.includes('/src/components/catalog/CatalogProductsSection.tsx')
+      // Unpinned, Rollup files it with its first importer, the admin catalog chunk,
+      // and catalog-products would statically pull catalog.
+      || normalized.endsWith('/src/utils/safeLinkUrl.ts')
+    ) {
       return 'catalog-products'
     }
     if (normalized.includes('/src/components/catalog/CatalogSecondaryTabs.tsx')) {
