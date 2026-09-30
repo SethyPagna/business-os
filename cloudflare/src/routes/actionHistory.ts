@@ -4,7 +4,7 @@ import { getDb } from '../lib/db'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit } from '../lib/audit'
 import { getActionTier, hasPermission, isAdminControlUser, isSensitiveActionHistory, permissionForActionHistory } from '../lib/permissions'
-import { SALE_ADD_ITEMS_ACTION_KIND, PRODUCT_MERGE_GROUP_ACTION_KIND, isServerReplayable, resolveUndoApplier, applierPermissionTier, mergeReplayChangesProductImages, replayRefusalCode, UNDO_HISTORY_STALE_CODE, UNDO_NEEDS_ORIGINAL_TAB_CODE, type UndoApplierOutcome } from '../lib/undoAppliers'
+import { SALE_ADD_ITEMS_ACTION_KIND, isUndoClosedByMerge, UNDO_CLOSED_BY_MERGE_CODE, UNDO_CLOSED_BY_MERGE_MESSAGE, PRODUCT_MERGE_GROUP_ACTION_KIND, isServerReplayable, resolveUndoApplier, applierPermissionTier, mergeReplayChangesProductImages, replayRefusalCode, UNDO_HISTORY_STALE_CODE, UNDO_NEEDS_ORIGINAL_TAB_CODE, type UndoApplierOutcome } from '../lib/undoAppliers'
 import { CUSTOMER_GENDER_RESTORATION_KIND, canRestoreCustomerGender, notifyCustomerGenderRestoration } from '../lib/customerGenderRestoration'
 import { PRODUCT_REMOVE_ACTION_KIND } from '../lib/productDelete'
 import type { Env } from '../index'
@@ -388,6 +388,9 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
     if (!Number.isInteger(actionId) || actionId <= 0) return c.json({ success: false, error: 'Action history item not found' }, 404)
     const existing = await db.prepare('SELECT * FROM action_history WHERE id = @id').get<ActionHistoryRow>({ id: actionId })
     if (!existing || !canOperateHistoryRow(user, existing)) return c.json({ success: false, error: 'Action history item not found' }, 404)
+    if (isUndoClosedByMerge(existing)) {
+      return c.json({ success: false, error: UNDO_CLOSED_BY_MERGE_MESSAGE, code: UNDO_CLOSED_BY_MERGE_CODE }, 409)
+    }
     if (!Number(existing.reversible || 0)) {
       return c.json({ success: false, error: 'This action is recorded only and cannot be reversed' }, 400)
     }

@@ -2,6 +2,7 @@ import type { D1Compat } from './db'
 import type { ActionHistoryRow } from '../routes/actionHistory'
 import { STOCK_LOT_SET_KIND, STOCK_SET_REFERENCE_PREFIX } from './stockLotAdjustment'
 import { STOCK_SESSION_KIND, STOCK_SESSION_MAX_LINES } from './stockSession'
+import { isUndoClosedByMerge, UNDO_CLOSED_BY_MERGE_CODE, UNDO_CLOSED_BY_MERGE_MESSAGE } from './undoAppliers'
 
 type Movement = {
   id: number; product_id: number; branch_id: number; batch_id: number | null
@@ -115,6 +116,7 @@ export async function stockMovementRevertPreview(db: D1Compat, movementId: numbe
   if (!kind) return { revert: { kind: 'movement', movementId, lineCount: 1 }, history: null }
   if (!Number.isSafeInteger(expectedGeneration) || expectedGeneration < 0 || !Number.isSafeInteger(historyId) || historyId <= 0 || lineCount < 1) throw unavailable()
   const history = await db.prepare('SELECT * FROM action_history WHERE id=@id').get<ActionHistoryRow>({ id: historyId })
+  if (isUndoClosedByMerge(history)) throw new StockMovementReplayError(UNDO_CLOSED_BY_MERGE_MESSAGE, 409, UNDO_CLOSED_BY_MERGE_CODE)
   if (!history || !history.reversible) throw unavailable()
   const payload = JSON.parse(String(history.undo_payload || '{}'))
   if (payload.operation_id !== operationId || payload.applier !== (kind === 'stock_set' ? STOCK_LOT_SET_KIND : STOCK_SESSION_KIND)) throw unavailable()

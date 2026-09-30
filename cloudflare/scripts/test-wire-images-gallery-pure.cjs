@@ -164,6 +164,7 @@ const productsRoute = loadReal('routes/products.ts', {
   // Real, not a stub: it builds SQL that routes/products.ts interpolates,
   // so a stub would have the test asserting against its own placeholder.
   '../lib/lotRemaining': loadReal('lib/lotRemaining.ts'),
+  '../lib/mergeRouteLog': loadReal('lib/mergeRouteLog.ts'),
   '../lib/productDetailRule': productDetailRule,
   '../lib/auth': { requireAuth: async (c, next) => { c.set('user', FAKE_USER); return next() } },
   '../lib/permissions': {

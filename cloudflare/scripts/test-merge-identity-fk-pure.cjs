@@ -23,8 +23,9 @@
 //     too far apart to be one cost was merged anyway (keeping the dearer, a
 //     figure neither row recorded). It is now refused, on both merge routes.
 //
-// Plus the stock-session guard: a merge rewrites the very rows a stock-in
-// session's undo asserts on, so it waits while such a session is reversible.
+// Plus the stock-session rule (MERGE-UNBLOCK, 1 Oct 2026): a merge rewrites the
+// very rows a stock-in session's undo asserts on, so the merge CLOSES that Undo
+// in its own batch instead of waiting for the session to expire (it never does).
 //
 // Real transpiled route + lib code against the REAL schema from the full
 // migration chain -- the SQL here is strings tsc cannot check.
@@ -187,15 +188,12 @@ const EXCLUDED = new Map([
   ['catalog_cost_recompute_0175.product_id', 'provenance: repair receipt of migration 0175 (cost before/after per product)'],
   ['catalog_cost_repair_0195_backup.product_id', 'provenance: backup of migration 0195 (cost before/after per product; its recovery key)'],
   ['sale_cost_repair_0200.product_id', 'provenance: backup of held migration 0200 (sale line cost before/after; recovery keys on sale_item_id)'],
-  // OWNER DECISION, open. The ask said the merge moves EVERY linked record,
-  // stock_session_members included. It is excluded instead, and refused rather
-  // than reparented, because the column is the replay DRIVER and not a link:
-  // reparenting it would compare the keeper's rows against a postimage
-  // recorded for the loser (proved by the two checks in section 5). The price
-  // of that choice is a merge blocked for up to ACTION_HISTORY_TTL_DAYS (180)
-  // for any product a stock-in session touched, since nothing ever settles a
-  // session. Recorded as a deviation, not a silent substitution.
-  ['stock_session_members.product_id', 'provenance AND the replay driver -- see the guard, not a reparent'],
+  // The ask said the merge moves EVERY linked record, stock_session_members
+  // included. It is excluded instead because the column is the replay DRIVER
+  // and not a link: reparenting it would compare the keeper's rows against a
+  // postimage recorded for the loser. The session's Undo is closed by the merge
+  // (section 5) rather than left to die silently or block the merge.
+  ['stock_session_members.product_id', 'provenance AND the replay driver -- the merge closes the session Undo, it does not reparent'],
 ])
 
 // 0136 stores immutable selected-merge receipts. These ids describe what the
@@ -546,55 +544,60 @@ async function main() {
     d1.db.prepare('UPDATE products SET cost_price_usd = 0 WHERE id = @id').run({ id: KEEPER })
   })
 
-  // ---- 5. The stock-session guard ----------------------------------------
-  await check('DISCRIMINATING: a merge waits while a stock-in session can still be undone', async () => {
+  // ---- 5. A stock-in session no longer blocks a merge: the merge closes it --
+  // Seeds: op-1 undoable on DUP, op-2 redoable on KEEPER, op-3 undoable on an
+  // unrelated product. The real statements run against the real schema.
+  const seedSession = (historyId, operationId, productId, status) => {
     d1.db.prepare(`INSERT INTO action_history (id, scope, entity, entity_id, label, status)
-                   VALUES (900, 'inventory', 'product', ${DUP}, 'Stock in', 'undoable')`).run()
+                   VALUES (${historyId}, 'inventory', 'product', ${productId}, 'Stock in', '${status}')`).run()
     d1.db.prepare(`INSERT INTO stock_session_operations (id, actor_id, request_id, mode, request_json, receipt_json, history_id)
-                   VALUES ('op-1', 1, 'req-1', 'stock_in', '{}', '{}', 900)`).run()
+                   VALUES ('${operationId}', 1, 'req-${operationId}', 'stock_in', '{}', '{}', ${historyId})`).run()
     d1.db.prepare(`INSERT INTO stock_session_members (operation_id, line_id, command_kind, product_id, branch_id, quantity)
-                   VALUES ('op-1', 'line-1', 'receive', ${DUP}, 1, 3)`).run()
-    const blocked = await mod.mergeBlockedByReversibleStockSession(adapter, [KEEPER, DUP])
-    // Pre-fix there was no guard at all: the merge moved branch_stock and
-    // reparented the movements, and the session's Undo then failed its own
-    // state assertion -- silently, whenever someone next tried to use it.
-    assert.ok(blocked, 'a live session naming either row must block the merge')
-    assert.equal(blocked.operationId, 'op-1')
-    assert.ok(mod.mergeStockSessionBlockedMessage('op-1').includes('op-1'), 'the message must name the session')
+                   VALUES ('${operationId}', 'line-1', 'receive', ${productId}, 1, 3)`).run()
+  }
+  const historyOf = (id) => d1.db.prepare('SELECT status, reversible, last_error FROM action_history WHERE id = ?').get(id)
+  const closeAudit = () => d1.db.prepare("SELECT entity_id, details FROM audit_logs WHERE action = 'stock_session_undo_closed' ORDER BY entity_id").all()
+  const route5 = loadProductsRoute(d1)
+  const appliers = route5.undoAppliers
+
+  await check('DISCRIMINATING: the close statements end Undo for sessions on either merged row and only those', async () => {
+    seedSession(900, 'op-1', DUP, 'undoable')
+    seedSession(901, 'op-2', KEEPER, 'redoable')
+    seedSession(902, 'op-3', 301, 'undoable')
+    const open = await appliers.readOpenStockSessions(route5.adapter, [KEEPER, DUP])
+    assert.deepEqual(open.map((s) => s.operationId), ['op-1', 'op-2'], 'the read names both open sessions and not the unrelated one')
+    await route5.adapter.batch(appliers.closeStockSessionsStatements([KEEPER, DUP], { id: 1, name: 'tester' }, 'merge-op', KEEPER))
+    for (const id of [900, 901]) {
+      assert.deepEqual({ ...historyOf(id) }, { status: 'recorded', reversible: 0, last_error: appliers.STOCK_SESSION_UNDO_CLOSED_BY_MERGE })
+      assert.equal(appliers.isUndoClosedByMerge(historyOf(id)), true)
+    }
+    assert.deepEqual({ ...historyOf(902) }, { status: 'undoable', reversible: 1, last_error: null }, 'a session on a product outside the merge keeps its Undo')
+    assert.deepEqual(closeAudit().map((row) => row.entity_id), ['op-1', 'op-2'], 'one audit row per closed session')
+    assert.equal(JSON.parse(closeAudit()[0].details).previousStatus, 'undoable')
+    assert.equal(JSON.parse(closeAudit()[1].details).previousStatus, 'redoable')
+    assert.equal(JSON.parse(closeAudit()[0].details).reason, 'products merged')
   })
 
-  // What ACTUALLY ends the block, and what does not. The earlier version of
-  // this check flipped the history row to 'recorded' and called the session
-  // "spent" -- but nothing in the stock-session code path ever writes that
-  // status: lib/stockSession.ts inserts 'undoable' and thereafter only swaps
-  // between 'undoable' and 'redoable' (targetStatus). The block therefore ends
-  // exactly one way in production: the retention sweep DELETES the
-  // action_history row at ACTION_HISTORY_TTL_DAYS (180) and the guard's JOIN
-  // stops matching. That 180-day window is the real cost of choosing the guard
-  // over reparenting stock_session_members, so it is pinned here rather than
-  // papered over with a status the system never writes.
-  await check('DISCRIMINATING: no stock-session path ever writes a settling status', () => {
-    const sessionSrc = fs.readFileSync(path.join(SRC, 'lib/stockSession.ts'), 'utf8')
-    const written = new Set((sessionSrc.match(/'(undoable|redoable|recorded|settled|spent|retired)'/g) || []).map((m) => m.slice(1, -1)))
-    assert.deepEqual([...written].sort(), ['redoable', 'undoable'],
-      'if a settle/retire status is ever introduced, the guard and this test must learn about it')
+  await check('closing is idempotent: a second merge touching the same products adds no audit rows and keeps the first reason', async () => {
+    const before = closeAudit().length
+    await route5.adapter.batch(appliers.closeStockSessionsStatements([KEEPER, DUP], { id: 1, name: 'tester' }, 'merge-op-2', KEEPER))
+    assert.equal(closeAudit().length, before)
+    assert.equal(historyOf(900).last_error, appliers.STOCK_SESSION_UNDO_CLOSED_BY_MERGE)
+    assert.deepEqual(await appliers.readOpenStockSessions(route5.adapter, [KEEPER, DUP]), [], 'nothing is left to close')
   })
 
-  await check('the block ends when retention removes the history row, not on a status flip', async () => {
-    // still blocked while the row lives and says undoable
-    assert.ok(await mod.mergeBlockedByReversibleStockSession(adapter, [KEEPER, DUP]))
-    // the real mechanism: ACTION_HISTORY_TTL_DAYS deletes the row outright
-    d1.db.prepare('DELETE FROM action_history WHERE id = 900').run()
-    assert.equal(await mod.mergeBlockedByReversibleStockSession(adapter, [KEEPER, DUP]), null,
-      'once retention has removed the history row the members row is pure history')
-    d1.db.prepare(`INSERT INTO action_history (id, scope, entity, entity_id, label, status)
-                   VALUES (900, 'inventory', 'product', ${DUP}, 'Stock in', 'undoable')`).run()
+  await check('a session naming NEITHER row is left alone, and a row that only LOOKS recorded is not mistaken for a closed one', async () => {
+    assert.equal(appliers.isUndoClosedByMerge({ reversible: 0, last_error: null }), false)
+    assert.equal(appliers.isUndoClosedByMerge({ reversible: 1, last_error: appliers.STOCK_SESSION_UNDO_CLOSED_BY_MERGE }), false)
+    assert.deepEqual((await appliers.readOpenStockSessions(route5.adapter, [301])).map((s) => s.operationId), ['op-3'])
   })
 
-  await check('a session naming NEITHER row does not block', async () => {
-    d1.db.prepare("UPDATE action_history SET status = 'undoable' WHERE id = 900").run()
-    d1.db.prepare("UPDATE stock_session_members SET product_id = 301 WHERE operation_id = 'op-1'").run()
-    assert.equal(await mod.mergeBlockedByReversibleStockSession(adapter, [KEEPER, DUP]), null)
+  await check('no merge door is still refused because of a stock-in session', () => {
+    assert.ok(!/mergeBlockedByReversibleStockSession|mergeStockSessionBlockedMessage|stock_session_reversible/.test(routeSrc),
+      'the refusal and its message are gone from every call site')
+    assert.ok(/closeStockSessionsStatements\(\[canonicalId, dup\.id\]/.test(routeSrc),
+      'the ONE fold every door shares closes the Undo in its own batch')
+    assert.ok(!/stock_session_reversible/.test(appliersSrc), 'the lib no longer names the old refusal')
   })
 
   // ---- 6. Wiring: both merge doors, and the preview --------------------
@@ -608,16 +611,13 @@ async function main() {
     const block = routeSrc.slice(at, end)
     assert.ok(/readMergeIdentityDiff\(db, keepId, mergeId\)/.test(block), 'the preview must READ it')
     assert.ok(/\n\s*identity,/.test(block), 'and RETURN it -- reading it and dropping it is the bug')
-    assert.ok(/mergeBlockedByReversibleStockSession/.test(block), 'the reviewer must learn about a blocking session before choosing')
   })
 
-  await check('POST /possible-duplicates/merge enforces identity, numeric and session blockers before folding', () => {
+  await check('POST /possible-duplicates/merge enforces identity and numeric blockers before folding', () => {
     const at = routeSrc.indexOf("app.post('/possible-duplicates/merge'")
     const foldAt = routeSrc.indexOf('foldDuplicateProductInto(', at)
     const numericAt = routeSrc.indexOf("code: 'invalid_merge_numeric'", at)
-    const sessionAt = routeSrc.indexOf("code: 'stock_session_reversible'", at)
     assert.ok(numericAt > at && numericAt < foldAt, 'invalid numeric storage must be refused before anything is written')
-    assert.ok(sessionAt > at && sessionAt < foldAt, 'so must the stock-session guard')
     assert.ok(/stock_choice_required[\s\S]{0,600}identity,/.test(routeSrc.slice(at, foldAt)),
       'the 400 refusal must carry identity too -- the dialog it opens is otherwise blind')
   })
@@ -628,8 +628,6 @@ async function main() {
     const block = routeSrc.slice(at, routeSrc.indexOf("app.post('/possible-duplicates", at) > at
       ? routeSrc.indexOf("app.post('/possible-duplicates", at) : at + 12000)
     assert.ok(/refusals\.push\(/.test(block), 'and say which pairs it left alone rather than skipping them silently')
-    assert.ok(/mergeBlockedByReversibleStockSession\(db, \[canonicalId, dup\.id\]\)/.test(block),
-      'the session guard applies to the bulk run too -- one rule, both doors')
     assert.ok(block.indexOf('let groupBlocker') < block.indexOf('await foldDuplicateProductInto('),
       'the blocker preflight must run before the first fold')
   })

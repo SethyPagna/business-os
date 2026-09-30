@@ -117,6 +117,7 @@ function createProductsRouteHarness(options = {}) {
     db,
     app,
     request,
+    load,
     setActionTier(fn) { actionTier = fn },
     setUser(next) { user = next },
   }

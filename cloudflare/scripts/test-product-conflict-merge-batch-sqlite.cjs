@@ -252,6 +252,37 @@ function seedPre0154LegacyLots(d1, setup) {
 }
 
 async function main() {
+  // MERGE-UNBLOCK (1 Oct 2026): a stock-in session that can still be undone no
+  // longer refuses the selected-conflict merge; the same batch closes its Undo
+  // (both undoable and redoable), and a session on an unrelated product is left
+  // alone. Before, this apply answered stock_session_reversible for 9102.
+  {
+    const sessions = seed()
+    sessions.db.exec(`
+      INSERT INTO products(id,name,name_key,barcode,is_active,is_group,stock_quantity) VALUES(9901,'Other','other','9999',1,0,0);
+      INSERT INTO action_history(id,scope,entity,entity_id,label,status) VALUES(8001,'inventory','product','9102','Stock in','undoable'),
+        (8002,'inventory','product','9101','Stock in','redoable'),(8003,'inventory','product','9901','Stock in','undoable');
+      INSERT INTO stock_session_operations(id,actor_id,request_id,mode,request_json,receipt_json,history_id)
+        VALUES('op-a',1,'ra','stock_in','{}','{}',8001),('op-b',1,'rb','stock_in','{}','{}',8002),('op-c',1,'rc','stock_in','{}','{}',8003);
+      INSERT INTO stock_session_members(operation_id,line_id,command_kind,product_id,branch_id,quantity)
+        VALUES('op-a','l1','receive',9102,901,2),('op-b','l1','receive',9101,901,5),('op-c','l1','receive',9901,901,1);
+    `)
+    const { app: sessionApp } = loadRoute(sessions)
+    const preview = await call(sessionApp, '/possible-duplicates/merge-batch/preview', { cases: [{ case_key: 'barcode:1111', cluster_type: 'barcode', cluster_value: '1111', product_ids: [9101, 9102] }] })
+    assert.equal(preview.status, 200, JSON.stringify(preview.body))
+    const applied = await call(sessionApp, '/possible-duplicates/merge-batch', {
+      client_request_id: 'sessions_close', manifest_version: 1, manifest_digest: preview.body.manifest_digest,
+      cases: preview.body.cases.map((item, ordinal) => ({ ordinal, case_key: item.case_key, keep_id: item.keep_id, merge_id: item.merge_id, state_digest: item.state_digest, stock: 'merge' })),
+    })
+    assert.equal(applied.body.complete, true, JSON.stringify(applied.body))
+    assert.deepEqual((applied.body.refusals || []).map((item) => item.code), [], 'no stock_session_reversible refusal')
+    const status = (id) => ({ ...sessions.db.prepare('SELECT status,reversible,last_error FROM action_history WHERE id=?').get(id) })
+    assert.deepEqual(status(8001), { status: 'recorded', reversible: 0, last_error: 'undo_closed:products_merged' })
+    assert.deepEqual(status(8002), { status: 'recorded', reversible: 0, last_error: 'undo_closed:products_merged' })
+    assert.deepEqual(status(8003), { status: 'undoable', reversible: 1, last_error: null }, 'an unrelated session keeps its Undo')
+    assert.equal(sessions.db.prepare("SELECT COUNT(*) n FROM audit_logs WHERE action='stock_session_undo_closed'").get().n, 2)
+    console.log('PASS selected-conflict merge closes the Undo of sessions on either product instead of refusing')
+  }
   // Positive stock must stay selectable after either merge disposition.
   // Exercise the real route/transaction, including inactive lots at both
   // branches, an empty source with retained keeper stock, and late rollback.
