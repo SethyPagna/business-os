@@ -242,9 +242,9 @@ for (const [text, where] of [[privacyKm, 'privacy'], [termsKm, 'terms']] as cons
 // The brand-enquiry route stays.
 assert.match(PORTAL_LEGAL_EN.portal_legal_terms_ip_b, /respective rights holders[\s\S]*Contact the store using the verified details above/)
 assert.match(PORTAL_LEGAL_KM.portal_legal_terms_ip_b, /ម្ចាស់សិទ្ធិ[\s\S]*សូមទាក់ទងហាង/)
-// Short and plain: the text may not grow past the 30 Sep rewrite (1,009 English words; the 7 Sep text was 1,148).
+// Short and plain: the text may not grow past the 30 Sep rewrite plus the picture-review disclosure (1,032 English words; the 7 Sep text was 1,148).
 const words = (text: string) => text.split(/\s+/).filter(Boolean).length
-assert.ok(words(privacyEn) + words(termsEn) <= 1010, `privacy + terms run ${words(privacyEn) + words(termsEn)} English words; keep them short`)
+assert.ok(words(privacyEn) + words(termsEn) <= 1032, `privacy + terms run ${words(privacyEn) + words(termsEn)} English words; keep them short`)
 
 // Page keys
 assert.equal(isLegalPageKey('privacy'), true)

@@ -26,8 +26,9 @@ export type LegalPageKey = 'privacy' | 'terms' | 'cookies'
 // Bump this (and the pack copies of the section text) whenever the wording
 // changes materially. It is also the value stored on a portal account as
 // `consent_version` at sign-up, so a later policy change is auditable. The
-// Worker (lib/portalAccounts.ts) moves with it and lists which earlier
-// versions still count, so a bump never signs customers out by itself.
+// Worker (lib/portalAccounts.ts) moves with it and keeps accepting the
+// earlier versions it lists, so existing accounts stay valid; the new text
+// applies to new sign-ups.
 export const PORTAL_LEGAL_LAST_UPDATED_ISO = '2026-09-30'
 export const PORTAL_LEGAL_CONSENT_VERSION = `portal-legal-${PORTAL_LEGAL_LAST_UPDATED_ISO}`
 
@@ -153,7 +154,7 @@ const EN: Record<string, string> = {
   portal_legal_privacy_who_b: 'Welcome! This online catalogue is run by the shop in the verified business details above ("we", "us"), which is also where to reach us about your information.',
   portal_legal_privacy_collect_h: 'What we keep',
   portal_legal_privacy_collect_b: 'You can browse the whole catalogue as a guest, with no account and no personal details.',
-  portal_legal_privacy_collect_list: 'If you create an account, we keep your name, phone number, membership ID, a one-way code made from your password (never the password itself), and which policy version you agreed to, when and in which language. If you save products while signed in, we keep that list. If you ask the assistant something, we keep the question and any preferences you share. We do not keep billing information and never ask for it. Short-lived security records use one-way codes instead of raw IP addresses or phone numbers, and brief error reports may go to Sentry.',
+  portal_legal_privacy_collect_list: 'If you create an account, we keep your name, phone number, membership ID, a one-way code made from your password (never the password itself), and which policy version you agreed to, when and in which language. If you save products while signed in, we keep that list. If you ask the assistant something, we keep the question and any preferences you share. If you send us pictures for review (when that option is on), we keep them with the platform, your note and your agreement. We do not keep billing information and never ask for it. Short-lived security records use one-way codes instead of raw IP addresses or phone numbers, and brief error reports may go to Sentry.',
   portal_legal_privacy_why_h: 'Why we keep it',
   portal_legal_privacy_why_b: 'We keep your account details only so we know who is who and to keep your account safe. Security records only stop password guessing and misuse, and error reports only help us fix problems.',
   portal_legal_privacy_basis_h: 'Your agreement',
@@ -274,7 +275,7 @@ const KM: Record<string, string> = {
   portal_legal_privacy_who_b: 'សូមស្វាគមន៍! កាតាឡុកអនឡាញនេះដំណើរការដោយហាងក្នុងព័ត៌មានអាជីវកម្មដែលបានផ្ទៀងផ្ទាត់ខាងលើ ("យើង") ដែលក៏ជាកន្លែងសម្រាប់ទាក់ទងយើងអំពីព័ត៌មានរបស់អ្នកផងដែរ។',
   portal_legal_privacy_collect_h: 'អ្វីដែលយើងរក្សាទុក',
   portal_legal_privacy_collect_b: 'អ្នកអាចមើលកាតាឡុកទាំងមូលជាភ្ញៀវ ដោយមិនចាំបាច់មានគណនី ឬផ្តល់ព័ត៌មានផ្ទាល់ខ្លួនអ្វីឡើយ។',
-  portal_legal_privacy_collect_list: 'បើអ្នកបង្កើតគណនី យើងរក្សាទុកឈ្មោះ លេខទូរស័ព្ទ លេខសមាជិក កូដមួយទិសដែលបង្កើតពីពាក្យសម្ងាត់របស់អ្នក (មិនមែនពាក្យសម្ងាត់ផ្ទាល់ទេ) និងកំណែគោលការណ៍ដែលអ្នកបានយល់ព្រម ពេលវេលា និងភាសា។ បើអ្នករក្សាទុកផលិតផលពេលចូលគណនី យើងរក្សាបញ្ជីនោះ។ បើអ្នកសួរជំនួយការ យើងរក្សាទុកសំណួរ និងចំណូលចិត្តដែលអ្នកចែករំលែក។ យើងមិនរក្សាទុកព័ត៌មានទូទាត់ប្រាក់ ហើយក៏មិនដែលសុំវាដែរ។ កំណត់ត្រាសុវត្ថិភាពរយៈពេលខ្លីប្រើកូដមួយទិស ជំនួសឱ្យ IP ឬលេខទូរស័ព្ទដើម ហើយរបាយការណ៍កំហុសខ្លីៗអាចផ្ញើទៅ Sentry។',
+  portal_legal_privacy_collect_list: 'បើអ្នកបង្កើតគណនី យើងរក្សាទុកឈ្មោះ លេខទូរស័ព្ទ លេខសមាជិក កូដមួយទិសដែលបង្កើតពីពាក្យសម្ងាត់របស់អ្នក (មិនមែនពាក្យសម្ងាត់ផ្ទាល់ទេ) និងកំណែគោលការណ៍ដែលអ្នកបានយល់ព្រម ពេលវេលា និងភាសា។ បើអ្នករក្សាទុកផលិតផលពេលចូលគណនី យើងរក្សាបញ្ជីនោះ។ បើអ្នកសួរជំនួយការ យើងរក្សាទុកសំណួរ និងចំណូលចិត្តដែលអ្នកចែករំលែក។ បើអ្នកផ្ញើរូបភាពមកឱ្យយើងពិនិត្យ (ពេលជម្រើសនេះបើក) យើងរក្សាទុករូបភាពទាំងនោះជាមួយវេទិកា កំណត់ចំណាំ និងការយល់ព្រមរបស់អ្នក។ យើងមិនរក្សាទុកព័ត៌មានទូទាត់ប្រាក់ ហើយក៏មិនដែលសុំវាដែរ។ កំណត់ត្រាសុវត្ថិភាពរយៈពេលខ្លីប្រើកូដមួយទិស ជំនួសឱ្យ IP ឬលេខទូរស័ព្ទដើម ហើយរបាយការណ៍កំហុសខ្លីៗអាចផ្ញើទៅ Sentry។',
   portal_legal_privacy_why_h: 'ហេតុអ្វីយើងរក្សាទុក',
   portal_legal_privacy_why_b: 'យើងរក្សាព័ត៌មានគណនីរបស់អ្នក គ្រាន់តែដើម្បីដឹងថានរណាជានរណា និងរក្សាសុវត្ថិភាពគណនីរបស់អ្នកប៉ុណ្ណោះ។ កំណត់ត្រាសុវត្ថិភាពមានតែដើម្បីទប់ស្កាត់ការទាយពាក្យសម្ងាត់ និងការប្រើខុសគោលបំណង ហើយរបាយការណ៍កំហុសគ្រាន់តែជួយយើងជួសជុលបញ្ហា។',
   portal_legal_privacy_basis_h: 'ការយល់ព្រមរបស់អ្នក',
