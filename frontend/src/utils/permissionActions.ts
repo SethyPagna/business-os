@@ -351,5 +351,39 @@ export function isActionOverriddenOff(
   action: string,
 ): boolean {
   if (!permissions) return false
-  return permissions[actionOverrideKey(section, action)] === false
+  if (permissions[actionOverrideKey(section, action)] !== false) return false
+  return !isViewImpliedByWrite(permissions, section, action)
+}
+
+// Contacts: Add and Edit imply View (owner, 30 Sep 2026). Mirrors the Worker's
+// isActionBlocked in cloudflare/src/lib/permissions.ts: a stored contacts:view
+// = false only takes effect once Add and Edit are both switched off too.
+const CONTACTS_WRITES_IMPLYING_VIEW = ['add', 'edit']
+
+/** True while Add or Edit is still on, which keeps View on (and locked). */
+export function isViewImpliedByWrite(
+  permissions: Record<string, unknown> | null | undefined,
+  section: string,
+  action: string,
+): boolean {
+  if (section !== 'contacts' || action !== 'view') return false
+  return CONTACTS_WRITES_IMPLYING_VIEW.some((write) => permissions?.[actionOverrideKey(section, write)] !== false)
+}
+
+/**
+ * The permission map after an admin clicks one action row in the role editor.
+ * Returns the SAME object when the click is refused (View while Add or Edit is
+ * on), and drops a stale View switch-off when Add or Edit is handed back, so
+ * View does not silently turn off again the day a write is switched off.
+ */
+export function toggleActionOverrideMap<T extends Record<string, unknown>>(permissions: T, section: string, action: string): T {
+  const key = actionOverrideKey(section, action)
+  const switchingOff = permissions[key] !== false
+  if (switchingOff && isViewImpliedByWrite(permissions, section, action)) return permissions
+  const next: Record<string, unknown> = { ...permissions }
+  if (switchingOff) next[key] = false
+  else delete next[key]
+  const restoresWrite = section === 'contacts' && !switchingOff && CONTACTS_WRITES_IMPLYING_VIEW.includes(action)
+  if (restoresWrite) delete next[actionOverrideKey(section, 'view')]
+  return next as T
 }
