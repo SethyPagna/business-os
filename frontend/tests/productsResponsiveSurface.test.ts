@@ -109,11 +109,12 @@ assert.match(
 // no /NN opacity suffix) -- see tests/stickyHeaderBlurRemoval.test.ts.
 assert.doesNotMatch(batches, /sticky bottom-0[^"]*backdrop-blur/, 'an opaque sticky footer must not also pay for backdrop-blur')
 
-// Detail footer actions use the shared 40px toolbar contract while retaining
-// their responsive half-width wrapping behavior.
-assert.match(detail, /className=\{`btn-secondary \$\{TOOLBAR_BUTTON_BASE\}[^`]*min-w-0[^`]*flex-1/, 'detail footer actions must share the canonical height and shrink on narrow screens')
-assert.match(detail, /flex flex-wrap items-center gap-2 border-t border-gray-200 p-3/, 'detail footer row must wrap instead of squeezing its labels away')
-assert.match(detail, /className=\{`btn-primary \$\{TOOLBAR_BUTTON_BASE\}[^`]*min-w-0[^`]*flex-1/, 'the primary detail action must share the canonical height and shrink on narrow screens')
+// Detail footer actions use the shared 40px toolbar contract on ONE row (owner
+// button policy, 27 Sep 2026): Add variant and Adjust stock are fixed 40px
+// icon buttons, Edit is the labelled main action that takes the rest.
+assert.equal((detail.match(/className=\{`btn-secondary \$\{TOOLBAR_BUTTON_BASE\} w-10 shrink-0 px-0`\}/g) || []).length, 2, 'the secondary detail actions are 40px icon buttons on the shared height')
+assert.match(detail, /flex items-center gap-2 border-t border-gray-200 px-3 py-2\.5 dark:border-gray-700 sm:justify-end/, 'detail footer is one row at every width')
+assert.match(detail, /className=\{`btn-primary \$\{TOOLBAR_BUTTON_BASE\} min-w-0 flex-1 sm:flex-none`\}/, 'the primary detail action must share the canonical height and shrink on narrow screens')
 assert.match(detail, /className=\{toolbarIconButtonClassName\}/, 'the product detail close action must use the shared 40px icon contract')
 assert.match(detail, /import \{ createPortal \} from 'react-dom'/, 'the product detail sheet must render outside the Products page stacking context')
 assert.match(detail, /modal-viewport-safe[\s\S]*z-\[1050\][\s\S]*overflow-y-auto/, 'the product detail overlay must sit above fixed app bars and remain scrollable')
@@ -124,10 +125,10 @@ assert.match(detail, /return createPortal\(modal, document\.body\)/, 'the produc
 // tests/copyFloat.test.ts). The layout property each line pins -- the title
 // wraps in full, the barcode stays on one line -- is unchanged, and is
 // still the class list itself.
-assert.match(detail, /min-w-0 font-bold text-gray-900 dark:text-white" \{\.\.\.copy\(productName\)\}>\s*<EntityLink[^>]*><ProductNameRail name=\{productName\} \/>/, 'product detail titles retain bold typography, copy and navigation around the full-name rail')
+assert.match(detail, /min-w-0 font-bold text-gray-900 dark:text-white" \{\.\.\.copy\(productName\)\}>[\s\S]{0,200}?<EntityLink[^>]*><ProductNameRail name=\{productName\} className="\[text-wrap:balance\]" \/>/, 'product detail titles retain bold typography, copy and navigation around the full-name rail')
 assert.match(detail, /whitespace-nowrap font-mono"[^>]*>\{p\.barcode\}/, 'product detail barcodes must remain on one line without truncation')
 assert.match(inventoryDetail, /min-w-0 font-bold text-gray-900 dark:text-white" \{\.\.\.copy\(p\.name\)\}><ProductNameRail name=\{String\(p\.name \?\? ''\)\} \/>/, 'inventory product-detail titles retain bold typography and copy around the full-name rail')
-assert.match(inventoryDetail, /shrink-0 whitespace-nowrap font-mono text-xs text-gray-400"[^>]*>&middot; \{p\.barcode\}/, 'inventory product-detail barcodes must remain on one line')
+assert.match(inventoryDetail, /shrink-0 whitespace-nowrap font-mono"[^>]*>\{p\.barcode\}/, 'inventory product-detail barcodes must remain on one line')
 assert.match(detail, /<Row label=\{T\('branch', 'Branch'\)\}>[\s\S]*scroll-x-clean flex min-w-0 flex-nowrap/, 'product detail must keep Branch and its values on one row')
 // 320px source geometry, EN + KM: after the sheet's 32px inline padding,
 // the fixed 4rem label and 0.5rem gap leave 216px for values. Long English
@@ -264,7 +265,7 @@ assert.match(stockChanges, /<th data-tone="emerald" className="text-center">/, '
 // header instead of clipping. English still fits on one line either way.
 assert.match(stockChanges, /<th className="dense-th-wrap text-center">\{beforeLabel\} → \{afterLabel\}<\/th>/, 'stock change Before/After headers must center over centered values and be allowed to wrap for Khmer')
 assert.match(newReturn, /const reviewReturn[\s\S]*step === 'items'[\s\S]*onClick=\{reviewReturn\}/, 'returns must expose Review before the final confirmation on mobile')
-assert.match(report, /flex w-full min-w-0 items-center justify-between/, 'detail report links must remain width-bounded')
+assert.match(report, /const LINK_CHIP = 'inline-flex h-8 max-w-full /, 'detail report links must remain width-bounded')
 assert.match(report, /<span className="detail-scroll-text[^\"]*">\{label\}<\/span>/, 'detail report labels must stay fully readable through bounded horizontal scrolling')
 
 console.log('PASS Products responsive section, detail, and batch surfaces')
