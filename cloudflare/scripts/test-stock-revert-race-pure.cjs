@@ -67,13 +67,13 @@ function freshDb() {
   return { rawDb, db, setBeforeBatch(fn) { beforeBatch = fn } }
 }
 
-function seed(rawDb, { stock, lot }) {
+function seed(rawDb, { stock, lot, lotStock = stock }) {
   rawDb.prepare("INSERT INTO products (id, name, is_active, stock_quantity) VALUES (1, 'Widget', 1, @stock)").run({ stock })
   rawDb.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (1, 1, @stock)').run({ stock })
   if (lot) {
     rawDb.prepare(`INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, received_at, is_active, batch_number, received_quantity)
       VALUES (1, 1, '08012026', '08012026', '2026-08-01', 1, 1, 10)`).run()
-    rawDb.prepare('INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (1, 1, @stock)').run({ stock })
+    rawDb.prepare('INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (1, 1, @lotStock)').run({ lotStock })
   }
 }
 
@@ -101,7 +101,8 @@ async function main() {
     // add 3 took 7 -> 10; reverting removes 3.
     { name: 'addition of 3, no lots', lot: false, stock: 10, type: 'add', batchId: null, expect: { branch: 7, product: 7, lot: 0 } },
     { name: 'addition of 3 onto a named lot', lot: true, stock: 10, type: 'add', batchId: 1, expect: { branch: 7, product: 7, lot: 7 } },
-    { name: 'addition of 3, lot drained FIFO (no lot stamp)', lot: true, stock: 10, type: 'add', batchId: null, expect: { branch: 7, product: 7, lot: 7 } },
+    // An unstamped add is undated stock: its revert takes the undated units, never the dated lot.
+    { name: 'addition of 3 with no lot stamp beside a dated lot', lot: true, stock: 13, lotStock: 10, type: 'add', batchId: null, expect: { branch: 10, product: 10, lot: 10 } },
   ]
   for (const c of cases) {
     await test(`two concurrent reverts of a ${c.name}: exactly one applies`, async () => {

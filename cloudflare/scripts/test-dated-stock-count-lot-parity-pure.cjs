@@ -389,9 +389,10 @@ async function main() {
         movement = rawDb.prepare("SELECT * FROM inventory_movements WHERE product_id = @p AND reason = 'Dated stock count import'").get({ p: P })
         const result = await applyMovementRevert(db, movement, { userId: 1, userName: 'Admin' })
         assert.ok(result.ok, JSON.stringify(result))
-        // The count lot received 3 and the revert un-receives them: empty,
-        // nothing received, so it leaves the pickers (planUnreceiveBatchStock).
-      }, { branch: 7, lots: '2026-08-01=7 2026-08-16=0(inactive)' }],
+        // The count lot received 3; the Revert takes the stock back and keeps
+        // what was recorded as received (owner, 30 Sep 2026), so the empty lot
+        // stays like any sold-out lot.
+      }, { branch: 7, lots: '2026-08-01=7 2026-08-16=0' }],
       ['revert again: refused, nothing moves', async () => {
         const result = await applyMovementRevert(db, movement, { userId: 1, userName: 'Admin' })
         assert.strictEqual(result.code, 'already_reverted')
@@ -910,13 +911,12 @@ async function main() {
         } else {
           // Ledger revert of a count movement -- one lot covered (the lot is
           // stamped on the row) or, FX-stock4 N1, several lots did (only its
-          // provenance names them) -- or of the latest such revert. A revert
-          // of a batch-less 'remove' revert is left out: that FIFO drain
-          // keeps no per-lot record (the N1 residual). Refusals are fine.
+          // provenance names them) -- or of the latest such revert, at any
+          // depth: every Revert in a chain moves the root's own lot shares.
+          // Refusals are fine.
           const chain = r >= 0.965
           const row = chain
             ? rawDb.prepare(`SELECT * FROM inventory_movements m WHERE m.product_id = @p AND m.reference_id LIKE 'revert:%'
-                AND (m.movement_type = 'add' OR m.batch_id IS NOT NULL)
                 AND NOT EXISTS (SELECT 1 FROM inventory_movements r WHERE r.reference_id = 'revert:' || m.id)
                 ORDER BY m.id DESC LIMIT 1`).get({ p: P })
             : rawDb.prepare(`SELECT * FROM inventory_movements m WHERE m.product_id = @p AND m.reason = 'Dated stock count import'
