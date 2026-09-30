@@ -37,6 +37,13 @@ async function main() {
     assert.deepEqual(flags, { [receipt]: [null, first], [first]: [receipt, second], [second]: [first, null] })
     console.log('PASS the ledger links each Revert to the row it reverts and flags every reverted row, independent of the reason text')
 
+    // The #N link opens that one row through the same kernel.
+    const one = ledger.buildStockLedgerQuery({ movementId: receipt })
+    const opened = f.sql.prepare(one.rowsSql).all({ ...one.params, limit: 1, offset: 0 })
+    assert.deepEqual(opened.map((row) => [row.id, row.reverted_by_movement_id]), [[receipt, first]])
+    assert.equal(f.sql.prepare(one.countSql).get(one.params).total, 1)
+    console.log('PASS a Revert link reads exactly its row by id')
+
     const list = sessions.buildStockInSessionListQuery('')
     const groups = f.sql.prepare(list.groupedSql).all(list.params)
     assert.deepEqual(groups.map((g) => [g.session_key, g.line_count, g.reverted_line_count, g.quantity]), [['session:777', 1, 1, 10]],

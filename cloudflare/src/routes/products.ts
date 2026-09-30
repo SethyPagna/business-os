@@ -1612,6 +1612,7 @@ app.get('/stock-ledger', async (c) => {
     endTime: String(query.endTime || ''),
     search: String(query.search || ''),
     supplierId: Number(query.supplierId) || 0,
+    movementId: Number(query.movementId) || 0,
   })
 
   const db = getDb(c.env)
