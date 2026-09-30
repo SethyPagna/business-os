@@ -47,6 +47,7 @@ function load(filename) {
 
 const permissions = load(path.join(src, 'lib/permissions.ts'))
 const contacts = load(path.join(src, 'routes/contacts.ts')).default
+const saleRecords = load(path.join(src, 'lib/saleRecords.ts'))
 const executionCtx = { waitUntil(p) { waiting.push(p) }, passThroughOnException() {} }
 
 const staff = (id, role, overrides = {}) => ({
@@ -225,6 +226,11 @@ async function test(name, fn) {
     assert.equal(details.source, 'sale')
     assert.equal(details.sale_id, 21)
     assert.equal(saleEvents(22).length, 0, 'the other sale is untouched')
+    const shown = saleRecords.buildSaleRecords({ sale: db.prepare('SELECT * FROM sales WHERE id = 21').get(), events: events.map((row) => ({ ...row, sale_id: 21 })) })
+    const customerRecord = shown.find((record) => record.kind === 'customer_changed')
+    assert.ok(customerRecord, 'the Sales Records list reads the event back')
+    assert.equal(customerRecord.actor_username, 'staff11')
+    assert.equal(customerRecord.changes[0].field, 'customer_details')
   })
 
   await test('a sale that is not this customer\'s is refused and nothing is written (atomic)', async () => {
