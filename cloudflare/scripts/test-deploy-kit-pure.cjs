@@ -429,9 +429,130 @@ check('the release runs every test file the package runners discover, frontend .
   assert.ok(/lib\.GATE_TEST_FILES\.frontend/.test(release) && /lib\.GATE_TEST_FILES\.cloudflare/.test(release))
 })
 
+// ------------------------------------------------ 8. free and paid never mixed
+
+const VID = 'bbbbbbbb-0000-4000-8000-000000000002'
+
+check('deploy.yml: the plan input has no default, its first option is a placeholder, and a step stops anything but paid or free', () => {
+  const y = read('.github', 'workflows', 'deploy.yml')
+  const block = /\n {6}plan:\n([\s\S]*?)\n {6}run_migrations:/.exec(y)
+  assert.ok(block, 'plan input block')
+  assert.ok(!/^\s+default:/m.test(block[1]), 'a default plan lets a release pick a plan nobody chose')
+  assert.ok(/required: true/.test(block[1]) && /type: choice/.test(block[1]))
+  const options = [...block[1].matchAll(/^\s+- (\S+)$/gm)].map((m) => m[1])
+  assert.deepStrictEqual(options.slice().sort(), ['choose-plan', 'free', 'paid'])
+  assert.strictEqual(options[0], 'choose-plan', 'the UI preselects the first option, so it must not be a real plan')
+  const guard = /- name: Check the plan choice[\s\S]*?(?=\n\s+- name: )/.exec(y)
+  assert.ok(guard, 'a "Check the plan choice" step')
+  assert.ok(y.indexOf('Check the plan choice') < y.indexOf('Check out the release kit'), 'the plan is checked before anything is fetched')
+  assert.ok(/\$env:PLAN/.test(guard[0]) && /\[System\.StringComparison\]::Ordinal/.test(guard[0]))
+  assert.ok(/'paid'/.test(guard[0]) && /'free'/.test(guard[0]) && /exit 1/.test(guard[0]))
+})
+
+check('the kit has no default plan: the constant is gone and release.cjs never falls back to paid', () => {
+  assert.strictEqual(lib.DEFAULT_PLAN, undefined)
+  const src = read('ops', 'scripts', 'deploy-kit', 'release.cjs')
+  assert.ok(!/DEFAULT_PLAN/.test(src) && !/askDefault\(ctx, 'Cloudflare plan/.test(src))
+})
+
+check('explicitPlan accepts exactly paid or free', () => {
+  assert.strictEqual(lib.explicitPlan('paid'), 'paid')
+  assert.strictEqual(lib.explicitPlan('free'), 'free')
+  for (const bad of ['', undefined, null, 'choose-plan', 'Paid', ' paid', 'gold', 0]) assert.strictEqual(lib.explicitPlan(bad), '', String(bad))
+})
+
+check('account plan and version view are read-only production reads with a confirm gate', () => {
+  const account = lib.commandCatalog.accountPlan()
+  const view = lib.commandCatalog.versionView(VID)
+  for (const spec of [account, view]) {
+    assert.ok(lib.isProductionSpec(spec), `${spec.id} reads the production account`)
+    assert.strictEqual(spec.gate, 'confirm')
+    assert.throws(() => lib.assertApproved(spec, null), /not confirmed/)
+    assert.ok(lib.assertApproved(spec, { ok: true, gate: 'confirm' }))
+  }
+  assert.ok(view.args.includes('--json') && view.args.includes('--name') && view.args.includes(VID))
+  assert.throws(() => lib.commandCatalog.versionView('../x'), /version id/)
+  assert.ok(lib.sampleCatalog().some((s) => s.id === account.id) && lib.sampleCatalog().some((s) => s.id.startsWith('version-view')))
+  assert.ok(lib.WRANGLER_SUBCOMMANDS_USED.some((s) => s.join(' ') === 'versions view'))
+  assert.ok(fs.existsSync(path.join(KIT, account.file)), 'the account-plan helper the catalogue names exists')
+})
+
+check('classifyWorkersPlan: only a live Workers subscription names the plan; anything else is unknown', () => {
+  const sub = (id, state = 'Paid') => ({ id: `s-${id}`, state, rate_plan: { id, public_name: id.replace(/_/g, ' ') } })
+  const ok = (result) => ({ success: true, result })
+  assert.strictEqual(lib.classifyWorkersPlan(ok([sub('workers_paid')])).plan, 'paid')
+  assert.strictEqual(lib.classifyWorkersPlan(ok([sub('workers_unlimited')])).plan, 'paid')
+  assert.strictEqual(lib.classifyWorkersPlan(ok([sub('workers_free', 'Provisioned')])).plan, 'free')
+  assert.strictEqual(lib.classifyWorkersPlan(ok([sub('cf_pro'), sub('workers_paid')])).plan, 'paid', 'other products are ignored')
+  assert.strictEqual(lib.classifyWorkersPlan(ok([sub('workers_paid', 'Expired'), sub('workers_free', 'Provisioned')])).plan, 'free', 'an expired Paid is not the plan')
+  for (const [name, body] of Object.entries({
+    'no Workers subscription listed': ok([sub('cf_pro')]),
+    'empty list': ok([]),
+    'cancelled Paid alone': ok([sub('workers_paid', 'Cancelled')]),
+    'conflicting live subscriptions': ok([sub('workers_paid'), sub('workers_free', 'Provisioned')]),
+    'api failure': { success: false, errors: [{ code: 10000, message: 'Authentication error' }] },
+    'not json': null,
+    'result is not a list': { success: true, result: {} },
+  })) {
+    const r = lib.classifyWorkersPlan(body)
+    assert.strictEqual(r.plan, 'unknown', name)
+    assert.ok(r.reason.length > 10, `${name}: says why`)
+  }
+})
+
+check('versionTier reads PLAN_TIER from the version bindings, never from a secret or another name', () => {
+  const bindings = (list) => ({ id: VID, resources: { bindings: list } })
+  assert.strictEqual(lib.versionTier(bindings([{ type: 'plain_text', name: 'PLAN_TIER', text: 'free' }])), 'free')
+  assert.strictEqual(lib.versionTier(bindings([{ type: 'kv_namespace', name: 'CACHE' }, { type: 'plain_text', name: 'PLAN_TIER', text: 'paid' }])), 'paid')
+  for (const bad of [
+    bindings([]), bindings([{ type: 'secret_text', name: 'PLAN_TIER' }]), bindings([{ type: 'plain_text', name: 'OTHER', text: 'paid' }]),
+    { id: VID }, null, 'x', bindings('nope'),
+  ]) assert.strictEqual(lib.versionTier(bad), '')
+  assert.strictEqual(lib.versionTier(bindings([{ type: 'plain_text', name: 'PLAN_TIER', text: 'Paid ' }])), 'Paid ', 'returned verbatim so checkTier can reject a malformed label')
+})
+
+check('checkTier states the same reasons checkVersion always did', () => {
+  assert.strictEqual(lib.checkTier('paid', 'paid'), '')
+  assert.strictEqual(lib.checkTier('free', 'paid'), 'tier is free, expected paid')
+  assert.strictEqual(lib.checkTier('', 'free'), 'no tier reported, expected free')
+  assert.strictEqual(lib.checkTier('Paid ', 'paid'), 'invalid tier reported, expected paid')
+})
+
+check('checkAccountPlan: the profile must equal the account plan, and unknown fails closed', () => {
+  assert.deepStrictEqual(lib.checkAccountPlan('paid', { plan: 'paid' }), { ok: true, problem: '' })
+  assert.deepStrictEqual(lib.checkAccountPlan('free', { plan: 'free' }), { ok: true, problem: '' })
+  assert.match(lib.checkAccountPlan('paid', { plan: 'free' }).problem, /account is on the free plan.*paid profile/i)
+  assert.match(lib.checkAccountPlan('free', { plan: 'paid' }).problem, /account is on the paid plan.*free profile/i)
+  for (const reading of [{ plan: 'unknown', reason: 'HTTP 403' }, {}, null, { plan: 'enterprise' }]) {
+    const r = lib.checkAccountPlan('paid', reading)
+    assert.strictEqual(r.ok, false)
+    assert.match(r.problem, /could not be read/i)
+  }
+  assert.match(lib.checkAccountPlan('paid', { plan: 'unknown', reason: 'HTTP 403' }).problem, /HTTP 403/)
+})
+
+check('rollbackPlanVerdict: refuses a target from the wrong profile, warns when it cannot tell', () => {
+  const v = (t) => lib.rollbackPlanVerdict(t)
+  assert.strictEqual(v({ target: 'paid', live: 'paid', account: 'paid' }).level, 'ok')
+  assert.strictEqual(v({ target: 'free', live: 'free', account: '' }).level, 'ok')
+  assert.strictEqual(v({ target: 'free', live: 'paid', account: 'paid' }).level, 'refuse')
+  assert.strictEqual(v({ target: 'paid', live: 'paid', account: 'free' }).level, 'refuse')
+  assert.strictEqual(v({ target: 'free', live: 'paid', account: '' }).level, 'refuse', 'account unreadable: never cross the live profile')
+  assert.strictEqual(v({ target: 'paid', live: 'free', account: '' }).level, 'refuse')
+  assert.strictEqual(v({ target: 'free', live: 'paid', account: 'free' }).level, 'warn', 'recovering a wrong live profile is allowed, but the queue consumers stay on the live profile')
+  assert.match(v({ target: 'free', live: 'paid', account: 'free' }).message, /queue/i)
+  assert.strictEqual(v({ target: '', live: 'paid', account: 'paid' }).level, 'warn', 'target unreadable')
+  assert.strictEqual(v({ target: 'paid', live: '', account: '' }).level, 'warn', 'nothing to compare with')
+  assert.strictEqual(v({ target: 'paid', live: '', account: 'paid' }).level, 'ok', 'the account alone confirms the target')
+  assert.strictEqual(v({ target: 'paid', live: 'paid', account: '' }).level, 'ok')
+  assert.ok(v({ target: 'free', live: 'paid', account: 'paid' }).message.length > 20)
+  assert.ok(v({ target: '', live: '', account: '' }).message.length > 20)
+})
+
 // ------------------------- 7. the live step, with the network and Cloudflare stubbed
 
 const ex = require(path.join(KIT, 'exec.cjs'))
+const accountPlanHelper = require(path.join(KIT, 'account-plan.cjs'))
 const { COMMANDS } = require(path.join(KIT, 'release.cjs'))
 
 async function checkAsync(name, fn) {
@@ -478,9 +599,9 @@ const CHALLENGE = { status: 403, headers: { 'cf-mitigated': 'challenge', 'conten
 // One live step. challenged: the site answers every request with a bot challenge
 // (what GitHub's runner gets). api: the version `deployments status` reports,
 // or 'fail' when the Cloudflare API does not answer.
-function runLive({ ci = true, challenged = true, api = V_PUBLISHED, published = V_PUBLISHED }) {
+function runLive({ ci = true, challenged = true, api = V_PUBLISHED, published = V_PUBLISHED, apiTier = 'paid', plan = 'paid' }) {
   const counts = Object.fromEntries(lib.KEY_TABLES.map((t, i) => [t, 10 + i]))
-  const ctx = { ci, dryRun: false, sha: SHA, subject: 'test', site: 'https://site.invalid', plan: 'paid', ciConfirmWord: 'DEPLOY', recordDir: '', args: {},
+  const ctx = { ci, dryRun: false, sha: SHA, subject: 'test', site: 'https://site.invalid', plan, ciConfirmWord: 'DEPLOY', recordDir: '', args: {},
     state: { deploy: published ? { versionId: published } : {}, snapshot: { previousVersionId: V_BEFORE, preCounts: counts } } }
   const stubs = {
     httpGet: async (url) => {
@@ -495,6 +616,10 @@ function runLive({ ci = true, challenged = true, api = V_PUBLISHED, published = 
         return api === 'fail' ? { code: 1, out: 'Authentication error [code: 10000]' }
           : { code: 0, out: JSON.stringify({ id: 'dddddddd-0000-4000-8000-000000000009', versions: [{ version_id: api, percentage: 100 }] }) }
       }
+      if (spec.id.startsWith('version-view:')) {
+        if (apiTier === 'fail') return { code: 1, out: 'Authentication error [code: 10000]' }
+        return { code: 0, out: JSON.stringify({ id: spec.id.slice(13), resources: { bindings: apiTier === '' ? [] : [{ type: 'plain_text', name: 'PLAN_TIER', text: apiTier }] } }) }
+      }
       if (spec.id === 'counts') return { code: 0, out: JSON.stringify([{ results: [counts], success: true }]) }
       throw new Error(`unexpected command ${spec.id}`)
     },
@@ -505,11 +630,13 @@ function runLive({ ci = true, challenged = true, api = V_PUBLISHED, published = 
 }
 
 ;(async () => {
-  await checkAsync('live, CI, site challenged: the Cloudflare API confirms the published version, and it says "with warnings"', async () => {
+  await checkAsync('live, CI, site challenged: passes only because the Cloudflare API confirmed the published version AND its PLAN_TIER', async () => {
     const r = await runLive({})
     assert.strictEqual(r.result, true)
     assert.ok(r.text.includes(`Cloudflare serves Worker version ${V_PUBLISHED}, the one this release published - matches`), 'the version must be confirmed through the API')
-    assert.ok(/Live checks passed with 3 warning\(s\)/.test(r.text), 'a challenged run must not end with a bare "Live checks passed."')
+    assert.ok(r.text.includes(`Worker version ${V_PUBLISHED} carries PLAN_TIER paid (read through the Cloudflare API) - matches`), 'the plan must be confirmed through the API, not waved through with a warning')
+    assert.ok(/Live checks passed with 3 warning\(s\)/.test(r.text), 'the unchecked /health and admin page still show as warnings')
+    assert.ok(!/WARNING: .*(PLAN_TIER|tier|plan)/i.test(r.text), 'no warning stands in for the plan check')
     assert.ok(!/^Live checks passed\.$/m.test(r.text))
     assert.ok(r.text.includes("GitHub's runner") && !/VPN/.test(r.text), 'CI wording, never the laptop VPN advice')
     assert.ok(r.summary.includes('### Live checks: OK with warnings'))
@@ -545,6 +672,209 @@ function runLive({ ci = true, challenged = true, api = V_PUBLISHED, published = 
     assert.ok(/^Live checks passed\.$/m.test(r.text))
     assert.ok(r.summary.includes('### Live checks: OK\n'))
   })
+  // ---- 8. free and paid never mixed: the account plan, the live tier and the rollback target
+
+  await checkAsync('readAccountPlan: reads the subscription with a GET, names a plan, and never echoes the token or the billing body', async () => {
+    const calls = []
+    const body = JSON.stringify({ success: true, result: [{ id: 's1', state: 'Paid', price: 5, rate_plan: { id: 'workers_paid', public_name: 'Workers Paid' } }] })
+    const fetchImpl = async (url, init) => { calls.push({ url: String(url), init }); return { ok: true, status: 200, text: async () => body } }
+    const r = await accountPlanHelper.readAccountPlan({ fetchImpl, token: 'fixture-not-a-token', accountId: 'acc123' })
+    assert.strictEqual(r.plan, 'paid')
+    assert.strictEqual(calls.length, 1)
+    assert.strictEqual(calls[0].url, 'https://api.cloudflare.com/client/v4/accounts/acc123/subscriptions')
+    assert.ok(!calls[0].init || !calls[0].init.method || calls[0].init.method === 'GET', 'read-only')
+    assert.ok(!calls[0].init || !calls[0].init.body, 'no request body')
+    assert.strictEqual(calls[0].init.headers.authorization, 'Bearer fixture-not-a-token')
+    assert.ok(!JSON.stringify(r).includes('fixture-not-a-token') && !JSON.stringify(r).includes('price'))
+  })
+
+  await checkAsync('readAccountPlan: every failure is "unknown" with a reason, and the response body is never repeated', async () => {
+    const mk = (status, text) => async () => ({ ok: status >= 200 && status < 300, status, text: async () => text })
+    for (const [name, args] of Object.entries({
+      'billing permission missing': { fetchImpl: mk(403, '{"success":false,"errors":[{"code":9109,"message":"SECRET_BODY_MARK"}]}'), token: 't', accountId: 'a' },
+      'server error': { fetchImpl: mk(500, 'SECRET_BODY_MARK'), token: 't', accountId: 'a' },
+      'unparseable answer': { fetchImpl: mk(200, 'SECRET_BODY_MARK <html>'), token: 't', accountId: 'a' },
+      'network error': { fetchImpl: async () => { throw new Error('getaddrinfo SECRET_BODY_MARK') }, token: 't', accountId: 'a' },
+      'no token': { fetchImpl: async () => { throw new Error('must not be called') }, token: '', accountId: 'a' },
+      'no account id': { fetchImpl: async () => { throw new Error('must not be called') }, token: 't', accountId: '' },
+    })) {
+      const r = await accountPlanHelper.readAccountPlan(args)
+      assert.strictEqual(r.plan, 'unknown', name)
+      assert.ok(r.reason.length > 10 && !/SECRET_BODY_MARK/.test(r.reason), `${name}: ${r.reason}`)
+    }
+    assert.match((await accountPlanHelper.readAccountPlan({ fetchImpl: mk(403, ''), token: 't', accountId: 'a' })).reason, /HTTP 403.*billing|billing.*HTTP 403/i)
+  })
+
+  await checkAsync('account-plan.cjs as a program: prints one JSON line, reads the account id from wrangler.toml, and does nothing without a token', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'test-account-plan-'))
+    try {
+      fs.writeFileSync(path.join(tmp, 'wrangler.toml'), 'name = "business-os"\naccount_id = "743e5b727d139e85ed11679097f6f99e"\n')
+      assert.strictEqual(accountPlanHelper.accountIdFromToml(fs.readFileSync(path.join(tmp, 'wrangler.toml'), 'utf8')), '743e5b727d139e85ed11679097f6f99e')
+      assert.strictEqual(accountPlanHelper.accountIdFromToml('name = "x"'), '')
+      const env = { ...process.env, CLOUDFLARE_API_TOKEN: '', CLOUDFLARE_ACCOUNT_ID: '' }
+      const r = spawnSync(process.execPath, [path.join(KIT, 'account-plan.cjs')], { cwd: tmp, encoding: 'utf8', env, timeout: 30000 })
+      assert.strictEqual(r.status, 0, r.stderr)
+      const out = JSON.parse(r.stdout.trim())
+      assert.strictEqual(out.plan, 'unknown')
+      assert.ok(/token/i.test(out.reason))
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true })
+    }
+  })
+
+  // One deploy step with the account read, the build check and the publish stubbed.
+  function runDeploy({ ci = true, plan = 'paid', account = { plan: 'paid' }, typed = 'paid' }) {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'test-deploy-plan-'))
+    fs.mkdirSync(path.join(tmp, 'frontend', 'dist'), { recursive: true })
+    const ran = []
+    const ctx = { ci, dryRun: false, sha: SHA, subject: 'test', site: 'https://site.invalid', plan, releaseDir: tmp, ciConfirmWord: 'DEPLOY', recordDir: '', args: {}, state: { frontendBuiltFor: SHA } }
+    const stubs = {
+      gitRead: (args) => (args[0] === 'rev-parse' ? SHA : ''),
+      runSpec: async (spec, _ctx, approval) => {
+        lib.assertApproved(spec, approval)
+        ran.push(spec.id)
+        if (spec.id === 'account-plan') return account === 'fail' ? { code: 1, out: 'boom' } : { code: 0, out: `[with-wrangler-auth] note\n${JSON.stringify(account)}\n` }
+        if (spec.id.startsWith('deploy:')) return { code: 0, out: `Current Version ID: ${V_PUBLISHED}` }
+        throw new Error(`unexpected command ${spec.id}`)
+      },
+      ...(ci ? {} : { confirm: async (_c, gate) => ({ ok: true, gate }), ask: async () => typed }),
+    }
+    return withStubs(stubs, () => COMMANDS.deploy(ctx)).then((r) => { fs.rmSync(tmp, { recursive: true, force: true }); return { ...r, ran, ctx } })
+  }
+
+  await checkAsync('deploy, CI, no plan given: stops before reading the account or publishing (no silent default)', async () => {
+    const r = await runDeploy({ plan: '' })
+    assert.strictEqual(r.result, false)
+    assert.deepStrictEqual(r.ran, [])
+    assert.match(r.text, /STOP: .*plan.*paid or free/i)
+  })
+
+  await checkAsync('deploy: the profile matches the real account plan, so it publishes, after the account read', async () => {
+    for (const plan of ['paid', 'free']) {
+      const r = await runDeploy({ plan, account: { plan } })
+      assert.strictEqual(r.result, true, plan)
+      assert.deepStrictEqual(r.ran, ['account-plan', `deploy:${plan}`])
+      assert.strictEqual(r.ctx.state.deploy.accountPlan, plan, 'the release records the plan the account had')
+    }
+  })
+
+  await checkAsync('deploy: a profile that differs from the real account plan is refused before anything is published', async () => {
+    for (const [plan, account] of [['paid', 'free'], ['free', 'paid']]) {
+      const r = await runDeploy({ plan, account: { plan: account } })
+      assert.strictEqual(r.result, false, `${plan} profile on a ${account} account`)
+      assert.deepStrictEqual(r.ran, ['account-plan'], 'nothing published')
+      assert.ok(r.text.includes(`account is on the ${account} plan`) && r.text.includes(`${plan} profile`), r.text)
+    }
+  })
+
+  await checkAsync('deploy fails closed when the account plan cannot be read', async () => {
+    for (const account of ['fail', { plan: 'unknown', reason: 'HTTP 403 (the token cannot read billing)' }, {}, { plan: 'enterprise' }]) {
+      const r = await runDeploy({ account })
+      assert.strictEqual(r.result, false, JSON.stringify(account))
+      assert.deepStrictEqual(r.ran, ['account-plan'])
+      assert.match(r.text, /could not be read/i)
+    }
+  })
+
+  await checkAsync('deploy at a keyboard: no -Plan means the owner types one, and an empty answer stops', async () => {
+    const empty = await runDeploy({ ci: false, plan: '', typed: '' })
+    assert.strictEqual(empty.result, false)
+    assert.deepStrictEqual(empty.ran, [])
+    const typed = await runDeploy({ ci: false, plan: '', typed: 'free', account: { plan: 'free' } })
+    assert.strictEqual(typed.result, true)
+    assert.deepStrictEqual(typed.ran, ['account-plan', 'deploy:free'])
+    const wrong = await runDeploy({ ci: false, plan: '', typed: 'gold' })
+    assert.strictEqual(wrong.result, false)
+  })
+
+  await checkAsync('live with no plan chosen or recorded stops instead of assuming paid', async () => {
+    const ctx = { ci: true, dryRun: false, sha: SHA, subject: 'test', site: 'https://site.invalid', plan: '', ciConfirmWord: 'DEPLOY', recordDir: '', args: {}, state: { deploy: {} } }
+    const r = await withStubs({ httpGet: async () => { throw new Error('must not reach the site') } }, () => COMMANDS.live(ctx))
+    assert.strictEqual(r.result, false)
+    assert.match(r.text, /STOP: .*plan/i)
+  })
+
+  await checkAsync('live, CI, site challenged: the plan the Worker version carries (PLAN_TIER via the API) must match', async () => {
+    const same = await runLive({ apiTier: 'paid' })
+    assert.strictEqual(same.result, true)
+    assert.ok(same.text.includes(`Worker version ${V_PUBLISHED} carries PLAN_TIER paid (read through the Cloudflare API) - matches`), same.text)
+    for (const apiTier of ['free', '', 'Paid ']) {
+      const r = await runLive({ apiTier })
+      assert.strictEqual(r.result, false, `tier ${JSON.stringify(apiTier)} must not pass on a challenged runner`)
+      assert.ok(/PROBLEM: Worker version .*(tier is free, expected paid|no tier reported, expected paid|invalid tier reported, expected paid)/.test(r.text), r.text)
+      assert.ok(r.summary.includes('### Live checks: PROBLEMS'))
+    }
+    const unreadable = await runLive({ apiTier: 'fail' })
+    assert.strictEqual(unreadable.result, false, 'CI: a tier that cannot be read is a problem, not a warning')
+    assert.match(unreadable.text, /PROBLEM: the plan of Worker version .* could not be read/)
+    const freeProfile = await runLive({ apiTier: 'paid', plan: 'free' })
+    assert.strictEqual(freeProfile.result, false, 'the Free profile against a Paid version is a mix')
+  })
+
+  await checkAsync('live, keyboard run, challenged: a tier that cannot be read is a warning; a wrong tier is still a problem', async () => {
+    const unreadable = await runLive({ ci: false, apiTier: 'fail' })
+    assert.strictEqual(unreadable.result, true)
+    assert.match(unreadable.text, /WARNING: the plan of Worker version .* could not be read/)
+    const wrong = await runLive({ ci: false, apiTier: 'free' })
+    assert.strictEqual(wrong.result, false)
+  })
+
+  // The rollback step with the reads stubbed. tiers: version id -> tier ('' = no PLAN_TIER, 'fail' = unreadable).
+  function runRollback({ live = 'paid', target = 'paid', account = { plan: 'paid' }, versionId = V_BEFORE, targetGiven = true, withSnapshot = true }) {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'test-rollback-plan-'))
+    const ran = []
+    const ctx = { ci: false, dryRun: false, sha: SHA, subject: 'test', plan: '', releaseDir: tmp, fixedRelease: true, ciConfirmWord: 'DEPLOY', recordDir: '', args: { target: 'worker', ...(targetGiven ? { versionId } : {}) },
+      state: withSnapshot ? { snapshot: { previousVersionId: V_BEFORE } } : {} }
+    const view = (id, tier) => (tier === 'fail' ? { code: 1, out: 'Authentication error' }
+      : { code: 0, out: JSON.stringify({ id, resources: { bindings: tier === '' ? [] : [{ type: 'plain_text', name: 'PLAN_TIER', text: tier }] } }) })
+    const stubs = {
+      runSpec: async (spec, _ctx, approval) => {
+        lib.assertApproved(spec, approval)
+        ran.push(spec.id)
+        if (spec.id === 'deployments-status') return { code: 0, out: JSON.stringify({ id: 'dddddddd-0000-4000-8000-000000000009', versions: [{ version_id: V_PUBLISHED, percentage: 100 }] }) }
+        if (spec.id === `version-view:${V_PUBLISHED}`) return view(V_PUBLISHED, live)
+        if (spec.id === `version-view:${versionId}`) return view(versionId, target)
+        if (spec.id === 'account-plan') return account === 'fail' ? { code: 1, out: 'boom' } : { code: 0, out: JSON.stringify(account) }
+        if (spec.id === 'rollback-worker') return { code: 0, out: '' }
+        throw new Error(`unexpected command ${spec.id}`)
+      },
+      confirm: async (_c, gate) => ({ ok: true, gate }),
+    }
+    return withStubs(stubs, () => COMMANDS.rollback(ctx)).then((r) => { fs.rmSync(tmp, { recursive: true, force: true }); return { ...r, ran } })
+  }
+
+  await checkAsync('rollback: a target from the other profile is refused and nothing is rolled back', async () => {
+    const r = await runRollback({ live: 'paid', target: 'free', account: { plan: 'paid' } })
+    assert.strictEqual(r.result, false)
+    assert.ok(!r.ran.includes('rollback-worker'), 'the rollback must not run')
+    assert.match(r.text, /REFUSED: .*free.*paid/i)
+    const noAccount = await runRollback({ live: 'paid', target: 'free', account: 'fail' })
+    assert.strictEqual(noAccount.result, false, 'account unreadable: never cross the live profile')
+    assert.ok(!noAccount.ran.includes('rollback-worker'))
+  })
+
+  await checkAsync('rollback: a target of the same profile goes ahead', async () => {
+    const r = await runRollback({})
+    assert.strictEqual(r.result, true)
+    assert.ok(r.ran.includes('rollback-worker'))
+    assert.ok(r.ran.indexOf('rollback-worker') > r.ran.indexOf(`version-view:${V_BEFORE}`), 'the target is read first')
+  })
+
+  await checkAsync('rollback: recovering a wrong live profile is allowed with a loud warning about the queue consumers', async () => {
+    const r = await runRollback({ live: 'paid', target: 'free', account: { plan: 'free' } })
+    assert.strictEqual(r.result, true)
+    assert.match(r.text, /WARNING: .*queue/i)
+  })
+
+  await checkAsync('rollback: an unreadable target profile warns loudly but does not block an emergency rollback', async () => {
+    const r = await runRollback({ target: 'fail' })
+    assert.strictEqual(r.result, true)
+    assert.match(r.text, /WARNING: .*could not be (read|compared)/i)
+    const noId = await runRollback({ targetGiven: false, withSnapshot: false })
+    assert.ok(noId.ran.includes('rollback-worker'))
+    assert.match(noId.text, /WARNING: .*previous version.*(plan|profile)/i)
+  })
+
   await checkAsync('runSpec tee shows AND returns the output; a plain run returns none, so the deploy step must tee', async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'test-deploy-kit-tee-'))
     try {

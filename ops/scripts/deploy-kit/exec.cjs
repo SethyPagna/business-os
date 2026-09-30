@@ -181,6 +181,8 @@ function specInvocation(spec, ctx) {
     inner = [process.execPath, [wranglerJs, ...spec.args]]
   } else if (spec.kind === 'npm') {
     inner = npmInvocation(spec.args)
+  } else if (spec.kind === 'kit-node') {
+    inner = [process.execPath, [path.join(__dirname, spec.file), ...spec.args.slice(1)]]
   } else if (spec.kind === 'bat') {
     return { cmd: 'cmd.exe', args: ['/d', '/c', path.join(ctx.repoRoot, 'run', spec.args[0])], cwd: ctx.repoRoot }
   } else {

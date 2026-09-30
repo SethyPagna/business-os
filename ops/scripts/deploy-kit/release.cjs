@@ -13,7 +13,7 @@
 // Options (PowerShell or GNU spelling):
 //   -DryRun / --dry-run   print every command instead of running it
 //   -Ref <branch|sha>     what to release (default claude/urgent-20260925)
-//   -Plan paid|free       Cloudflare plan config (default paid)
+//   -Plan paid|free       Cloudflare plan config (required for deploy and live: no default)
 //   -UseCert              skip the tests when a Claude certificate for the
 //                         exact commit exists (see DEPLOY.md)
 //   -Records <dir>        where deploy records go (default <home>\Records)
@@ -460,6 +460,27 @@ async function readProduction(ctx, spec, approval) {
   return { ok: r.code === 0, json, out: r.out }
 }
 
+// The plan the Cloudflare account is really on, read-only. Fails closed: a
+// missing or unreadable answer is reported as unknown, never guessed.
+async function readAccountPlan(ctx, approval) {
+  const r = await readProduction(ctx, lib.commandCatalog.accountPlan(), approval)
+  if (r.dry) return { dry: true }
+  const answered = r.ok && r.json && typeof r.json === 'object' && !Array.isArray(r.json)
+  return { reading: answered ? r.json : { plan: 'unknown', reason: 'the plan check gave no answer' } }
+}
+
+// The plan is always chosen, never assumed. A dry run only shows the paid
+// commands so the walk can reach them.
+async function choosePlan(ctx) {
+  if (ctx.plan) return ctx.plan
+  if (ctx.dryRun) {
+    log.say('[dry-run] no -Plan given; showing the paid commands for the walk (a real run has no default)')
+    return 'paid'
+  }
+  if (ctx.ci) return ''
+  return lib.explicitPlan((await ex.ask('Cloudflare plan of this account, paid or free? (no default) ')).trim().toLowerCase())
+}
+
 async function readCounts(ctx, approval) {
   const r = await readProduction(ctx, lib.commandCatalog.counts(), approval)
   if (r.dry) return { ok: true, counts: null }
@@ -582,14 +603,24 @@ async function stepDeploy(ctx) {
     if (!ctx.dryRun) ctx.state.frontendBuiltFor = ctx.sha
   }
   if (!(await checkClean(ctx))) return false
-  const plan = ctx.plan || await ex.askDefault(ctx, 'Cloudflare plan, paid or free? ', lib.DEFAULT_PLAN)
-  if (!['paid', 'free'].includes(plan)) { log.say('STOP: type paid or free.'); return false }
+  const plan = await choosePlan(ctx)
+  if (!plan) { log.say('STOP: no plan chosen. Choose the plan explicitly, paid or free (-Plan paid | -Plan free); there is no default.'); return false }
+  // Both profiles deploy the same Worker onto the same resources, so the only
+  // thing that keeps the wrong one from going live is checking the account.
+  const planRead = await ex.confirm(ctx, 'confirm', `Read the Cloudflare account's Workers plan to check it matches the ${plan} profile? (This changes nothing.)`)
+  if (!planRead.ok) { log.say('Stopped. Nothing was published.'); return false }
+  const account = await readAccountPlan(ctx, planRead)
+  if (!account.dry) {
+    const verdict = lib.checkAccountPlan(plan, account.reading)
+    if (!verdict.ok) { log.say(`STOP: ${verdict.problem}`); log.say('Nothing was published.'); return false }
+    log.say(`  the account is on the ${plan} plan - matches the ${plan} profile`)
+  }
   const approval = await ex.confirm(ctx, 'typeYES', `Publish ${ctx.sha.slice(0, 12)} "${ctx.subject}" to PRODUCTION on the ${plan} plan?`)
   if (!approval.ok) { log.say('Stopped. Nothing was published.'); return false }
   // tee, not plain: the version id below is parsed from this output, and an
   // uncaptured run returns none, so no release ever recorded what it published.
   const r = await ex.runSpec(lib.commandCatalog.deploy(plan), ctx, approval, { tee: true })
-  ctx.state.deploy = { at: new Date().toISOString(), plan, exitCode: r.code, dryRun: ctx.dryRun }
+  ctx.state.deploy = { at: new Date().toISOString(), plan, accountPlan: account.dry ? '' : account.reading.plan, exitCode: r.code, dryRun: ctx.dryRun }
   const version = /Current Version ID:\s*([0-9a-f-]{36})/i.exec(r.out || '')
   if (version) ctx.state.deploy.versionId = version[1]
   saveState(ctx)
@@ -601,7 +632,8 @@ async function stepDeploy(ctx) {
 async function stepLive(ctx) {
   heading('Live checks')
   if (!needSha(ctx)) return false
-  const plan = ctx.plan || (ctx.state.deploy && ctx.state.deploy.plan) || lib.DEFAULT_PLAN
+  const plan = ctx.plan || (ctx.state.deploy && ctx.state.deploy.plan) || ''
+  if (!plan && !ctx.dryRun) { log.say('STOP: no plan was chosen or recorded for this release, so the live Worker cannot be checked against one. Give -Plan paid or -Plan free.'); return false }
   const problems = []
   const warnings = []
   let version = null
@@ -665,6 +697,19 @@ async function stepLive(ctx) {
       } else {
         log.say(`  Cloudflare serves Worker version ${apiVersion}`)
       }
+      // A challenged site cannot say which plan it runs, so the version's own
+      // PLAN_TIER var is read from the API instead of passing with a warning.
+      if (siteChallenged && dep.ok && apiVersion) {
+        const view = await readProduction(ctx, lib.commandCatalog.versionView(apiVersion), approval)
+        if (view.dry) { /* nothing was read */ } else if (!view.ok || !view.json) {
+          unconfirmed(`the plan of Worker version ${apiVersion} could not be read through the Cloudflare API`)
+        } else {
+          const tier = lib.versionTier(view.json)
+          const problem = lib.checkTier(tier, plan)
+          if (problem) problems.push(`Worker version ${apiVersion}: ${problem}`)
+          else log.say(`  Worker version ${apiVersion} carries PLAN_TIER ${tier} (read through the Cloudflare API) - matches`)
+        }
+      }
     }
     const c = await readCounts(ctx, approval)
     if (!c.ok) problems.push('could not read the row counts after the release')
@@ -696,6 +741,35 @@ async function stepLive(ctx) {
   return true
 }
 
+// Rolling back across a Free/Paid switch leaves PLAN_TIER from one profile with the
+// queue consumer settings of the other, so the target's profile is checked first.
+// True to go on. Refuses a mixed target; an emergency rollback is never blocked
+// just because a read failed, but it warns loudly.
+async function guardRollbackPlan(ctx, versionId) {
+  if (!versionId && !ctx.dryRun) {
+    log.say('  WARNING: no version id was saved, so Cloudflare will go back to the previous version and its plan profile cannot be checked in advance. Check the plan in the Cloudflare dashboard afterwards.')
+    return true
+  }
+  const approval = await ex.confirm(ctx, 'confirm', "Read the Worker versions and the account's plan to check the rollback target uses the same plan profile? (This changes nothing.)")
+  if (!approval.ok) { log.say('Stopped. Nothing was changed.'); return false }
+  const tierOf = async (id) => {
+    if (!id) return ''
+    const r = await readProduction(ctx, lib.commandCatalog.versionView(id), approval)
+    return r.dry || !r.ok ? '' : lib.explicitPlan(lib.versionTier(r.json))
+  }
+  const dep = await readProduction(ctx, lib.commandCatalog.deploymentStatus(), approval)
+  const live = dep.dry ? '' : await tierOf(lib.liveVersionId(dep.json))
+  const target = await tierOf(versionId)
+  const acct = await readAccountPlan(ctx, approval)
+  if (ctx.dryRun) return true
+  const account = lib.explicitPlan(acct.reading && acct.reading.plan)
+  const verdict = lib.rollbackPlanVerdict({ target, live, account })
+  if (verdict.level === 'refuse') { log.say(`  REFUSED: ${verdict.message}`); log.say('  Nothing was rolled back.'); return false }
+  if (verdict.level === 'warn') log.say(`  WARNING: ${verdict.message}`)
+  else log.say(`  the rollback target uses the ${target} profile - matches`)
+  return true
+}
+
 async function stepRollback(ctx) {
   heading('Undo a release')
   ctx.ciConfirmWord = 'ROLLBACK'
@@ -717,6 +791,7 @@ async function stepRollback(ctx) {
       const versionId = ctx.args.versionId || snap.previousVersionId || ''
       if (versionId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(versionId)) { log.say(`STOP: ${versionId} is not a Worker version id.`); ok = false; continue }
       log.say(versionId ? `The version that was live before the release: ${versionId}` : 'No saved version; Cloudflare will go back to the previous version.')
+      if (!(await guardRollbackPlan(ctx, versionId))) { ok = false; continue }
       const approval = await ex.confirm(ctx, 'double', 'Put the website back to the version before this release?', 'ROLLBACK')
       if (!approval.ok) { log.say('Stopped. Nothing was changed.'); ok = false; continue }
       const r = await ex.runSpec(lib.commandCatalog.rollbackWorker(versionId, ctx.ci), ctx, approval)

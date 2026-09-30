@@ -23,11 +23,11 @@ on:
         default: claude/urgent-20260925
         type: string
       plan:
-        description: Cloudflare plan config (production runs paid)
+        description: Plan the Cloudflare account is on (no default; must match the account)
         required: true
-        default: paid
         type: choice
         options:
+          - choose-plan
           - paid
           - free
       run_migrations:
@@ -63,6 +63,17 @@ jobs:
         run: |
           if (-not [string]::Equals($env:CONFIRM, 'DEPLOY', [System.StringComparison]::Ordinal)) {
             Write-Output '::error::Type DEPLOY (in capitals) in the confirm box to release.'
+            exit 1
+          }
+
+      # A choice input shows its first option when nothing was picked, so the
+      # first option is a placeholder that stops here rather than a default plan.
+      - name: Check the plan choice
+        env:
+          PLAN: ${{ inputs.plan }}
+        run: |
+          if (-not ([string]::Equals($env:PLAN, 'paid', [System.StringComparison]::Ordinal) -or [string]::Equals($env:PLAN, 'free', [System.StringComparison]::Ordinal))) {
+            Write-Output '::error::Choose the plan (paid or free) that the Cloudflare account is really on; there is no default.'
             exit 1
           }
 

@@ -12,9 +12,6 @@
 const path = require('path')
 
 const DEFAULT_REF = 'claude/urgent-20260925'
-// DEPLOY.md "Free vs paid deploy" marks Workers Paid as current, and every
-// deploy recorded in progress.md reports `tier paid`.
-const DEFAULT_PLAN = 'paid'
 const DEFAULT_SITE = 'https://admin.leangbeauty.com'
 const WORKER_NAME = 'business-os'
 const CERT_DIR_NAME = 'certs'
@@ -48,8 +45,11 @@ const WRANGLER_SUBCOMMANDS_USED = [
   ['d1', 'migrations', 'list'],
   ['d1', 'execute'],
   ['deployments', 'status'],
+  ['versions', 'view'],
   ['rollback'],
 ]
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 const GATE_RANK = { none: 0, confirm: 1, typeYES: 2, double: 3 }
 
@@ -126,6 +126,12 @@ function countsSql(tables = KEY_TABLES) {
 const commandCatalog = {
   whoami: () => wrangler('whoami', ['whoami'], 'none'),
   timeTravelInfo: (db) => wrangler(`time-travel-info:${db}`, ['d1', 'time-travel', 'info', db, '--json'], 'confirm'),
+  // Reads the Cloudflare account's Workers subscription (read-only); see account-plan.cjs.
+  accountPlan: () => ({ id: 'account-plan', kind: 'kit-node', file: 'account-plan.cjs', args: ['account-plan'], gate: 'confirm' }),
+  versionView: (versionId) => {
+    if (!UUID_RE.test(String(versionId))) throw new Error(`Not a Worker version id: ${versionId}`)
+    return wrangler(`version-view:${versionId}`, ['versions', 'view', versionId, '--name', WORKER_NAME, '--json'], 'confirm')
+  },
   deploymentStatus: () => wrangler('deployments-status', ['deployments', 'status', '--json'], 'confirm'),
   counts: () => wrangler('counts', ['d1', 'execute', 'business-os', '--remote', '--json', '--command', countsSql()], 'confirm'),
   migrationsList: (db) => wrangler(`migrations-list:${db}`, ['d1', 'migrations', 'list', db, '--remote'], 'confirm'),
@@ -153,6 +159,8 @@ function sampleCatalog() {
     commandCatalog.whoami(),
     ...DATABASES.map((d) => commandCatalog.timeTravelInfo(d.name)),
     commandCatalog.deploymentStatus(),
+    commandCatalog.accountPlan(),
+    commandCatalog.versionView('00000000-0000-4000-8000-000000000000'),
     commandCatalog.counts(),
     ...DATABASES.map((d) => commandCatalog.migrationsList(d.name)),
     ...DATABASES.map((d) => commandCatalog.migrationsApply(d.name)),
@@ -168,7 +176,7 @@ function sampleCatalog() {
 const PRODUCTION_WORDS = new Set([
   '--remote', 'deploy', 'deploy:free', 'deploy:full', 'deploy:full:free', 'rollback', 'restore', 'apply',
   'migrate:remote', 'migrate:import:remote', 'secret', 'secrets:sync', 'r2', 'deployments',
-  'time-travel', 'full-automation.bat', 'd1:shell:remote', 'versions', 'triggers',
+  'time-travel', 'full-automation.bat', 'd1:shell:remote', 'versions', 'triggers', 'account-plan',
 ])
 
 // True when a command reads or changes production. Deliberately broad: a
@@ -335,6 +343,14 @@ function countChange(row, { ci = false } = {}) {
 
 // ----------------------------------------------------------- live checks
 
+// '' when the reported tier is exactly the plan, else why not.
+function checkTier(tier, plan) {
+  if (tier == null || tier === '') return `no tier reported, expected ${plan}`
+  if (tier !== 'paid' && tier !== 'free') return `invalid tier reported, expected ${plan}`
+  if (tier !== plan) return `tier is ${tier}, expected ${plan}`
+  return ''
+}
+
 function checkVersion(json, sha, plan) {
   const problems = []
   const rev = json && typeof json.revision === 'string' ? json.revision : ''
@@ -342,12 +358,74 @@ function checkVersion(json, sha, plan) {
   else if (rev.endsWith('-dirty')) problems.push(`revision ${rev} is a DIRTY build`)
   else if (!sha.toLowerCase().startsWith(rev.toLowerCase().slice(0, 12)) || rev.length < 7) problems.push(`revision ${rev} is not ${sha.slice(0, 12)}`)
   if (plan) {
-    const tier = json && json.tier
-    if (tier == null || tier === '') problems.push(`no tier reported, expected ${plan}`)
-    else if (tier !== 'paid' && tier !== 'free') problems.push(`invalid tier reported, expected ${plan}`)
-    else if (tier !== plan) problems.push(`tier is ${tier}, expected ${plan}`)
+    const problem = checkTier(json && json.tier, plan)
+    if (problem) problems.push(problem)
   }
   return { ok: problems.length === 0, problems, revision: rev }
+}
+
+// ------------------------------------------------- free and paid, never mixed
+
+// A plan is only ever chosen, never assumed: '' unless the value is exactly paid or free.
+function explicitPlan(value) {
+  return value === 'paid' || value === 'free' ? value : ''
+}
+
+// The plan of a Worker version, from the vars stored with it (the same PLAN_TIER
+// the running Worker reports at /api/runtime/version). Returned verbatim, or ''
+// when the version carries no plain-text PLAN_TIER.
+function versionTier(json) {
+  const bindings = json && json.resources && json.resources.bindings
+  if (!Array.isArray(bindings)) return ''
+  const hit = bindings.find((b) => b && b.type === 'plain_text' && b.name === 'PLAN_TIER' && typeof b.text === 'string')
+  return hit ? hit.text : ''
+}
+
+// The account's Workers plan from GET /accounts/{id}/subscriptions. Only a live
+// Workers subscription names a plan; every other answer is 'unknown', because a
+// deploy must never guess the plan.
+const DEAD_SUBSCRIPTION_STATES = /^(cancelled|canceled|expired|failed|awaitingpayment)$/i
+function classifyWorkersPlan(json) {
+  if (!json || typeof json !== 'object') return { plan: 'unknown', reason: 'the subscription answer was not JSON' }
+  if (json.success === false) return { plan: 'unknown', reason: 'the Cloudflare API reported an error reading the subscription' }
+  if (!Array.isArray(json.result)) return { plan: 'unknown', reason: 'the subscription answer had no list of subscriptions' }
+  const label = (sub) => `${(sub.rate_plan && sub.rate_plan.id) || ''} ${(sub.rate_plan && sub.rate_plan.public_name) || ''}`
+  const live = json.result.filter((sub) => sub && typeof sub === 'object' && !DEAD_SUBSCRIPTION_STATES.test(String(sub.state || '')) && /workers/i.test(label(sub)))
+  const paid = live.some((sub) => /paid|standard|unlimited|bundled/i.test(label(sub)))
+  const free = live.some((sub) => /free/i.test(label(sub)))
+  if (paid && free) return { plan: 'unknown', reason: 'the account lists both a Workers Paid and a Workers Free subscription' }
+  if (paid) return { plan: 'paid', reason: 'a live Workers Paid subscription' }
+  if (free) return { plan: 'free', reason: 'a live Workers Free subscription' }
+  return { plan: 'unknown', reason: 'the account lists no live Workers subscription' }
+}
+
+// The profile being deployed must be the plan the account is really on.
+function checkAccountPlan(profile, reading) {
+  const plan = reading && reading.plan
+  if (plan !== 'paid' && plan !== 'free') {
+    const why = reading && reading.reason ? `: ${reading.reason}` : ''
+    return { ok: false, problem: `the account's Workers plan could not be read${why}. A release is not published until it is known.` }
+  }
+  if (plan !== profile) return { ok: false, problem: `the account is on the ${plan} plan but this release uses the ${profile} profile. Choose the ${plan} profile, or change the plan in Cloudflare first.` }
+  return { ok: true, problem: '' }
+}
+
+// May the Worker be rolled back to `target`? Each argument is 'paid', 'free' or
+// '' (could not be read). A version carries PLAN_TIER, but the queue consumers'
+// batch sizes are set at deploy time and do not roll back with it.
+function rollbackPlanVerdict({ target, live, account }) {
+  const known = (p) => p === 'paid' || p === 'free'
+  if (!known(target)) return { level: 'warn', message: 'the plan of the version to roll back to could not be read, so it cannot be compared with the account. Check it in the Cloudflare dashboard before trusting the result.' }
+  if (known(account)) {
+    if (target !== account) return { level: 'refuse', message: `the version to roll back to uses the ${target} profile but the account is on the ${account} plan. Deploy the ${account} profile instead.` }
+    if (known(live) && live !== target) return { level: 'warn', message: `the live Worker is on the ${live} profile and the rollback target on the ${target} profile: the code follows the account's ${account} plan, but the queue consumer settings stay on the ${live} profile until a ${target} deploy.` }
+    return { level: 'ok', message: '' }
+  }
+  if (known(live)) {
+    if (target !== live) return { level: 'refuse', message: `the version to roll back to uses the ${target} profile but the live Worker uses the ${live} profile, and the account plan could not be read. Deploy the right profile instead of rolling back across profiles.` }
+    return { level: 'ok', message: '' }
+  }
+  return { level: 'warn', message: 'neither the live Worker plan nor the account plan could be read, so the rollback target cannot be compared. Check the plan in the Cloudflare dashboard.' }
 }
 
 // ---------------------------------------------------------- places, certs
@@ -393,10 +471,11 @@ function todayStamp(d = new Date()) {
 }
 
 module.exports = {
-  DEFAULT_REF, DEFAULT_PLAN, DEFAULT_SITE, WORKER_NAME, CERT_DIR_NAME,
+  DEFAULT_REF, DEFAULT_SITE, WORKER_NAME, CERT_DIR_NAME,
   DATABASES, KEY_TABLES, LIVE_TRAFFIC_TABLES, NPM_SCRIPTS_USED, WRANGLER_SUBCOMMANDS_USED, GATE_RANK, GATE_TEST_FILES,
   parseArgs, commandCatalog, sampleCatalog, countsSql, isProductionSpec, assertApproved,
   classifyResponse, lowerHeaders, parseMigrationNames, firstCommentLine, tablesTouched,
-  parseWranglerJson, findKey, liveVersionId, parseCounts, compareCounts, countsLines, countChange, checkVersion,
+  parseWranglerJson, findKey, liveVersionId, parseCounts, compareCounts, countsLines, countChange, checkVersion, checkTier,
+  explicitPlan, versionTier, classifyWorkersPlan, checkAccountPlan, rollbackPlanVerdict,
   recordDirName, certFileName, certMatches, samePath, forbiddenReleasePath, todayStamp,
 }
