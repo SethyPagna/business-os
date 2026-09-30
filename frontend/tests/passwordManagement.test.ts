@@ -356,20 +356,20 @@ await runTest('create and reset check the Worker\'s new-password rule on the cli
 
 await runTest('resetting another person\'s password: no current password, no username, other-user fields, then the hand-over panel (C19)', () => {
   const modal = between(usersCode, "{modal === 'resetPw' && selectedUser ? (", "{modal === 'editRole' ? (")
-  assert.match(modal, /passwordHandover \? \(\s*<PasswordHandover\b[\s\S]*?\) : isCurrentAccount\(selectedUser\) \? \(\s*<OwnPasswordChangeForm\b[\s\S]*?\) : \(\s*<AdminPasswordResetForm\b/)
+  assert.match(modal, /passwordHandover && passwordHandover\.userId === selectedUser\.id \? \(\s*<PasswordHandover\b[\s\S]*?\) : isCurrentAccount\(selectedUser\) \? \(\s*<OwnPasswordChangeForm\b[\s\S]*?\) : \(\s*<AdminPasswordResetForm\b/)
   const admin = sliceFunction(usersCode, 'AdminPasswordResetForm')
   assert.doesNotMatch(admin, /<form\b|<input\b|autoFocus|current_password|name="username"/)
   assert.match(firstNewPasswordFields(admin), /mode="other-user"/)
   assert.equal((admin.match(/<button\b/g) || []).length, 1, 'one main action')
   assert.match(admin, /<button type="button" className=\{MAIN_ACTION_BUTTON_CLASS\} title=\{tr\('change_password', 'Change password'\)\} disabled=\{passwordSaving\} onClick=\{onSave\}>\s*<KeyRound\b/)
-  assert.match(sliceConst(usersCode, 'handleResetPassword'), /setPasswordHandover\(\{ name: [^}]*, password: newPassword \}\)/)
+  assert.match(sliceConst(usersCode, 'handleResetPassword'), /setPasswordHandover\(\{ userId: selectedUser\.id, name: [^}]*, password: newPassword \}\)/)
 
   const handover = sliceFunction(usersCode, 'PasswordHandover')
   assert.match(handover, /tr\('password_admin_handover_title', 'New password for \{name\}'\)\.replace\('\{name\}', name\)/)
   assert.match(handover, /<div className="[^"]*\bselect-all\b[^"]*">\{password\}<\/div>/, 'shown once in a read-only line')
   assert.match(handover, /<button type="button" className="[^"]*" aria-label=\{copyLabel\} title=\{copyLabel\} onClick=\{\(\) => \{ void copy\(\) \}\}>\s*<Copy\b[^>]*\/>\s*<\/button>/, 'Copy is icon-only with its name as tooltip')
   assert.match(handover, /<button type="button" className=\{MAIN_ACTION_BUTTON_CLASS\} onClick=\{onDone\}>\s*<Check\b[\s\S]*?tr\('done', 'Done'\)/)
-  assert.match(usersCode, /useEffect\(\(\) => \{ if \(modal !== 'resetPw'\) setPasswordHandover\(null\) \}, \[modal\]\)/, 'the password leaves state with the dialog')
+  assert.match(usersCode, /useEffect\(\(\) => \{\s*beginTrackedRequest\(passwordDialogRequestRef\)\s*setPasswordHandover\(null\)[\s\S]*?invalidateTrackedRequest\(passwordDialogRequestRef\)[\s\S]*?\}, \[modal, selectedUser\?\.id, currentUser\?\.id\]\)/, 'the password leaves state with the dialog, target or actor')
 })
 
 await runTest('an administrator changing their own password here keeps the paired form and the browser save request', () => {
