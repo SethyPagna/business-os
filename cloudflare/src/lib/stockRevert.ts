@@ -27,7 +27,7 @@ import {
 import { multiplyMoney4 } from './moneyPrecision'
 import { MOVEMENT_RETURN_REFERENCE_TYPES, movementReferenceKindSql } from './movementReference'
 import { STOCK_RECEIPT_MOVEMENT_TYPES, isStockInEditReference, stockInEditRange } from './stockInSessionsQuery'
-import { isDamagedLotReference } from './stockCondition'
+import { STOCK_CONDITION_TAGS, isDamagedLotReference, taggedReasonText } from './stockCondition'
 
 const OUT_TYPES = new Set<string>(LEDGER_OUT_TYPES)
 const RECEIPT_TYPES = new Set<string>(STOCK_RECEIPT_MOVEMENT_TYPES)
@@ -72,6 +72,7 @@ export type RevertRefusalCode =
   | 'revert_stock_in_line_edited' | 'revert_nothing_to_revert' | 'revert_not_revertible' | 'revert_session_generation'
   | 'revert_lineage_unresolved' | 'revert_insufficient_branch_stock' | 'revert_insufficient_lot_stock'
   | 'revert_lot_moved' | 'revert_no_received_date' | 'revert_from_sale' | 'revert_from_return'
+  | 'revert_session_undone' | 'revert_from_merge'
 
 export type RevertRefusalParams = Record<string, string | number>
 
@@ -121,6 +122,94 @@ async function sourceRecordKind(db: D1Compat, m: Pick<RevertMovementRow, 'id' | 
   const row = await db.prepare(`SELECT ${movementReferenceKindSql('m')} AS kind FROM inventory_movements m WHERE m.id = @id`)
     .get<{ kind: string | null }>({ id: Number(m.id) })
   return row?.kind === 'sale' || row?.kind === 'return' ? row.kind : null
+}
+
+// The Inventory import writes its stock-in as type 'in' (not 'add') yet puts
+// it on a received lot through the receipt planner, so it is a purchase like
+// every other receipt. An 'in' row with no lot, or on a lot with no received
+// figures (a legacy row), changes stock only: un-receiving leaves NULL alone.
+async function isLotStampedRow(db: D1Compat, id: number): Promise<boolean> {
+  const row = await db.prepare('SELECT batch_id FROM inventory_movements WHERE id = @id').get<{ batch_id: number | null }>({ id })
+  return row?.batch_id != null
+}
+
+// Duplicate-merge rows ('adjustment', written by routes/products.ts) are owned
+// by the merge and reversed by its History Undo. The write-off is stored as a
+// NEGATIVE adjustment, which no standalone stock change ever writes, so a
+// Revert would move stock the wrong way; the carry-in is found by its text.
+const MERGE_ROW_REASON = /\) removed -- stock written off|\) into this product --|\[merge:[^\]]+\]/
+
+function isMergeOwnedRow(m: Pick<RevertMovementRow, 'movement_type' | 'quantity' | 'reason'>): boolean {
+  if (m.movement_type !== 'adjustment') return false
+  return Number(m.quantity) < 0 || MERGE_ROW_REASON.test(String(m.reason ?? ''))
+}
+
+// A receipt recorded with a condition tag is written as a normal 'add' and then
+// immediately moved to the held row (routes/inventory.ts, planHoldAsTagged):
+// the units are no longer sellable, so reverting the 'add' would take them out
+// of sellable stock a second time. The held 'damage_out' row beside it shares
+// product, branch, lot, units, reference and the tag-prefixed reason.
+async function isHeldAsTaggedReceipt(db: D1Compat, m: Pick<RevertMovementRow, 'id' | 'product_id' | 'branch_id' | 'batch_id' | 'quantity' | 'reason' | 'reference_id'>): Promise<boolean> {
+  const held = await db.prepare(`SELECT reason FROM inventory_movements
+    WHERE id > @id AND movement_type = 'damage_out' AND product_id = @productId AND branch_id = @branchId
+      AND COALESCE(batch_id, 0) = @batchId AND ABS(quantity) = @quantity AND CAST(COALESCE(reference_id, '') AS TEXT) = @reference`)
+    .all<{ reason: string | null }>({
+      id: Number(m.id), productId: Number(m.product_id), branchId: Number(m.branch_id), batchId: Number(m.batch_id) || 0,
+      quantity: Math.abs(Number(m.quantity)), reference: String(m.reference_id ?? ''),
+    })
+  return held.some((row) => STOCK_CONDITION_TAGS.some((tag) => row.reason === taggedReasonText(tag, m.reason)))
+}
+
+// 0153 (and any repair like it) wrote an 'adjustment' that carries the SALE's id
+// as its reference: the correction belongs to that sale. Membership, not mere
+// existence, because a standalone lot correction carries a client session id
+// that can equal some unrelated sale id.
+async function isSaleLinkedAdjustment(db: D1Compat, m: Pick<RevertMovementRow, 'movement_type' | 'product_id' | 'reference_id'>): Promise<boolean> {
+  if (m.movement_type !== 'adjustment' || !/^\d+$/.test(String(m.reference_id ?? ''))) return false
+  const row = await db.prepare('SELECT 1 AS hit FROM sale_items WHERE sale_id = @saleId AND product_id = @productId LIMIT 1')
+    .get<{ hit: number }>({ saleId: Number(m.reference_id), productId: Number(m.product_id) })
+  return Boolean(row)
+}
+
+const SESSION_UNDONE_TEXT = 'This row belongs to a stock-in session that was undone, so its stock is already taken back. Redo the session from Stock-in Sessions first. Nothing was changed.'
+const LINE_EDITED_TEXT = 'This stock-in line was edited after it was saved. Edit it again (quantity 0 removes it) or undo the edit from its history.'
+
+// Whether the session that wrote this row is currently undone (odd generation:
+// every undo adds one, every redo another).
+const SESSION_UNDONE_SQL = `SELECT 1 FROM stock_session_operations o
+  WHERE o.rowid = @rowid AND o.generation % 2 = 1
+    AND EXISTS (SELECT 1 FROM stock_session_members sm WHERE sm.movement_id = @movementId)`
+
+// The two states that make a receipt row no longer the thing it was when it
+// was saved: a later Edit of the line (stock-in-edit:<id> rows) and an Undo of
+// its session. Read once before planning, and asserted again INSIDE the batch
+// below, so a change that commits in between aborts the Revert instead of
+// being reversed twice.
+async function receiptRowRefusal(db: D1Compat, m: Pick<RevertMovementRow, 'id' | 'movement_type' | 'reference_id'>): Promise<RevertResult | null> {
+  if (RECEIPT_TYPES.has(m.movement_type)) {
+    const edited = await db.prepare('SELECT id FROM inventory_movements WHERE reference_id >= @lo AND reference_id < @hi LIMIT 1')
+      .get<{ id: number }>(stockInEditRange(Number(m.id)))
+    if (edited) return refuse(409, 'revert_stock_in_line_edited', LINE_EDITED_TEXT)
+  }
+  if (/^\d+$/.test(String(m.reference_id ?? ''))) {
+    const undone = await db.prepare(SESSION_UNDONE_SQL).get<{ 1: number }>({ rowid: Number(m.reference_id), movementId: Number(m.id) })
+    if (undone) return refuse(409, 'revert_session_undone', SESSION_UNDONE_TEXT)
+  }
+  return null
+}
+
+function receiptRowGuard(m: Pick<RevertMovementRow, 'id' | 'movement_type' | 'reference_id'>): StockWriteStatement {
+  const { lo, hi } = stockInEditRange(Number(m.id))
+  const checkEdits = RECEIPT_TYPES.has(m.movement_type)
+  const sessionRowid = /^\d+$/.test(String(m.reference_id ?? '')) ? Number(m.reference_id) : null
+  return {
+    sql: `INSERT INTO stock_session_guards (guard_value)
+      SELECT CASE
+        WHEN @checkEdits = 1 AND EXISTS (SELECT 1 FROM inventory_movements WHERE reference_id >= @lo AND reference_id < @hi) THEN 0
+        WHEN @rowid IS NOT NULL AND EXISTS (${SESSION_UNDONE_SQL}) THEN 0
+        ELSE 1 END`,
+    params: { checkEdits: checkEdits ? 1 : 0, lo, hi, rowid: sessionRowid, movementId: Number(m.id) },
+  }
 }
 
 async function branchQty(db: D1Compat, productId: number, branchId: number): Promise<number> {
@@ -266,11 +355,21 @@ export async function applyMovementRevert(db: D1Compat, m: RevertMovementRow, ac
   if (isStockInEditReference(setReference) || isStockInEditReference(setParent?.reference_id)) {
     return refuse(409, 'revert_use_history', 'This row belongs to an edit of a stock-in line. Use Undo/Redo in its history, or edit the line again.')
   }
-  if (RECEIPT_TYPES.has(m.movement_type)) {
-    const edited = await db.prepare('SELECT id FROM inventory_movements WHERE reference_id >= @lo AND reference_id < @hi LIMIT 1')
-      .get<{ id: number }>(stockInEditRange(Number(m.id)))
-    if (edited) {
-      return refuse(409, 'revert_stock_in_line_edited', 'This stock-in line was edited after it was saved. Edit it again (quantity 0 removes it) or undo the edit from its history.')
+  const rowRefusal = await receiptRowRefusal(db, m)
+  if (rowRefusal) return rowRefusal
+  // Rows another record owns: the record's own undo reverses them with its
+  // other effects, and a Revert here would move stock the wrong way or twice.
+  // A Revert counter is exempt, so a wrong-direction Revert made before this
+  // rule can still be reverted back.
+  if (!String(m.reference_id ?? '').startsWith('revert:')) {
+    if (isMergeOwnedRow(m)) {
+      return refuse(400, 'revert_from_merge', 'This change came from merging duplicate products. Undo the merge from History instead. Nothing was changed.')
+    }
+    if (await isSaleLinkedAdjustment(db, m)) {
+      return refuse(400, 'revert_from_sale', 'This change came from a sale. Change it from the sale: cancel it or change its status.')
+    }
+    if (RECEIPT_TYPES.has(m.movement_type) && await isHeldAsTaggedReceipt(db, m)) {
+      return refuse(400, 'revert_tagged_row', 'This receipt was held as a tagged (damaged, broken, expired ...) stock row. Reverse it from that row on the product instead, so the tagged quantity moves with the stock.')
     }
   }
   const plan = planMovementRevert(m)
@@ -315,7 +414,7 @@ export async function applyMovementRevert(db: D1Compat, m: RevertMovementRow, ac
   if (!root) return refuse(409, 'revert_lineage_unresolved', 'Cannot revert: the original stock action cannot be identified safely. Nothing was changed.')
   // A chain takes its purchase nature from its root: receipt -> un-receive ->
   // re-receive -> ..., while the chain of a removal only moves stock.
-  const purchaseSide = isReceiptMovementType(root.movement_type)
+  const purchaseSide = isReceiptMovementType(root.movement_type) || (root.movement_type === 'in' && await isLotStampedRow(db, root.id))
   // This receipt's own money for the lot's cumulative received cost (0080):
   // the movement's recorded total, else its unit cost times its units.
   const receiptCostUsd = m.total_cost_usd != null ? Number(m.total_cost_usd)
@@ -468,6 +567,7 @@ export async function applyMovementRevert(db: D1Compat, m: RevertMovementRow, ac
   try {
     await db.batch([
       { sql: ALREADY_REVERTED_GUARD, params: { ref: counterRef, movementId: Number(m.id) } },
+      receiptRowGuard(m),
       ...statements,
       { sql: 'DELETE FROM stock_session_guards', params: {} },
     ])
@@ -477,6 +577,10 @@ export async function applyMovementRevert(db: D1Compat, m: RevertMovementRow, ac
     if (await revertExists(db, counterRef)) return ALREADY_REVERTED
     const message = err instanceof Error ? err.message : String(err)
     if (/CHECK constraint failed/i.test(message)) {
+      // The in-batch receipt guard: an Edit or a session Undo landed after the
+      // reads above. Say which, instead of a generic "stock changed".
+      const changed = await receiptRowRefusal(db, m)
+      if (changed) return changed
       return refuse(409, 'stock_changed', 'The stock changed while this was being reverted. Nothing was changed; refresh and try again.')
     }
     throw err

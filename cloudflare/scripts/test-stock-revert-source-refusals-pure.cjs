@@ -34,6 +34,18 @@ const cases = [
   { type: 'damage_in', ref: RETURN_ID, code: 'revert_from_return' },
   ...['supplier_return', 'supplier_return_reversal', 'return_reversal', 'replacement_out', 'damage_reversal']
     .map((type) => ({ type, ref: RETURN_ID, code: 'revert_from_return' })),
+  // Rows another record owns, told apart by their SHAPE and not by the type
+  // (R-REVERT-FIX RF5): the duplicate-merge write-off is stored as a NEGATIVE
+  // adjustment (a Revert would remove 3 more), the merge carry-in is found by
+  // its text, and migration 0153's repair carries the SALE id as its reference.
+  { type: 'adjustment', qty: -3, reason: 'Duplicate product "Old" (#9) removed -- stock written off instead of being merged -- merge [merge:op-1]', code: 'revert_from_merge' },
+  { type: 'adjustment', qty: -3, reason: 'edited reason', code: 'revert_from_merge' },
+  { type: 'adjustment', qty: 3, reason: 'Merged duplicate product "Old" (#9) into this product -- merge', code: 'revert_from_merge' },
+  { type: 'adjustment', qty: 1, ref: SALE_ID, reason: '0153: reverse duplicate historical status deduction; original movement 46187', code: 'revert_from_sale' },
+  // Their controls: a standalone lot correction whose client session id matches no sale
+  // for this product, even when a sale of ANOTHER product carries the same id.
+  { type: 'adjustment', qty: 2, ref: 999, code: null },
+  { type: 'adjustment', qty: 2, ref: COLLIDING_ID, code: null },
   // Bound to another record that is neither: the generic refusal.
   { type: 'return', ref: 999, code: 'revert_not_revertible' },
   { type: 'damage_out', ref: null, code: 'revert_not_revertible' },
@@ -44,7 +56,7 @@ const cases = [
 async function main() {
   // The table covers every revertible type, so a type added to the allowlist
   // without a row here turns this file red.
-  const revertible = cases.filter((c) => c.code === null).map((c) => c.type).sort()
+  const revertible = [...new Set(cases.filter((c) => c.code === null).map((c) => c.type))].sort()
   assert.deepEqual(revertible, [...REVERTIBLE_MOVEMENT_TYPES].sort(), 'every revertible type is in the table')
 
   for (const c of cases) {
@@ -58,18 +70,23 @@ async function main() {
         INSERT INTO returns(id) VALUES(${RETURN_ID}), (${COLLIDING_ID});
         INSERT INTO return_items(return_id, product_id) VALUES(${RETURN_ID}, 1), (${COLLIDING_ID}, 1);`)
       const id = Number(f.sql.prepare(`INSERT INTO inventory_movements(product_id, branch_id, branch_name, movement_type, quantity, reason, reference_id, created_at)
-        VALUES(1, 1, 'Shop', @type, 2, 'probe', @ref, '2026-09-20 03:00:00')`).run({ type: c.type, ref: c.ref == null ? null : String(c.ref) }).lastInsertRowid)
+        VALUES(1, 1, 'Shop', @type, @qty, @reason, @ref, '2026-09-20 03:00:00')`).run({ type: c.type, qty: c.qty ?? 2, reason: c.reason ?? 'probe', ref: c.ref == null ? null : String(c.ref) }).lastInsertRowid)
       const before = JSON.stringify(f.sql.prepare('SELECT (SELECT quantity FROM branch_stock WHERE product_id=1) b, (SELECT stock_quantity FROM products WHERE id=1) p, (SELECT COUNT(*) FROM inventory_movements) n').get())
       const result = await applyMovementRevert(getDb(f.env), f.sql.prepare('SELECT * FROM inventory_movements WHERE id=?').get(id), actor)
-      const label = `${c.type}${c.ref == null ? '' : ` -> record ${c.ref}`}`
+      const label = `${c.type}${c.qty < 0 ? ' (negative)' : ''}${c.ref == null ? '' : ` -> record ${c.ref}`}`
       if (c.code === null) {
         assert.equal(result.ok, true, `${label}: revertible here ${JSON.stringify(result)}`)
+        // The Revert goes the OPPOSITE way to the original's net effect.
+        const outflow = ['remove', 'out'].includes(c.type)
+        assert.equal(result.revertType, outflow ? 'add' : 'remove', `${label}: direction`)
+        assert.equal(f.sql.prepare('SELECT quantity FROM branch_stock WHERE product_id=1').get().quantity, 20 + (outflow ? 1 : -1) * Math.abs(c.qty ?? 2), `${label}: stock moved the right way`)
         continue
       }
       assert.equal(result.ok, false, `${label}: refused`)
       assert.equal(result.code, c.code, `${label}: ${JSON.stringify(result)}`)
       if (c.code === 'revert_from_sale') assert.match(result.error, /Change it from the sale: cancel it or change its status/)
       if (c.code === 'revert_from_return') assert.match(result.error, /Change it from the return/)
+      if (c.code === 'revert_from_merge') assert.match(result.error, /Undo the merge from History/)
       assert.equal(JSON.stringify(f.sql.prepare('SELECT (SELECT quantity FROM branch_stock WHERE product_id=1) b, (SELECT stock_quantity FROM products WHERE id=1) p, (SELECT COUNT(*) FROM inventory_movements) n').get()), before, `${label}: nothing moved`)
     } finally { f.sql.close() }
   }
