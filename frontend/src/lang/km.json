@@ -6604,7 +6604,7 @@
   "record_history": "កំណត់ត្រា",
   "records_open_record": "មើលអ្នកកែប្រែកំណត់ត្រានេះ",
   "records_load_failed_record": "មិនអាចផ្ទុកកំណត់ត្រាទាំងនេះបានទេ។",
-  "field_history": "ប្រវត្តិវាលទិន្នន័យ",
+  "field_history": "កំណត់ត្រា",
   "record_kind_return_created": "បានកត់ត្រាការប្រគល់មកវិញ",
   "record_kind_return_updated": "បានកែការប្រគល់មកវិញ",
   "record_kind_return_deleted": "បានលុបការប្រគល់មកវិញ",

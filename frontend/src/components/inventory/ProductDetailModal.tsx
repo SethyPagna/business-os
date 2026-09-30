@@ -17,7 +17,7 @@ import { effectiveLowStockThreshold } from '../../utils/lowStockSettings.ts'
 import { TOOLBAR_BUTTON_BASE, toolbarIconButtonClassName } from '../shared/toolbarButtonStyles.ts'
 import CostCalculationFloat from '../shared/CostCalculationFloat.tsx'
 import ScrollText from 'lucide-react/dist/esm/icons/scroll-text.js'
-import { Suspense, useState } from 'react'
+import { Fragment, Suspense, useState, type ReactNode } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 
 // Loaded when the float is opened. The field history is a rare read behind a
@@ -161,6 +161,12 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
     extraCount: number
   }
   const batchCount = visibleBatches.length
+  const headerMeta: ReactNode[] = [
+    p.brand ? <span className="whitespace-nowrap" {...copy(p.brand)}>{p.brand}</span> : null,
+    p.category ? <span className="whitespace-nowrap text-blue-600 dark:text-blue-400">{p.category}</span> : null,
+    p.barcode ? <span className="shrink-0 whitespace-nowrap font-mono" {...copy(p.barcode)}>{p.barcode}</span> : null,
+    p.sku ? <span className="whitespace-nowrap font-mono">{p.sku}</span> : null,
+  ].filter(Boolean)
 
   return createPortal(
     <>
@@ -169,17 +175,19 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
         <div className="flex flex-shrink-0 items-center justify-between border-b border-gray-200 p-4 dark:border-gray-700">
           <div className="min-w-0 flex-1">
             <div className="min-w-0 font-bold text-gray-900 dark:text-white" {...copy(p.name)}><ProductNameRail name={String(p.name ?? '')} /></div>
-            <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5">
-              {p.sku ? <span className="rounded bg-gray-100 px-1.5 py-0.5 font-mono text-xs text-gray-400 dark:bg-gray-700">{p.sku}</span> : null}
-              {p.category ? <span className="text-xs text-blue-600 dark:text-blue-400">{p.category}</span> : null}
-              {p.unit ? <span className="text-xs text-gray-400">/{p.unit}</span> : null}
-              {/* Brand + barcode moved here from their own detail rows below --
-                  same text-xs sizing as the rest of this line, so they reuse
-                  this row's existing wrap space instead of costing a new
-                  row's worth of vertical space every time. */}
-              {p.brand ? <span className="text-xs text-gray-400" {...copy(p.brand)}>&middot; {p.brand}</span> : null}
-              {p.barcode ? <span className="shrink-0 whitespace-nowrap font-mono text-xs text-gray-400" {...copy(p.barcode)}>&middot; {p.barcode}</span> : null}
-            </div>
+            {/* One line that scrolls sideways, in the Products sheet's order:
+                brand · category · barcode, then SKU. The unit shows beside
+                the Current Stock figure, so it is not repeated here. */}
+            {headerMeta.length ? (
+              <div className="scroll-x-clean mt-0.5 text-xs text-gray-400" data-detail-meta-row="brand-category">
+                {headerMeta.map((item, index) => (
+                  <Fragment key={index}>
+                    {index ? <span className="mx-1 text-gray-300" aria-hidden="true">·</span> : null}
+                    {item}
+                  </Fragment>
+                ))}
+              </div>
+            ) : null}
           </div>
           <button type="button" onClick={onClose} className={toolbarIconButtonClassName} aria-label={T('close', 'Close')}><X className="h-4 w-4" /></button>
         </div>
@@ -235,7 +243,7 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
                 <span className="flex items-center gap-1.5">
                   <ScrollText className="h-3.5 w-3.5" />
                   {/* leading-relaxed: Khmer subscripts clip in a Latin line box. */}
-                  <span className="leading-relaxed">{T('field_history', 'Field history')}</span>
+                  <span className="leading-relaxed">{T('field_history', 'Records')}</span>
                 </span>
                 <ChevronRight className="h-3.5 w-3.5 flex-shrink-0" />
               </button>
@@ -379,52 +387,40 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
           ) : null}
         </div>
 
-        {/* Icon + label at sm: and up, icon-only (label visually hidden,
-            kept for screen readers via aria-label + a title tooltip) below
-            sm -- same "Product detail-view button layout" convention
-            Products' own ProductDetailModal.tsx already uses (Parts
-            227/241/244), brought here to close the "every other sheet/page
-            ... still open" half of that backlog item (Part 245's
-            writeup). Adjust Stock's icon switched from plain text to
-            SlidersHorizontal per that item's explicit "needs a better/more
-            literal 'adjust' icon" ask -- same icon Products' own detail
-            modal uses for the same action, so the two pages read
-            consistently. */}
-        <div className="grid grid-cols-2 flex-shrink-0 gap-1.5 border-t border-gray-200 p-3 dark:border-gray-700 sm:grid-cols-4 sm:gap-2">
-          {onAdjust ? (
-            <button
-              type="button"
-              onClick={() => { onClose(); onAdjust(p) }}
-              className={`btn-primary ${TOOLBAR_BUTTON_BASE} w-full truncate px-1 leading-tight`}
-              aria-label={T('adjust_stock', 'Adjust Stock')}
-              title={T('adjust_stock', 'Adjust Stock')}
-            >
-              <SlidersHorizontal className="h-3.5 w-3.5 flex-shrink-0" />
-              <span className="hidden truncate sm:inline">{T('adjust_stock', 'Adjust Stock')}</span>
-            </button>
-          ) : null}
+        {/* One row (owner button policy, 27 Sep): Adjust stock is the main
+            action with icon + word at every width; Transfer and Received
+            dates are icon-only with a translated tooltip. */}
+        <div className="flex flex-shrink-0 items-center gap-2 border-t border-gray-200 px-3 py-2.5 dark:border-gray-700 sm:justify-end">
           {onTransfer ? (
             <button
               type="button"
               onClick={() => { onClose(); onTransfer(p) }}
-              className={`btn-secondary ${TOOLBAR_BUTTON_BASE} w-full truncate px-1 leading-tight`}
+              className={`btn-secondary ${TOOLBAR_BUTTON_BASE} w-10 shrink-0 px-0`}
               aria-label={T('transfer', 'Transfer')}
               title={T('transfer', 'Transfer')}
             >
-              <ArrowRightLeft className="h-3.5 w-3.5 flex-shrink-0" />
-              <span className="hidden truncate sm:inline">{T('transfer', 'Transfer')}</span>
+              <ArrowRightLeft className="h-4 w-4" />
             </button>
           ) : null}
           {onManageBatches ? (
             <button
               type="button"
               onClick={() => { onClose(); onManageBatches(p) }}
-              className={`btn-secondary ${TOOLBAR_BUTTON_BASE} w-full truncate px-1 leading-tight`}
+              className={`btn-secondary ${TOOLBAR_BUTTON_BASE} w-10 shrink-0 px-0`}
               aria-label={T('manage_batches', 'Manage Received Dates')}
               title={T('manage_batches', 'Manage Received Dates')}
             >
-              <Layers className="h-3.5 w-3.5 flex-shrink-0" />
-              <span className="hidden truncate sm:inline">{T('manage_batches', 'Manage Received Dates')}</span>
+              <Layers className="h-4 w-4" />
+            </button>
+          ) : null}
+          {onAdjust ? (
+            <button
+              type="button"
+              onClick={() => { onClose(); onAdjust(p) }}
+              className={`btn-primary ${TOOLBAR_BUTTON_BASE} min-w-0 flex-1 sm:flex-none`}
+            >
+              <SlidersHorizontal className="h-4 w-4 shrink-0" />
+              <span className="truncate">{T('adjust_stock', 'Adjust Stock')}</span>
             </button>
           ) : null}
         </div>

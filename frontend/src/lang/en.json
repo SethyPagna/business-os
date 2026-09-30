@@ -6604,7 +6604,7 @@
   "record_history": "Records",
   "records_open_record": "Show who changed this record",
   "records_load_failed_record": "Could not load these records.",
-  "field_history": "Field history",
+  "field_history": "Records",
   "record_kind_return_created": "Return recorded",
   "record_kind_return_updated": "Return edited",
   "record_kind_return_deleted": "Return deleted",

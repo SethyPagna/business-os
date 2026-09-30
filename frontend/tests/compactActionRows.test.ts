@@ -215,27 +215,41 @@ runTest('DatedStockReconciliationModal footer keeps Back and the step action ins
   }
 })
 
-runTest('ProductDetailModal actions keep a legible label and the shared 40px target at 320', () => {
+// Owner button policy (27 Sep 2026): the main action keeps icon + one word,
+// every other button is icon-only with a translated tooltip, all on ONE row.
+// The button owning an icon marker, as its full source text.
+function buttonAround(source: string, marker: string): string {
+  const at = source.indexOf(marker)
+  assert.ok(at > 0, `marker not found in source: ${marker}`)
+  const open = source.lastIndexOf('<button', at)
+  const close = source.indexOf('</button>', at)
+  assert.ok(open > 0 && close > at, `no button around marker: ${marker}`)
+  return source.slice(open, close)
+}
+const isIconOnly = (button: string): boolean =>
+  button.includes('w-10 shrink-0 px-0') && button.includes('aria-label=') && button.includes('title=') && !button.includes('<span')
+
+runTest('ProductDetailModal footer: one row, Edit labelled and legible at 320, the others icon-only 40px targets', () => {
   const source = read('components/products/surfaces/ProductDetailModal.tsx')
   const row = rowClassAround(source, '<PlusCircle className=')
-  const rawButtons = [
-    templateClassNear(source, '<PlusCircle className='),
-    templateClassNear(source, '<SlidersHorizontal className='),
-    templateClassNear(source, '<Pencil className='),
-  ]
+  const markers = ['<PlusCircle className=', '<SlidersHorizontal className=', '<Pencil className=']
+  const rawButtons = markers.map((marker) => templateClassNear(source, marker))
   const buttons = rawButtons.map(expandSharedToolbarClass)
   assert.match(TOOLBAR_BUTTON_BASE, /\bh-10\b[\s\S]*\bmin-h-10\b/, 'the shared Manage-aligned toolbar contract is exactly 40px high')
   assert.doesNotMatch(TOOLBAR_BUTTON_BASE, /\bmin-h-11\b|\bh-11\b/, 'the obsolete 44px exception must not return')
-  for (const raw of rawButtons) assert.match(raw, /\$\{TOOLBAR_BUTTON_BASE\}/, 'every detail action must consume the shared toolbar height')
+  for (const raw of rawButtons) assert.ok(raw.includes('${TOOLBAR_BUTTON_BASE}'), 'every detail action must consume the shared toolbar height')
+  assert.doesNotMatch(row, /flex-wrap/, 'one row at every width: Edit must not wrap onto a line of its own')
   assert.ok(rowIsBounded(row, buttons), `unbounded row: ${row}`)
-  for (const button of buttons) {
-    const width = labelWidth(320, row, button, buttons.length)
-    assert.ok(width >= MIN_LABEL, `only ${width.toFixed(1)}px of label survives: ${button}`)
-    assert.match(button, /\bh-10\b[\s\S]*\bmin-h-10\b/, `not using the shared 40px target: ${button}`)
-  }
-  // The fix is wrapping, not hiding: no label is dropped below sm.
-  assert.doesNotMatch(row, /hidden/, 'the row must not hide an action to fit')
-  for (const button of buttons) assert.doesNotMatch(button, /\bhidden\b/, 'no action is hidden to fit')
+  const [variant, adjust, edit] = markers.map((marker) => buttonAround(source, marker))
+  assert.ok(isIconOnly(variant) && isIconOnly(adjust), 'Add variant and Adjust stock are icon-only with a tooltip')
+  assert.ok(!isIconOnly(edit) && edit.includes("{T('edit', 'Edit')}</span>"), 'Edit keeps its word')
+  // Edit's label width at 320: the row padding, two 40px icon buttons and
+  // two gaps come off first, then Edit's own padding, icon gap and icon.
+  assert.ok(/\bpx-3\b/.test(row) && /\bgap-2\b/.test(row), `row spacing changed, recompute: ${row}`)
+  const editLabel = 320 - 12 * 2 - 2 * 40 - 2 * 8 - 12 * 2 - 6 - 16
+  assert.ok(editLabel >= MIN_LABEL, `only ${editLabel}px of the Edit label survives`)
+  // Negative control: a labelled secondary button is not icon-only.
+  assert.equal(isIconOnly('<button className="btn-secondary w-10 shrink-0 px-0" aria-label title><PlusCircle /><span className="truncate">Add variant</span>'), false)
 })
 
 runTest('POS shift controls sit beside the order-tab scroller, not inside it', () => {

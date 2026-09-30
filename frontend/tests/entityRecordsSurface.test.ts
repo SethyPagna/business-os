@@ -69,14 +69,17 @@ test('BOTH product detail panes carry Field history, on the same terms', () => {
   }
 })
 
-test('the phone gets it too: the product pane renders it in both responsive slots', () => {
-  // The products-side pane builds its rows once and places them in a desktop
-  // column and a phone block; a capability added to one of the two is
-  // invisible on the device the owner actually uses.
-  const pane = read('../src/components/products/surfaces/ProductDetailModal.tsx')
-  const slots = pane.split('{fieldHistoryButton}').length - 1
-  assert.equal(slots, 2, `field history is rendered in ${slots} of the 2 responsive slots`)
-  assert.match(pane, /const fieldHistoryButton = canReadFieldHistory && Number\(p\.id\) > 0 \? \(/)
+test('the phone gets it too: the product pane renders it in the one links row at every width', () => {
+  // UI-DETAIL 2.3: the pane used to place its links in a desktop column and a
+  // phone block (one hidden by CSS). Now there is ONE links row, shown at every
+  // width; the Records chip leads it with Received dates, both in leadingPills.
+  const pane = read('../src/components/products/surfaces/ProductDetailModal.tsx').replace(/\r\n/g, '\n')
+  assert.equal(pane.split('data-product-field-history=""').length - 1, 1, 'one Records link')
+  const pills = pane.slice(pane.indexOf('const leadingPills = ('), pane.indexOf('const modal = ('))
+  assert.match(pills, /canReadFieldHistory && productId > 0 \? \(\s*<button\s+type="button"\s+data-product-field-history=""/)
+  const row = pane.slice(pane.lastIndexOf('<div', pane.indexOf('data-detail-links-row')), pane.indexOf('data-detail-links-row'))
+  assert.doesNotMatch(row, /\bhidden\b|sm:hidden/, 'the links row is not hidden at any width')
+  assert.match(pane, /<Suspense fallback=\{<div className="flex flex-wrap gap-1\.5">\{leadingPills\}<\/div>\}>/, 'the chip shows while the report chunk loads')
 })
 
 // The float is opened by a minority of readers (it needs the audit_log 'full'

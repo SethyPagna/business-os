@@ -7,7 +7,6 @@ import PlusCircle from 'lucide-react/dist/esm/icons/plus-circle.js'
 import Pencil from 'lucide-react/dist/esm/icons/pencil.js'
 import SlidersHorizontal from 'lucide-react/dist/esm/icons/sliders-horizontal.js'
 import Layers from 'lucide-react/dist/esm/icons/layers.js'
-import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
 import { useState, Suspense, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { ProductImg, ProductImagePlaceholder } from '../shared/primitives'
@@ -35,11 +34,10 @@ const ProductDescriptionDetailModal = lazyRetry(() => import('./ProductDescripti
 // chunk, loaded only when a detail pane opens.
 const ProductDetailReport = lazyRetry(() => import('./ProductDetailReport.tsx'), 'products-detail-report')
 
-// Truncation length for the description Row's inline preview -- long
-// enough to still be useful at a glance, short enough that a real
-// Features/Benefits/Ingredients/Caution block (which can run to
-// several hundred characters) always gets cut off with "..." rather
-// than dumping the whole blob inline (Aug 23 ask).
+// The links row's chip shape; ProductDetailReport's own chips use the same
+// string (it is a lazy chunk, so importing a shared constant from it would pull
+// it into this page's startup closure).
+const LINK_CHIP = 'inline-flex h-8 max-w-full items-center gap-1.5 whitespace-nowrap rounded-full px-3 text-xs transition-colors'
 
 type Translate = (key: string) => string | undefined
 type FormatMoney = (value: unknown) => string
@@ -99,17 +97,10 @@ type ProductDetailModalProps = {
   fmtUSD: FormatMoney
   fmtKHR: FormatMoney
   onEdit: () => void
+  // Delete lives inside the Edit flow (ProductForm's footer), not here.
+  // Each action renders only when its callback is passed, so the caller's
+  // permission check decides whether the button exists at all.
   onAddVariant?: () => void
-  // Aug 23 ask restores Adjust Stock as its own button (three standalone
-  // buttons now: Add variant / Adjust stock / Edit) and, separately,
-  // resolves the earlier Delete placement question the hard way: Delete
-  // is no longer rendered here at all -- it lives inside the Edit flow
-  // (ProductForm's own footer, see Products.tsx) instead of sitting as a
-  // fourth button on this pane. onDelete is intentionally gone from this
-  // component's props; Products.tsx now wires delete straight into
-  // ProductForm. Discount stays a ProductForm-tab shortcut only (no
-  // button here), same reasoning as before -- Pricing is a normal click
-  // away once Edit is open.
   onDiscount?: () => void
   onAdjustStock?: () => void
   onClose: () => void
@@ -150,13 +141,11 @@ export default function ProductDetailModal({
   const [descriptionDetailOpen, setDescriptionDetailOpen] = useState(false)
   // P10-6: the calculated-cost float.
   const [costFloatOpen, setCostFloatOpen] = useState(false)
-  // The product's field history -- the same affordance Inventory's own detail
-  // modal now carries, because the two panes describe the same product and a
-  // capability on one of them only is a capability the operator cannot find.
-  // Its rows come from the audit trail, read through the audit_log permission,
-  // whose 'view' tier answers with the CALLER'S OWN entries only; a list
-  // scoped to one reader presented as "this product's history" is a wrong
-  // answer, so the affordance appears only at the tier that sees all of it.
+  // The product's Records (field history). Its rows come from the audit
+  // trail, read through the audit_log permission, whose 'view' tier answers
+  // with the CALLER'S OWN entries only; a list scoped to one reader presented
+  // as "this product's history" is a wrong answer, so the link appears only
+  // at the tier that sees all of it.
   const [fieldHistoryOpen, setFieldHistoryOpen] = useState(false)
   const canReadFieldHistory = getPermissionTier('audit_log') === 'full'
   const T = (key: string, fallback: string) => {
@@ -186,40 +175,22 @@ export default function ProductDetailModal({
     : (p?.image_path ? [p.image_path] : [])
   const primaryImage = gallery[0] || ''
   const unitColor = p.unit ? unitMap?.[p.unit]?.color || '' : ''
-  // brandColorMap is still accepted (external prop contract, callers may
-  // pass it) but no longer used for styling here -- the header line brand
-  // moved to plain truncated text matching Category's own styling instead
-  // of a colored pill, since a small "...--truncated + color chip" combo
-  // reads noisier on this already-tight single header line than it did as
-  // its own full-width row in the details grid below.
   const expiryDate = String(p.expiry_date || '').trim()
   const expiryDaysLeft = expiryDate ? Math.ceil((new Date(`${expiryDate}T00:00:00`).getTime() - Date.now()) / MS_PER_DAY) : null
   // includeEmpty: true -- every product gets a "day added" batch at
   // creation (seedInitialBatchForNewProduct) that legitimately starts at 0
-  // stock; the full detail view is the one place that should still show it
-  // instead of filtering it out like the compact row/list previews do.
-  // Summary count only now -- the full per-batch list moved behind the
-  // click-to-view ManageBatchesModal (same live-fetched, per-branch batch
-  // editor Inventory's own ProductDetailModal already opens via its
-  // "View stock history"-style row), so this pane no longer needs to
-  // render every batch inline just to say how many there are.
+  // stock; the full detail view is the one place that should still count it.
   const visibleBatches = getVisibleProductBatches(p, 'all', { includeEmpty: true })
   // The list read attaches a scalar `batch_count` instead of the full array
   // (see cloudflare/src/lib/productBatches.ts's attachBatchCounts), so a
   // detail opened straight from a list row has the number but not the rows.
-  // Show that count so the Batches affordance appears (and opens the full
-  // per-batch view) instead of vanishing at 0.
   const batchCount = visibleBatches.length || Number((p as { batch_count?: unknown }).batch_count || 0)
-  // (The old "Batch: latest received date" row and its computation were
-  // removed Aug 30 -- see the note where it rendered.)
-  // Label column tightens to 4rem on phones (then 5rem from sm) and the gap
-  // gap-3 to gap-2 -- per the Aug 19 2026 ask to tighten these value/label
-  // pairs so each row takes less horizontal space, freeing room in the
-  // sheet (see the action-button restack just below for the other half of
-  // that same request).
+  const productId = Number(p.id)
+  // Label column: w-16 on phones, w-20 from sm; leading-snug lets a Khmer
+  // label take two lines. Every body row, the description included, uses it.
   const Row = ({ label, children }: DetailRowProps) => (
     <div className="flex min-w-0 gap-2">
-      <span className="w-16 flex-shrink-0 pt-0.5 text-xs text-gray-400 sm:w-20">{label}</span>
+      <span className="w-16 shrink-0 pt-0.5 text-xs leading-snug text-gray-400 sm:w-20">{label}</span>
       <span className="min-w-0 flex-1 text-sm text-gray-800 dark:text-gray-200">{children}</span>
     </div>
   )
@@ -230,124 +201,98 @@ export default function ProductDetailModal({
     </div>
   )
 
-  // Click-to-view row, same pattern as Inventory's own ProductDetailModal
-  // "View stock history" row -- a summary count plus a chevron that opens the
-  // full live-fetched, per-branch batch editor (ManageBatchesModal), rather
-  // than rendering every batch inline in this already-dense pane. Extracted to
-  // one element so it can render in TWO responsive slots (Part 563 ask): the
-  // left mini-section on wide screens ("first half"), and -- on phones, where
-  // the two mini-sections stack -- below the Status row and above the report
-  // pills instead. Only one slot is ever visible (the other is display:none),
-  // so both call the same onManageBatches with no conflict.
-  const fieldHistoryButton = canReadFieldHistory && Number(p.id) > 0 ? (
-    <button
-      type="button"
-      data-product-field-history=""
-      onClick={() => setFieldHistoryOpen(true)}
-      className="flex w-full min-w-0 items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs text-gray-500 transition-colors hover:bg-gray-50 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-gray-700/40 dark:hover:text-gray-200"
-    >
-      <span className="flex min-w-0 items-center gap-1.5">
-        <ScrollText className="h-3.5 w-3.5" />
-        {/* leading-relaxed: Khmer subscripts clip in a Latin line box. */}
-        <span className="truncate leading-relaxed">{T('field_history', 'Field history')}</span>
-      </span>
-      <ChevronRight className="h-3.5 w-3.5 flex-shrink-0" />
-    </button>
-  ) : null
-  const batchesButton = batchCount ? (
-    <button
-      type="button"
-      onClick={onManageBatches}
-      disabled={!onManageBatches}
-      className="flex w-full min-w-0 items-center justify-between gap-2 rounded-lg bg-amber-50/70 px-2.5 py-1.5 text-left text-xs text-amber-700 transition-colors hover:bg-amber-50 disabled:cursor-default disabled:opacity-100 dark:bg-amber-950/20 dark:text-amber-200 dark:hover:bg-amber-950/30"
-    >
-      <span className="flex min-w-0 items-center gap-1.5">
-        <Layers className="h-3.5 w-3.5" />
-        <span className="truncate">{T('batches', 'Received dates')}</span> <span className="shrink-0 text-amber-500/80 dark:text-amber-300/70">({batchCount})</span>
-      </span>
-      {onManageBatches ? <ChevronRight className="h-3.5 w-3.5 flex-shrink-0" /> : null}
-    </button>
-  ) : null
+  // Received dates and Records lead the links row; the report renders them
+  // first inside its own chip row (and so does its loading fallback).
+  const leadingPills = (
+    <>
+      {batchCount ? (
+        <button
+          type="button"
+          onClick={onManageBatches}
+          disabled={!onManageBatches}
+          className={`${LINK_CHIP} bg-amber-50/70 text-amber-700 hover:bg-amber-50 disabled:cursor-default dark:bg-amber-950/20 dark:text-amber-200 dark:hover:bg-amber-950/30`}
+        >
+          <Layers className="h-3.5 w-3.5 shrink-0" />
+          <span className="detail-scroll-text min-w-0">{T('batches', 'Received dates')}</span>
+          <span className="text-amber-500/80 dark:text-amber-300/70">({batchCount})</span>
+        </button>
+      ) : null}
+      {canReadFieldHistory && productId > 0 ? (
+        <button
+          type="button"
+          data-product-field-history=""
+          onClick={() => setFieldHistoryOpen(true)}
+          className={`${LINK_CHIP} bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-700/60 dark:text-gray-300 dark:hover:bg-gray-700`}
+        >
+          <ScrollText className="h-3.5 w-3.5 shrink-0" />
+          {/* leading-relaxed: Khmer subscripts clip in a Latin line box. */}
+          <span className="detail-scroll-text min-w-0 leading-relaxed">{T('field_history', 'Records')}</span>
+        </button>
+      ) : null}
+    </>
+  )
 
   const modal = (
     <>
-    {/* This sheet used to live inside Products' page tree at z-50. On mobile,
-        that put it in a lower stacking context than the fixed app header and
-        bottom navigation, so those bars could cover its rows and action
-        footer. Rendering at the body-level overlay layer ensures the sheet is
-        above both bars, while the safe viewport classes keep every control
-        inside the usable screen area on notched/short devices.
+    {/* This sheet renders at the body-level overlay layer so the fixed app
+        header and bottom navigation cannot cover its rows or footer; the
+        safe viewport classes keep every control inside the usable screen.
 
         The child floats (description, field history, cost calculation) are
         SIBLINGS of this overlay, never children -- see the note after it. */}
     <div className="modal-viewport-safe pointer-events-auto fixed inset-0 z-[1050] flex items-end justify-center overflow-y-auto bg-black/50 sm:items-center sm:p-4" onClick={onClose}>
-      <div className="modal-panel-safe flex w-full flex-col rounded-t-2xl bg-white shadow-2xl sm:max-w-5xl sm:rounded-2xl dark:bg-gray-800" onClick={(event) => event.stopPropagation()}>
-        <div className="flex items-center justify-between border-b border-gray-200 p-4 dark:border-gray-700">
-          <div className="min-w-0 flex items-center gap-3">
-            <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center overflow-hidden rounded-lg bg-gray-100 text-xl dark:bg-gray-700">
-              {primaryImage ? (
-                <ProductImg
-                  src={primaryImage}
-                  alt={productName}
-                  className="h-full w-full cursor-zoom-in object-contain p-0.5"
-                  onClick={(event) => {
-                    event.stopPropagation()
-                    onImageClick?.(primaryImage, gallery, 0)
-                  }}
-                />
-              ) : (
-                <ProductImagePlaceholder compact className="h-full w-full rounded-lg" />
-              )}
+      <div className="modal-panel-safe flex w-full flex-col rounded-t-2xl bg-white shadow-2xl sm:max-w-3xl sm:rounded-2xl dark:bg-gray-800" onClick={(event) => event.stopPropagation()}>
+        {/* items-start + gap-3: the thumbnail sits by the first title line
+            and the gap is the guaranteed space before the X. */}
+        <div className="flex items-start gap-3 border-b border-gray-200 px-4 py-3 dark:border-gray-700">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-gray-100 text-xl dark:bg-gray-700">
+            {primaryImage ? (
+              <ProductImg
+                src={primaryImage}
+                alt={productName}
+                className="h-full w-full cursor-zoom-in object-contain p-0.5"
+                onClick={(event) => {
+                  event.stopPropagation()
+                  onImageClick?.(primaryImage, gallery, 0)
+                }}
+              />
+            ) : (
+              <ProductImagePlaceholder compact className="h-full w-full rounded-lg" />
+            )}
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="min-w-0 font-bold text-gray-900 dark:text-white" {...copy(productName)}>
+              {/* Balanced wrap in this header only: two near-equal lines, no
+                  Khmer word orphaned on the second. */}
+              <EntityLink className="text-inherit no-underline hover:text-inherit hover:no-underline" page="products" anchor="hub:products:products" search={productName} navigate={navigateTo} title={T('open_product', 'Open product')}><ProductNameRail name={productName} className="[text-wrap:balance]" /></EntityLink>
             </div>
-            <div className="min-w-0">
-              {/* The title text is an EntityLink so it is directly openable;
-                  the legacy responsive contract remains a wrapping title. */}
-              <div className="min-w-0 font-bold text-gray-900 dark:text-white" {...copy(productName)}>
-                <EntityLink className="text-inherit no-underline hover:text-inherit hover:no-underline" page="products" anchor="hub:products:products" search={productName} navigate={navigateTo} title={T('open_product', 'Open product')}><ProductNameRail name={productName} /></EntityLink>
+            {/* Brand first, then category, on ONE line that scrolls sideways
+                when long (scroll-x-clean has no touch-action, so a vertical
+                swipe here still scrolls the sheet). SKU is a body row. */}
+            {p.brand || p.category ? (
+              <div className="scroll-x-clean mt-0.5 text-xs text-gray-500 dark:text-gray-400" data-detail-meta-row="brand-category">
+                {p.brand ? <span className="whitespace-nowrap" {...copy(p.brand)}><EntityLink className="text-inherit no-underline hover:text-inherit hover:underline" page="products" anchor="hub:products:products" focus={{ brand: p.brand }} navigate={navigateTo} title={T('open_product', 'Open product')}>{p.brand}</EntityLink></span> : null}
+                {p.brand && p.category ? <span className="mx-1 text-gray-300" aria-hidden="true">·</span> : null}
+                {p.category ? <span className="whitespace-nowrap"><EntityLink className="text-inherit no-underline hover:text-inherit hover:underline" page="products" anchor="hub:products:products" focus={{ category: p.category }} navigate={navigateTo} title={T('open_product', 'Open product')}>{p.category}</EntityLink></span> : null}
               </div>
-              {/* Category/brand/SKU stay compact but expose their complete
-                  values through horizontal touch scrolling. */}
-              <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-gray-500 dark:text-gray-400">
-                {/* Barcode leads this line ("in view details barcode show
-                    first"). It is the identifier someone opens a product to
-                    check or copy; category and brand are groupings they
-                    already knew from the list they came from. The middot
-                    separator moves onto the FOLLOWING items so the line
-                    never opens with a stray dot when a product has no
-                    barcode or SKU. */}
-                {p.sku ? <span className="detail-scroll-text max-w-[100px] font-mono" title={p.sku}>{p.sku}</span> : null}
-                {p.category ? <span className="detail-scroll-text max-w-[110px]" title={p.category}>{p.sku ? '· ' : ''}<EntityLink page="products" anchor="hub:products:products" focus={{ category: p.category }} navigate={navigateTo} title={T('open_product', 'Open product')}>{p.category}</EntityLink></span> : null}
-                {p.brand ? <span className="detail-scroll-text max-w-[110px]" {...copy(p.brand)} title={p.brand}>&middot; <EntityLink className="text-inherit no-underline hover:text-inherit hover:no-underline" page="products" anchor="hub:products:products" focus={{ brand: p.brand }} navigate={navigateTo} title={T('open_product', 'Open product')}>{p.brand}</EntityLink></span> : null}
-              </div>
-            </div>
+            ) : null}
           </div>
           <button type="button" onClick={onClose} aria-label={T('close', 'Close')} className={toolbarIconButtonClassName}>
             <X className="h-4 w-4" />
           </button>
         </div>
 
-        {/* Aug 29 rework: the actions no longer occupy a right-hand column.
-            They sit in ONE row along the bottom (see the footer below), which
-            frees the whole pane for the product data. The old details/actions
-            vertical split (with its slate-filled actions aside and heavy
-            border) is replaced by two DATA mini-sections split by a THIN
-            same-background divider on wide screens; on phones the two
-            mini-sections stack into one full-width column so the label:value
-            rows aren't crushed into a ~180px half the way the old split
-            crushed them. The report block spans the full pane beneath both
-            mini-sections. */}
         <div className="flex min-h-0 flex-1 flex-col">
-          <div className="min-h-0 flex-1 overflow-auto p-4">
+          <div className="min-h-0 flex-1 space-y-2.5 overflow-auto px-4 py-3">
+            {/* Phones: one column. sm and up: identity rows left, prices and
+                stock right, split by a thin divider; the links row spans both. */}
             <div className="grid grid-cols-1 gap-y-2.5 sm:grid-cols-2 sm:gap-x-5 sm:divide-x sm:divide-gray-100 dark:sm:divide-gray-700">
-              {/* Left mini-section: the compact identity + stock facts. */}
               <div className="min-w-0 space-y-2.5 sm:pr-5">
                 <div className="grid grid-cols-1 gap-y-1.5">
                   {/* barcode contract: <span className="whitespace-nowrap font-mono">{p.barcode}</span> */}
                   {p.barcode ? <Row label={T('barcode', 'Barcode')}><EntityLink className="text-inherit no-underline hover:text-inherit hover:no-underline" page="products" anchor="hub:products:products" search={p.barcode} navigate={navigateTo} title={T('open_product', 'Open product')}><span className="whitespace-nowrap font-mono" {...copy(p.barcode)}>{p.barcode}</span></EntityLink></Row> : null}
                   {p.sku ? <Row label={T('sku', 'SKU')}><span className="font-mono">{p.sku}</span></Row> : null}
                   {p.supplier ? <Row label={T('label_supplier', 'Supplier')}><EntityLink className="text-inherit no-underline hover:text-inherit hover:no-underline" page="contacts" anchor="hub:contacts:suppliers" search={p.supplier} navigate={navigateTo} title={T('open_supplier', 'Open supplier')}><span {...copy(p.supplier)}>{p.supplier}</span></EntityLink></Row> : null}
-                  {/* Stock + Status moved to the right column after Margin
-                      (Aug 30 ask) -- identity facts stay here. */}
                   {expiryDate ? (
                     <Row label={T('product_expiry_date', 'Expiry')}>
                       <span className={expiryDaysLeft != null && expiryDaysLeft < 0 ? 'text-red-600 dark:text-red-300' : 'text-amber-600 dark:text-amber-300'}>
@@ -386,47 +331,25 @@ export default function ProductDetailModal({
                   </Row>
                 ) : null}
 
-                {/* Desktop keeps all four related actions in this left-side
-                    column, directly below Branch Stock. */}
-                {batchesButton || fieldHistoryButton || Number(p.id) > 0 ? (
-                  <div className="hidden border-t border-gray-100 pt-2 dark:border-gray-700 sm:block">
-                    {batchesButton}
-                    {fieldHistoryButton}
-                    {Number(p.id) > 0 ? (
-                      <Suspense fallback={<p className="py-2 text-center text-xs text-gray-400">...</p>}>
-                        <ProductDetailReport productId={Number(p.id)} barcode={p.barcode} t={t || (() => undefined)} fmtUSD={fmtUSD} />
-                      </Suspense>
-                    ) : null}
-                  </div>
-                ) : null}
-
-                {/* The "Batch: <latest received date>" row is REMOVED (Aug 30
-                    ask): after the migration every product carries an
-                    import-day opening lot, so "latest received" showed the
-                    import date rather than any real receiving date -- a wrong
-                    detail at a glance. Per-lot dates live behind the Batches
-                    (stack icon) button above, which opens the real per-branch
-                    lot editor. */}
-              </div>
-
-              {/* Right mini-section: description + the pricing stack. */}
-              <div className="min-w-0 space-y-2.5 border-t border-gray-100 pt-2.5 dark:border-gray-700 sm:border-t-0 sm:pl-5 sm:pt-0">
-                {/* The compact row keeps the complete description scrollable;
-                    clicking also opens the formatted description reader. */}
+                {/* One line with an ellipsis; the whole value opens the
+                    formatted reader. Not a sideways scroller: a scrolled-away
+                    box read as a description missing its first letters. */}
                 {p.description ? (
-                  <div className="flex min-w-0 gap-2">
-                    <span className="w-20 flex-shrink-0 pt-0.5 text-xs text-gray-400">{T('label_description', 'Description')}</span>
+                  <Row label={T('label_description', 'Description')}>
                     <button
                       type="button"
                       onClick={() => setDescriptionDetailOpen(true)}
-                      className="detail-scroll-text min-w-0 flex-1 rounded text-left text-sm text-gray-800 dark:text-gray-200"
+                      className="block w-full min-w-0 truncate rounded text-left"
                       title={T('view_full_description', 'View full description')}
+                      aria-label={T('view_full_description', 'View full description')}
                     >
                       {p.description}
                     </button>
-                  </div>
+                  </Row>
                 ) : null}
+              </div>
 
+              <div className="min-w-0 space-y-2.5 border-t border-gray-100 pt-2.5 dark:border-gray-700 sm:border-t-0 sm:pl-5 sm:pt-0">
                 <div className="grid grid-cols-2 gap-2" data-detail-price-row="cost-wholesale">
                   {canViewCosts ? <PriceCell label={T('label_cost', 'Cost')}>
                     <button type="button" onClick={() => setCostFloatOpen(true)} className="text-left text-red-600 decoration-dotted underline-offset-2 hover:underline" title={T('cost_breakdown_title', 'Calculated cost price')}>{fmtUSD(purchaseUsd)}</button>
@@ -455,9 +378,10 @@ export default function ProductDetailModal({
                     ) : <span className="text-gray-300 dark:text-gray-600">—</span>}
                   </PriceCell> : null}
                 </div>
-                {/* Stock + Status directly after Margin (Aug 30 ask). */}
+                {/* Stock, unit and status on ONE row (owner, 30 Sep): the
+                    badge needs no "Status" label of its own. */}
                 <Row label={T('label_stock', 'Stock')}>
-                    <strong className="text-gray-900 dark:text-white">{stockQuantity}</strong>
+                  <strong className="text-gray-900 dark:text-white">{stockQuantity}</strong>
                   {p.unit ? (
                     unitColor ? (
                       <EntityLink page="products" anchor="hub:products:products" focus={{ unit: p.unit }} navigate={navigateTo} title={T('open_unit_products', 'Open products using this unit')} className="ml-2 text-inherit no-underline hover:text-inherit">
@@ -466,23 +390,17 @@ export default function ProductDetailModal({
                         </span>
                       </EntityLink>
                     ) : (
-                      <EntityLink page="products" anchor="hub:products:products" focus={{ unit: p.unit }} navigate={navigateTo} title={T('open_unit_products', 'Open products using this unit')} className="ml-1">{p.unit}</EntityLink>
+                      <EntityLink page="products" anchor="hub:products:products" focus={{ unit: p.unit }} navigate={navigateTo} title={T('open_unit_products', 'Open products using this unit')} className="ml-1 text-inherit no-underline hover:text-inherit">{p.unit}</EntityLink>
                     )
                   ) : null}
-                </Row>
-                <Row label={T('status', 'Status')}>
                   {stockQuantity <= outOfStockThreshold ? (
-                    <span className="badge-red">{T('out_of_stock', 'Out of stock')}</span>
+                    <span className="badge-red ml-2">{T('out_of_stock', 'Out of stock')}</span>
                   ) : stockQuantity <= lowStockThreshold ? (
-                    <span className="badge-yellow">{T('low_stock', 'Low stock')}</span>
+                    <span className="badge-yellow ml-2">{T('low_stock', 'Low stock')}</span>
                   ) : (
-                    <span className="badge-green">{T('in_stock', 'In stock')}</span>
+                    <span className="badge-green ml-2">{T('in_stock', 'In stock')}</span>
                   )}
                 </Row>
-                {/* The "VIP Price" Row that sat here is deleted by the
-                    2026-09-04 ruling -- that tier was the wholesale price
-                    misnamed, and the Wholesale row directly below now shows
-                    the very numbers it used to (migration 0111 moved them). */}
                 {promotion.active ? (
                   <Row label={T('product_discount', 'Discounts')}>
                     <span className="text-rose-600 dark:text-rose-300">{fmtUSD(promotion.applied_price_usd)}</span>
@@ -495,71 +413,52 @@ export default function ProductDetailModal({
               </div>
             </div>
 
-            {/* Phones only (Part 563 ask): the two mini-sections have stacked
-                by here, so Status has just rendered above -- drop Batches in
-                right below it and above the report pills. The wide-screen copy
-                lives in the left mini-section (sm:block there / sm:hidden here),
-                so exactly one shows. */}
-            {batchesButton || fieldHistoryButton ? (
-              <div className="mt-2.5 border-t border-gray-100 pt-2 dark:border-gray-700 sm:hidden">
-                {batchesButton}
-                {fieldHistoryButton}
-              </div>
-            ) : null}
-
-            {/* Phones retain the report actions below the metadata. */}
-            {Number(p.id) > 0 ? (
-              <div className="mt-2.5 border-t border-gray-100 pt-2 dark:border-gray-700 sm:hidden">
-                <Suspense fallback={<p className="py-2 text-center text-xs text-gray-400">...</p>}>
-                  <ProductDetailReport productId={Number(p.id)} barcode={p.barcode} t={t || (() => undefined)} fmtUSD={fmtUSD} />
+            {/* The links row, rendered ONCE at every width (it used to mount
+                the report twice, one copy hidden by CSS, so every open fetched
+                it twice). Content-sized chips wrap to a second line on phones. */}
+            {productId > 0 ? (
+              <div className="border-t border-gray-100 pt-2.5 dark:border-gray-700" data-detail-links-row="">
+                <Suspense fallback={<div className="flex flex-wrap gap-1.5">{leadingPills}</div>}>
+                  <ProductDetailReport productId={productId} barcode={p.barcode} t={t || (() => undefined)} fmtUSD={fmtUSD} leadingPills={leadingPills} />
                 </Suspense>
               </div>
+            ) : batchCount ? (
+              <div className="flex flex-wrap gap-1.5 border-t border-gray-100 pt-2.5 dark:border-gray-700" data-detail-links-row="">{leadingPills}</div>
             ) : null}
           </div>
 
-          {/* Bottom action row (Aug 29 ask): the three actions -- Add variant
-              / Adjust stock / Edit -- sit side by side in ONE row along the
-              bottom, sharing the width equally (flex-1). Replaces the old
-              right-hand slate-filled actions column; only a thin top border
-              separates them from the data now, no slate fill. Labels stay
-              visible at every width: below sm the row WRAPS (N4) so each
-              action keeps a half-width cell and a 44px tap target instead of
-              three cells squeezed past their labels and past the modal edge.
-              Delete is not here -- it lives inside the Edit flow (ProductForm's
-              own footer, see Products.tsx). */}
-          <div className="flex flex-wrap items-center gap-2 border-t border-gray-200 p-3 dark:border-gray-700">
+          {/* One row at every width (owner button policy, 27 Sep): Edit is the
+              main action with icon + word; Add variant and Adjust stock are
+              icon-only with a translated tooltip. */}
+          <div className="flex items-center gap-2 border-t border-gray-200 px-3 py-2.5 dark:border-gray-700 sm:justify-end">
             {onAddVariant ? (
               <button
                 type="button"
-                className={`btn-secondary ${TOOLBAR_BUTTON_BASE} min-w-0 flex-1 basis-[calc(50%_-_0.25rem)] truncate sm:basis-0`}
+                className={`btn-secondary ${TOOLBAR_BUTTON_BASE} w-10 shrink-0 px-0`}
                 onClick={onAddVariant}
                 aria-label={T('add_variant', 'Add variant')}
                 title={T('add_variant', 'Add variant')}
               >
-                <PlusCircle className="h-4 w-4 flex-shrink-0" />
-                <span className="truncate">{T('add_variant', 'Add variant')}</span>
+                <PlusCircle className="h-4 w-4" />
               </button>
             ) : null}
             {onAdjustStock ? (
               <button
                 type="button"
-                className={`btn-secondary ${TOOLBAR_BUTTON_BASE} min-w-0 flex-1 basis-[calc(50%_-_0.25rem)] truncate sm:basis-0`}
+                className={`btn-secondary ${TOOLBAR_BUTTON_BASE} w-10 shrink-0 px-0`}
                 onClick={onAdjustStock}
                 aria-label={T('adjust_stock', 'Adjust stock')}
                 title={T('adjust_stock', 'Adjust stock')}
               >
-                <SlidersHorizontal className="h-4 w-4 flex-shrink-0" />
-                <span className="truncate">{T('adjust_stock', 'Adjust stock')}</span>
+                <SlidersHorizontal className="h-4 w-4" />
               </button>
             ) : null}
             <button
               type="button"
-              className={`btn-primary ${TOOLBAR_BUTTON_BASE} min-w-0 flex-1 basis-[calc(50%_-_0.25rem)] truncate sm:basis-0`}
+              className={`btn-primary ${TOOLBAR_BUTTON_BASE} min-w-0 flex-1 sm:flex-none`}
               onClick={onEdit}
-              aria-label={T('edit', 'Edit')}
-              title={T('edit', 'Edit')}
             >
-              <Pencil className="h-4 w-4 flex-shrink-0" />
+              <Pencil className="h-4 w-4 shrink-0" />
               <span className="truncate">{T('edit', 'Edit')}</span>
             </button>
           </div>
@@ -592,7 +491,7 @@ export default function ProductDetailModal({
         <Suspense fallback={null}>
           <EntityRecordsFloat
             entity="product"
-            entityId={Number(p.id) || 0}
+            entityId={productId || 0}
             subject={productName}
             onClose={() => setFieldHistoryOpen(false)}
             t={(key) => (typeof t === 'function' ? (t(key) ?? key) : key)}
