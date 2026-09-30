@@ -19,6 +19,11 @@ const POSTER = readFileSync(new URL('./fixtures/about-poster.png', import.meta.u
 const POSTER_PATH = '/uploads/about-poster-e2e.png'
 const POSTER_SIDE = 256
 const POSTER_FRAME = 4
+// The viewer's Zoom in button is labelled from the storefront's language pack
+// (portal_a11y_zoom_in), so the storefront may show either language.
+const readPack = (name: string) => JSON.parse(readFileSync(new URL(`../src/lang/${name}.json`, import.meta.url), 'utf8')) as Record<string, string>
+const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+const ZOOM_IN_NAME = new RegExp(`^(${['en', 'km'].map((name) => escapeRegExp(readPack(name).portal_a11y_zoom_in)).join('|')})$`)
 const WIDTHS = [
   { width: 360, height: 800 },
   { width: 390, height: 844 },
@@ -95,7 +100,7 @@ test.describe('About picture on the storefront', () => {
       expect(isFrame(samples.centre), 'the sample is the poster, not a flat frame colour').toBe(false)
 
       await picture.click()
-      await expect(page.getByRole('button', { name: 'Zoom in' }), 'the image viewer opened').toBeVisible()
+      await expect(page.getByRole('button', { name: ZOOM_IN_NAME }), 'the image viewer opened').toBeVisible()
       const shownPoster = page.locator(`img[src*="${POSTER_PATH}"]`)
       await expect.poll(() => shownPoster.count(), 'the viewer shows the same picture as the page').toBeGreaterThan(1)
 
