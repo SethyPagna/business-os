@@ -66,10 +66,12 @@ runTest('a receipt line may have no movement id, and only lines with one are eve
   // the revert transport is called only behind a null guard
   // (U-records: the review is the shared ConfirmDialog, which only opens for
   // a line with an id; removeRow still re-checks before the write.)
-  assert.match(sectionSource, /if \(row\.id == null\) return\s+if \(Number\(row\.reverted\)\) return\s+if \(busy\) return/)
+  assert.match(sectionSource, /if \(row\.id == null\) return\s+if \(revertLocked\(row\)\) return\s+if \(busy\) return/)
   assert.match(sectionSource, /const reviewLineRemoval = \(row: Row\) => \{ if \(row\.id != null && /)
-  // REVERT-FIX F4: a line a Revert already took back is not reverted twice.
-  assert.match(sectionSource, /const revertibleRows = selected \? selected\.rows\.filter\(\(row\) => row\.id != null && !Number\(row\.reverted\)\) : \[\]/)
+  // A line whose own Revert exists (reverted now, or put back by reverting
+  // that Revert) is never reverted again here; only the chain's latest Revert.
+  assert.match(sectionSource, /function revertLocked\(row: Row\): boolean \{\s+return Boolean\(Number\(row\.reverted\) \|\| Number\(row\.has_revert\)\)/)
+  assert.match(sectionSource, /const revertibleRows = selected \? selected\.rows\.filter\(\(row\) => row\.id != null && !revertLocked\(row\)\) : \[\]/)
   // Bulk removal retains movement identities but refreshes their lot revisions
   // after each write; the actual-handler test covers zero/mixed/shared-lot rows.
   assert.match(sectionSource, /for \(const original of revertibleRows\) if \(original\.id != null\)/)

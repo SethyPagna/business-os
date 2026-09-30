@@ -80,4 +80,13 @@ runTest('both revert surfaces route errors through stockRevertErrorText', () => 
   }
 })
 
+runTest('Stock Changes names the sale types the Worker refuses as sale-made stock', () => {
+  const worker = fs.readFileSync(path.join(root, '..', 'cloudflare', 'src', 'lib', 'stockRevert.ts'), 'utf8')
+  const workerSale = JSON.parse((worker.match(/const SALE_SOURCE_TYPES = new Set<string>\((\[[^\]]*\])\)/)?.[1] || '[]').replace(/'/g, '"')) as string[]
+  assert.deepEqual(workerSale, ['sale', 'sale_from_damaged'])
+  const section = read('src/components/products/StockChangeSection.tsx')
+  for (const type of workerSale) assert.ok(section.includes(`detail.movement_type === '${type}'`), `the detail hint treats ${type} as a sale`)
+  assert.ok(section.includes("tr(t, 'revert_err_from_sale'") && section.includes("tr(t, 'revert_err_from_return'"), 'the hint uses the same texts as the refusal')
+})
+
 if (failed) { console.error(`${failed} failed`); process.exit(1) }

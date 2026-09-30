@@ -132,6 +132,9 @@ type LedgerRow = {
   // this row -- both from the immutable reference_id (Worker stockLedgerQuery).
   reverts_movement_id?: number | null
   reverted_by_movement_id?: number | null
+  // 1 while the chain's latest Revert undoes this row; a Revert that was itself
+  // reverted puts it back in the reports (owner, 1 Oct 2026).
+  reverted_now?: number | null
 }
 
 // The row as the list and the detail show it: a Revert's reason loses the
@@ -740,7 +743,7 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
   const revertTag = (row: LedgerRow) => {
     const reverts = revertsMovementId(row)
     if (reverts != null) return <span data-revert-tag="reverts" className="shrink-0 font-normal opacity-80">#{reverts}</span>
-    if (row.reverted_by_movement_id != null) {
+    if (Number(row.reverted_now)) {
       return <span data-revert-tag="reverted" className="shrink-0 rounded bg-gray-100 px-1 text-[10px] font-semibold text-gray-600 dark:bg-gray-800 dark:text-gray-300">{tr(t, 'movement_reverted_chip', 'Reverted')}</span>
     }
     return null
@@ -1027,6 +1030,10 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
   const detailShowsReceiptAccounting = detail ? showReceiptAccounting(detail.movement_type) && detailRevertsId == null : false
   // A reverted row offers its Revert's link instead: a second revert is refused.
   const detailCanRevert = detail ? isRevertibleStockMovement(detail.movement_type, detail.reference_id) && detailRevertedById == null : false
+  // Stock a sale or a return moved is changed from that record, never here.
+  const detailSourceKind = detail && !detailCanRevert
+    ? (detail.movement_type === 'sale' || detail.movement_type === 'sale_from_damaged' ? 'sale' : detail.reference_kind ?? null)
+    : null
   const revertScopeText = !revertPreview || revertPreview.kind === 'movement'
     ? tr(t, 'confirm_revert', 'Revert this change?')
     : tr(t, `movement_revert_${revertPreview.kind}_${revertPreview.direction}`,
@@ -1256,7 +1263,7 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
                 failed read still shows the row's own total pair. */}
             {detailRevertsId != null || detailRevertedById != null ? (
               <div data-revert-links="true" className="flex flex-wrap items-center gap-2 text-sm">
-                {detailRevertedById != null ? (
+                {Number(detail.reverted_now) ? (
                   <span className="rounded bg-gray-100 px-1.5 py-0.5 text-xs font-semibold text-gray-600 dark:bg-gray-800 dark:text-gray-300">{tr(t, 'movement_reverted_chip', 'Reverted')}</span>
                 ) : null}
                 {detailRevertsId != null ? (
@@ -1406,6 +1413,12 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
                       <Undo2 className="h-4 w-4 shrink-0" aria-hidden="true" />
                       <span>{tr(t, 'revert', 'Revert')}</span>
                     </button>
+                  ) : detailSourceKind ? (
+                    <span data-revert-source={detailSourceKind} className="min-w-0 break-words text-xs text-gray-500 dark:text-gray-400">
+                      {detailSourceKind === 'sale'
+                        ? tr(t, 'revert_err_from_sale', 'This change came from a sale. Change it from the sale: cancel it or change its status.')
+                        : tr(t, 'revert_err_from_return', 'This change came from a return. Change it from the return instead.')}
+                    </span>
                   ) : null}
                 </div>
               ) : (

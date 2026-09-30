@@ -65,9 +65,12 @@ type Row = {
   session_command_kind?: string | null
   // N6: how many edit rows the Worker folded into this line (0 = as saved).
   edit_count?: number | null
-  // REVERT-FIX F4: 1 when a Revert took this receipt's stock back. The line
-  // stays as recorded (the purchase does not change); it cannot be reverted twice.
+  // 1 while a Revert has this receipt undone: its stock went back and it left
+  // the purchase (owner, 1 Oct 2026). The line stays listed as history.
   reverted?: number | null
+  // Its own Revert exists, even if that Revert was reverted in turn: only the
+  // chain's latest Revert can be reverted, from Stock Changes.
+  has_revert?: number | null
   // U-records: the product's stock just before and just after this receipt,
   // derived by the Worker with the Stock Changes ledger's own expression.
   // null when there is no movement (a zero-quantity create) or the balance
@@ -96,7 +99,7 @@ type Session = {
 // The write a ConfirmDialog is currently reviewing.
 type SessionReview = { kind: 'header' } | { kind: 'line'; row: Row } | { kind: 'session' }
 
-// REVERT-FIX F4: a reverted receipt stays listed as recorded, marked.
+// A reverted receipt stays listed as history, marked, out of the totals.
 function SessionRevertTag({ session, tr }: { session: Session; tr: (key: string, fallback: string) => string }) {
   if (!(session.revertedLines > 0)) return null
   const label = session.revertedLines >= session.lineCount
@@ -111,6 +114,8 @@ function sessionCost(rows: Row[]): { costUsd: number | null; linesWithoutCost: n
   let missing = 0
   const fallbackBatches = new Set<number>()
   for (const row of rows) {
+    // A reverted receipt is no longer part of the purchase.
+    if (Number(row.reverted)) continue
     // A product created at 0 cost nothing to receive: a KNOWN $0, not a
     // missing receipt-level cost.
     if (Math.abs(Number(row.quantity) || 0) === 0) { known = true; continue }
@@ -128,6 +133,14 @@ function sessionCost(rows: Row[]): { costUsd: number | null; linesWithoutCost: n
     missing += 1
   }
   return { costUsd: known ? Math.round(total * 100) / 100 : null, linesWithoutCost: missing }
+}
+
+function revertLocked(row: Row): boolean {
+  return Boolean(Number(row.reverted) || Number(row.has_revert))
+}
+
+function liveUnits(rows: Row[]): number {
+  return rows.reduce((sum, row) => sum + (Number(row.reverted) ? 0 : Math.abs(Number(row.quantity) || 0)), 0)
 }
 
 // N14: the New/Existing pill. Deliberately three-valued -- a receipt taken
@@ -273,7 +286,7 @@ export default function StockInSessionsSection({ t, notify, branches, onChanged 
       const session = {
         // The lines are the Worker's current (edit-folded) figures; the header
         // total follows them so a just-edited line and the header agree.
-        ...summary, rows, quantity: rows.reduce((sum, row) => sum + Math.abs(Number(row.quantity) || 0), 0),
+        ...summary, rows, quantity: liveUnits(rows),
         costUsd: cost.costUsd, linesWithoutCost: cost.linesWithoutCost,
         paymentStatus: paymentState(rows), creditDueDate: rows.find((row) => row.batch_credit_due_date)?.batch_credit_due_date || '',
         hasSharedBatch: rows.some((row) => Number(row.batch_receipt_session_count) > 1),
@@ -329,7 +342,7 @@ export default function StockInSessionsSection({ t, notify, branches, onChanged 
   const removeRow = async (row: Row) => {
     if (pendingAttemptRef.current || lineAttemptBusyRef.current || sessionRemovalBusyRef.current) return
     if (row.id == null) return
-    if (Number(row.reverted)) return
+    if (revertLocked(row)) return
     if (busy) return
     if (removeInFlightRef.current) return
     if (Number(row.edit_count) > 0 && selected) {
@@ -418,8 +431,8 @@ export default function StockInSessionsSection({ t, notify, branches, onChanged 
   }
   // Only lines with a movement can be reversed; a product created at 0 left
   // no stock to take back and stays as history, and a reverted line is done.
-  const revertibleRows = selected ? selected.rows.filter((row) => row.id != null && !Number(row.reverted)) : []
-  const allLinesReverted = selected ? selected.rows.some((row) => Number(row.reverted)) && !revertibleRows.length : false
+  const revertibleRows = selected ? selected.rows.filter((row) => row.id != null && !revertLocked(row)) : []
+  const allLinesReverted = selected ? selected.rows.some(revertLocked) && !revertibleRows.length : false
   const editableLots = selected ? selected.rows.some((row) => Number(row.batch_id) > 0) : false
   const removeSession = async () => {
     if (!selected || busy || pendingAttemptRef.current || lineAttemptBusyRef.current || sessionRemovalBusyRef.current || !revertibleRows.length) return
@@ -459,7 +472,7 @@ export default function StockInSessionsSection({ t, notify, branches, onChanged 
     if (refusal) { notify(refusal, 'error'); return }
     setReview({ kind: 'header' })
   }
-  const reviewLineRemoval = (row: Row) => { if (row.id != null && !Number(row.reverted) && !writeLocked()) setReview({ kind: 'line', row }) }
+  const reviewLineRemoval = (row: Row) => { if (row.id != null && !revertLocked(row) && !writeLocked()) setReview({ kind: 'line', row }) }
   const reviewSessionRemoval = () => { if (selected && revertibleRows.length && !writeLocked()) setReview({ kind: 'session' }) }
   const confirmReview = () => {
     const current = review
@@ -595,7 +608,7 @@ export default function StockInSessionsSection({ t, notify, branches, onChanged 
                 <td><span className="detail-scroll-text text-gray-500">{row.reason || '—'}</span></td>
                 <td className="text-right font-bold tabular-nums text-emerald-600">+{Math.abs(Number(row.quantity) || 0)}</td>
                 {canViewCosts ? <td className="text-right tabular-nums">{unitCost == null ? '—' : `$${Number(unitCost).toFixed(2)}`}</td> : null}
-                <td>{row.id == null ? <InfoHint label={tr('quantity', 'Quantity')} text={tr('stock_session_zero_line', 'Created at 0 — nothing to reverse.')} /> : <span className="inline-flex items-center">{isStockInLineEditable(row) ? <button type="button" disabled={busy || Boolean(pendingAttempt)} onClick={() => startLineEdit(row)} className="rounded p-1 text-gray-400 hover:bg-blue-50 hover:text-blue-600" aria-label={tr('stock_in_line_edit', 'Edit line')}><Pencil className="h-3.5 w-3.5" /></button> : null}{Number(row.reverted) ? null : <button type="button" disabled={busy || Boolean(pendingAttempt)} onClick={() => reviewLineRemoval(row)} className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600" aria-label={tr('revert', 'Revert')} title={tr('revert', 'Revert')}><Undo2 className="h-3.5 w-3.5" /></button>}</span>}</td>
+                <td>{row.id == null ? <InfoHint label={tr('quantity', 'Quantity')} text={tr('stock_session_zero_line', 'Created at 0 — nothing to reverse.')} /> : <span className="inline-flex items-center">{isStockInLineEditable(row) ? <button type="button" disabled={busy || Boolean(pendingAttempt)} onClick={() => startLineEdit(row)} className="rounded p-1 text-gray-400 hover:bg-blue-50 hover:text-blue-600" aria-label={tr('stock_in_line_edit', 'Edit line')}><Pencil className="h-3.5 w-3.5" /></button> : null}{revertLocked(row) ? null : <button type="button" disabled={busy || Boolean(pendingAttempt)} onClick={() => reviewLineRemoval(row)} className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600" aria-label={tr('revert', 'Revert')} title={tr('revert', 'Revert')}><Undo2 className="h-3.5 w-3.5" /></button>}</span>}</td>
               </tr>
             })}</tbody>
           </table></div>
@@ -606,10 +619,10 @@ export default function StockInSessionsSection({ t, notify, branches, onChanged 
           return <div key={lineKey(row)} className={`grid min-w-0 grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 rounded-lg border px-2.5 py-1.5 ${selectedLine === row ? 'border-blue-300 bg-blue-50/60 dark:border-blue-800 dark:bg-blue-950/20' : 'border-gray-100 dark:border-gray-700'}`}>
             <button type="button" onClick={() => setSelectedLine(row)} className="grid min-w-0 grid-cols-[2.75rem_minmax(0,1fr)] items-center gap-2 text-left"><span>{row.image_path ? <ProductImg src={row.image_path} alt="" className="h-10 w-10 rounded-lg object-cover" /> : <ProductImagePlaceholder compact className="h-10 w-10 rounded-lg" />}</span><span className="min-w-0"><span className="block break-words text-[13px] font-medium leading-4 text-gray-800 dark:text-gray-100">{row.product_name}{originTag ? <span className={`ml-1 inline-block rounded px-1 py-0.5 align-middle text-[10px] font-semibold ${originTag.className}`}>{originTag.label}</span> : null}{Number(row.edit_count) > 0 ? <span className="ml-1 inline-block rounded bg-blue-50 px-1 py-0.5 align-middle text-[10px] font-semibold text-blue-700 dark:bg-blue-900/20 dark:text-blue-300">{tr('stock_in_line_edited', 'Edited')}</span> : null}{Number(row.reverted) ? <span className="ml-1 inline-block rounded bg-gray-100 px-1 py-0.5 align-middle text-[10px] font-semibold text-gray-600 dark:bg-gray-800 dark:text-gray-300">{tr('movement_reverted_chip', 'Reverted')}</span> : null}</span><span className="block break-all text-[11px] text-gray-400">{[row.barcode, row.unit, row.tag_label].filter(Boolean).join(' · ') || tr('details_not_recorded', 'Details not recorded')}</span>{row.reason ? <span className="block detail-scroll-text text-[11px] text-gray-400">{row.reason}</span> : null}</span></button>
             <span className="shrink-0 text-right"><b className="block text-sm text-emerald-600">+{Math.abs(Number(row.quantity) || 0)}</b>{canViewCosts ? <span className="block text-[11px] text-gray-400">{unitCost == null ? '—' : `$${Number(unitCost).toFixed(2)} / ${row.unit || tr('unit', 'unit')}`}</span> : null}</span>
-            {row.id == null ? <span className="p-2"><InfoHint label={tr('quantity', 'Quantity')} text={tr('stock_session_zero_line', 'Created at 0 — nothing to reverse.')} /></span> : <span className="flex shrink-0 items-center">{isStockInLineEditable(row) ? <button type="button" disabled={busy || Boolean(pendingAttempt)} onClick={() => startLineEdit(row)} className="rounded-lg p-2 text-gray-400 hover:bg-blue-50 hover:text-blue-600" aria-label={tr('stock_in_line_edit', 'Edit line')}><Pencil className="h-4 w-4" /></button> : null}{Number(row.reverted) ? null : <button type="button" disabled={busy || Boolean(pendingAttempt)} onClick={() => reviewLineRemoval(row)} className="rounded-lg p-2 text-gray-400 hover:bg-red-50 hover:text-red-600" aria-label={tr('revert', 'Revert')} title={tr('revert', 'Revert')}><Undo2 className="h-4 w-4" /></button>}</span>}
+            {row.id == null ? <span className="p-2"><InfoHint label={tr('quantity', 'Quantity')} text={tr('stock_session_zero_line', 'Created at 0 — nothing to reverse.')} /></span> : <span className="flex shrink-0 items-center">{isStockInLineEditable(row) ? <button type="button" disabled={busy || Boolean(pendingAttempt)} onClick={() => startLineEdit(row)} className="rounded-lg p-2 text-gray-400 hover:bg-blue-50 hover:text-blue-600" aria-label={tr('stock_in_line_edit', 'Edit line')}><Pencil className="h-4 w-4" /></button> : null}{revertLocked(row) ? null : <button type="button" disabled={busy || Boolean(pendingAttempt)} onClick={() => reviewLineRemoval(row)} className="rounded-lg p-2 text-gray-400 hover:bg-red-50 hover:text-red-600" aria-label={tr('revert', 'Revert')} title={tr('revert', 'Revert')}><Undo2 className="h-4 w-4" /></button>}</span>}
           </div>
         })}</div>
-        <div className="compact-action-row border-t border-gray-100 pt-3 dark:border-gray-700">{editing ? <><button type="button" disabled={busy || Boolean(pendingAttempt)} className="btn-primary h-8 px-2.5 text-xs" onClick={reviewHeaderSave}>{tr('save', 'Save')}</button><button type="button" disabled={busy || Boolean(pendingAttempt)} className="btn-secondary h-8 px-2.5 text-xs" onClick={() => setEditing(false)}>{tr('cancel', 'Cancel')}</button></> : <>{editableLots ? <button type="button" className="btn-secondary inline-flex h-8 items-center gap-1 px-2.5 text-xs" disabled={busy || Boolean(pendingAttempt)} onClick={editHeader}><Pencil className="h-3.5 w-3.5" />{tr('edit', 'Edit')}</button> : null}<button type="button" className="btn-primary inline-flex h-8 items-center gap-1 px-2.5 text-xs" disabled={busy || Boolean(pendingAttempt)} onClick={addMoreStock}><Plus className="h-3.5 w-3.5" />{tr('add_more', 'Add more')}</button>{revertibleRows.length ? <button type="button" disabled={busy || Boolean(pendingAttempt)} className="btn-danger ml-auto inline-flex h-8 items-center gap-1 px-2.5 text-xs" onClick={reviewSessionRemoval}><Undo2 className="h-3.5 w-3.5" />{tr('revert', 'Revert')}</button> : <span className="ml-auto self-center text-[11px] text-gray-400">{allLinesReverted ? tr('stock_session_all_reverted', 'Every line was reverted. The purchase stays as recorded.') : tr('stock_session_no_lot_to_edit', 'Every line was created at 0 — no received date to edit or reverse.')}</span>}</>}</div>
+        <div className="compact-action-row border-t border-gray-100 pt-3 dark:border-gray-700">{editing ? <><button type="button" disabled={busy || Boolean(pendingAttempt)} className="btn-primary h-8 px-2.5 text-xs" onClick={reviewHeaderSave}>{tr('save', 'Save')}</button><button type="button" disabled={busy || Boolean(pendingAttempt)} className="btn-secondary h-8 px-2.5 text-xs" onClick={() => setEditing(false)}>{tr('cancel', 'Cancel')}</button></> : <>{editableLots ? <button type="button" className="btn-secondary inline-flex h-8 items-center gap-1 px-2.5 text-xs" disabled={busy || Boolean(pendingAttempt)} onClick={editHeader}><Pencil className="h-3.5 w-3.5" />{tr('edit', 'Edit')}</button> : null}<button type="button" className="btn-primary inline-flex h-8 items-center gap-1 px-2.5 text-xs" disabled={busy || Boolean(pendingAttempt)} onClick={addMoreStock}><Plus className="h-3.5 w-3.5" />{tr('add_more', 'Add more')}</button>{revertibleRows.length ? <button type="button" disabled={busy || Boolean(pendingAttempt)} className="btn-danger ml-auto inline-flex h-8 items-center gap-1 px-2.5 text-xs" onClick={reviewSessionRemoval}><Undo2 className="h-3.5 w-3.5" />{tr('revert', 'Revert')}</button> : <span className="ml-auto self-center text-[11px] text-gray-400">{allLinesReverted ? tr('stock_session_all_reverted', 'Every line was reverted; nothing is left to revert.') : tr('stock_session_no_lot_to_edit', 'Every line was created at 0 — no received date to edit or reverse.')}</span>}</>}</div>
       </div>
     </Modal> : null}
     {/* U-records: a line opens as its OWN float, beside the session modal --
@@ -646,8 +659,8 @@ export default function StockInSessionsSection({ t, notify, branches, onChanged 
         message={review.kind === 'header'
           ? tr('confirm_update_stock_session', 'Update received date, supplier and payment for all {count} lines in this session?').replace('{count}', String(selected.rows.length))
           : review.kind === 'line'
-            ? tr('confirm_remove_stock_line', 'Revert this stock-in line? A Revert record dated today takes its stock back; the purchase stays as recorded.')
-            : tr('confirm_remove_stock_session', 'Revert this stock-in session? Each line gets a Revert record dated today that takes its stock back; the purchase stays as recorded. An edited line is set to 0 through its edit.')}
+            ? tr('confirm_remove_stock_line', 'Revert this stock-in line? A Revert record dated today takes its stock back and removes it from the purchase and the supplier totals.')
+            : tr('confirm_remove_stock_session', 'Revert this stock-in session? Each line gets a Revert record dated today that takes its stock back and removes it from the purchase and the supplier totals. An edited line is set to 0 through its edit.')}
         items={reviewItems(review, selected)}
         confirmLabel={review.kind === 'header' ? tr('save', 'Save') : tr('revert', 'Revert')}
         danger={review.kind !== 'header'}

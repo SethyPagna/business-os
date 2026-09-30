@@ -302,16 +302,21 @@ assert.match(source, /onClick=\{editHeader\}/)
 assert.match(source, /onClick=\{addMoreStock\}/)
 assert.match(source, /onClick=\{cancelLineEdit\}/)
 
-// REVERT-FIX F4: a line a Revert already took back stays listed as recorded
-// and is never sent to the Worker again -- neither by its own button nor by
-// reverting the whole session.
+// A line with its own Revert -- reverted now (51), or put back by reverting
+// that Revert (53) -- stays listed as history and is never sent to the Worker
+// again, neither by its own button nor by reverting the whole session.
 {
   const h = harness()
-  h.state.rows = [{ ...row, id: 51, edit_count: 0, reverted: 1 } as typeof h.state.rows[number], { ...row, id: 52, edit_count: 0 }]
+  h.state.rows = [
+    { ...row, id: 51, edit_count: 0, reverted: 1, has_revert: 1 } as typeof h.state.rows[number],
+    { ...row, id: 52, edit_count: 0 },
+    { ...row, id: 53, edit_count: 0, reverted: 0, has_revert: 1 } as typeof h.state.rows[number],
+  ]
   h.state.revertDispatch = async (id: number) => { h.state.rows = h.state.rows.map((r) => r.id === id ? { ...r, reverted: 1 } : r); return { success: true } }
   await h.render().open(summary)
   await h.render().removeRow(h.state.rows[0])
-  assert.equal(h.state.reverts, 0, 'a reverted line is not reverted twice')
+  await h.render().removeRow(h.state.rows[2])
+  assert.equal(h.state.reverts, 0, 'a line with its own Revert is not reverted again')
   await h.render().open(summary)
   await h.render().removeSession()
   assert.equal(h.state.reverts, 1, 'reverting the session reverts only the line not yet reverted')

@@ -21,7 +21,7 @@ const base = {
 const original = {
   ...base, id: 10, movement_type: 'add', quantity: 10, signed_quantity: 10, reason: 'Probe receipt', reference_id: '777',
   created_at: '2026-09-15T03:00:00Z', ledger_bucket: 'in', before_qty: 0, after_qty: 10,
-  reverts_movement_id: null, reverted_by_movement_id: 11, batch_payment_status: 'credit',
+  reverts_movement_id: null, reverted_by_movement_id: 11, reverted_now: 1, batch_payment_status: 'credit',
 }
 const revert = {
   ...base, id: 11, movement_type: 'remove', quantity: 10, signed_quantity: -10, reason: 'Revert of #10: Probe receipt', reference_id: 'revert:10',
@@ -87,3 +87,44 @@ for (const lang of ['en', 'km']) {
   await surface.unmount()
 }
 console.log('PASS Stock Changes labels a Revert, links it both ways and hides a second Revert, in English and Khmer')
+
+// Owner, 1 Oct 2026: a row whose Revert was itself reverted is live again --
+// no Reverted chip, still linked, still no second Revert of it -- and stock a
+// sale or a return moved says where to change it instead of offering Revert.
+{
+  const putBack = { ...original, id: 20, reference_id: '778', reverted_by_movement_id: 21, reverted_now: 0 }
+  const saleRow = { ...base, id: 30, movement_type: 'sale', quantity: 2, signed_quantity: -2, reason: '', reference_id: '4410', reference_kind: 'sale', reference_label: '20260920-101500',
+    created_at: '2026-09-20T03:00:00Z', ledger_bucket: 'out', before_qty: 10, after_qty: 8, reverts_movement_id: null, reverted_by_movement_id: null, reverted_now: 0 }
+  const returnRow = { ...saleRow, id: 31, movement_type: 'return', signed_quantity: 2, ledger_bucket: 'in', reference_kind: 'return', reference_label: 'R-0007' }
+  for (const lang of ['en', 'km']) {
+    const words = packs[lang]
+    const t = (key: string) => words[key] || key
+    const app = { t, page: 'products', user: { id: 1, username: 'fixture-admin', role_code: 'admin' }, can: () => true, notify: () => {} }
+    const surface = await harness.mount({
+      component: 'components/products/StockChangeSection.tsx', props: { t }, app,
+      doubles: {
+        'api/productReadTransport.ts': {
+          getStockLedger: async () => ({ items: [putBack, saleRow, returnRow], total: 3, totalPages: 1 }),
+          getStockLedgerMovementBalance: async (id: number) => ({ id, before_qty: 0, after_qty: 10 }),
+        },
+        'api/inventoryWriteTransport.ts': { revertStockMovement: async () => ({ success: true }) },
+        'api/actionHistoryTransport.ts': { getStockMovementRevertPreview: async (id: number) => ({ success: true, revert: { kind: 'movement', movementId: id, lineCount: 1 } }) },
+        'api/branchTransport.ts': { getBranches: async () => [] },
+        'components/shared/SupplierPickerField.tsx': { loadSupplierNames: async () => [] },
+      },
+    })
+    assert.ok(!surface.text().includes(words.movement_reverted_chip), `${lang}: a row put back by reverting its Revert is not marked Reverted`)
+    const rows = surface.findAll((node) => node.tagName === 'TR' && node.getAttribute('data-clickable') === 'true')
+    const revertButtons = () => surface.findAll((node) => node.tagName === 'BUTTON' && node.getAttribute('aria-label') === words.revert).length
+    await surface.click(rows[0])
+    assert.ok(surface.text().includes(words.movement_reverted_by_link.replace('{id}', '21')), `${lang}: still linked to its Revert`)
+    assert.equal(revertButtons(), 0, `${lang}: its own Revert exists, so no second Revert of it`)
+    for (const [index, key] of [[1, 'revert_err_from_sale'], [2, 'revert_err_from_return']] as const) {
+      await surface.click(surface.findAll((node) => node.tagName === 'TR' && node.getAttribute('data-clickable') === 'true')[index])
+      assert.ok(surface.text().includes(words[key]), `${lang}: ${key} shown on the record`)
+      assert.equal(revertButtons(), 0, `${lang}: no Revert on stock a ${key.slice(9)} moved`)
+    }
+    await surface.unmount()
+  }
+}
+console.log('PASS a put-back row is not marked Reverted, and sale or return stock points to its record instead of offering Revert, in English and Khmer')
