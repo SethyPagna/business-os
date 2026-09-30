@@ -33,7 +33,7 @@ const buildServerReplayRequest = new Function(
 )() as (payload: Record<string, unknown> | undefined) => Record<string, unknown>
 
 await runTest('generation-guarded server appliers send their exact expected generation', () => {
-  for (const applier of ['product.merge.group', 'product.remove', 'product.merge.bulk', 'sale.settlement', 'stock.transfer']) {
+  for (const applier of ['product.merge.group', 'product.remove', 'product.merge.bulk', 'sale.settlement', 'stock.transfer', 'stock.session', 'stock.quantity_set', 'stock.session_line_edit']) {
     assert.deepEqual(
       buildServerReplayRequest({ applier, generation: 0 }),
       { require_applied: true, expected_generation: 0 },
