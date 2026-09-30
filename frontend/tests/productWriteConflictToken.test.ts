@@ -78,6 +78,7 @@ function renderDialog(source: string, conflict: Record<string, unknown>): string
   new Function('require', 'module', 'exports', compiled)((name: string) => {
     if (name === 'react/jsx-runtime') return { jsx, jsxs: jsx, Fragment: 'fragment' }
     if (name.includes('utils/formatters')) return formatters
+    if (name.includes('/ConflictIcon')) return { ConflictIcon: 'svg', CONFLICT_ICON_CLASS: '' }
     if (name.includes('./Modal')) return { default: (props: Record<string, any>) => ({ type: 'modal', props: { children: [props.title, props.children] } }) }
     throw new Error('unexpected import ' + name)
   }, module, module.exports)

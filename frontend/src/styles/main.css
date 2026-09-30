@@ -714,7 +714,8 @@ body:has([data-page-bg])      { background-color: var(--ui-page-bg) !important; 
        and a mouse drags it (runtime/horizontalDragScroll.ts). */
     scrollbar-width: none;
     -ms-overflow-style: none;
-    touch-action: pan-x;
+    /* No touch-action (as .scroll-x-clean): pan-x stopped a vertical swipe
+       that began on a value and scrolled the value sideways instead. */
   }
   .detail-scroll-text::-webkit-scrollbar { width: 0; height: 0; display: none; }
 

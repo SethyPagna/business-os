@@ -5,7 +5,7 @@
 // What it pins, each against the failure it exists for:
 //   - loading shows a busy skeleton; a failed read says so with Retry;
 //   - the header X is the one close, with Minimize beside it; picks make the
-//     modal dirty, so X asks Discard changes / Back and Back keeps everything;
+//     modal dirty, so X asks Discard / Back and Back keeps everything;
 //   - an unanswered required row disables Resolve and says why, wired through
 //     aria-describedby -- never an error after the click; a Remove without a
 //     reason does the same, Remove reads the records again and typing the
@@ -173,7 +173,7 @@ const fixtureSource = String.raw`
     dialogs: () => [...document.querySelectorAll('[role=dialog]')],
     main: () => ui.dialogs().find((node) => text(node.querySelector('h2')) === 'Resolve duplicates') || null,
     confirm: () => ui.dialogs().find((node) => text(node.querySelector('h2')) === pack.resolve_confirm_title) || null,
-    prompt: () => ui.dialogs().find((node) => [...node.querySelectorAll('button')].some((button) => text(button) === pack.discard_changes)) || null,
+    prompt: () => ui.dialogs().find((node) => [...node.querySelectorAll('button')].some((button) => text(button) === pack.discard)) || null,
     primary: () => { const all = ui.main() ? [...ui.main().querySelectorAll('.btn-primary')] : []; return all[all.length - 1] || null },
     closeX: () => (ui.main() ? ui.main().querySelector('button[aria-label="' + pack.close + '"]') : null),
     minimize: () => (ui.main() ? ui.main().querySelector('button[aria-label="' + pack.minimize + '"]') : null),
@@ -298,8 +298,8 @@ await run('PASS resolve modal: loading, one close, dirty guard, blockers, remove
   await until('discard prompt', '__ui.prompt()')
   assert.deepEqual(
     await evaluate<string[]>(`[...__ui.prompt().querySelectorAll('button')].map((button) => button.getAttribute('aria-label') || __ui.text(button))`),
-    ['Minimize', 'Discard changes', 'Back'],
-    'X with choices made asks Discard changes / Back (and can park the draft instead)',
+    ['Minimize', 'Discard', 'Back'],
+    'X with choices made asks Discard / Back (and can park the draft instead)',
   )
   await click(`__ui.button(__ui.prompt(), 'Back')`)
   await until('prompt dismissed', '!__ui.prompt()')
@@ -456,7 +456,7 @@ await run('PASS resolve modal: loading, one close, dirty guard, blockers, remove
   assert.deepEqual(await footer(), { label: 'Resolve', disabled: false, described: [] })
   await click('__ui.closeX()')
   await until('restored flow is dirty', '__ui.prompt()')
-  await click(`__ui.button(__ui.prompt(), 'Discard changes')`)
+  await click(`__ui.button(__ui.prompt(), 'Discard')`)
   await until('discarded', `document.getElementById('closed') && __log.closed === 1`)
 
   // ------------------------------------------------ review failure (not stale)

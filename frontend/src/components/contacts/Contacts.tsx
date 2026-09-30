@@ -5,7 +5,7 @@ import { Suspense, useEffect, useState } from 'react'
 import Truck from 'lucide-react/dist/esm/icons/truck.js'
 import Users from 'lucide-react/dist/esm/icons/users.js'
 import Warehouse from 'lucide-react/dist/esm/icons/warehouse.js'
-import AlertTriangle from 'lucide-react/dist/esm/icons/alert-triangle.js'
+import { ConflictIcon } from '../shared/ConflictIcon.ts'
 import { useApp as useAppHook } from '../../AppContext.tsx'
 import { useIsPageActive } from '../shared/pageActivity'
 import HubSectionNav, { type HubSectionDef, readStoredHubSection } from '../shared/HubSectionNav.tsx'
@@ -48,7 +48,7 @@ const TABS = (t: TranslateFn): ContactTabDefinition[] => [
   { id: 'customers', label: t('customers') || 'Customers', icon: Users },
   { id: 'suppliers', label: t('suppliers') || 'Suppliers', icon: Warehouse },
   { id: 'delivery', label: t('pos_delivery') || 'Delivery', icon: Truck },
-  { id: 'duplicates', label: t('possible_duplicates') || 'Conflicts', icon: AlertTriangle },
+  { id: 'duplicates', label: t('possible_duplicates') || 'Conflicts', icon: ConflictIcon },
 ]
 
 const CONTACTS_HUB_STORAGE_KEY = 'bos:hub:contacts:active'

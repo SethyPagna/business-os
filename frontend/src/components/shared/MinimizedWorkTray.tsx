@@ -95,7 +95,14 @@ export function draftChipMovedPastThreshold(dx: number, dy: number): boolean {
 }
 
 type DraftChipStorage = Pick<Storage, 'getItem' | 'setItem'>
-const browserStorage = (): DraftChipStorage | null => (typeof window === 'undefined' ? null : window.localStorage)
+// Touching window.localStorage itself throws on iOS with site data blocked.
+const browserStorage = (): DraftChipStorage | null => {
+  try {
+    return typeof window === 'undefined' ? null : window.localStorage
+  } catch {
+    return null
+  }
+}
 
 export function readDraftChipPosition(storage: () => DraftChipStorage | null = browserStorage): DraftChipPoint | null {
   try {

@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { supplierDisplay } from '../../../utils/supplierDisplay.ts'
 import { createPortal } from 'react-dom'
 import X from 'lucide-react/dist/esm/icons/x.js'
-import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import History from 'lucide-react/dist/esm/icons/history.js'
 import TrendingUp from 'lucide-react/dist/esm/icons/trending-up.js'
@@ -32,11 +31,10 @@ import EntityLink from '../../shared/EntityLink.tsx'
 // Products-page ledger.
 //
 // Part-563 change (user ask): these three are no longer folded expand-in-place
-// SectionCards. They are now colored summary PILLS -- one per section, matching
-// the detail sheet's Batches button -- that open a click-to-view FLOAT (a modal
-// on top of the detail sheet) rather than expanding inline. Same reasoning as
-// the Batches move: a dense detail sheet reads better as a row of "open the
-// full view" affordances than as several stacked expanders. The Part-563 ask
+// SectionCards. They are colored summary chips -- one per section, in the
+// detail sheet's one links row after its Received dates and Records chips
+// (UI-DETAIL 2.3) -- that open a click-to-view FLOAT (a modal on top of the
+// detail sheet) rather than expanding inline. The Part-563 ask
 // also reported these sections "showing nothing" -- the old code swallowed a
 // failed report/ledger fetch into a silent empty/Loading state; this version
 // surfaces the actual error inline (loadError banner) and gives each float an
@@ -108,11 +106,13 @@ type DrillCache<T> = Record<string, T[] | 'loading' | 'error'>
 // behind it (the float is a separate z-[60] overlay above the z-50 sheet).
 type OpenSection = 'movements' | 'sales' | 'suppliers' | null
 
-// Per-section pill styling. Colors mirror shared/SectionCard's
+// Per-section chip styling. Colors mirror shared/SectionCard's
 // SECTION_KIND_COLORS (stock=orange, sales=red, suppliers=purple) so the
-// section-kind color still carries meaning, and the pill shape matches the
-// detail sheet's amber Batches button so all four affordances read as one set.
-// Tailwind needs literal class strings, so each kind lists its own.
+// section-kind color still carries meaning. Tailwind needs literal class
+// strings, so each kind lists its own.
+// The same chip shape as the detail sheet's LINK_CHIP (Received dates, Records).
+const LINK_CHIP = 'inline-flex h-8 max-w-full items-center gap-1.5 whitespace-nowrap rounded-full px-3 text-xs transition-colors'
+
 const SECTION_PILL: Record<Exclude<OpenSection, null>, { icon: LucideIcon; pill: string; accent: string }> = {
   movements: {
     icon: History,
@@ -131,8 +131,11 @@ const SECTION_PILL: Record<Exclude<OpenSection, null>, { icon: LucideIcon; pill:
   },
 }
 
-export default function ProductDetailReport({ productId, barcode, t, fmtUSD }: {
+export default function ProductDetailReport({ productId, barcode, t, fmtUSD, leadingPills }: {
   productId: number
+  // The sheet's own links (Received dates, Records), rendered first in this
+  // component's chip row so the whole links row is one wrapping line.
+  leadingPills?: ReactNode
   // Shown in each float's compact title so you can see WHICH product's changes
   // you are looking at (user ask: "the title ... also have barcode").
   barcode?: string
@@ -271,7 +274,7 @@ export default function ProductDetailReport({ productId, barcode, t, fmtUSD }: {
   const movementsLoading = movements === null
   const reportLoading = report === null
 
-  // One pill button. `count` is shown in parens when > 0 (matching Batches);
+  // One chip. `count` is shown in parens when > 0 (matching Received dates);
   // `loading` swaps it for a subtle "..." so an unfetched section doesn't read
   // as an empty one.
   const Pill = ({ section, label, count, loading }: {
@@ -286,18 +289,15 @@ export default function ProductDetailReport({ productId, barcode, t, fmtUSD }: {
       <button
         type="button"
         onClick={() => setOpenSection(section)}
-        className={`flex w-full min-w-0 items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs transition-colors ${meta.pill}`}
+        className={`${LINK_CHIP} ${meta.pill}`}
       >
-        <span className="flex min-w-0 items-center gap-1.5">
-          <Icon className="h-3.5 w-3.5 shrink-0" />
-          <span className="detail-scroll-text min-w-0 flex-1">{label}</span>
-          {loading ? (
-            <span className={`${meta.accent} shrink-0`}>...</span>
-          ) : count > 0 ? (
-            <span className={`${meta.accent} shrink-0`}>({count})</span>
-          ) : null}
-        </span>
-        <ChevronRight className="h-3.5 w-3.5 flex-shrink-0" />
+        <Icon className="h-3.5 w-3.5 shrink-0" />
+        <span className="detail-scroll-text min-w-0">{label}</span>
+        {loading ? (
+          <span className={meta.accent}>...</span>
+        ) : count > 0 ? (
+          <span className={meta.accent}>({count})</span>
+        ) : null}
       </button>
     )
   }
@@ -517,12 +517,12 @@ export default function ProductDetailReport({ productId, barcode, t, fmtUSD }: {
   const active = openSection ? floats[openSection] : null
 
   return (
-    <div className="space-y-1.5">
-      {loadError ? <p className="rounded-lg bg-red-50 px-2.5 py-1.5 text-xs text-red-600 dark:bg-red-900/20 dark:text-red-300">{loadError}</p> : null}
-
+    <div className="flex flex-wrap gap-1.5">
+      {leadingPills}
       <Pill section="movements" label={tr('stock_change_ledger', 'Stock Changes')} count={movementsTotal} loading={movementsLoading} />
       <Pill section="sales" label={tr('sales', 'Sales')} count={salesTxCount} loading={reportLoading} />
       <Pill section="suppliers" label={tr('suppliers', 'Suppliers')} count={suppliersCount} loading={reportLoading} />
+      {loadError ? <p className="basis-full rounded-lg bg-red-50 px-2.5 py-1.5 text-xs text-red-600 dark:bg-red-900/20 dark:text-red-300">{loadError}</p> : null}
 
       {active && typeof document !== 'undefined' ? createPortal((
         <div
