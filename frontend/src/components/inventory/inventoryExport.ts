@@ -4,6 +4,7 @@ import { formatPriceNumber } from '../../utils/pricing.ts'
 // Branch / Reason / User but not the receipt cannot be matched back to a sale,
 // which is the owner's "did not show details for sales" one surface along.
 import { formatHistoryReference, historyGroupReference } from '../../utils/historyRowModel.ts'
+import { revertsMovementId } from '../../utils/stockMovementDetail.ts'
 
 type AnyRecord = Record<string, any>
 
@@ -46,11 +47,11 @@ function buildMovementRows(groups: AnyRecord[]): AnyRecord[] {
     Qty: group.totalQuantity || 0,
     Total_Cost_USD: priceCsv(group.totalCostUsd || 0),
     Branch: group.branchSummary || '',
-    // The record the group belongs to -- "Sale 20260901-193100" -- and the raw
-    // reference_id only for the groups that name no record (stock-in session
-    // tokens, 'revert:<id>'), which is what the drill header falls back to.
+    // The record the group belongs to -- "Sale 20260901-193100" -- a Revert's
+    // "#<id>" of the row it reverts, and the raw reference_id only for the
+    // groups that name no record (stock-in session tokens).
     Receipt: formatHistoryReference(historyGroupReference(group.items), MOVEMENT_EXPORT_REFERENCE_WORDS)
-      || String(group.reference_id || ''),
+      || (revertsMovementId(group) != null ? `#${revertsMovementId(group)}` : String(group.reference_id || '')),
     Reason: group.reasonSummary || '',
     User: group.userSummary || '',
   }))

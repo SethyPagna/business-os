@@ -226,6 +226,8 @@ const stockRevert = loadReal('lib/stockRevert.ts', {
   './productBatches': productBatches,
   './moneyPrecision': moneyPrecision,
   './stockCondition': stockCondition,
+  // Sale/return-made stock is named by its record (revert_from_sale / _from_return).
+  './movementReference': movementReferenceKernel,
 })
 
 const inventoryRoute = loadReal('routes/inventory.ts', {

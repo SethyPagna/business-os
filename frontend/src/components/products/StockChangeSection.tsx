@@ -20,7 +20,7 @@ import type { StockMode } from '../inventory/FastStockInModal'
 // own Start → End range (user, Aug 31: "do the date range for all the
 // exports").
 const ExportRangeDialog = lazy(() => import('../shared/ExportRangeDialog'))
-import { movementColorClass, translateMovementType } from '../inventory/movementGroups.ts'
+import { movementColorClass, translateMovementRowType, translateMovementType } from '../inventory/movementGroups.ts'
 // U-records: a ledger row's float shows the SAME balance block, from the SAME
 // walk, as the Movements tab's record float -- branch line, then total.
 import { MovementBalance } from '../inventory/MovementDetailFloat.tsx'
@@ -59,6 +59,8 @@ import { buildHistoryRowModel, formatHistoryReference, historyExportField } from
 import {
   isRevertibleStockMovement,
   recordedMovementCosts,
+  revertDisplayReason,
+  revertsMovementId,
   showReceiptAccounting,
 } from '../../utils/stockMovementDetail.ts'
 import {
@@ -126,6 +128,19 @@ type LedgerRow = {
   batch_unit_cost_usd?: number | null
   batch_received_cost_usd?: number | null
   batch_receipt_session_count?: number | null
+  // REVERT-FIX F4: the row this Revert reverts, and the Revert that reverted
+  // this row -- both from the immutable reference_id (Worker stockLedgerQuery).
+  reverts_movement_id?: number | null
+  reverted_by_movement_id?: number | null
+  // 1 while the chain's latest Revert undoes this row; a Revert that was itself
+  // reverted puts it back in the reports (owner, 1 Oct 2026).
+  reverted_now?: number | null
+}
+
+// The row as the list and the detail show it: a Revert's reason loses the
+// Worker's English "Revert of #N:" prefix, since its label and link say that.
+function displayRow(row: LedgerRow): LedgerRow {
+  return { ...row, reason: revertDisplayReason(row) || null }
 }
 
 type LedgerSummary = {
@@ -446,6 +461,22 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
     setDetail(null); setEditingReason(null); setConfirmRevert(false); setReasonReview(null)
   }, [])
 
+  // A Revert's "#N" link (and a reverted row's "Reverted by #N"): read that one
+  // row through the same ledger kernel -- it may be on another page or outside
+  // the filters -- and open its detail in place of this one.
+  const openMovementById = useCallback(async (id: number) => {
+    const epoch = detailEpochRef.current
+    try {
+      const response = await getStockLedger({ movementId: id, page: 1, pageSize: 1 }) as LedgerResponse
+      if (detailEpochRef.current !== epoch) return
+      const next = Array.isArray(response?.items) ? response.items[0] : undefined
+      if (!next) throw new Error(tr(t, 'revert_err_movement_not_found', 'This change no longer exists. Refresh and try again.'))
+      openDetail(next)
+    } catch (error) {
+      if (detailEpochRef.current === epoch) app.notify(error instanceof Error ? error.message : String(error), 'error')
+    }
+  }, [app, openDetail, t])
+
   useEffect(() => { closeDetail() }, [app.user?.id, app.user?.username, closeDetail])
 
   // N13: the ONE composition of "which record is this" -- "Sale 20260901-193100",
@@ -499,7 +530,7 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
       product: row.product_name,
       barcode: historyExportField(row.barcode),
       branch: historyExportField(row.branch_name),
-      type: row.movement_type,
+      type: revertsMovementId(row) != null ? 'revert' : row.movement_type,
       quantity: row.signed_quantity,
       before: row.before_qty,
       after: row.after_qty,
@@ -510,8 +541,10 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
       // stays as the raw stored id beside it, for the rows whose reference is
       // a stock-in session token rather than a receipt.
       receipt: historyExportField(referenceText(row)),
-      reason: historyExportField(row.reason),
-      reference: row.reference_id ?? '',
+      reason: historyExportField(revertDisplayReason(row)),
+      // A Revert names the row it reverts as "#N", never the raw revert:N token.
+      reference: revertsMovementId(row) != null ? `#${revertsMovementId(row)}` : row.reference_id ?? '',
+      reverted_by: row.reverted_by_movement_id ? `#${row.reverted_by_movement_id}` : '',
       unit: row.unit || '',
       category: row.category || '',
       brand: row.brand || '',
@@ -705,11 +738,23 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
     return groups
   }, [rows])
 
+  // REVERT-FIX F4: a Revert names the row it reverts; a reverted row says so.
+  // Plain text here -- the whole row opens the detail, where both are links.
+  const revertTag = (row: LedgerRow) => {
+    const reverts = revertsMovementId(row)
+    // A Revert that was itself reverted shows both: what it reverts and that it is undone now.
+    const chip = Number(row.reverted_now)
+      ? <span data-revert-tag="reverted" className="shrink-0 rounded bg-gray-100 px-1 text-[10px] font-semibold text-gray-600 dark:bg-gray-800 dark:text-gray-300">{tr(t, 'movement_reverted_chip', 'Reverted')}</span>
+      : null
+    if (reverts == null) return chip
+    return <><span data-revert-tag="reverts" className="shrink-0 font-normal opacity-80">#{reverts}</span>{chip}</>
+  }
+
   const renderCard = (row: LedgerRow) => {
     const dateOnly = isDateOnlyStamp(row.created_at)
     const clock = dateOnly ? '' : fmtClock24(row.created_at)
     const timeUnknown = dateOnly || clock === '—' || clock === ''
-    const model = buildHistoryRowModel(row)
+    const model = buildHistoryRowModel(displayRow(row))
     return (
       <button
         key={row.id}
@@ -737,7 +782,8 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
           </div>
           <span className={`inline-flex shrink-0 items-center gap-1 rounded-lg px-2 py-0.5 text-xs font-semibold ${movementColorClass(row.movement_type, row.signed_quantity)}`}>
             {signedLabel(row)}
-            <span className="font-normal opacity-80">{translateMovementType(row.movement_type, t)}</span>
+            <span className="font-normal opacity-80">{translateMovementRowType(row, t)}</span>
+            {revertTag(row)}
           </span>
         </div>
 
@@ -850,7 +896,7 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
                 const dateOnly = isDateOnlyStamp(row.created_at)
                 const clock = dateOnly ? '' : fmtClock24(row.created_at)
                 const timeUnknown = dateOnly || clock === '—' || clock === ''
-                const model = buildHistoryRowModel(row)
+                const model = buildHistoryRowModel(displayRow(row))
                 return (
                   <tr
                     key={row.id}
@@ -882,7 +928,7 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
                       <span className="detail-scroll-text font-semibold text-gray-800 dark:text-gray-100">{row.product_name}</span>
                       <span className="block dense-cell-truncate dense-id leading-[0.85rem] text-gray-400" title={model.barcode}>{model.barcode}</span>
                     </td>
-                    <td><span className={`inline-flex max-w-full items-center rounded px-1.5 py-0.5 font-semibold ${movementColorClass(row.movement_type, row.signed_quantity)}`}><span className="dense-cell-truncate" title={translateMovementType(row.movement_type, t)}>{translateMovementType(row.movement_type, t)}</span></span></td>
+                    <td><span className={`inline-flex max-w-full items-center gap-1 rounded px-1.5 py-0.5 font-semibold ${movementColorClass(row.movement_type, row.signed_quantity)}`}><span className="dense-cell-truncate" title={translateMovementRowType(row, t)}>{translateMovementRowType(row, t)}</span>{revertTag(row)}</span></td>
                     <td className={`text-center font-bold tabular-nums ${row.signed_quantity >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>{signedLabel(row)}</td>
                     <td className="text-center tabular-nums text-gray-500">{row.before_qty} → <b className="text-gray-800 dark:text-gray-100">{row.after_qty}</b></td>
                     <td><span className="detail-scroll-text">{model.branch}</span></td>
@@ -979,8 +1025,16 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
   }
 
   const detailCosts = detail ? recordedMovementCosts(detail) : null
-  const detailShowsReceiptAccounting = detail ? showReceiptAccounting(detail.movement_type) : false
-  const detailCanRevert = detail ? isRevertibleStockMovement(detail.movement_type, detail.reference_id) : false
+  const detailRevertsId = detail ? revertsMovementId(detail) : null
+  const detailRevertedById = detail?.reverted_by_movement_id ?? null
+  // A Revert that puts stock back is not a receipt, whatever its type.
+  const detailShowsReceiptAccounting = detail ? showReceiptAccounting(detail.movement_type) && detailRevertsId == null : false
+  // A reverted row offers its Revert's link instead: a second revert is refused.
+  const detailCanRevert = detail ? isRevertibleStockMovement(detail.movement_type, detail.reference_id) && detailRevertedById == null : false
+  // Stock a sale or a return moved is changed from that record, never here.
+  const detailSourceKind = detail && !detailCanRevert
+    ? (detail.movement_type === 'sale' || detail.movement_type === 'sale_from_damaged' ? 'sale' : detail.reference_kind ?? null)
+    : null
   const revertScopeText = !revertPreview || revertPreview.kind === 'movement'
     ? tr(t, 'confirm_revert', 'Revert this change?')
     : tr(t, `movement_revert_${revertPreview.kind}_${revertPreview.direction}`,
@@ -1195,7 +1249,7 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
                 </div>
               </div>
               <div className="rounded-xl bg-gray-50 px-3 py-2 dark:bg-gray-800/60">
-                <div className="text-[11px] uppercase tracking-wide text-gray-400">{translateMovementType(detail.movement_type, t)}</div>
+                <div className="text-[11px] uppercase tracking-wide text-gray-400">{translateMovementRowType(detail, t)}</div>
                 <div className={`mt-0.5 inline-flex max-w-full flex-wrap rounded-lg px-2 py-0.5 text-sm font-semibold ${movementColorClass(detail.movement_type, detail.signed_quantity)}`}>
                   <span className="tabular-nums">{signedLabel(detail)}</span>
                   {detail.unit ? <span className="ml-1 break-words font-normal opacity-80">{detail.unit}</span> : null}
@@ -1208,6 +1262,23 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
                 on both screens (owner, 26 Sep). The type chip above already
                 shows the signed quantity, so the block drops its own; a
                 failed read still shows the row's own total pair. */}
+            {detailRevertsId != null || detailRevertedById != null ? (
+              <div data-revert-links="true" className="flex flex-wrap items-center gap-2 text-sm">
+                {Number(detail.reverted_now) ? (
+                  <span className="rounded bg-gray-100 px-1.5 py-0.5 text-xs font-semibold text-gray-600 dark:bg-gray-800 dark:text-gray-300">{tr(t, 'movement_reverted_chip', 'Reverted')}</span>
+                ) : null}
+                {detailRevertsId != null ? (
+                  <button type="button" className="font-semibold text-blue-700 underline-offset-2 hover:underline dark:text-blue-300" onClick={() => void openMovementById(detailRevertsId)}>
+                    {tr(t, 'movement_reverts_link', 'Reverts #{id}').replace('{id}', String(detailRevertsId))}
+                  </button>
+                ) : null}
+                {detailRevertedById != null ? (
+                  <button type="button" className="font-semibold text-blue-700 underline-offset-2 hover:underline dark:text-blue-300" onClick={() => void openMovementById(detailRevertedById)}>
+                    {tr(t, 'movement_reverted_by_link', 'Reverted by #{id}').replace('{id}', String(detailRevertedById))}
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
             <div className="text-xs">
               <MovementBalance movement={detail} tr={(key, fallback) => tr(t, key, fallback)} loadBalance={loadDetailBalance} fallback={detail} showQuantity={false} />
             </div>
@@ -1243,10 +1314,10 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
                 </div>
               )
             })()}
-            {detail.reason ? (
+            {revertDisplayReason(detail) ? (
               <p className="rounded-xl bg-gray-50 px-3 py-2 text-sm text-gray-600 dark:bg-gray-800/60 dark:text-gray-300">
                 <span className="text-[11px] uppercase tracking-wide text-gray-400">{tr(t, 'reason', 'Reason')}: </span>
-                {detail.reason}
+                {revertDisplayReason(detail)}
               </p>
             ) : null}
             {/* These are costs recorded on THIS movement. A zero is real; a
@@ -1343,6 +1414,12 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
                       <Undo2 className="h-4 w-4 shrink-0" aria-hidden="true" />
                       <span>{tr(t, 'revert', 'Revert')}</span>
                     </button>
+                  ) : detailSourceKind ? (
+                    <span data-revert-source={detailSourceKind} className="min-w-0 break-words text-xs text-gray-500 dark:text-gray-400">
+                      {detailSourceKind === 'sale'
+                        ? tr(t, 'revert_err_from_sale', 'This change came from a sale. Change it from the sale: cancel it or change its status.')
+                        : tr(t, 'revert_err_from_return', 'This change came from a return. Change it from the return instead.')}
+                    </span>
                   ) : null}
                 </div>
               ) : (

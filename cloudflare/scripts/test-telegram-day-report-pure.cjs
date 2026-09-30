@@ -66,7 +66,7 @@ db.exec(`
     return_to_stock INTEGER, stock_action TEXT);
   CREATE TABLE fees (id INTEGER PRIMARY KEY, fee_type TEXT, label TEXT, amount_usd REAL, amount_khr REAL,
     fee_date TEXT, sale_id INTEGER, branch_id INTEGER, delivery_contact_id INTEGER, created_by INTEGER, created_at TEXT);
-  CREATE TABLE inventory_movements (id INTEGER PRIMARY KEY, movement_type TEXT, quantity REAL, created_at TEXT);
+  CREATE TABLE inventory_movements (id INTEGER PRIMARY KEY, movement_type TEXT, quantity REAL, reference_id TEXT, created_at TEXT);
   CREATE TABLE delivery_contacts (id INTEGER PRIMARY KEY, name TEXT);
   CREATE TABLE customers (
     id INTEGER PRIMARY KEY,

@@ -301,3 +301,45 @@ assert.match(source, /closeDisabled=\{busy \|\| Boolean\(pendingAttempt\)\}/)
 assert.match(source, /onClick=\{editHeader\}/)
 assert.match(source, /onClick=\{addMoreStock\}/)
 assert.match(source, /onClick=\{cancelLineEdit\}/)
+
+// A line with its own Revert -- reverted now (51), or put back by reverting
+// that Revert (53) -- stays listed as history and is never sent to the Worker
+// again, neither by its own button nor by reverting the whole session.
+{
+  const h = harness()
+  h.state.rows = [
+    { ...row, id: 51, edit_count: 0, reverted: 1, has_revert: 1 } as typeof h.state.rows[number],
+    { ...row, id: 52, edit_count: 0 },
+    { ...row, id: 53, edit_count: 0, reverted: 0, has_revert: 1 } as typeof h.state.rows[number],
+  ]
+  h.state.revertDispatch = async (id: number) => { h.state.rows = h.state.rows.map((r) => r.id === id ? { ...r, reverted: 1 } : r); return { success: true } }
+  await h.render().open(summary)
+  await h.render().removeRow(h.state.rows[0])
+  await h.render().removeRow(h.state.rows[2])
+  assert.equal(h.state.reverts, 0, 'a line with its own Revert is not reverted again')
+  await h.render().open(summary)
+  await h.render().removeSession()
+  assert.equal(h.state.reverts, 1, 'reverting the session reverts only the line not yet reverted')
+}
+
+// R-REVERT-FIX RF2: the Worker refuses to edit a line that has a Revert row
+// (line_not_editable), reverted now or put back, so the section never opens an
+// edit for either and offers no pencil; the ordinary line still edits.
+{
+  const h = harness()
+  h.state.rows = [
+    { ...row, id: 51, edit_count: 0, reverted: 1, has_revert: 1 } as typeof h.state.rows[number],
+    { ...row, id: 53, edit_count: 0, reverted: 0, has_revert: 1 } as typeof h.state.rows[number],
+    { ...row, id: 52, edit_count: 0 },
+  ]
+  await h.render().open(summary)
+  for (const index of [0, 1]) {
+    h.render().startLineEdit(h.state.rows[index])
+    assert.equal(h.render().lineEdit, null, `line ${h.state.rows[index].id} with a Revert opens no edit`)
+    assert.equal(helpers.isStockInLineEditable(h.state.rows[index]), false)
+  }
+  h.render().startLineEdit(h.state.rows[2])
+  assert.equal(h.render().lineEdit?.row.id ?? h.render().lineEdit?.id, 52, 'an ordinary line still opens its edit')
+}
+console.log('PASS a line with a Revert offers no edit, and an ordinary line still does')
+console.log('PASS a reverted stock-in line is never reverted again, alone or with its session')

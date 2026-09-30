@@ -67,17 +67,14 @@ check('stockSession.ts commitStockSession: branchStocks/batchStocks resolve in o
   )
 })
 
-// routes/products.ts GET /stock-in-session-lines: the revert-lookup and the
-// receipt-count lookup each iterate chunkForBinding() -- before, each chunk
-// was a sequential `for (const chunk of ...) { await ... }` round trip;
-// after, each chunk fetch is fanned out with Promise.all(chunks.map(...)).
-check('products.ts GET /stock-in-session-lines: revert-id chunks fan out with Promise.all', () => {
+// routes/products.ts GET /stock-in-session-lines: the receipt-count lookup
+// iterates chunkForBinding() -- before, each chunk was a sequential
+// `for (const chunk of ...) { await ... }` round trip; after, each chunk fetch
+// is fanned out with Promise.all(chunks.map(...)). The former revert-id lookup
+// is gone: the line query flags a reverted line itself (REVERT-FIX F4).
+check('products.ts GET /stock-in-session-lines: receipt-count chunks fan out with Promise.all', () => {
   const block = sliceBetween(productsSource, "app.get('/stock-in-session-lines'", "app.get('/stock-ledger'", 'products.ts GET /stock-in-session-lines')
-  assert.match(
-    block,
-    /const chunkResults = await Promise\.all\(chunkForBinding\(movementIds\)\.map\(\(chunk\) => \{/,
-    'the revert-id IN-clause chunks must be fanned out with Promise.all, not a sequential for-await loop',
-  )
+  assert.doesNotMatch(block, /chunkForBinding\(movementIds\)/, 'no per-line revert lookup round trips remain')
   assert.match(
     block,
     /const chunkResults = await Promise\.all\(chunkForBinding\(batchIds\)\.map\(\(chunk\) => \{/,

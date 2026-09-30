@@ -841,7 +841,7 @@ const DENSE_COMPONENTS = new Set(['CopyableId'])
 const DENSE_CELL_VALUES: Record<string, Array<[string, DenseKind, string]>> = {
   'components/products/StockChangeSection.tsx': [
     ['model.barcode', 'id', 'The barcode under the (scrolling) product name: a code, on its own muted mono line.'],
-    ['translateMovementType(row.movement_type, t)', 'enum-label', 'The movement word the pack supplies for the movement_type code, inside a coloured chip.'],
+    ['translateMovementRowType(row, t)', 'enum-label', 'The movement word the pack supplies for the movement_type code (or Revert for a Revert row), inside a coloured chip.'],
   ],
   'components/products/StockInSessionsSection.tsx': [
     ["stockSessionId(session.createdAt) || session.key", 'id', 'The session id, which is the receipt an operator quotes back.'],

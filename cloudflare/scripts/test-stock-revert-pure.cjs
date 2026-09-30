@@ -13,7 +13,8 @@
 // findings on e3bf6fbf (its probes J, A, CHAIN, I, H): a quantity correction
 // is not a purchase, a full revert keeps the supplier so the un-revert brings
 // the purchase back under it, revert chains classify by the root movement, a
-// session-undo counter is refused, a single-lot FIFO drain is mirrored.
+// session-undo counter is refused. Case 14 (REVERT-FIX F7): a receipt with no
+// lot stamp is never drained from a guessed dated lot.
 //
 // Run: node scripts/test-stock-revert-pure.cjs
 const assert = require('node:assert/strict')
@@ -158,7 +159,8 @@ async function counterFor(originalId) {
   const r3 = await kernel.applyMovementRevert(db, await movementById(5201), actor)
   assert.equal(r3.ok, false)
   assert.equal(r3.status, 400)
-  assert.match(r3.error, /sale, return, transfer or move/)
+  assert.match(r3.error, /from the sale/)
+  assert.deepEqual([r3.code, r3.params], ['revert_from_sale', undefined], 'a sale row points to its sale, coded for the operator\'s language')
   const noCounter3 = await counterFor(5201)
   assert.equal(noCounter3, undefined, 'a refused revert writes no counter-movement')
   ok(true, 'a sale movement cannot be reverted from the stock ledger (refused, no stock moved)')
@@ -172,6 +174,7 @@ async function counterFor(originalId) {
   assert.equal(r4.ok, false)
   assert.equal(r4.status, 400)
   assert.match(r4.error, /only 0 in stock/)
+  assert.deepEqual([r4.code, r4.params], ['revert_insufficient_branch_stock', { available: 0, needed: 4, branch: 'Main Store' }], 'the numbers travel with the code (F5)')
   ok(true, 'revert-remove is refused when the stock to remove is no longer there (never goes negative)')
 
   // ---- supplier mirror (P3-L1) ------------------------------------------
@@ -397,10 +400,10 @@ async function counterFor(originalId) {
   assert.deepEqual(await lotOf(7110), { ...lotBefore13, is_active: 0, received_quantity: 0, received_cost_usd: 0 }, 'the session\'s own receipt row is still revertible')
   ok(true, 'a stock-session undo counter-movement is refused (409, session named); the session receipt itself stays revertible')
 
-  // ---- case 14: a pre-0084 receipt (no lot stamp) whose FIFO drain resolves
-  // to exactly ONE lot covering all of it is mirrored on that lot (review
-  // probe H); spread across two lots there is no honest target and only the
-  // stock moves.
+  // ---- case 14: a pre-0084 receipt (no lot stamp) is never drained from a
+  // dated lot -- one lot or several, another supplier's delivery or its own
+  // is a guess. With no undated stock to take it from, the Revert is refused
+  // whole (review F7; the undated case is in test-stock-revert-past-reports).
   db.prepare(`INSERT INTO products (id, name, barcode, unit, stock_quantity, is_active) VALUES (7009, 'Probe H', 'PH-1', 'pcs', 5, 1), (7019, 'Probe H2', 'PH-2', 'pcs', 6, 1)`).run({})
   db.prepare(`INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (7009, 1, 5), (7019, 1, 6)`).run({})
   db.prepare(`INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, received_at, is_active, batch_number,
@@ -412,24 +415,15 @@ async function counterFor(originalId) {
   db.prepare(`INSERT INTO inventory_movements (id, product_id, product_name, branch_id, branch_name, movement_type, quantity, unit_cost_usd, total_cost_usd, reason, user_name, created_at, batch_id)
     VALUES (6701, 7009, 'Probe H', 1, 'Main Store', 'add', 5, 2, 10, 'legacy receipt, no stamp', 'tester', '2026-11-09 09:00:00', NULL),
            (6702, 7019, 'Probe H2', 1, 'Main Store', 'add', 6, 2, 12, 'legacy receipt, no stamp', 'tester', '2026-01-02 09:00:00', NULL)`).run({})
-  const r14 = await kernel.applyMovementRevert(db, await movementById(6701), actor)
-  assert.equal(r14.ok, true, r14.error)
-  assert.equal(r14.usedBatchId, 7109)
-  assert.deepEqual(await stockOf(7009, 1), { product: 0, branch: 0 })
-  assert.deepEqual(await lotOf(7109), {
-    is_active: 0, supplier_id: 41, supplier_name: 'Acme Supply', unit_cost_usd: 2, payment_status: 'credit', credit_due_date: '2026-12-01',
-    received_quantity: 0, received_cost_usd: 0, received_branch_id: 1,
-  }, 'single-lot drain: the lot is un-received')
-  assert.equal(Number((await counterFor(6701)).batch_id), 7109)
-  const r14b = await kernel.applyMovementRevert(db, await movementById(6702), actor)
-  assert.equal(r14b.ok, true, r14b.error)
-  assert.equal(r14b.usedBatchId, null)
-  assert.deepEqual(await stockOf(7019, 1), { product: 0, branch: 0 })
-  for (const id of [7119, 7129]) {
-    const lot = await lotOf(id)
-    assert.deepEqual({ received_quantity: lot.received_quantity, received_cost_usd: lot.received_cost_usd, supplier_id: lot.supplier_id }, { received_quantity: 3, received_cost_usd: 6, supplier_id: 41 }, `lot ${id} untouched`)
+  for (const [movementId, productId, lots] of [[6701, 7009, [7109]], [6702, 7019, [7119, 7129]]]) {
+    const before = JSON.stringify([await stockOf(productId, 1), ...(await Promise.all(lots.map(async (id) => [await lotOf(id), await lotStock(id)])))])
+    const refused = await kernel.applyMovementRevert(db, await movementById(movementId), actor)
+    assert.equal(refused.ok, false)
+    assert.equal(refused.code, 'revert_no_received_date', JSON.stringify(refused))
+    assert.equal(await counterFor(movementId), undefined, 'refused: no counter-movement')
+    assert.equal(JSON.stringify([await stockOf(productId, 1), ...(await Promise.all(lots.map(async (id) => [await lotOf(id), await lotStock(id)])))]), before, 'refused: no stock or lot moved')
   }
-  ok(true, 'a batch-less receipt is mirrored only when its FIFO drain resolves to exactly one lot')
+  ok(true, 'a batch-less receipt is never drained from dated lots: refused whole with no undated stock')
 
   console.log(`\nAll ${checks} stock-revert kernel checks passed`)
 })().catch((err) => { console.error(err); process.exitCode = 1 })

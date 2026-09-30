@@ -18,6 +18,26 @@ export const STOCK_RECEIPT_MOVEMENT_TYPES = ['add', 'stock_in'] as const
 
 export const STOCK_RECEIPT_TYPE_SQL = `m.movement_type IN (${STOCK_RECEIPT_MOVEMENT_TYPES.map((type) => `'${type}'`).join(', ')})`
 
+// 1 when this row is reverted NOW: the last Revert in its chain sits at an odd
+// depth (reverted, or reverted again after its Revert was reverted). A row
+// whose Revert was itself reverted is live again. Counters are appended, so
+// increasing ids bound the walk (the same chain rule as removalLosses.ts).
+export function revertChainOpenSql(movement: string): string {
+  return `EXISTS (
+    WITH RECURSIVE revert_chain(id, depth) AS (
+      SELECT rv.id, 1 FROM inventory_movements rv
+      WHERE rv.reference_id = 'revert:' || CAST(${movement}.id AS TEXT) AND rv.id > ${movement}.id
+      UNION ALL
+      SELECT rv.id, chain.depth + 1 FROM inventory_movements rv
+      JOIN revert_chain chain ON rv.reference_id = 'revert:' || CAST(chain.id AS TEXT)
+      WHERE rv.id > chain.id
+    )
+    SELECT 1 FROM revert_chain chain WHERE chain.depth % 2 = 1
+      AND NOT EXISTS (SELECT 1 FROM inventory_movements next_revert
+        WHERE next_revert.reference_id = 'revert:' || CAST(chain.id AS TEXT) AND next_revert.id > chain.id)
+  )`
+}
+
 // N6 (owner, 23 Sep: "Stock-in sessions editable (today only add or
 // delete)"). An edit of a received line (lib/stockInLineEdit.ts) never
 // rewrites the line's own receipt movement -- the ledger stays append-only.
@@ -169,6 +189,12 @@ function sessionLineRowsSql(where: { movement: string; zero: string }): string {
            COALESCE(CAST(cb.supplier_id AS TEXT), '') || ':' || lower(trim(COALESCE(cb.supplier_name, ''))) AS supplier_state,
            COALESCE(cb.payment_status, '') AS payment_state,
            COALESCE(e.edit_rows, 0) AS edit_count,
+           -- A reverted receipt is no longer a purchase (its lot was
+           -- un-received), but the line stays as history, marked reverted.
+           ${revertChainOpenSql('m')} AS reverted,
+           -- Its own Revert exists (even if that was reverted in turn): the
+           -- line cannot be reverted again, only the chain's latest Revert.
+           EXISTS (SELECT 1 FROM inventory_movements rx WHERE rx.reference_id = 'revert:' || CAST(m.id AS TEXT)) AS has_revert,
            -- N14: did this line CREATE the product, or receive into one that
            -- already existed? The session commit records it durably per line
            -- (stock_session_members.product_created / command_kind, migration
@@ -190,8 +216,10 @@ function sessionLineRowsSql(where: { movement: string; zero: string }): string {
     LEFT JOIN products p ON p.id = m.product_id
     WHERE ${STOCK_RECEIPT_TYPE_SQL} AND ${where.movement}
       -- An edit's own receipt-typed delta row belongs to its root line, never
-      -- to a session of its own.
-      AND (m.reference_id IS NULL OR CAST(m.reference_id AS TEXT) NOT LIKE '${STOCK_IN_EDIT_REFERENCE_PREFIX}%')
+      -- to a session of its own; a Revert that puts stock back is not a
+      -- receipt at all.
+      AND (m.reference_id IS NULL OR (CAST(m.reference_id AS TEXT) NOT LIKE '${STOCK_IN_EDIT_REFERENCE_PREFIX}%'
+        AND CAST(m.reference_id AS TEXT) NOT LIKE 'revert:%'))
     UNION ALL
     SELECT 'session:' || CAST(o.rowid AS TEXT) AS session_key,
            NULL AS id, sm.line_id AS session_line_id, sm.product_id, p.name AS product_name, ${PRODUCT_COLUMNS_SQL},
@@ -216,6 +244,7 @@ function sessionLineRowsSql(where: { movement: string; zero: string }): string {
            END AS supplier_state,
            NULL AS payment_state,
            0 AS edit_count,
+           0 AS reverted, 0 AS has_revert,
            sm.product_created AS created_product, sm.command_kind AS session_command_kind
     FROM stock_session_members sm
     JOIN stock_session_operations o ON o.id = sm.operation_id
@@ -253,15 +282,10 @@ export function buildStockInSessionListQuery(searchValue = ''): { groupedSql: st
              COALESCE(MAX(s.user_name), '') || ' ' || COALESCE(GROUP_CONCAT(s.product_name, ' '), '') || ' ' ||
              COALESCE(GROUP_CONCAT(s.barcode, ' '), '')) LIKE @search ESCAPE '\\'`
     : ''
-  // The list reads every non-reverted receipt line plus every zero-quantity
-  // session line, then groups by the one session key both carry.
-  const rows = sessionLineRowsSql({
-    movement: `NOT EXISTS (
-      SELECT 1 FROM inventory_movements rx
-      WHERE rx.reference_id = 'revert:' || CAST(m.id AS TEXT)
-    )`,
-    zero: '1 = 1',
-  })
+  // The list reads every receipt line -- a reverted one kept as history, but
+  // out of the session's units and cost -- plus every zero-quantity session
+  // line, then groups by the one session key both carry.
+  const rows = sessionLineRowsSql({ movement: '1 = 1', zero: '1 = 1' })
   return { groupedSql: `
     SELECT s.session_key,
            MIN(s.created_at) AS created_at, MAX(s.received_at) AS received_at,
@@ -275,9 +299,10 @@ export function buildStockInSessionListQuery(searchValue = ''): { groupedSql: st
            -- the movement's snapshot -- is one user, not "Multiple users".
            COUNT(DISTINCT COALESCE(CAST(s.user_id AS TEXT), 'name:' || COALESCE(s.user_name, ''))) AS user_state_count,
            COUNT(DISTINCT s.supplier_state) AS supplier_state_count,
-           COUNT(*) AS line_count, SUM(s.quantity) AS quantity,
-           SUM(CASE WHEN s.total_cost_usd IS NOT NULL THEN s.total_cost_usd ELSE 0 END) AS movement_cost_usd,
-           SUM(s.cost_missing) AS lines_without_movement_cost,
+           COUNT(*) AS line_count, SUM(s.reverted) AS reverted_line_count,
+           SUM(CASE WHEN s.reverted THEN 0 ELSE s.quantity END) AS quantity,
+           SUM(CASE WHEN s.reverted OR s.total_cost_usd IS NULL THEN 0 ELSE s.total_cost_usd END) AS movement_cost_usd,
+           SUM(CASE WHEN s.reverted THEN 0 ELSE s.cost_missing END) AS lines_without_movement_cost,
            COUNT(DISTINCT s.payment_state) AS payment_state_count,
            MAX(s.payment_status) AS payment_status, MAX(s.credit_due_date) AS credit_due_date
     FROM (${rows}) s
@@ -316,7 +341,7 @@ export function stockInSessionLinesSql(locator: StockInSessionLocator): string {
            s.reason, s.reference_id, s.user_name, s.created_at, s.batch_id,
            s.batch_lot_code, s.batch_received_at, s.batch_supplier_id, s.batch_supplier_name,
            s.batch_payment_status, s.batch_credit_due_date, s.batch_unit_cost_usd, s.batch_received_cost_usd,
-           s.batch_expiry_date, s.batch_updated_at, s.batch_revision, s.created_product, s.session_command_kind, s.edit_count
+           s.batch_expiry_date, s.batch_updated_at, s.batch_revision, s.created_product, s.session_command_kind, s.edit_count, s.reverted, s.has_revert
     FROM (${sessionLineRowsSql(where)}) s
     ORDER BY s.created_at ASC, s.id ASC, s.session_line_id ASC
     LIMIT 2001`

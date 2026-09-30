@@ -66,9 +66,12 @@ runTest('a receipt line may have no movement id, and only lines with one are eve
   // the revert transport is called only behind a null guard
   // (U-records: the review is the shared ConfirmDialog, which only opens for
   // a line with an id; removeRow still re-checks before the write.)
-  assert.match(sectionSource, /if \(row\.id == null\) return\s+if \(busy\) return/)
+  assert.match(sectionSource, /if \(row\.id == null\) return\s+if \(revertLocked\(row\)\) return\s+if \(busy\) return/)
   assert.match(sectionSource, /const reviewLineRemoval = \(row: Row\) => \{ if \(row\.id != null && /)
-  assert.match(sectionSource, /const revertibleRows = selected \? selected\.rows\.filter\(\(row\) => row\.id != null\) : \[\]/)
+  // A line whose own Revert exists (reverted now, or put back by reverting
+  // that Revert) is never reverted again here; only the chain's latest Revert.
+  assert.match(sectionSource, /function revertLocked\(row: Row\): boolean \{\s+return Boolean\(Number\(row\.reverted\) \|\| Number\(row\.has_revert\)\)/)
+  assert.match(sectionSource, /const revertibleRows = selected \? selected\.rows\.filter\(\(row\) => row\.id != null && !revertLocked\(row\)\) : \[\]/)
   // Bulk removal retains movement identities but refreshes their lot revisions
   // after each write; the actual-handler test covers zero/mixed/shared-lot rows.
   assert.match(sectionSource, /for \(const original of revertibleRows\) if \(original\.id != null\)/)
@@ -109,7 +112,7 @@ runTest('an all-zero session shows authorized $0 and its item count, and says wh
   }
   // a primary control that cannot proceed says why next to it
   assert.match(sectionSource, /\{editableLots \? <button[^]*?\{tr\('edit', 'Edit'\)\}<\/button> : null\}/)
-  assert.match(sectionSource, /\{revertibleRows\.length \? <button[^]*?\{tr\('remove_session', 'Remove'\)\}<\/button> : <span[^>]*>\{tr\('stock_session_no_lot_to_edit'/)
+  assert.match(sectionSource, /\{revertibleRows\.length \? <button[^]*?\{tr\('revert', 'Revert'\)\}<\/button> : <span[^>]*>\{allLinesReverted \? tr\('stock_session_all_reverted'[^}]*: tr\('stock_session_no_lot_to_edit'/)
 })
 
 runTest('the create session sends the supplier on its zero lines so the list can show it', () => {

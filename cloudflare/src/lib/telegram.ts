@@ -511,12 +511,8 @@ async function dayStats(env: Env, date: string, salesTotals: Promise<SalesTotals
     db.prepare(`SELECT COUNT(*) AS count, ${FEE_SPLIT_COLUMNS} FROM fees WHERE fee_date = @date`)
       .get<{ count: number; usd: number; khr: number; delivery_usd: number; delivery_khr: number }>({ date }),
     courierPayoutsWhere(env, [courierWhere.sql], courierWhere.params),
-    // 'stock_in' is the legacy string the unified stock-in session used to
-    // write (see stockInSessionsQuery.ts's STOCK_RECEIPT_MOVEMENT_TYPES) --
-    // without it this digest under-counted every session committed through
-    // the Products page's "Add products" entry.
-    db.prepare(`SELECT COUNT(*) AS count, COALESCE(SUM(quantity), 0) AS quantity FROM inventory_movements WHERE movement_type IN ('add', 'stock_in', 'transfer_in', 'move_in') AND ${dayClause('created_at')}`).get<{ count: number; quantity: number }>({ date }),
-    db.prepare(`SELECT COUNT(*) AS count, COALESCE(SUM(quantity), 0) AS quantity FROM inventory_movements WHERE ${STOCK_OUT_MOVEMENT} AND ${dayClause('created_at')}`).get<{ count: number; quantity: number }>({ date }),
+    db.prepare(`SELECT COUNT(*) AS count, COALESCE(SUM(quantity), 0) AS quantity FROM inventory_movements WHERE ${stockDigestInWhere()} AND ${dayClause('created_at')}`).get<{ count: number; quantity: number }>({ date }),
+    db.prepare(`SELECT COUNT(*) AS count, COALESCE(SUM(quantity), 0) AS quantity FROM inventory_movements WHERE ${stockDigestOutWhere()} AND ${dayClause('created_at')}`).get<{ count: number; quantity: number }>({ date }),
   ])
   return {
     date,
@@ -962,12 +958,42 @@ function lowStockRowLines(row: LowStockRow): string[] {
 }
 
 const STOCK_OUT_MOVEMENT = "movement_type IN ('remove', 'transfer_out', 'move_out')"
+// A Revert (and a History Undo, same 'revert:' stamp) corrects an earlier
+// record; it is not today's business, so the digest never counts it. Owner,
+// 1 Oct 2026: a Revert works like cancelling a sale, so the row it reverted
+// leaves the count too, on whatever day the report asks for (/report takes any
+// past day); a row whose Revert was itself reverted counts again. The Stock
+// Changes ledger still shows both. Written against the table name, so every
+// caller reads inventory_movements unaliased.
+// The chain rule of stockInSessionsQuery.ts revertChainOpenSql (odd depth = reverted now),
+// spelled out here because this module is loaded by many tests with hand-written module
+// maps; test-telegram-digest-excludes-reverts-pure.cjs pins that the two stay identical.
+export const REVERTED_NOW_SQL = `EXISTS (
+    WITH RECURSIVE revert_chain(id, depth) AS (
+      SELECT rv.id, 1 FROM inventory_movements rv
+      WHERE rv.reference_id = 'revert:' || CAST(inventory_movements.id AS TEXT) AND rv.id > inventory_movements.id
+      UNION ALL
+      SELECT rv.id, chain.depth + 1 FROM inventory_movements rv
+      JOIN revert_chain chain ON rv.reference_id = 'revert:' || CAST(chain.id AS TEXT)
+      WHERE rv.id > chain.id
+    )
+    SELECT 1 FROM revert_chain chain WHERE chain.depth % 2 = 1
+      AND NOT EXISTS (SELECT 1 FROM inventory_movements next_revert
+        WHERE next_revert.reference_id = 'revert:' || CAST(chain.id AS TEXT) AND next_revert.id > chain.id)
+  )`
+const notARevert = (): string => `(reference_id IS NULL OR CAST(reference_id AS TEXT) NOT LIKE 'revert:%') AND NOT ${REVERTED_NOW_SQL}`
+// 'stock_in' is the legacy string the unified stock-in session used to write
+// (see stockInSessionsQuery.ts's STOCK_RECEIPT_MOVEMENT_TYPES) -- without it
+// this digest under-counted every session committed through the Products
+// page's "Add products" entry.
+export const stockDigestInWhere = (): string => `movement_type IN ('add', 'stock_in', 'transfer_in', 'move_in') AND ${notARevert()}`
+export const stockDigestOutWhere = (): string => `${STOCK_OUT_MOVEMENT} AND ${notARevert()}`
 
 /** Items at or below their alert level now that were sold or taken out of stock on the scope's day and branch. */
 async function lowStockMovedOnDay(env: Env, filters: SalesFilters): Promise<{ rows: LowStockRow[]; more: number }> {
   const lowThresholdSql = lowStockThresholdSql(await loadLowStockConfig(env), 'low_stock_threshold')
   const sold = whereActiveSales('sales', filters)
-  const removed = [STOCK_OUT_MOVEMENT, localDateRangeClause('inventory_movements.created_at')]
+  const removed = [stockDigestOutWhere(), localDateRangeClause('inventory_movements.created_at')]
   if (filters.branchId != null) removed.push('inventory_movements.branch_id = @branchId')
   const rows = await getDb(env).prepare(`SELECT name, stock_quantity, ${lowThresholdSql} AS low_threshold, out_of_stock_threshold, COUNT(*) OVER () AS matched
     FROM products WHERE is_active = 1 AND ${lowOrOutOfStockSql(lowThresholdSql)}

@@ -2781,7 +2781,7 @@ app.post('/move-row', async (c) => {
 app.post('/movements/:id/revert', async (c) => {
   const user = c.get('user')
   if (getActionTier(user, 'inventory', 'adjust') !== 'full') {
-    return c.json({ error: 'Reverting a stock movement requires Full Access to Inventory.' }, 403)
+    return c.json({ error: 'Reverting a stock movement requires Full Access to Inventory.', code: 'revert_forbidden' }, 403)
   }
   const id = Number.parseInt(String(c.req.param('id') || ''), 10)
   if (!Number.isFinite(id) || id <= 0) return c.json({ error: 'Invalid movement id' }, 400)
@@ -2791,9 +2791,9 @@ app.post('/movements/:id/revert', async (c) => {
       unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, reference_id, batch_id
     FROM inventory_movements WHERE id = @id
   `).get<RevertMovementRow>({ id })
-  if (!mv) return c.json({ error: 'Stock movement not found' }, 404)
+  if (!mv) return c.json({ error: 'Stock movement not found', code: 'movement_not_found' }, 404)
   const result = await applyMovementRevert(db, mv, { userId: user?.id ?? null, userName: actorSnapshot(user) })
-  if (!result.ok) return c.json({ error: result.error, ...(result.code ? { code: result.code } : {}) }, result.status)
+  if (!result.ok) return c.json({ error: result.error, code: result.code, ...(result.params ? { params: result.params } : {}) }, result.status)
   const productId = Number(mv.product_id) || 0
   await audit(c.env, user?.id ?? null, actorSnapshot(user), 'stock_revert', 'product', productId || null, {
     movementId: id, movementType: mv.movement_type, revertType: result.revertType, quantity: result.quantity,

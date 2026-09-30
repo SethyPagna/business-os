@@ -51,7 +51,8 @@ async function mount(options: {
     },
   })
   const open = async (name = row.product_name) => surface.click(surface.find((node) => node.tagName === 'BUTTON' && node.textContent.includes(name), 'stock row'))
-  const revert = () => surface.button(words.revert)
+  // The Revert action, not a Revert row's "Reverts #N" link button.
+  const revert = () => surface.button({ test: (text: string) => text.includes(words.revert) && !text.includes('#') } as RegExp)
   return { surface, words, app, calls, previews, notices, open, revert, reads: () => reads }
 }
 try {

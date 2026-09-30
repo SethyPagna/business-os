@@ -10,6 +10,11 @@ function visit(node: ts.Node): void {
   ts.forEachChild(node, visit)
 }
 visit(ast)
+// REVERT-FIX F4: a Revert's #N link reads that one row by id, outside every filter.
+const byId = calls.filter((call) => /\bmovementId\b/.test(call.arguments[0].getText(ast)))
+assert.equal(byId.length, 1, 'one by-id read for the Revert links')
+assert.equal(byId[0].arguments[0].getText(ast), '{ movementId: id, page: 1, pageSize: 1 }', 'the by-id read carries no list filter')
+calls.splice(calls.indexOf(byId[0]), 1)
 assert.equal(calls.length, 2, 'interactive ledger and paged export both use the same server filter')
 
 // Execute the actual query argument expressions: a time edited on either edge

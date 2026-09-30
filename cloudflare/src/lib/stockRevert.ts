@@ -7,6 +7,13 @@
 // primitives the /adjust route uses, so a revert can never drift the
 // aggregate from the lots.
 //
+// Owner, 1 Oct 2026: a Revert works like cancelling a sale -- everything
+// returns with no loss and the reverted effect leaves the reports. Reverting
+// a receipt un-receives it from its lot (invoice line, supplier total, credit
+// and paid spend follow); reverting a removal takes its loss out of the
+// original period (removalLosses.ts). The Revert row itself, dated now and
+// linked by reference_id, keeps the history (test-stock-revert-past-reports.cjs).
+//
 // Split into a pure decision (planMovementRevert) and the db mutation
 // (applyMovementRevert) so both can be driven directly by
 // test-stock-revert-pure.cjs against the real migration chain -- the same
@@ -14,12 +21,13 @@
 import type { D1Compat } from './db'
 import { LEDGER_OUT_TYPES } from './stockLedgerQuery'
 import {
-  planReceiveBatchStock, planRemoveStockFromBatch, listBatchesForProduct, allocateAcrossLots,
-  decrementBatchStockStrictStatement, planUnreceiveBatchStock, restoreBatchStockStatements, type StockWriteStatement,
+  decrementBatchStockStrictStatement, planReceiveBatchStock, planRemoveStockFromBatch, planUnreceiveBatchStock,
+  restoreBatchStockStatements, type StockWriteStatement,
 } from './productBatches'
 import { multiplyMoney4 } from './moneyPrecision'
+import { MOVEMENT_RETURN_REFERENCE_TYPES, movementReferenceKindSql } from './movementReference'
 import { STOCK_RECEIPT_MOVEMENT_TYPES, isStockInEditReference, stockInEditRange } from './stockInSessionsQuery'
-import { isDamagedLotReference } from './stockCondition'
+import { STOCK_CONDITION_TAGS, isDamagedLotReference, taggedReasonText } from './stockCondition'
 
 const OUT_TYPES = new Set<string>(LEDGER_OUT_TYPES)
 const RECEIPT_TYPES = new Set<string>(STOCK_RECEIPT_MOVEMENT_TYPES)
@@ -57,9 +65,24 @@ export type RevertPlan =
   | { revertible: true; revertType: 'add' | 'remove'; magnitude: number }
   | { revertible: false; reason: 'no_stock' | 'not_revertible' }
 
+// Every refusal carries a stable code (and the numbers its text needs) so the
+// app can show it in the operator's language (frontend stockRevertError.ts).
+export type RevertRefusalCode =
+  | 'already_reverted' | 'stock_changed' | 'revert_not_tied' | 'revert_tagged_row' | 'revert_use_history'
+  | 'revert_stock_in_line_edited' | 'revert_nothing_to_revert' | 'revert_not_revertible' | 'revert_session_generation'
+  | 'revert_lineage_unresolved' | 'revert_insufficient_branch_stock' | 'revert_insufficient_lot_stock'
+  | 'revert_lot_moved' | 'revert_no_received_date' | 'revert_from_sale' | 'revert_from_return'
+  | 'revert_session_undone' | 'revert_from_merge'
+
+export type RevertRefusalParams = Record<string, string | number>
+
 export type RevertResult =
   | { ok: true; revertType: 'add' | 'remove'; quantity: number; usedBatchId: number | null; movementId: number }
-  | { ok: false; status: 400 | 409; error: string; code?: 'already_reverted' | 'stock_changed' }
+  | { ok: false; status: 400 | 409; error: string; code: RevertRefusalCode; params?: RevertRefusalParams }
+
+function refuse(status: 400 | 409, code: RevertRefusalCode, error: string, params?: RevertRefusalParams): RevertResult {
+  return params ? { ok: false, status, code, error, params } : { ok: false, status, code, error }
+}
 
 // Pure: given a movement, decide whether and how it reverts. The revert
 // direction is the OPPOSITE of the original's net effect -- an inflow is
@@ -74,14 +97,175 @@ export function planMovementRevert(m: Pick<RevertMovementRow, 'movement_type' | 
   return { revertible: true, revertType, magnitude }
 }
 
+// Whether a movement changed what the SUPPLIER delivered -- i.e. whether
+// reverting it must move the lot's purchase figures (received quantity/cost;
+// see planUnreceiveBatchStock) and not just its stock. Keyed off the movement
+// TYPE through the SAME receipt allowlist the ledger, the stock-in sessions
+// list and the frontend's stockMovementDetail.ts use: only a receipt (or a
+// dated count increase, which is recorded as one) is a purchase. A lot
+// quantity correction ('set'), an 'adjustment', a plain removal or a legacy
+// 'csv_import'/'in' row can point at a received lot without being a purchase,
+// so reverting one moves stock only.
+export function isReceiptMovementType(movementType: string): boolean {
+  return RECEIPT_TYPES.has(movementType)
+}
+
+// Stock a sale or a return moved belongs to that record: the operator changes
+// it there (cancel the sale, change its status, edit the return), never here.
+const SALE_SOURCE_TYPES = new Set<string>(['sale', 'sale_from_damaged'])
+const RETURN_SOURCE_TYPES = new Set<string>(MOVEMENT_RETURN_REFERENCE_TYPES)
+
+async function sourceRecordKind(db: D1Compat, m: Pick<RevertMovementRow, 'id' | 'movement_type'>): Promise<'sale' | 'return' | null> {
+  if (SALE_SOURCE_TYPES.has(m.movement_type)) return 'sale'
+  if (RETURN_SOURCE_TYPES.has(m.movement_type)) return 'return'
+  // 'return' / 'damage_in' / 'damage_out' are written by both families.
+  const row = await db.prepare(`SELECT ${movementReferenceKindSql('m')} AS kind FROM inventory_movements m WHERE m.id = @id`)
+    .get<{ kind: string | null }>({ id: Number(m.id) })
+  return row?.kind === 'sale' || row?.kind === 'return' ? row.kind : null
+}
+
+// The Inventory import writes its stock-in as type 'in' (not 'add') yet puts
+// it on a received lot through the receipt planner, so it is a purchase like
+// every other receipt. An 'in' row with no lot, or on a lot with no received
+// figures (a legacy row), changes stock only: un-receiving leaves NULL alone.
+async function isLotStampedRow(db: D1Compat, id: number): Promise<boolean> {
+  const row = await db.prepare('SELECT batch_id FROM inventory_movements WHERE id = @id').get<{ batch_id: number | null }>({ id })
+  return row?.batch_id != null
+}
+
+// Duplicate-merge rows ('adjustment', written by routes/products.ts) are owned
+// by the merge and reversed by its History Undo. The write-off is stored as a
+// NEGATIVE adjustment, which no standalone stock change ever writes, so a
+// Revert would move stock the wrong way; the carry-in is found by its text.
+const MERGE_ROW_REASON = /\) removed -- stock written off|\) into this product --|\[merge:[^\]]+\]/
+
+function isMergeOwnedRow(m: Pick<RevertMovementRow, 'movement_type' | 'quantity' | 'reason'>): boolean {
+  if (m.movement_type !== 'adjustment') return false
+  return Number(m.quantity) < 0 || MERGE_ROW_REASON.test(String(m.reason ?? ''))
+}
+
+// A receipt recorded with a condition tag is written as a normal 'add' and then
+// immediately moved to the held row (routes/inventory.ts, planHoldAsTagged):
+// the units are no longer sellable, so reverting the 'add' would take them out
+// of sellable stock a second time. The held 'damage_out' row beside it shares
+// product, branch, lot, units, reference and the tag-prefixed reason.
+async function isHeldAsTaggedReceipt(db: D1Compat, m: Pick<RevertMovementRow, 'id' | 'product_id' | 'branch_id' | 'batch_id' | 'quantity' | 'reason' | 'reference_id'>): Promise<boolean> {
+  const held = await db.prepare(`SELECT reason FROM inventory_movements
+    WHERE id > @id AND movement_type = 'damage_out' AND product_id = @productId AND branch_id = @branchId
+      AND COALESCE(batch_id, 0) = @batchId AND ABS(quantity) = @quantity AND CAST(COALESCE(reference_id, '') AS TEXT) = @reference`)
+    .all<{ reason: string | null }>({
+      id: Number(m.id), productId: Number(m.product_id), branchId: Number(m.branch_id), batchId: Number(m.batch_id) || 0,
+      quantity: Math.abs(Number(m.quantity)), reference: String(m.reference_id ?? ''),
+    })
+  return held.some((row) => STOCK_CONDITION_TAGS.some((tag) => row.reason === taggedReasonText(tag, m.reason)))
+}
+
+// 0153 (and any repair like it) wrote an 'adjustment' that carries the SALE's id
+// as its reference: the correction belongs to that sale. Membership, not mere
+// existence, because a standalone lot correction carries a client session id
+// that can equal some unrelated sale id.
+async function isSaleLinkedAdjustment(db: D1Compat, m: Pick<RevertMovementRow, 'movement_type' | 'product_id' | 'reference_id'>): Promise<boolean> {
+  if (m.movement_type !== 'adjustment' || !/^\d+$/.test(String(m.reference_id ?? ''))) return false
+  const row = await db.prepare('SELECT 1 AS hit FROM sale_items WHERE sale_id = @saleId AND product_id = @productId LIMIT 1')
+    .get<{ hit: number }>({ saleId: Number(m.reference_id), productId: Number(m.product_id) })
+  return Boolean(row)
+}
+
+const SESSION_UNDONE_TEXT = 'This row belongs to a stock-in session that was undone, so its stock is already taken back. Redo the session from Stock-in Sessions first. Nothing was changed.'
+const LINE_EDITED_TEXT = 'This stock-in line was edited after it was saved. Edit it again (quantity 0 removes it) or undo the edit from its history.'
+
+// Whether the session that wrote this row is currently undone (odd generation:
+// every undo adds one, every redo another).
+const SESSION_UNDONE_SQL = `SELECT 1 FROM stock_session_operations o
+  WHERE o.rowid = @rowid AND o.generation % 2 = 1
+    AND EXISTS (SELECT 1 FROM stock_session_members sm WHERE sm.movement_id = @movementId)`
+
+// The two states that make a receipt row no longer the thing it was when it
+// was saved: a later Edit of the line (stock-in-edit:<id> rows) and an Undo of
+// its session. Read once before planning, and asserted again INSIDE the batch
+// below, so a change that commits in between aborts the Revert instead of
+// being reversed twice.
+async function receiptRowRefusal(db: D1Compat, m: Pick<RevertMovementRow, 'id' | 'movement_type' | 'reference_id'>): Promise<RevertResult | null> {
+  if (RECEIPT_TYPES.has(m.movement_type)) {
+    const edited = await db.prepare('SELECT id FROM inventory_movements WHERE reference_id >= @lo AND reference_id < @hi LIMIT 1')
+      .get<{ id: number }>(stockInEditRange(Number(m.id)))
+    if (edited) return refuse(409, 'revert_stock_in_line_edited', LINE_EDITED_TEXT)
+  }
+  if (/^\d+$/.test(String(m.reference_id ?? ''))) {
+    const undone = await db.prepare(SESSION_UNDONE_SQL).get<{ 1: number }>({ rowid: Number(m.reference_id), movementId: Number(m.id) })
+    if (undone) return refuse(409, 'revert_session_undone', SESSION_UNDONE_TEXT)
+  }
+  return null
+}
+
+function receiptRowGuard(m: Pick<RevertMovementRow, 'id' | 'movement_type' | 'reference_id'>): StockWriteStatement {
+  const { lo, hi } = stockInEditRange(Number(m.id))
+  const checkEdits = RECEIPT_TYPES.has(m.movement_type)
+  const sessionRowid = /^\d+$/.test(String(m.reference_id ?? '')) ? Number(m.reference_id) : null
+  return {
+    sql: `INSERT INTO stock_session_guards (guard_value)
+      SELECT CASE
+        WHEN @checkEdits = 1 AND EXISTS (SELECT 1 FROM inventory_movements WHERE reference_id >= @lo AND reference_id < @hi) THEN 0
+        WHEN @rowid IS NOT NULL AND EXISTS (${SESSION_UNDONE_SQL}) THEN 0
+        ELSE 1 END`,
+    params: { checkEdits: checkEdits ? 1 : 0, lo, hi, rowid: sessionRowid, movementId: Number(m.id) },
+  }
+}
+
 async function branchQty(db: D1Compat, productId: number, branchId: number): Promise<number> {
   const row = await db.prepare('SELECT quantity FROM branch_stock WHERE product_id = @productId AND branch_id = @branchId')
     .get<{ quantity: number }>({ productId, branchId })
   return row ? Number(row.quantity) || 0 : 0
 }
 
+// What this product holds at the branch under a received date. Whatever
+// branch_stock holds beyond it is stock with no date at all.
+const DATED_LOT_QTY_SQL = `SELECT COALESCE(SUM(bbs.quantity), 0) AS quantity FROM branch_batch_stock bbs
+  JOIN product_batches pb ON pb.id = bbs.batch_id
+  WHERE pb.variant_product_id = @productId AND bbs.branch_id = @branchId`
+
+async function datedLotQty(db: D1Compat, productId: number, branchId: number): Promise<number> {
+  const row = await db.prepare(DATED_LOT_QTY_SQL)
+    .get<{ quantity: number }>({ productId, branchId })
+  return Number(row?.quantity) || 0
+}
+
+// In-batch assertion (stock_session_guards' CHECK(guard_value = 1)) that taking
+// undated units never leaves branch_stock below its dated lots: a sale that
+// consumed the undated units after the read above aborts the whole revert
+// instead of forking the two stock ledgers.
+function undatedStockGuard(productId: number, branchId: number): StockWriteStatement {
+  return {
+    sql: `INSERT INTO stock_session_guards (guard_value)
+      SELECT CASE WHEN COALESCE((SELECT quantity FROM branch_stock WHERE product_id = @productId AND branch_id = @branchId), 0)
+        >= (SELECT quantity FROM (${DATED_LOT_QTY_SQL})) THEN 1 ELSE 0 END`,
+    params: { productId, branchId },
+  }
+}
+
+type LotShare = { batchId: number; quantity: number; productId: number | null }
+
+// FX-stock4 N1. A count that no single lot covered carries no batch_id (0084)
+// but records what it moved on each lot (dated_stock_count_batch_actions,
+// 0035). Every Revert in its chain moves exactly those lot shares back or
+// forth -- read from the ROOT row, since the counters record none of their
+// own -- so the lots never drift from what the count did. Other batch-less
+// rows (a manual multi-lot remove, an aggregate-only add) have no shares.
+async function rootLotShares(db: D1Compat, rootId: number): Promise<LotShare[]> {
+  const rows = await db.prepare(`
+    SELECT a.batch_id AS batchId, ABS(a.quantity) AS quantity, pb.variant_product_id AS productId
+    FROM dated_stock_count_batch_actions a
+    LEFT JOIN product_batches pb ON pb.id = a.batch_id
+    WHERE a.movement_id = @movementId AND a.quantity <> 0
+    ORDER BY a.id
+  `).all<LotShare>({ movementId: rootId })
+  return rows.map((row) => ({ batchId: Number(row.batchId), quantity: Number(row.quantity), productId: row.productId == null ? null : Number(row.productId) }))
+}
+
+const MERGED_LOT_REFUSAL = 'This count moved stock on a received date that now belongs to another product (the products were merged), so it cannot be reverted here. Nothing was changed; correct it with a new count instead.'
+
 // The aggregate-only move (branch_stock + products.stock_quantity) -- used for
-// a batch-less movement and for any FIFO remainder the lots can't cover.
+// the units of a batch-less movement that no lot holds.
 //
 // branch_stock carries CHECK(quantity >= 0) since migration 0058, and SQLite's
 // UPSERT does NOT let ON CONFLICT DO UPDATE bypass a CHECK failure on the
@@ -106,29 +290,11 @@ function aggregateDeltaStatements(productId: number, branchId: number, delta: nu
   ]
 }
 
-// Whether a movement changed what the SUPPLIER delivered -- i.e. whether
-// reverting it must move the lot's purchase figures (received quantity/cost;
-// see planUnreceiveBatchStock) and not just its stock. Keyed off the movement
-// TYPE through the SAME receipt allowlist the ledger, the stock-in sessions
-// list and the frontend's stockMovementDetail.ts use: only a receipt is a
-// purchase. A lot quantity correction ('set', routes/batches.ts), an
-// 'adjustment', a plain removal or a legacy 'csv_import'/'in' row can point
-// at a received lot without being a purchase, so reverting one moves stock
-// only -- a correction never touched received_quantity and its revert must
-// not either, and a whole-lot correction reverted must not wipe the
-// supplier's credit.
-export function isReceiptMovementType(movementType: string): boolean {
-  return RECEIPT_TYPES.has(movementType)
-}
-
-// A revert counter-movement (reference_id 'revert:N') takes its purchase
-// nature from the row it compensates, however deep the chain: receipt ->
-// revert (a 'remove' that un-received) -> revert of that (an 'add' that
-// re-received) -> ... Classifying a counter by its own type would call the
-// level-3 'add' a fresh receipt, and the counter of a plain removal (also an
-// 'add') a purchase. One indexed statement follows appended counters to their
-// root; strictly decreasing ids prevent cycles without truncating valid chains.
-// An unresolved reversal is refused rather than treated as stock-only.
+// A revert counter-movement (reference_id 'revert:N') compensates a row that
+// must still exist, however deep the chain. One indexed statement follows
+// appended counters to their root; strictly decreasing ids prevent cycles
+// without truncating valid chains. A reversal whose original cannot be
+// identified is refused.
 export async function revertRootMovement(
   db: D1Compat,
   m: Pick<RevertMovementRow, 'id' | 'movement_type' | 'reference_id'>,
@@ -147,16 +313,15 @@ export async function revertRootMovement(
 }
 
 // Apply the revert: move the stock (aggregate + batch ledger) the opposite
-// way, mirror the lot's purchase figures when the movement was a receipt, and
-// insert the counter-movement -- the mirror and the counter-movement land in
-// ONE db.batch. Returns a discriminated result rather than throwing, so the
-// route can map it straight to a status/JSON; the only exceptions it swallows
-// are the batch helpers' own (insufficient batch stock), converted to a 400.
+// way, mirror the lot's purchase figures when the chain's root is a receipt,
+// and insert the counter-movement, in ONE db.batch. Returns a
+// discriminated result rather than throwing, so the route can map it straight
+// to a status/JSON; a CHECK failure inside the batch becomes stock_changed.
 export async function applyMovementRevert(db: D1Compat, m: RevertMovementRow, actor: RevertActor): Promise<RevertResult> {
   const productId = Number(m.product_id) || 0
   const branchId = Number(m.branch_id) || 0
   if (!productId || !branchId) {
-    return { ok: false, status: 400, error: 'This movement is not tied to a product and branch, so it cannot be reverted here.' }
+    return refuse(400, 'revert_not_tied', 'This movement is not tied to a product and branch, so it cannot be reverted here.')
   }
   // P3-L6. A movement that moved units into or out of a TAGGED held row is
   // half of a two-ledger transition (sellable stock AND
@@ -168,11 +333,7 @@ export async function applyMovementRevert(db: D1Compat, m: RevertMovementRow, ac
   // neither place. The real reversal for these transitions is the tagged
   // row's own Restore / Remove entirely actions, which move both ledgers.
   if (isDamagedLotReference(m.reference_id)) {
-    return {
-      ok: false,
-      status: 400,
-      error: 'This movement belongs to a tagged (damaged, broken, expired ...) stock row. Reverse it from that row on the product instead, so the tagged quantity moves with the stock.',
-    }
+    return refuse(400, 'revert_tagged_row', 'This movement belongs to a tagged (damaged, broken, expired ...) stock row. Reverse it from that row on the product instead, so the tagged quantity moves with the stock.')
   }
   // A scoped Set (lib/stockLotAdjustment.ts) and the counter-movement of its
   // undo are replayed ONLY through its own history generation, which guards
@@ -184,7 +345,7 @@ export async function applyMovementRevert(db: D1Compat, m: RevertMovementRow, ac
     ? await db.prepare('SELECT reference_id FROM inventory_movements WHERE id = @id').get<{ reference_id: string | null }>({ id: Number(setReference.slice(7)) || 0 })
     : null
   if (setReference.startsWith('stock-set:') || String(setParent?.reference_id ?? '').startsWith('stock-set:')) {
-    return { ok: false, status: 409, error: 'This stock correction has exact history. Use Undo/Redo in its history; it cannot be reverted from the stock ledger.' }
+    return refuse(409, 'revert_use_history', 'This stock correction has exact history. Use Undo/Redo in its history; it cannot be reverted from the stock ledger.')
   }
   // N6: a stock-in line edit (lib/stockInLineEdit.ts) is replayed only through
   // its own history generation, and a line that was edited is no longer just
@@ -192,24 +353,32 @@ export async function applyMovementRevert(db: D1Compat, m: RevertMovementRow, ac
   // quantity from the ORIGINAL lot. Both are refused; the line is changed (or
   // set to 0) through its Edit, and an edit is reversed with Undo.
   if (isStockInEditReference(setReference) || isStockInEditReference(setParent?.reference_id)) {
-    return { ok: false, status: 409, error: 'This row belongs to an edit of a stock-in line. Use Undo/Redo in its history, or edit the line again.' }
+    return refuse(409, 'revert_use_history', 'This row belongs to an edit of a stock-in line. Use Undo/Redo in its history, or edit the line again.')
   }
-  if (RECEIPT_TYPES.has(m.movement_type)) {
-    const edited = await db.prepare('SELECT id FROM inventory_movements WHERE reference_id >= @lo AND reference_id < @hi LIMIT 1')
-      .get<{ id: number }>(stockInEditRange(Number(m.id)))
-    if (edited) {
-      return { ok: false, status: 409, error: 'This stock-in line was edited after it was saved. Edit it again (quantity 0 removes it) or undo the edit from its history.' }
+  const rowRefusal = await receiptRowRefusal(db, m)
+  if (rowRefusal) return rowRefusal
+  // Rows another record owns: the record's own undo reverses them with its
+  // other effects, and a Revert here would move stock the wrong way or twice.
+  // A Revert counter is exempt, so a wrong-direction Revert made before this
+  // rule can still be reverted back.
+  if (!String(m.reference_id ?? '').startsWith('revert:')) {
+    if (isMergeOwnedRow(m)) {
+      return refuse(400, 'revert_from_merge', 'This change came from merging duplicate products. Undo the merge from History instead. Nothing was changed.')
+    }
+    if (await isSaleLinkedAdjustment(db, m)) {
+      return refuse(400, 'revert_from_sale', 'This change came from a sale. Change it from the sale: cancel it or change its status.')
+    }
+    if (RECEIPT_TYPES.has(m.movement_type) && await isHeldAsTaggedReceipt(db, m)) {
+      return refuse(400, 'revert_tagged_row', 'This receipt was held as a tagged (damaged, broken, expired ...) stock row. Reverse it from that row on the product instead, so the tagged quantity moves with the stock.')
     }
   }
   const plan = planMovementRevert(m)
   if (!plan.revertible) {
-    return {
-      ok: false,
-      status: 400,
-      error: plan.reason === 'no_stock'
-        ? 'This movement moved no stock, so there is nothing to revert.'
-        : `A "${m.movement_type}" movement is part of a sale, return, transfer or move record and cannot be reverted from the stock ledger. Undo it from its own record instead.`,
-    }
+    if (plan.reason === 'no_stock') return refuse(400, 'revert_nothing_to_revert', 'This movement moved no stock, so there is nothing to revert.')
+    const source = await sourceRecordKind(db, m)
+    if (source === 'sale') return refuse(400, 'revert_from_sale', 'This change came from a sale. Change it from the sale: cancel it or change its status.')
+    if (source === 'return') return refuse(400, 'revert_from_return', 'This change came from a return. Change it from the return instead.')
+    return refuse(400, 'revert_not_revertible', `A "${m.movement_type}" movement is part of a sale, return, transfer or move record and cannot be reverted from the stock ledger. Undo it from its own record instead.`, { type: m.movement_type })
   }
   // Double-revert guard. This read only gives the common case a clean
   // answer; it is NOT what makes a revert once-only. Two requests (double
@@ -235,19 +404,17 @@ export async function applyMovementRevert(db: D1Compat, m: RevertMovementRow, ac
         AND NOT EXISTS (SELECT 1 FROM stock_session_members sm WHERE sm.movement_id = @movementId)
     `).get<{ id: string }>({ rowid: sessionRowid, movementId: m.id })
     if (generationOf) {
-      return {
-        ok: false,
-        status: 409,
-        error: `This row was written by the undo/redo of stock-in session ${generationOf.id}. Redo or undo that session from Stock-in Sessions instead.`,
-      }
+      return refuse(409, 'revert_session_generation', `This row was written by the undo/redo of stock-in session ${generationOf.id}. Redo or undo that session from Stock-in Sessions instead.`, { session: generationOf.id })
     }
   }
 
   const { revertType, magnitude } = plan
   const batchId = m.batch_id != null ? Number(m.batch_id) : null
   const root = await revertRootMovement(db, m)
-  if (!root) return { ok: false, status: 409, error: 'Cannot revert: the original stock action cannot be identified safely. Nothing was changed.' }
-  const purchaseSide = isReceiptMovementType(root.movement_type)
+  if (!root) return refuse(409, 'revert_lineage_unresolved', 'Cannot revert: the original stock action cannot be identified safely. Nothing was changed.')
+  // A chain takes its purchase nature from its root: receipt -> un-receive ->
+  // re-receive -> ..., while the chain of a removal only moves stock.
+  const purchaseSide = isReceiptMovementType(root.movement_type) || (root.movement_type === 'in' && await isLotStampedRow(db, root.id))
   // This receipt's own money for the lot's cumulative received cost (0080):
   // the movement's recorded total, else its unit cost times its units.
   const receiptCostUsd = m.total_cost_usd != null ? Number(m.total_cost_usd)
@@ -258,7 +425,7 @@ export async function applyMovementRevert(db: D1Compat, m: RevertMovementRow, ac
   if (revertType === 'remove') {
     const current = await branchQty(db, productId, branchId)
     if (magnitude > current) {
-      return { ok: false, status: 400, error: `Cannot revert: only ${current} in stock at ${m.branch_name || 'this branch'}, ${magnitude} needed.` }
+      return refuse(400, 'revert_insufficient_branch_stock', `Cannot revert: only ${current} in stock at ${m.branch_name || 'this branch'}, ${magnitude} needed.`, { available: current, needed: magnitude, branch: m.branch_name || '' })
     }
     if (batchId != null) {
       // Strict (unclamped) lot + branch decrement in the same batch as the
@@ -270,68 +437,59 @@ export async function applyMovementRevert(db: D1Compat, m: RevertMovementRow, ac
         LEFT JOIN branch_batch_stock bbs ON bbs.batch_id = pb.id AND bbs.branch_id = @branchId
         WHERE pb.id = @batchId AND pb.variant_product_id = @productId
       `).get<{ available: number }>({ batchId, productId, branchId })
-      if (!lot) return { ok: false, status: 400, error: 'Selected received date does not belong to this product' }
+      if (!lot) return refuse(400, 'revert_lot_moved', 'Selected received date does not belong to this product')
       const available = Number(lot.available) || 0
-      if (magnitude > available) return { ok: false, status: 400, error: `Only ${available} available under this received date at this branch` }
+      if (magnitude > available) return lotShortRefusal(available, magnitude)
       statements.push(...planRemoveStockFromBatch({ batchId, productId, branchId, quantity: magnitude }).statements)
       usedBatchId = batchId
       // Un-purchase: the lot loses this receipt's units and money; supplier
-      // and payment state stay on the row (see planUnreceiveBatchStock).
+      // and payment state stay on the row for the Revert of this Revert.
       if (purchaseSide) statements.push(...planUnreceiveBatchStock({ batchId, quantity: magnitude, totalCostUsd: receiptCostUsd }))
     } else {
-      // FIFO in listBatchesForProduct's order, written as strict statements
-      // into the one batch; whatever the lots cannot cover comes off the
-      // aggregate only.
-      const lots = await listBatchesForProduct(db, productId, branchId, { onlyAvailable: true })
-      const { takes, uncovered } = allocateAcrossLots(
-        lots.map((lot) => ({ batchId: Number(lot.id), lotCode: lot.lot_code ?? null, expiryDate: lot.expiry_date ?? null, available: Number(lot.quantity) || 0 })),
-        magnitude,
-      )
-      for (const take of takes) statements.push(decrementBatchStockStrictStatement(take.batchId, branchId, take.quantity))
-      // magnitude <= branch quantity was checked above; the strict UPDATE
-      // makes a concurrent sale fail the batch instead of flooring. The
-      // product total is recomputed from its branches, as
-      // planRemoveStockFromBatch does, never pushed below zero by drift.
-      statements.push(
-        {
-          sql: 'UPDATE branch_stock SET quantity = quantity - @quantity WHERE product_id = @productId AND branch_id = @branchId',
-          params: { productId, branchId, quantity: magnitude },
-        },
-        {
-          sql: `UPDATE products SET stock_quantity = (SELECT COALESCE(SUM(quantity), 0) FROM branch_stock WHERE product_id = @productId),
-                  updated_at = CURRENT_TIMESTAMP WHERE id = @productId`,
-          params: { productId },
-        },
-      )
-      usedBatchId = takes.length === 1 && uncovered === 0 ? takes[0].batchId : null
-      // A receipt with no lot stamp (pre-0084) names no lot to mirror on. When
-      // the FIFO drain resolved to exactly ONE lot that covered all of it,
-      // that lot is the only candidate and is mirrored (the counter-movement
-      // is stamped with it by the same rule). Spread across several lots
-      // there is no honest target and only the stock moves -- blank, the rule
-      // 0084 set for the stamp itself.
-      if (purchaseSide && usedBatchId != null) statements.push(...planUnreceiveBatchStock({ batchId: usedBatchId, quantity: magnitude, totalCostUsd: receiptCostUsd }))
+      // No lot stamp: the count's own lot shares come back off those lots;
+      // every other unit (a pre-0084 receipt, an aggregate-only add) was
+      // never put on a received date, so it comes off the stock held under
+      // none. Taking it from a dated lot would guess, and could drain another
+      // supplier's delivery; when the undated stock is short the revert is
+      // refused whole.
+      const shares = await rootLotShares(db, root.id)
+      if (shares.some((share) => share.productId !== productId)) return refuse(400, 'revert_lot_moved', MERGED_LOT_REFUSAL)
+      for (const share of shares) {
+        const lot = await db.prepare('SELECT COALESCE(quantity, 0) AS available FROM branch_batch_stock WHERE batch_id = @batchId AND branch_id = @branchId')
+          .get<{ available: number }>({ batchId: share.batchId, branchId })
+        const available = Number(lot?.available) || 0
+        if (share.quantity > available) return lotShortRefusal(available, share.quantity)
+        statements.push(decrementBatchStockStrictStatement(share.batchId, branchId, share.quantity))
+      }
+      const fromLots = shares.reduce((sum, share) => sum + share.quantity, 0)
+      const undated = current - await datedLotQty(db, productId, branchId)
+      if (magnitude - fromLots > undated) {
+        const available = Math.max(0, undated)
+        const needed = magnitude - fromLots
+        return refuse(400, 'revert_no_received_date', `Cannot revert: this change was saved without a received date and only ${available} of the ${needed} units at ${m.branch_name || 'this branch'} are held without one. Nothing was changed. Use Remove stock and choose the received date instead.`, { available, needed, branch: m.branch_name || '' })
+      }
+      statements.push(...aggregateDeltaStatements(productId, branchId, -magnitude), undatedStockGuard(productId, branchId))
+      // A count increase was received onto its lots: un-receive each share
+      // (after the stock writes, so an emptied lot is seen as empty).
+      if (purchaseSide) for (const share of shares) statements.push(...planUnreceiveBatchStock({ batchId: share.batchId, quantity: share.quantity, totalCostUsd: null }))
+      usedBatchId = shares.length === 1 && shares[0].quantity === magnitude ? shares[0].batchId : null
     }
   } else if (batchId != null && purchaseSide) {
     // Reverting the revert of a receipt puts the purchase back on the same
     // lot: units and money are received again under the supplier and payment
     // state the row kept through the revert (they are not on the movement).
-    // Since productBatches.ts now makes a ZEROED lot take whatever attribution
-    // this receipt carries -- including clearing it to NULL when none is
-    // given, so an unrelated later receipt never inherits a stale supplier --
-    // this call must explicitly re-supply the row's own attribution rather
-    // than rely on an implicit "no info means leave it alone".
+    // A ZEROED lot takes whatever attribution a receipt carries (clearing it
+    // to NULL when none is given), so this call re-supplies the row's own.
     const priorAttribution = await db.prepare(
       'SELECT supplier_id, supplier_name, payment_status, credit_due_date FROM product_batches WHERE id = @batchId',
     ).get<{ supplier_id: number | null; supplier_name: string | null; payment_status: string | null; credit_due_date: string | null }>({ batchId })
-    // Same plan receiveBatchStock builds for a historical replay onto an
-    // explicit lot (no lot-target resolution; cost preimage from the row),
-    // placed in this revert's one batch instead of committing on its own.
     const before = await db.prepare(
       'SELECT id, received_cost_usd FROM product_batches WHERE id = @batchId AND variant_product_id = @productId',
     ).get<{ id: number; received_cost_usd: number | null }>({ batchId, productId })
-    if (!before) return { ok: false, status: 400, error: 'Selected received date does not belong to this product' }
-    const unitCostUsd = m.unit_cost_usd ?? null
+    if (!before) return refuse(400, 'revert_lot_moved', 'Selected received date does not belong to this product')
+    // Both cost columns default to 0 (0001), so a row with neither priced (a
+    // dated count) carries no cost and must not turn the lot's NULL into $0.
+    const unitCostUsd = !Number(m.unit_cost_usd) && !Number(m.total_cost_usd) ? null : m.unit_cost_usd ?? null
     try {
       statements.push(...planReceiveBatchStock({
         productId, branchId, quantity: magnitude, batchId, unitCostUsd,
@@ -343,41 +501,36 @@ export async function applyMovementRevert(db: D1Compat, m: RevertMovementRow, ac
         receiptCostPreimage: unitCostUsd != null ? { batchExists: true, receivedCostUsd: before.received_cost_usd ?? null } : undefined,
       }).statements)
     } catch (err) {
-      return { ok: false, status: 400, error: err instanceof Error ? err.message : 'Failed to revert stock' }
+      return refuse(400, 'revert_lot_moved', err instanceof Error ? err.message : 'Failed to revert stock')
     }
     usedBatchId = batchId
   } else if (batchId != null) {
     // Putting back units a plain removal took out is not a new delivery: the
-    // lot regains its stock (and picker visibility), its received figures stay
-    // put. receiveBatchStock would have counted the units as received again.
+    // lot regains its stock (and picker visibility), its received figures stay.
     const lot = await db.prepare('SELECT id FROM product_batches WHERE id = @batchId AND variant_product_id = @productId')
       .get<{ id: number }>({ batchId, productId })
-    if (!lot) return { ok: false, status: 400, error: 'Selected received date does not belong to this product' }
+    if (!lot) return refuse(400, 'revert_lot_moved', 'Selected received date does not belong to this product')
     statements.push(...restoreBatchStockStatements(batchId, branchId, magnitude), ...aggregateDeltaStatements(productId, branchId, magnitude))
     usedBatchId = batchId
   } else {
-    // FX-stock4 N1. A removal no single lot covered carries no batch_id
-    // (0084), and this put its units back on branch_stock alone: receive 4
-    // and 8, count to 0, revert -> branch 12, lots 0. A dated stock count
-    // records what it took from each lot (0035), so each of those lots gets
-    // exactly that back; only what no lot held stays branch-only, as the
-    // removal left it. A lot a merge has left on another product is refused,
-    // as the stamped case above is. Other batch-less removals (a manual
-    // multi-lot remove, a revert's own FIFO drain) keep no per-lot record and
-    // still move branch_stock only.
-    const takes = await db.prepare(`
-      SELECT a.batch_id AS batchId, -a.quantity AS quantity, pb.variant_product_id AS productId
-      FROM dated_stock_count_batch_actions a
-      LEFT JOIN product_batches pb ON pb.id = a.batch_id
-      WHERE a.movement_id = @movementId AND a.quantity < 0
-      ORDER BY a.id
-    `).all<{ batchId: number; quantity: number; productId: number | null }>({ movementId: Number(m.id) })
-    if (takes.some((take) => Number(take.productId) !== productId)) {
-      return { ok: false, status: 400, error: 'This count took stock from a received date that now belongs to another product (the products were merged), so it cannot be reverted here. Nothing was changed; correct it with a new count instead.' }
+    // No lot stamp: a count's lot shares go back on those lots (receive 4
+    // and 8, count to 0, revert -> lots 4 / 8, not branch 12 / lots 0), and a
+    // count increase is received on them again; what no lot held stays
+    // branch-only, as the original left it.
+    const shares = await rootLotShares(db, root.id)
+    if (shares.some((share) => share.productId !== productId)) return refuse(400, 'revert_lot_moved', MERGED_LOT_REFUSAL)
+    for (const share of shares) {
+      statements.push(...restoreBatchStockStatements(share.batchId, branchId, share.quantity))
+      if (purchaseSide) {
+        statements.push({
+          sql: `UPDATE product_batches SET received_quantity = CASE WHEN received_quantity IS NULL THEN NULL ELSE received_quantity + @quantity END,
+                  updated_at = CURRENT_TIMESTAMP WHERE id = @batchId`,
+          params: { batchId: share.batchId, quantity: share.quantity },
+        })
+      }
     }
-    for (const take of takes) statements.push(...restoreBatchStockStatements(Number(take.batchId), branchId, Number(take.quantity)))
     statements.push(...aggregateDeltaStatements(productId, branchId, magnitude))
-    usedBatchId = takes.length === 1 && Number(takes[0].quantity) === magnitude ? Number(takes[0].batchId) : null
+    usedBatchId = shares.length === 1 && shares[0].quantity === magnitude ? shares[0].batchId : null
   }
 
   const revertReason = `Revert of #${m.id}${m.reason ? `: ${m.reason}` : ` (${m.movement_type})`}`
@@ -414,6 +567,7 @@ export async function applyMovementRevert(db: D1Compat, m: RevertMovementRow, ac
   try {
     await db.batch([
       { sql: ALREADY_REVERTED_GUARD, params: { ref: counterRef, movementId: Number(m.id) } },
+      receiptRowGuard(m),
       ...statements,
       { sql: 'DELETE FROM stock_session_guards', params: {} },
     ])
@@ -423,7 +577,11 @@ export async function applyMovementRevert(db: D1Compat, m: RevertMovementRow, ac
     if (await revertExists(db, counterRef)) return ALREADY_REVERTED
     const message = err instanceof Error ? err.message : String(err)
     if (/CHECK constraint failed/i.test(message)) {
-      return { ok: false, status: 409, code: 'stock_changed', error: 'The stock changed while this was being reverted. Nothing was changed; refresh and try again.' }
+      // The in-batch receipt guard: an Edit or a session Undo landed after the
+      // reads above. Say which, instead of a generic "stock changed".
+      const changed = await receiptRowRefusal(db, m)
+      if (changed) return changed
+      return refuse(409, 'stock_changed', 'The stock changed while this was being reverted. Nothing was changed; refresh and try again.')
     }
     throw err
   }
@@ -442,7 +600,11 @@ const ALREADY_REVERTED_GUARD = `INSERT INTO stock_session_guards (guard_value)
   SELECT CASE WHEN EXISTS (SELECT 1 FROM inventory_movements WHERE reference_id = @ref)
     OR NOT EXISTS (SELECT 1 FROM inventory_movements WHERE id = @movementId) THEN 0 ELSE 1 END`
 
-const ALREADY_REVERTED: RevertResult = { ok: false, status: 409, code: 'already_reverted', error: 'This movement has already been reverted.' }
+const ALREADY_REVERTED: RevertResult = refuse(409, 'already_reverted', 'This movement has already been reverted.')
+
+function lotShortRefusal(available: number, needed: number): RevertResult {
+  return refuse(400, 'revert_insufficient_lot_stock', `Cannot revert: only ${available} available under this received date at this branch, ${needed} needed.`, { available, needed })
+}
 
 async function revertExists(db: D1Compat, ref: string): Promise<boolean> {
   const row = await db.prepare('SELECT id FROM inventory_movements WHERE reference_id = @ref LIMIT 1').get<{ id: number }>({ ref })
