@@ -163,13 +163,14 @@ export default function StockSessionLineEntry(props: LineEntryProps) {
               <InsetNumberField label={tr('cost', 'Cost')} value={unitCost} onChange={onUnitCost} step="0.0001" disabled={busy || !canEditCosts || !canReceive} invalid={ring('cost')} onEnter={onAdd} />
             ) : (
               <div className="relative flex h-10 min-w-0 items-end justify-end rounded-lg border border-gray-200 bg-gray-50 px-2 pb-1.5 text-sm text-gray-400 dark:border-gray-700 dark:bg-gray-900/40" aria-disabled="true" title={tr('cost', 'Cost')}>
-                <span className="absolute left-2 top-1 text-[9px] leading-none">{tr('cost', 'Cost')}</span>—
+                <span className="absolute left-2 top-0 text-[9px] leading-[1.6]">{tr('cost', 'Cost')}</span>—
               </div>
             )}
             <InsetNumberField label={tr('price', 'Price')} value={sellingPrice} onChange={onSellingPrice} step="0.01" disabled={busy || !picked || !canEditPrice} invalid={ring('price')} onEnter={onAdd} />
           </div>
-          <div className="grid grid-cols-[minmax(0,1.5fr)_minmax(0,1.2fr)_minmax(0,1.2fr)] gap-1.5">
-            {lotSelect}
+          {/* Phones split the row: at 360 px the selects clipped their text. */}
+          <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-[minmax(0,1.5fr)_minmax(0,1.2fr)_minmax(0,1.2fr)]">
+            <div className="col-span-2 sm:col-span-1">{lotSelect}</div>
             <IconField icon={CalendarClock} title={tr('expiry', 'Expiry')}>
               <DateEntryInput
                 className="h-10 w-full pl-8 text-xs sm:text-sm"
@@ -185,8 +186,8 @@ export default function StockSessionLineEntry(props: LineEntryProps) {
           </div>
         </>
       ) : (
-        <div className="grid grid-cols-[minmax(0,1.5fr)_minmax(0,0.8fr)_minmax(0,1.2fr)] gap-1.5">
-          {lotSelect}
+        <div className="grid grid-cols-[minmax(0,0.7fr)_minmax(0,1.3fr)] gap-1.5 sm:grid-cols-[minmax(0,1.5fr)_minmax(0,0.8fr)_minmax(0,1.2fr)]">
+          <div className="col-span-2 sm:col-span-1">{lotSelect}</div>
           <InsetNumberField
             label={mode === 'set' ? tr('set_to', 'Set to') : tr('stock_line_qty', 'Qty')}
             value={quantity}

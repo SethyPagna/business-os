@@ -98,6 +98,8 @@ const batchRoute = loadReal('routes/batches.ts', {
   '../lib/batchCode': batchCode,
   '../lib/conflictControl': conflictControl,
   '../lib/stockReceiptGate': { appendReceiptNotes: (value) => value, FREE_GOODS_REASON_NOTE: '', stockReceiptGateCode: () => null, stockReceiptGateMessage: () => '' },
+  '../lib/stockSessionMath': loadReal('lib/stockSessionMath.ts', { './moneyPrecision': moneyPrecision }),
+  '../lib/schemaProbe': loadReal('lib/schemaProbe.ts'),
   // Migration 0192: runAdjustAction/runReceiveBatchAction wrap their kernel in
   // the per-line receipt guard. REAL, not a stub: a body without a
   // client_request_id must hand straight through to the kernel, and that is

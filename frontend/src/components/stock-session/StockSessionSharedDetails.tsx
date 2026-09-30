@@ -42,7 +42,7 @@ export function InsetNumberField({ label, value, onChange, disabled = false, inv
 }) {
   return (
     <label className="relative block min-w-0" title={title || label}>
-      <span className="pointer-events-none absolute left-2 top-1 z-10 max-w-[calc(100%-0.75rem)] truncate text-[9px] font-medium leading-none text-gray-400 dark:text-gray-500">{label}</span>
+      <span className="pointer-events-none absolute left-2 top-0 z-10 max-w-[calc(100%-0.75rem)] truncate text-[9px] font-medium leading-[1.6] text-gray-400 dark:text-gray-500">{label}</span>
       <input
         id={id}
         type="number"

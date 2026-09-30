@@ -2,7 +2,7 @@
 // the mode is the title, the shared details never change shape, labels live
 // inside the controls, and the buttons carry the owner's words.
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 
 let failed = 0
 function runTest(name: string, fn: () => void): void {
@@ -75,6 +75,31 @@ runTest('S3/S4: one Received date select, one Tag select, and the reason row wit
   assert.match(modal, /reloadReasons/, 'closing the manager reloads the options')
 })
 
+runTest('360 px: no mode or select text is clipped (browser pass, 30 Sep: "Rem…", "New · 3…", "Sella…")', () => {
+  // Measured at 360: "Remove" needed 67 px in a 63 px segment; the lot and
+  // tag selects kept 49 and 25 px for their text. Phones split the row.
+  assert.match(header, /min-w-0 truncate rounded-\[0\.6rem\] px-1 /, 'the mode segments keep 1 px-unit padding so "Remove" fits')
+  const rows = [...entry.matchAll(/<div className="(grid grid-cols-[^ ]+ gap-1\.5 sm:grid-cols-\[[^"]+\])">/g)].map((match) => match[1])
+  assert.equal(rows.length, 2, 'the Add E3 row and the Remove/Set row are two columns on a phone')
+  assert.match(rows[0], /^grid grid-cols-2 /, 'Add: Expiry and Tag share the second phone row equally')
+  // "Remove entirely" needed 102 px of text room in an even half (86 px).
+  assert.match(rows[1], /^grid grid-cols-\[minmax\(0,0\.7fr\)_minmax\(0,1\.3fr\)\] /, 'Remove/Set: the Tag select gets the wider phone cell')
+  for (const row of rows) assert.match(row, /sm:grid-cols-\[minmax\(0,1\.5fr\)_minmax\(0,(1\.2|0\.8)fr\)_minmax\(0,1\.2fr\)\]/, 'one row from sm up, as the spec draws it')
+  assert.match(entry, /<div className="col-span-2 sm:col-span-1">\s*\{lotSelect\}/, 'the received date takes the whole first phone row')
+  assert.equal((entry.match(/\{lotSelect\}/g) || []).length, 2)
+})
+
+runTest('Khmer: the labels inside the number cells keep a Khmer line box (browser pass, lang=km at 360)', () => {
+  // khmerRoom measured line-height 9/9 on ចំនួន, ថ្លៃដើម, តម្លៃ.
+  for (const [name, text] of [['shared', shared], ['entry', entry]] as const) {
+    for (const match of text.matchAll(/<span className="([^"]*text-\[9px\][^"]*)"/g)) {
+      assert.doesNotMatch(match[1], /leading-none/, `${name}: an inset label squeezes Khmer to a 1.0 line height`)
+      assert.match(match[1], /leading-\[1\.6\]/, `${name}: an inset label gets the Khmer line height`)
+    }
+  }
+  assert.match(shared, /text-\[9px\]/, 'the inset label is still there')
+})
+
 runTest('S13: the line button reads "Add" (or "Save"), text only; the finish button is "Complete Session"', () => {
   assert.match(entry, /\{editing \? tr\('save', 'Save'\) : tr\('add', 'Add'\)\}/)
   assert.doesNotMatch(entry, /fast_stockin_add|＋|update_line/, 'no "+ Add & next", no glyph')
@@ -91,6 +116,32 @@ runTest('S13: "Items" is the list; one compact row per line; no Existing badge',
   assert.doesNotMatch(items, /stock_session_existing_product/)
   assert.match(items, /aria-label=\{tr\('remove', 'Remove'\)\}/, 'trash is icon-only with a name')
   assert.doesNotMatch(items, /Pencil/, 'tapping the row edits; no separate pencil')
+})
+
+runTest('Items and Review show the barcode under the name: two child rows of one name differ only by it', () => {
+  // The old queue did this (tests/stockInSessionProductNames); the rewrite lost it.
+  const barcodeLine = /\{(line\.product|review)\.barcode \? <span className="block break-all dense-id text-\[10px\] text-gray-400">\{(line\.product|review)\.barcode\}<\/span> : null\}/
+  assert.match(items, barcodeLine, 'Items: the barcode sits under the name')
+  assert.match(review, barcodeLine, 'Review: the barcode sits under the name')
+  assert.match(src('utils/stockSessionDraft.ts'), /barcode: String\(line\.product\.barcode \|\| ''\)/, 'the review carries the barcode')
+})
+
+runTest('build: an icon in a shared stock control never pulls the public catalog into app-shared', () => {
+  // 30 Sep build: StockReasonField's MessageSquare was also PublicCatalogPage's,
+  // Rollup put it in catalog-public, and app-shared -> catalog-public closed a cycle.
+  const vite = readFileSync(new URL('../vite.config.ts', import.meta.url), 'utf8')
+  const pinned = new Set([...vite.matchAll(/const (?:routeSharedIconNames|appShellIconNames) = new Set\(\[([^\]]*)\]\)/g)]
+    .flatMap((match) => [...match[1].matchAll(/'([^']+)'/g)].map((name) => name[1])))
+  assert.ok(pinned.has('truck') && pinned.has('settings-2'), 'read the shared-ui icon sets from vite.config.ts')
+  const catalogDir = new URL('../src/components/catalog/', import.meta.url)
+  const catalogIcons = new Set(readdirSync(catalogDir, { recursive: true }).map(String).filter((file) => /\.tsx?$/.test(file))
+    .flatMap((file) => [...readFileSync(new URL(file.replace(/\\/g, '/'), catalogDir), 'utf8').matchAll(/lucide-react\/dist\/esm\/icons\/([a-z0-9-]+)\.js/g)].map((match) => match[1])))
+  assert.ok(catalogIcons.size > 0, 'read the catalog icon imports')
+  for (const [name, text] of [['StockReasonField', reasonField], ['SupplierPickerField', supplierField], ['StockConditionTagRow', tagRow]] as const) {
+    for (const [, icon] of text.matchAll(/lucide-react\/dist\/esm\/icons\/([a-z0-9-]+)\.js/g)) {
+      assert.ok(pinned.has(icon) || !catalogIcons.has(icon), `${name} imports "${icon}", which the public catalog also imports and vite.config.ts does not pin to shared-ui`)
+    }
+  }
 })
 
 runTest('no helper paragraphs or info icons inside the float', () => {

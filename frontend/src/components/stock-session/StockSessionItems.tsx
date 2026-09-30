@@ -83,6 +83,7 @@ export default function StockSessionItems({
                         {cost ? ` · ${cost}` : ''}
                       </span>
                     </span>
+                    {line.product.barcode ? <span className="block break-all dense-id text-[10px] text-gray-400">{line.product.barcode}</span> : null}
                     {line.status === 'error' && line.detail ? <span className="block break-words text-[11px] text-red-600 dark:text-red-400">{line.detail}</span> : null}
                     {line.reason ? <span className="block break-words text-[11px] text-gray-400">{line.reason}</span> : null}
                   </span>

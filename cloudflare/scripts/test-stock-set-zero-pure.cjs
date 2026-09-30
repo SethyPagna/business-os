@@ -158,6 +158,8 @@ const inventoryRoute = loadReal('routes/inventory.ts', {
   '../lib/productBatches': productBatches,
   '../lib/batchCode': batchCode,
   '../lib/stockReceiptGate': stockReceiptGate,
+  '../lib/stockSessionMath': loadReal('lib/stockSessionMath.ts', { './moneyPrecision': moneyPrecision }),
+  '../lib/schemaProbe': loadReal('lib/schemaProbe.ts'),
   // Migration 0192: runAdjustAction/runReceiveBatchAction wrap their kernel in
   // the per-line receipt guard. REAL, not a stub: a body without a
   // client_request_id must hand straight through to the kernel.

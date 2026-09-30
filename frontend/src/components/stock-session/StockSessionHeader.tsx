@@ -46,7 +46,7 @@ export default function StockSessionHeader({ mode, onModeChange, modeLocked, dis
               disabled={disabled || blocked}
               title={blocked ? blockedTitle : undefined}
               onClick={() => { if (!active) onModeChange(option) }}
-              className={`min-w-0 truncate rounded-[0.6rem] px-2 text-sm font-semibold transition-colors disabled:cursor-not-allowed ${active ? MODE_ON[option] : 'text-gray-600 hover:bg-white disabled:opacity-40 dark:text-gray-300 dark:hover:bg-gray-800'}`}
+              className={`min-w-0 truncate rounded-[0.6rem] px-1 text-sm font-semibold transition-colors disabled:cursor-not-allowed ${active ? MODE_ON[option] : 'text-gray-600 hover:bg-white disabled:opacity-40 dark:text-gray-300 dark:hover:bg-gray-800'}`}
             >
               {tr(STOCK_MODE_KEYS[option].key, STOCK_MODE_KEYS[option].fallback)}
             </button>
