@@ -18,7 +18,6 @@ import Store from 'lucide-react/dist/esm/icons/store.js'
 import Ticket from 'lucide-react/dist/esm/icons/ticket.js'
 import AppSelect, { type AppSelectOption } from '../shared/AppSelect.tsx'
 import PortalEmbedConsent from './legal/PortalEmbedConsent.tsx'
-import PortalPointsRow from './PortalPointsRow.tsx'
 import { SectionShell } from './catalogUi'
 import { splitNoTranslateSegments, stripNoTranslateMarkers } from './portalNoTranslate.ts'
 import { nextOpenFaqKey, splitFaqColumns } from './portalFaqLayout.ts'
@@ -213,7 +212,10 @@ function CatalogMembershipSection({ copy }: CatalogMembershipSectionProps) {
     <SectionShell title={copy('membership', 'Membership', 'សមាជិកភាព')}>
       <div className="flex items-center gap-3 rounded-[28px] border border-slate-200/80 bg-white p-6 text-sm text-slate-700 shadow-sm dark:border-neutral-700/80 dark:bg-neutral-900 dark:text-neutral-200">
         <Ticket aria-hidden="true" className="h-5 w-5 shrink-0 text-amber-500 dark:text-amber-300" />
-        <PortalPointsRow copy={copy} />
+        {/* Same row as the signed-in account card; inlined so this chunk never pulls the admin catalog chunk. */}
+        <div data-portal-points-row="true">
+          {copy('membershipPoints', 'Points', 'ពិន្ទុ')}: <span data-portal-points-value="true">{copy('membershipPointsComingSoon', 'Coming soon', 'នឹងមកដល់ឆាប់ៗនេះ')}</span>
+        </div>
       </div>
     </SectionShell>
   )
