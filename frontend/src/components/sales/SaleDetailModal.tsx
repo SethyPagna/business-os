@@ -4,6 +4,7 @@ import { receiptRoundingDisplay } from '../../utils/receiptRoundingDisplay.ts'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
 import History from 'lucide-react/dist/esm/icons/history.js'
+import Pencil from 'lucide-react/dist/esm/icons/pencil.js'
 import { searchProducts } from '../../api/methods.ts'
 import { getSaleDeliveryOptions, getSaleLineReceipt } from '../../api/salesTransport.ts'
 import { captureActorReadScope, isActorReadScopeCurrent } from '../../api/actorReadScope.ts'
@@ -327,6 +328,9 @@ interface SaleDetailModalProps {
   onStatusChange?: (saleId: string | number, status: string, notes: string, recordHistory?: boolean, extra?: Record<string, unknown> | null) => Promise<unknown> | unknown
   onAttachMembership?: (saleId: string | number, membershipNumber: string) => Promise<boolean | unknown> | boolean | unknown
   onCustomerAction?: (sale: SaleDetail) => void
+  // Edit the linked customer's own profile (name, phone, email, address, notes,
+  // gender) from this sale; the change is recorded on the sale's records.
+  onCustomerDetails?: (sale: SaleDetail) => void
   onPrint?: (sale: SaleDetail) => void
   // Opens the SAME new-return flow the Returns section uses
   // (returns/NewReturnModal), pre-filled with this sale. Omitted entirely
@@ -401,6 +405,7 @@ export default function SaleDetailModal({
   onStatusChange,
   onAttachMembership,
   onCustomerAction,
+  onCustomerDetails,
   onPrint,
   onReturn,
   onAddItems,
@@ -1953,7 +1958,16 @@ export default function SaleDetailModal({
                 (lib/saleBulkUpdate.ts), now refuses it too
                 (`cancelled_sale_read_only`); this hides the control that
                 would walk into that refusal. */}
-            <SectionCard title={t('customer') || 'Customer'} action={onCustomerAction && currentStatus !== 'cancelled' ? <button type="button" className="btn-secondary text-xs" onClick={() => onCustomerAction(sale)}>{t('sale_customer_edit_entry') || 'Edit customer'}</button> : null}>
+            <SectionCard title={t('customer') || 'Customer'} action={currentStatus !== 'cancelled' && (onCustomerAction || (onCustomerDetails && !customerIsAnonymous && sale.customer_id)) ? (
+              <span className="flex items-center gap-1.5">
+                {onCustomerDetails && !customerIsAnonymous && sale.customer_id ? (
+                  <button type="button" className="btn-secondary p-1.5" title={t('customer_details_edit') || 'Edit customer details'} aria-label={t('customer_details_edit') || 'Edit customer details'} onClick={() => onCustomerDetails(sale)}>
+                    <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
+                  </button>
+                ) : null}
+                {onCustomerAction ? <button type="button" className="btn-secondary text-xs" onClick={() => onCustomerAction(sale)}>{t('sale_customer_edit_entry') || 'Edit customer'}</button> : null}
+              </span>
+            ) : null}>
               <DetailRowGroup>
                 <DetailRow label={t('customer_name') || 'Customer'}>
                   {customerIsAnonymous ? (t('walk_in') || 'General') : sale.customer_name ? <EntityLink page="contacts" anchor="hub:contacts:customers" search={sale.customer_name} navigate={navigateTo}>{sale.customer_name}</EntityLink> : (t('walk_in') || 'General')}

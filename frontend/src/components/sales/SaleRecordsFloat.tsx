@@ -88,6 +88,7 @@ const FIELD_FALLBACKS: Record<string, string> = {
   refund: 'Refund',
   receipt_number: 'Receipt',
   customer: 'Customer',
+  customer_details: 'Customer details',
   membership_number: 'Membership',
   reason: 'Reason',
   note: 'Note',

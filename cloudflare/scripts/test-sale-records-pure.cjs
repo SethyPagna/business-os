@@ -1135,7 +1135,7 @@ runTest('the public field vocabulary is exact and closed', () => {
     'receipt_number', 'sale_status', 'items', 'total_usd',
     'money_precision_version', 'calculated_total_usd', 'rounding_adjustment_usd',
     'payment', 'delivery',
-    'customer', 'membership', 'item', 'quantity', 'unit_price_usd', 'removed_items', 'added_items',
+    'customer', 'customer_details', 'membership', 'item', 'quantity', 'unit_price_usd', 'removed_items', 'added_items',
     'delivery_fee_usd', 'actual_delivery_cost_usd', 'is_delivery', 'driver',
     'payment_method', 'payment_details', 'amount_paid_usd', 'amount_paid_khr',
     'change_usd', 'change_khr', 'cancel_reason', 'cancel_note', 'item_count',

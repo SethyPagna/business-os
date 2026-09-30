@@ -35,6 +35,17 @@ function objectRow(value: unknown): StructuredRow | null {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as StructuredRow : null
 }
 
+function customerDetailText(column: string, value: unknown, label: TranslateLabel): string {
+  const text = String(value ?? '').trim()
+  if (column === 'name') return text || label('none', 'None')
+  if (column === 'gender') {
+    const key = text.toLowerCase()
+    if (key === 'male' || key === 'female') return label(key, key === 'male' ? 'Male' : 'Female')
+    return text || label('none', 'None')
+  }
+  return text === 'not_recorded' ? label('not_recorded', 'Not recorded') : label('value_changed', 'Value changed')
+}
+
 function productLine(value: unknown, fmtUSD: FormatUsd): string {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return fallbackLine(value)
   const row = value as StructuredRow
@@ -98,6 +109,17 @@ export function formatSaleRecordValueLinesLocalized(
     const name = String(row.name ?? '').trim()
     const id = finiteNumber(row.id)
     return [name ? `${name}${id === null ? '' : ` · #${id}`}` : (id === null ? label('value_changed', 'Value changed') : `#${id}`)]
+  }
+  if (field === 'customer_details') {
+    const row = objectRow(parsed)
+    if (!row) return [fallbackLine(value, label)]
+    // The Worker quotes only name and gender; phone, email, address and notes
+    // arrive as markers (their real values stay in the admin-gated audit log).
+    const columns: Array<[string, string]> = [['name', 'Name'], ['phone', 'Phone'], ['email', 'Email'], ['address', 'Address'], ['notes', 'Notes'], ['gender', 'Gender']]
+    const lines = columns
+      .filter(([column]) => Object.prototype.hasOwnProperty.call(row, column))
+      .map(([column, fallback]) => `${label(column, fallback)}: ${customerDetailText(column, row[column], label)}`)
+    return lines.length ? lines : [label('value_changed', 'Value changed')]
   }
   if (field === 'driver') {
     const row = objectRow(parsed)

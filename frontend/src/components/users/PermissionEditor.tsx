@@ -3,7 +3,7 @@ import InfoHint from '../shared/InfoHint.tsx'
 import AppSelect from '../shared/AppSelect.tsx'
 import { PERMISSION_SECTIONS, type PermissionDefinition, type PermissionSection, type PermissionSensitivity } from './permissionDefinitions'
 import { normalizePermissionState, type PermissionValue } from '../../utils/permissions.ts'
-import { actionOverrideKey, actionsForKey, isActionOverriddenOff, outcomeAt, type ActionOutcome } from '../../utils/permissionActions.ts'
+import { actionsForKey, isActionOverriddenOff, isViewImpliedByWrite, outcomeAt, toggleActionOverrideMap, type ActionOutcome } from '../../utils/permissionActions.ts'
 
 type PermissionState = Record<string, PermissionValue>
 // 'view' (Part 557) is the READ-ONLY middle tier for VIEW_TIER_KEYS sections
@@ -242,10 +242,9 @@ export default function PermissionEditor({ permissions, onChange, t }: Permissio
   // otherwise a later tier change would be silently overridden by a stale
   // `true` nobody remembers setting.
   const toggleActionOverride = (permissionKey: string, actionKey: string) => {
-    const overrideKey = actionOverrideKey(permissionKey, actionKey)
-    const next: PermissionState = { ...perms }
-    if (next[overrideKey] === false) delete next[overrideKey]
-    else next[overrideKey] = false
+    const toggled = toggleActionOverrideMap(perms, permissionKey, actionKey)
+    if (toggled === perms) return
+    const next: PermissionState = { ...toggled }
     delete next.all
     onChange(next)
   }
@@ -512,7 +511,8 @@ export default function PermissionEditor({ permissions, onChange, t }: Permissio
                               const tierOutcome = outcomeAt(action, tier)
                               const overriddenOff = isActionOverriddenOff(perms as Record<string, unknown>, permission.key, action.key)
                               const meta = outcomeMeta(overriddenOff ? 'block' : tierOutcome)
-                              const canToggle = tierOutcome !== 'block'
+                              const viewLocked = tierOutcome !== 'block' && isViewImpliedByWrite(perms as Record<string, unknown>, permission.key, action.key)
+                              const canToggle = tierOutcome !== 'block' && !viewLocked
                               return (
                                 <li key={action.key}>
                                   <button
@@ -520,7 +520,9 @@ export default function PermissionEditor({ permissions, onChange, t }: Permissio
                                     disabled={!canToggle}
                                     aria-pressed={!overriddenOff}
                                     onClick={() => toggleActionOverride(permission.key, action.key)}
-                                    title={canToggle
+                                    title={viewLocked
+                                      ? translate('perm_view_implied', 'On while Add or Edit is on.')
+                                      : canToggle
                                       ? (overriddenOff
                                         ? translate('perm_action_restore', 'Switched off for this role. Click to hand it back to the tier.')
                                         : translate('perm_action_switch_off', 'Click to switch this single action off for this role.'))

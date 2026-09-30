@@ -148,6 +148,7 @@ export const SALE_RECORD_FIELD_RULES: Record<string, { key: string; format: Sale
   delivery_fee_usd: { key: 'delivery_fee', format: 'money' },
   actual_delivery_cost_usd: { key: 'delivery_actual_cost', format: 'money' },
   customer: { key: 'customer', format: 'text' },
+  customer_details: { key: 'customer_details', format: 'text' },
   membership: { key: 'membership', format: 'text' },
   driver: { key: 'driver', format: 'text' },
   item: { key: 'item', format: 'text' },

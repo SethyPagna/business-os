@@ -21,6 +21,7 @@ import { startVisibleInterval } from '../../utils/visibilityPolling.ts'
 import { useDebouncedValue } from '../../utils/useDebouncedValue.ts'
 import { paymentCoversSaleTotal, resolvePaidSaleStatus } from '../../utils/saleStatusResolution.ts'
 import ShoppingCart from 'lucide-react/dist/esm/icons/shopping-cart.js'
+import Pencil from 'lucide-react/dist/esm/icons/pencil.js'
 import { useApp, useLowStockConfig, useSync } from '../../AppContext'
 import { effectiveLowStockThreshold } from '../../utils/lowStockSettings.ts'
 import {
@@ -107,6 +108,7 @@ const ImageGalleryLightbox = lazyRetry(() => import('../shared/ImageGalleryLight
 const FilterPanel = lazyRetry(() => import('./FilterPanel'), 'pos-filter-panel')
 const ProductDetailSheet = lazyRetry(() => import('./ProductDetailSheet'), 'pos-product-detail-sheet')
 const POSQuickAddModals = lazyRetry(() => import('./POSQuickAddModals'), 'pos-quick-add-modals')
+const CustomerSourceModal = lazyRetry(() => import('../contacts/CustomerSourceModal'), 'pos-customer-source-modal')
 const AddressPresetPicker = lazyRetry(() => import('./AddressPresetPicker'), 'pos-address-preset-picker')
 
 const POS_CATALOG_LOAD_TIMEOUT_MS = 15000
@@ -192,6 +194,7 @@ type AppContextValue = {
   notify: (message: unknown, type?: string, duration?: number) => void
   settings: AppSettings
   t: (key: string) => string
+  can: (section: string, action: string) => boolean
   usdSymbol: string
   user: { id?: string | number; name?: string; permissions?: string | Record<string, unknown>; role_permissions?: string | Record<string, unknown>; role_code?: string; organization_id?: number } | null
   authReady: boolean
@@ -605,7 +608,7 @@ async function loadPosDeliveryContactsByIds(ids: Array<string | number>): Promis
 
 async function createPosCustomer(payload: CustomerFormState & { duplicateDecision?: ContactDuplicateDecision }): Promise<Partial<CustomerRecord>> {
   const { createCustomer } = await getContactWriteTransport()
-  return createCustomer(payload) as Promise<Partial<CustomerRecord>>
+  return createCustomer({ ...payload, source: 'pos' }) as Promise<Partial<CustomerRecord>>
 }
 
 async function createPosDeliveryContact(payload: DeliveryFormState & { duplicateDecision?: ContactDuplicateDecision; address?: string }): Promise<Partial<DeliveryContactRecord>> {
@@ -725,7 +728,9 @@ function paymentMethodSummary(details: PaymentDetail[]): string {
 }
 
 export default function POS() {
-  const { t, user, authReady, notify, settings, fmtUSD, fmtKHR, usdSymbol, khrSymbol, exchangeRate: currentExchangeRate } = useApp() as AppContextValue
+  const { t, user, authReady, notify, settings, fmtUSD, fmtKHR, usdSymbol, khrSymbol, exchangeRate: currentExchangeRate, can } = useApp() as AppContextValue
+  const canAddCustomer = can('contacts', 'add')
+  const canEditCustomer = can('contacts', 'edit')
   const moneyCapability = useSaleMoneyCapability(Boolean(user && authReady), saleSecurityFingerprint(user, authReady))
   // Settings > Stock Alerts. The till colours its grid and answers its stock
   // pills by the owner's number, offline included (the config rides the
@@ -1037,6 +1042,7 @@ export default function POS() {
 
 // Inline quick-add modals
   const [showAddCustomer,  setShowAddCustomer]  = useState(false)
+  const [editingCustomerId, setEditingCustomerId] = useState<string | number | null>(null)
   const [newCustomerForm,  setNewCustomerForm]  = useState<CustomerFormState>({ name: '', membership_number: '', phone: '', address: '' })
   const [savingCustomer,   setSavingCustomer]   = useState(false)
   const [customerDuplicateCheck, setCustomerDuplicateCheck] = useState<ContactDuplicateCheck | null>(null)
@@ -2049,6 +2055,28 @@ export default function POS() {
       savingCustomerRef.current = false
       setSavingCustomer(false)
     }
+  }
+
+  // The saved edit reaches the open order without touching its membership
+  // discount: name, phone and email follow the profile; the address follows it
+  // only when the customer has a single contact option, as selectCustomer does.
+  const applyEditedCustomer = async (record: Record<string, unknown>) => {
+    const options = await parseContactOptions(record.address)
+    const only = options.length === 1 ? options[0] : null
+    const stored = record as CustomerRecord
+    setCustomers(prev => prev.map(customer => String(customer.id) === String(stored.id) ? { ...customer, ...stored } : customer))
+    patchActive({
+      customer: {
+        ...active.customer,
+        name: only?.name || stored.name,
+        phone: only?.phone || stored.phone || '',
+        email: only?.email || stored.email || '',
+        address: options.length > 1 ? active.customer.address : (only?.address || ''),
+        _rawOptions: stored.address || '',
+      },
+      customerSearch: stored.name,
+    })
+    await invalidatePosCustomerReads()
   }
 
   const handleAddCustomer = () => { void submitNewCustomer() }
@@ -3950,7 +3978,12 @@ export default function POS() {
                     : <span className="text-gray-400">({t('optional')||'optional'})</span>}
                   <span className="ml-auto text-[10px] text-gray-400">{showCustomer ? t('hide') : t('show')}</span>
                 </button>
-                <button onClick={() => { resetQuickCustomerAddressPreset(); setShowAddCustomer(true) }} className="ml-2 text-xs text-blue-500 hover:text-blue-700 font-medium whitespace-nowrap">{t('add_new')||'+ New'}</button>
+                {canEditCustomer && active.customer.id ? (
+                  <button type="button" onClick={() => setEditingCustomerId(active.customer.id ?? null)} className="ml-2 rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-blue-600 dark:hover:bg-gray-700" title={t('edit_customer') || 'Edit Customer'} aria-label={t('edit_customer') || 'Edit Customer'}>
+                    <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
+                  </button>
+                ) : null}
+                {canAddCustomer ? <button onClick={() => { resetQuickCustomerAddressPreset(); setShowAddCustomer(true) }} className="ml-2 text-xs text-blue-500 hover:text-blue-700 font-medium whitespace-nowrap">{t('add_new')||'+ New'}</button> : null}
               </div>
               {showCustomer && (
                 <div className="px-3 pb-3 space-y-2">
@@ -4468,6 +4501,20 @@ export default function POS() {
             showAddCustomer={showAddCustomer}
             showAddDelivery={showAddDelivery}
             t={t}
+          />
+        </Suspense>
+      ) : null}
+
+      {editingCustomerId != null ? (
+        <Suspense fallback={null}>
+          <CustomerSourceModal
+            customerId={editingCustomerId}
+            source={{ kind: 'pos' }}
+            t={t}
+            notify={notify}
+            onSaved={({ record }) => applyEditedCustomer(record)}
+            onUseExisting={async (match) => { setEditingCustomerId(null); await handleUseExistingCustomer(match) }}
+            onClose={() => setEditingCustomerId(null)}
           />
         </Suspense>
       ) : null}
