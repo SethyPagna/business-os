@@ -61,7 +61,7 @@ test('HTML shell admission is independent of static transport admission', () => 
   assert.equal(guards.isValidDocumentResponse(response('Text/HTML; charset=utf-8')), true)
   assert.equal(guards.isValidDocumentResponse(response('text/html', { redirected: true })), false)
   assert.equal(guards.isValidDocumentResponse(response('text/html', { type: 'opaque' })), false)
-  for (const [path, mime] of [['/manifest.json', 'application/json'], ['/icon.png', 'image/png'], ['/assets/a.js', 'text/javascript'], ['/assets/a.css', 'text/css']]) assert.equal(guards.isValidStaticResponse(new Request(`https://app.test${path}`), response(mime)), true)
+  for (const [path, mime] of [['/manifest.json', 'application/json'], ['/icon-192.png', 'image/png'], ['/assets/a.js', 'text/javascript'], ['/assets/a.css', 'text/css']]) assert.equal(guards.isValidStaticResponse(new Request(`https://app.test${path}`), response(mime)), true)
   assert.equal(guards.isValidStaticResponse(new Request('https://app.test/assets/a.js'), response('text/html')), false)
 })
 
@@ -201,7 +201,7 @@ test('native SW metadata poisoning negative control, upgrade, recovery and offli
     const shellMime = () => page.evaluate(async () => (await (await caches.open('business-os-app-shell-fixed-shell')).match('/index.html'))?.headers.get('content-type'))
     assert.deepEqual(await page.evaluate(async () => {
       const cache = await caches.open('business-os-app-shell-fixed-shell')
-      return Promise.all(['/manifest.json', '/icon.png'].map(async path => (await cache.match(path))?.headers.get('content-type')))
+      return Promise.all(['/manifest.json', '/icon-192.png'].map(async path => (await cache.match(path))?.headers.get('content-type')))
     }), ['application/json', 'image/png'], 'install still caches non-HTML manifests/icons')
     for (const path of ['/api/private', '/files/private', '/uploads/private']) {
       await page.goto(origin + path)

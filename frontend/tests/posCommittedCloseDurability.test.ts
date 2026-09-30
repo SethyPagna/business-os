@@ -123,8 +123,14 @@ for (const expected of ['pos', 'notes', 'promotions', 'promos', 'review', 'revie
 }
 
 function assertAdminBlocksTranslation(source: string): void {
-  const adminPaths = ['/', ...adminSegments.map((segment) => `/${segment}`)]
-  for (const hostname of ['admin.leangbeauty.com', 'localhost']) {
+  const segmentPaths = adminSegments.map((segment) => `/${segment}`)
+  // The shop host still renders the staff app at the staff routes: install
+  // identity follows the host (tests/brandIcons.test.ts), rendering does not.
+  for (const [hostname, adminPaths] of [
+    ['admin.leangbeauty.com', ['/', ...segmentPaths]],
+    ['localhost', ['/', ...segmentPaths]],
+    ['leangbeauty.com', segmentPaths],
+  ] as const) {
     for (const pathname of adminPaths) {
       const run = runBootstrap(source, hostname, pathname)
       assert.equal(run.route, 'admin', `${hostname}${pathname} should be the admin shell`)
@@ -148,6 +154,7 @@ for (const [hostname, pathname] of [
   ['leangbeauty.com', '/terms'],
   ['leangbeauty.com', '/leang-beauty-phnom-penh'],
   ['leangbeauty.com', '/some-shop'],
+  ['admin.leangbeauty.com', '/some-shop'],
 ] as const) {
   const run = runBootstrap(bootstrapSource, hostname, pathname)
   assert.equal(run.route, 'public', `${hostname}${pathname} should be the storefront`)
@@ -176,6 +183,16 @@ assert.equal(runBootstrap(bootstrapWithoutOptOut, 'admin.leangbeauty.com', '/pos
 expectControlFails(
   'negative control: a bootstrap without the notranslate opt-out still passed the admin assertion',
   () => assertAdminBlocksTranslation(bootstrapWithoutOptOut),
+)
+
+// Negative control: key the opt-out on the host, as the install identity is,
+// and the staff app rendered on the shop host must lose it.
+const bootstrapOptOutByHost = bootstrapSource.replace('if (!publicRoute) {', 'if (adminHostname) {')
+assert.notEqual(bootstrapOptOutByHost, bootstrapSource, 'the negative control must actually re-key the opt-out')
+assert.equal(runBootstrap(bootstrapOptOutByHost, 'leangbeauty.com', '/pos').route, 'admin', 'the control bootstrap must still execute')
+expectControlFails(
+  'negative control: an opt-out keyed on the host still passed the admin assertion',
+  () => assertAdminBlocksTranslation(bootstrapOptOutByHost),
 )
 
 // --- B. a committed close is durable BEFORE React renders it --------------

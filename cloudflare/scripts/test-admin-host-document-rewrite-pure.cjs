@@ -2,12 +2,12 @@
 // G4: the admin host must never serve the storefront's install identity.
 //
 // One built index.html serves both hosts. Its static <head> names the
-// storefront (portal manifest, Leang icons, Leang title) and an inline script
-// swaps in the Business OS admin identity before first paint. index.html's own
-// comment records why that is not enough on iOS: "Add to Home Screen" can read
-// the RAW HTML, so an admin user installing admin.leangbeauty.com could end up
-// with a home-screen app called Leang Beauty, wearing the storefront icon and
-// pointed at the storefront manifest.
+// storefront (portal manifest, Leang icons, Leang Cosmetics title) and an
+// inline script swaps in the staff identity before first paint. index.html's
+// own comment records why that is not enough on iOS: "Add to Home Screen" can
+// read the RAW HTML, so an admin user installing admin.leangbeauty.com could
+// end up with a home-screen app named after the shop, wearing the storefront
+// icon and pointed at the storefront manifest.
 //
 // src/index.ts streams the document through HTMLRewriter with the rules in
 // src/lib/adminDocumentIdentity.ts, for admin hosts only. HTMLRewriter does
@@ -46,6 +46,8 @@ const wrangler = read(path.join(CF, 'wrangler.toml'))
 const headersFile = read(path.join(REPO, 'frontend', 'public', '_headers'))
 const pathRouting = read(path.join(REPO, 'frontend', 'src', 'app', 'pathRouting.ts'))
 const serviceWorker = read(path.join(REPO, 'frontend', 'src', 'public-runtime', 'service-worker.ts'))
+const staffManifest = JSON.parse(read(path.join(REPO, 'frontend', 'public', 'manifest.json')))
+const shopManifest = JSON.parse(read(path.join(REPO, 'frontend', 'public', 'portal-manifest.json')))
 
 let checks = 0
 const check = (label, fn) => { fn(); checks += 1; process.stdout.write('  ok  ' + label + '\n') }
@@ -155,22 +157,35 @@ check('the service worker precache fetch is still rewritten', () => {
 
 // --- the rules themselves ---------------------------------------------------
 
-check('the title becomes Business OS', () => {
+check('the title becomes Leang Cosmetics Admin', () => {
   const element = stubElement()
   ruleFor('title').element(element)
-  assert.strictEqual(element.innerContent, 'Business OS')
+  assert.strictEqual(element.innerContent, 'Leang Cosmetics Admin')
 })
 
-check('the Apple home-screen name becomes Business OS', () => {
-  const element = stubElement({ name: 'apple-mobile-web-app-title', content: 'Leang Beauty' })
+check('the Apple home-screen name becomes Leang Admin', () => {
+  const element = stubElement({ name: 'apple-mobile-web-app-title', content: 'Leang' })
   ruleFor('meta[name="apple-mobile-web-app-title"]').element(element)
-  assert.strictEqual(element.attributes.content, 'Business OS')
+  assert.strictEqual(element.attributes.content, 'Leang Admin')
 })
 
-check('the description becomes the admin one', () => {
-  const element = stubElement({ name: 'description', content: 'Leang Beauty - product catalog, prices and store contact' })
+check('the description becomes the staff one', () => {
+  const element = stubElement({ name: 'description', content: 'Browse Leang Cosmetics products and contact the store.' })
   ruleFor('meta[name="description"]').element(element)
-  assert.strictEqual(element.attributes.content, 'Business OS - Offline-first POS, inventory and analytics')
+  assert.strictEqual(element.attributes.content, 'Till, stock and sales for Leang Cosmetics staff')
+})
+
+check('the browser chrome takes the staff top-bar colour', () => {
+  const element = stubElement({ name: 'theme-color', content: '#ffffff' })
+  ruleFor('meta[name="theme-color"]').element(element)
+  assert.strictEqual(element.attributes.content, '#fffdf8')
+})
+
+check('the rewritten head names the same app the staff manifest installs', () => {
+  assert.strictEqual(identity.ADMIN_DOCUMENT_TITLE, staffManifest.name)
+  assert.strictEqual(identity.ADMIN_DOCUMENT_APP_TITLE, staffManifest.short_name)
+  assert.strictEqual(identity.ADMIN_DOCUMENT_DESCRIPTION, staffManifest.description)
+  assert.strictEqual(identity.ADMIN_DOCUMENT_THEME_COLOR, staffManifest.theme_color)
 })
 
 check('the installed app points at the ADMIN manifest', () => {
@@ -179,32 +194,48 @@ check('the installed app points at the ADMIN manifest', () => {
   assert.strictEqual(element.attributes.href, '/manifest.json')
 })
 
-check('the home-screen icon is the Business OS one', () => {
-  const element = stubElement({ rel: 'apple-touch-icon', sizes: '180x180', href: '/leang-cosmetics-apple-touch-icon-v1.png' })
+check('the home-screen icon is the staff BO one', () => {
+  const element = stubElement({ rel: 'apple-touch-icon', sizes: '180x180', href: '/leang-cosmetics-apple-touch-icon-v2.png' })
   ruleFor('link[rel="apple-touch-icon"]').element(element)
-  assert.strictEqual(element.attributes.href, '/apple-touch-icon.png')
+  assert.strictEqual(element.attributes.href, '/admin-apple-touch-icon-v1.png')
 })
 
 check('every favicon size maps to its admin twin', () => {
   const iconRule = ruleFor('link[rel="icon"]')
-  const sized192 = stubElement({ rel: 'icon', type: 'image/png', sizes: '192x192', href: '/leang-cosmetics-icon-192.png' })
+  const sized192 = stubElement({ rel: 'icon', type: 'image/png', sizes: '192x192', href: '/leang-cosmetics-icon-192-v2.png' })
   iconRule.element(sized192)
   assert.strictEqual(sized192.attributes.href, '/icon-192.png')
   assert.strictEqual(sized192.attributes.type, 'image/png')
 
-  const sized512 = stubElement({ rel: 'icon', type: 'image/png', sizes: '512x512', href: '/leang-cosmetics-icon-512.png' })
+  const sized512 = stubElement({ rel: 'icon', type: 'image/png', sizes: '512x512', href: '/leang-cosmetics-icon-512-v2.png' })
   iconRule.element(sized512)
   assert.strictEqual(sized512.attributes.href, '/icon-512.png')
 
-  const unsized = stubElement({ rel: 'icon', type: 'image/png', href: '/leang-cosmetics-icon-512.png' })
+  const unsized = stubElement({ rel: 'icon', type: 'image/x-icon', href: '/leang-cosmetics-favicon-v2.ico' })
   iconRule.element(unsized)
-  assert.strictEqual(unsized.attributes.href, '/favicon.ico?v=business-os')
+  assert.strictEqual(unsized.attributes.href, '/admin-favicon-v1.ico')
   assert.strictEqual(unsized.attributes.type, 'image/x-icon')
 
   // An unknown size must still land on an admin icon, never keep a Leang one.
-  const unknown = stubElement({ rel: 'icon', sizes: '64x64', href: '/leang-cosmetics-icon-192.png' })
+  const unknown = stubElement({ rel: 'icon', sizes: '64x64', href: '/leang-cosmetics-icon-192-v2.png' })
   iconRule.element(unknown)
   assert.doesNotMatch(unknown.attributes.href, /leang/i)
+})
+
+check('the raw admin HTML and the page bootstrap give the staff app the same icons', () => {
+  const bootstrap = read(path.join(REPO, 'frontend', 'index.html'))
+  const favicons = /adminIconSize === '192x192' \? '([^']+)' : \(adminIconSize === '512x512' \? '([^']+)' : '([^']+)'\)/.exec(bootstrap)
+  const apple = /adminAppleIcon\.setAttribute\('href', '([^']+)'\)/.exec(bootstrap)
+  assert.ok(favicons && apple, 'the admin branch of the bootstrap was read, not missed')
+  const iconRule = ruleFor('link[rel="icon"]')
+  for (const [sizes, bootstrapHref] of [['192x192', favicons[1]], ['512x512', favicons[2]], [undefined, favicons[3]]]) {
+    const element = stubElement({ rel: 'icon', ...(sizes ? { sizes } : {}), href: '/leang-cosmetics-favicon-v2.ico' })
+    iconRule.element(element)
+    assert.strictEqual(element.attributes.href, bootstrapHref, (sizes || 'unsized') + ' favicon')
+  }
+  const appleElement = stubElement({ rel: 'apple-touch-icon', href: '/leang-cosmetics-apple-touch-icon-v2.png' })
+  ruleFor('link[rel="apple-touch-icon"]').element(appleElement)
+  assert.strictEqual(appleElement.attributes.href, apple[1])
 })
 
 check('the admin document never advertises the storefront address', () => {
@@ -245,11 +276,29 @@ check('every tag index.html publishes for the storefront has an admin answer', (
 })
 
 check('no rule leaves a storefront value behind', () => {
+  const storefrontValues = new Set([shopManifest.name, shopManifest.short_name, shopManifest.description, shopManifest.theme_color])
   for (const rule of identity.ADMIN_DOCUMENT_REWRITES) {
-    const element = stubElement({ href: '/leang-cosmetics-icon-512.png', content: 'Leang Beauty', sizes: '192x192' })
+    const element = stubElement({ href: '/leang-cosmetics-icon-512-v2.png', content: shopManifest.name, sizes: '192x192' })
     rule.element(element)
     assert.ok(element.writes.length > 0, rule.selector + ' wrote nothing at all')
-    assert.doesNotMatch(element.writes.join(' '), /leang/i, rule.selector + ' still writes a storefront value')
+    for (const value of element.writes) {
+      assert.ok(!storefrontValues.has(value), rule.selector + ' still writes the storefront value ' + value)
+      assert.doesNotMatch(value, /leang-cosmetics-|portal-manifest|leangbeauty\.com/i, rule.selector + ' still points at a storefront file or address')
+    }
+  }
+})
+
+check('every identity tag the page bootstrap swaps on the admin host is also rewritten', () => {
+  // The raw HTML is what iOS may install from, so a tag the bootstrap swaps
+  // but the Worker does not reaches an installed staff app with the shop value.
+  const bootstrap = /\(function setInitialBusinessOsRoute\(\)[\s\S]*?\}\(\)\)/.exec(read(path.join(REPO, 'frontend', 'index.html')))
+  assert.ok(bootstrap, 'the index.html bootstrap was read')
+  const swapped = new Set([...bootstrap[0].matchAll(/querySelector(?:All)?\('([^']+)'\)/g)].map((match) => match[1]))
+  assert.ok(swapped.has('link[rel="manifest"]') && swapped.has('meta[name="theme-color"]'), 'the bootstrap selectors were read, not missed')
+  if (/document\.title = /.test(bootstrap[0])) swapped.add('title')
+  const rewritten = new Set(identity.ADMIN_DOCUMENT_REWRITES.map((rule) => rule.selector))
+  for (const selector of swapped) {
+    assert.ok(rewritten.has(selector), selector + ' is swapped in the page but never rewritten in the raw admin HTML')
   }
 })
 

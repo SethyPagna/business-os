@@ -36,6 +36,14 @@ const ICON_BUDGET_EXEMPTIONS = new Set([
   'public/leang-cosmetics-icon-192-maskable.png',
   'public/leang-cosmetics-icon-512-maskable.png',
   'public/leang-cosmetics-apple-touch-icon-v1.png',
+  'public/icon-192-maskable-v2.png',
+  'public/icon-512-maskable-v2.png',
+  'public/admin-apple-touch-icon-v1.png',
+  'public/leang-cosmetics-icon-192-v2.png',
+  'public/leang-cosmetics-icon-512-v2.png',
+  'public/leang-cosmetics-icon-192-maskable-v2.png',
+  'public/leang-cosmetics-icon-512-maskable-v2.png',
+  'public/leang-cosmetics-apple-touch-icon-v2.png',
 ])
 
 function collectMediaFiles(dirUrl: URL, output: URL[] = []): URL[] {

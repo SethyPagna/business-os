@@ -1,0 +1,108 @@
+{
+  "immutable": {
+    "icon-192.png": {
+      "sha256": "3d690206db3a8c15534d8405dc22bbde2639641b0c3306495113c257be00554f",
+      "brand": "staff",
+      "role": "any",
+      "bytesOf": "c3784a2eb:frontend/public/icon-192.png"
+    },
+    "icon-512.png": {
+      "sha256": "205c18a3cc49ed461e5c74abd96c69ec23b8d5ee1a4936496e71b13d7b971769",
+      "brand": "staff",
+      "role": "any",
+      "bytesOf": "c3784a2eb:frontend/public/icon-512.png"
+    },
+    "icon-192-maskable-v2.png": {
+      "sha256": "01c9c5c868c9780159817c09c7269fec254c1947b52c07b74778fd59df6d5d58",
+      "brand": "staff",
+      "role": "maskable"
+    },
+    "icon-512-maskable-v2.png": {
+      "sha256": "6403450dec5653584076f4b069732872373b162a5bb772230802a0637a629c00",
+      "brand": "staff",
+      "role": "maskable"
+    },
+    "admin-apple-touch-icon-v1.png": {
+      "sha256": "c06bbd6e47b10795334e42330407ee4a615440a019b3c6bfa7d4cbf3a963593b",
+      "brand": "staff",
+      "role": "apple",
+      "bytesOf": "c3784a2eb:frontend/public/apple-touch-icon.png"
+    },
+    "admin-favicon-v1.ico": {
+      "sha256": "35bafc890a3c0df3d51e48fe9c27a6e3c30efd477e26aee6fcd85a7a59e3ac2e",
+      "brand": "staff",
+      "role": "favicon",
+      "bytesOf": "c3784a2eb:frontend/public/favicon.ico"
+    },
+    "leang-cosmetics-icon-192-v2.png": {
+      "sha256": "8974b75f2148fb45117cf3e01d40d760511ee7ae04665cd247964662488eb330",
+      "brand": "shop",
+      "role": "any"
+    },
+    "leang-cosmetics-icon-512-v2.png": {
+      "sha256": "45e07bc4899938049d4eaf4e17454bc44d7aadfc22ffcc2358f14bbbb71fa540",
+      "brand": "shop",
+      "role": "any"
+    },
+    "leang-cosmetics-icon-192-maskable-v2.png": {
+      "sha256": "a8d819f182811581e5ec4722f1fcf4b112019afc468c8405872d68c6be026f62",
+      "brand": "shop",
+      "role": "maskable"
+    },
+    "leang-cosmetics-icon-512-maskable-v2.png": {
+      "sha256": "1ac3fb661f44c9d329c85341ce24bf97bbe1ba879a0255120c3518fd445a3ed4",
+      "brand": "shop",
+      "role": "maskable"
+    },
+    "leang-cosmetics-apple-touch-icon-v2.png": {
+      "sha256": "6636f8270917467a650b1fb8a8efef7c146c0d9b06154907d2136517c2ad969b",
+      "brand": "shop",
+      "role": "apple"
+    },
+    "leang-cosmetics-favicon-v2.ico": {
+      "sha256": "61ce8902614ee2952b9c85ac236b8150c9674668582608c734bba422062893e4",
+      "brand": "shop",
+      "role": "favicon"
+    },
+    "icon-192-maskable.png": {
+      "sha256": "1b8e1f0885654ecda6f49ac32b3605f010e92ebfb92db2b6c76f0da4c06db735",
+      "brand": "staff",
+      "role": "retired"
+    },
+    "icon-512-maskable.png": {
+      "sha256": "a038987fbfe432904061cb1c8b78b34de8f4158eff990f10284a64aaa4ef84a1",
+      "brand": "staff",
+      "role": "retired"
+    },
+    "leang-cosmetics-icon-192.png": {
+      "sha256": "4a9fb72626faca0f6636f61d6a4a554d8ada23c475c9c9df4f046c77cb94712c",
+      "brand": "shop",
+      "role": "retired"
+    },
+    "leang-cosmetics-icon-512.png": {
+      "sha256": "189a8bae57625f012d3dfe7d9dc16eefb1db023b0d0e7d657e4b5cd26edab88c",
+      "brand": "shop",
+      "role": "retired"
+    },
+    "leang-cosmetics-icon-192-maskable.png": {
+      "sha256": "e2de5b6ca07f240c08f1e0a238e780fbe96fbd77ffe20591a65de76fb204d072",
+      "brand": "shop",
+      "role": "retired"
+    },
+    "leang-cosmetics-icon-512-maskable.png": {
+      "sha256": "0df0f4fa917ac8064135fd61dcfd999a464b3ad6c1f08f4e7f0dd9d17cca2971",
+      "brand": "shop",
+      "role": "retired"
+    },
+    "leang-cosmetics-apple-touch-icon-v1.png": {
+      "sha256": "1cbf0361623232b4287eee2bd89b74b75e6e082dcebeb1db9ea6dfcae712062a",
+      "brand": "shop",
+      "role": "retired"
+    }
+  },
+  "mutable": {
+    "favicon.ico": "leang-cosmetics-favicon-v2.ico",
+    "apple-touch-icon.png": "leang-cosmetics-apple-touch-icon-v2.png",
+    "icon.png": "leang-cosmetics-icon-512-v2.png"
+  }
+}

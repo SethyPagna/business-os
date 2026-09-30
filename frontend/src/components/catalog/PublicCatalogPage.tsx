@@ -55,6 +55,7 @@ import { ADMIN_MAX_PRODUCT_GALLERY_IMAGES } from '../products/helpers/productGal
 import InstallPromptBand from '../shared/InstallPromptBand.tsx'
 import { installBeforeInstallPromptCapture, installStandaloneExternalLinkGuard } from '../../utils/standaloneNavigation.ts'
 import { normalizePortalLanguage, readPublicStorefrontLanguage, storePortalLanguage } from './portalLanguageOptions.ts'
+import { isAdminHostname } from '../../app/pathRouting.ts'
 
 const loadCatalogProductsSection = () => import('./CatalogProductsSection')
 const CatalogProductsSection = lazyRetry(loadCatalogProductsSection, 'public-catalog-products-section')
@@ -65,11 +66,13 @@ const PortalPromotionsBanner = lazyRetry(() => import('./PortalPromotionsBanner'
 
 const PUBLIC_PORTAL_PRODUCT_SEARCH_TIMEOUT_MS = 12000
 const PUBLIC_PORTAL_AI_TIMEOUT_MS = 25000
-// Fixed Leang Beauty browser branding for the live storefront, served as
+// Fixed storefront browser branding for the live storefront, served as
 // STATIC same-origin files (installable, unlike the old runtime blob: manifest
 // -- see the brand effect below). Not per-merchant customizable (11.14-16).
-const STOREFRONT_ICON = '/leang-cosmetics-icon-512.png'
-const STOREFRONT_APPLE_TOUCH_ICON = '/leang-cosmetics-apple-touch-icon-v1.png'
+const STOREFRONT_NAME = 'Leang Cosmetics'
+const STOREFRONT_HOME_SCREEN_NAME = 'Leang'
+const STOREFRONT_ICON = '/leang-cosmetics-icon-512-v2.png'
+const STOREFRONT_APPLE_TOUCH_ICON = '/leang-cosmetics-apple-touch-icon-v2.png'
 const STOREFRONT_MANIFEST = '/portal-manifest.json'
 
 type LooseRecord = Record<string, any>
@@ -953,7 +956,7 @@ export default function PublicCatalogPage() {
       .catch(() => {})
   }, [activeTab, displayConfig.aiEnabled])
 
-  // Storefront tab title + FIXED Leang Beauty browser branding.
+  // Storefront tab title + FIXED storefront browser branding.
   //
   // This used to build the manifest AND the favicon at runtime from the
   // merchant's uploaded logo. Two problems, both fixed here:
@@ -965,17 +968,22 @@ export default function PublicCatalogPage() {
   //   2. The favicon/PWA icon was per-merchant customizable, which 11.14-16
   //      removed (the portal editor changes the in-page LOGO only now).
   //
-  // The fix keeps the established admin/storefront brand split (admin =
-  // Business OS via the static /manifest.json + /favicon.ico in index.html;
-  // storefront = Leang Beauty) but serves the storefront's icon + manifest
-  // as STATIC same-origin files, which ARE installable, instead of a runtime
-  // blob. No canvas, no idle scheduling, no business-config input -- just a
-  // fixed brand swap. See public/portal-manifest.json and brandIcons.test.ts.
+  // The fix keeps the established staff/storefront brand split (staff =
+  // /manifest.json and the BO icons, which index.html's bootstrap picks on
+  // admin hosts; storefront = the Leang files) but serves the storefront's
+  // icon + manifest as STATIC same-origin files, which ARE installable,
+  // instead of a runtime blob. No canvas, no idle scheduling, no
+  // business-config input -- just a fixed brand swap. See
+  // public/portal-manifest.json and brandIcons.test.ts.
   useEffect(() => {
     if (typeof document === 'undefined') return undefined
     const previousTitle = document.title
-    const title = String(displayConfig.businessName || displayConfig.title || 'Leang Beauty').trim()
-    document.title = title || 'Leang Beauty'
+    const title = String(displayConfig.businessName || displayConfig.title || STOREFRONT_NAME).trim()
+    document.title = title || STOREFRONT_NAME
+    const restoreTitle = () => { document.title = previousTitle }
+    // The storefront also renders at unknown paths on admin.*, and the staff
+    // origin must never advertise the shop app.
+    if (isAdminHostname()) return restoreTitle
 
     const iconEls = Array.from(document.querySelectorAll<HTMLLinkElement>('link[rel="icon"]'))
     const previousIconHrefs = iconEls.map((el) => el.getAttribute('href') || '')
@@ -994,10 +1002,10 @@ export default function PublicCatalogPage() {
 
     const appleTitle = document.querySelector<HTMLMetaElement>('meta[name="apple-mobile-web-app-title"]')
     const previousAppleTitle = appleTitle?.getAttribute('content') || ''
-    if (appleTitle) appleTitle.setAttribute('content', 'Leang Beauty')
+    if (appleTitle) appleTitle.setAttribute('content', STOREFRONT_HOME_SCREEN_NAME)
 
     return () => {
-      document.title = previousTitle
+      restoreTitle()
       iconEls.forEach((el, i) => {
         if (previousIconHrefs[i]) el.setAttribute('href', previousIconHrefs[i])
       })
@@ -1193,7 +1201,7 @@ export default function PublicCatalogPage() {
     window.scrollTo({ top, behavior: 'smooth' })
   }
 
-  const bucketBusinessName = String(displayConfig.businessName || displayConfig.title || 'Leang Beauty').trim()
+  const bucketBusinessName = String(displayConfig.businessName || displayConfig.title || STOREFRONT_NAME).trim()
 
   const handleBucketCopy = () => {
     const text = formatPortalBucketText(bucket.items, bucketBusinessName)
