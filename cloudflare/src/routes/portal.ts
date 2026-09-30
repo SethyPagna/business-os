@@ -8,7 +8,7 @@ import { hasPermission } from '../lib/permissions'
 import { audit } from '../lib/audit'
 import { checkRateLimit, getClientIp } from '../lib/rateLimit'
 import { portalAbuseKey } from '../lib/portalAbuseKey'
-import { normalizeSafeLinkUrl } from '../lib/safeLinkUrl'
+import { normalizePortalUploadPath, normalizeSafeLinkUrl } from '../lib/safeLinkUrl'
 import { buildUniqueStoredName } from '../lib/fileAssets'
 import { sanitizeMediaList } from '../lib/media'
 import { sanitizePortalImageMetadata } from '../lib/portalImagePrivacy'
@@ -118,6 +118,65 @@ export function normalizePortalPromoItems(value: unknown) {
       }
     })
     .filter((item) => item.title || item.subtitle || item.body || item.mediaUrl)
+}
+
+function capPortalText(value: unknown, max: number): string {
+  const text = String(value ?? '').trim()
+  return text.length <= max ? text : Array.from(text).slice(0, max).join('')
+}
+
+// Reads the JSON the Website Editor writes (portalEditorUtils.ts serializeAboutBlocks).
+const PORTAL_ABOUT_BLOCK_TYPES = new Set(['text', 'image', 'video'])
+const MAX_PORTAL_ABOUT_BLOCKS = 30
+
+export function normalizePortalAboutBlocks(value: unknown) {
+  let parsed: unknown = value
+  if (typeof value === 'string') {
+    try {
+      parsed = JSON.parse(value)
+    } catch (_) {
+      return []
+    }
+  }
+  if (!Array.isArray(parsed)) return []
+
+  return parsed
+    .map((item, index) => {
+      const row = item && typeof item === 'object' ? item as Record<string, unknown> : {}
+      const type = String(row.type || '')
+      return {
+        id: capPortalText(row.id, 80) || `about-${index + 1}`,
+        type: PORTAL_ABOUT_BLOCK_TYPES.has(type) ? type : 'text',
+        title: capPortalText(row.title, 160),
+        body: capPortalText(row.body, 4000),
+        mediaUrl: normalizeSafeLinkUrl(row.mediaUrl) || '',
+      }
+    })
+    .filter((block) => block.title || block.body || block.mediaUrl)
+    .slice(0, MAX_PORTAL_ABOUT_BLOCKS)
+}
+
+// Same bare-host completion and http(s) rule as the editor's CatalogPage.tsx normalizeExternalUrl.
+function normalizePortalAddressLink(value: unknown): string {
+  const raw = String(value ?? '').trim()
+  if (!raw || raw.length > 2048 || /[\u0000-\u001f\u007f]/.test(raw)) return ''
+  const candidate = /^https?:\/\//i.test(raw)
+    ? raw
+    : (/^(www\.|[\w-]+(\.[\w-]+)+|maps\.app\.goo\.gl|goo\.gl\/maps)/i.test(raw) ? `https://${raw}` : '')
+  if (!candidate) return ''
+  try {
+    const url = new URL(candidate)
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return ''
+    return url.toString().replace(/\/$/, '')
+  } catch (_) {
+    return ''
+  }
+}
+
+function clampPortalWhole(value: unknown, min: number, max: number, fallback: number): number {
+  const raw = String(value ?? '').trim()
+  const num = raw ? Number(raw) : Number.NaN
+  return Number.isFinite(num) ? Math.min(max, Math.max(min, Math.round(num))) : fallback
 }
 
 // Ported from backend/src/routes/portal.ts's normalizeUrl, minus the
@@ -243,6 +302,7 @@ export function buildPortalConfig(settings: SettingsMap, env: Env) {
     businessPhone: settings.business_phone || '',
     businessEmail: settings.business_email || '',
     businessAddress: settings.business_address || '',
+    addressLink: normalizePortalAddressLink(settings.customer_portal_address_link),
     // N45: the registered identity an online seller has to display (Cambodia's
     // 2019 e-commerce law) and that the privacy/terms/cookie templates fill in.
     // Separate from businessName, which is the display/brand name. WHICH of
@@ -253,15 +313,28 @@ export function buildPortalConfig(settings: SettingsMap, env: Env) {
     businessLegalName: settings.business_legal_name || '',
     businessRegistrationNumber: settings.business_registration_number || '',
     businessTagline: settings.customer_portal_business_tagline || '',
-    businessLogo: settings.customer_portal_logo_image || '',
-    businessFavicon: settings.customer_portal_favicon_image || '',
-    businessCover: settings.customer_portal_cover_image || '',
+    // Images every visitor loads: same allowlist as promo card media.
+    businessLogo: normalizeSafeLinkUrl(settings.customer_portal_logo_image) || '',
+    businessFavicon: normalizeSafeLinkUrl(settings.customer_portal_favicon_image) || '',
+    businessCover: normalizeSafeLinkUrl(settings.customer_portal_cover_image) || '',
+    // The Website Editor's logo slider ranges and defaults.
+    logoSize: clampPortalWhole(settings.customer_portal_logo_size, 48, 144, 80),
+    logoFit: String(settings.customer_portal_logo_fit || '').trim().toLowerCase() === 'contain' ? 'contain' : 'cover',
+    logoZoom: clampPortalWhole(settings.customer_portal_logo_zoom, 80, 180, 100),
+    logoPositionX: clampPortalWhole(settings.customer_portal_logo_position_x, 0, 100, 50),
+    logoPositionY: clampPortalWhole(settings.customer_portal_logo_position_y, 0, 100, 50),
     showLogo: normalizeBoolean(settings.customer_portal_show_logo, true),
     showCover: normalizeBoolean(settings.customer_portal_show_cover, true),
     showPhone: normalizeBoolean(settings.customer_portal_show_phone, true),
     showEmail: normalizeBoolean(settings.customer_portal_show_email, true),
     showAddress: normalizeBoolean(settings.customer_portal_show_address, true),
     showAbout: normalizeBoolean(settings.customer_portal_show_about, true),
+    // Empty title: the storefront shows its own translated "About".
+    aboutTitle: String(settings.customer_portal_about_title || '').trim(),
+    aboutContent: String(settings.customer_portal_about_content || '').trim(),
+    aboutBlocks: normalizePortalAboutBlocks(settings.customer_portal_about_blocks),
+    aboutImage: normalizePortalUploadPath(settings.customer_portal_about_image) || '',
+    aboutImageAlt: capPortalText(settings.customer_portal_about_image_alt, 200),
     showCatalog: normalizeBoolean(settings.customer_portal_show_catalog, true),
     // Guest membership lookup was removed. Signed-in customers see their own
     // membership ID in the account drawer instead of exposing an ID oracle.
@@ -733,17 +806,6 @@ async function buildPortalCatalog(env: Env, showOutOfStockProducts: boolean) {
   }
 }
 
-// GET /config -- the real public branding endpoint. The original
-// (backend/src/routes/portal.ts's buildPortalConfig) whitelists ~70 fields
-// covering branding, FAQ, about-page blocks, translations, AI assistant
-// config, and membership/points settings. Porting the entire whitelist
-// faithfully is real, substantial work on its own -- this ports the core
-// branding/display fields a portal needs to render at all (name, contact
-// info, logo/cover, tagline, social links, show/hide toggles, hero colors,
-// catalog display options), and is deliberately NOT a complete port of the
-// original's full field set. Disclosed here and in MIGRATION.md, not
-// silently partial: FAQ, about blocks, translations, AI settings, and
-// membership/points config are not included in this response.
 // ---------------------------------------------------------------------------
 // Public read caching
 // ---------------------------------------------------------------------------

@@ -15,7 +15,7 @@ const check = (label, fn) => { fn(); passed++; console.log(`PASS ${label}`) }
 
 const PORTAL_POSTS_KEYS = new Set(['customer_portal_promo_items', 'customer_portal_promotions_title', 'customer_portal_promotions_intro', 'customer_portal_show_promotions'])
 const PORTAL_FAQ_KEYS = new Set(['customer_portal_faq_items', 'customer_portal_faq_title', 'customer_portal_show_faq'])
-const PORTAL_ABOUT_KEYS = new Set(['customer_portal_about_title', 'customer_portal_about_content', 'customer_portal_about_blocks', 'customer_portal_show_about'])
+const PORTAL_ABOUT_KEYS = new Set(['customer_portal_about_title', 'customer_portal_about_content', 'customer_portal_about_blocks', 'customer_portal_show_about', 'customer_portal_about_image', 'customer_portal_about_image_alt'])
 const BUSINESS_IDENTITY_KEYS = new Set([
   'business_name', 'business_legal_name', 'business_registration_number',
   'business_phone', 'business_address', 'business_email', 'tax_id', 'business_website',
@@ -61,6 +61,16 @@ check('a posts-only grant writes posts but NOT faq/about/config', () => {
   assert.equal(canWrite('customer_portal_faq_items', g), false)
   assert.equal(canWrite('customer_portal_about_title', g), false)
   assert.equal(canWrite('customer_portal_logo_image', g), false)
+})
+
+check('the About picture and its description are About keys: an About grant writes them, posts-only and config-only do not', () => {
+  for (const key of ['customer_portal_about_image', 'customer_portal_about_image_alt']) {
+    assert.equal(bucketFor(key), 'portal_about')
+    assert.equal(canWrite(key, new Set(['portal_about'])), true)
+    assert.equal(canWrite(key, new Set(['settings'])), true)
+    assert.equal(canWrite(key, new Set(['portal_posts'])), false)
+    assert.equal(canWrite(key, new Set(['customer_portal'])), false)
+  }
 })
 
 check('a config grant writes config + loyalty but NOT posts/faq/about', () => {

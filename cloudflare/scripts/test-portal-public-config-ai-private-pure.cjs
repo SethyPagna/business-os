@@ -44,7 +44,7 @@ const portal = load('routes/portal.ts', {
     cachedJsonResponse: async (_request, _ctx, _version, _ttl, produce) => produce(),
   },
   '../lib/requestBodyGuard': { SMALL_BODY_BYTES: 65536, PORTAL_SCREENSHOT_BODY_BYTES: 1 },
-  '../lib/safeLinkUrl': { normalizeSafeLinkUrl: (v) => String(v || '') },
+  '../lib/safeLinkUrl': load('lib/safeLinkUrl.ts'),
   '../lib/sqlBinding': {},
 })
 
