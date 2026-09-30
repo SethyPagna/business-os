@@ -44,6 +44,7 @@ const Receipt = lazyRetry(() => import('../receipt/Receipt'), 'sales-receipt')
 const SaleDetailModal = lazyRetry(() => import('./SaleDetailModal'), 'sales-sale-detail-modal')
 const SaleCustomerActionModal = lazyRetry(() => import('./SaleCustomerActionModal'), 'sales-customer-action-modal')
 const SaleCustomerNameModal = lazyRetry(() => import('./SaleCustomerNameModal'), 'sales-customer-name-modal')
+const CustomerSourceModal = lazyRetry(() => import('../contacts/CustomerSourceModal'), 'sales-customer-source-modal')
 const SaleRecordsFloat = lazyRetry(() => import('./SaleRecordsFloat'), 'sales-sale-records-float')
 const CancelSaleModal = lazyRetry(() => import('./CancelSaleModal'), 'sales-cancel-sale-modal')
 // S4-2: the confirmation every sale status change now goes through -- it
@@ -359,6 +360,10 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   // customer, import) is hidden here and refused by the backend. Full only.
   const canChangeSaleStatus = can('sales', 'status')
   const canChangeSaleCustomer = can('sales', 'customer')
+  // Add/Edit on Contacts (which imply View) are what let a sales role work on
+  // the customer's own profile from a sale; the Worker also needs Sales at Full.
+  const canEditSaleCustomerProfile = can('contacts', 'edit') && getPermissionTier('sales') === 'full'
+  const canAddSaleCustomer = can('contacts', 'add') && getPermissionTier('sales') === 'full'
   const customerEditMode = saleCustomerMode(canChangeSaleCustomer, can('sales', 'customer_reassign'))
   const canReassignSaleCustomer = customerEditMode === 'assignment'
   // S4-24b: adding goods to a recorded sale is its own grant -- it moves
@@ -426,6 +431,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   // a legacy row carries no receipt number.
   const [returnForSale, setReturnForSale] = useState<SaleRecord | null>(null)
   const [detailSale, setDetailSale] = useState<SaleRecord | null>(null)
+  const [saleCustomerProfile, setSaleCustomerProfile] = useState<{ sale: SaleRecord; mode: 'edit' | 'create' } | null>(null)
   const [saleCustomerPrompt, setSaleCustomerPrompt] = useState<{ sale: SaleRecord; choices: Array<{ id: number; name: string; phone?: string | null; membershipNumber?: string | null }>; loading?: boolean; error?: string; resultsQuery?: string } | null>(null)
   const [saleCustomerSaving, setSaleCustomerSaving] = useState(false)
   const [saleCustomerNameForm, setSaleCustomerNameForm] = useState<{ sale: SaleRecord; name: string; phone: string } | null>(null)
@@ -2812,6 +2818,7 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
             // its status buttons and membership form entirely.
             onStatusChange={canChangeSaleStatus ? handleStatusChange : undefined}
             onCustomerAction={canChangeSaleCustomer ? (sale) => { void openSaleCustomerEdit(sale as SaleRecord) } : undefined}
+            onCustomerDetails={canEditSaleCustomerProfile ? (sale) => setSaleCustomerProfile({ sale: sale as SaleRecord, mode: 'edit' }) : undefined}
             // Same hide-by-omission gate as the other write callbacks: without
             // `sales:add_items` the prop is absent and the whole Add-items
             // section never renders.
@@ -2862,6 +2869,7 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
             }}
             onSearch={canReassignSaleCustomer ? (query) => { void loadSaleCustomerChoices(saleCustomerPrompt.sale, query) } : undefined}
             onAssign={(customer) => { void submitSaleCustomerChange(saleCustomerPrompt.sale, customer) }}
+            onCreateCustomer={canAddSaleCustomer && canReassignSaleCustomer ? () => setSaleCustomerProfile({ sale: saleCustomerPrompt.sale, mode: 'create' }) : undefined}
             onRetryPending={saleCustomerPendingRequest && canReassignSaleCustomer ? () => {
               const targetId = saleCustomerPendingRequest.action.kind === 'customer' ? saleCustomerPendingRequest.action.target_id : null
               const target = targetId == null ? null : saleCustomerPrompt.choices.find((choice) => choice.id === targetId) || { id: targetId, name: `#${targetId}` }
@@ -2870,6 +2878,28 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
             onDiscardPending={saleCustomerPendingRequest ? () => {
               void confirmDiscardRetry().then((confirmed) => { if (confirmed) savePendingBulkFieldRequest(null) })
             } : undefined}
+          />
+        </Suspense>
+      ) : null}
+      {saleCustomerProfile ? (
+        <Suspense fallback={null}>
+          <CustomerSourceModal
+            key={`${statusSecurityScope}:${saleCustomerProfile.mode}:${saleCustomerProfile.sale.id}`}
+            customerId={saleCustomerProfile.mode === 'edit' ? saleCustomerProfile.sale.customer_id ?? null : null}
+            source={{ kind: 'sale', saleId: Number(saleCustomerProfile.sale.id) }}
+            t={t}
+            notify={notify}
+            pushAction={saleCustomerProfile.mode === 'edit' ? actionHistory.pushAction : undefined}
+            onSaved={async ({ record }) => {
+              const { sale, mode } = saleCustomerProfile
+              if (mode === 'create') {
+                await submitSaleCustomerChange(sale, { id: Number(record.id), name: String(record.name || '') })
+                return
+              }
+              setDetailSale(null)
+              await refreshSaleCustomerViews()
+            }}
+            onClose={() => setSaleCustomerProfile(null)}
           />
         </Suspense>
       ) : null}

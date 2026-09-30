@@ -99,6 +99,15 @@ export function formatSaleRecordValueLinesLocalized(
     const id = finiteNumber(row.id)
     return [name ? `${name}${id === null ? '' : ` · #${id}`}` : (id === null ? label('value_changed', 'Value changed') : `#${id}`)]
   }
+  if (field === 'customer_details') {
+    const row = objectRow(parsed)
+    if (!row) return [fallbackLine(value, label)]
+    const columns: Array<[string, string]> = [['name', 'Name'], ['phone', 'Phone'], ['email', 'Email'], ['address', 'Address'], ['notes', 'Notes'], ['gender', 'Gender']]
+    const lines = columns
+      .filter(([column]) => Object.prototype.hasOwnProperty.call(row, column))
+      .map(([column, fallback]) => `${label(column, fallback)}: ${String(row[column] ?? '').trim() || label('none', 'None')}`)
+    return lines.length ? lines : [label('value_changed', 'Value changed')]
+  }
   if (field === 'driver') {
     const row = objectRow(parsed)
     if (!row) return [fallbackLine(value, label)]

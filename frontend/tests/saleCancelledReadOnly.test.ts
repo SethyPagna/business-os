@@ -30,13 +30,19 @@ while (depth > 0) {
 const customerActionExpression = modalSource.slice(exprStart, cursor - 1)
 assert.match(customerActionExpression, /currentStatus/, 'the customer action must consult the status at all')
 
-const evaluateCustomerAction = (currentStatus: string, onCustomerAction: unknown) => {
+const evaluateCustomerAction = (
+  currentStatus: string,
+  onCustomerAction: unknown,
+  onCustomerDetails: unknown = undefined,
+  sale: Record<string, unknown> = { id: 1, customer_id: 5 },
+  customerIsAnonymous = false,
+) => {
   const code = transformSync(`module.exports = (${customerActionExpression})`, {
     loader: 'tsx', format: 'cjs', jsxFactory: 'h', jsxFragment: 'Fragment',
   }).code
   const module: { exports: unknown } = { exports: undefined }
-  new Function('module', 'exports', 'currentStatus', 'onCustomerAction', 'sale', 't', 'h', 'Fragment', code)(
-    module, module, currentStatus, onCustomerAction, { id: 1 },
+  new Function('module', 'exports', 'currentStatus', 'onCustomerAction', 'onCustomerDetails', 'customerIsAnonymous', 'Pencil', 'sale', 't', 'h', 'Fragment', code)(
+    module, module, currentStatus, onCustomerAction, onCustomerDetails, customerIsAnonymous, 'Pencil', sale,
     (key: string) => key, (tag: unknown) => ({ tag }), 'Fragment',
   )
   return module.exports
@@ -58,5 +64,13 @@ assert.equal(
   evaluateCustomerAction('completed', undefined), null,
   'no onCustomerAction still means no control',
 )
+
+// The customer-details pencil follows the same rules: never on a cancelled sale,
+// and only for a linked, named customer.
+assert.equal(evaluateCustomerAction('cancelled', undefined, handler), null, 'a cancelled sale hides the details pencil too')
+assert.notEqual(evaluateCustomerAction('completed', undefined, handler), null, 'a live sale with a linked customer offers the pencil')
+assert.equal(evaluateCustomerAction('completed', undefined, handler, { id: 1, customer_id: null }), null, 'a sale with no linked customer has no profile to edit')
+assert.equal(evaluateCustomerAction('completed', undefined, handler, { id: 1, customer_id: 5 }, true), null, 'a walk-in identity has no profile to edit')
+assert.equal(evaluateCustomerAction('completed', undefined, undefined), null, 'no callback, no control')
 
 console.log('saleCancelledReadOnly OK')

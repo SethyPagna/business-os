@@ -45,6 +45,7 @@ export default function SaleCustomerActionModal({
   onClose,
   onSearch,
   onAssign,
+  onCreateCustomer,
   onRetryPending,
   onDiscardPending,
 }: {
@@ -60,6 +61,9 @@ export default function SaleCustomerActionModal({
   onClose: () => void
   onSearch?: (query: string) => void
   onAssign: (customer: SaleCustomerChoice) => void
+  // Present only for a role that may add customers: opens the add-customer
+  // sheet from this sale; the new customer is then assigned to the sale.
+  onCreateCustomer?: () => void
   onRetryPending?: () => void
   onDiscardPending?: () => void
 }) {
@@ -136,10 +140,13 @@ export default function SaleCustomerActionModal({
               ))}
               {loading ? <p role="status" className="px-2 py-3 text-sm text-gray-500">{translate('loading', 'Loading...')}</p> : null}
               {errorMatchesQuery ? <div role="alert" className="px-2 py-3 text-sm text-red-600">{error}<button type="button" className="btn-secondary ml-2" disabled={blocked} onClick={() => runSearch(query.trim())}>{translate('retry', 'Retry')}</button></div> : null}
-              {hasQuery && query.trim() === resultsQuery && !loading && !error && !matchingChoices.length ? (
+              {hasQuery && query.trim() === resultsQuery && !loading && !error && !matchingChoices.length && !onCreateCustomer ? (
                 <p className="px-2 py-3 text-sm text-gray-500">{translate('sale_customer_create_contacts', 'No existing customer was found. Creating a new customer requires Contacts add access, as in POS. Add the customer in Contacts, then search again.')}</p>
               ) : null}
             </div>
+            {onCreateCustomer ? (
+              <button type="button" className="btn-secondary w-full text-xs" disabled={blocked} onClick={onCreateCustomer}>+ {translate('add_customer', 'Add Customer')}</button>
+            ) : null}
           </>
         ) : (
           <p className="rounded-lg border p-3 text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
