@@ -75,6 +75,31 @@ runTest('S3/S4: one Received date select, one Tag select, and the reason row wit
   assert.match(modal, /reloadReasons/, 'closing the manager reloads the options')
 })
 
+runTest('360 px: no mode or select text is clipped (browser pass, 30 Sep: "Rem…", "New · 3…", "Sella…")', () => {
+  // Measured at 360: "Remove" needed 67 px in a 63 px segment; the lot and
+  // tag selects kept 49 and 25 px for their text. Phones split the row.
+  assert.match(header, /min-w-0 truncate rounded-\[0\.6rem\] px-1 /, 'the mode segments keep 1 px-unit padding so "Remove" fits')
+  const rows = [...entry.matchAll(/<div className="(grid grid-cols-[^ ]+ gap-1\.5 sm:grid-cols-\[[^"]+\])">/g)].map((match) => match[1])
+  assert.equal(rows.length, 2, 'the Add E3 row and the Remove/Set row are two columns on a phone')
+  assert.match(rows[0], /^grid grid-cols-2 /, 'Add: Expiry and Tag share the second phone row equally')
+  // "Remove entirely" needed 102 px of text room in an even half (86 px).
+  assert.match(rows[1], /^grid grid-cols-\[minmax\(0,0\.7fr\)_minmax\(0,1\.3fr\)\] /, 'Remove/Set: the Tag select gets the wider phone cell')
+  for (const row of rows) assert.match(row, /sm:grid-cols-\[minmax\(0,1\.5fr\)_minmax\(0,(1\.2|0\.8)fr\)_minmax\(0,1\.2fr\)\]/, 'one row from sm up, as the spec draws it')
+  assert.match(entry, /<div className="col-span-2 sm:col-span-1">\s*\{lotSelect\}/, 'the received date takes the whole first phone row')
+  assert.equal((entry.match(/\{lotSelect\}/g) || []).length, 2)
+})
+
+runTest('Khmer: the labels inside the number cells keep a Khmer line box (browser pass, lang=km at 360)', () => {
+  // khmerRoom measured line-height 9/9 on ចំនួន, ថ្លៃដើម, តម្លៃ.
+  for (const [name, text] of [['shared', shared], ['entry', entry]] as const) {
+    for (const match of text.matchAll(/<span className="([^"]*text-\[9px\][^"]*)"/g)) {
+      assert.doesNotMatch(match[1], /leading-none/, `${name}: an inset label squeezes Khmer to a 1.0 line height`)
+      assert.match(match[1], /leading-\[1\.6\]/, `${name}: an inset label gets the Khmer line height`)
+    }
+  }
+  assert.match(shared, /text-\[9px\]/, 'the inset label is still there')
+})
+
 runTest('S13: the line button reads "Add" (or "Save"), text only; the finish button is "Complete Session"', () => {
   assert.match(entry, /\{editing \? tr\('save', 'Save'\) : tr\('add', 'Add'\)\}/)
   assert.doesNotMatch(entry, /fast_stockin_add|＋|update_line/, 'no "+ Add & next", no glyph')
