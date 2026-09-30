@@ -53,20 +53,19 @@ await runTest('browser no longer registers or messages automatic business replay
   assert.match(syncRuntimeSource, /function registerOutboxBackgroundSync/)
   assert.doesNotMatch(syncRuntimeSource, /syncRegistration\.sync\.register\(OUTBOX_SYNC_TAG\)/)
   assert.doesNotMatch(syncRuntimeSource, /postMessage\(\{ type: 'BUSINESS_OS_SYNC_NOW' \}\)/)
-  assert.match(webApiSource, /queueBusinessOutboxOperation/)
+  assert.doesNotMatch(webApiSource, /queueBusinessOutboxOperation/)
   assert.doesNotMatch(webApiSource, /encryptOfflineVaultValue|decryptOfflineVaultValue/)
   assert.doesNotMatch(webApiSource, /OFFLINE_AUTH_SESSION_TOKEN_KEY/)
   assert.doesNotMatch(webApiSource, /function syncBackgroundAuthSessionToken/)
 })
 
-await runTest('vault-unlocked foreground replay is denied without decryption or network dispatch', () => {
-  assert.match(webApiSource, /async function syncUnlockedOfflineOutbox/)
+await runTest('foreground replay does not exist: no decryption or network dispatch from web-api.ts', () => {
+  assert.doesNotMatch(webApiSource, /syncUnlockedOfflineOutbox|syncUnlockedOfflineFileChunks/)
   assert.doesNotMatch(webApiSource, /decryptOfflineVaultValue\(row\.encrypted_payload/)
   assert.doesNotMatch(webApiSource, /apiFetch\('POST', '\/api\/sync\//)
-  assert.match(webApiSource, /code: 'legacy_recovery_required'/)
+  assert.doesNotMatch(webApiSource, /code: 'legacy_recovery_required'/)
   assert.match(webApiSource, /String\(type\)\.startsWith\('BUSINESS_OS_OUTBOX_'\)/)
   assert.match(webApiSource, /BUSINESS_OS_OUTBOX_CONFLICT/)
-  assert.match(webApiSource, /async function syncUnlockedOfflineFileChunks/)
   assert.doesNotMatch(webApiSource, /function dispatchOutbox(?:File)?Progress/)
 })
 
