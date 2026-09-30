@@ -1,4 +1,5 @@
 import type { BindParams, getDb } from './db'
+import type { ProductMergeSourceExtent } from './productMerge'
 
 type ProductMergeDb = ReturnType<typeof getDb>
 
@@ -46,6 +47,25 @@ export type ProductMergeCaseSnapshot = {
   reparentedByTable: Array<{ table: string; column: string; ids: number[] }>
   promotionRuleRows: Array<{ id: number; product_ids: string | null }>
   childProductRows: Array<{ id: number }>
+}
+
+// What the fold read about the discarded product, as the extent its write batch
+// re-asserts (productMergeSourceUnmovedAssertion). Lot stock is included only
+// when every lot row carries it (the shared case read does; a leading-zero
+// approved plan builds its own rows).
+export function productMergeSourceExtent(snapshot: ProductMergeCaseSnapshot): ProductMergeSourceExtent {
+  const number = (value: unknown) => Number(value) || 0
+  const lotsKnown = snapshot.duplicateBatchRows.every((row) => row.lot_quantity != null && row.lot_stock_rows != null)
+  return {
+    shelfRows: snapshot.duplicateStockRows.length,
+    shelfQuantity: snapshot.duplicateStockRows.reduce((sum, row) => sum + number(row.quantity), 0),
+    lotRows: snapshot.duplicateBatchRows.length,
+    movements: snapshot.reparentedByTable.find((entry) => entry.table === 'inventory_movements')?.ids.length ?? 0,
+    ...(lotsKnown ? {
+      lotStockRows: snapshot.duplicateBatchRows.reduce((sum, row) => sum + number(row.lot_stock_rows), 0),
+      lotQuantity: snapshot.duplicateBatchRows.reduce((sum, row) => sum + number(row.lot_quantity), 0),
+    } : {}),
+  }
 }
 
 export type ProductMergeLotSnapshot = {
@@ -133,7 +153,15 @@ export function planProductMergeCaseSnapshot(
             FROM products WHERE id = @id`,
       params: { id: duplicateId },
     },
-    { key: 'duplicateBatches', sql: 'SELECT id, batch_key, batch_number FROM product_batches WHERE variant_product_id = @id', params: { id: duplicateId } },
+    {
+      key: 'duplicateBatches',
+      // The two lot_* columns let the fold assert in its write batch that nothing moved on these lots since this read.
+      sql: `SELECT id, batch_key, batch_number,
+        (SELECT COALESCE(SUM(quantity), 0) FROM branch_batch_stock WHERE batch_id = product_batches.id) AS lot_quantity,
+        (SELECT COUNT(*) FROM branch_batch_stock WHERE batch_id = product_batches.id) AS lot_stock_rows
+        FROM product_batches WHERE variant_product_id = @id`,
+      params: { id: duplicateId },
+    },
     { key: 'duplicateImages', sql: 'SELECT image_path, sort_order FROM product_images WHERE product_id = @id ORDER BY sort_order ASC, id ASC', params: { id: duplicateId } },
     { key: 'canonicalImages', sql: 'SELECT image_path FROM product_images WHERE product_id = @id', params: { id: keeperId } },
     ...reparentTables.map(({ table, column }, index) => ({

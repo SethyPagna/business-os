@@ -72,6 +72,13 @@ function localizeRefusal(t: TranslateFn, error: unknown): unknown {
       || 'These two costs are too far apart to be one product\u2019s cost ({min} and {max}). Averaging them would store a cost nobody paid, so nothing was merged \u2014 correct whichever figure is wrong, then merge.'
     return new Error(replaceVars(template, { min: outlier?.min ?? '', max: outlier?.max ?? '' }))
   }
+  // Both leave every table untouched; the operator's next move is to try again.
+  if (code === 'merge_conflict_retry') {
+    return Object.assign(new Error(t('resolve_refusal_retry') || 'Stock changed while merging. Nothing was saved. Try again.'), { code })
+  }
+  if (code === 'merge_case_exceeds_safe_limit') {
+    return Object.assign(new Error(t('resolve_refusal_too_large') || 'This product has too many linked records for one safe merge. Nothing was saved.'), { code })
+  }
   return error
 }
 

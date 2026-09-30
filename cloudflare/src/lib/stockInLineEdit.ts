@@ -75,6 +75,7 @@ import {
   STOCK_RECEIPT_MOVEMENT_TYPES, STOCK_IN_EDIT_REFERENCE_PREFIX, stockInEditRange, stockInEditReference,
 } from './stockInSessionsQuery'
 import { broadcast } from '../durable-objects/broadcastHub'
+import { isUndoClosedByMerge } from './undoAppliers'
 import { bumpVersion } from './cache'
 
 export const STOCK_IN_LINE_EDIT_KIND = 'stock.session_line_edit'
@@ -407,10 +408,14 @@ async function applyInner(db: D1Compat, user: SessionUser, movementId: number, b
   // session's undo/redo is not a receipt line either (same test stockRevert.ts
   // applies before reverting one).
   if (/^\d+$/.test(reference)) {
-    const session = await db.prepare(`SELECT o.id, o.generation,
+    const session = await db.prepare(`SELECT o.id, o.generation, h.reversible, h.last_error,
         EXISTS(SELECT 1 FROM stock_session_members sm WHERE sm.movement_id=@movement) AS is_member
-      FROM stock_session_operations o WHERE o.rowid=@rowid`).get<Row>({ rowid: Number(reference), movement: movementId })
+      FROM stock_session_operations o LEFT JOIN action_history h ON h.id=o.history_id WHERE o.rowid=@rowid`).get<Row>({ rowid: Number(reference), movement: movementId })
     if (session && (Number(session.is_member) !== 1 || Number(session.generation) % 2 === 1)) {
+      // A merge closes the Undo of a session it touches, so "Redo it first" would send the operator to a button that no longer exists.
+      if (Number(session.generation) % 2 === 1 && isUndoClosedByMerge(session)) {
+        refuse(409, 'This stock-in session was undone, and a product merge closed its Undo, so it cannot be redone. The line cannot be edited.', 'session_undo_closed')
+      }
       refuse(409, 'This stock-in session was undone. Redo it first, then edit the line.', 'session_undone')
     }
   }

@@ -1,5 +1,6 @@
 import { getMergePreview, mergePossiblySameProducts } from '../../api/productWriteTransport.ts'
 import { createClientRequestId } from '../../api/requestIds.ts'
+import { isRetryableFailure } from '../../utils/retryableFailure.ts'
 import { identityBarcodeKey, isRealBarcode } from '../../utils/productDetailRule.ts'
 import type { ProductConflictCluster, ProductConflictProduct } from '../../utils/selectedConflictMerge.ts'
 import type { ResolveCell, ResolveColumn, ResolveOption, ResolveRow } from '../shared/ResolveGrid.tsx'
@@ -282,20 +283,48 @@ function blockedMessage(ctx: Context, id: number, t: Translate): string | null {
   return null
 }
 
-// The Worker's refusals arrive in English; the ones this flow can meet are
-// said in the operator's language. The code stays on the error (isStale reads it).
+// The Worker's refusals arrive in English, and a dropped connection or a fault
+// says nothing an operator can use ("Failed to fetch"). Every failure this flow
+// can meet is said in the operator's language, by code first, then by kind.
+// The code and status stay on the error: isStale reads the code and the modal
+// offers Continue only for a network error or a 5xx.
 function localizedRefusal(error: unknown, t: Translate): unknown {
   const problem = error as { code?: unknown; status?: unknown } | null
   const code = typeof problem?.code === 'string' ? problem.code : ''
+  const status = Number(problem?.status)
   const message = code === 'product_merge_not_duplicates'
     ? tr(t, 'selected_conflict_product_merge_not_duplicates', 'These products are not a current duplicate group. Refresh the Duplicates list and try again.')
     : code === 'resolve_plan_budget'
       ? tr(t, 'resolve_plan_budget', 'Product resolving is unavailable on this deployment. No changes were saved.')
     : code === 'cost_permission_required'
       ? tr(t, 'resolve_cost_locked', 'Changing the cost needs the cost edit permission.')
+    : code === 'merge_conflict_retry'
+      ? tr(t, 'resolve_refusal_retry', 'Stock changed while merging. Nothing was saved. Try again.')
+    : code === 'merge_case_exceeds_safe_limit'
+      ? tr(t, 'resolve_refusal_too_large', 'This product has too many linked records for one safe merge. Nothing was saved.')
+    : code === 'invalid_merge_numeric'
+      ? tr(t, 'resolve_refusal_numeric', 'A price or cost is not a valid number. Correct it, then resolve.')
+    : code === 'resolve_request_conflict'
+      ? tr(t, 'resolve_refusal_request_conflict', 'This resolve was already started with different choices. Review again.')
+    : code === 'invalid_resolve_plan'
+      ? tr(t, 'resolve_refusal_invalid_plan', 'These choices are not valid. Review again.')
+    : STALE_CODES.has(code)
+      ? tr(t, 'resolve_refusal_changed', 'These records changed. Nothing was saved. Review again.')
+    : status === 403
+      ? tr(t, 'resolve_refusal_permission', 'You do not have permission to do this. Nothing was saved.')
+    : status === 404
+      ? tr(t, 'resolve_refusal_missing', 'One of these products no longer exists. Refresh and try again.')
+    : status >= 400 && status < 500 && status !== 408 && status !== 429
+      ? tr(t, 'resolve_refusal_invalid_plan', 'These choices are not valid. Review again.')
+    : status >= 500
+      ? tr(t, 'resolve_refusal_server', 'The server had a problem.')
+    : isRetryableFailure(error)
+      ? tr(t, 'resolve_refusal_network', 'Could not reach the server.')
       : ''
-  // The status stays: the modal offers Continue only for a network error or a 5xx.
-  return message ? Object.assign(new Error(message), { code, status: problem?.status }) : error
+  if (!message) return error
+  // Nothing on the wire said whether the write landed, and the new wording no longer carries the network signature isRetryableFailure reads.
+  const outcome = !Number.isFinite(status) && isRetryableFailure(error) ? { outcome: 'unknown' } : {}
+  return Object.assign(new Error(message), { code, status: problem?.status, ...outcome })
 }
 
 type Plan = { ctx: Context; rows: ResolveRow[]; finalBarcode: string; absorbed: string[] }

@@ -56,7 +56,8 @@ check('the merge records inventory_movements for the transferred quantity', () =
 })
 
 check('the merge re-points or folds product_batches', () => {
-  assert.ok(/UPDATE product_batches SET variant_product_id = @canonicalId/.test(mergeBlock), 'non-colliding batches must move to the canonical product')
+  assert.ok(/repointLotsStatement\(canonicalId/.test(mergeBlock) && /UPDATE product_batches SET variant_product_id = @canonicalId/.test(routeSrc),
+    'non-colliding batches must move to the canonical product (in chunks, one statement per chunk)')
   assert.ok(/INSERT INTO branch_batch_stock[\s\S]*?quantity = quantity \+ excluded\.quantity/.test(mergeBlock), 'colliding batches must fold their per-branch stock in')
 })
 
@@ -176,7 +177,7 @@ check('a WRITE-OFF zeroes the lots in place and leaves a balancing ledger line',
     'the write-off path must never write batch_number -- production already carries TEXT values in that INTEGER column')
   assert.ok(/batchNumber: batchRow\.batch_number == null \? null : Number\(batchRow\.batch_number\)/.test(writeOffBody),
     'the batch number it merely REPORTS must still be coerced to a number, so a legacy TEXT lot is not echoed back as text')
-  assert.ok(/batchNumber: nextCanonicalBatchNumber/.test(mergeBlock),
+  assert.ok(/number: nextCanonicalBatchNumber/.test(mergeBlock) && /CAST\(json_extract\(value, '\$\.number'\) AS INTEGER\)/.test(routeSrc),
     'the merge path must renumber from its own integer counter, never copy a possibly-TEXT value across')
 })
 

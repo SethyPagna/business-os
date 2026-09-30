@@ -30,9 +30,9 @@ import { lotRemainingSql } from '../lib/lotRemaining'
 import { compareCosts, normalizeProductGroupName, resolveMergedCostDetail } from '../lib/productDetailRule'
 import type { CostVerdict, MergedCostOutlier } from '../lib/productDetailRule'
 import { buildAtomicMergeHistoryStatements, closeStockSessionsStatements, readOpenStockSessions, finalizeAtomicMergeHistory, mergeStateFingerprint, PRODUCT_MERGE_GROUP_ACTION_KIND, PRODUCT_MERGE_GROUP_CHILD_KIND, productMergeGroupPrefixFingerprint, registerMergeFold, registerProductMergeGroupRedo, recordSupplierBackfillSnapshot, MERGE_REPARENT_TABLES, type AtomicMergeKnownIds, type AtomicMergeStatement, type MergeReversal, type MergeStockDisposition, type ProductMergeKeeperChoice } from '../lib/undoAppliers'
-import { createProductMergeClusterPlan, MERGE_COST_FIELDS, MERGE_PRICE_FIELDS, parseProductMergeClusterPlan, productMergeCaseKey, productMergeCasAssertion, productMergeNumericError, productMergePlanKeeperMatches, productMergePlanSourceMemberMatches, resolveProductMergeClusterPlanEconomics, resolveProductMergeEconomics, type ProductMergeClusterPlan, type ProductMergeEconomics, type ProductMergeNumericIssue } from '../lib/productMerge'
+import { createProductMergeClusterPlan, MERGE_COST_FIELDS, MERGE_PRICE_FIELDS, parseProductMergeClusterPlan, productMergeCaseKey, productMergeCasAssertion, productMergeNumericError, productMergeSourceUnmovedAssertion, MERGE_CONFLICT_RETRY, productMergePlanKeeperMatches, productMergePlanSourceMemberMatches, resolveProductMergeClusterPlanEconomics, resolveProductMergeEconomics, type ProductMergeClusterPlan, type ProductMergeEconomics, type ProductMergeNumericIssue } from '../lib/productMerge'
 import { CATALOG_COST_DERIVE_SQL, catalogCostRecomputeIfChangedSql, costEntryActorParams, typedCostEntriesBeforeWriteSql, typedCostEntryBeforeWriteStatement } from '../lib/catalogCostRecompute'
-import { PRODUCT_MERGE_READ_BATCH_MAX_STATEMENTS, readProductMergeCaseSnapshot, readProductMergeDependentLotSnapshots, planProductMergeCaseSnapshot, planProductMergeDependentLotSnapshots, runProductMergeReadBatch, type ProductMergeReadPlan } from '../lib/productMergeSnapshot'
+import { PRODUCT_MERGE_READ_BATCH_MAX_STATEMENTS, productMergeSourceExtent, readProductMergeCaseSnapshot, readProductMergeDependentLotSnapshots, planProductMergeCaseSnapshot, planProductMergeDependentLotSnapshots, runProductMergeReadBatch, type ProductMergeReadPlan } from '../lib/productMergeSnapshot'
 import type { ProductMergeCaseSnapshot, ProductMergeLotSnapshot } from '../lib/productMergeSnapshot'
 import {
   PRODUCT_CONFLICT_MERGE_MANIFEST_VERSION,
@@ -2251,8 +2251,8 @@ app.put('/:id', async (c) => {
         // refusing. Any other field this edit also carries (price/cost/image)
         // is applied on top of the survivor afterwards, same as an ordinary edit.
         const db = getDb(c.env)
-        const dupRow = await db.prepare('SELECT id, name, image_path, COALESCE(is_group, 0) AS is_group FROM products WHERE id = @id')
-          .get<{ id: number; name: string | null; image_path: string | null; is_group: number }>({ id: Number(id) })
+        const dupRow = await db.prepare('SELECT id, name, barcode, updated_at, image_path, COALESCE(is_group, 0) AS is_group FROM products WHERE id = @id')
+          .get<{ id: number; name: string | null; barcode: string | null; updated_at: string | null; image_path: string | null; is_group: number }>({ id: Number(id) })
         if (!dupRow) return c.json({ error: 'Product not found' }, 404)
         if (dupRow.is_group) return c.json({ error: 'Group rows cannot be merged — merge the variant products instead' }, 400)
         // foldDuplicateProductInto's own guard (productsShareExactIdentity)
@@ -2281,9 +2281,19 @@ app.put('/:id', async (c) => {
             'edit identity fold', 'merge', undefined, { operationId: crypto.randomUUID() },
           )
         } catch (error) {
-          if (/merge_state_conflict|merge_identity_conflict/.test(String(error))) {
+          const stateConflict = /merge_state_conflict|merge_identity_conflict/.test(String(error))
+          const refusal = mergeFoldRefusal(error)
+          if (stateConflict || refusal) {
+            // The fold wrote nothing, so the identity written above must not stay:
+            // the edit is refused as a whole and can simply be sent again.
+            await db.prepare(`UPDATE products SET name = @name, barcode = @barcode, updated_at = @updatedAt
+              WHERE id = @id AND name = @nextName AND COALESCE(barcode, '') = COALESCE(@nextBarcode, '')`)
+              .run({ name: dupRow.name, barcode: dupRow.barcode, updatedAt: dupRow.updated_at, id: dupRow.id, nextName, nextBarcode })
+          }
+          if (stateConflict) {
             return c.json({ success: false, code: 'merge_state_conflict', error: 'One of these products changed while the edit was being applied. Refresh and try again.' }, 409)
           }
+          if (refusal) return c.json({ success: false, ...refusal }, 409)
           throw error
         }
         // Apply the remaining fields this edit carried (price/cost/image/etc,
@@ -3257,6 +3267,43 @@ export async function productMergeChangesImages(
     || (!String(keeper.image_path || '').trim() && Boolean(String(discarded.image_path || '').trim())))
 }
 
+const MERGE_LOT_REPOINT_CHUNK = 100
+
+const MERGE_BUDGET_ERROR = /merge_case_statement_budget_exceeded|merge_case_fingerprint_statement_budget_exceeded|merge_read_batch_statement_limit/
+const MERGE_CONFLICT_RETRY_MESSAGE = 'Stock on one of these products changed while the merge was being saved. Nothing was saved. Try again.'
+const MERGE_TOO_LARGE_MESSAGE = 'This product has too many linked stock or history rows for one safe merge and remains unchanged.'
+
+// The two definite answers a fold can give that are neither a stale review nor a
+// fault: stock moved under it (retry), or the case is larger than one atomic
+// batch. Both leave every table untouched, so they are 409s, never 500s.
+function mergeFoldRefusal(error: unknown): { code: string; error: string; retryable?: true } | null {
+  const text = String(error)
+  if (text.includes(MERGE_CONFLICT_RETRY)) return { code: MERGE_CONFLICT_RETRY, error: MERGE_CONFLICT_RETRY_MESSAGE, retryable: true }
+  if (MERGE_BUDGET_ERROR.test(text)) return { code: 'merge_case_exceeds_safe_limit', error: MERGE_TOO_LARGE_MESSAGE }
+  return null
+}
+
+function chunkItems<T>(items: readonly T[], size: number): T[][] {
+  const chunks: T[][] = []
+  for (let index = 0; index < items.length; index += size) chunks.push(items.slice(index, index + size))
+  return chunks
+}
+
+// Moves the listed lots onto the keeper, each with its own new batch number.
+// A lot that holds stock is reactivated; an empty one keeps its state.
+function repointLotsStatement(canonicalId: number, lots: ReadonlyArray<{ id: number; number: number }>) {
+  return {
+    sql: `WITH moves AS (SELECT CAST(json_extract(value, '$.id') AS INTEGER) AS id, CAST(json_extract(value, '$.number') AS INTEGER) AS number FROM json_each(@lots))
+          UPDATE product_batches SET variant_product_id = @canonicalId,
+            batch_number = (SELECT number FROM moves WHERE moves.id = product_batches.id),
+            is_active = CASE WHEN EXISTS (SELECT 1 FROM branch_batch_stock WHERE batch_id = product_batches.id AND quantity > 0)
+                             THEN 1 ELSE is_active END,
+            updated_at = CURRENT_TIMESTAMP
+          WHERE id IN (SELECT id FROM moves)`,
+    params: { canonicalId, lots: JSON.stringify(lots) },
+  }
+}
+
 /** Atomic guard for an image-denied merge whose preflight found no image effect. */
 export function productMergeNoImageEffectAssertion(keeperId: number, duplicateId: number) {
   return {
@@ -3543,10 +3590,14 @@ export async function foldDuplicateProductInto(
   let nextCanonicalImageOrder = canonicalImageRows.length
 
   const canChangeProductImages = getActionTier(user, 'products', 'image') === 'full'
-  const statements: Array<{ sql: string; params?: Record<string, unknown> }> = [
-    productMergeCasAssertion([canonicalBefore, dupPricing]),
-    ...(atomicHistory?.preStatements || []),
-  ]
+  // A caller that reviewed the state itself (Resolve digest, selected-conflict
+  // fingerprint, leading-zero plan) brings guards with a more specific answer
+  // ("changed after review"), so they run before the generic stock-moved guard.
+  const sourceUnmovedGuard = productMergeSourceUnmovedAssertion(dup.id, productMergeSourceExtent(snapshot))
+  const reviewedGuards = atomicHistory?.preStatements || []
+  const statements: Array<{ sql: string; params?: Record<string, unknown> }> = reviewedGuards.length
+    ? [productMergeCasAssertion([canonicalBefore, dupPricing]), ...reviewedGuards, sourceUnmovedGuard]
+    : [sourceUnmovedGuard, productMergeCasAssertion([canonicalBefore, dupPricing])]
   if (!canChangeProductImages) {
     statements.push(productMergeNoImageEffectAssertion(canonicalId, dup.id))
   }
@@ -3726,6 +3777,7 @@ BEGIN SELECT RAISE(ABORT,'transfer provenance is immutable'); END`,
   let batchesWrittenOffThisDup = 0
   const dependentLotSnapshots = atomicHistory?.preparedDependentLotSnapshots
     ?? await readProductMergeDependentLotSnapshots(db, snapshot, stockDisposition)
+  const lotsToRepoint: Array<{ id: number; number: number }> = []
   for (const batchRow of dupBatchRows) {
     if (writeOffStock) {
       // REMOVE: the lot belonged to the row being discarded, so it does not
@@ -3802,15 +3854,9 @@ BEGIN SELECT RAISE(ABORT,'transfer provenance is immutable'); END`,
       // safe: this merge is exactly what collapses the two sides of that
       // transfer into one identity).
       const batchIsTransferEvidenced = transferEvidencedBatchIds.has(batchRow.id)
-      if (batchIsTransferEvidenced) statements.push({ sql: 'DROP TRIGGER IF EXISTS transfer_batch_identity_update' })
-      statements.push({
-        sql: `UPDATE product_batches SET variant_product_id = @canonicalId, batch_number = @batchNumber,
-              is_active = CASE WHEN EXISTS (SELECT 1 FROM branch_batch_stock WHERE batch_id = @id AND quantity > 0)
-                               THEN 1 ELSE is_active END,
-              updated_at = CURRENT_TIMESTAMP WHERE id = @id`,
-        params: { canonicalId, batchNumber: nextCanonicalBatchNumber, id: batchRow.id },
-      })
       if (batchIsTransferEvidenced) {
+        statements.push({ sql: 'DROP TRIGGER IF EXISTS transfer_batch_identity_update' })
+        statements.push(repointLotsStatement(canonicalId, [{ id: batchRow.id, number: nextCanonicalBatchNumber }]))
         statements.push({
           sql: `CREATE TRIGGER transfer_batch_identity_update BEFORE UPDATE OF id,variant_product_id ON product_batches
 WHEN (NEW.id IS NOT OLD.id OR NEW.variant_product_id IS NOT OLD.variant_product_id)
@@ -3818,6 +3864,8 @@ WHEN (NEW.id IS NOT OLD.id OR NEW.variant_product_id IS NOT OLD.variant_product_
    WHERE json_extract(a.value,'$.source_batch_id')=OLD.id OR json_extract(a.value,'$.destination_batch_id')=OLD.id)
 BEGIN SELECT RAISE(ABORT,'lot has immutable transfer provenance'); END`,
         })
+      } else {
+        lotsToRepoint.push({ id: batchRow.id, number: nextCanonicalBatchNumber })
       }
       canonicalBatchIdByKey.set(batchRow.batch_key, batchRow.id)
       nextCanonicalBatchNumber += 1
@@ -3825,6 +3873,9 @@ BEGIN SELECT RAISE(ABORT,'lot has immutable transfer provenance'); END`,
       batchesMovedThisDup += 1
     }
   }
+  // One statement per chunk, not per lot: a product with dozens of lots would
+  // otherwise spend the whole 100-statement bound on the repoint alone.
+  for (const lotChunk of chunkItems(lotsToRepoint, MERGE_LOT_REPOINT_CHUNK)) statements.push(repointLotsStatement(canonicalId, lotChunk))
 
   // Re-parent the duplicate's transactional history onto the keeper so the
   // survivor's Sales section and Stock Changes ledger show the COMPLETE
@@ -4049,6 +4100,7 @@ BEGIN SELECT RAISE(ABORT,'lot has immutable transfer provenance'); END`,
   try {
     batchResults = await db.batch(statements)
   } catch (error) {
+    if (String(error).includes(MERGE_CONFLICT_RETRY)) throw new Error(MERGE_CONFLICT_RETRY)
     if (/malformed JSON|merge_guard/i.test(String(error))) throw new Error('merge_state_conflict')
     throw error
   }
@@ -5307,18 +5359,21 @@ app.post('/merge-duplicates', async (c) => {
           break mergeGroups
         }
         const conflict = /merge_state_conflict|merge_identity_conflict|merge_cluster_plan_conflict/.test(String(error))
-        const exceedsBudget = /merge_case_statement_budget_exceeded|merge_case_fingerprint_statement_budget_exceeded|merge_read_batch_statement_limit/.test(String(error))
+        const exceedsBudget = MERGE_BUDGET_ERROR.test(String(error))
+        const retry = String(error).includes(MERGE_CONFLICT_RETRY)
         refusals.push({
           caseKey: productMergeCaseKey(canonicalId, dup.id),
           keeperId: canonicalId,
           mergedId: dup.id,
           mergedName: dup.name,
-          code: conflict ? 'merge_state_conflict' : exceedsBudget ? 'merge_case_exceeds_safe_limit' : 'merge_failed',
-          error: conflict
-            ? 'The product changed during this case; refresh and resume.'
-            : exceedsBudget
-              ? 'This product has too many linked stock or history rows for one safe merge case and remains unchanged.'
-              : String(error),
+          code: retry ? MERGE_CONFLICT_RETRY : conflict ? 'merge_state_conflict' : exceedsBudget ? 'merge_case_exceeds_safe_limit' : 'merge_failed',
+          error: retry
+            ? MERGE_CONFLICT_RETRY_MESSAGE
+            : conflict
+              ? 'The product changed during this case; refresh and resume.'
+              : exceedsBudget
+                ? 'This product has too many linked stock or history rows for one safe merge case and remains unchanged.'
+                : String(error),
         })
         break
       }
@@ -5683,6 +5738,7 @@ function selectedConflictStatementEstimate(
   }
   statements += 2 // deactivate discarded + keeper economics
   const keeperBatchByKey = new Map(snapshot.canonicalBatchRows.map((row) => [row.batch_key, row.id]))
+  let repointedLots = 0
   for (const batch of snapshot.duplicateBatchRows) {
     if (stockChoice === 'write_off') {
       statements += 2
@@ -5690,9 +5746,10 @@ function selectedConflictStatementEstimate(
       const lot = dependentLots.get(Number(batch.id))
       statements += (lot?.duplicateStockRows.filter((row) => Number(row.quantity)).length || 0) + 5
     } else {
-      statements += 1
+      repointedLots += 1
     }
   }
+  statements += Math.ceil(repointedLots / MERGE_LOT_REPOINT_CHUNK)
   statements += snapshot.reparentedByTable.length
   statements += snapshot.promotionRuleRows.filter((rule) => {
     try { return Array.isArray(JSON.parse(String(rule.product_ids || ''))) && JSON.parse(String(rule.product_ids || '')).some((id: unknown) => Number(id) === Number(snapshot.duplicateProduct?.id)) }
@@ -5700,6 +5757,7 @@ function selectedConflictStatementEstimate(
   }).length
   if (snapshot.childProductRows.some((row) => Number(row.id) !== Number(snapshot.canonicalProduct?.id))) statements += 1
   if (snapshot.childProductRows.some((row) => Number(row.id) === Number(snapshot.canonicalProduct?.id))) statements += 1
+  statements += 1 // discarded product's shelf, lots and movements still as read
   statements += 2 // stock caches
   statements += 2 // close stock-in session Undo (audit + status)
   statements += 2 // committed receipt transition + assertion
@@ -5965,19 +6023,21 @@ function selectedConflictLightStatementEstimate(
   const childCount = ofKind('child_product').filter((row) => Number(row.parent_id) === mergedId).length
   const collisionBatchIds = new Set<number>()
   let mergeBatchStatements = 0
+  let repointedLots = 0
   for (const batch of mergedBatches) {
     const keeperBatchId = keeperBatches.get(String(batch.batch_key))
-    if (keeperBatchId == null) mergeBatchStatements += 1
+    if (keeperBatchId == null) repointedLots += 1
     else {
       collisionBatchIds.add(Number(batch.id))
       mergeBatchStatements += batchStock.filter((row) => Number(row.batch_id) === Number(batch.id) && Number(row.quantity)).length + 5
     }
   }
+  mergeBatchStatements += Math.ceil(repointedLots / MERGE_LOT_REPOINT_CHUNK)
   const common = 1 + SELECTED_CONFLICT_FINGERPRINT_STATEMENT_COUNT + 1 // product CAS, selected-state guards, discarded stock clear
     + (canChangeImages ? mergedImages.length + 2 : 1)
     + 2 // deactivate and economics
     + reparentGroups.size + promotionCount + (childCount ? 2 : 0)
-    + 2 + 2 + 2 + 3 // stock caches, stock-session Undo close, receipt transition/guard, atomic history
+    + 1 + 2 + 2 + 2 + 3 // discarded-stock guard, stock caches, stock-session Undo close, receipt transition/guard, atomic history
   const merge = common + branchStock.length * 2 + mergeBatchStatements
   const writeOff = common + branchStock.length + mergedBatches.length * 2
 
@@ -7879,7 +7939,7 @@ async function applyProductConflictActionReview(c: any, raw: unknown, user: Sess
         snapshotContext: { review_id: review.id, group_key: group.group_key, authority: plan.authority },
       })
   } catch (error) {
-    const conflict = /merge_state_conflict|merge_identity_conflict|merge_cluster_plan_conflict/.test(String(error))
+    const conflict = /merge_state_conflict|merge_identity_conflict|merge_cluster_plan_conflict|merge_conflict_retry/.test(String(error))
     const infrastructure = isProductMergeInfrastructureError(error)
     throw new ProductConflictActionApplyStop(conflict ? 'merge_state_conflict' : infrastructure ? 'merge_infrastructure_interrupted' : 'merge_failed',
       conflict ? 'A reviewed product or receipt changed before this fold committed.' : 'The reviewed fold could not be completed.', conflict ? 409 : 500)
@@ -8306,8 +8366,8 @@ app.post('/possible-duplicates/merge-batch', async (c) => {
           interruptionCode = 'merge_infrastructure_interrupted'
           break
         }
-        const conflict = /merge_state_conflict|merge_identity_conflict|selected_conflict.*guard|malformed JSON/i.test(String(error))
-        const exceeds = /merge_case_statement_budget_exceeded|merge_case_fingerprint_statement_budget_exceeded|merge_read_batch_statement_limit/.test(String(error))
+        const conflict = /merge_state_conflict|merge_identity_conflict|merge_conflict_retry|selected_conflict.*guard|malformed JSON/i.test(String(error))
+        const exceeds = MERGE_BUDGET_ERROR.test(String(error))
         await db.prepare(`UPDATE product_conflict_merge_run_cases SET status='refused',refusal_code=@code,error=@error,updated_at=CURRENT_TIMESTAMP
           WHERE run_id=@runId AND ordinal=@ordinal AND status='planned'`)
           .run({
@@ -8703,6 +8763,8 @@ app.post('/possible-duplicates/merge', async (c) => {
     if (/merge_state_conflict|merge_identity_conflict/.test(String(error))) {
       return c.json({ success: false, code: 'merge_state_conflict', error: 'One of these products changed while the merge was being prepared. Refresh and try again.' }, 409)
     }
+    const refusal = mergeFoldRefusal(error)
+    if (refusal) return c.json({ success: false, ...refusal }, 409)
     if (/merge_numeric_invalid:/.test(String(error))) {
       return c.json({ success: false, code: 'invalid_merge_numeric', error: String(error).replace(/^Error:\s*merge_numeric_invalid:/, '') }, 409)
     }
