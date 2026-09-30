@@ -47,7 +47,8 @@ import { driveSyncScheduleDue, recordDriveSyncError } from './lib/googleDrive'
 import { checkDriveSyncAuthorizer } from './lib/driveSyncAuthority'
 import { enqueueDriveSyncJob } from './lib/driveSyncQueue'
 import { maybeRunScheduledAuditLogRetention } from './lib/audit'
-import { maybeRunScheduledImportRetention, cleanOrphanImportStaging } from './lib/importRetention'
+import { maybeRunScheduledImportRetention } from './lib/importRetention'
+import { maybeRunScheduledOrphanStagingCleanup } from './lib/orphanStagingSweep'
 import { sweepStaleImportIncomingFiles } from './lib/importIncomingFiles'
 import { maybeRunScheduledImageAudit } from './lib/imageAudit'
 import { maybeRunScheduledEphemeralRetention } from './lib/ephemeralRetention'
@@ -666,7 +667,7 @@ export default {
       // Drain orphan staging automatically (rows whose parent import_jobs row
       // is already gone) -- previously reachable only via a manual, force-only
       // admin endpoint, so orphans accumulated with no automatic drain.
-      await runStep('orphan-staging-cleanup', () => cleanOrphanImportStaging(env, { apply: true }))
+      await runStep('orphan-staging-cleanup', () => maybeRunScheduledOrphanStagingCleanup(env))
       // Prune ephemeral / log / expired-auth tables (rate_limit_events,
       // sessions, verification_codes, lockouts, ai_response_logs, action_history)
       // that had no automatic retention at all before the Aug-31 audit.
