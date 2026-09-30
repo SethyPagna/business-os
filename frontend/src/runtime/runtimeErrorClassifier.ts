@@ -58,7 +58,6 @@ export function isFirstPartyBuiltAssetSource(value: unknown, baseOrigin = ''): b
   return /\/assets\/[^?#]+\.js$/i.test(pathname)
     || /\/assets\/[^?#]+\.css$/i.test(pathname)
     || /\/theme-bootstrap\.js$/i.test(pathname)
-    || /\/scanbot-web-sdk\//i.test(pathname)
 }
 
 export function isLikelyInjectedRuntimeSource(value: unknown, baseOrigin = ''): boolean {

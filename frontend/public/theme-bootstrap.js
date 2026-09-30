@@ -79,8 +79,7 @@
         const raw = text(value).replace(/\\/g, '/');
         return /\/assets\/[^?#]+\.js/i.test(raw)
             || /\/assets\/[^?#]+\.css/i.test(raw)
-            || /\/theme-bootstrap\.js/i.test(raw)
-            || /\/scanbot-web-sdk\//i.test(raw);
+            || /\/theme-bootstrap\.js/i.test(raw);
     }
     function hasInjectedBundleSource(value) {
         const raw = text(value);

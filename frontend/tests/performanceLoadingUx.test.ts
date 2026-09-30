@@ -876,10 +876,8 @@ assert.match(webApi, /const previousSyncServerUrl = getSyncServerUrl\(\)[\s\S]*c
 assert.doesNotMatch(webApi, /setSyncServerUrl\(url: unknown\)[\s\S]{0,900}getOfflineDb\(\)\.then/, 'setSyncServerUrl should not load IndexedDB during startup')
 assert.doesNotMatch(webApi, /try \{\s*await dexieDb\.settings\.(?:delete|put)/, 'web API bootstrap should not await Dexie maintenance before connecting')
 assert.doesNotMatch(webApi, /dexieDb\.settings/, 'web API should not call Dexie settings through a startup static import')
-assert.match(webApi, /async function unlockOfflineVault[\s\S]*const offlineDb = await getOfflineDb\(\)[\s\S]*offlineDb\.offline_vault/, 'offline vault should load local DB on demand')
-const disabledGenericReplay = webApi.match(/async function syncUnlockedOfflineOutbox[^\n]*\{[\s\S]*?\n\}/)?.[0] || ''
-assert.match(disabledGenericReplay, /code: 'legacy_recovery_required'/, 'legacy generic replay must reject until ownership-verified recovery exists')
-assert.doesNotMatch(disabledGenericReplay, /getOfflineDb\(|apiFetch\(/, 'disabled generic replay must not load local DB or dispatch writes')
+assert.doesNotMatch(webApi, /unlockOfflineVault/, 'the offline vault can no longer be unlocked, so nothing loads its local DB at startup')
+assert.doesNotMatch(webApi, /syncUnlockedOfflineOutbox/, 'there is no generic legacy replay entry point to load the local DB or dispatch writes')
 assert.match(webApi, /if \(url\) \{[\s\S]*setSyncServerUrl\(url\)[\s\S]*if \(hasStoredUserSession\(\)\) \{[\s\S]*ensureSessionRecoveryListeners\(\)[\s\S]*scheduleConnectWS\(\)[\s\S]*startHealthCheck\(\)/, 'web API bootstrap should start recovery loops only when a stored session exists and delay the first websocket connect')
 assert.doesNotMatch(webApi, /startHealthCheck\(\)[^\n]*\n\s*runOfflineMaintenance\(\)/, 'web API bootstrap should not run offline maintenance synchronously')
 assert.match(appContext, /getAppApi\(\)\.ensureSessionRecoveryListeners\?\.\(\)[\s\S]*reconnectWS\(\)[\s\S]*startHealthCheck\(\)/, 'successful login should install recovery listeners before reconnecting websocket and health checks')

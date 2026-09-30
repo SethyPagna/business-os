@@ -46,23 +46,6 @@ type ActionHistoryTransportModule = typeof import('./api/actionHistoryTransport.
 type NotesTransportModule = typeof import('./api/notesTransport.ts')
 type ProductQueryParams = Parameters<ProductReadTransportModule['searchProducts']>[0]
 type OfflineVaultKey = CryptoKey | null
-type OfflineOperation = AnyRecord & {
-  operation_id?: string
-  type?: string
-  payload?: AnyRecord
-  id?: string
-  client_request_id?: string
-  schema_version?: number
-  base_updated_at?: string
-  updated_at?: string
-  entity_table?: string
-  entity?: string
-  entity_id?: string | number | null
-  entity_label?: string
-}
-type OfflineSyncOptions = { limit?: number; force?: boolean }
-type OfflineFileOwner = OfflineOperation & { upload_id?: string }
-
 const BOOTSTRAP_STORAGE_MAINTENANCE_DELAY_MS = 2200
 const BOOTSTRAP_STORAGE_MAINTENANCE_IDLE_TIMEOUT_MS = 9000
 const BOOTSTRAP_OFFLINE_DB_WRITE_DELAY_MS = 45_000
@@ -232,45 +215,6 @@ function getLazyApiMethod(name: string): LazyApiMethod {
   return lazyApiMethodCache.get(name) as LazyApiMethod
 }
 
-function asArrayBuffer(bytes: Uint8Array): ArrayBuffer {
-  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
-}
-
-function bytesToBase64(bytes: ArrayBuffer | ArrayBufferView): string {
-  const view = bytes instanceof Uint8Array
-    ? bytes
-    : ArrayBuffer.isView(bytes)
-      ? new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength)
-      : new Uint8Array(bytes)
-  let binary = ''
-  for (let index = 0; index < view.length; index += 1) binary += String.fromCharCode(view[index])
-  return btoa(binary)
-}
-
-function base64ToBytes(value: unknown): Uint8Array {
-  const binary = atob(String(value || ''))
-  const bytes = new Uint8Array(binary.length)
-  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index)
-  return bytes
-}
-
-async function deriveOfflineVaultKey(pin: unknown, saltBase64: unknown): Promise<CryptoKey> {
-  const material = await crypto.subtle.importKey(
-    'raw',
-    new TextEncoder().encode(String(pin || '')),
-    'PBKDF2',
-    false,
-    ['deriveKey'],
-  )
-  return crypto.subtle.deriveKey(
-    { name: 'PBKDF2', hash: 'SHA-256', salt: asArrayBuffer(base64ToBytes(saltBase64)), iterations: 250_000 },
-    material,
-    { name: 'AES-GCM', length: 256 },
-    false,
-    ['encrypt', 'decrypt'],
-  )
-}
-
 async function requestOfflinePersistentStorage(): Promise<{ supported: boolean; persistent: boolean; estimate?: StorageEstimate | null }> {
   if (typeof navigator === 'undefined' || !navigator.storage?.persist) return { supported: false, persistent: false }
   const persistent = await navigator.storage.persist().catch(() => false)
@@ -283,72 +227,12 @@ function dispatchVaultLocked(reason = 'idle'): void {
   window.dispatchEvent(new CustomEvent('offline:vault-locked', { detail: { reason, ts: Date.now() } }))
 }
 
-function scheduleOfflineVaultIdleLock(): void {
-  if (typeof window === 'undefined') return
-  if (offlineVaultIdleTimer != null) window.clearTimeout(offlineVaultIdleTimer)
-  offlineVaultIdleTimer = window.setTimeout(() => lockOfflineVault('idle'), OFFLINE_VAULT_IDLE_LOCK_MS)
-}
-
 function lockOfflineVault(reason = 'manual'): void {
   offlineVaultKey = null
   offlineVaultUnlockedAt = 0
   if (typeof window !== 'undefined' && offlineVaultIdleTimer != null) window.clearTimeout(offlineVaultIdleTimer)
   offlineVaultIdleTimer = null
   dispatchVaultLocked(reason)
-}
-
-async function unlockOfflineVault(pin: unknown): Promise<AnyRecord> {
-  if (!String(pin || '').trim()) throw new Error('PIN is required to unlock offline mode.')
-  const offlineDb = await getOfflineDb()
-  let saltRow = await offlineDb.offline_vault.get('device_salt').catch(() => null)
-  if (!saltRow?.value) {
-    saltRow = {
-      key: 'device_salt',
-      value: bytesToBase64(crypto.getRandomValues(new Uint8Array(16))),
-      status: 'active',
-      updated_at: new Date().toISOString(),
-    }
-    await offlineDb.offline_vault.put(saltRow)
-  }
-  offlineVaultKey = await deriveOfflineVaultKey(pin, saltRow.value)
-  offlineVaultUnlockedAt = Date.now()
-  scheduleOfflineVaultIdleLock()
-  const storage = await requestOfflinePersistentStorage()
-  await offlineDb.offline_vault.put({
-    key: 'storage_status',
-    value: storage,
-    status: storage.persistent ? 'persistent' : 'eviction_possible',
-    updated_at: new Date().toISOString(),
-  }).catch(() => {})
-  return { success: true, unlocked: true, storage }
-}
-
-async function queueBusinessOutboxOperation(_operation: OfflineOperation = {}): Promise<AnyRecord> {
-  // Retain legacy records unchanged; these paths have no verified recovery owner.
-  throw Object.assign(new Error('Business writes require an online connection. Keep your draft and submit it online.'), {
-    code: 'online_required',
-  })
-}
-
-async function queueOfflineFileChunks(_file: File, _ownerOperation: OfflineFileOwner = {}): Promise<AnyRecord> {
-  // Retain legacy records unchanged; these paths have no verified recovery owner.
-  throw Object.assign(new Error('Business writes require an online connection. Keep your draft and submit it online.'), {
-    code: 'online_required',
-  })
-}
-
-async function syncUnlockedOfflineOutbox(_options: OfflineSyncOptions = {}): Promise<AnyRecord> {
-  // Retain legacy records unchanged; these paths have no verified recovery owner.
-  throw Object.assign(new Error('Legacy encrypted records and files are retained on this device. Automatic replay is disabled; ownership-verified recovery is required.'), {
-    code: 'legacy_recovery_required',
-  })
-}
-
-async function syncUnlockedOfflineFileChunks(_options: OfflineSyncOptions = {}): Promise<AnyRecord> {
-  // Retain legacy records unchanged; these paths have no verified recovery owner.
-  throw Object.assign(new Error('Legacy encrypted records and files are retained on this device. Automatic replay is disabled; ownership-verified recovery is required.'), {
-    code: 'legacy_recovery_required',
-  })
 }
 
 // F1 (27 Sep 2026): there is no background "offline maintenance" loop any more.
@@ -862,7 +746,6 @@ const staticApi = {
 
   ensureSessionRecoveryListeners,
 
-  unlockOfflineVault,
   lockOfflineVault,
   getOfflineVaultState() {
     return {
@@ -871,10 +754,6 @@ const staticApi = {
       idleLockMs: OFFLINE_VAULT_IDLE_LOCK_MS,
     }
   },
-  queueBusinessOutboxOperation,
-  queueOfflineFileChunks,
-  syncUnlockedOfflineOutbox,
-  syncUnlockedOfflineFileChunks,
   requestOfflinePersistentStorage,
   getCallLog,
   clearCallLog,

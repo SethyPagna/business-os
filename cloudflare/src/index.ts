@@ -241,7 +241,7 @@ app.onError((error, c) => {
 // - Permissions-Policy: opts out of browser features this app never
 //   needs, at zero functional cost -- EXCEPT camera, which stays allowed
 //   for same-origin use only (`self`). This app's barcode/RFID scanning
-//   flow (scanbotScanner.ts, BarcodeScannerModal.tsx, cameraPermission.ts)
+//   flow (cameraPolicy.ts, BarcodeScannerModal.tsx, cameraPermission.ts)
 //   genuinely calls getUserMedia for the camera; blocking it here would
 //   have silently broken that feature in production with no console error
 //   pointing at this file.

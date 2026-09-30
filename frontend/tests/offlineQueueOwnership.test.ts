@@ -175,30 +175,9 @@ await test('SW two concurrent claims accept only one exact revision', async () =
   assert.equal(claims.filter(Boolean).length, 1)
   assert.equal(queues.get(1)?.sync_lease, 'first')
 })
-await test('legacy generic foreground sale is retained without decrypt, dispatch or any revision mutation', async () => {
+await test('legacy generic foreground sale is retained: web-api.ts has no decrypt, dispatch or queue mutation path for it', async () => {
   const text = source('web-api.ts')
-  const parsed = ts.createSourceFile('web-api.ts', text, ts.ScriptTarget.Latest, true)
-  const functions = parsed.statements.filter((node) => ts.isFunctionDeclaration(node) && ['syncUnlockedOfflineOutbox', 'getSyncOutboxKey'].includes(node.name?.text || '')).map((node) => node.getText(parsed)).join('\n')
-  for (const removedDuringRead of [false, true]) {
-    reset(); const original = { ...row(), operation_id: 'sales.create', encrypted_payload: 'original ciphertext', iv: 'original iv' }; queues.set(1, original)
-    const syncOutbox = {
-      toArray: async () => { const result = [...queues.values()].map(copy); if (removedDuringRead) queues.clear(); return result },
-      get: async (key: number) => copy(queues.get(key)),
-      update: async (key: number, values: Row) => { assert.ok(queues.has(key), 'must not resurrect missing work'); queues.set(key, { ...queues.get(key), ...values }) },
-    }
-    const dependencies = {
-      offlineVaultKey: {}, scheduleOfflineVaultIdleLock() {}, OFFLINE_OUTBOX_SYNC_LEASE_MS: 60000,
-      getOfflineDb: async () => ({ sync_outbox: syncOutbox, transaction: async (...args: any[]) => args.at(-1)() }),
-      decryptOfflineVaultValue: () => { throw Error('legacy sale must not be decrypted for replay') },
-      apiFetch: () => { throw Error('legacy sale must not dispatch') },
-    }
-    const compiled = ts.transpileModule(functions + '\nreturn syncUnlockedOfflineOutbox;', { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
-    const run = new Function(...Object.keys(dependencies), compiled)(...Object.values(dependencies))
-    await assert.rejects(run({ force: true }), (error: any) => error.code === 'legacy_recovery_required')
-    // A disabled replay must not even read the queue, hence the simulated
-    // concurrent read hook never runs; ciphertext and status remain exact.
-    assert.equal(queues.size, 1)
-    assert.deepEqual(queues.get(1), original)
-  }
+  assert.doesNotMatch(text, /\bsyncUnlockedOfflineOutbox\b|\bqueueBusinessOutboxOperation\b|decryptOfflineVaultValue|sync_outbox\.(?:put|update|delete)\(/)
+  assert.doesNotMatch(text, /apiFetch\('POST', '\/api\/sync\//)
 })
 console.log(`${passed} offline ownership behavioral checks passed`)

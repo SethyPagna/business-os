@@ -49,8 +49,6 @@ Thumbs.db
 .idea/
 
 # Local SDK unpack folders
-scanbot-web-sdk-*/
-/ops/scanbot-web-sdk-*/
 
 # Browser verification artifacts
 .playwright-cli/

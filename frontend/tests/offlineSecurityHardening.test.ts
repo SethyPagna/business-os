@@ -47,18 +47,17 @@ await runTest('IndexedDB schema has encrypted vault, generic outbox, file chunks
   assert.match(localDbSource, /schema_version/)
 })
 
-await runTest('offline vault uses Web Crypto PIN derivation, AES-GCM, persistence, and idle relock', () => {
-  assert.match(webApiSource, /deriveOfflineVaultKey/)
-  assert.match(webApiSource, /PBKDF2/)
-  assert.match(webApiSource, /AES-GCM/)
+await runTest('offline vault can no longer be unlocked: no PIN derivation, only persistence and relock remain', () => {
+  assert.doesNotMatch(webApiSource, /deriveOfflineVaultKey|unlockOfflineVault/)
+  assert.doesNotMatch(webApiSource, /PBKDF2|AES-GCM/)
   assert.match(webApiSource, /OFFLINE_VAULT_IDLE_LOCK_MS = 15 \* 60_000/)
   assert.match(webApiSource, /navigator\.storage\.persist/)
   assert.match(webApiSource, /offline:vault-locked/)
 })
 
 await runTest('legacy business format remains readable while new offline admission is denied', () => {
-  assert.match(webApiSource, /queueBusinessOutboxOperation/)
-  assert.match(webApiSource, /code: 'online_required'/)
+  assert.doesNotMatch(webApiSource, /queueBusinessOutboxOperation/)
+  assert.doesNotMatch(webApiSource, /code: 'online_required'/)
   assert.doesNotMatch(webApiSource, /sync_outbox\.put\(/)
   assert.match(swSource, /\/api\/sync\/outbox/)
   assert.match(swSource, /operation_id/)
@@ -67,10 +66,8 @@ await runTest('legacy business format remains readable while new offline admissi
 })
 
 await runTest('legacy file format remains retained but foreground replay endpoints are disabled', () => {
-  assert.match(webApiSource, /queueOfflineFileChunks/)
-  assert.match(webApiSource, /syncUnlockedOfflineOutbox/)
-  assert.match(webApiSource, /syncUnlockedOfflineFileChunks/)
-  assert.match(webApiSource, /code: 'legacy_recovery_required'/)
+  assert.doesNotMatch(webApiSource, /queueOfflineFileChunks|syncUnlockedOfflineOutbox|syncUnlockedOfflineFileChunks/)
+  assert.doesNotMatch(webApiSource, /code: 'legacy_recovery_required'/)
   assert.doesNotMatch(webApiSource, /offline_file_chunks\.(put|update|delete)\(/)
   assert.match(webApiSource, /String\(type\)\.startsWith\('BUSINESS_OS_OUTBOX_'\)/)
   assert.doesNotMatch(webApiSource, /OFFLINE_FILE_CHUNK_SIZE|encryptOfflineVaultValue|dispatchOutboxFileProgress/)
@@ -83,7 +80,7 @@ await runTest('legacy file format remains retained but foreground replay endpoin
 await runTest('interrupted legacy file staging cannot dispatch or complete any upload', async () => {
   assert.doesNotMatch(webApiSource, /apiFetch\('POST', '\/api\/sync\/files/)
   assert.doesNotMatch(webApiSource, /file\.slice\(/)
-  assert.match(webApiSource, /Legacy encrypted records and files are retained on this device/)
+  assert.doesNotMatch(webApiSource, /Legacy encrypted records and files are retained on this device/)
   // Behavioral coverage invokes all four exposed methods and reconnect handlers.
   await import('./onlineOnlyGenericQueues.test.ts')
 })
