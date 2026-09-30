@@ -7,16 +7,6 @@ export type EditedKeys = ReadonlySet<string>
 // Equal to KNOWN_UNPUBLISHED in cloudflare/scripts/test-portal-about-publish-pure.cjs (checked by portalEditorDraft.test.ts).
 export const DRAFT_KEYS_NOT_IN_PUBLIC_CONFIG: ReadonlySet<string> = new Set([
   'customer_portal_title_size',
-  'customer_portal_ai_intro',
-  'customer_portal_translations',
-  'customer_portal_language',
-  'customer_portal_show_top_seller_badge',
-  'customer_portal_show_top_product_badge',
-  'customer_portal_show_recommended_badge',
-  'customer_portal_show_promotion_badge',
-  'customer_portal_show_new_arrival_badge',
-  'customer_portal_highlight_rank_limit',
-  'customer_portal_recommended_product_ids',
   'customer_portal_stock_threshold_mode',
   'customer_portal_low_stock_threshold',
   'customer_portal_out_of_stock_threshold',
