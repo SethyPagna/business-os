@@ -75,7 +75,7 @@ CREATE TABLE fees(id INTEGER PRIMARY KEY, created_at TEXT, fee_date TEXT, branch
 CREATE TABLE returns(id INTEGER PRIMARY KEY, created_at TEXT, branch_id INTEGER, cashier_id INTEGER,
  status TEXT DEFAULT 'completed', return_scope TEXT DEFAULT 'customer',
  total_refund_usd REAL DEFAULT 0, total_refund_khr REAL DEFAULT 0);
-CREATE TABLE inventory_movements(id INTEGER PRIMARY KEY, movement_type TEXT, quantity REAL, created_at TEXT);
+CREATE TABLE inventory_movements(id INTEGER PRIMARY KEY, movement_type TEXT, quantity REAL, reference_id TEXT, created_at TEXT);
 
 INSERT INTO settings VALUES('pos_payment_methods','["Cash","ABA"]');
 INSERT INTO settings VALUES('business_name','Parity Test Shop');
