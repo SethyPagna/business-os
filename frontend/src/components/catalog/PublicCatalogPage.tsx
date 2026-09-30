@@ -701,6 +701,7 @@ export default function PublicCatalogPage() {
         const nextConfig = normalizeConfigPayload(payload)
         setConfig(nextConfig)
         setRealConfigInHand(true)
+        setLoadFailed(false)
         setActiveTab((tab) => resolvePortalActiveTab(nextConfig, copy, tab))
       },
       onBootstrap: (payload) => {

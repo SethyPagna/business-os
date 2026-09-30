@@ -417,6 +417,61 @@ test.describe('P2 first paint: no default look, no saved copy, bounded failure',
     expectNoRuntimeErrors(health)
   })
 
+  for (const configFirst of [true, false]) {
+    test(`P2-8 pull-to-refresh restores About after config recovers ${configFirst ? 'before' : 'after'} bootstrap fails, while product errors remain visible`, async ({ page, context }) => {
+      await seedStorefrontLanguage(context, STOREFRONT_ORIGIN, 'en')
+      let recovering = false
+      let configRequests = 0
+      let release: () => void = () => {}
+      const recoveryGate = new Promise<void>((resolve) => { release = resolve })
+      await page.route('**/api/portal/bootstrap', async (route) => {
+        if (recovering) {
+          await recoveryGate
+          if (configFirst) await pause(300)
+        }
+        await route.fulfill({ status: 500, json: { error: 'fixture bootstrap outage' } })
+      })
+      await page.route('**/api/portal/config', async (route) => {
+        configRequests += 1
+        if (!recovering) return route.fulfill({ status: 500, json: { error: 'fixture config outage' } })
+        await recoveryGate
+        if (!configFirst) await pause(300)
+        const response = await route.fetch()
+        await route.fulfill({ response, json: { ...(await response.json()), ...REAL_SHOP } })
+      })
+      await page.route('**/api/portal/catalog/products/search**', (route) => route.fulfill({ status: 500, json: { error: 'fixture products outage' } }))
+      await page.route('**/uploads/*-e2e.png', (route) => route.fulfill({ body: POSTER, contentType: 'image/png' }))
+      const health = collectPageHealth(page)
+      await page.goto(`${STOREFRONT_ORIGIN}/`, { waitUntil: 'load' })
+      const failure = page.locator('[data-portal-load-failed="true"]')
+      await expect(failure).toContainText(FAILURE_EN, { timeout: 20_000 })
+      const requestsBeforePull = configRequests
+      recovering = true
+      await page.evaluate(() => {
+        window.scrollTo(0, 0)
+        const target = document.querySelector<HTMLElement>('[data-public-media-protection="true"]')
+        if (!target) throw new Error('Storefront gesture target missing')
+        for (const [type, y] of [['touchstart', 100], ['touchmove', 300], ['touchend', 300]] as const) {
+          const touch = { identifier: 1, target, clientX: 180, clientY: y }
+          const event = new Event(type, { bubbles: true, cancelable: true })
+          Object.defineProperties(event, { touches: { value: type === 'touchend' ? [] : [touch] }, changedTouches: { value: [touch] } })
+          target.dispatchEvent(event)
+        }
+      })
+      await expect.poll(() => configRequests).toBeGreaterThan(requestsBeforePull)
+      await expect(failure).toContainText(FAILURE_EN)
+      release()
+      await expect(page.getByRole('heading', { level: 1, name: REAL_SHOP.businessName })).toBeVisible()
+      await page.getByRole('navigation', { name: STOREFRONT_EN_LABELS.sectionNavigation }).getByRole('button', { name: 'About', exact: true }).click()
+      await expect(page.getByText(REAL_SHOP.aboutContent, { exact: true })).toBeVisible()
+      await expect(failure).toHaveCount(0)
+      await storefrontSectionTab(page, STOREFRONT_EN_LABELS, 'products').click()
+      await expect(failure).toContainText(FAILURE_EN)
+      await expect(failure.getByRole('button', { name: 'Retry' })).toBeVisible()
+      expectNoRuntimeErrors(health)
+    })
+  }
+
   test('P2-6 a Khmer shopper gets the skeleton label and the failure text in Khmer', async ({ page }) => {
     // CATCHES: English-only loading or failure copy (a first visit opens in Khmer).
     let release: () => void = () => {}
