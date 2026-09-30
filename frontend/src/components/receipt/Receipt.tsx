@@ -152,6 +152,8 @@ interface ReceiptProps {
   // returned) -- the button stays visible but inert, with the reason behind
   // an InfoHint rather than as inline prose in this one-row toolbar.
   returnDisabledReason?: string
+  /** What the return does to the money on this sale (a Not Paid sale's debt), behind the same InfoHint. */
+  returnNote?: string
   _previewMode?: boolean
 }
 
@@ -354,7 +356,7 @@ function Row({ label, value, subValue, bold = false, tone = '', breakAll = false
   )
 }
 
-export default function Receipt({ sale, settings = {}, onClose, onReturn, returnLabel, returnDisabledReason = '', _previewMode }: ReceiptProps) {
+export default function Receipt({ sale, settings = {}, onClose, onReturn, returnLabel, returnDisabledReason = '', returnNote = '', _previewMode }: ReceiptProps) {
   const { fmtUSD, fmtKHR, khrSymbol, t, notify } = useApp()
   const printRef = useRef<HTMLDivElement | null>(null)
   const compactPrintRef = useRef<HTMLDivElement | null>(null)
@@ -1196,8 +1198,8 @@ export default function Receipt({ sale, settings = {}, onClose, onReturn, return
                 <span className="hidden truncate sm:inline">{returnLabel || t?.('return') || 'Return'}</span>
               </span>
             </button>
-            {returnDisabledReason ? (
-              <InfoHint text={returnDisabledReason} label={returnLabel || t?.('return') || 'Return'} />
+            {returnDisabledReason || returnNote ? (
+              <InfoHint text={returnDisabledReason || returnNote} label={returnLabel || t?.('return') || 'Return'} />
             ) : null}
           </span>
         ) : null}

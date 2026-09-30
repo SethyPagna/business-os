@@ -12,7 +12,7 @@ import { loadPendingDirectMutation, runSaleLineMutation, replaceReviewedSaleLine
 import { localizeBranchRuleError } from '../../api/branchRuleErrors.ts'
 import ConfirmDialog, { type ConfirmReviewItem } from '../shared/ConfirmDialog.tsx'
 import { fmtDateOnly, fmtDateTime24, fmtTime } from '../../utils/formatters.ts'
-import { getSaleReturnBlockReason } from '../../utils/saleReturnGuard.ts'
+import { getSaleReturnBlockReason, getSaleReturnNote } from '../../utils/saleReturnGuard.ts'
 import { DELIVERY_AMOUNT_ERROR_KEYS, deliveryAmountChanged, parseDeliveryAmountUsd } from '../../utils/deliveryAmounts.ts'
 import { buildProductGroups } from '../../utils/productGrouping.ts'
 // S4-30: the STAFF-facing half of an amended sale. The receipt uses none of
@@ -1323,6 +1323,9 @@ export default function SaleDetailModal({
     : returnBlockReason === 'fully_returned'
       ? translateOr('return_blocked_fully_returned', 'Every item on this sale has already been returned.', 'ទំនិញទាំងអស់ក្នុងការលក់នេះ ត្រូវបានប្រគល់មកវិញរួចហើយ។')
       : ''
+  const returnHint = returnBlockedReason || (getSaleReturnNote({ sale_status: currentStatus, items }) === 'lowers_debt'
+    ? translateOr('return_not_paid_lowers_debt', "Not Paid: this return lowers what the customer owes first; cash is refunded only beyond that.", "ប្រាក់ជំពាក់៖ ការប្រគល់មកវិញនេះ បន្ថយប្រាក់ដែលអតិថិជនជំពាក់ជាមុន; សងសាច់ប្រាក់តែផ្នែកលើសពីនោះប៉ុណ្ណោះ។")
+    : '')
   // ONE derivation of this sale's money column, shared with the printed
   // receipt (utils/receiptTotals.ts): the delivery fee split by who actually
   // paid it, the refund and net total, and a 'still owed' that counts riel.
@@ -2934,8 +2937,8 @@ export default function SaleDetailModal({
                   </button>
                   {/* Why the action is unavailable stays behind the hint, not
                       as inline prose next to the button. */}
-                  {returnBlockedReason ? (
-                    <InfoHint text={returnBlockedReason} label={t('return') || 'Return'} />
+                  {returnHint ? (
+                    <InfoHint text={returnHint} label={t('return') || 'Return'} />
                   ) : null}
                 </span>
               ) : null}

@@ -38,7 +38,8 @@ CREATE TABLE shift_sessions(id INTEGER PRIMARY KEY, business_date TEXT, branch_i
  opening_float_khr_registered INTEGER NOT NULL DEFAULT 0 CHECK (opening_float_khr_registered IN (0, 1)));
 CREATE TABLE returns(id INTEGER PRIMARY KEY, created_at TEXT, branch_id INTEGER, cashier_id INTEGER,
  status TEXT DEFAULT 'completed', return_scope TEXT DEFAULT 'customer',
- total_refund_usd REAL DEFAULT 0, total_refund_khr REAL DEFAULT 0, exchange_rate REAL);
+ total_refund_usd REAL DEFAULT 0, total_refund_khr REAL DEFAULT 0, exchange_rate REAL,
+ refund_currency TEXT, owed_reduction_usd REAL NOT NULL DEFAULT 0);
 
 INSERT INTO shift_sessions(id,business_date,branch_id,user_id,scope_mode,opened_at,closed_at,cancelled_at,closing_counted_khr,opening_float_khr,opening_float_khr_registered) VALUES
  (1,'2026-09-01',2,7,'per_account','2026-09-01T02:00:00.000Z','2026-09-01T06:00:00.000Z',NULL,1000,40000,1),
@@ -101,7 +102,7 @@ const salesAnalytics = load('lib/salesAnalytics.ts', { './db': { getDb: () => db
   './saleMoneyPrecision': saleMoneyPrecision, './reportMoneyPrecision': reportMoneyPrecision, './customerReturnEntitlement': customerReturnEntitlement, './refundMoneyPrecision': refundMoneyPrecision })
 const recon = load('lib/shiftReconciliation.ts', {
   './db': { getDb: () => db }, './nativeSaleChange': nativeSaleChange, './salesAnalytics': salesAnalytics,
-  './paymentMethodRegistry': load('lib/paymentMethodRegistry.ts'),
+  './paymentMethodRegistry': load('lib/paymentMethodRegistry.ts'), './refundTender': load('lib/refundTender.ts'),
 })
 
 ;(async () => {

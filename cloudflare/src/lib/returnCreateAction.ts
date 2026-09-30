@@ -1,6 +1,7 @@
 import { assertSaleRecordBatchBounds } from './saleRecordEvents'
 import { subtractDecimalSum } from './moneyPrecision'
 import { canonicalCustomerReturnExpectedQuote, type CustomerReturnExpectedQuoteV1 } from './customerReturnEntitlement'
+import { DEFAULT_REFUND_CURRENCY, parseRefundCurrency } from './refundTender'
 
 export type ReturnCreateStatement = { sql: string; params: Record<string, unknown> }
 
@@ -162,6 +163,12 @@ function canonicalV1Item(value: unknown, index: number): CanonicalV1Item {
     branch_id: optionalId('branch_id'), batch_id: optionalId('batch_id'), ...damagedChoiceKeys(item) }
 }
 
+// Dollars is the default and adds no key, so a request without a currency keeps
+// the exact digest bytes it had before the currency existed.
+function refundCurrencyIntent(body: Record<string, unknown>): { refund_currency?: 'KHR' } {
+  return parseRefundCurrency(body.refund_currency) === DEFAULT_REFUND_CURRENCY ? {} : { refund_currency: 'KHR' }
+}
+
 function canonicalReturnCreateIntentV1(body: Record<string, unknown>): Record<string, unknown> {
   if (!Array.isArray(body.items) || body.items.length === 0) throw new Error('Return items required')
   if (body.items.length > RETURN_CREATE_MAX_ITEMS) throw new Error(`Return at most ${RETURN_CREATE_MAX_ITEMS} items at a time`)
@@ -198,6 +205,7 @@ function canonicalReturnCreateIntentV1(body: Record<string, unknown>): Record<st
     items,
     expected_quote: expected satisfies CustomerReturnExpectedQuoteV1,
     replacement_items: [],
+    ...refundCurrencyIntent(body),
   }
 }
 
@@ -233,6 +241,7 @@ export function canonicalReturnCreateIntent(body: Record<string, unknown>): Reco
     items: body.items.map(canonicalItem),
     replacement_items: replacements.map(canonicalReplacementItem),
     replacement_payment_method: boundedText(body.replacement_payment_method, 120) || 'Cash',
+    ...refundCurrencyIntent(body),
   }
 }
 

@@ -35,6 +35,7 @@ import UnsavedChangesPrompt from '../shared/UnsavedChangesPrompt.tsx'
 import { captureActorReadScope, isActorReadScopeCurrent } from '../../api/actorReadScope.ts'
 import type { PendingReturnCreateV1, ReturnQuoteV1 } from '../../api/returnsTransport.ts'
 import { subtractDecimalSum } from '../../utils/moneyPrecision.ts'
+import { getSaleReturnNote } from '../../utils/saleReturnGuard.ts'
 
 const RETURN_SALE_SEARCH_TIMEOUT_MS = 12000
 // Long enough that a fast typist does not fire a request per keystroke, short
@@ -158,6 +159,7 @@ interface SaleRow {
   branch_id?: number | string | null
   exchange_rate?: number | string | null
   total_usd?: number | string | null
+  sale_status?: string | null
   created_at?: string | number | Date | null
   items?: SaleItemRow[] | null
 }
@@ -1163,6 +1165,11 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
                   <div className="text-xs text-green-600 dark:text-green-400 mt-0.5">
                     {fmtTime(foundSale.created_at)} · {foundSale.customer_name || T('no_data','—')} · {fmtUSD(foundSale.total_usd || 0)}
                   </div>
+                  {getSaleReturnNote(foundSale) === 'lowers_debt' ? (
+                    <div data-return-not-paid-note="" className="text-xs text-amber-700 dark:text-amber-300 mt-1">
+                      {T('return_not_paid_lowers_debt', 'Not Paid: this return lowers what the customer owes first; cash is refunded only beyond that.')}
+                    </div>
+                  ) : null}
                 </div>
               ) : (
                 <div className="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-3 text-sm text-gray-500">

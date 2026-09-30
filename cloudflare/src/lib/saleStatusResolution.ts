@@ -88,7 +88,9 @@
 // test-sale-bulk-status-paid-guard-pure.cjs drive the Worker copy through
 // the real routes.
 
-import { exactDecimalRatio, financialCalculationUnits, type FinancialDecimalInput } from './financialPrecision'
+import {
+  exactDecimalRatio, FINANCIAL_CALCULATION_DECIMALS, financialCalculationUnits, formatScaledUnits, type FinancialDecimalInput,
+} from './financialPrecision'
 
 /** The credit status: the sale asserts the customer still owes the money. */
 export const NOT_PAID_STATUS = 'awaiting_payment'
@@ -241,6 +243,8 @@ export type RecordedSaleMoney = {
   exchange_rate?: unknown
   money_precision_version?: unknown
   calculated_total_usd?: unknown
+  /** What the sale's active returns took off its debt instead of refunding cash (returns.owed_reduction_usd); absent is none. */
+  return_owed_reduction_usd?: unknown
   /** The rest of the row rides along untouched (and keeps this from being a weak type). */
   [column: string]: unknown
 }
@@ -257,6 +261,16 @@ function statusWord(status: unknown): string {
 }
 
 /**
+ * The total a stored sale's payment is measured against: its total less what
+ * its returns took off the debt. Exact, in calculation units. Throws when unreadable.
+ */
+export function recordedSaleOwedTotalUsd(sale: RecordedSaleMoney): string {
+  const total = financialCalculationUnits(storedAmount(sale.total_usd, false))
+  const lowered = financialCalculationUnits(storedAmount(sale.return_owed_reduction_usd, true))
+  return formatScaledUnits(total - lowered, FINANCIAL_CALCULATION_DECIMALS)
+}
+
+/**
  * A stored sale's money as the coverage formula takes it, read on the basis
  * the sale was written with: V1 when it carries recorded V1 money (the same
  * two columns the Worker's hasRecordedSaleMoneyPrecision and the frontend's
@@ -267,7 +281,7 @@ function recordedTender(sale: RecordedSaleMoney): AmountTender {
   return {
     paidUsd: storedAmount(sale.amount_paid_usd, true),
     paidKhr: storedAmount(sale.amount_paid_khr, true),
-    totalUsd: storedAmount(sale.total_usd, false),
+    totalUsd: recordedSaleOwedTotalUsd(sale),
     exchangeRate: storedAmount(sale.exchange_rate, false),
     moneyPrecisionVersion: Number(sale.money_precision_version) === 1 || sale.calculated_total_usd != null ? 1 : 0,
   }

@@ -12,6 +12,9 @@
 
 export type SaleReturnBlockReason = '' | 'cancelled' | 'fully_returned'
 
+/** What a return does to the money beyond refunding it: 'lowers_debt' on a Not Paid sale. */
+export type SaleReturnNote = '' | 'lowers_debt'
+
 type GuardLine = {
   quantity?: number | string | null
   qty?: number | string | null
@@ -52,4 +55,14 @@ export function getSaleReturnBlockReason(sale: GuardSale | null | undefined): Sa
   if (!lines.length) return ''
   const allReturned = lines.every((line) => toNumber(line.returned_quantity) >= toNumber(line.quantity ?? line.qty))
   return allReturned ? 'fully_returned' : ''
+}
+
+/**
+ * Owner rule 29 Sep 2026: a Not Paid sale is returned like a Completed one,
+ * but the return lowers what the customer owes before any cash is refunded
+ * (routes/returns.ts splits the refund the same way).
+ */
+export function getSaleReturnNote(sale: GuardSale | null | undefined): SaleReturnNote {
+  if (!sale || getSaleReturnBlockReason(sale)) return ''
+  return String(sale.sale_status || '') === 'awaiting_payment' ? 'lowers_debt' : ''
 }
