@@ -56,6 +56,7 @@ import {
   STOCK_SESSION_FAILURE_KEYS,
   type LineEntryRefusal,
   type LotChoice,
+  type SessionLinesRefusal,
   type StockMode,
   type StockSessionDraft,
   type StockSessionLine,
@@ -173,6 +174,7 @@ export default function FastStockInModal({
   const canEditPrice = permissions.getPermissionTier('products') === 'full' && permissions.can('products', 'edit')
   const canReceive = permissions.can('inventory', 'adjust')
   const canCreate = (canCreateProducts ?? true) && permissions.can('products', 'add')
+  const canEditReasons = permissions.can('inventory', 'edit_reasons')
   const packLookup = (key: string): string | undefined => tr(key, '') || undefined
   const fastStockInDraftKey = scopedWorkDraftKey('fast_stockin')
   const fallbackBranchId = String(initialHeader?.branchId || (defaultBranchId != null && defaultBranchId !== '' ? defaultBranchId : (branchOptions[0]?.value || '')))
@@ -288,6 +290,7 @@ export default function FastStockInModal({
   const [editingKey, setEditingKey] = useState('')
   const [freeEditKey, setFreeEditKey] = useState('')
   const [linesInvalidKey, setLinesInvalidKey] = useState('')
+  const [supplierRefused, setSupplierRefused] = useState(false)
   const [saving, setSaving] = useState(false)
 
   // ---- transient ----
@@ -468,7 +471,7 @@ export default function FastStockInModal({
     lotChoice: batchChoice, lot: chosenLot, canReceive, canEditCosts, branchQuantity,
   })
   if (!refusal && picked && lotsKey && !lotsReady) refusal = { key: 'loading', fallback: 'Loading...', field: 'lot' }
-  if (!refusal && picked && lotsKey && lotsFailed) refusal = { key: 'load_failed', fallback: 'Failed to load', field: 'lot' }
+  if (!refusal && picked && lotsKey && lotsFailed) refusal = { key: 'batches_load_failed', fallback: 'Could not load received dates.', field: 'lot' }
   if (!refusal && picked && mode === 'set' && batchChoice === 'none' && Number(quantity) > branchQuantity) {
     // Without a dated lot a Set can only lower the branch; raising is a receipt (Add).
     refusal = { key: 'no_batches_for_branch', fallback: 'No received dates for this branch', field: 'lot' }
@@ -620,6 +623,7 @@ export default function FastStockInModal({
       expiryDate: mode === 'add' ? expiryDate : '',
       batchChoice,
       batchLabel: lotLabelFor(batchChoice),
+      ...(mode === 'add' && String(chosenLot?.supplier_name || '').trim() ? { lotSupplierName: String(chosenLot?.supplier_name).trim() } : {}),
       ...(mode === 'set' && chosenLot ? { setScope: 'lot' as const } : {}),
       ...(mode !== 'add' && chosenLot ? { expectedLotQuantity: Number(chosenLot.quantity) || 0 } : {}),
       reason: reason.trim(),
@@ -890,22 +894,27 @@ export default function FastStockInModal({
   // ---- steps ----
   const stepIndex = steps.indexOf(currentStep)
   const goBack = stepIndex > 0 ? () => setStep(steps[stepIndex - 1]) : undefined
+  // The item to fix goes back to Items, marked; an empty item opens its free row.
+  const refuseLines = (linesRefusal: SessionLinesRefusal) => {
+    setLinesInvalidKey(linesRefusal.key)
+    if (linesRefusal.field === 'qty') setFreeEditKey(linesRefusal.key)
+    setSupplierRefused(linesRefusal.field === 'supplier')
+    setStep('items')
+    notify(tr(linesRefusal.messageKey, linesRefusal.fallback), 'error')
+  }
   const goNext = () => {
     if (saving) return
     if (currentStep === 'items') {
       if (!pendingLines.length) { if (received.length) finishSession(); return }
       if (!(Number(branchId) > 0)) { notify(tr('fast_stockin_pick_branch', 'Pick a branch'), 'error'); return }
-      const linesRefusal = sessionLinesRefusal(received)
-      if (linesRefusal) {
-        setLinesInvalidKey(linesRefusal.key)
-        setFreeEditKey(linesRefusal.key)
-        notify(tr(linesRefusal.messageKey, linesRefusal.fallback), 'error')
-        return
-      }
+      const linesRefusal = sessionLinesRefusal(received, { supplierName: supplier.supplierName })
+      if (linesRefusal) { refuseLines(linesRefusal); return }
       setStep(steps[1])
       return
     }
     if (currentStep === 'payment') {
+      const linesRefusal = sessionLinesRefusal(received, { supplierName: supplier.supplierName })
+      if (linesRefusal) { refuseLines(linesRefusal); return }
       if (paymentRefusal) {
         notify(paymentRefusal === 'fast_stockin_credit_due'
           ? tr('fast_stockin_credit_due', 'Not Yet Paid stock needs a due date')
@@ -1039,8 +1048,11 @@ export default function FastStockInModal({
                 brandOptions={brandOptions || fallbackBrands || []}
                 onRequestBrands={ensureBrands}
                 supplier={supplier}
-                onSupplier={setSupplier}
-                supplierInvalid={invalidField === 'supplier'}
+                onSupplier={(next) => {
+                  setSupplier(next)
+                  if (supplierRefused && next.supplierName.trim()) { setSupplierRefused(false); setLinesInvalidKey('') }
+                }}
+                supplierInvalid={invalidField === 'supplier' || (supplierRefused && !supplier.supplierName.trim())}
                 branchId={branchId}
                 onBranch={(next) => { if (!modeSwitchBlocked(received) || !received.some((line) => line.status === 'saved')) setBranchId(next) }}
                 branchOptions={branchOptions}
@@ -1091,7 +1103,7 @@ export default function FastStockInModal({
                 reason={reason}
                 onReason={setReason}
                 savedReasons={savedReasons}
-                onManageReasons={() => setReasonsOpen(true)}
+                onManageReasons={canEditReasons ? () => setReasonsOpen(true) : undefined}
                 onAdd={addLine}
                 editing={Boolean(editingKey)}
                 refusal={refusal ? refusalMessage : null}

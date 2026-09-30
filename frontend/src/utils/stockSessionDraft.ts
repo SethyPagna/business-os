@@ -1,7 +1,7 @@
 // The Stock Session model (UI-STOCK spec sections 4, 5): the persisted draft,
 // the mode a reopened float starts in, and the pure rules the float and its
 // tests share. React-free on purpose.
-import { adjustBranchQuantity, receiptDeclaresFree, scopedSetPreview, stockReceiptGateCode, type StockReceiptGateCode } from './stockReceiptFields.ts'
+import { adjustBranchQuantity, receiptDeclaresFree, scopedSetPreview, STOCK_RECEIPT_GATE_FALLBACKS, STOCK_RECEIPT_GATE_KEYS, stockReceiptGateCode, type StockReceiptGateCode } from './stockReceiptFields.ts'
 import { multiplyMoney4, roundMoney4, sellingPriceCeilCent, subtractMoney4 } from './moneyPrecision.ts'
 import { effectiveUnitCost, estimateCatalogCostAfter, matchCostsToPaid, paidItemsTotal, supplierTotalMatches } from './stockSessionMath.ts'
 import { formatBatchReceivedDate, lotCodeAsDate } from './batchLabel.ts'
@@ -54,6 +54,8 @@ export type StockSessionLine = {
   expiryDate: string
   batchChoice: LotChoice
   batchLabel: string
+  /** Add onto an existing lot: the supplier it already names (first attribution sticks). */
+  lotSupplierName?: string
   setScope?: 'lot' | 'branch'
   /** The lot figure the line was previewed against (Set guard, Remove/Set review). */
   expectedLotQuantity?: number
@@ -130,6 +132,7 @@ function normalizeLine(raw: unknown, mintRequestId: () => string): StockSessionL
     expiryDate: mode === 'add' ? asString(line.expiryDate) : '',
     batchChoice: normalizeLotChoice(line.batchChoice),
     batchLabel: asString(line.batchLabel),
+    ...(asString(line.lotSupplierName).trim() ? { lotSupplierName: asString(line.lotSupplierName).trim() } : {}),
     ...(line.setScope === 'lot' || line.setScope === 'branch' ? { setScope: line.setScope } : {}),
     ...(Number.isFinite(Number(line.expectedLotQuantity)) && line.expectedLotQuantity != null ? { expectedLotQuantity: Number(line.expectedLotQuantity) } : {}),
     reason: asString(line.reason),
@@ -620,10 +623,31 @@ export function lineEntryRefusal(input: {
   return { key: gate, fallback: gate, field: gate === 'supplier_required' ? 'supplier' : 'cost', gate }
 }
 
-/** Items' Next: an Add item with neither paid nor free units has nothing to receive. */
-export function sessionLinesRefusal(lines: readonly StockSessionLine[]): { key: string; messageKey: string; fallback: string } | null {
-  const empty = lines.find((line) => line.status !== 'saved' && line.mode === 'add' && !line.createPayload && line.quantity + line.freeQuantity <= 0)
-  return empty ? { key: empty.key, messageKey: 'fast_stockin_qty', fallback: 'Quantity must be at least 1' } : null
+export type SessionLinesRefusal = { key: string; messageKey: string; fallback: string; field: 'qty' | 'supplier' | 'cost' }
+
+/**
+ * Next (Items and Payment): an Add item with no units has nothing to receive,
+ * and every Add item passes the receipt gate with the shared Supplier as it is
+ * now -- it can be cleared after the items were added (spec 4.1).
+ */
+export function sessionLinesRefusal(lines: readonly StockSessionLine[], shared: { supplierName: string }): SessionLinesRefusal | null {
+  const pending = lines.filter((line) => line.status !== 'saved' && line.mode === 'add')
+  const empty = pending.find((line) => !line.createPayload && line.quantity + line.freeQuantity <= 0)
+  if (empty) return { key: empty.key, messageKey: 'fast_stockin_qty', fallback: 'Quantity must be at least 1', field: 'qty' }
+  for (const line of pending) {
+    if (line.quantity + line.freeQuantity <= 0) continue
+    const gate = stockReceiptGateCode({
+      isStockIn: true,
+      supplierName: shared.supplierName,
+      lotSupplierName: typeof line.batchChoice === 'number' ? line.lotSupplierName : '',
+      unitCostUsd: lineWireUnitCost(line) ?? '',
+      freeGoods: line.freeGoods,
+      quantity: line.quantity,
+      freeQuantity: line.freeQuantity,
+    })
+    if (gate) return { key: line.key, messageKey: STOCK_RECEIPT_GATE_KEYS[gate], fallback: STOCK_RECEIPT_GATE_FALLBACKS[gate], field: gate === 'supplier_required' ? 'supplier' : 'cost' }
+  }
+  return null
 }
 
 /** The free row of an Add item (owner, 30 Sep): only its quantity is typed. */

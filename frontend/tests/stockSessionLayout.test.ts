@@ -75,6 +75,20 @@ runTest('S3/S4: one Received date select, one Tag select, and the reason row wit
   assert.match(modal, /reloadReasons/, 'closing the manager reloads the options')
 })
 
+runTest('manage reasons: the icon shows only for users the Worker lets save reasons (inventory edit_reasons)', () => {
+  assert.match(modal, /const canEditReasons = permissions\.can\('inventory', 'edit_reasons'\)/)
+  assert.match(modal, /onManageReasons=\{canEditReasons \? \(\) => setReasonsOpen\(true\) : undefined\}/)
+  assert.match(entry, /\{onManageReasons \? \(\s*<button[\s\S]{0,200}onClick=\{onManageReasons\}/, 'no dead manage button for users who cannot save')
+  const worker = readFileSync(new URL('../../cloudflare/src/routes/inventory.ts', import.meta.url), 'utf8')
+  const put = worker.slice(worker.indexOf("app.put('/reasons'"), worker.indexOf("app.put('/reasons'") + 400)
+  assert.match(put, /getActionTier\(user, 'inventory', 'edit_reasons'\) === 'none'[\s\S]{0,120}403/, 'the Worker refuses the same users')
+})
+
+runTest('a received-date read that fails says so, not "Failed to load products"', () => {
+  assert.doesNotMatch(modal, /key: 'load_failed'/)
+  assert.match(modal, /key: 'batches_load_failed', fallback: 'Could not load received dates\.'/)
+})
+
 runTest('360 px: no mode or select text is clipped (browser pass, 30 Sep: "Rem…", "New · 3…", "Sella…")', () => {
   // Measured at 360: "Remove" needed 67 px in a 63 px segment; the lot and
   // tag selects kept 49 and 25 px for their text. Phones split the row.

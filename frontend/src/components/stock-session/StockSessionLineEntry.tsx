@@ -233,15 +233,17 @@ export default function StockSessionLineEntry(props: LineEntryProps) {
             onChange={(next) => onReason(next.slice(0, REASON_MAX_LENGTH))}
           />
         </div>
-        <button
-          type="button"
-          onClick={onManageReasons}
-          aria-label={tr('manage_reasons', 'Manage reasons')}
-          title={tr('manage_reasons', 'Manage reasons')}
-          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50 hover:text-gray-700 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700"
-        >
-          <Settings2 className="h-4 w-4" />
-        </button>
+        {onManageReasons ? (
+          <button
+            type="button"
+            onClick={onManageReasons}
+            aria-label={tr('manage_reasons', 'Manage reasons')}
+            title={tr('manage_reasons', 'Manage reasons')}
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50 hover:text-gray-700 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700"
+          >
+            <Settings2 className="h-4 w-4" />
+          </button>
+        ) : null}
         <button
           type="button"
           onClick={onAdd}
