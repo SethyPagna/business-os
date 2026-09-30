@@ -72,10 +72,13 @@ assert.ok(
 const list = kernel.buildStockInSessionListQuery('')
 assert.doesNotMatch(list.groupedSql, /CAST\(rx\.reference_id AS TEXT\)/, 'revert lookup must preserve the reference_id index')
 const groups = db.prepare(`${list.groupedSql} ORDER BY created_at DESC`).bind(list.params).all()
-assert.equal(groups.length, 6, 'four explicit sessions (incl. the free-goods and unpriced pair), one legacy-string session and one legacy timestamp group; reverted receipt excluded')
+assert.equal(groups.length, 7, 'five explicit sessions (incl. the free-goods and unpriced pair and the reverted one), one legacy-string session and one legacy timestamp group')
 assert.equal(groups.find((row) => row.session_key === 'session:100').line_count, 2)
 assert.equal(groups.find((row) => row.session_key === 'session:100').movement_cost_usd, 69)
-assert.equal(groups.some((row) => row.session_key === 'session:102'), false)
+assert.equal(groups.find((row) => row.session_key === 'session:100').reverted_line_count, 0)
+// Owner, 30 Sep 2026: a reverted receipt stays as recorded, marked reverted.
+const revertedSession = groups.find((row) => row.session_key === 'session:102')
+assert.deepEqual([revertedSession.line_count, revertedSession.reverted_line_count, revertedSession.quantity, revertedSession.movement_cost_usd], [1, 1, 1, 8])
 
 // Zero cost is a RECORDED value, not a missing one. The two are one column
 // apart in the list -- movement_cost_usd is the money, lines_without_movement
@@ -130,9 +133,10 @@ assert.deepEqual(
   db.prepare(byUsername.groupedSql).bind(byUsername.params).all().map((row) => row.session_key),
   // Session 103 is the session lane's legacy movement_type='stock_in' pair.
   // Sessions 104/105 are the newer deployed-lineage zero-quantity receipts;
-  // all four were written by user 7, so the exact result preserves those
-  // sessions while proving the actor search uses the resolved username.
-  ['session:100', 'session:103', 'session:104', 'session:105'],
+  // session 102 is the reverted receipt, still listed as recorded. All five
+  // were written by user 7, so the exact result preserves those sessions
+  // while proving the actor search uses the resolved username.
+  ['session:100', 'session:102', 'session:103', 'session:104', 'session:105'],
   'searching the username shown on the row must find it -- the haystack reads the resolved actor, not the raw snapshot',
 )
 const bySnapshot = kernel.buildStockInSessionListQuery('ung sethy')
@@ -182,4 +186,4 @@ assert.equal(legacyLines.length, 2, 'opening a legacy stock_in session must retu
 assert.equal(legacyLines[0].movement_type, 'stock_in')
 assert.equal(legacyLines[0].quantity, 4)
 
-console.log('PASS stock-in sessions group/paginate full history, preserve linked fields/costs, exclude reverts, and expose shared-lot collisions')
+console.log('PASS stock-in sessions group/paginate full history, preserve linked fields/costs, keep reverted receipts marked, and expose shared-lot collisions')

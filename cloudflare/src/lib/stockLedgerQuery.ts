@@ -90,6 +90,21 @@ const OUT_LIST = LEDGER_OUT_TYPES.map((t) => `'${t}'`).join(', ')
 // trusts to decide whether an edit could spill into another session.
 const RECEIPT_LIST = STOCK_RECEIPT_MOVEMENT_TYPES.map((t) => `'${t}'`).join(', ')
 
+/**
+ * REVERT-FIX F4 (owner, 30 Sep 2026): a Revert is its own record. These read
+ * the link from the immutable reference_id ('revert:<id>', lib/stockRevert.ts),
+ * never from the editable reason: the row this Revert reverts, and the Revert
+ * that reverted this row (one at most -- a second revert is refused).
+ */
+export function revertsMovementIdSql(movement: string): string {
+  return `CASE WHEN ${movement}.reference_id = 'revert:' || CAST(CAST(SUBSTR(${movement}.reference_id, 8) AS INTEGER) AS TEXT)
+    THEN CAST(SUBSTR(${movement}.reference_id, 8) AS INTEGER) END`
+}
+
+export function revertedByMovementIdSql(movement: string): string {
+  return `(SELECT MIN(rv.id) FROM inventory_movements rv WHERE rv.reference_id = 'revert:' || CAST(${movement}.id AS TEXT))`
+}
+
 /** A movement's quantity with the direction its type implies (see LEDGER_OUT_TYPES). */
 export function movementSignedQuantitySql(movement: string): string {
   return `CASE WHEN ${movement}.movement_type IN (${OUT_LIST}) THEN -ABS(COALESCE(${movement}.quantity, 0)) ELSE ABS(COALESCE(${movement}.quantity, 0)) END`
@@ -452,6 +467,7 @@ export function buildStockLedgerQuery(filters: StockLedgerFilters = {}): StockLe
       ${movementSignedQuantitySql('m')} AS signed_quantity,
       m.unit_cost_usd, m.unit_cost_khr, m.total_cost_usd, m.total_cost_khr,
       m.reason, m.reference_id, ${movementActorNameSql('m')} AS user_name, m.created_at,
+      ${revertsMovementIdSql('m')} AS reverts_movement_id, ${revertedByMovementIdSql('m')} AS reverted_by_movement_id,
       ${movementReferenceSelectSql('m')},
       m.batch_id, b.lot_code AS batch_lot_code, b.received_at AS batch_received_at,
       b.supplier_id AS batch_supplier_id, b.supplier_name AS batch_supplier_name,
@@ -460,7 +476,8 @@ export function buildStockLedgerQuery(filters: StockLedgerFilters = {}): StockLe
       b.expiry_date AS batch_expiry_date, b.updated_at AS batch_updated_at,
       (SELECT COUNT(DISTINCT COALESCE(mx.reference_id, -mx.id))
        FROM inventory_movements mx
-       WHERE mx.batch_id = m.batch_id AND mx.movement_type IN (${RECEIPT_LIST})) AS batch_receipt_session_count,
+       WHERE mx.batch_id = m.batch_id AND mx.movement_type IN (${RECEIPT_LIST})
+         AND (mx.reference_id IS NULL OR CAST(mx.reference_id AS TEXT) NOT LIKE 'revert:%')) AS batch_receipt_session_count,
       CASE WHEN m.movement_type IN (${OUT_LIST}) THEN 'out' ELSE 'in' END AS ledger_bucket,
       ${movementTotalDeltaSql('m')} AS total_delta,
       ${movementStockAfterSql('m', 'p')} AS after_qty

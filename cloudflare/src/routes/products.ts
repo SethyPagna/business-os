@@ -1516,25 +1516,10 @@ app.get('/stock-in-session-lines', async (c) => {
   // correlated receipt-count query for every candidate row, which is why one
   // legacy receipt click could exceed D1's CPU limit. The parsed key maps to
   // the indexes introduced in 0104 instead.
+  // A reverted receipt line stays, marked `reverted` by the query itself
+  // (owner, 30 Sep 2026: the purchase stays as recorded).
   let rows = await db.prepare(stockInSessionLinesSql(locator)).all<Record<string, unknown>>(stockInSessionLineParams(locator))
   const exceededLineLimit = rows.length > 2000
-  const movementIds = rows.map((row) => Number(row.id)).filter((id) => Number.isSafeInteger(id) && id > 0)
-  if (movementIds.length) {
-    const reverted = new Set<string>()
-    // Independent chunks (each is its own IN-clause lookup with no data
-    // dependency on the others), fanned out with Promise.all instead of a
-    // sequential for-await loop -- one round trip per chunk in parallel
-    // rather than serialized.
-    const chunkResults = await Promise.all(chunkForBinding(movementIds).map((chunk) => {
-      const refs = chunk.map((id) => `revert:${id}`)
-      const clause = buildInClause('revert', refs)
-      return db.prepare(`SELECT reference_id FROM inventory_movements WHERE reference_id IN (${clause.sql})`).all<{ reference_id: string | number }>({ ...clause.params })
-    }))
-    for (const found of chunkResults) {
-      for (const row of found) reverted.add(String(row.reference_id))
-    }
-    rows = rows.filter((row) => !reverted.has(`revert:${Number(row.id)}`))
-  }
 
   // A shared lot makes a header edit unsafe: it could rewrite another receipt.
   // Count sessions by indexed batch ids in bounded chunks, separately from the
@@ -1542,9 +1527,9 @@ app.get('/stock-in-session-lines', async (c) => {
   const batchIds = [...new Set(rows.map((row) => Number(row.batch_id)).filter((id) => Number.isSafeInteger(id) && id > 0))]
   const receiptCounts = new Map<number, number>()
   try {
-    // Same fan-out as the revert lookup above -- independent per-chunk
-    // COUNT queries, run in parallel with Promise.all instead of a
-    // sequential for-await loop.
+    // Independent per-chunk COUNT queries, run in parallel with Promise.all
+    // instead of a sequential for-await loop. A Revert that puts stock back
+    // on a lot is not a receipt, so it never makes a lot look shared.
     const chunkResults = await Promise.all(chunkForBinding(batchIds).map((chunk) => {
       const clause = buildInClause('batch', chunk)
       return db.prepare(`
@@ -1559,6 +1544,7 @@ app.get('/stock-in-session-lines', async (c) => {
         FROM inventory_movements m
         JOIN product_batches b ON b.id = m.batch_id
         WHERE ${STOCK_RECEIPT_TYPE_SQL} AND m.batch_id IN (${clause.sql})
+          AND (m.reference_id IS NULL OR CAST(m.reference_id AS TEXT) NOT LIKE 'revert:%')
         GROUP BY m.batch_id
       `).all<{ batch_id: number; receipt_session_count: number }>({ ...clause.params })
     }))
