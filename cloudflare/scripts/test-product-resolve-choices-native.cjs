@@ -119,6 +119,9 @@ const app = new Hono()
 app.route('/api/products', products)
 
 const ADMIN = { id: 1, username: 'admin', name: 'Admin', role_code: 'admin', permissions: '{}' }
+// products Full with the Edit product switch OFF: may merge, may not edit.
+const MERGER = { id: 2, username: 'merger', name: 'Merger', role_code: 'manager', permissions: JSON.stringify({ products: true, 'products:edit': false }) }
+const EDITOR = { id: 3, username: 'editor', name: 'Editor', role_code: 'manager', permissions: JSON.stringify({ products: true }) }
 const [KEEP, M1, M2] = FIXTURE.groupIds
 const CHOICE_COLUMNS = ['name', 'name_normalized', 'barcode', 'brand', 'brands', 'brand_compact', 'category', 'categories', 'unit', 'unit_normalized',
   'selling_price_usd', 'selling_price_khr', 'wholesale_price_usd', 'wholesale_price_khr', 'image_path']
@@ -234,6 +237,15 @@ async function main() {
     assert.match(body.error, /Nothing was changed/)
   })
 
+  await check('LIB: typing is any custom entry, read from the raw body before validation; picks and absent choices are not typing', async () => {
+    const typing = choicesLib.resolveChoicesTypeValues
+    assert.equal(typing({ choices: { name: { custom: 'x' } } }), true)
+    assert.equal(typing({ choices: { name: { source_id: 70 }, unit: { custom: '' } } }), true)
+    assert.equal(typing({ choices: { barcode: { custom: '1' } } }), true, 'an invalid typed barcode is still an attempt to type')
+    assert.equal(typing({ choices: { name: { source_id: 70 }, image: { source_id: 71 } } }), false)
+    for (const body of [{}, { choices: null }, { choices: [] }, { choices: 'x' }, null, undefined]) assert.equal(typing(body), false)
+  })
+
   // ---- ROUTE: the real preview/merge with choices (needs the wiring) --------
   await check('ROUTE: the fixture group is one current conflict and the preview says the server applies choices', async () => {
     fresh()
@@ -285,6 +297,48 @@ async function main() {
     assert.equal(planless.status, 400, JSON.stringify(planless.body))
     assert.equal(planless.body.code, 'invalid_resolve_choices')
     assert.equal(dump(), before)
+  })
+
+  // P11: a typed Final value is a product edit; merging alone does not allow it.
+  const TYPED = {
+    name: { custom: 'Anything I type' }, brand: { custom: 'New Brand' }, category: { custom: 'New Category' }, unit: { custom: 'box' },
+    selling_price_usd: { custom: 0.01 }, wholesale_price_usd: { custom: '0.02' },
+  }
+  await check('ROUTE: a merge-only user (Edit product OFF) cannot type any Final value; each field is 403 and writes nothing', async () => {
+    fresh()
+    state.user = MERGER
+    const control = await request('PUT', `/api/products/${KEEP}`, { name: 'Edited by merger' })
+    assert.equal(control.status, 403, 'the same user cannot edit the product directly')
+    for (const [field, choice] of Object.entries(TYPED)) {
+      const before = dump()
+      const group = await reviewGroup(`typed-${field}`, { [field]: choice })
+      const refused = await merge(group.body(M1))
+      assert.equal(refused.status, 403, `${field}: ${JSON.stringify(refused.body)}`)
+      assert.equal(refused.body.code, 'product_edit_permission_required', field)
+      assert.equal(dump(), before, `${field}: nothing written`)
+    }
+    const mixed = await reviewGroup('typed-mixed', { name: { source_id: M1 }, unit: { custom: 'box' } })
+    const before = dump()
+    assert.equal((await merge(mixed.body(M1))).status, 403, 'one typed value among picks still refuses the whole request')
+    assert.equal(dump(), before)
+  })
+
+  await check('ROUTE: the same user may pick among the reviewed records\' values, and a user with Edit product may type', async () => {
+    fresh()
+    state.user = MERGER
+    const picks = { name: { source_id: M1 }, barcode: { source_id: M1 }, brand: { source_id: M1 }, category: { source_id: M2 }, unit: { source_id: M2 },
+      selling_price_usd: { source_id: M1 }, wholesale_price_usd: { source_id: M2 } }
+    const group = await reviewGroup('picks-only', picks)
+    const done = await merge(group.body(M1))
+    assert.equal(done.status, 200, JSON.stringify(done.body))
+    const expected = choicesLib.resolveChoiceValues(choicesLib.parseProductResolveChoices({ choices: picks }, FIXTURE.groupIds).choices, FIXTURE.rows)
+    for (const [column, value] of Object.entries(expected)) assert.equal(keeperColumns()[column], value, column)
+    fresh()
+    state.user = EDITOR
+    const typed = await reviewGroup('editor-typed', TYPED)
+    const ok = await merge(typed.body(M1))
+    assert.equal(ok.status, 200, JSON.stringify(ok.body))
+    assert.equal(keeperColumns().name, 'Anything I type')
   })
 
   const replay = (history, direction) => {

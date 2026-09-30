@@ -8,6 +8,7 @@ import { compactSearchText, normalizeSearchText } from './searchMatch'
 
 export const INVALID_RESOLVE_CHOICES_CODE = 'invalid_resolve_choices'
 export const MERGE_FAILED_CODE = 'merge_failed'
+export const RESOLVE_EDIT_PERMISSION_CODE = 'product_edit_permission_required'
 
 export const PRODUCT_RESOLVE_CHOICE_FIELDS = [
   'name', 'barcode', 'brand', 'category', 'unit', 'selling_price_usd', 'wholesale_price_usd', 'image',
@@ -134,6 +135,17 @@ export function parseProductResolveChoices(body: unknown, groupIds: readonly num
     if (error instanceof ProductResolveChoiceError) return { ok: false, code: INVALID_RESOLVE_CHOICES_CODE, error: error.message }
     throw error
   }
+}
+
+/**
+ * True when the raw request types any Final value. That is a product edit, so
+ * the route asks for the same tier as PUT /products/:id before it reads
+ * anything; a merge-only user may only pick among the reviewed records' values.
+ * Reads the raw body so an unauthorised caller learns nothing from validation.
+ */
+export function resolveChoicesTypeValues(body: unknown): boolean {
+  const raw = isRecord(body) ? body.choices : undefined
+  return isRecord(raw) && Object.values(raw).some((choice) => isRecord(choice) && Object.prototype.hasOwnProperty.call(choice, 'custom'))
 }
 
 const textOrNull = (value: unknown): string | null => {
