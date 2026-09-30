@@ -7,8 +7,7 @@ import {
   type StockReasonType,
 } from '../../utils/useStockReasonCatalog.ts'
 import Modal from './Modal.tsx'
-import ReasonListEditor from './ReasonListEditor.tsx'
-import { useConfirmDialog } from './useConfirmDialog.tsx'
+import ReasonListEditor, { useAskConfirm } from './ReasonListEditor.tsx'
 
 // The one manager for saved stock reasons, opened from the Products and
 // Inventory Manage menus, the stock session's reason row and the delete
@@ -41,7 +40,7 @@ export default function StockReasonsManagerModal({ initialTab = 'adjust', onClos
     const value = t(key)
     return value && value !== key ? value : fallback
   }, [t])
-  const { askToConfirm, confirmDialog } = useConfirmDialog((key, fallback) => tr(key, fallback || key))
+  const { askToConfirm, confirmDialog } = useAskConfirm(tr)
   const catalog = useStockReasonCatalog({ notify, tr, askToConfirm, onChanged })
   const [tab, setTab] = useState<StockReasonType>(initialTab)
   const [draft, setDraft] = useState('')
