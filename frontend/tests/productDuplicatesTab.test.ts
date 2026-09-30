@@ -68,7 +68,7 @@ test('N-row selections open one durable paged group review', () => {
   // Merge selected at the new flow but left the older review-only button in
   // place, now doing nothing different. One button, doing the one thing it
   // does (open the auto-resolve review), replaces both.
-  const bulkBarBlock = src.slice(src.indexOf('duplicates_bulk_selected_count'), src.indexOf('duplicates_bulk_dismiss_action'))
+  const bulkBarBlock = src.slice(src.indexOf('duplicates_bulk_selected_count'), src.indexOf('onClick={() => void bulkDismiss()}'))
   const groupReviewButtonCount = (bulkBarBlock.match(/onClick=\{\(\) => void openSelectedGroupReview\(\)\}/g) || []).length
   assert.equal(groupReviewButtonCount, 1, 'the bulk bar must offer exactly one button that opens the group review, not a duplicate')
   assert.match(src, /Remove independently in the global review[\s\S]*Reason for removing this product/, 'independent removal is explicit and requires its own reason')
@@ -120,21 +120,21 @@ test('the bulk bar reuses the contacts panel\'s shared vocabulary (one review pa
   }
 })
 
-test('legacy direct groups apply only after EVERY row is decided, with exactly one Keep', () => {
-  // Decide-all-then-apply: per-row Keep/Merge decisions,
-  // Apply armed only when the whole group is decided with one keeper.
-  assert.match(src, /const \[decisions, setDecisions\] = useState<Record<number, 'keep' \| 'merge'>>/)
-  assert.match(src, /const everyDecided = cluster\.products\.every\(\(product\) => decisions\[product\.id\]\)/)
-  assert.match(src, /const canApply = Boolean\(keeper\) && everyDecided && merges\.length > 0/)
-  assert.match(src, /onApplyDecisions\(keeper, merges\)/)
-  assert.match(src, /if \(next\[Number\(id\)\] === 'keep'\) delete next\[Number\(id\)\]/, 'picking a new Keep demotes the old keeper to undecided')
+test('a group is decided in ONE Resolve grid over every product, not by per-row Keep / Merge buttons', () => {
+  // The card's one action opens the shared grid with the whole cluster; the
+  // survivor is implicit, so there is no keeper to pick and nothing to arm.
+  assert.match(src, /onResolve=\{\(\) => openResolve\(cluster\)\}/, 'the card opens the grid on the whole cluster')
+  assert.match(src, /setResolving\(\{ cluster, draft \}\)/, 'the grid gets every product of the cluster')
+  assert.doesNotMatch(src, /setDecisions|everyDecided|canApply|onApplyDecisions|handleApplyDecisions/, 'the pre-24-Sep Keep / Merge / Apply flow is gone')
+  assert.doesNotMatch(src, /keeperId/, 'no keeper is chosen on the card')
+  assert.doesNotMatch(src, /dup_decide_all_hint|dup_pick_one_keep/, 'its hints are gone with it')
 })
 
-test('Resolve edits IN PLACE via a float — the tab never navigates away', () => {
-  assert.match(src, /const \[editTarget, setEditTarget\] = useState<ClusterProduct \| null>/)
-  assert.match(src, /updateProduct\(editTarget\.id, \{/)
-  assert.match(src, /<Modal title=/, 'the edit float is the shared Modal')
-  assert.ok(!src.includes('onResolve'), 'no navigation-out prop remains')
+test('the in-place edit float is gone: the Final cell takes a typed value', () => {
+  assert.doesNotMatch(src, /editTarget|updateProduct|useFormDirty|<Modal /, 'no second editor beside the Resolve grid')
+  assert.ok(!src.includes('resolve_duplicate_inline_hint'), 'its hint key is not referenced')
+  assert.match(src, /<ResolveModal[\s\S]*onMinimize=\{parkResolve\}/, 'the grid can be parked as a Draft chip')
+  assert.match(src, /kind: 'product_resolve'/, 'and comes back with its choices')
 })
 
 if (failed > 0) {

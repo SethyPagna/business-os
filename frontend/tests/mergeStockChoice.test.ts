@@ -241,10 +241,6 @@ test('every new string ships in BOTH packs', () => {
     assert.ok(km[key], `km.json is missing ${key}`)
     assert.ok(/[ក-៿]/.test(km[key]), `km.json ${key} is not actually Khmer`)
   }
-  // The Conflicts hint has to tell reviewers the stock question exists before
-  // they hit it mid-merge.
-  assert.match(en.product_duplicates_hint, /still holds stock/i)
-  assert.ok(/[ក-៿]/.test(km.product_duplicates_hint))
 })
 
 test('a barcode or identity mismatch is NEVER offered in the selected batch', () => {
@@ -306,9 +302,10 @@ test('every child row under the name is swept -- no rows[0], no LIMIT 1', () => 
   // The list surfaces loop EVERY member/removal rather than acting on the first.
   assert.match(productsPage, /info\.members\.filter\(\(m\) => Number\(m\.id\) !== Number\(keepId\)\)/)
   assert.match(productsPage, /for \(const other of others\)/)
-  // The Duplicates tab hands the Resolve grid the keeper and EVERY removal, and
+  // The Duplicates tab hands the Resolve grid EVERY product of the group, and
   // the adapter merges every included product, one step each.
-  assert.match(duplicatesTab, /products: \[keeper, \.\.\.removals\]/)
+  assert.match(duplicatesTab, /onResolve=\{\(\) => openResolve\(cluster\)\}/)
+  assert.match(duplicatesTab, /createProductResolveAdapter\(\{\s*cluster: resolving\.cluster,/)
   assert.match(productResolveAdapter, /const steps = ctx\.merged\.map\(/)
   assert.match(productResolveAdapter, /for \(let index = state\.index; index < total; index \+= 1\)/)
 })

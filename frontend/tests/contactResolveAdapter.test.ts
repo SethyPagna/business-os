@@ -38,7 +38,7 @@ globalThis.window = {
 } as any
 
 const http = await import('../src/api/http.ts')
-const { createContactResolveAdapter } = await import('../src/components/contacts/contactResolveAdapter.ts')
+const { createContactResolveAdapter, contactSurvivor } = await import('../src/components/contacts/contactResolveAdapter.ts')
 type Draft = import('../src/components/shared/ResolveModal.tsx').ResolveDraft
 type Row = import('../src/components/shared/ResolveGrid.tsx').ResolveRow
 
@@ -68,9 +68,9 @@ async function test(name: string, fn: () => Promise<void> | void): Promise<void>
   try { await fn(); console.log(`PASS ${name}`) } catch (error) { failed += 1; console.error(`FAIL ${name}`); console.error(error) }
 }
 
-// Three customers the list grouped by name. #11 is the only one with a phone,
-// so it is the kept record; #11 and #13 each hold a membership number and a
-// storefront account.
+// Three customers the list grouped by name. #11 has the most linked history,
+// so it is the surviving record; #11 and #13 each hold a membership number
+// and a storefront account.
 const RECORDS = [
   { id: 11, name: 'Dara', phone: '012 345 678', email: '', address: null, gender: 'female', notes: 'VIP', membership_number: 'M-1', created_at: '2026-01-02 03:04:05', updated_at: 'v11', portal_account: { membershipId: 'M-1', createdAt: null } },
   { id: 12, name: 'dara', phone: null, email: 'dara@example.com', address: 'St 1, Phnom Penh', gender: '', notes: null, membership_number: null, created_at: '2026-02-03 04:05:06', updated_at: 'v12', portal_account: null },
@@ -115,13 +115,13 @@ try {
     assert.equal(sent.length, 1)
     assert.match(sent[0].url, /\/api\/customers\?ids=11,12,13$/, 'every record of the group is read again')
     assert.deepEqual(columns.map((column) => [column.id, column.title, column.subtitle, column.disposition]), [
-      ['11', 'Dara', '#11 · Record kept', 'include'],
+      ['11', 'Dara', '#11', 'include'],
       ['12', 'dara', '#12', 'include'],
       ['13', 'Dara', '#13', 'include'],
     ])
     assert.deepEqual(columns[0].dispositions, ['include', 'separate'], 'Keep separate lives in the grid, beside Merge in')
-    assert.deepEqual(rows.map((item) => item.key), ['record', 'name', 'phone', 'membership', 'storefront', 'email', 'address', 'gender', 'notes', 'created_at', 'history'])
-    assert.deepEqual([row(rows, 'record').choice, row(rows, 'record').final.text], [{ source: '11' }, '#11'], 'the one record with a phone is kept, as Merge selected would')
+    assert.deepEqual(rows.map((item) => item.key), ['name', 'phone', 'membership', 'storefront', 'email', 'address', 'gender', 'notes', 'created_at', 'history'], 'no Record kept row (owner, 30 Sep 2026: "no need product kept")')
+    assert.equal(rows.some((item) => 'hint' in item), false, 'no row carries an info hint')
     assert.deepEqual([row(rows, 'name').choice, row(rows, 'name').final.text, row(rows, 'name').copyable], [{ source: '11' }, 'Dara', true])
     assert.deepEqual([row(rows, 'email').choice, row(rows, 'email').final.text], [{ source: '12' }, 'dara@example.com'], 'a blank field takes the first record that has one')
     assert.equal(row(rows, 'address').final.text, '#1 (Default) St 1, Phnom Penh')
@@ -213,11 +213,36 @@ try {
     ], 'the confirm names every storefront account that becomes unlinked')
   })
 
+  await test('the surviving record is implicit: the most linked history, then the lowest id', async () => {
+    const history = (counts: Record<number, [number, number]>) => (id: number) => (counts[id] ? { salesCount: counts[id][0], returnsCount: counts[id][1] } : null)
+    assert.equal(contactSurvivor([13, 11, 12], history({ 11: [3, 0], 12: [1, 1] })), 11, 'most sales and returns')
+    assert.equal(contactSurvivor([13, 12], history({ 12: [1, 0], 13: [0, 1] })), 12, 'a tie keeps the lowest id')
+    assert.equal(contactSurvivor([13, 12], history({})), 12, 'no history: the lowest id')
+    assert.equal(contactSurvivor([], history({})), null)
+    // A stale draft that still names a record to keep does not move the survivor.
+    const adapter = adapterFor()
+    const { data, draft } = await open(adapter, RECORDS, { selection: { record: { source: '13' } }, columns: {} })
+    assert.equal((await adapter.review(data, draft, signal)).token.request.keepId, 11)
+    // Keeping the survivor separate hands it to the next record by the same rule.
+    const without11 = await open(adapter, RECORDS, { selection: {}, columns: { 11: { disposition: 'separate' } } })
+    assert.equal((await adapter.review(without11.data, without11.draft, signal)).token.request.keepId, 12, '#12 has more history than #13')
+  })
+
+  await test('a definite refusal is told apart from an unknown outcome', () => {
+    const adapter = adapterFor()
+    assert.equal(adapter.isDefinite(Object.assign(new Error('refused'), { status: 409, code: 'contact_merge_invalid_choice' })), true, 'a coded 4xx wrote nothing')
+    assert.equal(adapter.isDefinite(Object.assign(new Error('forbidden'), { status: 403 })), true, 'an uncoded 4xx still wrote nothing')
+    assert.equal(adapter.isDefinite(Object.assign(new Error('x'), { outcome: 'not_applied' })), true)
+    assert.equal(adapter.isDefinite(Object.assign(new Error('server'), { status: 500, outcome: 'unknown', code: 'write_outcome_unknown' })), false, 'a 5xx may have landed')
+    assert.equal(adapter.isDefinite(Object.assign(new TypeError('Failed to fetch'), { outcome: 'unknown' })), false)
+    assert.equal(adapter.isDefinite(new Error('no status')), false)
+    assert.equal(adapter.describe(new Error('Pick one membership number.')), 'Pick one membership number.')
+  })
+
   await test('typed and option answers travel as custom values', async () => {
     const adapter = adapterFor()
     const edits: Draft = {
       selection: {
-        record: { source: '13' },
         name: { custom: 'Dara Sok' },
         gender: { option: 'unspecified' },
         email: { source: '12' },
@@ -229,13 +254,13 @@ try {
     assert.deepEqual([row(rows, 'name').choice, row(rows, 'name').final.text], [{ custom: 'Dara Sok' }, 'Dara Sok'])
     assert.deepEqual([row(rows, 'gender').choice, row(rows, 'gender').final.text], [{ option: 'unspecified' }, 'Unspecified'])
     const review = await adapter.review(data, draft, signal)
-    assert.equal(review.token.request.keepId, 13, 'the record chosen to keep is kept')
-    assert.deepEqual(review.token.request.mergeIds, [11, 12])
+    assert.equal(review.token.request.keepId, 11, 'the survivor does not move when fields are picked')
+    assert.deepEqual(review.token.request.mergeIds, [12, 13])
     assert.deepEqual(review.token.request.choices?.name, { custom: 'Dara Sok' })
     assert.deepEqual(review.token.request.choices?.phone, { custom: '099 888 777' })
     assert.deepEqual(review.token.request.choices?.gender, { custom: null }, 'Unspecified clears the field')
-    assert.equal(review.token.request.membership_source_id, 13, "the kept record's own number is the default")
-    assert.deepEqual(review.changes.find((change) => change.label === 'Gender'), { label: 'Gender', before: 'Male', after: 'Unspecified' })
+    assert.equal(review.token.request.membership_source_id, 11, "the kept record's own number is the default")
+    assert.deepEqual(review.changes.find((change) => change.label === 'Gender'), { label: 'Gender', before: 'Female', after: 'Unspecified' })
   })
 
   await test('T28: Resolve sends ONE merge request with every merged id and shows what the server stored', async () => {
@@ -264,7 +289,7 @@ try {
     assert.equal(written, 1, 'the host learns its list is out of date')
     assert.deepEqual([result.done, result.total, result.next], [2, 2, undefined])
     assert.deepEqual(result.after, [
-      { label: 'Record kept', value: 'Dara (#11)' },
+      { label: 'Name', value: 'Dara' },
       { label: 'Email', value: 'dara@example.com' },
       { label: 'Contact options', value: '#1 (Default) St 1, Phnom Penh' },
       { label: 'Notes', value: 'VIP · Merged membership: M-2' },
@@ -308,7 +333,7 @@ try {
     const { data, draft } = await open(adapter, RECORDS)
     const review = await adapter.review(data, draft, signal)
     serve()
-    await assert.rejects(adapter.apply(review.token, signal, () => {}), /Access Denied/)
+    await assert.rejects(adapter.apply(review.token, signal, () => {}), (error: any) => /Access Denied/.test(error.message) && adapter.isDefinite(error))
     assert.equal(sent.length, 0)
   })
 
@@ -353,9 +378,9 @@ try {
 
   await test('suppliers and delivery contacts show their own fields and no customer-only rows', async () => {
     const supplier = await open(adapterFor('suppliers'), RECORDS.map(({ membership_number, portal_account, created_at, ...rest }) => ({ ...rest, company: null, contact_person: null })))
-    assert.deepEqual(supplier.rows.map((item) => item.key), ['record', 'name', 'phone', 'email', 'company', 'contact_person', 'address', 'gender', 'notes', 'history'])
+    assert.deepEqual(supplier.rows.map((item) => item.key), ['name', 'phone', 'email', 'company', 'contact_person', 'address', 'gender', 'notes', 'history'])
     const delivery = await open(adapterFor('delivery_contacts'), RECORDS.map(({ membership_number, portal_account, email, created_at, ...rest }) => ({ ...rest, area: rest.id === 12 ? 'Toul Kork' : null })))
-    assert.deepEqual(delivery.rows.map((item) => item.key), ['record', 'name', 'phone', 'area', 'address', 'gender', 'notes', 'history'])
+    assert.deepEqual(delivery.rows.map((item) => item.key), ['name', 'phone', 'area', 'address', 'gender', 'notes', 'history'])
     assert.match(sent[0].url, /\/api\/delivery-contacts\?ids=11,12,13$/)
     assert.equal(row(delivery.rows, 'area').final.text, 'Toul Kork')
   })

@@ -1,30 +1,37 @@
-import { getMergePreview, mergePossiblySameProducts } from '../../api/productWriteTransport.ts'
+import type { ReactNode } from 'react'
+import { getMergePreview, mergePossiblySameProducts, type ProductResolveChoices } from '../../api/productWriteTransport.ts'
 import { createClientRequestId } from '../../api/requestIds.ts'
+import { sellingPriceCeilCent } from '../../utils/moneyPrecision.ts'
 import { identityBarcodeKey, isRealBarcode } from '../../utils/productDetailRule.ts'
 import type { ProductConflictCluster, ProductConflictProduct } from '../../utils/selectedConflictMerge.ts'
-import type { ResolveCell, ResolveColumn, ResolveOption, ResolveRow } from '../shared/ResolveGrid.tsx'
+import type { ResolveCell, ResolveChoice, ResolveColumn, ResolveOption, ResolveRow } from '../shared/ResolveGrid.tsx'
 import type { ResolveAdapter, ResolveAfterItem, ResolveChange, ResolveDraft } from '../shared/ResolveModal.tsx'
 
-// The products side of the one conflict resolver (owner asks N1, N3, N4 of
-// 23 Sep 2026). A duplicate group opens in the shared ResolveModal with the
-// product the reviewer marked Keep; Resolve merges every other included
-// product into it, one server fold per product (POST .../possible-duplicates/
-// merge with keep:true), each one in History with its own Undo, exactly like
-// the pair merge it reuses.
+export type { ProductResolveChoices } from '../../api/productWriteTransport.ts'
+
+// The products side of the one conflict resolver. Every product of a group
+// opens in the shared ResolveModal; Resolve merges the others into one of
+// them, one server fold per product (POST .../possible-duplicates/merge with
+// keep:true), each in History with its own Undo.
 //
-// Rows:
-//   Product kept  the reviewer's Keep; changing it reads the group again.
-//   Name          N1: follows the kept product (locked).
-//   Barcode       N1: the kept product's stored barcode; a kept product with
-//                 none takes the first merged product's real barcode. Every
-//                 other barcode stays on its merged record (named in the
-//                 confirm and in the audit row) -- never a refusal.
-//   Cost          N4: the merge rule's cost for the group (mean of distinct
-//                 costs), a record's cost or a typed one. Hidden without cost
-//                 view; locked without cost edit (the Worker enforces it too).
-//   Selling       the highest selling price is kept (the merge rule).
-//   Stock         per merged product with stock: Carry (onto the kept
-//                 product, keeping lots and branches) or Write off.
+// The surviving record is implicit (owner, 30 Sep 2026: "no need product
+// kept"): the lowest included id. It never changes when a field is picked, so
+// picking never re-reads the server; only Merge in / Keep separate does.
+//
+// Rows (UI-CONFLICTS 3.4), each a choice the server applies as sent
+// (`choices`, frozen with the plan) when the preview says choicesSupported:
+//   Name, Brand, Category, Unit  the survivor's value, else the first record
+//                                that has one; Final can be typed.
+//   Barcode                      a real barcode over an empty or broken one:
+//                                the survivor's, else the first real one. The
+//                                others stay on their merged records.
+//   Cost                         the group average (server economics), a
+//                                record's or a typed one; cost permissions.
+//   Selling, Wholesale           the highest; a record's or a typed one.
+//   Image                        the survivor's, else the first record's.
+//   Stock                        Carry or Write off per merged product.
+// An older server that cannot apply choices gets today's computed rows: name
+// and barcode follow the survivor, selling is the highest.
 
 type Translate = (key: string) => string | undefined
 
@@ -33,28 +40,41 @@ type Translate = (key: string) => string | undefined
 // tests/productResolveAdapter.test.ts pins the two against each other.
 export const productCellKey = (rowKey: string, columnId: string): string => `${rowKey}|${columnId}`
 
+/** A group member as the preview reads it (every products column). */
+export type ProductResolveRecord = ProductConflictProduct & {
+  brand?: string | null
+  brands?: string | null
+  category?: string | null
+  categories?: string | null
+  unit?: string | null
+}
+
 type StockBranch = { branchId: number; branchName: string | null; quantity: number }
 type StockImpact = { totalQuantity: number; branches: StockBranch[] }
 
 export type ProductResolvePreview = {
   reviewedDigest: string
-  groupProducts: ProductConflictProduct[]
+  groupProducts: ProductResolveRecord[]
   stockImpact: StockImpact
   needsStockChoice: boolean
   blocked: { code: string; operationId?: string } | null
   keeperStock: StockImpact | null
   groupCost: { cost_price_usd?: number; cost_price_khr?: number } | null
+  choicesSupported: boolean
+  settlesStockSessions: string[]
 }
 
 export type ProductResolveData = {
   reviewedDigest: string
   /** Every product of the group in id order: one grid column each. */
   ids: number[]
-  products: Map<number, ProductConflictProduct>
-  /** The kept product the previews were read against. */
+  products: Map<number, ProductResolveRecord>
+  /** The survivor the previews were read against. */
   keeperId: number
   /** Per other product, read against keeperId. */
   previews: Map<number, ProductResolvePreview>
+  /** The server applies per-field choices (else the rows stay computed). */
+  choicesSupported: boolean
 }
 
 export type ProductResolveCost = { cost_price_usd: number; cost_price_khr?: number | null }
@@ -66,17 +86,24 @@ export type ProductResolveToken = {
   steps: Array<{ mergeId: number; name: string; stock?: 'merge' | 'write_off' }>
   /** Sent only by a user with the cost edit permission. */
   cost: ProductResolveCost | null
+  /** The Final column, sent on every step and every retry of the request. */
+  choices: ProductResolveChoices | null
+}
+
+type MergeKeep = {
+  cost_price_usd?: number
+  cost_price_khr?: number | null
+  resolve?: { requestId: string; reviewedDigest: string; steps: Array<{ mergeId: number; stock?: 'merge' | 'write_off' }> }
+  choices?: ProductResolveChoices
 }
 
 export type ProductResolveApi = {
   preview: (keepId: number, mergeId: number, options: { keep: true; groupIds: number[]; signal?: AbortSignal }) => Promise<unknown>
-  merge: (keepId: number, mergeId: number, stock: 'merge' | 'write_off' | undefined, keep: { cost_price_usd?: number; cost_price_khr?: number | null; resolve?: { requestId: string; reviewedDigest: string; steps: Array<{ mergeId: number; stock?: 'merge' | 'write_off' }> } }) => Promise<unknown>
+  merge: (keepId: number, mergeId: number, stock: 'merge' | 'write_off' | undefined, keep: MergeKeep) => Promise<unknown>
 }
 
 export type ProductResolveOptions = {
   cluster: ProductConflictCluster
-  /** The product the reviewer marked Keep on the card. */
-  keeperId: number
   t: Translate
   canViewCosts: boolean
   canEditCosts: boolean
@@ -84,6 +111,8 @@ export type ProductResolveOptions = {
   canMerge: () => boolean
   /** A merge step committed: the host's list is out of date even if a later step fails. */
   onWritten?: () => void
+  /** The picture for an image cell (the host renders the thumbnail). */
+  imageDisplay?: (path: string) => ReactNode
   api?: ProductResolveApi
 }
 
@@ -91,6 +120,10 @@ const DEFAULT_API: ProductResolveApi = {
   preview: (keepId, mergeId, options) => getMergePreview(keepId, mergeId, options),
   merge: (keepId, mergeId, stock, keep) => mergePossiblySameProducts(keepId, mergeId, stock, keep),
 }
+
+const MAX_GROUP = 12
+// Mirrors RESOLVE_NAME_MAX / RESOLVE_TEXT_MAX in cloudflare/src/lib/productResolveChoices.ts.
+export const RESOLVE_TEXT_MAX = 200
 
 // Refusals that mean the products moved under the review: read them again.
 const STALE_CODES = new Set(['merge_state_conflict', 'stock_choice_required', 'product_merge_not_duplicates', 'product_merge_inactive'])
@@ -109,7 +142,7 @@ export function formatProductMoney(value: unknown): string {
   return `$${Number(n.toFixed(4))}`
 }
 
-function productLabel(product: ProductConflictProduct | undefined, id: number): string {
+function productLabel(product: { name?: unknown } | undefined, id: number): string {
   const name = String(product?.name ?? '').trim()
   return name ? `${name} (#${id})` : `#${id}`
 }
@@ -132,7 +165,7 @@ function readPreview(value: unknown): ProductResolvePreview {
   const groupCost = raw.groupCost && typeof raw.groupCost === 'object' ? raw.groupCost as Record<string, unknown> : null
   return {
     reviewedDigest: String(raw.reviewedDigest ?? ''),
-    groupProducts: Array.isArray(raw.groupProducts) ? raw.groupProducts as ProductConflictProduct[] : [],
+    groupProducts: Array.isArray(raw.groupProducts) ? raw.groupProducts as ProductResolveRecord[] : [],
     stockImpact: readImpact(raw.stockImpact),
     needsStockChoice: Boolean(raw.needsStockChoice),
     blocked: blocked ? { code: String(blocked.code ?? ''), ...(blocked.operationId ? { operationId: String(blocked.operationId) } : {}) } : null,
@@ -140,12 +173,14 @@ function readPreview(value: unknown): ProductResolvePreview {
     groupCost: groupCost && 'cost_price_usd' in groupCost
       ? { cost_price_usd: Number(groupCost.cost_price_usd) || 0, cost_price_khr: Number(groupCost.cost_price_khr) || 0 }
       : null,
+    choicesSupported: raw.choicesSupported === true,
+    settlesStockSessions: Array.isArray(raw.settlesStockSessions) ? raw.settlesStockSessions.map(String).filter(Boolean) : [],
   }
 }
 
 /**
- * N1: the barcode the kept product ends with -- its own stored one; with none,
- * the first merged product's real barcode (the order the folds run in).
+ * The barcode the survivor ends with when the server cannot take a choice:
+ * its own stored one; with none, the first merged product's real barcode.
  * Mirrors keeperFollowsBarcode in cloudflare/src/lib/productIdentity.ts.
  */
 export function finalProductBarcode(keeper: { barcode?: unknown } | undefined, merged: Array<{ barcode?: unknown }>): string {
@@ -154,11 +189,69 @@ export function finalProductBarcode(keeper: { barcode?: unknown } | undefined, m
   return String(merged.find((product) => isRealBarcode(product.barcode))?.barcode ?? '').trim()
 }
 
-/** The merged products' barcodes the kept product does not carry: they stay on their merged records. */
+/** The merged products' barcodes the survivor does not carry: they stay on their merged records. */
 export function absorbedProductBarcodes(finalBarcode: string, merged: Array<{ barcode?: unknown }>): string[] {
   return merged
     .map((product) => String(product.barcode ?? '').trim())
     .filter((raw) => raw && !(finalBarcode.trim() && identityBarcodeKey(raw) === identityBarcodeKey(finalBarcode)))
+}
+
+// ---- The Final column as the server writes it (parity with
+// cloudflare/src/lib/productResolveChoices.ts resolveChoiceValues, pinned by
+// the shared fixture scripts/fixtures/product-resolve-choices-parity.json).
+
+export type ProductResolveFinal = Partial<{
+  name: string
+  barcode: string | null
+  brand: string | null
+  category: string | null
+  unit: string | null
+  selling_price_usd: number
+  wholesale_price_usd: number
+  image_path: string | null
+}>
+
+const textOrNull = (value: unknown): string | null => {
+  if (value == null) return null
+  const text = String(value)
+  return text.trim() ? text : null
+}
+
+const storedMoney = (value: unknown): number => (value == null || value === '' ? 0 : Number(value) || 0)
+
+export function productResolveFinalValues(choices: ProductResolveChoices, records: ReadonlyArray<ProductResolveRecord>): ProductResolveFinal {
+  const byId = new Map(records.map((record) => [Number(record.id), record]))
+  const out: ProductResolveFinal = {}
+  for (const [field, choice] of Object.entries(choices) as Array<[keyof ProductResolveChoices, ProductResolveChoices[keyof ProductResolveChoices]]>) {
+    if (!choice) continue
+    const row = 'source_id' in choice ? byId.get(choice.source_id) : undefined
+    const custom = 'custom' in choice ? choice.custom : undefined
+    if ('source_id' in choice && !row) continue
+    switch (field) {
+      case 'name': out.name = row ? String(row.name ?? '') : String(custom).trim(); break
+      case 'barcode': out.barcode = row?.barcode == null ? null : String(row.barcode); break
+      case 'brand': out.brand = row ? textOrNull(row.brand) : textOrNull(custom); break
+      case 'category': out.category = row ? textOrNull(row.category) : textOrNull(custom); break
+      case 'unit': out.unit = row ? textOrNull(row.unit) : textOrNull(custom); break
+      case 'selling_price_usd': out.selling_price_usd = row ? storedMoney(row.selling_price_usd) : Number(custom); break
+      case 'wholesale_price_usd': out.wholesale_price_usd = row ? storedMoney(row.wholesale_price_usd) : Number(custom); break
+      case 'image': out.image_path = row ? textOrNull(row.image_path) : null; break
+    }
+  }
+  return out
+}
+
+// ---- Per-field rows
+
+type TextField = 'name' | 'brand' | 'category' | 'unit'
+type MoneyField = 'selling_price_usd' | 'wholesale_price_usd'
+type ChoiceField = keyof ProductResolveChoices
+
+// Row key -> the field the server takes. Row keys stay short: they are grid
+// keys, draft keys and parked-chip keys.
+const FIELD_OF_ROW: Record<string, ChoiceField> = {
+  name: 'name', barcode: 'barcode', brand: 'brand', category: 'category', unit: 'unit',
+  selling: 'selling_price_usd', wholesale: 'wholesale_price_usd', image: 'image',
 }
 
 type Context = {
@@ -173,18 +266,100 @@ function includedIds(ids: number[], draft: ResolveDraft): number[] {
   return ids.filter((id) => draft.columns[String(id)]?.disposition !== 'separate')
 }
 
-function keeperOf(included: number[], draft: ResolveDraft, fallback: number): number | null {
-  const picked = draft.selection.record
-  const source = picked && 'source' in picked ? Number(picked.source) : Number.NaN
-  if (included.includes(source)) return source
-  if (included.includes(fallback)) return fallback
-  return included[0] ?? null
+/** The surviving record: the lowest included id. */
+export function productSurvivor(included: readonly number[]): number | null {
+  return included.length ? Math.min(...included) : null
 }
 
 function contextOf(data: ProductResolveData, draft: ResolveDraft): Context {
   const included = includedIds(data.ids, draft).filter((id) => data.products.has(id))
-  const keeperId = keeperOf(included, draft, data.keeperId)
+  const keeperId = productSurvivor(included)
   return { data, draft, included, keeperId, merged: included.filter((id) => id !== keeperId) }
+}
+
+const recordOf = (ctx: Context, id: number) => ctx.data.products.get(id)
+const survivorFirst = (ctx: Context): number[] => (ctx.keeperId === null ? ctx.included : [ctx.keeperId, ...ctx.merged])
+
+function pickedSource(ctx: Context, rowKey: string): number | null {
+  const choice = ctx.draft.selection[rowKey]
+  if (!choice || !('source' in choice)) return null
+  const id = Number(choice.source)
+  return ctx.included.includes(id) ? id : null
+}
+
+function typedValue(ctx: Context, rowKey: string): string | null {
+  const choice = ctx.draft.selection[rowKey]
+  return choice && 'custom' in choice ? choice.custom : null
+}
+
+function validName(value: string): boolean {
+  const trimmed = value.trim()
+  return trimmed.length >= 1 && trimmed.length <= RESOLVE_TEXT_MAX
+}
+
+function validText(value: string): boolean {
+  const trimmed = value.trim()
+  return trimmed.length <= RESOLVE_TEXT_MAX && !trimmed.includes('||')
+}
+
+function ceilMoney(value: string): number | null {
+  const trimmed = value.trim()
+  if (!trimmed || !Number.isFinite(Number(trimmed)) || Number(trimmed) < 0) return null
+  try { return sellingPriceCeilCent(trimmed) } catch { return null }
+}
+
+function defaultTextSource(ctx: Context, field: TextField): number | null {
+  const order = survivorFirst(ctx)
+  return order.find((id) => String(recordOf(ctx, id)?.[field] ?? '').trim()) ?? ctx.keeperId
+}
+
+function defaultBarcodeSource(ctx: Context): number | null {
+  const order = survivorFirst(ctx)
+  return order.find((id) => isRealBarcode(recordOf(ctx, id)?.barcode)) ?? ctx.keeperId
+}
+
+// Highest wins (the merge rule); on a tie the survivor, then the lowest id.
+function defaultMoneySource(ctx: Context, field: MoneyField): number | null {
+  let best: number | null = null
+  for (const id of survivorFirst(ctx)) {
+    if (best === null || storedMoney(recordOf(ctx, id)?.[field]) > storedMoney(recordOf(ctx, best)?.[field])) best = id
+  }
+  return best
+}
+
+function defaultImageSource(ctx: Context): number | null {
+  return survivorFirst(ctx).find((id) => String(recordOf(ctx, id)?.image_path ?? '').trim()) ?? ctx.keeperId
+}
+
+/** The effective choice per field: an explicit pick, a valid typed value, else the default. */
+function productResolveChoices(ctx: Context): ProductResolveChoices {
+  const out: ProductResolveChoices = {}
+  const source = (rowKey: string, fallback: number | null) => {
+    const id = pickedSource(ctx, rowKey) ?? fallback
+    return id === null ? undefined : { source_id: id }
+  }
+  for (const field of ['name', 'brand', 'category', 'unit'] as const) {
+    const typed = typedValue(ctx, field)
+    if (typed !== null && (field === 'name' ? validName(typed) : validText(typed))) out[field] = { custom: typed.trim() }
+    else {
+      const choice = source(field, defaultTextSource(ctx, field))
+      if (choice) out[field] = choice
+    }
+  }
+  const barcode = source('barcode', defaultBarcodeSource(ctx))
+  if (barcode) out.barcode = barcode
+  for (const [rowKey, field] of [['selling', 'selling_price_usd'], ['wholesale', 'wholesale_price_usd']] as const) {
+    const typed = typedValue(ctx, rowKey)
+    const money = typed === null ? null : ceilMoney(typed)
+    if (money !== null) out[field] = { custom: money }
+    else {
+      const choice = source(rowKey, defaultMoneySource(ctx, field))
+      if (choice) out[field] = choice
+    }
+  }
+  const image = source('image', defaultImageSource(ctx))
+  if (image) out.image = image
+  return out
 }
 
 type StockAnswer = 'merge' | 'write_off'
@@ -209,7 +384,7 @@ function costPick(ctx: Context, canEdit: boolean): CostPick {
 
 function ruleCost(ctx: Context): { cost_price_usd: number; cost_price_khr: number } {
   const fromPreview = ctx.merged.map((id) => ctx.data.previews.get(id)?.groupCost).find(Boolean)
-  const keeper = ctx.keeperId === null ? undefined : ctx.data.products.get(ctx.keeperId)
+  const keeper = ctx.keeperId === null ? undefined : recordOf(ctx, ctx.keeperId)
   return {
     cost_price_usd: Number(fromPreview?.cost_price_usd ?? keeper?.cost_price_usd ?? 0) || 0,
     cost_price_khr: Number(fromPreview?.cost_price_khr ?? keeper?.cost_price_khr ?? 0) || 0,
@@ -219,7 +394,7 @@ function ruleCost(ctx: Context): { cost_price_usd: number; cost_price_khr: numbe
 function chosenCost(ctx: Context, canEdit: boolean): ProductResolveCost {
   const pick = costPick(ctx, canEdit)
   if (pick.kind === 'source') {
-    const product = ctx.data.products.get(pick.id)
+    const product = recordOf(ctx, pick.id)
     return { cost_price_usd: Number(product?.cost_price_usd) || 0, cost_price_khr: product?.cost_price_khr == null ? null : Number(product.cost_price_khr) || 0 }
   }
   if (pick.kind === 'custom') return { cost_price_usd: pick.value }
@@ -230,7 +405,7 @@ type BranchLine = { branchId: number; name: string; before: number; after: numbe
 
 function stockPlan(ctx: Context): { before: number; after: number; branches: BranchLine[] } {
   const keeperStock = ctx.merged.map((id) => ctx.data.previews.get(id)?.keeperStock).find(Boolean)
-  const keeper = ctx.keeperId === null ? undefined : ctx.data.products.get(ctx.keeperId)
+  const keeper = ctx.keeperId === null ? undefined : recordOf(ctx, ctx.keeperId)
   const lines = new Map<number, BranchLine>()
   const line = (branch: StockBranch) => {
     if (!lines.has(branch.branchId)) lines.set(branch.branchId, { branchId: branch.branchId, name: branch.branchName || `#${branch.branchId}`, before: 0, after: 0 })
@@ -262,13 +437,13 @@ function productStockText(ctx: Context, id: number, t: Translate): string {
   } else if (preview) {
     return stockText(preview.stockImpact.totalQuantity, preview.stockImpact.branches.map((b) => ({ name: b.branchName || `#${b.branchId}`, quantity: b.quantity })), t)
   }
-  return stockText(Number(ctx.data.products.get(id)?.stock_quantity) || 0, [], t)
+  return stockText(Number(recordOf(ctx, id)?.stock_quantity) || 0, [], t)
 }
 
 function blockedMessage(ctx: Context, id: number, t: Translate): string | null {
   const blocked = ctx.data.previews.get(id)?.blocked
   if (!blocked?.code) return null
-  const name = productLabel(ctx.data.products.get(id), id)
+  const name = productLabel(recordOf(ctx, id), id)
   if (blocked.code === 'resolve_plan_budget') return tr(t, 'resolve_plan_budget', 'Product resolving is unavailable on this deployment. No changes were saved.')
   if (blocked.code === 'stock_session_reversible') {
     return fill(tr(t, 'merge_stock_session_blocked', 'One of these products is still part of a stock-in session that can be undone ({id}). Merging now would break that Undo — undo it or let it settle first.'), { id: blocked.operationId ?? '' })
@@ -282,24 +457,44 @@ function blockedMessage(ctx: Context, id: number, t: Translate): string | null {
   return null
 }
 
+type Problem = { code?: unknown; status?: unknown; outcome?: unknown; operationId?: unknown; errorId?: unknown; message?: unknown } | null
+
+// A refusal the server answered for certain (a 4xx, or a body saying nothing
+// was applied): nothing was written, so Continue would only be refused again.
+// A 5xx, a timeout or a dropped connection is not certain.
+function isDefiniteRefusal(error: unknown): boolean {
+  const problem = error as Problem
+  if (!problem || problem.outcome === 'unknown') return false
+  if (problem.outcome === 'not_applied') return true
+  const status = Number(problem.status)
+  return status >= 400 && status < 500
+}
+
 // The Worker's refusals arrive in English; the ones this flow can meet are
-// said in the operator's language. The code stays on the error (isStale reads it).
+// said in the operator's language. The code, status and outcome stay on the
+// error (isStale and isDefinite read them).
 function localizedRefusal(error: unknown, t: Translate): unknown {
-  const problem = error as { code?: unknown; operationId?: unknown } | null
+  const problem = error as Problem
   const code = typeof problem?.code === 'string' ? problem.code : ''
+  const errorId = String(problem?.errorId ?? '') || (String(problem?.message ?? '').match(/Reference: ([\w-]+)/)?.[1] ?? '')
   const message = code === 'product_merge_not_duplicates'
     ? tr(t, 'selected_conflict_product_merge_not_duplicates', 'These products are not a current duplicate group. Refresh the Duplicates list and try again.')
     : code === 'resolve_plan_budget'
       ? tr(t, 'resolve_plan_budget', 'Product resolving is unavailable on this deployment. No changes were saved.')
-    : code === 'cost_permission_required'
-      ? tr(t, 'resolve_cost_locked', 'Changing the cost needs the cost edit permission.')
-      : code === 'stock_session_reversible'
-        ? fill(tr(t, 'merge_stock_session_blocked', 'One of these products is still part of a stock-in session that can be undone ({id}). Merging now would break that Undo — undo it or let it settle first.'), { id: String(problem?.operationId ?? '') })
-        : ''
-  return message ? Object.assign(new Error(message), { code }) : error
+      : code === 'cost_permission_required'
+        ? tr(t, 'resolve_cost_locked', 'Changing the cost needs the cost edit permission.')
+        : code === 'stock_session_reversible'
+          ? fill(tr(t, 'merge_stock_session_blocked', 'One of these products is still part of a stock-in session that can be undone ({id}). Merging now would break that Undo — undo it or let it settle first.'), { id: String(problem?.operationId ?? '') })
+          : code === 'merge_failed'
+            ? fill(tr(t, 'resolve_refusal_merge_failed', 'The server could not merge these products. Reference: {errorId}'), { errorId })
+            : code === 'invalid_merge_numeric'
+              ? tr(t, 'resolve_refusal_invalid_merge_numeric', 'A price or cost is not a valid number. Correct it, then resolve.')
+              : ''
+  if (!message || !problem) return error
+  return Object.assign(new Error(message), { code, status: problem.status, outcome: problem.outcome, ...(errorId ? { errorId } : {}) })
 }
 
-type Plan = { ctx: Context; rows: ResolveRow[]; finalBarcode: string; absorbed: string[] }
+type Plan = { ctx: Context; rows: ResolveRow[]; choices: ProductResolveChoices | null; final: ProductResolveFinal; absorbed: string[] }
 
 function buildPlan(data: ProductResolveData, draft: ResolveDraft, options: ProductResolveOptions): Plan {
   const { t, canViewCosts, canEditCosts } = options
@@ -310,40 +505,61 @@ function buildPlan(data: ProductResolveData, draft: ResolveDraft, options: Produ
     Object.fromEntries(data.ids.map((id) => [String(id), { text: text(id), ...(extra?.(id) ?? {}) }]))
   )
   const identical = (row: Record<string, ResolveCell>, finalText: string): boolean => included.every((id) => (row[String(id)]?.text ?? '') === finalText)
-  const followsKept = tr(t, 'resolve_follows_kept', 'Follows the kept product')
   const keeper = keeperId === null ? undefined : product(keeperId)
-  const mergedProducts = ctx.merged.map((id) => product(id)).filter((entry): entry is ProductConflictProduct => Boolean(entry))
+  const mergedProducts = ctx.merged.map((id) => product(id)).filter((entry): entry is ProductResolveRecord => Boolean(entry))
+  const choices = data.choicesSupported ? productResolveChoices(ctx) : null
+  const final = choices ? productResolveFinalValues(choices, [...data.products.values()]) : {}
+  const rowChoice = (rowKey: string): ResolveChoice | undefined => {
+    const choice = choices?.[FIELD_OF_ROW[rowKey]]
+    if (!choice) return undefined
+    return 'source_id' in choice ? { source: String(choice.source_id) } : { custom: String(typedValue(ctx, rowKey) ?? choice.custom) }
+  }
+  const suggestions = (field: TextField) => [...new Set(included.map((id) => String(product(id)?.[field] ?? '').trim()).filter(Boolean))]
+  const rows: ResolveRow[] = []
 
-  const rows: ResolveRow[] = [{
-    key: 'record',
-    label: tr(t, 'resolve_product_kept', 'Product kept'),
-    hint: tr(t, 'resolve_product_kept_hint', 'This product stays. The others fold into it: stock, received-date records, photos, sales and returns move onto it, and each merge can be undone from History.'),
-    kind: 'choice',
-    cells: cells((id) => `#${id}`),
-    final: { text: keeperId === null ? '' : `#${keeperId}` },
-    ...(keeperId === null ? {} : { choice: { source: String(keeperId) } }),
-    identical: false,
-  }]
+  const textRow = (field: TextField, label: string) => {
+    const row = cells((id) => String(product(id)?.[field] ?? '').trim())
+    const finalText = String(final[field] ?? '').trim()
+    rows.push({
+      key: field,
+      label,
+      kind: 'choice',
+      cells: row,
+      final: { text: finalText },
+      choice: rowChoice(field),
+      identical: identical(row, finalText),
+      copyable: true,
+      custom: field === 'name'
+        ? { kind: 'text', validate: (value) => (validName(value) ? null : tr(t, 'resolve_name_invalid', 'Enter a name of 1 to 200 characters.')) }
+        : { kind: 'suggest', suggestions: suggestions(field), validate: (value) => (validText(value) ? null : tr(t, 'resolve_text_invalid', 'Use at most 200 characters, without ||.')) },
+    })
+  }
 
-  const nameRow = cells((id) => String(product(id)?.name ?? ''))
-  const finalName = String(keeper?.name ?? '')
-  // Computed rows cannot be picked: the reason rides in the hint (one icon,
-  // so the label column stays readable on a phone).
-  rows.push({ key: 'name', label: tr(t, 'name', 'Name'), hint: followsKept, kind: 'computed', cells: nameRow, final: { text: finalName }, identical: identical(nameRow, finalName), copyable: true })
+  if (choices) textRow('name', tr(t, 'name', 'Name'))
+  else {
+    const nameRow = cells((id) => String(product(id)?.name ?? ''))
+    const finalName = String(keeper?.name ?? '')
+    rows.push({ key: 'name', label: tr(t, 'name', 'Name'), kind: 'computed', cells: nameRow, final: { text: finalName }, identical: identical(nameRow, finalName), copyable: true })
+  }
 
-  const finalBarcode = finalProductBarcode(keeper, mergedProducts)
-  const absorbed = absorbedProductBarcodes(finalBarcode, mergedProducts)
   const barcodeRow = cells((id) => String(product(id)?.barcode ?? '').trim())
+  const finalBarcode = choices ? String(final.barcode ?? '').trim() : finalProductBarcode(keeper, mergedProducts).trim()
   rows.push({
     key: 'barcode',
     label: tr(t, 'barcode', 'Barcode'),
-    hint: tr(t, 'resolve_product_barcode_hint', 'The kept product keeps its barcode. If it has none it takes the merged product\'s. The other barcodes stay on the merged records, so their history keeps them.'),
-    kind: 'computed',
+    kind: choices ? 'choice' : 'computed',
     cells: barcodeRow,
-    final: { text: finalBarcode.trim() },
-    identical: identical(barcodeRow, finalBarcode.trim()),
+    final: { text: finalBarcode },
+    ...(choices ? { choice: rowChoice('barcode') } : {}),
+    identical: identical(barcodeRow, finalBarcode),
     copyable: true,
   })
+
+  if (choices) {
+    textRow('brand', tr(t, 'brand', 'Brand'))
+    textRow('category', tr(t, 'category', 'Category'))
+    textRow('unit', tr(t, 'unit', 'Unit'))
+  }
 
   if (canViewCosts) {
     const pick = costPick(ctx, canEditCosts)
@@ -354,7 +570,6 @@ function buildPlan(data: ProductResolveData, draft: ResolveDraft, options: Produ
     rows.push({
       key: 'cost',
       label: tr(t, 'cost', 'Cost'),
-      hint: tr(t, 'resolve_cost_hint', 'By default the kept product takes the average of the different costs (a zero cost is not a cost). You can pick one product\'s cost or type one.'),
       kind: 'choice',
       cells: costRow,
       options: [ruleOption],
@@ -367,18 +582,42 @@ function buildPlan(data: ProductResolveData, draft: ResolveDraft, options: Produ
     })
   }
 
-  const sellingRow = cells((id) => formatProductMoney(product(id)?.selling_price_usd))
-  const selling = Math.max(0, ...included.map((id) => Number(product(id)?.selling_price_usd) || 0))
-  const sellingText = formatProductMoney(selling)
-  rows.push({
-    key: 'selling',
-    label: tr(t, 'selling_price', 'Selling price'),
-    hint: tr(t, 'resolve_selling_hint', 'The highest selling price is kept.'),
-    kind: 'computed',
-    cells: sellingRow,
-    final: { text: sellingText },
-    identical: identical(sellingRow, sellingText),
-  })
+  const moneyRow = (rowKey: 'selling' | 'wholesale', field: MoneyField, label: string) => {
+    const row = cells((id) => formatProductMoney(product(id)?.[field]))
+    const finalText = formatProductMoney(final[field])
+    rows.push({
+      key: rowKey,
+      label,
+      kind: 'choice',
+      cells: row,
+      final: { text: finalText },
+      choice: rowChoice(rowKey),
+      identical: identical(row, finalText),
+      custom: { kind: 'money', validate: (value) => (ceilMoney(value) === null ? tr(t, 'resolve_price_invalid', 'Enter a price of zero or more.') : null) },
+    })
+  }
+
+  if (choices) {
+    moneyRow('selling', 'selling_price_usd', tr(t, 'selling_price', 'Selling price'))
+    moneyRow('wholesale', 'wholesale_price_usd', tr(t, 'wholesale_price', 'Wholesale price'))
+    const imageOf = (id: number) => String(product(id)?.image_path ?? '').trim()
+    const picture = (path: string): Partial<ResolveCell> => (path && options.imageDisplay ? { display: options.imageDisplay(path) } : {})
+    const imageRow = cells(imageOf, (id) => picture(imageOf(id)))
+    const finalImage = String(final.image_path ?? '').trim()
+    rows.push({
+      key: 'image',
+      label: tr(t, 'image', 'Image'),
+      kind: 'choice',
+      cells: imageRow,
+      final: { text: finalImage, ...picture(finalImage) },
+      choice: rowChoice('image'),
+      identical: identical(imageRow, finalImage),
+    })
+  } else {
+    const sellingRow = cells((id) => formatProductMoney(product(id)?.selling_price_usd))
+    const sellingText = formatProductMoney(Math.max(0, ...included.map((id) => Number(product(id)?.selling_price_usd) || 0)))
+    rows.push({ key: 'selling', label: tr(t, 'selling_price', 'Selling price'), kind: 'computed', cells: sellingRow, final: { text: sellingText }, identical: identical(sellingRow, sellingText) })
+  }
 
   const stockOptions: ResolveOption[] = [
     { id: 'merge', label: tr(t, 'resolve_stock_carry', 'Carry') },
@@ -389,34 +628,36 @@ function buildPlan(data: ProductResolveData, draft: ResolveDraft, options: Produ
     return { options: stockOptions, choice: stockAnswer(ctx, id) }
   })
   const stock = stockPlan(ctx)
-  const stockFinal = stockText(stock.after, stock.branches.map((branch) => ({ name: branch.name, quantity: branch.after })), t)
   rows.push({
     key: 'stock',
     label: tr(t, 'stock', 'Stock'),
-    hint: tr(t, 'resolve_stock_hint', 'Carry moves a product\'s stock onto the kept product, keeping its received dates and branches. Write off clears it with a ledger entry.'),
     kind: 'computed',
     cells: stockRow,
-    final: { text: stockFinal },
+    final: { text: stockText(stock.after, stock.branches.map((branch) => ({ name: branch.name, quantity: branch.after })), t) },
     identical: false,
   })
 
-  return { ctx, rows, finalBarcode: finalBarcode.trim(), absorbed }
+  return { ctx, rows, choices, final, absorbed: absorbedProductBarcodes(finalBarcode, mergedProducts) }
 }
 
 export function createProductResolveAdapter(options: ProductResolveOptions): ResolveAdapter<ProductResolveData, ProductResolveToken> {
   const { cluster, t } = options
   const api = options.api ?? DEFAULT_API
-  const listedProducts = new Map(cluster.products.map((product) => [Number(product.id), product]))
+  const listedProducts = new Map<number, ProductResolveRecord>(cluster.products.map((product) => [Number(product.id), product]))
   const ids = [...listedProducts.keys()].sort((a, b) => a - b)
   // A merge that stopped part way resumes from the step that did not answer.
   const progress = new WeakMap<ProductResolveToken, { index: number; keeper: Record<string, unknown> | null; absorbed: string[] }>()
 
   const afterItems = (keeper: Record<string, unknown> | null, token: ProductResolveToken, absorbed: string[]): ResolveAfterItem[] => {
-    const items: ResolveAfterItem[] = [{ label: tr(t, 'resolve_product_kept', 'Product kept'), value: productLabel({ id: token.keepId, name: keeper?.name == null ? null : String(keeper.name) } as ProductConflictProduct, token.keepId) }]
+    const items: ResolveAfterItem[] = []
     if (keeper) {
+      items.push({ label: tr(t, 'name', 'Name'), value: String(keeper.name ?? '') })
       items.push({ label: tr(t, 'barcode', 'Barcode'), value: String(keeper.barcode ?? '') })
+      if ('brand' in keeper) items.push({ label: tr(t, 'brand', 'Brand'), value: String(keeper.brand ?? '') })
+      if ('category' in keeper) items.push({ label: tr(t, 'category', 'Category'), value: String(keeper.category ?? '') })
       if ('cost_price_usd' in keeper && options.canViewCosts) items.push({ label: tr(t, 'cost', 'Cost'), value: formatProductMoney(keeper.cost_price_usd) })
       items.push({ label: tr(t, 'selling_price', 'Selling price'), value: formatProductMoney(keeper.selling_price_usd) })
+      if ('wholesale_price_usd' in keeper) items.push({ label: tr(t, 'wholesale_price', 'Wholesale price'), value: formatProductMoney(keeper.wholesale_price_usd) })
       const branches = Array.isArray(keeper.branch_stock) ? readImpact({ branches: keeper.branch_stock }).branches : []
       items.push({ label: tr(t, 'stock', 'Stock'), value: stockText(Number(keeper.stock_quantity) || 0, branches.map((b) => ({ name: b.branchName || `#${b.branchId}`, quantity: b.quantity })), t) })
     }
@@ -428,19 +669,20 @@ export function createProductResolveAdapter(options: ProductResolveOptions): Res
   return {
     async load(signal, edits) {
       const included = includedIds(ids, edits)
-      const keeperId = keeperOf(included, edits, options.keeperId) ?? options.keeperId
-      const groupIds = included.includes(keeperId) ? included : [keeperId, ...included]
-      if (groupIds.length > 12) return { ids, products: new Map(listedProducts), keeperId, previews: new Map(), reviewedDigest: '' }
+      const keeperId = productSurvivor(included) ?? ids[0]
+      const empty = { ids, products: new Map(listedProducts), keeperId, previews: new Map<number, ProductResolvePreview>(), reviewedDigest: '', choicesSupported: false }
+      if (included.length > MAX_GROUP) return empty
       const others = included.filter((id) => id !== keeperId)
-      const answers = await Promise.all(others.map((id) => api.preview(keeperId, id, { keep: true, groupIds, signal })))
+      const answers = await Promise.all(others.map((id) => api.preview(keeperId, id, { keep: true, groupIds: included, signal })))
       const previews = new Map(others.map((id, index) => [id, readPreview(answers[index])]))
       const first = previews.values().next().value as ProductResolvePreview | undefined
       if ([...previews.values()].some((preview) => preview.reviewedDigest !== first?.reviewedDigest)) {
         throw Object.assign(new Error(tr(t, 'resolve_stale_banner', 'These records changed. Reload and review again.')), { code: 'merge_state_conflict' })
       }
       const products = new Map(listedProducts)
-      for (const product of first?.groupProducts ?? []) products.set(Number(product.id), product)
-      return { ids, products, keeperId, previews, reviewedDigest: first?.reviewedDigest ?? '' }
+      for (const record of first?.groupProducts ?? []) products.set(Number(record.id), record)
+      const choicesSupported = previews.size > 0 && [...previews.values()].every((preview) => preview.choicesSupported)
+      return { ids, products, keeperId, previews, reviewedDigest: first?.reviewedDigest ?? '', choicesSupported }
     },
 
     initialSelection() {
@@ -448,18 +690,13 @@ export function createProductResolveAdapter(options: ProductResolveOptions): Res
     },
 
     columns(data, draft): ResolveColumn[] {
-      const { keeperId } = contextOf(data, draft)
-      return data.ids.map((id) => {
-        const product = data.products.get(id)
-        const kept = id === keeperId
-        return {
-          id: String(id),
-          title: String(product?.name ?? '').trim() || `#${id}`,
-          subtitle: kept ? `#${id} · ${tr(t, 'resolve_product_kept', 'Product kept')}` : `#${id}`,
-          disposition: draft.columns[String(id)]?.disposition === 'separate' ? 'separate' : 'include',
-          dispositions: ['include', 'separate'],
-        }
-      })
+      return data.ids.map((id) => ({
+        id: String(id),
+        title: String(data.products.get(id)?.name ?? '').trim() || `#${id}`,
+        subtitle: `#${id}`,
+        disposition: draft.columns[String(id)]?.disposition === 'separate' ? 'separate' : 'include',
+        dispositions: ['include', 'separate'],
+      }))
     },
 
     rows(data, draft) {
@@ -469,7 +706,7 @@ export function createProductResolveAdapter(options: ProductResolveOptions): Res
     blockers(data, draft) {
       const { ctx } = buildPlan(data, draft, options)
       const out: string[] = []
-      if (ctx.included.length > 12) out.push(fill(tr(t, 'resolve_merge_max', 'Merge at most {n} records at a time.'), { n: 12 }))
+      if (ctx.included.length > MAX_GROUP) out.push(fill(tr(t, 'resolve_merge_max', 'Merge at most {n} records at a time.'), { n: MAX_GROUP }))
       if (ctx.included.length < 2) out.push(tr(t, 'resolve_merge_needs_two', 'Merge in at least two records.'))
       for (const id of ctx.merged) {
         const message = blockedMessage(ctx, id, t)
@@ -478,16 +715,14 @@ export function createProductResolveAdapter(options: ProductResolveOptions): Res
       return out
     },
 
-    // The previews are read against one kept product and one group: a new
-    // Keep or a product taken in or out reads them again.
+    // The previews are read against the survivor and the group: only taking
+    // a product in or out reads them again, never a field pick.
     reloadWhen(before, after) {
-      const keeperBefore = keeperOf(includedIds(ids, before), before, options.keeperId)
-      const keeperAfter = keeperOf(includedIds(ids, after), after, options.keeperId)
-      return keeperBefore !== keeperAfter || includedIds(ids, before).join(',') !== includedIds(ids, after).join(',')
+      return includedIds(ids, before).join(',') !== includedIds(ids, after).join(',')
     },
 
     async review(data, draft) {
-      const { ctx, rows, absorbed } = buildPlan(data, draft, options)
+      const { ctx, rows, choices, absorbed } = buildPlan(data, draft, options)
       const keepId = ctx.keeperId
       if (keepId === null || !ctx.merged.length) throw new Error(tr(t, 'resolve_merge_needs_two', 'Merge in at least two records.'))
       const name = (id: number) => productLabel(data.products.get(id), id)
@@ -499,9 +734,13 @@ export function createProductResolveAdapter(options: ProductResolveOptions): Res
 
       const changes: ResolveChange[] = []
       for (const row of rows) {
-        if (row.key === 'record' || row.key === 'name' || row.key === 'stock') continue
+        if (row.key === 'stock' || (row.key === 'name' && row.kind === 'computed')) continue
         const before = row.cells[String(keepId)]?.text ?? ''
-        if (before !== row.final.text) changes.push({ label: row.label, before, after: row.final.text })
+        if (before === row.final.text) continue
+        if (row.key === 'image') {
+          const source = choices?.image && 'source_id' in choices.image ? choices.image.source_id : keepId
+          changes.push({ label: row.label, before: before ? name(keepId) : '', after: row.final.text ? name(source) : '' })
+        } else changes.push({ label: row.label, before, after: row.final.text })
       }
       const stock = stockPlan(ctx)
       const stockLabel = tr(t, 'stock', 'Stock')
@@ -517,26 +756,34 @@ export function createProductResolveAdapter(options: ProductResolveOptions): Res
         warnings.push(fill(tr(t, 'resolve_stock_write_off_warning', 'The stock of {name} ({quantity} pcs) will be written off.'), { name: name(id), quantity: data.previews.get(id)?.stockImpact.totalQuantity ?? 0 }))
       }
       if (absorbed.length) {
-        warnings.push(fill(tr(t, 'resolve_barcodes_kept_warning', 'Barcodes {barcodes} stay on the merged records; the kept product keeps its own.'), { barcodes: absorbed.join(', ') }))
+        const ownBarcode = String(data.products.get(keepId)?.barcode ?? '').trim()
+        const finalBarcode = rows.find((row) => row.key === 'barcode')?.final.text ?? ''
+        warnings.push(!ownBarcode || identityBarcodeKey(ownBarcode) === identityBarcodeKey(finalBarcode)
+          ? fill(tr(t, 'resolve_barcodes_kept_warning', 'Barcodes {barcodes} stay on the merged records; the kept product keeps its own.'), { barcodes: absorbed.join(', ') })
+          : `${tr(t, 'resolve_barcodes_kept_on_merged', 'Barcodes kept on the merged records')}: ${absorbed.join(', ')}`)
       }
+      const sessions = [...new Set(ctx.merged.flatMap((id) => data.previews.get(id)?.settlesStockSessions ?? []))]
+      for (const id of sessions) warnings.push(fill(tr(t, 'resolve_refusal_stock_session_settled', 'Stock-in session {id} can no longer be undone after this merge.'), { id }))
+      const finalName = rows.find((row) => row.key === 'name')?.final.text
       return {
-        message: fill(tr(t, 'resolve_product_confirm', 'Merge {products} into {name}.'), { products: ctx.merged.map(name).join(', '), name: name(keepId) }),
+        message: fill(tr(t, 'resolve_product_confirm', 'Merge {products} into {name}.'), { products: ctx.merged.map(name).join(', '), name: productLabel({ name: finalName }, keepId) }),
         changes,
         warnings,
-        token: { keepId, steps, cost, requestId: createClientRequestId('resolve'), reviewedDigest: data.reviewedDigest },
+        token: { keepId, steps, cost, choices, requestId: createClientRequestId('resolve'), reviewedDigest: data.reviewedDigest },
         undoable: true,
       }
     },
 
     async apply(token, _signal, onProgress) {
-      if (!options.canMerge()) throw new Error(tr(t, 'access_denied', 'Access Denied'))
+      if (!options.canMerge()) throw Object.assign(new Error(tr(t, 'access_denied', 'Access Denied')), { code: 'access_denied', outcome: 'not_applied' })
       const total = token.steps.length
       const state = progress.get(token) ?? { index: 0, keeper: null, absorbed: [] }
       for (let index = state.index; index < total; index += 1) {
         const step = token.steps[index]
-        const keep = {
+        const keep: MergeKeep = {
           ...(token.cost ? { cost_price_usd: token.cost.cost_price_usd, cost_price_khr: token.cost.cost_price_khr ?? null } : {}),
           resolve: { requestId: token.requestId, reviewedDigest: token.reviewedDigest, steps: token.steps.map(({ mergeId, stock }) => ({ mergeId, ...(stock ? { stock } : {}) })) },
+          ...(token.choices ? { choices: token.choices } : {}),
         }
         let response: { keeper?: Record<string, unknown> | null } | null
         try {
@@ -561,8 +808,16 @@ export function createProductResolveAdapter(options: ProductResolveOptions): Res
     },
 
     isStale(error) {
-      const code = (error as { code?: unknown } | null)?.code
+      const code = (error as Problem)?.code
       return typeof code === 'string' && STALE_CODES.has(code)
+    },
+
+    isDefinite(error) {
+      return isDefiniteRefusal(error)
+    },
+
+    describe(error) {
+      return error instanceof Error ? error.message : typeof error === 'string' ? error : ''
     },
   }
 }
