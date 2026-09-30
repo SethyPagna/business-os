@@ -6,6 +6,7 @@ import { getPlanLimits } from '../lib/planTier'
 import type { Env } from '../index'
 import { runAdjustAction, type InventoryContext } from './inventory'
 import { runReceiveBatchAction, type ReceiveBody } from './batches'
+import { paidItemsTotal, supplierTotalMatches } from '../lib/stockSessionMath'
 
 // P4-B: the fast stock-in modal used to commit its pending lines one at a
 // time -- N lines meant N sequential POST /api/inventory/adjust or POST
@@ -107,7 +108,46 @@ async function runLine(c: InventoryContext, line: StockInCommitLine): Promise<St
   }
 }
 
-// POST /api/inventory/fast-stock-in/commit -- body: { lines: StockInCommitLine[] }.
+// UI-STOCK 11.3: a stock session that went through the Payment step sends
+// what was paid to the supplier. Before any line runs, the receipt lines'
+// paid money (quantity x unit cost, free units excluded) must match it within
+// half a cent, and every receipt line must carry the session's payment status;
+// otherwise nothing is written. The first request of a session carries every
+// line (the cap only defers the tail), so it checks the whole session; a
+// re-send of a deferred tail omits the block. No block = the old contract.
+export type StockInCommitSession = { supplierTotalUsd: number; paymentStatus: 'paid' | 'credit'; creditDueDate?: string | null }
+
+function receiptLineFacts(line: StockInCommitLine): { qty: number; unitCost: number; paymentStatus: unknown } | null {
+  const body = (line?.body ?? {}) as Record<string, unknown>
+  if (line?.wire === 'receive') return { qty: Number(body.quantity) || 0, unitCost: Number(body.unit_cost_usd) || 0, paymentStatus: body.payment_status ?? null }
+  if (line?.wire === 'adjust' && body.type === 'add') return { qty: Number(body.quantity) || 0, unitCost: Number(body.unitCostUsd) || 0, paymentStatus: body.paymentStatus ?? null }
+  return null
+}
+
+/** Null when the session may run; otherwise the 400 body that stops it before any line. */
+export function stockInCommitSessionRefusal(lines: StockInCommitLine[], raw: unknown): Record<string, unknown> | null {
+  if (raw == null) return null
+  const session = raw as Partial<StockInCommitSession>
+  const supplierTotalUsd = Number(session.supplierTotalUsd)
+  if (typeof raw !== 'object' || !Number.isFinite(supplierTotalUsd) || supplierTotalUsd < 0
+    || (session.paymentStatus !== 'paid' && session.paymentStatus !== 'credit')) {
+    return { error: 'The session block needs supplierTotalUsd and paymentStatus (paid or credit)', code: 'invalid_session' }
+  }
+  if (session.paymentStatus === 'credit' && !String(session.creditDueDate ?? '').trim()) {
+    return { error: 'A Not Yet Paid purchase needs its due date', code: 'invalid_session' }
+  }
+  const receipts = lines.map(receiptLineFacts).filter((facts): facts is NonNullable<typeof facts> => facts != null)
+  if (receipts.some((facts) => facts.paymentStatus !== session.paymentStatus)) {
+    return { error: 'Every line must use the session\'s payment status', code: 'payment_status_mismatch' }
+  }
+  const itemsTotalUsd = paidItemsTotal(receipts)
+  if (!supplierTotalMatches(itemsTotalUsd, supplierTotalUsd)) {
+    return { error: 'Paid to supplier does not match the items total', code: 'supplier_total_mismatch', itemsTotalUsd, supplierTotalUsd }
+  }
+  return null
+}
+
+// POST /api/inventory/fast-stock-in/commit -- body: { lines: StockInCommitLine[], session?: StockInCommitSession }.
 // Lines run in order, sequentially (each kernel call may read-then-write
 // against the same product/branch as its neighbours, so out-of-order or
 // concurrent execution could race two lines touching the same lot). A
@@ -136,12 +176,19 @@ export async function runStockInCommit(c: InventoryContext, lines: StockInCommit
   return results
 }
 
-app.post('/commit', async (c) => {
-  const body = (await c.req.json<{ lines?: unknown }>().catch(() => ({}))) as { lines?: unknown }
-  const lines = Array.isArray(body.lines) ? (body.lines as StockInCommitLine[]) : []
+// The whole request, exported so the pure tests can drive it with a fake Context.
+export async function commitStockIn(c: InventoryContext, body: { lines?: unknown; session?: unknown }): Promise<Response> {
+  const lines = Array.isArray(body?.lines) ? (body.lines as StockInCommitLine[]) : []
   if (lines.length === 0) return c.json({ error: 'lines must be a non-empty array' }, 400)
-  const results = await runStockInCommit(c as InventoryContext, lines)
+  const refusal = stockInCommitSessionRefusal(lines, body.session)
+  if (refusal) return c.json(refusal as never, 400)
+  const results = await runStockInCommit(c, lines)
   return c.json({ results })
+}
+
+app.post('/commit', async (c) => {
+  const body = (await c.req.json<{ lines?: unknown; session?: unknown }>().catch(() => ({}))) as { lines?: unknown; session?: unknown }
+  return commitStockIn(c as InventoryContext, body)
 })
 
 export default app

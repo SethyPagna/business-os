@@ -212,6 +212,8 @@ const inventoryRoute = loadReal('routes/inventory.ts', {
   '../lib/productBatches': productBatches,
   '../lib/batchCode': batchCode,
   '../lib/stockReceiptGate': stockReceiptGate,
+  '../lib/stockSessionMath': loadReal('lib/stockSessionMath.ts', { './moneyPrecision': moneyPrecision }),
+  '../lib/schemaProbe': loadReal('lib/schemaProbe.ts'),
   // Migration 0192: runAdjustAction wraps its kernel in the per-line receipt
   // guard, so the real module joins the stub map like every other real
   // dependency. These bodies carry no client_request_id, so the guard hands
