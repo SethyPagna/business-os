@@ -128,3 +128,32 @@ console.log('PASS Stock Changes labels a Revert, links it both ways and hides a 
   }
 }
 console.log('PASS a put-back row is not marked Reverted, and sale or return stock points to its record instead of offering Revert, in English and Khmer')
+
+// R-REVERT-FIX RF9: a Revert that was itself reverted shows BOTH what it
+// reverts (#10) and that it is undone now (the Reverted chip) in the list.
+{
+  const undone = { ...revert, id: 12, reverts_movement_id: 10, reverted_by_movement_id: 13, reverted_now: 1 }
+  for (const lang of ['en', 'km']) {
+    const words = packs[lang]
+    const t = (key: string) => words[key] || key
+    const app = { t, page: 'products', user: { id: 1, username: 'fixture-admin', role_code: 'admin' }, can: () => true, notify: () => {} }
+    const surface = await harness.mount({
+      component: 'components/products/StockChangeSection.tsx', props: { t }, app,
+      doubles: {
+        'api/productReadTransport.ts': {
+          getStockLedger: async () => ({ items: [undone], total: 1, totalPages: 1 }),
+          getStockLedgerMovementBalance: async (id: number) => ({ id, before_qty: 0, after_qty: 10 }),
+        },
+        'api/inventoryWriteTransport.ts': { revertStockMovement: async () => ({ success: true }) },
+        'api/actionHistoryTransport.ts': { getStockMovementRevertPreview: async (id: number) => ({ success: true, revert: { kind: 'movement', movementId: id, lineCount: 1 } }) },
+        'api/branchTransport.ts': { getBranches: async () => [] },
+        'components/shared/SupplierPickerField.tsx': { loadSupplierNames: async () => [] },
+      },
+    })
+    const row = surface.findAll((node) => node.tagName === 'TR' && node.getAttribute('data-clickable') === 'true')[0]
+    assert.ok(row.textContent.includes('#10'), `${lang}: the Revert row names the row it reverts`)
+    assert.ok(row.textContent.includes(words.movement_reverted_chip), `${lang}: and says it is undone now`)
+    await surface.unmount()
+  }
+}
+console.log('PASS a Revert that was itself reverted shows #N and the Reverted chip, in English and Khmer')

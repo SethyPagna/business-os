@@ -14,6 +14,8 @@ export const STOCK_REVERT_ERRORS: Record<string, readonly [key: string, fallback
   revert_not_revertible: ['revert_err_not_revertible', 'This change belongs to a sale, return, transfer or move. Undo it from its own record. Nothing was changed.'],
   revert_from_sale: ['revert_err_from_sale', 'This change came from a sale. Change it from the sale: cancel it or change its status.'],
   revert_from_return: ['revert_err_from_return', 'This change came from a return. Change it from the return instead.'],
+  revert_from_merge: ['revert_err_from_merge', 'This change came from merging duplicate products. Undo the merge from History instead. Nothing was changed.'],
+  revert_session_undone: ['revert_err_session_undone', 'This row belongs to a stock-in session that was undone, so its stock is already taken back. Redo that session from Stock-in Sessions first. Nothing was changed.'],
   revert_session_generation: ['revert_err_session_generation', 'This row was written by the undo or redo of stock-in session {session}. Undo or redo that session from Stock-in Sessions. Nothing was changed.'],
   revert_lineage_unresolved: ['revert_err_lineage', 'The original change cannot be identified safely. Nothing was changed.'],
   revert_insufficient_branch_stock: ['revert_err_branch_stock', 'Cannot revert: only {available} in stock at {branch}, {needed} needed. Nothing was changed.'],

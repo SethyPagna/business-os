@@ -45,9 +45,14 @@ export type StockInLineEditBody = {
 export const STOCK_IN_LINE_REASON_MAX = 512
 export const STOCK_IN_LINE_MAX_QUANTITY = 1_000_000_000
 
-/** A line can be edited when it received stock into a lot (a created-at-0 line has neither). */
-export function isStockInLineEditable(row: Pick<StockInLineEditRow, 'id' | 'batch_id'>): boolean {
-  return row.id != null && Number(row.batch_id) > 0
+/**
+ * A line can be edited when it received stock into a lot (a created-at-0 line
+ * has neither) and no Revert exists for it. The Worker refuses an edit of a
+ * reverted line, and of one whose Revert was reverted in turn (it checks for
+ * any Revert row), so the pencil is not offered for either.
+ */
+export function isStockInLineEditable(row: Pick<StockInLineEditRow, 'id' | 'batch_id'> & { reverted?: unknown; has_revert?: unknown }): boolean {
+  return row.id != null && Number(row.batch_id) > 0 && !Number(row.reverted) && !Number(row.has_revert)
 }
 
 /** The unit cost a line is shown at: its own total over its quantity, else the lot's cost. */

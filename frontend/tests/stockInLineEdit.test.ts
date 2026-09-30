@@ -82,6 +82,10 @@ runTest('only a line that received stock into a lot can be edited; the unit cost
   assert.equal(isStockInLineEditable(row), true)
   assert.equal(isStockInLineEditable({ id: null, batch_id: null }), false)
   assert.equal(isStockInLineEditable({ id: 5, batch_id: null }), false)
+  // A reverted line, and one made live again by a Revert of its Revert, both refuse an edit in the Worker.
+  assert.equal(isStockInLineEditable({ ...row, reverted: 1, has_revert: 1 }), false, 'reverted')
+  assert.equal(isStockInLineEditable({ ...row, reverted: 0, has_revert: 1 }), false, 'live again after a Revert of its Revert')
+  assert.equal(isStockInLineEditable({ ...row, reverted: 0, has_revert: 0 }), true, 'never reverted')
   assert.equal(stockInLineUnitCost({ ...row, total_cost_usd: 36, quantity: 12, batch_unit_cost_usd: 3 }), 3)
   assert.equal(stockInLineUnitCost({ ...row, total_cost_usd: null, batch_unit_cost_usd: 2.5 }), 2.5)
   const id = newStockInLineEditRequestId()

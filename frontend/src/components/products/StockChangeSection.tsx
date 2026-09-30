@@ -742,11 +742,12 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
   // Plain text here -- the whole row opens the detail, where both are links.
   const revertTag = (row: LedgerRow) => {
     const reverts = revertsMovementId(row)
-    if (reverts != null) return <span data-revert-tag="reverts" className="shrink-0 font-normal opacity-80">#{reverts}</span>
-    if (Number(row.reverted_now)) {
-      return <span data-revert-tag="reverted" className="shrink-0 rounded bg-gray-100 px-1 text-[10px] font-semibold text-gray-600 dark:bg-gray-800 dark:text-gray-300">{tr(t, 'movement_reverted_chip', 'Reverted')}</span>
-    }
-    return null
+    // A Revert that was itself reverted shows both: what it reverts and that it is undone now.
+    const chip = Number(row.reverted_now)
+      ? <span data-revert-tag="reverted" className="shrink-0 rounded bg-gray-100 px-1 text-[10px] font-semibold text-gray-600 dark:bg-gray-800 dark:text-gray-300">{tr(t, 'movement_reverted_chip', 'Reverted')}</span>
+      : null
+    if (reverts == null) return chip
+    return <><span data-revert-tag="reverts" className="shrink-0 font-normal opacity-80">#{reverts}</span>{chip}</>
   }
 
   const renderCard = (row: LedgerRow) => {

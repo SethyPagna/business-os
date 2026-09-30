@@ -158,6 +158,17 @@ for (const rule of GLOSSARY) {
 assert.deepEqual(violations, [], `Khmer vocabulary forked again:\n  ${violations.join('\n  ')}`)
 console.log(`PASS ${GLOSSARY.length} Khmer glossary terms are used consistently across the pack`)
 
+// The Revert flow undoes a stock change; it never names a customer return, and
+// "វិញ" is not doubled (R-REVERT-FIX RF9). Only the refusals that point the
+// operator to a sale or return may say ការប្រគល់មកវិញ.
+const POINTS_TO_A_RETURN = new Set(['revert_err_not_revertible', 'revert_err_from_return'])
+const revertFlowMisuse = Object.entries(km)
+  .filter(([key]) => /^(revert_|movement_revert_|confirm_revert|movement_reverted)/.test(key) && !POINTS_TO_A_RETURN.has(key))
+  .filter(([, value]) => value.includes('ការប្រគល់មកវិញ') || value.includes('វិញវិញ'))
+  .map(([key, value]) => `${key} -- ${value}`)
+assert.deepEqual(revertFlowMisuse, [], `Revert strings use the customer-return noun or a doubled វិញ: ${revertFlowMisuse.join(' | ')}`)
+console.log('PASS the Revert flow never uses the customer-return noun')
+
 // --- 3. no English left where Khmer is expected --------------------------
 //
 // Loanwords Cambodian shop staff actually say (POS, CSV, QR, brand and font

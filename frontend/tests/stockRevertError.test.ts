@@ -89,4 +89,24 @@ runTest('Stock Changes names the sale types the Worker refuses as sale-made stoc
   assert.ok(section.includes("tr(t, 'revert_err_from_sale'") && section.includes("tr(t, 'revert_err_from_return'"), 'the hint uses the same texts as the refusal')
 })
 
+// R-REVERT-FIX RF1/RF5: the two refusals added by the fix round are shown in the operator's language.
+runTest('the receipt of an undone session and a merge-made row are refused in Khmer, pointing to where to change them', () => {
+  for (const code of ['revert_session_undone', 'revert_from_merge']) {
+    const text = stockRevertErrorText({ code, message: 'Server English' }, trFrom(packs.km))
+    assert.ok(text && text !== 'Server English' && !/[A-Za-z]{4,}/.test(text), `${code}: ${text}`)
+    assert.notEqual(text, stockRevertErrorText({ code, message: 'x' }, trFrom(packs.en)), `${code}: km differs from en`)
+  }
+  assert.match(packs.en.revert_err_from_merge, /Undo the merge from History/)
+  assert.match(packs.en.revert_err_session_undone, /Redo that session/)
+})
+
+// R-REVERT-FIX RF8: the Stock Changes confirmation states the effect, like the Stock-in Sessions one.
+runTest('the Revert confirmation says it removes the change from the purchase and the reports, in both packs', () => {
+  assert.match(packs.en.confirm_revert, /purchase/i)
+  assert.match(packs.en.confirm_revert, /supplier totals/i)
+  assert.match(packs.en.confirm_revert, /reports/i)
+  assert.ok(packs.km.confirm_revert.includes('ការទិញ') && packs.km.confirm_revert.includes('របាយការណ៍') && packs.km.confirm_revert.includes('អ្នកផ្គត់ផ្គង់'), packs.km.confirm_revert)
+  assert.ok(read('src/components/products/StockChangeSection.tsx').includes("tr(t, 'confirm_revert'"), 'the review shows it')
+})
+
 if (failed) { console.error(`${failed} failed`); process.exit(1) }
