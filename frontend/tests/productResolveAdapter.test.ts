@@ -239,6 +239,16 @@ await test('choices: a pick or a typed value changes Final and the request; the 
   assert.deepEqual(rowOf(adapter.rows(data, separate), 'name').choice, { source: '60' }, 'a pick from a record kept separate falls back to the default')
 })
 
+await test('a minimized Resolve comes back with the same Final: the chip stores the draft as JSON', async () => {
+  const { adapter, data } = await open(CLUSTERS.catalog, { view: true, edit: true }, { choices: true })
+  const draft = pick({ name: { source: '62' }, brand: { custom: 'Glowy Labs' }, selling: { custom: '13.001' }, image: { source: '62' } })
+  const restored = JSON.parse(JSON.stringify(draft)) as Draft
+  const finals = (from: Draft) => adapter.rows(data, from).map((row) => [row.key, row.final.text, JSON.stringify(row.choice ?? null)])
+  assert.notDeepEqual(finals(draft), finals(EMPTY), 'the draft changes the grid (else this test proves nothing)')
+  assert.deepEqual(finals(restored), finals(draft), 'the restored draft shows the same Final')
+  assert.deepEqual((await adapter.review(data, restored, signal)).token.choices, (await adapter.review(data, draft, signal)).token.choices, 'and sends the same choices')
+})
+
 // The Worker applies `choices` from the frozen reviewed rows; this shared
 // table is what both sides are tested against (UI-CONFLICTS-2 lands it).
 const PARITY = new URL('../../cloudflare/scripts/fixtures/product-resolve-choices-parity.json', import.meta.url)
