@@ -276,17 +276,40 @@ export async function audit(
   change?: AuditFieldChange | null,
 ): Promise<void> {
   try {
-    const detailsStr = details != null
-      ? (typeof details === 'object' ? JSON.stringify(details) : String(details))
-      : null
-    const changeColumns = auditChangeColumns(change)
-    const db = getDb(env)
-    await db.prepare(`
+    const statement = buildAuditStatement(userId, userName, action, entity, entityId, details, change)
+    await getDb(env).prepare(statement.sql).run(statement.params)
+  } catch (_) {
+    // Swallow -- see comment above.
+  }
+}
+
+// The same INSERT as audit(), as a statement a route can put INSIDE the D1 batch
+// that makes the change, so the change and its record commit together or not at
+// all (audit() itself stays best-effort for the 130+ routes that call it after
+// the fact). entityIdFromLastInsert names the row the batch's preceding INSERT
+// created, for a create whose id is not known until it runs.
+export function buildAuditStatement(
+  userId: number | null,
+  userName: string | null,
+  action: string,
+  entity: string,
+  entityId: string | number | null,
+  details: unknown = null,
+  change?: AuditFieldChange | null,
+  options: { entityIdFromLastInsert?: boolean } = {},
+): { sql: string; params: Record<string, unknown> } {
+  const detailsStr = details != null
+    ? (typeof details === 'object' ? JSON.stringify(details) : String(details))
+    : null
+  const changeColumns = auditChangeColumns(change)
+  const idSql = options.entityIdFromLastInsert ? 'last_insert_rowid()' : '@entity_id'
+  return {
+    sql: `
       INSERT INTO audit_logs (user_id, user_name, action, entity, entity_id, details, table_name, record_id, old_value, new_value, device_name, device_tz)
       SELECT
         @user_id,
         COALESCE(NULLIF(TRIM(u.username), ''), NULLIF(TRIM(@user_name), '')),
-        @action, @entity, @entity_id, @details, @table_name, @record_id, @old_value, @new_value,
+        @action, @entity, ${idSql}, @details, @table_name, ${idSql}, @old_value, @new_value,
         s.device_name,
         s.device_tz
       FROM (SELECT 1 AS one) AS _dummy
@@ -298,20 +321,18 @@ export async function audit(
         ORDER BY last_seen_at DESC, id DESC
         LIMIT 1
       ) AS s ON 1 = 1
-    `).run({
+    `,
+    params: {
       user_id: userId,
       user_name: userName,
       action,
       entity,
-      entity_id: entityId,
+      ...(options.entityIdFromLastInsert ? {} : { entity_id: entityId }),
       details: detailsStr,
       table_name: entity,
-      record_id: entityId,
       old_value: changeColumns.old_value,
       new_value: change === undefined ? detailsStr : changeColumns.new_value,
-    })
-  } catch (_) {
-    // Swallow -- see comment above.
+    },
   }
 }
 

@@ -1,7 +1,6 @@
-import { buildSaleRecordEventsInsert, type SaleRecordEventStatement } from './saleRecordEvents'
+import { buildSaleRecordEventsInsert, CUSTOMER_DETAILS_AFTER_MARKER, CUSTOMER_DETAILS_BEFORE_MARKER, type SaleRecordEventStatement } from './saleRecordEvents'
 import type { SaleRecordChange } from './saleRecords'
 import { getPermissionTier, type PermissionUser } from './permissions'
-import { contactDisplayAddress } from './contactOptions'
 
 // A customer add or edit made from the POS or a sale (owner, 30 Sep 2026). The
 // caller says where it came from with `source`; the Worker widens a Review-tier
@@ -17,11 +16,15 @@ export type ContactSalesSourceRead =
 
 const SOURCE_GRANT = { pos: 'pos', sale: 'sales' } as const
 
+function readSaleId(raw: unknown): number | null {
+  const id = typeof raw === 'number' ? raw : typeof raw === 'string' && /^[1-9]\d{0,15}$/.test(raw) ? Number(raw) : NaN
+  return Number.isSafeInteger(id) && id > 0 ? id : null
+}
+
 export function readContactSalesSource(
   user: PermissionUser,
   table: string,
   body: Record<string, unknown>,
-  options: { requireSaleId: boolean },
 ): ContactSalesSourceRead {
   const raw = body.source
   if (raw === undefined || raw === null || raw === '') return { ok: true, source: null }
@@ -31,11 +34,42 @@ export function readContactSalesSource(
     return { ok: false, status: 403, error: 'You do not have permission to perform this action' }
   }
   if (raw === 'pos') return { ok: true, source: { kind: 'pos', saleId: null } }
-  const saleId = Number(body.sale_id)
-  if (options.requireSaleId && (!Number.isSafeInteger(saleId) || saleId <= 0)) {
-    return { ok: false, status: 400, error: 'A sale source needs the sale_id it was made from.' }
+  const saleId = readSaleId(body.sale_id)
+  if (saleId === null) return { ok: false, status: 400, error: 'A sale source needs the sale_id it was made from.' }
+  return { ok: true, source: { kind: 'sale', saleId } }
+}
+
+export type ContactSaleCheckError = { status: 404 | 409; body: { error: string; code: string } }
+
+// A sale source must be a sale that exists and can still be worked on; an edit
+// must also be of that sale's own customer. The frontend hides the pencil on a
+// cancelled sale, and this is the Worker half of that rule.
+export async function checkContactSaleSource(
+  db: { prepare(sql: string): { get<T>(params: Record<string, unknown>): Promise<T | undefined | null> } },
+  source: ContactSalesSource,
+  customerId: number | null,
+): Promise<ContactSaleCheckError | null> {
+  if (source.kind !== 'sale') return null
+  const sale = await db.prepare('SELECT id, customer_id, sale_status FROM sales WHERE id = @saleId')
+    .get<{ id: number; customer_id: number | null; sale_status: string | null }>({ saleId: source.saleId })
+  if (!sale) return { status: 404, body: { error: 'sale not found', code: 'sale_not_found' } }
+  const status = String(sale.sale_status || 'completed')
+  if (status === 'cancelled' || status === 'returned') {
+    return { status: 409, body: { error: 'This sale is cancelled or fully returned, so its customer cannot be edited from it.', code: 'sale_not_editable' } }
   }
-  return { ok: true, source: { kind: 'sale', saleId: Number.isSafeInteger(saleId) && saleId > 0 ? saleId : null } }
+  if (customerId !== null && Number(sale.customer_id) !== customerId) {
+    return { status: 409, body: { error: 'This sale is not linked to that customer.', code: 'sale_customer_mismatch' } }
+  }
+  return null
+}
+
+// Columns of a customer row that a caller without Full Contacts access may not stamp: the joined date
+// and the membership number belong to the system and to administrators, whether
+// or not the request names a source.
+export const CUSTOMER_SYSTEM_COLUMNS = ['created_at', 'membership_number']
+
+export function customerCreateColumns(columns: string[], contactsTier: string): string[] {
+  return contactsTier === 'full' ? columns : columns.filter((column) => !CUSTOMER_SYSTEM_COLUMNS.includes(column))
 }
 
 export function contactSourceAuditDetails(source: ContactSalesSource | null): Record<string, unknown> {
@@ -45,15 +79,20 @@ export function contactSourceAuditDetails(source: ContactSalesSource | null): Re
 
 const RECORD_VALUE_LIMIT = 500
 
-function recordText(column: string, value: unknown): string | null {
-  const text = column === 'address' ? contactDisplayAddress(value) : String(value ?? '').trim()
+const QUOTED_COLUMNS = ['name', 'gender']
+
+function recordText(value: unknown): string | null {
+  const text = String(value ?? '').trim()
   if (!text) return null
   return text.length > RECORD_VALUE_LIMIT ? `${text.slice(0, RECORD_VALUE_LIMIT - 1)}…` : text
 }
 
 // The sale's own record of a customer-details edit: one immutable event on the
 // sale_customer source, in the same D1 batch as the customer UPDATE, so the
-// change and its record commit together or not at all. null when no field the
+// change and its record commit together or not at all. It quotes the old and new
+// name and gender only; phone, email, address and notes are named with a marker,
+// because anyone who can read Sales can read this row and it is never purged
+// (the full values stay in the admin-gated audit log). null when no field the
 // record shows actually changed.
 export function buildCustomerDetailsSaleEvent(input: {
   saleId: number
@@ -68,11 +107,11 @@ export function buildCustomerDetailsSaleEvent(input: {
   const before: Record<string, string | null> = {}
   const after: Record<string, string | null> = {}
   for (const column of columns) {
-    const previous = recordText(column, input.before[column])
-    const next = recordText(column, input.after[column])
+    const previous = recordText(input.before[column])
+    const next = recordText(input.after[column])
     if (previous === next) continue
-    before[column] = previous
-    after[column] = next
+    before[column] = QUOTED_COLUMNS.includes(column) ? previous : CUSTOMER_DETAILS_BEFORE_MARKER
+    after[column] = QUOTED_COLUMNS.includes(column) ? next : CUSTOMER_DETAILS_AFTER_MARKER
   }
   if (!Object.keys(after).length) return null
   const changes: SaleRecordChange[] = [{

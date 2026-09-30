@@ -48,6 +48,7 @@ function load(filename) {
 const permissions = load(path.join(src, 'lib/permissions.ts'))
 const contacts = load(path.join(src, 'routes/contacts.ts')).default
 const saleRecords = load(path.join(src, 'lib/saleRecords.ts'))
+const saleRecordEvents = load(path.join(src, 'lib/saleRecordEvents.ts'))
 const executionCtx = { waitUntil(p) { waiting.push(p) }, passThroughOnException() {} }
 
 const staff = (id, role, overrides = {}) => ({
@@ -71,7 +72,7 @@ function freshDb() {
   fresh.prepare("INSERT INTO users (id, username, name, password) VALUES (1,'owner','Owner','x'),(11,'staff11','Staff 11','x'),(12,'staff12','Staff 12','x'),(13,'staff13','Staff 13','x')").run()
   fresh.prepare("INSERT INTO customers (id, name, phone, email, address, notes, gender, membership_number, is_anonymous, created_at) VALUES (5,'Dara','012 345 678','d' || char(64) || 'old.test','Old street','old note','Female','LC-5',0,'2025-01-01 00:00:00'),(6,'Sokha','098 765 432',NULL,NULL,NULL,NULL,'LC-6',0,'2025-02-02 00:00:00')").run()
   fresh.prepare("INSERT INTO suppliers (id, name, phone) VALUES (1,'Acme','011 111 111')").run()
-  fresh.prepare("INSERT INTO sales (id, receipt_number, customer_id, customer_name, total_usd, total_khr) VALUES (21,'R-21',5,'Dara',3,12000),(22,'R-22',6,'Sokha',4,16000)").run()
+  fresh.prepare("INSERT INTO sales (id, receipt_number, customer_id, customer_name, customer_phone, customer_address, total_usd, total_khr, sale_status) VALUES (21,'R-21',5,'Dara','012 345 678','Old street',3,12000,'completed'),(22,'R-22',6,'Sokha','098 765 432',NULL,4,16000,'completed'),(23,'R-23',5,'Dara','012 345 678','Old street',5,20000,'completed'),(24,'R-24',5,'Dara','012 345 678','Old street',5,20000,'cancelled'),(25,'R-25',5,'Dara','012 345 678','Old street',5,20000,'returned'),(26,'R-26',5,'Dara','012 345 678','Old street',5,20000,'partial_return')").run()
   return fresh
 }
 
@@ -218,8 +219,11 @@ async function test(name, fn) {
     const changes = JSON.parse(events[0].changes_json)
     assert.equal(changes.length, 1)
     assert.equal(changes[0].field, 'customer_details')
-    assert.deepEqual(changes[0].before.value, { phone: '012 345 678', notes: 'old note' })
-    assert.deepEqual(changes[0].after.value, { phone: '012 999 888', notes: 'new note' })
+    assert.deepEqual(changes[0].before.value, { phone: 'not_recorded', notes: 'not_recorded' }, 'phone and notes are named, never quoted')
+    assert.deepEqual(changes[0].after.value, { phone: 'changed', notes: 'changed' })
+    for (const secret of ['012 345 678', '012 999 888', 'old note', 'new note']) {
+      assert.ok(!events[0].changes_json.includes(secret), `the immutable sale record must not hold "${secret}"`)
+    }
     const audit = auditRows('customer', 5)
     assert.equal(audit.length, 1)
     const details = JSON.parse(audit[0].details)
@@ -319,10 +323,230 @@ async function test(name, fn) {
     assert.equal(JSON.parse(audit[0].details).source, 'pos')
   })
 
-  await test('admin editing with a source keeps its full column set (not narrowed by the sales scope)', async () => {
-    const response = await call('PUT', '/customers/5', ROLES.admin, { name: 'Dara', notes: 'admin note', source: 'pos' })
+  await test('admin editing WITHOUT a source keeps its full column set; WITH a source it is narrowed to the six sales-safe columns', async () => {
+    const plain = await call('PUT', '/customers/5', ROLES.admin, { name: 'Dara', notes: 'admin note', created_at: '2024-03-03 00:00:00' })
+    assert.equal(plain.status, 200, JSON.stringify(plain.body))
+    assert.equal(customer().notes, 'admin note')
+    assert.equal(customer().created_at, '2024-03-03 00:00:00', 'no source: the joined date is editable by Full')
+    const sourced = await call('PUT', '/customers/5', ROLES.admin, { name: 'Dara', notes: 'admin note 2', created_at: '2019-09-09 00:00:00', membership_number: 'LC-ZZ', source: 'pos' })
+    assert.equal(sourced.status, 200, JSON.stringify(sourced.body))
+    assert.equal(customer().notes, 'admin note 2', 'a sales-safe column is written')
+    assert.equal(customer().created_at, '2024-03-03 00:00:00', 'with a source even Full cannot write the joined date')
+    assert.equal(customer().membership_number, 'LC-5')
+    assert.deepEqual(sourced.body.partialFields.sort(), ['created_at', 'membership_number'], 'the response names what was dropped')
+  })
+
+  const breakAuditWrites = () => db.exec("CREATE TRIGGER audit_down BEFORE INSERT ON audit_logs BEGIN SELECT RAISE(ABORT, 'audit down'); END")
+
+  await test('F1: a till or sale edit and its audit row commit together -- an unwritable audit log fails the request and changes nothing', async () => {
+    breakAuditWrites()
+    const pos = await call('PUT', '/customers/5', ROLES.employee, { name: 'Dara', phone: '012 999 888', notes: 'new note', source: 'pos' })
+    assert.ok(pos.status >= 500, `the edit must fail loudly, got ${pos.status}`)
+    assert.equal(customer().phone, '012 345 678', 'no customer change without its record (pos)')
+    assert.equal(customer().notes, 'old note')
+    const sale = await call('PUT', '/customers/5', ROLES.employee, { name: 'Dara', phone: '012 999 888', source: 'sale', sale_id: 21 })
+    assert.ok(sale.status >= 500, `got ${sale.status}`)
+    assert.equal(customer().phone, '012 345 678', 'no customer change without its record (sale)')
+    assert.equal(saleEvents(21).length, 0, 'the sale record rolled back with it')
+    const created = await call('POST', '/customers', ROLES.employee, { name: 'Bopha', phone: '077 000 111', source: 'pos' })
+    assert.ok(created.status >= 500, `got ${created.status}`)
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM customers WHERE name = 'Bopha'").get().n, 0, 'no customer added without its record')
+  })
+
+  await test('F1: the audit row of a source add names the NEW customer id, written in the same batch', async () => {
+    const created = await call('POST', '/customers', ROLES.employee, { name: 'Bopha', phone: '077 000 111', source: 'sale', sale_id: 21 })
+    assert.equal(created.status, 200, JSON.stringify(created.body))
+    const rows = auditRows('customer', created.body.id)
+    assert.equal(rows.length, 1)
+    assert.equal(rows[0].action, 'create')
+    assert.equal(String(rows[0].record_id), String(created.body.id))
+    assert.deepEqual(JSON.parse(rows[0].details), { name: 'Bopha', source: 'sale', sale_id: 21 })
+  })
+
+  await test('F1 control: a plain Contacts edit (no source) keeps its best-effort audit -- the save still succeeds', async () => {
+    breakAuditWrites()
+    const response = await call('PUT', '/customers/5', ROLES.admin, { name: 'Dara', notes: 'admin note' })
     assert.equal(response.status, 200)
     assert.equal(customer().notes, 'admin note')
+  })
+
+  await test('F2: the sale record names the changed fields and quotes only name and gender; phone, email, address, notes are markers', async () => {
+    const response = await call('PUT', '/customers/5', ROLES.employee, {
+      name: 'Dara B', __rename_cascade: 'record_only', phone: '012 999 888', email: 'new.mail.test', address: 'New street', notes: 'allergic to X; owes family', gender: 'Male',
+      source: 'sale', sale_id: 21,
+    })
+    assert.equal(response.status, 200, JSON.stringify(response.body))
+    const events = saleEvents(21)
+    assert.equal(events.length, 1)
+    const change = JSON.parse(events[0].changes_json)[0]
+    assert.equal(change.field, 'customer_details')
+    assert.deepEqual(change.before.value, { name: 'Dara', phone: 'not_recorded', email: 'not_recorded', address: 'not_recorded', notes: 'not_recorded', gender: 'Female' })
+    assert.deepEqual(change.after.value, { name: 'Dara B', phone: 'changed', email: 'changed', address: 'changed', notes: 'changed', gender: 'Male' })
+    for (const secret of ['012 345 678', '012 999 888', 'old.test', 'new.mail.test', 'Old street', 'New street', 'old note', 'allergic', 'owes family']) {
+      assert.ok(!events[0].changes_json.includes(secret), `the immutable sale record must not hold "${secret}"`)
+    }
+    const audit = auditRows('customer', 5)
+    assert.equal(JSON.parse(audit[0].new_value).notes, 'allergic to X; owes family', 'the admin-gated audit log keeps the full values')
+    assert.equal(JSON.parse(audit[0].old_value).notes, 'old note')
+  })
+
+  await test('F2: each private field alone is recorded by name (dropping email, address or gender from the record is caught)', async () => {
+    const edits = [
+      ['email', { email: 'other.mail.test' }], ['address', { address: 'Other street' }],
+      ['gender', { gender: 'Male' }], ['notes', { notes: 'other note' }], ['phone', { phone: '012 111 222' }],
+    ]
+    for (const [field, patch] of edits) {
+      db = freshDb()
+      const response = await call('PUT', '/customers/5', ROLES.employee, { name: 'Dara', ...patch, source: 'sale', sale_id: 21 })
+      assert.equal(response.status, 200, `${field}: ${JSON.stringify(response.body)}`)
+      const events = saleEvents(21)
+      assert.equal(events.length, 1, `${field}: one record`)
+      const change = JSON.parse(events[0].changes_json)[0]
+      assert.deepEqual(Object.keys(change.after.value), [field], `${field}: only that field is named`)
+      assert.deepEqual(Object.keys(change.before.value), [field])
+    }
+  })
+
+  await test('F2: any change to the saved Contact Options address is recorded -- even one the first displayed address does not show -- and an unchanged address is not', async () => {
+    const twoAddresses = JSON.stringify([{ address: 'Old street', phones: [] }, { address: 'Second street', phones: [] }])
+    await call('PUT', '/customers/5', ROLES.admin, { name: 'Dara', address: twoAddresses })
+    const unchanged = await call('PUT', '/customers/5', ROLES.employee, { name: 'Dara', address: twoAddresses, source: 'sale', sale_id: 21 })
+    assert.equal(unchanged.status, 200, JSON.stringify(unchanged.body))
+    assert.equal(saleEvents(21).length, 0, 'the same address saved again is not a change')
+    const secondRemoved = await call('PUT', '/customers/5', ROLES.employee, { name: 'Dara', address: JSON.stringify([{ address: 'Old street', phones: [] }]), source: 'sale', sale_id: 21 })
+    assert.equal(secondRemoved.status, 200)
+    const events = saleEvents(21)
+    assert.equal(events.length, 1, 'dropping the second address leaves the first one displayed, but it is a change')
+    const change = JSON.parse(events[0].changes_json)[0]
+    assert.deepEqual(change.after.value, { address: 'changed' })
+    assert.ok(!events[0].changes_json.includes('Second street') && !events[0].changes_json.includes('phones'), 'no address text in the record')
+  })
+
+  await test('F2: the sale-record validator itself refuses a quoted phone, email, address or notes (and accepts the marker)', async () => {
+    const build = (value, after = value) => saleRecordEvents.buildSaleRecordEventsInsert([{
+      saleId: 21, sourceKind: 'sale_customer', sourceId: 'contact:5:x', generation: 0, kind: 'customer_changed', via: 'apply',
+      subject: 'Dara', actorId: 11, actorUsername: 'staff11', occurredAt: new Date().toISOString(),
+      changes: [{ field: 'customer_details', before: { state: 'known_value', value }, after: { state: 'known_value', value: after } }],
+    }])
+    for (const key of ['phone', 'email', 'address', 'notes']) {
+      assert.throws(() => build({ [key]: 'a real value' }, { [key]: 'changed' }), undefined, `${key}: a quoted before value`)
+      assert.throws(() => build({ [key]: 'not_recorded' }, { [key]: 'a real value' }), undefined, `${key}: a quoted after value`)
+      assert.doesNotThrow(() => build({ [key]: 'not_recorded' }, { [key]: 'changed' }))
+    }
+    assert.doesNotThrow(() => build({ name: 'Dara', gender: 'Female' }, { name: 'Dara B', gender: 'Male' }))
+    assert.throws(() => build({ name: 'Dara', balance: 'x' }, { name: 'Dara B', balance: 'y' }))
+  })
+
+  await test('F4: a till or sale edit never rewrites the phone/address saved on past sales (record-only, like a rename)', async () => {
+    const response = await call('PUT', '/customers/5', ROLES.employee, { name: 'Dara', phone: '012 999 888', address: 'New street', source: 'sale', sale_id: 21 })
+    assert.equal(response.status, 200, JSON.stringify(response.body))
+    assert.equal(customer().phone, '012 999 888', 'the customer itself is updated')
+    for (const saleId of [21, 23, 24, 25, 26]) {
+      const sale = db.prepare('SELECT customer_phone, customer_address FROM sales WHERE id = @id').get({ id: saleId })
+      assert.equal(sale.customer_phone, '012 345 678', `sale ${saleId} keeps the phone it was made with`)
+      assert.equal(sale.customer_address, 'Old street', `sale ${saleId} keeps its address`)
+    }
+    const pos = await call('PUT', '/customers/5', ROLES.employee, { name: 'Dara', phone: '012 777 666', source: 'pos' })
+    assert.equal(pos.status, 200)
+    assert.equal(db.prepare('SELECT customer_phone FROM sales WHERE id = 23').get().customer_phone, '012 345 678', 'the POS edit does not rewrite either')
+  })
+
+  await test('F4 control: the same phone edit from Contacts (no source, Full) still carries to the customer\'s sales', async () => {
+    const response = await call('PUT', '/customers/5', ROLES.admin, { name: 'Dara', phone: '012 999 888' })
+    assert.equal(response.status, 200)
+    assert.equal(db.prepare('SELECT customer_phone FROM sales WHERE id = 23').get().customer_phone, '012 999 888')
+  })
+
+  await test('F4: a rename carried from a sale updates the saved names but still leaves the saved phone and address alone', async () => {
+    const response = await call('PUT', '/customers/5', ROLES.employee, { name: 'Dara B', __rename_cascade: 'carry', phone: '012 999 888', address: 'New street', source: 'sale', sale_id: 21 })
+    assert.equal(response.status, 200, JSON.stringify(response.body))
+    const sale = db.prepare('SELECT customer_name, customer_phone, customer_address FROM sales WHERE id = 23').get()
+    assert.equal(sale.customer_name, 'Dara B', 'carry renames the saved name')
+    assert.equal(sale.customer_phone, '012 345 678')
+    assert.equal(sale.customer_address, 'Old street')
+  })
+
+  await test('F5: a sale source must be a real, open sale of that customer -- cancelled and fully returned sales are refused', async () => {
+    const before = customer()
+    for (const [saleId, label] of [[24, 'cancelled'], [25, 'returned']]) {
+      const response = await call('PUT', '/customers/5', ROLES.employee, { name: 'Dara', phone: '000', source: 'sale', sale_id: saleId })
+      assert.equal(response.status, 409, `${label}: ${JSON.stringify(response.body)}`)
+      assert.equal(response.body.code, 'sale_not_editable', label)
+      assert.equal(saleEvents(saleId).length, 0, `${label}: no record on it`)
+    }
+    assert.deepEqual(customer(), before, 'nothing was written')
+    assert.equal(auditRows('customer', 5).length, 0)
+    const partial = await call('PUT', '/customers/5', ROLES.employee, { name: 'Dara', phone: '012 222 333', source: 'sale', sale_id: 26 })
+    assert.equal(partial.status, 200, 'a partly returned sale is still open')
+    const mismatch = await call('PUT', '/customers/5', ROLES.employee, { name: 'Dara', phone: '000', source: 'sale', sale_id: 22 })
+    assert.equal(mismatch.body.code, 'sale_customer_mismatch')
+    const missing = await call('PUT', '/customers/5', ROLES.employee, { name: 'Dara', phone: '000', source: 'sale', sale_id: 9999 })
+    assert.equal(missing.status, 404)
+    assert.equal(missing.body.code, 'sale_not_found')
+  })
+
+  await test('F5: adding a customer from a sale checks the sale too (exists, open); a POS add needs no sale', async () => {
+    for (const [saleId, expected] of [[24, 409], [25, 409], [9999, 404]]) {
+      const response = await call('POST', '/customers', ROLES.employee, { name: 'Bopha', phone: '077 000 111', source: 'sale', sale_id: saleId })
+      assert.equal(response.status, expected, `sale ${saleId}: ${JSON.stringify(response.body)}`)
+    }
+    const noSale = await call('POST', '/customers', ROLES.employee, { name: 'Bopha', phone: '077 000 111', source: 'sale' })
+    assert.equal(noSale.status, 400)
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM customers WHERE name = 'Bopha'").get().n, 0, 'nothing was added')
+    assert.equal(auditRows('customer', 7).length, 0)
+    const ok = await call('POST', '/customers', ROLES.employee, { name: 'Bopha', phone: '077 000 111', source: 'sale', sale_id: 21 })
+    assert.equal(ok.status, 200, JSON.stringify(ok.body))
+    const pos = await call('POST', '/customers', ROLES.employee, { name: 'Chenda', phone: '077 000 222', source: 'pos' })
+    assert.equal(pos.status, 200)
+  })
+
+  await test('F5: sale_id must be a positive whole number -- true, an array or junk text is refused, not coerced', async () => {
+    for (const saleId of [true, [21], '21abc', 21.5, 0, -21, null, {}]) {
+      const edit = await call('PUT', '/customers/5', ROLES.employee, { name: 'Dara', phone: '000', source: 'sale', sale_id: saleId })
+      assert.equal(edit.status, 400, `edit with sale_id ${JSON.stringify(saleId)} -> ${edit.status}`)
+      const add = await call('POST', '/customers', ROLES.employee, { name: 'Bopha', source: 'sale', sale_id: saleId })
+      assert.equal(add.status, 400, `add with sale_id ${JSON.stringify(saleId)} -> ${add.status}`)
+    }
+    assert.equal(customer().phone, '012 345 678')
+    const digits = await call('PUT', '/customers/5', ROLES.employee, { name: 'Dara', phone: '012 222 333', source: 'sale', sale_id: '21' })
+    assert.equal(digits.status, 200, 'a numeric string from a form is fine: ' + JSON.stringify(digits.body))
+  })
+
+  await test('F6: without Full Contacts access the joined date and membership number can never be set, source or not', async () => {
+    const create = await call('POST', '/customers', ROLES.employee, { name: 'Bopha', phone: '077 000 111', created_at: '2001-01-01 00:00:00', membership_number: 'LC-9001' })
+    assert.equal(create.status, 200, JSON.stringify(create.body))
+    assert.notEqual(customer(create.body.id).created_at, '2001-01-01 00:00:00', 'no source: the joined date is not taken')
+    assert.notEqual(customer(create.body.id).membership_number, 'LC-9001', 'no source: a typed membership number is not taken')
+    assert.ok(customer(create.body.id).membership_number, 'the house sequence still mints one')
+    const withSource = await call('POST', '/customers', ROLES.employee, { name: 'Chenda', phone: '077 000 222', created_at: '2001-01-01 00:00:00', membership_number: 'LC-9002', source: 'pos' })
+    assert.equal(withSource.status, 200)
+    assert.notEqual(customer(withSource.body.id).created_at, '2001-01-01 00:00:00')
+    assert.notEqual(customer(withSource.body.id).membership_number, 'LC-9002')
+    const edit = await call('PUT', '/customers/5', ROLES.employee, { name: 'Dara', notes: 'n', created_at: '2001-01-01 00:00:00', membership_number: 'LC-9003' })
+    assert.equal(edit.status, 200)
+    assert.equal(customer().created_at, '2025-01-01 00:00:00')
+    assert.equal(customer().membership_number, 'LC-5')
+    const editSource = await call('PUT', '/customers/5', ROLES.employee, { name: 'Dara', notes: 'n2', created_at: '2001-01-01 00:00:00', membership_number: 'LC-9004', source: 'pos' })
+    assert.equal(editSource.status, 200)
+    assert.equal(customer().created_at, '2025-01-01 00:00:00')
+    assert.equal(customer().membership_number, 'LC-5')
+  })
+
+  await test('F6 control: administrators (Full) still set the joined date and membership number when adding without a source', async () => {
+    const create = await call('POST', '/customers', ROLES.admin, { name: 'Bopha', phone: '077 000 111', created_at: '2001-01-01 00:00:00', membership_number: 'LC-9001' })
+    assert.equal(create.status, 200, JSON.stringify(create.body))
+    assert.equal(customer(create.body.id).created_at, '2001-01-01 00:00:00')
+    assert.equal(customer(create.body.id).membership_number, 'LC-9001')
+  })
+
+  await test('F3 ACCEPTED (owner, 1 Oct 2026): a Review-tier employee who holds POS may change phone/email/address/notes/gender with a POS source -- the name-only rule applies to Contacts-page edits only', async () => {
+    const plain = await call('PUT', '/customers/5', ROLES.employee, { name: 'Dara', phone: '012 999 888', email: 'e.test', address: 'A', notes: 'n', gender: 'Male' })
+    assert.equal(plain.status, 200)
+    assert.equal(customer().phone, '012 345 678', 'from the Contacts page the Review tier stays name-only')
+    const fromTill = await call('PUT', '/customers/5', ROLES.employee, { name: 'Dara', phone: '012 999 888', email: 'e.test', address: 'A', notes: 'n', gender: 'Male', source: 'pos' })
+    assert.equal(fromTill.status, 200, JSON.stringify(fromTill.body))
+    const row = customer()
+    assert.deepEqual([row.phone, row.email, row.address, row.notes, row.gender], ['012 999 888', 'e.test', 'A', 'n', 'Male'], 'the owner wants employees to edit customers from the till')
   })
 
   console.log(`${passed} passed, ${failed} failed`)

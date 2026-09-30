@@ -127,13 +127,27 @@ function validateCustomer(value: unknown): void {
   nullableText(value.name, 240, 'customer.name')
 }
 
-const CUSTOMER_DETAIL_KEYS = ['name', 'phone', 'email', 'address', 'notes', 'gender']
+// Sale records are append-only and readable by anyone who can read Sales, so a
+// customer-details record quotes only name and gender; the other fields are
+// named with a marker on each side (the two sides of a change may not be equal)
+// and their real values stay in the admin-gated audit log.
+export const CUSTOMER_DETAILS_BEFORE_MARKER = 'not_recorded'
+export const CUSTOMER_DETAILS_AFTER_MARKER = 'changed'
+const CUSTOMER_DETAIL_QUOTED_KEYS = ['name', 'gender']
+const CUSTOMER_DETAIL_MARKED_KEYS = ['phone', 'email', 'address', 'notes']
 
 function validateCustomerDetails(value: unknown): void {
   if (!object(value)) fail('customer_details must be an object.')
   const keys = Object.keys(value)
-  if (keys.length < 1 || keys.some((key) => !CUSTOMER_DETAIL_KEYS.includes(key))) fail('customer_details has an unsupported shape.')
-  for (const key of keys) nullableText(value[key], 1000, `customer_details.${key}`)
+  const known = [...CUSTOMER_DETAIL_QUOTED_KEYS, ...CUSTOMER_DETAIL_MARKED_KEYS]
+  if (keys.length < 1 || keys.some((key) => !known.includes(key))) fail('customer_details has an unsupported shape.')
+  for (const key of keys) {
+    if (CUSTOMER_DETAIL_MARKED_KEYS.includes(key)) {
+      if (value[key] !== CUSTOMER_DETAILS_BEFORE_MARKER && value[key] !== CUSTOMER_DETAILS_AFTER_MARKER) fail(`customer_details.${key} may only record that it changed.`)
+    } else {
+      nullableText(value[key], 1000, `customer_details.${key}`)
+    }
+  }
 }
 
 function validateMembership(value: unknown): void {

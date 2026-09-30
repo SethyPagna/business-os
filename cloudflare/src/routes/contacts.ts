@@ -6,7 +6,7 @@ import { applyCustomerGenderRestoration, previewCustomerGenderRestoration, custo
 import { loyaltyAffectingSaleSql, LOYALTY_REASSIGNMENT_CODE, LOYALTY_REASSIGNMENT_MESSAGE } from '../lib/saleCustomerAssignmentGuard'
 import { chunkForBinding } from '../lib/sqlBinding'
 import { requireAuth, type SessionUser } from '../lib/auth'
-import { audit, changedFields } from '../lib/audit'
+import { audit, buildAuditStatement, changedFields } from '../lib/audit'
 import { getPermissionTier, getActionTier, hasPermission, isAdminControlUser } from '../lib/permissions'
 import { broadcast, type BroadcastChannel } from '../durable-objects/broadcastHub'
 import { lotRemainingSql } from '../lib/lotRemaining'
@@ -46,7 +46,7 @@ import { bumpVersion, bumpVersions, cachedJsonResponse, getVersionWithFallback }
 import { localDateAtOrAfter, localDateAtOrBefore, localDateExpr, localDateOf } from '../lib/businessDateWindow'
 import type { Env } from '../index'
 import { actorSnapshot } from '../lib/actorSnapshot'
-import { SALES_CUSTOMER_COLUMNS, buildCustomerDetailsSaleEvent, contactSourceAuditDetails, readContactSalesSource } from '../lib/contactSalesSource'
+import { SALES_CUSTOMER_COLUMNS, buildCustomerDetailsSaleEvent, checkContactSaleSource, contactSourceAuditDetails, customerCreateColumns, readContactSalesSource } from '../lib/contactSalesSource'
 import {
   buildContactMergePlan,
   stepContactMergePlan,
@@ -1550,13 +1550,19 @@ function registerContactRoutes(config: ContactConfig) {
     const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
     const name = String(body.name || '').trim()
     if (!name) return c.json({ error: 'Name is required' }, 400)
-    const salesSource = readContactSalesSource(user, config.table, body, { requireSaleId: false })
+    const salesSource = readContactSalesSource(user, config.table, body)
     if (!salesSource.ok) return c.json({ error: salesSource.error }, salesSource.status)
 
     const db = getDb(c.env)
-    const payload = pickColumns(body, config.columns)
+    if (salesSource.source) {
+      const saleProblem = await checkContactSaleSource(db, salesSource.source, null)
+      if (saleProblem) return c.json(saleProblem.body, saleProblem.status)
+    }
+    // Below Full Contacts access the joined date and membership number are never
+    // taken from the request (source or not); a till or sale add cannot backdate
+    // the joined date even for Full.
+    const payload = pickColumns(body, config.table === 'customers' ? customerCreateColumns(config.columns, getPermissionTier(user, 'contacts')) : config.columns)
     payload.name = name
-    // A till or sale add cannot backdate the joined date.
     if (salesSource.source) delete payload.created_at
     // P7-c: store the P8 display shape (0XX XXX XXX[X]) so manual creates
     // match the 10,352 migrated numbers. Matching below stays digit-based,
@@ -1582,6 +1588,21 @@ function registerContactRoutes(config: ContactConfig) {
       if (existing) return c.json(existing)
     }
     const duplicateGuard = contactDuplicateWriteGuardStatement(config.table, { name, phones: duplicateDecision.phones }, duplicateDecision.decision, duplicateDecision.snapshots)
+    const createAuditDetails = {
+      name,
+      ...contactSourceAuditDetails(salesSource.source),
+      ...(duplicateDecision.decision ? {
+        duplicate_decision: 'create_separate',
+        duplicate_candidate_ids: duplicateDecision.decision.candidateIds,
+        duplicate_candidate_fingerprint: duplicateDecision.decision.fingerprint,
+      } : {}),
+    }
+    // A till or sale add is recorded in the same batch as the customer row, so it
+    // cannot exist without its audit row; every other add keeps the best-effort
+    // audit written after the commit.
+    const createAuditInBatch = salesSource.source
+      ? buildAuditStatement(user?.id ?? null, actorSnapshot(user), 'create', config.entity, null, createAuditDetails, undefined, { entityIdFromLastInsert: true })
+      : null
 
     // Customers only. A number staff typed in wins (after a reuse check);
     // a blank one is minted from the house LC- sequence. The mint is deferred
@@ -1631,9 +1652,9 @@ function registerContactRoutes(config: ContactConfig) {
           VALUES (${columns.map((col) => `@${col}`).join(', ')}, CURRENT_TIMESTAMP)`,
         params: payload,
       }
-      if (!duplicateGuard) return db.prepare(insert.sql).run(insert.params)
-      const results = await db.batch([duplicateGuard, insert])
-      const meta = results[1]?.meta
+      if (!duplicateGuard && !createAuditInBatch) return db.prepare(insert.sql).run(insert.params)
+      const results = await db.batch([...(duplicateGuard ? [duplicateGuard] : []), insert, ...(createAuditInBatch ? [createAuditInBatch] : [])])
+      const meta = results[duplicateGuard ? 1 : 0]?.meta
       return { changes: Number(meta?.changes ?? 0), lastInsertRowid: Number(meta?.last_row_id ?? 0) }
     }
     let result: { changes: number; lastInsertRowid: number }
@@ -1666,15 +1687,7 @@ function registerContactRoutes(config: ContactConfig) {
     // waitUntil the broadcast already used, so the reply only waits on the
     // one SELECT below instead of three sequential round trips.
     c.executionCtx.waitUntil(Promise.all([
-      audit(c.env, user?.id ?? null, actorSnapshot(user), 'create', config.entity, id, {
-        name,
-        ...contactSourceAuditDetails(salesSource.source),
-        ...(duplicateDecision.decision ? {
-          duplicate_decision: 'create_separate',
-          duplicate_candidate_ids: duplicateDecision.decision.candidateIds,
-          duplicate_candidate_fingerprint: duplicateDecision.decision.fingerprint,
-        } : {}),
-      }),
+      createAuditInBatch ? Promise.resolve() : audit(c.env, user?.id ?? null, actorSnapshot(user), 'create', config.entity, id, createAuditDetails),
       bumpVersion(c.env, config.table),
       broadcast(c.env, config.channel, { action: 'create', id }),
     ]))
@@ -1726,7 +1739,7 @@ function registerContactRoutes(config: ContactConfig) {
     }
     const id = c.req.param('id')
     const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
-    const salesSource = readContactSalesSource(user, config.table, body, { requireSaleId: true })
+    const salesSource = readContactSalesSource(user, config.table, body)
     if (!salesSource.ok) return c.json({ error: salesSource.error }, salesSource.status)
     const source = salesSource.source
     const db = getDb(c.env)
@@ -1734,10 +1747,9 @@ function registerContactRoutes(config: ContactConfig) {
     const current = await db.prepare(`SELECT * FROM ${config.table} WHERE id = @id`).get<Record<string, unknown>>({ id })
     if (!current) return c.json({ error: `${config.entity} not found` }, 404)
     if (config.table === 'customers' && isAnonymousCustomer(current)) return anonymousCustomerMutationResponse(c)
-    if (source?.kind === 'sale') {
-      const sale = await db.prepare('SELECT id, customer_id FROM sales WHERE id = @saleId').get<{ id: number; customer_id: number | null }>({ saleId: source.saleId })
-      if (!sale) return c.json({ error: 'sale not found' }, 404)
-      if (Number(sale.customer_id) !== Number(id)) return c.json({ error: 'This sale is not linked to that customer.', code: 'sale_customer_mismatch' }, 409)
+    if (source) {
+      const saleProblem = await checkContactSaleSource(db, source, Number(id))
+      if (saleProblem) return c.json(saleProblem.body, saleProblem.status)
     }
     const expectedUpdatedAt = getExpectedUpdatedAt(body)
     try {
@@ -1901,7 +1913,11 @@ function registerContactRoutes(config: ContactConfig) {
       statements.push(contactUpdate)
     }
 
-    if ((nameChanged && snapshotCarry) || phoneChanged || addressChanged) {
+    // A till or sale edit is record-only for phone and address, like its rename: the
+    // edit shows on the sale's records and in the audit log, and no other sale's
+    // saved phone or address is rewritten.
+    const carryContactSnapshot = !source && (phoneChanged || addressChanged)
+    if ((nameChanged && snapshotCarry) || carryContactSnapshot) {
       if (config.table === 'customers') {
         const customerPhone = Object.prototype.hasOwnProperty.call(payload, 'phone') ? payload.phone : current.phone
         // N21: sales carry the DISPLAY address, not the Contact Options JSON
@@ -1910,7 +1926,9 @@ function registerContactRoutes(config: ContactConfig) {
         const customerAddress = contactDisplayAddress(Object.prototype.hasOwnProperty.call(payload, 'address') ? payload.address : current.address) || null
         const snapshotName = nameChanged && !snapshotCarry ? current.name : name
         statements.push(
-          { sql: `UPDATE sales SET customer_name = @name, customer_phone = @phone, customer_address = @address WHERE customer_id = @id`, params: { id, name: snapshotName, phone: customerPhone ?? null, address: customerAddress ?? null } },
+          source
+            ? { sql: `UPDATE sales SET customer_name = @name WHERE customer_id = @id`, params: { id, name: snapshotName } }
+            : { sql: `UPDATE sales SET customer_name = @name, customer_phone = @phone, customer_address = @address WHERE customer_id = @id`, params: { id, name: snapshotName, phone: customerPhone ?? null, address: customerAddress ?? null } },
           { sql: `UPDATE returns SET customer_name = @name WHERE customer_id = @id`, params: { id, name: snapshotName } },
           { sql: `UPDATE customer_share_submissions SET customer_name = @name WHERE customer_id = @id`, params: { id, name: snapshotName } },
         )
@@ -1937,6 +1955,27 @@ function registerContactRoutes(config: ContactConfig) {
         statements.push({ sql: `UPDATE sales SET delivery_contact_name = @name WHERE delivery_contact_id = @id`, params: { id, name } })
       }
     }
+    // `payload` is exactly the set of columns this edit wrote (pickColumns already
+    // dropped everything the request did not send, and the review tier's name-only
+    // narrowing), and `current` is the row as it was read before the batch -- so
+    // diffing the two is the real changed-field set. Derived/lookup columns are
+    // excluded: they restate a field already in the diff.
+    const contactDiffKeys = Object.keys(payload).filter((column) => !CONTACT_DERIVED_COLUMNS.has(column))
+    const updateAuditDetails = {
+      name,
+      ...contactSourceAuditDetails(source),
+      ...(duplicateDecision.decision ? {
+        duplicate_decision: 'create_separate',
+        duplicate_candidate_ids: duplicateDecision.decision.candidateIds,
+        duplicate_candidate_fingerprint: duplicateDecision.decision.fingerprint,
+      } : {}),
+    }
+    // A till or sale edit is recorded in the same batch as the change, so it cannot
+    // land without its audit row. A source edit never mints a membership number
+    // (membership_number is not a sales column), so the diff is known before the batch.
+    const updateAuditInBatch = source
+      ? buildAuditStatement(user?.id ?? null, actorSnapshot(user), 'update', config.entity, id, updateAuditDetails, changedFields(current, payload, { keys: contactDiffKeys }))
+      : null
     let recordedOnSale = false
     if (source?.kind === 'sale' && source.saleId) {
       const saleRecord = buildCustomerDetailsSaleEvent({
@@ -1953,6 +1992,7 @@ function registerContactRoutes(config: ContactConfig) {
         recordedOnSale = true
       }
     }
+    if (updateAuditInBatch) statements.push(updateAuditInBatch)
     // The contact UPDATE built above carries `payload` as its params, so a
     // deferred mint (mintMembership) has to refresh them before the batch
     // runs: withMintedMembershipNumber re-mints and calls back on a lost
@@ -1991,24 +2031,11 @@ function registerContactRoutes(config: ContactConfig) {
         historical_snapshots_preserved: true,
       })
     }
-    // `payload` is exactly the set of columns this edit wrote (pickColumns
-    // already dropped everything the request did not send, and the review
-    // tier's name-only narrowing), and `current` is the row as it was read
-    // before the batch -- so diffing the two is the real changed-field set for
-    // customers, suppliers and delivery contacts alike. Derived/lookup columns
-    // are excluded: they are a restatement of a field already in the diff, not
-    // something an operator changed. Read AFTER the batch so a deferred
-    // membership mint records the number actually written.
-    const contactDiffKeys = Object.keys(payload).filter((column) => !CONTACT_DERIVED_COLUMNS.has(column))
-    await audit(c.env, user?.id ?? null, actorSnapshot(user), 'update', config.entity, id, {
-      name,
-      ...contactSourceAuditDetails(source),
-      ...(duplicateDecision.decision ? {
-        duplicate_decision: 'create_separate',
-        duplicate_candidate_ids: duplicateDecision.decision.candidateIds,
-        duplicate_candidate_fingerprint: duplicateDecision.decision.fingerprint,
-      } : {}),
-    }, changedFields(current, payload, { keys: contactDiffKeys }))
+    // Read AFTER the batch so a deferred membership mint records the number
+    // actually written.
+    if (!updateAuditInBatch) {
+      await audit(c.env, user?.id ?? null, actorSnapshot(user), 'update', config.entity, id, updateAuditDetails, changedFields(current, payload, { keys: contactDiffKeys }))
+    }
     const updateVersions: string[] = [config.table]
     if (recordedOnSale) updateVersions.push('sales')
     if (nameChanged && snapshotCarry) {
