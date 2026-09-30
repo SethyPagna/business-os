@@ -1091,7 +1091,7 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
 
       {/* Failed, UNSAVED adjustments lead the ledger -- they are not history,
           they are work still owed. Each shows the server's reason, the time,
-          and its rows; "Fix" reopens the adjust modal prefilled. */}
+          and its rows; "Fix" reopens the Stock Session with those lines queued. */}
       {failedAttempts.length ? (
         <div data-failed-stock-attempts="true" className="space-y-2">
           {failedAttempts.map((attempt) => (
