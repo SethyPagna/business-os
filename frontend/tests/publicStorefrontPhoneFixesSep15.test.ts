@@ -268,20 +268,44 @@ check('5 the storefront arms the install-prompt capture and link guard at mount'
   assert.match(publicCatalogPage, /stopExternalLinkGuard\(\)/, 'the guard teardown must run on unmount')
 })
 
-check('5 the storefront mounts the shared install band, not a duplicate implementation', () => {
+const SHOP_TRANSLATE = String.raw`translate=\{\(key, fallback, fallbackKm\) => copy\(key, fallback, fallbackKm\)\}`
+
+check('5 the storefront mounts the shared install band, not a duplicate implementation, on the shop host only', () => {
   assert.match(publicCatalogPage, /import InstallPromptBand from '\.\.\/shared\/InstallPromptBand\.tsx'/, 'must reuse the shared component')
-  assert.match(publicCatalogPage, /<InstallPromptBand translate=\{\(key, fallback, fallbackKm\) => copy\(key, fallback, fallbackKm\)\}/, 'must adapt the storefront copy() into the shared translate signature')
+  // CATCHES: the band on admin.leangbeauty.com (or localhost), where the manifest is the staff app's, and a gate keyed on the route instead of the host.
+  assert.match(publicCatalogPage, /const offersShopInstall = !isAdminHostname\(\)\r?\n/, 'the shop install offer is keyed on the host')
+  assert.match(
+    publicCatalogPage,
+    new RegExp(String.raw`const installBand = offersShopInstall \? \(\s*<div className="pointer-events-none fixed [^"]*">\s*<InstallPromptBand ${SHOP_TRANSLATE} \/>\s*<\/div>\s*\) : null\r?\n`),
+    'the band renders only when the shop offers the install, through the storefront copy()',
+  )
+  assert.equal((publicCatalogPage.match(/<InstallPromptBand /g) || []).length, 1, 'no second, ungated band')
   assert.match(publicCatalogPage, /\{installBand\}/, 'the band must actually be mounted in the render tree')
 })
 
+check('5 the Account drawer header offers the install icon next to Close, on the shop host only', () => {
+  assert.match(publicCatalogPage, /import InstallAppButton from '\.\.\/install\/InstallAppButton\.tsx'/, 'the button lives under components/install, outside the app-shared chunk')
+  const drawerStart = publicCatalogPage.indexOf('const accountDrawer = accountOpen ? (')
+  assert.ok(drawerStart > 0, 'account drawer moved')
+  const header = publicCatalogPage.slice(drawerStart, publicCatalogPage.indexOf('<CatalogAccountSection', drawerStart))
+  assert.match(
+    header,
+    new RegExp(String.raw`\{offersShopInstall \? \(\s*<InstallAppButton ${SHOP_TRANSLATE} className=\{accountDrawerIconButtonClass\} \/>\s*\) : null\}\s*<button\s+type="button"\s+className=\{accountDrawerIconButtonClass\}\s+onClick=\{\(\) => setAccountOpen\(false\)\}`),
+    'the install icon sits right before Close, styled like it, and only on the shop host',
+  )
+  assert.equal((publicCatalogPage.match(/<InstallAppButton /g) || []).length, 1, 'the drawer header is the one shop pull entry')
+})
+
 check('5 the admin app keeps the same install behaviour via the shared band', () => {
-  assert.match(iosInstallHint, /<InstallPromptBand translate=\{\(key, fallback\) => t\(key\) \|\| fallback\}/, 'IosInstallHint must delegate to the shared band')
+  // The admin wrapper hands the band the UI language, so a key missing from the pack still reads Khmer on a Khmer till.
+  assert.match(iosInstallHint, /<InstallPromptBand translate=\{translateFromPack\(t, language\)\} \/>/, 'IosInstallHint must delegate to the shared band')
+  assert.match(installPromptBand, /return language === 'km' \? fallbackKm : fallback/, 'the wrapper falls back to Khmer on a Khmer till')
   assert.ok(!/beforeinstallprompt|shouldOfferIosInstallHint\(\)/.test(stripComments(iosInstallHint)), 'the device-detection logic must not be duplicated in the admin wrapper (comments may still explain the history)')
 })
 
 check('5 InstallPromptBand supplies real Khmer fallback text for every translated string, not the English default', () => {
   const calls = [...installPromptBand.matchAll(/translate\(\s*'([^']+)',\s*'[^']*',\s*'([^']*)'/g)]
-  assert.ok(calls.length >= 3, 'expected install_app / ios_install_hint / ios_install_hint_detail / dismiss_notification calls')
+  assert.ok(calls.length >= 3, 'expected install_app / install_app_short / ios_install_hint / install_offer_detail / dismiss_notification calls')
   for (const [, key, khmerFallback] of calls) {
     assert.ok(/[ក-៿]/.test(khmerFallback), `translate('${key}', ...) must supply real Khmer script, not an English placeholder`)
   }
