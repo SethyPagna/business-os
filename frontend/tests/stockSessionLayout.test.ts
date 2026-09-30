@@ -192,6 +192,13 @@ runTest('every key the float reads exists in both packs (section 12)', () => {
   }
 })
 
+runTest('iOS: no raw vh in the float -- a dropdown height rides --app-vh like every modal', () => {
+  // iosLayoutGuards D4 freezes the raw-vh files; the float must not join them.
+  for (const [name, text] of Object.entries({ modal, header, shared, entry, items, footer, review })) {
+    assert.doesNotMatch(text.replace(/var\(--app-vh, 1vh\)/g, ''), /(?<![a-z-])\d+(?:\.\d+)?vh\b/, name + ' uses a raw vh unit')
+  }
+})
+
 if (failed > 0) {
   process.exitCode = 1
   console.error(`\n${failed} stock session layout test(s) failed`)

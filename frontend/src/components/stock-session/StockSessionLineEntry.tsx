@@ -143,7 +143,7 @@ export default function StockSessionLineEntry(props: LineEntryProps) {
               autoComplete="off"
             />
             {showList ? (
-              <div role="listbox" aria-label={tr('stock_session_search', 'Product or barcode')} className="absolute inset-x-0 top-full z-30 mt-1 max-h-[min(15rem,45vh)] overflow-y-auto overscroll-contain rounded-xl border border-gray-200 bg-white shadow-xl dark:border-gray-600 dark:bg-gray-800">
+              <div role="listbox" aria-label={tr('stock_session_search', 'Product or barcode')} className="absolute inset-x-0 top-full z-30 mt-1 max-h-[min(15rem,calc(45*var(--app-vh)))] overflow-y-auto overscroll-contain rounded-xl border border-gray-200 bg-white shadow-xl dark:border-gray-600 dark:bg-gray-800">
                 {groups.map((group) => (
                   <button key={group.key} type="button" role="option" aria-selected={false} onClick={() => onOpenGroup(group.key)} className="flex min-h-10 w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm hover:bg-blue-50 dark:hover:bg-blue-900/20">
                     <span className="min-w-0 break-words text-gray-800 dark:text-gray-200">{group.name}</span>
