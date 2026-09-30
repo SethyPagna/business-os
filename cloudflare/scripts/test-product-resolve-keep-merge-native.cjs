@@ -564,6 +564,37 @@ async function main() {
     assert.equal(dump(), before)
   })
 
+  // P2: one history row whose undo_payload is not JSON must not turn a rolled-back
+  // fold back into a raw 500 (the probe reads every row's payload).
+  const MALFORMED_HISTORY_ROW = `INSERT INTO action_history (scope, entity, entity_id, label, reversible, status, undo_payload, redo_payload)
+    VALUES ('global', 'legacy', 'x', 'Legacy row', 0, 'recorded', 'not json {', 'not json {')`
+
+  await check('B3: a malformed undo_payload elsewhere in the history does not turn merge_failed back into a 500', async () => {
+    fresh()
+    state.native.db.exec(`${MALFORMED_HISTORY_ROW};
+      INSERT INTO sales (id, receipt_number, branch_id, total_usd, sale_status) VALUES (950, 'R-950', 1, 15, 'completed');
+      INSERT INTO sale_items (id, sale_id, product_id, product_name, quantity, applied_price_usd, total_usd, branch_id) VALUES (951, 950, 11, 'Rose Toner 100ml', 1, 15, 15, 1);
+      CREATE TRIGGER uic2_boom BEFORE UPDATE ON sale_items BEGIN SELECT RAISE(ABORT, 'boom'); END;`)
+    const before = dump()
+    const consoleError = console.error
+    console.error = () => {}
+    let failedMerge
+    try { failedMerge = await merge({ keepId: 10, mergeId: 11, keep: true, stock: 'merge' }) } finally { console.error = consoleError }
+    assert.equal(failedMerge.status, 409, JSON.stringify(failedMerge.body))
+    assert.equal(failedMerge.body.code, 'merge_failed')
+    assert.equal(dump(), before)
+  })
+
+  await check('B3: the applied-probe still finds a committed merge among malformed rows, and not an unknown operation', async () => {
+    fresh()
+    state.native.db.exec(MALFORMED_HISTORY_ROW)
+    const done = await merge({ keepId: 10, mergeId: 11, keep: true, stock: 'merge' })
+    assert.equal(done.status, 200, JSON.stringify(done.body))
+    const probe = (operationId) => state.native.db.prepare(resolveChoices.MERGE_APPLIED_PROBE_SQL).get({ operationId })
+    assert.equal(probe(done.body.operationId)?.applied, 1)
+    assert.equal(probe('00000000-0000-4000-8000-000000000000'), undefined)
+  })
+
   console.log(failed ? `\n${failed} check(s) failed` : '\nall checks passed')
   process.exitCode = failed ? 1 : 0
 }

@@ -295,6 +295,8 @@ export function mergeFailedBody(errorId: string): MergeFailedBody {
   }
 }
 // The fold's history row carries its operation id; if it exists the batch
-// committed and "not applied" would be false.
-export const MERGE_APPLIED_PROBE_SQL = `SELECT 1 AS applied FROM action_history
-  WHERE json_extract(undo_payload, '$.operation_id') = @operationId LIMIT 1`
+// committed and "not applied" would be false. The row was written a moment ago,
+// so only the newest rows are read (no full scan on an error path), and CASE
+// keeps json_extract off any row whose payload is not JSON (it would throw).
+export const MERGE_APPLIED_PROBE_SQL = `SELECT 1 AS applied FROM (SELECT undo_payload FROM action_history ORDER BY id DESC LIMIT 500)
+  WHERE CASE WHEN json_valid(undo_payload) THEN json_extract(undo_payload, '$.operation_id') END = @operationId LIMIT 1`
