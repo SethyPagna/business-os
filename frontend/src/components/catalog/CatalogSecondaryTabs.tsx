@@ -18,6 +18,7 @@ import Store from 'lucide-react/dist/esm/icons/store.js'
 import Ticket from 'lucide-react/dist/esm/icons/ticket.js'
 import AppSelect, { type AppSelectOption } from '../shared/AppSelect.tsx'
 import PortalEmbedConsent from './legal/PortalEmbedConsent.tsx'
+import PortalPointsRow from './PortalPointsRow.tsx'
 import { SectionShell } from './catalogUi'
 import { splitNoTranslateSegments, stripNoTranslateMarkers } from './portalNoTranslate.ts'
 import { nextOpenFaqKey, splitFaqColumns } from './portalFaqLayout.ts'
@@ -209,12 +210,12 @@ function normalizePortalColor(value: unknown, fallback: string): string {
 
 function CatalogMembershipSection({ copy }: CatalogMembershipSectionProps) {
   return (
-    <section className="py-5">
-      <h2 className="flex items-center gap-3 rounded-[28px] border border-slate-200/80 bg-white p-6 text-base font-semibold text-slate-900 shadow-sm dark:border-neutral-700/80 dark:bg-neutral-900 dark:text-white">
+    <SectionShell title={copy('membership', 'Membership', 'សមាជិកភាព')}>
+      <div className="flex items-center gap-3 rounded-[28px] border border-slate-200/80 bg-white p-6 text-sm text-slate-700 shadow-sm dark:border-neutral-700/80 dark:bg-neutral-900 dark:text-neutral-200">
         <Ticket aria-hidden="true" className="h-5 w-5 shrink-0 text-amber-500 dark:text-amber-300" />
-        {copy('membershipComingSoon', 'Membership: coming soon')}
-      </h2>
-    </section>
+        <PortalPointsRow copy={copy} />
+      </div>
+    </SectionShell>
   )
 }
 
