@@ -421,7 +421,10 @@ app.use('*', async (c, next) => {
 
 // Fresh D1 databases need a default org/branch/roles/admin. Memoized per isolate;
 // run after public body admission so rejected bodies cannot trigger seeding.
-app.use('*', async (c, next) => {
+// /api/* only: assets, uploads, /health, /ws, robots/sitemap and the app
+// documents never touch that data, and each cold isolate that first served one
+// of them used to pay the check's ~2x-active-products row reads for nothing.
+app.use('/api/*', async (c, next) => {
   await ensureCoreDataInvariantsOnce(c.env)
   return next()
 })
