@@ -201,7 +201,7 @@ export interface MergeReversal {
   keeperNameNormalizedBefore?: string | null
   /** The Resolve grid's keeper choice (N1/N4); a redo passes it back to the fold. */
   keeperChoice?: ProductMergeKeeperChoice
-  /** Stock-in sessions this merge settled (B2); undo gives them back their status. */
+  /** Stock-in sessions this merge settled; undo gives them back their status. */
   settledStockSessions?: SettledStockSessions
   /** Optional exact keeper catalog before-image for reviewed v2 merges. */
   keeperCatalogBefore?: {
@@ -553,7 +553,7 @@ export function productNameSnapshotStatements(productId: number, productName: st
 //     session that can be undone or redone (routes/products.ts
 //     mergeBlockedByReversibleStockSession); the Resolve grid's keep-mode merge
 //     SETTLES it instead, in the same batch (settleStockSessionStatements
-//     above, option (b) of the N15 deviation, UI-CONFLICTS B2 30 Sep 2026),
+//     above, option (b) of the N15 deviation, 30 Sep 2026),
 //     and merge undo restores its status. Once the session's history row is
 //     not replayable the members row is pure history and stays where it
 //     happened. Both halves are pinned in scripts/test-merge-identity-fk-pure.cjs

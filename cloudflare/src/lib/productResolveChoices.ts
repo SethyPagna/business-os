@@ -1,8 +1,9 @@
 // The Resolve grid's per-field choices for a products keep-mode merge (owner,
 // 30 Sep 2026: "we should be able to select the segments we want, and the
 // final column should show the final how it looks like"). Pure: no database,
-// so the route, the undo applier's tests and the frontend parity fixture all
-// run the same rules.
+// so the route and the undo applier's tests run the same rules. The parity
+// fixture scripts/fixtures/product-resolve-choices-parity.json is the table the
+// frontend adapter must match; no frontend test reads it yet.
 import { sellingPriceCeilCent } from './moneyPrecision'
 import { compactSearchText, normalizeSearchText } from './searchMatch'
 
@@ -282,7 +283,7 @@ export function keeperChoiceBefore(row: Record<string, unknown> | null | undefin
   return before
 }
 
-// B3: a fold whose atomic batch threw wrote nothing, so the answer is a
+// A fold whose atomic batch threw wrote nothing, so the answer is a
 // definite refusal the client can show, not an unknown outcome.
 export type MergeFailedBody = { success: false; code: typeof MERGE_FAILED_CODE; outcome: 'not_applied'; errorId: string; error: string }
 export function mergeFailedBody(errorId: string): MergeFailedBody {

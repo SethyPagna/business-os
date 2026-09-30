@@ -3489,13 +3489,13 @@ export async function foldDuplicateProductInto(
   if (!canonicalBefore || !dupPricing || (!reviewedAuthorityValid && !keeperChoice?.follows && !productsShareExactIdentity(canonicalBefore, dupPricing))) {
     throw new Error('merge_identity_conflict')
   }
-  // UI-CONFLICTS B1: the grid's chosen Final values; the survivor's name and
+  // The grid's chosen Final values; the survivor's name and
   // catalog before-image is read here so a redo captures it again too.
   const choiceFields = keeperChoice?.fields && Object.keys(keeperChoice.fields).length ? keeperChoice.fields : undefined
   const choiceBefore = choiceFields
     ? keeperChoiceBefore(await db.prepare(KEEPER_CHOICE_BEFORE_SQL).get<Record<string, unknown>>({ id: canonicalId }), choiceFields)
     : {}
-  // UI-CONFLICTS B2: the Resolve keep-merge settles the stock-in sessions that
+  // The Resolve keep-merge settles the stock-in sessions that
   // touch either row, in this batch, instead of refusing until they expire.
   const settledStockSessions = keeperChoice?.follows
     ? { marker: stockSessionSettleMarker(atomicHistory?.operationId ?? crypto.randomUUID()), sessions: await readSettleableStockSessions(db, [canonicalId, dup.id]) }
@@ -8568,7 +8568,7 @@ app.get('/possible-duplicates/merge-preview', async (c) => {
     readMergeStockImpact(db, mergeId, branchNameById),
     readMergePricingChange(db, keepId, mergeId),
     readMergeIdentityDiff(db, keepId, mergeId),
-    // The Resolve keep-merge settles these sessions (B2); every other door still waits.
+    // The Resolve keep-merge settles these sessions; every other door still waits.
     keepMode ? Promise.resolve(null) : mergeBlockedByReversibleStockSession(db, [keepId, mergeId]),
     keepMode ? readSettleableStockSessions(db, [keepId, mergeId]) : Promise.resolve([]),
   ])
@@ -8806,7 +8806,7 @@ app.post('/possible-duplicates/merge', async (c) => {
       numericIssue,
     }, 409)
   }
-  // The Resolve keep-merge settles these sessions inside its batch (B2).
+  // The Resolve keep-merge settles these sessions inside its batch.
   const blockingSession = keepMode ? null : await mergeBlockedByReversibleStockSession(db, [keeper.id, dup.id])
   if (blockingSession) {
     return c.json({
@@ -8855,7 +8855,7 @@ app.post('/possible-duplicates/merge', async (c) => {
     if (/merge_numeric_invalid:/.test(String(error))) {
       return c.json({ success: false, code: 'invalid_merge_numeric', error: String(error).replace(/^Error:\s*merge_numeric_invalid:/, '') }, 409)
     }
-    // B3: the fold's one atomic batch rolled back, so nothing was written; a
+    // The fold's one atomic batch rolled back, so nothing was written; a
     // raw 500 would make the browser report an unknown outcome. If the history
     // row exists the batch did commit, and only then is this rethrown.
     let applied: unknown = true
