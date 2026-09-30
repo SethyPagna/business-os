@@ -28,10 +28,8 @@ export function isStockReceiptMovement(value: unknown): boolean {
 // it -- the same reason the type allowlist above is mirrored at all.
 export const DAMAGED_LOT_REFERENCE_PREFIX = 'damaged_lot:'
 
-// A scoped Set (cloudflare/src/lib/stockLotAdjustment.ts) stamps its forward
-// movement `stock-set:<operation>:<generation>`; it is reversed ONLY through
-// its generation-guarded history Undo/Redo, and the Worker refuses a ledger
-// revert of it (and of its undo counter) 409. Mirrored so Revert is not offered.
+// Scoped Sets use the same generation-guarded history transition from both
+// History and Stock Changes. The server preview identifies their whole action.
 export const STOCK_SET_REFERENCE_PREFIX = 'stock-set:'
 
 export function isStockSetMovement(referenceId: unknown): boolean {
@@ -40,7 +38,6 @@ export function isStockSetMovement(referenceId: unknown): boolean {
 
 export function isRevertibleStockMovement(value: unknown, referenceId?: unknown): boolean {
   if (String(referenceId ?? '').startsWith(DAMAGED_LOT_REFERENCE_PREFIX)) return false
-  if (isStockSetMovement(referenceId)) return false
   return revertibleTypes.has(normalizedMovementType(value))
 }
 
@@ -91,11 +88,8 @@ export function showReceiptAccounting(value: unknown): boolean {
 
 // A stock-in session's undo/redo writes its own counter-movement (Worker
 // lib/stockSession.ts: reason `Stock session <id> undo|redo generation <n>`,
-// reference_id = the session operation, a bare number). The Worker refuses
-// to revert those rows from the ledger (409: the session's own redo/undo is
-// the path), so the action is hidden here rather than offered and refused.
-// The session's original receipt rows (reason "Stock-in session <id>") stay
-// revertible.
+// reference_id = the session operation, a bare number). This marker describes
+// the row; only the server preview can authorize reverting its whole session.
 const SESSION_GENERATION_REASON = /^Stock session \S+ (undo|redo) generation \d+$/
 export function isStockSessionGenerationMovement(row: { reason?: unknown; reference_id?: unknown }): boolean {
   return /^\d+$/.test(String(row.reference_id ?? '')) && SESSION_GENERATION_REASON.test(String(row.reason ?? '').trim())
