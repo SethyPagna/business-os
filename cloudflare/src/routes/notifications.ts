@@ -4,7 +4,8 @@ import { getDb } from '../lib/db'
 import { chunkForBinding } from '../lib/sqlBinding'
 import { loadLowStockConfig, lowStockThresholdSql } from '../lib/lowStockSettings'
 import { requireAuth, type SessionUser } from '../lib/auth'
-import { hasPermission, hasAnyPermission, isAdminControlUser } from '../lib/permissions'
+import { hasPermission, isAdminControlUser } from '../lib/permissions'
+import { cachedNotificationSummary } from '../lib/notificationSummaryCache'
 
 // Ported from backend/src/routes/notifications.ts. Note what this actually
 // is: there is no persisted "notifications" table with read/unread state --
@@ -656,16 +657,39 @@ async function buildDeviceApprovalSection(env: Env): Promise<NotificationSection
   }
 }
 
+// Everything the summary shows a user is decided by these seven answers plus
+// shared data (buildImportsSection's per-type filter only asks the four
+// section permissions), so two users with the same answers get the same body.
+// The cache key is exactly those answers -- never a user id -- and an admin's
+// body can never be served to a user who lacks one of the permissions.
+function summaryAccess(user: SessionUser) {
+  const access = {
+    inventory: hasPermission(user, 'inventory'),
+    products: hasPermission(user, 'products'),
+    sales: hasPermission(user, 'sales'),
+    contacts: hasPermission(user, 'contacts'),
+    portal: hasPermission(user, 'customer_portal'),
+    backup: hasPermission(user, 'backup'),
+    adminControl: isAdminControlUser(user),
+  }
+  return { access, key: Object.values(access).map((granted) => (granted ? '1' : '0')).join('') }
+}
+
 app.get('/summary', async (c) => {
   const user = c.get('user')
-  const preferences = await loadPreferences(c.env)
+  const { access, key } = summaryAccess(user)
+  return c.json(await cachedNotificationSummary(key, () => buildSummary(c.env, user, access)))
+})
+
+async function buildSummary(env: Env, user: SessionUser, access: ReturnType<typeof summaryAccess>['access']) {
+  const preferences = await loadPreferences(env)
   const sections: NotificationSection[] = []
 
   const tasks: Array<Promise<NotificationSection | null>> = []
-  if (preferences.inventoryEnabled && hasPermission(user, 'inventory')) tasks.push(buildInventorySection(c.env))
-  if (preferences.expiryEnabled && hasPermission(user, 'products')) tasks.push(buildExpirySection(c.env, preferences.expiryDays))
-  if (preferences.salesEnabled && hasPermission(user, 'sales')) tasks.push(buildSalesSection(c.env))
-  if (preferences.loyaltyEnabled && hasPermission(user, 'contacts')) tasks.push(buildLoyaltySection(c.env, preferences.loyaltyThreshold))
+  if (preferences.inventoryEnabled && access.inventory) tasks.push(buildInventorySection(env))
+  if (preferences.expiryEnabled && access.products) tasks.push(buildExpirySection(env, preferences.expiryDays))
+  if (preferences.salesEnabled && access.sales) tasks.push(buildSalesSection(env))
+  if (preferences.loyaltyEnabled && access.contacts) tasks.push(buildLoyaltySection(env, preferences.loyaltyThreshold))
   // Pending Share & Reward submissions are an approve/reject queue (an
   // admin decision awards or denies real loyalty points), not an
   // informational notice -- so, like the security/device section below,
@@ -674,15 +698,15 @@ app.get('/summary', async (c) => {
   // meaning submissions could sit unreviewed indefinitely with no other
   // surface showing them and no way for the admin to know they'd been
   // silently suppressed by their own earlier mute choice.
-  if (hasPermission(user, 'customer_portal')) tasks.push(buildPortalSection(c.env))
-  if (hasAnyPermission(user, ['products', 'contacts', 'inventory', 'sales'])) tasks.push(buildImportsSection(c.env, user))
-  if (preferences.systemEnabled && hasPermission(user, 'backup')) tasks.push(Promise.resolve(buildSystemSection(preferences.driveSyncEnabled, preferences.driveSyncConnected)))
+  if (access.portal) tasks.push(buildPortalSection(env))
+  if (access.products || access.contacts || access.inventory || access.sales) tasks.push(buildImportsSection(env, user))
+  if (preferences.systemEnabled && access.backup) tasks.push(Promise.resolve(buildSystemSection(preferences.driveSyncEnabled, preferences.driveSyncConnected)))
   // Supplier credit reminders (0065): money owed to suppliers is cost
   // data, and Part 383's supplier-privacy rule keeps that with the people
   // who can act on it — admin-control users only (was: anyone with
   // inventory access; the user asked for "reminder for admin" and for the
   // supplier section to be hidden from employees).
-  if (preferences.supplierCreditEnabled && isAdminControlUser(user)) tasks.push(buildSupplierCreditSection(c.env, preferences.supplierCreditDays))
+  if (preferences.supplierCreditEnabled && access.adminControl) tasks.push(buildSupplierCreditSection(env, preferences.supplierCreditDays))
   // Device approvals: RE-REGISTERED (Part 382). The comment that used to
   // live here said the login gate was "fully disabled" and this section was
   // deliberately unused — that record was STALE: requiresDeviceApproval is
@@ -692,7 +716,7 @@ app.get('/summary', async (c) => {
   // admin approves it. Without this section, nothing surfaced those pending
   // devices and people were silently locked out. Admin-control users only —
   // they are the ones who can act on it.
-  if (isAdminControlUser(user)) tasks.push(buildDeviceApprovalSection(c.env))
+  if (access.adminControl) tasks.push(buildDeviceApprovalSection(env))
 
   const results = await Promise.all(tasks)
   for (const section of results) if (section) sections.push(section)
@@ -705,13 +729,13 @@ app.get('/summary', async (c) => {
 
   const unreadCount = sections.reduce((total, section) => total + Number(section.count || 0), 0)
 
-  return c.json({
+  return {
     unreadCount,
     unread: unreadCount,
     generatedAt: new Date().toISOString(),
     preferences,
     sections,
-  })
-})
+  }
+}
 
 export default app

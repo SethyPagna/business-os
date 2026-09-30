@@ -393,7 +393,8 @@ const { hasPermission, hasAnyPermission, isAdminControlUser, getActionTier, getP
   assert.match(contactsSrc, /SELECT id, name FROM \$\{config\.table\} \$\{config\.table === 'customers' \? `WHERE \$\{customerIsProfileSql\(\)\}` : ''\} ORDER BY lower\(name\) ASC/, 'the fields=names list must select id + name only and exclude the reserved anonymous customer inside the query')
 
   const notificationsSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'notifications.ts'), 'utf8')
-  assert.match(notificationsSrc, /preferences\.supplierCreditEnabled && isAdminControlUser\(user\)/, 'supplier-credit reminders (money owed) must be admin-control only')
+  assert.match(notificationsSrc, /adminControl: isAdminControlUser\(user\)/, 'the summary access flags take admin-control from isAdminControlUser')
+  assert.match(notificationsSrc, /preferences\.supplierCreditEnabled && access\.adminControl/, 'supplier-credit reminders (money owed) must be admin-control only')
   // D5: the purchases drill (per-lot received totals x unit cost = money
   // spent with a supplier) must live under /suppliers/* so the same gate
   // covers it -- registering it anywhere else would leak cost data past
