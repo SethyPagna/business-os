@@ -548,8 +548,7 @@ function readPortalCache(): LegacyCatalogRecord | null {
     // Inside the guard, not above it: merely touching window.localStorage /
     // sessionStorage throws where site data is blocked (Safari private mode,
     // Chrome's "block all cookies"), and this runs in a useRef initializer
-    // during the first render. Same fix and same reasoning as
-    // PublicCatalogPage.tsx's copy of this reader.
+    // during the first render.
     const stores = [window.sessionStorage, window.localStorage].filter(Boolean)
     let raw = ''
     let sourceStore: Storage | null = null

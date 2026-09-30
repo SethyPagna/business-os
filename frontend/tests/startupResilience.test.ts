@@ -7,11 +7,11 @@
 //      all cookies") must never escape a startup read/write and blank the
 //      shell -- checked by REAL execution against an actually-throwing
 //      Storage, not just a grep for `try`.
-//   b) the public storefront's embedded/cached bootstrap payload can be
-//      missing, malformed JSON, oversized, or cut at a page size the viewer
-//      didn't choose -- the shopper must still end up with a real product
-//      search, never an empty grid parked under a pager that disagrees
-//      with it.
+//   b) the public storefront's bootstrap payload can be missing, malformed,
+//      or cut at a page size the viewer didn't choose -- the shopper must
+//      still end up with a real product search, never an empty grid parked
+//      under a pager that disagrees with it. The paint embed's refusals
+//      are pinned in publicFirstPaint.test.ts.
 //   c) a failed lazy chunk import (the shape a stale deploy produces) must
 //      end at an actionable "Reload page" control, never an unhandled
 //      rejection with nothing on screen.
@@ -214,72 +214,24 @@ await runTest('readStoredCatalogPageSize ignores a healthy Storage holding an of
 })
 
 // ---------------------------------------------------------------------------
-// b) the public bootstrap payload path tolerates missing/malformed/oversized
-//    input and a viewer page-size mismatch, and still ends up searching.
+// b) the public bootstrap payload path tolerates missing/malformed input and
+//    a viewer page-size mismatch, and still ends up searching.
 // ---------------------------------------------------------------------------
 
 function extractPublicBootstrapHelpers(): string {
   const source = read('src/components/catalog/PublicCatalogPage.tsx')
-  const start = source.indexOf('const PUBLIC_PORTAL_CACHE_KEY')
+  const start = source.indexOf('const DEFAULT_PUBLIC_CONFIG')
   const end = source.indexOf('function normalizeBootstrapPayload')
-  assert.ok(start > 0 && end > start, 'PublicCatalogPage.tsx must keep readEmbeddedPortalBootstrap/normalizeBootstrapPayload in the expected shape for the sandbox to extract them')
+  assert.ok(start > 0 && end > start, 'PublicCatalogPage.tsx must keep DEFAULT_PUBLIC_CONFIG/normalizeBootstrapPayload in the expected shape for the sandbox to extract them')
   const endOfNormalize = source.indexOf('\n}\n', end) + 3
-  // Both functions are private to the real module (no top-level app state to
-  // leak); this sandboxed copy exports them purely so the test can call them.
-  return `${source.slice(start, endOfNormalize)}\nexport { readEmbeddedPortalBootstrap, normalizeBootstrapPayload }\n`
+  // The function is private to the real module (no top-level app state to
+  // leak); this sandboxed copy exports it purely so the test can call it.
+  return `${source.slice(start, endOfNormalize)}\nexport { normalizeBootstrapPayload }\n`
 }
 
 type BootstrapModule = {
-  readEmbeddedPortalBootstrap: () => Record<string, unknown> | null
   normalizeBootstrapPayload: (payload: unknown) => { config: Record<string, unknown>; products: unknown[]; catalog: Record<string, unknown> }
 }
-
-function domWithBootstrapNode(textContent: string | null): Record<string, unknown> {
-  const node = textContent === null ? null : { textContent }
-  return {
-    getElementById: (id: string) => (id === 'business-os-portal-bootstrap' ? node : null),
-  }
-}
-
-await runTest('a missing embedded bootstrap node returns null, not a throw', async () => {
-  const mod = await runSource<BootstrapModule>(extractPublicBootstrapHelpers(), 'tsx')
-  const previousDocument = (globalThis as Record<string, unknown>).document
-  ;(globalThis as Record<string, unknown>).document = domWithBootstrapNode(null)
-  ;(globalThis as Record<string, unknown>).window = {}
-  try {
-    assert.equal(mod.readEmbeddedPortalBootstrap(), null)
-  } finally {
-    if (previousDocument === undefined) Reflect.deleteProperty(globalThis, 'document')
-    else (globalThis as Record<string, unknown>).document = previousDocument
-    Reflect.deleteProperty(globalThis, 'window')
-  }
-})
-
-await runTest('malformed JSON in the embedded bootstrap node returns null, not a throw', async () => {
-  const mod = await runSource<BootstrapModule>(extractPublicBootstrapHelpers(), 'tsx')
-  ;(globalThis as Record<string, unknown>).document = domWithBootstrapNode('{not json')
-  ;(globalThis as Record<string, unknown>).window = {}
-  try {
-    assert.equal(mod.readEmbeddedPortalBootstrap(), null)
-  } finally {
-    Reflect.deleteProperty(globalThis, 'document')
-    Reflect.deleteProperty(globalThis, 'window')
-  }
-})
-
-await runTest('an oversized embedded bootstrap node is rejected before JSON.parse ever runs', async () => {
-  const mod = await runSource<BootstrapModule>(extractPublicBootstrapHelpers(), 'tsx')
-  const huge = `{"products":[${'1,'.repeat(1_000_001)}]}`
-  assert.ok(huge.length > 2_000_000, 'fixture must actually exceed the size ceiling under test')
-  ;(globalThis as Record<string, unknown>).document = domWithBootstrapNode(huge)
-  ;(globalThis as Record<string, unknown>).window = {}
-  try {
-    assert.equal(mod.readEmbeddedPortalBootstrap(), null)
-  } finally {
-    Reflect.deleteProperty(globalThis, 'document')
-    Reflect.deleteProperty(globalThis, 'window')
-  }
-})
 
 await runTest('normalizeBootstrapPayload defaults every field for missing/malformed input, never throws', async () => {
   const mod = await runSource<BootstrapModule>(extractPublicBootstrapHelpers(), 'tsx')
@@ -318,7 +270,7 @@ function countBootstrapSkipDecisions(source: string, refName: string): number {
 
 await runTest('the wiring: both bootstrap moments recompute skipNextProductSearchRef from bootstrapPageSizeMatchesViewer', () => {
   const source = read('src/components/catalog/PublicCatalogPage.tsx')
-  assert.equal(countBootstrapSkipDecisions(source, 'skipNextProductSearchRef'), 2, 'the embedded-bootstrap shortcut AND the fetched-bootstrap branch must each re-decide whether to skip the follow-up search (directly or via a named decision variable)')
+  assert.equal(countBootstrapSkipDecisions(source, 'skipNextProductSearchRef'), 1, 'the fetched bootstrap must re-decide whether to skip the follow-up search (directly or via a named decision variable)')
   // CatalogPage.tsx's publicView preview mount of the same public path must
   // carry the identical wiring, or the two public entry points would
   // diverge. (CatalogPage.tsx also calls bootstrapPageSizeMatchesViewer a

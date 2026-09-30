@@ -494,10 +494,11 @@ runTest('the public pager renders no size selector (P10-20), but the surrounding
   }
 })
 
-// The two portal cache readers are module-local functions inside component
-// files far too heavy to bundle whole, so each is lifted out by source slice
-// and compiled with esbuild: the REAL source runs, and `window` arrives as a
-// parameter, which is the only way to hand it one whose storage getters throw.
+// The Website Editor's portal cache reader is a module-local function inside a
+// component file far too heavy to bundle whole, so it is lifted out by source
+// slice and compiled with esbuild: the REAL source runs, and `window` arrives as
+// a parameter, which is the only way to hand it one whose storage getters throw.
+// The storefront keeps no saved copy at all (tests/publicFirstPaint.test.ts).
 function loadPortalCacheReader(source: string, keyConst: string, otherConsts: string[]) {
   const lf = source.replace(/\r\n/g, '\n')
   const start = lf.indexOf('function readPortalCache(')
@@ -518,7 +519,7 @@ function loadPortalCacheReader(source: string, keyConst: string, otherConsts: st
   return { key, read: (hostWindow: unknown) => (factory(hostWindow) as () => unknown)() }
 }
 
-runTest('both portal cache readers survive a browser that blocks site data', () => {
+runTest('the Website Editor portal cache reader survives a browser that blocks site data', () => {
   // Safari private mode and Chrome's "block all cookies" make the PROPERTY
   // throw, not getItem -- so a reader that lists the stores outside its try
   // throws out of a useRef initializer on the very first render. The
@@ -533,7 +534,6 @@ runTest('both portal cache readers survive a browser that blocks site data', () 
   }
 
   for (const [route, source, keyConst, otherConsts] of [
-    ['PublicCatalogPage', publicCatalogPageSource, 'PUBLIC_PORTAL_CACHE_KEY', ['PUBLIC_PORTAL_CACHE_MAX_AGE_MS', 'PUBLIC_PORTAL_CACHE_PRODUCT_LIMIT']],
     ['CatalogPage', catalogPageSource, 'PORTAL_CACHE_KEY', ['PORTAL_CACHE_MAX_AGE_MS', 'PORTAL_CACHE_PRODUCT_LIMIT']],
   ] as Array<[string, string, string, string[]]>) {
     const { key, read } = loadPortalCacheReader(source, keyConst, otherConsts)
@@ -557,24 +557,25 @@ runTest('both portal cache readers survive a browser that blocks site data', () 
 })
 
 runTest('neither public path seeds its grid from a payload cut at another page size', () => {
-  // The embedded/cached payload is page 1 at the Worker's fixed 50, ordered
+  // The bootstrap payload is page 1 at the Worker's fixed 50, ordered
   // promoted/brand/name (routes/portal.ts buildPortalCatalog), while a browse
   // payload renders A-Z by name -- so for a shopper on 20 it is neither page 1
   // nor a prefix of it. Seeding it anyway put 50 cards under a pager that read
   // "1 / total-over-20" for one round trip.
-  const seeded = ([
-    ['PublicCatalogPage', publicCatalogPageSource],
-    ['CatalogPage', catalogPageSource],
-  ] as Array<[string, string]>).filter(([, source]) => (
-    /const seedMatchesViewerPageSize = !cachedPortal/.test(source)
-    && /seedMatchesViewerPageSize (\?|&&)/.test(source)
-    && /useState\(\(\) => !seedMatchesViewerPageSize\)/.test(source)
-    && /if \(bootstrapMatchesViewer\) setProducts\(/.test(source)
+  const waitsForViewerSizedPage = (source: string) => /if \(bootstrapMatchesViewer\) setProducts\(/.test(source)
     && /setAwaitingViewerSizedProducts\(false\)/.test(source)
     && /loadingProducts[:=] ?\{?\(?[^\r\n]*awaitingViewerSizedProducts/.test(source)
-  ))
-  assert.equal(seeded.length, 2,
-    'both public paths must gate the grid seed on the viewer page size and keep the skeletons up meanwhile')
+  assert.ok(
+    /const seedMatchesViewerPageSize = !cachedPortal/.test(catalogPageSource)
+      && /seedMatchesViewerPageSize (\?|&&)/.test(catalogPageSource)
+      && /useState\(\(\) => !seedMatchesViewerPageSize\)/.test(catalogPageSource)
+      && waitsForViewerSizedPage(catalogPageSource),
+    'CatalogPage must gate its cached grid seed on the viewer page size and keep the skeletons up meanwhile')
+  assert.ok(
+    /const \[products, setProducts\] = useState<CatalogProduct\[\]>\(\[\]\)/.test(publicCatalogPageSource)
+      && /const \[awaitingViewerSizedProducts, setAwaitingViewerSizedProducts\] = useState\(true\)/.test(publicCatalogPageSource)
+      && waitsForViewerSizedPage(publicCatalogPageSource),
+    'the storefront starts with no products and keeps the skeletons up until a page cut at the viewer size lands')
 
   for (const [route, source] of [
     ['PublicCatalogPage', publicCatalogPageSource],

@@ -186,6 +186,7 @@ interface CatalogAboutSectionProps {
   socialLinks?: SocialLink[]
   versionedBusinessLogo?: string
   versionedBusinessCover?: string
+  imageFetchPriority?: 'high' | 'low' | 'auto'
   openPortalImage: (title: string, images: string[], index?: number) => void
 }
 
@@ -437,6 +438,7 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
     socialLinks,
     versionedBusinessLogo,
     versionedBusinessCover,
+    imageFetchPriority,
     openPortalImage,
   } = props
 
@@ -494,7 +496,10 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
             src={versionedBusinessCover}
             alt=""
             aria-hidden="true"
-            className="pointer-events-none absolute inset-0 -z-10 h-full w-full object-cover"
+            data-portal-cover="true"
+            fetchPriority={imageFetchPriority}
+            onLoad={(event) => { event.currentTarget.dataset.loaded = 'true' }}
+            className="portal-cover-image pointer-events-none absolute inset-0 -z-10 h-full w-full object-cover"
           />
         ) : null}
         <div
@@ -578,6 +583,7 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
               className="h-full w-full object-contain"
               loading="eager"
               decoding="async"
+              fetchPriority={imageFetchPriority}
             />
           </button>
         </figure>

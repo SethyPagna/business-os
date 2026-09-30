@@ -96,7 +96,6 @@ for (const expected of [
   'business-os-portal-bucket-v1',
   'business-os-portal-wishlist-v1',
   'business-os:portal-translate-target',
-  'business-os-catalog-portal-cache',
   'business-os-portal-map-consent-v1',
 ]) {
   assert.ok(storageNames.includes(expected), `cookie policy does not disclose ${expected}`)
@@ -107,7 +106,9 @@ const bucketSource = source('components/catalog/portalBucket.ts')
 assert.match(bucketSource, /'business-os-portal-bucket-v1'/, 'the bucket storage key moved; update the cookie policy')
 assert.match(bucketSource, /'business-os-portal-wishlist-v1'/, 'the wishlist storage key moved; update the cookie policy')
 assert.match(source('components/catalog/portalLanguageOptions.ts'), /'business-os:portal-translate-target'/, 'the language storage key moved; update the cookie policy')
-assert.match(source('components/catalog/PublicCatalogPage.tsx'), /PUBLIC_PORTAL_CACHE_KEY = 'business-os-catalog-portal-cache'/, 'the portal cache key moved; update the cookie policy')
+// The storefront keeps no saved copy of the shop (owner rule); it only removes the old one.
+assert.equal(storageNames.includes('business-os-catalog-portal-cache'), false, 'the cookie policy still lists the retired storefront cache')
+assert.doesNotMatch(source('components/catalog/publicFirstPaint.ts'), /setItem\(RETIRED_PORTAL_CACHE_KEY/, 'the storefront writes its saved copy again; disclose it in the cookie policy')
 const embedSource = source('components/catalog/legal/PortalEmbedConsent.tsx')
 assert.match(embedSource, /MAP_CONSENT_STORAGE_KEY = 'business-os-portal-map-consent-v1'/, 'the map consent key moved; update the cookie policy')
 // Once the visitor does ask for the map, the frame still leaks as little as
