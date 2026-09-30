@@ -234,7 +234,7 @@ const { hasPermission, hasAnyPermission, isAdminControlUser, getActionTier, getP
   // itself as partial so the frontend can tell the user their other
   // changes weren't saved, instead of a silent 200 (flagged as a UX gap
   // in Part 155, fixed here).
-  assert.match(contactsSrc, /const droppedColumns = tier === 'review'\s*\n\s*\? config\.columns\.filter/, 'contacts.ts PUT /:id must compute which non-name columns a Review Required edit actually dropped')
+  assert.match(contactsSrc, /const droppedColumns = tier === 'review' \|\| source\s*\n\s*\? config\.columns\.filter\(\(col\) => !allowedColumns\.includes\(col\)/, 'contacts.ts PUT /:id must compute which columns a Review Required or sales-scoped edit actually dropped')
   assert.match(contactsSrc, /if \(wasPartial\) \{\s*\n\s*return c\.json\(\{ \.\.\.item, partial: true, partialFields: droppedColumns \}\)/, 'contacts.ts PUT /:id must return partial:true (with the dropped field list) when a Review Required edit silently dropped non-name fields')
   console.log('PASS routes/contacts.ts PUT /:id flags a Review Required name-only edit as partial when other fields were dropped')
 }

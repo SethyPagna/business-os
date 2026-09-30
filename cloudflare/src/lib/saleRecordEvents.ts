@@ -65,7 +65,7 @@ const FIELDS_BY_KIND: Record<Exclude<SaleRecordKind, 'legacy_sale_change'>, read
   item_quantity_changed: ['item', 'quantity', 'total_usd'],
   item_price_changed: ['item', 'unit_price_usd', 'total_usd'],
   items_replaced: ['removed_items', 'added_items', 'total_usd'],
-  customer_changed: ['customer', 'membership'],
+  customer_changed: ['customer', 'customer_details', 'membership'],
   membership_changed: ['membership'],
   status_changed: ['sale_status'],
   payment_changed: ['payment_method', 'payment_details', 'amount_paid_usd', 'amount_paid_khr', 'change_usd', 'change_khr', 'sale_status'],
@@ -125,6 +125,15 @@ function validateCustomer(value: unknown): void {
   exactKeys(value, ['id', 'name'], 'customer')
   nullableId(value.id, 'customer.id')
   nullableText(value.name, 240, 'customer.name')
+}
+
+const CUSTOMER_DETAIL_KEYS = ['name', 'phone', 'email', 'address', 'notes', 'gender']
+
+function validateCustomerDetails(value: unknown): void {
+  if (!object(value)) fail('customer_details must be an object.')
+  const keys = Object.keys(value)
+  if (keys.length < 1 || keys.some((key) => !CUSTOMER_DETAIL_KEYS.includes(key))) fail('customer_details has an unsupported shape.')
+  for (const key of keys) nullableText(value[key], 1000, `customer_details.${key}`)
 }
 
 function validateMembership(value: unknown): void {
@@ -190,6 +199,7 @@ function validateKnownValue(field: SaleRecordField, value: unknown): void {
     return
   }
   if (field === 'customer') return validateCustomer(value)
+  if (field === 'customer_details') return validateCustomerDetails(value)
   if (field === 'membership') return validateMembership(value)
   if (field === 'driver') return validateDriver(value)
   if (field === 'item') return validateItem(value)

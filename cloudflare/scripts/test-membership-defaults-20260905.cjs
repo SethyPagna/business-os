@@ -34,6 +34,7 @@ const portal = load('routes/portal.ts', {
   '../lib/safeLinkUrl': load('lib/safeLinkUrl.ts'),
   '../lib/portalText': load('lib/portalText.ts'),
 })
+const permissionsModule = load('lib/permissions.ts')
 const contactDependencies = {
   '../lib/db': { getDb: () => db },
   '../lib/auth': { requireAuth: async (c, next) => {
@@ -42,7 +43,8 @@ const contactDependencies = {
     c.set('user', { id: 1, permissions })
     return next()
   } },
-  '../lib/permissions': load('lib/permissions.ts'),
+  '../lib/permissions': permissionsModule,
+  '../lib/contactSalesSource': load('lib/contactSalesSource.ts', { './permissions': permissionsModule, './contactOptions': contactOptions }),
   '../lib/sqlBinding': load('lib/sqlBinding.ts'),
   '../lib/membershipNumber': membership,
   '../lib/anonymousCustomer': anonymousCustomer,

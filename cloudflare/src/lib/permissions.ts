@@ -266,7 +266,18 @@ export function actionOverrideKey(section: string, action: string): string {
 export function isActionBlocked(user: PermissionUser, section: string, action: string): boolean {
   if (isAdminControlUser(user)) return false
   const permissions = mergedView(user)
-  return permissions[actionOverrideKey(section, action)] === false
+  if (permissions[actionOverrideKey(section, action)] !== false) return false
+  return !isViewImpliedByWrite(permissions, section, action)
+}
+
+// Contacts: Add and Edit imply View (owner, 30 Sep 2026). A role that can add
+// or edit a contact must be able to see it, so a stored contacts:view = false
+// only takes effect once Add and Edit are both switched off too. The role
+// editor mirrors this (frontend utils/permissionActions.ts).
+const CONTACTS_WRITES_IMPLYING_VIEW = ['add', 'edit']
+function isViewImpliedByWrite(permissions: Readonly<Record<string, PermissionValue>>, section: string, action: string): boolean {
+  if (section !== 'contacts' || action !== 'view') return false
+  return CONTACTS_WRITES_IMPLYING_VIEW.some((write) => permissions[actionOverrideKey(section, write)] !== false)
 }
 
 /**

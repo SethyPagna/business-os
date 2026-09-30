@@ -46,6 +46,7 @@ import { bumpVersion, bumpVersions, cachedJsonResponse, getVersionWithFallback }
 import { localDateAtOrAfter, localDateAtOrBefore, localDateExpr, localDateOf } from '../lib/businessDateWindow'
 import type { Env } from '../index'
 import { actorSnapshot } from '../lib/actorSnapshot'
+import { SALES_CUSTOMER_COLUMNS, buildCustomerDetailsSaleEvent, contactSourceAuditDetails, readContactSalesSource } from '../lib/contactSalesSource'
 import {
   buildContactMergePlan,
   stepContactMergePlan,
@@ -219,6 +220,17 @@ for (const prefix of CONTACT_PATH_PREFIXES) {
   app.use(prefix, requireAuth)
   app.use(`${prefix}/*`, requireAuth)
 }
+
+function isSupplierNamesRead(c: Context): boolean {
+  return c.req.method === 'GET' && /^\/(?:api\/)?suppliers\/?$/.test(c.req.path) && c.req.query('fields') === 'names'
+}
+
+// "View and search" off hides the directory. Writes keep their own action
+// gates, and supplier names stay pickable from the product and return forms.
+function isContactDirectoryRead(c: Context): boolean {
+  return (c.req.method === 'GET' || c.req.method === 'HEAD') && !isSupplierNamesRead(c)
+}
+
 // Legacy gates every customers/suppliers/delivery-contacts endpoint (reads
 // and writes alike) behind requirePermission('contacts') -- this Worker
 // only checked requireAuth (any logged-in user), a real gap.
@@ -246,6 +258,9 @@ const requireContactsAccess = async (c: Context<{ Bindings: Env; Variables: { us
     && c.req.query('fields') === 'sales_picker'
     && (getPermissionTier(user, 'pos') !== 'none' || getPermissionTier(user, 'sales') !== 'none')) return next()
   if (getPermissionTier(user, 'contacts') === 'none') return c.json({ error: 'You do not have permission to perform this action' }, 403)
+  if (isContactDirectoryRead(c) && getActionTier(user, 'contacts', 'view') === 'none') {
+    return c.json({ error: 'You do not have permission to perform this action' }, 403)
+  }
   return next()
 }
 
@@ -1535,10 +1550,14 @@ function registerContactRoutes(config: ContactConfig) {
     const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
     const name = String(body.name || '').trim()
     if (!name) return c.json({ error: 'Name is required' }, 400)
+    const salesSource = readContactSalesSource(user, config.table, body, { requireSaleId: false })
+    if (!salesSource.ok) return c.json({ error: salesSource.error }, salesSource.status)
 
     const db = getDb(c.env)
     const payload = pickColumns(body, config.columns)
     payload.name = name
+    // A till or sale add cannot backdate the joined date.
+    if (salesSource.source) delete payload.created_at
     // P7-c: store the P8 display shape (0XX XXX XXX[X]) so manual creates
     // match the 10,352 migrated numbers. Matching below stays digit-based,
     // so this changes nothing about duplicate detection or linkage.
@@ -1649,6 +1668,7 @@ function registerContactRoutes(config: ContactConfig) {
     c.executionCtx.waitUntil(Promise.all([
       audit(c.env, user?.id ?? null, actorSnapshot(user), 'create', config.entity, id, {
         name,
+        ...contactSourceAuditDetails(salesSource.source),
         ...(duplicateDecision.decision ? {
           duplicate_decision: 'create_separate',
           duplicate_candidate_ids: duplicateDecision.decision.candidateIds,
@@ -1706,11 +1726,19 @@ function registerContactRoutes(config: ContactConfig) {
     }
     const id = c.req.param('id')
     const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
+    const salesSource = readContactSalesSource(user, config.table, body, { requireSaleId: true })
+    if (!salesSource.ok) return c.json({ error: salesSource.error }, salesSource.status)
+    const source = salesSource.source
     const db = getDb(c.env)
 
     const current = await db.prepare(`SELECT * FROM ${config.table} WHERE id = @id`).get<Record<string, unknown>>({ id })
     if (!current) return c.json({ error: `${config.entity} not found` }, 404)
     if (config.table === 'customers' && isAnonymousCustomer(current)) return anonymousCustomerMutationResponse(c)
+    if (source?.kind === 'sale') {
+      const sale = await db.prepare('SELECT id, customer_id FROM sales WHERE id = @saleId').get<{ id: number; customer_id: number | null }>({ saleId: source.saleId })
+      if (!sale) return c.json({ error: 'sale not found' }, 404)
+      if (Number(sale.customer_id) !== Number(id)) return c.json({ error: 'This sale is not linked to that customer.', code: 'sale_customer_mismatch' }, 409)
+    }
     const expectedUpdatedAt = getExpectedUpdatedAt(body)
     try {
       assertUpdatedAtMatch(config.entity, current, expectedUpdatedAt)
@@ -1763,7 +1791,9 @@ function registerContactRoutes(config: ContactConfig) {
     // payload for a 'review'-tier user before it's applied, exactly like
     // pickColumns already drops any column not sent at all.
     const tier = getPermissionTier(user, 'contacts')
-    const allowedColumns = tier === 'review' ? ['name'] : config.columns
+    // A POS or sale edit is the one place a Review-tier role may change more than
+    // the name, and even a Full role there is held to the sales-safe columns.
+    const allowedColumns = source ? SALES_CUSTOMER_COLUMNS : tier === 'review' ? ['name'] : config.columns
     const payload = pickColumns(body, allowedColumns)
     payload.name = name
     // P7-c: same P8 display shape on edit as on create -- an update that
@@ -1786,8 +1816,8 @@ function registerContactRoutes(config: ContactConfig) {
     // (config.columns minus 'name'), not just when the tier happens to be
     // 'review' (a review-tier user submitting a genuine name-only change
     // isn't "partial", nothing of theirs was dropped).
-    const droppedColumns = tier === 'review'
-      ? config.columns.filter((col) => col !== 'name' && Object.prototype.hasOwnProperty.call(body, col))
+    const droppedColumns = tier === 'review' || source
+      ? config.columns.filter((col) => !allowedColumns.includes(col) && Object.prototype.hasOwnProperty.call(body, col))
       : []
     const wasPartial = droppedColumns.length > 0
 
@@ -1907,6 +1937,22 @@ function registerContactRoutes(config: ContactConfig) {
         statements.push({ sql: `UPDATE sales SET delivery_contact_name = @name WHERE delivery_contact_id = @id`, params: { id, name } })
       }
     }
+    let recordedOnSale = false
+    if (source?.kind === 'sale' && source.saleId) {
+      const saleRecord = buildCustomerDetailsSaleEvent({
+        saleId: source.saleId,
+        customerId: Number(id),
+        customerName: name,
+        actorId: user?.id ?? null,
+        actorUsername: actorSnapshot(user),
+        before: current,
+        after: payload,
+      })
+      if (saleRecord) {
+        statements.push(saleRecord)
+        recordedOnSale = true
+      }
+    }
     // The contact UPDATE built above carries `payload` as its params, so a
     // deferred mint (mintMembership) has to refresh them before the batch
     // runs: withMintedMembershipNumber re-mints and calls back on a lost
@@ -1956,6 +2002,7 @@ function registerContactRoutes(config: ContactConfig) {
     const contactDiffKeys = Object.keys(payload).filter((column) => !CONTACT_DERIVED_COLUMNS.has(column))
     await audit(c.env, user?.id ?? null, actorSnapshot(user), 'update', config.entity, id, {
       name,
+      ...contactSourceAuditDetails(source),
       ...(duplicateDecision.decision ? {
         duplicate_decision: 'create_separate',
         duplicate_candidate_ids: duplicateDecision.decision.candidateIds,
@@ -1963,6 +2010,7 @@ function registerContactRoutes(config: ContactConfig) {
       } : {}),
     }, changedFields(current, payload, { keys: contactDiffKeys }))
     const updateVersions: string[] = [config.table]
+    if (recordedOnSale) updateVersions.push('sales')
     if (nameChanged && snapshotCarry) {
       if (config.table === 'customers') {
         updateVersions.push('sales', 'returns')

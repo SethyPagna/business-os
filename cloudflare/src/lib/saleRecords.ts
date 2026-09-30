@@ -119,6 +119,7 @@ export const SALE_RECORD_FIELDS = [
   'payment',
   'delivery',
   'customer',
+  'customer_details',
   'membership',
   'item',
   'quantity',
