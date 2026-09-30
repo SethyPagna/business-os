@@ -54,6 +54,7 @@ import PortalFooter from './legal/LegalPages.tsx'
 import { localizeDefaultConfigCopy, resolveStorefrontCopy } from './portalLanguagePacks.ts'
 import { ADMIN_MAX_PRODUCT_GALLERY_IMAGES } from '../products/helpers/productGalleryHelpers.ts'
 import InstallPromptBand from '../shared/InstallPromptBand.tsx'
+import InstallAppButton from '../install/InstallAppButton.tsx'
 import { installBeforeInstallPromptCapture, installStandaloneExternalLinkGuard } from '../../utils/standaloneNavigation.ts'
 import { normalizePortalLanguage, readPublicStorefrontLanguage, storePortalLanguage } from './portalLanguageOptions.ts'
 import { isAdminHostname } from '../../app/pathRouting.ts'
@@ -1526,6 +1527,10 @@ export default function PublicCatalogPage() {
     </div>
   ) : null
 
+  // On the admin host the manifest is the staff app's, so the shop offers no install there.
+  const offersShopInstall = !isAdminHostname()
+  const accountDrawerIconButtonClass = 'rounded-full p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-100'
+
   // Account drawer: the top-bar profile icon opens this. It reuses the same
   // CatalogAccountSection body that used to be a nav tab (sign in / sign up /
   // signed-in profile + the now-disabled membership lookup), just presented as
@@ -1544,14 +1549,19 @@ export default function PublicCatalogPage() {
             <UserIcon className="h-5 w-5 text-slate-700 dark:text-neutral-200" />
             <div className="text-sm font-semibold text-slate-900 dark:text-neutral-100">{copy('account', 'Account')}</div>
           </div>
-          <button
-            type="button"
-            className="rounded-full p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
-            onClick={() => setAccountOpen(false)}
-            aria-label={copy('close', 'Close')}
-          >
-            <X className="h-5 w-5" />
-          </button>
+          <div className="flex items-center gap-1">
+            {offersShopInstall ? (
+              <InstallAppButton translate={(key, fallback, fallbackKm) => copy(key, fallback, fallbackKm)} className={accountDrawerIconButtonClass} />
+            ) : null}
+            <button
+              type="button"
+              className={accountDrawerIconButtonClass}
+              onClick={() => setAccountOpen(false)}
+              aria-label={copy('close', 'Close')}
+            >
+              <X className="h-5 w-5" />
+            </button>
+          </div>
         </div>
         <div className="max-h-[calc(70*var(--app-vh))] overflow-y-auto overscroll-contain px-5 py-4">
           <Suspense fallback={<div className="rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-500 dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-400">{copy('loadingPortal', 'Loading website...')}</div>}>
@@ -1683,16 +1693,13 @@ export default function PublicCatalogPage() {
     pullToRefreshEnabled,
   )
 
-  // The one automatic system notice the public portal is allowed to show
-  // unprompted (every other banner needs a merchant-configured reason) --
-  // pinned to the TOP, clear of the bottom-right bucket/contact FABs below,
-  // and dismissible exactly like the admin app's own IosInstallHint (shared
-  // logic, see InstallPromptBand.tsx's doc comment).
-  const installBand = (
+  // The one notice the shop shows unprompted (every other banner needs a merchant-configured reason);
+  // pinned to the top, clear of the bottom-right bucket and contact buttons.
+  const installBand = offersShopInstall ? (
     <div className="pointer-events-none fixed inset-x-2 top-[calc(0.75rem+env(safe-area-inset-top))] z-40 flex justify-center sm:inset-x-auto sm:right-4 sm:w-[22rem] sm:justify-end">
       <InstallPromptBand translate={(key, fallback, fallbackKm) => copy(key, fallback, fallbackKm)} />
     </div>
-  )
+  ) : null
 
   // Bucket ("My List") and Contact us are two separate floating icons,
   // stacked bottom-right with the bucket on top -- the bucket stays visible

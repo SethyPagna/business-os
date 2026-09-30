@@ -538,6 +538,173 @@ await check('install sheet texts carry their own Khmer, and every inline fallbac
   }
 })
 
+const SHOP_HOST = 'leangbeauty.com'
+const SHOP_NAMES_NO_STAFF = /admin|staff|Business OS|បុគ្គលិក|អ្នកគ្រប់គ្រង/i
+const SHOP_BUTTON_CLASS = 'shop-drawer-icon-button'
+
+type ElementNode = { type: unknown; props: Record<string, unknown> & { children?: unknown } }
+const isElement = (node: unknown): node is ElementNode => typeof node === 'object' && node !== null && 'props' in node
+function findElement(node: unknown, matches: (element: ElementNode) => boolean): ElementNode | undefined {
+  if (Array.isArray(node)) {
+    for (const child of node) {
+      const found = findElement(child, matches)
+      if (found) return found
+    }
+    return undefined
+  }
+  if (!isElement(node)) return undefined
+  return matches(node) ? node : findElement(node.props.children, matches)
+}
+
+function compileIosSteps(): ComponentModule {
+  const ModalStub = ({ title, children }: { title: string; children: unknown }) =>
+    React.createElement('div', { role: 'dialog' }, React.createElement('h2', null, title), children as never)
+  return compileComponent('src/components/install/IosInstallSteps.tsx', { '../shared/Modal.tsx': ModalStub })
+}
+
+type ShopButton = { markup: string; click: () => void; openedSteps: unknown[] }
+function renderShopButton(install: InstallModule, language: Language, stepsOpen = false): ShopButton {
+  const openedSteps: unknown[] = []
+  const iosSteps = compileIosSteps()
+  const buttonReact = {
+    ...clientSnapshotReact,
+    useState: (initial: unknown) => [stepsOpen || initial, (next: unknown) => { openedSteps.push(next) }],
+  }
+  const lazyImport = { lazyRetry: () => iosSteps.default }
+  const button = compileComponent('src/components/install/InstallAppButton.tsx', {
+    react: buttonReact,
+    '../../utils/lazyImport.ts': lazyImport,
+    '../../utils/standaloneNavigation.ts': install,
+  })
+  const props = { translate: inlineCopy(language), className: SHOP_BUTTON_CLASS }
+  const markup = renderToStaticMarkup(React.createElement(button.default, props))
+  const tree = button.default(props)
+  const click = () => {
+    const found = findElement(tree, (element) => element.type === 'button')
+    assert.ok(found, 'expected the install button')
+    ;(found.props.onClick as () => void)()
+  }
+  return { markup, click, openedSteps }
+}
+
+async function shopDevice(device: Device): Promise<{ win: EventTarget; install: InstallModule }> {
+  const { window: win } = useDevice({ hostname: SHOP_HOST, ...device })
+  return { win, install: await freshInstallModule() }
+}
+
+await check('the shop account button is one icon named by its tooltip, in both languages', async () => {
+  for (const [language, label] of [['en', 'Install app'], ['km', 'ដំឡើងកម្មវិធី']] as const) {
+    const { install } = await shopDevice({ userAgent: USER_AGENTS.iphoneSafari, maxTouchPoints: 5 })
+    const { markup } = renderShopButton(install, language)
+    const [only, ...others] = buttons(markup)
+    assert.ok(only, `${language}: the drawer shows the install button when an install is possible`)
+    assert.equal(others.length, 0)
+    assert.equal(visibleText(only.inner), '', 'icon-only: the Account header has no room for words')
+    assert.match(only.inner, /data-icon="download"/)
+    assert.equal(attribute(only.attributes, 'aria-label'), label)
+    assert.equal(attribute(only.attributes, 'title'), label, 'the tooltip is the translated aria-label')
+    assert.equal(attribute(only.attributes, 'class'), SHOP_BUTTON_CLASS, 'the drawer styles it like its Close button')
+    assert.equal(label, String(readPack(language).install_app), 'the tooltip reads the same words as the staff menu row')
+  }
+})
+
+await check('the shop account button exists only when an install is possible, never in the installed app', async () => {
+  const cases: Array<[string, Device, ((win: EventTarget) => void)?]> = [
+    ['iOS home-screen app', { userAgent: USER_AGENTS.iphoneSafari, maxTouchPoints: 5, iosStandalone: true }],
+    ['display-mode standalone with a captured prompt', { userAgent: USER_AGENTS.androidChrome, maxTouchPoints: 5, displayModeStandalone: true }, (win) => { win.dispatchEvent(installPromptEvent()) }],
+    ['Android before Chrome says the page is installable', { userAgent: USER_AGENTS.androidChrome, maxTouchPoints: 5 }],
+    ['Chrome on iPhone, which cannot Add to Home Screen', { userAgent: USER_AGENTS.iphoneChrome, maxTouchPoints: 5 }],
+    ['an install already recorded on this device', { userAgent: USER_AGENTS.iphoneSafari, maxTouchPoints: 5, storage: memoryStorage({ [INSTALLED_KEY]: String(Date.now()) }) }],
+  ]
+  for (const [name, device, afterLoad] of cases) {
+    const { win, install } = await shopDevice(device)
+    afterLoad?.(win)
+    assert.equal(renderShopButton(install, 'en').markup, '', `${name}: no install button`)
+  }
+
+  const android = await shopDevice({ userAgent: USER_AGENTS.androidChrome, maxTouchPoints: 5 })
+  android.win.dispatchEvent(installPromptEvent())
+  assert.notEqual(renderShopButton(android.install, 'en').markup, '', 'positive control: Android once the prompt is captured')
+  android.win.dispatchEvent(new Event('appinstalled'))
+  assert.equal(renderShopButton(android.install, 'en').markup, '', 'gone once the app is installed')
+
+  const desktop = await shopDevice({ userAgent: USER_AGENTS.desktopChrome })
+  desktop.win.dispatchEvent(installPromptEvent())
+  assert.notEqual(renderShopButton(desktop.install, 'en').markup, '', 'owner default: laptops get the Account button, never the band')
+})
+
+await check('closing the shop band keeps the install icon in the Account drawer', async () => {
+  const { install } = await shopDevice({ userAgent: USER_AGENTS.iphoneSafari, maxTouchPoints: 5 })
+  install.dismissInstallBand()
+  const reloaded = await freshInstallModule()
+  assert.equal(reloaded.installBandRoute(), null, 'the band stays closed after a reload')
+  assert.notEqual(renderShopButton(reloaded, 'en').markup, '', 'the Account button still offers the install')
+})
+
+await check('on iPhone the shop button opens the three steps; on Android it replays the native prompt', async () => {
+  const iphone = await shopDevice({ userAgent: USER_AGENTS.iphoneSafari, maxTouchPoints: 5 })
+  const closed = renderShopButton(iphone.install, 'km')
+  closed.click()
+  assert.deepEqual(closed.openedSteps, [true], 'the tap opens the steps sheet')
+  const open = visibleText(renderShopButton(iphone.install, 'km', true).markup)
+  const km = readPack('km')
+  let at = open.indexOf(String(km.ios_install_steps_title))
+  assert.ok(at >= 0, 'the sheet renders with its Khmer title')
+  for (const key of ['ios_install_step_menu', 'ios_install_step_add', 'ios_install_step_web_app']) {
+    const next = open.indexOf(String(km[key]), at)
+    assert.ok(next > at, `${key} renders in the shop language, in order`)
+    at = next
+  }
+
+  const android = await shopDevice({ userAgent: USER_AGENTS.androidChrome, maxTouchPoints: 5 })
+  const event = installPromptEvent()
+  android.win.dispatchEvent(event)
+  const button = renderShopButton(android.install, 'en')
+  button.click()
+  await Promise.resolve()
+  assert.equal(event.prompted, 1, 'the captured prompt is replayed')
+  assert.deepEqual(button.openedSteps, [], 'no iOS sheet on Android')
+})
+
+await check('the shop band, button and steps never name admin, staff or Business OS, and link nowhere', async () => {
+  for (const language of ['en', 'km'] as const) {
+    const markups = [
+      await renderBand({ userAgent: USER_AGENTS.iphoneSafari, maxTouchPoints: 5, hostname: SHOP_HOST }, language),
+      await renderBand({ userAgent: USER_AGENTS.androidChrome, maxTouchPoints: 5, hostname: SHOP_HOST }, language, (win) => { win.dispatchEvent(installPromptEvent()) }),
+    ]
+    const iphone = await shopDevice({ userAgent: USER_AGENTS.iphoneSafari, maxTouchPoints: 5 })
+    markups.push(renderShopButton(iphone.install, language).markup, renderShopButton(iphone.install, language, true).markup)
+    for (const markup of markups) {
+      assert.notEqual(markup, '', `${language}: every shop install surface rendered`)
+      assert.doesNotMatch(markup, SHOP_NAMES_NO_STAFF, `${language}: the shop never names the staff app`)
+      assert.doesNotMatch(markup, /<a\b|href=/, `${language}: the shop install offer links nowhere`)
+    }
+  }
+})
+
+await check('install button texts carry their own Khmer, matching the packs', () => {
+  assertEveryTranslateCallHasKhmer('src/components/install/InstallAppButton.tsx', 1)
+  for (const [, key, english, khmer] of read('src/components/install/InstallAppButton.tsx').matchAll(/translate\(\s*'([^']+)',\s*'([^']*)',\s*'([^']*)'/g)) {
+    assert.equal(english, readPack('en')[key])
+    assert.equal(khmer, readPack('km')[key])
+  }
+  assert.ok(!fs.existsSync(new URL('../src/components/shared/InstallAppButton.tsx', import.meta.url)), 'new install UI stays out of the app-shared chunk')
+})
+
+await check('the band and button gate reads the host: admin hosts are refused, shop hosts are not', () => {
+  for (const [hostname, admin] of [
+    ['admin.leangbeauty.com', true],
+    ['localhost', true],
+    ['127.0.0.1', true],
+    ['[::1]', true],
+    [SHOP_HOST, false],
+    ['www.leangbeauty.com', false],
+  ] as const) {
+    useDevice({ userAgent: USER_AGENTS.iphoneSafari, hostname })
+    assert.equal(pathRouting.isAdminHostname(), admin, `${hostname}: isAdminHostname`)
+  }
+})
+
 if (failed > 0) {
   console.error(`installOffer.test.ts: ${failed} failing check(s)`)
   process.exit(1)
