@@ -1,5 +1,5 @@
 import { Fragment } from 'react'
-import type { ClipboardEventHandler, ComponentType, Dispatch, SetStateAction } from 'react'
+import type { ComponentType, Dispatch, SetStateAction } from 'react'
 import { buildLogoImageStyle } from './logoImageStyle'
 import Bot from 'lucide-react/dist/esm/icons/bot.js'
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
@@ -16,8 +16,6 @@ import Send from 'lucide-react/dist/esm/icons/send.js'
 import ShoppingBag from 'lucide-react/dist/esm/icons/shopping-bag.js'
 import Store from 'lucide-react/dist/esm/icons/store.js'
 import Ticket from 'lucide-react/dist/esm/icons/ticket.js'
-import Upload from 'lucide-react/dist/esm/icons/upload.js'
-import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
 import AppSelect, { type AppSelectOption } from '../shared/AppSelect.tsx'
 import PortalEmbedConsent from './legal/PortalEmbedConsent.tsx'
 import { SectionShell } from './catalogUi'
@@ -51,108 +49,11 @@ interface PreviewConfig {
   priceDisplay?: string
   showCover?: boolean
   showLogo?: boolean
-  showPointValue?: boolean
-  submissionEnabled?: boolean
-  submissionInstructions?: string
   title?: string
-}
-
-interface MembershipCustomer {
-  name?: string
-  membership_number?: string
-  created_at?: unknown
-  phone?: string
-  email?: string
-  company?: string
-  notes?: string
-}
-
-interface MembershipPoints {
-  balance?: number
-  redeemValueUsd?: number
-  redeemValueKhr?: number
-}
-
-interface MembershipTotals {
-  totalSalesUsd?: number
-  totalSalesKhr?: number
-  totalReturnsUsd?: number
-  totalReturnsKhr?: number
-  membershipDiscountUsd?: number
-  membershipDiscountKhr?: number
-}
-
-interface MembershipSale {
-  id: IdValue
-  receipt_number?: string
-  created_at?: unknown
-  branch_name?: string
-  payment_status?: string
-  items_summary?: string
-  total_usd?: number
-  total_khr?: number
-}
-
-interface MembershipReturn {
-  id: IdValue
-  return_number?: string
-  created_at?: unknown
-  branch_name?: string
-  status?: string
-  items_summary?: string
-  reason?: string
-  total_refund_usd?: number
-  total_refund_khr?: number
-}
-
-interface ShareSubmission {
-  id: IdValue
-  platform?: string
-  created_at?: unknown
-  status?: string
-  note?: string
-  screenshots?: string[]
-  reward_points?: number
-  review_note?: string
-}
-
-interface MembershipData {
-  customer?: MembershipCustomer
-  points?: MembershipPoints
-  totals?: MembershipTotals
-  sales?: MembershipSale[]
-  returns?: MembershipReturn[]
-  submissions?: ShareSubmission[]
-}
-
-interface SubmissionDraft {
-  platform: string
-  note: string
-  screenshots: string[]
-  rightsConsent: boolean
-  privacyConsent: boolean
 }
 
 interface CatalogMembershipSectionProps {
   copy: CopyFn
-  formatDateTime: (value: unknown) => string
-  formatPortalPrice: (usd: unknown, khr: unknown, config: PreviewConfig) => string
-  membershipNumber: string
-  setMembershipNumber: (value: string) => void
-  handleMembershipLookup: () => void
-  membershipLoading: boolean
-  membershipError?: string
-  membershipData?: MembershipData | null
-  previewConfig: PreviewConfig
-  redeemSummaryText: string
-  submissionDraft: SubmissionDraft
-  setSubmissionDraft: Dispatch<SetStateAction<SubmissionDraft>>
-  submissionSaving: boolean
-  handleSubmissionPaste: ClipboardEventHandler<HTMLTextAreaElement>
-  handleSubmitShareProof: () => void
-  handleUploadSubmissionImages: () => void
-  openPortalImage: (title: string, images: string[], index?: number) => void
-  accountSignedIn: boolean
 }
 
 interface BusinessFact {
@@ -306,125 +207,14 @@ function normalizePortalColor(value: unknown, fallback: string): string {
   return /^#[0-9a-fA-F]{6}$/.test(raw) ? raw.toLowerCase() : fallback
 }
 
-function CatalogMembershipSection({
-  copy,
-  previewConfig,
-  submissionDraft,
-  setSubmissionDraft,
-  submissionSaving,
-  handleSubmissionPaste,
-  handleSubmitShareProof,
-  handleUploadSubmissionImages,
-  openPortalImage,
-  membershipError,
-  accountSignedIn,
-}: CatalogMembershipSectionProps) {
-  // The anonymous membership lookup was removed (§2, user request). Typing a
-  // membership number to see purchases/points exposed customer data on a
-  // public surface; a customer's own history now lives behind a real account
-  // instead of an open lookup. This renders the privacy notice in its place
-  // (the storefront Account section carries sign-in / sign-up).
+function CatalogMembershipSection({ copy }: CatalogMembershipSectionProps) {
   return (
-    <SectionShell
-      title={copy('membership', 'Membership')}
-      subtitle={copy('membershipDisabledSubtitle', 'Your membership details are kept private.')}
-    >
-      <div className="rounded-[28px] border border-slate-200/80 bg-white p-6 text-slate-700 shadow-[0_18px_42px_rgba(148,163,184,0.14)] dark:border-neutral-700/80 dark:bg-neutral-900 dark:text-neutral-200 dark:shadow-lg">
-        <div className="flex items-start gap-3">
-          <Ticket className="mt-0.5 h-5 w-5 shrink-0 text-amber-500 dark:text-amber-300" />
-          <div className="space-y-1">
-            <div className="text-sm font-semibold text-slate-900 dark:text-white">{copy('membershipPrivacyTitle', 'Membership lookup is off')}</div>
-            <p className="text-sm leading-relaxed">
-              {copy('membershipDisabledMessage', 'This feature is not built into the account structure for privacy and security purposes.')}
-            </p>
-          </div>
-        </div>
-      </div>
-      {previewConfig.submissionEnabled ? (
-        <div className="mt-4 rounded-[28px] border border-slate-200/80 bg-white p-5 shadow-sm dark:border-neutral-700/80 dark:bg-neutral-900">
-          <h3 className="text-base font-semibold text-slate-900 dark:text-white">{copy('shareProofTitle', 'Send share proof', 'ផ្ញើភស្តុតាងចែករំលែក')}</h3>
-          <p className="mt-1 text-sm leading-6 text-slate-600 dark:text-neutral-300">
-            {previewConfig.submissionInstructions || copy('shareProofInstructions', 'Upload screenshots for staff review. A submission does not guarantee points or approval.', 'បញ្ចូលរូបថតអេក្រង់សម្រាប់បុគ្គលិកពិនិត្យ។ ការផ្ញើមិនធានាថានឹងទទួលបានពិន្ទុ ឬការអនុម័តទេ។')}
-          </p>
-
-          {!accountSignedIn ? (
-            <p className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-700/60 dark:bg-amber-900/20 dark:text-amber-200">
-              {copy('submissionSignInRequired', 'Sign in before sending a screenshot.', 'សូមចូលគណនីមុនពេលផ្ញើរូបថតអេក្រង់។')}
-            </p>
-          ) : null}
-
-          <div className="mt-4 grid gap-3">
-            <div>
-              <label htmlFor="portal-submission-platform" className="block text-sm font-medium text-slate-700 dark:text-neutral-200">{copy('submissionPlatform', 'Platform', 'បណ្ដាញ')}</label>
-              <AppSelect
-                id="portal-submission-platform"
-                name="portal_submission_platform"
-                value={submissionDraft.platform}
-                onChange={(platform) => setSubmissionDraft((current) => ({ ...current, platform }))}
-                ariaLabel={copy('submissionPlatform', 'Platform', 'បណ្ដាញ')}
-                className="mt-1 w-full"
-                buttonClassName="h-11 w-full"
-                options={['Facebook', 'Instagram', 'TikTok', 'Telegram', 'Other'].map((value) => ({ value, label: value }))}
-              />
-            </div>
-            <div>
-              <label htmlFor="portal-submission-note" className="block text-sm font-medium text-slate-700 dark:text-neutral-200">{copy('submissionNote', 'Optional note', 'កំណត់ចំណាំ (ស្រេចចិត្ត)')}</label>
-              <textarea
-                id="portal-submission-note"
-                name="portal_submission_note"
-                className="input mt-1 min-h-24 resize-y"
-                maxLength={1000}
-                value={submissionDraft.note}
-                onPaste={handleSubmissionPaste}
-                onChange={(event) => setSubmissionDraft((current) => ({ ...current, note: event.target.value }))}
-                placeholder={copy('submissionPasteHint', 'You can paste screenshots here or use the upload button.', 'អ្នកអាចបិទភ្ជាប់រូបថតអេក្រង់នៅទីនេះ ឬប្រើប៊ូតុងបញ្ចូល។')}
-              />
-            </div>
-            <button type="button" className="btn-secondary w-fit text-sm" onClick={handleUploadSubmissionImages} disabled={!accountSignedIn || submissionSaving}>
-              <Upload className="mr-2 inline h-4 w-4" />
-              {copy('uploadScreenshots', 'Upload screenshots', 'បញ្ចូលរូបថតអេក្រង់')}
-            </button>
-            {submissionDraft.screenshots.length ? (
-              <ul className="grid grid-cols-2 gap-2 sm:grid-cols-4" aria-label={copy('selectedScreenshots', 'Selected screenshots', 'រូបថតអេក្រង់ដែលបានជ្រើស')}>
-                {submissionDraft.screenshots.map((src, index) => (
-                  <li key={`${index}-${src.slice(-24)}`} className="relative overflow-hidden rounded-2xl border border-slate-200 dark:border-neutral-700">
-                    <button type="button" className="block aspect-square w-full" onClick={() => openPortalImage(copy('submissionScreenshot', 'Submission screenshot', 'រូបថតអេក្រង់ដែលបានផ្ញើ'), submissionDraft.screenshots, index)}>
-                      <img src={src} alt={`${copy('submissionScreenshot', 'Submission screenshot', 'រូបថតអេក្រង់ដែលបានផ្ញើ')} ${index + 1}`} className="h-full w-full object-cover" />
-                    </button>
-                    <button
-                      type="button"
-                      className="absolute right-1 top-1 inline-flex h-9 w-9 items-center justify-center rounded-full bg-white/95 text-rose-700 shadow"
-                      onClick={() => setSubmissionDraft((current) => ({ ...current, screenshots: current.screenshots.filter((_, itemIndex) => itemIndex !== index) }))}
-                      aria-label={`${copy('remove', 'Remove', 'លុប')} ${index + 1}`}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            ) : null}
-            <label className="flex items-start gap-3 rounded-2xl border border-slate-200 p-3 text-sm leading-6 dark:border-neutral-700">
-              <input type="checkbox" className="mt-1 h-4 w-4" checked={submissionDraft.rightsConsent} onChange={(event) => setSubmissionDraft((current) => ({ ...current, rightsConsent: event.target.checked }))} />
-              <span>{copy('submissionRightsConsent', 'I created these screenshots or have permission to send them for staff review.', 'ខ្ញុំបានបង្កើតរូបថតអេក្រង់ទាំងនេះ ឬមានការអនុញ្ញាតឱ្យផ្ញើសម្រាប់បុគ្គលិកពិនិត្យ។')}</span>
-            </label>
-            <label className="flex items-start gap-3 rounded-2xl border border-slate-200 p-3 text-sm leading-6 dark:border-neutral-700">
-              <input type="checkbox" className="mt-1 h-4 w-4" checked={submissionDraft.privacyConsent} onChange={(event) => setSubmissionDraft((current) => ({ ...current, privacyConsent: event.target.checked }))} />
-              <span>{copy('submissionPrivacyConsent', 'I agree that the store may keep the screenshots and note for staff review under the Privacy Policy.', 'ខ្ញុំយល់ព្រមឱ្យហាងរក្សាទុករូបថតអេក្រង់ និងកំណត់ចំណាំសម្រាប់បុគ្គលិកពិនិត្យក្រោមគោលការណ៍ឯកជនភាព។')}</span>
-            </label>
-            {membershipError ? <p role="alert" className="text-sm text-rose-700 dark:text-rose-300">{membershipError}</p> : null}
-            <button
-              type="button"
-              className="btn-primary w-fit text-sm"
-              onClick={handleSubmitShareProof}
-              disabled={!accountSignedIn || submissionSaving || !submissionDraft.screenshots.length || !submissionDraft.rightsConsent || !submissionDraft.privacyConsent}
-            >
-              <Send className="mr-2 inline h-4 w-4" />
-              {submissionSaving ? copy('saving', 'Saving...', 'កំពុងរក្សាទុក...') : copy('submitForReview', 'Submit for review', 'ផ្ញើសម្រាប់ពិនិត្យ')}
-            </button>
-          </div>
-        </div>
-      ) : null}
-    </SectionShell>
+    <section className="py-5">
+      <h2 className="flex items-center gap-3 rounded-[28px] border border-slate-200/80 bg-white p-6 text-base font-semibold text-slate-900 shadow-sm dark:border-neutral-700/80 dark:bg-neutral-900 dark:text-white">
+        <Ticket aria-hidden="true" className="h-5 w-5 shrink-0 text-amber-500 dark:text-amber-300" />
+        {copy('membershipComingSoon', 'Membership: coming soon')}
+      </h2>
+    </section>
   )
 }
 

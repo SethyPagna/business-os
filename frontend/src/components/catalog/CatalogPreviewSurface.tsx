@@ -210,6 +210,15 @@ export default function CatalogPreviewSurface({
       target?.scrollIntoView({ block: 'start' })
     })
   }
+  const lightboxLabels = {
+    prev: copy('prevImage', 'Prev'),
+    next: copy('nextImage', 'Next'),
+    imageCount: copy('imageCount', '{current}/{total}'),
+    dotsLabel: copy('dotsLabel', 'Image {current} of {total}'),
+    close: copy('close', 'Close'),
+    zoomIn: copy('portal_a11y_zoom_in', 'Zoom in', 'ពង្រីកចូល'),
+    zoomOut: copy('portal_a11y_zoom_out', 'Zoom out', 'បង្រួមចេញ'),
+  }
   const footerWithQuickLinks = isValidElement<PortalFooterProps>(footer)
     ? cloneElement(footer, { quickLinks: portalTabs.map((tab) => ({ key: tab.key, label: tab.label, onSelect: () => handleFooterQuickLink(tab.key) })) })
     : footer
@@ -319,7 +328,8 @@ export default function CatalogPreviewSurface({
           monitors. Trimmed back so the row (and everything else in this
           column) actually uses the space instead of floating in a wide
           gutter on ordinary desktop widths. */}
-      <div className={`mx-auto max-w-[1680px] px-4 py-3 sm:px-6 sm:py-4 lg:px-10 xl:px-14 ${publicView ? 'pt-[calc(0.75rem+env(safe-area-inset-top))] sm:pt-[calc(1rem+env(safe-area-inset-top))]' : ''}`}>
+      {/* The bottom padding is the tallest floating button stack (contact, 7.5rem), so at the page end no button covers the footer. */}
+      <div className={`mx-auto max-w-[1680px] px-4 py-3 sm:px-6 sm:py-4 lg:px-10 xl:px-14 ${publicView ? 'pt-[calc(0.75rem+env(safe-area-inset-top))] pb-[calc(7.5rem+env(safe-area-inset-bottom))] sm:pt-[calc(1rem+env(safe-area-inset-top))] sm:pb-[calc(7.5rem+env(safe-area-inset-bottom))]' : ''}`}>
         <div className="space-y-0">
           <div ref={previewSectionRef} className="space-y-0">
             {/* WCAG 2.4.1: the storefront opens with a row of social links,
@@ -634,12 +644,7 @@ export default function CatalogPreviewSurface({
             onClose={() => setProductGalleryView({ open: false, title: '', items: [], index: 0 })}
             onIndexChange={(index: number) => setProductGalleryView((current) => ({ ...current, index }))}
             variant="immersive"
-            labels={{
-              prev: copy('prevImage', 'Prev'),
-              next: copy('nextImage', 'Next'),
-              imageCount: copy('imageCount', '{current}/{total}'),
-              dotsLabel: copy('dotsLabel', 'Image {current} of {total}'),
-            }}
+            labels={lightboxLabels}
             renderImage={(src, alt, className) => (
               <CatalogProductImage src={src} alt={alt} className={className} />
             )}
@@ -676,12 +681,7 @@ export default function CatalogPreviewSurface({
             index={portalImageView.index}
             onClose={() => setPortalImageView({ open: false, title: '', images: [], index: 0 })}
             onIndexChange={(index: number) => setPortalImageView((current) => ({ ...current, index }))}
-            labels={{
-              prev: copy('prevImage', 'Prev'),
-              next: copy('nextImage', 'Next'),
-              imageCount: copy('imageCount', '{current}/{total}'),
-              dotsLabel: copy('dotsLabel', 'Image {current} of {total}'),
-            }}
+            labels={lightboxLabels}
           />
         ) : null}
       </Suspense>

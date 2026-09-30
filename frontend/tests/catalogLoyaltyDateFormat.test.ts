@@ -34,11 +34,12 @@ async function runTest(name: string, fn: () => void | Promise<void>): Promise<vo
   }
 }
 
-const FILES = [
+const FILES_WITH_A_DATE_HELPER = [
   'src/components/catalog/CatalogPage.tsx',
-  'src/components/catalog/PublicCatalogPage.tsx',
   'src/components/loyalty-points/LoyaltyPointsPage.tsx',
 ]
+// The storefront lost its only dates with the membership lookup; it must not grow a bare one back.
+const FILES = [...FILES_WITH_A_DATE_HELPER, 'src/components/catalog/PublicCatalogPage.tsx']
 
 for (const file of FILES) {
   await runTest(`${file} formats dates through fmtTime, never a bare toLocaleString()`, () => {
@@ -49,7 +50,7 @@ for (const file of FILES) {
       /\bdate\.toLocaleString\(\s*\)/,
       'a bare date.toLocaleString() reintroduces the viewer-locale (dd/mm, 12h) date bug',
     )
-    // The fix must stay wired in.
+    if (!FILES_WITH_A_DATE_HELPER.includes(file)) return
     assert.match(src, /import \{ fmtTime \} from '\.\.\/\.\.\/utils\/formatters\.ts'/)
     assert.match(src, /:\s*fmtTime\(raw\)/, 'the date helper must delegate to fmtTime')
   })
