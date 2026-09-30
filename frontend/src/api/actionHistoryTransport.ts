@@ -18,6 +18,7 @@ export type StockMovementRevertPreview = {
 // Confirmation must use a fresh server decision, never a cached generation.
 export function getStockMovementRevertPreview(id: number): Promise<{ success: true; revert: StockMovementRevertPreview }> {
   return apiFetch('GET', `/api/action-history/movements/${id}/revert-preview`)
+    .catch((error: unknown) => localizeReplayRefusal(error, 'undo'))
 }
 
 export function getActionHistoryDetails(id: string | number, offset = 0): Promise<unknown> {
