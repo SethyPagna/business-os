@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
-import GitMerge from 'lucide-react/dist/esm/icons/git-merge.js'
+import Merge from 'lucide-react/dist/esm/icons/merge.js'
+import { ConflictIcon, CONFLICT_ICON_CLASS } from '../shared/ConflictIcon.ts'
 import UserPlus from 'lucide-react/dist/esm/icons/user-plus.js'
 import Loader2 from 'lucide-react/dist/esm/icons/loader-2.js'
 import CheckCircle2 from 'lucide-react/dist/esm/icons/check-circle-2.js'
@@ -409,7 +410,7 @@ export default function ContactImportConflictsModal({ jobId, entityLabel, t, not
   }, [loading, total, unresolvedCount, rows.length])
 
   return (
-    <Modal title={tr('contacts_import_conflicts_title', 'Resolve name conflicts').replace('{type}', entityLabel)} onClose={onClose} size="lg" draggable unsavedChanges={{ dirty: hasTypedRenameDraft }}>
+    <Modal title={<span className="inline-flex min-w-0 items-center gap-2"><ConflictIcon aria-hidden="true" className={`h-4 w-4 shrink-0 ${CONFLICT_ICON_CLASS}`} /><span className="min-w-0">{tr('contacts_import_conflicts_title', 'Resolve name conflicts').replace('{type}', entityLabel)}</span></span>} onClose={onClose} size="lg" draggable unsavedChanges={{ dirty: hasTypedRenameDraft }}>
       <div className="space-y-4">
         <p className="text-sm text-gray-500 dark:text-gray-400">
           {tr(
@@ -492,7 +493,7 @@ export default function ContactImportConflictsModal({ jobId, entityLabel, t, not
                   </span>
                   <div className="ml-auto flex flex-wrap gap-2">
                     <button type="button" disabled={!selectedRows.size || savingBulk} onClick={() => void bulkSave('merge')} className="btn-secondary px-2.5 py-1 text-xs disabled:opacity-50">
-                      <GitMerge className="mr-1 inline h-3.5 w-3.5" />
+                      <Merge className="mr-1 inline h-3.5 w-3.5" />
                       {tr('contacts_import_conflict_bulk_merge_action', 'Merge selected')}
                     </button>
                     <button type="button" disabled={!selectedRows.size || savingBulk} onClick={() => bulkSave('different')} className="btn-secondary px-2.5 py-1 text-xs disabled:opacity-50">
@@ -593,7 +594,7 @@ export default function ContactImportConflictsModal({ jobId, entityLabel, t, not
                             : 'border-gray-200 text-gray-600 hover:bg-gray-50 dark:border-zinc-700 dark:text-gray-300 dark:hover:bg-zinc-800'
                         }`}
                       >
-                        <GitMerge className="h-3.5 w-3.5" />
+                        <Merge className="h-3.5 w-3.5" />
                         {tr('contacts_import_conflict_merge_action', 'Same person -- merge')}
                       </button>
                       <button

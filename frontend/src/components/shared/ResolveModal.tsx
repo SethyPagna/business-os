@@ -1,4 +1,5 @@
 import AlertTriangle from 'lucide-react/dist/esm/icons/alert-triangle.js'
+import { ConflictIcon, CONFLICT_ICON_CLASS } from './ConflictIcon.ts'
 import CheckCircle from 'lucide-react/dist/esm/icons/check-circle-2.js'
 import { useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
@@ -364,7 +365,7 @@ export default function ResolveModal<P, T>({ title, adapter, onClose, onApplied,
 
   return (
     <Modal
-      title={title}
+      title={<span className="inline-flex min-w-0 items-center gap-2"><ConflictIcon aria-hidden="true" className={`h-4 w-4 shrink-0 ${CONFLICT_ICON_CLASS}`} /><span className="min-w-0">{title}</span></span>}
       onClose={onClose}
       size="xl"
       unsavedChanges={{ dirty }}

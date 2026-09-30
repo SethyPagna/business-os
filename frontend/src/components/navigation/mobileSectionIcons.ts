@@ -6,7 +6,6 @@ import BarChart3 from 'lucide-react/dist/esm/icons/bar-chart-3.js'
 import Bike from 'lucide-react/dist/esm/icons/bike.js'
 import Boxes from 'lucide-react/dist/esm/icons/boxes.js'
 import ClipboardCheck from 'lucide-react/dist/esm/icons/clipboard-check.js'
-import Copy from 'lucide-react/dist/esm/icons/copy.js'
 import Factory from 'lucide-react/dist/esm/icons/factory.js'
 import Gauge from 'lucide-react/dist/esm/icons/gauge.js'
 import Gift from 'lucide-react/dist/esm/icons/gift.js'
@@ -23,6 +22,7 @@ import Undo2 from 'lucide-react/dist/esm/icons/undo-2.js'
 import UserCog from 'lucide-react/dist/esm/icons/user-cog.js'
 import UserRound from 'lucide-react/dist/esm/icons/user-round.js'
 import WalletCards from 'lucide-react/dist/esm/icons/wallet-cards.js'
+import { ConflictIcon } from '../shared/ConflictIcon.ts'
 
 const ICONS_BY_SECTION: Record<string, LucideIcon> = {
   'branches:overview': Gauge,
@@ -36,7 +36,7 @@ const ICONS_BY_SECTION: Record<string, LucideIcon> = {
   'contacts:customers': UserRound,
   'contacts:suppliers': Factory,
   'contacts:delivery': Bike,
-  'contacts:duplicates': Copy,
+  'contacts:duplicates': ConflictIcon,
   'promotions:rules': ListChecks,
   'promotions:discounts': BadgePercent,
   'promotions:loyalty': Gift,
@@ -46,7 +46,7 @@ const ICONS_BY_SECTION: Record<string, LucideIcon> = {
   'products:products': Boxes,
   'products:stock_changes': History,
   'products:stock_in_sessions': PackagePlus,
-  'products:duplicates': Copy,
+  'products:duplicates': ConflictIcon,
   'review:review': ClipboardCheck,
   'review:audit': ScrollText,
   'review:deleted': ArchiveRestore,

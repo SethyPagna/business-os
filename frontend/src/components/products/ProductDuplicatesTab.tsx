@@ -7,6 +7,7 @@ import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw.js'
 import Search from 'lucide-react/dist/esm/icons/search.js'
 import EyeOff from 'lucide-react/dist/esm/icons/eye-off.js'
 import Merge from 'lucide-react/dist/esm/icons/merge.js'
+import { ConflictIcon, CONFLICT_ICON_CLASS } from '../shared/ConflictIcon.ts'
 import InfoHint from '../shared/InfoHint.tsx'
 import ScanSearchButton from '../shared/ScanSearchButton.tsx'
 import { ProductImg } from './shared/primitives.tsx'
@@ -206,6 +207,7 @@ function ClusterCard({
             disabled={!selectable || busy}
             aria-label={t('select_duplicate_cluster') || 'Select this duplicate group'}
           />
+          <ConflictIcon aria-hidden="true" className={`h-3.5 w-3.5 shrink-0 ${CONFLICT_ICON_CLASS}`} />
           <span className={`text-xs font-semibold ${SEVERITY_TEXT[cluster.severity]}`}>{t(key) || fallback}</span>
         </label>
         <div className="flex items-center gap-1">
