@@ -33,7 +33,17 @@ const DUMMY_HASH = '$2b$10$bcwRkHdyVgPIxFMLWdK9sOKBez3Uv06DFpLaUR/Mq0c6w595bHNFq
 // frontend/src/components/catalog/legal/legalContent.ts, which is the version
 // of the text actually shown; scripts/test-portal-legal-consent-pure.cjs pins
 // the two together so they cannot drift apart.
-export const PORTAL_CONSENT_VERSION = 'portal-legal-2026-09-07'
+export const PORTAL_CONSENT_VERSION = 'portal-legal-2026-09-30'
+
+// Owner, 30 Sep 2026: the rewrite removed promises and changed no data use, so
+// agreement to the earlier text stays valid and nobody is signed out or asked
+// again. scripts/test-portal-consent-version-accepted-pure.cjs pins this.
+const EARLIER_ACCEPTED_CONSENT_VERSIONS: readonly string[] = ['portal-legal-2026-09-07']
+
+export function portalConsentVersionAccepted(version: unknown): boolean {
+  if (typeof version !== 'string') return false
+  return version === PORTAL_CONSENT_VERSION || EARLIER_ACCEPTED_CONSENT_VERSIONS.includes(version)
+}
 
 // A ticked checkbox arrives as `true` over JSON and as 'true'/'on'/'1' from
 // anything that posts a form. Everything else -- absent, false, '', 'false'

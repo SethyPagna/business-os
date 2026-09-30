@@ -286,7 +286,7 @@ async function run() {
     assert.strictEqual(res.status, 428)
     const payload = await res.json()
     assert.strictEqual(payload.code, 'portal_consent_required')
-    assert.strictEqual(payload.consentVersion, 'portal-legal-2026-09-07')
+    assert.strictEqual(payload.consentVersion, 'portal-legal-2026-09-30')
     assert.strictEqual(rawDb.prepare('SELECT COUNT(*) AS n FROM customer_share_submissions').get().n, before)
     assert.strictEqual(bucket.objects.size, 0)
     rawDb.prepare("UPDATE portal_accounts SET consent_version = 'portal-legal-2026-09-07', consent_at = CURRENT_TIMESTAMP WHERE id = ?").run([alice.accountId])

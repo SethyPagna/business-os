@@ -1,7 +1,7 @@
 import type { Context } from 'hono'
 import { getCookie, setCookie, deleteCookie } from 'hono/cookie'
 import { getDb } from './db'
-import { PORTAL_CONSENT_VERSION } from './portalAccounts'
+import { PORTAL_CONSENT_VERSION, portalConsentVersionAccepted } from './portalAccounts'
 import type { Env } from '../index'
 import { customerIsProfileSql } from './anonymousCustomer'
 
@@ -119,7 +119,7 @@ export async function getPortalAccountState<E extends { Bindings: Env } = { Bind
     LIMIT 1
   `).get<PortalAccount & { consent_version: string | null; consent_at: string | null }>({ token_hash: tokenHash, now: nowIso })
   if (!row) return { status: 'unauthenticated', account: null }
-  if (row.consent_version !== PORTAL_CONSENT_VERSION || !row.consent_at) {
+  if (!portalConsentVersionAccepted(row.consent_version) || !row.consent_at) {
     return { status: 'reconsent_required', account: null }
   }
 
