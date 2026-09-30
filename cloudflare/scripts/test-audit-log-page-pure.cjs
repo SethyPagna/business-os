@@ -170,7 +170,7 @@ async function main() {
     ok(result.window.endDate === '2026-09-30' && result.window.startDate === '2026-09-01', 'no dates -> the last 30 business days ending today (UTC+7)')
     ok(!result.items.some((r) => r.created_at.startsWith('2026-06')), 'a row outside the default window is not read')
     const clamped = await page({ startDate: '2026-01-01', endDate: '2026-09-30' })
-    ok(clamped.window.startDate === '2026-06-30', 'a span longer than 92 days is clamped to the newest 92 days')
+    ok(clamped.window.startDate === '2026-07-01', 'a span longer than 92 days is clamped to the newest 92 days (2026-07-01..2026-09-30 is exactly 92 calendar days)')
     ok(!clamped.items.some((r) => r.created_at.startsWith('2026-06-01')), 'the clamped window excludes June 1')
     const midnight = await page({ startDate: '2026-09-30', endDate: '2026-09-30' })
     ok(midnight.items.some((r) => r.entity === 'product'), '00:30 local (17:30Z the day before) belongs to its LOCAL day')
@@ -274,6 +274,106 @@ async function main() {
     ok(ancient.items.length === 1, 'a record trail is not cut off by the default window')
   }
 
+  // ---- rows READ at scale, with and without planner statistics ---------------
+  // The 11-row fixture above cannot tell an index walk from a window sort. Here
+  // 100,000 rows over 180 days (about 17k in the default 30-day window) sit under
+  // the production indexes (0196 plus the two the release adds), and the page
+  // statement is wrapped so a counting function sees every row the engine visits.
+  // After ANALYZE, SQLite used to skip-scan (action|user_id, created_at) and sort
+  // the whole window for EVERY page and every "Load more".
+  {
+    const SCALE_ROWS = 100000
+    const SCALE_DAYS = 180
+    const scaleEnd = NOW
+    const ENTITIES = ['sale', 'product', 'customer', 'fee', 'expense', 'return', 'user', 'setting']
+    const ACTIONS = ['create', 'update', 'delete', 'login', 'stock_set', 'export']
+    const stamp = (ms) => new Date(ms).toISOString().replace('T', ' ').slice(0, 19)
+    const buildScale = () => {
+      const scaleDb = new Database(':memory:')
+      scaleDb.exec(createAuditLogs)
+      scaleDb.exec('CREATE TABLE users (id INTEGER PRIMARY KEY, username TEXT)')
+      for (const sql of [
+        'CREATE INDEX idx_audit_logs_entity_entity_id ON audit_logs(entity, entity_id)',
+        'CREATE INDEX idx_audit_logs_action_created ON audit_logs(action, created_at)',
+        ...INDEXES,
+      ]) scaleDb.exec(sql)
+      const insert = scaleDb.prepare('INSERT INTO audit_logs (user_id, user_name, action, entity, entity_id, created_at) VALUES (?, ?, ?, ?, ?, ?)')
+      scaleDb.transaction(() => {
+        for (let i = 0; i < SCALE_ROWS; i += 1) {
+          const at = scaleEnd - (SCALE_ROWS - i) * ((SCALE_DAYS * 86_400_000) / SCALE_ROWS)
+          insert.run(i % 97 === 0 ? null : 1 + (i % 5), 'user', ACTIONS[i % ACTIONS.length], ENTITIES[i % ENTITIES.length], String(i), stamp(at))
+        }
+      })()
+      let visited = 0
+      scaleDb.function('tick', { deterministic: false }, () => { visited += 1; return 1 })
+      return { scaleDb, read: () => visited, reset: () => { visited = 0 } }
+    }
+    // Counts only the page statement; `stripHint` rebuilds the pre-fix shape as a control.
+    const countingAdapter = (scale, { stripHint = false } = {}) => ({
+      prepare(sql) {
+        const isPage = /ORDER BY created_at (?:DESC|ASC), id (?:DESC|ASC)\s+LIMIT @limit/.test(sql)
+        let text = sql
+        if (stripHint) text = text.replace(/likelihood\((created_at [<>]=? date\(@\w+, '[^']*'\)), [0-9.]+\)/g, '$1')
+        const plan = () => scale.scaleDb.prepare(`EXPLAIN QUERY PLAN ${text}`)
+        const run = isPage ? text.replace('WHERE', 'WHERE tick() AND') : text
+        const statement = scale.scaleDb.prepare(run)
+        return {
+          all: async (params = {}) => {
+            if (isPage) scale.lastPlan = plan().all(params).map((r) => r.detail).join(' | ')
+            return statement.all(params)
+          },
+        }
+      },
+    })
+    const pageReads = async (scale, input, options) => {
+      const adapterForRun = countingAdapter(scale, options)
+      scale.reset()
+      const first = await readAuditLogPage(adapterForRun, input, NOW)
+      const firstReads = scale.read()
+      const firstPlan = scale.lastPlan
+      let more = null
+      let moreReads = 0
+      if (first.nextCursor) {
+        scale.reset()
+        more = await readAuditLogPage(adapterForRun, { ...input, cursor: first.nextCursor }, NOW)
+        moreReads = scale.read()
+      }
+      return { first, firstReads, firstPlan, more, moreReads }
+    }
+
+    const scale = buildScale()
+    const pageSize = 50
+    const shapes = [
+      ['the default 30-day page', {}, 'desc', pageSize + 1],
+      ['a page of the newest 92 days', { startDate: '2026-01-01' }, 'desc', pageSize + 1],
+      ['a text search (1 row in 8 matches)', { search: 'sale' }, 'desc', (pageSize + 1) * 10],
+      ['one section (1 row in 8)', { section: 'sales' }, 'desc', (pageSize + 1) * 10],
+      ['one user', { userId: '3' }, 'desc', (pageSize + 1) * 2],
+      ['two users', { userId: '3,4' }, 'desc', (pageSize + 1) * 6],
+      // Oldest first, the window's date-only prefilter starts one UTC day early (rows per day here: ~555); every later page starts at its cursor.
+      ['the oldest-first page of the window', { startDate: '2026-09-01' }, 'asc', 600, pageSize + 1],
+    ]
+    for (const analyzed of [false, true]) {
+      if (analyzed) scale.scaleDb.exec('ANALYZE')
+      const mode = analyzed ? 'after ANALYZE' : 'without statistics'
+      for (const [label, input, order, bound, moreBound = bound] of shapes) {
+        const result = await pageReads(scale, { ...input, pageSize, order }, {})
+        ok(result.first.items.length === pageSize && result.first.hasMore, `${label} (${mode}): a full page comes back`)
+        ok(result.firstReads <= bound, `${label} (${mode}): the first page reads ${result.firstReads} rows, at most ${bound} (${result.firstPlan})`)
+        ok(result.more && result.more.items.length === pageSize && result.moreReads <= moreBound + 1, `${label} (${mode}): Load more reads ${result.moreReads} rows, at most ${moreBound + 1} (the cursor row itself is read once)`)
+        const ids = new Set([...result.first.items, ...result.more.items].map((row) => row.id))
+        ok(ids.size === pageSize * 2, `${label} (${mode}): the two pages share no row`)
+      }
+      const plain = await pageReads(scale, { pageSize }, {})
+      ok(/idx_audit_logs_created/.test(plain.firstPlan) && !/TEMP B-TREE/.test(plain.firstPlan), `the default page is planned on the created_at index with no sort (${mode}: ${plain.firstPlan})`)
+    }
+
+    scale.scaleDb.exec('ANALYZE')
+    const control = await pageReads(scale, { pageSize }, { stripHint: true })
+    ok(control.firstReads > 10000, `control: the same page WITHOUT the planner hint reads ${control.firstReads} rows after ANALYZE, so this fixture does tell the two shapes apart`)
+    scale.scaleDb.close()
+  }
+
   // ---- every statement is bounded -------------------------------------------
   {
     const seen = new Set(statements)
@@ -286,7 +386,11 @@ async function main() {
     }
     ok(true, 'no statement uses OFFSET or DISTINCT, and every statement has a WHERE')
     const windowed = [...seen].filter((sql) => !/@entityId/.test(sql))
-    ok(windowed.every((sql) => /created_at >= date\(@startDate, '-1 day'\)/.test(sql) && /created_at < date\(@endDate, '\+1 day'\)/.test(sql)), 'every non-trail statement carries the sargable created_at window')
+    // A paged statement's cursor row replaces the window's prefilter on the side it walks toward.
+    const lowerBound = (sql) => /created_at >= date\(@startDate, '-1 day'\)/.test(sql) || /created_at >= @cursorCreatedAt/.test(sql)
+    const upperBound = (sql) => /created_at < date\(@endDate, '\+1 day'\)/.test(sql) || /created_at <= @cursorCreatedAt/.test(sql)
+    ok(windowed.every((sql) => lowerBound(sql) && upperBound(sql)), 'every non-trail statement carries a sargable created_at bound on both sides (the window, or the cursor on the side it walks toward)')
+    ok(windowed.every((sql) => /date\(created_at, '\+7 hours'\) >= @startDate/.test(sql) && /date\(created_at, '\+7 hours'\) <= @endDate/.test(sql)), 'and the exact UTC+7 day test is always kept')
     ok([...seen].every((sql) => !/COUNT\(\*\) AS count FROM audit_logs\s*(?:ORDER|$)/.test(sql)), 'no unwindowed COUNT(*)')
 
     const plan = (sql, params) => db.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(params).map((r) => r.detail).join(' | ')

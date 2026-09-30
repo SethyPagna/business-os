@@ -181,7 +181,8 @@ function run(input, page = 1, pageSize = 50) {
 
 // ---- wiring pins ----------------------------------------------------------
 const auditSrc = fs.readFileSync(path.join(cloudflareRoot, 'src', 'lib', 'auditLogQuery.ts'), 'utf8')
-ok(auditSrc.includes("localDateAtOrAfter('created_at')") && auditSrc.includes("localDateAtOrBefore('created_at')"),
+ok(auditSrc.includes("${localDateExpr('created_at')} >= @startDate") && auditSrc.includes("${localDateExpr('created_at')} <= @endDate")
+  && auditSrc.includes("created_at >= date(@startDate, '-1 day')") && auditSrc.includes("created_at < date(@endDate, '+1 day')"),
   'auditLogQuery.ts buckets the date filter on the LOCAL (UTC+7) calendar date, with the sargable created_at prefilter')
 ok(!/date\(created_at\) >= @startDate/.test(auditSrc),
   'auditLogQuery.ts no longer buckets the date filter in UTC')

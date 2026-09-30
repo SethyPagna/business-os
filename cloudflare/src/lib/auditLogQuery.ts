@@ -5,8 +5,12 @@
 //      D1 bills rows read, so a request always carries a time window (default
 //      the last 30 business days, at most 92) and pages by keyset cursor on
 //      (created_at, id) -- never OFFSET, never a whole-table COUNT or DISTINCT.
-//      A per-record trail (entityId) is the one exception to the window: it is
-//      bounded by the entity_id filter and a page of at most 100 rows.
+//      The window bounds the READ only once idx_audit_logs_created exists; until
+//      then the same statements are correct but scan.
+//      A per-record trail (entityId) is the one exception to the window and is
+//      NOT index-bounded: CAST(entity_id ...) and LOWER(entity) wrap the columns,
+//      so idx_audit_logs_entity_entity_id cannot serve it and it scans the table,
+//      as it did before this page was reorganised. Its page is at most 100 rows.
 //   2. Nothing the caller types reaches the SQL text. Search words, ids, cursor
 //      parts and the section lists are all bound parameters (the section lists
 //      as ONE json array each, read back with json_each, so D1's 100-parameter
@@ -20,7 +24,7 @@
 // deliberately not the device-supplied client_time (see businessDateWindow.ts;
 // the created_at prefilter there keeps the index usable).
 
-import { businessToday, localDateAtOrAfter, localDateAtOrBefore } from './businessDateWindow'
+import { businessToday, localDateExpr } from './businessDateWindow'
 import {
   AUDIT_ENTITY_SECTION,
   AUDIT_KEYLESS_ACTION_SECTION,
@@ -121,7 +125,7 @@ export function resolveAuditWindow(
   if (!end || end > today) end = today
   if (!start) start = addDays(end, -(AUDIT_DEFAULT_WINDOW_DAYS - 1))
   if (start > end) start = end
-  const floor = addDays(end, -AUDIT_MAX_WINDOW_DAYS)
+  const floor = addDays(end, -(AUDIT_MAX_WINDOW_DAYS - 1))
   if (start < floor) start = floor
   return { startDate: start, endDate: end }
 }
@@ -149,6 +153,16 @@ export function decodeAuditCursor(raw: unknown): AuditCursor | null {
   } catch {
     return null
   }
+}
+
+// likelihood() changes only what the planner ESTIMATES, never the rows. Telling it
+// the window keeps about half the table makes a sort of the window look costly,
+// so after ANALYZE it keeps walking the created_at index in order instead of
+// skip-scanning (action, created_at) or (user_id, created_at) and sorting the
+// whole window for every page. Measured stable with and without statistics.
+const WINDOW_BOUND_LIKELIHOOD = 0.5
+function likelyWindowBound(term: string): string {
+  return `likelihood(${term}, ${WINDOW_BOUND_LIKELIHOOD})`
 }
 
 // The key a row is filed under: its entity, else its table_name, else ''.
@@ -237,13 +251,21 @@ export function buildAuditLogFilters(input: AuditLogFilterInput, omit: AuditLogF
     if (clause) clauses.push(clause)
   }
 
+  const cursor = omit.cursor ? null : decodeAuditCursor(input.cursor)
+  const ascending = normalizeAuditOrder(input.order) === 'asc'
+  // The cursor row is itself a tight bound on the walk direction, so it replaces
+  // the window's date-only prefilter on that side. Two bounds on one column
+  // leave the choice of which one seeks to the planner, and a wrong pick would
+  // re-read every row between the window edge and the cursor on each page.
   if (isIsoDay(input.startDate)) {
     params.startDate = input.startDate
-    clauses.push(localDateAtOrAfter('created_at'))
+    clauses.push(`${localDateExpr('created_at')} >= @startDate`)
+    if (!(cursor && ascending)) clauses.push(`${likelyWindowBound("created_at >= date(@startDate, '-1 day')")}`)
   }
   if (isIsoDay(input.endDate)) {
     params.endDate = input.endDate
-    clauses.push(localDateAtOrBefore('created_at'))
+    clauses.push(`${localDateExpr('created_at')} <= @endDate`)
+    if (!(cursor && !ascending)) clauses.push(`${likelyWindowBound("created_at < date(@endDate, '+1 day')")}`)
   }
 
   const searchWords = String(input.search || '')
@@ -257,14 +279,11 @@ export function buildAuditLogFilters(input: AuditLogFilterInput, omit: AuditLogF
     clauses.push(`(${SEARCH_COLUMNS.map((column) => `${column} LIKE @search${index} ESCAPE '\\'`).join(' OR ')})`)
   })
 
-  if (!omit.cursor) {
-    const cursor = decodeAuditCursor(input.cursor)
-    if (cursor) {
-      params.cursorCreatedAt = cursor.createdAt
-      params.cursorId = cursor.id
-      const comparison = normalizeAuditOrder(input.order) === 'asc' ? '>' : '<'
-      clauses.push(`(created_at, id) ${comparison} (@cursorCreatedAt, @cursorId)`)
-    }
+  if (cursor) {
+    params.cursorCreatedAt = cursor.createdAt
+    params.cursorId = cursor.id
+    clauses.push(ascending ? 'created_at >= @cursorCreatedAt' : 'created_at <= @cursorCreatedAt')
+    clauses.push(`(created_at, id) ${ascending ? '>' : '<'} (@cursorCreatedAt, @cursorId)`)
   }
 
   return {
