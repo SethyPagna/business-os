@@ -45,6 +45,33 @@ body[data-public-portal='true'] .portal-contact-value-address {
   background-position: 0 0, 0 11px, 11px -11px, -11px 0;
 }
 
+.portal-skeleton-block {
+  background-color: #efebe4;
+}
+
+.dark .portal-skeleton-block {
+  background-color: #262626;
+}
+
+.portal-skeleton-pulse {
+  animation: portal-skeleton-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes portal-skeleton-pulse {
+  50% {
+    opacity: 0.55;
+  }
+}
+
+body[data-public-portal='true'] .portal-cover-image {
+  opacity: 0;
+  transition: opacity 150ms ease-out;
+}
+
+body[data-public-portal='true'] .portal-cover-image[data-loaded='true'] {
+  opacity: 1;
+}
+
 .dark [data-portal-root='true'],
 [data-portal-root='true'].dark,
 .dark [data-portal-root='true'] section {

@@ -349,9 +349,10 @@ runTest('the AI-assistant form labels carry a dark ink, not just slate-700', () 
 
 runTest('the secondary-tabs Suspense fallback paints a dark ground too', () => {
   const publicPage = fs.readFileSync(path.join(here, '..', 'src', 'components', 'catalog', 'PublicCatalogPage.tsx'), 'utf8')
+  assert.match(publicPage, /<Suspense fallback=\{storefrontSkeleton\}>/, 'the About and FAQ tabs fall back to the storefront skeleton (P2)')
   assert.match(
-    publicPage,
-    /rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-500 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-400/,
+    read('PublicStorefrontSkeleton.tsx'),
+    /border-slate-200\/80 bg-white dark:border-neutral-700\/80 dark:bg-neutral-900/,
     'loadingPortal fallback must not stay a hardcoded white card while the page around it is dark',
   )
 })

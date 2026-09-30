@@ -1,4 +1,4 @@
-import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ClipboardEvent, Dispatch, RefObject, SetStateAction } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import { fmtTime } from '../../utils/formatters.ts'
@@ -29,11 +29,14 @@ import Download from 'lucide-react/dist/esm/icons/download.js'
 import MessageSquare from 'lucide-react/dist/esm/icons/message-square.js'
 import Headset from 'lucide-react/dist/esm/icons/headset.js'
 import PhoneCall from 'lucide-react/dist/esm/icons/phone-call.js'
+import RotateCw from 'lucide-react/dist/esm/icons/rotate-cw.js'
 import type { LucideIcon } from 'lucide-react'
 import { MessengerIcon } from '../shared/BrandIcons.tsx'
 import { useApp } from '../../app/AppContextCore.tsx'
 import { clampPage } from '../shared/PaginationControls'
 import { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent, withLoaderTimeout } from '../../utils/loaders.ts'
+import { clearRetiredPortalCache, readPaintEmbed, startStorefrontLoad } from './publicFirstPaint.ts'
+import PublicStorefrontSkeleton from './PublicStorefrontSkeleton.tsx'
 import { aggregateInitialOptions } from '../../utils/initials.ts'
 import { deriveMessengerLink, deriveTelegramLink, derivePhoneCallLink, deriveWhatsappLink, deriveInstagramLink, resolveMessengerLink } from '../../utils/socialLinks.ts'
 import CatalogPreviewSurface from './CatalogPreviewSurface'
@@ -57,11 +60,11 @@ import { isAdminHostname } from '../../app/pathRouting.ts'
 
 const loadCatalogProductsSection = () => import('./CatalogProductsSection')
 const CatalogProductsSection = lazyRetry(loadCatalogProductsSection, 'public-catalog-products-section')
-const CatalogSecondaryTabs = lazyRetry(() => import('./CatalogSecondaryTabs'), 'public-catalog-secondary-tabs')
+const loadCatalogSecondaryTabs = () => import('./CatalogSecondaryTabs')
+const CatalogSecondaryTabs = lazyRetry(loadCatalogSecondaryTabs, 'public-catalog-secondary-tabs')
 const CatalogAccountSection = lazyRetry(() => import('./CatalogAccountSection'), 'public-catalog-account-section')
 const PortalPromotionsBanner = lazyRetry(() => import('./PortalPromotionsBanner'), 'public-catalog-promotions-banner')
 
-const PUBLIC_PORTAL_BOOTSTRAP_TIMEOUT_MS = 15000
 const PUBLIC_PORTAL_PRODUCT_SEARCH_TIMEOUT_MS = 12000
 const PUBLIC_PORTAL_MEMBERSHIP_TIMEOUT_MS = 12000
 const PUBLIC_PORTAL_SUBMISSION_TIMEOUT_MS = 12000
@@ -74,15 +77,10 @@ const STOREFRONT_HOME_SCREEN_NAME = 'Leang'
 const STOREFRONT_ICON = '/leang-cosmetics-icon-512.png'
 const STOREFRONT_APPLE_TOUCH_ICON = '/leang-cosmetics-apple-touch-icon-v1.png'
 const STOREFRONT_MANIFEST = '/portal-manifest.json'
-const PUBLIC_PORTAL_CACHE_KEY = 'business-os-catalog-portal-cache'
-const PUBLIC_PORTAL_BOOTSTRAP_ELEMENT_ID = 'business-os-portal-bootstrap'
-const PUBLIC_PORTAL_CACHE_MAX_AGE_MS = 1000 * 60 * 20
-const PUBLIC_PORTAL_CACHE_PRODUCT_LIMIT = 80
 const SUBMISSION_MAX_SCREENSHOTS = 8
 const IMAGE_READ_CONCURRENCY = 2
 
 type LooseRecord = Record<string, any>
-type PortalBootstrapWindow = Window & { __businessOsPortalBootstrap?: LooseRecord | null }
 type CopyFunction = (key: string, fallback?: string, fallbackKm?: string) => string
 type PortalInitialOption = ReturnType<typeof aggregateInitialOptions>[number]
 type CatalogOption = { id: string | number; name: string }
@@ -96,8 +94,7 @@ type CatalogProduct = LooseRecord & {
   image_path?: string
   image_gallery?: unknown[]
   // Server-computed availability (routes/portal.ts attachPortalStockStatus).
-  // Raw quantities/thresholds are redacted server-side; the legacy fields
-  // below them may still appear in pre-deploy localStorage snapshots only.
+  // Raw quantities/thresholds are redacted server-side.
   stock_status?: string
   branch_availability?: Array<{ branch_id?: string | number | null; status?: string }>
   branch_stock?: Array<{ branch_id?: string | number | null; quantity?: string | number | null }>
@@ -196,6 +193,7 @@ type SubmissionDraft = { platform: string; note: string; screenshots: string[]; 
 type PortalTab = { key: string; label: string; icon: LucideIcon }
 type CatalogApi = {
   getPortalBootstrap?: () => Promise<unknown>
+  getPortalConfig?: () => Promise<unknown>
   searchPortalCatalogProducts?: (params?: Record<string, unknown>) => Promise<unknown>
   lookupPortalMembership?: (membershipNumber: string) => Promise<unknown>
   createPortalSubmission?: (payload?: Record<string, unknown>) => Promise<unknown>
@@ -205,17 +203,17 @@ type CatalogApi = {
 
 const DEFAULT_PUBLIC_CONFIG: PortalConfig = {
   aboutBlocks: [],
-  aiEnabled: true,
-  businessName: 'Leang Beauty',
+  aiEnabled: false,
+  businessName: '',
   contactLinkLabels: { messenger: 'Messenger', telegram: 'Telegram', whatsapp: 'WhatsApp', phone: '', instagram: 'Instagram' },
   contactLinks: { messenger: '', telegram: '', whatsapp: '', phone: '', instagram: '' },
   exchangeRate: 4100,
   faqItems: [],
   gridColumnsDesktop: 4,
   gridColumnsMobile: 2,
-  heroGradientEnd: '#ea580c',
-  heroGradientMid: '#14532d',
-  heroGradientStart: '#0f172a',
+  heroGradientEnd: '#e7dccb',
+  heroGradientMid: '#efe7da',
+  heroGradientStart: '#f6f1e8',
   highlightRankLimit: 3,
   linkLabels: { website: 'Website', facebook: 'Facebook', instagram: 'Instagram', telegram: 'Telegram' },
   links: { website: '', facebook: '', instagram: '', telegram: '' },
@@ -247,11 +245,11 @@ const DEFAULT_PUBLIC_CONFIG: PortalConfig = {
   showInstagram: true,
   showLogo: true,
   showCover: true,
-  showMembership: true,
-  showOutOfStockProducts: true,
-  showStockStatus: true,
+  showMembership: false,
+  showOutOfStockProducts: false,
+  showStockStatus: false,
   showPhone: true,
-  showPrices: true,
+  showPrices: false,
   showProductBrand: true,
   showProductCategory: true,
   showProductDiscount: true,
@@ -262,9 +260,9 @@ const DEFAULT_PUBLIC_CONFIG: PortalConfig = {
   showTopSellerBadge: true,
   showWebsite: true,
   stockThresholdMode: 'product',
-  submissionEnabled: true,
+  submissionEnabled: false,
   submissionRewardPoints: 5,
-  title: 'Leang Beauty',
+  title: '',
   translateWidgetEnabled: true,
 }
 
@@ -329,89 +327,6 @@ function normalizeFaqItems(input: unknown): Array<{ id: string | number; questio
       answer: String((item as LooseRecord)?.answer || '').trim(),
     }))
     .filter((item) => item.question && item.answer)
-}
-
-function readPortalCache(): LooseRecord | null {
-  if (typeof window === 'undefined') return null
-  try {
-    // Touching window.localStorage/sessionStorage THROWS (SecurityError)
-    // wherever site data is blocked -- Safari private mode, Chrome's "block
-    // all cookies" -- so the store list has to be built INSIDE this guard.
-    // Built outside it, the throw escaped a useRef initializer on the
-    // storefront's very first render, and PublicCatalogRoot.tsx has a
-    // Suspense boundary but no error boundary: the whole page rendered
-    // blank instead of simply loading without a cache. Same shape as
-    // catalogPagination.tsx's stored-page-size helpers.
-    const stores = [window.sessionStorage, window.localStorage].filter(Boolean)
-    let raw = ''
-    let sourceStore: Storage | null = null
-    for (const store of stores) {
-      raw = store.getItem(PUBLIC_PORTAL_CACHE_KEY) || ''
-      if (raw) {
-        sourceStore = store
-        break
-      }
-    }
-    if (!raw) return null
-    if (raw.length > 1_500_000) {
-      for (const store of stores) store.removeItem(PUBLIC_PORTAL_CACHE_KEY)
-      return null
-    }
-    const parsed = JSON.parse(raw)
-    if (!parsed || typeof parsed !== 'object') return null
-    const ageMs = Date.now() - Number(parsed.cachedAt || 0)
-    if (!Number.isFinite(ageMs) || ageMs < 0 || ageMs > PUBLIC_PORTAL_CACHE_MAX_AGE_MS) {
-      sourceStore?.removeItem(PUBLIC_PORTAL_CACHE_KEY)
-      return null
-    }
-    if (Array.isArray(parsed.products) && parsed.products.length > PUBLIC_PORTAL_CACHE_PRODUCT_LIMIT) {
-      parsed.products = parsed.products.slice(0, PUBLIC_PORTAL_CACHE_PRODUCT_LIMIT)
-    }
-    return parsed
-  } catch (_) {
-    return null
-  }
-}
-
-function writePortalCache(payload: LooseRecord): void {
-  if (typeof window === 'undefined') return
-  try {
-    const serialized = JSON.stringify({
-      cachedAt: Date.now(),
-      ...payload,
-      products: Array.isArray(payload.products) ? payload.products.slice(0, PUBLIC_PORTAL_CACHE_PRODUCT_LIMIT) : [],
-    })
-    sessionStorage.setItem(PUBLIC_PORTAL_CACHE_KEY, serialized)
-    localStorage.setItem(PUBLIC_PORTAL_CACHE_KEY, serialized)
-  } catch (_) {}
-}
-
-function readEmbeddedPortalBootstrap(): LooseRecord | null {
-  if (typeof document === 'undefined') return null
-  const portalWindow = window as PortalBootstrapWindow
-  if (portalWindow.__businessOsPortalBootstrap) return portalWindow.__businessOsPortalBootstrap
-  const node = document.getElementById(PUBLIC_PORTAL_BOOTSTRAP_ELEMENT_ID)
-  if (!node) return null
-  const raw = String(node.textContent || '').trim()
-  if (!raw || raw.length > 2_000_000) return null
-  try {
-    const parsed = JSON.parse(raw)
-    if (!parsed || typeof parsed !== 'object') return null
-    portalWindow.__businessOsPortalBootstrap = {
-      cachedAt: Date.now(),
-      ...(parsed as LooseRecord),
-    }
-    return portalWindow.__businessOsPortalBootstrap
-  } catch (_) {
-    return null
-  }
-}
-
-function withAssetVersion(url: unknown, versionSeed: unknown): string {
-  const raw = String(url || '').trim()
-  if (!raw || raw.startsWith('blob:') || raw.startsWith('data:')) return raw
-  const seed = String(versionSeed || '').trim()
-  return seed ? `${raw}${raw.includes('?') ? '&' : '?'}v=${encodeURIComponent(seed)}` : raw
 }
 
 function buildPortalBackground(config: PortalConfig, darkMode = false): string {
@@ -534,6 +449,16 @@ function normalizeBootstrapPayload(payload: unknown) {
   }
 }
 
+function normalizeConfigPayload(payload: unknown): PortalConfig {
+  const fetched = payload && typeof payload === 'object' && !Array.isArray(payload) ? payload : {}
+  return { ...DEFAULT_PUBLIC_CONFIG, ...fetched }
+}
+
+function SignalOnMount({ onMount }: { onMount: () => void }) {
+  useEffect(onMount, [onMount])
+  return null
+}
+
 // The public catalog's bootstrap/search endpoints return one row per branch
 // for products that are otherwise identical, and grouped products (same
 // name, different branch/price/barcode) get collapsed to a single card
@@ -543,10 +468,7 @@ function normalizeBootstrapPayload(payload: unknown) {
 
 export default function PublicCatalogPage() {
   const { theme, toggleTheme, t } = useApp() as { theme?: string; toggleTheme: () => void; t?: (key: string) => string }
-  const embeddedPortalRef = useRef(readEmbeddedPortalBootstrap())
-  const cachedPortalRef = useRef(embeddedPortalRef.current || readPortalCache())
-  const cachedPortal = cachedPortalRef.current
-  const requestRef = useRef(0)
+  const paintConfigRef = useRef(readPaintEmbed())
   const productRequestRef = useRef(0)
   const aliveRef = useRef(true)
   const previewSectionRef = useRef<HTMLDivElement>(null)
@@ -558,45 +480,31 @@ export default function PublicCatalogPage() {
   // fixed 50 (routes/portal.ts), so without this ref every response would put
   // a shopper who picked 20 straight back onto 50.
   const viewerPageSizeRef = useRef(readStoredCatalogPageSize())
-  // Whether the payload already in hand (server-embedded bootstrap, or the
-  // cache) IS the page this shopper's size asks for. When it is not, nothing
-  // from it may seed the grid -- not even a prefix of it. That payload is the
-  // store's first 50 product families ordered promoted, then BRAND, then name
-  // (routes/portal.ts buildPortalCatalog -> familyOrderSql), while a browse
-  // payload is rendered A-Z by NAME (portalProductGrouping.ts), so its first
-  // 20 cards are the alphabetically first 20 of the first 50 by brand -- a
-  // page the server would never serve at pageSize 20. Seeding it whole is
-  // what put 50 cards under a pager reading "1 / total-over-20" until the
-  // corrective search landed; the grid holds its loading skeletons instead.
-  const seedMatchesViewerPageSize = !cachedPortal
-    || bootstrapPageSizeMatchesViewer(cachedPortal.catalog?.pageSize, viewerPageSizeRef.current)
-
-  const [config, setConfig] = useState<PortalConfig>(() => ({ ...DEFAULT_PUBLIC_CONFIG, ...(cachedPortal?.config || {}) }))
-  const [products, setProducts] = useState<CatalogProduct[]>(() => (
-    seedMatchesViewerPageSize ? mergePortalCatalogProducts(cachedPortal?.products) : []
-  ))
-  // Cleared by the first product payload cut at the viewer's size -- or by its
-  // failure, so an error is never hidden behind skeletons that never stop.
-  const [awaitingViewerSizedProducts, setAwaitingViewerSizedProducts] = useState(() => !seedMatchesViewerPageSize)
-  // G1: active promotion rules ride the catalog payload (and its cache).
-  const [portalPromotionRules, setPortalPromotionRules] = useState<PromotionRule[]>(() => {
-    const cached = (cachedPortal?.catalog as Record<string, unknown> | undefined)?.promotion_rules
-    return Array.isArray(cached) ? cached as PromotionRule[] : []
-  })
-  const [productTotal, setProductTotal] = useState(() => Number(cachedPortal?.catalog?.total || cachedPortal?.products?.length || 0))
-  const [productPage, setProductPage] = useState(() => Number(cachedPortal?.catalog?.page || 1) || 1)
-  const [productPageSize, setProductPageSize] = useState(() => (
-    viewerPageSizeRef.current || Number(cachedPortal?.catalog?.pageSize || CATALOG_DEFAULT_PAGE_SIZE) || CATALOG_DEFAULT_PAGE_SIZE
-  ))
+  const [config, setConfig] = useState<PortalConfig>(() => ({ ...DEFAULT_PUBLIC_CONFIG, ...paintConfigRef.current }) as PortalConfig)
+  const [realConfigInHand, setRealConfigInHand] = useState(() => paintConfigRef.current !== null)
+  const [loadFailed, setLoadFailed] = useState(false)
+  const [productsFailed, setProductsFailed] = useState(false)
+  const [tabContentMounted, setTabContentMounted] = useState(false)
+  const markTabContentMounted = useCallback(() => setTabContentMounted(true), [])
+  const [products, setProducts] = useState<CatalogProduct[]>([])
+  // The grid holds its skeletons until a page cut at the viewer's own size
+  // lands. The bootstrap is always the store's first 50 families ordered by
+  // brand (routes/portal.ts buildPortalCatalog), so for a shopper on 20 it is
+  // neither their page 1 nor a prefix of it (the a1d55f12 over-fill glitch).
+  const [awaitingViewerSizedProducts, setAwaitingViewerSizedProducts] = useState(true)
+  const [portalPromotionRules, setPortalPromotionRules] = useState<PromotionRule[]>([])
+  const [productTotal, setProductTotal] = useState(0)
+  const [productPage, setProductPage] = useState(1)
+  const [productPageSize, setProductPageSize] = useState(() => viewerPageSizeRef.current || CATALOG_DEFAULT_PAGE_SIZE)
   const [productInitial, setProductInitial] = useState('all')
-  const [productInitials, setProductInitials] = useState<PortalInitialOption[]>(() => normalizePortalInitialOptions(cachedPortal?.catalog?.initials))
-  const [categories, setCategories] = useState<CatalogOption[]>(() => normalizeCatalogOptions(cachedPortal?.categories))
-  const [brands, setBrands] = useState<string[]>(() => normalizeBrandOptions(cachedPortal?.brands))
-  const [branches, setBranches] = useState<CatalogOption[]>(() => normalizeCatalogOptions(cachedPortal?.branches))
+  const [productInitials, setProductInitials] = useState<PortalInitialOption[]>([])
+  const [categories, setCategories] = useState<CatalogOption[]>([])
+  const [brands, setBrands] = useState<string[]>([])
+  const [branches, setBranches] = useState<CatalogOption[]>([])
   // Default landing tab is About (user request): leangbeauty.com opens on the
   // store's About page. resolvePortalActiveTab falls back to the first visible
   // tab if About is turned off in config.
-  const [activeTab, setActiveTab] = useState(() => resolvePortalActiveTab({ ...DEFAULT_PUBLIC_CONFIG, ...(cachedPortal?.config || {}) }, (_key, fallback = '') => fallback, 'about'))
+  const [activeTab, setActiveTab] = useState(() => resolvePortalActiveTab({ ...DEFAULT_PUBLIC_CONFIG, ...paintConfigRef.current } as PortalConfig, (_key, fallback = '') => fallback, 'about'))
   const [search, setSearch] = useState('')
   const deferredSearch = useMemo(() => search.trim(), [search])
   const [categoryFilter, setCategoryFilter] = useState<string[]>([])
@@ -607,9 +515,8 @@ export default function PublicCatalogPage() {
   // deals" toggle) or 'rule:<id>' (a campaign chip on the promo strip).
   const [promoFacet, setPromoFacet] = useState('')
   const [filtersOpen, setFiltersOpen] = useState(false)
-  const [loading, setLoading] = useState(() => !(cachedPortal?.config || cachedPortal?.products?.length))
+  const [loading, setLoading] = useState(true)
   const [refreshingProducts, setRefreshingProducts] = useState(false)
-  const [portalError, setPortalError] = useState('')
   const [productGalleryView, setProductGalleryView] = useState<GalleryViewState>({ open: false, title: '', items: [], index: 0 })
   const [productDetailView, setProductDetailView] = useState<ProductDetailViewState>({ open: false, product: null, gallery: [], status: 'in_stock', pricePresentation: null, showPrices: true })
   const [portalImageView, setPortalImageView] = useState<PortalImageViewState>({ open: false, title: '', images: [], index: 0 })
@@ -663,10 +570,8 @@ export default function PublicCatalogPage() {
   const [bucketContactOpen, setBucketContactOpen] = useState(false)
   const [bucketCopyState, setBucketCopyState] = useState<'idle' | 'copied' | 'failed'>('idle')
   const [scrollButtonsVisible, setScrollButtonsVisible] = useState(false)
-  // Bumped by the pull-to-refresh gesture to force the bootstrap effect a
-  // few lines down to re-run and hit the network for real, even though
-  // its dependency array is otherwise empty (it's meant to run once on
-  // mount) -- see that effect's own `reloadToken === 0` guard.
+  // Bumped by the pull-to-refresh gesture and by Retry to run the load effect
+  // below again.
   const [reloadToken, setReloadToken] = useState(0)
   const publicPageRootRef = useRef<HTMLDivElement | null>(null)
 
@@ -784,23 +689,33 @@ export default function PublicCatalogPage() {
   }
 
   useEffect(() => {
-    if (embeddedPortalRef.current && reloadToken === 0) {
-      skipNextProductSearchRef.current = bootstrapPageSizeMatchesViewer(embeddedPortalRef.current.catalog?.pageSize, viewerPageSizeRef.current)
-      writePortalCache({ ...embeddedPortalRef.current, products: mergePortalCatalogProducts(embeddedPortalRef.current.products) })
-      setLoading(false)
-      return undefined
-    }
-    const requestId = beginTrackedRequest(requestRef)
+    clearRetiredPortalCache()
+    // Warm the About chunk while the config is on its way; the real mount retries and reports a failure.
+    if (!paintConfigRef.current) loadCatalogSecondaryTabs().catch(() => undefined)
+  }, [])
+
+  useEffect(() => {
+    const api = getCatalogApi()
     setLoading(products.length === 0)
-    withLoaderTimeout(() => getCatalogApi().getPortalBootstrap?.() || Promise.reject(new Error('Portal bootstrap API unavailable')), 'Portal bootstrap', PUBLIC_PORTAL_BOOTSTRAP_TIMEOUT_MS)
-      .then((payload) => {
-        if (!aliveRef.current || !isTrackedRequestCurrent(requestRef, requestId)) return
+    return startStorefrontLoad({
+      fetchBootstrap: () => api.getPortalBootstrap?.() || Promise.reject(new Error('Portal bootstrap API unavailable')),
+      fetchConfig: realConfigInHand ? null : () => api.getPortalConfig?.() || Promise.reject(new Error('Portal config API unavailable')),
+      onConfig: (payload) => {
+        const nextConfig = normalizeConfigPayload(payload)
+        setConfig(nextConfig)
+        setRealConfigInHand(true)
+        setActiveTab((tab) => resolvePortalActiveTab(nextConfig, copy, tab))
+      },
+      onBootstrap: (payload) => {
         const next = normalizeBootstrapPayload(payload)
         const mergedProducts = mergePortalCatalogProducts(next.products)
-        // Same rule as the mount-time seed: this payload is only the grid's
-        // page when it was cut at the size the shopper actually browses at.
+        // This payload is only the grid's page when it was cut at the size
+        // the shopper actually browses at.
         const bootstrapMatchesViewer = bootstrapPageSizeMatchesViewer(next.catalog.pageSize, viewerPageSizeRef.current)
         setConfig(next.config)
+        setRealConfigInHand(true)
+        setLoadFailed(false)
+        setProductsFailed(false)
         if (bootstrapMatchesViewer) setProducts(mergedProducts)
         // Only ever LOWERS the wait: this response and the corrective search
         // race each other, and a slow bootstrap must not drop skeletons back
@@ -816,23 +731,29 @@ export default function PublicCatalogPage() {
         setCategories(next.categories)
         setBrands(next.brands)
         setBranches(next.branches)
-        setActiveTab((current) => resolvePortalActiveTab(next.config, copy, current))
-        setPortalError('')
+        setActiveTab((tab) => resolvePortalActiveTab(next.config, copy, tab))
         skipNextProductSearchRef.current = bootstrapMatchesViewer
-        writePortalCache({ config: next.config, categories: next.categories, brands: next.brands, branches: next.branches, products: mergedProducts, catalog: next.catalog })
-      })
-      .catch((error) => {
-        if (!aliveRef.current || !isTrackedRequestCurrent(requestRef, requestId)) return
-        setPortalError(getErrorMessage(error, 'Portal bootstrap failed'))
-      })
-      .finally(() => {
-        if (!aliveRef.current || !isTrackedRequestCurrent(requestRef, requestId)) return
         setLoading(false)
-      })
-    return () => {
-      invalidateTrackedRequest(requestRef)
-    }
+      },
+      onBootstrapFailed: () => {
+        // The follow-up product search decides the grid; a grid already on
+        // screen (pull-to-refresh) keeps showing with the failure above it.
+        if (products.length > 0) setProductsFailed(true)
+        setLoading(false)
+      },
+      onFailed: () => {
+        setLoadFailed(true)
+        setLoading(false)
+      },
+    })
   }, [reloadToken])
+
+  const retryLoad = () => {
+    setLoadFailed(false)
+    setProductsFailed(false)
+    setAwaitingViewerSizedProducts(true)
+    setReloadToken((token) => token + 1)
+  }
 
   useEffect(() => {
     setProductPage(1)
@@ -851,7 +772,7 @@ export default function PublicCatalogPage() {
   }
 
   useEffect(() => {
-    if (!config.showCatalog) return undefined
+    if (!config.showCatalog || loadFailed) return undefined
     if (loading && products.length === 0) return undefined
     if (skipNextProductSearchRef.current) {
       skipNextProductSearchRef.current = false
@@ -878,8 +799,8 @@ export default function PublicCatalogPage() {
         if (!aliveRef.current || !isTrackedRequestCurrent(productRequestRef, requestId)) return
         const data = (result || {}) as LooseRecord
         // Search response: keep the server's relevance order (see
-        // portalProductGrouping.ts). The bootstrap/cache merges above stay
-        // A-Z because they are browse payloads, not answers to a query.
+        // portalProductGrouping.ts). The bootstrap merge above stays A-Z
+        // because it is a browse payload, not an answer to a query.
         const nextItems = mergePortalCatalogProducts(data.items, Boolean(String(deferredSearch || '').trim()))
         const nextInitials = normalizePortalInitialOptions(data.initials)
         const nextTotal = Number(data.total || 0)
@@ -910,20 +831,12 @@ export default function PublicCatalogPage() {
         if (Array.isArray(data.filters?.categories)) {
           setCategories(data.filters.categories.map((name: string, index: number) => ({ id: `server-${index}-${name}`, name })))
         }
-        setPortalError('')
-        writePortalCache({
-          config,
-          categories,
-          brands,
-          branches,
-          products: nextItems,
-          catalog: { page: responsePage, pageSize: responsePageSize, total: nextTotal, initials: nextInitials },
-        })
+        setProductsFailed(false)
       })
-      .catch((error) => {
+      .catch(() => {
         if (!aliveRef.current || !isTrackedRequestCurrent(productRequestRef, requestId)) return
         setAwaitingViewerSizedProducts(false)
-        setPortalError(getErrorMessage(error, 'Portal product search failed'))
+        setProductsFailed(true)
       })
       .finally(() => {
         if (!aliveRef.current || !isTrackedRequestCurrent(productRequestRef, requestId)) return
@@ -932,7 +845,7 @@ export default function PublicCatalogPage() {
     return () => {
       invalidateTrackedRequest(productRequestRef)
     }
-  }, [brandFilter, branchFilter, categoryFilter, config.showCatalog, config.showStockStatus, deferredSearch, loading, productInitial, productPage, productPageSize, products.length, promoFacet, stockFilter])
+  }, [brandFilter, branchFilter, categoryFilter, config.showCatalog, config.showStockStatus, deferredSearch, loadFailed, loading, productInitial, productPage, productPageSize, products.length, promoFacet, stockFilter])
 
   // Re-arm on mount, not just tear down: React 18 StrictMode (dev) runs
   // mount -> cleanup (simulated unmount) -> mount again on the SAME refs.
@@ -944,7 +857,6 @@ export default function PublicCatalogPage() {
     aliveRef.current = true
     return () => {
       aliveRef.current = false
-      invalidateTrackedRequest(requestRef)
       invalidateTrackedRequest(productRequestRef)
     }
   }, [])
@@ -966,8 +878,8 @@ export default function PublicCatalogPage() {
   // column count below the `lg` breakpoint, which collapses to a single
   // column on phones and tablets. Combine both, same as the admin preview.
   const productGridClass = `${getPortalMobileGridClass(mobileGridColumns)} ${getPortalGridClass(displayConfig.gridColumnsDesktop)}`
-  const versionedBusinessLogo = withAssetVersion(displayConfig.businessLogo, displayConfig.businessLogo || displayConfig.businessName)
-  const versionedBusinessCover = withAssetVersion(displayConfig.businessCover, displayConfig.businessCover || displayConfig.businessName)
+  const businessLogoUrl = String(displayConfig.businessLogo || '').trim()
+  const businessCoverUrl = String(displayConfig.businessCover || '').trim()
   const selectedStockBranch = branchFilter[0] || 'all'
   const portalActiveFilterCount = categoryFilter.length + brandFilter.length + branchFilter.length + (displayConfig.showStockStatus === false ? 0 : stockFilter.length) + (productInitial === 'all' ? 0 : 1) + (promoFacet ? 1 : 0)
   const publicFaqItems = normalizeFaqItems(displayConfig.faqItems)
@@ -1263,7 +1175,19 @@ export default function PublicCatalogPage() {
       })
   }
 
-  const catalogSection = displayConfig.showCatalog ? (
+  const storefrontSkeleton = <PublicStorefrontSkeleton label={copy('loadingPortal', 'Loading website...')} />
+  const loadFailedText = copy('portalLoadFailed', "We couldn't open the shop. Check your connection and try again.", 'យើងមិនអាចបើកហាងបានទេ។ សូមពិនិត្យការតភ្ជាប់អ៊ីនធឺណិត ហើយព្យាយាមម្ដងទៀត។')
+  const loadFailedPanel = (
+    <div role="alert" data-portal-load-failed="true" className="mx-auto my-8 flex max-w-md flex-col items-center gap-4 rounded-2xl border border-slate-200 bg-white p-6 text-center text-sm leading-6 text-slate-700 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200">
+      <p>{loadFailedText}</p>
+      <button type="button" className="btn-primary inline-flex items-center gap-2 text-sm" onClick={retryLoad}>
+        <RotateCw className="h-4 w-4" />
+        {copy('retry', 'Retry', 'ព្យាយាមម្ដងទៀត')}
+      </button>
+    </div>
+  )
+
+  const catalogSection = displayConfig.showCatalog ? (productsFailed && products.length === 0 ? loadFailedPanel : (
     <Suspense fallback={<div className="portal-empty-card">{copy('catalogLoading', 'Loading products...')}</div>}>
       <CatalogProductsSection
         copy={copy}
@@ -1303,7 +1227,7 @@ export default function PublicCatalogPage() {
         toggleFilterValue={toggleFilterValue}
         toggleFilterValues={toggleFilterValues}
         previewConfig={displayConfig}
-        portalError={portalError}
+        portalError={productsFailed ? loadFailedText : ''}
         productGridClass={productGridClass}
         compactTwoColumnMobile={compactTwoColumnMobile}
         compactCatalogCards
@@ -1331,7 +1255,7 @@ export default function PublicCatalogPage() {
         )}
       />
     </Suspense>
-  ) : null
+  )) : null
 
   const promotionsSection = activeTab === 'products' ? (
     <Suspense fallback={null}>
@@ -1339,10 +1263,11 @@ export default function PublicCatalogPage() {
     </Suspense>
   ) : null
 
-  const secondaryTabSection = activeTab !== 'products' ? (
-    <Suspense fallback={<div className="rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-500 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-400">{copy('loadingPortal', 'Loading website...')}</div>}>
+  const secondaryTabSection = activeTab !== 'products' ? (realConfigInHand ? (
+    <Suspense fallback={storefrontSkeleton}>
       <CatalogSecondaryTabs
         tab={activeTab}
+        imageFetchPriority="high"
         copy={copy}
         formatDateTime={formatDateTime}
         formatPortalPrice={formatPortalPrice}
@@ -1365,8 +1290,8 @@ export default function PublicCatalogPage() {
         addressFact={addressFact}
         businessFacts={businessFacts}
         socialLinks={socialLinks}
-        versionedBusinessLogo={versionedBusinessLogo}
-        versionedBusinessCover={versionedBusinessCover}
+        versionedBusinessLogo={businessLogoUrl}
+        versionedBusinessCover={businessCoverUrl}
         publicFaqItems={publicFaqItems}
         expandedFaqId={expandedFaqId}
         setExpandedFaqId={setExpandedFaqId}
@@ -1392,8 +1317,12 @@ export default function PublicCatalogPage() {
         setAssistantDataUseConsent={setAssistantDataUseConsent}
         accountSignedIn={!!portalAccount.account}
       />
+      <SignalOnMount onMount={markTabContentMounted} />
     </Suspense>
-  ) : null
+  ) : storefrontSkeleton) : null
+  // A footer painted under the skeleton is pushed off screen by the taller content (layout shift);
+  // appended after the content it moves nothing, and the cover's fetch does not wait for it.
+  const footerReady = realConfigInHand && (activeTab === 'products' || tabContentMounted)
 
   const scrollPublicPortal = (direction: 'top' | 'bottom') => {
     const top = direction === 'bottom' ? Math.max(document.documentElement.scrollHeight, document.body.scrollHeight) : 0
@@ -1923,7 +1852,8 @@ export default function PublicCatalogPage() {
       previewSectionRef={previewSectionRef as RefObject<HTMLDivElement>}
       onBackToEditor={() => {}}
       displayConfig={displayConfig}
-      versionedBusinessLogo={versionedBusinessLogo}
+      configPending={!realConfigInHand}
+      versionedBusinessLogo={businessLogoUrl}
       showBrandLabel={showBrandLabel}
       previewTitle={previewTitle}
       portalTabs={portalTabs}
@@ -1937,10 +1867,10 @@ export default function PublicCatalogPage() {
       publicPortalNavPinned={false}
       publicPortalNavMetrics={{ left: 0, width: 0, height: 0 }}
       headerLinks={headerLinks}
-      catalogSection={activeTab === 'products' ? catalogSection : null}
-      secondaryTabSection={secondaryTabSection}
-      promotionsSection={promotionsSection}
-      footer={<PortalFooter copy={copy} businessName={displayConfig.businessName} legalName={displayConfig.businessLegalName} registrationNumber={displayConfig.businessRegistrationNumber} address={displayConfig.businessAddress} phone={displayConfig.businessPhone} email={displayConfig.businessEmail} socialLinks={socialLinks} />}
+      catalogSection={!loadFailed && activeTab === 'products' ? catalogSection : null}
+      secondaryTabSection={loadFailed ? loadFailedPanel : secondaryTabSection}
+      promotionsSection={loadFailed ? null : promotionsSection}
+      footer={footerReady ? <PortalFooter copy={copy} businessName={displayConfig.businessName} legalName={displayConfig.businessLegalName} registrationNumber={displayConfig.businessRegistrationNumber} address={displayConfig.businessAddress} phone={displayConfig.businessPhone} email={displayConfig.businessEmail} socialLinks={socialLinks} /> : null}
       productDetailView={productDetailView}
       closeProductDetailView={closeProductDetailView}
       productDetailShopName={displayConfig.businessName || displayConfig.title || ''}

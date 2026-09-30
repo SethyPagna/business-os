@@ -35,7 +35,7 @@ const save = catalogPage.slice(saveStart, catalogPage.indexOf('\n  async functio
 const call = save.indexOf('const result = await saveSettings(savePayload')
 const conflict = save.indexOf('if (result?.conflict) {')
 const failed = save.indexOf('if (result?.success === false) return')
-const firstSavedMark = Math.min(...['setEditorDirty(false)', 'setConfig((current) => applyDraft(', "setDraft('customer_portal_logo_image'", 'setPromoItemsDraft(']
+const firstSavedMark = Math.min(...['settleSavedEdits(', 'setConfig((current) => applyDraft(', 'replaceDraftValues(', 'staffSettingsRef.current = { ...staffSettingsRef.current, ...savePayload }']
   .map((marker) => {
     const at = save.indexOf(marker)
     assert.ok(at > 0, `savePortalDraft still has ${marker}`)

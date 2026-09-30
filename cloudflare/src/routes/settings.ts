@@ -32,6 +32,8 @@ import { normalizedHaystackSql } from '../lib/searchMatch'
 import type { Env } from '../index'
 import { actorSnapshot } from '../lib/actorSnapshot'
 import { POS_ADDRESS_PRESETS_KEY } from '../lib/addressPresets'
+import { normalizePortalUploadPath } from '../lib/safeLinkUrl'
+import { normalizePortalImageAlt } from '../lib/portalText'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 
@@ -839,6 +841,8 @@ const PORTAL_ABOUT_KEYS = new Set([
   'customer_portal_about_content',
   'customer_portal_about_blocks',
   'customer_portal_show_about',
+  'customer_portal_about_image',
+  'customer_portal_about_image_alt',
 ])
 
 function settingsBucketPermissionFor(key: string): string | null {
@@ -1029,6 +1033,20 @@ app.post('/', async (c) => {
   }
   for (const key of attemptedKeys) {
     if (isRegisteredBusinessIdentityKey(key)) body[key] = (body[key] as string).trim()
+  }
+
+  // Every storefront visitor loads the About picture, so only this site's own upload is stored.
+  if (attemptedKeys.includes('customer_portal_about_image')) {
+    const raw = body.customer_portal_about_image
+    const cleared = raw == null || (typeof raw === 'string' && !raw.trim())
+    const uploadPath = cleared ? '' : normalizePortalUploadPath(raw)
+    if (uploadPath === null) {
+      return c.json({ error: 'The About picture must be a picture uploaded to this site.', code: 'invalid_about_image' }, 400)
+    }
+    body.customer_portal_about_image = uploadPath
+  }
+  if (attemptedKeys.includes('customer_portal_about_image_alt')) {
+    body.customer_portal_about_image_alt = normalizePortalImageAlt(body.customer_portal_about_image_alt)
   }
 
   // The low-stock alert switch and its threshold decide what the WHOLE

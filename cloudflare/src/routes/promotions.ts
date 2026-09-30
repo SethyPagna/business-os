@@ -10,6 +10,7 @@ import { normalizeTypedDate } from '../lib/batchCode'
 import { broadcast } from '../durable-objects/broadcastHub'
 import type { Env } from '../index'
 import { actorSnapshot } from '../lib/actorSnapshot'
+import { isSafeLinkUrl } from '../lib/safeLinkUrl'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 app.use('*', requireAuth)
@@ -211,6 +212,7 @@ app.delete('/rules/:id', requireAction('promotions', 'manage'), async (c) => {
 // Legacy announcement-strip endpoints (each keeps the products gate).
 
 const LINK_TYPES = new Set(['none', 'product', 'url'])
+const UNSAFE_LINK_ERROR = { error: 'Use a link that starts with https:// or a page path that starts with /.', code: 'invalid_link_url' }
 
 function normalizeText(value: unknown, maxLen = 500): string {
   return String(value || '').trim().slice(0, maxLen)
@@ -270,6 +272,7 @@ app.post('/', requireKey('products'), async (c) => {
   if (!input.title) return c.json({ error: 'Title required' }, 400)
   if (input.link_type === 'product' && !input.link_product_id) return c.json({ error: 'Choose a product to link to' }, 400)
   if (input.link_type === 'url' && !input.link_url) return c.json({ error: 'Enter a link URL' }, 400)
+  if (input.link_type === 'url' && !isSafeLinkUrl(body.link_url)) return c.json(UNSAFE_LINK_ERROR, 400)
 
   const db = getDb(c.env)
   if (input.link_type === 'product') {
@@ -308,6 +311,7 @@ app.put('/:id', requireKey('products'), async (c) => {
   if (!input.title) return c.json({ error: 'Title required' }, 400)
   if (input.link_type === 'product' && !input.link_product_id) return c.json({ error: 'Choose a product to link to' }, 400)
   if (input.link_type === 'url' && !input.link_url) return c.json({ error: 'Enter a link URL' }, 400)
+  if (input.link_type === 'url' && !isSafeLinkUrl(body.link_url)) return c.json(UNSAFE_LINK_ERROR, 400)
   if (input.link_type === 'product') {
     const productExists = await db.prepare('SELECT id FROM products WHERE id = ?').get([input.link_product_id])
     if (!productExists) return c.json({ error: 'Linked product not found' }, 400)

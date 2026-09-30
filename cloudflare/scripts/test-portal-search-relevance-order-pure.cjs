@@ -131,6 +131,7 @@ const portalRoute = loadReal('routes/portal.ts', {
   '../lib/rateLimit': { checkRateLimit: async () => ({ allowed: true }), getClientIp: () => '127.0.0.1' },
   '../lib/portalAbuseKey': loadReal('lib/portalAbuseKey.ts'),
   '../lib/safeLinkUrl': loadReal('lib/safeLinkUrl.ts'),
+  '../lib/portalText': loadReal('lib/portalText.ts'),
   ...(fs.existsSync(path.join(__dirname, '..', 'src', 'lib', 'portalImagePrivacy.ts'))
     ? { '../lib/portalImagePrivacy': loadReal('lib/portalImagePrivacy.ts') }
     : {}),

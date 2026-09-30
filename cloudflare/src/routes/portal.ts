@@ -8,7 +8,8 @@ import { hasPermission } from '../lib/permissions'
 import { audit } from '../lib/audit'
 import { checkRateLimit, getClientIp } from '../lib/rateLimit'
 import { portalAbuseKey } from '../lib/portalAbuseKey'
-import { normalizeSafeLinkUrl } from '../lib/safeLinkUrl'
+import { normalizePortalUploadPath, normalizeSafeLinkUrl } from '../lib/safeLinkUrl'
+import { capPortalText, normalizePortalImageAlt, plainText } from '../lib/portalText'
 import { buildUniqueStoredName } from '../lib/fileAssets'
 import { sanitizeMediaList } from '../lib/media'
 import { sanitizePortalImageMetadata } from '../lib/portalImagePrivacy'
@@ -41,10 +42,21 @@ function toNumber(value: unknown, fallback = 0): number {
   return Number.isFinite(num) ? num : fallback
 }
 
+const SWITCH_ON_VALUES = new Set(['1', 'true', 'yes', 'on'])
+
 function normalizeBoolean(value: unknown, fallback = false): boolean {
   if (value == null) return fallback
-  return ['1', 'true', 'yes', 'on'].includes(String(value).trim().toLowerCase())
+  return SWITCH_ON_VALUES.has(String(value).trim().toLowerCase())
 }
+
+// Unlike normalizeBoolean, a blank switch is no choice at all, so the storefront keeps its default.
+function normalizeStoredSwitch(value: unknown, fallback: boolean): boolean {
+  const text = String(value ?? '').trim()
+  return text ? normalizeBoolean(text) : fallback
+}
+
+const MAX_PORTAL_FAQ_ITEMS = 50
+const MAX_PORTAL_PROMO_ITEMS = 50
 
 function normalizePortalFaqItems(value: unknown): Array<{ id: string; question: string; answer: string }> {
   let parsed: unknown = value
@@ -58,13 +70,13 @@ function normalizePortalFaqItems(value: unknown): Array<{ id: string; question: 
   if (!Array.isArray(parsed)) return []
 
   return parsed
-    .slice(0, 50)
+    .slice(0, MAX_PORTAL_FAQ_ITEMS)
     .map((item, index) => {
       const row = item && typeof item === 'object' ? item as Record<string, unknown> : {}
       return {
-        id: String(row.id || `faq-${index + 1}`).trim() || `faq-${index + 1}`,
-        question: String(row.question || '').trim(),
-        answer: String(row.answer || '').trim(),
+        id: plainText(row.id) || `faq-${index + 1}`,
+        question: plainText(row.question),
+        answer: plainText(row.answer),
       }
     })
     .filter((item) => item.question && item.answer)
@@ -99,11 +111,12 @@ export function normalizePortalPromoItems(value: unknown) {
   if (!Array.isArray(parsed)) return []
 
   return parsed
-    .slice(0, 50)
+    .slice(0, MAX_PORTAL_PROMO_ITEMS)
     .map((item, index) => {
       const row = item && typeof item === 'object' ? item as Record<string, unknown> : {}
-      const text = (key: string) => String(row[key] || '').trim()
-      const linkProductId = Number.parseInt(String(row.linkProductId || ''), 10)
+      const text = (key: string) => plainText(row[key])
+      const productIdText = typeof row.linkProductId === 'number' ? String(row.linkProductId) : plainText(row.linkProductId)
+      const linkProductId = Number.parseInt(productIdText, 10)
       return {
         id: text('id') || `promo-${index + 1}`,
         eyebrow: text('eyebrow'),
@@ -118,6 +131,190 @@ export function normalizePortalPromoItems(value: unknown) {
       }
     })
     .filter((item) => item.title || item.subtitle || item.body || item.mediaUrl)
+}
+
+// Reads the JSON the Website Editor writes (portalEditorUtils.ts serializeAboutBlocks).
+const PORTAL_ABOUT_BLOCK_TYPES = new Set(['text', 'image', 'video'])
+const MAX_PORTAL_ABOUT_BLOCKS = 30
+const MAX_PORTAL_ABOUT_BLOCK_ID_LENGTH = 80
+const MAX_PORTAL_ABOUT_TITLE_LENGTH = 160
+const MAX_PORTAL_ABOUT_TEXT_LENGTH = 4000
+
+export function normalizePortalAboutBlocks(value: unknown) {
+  let parsed: unknown = value
+  if (typeof value === 'string') {
+    try {
+      parsed = JSON.parse(value)
+    } catch (_) {
+      return []
+    }
+  }
+  if (!Array.isArray(parsed)) return []
+
+  return parsed
+    .map((item, index) => {
+      const row = item && typeof item === 'object' ? item as Record<string, unknown> : {}
+      const type = plainText(row.type)
+      return {
+        id: capPortalText(row.id, MAX_PORTAL_ABOUT_BLOCK_ID_LENGTH) || `about-${index + 1}`,
+        type: PORTAL_ABOUT_BLOCK_TYPES.has(type) ? type : 'text',
+        title: capPortalText(row.title, MAX_PORTAL_ABOUT_TITLE_LENGTH),
+        body: capPortalText(row.body, MAX_PORTAL_ABOUT_TEXT_LENGTH),
+        mediaUrl: normalizeSafeLinkUrl(row.mediaUrl) || '',
+      }
+    })
+    .filter((block) => block.title || block.body || block.mediaUrl)
+    .slice(0, MAX_PORTAL_ABOUT_BLOCKS)
+}
+
+const MAX_PORTAL_AI_INTRO_LENGTH = 500
+const MAX_PORTAL_RECOMMENDED_PRODUCTS = 100
+const WHOLE_NUMBER_TEXT = /^\d{1,16}$/
+
+function parseStoredJson(value: unknown): unknown {
+  if (typeof value !== 'string') return undefined
+  try {
+    return JSON.parse(value)
+  } catch (_) {
+    return undefined
+  }
+}
+
+function positiveProductId(entry: unknown): number | null {
+  const id = typeof entry === 'string' && WHOLE_NUMBER_TEXT.test(entry.trim()) ? Number(entry.trim()) : entry
+  return typeof id === 'number' && Number.isSafeInteger(id) && id > 0 ? id : null
+}
+
+function normalizePortalRecommendedProductIds(value: unknown): number[] {
+  const parsed = parseStoredJson(value)
+  if (!Array.isArray(parsed)) return []
+  const ids = new Set<number>()
+  for (const entry of parsed) {
+    if (ids.size === MAX_PORTAL_RECOMMENDED_PRODUCTS) break
+    const id = positiveProductId(entry)
+    if (id !== null) ids.add(id)
+  }
+  return [...ids]
+}
+
+// The storefront's first-party languages (frontend portalLanguageOptions.ts).
+const PORTAL_LANGUAGE_CODES = ['en', 'km', 'zh-CN', 'zh-TW', 'vi', 'th', 'ru', 'fr', 'es', 'de', 'ja', 'ko', 'pt', 'it', 'ar', 'hi', 'id', 'ms', 'tr']
+const PORTAL_LANGUAGE_BY_LOWER_CASE = new Map(PORTAL_LANGUAGE_CODES.map((code) => [code.toLowerCase(), code]))
+
+function portalLanguageCode(value: unknown): string {
+  return typeof value === 'string' ? PORTAL_LANGUAGE_BY_LOWER_CASE.get(value.trim().toLowerCase()) || '' : ''
+}
+
+const MAX_PORTAL_TRANSLATIONS_JSON_LENGTH = 128 * 1024
+const MAX_PORTAL_TRANSLATION_TEXT_LENGTH = MAX_PORTAL_ABOUT_TEXT_LENGTH
+const MAX_PORTAL_TRANSLATED_PRODUCTS = 500
+const PORTAL_TRANSLATION_ENTRY_KEY = /^[A-Za-z0-9][\w.:-]{0,79}$/
+// Every field the storefront translates (frontend portalContentI18n.ts); nothing else is published.
+const PORTAL_TRANSLATED_CONFIG_FIELDS = [
+  'aboutTitle', 'aboutContent', 'aiTitle', 'aiIntro', 'aiDisclaimer', 'faqTitle',
+  'membershipInfoText', 'promotionsTitle', 'promotionsIntro', 'submissionInstructions',
+]
+const PORTAL_TRANSLATED_LINK_LABELS = ['website', 'facebook', 'instagram', 'telegram']
+const PORTAL_TRANSLATED_PRODUCT_FIELDS = ['name', 'description', 'category', 'brand']
+const PORTAL_TRANSLATED_COLLECTIONS: ReadonlyArray<[name: string, fields: readonly string[], maxEntries: number]> = [
+  ['aboutBlocks', ['title', 'body'], MAX_PORTAL_ABOUT_BLOCKS],
+  ['promoItems', ['eyebrow', 'title', 'subtitle', 'body', 'ctaLabel'], MAX_PORTAL_PROMO_ITEMS],
+  ['faqItems', ['question', 'answer'], MAX_PORTAL_FAQ_ITEMS],
+  ['products', PORTAL_TRANSLATED_PRODUCT_FIELDS, MAX_PORTAL_TRANSLATED_PRODUCTS],
+  ['catalogProducts', PORTAL_TRANSLATED_PRODUCT_FIELDS, MAX_PORTAL_TRANSLATED_PRODUCTS],
+  ['catalog', PORTAL_TRANSLATED_PRODUCT_FIELDS, MAX_PORTAL_TRANSLATED_PRODUCTS],
+]
+
+type PlainRecord = Record<string, unknown>
+
+function isPlainRecord(value: unknown): value is PlainRecord {
+  return !!value && typeof value === 'object' && !Array.isArray(value)
+}
+
+const hasEntries = (record: PlainRecord) => Object.keys(record).length > 0
+
+function pickTranslatedFields(source: unknown, fields: readonly string[]): PlainRecord {
+  const picked: PlainRecord = {}
+  if (!isPlainRecord(source)) return picked
+  for (const field of fields) {
+    const text = capPortalText(source[field], MAX_PORTAL_TRANSLATION_TEXT_LENGTH)
+    if (text) picked[field] = text
+  }
+  return picked
+}
+
+// The storefront also reads a translated field from the entry's `fields` or `text` group.
+function pickTranslatedTexts(source: unknown, fields: readonly string[]): PlainRecord {
+  const picked = pickTranslatedFields(source, fields)
+  if (!isPlainRecord(source)) return picked
+  for (const group of ['fields', 'text']) {
+    const nested = pickTranslatedFields(source[group], fields)
+    if (hasEntries(nested)) picked[group] = nested
+  }
+  return picked
+}
+
+// An array entry is matched to its item by position, so a junk entry stays as {} to keep the later ones in place.
+function normalizeTranslatedCollection(value: unknown, fields: readonly string[], maxEntries: number): unknown {
+  if (Array.isArray(value)) {
+    const entries = value.slice(0, maxEntries).map((entry) => pickTranslatedTexts(entry, fields))
+    return entries.some(hasEntries) ? entries : null
+  }
+  if (!isPlainRecord(value)) return null
+  const entries = Object.entries(value)
+    .filter(([key]) => PORTAL_TRANSLATION_ENTRY_KEY.test(key))
+    .map(([key, entry]): [string, PlainRecord] => [key, pickTranslatedTexts(entry, fields)])
+    .filter(([, entry]) => hasEntries(entry))
+    .slice(0, maxEntries)
+  return entries.length ? Object.fromEntries(entries) : null
+}
+
+function normalizeTranslationBlock(block: PlainRecord): PlainRecord {
+  const normalized = pickTranslatedTexts(block, PORTAL_TRANSLATED_CONFIG_FIELDS)
+  const linkLabels = pickTranslatedTexts(block.linkLabels, PORTAL_TRANSLATED_LINK_LABELS)
+  if (hasEntries(linkLabels)) normalized.linkLabels = linkLabels
+  for (const [name, fields, maxEntries] of PORTAL_TRANSLATED_COLLECTIONS) {
+    const collection = normalizeTranslatedCollection(block[name], fields, maxEntries)
+    if (collection) normalized[name] = collection
+  }
+  return normalized
+}
+
+function normalizePortalTranslations(value: unknown): Record<string, PlainRecord> {
+  const translations: Record<string, PlainRecord> = {}
+  const withinBound = typeof value === 'string' && value.length <= MAX_PORTAL_TRANSLATIONS_JSON_LENGTH
+  const parsed = withinBound ? parseStoredJson(value) : undefined
+  if (!isPlainRecord(parsed)) return translations
+  for (const [code, block] of Object.entries(parsed)) {
+    const language = portalLanguageCode(code)
+    if (!language || translations[language] || !isPlainRecord(block)) continue
+    const normalized = normalizeTranslationBlock(block)
+    if (hasEntries(normalized)) translations[language] = normalized
+  }
+  return translations
+}
+
+// Same bare-host completion and http(s) rule as the editor's CatalogPage.tsx normalizeExternalUrl.
+function normalizePortalAddressLink(value: unknown): string {
+  const raw = String(value ?? '').trim()
+  if (!raw || raw.length > 2048 || /[\u0000-\u001f\u007f]/.test(raw)) return ''
+  const candidate = /^https?:\/\//i.test(raw)
+    ? raw
+    : (/^(www\.|[\w-]+(\.[\w-]+)+|maps\.app\.goo\.gl|goo\.gl\/maps)/i.test(raw) ? `https://${raw}` : '')
+  if (!candidate) return ''
+  try {
+    const url = new URL(candidate)
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return ''
+    return url.toString().replace(/\/$/, '')
+  } catch (_) {
+    return ''
+  }
+}
+
+function clampPortalWhole(value: unknown, min: number, max: number, fallback: number): number {
+  const raw = String(value ?? '').trim()
+  const num = raw ? Number(raw) : Number.NaN
+  return Number.isFinite(num) ? Math.min(max, Math.max(min, Math.round(num))) : fallback
 }
 
 // Ported from backend/src/routes/portal.ts's normalizeUrl, minus the
@@ -237,12 +434,14 @@ export function buildPortalConfig(settings: SettingsMap, env: Env) {
     : 'usd'
   const pointsPerUsd = toNumber(settings.customer_portal_points_per_usd, 1)
   const derivedPointsPerKhr = pointsPerUsd > 0 && exchangeRate > 0 ? pointsPerUsd / exchangeRate : 0
+  const languageSetting = portalLanguageCode(settings.customer_portal_language) || 'auto'
 
   return {
     businessName: settings.business_name || 'Business OS',
     businessPhone: settings.business_phone || '',
     businessEmail: settings.business_email || '',
     businessAddress: settings.business_address || '',
+    addressLink: normalizePortalAddressLink(settings.customer_portal_address_link),
     // N45: the registered identity an online seller has to display (Cambodia's
     // 2019 e-commerce law) and that the privacy/terms/cookie templates fill in.
     // Separate from businessName, which is the display/brand name. WHICH of
@@ -253,15 +452,28 @@ export function buildPortalConfig(settings: SettingsMap, env: Env) {
     businessLegalName: settings.business_legal_name || '',
     businessRegistrationNumber: settings.business_registration_number || '',
     businessTagline: settings.customer_portal_business_tagline || '',
-    businessLogo: settings.customer_portal_logo_image || '',
-    businessFavicon: settings.customer_portal_favicon_image || '',
-    businessCover: settings.customer_portal_cover_image || '',
+    // Images every visitor loads: same allowlist as promo card media.
+    businessLogo: normalizeSafeLinkUrl(settings.customer_portal_logo_image) || '',
+    businessFavicon: normalizeSafeLinkUrl(settings.customer_portal_favicon_image) || '',
+    businessCover: normalizeSafeLinkUrl(settings.customer_portal_cover_image) || '',
+    // The Website Editor's logo slider ranges and defaults.
+    logoSize: clampPortalWhole(settings.customer_portal_logo_size, 48, 144, 80),
+    logoFit: String(settings.customer_portal_logo_fit || '').trim().toLowerCase() === 'contain' ? 'contain' : 'cover',
+    logoZoom: clampPortalWhole(settings.customer_portal_logo_zoom, 80, 180, 100),
+    logoPositionX: clampPortalWhole(settings.customer_portal_logo_position_x, 0, 100, 50),
+    logoPositionY: clampPortalWhole(settings.customer_portal_logo_position_y, 0, 100, 50),
     showLogo: normalizeBoolean(settings.customer_portal_show_logo, true),
     showCover: normalizeBoolean(settings.customer_portal_show_cover, true),
     showPhone: normalizeBoolean(settings.customer_portal_show_phone, true),
     showEmail: normalizeBoolean(settings.customer_portal_show_email, true),
     showAddress: normalizeBoolean(settings.customer_portal_show_address, true),
     showAbout: normalizeBoolean(settings.customer_portal_show_about, true),
+    // Empty title: the storefront shows its own translated "About".
+    aboutTitle: capPortalText(settings.customer_portal_about_title, MAX_PORTAL_ABOUT_TITLE_LENGTH),
+    aboutContent: capPortalText(settings.customer_portal_about_content, MAX_PORTAL_ABOUT_TEXT_LENGTH),
+    aboutBlocks: normalizePortalAboutBlocks(settings.customer_portal_about_blocks),
+    aboutImage: normalizePortalUploadPath(settings.customer_portal_about_image) || '',
+    aboutImageAlt: normalizePortalImageAlt(settings.customer_portal_about_image_alt),
     showCatalog: normalizeBoolean(settings.customer_portal_show_catalog, true),
     // Guest membership lookup was removed. Signed-in customers see their own
     // membership ID in the account drawer instead of exposing an ID oracle.
@@ -300,6 +512,14 @@ export function buildPortalConfig(settings: SettingsMap, env: Env) {
     showProductCategory: normalizeBoolean(settings.customer_portal_show_product_category, true),
     showProductDescription: normalizeBoolean(settings.customer_portal_show_product_description, true),
     showProductDiscount: normalizeBoolean(settings.customer_portal_show_product_discount, true),
+    showTopSellerBadge: normalizeStoredSwitch(settings.customer_portal_show_top_seller_badge, true),
+    showTopProductBadge: normalizeStoredSwitch(settings.customer_portal_show_top_product_badge, true),
+    showRecommendedBadge: normalizeStoredSwitch(settings.customer_portal_show_recommended_badge, true),
+    // The storefront has never shown these two without a stored choice.
+    showPromotionBadge: normalizeStoredSwitch(settings.customer_portal_show_promotion_badge, false),
+    showNewArrivalBadge: normalizeStoredSwitch(settings.customer_portal_show_new_arrival_badge, false),
+    highlightRankLimit: clampPortalWhole(settings.customer_portal_highlight_rank_limit, 1, 10, 3),
+    recommendedProductIds: normalizePortalRecommendedProductIds(settings.customer_portal_recommended_product_ids),
     // Same "editor reads it correctly, buildPortalConfig never sent it to
     // the real public site" gap already fixed twice for other toggles
     // above (out-of-stock, per-field show* toggles) -- this one was still
@@ -307,8 +527,12 @@ export function buildPortalConfig(settings: SettingsMap, env: Env) {
     // editor had no effect on the live portal (the frontend's own default
     // is `true`, so a missing field was silently read as "on").
     translateWidgetEnabled: normalizeBoolean(settings.customer_portal_translate_widget_enabled, true),
+    languageSetting,
+    language: languageSetting === 'auto' ? 'en' : languageSetting,
+    translations: normalizePortalTranslations(settings.customer_portal_translations),
     aiEnabled: normalizeBoolean(settings.customer_portal_ai_enabled, true),
     aiTitle: settings.customer_portal_ai_title || 'Beauty Assistant',
+    aiIntro: capPortalText(settings.customer_portal_ai_intro, MAX_PORTAL_AI_INTRO_LENGTH),
     aiDisclaimer: settings.customer_portal_ai_disclaimer
       || 'AI generated, for reference only. For more accurate inquiries, please contact our store on Instagram or Facebook.',
     aiProviderId: Number(settings.customer_portal_ai_provider_id || 0) || null,
@@ -733,17 +957,6 @@ async function buildPortalCatalog(env: Env, showOutOfStockProducts: boolean) {
   }
 }
 
-// GET /config -- the real public branding endpoint. The original
-// (backend/src/routes/portal.ts's buildPortalConfig) whitelists ~70 fields
-// covering branding, FAQ, about-page blocks, translations, AI assistant
-// config, and membership/points settings. Porting the entire whitelist
-// faithfully is real, substantial work on its own -- this ports the core
-// branding/display fields a portal needs to render at all (name, contact
-// info, logo/cover, tagline, social links, show/hide toggles, hero colors,
-// catalog display options), and is deliberately NOT a complete port of the
-// original's full field set. Disclosed here and in MIGRATION.md, not
-// silently partial: FAQ, about blocks, translations, AI settings, and
-// membership/points config are not included in this response.
 // ---------------------------------------------------------------------------
 // Public read caching
 // ---------------------------------------------------------------------------
@@ -822,11 +1035,27 @@ export function buildPublicPortalConfig(settings: SettingsMap, env: Env) {
   return publicConfig
 }
 
+async function keepActiveProductIds(env: Env, ids: readonly number[]): Promise<number[]> {
+  if (!ids.length) return []
+  const rows = await getDb(env)
+    .prepare(`SELECT id FROM products WHERE is_active = 1 AND id IN (${inlineIntegerIds(ids)})`)
+    .all<{ id: number }>()
+  const active = new Set(rows.map((row) => Number(row.id)))
+  return ids.filter((id) => active.has(id))
+}
+
+type PublicPortalConfig = ReturnType<typeof buildPublicPortalConfig>
+
+async function withActiveRecommendedProducts(env: Env, publicConfig: PublicPortalConfig): Promise<PublicPortalConfig> {
+  publicConfig.recommendedProductIds = await keepActiveProductIds(env, publicConfig.recommendedProductIds)
+  return publicConfig
+}
+
 app.get('/config', async (c) => {
   const version = await portalCacheVersion(c)
   return c.json(await cachedJsonResponse(portalCacheRequest(c.req.raw, c.req.query(), c.req.path), c.executionCtx, version, PORTAL_CONFIG_TTL_SECONDS, async () => {
     const settings = await loadSettingsMap(c.env)
-    return buildPublicPortalConfig(settings, c.env)
+    return withActiveRecommendedProducts(c.env, buildPublicPortalConfig(settings, c.env))
   }))
 })
 
@@ -834,9 +1063,9 @@ app.get('/bootstrap', async (c) => {
   const version = await portalCacheVersion(c)
   return c.json(await cachedJsonResponse(portalCacheRequest(c.req.raw, c.req.query(), c.req.path), c.executionCtx, version, PORTAL_CATALOG_TTL_SECONDS, async () => {
     const settings = await loadSettingsMap(c.env)
-    const config = buildPublicPortalConfig(settings, c.env)
     const showOutOfStockProducts = normalizeBoolean(settings.customer_portal_show_out_of_stock_products, true)
-    const [meta, catalog] = await Promise.all([
+    const [config, meta, catalog] = await Promise.all([
+      withActiveRecommendedProducts(c.env, buildPublicPortalConfig(settings, c.env)),
       buildPortalMeta(c.env, showOutOfStockProducts),
       buildPortalCatalog(c.env, showOutOfStockProducts),
     ])

@@ -110,8 +110,6 @@ export const LEGAL_STORAGE_ROWS: readonly LegalStorageRow[] = [
   { id: 'wishlist', name: 'business-os-portal-wishlist-v1', kindKey: 'portal_legal_kind_local', purposeKey: 'portal_legal_store_wishlist_p', lifetimeKey: 'portal_legal_store_until_cleared_l' },
   // portalLanguageOptions.ts
   { id: 'translate', name: 'business-os:portal-translate-target', kindKey: 'portal_legal_kind_local', purposeKey: 'portal_legal_store_translate_p', lifetimeKey: 'portal_legal_store_until_cleared_l' },
-  // PublicCatalogPage.tsx PUBLIC_PORTAL_CACHE_KEY (both storages)
-  { id: 'cache', name: 'business-os-catalog-portal-cache', kindKey: 'portal_legal_kind_both', purposeKey: 'portal_legal_store_cache_p', lifetimeKey: 'portal_legal_store_cache_l' },
   // public-runtime/service-worker.ts -- app shell and same-origin static
   // assets. Cache names are versioned and old versions are pruned on update.
   { id: 'cache-storage', name: 'Business OS app-shell/static caches', kindKey: 'portal_legal_kind_cache', purposeKey: 'portal_legal_store_cache_storage_p', lifetimeKey: 'portal_legal_store_cache_storage_l' },

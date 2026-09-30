@@ -895,6 +895,10 @@ function manualChunks(id: string): string | undefined {
       // which is a TDZ ReferenceError ("Cannot access '<var>' before initialization")
       // that blanks the whole public portal on load. Keep it with its only consumer.
       || normalized.includes('/src/components/catalog/portalProductGrouping.ts')
+      // publicFirstPaint.ts and the skeleton: only the storefront page and root import them;
+      // catalog-public-core would put them in the catalog-products closure (performanceBudgets).
+      || normalized.includes('/src/components/catalog/publicFirstPaint.ts')
+      || normalized.includes('/src/components/catalog/PublicStorefrontSkeleton.tsx')
       // PublicCatalogRoot installs it before its first render and already
       // imports this chunk statically; the generic catch-all is the admin chunk.
       || normalized.includes('/src/components/catalog/portalTranslateDomGuard.ts')

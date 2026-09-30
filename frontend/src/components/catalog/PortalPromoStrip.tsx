@@ -35,6 +35,7 @@ export default function PortalPromoStrip({
   promotionRules = [],
   copy,
   formatPrice,
+  showPrices,
   openProductDetail,
   promoFacet = '',
   setPromoFacet,
@@ -43,6 +44,7 @@ export default function PortalPromoStrip({
   promotionRules?: PromotionRule[]
   copy: (key: string, fallback?: string) => string
   formatPrice: (usd: unknown, khr: unknown) => string
+  showPrices: boolean
   openProductDetail?: (product: PortalProduct) => void
   // The campaign chip narrows the grid to that rule's products (search
   // param promo=rule:<id>); tapping the pressed chip clears it. Optional so
@@ -77,14 +79,14 @@ export default function PortalPromoStrip({
         key: `product-${product.id}`,
         product,
         label: String(product.name || ''),
-        priceText: evaluation.active
+        priceText: showPrices && evaluation.active
           ? formatPrice(evaluation.unit_price_usd, evaluation.unit_price_khr)
           : (evaluation.title || copy('promotionBadge', 'Promo')),
         color: evaluation.badge_color || '#e11d48',
       })
     }
     return out
-  }, [products, promotionRules, copy, formatPrice])
+  }, [products, promotionRules, copy, formatPrice, showPrices])
 
   // The drift: nudge scrollLeft each frame, wrap at the end, hold still
   // while the visitor interacts. Also keeps the active dot in sync with
