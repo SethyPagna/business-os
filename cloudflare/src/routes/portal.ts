@@ -9,7 +9,7 @@ import { audit } from '../lib/audit'
 import { checkRateLimit, getClientIp } from '../lib/rateLimit'
 import { portalAbuseKey } from '../lib/portalAbuseKey'
 import { normalizePortalUploadPath, normalizeSafeLinkUrl } from '../lib/safeLinkUrl'
-import { capPortalText, normalizePortalImageAlt, plainText } from '../lib/portalText'
+import { AUTOMATIC_PORTAL_LANGUAGE, capPortalText, normalizePortalImageAlt, plainText, portalLanguageCode } from '../lib/portalText'
 import { buildUniqueStoredName } from '../lib/fileAssets'
 import { sanitizeMediaList } from '../lib/media'
 import { sanitizePortalImageMetadata } from '../lib/portalImagePrivacy'
@@ -195,14 +195,6 @@ function normalizePortalRecommendedProductIds(value: unknown): number[] {
     if (id !== null) ids.add(id)
   }
   return [...ids]
-}
-
-// The storefront's first-party languages (frontend portalLanguageOptions.ts).
-const PORTAL_LANGUAGE_CODES = ['en', 'km', 'zh-CN', 'zh-TW', 'vi', 'th', 'ru', 'fr', 'es', 'de', 'ja', 'ko', 'pt', 'it', 'ar', 'hi', 'id', 'ms', 'tr']
-const PORTAL_LANGUAGE_BY_LOWER_CASE = new Map(PORTAL_LANGUAGE_CODES.map((code) => [code.toLowerCase(), code]))
-
-function portalLanguageCode(value: unknown): string {
-  return typeof value === 'string' ? PORTAL_LANGUAGE_BY_LOWER_CASE.get(value.trim().toLowerCase()) || '' : ''
 }
 
 const MAX_PORTAL_TRANSLATIONS_JSON_LENGTH = 128 * 1024
@@ -434,7 +426,7 @@ export function buildPortalConfig(settings: SettingsMap, env: Env) {
     : 'usd'
   const pointsPerUsd = toNumber(settings.customer_portal_points_per_usd, 1)
   const derivedPointsPerKhr = pointsPerUsd > 0 && exchangeRate > 0 ? pointsPerUsd / exchangeRate : 0
-  const languageSetting = portalLanguageCode(settings.customer_portal_language) || 'auto'
+  const languageSetting = portalLanguageCode(settings.customer_portal_language) || AUTOMATIC_PORTAL_LANGUAGE
 
   return {
     businessName: settings.business_name || 'Business OS',
@@ -528,7 +520,7 @@ export function buildPortalConfig(settings: SettingsMap, env: Env) {
     // is `true`, so a missing field was silently read as "on").
     translateWidgetEnabled: normalizeBoolean(settings.customer_portal_translate_widget_enabled, true),
     languageSetting,
-    language: languageSetting === 'auto' ? 'en' : languageSetting,
+    language: languageSetting === AUTOMATIC_PORTAL_LANGUAGE ? 'en' : languageSetting,
     translations: normalizePortalTranslations(settings.customer_portal_translations),
     aiEnabled: normalizeBoolean(settings.customer_portal_ai_enabled, true),
     aiTitle: settings.customer_portal_ai_title || 'Beauty Assistant',
@@ -604,7 +596,7 @@ export function buildPortalConfig(settings: SettingsMap, env: Env) {
     showContactPhone: normalizeBoolean(settings.customer_portal_show_contact_phone, false),
     showContactInstagram: normalizeBoolean(settings.customer_portal_show_contact_instagram, false),
     title: settings.customer_portal_title || settings.business_name || 'Customer Portal',
-    intro: settings.customer_portal_intro || 'Browse products and check membership details.',
+    intro: settings.customer_portal_intro || '',
     heroGradientStart: settings.customer_portal_hero_gradient_start || '#0f172a',
     heroGradientMid: settings.customer_portal_hero_gradient_mid || '#14532d',
     heroGradientEnd: settings.customer_portal_hero_gradient_end || '#ea580c',

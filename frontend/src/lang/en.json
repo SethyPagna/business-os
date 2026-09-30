@@ -4264,6 +4264,7 @@
   "write_server_unavailable": "The server is unavailable. No new request was sent. Try again when it reconnects.",
   "write_rejected_title": "Write rejected",
   "write_rejected_details": "The server did not accept this change. View details to check the reason.",
+  "write_rejected_portal_language": "The website language must be English or Khmer.",
   "restarting_app": "Restarting...",
   "refresh_status": "Refresh status",
   "refreshing": "Refreshing...",

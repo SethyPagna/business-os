@@ -79,6 +79,16 @@ const ctx = { waitUntil(p) { p?.catch?.(() => {}) }, passThroughOnException() {}
     assert.equal(internal.aiProviderId, 7)
   })
 
+  await check('an empty intro publishes empty: the storefront hides it, so no English or membership default reaches shoppers', async () => {
+    const settings = Object.fromEntries(settingsRows.map((r) => [r.key, r.value]))
+    assert.equal(portal.buildPortalConfig({ ...settings, customer_portal_intro: '' }, env).intro, '')
+    assert.equal(portal.buildPortalConfig(settings, env).intro, '')
+    assert.equal(portal.buildPortalConfig({ ...settings, customer_portal_intro: 'សូមស្វាគមន៍' }, env).intro, 'សូមស្វាគមន៍')
+    const res = await portal.default.request('https://shop.test/config', {}, env, ctx)
+    const body = JSON.parse(await res.text())
+    assert.equal(body.intro, '')
+  })
+
   await check('/config and /bootstrap both use the public builder; no public route returns the raw config', async () => {
     const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'portal.ts'), 'utf8')
     for (const route of ["app.get('/config'", "app.get('/bootstrap'"]) {

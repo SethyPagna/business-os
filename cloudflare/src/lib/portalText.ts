@@ -33,6 +33,42 @@ export function capPortalText(value: unknown, maxCodePoints: number): string {
   return characters.slice(0, cut).join('')
 }
 
+// Owner decision, 27 Sep 2026: the storefront is English and Khmer only (frontend PUBLIC_STOREFRONT_LANGUAGE_OPTIONS).
+export const PORTAL_LANGUAGE_CODES: ReadonlySet<string> = new Set(['en', 'km'])
+export const AUTOMATIC_PORTAL_LANGUAGE = 'auto'
+
+export function portalLanguageCode(value: unknown): string {
+  const code = typeof value === 'string' ? value.trim().toLowerCase() : ''
+  return PORTAL_LANGUAGE_CODES.has(code) ? code : ''
+}
+
+export function portalLanguageSetting(value: unknown): string | null {
+  if (value == null) return AUTOMATIC_PORTAL_LANGUAGE
+  if (typeof value !== 'string') return null
+  const setting = value.trim().toLowerCase()
+  if (!setting || setting === AUTOMATIC_PORTAL_LANGUAGE) return AUTOMATIC_PORTAL_LANGUAGE
+  return portalLanguageCode(setting) || null
+}
+
+function parsedTranslations(stored: string): Record<string, unknown> | null {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(stored)
+  } catch {
+    return null
+  }
+  return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : null
+}
+
+// Leaves every storefront-language block as sent, so the storefront publishes exactly what it did before.
+export function withoutOtherLanguageTranslations(stored: string): string {
+  const translations = parsedTranslations(stored)
+  if (!translations) return stored
+  const blocks = Object.entries(translations)
+  const storefrontBlocks = blocks.filter(([code]) => portalLanguageCode(code))
+  return storefrontBlocks.length === blocks.length ? stored : JSON.stringify(Object.fromEntries(storefrontBlocks))
+}
+
 export const MAX_PORTAL_IMAGE_ALT_LENGTH = 200
 const CONTROL_CHARACTERS = /\p{Cc}/gu
 

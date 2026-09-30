@@ -41,7 +41,8 @@ Intl.Segmenter = class WorkerdGraphemeSegmenter {
 
 const db = openDb(loadAll())
 const queries = []
-const portal = load('routes/portal.ts', {
+const portalText = load('lib/portalText.ts')
+const loadPortal = (portalTextModule) => load('routes/portal.ts', {
   '../lib/db': {
     getDb: () => ({
       prepare: (sql) => {
@@ -57,11 +58,12 @@ const portal = load('routes/portal.ts', {
   },
   '../lib/requestBodyGuard': { SMALL_BODY_BYTES: 65536, PORTAL_SCREENSHOT_BODY_BYTES: 1 },
   '../lib/safeLinkUrl': load('lib/safeLinkUrl.ts'),
-  '../lib/portalText': load('lib/portalText.ts'),
+  '../lib/portalText': portalTextModule,
   '../lib/sqlBinding': load('lib/sqlBinding.ts'),
   '../lib/familyPagination': load('lib/familyPagination.ts'),
   '../lib/promotionRulesSql': { loadActivePromotionRules: async () => [], productPromotedSql: () => '0' },
 })
+const portal = loadPortal(portalText)
 const env = { BUSINESS_OS_PUBLIC_URL: 'https://shop.example', CACHE: { get: async () => null } }
 const ctx = { waitUntil(promise) { promise?.catch?.(() => {}) }, passThroughOnException() {} }
 const publish = (settings) => portal.buildPublicPortalConfig(settings, env)
@@ -73,6 +75,16 @@ const SWITCHES = [
   ['customer_portal_show_promotion_badge', 'showPromotionBadge', false],
   ['customer_portal_show_new_arrival_badge', 'showNewArrivalBadge', false],
 ]
+const RETIRED_STOREFRONT_LANGUAGES = ['zh-CN', 'zh-TW', 'vi', 'th', 'ru', 'fr', 'es', 'de', 'ja', 'ko', 'pt', 'it', 'ar', 'hi', 'id', 'ms', 'tr']
+const LETTERS = [...'abcdefghijklmnopqrstuvwxyz']
+const TWO_LETTER_CODES = LETTERS.flatMap((first) => LETTERS.map((second) => first + second))
+const LANGUAGE_CODE_CANDIDATES = [...new Set([
+  ...TWO_LETTER_CODES,
+  ...TWO_LETTER_CODES.flatMap((pair) => LETTERS.map((third) => pair + third)),
+  ...RETIRED_STOREFRONT_LANGUAGES.map((code) => code.toLowerCase()),
+  'en-us', 'en-gb', 'km-kh', 'vi-vn', 'lo-la', 'th-th', 'zh-hans', 'zh-hant',
+])]
+const TRANSLATION_PROBE_CHUNK = 2000
 const KHMER_STACK = 'ស្ត្រី'
 const capFallsInside = (filler, max, character, inside) => filler.repeat(max - inside) + character
 const translationsOf = (value) => publish({ customer_portal_translations: typeof value === 'string' ? value : JSON.stringify(value) }).translations
@@ -83,6 +95,13 @@ function frontendList(relativePath, constName) {
   assert.ok(declared > -1, `${constName} not found in ${relativePath}`)
   const start = src.indexOf('= [', declared)
   return src.slice(start, src.indexOf('\n]', start))
+}
+
+function storefrontLanguageCodes() {
+  const list = frontendList('frontend/src/components/catalog/portalLanguageOptions.ts', 'PUBLIC_STOREFRONT_LANGUAGE_OPTIONS')
+  const codes = [...list.matchAll(/\bvalue:\s*(['"`])([^'"`]+)\1/g)].map((match) => match[2])
+  assert.equal(codes.length, [...list.matchAll(/\bvalue:/g)].length, 'every storefront option value is a plain string literal')
+  return codes
 }
 
 async function get(url) {
@@ -147,30 +166,75 @@ async function main() {
     assert.deepEqual(published, stored.slice(0, 100))
   })
 
-  await check('default language: a storefront language publishes in its own spelling, anything else is automatic (English)', () => {
-    const language = (value) => {
-      const config = publish({ customer_portal_language: value })
-      return [config.languageSetting, config.language]
-    }
-    assert.deepEqual(language('km'), ['km', 'km'])
-    assert.deepEqual(language(' KM '), ['km', 'km'])
-    assert.deepEqual(language('zh-cn'), ['zh-CN', 'zh-CN'])
-    assert.deepEqual(language('auto'), ['auto', 'en'])
-    assert.deepEqual(language('en'), ['en', 'en'])
-    for (const refused of ['', 'xx', 'zh', 'en-US', 'nl', 'khmer', '<script>']) {
-      assert.deepEqual(language(refused), ['auto', 'en'], JSON.stringify(refused))
+  const publishedLanguage = (value) => {
+    const config = publish({ customer_portal_language: value })
+    return [config.languageSetting, config.language]
+  }
+
+  await check('default language: English or Khmer publishes as stored, anything else is automatic (English)', () => {
+    assert.deepEqual(publishedLanguage('km'), ['km', 'km'])
+    assert.deepEqual(publishedLanguage(' KM '), ['km', 'km'])
+    assert.deepEqual(publishedLanguage('auto'), ['auto', 'en'])
+    assert.deepEqual(publishedLanguage('en'), ['en', 'en'])
+    assert.deepEqual(publishedLanguage('EN'), ['en', 'en'])
+    for (const refused of ['', 'xx', 'zh', 'en-US', 'nl', 'khmer', '<script>', 'zh-cn', 'FR']) {
+      assert.deepEqual(publishedLanguage(refused), ['auto', 'en'], JSON.stringify(refused))
     }
     assert.deepEqual([publish({}).languageSetting, publish({}).language], ['auto', 'en'])
   })
 
-  await check('default language: every first-party storefront language is accepted (frontend portalLanguageOptions.ts)', () => {
-    const list = frontendList('frontend/src/components/catalog/portalLanguageOptions.ts', 'FIRST_PARTY_PORTAL_LANGUAGE_OPTIONS')
-    const codes = [...list.matchAll(/value: '([^']+)'/g)].map((match) => match[1])
-    assert.ok(codes.includes('en') && codes.includes('km'), `parsed ${codes.length} codes`)
-    for (const code of codes) {
-      assert.equal(publish({ customer_portal_language: code }).languageSetting, code, code)
-      assert.equal(publish({ customer_portal_language: code.toUpperCase() }).languageSetting, code, code.toUpperCase())
+  await check('default language: a stored retired storefront language (French, Chinese, ...) publishes as English', () => {
+    assert.deepEqual(publishedLanguage('fr'), ['auto', 'en'])
+    for (const code of RETIRED_STOREFRONT_LANGUAGES) {
+      assert.deepEqual(publishedLanguage(code), ['auto', 'en'], code)
     }
+  })
+
+  await check('default language: the Worker language set IS the storefront list (frontend PUBLIC_STOREFRONT_LANGUAGE_OPTIONS), both ways', () => {
+    const storefront = storefrontLanguageCodes()
+    const worker = [...portalText.PORTAL_LANGUAGE_CODES]
+    assert.ok(storefront.includes('en') && storefront.includes('km'), `parsed ${storefront.length} storefront codes`)
+    assert.deepEqual(worker.filter((code) => !storefront.includes(code)), [], 'the Worker publishes a language the storefront does not offer')
+    assert.deepEqual(storefront.filter((code) => !worker.includes(code)), [], 'the storefront offers a language the Worker drops')
+    for (const code of storefront) {
+      assert.deepEqual(publishedLanguage(code), [code, code], code)
+      assert.deepEqual(publishedLanguage(code.toUpperCase()), [code, code], code.toUpperCase())
+    }
+  })
+
+  await check('default language: no other two- or three-letter code or region tag is published as a language', () => {
+    const storefront = storefrontLanguageCodes().sort()
+    assert.deepEqual(LANGUAGE_CODE_CANDIDATES.filter((code) => portalText.portalLanguageCode(code)).sort(), storefront, 'lib/portalText portalLanguageCode')
+    const savedAs = LANGUAGE_CODE_CANDIDATES.map((code) => [code, portalText.portalLanguageSetting(code)]).filter(([, saved]) => saved !== null)
+    assert.deepEqual(savedAs.sort(), storefront.map((code) => [code, code]), 'lib/portalText portalLanguageSetting, the settings save rule')
+    assert.deepEqual(LANGUAGE_CODE_CANDIDATES.filter((code) => publishedLanguage(code)[0] !== 'auto').sort(), storefront, 'published languageSetting')
+    const publishedBlocks = []
+    for (let start = 0; start < LANGUAGE_CODE_CANDIDATES.length; start += TRANSLATION_PROBE_CHUNK) {
+      const chunk = LANGUAGE_CODE_CANDIDATES.slice(start, start + TRANSLATION_PROBE_CHUNK)
+      publishedBlocks.push(...Object.keys(translationsOf(Object.fromEntries(chunk.map((code) => [code, { aboutTitle: code }])))))
+    }
+    assert.deepEqual(publishedBlocks.sort(), storefront, 'published translation blocks')
+  })
+
+  await check('default language and translation blocks are both decided by lib/portalText, never a copy in portal.ts', () => {
+    const probe = 'zz-probe'
+    const probed = loadPortal({ ...portalText, portalLanguageCode: (value) => (value === probe ? probe : portalText.portalLanguageCode(value)) })
+    const config = probed.buildPublicPortalConfig({
+      customer_portal_language: probe,
+      customer_portal_translations: JSON.stringify({ [probe]: { aboutTitle: 'probe' } }),
+    }, env)
+    assert.deepEqual([config.languageSetting, config.language], [probe, probe])
+    assert.deepEqual(config.translations, { [probe]: { aboutTitle: 'probe' } })
+  })
+
+  await check('translations: a block for a retired storefront language is never published', () => {
+    for (const code of RETIRED_STOREFRONT_LANGUAGES) {
+      assert.deepEqual(translationsOf({ [code]: { aboutTitle: `about in ${code}` } }), {}, code)
+    }
+  })
+
+  await check('translations: an English block that is not an object, or a Khmer block with nothing translatable, publishes none', () => {
+    assert.deepEqual(translationsOf({ en: 'not an object', km: {} }), {})
   })
 
   await check('translations: only storefront languages and translatable text reach the shop', () => {
@@ -188,11 +252,11 @@ async function main() {
         linkLabels: { facebook: 'ហ្វេសប៊ុក', tiktok: 'TikTok', fields: { telegram: 'តេឡេក្រាម' } },
         script: '<script>alert(1)</script>',
       },
+      En: { promotionsIntro: 'Featured' },
       'zh-cn': { promotionsIntro: '精选' },
+      fr: { aboutTitle: 'À propos' },
       zh: { aboutTitle: 'base language' },
       xx: { aboutTitle: 'unknown' },
-      fr: 'not an object',
-      ja: {},
     })
     assert.deepEqual(published, {
       km: {
@@ -202,7 +266,7 @@ async function main() {
         text: { membershipInfoText: 'ពិន្ទុ' },
         linkLabels: { facebook: 'ហ្វេសប៊ុក', fields: { telegram: 'តេឡេក្រាម' } },
       },
-      'zh-CN': { promotionsIntro: '精选' },
+      en: { promotionsIntro: 'Featured' },
     })
     assert.equal(JSON.stringify(publish({ customer_portal_translations: JSON.stringify({ km: { aiPrompt: 'INTERNAL rules' } }) })).includes('INTERNAL'), false)
   })
@@ -239,6 +303,26 @@ async function main() {
     assert.deepEqual(translationsOf({ km: { aboutBlocks: keyed } }).km.aboutBlocks, { 'about-1': { title: 'kept' } }, 'junk entries never push a real one out')
     const products = Object.fromEntries(Array.from({ length: 600 }, (_, index) => [String(index + 1), { name: `n${index}` }]))
     assert.equal(Object.keys(translationsOf({ km: { products } }).km.products).length, 500)
+  })
+
+  await check('translations: dropping other languages on save never changes what the storefront publishes', () => {
+    const blobs = [
+      { KM: { aboutTitle: 'អំពីយើង', aiPrompt: 'INTERNAL' }, En: { promotionsIntro: 'Featured' }, 'zh-cn': { promotionsIntro: '精选' }, fr: { aboutTitle: 'À propos' }, zh: {}, xx: {} },
+      { fr: { aboutTitle: 'À propos' }, km: 'not an object', KM: { aboutTitle: 'the second Khmer block publishes' } },
+      { km: { aiPrompt: 'nothing translatable' }, de: { aboutTitle: 'x' }, ' KM ': { aboutTitle: 'the padded Khmer block publishes' } },
+      { en: { aboutTitle: 'English only' } },
+    ].map((blob) => JSON.stringify(blob))
+    blobs.push(
+      '{"__proto__":{"aboutTitle":"p"},"fr":{"aboutTitle":"f"},"km":{"aboutTitle":"k"}}',
+      '{"km":{"aboutTitle":"first"},"fr":{},"km":{"aboutTitle":"last"}}',
+      '{"1":{"aboutTitle":"numeric"},"en":{"aboutTitle":"e"},"th":{"aboutTitle":"t"}}',
+      '{not json', '[{"km":{"aboutTitle":"x"}}]', '"km"', '',
+    )
+    for (const stored of blobs) {
+      const saved = portalText.withoutOtherLanguageTranslations(stored)
+      assert.equal(typeof saved, 'string', stored)
+      assert.deepEqual(translationsOf(saved), translationsOf(stored), stored.slice(0, 80))
+    }
   })
 
   await check('translations: a "__proto__" language or entry key is never published', () => {
