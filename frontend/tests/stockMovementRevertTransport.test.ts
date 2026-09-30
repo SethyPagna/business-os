@@ -36,9 +36,9 @@ for (const lang of ['en', 'km']) {
   for (const code of ['undo_history_stale', 'undo_history_unusable']) {
     refusal = Object.assign(new Error('Synthetic server refusal'), { status: 409, code })
     const expected = (lang === 'km' ? km : en)[code.replace('undo_', 'undo_refused_')]
-    await assert.rejects(module.exports.getStockMovementRevertPreview(81), (error: unknown) => error === refusal && refusal.message === expected)
+    await assert.rejects(module.exports.getStockMovementRevertPreview(81), (error: unknown) => error === refusal && refusal?.message === expected)
   }
 }
 refusal = Object.assign(new Error('Forbidden'), { status: 403 })
-await assert.rejects(module.exports.getStockMovementRevertPreview(81), (error: unknown) => error === refusal && refusal.message === 'Forbidden')
+await assert.rejects(module.exports.getStockMovementRevertPreview(81), (error: unknown) => error === refusal && refusal?.message === 'Forbidden')
 console.log('PASS actual movement preview and History transports: read-only preview, captured zero generation, device attribution and require_applied')
