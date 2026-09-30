@@ -105,7 +105,14 @@ const rawDb = openDb(allMigrationSql())
 const db = wrap(rawDb)
 const session = loadReal('lib/portalSession.ts', {
   './db': { getDb: () => db },
-  './portalAccounts': { PORTAL_CONSENT_VERSION: 'portal-legal-2026-09-07' },
+  './portalAccounts': loadReal('lib/portalAccounts.ts', {
+    './db': { getDb: () => db },
+    './membershipNumber': {},
+    './phone': {},
+    './passwordPolicy': {},
+    './contactDuplicates': {},
+    './anonymousCustomer': loadReal('lib/anonymousCustomer.ts'),
+  }),
   './anonymousCustomer': loadReal('lib/anonymousCustomer.ts'),
   'hono/cookie': cookieStub,
 })

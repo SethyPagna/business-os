@@ -202,8 +202,49 @@ assert.match(
 // 7. day-first date, and a consent version tied to it
 assert.match(PORTAL_LEGAL_LAST_UPDATED_ISO, /^\d{4}-\d{2}-\d{2}$/)
 assert.equal(formatLegalLastUpdated('2026-09-07'), '07/09/2026')
-assert.equal(formatLegalLastUpdated(), '07/09/2026')
+assert.equal(PORTAL_LEGAL_LAST_UPDATED_ISO, '2026-09-30', 'the 30 Sep 2026 rewrite is a new policy version')
+assert.equal(formatLegalLastUpdated(), '30/09/2026')
 assert.equal(PORTAL_LEGAL_CONSENT_VERSION, `portal-legal-${PORTAL_LEGAL_LAST_UPDATED_ISO}`)
+
+// 8. Owner, 30 Sep 2026: welcoming privacy and terms texts that stay safe for the shop.
+const pageText = (page: 'privacy' | 'terms', target: 'en' | 'km') =>
+  LEGAL_PAGE_SECTIONS[page].flatMap((section) => [section.heading, ...section.bodies]).map((key) => interpolateLegal(legalText(target, key), details, 2026)).join('\n')
+const privacyEn = pageText('privacy', 'en')
+const privacyKm = pageText('privacy', 'km')
+const termsEn = pageText('terms', 'en')
+const termsKm = pageText('terms', 'km')
+// Points are coming soon, so no policy may promise a points or loyalty programme.
+for (const [key, value] of Object.entries(PORTAL_LEGAL_EN)) {
+  assert.doesNotMatch(value, /\b(?:points?|rewards?|redeem\w*|redemption|loyalty)\b/i, `en ${key} still promises points: ${value}`)
+}
+for (const [key, value] of Object.entries(PORTAL_LEGAL_KM)) {
+  assert.doesNotMatch(value, /ពិន្ទុ|រង្វាន់|ប្ដូរយក|ប្តូរយក|ស្មោះត្រង់|ភក្ដីភាព/, `km ${key} still promises points: ${value}`)
+}
+assert.ok(!('portal_legal_terms_membership_h' in PORTAL_LEGAL_EN), 'the "Membership and points" section is gone')
+assert.match(legalText('en', LEGAL_PAGE_SECTIONS.privacy[0].bodies[0]), /^Welcome/, 'the privacy policy opens with a welcome')
+assert.match(legalText('km', LEGAL_PAGE_SECTIONS.privacy[0].bodies[0]), /^សូមស្វាគមន៍/, 'the Khmer privacy policy opens with a welcome')
+// Account details exist only to know who is who and for safety; no billing details are kept or asked for.
+assert.match(privacyEn, /only[^.]*know who is who[^.]*safe/i, 'the privacy policy says account details are kept only to know who is who and for safety')
+assert.match(privacyKm, /ដឹងថានរណាជានរណា[^។]*សុវត្ថិភាព/, 'the Khmer privacy policy says the same')
+for (const [text, where] of [[privacyEn, 'privacy'], [termsEn, 'terms']] as const) {
+  assert.match(text, /(?:do not keep|keep no) billing information[^.]*never (?:ask|collect)/i, `the ${where} text says no billing information is kept or asked for`)
+  assert.match(text, /payment details are never collected through this site|never collect payment details through this site/i, `the ${where} text says payment details are never collected through the site`)
+  // The scam warning: bank details, card numbers and passwords, even for someone claiming to be the shop.
+  assert.match(text, /bank details, card numbers or passwords/i, `the ${where} text names bank details, card numbers and passwords`)
+  assert.match(text, /even (?:someone who says they are from our shop|if they say they are us)/i, `the ${where} text warns about someone claiming to be the shop`)
+  assert.match(text, /scam/i, `the ${where} text calls it a scam`)
+}
+for (const [text, where] of [[privacyKm, 'privacy'], [termsKm, 'terms']] as const) {
+  assert.match(text, /មិនរក្សាទុកព័ត៌មានទូទាត់ប្រាក់/, `the Khmer ${where} text says no billing information is kept`)
+  for (const word of ['ធនាគារ', 'លេខកាត', 'ពាក្យសម្ងាត់', 'បោកប្រាស់']) assert.ok(text.includes(word), `the Khmer ${where} scam warning names ${word}`)
+  assert.match(text, /ទោះបី[^។]*(?:ហាងយើង|ជាយើង)/, `the Khmer ${where} text warns about someone claiming to be the shop`)
+}
+// The brand-enquiry route stays.
+assert.match(PORTAL_LEGAL_EN.portal_legal_terms_ip_b, /respective rights holders[\s\S]*Contact the store using the verified details above/)
+assert.match(PORTAL_LEGAL_KM.portal_legal_terms_ip_b, /ម្ចាស់សិទ្ធិ[\s\S]*សូមទាក់ទងហាង/)
+// Short and plain: the text may not grow past the 30 Sep rewrite plus the picture-review disclosure (1,032 English words; the 7 Sep text was 1,148).
+const words = (text: string) => text.split(/\s+/).filter(Boolean).length
+assert.ok(words(privacyEn) + words(termsEn) <= 1032, `privacy + terms run ${words(privacyEn) + words(termsEn)} English words; keep them short`)
 
 // Page keys
 assert.equal(isLegalPageKey('privacy'), true)

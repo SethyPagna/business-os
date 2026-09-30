@@ -209,12 +209,15 @@ function normalizePortalColor(value: unknown, fallback: string): string {
 
 function CatalogMembershipSection({ copy }: CatalogMembershipSectionProps) {
   return (
-    <section className="py-5">
-      <h2 className="flex items-center gap-3 rounded-[28px] border border-slate-200/80 bg-white p-6 text-base font-semibold text-slate-900 shadow-sm dark:border-neutral-700/80 dark:bg-neutral-900 dark:text-white">
+    <SectionShell title={copy('membership', 'Membership', 'សមាជិកភាព')}>
+      <div className="flex items-center gap-3 rounded-[28px] border border-slate-200/80 bg-white p-6 text-sm text-slate-700 shadow-sm dark:border-neutral-700/80 dark:bg-neutral-900 dark:text-neutral-200">
         <Ticket aria-hidden="true" className="h-5 w-5 shrink-0 text-amber-500 dark:text-amber-300" />
-        {copy('membershipComingSoon', 'Membership: coming soon')}
-      </h2>
-    </section>
+        {/* Same row as the signed-in account card; inlined so this chunk never pulls the admin catalog chunk. */}
+        <div data-portal-points-row="true">
+          {copy('membershipPoints', 'Points', 'ពិន្ទុ')}: <span data-portal-points-value="true">{copy('membershipPointsComingSoon', 'Coming soon', 'នឹងមកដល់ឆាប់ៗនេះ')}</span>
+        </div>
+      </div>
+    </SectionShell>
   )
 }
 

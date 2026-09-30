@@ -124,6 +124,10 @@ export default function CatalogAccountSection({
                 <div className="detail-scroll-text text-xs text-slate-500 dark:text-neutral-400">
                   {copy('membershipId', 'Membership ID')}: {account.membershipId}
                 </div>
+                {/* Owner, 30 Sep 2026: points are coming soon, so this row never takes a number. */}
+                <div data-portal-points-row="true" className="detail-scroll-text text-xs text-slate-500 dark:text-neutral-400">
+                  {copy('membershipPoints', 'Points', 'ពិន្ទុ')}: <span data-portal-points-value="true">{copy('membershipPointsComingSoon', 'Coming soon', 'នឹងមកដល់ឆាប់ៗនេះ')}</span>
+                </div>
               </div>
             </div>
             <div className="mt-4 grid grid-cols-2 gap-3">
