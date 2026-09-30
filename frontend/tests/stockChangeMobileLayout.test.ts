@@ -24,7 +24,7 @@ assert.ok(primary.indexOf('{timeUnknown ?') < primary.indexOf('{row.product_name
 assert.match(primary, /data-stock-mobile-product-name="true"/, 'the complete product name has a stable hook for the shared two-line rail')
 assert.doesNotMatch(primary, /\btruncate\b|line-clamp/, 'the temporary name rendering must not hide its tail before the shared rail lands')
 assert.match(primary, /signedLabel\(row\)/, 'signed movement quantity stays in the primary band')
-assert.match(primary, /translateMovementType\(row\.movement_type, t\)/, 'movement type remains attached to its quantity')
+assert.match(primary, /translateMovementRowType\(row, t\)/, 'movement type (Revert for a Revert row) remains attached to its quantity')
 assert.doesNotMatch(card, /\{row\.before_qty\}[\s\S]{0,120}\{row\.after_qty\}/, 'before/after detail must not create a fourth mobile card line')
 
 assert.ok(reference.indexOf('<CopyableId') < reference.indexOf('{model.barcode}'), 'source receipt leads the barcode')

@@ -1,4 +1,5 @@
 import { lotCodeAsDate } from '../../utils/batchLabel.ts'
+import { revertsMovementId } from '../../utils/stockMovementDetail.ts'
 
 type MovementRecord = Record<string, unknown>
 
@@ -123,6 +124,12 @@ function describeMovementType(type: unknown): string {
 // places. row_move_in/row_move_out have no equivalent anywhere else in
 // the app (they're only ever emitted by the same-product multi-row-merge
 // write path) so those two get their own small dedicated keys instead.
+/** A recorded row's type: a Revert reads "Revert" whichever way it moved stock. */
+export function translateMovementRowType(row: { movement_type?: unknown; reference_id?: unknown; reverts_movement_id?: unknown }, t?: (key: string) => string | undefined): string {
+  if (revertsMovementId(row) != null) return (typeof t === 'function' ? t('revert') : undefined) || 'Revert'
+  return translateMovementType(row.movement_type, t)
+}
+
 export function translateMovementType(type: unknown, t?: (key: string) => string | undefined): string {
   const key = String(type || '').toLowerCase()
   const T = (k: string, fallback: string): string => (typeof t === 'function' ? t(k) : undefined) || fallback
@@ -274,7 +281,8 @@ export function buildMovementGroups(movements: unknown[] = []): MovementGroup[] 
       groups.set(key, {
         id: key,
         movement_type: canonicalMovementType(normalizedMovement.movement_type) || 'adjustment',
-        movementLabel: describeMovementType(canonicalMovementType(normalizedMovement.movement_type)),
+        // A Revert is its own record (REVERT-FIX F4), whichever way it moved stock.
+        movementLabel: revertsMovementId(normalizedMovement) != null ? 'Revert' : describeMovementType(canonicalMovementType(normalizedMovement.movement_type)),
         created_at: normalizeMovementTimestamp(normalizedMovement),
         latest_at: normalizeMovementTimestamp(normalizedMovement),
         reference_id: normalizedMovement.reference_id || null,

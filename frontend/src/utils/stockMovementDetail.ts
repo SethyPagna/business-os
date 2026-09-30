@@ -41,6 +41,31 @@ export function isRevertibleStockMovement(value: unknown, referenceId?: unknown)
   return revertibleTypes.has(normalizedMovementType(value))
 }
 
+// REVERT-FIX F4 (owner, 30 Sep 2026): a Revert is its own record. Which row it
+// reverts is the immutable reference_id 'revert:<id>' (Worker
+// lib/stockRevert.ts), which the Stock Changes ledger also returns as
+// reverts_movement_id -- never the editable reason text.
+const REVERT_REFERENCE = /^revert:(\d+)$/
+
+type RevertLinkSource = { reference_id?: unknown; reverts_movement_id?: unknown }
+
+export function revertsMovementId(row: RevertLinkSource | null | undefined): number | null {
+  const stated = Number(row?.reverts_movement_id)
+  if (Number.isSafeInteger(stated) && stated > 0) return stated
+  const match = REVERT_REFERENCE.exec(String(row?.reference_id ?? ''))
+  return match ? Number(match[1]) : null
+}
+
+// The Worker records a Revert's reason as "Revert of #N: <original reason>" in
+// English. The Revert label and its #N link say that in the operator's
+// language, so a Revert row shows only the original reason.
+const REVERT_REASON_PREFIX = /^Revert of #\d+(?:: | \([^)]*\)$)/
+
+export function revertDisplayReason(row: RevertLinkSource & { reason?: unknown }): string {
+  const reason = String(row.reason ?? '')
+  return revertsMovementId(row) != null ? reason.replace(REVERT_REASON_PREFIX, '') : reason
+}
+
 export type RecordedMovementCosts = {
   unitUsd: number | null
   unitKhr: number | null

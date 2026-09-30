@@ -928,7 +928,7 @@ function removalLossLines(t: ReportTotals, line: LineFactory): StatementLine[] {
   if (!hasRemovalLosses(t)) return []
   const revenue = line('revenue_after_losses', 'rpt_revenue_after_losses', 'Revenue incl. losses', 'memo', 'losses')
   const lines = [
-    line('removal_loss', 'rpt_removal_loss', 'Losses (stock removed)', 'memo', 'losses', ['rpt_hint_removal_loss', 'Stock removed entirely from inventory -- direct removals and disposed tagged (broken, damaged, expired ...) stock, including from a deleted product -- valued at its cost price. It is not a sale, so it never reduced the revenue and profit above; the two lines below show the same period with it taken off.'], removalLossNote(t)),
+    line('removal_loss', 'rpt_removal_loss', 'Losses (stock removed)', 'memo', 'losses', ['rpt_hint_removal_loss', 'Stock removed entirely from inventory -- direct removals and disposed tagged (broken, damaged, expired ...) stock, including from a deleted product -- valued at its cost price. It is not a sale, so it never reduced the revenue and profit above; the two lines below show the same period with it taken off. A Revert of an earlier removal counts in the period it was made, as stock put back (it lowers this figure there); the removal\'s own period keeps its loss.'], removalLossNote(t)),
     // Same tone rule as profit_after_losses just below: a period that lost
     // more stock than it made revenue prints negative here (unclamped, by
     // design), and it must never print unstyled (F4, Sep 15 2026 -- this

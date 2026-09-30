@@ -11,7 +11,7 @@ import StatsRangeRow from '../shared/StatsRangeRow'
 import type { PaginationControlsProps } from '../shared/PaginationControls'
 import type { PortalMenuItem } from '../shared/PortalMenu'
 import { fmtClock24 } from '../../utils/formatters'
-import { translateMovementType } from './movementGroups'
+import { translateMovementRowType } from './movementGroups'
 // N13: branch / actor / reason are rendered through the one shared history
 // row model, so this drill and the Stock Change ledger cannot disagree about
 // the same movement row (an absent value said nothing here and '—' there).
@@ -517,7 +517,7 @@ export default function InventoryMovementsSurface({
                                   <div className="flex items-center gap-2">
                                     <span className="shrink-0 tabular-nums text-[11px] font-medium text-gray-400">{rowClock(group.latest_at)}</span>
                                     <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${movementColorClass(group)}`}>
-                                      {translateMovementType(group.movement_type, t)}
+                                      {translateMovementRowType(group, t)}
                                     </span>
                                   </div>
                                   <div className="mt-1 detail-scroll-text text-sm font-medium text-gray-800 dark:text-gray-200">{movementGroupTitle(group, tr)}</div>
@@ -657,7 +657,7 @@ export default function InventoryMovementsSurface({
                                   <td className="px-3 py-2">
                                     <div className="flex items-center gap-2">
                                       <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${movementColorClass(group)}`}>
-                                        {translateMovementType(group.movement_type, t)}
+                                        {translateMovementRowType(group, t)}
                                       </span>
                                       <span className="text-[10px] text-gray-400">{getMovementRecordCount(group)} {tr('records', 'records')}</span>
                                     </div>
