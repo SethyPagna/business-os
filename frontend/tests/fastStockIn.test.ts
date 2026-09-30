@@ -166,7 +166,8 @@ runTest('STK-06: creation reuses ProductForm and resumes without losing the stoc
 runTest('stock-in sessions reuse linked report data and preserve per-receipt costs', () => {
   assert.match(batchRouteSource, /unit_cost_usd, total_cost_usd, reason, reference_id/)
   assert.match(batchRouteSource, /unitCostUsd = nullableMoney4\(body\.unit_cost_usd\)/)
-  assert.match(batchRouteSource, /totalCostUsd = unitCostUsd == null \? null : multiplyMoney4\(unitCostUsd, quantity\)/)
+  assert.match(batchRouteSource, /totalCostUsd = unitCostUsd == null \? null : multiplyMoney4\(unitCostUsd, paidQuantity\)/)
+  // Free units are stock, not spend: the receipt money is the paid quantity times the cost.
   assert.ok(batchRouteSource.indexOf('totalCostUsd = unitCostUsd') < batchRouteSource.indexOf('received = await receiveBatchStock'),
     'receipt cost must be calculated and range-checked before stock mutation')
   assert.match(stockImportSource, /totalCostUsd = costPriceUsd == null \? null : multiplyMoney4\(costPriceUsd, quantity\)/)
