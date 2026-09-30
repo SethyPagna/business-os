@@ -362,6 +362,8 @@ export default function Login() {
   // first paint (before organizationLocked has a real value) and then
   // flashing back in. See the organizationLocked-gated render below.
   const [organizationBootstrapped, setOrganizationBootstrapped] = useState(false)
+  const [organizationBootstrapFailed, setOrganizationBootstrapFailed] = useState(false)
+  const [organizationBootstrapAttempt, setOrganizationBootstrapAttempt] = useState(0)
   const [organizationExpanded, setOrganizationExpanded] = useState(() => {
     try {
       const remembered = JSON.parse(localStorage.getItem(STORAGE_KEYS.ORGANIZATION) || 'null') as OrganizationMatch | null
@@ -475,8 +477,13 @@ export default function Login() {
   useEffect(() => {
     const bootstrap = async () => {
       const requestId = beginTrackedRequest(organizationBootstrapRequestRef)
+      setOrganizationBootstrapped(false)
+      setOrganizationBootstrapFailed(false)
+      let remembered: OrganizationMatch | null = null
       try {
-        const remembered = JSON.parse(localStorage.getItem(STORAGE_KEYS.ORGANIZATION) || 'null') as OrganizationMatch | null
+        remembered = JSON.parse(localStorage.getItem(STORAGE_KEYS.ORGANIZATION) || 'null') as OrganizationMatch | null
+      } catch (_) {}
+      try {
         const boot = await withLoaderTimeout(
           () => authApi.getOrganizationBootstrap?.(),
           'Organization bootstrap',
@@ -500,13 +507,17 @@ export default function Login() {
           }
         }
       } catch (_) {
+        if (isTrackedRequestCurrent(organizationBootstrapRequestRef, requestId)) {
+          setOrganizationBootstrapFailed(true)
+          setOrganizationExpanded(true)
+        }
       } finally {
         if (isTrackedRequestCurrent(organizationBootstrapRequestRef, requestId)) setOrganizationBootstrapped(true)
       }
     }
     bootstrap()
     return () => { invalidateTrackedRequest(organizationBootstrapRequestRef) }
-  }, [])
+  }, [organizationBootstrapAttempt])
 
   useEffect(() => {
     const query = String(organizationSearch || '').trim()
@@ -1148,6 +1159,7 @@ export default function Login() {
                   onChange={(event) => {
                     setOrganizationSearch(event.target.value)
                     setOrganizationId('')
+                    setOrganizationExpanded(true)
                   }}
                   placeholder="LeangBeauty"
                   autoComplete="organization"
@@ -1176,6 +1188,15 @@ export default function Login() {
                 ) : null}
               </div>
             )}
+
+            {organizationBootstrapFailed ? (
+              <div className="flex items-center justify-between gap-2 text-xs text-amber-700 dark:text-amber-300" role="status">
+                <span>{tr('organization', 'Organization')}: {tr('connection_failed', 'Connection Failed')}</span>
+                <button type="button" className="shrink-0 font-semibold underline" onClick={() => setOrganizationBootstrapAttempt((attempt) => attempt + 1)}>
+                  {tr('retry', 'Retry')}
+                </button>
+              </div>
+            ) : null}
 
             <div>
               <label htmlFor="login-username" className="mb-1 flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300">

@@ -405,6 +405,21 @@ async function tableColumns(env: Env, table: string): Promise<string[]> {
   return (result.results || []).map((row) => row.name).filter(Boolean)
 }
 
+async function captureRowidUpperBounds(env: Env, tables: readonly string[]): Promise<Map<string, number | null>> {
+  if (!tables.length) return new Map()
+  const results = await env.DB.batch<{ upper: number | null }>(
+    tables.map((table) => env.DB.prepare(`SELECT MAX(rowid) AS upper FROM ${qid(table)}`)),
+  )
+  if (results.length !== tables.length) throw new Error('Incomplete backup row bounds')
+  return new Map(tables.map((table, index) => {
+    const rows = results[index].results
+    if (!rows || rows.length !== 1 || (rows[0].upper !== null && !Number.isSafeInteger(rows[0].upper))) {
+      throw new Error(`Invalid backup row bound: ${table}`)
+    }
+    return [table, rows[0].upper]
+  }))
+}
+
 async function listAssets(env: Env) {
   const assets: BackupPayload['r2']['assets'] = []
   let cursor: string | undefined
@@ -699,31 +714,39 @@ async function writeBackupDocument(
     await writer.write(`"source":${JSON.stringify(source)},`)
     await writer.write('"runtime":"cloudflare-workers","tables":{')
 
-    for (const table of tables) {
-      if (!(await tableExists(env, table))) continue
+    const presentTables: string[] = []
+    for (const table of tables) if (await tableExists(env, table)) presentTables.push(table)
+    const upperBounds = await captureRowidUpperBounds(env, presentTables)
+
+    for (const table of presentTables) {
       const columns = await tableColumns(env, table)
+      let cursorAlias = '__bos_rowid'
+      while (columns.includes(cursorAlias)) cursorAlias += '_'
       await writer.write(`${tableCount ? ',' : ''}${JSON.stringify(table)}:{"columns":${JSON.stringify(columns)},"rows":[`)
       tableCount += 1
 
-      // Paged so a single large table is never fully resident. Ordered by
-      // rowid so paging is stable -- without an ORDER BY, SQLite may return
-      // rows in a different order between pages and a row could be emitted
-      // twice or skipped.
-      let offset = 0
+      // A rowid seek avoids re-reading earlier pages; the bound excludes later inserts.
+      const upper = upperBounds.get(table)!
+      let after: number | null = null
       let rowsInTable = 0
-      for (;;) {
-        const page = await env.DB
-          .prepare(`SELECT * FROM ${qid(table)} ORDER BY rowid LIMIT ? OFFSET ?`)
-          .bind(TABLE_PAGE_SIZE, offset)
-          .all<Record<string, unknown>>()
+      while (upper !== null) {
+        const select = `SELECT rowid AS ${qid(cursorAlias)}, * FROM ${qid(table)}`
+        const statement: D1PreparedStatement = after === null
+          ? env.DB.prepare(`${select} WHERE rowid <= ? ORDER BY rowid LIMIT ?`).bind(upper, TABLE_PAGE_SIZE)
+          : env.DB.prepare(`${select} WHERE rowid > ? AND rowid <= ? ORDER BY rowid LIMIT ?`).bind(after, upper, TABLE_PAGE_SIZE)
+        const page = await statement.all<Record<string, unknown>>()
         const rows = page.results || []
         if (!rows.length) break
         for (const row of rows) {
-          await writer.write(`${rowsInTable ? ',' : ''}${JSON.stringify(row)}`)
+          const { [cursorAlias]: cursor, ...values } = row
+          if (typeof cursor !== 'number' || !Number.isSafeInteger(cursor) || cursor > upper || (after !== null && cursor <= after)) {
+            throw new Error(`Invalid backup row cursor: ${table}`)
+          }
+          after = cursor
+          await writer.write(`${rowsInTable ? ',' : ''}${JSON.stringify(values)}`)
           rowsInTable += 1
         }
         if (rows.length < TABLE_PAGE_SIZE) break
-        offset += TABLE_PAGE_SIZE
       }
       rowCount += rowsInTable
       await writer.write(']}')

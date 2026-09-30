@@ -134,6 +134,15 @@ function makeFakeD1(schema) {
       const table = schema[m[1]]
       return { all: () => ({ results: table ? table.rows.slice() : [] }) }
     }
+    if ((m = sql.match(/^SELECT MAX\(rowid\) AS upper FROM "([^"]+)"$/))) {
+      return { all: () => ({ results: [{ upper: schema[m[1]]?.rows.length || null }] }) }
+    }
+    if ((m = sql.match(/^SELECT rowid AS "([^"]+)", \* FROM "([^"]+)" WHERE (rowid > \? AND )?rowid <= \? ORDER BY rowid LIMIT \?$/))) {
+      const [, alias, tableName, hasAfter] = m
+      const [after, upper, limit] = hasAfter ? values : [0, ...values]
+      return { all: () => ({ results: (schema[tableName]?.rows || []).slice(after, Math.min(upper, after + limit))
+        .map((row, index) => ({ [alias]: after + index + 1, ...row })) }) }
+    }
     // Paged read, used by the streamed backup writer. Real paging is what
     // keeps a large table from ever being fully resident, so the fake has
     // to honour LIMIT/OFFSET rather than returning everything -- otherwise
@@ -173,6 +182,7 @@ function makeFakeD1(schema) {
             first: async () => (bound.first ? bound.first() : null),
             run: async () => { if (bound.exec) bound.exec(); return { success: true } },
             _exec: () => (bound.exec ? bound.exec() : undefined),
+            _all: () => (bound.all ? bound.all() : { results: [] }),
           }
         },
         // .all()/.first()/.run() called directly with no .bind() -- backup.ts's
@@ -181,6 +191,8 @@ function makeFakeD1(schema) {
         all: async () => run(sql, []).all ? run(sql, []).all() : { results: [] },
         first: async () => run(sql, []).first ? run(sql, []).first() : null,
         run: async () => { const b = run(sql, []); if (b.exec) b.exec(); return { success: true } },
+        _exec: () => { const b = run(sql, []); if (b.exec) b.exec() },
+        _all: () => { const b = run(sql, []); return b.all ? b.all() : { results: [] } },
       }
     },
     async batch(statements) {
@@ -188,7 +200,7 @@ function makeFakeD1(schema) {
       // (env.DB.prepare(sql).bind(...values)); backup.ts's restore builds
       // exactly that shape. Execute sequentially, same effect as a batch.
       for (const statement of statements) statement._exec()
-      return statements.map(() => ({ success: true }))
+      return statements.map(statement => ({ success: true, ...statement._all() }))
     },
   }
 }

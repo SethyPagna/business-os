@@ -47,6 +47,7 @@ function firstDb(failures) {
           return {
             async first() { attempt(); return { ok: true } },
             async all() { attempt(); return { results: [{ ok: true }], meta: {} } },
+            async run() { attempt(); return { meta: { changes: 1 } } },
           }
         },
       }
@@ -69,6 +70,37 @@ function batchDb(failures) {
 }
 
 async function main() {
+  const quotaMessages = [
+    "D1_ERROR: Your account has exceeded D1's free tier daily row read limit. Upgrade to a paid plan or wait until tomorrow (midnight UTC) to continue. See https://developers.cloudflare.com/d1/platform/limits/ for more details.",
+    "D1_ERROR: Your account has exceeded D1's free tier daily row write limit. Upgrade to a paid plan or wait until tomorrow (midnight UTC) to continue. See https://developers.cloudflare.com/d1/platform/limits/ for more details.",
+    "D1_ERROR: Your account has exceeded D1's maximum account storage limit, please contact Cloudflare to raise your limit",
+    'D1_ERROR: Exceeded maximum DB size.',
+  ]
+  for (const message of quotaMessages) {
+    for (const method of ['get', 'all', 'run', 'batch', 'batchOnce']) {
+      const failure = new Error(message)
+      const raw = method.startsWith('batch') ? batchDb([failure]) : firstDb([failure])
+      const db = new D1Compat(raw)
+      const invoke = method.startsWith('batch')
+        ? () => db[method]([{ sql: 'UPDATE t SET value = 1' }])
+        : () => db.prepare(method === 'run' ? 'UPDATE t SET value = 1' : 'SELECT 1')[method]()
+      const originalSetTimeout = globalThis.setTimeout
+      const delays = []
+      globalThis.setTimeout = (callback, delay, ...args) => {
+        delays.push(delay)
+        return originalSetTimeout(callback, delay, ...args)
+      }
+      try {
+        await assert.rejects(invoke, (error) => error === failure, `${method} must preserve the quota error`)
+      } finally {
+        globalThis.setTimeout = originalSetTimeout
+      }
+      assert.deepEqual(delays, [], `${method} quota refusal must not schedule backoff`)
+      assert.equal(raw.attempts, 1, `${method} quota refusal must not retry: ${message}`)
+    }
+  }
+  console.log('PASS documented daily and storage quotas fail after one attempt across reads and writes')
+
   for (const message of [
     'D1_ERROR: D1 DB is overloaded. Requests queued for too long.',
     'D1 DB is overloaded',
@@ -85,6 +117,11 @@ async function main() {
   assert.deepEqual(transientResult, { ok: true })
   assert.equal(transient.attempts, 2, 'an ordinary transient D1 error keeps the one retry')
   console.log('PASS ordinary transient reads still retry once')
+
+  const storageReset = firstDb([new Error('D1_ERROR: Internal error in D1 DB storage caused object to be reset.')])
+  assert.deepEqual(await new D1Compat(storageReset).prepare('SELECT 1').get(), { ok: true })
+  assert.equal(storageReset.attempts, 2, 'a transient storage reset is not a storage quota')
+  console.log('PASS transient storage resets still retry once')
 
   const overloadedBatch = batchDb([new Error('D1_ERROR: Requests queued for too long')])
   await assert.rejects(
