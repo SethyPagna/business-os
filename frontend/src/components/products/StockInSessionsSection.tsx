@@ -3,6 +3,7 @@ import { supplierDisplay } from '../../utils/supplierDisplay.ts'
 import Pencil from 'lucide-react/dist/esm/icons/pencil.js'
 import Plus from 'lucide-react/dist/esm/icons/plus.js'
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
+import Truck from 'lucide-react/dist/esm/icons/truck.js'
 import CalendarDays from 'lucide-react/dist/esm/icons/calendar-days.js'
 import CalendarClock from 'lucide-react/dist/esm/icons/calendar-clock.js'
 import MessageSquare from 'lucide-react/dist/esm/icons/message-square.js'
@@ -27,7 +28,8 @@ import { StockLineChange } from '../shared/StockLineChange.tsx'
 import DateEntryInput from '../shared/DateEntryInput.tsx'
 import SearchInput from '../shared/SearchInput.tsx'
 import ScanSearchButton from '../shared/ScanSearchButton.tsx'
-import SupplierPickerField, { type SupplierChoice } from '../shared/SupplierPickerField.tsx'
+import { useSupplierSuggestions, type SupplierChoice } from '../shared/SupplierPickerField.tsx'
+import SuggestionTextInput from '../shared/SuggestionTextInput.tsx'
 import AppSelect from '../shared/AppSelect.tsx'
 import { IconField, InsetNumberField } from '../stock-session/StockSessionSharedDetails.tsx'
 import PaginationControls, { clampPage, DEFAULT_PAGE_SIZE } from '../shared/PaginationControls.tsx'
@@ -41,6 +43,36 @@ import { canEditAcquisitionCosts, canViewAcquisitionCosts } from '../../utils/ac
 const FastStockInModal = lazyRetry(() => import('../inventory/FastStockInModal.tsx'), 'stock-session-fast-stock-in')
 
 type T = (key: string) => string
+
+// Supplier as one box, the Truck icon and the placeholder naming it -- the
+// look of the Stock Session's own box (its copy is private to that float).
+function CompactSupplierBox({ idPrefix, value, tr, onChange }: {
+  idPrefix: string
+  value: SupplierChoice
+  tr: (key: string, fallback: string) => string
+  onChange: (next: SupplierChoice) => void
+}) {
+  const { options, loading, ensureLoaded, handleChange } = useSupplierSuggestions(value, onChange)
+  const label = tr('supplier', 'Supplier')
+  const shown = value.supplierName.trim()
+  return (
+    <IconField icon={Truck} title={shown ? `${label}: ${shown}` : label}>
+      <SuggestionTextInput
+        id={`${idPrefix}-supplier`}
+        value={value.supplierName}
+        options={options}
+        limit={8}
+        loading={loading}
+        loadingLabel={tr('loading', 'Loading...')}
+        onRequestOptions={ensureLoaded}
+        ariaLabel={label}
+        placeholder={label}
+        inputClassName="input h-10 w-full min-w-0 pl-8 text-sm"
+        onChange={handleChange}
+      />
+    </IconField>
+  )
+}
 type Branch = { id?: string | number; name?: string }
 type Row = {
   // N29: null for a line the Add-products session CREATED at quantity 0 --
@@ -535,7 +567,7 @@ export default function StockInSessionsSection({ t, notify, branches, onChanged 
             <IconField icon={CalendarDays} title={receivedDateLabel}>
               <DateEntryInput className="h-10 w-full pl-8 text-sm" t={t} ariaLabel={receivedDateLabel} placeholder={receivedDateLabel} value={String(editDate || '').slice(0, 10)} onChange={(iso) => setEditDate(iso)} />
             </IconField>
-            <SupplierPickerField variant="compact" value={editSupplier} idPrefix="stock-session-edit" onChange={setEditSupplier} tr={(key, fallback = key) => tr(key, fallback)} />
+            <CompactSupplierBox idPrefix="stock-session-edit" value={editSupplier} onChange={setEditSupplier} tr={tr} />
           </div>
           <div className="grid grid-cols-2 gap-1.5">
             <div role="radiogroup" aria-label={tr('payment', 'Payment')} className="grid h-10 grid-cols-2 gap-0.5 rounded-xl bg-gray-100 p-0.5 dark:bg-gray-900/60">
@@ -570,7 +602,7 @@ export default function StockInSessionsSection({ t, notify, branches, onChanged 
             <IconField icon={CalendarDays} title={receivedDateLabel}>
               <DateEntryInput className="h-10 w-full pl-8 text-sm" t={t} ariaLabel={receivedDateLabel} placeholder={receivedDateLabel} value={lineEdit.draft.receivedDate} onChange={(iso) => patchLineDraft({ receivedDate: iso })} />
             </IconField>
-            <SupplierPickerField variant="compact" value={{ supplierId: lineEdit.draft.supplierId, supplierName: lineEdit.draft.supplierName }} idPrefix="stock-in-line-edit" onChange={(choice) => patchLineDraft({ supplierId: choice.supplierId ?? null, supplierName: choice.supplierName || '' })} tr={(key, fallback = key) => tr(key, fallback)} />
+            <CompactSupplierBox idPrefix="stock-in-line-edit" value={{ supplierId: lineEdit.draft.supplierId, supplierName: lineEdit.draft.supplierName }} onChange={(choice) => patchLineDraft({ supplierId: choice.supplierId ?? null, supplierName: choice.supplierName || '' })} tr={tr} />
             <IconField icon={MessageSquare} title={tr('reason', 'Reason')} className="col-span-2 sm:col-span-4">
               <input className="input h-10 w-full pl-8 text-sm" maxLength={512} aria-label={tr('reason', 'Reason')} value={lineEdit.draft.reason} placeholder={tr('stock_in_line_edit_reason_placeholder', 'Optional, e.g. typo on the invoice')} onChange={(event) => patchLineDraft({ reason: event.target.value })} />
             </IconField>

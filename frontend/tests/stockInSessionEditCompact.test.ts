@@ -24,7 +24,7 @@ function headerIsCompact(text: string): boolean {
   return block.length > 0
     && !CAPTION.test(block)
     && /<IconField icon=\{CalendarDays\} title=\{receivedDateLabel\}>\s*<DateEntryInput[^>]*placeholder=\{receivedDateLabel\}/.test(block)
-    && /<SupplierPickerField variant="compact"[^>]*idPrefix="stock-session-edit"/.test(block)
+    && /<CompactSupplierBox idPrefix="stock-session-edit"/.test(block)
     && /role="radiogroup"/.test(block) && /aria-checked=\{editPayment === status\}/.test(block)
     && /<IconField icon=\{CalendarClock\} title=\{dueDateLabel\}>\s*<DateEntryInput[^>]*disabled=\{editPayment !== 'credit'\}/.test(block)
     && !/: <div \/>\}/.test(block)
@@ -37,7 +37,7 @@ function lineEditorIsCompact(text: string): boolean {
     && /<InsetNumberField label=\{tr\('quantity', 'Quantity'\)\}/.test(block)
     && /\{canEditCosts \? <InsetNumberField label=\{tr\('unit_cost', 'Unit cost'\)\}/.test(block)
     && /<IconField icon=\{CalendarDays\} title=\{receivedDateLabel\}>/.test(block)
-    && /<SupplierPickerField variant="compact"[^>]*idPrefix="stock-in-line-edit"/.test(block)
+    && /<CompactSupplierBox idPrefix="stock-in-line-edit"/.test(block)
     && /<IconField icon=\{MessageSquare\} title=\{tr\('reason', 'Reason'\)\} className="col-span-2 sm:col-span-4">/.test(block)
 }
 
