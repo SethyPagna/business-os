@@ -501,7 +501,7 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
             )}
           </div>
           <div className="ml-auto flex items-center gap-1.5">
-            <MinimizedWorkTray variant="desktop" />
+            <MinimizedWorkTray />
             {desktopNotificationSlot}
             {showQuickPreferences ? (
               <Suspense fallback={<QuickPreferenceTogglesFallback />}>
@@ -637,11 +637,6 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
           </div>
         </div>
         )}
-        {inline ? null : (
-          <div className="mx-2 min-w-0 flex-1 [&_button]:min-h-11 [&_button]:min-w-11">
-            <MinimizedWorkTray variant="mobile" />
-          </div>
-        )}
         <div className="flex shrink-0 items-center gap-1 [&_button]:min-h-11 [&_button]:min-w-11">
           <div id="section-export-action-host" className="flex shrink-0 items-center empty:hidden" />
           {notificationSlot}
@@ -683,13 +678,6 @@ export default function Sidebar({ notificationSlot = null, desktopNotificationSl
                       <div className="detail-scroll-text text-xs text-gray-400">{user?.role_name || t('no_role') || 'No role'}</div>
                     </div>
                   </div>
-                  {inline ? (
-                    <div className="mb-1 max-w-full border-b border-gray-100 px-1 pb-1 dark:border-gray-700 [&>div]:flex-wrap [&>div]:overflow-visible">
-                      <div className="max-w-full [&_button]:min-h-11 [&_button]:min-w-11">
-                        <MinimizedWorkTray variant="mobile" />
-                      </div>
-                    </div>
-                  ) : null}
                   {accountActions.map(renderAccountAction)}
                 </div>
               </>

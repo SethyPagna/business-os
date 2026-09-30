@@ -1,22 +1,29 @@
-import { useSyncExternalStore } from 'react'
-import X from 'lucide-react/dist/esm/icons/x.js'
-import { useApp as useAppHook } from '../../AppContext.tsx'
+import { Suspense, useState, useSyncExternalStore } from 'react'
+import { useApp as useAppHook } from '../../app/AppContextCore.tsx'
 import {
   canRestoreMinimizedWork, dispatchRestore, getMinimizedWork, removeMinimizedWork, subscribeMinimizedWork,
   type MinimizedWorkEntry, type MinimizedWorkKind,
   discardTransferDraft,
 } from '../../utils/minimizedWork.ts'
 import { discardStockAdjustDraft } from '../../utils/stockAdjustDraft.ts'
+import { lazyRetry } from '../../utils/lazyImport.ts'
+import { useIsCompactViewport } from '../../utils/useViewport.ts'
 import { clearWorkDraft, scopedWorkDraftKey } from '../../utils/workDrafts.ts'
+import type { CloseGuard } from '../../utils/useCloseGuard.ts'
+import MinimizedWorkDismissButton from './MinimizedWorkDismissButton.tsx'
+import UnsavedChangesPrompt from './UnsavedChangesPrompt.tsx'
 
-// F3 slice 2 (Part 424): the chips minimized flows park in. Mobile renders
-// this inside the top bar; desktop inside the sidebar header row (desktop
-// deliberately has no top bar -- the user removed it -- so the sidebar IS
-// its chrome). Chip click = restore (navigate to the host page, then the
-// host reopens the flow and slice 1's draft brings the content back);
-// the chip's own ✕ = dismiss AND discard that flow's draft -- the chip is
-// the draft's visible handle, so dismissing it silently keeping the draft
-// would resurrect "closed" work at the next open.
+// F3 slice 2 (Part 424): the chips minimized flows park in. The sidebar aside
+// is the ONE mount: it is CSS-hidden below md but always mounted, so on a
+// phone it loads the floating "Draft" chip (DraftChipFloat, a lazy chunk)
+// that works in pages and sections navigation and while the header is
+// scrolled away (KNOWN-136). From md up the pills below show in the aside.
+// Restore navigates to the host page and the host reopens the flow; the X
+// asks "Discard unsaved changes?" first and then discards that flow's draft --
+// the chip is the draft's visible handle, so dismissing it silently keeping
+// the draft would resurrect "closed" work at the next open.
+
+const DraftChipFloat = lazyRetry(() => import('./DraftChipFloat.tsx'), 'draft-chip-float')
 
 const LEGACY_DRAFT_BASE_BY_KIND: Record<MinimizedWorkKind, string | null> = {
   add_product: 'product_new_standalone-create',
@@ -53,9 +60,11 @@ const useApp = useAppHook as unknown as () => {
   user: { id?: string | number; username?: string } | null
 }
 
-export default function MinimizedWorkTray({ variant }: { variant: 'mobile' | 'desktop' }) {
+export default function MinimizedWorkTray() {
   const entries = useSyncExternalStore(subscribeMinimizedWork, getMinimizedWork, getMinimizedWork)
   const { can, navigateTo, notify, t, language, user } = useApp()
+  const compact = useIsCompactViewport()
+  const [pendingDismiss, setPendingDismiss] = useState<MinimizedWorkEntry | null>(null)
   const tr = (key: string, fallbackEn: string, fallbackKm: string): string => {
     const translated = t(key)
     if (translated && translated !== key) return translated
@@ -86,33 +95,48 @@ export default function MinimizedWorkTray({ variant }: { variant: 'mobile' | 'de
     }
     clearWorkDraft(draftKey)
   }
+  // A draft that vanished while the prompt was up has nothing left to discard.
+  const pending = pendingDismiss && entries.some((entry) => entry.key === pendingDismiss.key) ? pendingDismiss : null
+  const discardGuard: CloseGuard = {
+    requestClose: () => setPendingDismiss(null),
+    promptOpen: pending !== null,
+    options: ['discard', 'back'],
+    dismissPrompt: () => setPendingDismiss(null),
+    discardAndClose: () => {
+      if (pending) dismiss(pending)
+      setPendingDismiss(null)
+    },
+    saveAndClose: () => undefined,
+    saving: false,
+    workLabel: pending?.label ?? null,
+  }
 
   return (
-    <div className={`flex min-w-0 items-center gap-1.5 ${variant === 'mobile' ? 'overflow-x-auto' : 'flex-wrap'}`}>
-      {entries.map((entry) => (
-        <span
-          key={entry.key}
-          className="flex max-w-[11rem] flex-shrink-0 items-center gap-1 rounded-full border border-amber-300 bg-amber-50 py-1 pl-2.5 pr-1 text-[11px] font-medium text-amber-800 dark:border-amber-700 dark:bg-amber-900/40 dark:text-amber-200"
-        >
-          <button
-            type="button"
-            onClick={() => restore(entry)}
-            className="min-w-0 hover:underline"
-            title={`${tr('restore', 'Restore', 'ស្ដារ')} — ${entry.label}`}
+    <>
+      <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+        {entries.map((entry) => (
+          <span
+            key={entry.key}
+            className="flex max-w-[11rem] flex-shrink-0 items-center gap-1 rounded-full border border-amber-300 bg-amber-50 py-1 pl-2.5 pr-1 text-[11px] font-medium text-amber-800 dark:border-amber-700 dark:bg-amber-900/40 dark:text-amber-200"
           >
-            <span className="detail-scroll-text">{entry.label}</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => dismiss(entry)}
-            aria-label={tr('minimized_dismiss_hint', 'Dismiss and discard this draft', 'បិទ ហើយបោះបង់សេចក្តីព្រាងនេះ')}
-            title={tr('minimized_dismiss_hint', 'Dismiss and discard this draft', 'បិទ ហើយបោះបង់សេចក្តីព្រាងនេះ')}
-            className="flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full hover:bg-amber-200 dark:hover:bg-amber-800"
-          >
-            <X className="h-3 w-3" />
-          </button>
-        </span>
-      ))}
-    </div>
+            <button
+              type="button"
+              onClick={() => restore(entry)}
+              className="min-w-0 hover:underline"
+              title={`${tr('restore', 'Restore', 'ស្ដារ')} — ${entry.label}`}
+            >
+              <span className="detail-scroll-text">{entry.label}</span>
+            </button>
+            <MinimizedWorkDismissButton onDismiss={() => setPendingDismiss(entry)} tr={tr} />
+          </span>
+        ))}
+      </div>
+      {compact ? (
+        <Suspense fallback={null}>
+          <DraftChipFloat entries={entries} restore={restore} requestDismiss={setPendingDismiss} holdOpen={pending !== null} tr={tr} />
+        </Suspense>
+      ) : null}
+      <UnsavedChangesPrompt guard={discardGuard} />
+    </>
   )
 }
