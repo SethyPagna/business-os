@@ -153,6 +153,8 @@ async function main() {
     assert.match(fs.readFileSync(path.join(LIB, 'importEngine.ts'), 'utf8'), /notes: 'Received via product import',/)
     assert.match(fs.readFileSync(path.join(LIB, 'productBatches.ts'), 'utf8'), /@receivedAt,1,'Stock reconciled from product import snapshot',/)
     assert.ok(guard.loadQuery('health-movement-balance-rows').sql.includes("pb.notes IN ('Received via product import', 'Stock reconciled from product import snapshot')"))
+    const { STOCK_RECEIPT_MOVEMENT_TYPES } = loadRealLib('stockInSessionsQuery.ts')
+    assert.ok(guard.loadQuery('health-supplier-lots').sql.includes(`movement_type IN (${STOCK_RECEIPT_MOVEMENT_TYPES.map((t) => `'${t}'`).join(', ')})`), 'health-supplier-lots lost STOCK_RECEIPT_MOVEMENT_TYPES')
     const { CATALOG_COST_DERIVE_SQL } = loadRealLib('catalogCostRecompute.ts')
     assert.ok(squash(guard.loadQuery('health-catalog-cost').sql).includes(squash(CATALOG_COST_DERIVE_SQL)), 'health-catalog-cost lost CATALOG_COST_DERIVE_SQL')
     const { UPLOAD_REFERENCE_SOURCES } = loadRealLib('uploadReferences.ts')
@@ -220,7 +222,7 @@ async function main() {
     assert.equal(one(db, 'health-references').core_active_default_branches, 2)
   })
 
-  await check('health-stock-ledgers counts roll-up drift, lot/branch disagreement, damaged units and stocked group headers', () => {
+  await check('health-stock-ledgers counts roll-up drift, lot/branch disagreement, damaged units and stocked group headers', async () => {
     const db = migratedDatabase()
     insert(db, 'branches', { id: 1, name: 'Store', is_default: 1 })
     insert(db, 'products', [
@@ -228,17 +230,23 @@ async function main() {
       { id: 3, name: 'No row' }, { id: 4, name: 'Lots high', stock_quantity: 2 }, { id: 5, name: 'Unlotted', stock_quantity: 5 },
       { id: 6, name: 'Legacy', stock_quantity: 7 }, { id: 7, name: 'Residue', stock_quantity: 1 },
       { id: 8, name: 'Header', is_group: 1, parent_id: 0, stock_quantity: 1 }, { id: 9, name: 'Empty header', is_group: 1, parent_id: 0 },
+      { id: 10, name: 'Lots equal', stock_quantity: 2 },
     ])
     insert(db, 'branch_stock', [
       { product_id: 1, branch_id: 1, quantity: 4 }, { product_id: 4, branch_id: 1, quantity: 2 }, { product_id: 5, branch_id: 1, quantity: 5 },
       { product_id: 6, branch_id: 1, quantity: 7 }, { product_id: 7, branch_id: 1, quantity: 1.000000001 },
       { product_id: 8, branch_id: 1, quantity: 1 }, { product_id: 9, branch_id: 1, quantity: 0 },
+      { product_id: 10, branch_id: 1, quantity: 2 },
     ])
     insert(db, 'product_batches', [
       { id: 41, variant_product_id: 4, batch_key: 'l41' }, { id: 51, variant_product_id: 5, batch_key: 'l51' },
       { id: 61, variant_product_id: 6, batch_key: 'l61', is_active: 0 },
+      { id: 101, variant_product_id: 10, batch_key: 'l101' },
     ])
-    insert(db, 'branch_batch_stock', [{ batch_id: 41, branch_id: 1, quantity: 3 }, { batch_id: 51, branch_id: 1, quantity: 3 }, { batch_id: 61, branch_id: 1, quantity: 0 }])
+    insert(db, 'branch_batch_stock', [
+      { batch_id: 41, branch_id: 1, quantity: 3 }, { batch_id: 51, branch_id: 1, quantity: 3 }, { batch_id: 61, branch_id: 1, quantity: 0 },
+      { batch_id: 101, branch_id: 1, quantity: 2 },
+    ])
     insert(db, 'damaged_stock_lots', [{ product_id: 2, quantity_remaining: 2 }, { product_id: 1, quantity_remaining: 1 }, { product_id: 999, quantity_remaining: 1 }])
     const row = one(db, 'health-stock-ledgers')
     assert.deepEqual(row, {
@@ -247,6 +255,14 @@ async function main() {
       damaged_remaining_on_inactive_product: 2, group_headers_with_stock: 1,
     })
     assert.equal(row.pairs_lots_exceed_branch, one(db, 'lots-exceed-branch-stock').pairs_lots_exceed_branch, 'the same figure as lots-exceed-branch-stock')
+    const { getTrackedProductIds } = loadRealLib('productBatches.ts')
+    const d1 = { prepare: (sql) => ({ all: async (params) => db.prepare(sql).all(params || {}) }) }
+    const tracked = new Set(await getTrackedProductIds(d1, 1))
+    assert.ok(tracked.has(5) && !tracked.has(6), 'an active lot is tracked, an inactive empty one is not')
+    const lotSum = new Map(db.prepare('SELECT pb.variant_product_id AS pid, SUM(bbs.quantity) AS q FROM branch_batch_stock bbs JOIN product_batches pb ON pb.id = bbs.batch_id WHERE bbs.branch_id = 1 GROUP BY pb.variant_product_id').all().map((r) => [r.pid, r.q]))
+    const unlottedOnTill = db.prepare('SELECT product_id, quantity FROM branch_stock WHERE branch_id = 1').all()
+      .filter((b) => tracked.has(b.product_id) && b.quantity - (lotSum.get(b.product_id) || 0) > 0.000001)
+    assert.equal(row.tracked_pairs_unlotted, unlottedOnTill.length, 'tracked pairs as the till (getTrackedProductIds) sees them')
   })
 
   await check('health-movement-balance holds still under correct writes and moves only for stock changed without a movement', () => {
@@ -445,6 +461,7 @@ async function main() {
     insert(db, 'products', [
       { id: 1, name: 'Soap', barcode: '885' }, { id: 2, name: 'soap ', barcode: ' 885' }, { id: 3, name: 'Soap', barcode: '885', is_active: 0 },
       { id: 4, name: 'A', barcode: '777' }, { id: 5, name: 'B', barcode: '777' }, { id: 6, name: 'Blank', barcode: '' }, { id: 7, name: 'Blank', barcode: '' },
+      { id: 8, name: 'Cream', barcode: '999' }, { id: 9, name: 'Cream', barcode: '999', is_active: 0 },
     ])
     insert(db, 'suppliers', [{ id: 1, name: ' Srun ' }, { id: 2, name: 'srun' }, { id: 3, name: 'Dara' }])
     insert(db, 'customers', [
@@ -519,8 +536,9 @@ async function main() {
     db.exec('UPDATE products SET is_grouped_cached = 0 WHERE id = 1')
     db.exec("UPDATE products SET name_key = 'wrong' WHERE id = 3")
     db.exec('UPDATE products SET is_grouped_cached = 1 WHERE id = 4')
-    insert(db, 'products', [{ id: 5, name: 'Kid', parent_id: 4 }, { id: 6, name: '' }])
-    assert.deepEqual(one(db, 'health-product-family'), { name_key_drift: 1, grouped_cache_drift: 2, variant_parent_inactive: 1, blank_name_active: 1 })
+    insert(db, 'products', [{ id: 5, name: 'Kid', parent_id: 4 }, { id: 6, name: '' }, { id: 7, name: 'Lotion' }])
+    db.exec('UPDATE products SET name_key = NULL WHERE id = 7')
+    assert.deepEqual(one(db, 'health-product-family'), { name_key_drift: 2, grouped_cache_drift: 2, variant_parent_inactive: 1, blank_name_active: 1 })
   })
 
   await check('health-catalog-cost is 0 after the 0195 triggers and counts a hand-set cost and a split mirror', () => {
@@ -546,7 +564,7 @@ async function main() {
     const lot = (id, extra = {}) => ({ id, variant_product_id: 1, batch_key: `k${id}`, ...extra })
     insert(db, 'product_batches', [
       lot(1, { received_cost_usd: 10 }), lot(2, { received_cost_usd: 10 }), lot(3, { received_cost_usd: 5 }), lot(4, { supplier_name: 'srun ' }),
-      lot(5, { supplier_name: 'Dara' }), lot(6, { received_quantity: -1 }), lot(7, { payment_status: 'credit' }), lot(8, { received_cost_usd: 10 }),
+      lot(5, { supplier_name: 'DARA' }), lot(6, { received_quantity: -1 }), lot(7, { payment_status: 'credit' }), lot(8, { received_cost_usd: 10 }),
     ])
     const move = (batchId, type, cost, extra = {}) => ({ product_id: 1, batch_id: batchId, movement_type: type, quantity: 1, total_cost_usd: cost, ...extra })
     insert(db, 'inventory_movements', [
