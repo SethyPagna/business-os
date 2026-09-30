@@ -58,9 +58,23 @@ export type RevertPlan =
   | { revertible: true; revertType: 'add' | 'remove'; magnitude: number }
   | { revertible: false; reason: 'no_stock' | 'not_revertible' }
 
+// Every refusal carries a stable code (and the numbers its text needs) so the
+// app can show it in the operator's language (frontend stockRevertError.ts).
+export type RevertRefusalCode =
+  | 'already_reverted' | 'stock_changed' | 'revert_not_tied' | 'revert_tagged_row' | 'revert_use_history'
+  | 'revert_stock_in_line_edited' | 'revert_nothing_to_revert' | 'revert_not_revertible' | 'revert_session_generation'
+  | 'revert_lineage_unresolved' | 'revert_insufficient_branch_stock' | 'revert_insufficient_lot_stock'
+  | 'revert_lot_moved' | 'revert_no_received_date'
+
+export type RevertRefusalParams = Record<string, string | number>
+
 export type RevertResult =
   | { ok: true; revertType: 'add' | 'remove'; quantity: number; usedBatchId: number | null; movementId: number }
-  | { ok: false; status: 400 | 409; error: string; code?: 'already_reverted' | 'stock_changed' | 'revert_no_received_date' }
+  | { ok: false; status: 400 | 409; error: string; code: RevertRefusalCode; params?: RevertRefusalParams }
+
+function refuse(status: 400 | 409, code: RevertRefusalCode, error: string, params?: RevertRefusalParams): RevertResult {
+  return params ? { ok: false, status, code, error, params } : { ok: false, status, code, error }
+}
 
 // Pure: given a movement, decide whether and how it reverts. The revert
 // direction is the OPPOSITE of the original's net effect -- an inflow is
@@ -183,7 +197,7 @@ export async function applyMovementRevert(db: D1Compat, m: RevertMovementRow, ac
   const productId = Number(m.product_id) || 0
   const branchId = Number(m.branch_id) || 0
   if (!productId || !branchId) {
-    return { ok: false, status: 400, error: 'This movement is not tied to a product and branch, so it cannot be reverted here.' }
+    return refuse(400, 'revert_not_tied', 'This movement is not tied to a product and branch, so it cannot be reverted here.')
   }
   // P3-L6. A movement that moved units into or out of a TAGGED held row is
   // half of a two-ledger transition (sellable stock AND
@@ -195,11 +209,7 @@ export async function applyMovementRevert(db: D1Compat, m: RevertMovementRow, ac
   // neither place. The real reversal for these transitions is the tagged
   // row's own Restore / Remove entirely actions, which move both ledgers.
   if (isDamagedLotReference(m.reference_id)) {
-    return {
-      ok: false,
-      status: 400,
-      error: 'This movement belongs to a tagged (damaged, broken, expired ...) stock row. Reverse it from that row on the product instead, so the tagged quantity moves with the stock.',
-    }
+    return refuse(400, 'revert_tagged_row', 'This movement belongs to a tagged (damaged, broken, expired ...) stock row. Reverse it from that row on the product instead, so the tagged quantity moves with the stock.')
   }
   // A scoped Set (lib/stockLotAdjustment.ts) and the counter-movement of its
   // undo are replayed ONLY through its own history generation, which guards
@@ -211,7 +221,7 @@ export async function applyMovementRevert(db: D1Compat, m: RevertMovementRow, ac
     ? await db.prepare('SELECT reference_id FROM inventory_movements WHERE id = @id').get<{ reference_id: string | null }>({ id: Number(setReference.slice(7)) || 0 })
     : null
   if (setReference.startsWith('stock-set:') || String(setParent?.reference_id ?? '').startsWith('stock-set:')) {
-    return { ok: false, status: 409, error: 'This stock correction has exact history. Use Undo/Redo in its history; it cannot be reverted from the stock ledger.' }
+    return refuse(409, 'revert_use_history', 'This stock correction has exact history. Use Undo/Redo in its history; it cannot be reverted from the stock ledger.')
   }
   // N6: a stock-in line edit (lib/stockInLineEdit.ts) is replayed only through
   // its own history generation, and a line that was edited is no longer just
@@ -219,24 +229,20 @@ export async function applyMovementRevert(db: D1Compat, m: RevertMovementRow, ac
   // quantity from the ORIGINAL lot. Both are refused; the line is changed (or
   // set to 0) through its Edit, and an edit is reversed with Undo.
   if (isStockInEditReference(setReference) || isStockInEditReference(setParent?.reference_id)) {
-    return { ok: false, status: 409, error: 'This row belongs to an edit of a stock-in line. Use Undo/Redo in its history, or edit the line again.' }
+    return refuse(409, 'revert_use_history', 'This row belongs to an edit of a stock-in line. Use Undo/Redo in its history, or edit the line again.')
   }
   if (RECEIPT_TYPES.has(m.movement_type)) {
     const edited = await db.prepare('SELECT id FROM inventory_movements WHERE reference_id >= @lo AND reference_id < @hi LIMIT 1')
       .get<{ id: number }>(stockInEditRange(Number(m.id)))
     if (edited) {
-      return { ok: false, status: 409, error: 'This stock-in line was edited after it was saved. Edit it again (quantity 0 removes it) or undo the edit from its history.' }
+      return refuse(409, 'revert_stock_in_line_edited', 'This stock-in line was edited after it was saved. Edit it again (quantity 0 removes it) or undo the edit from its history.')
     }
   }
   const plan = planMovementRevert(m)
   if (!plan.revertible) {
-    return {
-      ok: false,
-      status: 400,
-      error: plan.reason === 'no_stock'
-        ? 'This movement moved no stock, so there is nothing to revert.'
-        : `A "${m.movement_type}" movement is part of a sale, return, transfer or move record and cannot be reverted from the stock ledger. Undo it from its own record instead.`,
-    }
+    return plan.reason === 'no_stock'
+      ? refuse(400, 'revert_nothing_to_revert', 'This movement moved no stock, so there is nothing to revert.')
+      : refuse(400, 'revert_not_revertible', `A "${m.movement_type}" movement is part of a sale, return, transfer or move record and cannot be reverted from the stock ledger. Undo it from its own record instead.`, { type: m.movement_type })
   }
   // Double-revert guard. This read only gives the common case a clean
   // answer; it is NOT what makes a revert once-only. Two requests (double
@@ -262,25 +268,21 @@ export async function applyMovementRevert(db: D1Compat, m: RevertMovementRow, ac
         AND NOT EXISTS (SELECT 1 FROM stock_session_members sm WHERE sm.movement_id = @movementId)
     `).get<{ id: string }>({ rowid: sessionRowid, movementId: m.id })
     if (generationOf) {
-      return {
-        ok: false,
-        status: 409,
-        error: `This row was written by the undo/redo of stock-in session ${generationOf.id}. Redo or undo that session from Stock-in Sessions instead.`,
-      }
+      return refuse(409, 'revert_session_generation', `This row was written by the undo/redo of stock-in session ${generationOf.id}. Redo or undo that session from Stock-in Sessions instead.`, { session: generationOf.id })
     }
   }
 
   const { revertType, magnitude } = plan
   const batchId = m.batch_id != null ? Number(m.batch_id) : null
   const root = await revertRootMovement(db, m)
-  if (!root) return { ok: false, status: 409, error: 'Cannot revert: the original stock action cannot be identified safely. Nothing was changed.' }
+  if (!root) return refuse(409, 'revert_lineage_unresolved', 'Cannot revert: the original stock action cannot be identified safely. Nothing was changed.')
   let usedBatchId: number | null = null
   const statements: StockWriteStatement[] = []
 
   if (revertType === 'remove') {
     const current = await branchQty(db, productId, branchId)
     if (magnitude > current) {
-      return { ok: false, status: 400, error: `Cannot revert: only ${current} in stock at ${m.branch_name || 'this branch'}, ${magnitude} needed.` }
+      return refuse(400, 'revert_insufficient_branch_stock', `Cannot revert: only ${current} in stock at ${m.branch_name || 'this branch'}, ${magnitude} needed.`, { available: current, needed: magnitude, branch: m.branch_name || '' })
     }
     if (batchId != null) {
       // Strict (unclamped) lot + branch decrement in the same batch as the
@@ -292,9 +294,9 @@ export async function applyMovementRevert(db: D1Compat, m: RevertMovementRow, ac
         LEFT JOIN branch_batch_stock bbs ON bbs.batch_id = pb.id AND bbs.branch_id = @branchId
         WHERE pb.id = @batchId AND pb.variant_product_id = @productId
       `).get<{ available: number }>({ batchId, productId, branchId })
-      if (!lot) return { ok: false, status: 400, error: 'Selected received date does not belong to this product' }
+      if (!lot) return refuse(400, 'revert_lot_moved', 'Selected received date does not belong to this product')
       const available = Number(lot.available) || 0
-      if (magnitude > available) return { ok: false, status: 400, error: `Only ${available} available under this received date at this branch` }
+      if (magnitude > available) return lotShortRefusal(available, magnitude)
       statements.push(...planRemoveStockFromBatch({ batchId, productId, branchId, quantity: magnitude }).statements)
       usedBatchId = batchId
     } else {
@@ -305,23 +307,20 @@ export async function applyMovementRevert(db: D1Compat, m: RevertMovementRow, ac
       // supplier's delivery; when the undated stock is short the revert is
       // refused whole.
       const shares = await rootLotShares(db, root.id)
-      if (shares.some((share) => share.productId !== productId)) return { ok: false, status: 400, error: MERGED_LOT_REFUSAL }
+      if (shares.some((share) => share.productId !== productId)) return refuse(400, 'revert_lot_moved', MERGED_LOT_REFUSAL)
       for (const share of shares) {
         const lot = await db.prepare('SELECT COALESCE(quantity, 0) AS available FROM branch_batch_stock WHERE batch_id = @batchId AND branch_id = @branchId')
           .get<{ available: number }>({ batchId: share.batchId, branchId })
         const available = Number(lot?.available) || 0
-        if (share.quantity > available) return { ok: false, status: 400, error: `Only ${available} available under this received date at this branch` }
+        if (share.quantity > available) return lotShortRefusal(available, share.quantity)
         statements.push(decrementBatchStockStrictStatement(share.batchId, branchId, share.quantity))
       }
       const fromLots = shares.reduce((sum, share) => sum + share.quantity, 0)
       const undated = current - await datedLotQty(db, productId, branchId)
       if (magnitude - fromLots > undated) {
-        return {
-          ok: false,
-          status: 400,
-          code: 'revert_no_received_date',
-          error: `Cannot revert: this change was saved without a received date and only ${Math.max(0, undated)} of the ${magnitude} units at ${m.branch_name || 'this branch'} are held without one. Nothing was changed. Use Remove stock and choose the received date instead.`,
-        }
+        const available = Math.max(0, undated)
+        const needed = magnitude - fromLots
+        return refuse(400, 'revert_no_received_date', `Cannot revert: this change was saved without a received date and only ${available} of the ${needed} units at ${m.branch_name || 'this branch'} are held without one. Nothing was changed. Use Remove stock and choose the received date instead.`, { available, needed, branch: m.branch_name || '' })
       }
       statements.push(...aggregateDeltaStatements(productId, branchId, -magnitude), undatedStockGuard(productId, branchId))
       usedBatchId = shares.length === 1 && shares[0].quantity === magnitude ? shares[0].batchId : null
@@ -332,7 +331,7 @@ export async function applyMovementRevert(db: D1Compat, m: RevertMovementRow, ac
     // picker visibility), its received figures stay as recorded.
     const lot = await db.prepare('SELECT id FROM product_batches WHERE id = @batchId AND variant_product_id = @productId')
       .get<{ id: number }>({ batchId, productId })
-    if (!lot) return { ok: false, status: 400, error: 'Selected received date does not belong to this product' }
+    if (!lot) return refuse(400, 'revert_lot_moved', 'Selected received date does not belong to this product')
     statements.push(...restoreBatchStockStatements(batchId, branchId, magnitude), ...aggregateDeltaStatements(productId, branchId, magnitude))
     usedBatchId = batchId
   } else {
@@ -340,7 +339,7 @@ export async function applyMovementRevert(db: D1Compat, m: RevertMovementRow, ac
     // and 8, count to 0, revert -> lots 4 / 8, not branch 12 / lots 0); what
     // no lot held stays branch-only, as the original left it.
     const shares = await rootLotShares(db, root.id)
-    if (shares.some((share) => share.productId !== productId)) return { ok: false, status: 400, error: MERGED_LOT_REFUSAL }
+    if (shares.some((share) => share.productId !== productId)) return refuse(400, 'revert_lot_moved', MERGED_LOT_REFUSAL)
     for (const share of shares) statements.push(...restoreBatchStockStatements(share.batchId, branchId, share.quantity))
     statements.push(...aggregateDeltaStatements(productId, branchId, magnitude))
     usedBatchId = shares.length === 1 && shares[0].quantity === magnitude ? shares[0].batchId : null
@@ -389,7 +388,7 @@ export async function applyMovementRevert(db: D1Compat, m: RevertMovementRow, ac
     if (await revertExists(db, counterRef)) return ALREADY_REVERTED
     const message = err instanceof Error ? err.message : String(err)
     if (/CHECK constraint failed/i.test(message)) {
-      return { ok: false, status: 409, code: 'stock_changed', error: 'The stock changed while this was being reverted. Nothing was changed; refresh and try again.' }
+      return refuse(409, 'stock_changed', 'The stock changed while this was being reverted. Nothing was changed; refresh and try again.')
     }
     throw err
   }
@@ -408,7 +407,11 @@ const ALREADY_REVERTED_GUARD = `INSERT INTO stock_session_guards (guard_value)
   SELECT CASE WHEN EXISTS (SELECT 1 FROM inventory_movements WHERE reference_id = @ref)
     OR NOT EXISTS (SELECT 1 FROM inventory_movements WHERE id = @movementId) THEN 0 ELSE 1 END`
 
-const ALREADY_REVERTED: RevertResult = { ok: false, status: 409, code: 'already_reverted', error: 'This movement has already been reverted.' }
+const ALREADY_REVERTED: RevertResult = refuse(409, 'already_reverted', 'This movement has already been reverted.')
+
+function lotShortRefusal(available: number, needed: number): RevertResult {
+  return refuse(400, 'revert_insufficient_lot_stock', `Cannot revert: only ${available} available under this received date at this branch, ${needed} needed.`, { available, needed })
+}
 
 async function revertExists(db: D1Compat, ref: string): Promise<boolean> {
   const row = await db.prepare('SELECT id FROM inventory_movements WHERE reference_id = @ref LIMIT 1').get<{ id: number }>({ ref })

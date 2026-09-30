@@ -149,6 +149,7 @@ async function counterFor(originalId) {
   assert.equal(r3.ok, false)
   assert.equal(r3.status, 400)
   assert.match(r3.error, /sale, return, transfer or move/)
+  assert.deepEqual([r3.code, r3.params], ['revert_not_revertible', { type: 'sale' }], 'coded for the operator\'s language (F5)')
   const noCounter3 = await counterFor(5201)
   assert.equal(noCounter3, undefined, 'a refused revert writes no counter-movement')
   ok(true, 'a sale movement cannot be reverted from the stock ledger (refused, no stock moved)')
@@ -162,6 +163,7 @@ async function counterFor(originalId) {
   assert.equal(r4.ok, false)
   assert.equal(r4.status, 400)
   assert.match(r4.error, /only 0 in stock/)
+  assert.deepEqual([r4.code, r4.params], ['revert_insufficient_branch_stock', { available: 0, needed: 4, branch: 'Main Store' }], 'the numbers travel with the code (F5)')
   ok(true, 'revert-remove is refused when the stock to remove is no longer there (never goes negative)')
 
   // ---- supplier mirror (P3-L1) ------------------------------------------
