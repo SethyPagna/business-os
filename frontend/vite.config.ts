@@ -1025,6 +1025,11 @@ function manualChunks(id: string): string | undefined {
     // public catalog loads: the catalog-products closure passed the budget in
     // tests/performanceBudgets.test.ts. Its own chunk keeps it off the storefront.
     if (normalized.includes('/src/components/shared/useConfirmDialog.tsx')) return 'confirm-dialog-hook'
+    // The phone Draft chip body (drag, clamp, list) is requested by
+    // MinimizedWorkTray only while a draft is parked on a phone. Left to the
+    // catch-all below it lands in 'app-shared' and adds ~6 KB to the public
+    // catalog closure (tests/performanceBudgets.test.ts).
+    if (normalized.includes('/src/components/shared/DraftChipFloat.tsx')) return 'draft-chip-float'
     if (normalized.includes('/src/components/shared/QuickPreferenceToggles.tsx')) return 'shared-ui'
     if (normalized.includes('/src/components/shared/PaginationControls.tsx')) return 'shared-ui'
     if (normalized.includes('/src/components/shared/FilterMenu.tsx')) return 'shared-ui'

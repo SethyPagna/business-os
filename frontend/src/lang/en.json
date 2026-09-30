@@ -5824,6 +5824,7 @@
   "minimize_hint": "Minimize — continue later from the chip",
   "minimized_to_chip": "Minimized. Pick it back up from the chip — nothing was lost.",
   "minimized_dismiss_hint": "Dismiss and discard this draft",
+  "draft_chip": "Draft",
   "menu": "Menu",
   "manage_return_reasons": "Manage return reasons",
   "reasons": "Reasons",

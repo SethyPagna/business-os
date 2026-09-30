@@ -1,11 +1,16 @@
-// KNOWN-136 / UI-STOCK S7: minimized work must be reachable on a phone in
-// portrait. The phone header mounts of the tray hide in pages mode and scroll
-// away, so the always-mounted desktop instance portals one floating "Draft"
-// chip instead. Part 1 drives the pure clamp and storage helpers; part 2 drives
-// the real component in headless Chromium at 360 px: default spot, tap to
-// restore, the count and popover with 3 drafts, drag limits under the header
-// (also while it is scrolled away) and above the bottom nav, the remembered
-// position after a reload, arrow-key nudges, blocked storage, and md+ widths.
+// KNOWN-136 / UI-STOCK S7 / DRAFT-CHIP: minimized work must be reachable on a
+// phone in portrait, in both navigation modes. The phone header mounts of the
+// tray hid in pages mode and scrolled away, so the ONE always-mounted tray
+// (its desktop aside is only CSS-hidden) loads a floating "Draft" chip. The
+// chip body is its own lazy chunk so the catalog-products budget holds; the
+// small shell stays in app-shared.
+// Part 1 drives the pure clamp and storage helpers, part 2 pins the source
+// contract, part 3 drives the real component in headless Chromium at 360 px:
+// the count chip that always opens the list, restore, the two-moment discard
+// prompt, the default spot clear of the edge launchers, drag limits under the
+// header (also while it is scrolled away) and above the bottom nav, the
+// remembered position after a reload, arrow-key nudges, blocked storage,
+// Khmer, and md+ widths.
 //
 // Run: node tests/draftChipFloat.test.ts
 import assert from 'node:assert/strict'
@@ -14,17 +19,16 @@ import ts from 'typescript'
 import { launchResolveFixture } from './resolveBrowserFixture.ts'
 
 const traySource = readFileSync(new URL('../src/components/shared/MinimizedWorkTray.tsx', import.meta.url), 'utf8')
+const floatSource = readFileSync(new URL('../src/components/shared/DraftChipFloat.tsx', import.meta.url), 'utf8')
+const sidebarSource = readFileSync(new URL('../src/components/navigation/Sidebar.tsx', import.meta.url), 'utf8')
 
 // ------------------------------------------------------------ 1. pure helpers
-const compiled = ts.transpileModule(traySource, {
+const compiled = ts.transpileModule(floatSource, {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX },
 }).outputText
-const tray: any = { exports: {} }
-new Function('require', 'module', 'exports', compiled)((name: string) => {
-  if (name.includes('AppContextCore')) return { useApp: () => ({}) }
-  return {}
-}, tray, tray.exports)
-const { draftChipBounds, clampDraftChipPosition, draftChipMovedPastThreshold, readDraftChipPosition, writeDraftChipPosition, DRAFT_CHIP_POSITION_KEY } = tray.exports
+const float: any = { exports: {} }
+new Function('require', 'module', 'exports', compiled)(() => ({}), float, float.exports)
+const { draftChipBounds, clampDraftChipPosition, draftChipMovedPastThreshold, draftChipDefaultPosition, readDraftChipPosition, writeDraftChipPosition, DRAFT_CHIP_POSITION_KEY } = float.exports
 
 const phone = { viewport: { width: 360, height: 740 }, chip: { width: 96, height: 44 }, insets: { top: 0, right: 0, bottom: 0, left: 0 } }
 assert.deepEqual(draftChipBounds({ ...phone, headerBottom: 64, navTop: 684 }), { minX: 8, maxX: 256, minY: 72, maxY: 632 })
@@ -33,6 +37,7 @@ assert.deepEqual(draftChipBounds({ ...phone, headerBottom: null, navTop: null, i
 const tiny = draftChipBounds({ viewport: { width: 60, height: 100 }, chip: { width: 96, height: 44 }, insets: phone.insets, headerBottom: 64, navTop: 90 })
 assert.ok(tiny.maxX >= tiny.minX && tiny.maxY >= tiny.minY, 'a viewport smaller than the chip still yields a valid box')
 assert.deepEqual(clampDraftChipPosition({ x: -500, y: 9999 }, { minX: 8, maxX: 256, minY: 72, maxY: 632 }), { x: 8, y: 632 })
+assert.deepEqual(draftChipDefaultPosition({ minX: 8, maxX: 256, minY: 72, maxY: 632 }), { x: 132, y: 632 }, 'the default spot is bottom centre: the right edge holds the scroll buttons and the import tracker, the left edge the notes launcher')
 assert.equal(draftChipMovedPastThreshold(6, 0), false, 'a 6 px wobble is still a tap')
 assert.equal(draftChipMovedPastThreshold(5, 5), true, 'a diagonal drag past 6 px is a drag')
 const throwing = () => ({ getItem: () => { throw new Error('blocked') }, setItem: () => { throw new Error('blocked') } })
@@ -48,12 +53,23 @@ assert.equal(readDraftChipPosition(store), null, 'a malformed saved value is ign
 console.log('PASS the Draft chip clamp and storage helpers')
 
 // ------------------------------------------------------------ 2. source pins
-assert.match(traySource, /if \(variant === 'mobile'\) return null/, 'the phone header mounts render nothing; the floating chip replaces them')
-assert.match(traySource, /createPortal\(floating, document\.body\)/, 'the chip is portalled out of the CSS-hidden sidebar')
-assert.match(traySource, /data-draft-chip-float="" className="md:hidden"/, 'the chip exists below md only')
-assert.match(traySource, /className="fixed z-\[60\] flex h-11/, 'fixed, above the top bar (z-50) and bottom nav (z-40), below modals')
-assert.match(traySource, /touchAction: 'none'/, 'dragging must not scroll the page')
-assert.doesNotMatch(traySource, /localStorage\.(?:get|set)Item/, 'storage goes only through the try/catch helpers')
+assert.match(floatSource, /createPortal\(/, 'the chip is portalled out of the CSS-hidden sidebar')
+assert.match(floatSource, /data-draft-chip-float="" className="md:hidden"/, 'the chip exists below md only')
+assert.match(floatSource, /className="fixed z-\[60\] flex h-11/, 'fixed, above the top bar (z-50) and bottom nav (z-40), below modals')
+assert.match(floatSource, /touchAction: 'none'/, 'dragging must not scroll the page')
+assert.doesNotMatch(floatSource, /localStorage\.(?:get|set)Item/, 'storage goes only through the try/catch helpers')
+assert.match(floatSource, /tr\('draft_chip', 'Draft', 'សេចក្ដីព្រាង'\)/, 'the chip word comes from the language packs, with a Khmer fallback')
+assert.match(traySource, /lazyRetry\(/, 'the floating half is a lazy chunk so the catalog-products budget holds')
+assert.match(traySource, /import\('\.\/DraftChipFloat(?:\.tsx)?'\)/, 'the lazy import names the float file')
+assert.doesNotMatch(traySource, /^import [^\n]*DraftChipFloat/m, 'the shell never statically imports the float body')
+assert.match(traySource, /entries\.length > 0|entries\.length\)/, 'the float is requested only when a draft is parked')
+assert.match(traySource, /UnsavedChangesPrompt/, 'dismissing a parked draft asks the two-moment "Discard unsaved changes?" prompt')
+assert.match(traySource, /onDismiss=\{\(\) => setPendingDismiss\(entry\)\}/, 'the pill dismiss asks first instead of discarding straight away')
+assert.doesNotMatch(traySource, /variant/, 'one tray, one mount: the phone header and account-menu mounts are gone')
+// Phone reachability never depends on the navigation mode or on the header.
+assert.doesNotMatch(sidebarSource, /<MinimizedWorkTray variant="mobile"/, 'no phone header or account-menu mount of the tray remains')
+assert.equal((sidebarSource.match(/<MinimizedWorkTray\b/g) ?? []).length, 1, 'exactly one always-mounted tray: the aside is only display:none below md, so pages and sections mode both reach the same chip')
+assert.match(sidebarSource, /<aside[^>]*hidden[^>]*md:flex[\s\S]*?<MinimizedWorkTray \/>/, 'the single mount sits in the always-mounted aside, outside every `inline` (pages mode) and scroll-away branch')
 console.log('PASS the Draft chip source contract')
 
 // ------------------------------------------------------------ 3. real browser
@@ -63,6 +79,7 @@ const fixtureSource = String.raw`
   import MinimizedWorkTray from '/src/components/shared/MinimizedWorkTray.tsx'
   import { AppContext, FALLBACK_APP_CONTEXT } from '/src/app/AppContextCore.tsx'
   import { minimizeWork, getMinimizedWork, removeMinimizedWork, RESTORE_WORK_EVENT } from '/src/utils/minimizedWork.ts'
+  import { writeWorkDraft, readWorkDraft } from '/src/utils/workDrafts.ts'
   import en from '/src/lang/en.json'
   import km from '/src/lang/km.json'
   import '@fontsource/noto-sans-khmer/400.css'
@@ -84,7 +101,11 @@ const fixtureSource = String.raw`
   const labels = ['Adjust stock — Head & Shoulders សាប៊ូកក់សក់ទឹកក្រូច 400ml', 'Add product — Dior 999', 'Expense — Electricity September']
   const count = Number(params.get('n') || 1)
   for (const entry of getMinimizedWork()) removeMinimizedWork(entry.key)
-  labels.slice(0, count).forEach((label, index) => minimizeWork({ key: 'draft-' + index, kind: 'fee_form', pageId: 'sales', anchor: 'hub:sales:fees', label, draftKey: 'fee-draft-' + index }))
+  labels.slice(0, count).forEach((label, index) => {
+    writeWorkDraft('fee-draft-' + index, { amount: 10 + index })
+    minimizeWork({ key: 'draft-' + index, kind: 'fee_form', pageId: 'sales', anchor: 'hub:sales:fees', label, draftKey: 'fee-draft-' + index })
+  })
+  window.__draftSaved = (index) => readWorkDraft('fee-draft-' + index) != null
   const headerTop = Number(params.get('headerTop') || 0)
   const value = {
     ...FALLBACK_APP_CONTEXT, language: lang, t: (key) => pack[key] || key, user: { id: 7, username: 'owner' },
@@ -93,11 +114,10 @@ const fixtureSource = String.raw`
   function Page() {
     return (
       <AppContext.Provider value={value}>
-        <header data-bos-mobile-header="inline" id="hdr" style={{ position: 'fixed', left: 0, right: 0, top: headerTop, height: 64, background: '#eee', zIndex: 50, transform: params.has('headerHidden') ? 'translateY(-100%)' : 'none' }}>
-          <div id="mobile-slot"><MinimizedWorkTray variant="mobile" /></div>
-        </header>
-        <aside id="aside" className="hidden md:flex"><MinimizedWorkTray variant="desktop" /></aside>
+        <header data-bos-mobile-header="inline" id="hdr" style={{ position: 'fixed', left: 0, right: 0, top: headerTop, height: 64, background: '#eee', zIndex: 50, transform: params.has('headerHidden') ? 'translateY(-100%)' : 'none' }} />
+        <aside id="aside" className="hidden md:flex"><MinimizedWorkTray /></aside>
         <main style={{ height: 2000 }} />
+        <div id="scroll-buttons" style={{ position: 'fixed', right: '0.625rem', bottom: '5rem', width: 44, height: 92, zIndex: 1000, background: '#ccc' }} />
         <nav className="safe-area-inset-bottom fixed bottom-0 left-0 right-0 z-40 h-14 md:hidden" style={{ background: '#ddd' }} />
       </AppContext.Provider>
     )
@@ -109,10 +129,21 @@ const browser = await launchResolveFixture('draft-chip-float', fixtureSource)
 const { evaluate, send, pause, open, press, khmerRoom } = browser
 
 type Box = { left: number; top: number; right: number; bottom: number; width: number; height: number }
-const chipBox = () => evaluate<Box | null>(`(() => { const c = document.querySelector('[data-draft-chip]'); if (!c) return null; const r = c.getBoundingClientRect(); return { left: r.left, top: r.top, right: r.right, bottom: r.bottom, width: r.width, height: r.height } })()`)
+const boxOf = (selector: string) => evaluate<Box | null>(`(() => { const c = document.querySelector(${JSON.stringify(selector)}); if (!c) return null; const r = c.getBoundingClientRect(); return { left: r.left, top: r.top, right: r.right, bottom: r.bottom, width: r.width, height: r.height } })()`)
+const chipBox = () => boxOf('[data-draft-chip]')
 const chipText = () => evaluate<string>(`[...document.querySelectorAll('[data-draft-chip] span')].map((span) => span.textContent.trim()).join(' ')`)
 const navTop = () => evaluate<number>(`document.querySelector('nav.safe-area-inset-bottom').getBoundingClientRect().top`)
 const ready = `(() => { const c = document.querySelector('[data-draft-chip]'); return c && getComputedStyle(c).visibility === 'visible' })()`
+const rowCount = () => evaluate<number>(`document.querySelectorAll('[data-draft-chip-popover] .detail-scroll-text').length`)
+const prompt = () => evaluate<{ title: string; paragraphs: number; buttons: string[]; sameRow: boolean } | null>(`(() => {
+  const dialog = [...document.querySelectorAll('[role="dialog"]')].find((node) => node.querySelector('h2'))
+  if (!dialog) return null
+  const actions = dialog.querySelector('[data-unsaved-actions]')
+  const buttons = actions ? [...actions.querySelectorAll('button')] : []
+  const tops = buttons.map((button) => Math.round(button.getBoundingClientRect().top))
+  return { title: dialog.querySelector('h2').textContent.trim(), paragraphs: dialog.querySelectorAll('p').length, buttons: buttons.map((button) => button.textContent.trim()), sameRow: tops.length > 1 && tops.every((top) => top === tops[0]) }
+})()`)
+const clickPromptButton = (label: string) => evaluate(`([...document.querySelectorAll('[data-unsaved-actions] button')].find((button) => button.textContent.trim() === ${JSON.stringify(label)}).click(), true)`)
 const drag = async (dx: number, dy: number) => {
   const box = await chipBox(); assert.ok(box)
   const x = box.left + box.width / 2
@@ -133,37 +164,68 @@ const tap = async (dx = 0) => {
   await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: x + dx, y, button: 'left', clickCount: 1 })
   await pause(80)
 }
+const intersects = (a: Box, b: Box) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom
 
-await browser.run('PASS the Draft chip floats, restores, lists, drags within limits and remembers its place on a phone', async () => {
+await browser.run('PASS the Draft chip floats, lists, restores, asks before discarding, drags within limits and remembers its place on a phone', async () => {
+  await open(360, 'n=1', ready)
   await evaluate(`localStorage.clear(), true`)
 
-  // One draft, default spot: right edge, just above the bottom nav.
+  // One draft, default spot: bottom centre, just above the bottom nav, clear of the right-edge scroll buttons.
   await open(360, 'n=1', ready)
   const nav = await navTop()
   let box = await chipBox(); assert.ok(box)
-  assert.equal(await chipText(), 'Draft', 'one draft reads "Draft", no count')
-  assert.ok(Math.abs(box.right - 352) <= 1, `hugs the right edge (right ${box.right})`)
+  assert.equal(await chipText(), 'Draft 1', 'the chip always carries the count, even for one draft')
+  assert.equal(await evaluate<string>(`document.querySelector('[data-draft-chip]').getAttribute('aria-label')`), 'Draft 1', 'aria-label names the chip and its count')
+  assert.equal(await evaluate<string>(`document.querySelector('[data-draft-chip]').getAttribute('title')`), 'Draft 1', 'the tooltip matches')
+  assert.ok(Math.abs(box.left + box.width / 2 - 180) <= 1, `centred (centre ${box.left + box.width / 2})`)
   assert.ok(Math.abs(box.bottom - (nav - 8)) <= 1, `sits just above the bottom nav (bottom ${box.bottom}, nav ${nav})`)
   assert.equal(box.height, 44, 'a 44 px touch target')
-  assert.equal(await evaluate<number>(`document.querySelectorAll('#mobile-slot button').length`), 0, 'the phone header mount renders nothing')
-  await tap()
-  assert.deepEqual(await evaluate(`__log.navigations`), [['sales', 'hub:sales:fees']], 'one draft: a tap restores it straight away')
-  assert.deepEqual(await evaluate(`__log.restores`), ['draft-0'])
+  const scrollButtons = await boxOf('#scroll-buttons'); assert.ok(scrollButtons)
+  assert.equal(intersects(box, scrollButtons), false, 'the default spot does not cover the scroll buttons')
 
-  // Three drafts: the count, then a popover listing every label in full.
+  // A tap opens the list (also for one draft); the row restores through the existing lifecycle.
+  await tap()
+  assert.equal(await rowCount(), 1, 'one draft still opens a list with its dismiss')
+  assert.deepEqual(await evaluate(`__log.navigations`), [], 'opening the list restores nothing')
+  await evaluate(`document.querySelector('[data-draft-chip-popover] button[title^="Restore"]').click(), true`)
+  await pause(80)
+  assert.deepEqual(await evaluate(`__log.navigations`), [['sales', 'hub:sales:fees']], 'the row restores by navigating to the host page')
+  assert.deepEqual(await evaluate(`__log.restores`), ['draft-0'], 'and dispatches the existing restore event')
+  assert.equal(await evaluate<boolean>(`!document.querySelector('[data-draft-chip-popover]')`), true, 'the list closes after a restore')
+
+  // Three drafts: the count, then a list of every label in full.
   await open(360, 'n=3', ready)
   assert.equal(await chipText(), 'Draft 3')
   await tap(3)
-  assert.equal(await evaluate<number>(`document.querySelectorAll('[data-draft-chip-popover] .detail-scroll-text').length`), 3, 'a 3 px wobble is a tap: the popover lists all three')
+  assert.equal(await rowCount(), 3, 'a 3 px wobble is a tap: the list shows all three')
   assert.equal(await evaluate<string>(`document.querySelector('[data-draft-chip-popover] .detail-scroll-text').textContent`), 'Adjust stock — Head & Shoulders សាប៊ូកក់សក់ទឹកក្រូច 400ml', 'the label is shown in full')
-  const popover = await evaluate<Box>(`(() => { const r = document.querySelector('[data-draft-chip-popover]').getBoundingClientRect(); return { left: r.left, top: r.top, right: r.right, bottom: r.bottom, width: r.width, height: r.height } })()`)
-  assert.ok(popover.left >= 0 && popover.right <= 360 && popover.top >= 0, 'the popover stays on screen')
-  await evaluate(`document.querySelectorAll('[data-draft-chip-popover] button[aria-label="${'Dismiss and discard this draft'}"]')[1].click(), true`)
+  const popover = await boxOf('[data-draft-chip-popover]'); assert.ok(popover)
+  assert.ok(popover.left >= 0 && popover.right <= 360 && popover.top >= 0, 'the list stays on screen')
+
+  // Dismiss asks the two-moment prompt; Back keeps the draft and its saved values.
+  const dismissRow = `document.querySelectorAll('[data-draft-chip-popover] button[aria-label="Dismiss and discard this draft"]')[1].click(), true`
+  await evaluate(dismissRow)
   await pause(80)
-  assert.equal(await chipText(), 'Draft 2', 'dismissing one row leaves two')
+  let asked = await prompt(); assert.ok(asked, 'dismissing a parked draft raises the prompt')
+  assert.equal(asked.title, 'Discard unsaved changes?')
+  assert.equal(asked.paragraphs, 0, 'title only, no body text')
+  assert.deepEqual(asked.buttons, ['Discard', 'Back'], 'Discard and Back')
+  assert.equal(asked.sameRow, true, 'on one row')
+  await clickPromptButton('Back')
+  await pause(60)
+  assert.equal(await prompt(), null, 'Back closes the prompt')
+  assert.equal(await chipText(), 'Draft 3', 'Back keeps every draft')
+  assert.equal(await evaluate<boolean>(`__draftSaved(1)`), true, 'and its saved values')
+  await evaluate(dismissRow)
+  await pause(80)
+  await clickPromptButton('Discard')
+  await pause(80)
+  assert.equal(await chipText(), 'Draft 2', 'Discard removes exactly that draft')
+  assert.equal(await evaluate<boolean>(`__draftSaved(1)`), false, 'and clears its saved values')
+  assert.equal(await evaluate<boolean>(`__draftSaved(0) && __draftSaved(2)`), true, 'the siblings keep theirs')
   await press('Escape')
   await pause(50)
-  assert.equal(await evaluate<boolean>(`!document.querySelector('[data-draft-chip-popover]')`), true, 'Escape closes the popover')
+  assert.equal(await evaluate<boolean>(`!document.querySelector('[data-draft-chip-popover]')`), true, 'Escape closes the list')
 
   // Drag to the top-left: clamped under the header, not under the status bar.
   await drag(-400, -900)
@@ -195,6 +257,7 @@ await browser.run('PASS the Draft chip floats, restores, lists, drags within lim
   await drag(0, -2000)
   box = await chipBox(); assert.ok(box)
   assert.equal(Math.round(box.top), 120, 'a scrolled-away header still reserves its space')
+  assert.equal(await evaluate<string>(`getComputedStyle(document.querySelector('[data-draft-chip]')).visibility`), 'visible', 'the chip is on screen while the header is away')
 
   // The update bar pushes the header down 48 px.
   await open(360, 'n=2&headerTop=48', ready)
@@ -203,6 +266,7 @@ await browser.run('PASS the Draft chip floats, restores, lists, drags within lim
   assert.equal(Math.round(box.top), 120, 'clamped under the header that sits below the update bar')
 
   // Rotating to a shorter viewport re-clamps a saved spot that is now off screen.
+  await evaluate(`localStorage.clear(), true`)
   await open(360, 'n=2', ready)
   await drag(0, 2000)
   await send('Emulation.setDeviceMetricsOverride', { width: 360, height: 420, deviceScaleFactor: 1, mobile: true })
@@ -211,17 +275,37 @@ await browser.run('PASS the Draft chip floats, restores, lists, drags within lim
   const shortNav = await navTop()
   assert.ok(box.bottom <= shortNav - 7, `re-clamped after the resize (bottom ${box.bottom}, nav ${shortNav})`)
 
+  // A short landscape-height phone: the default spot still misses the scroll buttons.
+  await evaluate(`localStorage.clear(), true`)
+  await open(360, 'n=1', ready, 420)
+  box = await chipBox(); assert.ok(box)
+  const shortScroll = await boxOf('#scroll-buttons'); assert.ok(shortScroll)
+  assert.equal(intersects(box, shortScroll), false, 'no overlap with the scroll buttons at 360x420 either')
+
   // Blocked storage: the chip still renders at its default spot.
   await open(360, 'n=1&blockStorage=1', ready)
   box = await chipBox(); assert.ok(box)
-  assert.ok(Math.abs(box.right - 352) <= 1, 'blocked storage falls back to the default spot')
+  assert.ok(Math.abs(box.left + box.width / 2 - 180) <= 1, 'blocked storage falls back to the default spot')
 
   // Khmer: the Khmer word, with a Khmer line box.
   await open(360, 'n=1&lang=km', ready)
-  assert.equal(await chipText(), 'សេចក្ដីព្រាង')
+  assert.equal(await chipText(), 'សេចក្ដីព្រាង 1')
+  assert.equal(await evaluate<string>(`document.querySelector('[data-draft-chip]').getAttribute('aria-label')`), 'សេចក្ដីព្រាង 1')
   await khmerRoom('Draft chip', '[data-draft-chip-float]', 1)
+  await tap()
+  await evaluate(`document.querySelector('[data-draft-chip-popover] button[aria-label]').click(), true`)
+  await pause(80)
+  const khmerAsked = await prompt(); assert.ok(khmerAsked)
+  assert.equal(khmerAsked.title, 'បោះបង់ការផ្លាស់ប្ដូរដែលមិនទាន់រក្សាទុក?')
+  assert.equal(khmerAsked.paragraphs, 0)
 
-  // md and up: the chip is gone and the sidebar pills show every draft.
+  // md and up: the chip is gone, the sidebar pills show every draft, and their X asks the same question.
   await open(1024, 'n=3', `document.querySelectorAll('#aside .detail-scroll-text').length === 3`, 760)
-  assert.equal(await evaluate<string>(`getComputedStyle(document.querySelector('[data-draft-chip-float]')).display`), 'none', 'no floating chip on md+')
+  assert.equal(await evaluate<boolean>(`!document.querySelector('[data-draft-chip-float]')`), true, 'no floating chip on md+')
+  await evaluate(`document.querySelector('#aside button[aria-label="Dismiss and discard this draft"]').click(), true`)
+  await pause(80)
+  const wideAsked = await prompt(); assert.ok(wideAsked, 'the pill X asks before discarding too')
+  await clickPromptButton('Discard')
+  await pause(80)
+  assert.equal(await evaluate<number>(`document.querySelectorAll('#aside .detail-scroll-text').length`), 2)
 })

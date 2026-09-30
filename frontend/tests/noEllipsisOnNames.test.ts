@@ -464,6 +464,7 @@ const TOUCHED_FILES: string[] = [
   'components/shared/AppSelect.tsx',
   'components/shared/CategoryFilterOptions.tsx',
   'components/shared/CostCalculationFloat.tsx',
+  'components/shared/DraftChipFloat.tsx',
   'components/shared/MinimizedWorkTray.tsx',
   'components/shared/NotesWidget.tsx',
   'components/users/DeviceApprovals.tsx',
@@ -649,6 +650,7 @@ const SCROLLED_VALUES: Array<[string, string]> = [
   ['components/utils-settings/AuditLog.tsx', 'formatEntityName(log, vocab)'],
   ['components/shared/ActionHistoryBar.tsx', 'item.label'],
   ['components/shared/MinimizedWorkTray.tsx', 'entry.label'],
+  ['components/shared/DraftChipFloat.tsx', 'entry.label'],
 ]
 
 runTest('every business value the sweep covered renders in .detail-scroll-text', () => {

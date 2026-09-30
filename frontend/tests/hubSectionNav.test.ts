@@ -154,10 +154,9 @@ await runTest('pages mode uses one compact header and its inline group drawer wi
   assert.match(sidebar, /inline \? 'bottom-0 pb-\[env\(safe-area-inset-bottom\)\]' : 'bottom-\[calc\(3\.55rem\+env\(safe-area-inset-bottom\)\)\]'/, 'pages drawer should reclaim the bottom safe area while legacy keeps its nav offset')
   assert.doesNotMatch(sidebar, /h-28|7rem|flex-wrap content-center gap-y-1/, 'pages mode should not force a second header row')
   assert.match(sidebar, /mobileTitle[\s\S]*?overflow-x-auto[\s\S]*?whitespace-nowrap[\s\S]*?text-sm font-semibold/, 'one-row pages title remains readable through horizontal scrolling rather than ellipsis')
-  assert.match(sidebar, /inline \? null : \([\s\S]*?<MinimizedWorkTray variant="mobile"/, 'wide minimized-work chips should leave the one-row pages header')
+  assert.doesNotMatch(sidebar, /<MinimizedWorkTray variant=/, 'minimized work has no phone header or account-menu copy: the one always-mounted tray loads the floating Draft chip, which shows in pages and sections mode and while the header is scrolled away (DRAFT-CHIP, draftChipFloat.test.ts)')
+  assert.equal((sidebar.match(/<MinimizedWorkTray\b/g) ?? []).length, 1, 'exactly one tray mount, in the aside that stays mounted below md')
   assert.match(sidebar, /\{notificationSlot\}\s*\{showQuickPreferences \? \([\s\S]*?<QuickPreferenceToggles \/>[\s\S]*?<div className="relative z-50/, 'theme and language controls should stay directly in the one-row header between notification and account')
-  assert.match(sidebar, /\{inline \? \(\s*<div className="[^"]*\[&>div\]:flex-wrap[^"]*">[\s\S]*?<MinimizedWorkTray variant="mobile"/, 'pages-mode minimized work should remain reachable in the account panel and wrap without horizontal overflow')
-  assert.doesNotMatch(sidebar, /\{inline \? \(\s*<div className="mb-1[\s\S]*?<MinimizedWorkTray variant="mobile"[\s\S]*?<QuickPreferenceToggles/, 'pages-mode account panel should not hide duplicate theme or language controls')
 
   assert.match(app, /inlineMobileNavigation \? 'pb-\[env\(safe-area-inset-bottom\)\]' : 'pb-\[calc\(3\.55rem\+env\(safe-area-inset-bottom\)\)\]'/, 'pages mode should not reserve phantom bottom-nav space')
   assert.doesNotMatch(app, /pt-28|7rem/, 'main content should reserve only the one-row header height')
