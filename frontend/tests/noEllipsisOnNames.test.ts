@@ -630,7 +630,7 @@ const SCROLLED_VALUES: Array<[string, string]> = [
   ['components/products/lookups/ManageCategoriesModal.tsx', 'category.name'],
   ['components/products/lookups/ManageUnitsModal.tsx', 'unit.name'],
   ['components/inventory/InventoryReasonManagerModal.tsx', 'entry.label'],
-  ['components/returns/ReturnReasonManagerModal.tsx', 'reason'],
+  ['components/shared/ReasonListEditor.tsx', 'item.label'],
   ['components/inventory/InventoryMovementsSurface.tsx', 'group.reasonPrimary'],
   ['components/inventory/ManageBatchesModal.tsx', 'batch.notes'],
   ['components/branches/Branches.tsx', 'branch.notes'],
