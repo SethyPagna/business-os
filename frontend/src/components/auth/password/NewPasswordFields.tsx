@@ -34,8 +34,6 @@ const SAFARI_PASSWORD_RULES: Record<string, string> = {
   passwordrules: 'minlength: 12; maxlength: 64; required: lower; required: upper; required: digit;',
 }
 const OWN_PASSWORD_INPUT: Record<string, string> = { autoComplete: 'new-password', ...SAFARI_PASSWORD_RULES }
-// Chrome offers to save, or to UPDATE the administrator's own login, for any
-// type=password field whatever its autocomplete or ignore attributes.
 const OTHER_USER_INPUT: Record<string, string | boolean> = {
   autoComplete: 'off',
   autoCapitalize: 'off',
@@ -45,6 +43,8 @@ const OTHER_USER_INPUT: Record<string, string | boolean> = {
   'data-lpignore': 'true',
   'data-bwignore': 'true',
 }
+// Other-user inputs are masked type=text: Chrome offers to save, or to UPDATE the
+// administrator's own login, for any type=password field whatever its attributes above.
 const MASKED_TEXT_CLASS = '[-webkit-text-security:disc]'
 
 const STRENGTH_STEPS: Record<PasswordStrength, number> = { weak: 1, fair: 2, strong: 3 }

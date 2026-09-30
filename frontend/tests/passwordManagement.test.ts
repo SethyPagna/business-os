@@ -286,8 +286,8 @@ await runTest('peer-admin reset uses dedicated admin endpoint and permits managi
   assert.doesNotMatch(usersSource, /return !targetUser\.has_admin_access/)
 })
 
-// Users block (AUTH-P1-users). Creating a user and resetting someone else's password set ANOTHER
-// person's password: never the administrator's own vault, never the clipboard unless Copy is pressed.
+// Creating a user and resetting someone else's password set ANOTHER person's password:
+// never the administrator's own vault, never the clipboard unless Copy is pressed.
 const usersCode = usersSource.replace(/\r\n/g, '\n')
 function sliceFunction(source: string, name: string): string {
   const start = source.indexOf(`\nfunction ${name}(`)

@@ -8,11 +8,13 @@ import { newPasswordProblem } from '../src/utils/passwordRules.ts'
 // pair every set-a-password screen uses.
 //   - 'self': autocomplete="new-password" and Safari's passwordrules, so the
 //     person's own password manager offers to save it;
-//   - 'other-user' (an administrator setting someone else's password): off
-//     plus the 1Password / LastPass / Bitwarden ignore attributes, so it never
-//     lands in the administrator's vault;
-//   - Show never switches the input to type=text (a submit while revealed can
-//     skip the browsers' save logic): the value appears in a line below;
+//   - 'other-user' (an administrator setting someone else's password): masked
+//     type=text, never type=password. That is what keeps it out of the
+//     administrator's vault: measured in Chrome, any type=password field is
+//     offered for saving, or for updating the administrator's own login,
+//     whatever its autocomplete=off or ignore attributes;
+//   - self: Show keeps both inputs type=password (a submit while revealed can
+//     skip the browsers' save logic) and shows the value in a line below;
 //   - Suggest fills both inputs with one suggestion; Copy writes the clipboard
 //     only when pressed.
 
@@ -125,7 +127,7 @@ await runTest('Suggest fills both inputs with the same valid suggestion and copi
   assert.deepEqual(clipboard, [], 'a suggestion is never copied on its own')
 })
 
-await runTest('Show keeps the inputs type=password and shows the value in a line below', () => {
+await runTest('self: Show keeps the inputs type=password and shows the value in a line below', () => {
   const revealedFirst: Hooks = { useState: (initial) => [(typeof initial === 'boolean' ? true : initial) as typeof initial, () => {}] }
   const tree = loadFields([], revealedFirst)(baseProps({ password: 'Kept-Secret-7', confirm: 'Kept-Secret-7' }))
   const inputs: Element[] = []
