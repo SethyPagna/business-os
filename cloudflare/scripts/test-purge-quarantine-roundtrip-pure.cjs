@@ -29,7 +29,10 @@
 // cap, restore meeting a different file, a missing copy or a row changed
 // since, restore failing or dying part way and run again, tampered
 // manifests, the command line, and the token never leaving the
-// Authorization header.
+// Authorization header. The mock's bucket is the script's exported BUCKET,
+// and it answers the live-binding read (production Worker, every live
+// version binds ASSETS to BUCKET) that the script makes before any R2 or D1
+// request; test-purge-bucket-binding-pure.cjs covers the refusals.
 //
 // Every failure is listed before the exit code is set. To run it against
 // another copy of the script: PURGE_SCRIPT=/tmp/purge.mjs node <this file>
@@ -50,6 +53,7 @@ const ACCOUNT = '0123456789abcdef0123456789abcdef'
 const DATABASE = '01234567-89ab-cdef-0123-456789abcdef'
 const ENV = { CLOUDFLARE_ACCOUNT_ID: ACCOUNT, BUSINESS_OS_D1_DATABASE_ID: DATABASE }
 const CLOCK = Date.parse('2026-09-26T12:00:00.000Z')
+const LIVE_VERSION = 'd4d4d4d4-4444-4444-8444-444444444444'
 
 const failures = []
 let checks = 0
@@ -189,9 +193,17 @@ async function handle(world, url, init = {}) {
   world.requests.push({ method, url, body: bodyText, bytes: bodyBytes ? Buffer.from(bodyBytes) : null, headers: [...headers.entries()].filter(([name]) => name !== 'authorization') })
   if (headers.get('authorization') !== `Bearer ${TOKEN}`) return reply(403, { success: false, errors: [{ code: 10000, message: 'Authentication error' }] })
   const account = `/client/v4/accounts/${ACCOUNT}`
-  const objects = `${account}/r2/buckets/business-os-assets/objects`
+  const objects = `${account}/r2/buckets/${script.BUCKET}/objects`
+  const worker = `${account}/workers/scripts/business-os`
   let request
   if (parsed.origin !== 'https://api.cloudflare.com') return reply(400, { success: false, errors: [{ code: 1, message: 'wrong host' }] })
+  // The production Worker's live binding: every version on BUCKET.
+  if (parsed.pathname === `${worker}/deployments` && method === 'GET') {
+    return reply(200, { success: true, result: { deployments: [{ id: 'dep-1', created_on: '2026-09-27T00:00:00Z', versions: [{ version_id: LIVE_VERSION, percentage: 100 }] }] } })
+  }
+  if (parsed.pathname === `${worker}/versions/${LIVE_VERSION}` && method === 'GET') {
+    return reply(200, { success: true, result: { id: LIVE_VERSION, resources: { bindings: [{ type: 'r2_bucket', name: 'ASSETS', bucket_name: script.BUCKET }] } } })
+  }
   if (parsed.pathname === objects && method === 'GET') request = { kind: 'list', method }
   else if (parsed.pathname.startsWith(`${objects}/`)) {
     const raw = parsed.pathname.slice(objects.length + 1)
@@ -425,7 +437,7 @@ async function main() {
     const moved = await invoke(world, ['--move'], PARALLEL)
     expect('move exits 0', () => assert.equal(moved.code, 0, moved.text))
     expect('large files were copied one at a time, after the small ones', () => {
-      const objectsPath = '/r2/buckets/business-os-assets/objects/'
+      const objectsPath = `/r2/buckets/${script.BUCKET}/objects/`
       const firstChange = world.requests.findIndex((request) => (request.body || '').includes('-- changes'))
       const spans = new Map()
       let lastSmall = -1

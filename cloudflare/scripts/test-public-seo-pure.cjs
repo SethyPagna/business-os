@@ -103,12 +103,15 @@ check('the raw storefront document carries the link-preview tags', () => {
     return match[1]
   }
   assert.equal(meta('og:type'), 'website')
-  assert.equal(meta('og:site_name'), 'Leang Beauty')
-  assert.equal(meta('og:title'), 'Leang Beauty')
-  assert.ok(meta('og:description').length > 20, 'a real description')
-  assert.match(meta('og:image'), /^https:\/\/leangbeauty\.com\/leang-cosmetics-icon-512\.png$/, 'absolute, on the public host')
+  const shopManifest = JSON.parse(read(path.join(REPO, 'frontend', 'public', 'portal-manifest.json')))
+  assert.equal(meta('og:site_name'), shopManifest.name)
+  assert.equal(meta('og:title'), 'Leang Cosmetics')
+  assert.equal(meta('og:description'), shopManifest.description, 'the preview describes the shop the way its installed app does')
+  // Prices can be hidden from the public storefront, so the preview never promises them.
+  assert.doesNotMatch(meta('og:description'), /price/i)
+  assert.match(meta('og:image'), /^https:\/\/leangbeauty\.com\/leang-cosmetics-icon-512-v2\.png$/, 'absolute, on the public host')
   assert.match(head, /<meta name="twitter:card" content="summary" \/>/)
-  assert.ok(fs.existsSync(path.join(REPO, 'frontend', 'public', 'leang-cosmetics-icon-512.png')), 'the preview image ships')
+  assert.ok(fs.existsSync(path.join(REPO, 'frontend', 'public', 'leang-cosmetics-icon-512-v2.png')), 'the preview image ships')
 })
 
 check('the document declares its canonical URL on the primary host, so the alias cannot rank on its own', () => {
@@ -132,6 +135,8 @@ check('the document declares its canonical URL on the primary host, so the alias
 })
 
 check('the admin host rewrites every preview tag away from the storefront', () => {
+  const shopManifest = JSON.parse(read(path.join(REPO, 'frontend', 'public', 'portal-manifest.json')))
+  const storefrontValues = new Set([shopManifest.name, shopManifest.short_name, shopManifest.description])
   for (const property of ['og:site_name', 'og:title', 'og:description', 'og:image', 'og:url']) {
     const rule = identity.ADMIN_DOCUMENT_REWRITES.find((candidate) => candidate.selector === 'meta[property="' + property + '"]')
     assert.ok(rule, 'no admin rewrite for ' + property)
@@ -142,7 +147,8 @@ check('the admin host rewrites every preview tag away from the storefront', () =
       setInnerContent: (value) => writes.push(value),
     })
     assert.ok(writes.length === 1 && writes[0], property + ' writes one value')
-    assert.doesNotMatch(writes[0], /leang/i, property + ' still names the storefront')
+    assert.ok(!storefrontValues.has(writes[0]), property + ' still names the storefront')
+    assert.doesNotMatch(writes[0], /leang-cosmetics-|leangbeauty.com/i, property + ' still points at a storefront file or address')
   }
   // The canonical too: an admin document telling a crawler its canonical
   // address is the shop's front page is the same leak in a different tag.

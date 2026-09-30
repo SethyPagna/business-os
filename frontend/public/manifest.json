@@ -1,13 +1,13 @@
 {
-  "name": "Business OS",
-  "short_name": "BusinessOS",
-  "description": "Offline-first POS, inventory and analytics",
+  "name": "Leang Cosmetics Admin",
+  "short_name": "Leang Admin",
+  "description": "Till, stock and sales for Leang Cosmetics staff",
   "id": "/",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
-  "background_color": "#f9fafb",
-  "theme_color": "#1e3a8a",
+  "background_color": "#f4f1ea",
+  "theme_color": "#fffdf8",
   "icons": [
     {
       "src": "/icon-192.png",
@@ -16,7 +16,7 @@
       "purpose": "any"
     },
     {
-      "src": "/icon-192-maskable.png",
+      "src": "/icon-192-maskable-v2.png",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "maskable"
@@ -28,7 +28,7 @@
       "purpose": "any"
     },
     {
-      "src": "/icon-512-maskable.png",
+      "src": "/icon-512-maskable-v2.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "maskable"

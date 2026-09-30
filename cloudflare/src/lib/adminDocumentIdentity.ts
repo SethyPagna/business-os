@@ -2,14 +2,14 @@
  * Admin-host document identity (G4).
  *
  * One built index.html serves BOTH hosts. Its static <head> is deliberately
- * storefront-first -- manifest, icons, title and Apple app title all name
- * Leang Beauty -- and a synchronous inline bootstrap swaps them to the
- * Business OS admin set on admin hosts before first paint. That bootstrap is
- * still the right default for the storefront, but index.html's own comment
- * records why it is not enough on iOS: "Add to Home Screen" can read the RAW
- * HTML (the file as served, before any script runs), so an admin user
- * installing admin.leangbeauty.com could get a home-screen app called Leang
- * Beauty, wearing the storefront icon, pointed at the storefront manifest.
+ * storefront-first -- manifest, icons, title, Apple app title and theme colour
+ * all belong to the shop -- and a synchronous inline bootstrap swaps them to
+ * the staff set on admin hosts before first paint. That bootstrap is still the
+ * right default for the storefront, but index.html's own comment records why
+ * it is not enough on iOS: "Add to Home Screen" can read the RAW HTML (the
+ * file as served, before any script runs), so an admin user installing
+ * admin.leangbeauty.com could get a home-screen app named after the shop,
+ * wearing the storefront icon, pointed at the storefront manifest.
  *
  * The Worker fixes it where the raw bytes are produced. FREE PLAN RULES apply
  * here (10 ms CPU, no custom cpu_ms): the document is never buffered, parsed
@@ -26,17 +26,21 @@
  * not exist outside workerd.
  */
 
-export const ADMIN_DOCUMENT_TITLE = 'Business OS'
-export const ADMIN_DOCUMENT_DESCRIPTION = 'Business OS - Offline-first POS, inventory and analytics'
+// frontend/public/manifest.json carries the same four values; the pure test
+// pins them together.
+export const ADMIN_DOCUMENT_TITLE = 'Leang Cosmetics Admin'
+export const ADMIN_DOCUMENT_APP_TITLE = 'Leang Admin'
+export const ADMIN_DOCUMENT_DESCRIPTION = 'Till, stock and sales for Leang Cosmetics staff'
+export const ADMIN_DOCUMENT_THEME_COLOR = '#fffdf8'
 export const ADMIN_DOCUMENT_MANIFEST_HREF = '/manifest.json'
-export const ADMIN_DOCUMENT_APPLE_TOUCH_ICON_HREF = '/apple-touch-icon.png'
+export const ADMIN_DOCUMENT_APPLE_TOUCH_ICON_HREF = '/admin-apple-touch-icon-v1.png'
 
 // Keyed by the <link rel="icon"> tag's own sizes attribute, exactly as
 // index.html's admin branch keys it. '' is the unsized favicon.
 const ADMIN_DOCUMENT_ICONS: Record<string, { href: string; type: string }> = {
   '192x192': { href: '/icon-192.png', type: 'image/png' },
   '512x512': { href: '/icon-512.png', type: 'image/png' },
-  '': { href: '/favicon.ico?v=business-os', type: 'image/x-icon' },
+  '': { href: '/admin-favicon-v1.ico', type: 'image/x-icon' },
 }
 
 // EXACT hostnames, not a prefix test: this list is the admin half of
@@ -108,16 +112,16 @@ export type DocumentElementRewrite = {
 //
 // Both replacements are RELATIVE, which is the same deliberate asymmetry
 // index.html's head comment records: an absolute value would have to name one
-// admin host, and there are four (two domains plus localhost and 127.0.0.1).
+// of the ADMIN_DOCUMENT_HOSTS, and local development serves this document too.
 // Nothing should ever preview or index the admin app -- robots.txt answers
 // `Disallow: /` on every admin host (lib/publicSeo.ts) -- so the only thing
-// that matters here is that the value is not Leang Beauty.
+// that matters here is that the value is not the storefront's.
 const ADMIN_DOCUMENT_OG_IMAGE = '/icon-512.png'
 const ADMIN_DOCUMENT_SELF_URL = '/'
 
-/** The six tags iOS reads when it installs a home-screen app, plus the
- * Open Graph tags a link preview reads and the canonical URL a search
- * crawler reads. */
+/** The six tags iOS reads when it installs a home-screen app, the colour the
+ * browser paints its own chrome, the Open Graph tags a link preview reads and
+ * the canonical URL a search crawler reads. */
 export const ADMIN_DOCUMENT_REWRITES: readonly DocumentElementRewrite[] = [
   {
     selector: 'title',
@@ -125,7 +129,11 @@ export const ADMIN_DOCUMENT_REWRITES: readonly DocumentElementRewrite[] = [
   },
   {
     selector: 'meta[name="apple-mobile-web-app-title"]',
-    element(element) { element.setAttribute('content', ADMIN_DOCUMENT_TITLE) },
+    element(element) { element.setAttribute('content', ADMIN_DOCUMENT_APP_TITLE) },
+  },
+  {
+    selector: 'meta[name="theme-color"]',
+    element(element) { element.setAttribute('content', ADMIN_DOCUMENT_THEME_COLOR) },
   },
   {
     selector: 'meta[name="description"]',

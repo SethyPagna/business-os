@@ -194,8 +194,10 @@ export function getPortalLanguageText(language: unknown, key: unknown): string {
   return typeof text === 'string' && text.trim() ? text : ''
 }
 
-// The Worker (routes/portal.ts) and the editor fill these in when the merchant left the
-// field empty; that English is system text, while a merchant's own wording is kept.
+// A value equal to one of these English defaults is system text, shown in the shopper's
+// language; any other value is the merchant's wording and is kept. Today the Worker
+// (routes/portal.ts) fills only aiTitle, aiDisclaimer and faqTitle when empty; the other
+// three are matched for copies of this English already stored in settings.
 const DEFAULT_CONFIG_COPY_KEYS: Record<string, [englishDefault: string, resourceKey: string]> = {
   aboutTitle: ['About us', 'aboutTitle'],
   aiTitle: ['Beauty Assistant', 'aiTitle'],

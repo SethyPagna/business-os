@@ -8,7 +8,7 @@ import {
 } from './support/harness'
 
 /**
- * admin-boot.spec.ts -- the Business OS admin shell comes up signed out.
+ * admin-boot.spec.ts -- the staff admin shell comes up signed out.
  *
  * WHAT THIS PROVES
  *  - The admin root renders the real login CONTROLS (index.html paints the
@@ -43,14 +43,14 @@ test.describe('admin shell boot', () => {
   test('renders the login form, not a blank page', async ({ page }) => {
     // CATCHES: the admin root failing to mount. Asserting on the two real form
     // CONTROLS (and the submit button) rather than on brand text is what makes
-    // it discriminating -- index.html paints "Business OS" before any script
+    // it discriminating -- index.html paints "Leang Cosmetics Admin" before any script
     // runs, so a text assertion passes on a dead page.
     const health = collectPageHealth(page)
     await page.goto(`${ADMIN_ORIGIN}/`, { waitUntil: 'load' })
 
     // Hostname routing: 127.0.0.1 is an admin hostname (src/app/pathRouting.ts).
     await expect(page.locator('html')).toHaveAttribute('data-business-os-initial-route', 'admin')
-    await expect(page).toHaveTitle('Business OS')
+    await expect(page).toHaveTitle('Leang Cosmetics Admin')
 
     await expect(page.locator(USERNAME_FIELD)).toBeVisible()
     await expect(page.locator(PASSWORD_FIELD)).toBeVisible()
@@ -88,10 +88,9 @@ test.describe('admin shell boot', () => {
     //       at renderWithHooks / performConcurrentWorkOnRoot
     //   getStoredUserExpiry (AppContext.tsx:429) has the identical shape.
     //
-    // This was the 1defc523 class on the ADMIN root. The storefront's
-    // readPortalCache (PublicCatalogPage.tsx:381) already fixed it the right way
-    // and its own comment says why: "the store list has to be built INSIDE this
-    // guard".
+    // This was the 1defc523 class on the ADMIN root. The Website Editor's
+    // readPortalCache (CatalogPage.tsx) already does it the right way: the store
+    // list is built INSIDE the guard.
     //
     // Fix: move the global reads inside the try, e.g.
     //     function getStoredUserPayload() {

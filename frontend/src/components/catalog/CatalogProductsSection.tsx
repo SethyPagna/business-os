@@ -577,6 +577,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
           promotionRules={promotionRules}
           copy={copy}
           formatPrice={(usd, khr) => formatPortalPrice(usd, khr, previewConfig)}
+          showPrices={previewConfig.showPrices === true}
           openProductDetail={openProductDetail}
           promoFacet={promoFacet}
           setPromoFacet={setPromoFacet}

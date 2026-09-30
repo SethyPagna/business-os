@@ -13,15 +13,17 @@ export { ADMIN_ORIGIN, STOREFRONT_ORIGIN }
  *    THROWS in Safari private mode and under "block all cookies", and a throw
  *    inside a useRef initializer escaped PublicCatalogRoot's Suspense boundary
  *    (which is not an error boundary) and rendered nothing at all.
- *  - seedStorefrontCache / seedViewerPageSize: the a1d55f12 over-fill glitch
- *    only happens to a RETURNING visitor whose stored page size disagrees with
- *    the store's bootstrap cut, so the specs have to reconstruct that visitor.
+ *  - seedViewerPageSize: the a1d55f12 over-fill glitch only happens to a
+ *    RETURNING visitor whose stored page size disagrees with the store's
+ *    bootstrap cut, so the specs have to reconstruct that visitor.
+ *  - seedStorefrontCache: a visitor from before the storefront dropped its
+ *    saved copy, whose old cover and prices must never paint.
  */
 
 // --- keys, copied from the source that owns them -----------------------------
 /** frontend/src/components/catalog/catalogPagination.tsx */
 export const PAGE_SIZE_STORAGE_KEY = 'business-os-portal-page-size-v1'
-/** frontend/src/components/catalog/PublicCatalogPage.tsx */
+/** The retired storefront cache (publicFirstPaint.ts RETIRED_PORTAL_CACHE_KEY): the page never reads it and removes it on load. */
 export const PORTAL_CACHE_KEY = 'business-os-catalog-portal-cache'
 /** frontend/src/constants.ts STORAGE_KEYS.DEVICE_SETTINGS */
 export const DEVICE_SETTINGS_KEY = 'businessos_device_settings'
@@ -257,12 +259,9 @@ export async function seedStorefrontLanguage(context: BrowserContext, origin: st
 }
 
 /**
- * Reconstruct a RETURNING storefront visitor: a cached bootstrap snapshot, cut
- * at the store's own page size, already in both storages.
- *
- * PublicCatalogPage.readPortalCache reads sessionStorage first, then
- * localStorage, and rejects anything older than 20 minutes -- so `cachedAt` has
- * to be written at page time, not at seed time.
+ * Reconstruct a visitor from before the storefront dropped its saved copy: an
+ * old bootstrap snapshot in both storages, stamped at page time the way the
+ * retired reader wanted it. The storefront must never paint from it.
  */
 export async function seedStorefrontCache(
   context: BrowserContext,

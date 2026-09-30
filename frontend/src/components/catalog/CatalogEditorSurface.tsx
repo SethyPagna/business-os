@@ -15,7 +15,8 @@ import Send from 'lucide-react/dist/esm/icons/send.js'
 import ShoppingBag from 'lucide-react/dist/esm/icons/shopping-bag.js'
 import Sparkles from 'lucide-react/dist/esm/icons/sparkles.js'
 import Upload from 'lucide-react/dist/esm/icons/upload.js'
-import { Suspense, useState, type RefObject } from 'react'
+import { Suspense, useEffect, useMemo, useState, type RefObject } from 'react'
+import { useApp, type AppContextCoreValue } from '../../app/AppContextCore.tsx'
 import { ProductImg } from '../products/shared/primitives'
 import AppSelect, { type AppSelectOption } from '../shared/AppSelect.tsx'
 import { MessengerIcon } from '../shared/BrandIcons.tsx'
@@ -27,14 +28,21 @@ import { PRODUCT_CAUTION_SUGGESTED_TEXT, PRODUCT_NEED_MORE_DETAILS_SUGGESTED_TEX
 import type { createInitialUploadState } from '../../utils/mediaUpload.ts'
 import type { PrivateAiStatus } from './portalPrivateAi.ts'
 import { lazyRetry } from '../../utils/lazyImport.ts'
+import { createEditorText } from './editor/editorText.ts'
 
 const ManageAnnouncementStripModal = lazyRetry(() => import('./ManagePromotionsModal'), 'catalog-editor-announcement-strip-modal')
+const ABOUT_IMAGE_DESCRIPTION_MAX_LENGTH = 200
+const ABOUT_TITLE_MAX_LENGTH = 160
+const ABOUT_TEXT_MAX_LENGTH = 4000
+const ABOUT_BLOCKS_MAX = 30
 
 type CatalogUploadState = ReturnType<typeof createInitialUploadState>
 type DraftPrimitive = string | number | boolean | null | undefined
 type DraftUpdateValue = string | number | boolean | null
 type EditorSectionKey = string
 type EditorSection = readonly [string, EditorSectionKey, string]
+type ColumnRange = readonly [min: number, max: number]
+type EditorColumnLimits = { desktop: ColumnRange; phone: ColumnRange }
 
 type CatalogEditorDraft = Record<string, DraftPrimitive> & {
   business_address?: string
@@ -44,6 +52,8 @@ type CatalogEditorDraft = Record<string, DraftPrimitive> & {
   business_name?: string
   business_phone?: string
   customer_portal_about_content?: string
+  customer_portal_about_image?: string | null
+  customer_portal_about_image_alt?: string
   customer_portal_about_title?: string
   customer_portal_product_caution_default?: string
   customer_portal_product_need_more_details_default?: string
@@ -124,6 +134,19 @@ type CatalogPromoItem = {
   title?: string
 }
 
+type PromoLinkMode = 'none' | 'product' | 'url'
+
+function promoLinkModeOf(item: CatalogPromoItem): PromoLinkMode {
+  return item.linkProductId ? 'product' : (item.linkUrl ? 'url' : 'none')
+}
+
+function linkFieldsOutside(mode: PromoLinkMode): Partial<CatalogPromoItem> {
+  return {
+    ...(mode === 'url' ? {} : { linkUrl: '' }),
+    ...(mode === 'product' ? {} : { linkProductId: '', linkProductName: '' }),
+  }
+}
+
 type CatalogAboutBlock = {
   id: string
   body?: string
@@ -131,6 +154,8 @@ type CatalogAboutBlock = {
   title?: string
   type?: string
 }
+
+type RefusedLink = { field: string; value: string }
 
 type CatalogFaqItem = {
   id: string
@@ -169,6 +194,7 @@ type CatalogPreviewConfig = {
 
 type CatalogEditorSurfaceContext = {
   aboutBlocks: CatalogAboutBlock[]
+  aboutImageRefused: boolean
   activeEditorSection: EditorSectionKey
   // Part 557 slice 8: the display tab bundles portal CONFIG (customer_portal)
   // and the POSTS editor (portal_posts); these gate the two halves so a
@@ -189,8 +215,10 @@ type CatalogEditorSurfaceContext = {
   dragPromoItemId: string | null
   editorDirty: boolean
   editorDraft: CatalogEditorDraft
+  editorLimits: EditorColumnLimits
   editorSaving: boolean
   editorSections: EditorSection[]
+  refusedLink: RefusedLink | null
   faqItems: CatalogFaqItem[]
   generatedPublicUrl: string
   getAboutBlockLabel: (type?: string) => string
@@ -228,6 +256,7 @@ type CatalogEditorSurfaceContext = {
   updateAboutBlock: (id: string, key: keyof CatalogAboutBlock, value: string) => void
   updateFaqItem: (id: string, key: keyof CatalogFaqItem, value: string) => void
   updatePromoItem: (id: string, key: keyof CatalogPromoItem, value: string) => void
+  updatePromoItemFields: (id: string, fields: Partial<CatalogPromoItem>) => void
   uploadAboutBlockMedia: (id: string) => void
   uploadDraftImage: (target: string) => void
   uploadPromoItemMedia: (id: string) => void
@@ -235,6 +264,13 @@ type CatalogEditorSurfaceContext = {
 
 type CatalogEditorSurfaceProps = {
   contextValue: unknown
+}
+
+// A stored count outside the range shows clamped and stays stored until edited; an empty field is an edit in progress.
+function withinColumns(value: DraftPrimitive, [min, max]: ColumnRange): string {
+  const typed = String(value ?? '').trim()
+  const columns = Math.round(Number(typed))
+  return typed && Number.isFinite(columns) ? String(Math.min(max, Math.max(min, columns))) : typed
 }
 
 // Density: a setting's title with its explanation folded into an InfoHint (i)
@@ -302,6 +338,7 @@ export default function CatalogEditorSurface({ contextValue }: CatalogEditorSurf
 function CatalogEditorSurfaceContent() {
   const {
     aboutBlocks,
+    aboutImageRefused,
     activeEditorSection,
     canEditConfig,
     canEditPosts,
@@ -319,8 +356,10 @@ function CatalogEditorSurfaceContent() {
     dragPromoItemId,
     editorDirty,
     editorDraft,
+    editorLimits,
     editorSaving,
     editorSections,
+    refusedLink,
     faqItems,
     generatedPublicUrl,
     getAboutBlockLabel,
@@ -357,11 +396,21 @@ function CatalogEditorSurfaceContent() {
     updateAboutBlock,
     updateFaqItem,
     updatePromoItem,
+    updatePromoItemFields,
     uploadAboutBlockMedia,
     uploadDraftImage,
     uploadPromoItemMedia,
   } = useCatalogPageContext<CatalogEditorSurfaceContext>()
+  const { t, language } = useApp() as Pick<AppContextCoreValue, 't' | 'language'>
+  const ed = useMemo(() => createEditorText(t, language), [t, language])
+  const linkInvalid = ed('web_editor_link_invalid', 'Use a full https:// link or a picture from this site.', 'សូមប្រើតំណ https:// ពេញលេញ ឬរូបភាពពីគេហទំព័រនេះ។')
+  const linkRefused = (field: string, value: unknown) => refusedLink?.field === field && refusedLink.value === String(value ?? '').trim()
+  const aboutBlocksFull = aboutBlocks.length >= ABOUT_BLOCKS_MAX
   const [showAnnouncementStripModal, setShowAnnouncementStripModal] = useState(false)
+  const [promoLinkModes, setPromoLinkModes] = useState<Record<string, PromoLinkMode>>({})
+  useEffect(() => {
+    if (!editorDirty) setPromoLinkModes({})
+  }, [editorDirty])
   // Until the server's stored values arrive, the fields show nothing and are
   // locked, so nothing can be typed over a value the editor has not seen.
   const privateAiLocked = privateAiStatus !== 'loaded'
@@ -373,9 +422,9 @@ function CatalogEditorSurfaceContent() {
   const missingSellerFieldLabels = [
     [editorDraft.business_legal_name, copy('portal_legal_editor_legal_name', 'Registered business name')],
     [editorDraft.business_registration_number, copy('portal_legal_editor_registration', 'Business registration number')],
-    [editorDraft.business_address, copy('address', 'Address')],
-    [editorDraft.business_phone, copy('phone', 'Phone')],
-    [editorDraft.business_email, copy('email', 'Email')],
+    [editorDraft.business_address, ed('web_editor_address', 'Address', 'អាសយដ្ឋាន')],
+    [editorDraft.business_phone, ed('web_editor_phone', 'Phone', 'ទូរស័ព្ទ')],
+    [editorDraft.business_email, ed('web_editor_email', 'Email', 'អ៊ីមែល')],
   ].filter(([value]) => !String(value || '').trim()).map(([, label]) => label)
 
   return (
@@ -387,6 +436,7 @@ function CatalogEditorSurfaceContent() {
               <button
                 key={sectionId}
                 type="button"
+                data-editor-section={sectionKey}
                 className={`whitespace-nowrap rounded-full px-3 py-2 text-xs font-semibold transition ${
                   activeEditorSection === sectionKey
                     ? 'bg-slate-950 text-white shadow-sm dark:bg-white dark:text-slate-950'
@@ -506,11 +556,11 @@ function CatalogEditorSurfaceContent() {
                   name="customer_portal_grid_columns_mobile"
                   className="input"
                   type="number"
-                  min="1"
-                  max="3"
+                  min={editorLimits.phone[0]}
+                  max={editorLimits.phone[1]}
                   step="1"
-                  value={editorDraft.customer_portal_grid_columns_mobile ?? '1'}
-                  onChange={(event) => setDraft('customer_portal_grid_columns_mobile', event.target.value)}
+                  value={withinColumns(editorDraft.customer_portal_grid_columns_mobile, editorLimits.phone)}
+                  onChange={(event) => setDraft('customer_portal_grid_columns_mobile', withinColumns(event.target.value, editorLimits.phone))}
                 />
               </div>
               <div>
@@ -520,11 +570,11 @@ function CatalogEditorSurfaceContent() {
                   name="customer_portal_grid_columns_desktop"
                   className="input"
                   type="number"
-                  min="2"
-                  max="10"
+                  min={editorLimits.desktop[0]}
+                  max={editorLimits.desktop[1]}
                   step="1"
-                  value={editorDraft.customer_portal_grid_columns_desktop ?? '4'}
-                  onChange={(event) => setDraft('customer_portal_grid_columns_desktop', event.target.value)}
+                  value={withinColumns(editorDraft.customer_portal_grid_columns_desktop, editorLimits.desktop)}
+                  onChange={(event) => setDraft('customer_portal_grid_columns_desktop', withinColumns(event.target.value, editorLimits.desktop))}
                 />
               </div>
             </div>
@@ -574,7 +624,7 @@ function CatalogEditorSurfaceContent() {
                     <div className="text-sm font-medium text-slate-700">{copy('recommendedProducts', 'Recommended products')}</div>
                     <InfoHint label={copy('recommendedProducts', 'Recommended products')} text={copy('recommendedProductsHint', 'Select store-picked products that should always receive a recommended badge on the website.')} />
                   </div>
-                  <span className="text-xs font-semibold text-slate-500">{recommendedProductIds.length} {copy('selected', 'selected')}</span>
+                  <span className="text-xs font-semibold text-slate-500">{ed('web_editor_selected_count', '{n} selected', 'បានជ្រើស {n}').replace('{n}', String(recommendedProductIds.length))}</span>
                 </div>
                 {selectedRecommendedProductOptions.length ? (
                   <div className="mt-3 flex flex-wrap gap-2">
@@ -602,7 +652,7 @@ function CatalogEditorSurfaceContent() {
                     setRecommendedProductSearchTerm(recommendedProductSearchInput.trim())
                   }}
                 >
-                  <label htmlFor="portal-recommended-product-search" className="sr-only">{copy('search', 'Search products')}</label>
+                  <label htmlFor="portal-recommended-product-search" className="sr-only">{ed('web_editor_search_products', 'Search products', 'ស្វែងរកផលិតផល')}</label>
                   <div className="flex min-w-0 flex-1 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 dark:border-slate-600 dark:bg-slate-950">
                     <Search className="h-4 w-4 shrink-0 text-slate-400" />
                     <input
@@ -611,13 +661,17 @@ function CatalogEditorSurfaceContent() {
                       className="min-w-0 flex-1 bg-transparent text-sm text-slate-700 outline-none placeholder:text-slate-400 dark:text-slate-100"
                       value={recommendedProductSearchInput}
                       onChange={(event) => setRecommendedProductSearchInput(event.target.value)}
-                      placeholder={copy('searchPlaceholder', 'Search by name, barcode, or SKU')}
+                      placeholder={ed('web_editor_search_products', 'Search products', 'ស្វែងរកផលិតផល')}
                       autoComplete="off"
                     />
                   </div>
-                  <button type="submit" className="btn-secondary inline-flex items-center justify-center gap-2 whitespace-nowrap">
-                    <Search className="h-4 w-4" />
-                    {copy('search', 'Search')}
+                  <button
+                    type="submit"
+                    className="btn-secondary inline-flex min-h-11 min-w-11 items-center justify-center"
+                    aria-label={ed('web_editor_search_products', 'Search products', 'ស្វែងរកផលិតផល')}
+                    title={ed('web_editor_search_products', 'Search products', 'ស្វែងរកផលិតផល')}
+                  >
+                    <Search className="h-4 w-4" aria-hidden="true" />
                   </button>
                 </form>
                 {recommendedProductSearchTerm.trim().length >= 2 ? (
@@ -641,12 +695,12 @@ function CatalogEditorSurfaceContent() {
                     </div>
                   ) : (
                     <div className="mt-3 rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-5 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-400">
-                      {copy('noProducts', 'No products matched the current filters.')}
+                      {ed('web_editor_no_match', 'No match', 'រកមិនឃើញ')}
                     </div>
                   )
                 ) : (
                   <div className="mt-3 rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-5 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-400">
-                    {products.length ? copy('searchPlaceholder', 'Search by product name, description, category, or brand') : copy('noRecommendedProducts', 'No products loaded yet. Save products first, then come back here.')}
+                    {products.length ? ed('web_editor_search_products', 'Search products', 'ស្វែងរកផលិតផល') : copy('noRecommendedProducts', 'No products loaded yet. Save products first, then come back here.')}
                   </div>
                 )}
               </div>
@@ -700,7 +754,10 @@ function CatalogEditorSurfaceContent() {
                 </div>
 
                 <div className="mt-4 space-y-4">
-                  {promoItems.length ? promoItems.map((item) => (
+                  {promoItems.length ? promoItems.map((item, index) => {
+                    const linkMode = promoLinkModes[item.id] ?? promoLinkModeOf(item)
+                    const productList = products as Array<{ id?: unknown; name?: unknown }>
+                    return (
                     <article
                       key={item.id}
                       draggable
@@ -748,62 +805,56 @@ function CatalogEditorSurfaceContent() {
                               <label htmlFor={`portal-promo-link-type-${item.id}`} className="block text-sm font-medium text-slate-700">{copy('promotionLinksTo', 'Button links to')}</label>
                               <AppSelect
                                 id={`portal-promo-link-type-${item.id}`}
-                                value={item.linkProductId ? 'product' : (item.linkUrl ? 'url' : 'none')}
+                                value={linkMode}
                                 buttonClassName="input h-auto w-full"
                                 options={[
                                   { value: 'none', label: copy('promotionLinkNone', 'No button') },
                                   { value: 'product', label: copy('promotionLinkProduct', 'A product') },
                                   { value: 'url', label: copy('promotionLinkUrl', 'A custom link') },
                                 ]}
-                                onChange={(nextType) => {
-                                  if (nextType === 'product') {
-                                    updatePromoItem(item.id, 'linkUrl', '')
-                                  } else if (nextType === 'url') {
-                                    updatePromoItem(item.id, 'linkProductId', '')
-                                    updatePromoItem(item.id, 'linkProductName', '')
-                                  } else {
-                                    updatePromoItem(item.id, 'linkUrl', '')
-                                    updatePromoItem(item.id, 'linkProductId', '')
-                                    updatePromoItem(item.id, 'linkProductName', '')
-                                  }
+                                onChange={(nextValue) => {
+                                  const nextMode = nextValue as PromoLinkMode
+                                  setPromoLinkModes((current) => ({ ...current, [item.id]: nextMode }))
+                                  updatePromoItemFields(item.id, linkFieldsOutside(nextMode))
                                 }}
                               />
                             </div>
                           </div>
-                          {(() => {
-                            const linkType = item.linkProductId ? 'product' : (item.linkUrl ? 'url' : 'none')
-                            if (linkType === 'product') {
-                              const productList = products as Array<{ id?: unknown; name?: unknown }>
-                              return (
-                                <div>
-                                  <label htmlFor={`portal-promo-product-${item.id}`} className="block text-sm font-medium text-slate-700">{copy('promotionProduct', 'Product')}</label>
-                                  <AppSelect
-                                    id={`portal-promo-product-${item.id}`}
-                                    value={item.linkProductId || ''}
-                                    buttonClassName="input h-auto w-full"
-                                    options={[
-                                      { value: '', label: copy('promotionSelectProduct', 'Select a product…') },
-                                      ...productList.map((product) => ({ value: String(product.id), label: String(product.name || '') })),
-                                    ]}
-                                    onChange={(nextId) => {
-                                      const match = productList.find((product) => String(product.id) === nextId)
-                                      updatePromoItem(item.id, 'linkProductId', nextId)
-                                      updatePromoItem(item.id, 'linkProductName', match ? String(match.name || '') : '')
-                                    }}
-                                  />
-                                </div>
-                              )
-                            }
-                            if (linkType === 'url') {
-                              return (
-                                <div>
-                                  <label htmlFor={`portal-promo-link-${item.id}`} className="block text-sm font-medium text-slate-700">{copy('promotionLink', 'Button link')}</label>
-                                  <input id={`portal-promo-link-${item.id}`} className="input" value={item.linkUrl || ''} onChange={(event) => updatePromoItem(item.id, 'linkUrl', event.target.value)} placeholder="https://..." />
-                                </div>
-                              )
-                            }
-                            return null
-                          })()}
+                          <div className="grid gap-3 sm:grid-cols-2">
+                            <div>
+                              <label htmlFor={`portal-promo-product-${item.id}`} className="block text-sm font-medium text-slate-700">{copy('promotionProduct', 'Product')}</label>
+                              <AppSelect
+                                id={`portal-promo-product-${item.id}`}
+                                value={item.linkProductId || ''}
+                                buttonClassName="input h-auto w-full"
+                                options={[
+                                  { value: '', label: copy('promotionSelectProduct', 'Select a product…') },
+                                  ...productList.map((product) => ({ value: String(product.id), label: String(product.name || '') })),
+                                ]}
+                                onChange={(nextId) => {
+                                  const match = productList.find((product) => String(product.id) === nextId)
+                                  updatePromoItemFields(item.id, { linkProductId: nextId, linkProductName: match ? String(match.name || '') : '' })
+                                }}
+                                disabled={linkMode !== 'product'}
+                              />
+                            </div>
+                            <div>
+                              <label htmlFor={`portal-promo-link-${item.id}`} className="block text-sm font-medium text-slate-700">{copy('promotionLink', 'Button link')}</label>
+                              <input
+                                id={`portal-promo-link-${item.id}`}
+                                className="input"
+                                value={item.linkUrl || ''}
+                                onChange={(event) => updatePromoItem(item.id, 'linkUrl', event.target.value)}
+                                placeholder="https://"
+                                disabled={linkMode !== 'url'}
+                                aria-invalid={linkRefused(`promo_items[${index}].linkUrl`, item.linkUrl)}
+                                aria-describedby={linkRefused(`promo_items[${index}].linkUrl`, item.linkUrl) ? `portal-promo-link-${item.id}-error` : undefined}
+                              />
+                              {linkRefused(`promo_items[${index}].linkUrl`, item.linkUrl) ? (
+                                <p id={`portal-promo-link-${item.id}-error`} role="alert" className="mt-1 rounded-2xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{linkInvalid}</p>
+                              ) : null}
+                            </div>
+                          </div>
                         </div>
                         <div className="space-y-3">
                           <ImageField
@@ -816,6 +867,7 @@ function CatalogEditorSurfaceContent() {
                             onChange={(value) => updatePromoItem(item.id, 'mediaUrl', value)}
                             onClear={() => clearPortalMediaTarget(`promo:${item.id}`)}
                             onPreview={() => openPortalImage(item.title || copy('coverImage', 'Cover image'), [item.mediaUrl])}
+                            error={linkRefused(`promo_items[${index}].mediaUrl`, item.mediaUrl) ? linkInvalid : ''}
                             uploadLabel={copy('uploadImage', 'Upload image')}
                             chooseLabel={copy('openFiles', 'Files')}
                             clearLabel={copy('clearImage', 'Clear')}
@@ -830,7 +882,8 @@ function CatalogEditorSurfaceContent() {
                         </div>
                       </div>
                     </article>
-                  )) : (
+                    )
+                  }) : (
                     <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-5 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-900/40 dark:text-slate-400">
                       {copy('noPromotionCards', 'No promotion cards yet. Add one to feature discounts, events, or new arrivals.')}
                     </div>
@@ -882,14 +935,55 @@ function CatalogEditorSurfaceContent() {
               </div>
             </div>
             <div className="mt-4">
-              <label htmlFor="portal-about-title" className="block text-sm font-medium text-slate-700">{copy('aboutTitle', 'About title')}</label>
+              <label htmlFor="portal-about-title" className="block text-sm font-medium text-slate-700">{ed('web_editor_title', 'Title', 'ចំណងជើង')}</label>
               <input
                 id="portal-about-title"
                 name="customer_portal_about_title"
                 className="input"
+                maxLength={ABOUT_TITLE_MAX_LENGTH}
                 value={editorDraft.customer_portal_about_title || ''}
                 onChange={(event) => setDraft('customer_portal_about_title', event.target.value)}
               />
+            </div>
+            <div className="mt-4 grid min-w-0 gap-3">
+              <ImageField
+                label={copy('aboutImage', 'About picture')}
+                value={editorDraft.customer_portal_about_image}
+                fieldId="portal-about-image"
+                allowLink={false}
+                squarePreview
+                infoHint={copy('aboutImageHint', 'Shown whole on the About page. Square pictures fit best.')}
+                error={aboutImageRefused ? copy('aboutImageInvalid', 'The About picture must be a picture uploaded to this site. Upload it again.') : ''}
+                onUpload={() => uploadDraftImage('customer_portal_about_image')}
+                onCancelUpload={() => cancelPortalMediaUpload('customer_portal_about_image')}
+                onChooseExisting={() => openFilePicker('customer_portal_about_image', 'image', copy('aboutImage', 'About picture'))}
+                onClear={() => clearPortalMediaTarget('customer_portal_about_image')}
+                onPreview={() => openPortalImage(copy('aboutImage', 'About picture'), [editorDraft.customer_portal_about_image])}
+                uploadLabel={copy('uploadImage', 'Upload image')}
+                chooseLabel={copy('openFiles', 'Files')}
+                clearLabel={copy('clearImage', 'Clear')}
+                previewLabel={copy('openGallery', 'Open image gallery')}
+                cancelLabel={copy('cancelUpload', 'Cancel upload')}
+                uploadingLabel={copy('uploading', 'Uploading...')}
+                uploadedQueuedLabel={copy('portalUploadQueued', 'Uploaded. Background optimization is running now.')}
+                uploadedReadyLabel={copy('portalUploadReady', 'Uploaded and ready.')}
+                uploadState={getMediaUploadState('customer_portal_about_image')}
+              />
+              <div>
+                <div className="flex items-center gap-1.5">
+                  <label htmlFor="portal-about-image-alt" className="text-sm font-medium text-slate-700">{copy('aboutImageAlt', 'Picture description')}</label>
+                  <InfoHint label={copy('aboutImageAlt', 'Picture description')} text={copy('aboutImageAltHint', 'Short words describing the picture, for people who cannot see it.')} />
+                </div>
+                <input
+                  id="portal-about-image-alt"
+                  name="customer_portal_about_image_alt"
+                  className="input"
+                  autoComplete="off"
+                  maxLength={ABOUT_IMAGE_DESCRIPTION_MAX_LENGTH}
+                  value={editorDraft.customer_portal_about_image_alt || ''}
+                  onChange={(event) => setDraft('customer_portal_about_image_alt', event.target.value)}
+                />
+              </div>
             </div>
             <div className="mt-4">
               <div className="flex items-center gap-1.5">
@@ -900,6 +994,7 @@ function CatalogEditorSurfaceContent() {
                 id="portal-about-content"
                 name="customer_portal_about_content"
                 className="input resize-none"
+                maxLength={ABOUT_TEXT_MAX_LENGTH}
                 rows={4}
                 value={editorDraft.customer_portal_about_content || ''}
                 onChange={(event) => setDraft('customer_portal_about_content', event.target.value)}
@@ -909,12 +1004,12 @@ function CatalogEditorSurfaceContent() {
               </p>
             </div>
             <div className="mt-5 rounded-2xl border border-slate-200 bg-white p-4">
-              <HintLabel className="text-sm font-semibold text-slate-900" title={copy('productDefaultsTitle', 'Product detail defaults')} hint={copy('productDefaultsHint', 'Shown on every product\'s detail view. A product\'s own Caution text (typed into its description) takes priority over this default; Need More Details always shows when set here.')} />
+              <HintLabel className="text-sm font-semibold text-slate-900" title={ed('web_editor_group_product_page', 'Product page', 'ទំព័រផលិតផល')} hint={ed('web_editor_product_page_hint', 'Shown on every product page. A product\'s own caution text wins.', 'បង្ហាញលើគ្រប់ទំព័រផលិតផល។ អត្ថបទប្រុងប្រយ័ត្នរបស់ផលិតផលផ្ទាល់ មានអាទិភាពជាង។')} />
               <div className="mt-3 grid min-w-0 gap-3 lg:grid-cols-2">
                 <SuggestedTextField
                   id="portal-product-caution-default"
                   settingKey="customer_portal_product_caution_default"
-                  label={copy('productCaution', 'Caution')}
+                  label={ed('web_editor_caution', 'Caution', 'ការប្រុងប្រយ័ត្ន')}
                   suggestedText={PRODUCT_CAUTION_SUGGESTED_TEXT}
                   applyLabel={copy('productDefaultsUseSuggested', 'Use suggested text')}
                   value={editorDraft.customer_portal_product_caution_default || ''}
@@ -923,7 +1018,7 @@ function CatalogEditorSurfaceContent() {
                 <SuggestedTextField
                   id="portal-product-need-more-details-default"
                   settingKey="customer_portal_product_need_more_details_default"
-                  label={copy('productNeedMoreDetails', 'Need More Details')}
+                  label={ed('web_editor_more_details', 'Need more details', 'ត្រូវការព័ត៌មានបន្ថែម')}
                   suggestedText={PRODUCT_NEED_MORE_DETAILS_SUGGESTED_TEXT}
                   applyLabel={copy('productDefaultsUseSuggested', 'Use suggested text')}
                   value={editorDraft.customer_portal_product_need_more_details_default || ''}
@@ -937,19 +1032,22 @@ function CatalogEditorSurfaceContent() {
                   <HintLabel className="text-sm font-semibold text-slate-900" title={copy('aboutBlocks', 'About blocks')} hint={copy('aboutBlocksHint', 'Add text, image, and video sections, then move them into the order you want customers to see.')} />
                 </div>
 
-                <div className="flex flex-wrap gap-2">
-                  <button type="button" className="btn-secondary inline-flex items-center gap-1.5 px-3 py-1.5 text-xs sm:text-sm" onClick={() => addAboutBlock('text')}>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button type="button" className="btn-secondary inline-flex items-center gap-1.5 px-3 py-1.5 text-xs sm:text-sm disabled:cursor-not-allowed disabled:opacity-50" disabled={aboutBlocksFull} aria-describedby={aboutBlocksFull ? 'portal-about-blocks-max' : undefined} onClick={() => addAboutBlock('text')}>
                     <Plus className="h-4 w-4" />
                     {copy('addTextBlock', 'Text')}
                   </button>
-                  <button type="button" className="btn-secondary inline-flex items-center gap-1.5 px-3 py-1.5 text-xs sm:text-sm" onClick={() => addAboutBlock('image')}>
+                  <button type="button" className="btn-secondary inline-flex items-center gap-1.5 px-3 py-1.5 text-xs sm:text-sm disabled:cursor-not-allowed disabled:opacity-50" disabled={aboutBlocksFull} aria-describedby={aboutBlocksFull ? 'portal-about-blocks-max' : undefined} onClick={() => addAboutBlock('image')}>
                     <Images className="h-4 w-4" />
                     {copy('addImageBlock', 'Image')}
                   </button>
-                  <button type="button" className="btn-secondary inline-flex items-center gap-1.5 px-3 py-1.5 text-xs sm:text-sm" onClick={() => addAboutBlock('video')}>
+                  <button type="button" className="btn-secondary inline-flex items-center gap-1.5 px-3 py-1.5 text-xs sm:text-sm disabled:cursor-not-allowed disabled:opacity-50" disabled={aboutBlocksFull} aria-describedby={aboutBlocksFull ? 'portal-about-blocks-max' : undefined} onClick={() => addAboutBlock('video')}>
                     <Plus className="h-4 w-4" />
                     {copy('addVideoBlock', 'Video')}
                   </button>
+                  {aboutBlocksFull ? (
+                    <p id="portal-about-blocks-max" role="status" className="text-xs font-medium text-slate-500">{ed('web_editor_blocks_max', 'Up to 30 blocks.', 'រហូតដល់ ៣០ ប្លុក។')}</p>
+                  ) : null}
                 </div>
               </div>
               <div className="mt-4 space-y-4">
@@ -983,11 +1081,11 @@ function CatalogEditorSurfaceContent() {
                       <div className="space-y-4">
                         <div>
                           <label htmlFor={`portal-about-block-title-${block.id}`} className="block text-sm font-medium text-slate-700">{copy('sectionTitle', 'Section title')}</label>
-                          <input id={`portal-about-block-title-${block.id}`} className="input" value={block.title || ''} onChange={(event) => updateAboutBlock(block.id, 'title', event.target.value)} />
+                          <input id={`portal-about-block-title-${block.id}`} className="input" maxLength={ABOUT_TITLE_MAX_LENGTH} value={block.title || ''} onChange={(event) => updateAboutBlock(block.id, 'title', event.target.value)} />
                         </div>
                         <div>
                           <label htmlFor={`portal-about-block-body-${block.id}`} className="block text-sm font-medium text-slate-700">{block.type === 'text' ? copy('textContent', 'Text content') : copy('captionDescription', 'Caption / description')}</label>
-                          <textarea id={`portal-about-block-body-${block.id}`} className="input resize-none" rows={block.type === 'text' ? 5 : 3} value={block.body || ''} onChange={(event) => updateAboutBlock(block.id, 'body', event.target.value)} />
+                          <textarea id={`portal-about-block-body-${block.id}`} className="input resize-none" rows={block.type === 'text' ? 5 : 3} maxLength={ABOUT_TEXT_MAX_LENGTH} value={block.body || ''} onChange={(event) => updateAboutBlock(block.id, 'body', event.target.value)} />
                         </div>
                       </div>
                       <div className="space-y-3">
@@ -998,7 +1096,10 @@ function CatalogEditorSurfaceContent() {
                           return (
                             <>
                         <label htmlFor={`portal-about-block-media-${block.id}`} className="block text-sm font-medium text-slate-700">{block.type === 'video' ? copy('videoUrl', 'Video URL') : copy('imageUrl', 'Image URL')}</label>
-                        <input id={`portal-about-block-media-${block.id}`} className="input" value={block.mediaUrl || ''} placeholder={block.type === 'video' ? 'https://...' : 'https://... or upload below'} onChange={(event) => updateAboutBlock(block.id, 'mediaUrl', event.target.value)} />
+                        <input id={`portal-about-block-media-${block.id}`} className="input" value={block.mediaUrl || ''} placeholder={block.type === 'video' ? 'https://...' : 'https://... or upload below'} aria-invalid={linkRefused(`about_blocks[${index}].mediaUrl`, block.mediaUrl)} aria-describedby={linkRefused(`about_blocks[${index}].mediaUrl`, block.mediaUrl) ? `portal-about-block-media-${block.id}-error` : undefined} onChange={(event) => updateAboutBlock(block.id, 'mediaUrl', event.target.value)} />
+                        {linkRefused(`about_blocks[${index}].mediaUrl`, block.mediaUrl) ? (
+                          <p id={`portal-about-block-media-${block.id}-error`} role="alert" className="rounded-2xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{linkInvalid}</p>
+                        ) : null}
                         <div className="flex flex-wrap gap-2">
                           <button type="button" className="btn-secondary text-sm" onClick={() => uploadAboutBlockMedia(block.id)} disabled={blockUpload.status === 'uploading'}>
                             <Upload className="mr-2 inline h-4 w-4" />
@@ -1009,11 +1110,11 @@ function CatalogEditorSurfaceContent() {
                               {copy('cancelUpload', 'Cancel upload')}
                             </button>
                           ) : null}
-                          <button type="button" className="btn-secondary text-sm" onClick={() => openFilePicker(`about:${block.id}`, block.type === 'video' ? 'video' : 'image', block.title || copy('about', 'About'))} disabled={blockUpload.status === 'uploading'}>
+                          <button type="button" className="btn-secondary text-sm" onClick={() => openFilePicker(`about:${block.id}`, block.type === 'video' ? 'video' : 'image', block.title || ed('web_editor_section_about', 'About', 'អំពី'))} disabled={blockUpload.status === 'uploading'}>
                             {copy('openFiles', 'Files')}
                           </button>
                           {block.mediaUrl && block.type !== 'video' ? (
-                            <button type="button" className="btn-secondary text-sm" onClick={() => openPortalImage(block.title || copy('about', 'About'), [block.mediaUrl])} disabled={blockUpload.status === 'uploading'}>
+                            <button type="button" className="btn-secondary text-sm" onClick={() => openPortalImage(block.title || ed('web_editor_section_about', 'About', 'អំពី'), [block.mediaUrl])} disabled={blockUpload.status === 'uploading'}>
                               <Eye className="mr-2 inline h-4 w-4" />
                               {copy('openGallery', 'Open image gallery')}
                             </button>
@@ -1052,8 +1153,8 @@ function CatalogEditorSurfaceContent() {
                             {block.type === 'video' ? (
                               <video src={block.mediaUrl} controls preload="metadata" className="max-h-56 w-full rounded-2xl bg-white object-contain" />
                             ) : (
-                              <button type="button" className="flex w-full items-center justify-center rounded-2xl bg-slate-50 p-3" onClick={() => openPortalImage(block.title || copy('about', 'About'), [block.mediaUrl])}>
-                                <img src={block.mediaUrl} alt={block.title || copy('about', 'About')} className="max-h-56 max-w-full object-contain" />
+                              <button type="button" className="flex w-full items-center justify-center rounded-2xl bg-slate-50 p-3" onClick={() => openPortalImage(block.title || ed('web_editor_section_about', 'About', 'អំពី'), [block.mediaUrl])}>
+                                <img src={block.mediaUrl} alt={block.title || ed('web_editor_section_about', 'About', 'អំពី')} className="max-h-56 max-w-full object-contain" />
                               </button>
                             )}
                           </div>
@@ -1077,7 +1178,7 @@ function CatalogEditorSurfaceContent() {
             <div className="rounded-2xl border border-slate-200 bg-white p-4">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div>
-                  <HintLabel className="text-sm font-semibold text-slate-900" title={copy('faqSettings', 'FAQ settings')} hint={copy('faqHint', 'Add your most common customer questions here. Customers can open each answer one by one.')} />
+                  <div className="text-sm font-semibold text-slate-900">{copy('faqSettings', 'FAQ settings')}</div>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <button type="button" className="btn-secondary inline-flex items-center gap-1.5 px-3 py-1.5 text-xs sm:text-sm" onClick={addFaqStarterSet}>
@@ -1100,7 +1201,7 @@ function CatalogEditorSurfaceContent() {
                   <input type="checkbox" checked={!!editorDraft.customer_portal_show_faq} onChange={(event) => setDraft('customer_portal_show_faq', event.target.checked)} />
                 </label>
                 <div className="min-w-0">
-                  <label htmlFor="portal-faq-title" className="block text-sm font-medium text-slate-700">{copy('faqTitle', 'FAQ title')}</label>
+                  <label htmlFor="portal-faq-title" className="block text-sm font-medium text-slate-700">{ed('web_editor_title', 'Title', 'ចំណងជើង')}</label>
                   <input id="portal-faq-title" className="input mt-1" value={editorDraft.customer_portal_faq_title || ''} onChange={(event) => setDraft('customer_portal_faq_title', event.target.value)} />
                 </div>
                 <div className="space-y-3 sm:col-span-2">
@@ -1123,7 +1224,7 @@ function CatalogEditorSurfaceContent() {
                     </article>
                   )) : (
                     <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-6 text-sm text-slate-500">
-                      {copy('faqHint', 'Add your most common customer questions here. Customers can open each answer one by one.')}
+                      {ed('web_editor_no_questions', 'No questions yet', 'មិនទាន់មានសំណួរ')}
                     </div>
                   )}
                 </div>
@@ -1227,7 +1328,10 @@ function CatalogEditorSurfaceContent() {
             </div>
             <label className="mt-3 flex min-h-11 items-center justify-between gap-4 rounded-xl border border-slate-200 bg-white px-3 py-2.5">
               <div>
-                <HintLabel title={copy('translateWidget', 'Enable public translate widget')} hint={copy('translateWidgetHint', 'Public customers switch English/Khmer instantly.')} />
+                <HintLabel
+                  title={ed('web_editor_lang_switch', 'Show the English/Khmer switch', 'បង្ហាញប៊ូតុងប្ដូរភាសា អង់គ្លេស/ខ្មែរ')}
+                  hint={ed('web_editor_lang_switch_hint', 'Only shows or hides the English/Khmer language switch on the website.', 'គ្រាន់តែបង្ហាញ ឬលាក់ប៊ូតុងប្ដូរភាសា អង់គ្លេស/ខ្មែរ នៅលើគេហទំព័រ។')}
+                />
               </div>
               <input id="portal-translate-widget-enabled" name="customer_portal_translate_widget_enabled" type="checkbox" checked={!!editorDraft.customer_portal_translate_widget_enabled} onChange={(event) => setDraft('customer_portal_translate_widget_enabled', event.target.checked)} />
             </label>
@@ -1285,17 +1389,17 @@ function CatalogEditorSurfaceContent() {
             </div>
             <div className="grid min-w-0 gap-3 sm:grid-cols-2">
               <div>
-                <label htmlFor="portal-business-phone" className="block text-sm font-medium text-slate-700">{copy('phone', 'Phone')}</label>
+                <label htmlFor="portal-business-phone" className="block text-sm font-medium text-slate-700">{ed('web_editor_phone', 'Phone', 'ទូរស័ព្ទ')}</label>
                 <input id="portal-business-phone" name="business_phone" autoComplete="tel" className="input" value={editorDraft.business_phone || ''} onChange={(event) => setDraft('business_phone', event.target.value)} />
               </div>
               <div>
-                <label htmlFor="portal-business-email" className="block text-sm font-medium text-slate-700">{copy('email', 'Email')}</label>
+                <label htmlFor="portal-business-email" className="block text-sm font-medium text-slate-700">{ed('web_editor_email', 'Email', 'អ៊ីមែល')}</label>
                 <input id="portal-business-email" name="business_email" autoComplete="email" className="input" value={editorDraft.business_email || ''} onChange={(event) => setDraft('business_email', event.target.value)} />
               </div>
             </div>
             <div className="grid min-w-0 gap-3 lg:grid-cols-2">
               <div>
-                <label htmlFor="portal-business-address" className="block text-sm font-medium text-slate-700">{copy('address', 'Address')}</label>
+                <label htmlFor="portal-business-address" className="block text-sm font-medium text-slate-700">{ed('web_editor_address', 'Address', 'អាសយដ្ឋាន')}</label>
                 <textarea id="portal-business-address" name="business_address" autoComplete="street-address" className="input resize-none" rows={2} value={editorDraft.business_address || ''} onChange={(event) => setDraft('business_address', event.target.value)} />
               </div>
               <div>
@@ -1389,7 +1493,7 @@ function CatalogEditorSurfaceContent() {
                     buttonClassName="h-10 w-full"
                     menuClassName="min-w-[12rem]"
                     options={[
-                      { value: 'auto', label: copy('followApp', 'English (default source)') },
+                      { value: 'auto', label: ed('web_editor_lang_default', 'English (default)', 'អង់គ្លេស (លំនាំដើម)') },
                       { value: 'en', label: copy('english', 'English') },
                       { value: 'km', label: copy('khmer', 'Khmer') },
                     ]}
@@ -1398,22 +1502,22 @@ function CatalogEditorSurfaceContent() {
 
                 <div data-testid="portal-social-links-grid" className="grid min-w-0 gap-3 sm:grid-cols-2 2xl:grid-cols-4">
                   <div className="space-y-2">
-                    <label htmlFor="portal-website" className="flex items-center gap-1.5 text-sm font-medium text-slate-700"><Globe className="h-3.5 w-3.5 text-slate-500" />{copy('website', 'Website')}</label>
+                    <label htmlFor="portal-website" className="flex items-center gap-1.5 text-sm font-medium text-slate-700"><Globe className="h-3.5 w-3.5 text-slate-500" />{ed('web_editor_website', 'Website', 'គេហទំព័រ')}</label>
                     <input id="portal-website" name="customer_portal_website" autoComplete="url" className="input" value={editorDraft.customer_portal_website || ''} onChange={(event) => setDraft('customer_portal_website', event.target.value)} />
                     <input id="portal-website-label" name="customer_portal_website_label" autoComplete="off" className="input" placeholder={copy('socialLabelPlaceholder', 'Optional label shown to customers')} value={editorDraft.customer_portal_website_label || ''} onChange={(event) => setDraft('customer_portal_website_label', event.target.value)} />
                   </div>
                   <div className="space-y-2">
-                    <label htmlFor="portal-facebook" className="flex items-center gap-1.5 text-sm font-medium text-slate-700"><Facebook className="h-3.5 w-3.5 text-[#1877F2]" />{copy('facebook', 'Facebook')}</label>
+                    <label htmlFor="portal-facebook" className="flex items-center gap-1.5 text-sm font-medium text-slate-700"><Facebook className="h-3.5 w-3.5 text-[#1877F2]" />{ed('web_editor_facebook', 'Facebook', 'Facebook')}</label>
                     <input id="portal-facebook" name="customer_portal_facebook" autoComplete="url" className="input" value={editorDraft.customer_portal_facebook || ''} onChange={(event) => setDraft('customer_portal_facebook', event.target.value)} />
                     <input id="portal-facebook-label" name="customer_portal_facebook_label" autoComplete="off" className="input" placeholder={copy('socialLabelPlaceholder', 'Optional label shown to customers')} value={editorDraft.customer_portal_facebook_label || ''} onChange={(event) => setDraft('customer_portal_facebook_label', event.target.value)} />
                   </div>
                   <div className="space-y-2">
-                    <label htmlFor="portal-instagram" className="flex items-center gap-1.5 text-sm font-medium text-slate-700"><Instagram className="h-3.5 w-3.5 text-[#E1306C]" />{copy('instagram', 'Instagram')}</label>
+                    <label htmlFor="portal-instagram" className="flex items-center gap-1.5 text-sm font-medium text-slate-700"><Instagram className="h-3.5 w-3.5 text-[#E1306C]" />{ed('web_editor_instagram', 'Instagram', 'Instagram')}</label>
                     <input id="portal-instagram" name="customer_portal_instagram" autoComplete="url" className="input" value={editorDraft.customer_portal_instagram || ''} onChange={(event) => setDraft('customer_portal_instagram', event.target.value)} />
                     <input id="portal-instagram-label" name="customer_portal_instagram_label" autoComplete="off" className="input" placeholder={copy('socialLabelPlaceholder', 'Optional label shown to customers')} value={editorDraft.customer_portal_instagram_label || ''} onChange={(event) => setDraft('customer_portal_instagram_label', event.target.value)} />
                   </div>
                   <div className="space-y-2">
-                    <label htmlFor="portal-telegram" className="flex items-center gap-1.5 text-sm font-medium text-slate-700"><Send className="h-3.5 w-3.5 text-[#26A5E4]" />{copy('telegram', 'Telegram')}</label>
+                    <label htmlFor="portal-telegram" className="flex items-center gap-1.5 text-sm font-medium text-slate-700"><Send className="h-3.5 w-3.5 text-[#26A5E4]" />{ed('web_editor_telegram', 'Telegram', 'Telegram')}</label>
                     <input id="portal-telegram" name="customer_portal_telegram" autoComplete="url" className="input" value={editorDraft.customer_portal_telegram || ''} onChange={(event) => setDraft('customer_portal_telegram', event.target.value)} />
                     <input id="portal-telegram-label" name="customer_portal_telegram_label" autoComplete="off" className="input" placeholder={copy('socialLabelPlaceholder', 'Optional label shown to customers')} value={editorDraft.customer_portal_telegram_label || ''} onChange={(event) => setDraft('customer_portal_telegram_label', event.target.value)} />
                   </div>
@@ -1457,26 +1561,26 @@ function CatalogEditorSurfaceContent() {
                       title={copy('contactChannelsGuideTitle', 'Contact us channels')}
                       triggerLabel={copy('contactChannelsGuideTitle', 'Contact us channels')}
                       entries={[
-                        { icon: <MessengerIcon className="h-4 w-4" />, label: copy('messenger', 'Messenger'), description: copy('contactGuideMessenger', 'Username, @username, or full m.me / facebook.com link. Blank uses the Facebook link above.') },
-                        { icon: <Send className="h-4 w-4" />, label: copy('telegram', 'Telegram'), description: copy('contactGuideTelegram', 'Username, @username, or full t.me link, including group/channel invites. Blank uses the Telegram link above.') },
-                        { icon: <Instagram className="h-4 w-4" />, label: copy('instagram', 'Instagram'), description: copy('contactGuideInstagram', 'Username, @username, or full instagram.com / ig.me link. Opens a direct message, not the profile. Blank uses the Instagram link above.') },
-                        { icon: <PhoneCall className="h-4 w-4" />, label: copy('call', 'Call'), description: copy('contactGuideCall', 'Phone number to dial. Blank uses your business phone.') },
+                        { icon: <MessengerIcon className="h-4 w-4" />, label: ed('web_editor_messenger', 'Messenger', 'Messenger'), description: copy('contactGuideMessenger', 'Username, @username, or full m.me / facebook.com link. Blank uses the Facebook link above.') },
+                        { icon: <Send className="h-4 w-4" />, label: ed('web_editor_telegram', 'Telegram', 'Telegram'), description: copy('contactGuideTelegram', 'Username, @username, or full t.me link, including group/channel invites. Blank uses the Telegram link above.') },
+                        { icon: <Instagram className="h-4 w-4" />, label: ed('web_editor_instagram', 'Instagram', 'Instagram'), description: copy('contactGuideInstagram', 'Username, @username, or full instagram.com / ig.me link. Opens a direct message, not the profile. Blank uses the Instagram link above.') },
+                        { icon: <PhoneCall className="h-4 w-4" />, label: ed('web_editor_call', 'Call', 'ហៅទូរស័ព្ទ'), description: copy('contactGuideCall', 'Phone number to dial. Blank uses your business phone.') },
                       ]}
                     />
                   </div>
                   <div data-testid="portal-contact-channel-grid" className="grid min-w-0 gap-3 sm:grid-cols-2 2xl:grid-cols-3">
                     <div className="space-y-2">
-                      <label htmlFor="portal-contact-messenger" className="flex items-center gap-1.5 text-sm font-medium text-slate-700"><MessengerIcon className="h-3.5 w-3.5 text-amber-600" />{copy('messenger', 'Messenger')}</label>
+                      <label htmlFor="portal-contact-messenger" className="flex items-center gap-1.5 text-sm font-medium text-slate-700"><MessengerIcon className="h-3.5 w-3.5 text-amber-600" />{ed('web_editor_messenger', 'Messenger', 'Messenger')}</label>
                       <input id="portal-contact-messenger" name="customer_portal_contact_messenger" autoComplete="off" className="input" placeholder="username or m.me/username" value={editorDraft.customer_portal_contact_messenger || ''} onChange={(event) => setDraft('customer_portal_contact_messenger', event.target.value)} />
                       <input id="portal-contact-messenger-label" name="customer_portal_contact_messenger_label" autoComplete="off" className="input" placeholder={copy('socialLabelPlaceholder', 'Optional label shown to customers')} value={editorDraft.customer_portal_contact_messenger_label || ''} onChange={(event) => setDraft('customer_portal_contact_messenger_label', event.target.value)} />
                     </div>
                     <div className="space-y-2">
-                      <label htmlFor="portal-contact-telegram" className="flex items-center gap-1.5 text-sm font-medium text-slate-700"><Send className="h-3.5 w-3.5 text-[#26A5E4]" />{copy('telegram', 'Telegram')}</label>
+                      <label htmlFor="portal-contact-telegram" className="flex items-center gap-1.5 text-sm font-medium text-slate-700"><Send className="h-3.5 w-3.5 text-[#26A5E4]" />{ed('web_editor_telegram', 'Telegram', 'Telegram')}</label>
                       <input id="portal-contact-telegram" name="customer_portal_contact_telegram" autoComplete="off" className="input" placeholder="username or t.me/username" value={editorDraft.customer_portal_contact_telegram || ''} onChange={(event) => setDraft('customer_portal_contact_telegram', event.target.value)} />
                       <input id="portal-contact-telegram-label" name="customer_portal_contact_telegram_label" autoComplete="off" className="input" placeholder={copy('socialLabelPlaceholder', 'Optional label shown to customers')} value={editorDraft.customer_portal_contact_telegram_label || ''} onChange={(event) => setDraft('customer_portal_contact_telegram_label', event.target.value)} />
                     </div>
                     <div className="space-y-2">
-                      <label htmlFor="portal-contact-instagram" className="flex items-center gap-1.5 text-sm font-medium text-slate-700"><Instagram className="h-3.5 w-3.5 text-[#E1306C]" />{copy('instagram', 'Instagram')}</label>
+                      <label htmlFor="portal-contact-instagram" className="flex items-center gap-1.5 text-sm font-medium text-slate-700"><Instagram className="h-3.5 w-3.5 text-[#E1306C]" />{ed('web_editor_instagram', 'Instagram', 'Instagram')}</label>
                       <input id="portal-contact-instagram" name="customer_portal_contact_instagram" autoComplete="off" className="input" placeholder="username or instagram.com/username" value={editorDraft.customer_portal_contact_instagram || ''} onChange={(event) => setDraft('customer_portal_contact_instagram', event.target.value)} />
                       <input id="portal-contact-instagram-label" name="customer_portal_contact_instagram_label" autoComplete="off" className="input" placeholder={copy('socialLabelPlaceholder', 'Optional label shown to customers')} value={editorDraft.customer_portal_contact_instagram_label || ''} onChange={(event) => setDraft('customer_portal_contact_instagram_label', event.target.value)} />
                     </div>
@@ -1486,7 +1590,7 @@ function CatalogEditorSurfaceContent() {
                       <input id="portal-contact-whatsapp-label" name="customer_portal_contact_whatsapp_label" autoComplete="off" className="input" placeholder={copy('socialLabelPlaceholder', 'Optional label shown to customers')} value={editorDraft.customer_portal_contact_whatsapp_label || ''} onChange={(event) => setDraft('customer_portal_contact_whatsapp_label', event.target.value)} />
                     </div>
                     <div className="space-y-2">
-                      <label htmlFor="portal-contact-phone" className="flex items-center gap-1.5 text-sm font-medium text-slate-700"><PhoneCall className="h-3.5 w-3.5 text-emerald-600" />{copy('call', 'Call')}</label>
+                      <label htmlFor="portal-contact-phone" className="flex items-center gap-1.5 text-sm font-medium text-slate-700"><PhoneCall className="h-3.5 w-3.5 text-emerald-600" />{ed('web_editor_call', 'Call', 'ហៅទូរស័ព្ទ')}</label>
                       <input id="portal-contact-phone" name="customer_portal_contact_phone" autoComplete="off" className="input" placeholder="phone number" value={editorDraft.customer_portal_contact_phone || editorDraft.business_phone || ''} onChange={(event) => setDraft('customer_portal_contact_phone', event.target.value)} />
                       <input id="portal-contact-phone-label" name="customer_portal_contact_phone_label" autoComplete="off" className="input" placeholder={copy('socialLabelPlaceholder', 'Optional label shown to customers')} value={editorDraft.customer_portal_contact_phone_label || ''} onChange={(event) => setDraft('customer_portal_contact_phone_label', event.target.value)} />
                     </div>
@@ -1544,15 +1648,15 @@ function CatalogEditorSurfaceContent() {
 
           <div id="portal-section-media" className={activeEditorSection === 'media' ? 'grid min-w-0 gap-4 2xl:grid-cols-2' : 'hidden'}>
             <ImageField
-              label={copy('logoImage', 'Logo image')}
+              label={ed('web_editor_logo', 'Logo', 'រូបសញ្ញា')}
               value={editorDraft.customer_portal_logo_image}
               fieldId="portal-logo-image"
               onUpload={() => uploadDraftImage('customer_portal_logo_image')}
               onCancelUpload={() => cancelPortalMediaUpload('customer_portal_logo_image')}
-              onChooseExisting={() => openFilePicker('customer_portal_logo_image', 'image', copy('logoImage', 'Logo image'))}
+              onChooseExisting={() => openFilePicker('customer_portal_logo_image', 'image', ed('web_editor_logo', 'Logo', 'រូបសញ្ញា'))}
               onChange={(value) => setDraft('customer_portal_logo_image', value)}
               onClear={() => clearPortalMediaTarget('customer_portal_logo_image')}
-              onPreview={() => openPortalImage(copy('logoImage', 'Logo image'), [editorDraft.customer_portal_logo_image])}
+              onPreview={() => openPortalImage(ed('web_editor_logo', 'Logo', 'រូបសញ្ញា'), [editorDraft.customer_portal_logo_image])}
               uploadLabel={copy('uploadImage', 'Upload image')}
               chooseLabel={copy('openFiles', 'Files')}
               clearLabel={copy('clearImage', 'Clear')}
@@ -1563,6 +1667,7 @@ function CatalogEditorSurfaceContent() {
               uploadedQueuedLabel={copy('portalUploadQueued', 'Uploaded. Background optimization is running now.')}
               uploadedReadyLabel={copy('portalUploadReady', 'Uploaded and ready.')}
               uploadState={getMediaUploadState('customer_portal_logo_image')}
+              error={linkRefused('customer_portal_logo_image', editorDraft.customer_portal_logo_image) ? linkInvalid : ''}
             />
             {/* The portal editor no longer sets a favicon / browser-tab
                 icon: that is DEFAULT app branding now, not per-portal (see
@@ -1671,7 +1776,7 @@ function CatalogEditorSurfaceContent() {
                       >
                         <img
                           src={editorDraft.customer_portal_logo_image}
-                          alt={copy('logoImage', 'Logo image')}
+                          alt={ed('web_editor_logo', 'Logo', 'រូបសញ្ញា')}
                           loading="lazy"
                           decoding="async"
                           className="h-full w-full"
@@ -1684,8 +1789,8 @@ function CatalogEditorSurfaceContent() {
                         />
                       </div>
                       <div className="min-w-0">
-                        <div className="truncate text-sm font-semibold">{editorDraft.business_name || previewConfig.businessName || 'Business OS'}</div>
-                        <div className="mt-1 text-xs text-white/80">{editorDraft.customer_portal_business_tagline || previewConfig.businessTagline || 'Preview the circular logo frame on the live header.'}</div>
+                        <div className="truncate text-sm font-semibold">{editorDraft.business_name || previewConfig.businessName || ed('web_editor_shop_name', 'Shop name', 'ឈ្មោះហាង')}</div>
+                        <div className="mt-1 text-xs text-white/80">{editorDraft.customer_portal_business_tagline || previewConfig.businessTagline}</div>
                       </div>
                     </div>
                   </div>
@@ -1713,10 +1818,11 @@ function CatalogEditorSurfaceContent() {
               uploadedQueuedLabel={copy('portalUploadQueued', 'Uploaded. Background optimization is running now.')}
               uploadedReadyLabel={copy('portalUploadReady', 'Uploaded and ready.')}
               uploadState={getMediaUploadState('customer_portal_cover_image')}
+              error={linkRefused('customer_portal_cover_image', editorDraft.customer_portal_cover_image) ? linkInvalid : ''}
             />
             {editorDraft.customer_portal_cover_image ? (
               <div className="xl:col-span-2 min-w-0 rounded-2xl border border-slate-200 bg-white p-4">
-                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">{copy('coverPreview', 'Cover preview')}</div>
+                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">{ed('web_editor_cover_preview', 'Cover preview', 'មើលរូបភាពគម្របជាមុន')}</div>
                 {/* Mirrors the same gradient-overlay-over-cover-image compositing the
                     live hero banner uses (CatalogSecondaryTabs.tsx's bannerBackground),
                     so this card shows what the person will actually see on save instead
@@ -1738,8 +1844,8 @@ function CatalogEditorSurfaceContent() {
                     }}
                   />
                   <div className="relative min-w-0">
-                    <div className="truncate text-sm font-semibold">{editorDraft.business_name || previewConfig.businessName || 'Business OS'}</div>
-                    <div className="mt-1 truncate text-xs text-white/80">{editorDraft.customer_portal_business_tagline || previewConfig.businessTagline || 'Preview the hero banner on the live header.'}</div>
+                    <div className="truncate text-sm font-semibold">{editorDraft.business_name || previewConfig.businessName || ed('web_editor_shop_name', 'Shop name', 'ឈ្មោះហាង')}</div>
+                    <div className="mt-1 truncate text-xs text-white/80">{editorDraft.customer_portal_business_tagline || previewConfig.businessTagline}</div>
                   </div>
                 </div>
               </div>

@@ -105,8 +105,8 @@ await runTest('every Users page path that writes a user or a role maps the code'
     role: between(users, 'const handleSaveRole = async', 'const handleDeleteRole = '),
   }
   const paths: Array<[keyof typeof surfaces, string, string]> = [
-    ['user', 'save: a { success: false } result', "notify(lastAdminRequiredMessage(result, tr) || result.error || 'Failed to save user', 'error')"],
-    ['user', 'save: a thrown ApiError', "notify(lastAdminRequiredMessage(error, tr) || getErrorMessage(error, 'Failed to save user'), 'error')"],
+    ['user', 'save: a { success: false } result', "notify(newPasswordRefusalMessage(result, tr) || lastAdminRequiredMessage(result, tr) || result.error || 'Failed to save user', 'error')"],
+    ['user', 'save: a thrown ApiError', "notify(newPasswordRefusalMessage(error, tr) || lastAdminRequiredMessage(error, tr) || getErrorMessage(error, 'Failed to save user'), 'error')"],
     ['user', 'Undo of the edit', "throw new Error(lastAdminRequiredMessage(undoResult, tr) || undoResult.error || 'Failed to restore user')"],
     ['user', 'Redo of the edit', "throw new Error(lastAdminRequiredMessage(redoResult, tr) || redoResult.error || 'Failed to reapply user changes')"],
     ['role', 'save: a { success: false } result', "notify(lastAdminRequiredMessage(result, tr) || result.error || 'Failed to save role', 'error')"],

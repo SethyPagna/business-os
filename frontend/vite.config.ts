@@ -843,6 +843,7 @@ function manualChunks(id: string): string | undefined {
       normalized.includes('/src/components/catalog/CatalogEditorSurface.tsx')
       || normalized.includes('/src/components/catalog/CatalogImageField.tsx')
       || normalized.includes('/src/components/catalog/CatalogPageContext.tsx')
+      || normalized.includes('/src/components/catalog/editor/')
     ) {
       return 'catalog-editor'
     }
@@ -895,13 +896,22 @@ function manualChunks(id: string): string | undefined {
       // which is a TDZ ReferenceError ("Cannot access '<var>' before initialization")
       // that blanks the whole public portal on load. Keep it with its only consumer.
       || normalized.includes('/src/components/catalog/portalProductGrouping.ts')
+      // publicFirstPaint.ts and the skeleton: only the storefront page and root import them;
+      // catalog-public-core would put them in the catalog-products closure (performanceBudgets).
+      || normalized.includes('/src/components/catalog/publicFirstPaint.ts')
+      || normalized.includes('/src/components/catalog/PublicStorefrontSkeleton.tsx')
       // PublicCatalogRoot installs it before its first render and already
       // imports this chunk statically; the generic catch-all is the admin chunk.
       || normalized.includes('/src/components/catalog/portalTranslateDomGuard.ts')
     ) {
       return 'catalog-public'
     }
-    if (normalized.includes('/src/components/catalog/CatalogProductsSection.tsx')) {
+    if (
+      normalized.includes('/src/components/catalog/CatalogProductsSection.tsx')
+      // Unpinned, Rollup files it with its first importer, the admin catalog chunk,
+      // and catalog-products would statically pull catalog.
+      || normalized.endsWith('/src/utils/safeLinkUrl.ts')
+    ) {
       return 'catalog-products'
     }
     if (normalized.includes('/src/components/catalog/CatalogSecondaryTabs.tsx')) {

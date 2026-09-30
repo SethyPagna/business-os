@@ -28,6 +28,8 @@ type CopyFn = (key: string, fallback?: string, fallbackKm?: string) => string
 interface PreviewConfig {
   aboutBlocks?: AboutBlock[]
   aboutContent?: string
+  aboutImage?: string
+  aboutImageAlt?: string
   aboutTitle?: string
   aiDisclaimer?: string
   aiIntro?: string
@@ -85,6 +87,7 @@ interface CatalogAboutSectionProps {
   socialLinks?: SocialLink[]
   versionedBusinessLogo?: string
   versionedBusinessCover?: string
+  imageFetchPriority?: 'high' | 'low' | 'auto'
   openPortalImage: (title: string, images: string[], index?: number) => void
 }
 
@@ -225,6 +228,7 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
     socialLinks,
     versionedBusinessLogo,
     versionedBusinessCover,
+    imageFetchPriority,
     openPortalImage,
   } = props
 
@@ -238,6 +242,8 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
   const fallbackStory = copy('portalAboutFallback', 'Welcome to our store.')
   const storyText = String(previewConfig.aboutContent || fallbackStory).trim()
   const heroTitle = previewTitle || aboutTitle
+  const aboutImage = String(previewConfig.aboutImage || '').trim()
+  const aboutImageAlt = String(previewConfig.aboutImageAlt || '').trim()
   // P-public-9: the hero line is the merchant's short intro only. It used to
   // fall back to the story, so a shop without an intro printed its whole story
   // twice -- once under the name and again in the story card below.
@@ -280,7 +286,10 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
             src={versionedBusinessCover}
             alt=""
             aria-hidden="true"
-            className="pointer-events-none absolute inset-0 -z-10 h-full w-full object-cover"
+            data-portal-cover="true"
+            fetchPriority={imageFetchPriority}
+            onLoad={(event) => { event.currentTarget.dataset.loaded = 'true' }}
+            className="portal-cover-image pointer-events-none absolute inset-0 -z-10 h-full w-full object-cover"
           />
         ) : null}
         <div
@@ -354,6 +363,21 @@ function CatalogAboutSection(props: CatalogAboutSectionProps) {
 
         </div>
       </div>
+
+      {aboutImage ? (
+        <figure data-portal-about-picture="true" className="mx-auto aspect-square w-full max-w-[640px]">
+          <button type="button" className="block h-full w-full" onClick={() => openPortalImage(aboutImageAlt || heroTitle, [aboutImage])}>
+            <img
+              src={aboutImage}
+              alt={aboutImageAlt || previewConfig.businessName || aboutTitle}
+              className="h-full w-full object-contain"
+              loading="eager"
+              decoding="async"
+              fetchPriority={imageFetchPriority}
+            />
+          </button>
+        </figure>
+      ) : null}
 
       {/* Quick-info card (facts + socials, moved out of the hero banner so
           it doesn't compete with the name/tagline for space) on the left,

@@ -19,6 +19,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { safeLinkUrl, isSafeLinkUrl, MAX_LINK_URL_LENGTH } from '../src/utils/safeLinkUrl.ts'
+import { normalizeSafeLinkUrl as workerNormalize } from '../../cloudflare/src/lib/safeLinkUrl.ts'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const repo = path.join(here, '..', '..')
@@ -32,6 +33,11 @@ const CASES: Array<[string, string | null]> = [
   ['  https://example.com/x  ', 'https://example.com/x'],
   ['/promotions', '/promotions'],
   ['/products?category=serum', '/products?category=serum'],
+  ['/promotions/%2fsale', '/promotions/%2fsale'],
+  ['/', '/'],
+  ['/./promotions', '/./promotions'],
+  ['/promotions//sale', '/promotions//sale'],
+  ['/?from=https://example.com', '/?from=https://example.com'],
   // The whole reason this file exists.
   ['javascript:alert(1)', null],
   ['JavaScript:alert(1)', null],
@@ -42,6 +48,26 @@ const CASES: Array<[string, string | null]> = [
   ['file:///c:/windows/system32', null],
   // Protocol-relative reads as a path and behaves as another origin.
   ['//evil.example/x', null],
+  // Browsers read '\' as '/', so these are '//evil.example' too.
+  ['/\\evil.example/x', null],
+  ['\\\\evil.example/x', null],
+  // Browsers strip a tab or newline, leaving '//evil.example'.
+  ['/\t/evil.example/x', null],
+  ['/\n/evil.example/x', null],
+  // Written on this site, but the resolved path '//evil.example/x' leaves it wherever that path is re-emitted.
+  ['/.//evil.example/x', null],
+  ['/..//evil.example/x', null],
+  ['/%2e%2e//evil.example/x', null],
+  ['/%2E//evil.example/x', null],
+  ['/promotions/..//evil.example/x', null],
+  // These stay on this site in a browser; refused because '\' and an encoded '/' change meaning between URL
+  // parsers and after one decoding step.
+  ['/%2fevil.example/x', null],
+  ['/%2F/evil.example/x', null],
+  ['/%5cevil.example/x', null],
+  ['/%5C/evil.example/x', null],
+  ['https://example.com\\@evil.example/x', null],
+  ['/promotions\\x', null],
   // Not a URL and not site-relative: refuse rather than invent an origin.
   ['example.com/promo', null],
   ['', null],
@@ -60,25 +86,32 @@ for (const [input, expected] of CASES) {
 assert.equal(safeLinkUrl('java\tscript:alert(1)'), null, 'a control character inside the scheme must not slip through')
 assert.equal(safeLinkUrl('java\nscript:alert(1)'), null)
 assert.equal(safeLinkUrl('https://example.com/' + 'a'.repeat(MAX_LINK_URL_LENGTH)), null, 'over the length cap is refused')
+const unprintable = JSON.parse('{"toString":"x"}')
+assert.equal(safeLinkUrl(unprintable), null, 'a stored value String() throws on is refused, never thrown')
+assert.equal(workerNormalize(unprintable), null)
 
 // --- parity: the Worker must answer the same way --------------------------
-// The Worker module is TypeScript on the other side of the repo and imports
-// nothing, so its body can be evaluated directly rather than mocked.
-const workerSource = fs.readFileSync(path.join(repo, 'cloudflare', 'src', 'lib', 'safeLinkUrl.ts'), 'utf8')
-const workerBody = workerSource
-  .replace(/export const /g, 'const ')
-  .replace(/export function /g, 'function ')
-  .replace(/: unknown/g, '')
-  .replace(/: string \| null/g, '')
-  .replace(/: boolean/g, '')
-  .replace(/let parsed: URL/g, 'let parsed')
-const workerNormalize = new Function(`${workerBody}; return normalizeSafeLinkUrl`)() as (value: unknown) => string | null
-
 for (const [input, expected] of CASES) {
   assert.equal(workerNormalize(input), expected, `worker normalizeSafeLinkUrl(${JSON.stringify(input)})`)
   assert.equal(workerNormalize(input), safeLinkUrl(input), `worker and frontend disagree on ${JSON.stringify(input)}`)
 }
 assert.equal(workerNormalize('java\tscript:alert(1)'), null)
+
+const shop = 'https://shop.example'
+assert.equal(new URL('/\t/evil.example/x', shop).host, 'evil.example')
+for (const input of ['/.//evil.example/x', '/%2e%2e//evil.example/x', '/promotions/..//evil.example/x']) {
+  assert.equal(new URL(new URL(input, shop).pathname, shop).host, 'evil.example', `${input} re-emitted as its resolved path`)
+}
+for (const input of ['/%2fevil.example/x', '/%5cevil.example/x', '/promotions\\x']) {
+  assert.equal(new URL(input, shop).host, 'shop.example', `${input} stays on this site in a browser`)
+}
+assert.equal(new URL('https://example.com\\@evil.example/x').host, 'example.com')
+
+const ODD_SITE_PATHS = ['/%', '/%zz', '/[', '/ x', '/..', '/.', '/#//x', '/?//x', `/${String.fromCharCode(0xd800)}`]
+for (const input of ODD_SITE_PATHS) {
+  assert.doesNotThrow(() => safeLinkUrl(input), `safeLinkUrl(${JSON.stringify(input)})`)
+  assert.equal(workerNormalize(input), safeLinkUrl(input), `worker and frontend disagree on ${JSON.stringify(input)}`)
+}
 
 // --- the guards are actually wired in -------------------------------------
 const portalRoute = fs.readFileSync(path.join(repo, 'cloudflare', 'src', 'routes', 'portal.ts'), 'utf8')
@@ -92,4 +125,4 @@ assert.doesNotMatch(banner, /window\.open\(promo\.link_url/, 'the raw stored val
 const modal = fs.readFileSync(path.join(here, '..', 'src', 'components', 'catalog', 'ManagePromotionsModal.tsx'), 'utf8')
 assert.match(modal, /isSafeLinkUrl\(form\.link_url\)/, 'the editor must tell the author what is wrong before the Worker 400s')
 
-console.log(`PASS promotion link_url: ${CASES.length + 3} cases agree across the storefront guard, the Worker guard and both call sites`)
+console.log(`PASS promotion link_url: ${CASES.length + 4} cases agree across the storefront guard, the Worker guard and both call sites`)

@@ -25,6 +25,20 @@ const rejectedKhmer = presentWriteError({ code: 'validation_failed' }, translate
 assert.equal(rejectedKhmer.detail, km.write_rejected_details)
 assert.match(rejectedKhmer.detail, /[ក-៿]/)
 
+const portalLanguage = presentWriteError({ code: 'invalid_portal_language' }, translate(en))
+assert.equal(portalLanguage.title, en.write_rejected_title)
+assert.equal(portalLanguage.detail, en.write_rejected_portal_language)
+assert.match(portalLanguage.detail, /English or Khmer/)
+const portalLanguageKhmer = presentWriteError({ code: 'invalid_portal_language' }, translate(km))
+assert.equal(portalLanguageKhmer.detail, km.write_rejected_portal_language)
+assert.match(portalLanguageKhmer.detail, /[ក-៿]/)
+const settingsRouteSource = readFileSync(new URL('../../cloudflare/src/routes/settings.ts', import.meta.url), 'utf8')
+assert.match(settingsRouteSource, /code: 'invalid_portal_language'/, 'the Worker still refuses a website language with the code this presenter translates')
+
+for (const inheritedName of ['constructor', '__proto__', 'toString']) {
+  assert.equal(presentWriteError({ code: inheritedName }, translate(en)).detail, en.write_rejected_details, inheritedName)
+}
+
 const unavailable = presentWriteError({ reason: 'server_unreachable' }, translate(en))
 assert.equal(unavailable.detail, en.write_server_unavailable)
 

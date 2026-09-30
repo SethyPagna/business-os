@@ -27,11 +27,13 @@ import { renameSalePaymentMethod } from '../lib/paymentSettlement'
 // is byte-identical and pinned by a test -- so frontend validation and backend
 // enforcement cannot drift apart.
 import { MAX_LOW_STOCK_THRESHOLD, validateLowStockSettingsWrite } from '../lib/lowStockSettings'
-import { isTelegramTopicSettingValue, TELEGRAM_TOPIC_KEYS } from '../lib/telegram'
+import { isTelegramSwitchValue, isTelegramTopicSettingValue, TELEGRAM_SUMMARY_SWITCHES, TELEGRAM_TOPIC_KEYS } from '../lib/telegram'
 import { normalizedHaystackSql } from '../lib/searchMatch'
 import type { Env } from '../index'
 import { actorSnapshot } from '../lib/actorSnapshot'
 import { POS_ADDRESS_PRESETS_KEY } from '../lib/addressPresets'
+import { normalizePortalUploadPath } from '../lib/safeLinkUrl'
+import { AUTOMATIC_PORTAL_LANGUAGE, normalizePortalImageAlt, portalLanguageSetting, withoutOtherLanguageTranslations } from '../lib/portalText'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 
@@ -839,6 +841,8 @@ const PORTAL_ABOUT_KEYS = new Set([
   'customer_portal_about_content',
   'customer_portal_about_blocks',
   'customer_portal_show_about',
+  'customer_portal_about_image',
+  'customer_portal_about_image_alt',
 ])
 
 function settingsBucketPermissionFor(key: string): string | null {
@@ -954,6 +958,17 @@ function sanitizeReceiptPrintSettingsValue(raw: unknown): string {
   return JSON.stringify(parsed)
 }
 
+const PORTAL_LANGUAGE_KEY = 'customer_portal_language'
+const PORTAL_TRANSLATIONS_KEY = 'customer_portal_translations'
+
+// A language stored before the English/Khmer decision comes back unchanged from the editor; it already publishes as automatic.
+async function portalLanguageForWrite(env: Env, sent: unknown): Promise<string | null> {
+  const language = portalLanguageSetting(sent)
+  if (language) return language
+  const stored = (await getSettingsValues(env, [PORTAL_LANGUAGE_KEY]))[PORTAL_LANGUAGE_KEY]
+  return sent === stored ? AUTOMATIC_PORTAL_LANGUAGE : null
+}
+
 app.post('/', async (c) => {
   const user = c.get('user')
   const body = await c.req.json<Record<string, unknown>>()
@@ -1031,6 +1046,31 @@ app.post('/', async (c) => {
     if (isRegisteredBusinessIdentityKey(key)) body[key] = (body[key] as string).trim()
   }
 
+  // Every storefront visitor loads the About picture, so only this site's own upload is stored.
+  if (attemptedKeys.includes('customer_portal_about_image')) {
+    const raw = body.customer_portal_about_image
+    const cleared = raw == null || (typeof raw === 'string' && !raw.trim())
+    const uploadPath = cleared ? '' : normalizePortalUploadPath(raw)
+    if (uploadPath === null) {
+      return c.json({ error: 'The About picture must be a picture uploaded to this site.', code: 'invalid_about_image' }, 400)
+    }
+    body.customer_portal_about_image = uploadPath
+  }
+  if (attemptedKeys.includes('customer_portal_about_image_alt')) {
+    body.customer_portal_about_image_alt = normalizePortalImageAlt(body.customer_portal_about_image_alt)
+  }
+  if (attemptedKeys.includes(PORTAL_LANGUAGE_KEY)) {
+    const language = await portalLanguageForWrite(c.env, body[PORTAL_LANGUAGE_KEY])
+    if (!language) {
+      return c.json({ error: 'The website language must be English or Khmer.', code: 'invalid_portal_language' }, 400)
+    }
+    body[PORTAL_LANGUAGE_KEY] = language
+  }
+  if (attemptedKeys.includes(PORTAL_TRANSLATIONS_KEY)) {
+    const sent = body[PORTAL_TRANSLATIONS_KEY]
+    body[PORTAL_TRANSLATIONS_KEY] = withoutOtherLanguageTranslations(typeof sent === 'string' ? sent : JSON.stringify(sent))
+  }
+
   // The low-stock alert switch and its threshold decide what the WHOLE
   // catalog is coloured by (Dashboard card, Inventory/Products/Branches
   // badges and filters, the POS grid, the bell, the Telegram report), so
@@ -1077,6 +1117,15 @@ app.post('/', async (c) => {
         error: 'Telegram topic ID must be a whole number, or left empty for General.',
         code: 'invalid_telegram_topic_id',
       }, 400)
+    }
+    body[key] = raw
+  }
+
+  for (const key of Object.values(TELEGRAM_SUMMARY_SWITCHES)) {
+    if (!attemptedKeys.includes(key)) continue
+    const raw = String(body[key] ?? '').trim()
+    if (!isTelegramSwitchValue(raw)) {
+      return c.json({ error: 'A Telegram summary section switch must be on or off.', code: 'invalid_telegram_switch' }, 400)
     }
     body[key] = raw
   }

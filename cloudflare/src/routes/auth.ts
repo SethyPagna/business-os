@@ -11,7 +11,7 @@ import { isOtpStepReplayed, markOtpStepUsed } from '../lib/otpReplay'
 import { isAdminControlUser } from '../lib/permissions'
 import { resolvePlanTier } from '../lib/planTier'
 import { checkRateLimit, getClientIp, peekRateLimit, recordRateLimitEvent, releaseRateLimitSlot } from '../lib/rateLimit'
-import { passwordTooShort, passwordMinLengthError, passwordKnownLeaked, setPasswordMustChange, KNOWN_LEAKED_PASSWORD_CODE, KNOWN_LEAKED_PASSWORD_ERROR } from '../lib/passwordPolicy'
+import { newPasswordProblem, newPasswordProblemError, passwordKnownLeaked, setPasswordMustChange, KNOWN_LEAKED_PASSWORD_CODE, KNOWN_LEAKED_PASSWORD_ERROR } from '../lib/passwordPolicy'
 import { CURRENT_PASSWORD_RATE_LIMITED_ERROR, verifyCurrentPassword } from '../lib/currentPasswordGuard'
 import { stripSensitiveSettings } from '../lib/settingsSensitive'
 // The OTP login-challenge binding -- see lib/otpChallenge.ts's comment for
@@ -57,6 +57,7 @@ const OTP_RESET_ACCOUNT_LIMIT_WINDOW_MS = 15 * 60 * 1000
 // so the endpoint cannot be used to learn which accounts exist or which
 // have an authenticator enrolled.
 const OTP_RESET_INVALID_ERROR = 'Invalid account or authenticator code.'
+const ADMIN_APP_NAME = 'Leang Cosmetics Admin'
 
 // Brute-force / credential-stuffing protection on POST /login. Previously
 // this endpoint had no rate limiting at all -- unlike /otp/verify and
@@ -85,9 +86,10 @@ const LOGIN_USER_LIMIT_WINDOW_MS = 15 * 60 * 1000
 const LOGIN_ACCOUNT_WIDE_MAX = 40
 const LOGIN_ACCOUNT_WIDE_WINDOW_MS = 15 * 60 * 1000
 // SEC1-02: a sign-in that resolves no usable account still spends one bcrypt
-// compare at the staff cost (10), so the answer time does not tell a staff
-// identifier from a stranger's (lib/portalAccounts.ts does the same). This is
-// the hash of a random string nobody holds.
+// compare at the staff cost (10), as lib/portalAccounts.ts does. That narrows
+// the timing gap to a staff identifier but does not close it: a resolved
+// account also spends the per-account limiter and lockout D1 calls. The hash
+// is of a random string nobody holds.
 const NO_ACCOUNT_PASSWORD_HASH = '$2b$10$kPCxhXVBKdQbkO41qCeEI./xzCQduQU0aV1E9hdVpUBlxosWlHUzO'
 
 type OtpTargetUser = {
@@ -465,6 +467,7 @@ app.post('/login', async (c) => {
       must_change_password: (signedInWithLeakedPassword || await accountMustChangePassword(c.env, user.id)) ? 1 : 0,
     },
     sessionExpiresAt: session.expiresAt,
+    sharedDevice: await deviceUsedByAnotherAccount(c.env, user.id, body.deviceId),
   })
 })
 
@@ -645,8 +648,9 @@ app.post('/password-reset/complete', async (c) => {
   if (!accessToken || !newPassword) {
     return c.json({ success: false, error: 'Recovery link and new password are required' }, 400)
   }
-  if (passwordTooShort(newPassword)) {
-    return c.json({ success: false, error: passwordMinLengthError() }, 400)
+  const passwordProblem = newPasswordProblem(newPassword)
+  if (passwordProblem) {
+    return c.json({ success: false, error: newPasswordProblemError(passwordProblem), code: passwordProblem }, 400)
   }
   if (await passwordKnownLeaked(newPassword, c.env)) {
     return c.json({ success: false, error: KNOWN_LEAKED_PASSWORD_ERROR, code: KNOWN_LEAKED_PASSWORD_CODE }, 400)
@@ -830,9 +834,11 @@ app.post('/otp/verify', async (c) => {
   // their grants on the ROLE, and a login payload without them resolves to
   // no permissions whenever the bootstrap re-fetch can't run.
   return c.json({
+    success: true,
     user: { ...buildUserPayload(user), role_code: user.role_code, role_permissions: user.role_permissions, must_change_password: (await accountMustChangePassword(c.env, user.id)) ? 1 : 0 },
     sessionExpiresAt: session.expiresAt,
     authMode: 'cookie',
+    sharedDevice: await deviceUsedByAnotherAccount(c.env, user.id, body.deviceId),
   })
 })
 
@@ -1038,8 +1044,10 @@ app.post('/password-reset/otp', async (c) => {
   const identifier = String(body.identifier || '').trim()
   if (!identifier) return c.json({ error: 'Username or email is required' }, 400)
   if (!body.otp) return c.json({ error: 'OTP code is required' }, 400)
-  if (!body.newPassword || passwordTooShort(body.newPassword)) return c.json({ error: passwordMinLengthError() }, 400)
-  if (await passwordKnownLeaked(body.newPassword, c.env)) return c.json({ error: KNOWN_LEAKED_PASSWORD_ERROR, code: KNOWN_LEAKED_PASSWORD_CODE }, 400)
+  const newPassword = String(body.newPassword || '')
+  const passwordProblem = newPasswordProblem(newPassword)
+  if (passwordProblem) return c.json({ success: false, error: newPasswordProblemError(passwordProblem), code: passwordProblem }, 400)
+  if (await passwordKnownLeaked(newPassword, c.env)) return c.json({ error: KNOWN_LEAKED_PASSWORD_ERROR, code: KNOWN_LEAKED_PASSWORD_CODE }, 400)
 
   // P1-1. This used to rate-limit only on `<ip>:<raw typed identifier>`,
   // so changing the letter case, typing the email instead of the username,
@@ -1104,7 +1112,7 @@ app.post('/password-reset/otp', async (c) => {
   // code sees it as used as early as possible.
   await markOtpStepUsed(c.env, user.id, matchedStep)
 
-  const passwordHash = bcrypt.hashSync(String(body.newPassword), 10)
+  const passwordHash = bcrypt.hashSync(newPassword, 10)
   await db.prepare('UPDATE users SET password = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run([passwordHash, user.id])
   await setPasswordMustChange(db, user.id, false)
   await revokeUserSessions(c.env, user.id)
@@ -1163,6 +1171,22 @@ async function accountMustChangePassword(env: Env, userId: number): Promise<bool
   } catch (error) {
     if (/no such column/i.test(String((error as Error)?.message || error))) return false
     throw error
+  }
+}
+
+// AUTH-P1 (shared tills): the app asks the browser to save the password after
+// a sign-in unless another account has been seen on this browser's device id.
+// Administrators have no trusted_devices rows, so any other row means shared.
+// Advisory only: a failed lookup answers "shared" (no save offer) rather than
+// failing a sign-in whose password was already verified.
+async function deviceUsedByAnotherAccount(env: Env, userId: number, deviceId: unknown): Promise<boolean> {
+  const device = trim(deviceId)
+  if (!device) return false
+  try {
+    const row = await getDb(env).prepare('SELECT 1 AS seen FROM trusted_devices WHERE device_id = ? AND user_id != ? LIMIT 1').get<{ seen: number }>([device, userId])
+    return Boolean(row)
+  } catch {
+    return true
   }
 }
 
@@ -1359,7 +1383,7 @@ app.get('/oauth/callback', async (c) => {
       payload: { ...basePayload, status: 'error', error },
       targetUrl: returnTarget.url,
       title,
-      message: error || 'Please return to Business OS and try again.',
+      message: error || `Please return to ${ADMIN_APP_NAME} and try again.`,
     }), status)
 
   if (!stateResult.success) return fail(400, stateResult.error || 'Google sign-in failed.')
@@ -1399,7 +1423,7 @@ app.get('/oauth/callback', async (c) => {
       const finishingUser = actorId ? await getSessionUser(c) : null
       if (!actorId) { callbackPayload = { success: false, error: 'A local user session is required to link Google.' } }
       else if (!finishingUser || Number(finishingUser.id) !== actorId) {
-        callbackPayload = { success: false, error: 'Sign in to Business OS in this browser as the account you are linking, then connect Google again.' }
+        callbackPayload = { success: false, error: `Sign in to ${ADMIN_APP_NAME} in this browser as the account you are linking, then connect Google again.` }
       }
       // S-auth4e: same gate as /oauth/start -- a session that must first
       // replace a publicly known password cannot attach a lasting way in.
@@ -1504,8 +1528,8 @@ app.get('/oauth/callback', async (c) => {
     const successPayload: Record<string, unknown> = { ...basePayload, status: callbackPayload.success === false ? 'error' : 'success', ...callbackPayload }
     const title = successPayload.status === 'success' ? (oauthMode === 'link' ? 'Google account connected' : 'Google sign-in complete') : 'Google sign-in failed'
     const message = successPayload.status === 'success'
-      ? (oauthMode === 'link' ? 'Returning to your profile now.' : 'Returning to Business OS now.')
-      : String(successPayload.error || 'Please return to Business OS and try again.')
+      ? (oauthMode === 'link' ? 'Returning to your profile now.' : `Returning to ${ADMIN_APP_NAME} now.`)
+      : String(successPayload.error || `Please return to ${ADMIN_APP_NAME} and try again.`)
     return c.html(buildOauthCallbackHtml({ payload: successPayload, targetUrl: returnTarget.url, title, message }), status)
   } catch (error) {
     return fail(500, error instanceof Error ? error.message : 'Google sign-in failed.')

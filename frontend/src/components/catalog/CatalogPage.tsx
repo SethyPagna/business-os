@@ -1,4 +1,4 @@
-import { Suspense, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { ClipboardEvent, Dispatch, RefObject, SetStateAction } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import { startVisibleInterval } from '../../utils/visibilityPolling.ts'
@@ -6,6 +6,7 @@ import { fuzzyTextMatches, matchesSearchTermGroups, sortBySearchRelevance } from
 import { fmtTime } from '../../utils/formatters.ts'
 import { deriveTelegramLink } from '../../utils/socialLinks.ts'
 import { canWriteSettingKey } from '../../utils/portalPermissions.ts'
+import { registerDirtyWork } from '../../utils/dirtyWork.ts'
 import Bot from 'lucide-react/dist/esm/icons/bot.js'
 import ExternalLink from 'lucide-react/dist/esm/icons/external-link.js'
 import Facebook from 'lucide-react/dist/esm/icons/facebook.js'
@@ -41,12 +42,15 @@ import {
   serializePromoItems,
 } from './portalEditorUtils.ts'
 import {
+  clampToRange,
   getPortalGridClass,
   getPortalMobileGridClass,
+  PORTAL_GRID_LIMITS,
   normalizeRecommendedProductIds,
   productMatchesPortalBranches,
   buildPortalPricePresentation,
   resolvePortalStockStatus,
+  type ColumnRange,
 } from './portalCatalogDisplay.ts'
 import type { ProductDetailViewState } from './ProductDetailFlyout'
 import { buildProductSearchTerms } from '../products/helpers/productFilterHelpers.ts'
@@ -66,6 +70,22 @@ import {
   privateAiSaveChanges,
   settlePrivateAiSave,
 } from './portalPrivateAi.ts'
+import {
+  discardEditorDraft,
+  findUnsafeLink,
+  isAboutImageRefusal,
+  keepEditedValues,
+  markEdited,
+  overlayStaffSettings,
+  isLoadedOrEditedKey,
+  readStaffSettings,
+  replaceDraftValues,
+  settleSavedEdits,
+  siteUploadPath,
+  type EditorDraft,
+  type RefusedLink,
+  type StaffSettings,
+} from './portalEditorDraft.ts'
 import { resolveCatalogAssetUrl } from './catalogAssetUrls'
 import { FAQ_STARTER_TEXT, AI_FAQ_STARTER_TEXT } from './faqStarterText.ts'
 import { aggregateInitialOptions } from '../../utils/initials.ts'
@@ -108,9 +128,14 @@ const CATALOG_IMAGE_READ_CONCURRENCY = 2
 const PORTAL_CACHE_KEY = 'business-os-catalog-portal-cache'
 const PORTAL_CACHE_PRODUCT_LIMIT = 80
 const PORTAL_CACHE_MAX_AGE_MS = 1000 * 60 * 20
+const WEBSITE_EDITOR_WORK_KEY = 'website-editor'
+// The Worker still stores and publishes 1 phone column (the shop shows it as 2),
+// so a stored 1 the owner did not change is sent back as 1.
+const STORED_PHONE_COLUMNS: ColumnRange = [1, PORTAL_GRID_LIMITS.phone[1]]
 
 type LegacyCatalogRecord = Record<string, any>
 type CopyFunction = (key: string, fallback?: string, fallbackKm?: string) => string
+type PortalSaveResult = { ok: true } | { ok: false; field?: string; messageKey?: string }
 type CatalogProduct = LegacyCatalogRecord & {
   id: string | number
   name?: string
@@ -390,6 +415,12 @@ function withAssetVersion(url: unknown, versionSeed: unknown): string {
   return `${raw}${separator}v=${encodeURIComponent(seed)}`
 }
 
+function sectionForLinkField(field: string): string {
+  if (field.startsWith('about_blocks[')) return 'about'
+  if (field.startsWith('promo_items[')) return 'display'
+  return 'media'
+}
+
 function sanitizePortalMediaValue(value: unknown, fallback = ''): string {
   return sanitizePersistedMediaPath(value, fallback)
 }
@@ -536,8 +567,7 @@ function readPortalCache(): LegacyCatalogRecord | null {
     // Inside the guard, not above it: merely touching window.localStorage /
     // sessionStorage throws where site data is blocked (Safari private mode,
     // Chrome's "block all cookies"), and this runs in a useRef initializer
-    // during the first render. Same fix and same reasoning as
-    // PublicCatalogPage.tsx's copy of this reader.
+    // during the first render.
     const stores = [window.sessionStorage, window.localStorage].filter(Boolean)
     let raw = ''
     let sourceStore: Storage | null = null
@@ -696,6 +726,8 @@ function buildDraft(config: PortalConfig): PortalDraft {
     customer_portal_show_about: !!config.showAbout,
     customer_portal_about_title: config.aboutTitle || '',
     customer_portal_about_content: config.aboutContent || '',
+    customer_portal_about_image: config.aboutImage || '',
+    customer_portal_about_image_alt: config.aboutImageAlt || '',
     // Aug 24 request (Part 326 backlog item 3): a single Caution and a
     // single Need More Details block, set once here and shown on every
     // product's detail flyout -- not per-product, so these are plain
@@ -844,6 +876,8 @@ function applyDraft(config: PortalConfig, draft: PortalDraft): PortalConfig {
     showAbout: toBoolean(draft.customer_portal_show_about, config.showAbout),
     aboutTitle: String(draft.customer_portal_about_title || config.aboutTitle || 'About us').trim() || 'About us',
     aboutContent: String(draft.customer_portal_about_content || config.aboutContent || '').trim(),
+    aboutImage: String(draft.customer_portal_about_image || '').trim(),
+    aboutImageAlt: String(draft.customer_portal_about_image_alt || '').trim(),
     productCautionDefault: String(draft.customer_portal_product_caution_default ?? config.productCautionDefault ?? '').trim(),
     productNeedMoreDetailsDefault: String(draft.customer_portal_product_need_more_details_default ?? config.productNeedMoreDetailsDefault ?? '').trim(),
     aboutBlocks: normalizeAboutBlocks(draft.customer_portal_about_blocks || config.aboutBlocks || []),
@@ -879,8 +913,8 @@ function applyDraft(config: PortalConfig, draft: PortalDraft): PortalConfig {
     stockThresholdMode: draft.customer_portal_stock_threshold_mode === 'global' ? 'global' : 'product',
     lowStockThreshold: Math.max(0, toNumber(draft.customer_portal_low_stock_threshold, config.lowStockThreshold)),
     outOfStockThreshold: Math.max(0, toNumber(draft.customer_portal_out_of_stock_threshold, config.outOfStockThreshold)),
-    gridColumnsMobile: Math.min(3, Math.max(1, Math.round(toNumber(draft.customer_portal_grid_columns_mobile, config.gridColumnsMobile || 1)))),
-    gridColumnsDesktop: Math.min(10, Math.max(2, Math.round(toNumber(draft.customer_portal_grid_columns_desktop, config.gridColumnsDesktop || 4)))),
+    gridColumnsMobile: clampToRange(Math.round(toNumber(draft.customer_portal_grid_columns_mobile, config.gridColumnsMobile || 1)), STORED_PHONE_COLUMNS),
+    gridColumnsDesktop: clampToRange(Math.round(toNumber(draft.customer_portal_grid_columns_desktop, config.gridColumnsDesktop || 4)), PORTAL_GRID_LIMITS.desktop),
     pointsBasis: draft.customer_portal_points_basis === 'khr' ? 'khr' : 'usd',
     pointsPerUsd: toNumber(draft.customer_portal_points_per_usd, config.pointsPerUsd),
     pointsPerKhr: toNumber(draft.customer_portal_points_per_khr, config.pointsPerKhr),
@@ -1033,6 +1067,8 @@ const DEFAULT_CONFIG = {
   intro: '',
   aboutTitle: '',
   aboutContent: '',
+  aboutImage: '',
+  aboutImageAlt: '',
   productCautionDefault: '',
   productNeedMoreDetailsDefault: '',
   aboutBlocks: [],
@@ -1159,9 +1195,19 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
           ...(cachedPortal?.config || {}),
         })
   ))
-  const [editorDirty, setEditorDirty] = useState(false)
+  const [editedKeys, setEditedKeys] = useState<ReadonlySet<string>>(() => new Set())
+  const editedKeysRef = useRef<ReadonlySet<string>>(editedKeys)
+  const editorDirty = editedKeys.size > 0
+  const staffSettingsRef = useRef<StaffSettings | null>(null)
+  const editorBaselineLoadedRef = useRef(false)
+  const [refusedAboutImage, setRefusedAboutImage] = useState<string | null>(null)
+  const [refusedLink, setRefusedLink] = useState<RefusedLink | null>(null)
   const [editorSaving, setEditorSaving] = useState(false)
   const [privateAi, setPrivateAi] = useState(createPrivateAiState)
+  const editorFormRef = useRef<EditorDraft>({})
+  useLayoutEffect(() => {
+    editorFormRef.current = { ...editorDraft, ...privateAiFormValues(privateAi) }
+  }, [editorDraft, privateAi])
   // Same viewer-owned page size as the standalone storefront
   // (PublicCatalogPage.tsx): the in-app public route and the editor preview
   // mount the same pager, so the 20/50/100 choice has to behave identically on
@@ -1517,6 +1563,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
   // The assistant's prompt and provider come only from the server's own
   // settings answer (portalPrivateAi.ts): the public website config never
   // carries them, and the app's settings map may be empty or device-only.
+  // The same answer restores the stored values of every other editor key.
   async function loadPrivateAiSettings() {
     const readId = beginTrackedRequest(privateAiReadRef)
     let settings: unknown = null
@@ -1530,6 +1577,12 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
       settings = null
     }
     if (!aliveRef.current || !isTrackedRequestCurrent(privateAiReadRef, readId)) return
+    const staffSettings = readStaffSettings(settings)
+    if (staffSettings) {
+      staffSettingsRef.current = staffSettings
+      setEditorDraft((current) => overlayStaffSettings(current, staffSettings, editedKeysRef.current))
+      editorBaselineLoadedRef.current = true
+    }
     setPrivateAi((current) => applyPrivateAiRead(current, settings))
   }
 
@@ -1674,7 +1727,9 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     const bootstrapMatchesViewer = bootstrapPageSizeMatchesViewer(catalogPage?.pageSize, viewerPageSizeRef.current)
     setConfig(nextConfig)
     setPortalConfigReady(true)
-    if (!editorDirty) setEditorDraft(buildDraft(nextConfig))
+    if (editedKeysRef.current.size === 0) setEditorDraft(overlayStaffSettings(buildDraft(nextConfig), staffSettingsRef.current))
+    else if (!editorBaselineLoadedRef.current) setEditorDraft((current) => keepEditedValues(overlayStaffSettings(buildDraft(nextConfig), staffSettingsRef.current), current, editedKeysRef.current))
+    editorBaselineLoadedRef.current = true
     setCategories(nextMeta.categories)
     setBrands(nextMeta.brands)
     setBranches(nextMeta.branches)
@@ -1907,8 +1962,8 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     // installable.
     if (!publicView || typeof document === 'undefined') return undefined
     const previousTitle = document.title
-    const titleText = String(previewConfig.businessName || previewConfig.title || 'Leang Beauty').trim()
-    document.title = titleText || 'Leang Beauty'
+    const titleText = String(previewConfig.businessName || previewConfig.title || 'Leang Cosmetics').trim()
+    document.title = titleText || 'Leang Cosmetics'
     return () => { document.title = previousTitle }
   }, [publicView, previewConfig.businessName, previewConfig.title])
 
@@ -2045,8 +2100,18 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     setPortalProductInitial('all')
   }
 
+  function replaceEditedKeys(next: ReadonlySet<string>) {
+    editedKeysRef.current = next
+    setEditedKeys(next)
+  }
+
+  function markDraftEdited(key: string) {
+    const next = markEdited(editedKeysRef.current, key)
+    if (next !== editedKeysRef.current) replaceEditedKeys(next)
+  }
+
   function setDraft(key: string, value: unknown) {
-    setEditorDirty(true)
+    markDraftEdited(key)
     if (isPrivateAiKey(key)) {
       setPrivateAi((current) => editPrivateAi(current, key, value))
       return
@@ -2169,7 +2234,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
         CATALOG_PORTAL_MEDIA_UPLOAD_TIMEOUT_MS,
       )
       if (!uploaded?.public_path) throw new Error(uploaded?.error || 'Image upload failed')
-      if (!aliveRef.current) return ''
+      if (!aliveRef.current || controller.signal.aborted) return ''
 
       const nextPath = buildCacheBustedMediaPath(uploaded.public_path, uploaded.cache_version)
       setPortalMediaValue(targetKey, nextPath)
@@ -2184,8 +2249,9 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     } catch (error) {
       const errorMessage = getCatalogErrorMessage(error, 'Image upload failed')
       const cancelled = /cancelled|canceled|aborted/i.test(errorMessage)
+      const restorable = mediaUploadOriginalValuesRef.current.has(targetKey)
       const previousValue = mediaUploadOriginalValuesRef.current.get(targetKey)
-      if (aliveRef.current) {
+      if (aliveRef.current && restorable) {
         setPortalMediaValue(targetKey, previousValue || '')
         updateMediaUploadState(targetKey, cancelled ? { type: 'cancel' } : { type: 'error', error: errorMessage })
         if (!cancelled) notify(errorMessage, 'error')
@@ -2210,10 +2276,14 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     )))
   }
 
-  function updatePromoItem(itemId: string, key: string, value: unknown) {
+  function updatePromoItemFields(itemId: string, fields: Record<string, unknown>) {
     setPromoItemsDraft(promoItems.map((item) => (
-      item.id === itemId ? { ...item, [key]: value } : item
+      item.id === itemId ? { ...item, ...fields } : item
     )))
+  }
+
+  function updatePromoItem(itemId: string, key: string, value: unknown) {
+    updatePromoItemFields(itemId, { [key]: value })
   }
 
   function addAboutBlock(type: unknown) {
@@ -2358,6 +2428,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
       targetKey === 'customer_portal_logo_image'
       || targetKey === 'customer_portal_favicon_image'
       || targetKey === 'customer_portal_cover_image'
+      || targetKey === 'customer_portal_about_image'
     ) {
       clearPortalUploadPreview(targetKey)
       setDraft(targetKey, selectedPath)
@@ -2377,20 +2448,45 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     }
   }
 
-  async function savePortalDraft() {
+  function showAboutImageRefusal(refusedValue: string) {
+    setRefusedAboutImage(refusedValue)
+    setActiveEditorSection('about')
+    notify(copy('aboutImageInvalid', 'The About picture must be a picture uploaded to this site. Upload it again.'), 'error')
+  }
+
+  function refuseSave(messageKey: string, fallback: string, field?: string): PortalSaveResult {
+    notify(copy(messageKey, fallback), 'error')
+    return { ok: false, messageKey, field }
+  }
+
+  function discardPortalDraft() {
+    const discarded = discardEditorDraft(buildDraft(config), staffSettingsRef.current, privateAi)
+    for (const controller of mediaUploadControllersRef.current.values()) controller.abort()
+    mediaUploadControllersRef.current.clear()
+    mediaUploadOriginalValuesRef.current.clear()
+    for (const target of [...mediaUploadPreviewUrlsRef.current.keys()]) clearPortalUploadPreview(target)
+    setMediaUploadStates({})
+    replaceEditedKeys(discarded.editedKeys)
+    setEditorDraft(discarded.draft)
+    setPrivateAi(discarded.privateAi)
+    setRefusedAboutImage(null)
+    setRefusedLink(null)
+  }
+
+  async function savePortalDraft(): Promise<PortalSaveResult> {
     try {
+      if (!editorBaselineLoadedRef.current) {
+        return refuseSave('portalSettingsLoading', 'Wait for the website settings to finish loading before saving.')
+      }
       if (hasActiveMediaUpload) {
-        notify(copy('portalUploadPending', 'Wait for media uploads to finish before saving the website.'), 'error')
-        return
+        return refuseSave('portalUploadPending', 'Wait for media uploads to finish before saving the website.')
       }
       if (canEditConfig && privateAiBlocksSave(privateAi)) {
-        notify(copy('portalSettingsLoading', 'Wait for the website settings to finish loading before saving.'), 'error')
-        return
+        return refuseSave('portalSettingsLoading', 'Wait for the website settings to finish loading before saving.')
       }
       const normalizedPath = normalizePortalPath(editorDraft.customer_portal_path || '/')
       if (isReservedPortalPath(normalizedPath)) {
-        notify(copy('invalidPublicPath', 'Choose a public path outside /api, /uploads, and /health.'), 'error')
-        return
+        return refuseSave('invalidPublicPath', 'Choose a public path outside /api, /uploads, and /health.', 'customer_portal_path')
       }
       if (
         !editorDraft.customer_portal_show_catalog
@@ -2398,15 +2494,14 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
         && !editorDraft.customer_portal_show_faq
         && !editorDraft.customer_portal_ai_enabled
       ) {
-        notify(copy('portalVisibilityRequired', 'Enable at least one customer section before saving the website.'), 'error')
-        return
+        return refuseSave('portalVisibilityRequired', 'Enable at least one customer section before saving the website.', 'customer_portal_show_catalog')
       }
 
       const sanitizedRefreshSeconds = Math.min(120, Math.max(5, Math.floor(toNumber(editorDraft.customer_portal_refresh_seconds, 20))))
       const sanitizedLowStockThreshold = Math.max(0, toNumber(editorDraft.customer_portal_low_stock_threshold, 10))
       const sanitizedOutOfStockThreshold = Math.max(0, toNumber(editorDraft.customer_portal_out_of_stock_threshold, 0))
-      const sanitizedGridMobile = Math.min(3, Math.max(1, Math.round(toNumber(editorDraft.customer_portal_grid_columns_mobile, 1))))
-      const sanitizedGridDesktop = Math.min(8, Math.max(2, Math.round(toNumber(editorDraft.customer_portal_grid_columns_desktop, 4))))
+      const sanitizedGridMobile = clampToRange(Math.round(toNumber(editorDraft.customer_portal_grid_columns_mobile, 1)), STORED_PHONE_COLUMNS)
+      const sanitizedGridDesktop = clampToRange(Math.round(toNumber(editorDraft.customer_portal_grid_columns_desktop, 4)), PORTAL_GRID_LIMITS.desktop)
       const sanitizedHighlightRankLimit = Math.max(1, Math.min(10, Math.round(toNumber(editorDraft.customer_portal_highlight_rank_limit, 3))))
       const sanitizedLogoSize = Math.min(144, Math.max(48, Math.round(toNumber(editorDraft.customer_portal_logo_size, 80))))
       const sanitizedLogoZoom = Math.min(180, Math.max(80, Math.round(toNumber(editorDraft.customer_portal_logo_zoom, 100))))
@@ -2415,12 +2510,10 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
       const sanitizedPublicUrl = String(editorDraft.customer_portal_public_url || '').trim()
       const sanitizedGoogleMapEmbed = normalizeGoogleMapsEmbed(editorDraft.customer_portal_google_maps_embed || '')
       if (sanitizedPublicUrl && !/^https?:\/\/.+/i.test(sanitizedPublicUrl)) {
-        notify(copy('publicUrlInvalid', 'Use a full https:// URL for the public website address, or leave it empty.'), 'error')
-        return
+        return refuseSave('publicUrlInvalid', 'Use a full https:// URL for the public website address, or leave it empty.', 'customer_portal_public_url')
       }
       if (editorDraft.customer_portal_google_maps_embed && !sanitizedGoogleMapEmbed) {
-        notify(copy('mapEmbedHint', 'Paste a Google Maps link or embed URL. The website will show it as an interactive map card.'), 'error')
-        return
+        return refuseSave('mapEmbedHint', 'Paste a Google Maps link or embed URL. The website will show it as an interactive map card.', 'customer_portal_google_maps_embed')
       }
       let sanitizedTranslations = '{}'
       try {
@@ -2431,8 +2524,15 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
         }
         sanitizedTranslations = stringifyPortalTranslations(parsedTranslations)
       } catch (_) {
-        notify(copy('translationJsonInvalid', 'Translation overrides must be valid JSON.'), 'error')
-        return
+        return refuseSave('translationJsonInvalid', 'Translation overrides must be valid JSON.', 'customer_portal_translations')
+      }
+      const aboutImagePath = siteUploadPath(
+        sanitizePortalMediaValue(editorDraft.customer_portal_about_image, config.aboutImage || ''),
+        (path) => resolveCatalogAssetUrl(path),
+      )
+      if (aboutImagePath === null) {
+        showAboutImageRefusal(String(editorDraft.customer_portal_about_image || ''))
+        return { ok: false, field: 'customer_portal_about_image', messageKey: 'aboutImageInvalid' }
       }
 
       const sanitizedLogoImage = sanitizePortalMediaValue(editorDraft.customer_portal_logo_image, previewConfig.logoImage || '')
@@ -2453,10 +2553,17 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
           item?.mediaUrl,
           previewPromoItemMap.get(String(item?.id || ''))?.mediaUrl || '',
         ),
-        linkUrl: normalizeExternalUrl(item?.linkUrl || ''),
+        linkUrl: String(item?.linkUrl || '').trim(),
       }))
+      const refusedLink = findUnsafeLink({ logo: sanitizedLogoImage, cover: sanitizedCoverImage, aboutBlocks: sanitizedAboutBlocks, promoItems: sanitizedPromoItems })
+      if (refusedLink) {
+        setRefusedLink(refusedLink)
+        setActiveEditorSection(sectionForLinkField(refusedLink.field))
+        return refuseSave('web_editor_link_invalid', 'Use a full https:// link or a picture from this site.', refusedLink.field)
+      }
 
       setEditorSaving(true)
+      const sentDraft: EditorDraft = { ...editorDraft, ...privateAiFormValues(privateAi) }
       // `config` is the last state actually confirmed from the server
       // (before this save's edits are applied) -- `buildDraft(config)`
       // reuses the exact same flat-key transform this save's payload below
@@ -2535,6 +2642,8 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
         customer_portal_show_about: editorDraft.customer_portal_show_about ? 'true' : 'false',
         customer_portal_about_title: String(editorDraft.customer_portal_about_title || '').trim(),
         customer_portal_about_content: String(editorDraft.customer_portal_about_content || '').trim(),
+        customer_portal_about_image: aboutImagePath,
+        customer_portal_about_image_alt: String(editorDraft.customer_portal_about_image_alt || '').trim(),
         customer_portal_product_caution_default: String(editorDraft.customer_portal_product_caution_default || '').trim(),
         customer_portal_product_need_more_details_default: String(editorDraft.customer_portal_product_need_more_details_default || '').trim(),
         customer_portal_about_blocks: serializeAboutBlocks(sanitizedAboutBlocks),
@@ -2569,8 +2678,8 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
         customer_portal_stock_threshold_mode: editorDraft.customer_portal_stock_threshold_mode === 'global' ? 'global' : 'product',
         customer_portal_low_stock_threshold: String(sanitizedLowStockThreshold),
         customer_portal_out_of_stock_threshold: String(sanitizedOutOfStockThreshold),
-        customer_portal_grid_columns_mobile: String(Math.min(3, Math.max(1, sanitizedGridMobile))),
-        customer_portal_grid_columns_desktop: String(Math.min(8, Math.max(2, sanitizedGridDesktop))),
+        customer_portal_grid_columns_mobile: String(sanitizedGridMobile),
+        customer_portal_grid_columns_desktop: String(sanitizedGridDesktop),
         customer_portal_submission_enabled: editorDraft.customer_portal_submission_enabled ? 'true' : 'false',
         customer_portal_submission_reward_points: String(Math.max(0, Math.floor(toNumber(editorDraft.customer_portal_submission_reward_points, previewConfig.submissionRewardPoints || 5)))),
         customer_portal_submission_instructions: editorDraft.customer_portal_submission_instructions || '',
@@ -2580,41 +2689,45 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
       // the Worker otherwise keeps a blank for them as stored.
       const privateAiChanges = privateAiSaveChanges(privateAi)
       const savePayload = Object.fromEntries(
-        Object.entries({ ...fullSavePayload, ...privateAiChanges.updates }).filter(([key]) => canWriteSettingKey(key, hasPermission)),
+        Object.entries({ ...fullSavePayload, ...privateAiChanges.updates }).filter(([key]) => canWriteSettingKey(key, hasPermission))
+          .filter(([key]) => isLoadedOrEditedKey(key, staffSettingsRef.current, editedKeysRef.current)),
       )
       const clearKeys = privateAiChanges.clearKeys.filter((key) => Object.prototype.hasOwnProperty.call(savePayload, key))
       const result = await saveSettings(savePayload, { baselineSettings, clearKeys }) as LegacyCatalogRecord
       if (result?.conflict) {
-        notify(copy('portalSettingsConflict', 'Website settings changed on another device. Review the latest values in Settings, then retry your save.'), 'error')
-        return
+        return refuseSave('portalSettingsConflict', 'Website settings changed on another device. Review the latest values in Settings, then retry your save.')
       }
       // saveSettings does not throw on a failed write: it shows its own error
       // and answers { success: false }. Everything below marks the draft as
       // saved (posts and their order included), so a failed write stops here
       // and the edits stay unsaved for another try.
-      if (result?.success === false) return
+      if (isAboutImageRefusal(result)) showAboutImageRefusal(String(sentDraft.customer_portal_about_image || ''))
+      if (result?.success === false) return { ok: false }
       // What this save sent is now the stored value; a read begun before it
       // landed would bring back the old one, so it is dropped.
       invalidateTrackedRequest(privateAiReadRef)
       setPrivateAi((current) => settlePrivateAiSave(current, savePayload))
-      setDraft('customer_portal_logo_image', sanitizedLogoImage)
-      setDraft('customer_portal_favicon_image', sanitizedFaviconImage)
-      setDraft('customer_portal_cover_image', sanitizedCoverImage)
-      setAboutBlocksDraft(sanitizedAboutBlocks)
-      setPromoItemsDraft(sanitizedPromoItems)
-      const sanitizedDraft = {
-        ...editorDraft,
+      staffSettingsRef.current = { ...staffSettingsRef.current, ...savePayload }
+      setRefusedAboutImage(null)
+      setRefusedLink(null)
+      const stillEdited = settleSavedEdits(editedKeysRef.current, sentDraft, editorFormRef.current)
+      replaceEditedKeys(stillEdited)
+      const savedMediaValues = {
         customer_portal_logo_image: sanitizedLogoImage,
         customer_portal_favicon_image: sanitizedFaviconImage,
         customer_portal_cover_image: sanitizedCoverImage,
+        customer_portal_about_image: aboutImagePath,
         customer_portal_about_blocks: serializeAboutBlocks(sanitizedAboutBlocks),
         customer_portal_promo_items: serializePromoItems(sanitizedPromoItems),
       }
-      setConfig((current) => applyDraft(current, sanitizedDraft))
-      setEditorDirty(false)
-      await loadPortal()
+      const settledMediaValues = Object.fromEntries(Object.entries(savedMediaValues).filter(([key]) => !stillEdited.has(key)))
+      setEditorDraft((current) => replaceDraftValues(current, settledMediaValues))
+      setConfig((current) => applyDraft(current, replaceDraftValues(editorDraft, savedMediaValues)))
+      await loadPortal().catch((error) => notify(getCatalogErrorMessage(error, 'Failed to load the website'), 'error'))
+      return { ok: true }
     } catch (error) {
       notify(getCatalogErrorMessage(error, 'Failed to save portal'), 'error')
+      return { ok: false }
     } finally {
       setEditorSaving(false)
     }
@@ -2881,8 +2994,24 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
       units: membershipData?.points?.redeemableUnits ?? 0,
     }
   )
-  const mobileGridColumns = Math.min(3, Math.max(1, Math.round(toNumber(displayConfig.gridColumnsMobile, 1))))
-  const desktopGridColumns = Math.min(10, Math.max(2, Math.round(toNumber(displayConfig.gridColumnsDesktop, 4))))
+  const savePortalDraftRef = useRef(savePortalDraft)
+  savePortalDraftRef.current = savePortalDraft
+  const discardPortalDraftRef = useRef(discardPortalDraft)
+  discardPortalDraftRef.current = discardPortalDraft
+  useEffect(() => {
+    if (publicView || !canEdit) return undefined
+    return registerDirtyWork({
+      key: WEBSITE_EDITOR_WORK_KEY,
+      pageId: 'catalog',
+      label: t('studioTitle'),
+      isDirty: () => editedKeysRef.current.size > 0,
+      save: async () => (await savePortalDraftRef.current()).ok,
+      discard: () => discardPortalDraftRef.current(),
+    })
+  }, [publicView, canEdit, editorDirty, t])
+
+  const mobileGridColumns = clampToRange(Math.round(toNumber(displayConfig.gridColumnsMobile, 1)), STORED_PHONE_COLUMNS)
+  const desktopGridColumns = clampToRange(Math.round(toNumber(displayConfig.gridColumnsDesktop, 4)), PORTAL_GRID_LIMITS.desktop)
   const compactTwoColumnMobile = mobileGridColumns === 2
   const productGridClass = `${getPortalMobileGridClass(mobileGridColumns)} ${getPortalGridClass(desktopGridColumns)}`
   const compactCatalogCards = desktopGridColumns >= 5 || (desktopGridColumns >= 4 && mobileGridColumns >= 2)
@@ -3182,7 +3311,9 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     const effectiveEditorSection = availableSectionIds.includes(activeEditorSection)
       ? activeEditorSection
       : (availableSectionIds[0] || 'branding')
+    const aboutImageRefused = refusedAboutImage !== null && String(editorDraft.customer_portal_about_image || '') === refusedAboutImage
     const editorContextValue = {
+      editorLimits: PORTAL_GRID_LIMITS,
       aboutBlocks,
       activeEditorSection: effectiveEditorSection,
       canEditConfig,
@@ -3200,6 +3331,9 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
       dragAboutBlockId,
       dragPromoItemId,
       editorDirty,
+      editedKeys,
+      aboutImageRefused,
+      refusedLink,
       editorDraft: { ...editorDraft, ...privateAiFormValues(privateAi) },
       editorSaving,
       editorSections,
@@ -3240,6 +3374,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
       updateAboutBlock,
       updateFaqItem,
       updatePromoItem,
+      updatePromoItemFields,
       uploadAboutBlockMedia,
       uploadDraftImage,
       uploadPromoItemMedia,

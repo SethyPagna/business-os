@@ -1420,8 +1420,6 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
           }
         } catch (_) {}
         authRecoveryRef.current = false
-        if (disposed || !isActorReadScopeCurrent(recoveryScope, false)) return
-        await handleUnauthorizedSession(message)
       }, 180)
     }
     window.addEventListener('sync:update', onUpdate)

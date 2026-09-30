@@ -174,8 +174,10 @@ export async function createSession(
 // device instead of the whole account.
 //
 // A session re-issued by POST /session-duration lives on the same browser as
-// the sign-in it came from, so the whole sign-in family goes too. That also
-// reaches rows re-issued before the route copied the device id (NULL there).
+// the sign-in it came from, so the whole sign-in family goes too. A re-issue
+// minted before the route copied the device id (NULL there) is reached only
+// while its sign-in row survives ephemeral retention; once that row is purged,
+// ops/queries/session-device-unlinked.sql lists it as a_family_orphan.
 export async function revokeSessionsForDevice(env: Env, userId: number, deviceId: string | null | undefined): Promise<number> {
   if (!deviceId || !deviceId.trim()) return 0
   const db = getDb(env)

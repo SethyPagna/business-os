@@ -29,6 +29,8 @@ export const PORTAL_ABOUT_KEYS = new Set<string>([
   'customer_portal_about_content',
   'customer_portal_about_blocks',
   'customer_portal_show_about',
+  'customer_portal_about_image',
+  'customer_portal_about_image_alt',
 ])
 
 export type PortalBucket = 'portal_posts' | 'portal_faq' | 'portal_about' | 'customer_portal'

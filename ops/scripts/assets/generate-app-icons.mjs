@@ -1,286 +1,302 @@
 #!/usr/bin/env node
-// Regenerates every app/PWA icon in frontend/public from the two brand
-// source logos.
+// Renders the versioned PWA icons in frontend/public from the tracked brand art
+// in frontend/icon logo images.
 //
-// Two brands, deliberately kept apart -- see frontend/public's own icons:
-//   Business OS      -> the ADMIN app (admin.leangbeauty.com).
-//                       Served by index.html + the static manifest.json.
-//   Leang Cosmetics  -> the PUBLIC storefront (leangbeauty.com).
-//                       The route bootstrap and PublicCatalogPage.tsx swap
-//                       to the static portal manifest and these fixed icons.
+// Usage:  node ops/scripts/assets/generate-app-icons.mjs [--check] [--out-dir=<dir>]
+//   --check           render in memory and fail if any output differs from disk
+//   --out-dir=<dir>   write (or check) there instead of frontend/public
 //
-// Why this is a script and not a one-off: both source logos are 1254x1254
-// PNGs with the artwork drawn as a rounded square on an opaque BLACK
-// background and no alpha channel. Shipping them as-is puts black corners on
-// every favicon and home-screen icon. This trims that surround, cuts the
-// rounded corners to real transparency, and emits the size set the manifest
-// and index.html actually reference -- reproducibly, so re-running after a
-// logo tweak cannot drift from what is checked in.
-//
-// App icons are deliberately EXEMPT from the 40KB media budget
-// (tests/assetCompression.test.ts's ICON_BUDGET_EXEMPTIONS) because they are
-// fetched once per install and then stared at as a static image, so these are
-// written at full quality rather than squeezed.
-//
-// Usage:  node ops/scripts/assets/generate-app-icons.mjs [--check]
-//   --check  re-render into memory and diff against what is on disk, failing
-//            instead of writing. Use in CI to catch a hand-edited icon that
-//            no longer matches its source logo.
+// The staff app keeps its BO art byte-for-byte (owner, 28 Sep 2026):
+// icon-192.png, icon-512.png, admin-favicon-v1.ico and admin-apple-touch-icon-v1.png
+// are not rendered here, because Business-os.png no longer reproduces them.
 
 import { Buffer } from 'node:buffer'
 import fs from 'node:fs/promises'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { createRequire } from 'node:module'
 
-// sharp lives in the Worker project's node_modules (it is a build/ops tool
-// here, not a frontend runtime dependency -- the frontend never bundles it).
 const require = createRequire(import.meta.url)
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..')
 const sharp = require(path.join(REPO, 'cloudflare', 'node_modules', 'sharp'))
 
+const SOURCE_DIR = process.env.BUSINESS_OS_BRAND_ASSET_DIR || path.join(REPO, 'frontend', 'icon logo images')
 const PUBLIC_DIR = path.join(REPO, 'frontend', 'public')
-const CHECK_ONLY = process.argv.includes('--check')
+const OUT_DIR_FLAG = '--out-dir='
 
-// Corner radius as a fraction of the icon width. Measured off both source
-// logos (~24% and ~26%); 23% sits just inside both so the mask never leaves a
-// sliver of the original black corner behind.
+// Farthest mark pixel from the centre as a fraction of the side; a maskable
+// mark stays inside the 0.40 safe circle every launcher mask keeps.
+const MASKABLE_MARK_REACH = 0.38
+const ROUNDED_MARK_REACH = 0.46
+const APPLE_MARK_REACH = 0.40
+const FAVICON_MARK_REACH = 0.47
+const ALPHA_FLOOR = 0.05
+const MIN_MARK_COMPONENT_PIXELS = 64
 const CORNER_RADIUS_RATIO = 0.23
-
-// A maskable icon is cropped by the OS to whatever shape the launcher uses,
-// so its artwork has to sit inside the middle ~80% ("safe zone") with the rest
-// bleeding to a flat background. 0.78 keeps a little margin beyond the spec's
-// minimum.
-const MASKABLE_ARTWORK_SCALE = 0.78
-
-// Every icon is written LOSSLESS -- full colour, no palette, per the owner's
-// "better quality" exemption above -- but with libpng's per-row adaptive
-// filter selection, which the default encode left off. That alone took the
-// shipped set from 1.69 MB to 1.22 MB (I6-6, Sep 2026) with every decoded
-// pixel byte-identical; the 512 px icons are fetched at install and by the
-// service worker's app-shell precache.
-const LOSSLESS_PNG = { compressionLevel: 9, adaptiveFiltering: true, palette: false }
-
-const BRANDS = {
-  businessOs: {
-    source: 'Business-os.png',
-    // Sampled just inside the rounded rect on the source art, so a maskable
-    // icon's bleed matches the logo's own edge instead of guessing a colour.
-    maskableBackground: '#031448',
-  },
-  leangCosmetics: {
-    source: 'Leang Cosmetics_1.png',
-    maskableBackground: '#fde2e8',
-  },
-}
-
-// Every file this script owns. Anything referenced by index.html or
-// manifest.json must appear here, otherwise it silently keeps whatever stale
-// art it had.
-const OUTPUTS = [
-  // --- admin app (Business OS) ---
-  { file: 'icon-192.png', brand: 'businessOs', size: 192, kind: 'rounded' },
-  { file: 'icon-512.png', brand: 'businessOs', size: 512, kind: 'rounded' },
-  // icon.png is the generic fallback some crawlers/OSes probe for.
-  { file: 'icon.png', brand: 'businessOs', size: 512, kind: 'rounded' },
-  // iOS ignores transparency on apple-touch-icon and composites it onto
-  // black, so this one is rendered FLAT on the brand background instead of
-  // with cut corners. iOS applies its own squircle mask on top.
-  { file: 'apple-touch-icon.png', brand: 'businessOs', size: 180, kind: 'flat' },
-  { file: 'icon-192-maskable.png', brand: 'businessOs', size: 192, kind: 'maskable' },
-  { file: 'icon-512-maskable.png', brand: 'businessOs', size: 512, kind: 'maskable' },
-
-  // --- public storefront (Leang Cosmetics) ---
-  { file: 'leang-cosmetics-icon-192.png', brand: 'leangCosmetics', size: 192, kind: 'rounded' },
-  { file: 'leang-cosmetics-icon-512.png', brand: 'leangCosmetics', size: 512, kind: 'rounded' },
-  { file: 'leang-cosmetics-icon-192-maskable.png', brand: 'leangCosmetics', size: 192, kind: 'maskable' },
-  { file: 'leang-cosmetics-icon-512-maskable.png', brand: 'leangCosmetics', size: 512, kind: 'maskable' },
-  // Versioned filename defeats iOS's unusually sticky home-screen icon URL
-  // cache after the old admin icon was mistakenly served on the public root.
-  { file: 'leang-cosmetics-apple-touch-icon-v1.png', brand: 'leangCosmetics', size: 180, kind: 'flat' },
-]
-
-// Sizes packed into favicon.ico. 16/32 are what browsers actually draw in a
-// tab and bookmark bar; 48 covers Windows shortcuts.
 const FAVICON_SIZES = [16, 32, 48]
 
-function resolveSource(fileName) {
-  // Brand logos live outside the repo (they are large originals, and the repo
-  // only carries the derived icons). Overridable so this can run in CI
-  // against a checked-out asset directory.
-  const dir = process.env.BUSINESS_OS_BRAND_ASSET_DIR || path.join(REPO, '..')
-  return path.join(dir, fileName)
+// Icons stay lossless (owner, 23 Aug 2026).
+const LOSSLESS_PNG = { compressionLevel: 9, adaptiveFiltering: true, palette: false }
+
+export const BRANDS = {
+  staff: {
+    source: 'Business-os.png',
+    // The BO glyph, inside the tile.
+    box: { left: 180, top: 300, width: 931, height: 621 },
+    key: (red, green, blue) => Math.max(red, green, blue),
+    keyRange: [80, 150],
+    field: '#031448',
+  },
+  shop: {
+    source: 'leang-cosmetics-logo-2026-09-28.webp',
+    // The mark only: above the words, inside the frame line.
+    box: { left: 240, top: 90, width: 861, height: 833 },
+    key: (red, green) => red - green,
+    keyRange: [70, 120],
+    // Median of the logo's field in a ring around the mark.
+    field: '#fee6ec',
+  },
 }
 
-// The artwork is drawn on opaque black with no alpha. Find the real bounds of
-// the non-black pixels rather than trusting sharp's trim(), which keys off a
-// single corner pixel and gets confused by the soft glow on the Leang logo
-// bleeding into the edges.
-async function findArtworkBounds(sourcePath) {
-  const { data, info } = await sharp(sourcePath).ensureAlpha().raw().toBuffer({ resolveWithObject: true })
-  const { width, height, channels } = info
-  // Sum of RGB. Deliberately loose: the drop shadow around the rounded rect
-  // fades to near-black, and including it would leave a grey halo.
-  const THRESHOLD = 90
+export const OUTPUTS = [
+  { file: 'icon-192-maskable-v2.png', brand: 'staff', kind: 'maskable', size: 192 },
+  { file: 'icon-512-maskable-v2.png', brand: 'staff', kind: 'maskable', size: 512 },
+  { file: 'leang-cosmetics-icon-192-v2.png', brand: 'shop', kind: 'rounded', size: 192 },
+  { file: 'leang-cosmetics-icon-512-v2.png', brand: 'shop', kind: 'rounded', size: 512 },
+  { file: 'leang-cosmetics-icon-192-maskable-v2.png', brand: 'shop', kind: 'maskable', size: 192 },
+  { file: 'leang-cosmetics-icon-512-maskable-v2.png', brand: 'shop', kind: 'maskable', size: 512 },
+  { file: 'leang-cosmetics-apple-touch-icon-v2.png', brand: 'shop', kind: 'flat', size: 180 },
+  { file: 'leang-cosmetics-favicon-v2.ico', brand: 'shop', kind: 'favicon' },
+]
+
+export const CONVENTIONAL_ALIASES = {
+  'favicon.ico': 'leang-cosmetics-favicon-v2.ico',
+  'apple-touch-icon.png': 'leang-cosmetics-apple-touch-icon-v2.png',
+  'icon.png': 'leang-cosmetics-icon-512-v2.png',
+}
+
+const MARK_REACH_BY_KIND = { maskable: MASKABLE_MARK_REACH, rounded: ROUNDED_MARK_REACH, flat: APPLE_MARK_REACH, favicon: FAVICON_MARK_REACH }
+
+function hexToRgb(hex) {
+  const value = Number.parseInt(hex.slice(1), 16)
+  return [(value >> 16) & 255, (value >> 8) & 255, value & 255]
+}
+
+const clampByte = (value) => Math.max(0, Math.min(255, Math.round(value)))
+
+function keyAlpha(keyValue, [low, high]) {
+  const alpha = Math.max(0, Math.min(1, (keyValue - low) / (high - low)))
+  return alpha > ALPHA_FLOOR ? alpha : 0
+}
+
+// What the key finds touching the box edge (the staff tile's edge glow, the shop
+// poster's light streaks) or no bigger than a speck is background, not mark.
+function keepMarkComponents(alpha, width, height) {
+  const visited = new Uint8Array(width * height)
+  const stack = []
+  for (let start = 0; start < alpha.length; start += 1) {
+    if (visited[start] || alpha[start] === 0) continue
+    const component = []
+    let touchesEdge = false
+    visited[start] = 1
+    stack.push(start)
+    while (stack.length > 0) {
+      const index = stack.pop()
+      component.push(index)
+      const x = index % width
+      const y = (index - x) / width
+      if (x === 0 || y === 0 || x === width - 1 || y === height - 1) touchesEdge = true
+      for (let dy = -1; dy <= 1; dy += 1) {
+        for (let dx = -1; dx <= 1; dx += 1) {
+          const nx = x + dx
+          const ny = y + dy
+          if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue
+          const neighbour = ny * width + nx
+          if (visited[neighbour] || alpha[neighbour] === 0) continue
+          visited[neighbour] = 1
+          stack.push(neighbour)
+        }
+      }
+    }
+    if (touchesEdge || component.length < MIN_MARK_COMPONENT_PIXELS) for (const index of component) alpha[index] = 0
+  }
+}
+
+async function liftMark(brandName) {
+  const { source, box, key, keyRange, field } = BRANDS[brandName]
+  const pixels = await sharp(path.join(SOURCE_DIR, source)).removeAlpha().extract(box).raw().toBuffer()
+  const { width, height } = box
+  const fieldRgb = hexToRgb(field)
+
+  const alpha = new Float64Array(width * height)
+  for (let index = 0; index < alpha.length; index += 1) {
+    const offset = index * 3
+    alpha[index] = keyAlpha(key(pixels[offset], pixels[offset + 1], pixels[offset + 2]), keyRange)
+  }
+  keepMarkComponents(alpha, width, height)
+
   let minX = width
   let minY = height
   let maxX = -1
   let maxY = -1
-  for (let y = 0; y < height; y += 1) {
-    for (let x = 0; x < width; x += 1) {
-      const i = (y * width + x) * channels
-      if (data[i] + data[i + 1] + data[i + 2] > THRESHOLD) {
-        if (x < minX) minX = x
-        if (x > maxX) maxX = x
-        if (y < minY) minY = y
-        if (y > maxY) maxY = y
+  for (let index = 0; index < alpha.length; index += 1) {
+    if (alpha[index] === 0) continue
+    const x = index % width
+    const y = (index - x) / width
+    minX = Math.min(minX, x)
+    maxX = Math.max(maxX, x)
+    minY = Math.min(minY, y)
+    maxY = Math.max(maxY, y)
+  }
+  if (maxX < 0) throw new Error(`${source}: the key found no mark inside its box`)
+
+  const bounds = { left: minX, top: minY, width: maxX - minX + 1, height: maxY - minY + 1 }
+  // Equal width and height parity lets placedMark centre the crop on a whole
+  // pixel; the padding row is transparent.
+  const cropWidth = bounds.width
+  const cropHeight = bounds.height + ((bounds.width - bounds.height) % 2 === 0 ? 0 : 1)
+  const rgba = Buffer.alloc(cropWidth * cropHeight * 4)
+  let reach = 0
+  for (let y = 0; y < bounds.height; y += 1) {
+    for (let x = 0; x < bounds.width; x += 1) {
+      const index = (y + minY) * width + (x + minX)
+      const a = alpha[index]
+      if (a === 0) continue
+      reach = Math.max(reach, Math.hypot(Math.abs(x + 0.5 - cropWidth / 2) + 0.5, Math.abs(y + 0.5 - cropHeight / 2) + 0.5))
+      const target = (y * cropWidth + x) * 4
+      // Un-blended against the field it lands on, so every kept pixel
+      // composites back to its source colour.
+      for (let channel = 0; channel < 3; channel += 1) {
+        rgba[target + channel] = clampByte((pixels[index * 3 + channel] - (1 - a) * fieldRgb[channel]) / a)
       }
+      rgba[target + 3] = clampByte(a * 255)
     }
   }
-  if (maxX < 0) throw new Error(`${path.basename(sourcePath)}: found no non-black pixels`)
-  // Force a square crop centred on the artwork -- the two source logos are
-  // square to within a few pixels, and a non-square extract would make the
-  // rounded-corner mask asymmetric.
-  const side = Math.max(maxX - minX + 1, maxY - minY + 1)
-  const cx = Math.round((minX + maxX) / 2)
-  const cy = Math.round((minY + maxY) / 2)
-  const left = Math.max(0, Math.min(width - side, cx - Math.round(side / 2)))
-  const top = Math.max(0, Math.min(height - side, cy - Math.round(side / 2)))
-  return { left, top, width: Math.min(side, width - left), height: Math.min(side, height - top) }
+  return { rgba, width: cropWidth, height: cropHeight, reach, bounds }
 }
 
-function roundedRectMask(size) {
-  const r = Math.round(size * CORNER_RADIUS_RATIO)
-  const svg = `<svg width="${size}" height="${size}" xmlns="http://www.w3.org/2000/svg">`
-    + `<rect x="0" y="0" width="${size}" height="${size}" rx="${r}" ry="${r}" fill="#ffffff"/>`
-    + `</svg>`
-  return Buffer.from(svg)
+const liftedMarks = new Map()
+function liftedMark(brandName) {
+  if (!liftedMarks.has(brandName)) liftedMarks.set(brandName, liftMark(brandName))
+  return liftedMarks.get(brandName)
 }
 
-async function squareArtwork(sourcePath, size) {
-  const bounds = await findArtworkBounds(sourcePath)
-  return sharp(sourcePath)
-    .extract(bounds)
-    .resize(size, size, { fit: 'fill', kernel: 'lanczos3' })
-    .ensureAlpha()
+// One square canvas centred on the mark, sized so its farthest pixel sits at
+// markReach x side, then one resize: no rounded offsets move the mark.
+async function placedMark(brandName, size, markReach) {
+  const mark = await liftedMark(brandName)
+  let side = Math.ceil(mark.reach / markReach)
+  if ((side - mark.width) % 2 !== 0) side += 1
+  const left = (side - mark.width) / 2
+  const top = (side - mark.height) / 2
+  // Two passes because sharp always extends after it resizes.
+  const canvas = await sharp(mark.rgba, { raw: { width: mark.width, height: mark.height, channels: 4 } })
+    .extend({ left, top, right: left, bottom: top, background: { r: 0, g: 0, b: 0, alpha: 0 } })
+    .raw()
+    .toBuffer()
+  return sharp(canvas, { raw: { width: side, height: side, channels: 4 } })
+    .resize(size, size, { kernel: 'lanczos3' })
     .png()
     .toBuffer()
 }
 
-async function render({ brand, size, kind }) {
-  const { source, maskableBackground } = BRANDS[brand]
-  const sourcePath = resolveSource(source)
-
-  if (kind === 'maskable') {
-    const inner = Math.round(size * MASKABLE_ARTWORK_SCALE)
-    const art = await squareArtwork(sourcePath, inner)
-    // Composite the cut-corner artwork onto a full-bleed brand background so
-    // the launcher's mask only ever crops flat colour.
-    const masked = await sharp(art)
-      .composite([{ input: roundedRectMask(inner), blend: 'dest-in' }])
-      .png()
-      .toBuffer()
-    const offset = Math.round((size - inner) / 2)
-    const composed = await sharp({
-      create: { width: size, height: size, channels: 4, background: maskableBackground },
-    })
-      .composite([{ input: masked, left: offset, top: offset }])
-      .png()
-      .toBuffer()
-    // Full-bleed background: every alpha byte is 255, so the channel carries
-    // no information and dropping it changes no pixel. A separate pass, not a
-    // chained removeAlpha(), because sharp does not apply operations in call
-    // order and composite() must see the alpha channel.
-    return sharp(composed).removeAlpha().png(LOSSLESS_PNG).toBuffer()
-  }
-
-  const art = await squareArtwork(sourcePath, size)
-
-  if (kind === 'flat') {
-    // No transparency: flatten onto the brand background (iOS composites
-    // apple-touch-icon onto black otherwise).
-    return sharp(art)
-      .flatten({ background: maskableBackground })
-      .png(LOSSLESS_PNG)
-      .toBuffer()
-  }
-
-  // 'rounded': cut the corners to real transparency.
-  return sharp(art)
-    .composite([{ input: roundedRectMask(size), blend: 'dest-in' }])
-    .png(LOSSLESS_PNG)
+async function markOnField(brandName, size, markReach) {
+  return sharp({ create: { width: size, height: size, channels: 4, background: BRANDS[brandName].field } })
+    .composite([{ input: await placedMark(brandName, size, markReach) }])
+    .png()
     .toBuffer()
 }
 
-// Minimal ICO container. sharp cannot write .ico, and the format is simple: a
-// 6-byte header, one 16-byte directory entry per image, then the payloads.
-// PNG payloads inside ICO are supported by every browser in this app's
-// support range (Vista+ / all evergreen browsers).
+function roundedRectMask(size) {
+  const radius = Math.round(size * CORNER_RADIUS_RATIO)
+  return Buffer.from(
+    `<svg width="${size}" height="${size}" xmlns="http://www.w3.org/2000/svg">`
+    + `<rect x="0" y="0" width="${size}" height="${size}" rx="${radius}" ry="${radius}" fill="#ffffff"/></svg>`,
+  )
+}
+
+export async function renderIconPng(brandName, kind, size) {
+  const composed = await markOnField(brandName, size, MARK_REACH_BY_KIND[kind])
+  if (kind === 'maskable' || kind === 'flat') {
+    // A separate pass, not a chained removeAlpha(): sharp does not apply
+    // operations in call order, and composite() must see the alpha channel.
+    return sharp(composed).removeAlpha().png(LOSSLESS_PNG).toBuffer()
+  }
+  return sharp(composed).composite([{ input: roundedRectMask(size), blend: 'dest-in' }]).png(LOSSLESS_PNG).toBuffer()
+}
+
 function buildIco(images) {
   const header = Buffer.alloc(6)
-  header.writeUInt16LE(0, 0) // reserved
-  header.writeUInt16LE(1, 2) // type 1 = icon
+  header.writeUInt16LE(0, 0)
+  header.writeUInt16LE(1, 2)
   header.writeUInt16LE(images.length, 4)
-
-  let offset = 6 + images.length * 16
-  const entries = []
-  for (const { size, data } of images) {
+  let offset = header.length + images.length * 16
+  const entries = images.map(({ size, data }) => {
     const entry = Buffer.alloc(16)
-    entry.writeUInt8(size >= 256 ? 0 : size, 0) // 0 means 256
-    entry.writeUInt8(size >= 256 ? 0 : size, 1)
-    entry.writeUInt8(0, 2) // palette count
-    entry.writeUInt8(0, 3) // reserved
-    entry.writeUInt16LE(1, 4) // colour planes
-    entry.writeUInt16LE(32, 6) // bits per pixel
+    entry.writeUInt8(size, 0)
+    entry.writeUInt8(size, 1)
+    entry.writeUInt16LE(1, 4)
+    entry.writeUInt16LE(32, 6)
     entry.writeUInt32LE(data.length, 8)
     entry.writeUInt32LE(offset, 12)
-    entries.push(entry)
     offset += data.length
-  }
+    return entry
+  })
   return Buffer.concat([header, ...entries, ...images.map((image) => image.data)])
 }
 
-async function main() {
+export async function renderIcon({ brand, kind, size }) {
+  if (kind !== 'favicon') return renderIconPng(brand, kind, size)
+  const images = []
+  for (const faviconSize of FAVICON_SIZES) images.push({ size: faviconSize, data: await renderIconPng(brand, kind, faviconSize) })
+  return buildIco(images)
+}
+
+export async function markMeasurements(brandName) {
+  const { bounds, reach } = await liftedMark(brandName)
+  return { bounds, reach }
+}
+
+async function renderAll() {
   const rendered = new Map()
+  for (const output of OUTPUTS) rendered.set(output.file, await renderIcon(output))
+  for (const [alias, twin] of Object.entries(CONVENTIONAL_ALIASES)) rendered.set(alias, rendered.get(twin))
+  return rendered
+}
 
-  for (const output of OUTPUTS) {
-    rendered.set(output.file, await render(output))
-  }
+async function main() {
+  const checkOnly = process.argv.includes('--check')
+  const outDirArgument = process.argv.find((argument) => argument.startsWith(OUT_DIR_FLAG))
+  const outDir = outDirArgument ? path.resolve(outDirArgument.slice(OUT_DIR_FLAG.length)) : PUBLIC_DIR
+  if (!checkOnly) await fs.mkdir(outDir, { recursive: true })
 
-  // favicon.ico -> the ADMIN brand, matching index.html's
-  // /favicon.ico?v=business-os. The public storefront replaces the favicon at
-  // runtime from portal settings, so it needs no .ico of its own.
-  const faviconImages = []
-  for (const size of FAVICON_SIZES) {
-    faviconImages.push({ size, data: await render({ brand: 'businessOs', size, kind: 'rounded' }) })
-  }
-  rendered.set('favicon.ico', buildIco(faviconImages))
-
-  let changed = 0
-  for (const [file, data] of rendered) {
-    const target = path.join(PUBLIC_DIR, file)
+  let differing = 0
+  for (const [file, data] of await renderAll()) {
+    const target = path.join(outDir, file)
     const existing = await fs.readFile(target).catch(() => null)
     if (existing && existing.equals(data)) {
       console.log(`  unchanged  ${file}`)
       continue
     }
-    changed += 1
-    if (CHECK_ONLY) {
-      console.log(`  DIFFERS    ${file}`)
+    differing += 1
+    if (checkOnly) {
+      console.log(`  ${existing ? 'DIFFERS' : 'MISSING'}    ${file}`)
       continue
     }
     await fs.writeFile(target, data)
-    console.log(`  wrote      ${file}  (${(data.length / 1024).toFixed(1)} KB)`)
+    console.log(`  wrote      ${file}  (${data.length} B)`)
   }
 
-  if (CHECK_ONLY && changed > 0) {
-    console.error(`\n${changed} icon(s) differ from their source logos. Run: node ops/scripts/assets/generate-app-icons.mjs`)
+  if (checkOnly && differing > 0) {
+    console.error(`\n${differing} icon(s) differ from their source art in ${outDir}. Run: node ops/scripts/assets/generate-app-icons.mjs`)
     process.exit(1)
   }
-  console.log(CHECK_ONLY ? '\nAll icons match their source logos.' : `\nDone -- ${changed} file(s) updated.`)
+  console.log(checkOnly ? `\nAll icons in ${outDir} match their source art.` : `\nDone -- ${differing} file(s) written to ${outDir}.`)
 }
 
-main().catch((error) => {
-  console.error(error)
-  process.exit(1)
-})
+if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+  main().catch((error) => {
+    console.error(error)
+    process.exit(1)
+  })
+}

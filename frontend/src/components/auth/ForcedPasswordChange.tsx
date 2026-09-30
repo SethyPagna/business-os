@@ -4,7 +4,10 @@ import LockKeyhole from 'lucide-react/dist/esm/icons/lock-keyhole.js'
 import { useApp as useAppHook } from '../../AppContext.tsx'
 import { changeUserPassword } from '../../api/userAdminTransport.ts'
 import { withLoaderTimeout } from '../../utils/loaders.ts'
-import { currentPasswordRateLimitMessage } from '../users/currentPasswordErrors.ts'
+import { requestPasswordSave } from '../../utils/passwordManager.ts'
+import { newPasswordProblem, passwordProblemMessage } from '../../utils/passwordRules.ts'
+import NewPasswordFields from './password/NewPasswordFields.tsx'
+import { passwordChangeFailureMessage } from './password/ownPasswordChange.ts'
 import { requestPasswordRecoveryAfterSignOut } from './passwordRecoveryHandoff.ts'
 
 // S-auth4b: shown instead of the app while the signed-in account is marked
@@ -21,9 +24,11 @@ import { requestPasswordRecoveryAfterSignOut } from './passwordRecoveryHandoff.t
 // (the Worker lets the sign-out probe through for exactly this).
 //
 // The server is the authority on what is allowed, including which passwords
-// are publicly known; the checks below only save a round trip (length 6 =
-// cloudflare/src/lib/passwordPolicy.ts MIN_PASSWORD_LENGTH, the same literal
-// My Profile uses). No password rule of its own.
+// are publicly known; the check below only saves a round trip with the shared
+// new-password rule (utils/passwordRules.ts). No password rule of its own.
+//
+// On success the browser is asked to UPDATE the saved password before the app
+// leaves this screen: the one it holds is the publicly known one.
 
 type ForcedPasswordUser = { id?: number | string; username?: string; name?: string } | null
 type ForcedPasswordAppContext = {
@@ -33,15 +38,44 @@ type ForcedPasswordAppContext = {
 }
 const useApp = useAppHook as () => ForcedPasswordAppContext
 
-export const PASSWORD_KNOWN_LEAKED_CODE = 'password_known_leaked'
-
-function resultCode(value: unknown): string {
-  return value && typeof value === 'object' ? String((value as { code?: unknown }).code || '') : ''
+type Translate = (key: string, fallback: string) => string
+type ForcedPasswordChangeInput = {
+  user: ForcedPasswordUser
+  currentPassword: string
+  newPassword: string
+  confirmPassword: string
+  tr: Translate
 }
 
-function resultMessage(value: unknown): string {
-  if (value instanceof Error) return value.message
-  if (value && typeof value === 'object') return String((value as { error?: unknown; message?: unknown }).error || (value as { message?: unknown }).message || '')
+function inputError({ currentPassword, newPassword, confirmPassword, tr }: ForcedPasswordChangeInput): string {
+  if (!currentPassword) return tr('current_password_required_change', 'Current password is required to change password')
+  const problem = newPasswordProblem(newPassword)
+  if (problem) return passwordProblemMessage(problem, tr)
+  if (newPassword !== confirmPassword) return tr('new_password_confirm_mismatch', 'New password confirmation does not match')
+  return ''
+}
+
+// Resolves to the error to show, or '' once the password is changed and the
+// app has been told to leave this screen.
+export async function changeForcedPassword(input: ForcedPasswordChangeInput): Promise<string> {
+  const refused = inputError(input)
+  if (refused) return refused
+  const { user, currentPassword, newPassword, tr } = input
+  const userId = user?.id
+  if (userId === undefined || userId === null || userId === '') return ''
+  try {
+    const result = await withLoaderTimeout(
+      () => changeUserPassword(userId, { currentPassword, newPassword }),
+      'Change password',
+    )
+    if (result && typeof result === 'object' && (result as { success?: unknown }).success === false) return passwordChangeFailureMessage(result, tr)
+  } catch (changeError) {
+    return passwordChangeFailureMessage(changeError, tr)
+  }
+  await requestPasswordSave({ username: String(user?.username || ''), password: newPassword, displayName: user?.name })
+  // The Worker cleared must_change_password with the change; tell the app
+  // so it leaves this screen (AppContext merges user:updated into user).
+  window.dispatchEvent(new CustomEvent('user:updated', { detail: { ...(user || {}), must_change_password: 0 } }))
   return ''
 }
 
@@ -57,40 +91,13 @@ export default function ForcedPasswordChange() {
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
 
-  const explain = (value: unknown, fallback: string): string => {
-    if (resultCode(value) === PASSWORD_KNOWN_LEAKED_CODE) {
-      return tr('password_known_leaked', 'This password is publicly known. Choose a different password.')
-    }
-    if (resultCode(value) === 'incorrect_password') {
-      return tr('current_password_incorrect', 'The current password is not correct.')
-    }
-    return currentPasswordRateLimitMessage(value, tr) || resultMessage(value) || fallback
-  }
-
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault()
     if (saving) return
     setError('')
-    if (!currentPassword) return setError(tr('current_password_required_change', 'Current password is required to change password'))
-    if (newPassword.length < 6) return setError(tr('password_min_6', 'Use at least 6 characters for the new password.'))
-    if (newPassword !== confirmPassword) return setError(tr('new_password_confirm_mismatch', 'New password confirmation does not match'))
-    const userId = user?.id
-    if (userId === undefined || userId === null || userId === '') return
     setSaving(true)
     try {
-      const result = await withLoaderTimeout(
-        () => changeUserPassword(userId, { currentPassword, newPassword }),
-        'Change password',
-      )
-      if (result && typeof result === 'object' && (result as { success?: unknown }).success === false) {
-        setError(explain(result, tr('forced_password_change_failed', 'Could not change the password. Try again.')))
-        return
-      }
-      // The Worker cleared must_change_password with the change; tell the app
-      // so it leaves this screen (AppContext merges user:updated into user).
-      window.dispatchEvent(new CustomEvent('user:updated', { detail: { ...(user || {}), must_change_password: 0 } }))
-    } catch (changeError) {
-      setError(explain(changeError, tr('forced_password_change_failed', 'Could not change the password. Try again.')))
+      setError(await changeForcedPassword({ user, currentPassword, newPassword, confirmPassword, tr }))
     } finally {
       setSaving(false)
     }
@@ -110,19 +117,21 @@ export default function ForcedPasswordChange() {
           {tr('forced_password_change_body', 'The password you signed in with is publicly known. Choose a new one to keep using the app.')}
         </p>
         {user?.username ? <p className="truncate text-xs text-gray-500 dark:text-gray-400">{user.username}</p> : null}
-        <input type="text" name="username" autoComplete="username" value={String(user?.username || '')} readOnly hidden />
+        <input type="text" name="username" autoComplete="username" value={String(user?.username || '')} readOnly className="sr-only" tabIndex={-1} aria-hidden="true" />
         <div>
           <label htmlFor="forced-current-password" className="mb-1 block text-xs font-medium text-gray-700 dark:text-gray-300">{tr('current_password', 'Current password')}</label>
-          <input id="forced-current-password" type="password" className="input h-10" autoComplete="current-password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} />
+          <input id="forced-current-password" name="current_password" type="password" className="input h-10" autoComplete="current-password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} />
         </div>
-        <div>
-          <label htmlFor="forced-new-password" className="mb-1 block text-xs font-medium text-gray-700 dark:text-gray-300">{tr('new_password', 'New Password')}</label>
-          <input id="forced-new-password" type="password" className="input h-10" autoComplete="new-password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} />
-        </div>
-        <div>
-          <label htmlFor="forced-confirm-password" className="mb-1 block text-xs font-medium text-gray-700 dark:text-gray-300">{tr('confirm_new_password', 'Confirm new password')}</label>
-          <input id="forced-confirm-password" type="password" className="input h-10" autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} />
-        </div>
+        <NewPasswordFields
+          tr={tr}
+          idPrefix="forced-password"
+          password={newPassword}
+          confirm={confirmPassword}
+          onPasswordChange={setNewPassword}
+          onConfirmChange={setConfirmPassword}
+          identity={{ username: user?.username, name: user?.name }}
+          disabled={saving}
+        />
         {error ? <div role="alert" className="rounded-xl bg-red-50 p-3 text-sm text-red-600 dark:bg-red-900/20 dark:text-red-400">{error}</div> : null}
         <button type="submit" className="btn-primary h-10 w-full text-sm" disabled={saving}>
           {saving ? tr('saving', 'Saving...') : tr('change_password', 'Change password')}

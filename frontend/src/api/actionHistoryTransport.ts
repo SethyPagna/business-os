@@ -4,6 +4,23 @@ import { getClientDeviceInfo } from '../utils/deviceInfo.ts'
 
 type ActionHistoryPayload = Record<string, unknown>
 
+export type StockMovementRevertPreview = {
+  kind: 'movement' | 'stock_set' | 'stock_session'
+  movementId: number
+  historyId?: number
+  operationId?: string | number
+  direction?: 'undo' | 'redo'
+  expectedGeneration?: number
+  label?: string
+  lineCount: number
+}
+
+// Confirmation must use a fresh server decision, never a cached generation.
+export function getStockMovementRevertPreview(id: number): Promise<{ success: true; revert: StockMovementRevertPreview }> {
+  return apiFetch('GET', `/api/action-history/movements/${id}/revert-preview`)
+    .catch((error: unknown) => localizeReplayRefusal(error, 'undo'))
+}
+
 export function getActionHistoryDetails(id: string | number, offset = 0): Promise<unknown> {
   return route(`actionHistory:details:${id}:${offset}`, () => apiFetch('GET', `/api/action-history/${encodeURIComponent(String(id))}/details?offset=${offset}&limit=10`), null)
 }
@@ -66,6 +83,7 @@ const REPLAY_REFUSAL_KEYS: Readonly<Record<string, { undo: string; redo: string 
   undo_history_stale: { undo: 'undo_refused_history_stale', redo: 'redo_refused_history_stale' },
   undo_already_done: { undo: 'undo_refused_already_done', redo: 'redo_refused_already_done' },
   undo_history_unusable: { undo: 'undo_refused_history_unusable', redo: 'redo_refused_history_unusable' },
+  undo_preview_limit: { undo: 'movement_revert_history_required', redo: 'movement_revert_history_required' },
   undo_needs_original_tab: { undo: 'undo_refused_needs_original_tab', redo: 'redo_refused_needs_original_tab' },
   undo_refused: { undo: 'undo_refused_generic', redo: 'redo_refused_generic' },
 }

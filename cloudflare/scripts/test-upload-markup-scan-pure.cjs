@@ -257,10 +257,21 @@ for (const file of repoImages) {
   })
 }
 check('the repo sweep saw real images', () => assert.ok(repoImages.length >= 10, `only ${repoImages.length} images found`))
+// The e2e suite uploads and shows the images in frontend/e2e/fixtures; each
+// must be tracked so the sweep above scans it.
+check('every frontend/e2e/fixtures image is in the repo sweep', () => {
+  const fixtures = fs.readdirSync(path.join(repoRoot, 'frontend', 'e2e', 'fixtures')).filter((file) => IMAGE_FILE.test(file))
+  assert.ok(fixtures.length >= 1, 'no image found in frontend/e2e/fixtures')
+  for (const file of fixtures) assert.ok(repoImages.includes(`frontend/e2e/fixtures/${file}`), `${file} is not tracked, so it is not scanned`)
+})
 
 // Positive/negative controls on real PNGs: a 4-letter token inside the
-// compressed IDAT data is noise; '<script' there, or '<svg' in a text
-// chunk, is markup.
+// compressed IDAT data past the sniffing window is noise; '<script' there,
+// or '<svg' in a text chunk, is markup. The first 1445 bytes (the WHATWG
+// MIME-sniffing window) get every token whatever the part, so a PNG whose
+// IDAT lies inside the window (the 1,050-byte e2e about-poster.png) gets the
+// opposite control: '<svg ' planted there is markup.
+const PAST_WINDOW = 1445 + 64
 function pngChunks(data) {
   const chunks = []
   for (let offset = 8; offset + 12 <= data.length;) {
@@ -274,14 +285,27 @@ const realPngs = repoImages.filter((file) => /\.png$/i.test(file)).map((file) =>
 for (const [file, data] of realPngs) {
   const idat = pngChunks(data).find((chunk) => chunk.type === 'IDAT' && chunk.length > 64)
   if (!idat) continue
-  const at = idat.dataStart + (idat.length >> 1)
-  check(`real PNG ${file}: '<svg ' planted in IDAT is noise`, () => {
-    const copy = data.slice()
-    copy.set(enc('<svg '), at)
-    assert.equal(security.containsEmbeddedMarkup(copy), false)
-    copy.set(enc('<IMG\t'), at)
-    assert.equal(security.containsEmbeddedMarkup(copy), false)
-  })
+  const middle = idat.dataStart + (idat.length >> 1)
+  const pastWindow = Math.max(PAST_WINDOW, middle)
+  const at = pastWindow + 8 <= idat.dataStart + idat.length ? pastWindow : middle
+  if (at === pastWindow) {
+    check(`real PNG ${file}: '<svg ' planted in IDAT is noise`, () => {
+      const copy = data.slice()
+      copy.set(enc('<svg '), at)
+      assert.equal(security.containsEmbeddedMarkup(copy), false)
+      copy.set(enc('<IMG\t'), at)
+      assert.equal(security.containsEmbeddedMarkup(copy), false)
+    })
+  } else {
+    check(`real PNG ${file}: '<svg ' planted in IDAT inside the sniffing window is found`, () => {
+      assert.ok(at + 5 <= 1445, `IDAT middle ${at} is not inside the sniffing window`)
+      const copy = data.slice()
+      copy.set(enc('<svg '), at)
+      assert.equal(security.containsEmbeddedMarkup(copy), true)
+      copy.set(enc('<IMG\t'), at)
+      assert.equal(security.containsEmbeddedMarkup(copy), true)
+    })
+  }
   check(`real PNG ${file}: '<script>' planted in IDAT is found`, () => {
     const copy = data.slice()
     copy.set(enc('<script>'), at)
@@ -442,8 +466,8 @@ async function sharpSection() {
 }
 
 // An offset in the middle of the largest compressed region, past the
-// sniffing window, not right after a JPEG 0xFF and inside one GIF sub-block.
-const PAST_WINDOW = 1445 + 64
+// sniffing window (PAST_WINDOW), not right after a JPEG 0xFF and inside one
+// GIF sub-block.
 function compressedOffset(label, data) {
   const find = (text, from = 0) => Buffer.from(data.buffer, data.byteOffset, data.length).indexOf(text, from)
   if (/^JPEG/.test(label)) {

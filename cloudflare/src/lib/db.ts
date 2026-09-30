@@ -63,6 +63,8 @@ const TRANSIENT_D1_ERROR_PATTERN = /network|timeout|timed out|internal error|too
 // Surface it immediately so the caller can back off at the request/job level.
 const D1_QUEUE_OVERLOAD_ERROR_PATTERN = /D1 DB is overloaded|Requests queued for too long/i
 
+const D1_QUOTA_EXCEEDED_ERROR_PATTERN = /Your account has exceeded D1's (?:free tier daily row (?:read|write) limit|maximum account storage limit)|Exceeded maximum DB size/i
+
 // Checked BEFORE the transient pattern, because D1 prefixes essentially
 // every error it surfaces with `D1_ERROR:` -- which the pattern above
 // matches -- so without this list a bad column name, a constraint
@@ -89,7 +91,7 @@ async function withD1Retry<T>(run: () => Promise<T>): Promise<T> {
     return await run()
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
-    if (DETERMINISTIC_SQL_ERROR_PATTERN.test(message) || D1_QUEUE_OVERLOAD_ERROR_PATTERN.test(message)) throw error
+    if (DETERMINISTIC_SQL_ERROR_PATTERN.test(message) || D1_QUEUE_OVERLOAD_ERROR_PATTERN.test(message) || D1_QUOTA_EXCEEDED_ERROR_PATTERN.test(message)) throw error
     if (!TRANSIENT_D1_ERROR_PATTERN.test(message)) throw error
     await new Promise((resolve) => setTimeout(resolve, 200))
     return run()

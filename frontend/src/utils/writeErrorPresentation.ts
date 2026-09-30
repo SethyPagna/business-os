@@ -13,6 +13,15 @@ export type WriteErrorPresentation = {
   unknownOutcome: boolean
 }
 
+type RejectionDetail = readonly [key: string, fallback: string]
+
+const GENERIC_REJECTION_DETAIL: RejectionDetail = ['write_rejected_details', 'The server did not accept this change. View details to check the reason.']
+
+// Keyed by the Worker's refusal code (cloudflare/src/routes/settings.ts).
+const REJECTION_DETAILS: ReadonlyMap<string, RejectionDetail> = new Map<string, RejectionDetail>([
+  ['invalid_portal_language', ['write_rejected_portal_language', 'The website language must be English or Khmer.']],
+])
+
 function copy(t: WriteErrorTranslator, key: string, fallback: string): string {
   const translated = t(key)
   return translated && translated !== key ? translated : fallback
@@ -62,9 +71,10 @@ export function presentWriteError(error: WriteErrorDetail, t: WriteErrorTranslat
     }
   }
 
+  const [detailKey, detailFallback] = REJECTION_DETAILS.get(code) ?? GENERIC_REJECTION_DETAIL
   return {
     title: copy(t, 'write_rejected_title', 'Write rejected'),
-    detail: copy(t, 'write_rejected_details', 'The server did not accept this change. View details to check the reason.'),
+    detail: copy(t, detailKey, detailFallback),
     unknownOutcome: false,
   }
 }

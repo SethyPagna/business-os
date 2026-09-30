@@ -90,6 +90,7 @@ type CatalogPreviewSurfaceProps = {
   previewSectionRef: RefObject<HTMLDivElement>
   onBackToEditor: () => void
   displayConfig: DisplayConfig
+  configPending?: boolean
   versionedBusinessLogo?: string | null
   showBrandLabel: boolean | string
   previewTitle: string
@@ -156,6 +157,7 @@ export default function CatalogPreviewSurface({
   previewSectionRef,
   onBackToEditor,
   displayConfig,
+  configPending = false,
   showBrandLabel,
   previewTitle,
   portalTabs,
@@ -420,7 +422,9 @@ export default function CatalogPreviewSurface({
                       style={{ fontFamily: "'Georgia', 'Times New Roman', serif" }}
                       translate="no"
                     >
-                      {previewTitle || displayConfig.businessName || copy('about', 'About')}
+                      {previewTitle || displayConfig.businessName || (configPending
+                        ? <span aria-hidden="true" className="portal-skeleton-block inline-block h-5 w-40 max-w-full rounded-md align-middle sm:h-7 sm:w-56" />
+                        : copy('about', 'About'))}
                     </h1>
                     {displayConfig.businessTagline ? (
                       <div className="notranslate hidden truncate text-xs text-slate-500 sm:block dark:text-neutral-400" translate="no">

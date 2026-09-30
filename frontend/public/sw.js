@@ -13,7 +13,17 @@ const BUILD_HASH = '__BUSINESS_OS_BUILD_HASH__';
 const APP_SHELL_VERSION = `business-os-app-shell-${BUILD_HASH}`;
 const APP_SHELL_CACHE = APP_SHELL_VERSION;
 const STATIC_CACHE = `business-os-static-${BUILD_HASH}`;
-const APP_SHELL_URLS = ['/', '/index.html', '/manifest.json', '/portal-manifest.json', '/business-os-precache.json', '/icon.png', '/icon-192.png', '/icon-512.png', '/icon-192-maskable.png', '/icon-512-maskable.png', '/apple-touch-icon.png', '/leang-cosmetics-icon-192.png', '/leang-cosmetics-icon-512.png', '/leang-cosmetics-icon-192-maskable.png', '/leang-cosmetics-icon-512-maskable.png', '/leang-cosmetics-apple-touch-icon-v1.png'];
+const APP_SHELL_URLS = ['/', '/index.html', '/business-os-precache.json'];
+const STAFF_IDENTITY_URLS = ['/manifest.json', '/icon-192.png', '/icon-512.png', '/icon-192-maskable-v2.png', '/icon-512-maskable-v2.png', '/admin-apple-touch-icon-v1.png', '/admin-favicon-v1.ico'];
+const SHOP_IDENTITY_URLS = ['/portal-manifest.json', '/leang-cosmetics-icon-192-v2.png', '/leang-cosmetics-icon-512-v2.png', '/leang-cosmetics-icon-192-maskable-v2.png', '/leang-cosmetics-icon-512-maskable-v2.png', '/leang-cosmetics-apple-touch-icon-v2.png', '/leang-cosmetics-favicon-v2.ico'];
+// The same host rule as isAdminHostname (app/pathRouting.ts) and the index.html bootstrap.
+function isAdminHost(hostname) {
+    const host = String(hostname || '').toLowerCase();
+    return host === 'localhost' || host === '127.0.0.1' || host === '[::1]' || host === '::1' || host.startsWith('admin.');
+}
+function appShellUrlsForHost(hostname) {
+    return [...APP_SHELL_URLS, ...(isAdminHost(hostname) ? STAFF_IDENTITY_URLS : SHOP_IDENTITY_URLS)];
+}
 const OUTBOX_SYNC_TAG = 'business-os-sync-outbox';
 const DB_NAME = 'BusinessOS';
 const OFFLINE_SALE_QUEUE_CHANNEL = 'sales:create';
@@ -391,7 +401,7 @@ async function precacheAppShell() {
     // and a redirected document served for a navigation is a network error --
     // a permanently blank page (isValidDocumentResponse above says why). Fetch
     // and store only what is safe to serve back.
-    await Promise.allSettled(APP_SHELL_URLS.map(async (url) => {
+    await Promise.allSettled(appShellUrlsForHost(self.location.hostname).map(async (url) => {
         const request = new Request(url, { cache: 'reload' });
         const response = await fetch(request);
         const valid = url === '/' || url === '/index.html'
@@ -841,19 +851,8 @@ function isAppDocumentPath(pathname) {
 }
 function isCacheableStaticPath(pathname) {
     return pathname.startsWith('/assets/')
-        || pathname === '/icon.png'
-        || pathname === '/icon-192.png'
-        || pathname === '/icon-512.png'
-        || pathname === '/icon-192-maskable.png'
-        || pathname === '/icon-512-maskable.png'
-        || pathname === '/apple-touch-icon.png'
-        || pathname === '/leang-cosmetics-icon-192.png'
-        || pathname === '/leang-cosmetics-icon-512.png'
-        || pathname === '/leang-cosmetics-icon-192-maskable.png'
-        || pathname === '/leang-cosmetics-icon-512-maskable.png'
-        || pathname === '/leang-cosmetics-apple-touch-icon-v1.png'
-        || pathname === '/manifest.json'
-        || pathname === '/portal-manifest.json'
+        || STAFF_IDENTITY_URLS.includes(pathname)
+        || SHOP_IDENTITY_URLS.includes(pathname)
         || pathname === '/runtime-noise-guard.js'
         || pathname === '/theme-bootstrap.js';
 }

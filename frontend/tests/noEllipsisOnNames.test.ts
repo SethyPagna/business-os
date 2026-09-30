@@ -492,9 +492,9 @@ const DELIBERATELY_CLIPPED: Record<string, Array<[string, Mechanism, string]>> =
     ['label', 'static-label', 'The stat tile caption ("Total stock"); its value and sub-value scroll one line below.'],
   ],
   'components/catalog/CatalogEditorSurface.tsx': [
-    ["editorDraft.business_name || previewConfig.businessName || 'Business OS'", 'branding', "The merchant's own shop name in the editor's live storefront preview."],
-    ["editorDraft.business_name || previewConfig.businessName || 'Business OS'", 'branding', "The same shop name on the preview's second breakpoint."],
-    ["editorDraft.customer_portal_business_tagline || previewConfig.businessTagline || 'Preview the hero banner on the live header.'", 'branding', "The merchant's own tagline, repeated in full in the About section."],
+    ["editorDraft.business_name || previewConfig.businessName || ed('web_editor_shop_name', 'Shop name', 'ឈ្មោះហាង')", 'branding', "The merchant's own shop name in the editor's live storefront preview."],
+    ["editorDraft.business_name || previewConfig.businessName || ed('web_editor_shop_name', 'Shop name', 'ឈ្មោះហាង')", 'branding', "The same shop name on the preview's second breakpoint."],
+    ["editorDraft.customer_portal_business_tagline || previewConfig.businessTagline", 'branding', "The merchant's own tagline, repeated in full in the About section."],
   ],
   'components/contacts/CustomersTab.tsx': [
     ["tr(t, 'add_customer', 'Add Customer')", 'language-pack', 'A toolbar button label from the language pack, not a contact.'],

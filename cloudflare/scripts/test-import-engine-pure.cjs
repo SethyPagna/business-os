@@ -218,12 +218,8 @@ const batchCodeModuleObj = { exports: {} }
 const batchCodeWrapper = new Function('exports', 'require', 'module', '__filename', '__dirname', batchCodeOutputText)
 batchCodeWrapper(batchCodeModuleObj.exports, require, batchCodeModuleObj, batchCodeSourcePath, path.dirname(batchCodeSourcePath))
 
-// productBatches.ts's two statement-builder exports (decrementBatchStockStatement/
-// incrementBatchStockStatement) are also pure string/object builders with no
-// D1 calls of their own (see the file's own comment on why they're plain
-// builders, not functions that touch `db`) -- real transpiled module so the
-// sales-import apply-path stock-restore statements (tested below) are the
-// actual SQL this ships, not a stand-in.
+// The REAL productBatches module, so importEngine.ts's lot planners
+// (planReceiveBatchStock, planReconcileBranchSnapshot, resolveReceiptLotTarget) run as shipped.
 const productBatchesSourcePath = path.join(__dirname, '..', 'src', 'lib', 'productBatches.ts')
 const productBatchesSource = fs.readFileSync(productBatchesSourcePath, 'utf8')
 const { outputText: productBatchesOutputText } = ts.transpileModule(productBatchesSource, {

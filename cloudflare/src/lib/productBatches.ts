@@ -889,27 +889,9 @@ export async function resolveDestinationBatch(
 }
 
 
-// sales.ts, which need these as part of one atomic db.batch() alongside the
-// sale_items/branch_stock writes (see lib/db.ts's batch() docs for why this
-// can't just call receiveBatchStock/an equivalent function directly -- no
-// interleaved reads inside an atomic batch).
-export function decrementBatchStockStatement(batchId: number, branchId: number, quantity: number): { sql: string; params: Record<string, unknown> } {
-  return {
-    sql: `UPDATE branch_batch_stock SET quantity = MAX(0, quantity - @quantity), updated_at = datetime('now')
-          WHERE batch_id = @batchId AND branch_id = @branchId`,
-    params: { batchId, branchId, quantity },
-  }
-}
-
-// Strict sibling of decrementBatchStockStatement: plain subtraction, no
-// MAX(0) clamp, so an oversell of a specific lot violates branch_batch_stock's
-// CHECK(quantity >= 0) (migration 0058) and aborts the whole atomic sale batch
-// instead of silently flooring the lot at 0. Used by the POS/sales write
-// paths and by planRemoveStockAcrossBatches (POST /inventory/adjust's
-// auto-routed remove and /move-row), which pre-validate availability and want
-// a concurrent oversell to FAIL the write rather than clamp it. Other callers
-// (transfers, returns) keep the clamped version deliberately -- see each call
-// site.
+// No MAX(0) clamp: taking more than the lot holds at the branch violates
+// branch_batch_stock's CHECK(quantity >= 0) (migration 0058) and aborts the
+// caller's whole atomic batch, so an oversell fails instead of flooring the lot.
 export function decrementBatchStockStrictStatement(batchId: number, branchId: number, quantity: number): { sql: string; params: Record<string, unknown> } {
   return {
     sql: `UPDATE branch_batch_stock SET quantity = quantity - @quantity, updated_at = datetime('now')

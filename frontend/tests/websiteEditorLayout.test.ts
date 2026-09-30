@@ -45,3 +45,92 @@ assert.match(grip, /(?:^|\s)sm:block(?:\s|$)/, 'the drag grip is back from sm: u
 assert.match(actions, /<div className="mr-auto flex items-center gap-1 sm:mr-0">\s*\n\s*<button[\s\S]*?index - 1/, 'on a phone Up/Down start the actions line, apart from the rest')
 
 console.log('PASS websiteEditorLayout: strip cards give the title its own line on a phone')
+
+let failed = 0
+function runTest(name: string, fn: () => void): void {
+  try {
+    fn()
+    console.log(`PASS ${name}`)
+  } catch (error) {
+    failed += 1
+    console.error(`FAIL ${name}`)
+    console.error(error)
+  }
+}
+
+runTest('T-L9: every module under catalog/editor/ is pinned to the lazy catalog-editor chunk', () => {
+  const vite = read('../vite.config.ts')
+  const returnAt = vite.indexOf("return 'catalog-editor'")
+  assert.ok(returnAt > 0, 'vite.config.ts still names the catalog-editor chunk')
+  const rule = vite.slice(vite.lastIndexOf('if (', returnAt), returnAt)
+  assert.match(rule, /normalized\.includes\('\/src\/components\/catalog\/editor\/'\)/, 'editor modules left to the catch-all land in the catalog route chunk')
+  assert.match(rule, /CatalogPageContext\.tsx'\)\s*\n\s*\|\| normalized\.includes\('\/src\/components\/catalog\/editor\/'\)/, 'the editor/ line follows the CatalogPageContext line (performanceLoadingUx.test.ts reads that order)')
+})
+
+const workerAboutCap = (name: string): number => {
+  const portalRoute = read('../../cloudflare/src/routes/portal.ts')
+  const value = portalRoute.match(new RegExp(`const ${name} = (\\d+)`))?.[1]
+  assert.ok(value, `cloudflare/src/routes/portal.ts still defines ${name}`)
+  return Number(value)
+}
+const editorCap = (editor: string, name: string): number => {
+  const value = editor.match(new RegExp(`const ${name} = (\\d+)`))?.[1]
+  assert.ok(value, `CatalogEditorSurface.tsx defines ${name}`)
+  return Number(value)
+}
+const elementWithId = (source: string, id: string): string => {
+  const at = source.indexOf(id)
+  assert.ok(at > 0, `the editor renders ${id}`)
+  const start = Math.max(source.lastIndexOf('<input', at), source.lastIndexOf('<textarea', at))
+  return source.slice(start, source.indexOf('/>', at))
+}
+
+runTest('T-L7: the About block limits in the editor are the Worker\'s, so nothing typed is cut off on the shop (R2)', () => {
+  const editor = read('../src/components/catalog/CatalogEditorSurface.tsx')
+  assert.equal(editorCap(editor, 'ABOUT_TITLE_MAX_LENGTH'), workerAboutCap('MAX_PORTAL_ABOUT_TITLE_LENGTH'))
+  assert.equal(editorCap(editor, 'ABOUT_TEXT_MAX_LENGTH'), workerAboutCap('MAX_PORTAL_ABOUT_TEXT_LENGTH'))
+  assert.equal(editorCap(editor, 'ABOUT_BLOCKS_MAX'), workerAboutCap('MAX_PORTAL_ABOUT_BLOCKS'))
+  assert.match(elementWithId(editor, 'id={`portal-about-block-title-${block.id}`}'), /maxLength=\{ABOUT_TITLE_MAX_LENGTH\}/, 'a block title stops where the shop cuts it')
+  assert.match(elementWithId(editor, 'id={`portal-about-block-body-${block.id}`}'), /maxLength=\{ABOUT_TEXT_MAX_LENGTH\}/, 'block text stops where the shop cuts it')
+  assert.match(elementWithId(editor, 'id="portal-about-title"'), /maxLength=\{ABOUT_TITLE_MAX_LENGTH\}/, 'the About title is capped like a block title (portal.ts aboutTitle)')
+  assert.match(elementWithId(editor, 'id="portal-about-content"'), /maxLength=\{ABOUT_TEXT_MAX_LENGTH\}/, 'the About text is capped like block text (portal.ts aboutContent)')
+  const addButtons = [...editor.matchAll(/onClick=\{\(\) => addAboutBlock\('(?:text|image|video)'\)\}/g)]
+  assert.equal(addButtons.length, 3, 'three Add block buttons')
+  for (const button of addButtons) {
+    const tag = editor.slice(editor.lastIndexOf('<button', button.index), editor.indexOf('>', button.index))
+    assert.match(tag, /disabled=\{aboutBlocksFull\}/, 'Add block stops at the limit')
+    assert.match(tag, /aria-describedby=\{aboutBlocksFull \? 'portal-about-blocks-max' : undefined\}/, 'the disabled button is described by the reason')
+    const buttonClass = tag.match(/className="([^"]*)"/)?.[1].split(/\s+/) ?? []
+    for (const look of ['disabled:opacity-50', 'disabled:cursor-not-allowed']) {
+      assert.ok(buttonClass.includes(look), `a stopped Add block looks stopped (btn-secondary has no disabled look of its own): ${look}`)
+    }
+  }
+  assert.match(editor, /const aboutBlocksFull = aboutBlocks\.length >= ABOUT_BLOCKS_MAX/)
+  assert.match(editor, /\{aboutBlocksFull \? \(\s*<p id="portal-about-blocks-max" role="status"[^>]*>\{ed\('web_editor_blocks_max', 'Up to 30 blocks\.', 'រហូតដល់ ៣០ ប្លុក។'\)\}<\/p>/, 'the reason is shown, not only hovered')
+})
+
+runTest('T-L6: a post card always shows its product picker and its web link field; the chosen link type enables one (B6)', () => {
+  const editor = read('../src/components/catalog/CatalogEditorSurface.tsx')
+  const cardStart = editor.indexOf('promoItems.length ? promoItems.map(')
+  assert.ok(cardStart > 0, 'the post cards render')
+  const card = editor.slice(cardStart, editor.indexOf('noPromotionCards', cardStart))
+  assert.doesNotMatch(card, /linkType === 'product'|linkType === 'url'|if \(linkMode === /, 'no link field appears only after the type changes (a new card never got one)')
+  assert.match(card, /const linkMode = promoLinkModes\[item\.id\] \?\? promoLinkModeOf\(item\)/, 'the card holds its own link type, first read from the data')
+  const picker = card.slice(card.lastIndexOf('<AppSelect', card.indexOf('id={`portal-promo-product-${item.id}`}')), card.indexOf('/>', card.indexOf('id={`portal-promo-product-${item.id}`}')))
+  assert.match(picker, /disabled=\{linkMode !== 'product'\}/, 'the product picker is always there, enabled only for a product link')
+  const url = elementWithId(card, 'id={`portal-promo-link-${item.id}`}')
+  assert.match(url, /disabled=\{linkMode !== 'url'\}/, 'the web link field is always there, enabled only for a web link')
+  assert.match(url, /aria-invalid=\{linkRefused\(`promo_items\[\$\{index\}\]\.linkUrl`, item\.linkUrl\)\}/, 'a refused link is marked on its own field')
+  const modeChange = card.slice(card.indexOf('id={`portal-promo-link-type-${item.id}`}'), card.indexOf('id={`portal-promo-product-${item.id}`}'))
+  assert.match(modeChange, /setPromoLinkModes\(\(current\) => \(\{ \.\.\.current, \[item\.id\]: nextMode \}\)\)/)
+  assert.match(modeChange, /updatePromoItemFields\(item\.id, linkFieldsOutside\(nextMode\)\)/, 'switching clears the other link in one write')
+  assert.match(picker, /updatePromoItemFields\(item\.id, \{ linkProductId: nextId, linkProductName: /, 'choosing a product writes its id and name together (two writes from one render kept only the name)')
+  assert.doesNotMatch(card, /updatePromoItem\(item\.id, 'link(?:ProductId|ProductName|Url)', [^)]*\)\s*\n\s*updatePromoItem\(/, 'no two link writes in a row from the same render')
+  const outside = editor.slice(editor.indexOf('function linkFieldsOutside('), editor.indexOf('\n}\n', editor.indexOf('function linkFieldsOutside(')))
+  assert.match(outside, /mode === 'url' \? \{\} : \{ linkUrl: '' \}/)
+  assert.match(outside, /mode === 'product' \? \{\} : \{ linkProductId: '', linkProductName: '' \}/)
+  const page = read('../src/components/catalog/CatalogPage.tsx')
+  assert.match(page, /function updatePromoItemFields\(itemId: string, fields: Record<string, unknown>\) \{\n\s*setPromoItemsDraft\(promoItems\.map\(\(item\) => \(\n\s*item\.id === itemId \? \{ \.\.\.item, \.\.\.fields \} : item/)
+})
+
+if (failed) process.exit(1)

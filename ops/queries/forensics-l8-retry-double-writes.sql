@@ -26,17 +26,24 @@
 --   request_ids_differ  returns only: 1 when both twins stored a request id
 --                     (they always differ: the column is UNIQUE)
 --   both_active       0 when either twin was since cancelled (return), voided
---                     (points) or reverted (movement) -- already compensated
+--                     (points) or reverted (movement) -- already compensated.
+--                     A movement counts as reverted by a 'revert:<id>' row, or
+--                     by the Inventory page's Undo: an 'Undo: ...' movement of
+--                     the same product, branch and quantity in the opposite
+--                     direction after the first twin. The Undo names no
+--                     movement, so an Undo of another such adjust counts too.
 --   suggested_class   a: gap <= 60 s, both active, and for stock_adjust the same
 --                        session (stock-in) or no session on either side (outflow)
 --                     b: any other active pair (owner review)
---                     c: one twin already cancelled, voided or reverted
+--                     c: one twin already cancelled, voided, reverted or undone
 -- Proposed repair (NOT run by this query): per class-a pair, cancel the second
 -- return through the Returns page bulk Cancel (restores stock and the refund
 -- through the app's own guards), void the second points row with reason
 -- 'SCAN1 F2 duplicate retry', and post the opposite stock movement for the
 -- second adjust with reason 'SCAN1 F5 duplicate retry'; class b and c go to the
--- owner row by row. Audit first, back up, and record each id pair used.
+-- owner row by row (in class c, a later 'Redo: ...' movement re-applies an
+-- undone twin).
+-- Audit first, back up, and record each id pair used.
 -- ops:min-rows 0
 -- ops:max-rows 2000
 WITH cr AS (
@@ -92,6 +99,14 @@ sa AS (
     CASE WHEN a.reference_id IS NULL OR b.reference_id IS NULL THEN NULL
       WHEN CAST(a.reference_id AS TEXT) = CAST(b.reference_id AS TEXT) THEN 1 ELSE 0 END AS same_reference,
     CASE WHEN EXISTS (SELECT 1 FROM inventory_movements x WHERE x.reference_id IN ('revert:' || a.id, 'revert:' || b.id))
+      OR EXISTS (
+        SELECT 1 FROM inventory_movements u
+        WHERE u.product_id = a.product_id AND u.branch_id IS a.branch_id AND u.id > a.id
+          AND ABS(u.quantity) = ABS(a.quantity) AND u.reason LIKE 'Undo: %'
+          AND CASE WHEN a.movement_type IN ('remove', 'damage_out', 'write_off')
+            THEN u.movement_type IN ('add', 'adjustment')
+            ELSE u.movement_type IN ('remove', 'damage_out', 'write_off') END
+      )
       THEN 0 ELSE 1 END AS both_active
   FROM inventory_movements a
   JOIN inventory_movements b ON b.product_id = a.product_id

@@ -23,7 +23,7 @@ import type { Env } from '../index'
  * report tests without the audit/cache/Durable Object imports; the webhook
  * route hands it in (routes/telegram.ts).
  */
-export const saveTelegramTopicSetting: TelegramTopicWriter = async (env: Env, save) => {
+export const saveTelegramTopicSetting: TelegramTopicWriter = async (env: Env, save, waitUntil) => {
   const value = save.threadId == null ? '' : String(save.threadId)
   if (!isTelegramTopicSettingValue(value)) throw new Error('Telegram topic ID must be a whole number, or empty for General.')
   const allowed = new Set<string>(TELEGRAM_TOPIC_KEYS)
@@ -49,5 +49,7 @@ export const saveTelegramTopicSetting: TelegramTopicWriter = async (env: Env, sa
     changedFields(before, after, { keys }))
   // Best effort, like the settings route's waitUntil: the value is saved; a
   // stale cache version expires on its own TTL.
-  await Promise.allSettled([bumpVersion(env, 'settings'), broadcast(env, 'settings', { action: 'update', keys })])
+  const refresh = Promise.allSettled([bumpVersion(env, 'settings'), broadcast(env, 'settings', { action: 'update', keys })])
+  if (waitUntil) waitUntil(refresh)
+  else await refresh
 }

@@ -44,7 +44,8 @@ const portal = load('routes/portal.ts', {
     cachedJsonResponse: async (_request, _ctx, _version, _ttl, produce) => produce(),
   },
   '../lib/requestBodyGuard': { SMALL_BODY_BYTES: 65536, PORTAL_SCREENSHOT_BODY_BYTES: 1 },
-  '../lib/safeLinkUrl': { normalizeSafeLinkUrl: (v) => String(v || '') },
+  '../lib/safeLinkUrl': load('lib/safeLinkUrl.ts'),
+  '../lib/portalText': load('lib/portalText.ts'),
   '../lib/sqlBinding': {},
 })
 
@@ -76,6 +77,16 @@ const ctx = { waitUntil(p) { p?.catch?.(() => {}) }, passThroughOnException() {}
     const internal = portal.buildPortalConfig(settings, env)
     assert.equal(internal.aiPrompt, SECRET_PROMPT)
     assert.equal(internal.aiProviderId, 7)
+  })
+
+  await check('an empty intro publishes empty: the storefront hides it, so no English or membership default reaches shoppers', async () => {
+    const settings = Object.fromEntries(settingsRows.map((r) => [r.key, r.value]))
+    assert.equal(portal.buildPortalConfig({ ...settings, customer_portal_intro: '' }, env).intro, '')
+    assert.equal(portal.buildPortalConfig(settings, env).intro, '')
+    assert.equal(portal.buildPortalConfig({ ...settings, customer_portal_intro: 'សូមស្វាគមន៍' }, env).intro, 'សូមស្វាគមន៍')
+    const res = await portal.default.request('https://shop.test/config', {}, env, ctx)
+    const body = JSON.parse(await res.text())
+    assert.equal(body.intro, '')
   })
 
   await check('/config and /bootstrap both use the public builder; no public route returns the raw config', async () => {

@@ -286,11 +286,12 @@ export async function resetClientRuntimeState(options: RuntimeResetOptions = {})
   // Nonsecret shared-cookie session fence: another tab must still observe the
   // logout/login boundary after this storage reset finishes.
   localPreserveKeys.add('businessos_read_session')
-  // Device-scoped by design (utils/standaloneNavigation.ts): the iOS "install
-  // this app" hint was dismissed for this phone, not for one cashier, so the
-  // next sign-in on a shared till must not re-ask. Spelled out here rather
-  // than imported to keep this runtime module free of UI-utility imports.
+  // INSTALL_OFFER_DEVICE_KEYS (utils/standaloneNavigation.ts): the install bar
+  // was closed, or the app installed, on this device, not for one cashier.
+  // Spelled out to keep this runtime module free of UI-utility imports.
+  localPreserveKeys.add(`${STORAGE_KEYS.DEVICE_SETTINGS}:install-offer-dismissed-at-v2`)
   localPreserveKeys.add(`${STORAGE_KEYS.DEVICE_SETTINGS}:ios-install-hint-dismissed-at-v1`)
+  localPreserveKeys.add(`${STORAGE_KEYS.DEVICE_SETTINGS}:app-installed-at-v1`)
   localPreserveKeys.add('businessos_auth_cookie_pending')
   localPreserveKeys.add('businessos_unresolved_signout_v1')
   if (preserveAuth) {

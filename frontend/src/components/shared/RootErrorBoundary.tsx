@@ -5,8 +5,7 @@ import { reportClientCrash } from '../../utils/clientCrashReport.ts'
 // PublicCatalogRoot.tsx, so it still catches when AppProvider itself throws
 // during its first render. Without it a single throw in a provider (the
 // storefront's useRef initializer touching window.sessionStorage on an iOS
-// device with "Block All Cookies" -- see readPortalCache() in
-// PublicCatalogPage.tsx) unmounted the whole tree and left a blank white page
+// device with "Block All Cookies") unmounted the whole tree and left a blank white page
 // with nothing on screen and no way back except force-quitting the PWA.
 //
 // Three deliberate constraints, all because of WHERE this renders:
