@@ -1,9 +1,4 @@
-import { useMemo, type ReactNode } from 'react'
-// Not message-square: the public catalog imports that one, and sharing it put
-// app-shared -> catalog-public into the build (a chunk cycle).
-import MessageSquareText from 'lucide-react/dist/esm/icons/message-square-text.js'
-import Settings2 from 'lucide-react/dist/esm/icons/settings-2.js'
-import SuggestionTextInput from './SuggestionTextInput.tsx'
+import type { ReactNode } from 'react'
 import type { SavedStockReason } from '../../utils/useSavedStockReasons.ts'
 
 // The one reason control for stock writes: the saved-reason chips from
@@ -33,68 +28,12 @@ type StockReasonFieldProps = {
   className?: string
   labelClassName?: string
   inputClassName?: string
-  /**
-   * 'compact' (Stock Session, S4): ONE row -- a searchable reason box whose
-   * list is the saved reasons, the manage icon, then the host's action.
-   */
-  variant?: 'default' | 'compact'
-  /** Compact only: the name of the box for screen readers and the tooltip. */
-  ariaLabel?: string
-  /** Compact only: rendered at the end of the row (the Add button). */
-  trailing?: ReactNode
 }
-
-// Deliberately 500 while every reason wire accepts 512 (lib/stockReason.ts):
-// the headroom lets undo/redo prepend 'Undo: ' to a maximum-length reason.
-const REASON_MAX_LENGTH = 500
 
 export default function StockReasonField({
   id, name, label, value, onChange, savedReasons, placeholder, onManage, manageLabel, onEnter,
   className = '', labelClassName = 'block text-xs font-medium text-gray-600 dark:text-gray-400', inputClassName = 'text-sm',
-  variant = 'default', ariaLabel, trailing,
 }: StockReasonFieldProps) {
-  const reasonOptions = useMemo(() => savedReasons.map((entry) => ({ value: entry.label, key: entry.id, selected: entry.label === value })), [savedReasons, value])
-  if (variant === 'compact') {
-    const boxLabel = ariaLabel || placeholder || ''
-    return (
-      <div
-        className={`flex min-w-0 items-center gap-1.5 ${className}`.trim()}
-        onKeyDown={onEnter ? (event) => {
-          // Only the box's own Enter queues; a picked suggestion has already handled it.
-          if (event.key !== 'Enter' || event.defaultPrevented || (event.target as HTMLElement).tagName !== 'INPUT') return
-          event.preventDefault()
-          onEnter()
-        } : undefined}
-      >
-        <div className="relative min-w-0 flex-1" title={value.trim() ? `${boxLabel}: ${value.trim()}` : boxLabel}>
-          <MessageSquareText className="pointer-events-none absolute left-2.5 top-1/2 z-10 h-4 w-4 -translate-y-1/2 text-gray-400" aria-hidden="true" />
-          <SuggestionTextInput
-            id={id || 'stock-reason'}
-            name={name}
-            value={value}
-            options={reasonOptions}
-            limit={50}
-            ariaLabel={boxLabel}
-            placeholder={placeholder}
-            inputClassName={`input h-10 w-full min-w-0 pl-8 ${inputClassName}`}
-            onChange={(next) => onChange(next.slice(0, REASON_MAX_LENGTH))}
-          />
-        </div>
-        {onManage ? (
-          <button
-            type="button"
-            onClick={onManage}
-            aria-label={manageLabel}
-            title={manageLabel}
-            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50 hover:text-gray-700 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700"
-          >
-            <Settings2 className="h-4 w-4" />
-          </button>
-        ) : null}
-        {trailing}
-      </div>
-    )
-  }
   return (
     <div className={className}>
       <div className="mb-1 flex items-center justify-between gap-2">
@@ -129,7 +68,7 @@ export default function StockReasonField({
         // operator has finished the rest of the line, and the 12 characters of
         // headroom are what lets undo/redo prepend 'Undo: ' to a maximum-length
         // reason and still be accepted by the wire that stored it.
-        maxLength={REASON_MAX_LENGTH}
+        maxLength={500}
         className={`input w-full ${inputClassName}`}
         placeholder={placeholder}
         value={value}

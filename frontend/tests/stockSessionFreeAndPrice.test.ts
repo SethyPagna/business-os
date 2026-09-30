@@ -172,9 +172,28 @@ runTest('a fully free product: the item may be added with Qty 0, then Next waits
   assert.equal(lineEntryRefusal({ ...base, quantity: '3', supplierName: 'Bong Long', unitCost: '0' })?.gate, 'free_goods_required', 'a typed $0 with paid units is still refused')
   assert.equal(lineEntryRefusal({ ...base, quantity: '', supplierName: 'Bong Long', unitCost: '3' })?.field, 'qty', 'a blank Qty is not 0')
   const empty = line({ quantity: 0, freeQuantity: 0 })
-  assert.equal(sessionLinesRefusal([empty])?.key, 'k1', 'an item with no units at all blocks Next')
-  assert.equal(sessionLinesRefusal([line({ quantity: 0, freeQuantity: 4 })]), null)
-  assert.equal(sessionLinesRefusal([line({ mode: 'set', quantity: 0 })]), null, 'Set to 0 is a count')
+  assert.equal(sessionLinesRefusal([empty], { supplierName: 'Bong Long' })?.key, 'k1', 'an item with no units at all blocks Next')
+  assert.equal(sessionLinesRefusal([line({ quantity: 0, freeQuantity: 4 })], { supplierName: 'Bong Long' }), null)
+  assert.equal(sessionLinesRefusal([line({ mode: 'set', quantity: 0 })], { supplierName: 'Bong Long' }), null, 'Set to 0 is a count')
+})
+
+runTest('spec 4.1: Next re-checks every Add item against the receipt gate with the supplier as it is NOW', () => {
+  // Items are gated when added; the shared Supplier can be cleared afterwards.
+  const shared = { supplierName: 'Bong Long' }
+  assert.equal(sessionLinesRefusal([line()], shared), null)
+  const cleared = sessionLinesRefusal([line()], { supplierName: '  ' })
+  assert.equal(cleared?.key, 'k1')
+  assert.equal(cleared?.field, 'supplier', 'the Supplier box is the control to fix')
+  assert.equal(cleared?.messageKey, 'stock_receipt_supplier_required')
+  assert.equal(sessionLinesRefusal([line({ quantity: 0, freeQuantity: 3 })], { supplierName: '' })?.field, 'supplier', 'free goods still name their supplier')
+  // Topping up a lot that already names its supplier needs none (first attribution sticks).
+  assert.equal(sessionLinesRefusal([line({ batchChoice: 12, lotSupplierName: 'Acme' })], { supplierName: '' }), null)
+  assert.equal(sessionLinesRefusal([line({ unitCost: '' })], shared)?.field, 'cost', 'a cost blanked on Payment is refused before Review')
+  assert.equal(sessionLinesRefusal([line({ mode: 'remove', batchChoice: 3 }), line({ key: 's', mode: 'set', batchChoice: 3 })], { supplierName: '' }), null, 'Remove and Set are not receipts')
+  assert.equal(sessionLinesRefusal([line({ status: 'saved' })], { supplierName: '' }), null, 'a saved item is history')
+  assert.equal(sessionLinesRefusal([line({ quantity: 0, freeQuantity: 0, createPayload: { name: 'New' } })], { supplierName: '' }), null, 'a create-only item receives nothing')
+  const modal = src('components/inventory/FastStockInModal.tsx')
+  assert.equal((modal.match(/sessionLinesRefusal\(received, \{ supplierName: supplier\.supplierName \}\)/g) || []).length, 2, 'both Next steps (Items and Payment) run it with the live supplier')
 })
 
 runTest('the entry row is [Qty][Cost][Price]; the free row lives in Items; Price is disabled without products edit, Cost without cost access', () => {

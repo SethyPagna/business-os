@@ -106,8 +106,8 @@ export default function StockSessionPaymentStep({
           </div>
           <ul className="divide-y divide-gray-100 rounded-xl border border-gray-200 dark:divide-gray-700 dark:border-gray-700">
             {lines.map((line) => (
-              <li key={line.key} className="grid grid-cols-[minmax(0,1fr)_auto_6rem_auto] items-center gap-2 px-2 py-1 text-sm">
-                <span className="min-w-0 break-words text-gray-800 dark:text-gray-200">{line.productName}</span>
+              <li key={line.key} className="grid grid-cols-[minmax(0,1fr)_6rem_4rem] items-center gap-x-2 gap-y-0.5 px-2 py-1 text-sm sm:grid-cols-[minmax(0,1fr)_auto_6rem_4rem]">
+                <span className="col-span-3 min-w-0 break-words text-gray-800 sm:col-span-1 dark:text-gray-200">{line.productName}</span>
                 <span className="whitespace-nowrap text-xs tabular-nums text-gray-500">{line.quantity}{line.freeQuantity > 0 ? ` (+${line.freeQuantity})` : ''}</span>
                 <input
                   type="number"
@@ -121,7 +121,7 @@ export default function StockSessionPaymentStep({
                   onChange={(event) => onLineCost(line.key, event.target.value)}
                   className="input h-9 min-h-0 w-full px-2 py-1 text-right text-sm tabular-nums"
                 />
-                <span className="w-16 whitespace-nowrap text-right text-xs tabular-nums text-gray-600 dark:text-gray-300">{usdSymbol}{linePaidTotal(line).toFixed(2)}</span>
+                <span className="whitespace-nowrap text-right text-xs tabular-nums text-gray-600 dark:text-gray-300">{usdSymbol}{linePaidTotal(line).toFixed(2)}</span>
               </li>
             ))}
           </ul>
