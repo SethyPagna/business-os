@@ -81,8 +81,8 @@ check('contacts.ts create: audit()/bumpVersion() deferred into waitUntil ahead o
   const createBlock = sliceBetween(contactsSource, 'app.post(config.path, async (c) => {', "app.post(`${config.path}/:id/portal-reset`", 'contacts.ts create')
   assert.match(
     createBlock,
-    /c\.executionCtx\.waitUntil\(Promise\.all\(\[\s*audit\(c\.env, user\?\.id \?\? null, actorSnapshot\(user\), 'create', config\.entity, id/,
-    'the create audit must be inside the waitUntil fan-out',
+    /c\.executionCtx\.waitUntil\(Promise\.all\(\[\s*(?:createAuditInBatch \? Promise\.resolve\(\) : )?audit\(c\.env, user\?\.id \?\? null, actorSnapshot\(user\), 'create', config\.entity, id/,
+    'the create audit must be inside the waitUntil fan-out (a POS or sale add writes it in the insert batch instead)',
   )
   assert.doesNotMatch(
     createBlock,
