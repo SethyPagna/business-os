@@ -5211,7 +5211,7 @@ function ProductsFullEditor() {
 
       {hasSelected && bulkEditMode === 'stock' && (
         <div className="mb-2 flex flex-wrap items-center gap-1.5 rounded-xl border border-primary-200 bg-white px-2 py-2 dark:border-primary-700 dark:bg-zinc-800">
-          <div role="group" aria-label={tr('bulk_edit_adjust_stock_for_count', 'Adjust stock for {count} products').replace('{count}', String(selectedVisibleCount))} className="grid min-w-0 flex-1 grid-cols-3 gap-1 rounded-lg bg-gray-100 p-0.5 dark:bg-zinc-700 sm:flex-none">
+          <div role="group" aria-label={tr('bulk_edit_adjust_stock_for_count', 'Adjust stock for {count} products').replace('{count}', String(selectedVisibleCount))} className="grid basis-full grid-cols-3 gap-1 rounded-lg bg-gray-100 p-0.5 dark:bg-zinc-700 sm:basis-auto">
             {(['add', 'remove', 'set'] as const).map((mode) => {
               const active = (bulkEditForm.action || 'add') === mode
               const tone = mode === 'add' ? 'bg-emerald-600' : mode === 'remove' ? 'bg-red-600' : 'bg-amber-500'
@@ -5238,7 +5238,7 @@ function ProductsFullEditor() {
             value={bulkEditForm.qty ?? 1}
             onChange={(e) => setBulkEditForm((f) => ({ ...f, qty: e.target.value }))}
           />
-          <button disabled={bulkActionBusy} className="btn-primary h-9 px-3 text-sm disabled:cursor-not-allowed disabled:opacity-60" onClick={openBulkStockSession}>
+          <button disabled={bulkActionBusy} className="btn-primary h-9 min-w-0 flex-1 px-3 text-sm disabled:cursor-not-allowed disabled:opacity-60 sm:flex-none" onClick={openBulkStockSession}>
             {tr('bulk_edit_apply_to_count', 'Apply to {count} products').replace('{count}', String(selectedVisibleCount))}
           </button>
         </div>

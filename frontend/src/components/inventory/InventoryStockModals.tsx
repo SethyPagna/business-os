@@ -155,7 +155,7 @@ export default function InventoryStockModals({
             {/* Section 10 (owner, 30 Sep): one row per pair, the name of each
                 control inside it, no captions. */}
             <fieldset disabled={transferSaving || transferPending} className={`modal-scroll min-w-0 space-y-2 p-3 sm:p-4 ${transferSaving || transferPending ? 'pointer-events-none opacity-60' : ''}`}>
-              <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-1.5">
+              <div className="grid grid-cols-[minmax(0,1.4fr)_auto_minmax(0,1fr)] items-center gap-1.5">
                 <AppSelect
                   value={transferForm.from_branch_id}
                   onChange={changeTransferSource}

@@ -126,4 +126,8 @@ runTest('no caption above a control, and one Transfer button', () => {
   assert.ok(noCaptionsOneButton(block))
 })
 
+runTest('the source branch gets the wider column so "Branch (stock)" is not clipped at 360 px', () => {
+  assert.match(block, /grid-cols-\[minmax\(0,1\.4fr\)_auto_minmax\(0,1fr\)\]/)
+})
+
 if (failed > 0) process.exitCode = 1
