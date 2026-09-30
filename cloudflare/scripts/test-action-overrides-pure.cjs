@@ -126,10 +126,12 @@ check('the Products routes gate on the ACTION, not just the section tier', () =>
 check('the editor writes the override rather than only rendering a badge', () => {
   const editor = fs.readFileSync(path.join(repoRoot, 'frontend', 'src', 'components', 'users', 'PermissionEditor.tsx'), 'utf8')
   assert.match(editor, /toggleActionOverride/, 'each action row must be a real control')
-  assert.match(editor, /next\[overrideKey\] = false/, 'switching off stores an explicit false')
+  assert.match(editor, /toggleActionOverrideMap\(perms, permissionKey, actionKey\)/, 'the editor toggles through the shared helper')
+  const helper = fs.readFileSync(path.join(repoRoot, 'frontend', 'src', 'utils', 'permissionActions.ts'), 'utf8')
+  assert.match(helper, /if \(switchingOff\) next\[key\] = false/, 'switching off stores an explicit false')
   assert.match(
-    editor,
-    /if \(next\[overrideKey\] === false\) delete next\[overrideKey\]/,
+    helper,
+    /else delete next\[key\]/,
     'handing an action back to the tier must DELETE the key, not write true -- a stale true would silently survive a later tier change',
   )
 })
