@@ -8,8 +8,9 @@ import Boxes from 'lucide-react/dist/esm/icons/boxes.js'
 import Download from 'lucide-react/dist/esm/icons/download.js'
 import Upload from 'lucide-react/dist/esm/icons/upload.js'
 import Settings2 from 'lucide-react/dist/esm/icons/settings-2.js'
+import Tags from 'lucide-react/dist/esm/icons/tags.js'
 import { isBrokenLocalizedString, useApp, useSync } from '../../AppContext'
-import { canEditAcquisitionCosts, canViewAcquisitionCosts } from '../../utils/acquisitionCostAccess.ts'
+import { canViewAcquisitionCosts } from '../../utils/acquisitionCostAccess.ts'
 import { fmtTime } from '../../utils/formatters'
 import { matchesSearchTermGroups } from '../../utils/searchMatch.ts'
 import { useDebouncedValue } from '../../utils/useDebouncedValue.ts'
@@ -25,11 +26,8 @@ import SectionSwitcher from '../shared/SectionSwitcher'
 import LoadingWatchdog from '../shared/LoadingWatchdog'
 import { TOOLBAR_BUTTON_WIDTH, manageToolbarButtonClassName } from '../shared/toolbarButtonStyles'
 import { columnsFromRows } from '../../utils/exportOptions.ts'
-// P10-19: the adjust confirm dialog (Part 563's shared review pattern,
-// already used by StockAdjustModal.tsx's Products-page twin of this flow).
-import ConfirmDialog, { type ConfirmReviewItem } from '../shared/ConfirmDialog'
+import ConfirmDialog from '../shared/ConfirmDialog'
 import { useConfirmDialog } from '../shared/useConfirmDialog.tsx'
-import { buildStockAdjustQuantityReview, buildStockReceiptPaymentReview } from '../../utils/stockAdjustReview.ts'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 const ProductDetailModal = lazyRetry(() => import('./ProductDetailModal'), 'inventory-product-detail-modal') as any
 const InventoryImportModal = lazyRetry(() => import('./InventoryImportModal'), 'inventory-import') as any
@@ -42,12 +40,11 @@ const FastStockInModal = lazyRetry(() => import('./FastStockInModal'), 'inventor
 // the canonical Products -> Stock Changes host. This retained Inventory body
 // accepts only its own transfer restore, never the Products stock-in event.
 import { FAST_STOCK_IN_RESTORE_HOST, minimizeWork, transferDraftKey, readTransferDraft, writeTransferDraft, discardTransferDraft, completeTransferDraft, parkTransferDraft, RESTORE_WORK_EVENT, peekPendingRestore, reparkDeniedRestore, type MinimizedWorkEntry } from '../../utils/minimizedWork.ts'
-import { clearWorkDraft, scopedWorkDraftKey, writeWorkDraft } from '../../utils/workDrafts.ts'
+import { scopedWorkDraftKey } from '../../utils/workDrafts.ts'
 import { registerDirtyWork } from '../../utils/dirtyWork.ts'
-import { STOCK_ADJUST_RESTORE_HOST, stockAdjustDraftKey, type StockAdjustDraft } from '../../utils/stockAdjustDraft.ts'
 const ExportOptionsDialog = lazyRetry(() => import('../shared/ExportOptionsDialog'), 'inventory-export-options') as any
 const ManageBatchesModal = lazyRetry(() => import('./ManageBatchesModal'), 'inventory-manage-batches-modal') as any
-const InventoryReasonManagerModal = lazyRetry(() => import('./InventoryReasonManagerModal'), 'inventory-reason-manager-modal') as any
+const StockReasonsManagerModal = lazyRetry(() => import('../shared/StockReasonsManagerModal'), 'inventory-stock-reasons-manager')
 const MovementDetailFloat = lazyRetry(() => import('./MovementDetailFloat'), 'inventory-movement-detail-float') as any
 const ProductHistoryPreviewModal = lazyRetry(() => import('./ProductHistoryPreviewModal'), 'inventory-product-history-preview-modal') as any
 const ExportRangeDialog = lazyRetry(() => import('../shared/ExportRangeDialog'), 'inventory-export-range-dialog') as any
@@ -67,8 +64,6 @@ import { normalizeDashboardGrossMetrics } from '../../api/dashboardTransport.ts'
 // 20, deduplicated). A plain constant for now rather than a per-business
 // setting; if a settings-driven default is wanted later, this is the one
 // place to read it from.
-const DEFAULT_ADD_QUANTITY = 1
-
 // All received-date defaults use the fixed Cambodia business calendar day.
 function todayIsoDate(): string {
   return todayStr()
@@ -76,13 +71,9 @@ function todayIsoDate(): string {
 import { useIsPageActive } from '../shared/pageActivity'
 import { useActionHistory } from '../../utils/actionHistory.ts'
 import { effectivePermissions } from '../../utils/permissions.ts'
-import { cloneHistorySnapshot } from '../../utils/historyHelpers.ts'
 import { buildTimeActionSections, toggleIdSet } from '../../utils/groupedRecords.ts'
 import { pruneSelectionToVisibleIds } from '../../utils/rowSelection.ts'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
-import { adjustBranchQuantity, isStockInSubmission, isStockReceiptCreditIncomplete, normalizeStockSetScope, scopedSetPreview, stockReceiptWire, stockAdjustBatchWire, stockReceiptGateCode, stockAdjustQuantityError, STOCK_ADJUST_QUANTITY_FALLBACKS, STOCK_RECEIPT_GATE_FALLBACKS, STOCK_RECEIPT_GATE_KEYS, type StockSetScope } from '../../utils/stockReceiptFields.ts'
-import { createClientRequestId } from '../../api/requestIds.ts'
-import { identityForIntent, retryableRequestId, withWriteTimeout, type IntentIdentityRef } from '../../utils/writeIntent.ts'
 import { isApiVersionMismatchError } from '../../api/http.ts'
 import { localizeBranchRuleError } from '../../api/branchRuleErrors.ts'
 import { branchCanBeTransferSource, branchCanTransferBetween } from '../../utils/branchRoles.ts'
@@ -102,7 +93,6 @@ type LegacyInventoryRecord = Record<string, any>
 type InventoryId = number | string
 type Translator = (key: string) => string | undefined
 type MoneyFormatter = (value: number) => string
-type InventoryLoader<T = any> = () => Promise<T>
 
 type InventoryProduct = LegacyInventoryRecord & {
   id?: InventoryId
@@ -132,14 +122,6 @@ type MovementMeta = {
   totalPages: number
 }
 
-type InventoryReasonType = 'adjust' | 'transfer' | 'move'
-
-type InventoryReason = {
-  id: string
-  type: InventoryReasonType
-  label: string
-}
-
 type InventoryUserOption = {
   id: InventoryId
   name?: string
@@ -149,59 +131,6 @@ type InventoryUserOption = {
 type InventoryStats = LegacyInventoryRecord | null
 
 type InventoryFormValue = string | number
-
-// See InventoryStockModals.tsx's matching comment: one "Cost" field (not
-// a separate cost + purchase price pair), and a pricingLocked toggle --
-// locked (default) skips all of this and adds straight to the current
-// row; unlocked lets the backend (resolveAddStockTarget) find-or-create
-// the right row for genuinely different pricing.
-type AdjustForm = {
-  product_id?: InventoryId
-  type: string
-  quantity: InventoryFormValue
-  reason: string
-  branch_id: InventoryId | ''
-  pricingLocked: boolean
-  selling_price_usd: InventoryFormValue
-  selling_price_khr: InventoryFormValue
-  // Renamed from special_price_* with the tier itself (2026-09-04 ruling);
-  // must stay in lockstep with InventoryStockModals.tsx's own form type.
-  wholesale_price_usd: InventoryFormValue
-  wholesale_price_khr: InventoryFormValue
-  discount_enabled: boolean
-  discount_type: string
-  discount_percent: InventoryFormValue
-  discount_amount_usd: InventoryFormValue
-  cost_usd: InventoryFormValue
-  cost_khr: InventoryFormValue
-  barcode: string
-  // D4 (11.28): real received date for stock recorded late -- see
-  // InventoryStockModals.tsx's matching comment for when it's shown and
-  // when it goes on the wire.
-  received_date: string
-  // Mirrors InventoryStockModals.tsx's own AdjustForm.batch_id -- see that
-  // file's comment. Kept in sync as the same literal type ('' | 'new' | id).
-  batch_id: InventoryId | ''
-  // Scoped Set: mirrors InventoryStockModals.tsx's set_scope / batch_quantity.
-  set_scope?: StockSetScope
-  batch_quantity?: number | ''
-  // D5a: supplier attribution for the lot an add creates or fills --
-  // mirrors InventoryStockModals.tsx's matching fields (the modal clears
-  // both when an attributed lot is picked, so the payload builder here can
-  // trust them; see its comment).
-  supplier_id: number | ''
-  supplier_name: string
-  // S4-15/S4-16: mirrors InventoryStockModals.tsx's matching receipt fields --
-  // what this stock-in cost per unit and how it was paid. Offered for an 'add'
-  // and for a 'set' that raises the figure (utils/stockReceiptFields.ts).
-  unit_cost_usd: InventoryFormValue
-  // N14-D: the explicit free-goods declaration, mirrored from the shared form.
-  free_goods: boolean
-  payment_status: string
-  credit_due_date: string
-  // P3-L6: mirrors InventoryStockModals.tsx's field of the same name.
-  condition_tag: string
-}
 
 type TransferForm = {
   from_branch_id: InventoryId | ''
@@ -310,15 +239,11 @@ function getInventoryApi(): InventoryApi {
     getInventoryBootstrap: async (params: QueryParams = {}) => (await loadInventoryTransport()).getInventoryBootstrap(params),
     getInventoryMovements: async (params: QueryParams = {}) => (await loadInventoryTransport()).getInventoryMovements(params),
     getInventoryMovementBalance: async (id: string | number) => (await loadInventoryTransport()).getInventoryMovementBalance(id),
-    getInventoryReasons: async () => (await loadInventoryTransport()).getInventoryReasons(),
-    getInventoryReasonImpact: async (type: string, from: string, to: string) => (await loadInventoryTransport()).getInventoryReasonImpact(type, from, to),
     getInventoryStats: async (params: QueryParams = {}) => (await loadInventoryTransport()).getInventoryStats(params),
     getProductsByIds: async (ids: unknown[] = [], params: QueryParams = {}) => (await loadProductReadTransport()).getProductsByIds(ids, params),
     getReturns: async (params: QueryParams = {}) => (await loadReturnsReadTransport()).getReturns(params),
     getRfidStatus: async (params: QueryParams = {}) => (await loadRfidTransport()).getRfidStatus(params),
     getUsers: async () => (await loadUserReadTransport()).getUsers(),
-    saveInventoryReasons: async (items: unknown[] = []) => (await loadInventoryWriteTransport()).saveInventoryReasons(items),
-    replaceInventoryReason: async (payload: Record<string, unknown>) => (await loadInventoryWriteTransport()).replaceInventoryReason(payload as { type: string; from: string; to: string; scope: 'saved_only' | 'linked' }),
     searchInventoryProducts: async (params: QueryParams = {}) => (await loadInventoryTransport()).searchInventoryProducts(params),
     adjustStock: async (payload: Record<string, unknown> = {}) => (await loadInventoryWriteTransport()).adjustStock(payload),
     moveStockRow: async (payload: Record<string, unknown> = {}) => (await loadInventoryWriteTransport()).moveStockRow(payload),
@@ -327,14 +252,12 @@ function getInventoryApi(): InventoryApi {
 }
 
 const INVENTORY_USER_OPTIONS_TIMEOUT_MS = 8000
-const INVENTORY_REASONS_TIMEOUT_MS = 8000
 const INVENTORY_BRANCHES_TIMEOUT_MS = 8000
 const INVENTORY_STATS_TIMEOUT_MS = 12000
 const INVENTORY_MOVEMENTS_TIMEOUT_MS = 15000
 const INVENTORY_PRODUCTS_TIMEOUT_MS = 15000
 const INVENTORY_RFID_TIMEOUT_MS = 8000
 const INVENTORY_PRODUCT_DETAIL_TIMEOUT_MS = 10000
-const INVENTORY_STOCK_MUTATION_TIMEOUT_MS = 12000
 
 function countActiveFlags(flags: unknown[] = []): number {
   let count = 0
@@ -397,10 +320,9 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
   dateRange?: DateTimeRange
   onDateRangeChange?: (range: DateTimeRange) => void
 } = {}) {
-  const { can, t, user, notify, fmtUSD, fmtKHR, usdSymbol, exchangeRate, navigateTo } = useApp() as InventoryAppContext
+  const { can, t, user, notify, fmtUSD, fmtKHR, exchangeRate, navigateTo } = useApp() as InventoryAppContext
   const { askToConfirm, confirmDialog } = useConfirmDialog()
   const canViewCosts = canViewAcquisitionCosts(user)
-  const canEditCosts = canEditAcquisitionCosts(user)
   // Every stock-moving action here mutates live batch/stock state that could
   // go stale between a Review Required user's request and an admin's
   // approval, so routes/inventory.ts blocks them outright for that tier
@@ -491,18 +413,7 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
   const [productsError, setProductsError] = useState<string | null>(null)
   const [productsResultScope, setProductsResultScope] = useState('')
   const productsRequestRef = useRef(0)
-  const [adjustModal,   setAdjustModal]   = useState<InventoryProduct | null>(null)
   const [manageBatchesModal, setManageBatchesModal] = useState<InventoryProduct | null>(null)
-  const [adjustForm,    setAdjustForm]    = useState<AdjustForm>({
-    type: 'add', quantity: DEFAULT_ADD_QUANTITY, reason: '', branch_id: '',
-    pricingLocked: true,
-    selling_price_usd: '', selling_price_khr: '', wholesale_price_usd: '', wholesale_price_khr: '',
-    discount_enabled: false, discount_type: 'percent', discount_percent: '', discount_amount_usd: '',
-    cost_usd: 0, cost_khr: 0, barcode: '', batch_id: '', set_scope: 'lot', batch_quantity: '', received_date: todayIsoDate(),
-    supplier_id: '', supplier_name: '',
-    unit_cost_usd: '', free_goods: false, payment_status: 'paid', credit_due_date: '',
-    condition_tag: '',
-  })
   const [transferModal, setTransferModal] = useState<InventoryProduct | null>(null)
   const [transferForm,  setTransferForm]  = useState<TransferForm>({ from_branch_id: '', to_branch_id: '', quantity: 1, reason: '' })
   const [search,        setSearch]        = useState('')
@@ -580,19 +491,6 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
   const [collapsedMovementSections, setCollapsedMovementSections] = useState<Set<string>>(() => new Set())
   const [loading,       setLoading]       = useState(true)
   const [loadError,     setLoadError]     = useState<string | null>(null)
-  const [adjustSaving,  setAdjustSaving]  = useState(false)
-  // P10-19: the validated adjustment request awaits an explicit confirm that
-  // shows what is about to be written -- quantity before/after, branch,
-  // reason, supplier and (for a receipt) Payment/Due date -- rather than the
-  // bare native `window.confirm("Add this quantity to stock?")` this used to
-  // be, which carried none of those values. Mirrors StockAdjustModal.tsx's
-  // own pendingAdjust (Part 563); null = no confirm pending.
-  const [pendingAdjust, setPendingAdjust] = useState<{
-    request: Record<string, any>
-    beforeQuantity: number
-    previousSnapshot: unknown
-    productName: string
-  } | null>(null)
   const [transferSaving, setTransferSaving] = useState(false)
   const [pendingTransfer, setPendingTransfer] = useState<PendingInventoryTransfer | null>(null)
   const [transferRetryError, setTransferRetryError] = useState('')
@@ -610,10 +508,9 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
     setFastStockInProduct(product)
     setShowFastStockIn(true)
   }, [])
-  const [inventoryReasons, setInventoryReasons] = useState<InventoryReason[]>([])
-  const [reasonManager, setReasonManager] = useState<{ open: boolean; type: InventoryReasonType }>({ open: false, type: 'adjust' })
-  const [reasonDraft, setReasonDraft] = useState('')
-  const [savingReasons, setSavingReasons] = useState(false)
+  // Manage > Reasons opens the one stock reasons manager (spec 9).
+  const [reasonsManagerOpen, setReasonsManagerOpen] = useState(false)
+  const canEditStockReasons = can('inventory', 'edit_reasons')
   const [historyReady, setHistoryReady] = useState(false)
   const movementSelectAllRef = useRef<HTMLInputElement | null>(null)
   const loadRequestRef = useRef(0)
@@ -623,13 +520,8 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
   const loadPromiseRef = useRef<Promise<void> | null>(null)
   const pendingLoadRef = useRef<{ silent: boolean; options?: LoadOptions } | null>(null)
   const latestLoadRef = useRef<((silent?: boolean, options?: LoadOptions) => Promise<void>) | null>(null)
-  const inventoryReasonsLoadedRef = useRef(false)
-  const inventoryReasonsPromiseRef = useRef<Promise<InventoryReason[]> | null>(null)
   const inventoryUsersLoadedRef = useRef(false)
   const inventoryUsersPromiseRef = useRef<Promise<InventoryUserOption[]> | null>(null)
-  const adjustStockInFlightRef = useRef(false)
-  // SCAN1 F5: the adjust's request id, one per intent (see handleAdjust).
-  const adjustIdentityRef = useRef<IntentIdentityRef<string>['current']>(null)
   const transferStockInFlightRef = useRef(false)
   const actionHistory = useActionHistory({ limit: 10, notify, scope: 'inventory', enabled: historyReady, user })
   const transferAuthorityRef = useRef({ actorId: String(user?.id ?? ''), allowed: canTransferStock })
@@ -733,12 +625,6 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
     })
     return () => { current = false }
   }, [user?.id])
-  // SCAN1 F5: a write outlives this timer (the POST lives on for up to 45 s),
-  // so its expiry reports an unknown outcome -- check before retrying -- not
-  // "Please try again"; the per-intent ids below make that retry a replay.
-  const runInventoryMutation = useCallback((loader: InventoryLoader, label: string): Promise<any> => (
-    withWriteTimeout(loader, label, INVENTORY_STOCK_MUTATION_TIMEOUT_MS, (key: string) => tr(key, ''))
-  ), [tr])
   // DAY sections always (user, Aug 31: "the date can be moved as group
   // wrap... show only time for rows") -- the date lives once on each day's
   // divider header, so rows need only their clock time.
@@ -794,12 +680,6 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
       hint: tr(option.hintKey, option.hint),
     }))
   ), [tr])
-
-  const reasonsByType = useMemo(() => ({
-    adjust: inventoryReasons.filter((item) => item?.type === 'adjust'),
-    transfer: inventoryReasons.filter((item) => item?.type === 'transfer'),
-    move: inventoryReasons.filter((item) => item?.type === 'move'),
-  }), [inventoryReasons])
 
   const needsStatsData = inventorySection === 'all' || inventorySection === 'stats' || inventorySection === 'products'
   const needsProductsData = inventorySection === 'products' || (inventorySection === 'all' && tab === 'products')
@@ -868,33 +748,6 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
     }
     void loadProducts()
   }, [isActive, loadProducts, needsProductsData])
-
-  const loadInventoryReasons = useCallback(async () => {
-    try {
-      const result = await withLoaderTimeout(
-        () => getInventoryApi().getInventoryReasons?.() ?? Promise.resolve({ items: [] }),
-        'Inventory reasons',
-        INVENTORY_REASONS_TIMEOUT_MS,
-      )
-      const items = Array.isArray(result?.items) ? result.items : []
-      setInventoryReasons(items)
-      inventoryReasonsLoadedRef.current = true
-      return items
-    } catch {
-      inventoryReasonsLoadedRef.current = false
-      return inventoryReasons
-    }
-  }, [inventoryReasons])
-
-  const ensureInventoryReasonsLoaded = useCallback(async () => {
-    if (inventoryReasonsLoadedRef.current) return inventoryReasons
-    if (inventoryReasonsPromiseRef.current) return inventoryReasonsPromiseRef.current
-    const promise = loadInventoryReasons().finally(() => {
-      inventoryReasonsPromiseRef.current = null
-    })
-    inventoryReasonsPromiseRef.current = promise
-    return promise
-  }, [inventoryReasons, loadInventoryReasons])
 
   const ensureInventoryUsersLoaded = useCallback(async () => {
     if (!isAdmin) return []
@@ -1130,88 +983,11 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
     return undefined
   }, [isActive, loading])
   useEffect(() => {
-    if (!isActive || reasonManager.open !== true) return
-    void ensureInventoryReasonsLoaded()
-  }, [ensureInventoryReasonsLoaded, isActive, reasonManager.open])
-  useEffect(() => {
     if (!isActive || !syncChannel?.channel) return
     const ch = syncChannel.channel
     if (['inventory', 'products', 'sales', 'returns', 'suppliers', 'users'].includes(ch)) load(true)
   }, [isActive, load, syncChannel?.channel, syncChannel?.ts])
 
-  const saveReasonCatalog = useCallback(async (nextItems: InventoryReason[]) => {
-    setSavingReasons(true)
-    try {
-      const result = await getInventoryApi().saveInventoryReasons?.(nextItems)
-      // Part 152: /reasons now queues under Review Required instead of
-      // applying directly (`{ success: true, pending: true,
-      // pendingActionId }`, no `items` field since nothing was actually
-      // written yet). Previously `result?.items` being absent on ANY
-      // unexpected response shape silently reset the visible list to
-      // empty -- harmless before this route could return anything but a
-      // full applied `{ items }`, but would have wiped the saved-reasons
-      // list on every Review Required submission the moment this shipped.
-      // Keep the current (optimistic) list on a pending response instead
-      // of clearing it -- nothing changed server-side yet, so nothing
-      // should visibly change client-side either.
-      if (result?.pending) {
-        notify(tr('reason_submitted_for_review', 'Submitted for review -- changes will appear once approved.'))
-        return inventoryReasons
-      }
-      const items = Array.isArray(result?.items) ? result.items as InventoryReason[] : []
-      setInventoryReasons(items)
-      return items
-    } finally {
-      setSavingReasons(false)
-    }
-  }, [inventoryReasons, notify, tr])
-
-  const addSavedReason = useCallback(async () => {
-    const label = reasonDraft.trim()
-    if (!label) return
-    const next = [...inventoryReasons, { id: `${reasonManager.type}:${Date.now()}`, type: reasonManager.type, label }]
-    await saveReasonCatalog(next)
-    setReasonDraft('')
-  }, [inventoryReasons, reasonDraft, reasonManager.type, saveReasonCatalog])
-
-  const renameSavedReason = useCallback(async (entry: InventoryReason) => {
-    const nextLabel = window.prompt(tr('rename_reason_prompt', 'Rename saved reason'), entry?.label || '')
-    if (!nextLabel?.trim() || nextLabel.trim().toLowerCase() === entry.label.trim().toLowerCase()) return
-    const to = nextLabel.trim()
-    const impact = await getInventoryApi().getInventoryReasonImpact(entry.type, entry.label, to) as { linked_records?: number }
-    const linked = Number(impact.linked_records || 0)
-    // Both answers save the rename, as on the native prompt this replaced:
-    // Confirm also rewrites the exact linked movements, Cancel renames only
-    // the saved choice. The buttons now say which is which.
-    const scope = linked > 0 && await askToConfirm({
-      title: tr('rename_reason_prompt', 'Rename saved reason'),
-      message: tr('inventory_reason_linked_notice', '{count} exact stock-movement record(s) use this reason.').replace('{count}', String(linked)),
-      items: [
-        { label: tr('before', 'Before'), value: entry.label },
-        { label: tr('after', 'After'), value: to },
-      ],
-      note: tr('audit_logs_unchanged', 'Audit logs stay unchanged.'),
-      confirmLabel: tr('reason_update_linked_too', 'Update linked records too'),
-      cancelLabel: tr('reason_rename_saved_only', 'Rename saved reason only'),
-    }) ? 'linked' : 'saved_only'
-    const result = await getInventoryApi().replaceInventoryReason({ type: entry.type, from: entry.label, to, scope })
-    const items = Array.isArray(result?.items) ? result.items as InventoryReason[] : inventoryReasons.map((item) => item.id === entry.id ? { ...item, label: to } : item)
-    setInventoryReasons(items)
-    notify(scope === 'linked' ? 'Reason and exact linked movements updated.' : 'Saved reason updated; existing movements were preserved.')
-  }, [askToConfirm, inventoryReasons, notify, tr])
-
-  const deleteSavedReason = useCallback(async (entry: InventoryReason) => {
-    if (!(await askToConfirm({
-      title: tr('delete', 'Delete'),
-      message: tr('delete_saved_reason_confirm', 'Delete this saved reason?'),
-      items: [{ label: tr('reason', 'Reason'), value: entry.label }],
-      confirmLabel: tr('delete', 'Delete'),
-      cancelLabel: tr('cancel', 'Cancel'),
-      danger: true,
-    }))) return
-    const next = inventoryReasons.filter((item) => item.id !== entry.id)
-    await saveReasonCatalog(next)
-  }, [askToConfirm, inventoryReasons, saveReasonCatalog, tr])
   useEffect(() => {
     const showingMovements = inventorySection === 'movements' || (inventorySection === 'all' && tab === 'movements')
     if (!isActive || !isAdmin || !showingMovements) return
@@ -1232,22 +1008,10 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
     if (branchFilter !== 'all') return product.display_quantity ?? product.stock_quantity ?? 0
     return product.stock_quantity ?? 0
   }, [branchFilter])
-  // Single adjust target: the product the modal was opened from. The
-  // variant-family switcher went with the products catalog -- the Products
-  // page's own StockAdjustModal is the multi-product entry point now.
-  const adjustTargetOptions = useMemo(() => (adjustModal ? [adjustModal] : []), [adjustModal])
-  const adjustTargetSelectOptions = useMemo(() => adjustTargetOptions.map((product) => ({
-    value: String(product.id),
-    label: `${product.name}${product.parent_id ? ' (Variant)' : product.is_group ? ' (Group)' : ''}`,
-  })), [adjustTargetOptions])
   const branchSelectOptions = useMemo(() => branches.map((branch) => ({
     value: String(branch.id),
     label: branch.name || String(branch.id),
   })), [branches])
-  const adjustBranchSelectOptions = useMemo(() => [
-    { value: '', label: t('no_specific_branch') || 'No specific branch' },
-    ...branchSelectOptions,
-  ], [branchSelectOptions, t])
   // The transfer selects carry no caption, so their empty option names them.
   const sourceBranchLabel = tr('source_branch', 'Source branch')
   const destinationBranchLabel = tr('destination_branch', 'Destination branch')
@@ -1283,372 +1047,6 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
       batch_quantity: '',
     }))
   }, [defaultTransferDestinationBySourceId])
-  // The figure every adjust verdict is measured against -- receipt or removal,
-  // picker or no picker, which fields the operator is shown. It is the BRANCH
-  // the form is adjusting, not the page's branch filter: `getStockQty` answers
-  // with the product TOTAL while the list is filtered to "All branches", and
-  // routes/inventory.ts compares the requested total against the branch's own
-  // row. Handing the modal the page figure made it call a receipt a set-down
-  // (see adjustBranchQuantity's own note). One rule now, shared with
-  // StockAdjustModal.tsx and with `previousQuantity` in handleAdjust below, so
-  // what is on screen and what rides the wire cannot disagree.
-  const adjustCurrentQuantity = adjustModal
-    ? adjustBranchQuantity(adjustModal.branch_stock, adjustForm.branch_id, getStockQty(adjustModal))
-    : 0
-  // Resolved against the *currently selected* adjust target (not just the
-  // row the modal was opened from) so switching the "Adjust target" picker
-  // (adjustTargetOptions.length > 1) updates the displayed locked price too
-  // -- same resolution `adjustCurrentQuantity` above and `handleAdjust`'s
-  // own `selectedAdjustProduct` already use, kept in sync with both rather
-  // than reading `adjustForm`'s pre-filled-at-open-time price fields, which
-  // never get refreshed on a target switch (those only matter once
-  // unlocked, as edit-starting-point values, not as a display source).
-  const adjustCurrentPricing = adjustModal
-    ? {
-        selling_price_usd: Number(adjustModal?.selling_price_usd) || 0,
-        selling_price_khr: Number(adjustModal?.selling_price_khr) || 0,
-      }
-    : { selling_price_usd: 0, selling_price_khr: 0 }
-
-  const handleAdjust = async () => {
-    if (adjustSaving || pendingAdjust) return
-    const qty = parseFloat(String(adjustForm.quantity))
-    // A set is a TARGET, not a movement: 0 is how an operator records an
-    // emptied shelf. One rule, shared with StockAdjustModal, FastStockInModal
-    // and routes/inventory.ts's own split -- and the refusal is a pack key,
-    // not hard-coded English.
-    const quantityError = stockAdjustQuantityError(adjustForm.type, adjustForm.quantity)
-    if (quantityError) return notify(tr(quantityError, STOCK_ADJUST_QUANTITY_FALLBACKS[quantityError]), 'error')
-    // Mirrors the transfer form's own required-reason check just below, and
-    // backs up routes/inventory.ts's /adjust hard requirement (added
-    // alongside the unconditional batch-ledger routing) with a fast inline
-    // error instead of letting the request round-trip to a 400.
-    if (!String(adjustForm.reason || '').trim()) {
-      notify(tr('adjust_reason_required', 'A reason is required for this stock adjustment.'), 'error')
-      return
-    }
-    const selectedAdjustProduct = adjustModal
-    if (!selectedAdjustProduct) return notify('Select a product first', 'error')
-    const previousSnapshot = cloneHistorySnapshot(selectedAdjustProduct)
-    const numericBranchId = adjustForm.branch_id ? parseInt(String(adjustForm.branch_id), 10) : null
-    const selectedBranchStockById = new Map(
-      (selectedAdjustProduct?.branch_stock || []).map((entry) => [Number(entry?.branch_id || 0), entry]),
-    )
-    const selectedBranchStock = numericBranchId ? selectedBranchStockById.get(numericBranchId) : null
-    // Same rule, same call, as `adjustCurrentQuantity` above -- the figure the
-    // modal renders its verdicts from and the figure this submission is gated
-    // against must be one number, not two derivations that agree by habit.
-    const previousQuantity = adjustBranchQuantity(
-      selectedAdjustProduct?.branch_stock,
-      numericBranchId,
-      getStockQty(selectedAdjustProduct),
-    )
-    // Pricing only ever goes on the wire when it's genuinely unlocked --
-    // locked (the default) is the fast add-to-this-row path, matching
-    // this endpoint's behavior before the grouping feature existed.
-    const unlockPricing = adjustForm.type === 'add' && !adjustForm.pricingLocked
-    // Mandatory batch selection, every target incl. group containers --
-    // D4b (matches InventoryStockModals.tsx's own `showBatchPicker`
-    // derivation; an unlocked add always gets a fresh batch server-side so
-    // there's nothing to require picking there). Checked client-side for a
-    // fast error message; routes/inventory.ts's /adjust also accepts a
-    // missing batchId on 'remove' from other callers (undo/redo, bulk
-    // edits) without requiring one -- this validation is this form's own
-    // rule, not the wire contract's.
-    if (!unlockPricing && (adjustForm.type === 'add' || adjustForm.type === 'remove') && numericBranchId) {
-      if (adjustForm.batch_id === '') { notify(tr('select_batch_required', 'Select a received date first'), 'error'); return }
-      if (adjustForm.type === 'remove' && adjustForm.batch_id === 'new') { notify(tr('select_batch_required', 'Select a received date first'), 'error'); return }
-    }
-    // Scoped Set (owner, 24 Sep): the selected received date (default) or the
-    // branch total, absorbed by that received date. It needs an EXISTING lot
-    // and carries the figures it was previewed against, so the Worker refuses
-    // it (409) instead of applying a stale difference.
-    const scopedSet = adjustForm.type === 'set' && adjustForm.set_scope != null
-    const setScope = normalizeStockSetScope(adjustForm.set_scope)
-    if (scopedSet) {
-      const lotQuantity = Number(adjustForm.batch_quantity)
-      if (!numericBranchId || adjustForm.batch_id === '' || adjustForm.batch_id === 'new' || adjustForm.batch_quantity === '' || !Number.isFinite(lotQuantity)) {
-        notify(tr('select_batch_required', 'Select a received date first'), 'error'); return
-      }
-      if (!scopedSetPreview({ scope: setScope, targetQuantity: qty, lotQuantity, branchQuantity: previousQuantity }).valid) {
-        notify(tr('stock_set_lot_negative', 'The selected received date does not have enough stock for this branch total.'), 'error'); return
-      }
-    }
-    const isStockIn = isStockInSubmission(adjustForm.type, qty, previousQuantity, adjustForm.set_scope)
-    if (isStockIn && !canEditCosts) {
-      notify(tr('product_cost_edit_required', 'Cost edit permission is required to receive stock.'), 'error')
-      return
-    }
-    if (isStockIn && isStockReceiptCreditIncomplete(adjustForm)) {
-      notify(tr('fast_stockin_credit_due', 'Not Yet Paid stock needs a due date'), 'error')
-      return
-    }
-    // The lot this submission actually names, derived from the one shared
-    // rule InventoryStockModals renders the picker by -- a picker that is not
-    // on screen chose nothing, so nothing stale rides the wire (N14-E).
-    // Picking an EXISTING lot blanks the supplier field on purpose: an
-    // attributed lot keeps its first supplier and the picker shows that name
-    // locked instead. This form cannot read the lot from here, so it defers
-    // the supplier half to routes/inventory.ts, which looks the lot up and
-    // refuses an unattributed one. The cost half is never deferred.
-    const batchWire = stockAdjustBatchWire({
-      type: adjustForm.type,
-      quantity: qty,
-      // `adjustCurrentQuantity` is the prop the modal renders the picker by,
-      // and it now resolves to the same branch figure `previousQuantity` and
-      // routes/inventory.ts compare against -- the two used to be different
-      // numbers, which is how the form and its wire came to disagree about
-      // what the operator was looking at.
-      currentQuantity: adjustCurrentQuantity,
-      unlockPricing,
-      branchId: numericBranchId,
-      batchId: adjustForm.batch_id,
-      setScope: scopedSet ? setScope : undefined,
-    })
-    // N14-D: the same rule routes/inventory.ts enforces (lib/stockReceiptGate.ts),
-    // run here so the operator is told at the form rather than by a 400.
-    const receiptGate = stockReceiptGateCode({
-      isStockIn,
-      supplierName: adjustForm.supplier_name,
-      lotAttributionDeferred: batchWire.lotAttributionDeferred,
-      unitCostUsd: adjustForm.unit_cost_usd,
-      freeGoods: adjustForm.free_goods,
-    })
-    if (receiptGate) {
-      notify(tr(STOCK_RECEIPT_GATE_KEYS[receiptGate], STOCK_RECEIPT_GATE_FALLBACKS[receiptGate]), 'error')
-      return
-    }
-    const adjustmentIntent = {
-      productId: selectedAdjustProduct.id,
-      productName: selectedAdjustProduct.name,
-      type: adjustForm.type,
-      quantity: qty,
-      reason: adjustForm.reason || '',
-      branchId: numericBranchId,
-      userId: user?.id,
-      userName: user?.name || user?.username,
-      unlockPricing,
-      batchId: batchWire.batchId,
-      ...(scopedSet ? {
-        setScope,
-        expectedLotQuantity: Number(adjustForm.batch_quantity),
-        expectedBranchQuantity: previousQuantity,
-      } : {}),
-      // D4 (11.28): sent only when the date input was actually on screen
-      // (InventoryStockModals.tsx's own visibility condition, recomputed
-      // here) -- a value lingering from a hidden input must never re-date
-      // some other kind of change. Group containers included since D4b.
-      // S4-16: a 'set' above the current figure is a receipt server-side
-      // (routes/inventory.ts converts it to an add of the difference), so it
-      // carries the same date, supplier and receipt facts an add does.
-      receivedDate: isStockIn
-          && (unlockPricing || (adjustForm.type === 'set' && !scopedSet) || (Boolean(numericBranchId) && adjustForm.batch_id === 'new'))
-          && adjustForm.received_date
-        ? String(adjustForm.received_date)
-        : undefined,
-      // D5a: sent only for adds, mirroring the picker's own visibility.
-      // The modal already cleared these when an attributed lot was picked
-      // (first attribution sticks), so what's here is what was on screen.
-      supplierId: isStockIn && adjustForm.supplier_id !== '' ? Number(adjustForm.supplier_id) : undefined,
-      supplierName: isStockIn && String(adjustForm.supplier_name || '').trim() !== '' ? String(adjustForm.supplier_name).trim() : undefined,
-      // P3-L6: the condition tag, sent only when the control offered it
-      // (add/remove; a 'set' has no quantity of its own to tag and the route
-      // refuses one). Absent means the ordinary untagged behaviour.
-      // A scoped Set that lowers stock may carry it too (loss rule, 24 Sep):
-      // the modal only offers the row, and keeps it, while the preview decreases.
-      conditionTag: (adjustForm.type === 'add' || adjustForm.type === 'remove' || scopedSet) && adjustForm.condition_tag
-        ? String(adjustForm.condition_tag)
-        : undefined,
-      ...stockReceiptWire(adjustForm, receiptSessionIdRef.current, isStockIn),
-      pricing: unlockPricing ? {
-        selling_price_usd: parseFloat(String(adjustForm.selling_price_usd)) || 0,
-        selling_price_khr: parseFloat(String(adjustForm.selling_price_khr)) || 0,
-        // Was special_price_*: the 2026-09-04 ruling renamed the tier, and
-        // routes/inventory.ts's /adjust contract now names the wholesale pair
-        // too, so this is a live column again, not a dead one. It still has no
-        // input on this form -- the values ride through prefilled from the row
-        // -- but it must be sent, because unlocked pricing can land the receipt
-        // on a NEW product row, and the pair is what seeds that row's tier.
-        // FastStockInModal sends it for the same reason.
-        wholesale_price_usd: parseFloat(String(adjustForm.wholesale_price_usd)) || 0,
-        wholesale_price_khr: parseFloat(String(adjustForm.wholesale_price_khr)) || 0,
-        discount_enabled: !!adjustForm.discount_enabled,
-        discount_type: adjustForm.discount_type,
-        discount_percent: parseFloat(String(adjustForm.discount_percent)) || 0,
-        discount_amount_usd: parseFloat(String(adjustForm.discount_amount_usd)) || 0,
-        ...(canEditCosts && String(adjustForm.cost_usd).trim() !== '' ? { cost_usd: parseFloat(String(adjustForm.cost_usd)) || 0 } : {}),
-        ...(canEditCosts && String(adjustForm.cost_khr).trim() !== '' ? { cost_khr: parseFloat(String(adjustForm.cost_khr)) || 0 } : {}),
-        barcode: adjustForm.barcode || null,
-      } : undefined,
-    }
-    const adjustmentRequest = {
-      ...adjustmentIntent,
-      // SCAN1 F5 / migrations 0192-0193: every adjust carries a per-request
-      // identity (a plain add/remove used to carry none and took the
-      // unprotected path). Minted once per INTENT: a re-confirm, or a
-      // re-submit of the same values after the UI stopped waiting, resends it
-      // and the Worker answers from the stored result instead of adjusting
-      // stock twice; changed values are a new request.
-      client_request_id: identityForIntent(adjustIdentityRef, adjustmentIntent, () => createClientRequestId(scopedSet ? 'stock-set' : 'stockadjust')),
-    }
-    if (adjustForm.type === 'remove') {
-      if (numericBranchId) {
-        const available = selectedBranchStock?.quantity || 0
-        if (available <= 0) { notify(tr('no_stock_in_branch', 'No stock in this branch to remove'), 'error'); return }
-        if (qty > available) { notify(`Cannot remove ${qty} - only ${available} available`, 'error'); return }
-      } else {
-        const totalQty = getStockQty(adjustModal)
-        if (totalQty <= 0) { notify('No stock available to remove', 'error'); return }
-        if (qty > totalQty) { notify(`Cannot remove ${qty} - only ${totalQty} available`, 'error'); return }
-      }
-    }
-    // P10-19: park the validated request and open the review dialog instead
-    // of writing straight away. A bare native confirm ("Add this quantity to
-    // stock?") showed no values at all -- not the quantity, not the branch,
-    // and for a receipt not the Payment/Due date the operator just typed --
-    // so there was nothing on screen to prove a "Not Yet Paid" due date had
-    // been read before the write. commitAdjust below does the actual write
-    // once the operator has seen the values and confirmed.
-    setPendingAdjust({
-      request: adjustmentRequest,
-      // A lot-scope Set is reviewed against the received date it targets.
-      beforeQuantity: scopedSet && setScope === 'lot' ? Number(adjustForm.batch_quantity) : previousQuantity,
-      previousSnapshot,
-      productName: String(previousSnapshot?.name || selectedAdjustProduct?.name || ''),
-    })
-  }
-
-  const commitAdjust = async () => {
-    const pending = pendingAdjust
-    if (!pending || adjustSaving) return
-    const adjustmentRequest = pending.request
-    if (!beginSingleAction(adjustStockInFlightRef, { blocked: adjustSaving })) return
-    setAdjustSaving(true)
-    try {
-      const res = await runInventoryMutation(() => getInventoryApi().adjustStock(adjustmentRequest), 'Adjust inventory stock')
-      // Match the defensive pattern used elsewhere (BulkAddStockModal):
-      // treat an explicit `success: false` as failure,
-      // not a missing/undefined field. A write that reaches this line
-      // without throwing already succeeded server-side (the server route
-      // now always sets `success: true`, but staying defensive here means a
-      // future response-shape change can't silently reintroduce the
-      // "succeeded but shows an error toast" bug).
-      if (res?.success !== false) {
-        // Committed: the next adjust, even an identical one, is a new request.
-        adjustIdentityRef.current = null
-        // The inverse of a batch-scoped adjustment must target the *same*
-        // batch the original one actually resolved to -- for a plain
-        // pick this is just adjustmentRequest.batchId, but an 'add' with
-        // batch_id 'new' didn't know which batch that'd be until the
-        // server created it. `res.batchId` is that resolved id either
-        // way (routes/inventory.ts's /adjust always echoes it back), so
-        // undo/redo use it instead of blindly replaying the request's own
-        // (possibly 'new') batchId.
-        const resolvedBatchId = (res as { batchId?: number | null } | null)?.batchId ?? null
-        const inverseBatchId = resolvedBatchId != null ? resolvedBatchId : adjustmentRequest.batchId
-        // SCAN1 F5: the inverse writes carry their OWN ids. Inheriting the
-        // forward id would be answered 409 (same id, different body) or
-        // replay the forward adjust; a fresh id per call would re-apply an
-        // undo whose answer was lost. Each rotates only once its closure fully
-        // succeeded (actionHistory re-runs a failed closure).
-        const undoRequestId = retryableRequestId('stockadjust-undo')
-        const redoRequestId = retryableRequestId('stockadjust-redo')
-        // A scoped Set is recorded by the Worker with an exact, generation-
-        // guarded undo/redo (stock.quantity_set). A client closure here would
-        // be a second, unguarded reversal of the same change.
-        // Without a server record (migration 0193 not applied yet) there is NO
-        // undo for it: replaying the request would reuse its request id and
-        // report success while changing nothing.
-        if (Number((res as { action_history_id?: number } | null)?.action_history_id || 0) > 0) {
-          await actionHistory.refreshServerItems()
-        } else if ('setScope' in adjustmentRequest && adjustmentRequest.setScope) {
-          // Saved; nothing to push.
-        } else
-        // P3-L6. A tagged adjustment is NOT reversible by an inverse
-        // /adjust call, so no undo entry is pushed for one -- an undo that
-        // reports success while doing the wrong thing is worse than no undo.
-        //   * a tagged REMOVE moved units out of sellable stock AND created
-        //     a held row; the inverse "add" would receive brand-new stock
-        //     and leave the held row standing, so the units would exist
-        //     twice. Its real reversal is the tagged row's own "Restore to
-        //     sellable" on the Products page, which moves both ledgers.
-        //   * a tagged RESTOCK additionally recorded a supplier purchase;
-        //     un-buying it is the Stock Change ledger's revert, not this.
-        if (adjustmentRequest.conditionTag) {
-          notify(tr('stock_tagged_undo_hint', 'Saved. Use the tagged row on the product to restore or remove these units.'), 'info')
-        } else actionHistory.pushAction({
-          label: `Adjust stock for ${pending.productName || 'product'}`,
-          undo: async () => {
-            // N14-D: an undo puts the branch back to the figure it held before.
-            // It is not a new receipt -- the inverse of a remove is an add with
-            // no supplier and no cost of its own, and the inverse of a set can
-            // raise stock too -- so it declares itself a correction rather than
-            // being handed invented receipt facts.
-            const undoBase = { ...adjustmentRequest, attribution: 'correction' as const, client_request_id: undoRequestId.current() }
-            const inverseRequest = adjustmentRequest.type === 'set'
-              ? { ...undoBase, type: 'set', quantity: pending.beforeQuantity, reason: `Undo: ${adjustmentRequest.reason || 'inventory adjustment'}` }
-              : adjustmentRequest.type === 'remove'
-                ? { ...undoBase, type: 'add', batchId: inverseBatchId, unlockPricing: false, reason: `Undo: ${adjustmentRequest.reason || 'inventory adjustment'}` }
-                : { ...undoBase, type: 'remove', batchId: inverseBatchId, unlockPricing: false, reason: `Undo: ${adjustmentRequest.reason || 'inventory adjustment'}` }
-            const undoResult = await runInventoryMutation(() => getInventoryApi().adjustStock(inverseRequest), 'Undo inventory adjustment')
-            if (undoResult?.success === false) throw new Error(undoResult?.error || 'Failed to undo stock adjustment')
-            await load(true)
-            undoRequestId.settle()
-          },
-          redo: async () => {
-            const redoResult = await runInventoryMutation(() => getInventoryApi().adjustStock({ ...adjustmentRequest, batchId: inverseBatchId, reason: `Redo: ${adjustmentRequest.reason || 'inventory adjustment'}`, client_request_id: redoRequestId.current() }), 'Redo inventory adjustment')
-            if (redoResult?.success === false) throw new Error(redoResult?.error || 'Failed to redo stock adjustment')
-            await load(true)
-            redoRequestId.settle()
-          },
-        })
-        notify('Stock adjusted')
-        clearWorkDraft(stockAdjustDraftKey(adjustModal?.id))
-        setPendingAdjust(null)
-        setAdjustModal(null)
-        await load(true)
-      }
-      else notify(res?.error || 'Adjustment failed', 'error')
-    } catch (e: unknown) { notify(e instanceof Error ? e.message : 'Error', 'error') }
-    finally {
-      finishSingleAction(adjustStockInFlightRef)
-      setAdjustSaving(false)
-    }
-  }
-
-  // The compact "what's about to happen" review rows the confirm dialog
-  // shows -- quantity before/after, branch, reason, supplier and (for a
-  // receipt) Payment/Due date -- built from the PARKED request so what is
-  // shown always matches exactly what will be written.
-  const buildInventoryAdjustReviewItems = (): ConfirmReviewItem[] => {
-    const req = pendingAdjust?.request
-    if (!req) return []
-    const reqBranchId = req.branchId != null ? Number(req.branchId) : null
-    const branchName = reqBranchId ? (branches.find((b) => Number(b.id) === reqBranchId)?.name || String(reqBranchId)) : '--'
-    const items: ConfirmReviewItem[] = [
-      ...buildStockAdjustQuantityReview({
-        type: req.type,
-        quantity: req.quantity,
-        beforeQuantity: pendingAdjust?.beforeQuantity,
-        setScope: 'setScope' in req ? req.setScope : undefined,
-        unit: adjustModal?.unit,
-        tr,
-      }),
-      { label: tr('branch', 'Branch'), value: branchName },
-    ]
-    const reqReason = String(req.reason || '').trim()
-    if (reqReason) items.push({ label: tr('reason', 'Reason'), value: reqReason })
-    const reqSupplier = String(req.supplierName || '').trim()
-    if (reqSupplier) items.push({ label: tr('supplier', 'Supplier'), value: reqSupplier })
-    items.push(...buildStockReceiptPaymentReview({
-      isStockIn: req.paymentStatus === 'paid' || req.paymentStatus === 'credit',
-      paymentStatus: req.paymentStatus,
-      creditDueDate: req.creditDueDate,
-      tr,
-    }))
-    return items
-  }
-
   // A fresh search is exactly the "search again" moment
   // pinnedEditedInventoryRef's own comment refers to -- once the person is
   // intentionally re-querying, a just-adjusted/transferred row that no
@@ -1658,93 +1056,8 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
     setSearch(value)
   }, [])
 
-  // S4-15: minted per modal OPENING, not per component mount -- a page-wide
-  // id would fold every adjustment made all day into one Sessions row.
-  const receiptSessionIdRef = useRef(Date.now())
-  const closeAdjustAndDiscardDraft = useCallback(() => {
-    clearWorkDraft(stockAdjustDraftKey(adjustModal?.id))
-    setPendingAdjust(null)
-    setAdjustModal(null)
-  }, [adjustModal?.id])
-  const preserveAndMinimizeAdjust = useCallback(() => {
-    if (!adjustModal || adjustSaving) return
-    const draftKey = stockAdjustDraftKey(adjustModal.id)
-    const initialType = adjustForm.type === 'remove' || adjustForm.type === 'set' ? adjustForm.type : 'add'
-    writeWorkDraft<StockAdjustDraft>(draftKey, {
-      version: 1,
-      product: { ...adjustModal },
-      form: { ...adjustForm },
-      initialType,
-      search: '',
-      receiptSessionId: receiptSessionIdRef.current,
-      attemptId: `inventory-${receiptSessionIdRef.current}`,
-      rows: [],
-    })
-    minimizeWork({
-      key: `stock-adjust-${String(adjustModal.id)}`,
-      kind: 'stock_adjust',
-      ...STOCK_ADJUST_RESTORE_HOST,
-      label: `${tr('adjust_stock', 'Adjust stock')} — ${adjustModal.name || `#${adjustModal.id}`}`,
-      payload: { productId: adjustModal.id },
-      draftKey,
-      requiredPermission: { permissionKey: 'inventory', actionKey: 'adjust' },
-    })
-    notify(tr('minimized_to_chip', 'Minimized. Pick it back up from the chip — nothing was lost.', 'បានបង្រួម។ បន្តវាឡើងវិញពីស្លាក — គ្មានអ្វីបាត់បង់ទេ។'), 'info')
-    setPendingAdjust(null)
-    setAdjustModal(null)
-  }, [adjustForm, adjustModal, adjustSaving, notify, tr])
-  const openAdjust = (p: InventoryProduct) => {
-    void ensureInventoryReasonsLoaded()
-    receiptSessionIdRef.current = Date.now()
-    adjustIdentityRef.current = null
-    setPendingAdjust(null)
-    setAdjustModal(p)
-    const defaultBranchId = defaultBranch?.id?.toString() || ''
-    // pricingLocked starts true (the fast "add to this row" path) --
-    // these price/cost/discount fields only matter once the person
-    // unlocks pricing, but are pre-filled from the current row so the
-    // fields aren't blank if they do unlock.
-    setAdjustForm({
-      product_id: p.id,
-      type: 'add',
-      quantity: DEFAULT_ADD_QUANTITY,
-      reason: '',
-      branch_id: defaultBranchId,
-      pricingLocked: true,
-      selling_price_usd: p.selling_price_usd || 0,
-      selling_price_khr: p.selling_price_khr || 0,
-      // Was the special_price_* pair, prefilled for the deleted "VIP" tier.
-      // Now prefilled from the row's real wholesale price, and sent back out
-      // with the pricing payload (see below) so an unlocked receipt that
-      // creates a new row carries the tier onto it.
-      wholesale_price_usd: p.wholesale_price_usd || 0,
-      wholesale_price_khr: p.wholesale_price_khr || 0,
-      discount_enabled: !!p.discount_enabled,
-      discount_type: p.discount_type || 'percent',
-      discount_percent: p.discount_percent || 0,
-      discount_amount_usd: p.discount_amount_usd || 0,
-      cost_usd: canViewCosts ? p.cost_price_usd ?? p.purchase_price_usd ?? '' : '',
-      cost_khr: canViewCosts ? p.cost_price_khr ?? p.purchase_price_khr ?? '' : '',
-      barcode: p.barcode || '',
-      batch_id: '',
-      set_scope: 'lot',
-      batch_quantity: '',
-      // Reset to today on every open -- a historical date from the last
-      // adjustment must never silently carry into the next one (same
-      // stale-draft rule ReceiveBatchModal documents for its own date).
-      received_date: todayIsoDate(),
-      // D5a: same stale-value rule -- last adjustment's supplier must
-      // never silently attribute the next lot. S4-15's receipt fields reset
-      // for the same reason: a cost or a credit due date from the previous
-      // receipt must never ride along into this one.
-      supplier_id: '', supplier_name: '',
-      unit_cost_usd: canViewCosts ? p.cost_price_usd ?? p.purchase_price_usd ?? '' : '', free_goods: false, payment_status: 'paid', credit_due_date: '',
-      // P3-L6: the condition tag resets with every other stale receipt
-      // field -- the last removal's "broken" must never silently tag the
-      // next one.
-      condition_tag: '',
-    })
-  }
+  // The row and detail Adjust open the Stock Session with that product picked.
+  const openAdjust = (p: InventoryProduct) => openFastStockIn(p)
 
   const openManageBatches = (p: InventoryProduct) => {
     setManageBatchesModal(p)
@@ -1755,7 +1068,6 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
     if (readTransferDraft('inventory_transfer', user?.id)) { void restoreInventoryTransfer(); return }
     transferDraftOwnerRef.current = { key: transferDraftKey('inventory_transfer'), actorId: String(user?.id ?? '') }
     setTransferRestoredDirty(false)
-    void ensureInventoryReasonsLoaded()
     const branchStock = Array.isArray(p?.branch_stock) ? p.branch_stock : []
     const firstStockBranch = branchStock.find((item: LegacyInventoryRecord) => Number(item?.quantity || 0) > 0)?.branch_id
     const requestedSourceId = branchFilter !== 'all'
@@ -1991,7 +1303,6 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
       setTransferRetryError('')
       transferDraftOwnerRef.current = { key: transferDraftKey('inventory_transfer'), actorId }
       setTransferRestoredDirty(true)
-      void ensureInventoryReasonsLoaded()
       setTransferForm({
         from_branch_id: form.from_branch_id,
         to_branch_id: form.to_branch_id,
@@ -2988,6 +2299,7 @@ ${inventoryFeesFormulaText}`,
             // icon convention as HeaderActions; these two were swapped.
             { label: tr('import', 'Import'), onClick: () => setShowImport(true), color: 'blue', icon: <Upload className="h-4 w-4 shrink-0" /> },
             { label: tr('adjust', 'Adjust'), onClick: () => openFastStockIn(null), color: 'green', icon: <Boxes className="h-4 w-4 shrink-0" /> },
+            ...(canEditStockReasons ? [{ label: tr('reasons', 'Reasons'), onClick: () => setReasonsManagerOpen(true), icon: <Tags className="h-4 w-4 shrink-0" /> }] : []),
           ] as PortalMenuItem[])}
         />
       </div>
@@ -3163,26 +2475,10 @@ ${inventoryFeesFormulaText}`,
         </Suspense>
       ) : null}
 
-      {adjustModal || transferModal ? (
+      {transferModal ? (
         <Suspense fallback={null}>
           <InventoryStockModals
-            adjustBranchSelectOptions={adjustBranchSelectOptions}
-            adjustCurrentPricing={adjustCurrentPricing}
-            adjustCurrentQuantity={adjustCurrentQuantity}
-            adjustForm={adjustForm}
-            adjustModal={adjustModal}
-            adjustSaving={adjustSaving}
-            adjustTargetOptions={adjustTargetOptions}
-            adjustTargetSelectOptions={adjustTargetSelectOptions}
-            branchCount={branches.length}
-            branchSelectOptions={branchSelectOptions}
-            defaultAddQuantity={DEFAULT_ADD_QUANTITY}
-            fmtKHR={fmtKHR}
-            fmtUSD={fmtUSD}
             getStockQty={getStockQty}
-            onAdjust={handleAdjust}
-            onCloseAdjust={closeAdjustAndDiscardDraft}
-            onMinimizeAdjust={adjustModal ? preserveAndMinimizeAdjust : undefined}
             onCloseTransfer={closeTransferDraft}
             onMinimizeTransfer={minimizeTransferDraft}
             transferRestoredDirty={transferRestoredDirty}
@@ -3190,9 +2486,6 @@ ${inventoryFeesFormulaText}`,
             transferWorkKey={transferDraftOwnerRef.current.key}
             onTransfer={handleTransferStock}
             onTransferSourceChange={handleTransferSourceChange}
-            reasonsByType={reasonsByType}
-            setAdjustForm={setAdjustForm}
-            setReasonManager={(next: typeof reasonManager) => { if (!transferStockInFlightRef.current && !pendingTransfer) setReasonManager(next) }}
             setTransferForm={(next: typeof transferForm) => { if (!transferStockInFlightRef.current && !pendingTransfer) setTransferForm(next) }}
             t={t}
             tr={tr}
@@ -3201,22 +2494,8 @@ ${inventoryFeesFormulaText}`,
             transferModal={transferModal}
             transferSaving={transferSaving}
             transferSourceBranchOptions={transferSourceBranchOptions}
-            usdSymbol={usdSymbol}
           />
         </Suspense>
-      ) : null}
-
-      {pendingAdjust ? (
-        <ConfirmDialog
-          t={t}
-          title={tr('adjust_stock', 'Adjust stock')}
-          message={pendingAdjust.productName}
-          items={buildInventoryAdjustReviewItems()}
-          working={adjustSaving}
-          workingLabel={tr('saving', 'Saving...')}
-          onConfirm={() => void commitAdjust()}
-          onClose={() => { if (!adjustSaving) setPendingAdjust(null) }}
-        />
       ) : null}
 
       {discardingInventoryTransfer && pendingTransfer ? (
@@ -3239,21 +2518,9 @@ ${inventoryFeesFormulaText}`,
         />
       ) : null}
 
-      {reasonManager.open ? (
+      {reasonsManagerOpen ? (
         <Suspense fallback={null}>
-          <InventoryReasonManagerModal
-            addSavedReason={addSavedReason}
-            deleteSavedReason={deleteSavedReason}
-            reasonDraft={reasonDraft}
-            reasonManager={reasonManager}
-            reasonsByType={reasonsByType}
-            renameSavedReason={renameSavedReason}
-            savingReasons={savingReasons}
-            setReasonDraft={setReasonDraft}
-            setReasonManager={setReasonManager}
-            t={t}
-            tr={tr}
-          />
+          <StockReasonsManagerModal initialTab="adjust" onClose={() => setReasonsManagerOpen(false)} />
         </Suspense>
       ) : null}
 

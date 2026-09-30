@@ -6,17 +6,19 @@
 // (including the Part-77 branch floor on lot scope), Add keeps New, Remove and
 // Set must name an existing lot, and a bulk Set is undone only through the
 // Worker's history rows.
+// Since 30 Sep 2026 the bulk panel queues its products as Items in the Stock
+// Session, so BulkAddStockModal's per-row lot pickers and the page's client
+// redo are retired; the session applies the same lot rules to every line.
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 
 import { bulkActionCanReceive, isBatchPickerVisible, isStockInSubmission, normalizeStockSetScope, scopedSetPreview } from '../src/utils/stockReceiptFields.ts'
 import { isRevertibleStockMovement } from '../src/utils/stockMovementDetail.ts'
+import { buildStockLineRequest, sessionLotChoices, type StockSessionLine } from '../src/utils/stockSessionDraft.ts'
 
-const read = (file: string) => readFileSync(new URL(file, import.meta.url), 'utf8')
-const bulk = read('../src/components/products/forms/BulkAddStockModal.tsx')
+const read = (file: string) => readFileSync(new URL(file, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 const products = read('../src/components/products/Products.tsx')
 const fast = read('../src/components/inventory/FastStockInModal.tsx')
-const modals = read('../src/components/inventory/InventoryStockModals.tsx')
 const worker = read('../../cloudflare/src/lib/stockLotAdjustment.ts')
 
 function test(name: string, run: () => void): void {
@@ -57,33 +59,42 @@ test('a scoped Set is a correction, never a receipt, and always shows the lot pi
   assert.equal(bulkActionCanReceive('add'), true)
 })
 
-test('every bulk row names an action-appropriate received date', () => {
-  assert.match(bulk, /getProductBatches\(productId, numericBranchId, action === 'remove'\)/, 'Remove asks for lots with stock; Add and Set ask for every lot')
-  assert.match(bulk, /action === 'add'\s*\n?\s*\? \[\{ value: 'new'/, 'New is an Add-only choice')
-  assert.match(bulk, /const missing = selectedProducts\.find/, 'no silent New/FIFO default for Remove and Set')
-  assert.match(bulk, /lotErrors\[productId\][\s\S]*?role="alert"[\s\S]*?setLotReloadKey/, 'a lot lookup failure is distinct from an empty list and retryable')
-  assert.match(bulk, /if \(action === 'set' && lot\) \{[\s\S]*?setScope, batchId: Number\(lot\.id\), expectedLotQuantity: Number\(lot\.quantity \|\| 0\)/)
-  assert.match(bulk, /useState<StockSetScope>\('lot'\)/, 'selected-lot Set is the default')
+test('the bulk panel hands the session its products; the page keeps no client stock redo', () => {
+  assert.match(products, /const openBulkStockSession = \(\) => \{/)
+  assert.match(products, /if \(lines\.length\) setStockSession\(\{ mode, lines \}\)/)
+  // A client redo closure re-adds on redo, which is wrong for a Remove or a Set.
+  assert.doesNotMatch(products, /BulkAddStockModal|addStockToProducts/)
 })
 
-test('a bulk Set or Remove is never redone as an add; server history is its undo', () => {
-  assert.match(bulk, /action_history_id/)
-  assert.match(bulk, /serverActionHistoryIds: \[\.\.\.historyIdsRef\.current\]/)
-  assert.match(products, /if \(serverActionHistoryIds\.length\) await actionHistory\.refreshServerItems\(\)/)
-  assert.match(products, /if \(action === 'add' && !serverActionHistoryIds\.length/)
-  assert.match(products, /action === 'remove' \? 'Removed stock from' : action === 'set' \? 'Set stock for' : 'Added stock to'/)
+const lots = [
+  { id: 1, quantity: 0, received_at: '2026-08-01' },
+  { id: 2, quantity: 5, received_at: '2026-09-01' },
+  { id: 3, quantity: 2, received_at: '2026-07-01' },
+]
+const anySupplier = { supplierId: null, supplierName: '' }
+
+test('session: New only for Add, Remove only lots with stock, Set every lot', () => {
+  assert.deepEqual(sessionLotChoices('remove', lots, anySupplier).map((lot) => lot.id), [3, 2], 'Remove offers only lots holding stock, oldest first')
+  assert.deepEqual(sessionLotChoices('set', lots, anySupplier).map((lot) => lot.id), [3, 1, 2], 'Set may correct an emptied lot')
+  assert.match(fast, /if \(mode === 'add'\) return \[\{ value: 'new', label: newLabel \}, \.\.\.batchOptions\.map\(lotRow\)\]/, 'New is an Add-only choice')
 })
 
-test('fast stock-in: New only for Add, Remove only lots with stock, scoped Set wire', () => {
-  assert.match(fast, /mode === 'remove' \? batchOptions\.filter\(\(batch\) => Number\(batch\.quantity\) > 0\) : batchOptions/)
-  assert.match(fast, /\{mode === 'add' \? <button type="button"/)
-  assert.match(fast, /if \(mode !== 'add' && !chosenOption\)/)
-  assert.match(fast, /setScope: line\.setScope \|\| 'lot',\s*\n\s*batchId: typeof line\.batchChoice === 'number' \? line\.batchChoice : null,\s*\n\s*expectedLotQuantity: line\.expectedLotQuantity,/)
+test('session: a scoped Set names its lot and the count it read', () => {
+  const line = {
+    key: 'k', requestId: 'r', product: { id: 9, name: 'Serum' }, productName: 'Serum', mode: 'set', quantity: 7, freeQuantity: 0,
+    unitCost: '', sellingPrice: '', freeGoods: false, expiryDate: '', batchChoice: 2, batchLabel: '', expectedLotQuantity: 5,
+    reason: '', conditionTag: '', createdProduct: false, status: 'queued', detail: '',
+  } as unknown as StockSessionLine
+  const ctx = { branchId: '1', receivedDate: '2026-09-30', supplier: anySupplier, paymentStatus: 'paid' as const, creditDueDate: '', sessionId: 1, canEditPrice: false, reasonFor: () => 'Count' }
+  const body = buildStockLineRequest(line, ctx).body as Record<string, unknown>
+  assert.deepEqual([body.type, body.setScope, body.batchId, body.expectedLotQuantity], ['set', 'lot', 2, 5])
+  const branchTotal = buildStockLineRequest({ ...line, batchChoice: 'none' }, ctx).body as Record<string, unknown>
+  assert.equal(Object.hasOwn(branchTotal, 'setScope'), false, 'CONTROL: with no dated lot the Set is the branch total')
 })
 
 test('the tag choice is offered on a Set only once its preview lowers stock', () => {
-  assert.match(modals, /adjustForm\.type === 'remove' \|\| adjustForm\.type === 'add' \|\| setLowersStock/)
-  assert.match(fast, /mode !== 'set' \|\| fastSetLowers/)
+  assert.match(fast, /tagDisabled=\{mode === 'set' && !setLowers\}/)
+  assert.match(fast, /conditionTag: mode === 'set' && !setLowers \? '' : conditionTag/)
 })
 
 test('history replays a scoped Set with its generation; the ledger never offers Revert', () => {

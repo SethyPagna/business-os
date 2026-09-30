@@ -10,8 +10,16 @@
 // empty Payment and a "-" Total cost -- and a "Set quantity" that raised the
 // figure, which the route converts into a real add, offered no cost field at
 // all.
+//
+// UI-STOCK-3 (30 Sep 2026): StockAdjustModal, the Inventory adjust form,
+// Receive stock, Bulk add stock and the Add/Create Products session were
+// retired into the one Stock Session. The pure rules below stay pinned where
+// the session still uses them; the source pins on the retired surfaces are
+// listed in the UI-STOCK-3 lane report, and the now-unused exports of
+// stockReceiptFields.ts are handed to its owner (UI-STOCK-2).
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import { buildStockLineRequest, sessionSteps, type StockSessionLine } from '../src/utils/stockSessionDraft.ts'
 import {
   isStockInSubmission,
   isSetDownSubmission,
@@ -103,11 +111,10 @@ runTest('the adjust form measures against the BRANCH it is adjusting, not the pa
   assert.equal(adjustBranchQuantity([{ branch_id: '5', quantity: '12' }], 5, 55), 12)
 })
 
-runTest('both adjust surfaces resolve that figure through the one shared rule', () => {
-  for (const path of ['components/inventory/Inventory.tsx', 'components/products/forms/StockAdjustModal.tsx']) {
-    const text = source(path)
-    assert.ok(text.includes('adjustBranchQuantity('), `${path} must resolve the adjust figure from the shared branch rule`)
-  }
+runTest('the Stock Session resolves that figure through the one shared rule', () => {
+  const session = source('components/inventory/FastStockInModal.tsx')
+  assert.match(session, /const branchQuantity = picked \? adjustBranchQuantity\(picked\.branch_stock, branchId, picked\.stock_quantity\) : 0/, 'the entry row measures the session branch')
+  assert.match(source('utils/stockSessionDraft.ts'), /const stockBefore = adjustBranchQuantity\(line\.product\.branch_stock, branchId, line\.product\.stock_quantity\)/, 'the Review measures the same figure')
   const inventory = source('components/inventory/Inventory.tsx')
   assert.ok(!inventory.includes('adjustModal ? getStockQty(adjustModal) : 0'),
     'Inventory.tsx must stop handing the modal the page filter\'s figure')
@@ -170,40 +177,35 @@ runTest('the wire carries only what was typed, and nothing at all for a remove',
   }
 })
 
-runTest('the shared adjust form actually asks for the cost and the payment', () => {
-  const modals = source('components/inventory/InventoryStockModals.tsx')
-  // The form gates on the shared rule, not on `type === 'add'`, so a
-  // set-that-raises gets the same fields (S4-16).
-  // The scope argument keeps S4-16 for a legacy unscoped Set; a scoped Set
-  // (owner, 24 Sep) is a count correction and never a receipt.
-  assert.match(modals, /const isStockIn = isStockInSubmission\(adjustForm\.type, adjustForm\.quantity, adjustCurrentQuantity, adjustForm\.set_scope\)/)
-  assert.match(modals, /id="inventory-adjust-unit-cost"/)
-  assert.match(modals, /id="inventory-adjust-credit-due-date"/)
-  assert.match(modals, /tr\('receipt_cost', 'Receipt cost'\)/)
-  // Received date and supplier moved off `type === 'add'` onto the same rule.
-  assert.doesNotMatch(modals, /\{adjustForm\.type === 'add' && \(unlockPricing \|\|/)
-})
-
-runTest('both adjust surfaces send the receipt fields and a grouping session id', () => {
-  // Products section AND Stock changes both open StockAdjustModal, so one
-  // payload builder covers the two entry points S4-15 names; Inventory.tsx is
-  // the sibling surface on the same shared form and must not drift.
-  for (const path of ['components/products/forms/StockAdjustModal.tsx', 'components/inventory/Inventory.tsx']) {
-    const text = source(path)
-    assert.match(text, /\.\.\.stockReceiptWire\(adjustForm, receiptSessionIdRef\.current, isStockIn\)/, `${path} must spread the receipt wire`)
-    assert.match(text, /isStockReceiptCreditIncomplete\(adjustForm\)/, `${path} must refuse credit with no due date`)
-    // supplier and received date follow the same stock-in rule now.
-    assert.match(text, /supplierId: isStockIn && adjustForm\.supplier_id !== ''/, `${path} supplier must follow isStockIn`)
-    assert.doesNotMatch(text, /supplierId: adjustForm\.type === 'add'/, `${path} must not gate supplier on 'add' alone`)
-    assert.match(text, /\(adjustForm\.type === 'set' && !scopedSet\) \|\| \(Boolean\(numericBranchId\)/, `${path} received date must cover a legacy set-increase, never a scoped Set`)
-    // The id is per modal opening, never a module constant.
-    assert.match(text, /receiptSessionIdRef = useRef\(Date\.now\(\)\)/, `${path} must mint its own session id`)
+runTest('the Stock Session asks for the cost and the payment, and sends them only on a receipt', () => {
+  const lineEntry = source('components/stock-session/StockSessionLineEntry.tsx')
+  assert.match(lineEntry, /label=\{tr\('cost', 'Cost'\)\}/, 'an Add item asks for its cost')
+  assert.deepEqual(sessionSteps('add', []), ['items', 'payment', 'review'], 'a session with an Add has a Payment step')
+  assert.deepEqual(sessionSteps('set', [{ mode: 'set' }]), ['items', 'review'], 'a Set session has none')
+  // Executed: the receipt facts and the grouping session id ride an Add;
+  // a Remove and a scoped Set carry none of them.
+  const line = {
+    key: 'k', requestId: 'r', product: { id: 7, name: 'Soap' }, productName: 'Soap', quantity: 2, freeQuantity: 0,
+    unitCost: '2.5', sellingPrice: '', freeGoods: false, expiryDate: '', batchChoice: 'new', batchLabel: '', reason: '',
+    conditionTag: '', createdProduct: false, status: 'queued', detail: '',
   }
-  // The Inventory page reseeds its form per opening, so a previous receipt's
-  // cost or credit due date can never attribute the next lot.
-  const inventory = source('components/inventory/Inventory.tsx')
-  assert.match(inventory, /receiptSessionIdRef\.current = Date\.now\(\)/)
-  assert.match(inventory, /unit_cost_usd: '', free_goods: false, payment_status: 'paid', credit_due_date: '',/)
+  const ctx = {
+    branchId: '1', receivedDate: '2026-09-30', supplier: { supplierId: 4, supplierName: 'Sok Supply' }, paymentStatus: 'credit' as const,
+    creditDueDate: '2026-10-15', sessionId: 77, canEditPrice: false, reasonFor: () => 'R',
+  }
+  const add = buildStockLineRequest({ ...line, mode: 'add' } as unknown as StockSessionLine, ctx).body as Record<string, unknown>
+  assert.equal(add.unitCostUsd, 2.5)
+  assert.equal(add.paymentStatus, 'credit')
+  assert.equal(add.creditDueDate, '2026-10-15')
+  assert.equal(add.supplierId, 4)
+  assert.equal(add.sessionId, 77)
+  for (const mode of ['remove', 'set'] as const) {
+    const body = buildStockLineRequest({ ...line, mode, batchChoice: 4 } as unknown as StockSessionLine, ctx).body as Record<string, unknown>
+    for (const key of ['unitCostUsd', 'paymentStatus', 'creditDueDate', 'supplierId', 'supplierName']) {
+      assert.equal(key in body, false, `a ${mode} carries no ${key}`)
+    }
+    assert.equal(body.sessionId, 77, `a ${mode} still groups under the session`)
+  }
 })
 
 // ---------------------------------------------------------------------------
@@ -254,7 +256,9 @@ runTest('the stock-in receipt gate agrees, case for case, with the server kernel
     assert.ok(km[key], `km.json is missing ${key}`)
     assert.notEqual(en[key], km[key], `${key} must be really translated`)
   }
-  for (const key of ['stock_receipt_free_goods', 'stock_receipt_free_goods_hint', 'stock_set_down_hint', 'stock_set_up_hint']) {
+  // (stock_receipt_free_goods_hint, stock_set_down_hint and stock_set_up_hint
+  // lost their last reader with the retired forms: HANDOFF to UI-STOCK-1.)
+  for (const key of ['stock_receipt_free_goods']) {
     assert.ok(en[key] && km[key], `both packs need ${key}`)
     assert.notEqual(en[key], km[key], `${key} must be really translated`)
   }
@@ -268,27 +272,19 @@ runTest('nothing invents a receipt cost any more', () => {
   // `||` and `?.`, which a regex would read as alternation and a quantifier
   // -- an escaping slip there produces a pattern that matches anything and a
   // test that can never fail.
+  // (BulkAddStockModal and CreateProductsSessionModal, two of the four, were
+  // retired by UI-STOCK-3.)
   const noFabrication: Array<[string, string]> = [
-    ['components/products/forms/BulkAddStockModal.tsx', 'unitCostUsd: product.purchase_price_usd || 0'],
     ['components/products/helpers/productWriteHelpers.ts', 'unitCostUsd: options.unitCostUsd ?? ('],
-    ['components/products/CreateProductsSessionModal.tsx', "cost_price_usd === '' ? 0"],
   ]
   for (const [path, literal] of noFabrication) {
     assert.ok(!source(path).includes(literal), `${path} must stop inventing a receipt cost: ${literal}`)
   }
   // ...and the surfaces that submit a receipt must run the gate before they do.
-  for (const path of [
-    'components/products/forms/StockAdjustModal.tsx',
-    'components/inventory/Inventory.tsx',
-    'components/inventory/FastStockInModal.tsx',
-    'components/products/forms/BulkAddStockModal.tsx',
-    'components/inventory/ReceiveBatchModal.tsx',
-    // Both of its line paths: the new product built through ProductForm and
-    // the existing product queued from the picker.
-    'components/products/CreateProductsSessionModal.tsx',
-  ]) {
-    assert.match(source(path), /stockReceiptGateCode/, `${path} must check the receipt gate before submitting`)
-  }
+  // The one receipt surface left is the Stock Session: its entry row runs the
+  // gate (lineEntryRefusal) before an Add item can be queued.
+  assert.match(source('utils/stockSessionDraft.ts'), /const gate = stockReceiptGateCode\(/, 'the session entry row checks the receipt gate')
+  assert.match(source('components/inventory/FastStockInModal.tsx'), /lineEntryRefusal\(\{/, 'and the float refuses the Add through it')
 
   // Picking an existing lot BLANKS the supplier field on purpose -- an
   // attributed lot keeps its first supplier and the picker shows that name
@@ -296,10 +292,7 @@ runTest('nothing invents a receipt cost any more', () => {
   // complete receipt, so every surface that can pick a lot must either read
   // the lot's own name or say it cannot see one.
   for (const [path, marker] of [
-    ['components/inventory/Inventory.tsx', 'lotAttributionDeferred'],
-    ['components/products/forms/StockAdjustModal.tsx', 'lotAttributionDeferred'],
-    ['components/inventory/ReceiveBatchModal.tsx', 'lotSupplierName'],
-    ['components/products/CreateProductsSessionModal.tsx', 'lotSupplierName'],
+    ['utils/stockSessionDraft.ts', 'lotSupplierName'],
   ] as Array<[string, string]>) {
     assert.ok(source(path).includes(marker),
       `${path} picks a lot, so it must pass ${marker} rather than refusing an attributed top-up`)
@@ -310,34 +303,13 @@ runTest('nothing invents a receipt cost any more', () => {
   // inferred from a reason string.
   const products = source('components/products/Products.tsx')
   assert.match(products, /attribution: 'correction'/, 'the snapshot-restore path must declare itself a correction')
-  const inventory2 = source('components/inventory/Inventory.tsx')
-  assert.match(inventory2, /attribution: 'correction'/, 'undo must declare itself a correction rather than carrying a fake supplier')
+  // (Inventory.tsx's adjust undo, the other correction, went with its adjust half.)
 })
 
-// N14-D, ported from a since-deleted unmounted per-product-row adjust form
-// onto the ONE live surface every branch adjust actually renders through
-// (Inventory.tsx and StockAdjustModal.tsx both submit through this shared
-// modal). The Δ line already explained a set-DOWN with stock_set_down_hint
-// (isSetDown); a set that RAISES stock is just as much a departure from a
-// plain quantity edit -- the receipt fields (supplier + cost) appear right
-// below it -- so the operator needs the mirror-image "why", not silence.
-runTest('a set that RAISES stock explains itself at the Δ line, same as a set that lowers it', () => {
-  const modals = source('components/inventory/InventoryStockModals.tsx')
-  const match = modals.match(/adjustForm\.type === 'set' && setDifference != null \? \(([\s\S]*?)\n {16}\) : null\}/)
-  assert.ok(match, 'the Δ line block must exist')
-  const deltaBlock = match![1]
-  assert.match(deltaBlock, /isSetDown \? \(/, 'the set-down hint must still be there')
-  assert.match(deltaBlock, /stock_set_down_hint/)
-  assert.match(deltaBlock, /isStockIn \? \(/, 'a set that raises stock must get its own hint at the same Δ line, gated on the SAME predicate the supplier/cost fields render on')
-  assert.match(deltaBlock, /stock_set_up_hint/, 'the up-hint uses the key both packs already carry')
-
-  const en = JSON.parse(readFileSync(new URL('../src/lang/en.json', import.meta.url), 'utf8')) as Record<string, string>
-  const km = JSON.parse(readFileSync(new URL('../src/lang/km.json', import.meta.url), 'utf8')) as Record<string, string>
-  for (const key of ['stock_set_up_hint', 'stock_set_down_hint']) {
-    assert.ok(en[key] && km[key], `both packs need ${key}`)
-    assert.notEqual(en[key], km[key], `${key} must be really translated`)
-  }
-})
+// Retired with the adjust half of InventoryStockModals (UI-STOCK-3): "a set
+// that RAISES stock explains itself at the Δ line". A Set in the Stock Session
+// is always scoped to a received date and never becomes a receipt; without a
+// dated lot it may only lower the branch (lineEntryRefusal: no_batches_for_branch).
 
 runTest('a hidden batch picker chose nothing: a set-down lot cannot ride a set-up (N14-E)', () => {
   // The picker is on screen for an add, for a remove, and -- since N14-E --
@@ -376,14 +348,8 @@ runTest('a hidden batch picker chose nothing: a set-down lot cannot ride a set-u
   const nothing = stockAdjustBatchWire({ type: 'add', quantity: 3, currentQuantity: 10, unlockPricing: false, branchId: 3, batchId: '' })
   assert.deepEqual(nothing, { lotAttributionDeferred: false })
 
-  // And the two submitters must derive it from here rather than re-deriving
-  // `batch_id !== ''` on their own, which is what let the two disagree.
-  for (const path of ['components/inventory/Inventory.tsx', 'components/products/forms/StockAdjustModal.tsx']) {
-    const text = source(path)
-    assert.ok(text.includes('stockAdjustBatchWire'), `${path} must build its batch wire from the shared rule`)
-    assert.ok(!text.includes("adjustForm.batch_id !== '' ? adjustForm.batch_id : undefined"),
-      `${path} must stop putting a possibly-stale batch_id straight on the wire`)
-  }
+  // (The two submitters, Inventory's adjust form and StockAdjustModal, were
+  // retired by UI-STOCK-3; the session names a lot only from its lot select.)
 })
 
 runTest('a bulk SET states no receipt facts: it is a scoped count correction (owner, 24 Sep)', () => {
@@ -413,40 +379,24 @@ runTest('a bulk SET states no receipt facts: it is a scoped count correction (ow
   assert.equal(bulkStockReceiptWire('add', { ...draft, unitCost: '0', freeGoods: true }).freeGoods, true)
   assert.equal(bulkStockReceiptWire('add', { ...draft, unitCost: '0', freeGoods: false }).freeGoods, undefined)
 
-  const bulk = source('components/products/forms/BulkAddStockModal.tsx')
-  assert.ok(bulk.includes('bulkStockReceiptWire'), 'the bulk surface must build its receipt half from the shared rule')
-  assert.ok(bulk.includes('isStockIn: bulkActionCanReceive(action)'), 'the bulk gate reads the one shared receive rule')
+  // (BulkAddStockModal was retired by UI-STOCK-3: the select-mode stock panel
+  // queues the products as Stock Session items instead.)
 })
 
 
-runTest('the free-goods declaration sits under the receipt row, not inside the cost cell', () => {
-  // Owner report (Sep 17): on a wide screen the cost input sat higher than the
-  // other inputs in the row. Cause: the declaration lived inside the cost
-  // <label>, making that grid cell taller, and sm:items-end aligned the tall
-  // cell's bottom -- lifting its input. It is its own full-width child now,
-  // and the cost track is wide enough that the required marker stays inline.
+// Retired with UI-STOCK-2's free row (owner, 30 Sep 06:40): "the free-goods
+// declaration sits under the receipt row, not inside the cost cell". There is
+// no declaration checkbox any more; free units are a row under their item.
+runTest('no stock session part shows an info tooltip or the old "Free goods" wording', () => {
   const src = (rel: string) => readFileSync(new URL(`../src/${rel}`, import.meta.url), 'utf8')
-  const source = src('components/inventory/FastStockInModal.tsx')
-  const costCell = source.slice(source.indexOf("{tr('cost_price_usd'"))
-  const costCellEnd = costCell.indexOf('</label>')
-  assert.ok(costCellEnd > 0, 'cost label not found')
-  assert.doesNotMatch(costCell.slice(0, costCellEnd), /stock_receipt_free_goods/, 'the declaration must not live inside the cost label')
-  assert.match(source, /sm:grid-cols-\[5rem_8\.5rem_8rem_1fr\]/, 'the cost track must fit the label and its required marker on one line')
-  assert.match(source, /whitespace-nowrap[^"]*">\{tr\('cost_price_usd'/, 'the cost label must not wrap')
-  assert.match(source, /col-span-2[\s\S]{0,400}?sm:col-span-4[\s\S]{0,200}?title=\{tr\('stock_receipt_free_goods_hint'/, 'the declaration is its own full-width row and keeps the hint as a title')
-  // The owner asked for the bare word, and for no info tooltip beside it.
-  const en = JSON.parse(src('lang/en.json')) as Record<string, string>
-  assert.equal(en.stock_receipt_free_goods, 'Free')
   for (const host of [
     'components/inventory/FastStockInModal.tsx',
-    'components/inventory/InventoryStockModals.tsx',
-    'components/inventory/ReceiveBatchModal.tsx',
-    'components/products/CreateProductsSessionModal.tsx',
-    'components/products/forms/BulkAddStockModal.tsx',
+    'components/stock-session/StockSessionItems.tsx',
+    'components/stock-session/StockSessionLineEntry.tsx',
   ]) {
     const text = src(host)
-    assert.doesNotMatch(text, /<InfoHint[^>]*stock_receipt_free_goods\b/, `${host} still shows an info tooltip beside the declaration`)
-    assert.doesNotMatch(text, /'Free goods/, `${host} still falls back to the old wording`)
+    assert.doesNotMatch(text, /<InfoHint[^>]*stock_receipt_free_goods\b/, `${host} shows an info tooltip beside the free units`)
+    assert.doesNotMatch(text, /'Free goods/, `${host} falls back to the old wording`)
   }
 })
 

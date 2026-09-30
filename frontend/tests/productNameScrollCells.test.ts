@@ -62,7 +62,6 @@ runTest('Khmer names keep their ink inside the scrolling box', () => {
 const EXPECTED_NAMES: Record<string, string[]> = {
  'components/products/surfaces/ProductDetailModal.tsx':['productName'],
  'components/inventory/ProductDetailModal.tsx':['p.name'],
- 'components/inventory/InventoryStockModals.tsx':['adjustModal.name'],
  'components/inventory/InventoryMovementsSurface.tsx':['movement.product_name'],
  'components/pos/ProductCard.tsx':['displayName'],
  'components/products/Products.tsx':['productName','productName'],
@@ -70,15 +69,13 @@ const EXPECTED_NAMES: Record<string, string[]> = {
  'components/inventory/InventoryProductsSurface.tsx':['group.label','product.name','group.label','product.name'],
  'components/products/ProductsImageOnlyView.tsx':['product.name'],
  'components/branches/Branches.tsx':['product.name','group.name'],
- 'components/products/CreateProductsSessionModal.tsx':['group.name'],
  'components/branches/TransferModal.tsx':['group.name','selectedProduct.name','product.name','group.name'],
- // The per-product received-date rows (scoped Set / explicit lots) name each product first.
- 'components/products/forms/BulkAddStockModal.tsx':['product.name || productId','row.request.productName'],
 }
+// Retired 30 Sep 2026 into the Stock Session: InventoryStockModals' adjust half
+// (its header rail), CreateProductsSessionModal and BulkAddStockModal.
 const ADOPTED: Array<[string, number]> = [
  ['components/products/surfaces/ProductDetailModal.tsx',1],
  ['components/inventory/ProductDetailModal.tsx',1],
- ['components/inventory/InventoryStockModals.tsx',1],
  ['components/inventory/InventoryMovementsSurface.tsx',1],
  ['components/pos/ProductCard.tsx',1],
  ['components/products/Products.tsx',2],
@@ -86,9 +83,7 @@ const ADOPTED: Array<[string, number]> = [
  ['components/inventory/InventoryProductsSurface.tsx',4],
  ['components/products/ProductsImageOnlyView.tsx',1],
  ['components/branches/Branches.tsx',2],
- ['components/products/CreateProductsSessionModal.tsx',1],
  ['components/branches/TransferModal.tsx',4],
- ['components/products/forms/BulkAddStockModal.tsx',2],
 ]
 runTest('adopted product names use the shared two-line component, not a local clamp',()=>{
  for(const [file,count] of ADOPTED){
@@ -144,9 +139,12 @@ runTest('excluded stock-in history keeps both fully wrapped name cells',()=>{
  assert.equal(tags.length,2)
  tags.forEach(tag=>assert.match(tag,/break-words/))
 })
+// The Stock Session's search results live in StockSessionLineEntry since UI-STOCK-2.
 runTest('excluded fast picker remains readable until its owner adopts the new rail',()=>{
- const source=read('components/inventory/FastStockInModal.tsx')
- assert.ok(source.includes('<ProductNameRail') || /className="scroll-x-clean [^"]*">\{group.name\}/.test(source))
+ const source=read('components/stock-session/StockSessionLineEntry.tsx')
+ const cell=source.match(/<span className="[^"]*">\{group\.name\}<\/span>/)?.[0] || ''
+ assert.ok(source.includes('<ProductNameRail') || /break-words/.test(cell), 'the result name wraps in full')
+ assert.doesNotMatch(cell,/line-clamp-|\btruncate\b/)
 })
 if(failures) process.exit(1)
 console.log('PASS productNameScrollCells two-line adoption and protected generic rails')

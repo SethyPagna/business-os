@@ -12,7 +12,7 @@ const productForm = readFileSync(new URL('../src/components/products/forms/Produ
 const variantForm = readFileSync(new URL('../src/components/products/forms/VariantFormModal.tsx', import.meta.url), 'utf8')
 const stockModals = readFileSync(new URL('../src/components/inventory/InventoryStockModals.tsx', import.meta.url), 'utf8')
 const confirmDialog = readFileSync(new URL('../src/components/shared/ConfirmDialog.tsx', import.meta.url), 'utf8')
-const receiveBatch = readFileSync(new URL('../src/components/inventory/ReceiveBatchModal.tsx', import.meta.url), 'utf8')
+const sessionFooter = readFileSync(new URL('../src/components/stock-session/StockSessionFooter.tsx', import.meta.url), 'utf8')
 const fastStockIn = readFileSync(new URL('../src/components/inventory/FastStockInModal.tsx', import.meta.url), 'utf8')
 const transfer = readFileSync(new URL('../src/components/branches/TransferModal.tsx', import.meta.url), 'utf8')
 const newReturn = readFileSync(new URL('../src/components/returns/NewReturnModal.tsx', import.meta.url), 'utf8')
@@ -159,12 +159,11 @@ const endOfPanelPrimaries: Array<[string, string, string, string]> = [
   ['ProductForm', productForm, 'onClick={saveForm}', 'className="sticky bottom-0'],
   ['VariantFormModal', variantForm, 'onClick={handleSave}', 'className="sticky bottom-0'],
   ['ConfirmDialog', confirmDialog, 'onClick={onConfirm}', 'className="sticky bottom-0'],
-  ['InventoryStockModals (adjust)', stockModals, 'onClick={onAdjust}', 'flex flex-shrink-0 gap-2 border-t'],
-  ['InventoryStockModals (transfer)', stockModals, 'onClick={onTransfer}', 'flex flex-shrink-0 gap-2 border-t'],
-  // Handler renamed submit -> beginReceive since this was first pinned; the
-  // property (wired once, inside the end-of-panel footer) is unchanged.
-  ['ReceiveBatchModal', receiveBatch, 'onClick={beginReceive}', 'flex items-center justify-end gap-2 border-t'],
-  ['FastStockInModal', fastStockIn, 'onClick={commitSession}', 'flex flex-shrink-0 flex-wrap'],
+  // UI-STOCK-3 retired the adjust half of InventoryStockModals and
+  // ReceiveBatchModal into the Stock Session, whose one primary (Next /
+  // Complete Session) lives in its footer component.
+  ['InventoryStockModals (transfer)', stockModals, 'onClick={onTransfer}', 'className="flex-shrink-0 border-t'],
+  ['StockSessionFooter', sessionFooter, 'onClick={onPrimary}', 'flex flex-shrink-0 items-center gap-2 border-t'],
   ['TransferModal', transfer, 'onClick={handleBulkTransfer}', 'flex gap-3 border-t'],
 ]
 for (const [name, source, handler, footerMarker] of endOfPanelPrimaries) {
@@ -177,11 +176,11 @@ for (const [name, source, handler, footerMarker] of endOfPanelPrimaries) {
 
 assert.doesNotMatch(productForm, /hidden gap-3[\s\S]*sm:flex/, 'the product edit footer must be visible on phones, not desktop-only')
 assert.match(productForm, /headerExtra=\{\([\s\S]{0,1200}?<MinimizeButton/, 'the product edit header must keep the minimize control')
-assert.match(stockModals, /return createPortal\(modals, document\.body\)/, 'stock-adjust and transfer dialogs must escape page stacking contexts')
-assert.match(stockModals, /modal-viewport-safe[\s\S]*z-\[1050\][\s\S]*modal-panel-safe/, 'stock dialogs must stay iPhone-safe above fixed app bars')
-assert.match(receiveBatch, /return createPortal\(modal, document\.body\)/, 'receive stock must escape parent stacking contexts')
-assert.match(receiveBatch, /modal-viewport-safe[\s\S]*z-\[1050\][\s\S]*modal-panel-safe/, 'receive stock must stay iPhone-safe above fixed app bars')
-assert.match(fastStockIn, /modal-viewport-safe[\s\S]*modal-panel-safe/, 'fast stock-in must remain within the usable viewport and safe areas')
+assert.match(stockModals, /return createPortal\(modals, document\.body\)/, 'the transfer dialog must escape page stacking contexts')
+assert.match(stockModals, /modal-viewport-safe[\s\S]*z-\[1050\][\s\S]*modal-panel-safe/, 'the transfer dialog must stay iPhone-safe above fixed app bars')
+assert.match(fastStockIn, /return createPortal\(/, 'the Stock Session must escape parent stacking contexts')
+assert.match(fastStockIn, /modal-viewport-safe[\s\S]*z-\[1050\][\s\S]*modal-panel-safe/, 'the Stock Session must stay iPhone-safe above fixed app bars')
+assert.equal(fastStockIn.split('<StockSessionFooter').length - 1, 1, 'the Stock Session renders its one footer once')
 assert.match(transfer, /modal-viewport-safe[\s\S]*z-\[1050\]/, 'branch transfers must sit above fixed app bars')
 
 // The same rule applied to the shape that produced the duplicate header Save

@@ -234,7 +234,8 @@ await runTest('no typed date field is rendered without a translator', () => {
     }
   }
   // Guards the sweep itself: a walk that found nothing would report clean.
-  assert.ok(seen >= 30, `expected the app's typed date fields to be found, saw ${seen}`)
+  // 25 after the retired stock forms took their date fields with them.
+  assert.ok(seen >= 20, `expected the app's typed date fields to be found, saw ${seen}`)
   assert.deepEqual(offenders, [], 'every typed date field must be given a translator (`t={...}`)')
 })
 

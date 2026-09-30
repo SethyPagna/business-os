@@ -58,9 +58,15 @@ runTest('the product form opened from fast stock-in gets those values, not liter
 runTest('no hard-coded rate or currency symbol is left for the form or the line and pending-commit totals', () => {
   assert.doesNotMatch(modal, /exchangeRate = 4100/, 'no private default rate')
   assert.doesNotMatch(modal, /usdSymbol="|khrSymbol="/, 'no literal symbol props')
-  assert.doesNotMatch(modal, /value: `\$\$\{pendingCommit/, 'the pending-commit total uses the Settings symbol')
-  assert.match(modal, /value: `\$\{usdSymbol\}\$\{pendingCommit\.reduce/)
-  assert.match(modal, /\{tr\('total_cost', 'Total cost'\)\}: \{usdSymbol\}\{\(Math\.max\(0, Number\(quantity\)/, 'the in-progress line total uses the Settings symbol')
+  // The Stock Session rewrite (UI-STOCK-2) prints its totals in the footer and
+  // hands the symbol to every part that prints money.
+  assert.match(modal, /const footerTotal = canViewCosts && received\.some\(\(line\) => line\.mode === 'add'\) \? `\$\{usdSymbol\}\$\{itemsTotal\.toFixed\(2\)\}` : null/, 'the session total uses the Settings symbol')
+  assert.equal((modal.match(/usdSymbol=\{usdSymbol\}/g) || []).length, 4, 'Items, Payment, Review and the product form get the Settings symbol')
+  for (const part of ['StockSessionItems', 'StockSessionPaymentStep', 'StockSessionReviewStep']) {
+    const source = read(`../src/components/stock-session/${part}.tsx`)
+    assert.doesNotMatch(source, /`\$\$\{|'\$'|"\$"/, `${part} prints no literal dollar sign`)
+    assert.match(source, /usdSymbol/, `${part} prints the Settings symbol`)
+  }
 })
 
 if (failed > 0) {

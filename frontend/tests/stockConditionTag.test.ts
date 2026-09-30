@@ -123,7 +123,7 @@ runTest('the tag option label never goes through the translator', () => {
   assert.doesNotMatch(stripComments(rows), /tr\([^)]*stockConditionLabel/)
 })
 
-runTest('the choice is one compact row, in both modals that offer it', () => {
+runTest('the choice is one compact row, on the surface that offers it', () => {
   const control = readSource('frontend/src/components/inventory/StockConditionTagRow.tsx')
   // One flex row holding both segments AND the tag dropdown -- not a stacked
   // block that grows the modal on a phone. min-w-0 is what keeps the select
@@ -139,29 +139,28 @@ runTest('the choice is one compact row, in both modals that offer it', () => {
   assert.match(control, /overflow-x-auto/)
   assert.match(control, /const SEGMENT_BASE = '[^']*shrink-0[^']*whitespace-nowrap[^']*sm:flex-1[^']*sm:truncate/)
 
+  // The adjust half of InventoryStockModals was retired into the Stock
+  // Session (UI-STOCK-3); the session's line entry is the one stock host now.
   for (const host of [
-    'frontend/src/components/inventory/InventoryStockModals.tsx',
-    'frontend/src/components/inventory/FastStockInModal.tsx',
+    'frontend/src/components/stock-session/StockSessionLineEntry.tsx',
   ]) {
     const source = readSource(host)
-    assert.match(source, /import StockConditionTagRow from '\.\/StockConditionTagRow'/, `${host} does not import the control`)
+    assert.match(source, /import StockConditionTagRow from '(?:\.|\.\.\/inventory)\/StockConditionTagRow(?:\.tsx)?'/, `${host} does not import the control`)
     assert.match(source, /<StockConditionTagRow/, `${host} does not render the control`)
     // Exactly one control per surface: two would mean two competing values.
     assert.equal((source.match(/<StockConditionTagRow/g) || []).length, 1, `${host} renders the control more than once`)
   }
 })
 
-runTest('a set offers a tag only once its preview LOWERS the lot, on either surface', () => {
+runTest('a set offers a tag only once its preview LOWERS the lot', () => {
   // Loss rule (owner, 24 Sep): a downward scoped Set is a loss unless tagged,
   // and tagged it follows the tagged Remove path. An upward or unchanged Set
   // has no units to tag; the Worker refuses one (set_tag_requires_decrease)
-  // and neither modal offers or keeps one.
-  const modals = readSource('frontend/src/components/inventory/InventoryStockModals.tsx')
-  assert.match(modals, /adjustForm\.type === 'remove' \|\| adjustForm\.type === 'add' \|\| setLowersStock \? \(/)
-  assert.match(modals, /if \(adjustForm\.type === 'set' && !setLowersStock && adjustForm\.condition_tag\)/, 'a stale tag is dropped when the Set stops lowering stock')
+  // and the Stock Session neither offers nor keeps one.
   const fast = readSource('frontend/src/components/inventory/FastStockInModal.tsx')
-  assert.match(fast, /\{mode !== 'set' \|\| fastSetLowers \? \(/)
-  assert.match(fast, /conditionTag: mode === 'set' && !fastSetLowers \? '' : conditionTag/)
+  assert.match(fast, /const setLowers = Boolean\(setPreview\?\.valid && setPreview\.delta < 0\)/)
+  assert.match(fast, /tagDisabled=\{mode === 'set' && !setLowers\}/, 'the tag is not offered until the Set lowers the lot')
+  assert.match(fast, /conditionTag: mode === 'set' && !setLowers \? '' : conditionTag/, 'a stale tag is dropped when the Set stops lowering stock')
   const worker = readSource('cloudflare/src/lib/stockLotAdjustment.ts')
   assert.match(worker, /if \(request\.conditionTag && lotDelta >= 0\)/, 'the Worker enforces the same direction rule')
 })

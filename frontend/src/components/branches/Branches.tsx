@@ -41,6 +41,7 @@ import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.
 import { buildProductGroups } from '../../utils/productGrouping.ts'
 import { branchRoleFromName } from '../../utils/branchRoles.ts'
 import {
+  FAST_STOCK_IN_RESTORE_HOST,
   RESTORE_WORK_EVENT,
   consumePendingRestore,
   markRestoreHandled,
@@ -50,7 +51,8 @@ import {
   transferDraftKey,
   peekPendingRestore,
 } from '../../utils/minimizedWork.ts'
-import { flushPendingWorkDraft, scopedWorkDraftKey } from '../../utils/workDrafts.ts'
+import { clearWorkDraft, flushPendingWorkDraft, readWorkDraft, scopedWorkDraftKey } from '../../utils/workDrafts.ts'
+import { stockSessionHasItems, stockSessionSavedScope } from '../../utils/stockSessionBusy.ts'
 import {
   beginTrackedRequest,
   getFirstLoaderError,
@@ -234,10 +236,9 @@ type ActionHistoryProp = ComponentProps<typeof ActionHistoryBar>['history']
 const useApp = useAppHook as () => AppContextValue
 const useSync = useSyncHook as () => SyncContextValue
 const LazyTransferModal = lazyRetry(async () => ({ default: (await import('./TransferModal')).default }), 'branches-transfer-modal')
-// D4b: the Branches per-branch stock view gets the SAME receive entry point
-// Inventory has (11.28's "Branch batch views") -- the one shared modal, with
-// this branch preselected, not a parallel form.
-const LazyReceiveBatchModal = lazyRetry(async () => ({ default: (await import('../inventory/ReceiveBatchModal')).default }), 'branches-receive-batch-modal')
+// A product card's Receive opens the one Stock Session with that product
+// picked and this branch preset, like every other stock entry point.
+const LazyFastStockInModal = lazyRetry(async () => ({ default: (await import('../inventory/FastStockInModal')).default }), 'branches-stock-session')
 const ExportOptionsDialog = lazyRetry(() => import('../shared/ExportOptionsDialog'), 'branches-export-options')
 
 function getBranchApi(): BranchApi {
@@ -389,9 +390,15 @@ export default function Branches({ embedded = false, view, showSectionNavigation
   // brand/category), so matches aren't limited to the rows already loaded.
   const [branchStockSearch, setBranchStockSearch] = useState<Record<string, string>>({})
   const branchSearchTimersRef = useRef<Map<string, number>>(new Map())
-  // D4b receive entry point: which product card's "receive" was clicked,
-  // and into which branch (preselected in the shared modal).
-  const [receiveTarget, setReceiveTarget] = useState<{ product: BranchStockProduct; branchId: string } | null>(null)
+  // Which product card's Receive was clicked, into which branch. A chip parked
+  // by the retired receive form comes back as a queued line instead.
+  const [receiveTarget, setReceiveTarget] = useState<{
+    product: BranchStockProduct | null
+    branchId: string
+    lines?: Array<{ product: BranchStockProduct; quantity: number; mode: 'add'; reason: string }>
+    // A parked Receive chip's own draft, cleared once the session has closed.
+    legacyDraftKey?: string
+  } | null>(null)
   const restoreBranchForm = useCallback(async (entry: MinimizedWorkEntry): Promise<boolean> => {
     const branchId = entry.payload?.branchId
     const isEdit = (typeof branchId === 'number' || typeof branchId === 'string') && String(branchId).trim() !== ''
@@ -455,14 +462,19 @@ export default function Branches({ embedded = false, view, showSectionNavigation
     const productId = payload.productId
     const branchId = String(payload.branchId || '')
     if ((typeof productId !== 'number' && typeof productId !== 'string') || !String(productId).trim() || !branchId) return false
-    setReceiveTarget({
-      product: {
-        id: productId,
-        name: String(payload.productName || ''),
-        unit: String(payload.productUnit || ''),
-      },
-      branchId,
-    })
+    const product = { id: productId, name: String(payload.productName || ''), unit: String(payload.productUnit || '') }
+    const draftKey = entry.draftKey || scopedWorkDraftKey(`receive_${productId}`)
+    const draft = readWorkDraft<{ quantity?: unknown; reason?: unknown }>(draftKey)?.data
+    const quantity = Number(draft?.quantity) || 0
+    if (quantity > 0 && stockSessionHasItems()) {
+      // The open session would drop this line: keep the chip and its draft.
+      reparkDeniedRestore(entry)
+      setReceiveTarget({ product: null, branchId })
+      return false
+    }
+    setReceiveTarget(quantity > 0
+      ? { product: null, branchId, lines: [{ product, quantity, mode: 'add', reason: String(draft?.reason || '') }], legacyDraftKey: draftKey }
+      : { product, branchId, legacyDraftKey: draftKey })
     return true
   }, [canReceiveStock])
   useEffect(() => {
@@ -701,7 +713,7 @@ export default function Branches({ embedded = false, view, showSectionNavigation
     () => activeBranches.map((branch) => ({ id: branch.id, name: branch.name || `Branch ${branch.id}` })),
     [activeBranches],
   )
-  // ReceiveBatchModal's AppSelect option shape ({value,label}), distinct
+  // The Stock Session's AppSelect option shape ({value,label}), distinct
   // from TransferModal's ({id,name}) above.
   const receiveBranchSelectOptions = useMemo(
     () => activeBranches.map((branch) => ({ value: String(branch.id), label: branch.name || `Branch ${branch.id}` })),
@@ -1479,9 +1491,8 @@ export default function Branches({ embedded = false, view, showSectionNavigation
                                       >
                                         {product.branch_quantity} {product.unit}
                                       </span>
-                                      {/* D4b: receive stock into THIS branch from right here --
-                                          the same shared ReceiveBatchModal (batch picker +
-                                          received date) every other entry point uses. */}
+                                      {/* Receive into THIS branch: the Stock Session in Add,
+                                          product picked, branch preset. */}
                                       {canReceiveStock ? (
                                         <button
                                           type="button"
@@ -1727,30 +1738,34 @@ export default function Branches({ embedded = false, view, showSectionNavigation
       ) : null}
       {receiveTarget ? (
         <Suspense fallback={null}>
-          <LazyReceiveBatchModal
-            product={{ id: receiveTarget.product.id, name: receiveTarget.product.name || '', unit: receiveTarget.product.unit || '' }}
-            branchSelectOptions={receiveBranchSelectOptions}
+          <LazyFastStockInModal
+            branchOptions={receiveBranchSelectOptions}
             defaultBranchId={receiveTarget.branchId}
+            initialMode="add"
+            initialProduct={receiveTarget.product}
+            initialLines={receiveTarget.lines}
+            tr={(key: string, fallbackEn = key) => tr(key, fallbackEn)}
             notify={notify}
-            onClose={() => setReceiveTarget(null)}
-            onMinimize={({ branchId, draftKey, label, productId, productName, productUnit }) => {
+            onClose={() => {
+              if (receiveTarget.legacyDraftKey) clearWorkDraft(receiveTarget.legacyDraftKey)
+              setReceiveTarget(null)
+            }}
+            onDone={() => {
+              // The session's Branch can be changed from the card's: refresh both when shown.
+              const sessionBranch = stockSessionSavedScope()?.branchId
+              void refreshBranchStock(receiveTarget.branchId)
+              if (sessionBranch && sessionBranch !== String(receiveTarget.branchId) && branchStocks[sessionBranch]) void refreshBranchStock(sessionBranch)
+            }}
+            onMinimize={(label: string) => {
               minimizeWork({
-                key: `receive-batch-${String(productId)}`,
-                kind: 'receive_batch',
-                pageId: 'branches',
+                key: 'fast-stockin',
+                kind: 'fast_stockin',
+                ...FAST_STOCK_IN_RESTORE_HOST,
                 label,
-                payload: { branchId, productId, productName, productUnit },
-                draftKey,
+                draftKey: scopedWorkDraftKey('fast_stockin'),
                 requiredPermission: { permissionKey: 'inventory', actionKey: 'adjust' },
               })
             }}
-            onReceived={() => {
-              const branchId = receiveTarget.branchId
-              setReceiveTarget(null)
-              void refreshBranchStock(branchId)
-            }}
-            t={t}
-            tr={(key: string, fallbackEn = '', _fallbackKm = fallbackEn) => tr(key, fallbackEn)}
           />
         </Suspense>
       ) : null}

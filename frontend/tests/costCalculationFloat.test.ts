@@ -314,7 +314,8 @@ const DISPLAY_SITES: Array<{ file: string; mustContain: string[] }> = [
   { file: 'components/inventory/ProductDetailModal.tsx', mustContain: ['CostCalculationFloat', 'setCostFloatOpen'] },
   { file: 'components/products/surfaces/ProductDetailModal.tsx', mustContain: ['CostCalculationFloat', 'setCostFloatOpen'] },
   { file: 'components/products/StockInSessionsSection.tsx', mustContain: ['CostCalculationFloat', 'setCostFloatOpen'] },
-  { file: 'components/inventory/InventoryStockModals.tsx', mustContain: ['CostCalculationFloat', 'setCostFloatOpen'] },
+  // The adjust half of InventoryStockModals (its current-cost tile) was retired
+  // into the Stock Session by UI-STOCK-3; the transfer half shows no cost.
   { file: 'components/pos/ProductDetailSheet.tsx', mustContain: ['CostCalculationFloat', 'setCostFloatTarget'] },
 ]
 

@@ -4,8 +4,16 @@ import ts from 'typescript'
 import React, { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { useProtectedCostEntry } from '../src/utils/useProtectedCostEntry.ts'
+import { buildStockLineRequest, catalogCostOf, type StockSessionLine } from '../src/utils/stockSessionDraft.ts'
 
-const read = (path: string) => readFileSync(new URL(`../src/components/${path}`, import.meta.url), 'utf8')
+// Prospective receipt cost: a picked product's entry starts from its canonical
+// mean cost when the operator may see costs, else blank; a known zero stays
+// zero; a missing cost stays blank. Since 30 Sep 2026 every stock entry point
+// opens the Stock Session, so StockAdjustModal / Inventory's adjust form (with
+// its "lock pricing") and CreateProductsSessionModal are retired, and the
+// session's own entry row is what is executed here.
+
+const read = (path: string) => readFileSync(new URL(`../src/components/${path}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 function extract(path: string, name: string): string {
   const ast = ts.createSourceFile(path, read(path), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
   let found = ''
@@ -21,112 +29,48 @@ function evaluate(expression: string, context: Record<string, unknown>): any {
   const js = ts.transpileModule(`const callback = ${expression}`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
   return new Function(...Object.keys(context), `${js}; return callback`)(...Object.values(context))
 }
-const product = { id: 7, name: 'Same product', barcode: '123', cost_price_usd: 1.2345, purchase_price_usd: 99 }
+
+const fast = 'inventory/FastStockInModal.tsx'
+const fastSource = read(fast)
+const priceText = evaluate(extract(fast, 'priceText'), {})
+const product = { id: 7, name: 'Same product', barcode: '123', cost_price_usd: 1.2345, selling_price_usd: 5 }
 for (const canViewCosts of [false, true]) {
   for (const canonical of [1.2345, 0, undefined]) {
-    const candidate = { ...product, cost_price_usd: canonical, purchase_price_usd: undefined }
-    const expected = canViewCosts ? canonical ?? '' : ''
-    for (const path of ['products/forms/StockAdjustModal.tsx', 'inventory/Inventory.tsx']) {
-      let form: any
-      const callback = evaluate(extract(path, path.includes('/forms/') ? 'selectProduct' : 'openAdjust'), {
-        useCallback: (fn: unknown) => fn, costViewRef: { current: canViewCosts }, canViewCosts,
-        restoredDraftRef: { current: null }, resumeRef: { current: null }, receiptSessionIdRef: { current: null }, adjustIdentityRef: { current: null },
-        defaultBranch: { id: 2 }, openingType: 'add', DEFAULT_ADD_QUANTITY: 1,
-        setSelectedProduct: () => {}, setAdjustModal: () => {}, setPendingAdjust: () => {},
-        ensureInventoryReasonsLoaded: () => {}, todayIsoDate: () => '2026-09-20',
-        setAdjustForm: (next: any) => { form = typeof next === 'function' ? next(form) : next },
-      })
-      callback(candidate)
-      assert.equal(form.unit_cost_usd, expected, `${path}: authorized canonical mean; zero is known, missing stays blank`)
-      assert.equal(form.pricingLocked, true, 'editable receipt cost does not require identity unlock')
-      assert.equal(form.product_id, 7)
-      assert.equal(form.free_goods, false, 'a known zero still requires explicit free declaration')
+    const entryFor = evaluate(extract(fast, 'entryFor'), { catalogCostOf, canViewCosts, priceText })
+    for (const mode of ['add', 'remove', 'set']) {
+      const entry = entryFor({ ...product, cost_price_usd: canonical }, mode)
+      const expected = canViewCosts && canonical != null ? String(canonical) : ''
+      assert.equal(entry.unitCost, expected, `${mode}: authorized canonical mean; zero is known, missing stays blank, blind stays blank`)
+      assert.equal(entry.picked.id, 7)
     }
   }
 }
+// The bulk panel's queued Items take the same rule, Add only.
+assert.match(fastSource, /unitCost: mode === 'add' && canViewCosts && cost != null \? String\(cost\) : ''/)
+assert.match(fastSource, /applyEntry\(entryFor\(candidate, mode\)\)/, 'a search pick fills the entry through the same function')
 
-const fast = 'inventory/FastStockInModal.tsx'
-for (const canViewCosts of [false, true]) {
-  let cost: unknown
-  const setters = Object.fromEntries(['setPicked', 'setQuantity', 'setExpiryDate', 'setQuery', 'setCandidates', 'setSelectedGroup', 'setFreeGoods', 'setCreatePriceVariant', 'setEditingKey', 'setBatchChoice', 'setConditionTag', 'setScannedBarcode'].map((name) => [name, () => {}]))
-  const pick = evaluate(extract(fast, 'pick'), {
-    ...setters, canViewCosts, duplicateRows: [], editingKey: '', findSessionProductDuplicate: () => null,
-    setUnitCost: (value: unknown) => { cost = value }, notify: () => {}, tr: (_key: string, fallback: string) => fallback,
-  })
-  pick(product)
-  assert.equal(cost, canViewCosts ? '1.2345' : '', 'Fast stock-in uses same canonical mean or blind blank')
+// The actual wire builder: a same-product receipt is a plain receive.
+const line = {
+  key: 'k', requestId: 'stockline_test', product, productName: product.name, mode: 'add', quantity: 2, freeQuantity: 0,
+  unitCost: '2.3456', sellingPrice: '', freeGoods: false, expiryDate: '', batchChoice: 'new', batchLabel: '',
+  reason: '', conditionTag: '', createdProduct: false, status: 'queued', detail: '',
+} as unknown as StockSessionLine
+const ctx = {
+  branchId: '2', receivedDate: '2026-09-20', supplier: { supplierId: 3, supplierName: 'Supplier' },
+  paymentStatus: 'paid' as const, creditDueDate: '', sessionId: 1, canEditPrice: false, reasonFor: () => 'Receipt',
 }
-
-// Execute the actual queued-line callback, then its actual wire builder.
-let queued: any[] = []
-const addLine = evaluate(extract(fast, 'addLine'), {
-  saving: false, quantity: '2', picked: product, duplicateRows: [], editingKey: '',
-  findSessionProductDuplicate: () => null, branchId: '2', mode: 'add', canEditCosts: true,
-  paymentStatus: 'paid', creditDueDate: '', supplier: { supplierId: 3, supplierName: 'Supplier' },
-  stockReceiptGateCode: () => null, unitCost: '2.3456', freeGoods: false,
-  // A restored historical flag must NOT turn an ordinary price edit into a new product.
-  createPriceVariant: true, canViewCosts: true, batchChoice: 'new', batchOptions: [], branchOptions: [],
-  expiryDate: '', reason: '', conditionTag: '', createdProductIds: [],
-  // addLine hands setReceived the NEXT array (it has to: the same value is
-  // written to the draft synchronously first), so accept both shapes exactly
-  // as the setAdjustForm stub above does.
-  received: [], persistSessionDraft: () => {},
-  createClientRequestId: (prefix: string) => `${prefix}_test`,
-  setReceived: (next: any) => { queued = typeof next === 'function' ? next(queued) : next },
-  setEditingKey: () => {}, resetLine: () => {}, tr: (_key: string, fallback: string) => fallback,
-  notify: (message: string) => { throw new Error(message) },
-})
-addLine()
-assert.equal(queued.length, 1)
-assert.equal(queued[0].createPriceVariant, false)
-const build = evaluate(extract(fast, 'buildLineRequest'), {
-  canEditCosts: true, branchId: '2', receivedDate: '2026-09-20',
-  supplier: { supplierId: 3, supplierName: 'Supplier' }, paymentStatus: 'paid', creditDueDate: '',
-  sessionIdRef: { current: 'session' }, stockLineReason: () => 'Receipt', tr: (_key: string, fallback: string) => fallback,
-})
-for (const legacyFlag of [false, true]) {
-  const request = build({ ...queued[0], createPriceVariant: legacyFlag })
-  assert.equal(request.wire, 'receive')
-  assert.equal(request.body.productId, 7)
-  assert.equal(request.body.unitCostUsd, 2.3456)
-  assert.equal(request.body.batchId, null)
-  assert.equal(Object.hasOwn(request.body, 'unlockPricing'), false)
-  assert.equal(Object.hasOwn(request.body, 'pricing'), false)
-}
-const free = build({ ...queued[0], unitCost: '0', freeGoods: true })
-assert.equal(free.body.unitCostUsd, 0)
-assert.equal(free.body.freeGoods, true)
-
-const sessionSource = read('products/CreateProductsSessionModal.tsx')
-const sessionAst = ts.createSourceFile('session.tsx', sessionSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
-let permissionEffect = ''
-function findEffect(node: ts.Node): void {
-  if (ts.isCallExpression(node) && node.expression.getText(sessionAst) === 'useEffect' && node.arguments[0]?.getText(sessionAst).includes('const previous = previousCostAccess.current')) permissionEffect = node.arguments[0].getText(sessionAst)
-  ts.forEachChild(node, findEffect)
-}
-findEffect(sessionAst)
-assert.ok(permissionEffect)
-function transition(previous: { canViewCosts: boolean; canEditCosts: boolean }, next: { canViewCosts: boolean; canEditCosts: boolean }, initial: string, blind: string, edited = false, blindEdited = false) {
-  let readable = initial
-  let blindValue = blind
-  evaluate(permissionEffect, {
-    ...next, previousCostAccess: { current: previous }, lineCostEditedRef: { current: edited }, blindLineCostEditedRef: { current: blindEdited },
-    blindLineUnitCost: blind, selectedProduct: product, currentCost: (p: typeof product) => String(p.cost_price_usd),
-    setLineUnitCost: (value: string | ((current: string) => string)) => { readable = typeof value === 'function' ? value(readable) : value },
-    setBlindLineUnitCost: (value: string) => { blindValue = value },
-  })()
-  return { readable, blind: blindValue }
-}
-const both = { canViewCosts: true, canEditCosts: true }
-const editOnly = { canViewCosts: false, canEditCosts: true }
-assert.equal(transition(editOnly, both, '', '').readable, '1.2345', 'new view grant seeds canonical mean')
-assert.equal(transition({ canViewCosts: false, canEditCosts: false }, both, '', '').readable, '1.2345', 'new full grant seeds canonical mean')
-assert.equal(transition(editOnly, both, '', '8.75', false, true).readable, '8.75', 'blind user-entered draft survives grant')
-assert.equal(transition(editOnly, both, '6.75', '', true).readable, '6.75', 'protected readable draft survives revoke/regrant')
-assert.equal(transition({ canViewCosts: true, canEditCosts: false }, both, '', '', true).readable, '', 'deliberately cleared input is not silently refilled')
-assert.deepEqual(transition(both, editOnly, '6.75', '9.25', true, true), { readable: '6.75', blind: '' }, 'view revocation hides known cost immediately without destroying protected draft')
-assert.match(sessionSource, /value=\{canViewCosts \? lineUnitCost : blindLineUnitCost\}/)
-assert.match(read('inventory/InventoryStockModals.tsx'), /<fieldset disabled=\{!canEditCosts\}/, 'view-only receipt controls are read-only')
+const request = buildStockLineRequest(line, ctx)
+const body = request.body as Record<string, unknown>
+assert.equal(request.wire, 'receive')
+assert.equal(body.productId, 7)
+assert.equal(body.unitCostUsd, 2.3456)
+assert.equal(body.batchId, null)
+assert.equal(Object.hasOwn(body, 'unlockPricing'), false, 'no lock-pricing flag rides the wire')
+assert.equal(Object.hasOwn(body, 'pricing'), false)
+const knownZero = buildStockLineRequest({ ...line, unitCost: '0' }, ctx).body as Record<string, unknown>
+assert.deepEqual([knownZero.unitCostUsd, knownZero.freeGoods], [0, false], 'a known zero still requires an explicit free declaration')
+const allFree = buildStockLineRequest({ ...line, quantity: 0, freeQuantity: 2, unitCost: '' }, ctx).body as Record<string, unknown>
+assert.deepEqual([allFree.unitCostUsd, allFree.freeGoods, allFree.freeQuantity], [0, true, 2], 'units received only as free declare it')
 
 // Reuse the existing lifecycle suite's small DOM fixture, without executing
 // that suite. This mounts the production hook with the installed React runtime.
@@ -158,42 +102,10 @@ assert.deepEqual(await render(1, true, false), { cost: '876.5432', free: true },
 assert.deepEqual(await render(2, true, true), { cost: '', free: false }, 'a different actor cannot inherit the mounted draft')
 assert.deepEqual(protectedDraft, { unitCost: '876.5432', freeGoods: true }, 'all transitions preserve protected source draft')
 await act(async () => mounted.unmount())
-const manualSource = read('inventory/InventoryStockModals.tsx')
-assert.match(manualSource, /useProtectedCostEntry\(user\?\.id, adjustForm\.product_id, canViewCosts, canEditCosts\)/)
-assert.match(manualSource, /value=\{displayedFreeGoods \? 0 : displayedUnitCost\}/)
-assert.match(manualSource, /value=\{displayedCostUsd\}/)
-assert.match(manualSource, /value=\{displayedCostKhr\}/)
-assert.match(manualSource, /free_goods: displayedFreeGoods/, 'new blind input cannot inherit a hidden free-goods declaration')
-const fastSource = read(fast)
+
+// The session's entry row reads its cost through that hook, and the draft
+// keeps the protected value when only rendering rights change.
 assert.match(fastSource, /useProtectedCostEntry\(user\?\.id, picked\?\.id, canViewCosts, canEditCosts\)/)
 assert.match(fastSource, /const unitCost = String\(costEntry\.value\('unitCost', protectedUnitCost, ''\)\)/)
-assert.match(fastSource, /unitCost: protectedUnitCost, freeGoods: protectedFreeGoods/, 'persisted draft keeps protected values when only rendering rights change')
-assert.match(fastSource, /setFreeGoods\(canViewCosts && line\.freeGoods\)/, 'reopening a saved blind line cannot infer free cost')
-
-for (const change of ['none', 'revoke', 'actor', 'entity', 'typed', 'cleanup']) {
-  let resolve: (result: unknown) => void = () => {}
-  const response = new Promise((done) => { resolve = done })
-  let readable = ''
-  let selected: any = { id: 7 }
-  const scope = { current: { key: 'actor1:product7:viewedit' } }
-  const access = { current: both }
-  const edited = { current: false }
-  const cleanup = evaluate(permissionEffect, {
-    ...both, previousCostAccess: { current: editOnly }, lineCostEditedRef: edited, blindLineCostEditedRef: { current: false },
-    blindLineUnitCost: '', selectedProduct: selected, currentCost: (p: any) => p?.cost_price_usd == null ? '' : String(p.cost_price_usd),
-    costRefreshScope: scope, costAccessRef: access,
-    getProductsByIds: (ids: unknown[], params: unknown) => { assert.deepEqual(ids, [7]); assert.deepEqual(params, { surface: 'inventory' }); return response },
-    setSelectedProduct: (updater: (p: any) => any) => { selected = updater(selected) },
-    setLineUnitCost: (value: string | ((current: string) => string)) => { readable = typeof value === 'function' ? value(readable) : value },
-    notify: () => {}, tr: (_key: string, fallback: string) => fallback,
-  })()
-  if (change === 'revoke') access.current = editOnly
-  if (change === 'actor' || change === 'entity') scope.current = { key: change }
-  if (change === 'typed') { edited.current = true; readable = '9.75' }
-  if (change === 'cleanup') cleanup()
-  resolve({ items: [{ id: 8, cost_price_usd: 999 }, { id: 7, cost_price_usd: 1.2345 }] })
-  await response
-  await Promise.resolve()
-  assert.equal(readable, change === 'none' ? '1.2345' : change === 'typed' ? '9.75' : '', `redacted selection refresh respects ${change} race fence`)
-}
-console.log('PASS prospective receipt defaults, same-product queued payloads, explicit free zero, and session permission transitions')
+assert.match(fastSource, /quantity, unitCost: protectedUnitCost,/, 'persisted draft keeps the protected value')
+console.log('PASS prospective receipt defaults, same-product receipt payloads, explicit free zero, and protected cost entry')

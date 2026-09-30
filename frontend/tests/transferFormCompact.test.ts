@@ -52,7 +52,7 @@ function receivedDateIsOneSelectBesideQty(block: string): boolean {
 function reasonAndManageShareOneRow(block: string): boolean {
   const row = rowContaining(block, 'id="inventory-transfer-reason"')
   return /<SuggestionTextInput/.test(row)
-    && /setReasonManager\(\{ open: true, type: 'transfer' \}\)|setReasonsManagerTab\('transfer'\)/.test(row)
+    && /onClick=\{\(\) => (setReasonsManagerOpen\(true\)|setReasonManager\(\{ open: true, type: 'transfer' \}\))\}/.test(row)
     && /aria-label=\{tr\('manage_reasons', 'Manage reasons'\)\}/.test(row)
     && !/<textarea/.test(block)
 }

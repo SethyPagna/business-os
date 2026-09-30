@@ -6,7 +6,6 @@ import { createRoot } from 'react-dom/client'
 const readSource = (path: string): string => readFileSync(new URL(path, import.meta.url), 'utf8').replace(/\r\n?/g, '\n')
 const productFormSource = readSource('../src/components/products/forms/ProductForm.tsx')
 const fastStockInSource = readSource('../src/components/inventory/FastStockInModal.tsx')
-const createSessionSource = readSource('../src/components/products/CreateProductsSessionModal.tsx')
 const productsSource = readSource('../src/components/products/Products.tsx')
 const confirmDialogSource = readSource('../src/components/shared/ConfirmDialog.tsx')
 const filePickerSource = readSource('../src/components/files/FilePickerModal.tsx')
@@ -16,8 +15,6 @@ assert.match(productFormSource, /draftScope\?: string/, 'ProductForm needs an ex
 assert.match(productFormSource, /useStableHydratedState/, 'form hydration must be guarded by a stable entity/session key')
 assert.match(productFormSource, /useStableHydratedState<ProductFormState>\(hydratedInitialForm, draftKey\)/, 'unstable caller seeds must be insulated by the scoped hydration key')
 assert.match(fastStockInSource, /draftScope=\{`fast-stock-in-/, 'scanner creation needs a session/barcode-specific draft')
-assert.match(createSessionSource, /draftScope=\{editingNewLine \? `create-products-session-/, 'each create-session item and queued-line editor needs an isolated draft')
-assert.match(createSessionSource, /useState\(\(\) => rows\.length\)/, 'a restored unified session must reopen the current item draft key')
 assert.match(productsSource, /draftScope="standalone-create"/, 'standalone creation needs its own draft namespace')
 assert.match(productsSource, /if \(!res\?\.success\) throw new Error/, 'failed product creates must reject back to ProductForm')
 assert.match(productFormSource, /clearAfterSuccessfulProductSave/, 'draft clearing must be gated by a resolved save')
@@ -47,10 +44,9 @@ assert.match(productsSource, /onMinimize=\{\(label:[\s\S]*?if \(modalProduct\) \
   'edit minimize must park the exact entity draft behind products:edit')
 assert.match(productsSource, /\} else \{[\s\S]*?kind: 'add_product'[\s\S]*?requiredPermission: \{ permissionKey: 'products', actionKey: 'add' \}/,
   'the same host callback must keep standalone create behind products:add')
-const sessionProductForm = createSessionSource.match(/<ProductForm[\s\S]*?\/>/)?.[0] || ''
 const stockInProductForm = fastStockInSource.match(/<ProductForm[\s\S]*?\/>/)?.[0] || ''
-assert.doesNotMatch(sessionProductForm, /onMinimize=/, 'create session must not fake a restorable minimized item')
-assert.doesNotMatch(stockInProductForm, /onMinimize=/, 'scanner-created stock-in item must not fake a separate minimized form')
+assert.ok(stockInProductForm, 'the Stock Session nested ProductForm located')
+assert.doesNotMatch(stockInProductForm, /onMinimize=/, 'a product created inside the Stock Session must not fake a separate minimized form')
 
 const catalogSaveStart = productsSource.indexOf('  const handleSaveWithGallery = async')
 const catalogSaveEnd = productsSource.indexOf('\n\n  // Opens DeleteConfirmModal', catalogSaveStart)
@@ -58,16 +54,14 @@ const catalogSaveBody = productsSource.slice(catalogSaveStart, catalogSaveEnd)
 assert.doesNotMatch(catalogSaveBody, /setModal\(null\)|setSelected\(null\)|setDetailProduct\(null\)/, 'the catalog host must not unmount ProductForm before its successful clean latch')
 assert.match(catalogSaveBody, /void \(async \(\) => \{[\s\S]*?await fetchProductsByIds/, 'post-save enrichment must not delay ProductForm clean-and-close')
 
-const sessionNewSaveStart = createSessionSource.indexOf('  const saveNewItem = async')
-const sessionNewSaveEnd = createSessionSource.indexOf('\n\n  const saveEditedNewLine', sessionNewSaveStart)
-const sessionEditSaveStart = sessionNewSaveEnd + 2
-const sessionEditSaveEnd = createSessionSource.indexOf('\n\n  const removeLine', sessionEditSaveStart)
-assert.doesNotMatch(createSessionSource.slice(sessionNewSaveStart, sessionNewSaveEnd), /closeItemForm\(\)/, 'a queued new session item resolves to ProductForm before ProductForm closes itself')
-assert.doesNotMatch(createSessionSource.slice(sessionEditSaveStart, sessionEditSaveEnd), /closeItemForm\(\)/, 'an edited queued item resolves to ProductForm before ProductForm closes itself')
-
-const scannedCreateStart = fastStockInSource.indexOf('  const createProductForScannedBarcode = async')
-const scannedCreateEnd = fastStockInSource.indexOf('\n\n  const addLine', scannedCreateStart)
-assert.doesNotMatch(fastStockInSource.slice(scannedCreateStart, scannedCreateEnd), /setCreateBarcode\(''\)/, 'the scanner host must let ProductForm clear its draft before onClose replaces it')
+// The Stock Session holds a new product on its line; the save callback must
+// not unmount ProductForm itself, so ProductForm clears its own draft first.
+const holdStart = fastStockInSource.indexOf('  const holdNewProduct = async')
+const holdEnd = fastStockInSource.indexOf('\n\n  const ', holdStart + 10)
+assert.ok(holdStart > 0 && holdEnd > holdStart, 'the float new-product hold located')
+assert.doesNotMatch(fastStockInSource.slice(holdStart, holdEnd), /setCreateForm\(null\)/, 'the session host must let ProductForm clear its draft before onClose replaces it')
+assert.match(stockInProductForm, /onSave=\{\(payload\) => holdNewProduct\(/)
+assert.match(stockInProductForm, /onClose=\{\(\) => setCreateForm\(null\)\}/)
 
 console.log('PASS product draft lifecycle source contracts')
 

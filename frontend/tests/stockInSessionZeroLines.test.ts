@@ -41,7 +41,6 @@ function runTest(name: string, fn: () => void): void {
 }
 
 const sectionSource = readFileSync(new URL('../src/components/products/StockInSessionsSection.tsx', import.meta.url), 'utf8')
-const createModalSource = readFileSync(new URL('../src/components/products/CreateProductsSessionModal.tsx', import.meta.url), 'utf8')
 const kernelSource = readFileSync(new URL('../../cloudflare/src/lib/stockInSessionsQuery.ts', import.meta.url), 'utf8')
 const en = JSON.parse(readFileSync(new URL('../src/lang/en.json', import.meta.url), 'utf8')) as Record<string, unknown>
 const km = JSON.parse(readFileSync(new URL('../src/lang/km.json', import.meta.url), 'utf8')) as Record<string, unknown>
@@ -112,14 +111,10 @@ runTest('an all-zero session shows authorized $0 and its item count, and says wh
   assert.match(sectionSource, /\{revertibleRows\.length \? <button[^]*?\{tr\('remove_session', 'Remove'\)\}<\/button> : <span[^>]*>\{tr\('stock_session_no_lot_to_edit'/)
 })
 
-runTest('the create session sends the supplier on its zero lines so the list can show it', () => {
-  const zeroWire = createModalSource.slice(
-    createModalSource.indexOf("if (line.kind === 'create_receive' && Number(line.quantity) === 0)"),
-    createModalSource.indexOf('const common ='),
-  )
-  assert.match(zeroWire, /supplier_id: line\.supplierLocked \|\| line\.supplierId == null \? null : Number\(line\.supplierId\)/)
-  assert.match(zeroWire, /supplier_name: line\.supplierLocked \? null : \(line\.supplierName \|\| null\)/)
-})
+// Retired with CreateProductsSessionModal (UI-STOCK-3): "the create session
+// sends the supplier on its zero lines". The Stock Session sends no zero line:
+// an Add item needs units (UI-STOCK-2), so the Worker-side zero-member listing
+// above now serves only sessions recorded before this change.
 
 runTest('every new string is in BOTH packs', () => {
   for (const key of ['stock_session_zero_line', 'stock_session_no_lot_to_edit', 'items']) {

@@ -11,9 +11,10 @@
 //      RAISES a branch's stock states its supplier, and (b) the form
 //      measures against the BRANCH being adjusted, not a page filter -- are
 //      carried by the live surface every per-branch add/remove/set adjust
-//      actually renders through: InventoryStockModals.tsx, reused verbatim
-//      by both StockAdjustModal.tsx (Products page / Stock-changes ledger)
-//      and Inventory.tsx (Inventory page).
+//      actually renders through. Since UI-STOCK-3 (30 Sep 2026) that is the
+//      one Stock Session (FastStockInModal); InventoryStockModals' adjust half
+//      and StockAdjustModal are retired. Behaviour (a) changed on purpose: a
+//      Set is scoped to a received date and is never a receipt.
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -119,53 +120,22 @@ runTest('the handoff list retires itself once the owning lane lands the reword',
 })
 
 runTest('the live surface carries the ported branch-quantity rule (behaviour 1)', () => {
-  const modals = fs.readFileSync(path.join(SRC, 'components', 'inventory', 'InventoryStockModals.tsx'), 'utf8')
-  const stockAdjustModal = fs.readFileSync(path.join(SRC, 'components', 'products', 'forms', 'StockAdjustModal.tsx'), 'utf8')
+  const session = fs.readFileSync(path.join(SRC, 'components', 'inventory', 'FastStockInModal.tsx'), 'utf8')
+  // "What does this branch hold" goes through the ONE shared function, for the
+  // session's own branch -- never a page filter or the product total.
+  assert.match(session, /const branchQuantity = picked \? adjustBranchQuantity\(picked\.branch_stock, branchId, picked\.stock_quantity\) : 0/,
+    'the Stock Session must resolve the ADJUSTED branch\'s own figure, not the product total')
   const inventoryPage = fs.readFileSync(path.join(SRC, 'components', 'inventory', 'Inventory.tsx'), 'utf8')
-  // Every consumer resolves "what does this branch hold" through the ONE
-  // shared function -- never the page's own branch filter or a stale copy.
-  for (const [label, text] of [
-    ['InventoryStockModals.tsx (isStockIn/isSetDown/showBatchPicker all read this prop)', modals],
-    ['StockAdjustModal.tsx', stockAdjustModal],
-    ['Inventory.tsx', inventoryPage],
-  ] as const) {
-    assert.ok(text.includes('adjustBranchQuantity') || text.includes('adjustCurrentQuantity'),
-      `${label} must derive its current-quantity figure from the shared branch-scoped rule`)
-  }
-  assert.match(stockAdjustModal, /adjustBranchQuantity\(product\.branch_stock, adjustForm\.branch_id, stockQtyOf\(product\)\)/,
-    'StockAdjustModal must resolve the ADJUSTED branch\'s own figure, not the product total')
+  assert.ok(!inventoryPage.includes('adjustModal ? getStockQty(adjustModal) : 0'), 'Inventory no longer hands any form the page filter figure')
 })
 
-runTest('the live surface carries the ported set-raise receipt rule (behaviour 2)', () => {
-  const modals = fs.readFileSync(path.join(SRC, 'components', 'inventory', 'InventoryStockModals.tsx'), 'utf8')
-  // The supplier and cost fields render on isStockIn -- exactly the predicate
-  // the receipt gate applies -- not on a narrower "row.type === 'add'" copy
-  // that would re-open the dead end a raising `set` used to hit.
-  // The scope argument (owner, 24 Sep) keeps the raise-is-receipt rule for a
-  // legacy unscoped Set; a scoped Set is a count correction, never a receipt.
-  assert.match(modals, /const isStockIn = isStockInSubmission\(adjustForm\.type, adjustForm\.quantity, adjustCurrentQuantity, adjustForm\.set_scope\)/)
-  assert.match(modals, /\{isStockIn && canEditCosts \? \(\s*\n\s*<SupplierPickerField/, 'authorized receipt inputs must cover both adds and raising sets')
-  const supplierCondition = modals.match(/\{([^{}\n]+) \? \(\s*\n\s*<SupplierPickerField/)?.[1]
-  assert.ok(supplierCondition, 'supplier visibility condition located')
-  const supplierVisible = new Function('isStockIn', 'canEditCosts', `return (${supplierCondition})`)
-  assert.equal(supplierVisible(true, true), true, 'authorized raising sets still collect a supplier')
-  assert.equal(supplierVisible(true, false), false, 'no-edit users cannot enter receipt fields')
-  assert.equal(supplierVisible(false, true), false, 'removal/correction does not request receipt fields')
-  const disabledExpression = modals.match(/onClick=\{onAdjust\}[^\n]*?disabled=\{([^}]+)\}/)?.[1]
-  assert.ok(disabledExpression, 'the actual adjustment submit button must retain its guard')
-  const disabled = new Function('adjustSaving', 'isStockIn', 'canEditCosts', 'costEntry', 'displayedUnitCost', 'adjustForm', 'displayedCostUsd', 'displayedCostKhr', `return (${disabledExpression})`)
-  for (const readable of [false, true]) {
-    for (const cost of ['', '2.3456']) {
-      assert.equal(disabled(false, true, false, { readable }, cost, { pricingLocked: true }, '', ''), true, 'no edit grant always denies adds/raising sets')
-    }
-  }
-  assert.equal(disabled(true, false, true, { readable: true }, '2', { pricingLocked: true }, '', ''), true, 'saving remains locked')
-  assert.equal(disabled(false, false, false, { readable: false }, '', { pricingLocked: true }, '', ''), false, 'a removal/set-down needs no cost grant')
-  assert.equal(disabled(false, true, true, { readable: false }, '', { pricingLocked: true }, '', ''), true, 'a revoked hidden cost cannot silently supply a receipt')
-  assert.equal(disabled(false, true, true, { readable: false }, '2', { pricingLocked: true }, '', ''), false, 'a blind editor may submit newly entered receipt cost')
-  assert.equal(disabled(false, true, true, { readable: false }, '2', { pricingLocked: false }, '', ''), true, 'unlocked blind pricing cannot reuse hidden catalog costs')
-  assert.equal(disabled(false, true, true, { readable: false }, '2', { pricingLocked: false }, '2', '8000'), false, 'explicit blind catalog costs permit the unlocked path')
-  assert.ok(!modals.includes("adjustForm.type === 'add' && adjustForm.batch_id !== ''") , 'the supplier field must not be re-narrowed to adds only')
+runTest('a Set is scoped and never a receipt; raising without a received date is refused (behaviour 2, changed)', () => {
+  const session = fs.readFileSync(path.join(SRC, 'components', 'inventory', 'FastStockInModal.tsx'), 'utf8')
+  const draft = fs.readFileSync(path.join(SRC, 'utils', 'stockSessionDraft.ts'), 'utf8')
+  // A Set writes a lot-scoped count correction and carries no receipt facts.
+  assert.match(draft, /\.\.\.\(batchId != null \? \{ setScope: line\.setScope \|\| 'lot', batchId, expectedLotQuantity: line\.expectedLotQuantity \} : \{\}\)/)
+  // Without a dated lot a Set can only lower the branch; raising is an Add.
+  assert.match(session, /mode === 'set' && batchChoice === 'none' && Number\(quantity\) > branchQuantity\) \{[^]*?refusal = \{ key: 'no_batches_for_branch'/)
 })
 
 if (failed > 0) {

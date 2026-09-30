@@ -20,6 +20,11 @@ import { readFileSync } from 'node:fs'
 // This file pins the client half: a stable per-line id minted once and
 // persisted in the SAME tick as the line, and every committed outcome written
 // synchronously BEFORE it is handed to React.
+//
+// UI-STOCK-2 rewrote the float as the Stock Session (line type and writer in
+// utils/stockSessionDraft.ts); UI-STOCK-3 repointed these pins and retired the
+// ones on the deleted single-line writers (Receive stock, Adjust stock, Bulk
+// add stock), whose work is the session's now.
 
 let failed = 0
 function runTest(name: string, fn: () => void): void {
@@ -38,9 +43,12 @@ function source(relative: string): string {
 }
 
 const fastStockIn = source('components/inventory/FastStockInModal.tsx')
+const sessionDraft = source('utils/stockSessionDraft.ts')
+const sessionItems = source('components/stock-session/StockSessionItems.tsx')
+const { buildStockLineRequest, normalizeStockSessionDraft } = await import('../src/utils/stockSessionDraft.ts')
 
-runTest('every queued fast stock-in line carries a stable dedup id minted once', () => {
-  assert.match(fastStockIn, /requestId: string/, 'a line must carry its own request id')
+runTest('every queued stock session line carries a stable dedup id minted once', () => {
+  assert.match(sessionDraft, /export type StockSessionLine = \{[^]*?\s+requestId: string\s/, 'a line must carry its own request id')
   assert.match(
     fastStockIn,
     /requestId: \(editingKey \? received\.find\(\(line\) => line\.key === editingKey\)\?\.requestId : ''\) \|\| createClientRequestId\('stockline'\)/,
@@ -48,24 +56,33 @@ runTest('every queued fast stock-in line carries a stable dedup id minted once',
   )
   // A restored draft written before this field existed must not commit with an
   // empty id, which the Worker would read as "no id" and happily double-apply.
-  assert.match(
-    fastStockIn,
-    /requestId: line\.requestId \|\| createClientRequestId\('stockline'\)/,
-    'an older draft restores with a minted id rather than none',
-  )
+  assert.match(sessionDraft, /requestId: asString\(line\.requestId\) \|\| mintRequestId\(\),/, 'an older draft restores with a minted id rather than none')
+  assert.match(fastStockIn, /const mintLineId = \(\) => createClientRequestId\('stockline'\)/)
   assert.match(fastStockIn, /import \{ createClientRequestId \} from '\.\.\/\.\.\/api\/requestIds\.ts'/)
 })
 
 runTest('the id reaches the Worker on both stock wires', () => {
-  // Last field of each adjust body, deliberately: tests/stockInModeSwitch.test.ts
-  // pins the receipt fields of all three bodies in their original order.
-  const adjustBodies = fastStockIn.match(/sessionId: sessionIdRef\.current,[\s\S]{0,320}?client_request_id: line\.requestId,\s*\r?\n\s*\} \}/g) || []
-  assert.equal(adjustBodies.length, 3, 'all three adjust-wire bodies (remove, set, tagged add) send the id')
-  assert.match(
-    fastStockIn,
-    /wire: 'receive', body: \{\s*\n\s*clientRequestId: line\.requestId,/,
-    'the receive wire sends the id too',
-  )
+  // Executed through the one line writer: remove, set and a tagged add go to
+  // /api/inventory/adjust, a plain add to /api/batches; every body carries the id.
+  const base = {
+    key: 'k', requestId: 'stockline_abc12345', product: { id: 7, name: 'Soap' }, productName: 'Soap', quantity: 2, freeQuantity: 0,
+    unitCost: '1', sellingPrice: '', freeGoods: false, expiryDate: '', batchChoice: 4, batchLabel: '', reason: '',
+    conditionTag: '', createdProduct: false, status: 'queued', detail: '',
+  }
+  const ctx = {
+    branchId: '1', receivedDate: '2026-09-30', supplier: { supplierId: null, supplierName: 'S' }, paymentStatus: 'paid' as const,
+    creditDueDate: '', sessionId: 1, canEditPrice: false, reasonFor: () => 'R',
+  }
+  const adjusts = [
+    { ...base, mode: 'remove' }, { ...base, mode: 'set' }, { ...base, mode: 'add', conditionTag: 'damaged' },
+  ].map((line) => buildStockLineRequest(line as never, ctx))
+  for (const request of adjusts) {
+    assert.equal(request.wire, 'adjust')
+    assert.equal((request.body as Record<string, unknown>).client_request_id, 'stockline_abc12345', 'all three adjust-wire bodies (remove, set, tagged add) send the id')
+  }
+  const receipt = buildStockLineRequest({ ...base, mode: 'add', batchChoice: 'new' } as never, ctx)
+  assert.equal(receipt.wire, 'receive')
+  assert.equal((receipt.body as Record<string, unknown>).clientRequestId, 'stockline_abc12345', 'the receive wire sends the id too')
   const transport = source('api/batchesTransport.ts')
   assert.match(
     transport,
@@ -78,13 +95,14 @@ runTest('a line is durable BEFORE React renders it, never only after a debounce'
   // The debounced autosave stays -- it is right for keystrokes. What must not
   // depend on it is a FACT: the id of a queued line and the saved status of a
   // committed one.
-  assert.match(fastStockIn, /scheduleWorkDraftWrite<FastStockInDraft>/, 'the keystroke autosave is retained')
-  assert.match(fastStockIn, /const persistSessionDraft = \(lines: ReceivedLine\[\] = received\) => \{/)
-  assert.match(fastStockIn, /writeWorkDraft<FastStockInDraft>\(fastStockInDraftKey, \{/)
+  assert.match(fastStockIn, /scheduleWorkDraftWrite<StockSessionDraft>/, 'the keystroke autosave is retained')
+  assert.match(fastStockIn, /const persistSessionDraft = \(lines: StockSessionLine\[\] = received\) => \{/)
+  assert.match(fastStockIn, /writeWorkDraft<StockSessionDraft>\(fastStockInDraftKey, currentDraft\(lines\)\)/)
 
   for (const [label, order] of [
     ['queueing a line', /persistSessionDraft\(nextLines\)\s*\n\s*setReceived\(nextLines\)/],
-    ['the batched commit', /persistSessionDraft\(lines\)\s*\n\s*setReceived\(lines\)/],
+    ['a whole-request failure', /persistSessionDraft\(lines\)\s*\n\s*setReceived\(lines\)/],
+    ['each answered round', /persistSessionDraft\(lines\)\s*\n\s*setReceived\(lines\.map\(/],
   ] as Array<[string, RegExp]>) {
     assert.match(fastStockIn, order, `${label} must persist synchronously before setState`)
   }
@@ -94,29 +112,20 @@ runTest('a line is durable BEFORE React renders it, never only after a debounce'
   // not exist until React renders -- so none may survive on these paths.
   const commitRegion = fastStockIn.slice(
     fastStockIn.indexOf('const performCommitSequential'),
-    fastStockIn.indexOf('const successCount'),
+    fastStockIn.indexOf('// ---- close / minimize ----'),
   )
   assert.ok(commitRegion.length > 0, 'the commit region must be found')
-  assert.doesNotMatch(
-    commitRegion,
-    /setReceived\(\(prev\) => prev\.map\(\(item\) => item\.key === line\.key \? \{ \.\.\.item, status: 'saved'/,
-    'a saved status must never be written by a functional updater alone',
-  )
-  assert.doesNotMatch(
-    commitRegion,
-    /setReceived\(\(prev\) => prev\.map\(\(item\) => item\.key === line\.key \? \{ \.\.\.item, status: 'error'/,
-    'an error status must never be written by a functional updater alone',
-  )
+  assert.doesNotMatch(commitRegion, /setReceived\(\(prev\) => [^\n]*status: '(?:saved|error)'/, 'a saved or error status must never be written by a functional updater alone')
   const persists = commitRegion.match(/persistSessionDraft\(lines\)/g) || []
-  assert.equal(persists.length, 3, 'the sequential fallback, the batched path and the whole-request failure all persist')
+  assert.ok(persists.length >= 4, 'the sequential fallback, each batched round, creation and the whole-request failure all persist')
 })
 
 runTest('applyLineOutcome folds one outcome into a new array without touching its neighbours', () => {
   const body = fastStockIn.match(
-    /function applyLineOutcome\([\s\S]*?\): ReceivedLine\[\] \{\r?\n([\s\S]*?)\r?\n\}/,
+    /function applyLineOutcome\([\s\S]*?\): StockSessionLine\[\] \{\r?\n([\s\S]*?)\r?\n\}/,
   )?.[1]
   assert.ok(body, 'applyLineOutcome must be a plain, extractable function')
-  const stripped = body!.replace(/: ReceivedLine\[\]/g, '').replace(/ as const/g, '')
+  const stripped = body!.replace(/: StockSessionLine\[\]/g, '').replace(/ as const/g, '')
   const applyLineOutcome = new Function('lines', 'key', 'outcome', stripped) as (
     lines: Array<Record<string, unknown>>,
     key: string,
@@ -145,32 +154,9 @@ runTest('applyLineOutcome folds one outcome into a new array without touching it
   assert.deepEqual(again, next, 'applying the same outcome twice is idempotent')
 })
 
-runTest('the sibling single-line stock writers carry an id too', () => {
-  const receiveModal = source('components/inventory/ReceiveBatchModal.tsx')
-  assert.match(
-    receiveModal,
-    /clientRequestId: createClientRequestId\('receive'\),/,
-    'ReceiveBatchModal parks the id with the request it confirms',
-  )
-  const parkAt = receiveModal.indexOf('setPendingReceipt({')
-  const idAt = receiveModal.indexOf("createClientRequestId('receive')")
-  const commitAt = receiveModal.indexOf('const commitReceive')
-  assert.ok(parkAt > 0 && idAt > parkAt && commitAt > idAt, 'the id is minted when the request is parked, not per confirm')
-
-  const adjustModal = source('components/products/forms/StockAdjustModal.tsx')
-  assert.match(
-    adjustModal,
-    /client_request_id: createClientRequestId\('stockadjust'\),/,
-    'StockAdjustModal parks the id with the request it confirms',
-  )
-  const adjustParkAt = adjustModal.indexOf('const adjustmentRequest = {')
-  const adjustCommitAt = adjustModal.indexOf('const commitAdjust')
-  const adjustIdAt = adjustModal.indexOf("createClientRequestId('stockadjust')")
-  assert.ok(
-    adjustParkAt > 0 && adjustIdAt > adjustParkAt && adjustCommitAt > adjustIdAt,
-    'the id belongs to the parked request, so re-confirming after a failure replays it',
-  )
-})
+// Retired with UI-STOCK-3: "the sibling single-line stock writers carry an id
+// too" (ReceiveBatchModal, StockAdjustModal). Both are deleted; every stock
+// line is a Stock Session line now, and carries the id pinned above.
 
 if (failed > 0) {
   console.error(`\n${failed} test(s) failed`)
@@ -214,35 +200,15 @@ type Draft = { lines: DraftLine[]; batchChoice: string; sessionId?: number | nul
 // the real file, so the test dies if either is rewritten into something a test
 // can no longer exercise.
 function liftApplyLineOutcome(): (lines: DraftLine[], key: string, outcome: Record<string, unknown>) => DraftLine[] {
-  const match = /function applyLineOutcome\([\s\S]*?\n\}/.exec(fastStockIn)
+  const match = /function applyLineOutcome\([\s\S]*?\n\}/.exec(fastStockIn.replace(/\r\n/g, '\n'))
   assert.ok(match, 'applyLineOutcome must stay a plain, extractable function')
-  const body = match![0].replace(/: ReceivedLine\['status'\]/g, '').replace(/: ReceivedLine\[\]/g, '')
-    .replace(/lines: ReceivedLine\[\],/, 'lines,').replace(/key: string,/, 'key,')
-    .replace(/outcome: \{[^}]*\},/, 'outcome,').replace(/\): ReceivedLine\[\] \{/, ') {')
+  const body = match![0]
+    .replace(/lines: StockSessionLine\[\],/, 'lines,').replace(/key: string,/, 'key,')
+    .replace(/outcome: \{[^}]*\},/, 'outcome,').replace(/\): StockSessionLine\[\] \{/, ') {')
   return new Function(`${body}; return applyLineOutcome`)() as never
 }
 
-function liftRestoreBlock(): (
-  restoredLinesRef: { current: unknown },
-  draft: Draft,
-  fastStockInDraftKey: string,
-  write: typeof writeWorkDraft,
-  mintId: typeof createClientRequestId,
-) => void {
-  const start = fastStockIn.indexOf("if (restoredLinesRef.current === null) {")
-  assert.ok(start > 0, 'the restore-and-mint block must stay extractable')
-  const end = fastStockIn.indexOf("\n  }", start)
-  const block = fastStockIn.slice(start, end + 4)
-  assert.match(block, /writeWorkDraft<FastStockInDraft>\(fastStockInDraftKey/, 'the block must persist the minted ids itself')
-  const plain = block.replace(/<FastStockInDraft>/g, '').replace(/: ReceivedLine\[\] \| null/g, '')
-  return new Function(
-    'restoredLinesRef', 'draft', 'fastStockInDraftKey', 'writeWorkDraft', 'createClientRequestId',
-    plain,
-  ) as never
-}
-
 const applyLineOutcome = liftApplyLineOutcome()
-const runRestoreBlock = liftRestoreBlock()
 
 runTest('EXECUTED: a committed line survives a crash between the response and the render', () => {
   const key = scopedWorkDraftKey('fast_stock_in')
@@ -293,11 +259,16 @@ runTest('EXECUTED: the in-flight autosave cannot resurrect the pre-commit snapsh
 runTest('EXECUTED: a legacy draft with no ids has them persisted in the same tick', () => {
   const key = scopedWorkDraftKey('fast_stock_in_legacy')
   // Written by a build that predates the dedup id.
-  writeWorkDraft(key, { batchChoice: "new", lines: [{ key: "old1", status: "queued" }, { key: "old2", status: "queued" }] })
-  const draft = readWorkDraft<Draft>(key)!.data
+  writeWorkDraft(key, { batchChoice: "new", lines: [{ key: "old1", status: "queued", product: { id: 1 } }, { key: "old2", status: "queued", product: { id: 2 } }] })
+  const raw = readWorkDraft<unknown>(key)!.data
 
-  const ref: { current: unknown } = { current: null }
-  runRestoreBlock(ref, draft, key, writeWorkDraft, createClientRequestId)
+  // The float's restore: normalise with the minting function, and because a
+  // line lacked an id, write the result back in the same (render) tick.
+  assert.match(fastStockIn, /stored = normalizeStockSessionDraft\(raw, mintLineId\)/)
+  assert.match(fastStockIn, /rewrite = Array\.isArray\(rawLines\) && rawLines\.some\(\(line\) => !line \|\| typeof line !== 'object' \|\| !\(line as \{ requestId\?: unknown \}\)\.requestId\)/)
+  assert.match(fastStockIn, /if \(rewrite\) writeWorkDraft<StockSessionDraft>\(fastStockInDraftKey, opened\)/)
+  const opened = normalizeStockSessionDraft(raw, () => createClientRequestId('stockline'))!
+  writeWorkDraft(key, opened)
 
   // No timer has fired and no effect has run: the ids must ALREADY be on disk,
   // or a crash inside the 800ms window reloads the same id-less draft and the
@@ -306,11 +277,7 @@ runTest('EXECUTED: a legacy draft with no ids has them persisted in the same tic
   for (const line of persisted.lines) {
     assert.match(String(line.requestId || ''), /^stockline_.{8,}$/, `${line.key} must have a usable id persisted immediately`)
   }
-  assert.equal(
-    persisted.lines[0].requestId,
-    (ref.current as DraftLine[])[0].requestId,
-    'and the persisted id must be the SAME one React was handed, not a second mint',
-  )
+  assert.equal(persisted.lines[0].requestId, opened.lines[0].requestId, 'and the persisted id must be the SAME one React was handed, not a second mint')
   assert.notEqual(persisted.lines[0].requestId, persisted.lines[1].requestId, "each line gets its own id")
 })
 
@@ -357,22 +324,12 @@ runTest('the guard codes are translated, not shown in the server English', () =>
 })
 
 runTest('every stock surface routes its failure text through the shared helper', () => {
-  assert.match(fastStockIn, /stockFailureText\(error, tr, tr\('error', 'Error'\)\)/, 'sequential commit')
-  assert.match(fastStockIn, /stockFailureText\(result, tr, tr\('error', 'Error'\)\)/, 'batched commit')
-  assert.match(fastStockIn, /needsRemoval: stockLineNeedsRemoval\(error\)/, 'sequential commit marks the signpost')
-  assert.match(fastStockIn, /needsRemoval: stockLineNeedsRemoval\(result\)/, 'batched commit marks the signpost')
-  assert.match(
-    fastStockIn,
-    /line\.status !== .saved. && !line\.needsRemoval \? <button[^>]*onClick=\{\(\) => editLine\(line\)\}/,
-    'a line that can only be removed must not offer Edit -- editing keeps the id and earns another 409',
-  )
-  assert.match(source('components/inventory/ReceiveBatchModal.tsx'), /stockFailureText\(e, tr,/, 'ReceiveBatchModal')
-  assert.match(source('components/products/forms/StockAdjustModal.tsx'), /stockFailureText\(error, tr, classified\.message\)/, 'StockAdjustModal')
-  const bulk = source('components/products/forms/BulkAddStockModal.tsx')
-  assert.match(bulk, /stockFailureText\(error, \(key, fallback\) => t\(key\) || fallback, failure\.message\)/, 'BulkAddStockModal')
-  // The parity gap the verifier found: this modal posted to the same route
-  // with no id at all.
-  assert.match(bulk, /client_request_id: row\.rowId,/, 'BulkAddStockModal must send the per-line dedup id')
+  assert.match(fastStockIn, /const failureText = \(error: unknown, fallback: string\): string => \{[^]*?stockFailureText\(error, tr, fallback\)/, 'one helper wraps the shared one')
+  assert.match(fastStockIn, /detail: failureText\(error, tr\('error', 'Error'\)\),\s*needsRemoval: stockLineNeedsRemoval\(error\)/, 'sequential commit marks the signpost')
+  assert.match(fastStockIn, /detail: failureText\(result, tr\('error', 'Error'\)\),\s*status: 'error',\s*needsRemoval: stockLineNeedsRemoval\(result\)/, 'batched commit marks the signpost')
+  // A line that can only be removed must not offer Edit -- editing keeps the id and earns another 409.
+  assert.match(sessionItems, /const editable = !busy && line\.status !== 'saved' && !line\.needsRemoval/)
+  assert.match(fastStockIn, /if \(saving \|\| line\.status === 'saved' \|\| line\.needsRemoval\) return/)
 })
 
 runTest('the batched commit envelope carries the guard code back to the client', () => {

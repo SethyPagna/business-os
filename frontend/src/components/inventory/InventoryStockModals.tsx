@@ -1,38 +1,28 @@
-import ProductNameRail from '../shared/ProductNameRail'
-import StockConditionTagRow from './StockConditionTagRow'
-import { useEffect, useState, type Dispatch, type ReactNode, type SetStateAction } from 'react'
-import { useProtectedCostEntry } from '../../utils/useProtectedCostEntry.ts'
+import { lazy, Suspense, useEffect, useState, type Dispatch, type SetStateAction } from 'react'
 import { createPortal } from 'react-dom'
 import X from 'lucide-react/dist/esm/icons/x.js'
-import Info from 'lucide-react/dist/esm/icons/info.js'
-import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import ArrowRight from 'lucide-react/dist/esm/icons/arrow-right.js'
 import Settings2 from 'lucide-react/dist/esm/icons/settings-2.js'
 import AppSelect, { type AppSelectOption } from '../shared/AppSelect'
 import { getProductBatches, type ProductBatch } from '../../api/batchesTransport.ts'
 import { batchDisplayLabel } from '../../utils/batchLabel.ts'
-import { dateEntryDisplayValue } from '../../utils/dateEntry.ts'
-import SupplierPickerField from '../shared/SupplierPickerField.tsx'
-import DateEntryInput from '../shared/DateEntryInput.tsx'
 import SuggestionTextInput from '../shared/SuggestionTextInput.tsx'
-import { isBatchPickerVisible, isSetDownSubmission, isStockInSubmission, normalizeStockSetScope, scopedSetPreview, type StockSetScope } from '../../utils/stockReceiptFields.ts'
-import InfoHint from '../shared/InfoHint.tsx'
-import StockReasonField from '../shared/StockReasonField.tsx'
 import { useFormDirty } from '../../utils/formDirty.ts'
 import { useCloseGuard } from '../../utils/useCloseGuard.ts'
-import UnsavedChangesPrompt, { type UnsavedChangesPromptItem } from '../shared/UnsavedChangesPrompt.tsx'
+import UnsavedChangesPrompt from '../shared/UnsavedChangesPrompt.tsx'
 import MinimizeButton from '../shared/MinimizeButton.tsx'
 import { markRestoreHandled } from '../../utils/minimizedWork.ts'
 import { TOOLBAR_BUTTON_BASE, toolbarIconButtonClassName } from '../shared/toolbarButtonStyles.ts'
-import CostCalculationFloat from '../shared/CostCalculationFloat.tsx'
-import { useApp } from '../../AppContext'
-import { canEditAcquisitionCosts, canViewAcquisitionCosts } from '../../utils/acquisitionCostAccess.ts'
+import { useSavedStockReasonCatalog } from '../../utils/useSavedStockReasons.ts'
 
-type MoneyFormatter = (value: number) => string
+const StockReasonsManagerModal = lazy(() => import('../shared/StockReasonsManagerModal'))
+
+// The Branches/Inventory transfer form. Stock changes (add / remove / set)
+// all go through the Stock Session float (FastStockInModal); this file keeps
+// only the transfer between branches.
 
 type InventoryId = number | string
 type InventoryFormValue = string | number
-type InventoryReasonType = 'adjust' | 'transfer' | 'move'
 type Translator = (key: string) => string | undefined
 type TranslationWithFallback = (key: string, fallbackEn?: string, fallbackKm?: string) => string
 
@@ -41,88 +31,6 @@ type InventoryProduct = Record<string, any> & {
   name?: string
   unit?: string
   branch_stock?: Array<Record<string, any>>
-}
-
-type InventoryReason = {
-  id: string
-  type?: InventoryReasonType
-  label: string
-}
-
-type InventoryReasonGroups = Record<InventoryReasonType, InventoryReason[]>
-
-// Pricing here mirrors ProductForm.tsx's own field set (one "Cost" input,
-// not a separate "cost" + "purchase price" pair -- see that form's own
-// purchase_price_usd/cost_price_usd mirroring). `pricingLocked` (default
-// true) hides all of it and adds straight to the current row/branch --
-// the fast, common case. Unlocking reveals these fields so the person can
-// receive stock at genuinely different pricing; the backend
-// (resolveAddStockTarget in routes/inventory.ts) then finds-or-creates
-// the matching row automatically, which is what the old separate "Move
-// Stock" modal used to require a second manual step for.
-type AdjustForm = {
-  product_id?: InventoryId
-  type: string
-  quantity: InventoryFormValue
-  reason: string
-  branch_id: InventoryId | ''
-  pricingLocked: boolean
-  selling_price_usd: InventoryFormValue
-  selling_price_khr: InventoryFormValue
-  wholesale_price_usd: InventoryFormValue
-  wholesale_price_khr: InventoryFormValue
-  discount_enabled: boolean
-  discount_type: string
-  discount_percent: InventoryFormValue
-  discount_amount_usd: InventoryFormValue
-  cost_usd: InventoryFormValue
-  cost_khr: InventoryFormValue
-  barcode: string
-  // Mandatory batch selection (add/remove, every target incl. group
-  // containers -- D4b; see routes/inventory.ts's `/adjust` batchId
-  // comment): '' = nothing picked yet (blocks submit), 'new' = create a
-  // fresh batch (the default once the picker loads for 'add'), a number =
-  // an existing batch's id. Ignored server-side when pricing is unlocked,
-  // so it's left as-is (not reset) when the person flips that toggle --
-  // the UI just stops asking for it.
-  batch_id: InventoryId | ''
-  // Scoped Set (owner, 24 Sep): 'lot' (the selected received date, default)
-  // or 'branch' (the branch total, absorbed by the selected received date).
-  set_scope?: StockSetScope
-  /** The picked lot's quantity when it was read: the Set's conflict expectation. */
-  batch_quantity?: number | ''
-  // D4 (11.28): the REAL received date for stock recorded late. Shown
-  // only when this add creates a lot ("New batch", or unlocked pricing
-  // which always makes a fresh one); Inventory.tsx only puts it on the
-  // wire in exactly those cases, so a lingering value can't re-date an
-  // existing lot's top-up.
-  received_date: string
-  // D5a: who this add was bought from. supplier_id only ever comes from
-  // picking a contact suggestion (free text stays a deliberate name-only
-  // attribution); this modal CLEARS both whenever an already-attributed
-  // lot is picked, so Inventory.tsx's onAdjust can trust the form to be
-  // honest -- first attribution sticks server-side either way.
-  supplier_id: number | ''
-  supplier_name: string
-  // S4-15/S4-16: the receipt facts the Sessions list has always had columns
-  // for. Shown for any stock-IN (an 'add', or a 'set' that raises the figure
-  // -- see utils/stockReceiptFields.ts), because the route converts exactly
-  // that 'set' into an add and records these on the movement and its lot.
-  // Blank cost stays blank: the Sessions list reports "no receipt-level cost"
-  // honestly rather than borrowing the product's stored cost price.
-  unit_cost_usd: InventoryFormValue
-  // N14-D: the operator's explicit "these goods were free" declaration. A
-  // $0.00 receipt cost is refused without it, on this form and on the server,
-  // because a defaulted zero and a declared zero used to be the same row.
-  free_goods: boolean
-  payment_status: string
-  credit_due_date: string
-  // P3-L6: the condition the units are being filed under. '' is the
-  // untagged default -- a remove destroys the units, an add receives them
-  // as ordinary sellable stock. A tag makes the remove KEEP them inside the
-  // product group as a non-sellable tagged row, and makes the add receive
-  // straight into that row (the supplier purchase is recorded either way).
-  condition_tag: string
 }
 
 type TransferForm = {
@@ -136,47 +44,9 @@ type TransferForm = {
   batch_quantity?: number | ''
 }
 
-type ReasonManagerState = {
-  open: boolean
-  type: InventoryReasonType
-}
-
-type AdjustCurrentPricing = {
-  selling_price_usd: number
-  selling_price_khr: number
-}
-
 type InventoryStockModalsProps = {
-  adjustBranchSelectOptions: AppSelectOption[]
-  adjustCurrentPricing: AdjustCurrentPricing
-  adjustCurrentQuantity: number
-  adjustForm: AdjustForm
-  adjustModal: InventoryProduct | null
-  // Optional resilience slots used by the Products-page adjust flow
-  // (StockAdjustModal.tsx): an inline notice pinned under the form when the
-  // last submit FAILED, and a submit label that reads "Retry (n)" while a
-  // failed row is still unsaved. Both default to the previous behaviour, so
-  // Inventory.tsx and every other caller stay unchanged.
-  adjustNotice?: ReactNode
-  // S4-21: what the host knows is at risk on THIS adjust (the values of an
-  // attempt that failed and was never retried). Handed to the one shared
-  // prompt so the host does not need a private discard dialog of its own.
-  adjustDiscardItems?: UnsavedChangesPromptItem[]
-  adjustSubmitLabel?: ReactNode
-  adjustSaving: boolean
-  adjustTargetOptions: InventoryProduct[]
-  adjustTargetSelectOptions: AppSelectOption[]
-  branchCount: number
-  branchSelectOptions: AppSelectOption[]
   branchWithPlaceholderOptions?: AppSelectOption[]
-  defaultAddQuantity: number
-  fmtKHR: MoneyFormatter
-  fmtUSD: MoneyFormatter
   getStockQty: (product?: InventoryProduct | null) => number
-  onAdjust: () => void
-  onCloseAdjust: () => void
-  onMinimizeAdjust?: () => void
-  adjustRestoredDirty?: boolean
   onCloseTransfer: () => void
   onMinimizeTransfer?: () => void
   transferRestoredDirty?: boolean
@@ -184,9 +54,6 @@ type InventoryStockModalsProps = {
   transferWorkKey?: string
   onTransfer: () => void
   onTransferSourceChange?: (branchId: string) => void
-  reasonsByType: InventoryReasonGroups
-  setAdjustForm: Dispatch<SetStateAction<AdjustForm>>
-  setReasonManager: Dispatch<SetStateAction<ReasonManagerState>>
   setTransferForm: Dispatch<SetStateAction<TransferForm>>
   t: Translator
   tr: TranslationWithFallback
@@ -195,30 +62,11 @@ type InventoryStockModalsProps = {
   transferModal: InventoryProduct | null
   transferSaving: boolean
   transferSourceBranchOptions: AppSelectOption[]
-  usdSymbol: string
 }
 
 export default function InventoryStockModals({
-  adjustBranchSelectOptions,
-  adjustCurrentPricing,
-  adjustCurrentQuantity,
-  adjustForm,
-  adjustModal,
-  adjustNotice = null,
-  adjustDiscardItems,
-  adjustSubmitLabel,
-  adjustSaving,
-  adjustTargetOptions,
-  adjustTargetSelectOptions,
-  branchCount,
   branchWithPlaceholderOptions,
-  fmtKHR,
-  fmtUSD,
   getStockQty,
-  onAdjust,
-  onCloseAdjust,
-  onMinimizeAdjust,
-  adjustRestoredDirty = false,
   onCloseTransfer,
   onMinimizeTransfer,
   transferRestoredDirty = false,
@@ -226,9 +74,6 @@ export default function InventoryStockModals({
   transferWorkKey,
   onTransfer,
   onTransferSourceChange,
-  reasonsByType,
-  setAdjustForm,
-  setReasonManager,
   setTransferForm,
   t,
   tr,
@@ -237,21 +82,11 @@ export default function InventoryStockModals({
   transferModal,
   transferSaving,
   transferSourceBranchOptions,
-  usdSymbol,
 }: InventoryStockModalsProps) {
-  const { user } = useApp() as { user: any }
-  const canViewCosts = canViewAcquisitionCosts(user)
-  const canEditCosts = canEditAcquisitionCosts(user)
-  const costEntry = useProtectedCostEntry(user?.id, adjustForm.product_id, canViewCosts, canEditCosts)
-  const displayedUnitCost = String(costEntry.value('unitCost', String(adjustForm.unit_cost_usd ?? ''), ''))
-  const displayedFreeGoods = Boolean(costEntry.value('freeGoods', adjustForm.free_goods, false))
-  const displayedCostUsd = String(costEntry.value('costUsd', String(adjustForm.cost_usd ?? ''), ''))
-  const displayedCostKhr = String(costEntry.value('costKhr', String(adjustForm.cost_khr ?? ''), ''))
   useEffect(() => { if (transferModal) markRestoreHandled('inventory_transfer') }, [transferModal?.id])
-  // P10-6: the calculated-cost float, opened from the "Catalog cost" line below.
-  const [costFloatOpen, setCostFloatOpen] = useState(false)
-  const requestedSetTotal = Number(adjustForm.quantity)
-  const setDifference = Number.isFinite(requestedSetTotal) ? requestedSetTotal - adjustCurrentQuantity : null
+  // The saved transfer reasons, re-read after the reasons manager changes them.
+  const { reasons: transferReasons, reload: reloadTransferReasons } = useSavedStockReasonCatalog('transfer')
+  const [reasonsManagerOpen, setReasonsManagerOpen] = useState(false)
   const changeTransferSource = onTransferSourceChange || ((branchId: string) => {
     setTransferForm((current) => ({ ...current, from_branch_id: branchId, to_branch_id: '', batch_id: '', batch_quantity: '' }))
   })
@@ -289,636 +124,19 @@ export default function InventoryStockModals({
   }, [transferProductId, transferSourceId])
   const destinationBranchOptions = transferDestinationBranchOptions || branchWithPlaceholderOptions || []
 
-  // Mandatory batch selection, for EVERY target -- group containers
-  // included (D4b). The old "flat rows only" exclusion predated the
-  // unconditional batch-ledger auto-routing in routes/inventory.ts's
-  // /adjust: since that change, an add on an is_group container CREATES a
-  // container batch server-side either way, so hiding the picker only hid
-  // lots that already existed -- one surface silently weaker than its
-  // siblings, the exact inconsistency the user rejected. (Name-grouped
-  // rows -- most real groups -- are flat rows and always had the picker.)
-  // Resolve against whichever row the "Adjust target" picker actually has
-  // selected, same as adjustCurrentQuantity/adjustCurrentPricing above.
-  const adjustTargetId = adjustForm.product_id || adjustModal?.id
-  const unlockPricing = adjustForm.type === 'add' && !adjustForm.pricingLocked
-  // A batch is scoped to one branch's stock -- "No specific branch" (the
-  // placeholder option in adjustBranchSelectOptions) has no branch to pick
-  // a batch within, so the picker only shows once a real branch is
-  // selected. In practice `openAdjust` always pre-fills the default
-  // branch, so this only matters if the person explicitly clears it.
-  const adjustBranchId = adjustForm.branch_id ? Number(adjustForm.branch_id) : null
-  // N14-E: a 'set' BELOW the current figure takes stock OUT. routes/inventory.ts
-  // turns it into a remove of the difference, and with no batch named that
-  // remove drains the oldest lots FIFO -- the form was silently choosing which
-  // lot the loss came out of. A set-down now offers the same batch picker an
-  // explicit remove does, so the operator says which lot it leaves.
-  // A Set opened on this form is always scoped (lot by default). Only a
-  // legacy caller that never sets set_scope keeps the branch-total conversion.
-  const scopedSet = adjustForm.type === 'set' && adjustForm.set_scope != null
-  const setScope = normalizeStockSetScope(adjustForm.set_scope)
-  const isSetDown = isSetDownSubmission(adjustForm.type, adjustForm.quantity, adjustCurrentQuantity, adjustForm.set_scope)
-  // One rule, shared with the two surfaces that submit this form
-  // (Inventory.tsx and StockAdjustModal.tsx build their wire from it), so the
-  // picker on screen and the lot on the wire can never disagree.
-  const showBatchPicker = isBatchPickerVisible({
-    type: adjustForm.type,
-    quantity: adjustForm.quantity,
-    currentQuantity: adjustCurrentQuantity,
-    unlockPricing,
-    branchId: adjustBranchId,
-    batchId: adjustForm.batch_id,
-    setScope: adjustForm.set_scope,
-  })
-  // S4-16: a 'set' above the current figure IS a receipt -- routes/inventory.ts
-  // turns it into an add of the difference and runs it through the same batch
-  // ledger. It has no batch picker (nothing to pick against a total), so it
-  // always creates or date-matches a lot, which is why it gates the same
-  // received-date / supplier / cost / payment fields an explicit add does.
-  const isStockIn = isStockInSubmission(adjustForm.type, adjustForm.quantity, adjustCurrentQuantity, adjustForm.set_scope)
-  const creditDueMissing = adjustForm.payment_status === 'credit' && String(adjustForm.credit_due_date || '').trim() === ''
-  const receivedDateInputVisible = isStockIn
-    && (unlockPricing || (adjustForm.type === 'set' && !scopedSet) || (showBatchPicker && adjustForm.batch_id === 'new'))
-
-  const [batchOptions, setBatchOptions] = useState<ProductBatch[]>([])
-  const [batchLoading, setBatchLoading] = useState(false)
-  const [receivedDateOptionsOpen, setReceivedDateOptionsOpen] = useState(false)
-  useEffect(() => {
-    // A scoped Set needs its received date chosen, so its options start open.
-    setReceivedDateOptionsOpen(adjustForm.type === 'set')
-  }, [adjustModal?.id, adjustForm.type])
-  useEffect(() => {
-    if (!showBatchPicker || !adjustTargetId || !adjustBranchId) {
-      setBatchOptions([])
-      // The picker just went away (a set-down raised into a set-up, pricing
-      // unlocked, the branch cleared). Whatever it had chosen belongs to the
-      // submission it was showing for, so drop it rather than leaving a lot
-      // id in the form that nothing on screen names any more.
-      setAdjustForm((current) => (current.batch_id === '' ? current : { ...current, batch_id: '', batch_quantity: '' }))
-      return
-    }
-    // Target/branch/type changed since the last fetch -- whatever was
-    // previously picked may not even be in the new list (different
-    // product, different branch's stock, or add<->remove switched which
-    // batches are eligible). Clear it so a stale id can't ride along to
-    // submit; the "default to new batch" effect below re-fills it for
-    // 'add' once the new list is in.
-    setAdjustForm((current) => (current.batch_id === '' ? current : { ...current, batch_id: '', batch_quantity: '' }))
-    let cancelled = false
-    setBatchLoading(true)
-    // 'remove' only offers batches that actually have stock at this
-    // branch (onlyAvailable) -- picking an empty lot to remove from would
-    // just bounce off removeStockFromBatch's InsufficientBatchStockError
-    // server-side; 'add' shows every active batch, including empty ones,
-    // since topping one back up is a normal receipt.
-    // A scoped Set offers every existing received date at this branch,
-    // including an emptied one a count can find stock in again (never New).
-    getProductBatches(adjustTargetId, adjustBranchId, adjustForm.type === 'remove' || isSetDown)
-      .then((res) => { if (!cancelled) setBatchOptions(res?.batches || []) })
-      // getProductBatches no longer resolves a failed request as an empty
-      // list (see batchesTransport.ts), so this needs a real handler --
-      // without one a 403/500 here would surface as an unhandled rejection.
-      // An empty option list is the honest fallback for a picker, but the
-      // failure is logged rather than swallowed silently.
-      .catch((error: unknown) => {
-        if (cancelled) return
-        console.error('[Inventory] batch options load failed:', error)
-        setBatchOptions([])
-      })
-      .finally(() => { if (!cancelled) setBatchLoading(false) })
-    return () => { cancelled = true }
-  }, [showBatchPicker, adjustTargetId, adjustBranchId, adjustForm.type, isSetDown, setAdjustForm])
-  // Default to "new batch" the first time the picker has something to
-  // show for an add -- matches the decided default ("Default batch
-  // `n+1: mm/dd/yyyy` stays the default for add stock"). That quote is from
-  // Sep 3; the label itself became day-first on Sep 4. Remove has no
-  // such default (no batch-less removals), so it's left blank until the
-  // person actually picks one. Only fires once per target/branch/type
-  // combo (guarded by the empty-string check) so it doesn't stomp a
-  // selection already made against the previous options.
-  useEffect(() => {
-    if (showBatchPicker && adjustForm.type === 'add' && adjustForm.batch_id === '') {
-      setAdjustForm((current) => (current.batch_id === '' ? { ...current, batch_id: 'new' } : current))
-    }
-  }, [showBatchPicker, adjustForm.type, adjustForm.batch_id, setAdjustForm])
-
-  // D5a: same visibility-mirror rule as the received date. An existing lot
-  // that already carries a supplier keeps it (first attribution sticks,
-  // COALESCE server-side), so the picker locks to that name; an
-  // unattributed existing lot still offers it (a choice FILLS the blank,
-  // which the server honors). unlockPricing always creates a fresh lot, so
-  // the picker stays live there with no lot to consult.
-  const selectedAdjustLot = adjustForm.type === 'add' && !unlockPricing
-    && adjustForm.batch_id !== '' && adjustForm.batch_id !== 'new'
-    ? batchOptions.find((batch) => String(batch.id) === String(adjustForm.batch_id)) || null
-    : null
-  const adjustLotAttributedName = selectedAdjustLot?.supplier_name?.trim() || null
-  const selectedBatchOption = adjustForm.batch_id !== '' && adjustForm.batch_id !== 'new'
-    ? batchOptions.find((batch) => String(batch.id) === String(adjustForm.batch_id)) || null
-    : null
-  const setPreview = scopedSet && selectedBatchOption
-    ? scopedSetPreview({ scope: setScope, targetQuantity: requestedSetTotal, lotQuantity: selectedBatchOption.quantity, branchQuantity: adjustCurrentQuantity })
-    : null
-  const setLowersStock = Boolean(setPreview && setPreview.valid && setPreview.delta < 0)
-  // A tag only names units that LEFT sellable stock; drop it when the Set
-  // stops lowering stock so a stale tag can never ride the wire (the Worker
-  // refuses a tag on a non-decreasing Set as well).
-  useEffect(() => {
-    if (adjustForm.type === 'set' && !setLowersStock && adjustForm.condition_tag) {
-      setAdjustForm((current) => ({ ...current, condition_tag: '' }))
-    }
-  }, [adjustForm.type, setLowersStock, adjustForm.condition_tag, setAdjustForm])
-  const receivedDateOptionSummary = selectedBatchOption
-    ? batchDisplayLabel(selectedBatchOption, tr('batch', 'Received date'))
-    : receivedDateInputVisible && adjustForm.received_date
-      ? dateEntryDisplayValue(adjustForm.received_date)
-      : adjustForm.batch_id === 'new'
-        ? tr('new_batch', '+ New received date')
-        : tr('choose_received_date', 'Choose a received date')
-  // Keep the form honest: a locked lot clears any previously typed choice,
-  // so what Inventory.tsx's onAdjust puts on the wire is exactly what the
-  // person saw on screen.
-  useEffect(() => {
-    if (adjustLotAttributedName && (adjustForm.supplier_id !== '' || adjustForm.supplier_name !== '')) {
-      setAdjustForm((current) => ({ ...current, supplier_id: '', supplier_name: '' }))
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [adjustLotAttributedName])
-
-  // S4-21: both forms live in the PARENT page's state (adjustForm /
-  // transferForm are props), so there is no local "pristine" copy to
-  // compare against -- useFormDirty takes the snapshot itself on the first
-  // render of each opening. The reset key goes null while the modal is
-  // shut, which is what makes a second open re-baseline instead of
-  // inheriting the previous session's snapshot.
-  const adjustDirty = useFormDirty(adjustForm, adjustModal ? `adjust-${adjustModal.id}` : null)
+  // S4-21: the form lives in the PARENT page's state, so useFormDirty takes
+  // the snapshot itself on the first render of each opening; the reset key
+  // goes null while the modal is shut, so a second open re-baselines.
   const transferDirty = useFormDirty(transferForm, transferModal ? `transfer-${transferModal.id}` : null)
-  // The backdrop, the ✕ and Cancel all reach the same prop today; each is
-  // routed through the guard so none of the three can slip past it.
-  const adjustGuard = useCloseGuard({ dirty: adjustDirty.dirty || Boolean(adjustRestoredDirty) }, onCloseAdjust, onMinimizeAdjust)
   const transferGuard = useCloseGuard(transferWorkKey ? { workKey: transferWorkKey } : { dirty: !transferPending && (transferDirty.dirty || transferRestoredDirty) }, onCloseTransfer, onMinimizeTransfer)
-  // Same in-flight rule the other stock modals use: a dismissal during a
-  // save is ignored outright rather than raising a prompt about a form the
-  // request is still reading.
-  const requestCloseAdjust = () => { if (!adjustSaving) adjustGuard.requestClose() }
+  // A dismissal during a save is ignored rather than prompting about a form
+  // the request is still reading.
   const requestCloseTransfer = () => { if (!transferSaving) transferGuard.requestClose() }
 
-  if (!adjustModal && !transferModal) return null
+  if (!transferModal) return null
 
   const modals = (
     <>
-      {adjustModal ? (
-        <div className="modal-viewport-safe pointer-events-auto fixed inset-0 z-[1050] flex items-end justify-center overflow-y-auto bg-black/50 sm:items-center sm:p-4" onClick={requestCloseAdjust}>
-          <div className="modal-panel-safe flex w-full flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-md sm:rounded-2xl" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
-              <div className="min-w-0 flex-1">
-                <h2 className="font-bold text-gray-900 dark:text-white">{t('adjust_stock')}</h2>
-                <div className="mt-0.5 min-w-0 max-w-full text-xs font-medium text-gray-600 dark:text-gray-300" title={adjustModal.name}><ProductNameRail name={String(adjustModal.name ?? '')} /></div>
-                <div className="mt-0.5 text-[11px] tabular-nums text-gray-400">{t('current_stock') || 'Current stock'}: {adjustCurrentQuantity} {adjustModal.unit}</div>
-                {/* P10-6: the catalog cost price, clickable -- opens the
-                    calculated-cost float for the same row adjustCurrentQuantity/
-                    adjustCurrentPricing above resolve against. */}
-                {canViewCosts ? <button
-                  type="button"
-                  className="mt-0.5 text-[11px] tabular-nums text-gray-400 decoration-dotted underline-offset-2 hover:underline"
-                  onClick={() => setCostFloatOpen(true)}
-                  title={t('cost_breakdown_title') || 'Calculated cost price'}
-                >
-                  {t('catalog_cost_price') || 'Catalog cost price'}: {fmtUSD(Number(adjustModal.cost_price_usd ?? adjustModal.purchase_price_usd) || 0)}
-                </button> : null}
-              </div>
-              <div className="flex shrink-0 items-center gap-1">
-                {onMinimizeAdjust ? <MinimizeButton disabled={adjustSaving} tr={tr} onMinimize={onMinimizeAdjust} /> : null}
-                <button type="button" onClick={requestCloseAdjust} className={toolbarIconButtonClassName} aria-label={t('close') || 'Close'}>
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
-            </div>
-            <div className="modal-scroll p-4 space-y-3">
-              {adjustTargetOptions.length > 1 ? (
-                <div>
-                  <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">{tr('adjust_target', 'Adjust target')}</label>
-                  <AppSelect
-                    value={adjustForm.product_id || adjustModal.id || ''}
-                    onChange={(nextValue) => setAdjustForm((current) => ({ ...current, product_id: nextValue }))}
-                    ariaLabel={tr('adjust_target', 'Adjust target')}
-                    className="w-full"
-                    buttonClassName="h-10 w-full text-sm"
-                    menuClassName="min-w-[15rem]"
-                    optionClassName="text-sm"
-                    options={adjustTargetSelectOptions}
-                  />
-                </div>
-              ) : null}
-              <div className="grid grid-cols-3 gap-2">
-                {([['add', t('adjust_add') || 'Add'], ['remove', t('adjust_remove') || 'Remove'], ['set', t('adjust_set') || 'Set']] as [string, string][]).map(([v,lbl]) => (
-                  <button key={v} type="button" onClick={() => setAdjustForm(f=>({...f, type:v, set_scope: v === 'set' ? 'lot' : f.set_scope, condition_tag: v === f.type ? f.condition_tag : ''}))}
-                    className={`${TOOLBAR_BUTTON_BASE} border-2 ${adjustForm.type===v ? 'border-blue-600 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300' : 'border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-400'}`}>
-                    {lbl}
-                  </button>
-                ))}
-              </div>
-              {scopedSet ? (
-                <div className="grid grid-cols-2 gap-2" role="group" aria-label={tr('stock_set_scope', 'Set quantity for')}>
-                  {([
-                    ['lot', tr('stock_set_scope_lot', 'Selected received date')],
-                    ['branch', tr('stock_set_scope_branch', 'Branch total')],
-                  ] as [StockSetScope, string][]).map(([scope, label]) => (
-                    <button
-                      key={scope}
-                      type="button"
-                      aria-pressed={setScope === scope}
-                      onClick={() => setAdjustForm((current) => ({ ...current, set_scope: scope }))}
-                      className={`${TOOLBAR_BUTTON_BASE} min-w-0 border-2 ${setScope === scope ? 'border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'border-gray-200 text-gray-600 dark:border-gray-600 dark:text-gray-400'}`}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-              ) : null}
-              <div>
-                <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">
-                  {adjustForm.type === 'set'
-                    ? (scopedSet
-                        ? `${setScope === 'lot' ? tr('stock_set_scope_lot', 'Selected received date') : tr('stock_set_scope_branch', 'Branch total')} · ${tr('target_quantity', 'Target quantity')} *`
-                        : `${t('adjust_set') || 'Set'} ${t('stock') || 'Stock'} (${t('total') || 'Total'}) *`)
-                    : `${t('quantity') || 'Quantity'} *`}
-                </label>
-                {/* A set may be typed down to 0 (an emptied branch); an add or a
-                    remove of 0 moves nothing, so the floor follows the type --
-                    the same split utils/stockReceiptFields.ts enforces on submit. */}
-                <input
-                  id="inventory-adjust-quantity"
-                  name="inventory_adjust_quantity"
-                  className="input text-sm"
-                  type="number"
-                  step="any"
-                  min={adjustForm.type === 'set' ? 0 : 1}
-                  value={adjustForm.quantity}
-                  onChange={e => setAdjustForm(f=>({...f, quantity:e.target.value}))} />
-                {scopedSet ? (
-                  setPreview ? (
-                    <div className={`mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] tabular-nums ${setPreview.valid ? 'text-gray-500 dark:text-gray-400' : 'text-rose-600 dark:text-rose-300'}`}>
-                      <span>{tr('lot_quantity', 'Received-date quantity')}: {setPreview.beforeLotQuantity} → {setPreview.afterLotQuantity} (Δ {setPreview.delta >= 0 ? '+' : ''}{setPreview.delta})</span>
-                      <span>{tr('branch_total', 'Branch total')}: {setPreview.beforeBranchQuantity} → {setPreview.afterBranchQuantity}</span>
-                      {!setPreview.valid ? <span className="font-semibold">{tr('stock_set_lot_negative', 'The selected received date does not have enough stock for this branch total.')}</span> : null}
-                    </div>
-                  ) : (
-                    <div className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">{tr('select_batch_required', 'Select a received date first')}</div>
-                  )
-                ) : adjustForm.type === 'set' && setDifference != null ? (
-                  <div className="mt-1 flex items-center gap-1 text-[11px] tabular-nums text-gray-500 dark:text-gray-400">
-                    <span>{t('current_stock') || 'Current stock'}: {adjustCurrentQuantity} → {t('total') || 'Total'}: {requestedSetTotal} (Δ {setDifference >= 0 ? '+' : ''}{setDifference})</span>
-                    {/* N14-E: the one place the operator can see that this set is a
-                        REMOVAL, so it is also where the reason the receipt fields
-                        vanished belongs -- as a hint, not a paragraph. */}
-                    {isSetDown ? (
-                      <InfoHint label={t('adjust_set') || 'Set'} text={t('stock_set_down_hint') || 'This set lowers the quantity, so it takes stock out: it has no supplier and no cost. Choose the received date to take it from, otherwise the oldest received dates are drained first.'} />
-                    ) : null}
-                    {/* N14-D: the mirror image -- a set that RAISES the figure is a
-                        receipt (routes/inventory.ts converts it into an add of the
-                        difference), which is why the supplier and cost fields appear
-                        below. Same isStockIn predicate those fields render on, so
-                        the hint can never show for a submission that owes neither. */}
-                    {isStockIn ? (
-                      <InfoHint label={t('adjust_set') || 'Set'} text={t('stock_set_up_hint') || 'This set raises the quantity, so it puts stock in: name the supplier it came from and the unit cost you paid, exactly as an add does.'} />
-                    ) : null}
-                  </div>
-                ) : null}
-              </div>
-              {/* P3-L6: the keep-or-destroy / sellable-or-tagged choice, ONE
-                  compact row directly under the quantity it applies to, on
-                  small and large screens alike. Never offered for a 'set':
-                  a set is a target figure whose direction is decided
-                  server-side, so it has no quantity of its own to tag (the
-                  route refuses a tag on a set for the same reason). */}
-              {/* Loss rule (owner, 24 Sep): a Set that LOWERS the received date
-                  is a loss unless tagged -- the same keep-or-destroy row a
-                  Remove offers, shown only once the preview proves a decrease. */}
-              {adjustForm.type === 'remove' || adjustForm.type === 'add' || setLowersStock ? (
-                <StockConditionTagRow
-                  mode={adjustForm.type === 'add' ? 'add' : 'remove'}
-                  value={adjustForm.condition_tag || ''}
-                  onChange={(next) => setAdjustForm((current) => ({ ...current, condition_tag: next }))}
-                  tr={tr}
-                  id="inventory-adjust-condition-tag"
-                />
-              ) : null}
-              {adjustForm.type === 'add' ? (
-                <div className="rounded-xl border border-gray-200 p-3 dark:border-gray-700">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex min-w-0 items-center gap-1.5">
-                      {/* Long on/off explanation moved off the face of the
-                          card and into this hover/focus tooltip -- same
-                          icon-button pattern InventoryMovementsSurface.tsx
-                          uses for its "grouped movement history" info,
-                          rather than a second always-visible text line.
-                          Part 207: icon moved before the label it explains. */}
-                      <button
-                        type="button"
-                        className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-400 transition hover:border-blue-200 hover:text-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500/30 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400 dark:hover:border-blue-800 dark:hover:text-blue-300"
-                        title={adjustForm.pricingLocked
-                          ? tr('lock_pricing_on_hint', "On: this stock is added to this row at its current price. Turn off to receive it at a different price.")
-                          : tr('lock_pricing_off_hint', "Off: if this price differs from an existing row's, stock goes there (or a new row is created) instead of here.")}
-                        aria-label={adjustForm.pricingLocked
-                          ? tr('lock_pricing_on_hint', "On: this stock is added to this row at its current price. Turn off to receive it at a different price.")
-                          : tr('lock_pricing_off_hint', "Off: if this price differs from an existing row's, stock goes there (or a new row is created) instead of here.")}
-                      >
-                        <Info className="h-2.5 w-2.5" aria-hidden="true" />
-                      </button>
-                      <span className="text-xs font-medium text-gray-700 dark:text-gray-300">{tr('lock_current_pricing', 'Lock current pricing')}</span>
-                    </div>
-                    <div className="flex shrink-0 items-center gap-2">
-                      {/* Current locked-in price, resolved against whichever
-                          row is actually selected (adjustCurrentPricing
-                          tracks the "Adjust target" picker, not just the
-                          product the modal opened from) -- shown regardless
-                          of lock state so it's still visible as the
-                          starting point right up until the fields below are
-                          edited. */}
-                      <span className="text-right text-[11px] leading-tight text-gray-500 dark:text-gray-400">
-                        <span className="block font-semibold text-gray-700 dark:text-gray-300">{fmtUSD(adjustCurrentPricing.selling_price_usd)}</span>
-                        {adjustCurrentPricing.selling_price_khr > 0 ? (
-                          <span className="block">{fmtKHR(adjustCurrentPricing.selling_price_khr)}</span>
-                        ) : null}
-                      </span>
-                      <button
-                        type="button"
-                        role="switch"
-                        aria-checked={adjustForm.pricingLocked}
-                        onClick={() => setAdjustForm(f => ({ ...f, pricingLocked: !f.pricingLocked }))}
-                        className={`relative h-5 w-9 rounded-full transition-colors ${adjustForm.pricingLocked ? 'bg-blue-600' : 'bg-gray-300 dark:bg-gray-600'}`}
-                      >
-                        <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-transform ${adjustForm.pricingLocked ? 'translate-x-0.5' : 'translate-x-4'}`} />
-                      </button>
-                    </div>
-                  </div>
-                  {!adjustForm.pricingLocked && canEditCosts ? (
-                    <div className="mt-3 space-y-2">
-                      <div className="grid grid-cols-2 gap-2">
-                        <div>
-                          <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">{tr('cost_price_usd_full', 'Cost')} ({usdSymbol})</label>
-                          <input className="input text-sm" type="number" step="any" min="0" value={displayedCostUsd} onChange={e => { costEntry.write('costUsd', e.target.value); setAdjustForm(f=>({...f, cost_usd:e.target.value})) }} />
-                        </div>
-                        <div>
-                          <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">{tr('cost_price_khr_full', 'Cost')} (KHR)</label>
-                          <input className="input text-sm" type="number" step="any" min="0" value={displayedCostKhr} onChange={e => { costEntry.write('costKhr', e.target.value); setAdjustForm(f=>({...f, cost_khr:e.target.value})) }} />
-                        </div>
-                        <div>
-                          <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">{tr('selling_price_usd_full', 'Selling price')} ({usdSymbol})</label>
-                          <input className="input text-sm" type="number" step="any" min="0" value={adjustForm.selling_price_usd} onChange={e => setAdjustForm(f=>({...f, selling_price_usd:e.target.value}))} />
-                        </div>
-                        <div>
-                          <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">{tr('selling_price_khr_full', 'Selling price')} (KHR)</label>
-                          <input className="input text-sm" type="number" step="any" min="0" value={adjustForm.selling_price_khr} onChange={e => setAdjustForm(f=>({...f, selling_price_khr:e.target.value}))} />
-                        </div>
-                      </div>
-                      <label className="flex items-center gap-2 text-xs font-medium text-gray-600 dark:text-gray-400">
-                        <input type="checkbox" checked={!!adjustForm.discount_enabled} onChange={e => setAdjustForm(f=>({...f, discount_enabled:e.target.checked}))} />
-                        {tr('product_discount', 'Discount')}
-                      </label>
-                      {adjustForm.discount_enabled ? (
-                        <div>
-                          <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">{tr('discount_percent', 'Percent off')}</label>
-                          <input className="input text-sm" type="number" step="any" min="0" value={adjustForm.discount_percent} onChange={e => setAdjustForm(f=>({...f, discount_percent:e.target.value}))} />
-                        </div>
-                      ) : null}
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
-              {(showBatchPicker || receivedDateInputVisible || (adjustForm.type === 'add' && unlockPricing)) ? (
-                <div className="rounded-xl border border-gray-200 dark:border-gray-700" data-stock-received-date-options="true">
-                  <button
-                    type="button"
-                    className="flex h-10 w-full min-w-0 items-center justify-between gap-2 rounded-xl px-3 text-left text-sm font-semibold text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-700/40"
-                    onClick={() => setReceivedDateOptionsOpen((open) => !open)}
-                    aria-expanded={receivedDateOptionsOpen}
-                  >
-                    <span className="shrink-0">{tr('options', 'Options', 'ជម្រើស')}</span>
-                    <span className="min-w-0 flex-1 detail-scroll-text text-right text-xs font-normal tabular-nums text-gray-500 dark:text-gray-400">{receivedDateOptionSummary}</span>
-                    <ChevronDown className={`h-4 w-4 shrink-0 transition-transform ${receivedDateOptionsOpen ? 'rotate-180' : ''}`} aria-hidden="true" />
-                  </button>
-                  {receivedDateOptionsOpen ? (
-                    <div className="space-y-3 border-t border-gray-200 p-3 dark:border-gray-700">
-                      {showBatchPicker ? (
-                        <div>
-                          <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">
-                            {adjustForm.type === 'add'
-                              ? tr('batch', 'Received date')
-                              : scopedSet
-                                ? tr('selected_received_date', 'Selected received date')
-                                : tr('batch_to_remove_from', 'Received date to remove from')} *
-                          </label>
-                          {batchLoading ? (
-                            <div className="text-xs text-gray-400">{t('loading') || 'Loading...'}</div>
-                          ) : (
-                            <div className="flex flex-wrap gap-1.5">
-                              {adjustForm.type === 'add' ? (
-                                <button
-                                  type="button"
-                                  className={`rounded-full border px-2.5 py-1 text-[11px] font-medium ${adjustForm.batch_id === 'new' ? 'border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'border-gray-200 text-gray-600 dark:border-gray-600 dark:text-gray-400'}`}
-                                  onClick={() => setAdjustForm((f) => ({ ...f, batch_id: 'new' }))}
-                                >
-                                  {tr('new_batch', '+ New received date')}
-                                </button>
-                              ) : null}
-                              {batchOptions.map((batch) => (
-                                <button
-                                  key={batch.id}
-                                  type="button"
-                                  className={`rounded-full border px-2.5 py-1 text-[11px] font-medium ${String(adjustForm.batch_id) === String(batch.id) ? 'border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'border-gray-200 text-gray-600 dark:border-gray-600 dark:text-gray-400'}`}
-                                  onClick={() => setAdjustForm((f) => ({ ...f, batch_id: batch.id, batch_quantity: Number(batch.quantity || 0) }))}
-                                >
-                                  {batchDisplayLabel(batch, tr('batch', 'Received date'))} ({batch.quantity})
-                                </button>
-                              ))}
-                              {!batchOptions.length && adjustForm.type !== 'add' ? (
-                                <div className="text-xs text-gray-400">{adjustForm.type === 'remove'
-                                  ? tr('no_batches_with_stock', 'No received dates with stock in this branch')
-                                  : tr('no_batches_for_branch', 'No received dates for this branch')}</div>
-                              ) : null}
-                            </div>
-                          )}
-                        </div>
-                      ) : null}
-                      {adjustForm.type === 'add' && unlockPricing ? (
-                        <div className="text-[11px] text-gray-400">
-                          {tr('batch_auto_new_unlocked', 'A new received date is created automatically for unlocked-pricing receipts.')}
-                        </div>
-                      ) : null}
-                      {/* The field keeps canonical ISO state while the shared
-                          DateEntryInput renders and accepts dd/mm/yyyy. The
-                          former MMDDYYYY code preview was an internal lot key
-                          duplicated beside the real date, so it is not shown. */}
-                      {receivedDateInputVisible ? (
-                        <div>
-                          <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{tr('received_date', 'Received date')}</label>
-                          <DateEntryInput
-                            id="inventory-adjust-received-date"
-                            name="inventory_adjust_received_date"
-                            className="text-sm"
-                            t={t}
-                            ariaLabel={tr('received_date', 'Received date')}
-                            value={adjustForm.received_date}
-                            onChange={iso => setAdjustForm(f => ({ ...f, received_date: iso }))}
-                          />
-                        </div>
-                      ) : null}
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
-              {/* D5a: supplier attribution for the lot this receipt creates or
-                  fills -- the same picker, same rules, as ReceiveBatchModal.
-                  N14-D repair: shown on `isStockIn`, which is EXACTLY the
-                  predicate the receipt gate applies (here and in
-                  lib/stockReceiptGate.ts). It used to be narrowed to "this
-                  submission creates or fills a lot I can name", which needed a
-                  visible batch picker and therefore a branch -- so a locked add
-                  with the branch cleared showed no supplier field at all, while
-                  the Worker (which falls back to the default branch and gates
-                  every add) refused it with supplier_required. A field the gate
-                  demands must never be a field the form declines to render. */}
-              {isStockIn && canEditCosts ? (
-                <SupplierPickerField
-                  idPrefix="inventory-adjust"
-                  value={{ supplierId: adjustForm.supplier_id === '' ? null : adjustForm.supplier_id, supplierName: adjustForm.supplier_name }}
-                  onChange={(next) => setAdjustForm((current) => ({ ...current, supplier_id: next.supplierId ?? '', supplier_name: next.supplierName }))}
-                  tr={tr}
-                  lockedName={adjustLotAttributedName}
-                  hint={selectedAdjustLot && !adjustLotAttributedName
-                    ? tr('supplier_will_fill_lot', 'This received date has no supplier yet — your choice will be recorded on it.')
-                    : null}
-                />
-              ) : null}
-              {/* S4-15/S4-16: what this receipt COST and how it was paid. The
-                  Sessions list has always had a Total cost and a Payment
-                  column; before this block there was nowhere on this form to
-                  answer either, so every receipt taken from the Products
-                  section, the Stock-changes ledger or the Inventory page
-                  landed there blank. Same fields, same defaults and same
-                  credit rule as FastStockInModal, so the two receipt surfaces
-                  record the same facts. Authorized viewers start from the
-                  current catalog mean; editors may enter this delivery's price
-                  without unlocking product-identity pricing. */}
-              {isStockIn && (canViewCosts || canEditCosts) ? (
-                <fieldset disabled={!canEditCosts} className="rounded-xl border border-gray-200 p-3 dark:border-gray-700">
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label htmlFor="inventory-adjust-unit-cost" className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">
-                        {tr('receipt_cost', 'Receipt cost')} ({usdSymbol}/{tr('unit', 'unit')}) <span className="text-red-500" aria-hidden="true">*</span>
-                      </label>
-                      <input
-                        id="inventory-adjust-unit-cost"
-                        name="inventory_adjust_unit_cost"
-                        className="input text-sm"
-                        type="number"
-                        step="any"
-                        min="0"
-                        required
-                        disabled={!canEditCosts || displayedFreeGoods}
-                        value={displayedFreeGoods ? 0 : displayedUnitCost}
-                        onChange={e => { costEntry.write('unitCost', e.target.value); setAdjustForm(f => ({ ...f, unit_cost_usd: e.target.value, free_goods: displayedFreeGoods })) }}
-                      />
-                      {/* N14-D: $0.00 is a claim, not a default. Ticking this is the
-                          only way a zero cost is accepted, here and on the server,
-                          and the declaration is written onto the receipt. */}
-                      <label className="mt-1.5 flex items-center gap-1.5 text-[11px] text-gray-600 dark:text-gray-400">
-                        <input
-                          type="checkbox"
-                          className="h-3.5 w-3.5"
-                          checked={displayedFreeGoods}
-                          onChange={e => { costEntry.write('freeGoods', e.target.checked); if (e.target.checked) costEntry.write('unitCost', '0'); setAdjustForm(f => ({ ...f, free_goods: e.target.checked, unit_cost_usd: e.target.checked ? 0 : f.unit_cost_usd })) }}
-                        />
-                        <span title={tr('stock_receipt_free_goods_hint', 'Tick only when the supplier gave these goods at no cost. The declaration is written onto the receipt.')}>{tr('stock_receipt_free_goods', 'Free')}</span>
-                      </label>
-                    </div>
-                    <div>
-                      <span className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{tr('payment', 'Payment')}</span>
-                      <div className="flex gap-1.5">
-                        {(['paid', 'credit'] as const).map((mode) => (
-                          <button
-                            key={mode}
-                            type="button"
-                            aria-pressed={adjustForm.payment_status === mode}
-                            onClick={() => setAdjustForm(f => ({ ...f, payment_status: mode, credit_due_date: mode === 'credit' ? f.credit_due_date : '' }))}
-                            className={`flex-1 rounded-lg border px-2 py-2 text-xs font-medium transition-colors ${adjustForm.payment_status === mode
-                              ? 'border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
-                              : 'border-gray-200 text-gray-600 dark:border-gray-600 dark:text-gray-400'}`}
-                          >
-                            {mode === 'credit' ? tr('on_credit', 'Not Yet Paid') : tr('paid', 'Paid')}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                  {adjustForm.payment_status === 'credit' ? (
-                    <div className="mt-2">
-                      <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">{tr('due_date', 'Due date')}</label>
-                      <DateEntryInput
-                        id="inventory-adjust-credit-due-date"
-                        name="inventory_adjust_credit_due_date"
-                        className="text-sm"
-                        t={t}
-                        ariaLabel={tr('due_date', 'Due date')}
-                        value={adjustForm.credit_due_date}
-                        onChange={iso => setAdjustForm(f => ({ ...f, credit_due_date: iso }))}
-                      />
-                      {creditDueMissing ? (
-                        <div className="mt-1 text-[11px] text-amber-700 dark:text-amber-300">{tr('fast_stockin_credit_due', 'Not Yet Paid stock needs a due date')}</div>
-                      ) : null}
-                    </div>
-                  ) : null}
-                </fieldset>
-              ) : null}
-              {branchCount > 1 ? (
-                <div>
-                  <label className="text-xs font-medium text-gray-600 dark:text-gray-400 block mb-1">{t('branch')}</label>
-                  <AppSelect
-                    id="inventory-adjust-branch"
-                    name="inventory_adjust_branch"
-                    value={adjustForm.branch_id}
-                    onChange={(nextValue) => setAdjustForm((current) => ({ ...current, branch_id: nextValue }))}
-                    ariaLabel={t('branch') || 'Branch'}
-                    className="w-full"
-                    buttonClassName="h-10 w-full text-sm"
-                    menuClassName="min-w-[13rem]"
-                    optionClassName="text-sm"
-                    options={adjustBranchSelectOptions}
-                  />
-                </div>
-              ) : null}
-              {/* P3-L2: the shared chips + text box; FastStockInModal renders the
-                  same control on every queued line. */}
-              <StockReasonField
-                id="inventory-adjust-reason"
-                name="inventory_adjust_reason"
-                label={t('reason')}
-                value={adjustForm.reason}
-                onChange={(next) => setAdjustForm((current) => ({ ...current, reason: next }))}
-                savedReasons={reasonsByType.adjust}
-                placeholder={t('reason_placeholder')}
-                onManage={() => setReasonManager({ open: true, type: 'adjust' })}
-                manageLabel={tr('manage_reasons', 'Manage reasons')}
-              />
-              {/* The failed-submit reason sits with the values that produced
-                  it, above the actions, so it survives the toast. */}
-              {adjustNotice}
-            </div>
-            {/* S4-20: the actions live at the END of the form -- outside
-                .modal-scroll, so they are the last thing in the panel
-                without being the last thing behind a scroll. There is no
-                second Save beside the ✕ any more. */}
-            <div className="flex flex-shrink-0 gap-2 border-t border-gray-200 p-4 dark:border-gray-700">
-              {isStockIn && !canEditCosts ? <p role="status" className="text-xs text-amber-700">{tr('product_cost_edit_required', 'Cost edit permission is required to receive stock.')}</p> : null}
-              <button type="button" onClick={onAdjust} className={`btn-primary ${TOOLBAR_BUTTON_BASE} flex-1`} disabled={adjustSaving || (isStockIn && (!canEditCosts || (!costEntry.readable && (displayedUnitCost.trim() === '' || (!adjustForm.pricingLocked && (displayedCostUsd.trim() === '' || displayedCostKhr.trim() === ''))))))}>{adjustSaving ? (t('saving') || 'Saving...') : (adjustSubmitLabel || t('save'))}</button>
-              <button type="button" onClick={requestCloseAdjust} className={`btn-secondary ${TOOLBAR_BUTTON_BASE}`} disabled={adjustSaving}>{t('cancel')}</button>
-            </div>
-          </div>
-          <UnsavedChangesPrompt guard={adjustGuard} items={adjustDiscardItems} />
-        </div>
-      ) : null}
-
       {transferModal ? (
         <div className="modal-viewport-safe pointer-events-auto fixed inset-0 z-[1050] flex items-end justify-center overflow-y-auto bg-black/50 sm:items-center sm:p-4" onClick={requestCloseTransfer}>
           <div className="modal-panel-safe flex w-full flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-md sm:rounded-2xl" onClick={(event) => event.stopPropagation()}>
@@ -1005,7 +223,7 @@ export default function InventoryStockModals({
                   className="min-w-0 flex-1"
                   inputClassName="h-9 text-sm"
                   value={transferForm.reason}
-                  options={reasonsByType.transfer.map((entry) => entry.label)}
+                  options={transferReasons.map((entry) => entry.label)}
                   onChange={(next) => setTransferForm((current) => ({ ...current, reason: next }))}
                   ariaLabel={t('reason') || 'Reason'}
                   placeholder={tr('transfer_reason_placeholder', 'Reason for this transfer')}
@@ -1013,7 +231,7 @@ export default function InventoryStockModals({
                 <button
                   type="button"
                   className={toolbarIconButtonClassName}
-                  onClick={() => setReasonManager({ open: true, type: 'transfer' })}
+                  onClick={() => setReasonsManagerOpen(true)}
                   aria-label={tr('manage_reasons', 'Manage reasons')}
                   title={tr('manage_reasons', 'Manage reasons')}
                 >
@@ -1030,16 +248,10 @@ export default function InventoryStockModals({
           <UnsavedChangesPrompt guard={transferGuard} />
         </div>
       ) : null}
-
-      {adjustModal && canViewCosts && costFloatOpen ? (
-        <CostCalculationFloat
-          productId={adjustTargetId as number | string}
-          productName={adjustModal.name}
-          onClose={() => setCostFloatOpen(false)}
-          fmtUSD={fmtUSD}
-          fmtKHR={fmtKHR}
-          t={(key, fallback) => t(key) || fallback}
-        />
+      {reasonsManagerOpen ? (
+        <Suspense fallback={null}>
+          <StockReasonsManagerModal initialTab="transfer" onClose={() => setReasonsManagerOpen(false)} onChanged={reloadTransferReasons} />
+        </Suspense>
       ) : null}
     </>
   )

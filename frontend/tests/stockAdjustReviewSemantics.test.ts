@@ -1,94 +1,53 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { buildStockAdjustQuantityReview, buildStockReceiptPaymentReview } from '../src/utils/stockAdjustReview.ts'
+import ts from 'typescript'
+import { formatBatchReceivedDate } from '../src/utils/batchLabel.ts'
 
-const tr = (_key: string, fallback: string) => fallback
+// P10-19 (owner): "the date in the Not Yet Paid in add stock etc... are not
+// working". The defect was that no stock-receipt confirmation showed the
+// typed Payment / due date back before it committed. The three retired forms
+// each built that row through utils/stockAdjustReview.ts (deleted with them by
+// UI-STOCK-3); the one Stock Session's Review step now states it in its
+// summary (spec 4.3), so the rule is pinned there by running the float's own
+// summary code.
+//
+// Retired with the util: the signed-quantity rows ("Add quantity +4 pcs",
+// "Set total quantity 5 -> 9", "Difference"). The session's Review shows
+// before -> after per line instead (StockSessionReviewStep).
 
-assert.deepEqual(buildStockAdjustQuantityReview({
-  type: 'add', quantity: 4, beforeQuantity: 5, unit: 'pcs', tr,
-}), [{ label: 'Add quantity', value: '+4 pcs' }])
+const read = (rel: string): string => readFileSync(new URL(rel, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
+const float = read('../src/components/inventory/FastStockInModal.tsx')
 
-assert.deepEqual(buildStockAdjustQuantityReview({
-  type: 'remove', quantity: 3, beforeQuantity: 5, unit: 'pcs', tr,
-}), [{ label: 'Remove quantity', value: '−3 pcs' }])
+const start = float.indexOf('  const branchName = branchOptions.find(')
+const end = float.indexOf('})()', float.indexOf('const reviewSummary = (() => {')) + '})()'.length
+assert.ok(start > 0 && end > start, 'the float review summary located')
+const js = ts.transpileModule(`${float.slice(start, end)}\nreturn reviewSummary`, { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText
+type Line = { mode: 'add' | 'remove' | 'set' }
+function summaryFor(input: { lines: Line[]; paymentStatus: 'paid' | 'credit'; creditDueDate: string; paidAmount?: string }): string[] {
+  const bindings = {
+    branchOptions: [{ value: '1', label: 'Store' }], branchId: '1', supplier: { supplierName: 'Supplier A' },
+    received: input.lines, paidAmount: input.paidAmount ?? '', itemsTotal: 12.5, canViewCosts: true, usdSymbol: '$',
+    paymentStatus: input.paymentStatus, creditDueDate: input.creditDueDate, receivedDate: '2026-09-30',
+    tr: (_key: string, fallback: string) => fallback, formatBatchReceivedDate,
+  }
+  return new Function(...Object.keys(bindings), js)(...Object.values(bindings))
+}
 
-assert.deepEqual(buildStockAdjustQuantityReview({
-  type: 'set', quantity: 9, beforeQuantity: 5, unit: 'pcs', tr,
-}), [
-  { label: 'Set total quantity', value: '5 pcs → 9 pcs' },
-  { label: 'Difference', value: '+4 pcs' },
-])
+const credit = summaryFor({ lines: [{ mode: 'add' }], paymentStatus: 'credit', creditDueDate: '2026-10-15' })
+assert.equal(credit.length, 2)
+assert.match(credit[1], /^30\/09\/2026 · Not Yet Paid \$12\.50 · Due 15\/10\/2026$/, 'a Not Yet Paid receipt shows its due date, day-first')
 
-assert.deepEqual(buildStockAdjustQuantityReview({
-  type: 'set', quantity: 2, beforeQuantity: 5, unit: 'pcs', tr,
-}), [
-  { label: 'Set total quantity', value: '5 pcs → 2 pcs' },
-  { label: 'Difference', value: '−3 pcs' },
-])
+const paid = summaryFor({ lines: [{ mode: 'add' }], paymentStatus: 'paid', creditDueDate: '2026-10-15', paidAmount: '10' })
+assert.match(paid[1], /· Paid \$10\.00$/, 'a Paid receipt shows Paid and the typed amount, never a due date')
 
-assert.deepEqual(buildStockAdjustQuantityReview({
-  type: 'set', quantity: 0, beforeQuantity: 0, unit: '', tr,
-}), [
-  { label: 'Set total quantity', value: '0 unit → 0 unit' },
-  { label: 'Difference', value: '0 unit' },
-])
+for (const mode of ['remove', 'set'] as const) {
+  const summary = summaryFor({ lines: [{ mode }], paymentStatus: 'paid', creditDueDate: '' })
+  assert.deepEqual(summary, ['Store · Supplier A'], `a ${mode} session states no payment fact`)
+}
 
-const source = readFileSync(new URL('../src/components/products/forms/StockAdjustModal.tsx', import.meta.url), 'utf8')
-// A lot-scope Set reviews against the received date it targets; every other
-// action (and a branch-total Set) against the authoritative branch quantity.
-assert.match(source, /setPendingAdjust\(\{\s*request: adjustmentRequest,[\s\S]*?beforeQuantity: scopedSet && setScope === 'lot' \? Number\(adjustForm\.batch_quantity\) : currentQuantity,/, 'the review freezes the quantity validation used')
-assert.match(source, /const adjustmentRequest = pendingAdjust\?\.request[\s\S]*?adjustStock\(adjustmentRequest\)/, 'display metadata never leaks into the inventory write payload')
-assert.match(source, /const reqReason = String\(req\.reason \|\| ''\)\.trim\(\)[\s\S]*?items\.push\(\{ label: tr\('reason'/, 'the required reason remains visible in every confirmation')
+assert.match(float, /<StockSessionReviewStep [^\n]*summary=\{reviewSummary\}/, 'the Review step renders that summary')
 
-// P10-19: "the date in the Not Yet Paid in add stock etc... are not
-// working" -- verified against the live code and found no data-loss bug in
-// the wire/state path (frontend field -> stockReceiptWire -> POST
-// /api/inventory/adjust -> cloudflare/src/lib/productBatches.ts's
-// receiveBatchStock -> product_batches.credit_due_date, and the read-back
-// surfaces StockInSessionsSection.tsx/StockChangeSection.tsx display it
-// correctly). The real, provable defect: every stock-receipt confirmation
-// that commits a typed due date failed to show it back before writing --
-// Inventory.tsx's own adjust flow used a BARE window.confirm() with no
-// values at all (not even the quantity), ReceiveBatchModal.tsx's confirm
-// baked the quantity/lot into an English sentence but never mentioned
-// Payment/Due date, and StockAdjustModal.tsx's ConfirmDialog omitted the
-// row entirely. A due date that is never reflected back before commit is
-// indistinguishable, to the person who typed it, from one that "isn't
-// working". These assertions pin the fix: the row exists, is gated on
-// isStockIn (never shown for a remove/set-down), and all three owning
-// files removed their bare native confirm for the adjust/receive flow.
+const inventorySource = read('../src/components/inventory/Inventory.tsx')
+assert.doesNotMatch(inventorySource, /window\.confirm\(adjustConfirmLabel\)/, 'Inventory.tsx never commits a stock change behind a bare native confirm')
 
-assert.deepEqual(
-  buildStockReceiptPaymentReview({ isStockIn: true, paymentStatus: 'credit', creditDueDate: '2026-09-30', tr }),
-  [{ label: 'Payment', value: 'Not Yet Paid · 30/09/2026' }],
-  'a Not Yet Paid receipt review shows the due date, day-first',
-)
-assert.deepEqual(
-  buildStockReceiptPaymentReview({ isStockIn: true, paymentStatus: 'paid', creditDueDate: '', tr }),
-  [{ label: 'Payment', value: 'Paid' }],
-  'a Paid receipt review shows Paid with no due date',
-)
-assert.deepEqual(
-  buildStockReceiptPaymentReview({ isStockIn: false, paymentStatus: 'paid', creditDueDate: '', tr }),
-  [],
-  'a remove/set-down carries no payment fact even though the form default is "paid" underneath',
-)
-assert.deepEqual(
-  buildStockReceiptPaymentReview({ isStockIn: true, paymentStatus: null, creditDueDate: null, tr }),
-  [],
-  'an unset payment status (not on the wire at all) shows nothing rather than a false "Paid"',
-)
-
-const stockAdjustModalSource = source
-assert.match(stockAdjustModalSource, /buildStockReceiptPaymentReview\(\{/, 'StockAdjustModal.tsx review includes the Payment/Due-date row')
-
-const inventorySource = readFileSync(new URL('../src/components/inventory/Inventory.tsx', import.meta.url), 'utf8')
-assert.match(inventorySource, /buildStockReceiptPaymentReview\(\{/, 'Inventory.tsx review includes the Payment/Due-date row')
-assert.doesNotMatch(inventorySource, /window\.confirm\(adjustConfirmLabel\)/, 'Inventory.tsx adjust no longer commits behind a bare native confirm')
-
-const receiveBatchSource = readFileSync(new URL('../src/components/inventory/ReceiveBatchModal.tsx', import.meta.url), 'utf8')
-assert.match(receiveBatchSource, /buildStockReceiptPaymentReview\(\{/, 'ReceiveBatchModal.tsx review includes the Payment/Due-date row')
-assert.doesNotMatch(receiveBatchSource, /window\.confirm\(tr\(\s*\n\s*'confirm_receive_batch_details'/, 'ReceiveBatchModal.tsx receive no longer commits behind a bare native confirm')
-
-console.log('PASS stock adjustment review uses action-specific signed quantities')
-console.log('PASS P10-19: Payment/Due-date is shown in every stock-receipt confirmation before it commits')
+console.log('PASS P10-19: the Stock Session review states Payment / due date before a receipt commits, and none for remove or set')

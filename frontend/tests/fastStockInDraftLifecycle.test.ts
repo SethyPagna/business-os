@@ -3,50 +3,56 @@ import fs from 'node:fs'
 
 import { canRestoreMinimizedWork } from '../src/utils/minimizedWork.ts'
 
-const modal = fs.readFileSync(new URL('../src/components/inventory/FastStockInModal.tsx', import.meta.url), 'utf8')
-const inventory = fs.readFileSync(new URL('../src/components/inventory/Inventory.tsx', import.meta.url), 'utf8')
-const stockChanges = fs.readFileSync(new URL('../src/components/products/StockChangeSection.tsx', import.meta.url), 'utf8')
+// The Stock Session (FastStockInModal, rewritten by UI-STOCK-2): X asks through
+// the shared guard, the minus preserves, Discard clears, and the draft keeps
+// the protected receipt values. Repointed by UI-STOCK-3 from the old modal's
+// shape; the retired pins are listed in the UI-STOCK-3 lane report.
+const read = (rel: string): string => fs.readFileSync(new URL(rel, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
+const modal = read('../src/components/inventory/FastStockInModal.tsx')
+const header = read('../src/components/stock-session/StockSessionHeader.tsx')
+const inventory = read('../src/components/inventory/Inventory.tsx')
+const stockChanges = read('../src/components/products/StockChangeSection.tsx')
 
 assert.match(modal, /import \{[^}]*flushPendingWorkDraft[^}]*\} from '\.\.\/\.\.\/utils\/workDrafts\.ts'/)
 
 assert.match(modal, /import UnsavedChangesPrompt from '\.\.\/shared\/UnsavedChangesPrompt\.tsx'/)
 assert.match(modal, /const closeGuard = useCloseGuard\(\{ dirty: closeDirty \}, discardAndClose, onMinimize \? preserveAndMinimize : undefined\)/, 'dirty X must use the shared Discard / Back / Minimize guard')
-assert.match(modal, /<button type="button" onClick=\{requestCloseIfIdle\}[^>]*aria-label=\{tr\('close'/, 'the header X must request close, not minimize')
-assert.doesNotMatch(modal, /onClick=\{preserveAndMinimize\}[^>]*aria-label=\{tr\('close'/, 'the header X must never call the preserve path')
+// The header X requests close; the minus preserves. Wired in the float, rendered by the header.
+assert.match(modal, /<StockSessionHeader[\s\S]*?onMinimize=\{onMinimize \? preserveAndMinimize : undefined\}[\s\S]*?onClose=\{requestCloseIfIdle\}/, 'the header X must request close, not minimize')
+assert.match(header, /<button\s+type="button"\s+onClick=\{onClose\}[\s\S]*?aria-label=\{tr\('close', 'Close'\)\}/)
+assert.match(header, /<MinimizeButton [^\n]*onMinimize=\{onMinimize\} \/>/, 'the minus calls the direct preserve path')
+assert.doesNotMatch(modal, /onClose=\{preserveAndMinimize\}/, 'the header X must never call the preserve path')
 
 const minimizeStart = modal.indexOf('  const preserveAndMinimize = () => {')
 const minimizeEnd = modal.indexOf('  const discardAndClose', minimizeStart)
 assert.ok(minimizeStart >= 0 && minimizeEnd > minimizeStart)
 const minimizeBody = modal.slice(minimizeStart, minimizeEnd)
-assert.ok(minimizeBody.indexOf('flushPendingWorkDraft(fastStockInDraftKey)') < minimizeBody.indexOf("onMinimize(tr('fast_stockin_title'"), 'minimize must flush before parking the chip')
-assert.ok(minimizeBody.indexOf("onMinimize(tr('fast_stockin_title'") < minimizeBody.indexOf('onClose()'), 'chip must be parked before the modal unmounts')
-assert.match(modal, /<MinimizeButton[\s\S]*?onMinimize=\{preserveAndMinimize\}/, 'the minus calls the direct preserve path')
+assert.ok(minimizeBody.indexOf('flushPendingWorkDraft(fastStockInDraftKey)') >= 0, 'minimize flushes the draft')
+assert.ok(minimizeBody.indexOf('flushPendingWorkDraft(fastStockInDraftKey)') < minimizeBody.indexOf('onMinimize(sessionLabel)'), 'minimize must flush before parking the chip')
+assert.ok(minimizeBody.indexOf('onMinimize(sessionLabel)') < minimizeBody.indexOf('onClose()'), 'chip must be parked before the modal unmounts')
 
 const discardStart = modal.indexOf('  const discardAndClose = () => {')
 const discardEnd = modal.indexOf('  const closeGuard', discardStart)
 const discardBody = modal.slice(discardStart, discardEnd)
-assert.ok(discardBody.indexOf('clearWorkDraft(fastStockInDraftKey)') < discardBody.indexOf('onClose()'), 'Discard clears the exact draft before unmount')
+assert.ok(discardBody.indexOf('clearWorkDraft(fastStockInDraftKey)') >= 0 && discardBody.indexOf('clearWorkDraft(fastStockInDraftKey)') < discardBody.indexOf('onClose()'), 'Discard clears the exact draft before unmount')
 assert.doesNotMatch(discardBody, /onMinimize/, 'Discard must not park a minimized chip')
 
-assert.match(modal, /freeGoods\?: boolean/)
-assert.match(modal, /batchChoice\?: 'new' \| number/)
-assert.match(modal, /setProtectedFreeGoods\]\s*=\s*useState\(Boolean\(draft\?\.freeGoods\)\)/, 'free-goods choice restores into protected draft state')
-assert.match(modal, /setProtectedUnitCost\]\s*=\s*useState\(draft\?\.unitCost \|\| ''\)/, 'receipt cost restores into protected draft state')
-assert.match(modal, /const freeGoods = Boolean\(costEntry\.value\('freeGoods', protectedFreeGoods, false\)\)/, 'restored declaration displays only through the permission-scoped entry')
-assert.match(modal, /pendingBatchRestoreRef = useRef<'new' \| number \| null>\(draft\?\.batchChoice \?\? null\)/, 'a parked lot choice must be revalidated by the existing options effect')
-// The synchronous writer takes its lines as a parameter now (it persists the
-// NEXT queue, in the same tick, before React renders it -- see
-// tests/stockLineRequestIdDurability.test.ts), so only the debounced effect
-// still names `received` directly. Both must still carry the PROTECTED values.
-assert.equal((modal.match(/unitCost: protectedUnitCost, freeGoods: protectedFreeGoods, createPriceVariant, expiryDate, reason, batchChoice, lines/g) || []).length, 2, 'both debounced and synchronous drafts preserve protected receipt values, not the blank revoked display')
-assert.match(modal, /batchChoice, lines: received, scannedBarcode/, 'the debounced autosave still snapshots the live queue')
-assert.match(modal, /const persistSessionDraft = \(lines: ReceivedLine\[\] = received\) =>/, 'the synchronous writer defaults to the live queue when no next queue is given')
+// The receipt cost restores into protected state and displays only through
+// the permission-scoped entry; both draft writers go through ONE builder that
+// stores the protected value, never the blank revoked display.
+assert.match(modal, /const \[protectedUnitCost, setProtectedUnitCost\] = useState\(init\.draft\.unitCost\)/, 'receipt cost restores into protected draft state')
+assert.match(modal, /const unitCost = String\(costEntry\.value\('unitCost', protectedUnitCost, ''\)\)/, 'restored cost displays only through the permission-scoped entry')
+assert.match(modal, /const currentDraft = \(lines: StockSessionLine\[\] = received\): StockSessionDraft => \(\{[\s\S]*?unitCost: protectedUnitCost,[\s\S]*?batchChoice,[\s\S]*?lines,\s*\}\)/)
+assert.match(modal, /useEffect\(\(\) => scheduleWorkDraftWrite<StockSessionDraft>\(fastStockInDraftKey, currentDraft\(\)\)/, 'the debounced autosave snapshots the live queue')
+assert.match(modal, /const persistSessionDraft = \(lines: StockSessionLine\[\] = received\) => \{\s*writeWorkDraft<StockSessionDraft>\(fastStockInDraftKey, currentDraft\(lines\)\)/, 'the synchronous writer defaults to the live queue')
+assert.match(modal, /const pendingBatchRestoreRef = useRef<LotChoice \| null>\(init\.draft\.picked \? init\.draft\.batchChoice : null\)/, 'a parked lot choice must be revalidated by the options effect')
 
-const createStart = modal.indexOf('  const createProductForScannedBarcode = async')
-const createEnd = modal.indexOf('  const addLine', createStart)
-assert.ok(createStart >= 0 && createEnd > createStart)
-assert.doesNotMatch(modal.slice(createStart, createEnd), /setCreateBarcode\(''\)/, 'successful scanner creation must return to ProductForm before ProductForm clears and closes')
-assert.match(modal, /onClose=\{\(\) => setCreateBarcode\(''\)\}/, 'ProductForm owns the scanner child close after its successful clean latch')
+// A product created inside the session: ProductForm owns its own close.
+const holdStart = modal.indexOf('  const holdNewProduct = async')
+const holdEnd = modal.indexOf('  const createHeldProduct', holdStart)
+assert.ok(holdStart >= 0 && holdEnd > holdStart)
+assert.doesNotMatch(modal.slice(holdStart, holdEnd), /setCreateForm\(null\)/, 'a held product must return to ProductForm before ProductForm clears and closes')
+assert.match(modal, /onClose=\{\(\) => setCreateForm\(null\)\}/, 'ProductForm owns the child close after its successful clean latch')
 
 assert.match(inventory, /draftKey: scopedWorkDraftKey\('fast_stockin'\)/)
 assert.match(inventory, /requiredPermission: \{ permissionKey: 'inventory', actionKey: 'adjust' \}/)
@@ -67,4 +73,4 @@ const entry = {
 assert.equal(canRestoreMinimizedWork(entry, () => true), true)
 assert.equal(canRestoreMinimizedWork(entry, () => false), false, 'revoked inventory adjustment must block restore')
 
-console.log('PASS Fast Stock-In draft flush and restore permission contract')
+console.log('PASS Stock Session draft flush and restore permission contract')

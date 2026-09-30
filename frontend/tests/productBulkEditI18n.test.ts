@@ -116,8 +116,11 @@ await runTest('bulk-edit i18n: no sentence-fragment (_prefix/_suffix) keys remai
   }
   // No key anywhere in either pack is a bare sentence-fragment key (the
   // pre-existing, unrelated 'object_prefix' R2 setting is not a sentence
-  // fragment and is excluded).
-  const fragmentKeys = Object.keys(en).filter((k) => (k.endsWith('_prefix') || k.endsWith('_suffix')) && k !== 'object_prefix')
+  // fragment and is excluded). A key that carries its own placeholder in both
+  // packs is a whole phrase Khmer can reorder ("{n} free" / "ឥតគិតថ្លៃ {n}"),
+  // not a fragment glued to a bare number.
+  const wholePhrase = (k: string) => /\{\w+\}/.test(String(en[k])) && /\{\w+\}/.test(String(km[k]))
+  const fragmentKeys = Object.keys(en).filter((k) => (k.endsWith('_prefix') || k.endsWith('_suffix')) && k !== 'object_prefix' && !wholePhrase(k))
   assert.deepEqual(fragmentKeys, [], `unexpected sentence-fragment keys survive in en.json: ${fragmentKeys.join(', ')}`)
 })
 
@@ -194,14 +197,16 @@ await runTest('bulk-edit Stock panel: heading, Quantity/Action labels and Apply 
   assert.doesNotMatch(stockPanel, />Action<\/label>/, 'Action label still hardcoded')
   assert.doesNotMatch(stockPanel, />Apply to \{selectedVisibleCount\} products</, 'Apply button still hardcoded')
 
-  assert.match(stockPanel, /tr\('bulk_edit_adjust_stock_for_count', 'Adjust stock for \{count\} products'\)/)
-  assert.match(stockPanel, /tr\('quantity', 'Quantity'\)/)
-  assert.match(stockPanel, /tr\('action', 'Action'\)/)
+  // Owner, 30 Sep 2026: the panel is one compact row with the names inside
+  // the controls, so the count sentence labels the mode group and the
+  // Quantity caption became the input's own label and placeholder.
+  assert.match(stockPanel, /aria-label=\{tr\('bulk_edit_adjust_stock_for_count', 'Adjust stock for \{count\} products'\)\.replace\('\{count\}', String\(selectedVisibleCount\)\)\}/)
+  assert.match(stockPanel, /aria-label=\{tr\('quantity', 'Quantity'\)\}/)
+  assert.match(stockPanel, /placeholder=\{tr\('quantity', 'Quantity'\)\}/)
   assert.match(stockPanel, /tr\('bulk_edit_apply_to_count', 'Apply to \{count\} products'\)\.replace\('\{count\}', String\(selectedVisibleCount\)\)/)
-  // Add/Remove/Set action chips were already translated before this lane.
-  assert.match(stockPanel, /t\('add'\)\s*\|\|\s*'Add'/)
-  assert.match(stockPanel, /t\('remove'\)/)
-  assert.match(stockPanel, /t\('set'\)/)
+  // Add/Remove/Set use the stock words (Remove = ដក, never the delete word).
+  assert.match(stockPanel, /tr\(`adjust_\$\{mode\}`, mode === 'add' \? 'Add' : mode === 'remove' \? 'Remove' : 'Set'\)/)
+  assert.doesNotMatch(stockPanel, /t\('remove'\)/)
 })
 
 await runTest('bulk-edit Move-stock panel: label, options, button and error toast are translated', () => {

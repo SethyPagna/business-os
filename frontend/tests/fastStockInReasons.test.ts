@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import ts from 'typescript'
 import { stockLineReason } from '../src/utils/stockLineReason.ts'
+import { buildStockLineRequest, type StockSessionLine } from '../src/utils/stockSessionDraft.ts'
 
 // P3-L2 (2026-09-14): "the add stock, remove, and set stock doesn't have
 // reasons. it was removed. bring that back... and they didn't have like per
@@ -14,19 +14,23 @@ import { stockLineReason } from '../src/utils/stockLineReason.ts'
 // carries its own reason -- the saved-reason chips plus free text the adjust
 // form already had -- frozen with the line and stored as typed.
 //
+// UI-STOCK-2/3 (30 Sep 2026): the float is the one Stock Session; its line
+// writer lives in utils/stockSessionDraft.ts and its reason row in
+// StockSessionLineEntry. The Add/Create Products session, Receive stock,
+// Bulk add stock and the Inventory adjust form were retired into it.
+//
 // Run: node tests/fastStockInReasons.test.ts
 
 const read = (rel: string): string => readFileSync(new URL(rel, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 const modal = read('../src/components/inventory/FastStockInModal.tsx')
-const adjustForm = read('../src/components/inventory/InventoryStockModals.tsx')
+const lineEntry = read('../src/components/stock-session/StockSessionLineEntry.tsx')
+const items = read('../src/components/stock-session/StockSessionItems.tsx')
+const draftModule = read('../src/utils/stockSessionDraft.ts')
 const field = read('../src/components/shared/StockReasonField.tsx')
 const transport = read('../src/api/batchesTransport.ts')
 const batchesRoute = read('../../cloudflare/src/routes/batches.ts')
 const inventoryRoute = read('../../cloudflare/src/routes/inventory.ts')
 const sessionsSection = read('../src/components/products/StockInSessionsSection.tsx')
-const productsSession = read('../src/components/products/CreateProductsSessionModal.tsx')
-const receiveModal = read('../src/components/inventory/ReceiveBatchModal.tsx')
-const bulkAdd = read('../src/components/products/forms/BulkAddStockModal.tsx')
 const loader = read('../src/utils/useSavedStockReasons.ts')
 const en = JSON.parse(read('../src/lang/en.json')) as Record<string, string>
 const km = JSON.parse(read('../src/lang/km.json')) as Record<string, string>
@@ -63,159 +67,75 @@ runTest('a blank reason falls back to the label the write path used before, per 
 })
 
 runTest('every queued line freezes its reason and every adjust write sends it', () => {
-  assert.match(modal, /interface ReceivedLine \{[^]*?\n  reason: string\n[^]*?\n\}/)
-  assert.match(modal, /const next: ReceivedLine = \{[^]*?\n\s+reason: reason\.trim\(\),\n[^]*?\}/)
-  assert.match(modal, /function editLine\(line: ReceivedLine\) \{[^]*?setReason\(line\.reason\)/, 'reopening a queued line restores its reason')
-  // Remove, set and tagged restock use adjust; cost-only variants no longer
-  // fork another product. Execute every current request branch instead of
-  // counting the obsolete fourth branch's source text.
-  const ast = ts.createSourceFile('FastStockInModal.tsx', modal, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
-  let expression = ''
-  function visit(node: ts.Node): void {
-    if (ts.isVariableDeclaration(node) && node.name.getText(ast) === 'buildLineRequest') expression = node.initializer!.getText(ast)
-    ts.forEachChild(node, visit)
-  }
-  visit(ast)
-  assert.ok(expression)
-  const code = ts.transpileModule(`const build = ${expression}`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
-  const context = { stockLineReason, tr, canEditCosts: true, branchId: '1', receivedDate: '2026-09-20', supplier: { supplierId: 2, supplierName: 'Supplier' }, paymentStatus: 'paid', creditDueDate: '', sessionIdRef: { current: 'session' } }
-  const build = new Function(...Object.keys(context), `${code}; return build`)(...Object.values(context))
+  assert.match(draftModule, /export type StockSessionLine = \{[^]*?\n  reason: string\n[^]*?\n\}/)
+  assert.match(modal, /\n\s+reason: reason\.trim\(\),\n/, 'a queued line freezes the typed reason')
+  assert.match(modal, /setReason\(line\.reason\)/, 'reopening a queued line restores its reason')
+  assert.match(modal, /reasonFor: \(entry\) => stockLineReason\(entry, tr\)/, 'the writer reads the one reason rule')
+  // Execute the real line writer for every mode, tag and reason shape.
   for (const mode of ['remove', 'set', 'add'] as const) {
     for (const conditionTag of ['', 'damaged']) {
       for (const reason of ['  Line-specific reason  ', '']) {
-        const line = { key: 'line', product: { id: 7 }, mode, conditionTag, quantity: 2, unitCost: '1.2345', expiryDate: '', batchChoice: 'new', freeGoods: false, reason, createPriceVariant: true }
-        const request = build(line)
+        const line = {
+          key: 'line', requestId: 'req', product: { id: 7, name: 'Serum' }, productName: 'Serum', mode, conditionTag,
+          quantity: 2, freeQuantity: 0, unitCost: '1.2345', sellingPrice: '', expiryDate: '', batchChoice: 'new',
+          batchLabel: '', freeGoods: false, reason, createdProduct: false, status: 'queued', detail: '',
+        } as unknown as StockSessionLine
+        const request = buildStockLineRequest(line, {
+          branchId: '1', receivedDate: '2026-09-20', supplier: { supplierId: 2, supplierName: 'Supplier' },
+          paymentStatus: 'paid', creditDueDate: '', sessionId: 1, canEditPrice: false, reasonFor: (entry) => stockLineReason(entry, tr),
+        })
+        const body = request.body as Record<string, unknown>
         const isPlainReceipt = mode === 'add' && !conditionTag
         assert.equal(request.wire, isPlainReceipt ? 'receive' : 'adjust')
-        assert.equal(request.body.reason, isPlainReceipt ? reason.trim() || null : stockLineReason(line, tr))
-        assert.equal(request.body.productId, 7, 'a stale cost-variant flag cannot fork product identity')
+        // The plain add sends the text or null so the Worker keeps its lot label.
+        assert.equal(body.reason, isPlainReceipt ? reason.trim() || null : stockLineReason(line, tr))
+        assert.equal(body.productId, 7)
       }
     }
   }
   assert.doesNotMatch(modal, /reason: tr\('stock_change_session_reason'/, 'no hardcoded reason is left on a write')
   assert.doesNotMatch(modal, /reason: tr\('stock_in_session_reason'/, 'no hardcoded reason is left on a write')
-  // the plain add sends the text or null so the Worker keeps its lot label.
-  // P4-B: the body is built once in buildLineRequest and sent either through
-  // receiveBatchStock (404 fallback) or the batched commit endpoint -- both
-  // read this same 'receive' wire branch, not a per-call-site copy.
-  assert.match(modal, /wire: 'receive', body: \{[^]*?reason: line\.reason\.trim\(\) \|\| null,[^]*?\}/)
-  // the draft carries it across reload like every other in-progress value
-  assert.match(modal, /type FastStockInDraft = \{[^]*?\n  reason\?: string\n/)
-  assert.match(modal, /const \[reason, setReason\] = useState\(draft\?\.reason \|\| ''\)/)
-  // an older draft's lines without the field become blank-reason lines, not undefined
-  assert.match(modal, /reason: line\.reason \|\| ''/)
+  // The draft carries it across reload; an older draft's line without it becomes blank, not undefined.
+  assert.match(draftModule, /export type StockSessionDraft = \{[^]*?\n  reason: string\n/)
+  assert.match(draftModule, /reason: asString\(line\.reason\)/)
+  assert.match(draftModule, /reason: asString\(draft\.reason\)/)
 })
 
-runTest('the fast flow and the adjust form share ONE reason control, fed by the saved-reason catalog', () => {
-  assert.match(modal, /import StockReasonField from '\.\.\/shared\/StockReasonField\.tsx'/)
-  assert.match(modal, /import \{ useSavedStockReasons \} from '\.\.\/\.\.\/utils\/useSavedStockReasons\.ts'/)
-  assert.match(modal, /const savedReasons = useSavedStockReasons\(\)/)
+runTest('the Stock Session has ONE reason control, fed by the saved-reason catalog', () => {
+  assert.match(lineEntry, /import StockReasonField from '\.\.\/shared\/StockReasonField\.tsx'/)
+  assert.match(modal, /import \{ useSavedStockReasonCatalog \} from '\.\.\/\.\.\/utils\/useSavedStockReasons\.ts'/)
+  assert.match(modal, /const \{ reasons: savedReasons, reload: reloadReasons \} = useSavedStockReasonCatalog\('adjust'\)/)
   // The catalog fetch + type filter + { id, label } mapping lives in ONE
   // place; no surface keeps its own copy of it.
   assert.equal((loader.match(/item\?\.type === type/g) || []).length, 1, 'the adjust-type filter is written once')
-  assert.match(loader, /export function useSavedStockReasons\(type = 'adjust'\)/, 'adjust is the default catalog, same as the adjust form')
-  for (const surface of [modal, productsSession, receiveModal]) {
+  assert.match(loader, /export function useSavedStockReasons\(type = 'adjust'\)/, 'adjust is the default catalog')
+  for (const surface of [modal, lineEntry]) {
     assert.doesNotMatch(surface, /getInventoryReasons\(\)/, 'no surface re-implements the catalog read')
+    assert.doesNotMatch(surface, /savedReasons\.map/, 'no second copy of the reason list markup')
   }
-  assert.match(modal, /<StockReasonField\n\s+id="fast-stockin-reason"[^]*?onEnter=\{addLine\}[^]*?savedReasons=\{savedReasons\}/, 'Enter in the reason box queues the line')
-  assert.match(adjustForm, /<StockReasonField\n\s+id="inventory-adjust-reason"[^]*?savedReasons=\{reasonsByType\.adjust\}/)
-  // no second copy of the chip markup survives in either surface
-  assert.doesNotMatch(adjustForm, /reasonsByType\.adjust\.map/)
-  // Bulk add stock is the fourth writer of an adjust reason. It hand-rolled
-  // its own chips and its own <input> with no maxLength and a placeholder
-  // that disagreed with the pack's -- the exact drift this control exists to
-  // stop. It renders the shared one now, same as the other three.
-  assert.match(bulkAdd, /<StockReasonField\n\s+id="bulk-add-stock-reason"[^]*?savedReasons=\{reasonsByType\.adjust\}/)
-  assert.doesNotMatch(bulkAdd, /reasonsByType\.adjust\.map/)
-  assert.doesNotMatch(bulkAdd, /<input[^>]*id="bulk-add-stock-reason"/, 'no second copy of the reason input survives')
-  assert.doesNotMatch(modal, /savedReasons\.map/)
-  assert.equal((field.match(/savedReasons\.map/g) || []).length, 1)
-  assert.match(field, /aria-pressed=\{value === entry\.label\}/)
+  assert.match(lineEntry, /<StockReasonField\n\s+variant="compact"\n\s+id="stock-session-reason"[^]*?onEnter=\{onAdd\}[^]*?savedReasons=\{savedReasons\}/, 'Enter in the reason box queues the line')
+  assert.equal((lineEntry.match(/<StockReasonField/g) || []).length, 1)
   // The box stops BELOW the Worker cap (STOCK_REASON_MAX_LENGTH in
   // cloudflare/src/lib/stockReason.ts) on purpose: the headroom is what lets
   // undo/redo prepend 'Undo: ' to a full-length reason and still be accepted
-  // by the same wire that stored it. Close the gap and every undo of a
-  // maximum-length reason starts failing.
-  const boxCap = Number((field.match(/maxLength=\{(\d+)\}/) || [])[1])
+  // by the same wire that stored it.
+  const boxCap = Number((field.match(/const REASON_MAX_LENGTH = (\d+)/) || [])[1])
   const workerCap = Number((read('../../cloudflare/src/lib/stockReason.ts').match(/STOCK_REASON_MAX_LENGTH = (\d+)/) || [])[1])
   assert.ok(boxCap > 0 && workerCap > 0, 'both caps must be readable')
   assert.ok(boxCap + 'Undo: '.length <= workerCap, `the reason box (${boxCap}) must leave room for the undo prefix under the Worker cap (${workerCap})`)
-  // the explanation is a tooltip, not prose in the form
-  assert.match(modal, /tr\('fast_stock_reason_hint'/)
-  assert.doesNotMatch(modal, /<p[^>]*>\{tr\('fast_stock_reason_hint'/)
-  for (const key of ['fast_stock_reason_hint', 'reason', 'reason_placeholder']) {
+  assert.match(field, /onChange\(next\.slice\(0, REASON_MAX_LENGTH\)\)/, 'the compact box enforces the same cap')
+  for (const key of ['reason', 'reason_placeholder']) {
     assert.equal(typeof en[key], 'string', `en.${key}`)
     assert.equal(typeof km[key], 'string', `km.${key}`)
     assert.match(km[key], /[ក-៿]/, `km.${key} is Khmer`)
   }
-  assert.match(km.fast_stock_reason_hint, /មូលហេតុ|វគ្គ/, 'the Khmer hint uses the glossary words')
 })
 
 runTest('the queued line and the sessions list show the reason where the line is', () => {
-  assert.match(modal, /\{line\.reason \? <span className="block break-words[^"]*">\{line\.reason\}<\/span> : null\}/, 'a queued line shows its reason, wrapping rather than truncating')
+  assert.match(items, /\{line\.reason \? <span className="block break-words[^"]*">\{line\.reason\}<\/span> : null\}/, 'a queued item shows its reason, wrapping rather than truncating')
   assert.match(sessionsSection, /tr\('reason', 'Reason'\)/)
   // clicking a session line reveals its reason in the line detail panel
   assert.match(sessionsSection, /selectedLine\.reason/, 'the clicked line detail carries the reason')
-})
-
-runTest("the Add/Create Products session asks for a reason and its payload builder sends it", () => {
-  // The second session surface: the Worker has taken a session-default and a
-  // per-line reason since the line-reason commit, but this modal produced
-  // neither, so every product added from the Products page still landed on
-  // the generated 'Stock-in session <id>' label.
-  assert.match(productsSession, /import StockReasonField from '\.\.\/shared\/StockReasonField\.tsx'/)
-  assert.match(productsSession, /import \{ useSavedStockReasons \} from '\.\.\/\.\.\/utils\/useSavedStockReasons\.ts'/)
-  assert.match(productsSession, /<StockReasonField\n\s+id="create-products-reason"[^]*?savedReasons=\{savedReasons\}/, 'the shared control, in the shared details')
-  assert.doesNotMatch(productsSession, /savedReasons\.map/, 'no second copy of the chip markup')
-  // Frozen per line exactly like the free-goods declaration, so editing the
-  // shared details later only changes lines queued after the edit.
-  // P10-18 adds the optional payment intersection and captures payment beside
-  // the frozen reason. Check each row constructor, not neighboring fields:
-  // otherwise adding payment fields looks like losing a movement reason.
-  assert.match(productsSession, /type SessionLine = SessionPayment & \{[^]*?\n  reason: string\n[^]*?\n\}/)
-  const rowConstructors = [...productsSession.matchAll(/const row: SessionLine = \{([^]*?)\n\s*\}/g)]
-  assert.equal(rowConstructors.length, 3, 'existing receipt, review create and atomic create each construct a row')
-  for (const constructor of rowConstructors) {
-    assert.match(constructor[1], /\breason: reason\.trim\(\)/, 'every row freezes its own typed reason')
-  }
-  // The payload builder sends it, and only when there is one -- a session
-  // without a reason must serialize exactly as before (idempotency).
-  assert.match(productsSession, /\.\.\.\(line\.reason \? \{ reason: line\.reason \} : \{\}\),/)
-  // The draft carries it across a reload like every other shared detail.
-  assert.match(productsSession, /type UnifiedSessionDraft = [^]*?\n  reason\?: string\n/)
-  assert.match(productsSession, /const \[reason, setReason\] = useState\(draft\?\.reason \|\| ''\)/)
-  // Visible where the line is, same as the fast flow's queue.
-  assert.match(productsSession, /\{row\.reason \? <span className="block break-words text-\[10px\] text-gray-500 dark:text-gray-400">\{row\.reason\}<\/span> : null\}/)
-})
-
-runTest("the branch Receive stock modal asks for a reason and sends it", () => {
-  // The third receipt surface (Branches hub -> Receive stock). POST /api/batches
-  // has taken an optional reason since the fast-flow commit; this modal is the
-  // other caller of that wire and had no way to give one.
-  assert.match(receiveModal, /import StockReasonField from '\.\.\/shared\/StockReasonField\.tsx'/)
-  assert.match(receiveModal, /import \{ useSavedStockReasons \} from '\.\.\/\.\.\/utils\/useSavedStockReasons\.ts'/)
-  assert.match(receiveModal, /<StockReasonField\n\s+id="receive-batch-reason"[^]*?savedReasons=\{savedReasons\}/)
-  assert.doesNotMatch(receiveModal, /savedReasons\.map/, 'no second copy of the chip markup')
-  // Blank sends null so the Worker keeps its own "Stock received (<lot>)" label.
-  // P10-19 inserted a confirm-review step: the payload is now built into
-  // `pendingReceipt.request` at submit time and sent later as
-  // `receiveBatchStock(pending.request)`, rather than inline at the call
-  // site. Assert both halves instead of the single inline call the old
-  // regex pinned, so the property (reason still rides the wire, blank -> null)
-  // survives that split.
-  assert.match(receiveModal, /setPendingReceipt\(\{[^]*?reason: reason\.trim\(\) \|\| null,[^]*?\}\)/)
-  assert.match(receiveModal, /await receiveBatchStock\(pending\.request as any\)/)
-  // In-progress work: dirty guard, draft write, draft restore, and the reset
-  // that runs when another product is opened -- same as every other field.
-  assert.match(receiveModal, /notes !== '' \|\| reason !== ''/)
-  assert.match(receiveModal, /scheduleWorkDraftWrite\(draftKey, \{ quantity, receivedDate, expiryDate, notes, reason,/)
-  assert.match(receiveModal, /if \(draft\.reason !== undefined\) setReason\(draft\.reason\)/)
-  assert.match(receiveModal, /setNotes\(''\)\r?\n\s+setReason\(''\)/)
-  for (const key of ['receive_batch_reason_hint']) {
-    assert.equal(typeof en[key], 'string', `en.${key}`)
-    assert.equal(typeof km[key], 'string', `km.${key}`)
-    assert.match(km[key], /[ក-៿]/, `km.${key} is Khmer`)
-  }
 })
 
 runTest('Worker parity: /inventory/adjust still refuses a missing reason; /batches takes an optional one', () => {

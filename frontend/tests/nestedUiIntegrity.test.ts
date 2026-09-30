@@ -158,7 +158,9 @@ for (const [tab, fetcher] of [
   assert.match(source, /<RenameCascadeModal request=\{renameRequest\}/, `${tab} must mount the prompt`)
 }
 
-for (const file of ['components/products/forms/BulkAddStockModal.tsx', 'components/promotions/PromotionsPage.tsx']) {
+// The Stock Session float took over BulkAddStockModal's work (retired by
+// UI-STOCK-3) and is the hand-rolled dialog that must keep these guarantees.
+for (const file of ['components/inventory/FastStockInModal.tsx', 'components/promotions/PromotionsPage.tsx']) {
   const source = read(file)
   assert.match(source, /modal-viewport-safe/, `${file}: nested dialog viewport must respect safe areas`)
   assert.match(source, /modal-panel-safe/, `${file}: nested dialog must stay within the dynamic viewport`)

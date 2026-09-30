@@ -6,13 +6,8 @@ import { getStockLedger, getStockLedgerMovementBalance } from '../../api/product
 import { revertStockMovement, editStockMovementReason } from '../../api/inventoryWriteTransport.ts'
 import { stockRevertErrorText } from '../../utils/stockRevertError.ts'
 
-// The full-featured adjust modal (batch, price-lock, reasons) reused from the
-// Inventory/Branches page -- lazy so its weight only loads when the person
-// actually opens the Adjust menu, not on every Stock Changes view.
-const StockAdjustModal = lazy(() => import('./forms/StockAdjustModal'))
-// The shipment receiver, same one the Branches page offers -- reachable from
-// this section's Adjust menu too (user, Aug 31: "for fast stock in do that
-// for products pages and all sections").
+// The one Stock Session float, opened by the header Adjust and by resuming a
+// failed attempt; lazy so it loads only when opened.
 const FastStockInModal = lazy(() => import('../inventory/FastStockInModal'))
 import type { StockMode } from '../inventory/FastStockInModal'
 // The shared range step in front of an export -- defaults to this section's
@@ -38,6 +33,8 @@ import ProductNameRail from '../shared/ProductNameRail'
 import CopyableId from '../shared/CopyableId.tsx'
 import Pencil from 'lucide-react/dist/esm/icons/pencil.js'
 import Undo2 from 'lucide-react/dist/esm/icons/undo-2.js'
+import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw.js'
+import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
 import { todayStr } from '../../utils/dateHelpers.ts'
 import { useDebouncedValue } from '../../utils/useDebouncedValue.ts'
 import {
@@ -51,7 +48,7 @@ import {
   type MinimizedWorkEntry,
 } from '../../utils/minimizedWork.ts'
 import { scopedWorkDraftKey } from '../../utils/workDrafts.ts'
-import { STOCK_ADJUST_RESTORE_HOST } from '../../utils/stockAdjustDraft.ts'
+import { stockSessionHasItems } from '../../utils/stockSessionBusy.ts'
 import { fmtDate, fmtClock24, fmtDateTime24 } from '../../utils/formatters'
 import { batchDisplayLabel } from '../../utils/batchLabel.ts'
 import { buildHistoryRowModel, formatHistoryReference, historyExportField } from '../../utils/historyRowModel.ts'
@@ -202,12 +199,17 @@ type BranchOption = { id: number; name: string }
 // info/History/Manage (user, Aug 31) instead of in this section's body. The
 // modals and the ledger's live filter state stay in this component -- only the
 // trigger UI is lifted, via these stable callbacks.
+type FastStockInResumeLine = {
+  product: { id: number | string; name: string }
+  quantity: number
+  mode: StockMode
+  batchId: number | null
+  reason: string
+}
+
 export type StockChangeHeaderActions = {
   canAdjust: boolean
-  // N27: Add / Remove / Adjust quantity all open the fast flow in that mode.
-  // The one-by-one StockAdjustModal is no longer a header entry point; it
-  // remains only for resuming a failed attempt (below) and the per-row list
-  // adjust.
+  // Opens the Stock Session; the header Adjust opens it in Add.
   openFastStockIn: (mode?: StockMode) => void
   runExport: () => void
 }
@@ -277,12 +279,10 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
   // U-records: the reason edit awaiting review in the shared ConfirmDialog
   // (never native confirm()), holding the recorded and the typed reason.
   const [reasonReview, setReasonReview] = useState<{ before: string; after: string } | null>(null)
-  // adjustType now opens StockAdjustModal ONLY to resume a failed attempt
-  // (resumeFailedAttempt below). The header's Adjust menu (Products.tsx)
-  // opens the fast flow in the chosen mode instead.
-  const [adjustType, setAdjustType] = useState<'add' | 'remove' | 'set' | null>(null)
   const [fastStockInOpen, setFastStockInOpen] = useState(false)
   const [fastStockInMode, setFastStockInMode] = useState<StockMode>('add')
+  // A resumed failed attempt opens the session with its lines queued.
+  const [fastStockInResume, setFastStockInResume] = useState<{ lines: FastStockInResumeLine[]; branchId: number | null; attemptId: string } | null>(null)
   const restoringFastStockInRef = useRef<MinimizedWorkEntry | null>(null)
   const [exportRange, setExportRange] = useState<DateTimeRange | null>(null)
   // Unsaved failed adjustments (user, Sep 3: "also show the failed in the
@@ -293,9 +293,8 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
   const failedStorage = useMemo(() => browserStockStorage(), [])
   const failedUserKey = app.user?.id ?? app.user?.username ?? null
   const [failedAttempts, setFailedAttempts] = useState<FailedStockAttempt[]>([])
-  const [resumeAttempt, setResumeAttempt] = useState<FailedStockAttempt | null>(null)
   const requestRef = useRef(0)
-  const stockWorkflowOpen = adjustType !== null || fastStockInOpen
+  const stockWorkflowOpen = fastStockInOpen
 
   // A hardware scanner behaves like a keyboard. Blur and disable the ledger
   // search before opening an adjustment workflow so its barcode cannot be
@@ -306,6 +305,7 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
   }, [])
   const openFastStockIn = useCallback((nextMode: StockMode = 'add') => {
     blurLedgerSearch()
+    setFastStockInResume(null)
     setFastStockInMode(nextMode)
     setFastStockInOpen(true)
   }, [blurLedgerSearch])
@@ -392,13 +392,27 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
     emitFailedAttemptsChanged()
   }, [failedStorage, failedUserKey])
 
-  // Reopen a failed attempt prefilled with exactly the values that failed.
+  // Reopen a failed attempt in its mode with its lines queued as Items. It
+  // stays listed until that session writes; an open session with items of its
+  // own reopens as it is (the float ignores new lines then).
   const resumeFailedAttempt = useCallback((attempt: FailedStockAttempt) => {
-    const row = attempt.rows[0]
-    if (!row) return
+    const first = attempt.rows[0]
+    if (!first) return
+    const mode: StockMode = first.type === 'remove' || first.type === 'set' ? first.type : 'add'
+    const lines = attempt.rows.flatMap((row) => (row.productId != null && (row.type === mode || (mode === 'add' && row.type !== 'remove' && row.type !== 'set'))
+      ? [{
+          product: { id: row.productId, name: row.productName },
+          quantity: Number(row.quantity) || 0,
+          mode,
+          batchId: Number(row.batchId) > 0 ? Number(row.batchId) : null,
+          reason: row.reason || '',
+        }]
+      : []))
+    if (!lines.length) return
     blurLedgerSearch()
-    setResumeAttempt(attempt)
-    setAdjustType(row.type === 'remove' || row.type === 'set' ? row.type : 'add')
+    setFastStockInResume(stockSessionHasItems() ? null : { lines, branchId: first.branchId ?? null, attemptId: attempt.id })
+    setFastStockInMode(mode)
+    setFastStockInOpen(true)
   }, [blurLedgerSearch])
 
   useEffect(() => {
@@ -1022,33 +1036,37 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
               key={attempt.id}
               className="rounded-xl border border-rose-300 bg-rose-50/70 px-3 py-2 dark:border-rose-800 dark:bg-rose-950/30"
             >
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="rounded bg-rose-600 px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-white">
+              <div className="flex min-w-0 items-center gap-1.5">
+                <span
+                  className="rounded bg-rose-600 px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-white"
+                  title={tr(t, 'unsaved_not_applied', 'Unsaved — not applied')}
+                >
                   {tr(t, 'failed', 'Failed')}
                 </span>
-                <span className="rounded border border-rose-300 px-1.5 py-0.5 text-[11px] font-semibold text-rose-700 dark:border-rose-700 dark:text-rose-300">
-                  {tr(t, 'unsaved_not_applied', 'Unsaved — not applied')}
-                </span>
-                <span className="text-xs tabular-nums text-gray-500">{fmtDateTime24(attempt.createdAt)}</span>
+                <span className="min-w-0 truncate text-xs tabular-nums text-gray-500">{fmtDateTime24(attempt.createdAt)}</span>
                 <InfoHint
                   text={tr(t, 'failed_attempt_hint', 'This change never reached the server, so no stock moved. Fix it and retry, or discard it.')}
                   label={tr(t, 'unsaved_not_applied', 'Unsaved — not applied')}
                 />
-                <div className="ml-auto flex items-center gap-1.5">
+                <div className="ml-auto flex shrink-0 items-center gap-1">
                   <button
                     type="button"
-                    className="rounded-lg bg-rose-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-rose-700"
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-rose-600 text-white hover:bg-rose-700 disabled:opacity-50"
                     onClick={() => resumeFailedAttempt(attempt)}
                     disabled={!canAdjust}
+                    aria-label={tr(t, 'fix_and_retry', 'Fix and retry')}
+                    title={tr(t, 'fix_and_retry', 'Fix and retry')}
                   >
-                    {tr(t, 'fix_and_retry', 'Fix and retry')}
+                    <RotateCcw className="h-4 w-4" aria-hidden="true" />
                   </button>
                   <button
                     type="button"
-                    className="rounded-lg border border-gray-300 px-2.5 py-1 text-xs text-gray-600 hover:bg-white dark:border-gray-600 dark:text-gray-300"
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-gray-500 hover:bg-white hover:text-rose-600 dark:text-gray-300"
                     onClick={() => discardFailedAttempt(attempt.id)}
+                    aria-label={tr(t, 'discard', 'Discard')}
+                    title={tr(t, 'discard', 'Discard')}
                   >
-                    {tr(t, 'discard', 'Discard')}
+                    <Trash2 className="h-4 w-4" aria-hidden="true" />
                   </button>
                 </div>
               </div>
@@ -1321,36 +1339,6 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
         />
       ) : null}
 
-      {adjustType ? (
-        <Suspense fallback={null}>
-          <StockAdjustModal
-            initialType={adjustType}
-            // Resuming an unsaved failure: the product AND every typed value
-            // come back with it, so nothing has to be retyped.
-            initialProduct={resumeAttempt?.rows[0]?.productId != null
-              ? { id: resumeAttempt.rows[0].productId, name: resumeAttempt.rows[0].productName }
-              : null}
-            resumeRow={resumeAttempt?.rows[0] || null}
-            resumeAttemptId={resumeAttempt?.id || null}
-            t={t}
-            onClose={() => { setAdjustType(null); setResumeAttempt(null) }}
-            onDone={() => { setAdjustType(null); setResumeAttempt(null); void load() }}
-            onMinimize={(label: string, detail: { draftKey: string; productId: string | number }) => {
-              minimizeWork({
-                key: `stock-adjust-${String(detail.productId)}`,
-                kind: 'stock_adjust',
-                ...STOCK_ADJUST_RESTORE_HOST,
-                label,
-                payload: { productId: detail.productId },
-                draftKey: detail.draftKey,
-                requiredPermission: { permissionKey: 'inventory', actionKey: 'adjust' },
-              })
-              app.notify(tr(t, 'minimized_to_chip', 'Minimized. Pick it back up from the chip — nothing was lost.'), 'info')
-            }}
-          />
-        </Suspense>
-      ) : null}
-
       {exportRange ? (
         <Suspense fallback={null}>
           <ExportRangeDialog
@@ -1368,12 +1356,16 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
         <Suspense fallback={null}>
           <FastStockInModal
             branchOptions={branches.map((branch) => ({ value: String(branch.id), label: branch.name || String(branch.id) }))}
-            defaultBranchId={branchId || null}
+            defaultBranchId={fastStockInResume?.branchId || branchId || null}
             initialMode={fastStockInMode}
+            initialLines={fastStockInResume?.lines}
             tr={(key: string, fallback = key) => tr(t, key, fallback)}
             notify={(message: string, kind?: string) => app.notify(message, kind)}
-            onClose={() => setFastStockInOpen(false)}
-            onDone={() => { void load() }}
+            onClose={() => { setFastStockInOpen(false); setFastStockInResume(null) }}
+            onDone={() => {
+              if (fastStockInResume) discardFailedAttempt(fastStockInResume.attemptId)
+              void load()
+            }}
             onMinimize={(label: string) => {
               minimizeWork({
                 key: 'fast-stockin',

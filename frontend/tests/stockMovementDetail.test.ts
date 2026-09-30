@@ -89,7 +89,7 @@ test('frontend movement allowlists stay in source parity with the Worker', () =>
 test('detail uses a compact two-column identity and action composition', () => {
   const source = readFileSync(new URL('../src/components/products/StockChangeSection.tsx', import.meta.url), 'utf8')
   const start = source.indexOf('{detail ? (')
-  const end = source.indexOf('{adjustType ? (', start)
+  const end = source.indexOf('{exportRange ? (', start)
   const detail = source.slice(start, end)
   assert.ok(start > 0 && end > start, 'detail modal located')
   assert.match(detail, /<Modal title=\{`\$\{detail\.product_name\}`\}/)
@@ -103,7 +103,7 @@ test('detail uses a compact two-column identity and action composition', () => {
 test('detail labels missing action costs honestly and gates receipt-only lot accounting', () => {
   const source = readFileSync(new URL('../src/components/products/StockChangeSection.tsx', import.meta.url), 'utf8')
   const start = source.indexOf('{detail ? (')
-  const end = source.indexOf('{adjustType ? (', start)
+  const end = source.indexOf('{exportRange ? (', start)
   const detail = source.slice(start, end)
   assert.match(detail, /recordedCostLabel\(detailCosts\?\.unitUsd/)
   assert.match(detail, /recordedCostLabel\(detailCosts\?\.totalUsd/)
@@ -117,7 +117,7 @@ test('detail labels missing action costs honestly and gates receipt-only lot acc
 test('detail keeps Revert explicit on mobile without the redundant info control', () => {
   const source = readFileSync(new URL('../src/components/products/StockChangeSection.tsx', import.meta.url), 'utf8')
   const start = source.indexOf('{detail ? (')
-  const end = source.indexOf('{adjustType ? (', start)
+  const end = source.indexOf('{exportRange ? (', start)
   const detail = source.slice(start, end)
   const revertButtons = detail.split('<button').slice(1).filter((button) => /aria-label=\{tr\(t, 'revert'/.test(button.slice(0, 900)))
   assert.equal(revertButtons.length, 2, 'both the initial and confirmed Revert controls must be present')
