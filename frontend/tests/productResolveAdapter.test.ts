@@ -56,7 +56,7 @@ const CLUSTERS: Record<string, Cluster> = {
 }
 
 type Call = { kind: 'preview' | 'merge'; args: unknown[] }
-function fakeApi(cluster: Cluster, extra: { blocked?: Record<number, unknown>; failMergeAt?: number } = {}) {
+function fakeApi(cluster: Cluster, extra: { blocked?: Record<number, unknown>; closes?: Record<number, string[]>; failMergeAt?: number } = {}) {
   const calls: Call[] = []
   let merges = 0
   const byId = new Map(cluster.products.map((entry) => [entry.id, entry]))
@@ -73,6 +73,7 @@ function fakeApi(cluster: Cluster, extra: { blocked?: Record<number, unknown>; f
         stockImpact: { totalQuantity: Number(merged.stock_quantity) || 0, branches: merged.stock_quantity ? [{ branchId: 1, branchName: 'shop', quantity: Number(merged.stock_quantity) }] : [] },
         needsStockChoice: Number(merged.stock_quantity) > 0,
         blocked: extra.blocked?.[mergeId] ?? null,
+        closesStockSessions: extra.closes?.[mergeId] ?? [],
         keeperStock: { totalQuantity: Number(keeper.stock_quantity) || 0, branches: keeper.stock_quantity ? [{ branchId: 1, branchName: 'shop', quantity: Number(keeper.stock_quantity) }] : [] },
         groupCost: { cost_price_usd: mean, cost_price_khr: mean * 4100 },
       }
@@ -240,10 +241,19 @@ await test('a product kept separate is not merged; a new Keep reads the group ag
   assert.deepEqual(adapter.blockers!(data, alone), ['Merge in at least two records.'])
 })
 
-await test('a blocked product says why before Resolve (stock-in session), in the pack\'s words', async () => {
+await test('a stock-in session never blocks Resolve (MERGE-UNBLOCK: the Worker closes that Undo in the merge)', async () => {
   const { adapter, data } = await open(CLUSTERS.same_name, 10, { view: true, edit: true }, { blocked: { 11: { code: 'stock_session_reversible', operationId: 'S-20260924-0900' } } })
-  const [message] = adapter.blockers!(data, EMPTY)
-  assert.ok(message.includes('S-20260924-0900'), message)
+  assert.deepEqual(adapter.blockers!(data, EMPTY), [], 'an older Worker that still reports the session must not stop the operator here')
+  const { adapter: clean, data: cleanData } = await open(CLUSTERS.same_name, 10, { view: true, edit: true })
+  assert.deepEqual(clean.blockers!(cleanData, EMPTY), [])
+})
+
+await test('the confirm says how many stock-in sessions lose their Undo, once per session, and stays silent when none do', async () => {
+  const { adapter, data } = await open(CLUSTERS.three, 50, { view: true, edit: true }, { closes: { 51: ['op-a', 'op-b'], 52: ['op-b'] } })
+  const review = await adapter.review(data, EMPTY, signal)
+  assert.deepEqual(review.warnings?.filter((warning) => warning.startsWith('Undo closes')), ['Undo closes for 2 stock-in session(s) that include these products.'], 'op-b is named by two previews and counted once')
+  const quiet = await open(CLUSTERS.three, 50)
+  assert.equal((await quiet.adapter.review(quiet.data, EMPTY, signal)).warnings?.some((warning) => warning.startsWith('Undo closes')), false)
 })
 
 await test('apply merges every product one step each, stops where a step fails and Continue resumes there', async () => {

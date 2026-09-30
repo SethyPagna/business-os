@@ -4,6 +4,7 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExtern
 import type { CSSProperties, ReactNode } from 'react'
 import { useApp as useAppHook } from '../../app/AppContextCore.tsx'
 import { stableSnapshot } from '../../utils/formDirty.ts'
+import { isRetryableFailure } from '../../utils/retryableFailure.ts'
 import ConfirmDialog, { type ConfirmReviewItem } from './ConfirmDialog.tsx'
 import InfoHint from './InfoHint.tsx'
 import MinimizeButton from './MinimizeButton.tsx'
@@ -29,6 +30,10 @@ import ResolveGrid, {
 // survive while the server's new suggestions still apply to everything they
 // did not touch. Dirty means the grid's effective choices differ from what it
 // showed on load, not that the two layers differ in shape.
+//
+// A write the server refused with a reason (an HTTP 4xx) is shown with that
+// reason and is NOT retried: Continue only exists for a dropped connection or
+// a server fault, where the same frozen token is safe to send again.
 //
 // Closing: the header X is the only close (no Cancel, no Close button). With
 // choices made it asks Discard changes / Back through the shared close guard;
@@ -105,7 +110,8 @@ export type ResolveModalProps<P, T> = {
 }
 
 type Phase = 'loading' | 'failed' | 'ready' | 'reviewing' | 'confirm' | 'applying' | 'partial' | 'done'
-type Failure = { kind: 'load' | 'review' | 'apply'; detail: string; stale?: boolean }
+type Written = { done: number; total: number }
+type Failure = { kind: 'load' | 'review' | 'apply'; detail: string; stale?: boolean; refused?: Written }
 
 const EMPTY_DRAFT: ResolveDraft = { selection: {}, columns: {} }
 const NO_CHANGES: ReadonlySet<string> = new Set<string>()
@@ -211,6 +217,7 @@ export default function ResolveModal<P, T>({ title, adapter, onClose, onApplied,
   const latest = useRef({ data, edits, draft, rows })
   latest.current = { data, edits, draft, rows }
   const controllerRef = useRef<AbortController | null>(null)
+  const writtenRef = useRef<Written | null>(null)
   const begin = useCallback(() => {
     controllerRef.current?.abort()
     const controller = new AbortController()
@@ -219,7 +226,7 @@ export default function ResolveModal<P, T>({ title, adapter, onClose, onApplied,
   }, [])
   useEffect(() => () => controllerRef.current?.abort(), [])
 
-  const load = useCallback(async (stale: boolean, keep: ResolveDraft) => {
+  const load = useCallback(async (stale: boolean, keep: ResolveDraft, notice?: Failure) => {
     const source = adapterRef.current
     const controller = begin()
     setPhase('loading')
@@ -236,6 +243,7 @@ export default function ResolveModal<P, T>({ title, adapter, onClose, onApplied,
       setData(next)
       setInitial(nextInitial)
       setEdits(pruned)
+      if (notice) setFailure(notice)
       setPhase('ready')
     } catch (error) {
       if (controller.signal.aborted) return
@@ -251,6 +259,7 @@ export default function ResolveModal<P, T>({ title, adapter, onClose, onApplied,
     const { data: current, draft: chosen } = latest.current
     if (current === null) return
     const controller = begin()
+    writtenRef.current = null
     setPhase('reviewing')
     setFailure(null)
     try {
@@ -273,9 +282,12 @@ export default function ResolveModal<P, T>({ title, adapter, onClose, onApplied,
     setProgress(null)
     try {
       const outcome = await adapterRef.current.apply(token, controller.signal, (done, total) => {
-        if (!controller.signal.aborted) setProgress({ done, total })
+        if (controller.signal.aborted) return
+        writtenRef.current = { done, total }
+        setProgress({ done, total })
       })
       if (controller.signal.aborted) return
+      writtenRef.current = { done: outcome.done, total: outcome.total }
       setProgress({ done: outcome.done, total: outcome.total })
       setResult(outcome)
       setResume(outcome.next === undefined ? null : { token: outcome.next })
@@ -284,6 +296,17 @@ export default function ResolveModal<P, T>({ title, adapter, onClose, onApplied,
     } catch (error) {
       if (controller.signal.aborted) return
       if (adapterRef.current.isStale(error)) { setReview(null); void load(true, latest.current.edits); return }
+      if (!isRetryableFailure(error)) {
+        const written = writtenRef.current ?? { done: 0, total: 0 }
+        const refusal: Failure = { kind: 'apply', detail: messageOf(error), refused: written }
+        setResume(null)
+        setReview(null)
+        // Steps that landed changed the records: read them again under the refusal.
+        if (written.done > 0) { void load(true, latest.current.edits, refusal); return }
+        setFailure(refusal)
+        setPhase('ready')
+        return
+      }
       // The last step may or may not have landed; Continue re-sends the same
       // frozen token, which the server treats as the same request.
       setResume({ token })
@@ -320,7 +343,11 @@ export default function ResolveModal<P, T>({ title, adapter, onClose, onApplied,
 
   const failureText = failure?.kind === 'load' ? tr('resolve_load_failed', 'Could not load the records.')
     : failure?.kind === 'review' ? tr('resolve_failed', 'Could not check the changes. Nothing was saved.')
-      : failure?.kind === 'apply' ? tr('resolve_apply_failed', 'Stopped before finishing. Continue picks up where it stopped.')
+      : failure?.kind === 'apply' ? (failure.refused
+        ? (failure.refused.done > 0
+          ? fill(tr('resolve_apply_refused_partial', 'Stopped after {done} of {total}. The rest was not saved.'), failure.refused)
+          : tr('resolve_apply_refused', 'Could not resolve. Nothing was saved.'))
+        : tr('resolve_apply_failed', 'Stopped before finishing. Continue picks up where it stopped.'))
         : ''
   const retry = () => { void load(Boolean(failure?.stale), latest.current.edits) }
   const stale = changed.size > 0

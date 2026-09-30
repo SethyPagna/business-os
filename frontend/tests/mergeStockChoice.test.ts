@@ -220,8 +220,10 @@ test('the transport carries the answer and the server refusal keeps its breakdow
   assert.match(http, /error\.costOutlier = parsed\?\.costOutlier \|\| null/)
   assert.match(http, /error\.operationId = parsed\?\.operationId \|\| null/)
   assert.match(hook, /'cost_outlier_review'/, 'an un-averageable cost pair must be reported, not merged')
-  assert.match(hook, /'stock_session_reversible'/, 'a merge must not break a stock session that can still be undone')
-  assert.match(hook, /localizeRefusal\(t, error\)/, 'and both must reach the operator translated')
+  // MERGE-UNBLOCK (1 Oct 2026): a stock-in session no longer blocks a merge; the
+  // Worker closes that session's Undo in the merge's own batch instead.
+  assert.doesNotMatch(hook, /stock_session_reversible/, 'a merge is no longer refused for a stock session that can still be undone')
+  assert.match(hook, /localizeRefusal\(t, error\)/, 'and the remaining decision must reach the operator translated')
 })
 
 test('every new string ships in BOTH packs', () => {
@@ -233,7 +235,7 @@ test('every new string ships in BOTH packs', () => {
     'merge_duplicate_confirm_title', 'bulk_merge_cancelled_count', 'special_price_khr',
     // N15: the cost a merge writes, and the two refusals.
     'merge_cost_average_title', 'merge_cost_average_hint',
-    'merge_cost_outlier_refused', 'merge_stock_session_blocked',
+    'merge_cost_outlier_refused',
     'wholesale_price', 'wholesale_price_khr', 'product_dup_leading_zero',
   ]
   for (const key of keys) {

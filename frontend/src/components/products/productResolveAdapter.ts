@@ -44,6 +44,8 @@ export type ProductResolvePreview = {
   blocked: { code: string; operationId?: string } | null
   keeperStock: StockImpact | null
   groupCost: { cost_price_usd?: number; cost_price_khr?: number } | null
+  /** Stock-in sessions whose Undo this merge closes (operation ids). */
+  closesStockSessions: string[]
 }
 
 export type ProductResolveData = {
@@ -137,6 +139,7 @@ function readPreview(value: unknown): ProductResolvePreview {
     needsStockChoice: Boolean(raw.needsStockChoice),
     blocked: blocked ? { code: String(blocked.code ?? ''), ...(blocked.operationId ? { operationId: String(blocked.operationId) } : {}) } : null,
     keeperStock: raw.keeperStock ? readImpact(raw.keeperStock) : null,
+    closesStockSessions: Array.isArray(raw.closesStockSessions) ? raw.closesStockSessions.map(String) : [],
     groupCost: groupCost && 'cost_price_usd' in groupCost
       ? { cost_price_usd: Number(groupCost.cost_price_usd) || 0, cost_price_khr: Number(groupCost.cost_price_khr) || 0 }
       : null,
@@ -270,9 +273,6 @@ function blockedMessage(ctx: Context, id: number, t: Translate): string | null {
   if (!blocked?.code) return null
   const name = productLabel(ctx.data.products.get(id), id)
   if (blocked.code === 'resolve_plan_budget') return tr(t, 'resolve_plan_budget', 'Product resolving is unavailable on this deployment. No changes were saved.')
-  if (blocked.code === 'stock_session_reversible') {
-    return fill(tr(t, 'merge_stock_session_blocked', 'One of these products is still part of a stock-in session that can be undone ({id}). Merging now would break that Undo — undo it or let it settle first.'), { id: blocked.operationId ?? '' })
-  }
   if (blocked.code === 'invalid_merge_numeric') {
     return fill(tr(t, 'resolve_product_numeric', '{name} has a price or cost that is not a valid number. Correct it, then resolve.'), { name })
   }
@@ -285,7 +285,7 @@ function blockedMessage(ctx: Context, id: number, t: Translate): string | null {
 // The Worker's refusals arrive in English; the ones this flow can meet are
 // said in the operator's language. The code stays on the error (isStale reads it).
 function localizedRefusal(error: unknown, t: Translate): unknown {
-  const problem = error as { code?: unknown; operationId?: unknown } | null
+  const problem = error as { code?: unknown; status?: unknown } | null
   const code = typeof problem?.code === 'string' ? problem.code : ''
   const message = code === 'product_merge_not_duplicates'
     ? tr(t, 'selected_conflict_product_merge_not_duplicates', 'These products are not a current duplicate group. Refresh the Duplicates list and try again.')
@@ -293,10 +293,9 @@ function localizedRefusal(error: unknown, t: Translate): unknown {
       ? tr(t, 'resolve_plan_budget', 'Product resolving is unavailable on this deployment. No changes were saved.')
     : code === 'cost_permission_required'
       ? tr(t, 'resolve_cost_locked', 'Changing the cost needs the cost edit permission.')
-      : code === 'stock_session_reversible'
-        ? fill(tr(t, 'merge_stock_session_blocked', 'One of these products is still part of a stock-in session that can be undone ({id}). Merging now would break that Undo — undo it or let it settle first.'), { id: String(problem?.operationId ?? '') })
-        : ''
-  return message ? Object.assign(new Error(message), { code }) : error
+      : ''
+  // The status stays: the modal offers Continue only for a network error or a 5xx.
+  return message ? Object.assign(new Error(message), { code, status: problem?.status }) : error
 }
 
 type Plan = { ctx: Context; rows: ResolveRow[]; finalBarcode: string; absorbed: string[] }
@@ -516,6 +515,8 @@ export function createProductResolveAdapter(options: ProductResolveOptions): Res
         if (stockAnswer(ctx, id) !== 'write_off') continue
         warnings.push(fill(tr(t, 'resolve_stock_write_off_warning', 'The stock of {name} ({quantity} pcs) will be written off.'), { name: name(id), quantity: data.previews.get(id)?.stockImpact.totalQuantity ?? 0 }))
       }
+      const closing = new Set(ctx.merged.flatMap((id) => data.previews.get(id)?.closesStockSessions ?? []))
+      if (closing.size) warnings.push(fill(tr(t, 'resolve_closes_stock_sessions', 'Undo closes for {n} stock-in session(s) that include these products.'), { n: closing.size }))
       if (absorbed.length) {
         warnings.push(fill(tr(t, 'resolve_barcodes_kept_warning', 'Barcodes {barcodes} stay on the merged records; the kept product keeps its own.'), { barcodes: absorbed.join(', ') }))
       }
