@@ -34,9 +34,15 @@ for (const [page, keys] of Object.entries({ sales: ['sales', 'returns', 'fees'],
     assert.equal(pageAccess({ permissions: { [key]: true, [`${key}:view`]: false } })(page), false)
   }
 }
-for (const key of ['dashboard', 'pos', 'products', 'contacts']) {
+for (const key of ['dashboard', 'pos', 'products']) {
   assert.equal(pageAccess({ permissions: { [key]: true, [`${key}:view`]: false } })(key), false)
 }
+// Contacts: Add and Edit imply View (owner, 30 Sep 2026), so View off closes the page
+// only once both writes are off too.
+assert.equal(pageAccess({ permissions: { contacts: true, 'contacts:view': false } })('contacts'), true, 'Add and Edit keep the page open')
+assert.equal(pageAccess({ permissions: { contacts: true, 'contacts:view': false, 'contacts:add': false } })('contacts'), true, 'Edit alone keeps it open')
+assert.equal(pageAccess({ permissions: { contacts: true, 'contacts:view': false, 'contacts:edit': false } })('contacts'), true, 'Add alone keeps it open')
+assert.equal(pageAccess({ permissions: { contacts: true, 'contacts:view': false, 'contacts:add': false, 'contacts:edit': false } })('contacts'), false)
 const downgraded = { role_permissions: { all: true }, permissions: { all: false, products: 'review', products_image_only: true } }
 assert.equal(pageAccess(downgraded)('products'), true)
 assert.equal(pageAccess({ ...downgraded, permissions: { ...downgraded.permissions, 'products:view': false } })('products'), false)
