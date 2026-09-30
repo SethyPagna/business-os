@@ -1,11 +1,11 @@
 import type { D1Compat } from './db'
 import type { ActionHistoryRow } from '../routes/actionHistory'
 import { STOCK_LOT_SET_KIND, STOCK_SET_REFERENCE_PREFIX } from './stockLotAdjustment'
-import { STOCK_SESSION_KIND } from './stockSession'
+import { STOCK_SESSION_KIND, STOCK_SESSION_MAX_LINES } from './stockSession'
 
 type Movement = {
   id: number; product_id: number; branch_id: number; batch_id: number | null
-  movement_type: string; quantity: number; reference_id: string | null; reason: string | null
+  movement_type: string; quantity: number; reference_id: string | null
 }
 
 export type StockMovementRevertPreview = {
@@ -24,13 +24,55 @@ export class StockMovementReplayError extends Error {
 }
 
 const unavailable = () => new StockMovementReplayError('This stock action has no exact replay identity. Nothing was changed.')
+const stale = () => new StockMovementReplayError('This stock action generation is stale. Refresh its history. Nothing was changed.', 409, 'undo_history_stale')
+
+async function sessionMovementGeneration(db: D1Compat, movement: Movement, operation: { id: string; generation: number }): Promise<number> {
+  const generation = operation.generation
+  if (!Number.isSafeInteger(generation) || generation <= 0 || !['add', 'remove'].includes(movement.movement_type)) throw unavailable()
+  type MemberMovement = Movement & { member_product: number; member_branch: number; member_batch: number | null; member_quantity: number }
+  const originals = await db.prepare(`SELECT i.id,i.product_id,i.branch_id,i.batch_id,i.movement_type,i.quantity,i.reference_id,
+    m.product_id AS member_product,m.branch_id AS member_branch,m.batch_id AS member_batch,m.quantity AS member_quantity
+    FROM stock_session_members m LEFT JOIN inventory_movements i ON i.id=m.movement_id
+    WHERE m.operation_id=@id AND m.quantity>0 ORDER BY m.line_id LIMIT @limit`).all<MemberMovement>({ id: operation.id, limit: STOCK_SESSION_MAX_LINES + 1 })
+  const count = originals.length
+  if (count === 0 || count > STOCK_SESSION_MAX_LINES || new Set(originals.map(row => row.id)).size !== count) throw unavailable()
+  if ((generation + 1) * count > 1000) {
+    throw new StockMovementReplayError('This stock action has too many replay movements to preview here. Use History Undo/Redo.', 409, 'undo_preview_limit')
+  }
+  const reference = String(movement.reference_id)
+  for (const row of originals) {
+    if (!Number.isSafeInteger(row.id) || row.id <= 0 || !['add', 'stock_in'].includes(row.movement_type)
+      || String(row.reference_id) !== reference || row.product_id !== row.member_product || row.branch_id !== row.member_branch
+      || row.batch_id !== row.member_batch || row.quantity !== row.member_quantity) throw unavailable()
+  }
+  const after = Math.max(...originals.map(row => row.id))
+  const expectedRows = generation * count
+  const rows: Movement[] = []
+  for (const type of ['add', 'remove']) {
+    rows.push(...await db.prepare(`SELECT id,product_id,branch_id,batch_id,movement_type,quantity,reference_id FROM inventory_movements
+      WHERE reference_id=@reference AND movement_type=@type AND id>@after ORDER BY id LIMIT @limit`)
+      .all<Movement>({ reference, type, after, limit: expectedRows + 1 }))
+  }
+  if (rows.length !== expectedRows) throw unavailable()
+  rows.sort((left, right) => left.id - right.id)
+  const key = (row: Pick<Movement, 'product_id' | 'branch_id' | 'batch_id' | 'quantity'>) => JSON.stringify([row.product_id, row.branch_id, row.batch_id, row.quantity])
+  for (let block = 1; block <= generation; block += 1) {
+    const undo = block % 2 === 1
+    const expected = originals.map(row => key({ ...row, quantity: row.quantity * (undo ? -1 : 1) })).sort()
+    const current = rows.slice((block - 1) * count, block * count)
+    if (current.some(row => row.movement_type !== (undo ? 'remove' : 'add'))
+      || JSON.stringify(current.map(key).sort()) !== JSON.stringify(expected)) throw unavailable()
+  }
+  if (!rows.slice(-count).some(row => row.id === movement.id)) throw stale()
+  return generation
+}
 
 export async function stockMovementRevertPreview(db: D1Compat, movementId: number): Promise<{ revert: StockMovementRevertPreview; history: ActionHistoryRow | null }> {
-  const movement = await db.prepare('SELECT id,product_id,branch_id,batch_id,movement_type,quantity,reference_id,reason FROM inventory_movements WHERE id=@id').get<Movement>({ id: movementId })
+  const movement = await db.prepare('SELECT id,product_id,branch_id,batch_id,movement_type,quantity,reference_id FROM inventory_movements WHERE id=@id').get<Movement>({ id: movementId })
   if (!movement) throw new StockMovementReplayError('Stock movement not found.', 404)
   const reference = String(movement.reference_id ?? '')
   const parent = /^revert:\d+$/.test(reference)
-    ? await db.prepare('SELECT id,product_id,branch_id,batch_id,movement_type,quantity,reference_id,reason FROM inventory_movements WHERE id=@id').get<Movement>({ id: Number(reference.slice(7)) })
+    ? await db.prepare('SELECT id,product_id,branch_id,batch_id,movement_type,quantity,reference_id FROM inventory_movements WHERE id=@id').get<Movement>({ id: Number(reference.slice(7)) })
     : null
   const setReference = reference.startsWith(STOCK_SET_REFERENCE_PREFIX) ? reference : String(parent?.reference_id ?? '')
   let kind: 'stock_set' | 'stock_session' | null = null
@@ -57,18 +99,9 @@ export async function stockMovementRevertPreview(db: D1Compat, movementId: numbe
       operationId = member.id
       historyId = member.history_id
     } else if (/^\d+$/.test(reference)) {
-      const operation = await db.prepare('SELECT id,history_id FROM stock_session_operations WHERE rowid=@rowid').get<{ id: string; history_id: number }>({ rowid: Number(reference) })
+      const operation = await db.prepare('SELECT id,history_id,generation FROM stock_session_operations WHERE rowid=@rowid').get<{ id: string; history_id: number; generation: number }>({ rowid: Number(reference) })
       if (operation) {
-        const match = /^Stock session (\S+) (undo|redo) generation (\d+)$/.exec(String(movement.reason ?? ''))
-        if (!match || match[1] !== operation.id) throw unavailable()
-        expectedGeneration = Number(match[3])
-        const undo = match[2] === 'undo'
-        if (expectedGeneration <= 0 || expectedGeneration % 2 !== (undo ? 1 : 0)
-          || movement.movement_type !== (undo ? 'remove' : 'add')) throw unavailable()
-        const member = await db.prepare(`SELECT line_id FROM stock_session_members WHERE operation_id=@operation AND product_id=@product
-          AND branch_id=@branch AND batch_id IS @batch AND quantity=@quantity LIMIT 1`).get({ operation: operation.id, product: movement.product_id,
-            branch: movement.branch_id, batch: movement.batch_id, quantity: Number(movement.quantity) * (undo ? -1 : 1) })
-        if (!member) throw unavailable()
+        expectedGeneration = await sessionMovementGeneration(db, movement, operation)
         kind = 'stock_session'
         operationId = operation.id
         historyId = operation.history_id
@@ -89,7 +122,7 @@ export async function stockMovementRevertPreview(db: D1Compat, movementId: numbe
   const currentGeneration = Number(payload.generation)
   const expectedStatus = direction === 'undo' ? 'undoable' : 'redoable'
   if (currentGeneration !== expectedGeneration || history.status !== expectedStatus) {
-    throw new StockMovementReplayError('This stock action generation is stale. Refresh its history. Nothing was changed.', 409, 'undo_history_stale')
+    throw stale()
   }
   return { revert: { kind, movementId, historyId, operationId, direction, expectedGeneration, label: String(history.label || ''), lineCount }, history }
 }

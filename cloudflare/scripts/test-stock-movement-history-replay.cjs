@@ -59,9 +59,56 @@ async function main() {
     const latest = f.sql.prepare('SELECT id FROM inventory_movements ORDER BY id DESC LIMIT 1').get().id
     f.sql.prepare('UPDATE inventory_movements SET reason=? WHERE id=?').run('Edited receipt note', latest)
     const edited = state(f)
-    assert.equal((await preview(f, latest)).status, 409, 'legacy session generation must retain exact identity')
+    const editedPreview = await preview(f, latest)
+    assert.equal(editedPreview.status, 200, 'editing display reason must preserve current immutable replay identity')
     assert.deepEqual(state(f), edited)
+    assert.equal((await replay(f, editedPreview.body.revert)).status, 200)
+    f.sql.prepare('UPDATE inventory_movements SET reason=? WHERE id=?').run(`Stock session ${receipt.operationId} undo generation 3`, counter)
+    assert.equal((await preview(f, counter)).status, 409, 'forging current generation into old display text cannot revive an old row')
+    const current = f.sql.prepare('SELECT id FROM inventory_movements ORDER BY id DESC LIMIT 1').get().id
+    const currentPreview = await preview(f, current)
+    assert.equal(currentPreview.status, 200)
+    assert.equal(currentPreview.body.revert.expectedGeneration, 3)
+    const attacks = [
+      ['same-reference identical counter collision', () => f.sql.prepare(`INSERT INTO inventory_movements(product_id,branch_id,batch_id,movement_type,quantity,reference_id,reason)
+        SELECT product_id,branch_id,batch_id,movement_type,quantity,reference_id,reason FROM inventory_movements WHERE id=?`).run(current)],
+      ['partial latest block', () => f.sql.prepare('DELETE FROM inventory_movements WHERE id=?').run(current - 1)],
+      ['reordered generation types', () => f.sql.prepare("UPDATE inventory_movements SET movement_type='add' WHERE id=?").run(current - 1)],
+      ['earlier block quantity drift', () => f.sql.prepare('UPDATE inventory_movements SET quantity=quantity-1 WHERE id=?').run(counter)],
+      ['operation/history mismatch', () => f.sql.prepare("UPDATE action_history SET undo_payload=json_set(undo_payload,'$.generation',4) WHERE id=?").run(receipt.actionHistoryId)],
+      ['missing generation block', () => f.sql.prepare('UPDATE stock_session_operations SET generation=4 WHERE id=?').run(receipt.operationId)],
+      ['bounded lineage', () => f.sql.prepare('UPDATE stock_session_operations SET generation=501 WHERE id=?').run(receipt.operationId), 'undo_preview_limit'],
+    ]
+    for (const [name, mutate, code] of attacks) {
+      f.sql.exec('SAVEPOINT identity_attack')
+      mutate()
+      const before = state(f)
+      const refused = await preview(f, current)
+      assert.equal(refused.status, 409, name)
+      if (code) assert.equal(refused.body.code, code)
+      assert.deepEqual(state(f), before, `${name} changes nothing`)
+      f.sql.exec('ROLLBACK TO identity_attack; RELEASE identity_attack')
+    }
+    f.sql.exec('SAVEPOINT duplicate_members')
+    const firstMember = f.sql.prepare('SELECT product_id,branch_id,batch_id,quantity FROM stock_session_members WHERE movement_id=?').get(firstMovement)
+    const secondMember = receipt.items[1]
+    f.sql.prepare('UPDATE stock_session_members SET product_id=?,branch_id=?,batch_id=?,quantity=? WHERE movement_id=?')
+      .run(firstMember.product_id, firstMember.branch_id, firstMember.batch_id, firstMember.quantity, secondMember.movementId)
+    f.sql.prepare('UPDATE inventory_movements SET product_id=?,branch_id=?,batch_id=?,quantity=CASE WHEN quantity<0 THEN -? ELSE ? END WHERE product_id=?')
+      .run(firstMember.product_id, firstMember.branch_id, firstMember.batch_id, firstMember.quantity, firstMember.quantity, secondMember.productId)
+    assert.equal((await preview(f, current)).status, 200, 'identical member multiplicities are preserved by whole-block comparison')
+    f.sql.exec('ROLLBACK TO duplicate_members; RELEASE duplicate_members')
+    f.sql.exec('SAVEPOINT zero_member')
+    f.sql.prepare("INSERT INTO stock_session_members(operation_id,line_id,command_kind,product_id,product_created,branch_id,quantity) VALUES(?,'zero-only','receive',1,0,1,0)").run(receipt.operationId)
+    const withZero = await preview(f, current)
+    assert.equal(withZero.status, 200)
+    assert.equal(withZero.body.revert.lineCount, 3, 'zero-movement members count in whole action but not replay blocks')
+    f.sql.exec('ROLLBACK TO zero_member; RELEASE zero_member')
+    const plan = f.sql.prepare('EXPLAIN QUERY PLAN SELECT id,product_id,branch_id,batch_id,movement_type,quantity,reference_id FROM inventory_movements WHERE reference_id=? AND movement_type=? AND id>? ORDER BY id LIMIT ?').all('1', 'remove', firstMovement, 1001)
+    assert.ok(plan.some(row => /idx_inventory_movements_reference_type_id/.test(row.detail)))
+    assert.ok(plan.every(row => !/TEMP B-TREE|SCAN inventory_movements/.test(row.detail)), 'bounded per-type range reads need no whole-reference sort')
     console.log('PASS Stock Changes session preview, whole-operation replay, cross-surface generations, permission denial and retry safety')
+    console.log('PASS immutable session lineage survives edited reasons, refuses forged/stale/colliding/incomplete generations and bounds indexed reads')
   } finally { f.sql.close() }
 
   const s = fixture()
