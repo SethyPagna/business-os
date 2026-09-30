@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import vm from 'node:vm'
 import { fileURLToPath } from 'node:url'
+import * as pathRouting from '../src/app/pathRouting.ts'
 
 // Two brands share one index.html, and mixing them up is a silent, purely
 // visual regression that no other test would catch:
@@ -25,12 +26,26 @@ import { fileURLToPath } from 'node:url'
 // These assertions pin the split so a future edit cannot quietly ship
 // staff branding to customers (or a blob: manifest that kills Install).
 //
-// Icon FILES themselves are regenerated from the source logos by
-// ops/scripts/assets/generate-app-icons.mjs (run it with --check to verify
-// they still match). This test covers the WIRING, not the pixels.
+// The icon files' pixels and bytes are tests/pwaIcons.test.ts; this test
+// covers the WIRING.
 
 const read = (relPath: string): string =>
   fs.readFileSync(fileURLToPath(new URL(relPath, import.meta.url)), 'utf8')
+
+type IconLedger = { immutable: Record<string, { brand: 'staff' | 'shop'; role: string }>; mutable: Record<string, string> }
+const ledger = JSON.parse(read('./fixtures/pwa-icon-ledger.json')) as IconLedger
+const SHOP_ICON_BY_SIZE: Record<string, string> = {
+  '': '/leang-cosmetics-favicon-v2.ico',
+  '192x192': '/leang-cosmetics-icon-192-v2.png',
+  '512x512': '/leang-cosmetics-icon-512-v2.png',
+}
+const STAFF_ICON_BY_SIZE: Record<string, string> = {
+  '': '/admin-favicon-v1.ico',
+  '192x192': '/icon-192.png',
+  '512x512': '/icon-512.png',
+}
+const SHOP_APPLE_TOUCH_ICON = '/leang-cosmetics-apple-touch-icon-v2.png'
+const STAFF_APPLE_TOUCH_ICON = '/admin-apple-touch-icon-v1.png'
 
 const indexHtml = read('../index.html')
 const manifest = JSON.parse(read('../public/manifest.json')) as {
@@ -43,11 +58,17 @@ const login = read('../src/components/auth/Login.tsx')
 // --- raw HTML is public-first; the admin host's bootstrap swaps to staff ----
 
 assert.match(indexHtml, /rel="manifest" href="\/portal-manifest\.json"/, 'raw HTML must identify the storefront before iOS snapshots install metadata')
-assert.match(indexHtml, /href="\/leang-cosmetics-icon-192\.png"/, 'raw HTML should use the Leang 192 icon')
-assert.match(indexHtml, /href="\/leang-cosmetics-icon-512\.png"/, 'raw HTML should use the Leang 512 icon')
-assert.match(indexHtml, /href="\/leang-cosmetics-apple-touch-icon-v1\.png"/, 'raw HTML should use the Leang Apple touch icon')
+const staticHead = indexHtml.slice(0, indexHtml.indexOf('<script>'))
+const staticIconLinks = [...staticHead.matchAll(/<link rel="icon"([^>]*)>/g)].map(([, attributes]) => ({
+  sizes: /sizes="([^"]+)"/.exec(attributes)?.[1] ?? '',
+  href: /href="([^"]+)"/.exec(attributes)?.[1],
+  type: /type="([^"]+)"/.exec(attributes)?.[1],
+}))
+assert.deepEqual(Object.fromEntries(staticIconLinks.map((link) => [link.sizes, link.href])), SHOP_ICON_BY_SIZE, 'raw HTML names each size its own shop icon')
+assert.equal(staticIconLinks.find((link) => link.sizes === '')?.type, 'image/x-icon', 'the unsized raw favicon link is the ICO')
+assert.ok(staticHead.includes(`<link rel="apple-touch-icon" sizes="180x180" href="${SHOP_APPLE_TOUCH_ICON}" />`), 'raw HTML should use the shop Apple touch icon')
 assert.match(indexHtml, /adminManifest\.setAttribute\('href', '\/manifest\.json'\)/, 'admin bootstrap should restore the staff manifest')
-assert.match(indexHtml, /adminAppleIcon\.setAttribute\('href', '\/apple-touch-icon\.png'\)/, 'admin bootstrap should restore the staff Apple icon')
+assert.ok(indexHtml.includes(`adminAppleIcon.setAttribute('href', '${STAFF_APPLE_TOUCH_ICON}')`), 'admin bootstrap should restore the staff Apple icon')
 assert.match(indexHtml, /hostname\.indexOf\('admin\.'\) === 0/, 'the bootstrap should distinguish the admin hostname')
 assert.match(indexHtml, /pathname === '\/'\s*\? !adminHostname/, 'the public production root must not be classified as admin')
 
@@ -55,9 +76,9 @@ assert.equal(manifest.name, 'Leang Cosmetics Admin', 'manifest.json remains the 
 assert.deepEqual(
   manifest.icons.map((icon) => `${icon.src} ${icon.sizes} ${icon.purpose}`).sort(),
   [
-    '/icon-192-maskable.png 192x192 maskable',
+    '/icon-192-maskable-v2.png 192x192 maskable',
     '/icon-192.png 192x192 any',
-    '/icon-512-maskable.png 512x512 maskable',
+    '/icon-512-maskable-v2.png 512x512 maskable',
     '/icon-512.png 512x512 any',
   ],
   'admin manifest should offer both any and maskable at 192 and 512, all staff icons',
@@ -86,21 +107,26 @@ assert.match(
   /const STOREFRONT_APPLE_TOUCH_ICON = '\/leang-cosmetics-apple-touch-icon-v2\.png'/,
   'the live storefront must replace the Apple touch icon used by Add to Home Screen',
 )
-assert.match(
-  indexHtml,
-  /appleIcon\.setAttribute\('href', '\/leang-cosmetics-apple-touch-icon-v1\.png'\)/,
+assert.ok(
+  indexHtml.includes(`appleIcon.setAttribute('href', '${SHOP_APPLE_TOUCH_ICON}')`),
   'the parser-time bootstrap must select the storefront Apple icon before React loads',
 )
 // The static portal manifest is the storefront's own brand, and must stay a
 // real file (installable) -- the whole point of 16.1.
 const portalManifest = JSON.parse(read('../public/portal-manifest.json')) as {
   name: string
-  icons: Array<{ src: string }>
+  icons: Array<{ src: string; sizes: string; purpose: string }>
 }
 assert.equal(portalManifest.name, 'Leang Cosmetics', 'the static portal manifest is the storefront brand, not the staff app')
-assert.ok(
-  portalManifest.icons.length > 0 && portalManifest.icons.every((icon) => /leang/i.test(icon.src)),
-  'every portal-manifest icon must be a Leang asset',
+assert.deepEqual(
+  portalManifest.icons.map((icon) => `${icon.src} ${icon.sizes} ${icon.purpose}`).sort(),
+  [
+    '/leang-cosmetics-icon-192-maskable-v2.png 192x192 maskable',
+    '/leang-cosmetics-icon-192-v2.png 192x192 any',
+    '/leang-cosmetics-icon-512-maskable-v2.png 512x512 maskable',
+    '/leang-cosmetics-icon-512-v2.png 512x512 any',
+  ],
+  'the shop manifest offers the owner-logo icons, any and maskable, at 192 and 512',
 )
 
 // The storefront must NOT reintroduce the runtime blob: manifest (Chrome
@@ -156,23 +182,24 @@ assert.match(publicCatalog, /const STOREFRONT_NAME = 'Leang Cosmetics'/)
 assert.match(brandEffect, /displayConfig\.title \|\| STOREFRONT_NAME\)/, 'the tab title falls back to the storefront name')
 assert.doesNotMatch(brandEffect, /Leang Beauty/, 'the retired storefront name is gone from the storefront identity')
 
-// --- every referenced icon file exists ------------------------------------
-
-const referenced = new Set<string>([
-  ...manifest.icons.map((icon) => icon.src.replace(/^\//, '')),
-  'favicon.ico',
-  'apple-touch-icon.png',
-  'icon.png',
-  'leang-cosmetics-icon-192.png',
-  'leang-cosmetics-icon-512.png',
-  'leang-cosmetics-icon-192-maskable.png',
-  'leang-cosmetics-icon-512-maskable.png',
-  'leang-cosmetics-apple-touch-icon-v1.png',
+const workerIdentity = read('../../cloudflare/src/lib/adminDocumentIdentity.ts')
+const iconPath = /\/[\w.-]+\.(?:png|ico)/g
+const wiredIcons = new Map<string, string>([
+  ...manifest.icons.map((icon) => [icon.src, 'manifest.json'] as [string, string]),
+  ...portalManifest.icons.map((icon) => [icon.src, 'portal-manifest.json'] as [string, string]),
+  ...[...indexHtml.matchAll(iconPath)].map(([src]) => [src, 'index.html'] as [string, string]),
+  ...[...workerIdentity.matchAll(iconPath)].map(([src]) => [src, 'adminDocumentIdentity.ts'] as [string, string]),
+  ...[...publicCatalog.matchAll(/const STOREFRONT_[A-Z_]*ICON = '([^']+)'/g)].map(([, src]) => [src, 'PublicCatalogPage.tsx'] as [string, string]),
 ])
-const missing = [...referenced].filter(
-  (file) => !fs.existsSync(fileURLToPath(new URL(`../public/${file}`, import.meta.url))),
-)
-assert.deepEqual(missing, [], 'every icon referenced by the manifest or the portal fallbacks must exist on disk')
+assert.ok(wiredIcons.size >= 10, 'the wired icon names were read, not missed')
+const staleWiring = [...wiredIcons]
+  .filter(([src]) => {
+    const file = src.replace(/^\//, '')
+    const entry = ledger.immutable[file]
+    return !entry || entry.role === 'retired' || !fs.existsSync(fileURLToPath(new URL(`../public/${file}`, import.meta.url)))
+  })
+  .map(([src, owner]) => `${owner}: ${src}`)
+assert.deepEqual(staleWiring, [], 'every wired icon is a current file in the icon ledger: not retired art, not a conventional probe path whose bytes may change')
 
 // Execute the real parser-time bootstrap against small DOM doubles.
 const bootstrapMatch = indexHtml.match(/<script>\s*(\(function setInitialBusinessOsRoute\(\)[\s\S]*?\}\(\)\))\s*<\/script>/)
@@ -214,7 +241,7 @@ function runBootstrap(hostname: string, pathname: string) {
     querySelectorAll(selector: string) { return selector === 'link[rel="icon"]' ? [favicon, png192, png512] : [] },
   }
   vm.runInNewContext(bootstrapMatch![1], { window: { location: { hostname, pathname } }, document })
-  return { attributes, elements, document, favicon }
+  return { attributes, elements, document, favicon, png192, png512 }
 }
 
 const SHOP_IDENTITY = {
@@ -222,16 +249,20 @@ const SHOP_IDENTITY = {
   appTitle: 'Leang',
   manifest: '/portal-manifest.json',
   themeColor: '#ffffff',
-  appleIcon: '/leang-cosmetics-apple-touch-icon-v1.png',
-  favicon: '/leang-cosmetics-icon-512.png',
+  appleIcon: SHOP_APPLE_TOUCH_ICON,
+  favicon: `${SHOP_ICON_BY_SIZE['']} image/x-icon`,
+  icon192: `${SHOP_ICON_BY_SIZE['192x192']} image/png`,
+  icon512: `${SHOP_ICON_BY_SIZE['512x512']} image/png`,
 }
 const STAFF_IDENTITY = {
   title: 'Leang Cosmetics Admin',
   appTitle: 'Leang Admin',
   manifest: '/manifest.json',
   themeColor: '#fffdf8',
-  appleIcon: '/apple-touch-icon.png',
-  favicon: '/favicon.ico?v=business-os',
+  appleIcon: STAFF_APPLE_TOUCH_ICON,
+  favicon: `${STAFF_ICON_BY_SIZE['']} image/x-icon`,
+  icon192: `${STAFF_ICON_BY_SIZE['192x192']} image/png`,
+  icon512: `${STAFF_ICON_BY_SIZE['512x512']} image/png`,
 }
 
 // What installs follows the HOST; which app renders still follows the route
@@ -259,7 +290,9 @@ for (const [hostname, pathname, identity, route] of identityCases) {
       manifest: run.elements.get('manifest')?.attrs.get('href'),
       themeColor: run.elements.get('theme-color')?.attrs.get('content'),
       appleIcon: run.elements.get('apple-icon')?.attrs.get('href'),
-      favicon: run.favicon.attrs.get('href'),
+      favicon: `${run.favicon.attrs.get('href')} ${run.favicon.attrs.get('type')}`,
+      icon192: `${run.png192.attrs.get('href')} ${run.png192.attrs.get('type')}`,
+      icon512: `${run.png512.attrs.get('href')} ${run.png512.attrs.get('type')}`,
     },
     identity,
     `${hostname}${pathname} installs as ${identity.title}`,
@@ -276,8 +309,58 @@ const redirectHosts = vm.runInNewContext('(' + redirectLiteral[1] + ')') as Reco
 assert.deepEqual({ ...redirectHosts }, { 'www.leangbeauty.com': 'leangbeauty.com' })
 assert.doesNotMatch(bootstrapMatch![1], /dpdns|leangcosmetics\.com/i, 'the retired domain is gone from the bootstrap')
 
-const appleIconBytes = fs.readFileSync(fileURLToPath(new URL('../public/leang-cosmetics-apple-touch-icon-v1.png', import.meta.url)))
-assert.equal(appleIconBytes.readUInt32BE(16), 180, 'iPhone icon should be exactly 180px wide')
-assert.equal(appleIconBytes.readUInt32BE(20), 180, 'iPhone icon should be exactly 180px high')
+for (const appleIcon of [SHOP_APPLE_TOUCH_ICON, STAFF_APPLE_TOUCH_ICON]) {
+  const appleIconBytes = fs.readFileSync(fileURLToPath(new URL(`../public${appleIcon}`, import.meta.url)))
+  assert.equal(appleIconBytes.readUInt32BE(16), 180, `${appleIcon}: an iPhone icon is exactly 180px wide`)
+  assert.equal(appleIconBytes.readUInt32BE(20), 180, `${appleIcon}: an iPhone icon is exactly 180px high`)
+}
+
+type ServiceWorkerHostRules = {
+  isAdminHost?: (hostname: string) => boolean
+  appShellUrlsForHost?: (hostname: string) => string[]
+  isCacheableStaticPath?: (pathname: string) => boolean
+}
+const serviceWorker: ServiceWorkerHostRules & { self: unknown; URL: typeof URL } = {
+  self: { addEventListener() {}, location: { origin: 'https://leangbeauty.com', hostname: 'leangbeauty.com' }, registration: {} },
+  URL,
+}
+vm.runInNewContext(read('../public/sw.js'), serviceWorker)
+const { isAdminHost, appShellUrlsForHost, isCacheableStaticPath } = serviceWorker
+assert.ok(appShellUrlsForHost, 'sw.js picks its precache list by host (appShellUrlsForHost)')
+assert.ok(isAdminHost, 'sw.js has the one host predicate (isAdminHost)')
+assert.ok(isCacheableStaticPath, 'sw.js still decides which static paths it keeps')
+
+const HOST_MATRIX = ['admin.leangbeauty.com', 'leangbeauty.com', 'www.leangbeauty.com', 'notadmin.leangbeauty.com', 'localhost', '127.0.0.1', '[::1]', 'admin.example.test']
+for (const hostname of HOST_MATRIX) {
+  const bootstrapAdmin = runBootstrap(hostname, '/some-unknown-path').elements.get('manifest')?.attrs.get('href') === '/manifest.json'
+  const previousWindow = (globalThis as { window?: unknown }).window
+  ;(globalThis as { window?: unknown }).window = { location: { hostname } }
+  try {
+    assert.equal(pathRouting.isAdminHostname(), bootstrapAdmin, `${hostname}: pathRouting and the bootstrap disagree`)
+  } finally {
+    ;(globalThis as { window?: unknown }).window = previousWindow
+  }
+  assert.equal(isAdminHost(hostname), bootstrapAdmin, `${hostname}: the service worker and the bootstrap disagree`)
+}
+
+const APP_SHELL_DOCUMENTS = ['/', '/index.html', '/business-os-precache.json']
+const currentIdentity = (brand: 'staff' | 'shop', manifestHref: string): string[] => [
+  manifestHref,
+  ...Object.entries(ledger.immutable).filter(([, entry]) => entry.brand === brand && entry.role !== 'retired').map(([file]) => `/${file}`),
+].sort()
+for (const [hostname, brand, manifestHref] of [
+  ['leangbeauty.com', 'shop', '/portal-manifest.json'],
+  ['admin.leangbeauty.com', 'staff', '/manifest.json'],
+] as const) {
+  const precached: string[] = [...appShellUrlsForHost(hostname)]
+  for (const shellDocument of APP_SHELL_DOCUMENTS) assert.ok(precached.includes(shellDocument), `${hostname} precaches ${shellDocument}`)
+  assert.deepEqual(
+    precached.filter((url) => !APP_SHELL_DOCUMENTS.includes(url)).sort(),
+    currentIdentity(brand, manifestHref),
+    `${hostname} precaches exactly its own manifest and current icons`,
+  )
+  for (const url of currentIdentity(brand, manifestHref)) assert.ok(isCacheableStaticPath(url), `${url} is cacheable when the page asks for it`)
+}
+assert.equal(isCacheableStaticPath('/icon.png'), false, 'nothing names /icon.png, so the worker does not keep it')
 
 console.log('PASS admin/storefront brand icon wiring')

@@ -109,9 +109,9 @@ check('the raw storefront document carries the link-preview tags', () => {
   assert.equal(meta('og:description'), shopManifest.description, 'the preview describes the shop the way its installed app does')
   // Prices can be hidden from the public storefront, so the preview never promises them.
   assert.doesNotMatch(meta('og:description'), /price/i)
-  assert.match(meta('og:image'), /^https:\/\/leangbeauty\.com\/leang-cosmetics-icon-512\.png$/, 'absolute, on the public host')
+  assert.match(meta('og:image'), /^https:\/\/leangbeauty\.com\/leang-cosmetics-icon-512-v2\.png$/, 'absolute, on the public host')
   assert.match(head, /<meta name="twitter:card" content="summary" \/>/)
-  assert.ok(fs.existsSync(path.join(REPO, 'frontend', 'public', 'leang-cosmetics-icon-512.png')), 'the preview image ships')
+  assert.ok(fs.existsSync(path.join(REPO, 'frontend', 'public', 'leang-cosmetics-icon-512-v2.png')), 'the preview image ships')
 })
 
 check('the document declares its canonical URL on the primary host, so the alias cannot rank on its own', () => {

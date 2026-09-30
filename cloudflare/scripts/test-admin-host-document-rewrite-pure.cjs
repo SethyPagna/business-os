@@ -195,31 +195,47 @@ check('the installed app points at the ADMIN manifest', () => {
 })
 
 check('the home-screen icon is the staff BO one', () => {
-  const element = stubElement({ rel: 'apple-touch-icon', sizes: '180x180', href: '/leang-cosmetics-apple-touch-icon-v1.png' })
+  const element = stubElement({ rel: 'apple-touch-icon', sizes: '180x180', href: '/leang-cosmetics-apple-touch-icon-v2.png' })
   ruleFor('link[rel="apple-touch-icon"]').element(element)
-  assert.strictEqual(element.attributes.href, '/apple-touch-icon.png')
+  assert.strictEqual(element.attributes.href, '/admin-apple-touch-icon-v1.png')
 })
 
 check('every favicon size maps to its admin twin', () => {
   const iconRule = ruleFor('link[rel="icon"]')
-  const sized192 = stubElement({ rel: 'icon', type: 'image/png', sizes: '192x192', href: '/leang-cosmetics-icon-192.png' })
+  const sized192 = stubElement({ rel: 'icon', type: 'image/png', sizes: '192x192', href: '/leang-cosmetics-icon-192-v2.png' })
   iconRule.element(sized192)
   assert.strictEqual(sized192.attributes.href, '/icon-192.png')
   assert.strictEqual(sized192.attributes.type, 'image/png')
 
-  const sized512 = stubElement({ rel: 'icon', type: 'image/png', sizes: '512x512', href: '/leang-cosmetics-icon-512.png' })
+  const sized512 = stubElement({ rel: 'icon', type: 'image/png', sizes: '512x512', href: '/leang-cosmetics-icon-512-v2.png' })
   iconRule.element(sized512)
   assert.strictEqual(sized512.attributes.href, '/icon-512.png')
 
-  const unsized = stubElement({ rel: 'icon', type: 'image/png', href: '/leang-cosmetics-icon-512.png' })
+  const unsized = stubElement({ rel: 'icon', type: 'image/x-icon', href: '/leang-cosmetics-favicon-v2.ico' })
   iconRule.element(unsized)
-  assert.strictEqual(unsized.attributes.href, '/favicon.ico?v=business-os')
+  assert.strictEqual(unsized.attributes.href, '/admin-favicon-v1.ico')
   assert.strictEqual(unsized.attributes.type, 'image/x-icon')
 
   // An unknown size must still land on an admin icon, never keep a Leang one.
-  const unknown = stubElement({ rel: 'icon', sizes: '64x64', href: '/leang-cosmetics-icon-192.png' })
+  const unknown = stubElement({ rel: 'icon', sizes: '64x64', href: '/leang-cosmetics-icon-192-v2.png' })
   iconRule.element(unknown)
   assert.doesNotMatch(unknown.attributes.href, /leang/i)
+})
+
+check('the raw admin HTML and the page bootstrap give the staff app the same icons', () => {
+  const bootstrap = read(path.join(REPO, 'frontend', 'index.html'))
+  const favicons = /adminIconSize === '192x192' \? '([^']+)' : \(adminIconSize === '512x512' \? '([^']+)' : '([^']+)'\)/.exec(bootstrap)
+  const apple = /adminAppleIcon\.setAttribute\('href', '([^']+)'\)/.exec(bootstrap)
+  assert.ok(favicons && apple, 'the admin branch of the bootstrap was read, not missed')
+  const iconRule = ruleFor('link[rel="icon"]')
+  for (const [sizes, bootstrapHref] of [['192x192', favicons[1]], ['512x512', favicons[2]], [undefined, favicons[3]]]) {
+    const element = stubElement({ rel: 'icon', ...(sizes ? { sizes } : {}), href: '/leang-cosmetics-favicon-v2.ico' })
+    iconRule.element(element)
+    assert.strictEqual(element.attributes.href, bootstrapHref, (sizes || 'unsized') + ' favicon')
+  }
+  const appleElement = stubElement({ rel: 'apple-touch-icon', href: '/leang-cosmetics-apple-touch-icon-v2.png' })
+  ruleFor('link[rel="apple-touch-icon"]').element(appleElement)
+  assert.strictEqual(appleElement.attributes.href, apple[1])
 })
 
 check('the admin document never advertises the storefront address', () => {
@@ -262,7 +278,7 @@ check('every tag index.html publishes for the storefront has an admin answer', (
 check('no rule leaves a storefront value behind', () => {
   const storefrontValues = new Set([shopManifest.name, shopManifest.short_name, shopManifest.description, shopManifest.theme_color])
   for (const rule of identity.ADMIN_DOCUMENT_REWRITES) {
-    const element = stubElement({ href: '/leang-cosmetics-icon-512.png', content: shopManifest.name, sizes: '192x192' })
+    const element = stubElement({ href: '/leang-cosmetics-icon-512-v2.png', content: shopManifest.name, sizes: '192x192' })
     rule.element(element)
     assert.ok(element.writes.length > 0, rule.selector + ' wrote nothing at all')
     for (const value of element.writes) {

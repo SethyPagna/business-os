@@ -10,25 +10,25 @@
   "theme_color": "#ffffff",
   "icons": [
     {
-      "src": "/leang-cosmetics-icon-192.png",
+      "src": "/leang-cosmetics-icon-192-v2.png",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/leang-cosmetics-icon-192-maskable.png",
+      "src": "/leang-cosmetics-icon-192-maskable-v2.png",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "maskable"
     },
     {
-      "src": "/leang-cosmetics-icon-512.png",
+      "src": "/leang-cosmetics-icon-512-v2.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/leang-cosmetics-icon-512-maskable.png",
+      "src": "/leang-cosmetics-icon-512-maskable-v2.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "maskable"

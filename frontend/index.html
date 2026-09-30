@@ -42,7 +42,7 @@
     <meta property="og:title" content="Leang Cosmetics" />
     <meta property="og:description" content="Browse Leang Cosmetics products and contact the store." />
     <meta property="og:url" content="https://leangbeauty.com/" />
-    <meta property="og:image" content="https://leangbeauty.com/leang-cosmetics-icon-512.png" />
+    <meta property="og:image" content="https://leangbeauty.com/leang-cosmetics-icon-512-v2.png" />
     <meta name="twitter:card" content="summary" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -62,10 +62,10 @@
          advertise the staff app. The synchronous bootstrap below swaps these
          to the staff identity on admin.* / localhost. -->
     <link rel="manifest" href="/portal-manifest.json" />
-    <link rel="icon" type="image/png" href="/leang-cosmetics-icon-512.png" />
-    <link rel="icon" type="image/png" sizes="192x192" href="/leang-cosmetics-icon-192.png" />
-    <link rel="icon" type="image/png" sizes="512x512" href="/leang-cosmetics-icon-512.png" />
-    <link rel="apple-touch-icon" sizes="180x180" href="/leang-cosmetics-apple-touch-icon-v1.png" />
+    <link rel="icon" type="image/x-icon" href="/leang-cosmetics-favicon-v2.ico" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/leang-cosmetics-icon-192-v2.png" />
+    <link rel="icon" type="image/png" sizes="512x512" href="/leang-cosmetics-icon-512-v2.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/leang-cosmetics-apple-touch-icon-v2.png" />
     <title>Leang Cosmetics</title>
     <script>
       (function setInitialBusinessOsRoute() {
@@ -175,11 +175,12 @@
           if (manifest) manifest.setAttribute('href', '/portal-manifest.json')
           var icons = document.querySelectorAll('link[rel="icon"]')
           for (var iconIndex = 0; iconIndex < icons.length; iconIndex += 1) {
-            icons[iconIndex].setAttribute('href', '/leang-cosmetics-icon-512.png')
-            icons[iconIndex].setAttribute('type', 'image/png')
+            var iconSize = icons[iconIndex].getAttribute('sizes')
+            icons[iconIndex].setAttribute('href', iconSize === '192x192' ? '/leang-cosmetics-icon-192-v2.png' : (iconSize === '512x512' ? '/leang-cosmetics-icon-512-v2.png' : '/leang-cosmetics-favicon-v2.ico'))
+            icons[iconIndex].setAttribute('type', iconSize ? 'image/png' : 'image/x-icon')
           }
           var appleIcon = document.querySelector('link[rel="apple-touch-icon"]')
-          if (appleIcon) appleIcon.setAttribute('href', '/leang-cosmetics-apple-touch-icon-v1.png')
+          if (appleIcon) appleIcon.setAttribute('href', '/leang-cosmetics-apple-touch-icon-v2.png')
         } else {
           document.title = 'Leang Cosmetics Admin'
           var adminAppTitle = document.querySelector('meta[name="apple-mobile-web-app-title"]')
@@ -192,11 +193,11 @@
           var adminIcons = document.querySelectorAll('link[rel="icon"]')
           for (var adminIconIndex = 0; adminIconIndex < adminIcons.length; adminIconIndex += 1) {
             var adminIconSize = adminIcons[adminIconIndex].getAttribute('sizes')
-            adminIcons[adminIconIndex].setAttribute('href', adminIconSize === '192x192' ? '/icon-192.png' : (adminIconSize === '512x512' ? '/icon-512.png' : '/favicon.ico?v=business-os'))
+            adminIcons[adminIconIndex].setAttribute('href', adminIconSize === '192x192' ? '/icon-192.png' : (adminIconSize === '512x512' ? '/icon-512.png' : '/admin-favicon-v1.ico'))
             adminIcons[adminIconIndex].setAttribute('type', adminIconSize ? 'image/png' : 'image/x-icon')
           }
           var adminAppleIcon = document.querySelector('link[rel="apple-touch-icon"]')
-          if (adminAppleIcon) adminAppleIcon.setAttribute('href', '/apple-touch-icon.png')
+          if (adminAppleIcon) adminAppleIcon.setAttribute('href', '/admin-apple-touch-icon-v1.png')
         }
         if (!publicRoute) {
           // Opt the ADMIN shell out of machine translation (Sep 22 2026).

@@ -33,14 +33,14 @@ export const ADMIN_DOCUMENT_APP_TITLE = 'Leang Admin'
 export const ADMIN_DOCUMENT_DESCRIPTION = 'Till, stock and sales for Leang Cosmetics staff'
 export const ADMIN_DOCUMENT_THEME_COLOR = '#fffdf8'
 export const ADMIN_DOCUMENT_MANIFEST_HREF = '/manifest.json'
-export const ADMIN_DOCUMENT_APPLE_TOUCH_ICON_HREF = '/apple-touch-icon.png'
+export const ADMIN_DOCUMENT_APPLE_TOUCH_ICON_HREF = '/admin-apple-touch-icon-v1.png'
 
 // Keyed by the <link rel="icon"> tag's own sizes attribute, exactly as
 // index.html's admin branch keys it. '' is the unsized favicon.
 const ADMIN_DOCUMENT_ICONS: Record<string, { href: string; type: string }> = {
   '192x192': { href: '/icon-192.png', type: 'image/png' },
   '512x512': { href: '/icon-512.png', type: 'image/png' },
-  '': { href: '/favicon.ico?v=business-os', type: 'image/x-icon' },
+  '': { href: '/admin-favicon-v1.ico', type: 'image/x-icon' },
 }
 
 // EXACT hostnames, not a prefix test: this list is the admin half of
