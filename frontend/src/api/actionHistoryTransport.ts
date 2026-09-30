@@ -4,6 +4,22 @@ import { getClientDeviceInfo } from '../utils/deviceInfo.ts'
 
 type ActionHistoryPayload = Record<string, unknown>
 
+export type StockMovementRevertPreview = {
+  kind: 'movement' | 'stock_set' | 'stock_session'
+  movementId: number
+  historyId?: number
+  operationId?: string | number
+  direction?: 'undo' | 'redo'
+  expectedGeneration?: number
+  label?: string
+  lineCount: number
+}
+
+// Confirmation must use a fresh server decision, never a cached generation.
+export function getStockMovementRevertPreview(id: number): Promise<{ success: true; revert: StockMovementRevertPreview }> {
+  return apiFetch('GET', `/api/action-history/movements/${id}/revert-preview`)
+}
+
 export function getActionHistoryDetails(id: string | number, offset = 0): Promise<unknown> {
   return route(`actionHistory:details:${id}:${offset}`, () => apiFetch('GET', `/api/action-history/${encodeURIComponent(String(id))}/details?offset=${offset}&limit=10`), null)
 }

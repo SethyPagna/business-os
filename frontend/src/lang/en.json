@@ -7039,5 +7039,9 @@
   "days_overdue": "overdue",
   "export_group_whole": "Whole dashboard",
   "export_group_sections": "By section",
-  "warnings_short": "warnings"
+  "warnings_short": "warnings",
+  "movement_revert_stock_set_undo": "Undo the entire stock correction {action} ({count} lines)?",
+  "movement_revert_stock_set_redo": "Redo the entire stock correction {action} ({count} lines)?",
+  "movement_revert_stock_session_undo": "Undo the entire stock session {action} ({count} lines)?",
+  "movement_revert_stock_session_redo": "Redo the entire stock session {action} ({count} lines)?"
 }

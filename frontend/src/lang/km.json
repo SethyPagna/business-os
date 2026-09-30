@@ -7039,5 +7039,9 @@
   "days_overdue": "ហួសកំណត់",
   "export_group_whole": "ផ្ទាំងគ្រប់គ្រងទាំងមូល",
   "export_group_sections": "តាមផ្នែក",
-  "warnings_short": "ការព្រមាន"
+  "warnings_short": "ការព្រមាន",
+  "movement_revert_stock_set_undo": "ត្រឡប់ការកែតម្រូវស្តុក {action} ទាំងមូល ({count} បន្ទាត់)?",
+  "movement_revert_stock_set_redo": "ធ្វើការកែតម្រូវស្តុក {action} ទាំងមូលឡើងវិញ ({count} បន្ទាត់)?",
+  "movement_revert_stock_session_undo": "ត្រឡប់វគ្គស្តុក {action} ទាំងមូល ({count} បន្ទាត់)?",
+  "movement_revert_stock_session_redo": "ធ្វើវគ្គស្តុក {action} ទាំងមូលឡើងវិញ ({count} បន្ទាត់)?"
 }
