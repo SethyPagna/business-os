@@ -357,6 +357,41 @@ check('live version check needs the exact commit, a clean stamp and the plan', (
   assert.ok(!lib.checkVersion(null, sha, 'paid').ok)
 })
 
+check('live plan verification accepts matching Paid and Free profiles', () => {
+  const sha = 'a0064847eab5d52bf4bab2b89e4096f7f5d17ec8'
+  const revision = sha.slice(0, 12)
+  for (const plan of ['paid', 'free']) {
+    assert.deepStrictEqual(lib.checkVersion({ revision, tier: plan }, sha, plan), { ok: true, problems: [], revision })
+    const otherPlan = plan === 'paid' ? 'free' : 'paid'
+    const mismatch = lib.checkVersion({ revision, tier: otherPlan }, sha, plan)
+    assert.strictEqual(mismatch.ok, false)
+    assert.deepStrictEqual(mismatch.problems, [`tier is ${otherPlan}, expected ${plan}`])
+  }
+  assert.ok(lib.checkVersion({ revision }, sha).ok, 'revision-only callers need no reported plan')
+})
+
+check('live plan verification rejects absent or empty tier with an actionable reason', () => {
+  const sha = 'a0064847eab5d52bf4bab2b89e4096f7f5d17ec8'
+  for (const plan of ['paid', 'free']) {
+    for (const tier of [undefined, null, '']) {
+      const result = lib.checkVersion({ revision: sha.slice(0, 12), tier }, sha, plan)
+      assert.strictEqual(result.ok, false, `${plan}: missing tier must not pass`)
+      assert.deepStrictEqual(result.problems, [`no tier reported, expected ${plan}`])
+    }
+  }
+})
+
+check('live plan verification rejects malformed or unknown reported profiles', () => {
+  const sha = 'a0064847eab5d52bf4bab2b89e4096f7f5d17ec8'
+  for (const plan of ['paid', 'free']) {
+    for (const tier of [' ', 'Paid', 'enterprise', false, 0, {}, ['paid']]) {
+      const result = lib.checkVersion({ revision: sha.slice(0, 12), tier }, sha, plan)
+      assert.strictEqual(result.ok, false, `${plan}: malformed tier must not pass`)
+      assert.deepStrictEqual(result.problems, [`invalid tier reported, expected ${plan}`])
+    }
+  }
+})
+
 check('certificates must name the exact full sha', () => {
   const sha = 'a0064847eab5d52bf4bab2b89e4096f7f5d17ec8'
   assert.strictEqual(lib.certFileName(sha), `release-cert-${sha}.txt`)
