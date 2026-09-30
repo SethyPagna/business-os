@@ -114,10 +114,10 @@ await runTest('bulk-edit i18n: no sentence-fragment (_prefix/_suffix) keys remai
     assert.match(en[key] as string, /\{count\}/, `en.json '${key}' must contain a {count} placeholder`)
     assert.match(km[key] as string, /\{count\}/, `km.json '${key}' must contain a {count} placeholder`)
   }
-  // No key anywhere in either pack is a bare sentence-fragment key (the
-  // pre-existing, unrelated 'object_prefix' R2 setting is not a sentence
-  // fragment and is excluded).
-  const fragmentKeys = Object.keys(en).filter((k) => (k.endsWith('_prefix') || k.endsWith('_suffix')) && k !== 'object_prefix')
+  // No key anywhere in either pack is a bare sentence-fragment key. Excluded:
+  // the unrelated 'object_prefix' R2 setting and 'stock_free_suffix', a whole
+  // "{n} free" badge (the number sits inside the string) named by the stock spec.
+  const fragmentKeys = Object.keys(en).filter((k) => (k.endsWith('_prefix') || k.endsWith('_suffix')) && k !== 'object_prefix' && k !== 'stock_free_suffix')
   assert.deepEqual(fragmentKeys, [], `unexpected sentence-fragment keys survive in en.json: ${fragmentKeys.join(', ')}`)
 })
 
