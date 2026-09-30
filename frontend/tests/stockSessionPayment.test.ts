@@ -118,6 +118,15 @@ runTest('the Payment step: no hint text, the two amount labels, match and reset 
   assert.match(payment, /onBlur=\{onPaidBlur\}/, 'costs readjust automatically when the paid amount is left')
 })
 
+runTest('360 px: a Payment line is the name, then its figures -- the name is never squeezed into a 64 px column', () => {
+  // Browser pass 30 Sep: "Rose Serum 30ml" wrapped to three lines beside qty, cost and total.
+  const payment = src('components/stock-session/StockSessionPaymentStep.tsx')
+  const row = /<li key=\{line\.key\} className="grid grid-cols-\[minmax\(0,1fr\)_6rem_4rem\] [^"]*sm:grid-cols-\[minmax\(0,1fr\)_auto_6rem_4rem\][^"]*">/
+  assert.match(payment, row, 'phones: [qty][cost][total] under the name; sm+: one row')
+  assert.match(payment, /<span className="col-span-3 min-w-0 break-words [^"]*sm:col-span-1[^"]*">\{line\.productName\}/, 'the name has the whole first phone row')
+  assert.doesNotMatch(payment, /grid-cols-\[minmax\(0,1fr\)_auto_6rem_auto\]/, 'the squeezed four-column phone row is gone')
+})
+
 if (failed > 0) {
   process.exitCode = 1
   console.error(`\n${failed} stock session payment test(s) failed`)
