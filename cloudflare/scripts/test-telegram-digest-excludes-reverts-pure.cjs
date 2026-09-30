@@ -8,6 +8,12 @@
 const assert = require('node:assert/strict')
 const { fixture, loadStockSession } = require('./test-stock-session-atomic.cjs')
 const telegram = loadStockSession('lib/telegram.ts')
+const { revertChainOpenSql } = loadStockSession('lib/stockInSessionsQuery.ts')
+
+// telegram.ts spells the chain rule out (it cannot import it: many tests load it with hand-written
+// module maps), so the two must stay the same query.
+const squash = (sql) => sql.replace(/s+/g, ' ').trim()
+assert.equal(squash(telegram.REVERTED_NOW_SQL), squash(revertChainOpenSql('inventory_movements')), 'the digest uses the shared chain rule')
 
 const f = fixture()
 try {

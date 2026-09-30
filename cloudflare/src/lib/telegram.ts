@@ -1,7 +1,6 @@
 import { getDb } from './db'
 import { loadLowStockConfig, lowStockThresholdSql } from './lowStockSettings'
 import { customerBilledDeliveryFeeUsd } from './saleTotals'
-import { revertChainOpenSql } from './stockInSessionsQuery'
 import { BUSINESS_UTC_OFFSET_MINUTES, businessToday, localDateRangeClause } from './businessDateWindow'
 import {
   addCalendarDays, bi, firstCharacters, getTelegramLanguage, HANGING_INDENT, label, labeled, localizeTelegramHeading, localizeTelegramLine, localizeTelegramValue, moreItems, normalizeTelegramLanguage, REPORT_SECTION_EDGE, ROW_BULLET, row, RULE, saleStatusMoneyLabel,
@@ -966,7 +965,23 @@ const STOCK_OUT_MOVEMENT = "movement_type IN ('remove', 'transfer_out', 'move_ou
 // past day); a row whose Revert was itself reverted counts again. The Stock
 // Changes ledger still shows both. Written against the table name, so every
 // caller reads inventory_movements unaliased.
-const notARevert = (): string => `(reference_id IS NULL OR CAST(reference_id AS TEXT) NOT LIKE 'revert:%') AND NOT ${revertChainOpenSql('inventory_movements')}`
+// The chain rule of stockInSessionsQuery.ts revertChainOpenSql (odd depth = reverted now),
+// spelled out here because this module is loaded by many tests with hand-written module
+// maps; test-telegram-digest-excludes-reverts-pure.cjs pins that the two stay identical.
+export const REVERTED_NOW_SQL = `EXISTS (
+    WITH RECURSIVE revert_chain(id, depth) AS (
+      SELECT rv.id, 1 FROM inventory_movements rv
+      WHERE rv.reference_id = 'revert:' || CAST(inventory_movements.id AS TEXT) AND rv.id > inventory_movements.id
+      UNION ALL
+      SELECT rv.id, chain.depth + 1 FROM inventory_movements rv
+      JOIN revert_chain chain ON rv.reference_id = 'revert:' || CAST(chain.id AS TEXT)
+      WHERE rv.id > chain.id
+    )
+    SELECT 1 FROM revert_chain chain WHERE chain.depth % 2 = 1
+      AND NOT EXISTS (SELECT 1 FROM inventory_movements next_revert
+        WHERE next_revert.reference_id = 'revert:' || CAST(chain.id AS TEXT) AND next_revert.id > chain.id)
+  )`
+const notARevert = (): string => `(reference_id IS NULL OR CAST(reference_id AS TEXT) NOT LIKE 'revert:%') AND NOT ${REVERTED_NOW_SQL}`
 // 'stock_in' is the legacy string the unified stock-in session used to write
 // (see stockInSessionsQuery.ts's STOCK_RECEIPT_MOVEMENT_TYPES) -- without it
 // this digest under-counted every session committed through the Products
