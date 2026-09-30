@@ -11,6 +11,7 @@ import {
   freeRowText,
   lineDeclaresFree,
   lineEntryRefusal,
+  lineNeedsCreate,
   linePaidTotal,
   lineSellingPriceChange,
   lineWireUnitCost,
@@ -211,6 +212,23 @@ runTest('the entry row is [Qty][Cost][Price]; the free row lives in Items; Price
   assert.match(modal, /getPermissionTier\('products'\) === 'full' && [a-zA-Z.]+\.can\('products', 'edit'\)/, 'price edit = full products tier + edit')
   const shared = src('components/stock-session/StockSessionSharedDetails.tsx')
   assert.doesNotMatch(shared, /stock_receipt_free_goods/, 'Free is never a shared detail')
+})
+
+runTest('a new product is held, then created once under its held request id at Complete Session, before it is received', () => {
+  const held = line({ product: { id: '', name: 'Glow Toner' }, createPayload: { name: 'Glow Toner' }, createRequestId: 'product_req_1' })
+  assert.equal(lineNeedsCreate(held), true, 'a held payload with no id still needs its create')
+  assert.equal(lineNeedsCreate({ ...held, product: { ...held.product, id: 501 } }), false, 'once the id is written, a retry only receives')
+  assert.equal(lineNeedsCreate(line()), false, 'an existing product is never created')
+  const modal = src('components/inventory/FastStockInModal.tsx')
+  assert.match(modal, /client_request_id: line\.createRequestId/, 'the create replays under the id minted when the payload was held')
+  const create = modal.indexOf('const id = await createHeldProduct(line)')
+  const persist = modal.indexOf('persistSessionDraft(lines)', create)
+  const receive = modal.indexOf('await commitFastStockIn(')
+  assert.ok(create > 0 && persist > create && receive > persist, 'create, then the id is persisted synchronously, then the receipt')
+  assert.match(modal, /if \(result\?\.pending\) throw Object\.assign\([\s\S]{0,260}code: 'product_pending_review'/, 'a review-pending create is refused for this session')
+  assert.match(modal, /reviewPending \? \{ needsRemoval: true \} : \{\}/, 'a pending-review line offers only removal')
+  assert.equal((modal.match(/createHeldProduct\(/g) || []).length, 1, 'the held create has one caller, the Complete Session loop')
+  assert.equal((modal.match(/createProduct\(/g) || []).length, 1, 'createProduct has one call site')
 })
 
 if (failed > 0) {
