@@ -3,6 +3,15 @@ import PublicCatalogPage from './components/catalog/PublicCatalogPage.tsx'
 import { PublicCatalogAppProvider } from './app/PublicCatalogAppProvider.tsx'
 import RootErrorBoundary from './components/shared/RootErrorBoundary.tsx'
 import './public-web-api.ts'
+import { installPortalTranslateDomGuard } from './components/catalog/portalTranslateDomGuard.ts'
+
+// Every storefront page load, before the first render: Chrome's built-in
+// translator and translation extensions move text nodes React owns, and React's next commit then throws on
+// removeChild/insertBefore. The guard only changes calls that would
+// otherwise throw (portalTranslateDomGuard.ts). This module is the
+// storefront entry only -- index.tsx loads it when isPublicCatalogPath() is
+// true and AdminRoot otherwise -- so the admin app keeps the native methods.
+installPortalTranslateDomGuard()
 
 function PublicCatalogFallback(): ReactElement {
   return (

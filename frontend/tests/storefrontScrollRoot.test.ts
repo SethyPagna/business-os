@@ -4,12 +4,11 @@
 // ways the storefront can lose its scroll -- each one a mechanism that was
 // actually present in the tree, not a hypothetical:
 //
-//  1. A body/document scroll LOCK left armed. The storefront has no modal
-//     library that locks the body, and it must stay that way: nothing in the
-//     public catalog file set may write document.body.style.overflow. The
-//     flyouts (bucket, contact, account, wishlist, galleries) are absolutely
-//     -positioned overlays, so with every flyout CLOSED there is by
-//     construction nothing left to unlock.
+//  1. A body/document scroll LOCK left armed. Nothing in the public catalog
+//     file set may write document.body.style.overflow. The overlays that lock
+//     (product sheet, photo viewer, policy reader) go through the counted
+//     shared/documentScrollLock.ts and release it on unmount, so with every
+//     flyout CLOSED there is nothing left to unlock.
 //  2. An inner scroll container sitting over the product list, swallowing
 //     the wheel/touch gesture aimed at the page. The brand-letter GRID was
 //     exactly that (`max-h-[min(18rem,...)] overflow-y-auto`), and the
@@ -88,6 +87,17 @@ runTest('no storefront file locks the body or document scroll', () => {
       `${file} must not take a body/document scroll lock -- the storefront has no unlock path, so a lock left armed by a closed flyout is unrecoverable`,
     )
   }
+})
+
+// 2026-09-25 (refuter follow-up to P-public-6): the product sheet and the
+// immersive viewer DO lock page scroll now -- but only through the counted
+// shared/documentScrollLock.ts, taken in a mount effect and released in its
+// cleanup, so an unmounted (closed) overlay cannot leave the lock armed.
+// tests/overlayScrollLockFocus.test.ts proves the count and the restore.
+runTest('storefront overlays lock scroll only through the counted, self-releasing helper', () => {
+  const flyout = sources.get('../src/components/catalog/ProductDetailFlyout.tsx')!
+  assert.match(flyout, /import \{ lockDocumentScroll \} from '\.\.\/shared\/documentScrollLock\.ts'/)
+  assert.match(flyout, /const releaseScroll = lockDocumentScroll\(\)[\s\S]{0,200}return \(\) => \{[\s\S]{0,80}releaseScroll\(\)/, 'the lock must be released in the same effect cleanup')
 })
 
 runTest('every storefront flyout is an overlay, so a CLOSED flyout leaves nothing locked', () => {

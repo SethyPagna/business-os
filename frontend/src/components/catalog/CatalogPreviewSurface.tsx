@@ -1,4 +1,4 @@
-import { Suspense, useMemo, useState } from 'react'
+import { Suspense, cloneElement, isValidElement } from 'react'
 import type { CSSProperties, ComponentType, Dispatch, ReactNode, RefObject, SetStateAction } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import ArrowDown from 'lucide-react/dist/esm/icons/arrow-down.js'
@@ -11,6 +11,8 @@ import User from 'lucide-react/dist/esm/icons/user.js'
 import LazyPortalMenu from '../shared/LazyPortalMenu'
 import CatalogProductImage from './catalogImages'
 import type { ProductDetailViewState } from './ProductDetailFlyout'
+import type { PortalFooterProps } from './legal/LegalPages.tsx'
+import { PUBLIC_STOREFRONT_LANGUAGE_OPTIONS } from './portalLanguageOptions.ts'
 import '../../styles/public-portal.css'
 
 const ImageGalleryLightbox = lazyRetry(() => import('../shared/ImageGalleryLightbox'), 'catalog-preview-image-gallery-lightbox')
@@ -71,12 +73,6 @@ type FilePickerModalProps = FilePickerState & {
   onSelect: (asset: unknown) => void
 }
 
-type TranslateOption = {
-  value: string
-  label: string
-  kind?: string
-}
-
 type HeaderLink = {
   key: string
   label: string
@@ -84,8 +80,6 @@ type HeaderLink = {
   icon: ComponentType<{ className?: string }>
   accentClassName?: string
 }
-
-type TranslateApplyState = 'idle' | 'applied' | 'failed' | string
 
 type CatalogPreviewSurfaceProps = {
   publicView: boolean
@@ -116,10 +110,10 @@ type CatalogPreviewSurfaceProps = {
   catalogSection: ReactNode
   secondaryTabSection: ReactNode
   promotionsSection?: ReactNode
-  // N45 legal lane: the storefront <footer> (business details + the
-  // Policies menu). Rendered here so the live site and the admin
-  // preview show the SAME footer from one place; the caller supplies it
-  // so this surface never has to know the business-detail shape.
+  // N45 legal lane: the storefront <footer> (business details, quick links,
+  // social links and the policy links). Rendered here so the live site and
+  // the admin preview show the SAME footer from one place; the caller
+  // supplies it so this surface never has to know the business-detail shape.
   footer?: ReactNode
   publicScrollButtonsVisible: boolean
   scrollPublicPortal: (direction: 'top' | 'bottom') => void
@@ -145,13 +139,8 @@ type CatalogPreviewSurfaceProps = {
   portalImageView: PortalImageViewState
   setPortalImageView: Dispatch<SetStateAction<PortalImageViewState>>
   toggleTheme: () => void
-  translateTarget: string
-  translateApplyState: TranslateApplyState
-  translateApplyMessage?: string
-  externalTranslateTarget?: string | null
-  translateReady: boolean
-  changeTranslateTarget: (target: string) => void
-  allPublicTranslateOptions: TranslateOption[]
+  pageLanguage: string
+  changePageLanguage: (language: string) => void
 }
 
 const FilePickerModal = lazyRetry(async () => ({
@@ -202,29 +191,26 @@ export default function CatalogPreviewSurface({
   portalImageView,
   setPortalImageView,
   toggleTheme,
-  translateTarget,
-  translateApplyState,
-  translateApplyMessage,
-  externalTranslateTarget,
-  translateReady,
-  changeTranslateTarget,
-  allPublicTranslateOptions,
+  pageLanguage,
+  changePageLanguage,
 }: CatalogPreviewSurfaceProps) {
-  const [translateSearch, setTranslateSearch] = useState('')
-  const trimmedTranslateSearch = translateSearch.trim().toLowerCase()
-  // Split into "first-party" (fast, real translations) vs "external" (the
-  // 9 Google-Translate-only languages) sections instead of one flat list
-  // of 28 -- matches the distinction the data already carries (`kind`)
-  // but the old flat list never surfaced visually, just via a per-item
-  // "External translation:" text prefix that was easy to miss while
-  // scanning a long list. Filtered by the search box below when there
-  // are enough options that scrolling to find one is real friction.
-  const filteredTranslateOptions = useMemo(() => {
-    if (!trimmedTranslateSearch) return allPublicTranslateOptions
-    return allPublicTranslateOptions.filter((option) => option.label.toLowerCase().includes(trimmedTranslateSearch))
-  }, [allPublicTranslateOptions, trimmedTranslateSearch])
-  const firstPartyTranslateOptions = filteredTranslateOptions.filter((option) => option.kind !== 'external')
-  const externalTranslateOptions = filteredTranslateOptions.filter((option) => option.kind === 'external')
+
+  // P-public-9: the footer's quick links are the nav's own tabs. This
+  // surface owns the tabs, so it hands them to whichever footer the caller
+  // mounted (public page and admin preview alike) -- one source, no drift.
+  // A footer jump always lands at the top of the section, so unlike a nav
+  // click it scrolls even when the tab is already active.
+  const handleFooterQuickLink = (key: string) => {
+    if (key !== activeTab) setActiveTab(key)
+    if (typeof window === 'undefined') return
+    window.requestAnimationFrame(() => {
+      const target = publicPortalNavRef?.current || previewSectionRef?.current
+      target?.scrollIntoView({ block: 'start' })
+    })
+  }
+  const footerWithQuickLinks = isValidElement<PortalFooterProps>(footer)
+    ? cloneElement(footer, { quickLinks: portalTabs.map((tab) => ({ key: tab.key, label: tab.label, onSelect: () => handleFooterQuickLink(tab.key) })) })
+    : footer
 
   const handlePortalTabClick = (key: string) => {
     if (key === activeTab) return
@@ -354,7 +340,13 @@ export default function CatalogPreviewSurface({
                 </button>
               </div>
             ) : null}
-            <header className="portal-header-shell rounded-t-[28px] border-b border-slate-200/80 dark:border-neutral-800/80">
+            {/* Square, full-width bars (P-public-8, owner 2026-09-25): the 28px
+                corners on these two shells sat 4px (px-1) from their content, so
+                in dark mode -- where both shells and the nav track paint a
+                background -- the curve cut into the header row, and the sticky
+                nav's rounded bottom left two see-through notches that the About
+                hero (the first section) scrolled through. */}
+            <header className="portal-header-shell border-b border-slate-200/80 dark:border-neutral-800/80">
               <div className="px-1 py-4 sm:py-5">
                 <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 sm:grid-cols-[auto_minmax(0,1fr)_auto]">
                   {/* 6.2 (user): the LOGO is out of the top bar -- it still
@@ -372,7 +364,7 @@ export default function CatalogPreviewSurface({
                       icons` is the hook public-portal.css's pointer:coarse
                       44px floor exempts -- every icon below carries an
                       aria-label, which matched that rule and would otherwise
-                      silently re-widen it past `h-8`/`h-9` and reopen this
+                      silently re-widen it past `w-8`/`w-9` and reopen this
                       same overflow. */}
                   {/* 2026-09-18 (owner): "for the top of the website, the
                       buttons can be below the business name... so Leang
@@ -393,7 +385,7 @@ export default function CatalogPreviewSurface({
                           href={item.value}
                           target="_blank"
                           rel="noreferrer"
-                          className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-slate-700 transition hover:bg-slate-100 dark:text-neutral-200 dark:hover:bg-neutral-800 sm:h-9 sm:w-9 ${item.accentClassName || ''}`}
+                          className={`inline-flex h-10 w-8 min-[360px]:w-9 shrink-0 items-center justify-center rounded-full text-slate-700 transition hover:bg-slate-100 dark:text-neutral-200 dark:hover:bg-neutral-800 sm:h-9 sm:w-9 ${item.accentClassName || ''}`}
                           aria-label={item.label}
                           title={item.label}
                         >
@@ -439,7 +431,7 @@ export default function CatalogPreviewSurface({
                     {onOpenWishlist ? (
                       <button
                         type="button"
-                        className="relative inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-slate-700 transition hover:bg-slate-100 dark:text-neutral-200 dark:hover:bg-neutral-800 sm:h-9 sm:w-9"
+                        className="relative inline-flex h-10 w-8 min-[360px]:w-9 shrink-0 items-center justify-center rounded-full text-slate-700 transition hover:bg-slate-100 dark:text-neutral-200 dark:hover:bg-neutral-800 sm:h-9 sm:w-9"
                         onClick={onOpenWishlist}
                         aria-label={copy('wishlistTitle', 'Wishlist')}
                         title={copy('wishlistTitle', 'Wishlist')}
@@ -455,7 +447,7 @@ export default function CatalogPreviewSurface({
                     {onOpenAccount ? (
                       <button
                         type="button"
-                        className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition hover:bg-slate-100 dark:hover:bg-neutral-800 sm:h-9 sm:w-9 ${accountSignedIn ? 'text-emerald-600 dark:text-emerald-300' : 'text-slate-700 dark:text-neutral-200'}`}
+                        className={`inline-flex h-10 w-8 min-[360px]:w-9 shrink-0 items-center justify-center rounded-full transition hover:bg-slate-100 dark:hover:bg-neutral-800 sm:h-9 sm:w-9 ${accountSignedIn ? 'text-emerald-600 dark:text-emerald-300' : 'text-slate-700 dark:text-neutral-200'}`}
                         onClick={onOpenAccount}
                         aria-label={copy('account', 'Account')}
                         title={copy('account', 'Account')}
@@ -466,121 +458,51 @@ export default function CatalogPreviewSurface({
                     {displayConfig.translateWidgetEnabled ? (
                       <LazyPortalMenu
                         align="right"
-                        onOpenChange={(open) => {
-                          if (!open) setTranslateSearch('')
-                        }}
                         trigger={(
                           <button
                             type="button"
-                            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-slate-700 transition hover:bg-slate-100 dark:text-neutral-200 dark:hover:bg-neutral-800 sm:h-9 sm:w-9"
+                            className="inline-flex h-10 w-8 min-[360px]:w-9 shrink-0 items-center justify-center rounded-full text-slate-700 transition hover:bg-slate-100 dark:text-neutral-200 dark:hover:bg-neutral-800 sm:h-9 sm:w-9"
                             aria-label={copy('publicTranslation', 'Language tools')}
                             title={copy('publicTranslation', 'Language tools')}
                           >
                             <Globe className="h-4 w-4 sm:h-[18px] sm:w-[18px]" />
                           </button>
                         )}
-                        content={({ closeMenu }) => {
-                          const renderOption = (option: TranslateOption) => {
-                            const active = translateTarget === option.value && (
-                              translateApplyState === 'applied'
-                              || (option.value === 'original' && translateApplyState === 'idle')
-                            )
-                            return (
-                              <button
-                                key={option.value}
-                                type="button"
-                                className={`flex w-full items-center justify-between gap-3 px-4 py-2.5 text-left text-sm transition ${
-                                  active
-                                    ? 'bg-blue-50 text-blue-700 dark:bg-amber-500/10 dark:text-amber-300'
-                                    : 'text-slate-700 hover:bg-slate-50 dark:text-neutral-200 dark:hover:bg-neutral-800'
-                                }`}
-                                onClick={() => {
-                                  changeTranslateTarget(option.value)
-                                  closeMenu()
-                                }}
-                              >
-                                <span>{option.value === 'original' ? copy('followApp', 'Original') : option.label}</span>
-                                {active ? <span className="text-[11px] font-semibold uppercase">{copy('active', 'Active')}</span> : null}
-                              </button>
-                            )
-                          }
-                          return (
-                            <div className="w-72 max-w-[85vw]">
-                              <div className="px-4 pb-2 pt-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-neutral-400">
-                                {copy('publicTranslation', 'Language tools')}
-                              </div>
-                              {allPublicTranslateOptions.length > 8 ? (
-                                <div className="px-3 pb-2">
-                                  <input
-                                    type="text"
-                                    value={translateSearch}
-                                    onChange={(event) => setTranslateSearch(event.target.value)}
-                                    placeholder={copy('searchLanguages', 'Search languages')}
-                                    aria-label={copy('searchLanguages', 'Search languages')}
-                                    // Same createPortal() problem as the
-                                    // filter menu's search field: this popup
-                                    // is mounted on document.body, outside
-                                    // every portal root, so the stylesheet's
-                                    // :focus-visible ring cannot reach it and
-                                    // focus:border-blue-400 alone is a 1px
-                                    // tint. It paints the ring itself.
-                                    className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm text-slate-700 outline-none transition focus:border-blue-400 focus:bg-white focus-visible:outline focus-visible:outline-[3px] focus-visible:outline-offset-2 focus-visible:outline-[#0369a1] dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100 dark:focus:border-amber-400 dark:focus:bg-neutral-900 dark:focus-visible:outline-[#fcd34d]"
-                                    // Real user requirement, not decorative:
-                                    // a flat 28-option list with no way to
-                                    // filter was the actual complaint behind
-                                    // "hard to find the right language" --
-                                    // this narrows the two sections below as
-                                    // you type instead of forcing a scroll
-                                    // through the full list every time.
-                                    autoFocus
-                                  />
-                                </div>
-                              ) : null}
-                              <div className="max-h-[min(calc(60*var(--app-vh)),20rem)] overflow-y-auto py-1">
-                                {firstPartyTranslateOptions.length ? firstPartyTranslateOptions.map(renderOption) : null}
-                                {externalTranslateOptions.length ? (
-                                  <>
-                                    <div className="mt-1 border-t border-slate-200 px-4 pb-1.5 pt-2.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:border-neutral-700 dark:text-neutral-400">
-                                      {copy('externalTranslation', 'More languages (auto-translated)')}
-                                    </div>
-                                    <p className="px-4 pb-2 text-xs leading-5 text-slate-500 dark:text-neutral-400">
-                                      {copy(
-                                        'externalTranslationDisclosure',
-                                        'Choosing one sends the text on this page to Google Translate and may set Google cookies.',
-                                        'ការជ្រើសរើសភាសាមួយនឹងផ្ញើអត្ថបទលើទំព័រនេះទៅ Google Translate ហើយអាចកំណត់ខូឃី Google។',
-                                      )}
-                                    </p>
-                                    {externalTranslateOptions.map(renderOption)}
-                                  </>
-                                ) : null}
-                                {!firstPartyTranslateOptions.length && !externalTranslateOptions.length ? (
-                                  <div className="px-4 py-6 text-center text-sm text-slate-500 dark:text-neutral-400">
-                                    {copy('noLanguagesFound', 'No languages match your search.')}
-                                  </div>
-                                ) : null}
-                              </div>
-                              {translateApplyMessage ? (
-                                <div className={`border-t border-slate-200 px-4 py-2 text-xs dark:border-neutral-700 ${
-                                  translateApplyState === 'failed'
-                                    ? 'text-rose-600 dark:text-rose-300'
-                                    : 'text-slate-500 dark:text-neutral-400'
-                                }`}>
-                                  {translateApplyMessage}
-                                </div>
-                              ) : null}
-                              {externalTranslateTarget && !translateReady ? (
-                                <div className="border-t border-slate-200 px-4 py-2 text-xs text-slate-500 dark:border-neutral-700 dark:text-neutral-400">
-                                  {copy('externalTranslationPreparing', 'Preparing external translation...')}
-                                </div>
-                              ) : null}
+                        content={({ closeMenu }) => (
+                          <div className="w-72 max-w-[85vw]">
+                            <div className="px-4 pb-2 pt-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-neutral-400">
+                              {copy('publicTranslation', 'Language tools')}
                             </div>
-                          )
-                        }}
+                            <div className="py-1">
+                              {PUBLIC_STOREFRONT_LANGUAGE_OPTIONS.map((option) => {
+                                const active = pageLanguage === option.value
+                                return (
+                                  <button
+                                    key={option.value}
+                                    type="button"
+                                    className={`flex w-full items-center justify-between gap-3 px-4 py-2.5 text-left text-sm transition ${
+                                      active
+                                        ? 'bg-blue-50 text-blue-700 dark:bg-amber-500/10 dark:text-amber-300'
+                                        : 'text-slate-700 hover:bg-slate-50 dark:text-neutral-200 dark:hover:bg-neutral-800'
+                                    }`}
+                                    onClick={() => {
+                                      changePageLanguage(option.value)
+                                      closeMenu()
+                                    }}
+                                  >
+                                    <span>{option.label}</span>
+                                    {active ? <span className="text-[11px] font-semibold uppercase">{copy('active', 'Active')}</span> : null}
+                                  </button>
+                                )
+                              })}
+                            </div>
+                          </div>
+                        )}
                       />
                     ) : null}
                     <button
                       type="button"
-                      className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-slate-700 transition hover:bg-slate-100 dark:text-neutral-200 dark:hover:bg-neutral-800 sm:h-9 sm:w-9"
+                      className="inline-flex h-10 w-8 min-[360px]:w-9 shrink-0 items-center justify-center rounded-full text-slate-700 transition hover:bg-slate-100 dark:text-neutral-200 dark:hover:bg-neutral-800 sm:h-9 sm:w-9"
                       onClick={toggleTheme}
                       aria-label={darkMode ? copy('switch_to_light_mode', 'Switch to light mode') : copy('switch_to_dark_mode', 'Switch to dark mode')}
                       title={darkMode ? copy('switch_to_light_mode', 'Switch to light mode') : copy('switch_to_dark_mode', 'Switch to dark mode')}
@@ -602,7 +524,7 @@ export default function CatalogPreviewSurface({
               style={publicView && publicPortalNavPinned ? { minHeight: `${publicPortalNavMetrics.height || 0}px` } : undefined}
             >
               <div
-                className="portal-nav-shell rounded-b-[28px] border-b border-slate-200/80 bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/85 dark:border-neutral-800/80 dark:bg-[#0b0b0c]/95"
+                className="portal-nav-shell border-b border-slate-200/80 bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/85 dark:border-neutral-800/80 dark:bg-[#0b0b0c]/95"
                 style={pinnedNavStyle}
               >
                 <div className="portal-nav-scroll overflow-x-auto overflow-y-hidden">
@@ -645,7 +567,7 @@ export default function CatalogPreviewSurface({
               {catalogSection}
               {secondaryTabSection}
             </main>
-            {footer}
+            {footerWithQuickLinks}
           </div>
         </div>
       </div>
@@ -707,6 +629,7 @@ export default function CatalogPreviewSurface({
             index={productGalleryView.index}
             onClose={() => setProductGalleryView({ open: false, title: '', items: [], index: 0 })}
             onIndexChange={(index: number) => setProductGalleryView((current) => ({ ...current, index }))}
+            variant="immersive"
             labels={{
               prev: copy('prevImage', 'Prev'),
               next: copy('nextImage', 'Next'),
@@ -727,6 +650,7 @@ export default function CatalogPreviewSurface({
             contactNote={productDetailContactNote}
             cautionDefault={productDetailCautionDefault}
             needMoreDetailsDefault={productDetailNeedMoreDetailsDefault}
+            language={pageLanguage}
             onAddToBucket={onAddToBucket}
             bucketQty={productDetailView.product ? getBucketQty?.(productDetailView.product.id) : 0}
           />

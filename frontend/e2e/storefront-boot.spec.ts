@@ -1,10 +1,12 @@
 import { expect, test } from '@playwright/test'
 import {
+  STOREFRONT_KM_LABELS,
   STOREFRONT_ORIGIN,
   blockSiteData,
   collectPageHealth,
   expectNoRuntimeErrors,
   storefrontCards,
+  storefrontSectionTab,
 } from './support/harness'
 
 /**
@@ -43,15 +45,17 @@ test.describe('leangbeauty storefront boot', () => {
     // The public root is chosen by HOSTNAME (src/app/pathRouting.ts). If this
     // ever reads "admin" the rest of the file is testing the wrong app.
     await expect(page.locator('html')).toHaveAttribute('data-business-os-initial-route', 'public')
+    // A first visit opens in Khmer, the owner's storefront default.
+    await expect(page.locator('html')).toHaveAttribute('lang', 'km')
 
     // About is the store's default landing tab (PublicCatalogPage's
     // resolvePortalActiveTab(..., 'about')), so the grid is one tap away.
-    await page.getByRole('button', { name: 'Products', exact: true }).click()
+    await storefrontSectionTab(page, STOREFRONT_KM_LABELS, 'products').click()
 
     await expect(page.locator(storefrontCards).first()).toBeVisible()
     // 137 fixture products at the store's own page size of 50.
     await expect(page.locator(storefrontCards)).toHaveCount(50)
-    await expect(page.getByRole('navigation', { name: 'Page' }).first()).toBeVisible()
+    await expect(page.getByRole('navigation', { name: STOREFRONT_KM_LABELS.page }).first()).toBeVisible()
 
     expectNoRuntimeErrors(health)
     // A storefront that 404s or 500s on its own bootstrap is a white screen
@@ -74,7 +78,7 @@ test.describe('leangbeauty storefront boot', () => {
     const health = collectPageHealth(page)
 
     await page.goto(`${STOREFRONT_ORIGIN}/`, { waitUntil: 'load' })
-    await page.getByRole('button', { name: 'Products', exact: true }).click()
+    await storefrontSectionTab(page, STOREFRONT_KM_LABELS, 'products').click()
 
     await expect(page.locator(storefrontCards).first()).toBeVisible()
     await expect(page.locator(storefrontCards)).toHaveCount(50)
@@ -111,7 +115,7 @@ test.describe('leangbeauty storefront boot', () => {
     test.skip(browserName === 'webkit', 'WebKit cannot reload under Playwright offline emulation')
     const health = collectPageHealth(page)
     await page.goto(`${STOREFRONT_ORIGIN}/`, { waitUntil: 'load' })
-    await expect(page.getByRole('button', { name: 'Products', exact: true })).toBeVisible()
+    await expect(storefrontSectionTab(page, STOREFRONT_KM_LABELS, 'products')).toBeVisible()
 
     if (browserName === 'chromium') {
       // index.tsx registers on the idle callback after `load`, so wait for a

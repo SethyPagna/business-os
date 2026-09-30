@@ -23,7 +23,6 @@ const read = (rel: string): string => fs.readFileSync(path.join(ROOT, rel), 'utf
 
 const indexHtml = read('index.html')
 const mainCss = read('src/styles/main.css')
-const portalCss = read('src/styles/public-portal.css')
 const hookSource = read('src/utils/useVisualViewportInset.ts')
 const modalSource = read('src/components/shared/Modal.tsx')
 const themeBootstrapSource = read('src/public-runtime/theme-bootstrap.ts')
@@ -99,16 +98,6 @@ runTest('D3 -- the date-entry field keeps its own rule instead of tying with the
   assert.match(mainCss, /input:is\(\[type='text'/)
   assert.match(mainCss, /:not\(\[type\]\)\):not\(\.date-entry-input\)/)
   assert.match(mainCss, /input\.date-entry-input \{\s*font-size: max\(16px, calc\(13px \* var\(--ui-text-scale, 1\)\)\) !important;/)
-})
-
-runTest('D3 -- the storefront translate select is floored too', () => {
-  // Catches: leaving the one field main.css cannot reach. The Google
-  // Translate <select> is pinned at 0.875rem through an ID selector (1-2-1),
-  // which outranks the floor, so tapping it zoomed the storefront.
-  assert.match(
-    portalCss,
-    /@media \(max-width: 767px\) \{[\s\S]*?\.goog-te-combo[\s\S]*?font-size: 16px !important;/,
-  )
 })
 
 runTest('D3 -- index.html still caps browser zoom as belt and braces', () => {

@@ -10,7 +10,10 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
   PRODUCT_CAUTION_SUGGESTED_TEXT,
+  PRODUCT_CAUTION_SUGGESTED_TEXT_KM,
   PRODUCT_NEED_MORE_DETAILS_SUGGESTED_TEXT,
+  PRODUCT_NEED_MORE_DETAILS_SUGGESTED_TEXT_KM,
+  resolveProductDetailDefault,
 } from '../src/components/catalog/productDetailDefaultsText.ts'
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)))
@@ -59,5 +62,39 @@ for (const pack of ['en', 'km']) {
 const worker = read('../cloudflare/src/routes/portal.ts')
 assert.match(worker, /productCautionDefault: settings\.customer_portal_product_caution_default \|\| ''/)
 assert.match(worker, /productNeedMoreDetailsDefault: settings\.customer_portal_product_need_more_details_default \|\| ''/)
+
+// 5. Owner, 2026-09-25: the owner's texts ARE the default whenever a product
+//    has no value of its own -- with nothing saved in settings too, which is
+//    the state that used to show "No product-specific caution has been added
+//    yet." / "Contact us for more product details." instead.
+assert.equal(PRODUCT_CAUTION_SUGGESTED_TEXT, 'Follow the instructions on the product packaging and use the product only as directed. Stop use if unexpected irritation, discomfort, or another adverse reaction occurs. Contact us if you need help confirming the exact variant or usage details before purchase. For external use only. Avoid contact with eyes.')
+assert.equal(PRODUCT_NEED_MORE_DETAILS_SUGGESTED_TEXT, 'Contact us if you need additional product details, variant confirmation, usage guidance, or help comparing suitable options. Consider how the product fits into your existing routine and what finish, function, or application style you want. For products where ingredients, shade compatibility, or personal suitability matter, check the exact packaging details before use.')
+for (const [name, text] of [['caution', PRODUCT_CAUTION_SUGGESTED_TEXT_KM], ['need-more-details', PRODUCT_NEED_MORE_DETAILS_SUGGESTED_TEXT_KM]] as const) {
+  assert.match(text, /^[ក-៿᧠-᧿\s]+$/u,`${name} Khmer text is Khmer only (no English left in)`)
+  assert.ok(text.endsWith('។'), `${name} Khmer text ends as a Khmer sentence`)
+}
+// Same number of sentences as the English it translates (5 and 3).
+assert.equal(PRODUCT_CAUTION_SUGGESTED_TEXT_KM.split('។').filter(Boolean).length, 5)
+assert.equal(PRODUCT_NEED_MORE_DETAILS_SUGGESTED_TEXT_KM.split('។').filter(Boolean).length, 3)
+
+// Nothing saved: owner text in the page language.
+assert.equal(resolveProductDetailDefault('caution', '', 'km'), PRODUCT_CAUTION_SUGGESTED_TEXT_KM)
+assert.equal(resolveProductDetailDefault('caution', undefined, 'en'), PRODUCT_CAUTION_SUGGESTED_TEXT)
+assert.equal(resolveProductDetailDefault('need_more_details', '   ', 'km'), PRODUCT_NEED_MORE_DETAILS_SUGGESTED_TEXT_KM)
+assert.equal(resolveProductDetailDefault('need_more_details', null, 'fr'), PRODUCT_NEED_MORE_DETAILS_SUGGESTED_TEXT, 'Google languages translate from the English page')
+// The merchant's own saved text wins, in every language.
+assert.equal(resolveProductDetailDefault('caution', ' Patch test first. ', 'km'), 'Patch test first.')
+// "Use suggested text" saved the English owner text (reflowed whitespace and
+// all): a Khmer page still gets Khmer.
+assert.equal(resolveProductDetailDefault('caution', PRODUCT_CAUTION_SUGGESTED_TEXT.replace(/\. /g, '.\n'), 'km'), PRODUCT_CAUTION_SUGGESTED_TEXT_KM)
+
+// 6. The flyout uses the resolver for both, and no longer has a generic
+//    last-resort line of its own.
+const flyout = read('src/components/catalog/ProductDetailFlyout.tsx')
+assert.match(flyout, /: \[resolveProductDetailDefault\('caution', cautionDefault, language\)\]/, 'caution falls back to the owner default')
+assert.match(flyout, /const needMoreDetailsText = resolveProductDetailDefault\('need_more_details', needMoreDetailsDefault, language\)/)
+assert.doesNotMatch(flyout, /No product-specific caution has been added yet|Contact us for more product details\./)
+const surface = read('src/components/catalog/CatalogPreviewSurface.tsx')
+assert.match(surface, /needMoreDetailsDefault=\{productDetailNeedMoreDetailsDefault\}\s*language=\{pageLanguage\}/,'the flyout is told the page language')
 
 console.log('productDetailDefaultsText tests passed')

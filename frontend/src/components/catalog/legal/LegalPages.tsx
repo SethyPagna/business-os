@@ -11,8 +11,11 @@
 // this" notice. Nothing here is legal advice.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
-import ExternalLink from 'lucide-react/dist/esm/icons/external-link.js'
+
+import Facebook from 'lucide-react/dist/esm/icons/facebook.js'
+import Globe from 'lucide-react/dist/esm/icons/globe.js'
+import Instagram from 'lucide-react/dist/esm/icons/instagram.js'
+import Send from 'lucide-react/dist/esm/icons/send.js'
 import ShieldCheck from 'lucide-react/dist/esm/icons/shield-check.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import {
@@ -26,6 +29,7 @@ import {
   legalText,
 } from './legalContent.ts'
 import type { LegalBusinessDetails, LegalPageKey } from './legalContent.ts'
+import { lockDocumentScroll } from '../../shared/documentScrollLock.ts'
 
 export const LEGAL_QUERY_PARAM = 'legal'
 
@@ -67,6 +71,11 @@ const INLINE_LINK_CLASS = 'font-semibold text-emerald-700 underline underline-of
 
 type CopyFn = (key: string, fallback?: string, fallbackKm?: string) => string
 
+/** A storefront section the footer can jump to (the nav's own tabs). */
+export type PortalFooterQuickLink = { key: string; label: string; onSelect: () => void }
+/** An already-normalised external profile link (website/facebook/...). */
+export type PortalFooterSocialLink = { key: string; label: string; value: string }
+
 export type PortalFooterProps = {
   copy: CopyFn
   businessName?: string
@@ -75,6 +84,20 @@ export type PortalFooterProps = {
   address?: string
   phone?: string
   email?: string
+  // P-public-9 (owner, 2026-09-25): the footer carries social links, quick
+  // links, contact and policies. Both optional: CatalogPreviewSurface injects
+  // the quick links (it owns the tabs) for every caller, and a caller passes
+  // the social links it has already filtered and normalised.
+  quickLinks?: PortalFooterQuickLink[]
+  socialLinks?: PortalFooterSocialLink[]
+}
+
+const FOOTER_HEADING_CLASS = 'mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase leading-5 tracking-[0.14em] text-slate-500 dark:text-neutral-400'
+const FOOTER_LINK_CLASS = 'inline-flex min-h-10 items-center text-sm leading-6 text-slate-700 underline-offset-2 transition hover:text-slate-900 hover:underline dark:text-neutral-200 dark:hover:text-white'
+
+function SocialIcon({ kind }: { kind: string }) {
+  const Icon = kind === 'facebook' ? Facebook : kind === 'instagram' ? Instagram : kind === 'telegram' ? Send : Globe
+  return <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
 }
 
 /**
@@ -131,15 +154,15 @@ export default function PortalFooter({
   address,
   phone,
   email,
+  quickLinks = [],
+  socialLinks = [],
 }: PortalFooterProps) {
-  const [menuOpen, setMenuOpen] = useState(false)
   const [activePage, setActivePage] = useState<LegalPageKey | null>(() =>
     typeof window === 'undefined' ? null : readLegalPageFromSearch(window.location.search))
   // True while the reader was opened by us (so closing can go BACK and leave
   // no history crumb); false when the visitor arrived on a policy link
   // directly, where going back would leave the site entirely.
   const pushedRef = useRef(false)
-  const policiesTriggerRef = useRef<HTMLButtonElement | null>(null)
   const returnFocusRef = useRef<HTMLElement | null>(null)
   // Capture the catalogue title before a direct ?legal= reader's first
   // effect can replace it. Effect reruns must never promote a policy title to
@@ -167,13 +190,12 @@ export default function PortalFooter({
   const fill = useCallback((key: string) => interpolateLegal(text(key), details, year), [text, details, year])
 
   const openPage = useCallback((page: LegalPageKey) => {
+    // The opener -- one of the footer's always-visible policy links, or the
+    // sign-up consent link -- stays mounted while the reader is open (the
+    // reader only marks it inert), so it is itself the stable focus target.
     if (!activePage && typeof document !== 'undefined') {
-      const focused = document.activeElement instanceof HTMLElement ? document.activeElement : null
-      returnFocusRef.current = focused?.getAttribute('role') === 'menuitem'
-        ? policiesTriggerRef.current
-        : focused
+      returnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
     }
-    setMenuOpen(false)
     setActivePage(page)
     if (typeof window === 'undefined') return
     try {
@@ -240,10 +262,9 @@ export default function PortalFooter({
     return () => { document.title = baseDocumentTitleRef.current }
   }, [activePage, text, details.name])
 
-  // Restore focus only after the reader has unmounted. A footer menu item is
-  // removed as soon as it opens a policy, so the stable return target for that
-  // flow is the Policies trigger. A direct ?legal= link has no opener; the
-  // catalogue main landmark is the meaningful fallback.
+  // Restore focus only after the reader has unmounted, to the link that
+  // opened it. A direct ?legal= link has no opener; the catalogue main
+  // landmark is the meaningful fallback.
   const hadActivePageRef = useRef(!!activePage)
   useEffect(() => {
     const hadActivePage = hadActivePageRef.current
@@ -266,28 +287,35 @@ export default function PortalFooter({
         data-portal-footer="true"
         className="mt-8 border-t border-slate-200 px-4 py-6 text-slate-600 dark:border-neutral-800 dark:text-neutral-400"
       >
-        <div className="mx-auto flex max-w-3xl flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        {/* P-public-9 (owner, 2026-09-25): a real site footer -- contact,
+            quick links to the storefront sections, social profiles and the
+            policies, as columns that stack on a phone. Every column renders
+            only when it has something in it. */}
+        <div className="mx-auto grid max-w-5xl gap-6 sm:grid-cols-2 lg:grid-cols-4">
           <div className="min-w-0 space-y-1 text-xs leading-relaxed">
-            <div className="text-sm font-semibold text-slate-900 dark:text-neutral-100">
+            <div className="notranslate text-sm font-semibold leading-6 text-slate-900 dark:text-neutral-100" translate="no">
               {details.name}
             </div>
             {details.legalName ? (
-              <div>{text('portal_legal_identity_legal_name')}: {details.legalName}</div>
+              <div>{text('portal_legal_identity_legal_name')}: <span className="notranslate" translate="no">{details.legalName}</span></div>
             ) : null}
             {details.registrationNumber ? (
               <div>{text('portal_legal_identity_registration')}: {details.registrationNumber}</div>
             ) : null}
-            {details.address ? <div className="break-words">{details.address}</div> : null}
-            <div className="flex flex-wrap gap-x-3 gap-y-1">
+            {details.address || details.phone || details.email ? (
+              <div className="pt-2 text-[11px] font-semibold uppercase leading-5 tracking-[0.14em] text-slate-500 dark:text-neutral-400">{text('portal_legal_footer_contact')}</div>
+            ) : null}
+            {details.address ? <div className="notranslate break-words" translate="no">{details.address}</div> : null}
+            <div className="flex flex-col">
               {details.phone ? (
                 contactHref('tel', details.phone)
-                  ? <a className="underline-offset-2 hover:underline" href={contactHref('tel', details.phone)}>{details.phone}</a>
+                  ? <a className={FOOTER_LINK_CLASS} href={contactHref('tel', details.phone)}>{details.phone}</a>
                   : <span>{details.phone}</span>
               ) : null}
               {details.email ? (
                 contactHref('mailto', details.email)
-                  ? <a className="underline-offset-2 hover:underline" href={contactHref('mailto', details.email)}>{details.email}</a>
-                  : <span>{details.email}</span>
+                  ? <a className={`${FOOTER_LINK_CLASS} break-all`} href={contactHref('mailto', details.email)}>{details.email}</a>
+                  : <span className="break-all">{details.email}</span>
               ) : null}
             </div>
             {/* A takedown route, in the one place every page of the site
@@ -299,53 +327,68 @@ export default function PortalFooter({
             {details.email ? (
               <div className="pt-1">{fill('portal_legal_footer_content_concerns')}</div>
             ) : null}
-            <div className="pt-1 text-[11px] text-slate-400 dark:text-neutral-500">{fill('portal_legal_footer_rights')}</div>
           </div>
 
-          <div className="relative shrink-0">
-            <button
-              ref={policiesTriggerRef}
-              type="button"
-              className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200 dark:hover:bg-neutral-800"
-              onClick={() => setMenuOpen((open) => !open)}
-              aria-expanded={menuOpen}
-              aria-haspopup="menu"
-              aria-label={text('portal_legal_open_policies')}
-            >
-              <ShieldCheck className="h-4 w-4" />
-              {text('portal_legal_policies')}
-              <ChevronDown className={`h-3.5 w-3.5 transition ${menuOpen ? 'rotate-180' : ''}`} />
-            </button>
-            {menuOpen ? (
-              <>
-                {/* Click-away layer: the menu floats above content rather than
-                    pushing the footer taller. */}
-                <div className="fixed inset-0 z-[75]" onClick={() => setMenuOpen(false)} aria-hidden="true" />
-                <div
-                  role="menu"
-                  aria-label={text('portal_legal_policies')}
-                  className="absolute bottom-full right-0 z-[76] mb-2 w-56 max-w-[calc(100vw-2rem)] overflow-hidden rounded-2xl border border-slate-200 bg-white p-1 shadow-2xl dark:border-neutral-700 dark:bg-neutral-900"
-                >
-                  {LEGAL_PAGE_ORDER.map((page) => (
-                    <a
-                      key={page}
-                      role="menuitem"
-                      href={typeof window === 'undefined' ? '' : legalHref(page, window.location.search, window.location.pathname)}
-                      className="flex items-center justify-between gap-2 rounded-xl px-3 py-2 text-xs font-medium text-slate-700 transition hover:bg-slate-50 dark:text-neutral-200 dark:hover:bg-neutral-800"
-                      onClick={(event) => {
-                        if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return
-                        event.preventDefault()
-                        openPage(page)
-                      }}
-                    >
-                      {text(LEGAL_PAGE_TITLE_KEY[page])}
-                      <ExternalLink className="h-3.5 w-3.5 shrink-0 text-slate-300 dark:text-neutral-600" />
+          {quickLinks.length ? (
+            <nav aria-label={text('portal_legal_footer_quick_links')} className="min-w-0" data-portal-footer-quick-links="true">
+              <div className={FOOTER_HEADING_CLASS}>{text('portal_legal_footer_quick_links')}</div>
+              <ul className="flex flex-col">
+                {quickLinks.map((link) => (
+                  <li key={link.key}>
+                    <button type="button" className={`${FOOTER_LINK_CLASS} text-left`} onClick={link.onSelect}>
+                      {link.label}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </nav>
+          ) : null}
+
+          {socialLinks.length ? (
+            <div className="min-w-0" data-portal-footer-social="true">
+              <div className={FOOTER_HEADING_CLASS}>{text('portal_legal_footer_follow')}</div>
+              <ul className="flex flex-col">
+                {socialLinks.map((link) => (
+                  <li key={link.key}>
+                    <a className={`${FOOTER_LINK_CLASS} gap-2`} href={link.value} target="_blank" rel="noreferrer">
+                      <SocialIcon kind={link.key} />
+                      <span className="notranslate break-words" translate="no">{link.label}</span>
                     </a>
-                  ))}
-                </div>
-              </>
-            ) : null}
-          </div>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+
+          {/* Owner, 2026-09-25 (P-public-7): the three policies are visible
+              buttons, not a dropdown. Real links (shareable ?legal= hrefs,
+              middle-click opens a tab); a plain click opens the reader. */}
+          <nav aria-label={text('portal_legal_policies')} className="min-w-0" data-portal-footer-policies="true">
+            <div className={FOOTER_HEADING_CLASS}>
+              <ShieldCheck className="h-3.5 w-3.5" />
+              {text('portal_legal_policies')}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {LEGAL_PAGE_ORDER.map((page) => (
+                <a
+                  key={page}
+                  href={typeof window === 'undefined' ? '' : legalHref(page, window.location.search, window.location.pathname)}
+                  aria-current={activePage === page ? 'page' : undefined}
+                  className="inline-flex min-h-10 items-center rounded-2xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold leading-5 text-slate-700 transition hover:bg-slate-50 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200 dark:hover:bg-neutral-800"
+                  onClick={(event) => {
+                    if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return
+                    event.preventDefault()
+                    openPage(page)
+                  }}
+                >
+                  {text(LEGAL_PAGE_TITLE_KEY[page])}
+                </a>
+              ))}
+            </div>
+          </nav>
+        </div>
+        <div className="mx-auto mt-6 max-w-5xl border-t border-slate-200 pt-4 text-[11px] leading-5 text-slate-500 dark:border-neutral-800 dark:text-neutral-500">
+          {fill('portal_legal_footer_rights')}
         </div>
       </footer>
 
@@ -377,10 +420,9 @@ function LegalReader({
   useEffect(() => {
     closeRef.current?.focus()
     const dialog = dialogRef.current
-    const previousOverflow = document.body.style.overflow
-    const previousDocumentOverflow = document.documentElement.style.overflow
-    document.body.style.overflow = 'hidden'
-    document.documentElement.style.overflow = 'hidden'
+    // The shared counted lock: a plain inline overflow write loses to the
+    // storefront's html overflow-y: auto !important (documentScrollLock.ts).
+    const releaseScroll = lockDocumentScroll()
 
     // The reader is rendered beside the catalogue landmarks, rather than
     // inside them. Marking those landmarks inert keeps pointer and keyboard
@@ -419,8 +461,7 @@ function LegalReader({
     window.addEventListener('keydown', onKeyDown)
     return () => {
       window.removeEventListener('keydown', onKeyDown)
-      document.body.style.overflow = previousOverflow
-      document.documentElement.style.overflow = previousDocumentOverflow
+      releaseScroll()
       background.forEach((element, index) => {
         if (!previouslyInert[index]) element.removeAttribute('inert')
       })
@@ -455,7 +496,7 @@ function LegalReader({
             onClick={onClose}
             aria-label={text('portal_legal_close')}
             title={text('portal_legal_close')}
-            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
+            className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100"
           >
             <X className="h-5 w-5" />
           </button>

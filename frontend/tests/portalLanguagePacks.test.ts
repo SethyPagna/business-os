@@ -1,50 +1,31 @@
 import assert from 'node:assert/strict'
-import {
-  FIRST_PARTY_PORTAL_LANGUAGE_OPTIONS,
-  getPortalLanguageText,
-  isFirstPartyPortalLanguage,
-  normalizeFirstPartyPortalLanguage,
-} from '../src/components/catalog/portalLanguagePacks.ts'
+import { getPortalLanguageText } from '../src/components/catalog/portalLanguagePacks.ts'
 
-const values = FIRST_PARTY_PORTAL_LANGUAGE_OPTIONS.map((option) => option.value)
-
-for (const required of ['en', 'km', 'zh-CN', 'zh-TW', 'vi', 'th', 'ru', 'fr', 'es']) {
-  assert.ok(values.includes(required), `missing first-party portal language ${required}`)
+// Owner decision, 27 Sep 2026: the public site is English and Khmer only.
+// Khmer comes from the pack; English is each call site's own fallback.
+assert.equal(getPortalLanguageText('km', 'products'), '\u1795\u179b\u17b7\u178f\u1795\u179b')
+assert.equal(getPortalLanguageText(' KM ', 'products'), getPortalLanguageText('km', 'products'))
+assert.equal(getPortalLanguageText('en', 'products'), '')
+for (const retired of ['zh-CN', 'zh-TW', 'vi', 'th', 'ru', 'fr', 'es', 'de', 'ja', 'ko', 'pt', 'it', 'ar', 'hi', 'id', 'ms', 'tr']) {
+  assert.equal(getPortalLanguageText(retired, 'products'), '', `the retired ${retired} pack still answers`)
 }
-
-assert.equal(normalizeFirstPartyPortalLanguage('zh-cn'), 'zh-CN')
-assert.equal(normalizeFirstPartyPortalLanguage('ZH-TW'), 'zh-TW')
-assert.equal(normalizeFirstPartyPortalLanguage('vi'), 'vi')
-assert.equal(isFirstPartyPortalLanguage('ru'), true)
-assert.equal(isFirstPartyPortalLanguage('fa'), false)
-
-assert.notEqual(getPortalLanguageText('zh-CN', 'products'), 'Products')
-assert.notEqual(getPortalLanguageText('zh-CN', 'liveCatalog'), 'Live inventory, customer-safe details only.')
-assert.notEqual(getPortalLanguageText('zh-CN', 'filterCompactHint'), 'Use quick filters to narrow products faster.')
-assert.notEqual(getPortalLanguageText('zh-CN', 'aiTitle'), 'Beauty Assistant')
-assert.notEqual(getPortalLanguageText('zh-CN', 'faqHint'), 'Add your most common customer questions here. Customers can open each answer one by one.')
-assert.notEqual(getPortalLanguageText('vi', 'membership'), 'Membership')
-assert.notEqual(getPortalLanguageText('th', 'search'), 'Search products')
-assert.notEqual(getPortalLanguageText('ru', 'noProducts'), 'No products matched the current filters.')
-assert.equal(getPortalLanguageText('zh-CN', 'products'), '\u4ea7\u54c1')
-assert.equal(getPortalLanguageText('zh-TW', 'products'), '\u7522\u54c1')
-assert.equal(getPortalLanguageText('vi', 'membership'), 'Th\u00e0nh vi\u00ean')
-assert.equal(getPortalLanguageText('th', 'search'), '\u0e04\u0e49\u0e19\u0e2b\u0e32\u0e2a\u0e34\u0e19\u0e04\u0e49\u0e32')
-assert.equal(getPortalLanguageText('ru', 'noProducts'), '\u0422\u043e\u0432\u0430\u0440\u044b \u043f\u043e \u0442\u0435\u043a\u0443\u0449\u0438\u043c \u0444\u0438\u043b\u044c\u0442\u0440\u0430\u043c \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d\u044b.')
+{
+  const fs = await import('node:fs')
+  const packSource = fs.readFileSync(new URL('../src/components/catalog/portalLanguagePacks.ts', import.meta.url), 'utf8')
+  const packLanguages = new Set([...packSource.matchAll(/^ {2}'?([a-z]{2}(?:-[A-Za-z]{2})?)'?: \{/gm)].map((match) => match[1]))
+  assert.deepEqual([...packLanguages], ['km'], 'the pack file holds a retired language')
+}
 
 const mojibakePattern = /\u00c3|\u00c2|\u00e2\u20ac|\u00e1\u017e|\u00e1\u0178|\u00e0\u00b8|\u00e1\u00ba|\u00d0|\u00d1|\u00d8|\u00d9|\ufffd/
 
-for (const option of FIRST_PARTY_PORTAL_LANGUAGE_OPTIONS) {
-  assert.doesNotMatch(option.nativeLabel || '', mojibakePattern, `${option.value} native label is mojibake`)
-  for (const key of ['products', 'membership', 'search', 'searchPlaceholder', 'noProducts', 'filters', 'loadingProducts', 'aboutTitle', 'faqTitle', 'aiTitle', 'assistantQuestion', 'switch_to_dark_mode']) {
-    const text = getPortalLanguageText(option.value, key)
-    if (!text) continue
-    assert.doesNotMatch(text, mojibakePattern, `${option.value}.${key} is mojibake`)
-  }
+for (const key of ['products', 'membership', 'search', 'searchPlaceholder', 'noProducts', 'filters', 'loadingProducts', 'aboutTitle', 'faqTitle', 'aiTitle', 'assistantQuestion', 'switch_to_dark_mode']) {
+  const text = getPortalLanguageText('km', key)
+  assert.ok(text, `km.${key} is missing`)
+  assert.doesNotMatch(text, mojibakePattern, `km.${key} is mojibake`)
 }
-assert.equal(getPortalLanguageText('zh-CN', 'businessName'), '')
-assert.equal(getPortalLanguageText('fr', 'portalIntro'), '')
-assert.equal(getPortalLanguageText('es', 'businessTagline'), '')
+assert.equal(getPortalLanguageText('km', 'businessName'), '', 'merchant fields never come from the pack')
+assert.equal(getPortalLanguageText('km', 'portalIntro'), '')
+assert.equal(getPortalLanguageText('km', 'businessTagline'), '')
 
 
 // P3-L3 item D: the product detail flyout's labels. None of its copy() keys
@@ -60,7 +41,11 @@ assert.equal(getPortalLanguageText('es', 'businessTagline'), '')
   const keys = new Set<string>()
   for (const match of flyout.matchAll(/copy\('([A-Za-z]+)'/g)) keys.add(match[1])
   for (const match of flyout.matchAll(/labelKey: '([A-Za-z]+)'/g)) keys.add(match[1])
-  assert.ok(keys.size >= 24, `expected the flyout's copy keys, found ${keys.size}`)
+  // A floor that catches a broken extraction regex, not a quota: P-public
+  // (2026-09-25) retired the flyout's generic empty-state lines
+  // (productCautionNotProvided, productNeedMoreDetailsFallback,
+  // productDetailNotProvided) in favour of owner defaults / hidden rows.
+  assert.ok(keys.size >= 18, `expected the flyout's copy keys, found ${keys.size}`)
   // imageCount is "{current}/{total}" in every language: digits and a slash.
   keys.delete('imageCount')
   const khmer = /[\u1780-\u17ff]/

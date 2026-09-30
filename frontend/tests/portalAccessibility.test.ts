@@ -16,6 +16,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { PORTAL_CONTRAST_PAIRS } from '../src/components/catalog/portalContrast.ts'
+import { resolveStorefrontCopy } from '../src/components/catalog/portalLanguagePacks.ts'
 
 let failed = 0
 
@@ -97,7 +98,9 @@ runTest('a product image is described by the product, never by the word "Product
   )
   const flyout = read('ProductDetailFlyout.tsx')
   assert.match(flyout, /const galleryImageAlt = \[product\.name, brandValues\[0\]\]/, 'the sheet photo does the same')
-  assert.match(flyout, /alt=\{galleryImageAlt\}/)
+  // P-public-6: the photos are an album row; the first tile carries the
+  // product description, the rest are named by their own button labels.
+  assert.match(flyout, /alt=\{index === 0 \? galleryImageAlt : ''\}/)
 })
 
 runTest('the logo and cover images name the business or hide themselves', () => {
@@ -116,7 +119,10 @@ runTest('the product-sheet thumbnail strip names each thumbnail', () => {
   // On the base tree each thumbnail button contained only an alt="" image,
   // so a reader announced a row of bare "button".
   assert.match(flyout, /aria-label=\{imageLabel\(index\)\}/, 'each thumbnail says which image it is')
-  assert.match(flyout, /aria-current=\{index === activeIndex \? 'true' : undefined\}/, 'and which one is showing')
+  // P-public-6: the strip is now the album itself (every tile opens the
+  // full-screen viewer), so there is no "currently showing" tile to mark --
+  // the viewer's own counter announces the position.
+  assert.match(flyout, /data-product-detail-album="true"/)
   assert.match(flyout, /const imageLabel = \(index: number\) => copy\('dotsLabel'/, 'the label is translated, not hardcoded')
 })
 
@@ -319,11 +325,11 @@ runTest('the portal stylesheet scopes focus, touch targets and reduced motion to
 
 runTest('the storefront controls no portal-scoped CSS can reach carry their own ring', () => {
   // shared/PortalMenu.tsx createPortal()s its popup to document.body, so the
-  // filter menu's search field and the language-menu search field sit OUTSIDE
-  // every portal root: no descendant selector in public-portal.css can ever
-  // match them. Their base-tree indicator was focus:ring-blue-100 (#dbeafe on
-  // white = 1.16:1). They need the ring in their own class string.
-  for (const file of ['PortalFilterCombobox.tsx', 'CatalogPreviewSurface.tsx']) {
+  // filter menu's search field sits OUTSIDE every portal root: no descendant
+  // selector in public-portal.css can ever match it. Its base-tree indicator
+  // was focus:ring-blue-100 (#dbeafe on white = 1.16:1). It needs the ring in
+  // its own class string.
+  for (const file of ['PortalFilterCombobox.tsx']) {
     const source = read(file)
     assert.match(source, /focus-visible:outline-\[#0369a1\]/, `${file}: the popup search field paints its own focus outline`)
     assert.match(source, /dark:focus-visible:outline-\[#fcd34d\]/, `${file}: and the dark-mode counterpart`)
@@ -493,7 +499,7 @@ runTest('the page language follows the chosen storefront language', () => {
   // Base tree: the <html lang> stayed on whatever the admin app set, so a
   // Khmer storefront was announced to a screen reader as English.
   assert.match(publicPage, /document\.documentElement\.lang = /, 'the document language is set')
-  assert.match(publicPage, /portalDocumentLanguage/, 'from the resolved storefront language, not a constant')
+  assert.match(publicPage, /document\.documentElement\.lang = pageLanguage/, 'from the chosen storefront language, not a constant')
 })
 
 runTest('the storefront offers a skip-to-content link', () => {
@@ -566,9 +572,11 @@ runTest('every portal_a11y_* key exists in both packs and is used', () => {
 
 runTest('the storefront copy() can actually reach a portal_a11y_ pack key', () => {
   const publicPage = read('PublicCatalogPage.tsx')
-  // copy() prefixes every key with `portalEditor.`, so a bare pack key was
-  // unreachable and the entry would have been dead weight.
-  assert.match(publicPage, /key\.startsWith\('portal_a11y_'\)/, 'the lane namespace resolves against the flat pack')
+  assert.match(publicPage, /resolveStorefrontCopy\(pageLanguage, t, key, fallback, fallbackKm\)/, 'the storefront copy() is resolveStorefrontCopy')
+  // Every other key is prefixed with `portalEditor.`, which would leave a bare pack key unreachable.
+  const packed = (key: string) => (key === 'portal_a11y_skip_to_content' ? 'Skip to the products' : key)
+  assert.equal(resolveStorefrontCopy('en', packed, 'portal_a11y_skip_to_content', 'Skip to products'), 'Skip to the products')
+  assert.equal(resolveStorefrontCopy('km', packed, 'portal_a11y_skip_to_content', 'Skip to products', 'រំលងទៅផលិតផល'), 'រំលងទៅផលិតផល')
 })
 
 if (failed > 0) {

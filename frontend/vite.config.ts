@@ -852,6 +852,15 @@ function manualChunks(id: string): string | undefined {
       || normalized.includes('/src/components/catalog/catalogAssetUrls.ts')
       || normalized.includes('/src/components/catalog/portalCatalogDisplay.ts')
       || normalized.includes('/src/components/catalog/portalEditorUtils.ts')
+      // portalNoTranslate.ts (owner [[ ]] never-translate markers) is imported by
+      // CatalogSecondaryTabs (catalog-secondary-tabs), which must not pull the
+      // admin 'catalog' chunk (tests/chunkBoundaryPolicy.test.ts).
+      || normalized.includes('/src/components/catalog/portalNoTranslate.ts')
+      // portalFaqLayout.ts: same consumer, same reason.
+      || normalized.includes('/src/components/catalog/portalFaqLayout.ts')
+      // portalActiveFilters.ts (filter chips) is imported by
+      // CatalogProductsSection (catalog-products); same reason.
+      || normalized.includes('/src/components/catalog/portalActiveFilters.ts')
       // BrandIcons.tsx lives under components/shared/ but is only ever imported by
       // two catalog surfaces (CatalogEditorSurface -> catalog-editor,
       // PublicCatalogPage -> catalog-public). Left to the generic
@@ -886,6 +895,9 @@ function manualChunks(id: string): string | undefined {
       // which is a TDZ ReferenceError ("Cannot access '<var>' before initialization")
       // that blanks the whole public portal on load. Keep it with its only consumer.
       || normalized.includes('/src/components/catalog/portalProductGrouping.ts')
+      // PublicCatalogRoot installs it before its first render and already
+      // imports this chunk statically; the generic catch-all is the admin chunk.
+      || normalized.includes('/src/components/catalog/portalTranslateDomGuard.ts')
     ) {
       return 'catalog-public'
     }
@@ -897,9 +909,6 @@ function manualChunks(id: string): string | undefined {
     }
     if (normalized.includes('/src/utils/initials.ts')) return 'route-sync-utils'
     if (normalized.endsWith('/src/utils/scriptTypography.ts')) return 'route-sync-utils'
-    if (normalized.includes('/src/components/catalog/portalTranslateController.ts')) {
-      return 'portal-translate-controller'
-    }
     if (
       normalized.includes('/src/components/catalog/portalLanguagePacks.ts')
       // portalLanguageOptions is a small option-list module imported by
@@ -945,9 +954,15 @@ function manualChunks(id: string): string | undefined {
     if (normalized.includes('/src/utils/mediaUpload.ts')) {
       return 'media-upload-utils'
     }
-    if (normalized.includes('/src/components/shared/ImageGalleryLightbox')) {
+    if (
+      normalized.includes('/src/components/shared/ImageGalleryLightbox')
+      || normalized.endsWith('/src/components/shared/lightboxSwipe.ts')
+    ) {
       return 'image-lightbox'
     }
+    // Both roots load app-shell at boot, so the overlays lock scroll without a request of
+    // their own; app-shared would put it in the catalog-products closure.
+    if (normalized.endsWith('/src/components/shared/documentScrollLock.ts')) return 'app-shell'
     if (normalized.includes('/src/components/shared/AppSelect.tsx')) return 'shared-ui'
     if (normalized.includes('/src/components/shared/LazyPortalMenu.tsx')) return 'shared-ui'
     if (normalized.includes('/src/components/shared/pageActivity.ts')) return 'route-sync-utils'

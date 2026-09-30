@@ -904,6 +904,9 @@ function CatalogEditorSurfaceContent() {
                 value={editorDraft.customer_portal_about_content || ''}
                 onChange={(event) => setDraft('customer_portal_about_content', event.target.value)}
               />
+              <p className="mt-1 text-xs leading-5 text-slate-500">
+                {copy('aboutNoTranslateHint', 'If a visitor translates this page with their browser, words in double square brackets stay exactly as written, for example [[Leang Cosmetics]].')}
+              </p>
             </div>
             <div className="mt-5 rounded-2xl border border-slate-200 bg-white p-4">
               <HintLabel className="text-sm font-semibold text-slate-900" title={copy('productDefaultsTitle', 'Product detail defaults')} hint={copy('productDefaultsHint', 'Shown on every product\'s detail view. A product\'s own Caution text (typed into its description) takes priority over this default; Need More Details always shows when set here.')} />
@@ -1224,7 +1227,7 @@ function CatalogEditorSurfaceContent() {
             </div>
             <label className="mt-3 flex min-h-11 items-center justify-between gap-4 rounded-xl border border-slate-200 bg-white px-3 py-2.5">
               <div>
-                <HintLabel title={copy('translateWidget', 'Enable public translate widget')} hint={copy('translateWidgetHint', 'Public customers switch English/Khmer instantly. External languages use Google only as a fallback.')} />
+                <HintLabel title={copy('translateWidget', 'Enable public translate widget')} hint={copy('translateWidgetHint', 'Public customers switch English/Khmer instantly.')} />
               </div>
               <input id="portal-translate-widget-enabled" name="customer_portal_translate_widget_enabled" type="checkbox" checked={!!editorDraft.customer_portal_translate_widget_enabled} onChange={(event) => setDraft('customer_portal_translate_widget_enabled', event.target.checked)} />
             </label>
@@ -1244,20 +1247,20 @@ function CatalogEditorSurfaceContent() {
               <details className="mt-2 text-xs text-slate-500">
                 <summary className="cursor-pointer font-semibold text-slate-600">{copy('translationOverridesExample', 'Example format')}</summary>
                 <pre className="mt-2 overflow-x-auto rounded-xl bg-slate-50 p-3 text-[11px] leading-5 text-slate-600">{`{
-  "zh-CN": {
-    "aboutTitle": "关于我们",
-    "promotionsTitle": "精选优惠",
+  "km": {
+    "aboutTitle": "អំពីយើង",
+    "promotionsTitle": "ការផ្ដល់ជូនពិសេស",
     "aboutBlocks": {
-      "block-id": { "title": "标题", "body": "内容" }
+      "block-id": { "title": "ចំណងជើង", "body": "ខ្លឹមសារ" }
     },
     "promoItems": {
-      "promo-id": { "title": "优惠标题", "body": "优惠内容", "ctaLabel": "立即查看" }
+      "promo-id": { "title": "ចំណងជើងការផ្ដល់ជូន", "body": "ខ្លឹមសារការផ្ដល់ជូន", "ctaLabel": "មើលឥឡូវនេះ" }
     },
     "faqItems": {
-      "faq-id": { "question": "问题", "answer": "答案" }
+      "faq-id": { "question": "សំណួរ", "answer": "ចម្លើយ" }
     },
     "products": {
-      "123": { "description": "产品说明" }
+      "123": { "description": "ការពិពណ៌នាផលិតផល" }
     }
   }
 }`}</pre>

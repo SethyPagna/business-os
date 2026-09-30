@@ -1,4 +1,5 @@
 import { Suspense, useEffect, useId, useRef, useState } from 'react'
+import { lockDocumentScroll } from '../shared/documentScrollLock.ts'
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
 import type { ReactNode } from 'react'
 import X from 'lucide-react/dist/esm/icons/x.js'
@@ -10,12 +11,11 @@ import Sparkles from 'lucide-react/dist/esm/icons/sparkles.js'
 import Leaf from 'lucide-react/dist/esm/icons/leaf.js'
 import TriangleAlert from 'lucide-react/dist/esm/icons/alert-triangle.js'
 import Users2 from 'lucide-react/dist/esm/icons/users.js'
-import ChevronLeft from 'lucide-react/dist/esm/icons/chevron-left.js'
-import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
 import type { LucideIcon } from 'lucide-react'
 import CatalogProductImage from './catalogImages'
 import { StatusPill } from './catalogUi'
-import { parseProductDescription } from './productDetailSections.ts'
+import { parseProductDescription, resolveOfficialProductName } from './productDetailSections.ts'
+import { resolveProductDetailDefault } from './productDetailDefaultsText.ts'
 import type { ProductDetailSectionKey } from './productDetailSections.ts'
 import { getKhmerTextProps } from '../../utils/scriptTypography.ts'
 import { lazyRetry } from '../../utils/lazyImport.ts'
@@ -80,8 +80,12 @@ type ProductDetailFlyoutProps = {
   // being followed immediately by a generic one that might read as
   // contradictory. "Need More Details" has no per-product equivalent to
   // defer to -- it always renders when a non-empty default is supplied.
+  // Owner, 2026-09-25: with nothing saved, the owner's own wording
+  // (productDetailDefaultsText.ts) is the default, in `language`.
   cautionDefault?: string
   needMoreDetailsDefault?: string
+  /** The storefront's page language; 'km' picks the Khmer owner defaults. */
+  language?: string
   onAddToBucket?: (product: ProductDetailViewProduct, priceText?: string) => void
   bucketQty?: number
 }
@@ -110,17 +114,18 @@ function DetailField({ label, children }: { label: string; children: ReactNode }
   )
 }
 
+// A section with nothing to say is not rendered at all (owner, 2026-09-25:
+// no placeholder rows for missing data on the storefront).
 function DetailSectionBlock({
   sectionKey,
   items,
   copy,
-  emptyText,
 }: {
   sectionKey: ProductDetailSectionKey
   items: string[]
   copy: CopyFn
-  emptyText: string
 }) {
+  if (!items.length) return null
   const meta = SECTION_META[sectionKey]
   const SectionIcon = meta.icon
   return (
@@ -136,8 +141,8 @@ function DetailSectionBlock({
           ))}
         </ul>
       ) : (
-        <p {...getKhmerTextProps(items[0] || emptyText, `whitespace-pre-line text-sm leading-6 ${items.length ? 'text-slate-600 dark:text-neutral-300' : 'text-slate-500 dark:text-neutral-400'}`)}>
-          {items[0] || emptyText}
+        <p {...getKhmerTextProps(items[0], 'whitespace-pre-line text-sm leading-6 text-slate-600 dark:text-neutral-300')}>
+          {items[0]}
         </p>
       )}
     </div>
@@ -148,7 +153,7 @@ function DetailSectionBlock({
 // ends of this list are where a trapped Tab wraps around.
 const FOCUSABLE_SELECTOR = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
 
-export default function ProductDetailFlyout({ view, copy, onClose, shopName, contactNote, cautionDefault, needMoreDetailsDefault, onAddToBucket, bucketQty = 0 }: ProductDetailFlyoutProps) {
+export default function ProductDetailFlyout({ view, copy, onClose, shopName, contactNote, cautionDefault, needMoreDetailsDefault, language, onAddToBucket, bucketQty = 0 }: ProductDetailFlyoutProps) {
   const [activeIndex, setActiveIndex] = useState(0)
   const [lightboxOpen, setLightboxOpen] = useState(false)
   const dialogRef = useRef<HTMLDivElement | null>(null)
@@ -164,9 +169,14 @@ export default function ProductDetailFlyout({ view, copy, onClose, shopName, con
   useEffect(() => {
     if (typeof document === 'undefined') return undefined
     previouslyFocusedRef.current = document.activeElement as HTMLElement | null
+    // The sheet covers the page, so the page behind it must not scroll
+    // (refuter follow-up, 2026-09-25). Counted + released on unmount -- see
+    // shared/documentScrollLock.ts for why not a direct body.style write.
+    const releaseScroll = lockDocumentScroll()
     const raf = requestAnimationFrame(() => closeButtonRef.current?.focus())
     return () => {
       cancelAnimationFrame(raf)
+      releaseScroll()
       previouslyFocusedRef.current?.focus?.()
     }
   }, [])
@@ -181,6 +191,9 @@ export default function ProductDetailFlyout({ view, copy, onClose, shopName, con
       return
     }
     if (event.key !== 'Tab') return
+    // The portalled viewer's key events bubble through the React tree to
+    // here; it traps its own Tab, and this trap would pull focus back out.
+    if (lightboxOpen) return
     const focusable = dialogRef.current?.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)
     if (!focusable || focusable.length === 0) return
     const first = focusable[0]
@@ -199,12 +212,13 @@ export default function ProductDetailFlyout({ view, copy, onClose, shopName, con
   if (!product) return null
 
   const gallery = view.gallery.length ? view.gallery : []
-  const activeImage = gallery[Math.min(activeIndex, Math.max(gallery.length - 1, 0))] || ''
   const parsed = parseProductDescription(product.description)
   const categoryValues = multiValues(product.categories, product.category)
   const brandValues = multiValues(product.brands, product.brand)
   const promotion = view.pricePresentation?.promotion
-  const emptyDetailText = copy('productDetailNotProvided', 'Not provided yet.')
+  // Only a real official name -- never the shop's name (see
+  // resolveOfficialProductName for why a copy of it counts as none).
+  const officialName = resolveOfficialProductName(parsed.officialName, product.name)
   const sectionItems = (...keys: ProductDetailSectionKey[]) => parsed.sections
     .filter((section) => keys.includes(section.key))
     .flatMap((section) => section.items)
@@ -214,7 +228,7 @@ export default function ProductDetailFlyout({ view, copy, onClose, shopName, con
   const productCautionItems = sectionItems('caution')
   const cautionItems = productCautionItems.length
     ? productCautionItems
-    : (String(cautionDefault || '').trim() ? [String(cautionDefault).trim()] : [])
+    : [resolveProductDetailDefault('caution', cautionDefault, language)]
 
   // Alt text a shopper can actually use: the product name PLUS its brand, so
   // "Hydrating Toner" and "Hydrating Toner - Some Brand" are distinguishable
@@ -225,8 +239,7 @@ export default function ProductDetailFlyout({ view, copy, onClose, shopName, con
   const imageLabel = (index: number) => copy('dotsLabel', 'Image {current} of {total}')
     .replace('{current}', String(index + 1))
     .replace('{total}', String(gallery.length))
-  const needMoreDetailsText = String(needMoreDetailsDefault || '').trim()
-    || copy('productNeedMoreDetailsFallback', 'Contact us for more product details.')
+  const needMoreDetailsText = resolveProductDetailDefault('need_more_details', needMoreDetailsDefault, language)
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center p-0 sm:items-center sm:p-4">
@@ -249,7 +262,7 @@ export default function ProductDetailFlyout({ view, copy, onClose, shopName, con
             <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-neutral-400">
               {copy('productShopName', "Shop's Product Name")}
             </div>
-            <div id={titleId} {...getKhmerTextProps(product.name || '', 'break-words text-base font-semibold text-slate-900 dark:text-white')}>
+            <div id={titleId} translate="no" {...getKhmerTextProps(product.name || '', 'notranslate break-words text-base font-semibold text-slate-900 dark:text-white')}>
               {product.name || copy('productDetails', 'Product details')}
             </div>
           </div>
@@ -258,75 +271,44 @@ export default function ProductDetailFlyout({ view, copy, onClose, shopName, con
             type="button"
             onClick={onClose}
             aria-label={copy('close', 'Close')}
-            className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full text-slate-500 hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
+            className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full text-slate-500 hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
           >
             <X className="h-4 w-4" />
           </button>
         </div>
 
         <div className="min-h-0 flex-1 overflow-auto overscroll-contain">
-          {/* One image at a time, as a card. Arrows step through the set and
-              the image itself opens the lightbox, where the photos can be
-              viewed on their own without the rest of the page. The thumbnail
-              strip below stays as a direct way to jump to a specific photo. */}
-          <div className="relative aspect-[4/3] max-h-[22rem] w-full bg-slate-100 dark:bg-neutral-800 sm:max-h-[26rem]">
-            {activeImage ? (
-              <button
-                type="button"
-                className="block h-full w-full cursor-zoom-in"
-                onClick={() => setLightboxOpen(true)}
-                aria-label={copy('viewImages', 'View images')}
-              >
-                <CatalogProductImage src={activeImage} alt={galleryImageAlt} className="h-full w-full object-contain" />
-              </button>
-            ) : (
-              <div className="flex h-full items-center justify-center text-slate-300" aria-hidden="true">
-                <ShoppingBag className="h-14 w-14" />
-              </div>
-            )}
-            {gallery.length > 1 ? (
-              <>
-                <button
-                  type="button"
-                  onClick={() => setActiveIndex((current) => (current - 1 + gallery.length) % gallery.length)}
-                  aria-label={copy('prevImage', 'Previous image')}
-                  className="absolute left-2 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full bg-white/85 text-slate-700 shadow-md backdrop-blur transition hover:bg-white dark:bg-neutral-900/85 dark:text-neutral-100 dark:hover:bg-neutral-900"
-                >
-                  <ChevronLeft className="h-5 w-5" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setActiveIndex((current) => (current + 1) % gallery.length)}
-                  aria-label={copy('nextImage', 'Next image')}
-                  className="absolute right-2 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full bg-white/85 text-slate-700 shadow-md backdrop-blur transition hover:bg-white dark:bg-neutral-900/85 dark:text-neutral-100 dark:hover:bg-neutral-900"
-                >
-                  <ChevronRight className="h-5 w-5" />
-                </button>
-                <div className="absolute bottom-2 left-1/2 -translate-x-1/2 rounded-full bg-black/55 px-2 py-0.5 text-[11px] font-medium text-white" aria-live="polite" aria-atomic="true">
-                  {activeIndex + 1}/{gallery.length}
-                </div>
-              </>
-            ) : null}
-          </div>
-          {gallery.length > 1 ? (
-            <div className="flex gap-2 overflow-x-auto overscroll-x-contain p-3">
+          {/* Owner, 2026-09-25: the photos are a small album row -- square
+              cover-cropped tiles that scroll sideways -- so the name, price
+              and details are on screen at once instead of under one large
+              image. A tile opens the full-screen viewer at that photo. */}
+          {gallery.length ? (
+            <div
+              className="flex snap-x snap-mandatory gap-2 overflow-x-auto overscroll-x-contain px-4 pb-1 pt-4"
+              data-product-detail-album="true"
+            >
               {gallery.map((image, index) => (
                 <button
                   type="button"
                   key={`${image}-${index}`}
-                  onClick={() => setActiveIndex(index)}
-                  // The thumbnail image is deliberately alt="" (it repeats the
-                  // photo above), which left this button with no accessible
-                  // name at all -- a screen reader read a row of "button".
+                  onClick={() => {
+                    setActiveIndex(index)
+                    setLightboxOpen(true)
+                  }}
+                  // The tile image is alt="" after the first (the label
+                  // names each one), so the button carries the position.
                   aria-label={imageLabel(index)}
-                  aria-current={index === activeIndex ? 'true' : undefined}
-                  className={`h-14 w-14 flex-shrink-0 overflow-hidden rounded-lg border-2 ${index === activeIndex ? 'border-slate-900 dark:border-white' : 'border-transparent'}`}
+                  className="h-28 w-28 shrink-0 snap-start overflow-hidden rounded-xl bg-slate-100 ring-1 ring-slate-200 transition hover:ring-slate-400 sm:h-32 sm:w-32 dark:bg-neutral-800 dark:ring-neutral-700"
                 >
-                  <CatalogProductImage src={image} alt="" className="h-full w-full object-cover" />
+                  <CatalogProductImage src={image} alt={index === 0 ? galleryImageAlt : ''} className="h-full w-full object-cover" />
                 </button>
               ))}
             </div>
-          ) : null}
+          ) : (
+            <div className="mx-4 mt-4 flex h-28 w-28 items-center justify-center rounded-xl bg-slate-100 dark:bg-neutral-800 text-slate-300" aria-hidden="true">
+              <ShoppingBag className="h-10 w-10" />
+            </div>
+          )}
 
           <div className="space-y-4 p-4 pt-2">
             <div className="flex flex-wrap items-center gap-2">
@@ -340,7 +322,7 @@ export default function ProductDetailFlyout({ view, copy, onClose, shopName, con
             </div>
 
             {view.showPrices && view.pricePresentation?.primaryText ? (
-              <div className="text-xl font-semibold text-slate-900 dark:text-white">
+              <div translate="no" className="notranslate text-xl font-semibold text-slate-900 dark:text-white">
                 {view.pricePresentation.primaryText}
                 {view.pricePresentation.originalText ? (
                   <span className="ml-2 text-sm font-normal text-slate-500 line-through dark:text-neutral-400">
@@ -350,35 +332,46 @@ export default function ProductDetailFlyout({ view, copy, onClose, shopName, con
               </div>
             ) : null}
 
-            <DetailField label={copy('productOfficialName', 'Official Product Name')}>
-              <p {...getKhmerTextProps(parsed.officialName || emptyDetailText, `whitespace-pre-line text-sm leading-6 ${parsed.officialName ? 'text-slate-600 dark:text-neutral-300' : 'text-slate-500 dark:text-neutral-400'}`)}>
-                {parsed.officialName || emptyDetailText}
-              </p>
-            </DetailField>
+            {/* Owner, 2026-09-25: a row with no value is left out rather
+                than shown with a placeholder. Caution and Need More
+                Details always have text (owner defaults). */}
+            {officialName ? (
+              <DetailField label={copy('productOfficialName', 'Official Product Name')}>
+                <p translate="no" {...getKhmerTextProps(officialName, 'notranslate whitespace-pre-line text-sm leading-6 text-slate-600 dark:text-neutral-300')}>
+                  {officialName}
+                </p>
+              </DetailField>
+            ) : null}
 
-            <DetailField label={copy('productIntroduction', 'Introduction')}>
-              <p {...getKhmerTextProps(parsed.intro || emptyDetailText, `whitespace-pre-line text-sm leading-6 ${parsed.intro ? 'text-slate-600 dark:text-neutral-300' : 'text-slate-500 dark:text-neutral-400'}`)}>
-                {parsed.intro || emptyDetailText}
-              </p>
-            </DetailField>
+            {parsed.intro ? (
+              <DetailField label={copy('productIntroduction', 'Introduction')}>
+                <p {...getKhmerTextProps(parsed.intro, 'whitespace-pre-line text-sm leading-6 text-slate-600 dark:text-neutral-300')}>
+                  {parsed.intro}
+                </p>
+              </DetailField>
+            ) : null}
 
-            <DetailSectionBlock sectionKey="features_benefits" items={featureItems} copy={copy} emptyText={emptyDetailText} />
+            <DetailSectionBlock sectionKey="features_benefits" items={featureItems} copy={copy} />
 
-            <DetailField label={copy('productCategory', 'Category')}>
-              <p className={`text-sm leading-6 ${categoryValues.length ? 'text-slate-600 dark:text-neutral-300' : 'text-slate-500 dark:text-neutral-400'}`}>
-                {categoryValues.join(', ') || emptyDetailText}
-              </p>
-            </DetailField>
+            {categoryValues.length ? (
+              <DetailField label={copy('productCategory', 'Category')}>
+                <p className="text-sm leading-6 text-slate-600 dark:text-neutral-300">
+                  {categoryValues.join(', ')}
+                </p>
+              </DetailField>
+            ) : null}
 
-            <DetailField label={copy('productBrand', 'Brand')}>
-              <p className={`text-sm leading-6 ${brandValues.length ? 'text-slate-600 dark:text-neutral-300' : 'text-slate-500 dark:text-neutral-400'}`}>
-                {brandValues.join(', ') || emptyDetailText}
-              </p>
-            </DetailField>
+            {brandValues.length ? (
+              <DetailField label={copy('productBrand', 'Brand')}>
+                <p translate="no" className="notranslate text-sm leading-6 text-slate-600 dark:text-neutral-300">
+                  {brandValues.join(', ')}
+                </p>
+              </DetailField>
+            ) : null}
 
-            <DetailSectionBlock sectionKey="who_for" items={whoForItems} copy={copy} emptyText={emptyDetailText} />
-            <DetailSectionBlock sectionKey="ingredients" items={ingredientItems} copy={copy} emptyText={emptyDetailText} />
-            <DetailSectionBlock sectionKey="caution" items={cautionItems} copy={copy} emptyText={copy('productCautionNotProvided', 'No product-specific caution has been added yet.')} />
+            <DetailSectionBlock sectionKey="who_for" items={whoForItems} copy={copy} />
+            <DetailSectionBlock sectionKey="ingredients" items={ingredientItems} copy={copy} />
+            <DetailSectionBlock sectionKey="caution" items={cautionItems} copy={copy} />
 
             <div data-product-detail-section="need_more_details">
               <div className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-neutral-400">
@@ -394,7 +387,7 @@ export default function ProductDetailFlyout({ view, copy, onClose, shopName, con
               <div className="flex items-start gap-2 rounded-xl bg-slate-50 p-3 text-xs text-slate-500 dark:bg-neutral-800/60 dark:text-neutral-400">
                 <Store className="mt-0.5 h-3.5 w-3.5 flex-shrink-0" />
                 <div>
-                  <div className="font-medium text-slate-700 dark:text-neutral-200">{shopName}</div>
+                  <div translate="no" className="notranslate font-medium text-slate-700 dark:text-neutral-200">{shopName}</div>
                   {contactNote ? <div className="mt-0.5">{contactNote}</div> : null}
                 </div>
               </div>
@@ -433,6 +426,7 @@ export default function ProductDetailFlyout({ view, copy, onClose, shopName, con
             index={activeIndex}
             onClose={() => setLightboxOpen(false)}
             onIndexChange={(index: number) => setActiveIndex(index)}
+            variant="immersive"
             labels={{
               prev: copy('prevImage', 'Previous image'),
               next: copy('nextImage', 'Next image'),

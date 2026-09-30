@@ -1,8 +1,5 @@
 import assert from 'node:assert/strict'
-import {
-  FIRST_PARTY_PORTAL_LANGUAGE_OPTIONS,
-  getPortalLanguageText,
-} from '../src/components/catalog/portalLanguagePacks.ts'
+import { getPortalLanguageText } from '../src/components/catalog/portalLanguagePacks.ts'
 import {
   localizePortalConfig,
   localizePortalFaqText,
@@ -58,21 +55,31 @@ const defaultFaqConfig = {
   translations: {},
 }
 
-const localized = localizePortalConfig(config, 'zh-CN') as LocalizedPortalConfig
+const localized = localizePortalConfig(config, 'km') as LocalizedPortalConfig
 assert.notEqual(localized.faqItems[0].question, config.faqItems[0].question)
 assert.notEqual(localized.faqItems[0].answer, config.faqItems[0].answer)
-assert.match(localized.faqItems[0].question, /肤质|产品/)
+assert.match(localized.faqItems[0].question, /ប្រភេទស្បែក|ផលិតផល/)
 
-const fallbackText = String(localizePortalFaqText(config.faqItems[1].question, 'zh-CN'))
+const fallbackText = String(localizePortalFaqText(config.faqItems[1].question, 'km'))
 assert.notEqual(fallbackText, config.faqItems[1].question)
-assert.match(fallbackText, /敏感肌|预算|产品/)
+assert.match(fallbackText, /ស្បែកងាយប្រតិកម្ម|ថវិកា|ផលិតផល/)
 
 const english = localizePortalConfig(config, 'en') as LocalizedPortalConfig
 assert.equal(english.faqItems[0].question, config.faqItems[0].question)
 
-const firstPartyLanguages = FIRST_PARTY_PORTAL_LANGUAGE_OPTIONS
-  .map((option) => option.value)
-  .filter((language) => language !== 'en')
+// Owner decision, 27 Sep 2026: English and Khmer only; no other language
+// localises FAQ text any more.
+for (const retired of ['zh-CN', 'zh-TW', 'vi', 'fr', 'ja']) {
+  assert.equal(localizePortalFaqText(config.faqItems[0].question, retired), config.faqItems[0].question, `${retired} still localises FAQ text`)
+}
+{
+  const fs = await import('node:fs')
+  const contentSource = fs.readFileSync(new URL('../src/components/catalog/portalContentI18n.ts', import.meta.url), 'utf8')
+  const dictionaryLanguages = new Set([...contentSource.matchAll(/^ {2}'?([a-z]{2}(?:-[A-Za-z]{2})?)'?: \{/gm)].map((match) => match[1]))
+  assert.deepEqual([...dictionaryLanguages], ['km'], 'the FAQ dictionaries hold a retired language')
+}
+
+const firstPartyLanguages = ['km']
 
 for (const language of firstPartyLanguages) {
   const localizedDefault = localizePortalConfig(defaultFaqConfig, language) as LocalizedPortalConfig
@@ -107,9 +114,7 @@ for (const language of firstPartyLanguages) {
 }
 
 // New starter FAQ items (delivery, payment, store hours, authenticity,
-// promotions) added alongside this test -- exercise both the zh-CN exact
-// dictionary path and the vocabulary-substitution fallback path every
-// other first-party language relies on for these five new items.
+// promotions) go through the Khmer vocabulary-substitution path.
 const newStarterFaq = [
   {
     question: 'Do you offer delivery, or is it pickup only?',
@@ -133,16 +138,6 @@ const newStarterFaq = [
   },
 ]
 const newStarterFaqLeakPattern = /\b(delivery|payment|store hours|authentic|promotions|discounts)\b/i
-
-const zhCnLocalized = newStarterFaq.map((item) => ({
-  question: String(localizePortalFaqText(item.question, 'zh-CN')),
-  answer: String(localizePortalFaqText(item.answer, 'zh-CN')),
-}))
-zhCnLocalized.forEach((item, index) => {
-  assert.notEqual(item.question, newStarterFaq[index].question, `zh-CN new FAQ question ${index + 1} should localize`)
-  assert.notEqual(item.answer, newStarterFaq[index].answer, `zh-CN new FAQ answer ${index + 1} should localize`)
-  assert.doesNotMatch(item.answer, newStarterFaqLeakPattern, `zh-CN new FAQ answer ${index + 1} still has key English fragments`)
-})
 
 for (const language of firstPartyLanguages) {
   newStarterFaq.forEach((item, index) => {

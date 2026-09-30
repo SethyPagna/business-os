@@ -24,6 +24,7 @@ import LazyPortalMenu from '../shared/LazyPortalMenu'
 import AlphaIndexRail from '../shared/AlphaIndexRail.tsx'
 import { RAIL_ALL_KEY, resolveBrandJump } from '../../utils/alphaRail.ts'
 import { pagerState } from '../../utils/pagerState.ts'
+import { buildPortalActiveFilterChips, withoutFilterValue, type PortalActiveFilterChip } from './portalActiveFilters.ts'
 import { buildPortalHighlightBadges, buildPortalPricePresentation, resolvePortalStockStatus, shouldShowStockStatus } from './portalCatalogDisplay.ts'
 import { isProductPromoted, type PromotionRule } from '../../utils/promotionRules.ts'
 import { aggregateInitialOptions, getInitialKey } from '../../utils/initials.ts'
@@ -269,6 +270,10 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
   const [pageSize, setPageSize] = useState(CATALOG_DEFAULT_PAGE_SIZE)
   const [localInitialFilter, setLocalInitialFilter] = useState('all')
   const filterPanelRef = useRef<HTMLDivElement | null>(null)
+  // lg+ only: the slim inline filter panel under the search row. Collapsed by
+  // default so the search owns the full row (P-public-10). Separate from
+  // `filtersOpen`, which tracks the body-portalled layer used below `lg`.
+  const [desktopFiltersOpen, setDesktopFiltersOpen] = useState(false)
   const effectivePage = serverPaged ? Number(productPage || 1) : page
   const effectivePageSize = serverPaged ? Number(productPageSize || CATALOG_DEFAULT_PAGE_SIZE) : pageSize
   const effectiveInitialFilter = serverPaged ? (controlledInitialFilter || 'all') : localInitialFilter
@@ -389,32 +394,41 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
     return headers
   }, [pagedProducts, showCategoryHeaders, copy, promotionRules])
 
-  // Shared filter-field body (category/brand/branch/stock) -- rendered
-  // twice: once inside the body-portalled mobile/tablet filter layer below
-  // `lg`, and once inside the always-visible left rail at `lg` and up.
-  // Extracted to a function rather than duplicated JSX so the two call
-  // sites can never drift apart.
+  const stockLabels: Record<string, string> = {
+    in_stock: copy('inStock', 'In Stock'),
+    low_stock: copy('lowStock', 'Low Stock'),
+    out_of_stock: copy('outOfStock', 'Out of Stock'),
+  }
+  const activeFilterChips = buildPortalActiveFilterChips({
+    categoryFilter,
+    brandFilter,
+    promoFacet,
+    stockFilter,
+    showStockStatus: shouldShowStockStatus(previewConfig),
+    branchFilter,
+    initialFilter: effectiveInitialFilter,
+    promoLabel: copy('promotionsFilter', 'Promotions only'),
+    stockLabel: (value) => stockLabels[value] || value,
+    branchLabel: (value) => branches.find((branch) => String(branch.id) === value)?.name || value,
+    allInitialKey: RAIL_ALL_KEY,
+  })
+  const removeActiveFilterChip = (chip: PortalActiveFilterChip) => {
+    if (chip.kind === 'category') setCategoryFilter(withoutFilterValue(categoryFilter, chip.value))
+    else if (chip.kind === 'brand') setBrandFilter(withoutFilterValue(brandFilter, chip.value))
+    else if (chip.kind === 'stock') setStockFilter(withoutFilterValue(stockFilter, chip.value))
+    else if (chip.kind === 'branch') setBranchFilter(withoutFilterValue(branchFilter, chip.value))
+    else if (chip.kind === 'promo') setPromoFacet?.('')
+    else updateInitialFilter?.(RAIL_ALL_KEY)
+  }
+
+  // Shared filter-field body, most useful first (P-public-10, owner
+  // 2026-09-25): category, brand, promotions, then the admin-only branch and
+  // stock status. Rendered twice: inside the body-portalled filter layer below
+  // `lg`, and inside the slim collapsible panel under the search row at `lg`
+  // and up. Extracted to a function rather than duplicated JSX so the two
+  // call sites can never drift apart.
   const renderFilterFields = () => (
     <>
-      {/* G1b: the "only deals" toggle. A campaign chip on the promo strip
-          sets the narrower 'rule:<id>' facet; this toggle reads as on for
-          either and switches any promo facet off. Admin facets (supplier
-          etc.) never reach the portal -- standing surface rule. */}
-      {setPromoFacet ? (
-        <button
-          type="button"
-          onClick={() => setPromoFacet(promoFacet ? '' : 'promoted')}
-          aria-pressed={!!promoFacet}
-          className={`mb-2 flex w-full items-center justify-between rounded-[1.1rem] px-3 py-2 text-xs font-bold uppercase tracking-wide ring-1 transition-colors ${
-            promoFacet
-              ? 'bg-rose-600 text-white ring-rose-600'
-              : 'bg-slate-50 text-gray-500 ring-slate-100 hover:text-rose-600 dark:bg-neutral-800 dark:text-neutral-400 dark:ring-neutral-700'
-          }`}
-        >
-          <span>{copy('promotionsFilter', 'Promotions only')}</span>
-          <span aria-hidden="true">{promoFacet ? '✓' : ''}</span>
-        </button>
-      ) : null}
       <div className="rounded-[1.1rem] bg-slate-50 p-2 ring-1 ring-slate-100 dark:bg-neutral-800 dark:ring-neutral-700">
         <div className="grid grid-cols-[5rem_minmax(0,1fr)] items-start gap-2 sm:grid-cols-[5.6rem_minmax(0,1fr)] lg:grid-cols-1 lg:gap-1">
           <div className="min-w-0 pt-1.5 text-[10px] font-bold uppercase tracking-wide text-gray-500 dark:text-neutral-400 lg:pt-0">
@@ -455,6 +469,26 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
         </div>
       </div>
 
+      {/* G1b: the "only deals" toggle. A campaign chip on the promo strip
+          sets the narrower 'rule:<id>' facet; this toggle reads as on for
+          either and switches any promo facet off. Admin facets (supplier
+          etc.) never reach the portal -- standing surface rule. */}
+      {setPromoFacet ? (
+        <button
+          type="button"
+          onClick={() => setPromoFacet(promoFacet ? '' : 'promoted')}
+          aria-pressed={!!promoFacet}
+          className={`flex min-h-10 w-full items-center justify-between rounded-[1.1rem] px-3 py-2 text-xs font-bold uppercase tracking-wide ring-1 transition-colors ${
+            promoFacet
+              ? 'bg-rose-600 text-white ring-rose-600'
+              : 'bg-slate-50 text-gray-500 ring-slate-100 hover:text-rose-600 dark:bg-neutral-800 dark:text-neutral-400 dark:ring-neutral-700'
+          }`}
+        >
+          <span>{copy('promotionsFilter', 'Promotions only')}</span>
+          <span aria-hidden="true">{promoFacet ? '✓' : ''}</span>
+        </button>
+      ) : null}
+
       {!publicView ? (
         <div className="rounded-[1.1rem] bg-slate-50 p-2 ring-1 ring-slate-100 dark:bg-neutral-800 dark:ring-neutral-700">
           <div className="grid grid-cols-[5rem_minmax(0,1fr)] items-start gap-2 sm:grid-cols-[5.6rem_minmax(0,1fr)] lg:grid-cols-1 lg:gap-1">
@@ -494,7 +528,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
                     key={value}
                     type="button"
                     onClick={() => toggleFilterValue(stockFilter, setStockFilter, value)}
-                    className={`rounded-full border px-3 py-1.5 text-xs font-semibold leading-none transition-colors ${
+                    className={`inline-flex min-h-10 items-center rounded-full border px-3 py-1.5 text-xs font-semibold leading-5 transition-colors ${
                       active
                         ? 'border-blue-700 bg-blue-600 text-white shadow-sm dark:border-amber-400 dark:bg-amber-400 dark:text-neutral-950'
                         : 'border-slate-200 bg-white/95 text-slate-700 shadow-sm hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 dark:border-neutral-700 dark:bg-neutral-800/90 dark:text-neutral-200 dark:hover:border-amber-500/50 dark:hover:bg-neutral-700/80 dark:hover:text-amber-300'
@@ -521,34 +555,19 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
       title={publicView ? undefined : copy('products', 'Products')}
       subtitle={copy('liveCatalog', 'Browse our products and check availability.')}
     >
-      {/* Desktop (lg+): an always-visible left rail replaces the floating
-          Filters layer used below `lg`; no popover is needed when there is
-          room for a permanent sidebar. */}
-      {/* `relative` so the editor preview's in-flow brand rail (edge="inline",
-          mounted at the end of this grid) has a positioned ancestor to stick
+      {/* The permanent 17rem left filter rail that sat here at lg+ is gone
+          (P-public-10, owner 2026-09-25: "compact filter ... the search bar
+          takes the whole row"). It cut the search row to what was left beside
+          it and cost a sixth of the page width even with no filter in use.
+          Filters are now one control at every breakpoint: the body-portalled
+          layer below `lg`, and a slim panel that expands under the search row
+          at `lg` and up, collapsed by default.
+
+          `relative` so the editor preview's in-flow brand rail (edge="inline",
+          mounted at the end of this block) has a positioned ancestor to stick
           inside. The public storefront's rail is `fixed` and portalled, so
           this changes nothing for it. */}
-      <div className="relative lg:grid lg:grid-cols-[17rem_minmax(0,1fr)] lg:items-start lg:gap-6">
-        <aside className="hidden min-w-0 lg:sticky lg:top-20 lg:block lg:min-w-0 lg:self-start">
-          <div className="min-w-0 space-y-2 rounded-[1.35rem] border border-slate-200 bg-white p-2.5 shadow-sm dark:border-neutral-700 dark:bg-neutral-900">
-            <div className="flex items-center justify-between gap-2 px-1 pb-1">
-              <span className="text-sm font-semibold text-slate-900 dark:text-neutral-100">{copy('filters', 'Filters')}</span>
-              {portalActiveFilterCount > 0 ? (
-                <button type="button" className="text-xs font-semibold text-slate-500 hover:text-slate-700 dark:text-neutral-300 dark:hover:text-white" onClick={clearPortalFilters}>
-                  {copy('clear', 'Clear')}
-                </button>
-              ) : null}
-            </div>
-            {renderFilterFields()}
-          </div>
-          {/* The brand index used to be a second card here: a 4-column letter
-              GRID inside its own `max-h-[...] overflow-y-auto` box. That box
-              sat over the product list and swallowed wheel/touch gestures
-              aimed at the page, and it duplicated a `lg:hidden` chip row
-              below the search field. Both are now the single screen-edge
-              AlphaIndexRail mounted at the end of this section. */}
-        </aside>
-
+      <div className="relative">
         <div className={`min-w-0 ${railGutterClass}`}>
       {/* G3: the auto-scrolling promo row sits ABOVE search, public view
           only, and only when the merchant shows promotions at all. */}
@@ -583,7 +602,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
               field no accessible name at all: a reader announced a bare "edit
               text". A placeholder is not a name -- it disappears the moment
               anything is typed, and several readers ignore it outright. */}
-          <label htmlFor="portal-product-search" className="flex min-w-0 flex-1 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm transition focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-100 dark:border-neutral-700 dark:bg-neutral-950 dark:focus-within:border-amber-400 dark:focus-within:ring-amber-500/15">
+          <label htmlFor="portal-product-search" className="flex min-h-10 min-w-0 flex-1 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm transition focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-100 dark:border-neutral-700 dark:bg-neutral-950 dark:focus-within:border-amber-400 dark:focus-within:ring-amber-500/15">
             <Search className="h-4 w-4 shrink-0 text-blue-600 dark:text-amber-300" aria-hidden="true" />
             <span className="sr-only">{copy('searchPlaceholder', 'Search products')}</span>
             <input
@@ -605,7 +624,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
               trigger={(
                 <button
                   type="button"
-                  className={`inline-flex items-center justify-center gap-2 rounded-xl border px-3 py-2 text-sm font-semibold transition ${
+                  className={`inline-flex min-h-10 min-w-10 items-center justify-center gap-2 rounded-xl border px-3 py-2 text-sm font-semibold transition ${
                     filtersOpen || portalActiveFilterCount > 0 ? 'border-blue-600 bg-blue-600 text-white shadow-sm dark:border-amber-400 dark:bg-amber-400 dark:text-neutral-950' : 'border-slate-200 bg-white text-slate-700 shadow-sm hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 dark:border-neutral-700 dark:bg-neutral-950 dark:text-neutral-200 dark:hover:border-amber-500/50 dark:hover:text-amber-300'
                   }`}
                   aria-label={copy('filters', 'Filters')}
@@ -629,13 +648,13 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
                     <span className="text-sm font-semibold text-slate-900 dark:text-neutral-100">{copy('filters', 'Filters')}</span>
                     <div className="flex items-center gap-2">
                       {portalActiveFilterCount > 0 ? (
-                        <button type="button" className="text-xs font-semibold text-slate-500 hover:text-slate-700 dark:text-neutral-300 dark:hover:text-white" onClick={clearPortalFilters}>
+                        <button type="button" className="min-h-10 rounded-lg px-2 text-xs font-semibold text-slate-500 hover:text-slate-700 dark:text-neutral-300 dark:hover:text-white" onClick={clearPortalFilters}>
                           {copy('clear', 'Clear')}
                         </button>
                       ) : null}
                       <button
                         type="button"
-                        className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-slate-200 text-slate-500 transition hover:bg-slate-50 hover:text-slate-700 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800 dark:hover:text-white"
+                        className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 text-slate-500 transition hover:bg-slate-50 hover:text-slate-700 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800 dark:hover:text-white"
                         onClick={closeMenu}
                         aria-label={copy('closeFilters', 'Close filters')}
                       >
@@ -655,7 +674,39 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
                 the clear in the filter menu is enough." One Clear control,
                 inside the menu, is what's left. */}
           </div>
+          {/* lg+: the same Filters control toggles a slim inline panel
+              instead of a floating layer -- there is room for it, and it
+              leaves the search field the rest of the row. */}
+          <button
+            type="button"
+            onClick={() => setDesktopFiltersOpen((open) => !open)}
+            aria-expanded={desktopFiltersOpen}
+            aria-controls="portal-desktop-filters"
+            className={`hidden min-h-10 shrink-0 items-center justify-center gap-2 rounded-xl border px-3 py-2 text-sm font-semibold transition lg:inline-flex ${
+              desktopFiltersOpen || portalActiveFilterCount > 0 ? 'border-blue-600 bg-blue-600 text-white shadow-sm dark:border-amber-400 dark:bg-amber-400 dark:text-neutral-950' : 'border-slate-200 bg-white text-slate-700 shadow-sm hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 dark:border-neutral-700 dark:bg-neutral-950 dark:text-neutral-200 dark:hover:border-amber-500/50 dark:hover:text-amber-300'
+            }`}
+          >
+            <SlidersHorizontal className="h-4 w-4" aria-hidden="true" />
+            <span>{copy('filters', 'Filters')}</span>
+            {portalActiveFilterCount > 0 ? (
+              <span className="rounded-full bg-white/20 px-2 py-0.5 text-xs">{portalActiveFilterCount}</span>
+            ) : null}
+          </button>
           </div>
+
+        {desktopFiltersOpen ? (
+          <div id="portal-desktop-filters" data-portal-desktop-filters="true" className="hidden border-t border-slate-100 px-1 pt-2 dark:border-neutral-800 lg:block">
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <span className="text-sm font-semibold text-slate-900 dark:text-neutral-100">{copy('filters', 'Filters')}</span>
+              {portalActiveFilterCount > 0 ? (
+                <button type="button" className="min-h-10 rounded-lg px-2 text-xs font-semibold text-slate-500 hover:text-slate-700 dark:text-neutral-300 dark:hover:text-white" onClick={clearPortalFilters}>
+                  {copy('clear', 'Clear')}
+                </button>
+              ) : null}
+            </div>
+            <div className="grid grid-cols-4 items-start gap-2">{renderFilterFields()}</div>
+          </div>
+        ) : null}
 
         {/* The `lg:hidden` letter chip row lived here: an `overflow-x-auto`
             strip of `h-8 min-w-9` buttons pinned under the search field. On a
@@ -669,11 +720,40 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
             sat beside now prints on the pagination row below/above the grid
             instead -- one number, not two. This row is left only for the
             two states that actually change between renders: an active
-            filter count, and load feedback while a request is in flight. */}
+            filter count, and load feedback while a request is in flight.
+
+            P-public-10: the bare "N selected" count became one removable chip
+            per active filter, so a shopper sees WHAT is narrowing the list and
+            can drop one value without reopening Filters. The chips wrap
+            (flex-wrap) rather than scroll -- this row sits over the product
+            list, where an inner scroller eats page gestures
+            (storefrontScrollRoot.test.ts). */}
         {portalActiveFilterCount > 0 || refreshingProducts || loadingProducts ? (
-          <div className="flex items-center justify-between gap-2 border-t border-slate-100 px-1 pt-2 text-xs text-slate-500 dark:border-neutral-800 dark:text-neutral-400">
-            <span>{portalActiveFilterCount > 0 ? `${portalActiveFilterCount} ${copy('selected', 'selected')}` : ''}</span>
-            <span className="font-semibold text-slate-600 dark:text-neutral-200">
+          <div className="flex items-start justify-between gap-2 border-t border-slate-100 px-1 pt-2 text-xs text-slate-500 dark:border-neutral-800 dark:text-neutral-400">
+            {activeFilterChips.length ? (
+              <ul data-portal-active-filters="true" aria-label={copy('filters', 'Filters')} className="flex min-w-0 flex-wrap gap-1.5">
+                {activeFilterChips.map((chip) => (
+                  <li key={chip.key} className="min-w-0">
+                    <button
+                      type="button"
+                      onClick={() => removeActiveFilterChip(chip)}
+                      aria-label={replaceVars(copy('removeActiveFilter', 'Remove filter: {label}'), { label: chip.label })}
+                      className="inline-flex min-h-10 max-w-full items-center gap-1.5 rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-left text-xs font-semibold leading-[1.5] text-blue-800 transition hover:border-blue-400 dark:border-amber-500/40 dark:bg-amber-400/10 dark:text-amber-200 dark:hover:border-amber-400"
+                    >
+                      {/* Owner data (names, letters) must not be machine-translated; the
+                          promotions/stock labels are UI copy and should be. */}
+                      {chip.kind === 'promo' || chip.kind === 'stock'
+                        ? <span className="min-w-0 break-words">{chip.label}</span>
+                        : <span className="notranslate min-w-0 break-words" translate="no">{chip.label}</span>}
+                      <X className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <span>{portalActiveFilterCount > 0 ? `${portalActiveFilterCount} ${copy('selected', 'selected')}` : ''}</span>
+            )}
+            <span className="shrink-0 pt-1 font-semibold text-slate-600 dark:text-neutral-200">
               {refreshingProducts ? copy('refreshing', 'Refreshing...') : loadingProducts ? copy('loadingProducts', 'Loading products...') : ''}
             </span>
           </div>
@@ -828,10 +908,12 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
           const pricePresentation = previewConfig.showPrices
             ? buildPortalPricePresentation(product, previewConfig, formatPortalPrice, promotionRules)
             : null
+          // A brand is a proper name and is never machine-translated; a
+          // category ("Skincare") is ordinary copy and may be.
           const metadataChips = [
-            previewConfig.showProductCategory !== false ? product.category : '',
-            previewConfig.showProductBrand !== false ? product.brand : '',
-          ].map((chip) => String(chip || '').trim()).filter(Boolean)
+            { kind: 'category', text: previewConfig.showProductCategory !== false ? String(product.category || '').trim() : '' },
+            { kind: 'brand', text: previewConfig.showProductBrand !== false ? String(product.brand || '').trim() : '' },
+          ].filter((chip) => chip.text)
           const showDiscountDetails = previewConfig.showProductDiscount !== false
           const promotion = pricePresentation?.promotion
           const categoryHeaderLabel = categoryHeaderAt.get(index)
@@ -937,9 +1019,15 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
                 {metadataChips.length ? (
                   <div className="flex flex-wrap items-center gap-1 text-[10px] uppercase tracking-wide text-slate-500 dark:text-neutral-400">
                     {metadataChips.map((chip) => (
-                      <span key={`${product.id}-${chip}`} {...getKhmerTextProps(chip, '')}>
-                        {chip}
-                      </span>
+                      chip.kind === 'brand' ? (
+                        <span key={`${product.id}-brand`} translate="no" {...getKhmerTextProps(chip.text, 'notranslate')}>
+                          {chip.text}
+                        </span>
+                      ) : (
+                        <span key={`${product.id}-category`} {...getKhmerTextProps(chip.text, '')}>
+                          {chip.text}
+                        </span>
+                      )
                     ))}
                   </div>
                 ) : null}
@@ -953,12 +1041,13 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
                   <button
                     type="button"
                     onClick={(event) => { event.stopPropagation(); openProductDetail(product) }}
-                    {...getKhmerTextProps(product.name, `block w-full text-left ${compactCatalogCards ? 'text-[13px]' : 'text-[15px]'} font-medium leading-snug text-slate-900 dark:text-neutral-100`)}
+                    translate="no"
+                    {...getKhmerTextProps(product.name, `notranslate block w-full text-left ${compactCatalogCards ? 'text-[13px]' : 'text-[15px]'} font-medium leading-snug text-slate-900 dark:text-neutral-100`)}
                   >
                     {product.name}
                   </button>
                 ) : (
-                  <div {...getKhmerTextProps(product.name, `${compactCatalogCards ? 'text-[13px]' : 'text-[15px]'} font-medium leading-snug text-slate-900 dark:text-neutral-100`)}>
+                  <div translate="no" {...getKhmerTextProps(product.name, `notranslate ${compactCatalogCards ? 'text-[13px]' : 'text-[15px]'} font-medium leading-snug text-slate-900 dark:text-neutral-100`)}>
                     {product.name}
                   </div>
                 )}
@@ -992,7 +1081,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
 
                 <div className="flex items-center justify-between gap-2 pt-1">
                   {previewConfig.showPrices ? (
-                    <div className={`font-semibold text-slate-900 dark:text-neutral-100 ${compactCatalogCards ? 'text-xs' : 'text-sm'}`}>
+                    <div translate="no" className={`notranslate font-semibold text-slate-900 dark:text-neutral-100 ${compactCatalogCards ? 'text-xs' : 'text-sm'}`}>
                       {pricePresentation?.primaryText}
                       {showDiscountDetails && promotion?.active && pricePresentation?.originalText ? (
                         <span className="ml-2 text-[11px] font-normal text-slate-500 line-through dark:text-neutral-400">
@@ -1116,7 +1205,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
           renders this same section inside a `.page-scroll` panel, where a
           fixed rail would float out of the preview and over the admin's own
           chrome -- so it takes the `inline` variant, which sticks inside this
-          (relatively positioned) grid instead. Gating the preview out
+          (relatively positioned) block instead. Gating the preview out
           entirely, as an earlier pass did, left the editor with no brand
           index at all after both letter lists were deleted. */}
       {initialOptions.length > 1 ? (

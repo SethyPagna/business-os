@@ -159,6 +159,12 @@
             && !adminRoutes[segment]
         document.documentElement.setAttribute('data-business-os-initial-route', publicRoute ? 'public' : 'admin')
         if (publicRoute) {
+          // The storefront opens in Khmer by default (P-public-1, Sep 25
+          // 2026), so declare km before any script or crawler reads the
+          // static lang="en". PublicCatalogPage re-sets it on mount to the
+          // visitor's chosen language. The admin branch leaves lang alone --
+          // AppContext sets the staff member's own language.
+          document.documentElement.setAttribute('lang', 'km')
           document.title = 'Leang Beauty'
           var description = document.querySelector('meta[name="description"]')
           if (description) description.setAttribute('content', 'Leang Beauty — product catalog, prices and store contact')
@@ -213,11 +219,11 @@
           // Both signals, on purpose: the meta is what Chrome/Edge read to
           // suppress the offer entirely, translate="no" is the HTML standard
           // attribute other engines honour. The PUBLIC branch above must stay
-          // translatable -- customers read the storefront in their own
-          // language, it has its own Google Translate widget
-          // (src/components/catalog/portalTranslateController.ts), and it
-          // already carries its own reload recovery for this crash class
-          // (src/app/publicErrorRecovery.ts).
+          // translatable -- a customer may still run the browser's page
+          // translator on the storefront, which carries its own guard and
+          // reload recovery for this crash class
+          // (src/components/catalog/portalTranslateDomGuard.ts,
+          // src/app/publicErrorRecovery.ts).
           var adminNoTranslate = document.createElement('meta')
           adminNoTranslate.setAttribute('name', 'google')
           adminNoTranslate.setAttribute('content', 'notranslate')

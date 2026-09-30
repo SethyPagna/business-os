@@ -105,13 +105,10 @@ export type LegalStorageRow = {
 export const LEGAL_STORAGE_ROWS: readonly LegalStorageRow[] = [
   // lib/portalSession.ts -- HttpOnly session cookie set on sign-in only.
   { id: 'bos_portal', name: 'bos_portal', kindKey: 'portal_legal_kind_cookie', purposeKey: 'portal_legal_store_session_p', lifetimeKey: 'portal_legal_store_session_l' },
-  // portalTranslateController.ts -- written only when the visitor picks one of
-  // the external-translation languages from the language menu.
-  { id: 'googtrans', name: 'googtrans', kindKey: 'portal_legal_kind_cookie', purposeKey: 'portal_legal_store_googtrans_p', lifetimeKey: 'portal_legal_store_googtrans_l' },
   // portalBucket.ts
   { id: 'bucket', name: 'business-os-portal-bucket-v1', kindKey: 'portal_legal_kind_local', purposeKey: 'portal_legal_store_bucket_p', lifetimeKey: 'portal_legal_store_until_cleared_l' },
   { id: 'wishlist', name: 'business-os-portal-wishlist-v1', kindKey: 'portal_legal_kind_local', purposeKey: 'portal_legal_store_wishlist_p', lifetimeKey: 'portal_legal_store_until_cleared_l' },
-  // portalTranslateController.ts
+  // portalLanguageOptions.ts
   { id: 'translate', name: 'business-os:portal-translate-target', kindKey: 'portal_legal_kind_local', purposeKey: 'portal_legal_store_translate_p', lifetimeKey: 'portal_legal_store_until_cleared_l' },
   // PublicCatalogPage.tsx PUBLIC_PORTAL_CACHE_KEY (both storages)
   { id: 'cache', name: 'business-os-catalog-portal-cache', kindKey: 'portal_legal_kind_both', purposeKey: 'portal_legal_store_cache_p', lifetimeKey: 'portal_legal_store_cache_l' },
@@ -135,7 +132,6 @@ const EN: Record<string, string> = {
   portal_legal_cookies_title: 'Cookie Policy',
   portal_legal_last_updated: 'Last updated {date}',
   portal_legal_close: 'Close',
-  portal_legal_open_policies: 'Open policies menu',
   portal_legal_template_notice: 'This document is a template prepared for {name}. The business owner should have it reviewed by a qualified lawyer before relying on it. It is not legal advice.',
   portal_legal_identity_h: 'Business details',
   portal_legal_identity_legal_name: 'Registered name',
@@ -146,6 +142,10 @@ const EN: Record<string, string> = {
   portal_legal_footer_rights: 'Site operated by {name}.',
   portal_legal_footer_content_concerns: 'If something on this site is about you, or you are concerned about an image, contact {email}. We will review the request and may ask for information needed to identify the content and the person making the request.',
   portal_legal_footer_landmark: 'Site information and policies',
+  // P-public-9 footer column headings.
+  portal_legal_footer_contact: 'Contact',
+  portal_legal_footer_quick_links: 'Quick links',
+  portal_legal_footer_follow: 'Follow us',
 
   // --- Privacy Policy ------------------------------------------------------
   portal_legal_privacy_who_h: 'Who we are',
@@ -161,7 +161,7 @@ const EN: Record<string, string> = {
   portal_legal_privacy_retention_b: 'Application rate-limit and inactive sign-in-protection records are removed after about a day. A signed-in session can last up to 399 days and may renew while it is actively used; signing out revokes it, and expired or revoked server records are removed. Assistant logs are removed after about thirty days. Submitted images are removed about ninety days after staff review; an unreviewed submission and its images are removed after about one hundred and eighty days. The reviewed submission row may remain as part of the points record after its images are removed. Account and membership records remain until the business resolves a verified request or must keep them for an operational or legal reason. Sentry applies its configured error-event retention.',
   portal_legal_privacy_sharing_h: 'Who else sees it',
   portal_legal_privacy_sharing_b: 'The current storefront does not include advertising trackers. Account and submission data is used only for the purposes described in this notice unless this notice and the required consent are updated first.',
-  portal_legal_privacy_sharing_list: 'Cloudflare hosts this site, its database, its images and its security logs, so your data passes through and is stored on their infrastructure. Application error reports go to Sentry. Product photographs may be optimised by Cloudinary; screenshots you send us are not. If the assistant is switched on, the question you type is sent to a third-party AI provider to produce an answer. If you choose an external translation language, your page text is sent to Google Translate. If you choose to load the store map, Google receives that request. Links to Facebook, Instagram, Telegram, WhatsApp or Messenger open those apps, which then apply their own policies.',
+  portal_legal_privacy_sharing_list: 'Cloudflare hosts this site, its database, its images and its security logs, so your data passes through and is stored on their infrastructure. Application error reports go to Sentry. Product photographs may be optimised by Cloudinary; screenshots you send us are not. If the assistant is switched on, the question you type is sent to a third-party AI provider to produce an answer. If you choose to load the store map, Google receives that request. Links to Facebook, Instagram, Telegram, WhatsApp or Messenger open those apps, which then apply their own policies.',
   portal_legal_privacy_security_h: 'How we protect it',
   portal_legal_privacy_security_b: 'Passwords are stored only as a one-way verifier and must be at least six characters. The sign-in cookie cannot be read by scripts, is limited to this site and is sent over HTTPS. Repeated failed attempts are slowed down. Screenshots you send us use private object keys and authenticated staff access. No system is perfect, so please use a password you do not reuse elsewhere.',
   portal_legal_privacy_rights_h: 'Your choices',
@@ -197,11 +197,11 @@ const EN: Record<string, string> = {
   portal_legal_cookies_what_h: 'What this site stores',
   portal_legal_cookies_what_b: 'A cookie is a small file a site stores in your browser; local storage works the same way. This site uses only what it needs to work. There are no advertising or analytics cookies.',
   portal_legal_cookies_consent_h: 'Necessary and requested storage',
-  portal_legal_cookies_consent_b: 'The application uses storage needed for core functions, and creates optional third-party storage only after you request the related feature. The store map stays blocked until you choose to load it; choosing an external translation language loads Google Translate. This description does not claim that one banner rule applies in every country or to every future feature.',
+  portal_legal_cookies_consent_b: 'The application uses storage needed for core functions, and creates optional third-party storage only after you request the related feature. The store map stays blocked until you choose to load it. This description does not claim that one banner rule applies in every country or to every future feature.',
   portal_legal_cookies_table_h: 'Exactly what is stored',
   portal_legal_cookies_table_b: 'This table lists browser storage managed by the current storefront code. A third-party service may add its own storage after you choose to load that service.',
   portal_legal_cookies_third_h: 'Third parties',
-  portal_legal_cookies_third_b: 'Choosing an external translation language loads Google Translate, which receives the page text and writes a googtrans cookie for this site; loading the store map loads Google Maps. Both are Google services and may set their own cookies once loaded. Opening a Facebook, Instagram, Telegram, WhatsApp or Messenger link hands you to that app under its own policy. The assistant sends your question to a third-party AI provider. None of these run before you choose them.',
+  portal_legal_cookies_third_b: 'Loading the store map loads Google Maps, a Google service that may set its own cookies once loaded. Opening a Facebook, Instagram, Telegram, WhatsApp or Messenger link hands you to that app under its own policy. The assistant sends your question to a third-party AI provider. None of these run before you choose them.',
   portal_legal_cookies_clear_h: 'How to remove it',
   portal_legal_cookies_clear_b: 'Sign out to end the session cookie. Use the unload control beside the map to forget the saved map choice. Clear site data for this address in your browser settings to remove everything else; this removes your saved list, wishlist, language and theme on this device.',
 
@@ -216,8 +216,6 @@ const EN: Record<string, string> = {
   portal_legal_kind_cache: 'Cache Storage',
   portal_legal_store_session_p: 'Keeps you signed in. Set only when you sign in, cannot be read by scripts, and is limited to this site.',
   portal_legal_store_session_l: 'Up to about 13 months. It may renew after sustained account use; signing out deletes it.',
-  portal_legal_store_googtrans_p: 'Remembers the external translation language. Written only if you choose one of those languages.',
-  portal_legal_store_googtrans_l: 'Until you return to the original language',
   portal_legal_store_bucket_p: 'Your list of products, so it survives a page reload.',
   portal_legal_store_wishlist_p: 'Your saved products.',
   portal_legal_store_translate_p: 'The language you chose for this site.',
@@ -256,7 +254,6 @@ const KM: Record<string, string> = {
   portal_legal_cookies_title: 'គោលការណ៍ខូឃី',
   portal_legal_last_updated: 'ធ្វើបច្ចុប្បន្នភាពចុងក្រោយ {date}',
   portal_legal_close: 'បិទ',
-  portal_legal_open_policies: 'បើកបញ្ជីគោលការណ៍',
   portal_legal_template_notice: 'ឯកសារនេះជាគំរូដែលរៀបចំសម្រាប់ {name}។ ម្ចាស់អាជីវកម្មគួរឱ្យមេធាវីជំនាញពិនិត្យមុននឹងប្រើ។ វាមិនមែនជាការប្រឹក្សាផ្នែកច្បាប់ទេ។',
   portal_legal_identity_h: 'ព័ត៌មានអាជីវកម្ម',
   portal_legal_identity_legal_name: 'ឈ្មោះចុះបញ្ជី',
@@ -267,6 +264,9 @@ const KM: Record<string, string> = {
   portal_legal_footer_rights: 'គេហទំព័រនេះដំណើរការដោយ {name}។',
   portal_legal_footer_content_concerns: 'បើមានខ្លឹមសារអំពីអ្នក ឬអ្នកបារម្ភអំពីរូបភាពណាមួយ សូមទាក់ទង {email}។ យើងនឹងពិនិត្យសំណើ ហើយអាចសុំព័ត៌មានដែលត្រូវការដើម្បីសម្គាល់ខ្លឹមសារ និងអ្នកដាក់សំណើ។',
   portal_legal_footer_landmark: 'ព័ត៌មាននិងគោលការណ៍របស់គេហទំព័រ',
+  portal_legal_footer_contact: 'ទំនាក់ទំនង',
+  portal_legal_footer_quick_links: 'តំណភ្ជាប់រហ័ស',
+  portal_legal_footer_follow: 'តាមដានយើង',
 
   portal_legal_privacy_who_h: 'យើងជានរណា',
   portal_legal_privacy_who_b: 'កាតាឡុកអនឡាញនេះដំណើរការដោយអ្នកលក់ដែលមានអត្តសញ្ញាណក្នុងព័ត៌មានអាជីវកម្មដែលបានផ្ទៀងផ្ទាត់ខាងលើ ("យើង")។ ព័ត៌មាននោះជាចំណុចទំនាក់ទំនងសម្រាប់រឿងទាំងអស់ក្នុងគោលការណ៍នេះ។',
@@ -281,7 +281,7 @@ const KM: Record<string, string> = {
   portal_legal_privacy_retention_b: 'កំណត់ត្រាកំណត់សំណើ និងការពារការចូលដែលអសកម្ម ត្រូវបានដកចេញក្រោយប្រហែលមួយថ្ងៃ។ វគ្គចូលគណនីអាចមានរហូតដល់ ៣៩៩ថ្ងៃ និងអាចបន្តពេលប្រើសកម្ម; ការចាកចេញនឹងលុបសិទ្ធិវគ្គ ហើយកំណត់ត្រាវគ្គផុតកំណត់ ឬត្រូវបានដកសិទ្ធិនឹងត្រូវដកចេញ។ កំណត់ត្រាជំនួយការ ត្រូវបានដកចេញក្រោយប្រហែល៣០ថ្ងៃ។ រូបភាពដែលបានផ្ញើ ត្រូវបានដកចេញប្រហែល៩០ថ្ងៃក្រោយបុគ្គលិកពិនិត្យ; សំណើមិនបានពិនិត្យ និងរូបភាព ត្រូវបានដកចេញក្រោយប្រហែល១៨០ថ្ងៃ។ ជួរកំណត់ត្រាសំណើដែលបានពិនិត្យអាចនៅសល់ជាកំណត់ត្រាពិន្ទុ បន្ទាប់ពីរូបភាពត្រូវបានដកចេញ។ កំណត់ត្រាគណនី និងសមាជិកភាពនៅសល់រហូតដល់អាជីវកម្មដោះស្រាយសំណើដែលបានផ្ទៀងផ្ទាត់ ឬត្រូវរក្សាទុកសម្រាប់មូលហេតុប្រតិបត្តិការ ឬច្បាប់។ Sentry អនុវត្តរយៈពេលរក្សាទុកកំហុសដែលបានកំណត់។',
   portal_legal_privacy_sharing_h: 'នរណាផ្សេងទៀតឃើញវា',
   portal_legal_privacy_sharing_b: 'ហាងអនឡាញបច្ចុប្បន្នមិនមានឧបករណ៍តាមដានសម្រាប់ការផ្សាយពាណិជ្ជកម្មទេ។ ទិន្នន័យគណនី និងការដាក់ស្នើ ត្រូវបានប្រើសម្រាប់តែគោលបំណងដែលពណ៌នាក្នុងសេចក្ដីជូនដំណឹងនេះ លុះត្រាតែសេចក្ដីជូនដំណឹង និងការយល់ព្រមដែលត្រូវការ ត្រូវបានធ្វើបច្ចុប្បន្នភាពជាមុន។',
-  portal_legal_privacy_sharing_list: 'Cloudflare បង្ហោះគេហទំព័រនេះ មូលដ្ឋានទិន្នន័យ រូបភាព និងកំណត់ត្រាសុវត្ថិភាព ដូច្នេះទិន្នន័យរបស់អ្នកឆ្លងកាត់ និងរក្សាទុកនៅលើហេដ្ឋារចនាសម្ព័ន្ធរបស់ពួកគេ។ របាយការណ៍កំហុសកម្មវិធីផ្ញើទៅ Sentry។ រូបភាពផលិតផលអាចកែលម្អដោយ Cloudinary ប៉ុន្តែរូបថតអេក្រង់ដែលអ្នកផ្ញើមកមិនផ្ញើទៅទេ។ បើជំនួយការត្រូវបានបើក សំណួរដែលអ្នកវាយបញ្ចូលផ្ញើទៅអ្នកផ្តល់សេវា AI ភាគីទីបីដើម្បីបង្កើតចម្លើយ។ បើអ្នកជ្រើសភាសាបកប្រែខាងក្រៅ អត្ថបទទំព័រផ្ញើទៅ Google Translate។ បើអ្នកជ្រើសផ្ទុកផែនទីហាង Google ទទួលសំណើនោះ។ តំណទៅ Facebook, Instagram, Telegram, WhatsApp ឬ Messenger បើកកម្មវិធីទាំងនោះ ដែលអនុវត្តគោលការណ៍ផ្ទាល់របស់ខ្លួន។',
+  portal_legal_privacy_sharing_list: 'Cloudflare បង្ហោះគេហទំព័រនេះ មូលដ្ឋានទិន្នន័យ រូបភាព និងកំណត់ត្រាសុវត្ថិភាព ដូច្នេះទិន្នន័យរបស់អ្នកឆ្លងកាត់ និងរក្សាទុកនៅលើហេដ្ឋារចនាសម្ព័ន្ធរបស់ពួកគេ។ របាយការណ៍កំហុសកម្មវិធីផ្ញើទៅ Sentry។ រូបភាពផលិតផលអាចកែលម្អដោយ Cloudinary ប៉ុន្តែរូបថតអេក្រង់ដែលអ្នកផ្ញើមកមិនផ្ញើទៅទេ។ បើជំនួយការត្រូវបានបើក សំណួរដែលអ្នកវាយបញ្ចូលផ្ញើទៅអ្នកផ្តល់សេវា AI ភាគីទីបីដើម្បីបង្កើតចម្លើយ។ បើអ្នកជ្រើសផ្ទុកផែនទីហាង Google ទទួលសំណើនោះ។ តំណទៅ Facebook, Instagram, Telegram, WhatsApp ឬ Messenger បើកកម្មវិធីទាំងនោះ ដែលអនុវត្តគោលការណ៍ផ្ទាល់របស់ខ្លួន។',
   portal_legal_privacy_security_h: 'យើងការពារវាយ៉ាងណា',
   portal_legal_privacy_security_b: 'ពាក្យសម្ងាត់រក្សាទុកតែជាទិន្នន័យផ្ទៀងផ្ទាត់មួយទិស និងត្រូវមានយ៉ាងតិច៦តួអក្សរ។ ខូឃីចូលគណនីមិនអាចអានដោយស្គ្រីប កំណត់តែសម្រាប់គេហទំព័រនេះ និងផ្ញើតាម HTTPS។ ការសាកល្បងចូលខុសច្រើនដងត្រូវបន្ថយល្បឿន។ រូបថតអេក្រង់ដែលអ្នកផ្ញើមក ប្រើសោឯកជន និងតម្រូវឱ្យបុគ្គលិកចូលគណនី។ គ្មានប្រព័ន្ធណាល្អឥតខ្ចោះ ដូច្នេះសូមប្រើពាក្យសម្ងាត់ដែលអ្នកមិនប្រើនៅកន្លែងផ្សេង។',
   portal_legal_privacy_rights_h: 'ជម្រើសរបស់អ្នក',
@@ -315,11 +315,11 @@ const KM: Record<string, string> = {
   portal_legal_cookies_what_h: 'អ្វីដែលគេហទំព័រនេះរក្សាទុក',
   portal_legal_cookies_what_b: 'ខូឃីជាឯកសារតូចមួយដែលគេហទំព័ររក្សាទុកក្នុងកម្មវិធីរុករករបស់អ្នក។ ការផ្ទុកមូលដ្ឋានដំណើរការស្រដៀងគ្នា។ គេហទំព័រនេះប្រើតែអ្វីដែលចាំបាច់។ គ្មានខូឃីផ្សាយពាណិជ្ជកម្ម ឬវិភាគទេ។',
   portal_legal_cookies_consent_h: 'ការផ្ទុកចាំបាច់ និងតាមសំណើ',
-  portal_legal_cookies_consent_b: 'កម្មវិធីប្រើការផ្ទុកដែលត្រូវការសម្រាប់មុខងារស្នូល ហើយបង្កើតការផ្ទុកភាគីទីបីស្រេចចិត្តតែបន្ទាប់ពីអ្នកស្នើមុខងារនោះ។ ផែនទីហាងត្រូវបានរារាំងរហូតដល់អ្នកជ្រើសផ្ទុក; ការជ្រើសភាសាបកប្រែខាងក្រៅនឹងផ្ទុក Google Translate។ សេចក្ដីពិពណ៌នានេះមិនអះអាងថាច្បាប់ផ្ទាំងសុំការយល់ព្រមតែមួយ អនុវត្តនៅគ្រប់ប្រទេស ឬមុខងារនាពេលអនាគតទេ។',
+  portal_legal_cookies_consent_b: 'កម្មវិធីប្រើការផ្ទុកដែលត្រូវការសម្រាប់មុខងារស្នូល ហើយបង្កើតការផ្ទុកភាគីទីបីស្រេចចិត្តតែបន្ទាប់ពីអ្នកស្នើមុខងារនោះ។ ផែនទីហាងត្រូវបានរារាំងរហូតដល់អ្នកជ្រើសផ្ទុក។ សេចក្ដីពិពណ៌នានេះមិនអះអាងថាច្បាប់ផ្ទាំងសុំការយល់ព្រមតែមួយ អនុវត្តនៅគ្រប់ប្រទេស ឬមុខងារនាពេលអនាគតទេ។',
   portal_legal_cookies_table_h: 'អ្វីដែលរក្សាទុកពិតប្រាកដ',
   portal_legal_cookies_table_b: 'តារាងនេះរាយការផ្ទុកក្នុងកម្មវិធីរុករក ដែលកូដទំព័រហាងបច្ចុប្បន្នគ្រប់គ្រង។ សេវាភាគីទីបីអាចបន្ថែមការផ្ទុកផ្ទាល់ខ្លួន បន្ទាប់ពីអ្នកជ្រើសផ្ទុកសេវានោះ។',
   portal_legal_cookies_third_h: 'ភាគីទីបី',
-  portal_legal_cookies_third_b: 'ការជ្រើសភាសាបកប្រែខាងក្រៅផ្ទុក Google Translate ដែលទទួលអត្ថបទទំព័រ និងសរសេរខូឃី googtrans សម្រាប់គេហទំព័រនេះ ហើយការផ្ទុកផែនទីហាងផ្ទុក Google Maps។ ទាំងពីរជាសេវា Google ហើយអាចកំណត់ខូឃីផ្ទាល់ខ្លួនបន្ទាប់ពីផ្ទុក។ ការបើកតំណ Facebook, Instagram, Telegram, WhatsApp ឬ Messenger នាំអ្នកទៅកម្មវិធីនោះក្រោមគោលការណ៍ផ្ទាល់របស់វា។ ជំនួយការផ្ញើសំណួររបស់អ្នកទៅអ្នកផ្តល់សេវា AI ភាគីទីបី។ គ្មានមួយណាដំណើរការមុនអ្នកជ្រើសរើសទេ។',
+  portal_legal_cookies_third_b: 'ការផ្ទុកផែនទីហាងផ្ទុក Google Maps ដែលជាសេវា Google ហើយអាចកំណត់ខូឃីផ្ទាល់ខ្លួនបន្ទាប់ពីផ្ទុក។ ការបើកតំណ Facebook, Instagram, Telegram, WhatsApp ឬ Messenger នាំអ្នកទៅកម្មវិធីនោះក្រោមគោលការណ៍ផ្ទាល់របស់វា។ ជំនួយការផ្ញើសំណួររបស់អ្នកទៅអ្នកផ្តល់សេវា AI ភាគីទីបី។ គ្មានមួយណាដំណើរការមុនអ្នកជ្រើសរើសទេ។',
   portal_legal_cookies_clear_h: 'របៀបលុបវា',
   portal_legal_cookies_clear_b: 'ចាកចេញពីគណនីដើម្បីបញ្ចប់ខូឃីវគ្គ។ ប្រើប៊ូតុងបិទនៅក្បែរផែនទី ដើម្បីលុបជម្រើសផែនទីដែលបានរក្សាទុក។ សម្អាតទិន្នន័យគេហទំព័រនេះក្នុងការកំណត់កម្មវិធីរុករក ដើម្បីលុបអ្វីៗផ្សេងទៀត រួមទាំងបញ្ជី បញ្ជីចង់បាន ភាសា និងរូបរាងរបស់អ្នកលើឧបករណ៍នេះ។',
 
@@ -333,8 +333,6 @@ const KM: Record<string, string> = {
   portal_legal_kind_cache: 'ឃ្លាំងសម្ងាត់ Cache Storage',
   portal_legal_store_session_p: 'រក្សាឱ្យអ្នកនៅក្នុងគណនី។ កំណត់តែពេលអ្នកចូល មិនអាចអានដោយស្គ្រីប និងកំណត់តែលើគេហទំព័រនេះ។',
   portal_legal_store_session_l: 'រហូតដល់ប្រហែល ១៣ ខែ។ វាអាចបន្តបន្ទាប់ពីការប្រើគណនីជាបន្តបន្ទាប់ ហើយការចាកចេញនឹងលុបវា។',
-  portal_legal_store_googtrans_p: 'ចងចាំភាសាបកប្រែខាងក្រៅ។ សរសេរតែបើអ្នកជ្រើសភាសាទាំងនោះ។',
-  portal_legal_store_googtrans_l: 'រហូតដល់អ្នកត្រឡប់ទៅភាសាដើម',
   portal_legal_store_bucket_p: 'បញ្ជីផលិតផលរបស់អ្នក ដើម្បីកុំបាត់ពេលផ្ទុកទំព័រឡើងវិញ។',
   portal_legal_store_wishlist_p: 'ផលិតផលដែលអ្នករក្សាទុក។',
   portal_legal_store_translate_p: 'ភាសាដែលអ្នកជ្រើសសម្រាប់គេហទំព័រនេះ។',
@@ -368,9 +366,8 @@ export const PORTAL_LEGAL_EN: Readonly<Record<string, string>> = EN
 export const PORTAL_LEGAL_KM: Readonly<Record<string, string>> = KM
 
 /**
- * Resolve one legal string for the storefront's current language target.
- * `km` is a first-party pack; every other target falls back to English (the
- * external Google-Translate widget translates the rendered DOM for those).
+ * Resolve one legal string for the storefront's current language: Khmer for
+ * `km`, English for anything else.
  */
 export function legalText(target: string, key: string): string {
   if (String(target || '') === 'km') return KM[key] ?? EN[key] ?? ''

@@ -44,34 +44,34 @@ const config = {
   ],
   linkLabels: { website: 'Website', facebook: 'Facebook' },
   translations: {
-    'zh-CN': {
-      aboutTitle: '关于我们',
-      aboutContent: '中文关于内容',
-      aiTitle: '美容顾问',
+    km: {
+      aboutTitle: 'អំពីហាងយើង',
+      aboutContent: 'ខ្លឹមសារអំពីហាង',
+      aiTitle: 'ជំនួយការសម្រស់',
       fields: {
-        aiIntro: '告诉我们你的需求',
+        aiIntro: 'ប្រាប់យើងពីអ្វីដែលអ្នកចង់បាន',
       },
       faqItems: {
-        'faq-shipping': { question: '可以配送吗？', answer: '可以，请联系店员。' },
+        'faq-shipping': { question: 'តើអាចដឹកជញ្ជូនបានទេ?', answer: 'បាន សូមសួរបុគ្គលិក។' },
       },
       aboutBlocks: {
-        'about-hours': { title: '营业时间', body: '每天营业。' },
+        'about-hours': { title: 'ម៉ោងបើកហាង', body: 'បើករាល់ថ្ងៃ។' },
       },
-      linkLabels: { website: '网站' },
+      linkLabels: { website: 'គេហទំព័រហាង' },
     },
   },
 }
 
-const localized = localizePortalConfig(config, 'zh-cn') as LocalizedPortalConfig
-assert.equal(localized.aboutTitle, '关于我们')
-assert.equal(localized.aboutContent, '中文关于内容')
-assert.equal(localized.aiTitle, '美容顾问')
-assert.equal(localized.aiIntro, '告诉我们你的需求')
-assert.equal(localized.faqItems[0].question, '可以配送吗？')
-assert.equal(localized.faqItems[0].answer, '可以，请联系店员。')
-assert.equal(localized.aboutBlocks[0].title, '营业时间')
-assert.equal(localized.aboutBlocks[0].body, '每天营业。')
-assert.equal(localized.linkLabels.website, '网站')
+const localized = localizePortalConfig(config, 'KM') as LocalizedPortalConfig
+assert.equal(localized.aboutTitle, 'អំពីហាងយើង')
+assert.equal(localized.aboutContent, 'ខ្លឹមសារអំពីហាង')
+assert.equal(localized.aiTitle, 'ជំនួយការសម្រស់')
+assert.equal(localized.aiIntro, 'ប្រាប់យើងពីអ្វីដែលអ្នកចង់បាន')
+assert.equal(localized.faqItems[0].question, 'តើអាចដឹកជញ្ជូនបានទេ?')
+assert.equal(localized.faqItems[0].answer, 'បាន សូមសួរបុគ្គលិក។')
+assert.equal(localized.aboutBlocks[0].title, 'ម៉ោងបើកហាង')
+assert.equal(localized.aboutBlocks[0].body, 'បើករាល់ថ្ងៃ។')
+assert.equal(localized.linkLabels.website, 'គេហទំព័រហាង')
 assert.equal(localized.linkLabels.facebook, 'Facebook')
 
 assert.equal(localized.businessName, 'Leang Cosmetic')
@@ -85,7 +85,7 @@ const defaultCopyLocalized = localizePortalConfig({
   aiDisclaimer: 'AI generated, for reference only. For more accurate inquiries, please contact our store on Instagram or Facebook.',
   faqTitle: 'Frequently asked questions',
   translations: {},
-}, 'zh-CN') as LocalizedPortalConfig
+}, 'km') as LocalizedPortalConfig
 
 assert.notEqual(defaultCopyLocalized.aboutTitle, 'About us')
 assert.notEqual(defaultCopyLocalized.aiTitle, 'Beauty Assistant')
@@ -97,18 +97,18 @@ const product = localizePortalProduct({
   description: 'Brightening serum',
   category: 'Skincare',
   translations: {
-    'zh-CN': {
-      description: '焕亮精华',
-      category: '护肤',
+    km: {
+      description: 'សេរ៉ូមធ្វើឱ្យស្បែកភ្លឺ',
+      category: 'ថែរក្សាស្បែក',
     },
   },
-}, 'zh-CN') as LocalizedPortalProduct
+}, 'km') as LocalizedPortalProduct
 
 assert.equal(product.name, 'AHA Serum')
-assert.equal(product.description, '焕亮精华')
-assert.equal(product.category, '护肤')
+assert.equal(product.description, 'សេរ៉ូមធ្វើឱ្យស្បែកភ្លឺ')
+assert.equal(product.category, 'ថែរក្សាស្បែក')
 
 assert.deepEqual(normalizePortalTranslations('bad json'), {})
-assert.equal(stringifyPortalTranslations({ vi: { aboutTitle: 'Giới thiệu' } }).includes('Giới thiệu'), true)
+assert.equal(stringifyPortalTranslations({ km: { aboutTitle: 'អំពីយើង' } }).includes('អំពីយើង'), true)
 
 console.log('portalContentI18n tests passed')

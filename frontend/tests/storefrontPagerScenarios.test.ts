@@ -23,7 +23,8 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { build } from 'esbuild'
 import { pagerState } from '../src/utils/pagerState.ts'
-import { getPortalLanguageText, FIRST_PARTY_PORTAL_LANGUAGE_OPTIONS } from '../src/components/catalog/portalLanguagePacks.ts'
+import { getPortalLanguageText } from '../src/components/catalog/portalLanguagePacks.ts'
+import { PUBLIC_STOREFRONT_LANGUAGE_OPTIONS } from '../src/components/catalog/portalLanguageOptions.ts'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const frontendRoot = path.resolve(here, '..')
@@ -307,11 +308,11 @@ await runTest('both public paths (standalone storefront and the admin publicView
   }
 })
 
-await runTest('every first-party language pack that carries pager vocabulary carries per_page too, in both packs', () => {
-  const perPagePacks = FIRST_PARTY_PORTAL_LANGUAGE_OPTIONS
+await runTest('the storefront language pack that carries pager vocabulary carries per_page too, in both packs', () => {
+  const perPagePacks = PUBLIC_STOREFRONT_LANGUAGE_OPTIONS
     .map((option) => option.value)
     .filter((value) => getPortalLanguageText(value, 'perPage'))
-  assert.ok(perPagePacks.length >= 18, `expected the full set of packs carrying pager words, found ${perPagePacks.length}`)
+  assert.deepEqual(perPagePacks, ['km'], 'Khmer is the one storefront pack; English is the fallback text')
   for (const value of perPagePacks) {
     for (const key of ['page', 'of', 'back', 'next', 'perPage']) {
       const text = getPortalLanguageText(value, key)

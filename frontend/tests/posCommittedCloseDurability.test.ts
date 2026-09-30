@@ -140,8 +140,8 @@ function assertAdminBlocksTranslation(source: string): void {
 
 assertAdminBlocksTranslation(bootstrapSource)
 
-// The storefront stays translatable: customers read it in their own language
-// and it drives its own Google Translate widget (portalTranslateController).
+// The storefront stays translatable: a customer may still run the browser's
+// own page translator on it.
 for (const [hostname, pathname] of [
   ['leangbeauty.com', '/'],
   ['leangbeauty.com', '/privacy'],

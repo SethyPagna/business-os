@@ -151,17 +151,26 @@ check('2 the header icon rows never wrap on a phone', () => {
   // Every icon button in both rows shrinks one size below `sm` rather than
   // wrapping -- catches a partial fix that stops wrapping but overflows the
   // header instead.
-  const iconButtonCount = (catalogPreviewSurface.match(/h-8 w-8 shrink-0 items-center justify-center rounded-full/g) || []).length
-    + (catalogPreviewSurface.match(/inline-flex h-8 w-8 shrink-0/g) || []).length
+  // P-public-11 (owner, 2026-09-25: 40px touch targets at 360/390): the icons
+  // are 40px TALL on a phone; width stays one size down (32px below 360,
+  // 36px from 360) because 4 social + 4 account icons at 40px wide do not fit
+  // one 360px row, and wrapping them is what this check exists to prevent.
+  const iconButtonCount = (catalogPreviewSurface.match(/inline-flex h-10 w-8 min-\[360px\]:w-9 shrink-0 items-center justify-center rounded-full[^"`]*sm:h-9 sm:w-9/g) || []).length
   assert.ok(iconButtonCount >= 4, `expected at least 4 shrink-below-sm icon buttons, found ${iconButtonCount}`)
+  assert.doesNotMatch(catalogPreviewSurface, /inline-flex h-8 w-8 shrink-0/, 'a 32px-tall header icon is back')
 })
 
 // --- 3. Contact FAB minimize ------------------------------------------------
 
-check('3 the contact FAB has a minimize control with a per-viewer memory', () => {
-  assert.match(publicCatalogPage, /CONTACT_MINIMIZED_STORAGE_KEY = 'business-os-portal-contact-minimized-v1'/, 'the minimized flag must be versioned')
-  assert.match(publicCatalogPage, /const \[contactMinimized, setContactMinimizedState\] = useState/, 'minimize must be real state, not a CSS-only hover trick')
-  assert.match(publicCatalogPage, /window\.localStorage\?\.setItem\(CONTACT_MINIMIZED_STORAGE_KEY/, 'minimize must persist per viewer')
+// P-public-5 (owner, 2026-09-25): "minimized by default as a small icon and
+// expands on click" replaces the Sep 15 per-viewer memory. That memory only
+// ever stored "minimized", which is now the default for every page view, and
+// storing "expanded" would undo the ask on every later visit.
+check('3 the contact FAB starts minimized, expands on tap, and can be minimized again', () => {
+  assert.match(publicCatalogPage, /const \[contactMinimized, setContactMinimized\] = useState\(true\)/, 'every page view starts minimized')
+  assert.doesNotMatch(publicCatalogPage, /CONTACT_MINIMIZED_STORAGE_KEY/, 'no remembered state can bring the full button back by default')
+  assert.match(publicCatalogPage, /onClick=\{\(\) => \{\s*setContactMinimized\(false\)\s*setContactOpen\(true\)\s*\}\}/, 'one tap on the icon expands it and opens the contact list')
+  assert.match(publicCatalogPage, /flex h-10 w-10 items-center justify-center rounded-full bg-white\/95/, 'the minimized icon is small but still a 40px touch target')
   // The X control must exist and be reachable on touch (not hover-only),
   // per the owner's "always reachable on touch" requirement.
   assert.match(publicCatalogPage, /setContactMinimized\(true\)/, 'there must be a control that minimizes the button')
@@ -173,19 +182,22 @@ check('3 the contact FAB has a minimize control with a per-viewer memory', () =>
   assert.doesNotMatch(publicCatalogPage, /-right-1\.5 -top-1\.5/, 'the minimize control must not overlap the main button corner')
   assert.doesNotMatch(publicCatalogPage, /opacity-0.*group-hover:opacity-100/, 'the minimize control must not be hover-gated invisible by default')
   assert.match(publicCatalogPage, /bg-slate-700 text-white shadow-md/, 'the minimize control is a plain always-filled pill')
-  // Restoring from the minimized tab.
-  assert.match(publicCatalogPage, /onClick=\{\(\) => setContactMinimized\(false\)\}/, 'tapping the minimized tab must restore the full button')
 })
 
-check('3 the minimize/restore labels exist in both language packs', () => {
+// P-public-5: the minimized icon IS the contact button (one tap expands and
+// opens it), so it is labelled `contactUs`; the separate "Show the contact us
+// button" restore label was retired with the remembered-minimized state.
+check('3 the minimize/contact labels exist in both language packs', () => {
   const pagesEn = en.pages as Record<string, unknown>
   const pagesKm = km.pages as Record<string, unknown>
-  const portalEditor = (pagesEn?.portalEditor as { contactUsMinimize?: string; contactUsRestore?: string } | undefined)
-  const portalEditorKm = (pagesKm?.portalEditor as { contactUsMinimize?: string; contactUsRestore?: string } | undefined)
+  const portalEditor = (pagesEn?.portalEditor as { contactUs?: string; contactUsMinimize?: string; contactUsRestore?: string } | undefined)
+  const portalEditorKm = (pagesKm?.portalEditor as { contactUs?: string; contactUsMinimize?: string; contactUsRestore?: string } | undefined)
   assert.ok(portalEditor?.contactUsMinimize, 'en.json must carry portalEditor.contactUsMinimize')
-  assert.ok(portalEditor?.contactUsRestore, 'en.json must carry portalEditor.contactUsRestore')
+  assert.ok(portalEditor?.contactUs, 'en.json must carry portalEditor.contactUs')
   assert.ok(portalEditorKm?.contactUsMinimize && portalEditorKm.contactUsMinimize !== portalEditor?.contactUsMinimize, 'km.json must carry a REAL Khmer translation, not the English string')
-  assert.ok(portalEditorKm?.contactUsRestore && portalEditorKm.contactUsRestore !== portalEditor?.contactUsRestore, 'km.json must carry a REAL Khmer translation, not the English string')
+  assert.ok(portalEditorKm?.contactUs && portalEditorKm.contactUs !== portalEditor?.contactUs, 'km.json must carry a REAL Khmer translation, not the English string')
+  assert.equal(portalEditor?.contactUsRestore, undefined, 'the retired restore label is back in en.json')
+  assert.equal(portalEditorKm?.contactUsRestore, undefined, 'the retired restore label is back in km.json')
 })
 
 // --- 4. Pagination row order + results count + dead hint removed ----------

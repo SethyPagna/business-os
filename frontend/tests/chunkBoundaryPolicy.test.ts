@@ -49,6 +49,8 @@ const boundaries: Array<[string, string]> = [
   ['api/legacySubtotalRepairTransport.ts', 'backup-reset-tools'],
   ['api/generalCustomerRepairTransport.ts', 'backup-reset-tools'],
   ['api/generalCustomerMembershipRepairTransport.ts', 'backup-reset-tools'],
+  ['components/shared/lightboxSwipe.ts', 'image-lightbox'],
+  ['components/shared/documentScrollLock.ts', 'app-shell'],
 ]
 for (const [relative, expected] of boundaries) {
   const id = path.join(frontend, 'src', relative)
@@ -167,7 +169,7 @@ if (process.argv.includes('--bundle')) {
     ['index', ['vendor', 'app-auth', 'auth-login', 'catalog', 'backup-reset-tools']],
     ['auth-login', ['catalog', 'catalog-public', 'background-import-tracker']],
     ['catalog-public', ['app-auth', 'auth-login', 'catalog', 'background-import-tracker', 'backup-reset-tools']],
-    ['catalog-products', ['app-auth', 'catalog', 'file-api', 'import-jobs-api', 'backup-reset-tools']],
+    ['catalog-products', ['app-auth', 'catalog', 'file-api', 'import-jobs-api', 'backup-reset-tools', 'image-lightbox']],
     ['catalog-secondary-tabs', ['app-auth', 'catalog', 'file-api', 'import-jobs-api', 'backup-reset-tools']],
   ] as const) {
     const match = (name: string) => new RegExp(`^${name}-[\\w-]{8}\\.js$`)
