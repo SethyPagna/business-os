@@ -53,7 +53,7 @@ for (const [name, source] of [['ReasonListEditor', editor], ['StockReasonsManage
   assert.doesNotMatch(source, /window\.prompt|window\.confirm/, `${name}: no native prompt or confirm`)
 }
 for (const [name, source] of [['StockReasonsManagerModal', stockManager], ['ReturnReasonManagerModal', returnManager], ['ExpenseLabelManagerModal', expenseManager]] as const) {
-  assert.match(source, /import ReasonListEditor from '[./]*(?:shared\/)?ReasonListEditor\.tsx'/, `${name} renders the shared editor`)
+  assert.match(source, /import ReasonListEditor(?:, \{ useAskConfirm \})? from '[./]*(?:shared\/)?ReasonListEditor\.tsx'/, `${name} renders the shared editor`)
   assert.match(source, /<ReasonListEditor[\s\S]*?onDirtyChange=/, `${name} feeds typed-but-unsaved text to its close guard`)
 }
 assert.match(editor, /askToConfirm\(request\)[\s\S]*?await onDelete\(item\)/, 'delete runs only after the shared confirm dialog answers yes')
