@@ -108,6 +108,8 @@ function resetDialog(page: MountedSurface): MemoryNode | null {
   return page.findAll(isResetDialog)[0] ?? null
 }
 
+const resetDialogTitle = (page: MountedSurface): string | null => resetDialog(page)?.querySelector('h2')?.textContent ?? null
+
 function openDialog(page: MountedSurface, member: StaffMember): MemoryNode {
   const dialog = resetDialog(page)
   assert.ok(dialog, `the reset dialog for ${member.name} is open`)
@@ -173,7 +175,7 @@ await runTest('a reset answer that arrives after the dialog left that staff memb
       await page.click(close)
       const discard = page.findAll((node) => node.tagName === 'BUTTON' && accessibleText(node).includes(en.discard_changes))[0]
       if (discard) await page.click(discard)
-      assert.equal(resetDialog(page), null, 'the admin closed Cashier A\'s dialog mid-flight')
+      assert.equal(resetDialogTitle(page), null, 'the admin closed Cashier A\'s dialog mid-flight')
     }
     await openReset(page, cashierB, () => { switchedAt = frames.length })
     assertBNeverShowsA('before the late answer')
@@ -208,6 +210,50 @@ await runTest('a hand-over on screen is never painted under another staff member
     await openReset(page, cashierA)
     assert.equal(resetFormCount(page), 1, 'back on Cashier A the dialog opens on the reset form')
     assert.deepEqual(framesShowing(switchedAt, secret), [], 'once the dialog moved to another staff member the hand-over is cleared, not kept for a later frame')
+  } finally {
+    await page.unmount()
+  }
+})
+
+await runTest('the hand-over copies only on Copy, is never a password input, keeps nothing typed behind it, and Done closes it', async () => {
+  const secret = 'Handed-Secret-52x'
+  const writesBefore = clipboardWrites.length
+  const { page, resets } = await mountUsers(async () => ({ success: true }))
+  const saveAndWaitForHandover = async (resetCount: number) => {
+    await page.click(saveButton(page, openDialog(page, cashierA)), { until: () => resets.length === resetCount, waitingFor: 'the reset request' })
+    await page.waitFor(() => openDialog(page, cashierA).textContent.includes(secret), 'the hand-over')
+  }
+  const discardPromptOpen = () => page.findAll((node) => node.getAttribute('role') === 'dialog' && node.textContent.includes(en.unsaved_changes_title)).length > 0
+  try {
+    await openReset(page, cashierA)
+    await typeNewPassword(page, secret)
+    await page.click(closeButton(page, openDialog(page, cashierA)))
+    assert.equal(discardPromptOpen(), true, 'a typed password is unsaved work: closing asks first')
+    await page.click(page.button(new RegExp(`^${en.back}$`)))
+    await saveAndWaitForHandover(1)
+    const dialog = openDialog(page, cashierA)
+    assert.ok(dialog.textContent.includes(en.password_admin_handover_title.replace('{name}', cashierA.name)))
+    assert.deepEqual(dialog.querySelectorAll('input').filter((input) => input.getAttribute('type') === 'password').map((input) => input.getAttribute('name')), [], 'the hand-over has no type=password input')
+    assert.equal(everythingShownIn(dialog).split(secret).length - 1, 1, 'the password is shown once, in text or in any input')
+    assert.deepEqual(clipboardWrites.slice(writesBefore), [], 'typing, saving and showing the hand-over copy nothing')
+
+    await page.click(page.button(en.copy_new_password, dialog))
+    assert.deepEqual(clipboardWrites.slice(writesBefore), [secret], 'Copy writes the clipboard exactly once')
+
+    await page.click(closeButton(page, dialog))
+    assert.equal(discardPromptOpen(), false, 'nothing typed is left in the form behind the hand-over, so closing it asks nothing')
+    assert.equal(resetDialogTitle(page), null, 'the header close closes the hand-over')
+
+    await openReset(page, cashierA)
+    await typeNewPassword(page, secret)
+    await saveAndWaitForHandover(2)
+    await page.click(page.button(new RegExp(`^${en.done}$`), openDialog(page, cashierA)))
+    assert.equal(resetDialogTitle(page), null, 'Done closes the dialog')
+    assert.doesNotMatch(everythingShownIn(page.body), new RegExp(secret), 'after Done the password is shown nowhere')
+    await openReset(page, cashierA)
+    assert.equal(resetFormCount(page), 1, 'reopening starts on the reset form')
+    assert.doesNotMatch(everythingShownIn(openDialog(page, cashierA)), new RegExp(secret), 'reopening shows no old hand-over')
+    assert.deepEqual(clipboardWrites.slice(writesBefore), [secret], 'no further clipboard write happened')
   } finally {
     await page.unmount()
   }
