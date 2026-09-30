@@ -79,6 +79,17 @@ async function mergePair(f, keepId, mergeId, extra = {}) {
   return f.h.request('POST', '/possible-duplicates/merge', { keepId, mergeId, stock: 'merge', ...extra })
 }
 
+const memberMovementId = (f, operationId) => f.h.raw.prepare('SELECT movement_id FROM stock_session_members WHERE operation_id = ? LIMIT 1').get([operationId]).movement_id
+const historyApp = (f) => f.h.load('routes/actionHistory.ts').default
+const historyRequest = async (f, method, path, body) => {
+  const res = await historyApp(f).request(`http://local${path}`, {
+    method, headers: { 'content-type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}),
+  }, { DB: f.h.raw }, { waitUntil() {}, passThroughOnException() {} })
+  return { status: res.status, json: await res.json().catch(() => null) }
+}
+const DIGEST_TABLES = ['products', 'branch_stock', 'product_batches', 'branch_batch_stock', 'inventory_movements', 'action_history', 'audit_logs', 'undo_snapshots']
+const digest = (f) => JSON.stringify(DIGEST_TABLES.map((table) => [table, f.h.raw.prepare(`SELECT * FROM ${table} ORDER BY 1`).all([])]))
+
 async function main() {
   await check('DISCRIMINATING: a merge of two products, one with an undoable stock-in session, completes and closes that session', async () => {
     const f = fixture()
@@ -229,6 +240,100 @@ async function main() {
     assert.equal(totalUnits(f, [1, 2]), unitsAfterFirst)
     assert.equal(history(f, open.actionHistoryId).status, 'recorded')
     assertLedgersAgree(f, [1], 'after the replay')
+  })
+
+  // The close is only safe because it commits WITH the merge. Each trigger makes one
+  // statement of the fold's single D1 batch fail; the statements after the close
+  // (the merge's own snapshot, history row and audit row) are in that batch too, so
+  // a close committed on its own would show here as a session closed by a merge
+  // that never happened, or the reverse.
+  const injections = [
+    ['the close audit insert', "BEFORE INSERT ON audit_logs WHEN NEW.action = 'stock_session_undo_closed'"],
+    ['the close status update', `BEFORE UPDATE ON action_history WHEN NEW.last_error = '${MARKER}'`],
+    ['the merge undo snapshot insert', "BEFORE INSERT ON undo_snapshots WHEN NEW.kind = 'product.merge'"],
+    ['the merge history row insert', "BEFORE INSERT ON action_history WHEN NEW.scope = 'products' AND NEW.entity = 'product'"],
+    ['the merge audit row insert', "BEFORE INSERT ON audit_logs WHEN NEW.action = 'merge_duplicate'"],
+  ]
+  for (const [point, when] of injections) {
+    await check(`DISCRIMINATING: a failure at ${point} leaves the merge AND the close unwritten, and a retry does both`, async () => {
+      const f = fixture()
+      const open = await f.receive([{ product_id: 2, quantity: 4 }])
+      const before = digest(f)
+      f.h.raw.db.exec(`CREATE TRIGGER injected_fault ${when} BEGIN SELECT RAISE(ABORT, 'probe_injected'); END;`)
+      const failedRes = await mergePair(f, 1, 2)
+      assert.equal(failedRes.status, 500, JSON.stringify(failedRes.json))
+      assert.equal(digest(f), before, 'not one row of the merge or the close survived')
+      assert.equal(history(f, open.actionHistoryId).status, 'undoable', 'the session kept its Undo')
+      assert.equal(f.h.raw.prepare('SELECT is_active FROM products WHERE id = 2').get().is_active, 1)
+      f.h.raw.db.exec('DROP TRIGGER injected_fault')
+      const retry = await mergePair(f, 1, 2)
+      assert.equal(retry.status, 200, JSON.stringify(retry.json))
+      assert.equal(history(f, open.actionHistoryId).last_error, MARKER)
+      assert.equal(auditRows(f, 'stock_session_undo_closed').length, 1)
+      assertLedgersAgree(f, [1], 'after the retry')
+    })
+  }
+
+  await check('the revert-preview door answers a closed session with its own reason (and an open one still previews)', async () => {
+    const f = fixture()
+    const open = await f.receive([{ product_id: 2, quantity: 4 }])
+    const movementId = memberMovementId(f, open.operationId)
+    const control = await historyRequest(f, 'GET', `/movements/${movementId}/revert-preview`)
+    assert.equal(control.status, 200, JSON.stringify(control.json))
+    assert.equal(control.json.revert.kind, 'stock_session')
+    assert.equal((await mergePair(f, 1, 2)).status, 200)
+    const closed = await historyRequest(f, 'GET', `/movements/${movementId}/revert-preview`)
+    assert.equal(closed.status, 409, JSON.stringify(closed.json))
+    assert.equal(closed.json.code, 'undo_closed_products_merged')
+    assert.match(closed.json.error, /Undo closed: products were merged/)
+  })
+
+  await check('a session undone and then closed by a merge refuses a line edit with the merge reason, not "Redo it first"', async () => {
+    const f = fixture()
+    const receipt = await f.receive([{ product_id: 2, quantity: 4 }])
+    const payload = JSON.parse(f.h.raw.prepare('SELECT undo_payload FROM action_history WHERE id = ?').get([receipt.actionHistoryId]).undo_payload)
+    await f.sessions.replayStockSession(f.env, ADMIN, 'undo', receipt.actionHistoryId, 0, payload)
+    const { applyStockInLineEdit } = f.h.load('lib/stockInLineEdit.ts')
+    const movementId = memberMovementId(f, receipt.operationId)
+    const edit = (id) => applyStockInLineEdit(f.h.db, ADMIN, movementId, { quantity: 3, expected_batch_revision: 0, client_request_id: `line-edit-${id}-000000` })
+
+    const plain = await edit('plain')
+    assert.equal(plain.status, 409)
+    assert.equal(plain.body.code, 'session_undone')
+    assert.match(plain.body.error, /Redo it first/, 'an undone session that can still be redone keeps the old advice')
+
+    assert.equal((await mergePair(f, 1, 2)).status, 200)
+    const closed = await edit('closed')
+    assert.equal(closed.status, 409)
+    assert.equal(closed.body.code, 'session_undo_closed')
+    assert.match(closed.body.error, /product merge closed its Undo/)
+    assert.doesNotMatch(closed.body.error, /Redo it first/, 'Redo is no longer possible, so it must not be offered')
+  })
+
+  await check("OWNER-ACCEPTED: a product edit that folds a twin closes another user's stock-in Undo without inventory rights, and the audit row names who and which session", async () => {
+    const f = fixture()
+    f.h.raw.db.exec(`INSERT INTO products(id, name, barcode, cost_price_usd, selling_price_usd, stock_quantity, is_active)
+      VALUES(6, 'Gloss Renamed', '8850000000066', 2, 5, 0, 1)`)
+    const others = await f.receive([{ product_id: 6, quantity: 4 }])
+    const EDITOR = { id: 12, username: 'editor', name: 'Edith Editor', role_code: 'staff', permissions: '{}' }
+    assert.notEqual(EDITOR.id, ADMIN.id, 'the session belongs to somebody else')
+    f.h.setUser(EDITOR)
+    f.h.setActionTier((_user, scope) => (scope === 'inventory' ? 'none' : 'full'))
+    const res = await f.h.request('PUT', '/6', { name: 'Gloss One', barcode: '8850000000011' })
+    assert.equal(res.status, 200, JSON.stringify(res.json))
+    assert.equal(res.json.merged_into, 1)
+    assert.equal(history(f, others.actionHistoryId).last_error, MARKER, 'accepted by the owner: merges always work with product edit rights')
+
+    const rows = f.h.raw.prepare('SELECT user_id, user_name, entity, entity_id, details FROM audit_logs WHERE action = ?').all(['stock_session_undo_closed'])
+    assert.equal(rows.length, 1)
+    assert.equal(rows[0].user_id, EDITOR.id, 'the actor is recorded, not the session creator')
+    assert.match(rows[0].user_name, /Edith Editor|editor/)
+    assert.equal(rows[0].entity, 'stock_session')
+    assert.equal(rows[0].entity_id, others.operationId, 'the closed session is named')
+    const mergeAudit = f.h.raw.prepare("SELECT user_id, details FROM audit_logs WHERE action = 'merge_duplicate'").get()
+    assert.equal(mergeAudit.user_id, EDITOR.id)
+    const mergeHistory = f.h.raw.prepare("SELECT undo_payload FROM action_history WHERE undo_payload LIKE '%product.merge%'").get()
+    assert.equal(JSON.parse(rows[0].details).mergeOperationId, JSON.parse(mergeHistory.undo_payload).operation_id, 'and the merge that caused it')
   })
 
   console.log(failed ? `\n${failed} check(s) FAILED` : '\nall checks passed')

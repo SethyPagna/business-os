@@ -204,6 +204,52 @@ export type ProductMergeCasRow = {
   updated_at: string | null
 }
 
+export type ProductMergeSourceExtent = {
+  shelfRows: number
+  shelfQuantity: number
+  lotRows: number
+  movements: number
+  // Absent when the snapshot came from a caller that does not read lot stock;
+  // those callers carry their own stock-state assertions.
+  lotStockRows?: number
+  lotQuantity?: number
+}
+
+// Named inside the JSON-path error SQLite raises, so the route can tell this
+// abort from the other merge guards (which all read as "malformed JSON").
+export const MERGE_CONFLICT_RETRY = 'merge_conflict_retry'
+
+// The fold plans from reads taken before its write batch. A stock-in, sale or
+// transfer landing on the DISCARDED product in between would leave its units on
+// a deactivated row, because the fold deletes the shelf rows it read and not the
+// ones it did not. This read-only statement aborts the whole batch (the
+// closed-session statements with it) when the discarded product's shelf, lots or
+// movement count differ from what was read; the caller answers a retryable 409.
+export function productMergeSourceUnmovedAssertion(productId: number, extent: ProductMergeSourceExtent): { sql: string; params: Record<string, unknown> } {
+  const readsLotStock = extent.lotQuantity != null && extent.lotStockRows != null
+  const lotStockTerms = readsLotStock
+    ? `
+      AND (SELECT COUNT(*) FROM branch_batch_stock bbs JOIN product_batches pb ON pb.id = bbs.batch_id WHERE pb.variant_product_id = @id) = @lotStockRows
+      AND (SELECT COALESCE(SUM(bbs.quantity), 0) FROM branch_batch_stock bbs JOIN product_batches pb ON pb.id = bbs.batch_id WHERE pb.variant_product_id = @id) = @lotQuantity`
+    : ''
+  return {
+    sql: `SELECT CASE WHEN
+      (SELECT COUNT(*) FROM branch_stock WHERE product_id = @id) = @shelfRows
+      AND (SELECT COALESCE(SUM(quantity), 0) FROM branch_stock WHERE product_id = @id) = @shelfQuantity
+      AND (SELECT COUNT(*) FROM product_batches WHERE variant_product_id = @id) = @lotRows
+      AND (SELECT COUNT(*) FROM inventory_movements WHERE product_id = @id) = @movements${lotStockTerms}
+      THEN 1 ELSE json_extract('[1]', '$[${MERGE_CONFLICT_RETRY}]') END AS merge_source_guard`,
+    params: {
+      id: productId,
+      shelfRows: extent.shelfRows,
+      shelfQuantity: extent.shelfQuantity,
+      lotRows: extent.lotRows,
+      movements: extent.movements,
+      ...(readsLotStock ? { lotStockRows: extent.lotStockRows, lotQuantity: extent.lotQuantity } : {}),
+    },
+  }
+}
+
 // Product ids are immutable, so this key remains stable across retries and
 // lets a bounded client deduplicate receipts after a lost response.
 export function productMergeCaseKey(keeperId: number, mergedId: number): string {

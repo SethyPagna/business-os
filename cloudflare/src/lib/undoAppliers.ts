@@ -104,6 +104,9 @@ export const UNDO_NO_DEFAULT_BRANCH_CODE = 'undo_no_default_branch'
 // closeStockSessionsStatements); the row reads "Undo closed: products were merged".
 export const UNDO_CLOSED_BY_MERGE_CODE = 'undo_closed_products_merged'
 export const UNDO_CLOSED_BY_MERGE_MESSAGE = 'Undo closed: products were merged.'
+// A redo of a merge found stock had moved on a product while its write batch was
+// being saved; nothing was written. Same code the merge routes answer with.
+export const UNDO_MERGE_CONFLICT_RETRY_CODE = 'merge_conflict_retry'
 // FX-exc1 item 1: the other refusals carry a code too.
 // The history entry no longer matches the server (a stale generation, pointer
 // or receipt): refresh history and try again.
@@ -548,7 +551,17 @@ export type MergeFoldFn = (
 
 let mergeFoldFn: MergeFoldFn | null = null
 export function registerMergeFold(fn: MergeFoldFn): void {
-  mergeFoldFn = fn
+  mergeFoldFn = async (...args) => {
+    try {
+      return await fn(...args)
+    } catch (error) {
+      // Stock moved under the redo's write batch: nothing was written, so this is a 409 to try again, not a fault.
+      if (String(error).includes(UNDO_MERGE_CONFLICT_RETRY_CODE)) {
+        throw new UndoConflictError('Stock changed while the merge was being redone. Redo was refused. Nothing was changed. Try again.', UNDO_MERGE_CONFLICT_RETRY_CODE)
+      }
+      throw error
+    }
+  }
 }
 
 function savedBulkClusterEconomics(reversal: MergeReversal): ProductMergeEconomics | undefined {
