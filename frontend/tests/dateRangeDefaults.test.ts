@@ -9,6 +9,7 @@ import { withDashboardRangeScope } from '../src/api/dashboardTransport.ts'
 import { buildQueryString } from '../src/api/query.ts'
 import { feeRangeParams } from '../src/api/feesTransport.ts'
 import { returnRangeParams } from '../src/api/returnsReadTransport.ts'
+import { buildAuditRequestParams, initialAuditViewState } from '../src/utils/auditLogView.ts'
 
 // Execute the production initializers, preference functions and request
 // expressions. No duplicate date-policy implementation lives in the fixture.
@@ -267,16 +268,19 @@ assert.match(
   'contactReadTransport must drop empty query values, or an all-time default would send from=&to=',
 )
 
-const audit = todayPair('utils-settings/AuditLog.tsx', '[rangeStart, setRangeStart]', '[rangeEnd, setRangeEnd]')
-const effectiveDateRange = evaluate(variable(audit.source, 'effectiveDateRange'), {
-  ...hooks, rangeStart: audit.from, rangeEnd: audit.to, auditDateRange: {},
-})
-const auditParams = evaluate(variable(audit.source, 'params'), {
-  page: 1, pageSize: 20, search: '', actionFilter: 'all', entityFilter: 'all',
-  isAdmin: true, userFilter: 'all', effectiveDateRange,
-})
-const auditRequest = evaluate(requestArgs(audit.source, 'getAuditLogsRequest')[0], { params: auditParams })
-assert.deepEqual([auditRequest.startDate, auditRequest.endDate], [day1, day1])
+// The Audit Log opens on Today through its view state (scope All, preset
+// Today) and asks the Worker for exactly that business day; the page hands the
+// business calendar's today to the request builder rather than the device's.
+{
+  const audit = read('utils-settings/AuditLog.tsx')
+  assert.match(audit, /useState<AuditViewState>\(\(\) => initialAuditViewState\(\)\)/, 'AuditLog starts from the initial view state (Today)')
+  assert.match(audit, /const today = todayStr\(\)/, 'AuditLog takes today from the business calendar helper')
+  assert.match(audit, /buildAuditRequestParams\(view, \{ today \}\)/, 'AuditLog builds its first request from the view state and that today')
+  const auditParams = buildAuditRequestParams(initialAuditViewState(), { today: day1 })
+  assert.deepEqual([auditParams.startDate, auditParams.endDate], [day1, day1])
+  const auditRequest = evaluate(requestArgs(audit, 'getAuditLogsRequest')[0], { params: auditParams })
+  assert.deepEqual([auditRequest.startDate, auditRequest.endDate], [day1, day1])
+}
 
 // DeliveryContactReportModal still opens on Today, same [range, setRange] shape
 // as the rest of the app's stats surfaces.
@@ -372,7 +376,6 @@ for (const [file, fromSetter, toSetter, attribute] of [
   ['contacts/ArInvoicesSection.tsx', 'setFromDate', 'setToDate', 'onRangeChange'],
   ['contacts/ApInvoicesSection.tsx', 'setFromDate', 'setToDate', 'onRangeChange'],
   ['contacts/StockInInvoicesSection.tsx', 'setFromDate', 'setToDate', 'onRangeChange'],
-  ['utils-settings/AuditLog.tsx', 'setRangeStart', 'setRangeEnd', 'onRangeChange'],
   ['review/LegacyDeletedSalesSection.tsx', 'setFromDate', 'setToDate', 'onRangeChange'],
 ] as const) {
   const source = read(file)

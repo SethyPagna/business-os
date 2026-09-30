@@ -1,25 +1,22 @@
-import { Fragment, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { isAdminControlUser } from '../../utils/permissions.ts'
 import { lazyRetry } from '../../utils/lazyImport.ts'
-import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
 import ClipboardList from 'lucide-react/dist/esm/icons/clipboard-list.js'
 import Clock3 from 'lucide-react/dist/esm/icons/clock-3.js'
 import MonitorSmartphone from 'lucide-react/dist/esm/icons/monitor-smartphone.js'
 import SearchInput from '../shared/SearchInput'
 import User2 from 'lucide-react/dist/esm/icons/user-round.js'
-import X from 'lucide-react/dist/esm/icons/x.js'
 import { toggleMultiValue, isMultiActive } from '../../utils/multiSelect'
 import { auditActionLabel, auditEntityLabel, type LabelFn } from '../../utils/auditVocabulary.ts'
+import { AUDIT_ACTION_LABELS } from '../../utils/auditVocabulary.ts'
 import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAppHook } from '../../AppContext.tsx'
+import AppSelect from '../shared/AppSelect'
 import ExportMenu from '../shared/ExportMenu'
 import FilterMenu from '../shared/FilterMenu'
-import PaginationControls, { clampPage, DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
 import { useIsPageActive } from '../shared/pageActivity'
 import StatsRangeRow from '../shared/StatsRangeRow'
-import { buildTimeActionSections, getAvailableYears, getTimeGroupingMode, toggleIdSet } from '../../utils/groupedRecords.ts'
-import { buildPeriodFilterOptions } from '../../utils/periodFilterOptions.ts'
 import {
   beginTrackedRequest,
   invalidateTrackedRequest,
@@ -31,6 +28,22 @@ import {
 } from '../../api/auditLogTransport.ts'
 import { buildAuditFieldDiff } from '../../utils/auditLogFieldDiff.ts'
 import { entityFieldLabel } from '../../utils/entityRecords.ts'
+import {
+  AUDIT_SCOPES,
+  AUDIT_SECTION_FALLBACKS,
+  AUDIT_SECTION_IDS,
+  AUDIT_TIME_PRESETS,
+  auditFilterKey,
+  buildAuditRequestParams,
+  initialAuditViewState,
+  mergeAuditRows,
+  setAuditPreset,
+  setAuditRange,
+  setAuditScope,
+  type AuditScope,
+  type AuditTimePreset,
+  type AuditViewState,
+} from '../../utils/auditLogView.ts'
 import AuditFieldDiffLine from './AuditFieldDiffLine.tsx'
 import { fmtDayFirst, fmtTimezoneLabel } from '../../utils/formatters.ts'
 import { BUSINESS_TIME_ZONE } from '../../constants.ts'
@@ -40,17 +53,11 @@ import { todayStr } from '../../utils/dateHelpers.ts'
 // its own '--' placeholder.
 import { HISTORY_EMPTY, historyActor, historyExportField, historyField } from '../../utils/historyRowModel.ts'
 
-type SortDirection = 'asc' | 'desc'
-type AuditGroupMode = 'time' | 'time+action'
 type TranslateFn = (key: string) => string
-
-interface AuditUserOption {
-  id?: string | number | null
-  name?: string | null
-}
 
 interface AuditLogRow {
   id?: string | number | null
+  user_id?: number | null
   action?: string | null
   table_name?: string | null
   entity?: string | null
@@ -62,36 +69,34 @@ interface AuditLogRow {
   old_value?: string | null
   new_value?: string | null
   details?: string | null
+  section?: string | null
+}
+
+interface AuditUserCount {
+  id: number | null
+  name: string | null
+  count: number
+}
+
+interface AuditSectionCount {
+  section: string
+  count: number
 }
 
 interface AuditLogResponse {
   items?: AuditLogRow[]
-  total?: number | string | null
+  nextCursor?: string | null
+  hasMore?: boolean
   partial?: boolean
   source?: string | null
-  filters?: {
-    users?: AuditUserOption[]
-    // I2: whole-table filter vocabularies -- before these, the action
-    // dropdown could only offer whatever happened to be on the visible page.
-    actions?: string[]
-    entities?: string[]
+  counts?: {
+    users?: AuditUserCount[]
+    sections?: AuditSectionCount[]
   }
 }
 
-interface AuditLogParams {
-  [key: string]: string | number | undefined
-  page: number
-  pageSize: number
-  search?: string
-  action?: string
-  entity?: string
-  userId?: string
-  startDate?: string
-  endDate?: string
-}
-
 interface AppContextValue {
-  // App language ('en' | 'km'); drives the period filter's month names.
+  // App language ('en' | 'km').
   language: string
   t: TranslateFn
   user?: {
@@ -188,31 +193,8 @@ function formatDateTime(raw: unknown): string {
   }
 }
 
-function formatCompactDateTime(raw: unknown): string {
-  const iso = toIso(raw)
-  if (!iso) return HISTORY_EMPTY
-  try {
-    const date = new Date(iso)
-    if (Number.isNaN(date.getTime())) return String(raw)
-    return fmtDayFirst(date, {
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: false,
-      timeZone: BUSINESS_TIME_ZONE,
-    })
-  } catch {
-    return String(raw || HISTORY_EMPTY)
-  }
-}
-
 function formatLogTime(log: AuditLogRow): string {
   return formatDateTime(log.client_time || log.created_at)
-}
-
-function formatLogTableTime(log: AuditLogRow): string {
-  return formatCompactDateTime(log.client_time || log.created_at)
 }
 
 function auditDeviceLabel(log: AuditLogRow | null | undefined): string {
@@ -230,13 +212,6 @@ function auditDeviceLabel(log: AuditLogRow | null | undefined): string {
 // which described the raw input and contradicted the converted clock beside it.
 function auditTimezoneLabel(_log?: AuditLogRow | null): string {
   return fmtTimezoneLabel(BUSINESS_TIME_ZONE)
-}
-
-function getLogEpoch(log: AuditLogRow | null | undefined): number {
-  const iso = toIso(log?.client_time || log?.created_at)
-  if (!iso) return 0
-  const epoch = new Date(iso).getTime()
-  return Number.isFinite(epoch) ? epoch : 0
 }
 
 function formatJsonPretty(value: string): string {
@@ -315,34 +290,6 @@ function readableSummary(log: AuditLogRow): string | null {
   return null
 }
 
-function normalizeFiniteIdsFrom<T>(items: T[] = [], getValue: (value: T) => unknown = (value) => value): number[] {
-  return items.reduce((normalized, item) => {
-    const id = Number(getValue(item))
-    if (Number.isFinite(id)) normalized.push(id)
-    return normalized
-  }, [] as number[])
-}
-
-function normalizeFiniteIds(ids: unknown[] = []): number[] {
-  return normalizeFiniteIdsFrom(ids)
-}
-
-function countSelectedIds(ids: number[] = [], selectedIds: Set<number> = new Set()): number {
-  let count = 0
-  for (const id of ids) {
-    if (selectedIds.has(id)) count += 1
-  }
-  return count
-}
-
-function countActiveFlags(flags: boolean[] = []): number {
-  let count = 0
-  for (const flag of flags) {
-    if (flag) count += 1
-  }
-  return count
-}
-
 function DetailRow({ label, value, mono = false }: DetailRowProps) {
   if (!value && value !== 0) return null
   return (
@@ -355,58 +302,68 @@ function DetailRow({ label, value, mono = false }: DetailRowProps) {
   )
 }
 
+function logDayKey(log: AuditLogRow): string {
+  const iso = toIso(log.client_time || log.created_at)
+  if (!iso) return ''
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return ''
+  return new Intl.DateTimeFormat('en-CA', { timeZone: BUSINESS_TIME_ZONE, year: 'numeric', month: '2-digit', day: '2-digit' }).format(date)
+}
+
+function formatDayHeader(dayKey: string): string {
+  const [year, month, day] = dayKey.split('-')
+  return year && month && day ? `${day}/${month}/${year}` : dayKey
+}
+
+function formatRowClock(log: AuditLogRow): string {
+  const iso = toIso(log.client_time || log.created_at)
+  if (!iso) return HISTORY_EMPTY
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return HISTORY_EMPTY
+  return fmtDayFirst(date, { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: BUSINESS_TIME_ZONE })
+}
+
+const AUDIT_TIME_LABELS: Record<AuditTimePreset, [string, string]> = {
+  today: ['today', 'Today'],
+  '7d': ['last_7_days', 'Last 7 days'],
+  '30d': ['last_30_days', 'Last 30 days'],
+  custom: ['custom_range', 'Custom range'],
+}
+
+const AUDIT_SCOPE_LABELS: Record<AuditScope, [string, string]> = {
+  all: ['audit_scope_all', 'All'],
+  section: ['audit_scope_section', 'Section'],
+  user: ['audit_scope_user', 'User'],
+}
+
 export default function AuditLog() {
-  const { t, user, language } = useApp()
+  const { t, user, language, hasPermission } = useApp()
   // E3: renders inside Review & Logs now -- lifecycle keys on that page.
   const isActive = useIsPageActive('review')
+  const isAdmin = isAdminControlUser(user)
+  // The Worker decides what a caller may read (audit_log tier: view = own rows
+  // only); this only decides whether to OFFER the User scope.
+  const canSeeAllUsers = isAdmin || hasPermission?.('audit_log') === true
+  const [view, setView] = useState<AuditViewState>(() => initialAuditViewState())
+  const [searchInput, setSearchInput] = useState('')
   const [logs, setLogs] = useState<AuditLogRow[]>([])
-  const [search, setSearch] = useState('')
-  const [yearFilter, setYearFilter] = useState('all')
-  const [monthFilter, setMonthFilter] = useState('all')
-  // I2 (D2-era leftover): an explicit one-row start->end date range, the same
-  // control the Products/Inventory stock ledger (StockChangeSection) uses.
-  // When set it is the AUTHORITATIVE date filter (server startDate/endDate);
-  // the year/month period chips stay as the grouping period and as the
-  // fallback date range when no explicit range is typed. Native date inputs
-  // carry ISO yyyy-mm-dd, exactly the shape the server already accepts.
-  const initialToday = todayStr()
-  const [rangeStart, setRangeStart] = useState(initialToday)
-  const [rangeEnd, setRangeEnd] = useState(initialToday)
-  const [actionFilter, setActionFilter] = useState('all')
-  // I2: filter by the record's entity ("page"/area) -- entity or legacy
-  // table_name server-side, comma-joined multi-select like action/user.
-  const [entityFilter, setEntityFilter] = useState('all')
-  const [userFilter, setUserFilter] = useState('all')
-  const [auditUsers, setAuditUsers] = useState<AuditUserOption[]>([])
-  const [auditActions, setAuditActions] = useState<string[]>([])
-  const [auditEntities, setAuditEntities] = useState<string[]>([])
-  const [page, setPage] = useState(1)
-  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
-  const [totalLogs, setTotalLogs] = useState(0)
-  const [groupMode, setGroupMode] = useState<AuditGroupMode>('time')
-  const [sortDirection, setSortDirection] = useState<SortDirection>('desc')
-  const [collapsedSections, setCollapsedSections] = useState<Set<string>>(() => new Set())
-  const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set())
+  const [nextCursor, setNextCursor] = useState<string | null>(null)
+  const [hasMore, setHasMore] = useState(false)
+  const [userCounts, setUserCounts] = useState<AuditUserCount[]>([])
+  const [sectionCounts, setSectionCounts] = useState<AuditSectionCount[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadingMore, setLoadingMore] = useState(false)
   const [hasLoadedOnce, setHasLoadedOnce] = useState(false)
-  const [initialDesktopRevealReady, setInitialDesktopRevealReady] = useState(false)
-  const [initialMobileRevealReady, setInitialMobileRevealReady] = useState(false)
-  const [detailLog, setDetailLog] = useState<AuditLogRow | null>(null)
+  const [expandedId, setExpandedId] = useState<string | null>(null)
   const [showRawAuditJson, setShowRawAuditJson] = useState(false)
-  const openLogDetail = useCallback((log: AuditLogRow) => {
-    setDetailLog(log)
-    setShowRawAuditJson(false)
-  }, [])
   const [error, setError] = useState<string | null>(null)
   const skeletonRows = useMemo(() => Array.from({ length: 8 }, (_, index) => index), [])
   const loadedOnceRef = useRef(false)
-  const pageLoadRequestedRef = useRef(false)
+  const loadedKeyRef = useRef('')
   const loadRequestRef = useRef(0)
   const loadWatchdogRef = useRef<number | null>(null)
-  const selectAllRef = useRef<HTMLInputElement | null>(null)
   const aliveRef = useRef(true)
-  const isAdmin = isAdminControlUser(user)
-  const timeMode = useMemo(() => getTimeGroupingMode(yearFilter, monthFilter), [monthFilter, yearFilter])
+  const today = todayStr()
 
   // (packKey, englishFallback) => translated -- the shape the shared audit
   // vocabulary takes, and the same one the Records floats pass it.
@@ -414,7 +371,7 @@ export default function AuditLog() {
     const value = t(key)
     return value && value !== key ? value : fallback
   }, [t])
-  const isKhmer = /[\u1780-\u17FF]/.test(t('cancel') || '')
+  const isKhmer = /[ក-៿]/.test(t('cancel') || '')
   const auditFallbacks = useMemo<Record<string, AuditFallback>>(() => ({
     all_time: { en: 'All time', km: 'គ្រប់ពេល' },
     time: 'ពេលវេលា',
@@ -454,42 +411,28 @@ export default function AuditLog() {
     return ACTION_COLOR_CLASS[String(action).toLowerCase()] || DEFAULT_ACTION_CLASS
   }, [])
 
-  const auditDateRange = useMemo<Pick<AuditLogParams, 'startDate' | 'endDate'>>(() => {
-    if (yearFilter === 'all') return {}
-    const year = Number(yearFilter)
-    if (!Number.isFinite(year)) return {}
-    const month = monthFilter !== 'all' ? Number(monthFilter) : null
-    if (month && Number.isFinite(month)) {
-      const start = new Date(Date.UTC(year, month - 1, 1))
-      const end = new Date(Date.UTC(year, month, 0))
-      return {
-        startDate: start.toISOString().slice(0, 10),
-        endDate: end.toISOString().slice(0, 10),
-      }
-    }
-    return {
-      startDate: `${year}-01-01`,
-      endDate: `${year}-12-31`,
-    }
-  }, [monthFilter, yearFilter])
+  const sectionLabel = useCallback((section: unknown): string => {
+    const id = String(section || 'other')
+    return vocab(`audit_section_${id}`, AUDIT_SECTION_FALLBACKS[id] || AUDIT_SECTION_FALLBACKS.other)
+  }, [vocab])
 
-  // Explicit range wins over the period-derived range; a lone start or end is
-  // a valid open-ended bound. Falls back to the year/month range only when
-  // neither explicit input is set, preserving the prior behaviour.
-  const effectiveDateRange = useMemo<Pick<AuditLogParams, 'startDate' | 'endDate'>>(() => {
-    if (rangeStart || rangeEnd) {
-      return {
-        startDate: rangeStart || undefined,
-        endDate: rangeEnd || undefined,
-      }
-    }
-    return auditDateRange
-  }, [auditDateRange, rangeEnd, rangeStart])
+  // A typed search waits for a pause before it becomes a request: every
+  // request reads the audit table, and the read budget is finite.
+  useEffect(() => {
+    const trimmed = searchInput.trim()
+    if (trimmed === view.search.trim()) return undefined
+    const timer = window.setTimeout(() => setView((current) => ({ ...current, search: trimmed })), 350)
+    return () => window.clearTimeout(timer)
+  }, [searchInput, view.search])
+
+  const filterKey = useMemo(() => auditFilterKey(view, today), [today, view])
+  const params = useMemo(() => buildAuditRequestParams(view, { today }), [today, view])
 
   const load = useCallback(async (silent = false): Promise<void> => {
     const requestId = beginTrackedRequest(loadRequestRef)
     let didLoadRows = false
     if (!silent && aliveRef.current) {
+      setLoadingMore(false)
       setLoading(true)
       setError(null)
       if (loadWatchdogRef.current) window.clearTimeout(loadWatchdogRef.current)
@@ -499,15 +442,6 @@ export default function AuditLog() {
       }, 20000)
     }
     try {
-      const params: AuditLogParams = {
-        page,
-        pageSize,
-        search: search.trim() || undefined,
-        action: actionFilter !== 'all' ? actionFilter : undefined,
-        entity: entityFilter !== 'all' ? entityFilter : undefined,
-        userId: isAdmin && userFilter !== 'all' ? userFilter : undefined,
-        ...effectiveDateRange,
-      }
       const data = await withLoaderTimeout(
         () => getAuditLogsRequest(params) as Promise<AuditLogResponse | AuditLogRow[]>,
         'Audit log',
@@ -515,12 +449,10 @@ export default function AuditLog() {
       )
       if (!aliveRef.current || !isTrackedRequestCurrent(loadRequestRef, requestId)) return
       const rows = Array.isArray(data) ? data : (data?.items || [])
-      const nextTotal = Number(Array.isArray(data) ? rows.length : data?.total || rows.length)
       const emptyLocalFallback = !Array.isArray(data)
         && data?.partial === true
         && data?.source === 'local'
         && rows.length === 0
-        && nextTotal === 0
       if (emptyLocalFallback) {
         if (!loadedOnceRef.current) {
           setError('Audit log is still waiting for the server. No cached entries are available yet.')
@@ -529,21 +461,15 @@ export default function AuditLog() {
         }
         return
       }
-      const clampedPage = clampPage(page, nextTotal, pageSize)
-      if (clampedPage !== page) {
-        setPage(clampedPage)
-        return
-      }
+      const page = Array.isArray(data) ? null : data
       setLogs(rows)
-      setTotalLogs(nextTotal)
-      setAuditUsers(!Array.isArray(data) && Array.isArray(data?.filters?.users) ? data.filters.users : [])
-      if (!Array.isArray(data)) {
-        // Keep the last good vocabularies when a local-mirror fallback
-        // (which carries none) answers -- clearing them would empty the
-        // filter menus the user is about to use to recover.
-        if (Array.isArray(data?.filters?.actions) && data.filters.actions.length) setAuditActions(data.filters.actions)
-        if (Array.isArray(data?.filters?.entities) && data.filters.entities.length) setAuditEntities(data.filters.entities)
-      }
+      setNextCursor(page?.nextCursor || null)
+      setHasMore(Boolean(page?.hasMore && page?.nextCursor))
+      // Counts ride on the first page only; a local-mirror answer carries
+      // none, so keep the last good ones instead of blanking the chips.
+      if (page?.counts?.users) setUserCounts(page.counts.users)
+      if (page?.counts?.sections) setSectionCounts(page.counts.sections)
+      loadedKeyRef.current = filterKey
       didLoadRows = true
     } catch (err) {
       if (!aliveRef.current || !isTrackedRequestCurrent(loadRequestRef, requestId)) return
@@ -565,37 +491,52 @@ export default function AuditLog() {
       }
       if (!silent) setLoading(false)
     }
-  }, [actionFilter, effectiveDateRange, entityFilter, isAdmin, page, pageSize, search, userFilter])
+  }, [filterKey, params])
+
+  const loadMore = useCallback(async (): Promise<void> => {
+    if (!nextCursor || loadingMore || loading) return
+    const requestId = beginTrackedRequest(loadRequestRef)
+    const moreParams = buildAuditRequestParams(view, { today, cursor: nextCursor })
+    setLoadingMore(true)
+    try {
+      const data = await withLoaderTimeout(
+        () => getAuditLogsRequest(moreParams) as Promise<AuditLogResponse | AuditLogRow[]>,
+        'Audit log',
+        AUDIT_LOG_LOAD_TIMEOUT_MS,
+      )
+      if (!aliveRef.current || !isTrackedRequestCurrent(loadRequestRef, requestId)) return
+      const page = Array.isArray(data) ? null : data
+      const rows = Array.isArray(data) ? data : (data?.items || [])
+      setLogs((current) => mergeAuditRows(current, rows))
+      setNextCursor(page?.nextCursor || null)
+      setHasMore(Boolean(page?.hasMore && page?.nextCursor))
+    } catch (err) {
+      if (!aliveRef.current || !isTrackedRequestCurrent(loadRequestRef, requestId)) return
+      console.error('Failed to load more audit logs:', err)
+      setError(getErrorMessage(err, 'Failed to load audit logs.'))
+    } finally {
+      if (aliveRef.current && isTrackedRequestCurrent(loadRequestRef, requestId)) setLoadingMore(false)
+    }
+  }, [loading, loadingMore, nextCursor, today, view])
 
   useEffect(() => {
     if (!isActive) {
-      pageLoadRequestedRef.current = false
       invalidateTrackedRequest(loadRequestRef)
       if (loadWatchdogRef.current) {
         window.clearTimeout(loadWatchdogRef.current)
         loadWatchdogRef.current = null
       }
       setLoading(false)
+      setLoadingMore(false)
       return
     }
     aliveRef.current = true
-    const needsVisibleReload = !loadedOnceRef.current || !!error
-    if (pageLoadRequestedRef.current) {
-      load(needsVisibleReload ? false : true)
-      return
-    }
-    if (needsVisibleReload) {
-      pageLoadRequestedRef.current = true
-      load(false)
-      return
-    }
-    pageLoadRequestedRef.current = true
-    load(false)
-  }, [error, isActive, load, logs.length])
-
-  useEffect(() => {
-    setPage(1)
-  }, [actionFilter, entityFilter, monthFilter, pageSize, rangeEnd, rangeStart, search, userFilter, yearFilter])
+    // A changed filter is a visible reload of a new result set; coming back to
+    // the same filters refreshes quietly behind the rows already shown.
+    const sameResultSet = loadedOnceRef.current && loadedKeyRef.current === filterKey
+    if (!sameResultSet) setExpandedId(null)
+    void load(sameResultSet)
+  }, [filterKey, isActive, load])
 
   useEffect(() => () => {
     aliveRef.current = false
@@ -606,170 +547,43 @@ export default function AuditLog() {
     invalidateTrackedRequest(loadRequestRef)
   }, [])
 
-  const availableYears = useMemo(
-    () => getAvailableYears(logs, (log) => log?.client_time || log?.created_at),
-    [logs],
-  )
-
   const actionOptions = useMemo(() => {
     const seen = new Map<string, string>()
-    // Whole-table vocabulary from the server first (I2); the visible page's
-    // own actions remain as the fallback so the menu never goes empty on a
-    // local-mirror answer.
-    auditActions.forEach((key) => {
-      const normalized = String(key || '').toLowerCase()
-      if (normalized) seen.set(normalized, actionLabel(normalized))
-    })
+    // The static list of actions the app writes; whatever a loaded page adds
+    // stays selectable too (an action nobody listed yet).
+    Object.keys(AUDIT_ACTION_LABELS).forEach((key) => seen.set(key, actionLabel(key)))
     logs.forEach((log) => {
       const key = String(log?.action || '').toLowerCase()
       if (!key || seen.has(key)) return
       seen.set(key, actionLabel(key))
     })
     return [...seen.entries()].sort((left, right) => left[1].localeCompare(right[1]))
-  }, [actionLabel, auditActions, logs])
+  }, [actionLabel, logs])
 
-  const entityOptions = useMemo(() => {
-    const seen = new Map<string, string>()
-    // The vocabulary itself comes from the SERVER (a DISTINCT over the whole
-    // table, not the current page), so every record type that has ever been
-    // written is selectable here; what this adds is the reader's own language
-    // for it, and a readable fallback for anything a newer route introduces.
-    const labelFor = (key: string) => auditEntityLabel(key, vocab)
-    auditEntities.forEach((key) => {
-      const normalized = String(key || '').toLowerCase()
-      if (normalized) seen.set(normalized, labelFor(normalized))
-    })
-    logs.forEach((log) => {
-      const key = String(log?.table_name || log?.entity || '').toLowerCase()
-      if (!key || seen.has(key)) return
-      seen.set(key, labelFor(key))
-    })
-    return [...seen.entries()].sort((left, right) => left[1].localeCompare(right[1]))
-  }, [auditEntities, logs, vocab])
+  const sectionChips = useMemo(() => {
+    const counts = new Map(sectionCounts.map((entry) => [entry.section, entry.count]))
+    const picked = new Set(view.section === 'all' ? [] : view.section.split(','))
+    return AUDIT_SECTION_IDS
+      .filter((id) => counts.has(id) || picked.has(id))
+      .map((id) => ({ id: String(id), label: sectionLabel(id), count: counts.get(id) ?? 0 }))
+  }, [sectionCounts, sectionLabel, view.section])
 
-  const filtered = useMemo(() => logs, [logs])
+  const userChips = useMemo(() => userCounts.map((entry) => ({
+    id: entry.id == null ? '' : String(entry.id),
+    label: entry.id == null ? (t('system') || 'System') : (entry.name || `#${entry.id}`),
+    count: entry.count,
+  })), [t, userCounts])
 
-  const orderedLogs = useMemo(() => {
-    const next = [...filtered]
-    next.sort((left, right) => {
-      const delta = getLogEpoch(left) - getLogEpoch(right)
-      if (delta !== 0) return delta
-      return Number(left?.id || 0) - Number(right?.id || 0)
-    })
-    return sortDirection === 'asc' ? next : next.reverse()
-  }, [filtered, sortDirection])
-
-  const groupedSections = useMemo(() => buildTimeActionSections(orderedLogs, {
-    getDate: (log) => log?.client_time || log?.created_at,
-    getItemId: (log) => Number(log?.id),
-    getActionKey: (log) => String(log?.action || '').toLowerCase() || 'other',
-    getActionLabel: (log) => actionLabel(log?.action),
-    year: yearFilter,
-    month: monthFilter,
-    timeMode,
-    groupMode,
-    sortDirection,
-  }), [actionLabel, groupMode, monthFilter, orderedLogs, sortDirection, timeMode, yearFilter])
-  const showActionGroups = groupMode === 'time+action'
-  const showDesktopLoadingOverlay = !initialDesktopRevealReady
-
-  const visibleLogs = useMemo(
-    () => groupedSections.flatMap((section) => section.groups.flatMap((group) => group.items)),
-    [groupedSections],
-  )
-  const visibleIds = useMemo(
-    () => normalizeFiniteIdsFrom(visibleLogs, (log) => log.id),
-    [visibleLogs],
-  )
-  const showMobileLoadingOverlay = hasLoadedOnce && visibleLogs.length > 0 && (!initialMobileRevealReady || loading)
-
-  useEffect(() => {
-    if (initialDesktopRevealReady || loading) return
-    setInitialDesktopRevealReady(true)
-    return undefined
-  }, [error, initialDesktopRevealReady, loading, visibleLogs.length])
-
-  useEffect(() => {
-    if (loading) {
-      setInitialMobileRevealReady(false)
-      return
+  const dayGroups = useMemo(() => {
+    const groups: Array<{ key: string; rows: AuditLogRow[] }> = []
+    for (const log of logs) {
+      const key = logDayKey(log)
+      const last = groups[groups.length - 1]
+      if (last && last.key === key) last.rows.push(log)
+      else groups.push({ key, rows: [log] })
     }
-    if (initialMobileRevealReady) return
-    setInitialMobileRevealReady(true)
-    return undefined
-  }, [error, initialMobileRevealReady, loading, visibleLogs.length])
-
-  useEffect(() => {
-    const validIds = new Set(visibleIds)
-    setSelectedIds((current) => new Set([...current].filter((id) => validIds.has(id))))
-  }, [visibleIds])
-
-  useEffect(() => {
-    const validIds = new Set(groupedSections.map((section) => section.id))
-    setCollapsedSections((current) => {
-      const next = new Set([...current].filter((id) => validIds.has(id)))
-      return next.size === current.size ? current : next
-    })
-  }, [groupedSections])
-
-  const selectedLogs = useMemo(
-    () => visibleLogs.filter((log) => selectedIds.has(Number(log.id))),
-    [selectedIds, visibleLogs],
-  )
-
-  useEffect(() => {
-    if (!selectAllRef.current) return
-    selectAllRef.current.indeterminate = selectedIds.size > 0 && selectedIds.size < visibleIds.length
-  }, [selectedIds.size, visibleIds.length])
-
-  const toggleSelected = useCallback((logId: unknown) => {
-    const numericId = Number(logId)
-    if (!Number.isFinite(numericId)) return
-    setSelectedIds((current) => toggleIdSet(current, [numericId], !current.has(numericId)))
-  }, [])
-
-  const toggleSelectAll = useCallback((checked: boolean) => {
-    if (!checked) {
-      setSelectedIds(new Set())
-      return
-    }
-    setSelectedIds(new Set(visibleIds))
-  }, [visibleIds])
-
-  const toggleSelectionScope = useCallback((ids: unknown[], checked: boolean) => {
-    const normalized = normalizeFiniteIds(ids)
-    setSelectedIds((current) => toggleIdSet(current, normalized, checked))
-  }, [])
-
-  const toggleSectionCollapsed = useCallback((sectionId: string) => {
-    setCollapsedSections((current) => {
-      const next = new Set(current)
-      if (next.has(sectionId)) next.delete(sectionId)
-      else next.add(sectionId)
-      return next
-    })
-  }, [])
-
-  const isSelectionScopeFullySelected = useCallback(
-    (ids: unknown[] = []) => {
-      const normalized = normalizeFiniteIds(ids)
-      return normalized.length > 0 && countSelectedIds(normalized, selectedIds) === normalized.length
-    },
-    [selectedIds],
-  )
-
-  const isSelectionScopePartiallySelected = useCallback(
-    (ids: unknown[] = []) => {
-      const normalized = normalizeFiniteIds(ids)
-      const selectedCount = countSelectedIds(normalized, selectedIds)
-      return selectedCount > 0 && selectedCount < normalized.length
-    },
-    [selectedIds],
-  )
-
-  function sessionEntryLabel(log: AuditLogRow): string {
-    return `#${Number(log?.id || 0)}`
-  }
+    return groups
+  }, [logs])
 
   // H1+X5 (Part 401): the export menu opens the shared options dialog
   // (column chooser + CSV/Excel/PDF) with the rows pre-built to this
@@ -782,7 +596,7 @@ export default function AuditLog() {
     setExportDialog({
       baseName: prefix,
       rows: rows.map((log) => ({
-        entry: sessionEntryLabel(log),
+        entry: `#${Number(log?.id || 0)}`,
         time: formatLogTime(log),
         entity: formatEntityName(log, vocab),
         user: historyExportField(log.user_name),
@@ -792,106 +606,164 @@ export default function AuditLog() {
         summary: readableSummary(log) || '',
       })),
     })
-  }, [actionLabel])
-  const desktopColGroup = (
-    <colgroup>
-      <col className="w-10" />
-      <col className="w-24" />
-      <col className="w-28" />
-      <col className="w-28" />
-      <col className="w-24" />
-      <col className="w-44" />
-      <col className="w-[26%]" />
-      <col className="w-36" />
-    </colgroup>
-  )
+  }, [actionLabel, vocab])
 
   const handleRefresh = useCallback(() => {
-    load(false)
+    void load(false)
   }, [load])
 
   const exportItems = useMemo<ExportItem[]>(() => {
     const items: Array<ExportItem | null> = [
-      { label: copy('export_visible_logs', 'Export visible logs', 'នាំចេញកំណត់ហេតុដែលកំពុងបង្ហាញ'), onClick: () => exportRows(visibleLogs, 'audit-log-visible') },
-      selectedLogs.length ? { label: copy('export_selected_logs', 'Export selected logs', 'នាំចេញកំណត់ហេតុដែលបានជ្រើស'), onClick: () => exportRows(selectedLogs, 'audit-log-selected'), color: 'blue' } : null,
-      actionFilter !== 'all' ? { label: copy('export_filtered_action', `Export ${actionLabel(actionFilter)}`, `នាំចេញតាមសកម្មភាព ${actionLabel(actionFilter)}`), onClick: () => exportRows(visibleLogs, `audit-log-${actionFilter}`) } : null,
-      yearFilter !== 'all' || monthFilter !== 'all' ? { label: copy('export_filtered_time_range', 'Export filtered time range', 'នាំចេញតាមចន្លោះពេលដែលបានតម្រង'), onClick: () => exportRows(visibleLogs, 'audit-log-filtered') } : null,
+      { label: copy('export_visible_logs', 'Export visible logs', 'នាំចេញកំណត់ហេតុដែលកំពុងបង្ហាញ'), onClick: () => exportRows(logs, 'audit-log-visible') },
+      view.action !== 'all' ? { label: copy('export_filtered_action', `Export ${actionLabel(view.action)}`, `នាំចេញតាមសកម្មភាព ${actionLabel(view.action)}`), onClick: () => exportRows(logs, `audit-log-${view.action}`) } : null,
     ]
     return items.filter((item): item is ExportItem => Boolean(item))
-  }, [actionFilter, actionLabel, copy, exportRows, monthFilter, selectedLogs, selectedLogs.length, visibleLogs, yearFilter])
+  }, [actionLabel, copy, exportRows, logs, view.action])
 
   const filterSections = useMemo(() => ([
     {
       id: 'action',
       label: t('action') || 'Action',
+      searchable: true,
       options: [
-        { id: 'all', label: t('all_actions') || 'All actions', active: actionFilter === 'all', onClick: () => setActionFilter('all') },
+        { id: 'all', label: t('all_actions') || 'All actions', active: view.action === 'all', onClick: () => setView((current) => ({ ...current, action: 'all' })) },
         ...actionOptions.map(([id, label]) => ({
           id,
           label,
-          active: isMultiActive(actionFilter, id),
-          onClick: () => setActionFilter(toggleMultiValue(actionFilter, id)),
+          active: isMultiActive(view.action, id),
+          onClick: () => setView((current) => ({ ...current, action: toggleMultiValue(current.action, id) })),
         })),
       ],
     },
-    {
-      id: 'entity',
-      label: t('audit_entity') || 'Page / record type',
-      searchable: true,
-      options: [
-        { id: 'all', label: t('all_entities') || 'All types', active: entityFilter === 'all', onClick: () => setEntityFilter('all') },
-        ...entityOptions.map(([id, label]) => ({
-          id: `entity-${id}`,
-          label,
-          active: isMultiActive(entityFilter, id),
-          onClick: () => setEntityFilter(toggleMultiValue(entityFilter, id)),
-        })),
-      ],
-    },
-    isAdmin ? {
-      id: 'user',
-      label: t('user') || 'User',
-      searchable: true,
-      options: [
-        { id: 'all', label: t('all_users') || 'All users', active: userFilter === 'all', onClick: () => setUserFilter('all') },
-        ...auditUsers.map((auditUser) => {
-          const id = String(auditUser?.id || '')
-          return {
-            id: `user-${id}`,
-            label: auditUser?.name || `User ${id}`,
-            active: isMultiActive(userFilter, id),
-            onClick: () => setUserFilter(toggleMultiValue(userFilter, id)),
-          }
-        }).filter((option) => option.id !== 'user-'),
-      ],
-    } : null,
     {
       id: 'sort',
       label: copy('sort', 'Sort'),
-      searchable: true,
       options: [
-        { id: 'desc', label: copy('newest_first', 'Newest first'), active: sortDirection === 'desc', onClick: () => setSortDirection('desc') },
-        { id: 'asc', label: copy('oldest_first', 'Oldest first'), active: sortDirection === 'asc', onClick: () => setSortDirection('asc') },
-        ...buildPeriodFilterOptions({
-          yearFilter, setYearFilter, monthFilter, setMonthFilter, availableYears,
-          allTimeLabel: copy('all_time', 'All time'), language,
-        }),
+        { id: 'desc', label: copy('newest_first', 'Newest first'), active: view.order === 'desc', onClick: () => setView((current) => ({ ...current, order: 'desc' })) },
+        { id: 'asc', label: copy('oldest_first', 'Oldest first'), active: view.order === 'asc', onClick: () => setView((current) => ({ ...current, order: 'asc' })) },
       ],
     },
-    {
-      id: 'group',
-      label: copy('group_by', 'Group by'),
-      options: [
-        { id: 'group-time', label: copy('group_time_created', 'Time created'), active: groupMode === 'time', onClick: () => setGroupMode('time') },
-        { id: 'group-time-action', label: copy('group_time_action', 'Time + action'), active: groupMode === 'time+action', onClick: () => setGroupMode('time+action') },
-      ],
-    },
-  ].filter(Boolean)), [actionFilter, actionOptions, auditUsers, availableYears, copy, entityFilter, entityOptions, groupMode, isAdmin, language, monthFilter, sortDirection, t, userFilter, yearFilter])
+  ]), [actionOptions, copy, t, view.action, view.order])
 
-  const activeFilterCount = useMemo(
-    () => countActiveFlags([yearFilter !== 'all', monthFilter !== 'all', Boolean(rangeStart || rangeEnd), actionFilter !== 'all', entityFilter !== 'all', userFilter !== 'all', sortDirection !== 'desc', groupMode !== 'time']),
-    [actionFilter, entityFilter, groupMode, monthFilter, rangeEnd, rangeStart, sortDirection, userFilter, yearFilter],
-  )
+  const activeFilterCount = (view.action !== 'all' ? 1 : 0) + (view.order !== 'desc' ? 1 : 0)
+
+  const timeOptions = useMemo(() => AUDIT_TIME_PRESETS.map((preset) => ({
+    value: preset,
+    label: vocab(AUDIT_TIME_LABELS[preset][0], AUDIT_TIME_LABELS[preset][1]),
+  })), [vocab])
+
+  const toggleChip = (field: 'section' | 'userId', id: string) => {
+    if (!id) return
+    setView((current) => ({ ...current, [field]: toggleMultiValue(current[field], id) }))
+  }
+
+  const detailPanel = (detailLog: AuditLogRow) => {
+    // A column is named with the same pack words a record's own
+    // history uses (entityRecords.ts), not Title-Cased English --
+    // the Khmer pack read "Telegram Topic Shift" for a /settopic row.
+    const fieldLabelFor = (key: string) => entityFieldLabel(key, vocab)
+    const fieldDiffRows = buildAuditFieldDiff(detailLog.old_value, detailLog.new_value, fieldLabelFor)
+    // The recorded context: the payload the route wrote alongside the pair (a
+    // rename's linked-sale counts, a profile save's mode, the operator's
+    // reason). Same builder as the pair -- a details payload has no old side,
+    // so its rows come back as context rows.
+    const contextRows = buildAuditFieldDiff(null, detailLog.details, fieldLabelFor)
+    const hasRawData = Boolean(detailLog.old_value || detailLog.new_value)
+    return (
+      <div className="space-y-3 border-t border-gray-100 bg-gray-50/70 px-3 py-3 dark:border-gray-700/60 dark:bg-gray-900/30">
+        <div className="grid gap-3 rounded-xl border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-900/40">
+          <div className="flex items-start gap-2">
+            <Clock3 className="mt-0.5 h-4 w-4 shrink-0 text-blue-500" />
+            <div className="min-w-0 space-y-2">
+              <DetailRow label={t('client_time') || 'Client Time'} value={formatLogTime(detailLog)} />
+              <DetailRow label={t('server_time') || 'Server Time'} value={formatDateTime(detailLog.created_at)} />
+            </div>
+          </div>
+          <div className="flex items-start gap-2">
+            <MonitorSmartphone className="mt-0.5 h-4 w-4 shrink-0 text-blue-500" />
+            <div className="min-w-0 space-y-2">
+              <DetailRow label={t('device') || 'Device'} value={auditDeviceLabel(detailLog)} />
+              <DetailRow label={t('timezone') || 'Timezone'} value={auditTimezoneLabel(detailLog)} mono />
+            </div>
+          </div>
+          <div className="flex items-start gap-2">
+            <User2 className="mt-0.5 h-4 w-4 shrink-0 text-blue-500" />
+            <div className="min-w-0 space-y-2">
+              <DetailRow label={t('user') || 'User'} value={historyActor(detailLog.user_name)} />
+              <DetailRow label={t('action') || 'Action'} value={actionLabel(detailLog.action)} />
+              <DetailRow label={t('table') || 'Entity'} value={formatEntityName(detailLog, vocab)} />
+              <DetailRow label={copy('audit_scope_section', 'Section')} value={detailLog.section ? sectionLabel(detailLog.section) : null} />
+              <DetailRow label={copy('entry', 'Entry', 'លំដាប់')} value={`#${Number(detailLog.id || 0)}`} />
+              <DetailRow label={t('reason') || 'Reason'} value={historyField(auditReason(detailLog))} />
+              <DetailRow label={t('summary') || 'Summary'} value={historyField(readableSummary(detailLog))} />
+            </div>
+          </div>
+        </div>
+
+        {hasRawData && !fieldDiffRows.length ? (
+          <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs leading-relaxed text-gray-500 dark:border-gray-700 dark:bg-gray-900/40 dark:text-gray-400">
+            {copy('no_field_changed', 'No field changed', 'គ្មានវាលណាមួយផ្លាស់ប្តូរទេ')}
+          </div>
+        ) : null}
+        {fieldDiffRows.length ? (
+          <div>
+            <div className="mb-1 flex items-center justify-between gap-2">
+              <div className="text-xs font-semibold text-gray-500 dark:text-gray-400">
+                {copy('changed_fields', 'Changed fields', 'វាលដែលបានផ្លាស់ប្តូរ')}
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowRawAuditJson((current) => !current)}
+                className="text-xs font-semibold text-blue-600 hover:underline dark:text-blue-400"
+              >
+                {showRawAuditJson
+                  ? copy('hide_raw_data', 'Hide raw data', 'លាក់ទិន្នន័យដើម')
+                  : copy('view_raw_data', 'View raw data', 'មើលទិន្នន័យដើម')}
+              </button>
+            </div>
+            <div className="space-y-2 rounded-lg border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-900/40">
+              {fieldDiffRows.map((row) => <AuditFieldDiffLine key={row.key} row={row} />)}
+            </div>
+          </div>
+        ) : null}
+
+        {contextRows.length ? (
+          <div>
+            <div className="mb-1 text-xs font-semibold text-gray-500 dark:text-gray-400">
+              {copy('recorded_context', 'Recorded context', 'ព័ត៌មានកត់ត្រាបន្ថែម')}
+            </div>
+            <div className="space-y-2 rounded-lg border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-900/40">
+              {contextRows.map((row) => <AuditFieldDiffLine key={`context:${row.key}`} row={row} />)}
+            </div>
+          </div>
+        ) : null}
+
+        {(showRawAuditJson || !fieldDiffRows.length) && hasRawData ? (
+          <>
+            {detailLog.old_value ? (
+              <div>
+                <div className="mb-1 text-xs font-semibold text-red-500">{t('before_data') || 'Before (old data)'}</div>
+                <pre className="max-h-48 overflow-auto rounded-lg bg-red-50 p-3 text-xs font-mono text-red-700 whitespace-pre-wrap break-all dark:bg-red-900/20 dark:text-red-300">
+                  {formatJsonPretty(detailLog.old_value)}
+                </pre>
+              </div>
+            ) : null}
+            {detailLog.new_value ? (
+              <div>
+                <div className="mb-1 text-xs font-semibold text-green-600">{t('after_data') || 'After (new data)'}</div>
+                <pre className="max-h-48 overflow-auto rounded-lg bg-green-50 p-3 text-xs font-mono text-green-700 whitespace-pre-wrap break-all dark:bg-green-900/20 dark:text-green-300">
+                  {formatJsonPretty(detailLog.new_value)}
+                </pre>
+              </div>
+            ) : null}
+          </>
+        ) : null}
+      </div>
+    )
+  }
+
+  const chipStrip = view.scope === 'section' ? sectionChips : view.scope === 'user' ? userChips : []
+  const chipField: 'section' | 'userId' = view.scope === 'section' ? 'section' : 'userId'
 
   return (
     <div className="page-scroll flex flex-col p-3 sm:p-6">
@@ -908,54 +780,46 @@ export default function AuditLog() {
           />
         </Suspense>
       ) : null}
-      {/* Centered like every other page's pager pill; the loading skeleton
-          matches the compact pill's footprint instead of the old full-width
-          card row (which flashed a "double card" during load). */}
-      <div className="mb-3 flex min-h-[2.75rem] justify-center">
-        {loading && !hasLoadedOnce ? (
-          <div className="h-9 w-64 animate-pulse rounded-xl border border-slate-200 bg-white/80 shadow-sm dark:border-slate-700 dark:bg-slate-900/70" />
-        ) : (
-          <PaginationControls
-            className="mb-0"
-            compact
-            rangeAsPageSize
-            page={page}
-            pageSize={pageSize}
-            totalItems={totalLogs}
-            label={copy('entries', 'entries', 'កំណត់ត្រា')}
-            t={t}
-            pageSizeOptions={[20, 50, 100, 200]}
-            onPageChange={setPage}
-            onPageSizeChange={(size) => {
-              setPageSize(size)
-              setPage(1)
-            }}
-          />
-        )}
-      </div>
 
-      {/* Search row + bulk-action bar pin to the top of the page's scroll
-          container while scrolling (Aug 11 2026 UI-polish request, same
-          treatment as Products.tsx/Inventory.tsx/Sales.tsx). Pagination now
-          lives above this group instead of below it, same reordering those
-          pages got. Filter + Export are icon-only here, next to search. The
-          old standalone Refresh button was removed (the list already
-          refreshes itself on load/filter changes; the error banner below
-          still has its own contextual "Try again" retry), and the manual
-          "Clear 30d" action was replaced by automatic retention -- audit
-          logs are now cleared on a schedule (default 21 days, configurable
-          from the Settings page) instead of requiring an admin to remember
-          to click something. */}
+      {/* The controls pin to the top of the page's scroll container while the
+          rows scroll. Row 1: scope + time. Row 2: search + export + filters.
+          Then the custom range (only when chosen) and the scope's chips. */}
       <div className="sticky top-2 z-30 -mx-1 space-y-2 bg-gray-50 pb-2 dark:bg-gray-900 sm:mx-0">
         <div
-          className="flex flex-wrap items-center gap-2 pt-1 sm:flex-nowrap"
+          className="flex items-center gap-2 pt-1"
           title={t('audit_log_desc') || 'Default columns: Record, Device, User, Action. Click a row to see full details and data changes.'}
         >
+          <div role="group" aria-label={t('audit_log') || 'Audit Log'} className="grid min-w-0 flex-1 grid-flow-col auto-cols-fr gap-0.5 rounded-lg bg-slate-100 p-0.5 dark:bg-slate-800/90">
+            {AUDIT_SCOPES.filter((scope) => scope !== 'user' || canSeeAllUsers).map((scope) => (
+              <button
+                key={scope}
+                type="button"
+                aria-pressed={view.scope === scope}
+                onClick={() => setView((current) => setAuditScope(current, scope, canSeeAllUsers))}
+                className={`min-h-9 min-w-0 rounded-md px-2 text-xs font-semibold transition-colors ${view.scope === scope ? 'bg-white text-blue-700 shadow-sm ring-1 ring-blue-100 dark:bg-slate-700 dark:text-white dark:ring-slate-600' : 'text-slate-500 hover:text-slate-700 dark:text-slate-300 dark:hover:text-white'}`}
+              >
+                <span className="detail-scroll-text text-center">{vocab(AUDIT_SCOPE_LABELS[scope][0], AUDIT_SCOPE_LABELS[scope][1])}</span>
+              </button>
+            ))}
+          </div>
+          <AppSelect
+            id="audit-log-time"
+            name="audit_log_time"
+            className="w-[7.5rem] shrink-0"
+            buttonClassName="w-full"
+            value={view.preset}
+            options={timeOptions}
+            onChange={(value) => setView((current) => setAuditPreset(current, value as AuditTimePreset, today))}
+            ariaLabel={t('time') || 'Time'}
+          />
+        </div>
+
+        <div className="flex items-center gap-2">
           <SearchInput
             id="audit-log-search"
             name="audit_log_search"
-            value={search}
-            onChange={setSearch}
+            value={searchInput}
+            onChange={setSearchInput}
             placeholder={t('search_audit_placeholder') || 'Search logs'}
             inputClassName="text-sm"
           />
@@ -966,46 +830,43 @@ export default function AuditLog() {
             label={t('filters') || 'Filters'}
             activeCount={activeFilterCount}
             sections={filterSections}
-            onClear={() => {
-              setYearFilter('all')
-              setMonthFilter('all')
-              setRangeStart('')
-              setRangeEnd('')
-              setActionFilter('all')
-              setEntityFilter('all')
-              setUserFilter('all')
-              setGroupMode('time')
-              setSortDirection('desc')
-            }}
+            onClear={() => setView((current) => ({ ...current, action: 'all', order: 'desc' }))}
             compact
             mobileIconOnly
           />
         </div>
 
-        {/* I2 range row, converted (Aug 30 2026) from two loose native date
-            inputs to the same unified Start → End pill every other surface
-            uses (Dashboard, Fees, Inventory movements, Stock-in invoices) --
-            cross-surface consistency. ISO in/out is unchanged; the pill's
-            own panel handles clearing. */}
-        <StatsRangeRow
-          range={{ startDate: rangeStart, endDate: rangeEnd, startTime: '', endTime: '' }}
-          onRangeChange={(next) => {
-            setRangeStart(next.startDate || '')
-            setRangeEnd(next.endDate || '')
-          }}
-          t={t}
-          showTime={false}
-          showPresets
-          className="w-full min-w-0"
-        />
+        {view.preset === 'custom' ? (
+          <StatsRangeRow
+            range={{ startDate: view.rangeStart, endDate: view.rangeEnd, startTime: '', endTime: '' }}
+            onRangeChange={(next) => setView((current) => setAuditRange(current, next.startDate || '', next.endDate || ''))}
+            t={t}
+            showTime={false}
+            showPresets={false}
+            className="w-full min-w-0"
+          />
+        ) : null}
 
-        {selectedLogs.length > 0 ? (
-          <div className="bulk-toolbar flex flex-wrap items-center gap-2 rounded-xl border px-3 py-2 text-sm shadow-sm">
-            <span className="rounded-full bg-blue-100 px-2.5 py-1 text-xs font-semibold text-blue-700 dark:bg-blue-900/40 dark:text-blue-200">{selectedLogs.length} {copy('selected', 'Selected', 'បានជ្រើស')}</span>
-            <button type="button" className="btn-secondary px-3 py-1 text-xs" onClick={() => exportRows(selectedLogs, 'audit-log-selected')}>{copy('export_selected_logs', 'Export selected logs', 'នាំចេញកំណត់ហេតុដែលបានជ្រើស')}</button>
-            <button type="button" className="ml-auto text-xs font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200" onClick={() => setSelectedIds(new Set())}>
-              {t('clear') || 'Clear'}
-            </button>
+        {view.scope !== 'all' ? (
+          <div className="flex min-w-0 flex-nowrap gap-1 overflow-x-auto overscroll-x-contain pb-1" data-audit-scope-chips>
+            {chipStrip.length === 0 ? (
+              <span className="px-1 py-1.5 text-xs text-gray-400">{loading ? (t('loading') || 'Loading...') : (t('no_data') || 'No data')}</span>
+            ) : chipStrip.map((chip) => {
+              const picked = isMultiActive(view[chipField], chip.id)
+              return (
+                <button
+                  key={`${view.scope}-${chip.id || 'none'}`}
+                  type="button"
+                  aria-pressed={picked}
+                  disabled={!chip.id}
+                  onClick={() => toggleChip(chipField, chip.id)}
+                  className={`inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg px-2.5 text-xs font-medium disabled:opacity-60 ${picked ? 'bg-slate-800 text-white dark:bg-slate-200 dark:text-slate-900' : 'bg-gray-100 text-gray-600 dark:bg-zinc-800 dark:text-gray-300'}`}
+                >
+                  <span className="max-w-[9rem] detail-scroll-text">{chip.label}</span>
+                  <span className={`rounded-full px-1.5 text-[10px] font-semibold ${picked ? 'bg-white/20' : 'bg-white text-slate-500 dark:bg-slate-900/80 dark:text-slate-300'}`}>{chip.count}</span>
+                </button>
+              )
+            })}
           </div>
         ) : null}
       </div>
@@ -1025,445 +886,72 @@ export default function AuditLog() {
         </div>
       ) : null}
 
-      <div className="card hidden flex-col overflow-hidden sm:flex sm:h-[calc(100vh-18rem)] sm:min-h-[28rem] sm:max-h-[42rem]">
-        <div className="relative min-h-0 flex-1 overflow-auto px-2 pt-2.5">
-          <table className="w-full min-w-[860px] table-fixed text-sm table-bordered">
-            {desktopColGroup}
-            <thead className="sticky top-0 z-10">
-              <tr>
-                <th className="w-10 px-3 py-3">
-                  <input
-                    ref={selectAllRef}
-                    type="checkbox"
-                    className="h-4 w-4 rounded"
-                    checked={visibleIds.length > 0 && selectedIds.size === visibleIds.length}
-                    onChange={(event) => toggleSelectAll(event.target.checked)}
-                    aria-label={t('select_all') || 'Select all'}
-                  />
-                </th>
-                <th className="px-3 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{copy('entry', 'Entry', 'លំដាប់')}</th>
-                <th className="px-3 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">Entity</th>
-                <th className="px-3 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{t('user') || 'User'}</th>
-                <th className="px-3 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{t('action') || 'Action'}</th>
-                <th className="px-3 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{t('device') || 'Device'}</th>
-                <th className="px-3 py-3 text-left font-semibold text-gray-600 dark:text-gray-400">{t('summary') || 'Summary'}</th>
-                <th className="px-3 py-3 text-left font-semibold text-gray-600 dark:text-gray-400 whitespace-nowrap">{t('time') || 'Time'}</th>
-              </tr>
-            </thead>
-            <tbody className={`divide-y divide-gray-100 dark:divide-gray-700/50 ${showDesktopLoadingOverlay ? 'invisible' : ''}`}>
-              {!hasLoadedOnce ? (
-                <tr><td colSpan={8} className="py-10 text-center text-gray-400">{t('loading') || 'Loading...'}</td></tr>
-              ) : visibleLogs.length === 0 ? (
-                <tr><td colSpan={8} className="py-10 text-center text-gray-400">{t('no_data') || 'No data'}</td></tr>
-              ) : groupedSections.map((section) => {
-                const isCollapsed = collapsedSections.has(section.id)
-                return (
-                <Fragment key={section.id}>
-                  <tr className="bg-transparent">
-                    <td colSpan={8} className="px-4 py-2">
-                      <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200/90 bg-slate-50/95 px-3 py-2 text-xs shadow-sm dark:border-slate-700/80 dark:bg-slate-800/70">
-                        <label className="inline-flex min-w-0 items-center gap-2 font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-                          <input
-                            type="checkbox"
-                            className="h-4 w-4 rounded"
-                            checked={isSelectionScopeFullySelected(section.ids)}
-                            ref={(node) => {
-                              if (node) node.indeterminate = isSelectionScopePartiallySelected(section.ids)
-                            }}
-                            onChange={(event) => toggleSelectionScope(section.ids, event.target.checked)}
-                            aria-label={`${t('select')} ${section.label}`}
-                          />
-                          <span className="detail-scroll-text">{section.label}</span>
-                        </label>
-                        <div className="flex items-center gap-2">
-                          <span className="rounded-full bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-500 shadow-sm dark:bg-slate-900/80 dark:text-slate-300">{section.ids.length}</span>
-                          <button type="button" className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-slate-500 hover:bg-white/80 hover:text-slate-700 dark:text-slate-300 dark:hover:bg-slate-700/60 dark:hover:text-white" onClick={() => toggleSectionCollapsed(section.id)} aria-label={isCollapsed ? (t('expand') || 'Expand') : (t('collapse') || 'Collapse')}>
-                            {isCollapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
-                          </button>
-                        </div>
-                      </div>
-                    </td>
-                  </tr>
-                  {!isCollapsed ? section.groups.map((group) => (
-                    <Fragment key={group.id}>
-                      {showActionGroups ? (
-                        <tr className="bg-transparent">
-                          <td colSpan={8} className="px-6 py-1.5">
-                            <div className="flex flex-wrap items-center gap-2 rounded-lg bg-white/90 px-3 py-1.5 text-xs dark:bg-slate-900/25">
-                              <label className="inline-flex items-center gap-2 font-medium text-slate-600 dark:text-slate-300">
-                                <input
-                                  type="checkbox"
-                                  className="h-4 w-4 rounded"
-                                  checked={isSelectionScopeFullySelected(group.ids)}
-                                  ref={(node) => {
-                                    if (node) node.indeterminate = isSelectionScopePartiallySelected(group.ids)
-                                  }}
-                                  onChange={(event) => toggleSelectionScope(group.ids, event.target.checked)}
-                                  aria-label={`${t('select')} ${group.label}`}
-                                />
-                                <span>{group.label}</span>
-                              </label>
-                              <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-500 dark:bg-slate-800 dark:text-slate-300">{group.items.length}</span>
-                            </div>
-                          </td>
-                        </tr>
-                      ) : null}
-                      {group.items.map((log) => (
-                        <tr
-                          key={log.id}
-                          className="table-row cursor-pointer hover:bg-blue-50 dark:hover:bg-blue-900/10"
-                          onClick={() => openLogDetail(log)}
-                        >
-                          <td className="px-3 py-2" onClick={(event) => event.stopPropagation()}>
-                            <input
-                              type="checkbox"
-                              className="h-4 w-4 rounded"
-                              checked={selectedIds.has(Number(log.id))}
-                              onChange={() => toggleSelected(log.id)}
-                              aria-label={`${t('select')} ${sessionEntryLabel(log)}`}
-                            />
-                          </td>
-                          <td className="px-3 py-2">
-                            <div className="text-xs font-semibold text-gray-500 dark:text-gray-300">{sessionEntryLabel(log)}</div>
-                          </td>
-                          <td className="max-w-[160px] px-3 py-2">
-                            <div className="detail-scroll-text text-xs font-medium text-gray-800 dark:text-gray-200" title={formatEntityName(log, vocab)}>
-                              {formatEntityName(log, vocab)}
-                            </div>
-                          </td>
-                          <td className="px-3 py-2 text-xs font-medium text-gray-700 dark:text-gray-300 whitespace-nowrap">{historyActor(log.user_name)}</td>
-                          <td className="px-3 py-2">
-                            <span className={`whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-semibold ${actionColorClass(log.action)}`}>
-                              {actionLabel(log.action)}
-                            </span>
-                          </td>
-                          <td className="px-3 py-2">
-                            <div className="max-w-[170px] detail-scroll-text text-xs text-gray-700 dark:text-gray-300" title={auditDeviceLabel(log)}>
-                              {auditDeviceLabel(log)}
-                            </div>
-                            <div className="text-xs font-mono text-blue-500 dark:text-blue-400">{auditTimezoneLabel(log)}</div>
-                          </td>
-                          <td
-                            className="max-w-[220px] px-3 py-2 text-xs text-gray-500 dark:text-gray-400"
-                            title={readableSummary(log) || undefined}
-                          >
-                            <span className="detail-scroll-text">{readableSummary(log) || <span className="italic text-gray-300">{t('click_for_details') || 'Click to view'}</span>}</span>
-                          </td>
-                          <td className="px-3 py-2 text-xs leading-snug text-gray-400" title={formatLogTime(log)}>
-                            <span className="block max-w-[7.5rem] break-words font-medium text-gray-500 dark:text-gray-400">{formatLogTableTime(log)}</span>
-                          </td>
-                        </tr>
-                      ))}
-                    </Fragment>
-                  )) : null}
-                </Fragment>
-              )})}
-            </tbody>
-          </table>
-          {showDesktopLoadingOverlay ? (
-            <div className="pointer-events-none absolute inset-x-0 top-[3.125rem] bottom-0 z-20 overflow-hidden border-t border-slate-200/80 bg-white/80 backdrop-blur-[1px] dark:border-slate-700/80 dark:bg-slate-950/78">
-              <div className="min-h-[26rem] animate-pulse bg-white/95 px-4 py-4 dark:bg-slate-950/80">
-                <div className="rounded-xl border border-slate-200/90 bg-slate-50/85 p-3 dark:border-slate-700/80 dark:bg-slate-900/70">
-                  <div className="flex items-center justify-between gap-4">
-                    <div className="flex items-center gap-2">
-                      <div className="h-4 w-4 rounded bg-slate-200 dark:bg-slate-700" />
-                      <div className="h-4 w-32 rounded bg-slate-200 dark:bg-slate-700" />
-                    </div>
-                    <div className="h-7 w-20 rounded-lg bg-slate-200 dark:bg-slate-700" />
-                  </div>
-                </div>
-                <div className="mt-4 space-y-4">
-                  {Array.from({ length: 4 }, (_, index) => (
-                    <div key={`audit-shell-${index}`} className="rounded-2xl border border-slate-200/80 bg-white/90 p-4 shadow-sm dark:border-slate-700/70 dark:bg-slate-900/70">
-                      <div className="flex items-start justify-between gap-4">
-                        <div className="min-w-0 flex-1 space-y-3">
-                          <div className="flex items-center gap-3">
-                            <div className="h-4 w-20 rounded bg-slate-200 dark:bg-slate-700" />
-                            <div className="h-5 w-20 rounded-full bg-slate-100 dark:bg-slate-800" />
-                            <div className="h-4 w-24 rounded bg-slate-100 dark:bg-slate-800" />
-                          </div>
-                          <div className="h-3 w-40 rounded bg-slate-100 dark:bg-slate-800" />
-                          <div className="grid grid-cols-[1.2fr_0.9fr_1.3fr] gap-3">
-                            <div className="h-10 rounded-lg bg-slate-100 dark:bg-slate-800" />
-                            <div className="h-10 rounded-lg bg-slate-100 dark:bg-slate-800" />
-                            <div className="h-10 rounded-lg bg-slate-100 dark:bg-slate-800" />
-                          </div>
-                        </div>
-                        <div className="h-4 w-28 rounded bg-slate-100 dark:bg-slate-800" />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          ) : null}
-        </div>
-        <div className="border-t border-gray-100 px-4 py-2 text-xs text-gray-400 dark:border-gray-700">
-          <span>{visibleLogs.length} / {totalLogs || visibleLogs.length} {copy('entries', 'entries', 'កំណត់ត្រា')}</span>
-        </div>
-      </div>
-
-      <div className="relative min-h-[32rem] space-y-2 sm:hidden">
+      <div className="card overflow-hidden">
         {loading && !hasLoadedOnce ? (
-          <div className="space-y-2">
-            {skeletonRows.slice(0, 6).map((row) => (
-              <div key={`audit-mobile-skeleton-${row}`} className="card animate-pulse p-3">
-                <div className="space-y-2">
-                  <div className="h-4 w-3/4 rounded bg-slate-200 dark:bg-slate-700" />
-                  <div className="h-3 w-1/2 rounded bg-slate-200 dark:bg-slate-700" />
-                  <div className="h-3 w-2/3 rounded bg-slate-100 dark:bg-slate-800" />
-                </div>
-              </div>
+          <div className="space-y-2 p-3">
+            {skeletonRows.map((row) => (
+              <div key={`audit-skeleton-${row}`} className="h-7 animate-pulse rounded bg-slate-100 dark:bg-slate-800" />
             ))}
           </div>
         ) : !hasLoadedOnce ? (
           <div className="py-10 text-center text-gray-400">{t('loading') || 'Loading...'}</div>
-        ) : visibleLogs.length === 0 ? (
+        ) : logs.length === 0 ? (
           <div className="py-10 text-center text-gray-400">{t('no_data') || 'No data'}</div>
-        ) : groupedSections.map((section) => {
-          const isCollapsed = collapsedSections.has(section.id)
-          return (
-          <div key={section.id} className={`space-y-2 ${showMobileLoadingOverlay ? 'invisible' : ''}`}>
-            <div className="rounded-xl bg-slate-100 px-3 py-2 dark:bg-slate-800/70">
-              <div className="flex items-center justify-between gap-3">
-                <label className="flex min-w-0 flex-1 items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-                  <input
-                    type="checkbox"
-                    className="h-4 w-4 rounded"
-                    checked={isSelectionScopeFullySelected(section.ids)}
-                    ref={(node) => {
-                      if (node) node.indeterminate = isSelectionScopePartiallySelected(section.ids)
-                    }}
-                    onChange={(event) => toggleSelectionScope(section.ids, event.target.checked)}
-                    aria-label={`${t('select')} ${section.label}`}
-                  />
-                  <span className="min-w-0 flex-1 detail-scroll-text">{section.label}</span>
-                  <span className="shrink-0 normal-case tracking-normal text-slate-400">{section.ids.length}</span>
-                </label>
-                <div className="flex items-center gap-1">
-                  <button type="button" className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-500 hover:bg-white/70 hover:text-slate-700 dark:text-slate-300 dark:hover:bg-slate-700/60 dark:hover:text-white" onClick={() => toggleSectionCollapsed(section.id)}>
-                    {isCollapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
-                  </button>
+        ) : (
+          <div className={loading ? 'opacity-60 transition-opacity' : ''}>
+            {dayGroups.map((group) => (
+              <div key={`${group.key}-${group.rows[0]?.id}`}>
+                <div className="flex items-center justify-between gap-2 bg-slate-100 px-3 py-1 text-[11px] font-semibold text-slate-600 dark:bg-slate-800/70 dark:text-slate-300">
+                  <span>{formatDayHeader(group.key)}</span>
+                  <span className="text-slate-400">{group.rows.length}</span>
                 </div>
-              </div>
-            </div>
-            {!isCollapsed ? section.groups.map((group) => (
-              <div key={group.id} className="space-y-2">
-                {showActionGroups ? (
-                  <div className="px-2 text-xs font-medium text-slate-500 dark:text-slate-400">
-                    <label className="inline-flex min-w-0 max-w-full items-center gap-2">
-                      <input
-                        type="checkbox"
-                        className="h-4 w-4 rounded"
-                        checked={isSelectionScopeFullySelected(group.ids)}
-                        ref={(node) => {
-                          if (node) node.indeterminate = isSelectionScopePartiallySelected(group.ids)
-                        }}
-                        onChange={(event) => toggleSelectionScope(group.ids, event.target.checked)}
-                        aria-label={`${t('select')} ${group.label}`}
-                      />
-                      <span className="min-w-0 detail-scroll-text">{group.label}</span>
-                      <span className="shrink-0 text-slate-400">{group.items.length}</span>
-                    </label>
-                  </div>
-                ) : null}
-                {group.items.map((log) => (
-                  <button
-                    key={log.id}
-                    type="button"
-                    className="card w-full p-3 text-left active:bg-blue-50 dark:active:bg-blue-900/10"
-                    onClick={() => openLogDetail(log)}
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0 flex-1">
-                        <div className="mb-1 flex items-center gap-1 overflow-hidden text-[11px]">
-                          <input
-                            type="checkbox"
-                            className="h-4 w-4 rounded"
-                            checked={selectedIds.has(Number(log.id))}
-                            onChange={() => toggleSelected(log.id)}
-                            onClick={(event) => event.stopPropagation()}
-                            aria-label={`${t('select')} ${sessionEntryLabel(log)}`}
-                          />
-                          <span className="detail-scroll-text font-semibold text-gray-700 dark:text-gray-200">{historyActor(log.user_name)}</span>
-                          <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${actionColorClass(log.action)}`}>
+                <ul className="divide-y divide-gray-100 dark:divide-gray-700/50">
+                  {group.rows.map((log) => {
+                    const rowId = String(log.id)
+                    const open = expandedId === rowId
+                    const summary = readableSummary(log)
+                    return (
+                      <li key={rowId}>
+                        <button
+                          type="button"
+                          aria-expanded={open}
+                          onClick={() => {
+                            setExpandedId(open ? null : rowId)
+                            setShowRawAuditJson(false)
+                          }}
+                          className="flex w-full min-w-0 items-center gap-1.5 px-2 py-1.5 text-left text-xs hover:bg-blue-50 dark:hover:bg-blue-900/10"
+                          title={formatLogTime(log)}
+                        >
+                          <ChevronRight className={`h-3.5 w-3.5 shrink-0 text-gray-300 transition-transform ${open ? 'rotate-90' : ''}`} />
+                          <span className="shrink-0 font-mono tabular-nums text-gray-400">{formatRowClock(log)}</span>
+                          <span className="max-w-[5.5rem] shrink-0 detail-scroll-text font-medium text-gray-700 dark:text-gray-200">{historyActor(log.user_name)}</span>
+                          <span className={`shrink-0 whitespace-nowrap rounded-full px-1.5 py-0.5 text-[11px] font-semibold ${actionColorClass(log.action)}`}>
                             {actionLabel(log.action)}
                           </span>
-                          <span className="detail-scroll-text text-xs text-gray-500">{formatEntityName(log, vocab)}</span>
-                          <span className="shrink-0 text-xs text-gray-400">{sessionEntryLabel(log)}</span>
-                        </div>
-                        {readableSummary(log) ? (
-                          <div
-                            className="mt-1 detail-scroll-text text-xs text-gray-400"
-                            title={readableSummary(log) ?? undefined}
-                          >
-                            {readableSummary(log)}
-                          </div>
-                        ) : null}
-                        <div className="mt-1 text-xs text-gray-400">{formatLogTime(log)}</div>
-                      </div>
-                      <ChevronRight className="h-4 w-4 text-gray-300" />
-                    </div>
-                  </button>
-                ))}
+                          <span className="min-w-0 flex-1 detail-scroll-text text-gray-500 dark:text-gray-400">
+                            {formatEntityName(log, vocab)}{summary ? ` · ${summary}` : ''}
+                          </span>
+                        </button>
+                        {open ? detailPanel(log) : null}
+                      </li>
+                    )
+                  })}
+                </ul>
               </div>
-            )) : null}
+            ))}
           </div>
-        )})}
-        {showMobileLoadingOverlay ? (
-          <div className="pointer-events-none absolute inset-0 z-20 overflow-hidden rounded-2xl bg-white/88 px-1 py-0.5 backdrop-blur-[1px] dark:bg-slate-950/80">
-            <div className="space-y-2">
-              {skeletonRows.slice(0, 4).map((row) => (
-                <div key={`audit-mobile-overlay-${row}`} className="card animate-pulse p-3">
-                  <div className="space-y-2">
-                    <div className="h-4 w-3/4 rounded bg-slate-200 dark:bg-slate-700" />
-                    <div className="h-3 w-1/2 rounded bg-slate-200 dark:bg-slate-700" />
-                    <div className="h-3 w-2/3 rounded bg-slate-100 dark:bg-slate-800" />
-                  </div>
-                </div>
-              ))}
-            </div>
+        )}
+        {hasLoadedOnce && logs.length > 0 ? (
+          <div className="flex items-center justify-between gap-2 border-t border-gray-100 px-3 py-2 text-xs text-gray-400 dark:border-gray-700">
+            <span>{logs.length}{hasMore ? '+' : ''} {copy('entries', 'entries', 'កំណត់ត្រា')}</span>
+            {hasMore ? (
+              <button type="button" className="btn-secondary px-3 py-1 text-xs" disabled={loadingMore || loading} onClick={() => { void loadMore() }}>
+                {loadingMore ? (t('loading') || 'Loading...') : vocab('audit_load_more', 'Load more')}
+              </button>
+            ) : null}
           </div>
         ) : null}
       </div>
-
-      {detailLog ? (
-        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4" onClick={() => setDetailLog(null)}>
-          <div
-            className="flex max-h-modal-88 w-full flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-lg sm:rounded-2xl pb-[env(safe-area-inset-bottom)] sm:pb-0"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="flex items-center justify-between border-b border-gray-200 p-4 dark:border-gray-700">
-              <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${actionColorClass(detailLog.action)}`}>
-                    {actionLabel(detailLog.action)}
-                  </span>
-                  <span className="detail-scroll-text text-sm font-semibold text-gray-900 dark:text-white">{formatEntityName(detailLog, vocab)}</span>
-                </div>
-                <div className="mt-1 text-xs font-semibold text-gray-400">{sessionEntryLabel(detailLog)}</div>
-              </div>
-              <button
-                onClick={() => setDetailLog(null)}
-                className="flex h-8 w-8 items-center justify-center text-gray-400 hover:text-gray-600"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-
-            <div className="flex-1 overflow-auto p-4 space-y-3">
-              <div className="grid gap-3 rounded-xl border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-900/40">
-                <div className="flex items-start gap-2">
-                  <Clock3 className="mt-0.5 h-4 w-4 text-blue-500" />
-                  <div className="space-y-2">
-                    <DetailRow label={t('client_time') || 'Client Time'} value={formatLogTime(detailLog)} />
-                    <DetailRow label={t('server_time') || 'Server Time'} value={formatDateTime(detailLog.created_at)} />
-                  </div>
-                </div>
-                <div className="flex items-start gap-2">
-                  <MonitorSmartphone className="mt-0.5 h-4 w-4 text-blue-500" />
-                  <div className="space-y-2">
-                    <DetailRow label={t('device') || 'Device'} value={auditDeviceLabel(detailLog)} />
-                    <DetailRow label={t('timezone') || 'Timezone'} value={auditTimezoneLabel(detailLog)} mono />
-                  </div>
-                </div>
-                <div className="flex items-start gap-2">
-                  <User2 className="mt-0.5 h-4 w-4 text-blue-500" />
-                  <div className="space-y-2">
-                    <DetailRow label={t('user') || 'User'} value={historyActor(detailLog.user_name)} />
-                    <DetailRow label={t('action') || 'Action'} value={actionLabel(detailLog.action)} />
-                    <DetailRow label={t('table') || 'Entity'} value={formatEntityName(detailLog, vocab)} />
-                    <DetailRow label={copy('entry', 'Entry', 'លំដាប់')} value={sessionEntryLabel(detailLog)} />
-                    <DetailRow label={t('reason') || 'Reason'} value={historyField(auditReason(detailLog))} />
-                    <DetailRow label={t('summary') || 'Summary'} value={historyField(readableSummary(detailLog))} />
-                  </div>
-                </div>
-              </div>
-
-              {(() => {
-                // A column is named with the same pack words a record's own
-                // history uses (entityRecords.ts), not Title-Cased English --
-                // the Khmer pack read "Telegram Topic Shift" for a /settopic row.
-                const fieldLabelFor = (key: string) => entityFieldLabel(key, vocab)
-                const fieldDiffRows = buildAuditFieldDiff(detailLog.old_value, detailLog.new_value, fieldLabelFor)
-                // The recorded context: the payload the route wrote alongside
-                // the pair (a rename's linked-sale counts, a profile save's
-                // mode, the operator's reason). It used to be reachable only
-                // through "View raw data", and for an opted-in save whose
-                // columns happened not to move, the float showed nothing at
-                // all. Same builder as the pair -- a details payload has no
-                // old side, so its rows come back as context rows.
-                const contextRows = buildAuditFieldDiff(null, detailLog.details, fieldLabelFor)
-                const hasRawData = Boolean(detailLog.old_value || detailLog.new_value)
-                if (!hasRawData && !contextRows.length) return null
-                return (
-                  <div className="space-y-3">
-                    {hasRawData && !fieldDiffRows.length ? (
-                      <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs leading-relaxed text-gray-500 dark:border-gray-700 dark:bg-gray-900/40 dark:text-gray-400">
-                        {copy('no_field_changed', 'No field changed', 'គ្មានវាលណាមួយផ្លាស់ប្តូរទេ')}
-                      </div>
-                    ) : null}
-                    {fieldDiffRows.length ? (
-                      <div>
-                        <div className="mb-1 flex items-center justify-between gap-2">
-                          <div className="text-xs font-semibold text-gray-500 dark:text-gray-400">
-                            {copy('changed_fields', 'Changed fields', 'វាលដែលបានផ្លាស់ប្តូរ')}
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => setShowRawAuditJson((current) => !current)}
-                            className="text-xs font-semibold text-blue-600 hover:underline dark:text-blue-400"
-                          >
-                            {showRawAuditJson
-                              ? copy('hide_raw_data', 'Hide raw data', 'លាក់ទិន្នន័យដើម')
-                              : copy('view_raw_data', 'View raw data', 'មើលទិន្នន័យដើម')}
-                          </button>
-                        </div>
-                        <div className="space-y-2 rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-900/40">
-                          {fieldDiffRows.map((row) => <AuditFieldDiffLine key={row.key} row={row} />)}
-                        </div>
-                      </div>
-                    ) : null}
-
-                    {contextRows.length ? (
-                      <div>
-                        <div className="mb-1 text-xs font-semibold text-gray-500 dark:text-gray-400">
-                          {copy('recorded_context', 'Recorded context', 'ព័ត៌មានកត់ត្រាបន្ថែម')}
-                        </div>
-                        <div className="space-y-2 rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-900/40">
-                          {contextRows.map((row) => <AuditFieldDiffLine key={`context:${row.key}`} row={row} />)}
-                        </div>
-                      </div>
-                    ) : null}
-
-                    {showRawAuditJson || !fieldDiffRows.length ? (
-                      <>
-                        {detailLog.old_value ? (
-                          <div>
-                            <div className="mb-1 text-xs font-semibold text-red-500">{t('before_data') || 'Before (old data)'}</div>
-                            <pre className="max-h-48 overflow-auto rounded-lg bg-red-50 p-3 text-xs font-mono text-red-700 whitespace-pre-wrap break-all dark:bg-red-900/20 dark:text-red-300">
-                              {formatJsonPretty(detailLog.old_value)}
-                            </pre>
-                          </div>
-                        ) : null}
-
-                        {detailLog.new_value ? (
-                          <div>
-                            <div className="mb-1 text-xs font-semibold text-green-600">{t('after_data') || 'After (new data)'}</div>
-                            <pre className="max-h-48 overflow-auto rounded-lg bg-green-50 p-3 text-xs font-mono text-green-700 whitespace-pre-wrap break-all dark:bg-green-900/20 dark:text-green-300">
-                              {formatJsonPretty(detailLog.new_value)}
-                            </pre>
-                          </div>
-                        ) : null}
-                      </>
-                    ) : null}
-                  </div>
-                )
-              })()}
-            </div>
-          </div>
-        </div>
-      ) : null}
     </div>
   )
 }

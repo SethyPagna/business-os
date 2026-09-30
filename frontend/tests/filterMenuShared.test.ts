@@ -246,7 +246,7 @@ runTest('buildPeriodFilterOptions switches month names with the language argumen
   assert.ok(build('km').includes('មករា'), 'km gets Khmer month names')
   assert.ok(!build('km').includes('Jan'))
   assert.ok(build('en').includes('Jan'), 'en gets English month names')
-  for (const caller of ['utils-settings/AuditLog.tsx', 'contacts/CustomersTab.tsx', 'contacts/SuppliersTab.tsx', 'contacts/DeliveryTab.tsx']) {
+  for (const caller of ['contacts/CustomersTab.tsx', 'contacts/SuppliersTab.tsx', 'contacts/DeliveryTab.tsx']) {
     const callerSource = fs.readFileSync(path.resolve(here, '..', 'src', 'components', caller), 'utf8')
     assert.match(callerSource, /buildPeriodFilterOptions\(\{[\s\S]{0,200}?\blanguage,/, `${caller} passes its language`)
   }

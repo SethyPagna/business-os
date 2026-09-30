@@ -2519,36 +2519,31 @@ assert.match(
 )
 assert.match(
   auditLog,
-  /function normalizeFiniteIdsFrom<T>\(items: T\[\] = \[\], getValue: \(value: T\) => unknown = \(value\) => value\): number\[\]/,
-  'audit log selection should share a finite-id normalization helper',
+  /withLoaderTimeout\(\s*\(\) => getAuditLogsRequest\(moreParams\) as Promise<AuditLogResponse \| AuditLogRow\[\]>,\s*'Audit log',\s*AUDIT_LOG_LOAD_TIMEOUT_MS,\s*\)/,
+  'audit log Load more should timeout slow reads with the same explicit constant',
 )
-assert.match(
-  auditLog,
-  /const visibleIds = useMemo\(\s*\(\) => normalizeFiniteIdsFrom\(visibleLogs, \(log\) => log\.id\),\s*\[visibleLogs\],\s*\)/,
-  'audit log should precompute visible ids once for selection cleanup and select all',
-)
-assert.match(
-  auditLog,
-  /countSelectedIds\(normalized, selectedIds\) === normalized\.length/,
-  'audit log grouped selection should count selected ids without repeated every/map conversions',
-)
-assert.match(
-  auditLog,
-  // entityFilter joined the flag list with I2's entity ("page") filter
-  // (Part 393); the D2-era one-row date-range control then added
-  // Boolean(rangeStart || rangeEnd) -- the pin tracks the current vocabulary.
-  /countActiveFlags\(\[yearFilter !== 'all', monthFilter !== 'all', Boolean\(rangeStart \|\| rangeEnd\), actionFilter !== 'all', entityFilter !== 'all', userFilter !== 'all', sortDirection !== 'desc', groupMode !== 'time'\]\)/,
-  'audit log active filter count should avoid temporary filtered boolean arrays',
-)
+// AUDIT-LOG-ORG: rows are compact one-liners that expand in place; the per-row
+// checkboxes, the bulk toolbar and their id-normalising helpers are gone.
 assert.doesNotMatch(
   auditLog,
-  /visibleLogs\.map\(\(log\) => Number\(log\.id\)\)\.filter/,
-  'audit log selection cleanup should not rebuild visible ids with map/filter',
+  /normalizeFiniteIdsFrom|countSelectedIds|selectedLogs|toggleSelectAll|toggleSelectionScope/,
+  'audit log must not carry the removed row-selection machinery',
+)
+assert.match(
+  auditLog,
+  /const activeFilterCount = \(view\.action !== 'all' \? 1 : 0\) \+ \(view\.order !== 'desc' \? 1 : 0\)/,
+  'audit log active filter count should avoid temporary filtered boolean arrays',
 )
 assert.doesNotMatch(
   auditLog,
   /\[yearFilter !== 'all', monthFilter !== 'all', actionFilter !== 'all', userFilter !== 'all', sortDirection !== 'desc', groupMode !== 'time'\]\.filter\(Boolean\)\.length/,
   'audit log active filter count should not allocate a boolean array just to filter it',
+)
+// A page is a cursor, never an OFFSET or a whole-table count.
+assert.doesNotMatch(
+  auditLog,
+  /PaginationControls|clampPage|totalLogs/,
+  'audit log pages by keyset cursor (Load more), not by page number or total',
 )
 assert.match(
   serverPage,

@@ -16,7 +16,7 @@ const StatsRangeRow = evaluate(read('shared/StatsRangeRow.tsx').replace(/import 
 const initial = { startDate: '2026-09-18', endDate: '2026-09-19', startTime: '09:30', endTime: '17:15' }
 
 for (const file of [
-  'utils-settings/AuditLog.tsx', 'inventory/InventoryMovementsSurface.tsx',
+  'inventory/InventoryMovementsSurface.tsx',
   'review/LegacyDeletedSalesSection.tsx', 'contacts/DeliveryContactReportModal.tsx',
   'shared/ExportRangeDialog.tsx',
 ]) {
@@ -70,4 +70,20 @@ for (const file of [
     assert.equal(state.endDate, '')
   }
   console.log(`PASS ${file}: external presets, preserved time capability, custom selection and clear`)
+}
+
+// The Audit Log owns a compact time control instead of the eight-preset rail:
+// Today / 7 days / 30 days / Custom in one select (owner, 30 Sep 2026). Its
+// custom range still goes through the one shared StatsRangeRow, with the
+// picker's own quick ranges, and is only mounted while Custom is chosen.
+{
+  const source = read('utils-settings/AuditLog.tsx')
+  assert.equal((source.match(/<StatsRangeRow/g) || []).length, 1, 'AuditLog: exactly one shared range owner')
+  assert.doesNotMatch(source, /<DateTimeRangePicker/, 'AuditLog: no direct picker')
+  assert.match(source, /view\.preset === 'custom' \? \(\s*<StatsRangeRow[\s\S]*?showPresets=\{false\}/, 'AuditLog: the range picker appears only for Custom, without a second preset rail')
+  // Clearing the custom range does not mean "all time" here: the view state
+  // falls back to the last 30 days, because an unbounded audit read is not on
+  // offer (tests/auditLogView.test.ts pins the fallback).
+  assert.match(source, /onRangeChange=\{\(next\) => setView\(\(current\) => setAuditRange\(current, next\.startDate \|\| '', next\.endDate \|\| ''\)\)\}/, 'AuditLog: the picker writes the custom range through setAuditRange')
+  console.log('PASS utils-settings/AuditLog.tsx: compact time select owns the presets; custom range uses the shared row')
 }

@@ -360,7 +360,6 @@ const RAW_VH_ALLOWLIST = new Set([
   'components/shared/SuggestionTextInput.tsx',
   'components/shared/kit/Fold.tsx',
   'components/shifts/ShiftHistoryModal.tsx',
-  'components/utils-settings/AuditLog.tsx',
 ])
 
 runTest('D4 -- no raw vh outside the frozen allowlist', () => {

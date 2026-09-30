@@ -306,7 +306,6 @@ const DELIBERATELY_UNGUARDED: Record<string, string> = {
   'components/shared/ImageGalleryLightbox.tsx': 'an image lightbox',
   'components/shared/kit/Fold.tsx': 'a layout primitive',
   'components/users/UserDetailSheet.tsx': 'read-only viewer',
-  'components/utils-settings/AuditLog.tsx': 'the overlay is a read-only detail of one log line',
   // NOT a judgement that these are safe -- they were out of this lane's
   // reach. Each was held dirty by another session in the shared checkout
   // when this pass ran, and SaleDetailModal in particular DOES carry losable
