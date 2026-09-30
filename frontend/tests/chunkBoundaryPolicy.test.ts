@@ -37,6 +37,8 @@ const boundaries: Array<[string, string]> = [
   ['components/catalog/legal/LegalPages.tsx', 'catalog-legal'],
   ['components/shared/modalCloseContext.ts', 'shared-modal'],
   ['components/shared/UnsavedChangesPrompt.tsx', 'shared-modal'],
+  // The phone Draft chip body stays off app-shared so the public catalog budget holds (DRAFT-CHIP).
+  ['components/shared/DraftChipFloat.tsx', 'draft-chip-float'],
   ['components/shared/InfoHint.tsx', 'shared-ui'],
   ['components/shared/TruncatedText.tsx', 'shared-ui'],
   ['components/shared/AlphaIndexRail.tsx', 'shared-ui'],
