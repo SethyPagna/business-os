@@ -1,19 +1,26 @@
-import type { RefObject } from 'react'
+import { useMemo, type RefObject } from 'react'
 import Search from 'lucide-react/dist/esm/icons/search.js'
 import CalendarDays from 'lucide-react/dist/esm/icons/calendar-days.js'
 import CalendarClock from 'lucide-react/dist/esm/icons/calendar-clock.js'
 import Plus from 'lucide-react/dist/esm/icons/plus.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
+// Not message-square: the public catalog imports that icon (chunk cycle, 30 Sep).
+import MessageSquareText from 'lucide-react/dist/esm/icons/message-square-text.js'
+import Settings2 from 'lucide-react/dist/esm/icons/settings-2.js'
 import AppSelect, { type AppSelectOption } from '../shared/AppSelect.tsx'
 import DateEntryInput from '../shared/DateEntryInput.tsx'
 import ScanSearchButton from '../shared/ScanSearchButton.tsx'
-import StockReasonField from '../shared/StockReasonField.tsx'
+import SuggestionTextInput from '../shared/SuggestionTextInput.tsx'
 import StockConditionTagRow from '../inventory/StockConditionTagRow.tsx'
 import type { SavedStockReason } from '../../utils/useSavedStockReasons.ts'
 import type { LineEntryField, StockMode, StockSessionProduct } from '../../utils/stockSessionDraft.ts'
 import { IconField, InsetNumberField, INVALID_RING } from './StockSessionSharedDetails.tsx'
 
 type Translate = (key: string, fallbackEn?: string, fallbackKm?: string) => string
+
+// StockReasonField's limit: every reason wire takes 512, and the headroom lets
+// undo prepend 'Undo: ' to a maximum-length reason.
+const REASON_MAX_LENGTH = 500
 
 export type CandidateGroupRow = { key: string; name: string; options: number; stock: number }
 
@@ -78,6 +85,8 @@ export default function StockSessionLineEntry(props: LineEntryProps) {
     reason, onReason, savedReasons, onManageReasons, onAdd, editing, refusal, invalidField,
   } = props
   const ring = (field: LineEntryField): boolean => invalidField === field
+  const reasonLabel = tr('reason', 'Reason')
+  const reasonOptions = useMemo(() => savedReasons.map((entry) => ({ value: entry.label, key: entry.id, selected: entry.label === reason })), [savedReasons, reason])
   const lotLabel = tr('received_date', 'Received date')
   const showList = !picked && (groups.length > 0 || createText != null)
   const lotSelect = (
@@ -200,32 +209,50 @@ export default function StockSessionLineEntry(props: LineEntryProps) {
         </div>
       )}
 
-      {/* E4 */}
-      <StockReasonField
-        variant="compact"
-        id="stock-session-reason"
-        label={tr('reason', 'Reason')}
-        ariaLabel={tr('reason', 'Reason')}
-        placeholder={tr('reason', 'Reason')}
-        value={reason}
-        onChange={onReason}
-        onEnter={onAdd}
-        savedReasons={savedReasons}
-        onManage={onManageReasons}
-        manageLabel={tr('manage_reasons', 'Manage reasons')}
-        trailing={(
-          <button
-            type="button"
-            onClick={onAdd}
-            disabled={busy}
-            aria-disabled={refusal ? true : undefined}
-            title={refusal || undefined}
-            className={`btn-primary h-10 w-16 shrink-0 px-2 text-sm ${refusal ? 'opacity-50' : ''}`}
-          >
-            {editing ? tr('save', 'Save') : tr('add', 'Add')}
-          </button>
-        )}
-      />
+      {/* E4: the reason box (saved reasons, free text), manage, then Add. Lives
+          here, not in components/shared, so the catalog closure does not grow. */}
+      <div
+        className="flex min-w-0 items-center gap-1.5"
+        onKeyDown={(event) => {
+          // Only the box's own Enter adds; a picked suggestion has already handled it.
+          if (event.key !== 'Enter' || event.defaultPrevented || (event.target as HTMLElement).tagName !== 'INPUT') return
+          event.preventDefault()
+          onAdd()
+        }}
+      >
+        <div className="relative min-w-0 flex-1" title={reason.trim() ? `${reasonLabel}: ${reason.trim()}` : reasonLabel}>
+          <MessageSquareText className="pointer-events-none absolute left-2.5 top-1/2 z-10 h-4 w-4 -translate-y-1/2 text-gray-400" aria-hidden="true" />
+          <SuggestionTextInput
+            id="stock-session-reason"
+            value={reason}
+            options={reasonOptions}
+            limit={50}
+            ariaLabel={reasonLabel}
+            placeholder={reasonLabel}
+            inputClassName="input h-10 w-full min-w-0 pl-8 text-sm"
+            onChange={(next) => onReason(next.slice(0, REASON_MAX_LENGTH))}
+          />
+        </div>
+        <button
+          type="button"
+          onClick={onManageReasons}
+          aria-label={tr('manage_reasons', 'Manage reasons')}
+          title={tr('manage_reasons', 'Manage reasons')}
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50 hover:text-gray-700 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700"
+        >
+          <Settings2 className="h-4 w-4" />
+        </button>
+        <button
+          type="button"
+          onClick={onAdd}
+          disabled={busy}
+          aria-disabled={refusal ? true : undefined}
+          title={refusal || undefined}
+          className={`btn-primary h-10 w-16 shrink-0 px-2 text-sm ${refusal ? 'opacity-50' : ''}`}
+        >
+          {editing ? tr('save', 'Save') : tr('add', 'Add')}
+        </button>
+      </div>
     </div>
   )
 }

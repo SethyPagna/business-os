@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import Truck from 'lucide-react/dist/esm/icons/truck.js'
 import InfoHint from './InfoHint.tsx'
 import { captureActorReadScope, isActorReadScopeCurrent, type ActorReadScope } from '../../api/actorReadScope.ts'
 import { loadPickerOptions, invalidatePickerOptionsCache } from '../../api/pickerOptionsCache.ts'
@@ -103,24 +102,14 @@ type SupplierPickerFieldProps = {
   hintDisplay?: 'inline' | 'tooltip'
   disabled?: boolean
   idPrefix: string
-  /** 'compact': no caption or notes; the Truck icon and the placeholder name the field (Stock Session). */
-  variant?: 'default' | 'compact'
-  /** Compact only: ring the field when the receipt gate is waiting on it. */
-  invalid?: boolean
 }
 
-export default function SupplierPickerField({
-  value,
-  onChange,
-  tr,
-  lockedName,
-  hint,
-  hintDisplay = 'inline',
-  disabled,
-  idPrefix,
-  variant = 'default',
-  invalid = false,
-}: SupplierPickerFieldProps) {
+/**
+ * The picker's supplier names, exported so the Stock Session's compact box
+ * (stock-session/StockSessionSharedDetails.tsx) uses the same names read,
+ * scope guard and exact-name resolver instead of a copy.
+ */
+export function useSupplierSuggestions(value: SupplierChoice, onChange: (next: SupplierChoice) => void) {
   const [rows, setRows] = useState<SupplierNameRow[]>([])
   const rowsScope = useRef<ActorReadScope | null>(null)
   const [loading, setLoading] = useState(false)
@@ -154,16 +143,14 @@ export default function SupplierPickerField({
       .finally(() => { if (aliveRef.current && rowsScope.current === scope) setLoading(false) })
   }
 
-  const label = tr('supplier', 'Supplier')
-
   // The input + floating list is the ONE shared SuggestionTextInput -- the
   // same control ProductForm's Category/Brand/Unit/Supplier and the
   // create-products header's Brand render. This field adds only what is
   // supplier-specific: the contact id a pick carries, and the locked variant
-  // below. Before this, four supplier surfaces and the product form each had
-  // their own copy of "input plus a dropdown", and they disagreed (the
-  // product form's showed nothing until something was typed).
-  const suggestionOptions = useMemo<SuggestionOption[]>(
+  // (SupplierPickerField below). Before this, four supplier surfaces and the
+  // product form each had their own copy of "input plus a dropdown", and they
+  // disagreed (the product form's showed nothing until something was typed).
+  const options = useMemo<SuggestionOption[]>(
     () => rows.map((row) => ({
       value: row.name,
       key: `supplier-${row.id}`,
@@ -173,12 +160,14 @@ export default function SupplierPickerField({
     [rows, value.supplierId],
   )
 
-  // A pick carries the contact id outright. Typing does NOT carry a stale id
-  // forward -- it is re-resolved from the typed text every keystroke, so an
-  // edited name can never ride on the previous pick's id. P3-9: typing an
-  // existing supplier's name exactly resolves to that contact instead of
-  // falling through to a name-only attribution.
   const handleChange = (next: string, option?: SuggestionOption) => {
+    // A pick carries the contact id outright. Typing does NOT carry a
+    // stale id forward -- it is re-resolved from the typed text every
+    // keystroke, so an edited name can never ride on the previous pick's
+    // id. P3-9: typing an existing supplier's name exactly now resolves
+    // to that contact instead of falling through to a name-only
+    // attribution, which is what made the same supplier get recorded two
+    // different ways depending on whether the suggestion was clicked.
     if (option) {
       onChange({ supplierId: Number(option.payload), supplierName: option.value })
       return
@@ -189,41 +178,22 @@ export default function SupplierPickerField({
     const resolved = resolveSupplierByExactName(resolvable, next)
     onChange({ supplierId: resolved ? resolved.id : null, supplierName: next })
   }
-  const liveOptions = rowsScope.current && isActorReadScopeCurrent(rowsScope.current) ? suggestionOptions : []
+  return { options: rowsScope.current && isActorReadScopeCurrent(rowsScope.current) ? options : [], loading, ensureLoaded, handleChange }
+}
 
-  if (variant === 'compact') {
-    const shown = lockedName || value.supplierName.trim()
-    const iconClass = 'pointer-events-none absolute left-2.5 top-1/2 z-10 h-4 w-4 -translate-y-1/2 text-gray-400'
-    if (lockedName) {
-      return (
-        <div className="relative min-w-0" title={`${label}: ${lockedName}`}>
-          <Truck className={iconClass} aria-hidden="true" />
-          <div aria-label={label} className="flex h-10 min-w-0 items-center rounded-lg border border-gray-200 bg-gray-50 pl-8 pr-2 text-sm text-gray-700 dark:border-gray-600 dark:bg-gray-700/40 dark:text-gray-300">
-            <span className="detail-scroll-text min-w-0">{lockedName}</span>
-          </div>
-        </div>
-      )
-    }
-    return (
-      <div className="relative min-w-0" title={shown ? `${label}: ${shown}` : label}>
-        <Truck className={iconClass} aria-hidden="true" />
-        <SuggestionTextInput
-          id={`${idPrefix}-supplier`}
-          value={value.supplierName}
-          options={liveOptions}
-          limit={8}
-          disabled={disabled}
-          loading={loading}
-          loadingLabel={tr('loading', 'Loading...')}
-          onRequestOptions={ensureLoaded}
-          ariaLabel={label}
-          inputClassName={`input h-10 w-full min-w-0 pl-8 text-sm ${invalid ? 'ring-2 ring-red-400 dark:ring-red-500' : ''}`}
-          placeholder={label}
-          onChange={handleChange}
-        />
-      </div>
-    )
-  }
+export default function SupplierPickerField({
+  value,
+  onChange,
+  tr,
+  lockedName,
+  hint,
+  hintDisplay = 'inline',
+  disabled,
+  idPrefix,
+}: SupplierPickerFieldProps) {
+  // Every hook runs before the locked early return.
+  const { options, loading, ensureLoaded, handleChange } = useSupplierSuggestions(value, onChange)
+  const label = tr('supplier', 'Supplier')
 
   if (lockedName) {
     return (
@@ -248,7 +218,7 @@ export default function SupplierPickerField({
       <SuggestionTextInput
         id={`${idPrefix}-supplier`}
         value={value.supplierName}
-        options={liveOptions}
+        options={options}
         limit={8}
         disabled={disabled}
         loading={loading}

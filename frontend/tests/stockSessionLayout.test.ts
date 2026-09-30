@@ -55,11 +55,11 @@ runTest('S5/S9/S11: the shared details are the same two rows in every mode, labe
   assert.doesNotMatch(shared, /fast_stockin_header|shipment/i)
   assert.doesNotMatch(shared, /mode\s*[!=]==|StockMode/, 'the shared block does not branch on the mode')
   for (const icon of ['Award', 'Store', 'CalendarDays']) assert.match(shared, new RegExp(`icon=\\{${icon}\\}`))
-  assert.match(shared, /variant="compact"/, 'Supplier uses the compact picker')
+  assert.match(shared, /useSupplierSuggestions\(/, 'the compact Supplier box runs on the picker\'s own names read and resolver')
+  assert.match(shared, /placeholder=\{label\}/, 'the compact supplier box reads "Supplier"')
   assert.match(shared, /grid-cols-2 gap-1\.5 sm:grid-cols-4/, 'two per row on a phone, one row of four on desktop')
   assert.doesNotMatch(shared, /mb-1 block text-\[11px\]/, 'no caption above an input')
-  assert.match(supplierField, /variant === 'compact'/)
-  assert.match(supplierField, /placeholder=\{label\}/, 'the compact supplier box reads "Supplier"')
+  assert.match(supplierField, /export function useSupplierSuggestions\(/, 'one names read and one resolver behind both boxes')
   assert.doesNotMatch(modal, /stock_receipt_free_goods/, 'Free is a line cell, never a shared detail')
 })
 
@@ -69,8 +69,8 @@ runTest('S3/S4: one Received date select, one Tag select, and the reason row wit
   assert.match(entry, /variant="select"/, 'the tag is one select')
   assert.match(tagRow, /variant === 'select'/)
   assert.match(tagRow, /'stock_tag_sellable'/)
-  assert.match(entry, /variant="compact"[\s\S]{0,400}onManage=\{onManageReasons\}/, 'the reason row keeps its manage button')
-  assert.match(reasonField, /Settings2/, 'manage is an icon')
+  assert.match(entry, /onClick=\{onManageReasons\}[\s\S]{0,500}<Settings2/, 'the reason row keeps its manage icon button')
+  assert.match(entry, /next\.slice\(0, REASON_MAX_LENGTH\)/, 'the reason box keeps the 500-character clamp')
   assert.match(modal, /StockReasonsManagerModal/, 'manage opens the stock reasons manager')
   assert.match(modal, /reloadReasons/, 'closing the manager reloads the options')
 })
@@ -124,6 +124,13 @@ runTest('Items and Review show the barcode under the name: two child rows of one
   assert.match(items, barcodeLine, 'Items: the barcode sits under the name')
   assert.match(review, barcodeLine, 'Review: the barcode sits under the name')
   assert.match(src('utils/stockSessionDraft.ts'), /barcode: String\(line\.product\.barcode \|\| ''\)/, 'the review carries the barcode')
+})
+
+runTest('build: the catalog closure does not grow -- the compact controls live in the lazy float, not components/shared', () => {
+  // components/shared is vite.config.ts's app-shared catch-all, which the public
+  // catalog loads. Measured 30 Sep: the compact variants added 2.5 KB there.
+  assert.doesNotMatch(reasonField, /variant\b|MessageSquare|SuggestionTextInput/, 'StockReasonField is back to its one shape')
+  assert.doesNotMatch(supplierField, /variant ===|variant\?:|Truck/, 'SupplierPickerField renders no compact shape')
 })
 
 runTest('build: an icon in a shared stock control never pulls the public catalog into app-shared', () => {

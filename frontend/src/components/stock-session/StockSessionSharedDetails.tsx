@@ -1,11 +1,12 @@
 import type { ComponentType, ReactNode } from 'react'
 import Award from 'lucide-react/dist/esm/icons/award.js'
+import Truck from 'lucide-react/dist/esm/icons/truck.js'
 import Store from 'lucide-react/dist/esm/icons/store.js'
 import CalendarDays from 'lucide-react/dist/esm/icons/calendar-days.js'
 import AppSelect from '../shared/AppSelect.tsx'
 import DateEntryInput from '../shared/DateEntryInput.tsx'
 import SuggestionTextInput from '../shared/SuggestionTextInput.tsx'
-import SupplierPickerField, { type SupplierChoice } from '../shared/SupplierPickerField.tsx'
+import { useSupplierSuggestions, type SupplierChoice } from '../shared/SupplierPickerField.tsx'
 
 type Translate = (key: string, fallbackEn?: string, fallbackKm?: string) => string
 type IconType = ComponentType<{ className?: string; 'aria-hidden'?: boolean | 'true' }>
@@ -62,6 +63,41 @@ export function InsetNumberField({ label, value, onChange, disabled = false, inv
   )
 }
 
+/**
+ * Supplier as one box: the Truck icon and the placeholder name it. The names
+ * read and the exact-name resolver are SupplierPickerField's own hook; the
+ * box lives here so components/shared (the catalog's app-shared) stays as it was.
+ */
+function CompactSupplierField({ value, onChange, tr, disabled, invalid }: {
+  value: SupplierChoice
+  onChange: (next: SupplierChoice) => void
+  tr: Translate
+  disabled?: boolean
+  invalid?: boolean
+}) {
+  const { options, loading, ensureLoaded, handleChange } = useSupplierSuggestions(value, onChange)
+  const label = tr('supplier', 'Supplier')
+  const shown = value.supplierName.trim()
+  return (
+    <IconField icon={Truck} title={shown ? `${label}: ${shown}` : label}>
+      <SuggestionTextInput
+        id="stock-session-supplier"
+        value={value.supplierName}
+        options={options}
+        limit={8}
+        disabled={disabled}
+        loading={loading}
+        loadingLabel={tr('loading', 'Loading...')}
+        onRequestOptions={ensureLoaded}
+        ariaLabel={label}
+        placeholder={label}
+        inputClassName={`input h-10 w-full min-w-0 pl-8 text-sm ${invalid ? INVALID_RING : ''}`}
+        onChange={handleChange}
+      />
+    </IconField>
+  )
+}
+
 type SharedDetailsProps = {
   tr: Translate
   packLookup: (key: string) => string | undefined
@@ -109,15 +145,7 @@ export default function StockSessionSharedDetails({
             onChange={(next) => onBrand(next)}
           />
         </IconField>
-        <SupplierPickerField
-          variant="compact"
-          value={supplier}
-          onChange={onSupplier}
-          tr={tr}
-          idPrefix="stock-session"
-          disabled={disabled}
-          invalid={supplierInvalid}
-        />
+        <CompactSupplierField value={supplier} onChange={onSupplier} tr={tr} disabled={disabled} invalid={supplierInvalid} />
         <IconField icon={Store} title={branchLabel}>
           <AppSelect
             value={branchId}
