@@ -127,6 +127,13 @@ runTest('360 px: a Payment line is the name, then its figures -- the name is nev
   assert.doesNotMatch(payment, /grid-cols-\[minmax\(0,1fr\)_auto_6rem_auto\]/, 'the squeezed four-column phone row is gone')
 })
 
+runTest('360 px: the total and the difference each stay whole -- a wrap falls between them, never inside a figure', () => {
+  // Browser pass 30 Sep: "Difference −" / "$0.4500" split across two lines beside the match and reset icons.
+  const payment = src('components/stock-session/StockSessionPaymentStep.tsx')
+  assert.match(payment, /<p className="[^"]*flex-wrap[^"]*">\s*<span className="whitespace-nowrap">\{tr\('items_total'/, 'the Items total is one unbreakable span in a wrapping row')
+  assert.match(payment, /<span className="whitespace-nowrap font-semibold text-red-600[^"]*">\{tr\('stock_difference'/, 'the difference is one unbreakable span')
+})
+
 if (failed > 0) {
   process.exitCode = 1
   console.error(`\n${failed} stock session payment test(s) failed`)
