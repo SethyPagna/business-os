@@ -269,7 +269,11 @@ function makeDb() {
       async batch(items) {
         sql.exec('BEGIN')
         try {
-          const out = items.map((item) => { const result = sql.prepare(item.text).run(...item.params); return { success: true, meta: { changes: result.changes } } })
+          const out = items.map((item) => {
+            if (/^SELECT\b/i.test(item.text.trim())) return { success: true, results: sql.prepare(item.text).all(...item.params) }
+            const result = sql.prepare(item.text).run(...item.params)
+            return { success: true, meta: { changes: result.changes } }
+          })
           sql.exec('COMMIT')
           return out
         } catch (error) {

@@ -44,7 +44,7 @@ const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 app.use('*', requireAuth)
 app.use('*', acquisitionCostResponses)
 
-type ActionHistoryRow = Record<string, unknown> & {
+export type ActionHistoryRow = Record<string, unknown> & {
   id: number
   scope: string
   entity: string | null
@@ -211,6 +211,28 @@ app.get('/', async (c) => {
     return c.json({ success: true, items: await Promise.all(rows.map((row) => mapRow(row, user, c.env))) })
   } catch (error) {
     return c.json({ success: false, error: (error as Error)?.message || 'Failed to load action history' }, 500)
+  }
+})
+
+app.get('/movements/:id/revert-preview', async (c) => {
+  const user = c.get('user')
+  if (getActionTier(user, 'inventory', 'view') === 'none' || getActionTier(user, 'inventory', 'adjust') !== 'full') {
+    return c.json({ success: false, error: 'Reverting a stock movement requires Full Access to Inventory.' }, 403)
+  }
+  const id = Number(c.req.param('id'))
+  if (!Number.isSafeInteger(id) || id <= 0) return c.json({ success: false, error: 'Invalid movement id.' }, 400)
+  const { StockMovementReplayError, stockMovementRevertPreview } = await import('../lib/stockMovementReplay')
+  try {
+    const { revert, history } = await stockMovementRevertPreview(getDb(c.env), id)
+    if (history && (!canOperateHistoryRow(user, history)
+      || !canUseNamedAppliers(user, [parseJson(history.undo_payload), parseJson(history.redo_payload)]))) {
+      return c.json({ success: false, error: 'You do not have permission to perform this action.' }, 403)
+    }
+    return c.json({ success: true, revert })
+  } catch (error) {
+    const status = error instanceof StockMovementReplayError ? error.status : 500
+    return c.json({ success: false, error: error instanceof Error ? error.message : 'Unable to preview this stock action.',
+      ...(status === 409 ? { code: replayRefusalCode(error) } : {}) }, status)
   }
 })
 
