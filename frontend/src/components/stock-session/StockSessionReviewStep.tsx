@@ -50,6 +50,7 @@ export default function StockSessionReviewStep({ tr, usdSymbol, canViewCosts, su
                 {review.name}
                 {review.mode === 'add' && review.freeQuantity > 0 ? <span className="ml-1.5 text-xs font-normal text-emerald-700 dark:text-emerald-300">{tr('stock_free_suffix', '{n} free').replace('{n}', String(review.freeQuantity))}</span> : null}
               </div>
+              {review.barcode ? <span className="block break-all dense-id text-[10px] text-gray-400">{review.barcode}</span> : null}
               <div className="flex flex-wrap gap-x-2 gap-y-0.5 text-xs text-gray-600 dark:text-gray-300">
                 {review.mode === 'set' ? <>{lot}{lot ? <span aria-hidden="true">·</span> : null}{stock}</> : null}
                 {review.mode === 'remove' ? <>{stock}{lot ? <><span aria-hidden="true">·</span>{lot}</> : null}<span aria-hidden="true">·</span><span>{review.tag || tr('stock_remove_entirely', 'Remove entirely')}</span></> : null}

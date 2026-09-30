@@ -646,6 +646,7 @@ export function freeRowText(line: Pick<StockSessionLine, 'freeQuantity' | 'unitC
 export type StockLineReview = {
   key: string
   name: string
+  barcode: string
   mode: StockMode
   stockBefore: number
   stockAfter: number
@@ -676,7 +677,7 @@ export function catalogCostOf(product: StockSessionProduct): number | null {
 export function reviewStockLine(line: StockSessionLine, branchId: string): StockLineReview {
   const stockBefore = adjustBranchQuantity(line.product.branch_stock, branchId, line.product.stock_quantity)
   const base = {
-    key: line.key, name: line.productName, mode: line.mode, stockBefore, lotLabel: line.batchLabel,
+    key: line.key, name: line.productName, barcode: String(line.product.barcode || ''), mode: line.mode, stockBefore, lotLabel: line.batchLabel,
     tag: line.conditionTag, reason: line.reason, freeQuantity: line.freeQuantity,
     costBefore: null, costAfter: null, priceBefore: null, priceAfter: null,
   }

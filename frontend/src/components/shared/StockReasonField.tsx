@@ -1,5 +1,7 @@
 import { useMemo, type ReactNode } from 'react'
-import MessageSquare from 'lucide-react/dist/esm/icons/message-square.js'
+// Not message-square: the public catalog imports that one, and sharing it put
+// app-shared -> catalog-public into the build (a chunk cycle).
+import MessageSquareText from 'lucide-react/dist/esm/icons/message-square-text.js'
 import Settings2 from 'lucide-react/dist/esm/icons/settings-2.js'
 import SuggestionTextInput from './SuggestionTextInput.tsx'
 import type { SavedStockReason } from '../../utils/useSavedStockReasons.ts'
@@ -65,7 +67,7 @@ export default function StockReasonField({
         } : undefined}
       >
         <div className="relative min-w-0 flex-1" title={value.trim() ? `${boxLabel}: ${value.trim()}` : boxLabel}>
-          <MessageSquare className="pointer-events-none absolute left-2.5 top-1/2 z-10 h-4 w-4 -translate-y-1/2 text-gray-400" aria-hidden="true" />
+          <MessageSquareText className="pointer-events-none absolute left-2.5 top-1/2 z-10 h-4 w-4 -translate-y-1/2 text-gray-400" aria-hidden="true" />
           <SuggestionTextInput
             id={id || 'stock-reason'}
             name={name}

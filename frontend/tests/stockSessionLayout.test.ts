@@ -2,7 +2,7 @@
 // the mode is the title, the shared details never change shape, labels live
 // inside the controls, and the buttons carry the owner's words.
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 
 let failed = 0
 function runTest(name: string, fn: () => void): void {
@@ -116,6 +116,32 @@ runTest('S13: "Items" is the list; one compact row per line; no Existing badge',
   assert.doesNotMatch(items, /stock_session_existing_product/)
   assert.match(items, /aria-label=\{tr\('remove', 'Remove'\)\}/, 'trash is icon-only with a name')
   assert.doesNotMatch(items, /Pencil/, 'tapping the row edits; no separate pencil')
+})
+
+runTest('Items and Review show the barcode under the name: two child rows of one name differ only by it', () => {
+  // The old queue did this (tests/stockInSessionProductNames); the rewrite lost it.
+  const barcodeLine = /\{(line\.product|review)\.barcode \? <span className="block break-all dense-id text-\[10px\] text-gray-400">\{(line\.product|review)\.barcode\}<\/span> : null\}/
+  assert.match(items, barcodeLine, 'Items: the barcode sits under the name')
+  assert.match(review, barcodeLine, 'Review: the barcode sits under the name')
+  assert.match(src('utils/stockSessionDraft.ts'), /barcode: String\(line\.product\.barcode \|\| ''\)/, 'the review carries the barcode')
+})
+
+runTest('build: an icon in a shared stock control never pulls the public catalog into app-shared', () => {
+  // 30 Sep build: StockReasonField's MessageSquare was also PublicCatalogPage's,
+  // Rollup put it in catalog-public, and app-shared -> catalog-public closed a cycle.
+  const vite = readFileSync(new URL('../vite.config.ts', import.meta.url), 'utf8')
+  const pinned = new Set([...vite.matchAll(/const (?:routeSharedIconNames|appShellIconNames) = new Set\(\[([^\]]*)\]\)/g)]
+    .flatMap((match) => [...match[1].matchAll(/'([^']+)'/g)].map((name) => name[1])))
+  assert.ok(pinned.has('truck') && pinned.has('settings-2'), 'read the shared-ui icon sets from vite.config.ts')
+  const catalogDir = new URL('../src/components/catalog/', import.meta.url)
+  const catalogIcons = new Set(readdirSync(catalogDir, { recursive: true }).map(String).filter((file) => /\.tsx?$/.test(file))
+    .flatMap((file) => [...readFileSync(new URL(file.replace(/\\/g, '/'), catalogDir), 'utf8').matchAll(/lucide-react\/dist\/esm\/icons\/([a-z0-9-]+)\.js/g)].map((match) => match[1])))
+  assert.ok(catalogIcons.size > 0, 'read the catalog icon imports')
+  for (const [name, text] of [['StockReasonField', reasonField], ['SupplierPickerField', supplierField], ['StockConditionTagRow', tagRow]] as const) {
+    for (const [, icon] of text.matchAll(/lucide-react\/dist\/esm\/icons\/([a-z0-9-]+)\.js/g)) {
+      assert.ok(pinned.has(icon) || !catalogIcons.has(icon), `${name} imports "${icon}", which the public catalog also imports and vite.config.ts does not pin to shared-ui`)
+    }
+  }
 })
 
 runTest('no helper paragraphs or info icons inside the float', () => {
