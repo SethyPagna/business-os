@@ -58,8 +58,13 @@ const deniedReview = renderToStaticMarkup(React.createElement(ReviewScreen, {
 assert.ok(deniedReview.includes('Cost view permission is required'))
 assert.ok(!deniedReview.includes('Importing'), 'edit permission alone cannot mount the financial review body')
 const duplicates = read('../src/components/products/ProductDuplicatesTab.tsx')
-assert.match(duplicates, /omitUnauthorizedCatalogCosts\(\(canViewCosts \|\| costEdited\)/)
-assert.match(duplicates, /disabled=\{field === 'cost' && !canEditCosts\}/)
+// The Resolve grid replaced the card's edit modal: the cost row exists only for a
+// cost viewer, and a pick or a typed cost counts only from a cost editor.
+const resolveAdapter = read('../src/components/products/productResolveAdapter.ts')
+assert.match(duplicates, /createProductResolveAdapter\(\{[^}]*canViewCosts,\s*canEditCosts,/)
+assert.match(resolveAdapter, /if \(canViewCosts\) \{[^]*?key: 'cost'/)
+assert.match(resolveAdapter, /if \(canEdit && choice && 'source' in choice/)
+assert.match(resolveAdapter, /: \{ locked: tr\(t, 'resolve_cost_locked'/)
 const review = read('../src/components/products/import/ProductServerImportReviewScreen.tsx')
 assert.match(review, /if \(!hasPermission\('product_cost_view'\)\) return/)
 assert.match(review, /const saveDecision[^]*?if \(!canEditCosts\) return/)

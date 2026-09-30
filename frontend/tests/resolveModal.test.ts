@@ -5,7 +5,7 @@
 // What it pins, each against the failure it exists for:
 //   - loading shows a busy skeleton; a failed read says so with Retry;
 //   - the header X is the one close, with Minimize beside it; picks make the
-//     modal dirty, so X asks Discard / Back and Back keeps everything;
+//     modal dirty, so X asks Discard changes / Back and Back keeps everything;
 //   - an unanswered required row disables Resolve and says why, wired through
 //     aria-describedby -- never an error after the click; a Remove without a
 //     reason does the same, Remove reads the records again and typing the
@@ -20,6 +20,9 @@
 //   - applying locks the X, reports progress, stops at a partial result or a
 //     dropped connection with Continue re-sending the same frozen token, and
 //     done shows the server's after values with the undo hint and no footer;
+//   - a definite refusal says "Nothing was changed." with the reason, offers
+//     no Continue and leaves the grid editable (owner, 30 Sep 2026: "request
+//     not finished" was every refusal dressed as an interrupted run);
 //   - offline disables Resolve with a notice and keeps the choices;
 //   - Minimize hands the choices to the host and they come back on reopen;
 //   - Khmer: labels from the pack, Khmer line boxes; phone and desktop: the
@@ -52,7 +55,7 @@ const fixtureSource = String.raw`
   document.body.className = lang === 'km' ? 'lang-km' : ''
   if (params.get('theme') === 'dark') document.documentElement.classList.add('dark')
 
-  const ctl = window.__ctl = { holdLoad: params.has('holdLoad'), failLoad: Number(params.get('failLoad') || 0), staleReview: 0, failReview: 0, noChanges: false, requiredChanges: false, holdApply: false, failApply: 0 }
+  const ctl = window.__ctl = { holdLoad: params.has('holdLoad'), failLoad: Number(params.get('failLoad') || 0), staleReview: 0, failReview: 0, noChanges: false, requiredChanges: false, holdApply: false, failApply: 0, refuseApply: 0 }
   const log = window.__log = { loads: [], reviews: 0, applies: [], applied: [], minimized: null, closed: 0 }
   const waiters = { load: [], apply: [] }
   const gate = (name) => new Promise((resolve) => waiters[name].push(resolve))
@@ -153,6 +156,7 @@ const fixtureSource = String.raw`
     },
     async apply(token, signal, onProgress) {
       log.applies.push(token.done)
+      if (ctl.refuseApply > 0) { ctl.refuseApply -= 1; await pause(20); throw Object.assign(new Error('A price is not a valid number'), { definite: true }) }
       onProgress(token.done + 1, token.total)
       if (ctl.holdApply) await gate('apply'); else await pause(20)
       if (signal.aborted) throw aborted()
@@ -164,6 +168,8 @@ const fixtureSource = String.raw`
       }
     },
     isStale: (error) => Boolean(error && error.stale),
+    isDefinite: (error) => Boolean(error && error.definite),
+    describe: (error) => (error && error.message) || '',
   }
 
   // Page-side lookups the test reads through.
@@ -173,7 +179,7 @@ const fixtureSource = String.raw`
     dialogs: () => [...document.querySelectorAll('[role=dialog]')],
     main: () => ui.dialogs().find((node) => text(node.querySelector('h2')) === 'Resolve duplicates') || null,
     confirm: () => ui.dialogs().find((node) => text(node.querySelector('h2')) === pack.resolve_confirm_title) || null,
-    prompt: () => ui.dialogs().find((node) => [...node.querySelectorAll('button')].some((button) => text(button) === pack.discard)) || null,
+    prompt: () => ui.dialogs().find((node) => [...node.querySelectorAll('button')].some((button) => text(button) === pack.discard_changes)) || null,
     primary: () => { const all = ui.main() ? [...ui.main().querySelectorAll('.btn-primary')] : []; return all[all.length - 1] || null },
     closeX: () => (ui.main() ? ui.main().querySelector('button[aria-label="' + pack.close + '"]') : null),
     minimize: () => (ui.main() ? ui.main().querySelector('button[aria-label="' + pack.minimize + '"]') : null),
@@ -298,8 +304,8 @@ await run('PASS resolve modal: loading, one close, dirty guard, blockers, remove
   await until('discard prompt', '__ui.prompt()')
   assert.deepEqual(
     await evaluate<string[]>(`[...__ui.prompt().querySelectorAll('button')].map((button) => button.getAttribute('aria-label') || __ui.text(button))`),
-    ['Minimize', 'Discard', 'Back'],
-    'X with choices made asks Discard / Back (and can park the draft instead)',
+    ['Minimize', 'Discard changes', 'Back'],
+    'X with choices made asks Discard changes / Back (and can park the draft instead)',
   )
   await click(`__ui.button(__ui.prompt(), 'Back')`)
   await until('prompt dismissed', '!__ui.prompt()')
@@ -310,9 +316,7 @@ await run('PASS resolve modal: loading, one close, dirty guard, blockers, remove
   await click(cell('brand|p2'))
   await until('brand pick', `${cell('brand|p2')}.getAttribute('aria-selected') === 'true'`)
   const loadsBeforeRemove = await loadsSoFar()
-  await click(`document.querySelector('[aria-label="What to do with FIT ME"]')`)
-  await until('disposition menu', 'document.querySelector("[data-app-select-option=remove]")')
-  await click('document.querySelector("[data-app-select-option=remove]")')
+  await click(`document.querySelector('[data-rg-remove="p3"]')`)
   await until('remove re-reads the records', `__log.loads.length === ${loadsBeforeRemove + 1} && ${gridReady}`)
   assert.deepEqual(await evaluate<any>('__log.loads.at(-1).columns.p3'), { disposition: 'remove' }, 'the re-read is handed the Remove it has to preview')
   const reason = `document.querySelector('[aria-label="Reason to remove FIT ME"]')`
@@ -377,6 +381,22 @@ await run('PASS resolve modal: loading, one close, dirty guard, blockers, remove
   await until('back to the grid', `!__ui.confirm() && !__ui.primary().disabled`)
   assert.equal(await selected('brand|p2'), 'true', 'Back from the confirm keeps the choices')
 
+  // ------------------------- a definite refusal: nothing changed, no Continue
+  await click('__ui.primary()')
+  await until('confirm for the refusal', '__ui.confirm()')
+  await evaluate('__ctl.refuseApply = 1')
+  await click(`__ui.button(__ui.confirm(), 'Resolve')`)
+  await until('refused', `__ui.alerts().some((text) => text === 'Nothing was changed. A price is not a valid number')`)
+  const refused = await evaluate<any>(`(() => ({
+    confirm: Boolean(__ui.confirm()),
+    continue: Boolean(__ui.button(__ui.main(), 'Continue')),
+    inert: document.querySelector('.resolve-grid-scroll').parentElement.inert,
+    kind: __ui.main().querySelector('[data-resolve-failure]').getAttribute('data-resolve-failure'),
+  }))()`)
+  assert.deepEqual(refused, { confirm: false, continue: false, inert: false, kind: 'refused' }, 'a definite refusal returns to the editable grid without Continue')
+  assert.deepEqual(await footer(), { label: 'Resolve', disabled: false, described: [] }, 'Resolve is offered again after a definite refusal')
+  assert.equal(await evaluate<boolean>(`__ui.alerts().some((text) => text.startsWith(__pack.resolve_apply_unknown))`), false, 'a definite refusal is not an unknown result')
+
   // -------------------------------------------- apply: progress and partial
   await click('__ui.primary()')
   await until('confirm again', '__ui.confirm()')
@@ -403,7 +423,8 @@ await run('PASS resolve modal: loading, one close, dirty guard, blockers, remove
   // ----------------------------------------- a dropped write keeps Continue
   await evaluate('__ctl.failApply = 1')
   await click('__ui.primary()')
-  await until('apply failure', `__ui.alerts().some((text) => text.startsWith('Stopped before finishing. Continue picks up where it stopped.'))`)
+  await until('apply failure', `__ui.alerts().some((text) => text.startsWith('The result is unknown. Continue checks what was saved and finishes the rest.'))`)
+  assert.equal(await evaluate<string>(`__ui.main().querySelector('[data-resolve-failure]').getAttribute('data-resolve-failure')`), 'apply')
   assert.equal(await evaluate<boolean>(`__ui.alerts().some((text) => text.includes('Connection dropped'))`), true, 'the failure carries the reason')
   assert.deepEqual(await footer(), { label: 'Continue', disabled: false, described: [] }, 'a dropped write keeps Continue')
 
@@ -415,7 +436,7 @@ await run('PASS resolve modal: loading, one close, dirty guard, blockers, remove
     return {
       after: [...main.querySelectorAll('dl > div')].map((row) => [__ui.text(row.querySelector('dt')), __ui.text(row.querySelector('dd'))]),
       notes: [...main.querySelectorAll('.modal-scroll p')].map(__ui.text).includes('Removing FIT ME waits for approval'),
-      undoHint: Boolean(main.querySelector('[aria-label="About undo"]')),
+      infoButtons: main.querySelectorAll('svg.lucide-info').length,
       footer: main.querySelectorAll('.btn-primary').length,
       grid: Boolean(main.querySelector('.resolve-grid')),
       minimize: Boolean(__ui.minimize()),
@@ -423,9 +444,9 @@ await run('PASS resolve modal: loading, one close, dirty guard, blockers, remove
   })()`)
   assert.deepEqual(done, {
     after: [['Name', 'Fit Me Matte 30ml'], ['Brand', 'M·A·C'], ['Barcode', '—Empty']],
-    notes: true, undoHint: true, footer: 0, grid: false, minimize: false,
+    notes: true, infoButtons: 0, footer: 0, grid: false, minimize: false,
   }, 'done shows the server\'s after values and the undo hint, with no footer and nothing to park')
-  assert.deepEqual(await evaluate<number[]>('__log.applies'), [0, 2, 2], 'Continue re-sends the same frozen token after a dropped write')
+  assert.deepEqual(await evaluate<number[]>('__log.applies'), [0, 0, 2, 2], 'the refused token is dropped; Continue re-sends the same frozen token after a dropped write')
   assert.deepEqual(await evaluate<number[][]>('__log.applied'), [[2, 3], [3, 3]])
   assert.deepEqual(await closeLike(), ['Close'], 'done still has one close')
   await click('__ui.closeX()')
@@ -456,7 +477,7 @@ await run('PASS resolve modal: loading, one close, dirty guard, blockers, remove
   assert.deepEqual(await footer(), { label: 'Resolve', disabled: false, described: [] })
   await click('__ui.closeX()')
   await until('restored flow is dirty', '__ui.prompt()')
-  await click(`__ui.button(__ui.prompt(), 'Discard')`)
+  await click(`__ui.button(__ui.prompt(), 'Discard changes')`)
   await until('discarded', `document.getElementById('closed') && __log.closed === 1`)
 
   // ------------------------------------------------ review failure (not stale)

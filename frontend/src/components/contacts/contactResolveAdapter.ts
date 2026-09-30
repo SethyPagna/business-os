@@ -1,10 +1,10 @@
 import { createClientRequestId } from '../../api/requestIds.ts'
 import { fmtDateTime24 } from '../../utils/formatters.ts'
 import { formatPhoneInputValue } from '../../utils/phoneInput.ts'
+import { isDefiniteRefusal } from '../shared/resolveRefusal.ts'
 import type { ResolveAdapter, ResolveAfterItem, ResolveChange, ResolveDraft } from '../shared/ResolveModal.tsx'
 import type { ResolveCell, ResolveChoice, ResolveColumn, ResolveOption, ResolveRow } from '../shared/ResolveGrid.tsx'
 import {
-  chooseBulkMergeKeeper,
   CONTACT_MERGE_MAX_RECORDS,
   mergeContacts,
   readContactRecords,
@@ -24,10 +24,14 @@ import { buildContactOptionSummary, parseStoredContactOptions } from './contactO
 // field's value explicitly, so what the confirm shows is what the server
 // writes. Contact merges have no undo (council D9).
 //
+// The surviving record is implicit (owner, 30 Sep 2026: "no need product
+// kept"): the one with the most linked history (sales + returns, as the
+// duplicate list counted them), the lowest id on a tie. It never changes when
+// a field is picked, so picking never re-reads the records.
+//
 // Rows (plan-resolver-grid.md §2B):
-//   Record kept  chooseBulkMergeKeeper, the same rule Merge selected uses.
-//   Each field   the kept record's value when it has one, else the first
-//                record's that does (the server's own default).
+//   Each field   the surviving record's value when it has one, else the
+//                first record's that does (the server's own default).
 //   Membership   D6: one number stays, every other one is added to Notes.
 //                With two or more numbers the row is required; it starts
 //                answered with the kept record's number (else the first
@@ -186,17 +190,21 @@ const recordOf = (ctx: Context, id: number): ContactRow | undefined => ctx.data.
 const valueOf = (ctx: Context, id: number, column: string): unknown => recordOf(ctx, id)?.[column]
 const sourceOf = (choice: ResolveChoice | undefined): number => (choice && 'source' in choice ? Number(choice.source) : Number.NaN)
 
-function keeperEntry(data: ContactResolveData, id: number): ContactDuplicateClusterEntry {
-  const row = data.records.get(id)
-  return { id, name: row?.name == null ? null : String(row.name), phone: row?.phone == null ? null : String(row.phone), membershipNumber: membershipOf(row) }
+/** The surviving record: most linked history, then the lowest id. */
+export function contactSurvivor(ids: readonly number[], history: (id: number) => ContactDuplicateEntryHistory | null | undefined): number | null {
+  let best: number | null = null
+  let bestLinks = -1
+  for (const id of [...ids].sort((a, b) => a - b)) {
+    const entry = history(id)
+    const links = (entry?.salesCount ?? 0) + (entry?.returnsCount ?? 0)
+    if (links > bestLinks) { best = id; bestLinks = links }
+  }
+  return best
 }
 
 function contextOf(data: ContactResolveData, draft: ResolveDraft): Context {
   const included = data.ids.filter((id) => data.records.has(id) && draft.columns[String(id)]?.disposition !== 'separate')
-  const picked = sourceOf(draft.selection.record)
-  const keeperId = included.includes(picked)
-    ? picked
-    : chooseBulkMergeKeeper(included.map((id) => keeperEntry(data, id)))?.id ?? included[0] ?? null
+  const keeperId = contactSurvivor(included, (id) => data.listed.get(id)?.history)
   return { data, draft, included, keeperId }
 }
 
@@ -279,16 +287,7 @@ function buildPlan(data: ContactResolveData, draft: ResolveDraft, t: Translate):
     included.every((id) => (row[String(id)]?.text ?? '') === finalText)
   )
 
-  const rows: ResolveRow[] = [{
-    key: 'record',
-    label: tr(t, 'resolve_record_kept', 'Record kept'),
-    hint: tr(t, 'resolve_record_kept_hint', 'This record stays. The other records\' history moves onto it, then they are deleted.'),
-    kind: 'choice',
-    cells: cells((id) => `#${id}`),
-    final: { text: keeperId === null ? '' : `#${keeperId}` },
-    ...(keeperId === null ? {} : { choice: { source: String(keeperId) } }),
-    identical: false,
-  }]
+  const rows: ResolveRow[] = []
 
   const fieldRow = (spec: FieldSpec): ResolveRow => {
     const pick = fieldPick(ctx, spec)
@@ -323,7 +322,6 @@ function buildPlan(data: ContactResolveData, draft: ResolveDraft, t: Translate):
       rows.push({
         key: 'membership',
         label: tr(t, 'membership_number', 'Membership number'),
-        hint: tr(t, 'resolve_membership_hint', 'The chosen number stays. The other numbers are added to Notes.'),
         kind: membership.required ? 'required' : 'computed',
         cells: row,
         final: { text: membership.final },
@@ -341,7 +339,6 @@ function buildPlan(data: ContactResolveData, draft: ResolveDraft, t: Translate):
       rows.push({
         key: 'storefront',
         label: tr(t, 'resolve_storefront_account', 'Storefront account'),
-        hint: tr(t, 'resolve_storefront_hint', 'The chosen account stays linked to the kept record. The others are unlinked but can still sign in.'),
         kind: several ? 'choice' : 'computed',
         cells: row,
         final: { text: finalText },
@@ -362,7 +359,6 @@ function buildPlan(data: ContactResolveData, draft: ResolveDraft, t: Translate):
   rows.push({
     key: 'history',
     label: tr(t, 'history', 'History'),
-    hint: tr(t, 'resolve_history_hint', 'Everything linked to the merged records moves onto the kept record.'),
     kind: 'computed',
     cells: historyRow,
     final: { text: historyText },
@@ -383,8 +379,9 @@ export function createContactResolveAdapter(options: ContactResolveOptions): Res
 
   const afterItems = (outcome: ContactMergeOutcome, token: ContactResolveToken): ResolveAfterItem[] => {
     const keeper = outcome.keeper ?? {}
-    const items: ResolveAfterItem[] = [{ label: tr(t, 'resolve_record_kept', 'Record kept'), value: recordLabel(keeper.name, token.request.keepId) }]
+    const items: ResolveAfterItem[] = [{ label: tr(t, 'name', 'Name'), value: String(keeper.name ?? '').trim() }]
     for (const { key, label } of token.changed) {
+      if (key === 'name') continue
       if (key === 'membership') items.push({ label, value: membershipOf(keeper) ?? '' })
       else if (FIELDS[key]) items.push({ label, value: fieldText(FIELDS[key], keeper[key], table, t) })
     }
@@ -412,7 +409,7 @@ export function createContactResolveAdapter(options: ContactResolveOptions): Res
     initialSelection(data) {
       const present = data.ids.filter((id) => data.records.has(id))
       if (present.length <= CONTACT_MERGE_MAX_RECORDS) return { selection: {}, columns: {} }
-      const keeperId = chooseBulkMergeKeeper(present.map((id) => keeperEntry(data, id)))?.id ?? present[0]
+      const keeperId = contactSurvivor(present, (id) => data.listed.get(id)?.history) ?? present[0]
       const first = new Set([keeperId, ...present.filter((id) => id !== keeperId).slice(0, CONTACT_MERGE_MAX_RECORDS - 1)])
       return {
         selection: {},
@@ -421,7 +418,6 @@ export function createContactResolveAdapter(options: ContactResolveOptions): Res
     },
 
     columns(data, draft): ResolveColumn[] {
-      const { keeperId } = contextOf(data, draft)
       return data.ids.map((id) => {
         const row = data.records.get(id)
         const title = String(row?.name ?? data.listed.get(id)?.name ?? '').trim() || `#${id}`
@@ -438,7 +434,7 @@ export function createContactResolveAdapter(options: ContactResolveOptions): Res
         return {
           id: String(id),
           title,
-          subtitle: id === keeperId ? `#${id} · ${tr(t, 'resolve_record_kept', 'Record kept')}` : `#${id}`,
+          subtitle: `#${id}`,
           disposition: draft.columns[String(id)]?.disposition === 'separate' ? 'separate' : 'include',
           dispositions: ['include', 'separate'],
         }
@@ -484,7 +480,7 @@ export function createContactResolveAdapter(options: ContactResolveOptions): Res
       const changes: ResolveChange[] = []
       const changed: ContactResolveToken['changed'] = []
       for (const row of rows) {
-        if (row.key === 'record' || row.key === 'history') continue
+        if (row.key === 'history') continue
         const before = row.cells[String(keepId)]?.text ?? ''
         if (before === row.final.text) continue
         changes.push({ label: row.label, before, after: row.final.text })
@@ -514,7 +510,7 @@ export function createContactResolveAdapter(options: ContactResolveOptions): Res
     },
 
     async apply(token, _signal, onProgress) {
-      if (!options.canMerge()) throw new Error(tr(t, 'access_denied', 'Access Denied'))
+      if (!options.canMerge()) throw Object.assign(new Error(tr(t, 'access_denied', 'Access Denied')), { code: 'access_denied', outcome: 'not_applied' })
       const total = token.request.mergeIds.length
       const outcome = await mergeContacts(table, token.request, (step) => {
         progress.set(token, step)
@@ -529,6 +525,14 @@ export function createContactResolveAdapter(options: ContactResolveOptions): Res
       const code = (error as { code?: unknown } | null)?.code
       if (code === 'contact_merge_not_duplicates') { clusterInvalidated = true; return true }
       return typeof code === 'string' && STALE_CODES.has(code)
+    },
+
+    isDefinite(error) {
+      return isDefiniteRefusal(error)
+    },
+
+    describe(error) {
+      return error instanceof Error ? error.message : typeof error === 'string' ? error : ''
     },
   }
 }

@@ -3,14 +3,15 @@ import Check from 'lucide-react/dist/esm/icons/check.js'
 import ChevronLeft from 'lucide-react/dist/esm/icons/chevron-left.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
 import Lock from 'lucide-react/dist/esm/icons/lock.js'
+import Merge from 'lucide-react/dist/esm/icons/merge.js'
 import Pencil from 'lucide-react/dist/esm/icons/pencil.js'
+import Split from 'lucide-react/dist/esm/icons/split.js'
+import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, FocusEvent as ReactFocusEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { helpPopoverGeometry } from '../../utils/helpPopoverGeometry.ts'
-import AppSelect from './AppSelect.tsx'
 import { useCopyFloat, type CopyFloatProps } from './CopyFloat.tsx'
-import InfoHint from './InfoHint.tsx'
 import ProductNameRail from './ProductNameRail.tsx'
 import SuggestionTextInput from './SuggestionTextInput.tsx'
 import { COPY_SELECTOR, deferCopySurfaceAction } from './textAffordances.ts'
@@ -34,7 +35,11 @@ import { COPY_SELECTOR, deferCopySurfaceAction } from './textAffordances.ts'
 // and the grid never has to know the difference.
 //
 // Keep separate / Merge in / Remove is a per-column disposition INSIDE the
-// grid (council D4): there is no second button beside Resolve.
+// grid (council D4): there is no second button beside Resolve. Each column
+// header carries it as one icon toggle beside the record's #id.
+//
+// No info buttons (owner, 30 Sep 2026: "no need the info buttons for each
+// rows"): the one line above the grid says what to do, beside the pager.
 
 export type ResolveDisposition = 'include' | 'separate' | 'remove'
 export type ResolveChoice = { source: string } | { option: string } | { custom: string }
@@ -67,8 +72,6 @@ export type ResolveCell = {
 export type ResolveRow = {
   key: string
   label: string
-  /** Explanation behind an InfoHint on the label. */
-  hint?: string
   /** choice: pick a record's value; computed: the adapter works Final out;
    *  required: like choice, but Resolve waits until it has an answer. */
   kind: 'choice' | 'computed' | 'required'
@@ -451,6 +454,7 @@ export default function ResolveGrid({ columns, rows, onSelect, onDisposition, ch
                 tabIndex={key === currentKey ? 0 : -1}
                 aria-pressed={pressed}
                 aria-disabled={disabled || undefined}
+                title={option.disabledReason || undefined}
                 className={`inline-flex min-h-8 max-w-full items-center gap-1 rounded-full border px-2 py-0.5 text-left text-xs font-medium ${pressed
                   ? 'border-emerald-500 bg-emerald-50 text-emerald-800 dark:border-emerald-400 dark:bg-emerald-900/40 dark:text-emerald-100'
                   : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700'} ${disabled ? 'cursor-not-allowed opacity-50' : ''}`}
@@ -458,8 +462,8 @@ export default function ResolveGrid({ columns, rows, onSelect, onDisposition, ch
               >
                 {pressed ? <Check aria-hidden="true" className="h-3 w-3 shrink-0" /> : null}
                 <span className="min-w-0">{option.label}</span>
+                {option.disabledReason ? <span className="sr-only">{option.disabledReason}</span> : null}
               </button>
-              {option.disabledReason ? <InfoHint text={option.disabledReason} label={option.label} align="auto" /> : null}
             </span>
           )
         })}
@@ -559,16 +563,63 @@ export default function ResolveGrid({ columns, rows, onSelect, onDisposition, ch
 
   const renderColumnHeader = (column: ResolveColumn, index: number) => {
     const name = column.title
+    const included = column.disposition === 'include'
+    const canSeparate = column.dispositions.includes('include') && column.dispositions.includes('separate')
+    const canRemove = column.dispositions.includes('remove')
+    const stateLabel = included ? tr('resolve_merge_in_toggle', 'Merge in') : tr('resolve_keep_separate_toggle', 'Keep separate')
+    const toggleClass = 'flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border disabled:opacity-40'
     return (
       <th key={column.id} scope="col" role="columnheader" aria-colindex={index + 2} className="rg-cell font-normal">
-        <div className={column.disposition === 'include' ? undefined : 'opacity-60'}>
+        <div className={included ? undefined : 'opacity-60'}>
           {/* The record's name copies like everywhere else (double-click /
               long-press); the marker only, so the column header's accessible
               name stays the name itself. */}
           <div className="min-w-0" {...copyMarker(copyProps(name))}>
             <ProductNameRail name={name} className="font-semibold text-gray-900 dark:text-gray-100" />
           </div>
-          {column.subtitle ? <span className="block text-[11px] text-gray-500 dark:text-gray-400">{column.subtitle}</span> : null}
+        </div>
+        <div className="mt-0.5 flex items-center justify-between gap-1">
+          {column.subtitle ? <span className="min-w-0 text-[11px] text-gray-500 dark:text-gray-400">{column.subtitle}</span> : <span />}
+          {!column.disabledReason && (canSeparate || canRemove) ? (
+            <span className="flex shrink-0 items-center gap-1">
+              {canSeparate && column.disposition !== 'remove' ? (
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={included}
+                  aria-label={`${tr('resolve_merge_in_toggle', 'Merge in')} · ${name}`}
+                  title={stateLabel}
+                  data-rg-disposition={column.id}
+                  disabled={busy}
+                  className={`${toggleClass} ${included
+                    ? 'border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-200'
+                    : 'border-gray-300 bg-white text-gray-600 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300'}`}
+                  onClick={() => onDisposition(column.id, included ? 'separate' : 'include')}
+                >
+                  {included ? <Merge aria-hidden="true" className="h-4 w-4" /> : <Split aria-hidden="true" className="h-4 w-4" />}
+                </button>
+              ) : null}
+              {canRemove ? (
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={column.disposition === 'remove'}
+                  aria-label={`${tr('remove', 'Remove')} · ${name}`}
+                  title={tr('remove', 'Remove')}
+                  data-rg-remove={column.id}
+                  disabled={busy}
+                  className={`${toggleClass} ${column.disposition === 'remove'
+                    ? 'border-red-300 bg-red-50 text-red-700 dark:border-red-700 dark:bg-red-900/30 dark:text-red-200'
+                    : 'border-gray-300 bg-white text-gray-600 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300'}`}
+                  onClick={() => (column.disposition === 'remove'
+                    ? onDisposition(column.id, 'include')
+                    : onDisposition(column.id, 'remove', column.removeReason))}
+                >
+                  <Trash2 aria-hidden="true" className="h-4 w-4" />
+                </button>
+              ) : null}
+            </span>
+          ) : null}
         </div>
         {column.warning ? (
           <span className="mt-1 flex items-start gap-1 text-[11px] text-amber-700 dark:text-amber-300">
@@ -578,22 +629,6 @@ export default function ResolveGrid({ columns, rows, onSelect, onDisposition, ch
         ) : null}
         {column.disabledReason ? (
           <span className="mt-1 block text-[11px] text-gray-500 dark:text-gray-400">{column.disabledReason}</span>
-        ) : column.dispositions.length > 1 ? (
-          <AppSelect
-            className="mt-1 w-full"
-            buttonClassName="min-h-10 w-full !px-2 !py-1"
-            value={column.disposition}
-            // The size goes on the label, not the button: the button's own
-            // text-sm is !important in main.css, while .text-xs on a span
-            // also carries the Khmer line height.
-            options={column.dispositions.map((disposition) => ({ value: disposition, label: <span className="text-xs">{dispositionLabel(disposition)}</span> }))}
-            onChange={(value) => {
-              const disposition = column.dispositions.find((item) => item === value)
-              if (disposition) onDisposition(column.id, disposition, disposition === 'remove' ? column.removeReason : undefined)
-            }}
-            ariaLabel={fill(tr('resolve_disposition_label', 'What to do with {name}'), { name })}
-            disabled={busy}
-          />
         ) : null}
         {column.disposition === 'remove' && !column.disabledReason ? (
           <input
@@ -613,25 +648,34 @@ export default function ResolveGrid({ columns, rows, onSelect, onDisposition, ch
   const recordCount = ordered.length
   const pagerFrom = Math.min(recordCount, pager.start + 1)
   const pagerTo = Math.min(recordCount, pager.start + pager.perView)
+  const overflows = recordCount > pager.perView
   const editorLabel = editingRow ? `${tr('resolve_final', 'Final')} · ${editingRow.label}` : ''
   const editorErrorId = `${gridId}-editor-error`
 
   return (
     <div ref={rootRef} aria-busy={busy || undefined}>
-      {recordCount > pager.perView ? (
-        <div className="mb-1 flex items-center justify-end gap-1 text-xs font-medium text-gray-600 dark:text-gray-300">
-          <button type="button" aria-label={tr('resolve_previous_record', 'Previous record')} disabled={pager.start <= 0} onClick={() => page(-1)} className="flex h-9 w-9 items-center justify-center rounded-lg hover:bg-gray-100 disabled:opacity-40 dark:hover:bg-gray-700">
+      {/* One row at every width (owner, 30 Sep 2026): the hint wraps before
+          it pushes the chevrons down; the pager keeps its place even when
+          every record fits, with the chevrons disabled and no counter. */}
+      <div className="mb-1 flex items-center gap-2" data-rg-toolbar="true">
+        <p data-rg-hint="true" className="min-w-0 flex-1 text-xs text-gray-500 dark:text-gray-400">{tr('resolve_select_hint', 'Select the details you want to keep; review the final result.')}</p>
+        <div className="flex shrink-0 items-center gap-1 text-xs font-medium text-gray-600 dark:text-gray-300">
+          <button type="button" aria-label={tr('resolve_previous_record', 'Previous record')} title={tr('resolve_previous_record', 'Previous record')} disabled={!overflows || pager.start <= 0} onClick={() => page(-1)} className="flex h-9 w-9 items-center justify-center rounded-lg hover:bg-gray-100 disabled:opacity-40 dark:hover:bg-gray-700">
             <ChevronLeft aria-hidden="true" className="h-4 w-4" />
           </button>
-          <span aria-hidden="true" data-rg-pager="true" className="min-w-[3.5rem] text-center tabular-nums">
-            {pagerFrom === pagerTo ? `${pagerFrom} / ${recordCount}` : `${pagerFrom}–${pagerTo} / ${recordCount}`}
-          </span>
-          <span className="sr-only">{fill(tr('resolve_columns_label', 'Showing records {from}–{to} of {total}'), { from: pagerFrom, to: pagerTo, total: recordCount })}</span>
-          <button type="button" aria-label={tr('resolve_next_record', 'Next record')} disabled={pager.start + pager.perView >= recordCount} onClick={() => page(1)} className="flex h-9 w-9 items-center justify-center rounded-lg hover:bg-gray-100 disabled:opacity-40 dark:hover:bg-gray-700">
+          {overflows ? (
+            <>
+              <span aria-hidden="true" data-rg-pager="true" className="min-w-[3.5rem] text-center tabular-nums">
+                {pagerFrom === pagerTo ? `${pagerFrom} / ${recordCount}` : `${pagerFrom}–${pagerTo} / ${recordCount}`}
+              </span>
+              <span className="sr-only">{fill(tr('resolve_columns_label', 'Showing records {from}–{to} of {total}'), { from: pagerFrom, to: pagerTo, total: recordCount })}</span>
+            </>
+          ) : null}
+          <button type="button" aria-label={tr('resolve_next_record', 'Next record')} title={tr('resolve_next_record', 'Next record')} disabled={!overflows || pager.start + pager.perView >= recordCount} onClick={() => page(1)} className="flex h-9 w-9 items-center justify-center rounded-lg hover:bg-gray-100 disabled:opacity-40 dark:hover:bg-gray-700">
             <ChevronRight aria-hidden="true" className="h-4 w-4" />
           </button>
         </div>
-      ) : null}
+      </div>
       <div ref={scrollerRef} className="resolve-grid-scroll">
         <table
           role="grid"
@@ -648,10 +692,7 @@ export default function ResolveGrid({ columns, rows, onSelect, onDisposition, ch
           <thead ref={theadRef}>
             <tr aria-rowindex={1}>
               <th scope="col" role="columnheader" aria-colindex={1} className="rg-label">
-                <span className="flex items-center gap-1 text-xs text-gray-600 dark:text-gray-300">
-                  <span className="min-w-0">{tr('field', 'Field')}</span>
-                  <InfoHint text={tr('resolve_how_to', 'Tap a value to use it in Final. Tap Final to type your own value. Matching fields are folded.')} label={tr('resolve_how_to_label', 'How to resolve')} align="left" />
-                </span>
+                <span className="text-xs text-gray-600 dark:text-gray-300">{tr('field', 'Field')}</span>
               </th>
               {ordered.map(renderColumnHeader)}
               <th scope="col" role="columnheader" aria-colindex={recordCount + 2} className="rg-final">
@@ -669,12 +710,11 @@ export default function ResolveGrid({ columns, rows, onSelect, onDisposition, ch
                       {row.kind === 'required' ? <span aria-hidden="true" className="text-amber-600 dark:text-amber-400"> *</span> : null}
                     </span>
                     {row.locked ? (
-                      <>
-                        <Lock aria-hidden="true" className="mt-0.5 h-3.5 w-3.5 shrink-0 text-gray-400" />
-                        <InfoHint text={row.locked} label={`${tr('resolve_locked', 'Locked')}: ${row.label}`} align="left" />
-                      </>
+                      <span title={row.locked} className="mt-0.5 shrink-0">
+                        <Lock aria-hidden="true" className="h-3.5 w-3.5 text-gray-400" />
+                        <span className="sr-only">{`${tr('resolve_locked', 'Locked')}: ${row.locked}`}</span>
+                      </span>
                     ) : null}
-                    {row.hint ? <InfoHint text={row.hint} label={row.label} align="left" /> : null}
                   </span>
                 </th>
                 {ordered.map((column, index) => renderRecordCell(row, rowIndex, column, index))}

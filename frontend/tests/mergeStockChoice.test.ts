@@ -306,9 +306,11 @@ test('every child row under the name is swept -- no rows[0], no LIMIT 1', () => 
   // The list surfaces loop EVERY member/removal rather than acting on the first.
   assert.match(productsPage, /info\.members\.filter\(\(m\) => Number\(m\.id\) !== Number\(keepId\)\)/)
   assert.match(productsPage, /for \(const other of others\)/)
-  // The Duplicates tab hands the Resolve grid the keeper and EVERY removal, and
-  // the adapter merges every included product, one step each.
-  assert.match(duplicatesTab, /products: \[keeper, \.\.\.removals\]/)
+  // The Duplicates tab hands the Resolve grid the whole cluster (every product,
+  // no keeper picked on the card), and the adapter merges every included
+  // product, one step each.
+  assert.match(duplicatesTab, /createProductResolveAdapter\(\{\s*cluster: resolving\.cluster,/)
+  assert.match(productResolveAdapter, /const ids = \[\.\.\.listedProducts\.keys\(\)\]/)
   assert.match(productResolveAdapter, /const steps = ctx\.merged\.map\(/)
   assert.match(productResolveAdapter, /for \(let index = state\.index; index < total; index \+= 1\)/)
 })

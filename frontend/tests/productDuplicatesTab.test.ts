@@ -1,7 +1,7 @@
 // Pins the Products → Duplicates review section's multi-select bulk
 // contract, which deliberately mirrors the contacts Possible Duplicates
 // panel (cross-surface rule): per-cluster checkboxes, Select all over the
-// FILTERED view, a bulk bar with Merge/Dismiss selected, sequential calls
+// FILTERED view, a bulk bar with icon-only Merge/Dismiss selected, sequential calls
 // with visible progress, and — the safety-critical part — bulk merge only
 // ever automated for exact same-name + same-cost barcode pairs. Similar-name
 // and same-barcode/different-name conflicts stay manual; keeper selection is
@@ -68,8 +68,7 @@ test('N-row selections open one durable paged group review', () => {
   // Merge selected at the new flow but left the older review-only button in
   // place, now doing nothing different. One button, doing the one thing it
   // does (open the auto-resolve review), replaces both.
-  const bulkBarBlock = src.slice(src.indexOf('duplicates_bulk_selected_count'), src.indexOf('duplicates_bulk_dismiss_action'))
-  const groupReviewButtonCount = (bulkBarBlock.match(/onClick=\{\(\) => void openSelectedGroupReview\(\)\}/g) || []).length
+  const groupReviewButtonCount = (src.match(/onClick=\{\(\) => void openSelectedGroupReview\(\)\}/g) || []).length
   assert.equal(groupReviewButtonCount, 1, 'the bulk bar must offer exactly one button that opens the group review, not a duplicate')
   assert.match(src, /Remove independently in the global review[\s\S]*Reason for removing this product/, 'independent removal is explicit and requires its own reason')
   assert.doesNotMatch(src, /selected_conflict_remove_unavailable/, 'the reviewed removal path is no longer presented as unavailable')
@@ -120,21 +119,40 @@ test('the bulk bar reuses the contacts panel\'s shared vocabulary (one review pa
   }
 })
 
-test('legacy direct groups apply only after EVERY row is decided, with exactly one Keep', () => {
-  // Decide-all-then-apply: per-row Keep/Merge decisions,
-  // Apply armed only when the whole group is decided with one keeper.
-  assert.match(src, /const \[decisions, setDecisions\] = useState<Record<number, 'keep' \| 'merge'>>/)
-  assert.match(src, /const everyDecided = cluster\.products\.every\(\(product\) => decisions\[product\.id\]\)/)
-  assert.match(src, /const canApply = Boolean\(keeper\) && everyDecided && merges\.length > 0/)
-  assert.match(src, /onApplyDecisions\(keeper, merges\)/)
-  assert.match(src, /if \(next\[Number\(id\)\] === 'keep'\) delete next\[Number\(id\)\]/, 'picking a new Keep demotes the old keeper to undecided')
+test('the card has ONE Resolve and none of the retired Keep / Merge / Apply / edit-modal code', () => {
+  // Owner, 30 Sep 2026: "i tried to do the keep and merge etc.. they are not
+  // working". Keep and Merge were only toggles; the one action that wrote was
+  // a small Apply behind "decide every row". The card now mirrors the contacts
+  // card: one Resolve opens the shared grid with every product of the group.
+  for (const zombie of ['decisions', 'setDecisions', 'everyDecided', 'canApply', 'onApplyDecisions', 'editTarget', 'setEditTarget', 'updateProduct',
+    'dup_decide_all_hint', 'dup_pick_one_keep', 'resolve_duplicate_inline_hint', 'product_duplicates_hint', 'InfoHint']) {
+    assert.ok(!src.includes(zombie), zombie + ' is retired from the card')
+  }
+  assert.match(src, /onResolve: \(\) => void/)
+  assert.match(src, /onClick=\{onResolve\}[\s\S]{0,400}<Merge aria-hidden="true" className="h-4 w-4" \/>[\s\S]{0,40}\{t\('resolve'\) \|\| 'Resolve'\}/, 'Resolve is the merge icon plus one word')
+  assert.match(src, /<ConflictIcon aria-hidden="true"/, 'the card header carries the conflict triangle')
+  assert.match(src, /onResolve=\{\(\) => openResolve\(cluster\)\}/, 'the card opens the grid on the whole cluster')
 })
 
-test('Resolve edits IN PLACE via a float — the tab never navigates away', () => {
-  assert.match(src, /const \[editTarget, setEditTarget\] = useState<ClusterProduct \| null>/)
-  assert.match(src, /updateProduct\(editTarget\.id, \{/)
-  assert.match(src, /<Modal title=/, 'the edit float is the shared Modal')
-  assert.ok(!src.includes('onResolve'), 'no navigation-out prop remains')
+test('Dismiss confirms with before and after; the toolbar and bulk buttons are icon-only with a translated tooltip', () => {
+  assert.match(src, /setConfirmDismiss\(true\)/)
+  assert.match(src, /items=\{\[\s*\{ label: t\('before'\) \|\| 'Before', value: t\('needs_review'\) \|\| 'Needs review' \},\s*\{ label: t\('after'\) \|\| 'After', value: t\('kept_separate'\)/, 'Dismiss shows before and after')
+  assert.match(src, /onConfirm=\{\(\) => \{ setConfirmDismiss\(false\); onDismiss\(\) \}\}/, 'nothing is dismissed before the confirm')
+  for (const label of ['dismissLabel', 'refreshLabel', 'leadingZeroLabel', 'bulkMergeLabel', 'bulkDismissLabel', 'selectAllLabel', 'clearSelectionLabel']) {
+    assert.match(src, new RegExp('title=\\{' + label + '\\}\\s*aria-label=\\{' + label + '\\}'), label + ' is both the tooltip and the accessible name')
+  }
+  assert.match(src, /<AppSelect[\s\S]{0,400}ariaLabel=\{t\('type'\) \|\| 'Type'\}/, 'the severity pills are one select')
+})
+
+test('Resolve minimizes to a chip that keeps the choices, and restoring reopens the grid with them', () => {
+  assert.match(src, /onMinimize=\{parkResolve\}/)
+  assert.match(src, /initialDraft=\{resolving\.draft\}/)
+  assert.match(src, /kind: 'product_resolve'[\s\S]{0,200}payload: \{ cluster: resolving\.cluster, draft \}/, 'the chip carries the group and the draft')
+  assert.match(src, /openResolve\(parked\.cluster, parked\.draft\)/, 'restore hands the draft back to the grid')
+  assert.match(src, /consumePendingRestore\('product_resolve'\)/, 'a chip restored before the tab mounted is still honoured')
+  const minimized = readFileSync(join(here, '..', 'src', 'utils', 'minimizedWork.ts'), 'utf8')
+  assert.match(minimized, /\| 'product_resolve'/)
+  assert.match(minimized, /product_resolve: \{ permissionKey: 'products', actionKey: 'merge_duplicates' \}/, 'a restored chip is re-checked against the merge permission')
 })
 
 if (failed > 0) {
