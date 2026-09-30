@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import vm from 'node:vm'
 
 const indexSource = readFileSync(new URL('../index.html', import.meta.url), 'utf8')
 const swSource = readFileSync(new URL('../public/sw.js', import.meta.url), 'utf8')
@@ -32,14 +33,14 @@ assert.match(
   'Admin shell should request its PWA manifest so install prompts work for signed-in users',
 )
 
-// The SW deliberately caches manifest.json now (see service-worker.ts's
-// isCacheableStaticPath) as part of the same "make PWA installable" work
-// as the index.html assertion above -- it's a small static same-origin
-// asset like the other entries already listed here, not something that
-// needs to skip the app shell cache.
-assert.match(
-  swSource,
-  /pathname === '\/manifest\.json'/,
+const serviceWorker: { self: unknown; URL: typeof URL; isCacheableStaticPath?: (pathname: string) => boolean } = {
+  self: { addEventListener() {}, location: { origin: 'https://admin.leangbeauty.com', hostname: 'admin.leangbeauty.com' }, registration: {} },
+  URL,
+}
+vm.runInNewContext(swSource, serviceWorker)
+assert.equal(
+  serviceWorker.isCacheableStaticPath?.('/manifest.json'),
+  true,
   'Service worker should treat manifest.json as a cacheable static asset alongside the icons',
 )
 
