@@ -48,6 +48,8 @@ const KEYS = {
   needsOriginalTab: { undo: 'undo_refused_needs_original_tab', redo: 'redo_refused_needs_original_tab' },
   // A merge closed the stock-in session's Undo for good.
   closedByMerge: { undo: 'undo_refused_closed_by_merge', redo: 'redo_refused_closed_by_merge' },
+  // Stock moved on a product while a merge redo was being saved; nothing was written.
+  mergeConflictRetry: { undo: 'undo_refused_merge_conflict_retry', redo: 'redo_refused_merge_conflict_retry' },
   generic: { undo: 'undo_refused_generic', redo: 'redo_refused_generic' },
 } as const
 // Worker constant -> the pack keys the transport must restate it with.
@@ -59,6 +61,7 @@ const CODE_KEYS = [
   ['UNDO_HISTORY_UNUSABLE_CODE', KEYS.historyUnusable],
   ['UNDO_NEEDS_ORIGINAL_TAB_CODE', KEYS.needsOriginalTab],
   ['UNDO_CLOSED_BY_MERGE_CODE', KEYS.closedByMerge],
+  ['UNDO_MERGE_CONFLICT_RETRY_CODE', KEYS.mergeConflictRetry],
   ['UNDO_REFUSED_CODE', KEYS.generic],
 ] as const
 
@@ -183,7 +186,7 @@ for (const language of ['en', 'km'] as const) {
 }
 
 await runCase('every new refusal names what was refused and that nothing changed, in both packs', () => {
-  for (const pair of [KEYS.historyStale, KEYS.alreadyDone, KEYS.historyUnusable, KEYS.needsOriginalTab, KEYS.closedByMerge, KEYS.generic]) {
+  for (const pair of [KEYS.historyStale, KEYS.alreadyDone, KEYS.historyUnusable, KEYS.needsOriginalTab, KEYS.closedByMerge, KEYS.mergeConflictRetry, KEYS.generic]) {
     for (const direction of ['undo', 'redo'] as const) {
       const english = String(EN[pair[direction]])
       assert.match(english, direction === 'undo' ? /\b[Uu]ndo(ne)?\b/ : /\b[Rr]edo(ne)?\b/, `en ${pair[direction]} names ${direction}`)

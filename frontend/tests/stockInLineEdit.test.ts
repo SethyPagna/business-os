@@ -78,6 +78,18 @@ runTest('every refusal code the client translates is one the Worker actually sen
   assert.equal(stockInLineEditErrorText({ code: 'something_else', message: 'Server words' }, tr), 'Server words')
 })
 
+runTest('a session undone and then closed by a merge never tells the operator to Redo it first', () => {
+  const closed = stockInLineEditErrorText({ code: 'session_undo_closed', message: 'Worker words' }, tr)
+  const plain = stockInLineEditErrorText({ code: 'session_undone', message: 'Worker words' }, tr)
+  assert.doesNotMatch(closed, /Redo it first/)
+  assert.match(closed, /merge closed its Undo/)
+  assert.match(plain, /Redo it first/, 'an ordinary undone session still can be redone')
+  const en = JSON.parse(fs.readFileSync(new URL('../src/lang/en.json', import.meta.url), 'utf8')) as Record<string, string>
+  const km = JSON.parse(fs.readFileSync(new URL('../src/lang/km.json', import.meta.url), 'utf8')) as Record<string, string>
+  assert.notEqual(km.stock_in_line_error_session_undo_closed, km.stock_in_line_error_session_undone)
+  assert.equal(en.stock_in_line_error_session_undo_closed, STOCK_IN_LINE_EDIT_ERRORS.session_undo_closed[1])
+})
+
 runTest('only a line that received stock into a lot can be edited; the unit cost reads the line total first', () => {
   assert.equal(isStockInLineEditable(row), true)
   assert.equal(isStockInLineEditable({ id: null, batch_id: null }), false)

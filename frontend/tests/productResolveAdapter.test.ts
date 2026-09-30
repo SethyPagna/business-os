@@ -263,7 +263,7 @@ await test('apply merges every product one step each, stops where a step fails a
   const data = await adapter.load(signal, EMPTY)
   const review = await adapter.review(data, EMPTY, signal)
   const progress: Array<[number, number]> = []
-  await assert.rejects(adapter.apply(review.token, signal, (done, total) => progress.push([done, total])), /network down/)
+  await assert.rejects(adapter.apply(review.token, signal, (done, total) => progress.push([done, total])), new RegExp(en.resolve_refusal_network))
   assert.deepEqual(progress, [[1, 2]])
   assert.equal(written.length, 1, 'the host refreshes after a committed step even though the next failed')
   const result = await adapter.apply(review.token, signal, (done, total) => progress.push([done, total]))
@@ -291,6 +291,46 @@ await test('a refusal the Worker states in English reaches the operator in the p
   await assert.rejects(adapter.apply(review.token, signal, () => {}), (error: any) => error.code === 'product_merge_not_duplicates' && error.message === km.selected_conflict_product_merge_not_duplicates)
   assert.equal(adapter.isStale(Object.assign(new Error('x'), { code: 'merge_state_conflict' })), true)
   assert.equal(adapter.isStale(Object.assign(new Error('x'), { code: 'product_merge_not_duplicates' })), true)
+})
+
+await test('every failure a Resolve can meet reaches a Khmer operator in Khmer, with its status and code intact', async () => {
+  const { isRetryableFailure } = await import('../src/utils/retryableFailure.ts')
+  const shapes: Array<[string, Error & { code?: string; status?: number }, string, boolean]> = [
+    ['stock moved while saving', Object.assign(new Error('Stock on one of these products changed while the merge was being saved. Nothing was saved. Try again.'), { code: 'merge_conflict_retry', status: 409 }), 'resolve_refusal_retry', false],
+    ['too many lots for one batch', Object.assign(new Error('This product has too many linked stock or history rows for one safe merge and remains unchanged.'), { code: 'merge_case_exceeds_safe_limit', status: 409 }), 'resolve_refusal_too_large', false],
+    ['invalid number', Object.assign(new Error('selling_price_usd on product #3 is negative. Correct it before merging.'), { code: 'invalid_merge_numeric', status: 409 }), 'resolve_refusal_numeric', false],
+    ['request reused with other choices', Object.assign(new Error('This resolve request already has different choices.'), { code: 'resolve_request_conflict', status: 409 }), 'resolve_refusal_request_conflict', false],
+    ['invalid plan', Object.assign(new Error('Invalid product resolve plan.'), { code: 'invalid_resolve_plan', status: 400 }), 'resolve_refusal_invalid_plan', false],
+    ['records changed after review', Object.assign(new Error('These products changed after review.'), { code: 'merge_state_conflict', status: 409 }), 'resolve_refusal_changed', false],
+    ['already merged', Object.assign(new Error('Both products must be active'), { code: 'product_merge_inactive', status: 409 }), 'resolve_refusal_changed', false],
+    ['no permission', Object.assign(new Error('You do not have permission to perform this action'), { status: 403 }), 'resolve_refusal_permission', false],
+    ['product gone', Object.assign(new Error('Both products must exist'), { status: 404 }), 'resolve_refusal_missing', false],
+    ['group row refused', Object.assign(new Error('Group rows cannot be merged — merge the variant products instead'), { status: 400 }), 'resolve_refusal_invalid_plan', false],
+    ['server fault', Object.assign(new Error('Internal Server Error'), { status: 500 }), 'resolve_refusal_server', true],
+    ['connection lost', new TypeError('Failed to fetch'), 'resolve_refusal_network', true],
+  ]
+  const kt = (key: string) => km[key] ?? key
+  for (const [label, failure, key, retryable] of shapes) {
+    const adapter = createProductResolveAdapter({
+      cluster: CLUSTERS.same_name, keeperId: 10, t: kt, canViewCosts: false, canEditCosts: false, canMerge: () => true,
+      api: { preview: fakeApi(CLUSTERS.same_name).api.preview, merge: async () => { throw failure } },
+    })
+    const data = await adapter.load(signal, EMPTY)
+    const review = await adapter.review(data, EMPTY, signal)
+    await assert.rejects(adapter.apply(review.token, signal, () => {}), (error: any) => {
+      assert.equal(error.message, km[key], `${label}: said in Khmer`)
+      assert.notEqual(error.message, failure.message)
+      assert.equal(error.code, failure.code ?? '', `${label}: code kept`)
+      assert.equal(isRetryableFailure(error), retryable, `${label}: Continue is offered only for faults`)
+      return true
+    })
+  }
+  const english = createProductResolveAdapter({
+    cluster: CLUSTERS.same_name, keeperId: 10, t, canViewCosts: false, canEditCosts: false, canMerge: () => true,
+    api: { preview: fakeApi(CLUSTERS.same_name).api.preview, merge: async () => { throw new TypeError('Failed to fetch') } },
+  })
+  const enData = await english.load(signal, EMPTY)
+  await assert.rejects(english.apply((await english.review(enData, EMPTY, signal)).token, signal, () => {}), (error: any) => error.message === en.resolve_refusal_network)
 })
 
 await test('every key the adapter reads exists in both packs', () => {

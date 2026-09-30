@@ -144,6 +144,7 @@ export const STOCK_IN_LINE_EDIT_ERRORS: Record<string, [string, string]> = {
   stale_state: ['stock_in_line_error_stale', 'This line changed on another device. Reopen the session and try again.'],
   line_not_editable: ['stock_in_line_error_not_editable', 'This line cannot be edited here.'],
   session_undone: ['stock_in_line_error_session_undone', 'This stock-in session was undone. Redo it first, then edit the line.'],
+  session_undo_closed: ['stock_in_line_error_session_undo_closed', 'This stock-in session was undone, and a product merge closed its Undo, so it cannot be redone. The line cannot be edited.'],
   product_cost_edit_required: ['stock_in_line_error_cost_permission', 'Cost-entry permission is required to change receipt costs.'],
   permission_denied: ['stock_in_line_error_permission', 'You do not have permission to edit stock-in lines.'],
   migration_required: ['stock_in_line_error_migration', 'Editing stock-in lines is not available on this server yet. Nothing was changed.'],
@@ -193,7 +194,7 @@ export function isKnownStockInLineEditRefusal(error: unknown, hadUnknownOutcome 
   if (![400, 404, 409].includes(Number(detail.status))) return false
   return new Set([
     'invalid_request', 'invalid_quantity', 'invalid_unit_cost', 'invalid_received_date', 'invalid_batch_revision',
-    'invalid_client_request_id', 'reason_too_long', 'stale_line', 'stale_state', 'line_not_editable', 'session_undone',
+    'invalid_client_request_id', 'reason_too_long', 'stale_line', 'stale_state', 'line_not_editable', 'session_undone', 'session_undo_closed',
     'product_not_found', 'batch_mismatch', 'supplier_not_found', 'supplier_mismatch', 'supplier_required', 'free_goods_required',
     'shared_lot', 'move_consumed', 'below_consumed', 'branch_below_zero', 'target_unresolved', 'target_other_supplier',
   ]).has(String(detail.code || ''))

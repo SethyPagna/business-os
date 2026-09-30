@@ -224,6 +224,13 @@ test('the transport carries the answer and the server refusal keeps its breakdow
   // Worker closes that session's Undo in the merge's own batch instead.
   assert.doesNotMatch(hook, /stock_session_reversible/, 'a merge is no longer refused for a stock session that can still be undone')
   assert.match(hook, /localizeRefusal\(t, error\)/, 'and the remaining decision must reach the operator translated')
+  // MERGE-UNBLOCK follow-up: stock that moved while the merge was being saved,
+  // and a product too large for one safe batch, are definite 409s said in the pack.
+  for (const code of ['merge_conflict_retry', 'merge_case_exceeds_safe_limit']) assert.match(hook, new RegExp(`code === '${code}'`), `${code} is translated`)
+  for (const key of ['resolve_refusal_retry', 'resolve_refusal_too_large']) {
+    assert.match(hook, new RegExp(`t\\('${key}'\\)`), `the hook reads ${key}`)
+    assert.ok(en[key] && km[key] && km[key] !== en[key], `${key} ships in both packs`)
+  }
 })
 
 test('every new string ships in BOTH packs', () => {
