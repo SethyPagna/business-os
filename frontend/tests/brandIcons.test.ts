@@ -73,7 +73,7 @@ assert.ok(
 // at fixed Leang assets, NOT at anything derived from business config.
 assert.match(
   publicCatalog,
-  /const STOREFRONT_ICON = '\/leang-cosmetics-icon-512\.png'/,
+  /const STOREFRONT_ICON = '\/leang-cosmetics-icon-512-v2\.png'/,
   'the live storefront should use the static Leang tab icon, not a staff icon or a merchant upload',
 )
 assert.match(
@@ -83,7 +83,7 @@ assert.match(
 )
 assert.match(
   publicCatalog,
-  /const STOREFRONT_APPLE_TOUCH_ICON = '\/leang-cosmetics-apple-touch-icon-v1\.png'/,
+  /const STOREFRONT_APPLE_TOUCH_ICON = '\/leang-cosmetics-apple-touch-icon-v2\.png'/,
   'the live storefront must replace the Apple touch icon used by Add to Home Screen',
 )
 assert.match(

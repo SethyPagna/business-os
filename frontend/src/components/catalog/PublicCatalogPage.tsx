@@ -71,8 +71,8 @@ const PUBLIC_PORTAL_AI_TIMEOUT_MS = 25000
 // -- see the brand effect below). Not per-merchant customizable (11.14-16).
 const STOREFRONT_NAME = 'Leang Cosmetics'
 const STOREFRONT_HOME_SCREEN_NAME = 'Leang'
-const STOREFRONT_ICON = '/leang-cosmetics-icon-512.png'
-const STOREFRONT_APPLE_TOUCH_ICON = '/leang-cosmetics-apple-touch-icon-v1.png'
+const STOREFRONT_ICON = '/leang-cosmetics-icon-512-v2.png'
+const STOREFRONT_APPLE_TOUCH_ICON = '/leang-cosmetics-apple-touch-icon-v2.png'
 const STOREFRONT_MANIFEST = '/portal-manifest.json'
 const PUBLIC_PORTAL_CACHE_KEY = 'business-os-catalog-portal-cache'
 const PUBLIC_PORTAL_BOOTSTRAP_ELEMENT_ID = 'business-os-portal-bootstrap'
