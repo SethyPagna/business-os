@@ -1042,6 +1042,31 @@ async function runResolveChoiceUndo() {
     assert.deepEqual(undo.restoreSettledStockSessionStatements({ marker: 'm', sessions: [] }), [])
   })
 
+  // A Resolve barcode choice puts the survivor's own barcode on the merged record.
+  // Undo must give each record its own back; a snapshot from any other merge has no
+  // dupBarcodeBefore and must leave the merged record's barcode as it is.
+  async function mergeWithBarcodes(keeperAfter, dupAfter, extra) {
+    const merged = await foldForward(d1, { id: KEEPER, name: 'Glow Serum 30ml' }, { id: DUP, name: 'Glow-Serum 30ml', image_path: null }, new Map([[1, 'B1']]), 'resolve grid keep merge')
+    run1('UPDATE products SET barcode = @k WHERE id = @id', { k: keeperAfter, id: KEEPER })
+    run1('UPDATE products SET barcode = @d WHERE id = @id', { d: dupAfter, id: DUP })
+    const recorded = await undo.recordMergeUndoSnapshot({}, { id: 42, name: 'Merger' }, { ...merged.reversal, keeperBarcodeBefore: '8850000000070', ...extra })
+    const undoer = undo.resolveUndoApplier({ applier: 'product.merge', snapshot_id: recorded.snapshotId })
+    await undoer.run({ applier: 'product.merge', snapshot_id: recorded.snapshotId }, { env: {}, user: { id: 42 }, direction: 'undo' })
+  }
+  const barcodes = () => [one('SELECT barcode FROM products WHERE id = ?', KEEPER).barcode, one('SELECT barcode FROM products WHERE id = ?', DUP).barcode]
+
+  await check('UNDO puts a swapped barcode back on the merged record', async () => {
+    await mergeWithBarcodes('8850000000071', '8850000000070', { dupBarcodeBefore: '8850000000071' })
+    assert.deepEqual(barcodes(), ['8850000000070', '8850000000071'])
+    assert.equal(one('SELECT is_active FROM products WHERE id = ?', DUP).is_active, 1)
+  })
+
+  await check('a snapshot without dupBarcodeBefore leaves the merged record\'s barcode alone', async () => {
+    await mergeWithBarcodes('8850000000070', 'MERGED-ROW-BARCODE', {})
+    assert.deepEqual(barcodes(), ['8850000000070', 'MERGED-ROW-BARCODE'])
+    run1("UPDATE products SET barcode = '8850000000071' WHERE id = ?", DUP)
+  })
+
   await check('the name-snapshot list matches the rename/merge path in products.ts', async () => {
     const src = fs.readFileSync(path.join(cloudflareRoot, 'src', 'routes', 'products.ts'), 'utf8')
     const at = src.indexOf('function linkedProductNameSnapshotStatements(')

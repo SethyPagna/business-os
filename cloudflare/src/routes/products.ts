@@ -3315,6 +3315,14 @@ function writeOffReason(dup: { id: number; name: string | null }, mergeContext: 
   return `Duplicate product "${dup.name}" ${writeOffMarker(dup.id)} instead of being merged -- ${mergeContext}`
 }
 
+// Same barcode by the exact text or by the leading-zero identity rule (which is
+// a comparison only; spellings are never rewritten). Two empty barcodes match.
+function sameBarcodeText(a: unknown, b: unknown): boolean {
+  const x = String(a ?? '').trim()
+  const y = String(b ?? '').trim()
+  return x === y || (isRealBarcode(x) && isRealBarcode(y) && identityBarcodeKey(x) === identityBarcodeKey(y))
+}
+
 // The complete fold of ONE duplicate product into a keeper -- branch_stock
 // summed per branch (with an inventory_movements record each), gallery +
 // primary image carried over, product_batches re-pointed lot-by-lot (or
@@ -3561,6 +3569,17 @@ export async function foldDuplicateProductInto(
   const canonicalBarcode = keeperChoice?.follows
     ? keeperFollowsBarcode(canonicalBefore, dupPricing)
     : reviewedAuthorityValid ? reviewedPlan.selected.barcode.value : canonicalProductBarcode([canonicalBefore, dupPricing])
+  // A barcode picked in the Resolve grid is written on the survivor at the step
+  // that merges the record it came from, and the survivor's own barcode moves
+  // onto that record: a barcode is one column, so that record is the only row
+  // free to hold it, and N1 says a barcode that does not survive stays on a
+  // record. Other steps leave the survivor's barcode alone.
+  const chosenBarcode = choiceFields && Object.prototype.hasOwnProperty.call(choiceFields, 'barcode') ? (choiceFields.barcode ?? null) : undefined
+  const barcodeSwap = chosenBarcode !== undefined && sameBarcodeText(dupPricing.barcode, chosenBarcode)
+  const keeperBarcodeBefore = String(canonicalBefore.barcode ?? '')
+  const displacedBarcode = barcodeSwap && keeperBarcodeBefore.trim() && keeperBarcodeBefore.trim() !== String(chosenBarcode ?? '').trim() ? keeperBarcodeBefore : null
+  const keeperBarcodeAfter = barcodeSwap ? chosenBarcode ?? null : canonicalBarcode
+  const dupBarcodeAfter = displacedBarcode ?? dupPricing.barcode ?? null
   // Which of the keeper's prices this fold actually moves. Computed from the
   // same two rows and the same fallback chain the UPDATE below writes, so the
   // audit trail cannot claim a change the fold did not make (or miss one it
@@ -3913,7 +3932,13 @@ BEGIN SELECT RAISE(ABORT,'lot has immutable transfer provenance'); END`,
   }
   // After the economics UPDATE on every step, so a later step's highest-price
   // rule cannot overwrite a chosen lower price (idempotent when repeated).
-  if (choiceFields) statements.push(...keeperChoiceStatements(canonicalId, choiceFields))
+  if (choiceFields) {
+    const { barcode: _barcode, ...stepFields } = choiceFields
+    statements.push(...keeperChoiceStatements(canonicalId, barcodeSwap ? choiceFields : stepFields))
+  }
+  if (displacedBarcode !== null) {
+    statements.push({ sql: 'UPDATE products SET barcode = @displacedBarcode, updated_at = CURRENT_TIMESTAMP WHERE id = @dupId', params: { displacedBarcode, dupId: dup.id } })
+  }
   // promotion_rules.product_ids: a LIVE product link the walk above structurally
   // cannot reach -- it is a JSON array of ids inside a TEXT column, not an
   // INTEGER FK, so neither MERGE_REPARENT_TABLES nor the migration sweep that
@@ -3986,7 +4011,7 @@ BEGIN SELECT RAISE(ABORT,'lot has immutable transfer provenance'); END`,
     productName: dup.name,
     mergedIntoProductId: canonicalId,
     mergedIntoProductName: canonicalName,
-    canonicalBarcode,
+    canonicalBarcode: keeperBarcodeAfter,
     stockDisposition,
     priceChanges: priceChangesForAudit,
     batchesMoved: batchesMovedThisDup,
@@ -4004,7 +4029,9 @@ BEGIN SELECT RAISE(ABORT,'lot has immutable transfer provenance'); END`,
     reparentedTables: reparentedByTable.map((e) => `${e.table}:${e.ids.length}`),
     // N1: the merged record's barcode the kept product does not carry stays
     // on the merged (deactivated) record and is named here.
-    ...(keeperChoice?.follows ? { keeperFollows: true, absorbedBarcodes: absorbedBarcodes(canonicalBarcode, dupPricing) } : {}),
+    ...(keeperChoice?.follows ? { keeperFollows: true, absorbedBarcodes: absorbedBarcodes(keeperBarcodeAfter, { barcode: dupBarcodeAfter }) } : {}),
+    // Both records' barcodes before and after, so the swap is readable and undo restores each.
+    ...(barcodeSwap ? { barcodes: { keeper: { before: canonicalBefore.barcode ?? null, after: keeperBarcodeAfter }, merged: { before: dupPricing.barcode ?? null, after: dupBarcodeAfter } } } : {}),
     ...(chosenCost ? { costChosen: chosenCost } : {}),
     ...(choiceFields ? { choicesApplied: choiceFields } : {}),
     ...(settledStockSessions?.sessions.length ? { settledStockSessions: settledStockSessions.sessions.map((row) => row.operationId) } : {}),
@@ -4018,6 +4045,7 @@ BEGIN SELECT RAISE(ABORT,'lot has immutable transfer provenance'); END`,
     keeperImagePathBefore: canonicalBefore?.image_path ?? null,
     dupImagePathBefore: dup.image_path ?? null,
     keeperBarcodeBefore: canonicalBefore?.barcode ?? null,
+    ...(displacedBarcode !== null ? { dupBarcodeBefore: dupPricing.barcode ?? null } : {}),
     ...(keeperChoice ? { keeperChoice } : {}),
     ...choiceBefore,
     ...(settledStockSessions?.sessions.length ? { settledStockSessions } : {}),

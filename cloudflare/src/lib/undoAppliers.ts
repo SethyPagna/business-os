@@ -194,6 +194,8 @@ export interface MergeReversal {
   /** Duplicate primary captured for image-effect permission checks on replay. */
   dupImagePathBefore?: string | null
   keeperBarcodeBefore?: string | null
+  /** Present only when a Resolve barcode choice moved the keeper's own barcode onto this record; undo puts it back. */
+  dupBarcodeBefore?: string | null
   /** Present only when a Resolve choice rewrote the keeper's name; undo restores both. */
   keeperNameBefore?: string | null
   keeperNameNormalizedBefore?: string | null
@@ -1808,7 +1810,12 @@ async function buildMergeReversalStatements(env: Env, r: MergeReversal, canChang
   const stmts: Array<{ sql: string; params?: Record<string, unknown> }> = []
 
   // 1. Reactivate the merged-away product; restore keeper's image_path.
-  stmts.push({ sql: 'UPDATE products SET is_active = 1, updated_at = CURRENT_TIMESTAMP WHERE id = @dupId', params: { dupId } })
+  // A snapshot without dupBarcodeBefore (every merge but a Resolve barcode swap) leaves the barcode alone.
+  const restoresDupBarcode = r.dupBarcodeBefore !== undefined
+  stmts.push({
+    sql: `UPDATE products SET is_active = 1, ${restoresDupBarcode ? 'barcode = @dupBarcode, ' : ''}updated_at = CURRENT_TIMESTAMP WHERE id = @dupId`,
+    params: { dupId, ...(restoresDupBarcode ? { dupBarcode: r.dupBarcodeBefore } : {}) },
+  })
   stmts.push(mergeKeeperRestoreStatement(r, canChangeProductImages))
   if (r.keeperPricingBefore) {
     // Cost is restored only when the snapshot recorded it. A pre-Sep-4-2026

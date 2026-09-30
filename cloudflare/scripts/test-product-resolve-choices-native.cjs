@@ -264,9 +264,11 @@ async function main() {
       const done = await merge(group.body(mergeId))
       assert.equal(done.status, 200, `step ${mergeId}: ${JSON.stringify(done.body)}`)
       const after = keeperColumns()
-      for (const [column, value] of Object.entries(expected)) assert.equal(after[column], value, `after step ${mergeId}: ${column}`)
+      // The barcode is chosen from #72, so it is written at the step that merges #72 (P1).
+      const barcodeWritten = mergeId === M2
+      for (const [column, value] of Object.entries(expected)) assert.equal(after[column], column === 'barcode' && !barcodeWritten ? '8850000000070' : value, `after step ${mergeId}: ${column}`)
       assert.equal(done.body.keeper.name, expected.name)
-      assert.equal(done.body.keeper.barcode, expected.barcode)
+      assert.equal(done.body.keeper.barcode, barcodeWritten ? expected.barcode : '8850000000070')
       assert.equal(done.body.keeper.selling_price_usd, 9.5)
       assert.equal(one('SELECT product_name FROM sale_items WHERE id = 700').product_name, expected.name, `step ${mergeId}: the survivor's history follows the chosen name`)
     }
@@ -381,6 +383,71 @@ async function main() {
     await replay(newest, 'undo')
     assert.deepEqual(keeperColumns(), afterFirst)
     assert.equal(one('SELECT is_active FROM products WHERE id = ?', M2).is_active, 1)
+  })
+
+  // P1: a barcode picked from a merged record displaces the survivor's own; that
+  // one must stay on a record (N1) and be named in the audit, undone exactly.
+  const OWN = { [KEEP]: '8850000000070', [M1]: '8850000000071', [M2]: '8850000000072' }
+  const barcodeOf = (id) => one('SELECT barcode FROM products WHERE id = ?', id).barcode
+  const allBarcodes = () => rows('SELECT barcode FROM products WHERE barcode IS NOT NULL').map((row) => row.barcode)
+  const mergeAudits = () => rows("SELECT details FROM audit_logs WHERE action = 'merge_duplicate' ORDER BY id").map((row) => JSON.parse(row.details))
+
+  await check('ROUTE: a barcode picked from the merged record moves the survivor\'s own onto that record, is audited, and undo/redo restore both', async () => {
+    fresh()
+    const seen = await preview(KEEP, M1, `&groupIds=${KEEP},${M1}`)
+    const resolve = { requestId: 'barcode-swap', reviewedDigest: seen.body.reviewedDigest, steps: [{ mergeId: M1 }] }
+    const done = await merge({ keepId: KEEP, mergeId: M1, keep: true, resolve, choices: { barcode: { source_id: M1 } } })
+    assert.equal(done.status, 200, JSON.stringify(done.body))
+    assert.equal(barcodeOf(KEEP), OWN[M1])
+    assert.equal(barcodeOf(M1), OWN[KEEP], 'the survivor\'s displaced barcode stays on the merged (deactivated) record')
+    assert.deepEqual(done.body.keeper.absorbed_barcodes, [OWN[KEEP]])
+    const [audit] = mergeAudits()
+    assert.deepEqual(audit.absorbedBarcodes, [OWN[KEEP]], 'the audit names the barcode that did not survive, not the one that did')
+    assert.deepEqual(audit.barcodes, { keeper: { before: OWN[KEEP], after: OWN[M1] }, merged: { before: OWN[M1], after: OWN[KEEP] } })
+    const [history] = undoableHistories()
+    const snapshot = JSON.parse(one("SELECT payload_json FROM undo_snapshots WHERE kind = 'product.merge' ORDER BY id DESC").payload_json)
+    assert.deepEqual([snapshot.keeperBarcodeBefore, snapshot.dupBarcodeBefore], [OWN[KEEP], OWN[M1]], 'the undo payload carries both old barcodes')
+    await replay(history, 'undo')
+    assert.deepEqual([barcodeOf(KEEP), barcodeOf(M1)], [OWN[KEEP], OWN[M1]], 'undo puts each barcode back on its own record')
+    assert.equal(one('SELECT is_active FROM products WHERE id = ?', M1).is_active, 1)
+    await replay(history, 'redo')
+    assert.deepEqual([barcodeOf(KEEP), barcodeOf(M1)], [OWN[M1], OWN[KEEP]], 'redo repeats the swap')
+  })
+
+  await check('ROUTE: across a three-product group no barcode is lost at any step, whichever record the barcode is picked from', async () => {
+    fresh()
+    const group = await reviewGroup('barcode-group', { barcode: { source_id: M2 } })
+    for (const mergeId of [M1, M2]) {
+      const done = await merge(group.body(mergeId))
+      assert.equal(done.status, 200, JSON.stringify(done.body))
+      // Written at the step that merges the record it came from, so no step needs two homes for barcodes.
+      assert.equal(barcodeOf(KEEP), mergeId === M1 ? OWN[KEEP] : OWN[M2], `after step ${mergeId}`)
+      for (const original of Object.values(OWN)) assert.ok(allBarcodes().includes(original), `after step ${mergeId}: ${original} is still on a record`)
+    }
+    assert.deepEqual([barcodeOf(M1), barcodeOf(M2)], [OWN[M1], OWN[KEEP]], 'the merged record keeps its own barcode; the source record takes the survivor own')
+    const [newest] = undoableHistories()
+    await replay(newest, 'undo')
+    assert.deepEqual([barcodeOf(KEEP), barcodeOf(M1), barcodeOf(M2)], [OWN[KEEP], OWN[M1], OWN[M2]], 'undo puts every barcode back on its own record')
+  })
+
+  await check('ROUTE: only a barcode picked from a merged record swaps; picking it, or having none, displaces nothing; a leading-zero twin keeps both spellings', async () => {
+    fresh()
+    const own = await reviewGroup('barcode-own', { barcode: { source_id: KEEP } })
+    assert.equal((await merge(own.body(M1))).status, 200)
+    assert.deepEqual([barcodeOf(KEEP), barcodeOf(M1)], [OWN[KEEP], OWN[M1]])
+    assert.deepEqual(mergeAudits()[0].absorbedBarcodes, [OWN[M1]])
+    fresh()
+    state.native.db.exec(`UPDATE products SET barcode = '0${OWN[KEEP]}' WHERE id = ${M1}`)
+    const twin = await reviewGroup('barcode-twin', { barcode: { source_id: M1 } })
+    assert.equal((await merge(twin.body(M1))).status, 200)
+    assert.deepEqual([barcodeOf(KEEP), barcodeOf(M1)], [`0${OWN[KEEP]}`, OWN[KEEP]], 'each exact spelling stays on a record; by the leading-zero rule neither barcode is lost')
+    assert.deepEqual(mergeAudits()[0].absorbedBarcodes, [])
+    fresh()
+    state.native.db.exec(`UPDATE products SET barcode = NULL WHERE id = ${KEEP}`)
+    const blank = await reviewGroup('barcode-blank', { barcode: { source_id: M1 } })
+    assert.equal((await merge(blank.body(M1))).status, 200)
+    assert.deepEqual([barcodeOf(KEEP), barcodeOf(M1)], [OWN[M1], OWN[M1]])
+    assert.deepEqual(mergeAudits()[0].absorbedBarcodes, [])
   })
 
   console.log(failed ? `\n${failed} check(s) failed` : '\nall checks passed')
