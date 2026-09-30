@@ -163,7 +163,7 @@ async function escapeSessionQuarantine(page: Page): Promise<boolean> {
   return true
 }
 
-async function submitLogin(page: Page, account: E2EAccount): Promise<void> {
+async function submitLogin(page: Page, account: E2EAccount, password: string): Promise<void> {
   // Bounded, and deliberately not fatal: if the organization never arrives the
   // submit below still happens and fails with the product's own message, which
   // is far more informative than a timeout on a field nobody was asserting on.
@@ -196,7 +196,7 @@ async function submitLogin(page: Page, account: E2EAccount): Promise<void> {
     if (await escapeSessionQuarantine(page)) return 'was locked'
     if (!(await page.locator(USERNAME_FIELD).isVisible().catch(() => false))) return 'in flight'
     await fillCredential(page, USERNAME_FIELD, account.username)
-    await fillCredential(page, PASSWORD_FIELD, 'e2e-password')
+    await fillCredential(page, PASSWORD_FIELD, password)
     await page.getByRole('button', { name: /^Login$/ }).click({ timeout: 15_000 }).catch(() => { /* the form may be re-mounting */ })
     await page.waitForTimeout(1_500)
     return (await page.locator(APP_ROOT).count()) ? 'shell' : 'login form'
@@ -211,12 +211,12 @@ async function submitLogin(page: Page, account: E2EAccount): Promise<void> {
  * an account) but must be non-empty, because the real route rejects a blank
  * one and the form must be exercised the way a person uses it.
  */
-export async function signIn(page: Page, account: E2EAccount): Promise<void> {
+export async function signIn(page: Page, account: E2EAccount, password = 'e2e-password'): Promise<void> {
   if (!page.url().startsWith(ADMIN_ORIGIN)) {
     await page.goto(`${ADMIN_ORIGIN}/`, { waitUntil: 'load' })
   }
   await expect(page.locator(USERNAME_FIELD)).toBeVisible()
-  await submitLogin(page, account)
+  await submitLogin(page, account, password)
   // The shell paints before the account is resolved, so wait for the IDENTITY
   // as well -- otherwise a spec that switches users can assert against the
   // previous one.

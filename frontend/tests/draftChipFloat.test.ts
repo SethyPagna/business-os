@@ -7,7 +7,7 @@
 // Part 1 drives the pure clamp and storage helpers, part 2 pins the source
 // contract, part 3 drives the real component in headless Chromium at 360 px:
 // the count chip that always opens the list, restore, the two-moment discard
-// prompt, the default spot clear of the edge launchers, drag limits under the
+// prompt, the default spot clear of the bottom band, drag limits under the
 // header (also while it is scrolled away) and above the bottom nav, the
 // remembered position after a reload, arrow-key nudges, blocked storage,
 // Khmer, and md+ widths.
@@ -37,7 +37,7 @@ assert.deepEqual(draftChipBounds({ ...phone, headerBottom: null, navTop: null, i
 const tiny = draftChipBounds({ viewport: { width: 60, height: 100 }, chip: { width: 96, height: 44 }, insets: phone.insets, headerBottom: 64, navTop: 90 })
 assert.ok(tiny.maxX >= tiny.minX && tiny.maxY >= tiny.minY, 'a viewport smaller than the chip still yields a valid box')
 assert.deepEqual(clampDraftChipPosition({ x: -500, y: 9999 }, { minX: 8, maxX: 256, minY: 72, maxY: 632 }), { x: 8, y: 632 })
-assert.deepEqual(draftChipDefaultPosition({ minX: 8, maxX: 256, minY: 72, maxY: 632 }), { x: 132, y: 632 }, 'the default spot is bottom centre: the right edge holds the scroll buttons and the import tracker, the left edge the notes launcher')
+assert.deepEqual(draftChipDefaultPosition({ minX: 8, maxX: 256, minY: 72, maxY: 632 }), { x: 8, y: 380 }, 'the default spot is the left edge below the middle: the bottom band holds the scroll buttons, import tracker, notes launcher, toasts and the iOS install offer')
 assert.equal(draftChipMovedPastThreshold(6, 0), false, 'a 6 px wobble is still a tap')
 assert.equal(draftChipMovedPastThreshold(5, 5), true, 'a diagonal drag past 6 px is a drag')
 const throwing = () => ({ getItem: () => { throw new Error('blocked') }, setItem: () => { throw new Error('blocked') } })
@@ -170,15 +170,15 @@ await browser.run('PASS the Draft chip floats, lists, restores, asks before disc
   await open(360, 'n=1', ready)
   await evaluate(`localStorage.clear(), true`)
 
-  // One draft, default spot: bottom centre, just above the bottom nav, clear of the right-edge scroll buttons.
+  // One draft, default spot: left edge below the middle, clear of the bottom band (scroll buttons, toasts, install offer).
   await open(360, 'n=1', ready)
   const nav = await navTop()
   let box = await chipBox(); assert.ok(box)
   assert.equal(await chipText(), 'Draft 1', 'the chip always carries the count, even for one draft')
   assert.equal(await evaluate<string>(`document.querySelector('[data-draft-chip]').getAttribute('aria-label')`), 'Draft 1', 'aria-label names the chip and its count')
   assert.equal(await evaluate<string>(`document.querySelector('[data-draft-chip]').getAttribute('title')`), 'Draft 1', 'the tooltip matches')
-  assert.ok(Math.abs(box.left + box.width / 2 - 180) <= 1, `centred (centre ${box.left + box.width / 2})`)
-  assert.ok(Math.abs(box.bottom - (nav - 8)) <= 1, `sits just above the bottom nav (bottom ${box.bottom}, nav ${nav})`)
+  assert.ok(Math.abs(box.left - 8) <= 1, `hugs the left edge (left ${box.left})`)
+  assert.ok(box.top > 72 && box.bottom < nav - 8 - 100, `sits mid-screen, well above the bottom band (top ${box.top}, bottom ${box.bottom}, nav ${nav})`)
   assert.equal(box.height, 44, 'a 44 px touch target')
   const scrollButtons = await boxOf('#scroll-buttons'); assert.ok(scrollButtons)
   assert.equal(intersects(box, scrollButtons), false, 'the default spot does not cover the scroll buttons')
@@ -285,7 +285,7 @@ await browser.run('PASS the Draft chip floats, lists, restores, asks before disc
   // Blocked storage: the chip still renders at its default spot.
   await open(360, 'n=1&blockStorage=1', ready)
   box = await chipBox(); assert.ok(box)
-  assert.ok(Math.abs(box.left + box.width / 2 - 180) <= 1, 'blocked storage falls back to the default spot')
+  assert.ok(Math.abs(box.left - 8) <= 1, 'blocked storage falls back to the default spot')
 
   // Khmer: the Khmer word, with a Khmer line box.
   await open(360, 'n=1&lang=km', ready)

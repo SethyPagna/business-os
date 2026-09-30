@@ -47,10 +47,12 @@ export function clampDraftChipPosition(point: DraftChipPoint, bounds: DraftChipB
   }
 }
 
-// Bottom centre: the right edge holds the scroll buttons and the import
-// tracker, the left edge the notes launcher, and the middle is free.
+// Left edge, a little below the middle: the bottom band holds the scroll
+// buttons, import tracker, notes launcher, toasts and the iOS install offer
+// (which covered a bottom-centre chip), and the right edge the custom scroll
+// handle. The chip is draggable and remembers where it was put.
 export function draftChipDefaultPosition(bounds: DraftChipBounds): DraftChipPoint {
-  return { x: Math.round((bounds.minX + bounds.maxX) / 2), y: bounds.maxY }
+  return { x: bounds.minX, y: Math.round(bounds.minY + (bounds.maxY - bounds.minY) * 0.55) }
 }
 
 export function draftChipMovedPastThreshold(dx: number, dy: number): boolean {
