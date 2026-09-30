@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { buildStockLineRequest, lineEntryRefusal, resolveOpeningMode, sessionSteps, type StockSessionLine } from '../src/utils/stockSessionDraft.ts'
+import { buildStockLineRequest, lineEntryRefusal, resolveOpeningMode, sessionLinesRefusal, sessionSteps, type StockSessionLine } from '../src/utils/stockSessionDraft.ts'
 
 // The checkout is CRLF on disk and LF in the index; the pins are written
 // against LF so they hold in both.
@@ -127,7 +127,14 @@ runTest('a set can target zero; an add or a remove of nothing still cannot', () 
   assert.equal(refusalFor({ mode: 'remove', quantity: '0' })?.key, 'fast_stockin_qty', 'a remove of nothing is refused')
   assert.equal(refusalFor({ mode: 'add', quantity: '-1' })?.key, 'fast_stockin_qty', 'an add below zero is refused')
   // An Add item of Qty 0 is all free units (owner, 30 Sep); Next refuses an item with none at all.
-  assert.match(draftSource, /export function sessionLinesRefusal[^]*?line\.mode === 'add' && !line\.createPayload && line\.quantity \+ line\.freeQuantity <= 0/)
+  // Executed, not matched: an Add item with neither paid nor free units is refused at Next; free units alone are an item.
+  const item = (quantity: number, freeQuantity: number): StockSessionLine => ({
+    key: 'a', requestId: 'r', product: { id: 7, name: 'Serum' }, productName: 'Serum', mode: 'add', quantity, freeQuantity,
+    unitCost: '', sellingPrice: '', freeGoods: false, expiryDate: '', batchChoice: null, batchLabel: '', reason: '',
+    conditionTag: '', createdProduct: false, status: 'queued', detail: '',
+  } as unknown as StockSessionLine)
+  assert.equal(sessionLinesRefusal([item(0, 0)], { supplierName: 'Bong Long' })?.messageKey, 'fast_stockin_qty', 'an item of nothing is refused')
+  assert.notEqual(sessionLinesRefusal([item(0, 2)], { supplierName: 'Bong Long' })?.messageKey, 'fast_stockin_qty', 'free units alone are an item')
   assert.match(lineEntrySource, /label=\{mode === 'set' \? tr\('set_to', 'Set to'\) : tr\('stock_line_qty', 'Qty'\)\}/, 'the box says what a Set means')
   assert.equal(typeof en.fast_stockin_set_qty, 'string')
   assert.equal(typeof km.fast_stockin_set_qty, 'string')

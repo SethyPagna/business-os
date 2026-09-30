@@ -64,7 +64,8 @@ const stockSessionQuerySource = readFileSync(new URL('../../cloudflare/src/lib/s
 runTest('F2: the shipment header is entered once and rides every line', () => {
   // branch + received date + the SHARED supplier picker + paid/credit -- the
   // same field siblings every stock surface uses (D5a rule), in one row group
-  assert.match(sharedDetailsSource, /import SupplierPickerField, \{ type SupplierChoice \} from '\.\.\/shared\/SupplierPickerField\.tsx'/)
+  // The compact box wraps the picker's own names read and exact-name resolver (useSupplierSuggestions), not a copy of them.
+  assert.match(sharedDetailsSource, /import \{ useSupplierSuggestions, type SupplierChoice \} from '\.\.\/shared\/SupplierPickerField\.tsx'/)
   assert.match(sharedDetailsSource, /grid grid-cols-2 gap-1\.5 sm:grid-cols-4/, 'shared details stay compact without breaking the two-column phone layout')
   // a reopened session's header seeds the new one; the date is today otherwise
   assert.match(modalSource, /receivedDate: initialHeader\?\.receivedDate \|\| todayStr\(\)/)

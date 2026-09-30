@@ -26,7 +26,6 @@ const modal = read('../src/components/inventory/FastStockInModal.tsx')
 const lineEntry = read('../src/components/stock-session/StockSessionLineEntry.tsx')
 const items = read('../src/components/stock-session/StockSessionItems.tsx')
 const draftModule = read('../src/utils/stockSessionDraft.ts')
-const field = read('../src/components/shared/StockReasonField.tsx')
 const transport = read('../src/api/batchesTransport.ts')
 const batchesRoute = read('../../cloudflare/src/routes/batches.ts')
 const inventoryRoute = read('../../cloudflare/src/routes/inventory.ts')
@@ -102,7 +101,9 @@ runTest('every queued line freezes its reason and every adjust write sends it', 
 })
 
 runTest('the Stock Session has ONE reason control, fed by the saved-reason catalog', () => {
-  assert.match(lineEntry, /import StockReasonField from '\.\.\/shared\/StockReasonField\.tsx'/)
+  // The box lives in the float (components/shared is the catalog's app-shared chunk), fed by the saved-reason options.
+  assert.match(lineEntry, /import SuggestionTextInput from '\.\.\/shared\/SuggestionTextInput\.tsx'/)
+  assert.doesNotMatch(lineEntry, /StockReasonField\.tsx/)
   assert.match(modal, /import \{ useSavedStockReasonCatalog \} from '\.\.\/\.\.\/utils\/useSavedStockReasons\.ts'/)
   assert.match(modal, /const \{ reasons: savedReasons, reload: reloadReasons \} = useSavedStockReasonCatalog\('adjust'\)/)
   // The catalog fetch + type filter + { id, label } mapping lives in ONE
@@ -111,19 +112,23 @@ runTest('the Stock Session has ONE reason control, fed by the saved-reason catal
   assert.match(loader, /export function useSavedStockReasons\(type = 'adjust'\)/, 'adjust is the default catalog')
   for (const surface of [modal, lineEntry]) {
     assert.doesNotMatch(surface, /getInventoryReasons\(\)/, 'no surface re-implements the catalog read')
-    assert.doesNotMatch(surface, /savedReasons\.map/, 'no second copy of the reason list markup')
+    // The line entry maps the catalog into suggestion OPTIONS (data); no surface renders its own chip/list markup from it.
+    assert.doesNotMatch(surface, /savedReasons\.map\([^]{0,160}?<(?:button|li|span|div)\b/, 'no second copy of the reason list markup')
   }
-  assert.match(lineEntry, /<StockReasonField\n\s+variant="compact"\n\s+id="stock-session-reason"[^]*?onEnter=\{onAdd\}[^]*?savedReasons=\{savedReasons\}/, 'Enter in the reason box queues the line')
-  assert.equal((lineEntry.match(/<StockReasonField/g) || []).length, 1)
+  assert.match(lineEntry, /const reasonOptions = useMemo\(\(\) => savedReasons\.map\(/, 'the options are the saved reasons')
+  assert.match(lineEntry, /<SuggestionTextInput\n\s+id="stock-session-reason"\n\s+value=\{reason\}\n\s+options=\{reasonOptions\}/)
+  assert.match(lineEntry, /event\.key !== 'Enter'[^]*?onAdd\(\)/, 'Enter in the reason box queues the line')
+  assert.equal((lineEntry.match(/id="stock-session-reason"/g) || []).length, 1, 'one reason control')
+  assert.match(modal, /savedReasons=\{savedReasons\}/, 'the modal feeds the catalog into the line entry')
   // The box stops BELOW the Worker cap (STOCK_REASON_MAX_LENGTH in
   // cloudflare/src/lib/stockReason.ts) on purpose: the headroom is what lets
   // undo/redo prepend 'Undo: ' to a full-length reason and still be accepted
   // by the same wire that stored it.
-  const boxCap = Number((field.match(/const REASON_MAX_LENGTH = (\d+)/) || [])[1])
+  const boxCap = Number((lineEntry.match(/const REASON_MAX_LENGTH = (\d+)/) || [])[1])
   const workerCap = Number((read('../../cloudflare/src/lib/stockReason.ts').match(/STOCK_REASON_MAX_LENGTH = (\d+)/) || [])[1])
   assert.ok(boxCap > 0 && workerCap > 0, 'both caps must be readable')
   assert.ok(boxCap + 'Undo: '.length <= workerCap, `the reason box (${boxCap}) must leave room for the undo prefix under the Worker cap (${workerCap})`)
-  assert.match(field, /onChange\(next\.slice\(0, REASON_MAX_LENGTH\)\)/, 'the compact box enforces the same cap')
+  assert.match(lineEntry, /onReason\(next\.slice\(0, REASON_MAX_LENGTH\)\)/, 'the box enforces the same cap')
   for (const key of ['reason', 'reason_placeholder']) {
     assert.equal(typeof en[key], 'string', `en.${key}`)
     assert.equal(typeof km[key], 'string', `km.${key}`)

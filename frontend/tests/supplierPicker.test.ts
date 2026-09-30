@@ -27,17 +27,20 @@ const sessionDetails = read('components/stock-session/StockSessionSharedDetails.
 const stockInSessions = read('components/products/StockInSessionsSection.tsx')
 const transport = read('api/batchesTransport.ts')
 
-// --- The cross-surface law: every manual add surface renders the ONE
-// shared picker. A surface dropping this import is exactly the "one place
-// not the other" inconsistency the user rejected on D4.
+// --- The cross-surface law: every manual add surface takes its supplier names
+// and its exact-name resolver from the ONE shared picker module. The compact
+// boxes render their own input (components/shared stays lean for the public
+// catalog), so the law is the shared hook, not a shared element. A surface
+// that re-implements the read is exactly the "one place not the other"
+// inconsistency the user rejected on D4.
 for (const [name, src] of [
   ['StockSessionSharedDetails', sessionDetails],
   ['StockInSessionsSection', stockInSessions],
 ] as const) {
-  assert.match(src, /import SupplierPickerField(?:, \{[^}]*\})? from ['"].*shared\/SupplierPickerField/, `${name} imports the shared picker`)
-  assert.match(src, /<SupplierPickerField/, `${name} renders the shared picker`)
+  assert.match(src, /import \{[^}]*\buseSupplierSuggestions\b[^}]*\} from ['"].*shared\/SupplierPickerField/, `${name} imports the shared picker hook`)
+  assert.match(src, /useSupplierSuggestions\(value, onChange\)/, `${name} reads suppliers through the shared hook`)
 }
-ok('every manual stock surface renders the ONE shared SupplierPickerField (cross-surface rule): the Stock Session and the stock-in session editors')
+ok('every manual stock surface reads suppliers through the ONE shared picker hook (cross-surface rule): the Stock Session and the stock-in session editors')
 
 // --- The picker itself: typing always breaks the contact link (an id may
 // only ever come from an explicit pick), and picks land on mousedown so
@@ -90,11 +93,12 @@ ok('picker: free text stays name-only, picks are mousedown-safe on mouse and tou
 // read-only -- no input element in that branch, so no choice can be
 // collected that the server would ignore.
 {
-  // Two variants since UI-STOCK-2: the compact one (the Stock Session's
-  // shared details) and the default. Each has its own locked branch.
+  // One picker again: the Stock Session's compact box lives in the float and
+  // is never locked (its supplier is the session's own), so the picker keeps
+  // the single locked branch.
   const text = picker.replace(/\r\n/g, '\n')
   const lockedStarts = [...text.matchAll(/\n {2,4}if \(lockedName\) \{/g)].map((match) => match.index ?? -1)
-  assert.equal(lockedStarts.length, 2, 'both variants have a locked branch')
+  assert.equal(lockedStarts.length, 1, 'the picker has one locked branch')
   // The branch ends at the closing brace on its own indentation.
   const blockAt = (start: number): string => {
     const indent = /^\n( *)/.exec(text.slice(start))?.[1] ?? ''
@@ -105,8 +109,7 @@ ok('picker: free text stays name-only, picks are mousedown-safe on mouse and tou
     const lockedBlock = blockAt(start)
     assert.ok(lockedBlock.length > 0 && !lockedBlock.includes('<input') && !lockedBlock.includes('<SuggestionTextInput'), 'locked variant renders NO input')
   }
-  const defaultLocked = blockAt(lockedStarts[1])
-  assert.ok(defaultLocked.includes('supplier_first_attribution'), 'the default locked variant explains first-attribution-sticks')
+  assert.ok(blockAt(lockedStarts[0]).includes('supplier_first_attribution'), 'the locked branch explains first-attribution-sticks')
   ok('picker: attributed lots render read-only, never a dead input')
 }
 
