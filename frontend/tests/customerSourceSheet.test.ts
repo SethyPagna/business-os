@@ -46,8 +46,8 @@ const record: SaleRecord = {
   id: 'event:1', kind: 'customer_changed',
   changes: [{
     field: 'customer_details',
-    before: { state: 'known_value', value: { phone: '012 345 678', notes: null } },
-    after: { state: 'known_value', value: { phone: '012 999 888', notes: 'new note' } },
+    before: { state: 'known_value', value: { name: 'Dara', phone: 'not_recorded', gender: 'Female' } },
+    after: { state: 'known_value', value: { name: 'Dara B', phone: 'changed', gender: 'Male' } },
   }],
 } as unknown as SaleRecord
 assert.ok(SALE_RECORD_FIELD_RULES.customer_details, 'the record field has a browser rule')
@@ -55,9 +55,12 @@ const rows = saleRecordFieldRows(record)
 assert.equal(rows.length, 1)
 assert.equal(rows[0].labelKey, 'customer_details')
 const fmt = (n: number | string) => `$${n}`
-assert.deepEqual(formatSaleRecordValueLinesLocalized('customer_details', { phone: '012 345 678', notes: null }, fmt, fmt), ['Phone: 012 345 678', 'Notes: None'])
-assert.deepEqual(formatSaleRecordValueLinesLocalized('customer_details', { phone: '012 999 888', notes: 'new note' }, fmt, fmt), ['Phone: 012 999 888', 'Notes: new note'])
-assert.notDeepEqual(formatSaleRecordValueLinesLocalized('customer_details', { phone: 'x' }, fmt, fmt), ['Value changed'], 'never the generic label for a readable value')
+assert.deepEqual(formatSaleRecordValueLinesLocalized('customer_details', { name: 'Dara', phone: 'not_recorded', email: 'not_recorded', gender: 'Female' }, fmt, fmt), ['Name: Dara', 'Phone: Not recorded', 'Email: Not recorded', 'Gender: Female'])
+assert.deepEqual(formatSaleRecordValueLinesLocalized('customer_details', { name: 'Dara B', phone: 'changed', address: 'changed', notes: 'changed', gender: 'male' }, fmt, fmt), ['Name: Dara B', 'Phone: Value changed', 'Address: Value changed', 'Notes: Value changed', 'Gender: Male'])
+const khmer: Record<string, string> = { male: 'ប្រុស', female: 'ស្រី', phone: 'ទូរស័ព្ទ', value_changed: 'តម្លៃបានប្តូរ', not_recorded: 'មិនបានកត់ត្រា' }
+const inKhmer = (key: string, fallback: string) => khmer[key] || fallback
+assert.deepEqual(formatSaleRecordValueLinesLocalized('customer_details', { phone: 'changed', gender: 'Female' }, fmt, fmt, inKhmer), ['ទូរស័ព្ទ: តម្លៃបានប្តូរ', 'Gender: ស្រី'], 'gender is translated, never shown raw')
+assert.ok(!formatSaleRecordValueLinesLocalized('customer_details', { phone: '012 999 888', notes: 'allergic' }, fmt, fmt).join(' ').match(/012|allergic/), 'a quoted phone or note is never rendered, even if one were stored')
 console.log('PASS the sale records show what the Worker writes for a customer-details edit')
 
 const pos = read('../src/components/pos/POS.tsx')
@@ -74,9 +77,11 @@ assert.match(sales, /source=\{\{ kind: 'sale', saleId: Number\(saleCustomerProfi
 assert.match(sales, /pushAction=\{saleCustomerProfile\.mode === 'edit' \? actionHistory\.pushAction : undefined\}/, 'an edit from a sale stays undoable')
 const detail = read('../src/components/sales/SaleDetailModal.tsx')
 assert.match(detail, /onCustomerDetails && !customerIsAnonymous && sale\.customer_id/, 'never offered for a walk-in or an unlinked sale')
+const modal = read('../src/components/contacts/CustomerSourceModal.tsx')
+for (const code of ['sale_not_found', 'sale_customer_mismatch', 'sale_not_editable']) assert.match(modal, new RegExp(code), `the sheet words the Worker's ${code} refusal`)
 const en = JSON.parse(read('../src/lang/en.json')) as Record<string, string>
 const km = JSON.parse(read('../src/lang/km.json')) as Record<string, string>
-for (const key of ['customer_details_edit', 'customer_edit_not_found', 'customer_details']) {
+for (const key of ['customer_details_edit', 'customer_edit_not_found', 'customer_details', 'customer_sale_mismatch', 'customer_sale_not_editable', 'sale_not_found']) {
   assert.ok(en[key] && km[key], `${key} exists in both packs`)
   assert.notEqual(en[key], km[key], `${key} is translated`)
 }

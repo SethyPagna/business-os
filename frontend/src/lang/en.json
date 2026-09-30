@@ -1665,6 +1665,8 @@
   "customer_deleted": "Customer deleted",
   "customer_details": "Customer Details",
   "customer_edit_not_found": "This customer could not be loaded.",
+  "customer_sale_mismatch": "This sale is not linked to that customer.",
+  "customer_sale_not_editable": "This sale is cancelled or fully returned, so its customer cannot be edited from it.",
   "customer_details_edit": "Edit customer details",
   "customer_membership_id": "Membership ID",
   "customer_name": "Customer Name",

@@ -22,6 +22,14 @@ function tr(t: TranslateFn, key: string, fallback: string): string {
   return value && value !== key ? value : fallback
 }
 
+// The Worker refuses a sale source that is gone, not this customer's, or no longer
+// open; each refusal carries a code so the message shows in the viewer's language.
+const SALE_SOURCE_REFUSALS: Record<string, [string, string]> = {
+  sale_not_found: ['sale_not_found', 'Sale not found'],
+  sale_customer_mismatch: ['customer_sale_mismatch', 'This sale is not linked to that customer.'],
+  sale_not_editable: ['customer_sale_not_editable', 'This sale is cancelled or fully returned, so its customer cannot be edited from it.'],
+}
+
 // One customer sheet for the POS and the sales flow (owner, 30 Sep 2026). It is the
 // same form as Contacts; the Worker narrows what a request with a `source` may
 // change (name, phone, email, address, notes, gender) and records it in the audit
@@ -92,7 +100,8 @@ export default function CustomerSourceModal({ customerId = null, source, t, noti
     } catch (error) {
       const duplicateDecisionRequired = readContactDuplicateDecisionError(error)
       if (duplicateDecisionRequired) return { duplicateDecisionRequired }
-      notify(error instanceof Error ? error.message : tr(t, 'update_failed', 'Failed'), 'error')
+      const refusal = SALE_SOURCE_REFUSALS[String((error as { code?: unknown } | null)?.code || '')]
+      notify(refusal ? tr(t, refusal[0], refusal[1]) : error instanceof Error ? error.message : tr(t, 'update_failed', 'Failed'), 'error')
       return { success: false }
     }
   }

@@ -1665,6 +1665,8 @@
   "customer_deleted": "បានលុបអតិថិជន",
   "customer_details": "ព័ត៌មានលម្អិតអតិថិជន",
   "customer_edit_not_found": "មិនអាចផ្ទុកអតិថិជននេះបានទេ។",
+  "customer_sale_mismatch": "ការលក់នេះមិនត្រូវបានភ្ជាប់ជាមួយអតិថិជននេះទេ។",
+  "customer_sale_not_editable": "ការលក់នេះត្រូវបានបោះបង់ ឬបានប្រគល់ទំនិញវិញទាំងស្រុងហើយ ដូច្នេះមិនអាចកែអតិថិជនពីការលក់នេះបានទេ។",
   "customer_details_edit": "កែប្រែព័ត៌មានលម្អិតអតិថិជន",
   "customer_membership_id": "លេខសមាជិក",
   "customer_name": "ឈ្មោះអតិថិជន",
