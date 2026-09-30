@@ -65,6 +65,32 @@ const D1_QUEUE_OVERLOAD_ERROR_PATTERN = /D1 DB is overloaded|Requests queued for
 
 const D1_QUOTA_EXCEEDED_ERROR_PATTERN = /Your account has exceeded D1's (?:free tier daily row (?:read|write) limit|maximum account storage limit)|Exceeded maximum DB size/i
 
+// Only the daily row limits belong to the Free plan; the storage limits above also
+// bind paid accounts, so they prove nothing about the plan.
+const D1_FREE_TIER_QUOTA_PATTERN = /free tier daily row (?:read|write) limit/i
+
+// A dead Free quota fails every request, so the alert is one line per window.
+const PLAN_MISMATCH_ALERT_INTERVAL_MS = 10 * 60_000
+let lastPlanMismatchAlertAt: number | null = null
+
+// PLAN_TIER says paid (planTier.ts reads anything but "free" as paid, unset
+// included) yet D1 answers with the Free plan's quota: the Paid profile is live
+// on a Free account. Scheduled backups and the Paid batch sizes then burn the
+// Free quota, which is how the 30 Sep 2026 outage began. `planTier` is
+// undefined when the caller has no plan (tests), which stays silent.
+function reportPlanMismatch(message: string, planTier: string | undefined): void {
+  if (planTier === undefined || planTier.trim().toLowerCase() === 'free') return
+  if (!D1_FREE_TIER_QUOTA_PATTERN.test(message)) return
+  const now = Date.now()
+  if (lastPlanMismatchAlertAt !== null && now - lastPlanMismatchAlertAt < PLAN_MISMATCH_ALERT_INTERVAL_MS) return
+  lastPlanMismatchAlertAt = now
+  console.error('[plan-mismatch] ALERT: D1 refused a query with the Free-plan daily quota while PLAN_TIER says paid. The Cloudflare account is probably on the Free plan: upgrade it, or deploy the free profile (wrangler.free.toml).')
+}
+
+export function __resetPlanMismatchAlertForTests(): void {
+  lastPlanMismatchAlertAt = null
+}
+
 // Checked BEFORE the transient pattern, because D1 prefixes essentially
 // every error it surfaces with `D1_ERROR:` -- which the pattern above
 // matches -- so without this list a bad column name, a constraint
@@ -86,11 +112,12 @@ const D1_QUOTA_EXCEEDED_ERROR_PATTERN = /Your account has exceeded D1's (?:free 
 // already handle this class explicitly; ordinary requests must fail once.
 const DETERMINISTIC_SQL_ERROR_PATTERN = /CPU time limit|exceeded its CPU time limit|too many SQL variables|no such (table|column|function)|constraint failed|syntax error|datatype mismatch|ambiguous column|incomplete input|bad JSON path/i
 
-async function withD1Retry<T>(run: () => Promise<T>): Promise<T> {
+async function withD1Retry<T>(run: () => Promise<T>, planTier?: string): Promise<T> {
   try {
     return await run()
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
+    if (D1_QUOTA_EXCEEDED_ERROR_PATTERN.test(message)) reportPlanMismatch(message, planTier)
     if (DETERMINISTIC_SQL_ERROR_PATTERN.test(message) || D1_QUEUE_OVERLOAD_ERROR_PATTERN.test(message) || D1_QUOTA_EXCEEDED_ERROR_PATTERN.test(message)) throw error
     if (!TRANSIENT_D1_ERROR_PATTERN.test(message)) throw error
     await new Promise((resolve) => setTimeout(resolve, 200))
@@ -137,15 +164,15 @@ function timedAttempt<R>(attempt: () => Promise<R>, metas: (result: R) => unknow
   }
 }
 
-function metered<R>(attempt: () => Promise<R>, metas: (result: R) => unknown[]): Promise<R> {
-  return withD1Retry(timedAttempt(attempt, metas))
+function metered<R>(attempt: () => Promise<R>, metas: (result: R) => unknown[], planTier?: string): Promise<R> {
+  return withD1Retry(timedAttempt(attempt, metas), planTier)
 }
 
 const metaOf = (result: { meta?: unknown }) => [result?.meta]
 const metasOf = (results: Array<{ meta?: unknown }>) => (Array.isArray(results) ? results.map((result) => result?.meta) : [])
 
 class D1CompatStatement {
-  constructor(private readonly db: D1Database, private readonly sql: string) {}
+  constructor(private readonly db: D1Database, private readonly sql: string, private readonly planTier?: string) {}
 
   private bound(params: BindParams) {
     const { sql, values } = translate(this.sql, params)
@@ -160,17 +187,17 @@ class D1CompatStatement {
   // scripts/test-request-metrics-pure.cjs for no row, one row, many rows and
   // null columns).
   async get<T = Record<string, unknown>>(params?: BindParams): Promise<T | undefined> {
-    const result = await metered(() => this.bound(params).all<T>(), metaOf)
+    const result = await metered(() => this.bound(params).all<T>(), metaOf, this.planTier)
     return result.results?.[0] ?? undefined
   }
 
   async all<T = Record<string, unknown>>(params?: BindParams): Promise<T[]> {
-    const result = await metered(() => this.bound(params).all<T>(), metaOf)
+    const result = await metered(() => this.bound(params).all<T>(), metaOf, this.planTier)
     return result.results ?? []
   }
 
   async run(params?: BindParams): Promise<{ changes: number; lastInsertRowid: number }> {
-    const result = await metered(() => this.bound(params).run(), metaOf)
+    const result = await metered(() => this.bound(params).run(), metaOf, this.planTier)
     return {
       changes: result.meta?.changes ?? 0,
       lastInsertRowid: Number(result.meta?.last_row_id ?? 0),
@@ -194,12 +221,14 @@ export class D1Compat {
   // import_auto_merges deliberately stay on the main DB for that reason).
   staging: D1Compat
 
-  constructor(private readonly d1: D1Database) {
+  // `planTier` is the deployment's raw PLAN_TIER, used only to name a plan
+  // mismatch when D1 reports the Free quota (see reportPlanMismatch).
+  constructor(private readonly d1: D1Database, private readonly planTier?: string) {
     this.staging = this
   }
 
   prepare(sql: string): D1CompatPreparedStatement {
-    return new D1CompatStatement(this.d1, sql)
+    return new D1CompatStatement(this.d1, sql, this.planTier)
   }
 
   // Real atomic multi-statement write, using D1's actual db.batch() API.
@@ -226,7 +255,7 @@ export class D1Compat {
   async batch(statements: Array<{ sql: string; params?: BindParams }>): Promise<D1Result[]> {
     const prepared = this.prepareBatch(statements)
     // One meta per statement: a batch of N counts as N statements.
-    return metered(() => this.d1.batch(prepared), metasOf)
+    return metered(() => this.d1.batch(prepared), metasOf, this.planTier)
   }
 
   /** Explicit single-attempt atomic write. Only callers with durable idempotency
@@ -236,7 +265,12 @@ export class D1Compat {
    */
   async batchOnce(statements: Array<{ sql: string; params?: BindParams }>): Promise<D1Result[]> {
     // Single attempt by contract: timed, never retried.
-    return timedAttempt(() => this.d1.batch(this.prepareBatch(statements)), metasOf)()
+    try {
+      return await timedAttempt(() => this.d1.batch(this.prepareBatch(statements)), metasOf)()
+    } catch (error) {
+      reportPlanMismatch(error instanceof Error ? error.message : String(error), this.planTier)
+      throw error
+    }
   }
 
   async transaction<T>(fn: (db: D1Compat) => Promise<T>): Promise<T> {
@@ -248,13 +282,14 @@ export class D1Compat {
   }
 }
 
-export function getDb(env: { DB: D1Database; IMPORT_DB?: D1Database }): D1Compat {
-  const db = new D1Compat(env.DB)
+export function getDb(env: { DB: D1Database; IMPORT_DB?: D1Database; PLAN_TIER?: string }): D1Compat {
+  const planTier = env.PLAN_TIER ?? ''
+  const db = new D1Compat(env.DB, planTier)
   // Route the bulk import staging tables to their own D1 when the optional
   // IMPORT_DB binding is present (production). Without it, db.staging stays
   // pointed at the main DB (see the field's comment) and everything works
   // against a single database exactly as before.
-  if (env.IMPORT_DB) db.staging = new D1Compat(env.IMPORT_DB)
+  if (env.IMPORT_DB) db.staging = new D1Compat(env.IMPORT_DB, planTier)
   return db
 }
 
