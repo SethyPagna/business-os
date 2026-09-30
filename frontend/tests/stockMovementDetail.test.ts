@@ -63,7 +63,7 @@ test('frontend revert eligibility mirrors the backend allowlist', () => {
   }
 })
 
-test('a stock-in session undo/redo counter-movement is not offered for revert', () => {
+test('session counter-movement markers do not replace the server preview authority', () => {
   assert.equal(isStockSessionGenerationMovement({ reason: 'Stock session op-1 undo generation 1', reference_id: 12 }), true)
   assert.equal(isStockSessionGenerationMovement({ reason: 'Stock session op-1 redo generation 2', reference_id: '12' }), true)
   assert.equal(isStockSessionGenerationMovement({ reason: 'Stock-in session op-1', reference_id: 12 }), false, 'the session receipt itself stays revertible')
@@ -72,7 +72,8 @@ test('a stock-in session undo/redo counter-movement is not offered for revert', 
   const sessionSource = readFileSync(new URL('../../cloudflare/src/lib/stockSession.ts', import.meta.url), 'utf8')
   assert.ok(sessionSource.includes('`Stock session ${op.id} ${direction} generation ${generation + 1}`'), 'Worker undo/redo reason template located')
   const section = readFileSync(new URL('../src/components/products/StockChangeSection.tsx', import.meta.url), 'utf8')
-  assert.match(section, /isRevertibleStockMovement\(detail\.movement_type, detail\.reference_id\) && !isStockSessionGenerationMovement\(detail\)/)
+  assert.doesNotMatch(section, /&& !isStockSessionGenerationMovement\(detail\)/)
+  assert.match(section, /getStockMovementRevertPreview\(detail\.id\)/)
 })
 
 test('frontend movement allowlists stay in source parity with the Worker', () => {

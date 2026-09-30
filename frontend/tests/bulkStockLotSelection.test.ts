@@ -97,12 +97,12 @@ test('the tag choice is offered on a Set only once its preview lowers stock', ()
   assert.match(fast, /conditionTag: mode === 'set' && !setLowers \? '' : conditionTag/)
 })
 
-test('history replays a scoped Set with its generation; the ledger never offers Revert', () => {
+test('history and the ledger both offer a scoped Set replay with its generation', () => {
   // actionHistory.ts pulls runtime loaders, so its generation list is read as source.
   assert.match(read('../src/utils/actionHistory.ts'), /\|\| applier === 'stock\.quantity_set'/,
     'a scoped Set replays with expected_generation like every other generation-guarded applier')
-  assert.equal(isRevertibleStockMovement('remove', 'stock-set:abc:0'), false)
-  assert.equal(isRevertibleStockMovement('adjustment', 'stock-set:abc:2'), false)
+  assert.equal(isRevertibleStockMovement('remove', 'stock-set:abc:0'), true)
+  assert.equal(isRevertibleStockMovement('adjustment', 'stock-set:abc:2'), true)
   assert.equal(isRevertibleStockMovement('remove', null), true, 'CONTROL: a plain removal stays revertible')
 })
 
