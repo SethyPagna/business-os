@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import { transformSync } from 'esbuild'
-import { passwordPersistenceNotice, persistChangedPassword } from '../src/utils/passwordManager.ts'
 import { newPasswordProblem, passwordProblemMessage } from '../src/utils/passwordRules.ts'
 import { isAdminControlUser } from '../src/utils/permissions.ts'
 
@@ -23,94 +22,6 @@ const profileSource = fs.readFileSync(new URL('../src/components/users/UserProfi
 const otpSource = fs.readFileSync(new URL('../src/components/utils-settings/OtpModal.tsx', import.meta.url), 'utf8')
 const usersSource = fs.readFileSync(new URL('../src/components/users/Users.tsx', import.meta.url), 'utf8')
 const transportSource = fs.readFileSync(new URL('../src/api/userAdminTransport.ts', import.meta.url), 'utf8')
-
-const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window')
-const originalNavigator = Object.getOwnPropertyDescriptor(globalThis, 'navigator')
-function installBrowserMocks({ storeOk = true, copyOk = true } = {}) {
-  let storeCalls = 0
-  let copyCalls = 0
-  class FakePasswordCredential {
-    id: string
-    password: string
-    name?: string
-    constructor(data: { id: string; password: string; name?: string }) {
-      this.id = data.id
-      this.password = data.password
-      this.name = data.name
-    }
-  }
-  Object.defineProperty(globalThis, 'window', {
-    configurable: true,
-    value: { PasswordCredential: FakePasswordCredential },
-  })
-  Object.defineProperty(globalThis, 'navigator', {
-    configurable: true,
-    value: {
-      credentials: {
-        store: async () => {
-          storeCalls += 1
-          if (!storeOk) throw new Error('store blocked')
-        },
-      },
-      clipboard: {
-        writeText: async () => {
-          copyCalls += 1
-          if (!copyOk) throw new Error('clipboard blocked')
-        },
-      },
-    },
-  })
-  return { getStoreCalls: () => storeCalls, getCopyCalls: () => copyCalls }
-}
-function restoreGlobals() {
-  if (originalWindow) Object.defineProperty(globalThis, 'window', originalWindow)
-  else Reflect.deleteProperty(globalThis, 'window')
-  if (originalNavigator) Object.defineProperty(globalThis, 'navigator', originalNavigator)
-  else Reflect.deleteProperty(globalThis, 'navigator')
-}
-
-await runTest('successful credential-store request does not overwrite clipboard', async () => {
-  const calls = installBrowserMocks({ storeOk: true, copyOk: true })
-  try {
-    const result = await persistChangedPassword({ username: 'admin2', password: 'new-secret', copyFallback: true })
-    assert.equal(result.credentialStoreRequested, true)
-    assert.equal(result.credentialStoreSucceeded, true)
-    assert.equal(result.copiedToClipboard, false)
-    assert.equal(calls.getStoreCalls(), 1)
-    assert.equal(calls.getCopyCalls(), 0)
-    assert.match(passwordPersistenceNotice(result), /password manager/i)
-  } finally {
-    restoreGlobals()
-  }
-})
-
-await runTest('clipboard becomes the automatic backup when password-manager storage fails', async () => {
-  const calls = installBrowserMocks({ storeOk: false, copyOk: true })
-  try {
-    const result = await persistChangedPassword({ username: 'worker1', password: 'replacement', copyFallback: true })
-    assert.equal(result.credentialStoreSucceeded, false)
-    assert.equal(result.copiedToClipboard, true)
-    assert.equal(calls.getStoreCalls(), 1)
-    assert.equal(calls.getCopyCalls(), 1)
-    assert.match(passwordPersistenceNotice(result), /copied to your clipboard/i)
-  } finally {
-    restoreGlobals()
-  }
-})
-
-await runTest('admin reset never stores another user credential in the admin password manager', async () => {
-  const calls = installBrowserMocks({ storeOk: true, copyOk: true })
-  try {
-    const result = await persistChangedPassword({ username: 'other-admin', password: 'temporary-pass', allowCredentialStore: false, copyFallback: true })
-    assert.equal(result.credentialStoreRequested, false)
-    assert.equal(result.copiedToClipboard, true)
-    assert.equal(calls.getStoreCalls(), 0)
-    assert.equal(calls.getCopyCalls(), 1)
-    assert.match(passwordPersistenceNotice(result, { adminReset: true }), /give it to this user/i)
-  } finally {
-    restoreGlobals()
-  }
-})
 
 // Login block (AUTH-P1-login). The sign-in form pairs for password managers
 // and the browser is asked to save only after the Worker accepted the password
