@@ -179,14 +179,16 @@ async function main() {
     // keeper's on-hand catalog cost (catalogCostRecomputeIfChangedSql).
     // 19 -> 21: MERGE-UNBLOCK -- the same batch closes the Undo of any stock-in
     // session that touches either product (audit row + status update).
-    [3, 8, 21, 22],
+    // 21 -> 22 (round 2): the discarded-product-unmoved guard joined the write
+    // batch, so it is now as long as the 22-statement batch and the set folds them.
+    [3, 8, 22],
     'the no-stock fold has bounded snapshot/write/fingerprint/finalize statement groups',
   )
   const { batchStatementCounts: _batchStatementCounts, ...reportedCounters } = counters
 
   console.log(JSON.stringify({
     candidates: 1600, chunk: 25, scanMs: Number(scanMs.toFixed(1)), runMs: Number(runMs.toFixed(1)),
-    foldAdapterCalls, foldCallsPerCase: foldAdapterCalls / 25, foldBatchSizes: [22, 21, 8, 3],
+    foldAdapterCalls, foldCallsPerCase: foldAdapterCalls / 25, foldBatchSizes: [22, 8, 3],
     ...reportedCounters,
   }))
   console.log('test-product-merge-bulk-benchmark: all checks passed')
