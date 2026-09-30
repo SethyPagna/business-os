@@ -138,11 +138,13 @@ function quoted(values: readonly string[]): string {
  *                                   writing a 'remove' stamped
  *                                   reference_id 'revert:<id>'. That undoes an
  *                                   inflow; nothing was lost.
- *  4. no revert exists FOR this row (keyed by its own numeric id)
- *                                   a removal that was later reverted put the
- *                                   goods back on the shelf, so it must not
- *                                   count. Same correlated lookup
- *                                   stockInSessionsQuery.ts already uses.
+ *  4. the numeric revert chain is not currently reversed
+ *                                   odd counter depth cancels the original
+ *                                   loss; even depth restores it in its
+ *                                   original reporting period. Counter rows
+ *                                   never become a second loss. Reverts are
+ *                                   appended, so increasing ids bound the
+ *                                   indexed walk without a depth cutoff.
  *  5. no revert exists FOR this row's reference_id (write_off/delete only)
  *                                   DISPOSE and productDelete's write_off
  *                                   rows, and bulkDeleteEngine's 'delete'
@@ -168,8 +170,19 @@ export function removalLossMovementWhere(alias = 'm'): string {
     `${alias}.quantity > 0`,
     `(${alias}.reference_id IS NULL OR CAST(${alias}.reference_id AS TEXT) NOT LIKE 'revert:%')`,
     `COALESCE(${alias}.reason, '') NOT IN (${quoted(REMOVAL_LOSS_EXCLUDED_REASONS)})`,
-    `NOT EXISTS (SELECT 1 FROM inventory_movements rv
-       WHERE rv.reference_id = 'revert:' || CAST(${alias}.id AS TEXT))`,
+    `NOT EXISTS (
+       WITH RECURSIVE loss_reverts(id, depth) AS (
+         SELECT rv.id, 1 FROM inventory_movements rv
+         WHERE rv.reference_id = 'revert:' || CAST(${alias}.id AS TEXT) AND rv.id > ${alias}.id
+         UNION ALL
+         SELECT rv.id, chain.depth + 1 FROM inventory_movements rv
+         JOIN loss_reverts chain ON rv.reference_id = 'revert:' || CAST(chain.id AS TEXT)
+         WHERE rv.id > chain.id
+       )
+       SELECT 1 FROM loss_reverts chain WHERE chain.depth % 2 = 1
+         AND NOT EXISTS (SELECT 1 FROM inventory_movements next_revert
+           WHERE next_revert.reference_id = 'revert:' || CAST(chain.id AS TEXT) AND next_revert.id > chain.id)
+     )`,
     `(${alias}.movement_type NOT IN ('write_off', 'delete') OR ${alias}.reference_id IS NULL
        OR NOT EXISTS (SELECT 1 FROM inventory_movements rv2
          WHERE rv2.reference_id = 'revert:' || CAST(${alias}.reference_id AS TEXT)))`,

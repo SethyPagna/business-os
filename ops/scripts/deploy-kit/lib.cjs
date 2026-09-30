@@ -341,7 +341,12 @@ function checkVersion(json, sha, plan) {
   if (!rev) problems.push('no revision reported')
   else if (rev.endsWith('-dirty')) problems.push(`revision ${rev} is a DIRTY build`)
   else if (!sha.toLowerCase().startsWith(rev.toLowerCase().slice(0, 12)) || rev.length < 7) problems.push(`revision ${rev} is not ${sha.slice(0, 12)}`)
-  if (plan && json && json.tier && json.tier !== plan) problems.push(`tier is ${json.tier}, expected ${plan}`)
+  if (plan) {
+    const tier = json && json.tier
+    if (tier == null || tier === '') problems.push(`no tier reported, expected ${plan}`)
+    else if (tier !== 'paid' && tier !== 'free') problems.push(`invalid tier reported, expected ${plan}`)
+    else if (tier !== plan) problems.push(`tier is ${tier}, expected ${plan}`)
+  }
   return { ok: problems.length === 0, problems, revision: rev }
 }
 

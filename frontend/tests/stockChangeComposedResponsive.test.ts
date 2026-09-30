@@ -57,6 +57,18 @@ const mockModules: Record<string, string> = {
     }
     export async function editStockMovementReason() { return { success: true } }
   `,
+  '../../api/actionHistoryTransport.ts': `
+    export async function getStockMovementRevertPreview(id) {
+      return { success: true, revert: window.__scopedRevert
+        ? { kind: 'stock_set', movementId: id, historyId: 43, operationId: 'synthetic-operation-20260930', direction: 'undo', expectedGeneration: 0, lineCount: 3 }
+        : { kind: 'movement', movementId: id, lineCount: 1 } }
+    }
+    export async function undoActionHistory(id, payload) {
+      window.__historyCalls.push({ id, payload })
+      return { success: true, applied: true }
+    }
+    export async function redoActionHistory() { throw new Error('Unexpected redo') }
+  `,
   '../shared/Modal': `
     import React from 'react'
     export default function Modal({ title, children }) {
@@ -94,6 +106,8 @@ const fixture = String.raw`
   import React from 'react'
   import { createRoot } from 'react-dom/client'
   import StockChangeSection from './src/components/products/StockChangeSection.tsx'
+  import en from './src/lang/en.json'
+  import khmer from './src/lang/km.json'
 
   const km = new URLSearchParams(location.search).get('lang') === 'km'
   const copy = km ? {
@@ -103,6 +117,8 @@ const fixture = String.raw`
   window.__notifications = []
   window.__readCalls = 0
   window.__revertCalls = []
+  window.__historyCalls = []
+  window.__scopedRevert = new URLSearchParams(location.search).get('scope') === 'set'
   window.__expected = km ? {
     name: 'ទឹកអប់ផ្កាកូជប្រភេទពិសេសសម្រាប់ខួបអនុស្សាវរីយ៍ដែលមានឈ្មោះវែងខ្លាំង ៩០មល '.repeat(8).trim(),
     actor: 'អ្នកគ្រប់គ្រងឃ្លាំងឈ្មោះវែង',
@@ -131,7 +147,7 @@ const fixture = String.raw`
     quantity: 12,
     signed_quantity: -12,
     reason: window.__expected.reason,
-    reference_id: 98765,
+    reference_id: window.__scopedRevert ? 'stock-set:synthetic-operation-20260930:0' : 98765,
     reference_kind: 'sale',
     reference_label: km ? '20260912-182000-លេខយោងវែង' : '20260912-182000-VERY-LONG-REFERENCE',
     user_name: window.__expected.actor,
@@ -149,7 +165,7 @@ const fixture = String.raw`
   }
   document.documentElement.lang = km ? 'km' : 'en'
   document.body.className = km ? 'lang-km' : 'lang-en'
-  const t = (key) => copy[key] || key
+  const t = (key) => copy[key] || (km ? khmer : en)[key] || key
   createRoot(document.getElementById('root')).render(<StockChangeSection t={t} />)
 `
 
@@ -402,6 +418,21 @@ try {
         await waitFor('confirmed revert mock', async () => await evaluate('window.__revertCalls.length === 1') ? true : null)
         assert.deepEqual(await evaluate('window.__revertCalls'), [46890], 'only confirmed Revert sends the selected movement id')
       }
+
+      await send('Page.navigate', { url: `http://127.0.0.1:${appPort}/?lang=${lang}&scope=set` })
+      await waitFor('scoped stock row', async () => await evaluate('!!document.querySelector(".mobile-cards-only button:has([data-stock-mobile-row=primary])")') ? true : null)
+      await evaluate(`document.querySelector('.mobile-cards-only button:has([data-stock-mobile-row="primary"])').click()`)
+      await waitFor('scoped movement detail', async () => await evaluate('!!document.querySelector("[role=dialog]")') ? true : null)
+      await evaluate(`document.querySelector('[role=dialog] button[aria-label="'+window.__expected.revert+'"]').click()`)
+      await waitFor('whole action confirmation', async () => await evaluate('document.querySelector("[role=dialog]").textContent.includes(" (3 ")') ? true : null)
+      assert.deepEqual(await evaluate('window.__historyCalls'), [], `${lang}/${width}: preview cannot mutate stock`)
+      const confirmation = await evaluate<{ text: string; width: number; scroll: number }>(`(()=>{const el=document.querySelector('[role=dialog]');return {text:el.textContent,width:el.clientWidth,scroll:el.scrollWidth}})()`)
+      assert.ok(confirmation.text.includes(lang === 'km' ? 'ទាំងមូល' : 'entire stock correction'), `${lang}/${width}: identifies whole action`)
+      assert.ok(confirmation.scroll <= confirmation.width + 1, `${lang}/${width}: whole-action confirmation fits the dialog`)
+      await evaluate(`document.querySelector('[role=dialog] button[aria-label="'+window.__expected.revert+'"]').click()`)
+      await waitFor('scoped confirmed replay', async () => await evaluate('window.__historyCalls.length === 1') ? true : null)
+      assert.deepEqual(await evaluate('window.__historyCalls'), [{ id: 43, payload: { require_applied: true, expected_generation: 0 } }])
+      assert.deepEqual(await evaluate('window.__revertCalls'), [], 'scoped action never calls the single-line reversal')
     }
   }
   console.log('PASS composed StockChangeSection native 320/390 EN/KM: three bands, full tails, provenance, hidden bars, visible two-step Revert, zero page overflow')

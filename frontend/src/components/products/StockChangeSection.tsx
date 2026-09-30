@@ -4,6 +4,7 @@ import { useApp } from '../../AppContext'
 import { canViewAcquisitionCosts } from '../../utils/acquisitionCostAccess.ts'
 import { getStockLedger, getStockLedgerMovementBalance } from '../../api/productReadTransport.ts'
 import { revertStockMovement, editStockMovementReason } from '../../api/inventoryWriteTransport.ts'
+import { getStockMovementRevertPreview, undoActionHistory, redoActionHistory, type StockMovementRevertPreview } from '../../api/actionHistoryTransport.ts'
 import { stockRevertErrorText } from '../../utils/stockRevertError.ts'
 
 // The full-featured adjust modal (batch, price-lock, reasons) reused from the
@@ -57,8 +58,6 @@ import { batchDisplayLabel } from '../../utils/batchLabel.ts'
 import { buildHistoryRowModel, formatHistoryReference, historyExportField } from '../../utils/historyRowModel.ts'
 import {
   isRevertibleStockMovement,
-  isStockSetMovement,
-  isStockSessionGenerationMovement,
   recordedMovementCosts,
   showReceiptAccounting,
 } from '../../utils/stockMovementDetail.ts'
@@ -274,6 +273,12 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
   const revertInFlightRef = useRef(false)
   const [editingReason, setEditingReason] = useState<string | null>(null)
   const [confirmRevert, setConfirmRevert] = useState(false)
+  const [revertPreview, setRevertPreview] = useState<StockMovementRevertPreview | null>(null)
+  const detailEpochRef = useRef(0)
+  const previewInFlightRef = useRef<number | null>(null)
+  const detailActorRef = useRef(app.user?.id ?? app.user?.username ?? null)
+  detailActorRef.current = app.user?.id ?? app.user?.username ?? null
+  useEffect(() => () => { detailEpochRef.current += 1 }, [])
   // U-records: the reason edit awaiting review in the shared ConfirmDialog
   // (never native confirm()), holding the recorded and the typed reason.
   const [reasonReview, setReasonReview] = useState<{ before: string; after: string } | null>(null)
@@ -423,6 +428,10 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
   }, [])
 
   const openDetail = useCallback((row: LedgerRow) => {
+    detailEpochRef.current += 1
+    previewInFlightRef.current = null
+    setRevertPreview(null)
+    setRowBusy(false)
     setDetail(row)
     setEditingReason(null)
     setConfirmRevert(false)
@@ -430,8 +439,14 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
   }, [])
 
   const closeDetail = useCallback(() => {
+    detailEpochRef.current += 1
+    previewInFlightRef.current = null
+    setRevertPreview(null)
+    setRowBusy(false)
     setDetail(null); setEditingReason(null); setConfirmRevert(false); setReasonReview(null)
   }, [])
+
+  useEffect(() => { closeDetail() }, [app.user?.id, app.user?.username, closeDetail])
 
   // N13: the ONE composition of "which record is this" -- "Sale 20260901-193100",
   // "Return RET-...". Defined once here and used by the desktop row, the mobile
@@ -512,26 +527,68 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
     })))
   }, [app, branchId, canViewCosts, debouncedSearch, referenceText, supplierId, t, view])
 
+  const prepareRevert = useCallback(async () => {
+    if (!detail || !canAdjust || rowBusy || previewInFlightRef.current !== null) return
+    const epoch = detailEpochRef.current
+    const actor = detailActorRef.current
+    const isCurrent = () => detailEpochRef.current === epoch && detailActorRef.current === actor
+    previewInFlightRef.current = epoch
+    setRowBusy(true)
+    try {
+      const response = await getStockMovementRevertPreview(detail.id)
+      if (!isCurrent()) return
+      const preview = response?.revert
+      if (!response?.success || !preview || preview.movementId !== detail.id
+        || !['movement', 'stock_set', 'stock_session'].includes(preview.kind)
+        || !Number.isSafeInteger(preview.lineCount) || preview.lineCount < 1
+        || (preview.kind !== 'movement' && (!['undo', 'redo'].includes(String(preview.direction))
+          || !Number.isSafeInteger(preview.expectedGeneration) || Number(preview.expectedGeneration) < 0
+          || !Number.isSafeInteger(preview.historyId) || Number(preview.historyId) < 1
+          || !(preview.operationId || preview.historyId)))) {
+        throw new Error(tr(t, 'revert_failed', 'Revert failed'))
+      }
+      setRevertPreview(preview)
+      setConfirmRevert(true)
+    } catch (error) {
+      if (isCurrent()) app.notify(stockRevertErrorText(error, (key, fallback) => tr(t, key, fallback)), 'error')
+    } finally {
+      if (isCurrent()) {
+        previewInFlightRef.current = null
+        setRowBusy(false)
+      }
+    }
+  }, [detail, canAdjust, rowBusy, app, t])
+
   // Revert: post the compensating counter-movement, then refresh the list (the
   // reverted row stays -- the ledger is append-only -- and the new counter-
   // movement appears). Close the detail so the person sees the updated list.
   const doRevert = useCallback(async () => {
-    if (!detail || revertInFlightRef.current) return
+    if (!detail || !canAdjust || !revertPreview || revertPreview.movementId !== detail.id || revertInFlightRef.current) return
+    const epoch = detailEpochRef.current
+    const actor = detailActorRef.current
+    const isCurrent = () => detailEpochRef.current === epoch && detailActorRef.current === actor
     revertInFlightRef.current = true
     setRowBusy(true)
     try {
-      const res = await revertStockMovement(detail.id) as { success?: boolean; error?: string } | undefined
+      const res = await (revertPreview.kind === 'movement'
+        ? revertStockMovement(detail.id)
+        : (revertPreview.direction === 'undo' ? undoActionHistory : redoActionHistory)(revertPreview.historyId!, {
+          require_applied: true,
+          expected_generation: revertPreview.expectedGeneration,
+        })) as { success?: boolean; applied?: boolean; error?: string } | undefined
       if (res && res.success === false) throw Object.assign(new Error(res.error || tr(t, 'revert_failed', 'Revert failed')), { code: (res as { code?: string }).code })
+      if (revertPreview.kind !== 'movement' && res?.applied !== true) throw new Error(tr(t, 'revert_failed', 'Revert failed'))
+      if (!isCurrent()) return
       app.notify(tr(t, 'movement_reverted', 'Change reverted'))
       closeDetail()
       void load()
     } catch (error) {
-      app.notify(stockRevertErrorText(error, (key, fallback) => tr(t, key, fallback)), 'error')
+      if (isCurrent()) app.notify(stockRevertErrorText(error, (key, fallback) => tr(t, key, fallback)), 'error')
     } finally {
       revertInFlightRef.current = false
-      setRowBusy(false)
+      if (isCurrent()) setRowBusy(false)
     }
-  }, [detail, app, t, closeDetail, load])
+  }, [detail, canAdjust, revertPreview, app, t, closeDetail, load])
 
   // Save opens the review; commitReason is the write the review confirms.
   const saveReason = useCallback(() => {
@@ -923,7 +980,13 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
 
   const detailCosts = detail ? recordedMovementCosts(detail) : null
   const detailShowsReceiptAccounting = detail ? showReceiptAccounting(detail.movement_type) : false
-  const detailCanRevert = detail ? isRevertibleStockMovement(detail.movement_type, detail.reference_id) && !isStockSessionGenerationMovement(detail) : false
+  const detailCanRevert = detail ? isRevertibleStockMovement(detail.movement_type, detail.reference_id) : false
+  const revertScopeText = !revertPreview || revertPreview.kind === 'movement'
+    ? tr(t, 'confirm_revert', 'Revert this change?')
+    : tr(t, `movement_revert_${revertPreview.kind}_${revertPreview.direction}`,
+      `${revertPreview.direction === 'redo' ? 'Redo' : 'Undo'} the entire ${revertPreview.kind === 'stock_set' ? 'stock correction' : 'stock session'} {action} ({count} lines)?`)
+      .replace('{action}', String(revertPreview.operationId || revertPreview.historyId))
+      .replace('{count}', String(revertPreview.lineCount))
 
   return (
     <div className="space-y-3">
@@ -1115,7 +1178,7 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
       </div>
 
       {detail ? (
-        <Modal title={`${detail.product_name}`} onClose={closeDetail} unsavedChanges="read-only">
+        <Modal title={`${detail.product_name}`} onClose={closeDetail} closeDisabled={rowBusy && revertInFlightRef.current} unsavedChanges="read-only">
           <div className="space-y-3">
             {/* Identity belongs with the title. It is deliberately not another
                 fact card competing with the action summary below. */}
@@ -1237,7 +1300,7 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
                   <button
                     type="button"
                     disabled={rowBusy}
-                    onClick={() => setEditingReason(detail.reason || '')}
+                    onClick={() => { setConfirmRevert(false); setRevertPreview(null); setEditingReason(detail.reason || '') }}
                     aria-label={tr(t, 'edit_reason', 'Edit reason')}
                     title={tr(t, 'edit_reason', 'Edit reason')}
                     className="btn-secondary inline-flex items-center gap-1.5 px-3 text-sm disabled:opacity-50"
@@ -1246,8 +1309,8 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
                     <span className="hidden sm:inline">{tr(t, 'edit_reason', 'Edit reason')}</span>
                   </button>
                   {detailCanRevert && confirmRevert ? (
-                    <span className="inline-flex flex-wrap items-center gap-2 text-xs">
-                      <span className="text-gray-500 dark:text-gray-400">{tr(t, 'confirm_revert', 'Revert this change?')}</span>
+                    <span className="inline-flex min-w-0 max-w-full flex-wrap items-center gap-2 text-xs">
+                      <span className="w-full min-w-0 break-words text-gray-500 dark:text-gray-400">{revertScopeText}</span>
                       <button
                         type="button"
                         disabled={rowBusy}
@@ -1262,7 +1325,7 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
                       <button
                         type="button"
                         disabled={rowBusy}
-                        onClick={() => setConfirmRevert(false)}
+                        onClick={() => { setConfirmRevert(false); setRevertPreview(null) }}
                         className="btn-secondary px-3 text-sm disabled:opacity-50"
                       >
                         {tr(t, 'cancel', 'Cancel')}
@@ -1272,7 +1335,7 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
                     <button
                       type="button"
                       disabled={rowBusy}
-                      onClick={() => setConfirmRevert(true)}
+                      onClick={() => void prepareRevert()}
                       aria-label={tr(t, 'revert', 'Revert')}
                       title={tr(t, 'revert', 'Revert')}
                       className="btn-secondary inline-flex items-center gap-1.5 border-rose-300 px-3 text-sm text-rose-600 hover:bg-rose-50 disabled:opacity-50 dark:border-rose-900/60 dark:text-rose-300 dark:hover:bg-rose-900/20"
@@ -1280,8 +1343,6 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
                       <Undo2 className="h-4 w-4 shrink-0" aria-hidden="true" />
                       <span>{tr(t, 'revert', 'Revert')}</span>
                     </button>
-                  ) : isStockSetMovement(detail.reference_id) ? (
-                    <span className="text-xs text-gray-500 dark:text-gray-400">{tr(t, 'stock_correction_use_history', 'Use Undo/Redo in history for this Set')}</span>
                   ) : null}
                 </div>
               ) : (

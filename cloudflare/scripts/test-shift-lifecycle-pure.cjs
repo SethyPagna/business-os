@@ -527,7 +527,7 @@ const schemaProbeReal = loadReal('lib/schemaProbe.ts')
 
   const backupSource = fs.readFileSync(path.join(root, 'src', 'lib', 'backup.ts'), 'utf8')
   assert.match(backupSource, /'shift_sessions'/)
-  assert.match(backupSource, /SELECT \* FROM \$\{qid\(table\)\}/,
+  assert.match(backupSource, /SELECT (?:rowid AS \$\{qid\(cursorAlias\)\}, )?\* FROM \$\{qid\(table\)\}/,
     'dynamic SELECT-star backup includes appended lineage columns without a backup.ts write')
   const backedUpShifts = sqlite.prepare('SELECT * FROM shift_sessions ORDER BY id').all()
   const backedUpAmendments = sqlite.prepare('SELECT * FROM shift_session_amendments ORDER BY id').all()
