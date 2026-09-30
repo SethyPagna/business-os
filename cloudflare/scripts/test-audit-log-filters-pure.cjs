@@ -36,10 +36,12 @@ function ok(cond, label) {
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'audit-log-query-'))
 const tsPath = path.join(tmpDir, 'auditLogQuery.ts')
 const winPath = path.join(tmpDir, 'businessDateWindow.ts')
+const sectionsPath = path.join(tmpDir, 'auditSections.ts')
 fs.writeFileSync(tsPath, fs.readFileSync(path.join(cloudflareRoot, 'src', 'lib', 'auditLogQuery.ts'), 'utf8'))
 fs.writeFileSync(winPath, fs.readFileSync(path.join(cloudflareRoot, 'src', 'lib', 'businessDateWindow.ts'), 'utf8'))
+fs.writeFileSync(sectionsPath, fs.readFileSync(path.join(cloudflareRoot, 'src', 'lib', 'auditSections.ts'), 'utf8'))
 const tscBin = path.join(cloudflareRoot, 'node_modules', 'typescript', 'bin', 'tsc')
-execSync(`node ${tscBin} --module commonjs --target es2020 --outDir ${tmpDir} ${tsPath} ${winPath}`, { cwd: tmpDir, stdio: 'inherit' })
+execSync(`node ${tscBin} --module commonjs --target es2020 --outDir ${tmpDir} ${tsPath} ${winPath} ${sectionsPath}`, { cwd: tmpDir, stdio: 'inherit' })
 const { buildAuditLogFilters } = require(path.join(tmpDir, 'auditLogQuery.js'))
 
 // ---- real schema ----------------------------------------------------------
@@ -179,18 +181,16 @@ function run(input, page = 1, pageSize = 50) {
 
 // ---- wiring pins ----------------------------------------------------------
 const auditSrc = fs.readFileSync(path.join(cloudflareRoot, 'src', 'lib', 'auditLogQuery.ts'), 'utf8')
-ok(/\$\{localDateExpr\('created_at'\)\} >= @startDate/.test(auditSrc) && /\$\{localDateExpr\('created_at'\)\} <= @endDate/.test(auditSrc),
-  'auditLogQuery.ts buckets the date filter on the LOCAL (UTC+7) calendar date')
+ok(auditSrc.includes("localDateAtOrAfter('created_at')") && auditSrc.includes("localDateAtOrBefore('created_at')"),
+  'auditLogQuery.ts buckets the date filter on the LOCAL (UTC+7) calendar date, with the sargable created_at prefilter')
 ok(!/date\(created_at\) >= @startDate/.test(auditSrc),
   'auditLogQuery.ts no longer buckets the date filter in UTC')
 const compatSrc = fs.readFileSync(path.join(cloudflareRoot, 'src', 'routes', 'compat.ts'), 'utf8')
-ok(compatSrc.includes('buildAuditLogFilters({'), 'compat.ts builds the clause from the request')
+ok(compatSrc.includes('readAuditLogPage(getDb(c.env), {'), 'compat.ts reads the page through the shared reader, which builds the clause from the request')
 ok(/entityId: c\.req\.query\('entityId'\)/.test(compatSrc),
   'compat.ts passes entityId through -- the per-record floats read this same endpoint rather than a second audit reader with its own permission story')
-ok(/SELECT COUNT\(\*\) AS count FROM audit_logs \$\{where\}/.test(compatSrc),
-  'the COUNT shares the WHERE -- pagination cannot disagree with the rows')
-ok(/DISTINCT LOWER\(action\)/.test(compatSrc) && /DISTINCT LOWER\(COALESCE\(entity, table_name\)\)/.test(compatSrc),
-  'filter vocabularies are whole-table (actions + entities)')
+ok(!/DISTINCT/.test(compatSrc.slice(compatSrc.indexOf("app.get('/system/audit-logs'"), compatSrc.indexOf("app.delete('/system/audit-logs/retention'"))),
+  'the whole-table DISTINCT vocabulary scans are gone (sections and the static action list replace them)')
 const auditHandler = compatSrc.slice(compatSrc.indexOf("app.get('/system/audit-logs'"), compatSrc.indexOf("app.delete('/system/audit-logs/retention'"))
 ok(!/catch \(_\)/.test(auditHandler) && /}, 500\)/.test(auditHandler),
   'the silent-empty catch is gone -- a db error is a 500, never an empty 200 pretending to be "no logs"')

@@ -20,7 +20,7 @@ function fn(name: string): string {
   return ts.transpileModule(found!.getText(ast), { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
 }
 const HISTORY_EMPTY = '—'
-const names = ['toIso', 'formatDateTime', 'formatCompactDateTime', 'formatLogTime', 'formatLogTableTime', 'auditTimezoneLabel']
+const names = ['toIso', 'formatDateTime', 'formatLogTime', 'formatRowClock', 'logDayKey', 'auditTimezoneLabel']
 const api = new Function('fmtDayFirst', 'fmtTimezoneLabel', 'BUSINESS_TIME_ZONE', 'HISTORY_EMPTY',
   `${names.map(fn).join('\n')}; return { ${names.join(', ')} }`,
 )(fmtDayFirst, fmtTimezoneLabel, BUSINESS_TIME_ZONE, HISTORY_EMPTY)
@@ -32,7 +32,8 @@ const bangkokRow = { client_time: '2026-09-24T18:30:05+00:00', device_tz: 'Asia/
 
 for (const row of [serverRow, deviceRow, bangkokRow]) {
   assert.equal(api.formatLogTime(row), '25/09/2026, 01:30:05', 'full time is Phnom Penh wall clock')
-  assert.equal(api.formatLogTableTime(row), '25/09, 01:30', 'table time is Phnom Penh wall clock')
+  assert.equal(api.formatRowClock(row), '01:30', 'row clock is Phnom Penh wall clock')
+  assert.equal(api.logDayKey(row), '2026-09-25', 'the day a row is filed under is the Phnom Penh day, not the device day (24 Sep in Los Angeles)')
   assert.equal(api.auditTimezoneLabel(row), 'Asia/Phnom_Penh', `label names the business zone (device_tz=${row.device_tz})`)
 }
 assert.equal(api.auditTimezoneLabel(null), 'Asia/Phnom_Penh')
@@ -41,7 +42,7 @@ for (const wrong of ['UTC', 'Server time', 'America/Los_Angeles', 'Asia/Bangkok'
 }
 
 // Every surface that shows the zone uses the one label.
-assert.equal((source.match(/auditTimezoneLabel\(/g) || []).length, 4, 'declaration + table cell + detail row + export column')
+assert.equal((source.match(/auditTimezoneLabel\(/g) || []).length, 3, 'declaration + expanded detail + export column')
 assert.doesNotMatch(source, /'Server time'/, 'no Server time label left in the audit log')
 
 console.log('PASS audit log times and their zone label are Phnom Penh business time under TZ=America/Los_Angeles')

@@ -55,11 +55,8 @@ export function getAuditLogs(params: AuditLogParams = {}): Promise<unknown> {
       const rows = await db.table('audit_logs').orderBy('created_at').reverse().limit(pageSize).toArray()
       return {
         items: rows,
-        total: rows.length,
-        page: 1,
-        pageSize: rows.length || pageSize,
-        totalPages: 1,
-        filters: { users: [] },
+        nextCursor: null,
+        hasMore: false,
         source: 'local',
         partial: true,
       }

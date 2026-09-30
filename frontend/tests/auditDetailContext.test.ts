@@ -116,7 +116,9 @@ test('E6: an opted-in save with an empty diff still has something to show', () =
   // The page names the context rows with its pack (auditLogEntityLabels.test.ts
   // pins the vocabulary); the call is still the details column, no old side.
   assert.match(page, /const contextRows = buildAuditFieldDiff\(null, detailLog\.details, fieldLabelFor\)/)
-  assert.match(page, /if \(!hasRawData && !contextRows\.length\) return null/)
+  // The row expands in place and always carries its who/when/where block, so an
+  // empty diff is never a blank panel.
+  assert.match(page, /const detailPanel = \(detailLog: AuditLogRow\) =>/)
   assert.match(page, /hasRawData && !fieldDiffRows\.length \? \([\s\S]{0,400}copy\('no_field_changed'/)
   assert.match(page, /copy\('recorded_context'/)
   // One line component for both blocks: the pair and the context cannot drift.

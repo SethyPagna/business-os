@@ -271,7 +271,7 @@ test('DRIFT GUARD: no Worker file writes before/after without a fixture here', (
 test('the Audit Log page names actions and record types from the shared vocabulary', () => {
   const page = read('../src/components/utils-settings/AuditLog.tsx')
   assert.match(page, /import \{ auditActionLabel, auditEntityLabel, type LabelFn \}/)
-  assert.match(page, /const labelFor = \(key: string\) => auditEntityLabel\(key, vocab\)/)
+  assert.match(page, /return auditEntityLabel\(raw, label\)/)
   assert.match(page, /return auditActionLabel\(key, vocab\)/)
   // The Title-Case-the-raw-column renderer is gone from both places it lived.
   assert.doesNotMatch(page, /const labelFor = \(key: string\) => key\.replace/)

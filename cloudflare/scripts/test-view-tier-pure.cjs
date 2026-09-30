@@ -170,7 +170,7 @@ check("routes/compat.ts: audit-logs read is tier-aware + own-scopes view (userId
   const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'compat.ts'), 'utf8')
   assert.match(src, /const tier = getActionTier\(user, 'audit_log', 'view'\)/)
   assert.match(src, /const ownOnly = tier === 'view'/)
-  assert.match(src, /userId: ownOnly \? String\(user\?\.id \?\? ''\) : c\.req\.query\('userId'\)/)
+  assert.match(src, /lockedUserId: ownOnly \? Number\(user\?\.id\) : undefined/)
   // Purge + deleted-sales ledger stay strict (Full only).
   assert.match(src, /app\.delete\('\/system\/audit-logs\/retention'[\s\S]*?denyUnless\(c, 'audit_log'\)/)
 })

@@ -569,7 +569,7 @@ await runTest('paged audit and user-attributed activity APIs expose user filters
   assert.match(auditLogTransportSource, /getLocalMirrorsModule\(\)[\s\S]*\.then\(\(\{ mirrorTable \}\) => mirrorTable\('audit_logs'\)\(rows\)\)[\s\S]*\.catch\(\(\) => \{\}\)/)
   assert.match(auditLogTransportSource, /return result/)
   assert.doesNotMatch(auditLogTransportSource, /return mirrorTable\('audit_logs'\)\(rows\)/)
-  assert.match(auditLogTransportSource, /filters:\s*\{ users: \[\] \}/)
+  assert.match(auditLogTransportSource, /nextCursor: null,\s*hasMore: false,/)
   assert.match(source, /getActionHistory\s*=\s*async\s*\([^)]*params\s*=\s*\{\}/)
   assert.match(source, /loadActionHistoryTransport\(\)[\s\S]*module\.getActionHistory\(scope, limit, params\)/)
   assert.match(source, /getInventoryMovements\s*=\s*async\s*\(params\s*=\s*\{\}/)

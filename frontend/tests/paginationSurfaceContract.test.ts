@@ -68,7 +68,7 @@ const expectedConsumers = [
   'src/components/sales/reports/ShiftReport.tsx',
   'src/components/shared/NotificationCenter.tsx',
   'src/components/shifts/ShiftHistoryModal.tsx',
-  'src/components/utils-settings/AuditLog.tsx',
+  // The Audit Log pages by keyset cursor (Load more), not by page number: see tests/auditLogView.test.ts.
 ].sort()
 
 check('every audited paginated consumer is inventoried', () => {
