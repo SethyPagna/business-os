@@ -126,25 +126,24 @@ export function isReceiptMovementType(movementType: string): boolean {
 // revert (a 'remove' that un-received) -> revert of that (an 'add' that
 // re-received) -> ... Classifying a counter by its own type would call the
 // level-3 'add' a fresh receipt, and the counter of a plain removal (also an
-// 'add') a purchase. Walks to the root with one primary-key read per hop; a
-// chain is as long as the operator's changes of mind (typically 0-2 hops).
-// A broken chain (referenced row missing) resolves to null = stock only.
+// 'add') a purchase. One indexed statement follows appended counters to their
+// root; strictly decreasing ids prevent cycles without truncating valid chains.
+// An unresolved reversal is refused rather than treated as stock-only.
 export async function revertRootMovement(
   db: D1Compat,
   m: Pick<RevertMovementRow, 'id' | 'movement_type' | 'reference_id'>,
 ): Promise<{ id: number; movement_type: string } | null> {
-  let current = { id: Number(m.id), movement_type: m.movement_type, reference_id: m.reference_id as string | number | null }
-  for (let hop = 0; hop < 32; hop += 1) {
-    const ref = String(current.reference_id ?? '')
-    if (!ref.startsWith('revert:')) return { id: current.id, movement_type: current.movement_type }
-    const parentId = Number(ref.slice('revert:'.length))
-    if (!Number.isSafeInteger(parentId) || parentId <= 0) return null
-    const parent = await db.prepare('SELECT id, movement_type, reference_id FROM inventory_movements WHERE id = @id')
-      .get<{ id: number; movement_type: string; reference_id: string | number | null }>({ id: parentId })
-    if (!parent) return null
-    current = { id: Number(parent.id), movement_type: parent.movement_type, reference_id: parent.reference_id }
-  }
-  return null
+  if (!String(m.reference_id ?? '').startsWith('revert:')) return { id: Number(m.id), movement_type: m.movement_type }
+  return await db.prepare(`WITH RECURSIVE ancestry(id, movement_type, reference_id) AS (
+    SELECT id, movement_type, reference_id FROM inventory_movements WHERE id=@id
+    UNION ALL
+    SELECT parent.id, parent.movement_type, parent.reference_id
+    FROM inventory_movements parent JOIN ancestry child
+      ON parent.id=CAST(SUBSTR(child.reference_id,8) AS INTEGER)
+    WHERE child.reference_id='revert:' || CAST(parent.id AS TEXT) AND parent.id > 0 AND parent.id < child.id
+  ) SELECT id, movement_type FROM ancestry
+    WHERE COALESCE(SUBSTR(reference_id,1,7),'') != 'revert:' LIMIT 1`)
+    .get<{ id: number; movement_type: string }>({ id: Number(m.id) }) || null
 }
 
 // Apply the revert: move the stock (aggregate + batch ledger) the opposite
@@ -247,7 +246,8 @@ export async function applyMovementRevert(db: D1Compat, m: RevertMovementRow, ac
   const { revertType, magnitude } = plan
   const batchId = m.batch_id != null ? Number(m.batch_id) : null
   const root = await revertRootMovement(db, m)
-  const purchaseSide = root != null && isReceiptMovementType(root.movement_type)
+  if (!root) return { ok: false, status: 409, error: 'Cannot revert: the original stock action cannot be identified safely. Nothing was changed.' }
+  const purchaseSide = isReceiptMovementType(root.movement_type)
   // This receipt's own money for the lot's cumulative received cost (0080):
   // the movement's recorded total, else its unit cost times its units.
   const receiptCostUsd = m.total_cost_usd != null ? Number(m.total_cost_usd)
