@@ -22,6 +22,7 @@ import { getNotificationSummary as getNotificationSummaryRequest } from '../../a
 import { listImportJobs as listImportJobsRequest } from '../../api/importJobsTransport.ts'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import { startVisibleInterval } from '../../utils/visibilityPolling.ts'
+import { createCoalescedRefresh, type CoalescedRefresh } from '../../utils/coalescedRefresh.ts'
 import AppSelect from './AppSelect'
 import PaginationControls from './PaginationControls'
 import { getStatusBadgeLabel } from '../sales/StatusBadge.tsx'
@@ -169,6 +170,17 @@ const NOTIFICATION_SUMMARY_TIMEOUT_MS = 8000
 // for the record of that call if a shorter/separate expiry schedule turns
 // out to be wanted after all.
 const NOTIFICATION_SUMMARY_IDLE_REFRESH_MS = 2 * 60 * 60 * 1000
+// The channels whose broadcasts can change the bell. One sale fires several of
+// them within a moment, so they are coalesced: the read runs
+// NOTIFICATION_SUMMARY_SYNC_QUIET_MS after the last signal (capped at the max
+// wait), and never in a hidden tab -- the visibilitychange reload below owns
+// catch-up. The quiet window must stay longer than the Worker's summary cache
+// TTL (lib/notificationSummaryCache.ts) so a read that follows a write is never
+// answered from an entry built before it; test-notification-summary-cache-pure
+// pins the pair.
+const NOTIFICATION_SUMMARY_SYNC_CHANNELS = ['inventory', 'sales', 'returns', 'customers', 'suppliers', 'deliveryContacts', 'notifications', 'catalog', 'settings']
+const NOTIFICATION_SUMMARY_SYNC_QUIET_MS = 1500
+const NOTIFICATION_SUMMARY_SYNC_MAX_WAIT_MS = 5000
 
 const TONE_CLASS: Record<Tone, string> = {
   danger: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300',
@@ -453,6 +465,7 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
   const visibleLoadRequestRef = useRef(0)
   const aliveRef = useRef(true)
   const refreshTimerRef = useRef<number | null>(null)
+  const syncRefreshRef = useRef<CoalescedRefresh | null>(null)
   const failureCountRef = useRef(0)
 
   useEffect(() => {
@@ -599,6 +612,19 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
   }, [tr, visibilityActive])
 
   useEffect(() => {
+    if (!visibilityActive) return undefined
+    const refresh = createCoalescedRefresh(() => { void loadSummary(true) }, {
+      quietMs: NOTIFICATION_SUMMARY_SYNC_QUIET_MS,
+      maxWaitMs: NOTIFICATION_SUMMARY_SYNC_MAX_WAIT_MS,
+    })
+    syncRefreshRef.current = refresh
+    return () => {
+      refresh.cancel()
+      if (syncRefreshRef.current === refresh) syncRefreshRef.current = null
+    }
+  }, [loadSummary, visibilityActive])
+
+  useEffect(() => {
     if (!visibilityActive) return
     if (!syncChannel?.channel) return
     // 'contacts' and 'backup' here used to be copy-pasted from
@@ -612,10 +638,8 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
     // decisions (routes/devices.ts) -- previously missing even though
     // it's the one channel semantically built for this exact component,
     // so a device approve/deny elsewhere never refreshed the bell live.
-    if (['inventory', 'sales', 'returns', 'customers', 'suppliers', 'deliveryContacts', 'notifications', 'catalog', 'settings'].includes(syncChannel.channel)) {
-      void loadSummary(true)
-    }
-  }, [loadSummary, syncChannel?.channel, syncChannel?.ts, visibilityActive])
+    if (NOTIFICATION_SUMMARY_SYNC_CHANNELS.includes(syncChannel.channel)) syncRefreshRef.current?.request()
+  }, [syncChannel?.channel, syncChannel?.ts, visibilityActive])
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent | TouchEvent) => {
