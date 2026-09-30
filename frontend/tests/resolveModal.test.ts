@@ -52,7 +52,7 @@ const fixtureSource = String.raw`
   document.body.className = lang === 'km' ? 'lang-km' : ''
   if (params.get('theme') === 'dark') document.documentElement.classList.add('dark')
 
-  const ctl = window.__ctl = { holdLoad: params.has('holdLoad'), failLoad: Number(params.get('failLoad') || 0), staleReview: 0, failReview: 0, noChanges: false, requiredChanges: false, holdApply: false, failApply: 0 }
+  const ctl = window.__ctl = { holdLoad: params.has('holdLoad'), failLoad: Number(params.get('failLoad') || 0), staleReview: 0, failReview: 0, noChanges: false, requiredChanges: false, holdApply: false, failApply: 0, refuseApply: 0 }
   const log = window.__log = { loads: [], reviews: 0, applies: [], applied: [], minimized: null, closed: 0 }
   const waiters = { load: [], apply: [] }
   const gate = (name) => new Promise((resolve) => waiters[name].push(resolve))
@@ -153,10 +153,11 @@ const fixtureSource = String.raw`
     },
     async apply(token, signal, onProgress) {
       log.applies.push(token.done)
+      if (ctl.refuseApply > 0) { ctl.refuseApply -= 1; throw Object.assign(new Error('Product #12 was already merged'), { status: 409, code: 'product_merge_inactive' }) }
       onProgress(token.done + 1, token.total)
       if (ctl.holdApply) await gate('apply'); else await pause(20)
       if (signal.aborted) throw aborted()
-      if (ctl.failApply > 0) { ctl.failApply -= 1; throw new Error('Connection dropped') }
+      if (ctl.failApply > 0) { ctl.failApply -= 1; throw Object.assign(new Error('Connection dropped'), { status: 503 }) }
       if (token.done === 0) return { after: [], done: 2, total: token.total, next: { ...token, done: 2 } }
       return {
         after: [{ label: 'Name', value: 'Fit Me Matte 30ml' }, { label: 'Brand', value: 'M·A·C' }, { label: 'Barcode', value: '' }],
@@ -493,6 +494,31 @@ await run('PASS resolve modal: loading, one close, dirty guard, blockers, remove
   await click(`__ui.button(__ui.confirm(), 'Back')`)
   await until('back again (1280)', '!__ui.confirm()')
   await assertResolveReachable('1280 en dark')
+
+  // ------------------- a refusal shows its reason and is never re-sent (MERGE-UNBLOCK)
+  await evaluate('__ctl.requiredChanges = false; __ctl.refuseApply = 1')
+  const sentBefore = await evaluate<number>('__log.applies.length')
+  await click('__ui.primary()')
+  await until('confirm before the refusal', '__ui.confirm()')
+  await click(`__ui.button(__ui.confirm(), 'Resolve')`)
+  await until('refusal shown', `__ui.alerts().some((text) => text.startsWith('Could not resolve. Nothing was saved.'))`)
+  assert.equal(await evaluate<boolean>(`__ui.alerts().some((text) => text.includes('Product #12 was already merged'))`), true, 'the refusal carries its own reason')
+  assert.equal(await evaluate<boolean>(`__ui.alerts().some((text) => text.includes('Stopped before finishing'))`), false, 'a refusal is not "stopped before finishing"')
+  assert.deepEqual(await footer(), { label: 'Resolve', disabled: false, described: [] }, 'a refused write offers Resolve again and never Continue')
+  assert.equal(await evaluate<number>('__log.applies.length'), sentBefore + 1, 'the refused request was sent once and not re-sent')
+  assert.equal(await pressed('session|#final|finalize'), 'true', 'a refusal keeps the choices')
+
+  // A refusal after steps already landed re-reads the records and says how far it got.
+  await click('__ui.primary()')
+  await until('confirm before the partial refusal', '__ui.confirm()')
+  await click(`__ui.button(__ui.confirm(), 'Resolve')`)
+  await until('partial before the refusal', `__ui.statuses().includes('Resolved 2 of 3. Continue to finish the rest.')`)
+  const loadsBeforeRefusal = await loadsSoFar()
+  await evaluate('__ctl.refuseApply = 1')
+  await click('__ui.primary()')
+  await until('partial refusal shown', `__ui.alerts().some((text) => text.startsWith('Stopped after 2 of 3. The rest was not saved.'))`)
+  assert.deepEqual(await footer(), { label: 'Resolve', disabled: false, described: [] }, 'after a refusal mid-way Continue is gone')
+  assert.equal(await loadsSoFar(), loadsBeforeRefusal + 1, 'the records are read again because earlier steps changed them')
 
   // --------------------------------------------------------- load failure
   await open(375, 'lang=en&failLoad=1', '__ui && __ui.main()')

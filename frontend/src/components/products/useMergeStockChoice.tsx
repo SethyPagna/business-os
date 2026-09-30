@@ -59,9 +59,8 @@ function replaceVars(template: string, values: Record<string, unknown>): string 
   return template.replace(/\{(\w+)\}/g, (_m, key) => String(values[key] ?? ''))
 }
 
-// The two refusals that are DECISIONS, not failures: the server declines to
-// invent a cost out of two figures that cannot both be one product's cost, and
-// it declines to break a stock-in session that can still be undone. Both reach
+// A refusal that is a DECISION, not a failure: the server declines to invent a
+// cost out of two figures that cannot both be one product's cost. It reaches
 // the caller as an ordinary throw -- every merge surface already reports
 // error.message -- so the message has to be the translated one, not the
 // server's English. Any other error passes through untouched.
@@ -72,12 +71,6 @@ function localizeRefusal(t: TranslateFn, error: unknown): unknown {
     const template = t('merge_cost_outlier_refused')
       || 'These two costs are too far apart to be one product\u2019s cost ({min} and {max}). Averaging them would store a cost nobody paid, so nothing was merged \u2014 correct whichever figure is wrong, then merge.'
     return new Error(replaceVars(template, { min: outlier?.min ?? '', max: outlier?.max ?? '' }))
-  }
-  if (code === 'stock_session_reversible') {
-    const operationId = String((error as { operationId?: unknown } | null)?.operationId || '')
-    const template = t('merge_stock_session_blocked')
-      || 'One of these products is still part of a stock-in session that can be undone ({id}). Merging now would break that Undo \u2014 undo it or let it settle first.'
-    return new Error(replaceVars(template, { id: operationId }))
   }
   return error
 }

@@ -100,6 +100,10 @@ export type UndoApplier = (payload: Record<string, unknown>, ctx: UndoApplierCon
 // action_history.last_error and API callers.
 export const UNDO_RECORD_CHANGED_CODE = 'undo_record_changed'
 export const UNDO_NO_DEFAULT_BRANCH_CODE = 'undo_no_default_branch'
+// A merge closed this stock-in session's Undo for good (see
+// closeStockSessionsStatements); the row reads "Undo closed: products were merged".
+export const UNDO_CLOSED_BY_MERGE_CODE = 'undo_closed_products_merged'
+export const UNDO_CLOSED_BY_MERGE_MESSAGE = 'Undo closed: products were merged.'
 // FX-exc1 item 1: the other refusals carry a code too.
 // The history entry no longer matches the server (a stale generation, pointer
 // or receipt): refresh history and try again.
@@ -428,24 +432,16 @@ export type ProductMergeKeeperChoice = {
 //     against a postimage recorded for the loser -- and `members` is itself
 //     inside the postimage, so the UPDATE alone breaks the assertion. Moving
 //     this row does not fix the orphan; it inverts it onto the survivor.
-//     What DOES protect the session is the guard in routes/products.ts
-//     (mergeBlockedByReversibleStockSession): a merge is REFUSED while either
-//     row still belongs to a stock session that can be undone or redone, so no
-//     merge can silently brick a replay. Once the session's history row is
-//     gone the members row is pure history and stays where it happened.
-//
-//     OWNER DECISION, OPEN -- a recorded DEVIATION from the N15 ask ("the
-//     merge moves EVERY linked record ... including stock_session_members"),
-//     not an oversight. What it costs: nothing ever settles a stock session
-//     (lib/stockSession.ts writes only 'undoable' and 'redoable'), so the block
-//     on a touched product lifts only when the retention sweep deletes the
-//     action_history row at ACTION_HISTORY_TTL_DAYS = 180. Three ways out, for
-//     the owner to pick: (a) accept the guard as it stands; (b) add a way to
-//     settle/retire a spent session so the block lifts in days rather than
-//     months; (c) implement the compensating postimage rewrite so the member
-//     row can be reparented with the replay following it. Both halves are
-//     pinned in scripts/test-merge-identity-fk-pure.cjs section 5, so
-//     whichever way it goes the test moves with it.
+//     So the members row stays where it happened, and the merge CLOSES the
+//     session's Undo in its own D1 batch (closeStockSessionsStatements below):
+//     history status 'recorded', reversible 0, the reason in last_error, one
+//     audit row per session. Before 1 Oct 2026 the merge was REFUSED while a
+//     session could be undone or redone, but nothing ever settles a session
+//     (only the 180-day retention sweep), so recently received duplicates could
+//     never be merged. Closed is permanent: undoing the merge does not reopen
+//     the session. Both halves are pinned in
+//     scripts/test-merge-identity-fk-pure.cjs section 5 and
+//     scripts/test-merge-closes-stock-session-native.cjs.
 export const MERGE_REPARENT_TABLES: ReadonlyArray<{ table: string; column: string }> = [
   { table: 'sale_items', column: 'product_id' },
   { table: 'return_items', column: 'product_id' },
@@ -462,6 +458,74 @@ export const MERGE_REPARENT_TABLES: ReadonlyArray<{ table: string; column: strin
   // same as every other per-product ledger above, so undo gives it back.
   { table: 'product_cost_entries', column: 'product_id' },
 ]
+
+// The history row of a closed session: the existing 'recorded' status with
+// reversible = 0 (what every recorded-only action already uses) and this marker
+// in last_error, which History and the Stock Changes page read to say why.
+export const STOCK_SESSION_UNDO_CLOSED_BY_MERGE = 'undo_closed:products_merged'
+export const STOCK_SESSION_CLOSED_AUDIT_ACTION = 'stock_session_undo_closed'
+
+export const isUndoClosedByMerge = (row: { reversible?: unknown; last_error?: unknown } | null | undefined): boolean =>
+  Boolean(row) && !Number(row?.reversible || 0) && row?.last_error === STOCK_SESSION_UNDO_CLOSED_BY_MERGE
+
+export type OpenStockSession = { operationId: string; historyId: number; status: string }
+
+const OPEN_STOCK_SESSION_WHERE = `h.status IN ('undoable', 'redoable')
+      AND EXISTS (SELECT 1 FROM stock_session_members m WHERE m.operation_id = o.id
+        AND m.product_id IN (SELECT CAST(value AS INTEGER) FROM json_each(@closeProductIds)))`
+
+export async function readOpenStockSessions(
+  db: ReturnType<typeof getDb>,
+  productIds: number[],
+): Promise<OpenStockSession[]> {
+  const ids = productIds.filter((id) => Number.isSafeInteger(id) && id > 0)
+  if (!ids.length) return []
+  return db.prepare(`
+    SELECT o.id AS operationId, h.id AS historyId, h.status AS status
+    FROM stock_session_operations o
+    JOIN action_history h ON h.id = o.history_id
+    WHERE ${OPEN_STOCK_SESSION_WHERE}
+    ORDER BY h.id
+  `).all<OpenStockSession>({ closeProductIds: JSON.stringify(ids) })
+}
+
+// Two statements for a merge's own db.batch. Both pick the sessions by the same
+// predicate at write time, so a session created after the merge was planned is
+// closed too and none can be left undoable on a folded product. The audit
+// insert comes first because it selects the sessions the update then closes.
+export function closeStockSessionsStatements(
+  productIds: number[],
+  user: { id?: number | null; name?: string | null; username?: string | null } | null,
+  mergeOperationId: string | null,
+  mergedIntoProductId: number,
+): AtomicMergeStatement[] {
+  const closeProductIds = JSON.stringify(productIds.filter((id) => Number.isSafeInteger(id) && id > 0))
+  return [
+    {
+      sql: `INSERT INTO audit_logs(user_id, user_name, action, entity, entity_id, details, table_name, record_id)
+        SELECT @closeActor, @closeName, @closeAction, 'stock_session', o.id,
+          json_object('reason', 'products merged', 'operationId', o.id, 'actionHistoryId', h.id,
+            'previousStatus', h.status, 'mergeOperationId', @closeMergeOperation, 'mergedIntoProductId', @closeKeeper),
+          'stock_session_operations', o.id
+        FROM stock_session_operations o JOIN action_history h ON h.id = o.history_id
+        WHERE ${OPEN_STOCK_SESSION_WHERE}`,
+      params: {
+        closeProductIds,
+        closeActor: user?.id ?? null,
+        closeName: actorSnapshot(user),
+        closeAction: STOCK_SESSION_CLOSED_AUDIT_ACTION,
+        closeMergeOperation: mergeOperationId,
+        closeKeeper: mergedIntoProductId,
+      },
+    },
+    {
+      sql: `UPDATE action_history SET status = 'recorded', reversible = 0, last_error = @closeMarker, updated_at = CURRENT_TIMESTAMP
+        WHERE id IN (SELECT h.id FROM stock_session_operations o JOIN action_history h ON h.id = o.history_id
+          WHERE ${OPEN_STOCK_SESSION_WHERE})`,
+      params: { closeProductIds, closeMarker: STOCK_SESSION_UNDO_CLOSED_BY_MERGE },
+    },
+  ]
+}
 
 const MERGE_REPARENT_ALLOWED = new Set(MERGE_REPARENT_TABLES.map((t) => `${t.table}.${t.column}`))
 

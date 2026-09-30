@@ -85,6 +85,7 @@ const REPLAY_REFUSAL_KEYS: Readonly<Record<string, { undo: string; redo: string 
   undo_history_unusable: { undo: 'undo_refused_history_unusable', redo: 'redo_refused_history_unusable' },
   undo_preview_limit: { undo: 'movement_revert_history_required', redo: 'movement_revert_history_required' },
   undo_needs_original_tab: { undo: 'undo_refused_needs_original_tab', redo: 'redo_refused_needs_original_tab' },
+  undo_closed_products_merged: { undo: 'undo_refused_closed_by_merge', redo: 'redo_refused_closed_by_merge' },
   undo_refused: { undo: 'undo_refused_generic', redo: 'redo_refused_generic' },
 }
 

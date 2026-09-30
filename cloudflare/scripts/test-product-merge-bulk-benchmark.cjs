@@ -177,14 +177,16 @@ async function main() {
     // batch as every other relinked table.
     // 18 -> 19: U-cost -- the fold ends with the guarded re-derive of the
     // keeper's on-hand catalog cost (catalogCostRecomputeIfChangedSql).
-    [3, 8, 19, 22],
+    // 19 -> 21: MERGE-UNBLOCK -- the same batch closes the Undo of any stock-in
+    // session that touches either product (audit row + status update).
+    [3, 8, 21, 22],
     'the no-stock fold has bounded snapshot/write/fingerprint/finalize statement groups',
   )
   const { batchStatementCounts: _batchStatementCounts, ...reportedCounters } = counters
 
   console.log(JSON.stringify({
     candidates: 1600, chunk: 25, scanMs: Number(scanMs.toFixed(1)), runMs: Number(runMs.toFixed(1)),
-    foldAdapterCalls, foldCallsPerCase: foldAdapterCalls / 25, foldBatchSizes: [22, 19, 8, 3],
+    foldAdapterCalls, foldCallsPerCase: foldAdapterCalls / 25, foldBatchSizes: [22, 21, 8, 3],
     ...reportedCounters,
   }))
   console.log('test-product-merge-bulk-benchmark: all checks passed')

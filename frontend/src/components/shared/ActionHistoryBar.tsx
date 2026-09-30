@@ -32,6 +32,9 @@ type HistoryItem = {
   // Server-computed (K1 slice 2): this row's next transition can be replayed
   // by the Worker itself, so it is actionable even with no live closure here.
   server_replayable?: boolean
+  // A stock-in session whose products were merged keeps this marker: the row is
+  // recorded only, and History says why instead of leaving a dead Undo.
+  last_error?: string | null
   undo_payload?: Record<string, unknown>
   created_by_name?: string
   created_at?: string
@@ -161,7 +164,12 @@ function formatHistoryList(items: HistoryItem[] = []) {
 //
 // Calling that "Recorded" is the honest word. The hint explains the actual
 // constraint rather than implying the entry decayed.
+const UNDO_CLOSED_BY_MERGE_MARKER = 'undo_closed:products_merged'
+
 function formatServerStatus(item: HistoryItem, T: Translate, isActionable: boolean) {
+  if (item?.status === 'recorded' && item.last_error === UNDO_CLOSED_BY_MERGE_MARKER) {
+    return T('history_undo_closed_merged', 'Undo closed: products were merged')
+  }
   if (item?.status === 'undoable') {
     return isActionable ? T('undo_available', 'Undo available') : T('history_recorded_only', 'Recorded')
   }
@@ -387,7 +395,7 @@ export default function ActionHistoryBar({
                 }
               >
                 <span className="min-w-0 whitespace-normal break-words text-slate-700 dark:text-slate-200" title={displayLabel}>{displayLabel}</span>
-                <span className="rounded-full bg-slate-100 px-2 py-0.5 font-semibold text-slate-600 dark:bg-slate-800 dark:text-slate-300">{formatServerStatus(item, T, false)}</span>
+                <span className="max-w-[55%] rounded-full bg-slate-100 px-2 py-0.5 text-center font-semibold leading-tight text-slate-600 dark:bg-slate-800 dark:text-slate-300">{formatServerStatus(item, T, false)}</span>
               </div>
               {grouped && item.undo_payload?.applier !== 'return.fields.bulk' && <BulkHistoryDetails item={item} T={T} />}
               </div>

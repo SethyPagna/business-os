@@ -3,6 +3,7 @@ import { acquisitionCostResponses, canEditAcquisitionCosts, hasCatalogCostWrite 
 import { roundMoney4 } from '../lib/moneyPrecision'
 import { enqueueImageNormalization } from '../lib/imageAudit'
 import { getDb } from '../lib/db'
+import { collectMergeProductIds, describeMergeFailure } from '../lib/mergeRouteLog'
 import { getImportFencedDb, isImportMaintenanceFenceError } from '../lib/importMaintenanceFence'
 import { paginateProductFamilies } from '../lib/familyPagination'
 import { loadLowStockConfig, lowStockThresholdSql, type LowStockConfig } from '../lib/lowStockSettings'
@@ -28,7 +29,7 @@ import { barcodeIdentityMatches, canonicalProductBarcode, findDuplicateProductGr
 import { lotRemainingSql } from '../lib/lotRemaining'
 import { compareCosts, normalizeProductGroupName, resolveMergedCostDetail } from '../lib/productDetailRule'
 import type { CostVerdict, MergedCostOutlier } from '../lib/productDetailRule'
-import { buildAtomicMergeHistoryStatements, finalizeAtomicMergeHistory, mergeStateFingerprint, PRODUCT_MERGE_GROUP_ACTION_KIND, PRODUCT_MERGE_GROUP_CHILD_KIND, productMergeGroupPrefixFingerprint, registerMergeFold, registerProductMergeGroupRedo, recordSupplierBackfillSnapshot, MERGE_REPARENT_TABLES, type AtomicMergeKnownIds, type AtomicMergeStatement, type MergeReversal, type MergeStockDisposition, type ProductMergeKeeperChoice } from '../lib/undoAppliers'
+import { buildAtomicMergeHistoryStatements, closeStockSessionsStatements, readOpenStockSessions, finalizeAtomicMergeHistory, mergeStateFingerprint, PRODUCT_MERGE_GROUP_ACTION_KIND, PRODUCT_MERGE_GROUP_CHILD_KIND, productMergeGroupPrefixFingerprint, registerMergeFold, registerProductMergeGroupRedo, recordSupplierBackfillSnapshot, MERGE_REPARENT_TABLES, type AtomicMergeKnownIds, type AtomicMergeStatement, type MergeReversal, type MergeStockDisposition, type ProductMergeKeeperChoice } from '../lib/undoAppliers'
 import { createProductMergeClusterPlan, MERGE_COST_FIELDS, MERGE_PRICE_FIELDS, parseProductMergeClusterPlan, productMergeCaseKey, productMergeCasAssertion, productMergeNumericError, productMergePlanKeeperMatches, productMergePlanSourceMemberMatches, resolveProductMergeClusterPlanEconomics, resolveProductMergeEconomics, type ProductMergeClusterPlan, type ProductMergeEconomics, type ProductMergeNumericIssue } from '../lib/productMerge'
 import { CATALOG_COST_DERIVE_SQL, catalogCostRecomputeIfChangedSql, costEntryActorParams, typedCostEntriesBeforeWriteSql, typedCostEntryBeforeWriteStatement } from '../lib/catalogCostRecompute'
 import { PRODUCT_MERGE_READ_BATCH_MAX_STATEMENTS, readProductMergeCaseSnapshot, readProductMergeDependentLotSnapshots, planProductMergeCaseSnapshot, planProductMergeDependentLotSnapshots, runProductMergeReadBatch, type ProductMergeReadPlan } from '../lib/productMergeSnapshot'
@@ -140,6 +141,25 @@ async function syncLinkedProductNameSnapshots(env: Env, productIds: number[], pr
 // products/search is the actually-public equivalent, in routes/portal.ts.
 app.use('*', requireAuth)
 app.use('*', acquisitionCostResponses)
+// A 5xx on a merge / Resolve route (or an edit that folds a twin) writes one
+// structured line with the route, the product ids and the error text. Inline,
+// not a lib middleware: the body is read here only for the JSON merge POSTs.
+const MERGE_ROUTE_PATH = /\/(?:merge-duplicates|possible-duplicates\/merge)(?:\/|$|-)/
+app.use('*', async (c, next) => {
+  const folds = c.req.method === 'PUT' && /\/\d+$/.test(c.req.path)
+  const watched = MERGE_ROUTE_PATH.test(c.req.path) || folds
+  const body = watched && c.req.method === 'POST' ? await c.req.json().catch(() => null) : null
+  await next()
+  if (!watched || c.res.status < 500) return
+  try {
+    console.error(describeMergeFailure({
+      method: c.req.method, path: c.req.path, status: c.res.status,
+      productIds: collectMergeProductIds(c.req.path, c.req.query(), body), error: c.error,
+    }))
+  } catch {
+    // Logging must never turn one failure into two.
+  }
+})
 
 // Fallback for GET /zero-quantity-candidates when no
 // `product_zero_qty_delete_threshold_days` setting has ever been saved
@@ -2244,15 +2264,6 @@ app.put('/:id', async (c) => {
         // genuinely matches before the fold reads it back.
         await db.prepare('UPDATE products SET name = @name, barcode = @barcode, updated_at = CURRENT_TIMESTAMP WHERE id = @id')
           .run({ name: nextName, barcode: nextBarcode, id: Number(id) })
-        const blockingSession = await mergeBlockedByReversibleStockSession(db, [duplicate.id, Number(id)])
-        if (blockingSession) {
-          return c.json({
-            success: false,
-            code: 'stock_session_reversible',
-            error: mergeStockSessionBlockedMessage(blockingSession.operationId),
-            operationId: blockingSession.operationId,
-          }, 409)
-        }
         if (getActionTier(user, 'products', 'image') !== 'full' && await productMergeChangesImages(
           db, [{ keeper: { id: duplicate.id, image_path: null }, discarded: dupRow }],
         )) {
@@ -3217,37 +3228,6 @@ export async function readMergeIdentityDiff(
 export const mergeNumericRefusal = (identity: MergeIdentityDiff): ProductMergeNumericIssue | null =>
   identity.numericIssues[0] ?? null
 
-// A merge rewrites the very rows a stock-in session's undo/redo asserts on:
-// lib/stockSession.ts rebuilds the session postimage through `IN (SELECT
-// product_id FROM stock_session_members WHERE operation_id=@id)` and refuses to
-// replay unless live state still equals it. Folding a member product moves its
-// branch_stock and reparents its movements, so that equality can never hold
-// again and the session's Undo dies -- silently, at the moment someone tries to
-// use it. Reparenting the members row does not help: `members` is itself inside
-// the postimage, so the UPDATE alone breaks the assertion, and the comparison
-// then runs against the KEEPER's rows. So the merge waits instead.
-export async function mergeBlockedByReversibleStockSession(
-  db: ReturnType<typeof getDb>,
-  productIds: number[],
-): Promise<{ operationId: string; status: string } | null> {
-  const ids = productIds.filter((id) => Number.isFinite(id))
-  if (!ids.length) return null
-  const { sql, params } = buildInClause('p', ids)
-  const row = await db.prepare(`
-    SELECT o.id AS operationId, h.status AS status
-    FROM stock_session_operations o
-    JOIN action_history h ON h.id = o.history_id
-    WHERE h.status IN ('undoable', 'redoable')
-      AND EXISTS (SELECT 1 FROM stock_session_members m WHERE m.operation_id = o.id AND m.product_id IN (${sql}))
-    LIMIT 1
-  `).get<{ operationId: string; status: string }>(params)
-  return row || null
-}
-
-export const mergeStockSessionBlockedMessage = (operationId: string): string =>
-  `One of these products is part of stock-in session ${operationId}, which can still be undone. `
-  + 'Merging now would break that session\'s Undo. Undo it or let it settle first, then merge.'
-
 type ProductMergeImagePair = {
   keeper: { id: number; image_path?: string | null }
   discarded: { id: number; image_path?: string | null }
@@ -3952,7 +3932,6 @@ BEGIN SELECT RAISE(ABORT,'lot has immutable transfer provenance'); END`,
   const reparentedSaleItemIds = byTable('sale_items')
   const reparentedMovementIds = byTable('inventory_movements')
   const returnsReparented = byTable('return_items').length + byTable('return_replacement_items').length
-
   const auditDetails = {
     productName: dup.name,
     mergedIntoProductId: canonicalId,
@@ -4048,6 +4027,9 @@ BEGIN SELECT RAISE(ABORT,'lot has immutable transfer provenance'); END`,
     // the next stock movement. No-op when nothing is derivable.
     { sql: catalogCostRecomputeIfChangedSql('id = @id', { stampUpdatedAt: false }), params: { id: canonicalId } },
   )
+  // A merge makes every stock-in session that touches either product unreplayable,
+  // so its Undo is closed here, in the same batch, with the reason on record.
+  statements.push(...closeStockSessionsStatements([canonicalId, dup.id], user, atomicHistory?.operationId ?? null, canonicalId))
   if (atomicHistory?.additionalStatements?.length) statements.push(...atomicHistory.additionalStatements)
   // Record the exact result slots before appending the fixed snapshot/history/
   // audit trio. D1 returns one result per statement in input order.
@@ -4652,9 +4634,6 @@ function leadingZeroScopeAtomicAssertions(
       NOT EXISTS(SELECT 1 FROM transfer_operation_members m JOIN transfer_operation_receipts r ON r.id=m.receipt_id
         WHERE (m.source_product_id IN (@keeper,@duplicate) OR m.destination_product_id IN (@keeper,@duplicate))
           AND r.replay_state<>'applied')
-      AND NOT EXISTS(SELECT 1 FROM stock_session_members sm JOIN stock_session_operations so ON so.id=sm.operation_id
-        JOIN action_history sh ON sh.id=so.history_id
-        WHERE sm.product_id IN (@keeper,@duplicate) AND sh.status IN ('undoable','redoable'))
       THEN 1 ELSE json_extract('', '$') END AS leading_zero_authority_guard`,
     params: { keeper: group.canonical.id, duplicate: duplicate.id },
   },
@@ -5208,11 +5187,6 @@ app.post('/merge-duplicates', async (c) => {
         groupBlocker = { code: 'incompatible_product_identity', error: 'A product identity changed; this whole group remains unchanged.' }
         break
       }
-      const blockingSession = await mergeBlockedByReversibleStockSession(db, [canonicalId, dup.id])
-      if (blockingSession) {
-        groupBlocker = { code: 'stock_session_reversible', error: mergeStockSessionBlockedMessage(blockingSession.operationId) }
-        break
-      }
     }
     if (groupBlocker) {
       for (const dup of group.duplicates) refusals.push({ caseKey: productMergeCaseKey(canonicalId, dup.id), keeperId: canonicalId, mergedId: dup.id, mergedName: dup.name, ...groupBlocker })
@@ -5504,7 +5478,6 @@ type SelectedConflictPreparedCase = {
   snapshot: ProductMergeCaseSnapshot
   dependentLots: Map<number, ProductMergeLotSnapshot>
   imageChanges: boolean
-  blockingSession: { operationId: string; status: string } | null
   statementEstimate: Record<'merge' | 'write_off', number>
   before: Record<string, unknown>
   afterByStockChoice: Record<'merge' | 'write_off', Record<string, unknown>>
@@ -5530,7 +5503,7 @@ function selectedConflictClusterPredicateSql(clusterType: ProductConflictPreview
 }
 
 const SELECTED_CONFLICT_FINGERPRINT_MAX_COMPOUND_TERMS = 5
-const SELECTED_CONFLICT_FINGERPRINT_TERM_COUNT = 12 + MERGE_REPARENT_TABLES.length
+const SELECTED_CONFLICT_FINGERPRINT_TERM_COUNT = 11 + MERGE_REPARENT_TABLES.length
 const SELECTED_CONFLICT_FINGERPRINT_STATEMENT_COUNT = Math.ceil(
   SELECTED_CONFLICT_FINGERPRINT_TERM_COUNT / SELECTED_CONFLICT_FINGERPRINT_MAX_COMPOUND_TERMS,
 )
@@ -5587,13 +5560,6 @@ function selectedConflictStateFingerprintSqlTerms(clusterType: ProductConflictPr
             json_object('id',a.id,'return_item_id',a.return_item_id,'batch_id',a.batch_id,'quantity',a.quantity) AS value
      FROM return_item_batch_allocations a JOIN product_batches pb ON pb.id=a.batch_id
      WHERE pb.variant_product_id IN (@keeperId, @mergedId)`,
-    `SELECT 'reversible_stock_session' AS kind, o.id AS row_key,
-            json_object('operation_id',o.id,'history_id',o.history_id,'history_status',h.status,
-              'member_product_id',m.product_id) AS value
-     FROM stock_session_operations o
-     JOIN action_history h ON h.id=o.history_id
-     JOIN stock_session_members m ON m.operation_id=o.id
-     WHERE h.status IN ('undoable','redoable') AND m.product_id IN (@keeperId,@mergedId)`,
     `SELECT 'branch' AS kind, printf('%020d', b.id) AS row_key,
             json_object('id',b.id,'name',b.name) AS value
      FROM branches b WHERE b.id IN (
@@ -5735,6 +5701,7 @@ function selectedConflictStatementEstimate(
   if (snapshot.childProductRows.some((row) => Number(row.id) !== Number(snapshot.canonicalProduct?.id))) statements += 1
   if (snapshot.childProductRows.some((row) => Number(row.id) === Number(snapshot.canonicalProduct?.id))) statements += 1
   statements += 2 // stock caches
+  statements += 2 // close stock-in session Undo (audit + status)
   statements += 2 // committed receipt transition + assertion
   statements += 3 // snapshot + action history + audit
   return statements
@@ -5887,10 +5854,9 @@ async function prepareSelectedConflictCase(
     return { ordinal, case_key: requested.case_key, product_ids: requestedIds, code: 'not_exact_pair', message: 'This conflict no longer contains exactly the reviewed two active products.' }
   }
   const snapshot = await readProductMergeCaseSnapshot(db, keeper.id, discarded.id, MERGE_REPARENT_TABLES)
-  const [writeOffLots, mergeLots, blockingSession, imageChanges] = await Promise.all([
+  const [writeOffLots, mergeLots, imageChanges] = await Promise.all([
     executionStockChoice === 'merge' ? Promise.resolve(new Map<number, ProductMergeLotSnapshot>()) : readProductMergeDependentLotSnapshots(db, snapshot, 'write_off'),
     executionStockChoice === 'write_off' ? Promise.resolve(new Map<number, ProductMergeLotSnapshot>()) : readProductMergeDependentLotSnapshots(db, snapshot, 'merge'),
-    mergeBlockedByReversibleStockSession(db, [keeper.id, discarded.id]),
     productMergeChangesImages(db, [{ keeper, discarded }]),
   ])
   const dependentLots = new Map(writeOffLots)
@@ -5929,7 +5895,6 @@ async function prepareSelectedConflictCase(
     snapshot,
     dependentLots,
     imageChanges,
-    blockingSession,
     statementEstimate: {
       merge: selectedConflictStatementEstimate(snapshot, dependentLots, 'merge', canChangeImages),
       write_off: selectedConflictStatementEstimate(snapshot, dependentLots, 'write_off', canChangeImages),
@@ -5969,7 +5934,7 @@ async function prepareSelectedConflictCases(
 
 type SelectedConflictApplyPreflightCase = Pick<SelectedConflictPreparedCase,
   'ordinal' | 'caseKey' | 'keeper' | 'discarded' | 'stateDigest' | 'needsStockChoice'
-  | 'stateGuards' | 'imageChanges' | 'blockingSession' | 'statementEstimate'>
+  | 'stateGuards' | 'imageChanges' | 'statementEstimate'>
 
 function selectedConflictLightStatementEstimate(
   fingerprint: string,
@@ -6012,7 +5977,7 @@ function selectedConflictLightStatementEstimate(
     + (canChangeImages ? mergedImages.length + 2 : 1)
     + 2 // deactivate and economics
     + reparentGroups.size + promotionCount + (childCount ? 2 : 0)
-    + 2 + 2 + 3 // stock caches, receipt transition/guard, atomic history
+    + 2 + 2 + 2 + 3 // stock caches, stock-session Undo close, receipt transition/guard, atomic history
   const merge = common + branchStock.length * 2 + mergeBatchStatements
   const writeOff = common + branchStock.length + mergedBatches.length * 2
 
@@ -6076,10 +6041,9 @@ async function prepareSelectedConflictApplyPreflightCases(
     const keeper = eligibility.keeper as SelectedConflictProductRow
     const discarded = eligibility.discarded as SelectedConflictProductRow
     const clusterNameKey = normalizeProductGroupName(keeper.name)
-    const [memberIds, stockImpact, blockingSession, imageChanges] = await Promise.all([
+    const [memberIds, stockImpact, imageChanges] = await Promise.all([
       readSelectedConflictClusterMemberIds(db, requested.cluster_type, authoritativeClusterValue, clusterNameKey),
       readMergeStockImpact(db, discarded.id, new Map()),
-      mergeBlockedByReversibleStockSession(db, [keeper.id, discarded.id]),
       productMergeChangesImages(db, [{ keeper, discarded }]),
     ])
     const after = await readSelectedConflictFingerprint(db, keeper.id, discarded.id, requested.cluster_type, authoritativeClusterValue, clusterNameKey)
@@ -6093,7 +6057,7 @@ async function prepareSelectedConflictApplyPreflightCases(
     })
     prepared.push({
       ordinal, caseKey: requested.case_key, keeper, discarded, stateDigest, stateGuards: after.guards,
-      needsStockChoice: mergeStockImpactNeedsChoice(stockImpact), imageChanges, blockingSession,
+      needsStockChoice: mergeStockImpactNeedsChoice(stockImpact), imageChanges,
       statementEstimate: selectedConflictLightStatementEstimate(after.fingerprint, keeper.id, discarded.id, canChangeImages),
     })
   }
@@ -6142,16 +6106,9 @@ async function selectedConflictManifestDigest(cases: ReadonlyArray<Pick<Selected
 }
 
 function selectedConflictBlocked(
-  item: Pick<SelectedConflictPreparedCase, 'blockingSession' | 'imageChanges' | 'statementEstimate'>,
+  item: Pick<SelectedConflictPreparedCase, 'imageChanges' | 'statementEstimate'>,
   canChangeImages: boolean,
-): { code: string; message: string; operation_id?: string } | null {
-  if (item.blockingSession) {
-    return {
-      code: 'stock_session_reversible',
-      message: mergeStockSessionBlockedMessage(item.blockingSession.operationId),
-      operation_id: item.blockingSession.operationId,
-    }
-  }
+): { code: string; message: string } | null {
   if (item.imageChanges && !canChangeImages) {
     return { code: 'image_permission_required', message: 'This merge changes product images and requires full image permission.' }
   }
@@ -7898,9 +7855,6 @@ async function applyProductConflictActionReview(c: any, raw: unknown, user: Sess
         AND NOT EXISTS(SELECT 1 FROM product_conflict_action_group_members
           WHERE review_id=@review AND group_ordinal=@ordinal AND undo_snapshot_id IS NOT NULL AND status<>'undo_ready')
       ))
-      AND NOT EXISTS(SELECT 1 FROM stock_session_members sm JOIN stock_session_operations so ON so.id=sm.operation_id
-        JOIN action_history sh ON sh.id=so.history_id
-        WHERE sm.product_id IN (@keeper,@member) AND sh.status IN ('undoable','redoable'))
       THEN 1 ELSE json_extract('', '$') END AS product_conflict_apply_guard`,
     params: { review: review.id, actor: user.id, manifest: review.manifest_digest, ordinal: group.ordinal,
       groupKey: group.group_key, plan: group.final_plan_json, groupOperation: group.operation_id,
@@ -8167,8 +8121,6 @@ app.post('/possible-duplicates/merge-batch', async (c) => {
         code = 'stock_choice_required'; error = 'Choose whether the discarded product stock moves or is written off.'
       } else if (!prepared.needsStockChoice && supplied.stock != null) {
         code = 'stock_choice_not_applicable'; error = 'This unstocked pair must send a null stock choice.'
-      } else if (prepared.blockingSession) {
-        code = 'stock_session_reversible'; error = mergeStockSessionBlockedMessage(prepared.blockingSession.operationId)
       } else if (prepared.imageChanges && !canChangeImages) {
         code = 'image_permission_required'; error = 'This merge changes product images and requires full image permission.'
       } else {
@@ -8502,11 +8454,11 @@ app.get('/possible-duplicates/merge-preview', async (c) => {
   const beforeReview = keepMode ? await readResolveProductGroup(db, groupIds, keepId) : null
   const branchRows = await db.prepare('SELECT id, name FROM branches').all<{ id: number; name: string }>({})
   const branchNameById = new Map<number, string>(branchRows.map((b) => [b.id, b.name]))
-  const [stockImpact, pricing, identity, blockingSession] = await Promise.all([
+  const [stockImpact, pricing, identity, closingSessions] = await Promise.all([
     readMergeStockImpact(db, mergeId, branchNameById),
     readMergePricingChange(db, keepId, mergeId),
     readMergeIdentityDiff(db, keepId, mergeId),
-    mergeBlockedByReversibleStockSession(db, [keepId, mergeId]),
+    readOpenStockSessions(db, [keepId, mergeId]),
   ])
   const numericIssue = mergeNumericRefusal(identity)
   // keep=1: the Resolve grid's Keep merge (N1/N3). A name or barcode
@@ -8546,6 +8498,8 @@ app.get('/possible-duplicates/merge-preview', async (c) => {
     stockImpact,
     needsStockChoice: mergeStockImpactNeedsChoice(stockImpact),
     pricing,
+    // Merging closes these stock-in sessions' Undo; said before the reviewer confirms.
+    closesStockSessions: closingSessions.map((session) => session.operationId),
     // The gate the client has always read and the server has never sent.
     identity,
     ...(keepMode ? { cluster: inCluster, keeperStock, groupCost, groupProducts: resolveGroup?.rows, reviewedDigest: resolveGroup?.reviewedDigest } : {}),
@@ -8557,8 +8511,6 @@ app.get('/possible-duplicates/merge-preview', async (c) => {
       ? { code: 'incompatible_product_identity' }
       : numericIssue
         ? { code: 'invalid_merge_numeric', field: numericIssue.field, rowId: numericIssue.rowId }
-      : blockingSession
-        ? { code: 'stock_session_reversible', operationId: blockingSession.operationId }
         : null,
   })
 })
@@ -8713,15 +8665,6 @@ app.post('/possible-duplicates/merge', async (c) => {
       error: productMergeNumericError(identity.numericIssues),
       identity,
       numericIssue,
-    }, 409)
-  }
-  const blockingSession = await mergeBlockedByReversibleStockSession(db, [keeper.id, dup.id])
-  if (blockingSession) {
-    return c.json({
-      success: false,
-      code: 'stock_session_reversible',
-      error: mergeStockSessionBlockedMessage(blockingSession.operationId),
-      operationId: blockingSession.operationId,
     }, 409)
   }
   if (!stockChoice && mergeStockImpactNeedsChoice(stockImpact)) {
