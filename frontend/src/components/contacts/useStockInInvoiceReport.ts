@@ -25,6 +25,8 @@ export type ReportTotals = {
   invoices_without_branch?: number
 }
 
+export type ReportBranch = { id: number; name?: string | null; is_active?: number | null }
+
 export type ReportPayload = {
   invoices?: InvoiceGroup[]
   totals?: ReportTotals
@@ -32,7 +34,7 @@ export type ReportPayload = {
   page_size?: number
   total_invoices?: number
   meta?: {
-    branches?: Array<{ id: number; name?: string | null }>
+    branches?: ReportBranch[]
     suppliers?: Array<{ key: string; name?: string | null }>
   }
 }

@@ -8,7 +8,7 @@ import StatsRangeRow from '../shared/StatsRangeRow.tsx'
 import PaginationControls, { DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
 import { fmtDateOnly } from '../../utils/formatters'
 import { todayStr } from '../../utils/dateHelpers.ts'
-import { useStockInInvoiceReport, groupKeyOf, LINE_PAGE_SIZE, type InvoiceGroup, type InvoiceLine } from './useStockInInvoiceReport.ts'
+import { useStockInInvoiceReport, groupKeyOf, LINE_PAGE_SIZE, type InvoiceGroup, type InvoiceLine, type ReportBranch } from './useStockInInvoiceReport.ts'
 import InvoiceLedgerSummary from './InvoiceLedgerSummary.tsx'
 import InvoiceDetailFloat from './InvoiceDetailFloat.tsx'
 import CopyableId from '../shared/CopyableId.tsx'
@@ -29,6 +29,8 @@ type TranslateFn = (key: string) => string | undefined
 // system's invoice NUMBER was never stored in this schema, so the date is
 // the honest grouping. Lots with no recorded branch/date/supplier show
 // under explicit "not recorded" labels instead of being hidden.
+
+const isRetiredBranch = (branch: ReportBranch): boolean => branch.is_active != null && Number(branch.is_active) === 0
 
 type StockInInvoicesSectionProps = {
   t: TranslateFn
@@ -58,7 +60,11 @@ export default function StockInInvoicesSection({ t }: StockInInvoicesSectionProp
   const branches = Array.isArray(data?.meta?.branches) ? data!.meta!.branches! : []
   const supplierOptions = Array.isArray(data?.meta?.suppliers) ? data!.meta!.suppliers! : []
   const totalInvoices = Number(data?.total_invoices) || 0
-  const branchNameById = new Map(branches.map((branch) => [String(branch.id), String(branch.name || '')]))
+  const branchLabel = (branch: ReportBranch): string => {
+    const name = String(branch.name || '').trim() || `#${branch.id}`
+    return isRetiredBranch(branch) ? `${name} (${tr('inactive', 'Inactive')})` : name
+  }
+  const branchNameById = new Map(branches.map((branch) => [String(branch.id), branchLabel(branch)]))
 
   const money = (value: unknown): string => `$${(Number(value) || 0).toFixed(2)}`
   const qty = (value: unknown): string => (value == null ? '--' : String(Number(value) || 0))
@@ -129,7 +135,7 @@ export default function StockInInvoicesSection({ t }: StockInInvoicesSectionProp
           className="min-w-[9rem]"
           options={[
             { value: 'all', label: tr('all_branches', 'All Branches') },
-            ...branches.map((branch) => ({ value: String(branch.id), label: String(branch.name || `#${branch.id}`) })),
+            ...branches.map((branch) => ({ value: String(branch.id), label: branchLabel(branch) })),
           ]}
         />
         <SuggestionTextInput
