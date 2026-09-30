@@ -162,7 +162,7 @@ export default function ReasonListEditor<T extends ReasonListItem>({
           </button>
         </div>
       ) : null}
-      <div className="max-h-[min(22rem,55vh)] space-y-1 overflow-y-auto">
+      <div className="max-h-[min(22rem,calc(55*var(--app-vh)))] space-y-1 overflow-y-auto">
         {loading ? (
           <div className="py-6 text-center text-sm text-slate-400">{tr('loading', 'Loading…')}</div>
         ) : items.length ? items.map((item) => (
