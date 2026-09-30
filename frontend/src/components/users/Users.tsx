@@ -144,9 +144,12 @@ interface PasswordFormState {
 const EMPTY_PASSWORD_FORM: PasswordFormState = { currentPassword: '', newPassword: '', confirmPassword: '' }
 
 interface PasswordHandoverState {
+  userId: EntityId
   name: string
   password: string
 }
+
+const sameUserId = (left: EntityId, right: EntityId): boolean => String(left) === String(right)
 
 interface MutationResult {
   success?: boolean
@@ -506,7 +509,10 @@ export default function Users() {
   const [roleForm, setRoleForm] = useState<RoleFormState>(INITIAL_ROLE_FORM)
   const [passwordForm, setPasswordForm] = useState<PasswordFormState>(EMPTY_PASSWORD_FORM)
   const [passwordHandover, setPasswordHandover] = useState<PasswordHandoverState | null>(null)
-  useEffect(() => { if (modal !== 'resetPw') setPasswordHandover(null) }, [modal])
+  const resetTargetId = modal === 'resetPw' && selectedUser ? selectedUser.id : null
+  const openResetTargetRef = useRef<EntityId | null>(resetTargetId)
+  openResetTargetRef.current = resetTargetId
+  useEffect(() => { setPasswordHandover(null) }, [resetTargetId])
   const [saving, setSaving] = useState(false)
   // Part 563: the user-save review dialog is open (handleSaveUser validated +
   // opened it; commitSaveUser writes on confirm).
@@ -1020,6 +1026,8 @@ export default function Users() {
     }
     if (!beginSingleAction(passwordInFlightRef, { blocked: passwordSaving })) return
 
+    const targetId = selectedUser.id
+    const stillOpenForTarget = () => openResetTargetRef.current !== null && sameUserId(openResetTargetRef.current, targetId)
     setPasswordSaving(true)
     try {
       const actor = { userId: currentUser?.id, userName: currentUser?.name }
@@ -1034,14 +1042,16 @@ export default function Users() {
       if (ownAccount) {
         const stored = await requestPasswordSave({ username: String(selectedUser.username || ''), password: newPassword, displayName: selectedUser.name })
         const notice = passwordNoticeKey({ stored })
-        setPasswordForm(EMPTY_PASSWORD_FORM)
         notify(tr(notice.key, notice.fallback), stored ? 'success' : 'warning')
+        if (!stillOpenForTarget()) return
+        setPasswordForm(EMPTY_PASSWORD_FORM)
         setModal(null)
         return
       }
       setResetRequestsVersion((version) => version + 1)
+      if (!stillOpenForTarget()) return
       setPasswordForm(EMPTY_PASSWORD_FORM)
-      setPasswordHandover({ name: String(selectedUser.name || selectedUser.username || ''), password: newPassword })
+      setPasswordHandover({ userId: targetId, name: String(selectedUser.name || selectedUser.username || ''), password: newPassword })
     } catch (error) {
       notify(newPasswordRefusalMessage(error, tr) || currentPasswordRateLimitMessage(error, tr) || getErrorMessage(error, 'Failed to change password'), 'error')
     } finally {
@@ -1608,8 +1618,8 @@ export default function Users() {
       ) : null}
 
       {modal === 'resetPw' && selectedUser ? (
-        <Modal title={`${tr('change_password', 'Change password')}: ${selectedUser.name}`} onClose={() => setModal(null)} unsavedChanges={{ dirty: passwordFormDirty }}>
-          {passwordHandover ? (
+        <Modal title={`${tr('change_password', 'Change password')}: ${selectedUser.name}`} onClose={() => setModal(null)} closeDisabled={passwordSaving} unsavedChanges={{ dirty: passwordFormDirty }}>
+          {passwordHandover && sameUserId(passwordHandover.userId, selectedUser.id) ? (
             <PasswordHandover tr={tr} name={passwordHandover.name} password={passwordHandover.password} onDone={() => setModal(null)} />
           ) : isCurrentAccount(selectedUser) ? (
             <OwnPasswordChangeForm tr={tr} target={selectedUser} form={passwordForm} setForm={setPasswordForm} passwordSaving={passwordSaving} onSave={() => { void handleResetPassword() }} />
