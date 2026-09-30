@@ -8,7 +8,7 @@ import ScanLine from 'lucide-react/dist/esm/icons/scan-line.js'
 import ShieldAlert from 'lucide-react/dist/esm/icons/shield-alert.js'
 import Modal from '../../shared/Modal'
 import { deriveScannerPresentation } from './barcodeScannerState.ts'
-import { isCameraBlockedByDocumentPolicy } from './scanbotScanner.ts'
+import { isCameraBlockedByDocumentPolicy } from './cameraPolicy.ts'
 import { scanBarcodeFromImageFile } from './barcodeImageScanner.ts'
 import { readCameraPermissionState, watchCameraPermission, type CameraPermissionState } from './cameraPermission.ts'
 

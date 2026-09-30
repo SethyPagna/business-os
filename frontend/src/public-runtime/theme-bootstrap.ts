@@ -98,7 +98,6 @@ type AppTheme = 'light' | 'dark'
     return /\/assets\/[^?#]+\.js/i.test(raw)
       || /\/assets\/[^?#]+\.css/i.test(raw)
       || /\/theme-bootstrap\.js/i.test(raw)
-      || /\/scanbot-web-sdk\//i.test(raw)
   }
 
   function hasInjectedBundleSource(value: unknown): boolean {
