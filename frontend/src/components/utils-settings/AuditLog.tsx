@@ -34,6 +34,7 @@ import {
   AUDIT_SECTION_IDS,
   AUDIT_TIME_PRESETS,
   auditFilterKey,
+  auditWindowWasCut,
   buildAuditRequestParams,
   initialAuditViewState,
   mergeAuditRows,
@@ -89,6 +90,7 @@ interface AuditLogResponse {
   hasMore?: boolean
   partial?: boolean
   source?: string | null
+  window?: { startDate?: string | null; endDate?: string | null } | null
   counts?: {
     users?: AuditUserCount[]
     sections?: AuditSectionCount[]
@@ -351,6 +353,7 @@ export default function AuditLog() {
   const [hasMore, setHasMore] = useState(false)
   const [userCounts, setUserCounts] = useState<AuditUserCount[]>([])
   const [sectionCounts, setSectionCounts] = useState<AuditSectionCount[]>([])
+  const [windowCut, setWindowCut] = useState(false)
   const [loading, setLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
   const [hasLoadedOnce, setHasLoadedOnce] = useState(false)
@@ -463,6 +466,7 @@ export default function AuditLog() {
       }
       const page = Array.isArray(data) ? null : data
       setLogs(rows)
+      setWindowCut(auditWindowWasCut({ startDate: String(params.startDate || ''), endDate: String(params.endDate || '') }, page?.window))
       setNextCursor(page?.nextCursor || null)
       setHasMore(Boolean(page?.hasMore && page?.nextCursor))
       // Counts ride on the first page only; a local-mirror answer carries
@@ -787,7 +791,7 @@ export default function AuditLog() {
       <div className="sticky top-2 z-30 -mx-1 space-y-2 bg-gray-50 pb-2 dark:bg-gray-900 sm:mx-0">
         <div
           className="flex items-center gap-2 pt-1"
-          title={t('audit_log_desc') || 'Default columns: Record, Device, User, Action. Click a row to see full details and data changes.'}
+          title={t('audit_log_desc') || 'Choose All, Section or User, then a time range. Click a row to see full details and data changes.'}
         >
           <div role="group" aria-label={t('audit_log') || 'Audit Log'} className="grid min-w-0 flex-1 grid-flow-col auto-cols-fr gap-0.5 rounded-lg bg-slate-100 p-0.5 dark:bg-slate-800/90">
             {AUDIT_SCOPES.filter((scope) => scope !== 'user' || canSeeAllUsers).map((scope) => (
@@ -847,6 +851,12 @@ export default function AuditLog() {
           />
         ) : null}
 
+        {windowCut ? (
+          <p className="px-1 text-xs text-amber-700 dark:text-amber-300" data-audit-window-note>
+            {copy('audit_window_clamped', 'Showing the newest 92 days', 'កំពុងបង្ហាញ ៩២ ថ្ងៃថ្មីបំផុត')}
+          </p>
+        ) : null}
+
         {view.scope !== 'all' ? (
           <div className="flex min-w-0 flex-nowrap gap-1 overflow-x-auto overscroll-x-contain pb-1" data-audit-scope-chips>
             {chipStrip.length === 0 ? (
@@ -859,6 +869,7 @@ export default function AuditLog() {
                   type="button"
                   aria-pressed={picked}
                   disabled={!chip.id}
+                  title={chip.id ? undefined : copy('audit_system_chip_hint', 'Entries with no signed-in user are listed under All', 'កំណត់ត្រាដែលគ្មានអ្នកប្រើចូលប្រព័ន្ធ បង្ហាញក្នុង «ទាំងអស់»')}
                   onClick={() => toggleChip(chipField, chip.id)}
                   className={`inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg px-2.5 text-xs font-medium disabled:opacity-60 ${picked ? 'bg-slate-800 text-white dark:bg-slate-200 dark:text-slate-900' : 'bg-gray-100 text-gray-600 dark:bg-zinc-800 dark:text-gray-300'}`}
                 >

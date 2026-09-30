@@ -84,6 +84,20 @@ export function auditWindowFor(state: AuditViewState, today: string): { startDat
   }
 }
 
+/**
+ * True when the Worker answered with a later start than the page asked for:
+ * it caps a custom range at the newest 92 days, and the page says so instead
+ * of letting the list silently end. An answer without a window (the local
+ * mirror) claims nothing.
+ */
+export function auditWindowWasCut(
+  requested: { startDate: string; endDate: string },
+  served: { startDate?: string | null; endDate?: string | null } | null | undefined,
+): boolean {
+  const from = served?.startDate
+  return Boolean(from && requested.startDate && from > requested.startDate)
+}
+
 export function auditCountsFor(scope: AuditScope): 'sections' | 'users' | undefined {
   if (scope === 'section') return 'sections'
   if (scope === 'user') return 'users'

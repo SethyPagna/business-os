@@ -20,6 +20,7 @@ import {
   auditCountsFor,
   auditFilterKey,
   auditPresetWindow,
+  auditWindowWasCut,
   buildAuditRequestParams,
   initialAuditViewState,
   mergeAuditRows,
@@ -162,4 +163,42 @@ test('the section ids and labels match the Worker mapping table', () => {
       assert.ok(typeof strings[key] === 'string' && strings[key], `${pack}.json has ${key}`)
     }
   }
+})
+
+test('a custom range the Worker cut short is reported from the window it returned', () => {
+  assert.equal(auditWindowWasCut({ startDate: '2026-01-01', endDate: '2026-09-30' }, { startDate: '2026-07-01', endDate: '2026-09-30' }), true, 'the Worker started later than asked')
+  assert.equal(auditWindowWasCut({ startDate: '2026-09-01', endDate: '2026-09-30' }, { startDate: '2026-09-01', endDate: '2026-09-30' }), false, 'the window came back as asked')
+  assert.equal(auditWindowWasCut({ startDate: '2026-09-01', endDate: '2026-12-31' }, { startDate: '2026-09-01', endDate: '2026-09-30' }), false, 'a future end date shortens nothing that exists')
+  assert.equal(auditWindowWasCut({ startDate: '2026-09-01', endDate: '2026-09-30' }, undefined), false, 'an answer with no window (the local mirror) claims no cut')
+  assert.equal(auditWindowWasCut({ startDate: '2026-09-01', endDate: '2026-09-30' }, { startDate: null, endDate: null }), false, 'a null window claims no cut')
+})
+
+test('the page states a cut range in one line and uses the window the Worker returned', () => {
+  const page = read('../src/components/utils-settings/AuditLog.tsx')
+  assert.match(page, /auditWindowWasCut\(\{ startDate: String\(params\.startDate/, 'load() compares the requested dates with the returned window')
+  assert.match(page, /page\?\.window/, 'the returned window is read from the response')
+  assert.match(page, /data-audit-window-note/, 'the note has its own element')
+  assert.match(page, /copy\('audit_window_clamped', 'Showing the newest 92 days'/, 'the note goes through the pack')
+  const worker = read('../../cloudflare/src/lib/auditLogQuery.ts')
+  assert.match(worker, /AUDIT_MAX_WINDOW_DAYS = 92/, 'the note says what the Worker enforces')
+})
+
+test('the tooltip describes the page that exists and the dead keys are gone from both packs', () => {
+  for (const pack of ['en', 'km']) {
+    const strings = JSON.parse(read(`../src/lang/${pack}.json`)) as Record<string, unknown>
+    for (const key of ['audit_window_clamped', 'audit_system_chip_hint']) {
+      assert.ok(typeof strings[key] === 'string' && strings[key], `${pack}.json has ${key}`)
+    }
+    for (const key of ['all_entities', 'audit_entity', 'click_for_details', 'export_selected_logs', 'group_time_action', 'group_time_created']) {
+      assert.ok(!(key in strings), `${pack}.json no longer carries ${key}`)
+    }
+    assert.ok(!/Record.*Device.*User.*Action/i.test(String(strings.audit_log_desc)), `${pack}.json audit_log_desc no longer lists the removed columns`)
+  }
+  const en = JSON.parse(read('../src/lang/en.json')) as Record<string, unknown>
+  const km = JSON.parse(read('../src/lang/km.json')) as Record<string, unknown>
+  assert.notEqual(km.audit_window_clamped, en.audit_window_clamped, 'the Khmer note is translated')
+  assert.notEqual(km.audit_system_chip_hint, en.audit_system_chip_hint, 'the Khmer System hint is translated')
+  const page = read('../src/components/utils-settings/AuditLog.tsx')
+  assert.doesNotMatch(page, /Default columns/, 'the tooltip fallback no longer lists columns')
+  assert.match(page, /title=\{chip\.id \? undefined : copy\('audit_system_chip_hint'/, 'the disabled System chip says why')
 })
