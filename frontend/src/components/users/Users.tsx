@@ -1,7 +1,11 @@
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { MutableRefObject } from 'react'
+import type { Dispatch, MutableRefObject, SetStateAction } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
+import Check from 'lucide-react/dist/esm/icons/check.js'
 import CircleUserRound from 'lucide-react/dist/esm/icons/circle-user-round.js'
+import Copy from 'lucide-react/dist/esm/icons/copy.js'
+import KeyRound from 'lucide-react/dist/esm/icons/key-round.js'
+import Save from 'lucide-react/dist/esm/icons/save.js'
 import UserPlus from 'lucide-react/dist/esm/icons/user-plus.js'
 import AppSelect from '../shared/AppSelect.tsx'
 import SearchInput from '../shared/SearchInput'
@@ -23,7 +27,10 @@ import { APP_NAVIGATION_EVENT } from '../../app/pathRouting.ts'
 import { useActionHistory } from '../../utils/actionHistory.ts'
 import { cloneHistorySnapshot, extractHistoryResultId } from '../../utils/historyHelpers.ts'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
-import { copyPasswordToClipboard, passwordPersistenceNotice, persistChangedPassword } from '../../utils/passwordManager.ts'
+import { copyPasswordToClipboard, passwordNoticeKey, requestPasswordSave } from '../../utils/passwordManager.ts'
+import { newPasswordProblem, newPasswordRefusalMessage, passwordProblemMessage } from '../../utils/passwordRules.ts'
+import type { PasswordIdentity } from '../../utils/passwordSuggest.ts'
+import NewPasswordFields from '../auth/password/NewPasswordFields.tsx'
 import {
   beginTrackedRequest,
   invalidateTrackedRequest,
@@ -53,6 +60,7 @@ type EntityId = number | string
 type UsersTab = 'users' | 'roles' | 'devices'
 type UsersModal = 'editUser' | 'editRole' | 'resetPw' | 'userDetail' | null
 type TranslateFn = (key: string) => string
+type Translate = (key: string, fallback: string) => string
 type NotifyFn = (message: string, tone?: string) => void
 type PermissionState = Record<string, PermissionValue>
 
@@ -117,6 +125,7 @@ interface UserFormState {
   email: string
   avatar_path: string
   password: string
+  passwordConfirm: string
   role_id: EntityId | ''
   is_active: number
 }
@@ -131,6 +140,16 @@ interface PasswordFormState {
   newPassword: string
   confirmPassword: string
 }
+
+const EMPTY_PASSWORD_FORM: PasswordFormState = { currentPassword: '', newPassword: '', confirmPassword: '' }
+
+interface PasswordHandoverState {
+  userId: EntityId
+  name: string
+  password: string
+}
+
+const sameUserId = (left: EntityId, right: EntityId): boolean => String(left) === String(right)
 
 interface MutationResult {
   success?: boolean
@@ -246,6 +265,7 @@ const INITIAL_USER_FORM: UserFormState = {
   email: '',
   avatar_path: '',
   password: '',
+  passwordConfirm: '',
   role_id: '',
   is_active: 1,
 }
@@ -264,6 +284,128 @@ const USER_MUTATION_TIMEOUT_MS = 12000
 const ROLE_MUTATION_TIMEOUT_MS = 12000
 const USERS_SECONDARY_READ_DELAY_MS = 2500
 const USERS_SECONDARY_READ_IDLE_TIMEOUT_MS = 5000
+const MAIN_ACTION_BUTTON_CLASS = 'btn-primary inline-flex h-9 items-center gap-1.5 px-3 text-xs'
+
+function passwordEntryError(password: string, confirm: string, missing: string, tr: Translate): string {
+  if (!password) return missing
+  const problem = newPasswordProblem(password)
+  if (problem) return passwordProblemMessage(problem, tr)
+  if (password !== confirm) return tr('new_password_confirm_mismatch', 'New password confirmation does not match')
+  return ''
+}
+
+function passwordIdentity(user: UserRecord): PasswordIdentity {
+  return { username: user.username, name: user.name, phone: user.phone || undefined }
+}
+
+type PasswordEntryProps = {
+  tr: Translate
+  target: UserRecord
+  form: PasswordFormState
+  setForm: Dispatch<SetStateAction<PasswordFormState>>
+  passwordSaving: boolean
+  onSave: () => void
+}
+
+function OwnPasswordChangeForm({ tr, target, form, setForm, passwordSaving, onSave }: PasswordEntryProps) {
+  return (
+    <form className="space-y-4" onSubmit={(event) => { event.preventDefault(); onSave() }}>
+      <input type="text" name="username" autoComplete="username" value={target.username || ''} readOnly className="sr-only" tabIndex={-1} aria-hidden="true" />
+      <div className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-700 dark:border-blue-900/40 dark:bg-blue-950/30 dark:text-blue-300">
+        {tr('current_password_required_change', 'Current password is required to change password')}
+      </div>
+      <div>
+        <label htmlFor="reset-password-current" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr('current_password', 'Current password')}</label>
+        <input
+          id="reset-password-current"
+          name="current_password"
+          type="password"
+          autoComplete="current-password"
+          className="input"
+          value={form.currentPassword}
+          onChange={(event) => setForm((prev) => ({ ...prev, currentPassword: event.target.value }))}
+          autoFocus
+        />
+      </div>
+      <NewPasswordFields
+        tr={tr}
+        idPrefix="reset-password"
+        password={form.newPassword}
+        confirm={form.confirmPassword}
+        onPasswordChange={(newPassword) => setForm((prev) => ({ ...prev, newPassword }))}
+        onConfirmChange={(confirmPassword) => setForm((prev) => ({ ...prev, confirmPassword }))}
+        identity={passwordIdentity(target)}
+        disabled={passwordSaving}
+        inputClassName="input"
+      />
+      <div className="flex justify-end">
+        <button type="submit" className={MAIN_ACTION_BUTTON_CLASS} title={tr('change_password', 'Change password')} disabled={passwordSaving}>
+          <KeyRound className="h-4 w-4" aria-hidden="true" />
+          {passwordSaving ? tr('updating', 'Updating…') : tr('save', 'Save')}
+        </button>
+      </div>
+    </form>
+  )
+}
+
+// Not a form, and no field a password manager treats as a login: this is
+// someone else's password, never one for the administrator's own vault.
+function AdminPasswordResetForm({ tr, target, form, setForm, passwordSaving, onSave }: PasswordEntryProps) {
+  return (
+    <div className="space-y-4">
+      <NewPasswordFields
+        tr={tr}
+        idPrefix="reset-password"
+        mode="other-user"
+        password={form.newPassword}
+        confirm={form.confirmPassword}
+        onPasswordChange={(newPassword) => setForm((prev) => ({ ...prev, newPassword }))}
+        onConfirmChange={(confirmPassword) => setForm((prev) => ({ ...prev, confirmPassword }))}
+        identity={passwordIdentity(target)}
+        disabled={passwordSaving}
+        inputClassName="input"
+      />
+      <div className="flex justify-end">
+        <button type="button" className={MAIN_ACTION_BUTTON_CLASS} title={tr('change_password', 'Change password')} disabled={passwordSaving} onClick={onSave}>
+          <KeyRound className="h-4 w-4" aria-hidden="true" />
+          {passwordSaving ? tr('updating', 'Updating…') : tr('save', 'Save')}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function PasswordHandover({ tr, name, password, onDone }: { tr: Translate; name: string; password: string; onDone: () => void }) {
+  const [copyNotice, setCopyNotice] = useState('')
+  const copyLabel = tr('copy_new_password', 'Copy new password')
+  const copy = async () => {
+    const copied = await copyPasswordToClipboard(password)
+    setCopyNotice(copied
+      ? tr('new_password_copied', 'New password copied to clipboard.')
+      : tr('new_password_copy_failed', 'Could not copy automatically. Select the new password field and copy it before leaving.'))
+  }
+  return (
+    <div className="space-y-3">
+      <div>
+        <p className="text-sm font-semibold text-gray-900 dark:text-white">{tr('password_admin_handover_title', 'New password for {name}').replace('{name}', name)}</p>
+        <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{tr('password_admin_handover_body', 'Give it to them now. It is shown only this once.')}</p>
+      </div>
+      <div className="flex items-center gap-2">
+        <div className="min-w-0 flex-1 select-all break-all rounded-md bg-gray-50 px-2 py-1.5 font-mono text-sm text-gray-800 dark:bg-slate-900 dark:text-gray-100">{password}</div>
+        <button type="button" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-gray-500 hover:bg-gray-100 hover:text-gray-800 dark:text-gray-400 dark:hover:bg-slate-700 dark:hover:text-gray-100" aria-label={copyLabel} title={copyLabel} onClick={() => { void copy() }}>
+          <Copy className="h-4 w-4" aria-hidden="true" />
+        </button>
+      </div>
+      {copyNotice ? <p className="text-xs text-gray-600 dark:text-gray-300" role="status">{copyNotice}</p> : null}
+      <div className="flex justify-end">
+        <button type="button" className={MAIN_ACTION_BUTTON_CLASS} onClick={onDone}>
+          <Check className="h-4 w-4" aria-hidden="true" />
+          {tr('done', 'Done')}
+        </button>
+      </div>
+    </div>
+  )
+}
 
 /**
  * 1.2.1 Render-safe fallback for nullable contact values.
@@ -365,11 +507,12 @@ export default function Users() {
   }, [t])
   const [userForm, setUserForm] = useState<UserFormState>(INITIAL_USER_FORM)
   const [roleForm, setRoleForm] = useState<RoleFormState>(INITIAL_ROLE_FORM)
-  const [passwordForm, setPasswordForm] = useState<PasswordFormState>({
-    currentPassword: '',
-    newPassword: '',
-    confirmPassword: '',
-  })
+  const [passwordForm, setPasswordForm] = useState<PasswordFormState>(EMPTY_PASSWORD_FORM)
+  const [passwordHandover, setPasswordHandover] = useState<PasswordHandoverState | null>(null)
+  const resetTargetId = modal === 'resetPw' && selectedUser ? selectedUser.id : null
+  const openResetTargetRef = useRef<EntityId | null>(resetTargetId)
+  openResetTargetRef.current = resetTargetId
+  useEffect(() => { setPasswordHandover(null) }, [resetTargetId])
   const [saving, setSaving] = useState(false)
   // Part 563: the user-save review dialog is open (handleSaveUser validated +
   // opened it; commitSaveUser writes on confirm).
@@ -428,6 +571,7 @@ export default function Users() {
   const canManageTargetUser = (targetUser: UserRecord | null | undefined): boolean => {
     return canManage && !!targetUser
   }
+  const isCurrentAccount = (targetUser: UserRecord): boolean => Number(targetUser.id) === Number(currentUser?.id)
 
   // Device-approval notifications navigate here with anchor 'devices' (see
   // routes/notifications.ts's buildDeviceApprovalSection and
@@ -688,6 +832,7 @@ export default function Users() {
       email: user.email || '',
       avatar_path: user.avatar_path || '',
       password: '',
+      passwordConfirm: '',
       role_id: user.role_id || '',
       is_active: user.is_active ? 1 : 0,
     })
@@ -754,8 +899,11 @@ export default function Users() {
       notify(tr('name_username_required', 'Name and username are required'), 'error')
       return
     }
-    if (!selectedUser && !userForm.password.trim()) {
-      notify(tr('password_required_new_user', 'Password is required for new users'), 'error')
+    const newUserPasswordError = selectedUser
+      ? ''
+      : passwordEntryError(userForm.password, userForm.passwordConfirm, tr('password_required_new_user', 'Password is required for new users'), tr)
+    if (newUserPasswordError) {
+      notify(newUserPasswordError, 'error')
       return
     }
     if (selectedUser && !canManageTargetUser(selectedUser)) {
@@ -802,7 +950,7 @@ export default function Users() {
         : await runUserMutation(() => getUsersApi().createUser({ ...payload, password: userForm.password }), 'Create user')
 
       if (result?.success === false) {
-        notify(lastAdminRequiredMessage(result, tr) || result.error || 'Failed to save user', 'error')
+        notify(newPasswordRefusalMessage(result, tr) || lastAdminRequiredMessage(result, tr) || result.error || 'Failed to save user', 'error')
         return
       }
 
@@ -835,7 +983,7 @@ export default function Users() {
       setUserForm(INITIAL_USER_FORM)
       await load()
     } catch (error) {
-      notify(lastAdminRequiredMessage(error, tr) || getErrorMessage(error, 'Failed to save user'), 'error')
+      notify(newPasswordRefusalMessage(error, tr) || lastAdminRequiredMessage(error, tr) || getErrorMessage(error, 'Failed to save user'), 'error')
     } finally {
       finishSingleAction(saveUserInFlightRef)
       setSaving(false)
@@ -865,75 +1013,47 @@ export default function Users() {
       notify(tr('cannot_manage_admin_account', 'You cannot manage this account.'), 'error')
       return
     }
-    const currentPassword = String(passwordForm.currentPassword || '')
-    const newPassword = String(passwordForm.newPassword || '')
-    const confirmPassword = String(passwordForm.confirmPassword || '')
-    const allowAdminOverride = Number(selectedUser.id) !== Number(currentUser?.id) && canManageTargetUser(selectedUser)
-
-    if (!newPassword.trim()) {
-      notify(tr('enter_new_password', 'Enter new password'), 'error')
+    const { currentPassword, newPassword, confirmPassword } = passwordForm
+    const ownAccount = isCurrentAccount(selectedUser)
+    const entryError = passwordEntryError(newPassword, confirmPassword, tr('enter_new_password', 'Enter new password'), tr)
+    if (entryError) {
+      notify(entryError, 'error')
       return
     }
-    if (newPassword.length < 6) {
-      notify(tr('password_min_6', 'Use at least 6 characters for the new password.'), 'error')
-      return
-    }
-    if (newPassword !== confirmPassword) {
-      notify(tr('new_password_confirm_mismatch', 'New password confirmation does not match'), 'error')
-      return
-    }
-    if (!allowAdminOverride && !currentPassword.trim()) {
+    if (ownAccount && !currentPassword.trim()) {
       notify(tr('current_password_required_change', 'Current password is required to change password'), 'error')
       return
     }
     if (!beginSingleAction(passwordInFlightRef, { blocked: passwordSaving })) return
 
+    const targetId = selectedUser.id
+    const stillOpenForTarget = () => openResetTargetRef.current !== null && sameUserId(openResetTargetRef.current, targetId)
     setPasswordSaving(true)
     try {
-      const result = await runUserMutation(() => (allowAdminOverride
-        ? getUsersApi().resetPassword(selectedUser.id, {
-            newPassword,
-            userId: currentUser?.id,
-            userName: currentUser?.name,
-          })
-        : getUsersApi().changeUserPassword(selectedUser.id, {
-            currentPassword,
-            newPassword,
-            userId: currentUser?.id,
-            userName: currentUser?.name,
-          })
-      ), allowAdminOverride ? 'Reset user password' : 'Change user password')
+      const actor = { userId: currentUser?.id, userName: currentUser?.name }
+      const result = await runUserMutation(() => (ownAccount
+        ? getUsersApi().changeUserPassword(selectedUser.id, { currentPassword, newPassword, ...actor })
+        : getUsersApi().resetPassword(selectedUser.id, { newPassword, ...actor })
+      ), ownAccount ? 'Change user password' : 'Reset user password')
       if (result?.success === false) {
-        notify(currentPasswordRateLimitMessage(result, tr) || result.error || 'Failed to change password', 'error')
+        notify(newPasswordRefusalMessage(result, tr) || currentPasswordRateLimitMessage(result, tr) || result.error || 'Failed to change password', 'error')
         return
       }
-      const adminReset = Number(selectedUser.id) !== Number(currentUser?.id)
-      if (adminReset) setResetRequestsVersion((version) => version + 1)
-      const persistence = await persistChangedPassword({
-        username: String(selectedUser.username || '').trim(),
-        displayName: String(selectedUser.name || selectedUser.username || '').trim(),
-        password: newPassword,
-        // Never store another user's credential as this administrator's own
-        // browser login. For admin resets the clipboard safeguard is used.
-        allowCredentialStore: !adminReset,
-        copyFallback: true,
-      })
-      const passwordSecured = persistence.credentialStoreSucceeded || persistence.copiedToClipboard
-      notify(passwordPersistenceNotice(persistence, { adminReset }), passwordSecured && !persistence.copiedToClipboard ? 'success' : 'warning')
-      if (passwordSecured) {
-        setPasswordForm({
-          currentPassword: '',
-          newPassword: '',
-          confirmPassword: '',
-        })
+      if (ownAccount) {
+        const stored = await requestPasswordSave({ username: String(selectedUser.username || ''), password: newPassword, displayName: selectedUser.name })
+        const notice = passwordNoticeKey({ stored })
+        notify(tr(notice.key, notice.fallback), stored ? 'success' : 'warning')
+        if (!stillOpenForTarget()) return
+        setPasswordForm(EMPTY_PASSWORD_FORM)
         setModal(null)
-      } else {
-        // The server write already succeeded. Keep the new value in the form
-        // instead of clearing it and stranding the operator without a copy.
-        setPasswordForm((prev) => ({ ...prev, currentPassword: '' }))
+        return
       }
+      setResetRequestsVersion((version) => version + 1)
+      if (!stillOpenForTarget()) return
+      setPasswordForm(EMPTY_PASSWORD_FORM)
+      setPasswordHandover({ userId: targetId, name: String(selectedUser.name || selectedUser.username || ''), password: newPassword })
     } catch (error) {
-      notify(currentPasswordRateLimitMessage(error, tr) || getErrorMessage(error, 'Failed to change password'), 'error')
+      notify(newPasswordRefusalMessage(error, tr) || currentPasswordRateLimitMessage(error, tr) || getErrorMessage(error, 'Failed to change password'), 'error')
     } finally {
       finishSingleAction(passwordInFlightRef)
       setPasswordSaving(false)
@@ -1181,7 +1301,7 @@ export default function Users() {
               return
             }
             setSelectedUser(target)
-            setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' })
+            setPasswordForm(EMPTY_PASSWORD_FORM)
             setModal('resetPw')
           }}
         />
@@ -1243,7 +1363,7 @@ export default function Users() {
                           onEdit={() => openEditUser(user)}
                           onResetPw={() => {
                             setSelectedUser(user)
-                            setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' })
+                            setPasswordForm(EMPTY_PASSWORD_FORM)
                             setModal('resetPw')
                           }}
                         />
@@ -1278,7 +1398,7 @@ export default function Users() {
                     onEdit={() => openEditUser(user)}
                     onResetPw={() => {
                       setSelectedUser(user)
-                      setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' })
+                      setPasswordForm(EMPTY_PASSWORD_FORM)
                       setModal('resetPw')
                     }}
                   />
@@ -1339,7 +1459,7 @@ export default function Users() {
             t={t}
             onEdit={() => openEditUser(selectedUser)}
             onResetPw={() => {
-              setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' })
+              setPasswordForm(EMPTY_PASSWORD_FORM)
               setModal('resetPw')
             }}
             canRecoverOtp={canManageTargetUser(selectedUser)
@@ -1364,7 +1484,7 @@ export default function Users() {
               </div>
               <div>
                 <label htmlFor="user-username" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr('username', 'Username')}</label>
-                <input id="user-username" name="username" autoComplete="username" className="input" value={userForm.username} onChange={(e) => setUserForm((prev) => ({ ...prev, username: e.target.value }))} />
+                <input id="user-username" name="new_user_username" autoComplete="off" data-1p-ignore="true" data-lpignore="true" data-bwignore="true" className="input" value={userForm.username} onChange={(e) => setUserForm((prev) => ({ ...prev, username: e.target.value }))} />
               </div>
               <div>
                 <label htmlFor="user-phone" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr('phone', 'Phone')}</label>
@@ -1380,10 +1500,18 @@ export default function Users() {
               <input id="user-avatar" name="avatar_path" autoComplete="off" className="input" placeholder={tr('avatar_upload_note', 'Use My Profile to upload an image')} value={userForm.avatar_path} onChange={(e) => setUserForm((prev) => ({ ...prev, avatar_path: e.target.value }))} />
             </div>
             {!selectedUser ? (
-              <div>
-                <label htmlFor="user-password" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr('password', 'Password')}</label>
-                <input id="user-password" name="password" type="password" autoComplete="new-password" className="input" value={userForm.password} onChange={(e) => setUserForm((prev) => ({ ...prev, password: e.target.value }))} />
-              </div>
+              <NewPasswordFields
+                tr={tr}
+                idPrefix="new-user-password"
+                mode="other-user"
+                password={userForm.password}
+                confirm={userForm.passwordConfirm}
+                onPasswordChange={(password) => setUserForm((prev) => ({ ...prev, password }))}
+                onConfirmChange={(passwordConfirm) => setUserForm((prev) => ({ ...prev, passwordConfirm }))}
+                identity={{ username: userForm.username, name: userForm.name, phone: userForm.phone }}
+                inputClassName="input"
+                layout="columns"
+              />
             ) : null}
             <div className="grid gap-4 sm:grid-cols-2">
               <div>
@@ -1421,9 +1549,11 @@ export default function Users() {
                 />
               </div>
             </div>
-            <div className="flex justify-end gap-3 pt-2">
-              <button type="button" className="btn-secondary" onClick={() => setModal(null)}>{t('cancel') || 'Cancel'}</button>
-              <button type="button" className="btn-primary" onClick={handleSaveUser} disabled={saving}>{saving ? (t('loading') || 'Saving...') : (t('save') || 'Save')}</button>
+            <div className="flex justify-end pt-2">
+              <button type="button" className={MAIN_ACTION_BUTTON_CLASS} onClick={handleSaveUser} disabled={saving}>
+                <Save className="h-4 w-4" aria-hidden="true" />
+                {saving ? (t('loading') || 'Saving...') : (t('save') || 'Save')}
+              </button>
             </div>
           </div>
           {userConfirmOpen ? (
@@ -1488,87 +1618,14 @@ export default function Users() {
       ) : null}
 
       {modal === 'resetPw' && selectedUser ? (
-        <Modal title={`${tr('change_password', 'Change password')}: ${selectedUser.name}`} onClose={() => setModal(null)} unsavedChanges={{ dirty: passwordFormDirty }}>
-          <form className="space-y-4" onSubmit={(event) => { event.preventDefault(); void handleResetPassword() }}>
-            <input
-              type="text"
-              name="username"
-              autoComplete={Number(selectedUser.id) === Number(currentUser?.id) ? 'username' : 'off'}
-              value={selectedUser.username || ''}
-              readOnly
-              className="sr-only"
-              tabIndex={-1}
-              aria-hidden="true"
-            />
-            {Number(selectedUser.id) === Number(currentUser?.id) ? (
-              <div className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-700 dark:border-blue-900/40 dark:bg-blue-950/30 dark:text-blue-300">
-                {tr('current_password_required_change', 'Current password is required to change password')}
-              </div>
-            ) : null}
-            {Number(selectedUser.id) !== Number(currentUser?.id) && canManageTargetUser(selectedUser) ? (
-              <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-300">
-                {tr('admin_password_override_note', 'Current password is not required when an administrator resets another account, including another admin account.')}
-              </div>
-            ) : null}
-            <div>
-              <label htmlFor="reset-password-current" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr('current_password', 'Current password')}</label>
-              <input
-                id="reset-password-current"
-                name="current_password"
-                type="password"
-                autoComplete={Number(selectedUser.id) === Number(currentUser?.id) ? 'current-password' : 'off'}
-                className="input"
-                value={passwordForm.currentPassword}
-                onChange={(e) => setPasswordForm((prev) => ({ ...prev, currentPassword: e.target.value }))}
-                autoFocus
-              />
-            </div>
-            <div>
-              <label htmlFor="reset-password-new" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr('new_password', 'New password')}</label>
-              <input
-                id="reset-password-new"
-                name="new_password"
-                type="password"
-                autoComplete={Number(selectedUser.id) === Number(currentUser?.id) ? 'new-password' : 'off'}
-                className="input"
-                value={passwordForm.newPassword}
-                onChange={(e) => setPasswordForm((prev) => ({ ...prev, newPassword: e.target.value }))}
-              />
-            </div>
-            <div>
-              <label htmlFor="reset-password-confirm" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr('confirm_new_password', 'Confirm new password')}</label>
-              <input
-                id="reset-password-confirm"
-                name="confirm_password"
-                type="password"
-                autoComplete={Number(selectedUser.id) === Number(currentUser?.id) ? 'new-password' : 'off'}
-                className="input"
-                value={passwordForm.confirmPassword}
-                onChange={(e) => setPasswordForm((prev) => ({ ...prev, confirmPassword: e.target.value }))}
-              />
-            </div>
-            <div className="flex flex-wrap justify-end gap-3">
-              <button
-                type="button"
-                className="btn-secondary"
-                disabled={!passwordForm.newPassword}
-                onClick={() => {
-                  void copyPasswordToClipboard(passwordForm.newPassword).then((copied) => {
-                    notify(
-                      copied
-                        ? tr('new_password_copied', 'New password copied to clipboard.')
-                        : tr('new_password_copy_failed', 'Could not copy automatically. Select the new password field and copy it before leaving.'),
-                      copied ? 'success' : 'warning',
-                    )
-                  })
-                }}
-              >
-                {tr('copy_new_password', 'Copy new password')}
-              </button>
-              <button type="button" className="btn-secondary" onClick={() => setModal(null)}>{t('cancel') || 'Cancel'}</button>
-              <button type="submit" className="btn-primary" disabled={passwordSaving}>{passwordSaving ? (t('loading') || 'Saving...') : tr('change_password', 'Change password')}</button>
-            </div>
-          </form>
+        <Modal title={`${tr('change_password', 'Change password')}: ${selectedUser.name}`} onClose={() => setModal(null)} closeDisabled={passwordSaving} unsavedChanges={{ dirty: passwordFormDirty }}>
+          {passwordHandover && sameUserId(passwordHandover.userId, selectedUser.id) ? (
+            <PasswordHandover tr={tr} name={passwordHandover.name} password={passwordHandover.password} onDone={() => setModal(null)} />
+          ) : isCurrentAccount(selectedUser) ? (
+            <OwnPasswordChangeForm tr={tr} target={selectedUser} form={passwordForm} setForm={setPasswordForm} passwordSaving={passwordSaving} onSave={() => { void handleResetPassword() }} />
+          ) : (
+            <AdminPasswordResetForm tr={tr} target={selectedUser} form={passwordForm} setForm={setPasswordForm} passwordSaving={passwordSaving} onSave={() => { void handleResetPassword() }} />
+          )}
         </Modal>
       ) : null}
 
@@ -1611,9 +1668,11 @@ export default function Users() {
             <div className="rounded-xl bg-amber-50 p-3 text-xs text-amber-700 dark:bg-amber-900/20 dark:text-amber-300">
               {tr('affected_users_logout_warning', 'Affected users must log out and back in for changes to take effect.')}
             </div>
-            <div className="flex justify-end gap-3">
-              <button type="button" className="btn-secondary" onClick={() => setModal(null)}>{t('cancel') || 'Cancel'}</button>
-              <button type="button" className="btn-primary" onClick={handleSaveRole} disabled={saving}>{saving ? (t('loading') || 'Saving...') : (t('save') || 'Save')}</button>
+            <div className="flex justify-end">
+              <button type="button" className={MAIN_ACTION_BUTTON_CLASS} onClick={handleSaveRole} disabled={saving}>
+                <Save className="h-4 w-4" aria-hidden="true" />
+                {saving ? (t('loading') || 'Saving...') : (t('save') || 'Save')}
+              </button>
             </div>
           </div>
         </Modal>

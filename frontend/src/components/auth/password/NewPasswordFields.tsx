@@ -33,12 +33,19 @@ type NewPasswordFieldsProps = {
 const SAFARI_PASSWORD_RULES: Record<string, string> = {
   passwordrules: 'minlength: 12; maxlength: 64; required: lower; required: upper; required: digit;',
 }
-const PASSWORD_MANAGER_IGNORE: Record<string, string> = {
+const OWN_PASSWORD_INPUT: Record<string, string> = { autoComplete: 'new-password', ...SAFARI_PASSWORD_RULES }
+const OTHER_USER_INPUT: Record<string, string | boolean> = {
   autoComplete: 'off',
+  autoCapitalize: 'off',
+  autoCorrect: 'off',
+  spellCheck: false,
   'data-1p-ignore': 'true',
   'data-lpignore': 'true',
   'data-bwignore': 'true',
 }
+// Other-user inputs are masked type=text: Chrome offers to save, or to UPDATE the
+// administrator's own login, for any type=password field whatever its attributes above.
+const MASKED_TEXT_CLASS = '[-webkit-text-security:disc]'
 
 const STRENGTH_STEPS: Record<PasswordStrength, number> = { weak: 1, fair: 2, strong: 3 }
 const STRENGTH_COLOR: Record<PasswordStrength, string> = {
@@ -84,7 +91,10 @@ export default function NewPasswordFields({
 }: NewPasswordFieldsProps) {
   const [revealed, setRevealed] = useState(false)
   const [copyNotice, setCopyNotice] = useState('')
-  const inputAttributes = mode === 'self' ? { autoComplete: 'new-password', ...SAFARI_PASSWORD_RULES } : PASSWORD_MANAGER_IGNORE
+  const otherUser = mode === 'other-user'
+  const inputAttributes = otherUser ? OTHER_USER_INPUT : OWN_PASSWORD_INPUT
+  const inputType = otherUser ? 'text' : 'password'
+  const inputClass = otherUser ? `${inputClassName} ${MASKED_TEXT_CLASS}` : inputClassName
   const strength = password ? passwordStrength(password, identity) : null
   const strengthLabel: Record<PasswordStrength, string> = {
     weak: tr('password_strength_weak', 'Weak'),
@@ -131,8 +141,8 @@ export default function NewPasswordFields({
         <input
           id={`${idPrefix}-new`}
           name="new_password"
-          type="password"
-          className={inputClassName}
+          type={inputType}
+          className={inputClass}
           value={password}
           onChange={(event) => { onPasswordChange(event.target.value); setCopyNotice('') }}
           disabled={disabled}
@@ -165,8 +175,8 @@ export default function NewPasswordFields({
         <input
           id={`${idPrefix}-confirm`}
           name="confirm_password"
-          type="password"
-          className={inputClassName}
+          type={inputType}
+          className={inputClass}
           value={confirm}
           onChange={(event) => onConfirmChange(event.target.value)}
           disabled={disabled}
