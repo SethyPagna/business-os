@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { supplierDisplay } from '../../utils/supplierDisplay.ts'
 import Modal from '../shared/Modal.tsx'
+import { ConflictIcon, CONFLICT_ICON_CLASS } from '../shared/ConflictIcon.ts'
 import ConfirmDialog from '../shared/ConfirmDialog.tsx'
 import AppSelect, { type AppSelectOption } from '../shared/AppSelect.tsx'
 import PaginationControls from '../shared/PaginationControls.tsx'
@@ -360,7 +361,7 @@ export function SelectedConflictGroupReviewModal({
   return (
     <>
       <Modal
-        title={tr('selected_conflict_group_review_title', 'Review selected product actions')}
+        title={<span className="inline-flex min-w-0 items-center gap-2"><ConflictIcon aria-hidden="true" className={`h-4 w-4 shrink-0 ${CONFLICT_ICON_CLASS}`} /><span className="min-w-0">{tr('selected_conflict_group_review_title', 'Review selected product actions')}</span></span>}
         onClose={onClose}
         size="xl"
         draggable
