@@ -389,10 +389,9 @@ async function main() {
         movement = rawDb.prepare("SELECT * FROM inventory_movements WHERE product_id = @p AND reason = 'Dated stock count import'").get({ p: P })
         const result = await applyMovementRevert(db, movement, { userId: 1, userName: 'Admin' })
         assert.ok(result.ok, JSON.stringify(result))
-        // The count lot received 3; the Revert takes the stock back and keeps
-        // what was recorded as received (owner, 30 Sep 2026), so the empty lot
-        // stays like any sold-out lot.
-      }, { branch: 7, lots: '2026-08-01=7 2026-08-16=0' }],
+        // The count lot received 3 and the revert un-receives them: empty,
+        // nothing received, so it leaves the pickers (planUnreceiveBatchStock).
+      }, { branch: 7, lots: '2026-08-01=7 2026-08-16=0(inactive)' }],
       ['revert again: refused, nothing moves', async () => {
         const result = await applyMovementRevert(db, movement, { userId: 1, userName: 'Admin' })
         assert.strictEqual(result.code, 'already_reverted')

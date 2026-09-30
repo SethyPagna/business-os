@@ -1274,9 +1274,9 @@ app.get('/:id/detail-report', async (c) => {
   // (key = supplier_id when present, else the lowercased name). Costs sum
   // only where recorded; lots_without_cost says the rest -- never a
   // fabricated zero total presented as complete. A lot whose tracked
-  // receipts were all undone (received_quantity 0, no money;
+  // receipts were all reverted (received_quantity 0, no money;
   // lib/productBatches.ts planUnreceiveBatchStock) keeps its supplier for a
-  // redo but was not bought -- the same rule Contacts'
+  // possible un-revert but was not bought -- the same rule Contacts'
   // purchases, the stock-in invoice report and the credit reminder apply.
   const suppliers = await db.prepare(`
     SELECT

@@ -210,10 +210,9 @@ function readRows(params = { startDate: '2026-09-10', endDate: '2026-09-10', bra
 {
   const rows = readRows()
   const ids = rows.map((r) => Number(r.id)).sort((a, b) => a - b)
-  assert.deepEqual(ids, [1, 5, 6, 9, 10, 12, 14], `only the real removals and the Revert of one are selected, got ${JSON.stringify(ids)}`)
-  assert.deepEqual(rows.filter((r) => [5, 6].includes(Number(r.id))).map((r) => [Number(r.id), Number(r.loss_sign)]), [[5, 1], [6, -1]])
+  assert.deepEqual(ids, [1, 9, 10, 12, 14], `only the real removals are selected, got ${JSON.stringify(ids)}`)
   ok('SQL: sale, transfer_out and damage_out are not losses')
-  ok('SQL: a reverted removal (#5) keeps its loss and its same-day Revert (#6) offsets it as a recovery (owner, 30 Sep 2026)')
+  ok('SQL: a reverted removal (#5) and the revert row itself (#6) are both excluded')
   ok('SQL: a negative-quantity stock-session undo (#7) is excluded')
   ok('SQL: a dated stock-count import removal (#8) is excluded')
   ok('SQL: a removal outside the window (#11) is excluded')

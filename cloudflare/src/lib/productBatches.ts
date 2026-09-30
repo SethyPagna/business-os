@@ -712,11 +712,9 @@ export function planRemoveStockFromBatch(input: RemoveBatchStockPlanInput): { st
   ] }
 }
 
-// The compensating side of a receipt, for the writers that make one never
-// have happened (lib/datedStockCountApply.ts's superseded count). A ledger
-// Revert is NOT one of them: it is a new record that moves stock only and
-// leaves the purchase as recorded (lib/stockRevert.ts). A lot's
-// supplier-facing columns -- received_quantity (0067),
+// The compensating side of a receipt, for the writers that reverse one
+// (lib/stockRevert.ts today; anything that un-receives a lot-stamped inflow
+// tomorrow). A lot's supplier-facing columns -- received_quantity (0067),
 // received_cost_usd (0080), payment_status/credit_due_date (0065) and the
 // first-attribution supplier/cost (0062/0065) -- are what Contacts derives
 // purchases, stock-in invoices, "not paid" balances and credit reminders

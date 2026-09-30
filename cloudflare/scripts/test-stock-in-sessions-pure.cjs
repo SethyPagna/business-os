@@ -76,9 +76,10 @@ assert.equal(groups.length, 7, 'five explicit sessions (incl. the free-goods and
 assert.equal(groups.find((row) => row.session_key === 'session:100').line_count, 2)
 assert.equal(groups.find((row) => row.session_key === 'session:100').movement_cost_usd, 69)
 assert.equal(groups.find((row) => row.session_key === 'session:100').reverted_line_count, 0)
-// Owner, 30 Sep 2026: a reverted receipt stays as recorded, marked reverted.
+// Owner, 1 Oct 2026: a reverted receipt stays listed as history, marked
+// reverted, but its units and cost leave the session's totals.
 const revertedSession = groups.find((row) => row.session_key === 'session:102')
-assert.deepEqual([revertedSession.line_count, revertedSession.reverted_line_count, revertedSession.quantity, revertedSession.movement_cost_usd], [1, 1, 1, 8])
+assert.deepEqual([revertedSession.line_count, revertedSession.reverted_line_count, revertedSession.quantity, revertedSession.movement_cost_usd, revertedSession.lines_without_movement_cost], [1, 1, 0, 0, 0])
 
 // Zero cost is a RECORDED value, not a missing one. The two are one column
 // apart in the list -- movement_cost_usd is the money, lines_without_movement
@@ -133,7 +134,7 @@ assert.deepEqual(
   db.prepare(byUsername.groupedSql).bind(byUsername.params).all().map((row) => row.session_key),
   // Session 103 is the session lane's legacy movement_type='stock_in' pair.
   // Sessions 104/105 are the newer deployed-lineage zero-quantity receipts;
-  // session 102 is the reverted receipt, still listed as recorded. All five
+  // session 102 is the reverted receipt, still listed as history. All five
   // were written by user 7, so the exact result preserves those sessions
   // while proving the actor search uses the resolved username.
   ['session:100', 'session:102', 'session:103', 'session:104', 'session:105'],

@@ -266,10 +266,9 @@ async function buildExpirySection(env: Env, days: number): Promise<NotificationS
 // ON CREDIT carries a due date exactly so the admin is reminded — overdue
 // first, then anything due within the window. Marking the batch paid
 // (PATCH /api/batches/:id payment_status='paid') clears it from here. So does
-// undoing every receipt on the lot: the row keeps 'credit' for a redo, but
-// with nothing received and no money there is nothing owed
+// reverting every receipt on the lot: the row keeps 'credit' for a possible
+// un-revert, but with nothing received and no money there is nothing owed
 // (lib/productBatches.ts planUnreceiveBatchStock; untracked NULL lots stay).
-// A ledger Revert moves stock only, so the credit stays owed.
 async function buildSupplierCreditSection(env: Env, days: number): Promise<NotificationSection | null> {
   const db = getDb(env)
   const rows = await db.prepare(`

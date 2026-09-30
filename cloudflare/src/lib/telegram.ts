@@ -189,8 +189,6 @@ export function telegramRowLines(head: string, parts: string[] = [], nest = ''):
 // grow a third way of printing a dollar amount.
 const round2 = (value: number) => Math.round(value * 100) / 100
 const usd = (value: unknown) => `$${round2(Number(value) || 0).toFixed(2)}`
-// The loss line goes negative when a Revert put back more than was removed.
-const signedUsd = (value: unknown) => (Number(value) < 0 ? `-${usd(-Number(value))}` : usd(value))
 // p5/losses (Sep 15 2026): a terse, numbers-only suffix for the "loss" line
 // when some of its rows carried no cost anywhere -- the concise-report rule
 // (no explanatory prose) means this is a bare count, not a sentence.
@@ -807,7 +805,7 @@ export function formatDaySummary(stats: DayStats, cashiers: CashierRow[], catego
     // reports as well". One number, no sentence. Like Not Paid it is a
     // POSITIVE memo and is never subtracted from the lines above -- those stay
     // the canonical figures the app's own stats show.
-    if (stats.sales?.removalLossUsd) sales.push(labeled('loss', signedUsd(stats.sales.removalLossUsd) + unvaluedSuffix(stats.sales.removalLossUnvaluedRows)))
+    if (stats.sales?.removalLossUsd) sales.push(labeled('loss', usd(stats.sales.removalLossUsd) + unvaluedSuffix(stats.sales.removalLossUnvaluedRows)))
     if (stats.sales?.refundUsd) sales.push(labeled('refunds', usd(stats.sales.refundUsd)))
     section('sales', sales)
     // Invoices -- the counts, on their own. They are the breakdown of the
@@ -1296,7 +1294,7 @@ export function formatShiftReport(shopName: string, shift: ShiftReportSession, f
   // unpaid in reports as well"). A POSITIVE memo, one number and no sentence:
   // Revenue and Profit above stay the canonical figures and are never reduced
   // by it, exactly as Not Paid behaves.
-  if (figures.removalLossUsd) sales.push(labeled('loss', signedUsd(figures.removalLossUsd) + unvaluedSuffix(figures.removalLossUnvaluedRows)))
+  if (figures.removalLossUsd) sales.push(labeled('loss', usd(figures.removalLossUsd) + unvaluedSuffix(figures.removalLossUnvaluedRows)))
   if (figures.refundUsd) sales.push(labeled('refunds', usd(figures.refundUsd)))
   lines.push(sectionHeader('sales', SHIFT_SECTION_EDGE), ...sales)
 

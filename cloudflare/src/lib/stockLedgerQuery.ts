@@ -30,7 +30,7 @@ import { movementActorNameSql } from './movementActorName'
 // row's reference_id names -- see lib/movementReference.ts for the type
 // mapping and why the ambiguous types resolve by product membership.
 import { movementReferenceSelectSql } from './movementReference'
-import { STOCK_RECEIPT_MOVEMENT_TYPES } from './stockInSessionsQuery'
+import { STOCK_RECEIPT_MOVEMENT_TYPES, revertChainOpenSql } from './stockInSessionsQuery'
 
 export const LEDGER_OUT_TYPES = [
   'remove', 'sale', 'supplier_return', 'return_reversal', 'transfer_out',
@@ -473,6 +473,7 @@ export function buildStockLedgerQuery(filters: StockLedgerFilters = {}): StockLe
       m.unit_cost_usd, m.unit_cost_khr, m.total_cost_usd, m.total_cost_khr,
       m.reason, m.reference_id, ${movementActorNameSql('m')} AS user_name, m.created_at,
       ${revertsMovementIdSql('m')} AS reverts_movement_id, ${revertedByMovementIdSql('m')} AS reverted_by_movement_id,
+      ${revertChainOpenSql('m')} AS reverted_now,
       ${movementReferenceSelectSql('m')},
       m.batch_id, b.lot_code AS batch_lot_code, b.received_at AS batch_received_at,
       b.supplier_id AS batch_supplier_id, b.supplier_name AS batch_supplier_name,

@@ -28,14 +28,15 @@ async function main() {
       const lot = receipt.sql.prepare('SELECT received_quantity,received_cost_usd,is_active FROM product_batches WHERE id=7001').get()
       const remaining = generation % 2 ? 0 : 10
       assert.equal(receipt.sql.prepare('SELECT stock_quantity FROM products WHERE id=1').get().stock_quantity, remaining)
-      assert.equal(receipt.sql.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id=7001').get().quantity, remaining, `lot stock generation ${generation}`)
-      assert.deepEqual({ ...lot }, { received_quantity: 10, received_cost_usd: 40, is_active: 1 }, `generation ${generation}: the purchase stays as recorded`)
+      assert.equal(lot.received_quantity, remaining, `receipt purchase quantity generation ${generation}`)
+      assert.equal(lot.received_cost_usd, remaining * 4, `receipt purchase money generation ${generation}`)
+      assert.equal(lot.is_active, remaining ? 1 : 0)
       if (generation === 34) break
       const result = await kernel.applyMovementRevert(db, latest(receipt), actor)
       assert.equal(result.ok, true, JSON.stringify(result))
     }
     assert.equal(receipt.sql.prepare('SELECT COUNT(*) n FROM inventory_movements').get().n, 35)
-    console.log('PASS actual receipt reversals through generation34 move stock on the lot and never its received quantity, cost or active state')
+    console.log('PASS actual receipt reversals through generation34 keep stock, received quantity, purchase cost, active state and audit in parity')
   } finally { receipt.sql.close() }
 
   for (const type of ['add', 'remove', 'adjustment', 'out']) {
@@ -56,10 +57,10 @@ async function main() {
       const applied = await kernel.applyMovementRevert(db, end, actor)
       assert.equal(applied.ok, true, JSON.stringify(applied))
       const lot = f.sql.prepare('SELECT received_quantity,received_cost_usd FROM product_batches WHERE id=7001').get()
-      assert.deepEqual({ ...lot }, { received_quantity: 10, received_cost_usd: 40 }, 'no revert chain changes purchase accounting')
+      assert.deepEqual(lot, type === 'add' ? { received_quantity: 0, received_cost_usd: 0 } : { received_quantity: 10, received_cost_usd: 40 }, 'only receipt-root chains change purchase accounting')
     } finally { f.sql.close() }
   }
-  console.log('PASS depth1000 indexed ancestry; receipt, removal, correction and import chains leave the purchase as recorded')
+  console.log('PASS depth1000 indexed ancestry and receipt versus removal/correction/import financial controls')
 
   for (const malformed of ['missing', 'nonnumeric', 'fractional', 'noncanonical', 'zero', 'negative', 'self', 'forward', 'cycle']) {
     const f = fixture()

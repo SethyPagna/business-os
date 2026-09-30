@@ -43,9 +43,8 @@
 // L, B (and H for a tagged Set) equalling the snapshot it reverses from --
 // an intervening sale, transfer, count or disposal refuses the replay 409 and
 // changes nothing. Undo posts the counter-movement stamped
-// `revert:<forward movement id>` (so removalLosses.ts offsets an undone loss
-// in the undo's own period, and the undo of an upward Set is not itself a
-// loss); redo posts a fresh
+// `revert:<forward movement id>` (so removalLosses.ts drops the undone loss,
+// and the undo of an upward Set is not itself a loss); redo posts a fresh
 // forward movement under the next generation's reference. The generation is
 // advanced in the same batch, so a stale history row can never apply twice.
 //
@@ -472,8 +471,7 @@ export async function replayStockLotSet(
   ]
   if (direction === 'undo') {
     // The counter-movement names the forward row it reverses: removalLosses.ts
-    // then offsets an undone loss in this row's own period (the forward row's
-    // period keeps it), and never counts the undo of an upward Set as a loss.
+    // then stops counting an undone loss, and does not count this row either.
     statements.push(guard('EXISTS(SELECT 1 FROM inventory_movements WHERE reference_id=@forward)', params))
     if (tagged) {
       statements.push(guard('(SELECT quantity_remaining FROM damaged_stock_lots WHERE id=@heldLotId)=@held', params))

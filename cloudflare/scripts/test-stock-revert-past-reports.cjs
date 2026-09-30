@@ -1,8 +1,13 @@
-// Owner, 30 Sep 2026: a Revert is a NEW compensating record dated now. It
-// moves the stock back and changes no past report: the purchase (lot received
-// quantity/cost/date, invoice line, supplier total, credit, paid spend) stays
-// exactly as recorded. Real applyMovementRevert on the real migration chain,
-// with the stock-in invoice report's own SQL read out of routes/contacts.ts.
+// Owner, 1 Oct 2026: "revert is the same logic as cancelling a sale or changing
+// its status: everything returns with no loss, through the official process;
+// just that the report and so on removes." A Revert is a new record, dated now
+// and linked to its original, and the reverted effect leaves every report:
+// a reverted receipt leaves its own month's invoice report, the supplier total,
+// the open credit and the paid spend (the lot is un-received); a reverted
+// removal leaves its original period's losses. Reverting the Revert brings it
+// back exactly. The original row stays in the ledger as history. Real
+// applyMovementRevert on the real migration chain, with the stock-in invoice
+// report's own SQL read out of routes/contacts.ts.
 const fs = require('node:fs')
 const path = require('node:path')
 const assert = require('node:assert/strict')
@@ -29,14 +34,14 @@ function seedPurchases(f) {
   return { receipt, removal }
 }
 
-// Every purchase reader (invoice report, supplier purchases, open credit,
-// credit reminder) reads these lot columns, so the whole table must hold.
-const purchaseRecord = (f) => JSON.stringify({
-  invoice: f.sql.prepare(`SELECT * FROM (${STOCK_IN_REPORT_SOURCE}) t
-    WHERE t.received_day >= '2026-09-01' AND t.received_day <= '2026-09-30' ORDER BY t.received_day, t.id`).all(),
-  lots: f.sql.prepare(`SELECT id, variant_product_id, batch_key, lot_code, received_at, is_active, unit_cost_usd, payment_status,
-      credit_due_date, received_quantity, received_branch_id, received_cost_usd, supplier_id, supplier_name FROM product_batches ORDER BY id`).all(),
-})
+// The September stock-in invoice report as its readers see it: one line per
+// lot with what was bought, from whom, for how much, and whether it is owed.
+const invoice = (f) => f.sql.prepare(`SELECT id, supplier_key, received_day, received_quantity, received_cost_usd, payment_status
+  FROM (${STOCK_IN_REPORT_SOURCE}) t
+  WHERE t.received_day >= '2026-09-01' AND t.received_day <= '2026-09-30' ORDER BY t.received_day, t.id`).all().map((row) => ({ ...row }))
+const supplierTotal = (f, key) => invoice(f).filter((line) => line.supplier_key === key)
+  .reduce((sum, line) => ({ units: sum.units + line.received_quantity, usd: sum.usd + line.received_cost_usd }), { units: 0, usd: 0 })
+const openCredit = (f) => invoice(f).filter((line) => line.payment_status === 'credit').reduce((sum, line) => sum + line.received_cost_usd, 0)
 
 function stock(f) {
   const branch = f.sql.prepare('SELECT quantity FROM branch_stock WHERE product_id=1 AND branch_id=1').get().quantity
@@ -49,45 +54,51 @@ function stock(f) {
 const latest = (f) => f.sql.prepare('SELECT * FROM inventory_movements ORDER BY id DESC LIMIT 1').get()
 const movement = (f, id) => f.sql.prepare('SELECT * FROM inventory_movements WHERE id=?').get(id)
 
-async function receiptRevertKeepsPurchase() {
+async function receiptRevertRemovesPurchase() {
   const f = fixture()
   try {
     const { receipt } = seedPurchases(f)
-    const record = purchaseRecord(f)
     const db = getDb(f.env)
-    const expected = [{ branch: 17, lot: 10 }, { branch: 7, lot: 0 }, { branch: 17, lot: 10 }, { branch: 7, lot: 0 }]
-    for (let generation = 0; generation < expected.length; generation++) {
-      const now = stock(f)
-      assert.equal(now.branch, expected[generation].branch, `generation ${generation}: branch stock`)
-      assert.equal(now.product, now.branch, `generation ${generation}: product total follows its branch`)
-      assert.equal(now.lots[9001], expected[generation].lot, `generation ${generation}: the receipt's own lot moves, no other`)
-      assert.equal(now.lots[9002], 7, `generation ${generation}: another supplier's lot is never drained`)
-      assert.equal(now.lotTotal, now.branch, `generation ${generation}: the lot ledger and branch_stock agree`)
-      assert.equal(purchaseRecord(f), record, `generation ${generation}: the 15 Sep purchase, supplier total and open credit are byte-identical`)
-      if (generation === expected.length - 1) break
-      const target = generation === 0 ? movement(f, receipt) : latest(f)
+    const bought = invoice(f)
+    const other = bought.filter((line) => line.id === 9002)
+    assert.deepEqual(bought.map((line) => [line.id, line.received_quantity, line.received_cost_usd, line.payment_status]),
+      [[9002, 10, 30, 'paid'], [9001, 10, 20, 'credit']], 'precondition: the 15 Sep receipt is on the September invoice report, on credit')
+    const originalRow = JSON.stringify(movement(f, receipt))
+    // Reverted -> gone from the report; reverted again -> back exactly; and again -> gone.
+    const expected = [{ branch: 7, lot: 0, live: false }, { branch: 17, lot: 10, live: true }, { branch: 7, lot: 0, live: false }]
+    let target = movement(f, receipt)
+    for (const [depth, want] of expected.entries()) {
       const result = await applyMovementRevert(db, target, actor)
       assert.equal(result.ok, true, JSON.stringify(result))
+      target = latest(f)
+      assert.equal(target.reference_id, `revert:${depth === 0 ? receipt : target.id - 1}`, `depth ${depth + 1}: the Revert names the row it reverts`)
+      const now = stock(f)
+      assert.deepEqual([now.branch, now.product, now.lots[9001], now.lots[9002], now.lotTotal], [want.branch, want.branch, want.lot, 7, want.branch],
+        `depth ${depth + 1}: stock moves on the receipt's own lot; lots and branch_stock agree; the other supplier's lot is never drained`)
+      assert.deepEqual(invoice(f), want.live ? bought : other, `depth ${depth + 1}: the 15 Sep purchase is ${want.live ? 'back on' : 'gone from'} its month's invoice report`)
+      assert.deepEqual(supplierTotal(f, 'name:probe supplier'), want.live ? { units: 10, usd: 20 } : { units: 0, usd: 0 }, `depth ${depth + 1}: supplier total`)
+      assert.equal(openCredit(f), want.live ? 20 : 0, `depth ${depth + 1}: open credit follows`)
+      assert.equal(JSON.stringify(movement(f, receipt)), originalRow, `depth ${depth + 1}: the original row stays in the ledger as history`)
     }
-    const counters = f.sql.prepare("SELECT movement_type, batch_id, reference_id FROM inventory_movements WHERE reference_id LIKE 'revert:%' ORDER BY id").all()
-    assert.deepEqual(counters.map((row) => [row.movement_type, row.batch_id]), [['remove', 9001], ['add', 9001], ['remove', 9001]])
-    console.log('PASS receipt revert chain moves stock on its own lot only; the past purchase, supplier total and credit never change')
+    console.log('PASS a reverted receipt leaves its month\'s invoice report, supplier total and credit; its Revert brings it back; the row stays as history')
   } finally { f.sql.close() }
 }
 
-async function paidReceiptRevertKeepsPaidSpend() {
+async function paidReceiptRevertLowersPaidSpend() {
   const f = fixture()
   try {
     seedPurchases(f)
+    f.sql.exec('UPDATE product_batches SET received_quantity=17, received_cost_usd=51 WHERE id=9002; UPDATE branch_batch_stock SET quantity=14 WHERE batch_id=9002; UPDATE branch_stock SET quantity=24 WHERE product_id=1; UPDATE products SET stock_quantity=24 WHERE id=1')
     const paid = Number(f.sql.prepare(`INSERT INTO inventory_movements(product_id,branch_id,movement_type,quantity,unit_cost_usd,total_cost_usd,reason,batch_id,created_at)
       VALUES(1,1,'add',7,3,21,'Paid receipt',9002,'2026-09-01 03:00:00')`).run().lastInsertRowid)
-    const record = purchaseRecord(f)
+    assert.deepEqual(supplierTotal(f, 'name:other supplier'), { units: 17, usd: 51 })
     const result = await applyMovementRevert(getDb(f.env), movement(f, paid), actor)
     assert.equal(result.ok, true, JSON.stringify(result))
-    assert.equal(purchaseRecord(f), record, 'a paid receipt keeps its paid spend; no refund or payable is invented')
-    assert.deepEqual(stock(f).lots, { 9001: 10, 9002: 0 })
-    assert.equal(stock(f).branch, 10)
-    console.log('PASS paid receipt revert leaves the paid spend as recorded')
+    assert.deepEqual(supplierTotal(f, 'name:other supplier'), { units: 10, usd: 30 }, 'the paid spend drops by exactly the reverted $21')
+    assert.equal(invoice(f).find((line) => line.id === 9002).payment_status, 'paid', 'the lot\'s other purchase stays paid')
+    assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM inventory_movements WHERE reference_id LIKE 'revert:%'").get().n, 1, 'one Revert row; no refund record is invented')
+    assert.deepEqual(stock(f).lots, { 9001: 10, 9002: 7 })
+    console.log('PASS paid receipt revert takes its own units and money out of the paid spend')
   } finally { f.sql.close() }
 }
 
@@ -105,12 +116,12 @@ async function legacyReceiptWithoutLot() {
   let f = fixture()
   try {
     const legacy = seed(f, 5)
-    const record = purchaseRecord(f)
+    const record = JSON.stringify(invoice(f))
     const result = await applyMovementRevert(getDb(f.env), movement(f, legacy), actor)
     assert.equal(result.ok, true, JSON.stringify(result))
     assert.equal(result.usedBatchId, null)
     assert.deepEqual(stock(f), { branch: 10, product: 10, lots: { 9101: 10 }, lotTotal: 10 }, 'the units with no received date go; the dated lot stays whole')
-    assert.equal(purchaseRecord(f), record)
+    assert.equal(JSON.stringify(invoice(f)), record, 'Sup X\'s purchase is not un-received for Sup Y\'s legacy receipt')
     assert.equal(latest(f).batch_id, null, 'the Revert names no lot it did not take from')
     console.log('PASS legacy receipt without a lot takes back the undated units only')
   } finally { f.sql.close() }
@@ -118,11 +129,11 @@ async function legacyReceiptWithoutLot() {
   f = fixture()
   try {
     const legacy = seed(f, 0)
-    const before = JSON.stringify([stock(f), purchaseRecord(f), f.sql.prepare('SELECT COUNT(*) n FROM inventory_movements').get()])
+    const before = JSON.stringify([stock(f), invoice(f), f.sql.prepare('SELECT COUNT(*) n FROM inventory_movements').get()])
     const result = await applyMovementRevert(getDb(f.env), movement(f, legacy), actor)
     assert.equal(result.ok, false)
     assert.equal(result.code, 'revert_no_received_date', JSON.stringify(result))
-    assert.equal(JSON.stringify([stock(f), purchaseRecord(f), f.sql.prepare('SELECT COUNT(*) n FROM inventory_movements').get()]), before, 'refused whole: no lot is guessed')
+    assert.equal(JSON.stringify([stock(f), invoice(f), f.sql.prepare('SELECT COUNT(*) n FROM inventory_movements').get()]), before, 'refused whole: no lot is guessed')
     console.log('PASS legacy receipt without a lot is refused when only dated lots could cover it')
   } finally { f.sql.close() }
 
@@ -138,6 +149,43 @@ async function legacyReceiptWithoutLot() {
   } finally { f.sql.close() }
 }
 
+// Owner, 1 Oct 2026: "make it consistent with what I am doing, easy to revert".
+// A dated stock count that found MORE than the ledger held recorded the extra
+// as received onto its lots (lib/datedStockCountApply.ts). One Revert takes
+// the stock back off exactly those lots and un-receives them; its Revert
+// receives them again. Two lots (no batch stamp, provenance only) and one.
+async function countIncreaseRevertUnreceives() {
+  for (const shape of ['two lots', 'one lot']) {
+    const f = fixture()
+    try {
+      const twoLots = shape === 'two lots'
+      f.sql.exec(`
+        UPDATE products SET stock_quantity=${twoLots ? 9 : 4} WHERE id=1; UPDATE branch_stock SET quantity=${twoLots ? 9 : 4} WHERE product_id=1 AND branch_id=1;
+        INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at,is_active,batch_number,received_quantity,received_branch_id)
+          VALUES(9201,1,'09102026','09102026','2026-09-10',1,1,4,1)${twoLots ? ",(9202,1,'09122026','09122026','2026-09-12',1,2,5,1)" : ''};
+        INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(9201,1,4)${twoLots ? ',(9202,1,5)' : ''};`)
+      const count = Number(f.sql.prepare(`INSERT INTO inventory_movements(product_id,branch_id,movement_type,quantity,reason,batch_id,created_at)
+        VALUES(1,1,'add',${twoLots ? 9 : 4},'Dated stock count import',${twoLots ? 'NULL' : 9201},'2026-09-12 00:00:00')`).run().lastInsertRowid)
+      f.sql.exec(`INSERT INTO dated_stock_count_batch_actions(movement_id,batch_id,quantity) VALUES(${count},9201,4)${twoLots ? `,(${count},9202,5)` : ''}`)
+      const counted = invoice(f)
+      assert.equal(counted.length, twoLots ? 2 : 1, 'precondition: the counted units show as received')
+      const db = getDb(f.env)
+      const r1 = await applyMovementRevert(db, movement(f, count), actor)
+      assert.equal(r1.ok, true, JSON.stringify(r1))
+      assert.deepEqual(stock(f), { branch: 0, product: 0, lots: twoLots ? { 9201: 0, 9202: 0 } : { 9201: 0 }, lotTotal: 0 }, `${shape}: one Revert takes the count back off its lots`)
+      assert.deepEqual(invoice(f), [], `${shape}: nothing counted is left as received`)
+      assert.deepEqual(f.sql.prepare('SELECT id, received_quantity, is_active FROM product_batches ORDER BY id').all().map((row) => ({ ...row })),
+        (twoLots ? [9201, 9202] : [9201]).map((id) => ({ id, received_quantity: 0, is_active: 0 })), `${shape}: the lots are un-received and leave the pickers`)
+      const r2 = await applyMovementRevert(db, latest(f), actor)
+      assert.equal(r2.ok, true, JSON.stringify(r2))
+      assert.deepEqual(stock(f).lotTotal, twoLots ? 9 : 4)
+      assert.deepEqual(stock(f).branch, twoLots ? 9 : 4)
+      assert.deepEqual(invoice(f), counted, `${shape}: reverting the Revert receives the count again, exactly`)
+    } finally { f.sql.close() }
+  }
+  console.log('PASS a dated count increase reverts in one action, un-receiving its lots; its Revert receives them again')
+}
+
 // The loss view of one calendar day (or of all time), exactly as the Reports
 // kernel builds it: the loss WHERE, the loss SELECT and the reducer.
 function lossOn(f, day) {
@@ -146,41 +194,37 @@ function lossOn(f, day) {
   return losses.summarizeRemovalLosses(rows)
 }
 
-async function removalRevertOffsetsInCurrentPeriod() {
+async function removalRevertRemovesTheLoss() {
   const f = fixture()
   try {
     const { receipt, removal } = seedPurchases(f)
     const db = getDb(f.env)
-    const loss20Sep = JSON.stringify(lossOn(f, '2026-09-20'))
-    assert.deepEqual(JSON.parse(loss20Sep), { removal_loss_usd: 9, removal_loss_qty: 3, removal_loss_unvalued_rows: 0 })
+    const loss = { removal_loss_usd: 9, removal_loss_qty: 3, removal_loss_unvalued_rows: 0 }
+    const none = { removal_loss_usd: 0, removal_loss_qty: 0, removal_loss_unvalued_rows: 0 }
+    assert.deepEqual(lossOn(f, '2026-09-20'), loss)
     // A receipt's Revert takes stock out, but nothing was lost.
     assert.equal((await applyMovementRevert(db, movement(f, receipt), actor)).ok, true)
     const counterDay = latest(f).created_at.slice(0, 10)
-    assert.deepEqual(lossOn(f, counterDay), { removal_loss_usd: 0, removal_loss_qty: 0, removal_loss_unvalued_rows: 0 }, 'the Revert of a receipt is not a loss')
-    const expected = [
-      { counterDay: -9, qty: -3, total: 0 },
-      { counterDay: 0, qty: 0, total: 9 },
-      { counterDay: -9, qty: -3, total: 0 },
-    ]
+    assert.deepEqual(lossOn(f, counterDay), none, 'the Revert of a receipt is not a loss')
+    // Reverted -> the 20 Sep loss is removed; reverted again -> back on 20 Sep; again -> removed.
     let target = movement(f, removal)
-    for (const [depth, want] of expected.entries()) {
+    for (const [depth, lost] of [false, true, false].entries()) {
       assert.equal((await applyMovementRevert(db, target, actor)).ok, true)
       target = latest(f)
-      assert.equal(JSON.stringify(lossOn(f, '2026-09-20')), loss20Sep, `depth ${depth + 1}: the 20 Sep loss is byte-identical`)
-      assert.deepEqual(lossOn(f, target.created_at.slice(0, 10)), { removal_loss_usd: want.counterDay, removal_loss_qty: want.qty, removal_loss_unvalued_rows: 0 }, `depth ${depth + 1}: the Revert day carries the offset`)
-      assert.equal(lossOn(f).removal_loss_usd, want.total, `depth ${depth + 1}: all time nets out`)
+      assert.deepEqual(lossOn(f, '2026-09-20'), lost ? loss : none, `depth ${depth + 1}: the 20 Sep loss is ${lost ? 'back' : 'removed'}`)
+      assert.deepEqual(lossOn(f, target.created_at.slice(0, 10)), none, `depth ${depth + 1}: the Revert day books no loss and no recovery`)
+      assert.deepEqual(lossOn(f), lost ? loss : none, `depth ${depth + 1}: all time`)
     }
-    const reportTotals = losses.removalLossTotals(100, 40, lossOn(f, target.created_at.slice(0, 10)))
-    assert.deepEqual([reportTotals.revenue_after_losses_usd, reportTotals.profit_after_losses_usd], [109, 49], 'the recovery raises the Revert day\'s after-losses figures')
-    console.log('PASS a removal\'s Revert offsets the loss on the Revert day; 20 Sep keeps its loss at every depth')
+    console.log('PASS a removal\'s Revert removes the loss from its own period; reverting the Revert restores it there')
   } finally { f.sql.close() }
 }
 
 async function main() {
-  await removalRevertOffsetsInCurrentPeriod()
-  await receiptRevertKeepsPurchase()
-  await paidReceiptRevertKeepsPaidSpend()
+  await removalRevertRemovesTheLoss()
+  await receiptRevertRemovesPurchase()
+  await paidReceiptRevertLowersPaidSpend()
   await legacyReceiptWithoutLot()
+  await countIncreaseRevertUnreceives()
 }
 
 main().catch((error) => { console.error(error); process.exitCode = 1 })
