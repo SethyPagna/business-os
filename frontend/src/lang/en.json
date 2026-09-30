@@ -7043,5 +7043,6 @@
   "movement_revert_stock_set_undo": "Undo the entire stock correction {action} ({count} lines)?",
   "movement_revert_stock_set_redo": "Redo the entire stock correction {action} ({count} lines)?",
   "movement_revert_stock_session_undo": "Undo the entire stock session {action} ({count} lines)?",
-  "movement_revert_stock_session_redo": "Redo the entire stock session {action} ({count} lines)?"
+  "movement_revert_stock_session_redo": "Redo the entire stock session {action} ({count} lines)?",
+  "movement_revert_history_required": "This action has too many stock changes to preview here. Use History Undo/Redo. Nothing was changed."
 }

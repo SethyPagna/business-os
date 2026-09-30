@@ -7043,5 +7043,6 @@
   "movement_revert_stock_set_undo": "ត្រឡប់ការកែតម្រូវស្តុក {action} ទាំងមូល ({count} បន្ទាត់)?",
   "movement_revert_stock_set_redo": "ធ្វើការកែតម្រូវស្តុក {action} ទាំងមូលឡើងវិញ ({count} បន្ទាត់)?",
   "movement_revert_stock_session_undo": "ត្រឡប់វគ្គស្តុក {action} ទាំងមូល ({count} បន្ទាត់)?",
-  "movement_revert_stock_session_redo": "ធ្វើវគ្គស្តុក {action} ទាំងមូលឡើងវិញ ({count} បន្ទាត់)?"
+  "movement_revert_stock_session_redo": "ធ្វើវគ្គស្តុក {action} ទាំងមូលឡើងវិញ ({count} បន្ទាត់)?",
+  "movement_revert_history_required": "សកម្មភាពនេះមានការផ្លាស់ប្តូរស្តុកច្រើនពេកសម្រាប់មើលជាមុននៅទីនេះ។ សូមប្រើ ត្រឡប់វិញ/ធ្វើឡើងវិញ ក្នុងប្រវត្តិ។ មិនមានអ្វីត្រូវបានផ្លាស់ប្តូរទេ។"
 }

@@ -33,10 +33,14 @@ for (const direction of ['undo', 'redo']) {
 }
 for (const lang of ['en', 'km']) {
   Object.assign(globalThis, { document: { documentElement: { getAttribute: () => lang } } })
-  for (const code of ['undo_history_stale', 'undo_history_unusable']) {
+  for (const code of ['undo_history_stale', 'undo_history_unusable', 'undo_preview_limit']) {
     refusal = Object.assign(new Error('Synthetic server refusal'), { status: 409, code })
-    const expected = (lang === 'km' ? km : en)[code.replace('undo_', 'undo_refused_')]
+    const expected = (lang === 'km' ? km : en)[code === 'undo_preview_limit' ? 'movement_revert_history_required' : code.replace('undo_', 'undo_refused_')]
+    assert.ok(expected)
     await assert.rejects(module.exports.getStockMovementRevertPreview(81), (error: unknown) => error === refusal && refusal?.message === expected)
+    if (code === 'undo_preview_limit') for (const direction of ['undo', 'redo']) {
+      await assert.rejects(module.exports[`${direction}ActionHistory`](43), (error: unknown) => error === refusal && refusal?.message === expected)
+    }
   }
 }
 refusal = Object.assign(new Error('Forbidden'), { status: 403 })

@@ -1309,8 +1309,8 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
                     <span className="hidden sm:inline">{tr(t, 'edit_reason', 'Edit reason')}</span>
                   </button>
                   {detailCanRevert && confirmRevert ? (
-                    <span className="inline-flex flex-wrap items-center gap-2 text-xs">
-                      <span className="min-w-0 break-words text-gray-500 dark:text-gray-400">{revertScopeText}</span>
+                    <span className="inline-flex min-w-0 max-w-full flex-wrap items-center gap-2 text-xs">
+                      <span className="w-full min-w-0 break-words text-gray-500 dark:text-gray-400">{revertScopeText}</span>
                       <button
                         type="button"
                         disabled={rowBusy}
