@@ -47,6 +47,7 @@ import { driveSyncScheduleDue, recordDriveSyncError } from './lib/googleDrive'
 import { checkDriveSyncAuthorizer } from './lib/driveSyncAuthority'
 import { enqueueDriveSyncJob } from './lib/driveSyncQueue'
 import { maybeRunScheduledAuditLogRetention } from './lib/audit'
+import { getPlanLimits } from './lib/planTier'
 import { maybeRunScheduledImportRetention } from './lib/importRetention'
 import { maybeRunScheduledOrphanStagingCleanup } from './lib/orphanStagingSweep'
 import { sweepStaleImportIncomingFiles } from './lib/importIncomingFiles'
@@ -654,7 +655,7 @@ export default {
         }
         return enqueueDriveSyncJob(env, 'scheduled')
       })
-      await runStep('audit-log-retention', () => maybeRunScheduledAuditLogRetention(env))
+      await runStep('audit-log-retention', () => maybeRunScheduledAuditLogRetention(env, getPlanLimits(env).auditLogRetentionBatch))
       // Reap stalled import jobs into a terminal status BEFORE retention runs,
       // so a job stuck in analyzing/applying (e.g. a killed queue invocation)
       // is pruned this same tick. Previously this ran ONLY on the Import Jobs

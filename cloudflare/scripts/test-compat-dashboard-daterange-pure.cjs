@@ -283,14 +283,14 @@ const NEW_TODAY = `date(created_at, '+7 hours') = date('now', '+7 hours') AND cr
       : ''
     check('compat.ts uses the shared audit retention policy',
       /import \{ audit, buildAuditLogRetentionDeleteSql \} from '\.\.\/lib\/audit'/.test(src)
-      && /prepare\(buildAuditLogRetentionDeleteSql\(\)\)/.test(src))
+      && /prepare\(buildAuditLogRetentionDeleteSql\(auditBatch\)\)/.test(src))
     check('the audit_logs retention delete is sargable -- no date() around created_at',
       /DELETE FROM audit_logs/.test(retention) && !/date\(created_at\)/.test(retention)
       && /created_at < @cutoff/.test(retention))
     check('the shared retention exception stays limited to Return bulk replay provenance',
       /entity = 'return'[\s\S]*action IN \('action_undo','action_redo'\)[\s\S]*json_extract\(details, '\$\.kind'\) = 'return\.fields\.bulk'/.test(retention))
     check('and it is batched, so a large backlog cannot exhaust the D1 statement budget',
-      /LIMIT 5000/.test(retention))
+      /LIMIT \$\{batchSize\}/.test(retention) && /DEFAULT_AUDIT_LOG_RETENTION_BATCH = 5000/.test(auditSrc))
   }
 
   const win = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'businessDateWindow.ts'), 'utf8')

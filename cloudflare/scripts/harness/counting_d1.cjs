@@ -19,7 +19,12 @@ function countingDb(d1) {
       bind(params) { stmt.bind(params); return api },
       get(params) { const row = stmt.get(params); record(sql, row ? 1 : 0); return row },
       all(params) { const rows = stmt.all(params); record(sql, rows.length); return rows },
-      run(params) { const info = stmt.run(params); record(sql, 0); return info },
+      // lib/db.ts's D1Compat answers run() with { changes, lastInsertRowid }.
+      run(params) {
+        const info = stmt.run(params)
+        record(sql, 0)
+        return { ...info, changes: info.meta?.changes ?? info.changes ?? 0, lastInsertRowid: Number(info.meta?.last_row_id ?? info.lastInsertRowid ?? 0) }
+      },
     }
     return api
   }

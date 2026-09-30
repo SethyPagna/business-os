@@ -25,7 +25,13 @@ const AUDIT_LOG_RETENTION_MIN_INTERVAL_MS = 24 * 60 * 60 * 1000
 // ordinary Shift logs and legacy writes without request identity still age out.
 // Keep this predicate narrow: ordinary audit data, the original bulk receipt,
 // and unrelated undo/redo rows continue to follow the configured retention.
-export function buildAuditLogRetentionDeleteSql(): string {
+// `batchSize` is the tier-keyed getPlanLimits(env).auditLogRetentionBatch; the
+// default is the Paid value every caller used before it was tier-aware. audit.ts
+// takes the value as a parameter instead of importing planTier so the many
+// harnesses that load this module on its own need no extra shim.
+export const DEFAULT_AUDIT_LOG_RETENTION_BATCH = 5000
+export function buildAuditLogRetentionDeleteSql(batchSize: number = DEFAULT_AUDIT_LOG_RETENTION_BATCH): string {
+  if (!Number.isInteger(batchSize) || batchSize <= 0) throw new Error('audit retention batch size must be a positive integer')
   return `DELETE FROM audit_logs WHERE id IN (
     SELECT id FROM audit_logs
     WHERE created_at < @cutoff
@@ -47,7 +53,7 @@ export function buildAuditLogRetentionDeleteSql(): string {
           ELSE 0 END
         )
       ) ELSE 0 END, 0)
-    LIMIT 5000
+    LIMIT ${batchSize}
   )`
 }
 
@@ -339,7 +345,7 @@ export async function getAuditLogRetentionDays(env: Env): Promise<number> {
 // configured retention window (default 21 days, see DEFAULT_AUDIT_LOG_RETENTION_DAYS),
 // throttled to at most once per day so a 6h cron tick doesn't re-scan the
 // table for nothing.
-export async function maybeRunScheduledAuditLogRetention(env: Env): Promise<{ skipped: boolean; reason?: string; deleted?: number; retentionDays?: number }> {
+export async function maybeRunScheduledAuditLogRetention(env: Env, batchSize: number): Promise<{ skipped: boolean; reason?: string; deleted?: number; retentionDays?: number }> {
   const lastRunRaw = await getSettingValue(env, AUDIT_LOG_RETENTION_LAST_RUN_KEY)
   const lastRun = lastRunRaw ? Date.parse(lastRunRaw) : 0
   if (lastRun && Date.now() - lastRun < AUDIT_LOG_RETENTION_MIN_INTERVAL_MS) {
@@ -357,10 +363,10 @@ export async function maybeRunScheduledAuditLogRetention(env: Env): Promise<{ sk
   const db = getDb(env)
   let deleted = 0
   for (;;) {
-    const result = await db.prepare(buildAuditLogRetentionDeleteSql()).run({ cutoff })
+    const result = await db.prepare(buildAuditLogRetentionDeleteSql(batchSize)).run({ cutoff })
     const n = result.changes ?? 0
     deleted += n
-    if (n < 5000) break
+    if (n < batchSize) break
   }
   await setSettingValue(env, AUDIT_LOG_RETENTION_LAST_RUN_KEY, new Date().toISOString())
   if (deleted > 0) {

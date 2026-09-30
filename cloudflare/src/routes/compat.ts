@@ -8,7 +8,7 @@ import { buildDriveOauthStartUrl, completeDriveOauth, consumeDriveOauthState, di
 import { enqueueDriveRestoreStageJob, enqueueDriveSyncJob } from '../lib/driveSyncQueue'
 import { canAuthorizeDriveSync } from '../lib/driveSyncAuthority'
 import { hasPermission, hasAnyPermission, isAdminControlUser, getActionTier } from '../lib/permissions'
-import { resolvePlanTier } from '../lib/planTier'
+import { getPlanLimits, resolvePlanTier } from '../lib/planTier'
 import { readAllQuotas } from '../lib/quotaGuard'
 import { audit, buildAuditLogRetentionDeleteSql } from '../lib/audit'
 import { buildAuditLogFilters } from '../lib/auditLogQuery'
@@ -788,12 +788,13 @@ app.delete('/system/audit-logs/retention', requireAuth, async (c) => {
   // budget on a large backlog.
   const cutoff = new Date(Date.now() - olderThanDays * 24 * 60 * 60 * 1000).toISOString().slice(0, 19).replace('T', ' ')
   const db = getDb(c.env)
+  const auditBatch = getPlanLimits(c.env).auditLogRetentionBatch
   let deleted = 0
   for (;;) {
-    const result = await db.prepare(buildAuditLogRetentionDeleteSql()).run({ cutoff })
+    const result = await db.prepare(buildAuditLogRetentionDeleteSql(auditBatch)).run({ cutoff })
     const n = (result as any)?.meta?.changes ?? (result as any)?.changes ?? 0
     deleted += n
-    if (n < 5000) break
+    if (n < auditBatch) break
   }
   await audit(c.env, user?.id ?? null, actorSnapshot(user), 'audit_log_retention_delete', 'audit_log', null, { olderThanDays, cutoffDate: cutoff, deleted })
   return c.json({ ok: true, deleted })

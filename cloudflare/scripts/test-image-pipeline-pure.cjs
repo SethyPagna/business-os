@@ -213,7 +213,7 @@ check('the audit cannot break the backup chain', async () => {
   // rest. The ORDER is still the invariant, so that is what gets pinned now.)
   const scheduled = index.slice(index.indexOf('async scheduled('))
   const backupAt = scheduled.indexOf("runStep('backup', () => maybeRunScheduledBackup(env))")
-  const retentionAt = scheduled.indexOf("runStep('audit-log-retention', () => maybeRunScheduledAuditLogRetention(env))")
+  const retentionAt = scheduled.indexOf("runStep('audit-log-retention', () => maybeRunScheduledAuditLogRetention(env, getPlanLimits(env).auditLogRetentionBatch))")
   const auditAt = scheduled.indexOf("runStep('image-audit', () => maybeRunScheduledImageAudit(env))")
   assert.ok(backupAt >= 0, 'the backup must run in the scheduled tick')
   assert.ok(retentionAt > backupAt, 'audit-log retention must run after the backup')

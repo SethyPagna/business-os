@@ -90,11 +90,11 @@ for (const id of [8, 9, 10, 11]) {
 sqlite.close()
 
 const compatSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'compat.ts'), 'utf8')
-assert.match(auditSource, /prepare\(buildAuditLogRetentionDeleteSql\(\)\)/,
+assert.match(auditSource, /prepare\(buildAuditLogRetentionDeleteSql\(batchSize\)\)/,
   'scheduled retention must use the shared narrow deletion SQL')
 assert.match(compatSource, /import \{ audit, buildAuditLogRetentionDeleteSql \} from '\.\.\/lib\/audit'/,
   'manual retention must import the same policy')
-assert.match(compatSource, /prepare\(buildAuditLogRetentionDeleteSql\(\)\)/,
+assert.match(compatSource, /prepare\(buildAuditLogRetentionDeleteSql\(auditBatch\)\)/,
   'manual retention must use the same narrow deletion SQL')
 assert.doesNotMatch(compatSource, /DELETE FROM audit_logs WHERE id IN \(SELECT id FROM audit_logs WHERE created_at < @cutoff LIMIT 5000\)/,
   'manual retention must not retain its old blanket deletion path')

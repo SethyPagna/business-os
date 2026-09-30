@@ -228,6 +228,26 @@ export type PlanLimits = {
   //   Free: floor((50 - 13) / 33)   = 1
   stockInLinesPerRequest: number
 
+  // ---- Window sizes that used to be Paid-only literals ---------------------
+
+  // importEngine.ts: source rows parsed and written per CSV materialize
+  // window. Its own comment held it at 100 for Workers Free's 10 ms CPU limit
+  // and raised it to 600 once the account was Paid with cpu_ms = 300000, so
+  // Paid 600 is today's value and Free 100 is the documented old one.
+  materializeRowsPerChunk: number
+
+  // importEngine.ts direct-mode stock-action continuation: rows classified
+  // per window, and persisted rows read per dispatch batch. Paid 480 / 400
+  // are the current values. Free 120 / 100 keep the same 0.25 ratio used for
+  // stockActionMaxRows (an estimate, not a measured Free figure).
+  stockActionClassifyWindow: number
+  stockActionDispatchRead: number
+
+  // audit.ts scheduled sweep and compat.ts manual clear: rows per bounded
+  // DELETE ... IN (SELECT ... LIMIT n). Paid 5000 is the old literal; Free
+  // 1000 matches ephemeralDeleteBatch, the sibling retention sweep.
+  auditLogRetentionBatch: number
+
   // ---- Documented platform facts (no behavioural reader) -----------------
   //
   // These four are REPORTED, not enforced: the tier readout on
@@ -284,6 +304,10 @@ const PAID_LIMITS: PlanLimits = {
   ephemeralDeleteBatch: 5000,
   catalogIntegrityMaxProducts: 50_000,
   stockInLinesPerRequest: 29,
+  materializeRowsPerChunk: 600,
+  stockActionClassifyWindow: 480,
+  stockActionDispatchRead: 400,
+  auditLogRetentionBatch: 5000,
   d1DailyRowsRead: 833_000_000,
   d1DailyRowsWritten: 1_666_000,
   d1MaxDatabaseBytes: 10 * 1024 * 1024 * 1024,
@@ -306,6 +330,10 @@ const FREE_LIMITS: PlanLimits = {
   ephemeralDeleteBatch: 1000,
   catalogIntegrityMaxProducts: 2000,
   stockInLinesPerRequest: 1,
+  materializeRowsPerChunk: 100,
+  stockActionClassifyWindow: 120,
+  stockActionDispatchRead: 100,
+  auditLogRetentionBatch: 1000,
   d1DailyRowsRead: 5_000_000,
   d1DailyRowsWritten: 100_000,
   d1MaxDatabaseBytes: 500 * 1024 * 1024,

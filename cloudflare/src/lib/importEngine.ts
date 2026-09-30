@@ -922,7 +922,7 @@ async function fetchCsvText(env: Env, jobId: string): Promise<{ text: string; fi
 // How many bytes one materialize window pulls from R2.
 //
 // Sized so a window comfortably contains far more than
-// MATERIALIZE_ROWS_PER_CHUNK rows: the real file averages ~290 bytes/row, so
+// materializeRowsPerChunk rows: the real file averages ~290 bytes/row, so
 // 256 KB holds roughly 900 rows against a 100-row budget. Overshooting is
 // nearly free (the unread remainder is simply not parsed and the next window
 // re-reads from the exact byte where this one stopped), whereas undershooting
@@ -1037,17 +1037,13 @@ type MaterializeState = {
   salesLastGroupKey?: string
 }
 
-// Kept separate from ROWS_PER_IMPORT_CHUNK: a materialize window only
-// parses + does one INSERT OR REPLACE per row (no classify, no image-match,
-// no branch resolution, no 1-3-statements-per-row apply logic), so per-row
-// it's cheaper than analyze/apply's own chunk work. This was held at 100
-// for the old Workers Free 10ms CPU limit. The production account is now on
-// Paid with cpu_ms=300000, so use the same measured 600-row window as the
-// heavier classify/apply phase. That removes five out of every six queue
-// round-trips for the 12k/21k migration files while keeping each D1 write
-// split by runD1BatchInChunks. Lower it again only if production telemetry
-// shows a materialization-specific CPU failure.
-const MATERIALIZE_ROWS_PER_CHUNK = 600
+// The materialize window (getPlanLimits(env).materializeRowsPerChunk) is kept
+// separate from ROWS_PER_IMPORT_CHUNK: it only parses + does one INSERT OR
+// REPLACE per row (no classify, no image-match, no branch resolution), so
+// per-row it's cheaper than analyze/apply's own chunk work. Paid runs 600 rows
+// (cpu_ms=300000), which removes five out of every six queue round-trips for
+// the 12k/21k migration files while each D1 write stays split by
+// runD1BatchInChunks; Free keeps the old 100 for its 10ms CPU limit.
 
 async function getMaterializeState(db: D1Compat, jobId: string): Promise<{ state: MaterializeState; done: boolean; type: ImportType | null }> {
   const row = await db.prepare(`SELECT type, materialize_state_json, materialize_done FROM import_jobs WHERE id = @id`)
@@ -1148,7 +1144,8 @@ async function ensureSourceRowsMaterialized(env: Env, db: D1Compat, jobId: strin
   // false the parser must not flush a trailing partial row -- see
   // parseDelimitedRowsWindow's sourceIsComplete.
   let reachedEof = state.byteOffset + csv.bytesRead >= csv.totalSize
-  let window = parseDelimitedRowsWindow(source, state.delimiter, 0, state.inQuotes, MATERIALIZE_ROWS_PER_CHUNK, reachedEof)
+  const materializeRows = getPlanLimits(env).materializeRowsPerChunk
+  let window = parseDelimitedRowsWindow(source, state.delimiter, 0, state.inQuotes, materializeRows, reachedEof)
 
   // A single row longer than the whole window would parse to zero rows and
   // the job would never advance. Widen and retry rather than spin: real
@@ -1161,7 +1158,7 @@ async function ensureSourceRowsMaterialized(env: Env, db: D1Compat, jobId: strin
     csv = wider
     source = state.byteOffset === 0 ? stripBom(csv.text) : csv.text
     reachedEof = state.byteOffset + csv.bytesRead >= csv.totalSize
-    window = parseDelimitedRowsWindow(source, state.delimiter, 0, state.inQuotes, MATERIALIZE_ROWS_PER_CHUNK, reachedEof)
+    window = parseDelimitedRowsWindow(source, state.delimiter, 0, state.inQuotes, materializeRows, reachedEof)
   }
 
   // The parser reports a CHARACTER offset into this slice; the cursor we
@@ -5017,13 +5014,13 @@ export const STOCK_ACTION_MAX_UNITS = 480
 // per-invocation budgets the caps above encode. The window sizes below are
 // M4's own proven values and deliberately NOT raised by A4: they are sized
 // by job-state blob growth and per-window write batching, not by the
-// platform limits that changed.
+// platform limits that changed. Paid keeps the M4 values (480 / 400); they are
+// tier-keyed as getPlanLimits(env).stockActionClassifyWindow / DispatchRead so
+// Free runs smaller windows.
 // RECONCILE mode keeps the single-pass caps on purpose: its deltas compare
 // against ONE consistent live-stock snapshot, which windowed classification
 // across invocations cannot promise.
 const STOCK_ACTION_DIRECT_MAX_ROWS = 25000
-const STOCK_ACTION_CLASSIFY_WINDOW = 480
-const STOCK_ACTION_DISPATCH_READ = 400
 // Direct add rows are independent, atomic, and idempotently sealed by
 // applyUnifiedStockAdd. Dispatch a small bounded group concurrently so the
 // continuation is not dominated by one D1 network round-trip at a time.
@@ -5403,7 +5400,7 @@ async function applyStockActionsContinuation(
   }
 
   if (stock.phase === 'classify') {
-    const windowRows = await readMaterializedWindow(db, jobId, cursor, STOCK_ACTION_CLASSIFY_WINDOW, decisions)
+    const windowRows = await readMaterializedWindow(db, jobId, cursor, limits.stockActionClassifyWindow, decisions)
     const results = (await classifyRows(db, 'stock_actions', windowRows, jobId, policyJson)) as StockActionImportResult[]
     sw.lap('classifyChunkMs')
 
@@ -5474,7 +5471,7 @@ async function applyStockActionsContinuation(
     }
     await persistChunkResults(db, jobId, 'apply', results, groupIndexByRowNumber)
     const nextCursor = cursor + windowRows.length
-    const classifyDone = windowRows.length < STOCK_ACTION_CLASSIFY_WINDOW || nextCursor >= totalRows
+    const classifyDone = windowRows.length < limits.stockActionClassifyWindow || nextCursor >= totalRows
     if (classifyDone) stock.phase = 'dispatch'
     await saveChunkState(db, jobId, nextCursor, state)
     await db.prepare(`UPDATE import_jobs SET processed_rows = @n, updated_at = CURRENT_TIMESTAMP WHERE id = @id`)
@@ -5543,7 +5540,7 @@ async function applyStockActionsContinuation(
     const batch = await db.staging.prepare(`
       SELECT row_number, group_index, result_json FROM import_job_rows
       WHERE job_id = @id AND phase = 'apply' AND row_number > @after
-      ORDER BY row_number LIMIT ${STOCK_ACTION_DISPATCH_READ}
+      ORDER BY row_number LIMIT ${limits.stockActionDispatchRead}
     `).all<{ row_number: number; group_index: number | null; result_json: string }>({ id: jobId, after })
     if (!batch.length) { moreRows = false; break }
 

@@ -258,7 +258,7 @@ check('ensureSourceRowsMaterialized reads a range, not the whole object', () => 
   const engine = fs.readFileSync(path.join(cloudflareRoot, 'src', 'lib', 'importEngine.ts'), 'utf8')
   assert.match(engine, /await fetchCsvRange\(env, jobId, state\.byteOffset/, 'the materialize loop must read by byte range')
   assert.match(engine, /range: \{ offset, length \}/, 'the R2 get must pass a range')
-  assert.match(engine, /MATERIALIZE_ROWS_PER_CHUNK, reachedEof\)/, 'the parser must be told whether the slice reaches EOF')
+  assert.match(engine, /materializeRows, reachedEof\)/, 'the parser must be told whether the slice reaches EOF')
   assert.match(engine, /state\.byteOffset = nextByteOffset/, 'the byte cursor must be persisted between windows')
 })
 
