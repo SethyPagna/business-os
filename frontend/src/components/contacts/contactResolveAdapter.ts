@@ -280,7 +280,7 @@ type Plan = {
 
 function buildPlan(data: ContactResolveData, draft: ResolveDraft, t: Translate): Plan {
   const ctx = contextOf(data, draft)
-  const { included, keeperId } = ctx
+  const { included } = ctx
   const membership = membershipPlan(ctx)
   const storefront = storefrontPlan(ctx, membership)
   const picks = new Map<string, FieldPick>()
