@@ -51,7 +51,7 @@
  *                             row from one job (bulkDeleteWriteOffReferenceId),
  *                             the same shared-string-per-event shape
  *                             productRemoveWriteOffReferenceId uses below, so
- *                             the write_off-shaped revert guard (clause 5)
+ *                             the write_off-shaped revert guard (guard 4)
  *                             covers it too. There is currently no undo for a
  *                             bulk-delete job at all, so that guard never
  *                             actually excludes a 'delete' row today -- it is
@@ -84,7 +84,7 @@
  *     apply/redo, and undo writes a counter stamped `revert:` + that same
  *     string, so an undone delete is excluded and a later redo (a NEW
  *     generation, a NEW string) is a fresh, uncounted-until-booked loss again.
- * See the second NOT EXISTS clause below -- it is keyed on `reference_id`,
+ * See guard 4 of removalOriginalLossWhere below -- it is keyed on `reference_id`,
  * not `id`, for 'write_off'/'delete' rows, because unlike every other writer
  * here these can post more than one loss-bearing row per real-world event.
  *
@@ -123,10 +123,54 @@ function quoted(values: readonly string[]): string {
 }
 
 /**
- * The WHERE fragment selecting the loss-bearing removal movements under
- * `alias`. The caller AND-s its own date/branch window onto this.
+ * The WHERE fragment selecting the rows that move the loss figure under
+ * `alias`: every loss-bearing removal (see removalOriginalLossWhere) plus every
+ * Revert in a chain rooted at one. The caller AND-s its own date/branch window
+ * onto this, so each row counts in ITS OWN period.
  *
- * Five guards, each for a writer that would otherwise be mis-counted:
+ * Owner, 30 Sep 2026: a Revert is a new record dated now and changes no past
+ * report. So a reverted removal keeps its loss in its original period, and the
+ * Revert that puts the stock back counts as a recovery (a negative loss, see
+ * REMOVAL_LOSS_SELECT's loss_sign) in the period it was made; a Revert of that
+ * Revert takes the stock out again and is a loss again, in its own period.
+ */
+export function removalLossMovementWhere(alias = 'm'): string {
+  return `(${removalOriginalLossWhere(alias)} OR ${revertOfLossWhere(alias)})`
+}
+
+/**
+ * A numeric Revert (reference_id 'revert:<id>', lib/stockRevert.ts, and a
+ * scoped Set's undo, lib/stockLotAdjustment.ts) whose chain -- followed to
+ * its root through strictly decreasing ids -- starts at a loss-bearing
+ * removal. A Revert of a receipt or of a correction is never a loss.
+ */
+function revertOfLossWhere(alias: string): string {
+  return `(CAST(${alias}.reference_id AS TEXT) LIKE 'revert:%' AND ${alias}.quantity > 0 AND EXISTS (
+       WITH RECURSIVE loss_chain(id, reference_id) AS (
+         SELECT parent.id, parent.reference_id FROM inventory_movements parent
+         WHERE parent.id = CAST(SUBSTR(${alias}.reference_id, 8) AS INTEGER)
+           AND ${alias}.reference_id = 'revert:' || CAST(parent.id AS TEXT) AND parent.id < ${alias}.id
+         UNION ALL
+         SELECT parent.id, parent.reference_id FROM inventory_movements parent
+         JOIN loss_chain child ON parent.id = CAST(SUBSTR(child.reference_id, 8) AS INTEGER)
+         WHERE child.reference_id = 'revert:' || CAST(parent.id AS TEXT) AND parent.id < child.id
+       )
+       SELECT 1 FROM loss_chain chain JOIN inventory_movements root ON root.id = chain.id
+       WHERE ${removalOriginalLossWhere('root')}
+     ))`
+}
+
+/** +1 for a row that loses stock, -1 for a Revert that puts a lost removal back. */
+function lossSignSql(alias: string): string {
+  return `CASE WHEN CAST(${alias}.reference_id AS TEXT) LIKE 'revert:%'
+    AND ${alias}.movement_type NOT IN (${quoted(REMOVAL_LOSS_MOVEMENT_TYPES)}) THEN -1 ELSE 1 END`
+}
+
+/**
+ * The loss-bearing removals themselves -- the rows a Revert chain can start
+ * from.
+ *
+ * Four guards, each for a writer that would otherwise be mis-counted:
  *
  *  1. `movement_type IN (...)`      the loss set above.
  *  2. `quantity > 0`                stockSession.ts's session UNDO writes a
@@ -137,15 +181,10 @@ function quoted(values: readonly string[]): string {
  *                                   stockRevert.ts reverses an 'add' by
  *                                   writing a 'remove' stamped
  *                                   reference_id 'revert:<id>'. That undoes an
- *                                   inflow; nothing was lost.
- *  4. the numeric revert chain is not currently reversed
- *                                   odd counter depth cancels the original
- *                                   loss; even depth restores it in its
- *                                   original reporting period. Counter rows
- *                                   never become a second loss. Reverts are
- *                                   appended, so increasing ids bound the
- *                                   indexed walk without a depth cutoff.
- *  5. no revert exists FOR this row's reference_id (write_off/delete only)
+ *                                   inflow; nothing was lost. (A Revert in a
+ *                                   removal's chain counts through
+ *                                   revertOfLossWhere instead.)
+ *  4. no revert exists FOR this row's reference_id (write_off/delete only)
  *                                   DISPOSE and productDelete's write_off
  *                                   rows, and bulkDeleteEngine's 'delete'
  *                                   rows, are the identified exception: their
@@ -157,32 +196,19 @@ function quoted(values: readonly string[]): string {
  *                                   all with ONE shared counter -- see the
  *                                   comment on REMOVAL_LOSS_MOVEMENT_TYPES).
  *                                   Scoped to `movement_type IN ('write_off',
- *                                   'delete')` ONLY, so every other writer's
- *                                   behaviour (in particular guard 4 above,
- *                                   keyed on numeric id) is completely
- *                                   unchanged.
+ *                                   'delete')` ONLY: a History Undo of a
+ *                                   product delete still removes that loss
+ *                                   from its own period (open owner question:
+ *                                   is that Undo also a "Revert"?).
  *
  *  plus the excluded-reason set above.
  */
-export function removalLossMovementWhere(alias = 'm'): string {
+function removalOriginalLossWhere(alias: string): string {
   return [
     `${alias}.movement_type IN (${quoted(REMOVAL_LOSS_MOVEMENT_TYPES)})`,
     `${alias}.quantity > 0`,
     `(${alias}.reference_id IS NULL OR CAST(${alias}.reference_id AS TEXT) NOT LIKE 'revert:%')`,
     `COALESCE(${alias}.reason, '') NOT IN (${quoted(REMOVAL_LOSS_EXCLUDED_REASONS)})`,
-    `NOT EXISTS (
-       WITH RECURSIVE loss_reverts(id, depth) AS (
-         SELECT rv.id, 1 FROM inventory_movements rv
-         WHERE rv.reference_id = 'revert:' || CAST(${alias}.id AS TEXT) AND rv.id > ${alias}.id
-         UNION ALL
-         SELECT rv.id, chain.depth + 1 FROM inventory_movements rv
-         JOIN loss_reverts chain ON rv.reference_id = 'revert:' || CAST(chain.id AS TEXT)
-         WHERE rv.id > chain.id
-       )
-       SELECT 1 FROM loss_reverts chain WHERE chain.depth % 2 = 1
-         AND NOT EXISTS (SELECT 1 FROM inventory_movements next_revert
-           WHERE next_revert.reference_id = 'revert:' || CAST(chain.id AS TEXT) AND next_revert.id > chain.id)
-     )`,
     `(${alias}.movement_type NOT IN ('write_off', 'delete') OR ${alias}.reference_id IS NULL
        OR NOT EXISTS (SELECT 1 FROM inventory_movements rv2
          WHERE rv2.reference_id = 'revert:' || CAST(${alias}.reference_id AS TEXT)))`,
@@ -219,6 +245,7 @@ export const REMOVAL_LOSS_SELECT = `
   m.id AS id,
   m.created_at AS created_at,
   m.quantity AS quantity,
+  ${lossSignSql('m')} AS loss_sign,
   m.unit_cost_usd AS unit_cost_usd,
   m.total_cost_usd AS total_cost_usd,
   COALESCE(
@@ -246,15 +273,18 @@ export type RemovalLossRow = {
   id?: number | string | null
   created_at?: string | null
   quantity?: number | string | null
+  /** -1 for a Revert that put a lost removal back (a recovery), else +1. */
+  loss_sign?: number | string | null
   unit_cost_usd?: number | string | null
   total_cost_usd?: number | string | null
   fallback_unit_cost_usd?: number | string | null
 }
 
 export type RemovalLossSummary = {
-  /** Cost value of the stock removed in the window. Never negative. */
+  /** Cost value of the stock removed in the window, less what Reverts made in
+   *  the window put back. Negative when the window recovered more than it lost. */
   removal_loss_usd: number
-  /** Units removed. */
+  /** Units removed, less units a Revert put back, on the same rule. */
   removal_loss_qty: number
   /** Removal rows that carried no cost anywhere -- the loss is understated by
    *  whatever they were worth, and this says so instead of hiding it. */
@@ -305,7 +335,7 @@ export function removalRowLossUsd(row: RemovalLossRow): number | null {
   return null
 }
 
-/** Reduce priced removal rows to one summary. */
+/** Reduce priced removal rows (and their Reverts, signed) to one summary. */
 export function summarizeRemovalLosses(rows: readonly RemovalLossRow[] | null | undefined): RemovalLossSummary {
   let usd = 0
   let qty = 0
@@ -313,14 +343,15 @@ export function summarizeRemovalLosses(rows: readonly RemovalLossRow[] | null | 
   for (const row of rows || []) {
     const quantity = finite(row.quantity) ?? 0
     if (!(quantity > 0)) continue
-    qty += quantity
+    const sign = finite(row.loss_sign) === -1 ? -1 : 1
+    qty += sign * quantity
     const value = removalRowLossUsd(row)
     if (value == null) unvalued += 1
-    else usd += value
+    else usd += sign * value
   }
   return {
-    removal_loss_usd: round2(Math.max(0, usd)),
-    removal_loss_qty: round2(qty),
+    removal_loss_usd: round2(usd) || 0,
+    removal_loss_qty: round2(qty) || 0,
     removal_loss_unvalued_rows: unvalued,
   }
 }

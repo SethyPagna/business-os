@@ -623,6 +623,11 @@ for (const variant of [{ ...lossFigures, removalLossUsd: 0 }, cancelledFigures])
   const quiet = telegram.formatShiftReport('Shop', closedThenCancelled, variant, Date.parse('2026-09-05T12:00:00.000Z'))
   assert.ok(!quiet.includes('· Loss/ខាតបង់:'), quiet)
 }
+// A shift whose only stock event was the Revert of an earlier removal put
+// stock back: its loss is negative (owner, 30 Sep 2026 -- the original
+// shift keeps its loss), printed with the sign before the dollar.
+const recovered = telegram.formatShiftReport('Shop', closedThenCancelled, { ...lossFigures, removalLossUsd: -9 }, Date.parse('2026-09-05T12:00:00.000Z')).split('\n')
+assert.equal(recovered.find((line) => line.startsWith('· Loss/')), '· Loss/ខាតបង់: -$9.00')
 
 // The day summary carries the same row in the same place, through the same
 // glossary key -- one label for one figure across both reports.

@@ -8,6 +8,7 @@ const path = require('node:path')
 const assert = require('node:assert/strict')
 const { fixture, loadStockSession, user } = require('./test-stock-session-atomic.cjs')
 const { applyMovementRevert } = loadStockSession('lib/stockRevert.ts')
+const losses = loadStockSession('lib/removalLosses.ts')
 const { getDb } = loadStockSession('lib/db.ts')
 
 const actor = { userId: user.id, userName: user.name }
@@ -137,7 +138,46 @@ async function legacyReceiptWithoutLot() {
   } finally { f.sql.close() }
 }
 
+// The loss view of one calendar day (or of all time), exactly as the Reports
+// kernel builds it: the loss WHERE, the loss SELECT and the reducer.
+function lossOn(f, day) {
+  const rows = f.sql.prepare(`SELECT ${losses.REMOVAL_LOSS_SELECT} ${losses.REMOVAL_LOSS_FROM}
+    WHERE ${losses.removalLossMovementWhere('m')} ${day ? 'AND substr(m.created_at, 1, 10) = ?' : ''}`).all(...(day ? [day] : []))
+  return losses.summarizeRemovalLosses(rows)
+}
+
+async function removalRevertOffsetsInCurrentPeriod() {
+  const f = fixture()
+  try {
+    const { receipt, removal } = seedPurchases(f)
+    const db = getDb(f.env)
+    const loss20Sep = JSON.stringify(lossOn(f, '2026-09-20'))
+    assert.deepEqual(JSON.parse(loss20Sep), { removal_loss_usd: 9, removal_loss_qty: 3, removal_loss_unvalued_rows: 0 })
+    // A receipt's Revert takes stock out, but nothing was lost.
+    assert.equal((await applyMovementRevert(db, movement(f, receipt), actor)).ok, true)
+    const counterDay = latest(f).created_at.slice(0, 10)
+    assert.deepEqual(lossOn(f, counterDay), { removal_loss_usd: 0, removal_loss_qty: 0, removal_loss_unvalued_rows: 0 }, 'the Revert of a receipt is not a loss')
+    const expected = [
+      { counterDay: -9, qty: -3, total: 0 },
+      { counterDay: 0, qty: 0, total: 9 },
+      { counterDay: -9, qty: -3, total: 0 },
+    ]
+    let target = movement(f, removal)
+    for (const [depth, want] of expected.entries()) {
+      assert.equal((await applyMovementRevert(db, target, actor)).ok, true)
+      target = latest(f)
+      assert.equal(JSON.stringify(lossOn(f, '2026-09-20')), loss20Sep, `depth ${depth + 1}: the 20 Sep loss is byte-identical`)
+      assert.deepEqual(lossOn(f, target.created_at.slice(0, 10)), { removal_loss_usd: want.counterDay, removal_loss_qty: want.qty, removal_loss_unvalued_rows: 0 }, `depth ${depth + 1}: the Revert day carries the offset`)
+      assert.equal(lossOn(f).removal_loss_usd, want.total, `depth ${depth + 1}: all time nets out`)
+    }
+    const reportTotals = losses.removalLossTotals(100, 40, lossOn(f, target.created_at.slice(0, 10)))
+    assert.deepEqual([reportTotals.revenue_after_losses_usd, reportTotals.profit_after_losses_usd], [109, 49], 'the recovery raises the Revert day\'s after-losses figures')
+    console.log('PASS a removal\'s Revert offsets the loss on the Revert day; 20 Sep keeps its loss at every depth')
+  } finally { f.sql.close() }
+}
+
 async function main() {
+  await removalRevertOffsetsInCurrentPeriod()
   await receiptRevertKeepsPurchase()
   await paidReceiptRevertKeepsPaidSpend()
   await legacyReceiptWithoutLot()
