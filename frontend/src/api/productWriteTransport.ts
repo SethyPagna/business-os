@@ -431,14 +431,28 @@ export function getMergePreview(
 // NOT defaulted here: the server refuses a stocked row with no answer (400
 // stock_choice_required) rather than guessing, and a default in the transport
 // would quietly reinstate exactly the silent behaviour that was wrong.
+/** The Resolve grid's Final column per field: a record's value or a typed one
+ *  (never a typed barcode or image). The Worker reads them from the frozen
+ *  reviewed rows (cloudflare/src/lib/productResolveChoices.ts). */
+export type ProductResolveChoice = { source_id: number } | { custom: string | number }
+export type ProductResolveChoices = Partial<Record<
+  'name' | 'barcode' | 'brand' | 'category' | 'unit' | 'selling_price_usd' | 'wholesale_price_usd' | 'image',
+  ProductResolveChoice
+>>
+
 export function mergePossiblySameProducts(
   keepId: number | string,
   mergeId: number | string,
   stock?: 'merge' | 'write_off',
-  // The Resolve grid's Keep merge: the kept product's name and barcode stay,
-  // and a chosen cost (sent only by a user with the cost edit permission; the
-  // Worker refuses it otherwise) replaces the averaged one.
-  keep?: { cost_price_usd?: number; cost_price_khr?: number | null; resolve?: { requestId: string; reviewedDigest: string; steps: Array<{ mergeId: number; stock?: 'merge' | 'write_off' }> } },
+  // The Resolve grid's Keep merge: a chosen cost (sent only by a user with the
+  // cost edit permission; the Worker refuses it otherwise) replaces the
+  // averaged one, and `choices` set the survivor's other fields.
+  keep?: {
+    cost_price_usd?: number
+    cost_price_khr?: number | null
+    resolve?: { requestId: string; reviewedDigest: string; steps: Array<{ mergeId: number; stock?: 'merge' | 'write_off' }> }
+    choices?: ProductResolveChoices
+  },
 ): Promise<unknown> {
   const body: Record<string, unknown> = stock ? { keepId, mergeId, stock } : { keepId, mergeId }
   if (keep) {
@@ -446,6 +460,8 @@ export function mergePossiblySameProducts(
     if (keep.resolve) body.resolve = keep.resolve
     if (keep.cost_price_usd !== undefined) body.cost_price_usd = keep.cost_price_usd
     if (keep.cost_price_khr != null) body.cost_price_khr = keep.cost_price_khr
+    // The Worker refuses choices without a reviewed plan (400 invalid_resolve_choices).
+    if (keep.resolve && keep.choices && Object.keys(keep.choices).length) body.choices = keep.choices
   }
   return route(
     'products:mergePossiblySame',
