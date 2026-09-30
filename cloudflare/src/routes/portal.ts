@@ -596,7 +596,7 @@ export function buildPortalConfig(settings: SettingsMap, env: Env) {
     showContactPhone: normalizeBoolean(settings.customer_portal_show_contact_phone, false),
     showContactInstagram: normalizeBoolean(settings.customer_portal_show_contact_instagram, false),
     title: settings.customer_portal_title || settings.business_name || 'Customer Portal',
-    intro: settings.customer_portal_intro || 'Browse products and check membership details.',
+    intro: settings.customer_portal_intro || '',
     heroGradientStart: settings.customer_portal_hero_gradient_start || '#0f172a',
     heroGradientMid: settings.customer_portal_hero_gradient_mid || '#14532d',
     heroGradientEnd: settings.customer_portal_hero_gradient_end || '#ea580c',
