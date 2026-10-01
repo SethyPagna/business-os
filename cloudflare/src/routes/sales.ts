@@ -5458,14 +5458,30 @@ function buildSalesSearchWhere(query: Record<string, string>, params: Record<str
     "COALESCE(sip.brand, '')", "COALESCE(sip.name_normalized, '')", "COALESCE(sip.brand_compact, '')",
   ])
 
+  const searchBindings = new Map<string, string>()
+  const boundSearchClause = (word: string, haystack: string, keyBase: string): string => {
+    const wordParams: Record<string, unknown> = {}
+    const clause = buildLikeAliasClause(word, [haystack], wordParams, keyBase, true)
+    return clause.replace(/@(\w+)/g, (_match, key: string) => {
+      const value = wordParams[key] as string
+      let sharedKey = searchBindings.get(value)
+      if (sharedKey === undefined) {
+        sharedKey = key
+        searchBindings.set(value, sharedKey)
+        params[sharedKey] = value
+      }
+      return `@${sharedKey}`
+    })
+  }
+
   let groupIndex = 0
   const groupClauses = groups.map((words) => {
     let wordIndex = 0
     const wordClauses = words.map((word) => {
       const keyBase = `srch${groupIndex}_${wordIndex}`
       wordIndex += 1
-      const flatClause = buildLikeAliasClause(word, [flatHaystack], params, `${keyBase}_f`, true)
-      const itemClause = buildLikeAliasClause(word, [itemHaystack], params, `${keyBase}_i`, true)
+      const flatClause = boundSearchClause(word, flatHaystack, `${keyBase}_f`)
+      const itemClause = boundSearchClause(word, itemHaystack, `${keyBase}_i`)
       return `(${flatClause} OR EXISTS (
         SELECT 1 FROM sale_items sis
         LEFT JOIN products sip ON sip.id = sis.product_id
