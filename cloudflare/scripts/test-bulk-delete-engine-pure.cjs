@@ -3,17 +3,6 @@
 //   - buildCoreDeleteStatements (soft vs hard delete SQL/params per entity)
 //   - ENTITY_CONFIGS (shape/consistency of every registered entity type)
 //
-// Same reasoning as test-import-engine-pure.cjs's own header: no D1/
-// wrangler test harness in this project, so rather than skip verification
-// this transpiles the REAL source file with the `typescript` package
-// already in node_modules and calls the actual exported functions/data,
-// not a re-implementation. The four value imports bulkDeleteEngine.ts
-// pulls in (getDb, runD1BatchInChunks, bumpVersion, broadcast) are never
-// called by the two exports under test here (they're only used inside
-// runBulkDeleteJob/createBulkDeleteJob, which need a live D1 and aren't
-// pure) -- stubbed as no-ops purely so `require()` resolves, not because
-// their real behavior matters to these assertions.
-//
 // Run: node scripts/test-bulk-delete-engine-pure.cjs
 
 const fs = require('fs')
@@ -72,10 +61,6 @@ function loadRealLib(relName) {
   return libModule.exports
 }
 
-// Stub require: only './db', './importEngine', './cache', and
-// '../durable-objects/broadcastHub' are ever requested by the transpiled
-// output (Env/D1Compat/BroadcastChannel are type-only imports, elided by
-// the transpiler) -- anything else falls through to the real require.
 function stubRequire(id) {
   // queueDispatch is pure and is what runBulkDeleteJob's self-continuation
   // enqueues through now; a {} stub makes dispatchImportWork undefined.
