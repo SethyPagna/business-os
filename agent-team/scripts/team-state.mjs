@@ -27,24 +27,60 @@ function processIsAlive(pid) {
   catch (error) { return error.code === "EPERM"; }
 }
 
-function recoverStaleLock() {
-  let createdAt;
-  let ownerPid;
-  let ownerNonce;
+function recoverStaleLock(attempt = 1) {
+  let ownerText;
+  let owner;
   try {
-    const owner = JSON.parse(readFileSync(lockOwnerPath, "utf8"));
-    createdAt = Date.parse(owner.created_at);
-    ownerPid = owner.pid;
-    ownerNonce = owner.nonce;
-  } catch {
-    try { createdAt = statSync(lockPath).mtimeMs; } catch { return; }
-    ownerNonce = `unknown-${Math.trunc(createdAt)}`;
+    ownerText = readFileSync(lockOwnerPath, "utf8");
+    owner = JSON.parse(ownerText);
+  } catch (error) {
+    if (error.code !== "ENOENT") return;
+    let lockStat;
+    try { lockStat = statSync(lockPath); } catch { return; }
+    if (!lockStat.isDirectory() || Date.now() - lockStat.mtimeMs <= staleLockMs) return;
+    owner = { pid: 0, nonce: randomUUID(), created_at: new Date(lockStat.mtimeMs).toISOString() };
+    ownerText = `${JSON.stringify(owner)}\n`;
+    try { writeFileSync(lockOwnerPath, ownerText, { encoding: "utf8", flag: "wx" }); }
+    catch (publishError) {
+      if (["EEXIST", "ENOENT"].includes(publishError.code)) return;
+      throw publishError;
+    }
   }
-  if (Number.isFinite(createdAt) && Date.now() - createdAt > staleLockMs && !processIsAlive(ownerPid)) {
-    const safeNonce = String(ownerNonce || "missing").replace(/[^A-Za-z0-9._-]/g, "_");
-    const tombstone = join(stateDir, `state.lock.stale.${safeNonce}`);
-    try { renameSync(lockPath, tombstone); }
-    catch (error) { if (!["ENOENT", "EEXIST", "ENOTEMPTY"].includes(error.code)) throw error; }
+  const createdAt = Date.parse(owner?.created_at);
+  if (!Number.isInteger(owner?.pid) || owner.pid < 0 || typeof owner.nonce !== "string" || !owner.nonce || !Number.isFinite(createdAt)) return;
+  if (Date.now() - createdAt <= staleLockMs || processIsAlive(owner.pid)) return;
+  const safeNonce = owner.nonce.replace(/[^A-Za-z0-9._-]/g, "_");
+  const tombstone = join(stateDir, `state.lock.stale.${safeNonce}`);
+  const sameRetiredOwner = () => {
+    try { return readFileSync(join(tombstone, "owner.json"), "utf8") === ownerText; }
+    catch { return false; }
+  };
+  if (existsSync(tombstone)) {
+    if (sameRetiredOwner()) return;
+    throw new Error(`Agent-team stale lock tombstone conflicts with owner: ${tombstone}`);
+  }
+  try {
+    if (readFileSync(lockOwnerPath, "utf8") !== ownerText) return;
+    renameSync(lockPath, tombstone);
+  } catch (error) {
+    if (error.code === "ENOENT") return;
+    if (["EEXIST", "ENOTEMPTY", "EPERM"].includes(error.code) && sameRetiredOwner()) return;
+    if (process.platform === "win32" && error.code === "EPERM") {
+      let targetAbsent = false;
+      try { statSync(tombstone); }
+      catch (targetError) { targetAbsent = targetError.code === "ENOENT"; }
+      let sameCurrentOwner = false;
+      try { sameCurrentOwner = readFileSync(lockOwnerPath, "utf8") === ownerText; } catch {}
+      if (targetAbsent && sameCurrentOwner && Date.now() - createdAt > staleLockMs && !processIsAlive(owner.pid)) {
+        if (attempt < 3) {
+          sleep(10);
+          return recoverStaleLock(attempt + 1);
+        }
+        error.retirementAttempts = attempt;
+        error.message += `; stale lock retirement failed after ${attempt} attempts: ${lockPath}`;
+      }
+    }
+    throw error;
   }
 }
 
@@ -53,8 +89,9 @@ function lock() {
   for (let i = 0; i < 30; i += 1) {
     try {
       mkdirSync(lockPath);
-      heldLockNonce = randomUUID();
-      writeFileSync(lockOwnerPath, `${JSON.stringify({ pid: process.pid, nonce: heldLockNonce, created_at: now() })}\n`, "utf8");
+      const nonce = randomUUID();
+      writeFileSync(lockOwnerPath, `${JSON.stringify({ pid: process.pid, nonce, created_at: now() })}\n`, { encoding: "utf8", flag: "wx" });
+      heldLockNonce = nonce;
       return;
     } catch (error) {
       if (error.code !== "EEXIST") throw error;
