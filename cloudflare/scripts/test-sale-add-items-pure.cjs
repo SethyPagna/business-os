@@ -40,13 +40,22 @@ const ts = require('typescript')
 const assert = require('assert')
 const Database = require('better-sqlite3')
 
+const compiledModules = new Map()
 function compile(file, stubs = {}) {
+  file = path.posix.normalize(file)
+  if (compiledModules.has(file)) return compiledModules.get(file).exports
   const sourcePath = path.join(__dirname, '..', 'src', 'lib', file)
   const output = ts.transpileModule(fs.readFileSync(sourcePath, 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
   }).outputText
   const moduleObj = { exports: {} }
-  const localRequire = (request) => Object.prototype.hasOwnProperty.call(stubs, request) ? stubs[request] : require(request)
+  compiledModules.set(file, moduleObj)
+  const localRequire = (request) => {
+    if (Object.prototype.hasOwnProperty.call(stubs, request)) return stubs[request]
+    if (!request.startsWith('.')) return require(request)
+    const resolved = path.posix.join(path.posix.dirname(file), request)
+    return compile(resolved.endsWith('.ts') ? resolved : `${resolved}.ts`)
+  }
   new Function('exports', 'require', 'module', output)(moduleObj.exports, localRequire, moduleObj)
   return moduleObj.exports
 }
@@ -674,3 +683,67 @@ console.log('PASS 8b -- an unlotted oversell aborts on branch_stock itself, it i
 console.log('PASS 9 -- route, applier and permission-action wiring are all in place')
 
 console.log('\nAll sale add-items checks passed.')
+
+async function loadedLifecycleContract() {
+  assert.strictEqual(typeof subject.buildOperationAllocationStatements, 'function', 'the actual atomic allocation writer is loaded')
+  for (const deducted of [true, false]) {
+    const { sqlite, apply } = setup()
+    const lines = allocateNewSaleLines([LINE(11)], lotsFor(), 'completed')
+    if (!deducted) lines[0].heldUnits = 0
+    sqlite.exec("CREATE TABLE sale_mutation_members(operation_id TEXT,entity_kind TEXT,ordinal INTEGER,entity_id INTEGER); INSERT INTO sale_mutation_members VALUES('sales-allocations','sale_item',0,700)")
+    apply(subject.buildOperationAllocationStatements(lines, 'sales-allocations', 'released-stamp'))
+    assert.deepStrictEqual(sqlite.prepare('SELECT sale_item_id,batch_id,branch_id,quantity,released_quantity,released_at FROM sale_item_batch_allocations ORDER BY batch_id').all(), [
+      { sale_item_id: 700, batch_id: 501, branch_id: 1, quantity: 8, released_quantity: deducted ? 0 : 8, released_at: deducted ? null : 'released-stamp' },
+      { sale_item_id: 700, batch_id: 502, branch_id: 1, quantity: 3, released_quantity: deducted ? 0 : 3, released_at: deducted ? null : 'released-stamp' },
+    ], 'the in-batch writer allocates both actual lot takes to the operation member')
+    sqlite.close()
+  }
+  console.log('PASS 10a -- actual operation allocator persists multi-lot deducted and released quantities')
+  const lifecycle = compile('stockLifecycle.ts')
+  assert.strictEqual(lifecycle, compile('stockLifecycle.ts'), 'one cached helper defines the refusal class')
+  const { HTTPException } = require('hono/http-exception')
+  const { getDb } = compile('db.ts')
+  const { sqliteD1Call } = require('./harness/sqlite_d1_bindings.cjs')
+  for (const table of ['stock_disposition_sources', 'stock_funding_dependencies']) {
+    const sqlite = new Database(':memory:')
+    sqlite.exec(`CREATE TABLE ${table}(movement_id INTEGER,batch_id INTEGER,product_id INTEGER,branch_id INTEGER,supplier_id INTEGER);
+      INSERT INTO ${table} VALUES(701,501,100,1,11);
+      CREATE TABLE durable_marker(id INTEGER PRIMARY KEY,value TEXT); INSERT INTO durable_marker VALUES(1,'unchanged');`)
+    let batches = 0
+    const rawStatement = (text, values = []) => ({
+      bind: (...next) => rawStatement(text, next),
+      first: async () => sqliteD1Call(sqlite.prepare(text), 'get', values) ?? null,
+      all: async () => ({ results: sqliteD1Call(sqlite.prepare(text), 'all', values) }),
+      run: async () => ({ meta: { changes: sqliteD1Call(sqlite.prepare(text), 'run', values).changes } }),
+    })
+    const db = getDb({ DB: {
+      prepare: text => rawStatement(text),
+      batch: async () => { batches += 1; throw new Error('Unexpected lifecycle write batch') },
+    } })
+    const state = () => JSON.stringify([sqlite.prepare(`SELECT * FROM ${table}`).all(), sqlite.prepare('SELECT * FROM durable_marker').all()])
+    const before = state()
+    for (const scope of [{ productId: 100 }, { movementId: 701, batchId: 501, productId: 100, branchId: 1, supplierId: 11 }, { supplierIds: [12, 11] }, { allSources: true }]) {
+      let refusal
+      await assert.rejects(lifecycle.assertStockLifecycleMutable(db, scope), error => {
+        refusal = error
+        return error instanceof HTTPException && error.status === 409 && error.statusCode === 409 && error.code === 'stock_lifecycle_dependency'
+      })
+      const response = refusal.getResponse()
+      assert.strictEqual(response.status, 409)
+      assert.deepStrictEqual(await response.json(), { error: lifecycle.STOCK_LIFECYCLE_MESSAGE, code: 'stock_lifecycle_dependency' })
+      assert.deepStrictEqual(lifecycle.stockLifecycleRefusal(refusal), { error: lifecycle.STOCK_LIFECYCLE_MESSAGE, code: 'stock_lifecycle_dependency' })
+      assert.strictEqual(batches, 0)
+      assert.strictEqual(state(), before, 'a linked-source preflight preserves every durable row')
+    }
+    for (const scope of [{}, { productId: 101 }, { batchId: 502 }, { supplierIds: [12] }]) await lifecycle.assertStockLifecycleMutable(db, scope)
+    sqlite.exec(`DELETE FROM ${table}`)
+    await lifecycle.assertStockLifecycleMutable(db, { allSources: true })
+    sqlite.exec(`DROP TABLE ${table}`)
+    await lifecycle.assertStockLifecycleMutable(db, { productId: 100 })
+    assert.strictEqual(batches, 0)
+    sqlite.close()
+  }
+  assert.throws(() => compile('absent-sales-test-module.ts'), /ENOENT/, 'unknown local imports cannot become no-op modules')
+  console.log('PASS 10 -- cached actual lifecycle/db helpers preserve HTTP 409, durable rows and unrelated/empty positives')
+}
+loadedLifecycleContract().catch(error => { console.error(error); process.exitCode = 1 })
