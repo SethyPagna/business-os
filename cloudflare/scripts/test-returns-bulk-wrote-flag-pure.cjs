@@ -1,3 +1,4 @@
+const { sqliteD1Call } = require('./harness/sqlite_d1_bindings.cjs')
 // applyReturnBulkActionOutcome's `wrote` flag (R-telegram E1, 27 Sep 2026):
 // the route announces a grouped Returns status change to Telegram only when
 // `wrote` is true, so the flag must be true for exactly the call whose OWN
@@ -63,16 +64,16 @@ function fixture() {
       return { bind(...params) {
         return {
           text, params,
-          async first() { return sql.prepare(text).get(...params) || null },
-          async all() { return { results: sql.prepare(text).all(...params) } },
-          async run() { const result = sql.prepare(text).run(...params); return { meta: { changes: result.changes, last_row_id: Number(result.lastInsertRowid) } } },
+          async first() { return sqliteD1Call(sql.prepare(text), 'get', params) || null },
+          async all() { return { results: sqliteD1Call(sql.prepare(text), 'all', params) } },
+          async run() { const result = sqliteD1Call(sql.prepare(text), 'run', params); return { meta: { changes: result.changes, last_row_id: Number(result.lastInsertRowid) } } },
         }
       } }
     },
     async batch(statements) {
       if (beforeBatch) { const hook = beforeBatch; beforeBatch = null; await hook() }
       const results = sql.transaction(() => statements.map((statement) => {
-        const result = sql.prepare(statement.text).run(...statement.params)
+        const result = sqliteD1Call(sql.prepare(statement.text), 'run', statement.params)
         return { meta: { changes: result.changes, last_row_id: Number(result.lastInsertRowid) } }
       }))()
       commits += 1

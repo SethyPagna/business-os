@@ -1,3 +1,4 @@
+const { sqliteD1Call } = require('./harness/sqlite_d1_bindings.cjs')
 // Real SQLite regressions for POST /api/inventory/sessions' commit kernel.
 // These fixtures began red against the legacy receive path: batch metadata
 // survived a later stock failure, and a lost acknowledgement doubled stock.
@@ -62,10 +63,10 @@ function fixture() {
   let batchLength = 0
   const wrap = (text, params = []) => ({
     text, params,
-    async first() { return sql.prepare(text).get(...params) || null },
-    async all() { return { results: sql.prepare(text).all(...params) } },
+    async first() { return sqliteD1Call(sql.prepare(text), 'get', params) || null },
+    async all() { return { results: sqliteD1Call(sql.prepare(text), 'all', params) } },
     async run() {
-      const result = sql.prepare(text).run(...params)
+      const result = sqliteD1Call(sql.prepare(text), 'run', params)
       return { meta: { changes: result.changes, last_row_id: Number(result.lastInsertRowid) } }
     },
   })
@@ -80,7 +81,7 @@ function fixture() {
       throw new Error('injected failure after batch metadata')
     }
     let result
-    try { result = sql.prepare(statement.text).run(...statement.params) }
+    try { result = sqliteD1Call(sql.prepare(statement.text), 'run', statement.params) }
     catch (error) { if (process.env.STOCK_TEST_DEBUG) console.error('FAILED SQL', statement.text, statement.params); throw error }
     return { meta: { changes: result.changes, last_row_id: Number(result.lastInsertRowid) } }
   }))()

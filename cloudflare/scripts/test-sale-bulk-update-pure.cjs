@@ -1,3 +1,4 @@
+const { sqliteD1Call } = require('./harness/sqlite_d1_bindings.cjs')
 // Conditional bulk sale field updates through the real Hono routes and SQLite transactions.
 const fs = require('node:fs')
 const path = require('node:path')
@@ -61,13 +62,13 @@ function fixture() {
       return {bind(...params){
         return {
           text,params,
-          async first(){return sql.prepare(text).get(...params)||null},
-          async all(){return {results:sql.prepare(text).all(...params)}},
-          async run(){const r=sql.prepare(text).run(...params);return {meta:{changes:r.changes,last_row_id:Number(r.lastInsertRowid)}}},
+          async first(){return sqliteD1Call(sql.prepare(text), 'get', params)||null},
+          async all(){return {results:sqliteD1Call(sql.prepare(text), 'all', params)}},
+          async run(){const r=sqliteD1Call(sql.prepare(text), 'run', params);return {meta:{changes:r.changes,last_row_id:Number(r.lastInsertRowid)}}},
         }
       }}
     },
-    async batch(statements){if(beforeBatch){const fn=beforeBatch;beforeBatch=null;await fn()}return sql.transaction(()=>statements.map(s=>{const r=sql.prepare(s.text).run(...s.params);return {meta:{changes:r.changes,last_row_id:Number(r.lastInsertRowid)}}}))()}
+    async batch(statements){if(beforeBatch){const fn=beforeBatch;beforeBatch=null;await fn()}return sql.transaction(()=>statements.map(s=>{const r=sqliteD1Call(sql.prepare(s.text), 'run', s.params);return {meta:{changes:r.changes,last_row_id:Number(r.lastInsertRowid)}}}))()}
   }}
   const ctx={waitUntil(){},passThroughOnException(){}}
   const call=async(app,url,body,method='POST')=>{const response=await app.request(url,{method,headers:{'content-type':'application/json'},body:JSON.stringify(body)},env,ctx);return {status:response.status,body:await response.json()}}
