@@ -112,7 +112,7 @@ export function statsPresetRange(preset: StatsPresetKey, now?: Date): DateTimeRa
 /** Which legacy preset (if any) the current range equals. */
 export function activeStatsPreset(range: DateTimeRange, now?: Date): StatsPresetKey | null {
   // Custom partial-day ranges must not highlight a full-day preset.
-  if ((range.startTime && range.startTime !== '00:00') || (range.endTime && range.endTime !== '23:59')) return null
+  if ((range.startTime && range.startTime !== '00:00') || (range.endTime && range.endTime !== '23:59' && range.endTime !== '24:00')) return null
   // Match the common picker order. On dates such as April 30, 30d and month
   // are the same range; the first visible matching choice owns the highlight.
   for (const { id: preset } of STATS_PRESETS) {

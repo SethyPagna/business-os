@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { useId, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import AlertTriangle from 'lucide-react/dist/esm/icons/alert-triangle.js'
 import { useApp as useAppHook } from '../../app/AppContextCore.tsx'
@@ -27,6 +27,7 @@ const useApp = useAppHook as unknown as () => { t: (key: string) => string }
 export type UnsavedChangesPromptItem = { label: ReactNode; value: ReactNode }
 
 export default function UnsavedChangesPrompt({ guard, items }: { guard: CloseGuard; items?: UnsavedChangesPromptItem[] }) {
+  const titleId = useId()
   const { t } = useApp()
   const tr = (key: string, fallback: string): string => {
     const value = t(key)
@@ -39,6 +40,7 @@ export default function UnsavedChangesPrompt({ guard, items }: { guard: CloseGua
       className="modal-viewport-safe pointer-events-auto fixed inset-0 z-[1080] flex items-center justify-center overflow-y-auto bg-black/60 p-4"
       role="dialog"
       aria-modal="true"
+      aria-labelledby={titleId}
       // A React portal bubbles its events up the REACT tree, not the DOM
       // tree. Several hosts (ReceiveBatchModal, TransferModal, ...) put
       // `onClick={close}` on their backdrop, so without this every click
@@ -54,7 +56,7 @@ export default function UnsavedChangesPrompt({ guard, items }: { guard: CloseGua
             {/* leading-relaxed, not the default tight line box: Khmer
                 ascenders/descenders (ុ ់ ៍) are clipped by a line box sized
                 to Latin text. */}
-            <h2 className="text-base font-bold leading-relaxed text-gray-900 dark:text-white">
+            <h2 id={titleId} className="text-base font-bold leading-relaxed text-gray-900 dark:text-white">
               {tr('unsaved_changes_title', 'Discard unsaved changes?')}
             </h2>
           </div>

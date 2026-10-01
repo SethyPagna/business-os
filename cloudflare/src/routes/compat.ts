@@ -18,7 +18,7 @@ import { getGoogleLoginPublicConfig } from '../lib/googleOauth'
 import { CUSTOMER_REFUND_JOIN, getSalesTotals, getSalesTotalsAndPeriodSeries, identifiedCustomerExpr, reportCustomerNameExpr, netRefundExpr, netSaleExpr, previousPeriodFilters, recognizedExpr, shiftWindowBound, shiftWindowWhere } from '../lib/salesAnalytics'
 import { getFamilyStockAlertPage, getFamilyStockStats, type FamilyStockAlertState } from '../lib/familyStockStats'
 import { loadLowStockConfig } from '../lib/lowStockSettings'
-import { businessToday, localDateAtOrAfter, localDateAtOrBefore, localDateRangeClause, localHourExpr, localTimeRangeClause } from '../lib/businessDateWindow'
+import { localRangeClockError, isLocalRangeClock, businessToday, localDateAtOrAfter, localDateAtOrBefore, localDateRangeClause, localHourExpr, localTimeRangeClause } from '../lib/businessDateWindow'
 import { continuousReadWindowSql, parseContinuousReadWindow } from '../lib/continuousReadWindow'
 import { actorSnapshot } from '../lib/actorSnapshot'
 import { secretEncryptionStatus } from '../lib/secretCrypto'
@@ -1232,6 +1232,8 @@ app.get('/transfers', async (c) => {
   }
 
   const query = c.req.query()
+  const clockError = localRangeClockError(query.startTime, query.endTime)
+  if (clockError) return c.json({ code: 'invalid_time_range', error: clockError }, 400)
   let continuousWindow
   try { continuousWindow = parseContinuousReadWindow(query) } catch (error) {
     return c.json({ error: (error as Error).message }, 400)
@@ -1270,10 +1272,9 @@ app.get('/transfers', async (c) => {
   // bound above -- same "date and time range" picker/route pattern
   // sales.ts's appendLocalTimeRange already uses. Both start/end must be
   // present and valid to take effect.
-  const LOCAL_TIME_RE = /^(?:[01]\d|2[0-3]):[0-5]\d$/
   const startTime = String(query.startTime || '').trim()
   const endTime = String(query.endTime || '').trim()
-  if (LOCAL_TIME_RE.test(startTime) && LOCAL_TIME_RE.test(endTime)) {
+  if (isLocalRangeClock(startTime) && isLocalRangeClock(endTime, true)) {
     clauses.push(localTimeRangeClause('st.created_at'))
     bindings.startTime = startTime
     bindings.endTime = endTime

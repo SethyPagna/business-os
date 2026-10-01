@@ -504,7 +504,7 @@ export default function DateTimeRangePicker({
                 t={t} label={t('start_time') || 'Start time'} ariaLabel={t('start_time') || 'Start time'}
                 placeholder="HH:MM" advanceOnCommit={false} className="text-center tabular-nums" />
               <span className="text-[10px] font-semibold text-slate-400">24h</span>
-              <TimeEntryInput value={value.endTime} onChange={(next) => apply({ endTime: next })}
+              <TimeEntryInput allowEndOfDay value={value.endTime} onChange={(next) => apply({ endTime: next })}
                 t={t} label={t('end_time') || 'End time'} ariaLabel={t('end_time') || 'End time'}
                 placeholder="HH:MM" advanceOnCommit={false} className="text-center tabular-nums" />
             </div>
