@@ -19,7 +19,7 @@ type Receipt = { actor_id: number; request_digest: string; request_json: string;
 type Header = { id: number; supplier_id: number | null; branch_id: number | null; total_amount_usd: number; amount_paid_usd: number; outstanding_balance_usd: number; status: string; source_branch: string; legacy_id: number; source_file: string; source_row: number }
 type Statement = { sql: string; params?: Record<string,unknown> }
 const headerSql = `SELECT id,supplier_id,branch_id,total_amount_usd,amount_paid_usd,outstanding_balance_usd,status,source_branch,legacy_id,source_file,source_row FROM supplier_invoices`
-const physicalSql = `SELECT pb.variant_product_id AS product_id,pb.supplier_id,pb.received_branch_id AS branch_id,pb.received_quantity,pb.received_cost_usd,pb.is_active AS batch_active,
+export const stockFundingPhysicalSql = `SELECT pb.variant_product_id AS product_id,pb.supplier_id,pb.received_branch_id AS branch_id,pb.received_quantity,pb.received_cost_usd,pb.is_active AS batch_active,
  im.id AS movement_id,im.batch_id,im.product_id AS movement_product,im.branch_id AS movement_branch,im.quantity,im.free_quantity,im.total_cost_usd,im.total_cost_khr,im.movement_type,im.reference_id,
  p.is_active AS product_active,b.is_active AS branch_active,
  (SELECT COUNT(*) FROM inventory_movements x WHERE x.batch_id=pb.id AND x.movement_type IN ('add','in')) AS receipt_count
@@ -36,7 +36,7 @@ const ambiguousInvoiceSql = `SELECT id FROM supplier_invoices WHERE (supplier_id
 async function refuseAmbiguousNativeSource(db: D1Compat, source: {invoice_id:number|null;supplier_id:number;branch_id:number}) {
   if (source.invoice_id === null && await db.prepare(ambiguousInvoiceSql).get({supplier:source.supplier_id,branch:source.branch_id})) return refuse('funding_explicit_invoice_mapping_required')
 }
-async function currentActor(db: D1Compat, actor: SessionUser, cash: boolean, read = false) {
+export async function currentFundingActor(db: D1Compat, actor: SessionUser, cash: boolean, read = false) {
   const u = await db.prepare(`SELECT u.id,u.username,u.name,u.permissions,u.role_id,u.is_active,u.deleted_at,r.code AS role_code,r.permissions AS role_permissions FROM users u LEFT JOIN roles r ON r.id=u.role_id WHERE u.id=@actor`).get<SessionUser & { deleted_at: string | null }>({ actor:actor.id })
   if (!u || u.is_active !== 1 || u.deleted_at || getActionTier(u,'inventory',read ? 'view' : 'adjust') !== 'full' || getActionTier(u,'contacts',read ? 'view' : 'edit') !== 'full' || !canViewAcquisitionCosts(u) || (!read && !canEditAcquisitionCosts(u))) return refuse('funding_permission_denied',403)
   if (cash && getActionTier(u,'fees','add') !== 'full') return refuse('funding_cash_permission_denied',403)
@@ -62,7 +62,7 @@ async function checkedHeader(db: D1Compat, invoice: number) {
   if (opening && opening.header_json !== JSON.stringify(h)) return refuse('funding_invoice_preimage_changed')
   return { h,opening }
 }
-export async function commitStockFunding(env: { DB: D1Database; IMPORT_DB?: D1Database }, actor: SessionUser, input: unknown) {
+export async function planStockFunding(env: { DB: D1Database; IMPORT_DB?: D1Database }, actor: SessionUser, input: unknown, joint?: { acceptedAmount4?: number; acceptedClaimId?: string }) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) return refuse('invalid_request',400)
   const raw = input as Record<string,unknown>
   const allowed = ['kind','source_id','movement_id','batch_id','product_id','branch_id','supplier_id','quantity','free_quantity','gross_usd','opening_paid_usd','opening_debt_usd','reconciliation_proof','invoice_id','amount_usd','claim_id','proof','fee_id','cash_method','cash_reference','cash_recorded_at','expected_generation','client_request_id']
@@ -91,20 +91,21 @@ export async function commitStockFunding(env: { DB: D1Database; IMPORT_DB?: D1Da
       if (amount4 <= 0) return refuse('invalid_amount',400)
     } else if (raw.amount_usd !== undefined) return refuse('claim_amount_is_immutable',400)
   } catch(error) { if (error instanceof StockFundingError) throw error; return refuse('unsupported_quantity_or_money_precision',400) }
-  const claim = kind === 'pending' || kind === 'accept' || kind === 'cancel' ? text(raw.claim_id,120) : null
+  let claim = kind === 'pending' || kind === 'accept' || kind === 'cancel' ? text(raw.claim_id,120) : null
   const feeId = shipping ? id(raw.fee_id) : null
   if ((claim === null && raw.claim_id !== undefined) || (!shipping && raw.fee_id !== undefined) || (!cash && ['cash_method','cash_reference','cash_recorded_at'].some(key=>raw[key] !== undefined))) return refuse('unsupported_transition_field',400)
   const cashMethod = cash ? raw.cash_method : null, cashReference = cash ? text(raw.cash_reference,120) : null, cashAt = cash ? text(raw.cash_recorded_at,40) : null
   if (cash && (cashMethod !== 'cash' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(cashAt!) || !Number.isFinite(Date.parse(cashAt!)) || new Date(cashAt!).toISOString() !== cashAt || Date.parse(cashAt!) > Date.now())) return refuse('unsupported_or_invalid_cash_proof',400)
   const requestJson = JSON.stringify({ kind,sourceId,generation,opening,amount4,claim,feeId,proof,cashMethod,cashReference,cashAt })
-  const digest = await feeRequestDigest(requestJson), db = getDb(env), current = await currentActor(db,actor,cash || shipping)
+  const digest = await feeRequestDigest(requestJson), db = getDb(env), current = await currentFundingActor(db,actor,cash || shipping)
   const cached = await receipt(db,request)
-  if (cached) return replay(cached,actor.id,digest,requestJson)
+  if (cached) return { replay:replay(cached,actor.id,digest,requestJson) }
   const stored = await db.prepare('SELECT * FROM stock_funding_sources WHERE id=@source').get<Source>({source:sourceId})
   if ((admit && stored) || (!admit && !stored)) return refuse('funding_source_state_conflict')
   const source = (opening || stored)!
+  if (!joint && !admit && await db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='stock_valuation_sources'").get() && await db.prepare('SELECT source_id FROM stock_valuation_sources WHERE source_id=@source').get({source:sourceId})) return refuse('funding_joint_valuation_required')
   await refuseAmbiguousNativeSource(db,source)
-  const physical = await db.prepare(physicalSql).get<Record<string,unknown>>({batch:source.batch_id,movement:source.movement_id})
+  const physical = await db.prepare(stockFundingPhysicalSql).get<Record<string,unknown>>({batch:source.batch_id,movement:source.movement_id})
   if (!physical || physical.product_id !== source.product_id || physical.movement_product !== source.product_id || physical.supplier_id !== source.supplier_id || physical.branch_id !== source.branch_id || physical.movement_branch !== source.branch_id || physical.batch_active !== 1 || physical.product_active !== 1 || physical.branch_active !== 1 || physical.receipt_count !== 1 || !['add','in'].includes(String(physical.movement_type))) return refuse('funding_source_identity_or_shared_receipt')
   try {
     if (quantityDecimal(physical.quantity) !== source.quantity || quantityDecimal(physical.received_quantity) !== source.quantity || quantityDecimal(physical.free_quantity,true) !== source.free_quantity || exactMoney4(physical.total_cost_usd) !== source.gross4 || exactMoney4(physical.received_cost_usd) !== source.gross4) return refuse('funding_source_preimage_changed')
@@ -120,7 +121,8 @@ export async function commitStockFunding(env: { DB: D1Database; IMPORT_DB?: D1Da
   if (kind === 'accept' || kind === 'cancel') {
     const c = await db.prepare('SELECT amount4 FROM stock_funding_claims WHERE id=@claim AND source_id=@source').get<{amount4:number}>({claim,source:sourceId})
     if (!c || await db.prepare("SELECT id FROM stock_funding_events WHERE claim_id=@claim AND kind IN ('accept','cancel')").get({claim})) return refuse('funding_claim_not_pending')
-    amount4 = c.amount4
+    amount4 = joint?.acceptedAmount4 ?? c.amount4
+    if (joint && (!Number.isSafeInteger(amount4) || amount4<=0 || amount4>c.amount4)) return refuse('funding_claim_amount_invalid')
   }
   let next = state
   try { if (!admit) next = fundingTransition(state,kind,amount4) } catch(error) { return refuse(error instanceof Error ? error.message : 'funding_transition_conflict') }
@@ -140,6 +142,7 @@ export async function commitStockFunding(env: { DB: D1Database; IMPORT_DB?: D1Da
     try { actualFee4 = fee ? exactMoney4(fee.amount_usd) : -1 } catch { return refuse('shipping_actual_fee_proof_required') }
     if (!fee || fee.branch_id !== source.branch_id || fee.created_by !== actor.id || fee.amount_khr !== 0 || actualFee4 !== amount4) return refuse('shipping_actual_fee_proof_required')
   }
+  if (joint && kind==='accept') claim=joint.acceptedClaimId!
   const eventId = cash ? `cash-${await feeRequestDigest(`${cashMethod}:${cashReference}`)}` : crypto.randomUUID(), nextGeneration = admit ? 0 : generation+1, at = new Date().toISOString()
   const response = { funding_version:2,source_id:sourceId,event_id:eventId,generation:nextGeneration,kind,gross4:next.gross4,paid4:next.paid4,debt4:next.debt4,credit4:next.credit4,asset4:next.asset4,cash_in4:next.cashIn4,cash_out4:next.cashOut4,shipping4:next.shipping4,claim_id:claim,fee_id:feeId }
   const responseJson = JSON.stringify(response)
@@ -161,6 +164,7 @@ export async function commitStockFunding(env: { DB: D1Database; IMPORT_DB?: D1Da
     if (invoiceOpening) statements.push({sql:`INSERT INTO stock_funding_invoice_openings(invoice_id,supplier_id,branch_id,gross4,paid4,debt4,header_json,proof) VALUES(@invoice,@supplier,@branch,@invoiceGross,@invoicePaid,@invoiceDebt,@headerJson,@sourceProof)`,params})
     statements.push({sql:`INSERT INTO stock_funding_sources(id,movement_id,batch_id,product_id,branch_id,supplier_id,quantity,free_quantity,gross4,opening_paid4,opening_debt4,reconciliation_proof,invoice_id,actor_id,source_json) VALUES(@source,@movement,@batch,@product,@branch,@supplier,@qty,@free,@gross,@paid,@debt,@sourceProof,@invoice,@actor,@sourceJson)`,params})
   }
+  if (joint && kind==='accept') statements.push({sql:'INSERT INTO stock_funding_claims(id,source_id,amount4,proof) VALUES(@claim,@source,@amount,@proof)',params})
   if (kind === 'pending') statements.push({sql:'INSERT INTO stock_funding_claims(id,source_id,amount4,proof) VALUES(@claim,@source,@amount,@proof)',params})
   statements.push({sql:`INSERT INTO stock_funding_events(id,source_id,generation,kind,amount4,claim_id,fee_id,gross4,paid4,debt4,credit4,asset4,cash_in4,cash_out4,shipping4,proof,cash_method,cash_reference,cash_recorded_at,actor_id,occurred_at) VALUES(@event,@source,@nextGeneration,@kind,@amount,@claim,@fee,@gross,@nextPaid,@nextDebt,@nextCredit,@nextAsset,@cashIn,@cashOut,@shipping,@proof,@cashMethod,@cashReference,@cashAt,@actor,@at)`,params},
     {sql:`INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details,table_name,record_id,new_value) VALUES(@actor,@name,@kind,'stock_funding',@event,@responseJson,'stock_funding_events',@event,@responseJson)`,params},
@@ -172,18 +176,24 @@ export async function commitStockFunding(env: { DB: D1Database; IMPORT_DB?: D1Da
   check(`${request}:post`,terminal)
   statements.push({sql:'DELETE FROM stock_funding_guards WHERE token IN (@pre,@post)',params:{pre:`${request}:pre`,post:`${request}:post`}},
     {sql:`SELECT CASE WHEN NOT EXISTS(SELECT 1 FROM stock_funding_guards WHERE token IN (@pre,@post)) THEN 1 ELSE json_extract('[1]','$[funding_guard_cleanup]') END`,params:{pre:`${request}:pre`,post:`${request}:post`}})
-  try { await ordinaryBusinessBatch(db,statements) }
+  return { statements,response,source:{...source,source_json:sourceJson},db,current,request,digest,requestJson,cash:cash||shipping }
+}
+export async function commitStockFunding(env: { DB: D1Database; IMPORT_DB?: D1Database }, actor: SessionUser, input: unknown) {
+  const plan = await planStockFunding(env,actor,input)
+  if ('replay' in plan) return plan.replay
+  try { await ordinaryBusinessBatch(plan.db,plan.statements) }
   catch {
-    await currentActor(db,actor,cash || shipping)
-    const saved = await receipt(db,request)
-    if (saved) return replay(saved,actor.id,digest,requestJson)
+    await currentFundingActor(plan.db,actor,plan.cash)
+    const saved = await receipt(plan.db,plan.request)
+    if (saved) return replay(saved,actor.id,plan.digest,plan.requestJson)
     return refuse('funding_atomic_conflict')
   }
-  return { ...response,replayed:false }
+  return { ...plan.response,replayed:false }
 }
+
 export async function readStockFundingAp(env: { DB: D1Database; IMPORT_DB?: D1Database }, actor: SessionUser) {
   const db = getDb(env)
-  await currentActor(db,actor,false,true)
+  await currentFundingActor(db,actor,false,true)
   const invoices = await db.prepare(headerSql+' ORDER BY id').all<Header>()
   const sources = await db.prepare(`SELECT s.id,s.invoice_id,s.supplier_id,s.branch_id,s.gross4,s.opening_paid4,s.opening_debt4,e.paid4,e.debt4,e.credit4,e.asset4,e.cash_in4,e.cash_out4,e.shipping4 FROM stock_funding_sources s JOIN stock_funding_latest e ON e.source_id=s.id ORDER BY s.id`).all<Record<string,number|string|null>>()
   const rows: Record<string,unknown>[] = [], included = new Set<string>()
