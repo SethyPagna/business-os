@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { createRequire } from 'node:module'
 import { transformSync } from 'esbuild'
-import { statsPresetRange, activeStatsPreset } from '../src/components/shared/statsStripPresets.ts'
+import { statsPresetRange, activeStatsPreset, STATS_PRESETS } from '../src/components/shared/statsStripPresets.ts'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const read = (rel: string) => readFileSync(join(here, '..', rel), 'utf8')
@@ -519,11 +519,12 @@ test('preset buttons execute the shared date-only and timestamp range callbacks'
     assert.equal(continuousTree.props.children[0].props.children[1].props.continuous, true, 'explicit continuous semantics reach the actual picker')
     const rail = tree.props.children[1]
     const buttons = rail.props.children
-    assert.equal(buttons.length, 8)
-    buttons[1].props.onClick()
-    assert.deepEqual(changed, showTime ? statsPresetRange('today') : { ...statsPresetRange('today'), startTime: '', endTime: '' })
-    buttons[0].props.onClick()
-    assert.deepEqual(changed, statsPresetRange('all'))
+    assert.deepEqual(buttons.map((button: { key: string }) => button.key), STATS_PRESETS.map(({ id }) => id))
+    for (const [index, { id }] of STATS_PRESETS.entries()) {
+      buttons[index].props.onClick()
+      const expected = statsPresetRange(id)
+      assert.deepEqual(changed, showTime ? expected : { ...expected, startTime: '', endTime: '' }, `${id} applies canonical date/time endpoints`)
+    }
   }
 })
 

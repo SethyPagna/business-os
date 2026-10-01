@@ -7156,5 +7156,17 @@
   "movement_revert_stock_set_redo": "Redo the entire stock correction {action} ({count} lines)?",
   "movement_revert_stock_session_undo": "Undo the entire stock session {action} ({count} lines)?",
   "movement_revert_stock_session_redo": "Redo the entire stock session {action} ({count} lines)?",
-  "movement_revert_history_required": "This action has too many stock changes to preview here. Use History Undo/Redo. Nothing was changed."
+  "movement_revert_history_required": "This action has too many stock changes to preview here. Use History Undo/Redo. Nothing was changed.",
+  "resolve_partial_refusal_permission": "You do not have permission to finish this merge.",
+  "resolve_partial_refusal_retry": "Stock changed while merging. Review the remaining records again.",
+  "resolve_partial_refusal_too_large": "This product has too many linked records for one safe merge.",
+  "resolve_partial_refusal_changed": "These records changed. Review the remaining records again.",
+  "resolve_partial_refusal_budget": "Product resolving is unavailable on this deployment.",
+  "last_month": "Last month",
+  "this_quarter": "This quarter",
+  "last_quarter": "Last quarter",
+  "last_6_months": "Last 6 months",
+  "this_half_year": "This half-year",
+  "last_half_year": "Last half-year",
+  "last_year": "Last year"
 }
