@@ -11,7 +11,7 @@ and their new status, and each item here names the Part that last changed it (e.
 |---|---|
 | RC2-HOTFIX | [x] Live; both real merge actions and health checks verified. |
 | RC3-UI and DATE | [~] UI and date/time pickers passed their release gates. Not live; RC3 deploys first after 20:00 Cambodia and a fresh closed-trading check. |
-| STOCK-RETURN | [~] Partial quantity returns and supplier compensation are being built and independently challenged. Whole-suite failures remain; not ready or live. |
+| STOCK-RETURN | [~] Reset and receipt fixes verified; partial returns, compensation and recovery still being built. Whole-suite failures remain; not ready or live. |
 
 ### Deploy checkpoints (26 Sep) — each deploys as soon as it is green; nothing waits for the next
 | Checkpoint | Contents | State |
