@@ -28,6 +28,7 @@ const realLibraries = new Set(['movementCostSnapshot', 'operationWriteReadiness'
 realLibraries.add('moneyPrecision')
 realLibraries.add('acquisitionCostAccess')
 realLibraries.add('businessMaintenanceGuard')
+realLibraries.add('stockLifecycle')
 function load(relative) {
   if (modules.has(relative)) return modules.get(relative)
   const module = { exports: {} }
@@ -36,7 +37,7 @@ function load(relative) {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
   }).outputText
   new Function('exports', 'require', 'module', code)(module.exports, (id) => {
-    if (id === 'hono') return require('hono')
+    if (id === 'hono' || id === 'hono/http-exception') return require(id)
     const name = id.split('/').at(-1)
     if (name === 'db') return { ...load('lib/db.ts'), getDb: wrapDb }
     if (name === 'auth') return { requireAuth: async (c, next) => { c.set('user', user); return next() } }

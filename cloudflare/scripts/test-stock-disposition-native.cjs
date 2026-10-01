@@ -46,6 +46,7 @@ function fixture(hooks={},lot={ quantity:4,free:1,cost:9.9999,gross4:99999 }) {
   assert.equal(db.limits.exprDepth,100); assert.equal(db.limits.variableNumber,100)
   db.exec(`INSERT INTO branches(id,name,is_active,is_default) VALUES(1,'Shop',1,1);
     INSERT INTO users(id,username,name,password,permissions,is_active) VALUES(71,'kernel_writer','Kernel Writer','admin123','{"inventory":true,"product_cost_edit":true,"product_cost_view":true,"fees":true}',1),(72,'other_writer','Other Writer','admin123','{"inventory":true,"product_cost_edit":true,"product_cost_view":true,"fees":true}',1);
+    INSERT INTO suppliers(id,name) VALUES(77,'Fixture supplier');
     INSERT INTO products(id,name,sku,stock_quantity,is_active) VALUES(10,'Basis fixture','BASIS',${lot.quantity},1);
     INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at,is_active,batch_number,supplier_id,payment_status,received_quantity,received_cost_usd,received_branch_id,unit_cost_usd)
     VALUES(500,10,'basis-lot','BASIS','2026-10-01',1,1,77,'credit',${lot.quantity},${lot.cost},1,2.5);

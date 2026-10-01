@@ -56,7 +56,15 @@ try {
     throw err
   }
 }
-const kernel = require(path.join(tmpDir, 'stockRevert.js'))
+const dependencyPath = path.join(tmpDir, 'node_modules')
+fs.symlinkSync(path.join(cloudflareRoot, 'node_modules'), dependencyPath, process.platform === 'win32' ? 'junction' : 'dir')
+let kernel
+try {
+  kernel = require(path.join(tmpDir, 'stockRevert.js'))
+} finally {
+  if (process.platform === 'win32') fs.rmdirSync(dependencyPath)
+  else fs.unlinkSync(dependencyPath)
+}
 ok(typeof kernel.applyMovementRevert === 'function', 'kernel compiled and exports applyMovementRevert')
 
 // ---- pure decision --------------------------------------------------------
