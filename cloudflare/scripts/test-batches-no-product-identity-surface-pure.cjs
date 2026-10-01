@@ -1,3 +1,4 @@
+const { sqliteD1Call } = require('./harness/sqlite_d1_bindings.cjs')
 // P10-5 writer 5 (Sep 16 2026 owner ruling): "batches.ts identity check
 // aligned to the same fold rule (read it first; if it only validates and
 // never creates, pin that with a test and say so)."
@@ -79,10 +80,10 @@ function fixture() {
   `)
   const wrap = (text, params = []) => ({
     text, params,
-    async first() { return sql.prepare(text).get(...params) || null },
-    async all() { return { results: sql.prepare(text).all(...params) } },
+    async first() { return sqliteD1Call(sql.prepare(text), 'get', params) || null },
+    async all() { return { results: sqliteD1Call(sql.prepare(text), 'all', params) } },
     async run() {
-      const result = sql.prepare(text).run(...params)
+      const result = sqliteD1Call(sql.prepare(text), 'run', params)
       return { meta: { changes: result.changes, last_row_id: Number(result.lastInsertRowid) } }
     },
   })
@@ -94,7 +95,7 @@ function fixture() {
       },
       async batch(statements) {
         return sql.transaction(() => statements.map((statement) => {
-          const result = sql.prepare(statement.text ?? statement.sql).run(...(statement.params ? (Array.isArray(statement.params) ? statement.params : Object.values(statement.params)) : []))
+          const result = sqliteD1Call(sql.prepare(statement.text ?? statement.sql), 'run', (statement.params ? (Array.isArray(statement.params) ? statement.params : Object.values(statement.params)) : []))
           return { meta: { changes: result.changes, last_row_id: Number(result.lastInsertRowid) } }
         }))()
       },
