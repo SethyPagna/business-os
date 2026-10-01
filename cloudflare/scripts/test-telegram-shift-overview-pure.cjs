@@ -311,11 +311,16 @@ async function main() {
   const reportsSource = fs.readFileSync(path.join(root, 'src', 'routes', 'reports.ts'), 'utf8')
   const ast = ts.createSourceFile('reports.ts', reportsSource, ts.ScriptTarget.Latest, true)
   const fn = (name) => ast.statements.find((node) => ts.isFunctionDeclaration(node) && node.name?.text === name).getText(ast)
-  const compiled = ts.transpileModule([fn('parseFilters'), fn('isClock'), fn('parseViewFilters'), fn('reportRecordRange')].join('\n') + '\nexports.parseViewFilters = parseViewFilters; exports.reportRecordRange = reportRecordRange',
+  const compiled = ts.transpileModule([fn('parseFilters'), fn('parseViewFilters'), fn('reportRecordRange')].join('\n') + '\nexports.parseViewFilters = parseViewFilters; exports.reportRecordRange = reportRecordRange',
     { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText
   const reports = { exports: {} }
-  new Function('exports', 'module', 'shiftWindowBound', 'localDateAtOrAfter', 'localDateAtOrBefore', compiled)(
-    reports.exports, reports, salesAnalyticsReal.shiftWindowBound, businessDateWindow.localDateAtOrAfter, businessDateWindow.localDateAtOrBefore)
+  new Function('exports', 'module', 'shiftWindowBound', 'localDateAtOrAfter', 'localDateAtOrBefore', 'localRangeClockError', 'isLocalRangeClock', compiled)(
+    reports.exports, reports, salesAnalyticsReal.shiftWindowBound, businessDateWindow.localDateAtOrAfter, businessDateWindow.localDateAtOrBefore, businessDateWindow.localRangeClockError, businessDateWindow.isLocalRangeClock)
+  assert.throws(() => reports.exports.parseViewFilters({ startTime: '24:00', endTime: '24:00' }),
+    { name: 'RangeError', message: 'Use valid 24-hour HH:MM times; 24:00 is allowed only as the range end.' })
+  assert.deepEqual(reports.exports.parseViewFilters({ startTime: '00:00', endTime: '24:00' }),
+    { startDate: null, endDate: null, branchId: null, startTime: '00:00', endTime: '24:00' })
+  check('actual reports parser rejects start 24:00 and accepts end 24:00', true)
   const routeFilters = reports.exports.parseViewFilters({ startDate: '2026-09-23', endDate: '2026-09-23', branchId: '1' })
   check('parseViewFilters of the same query is the same filter set (branch id as the query string carries it)',
     JSON.stringify({ ...routeFilters, branchId: Number(routeFilters.branchId) }) === JSON.stringify(overviewFilters), JSON.stringify(routeFilters))
