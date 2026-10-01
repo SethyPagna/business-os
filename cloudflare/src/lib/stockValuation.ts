@@ -92,6 +92,15 @@ function planPhysicalSegments(segments: ValuationSegment[], raw: Record<string, 
         split.child.reason = '';
     return [...segments.slice(0, index), ...(split.remainder ? [split.remainder] : []), split.child, ...segments.slice(index + 1)];
 }
+function buildFundingRequest(raw:Record<string,unknown>,kind:string,sourceId:string,generation:number,request:string,agreement:string|null) {
+  const common={kind,source_id:sourceId,expected_generation:generation,client_request_id:request}
+  if(kind==='admit') return {...(raw.funding as Record<string,unknown>),...common}
+  const proof={...common,proof:raw.proof}
+  if(kind==='pending') return {...proof,claim_id:agreement,amount_usd:raw.amount_usd}
+  if(kind==='accept') return {...proof,claim_id:agreement}
+  if(kind==='shipping') return {...proof,amount_usd:raw.amount_usd,fee_id:raw.fee_id}
+  return {...proof,amount_usd:raw.amount_usd,cash_method:raw.cash_method,cash_reference:raw.cash_reference,cash_recorded_at:raw.cash_recorded_at}
+}
 async function replay(db: D1Compat, actor: SessionUser, request: string, digest: string, requestJson: string) {
     const saved = await db.prepare('SELECT * FROM stock_valuation_receipts WHERE request_id=@request').get<{
         actor_id: number;
@@ -216,7 +225,7 @@ export async function commitStockValuation(env: {
     }
     if (fundingKind) {
         const fundingRequest = `valuation-fund-${digest}`;
-        const fundingInput = kind === 'admit' ? { ...(raw.funding as Record<string, unknown>), kind, source_id: sourceId, expected_generation: generation, client_request_id: fundingRequest } : { kind, source_id: sourceId, expected_generation: generation, client_request_id: fundingRequest, proof: raw.proof, ...(kind === 'pending' || kind === 'accept' ? { claim_id: agreement, ...(kind === 'pending' ? { amount_usd: raw.amount_usd } : {}) } : { amount_usd: raw.amount_usd, ...(['refund', 'payment'].includes(kind) ? { cash_method: raw.cash_method, cash_reference: raw.cash_reference, cash_recorded_at: raw.cash_recorded_at } : {}), ...(kind === 'shipping' ? { fee_id: raw.fee_id } : {}) }) };
+        const fundingInput=buildFundingRequest(raw,kind,sourceId,generation,fundingRequest,agreement);
         plan = await planStockFunding(env, actor, fundingInput, kind === 'accept' ? { acceptedAmount4: amount4, acceptedClaimId: `${agreement}:${event}` } : {});
         if ('replay' in plan)
             return refuse('valuation_orphan_funding_receipt');

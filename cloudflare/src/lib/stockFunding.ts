@@ -99,7 +99,11 @@ export async function planStockFunding(env: { DB: D1Database; IMPORT_DB?: D1Data
   const requestJson = JSON.stringify({ kind,sourceId,generation,opening,amount4,claim,feeId,proof,cashMethod,cashReference,cashAt })
   const digest = await feeRequestDigest(requestJson), db = getDb(env), current = await currentFundingActor(db,actor,cash || shipping)
   const cached = await receipt(db,request)
-  if (cached) return { replay:replay(cached,actor.id,digest,requestJson) }
+  if (cached) {
+    const response=replay(cached,actor.id,digest,requestJson)
+    await currentFundingActor(db,actor,cash||shipping)
+    return {replay:response}
+  }
   const stored = await db.prepare('SELECT * FROM stock_funding_sources WHERE id=@source').get<Source>({source:sourceId})
   if ((admit && stored) || (!admit && !stored)) return refuse('funding_source_state_conflict')
   const source = (opening || stored)!
