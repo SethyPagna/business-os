@@ -1506,19 +1506,20 @@ assert.match(
 // branchSummary loader removed with the stat cards (see the note above).
 assert.match(
   branches,
-  /withLoaderTimeout\(\s*\(\) => branchApi\.getTransfers\(\{[\s\S]*?startDate:[\s\S]*?endDate:[\s\S]*?\}\),\s*'Branch transfers',\s*BRANCH_TRANSFERS_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => branchApi\.getTransfers\(\{\s*\.\.\.continuousRangeParams\(branchDateRange\),[\s\S]*?\}\),\s*'Branch transfers',\s*BRANCH_TRANSFERS_TIMEOUT_MS,\s*\)/,
   'branch transfer history should timeout slow reads',
 )
 assert.match(
   branches,
-  /const loadPromiseModeRef = useRef\(''\)/,
-  'branches should track the current in-flight load mode',
+  /const loadPromiseKeyRef = useRef\(''\)/,
+  'branches should track the complete in-flight filter key',
 )
 assert.match(
   branches,
-  /requestedMode !== 'transfers' \|\| loadPromiseModeRef\.current === 'transfers'/,
-  'branches should only reuse a base load when it already satisfies the requested transfer view',
+  /loadPromiseRef\.current && loadPromiseKeyRef\.current === requestedKey/,
+  'branches should reuse only an identical in-flight request',
 )
+assert.match(branches, /JSON\.stringify\(\[requestedMode, \.\.\.\(requestedMode === 'transfers' \? \[branchDateRange, transferFromFilter, transferToFilter, transferPage, transferPageSize\] : \[\]\)\]\)/)
 assert.match(
   branches,
   /withLoaderTimeout\(\s*\(\) => branchApi\.getBranchStock\(branchId, \{ page: 1, pageSize: 20, stockState: 'positive' \}\),\s*'Branch stock',\s*12000,\s*\)/,
