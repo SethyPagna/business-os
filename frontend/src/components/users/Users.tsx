@@ -19,7 +19,7 @@ import PortalMenu, { type PortalMenuItem } from '../shared/PortalMenu'
 import ActionHistoryBar from '../shared/ActionHistoryBar'
 import { fmtDate } from '../../utils/formatters'
 import { useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.tsx'
-import { PERMISSION_DEFS } from './permissionDefinitions'
+import { rolePermissionLabel } from './rolePermissionLabel.ts'
 import { ROLE_PRESETS } from './rolePresetDefaults'
 import { isAdminControlUser, normalizePermissionState, type PermissionValue } from '../../utils/permissions.ts'
 import { useIsPageActive } from '../shared/pageActivity'
@@ -859,7 +859,7 @@ export default function Users() {
 
   const getRolePermissions = (role: RoleRecord | null | undefined): string[] => {
     const value = normalizePermissionState(role?.permissions)
-    return Object.keys(value).filter((key) => value[key])
+    return Object.keys(value).filter((key) => value[key] && rolePermissionLabel(key, tr) !== null)
   }
 
   const getRolePermissionValue = (role: RoleRecord | null | undefined, key: string): PermissionValue => {
@@ -869,13 +869,12 @@ export default function Users() {
 
   const getPermissionSummary = (role: RoleRecord): string => {
     const value = normalizePermissionState(role?.permissions)
-    const keys = Object.keys(value).filter((key) => value[key])
+    const keys = Object.keys(value).filter((key) => value[key] && rolePermissionLabel(key, tr) !== null)
     if (!keys.length) return tr('no_permissions', 'No permissions')
     if (keys.includes('all')) return tr('full_access', 'Full access')
     return keys
       .map((key) => {
-        const perm = PERMISSION_DEFS.find((item) => item.key === key)
-        const label = tr(perm?.tKey || key, perm?.label || key)
+        const label = rolePermissionLabel(key, tr) || key
         return value[key] === 'review' ? `${label} (${tr('review_required', 'Partial Access')})` : value[key] === 'view' ? `${label} (${tr('view_only', 'View only')})` : label
       })
       .join(', ')
@@ -1429,7 +1428,7 @@ export default function Users() {
                       {permissionKeys.length === 0 ? <span className="text-xs italic text-gray-400">{tr('no_permissions', 'No permissions')}</span> : null}
                       {permissionKeys.map((key) => (
                         <span key={key} className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-600 dark:bg-gray-700 dark:text-gray-300">
-                          {PERMISSION_DEFS.find((item) => item.key === key)?.label || key}
+                          {rolePermissionLabel(key, tr)}
                           {getRolePermissionValue(role, key) === 'review' ? ` (${tr('review_required', 'Partial Access')})` : getRolePermissionValue(role, key) === 'view' ? ` (${tr('view_only', 'View only')})` : ''}
                         </span>
                       ))}
@@ -1662,7 +1661,7 @@ export default function Users() {
             <div>
               <label className="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">{tr('permissions', 'Permissions')}</label>
               <Suspense fallback={<div className="rounded-xl border border-gray-200 p-3 text-sm text-gray-500 dark:border-zinc-700 dark:text-gray-400">{tr('loading', 'Loading...')}</div>}>
-                <LazyPermissionEditor permissions={roleForm.permissions} onChange={(permissions) => setRoleForm((prev) => ({ ...prev, permissions }))} />
+                <LazyPermissionEditor permissions={roleForm.permissions} onChange={(permissions) => setRoleForm((prev) => ({ ...prev, permissions }))} t={t} />
               </Suspense>
             </div>
             <div className="rounded-xl bg-amber-50 p-3 text-xs text-amber-700 dark:bg-amber-900/20 dark:text-amber-300">
