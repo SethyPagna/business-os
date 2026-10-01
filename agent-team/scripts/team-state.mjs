@@ -198,7 +198,9 @@ function validateResult(value) {
 if (command === "status") {
   const state = load();
   const staleBefore = Date.now() - 2 * 60 * 60 * 1000;
-  process.stdout.write(`${JSON.stringify({ ...state, claims: state.claims.map((claim) => ({ ...claim, stale: Date.parse(claim.heartbeat_at) < staleBefore })) }, null, 2)}\n`);
+  const claims = state.claims.map((claim) => ({ ...claim, stale: Date.parse(claim.heartbeat_at) < staleBefore }));
+  const status = tokens.includes("--claims-only") ? { schemaVersion: state.schemaVersion, claims } : { ...state, claims };
+  process.stdout.write(`${JSON.stringify(status, null, 2)}\n`);
 } else if (command === "claim") {
   const task = arg("task"), agent = arg("agent"), mode = arg("mode"), resource = arg("resource") ? portableResource(arg("resource")) : undefined;
   const authorization = arg("authorization");
