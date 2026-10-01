@@ -4,7 +4,7 @@ import { fillOmittedReturnCosts } from '../lib/returnCostAccess'
 import { getDb } from '../lib/db'
 import { ordinaryBusinessMaintenanceGuard, runOrdinaryBusinessWrite } from '../lib/businessMaintenanceGuard'
 import { selectInChunks } from '../lib/sqlBinding'
-import { supplierReturnLots } from '../lib/supplierReturnGuard'
+import { supplierReturnLots, supplierReturnCosts, validateSupplierReturnMoney } from '../lib/supplierReturnGuard'
 import { localDateAtOrAfter, localDateAtOrBefore, localDateExpr } from '../lib/businessDateWindow'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit, changedFields } from '../lib/audit'
@@ -2348,6 +2348,11 @@ app.post('/supplier', async (c) => {
       return c.json({ error: 'A valid product, branch and selected received lot are required' }, 400)
     }
   }
+  try {
+    validateSupplierReturnMoney(body, body.items)
+  } catch (error) {
+    return c.json({ error: (error as Error).message }, 400)
+  }
 
   if (clientRequestId) {
     const existing = await db.prepare("SELECT id, return_number FROM returns WHERE client_request_id = ? AND client_request_id <> '' LIMIT 1").get<{ id: number; return_number: string }>([clientRequestId])
@@ -2373,17 +2378,34 @@ app.post('/supplier', async (c) => {
     }
   }
 
+  const supplierFifoLots = await supplierReturnLots(db, Number(body.supplier_id), body.items.map(item => ({
+    productId: item.product_id, branchId: Number(item.branch_id ?? body.branch_id),
+  })))
+  try {
+    const costs = supplierReturnCosts(body.items, body.branch_id, supplierFifoLots)
+    body.items = body.items.map((item, index) => ({ ...item, cost_price_usd: costs[index].usd, cost_price_khr: costs[index].khr }))
+  } catch (error) {
+    return c.json({ error: (error as Error).message }, 400)
+  }
   let totalCostUsd = 0
   let totalCostKhr = 0
   for (const item of body.items) {
     const qty = toNumber(item.quantity, 0)
-    totalCostUsd += qty * toNumber(item.cost_price_usd ?? item.unit_cost_usd, 0)
-    totalCostKhr += qty * toNumber(item.cost_price_khr ?? item.unit_cost_khr, 0)
+    const costUsd = qty * toNumber(item.cost_price_usd ?? item.unit_cost_usd, 0)
+    const costKhr = qty * toNumber(item.cost_price_khr ?? item.unit_cost_khr, 0)
+    totalCostUsd += item.batch_id === undefined ? costUsd : Number(costUsd.toFixed(2))
+    totalCostKhr += item.batch_id === undefined ? costKhr : Math.round(costKhr)
   }
+  if (body.items.every(item => item.batch_id !== undefined)) totalCostUsd = Number(totalCostUsd.toFixed(2))
+  if (!Number.isFinite(totalCostUsd) || !Number.isFinite(totalCostKhr) || totalCostKhr > Number.MAX_SAFE_INTEGER) return c.json({ error: 'Supplier return cost is outside the supported range' }, 400)
   const defaultCompensationUsd = ['refund', 'credit'].includes(settlement) ? totalCostUsd : 0
   const defaultCompensationKhr = ['refund', 'credit'].includes(settlement) ? totalCostKhr : 0
   const supplierCompensationUsd = toNumber(body.supplier_compensation_usd, defaultCompensationUsd)
   const supplierCompensationKhr = toNumber(body.supplier_compensation_khr, defaultCompensationKhr)
+  if (supplierCompensationUsd > totalCostUsd || supplierCompensationKhr > totalCostKhr
+    || (['replacement', 'writeoff'].includes(settlement) && (supplierCompensationUsd !== 0 || supplierCompensationKhr !== 0))) {
+    return c.json({ error: 'Supplier compensation must not exceed the allocated cost and must match the settlement' }, 400)
+  }
   const supplierLossUsd = Math.max(0, Number((totalCostUsd - supplierCompensationUsd).toFixed(2)))
   const supplierLossKhr = Math.max(0, Math.round(totalCostKhr - supplierCompensationKhr))
 
@@ -2455,11 +2477,6 @@ app.post('/supplier', async (c) => {
     // sale of a no-lot line, so a supplier return of a batch-tracked product
     // keeps branch_batch_stock in step with branch_stock instead of leaving the
     // lot ledger high (a product×branch lot drift). Fetched once for the return.
-    const supplierFifoLots = await supplierReturnLots(
-      db,
-      Number(body.supplier_id),
-      body.items.map((i) => ({ productId: Number(i.product_id), branchId: Number(i.branch_id || body.branch_id || 0) })),
-    )
     // Part-77 (oversell-clamp audit): validate availability BEFORE composing
     // the deduction — a supplier return can never send back more units than
     // the branch holds, and the old MAX(0, ...) clamp silently floored the
@@ -2544,11 +2561,12 @@ app.post('/supplier', async (c) => {
           const lot = lots.find((entry) => entry.batchId === take.batchId)
           if (lot) lot.available -= take.quantity
           statements.push({
-            sql: `SELECT CASE WHEN EXISTS(SELECT 1 FROM product_batches pb JOIN branch_batch_stock bbs ON bbs.batch_id=pb.id
+            sql: `SELECT CASE WHEN EXISTS(SELECT 1 FROM product_batches pb JOIN branch_batch_stock bbs ON bbs.batch_id=pb.id JOIN products p ON p.id=pb.variant_product_id
               WHERE pb.id=@batch_id AND pb.variant_product_id=@product_id AND pb.supplier_id=@supplier_id
-                AND pb.is_active=1 AND bbs.branch_id=@branch_id AND bbs.quantity>=@quantity)
+                AND pb.is_active=1 AND bbs.branch_id=@branch_id AND bbs.quantity>=@quantity
+                AND (CASE WHEN pb.received_quantity>0 AND pb.received_cost_usd IS NOT NULL THEN 1.0*pb.received_cost_usd/pb.received_quantity ELSE COALESCE(pb.unit_cost_usd,p.cost_price_usd,0) END)=@unit_cost_usd)
               THEN 1 ELSE json('supplier_return_lot_changed') END`,
-            params: { batch_id: take.batchId, product_id: item.product_id, supplier_id: body.supplier_id, branch_id: itemBranchId, quantity: take.quantity },
+            params: { batch_id: take.batchId, product_id: item.product_id, supplier_id: body.supplier_id, branch_id: itemBranchId, quantity: take.quantity, unit_cost_usd: lot!.unitCostUsd },
           })
           statements.push(decrementBatchStockStrictStatement(take.batchId, itemBranchId, take.quantity))
         }
