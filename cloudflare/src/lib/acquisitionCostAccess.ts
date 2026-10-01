@@ -134,7 +134,7 @@ export function projectAcquisitionCosts(value: unknown, user: PermissionUser, su
     if (typeof source.field === 'string' && (isAcquisitionCostKey(source.field) || isLifecycleAmount(source.field, lifecycle))) return { field: source.field, redacted: true }
     const result: Record<string, unknown> = {}
     for (const [key, child] of Object.entries(source)) {
-      if (isAcquisitionCostKey(key) || isLifecycleAmount(key, lifecycle) || (supplier && SUPPLIER_MONEY_FIELDS.has(key))) continue
+      if (isAcquisitionCostKey(key) || isLifecycleAmount(key, lifecycle) || (supplier && SUPPLIER_MONEY_FIELDS.has(normalizeCostKey(key)))) continue
       const childLifecycle = lifecycle && !INDEPENDENT_MONEY_FIELDS.has(normalizeCostKey(key))
       if (typeof child === 'string' && isSerializedCostEnvelope(key)) {
         // Only serialized envelopes are parsed, never arbitrary names/notes.
