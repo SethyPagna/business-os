@@ -155,6 +155,14 @@ app.post('/disposition-experiment', async (c) => {
   }
 })
 
+app.post('/valuation-experiment', async (c) => {
+  if ((c.env as Env & { STOCK_VALUATION_EXPERIMENT?: string }).STOCK_VALUATION_EXPERIMENT !== 'local-fixture-only') return c.json({error:'Not found'},404)
+  const kernel=await import('../lib/stockValuation')
+  const funding=await import('../lib/stockFunding')
+  try{return c.json(await kernel.commitStockValuation(c.env,c.get('user'),await c.req.json<unknown>().catch(()=>null)))}
+  catch(error){if(error instanceof kernel.StockValuationError||error instanceof funding.StockFundingError)return c.json({error:error.message,code:error.code},error.statusCode);throw error}
+})
+
 app.post('/funding-experiment', async (c) => {
   if ((c.env as Env & { STOCK_FUNDING_EXPERIMENT?: string }).STOCK_FUNDING_EXPERIMENT !== 'local-fixture-only') return c.json({ error:'Not found' },404)
   const kernel = await import('../lib/stockFunding')
