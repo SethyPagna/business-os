@@ -1,3 +1,4 @@
+const { sqliteD1Call } = require('./harness/sqlite_d1_bindings.cjs')
 // THE identity rule on the FAST STOCK-IN path (N15 repair, 2026-09-06).
 //
 // commitStockSession's create_receive guard was the last inflow still using
@@ -75,10 +76,10 @@ function fixture() {
   `)
   const wrap = (text, params = []) => ({
     text, params,
-    async first() { return sql.prepare(text).get(...params) || null },
-    async all() { return { results: sql.prepare(text).all(...params) } },
+    async first() { return sqliteD1Call(sql.prepare(text), 'get', params) || null },
+    async all() { return { results: sqliteD1Call(sql.prepare(text), 'all', params) } },
     async run() {
-      const result = sql.prepare(text).run(...params)
+      const result = sqliteD1Call(sql.prepare(text), 'run', params)
       return { meta: { changes: result.changes, last_row_id: Number(result.lastInsertRowid) } }
     },
   })
@@ -94,7 +95,7 @@ function fixture() {
     },
     async batch(statements) {
       return sql.transaction(() => statements.map((statement) => {
-        const result = sql.prepare(statement.text).run(...statement.params)
+        const result = sqliteD1Call(sql.prepare(statement.text), 'run', statement.params)
         return { meta: { changes: result.changes, last_row_id: Number(result.lastInsertRowid) } }
       }))()
     },
