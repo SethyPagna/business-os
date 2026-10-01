@@ -1,3 +1,4 @@
+const { sqliteD1Call } = require('./harness/sqlite_d1_bindings.cjs')
 const fs = require('node:fs')
 const path = require('node:path')
 const assert = require('node:assert/strict')
@@ -69,14 +70,14 @@ function fixture() {
   let beforeBatch = null
   const env = { DB: {
     prepare(text) { return { bind(...params) { return { text, params,
-      async first() { return sql.prepare(text).get(...params) || null },
-      async all() { return { results: sql.prepare(text).all(...params) } },
-      async run() { const r = sql.prepare(text).run(...params); return { meta: { changes: r.changes, last_row_id: Number(r.lastInsertRowid) } } },
+      async first() { return sqliteD1Call(sql.prepare(text), 'get', params) || null },
+      async all() { return { results: sqliteD1Call(sql.prepare(text), 'all', params) } },
+      async run() { const r = sqliteD1Call(sql.prepare(text), 'run', params); return { meta: { changes: r.changes, last_row_id: Number(r.lastInsertRowid) } } },
     } } } },
     async batch(statements) {
       if (beforeBatch) { const fn = beforeBatch; beforeBatch = null; fn() }
       return sql.transaction(() => statements.map((statement) => {
-        const r = sql.prepare(statement.text).run(...statement.params)
+        const r = sqliteD1Call(sql.prepare(statement.text), 'run', statement.params)
         return { meta: { changes: r.changes, last_row_id: Number(r.lastInsertRowid) } }
       }))()
     },
