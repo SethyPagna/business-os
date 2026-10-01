@@ -1,0 +1,244 @@
+import type { D1Compat } from './db';
+import { stockFundingPhysicalSql } from './stockFunding';
+import { fundingTransition, type FundingKind, type FundingState } from './stockFundingMath';
+import { exactMoney4, quantityDecimal, subtractQuantity } from './stockDispositionBasis';
+import { feeRequestDigest, normalizeFeeRequestId } from './feeOperationReceipt';
+import { applyValuationCoverage, valuationTotals, type ValuationSegment } from './stockValuationMath';
+
+type Row = Record<string, any>;
+type Statement = { sql: string; params: Record<string, unknown> };
+type Request = { raw: Record<string, unknown>; kind: string; sourceId: string; request: string; revision: number; generation: number };
+type HistoryRules = {
+    parseRequest(input: unknown): Request;
+    parseAmounts(input: unknown, key: 'allocation_id' | 'segment_id'): { target: string; amount4: number }[];
+    planPhysical(segments: ValuationSegment[], raw: Record<string, unknown>, kind: string): ValuationSegment[];
+};
+type Agreement = { amount4: number; targets: { allocation_id: string; amount4: number }[]; accepted: Map<string, number> };
+const requireHistory = (condition: unknown): void => { if (!condition) throw new Error('valuation_history_corrupt'); };
+const same = (actual: unknown, expected: unknown) => requireHistory(JSON.stringify(actual) === JSON.stringify(expected));
+function canonicalJson(value: string): Row {
+    const parsed = JSON.parse(value);
+    requireHistory(parsed && typeof parsed === 'object' && !Array.isArray(parsed) && JSON.stringify(parsed) === value);
+    return parsed;
+}
+function sameFields(actual: Row | undefined, expected: Row) {
+    requireHistory(actual);
+    for (const [key, value] of Object.entries(expected)) requireHistory(actual![key] === value);
+}
+function normalizedText(value: unknown, max = 500): string {
+    requireHistory(typeof value === 'string' && value.trim().length > 0 && value.trim().length <= max);
+    return (value as string).trim();
+}
+function positiveAmount(value: unknown) {
+    const amount = exactMoney4(value);
+    requireHistory(amount > 0);
+    return amount;
+}
+function acceptedTotal(agreement: Agreement) {
+    return [...agreement.accepted.values()].reduce((sum, amount) => sum + amount, 0);
+}
+function pendingTotal(agreements: Map<string, Agreement>) {
+    return [...agreements.values()].reduce((sum, agreement) => sum + agreement.amount4 - acceptedTotal(agreement), 0);
+}
+function projectedFunding(event: Row) {
+    return { id: event.id, source_id: event.source_id, generation: event.generation, gross4: event.gross4, paid4: event.paid4, debt4: event.debt4, credit4: event.credit4, asset4: event.asset4, cash_in4: event.cash_in4, cash_out4: event.cash_out4, shipping4: event.shipping4 };
+}
+function assertAudit(rows: Row[], entity: string, event: Row, response: string) {
+    const evidence = rows.filter(row => row.entity === entity && row.entity_id === event.id);
+    requireHistory(evidence.length === 1);
+    sameFields(evidence[0], { user_id: event.actor_id, action: event.kind, entity, entity_id: event.id, details: response, table_name: `${entity}_events`, record_id: event.id, new_value: response });
+}
+function sourceOpening(source: Row) {
+    return { id: source.id, movement_id: source.movement_id, batch_id: source.batch_id, product_id: source.product_id, branch_id: source.branch_id, supplier_id: source.supplier_id, quantity: source.quantity, free_quantity: source.free_quantity, gross4: source.gross4, opening_paid4: source.opening_paid4, opening_debt4: source.opening_debt4, reconciliation_proof: source.reconciliation_proof, invoice_id: source.invoice_id };
+}
+function validateOpening(source: Row, raw: Record<string, unknown>, actor: number) {
+    requireHistory(raw.funding && typeof raw.funding === 'object' && !Array.isArray(raw.funding));
+    const opening = raw.funding as Record<string, unknown>;
+    const keys = ['movement_id', 'batch_id', 'product_id', 'branch_id', 'supplier_id', 'quantity', 'free_quantity', 'gross_usd', 'opening_paid_usd', 'opening_debt_usd', 'reconciliation_proof', 'invoice_id'];
+    requireHistory(Object.keys(opening).every(key => keys.includes(key)) && keys.every(key => Object.hasOwn(opening, key)));
+    for (const key of keys.slice(0, 5)) requireHistory(Number.isSafeInteger(opening[key]) && Number(opening[key]) > 0 && opening[key] === source[key]);
+    requireHistory(opening.invoice_id === source.invoice_id && (source.invoice_id === null || Number.isSafeInteger(source.invoice_id) && source.invoice_id > 0));
+    requireHistory(quantityDecimal(opening.quantity) === source.quantity && quantityDecimal(opening.free_quantity, true) === source.free_quantity);
+    subtractQuantity(source.quantity, [source.free_quantity]);
+    requireHistory(exactMoney4(opening.gross_usd) === source.gross4 && exactMoney4(opening.opening_paid_usd) === source.opening_paid4 && exactMoney4(opening.opening_debt_usd) === source.opening_debt4 && source.opening_paid4 + source.opening_debt4 === source.gross4);
+    requireHistory(normalizedText(opening.reconciliation_proof) === source.reconciliation_proof && source.actor_id === actor);
+}
+function snapshotGuard(table: string, where: string, params: Record<string, unknown>, rows: Row[]): Statement[] {
+    const guards: Statement[] = [{ sql: `SELECT CASE WHEN (SELECT COUNT(*) FROM ${table} WHERE ${where})=@historyCount THEN 1 ELSE json_extract('[1]','$[valuation_history_changed]') END`, params: { ...params, historyCount: rows.length } }];
+    for (const row of rows) {
+        const values = Object.entries(row);
+        guards.push({ sql: `SELECT CASE WHEN EXISTS(SELECT 1 FROM ${table} WHERE ${values.map(([key], index) => `${key} IS @history${index}`).join(' AND ')}) THEN 1 ELSE json_extract('[1]','$[valuation_history_changed]') END`, params: Object.fromEntries(values.map(([, value], index) => [`history${index}`, value])) });
+    }
+    return guards;
+}
+async function readHistory(db: D1Compat, source: string) {
+    const valuationEvents = 'SELECT id FROM stock_valuation_events WHERE source_id=@source';
+    const fundingEvents = 'SELECT id FROM stock_funding_events WHERE source_id=@source';
+    const agreements = 'SELECT id FROM stock_valuation_agreements WHERE source_id=@source';
+    const scopes: Record<string, string> = {
+        stock_funding_sources: 'id=@source',
+        stock_valuation_sources: 'source_id=@source',
+        stock_valuation_events: 'source_id=@source',
+        stock_valuation_segments: `event_id IN (${valuationEvents})`,
+        stock_valuation_agreements: 'source_id=@source',
+        stock_valuation_acceptances: `event_id IN (${valuationEvents}) OR agreement_id IN (${agreements}) OR funding_event_id IN (${fundingEvents})`,
+        stock_valuation_receipts: `event_id IN (${valuationEvents}) OR json_extract(request_json,'$.source_id')=@source OR json_extract(response_json,'$.source_id')=@source`,
+        stock_funding_events: 'source_id=@source',
+        stock_funding_claims: `source_id=@source OR id IN (SELECT claim_id FROM stock_funding_events WHERE source_id=@source AND claim_id IS NOT NULL)`,
+        stock_funding_receipts: `event_id IN (${fundingEvents}) OR json_extract(request_json,'$.sourceId')=@source OR json_extract(response_json,'$.source_id')=@source OR request_id IN (SELECT 'valuation-fund-'||request_digest FROM stock_valuation_receipts WHERE event_id IN (${valuationEvents}))`,
+        audit_logs: `(entity='stock_valuation' AND (entity_id IN (${valuationEvents}) OR record_id IN (${valuationEvents}))) OR (entity='stock_funding' AND (entity_id IN (${fundingEvents}) OR record_id IN (${fundingEvents})))`,
+    };
+    const rows: Record<string, Row[]> = {}, guards: Statement[] = [];
+    for (const [table, where] of Object.entries(scopes)) {
+        rows[table] = await db.prepare(`SELECT * FROM ${table} WHERE ${where}`).all<Row>({ source });
+        guards.push(...snapshotGuard(table, where, { source }, rows[table]));
+    }
+    return { rows, guards };
+}
+function planAgreement(raw: Record<string, unknown>, segments: ValuationSegment[], rules: HistoryRules): Agreement {
+    const amount4 = positiveAmount(raw.amount_usd);
+    const targets = rules.parseAmounts(raw.targets, 'allocation_id').map(row => ({ allocation_id: row.target, amount4: row.amount4 }));
+    requireHistory(new Set(targets.map(target => target.allocation_id)).size === targets.length && targets.reduce((sum, target) => sum + target.amount4, 0) === amount4);
+    for (const target of targets) {
+        const available = segments.filter(segment => segment.allocation_id === target.allocation_id && (segment.fate !== 'sellable' || segment.allocation_id !== segment.segment_id)).reduce((sum, segment) => sum + segment.gross4 - segment.coverage4, 0);
+        requireHistory(target.amount4 > 0 && target.amount4 <= available);
+    }
+    return { amount4, targets, accepted: new Map() };
+}
+function planAcceptance(raw: Record<string, unknown>, agreement: Agreement, segments: ValuationSegment[], rules: HistoryRules) {
+    const shares = rules.parseAmounts(raw.shares, 'segment_id').map(row => ({ segment_id: row.target, amount4: row.amount4 }));
+    requireHistory(new Set(shares.map(share => share.segment_id)).size === shares.length);
+    const amount4 = shares.reduce((sum, share) => sum + share.amount4, 0);
+    requireHistory(amount4 > 0 && acceptedTotal(agreement) + amount4 <= agreement.amount4);
+    const next = [...segments];
+    for (const share of shares) {
+        const index = next.findIndex(segment => segment.segment_id === share.segment_id);
+        requireHistory(index >= 0);
+        const allocation = next[index].allocation_id;
+        const target = agreement.targets.find(target => target.allocation_id === allocation);
+        const accepted = (agreement.accepted.get(allocation) || 0) + share.amount4;
+        requireHistory(target && share.amount4 > 0 && accepted <= target.amount4);
+        agreement.accepted.set(allocation, accepted);
+        next[index] = applyValuationCoverage(next[index], share.amount4);
+    }
+    return { shares, amount4, segments: next };
+}
+async function validateFundingReceipt(event: Row, receipt: Row, intent: Request, source: Row, valuationDigest: string, amount4: number, state: FundingState, audits: Row[]) {
+    const { raw, kind, sourceId, generation } = intent;
+    const cash = kind === 'refund' || kind === 'payment';
+    const proof = normalizedText(kind === 'admit' ? source.reconciliation_proof : raw.proof);
+    const claim = kind === 'pending' || kind === 'accept' ? normalizedText(raw.agreement_id, 120) : null;
+    const fee = kind === 'shipping' ? raw.fee_id : null;
+    const cashMethod = cash ? raw.cash_method : null;
+    const cashReference = cash ? normalizedText(raw.cash_reference, 120) : null;
+    const cashAt = cash ? normalizedText(raw.cash_recorded_at, 40) : null;
+    requireHistory(!cash || cashMethod === 'cash' && new Date(cashAt!).toISOString() === cashAt);
+    requireHistory(kind !== 'shipping' || Number.isSafeInteger(fee) && Number(fee) > 0);
+    const requestJson = JSON.stringify({ kind, sourceId, generation, opening: kind === 'admit' ? sourceOpening(source) : null, amount4: kind === 'accept' || kind === 'admit' ? 0 : amount4, claim, feeId: fee, proof, cashMethod, cashReference, cashAt });
+    const response = { funding_version: 2, source_id: sourceId, event_id: event.id, generation: event.generation, kind, gross4: state.gross4, paid4: state.paid4, debt4: state.debt4, credit4: state.credit4, asset4: state.asset4, cash_in4: state.cashIn4, cash_out4: state.cashOut4, shipping4: state.shipping4, claim_id: event.claim_id, fee_id: fee };
+    const responseJson = JSON.stringify(response);
+    canonicalJson(receipt.request_json); canonicalJson(receipt.response_json);
+    sameFields(receipt, { request_id: `valuation-fund-${valuationDigest}`, actor_id: event.actor_id, event_id: event.id, request_digest: await feeRequestDigest(requestJson), request_json: requestJson, response_json: responseJson });
+    sameFields(event, { kind, amount4, fee_id: fee, proof, cash_method: cashMethod, cash_reference: cashReference, cash_recorded_at: cashAt });
+    if (cash) requireHistory(event.id === `cash-${await feeRequestDigest(`${cashMethod}:${cashReference}`)}`);
+    assertAudit(audits, 'stock_funding', event, responseJson);
+}
+export async function validateValuationHistory(db: D1Compat, sourceId: string, rules: HistoryRules) {
+    const { rows, guards } = await readHistory(db, sourceId);
+    const events = rows.stock_valuation_events.sort((a, b) => a.revision - b.revision);
+    if (!events.length) {
+        requireHistory(Object.values(rows).every(list => list.length === 0));
+        return { guards };
+    }
+    requireHistory(rows.stock_funding_sources.length === 1 && rows.stock_valuation_sources.length === 1);
+    const source = rows.stock_funding_sources[0];
+    requireHistory(source.id === sourceId && rows.stock_valuation_sources[0].opening_json === source.source_json);
+    canonicalJson(source.source_json);
+    const physical = await db.prepare(stockFundingPhysicalSql).get<Row>({ batch: source.batch_id, movement: source.movement_id });
+    same(physical, JSON.parse(source.source_json));
+    sameFields(physical, { product_id: source.product_id, movement_product: source.product_id, supplier_id: source.supplier_id, branch_id: source.branch_id, movement_branch: source.branch_id, batch_id: source.batch_id, movement_id: source.movement_id, batch_active: 1, product_active: 1, branch_active: 1, receipt_count: 1 });
+    requireHistory(['add', 'in'].includes(physical!.movement_type) && quantityDecimal(physical!.quantity) === source.quantity && quantityDecimal(physical!.received_quantity) === source.quantity && quantityDecimal(physical!.free_quantity, true) === source.free_quantity && exactMoney4(physical!.total_cost_usd) === source.gross4 && exactMoney4(physical!.received_cost_usd) === source.gross4 && (physical!.total_cost_khr === null || physical!.total_cost_khr === 0));
+    requireHistory(!await db.prepare('SELECT id FROM stock_disposition_sources WHERE movement_id=@movement OR batch_id=@batch').get({ movement: source.movement_id, batch: source.batch_id }));
+    requireHistory(rows.stock_valuation_receipts.length === events.length && rows.stock_valuation_segments.length > 0);
+    const fundingEvents = rows.stock_funding_events.sort((a, b) => a.generation - b.generation);
+    requireHistory(rows.stock_funding_receipts.length === fundingEvents.length && rows.audit_logs.length === events.length + fundingEvents.length);
+    const agreements = new Map<string, Agreement>(), usedClaims = new Set<string>(), usedChildren = new Set(['original']);
+    let segments: ValuationSegment[] = [], fundingIndex = 0, pending4 = 0;
+    let state: FundingState = { gross4: source.gross4, paid4: source.opening_paid4, debt4: source.opening_debt4, credit4: 0, asset4: 0, cashIn4: 0, cashOut4: 0, shipping4: 0 };
+    let funding: ReturnType<typeof projectedFunding> | undefined;
+    for (let revision = 0; revision < events.length; revision++) {
+        const event = events[revision];
+        requireHistory(event.source_id === sourceId && event.revision === revision && new Date(event.occurred_at).toISOString() === event.occurred_at);
+        const receipts = rows.stock_valuation_receipts.filter(receipt => receipt.event_id === event.id);
+        requireHistory(receipts.length === 1);
+        const receipt = receipts[0], raw = canonicalJson(receipt.request_json), intent = rules.parseRequest(raw);
+        const digest = await feeRequestDigest(receipt.request_json);
+        requireHistory(intent.sourceId === sourceId && intent.kind === event.kind && intent.request === receipt.request_id && normalizeFeeRequestId(receipt.request_id) === receipt.request_id && intent.revision === (revision === 0 ? 0 : revision - 1) && intent.generation === (funding?.generation ?? 0));
+        sameFields(receipt, { actor_id: event.actor_id, request_digest: digest });
+        canonicalJson(receipt.response_json);
+        const previous = revision ? valuationTotals(segments, source.gross4, source.quantity) : null;
+        let amount4 = 0, claim: string | null = null, shares: { segment_id: string; amount4: number }[] = [];
+        if (revision === 0) {
+            requireHistory(event.kind === 'admit'); validateOpening(source, raw, event.actor_id);
+            segments = [{ segment_id: 'original', allocation_id: 'original', fate: 'sellable', quantity: source.quantity, gross4: source.gross4, coverage4: 0, loss4: 0, recovery4: 0, reason: '' }];
+        } else requireHistory(event.kind !== 'admit');
+        if (['hold', 'dispose', 'repair'].includes(event.kind)) {
+            requireHistory(typeof raw.child_segment_id === 'string' && !usedChildren.has(raw.child_segment_id));
+            usedChildren.add(raw.child_segment_id as string);
+            segments = rules.planPhysical(segments, raw, event.kind);
+        }
+        if (event.kind === 'pending') {
+            const id = normalizedText(raw.agreement_id, 120);
+            requireHistory(id === raw.agreement_id && !agreements.has(id) && normalizedText(raw.proof, 120) === raw.proof);
+            const agreement = planAgreement(raw, segments, rules);
+            const actual = rows.stock_valuation_agreements.filter(row => row.id === id);
+            requireHistory(actual.length === 1);
+            sameFields(actual[0], { source_id: sourceId, amount4: agreement.amount4, targets_json: JSON.stringify(agreement.targets), proof: raw.proof });
+            agreements.set(id, agreement); amount4 = agreement.amount4; claim = id;
+        }
+        if (event.kind === 'accept') {
+            const id = normalizedText(raw.agreement_id, 120), agreement = agreements.get(id);
+            requireHistory(id === raw.agreement_id && agreement);
+            const accepted = planAcceptance(raw, agreement!, segments, rules);
+            shares = accepted.shares; amount4 = accepted.amount4; segments = accepted.segments; claim = `${id}:${event.id}`;
+        }
+        if (['refund', 'payment', 'shipping'].includes(event.kind)) amount4 = positiveAmount(raw.amount_usd);
+        if (['admit', 'pending', 'accept', 'refund', 'payment', 'shipping'].includes(event.kind)) {
+            const financial = fundingEvents[fundingIndex];
+            requireHistory(financial && financial.generation === fundingIndex && financial.source_id === sourceId && financial.actor_id === event.actor_id && new Date(financial.occurred_at).toISOString() === financial.occurred_at);
+            if (event.kind !== 'admit') state = fundingTransition(state, event.kind as FundingKind, amount4);
+            sameFields(financial, { claim_id: claim, gross4: state.gross4, paid4: state.paid4, debt4: state.debt4, credit4: state.credit4, asset4: state.asset4, cash_in4: state.cashIn4, cash_out4: state.cashOut4, shipping4: state.shipping4 });
+            const financialReceipts = rows.stock_funding_receipts.filter(row => row.event_id === financial.id);
+            requireHistory(financialReceipts.length === 1);
+            await validateFundingReceipt(financial, financialReceipts[0], intent, source, digest, amount4, state, rows.audit_logs);
+            if (claim) {
+                const claims = rows.stock_funding_claims.filter(row => row.id === claim);
+                requireHistory(claims.length === 1 && !usedClaims.has(claim));
+                sameFields(claims[0], { source_id: sourceId, amount4, proof: normalizedText(raw.proof) });
+                usedClaims.add(claim);
+            }
+            funding = projectedFunding(financial); fundingIndex++;
+        }
+        requireHistory(funding);
+        const acceptedRows = rows.stock_valuation_acceptances.filter(row => row.event_id === event.id);
+        requireHistory(acceptedRows.length === shares.length);
+        for (const share of shares) {
+            const actual = acceptedRows.find(row => row.target_segment_id === share.segment_id);
+            sameFields(actual, { event_id: event.id, agreement_id: raw.agreement_id, target_segment_id: share.segment_id, amount4: share.amount4, funding_event_id: funding!.id });
+        }
+        segments.sort((a, b) => a.segment_id.localeCompare(b.segment_id));
+        const actualSegments = rows.stock_valuation_segments.filter(row => row.event_id === event.id).sort((a, b) => a.segment_id.localeCompare(b.segment_id)).map(({ event_id, ...segment }) => segment);
+        same(actualSegments, segments);
+        const totals = valuationTotals(segments, source.gross4, source.quantity);
+        requireHistory(totals.coverage4 === state.credit4);
+        pending4 = pendingTotal(agreements);
+        requireHistory(Number.isSafeInteger(pending4) && pending4 >= 0);
+        sameFields(event, { loss4: totals.historical_loss4 - (previous?.historical_loss4 || 0), recovery4: totals.recovery4 - (previous?.recovery4 || 0), expense_category: raw.expense_category ?? null });
+        const responseJson = JSON.stringify({ valuation_version: 3, source_id: sourceId, event_id: event.id, revision, kind: event.kind, funding, segments, totals, pending4 });
+        requireHistory(responseJson === receipt.response_json);
+        assertAudit(rows.audit_logs, 'stock_valuation', event, responseJson);
+    }
+    requireHistory(fundingIndex === fundingEvents.length && agreements.size === rows.stock_valuation_agreements.length && usedClaims.size === rows.stock_funding_claims.length);
+    requireHistory(rows.stock_valuation_acceptances.every(row => events.some(event => event.id === row.event_id && event.kind === 'accept') && agreements.has(row.agreement_id)));
+    return { guards };
+}

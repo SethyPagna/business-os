@@ -5,6 +5,7 @@ import { ordinaryBusinessBatch } from './businessMaintenanceGuard';
 import { exactMoney4, quantityDecimal, subtractQuantity } from './stockDispositionBasis';
 import { feeRequestDigest, normalizeFeeRequestId } from './feeOperationReceipt';
 import { applyValuationCoverage, splitValuationSegment, sumValuationQuantity, valuationTotals, type ValuationSegment } from './stockValuationMath';
+import { validateValuationHistory } from './stockValuationHistory';
 export class StockValuationError extends Error {
     constructor(public code: string, public statusCode: 400 | 403 | 409 = 409) { super(code); }
 }
@@ -72,6 +73,10 @@ function parseAttributedAmounts(value: unknown, key: 'allocation_id' | 'segment_
         return { target: identity(row[key]), amount4 };
     });
 }
+function parseValuationMoney(value: unknown) {
+    try { return exactMoney4(value); }
+    catch { return refuse('unsupported_valuation_money_precision', 400); }
+}
 function planPhysicalSegments(segments: ValuationSegment[], raw: Record<string, unknown>, kind: string) {
     const segmentId = identity(raw.segment_id), childId = identity(raw.child_segment_id);
     const index = segments.findIndex(s => s.segment_id === segmentId);
@@ -112,6 +117,7 @@ async function replay(db: D1Compat, actor: SessionUser, request: string, digest:
     if (!saved)
         return null;
     await currentFundingActor(db, actor, ['refund', 'payment', 'shipping'].includes(JSON.parse(requestJson).kind));
+    await checkedHistory(db, JSON.parse(requestJson).source_id);
     if (saved.actor_id !== actor.id || saved.request_digest !== digest || saved.request_json !== requestJson)
         return refuse('valuation_request_intent_conflict');
     let response: Record<string, unknown>;
@@ -144,8 +150,13 @@ async function replay(db: D1Compat, actor: SessionUser, request: string, digest:
     const actual = await db.prepare(fundingSql + ' WHERE id=@id AND source_id=@source').get<Funding>({ id: funding?.id, source: response.source_id });
     if (!event || !source || response.source_id !== event.source_id || response.revision !== event.revision || response.kind !== event.kind || JSON.stringify(actual) !== JSON.stringify(funding) || JSON.stringify(segments) !== JSON.stringify(response.segments) || JSON.stringify(valuationTotals(segments, funding.gross4, source.quantity)) !== JSON.stringify(response.totals) || !Number.isSafeInteger(response.pending4) || Number(response.pending4) < 0)
         return refuse('valuation_receipt_corrupt');
+    await checkedHistory(db, response.source_id);
     await currentFundingActor(db, actor, ['refund', 'payment', 'shipping'].includes(JSON.parse(requestJson).kind));
     return { ...response, replayed: true };
+}
+async function checkedHistory(db: D1Compat, source: unknown) {
+    try { return await validateValuationHistory(db, identity(source), { parseRequest: parseValuationRequest, parseAmounts: parseAttributedAmounts, planPhysical: planPhysicalSegments }); }
+    catch { return refuse('valuation_history_corrupt'); }
 }
 export async function commitStockValuation(env: {
     DB: D1Database;
@@ -154,12 +165,14 @@ export async function commitStockValuation(env: {
     const { raw, kind, sourceId, request, revision, generation } = parseValuationRequest(input);
     const db = getDb(env);
     const authorized = await currentFundingActor(db, actor, ['refund', 'payment', 'shipping'].includes(kind));
+    if (kind === 'pending') parseValuationMoney(raw.amount_usd);
     const requestJson = JSON.stringify(raw), digest = await feeRequestDigest(requestJson);
+    const history = await checkedHistory(db, sourceId);
     const cached = await replay(db, actor, request, digest, requestJson);
     if (cached)
         return cached;
     const at = new Date().toISOString(), event = crypto.randomUUID(), token = `${request}:valuation`, params: Record<string, unknown> = { source: sourceId, actor: actor.id, event, revision, nextRevision: kind === 'admit' ? 0 : revision + 1, kind, at, token, request, digest, requestJson };
-    const statements: Statement[] = [], assertSql = (condition: string) => statements.push({ sql: `SELECT CASE WHEN (${condition}) THEN 1 ELSE json_extract('[1]','$[valuation_assertion_failed]') END`, params });
+    const statements: Statement[] = [...history.guards], assertSql = (condition: string) => statements.push({ sql: `SELECT CASE WHEN (${condition}) THEN 1 ELSE json_extract('[1]','$[valuation_assertion_failed]') END`, params });
     const latest = await db.prepare('SELECT id,revision FROM stock_valuation_latest WHERE source_id=@source').get<{
         id: string;
         revision: number;
@@ -182,7 +195,7 @@ export async function commitStockValuation(env: {
     if (kind === 'pending' || kind === 'accept') {
         agreement = identity(raw.agreement_id);
         if (kind === 'pending') {
-            amount4 = exactMoney4(raw.amount_usd);
+            amount4 = parseValuationMoney(raw.amount_usd);
             targets = parseAttributedAmounts(raw.targets, 'allocation_id').map(row => ({ allocation_id: row.target, amount4: row.amount4 }));
             if (new Set(targets.map(t => t.allocation_id)).size !== targets.length || targets.reduce((n, t) => n + t.amount4, 0) !== amount4 || targets.some(t => t.amount4 <= 0 || t.amount4 > segments.filter(s => s.allocation_id === t.allocation_id && (s.fate !== 'sellable' || s.allocation_id !== s.segment_id)).reduce((n, s) => n + s.gross4 - s.coverage4, 0)))
                 return refuse('agreement_targets_exceed_basis');
