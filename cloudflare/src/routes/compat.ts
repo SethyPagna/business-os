@@ -693,12 +693,17 @@ app.get('/system/audit-logs', requireAuth, async (c) => {
       lockedUserId: ownOnly ? Number(user?.id) : undefined,
       startDate: c.req.query('startDate'),
       endDate: c.req.query('endDate'),
+      createdFrom: c.req.query('createdFrom'),
+      createdTo: c.req.query('createdTo'),
+      startTime: c.req.query('startTime'),
+      endTime: c.req.query('endTime'),
       order: c.req.query('order'),
       cursor,
       pageSize: c.req.query('pageSize'),
       counts: c.req.query('counts'),
     }))
   } catch (error) {
+    if (error instanceof RangeError) return c.json({ error: error.message }, 400)
     // A db error is a 500, never an empty 200 that reads as "no logs": the
     // client falls back to its local mirror (and says so) instead of
     // presenting an error as an empty trail.
@@ -748,6 +753,11 @@ app.get('/system/legacy-deleted-sales', requireAuth, async (c) => {
   const denied = denyUnless(c, 'audit_log')
   if (denied) return denied
   const query = c.req.query()
+  let continuousWindow
+  try { continuousWindow = parseContinuousReadWindow(query) } catch (error) {
+    if (error instanceof RangeError) return c.json({ error: error.message }, 400)
+    throw error
+  }
   const page = Math.max(1, Number.parseInt(query.page || '1', 10) || 1)
   const pageSize = Math.min(200, Math.max(1, Number.parseInt(query.page_size || '50', 10) || 50))
 
@@ -776,8 +786,13 @@ app.get('/system/legacy-deleted-sales', requireAuth, async (c) => {
   // no date filter set).
   const from = String(query.from || '').slice(0, 10)
   const to = String(query.to || '').slice(0, 10)
-  if (from) { conditions.push(`d.deleted_at IS NOT NULL AND ${localDateAtOrAfter('d.deleted_at', '@from')}`); params.from = from }
-  if (to) { conditions.push(`d.deleted_at IS NOT NULL AND ${localDateAtOrBefore('d.deleted_at', '@to')}`); params.to = to }
+  if (continuousWindow) {
+    conditions.push(continuousReadWindowSql('d.deleted_at'))
+    Object.assign(params, continuousWindow)
+  } else {
+    if (from) { conditions.push(`d.deleted_at IS NOT NULL AND ${localDateAtOrAfter('d.deleted_at', '@from')}`); params.from = from }
+    if (to) { conditions.push(`d.deleted_at IS NOT NULL AND ${localDateAtOrBefore('d.deleted_at', '@to')}`); params.to = to }
+  }
   const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''
 
   try {

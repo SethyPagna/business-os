@@ -32,7 +32,7 @@ function ok(cond, label) {
 
 // ---- compile the real modules ---------------------------------------------
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'audit-log-page-'))
-const libFiles = ['auditLogPage.ts', 'auditLogQuery.ts', 'auditSections.ts', 'businessDateWindow.ts']
+const libFiles = ['auditLogPage.ts', 'auditLogQuery.ts', 'auditSections.ts', 'businessDateWindow.ts', 'continuousReadWindow.ts']
 for (const file of libFiles) fs.copyFileSync(path.join(cloudflareRoot, 'src', 'lib', file), path.join(tmpDir, file))
 const tscBin = path.join(cloudflareRoot, 'node_modules', 'typescript', 'bin', 'tsc')
 execSync(`node ${tscBin} --module commonjs --target es2020 --outDir ${tmpDir} ${libFiles.map((f) => path.join(tmpDir, f)).join(' ')}`, { cwd: tmpDir, stdio: 'inherit' })
