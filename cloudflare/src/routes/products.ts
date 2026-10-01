@@ -1,3 +1,4 @@
+import { assertStockLifecycleMutable, stockLifecycleRefusal } from '../lib/stockLifecycle'
 import { Hono } from 'hono'
 import { acquisitionCostResponses, canEditAcquisitionCosts, hasCatalogCostWrite } from '../lib/acquisitionCostAccess'
 import { roundMoney4 } from '../lib/moneyPrecision'
@@ -2545,6 +2546,8 @@ app.delete('/:id', async (c) => {
   try {
     await db.batch(productRemoveApplyStatements({ plan, operationId, source: 'direct', requestId, user, transitionStamp, planDigest }))
   } catch (error) {
+    const lifecycle = stockLifecycleRefusal(error)
+    if (lifecycle) return c.json({ success: false, ...lifecycle }, 409)
     const replay = await db.prepare(`SELECT * FROM product_remove_operations WHERE actor_id=@actor AND source='direct' AND request_id=@request`)
       .get<ProductRemoveOperationRow>({ actor: user.id, request: requestId })
     if (replay?.status === 'undo_ready' && replay.product_id === id && replay.reason === reason) {
@@ -3283,6 +3286,8 @@ const MERGE_TOO_LARGE_MESSAGE = 'This product has too many linked stock or histo
 // fault: stock moved under it (retry), or the case is larger than one atomic
 // batch. Both leave every table untouched, so they are 409s, never 500s.
 function mergeFoldRefusal(error: unknown): { code: string; error: string; retryable?: true } | null {
+  const lifecycle = stockLifecycleRefusal(error)
+  if (lifecycle) return lifecycle
   const text = String(error)
   if (text.includes(MERGE_CONFLICT_RETRY)) return { code: MERGE_CONFLICT_RETRY, error: MERGE_CONFLICT_RETRY_MESSAGE, retryable: true }
   if (MERGE_BUDGET_ERROR.test(text)) return { code: 'merge_case_exceeds_safe_limit', error: MERGE_TOO_LARGE_MESSAGE }
@@ -3425,6 +3430,8 @@ export async function foldDuplicateProductInto(
   undoReady: boolean
   reversal: MergeReversal
 }> {
+  await assertStockLifecycleMutable(db, { productId: canonical.id })
+  await assertStockLifecycleMutable(db, { productId: dup.id })
   const writeOffStock = stockDisposition === 'write_off'
   // Transfer-aware merge (owner ruling 2026-09-15, verbatim: "transfer aware
   // merge"): a product that is one side of a committed branch transfer is no

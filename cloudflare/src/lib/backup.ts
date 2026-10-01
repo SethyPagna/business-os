@@ -1,3 +1,5 @@
+import { assertStockLifecycleRestoreAllowed } from './stockLifecycle'
+import { getDb } from './db'
 import type { Env } from '../index'
 import { getPlanLimits } from './planTier'
 import { copyObject, listObjects } from './r2'
@@ -1476,6 +1478,7 @@ export async function restoreCloudflareBackup(env: Env, source: string, onProgre
   // unsafe dependency gaps below; report any unrelated omitted tables rather
   // than letting a scoped restore read as complete.
   const tablesNotInBackup = (BACKUP_TABLES as readonly string[]).filter((t) => !documentTables.has(t))
+  await assertStockLifecycleRestoreAllowed(getDb(env), documentTables)
 
   // Recheck against the live schema even if the caller already validated the
   // document. This MUST precede progress callbacks and every DELETE/write.

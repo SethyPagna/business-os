@@ -1,3 +1,4 @@
+import { assertStockLifecycleMutable } from '../lib/stockLifecycle'
 import { Hono } from 'hono'
 import { getDb } from '../lib/db'
 
@@ -669,6 +670,7 @@ app.put('/:id', async (c) => {
 
   const existing = await db.prepare(`SELECT * FROM fees WHERE id = @id`).get<FeeRow>({ id })
   if (!existing) return c.json({ error: 'Fee not found' }, 404)
+  await assertStockLifecycleMutable(db, { feeId: id })
 
   const expectedUpdatedAt = getExpectedUpdatedAt(body)
   try {
@@ -769,6 +771,7 @@ app.delete('/:id', async (c) => {
   if (!Number.isFinite(id)) return c.json({ error: 'Invalid fee id' }, 400)
   const existing = await db.prepare(`SELECT * FROM fees WHERE id = @id`).get<FeeRow>({ id })
   if (!existing) return c.json({ error: 'Fee not found' }, 404)
+  await assertStockLifecycleMutable(db, { feeId: id })
 
   const pendingId = await maybeQueueForReview(c.env, user, 'fees', {
     actionType: 'delete',

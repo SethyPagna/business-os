@@ -1,6 +1,7 @@
 import { Hono, type Context, type Next } from 'hono'
 import { acquisitionCostResponses } from '../lib/acquisitionCostAccess'
 import { getDb } from '../lib/db'
+import { assertStockLifecycleMutable, stockLifecycleRefusal } from '../lib/stockLifecycle'
 import { getImportFencedDb, isImportMaintenanceFenceError } from '../lib/importMaintenanceFence'
 import { applyCustomerGenderRestoration, previewCustomerGenderRestoration, customerGenderRestorationStatus, notifyCustomerGenderRestoration, canRestoreCustomerGender, GENDER_RESTORATION_MAX_BYTES } from '../lib/customerGenderRestoration'
 import { loyaltyAffectingSaleSql, LOYALTY_REASSIGNMENT_CODE, LOYALTY_REASSIGNMENT_MESSAGE } from '../lib/saleCustomerAssignmentGuard'
@@ -728,6 +729,7 @@ async function mergeSupplierIntoExisting(
   merged: Record<string, unknown>,
 ): Promise<Record<string, unknown>> {
   const db = getDb(env)
+  await assertStockLifecycleMutable(db, { supplierIds: [Number(keeper.id), Number(merged.id)] })
   const hasSupplierInvoices = await hasTable(db, 'supplier_invoices')
   const plan = buildContactMergePlan({
     table: config.table,
@@ -1415,6 +1417,7 @@ function registerContactRoutes(config: ContactConfig) {
     const portalAccounts = config.table === 'customers'
       ? await db.prepare(`SELECT id, contact_id, membership_id, name FROM portal_accounts WHERE contact_id IN (${idList}) ORDER BY id`).all<ContactMergePortalAccount>(idParams)
       : []
+    if (config.table === 'suppliers') await assertStockLifecycleMutable(db, { supplierIds: recordIds })
     if (verified.continuation && contactMergeKey(portalAccounts) !== contactMergeKey(verified.continuation.portalAccounts)) {
       return c.json({ error: CONTACT_MERGE_STALE_ERROR, code: 'contact_merge_conflict' }, 409)
     }
@@ -2102,6 +2105,7 @@ function registerContactRoutes(config: ContactConfig) {
       throw error
     }
 
+    if (config.table === 'suppliers') await assertStockLifecycleMutable(db, { supplierId: Number(id) })
     try {
       if (config.table === 'customers') {
         await db.batch([
@@ -2160,6 +2164,8 @@ function registerContactRoutes(config: ContactConfig) {
       const { jobId, totalCount } = await createBulkDeleteJob(c.env, contactBulkDeleteEntityType(config), rawIds as number[], reason, { id: user?.id ?? null, name: actorSnapshot(user) })
       return c.json({ success: true, jobId, totalCount }, 202)
     } catch (error) {
+      const lifecycle = stockLifecycleRefusal(error)
+      if (lifecycle) return c.json(lifecycle, 409)
       if (isImportMaintenanceFenceError(error)) return c.json({ code: error.code, error: error.message }, 503)
       return c.json({ error: error instanceof Error ? error.message : 'Failed to start bulk delete' }, 400)
     }

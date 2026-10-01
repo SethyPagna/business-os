@@ -1,3 +1,4 @@
+import { stockLifecycleRefusal } from './lib/stockLifecycle'
 import { Hono, type Context } from 'hono'
 import settingsRoute from './routes/settings'
 import productsRoute from './routes/products'
@@ -194,6 +195,8 @@ app.use('/api/*', requestMetricsMiddleware)
 // the frontend can actually parse and show a sane message for, instead of
 // a bare string.
 app.onError((error, c) => {
+  const lifecycle = stockLifecycleRefusal(error)
+  if (lifecycle) return c.json({ success: false, ...lifecycle }, 409)
   if (error instanceof ReportMoneyPrecisionError) {
     const mapped = reportMoneyHttpError(error)
     return c.json({

@@ -46,6 +46,7 @@ function fixture(hooks={},lot={ quantity:4,free:1,cost:9.9999,gross4:99999 }) {
   assert.equal(db.limits.exprDepth,100); assert.equal(db.limits.variableNumber,100)
   db.exec(`INSERT INTO branches(id,name,is_active,is_default) VALUES(1,'Shop',1,1);
     INSERT INTO users(id,username,name,password,permissions,is_active) VALUES(71,'kernel_writer','Kernel Writer','admin123','{"inventory":true,"product_cost_edit":true,"product_cost_view":true,"fees":true}',1),(72,'other_writer','Other Writer','admin123','{"inventory":true,"product_cost_edit":true,"product_cost_view":true,"fees":true}',1);
+    INSERT INTO suppliers(id,name) VALUES(77,'Fixture supplier');
     INSERT INTO products(id,name,sku,stock_quantity,is_active) VALUES(10,'Basis fixture','BASIS',${lot.quantity},1);
     INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at,is_active,batch_number,supplier_id,payment_status,received_quantity,received_cost_usd,received_branch_id,unit_cost_usd)
     VALUES(500,10,'basis-lot','BASIS','2026-10-01',1,1,77,'credit',${lot.quantity},${lot.cost},1,2.5);
@@ -98,6 +99,7 @@ async function permissionControls() {
     assert.equal((await post(f,hold())).status,403,'fee-only revocation must fence cached extra-fee replay')
     const noFee=hold('no-fee-request-0001',{ quantity:1,coverage_usd:0,coverage_state:'none',extra_fee_usd:0,expected_generation:1 })
     assert.equal((await post(f,noFee)).status,200,'no-fee command retains independent inventory permission')
+    f.db.exec('DROP TRIGGER IF EXISTS stock_lifecycle_batch_update')
     f.db.exec('UPDATE product_batches SET received_cost_usd=20 WHERE id=500')
     assert.equal((await post(f,noFee)).status,200,'authorized read-only replay does not reread changed entity')
     const lost=fixture({ afterBatchThrow:true,afterCommit:db=>db.exec(`UPDATE users SET permissions='{"inventory":true,"product_cost_edit":true,"product_cost_view":true,"fees":false}' WHERE id=71`) })
@@ -211,7 +213,7 @@ async function jsonReceiptControls() {
   assert.equal((await post(f,hold())).data.replayed,true); assert.equal(snapshot(f),beforeReplay)
   for (const change of [{ quantity:1 },{ reason:'Other' },{ coverage_usd:2 },{ condition_tag:'damaged' },{ expected_generation:1 },{ supplier_id:78 },{ batch_id:501 },{ product_id:11 },{ extra_fee_usd:0 }]) assert.equal((await post(f,hold('hold-request-0001',change))).status,409)
   actorId=72; assert.equal((await post(f,hold())).status,409); actorId=71
-  assert.throws(()=>f.db.prepare('DELETE FROM fees WHERE id=(SELECT fee_id FROM stock_disposition_fees)').run(),/FOREIGN KEY/)
+  assert.throws(()=>f.db.prepare('DELETE FROM fees WHERE id=(SELECT fee_id FROM stock_disposition_fees)').run(),/FOREIGN KEY|stock_lifecycle_dependency/)
   assert.throws(()=>f.db.prepare('UPDATE stock_disposition_events SET quantity=99').run(),/immutable/)
   assert.throws(()=>f.db.prepare('UPDATE stock_disposition_sources SET gross4=0').run(),/immutable/)
   const dispose={ kind:'dispose',source_id:'source-900',batch_id:500,product_id:10,branch_id:1,supplier_id:77,allocation_id:first.data.allocation_id,quantity:1,reason:'Disposed broken unit',expense_category:'broken goods',expected_generation:1,client_request_id:'dispose-request-0001' }
@@ -238,8 +240,8 @@ async function jsonReceiptControls() {
   }
   const lost=fixture({ afterBatchThrow:true }); const lostResult=await post(lost,hold()); assert.equal(lostResult.status,200); assert.equal(lostResult.data.replayed,true); assert.equal(count(lost,'fees'),lost.baseline.fees+1); assert.equal(count(lost,'stock_disposition_events'),1); lost.db.close()
   const denied=fixture(); denied.db.exec("UPDATE users SET permissions='{}' WHERE id=71"); assert.equal((await post(denied,hold())).status,403); assert.equal(count(denied,'fees'),denied.baseline.fees); denied.db.close()
-  const unknown=fixture(); unknown.db.exec('UPDATE product_batches SET received_cost_usd=NULL WHERE id=500'); assert.equal((await post(unknown,hold())).status,409); unknown.db.close()
-  const paid=fixture(); paid.db.exec("UPDATE product_batches SET payment_status='paid' WHERE id=500"); assert.equal((await post(paid,hold())).status,409); paid.db.close()
+  const unknown=fixture(); unknown.db.exec('DROP TRIGGER IF EXISTS stock_lifecycle_batch_update'); unknown.db.exec('UPDATE product_batches SET received_cost_usd=NULL WHERE id=500'); assert.equal((await post(unknown,hold())).status,409); unknown.db.close()
+  const paid=fixture(); paid.db.exec("DROP TRIGGER IF EXISTS stock_lifecycle_batch_update"); paid.db.exec("UPDATE product_batches SET payment_status='paid' WHERE id=500"); assert.equal((await post(paid,hold())).status,409); paid.db.close()
   const zero=fixture({}, { quantity:4,free:1,cost:0,gross4:0 }); const zeroHold=await post(zero,hold('zero-hold-0001',{ coverage_usd:0,coverage_state:'none',extra_fee_usd:0 })); assert.equal(zeroHold.status,200); assert.equal(zeroHold.data.gross4,0); assert.equal(zeroHold.data.net4,0); zero.db.close()
   const fractional=fixture({}, { quantity:0.3,free:0.1,cost:1.0001,gross4:10001 })
   const fractionalHold=await post(fractional,hold('fraction-hold-0001',{ quantity:0.1,coverage_usd:0.2,extra_fee_usd:0 }))
