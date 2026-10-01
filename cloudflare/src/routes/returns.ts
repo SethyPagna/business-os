@@ -4,6 +4,7 @@ import { fillOmittedReturnCosts } from '../lib/returnCostAccess'
 import { getDb } from '../lib/db'
 import { ordinaryBusinessMaintenanceGuard, runOrdinaryBusinessWrite } from '../lib/businessMaintenanceGuard'
 import { selectInChunks } from '../lib/sqlBinding'
+import { supplierReturnLots } from '../lib/supplierReturnGuard'
 import { localDateAtOrAfter, localDateAtOrBefore, localDateExpr } from '../lib/businessDateWindow'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit, changedFields } from '../lib/audit'
@@ -2319,7 +2320,7 @@ app.post('/supplier', async (c) => {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
   const body = await c.req.json<{
-    items: Array<{ product_id: number; product_name?: string; quantity: number; cost_price_usd?: number; cost_price_khr?: number; unit_cost_usd?: number; unit_cost_khr?: number; branch_id?: number }>
+    items: Array<{ product_id: number; product_name?: string; quantity: number; cost_price_usd?: number; cost_price_khr?: number; unit_cost_usd?: number; unit_cost_khr?: number; branch_id?: number; batch_id?: number }>
     branch_id?: number
     reason?: string
     notes?: string
@@ -2336,6 +2337,17 @@ app.post('/supplier', async (c) => {
   const clientRequestId = normalizeClientRequestId(body.client_request_id)
   if (!Array.isArray(body.items) || body.items.length === 0) return c.json({ error: 'Return items required' }, 400)
   if (!body.reason) return c.json({ error: 'Reason is required' }, 400)
+  if (!Number.isSafeInteger(body.supplier_id) || Number(body.supplier_id) <= 0
+    || !await db.prepare('SELECT id FROM suppliers WHERE id=?').get([body.supplier_id])) {
+    return c.json({ error: 'A valid supplier is required' }, 400)
+  }
+  for (const item of body.items) {
+    if (!Number.isSafeInteger(item.product_id) || !Number.isSafeInteger(item.branch_id ?? body.branch_id)
+      || Number(item.product_id) <= 0 || Number(item.branch_id ?? body.branch_id) <= 0
+      || (Object.prototype.hasOwnProperty.call(item, 'batch_id') && (!Number.isSafeInteger(item.batch_id) || Number(item.batch_id) <= 0))) {
+      return c.json({ error: 'A valid product, branch and selected received lot are required' }, 400)
+    }
+  }
 
   if (clientRequestId) {
     const existing = await db.prepare("SELECT id, return_number FROM returns WHERE client_request_id = ? AND client_request_id <> '' LIMIT 1").get<{ id: number; return_number: string }>([clientRequestId])
@@ -2443,8 +2455,9 @@ app.post('/supplier', async (c) => {
     // sale of a no-lot line, so a supplier return of a batch-tracked product
     // keeps branch_batch_stock in step with branch_stock instead of leaving the
     // lot ledger high (a product×branch lot drift). Fetched once for the return.
-    const supplierFifoLots = await readFifoLotAvailabilityForCart(
+    const supplierFifoLots = await supplierReturnLots(
       db,
+      Number(body.supplier_id),
       body.items.map((i) => ({ productId: Number(i.product_id), branchId: Number(i.branch_id || body.branch_id || 0) })),
     )
     // Part-77 (oversell-clamp audit): validate availability BEFORE composing
@@ -2519,11 +2532,24 @@ app.post('/supplier', async (c) => {
       let supplierReturnTakes: Array<{ batchId: number; quantity: number }> = []
       if (itemBranchId) {
         const lots = supplierFifoLots.get(`${item.product_id}:${itemBranchId}`) || []
-        const { takes } = allocateAcrossLots(lots, qty)
+        const selected = item.batch_id === undefined ? lots : lots.filter(lot => lot.batchId === item.batch_id)
+        const { takes, uncovered } = allocateAcrossLots(selected, qty)
+        if (uncovered > 0) {
+          const insufficient = new Error('The selected supplier received lot does not have enough stock at this branch')
+          insufficient.name = 'SupplierReturnStockError'
+          throw insufficient
+        }
         supplierReturnTakes = takes
         for (const take of takes) {
           const lot = lots.find((entry) => entry.batchId === take.batchId)
           if (lot) lot.available -= take.quantity
+          statements.push({
+            sql: `SELECT CASE WHEN EXISTS(SELECT 1 FROM product_batches pb JOIN branch_batch_stock bbs ON bbs.batch_id=pb.id
+              WHERE pb.id=@batch_id AND pb.variant_product_id=@product_id AND pb.supplier_id=@supplier_id
+                AND pb.is_active=1 AND bbs.branch_id=@branch_id AND bbs.quantity>=@quantity)
+              THEN 1 ELSE json('supplier_return_lot_changed') END`,
+            params: { batch_id: take.batchId, product_id: item.product_id, supplier_id: body.supplier_id, branch_id: itemBranchId, quantity: take.quantity },
+          })
           statements.push(decrementBatchStockStrictStatement(take.batchId, itemBranchId, take.quantity))
         }
       }
