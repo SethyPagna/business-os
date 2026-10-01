@@ -271,6 +271,7 @@ async function check(name, run) {
 
 async function main() {
   await setupAuth()
+  await lifecycleImportContract()
 
   await check('real Hono auth returns 401 and backup_restore permission returns 403', async () => {
     seedRepair()
@@ -452,3 +453,42 @@ main().catch((error) => {
   console.error(error instanceof Error ? error.stack || error.message : error)
   process.exitCode = 1
 })
+
+async function lifecycleImportContract() {
+  const lifecycle = loadLifecycleModule('lib/stockLifecycle.ts')
+  assert.strictEqual(lifecycle, loadLifecycleModule('lib/stockLifecycle.ts'))
+  const { getDb } = loadLifecycleModule('lib/db.ts')
+  const { HTTPException } = require('hono/http-exception')
+  const { sqliteD1Call } = require('./harness/sqlite_d1_bindings.cjs')
+  for (const table of ['stock_disposition_sources', 'stock_funding_dependencies']) {
+    const sql = openDb([]).db
+    sql.exec(`CREATE TABLE ${table}(movement_id INTEGER,batch_id INTEGER,product_id INTEGER,branch_id INTEGER,supplier_id INTEGER);
+      INSERT INTO ${table} VALUES(701,501,100,1,77);
+      CREATE TABLE durable_marker(id INTEGER PRIMARY KEY,payload BLOB,amount INTEGER,label TEXT);
+      INSERT INTO durable_marker VALUES(1,X'0001ff00',9007199254740993,'ខ្មែរ');`)
+    const calls = { run: 0, batch: 0 }
+    const statement = (text, values = []) => ({
+      bind: (...next) => statement(text, next),
+      first: async () => sqliteD1Call(sql.prepare(text), 'get', values) ?? null,
+      all: async () => ({ results: sqliteD1Call(sql.prepare(text), 'all', values) }),
+      run: async () => { calls.run += 1; return { meta: { changes: Number(sqliteD1Call(sql.prepare(text), 'run', values).changes) } } },
+    })
+    const loadedDb = getDb({ DB: { prepare: text => statement(text), batch: async () => { calls.batch += 1; throw new Error('Unexpected lifecycle preflight batch') } } })
+    const state = () => JSON.stringify([sql.prepare(`SELECT * FROM ${table}`).all(), sql.prepare('SELECT hex(payload) AS blob,CAST(amount AS TEXT) AS integer,label FROM durable_marker').all()])
+    const before = state()
+    for (const scope of [{ allSources: true }, { productId: 100 }, { supplierIds: [78, 77] }, { movementId: 701, batchId: 501, productId: 100, branchId: 1, supplierId: 77 }]) {
+      let refusal
+      await assert.rejects(lifecycle.assertStockLifecycleMutable(loadedDb, scope), error => { refusal = error; return error instanceof HTTPException && error.status === 409 && error.code === 'stock_lifecycle_dependency' })
+      assert.deepEqual(await refusal.getResponse().json(), { error: lifecycle.STOCK_LIFECYCLE_MESSAGE, code: 'stock_lifecycle_dependency' })
+      assert.equal(state(), before)
+      assert.deepEqual(calls, { run: 0, batch: 0 })
+    }
+    for (const scope of [{}, { productId: 101 }, { supplierIds: [78] }, { productId: 100, branchId: 2 }]) await lifecycle.assertStockLifecycleMutable(loadedDb, scope)
+    sql.exec(`DELETE FROM ${table}`)
+    await lifecycle.assertStockLifecycleMutable(loadedDb, { allSources: true })
+    assert.deepEqual(calls, { run: 0, batch: 0 })
+    sql.close()
+  }
+  assert.throws(() => loadLifecycleModule('lib/absent-fixture.ts'), /false|Unexpected|assert/i)
+  console.log('PASS actual cached system lifecycle/db/Hono dependencies refuse linked sources without effects and accept unrelated or empty scopes')
+}
