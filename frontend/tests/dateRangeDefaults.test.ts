@@ -226,8 +226,12 @@ for (const surface of todayInvoiceSurfaces) {
     ? read('contacts/useStockInInvoiceReport.ts') : dates.source
   const request = evaluate(requestArgs(requestSource, surface.endpoint)[0], {
     ...surface.context, fromDate: dates.from, toDate: dates.to, page: 1, pageSize: 20,
+    ...continuousRangeParams({ startDate: dates.from, endDate: dates.to, startTime: '', endTime: '' }),
+    createdFrom: undefined, createdTo: undefined,
   })
   assert.deepEqual([request.from, request.to], [day1, day1], `${surface.endpoint} first request is Today`)
+  assert.equal(request.createdFrom, undefined)
+  assert.equal(request.createdTo, undefined)
 }
 
 // P3-10. The AP and AR ledgers are the opposite case and must NOT open on

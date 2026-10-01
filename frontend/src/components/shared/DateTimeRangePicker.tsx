@@ -154,7 +154,7 @@ export default function DateTimeRangePicker({
   // text was readable, so the endpoint box can paint its own red border.
   const [startInvalid, setStartInvalid] = useState(false)
   const [endInvalid, setEndInvalid] = useState(false)
-  const [rangeInvalid, setRangeInvalid] = useState(false)
+  const [rangeInvalid, setRangeInvalid] = useState<boolean | 'dates'>(false)
 
   useEffect(() => {
     setStartInvalid(false)
@@ -219,6 +219,10 @@ export default function DateTimeRangePicker({
   const apply = (patch: Partial<DateTimeRange>) => {
     // Keep start <= end whenever both ends exist -- swapping beats erroring.
     const next = { ...value, ...patch }
+    if (continuous && (next.startTime || next.endTime) && (!next.startDate || !next.endDate)) {
+      setRangeInvalid('dates')
+      return
+    }
     if (next.startDate && next.endDate && next.endDate < next.startDate) {
       const swapped = next.startDate
       next.startDate = next.endDate
@@ -507,7 +511,7 @@ export default function DateTimeRangePicker({
           ) : null}
 
           {rangeInvalid ? <p role="alert" className="mt-2 text-sm text-red-700 dark:text-red-300">
-            {t('end_date') || 'End date'} / {t('end_time') || 'End time'} ≥ {t('start_date') || 'Start date'} / {t('start_time') || 'Start time'}
+            {rangeInvalid === 'dates' ? t('please_select_start_end_dates') : <>{t('end_date') || 'End date'} / {t('end_time') || 'End time'} ≥ {t('start_date') || 'Start date'} / {t('start_time') || 'Start time'}</>}
           </p> : null}
 
           {/* Calendar range grid, Monday-first, with its own ‹ month › nav. */}

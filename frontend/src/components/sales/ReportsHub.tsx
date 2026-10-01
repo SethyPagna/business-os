@@ -234,10 +234,12 @@ export default function ReportsHub(_props: { embedded?: boolean } = {}) {
   }), [range, branchFilter, statusFilter, paymentFilter])
   const rangeError = useMemo(() => {
     if (!view) return ''
-    try { reportQueryParams(filters, view); return '' } catch (error) {
-      return error instanceof Error ? error.message : 'Invalid report date/time range'
+    try { reportQueryParams(filters, view); return '' } catch {
+      return !filters.startDate || !filters.endDate
+        ? trh('please_select_start_end_dates', 'Please select start and end dates')
+        : `${trh('end_date', 'End date')} / ${trh('end_time', 'End time')} ≥ ${trh('start_date', 'Start date')} / ${trh('start_time', 'Start time')}`
     }
-  }, [filters, view])
+  }, [filters, view, trh])
   const activeFilterCount = (branchFilter ? 1 : 0) + (supportsSaleFilters ? (statusFilter ? 1 : 0) + (paymentFilter ? 1 : 0) : 0)
   const clearFilters = () => { setBranchFilter(''); setStatusFilter(''); setPaymentFilter('') }
 
