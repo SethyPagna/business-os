@@ -92,7 +92,7 @@ const filters = { startDate: '2026-09-01', endDate: '2026-09-30', branchId: 2 }
   assert.equal(scopeCalls, 1, 'scope callback is captured once for both complete passes')
   assert.deepEqual(scopedSnapshot.sales.map((row) => row.id), [1])
   assert.deepEqual(scopedSnapshot.items.map((row) => row.sale_id), [1])
-  for (const table of ['FROM sales s WHERE', 'FROM sale_items si WHERE EXISTS', 'FROM returns r WHERE', 'FROM return_items ri WHERE EXISTS']) {
+  for (const table of ['FROM sales s WHERE', 'FROM sale_items si NOT INDEXED CROSS JOIN sales s', 'FROM returns r CROSS JOIN sales s', 'FROM return_items ri NOT INDEXED CROSS JOIN returns r']) {
     assert.ok(scopedQueries.some((query) => query.includes(table)), `scope reaches ${table}`)
   }
   await assert.rejects(() => scoped.readSalesReportSnapshot({}, filters, false, () => ({ sql: 's.id=@status', params: { status: 1 } })),
