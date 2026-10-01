@@ -166,6 +166,7 @@ const broadcastStub = { broadcast: async () => {} }
 const authStub = { requireAuth: async (c, next) => { await next() } }
 
 const inventoryMod = loadReal('routes/inventory.ts', {
+  '../lib/continuousReadWindow': loadReal('lib/continuousReadWindow.ts'),
   '../lib/db': dbOverride,
   '../lib/auth': authStub,
   '../lib/audit': auditStub,

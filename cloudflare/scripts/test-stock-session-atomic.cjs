@@ -28,7 +28,7 @@ function loadStockSession(entry = 'lib/stockSession.ts', actor = user) {
       // Migration 0192: the per-line receipt guard is REAL here, because the
       // reason-cap wires driven through this harness must reach the kernel
       // exactly as an unidentified production request does.
-      if (normalized === 'routes/inventory.ts' && name.startsWith('../') && !['../lib/acquisitionCostAccess', '../lib/stockSession', '../lib/permissions', '../lib/stockReason', '../lib/stockCondition', '../lib/stockMutationReceipt'].includes(name)) return {}
+      if (normalized === 'routes/inventory.ts' && name.startsWith('../') && !['../lib/continuousReadWindow', '../lib/acquisitionCostAccess', '../lib/stockSession', '../lib/permissions', '../lib/stockReason', '../lib/stockCondition', '../lib/stockMutationReceipt'].includes(name)) return {}
       if (name === './cache' || name === '../lib/cache') return { bumpVersion: async () => {} }
       if (name === '../durable-objects/broadcastHub') return { broadcast: async () => {} }
       if (name.startsWith('./')) return load(`lib/${name.slice(2)}.ts`)
@@ -194,6 +194,13 @@ async function check(name, run) {
 }
 
 async function main() {
+  await check('actual movements parser rejects a missing continuous partner', async () => {
+    const f = fixture()
+    const app = loadStockSession('routes/inventory.ts').default
+    const response = await app.request('/movements?createdFrom=2026-09-05T04:00:00Z', {}, f.env)
+    assert.equal(response.status, 400)
+    assert.deepEqual(await response.json(), { error: 'createdFrom and createdTo must be provided together' })
+  })
   const { commitStockSession, replayStockSession, StockSessionError } = loadStockSession()
   await check('cost entry defaults denied independently of inventory and products grants', async () => {
     const f = fixture()
