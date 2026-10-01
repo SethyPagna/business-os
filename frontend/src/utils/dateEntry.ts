@@ -153,7 +153,7 @@ function resolve(candidates: Array<Ymd | null>): DateEntryResult {
   const first = valid[0]
   const iso = `${String(first.year).padStart(4, '0')}-${pad2(first.month)}-${pad2(first.day)}`
   const distinct = new Set(valid.map((entry) => `${entry.year}-${entry.month}-${entry.day}`))
-  const result: DateEntryResult = { value: `${pad2(first.day)}/${pad2(first.month)}/${String(first.year).padStart(4, '0')}`, iso }
+  const result: DateEntryResult = { value: fmtDateOnly(iso), iso }
   if (distinct.size > 1) result.ambiguous = true
   return result
 }

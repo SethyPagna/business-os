@@ -281,7 +281,11 @@ export default function DateTimeRangePicker({
     years.add(viewYear)
     return Array.from(years).sort((a, b) => a - b).map((year) => ({ value: String(year), label: String(year) }))
   }, [currentYear, viewYear])
-  const monthOptions = useMemo(() => MONTH_LABELS.map((label, index) => ({ value: String(index + 1), label })), [])
+  const monthOptions = useMemo(() => MONTH_LABELS.map((fallback, index) => {
+    const key = `date_month_${index + 1}`
+    const label = t(key)
+    return { value: String(index + 1), label: label && label !== key ? label : fallback }
+  }), [t])
 
   const stepViewMonth = (delta: number) => {
     let month = viewMonth + delta
@@ -573,7 +577,7 @@ export default function DateTimeRangePicker({
               </button>
             </div>
             <div className="grid grid-cols-7 text-center text-[10px] font-semibold text-slate-600 dark:text-slate-300">
-              {DOW_LABELS.map((label) => <div key={label} className="py-0.5">{label}</div>)}
+              {DOW_LABELS.map((label, index) => <div key={label} data-date-range-weekday className="min-w-0 break-words py-0.5">{quickRangeLabel(`date_weekday_${index + 1}`, label)}</div>)}
             </div>
             <div className="grid grid-cols-7 text-center text-xs">
               {calendarCells.map((cell, index) => cell ? (
