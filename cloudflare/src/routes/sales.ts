@@ -5418,6 +5418,14 @@ type SaleRow = {
 // Deliberately still a LIKE scan, not FTS5 -- see buildLikeAliasClause's
 // own comment in lib/searchMatch.ts for why that's a considered choice
 // for this table, not an oversight.
+// Space-joined concatenation as a balanced tree: D1 parses with expression depth 100 and
+// a 21-term left chain of || under the report's nested filters used up most of it.
+function concatBalanced(parts: readonly string[]): string {
+  if (parts.length === 1) return parts[0]
+  const middle = Math.ceil(parts.length / 2)
+  return `(${concatBalanced(parts.slice(0, middle))} || ' ' || ${concatBalanced(parts.slice(middle))})`
+}
+
 function buildSalesSearchWhere(query: Record<string, string>, params: Record<string, unknown>): string | undefined {
   const raw = query.search || query.q || ''
   const groups = tokenizeSearchTermGroups(raw)
@@ -5439,19 +5447,16 @@ function buildSalesSearchWhere(query: Record<string, string>, params: Record<str
   // import rows, which the importer does not populate) still searches exactly
   // as before through the raw columns -- additive, never a regression. See the
   // migration's own comment for why there is no data backfill.
-  const flatHaystack = `(
-    COALESCE(s.search_normalized, '') || ' ' ||
-    COALESCE(s.receipt_number, '') || ' ' || COALESCE(s.legacy_receipt_number, '') || ' ' ||
-    COALESCE(s.cashier_name, '') || ' ' ||
-    COALESCE(s.customer_name, '') || ' ' || COALESCE(s.customer_phone, '') || ' ' ||
-    COALESCE(s.branch_name, '') || ' ' || COALESCE(s.payment_method, '') || ' ' ||
-    COALESCE(s.notes, '') || ' ' || COALESCE(c.membership_number, '')
-  )`
-  const itemHaystack = `(
-    COALESCE(sis.product_name, '') || ' ' || COALESCE(sis.sku, '') || ' ' ||
-    COALESCE(sip.barcode, '') || ' ' || COALESCE(sip.brand, '') || ' ' ||
-    COALESCE(sip.name_normalized, '') || ' ' || COALESCE(sip.brand_compact, '')
-  )`
+  const flatHaystack = concatBalanced([
+    "COALESCE(s.search_normalized, '')", "COALESCE(s.receipt_number, '')", "COALESCE(s.legacy_receipt_number, '')",
+    "COALESCE(s.cashier_name, '')", "COALESCE(s.customer_name, '')", "COALESCE(s.customer_phone, '')",
+    "COALESCE(s.branch_name, '')", "COALESCE(s.payment_method, '')", "COALESCE(s.notes, '')",
+    "COALESCE(c.membership_number, '')",
+  ])
+  const itemHaystack = concatBalanced([
+    "COALESCE(sis.product_name, '')", "COALESCE(sis.sku, '')", "COALESCE(sip.barcode, '')",
+    "COALESCE(sip.brand, '')", "COALESCE(sip.name_normalized, '')", "COALESCE(sip.brand_compact, '')",
+  ])
 
   let groupIndex = 0
   const groupClauses = groups.map((words) => {
