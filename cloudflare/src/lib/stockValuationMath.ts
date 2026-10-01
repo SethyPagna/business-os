@@ -31,12 +31,16 @@ export function valuationTotals(segments: ValuationSegment[], gross4: number, ac
     const totals = { sellable_quantity: '0', held_quantity: '0', sellable_net4: 0, held_net4: 0, historical_loss4: 0, recovery4: 0, coverage4: 0 };
     if (new Set(segments.map(s => s.segment_id)).size !== segments.length || (acquiredQuantity !== undefined && sumValuationQuantity(segments.map(s => s.quantity)) !== quantityDecimal(acquiredQuantity)))
         throw new RangeError('valuation_quantity_conservation_failed');
+    if (segments.reduce((total, segment) => total + segment.gross4, 0) !== gross4)
+        throw new RangeError('valuation_gross_conservation_failed');
     totals.sellable_quantity = sumValuationQuantity(segments.filter(s => s.fate === 'sellable').map(s => s.quantity));
     totals.held_quantity = sumValuationQuantity(segments.filter(s => s.fate === 'held').map(s => s.quantity));
     for (const s of segments) {
         quantityDecimal(s.quantity);
         if ([s.gross4, s.coverage4, s.loss4, s.recovery4].some(n => !Number.isSafeInteger(n) || n < 0) || s.coverage4 > s.gross4 || s.recovery4 > s.loss4)
             throw new RangeError('valuation_state_invalid');
+        if (s.fate === 'disposed' ? s.loss4 + s.coverage4 - s.recovery4 !== s.gross4 : s.loss4 !== 0 || s.recovery4 !== 0)
+            throw new RangeError('valuation_fate_basis_invalid');
         if (s.fate === 'sellable')
             totals.sellable_net4 += s.gross4 - s.coverage4;
         if (s.fate === 'held')
