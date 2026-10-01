@@ -1,3 +1,4 @@
+const { sqliteD1Call } = require('./harness/sqlite_d1_bindings.cjs')
 // Restoring a cancelled return on a LEGACY (money_precision_version 0) sale
 // must respect the same quantity cap POST /api/returns enforces.
 //
@@ -53,15 +54,15 @@ function fixture() {
       return { bind(...params) {
         return {
           text, params,
-          async first() { return sql.prepare(text).get(...params) || null },
-          async all() { return { results: sql.prepare(text).all(...params) } },
-          async run() { const result = sql.prepare(text).run(...params); return { meta: { changes: result.changes, last_row_id: Number(result.lastInsertRowid) } } },
+          async first() { return sqliteD1Call(sql.prepare(text), 'get', params) || null },
+          async all() { return { results: sqliteD1Call(sql.prepare(text), 'all', params) } },
+          async run() { const result = sqliteD1Call(sql.prepare(text), 'run', params); return { meta: { changes: result.changes, last_row_id: Number(result.lastInsertRowid) } } },
         }
       } }
     },
     async batch(statements) {
       return sql.transaction(() => statements.map(statement => {
-        const result = sql.prepare(statement.text).run(...statement.params)
+        const result = sqliteD1Call(sql.prepare(statement.text), 'run', statement.params)
         return { meta: { changes: result.changes, last_row_id: Number(result.lastInsertRowid) } }
       }))()
     },

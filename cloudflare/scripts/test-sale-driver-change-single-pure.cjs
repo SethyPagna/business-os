@@ -1,3 +1,4 @@
+const { sqliteD1Call } = require('./harness/sqlite_d1_bindings.cjs')
 // G3: ONE sale's existing driver is changed or cleared from its detail screen.
 //
 // Before G3 the single-sale screen could only ADD a driver to a counter sale
@@ -73,13 +74,13 @@ function fixture() {
     prepare(text) {
       return { bind(...params) { return {
         text, params,
-        async first() { return sql.prepare(text).get(...params) || null },
-        async all() { return { results: sql.prepare(text).all(...params) } },
-        async run() { const r = sql.prepare(text).run(...params); return { meta: { changes: r.changes, last_row_id: Number(r.lastInsertRowid) } } },
+        async first() { return sqliteD1Call(sql.prepare(text), 'get', params) || null },
+        async all() { return { results: sqliteD1Call(sql.prepare(text), 'all', params) } },
+        async run() { const r = sqliteD1Call(sql.prepare(text), 'run', params); return { meta: { changes: r.changes, last_row_id: Number(r.lastInsertRowid) } } },
       } } }
     },
     async batch(statements) {
-      return sql.transaction(() => statements.map((s) => { const r = sql.prepare(s.text).run(...s.params); return { meta: { changes: r.changes, last_row_id: Number(r.lastInsertRowid) } } }))()
+      return sql.transaction(() => statements.map((s) => { const r = sqliteD1Call(sql.prepare(s.text), 'run', s.params); return { meta: { changes: r.changes, last_row_id: Number(r.lastInsertRowid) } } }))()
     },
   } }
   const ctx = { waitUntil() {}, passThroughOnException() {} }

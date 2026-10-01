@@ -1,3 +1,4 @@
+const { sqliteD1Call } = require('./harness/sqlite_d1_bindings.cjs')
 // Actual return bulk kernel + D1 adapter + real SQLite transactions. No SQL mocks.
 const fs = require('node:fs')
 const path = require('node:path')
@@ -49,9 +50,9 @@ function fixture() {
         return {
           text,
           params,
-          async first() { return sql.prepare(text).get(...params) || null },
-          async all() { return { results: sql.prepare(text).all(...params) } },
-          async run() { const result = sql.prepare(text).run(...params); return { meta: { changes: result.changes, last_row_id: Number(result.lastInsertRowid) } } },
+          async first() { return sqliteD1Call(sql.prepare(text), 'get', params) || null },
+          async all() { return { results: sqliteD1Call(sql.prepare(text), 'all', params) } },
+          async run() { const result = sqliteD1Call(sql.prepare(text), 'run', params); return { meta: { changes: result.changes, last_row_id: Number(result.lastInsertRowid) } } },
         }
       } }
     },
@@ -60,7 +61,7 @@ function fixture() {
       if (beforeBatch) { const hook = beforeBatch; beforeBatch = null; await hook() }
       return sql.transaction(() => statements.map(statement => {
         if (failAt && statement.text.includes(failAt)) throw new Error('injected failure')
-        const result = sql.prepare(statement.text).run(...statement.params)
+        const result = sqliteD1Call(sql.prepare(statement.text), 'run', statement.params)
         return { meta: { changes: result.changes, last_row_id: Number(result.lastInsertRowid) } }
       }))()
     },

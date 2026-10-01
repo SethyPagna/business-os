@@ -1,3 +1,4 @@
+const { sqliteD1Call } = require('./harness/sqlite_d1_bindings.cjs')
 // N21 -- sales.customer_address holds the DISPLAY address, never the Contact
 // Options JSON that customers.address stores.
 //
@@ -98,14 +99,14 @@ function fixture(options = {}) {
     prepare(text) {
       return { bind(...params) {
         return { text, params,
-          async first() { return sql.prepare(text).get(...params) || null },
-          async all() { return { results: sql.prepare(text).all(...params) } },
+          async first() { return sqliteD1Call(sql.prepare(text), 'get', params) || null },
+          async all() { return { results: sqliteD1Call(sql.prepare(text), 'all', params) } },
           async run() {
             if (!saleInsertIntercepted && /INSERT\s+INTO\s+sales\s*\(/i.test(text) && options.beforeSaleInsert) {
               saleInsertIntercepted = true
               options.beforeSaleInsert(sql)
             }
-            const r = sql.prepare(text).run(...params)
+            const r = sqliteD1Call(sql.prepare(text), 'run', params)
             return { meta: { changes: r.changes, last_row_id: Number(r.lastInsertRowid) } }
           },
         }
@@ -119,7 +120,7 @@ function fixture(options = {}) {
         options.beforeSaleInsert(sql)
       }
       return sql.transaction(() => statements.map((statement) => {
-        const r = sql.prepare(statement.text).run(...statement.params)
+        const r = sqliteD1Call(sql.prepare(statement.text), 'run', statement.params)
         return { meta: { changes: r.changes, last_row_id: Number(r.lastInsertRowid) } }
       }))()
     },
