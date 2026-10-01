@@ -486,7 +486,6 @@ function sqlLiteral(char: string): string {
   return char.replace(/'/g, "''")
 }
 
-// Materialized stages keep each REPLACE expression below D1's depth100 limit.
 export function foldDiacriticsSql(expr: string): string {
   const stages: string[] = []
   for (let offset = 0; offset < DIACRITIC_SQL_PAIRS.length; offset += 12) {
