@@ -73,6 +73,18 @@ for (const json of ['{', JSON.stringify({ version: 1, amounts: { gross_usd: 123 
   const projected = access.projectAcquisitionCosts({ pricing_snapshot_json: json }, cashier, false, pricing.parseSaleItemPricing)
   assert.ok(projected.pricing_snapshot_json === null || JSON.parse(projected.pricing_snapshot_json).amounts.gross_usd === undefined)
 }
+const supplierFields = ['line_total_usd','total_usd','paid_usd','outstanding_usd','taxable_amount_usd','vat_amount_usd','total_amount_usd','amount_paid_usd','outstanding_balance_usd','total_khr','total_refund_usd','total_refund_khr','applied_price_usd','applied_price_khr','supplier_compensation_usd','supplier_compensation_khr','supplier_loss_usd','supplier_loss_khr','refund_usd','refund_khr']
+const moneyAliases = Object.fromEntries(supplierFields.flatMap(field => [[field, 12], [field.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase()), 12]]))
+for (const marker of [{ scope: 'supplier' }, { return_scope: 'supplier' }, { returnScope: 'supplier' }]) {
+  const original = { ...marker, ...moneyAliases, delivery_actual_cost_usd: 3, product_name: 'Khmer ខូច' }
+  assert.deepEqual(access.projectAcquisitionCosts(original, cashier), { ...marker, delivery_actual_cost_usd: 3, product_name: 'Khmer ខូច' }, 'supplier money aliases remain private')
+  assert.deepEqual(access.projectAcquisitionCosts({ nested: original }, cashier), { nested: { ...marker, delivery_actual_cost_usd: 3, product_name: 'Khmer ខូច' } })
+  const before = JSON.stringify(original)
+  assert.equal(access.projectAcquisitionCosts(original, { role_code: 'admin' }), original)
+  assert.equal(JSON.stringify(original), before)
+}
+const ordinaryMoney = { scope: 'customer', totalUsd: 12, paidUsd: 8, refundUsd: 1, total_usd: 12, paid_usd: 8 }
+assert.deepEqual(access.projectAcquisitionCosts(ordinaryMoney, cashier), ordinaryMoney)
 async function middleware() {
   const app = new Hono()
   app.use('*', async (c, next) => { c.set('user', cashier); await next() })
