@@ -16,6 +16,6 @@ export function invoiceReadWindow(column: string, query: Record<string, string |
   if (!validDay(from) || !validDay(to) || from > to) throw new RangeError('Invoice hours require both valid ordered dates')
   Object.assign(params, window)
   const unknownClock = `length(trim(${column})) = 10 AND ${dateClauses.join(' AND ')}`
-  const recordedClock = `length(trim(${column})) > 10 AND ${continuousReadWindowSql(column)}`
+  const recordedClock = `length(trim(${column})) > 10 AND ${dateClauses.join(' AND ')} AND ${continuousReadWindowSql(column)}`
   return { sql: `((${unknownClock}) OR (${recordedClock}))`, params }
 }
