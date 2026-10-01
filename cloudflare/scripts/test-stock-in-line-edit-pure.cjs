@@ -53,6 +53,7 @@ const load = loadModules()
 const app = new Hono()
 app.route('/api/inventory', load('routes/inventory.ts').default)
 app.route('/api/action-history', load('routes/actionHistory.ts').default)
+app.route('/api', load('routes/contacts.ts').default)
 const losses = load('lib/removalLosses.ts')
 const sessionsQuery = load('lib/stockInSessionsQuery.ts')
 
@@ -86,6 +87,17 @@ async function receive(f, { requestId, quantity, cost = 2, date = '2026-09-05', 
 }
 
 let requestCounter = 0
+async function receiveFree(f, requestId, date = '2026-09-05') {
+  const receipt = await load('lib/productBatches.ts').receiveBatchStock(load('lib/db.ts').getDb(f.env), {
+    productId: 1, branchId: 1, quantity: 12, receivedDate: date,
+    supplierName: 'Fixture Supplier', unitCostUsd: 1.6667, receiptTotalUsd: 20,
+  })
+  const movement = f.sql.prepare(`INSERT INTO inventory_movements
+    (product_id,product_name,branch_id,branch_name,movement_type,quantity,free_quantity,unit_cost_usd,total_cost_usd,reference_id,batch_id)
+    VALUES(1,'Serum',1,'Shop','add',12,2,1.6667,20,?,?)`).run(requestId, receipt.batchId)
+  return { movementId: Number(movement.lastInsertRowid), batchId: receipt.batchId }
+}
+
 const edit = (f, movementId, body, headers) => send(f, 'POST', `/api/inventory/stock-in-lines/${movementId}/edit`,
   { client_request_id: body.client_request_id || `edit-request-${++requestCounter}`, expected_batch_revision: lineRevision(f, movementId), ...body }, headers)
 
@@ -404,6 +416,72 @@ async function main() {
     assert.equal((await redo(f, history.id, 1)).status, 200)
     assert.equal(lot(f, T).stock, 10); assert.equal(lot(f, A).stock, 5)
     assert.equal(sessionLines(f, first.movementId)[0].batch_id, T)
+  })
+
+  await check('shared paid/free date-only moves preserve exact saved money across target reuse, History and supplier invoice children', async () => {
+    for (const existingTarget of [false, true]) for (const explicitSameCost of [false, true]) {
+      const f = fresh()
+      try {
+        const first = await receiveFree(f, 'free-source-first')
+        const second = await receiveFree(f, 'free-source-second')
+        if (existingTarget) await receiveFree(f, 'free-target-existing', '2026-09-07')
+        const expectedTotal = existingTarget ? 60 : 40
+        const invoiceHeaders = { 'x-test-user': JSON.stringify({ ...user, permissions: JSON.stringify({ all: true }) }) }
+        const assertMoney = async (sourceCost, targetCost) => {
+          assert.equal(lot(f, first.batchId).received_cost_usd, sourceCost)
+          const target = f.sql.prepare("SELECT received_cost_usd FROM product_batches WHERE received_at='2026-09-07'").get()
+          assert.equal(target?.received_cost_usd ?? 0, targetCost)
+          assert.equal(f.sql.prepare('SELECT SUM(received_cost_usd) total FROM product_batches').get().total, expectedTotal)
+          assert.equal(sessionLines(f, first.movementId)[0].total_cost_usd, 20)
+          assert.equal(sessionLines(f, second.movementId)[0].total_cost_usd, 20)
+          assert.deepEqual(totals(f), { branch: existingTarget ? 36 : 24, product: existingTarget ? 36 : 24, lots: existingTarget ? 36 : 24 })
+          const invoices = await send(f, 'GET', '/api/suppliers/reports/stock-in-invoices', undefined, invoiceHeaders)
+          assert.equal(invoices.status, 200, JSON.stringify(invoices.json))
+          let childTotal = 0
+          for (const invoice of invoices.json.invoices) {
+            const children = await send(f, 'GET', `/api/suppliers/reports/stock-in-invoice-lines?supplier_key=${encodeURIComponent(invoice.supplier_key)}&day=${invoice.received_day}`, undefined, invoiceHeaders)
+            assert.equal(children.status, 200, JSON.stringify(children.json))
+            childTotal += children.json.lines.reduce((sum, line) => sum + line.received_cost_usd, 0)
+          }
+          assert.equal(childTotal, expectedTotal)
+        }
+        await assertMoney(40, existingTarget ? 20 : 0)
+        const body = { client_request_id: 'free-date-only-edit', quantity: 12, received_date: '2026-09-07', expected_quantity: 12, expected_batch_id: first.batchId, expected_batch_revision: lineRevision(f, first.movementId), ...(explicitSameCost ? { unit_cost_usd: 1.6667 } : {}) }
+        const result = await edit(f, first.movementId, body)
+        assert.equal(result.status, 200, JSON.stringify(result.json))
+        assert.equal(result.json.after.totalCostUsd, 20)
+        await assertMoney(20, existingTarget ? 40 : 20)
+        assert.deepEqual(editRows(f, first.movementId).map((row) => row.total_cost_usd), [-20, 20])
+        assert.equal((await edit(f, first.movementId, body)).status, 200)
+        await assertMoney(20, existingTarget ? 40 : 20)
+        const history = historyOf(f, result.json.operation_id)
+        assert.equal((await undo(f, history.id, 0)).status, 200)
+        await assertMoney(40, existingTarget ? 20 : 0)
+        assert.equal((await redo(f, history.id, 1)).status, 200)
+        await assertMoney(20, existingTarget ? 40 : 20)
+      } finally { f.sql.close() }
+    }
+  })
+
+  await check('paid/free in-place date and deliberate quantity/cost edits retain existing money rules', async () => {
+    for (const shared of [false, true]) for (const change of ['date', 'quantity', 'cost']) {
+      const f = fresh()
+      try {
+        const first = await receiveFree(f, 'free-edit-first')
+        if (shared) await receiveFree(f, 'free-edit-second')
+        const body = { quantity: change === 'quantity' ? 13 : 12, ...(change === 'date' || shared ? { received_date: '2026-09-07' } : {}), ...(change === 'cost' ? { unit_cost_usd: 2 } : {}) }
+        const expected = change === 'cost' ? 24 : change === 'quantity' ? (shared ? 21.6671 : 21.6667) : 20
+        const result = await edit(f, first.movementId, body)
+        assert.equal(result.status, 200, JSON.stringify(result.json))
+        assert.equal(result.json.after.totalCostUsd, expected)
+        assert.equal(sessionLines(f, first.movementId)[0].total_cost_usd, expected)
+        const history = historyOf(f, result.json.operation_id)
+        assert.equal((await undo(f, history.id, 0)).status, 200)
+        assert.equal(sessionLines(f, first.movementId)[0].total_cost_usd, 20)
+        assert.equal((await redo(f, history.id, 1)).status, 200)
+        assert.equal(sessionLines(f, first.movementId)[0].total_cost_usd, expected)
+      } finally { f.sql.close() }
+    }
   })
 
   await check('a move is refused when some of the line was already sold out of the shared lot', async () => {
