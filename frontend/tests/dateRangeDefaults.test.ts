@@ -11,6 +11,7 @@ import { feeRangeParams } from '../src/api/feesTransport.ts'
 import { returnRangeParams } from '../src/api/returnsReadTransport.ts'
 import { buildAuditRequestParams, initialAuditViewState } from '../src/utils/auditLogView.ts'
 import { continuousRangeParams } from '../src/utils/continuousRangeParams.ts'
+import { invoiceRangeParams } from '../src/utils/invoiceRangeParams.ts'
 
 // Execute the production initializers, preference functions and request
 // expressions. No duplicate date-policy implementation lives in the fixture.
@@ -50,13 +51,17 @@ function stateCell(source: string, stateName: string, context: Record<string, un
   return { initial, set, current: () => current }
 }
 function jsxHandler(source: string, attributeName: string, contains: string): string {
-  const attribute = find(source, (node) => ts.isJsxAttribute(node)
-    && node.name.getText() === attributeName
-    && Boolean(node.initializer?.getText().includes(contains)))[0] as ts.JsxAttribute
-  if (!attribute?.initializer || !ts.isJsxExpression(attribute.initializer) || !attribute.initializer.expression) {
-    throw new Error(`production ${attributeName} handler containing ${contains} exists`)
+  for (const candidate of find(source, (node) => ts.isJsxAttribute(node) && node.name.getText() === attributeName)) {
+    const attribute = candidate as ts.JsxAttribute
+    if (!attribute.initializer || !ts.isJsxExpression(attribute.initializer) || !attribute.initializer.expression) continue
+    const expression = attribute.initializer.expression
+    const declaration = ts.isIdentifier(expression)
+      ? find(source, (node) => ts.isVariableDeclaration(node) && node.name.getText() === expression.getText())[0] as ts.VariableDeclaration | undefined
+      : undefined
+    const handler = declaration?.initializer?.getText() || expression.getText()
+    if (handler.includes(contains)) return handler
   }
-  return attribute.initializer.expression.getText()
+  throw new Error(`production ${attributeName} handler containing ${contains} exists`)
 }
 const hooks = { useMemo: (fn: () => unknown) => fn(), useCallback: (fn: unknown) => fn }
 let now = new Date(2026, 8, 11, 12)
@@ -251,10 +256,15 @@ for (const surface of allTimeInvoiceSurfaces) {
   assert.doesNotMatch(source, /todayStr/, `${surface.file} must not reach for the business-day helper at all`)
   const from = stateCell(source, '[fromDate, setFromDate]')
   const to = stateCell(source, '[toDate, setToDate]')
+  const startClock = stateCell(source, '[startTime, setStartTime]')
+  const endClock = stateCell(source, '[endTime, setEndTime]')
   assert.equal(from.initial, '', `${surface.file} start initializer is All time`)
   assert.equal(to.initial, '', `${surface.file} end initializer is All time`)
+  assert.equal(startClock.initial, '')
+  assert.equal(endClock.initial, '')
   const request = evaluate(requestArgs(source, surface.endpoint)[0], {
     ...surface.context, fromDate: from.initial, toDate: to.initial, page: 1, pageSize: 20,
+    invoiceRangeParams, startTime: startClock.initial, endTime: endClock.initial,
   })
   assert.deepEqual([request.from, request.to], ['', ''], `${surface.endpoint} first request carries no date bounds`)
   // Choosing Today from the preset chips must still bound the request, so the
@@ -262,8 +272,17 @@ for (const surface of allTimeInvoiceSurfaces) {
   const today = preset('today')
   const bounded = evaluate(requestArgs(source, surface.endpoint)[0], {
     ...surface.context, fromDate: today.startDate, toDate: today.endDate, page: 1, pageSize: 20,
+    invoiceRangeParams, startTime: '', endTime: '',
   })
   assert.deepEqual([bounded.from, bounded.to], [day1, day1], `${surface.endpoint} still honours a chosen range`)
+  assert.equal(bounded.createdFrom, undefined)
+  assert.equal(bounded.createdTo, undefined)
+  const timed = evaluate(requestArgs(source, surface.endpoint)[0], {
+    ...surface.context, fromDate: today.startDate, toDate: today.endDate, page: 1, pageSize: 20,
+    invoiceRangeParams, startTime: '09:00', endTime: '11:00',
+  })
+  assert.equal(timed.createdFrom, `${day1} 02:00:00`)
+  assert.equal(timed.createdTo, `${day1} 04:01:00`)
 }
 // The mechanism the all-time default depends on: empty values never reach the
 // query string, so "no bound" really means "no bound" at the Worker.
@@ -383,6 +402,7 @@ for (const [file, fromSetter, toSetter, attribute] of [
   let to = day1
   const handler = evaluate(jsxHandler(source, attribute, fromSetter), {
     changeFilter: (apply: () => void) => apply(),
+    invoiceRangeParams, notify: () => {}, tr: (_key: string, fallback: string) => fallback,
     setStartTime: () => {}, setEndTime: () => {},
     [fromSetter]: (value: string) => { from = value },
     [toSetter]: (value: string) => { to = value },

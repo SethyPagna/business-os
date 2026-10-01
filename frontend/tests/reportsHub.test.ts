@@ -607,7 +607,7 @@ test('views: permissions gate the picker, the stored view survives only while al
   assert.equal(resolveReportView('bogus', all), 'overview')
   assert.equal(resolveReportView('sales', { sales: false, returns: false, fees: false, shift: false }), null, 'nothing readable -> null (the hub shows its EmptyState)')
   for (const v of REPORT_VIEWS) {
-    assert.equal(v.supportsTime, v.id !== 'shift', `${v.id} exposes only filters its endpoint understands`)
+    assert.equal(v.supportsTime, true, `${v.id} exposes its implemented timestamp filter`)
     if (v.groupedBy) assert.ok(v.area === 'sales', `${v.id} grouped views are sales-gated`)
   }
   const ids = REPORT_VIEWS.map((v) => v.id)
