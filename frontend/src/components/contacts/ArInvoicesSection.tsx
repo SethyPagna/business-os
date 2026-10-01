@@ -1,4 +1,5 @@
 import { useApp } from '../../AppContext'
+import type { AppContextCoreValue } from '../../app/AppContextCore.tsx'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import AppSelect from '../shared/AppSelect.tsx'
 import SuggestionTextInput, { type SuggestionOption } from '../shared/SuggestionTextInput.tsx'
@@ -78,7 +79,7 @@ const AR_OPTIONAL_COLUMNS: TableColumnDef[] = [
 ]
 
 export default function ArInvoicesSection({ t }: ArInvoicesSectionProps) {
-  const { notify } = useApp()
+  const { notify } = useApp() as Pick<AppContextCoreValue, 'notify'>
   const tr = (key: string, fallback: string): string => t(key) || fallback
   const [customer, setCustomer] = useState('all')
   // P11-13: the customer filter is a search box that lists its options (the
