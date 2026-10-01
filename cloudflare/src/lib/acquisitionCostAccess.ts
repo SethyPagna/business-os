@@ -97,8 +97,19 @@ const SUPPLIER_MONEY_FIELDS = new Set(['line_total_usd', 'total_usd', 'paid_usd'
 
 type RetailPricingParser = (json: string) => { amounts: { gross_usd: number } } | null
 
+function normalizeResponseKey(key: string): string {
+  return normalizeCostKey(key.trim()).replaceAll('_', '')
+}
+const SUPPLIER_RESPONSE_MONEY_FIELDS = new Set([...SUPPLIER_MONEY_FIELDS].map(normalizeResponseKey))
+function isSupplierResponseMoney(key: string): boolean {
+  return SUPPLIER_RESPONSE_MONEY_FIELDS.has(normalizeResponseKey(key))
+}
+function isSupplierGroupKey(key: string): boolean {
+  return normalizeResponseKey(key) === 'periodsupplierreturns'
+}
 function hasSupplierContext(source: Record<string, unknown>): boolean {
-  return Object.entries(source).some(([key, value]) => ['scope', 'return_scope'].includes(normalizeCostKey(key)) && value === 'supplier')
+  return Object.entries(source).some(([key, value]) => ['scope', 'returnscope'].includes(normalizeResponseKey(key))
+    && typeof value === 'string' && value.trim().toLowerCase() === 'supplier')
 }
 
 function restoreRetailPricingGross(json: string, parsed: unknown, projected: unknown, parser?: RetailPricingParser): unknown {
@@ -131,10 +142,14 @@ export function projectAcquisitionCosts(value: unknown, user: PermissionUser, su
     supplier = supplier || hasSupplierContext(source)
     lifecycle = hasLifecycleContext(source, lifecycle)
     // Audit/merge diffs may name the column rather than use it as a key.
-    if (typeof source.field === 'string' && (isAcquisitionCostKey(source.field) || isLifecycleAmount(source.field, lifecycle))) return { field: source.field, redacted: true }
+    const selectedField = Object.entries(source).find(([key, field]) => normalizeResponseKey(key) === 'field'
+      && typeof field === 'string' && (isAcquisitionCostKey(field.trim()) || isLifecycleAmount(field.trim(), lifecycle)
+        || (supplier && isSupplierResponseMoney(field))))
+    if (selectedField) return { field: selectedField[1], redacted: true }
     const result: Record<string, unknown> = {}
     for (const [key, child] of Object.entries(source)) {
-      if (isAcquisitionCostKey(key) || isLifecycleAmount(key, lifecycle) || (supplier && SUPPLIER_MONEY_FIELDS.has(normalizeCostKey(key)))) continue
+      if (isAcquisitionCostKey(key) || isLifecycleAmount(key, lifecycle) || (supplier && isSupplierResponseMoney(key))) continue
+      const childSupplier = supplier || isSupplierGroupKey(key)
       const childLifecycle = lifecycle && !INDEPENDENT_MONEY_FIELDS.has(normalizeCostKey(key))
       if (typeof child === 'string' && isSerializedCostEnvelope(key)) {
         // Only serialized envelopes are parsed, never arbitrary names/notes.
@@ -146,12 +161,13 @@ export function projectAcquisitionCosts(value: unknown, user: PermissionUser, su
           // A bare historical scalar has no column identity; do not expose
           // an old/new unit cost merely because its wrapper lost the key.
           if (!parsed || typeof parsed !== 'object') { result[key] = null; continue }
-          const projected = project(parsed, depth + 1, supplier, childLifecycle)
+          const projected = project(parsed, depth + 1, childSupplier, childLifecycle)
           result[key] = JSON.stringify(key === 'pricing_snapshot_json' && !supplier && !childLifecycle
             ? restoreRetailPricingGross(child, parsed, projected, retailPricingParser) : projected)
         }
         catch { result[key] = null }
       } else {
+        const supplier = childSupplier
         result[key] = project(child, depth + 1, supplier || key === 'periodSupplierReturns', childLifecycle)
       }
     }

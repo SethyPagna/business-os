@@ -100,3 +100,74 @@ async function middleware() {
   console.log('PASS actual serializer/parser and Hono cashier response retain retail gross only; private aliases, supplier/lifecycle, malformed and audit contexts stay redacted')
 }
 middleware().catch(error => { console.error(error); process.exitCode = 1 })
+.then(() => { if (!process.exitCode) return supplierResponseContext() })
+
+async function supplierResponseContext() {
+  console.log('[ORIGINAL_CHECKS_COMPLETE]')
+  let cases = 0
+  const aliases = field => [...new Set([field, field.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase()), field.replace(/(^|_)([a-z])/g, (_, prefix, letter) => letter.toUpperCase()), field.toUpperCase()])]
+  const markers = ['scope', 'Scope', 'SCOPE', 'return_scope', 'returnScope', 'ReturnScope', 'RETURN_SCOPE', 'RETURNSCOPE']
+  const selectors = ['field', 'Field', 'FIELD']
+  const verify = (input, expected, label) => {
+    const before = JSON.stringify(input)
+    assert.deepEqual(access.projectAcquisitionCosts(input, cashier, false, pricing.parseSaleItemPricing), expected, label)
+    assert.equal(JSON.stringify(input), before, 'response projection preserves actor-neutral source bytes')
+    assert.equal(access.projectAcquisitionCosts(input, { role_code: 'admin', permissions: '{"product_cost_view":false}' }), input)
+    assert.equal(access.projectAcquisitionCosts(input, { role_code: 'staff', permissions: '{"product_cost_view":true}' }), input)
+    cases += 1
+  }
+  for (const marker of markers) {
+    for (const context of ['supplier', ' SUPPLIER ']) {
+      for (const selector of selectors) {
+        for (const field of supplierFields.flatMap(aliases)) {
+          const input = { [marker]: context, [selector]: field, old_value: 88, new_value: 99, retained_label: 'ខូច' }
+          const expected = { field, redacted: true }
+          verify(input, expected, 'supplier field diff ' + marker + '/' + context + '/' + selector + '/' + field)
+          verify({ details: JSON.stringify(input) }, { details: JSON.stringify(expected) }, 'serialized supplier field diff')
+        }
+      }
+    }
+  }
+  for (const selector of selectors) {
+    verify({ [selector]: 'costPriceUsd', old_value: 88, new_value: 99 }, { field: 'costPriceUsd', redacted: true }, 'normalized acquisition selector')
+    verify({ entity: 'stock_funding', [selector]: 'amountUsd', old_value: 88, new_value: 99 }, { field: 'amountUsd', redacted: true }, 'normalized lifecycle selector')
+  }
+  verify({ field: 'product_name', FIELD: 'costPriceUsd', old_value: 88, new_value: 99 }, { field: 'costPriceUsd', redacted: true }, 'all selector aliases are inspected before keeping a benign alias')
+  verify({ field: 'totalUsd', Scope: 'supplier', return_scope: 'customer', old_value: 88, new_value: 99 }, { field: 'totalUsd', redacted: true }, 'conflicting supplier marker remains private')
+  const groups = ['periodSupplierReturns', 'period_supplier_returns', 'PeriodSupplierReturns', 'PERIOD_SUPPLIER_RETURNS', 'PERIODSUPPLIERRETURNS']
+  const groupedMoney = Object.fromEntries(supplierFields.flatMap(aliases).map(field => [field, 99]))
+  for (const group of groups) {
+    const input = { [group]: [{ ...groupedMoney, count: 3, product_name: 'ខូច', delivery_actual_cost_usd: 4 }], ordinary: ordinaryMoney }
+    const expected = { [group]: [{ count: 3, product_name: 'ខូច', delivery_actual_cost_usd: 4 }], ordinary: ordinaryMoney }
+    verify(input, expected, 'normalized supplier group ' + group)
+    verify({ details: JSON.stringify(input) }, { details: JSON.stringify(expected) }, 'serialized supplier group ' + group)
+    const projected = access.projectAcquisitionCosts({ [group]: [{ pricing_snapshot_json: original }] }, cashier, false, pricing.parseSaleItemPricing)
+    assert.equal(JSON.parse(projected[group][0].pricing_snapshot_json).amounts.gross_usd, undefined, 'supplier group never receives retail gross exemption')
+  }
+  for (const scope of ['customer', 'retail', 'delivery']) {
+    for (const selector of selectors) {
+      const input = { scope, [selector]: 'totalUsd', old_value: 88, new_value: 99, delivery_actual_cost_usd: 4 }
+      verify(input, input, 'ordinary monetary field diff survives ' + scope + '/' + selector)
+    }
+  }
+  verify({ scope: 'customer', field: 'deliveryActualCostUsd', old_value: 4, new_value: 5 }, { scope: 'customer', field: 'deliveryActualCostUsd', old_value: 4, new_value: 5 }, 'courier amendment exception remains')
+  verify({ field: 'sellingPriceUsd', old_value: 88, new_value: 99 }, { field: 'sellingPriceUsd', old_value: 88, new_value: 99 }, 'retail selling price diff survives')
+  assert.equal(access.hasAcquisitionCostInput({ scope: 'customer', totalUsd: 99 }, cashier), false)
+  assert.equal(access.hasAcquisitionCostInput({ field: 'costPriceUsd', old_value: 88, new_value: 99 }, cashier), true)
+  let user = cashier
+  const payload = { changes: [{ SCOPE: 'SUPPLIER', FIELD: 'totalUsd', old_value: 88, new_value: 99 }], PERIOD_SUPPLIER_RETURNS: [{ totalUsd: 99, count: 3 }], ordinary: ordinaryMoney, pricing_snapshot_json: original }
+  const expected = { changes: [{ field: 'totalUsd', redacted: true }], PERIOD_SUPPLIER_RETURNS: [{ count: 3 }], ordinary: ordinaryMoney, pricing_snapshot_json: original }
+  const app = new Hono()
+  app.use('*', async (c, next) => { c.set('user', user); return next() })
+  app.use('*', access.createAcquisitionCostResponses(pricing.parseSaleItemPricing))
+  app.get('/api/system/audit-logs', c => c.json(payload, 201, { 'X-context': 'supplier' }))
+  const before = JSON.stringify(payload), denied = await app.request('/api/system/audit-logs')
+  assert.equal(denied.status, 201)
+  assert.equal(denied.headers.get('Cache-Control'), 'private, no-store')
+  assert.equal(denied.headers.get('X-context'), 'supplier')
+  assert.deepEqual(await denied.json(), expected)
+  user = { role_code: 'admin', permissions: '{"product_cost_view":false}' }
+  assert.deepEqual(await (await app.request('/api/system/audit-logs')).json(), payload)
+  assert.equal(JSON.stringify(payload), before)
+  console.log('PASS supplier response context matrix ' + cases + ' cases; actual Hono aliases, canonical redacted shape, ordinary amounts, admin grant and immutable retail snapshots')
+}
