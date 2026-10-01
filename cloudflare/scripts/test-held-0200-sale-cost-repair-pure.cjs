@@ -357,6 +357,22 @@ const indexOnly = (text) => {
   return statements.length > 0 && statements.every((s) => /^CREATE\s+(UNIQUE\s+)?INDEX\b/i.test(s))
 }
 
+// A file made only of ALTER TABLE ... ADD COLUMN statements, none of whose new
+// columns the repair names, adds a value the repair never reads or writes, so it
+// cannot interact with it in either order (0208 free_quantity). A column the
+// repair does name still counts.
+const additiveUnread = (text, repairText) => {
+  const statements = text.replace(/--[^\n]*|\/\*[\s\S]*?\*\//g, ' ').split(';').map((s) => s.trim()).filter(Boolean)
+  if (!statements.length) return false
+  const columns = []
+  for (const statement of statements) {
+    const match = /^ALTER\s+TABLE\s+\w+\s+ADD\s+COLUMN\s+(\w+)\b/i.exec(statement)
+    if (!match) return false
+    columns.push(match[1])
+  }
+  return columns.every((column) => !namedIn(repairText)(column))
+}
+
 check('held: not in cloudflare/migrations; sorts after every chain file touching a table it reads or writes (0195 among them), not necessarily last; the chain plus it applies to a fresh database in either order', () => {
   const chain = fs.readdirSync(migrationsDir).filter((f) => f.endsWith('.sql')).sort()
   const chainText = (f) => fs.readFileSync(path.join(migrationsDir, f), 'utf8')
@@ -374,11 +390,13 @@ check('held: not in cloudflare/migrations; sorts after every chain file touching
   const fresh = openDb(chain.map(chainText)).db
   const tables = fresh.prepare("SELECT name FROM sqlite_master WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite_%'").all().map((r) => r.name)
   const touched = tables.filter(namedIn(migrationText))
-  const dependencies = chain.filter((f) => !indexOnly(chainText(f)) && touched.some(namedIn(chainText(f))))
+  const dependencies = chain.filter((f) => !indexOnly(chainText(f)) && !additiveUnread(chainText(f), migrationText) && touched.some(namedIn(chainText(f))))
   assert.ok(['sale_items', 'return_items', 'catalog_cost_repair_0195_backup'].every((t) => touched.includes(t)), 'control: the scan sees the two tables it writes and the 0195 backup it reads')
   assert.ok(dependencies.includes('0195_catalog_cost_on_hand.sql'), 'control: the scan finds 0195')
   assert.ok(indexOnly('-- x\nCREATE INDEX IF NOT EXISTS i ON sale_items(id);\nCREATE UNIQUE INDEX j ON sale_items(id);'), 'control: an index-only file is skipped')
   assert.ok(!indexOnly('CREATE INDEX i ON sale_items(id); UPDATE sale_items SET cost_price_usd = 0;') && !indexOnly('ALTER TABLE sale_items ADD COLUMN z INTEGER;'), 'control: a file that also changes rows or columns is still a dependency')
+  assert.ok(additiveUnread('ALTER TABLE sale_items ADD COLUMN zzz_unread INTEGER NOT NULL DEFAULT 0;', migrationText), 'control: a new column the repair never names is skipped')
+  assert.ok(!additiveUnread('ALTER TABLE sale_items ADD COLUMN cost_price_usd REAL;', migrationText) && !additiveUnread('ALTER TABLE sale_items ADD COLUMN zzz INTEGER; UPDATE sale_items SET zzz = 1;', migrationText), 'control: a column the repair names, or any row change, is still a dependency')
   const later = chain.filter((f) => movedIn.indexOf(f) > movedIn.indexOf(heldName))
   assert.deepEqual(later.filter((f) => dependencies.includes(f)), [],
     `these chain files sort after ${heldName} yet touch a table it reads or writes (${touched.join(', ')}). ` +
