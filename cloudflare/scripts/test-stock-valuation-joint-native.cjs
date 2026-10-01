@@ -6,6 +6,7 @@ const { execFileSync } = require('node:child_process')
 const { openDb } = require('./harness/d1compat.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')
 const { sqliteD1Call } = require('./harness/sqlite_d1_bindings.cjs')
+assert.equal(loadAll().filter(sql => sql === fs.readFileSync(path.join(__dirname, '../migrations/0213_stock_valuation_segments.sql'), 'utf8')).length, 1)
 
 const cache = new Map()
 let actorId = 71

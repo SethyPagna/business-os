@@ -59,6 +59,11 @@ const NAMED_COMPANIONS = {
   // drives schedule / queue delivery / drain through duplicates, races,
   // retries, reopen + reclose and the toggle.
   194: 'test-telegram-shift-overview-pure.cjs',
+  209: 'test-stock-disposition-native.cjs',
+  210: 'test-stock-funding-native.cjs',
+  211: 'test-stock-lifecycle-guards-native.cjs',
+  212: 'test-stock-supplier-lifecycle-native.cjs',
+  213: 'test-stock-valuation-joint-native.cjs',
 }
 
 function listMigrationNumbers() {
