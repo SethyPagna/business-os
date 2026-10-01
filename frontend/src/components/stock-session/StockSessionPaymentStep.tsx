@@ -91,10 +91,10 @@ export default function StockSessionPaymentStep({
       {canViewCosts ? (
         <>
           <div className="flex items-center gap-1.5">
-            <p className="min-w-0 flex-1 text-xs tabular-nums text-gray-600 dark:text-gray-300">
-              {tr('items_total', 'Items total')} <span className="font-semibold">{money4(itemsTotal)}</span>
+            <p className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-1.5 text-xs leading-5 tabular-nums text-gray-600 dark:text-gray-300">
+              <span className="whitespace-nowrap">{tr('items_total', 'Items total')} <span className="font-semibold">{money4(itemsTotal)}</span></span>
               {Math.abs(difference) > 0.005 ? (
-                <> · <span className="font-semibold text-red-600 dark:text-red-400">{tr('stock_difference', 'Difference')} {money4(difference)}</span></>
+                <span className="whitespace-nowrap font-semibold text-red-600 dark:text-red-400">{tr('stock_difference', 'Difference')} {money4(difference)}</span>
               ) : null}
             </p>
             <button type="button" className={ICON_BUTTON} disabled={busy || !canEditCosts} onClick={onMatch} aria-label={tr('match_cost_to_paid', 'Match cost to paid amount')} title={tr('match_cost_to_paid', 'Match cost to paid amount')}>
