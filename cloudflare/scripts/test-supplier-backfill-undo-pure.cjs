@@ -21,6 +21,41 @@ const ts = require('typescript')
 // Load the actual dependency before any permissive per-module shim is active.
 const moneyPrecision = require('../src/lib/moneyPrecision.ts')
 const { loadStockLifecycleFixture, nativeStockFixtureBinding } = require('./harness/load_stock_lifecycle_fixture.cjs')
+const replayEffectCalls = []
+
+function linkedStockFixture(kind) {
+  const d1 = require('./harness/d1compat.cjs').openDb(require('./harness/load_migrations.cjs').loadAll())
+  const native = d1.db
+  native.exec(`
+    INSERT INTO branches(id,name,is_active,is_default) VALUES(9,'Shop',1,1);
+    INSERT INTO users(id,username,name,password,permissions,is_active) VALUES(101,'fixture-owner','Owner','fixture-only','{"products":true,"inventory":true}',1);
+    INSERT INTO suppliers(id,name) VALUES(31,'Pinned supplier');
+    INSERT INTO products(id,name,barcode,stock_quantity,is_active) VALUES(91,'Pinned stock','GUARD91',3,1),(92,'Unlinked product','GUARD92',0,0);
+    INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at,is_active,batch_number,supplier_id,supplier_name,payment_status,received_quantity,received_cost_usd,received_branch_id,unit_cost_usd)
+      VALUES(951,91,'GUARD951','GUARD951','2026-10-01',1,1,31,'Pinned supplier','credit',3,7.0001,9,2.3334);
+    INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(951,9,3);
+    INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(91,9,3);
+    INSERT INTO inventory_movements(id,product_id,branch_id,batch_id,movement_type,quantity,free_quantity,total_cost_usd,reference_id,user_id)
+      VALUES(991,91,9,951,'add',3,0.5,7.0001,'fixture-real-source',101);
+  `)
+  if (kind === 'disposition') native.exec("INSERT INTO stock_disposition_sources(id,movement_id,batch_id,product_id,branch_id,supplier_id,quantity,free_quantity,gross4,opening_paid4,opening_debt4,funding_state) VALUES('source-disposition',991,951,91,9,31,'3','0.5',70001,0,70001,'reconciled_unpaid')")
+  else native.exec("INSERT INTO stock_funding_sources(id,movement_id,batch_id,product_id,branch_id,supplier_id,quantity,free_quantity,gross4,opening_paid4,opening_debt4,reconciliation_proof,actor_id,source_json) VALUES('source-funding',991,951,91,9,31,'3','0.5',70001,40000,30001,'fixture trusted opening',101,'{}'); INSERT INTO stock_funding_events(id,source_id,generation,kind,amount4,gross4,paid4,debt4,credit4,asset4,cash_in4,cash_out4,shipping4,proof,actor_id,occurred_at) VALUES('funding-admit','source-funding',0,'admit',0,70001,40000,30001,0,0,0,0,0,'fixture trusted opening',101,'2026-10-01T00:00:00Z')")
+  return { d1, native }
+}
+
+function linkedStockSnapshot(native) {
+  const encode = value => JSON.stringify(value, (_, cell) => typeof cell === 'bigint' ? { integer64: String(cell) }
+    : ArrayBuffer.isView(cell) ? { blob: Buffer.from(cell.buffer, cell.byteOffset, cell.byteLength).toString('hex') } : cell)
+  const schema = native.prepare('SELECT type,name,tbl_name,sql FROM sqlite_master ORDER BY type,name').all()
+  const quote = value => '"' + value.replaceAll('"', '""') + '"'
+  const tables = schema.filter(row => row.type === 'table').map(({ name }) => {
+    const columns = native.prepare('PRAGMA table_info(' + quote(name) + ')').all()
+    const probes = columns.map(column => 'typeof(' + quote(column.name) + ') AS ' + quote('__stock_type_' + column.name))
+    const rows = native.prepare('SELECT *' + (probes.length ? ',' + probes.join(',') : '') + ' FROM ' + quote(name)).all().map(encode).sort()
+    return [name, columns, rows]
+  })
+  return encode([schema, tables])
+}
 const Module = require('module')
 const { openDb } = require('./harness/d1compat.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')
@@ -84,8 +119,8 @@ function loadUndoAppliers(d1) {
     '../index': {},
     './auth': {},
     './db': { ...loadStockLifecycleFixture('lib/db.ts'), getDb: () => loadStockLifecycleFixture('lib/db.ts').getDb({ DB: nativeStockFixtureBinding(d1.db, stmts => d1.batch(stmts)) }) },
-    './audit': { audit: async () => {} },
-    '../durable-objects/broadcastHub': { broadcast: async () => {} },
+    './audit': { audit: async () => { replayEffectCalls.push('audit') } },
+    '../durable-objects/broadcastHub': { broadcast: async () => { replayEffectCalls.push('broadcast') } },
     './branchWrites': { branchUpdateStatements: () => [] },
     './permissions': { getActionTier: () => 'full', getPermissionTier: () => 'full' },
     // S4-24b: the 'sale.add_items' applier's planners. This file exercises
@@ -309,6 +344,35 @@ async function run() {
     assert.match(appliersSrc, /That supplier no longer exists/)
   })
 
+
+  for (const kind of ['disposition', 'funding']) {
+    await check('actual ' + kind + ' linked metadata refuses supplier replay with typed durable state intact', async () => {
+      const f = linkedStockFixture(kind)
+      try {
+        const actual = loadUndoAppliers(f.d1), lifecycle = loadStockLifecycleFixture()
+        const rec = await actual.recordSupplierBackfillSnapshot({}, { id: 101, username: 'fixture-owner' }, {
+          productId: 91, supplierId: 31, supplierName: 'Pinned supplier', lots: [{ id: 951, prevSupplierId: null, prevSupplierName: null }],
+        })
+        const before = linkedStockSnapshot(f.native), effectsBefore = [...replayEffectCalls]
+        const db = loadStockLifecycleFixture('lib/db.ts').getDb({ DB: nativeStockFixtureBinding(f.native, stmts => f.d1.batch(stmts)) })
+        await assert.rejects(() => lifecycle.assertStockLifecycleMutable(db, { batchId: 951 }), error => {
+          assert.equal(error instanceof require('hono/http-exception').HTTPException, true)
+          assert.equal(error.status, 409)
+          return error.code === 'stock_lifecycle_dependency'
+        })
+        assert.equal(linkedStockSnapshot(f.native), before)
+        assert.deepEqual(replayEffectCalls, effectsBefore)
+        const applier = actual.resolveUndoApplier({ applier: 'supplier.backfill', snapshot_id: rec.snapshotId })
+        await assert.rejects(() => applier.run({ applier: 'supplier.backfill', snapshot_id: rec.snapshotId },
+          { env: {}, user: { id: 101, username: 'fixture-owner' }, direction: 'undo' }), error => lifecycle.stockLifecycleRefusal(error)?.code === 'stock_lifecycle_dependency')
+        assert.equal(linkedStockSnapshot(f.native), before)
+        await lifecycle.assertStockLifecycleMutable(db, { productId: 92 })
+        const authority = loadStockLifecycleFixture('lib/permissions.ts')
+        assert.equal(authority.getActionTier({ permissions: '{"products":true}' }, applier.permission, applier.action), 'full')
+        assert.equal(authority.getActionTier({ permissions: '{"products":true,"products:edit":false}' }, applier.permission, applier.action), 'none')
+      } finally { f.native.close() }
+    })
+  }
   console.log(`\n${passed} check(s) passed.`)
 }
 
