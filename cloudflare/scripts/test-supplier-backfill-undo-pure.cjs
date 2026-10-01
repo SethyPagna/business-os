@@ -366,6 +366,7 @@ async function run() {
         await assert.rejects(() => applier.run({ applier: 'supplier.backfill', snapshot_id: rec.snapshotId },
           { env: {}, user: { id: 101, username: 'fixture-owner' }, direction: 'undo' }), error => lifecycle.stockLifecycleRefusal(error)?.code === 'stock_lifecycle_dependency')
         assert.equal(linkedStockSnapshot(f.native), before)
+        assert.deepEqual(replayEffectCalls, effectsBefore)
         await lifecycle.assertStockLifecycleMutable(db, { productId: 92 })
         const authority = loadStockLifecycleFixture('lib/permissions.ts')
         assert.equal(authority.getActionTier({ permissions: '{"products":true}' }, applier.permission, applier.action), 'full')

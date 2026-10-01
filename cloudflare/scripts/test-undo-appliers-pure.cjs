@@ -1000,7 +1000,7 @@ for (const kind of ['disposition', 'funding']) {
         return error.code === 'stock_lifecycle_dependency'
       })
       assert.equal(linkedStockSnapshot(f.native), before)
-        assert.deepEqual(replayEffectCalls, effectsBefore)
+      assert.deepEqual(replayEffectCalls, effectsBefore)
       const db = loadStockLifecycleFixture('lib/db.ts').getDb({ DB: nativeStockFixtureBinding(f.native, stmts => f.d1.batch(stmts)) })
       await lifecycle.assertStockLifecycleMutable(db, { productId: 92 })
       const permissions = loadStockLifecycleFixture('lib/permissions.ts')
