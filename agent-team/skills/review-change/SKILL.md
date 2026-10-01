@@ -11,6 +11,7 @@ You did not write this code. Judge what is written, not what was meant.
 - Review the **committed** HEAD of the branch, in its own worktree. Note base and head shas.
 - Read the brief/claims. List them as numbered claims to refute.
 - Read raw source/diffs and acceptance artifacts before the author's verdict. Record peer-conclusion exposure; filter coordination output to claims rather than historical messages when preserving blind review.
+- Capture coordination state without displaying it; render only id, agent, mode, paths, resource, worktree, branch and stale. Claims-only output can still expose task or arbitrary claim metadata. Do not print those fields before the independent source pass; disclose any exposure.
 
 ## Checklist
 1. Does the change satisfy the task as stated by the owner (not as reinterpreted)?
@@ -26,6 +27,9 @@ You did not write this code. Judge what is written, not what was meant.
 11. Composition: a clean merge is not a working composition. When the change adds an import to a shared module or a new audit/settings writer, find the tests that would notice on the composed tree: strict harnesses that enumerate a module's imports, and drift guards that scan a whole directory. Run them on the merged tree, or ask the lead for `gate.yml` on the pre-candidate. Lane-scoped test runs missed both CP-3a-2 reds on 28 Sep 2026.
 12. Test instruments: enumerate custom, recursive, extracted and inherited loaders, including permissive stubs. Execute a plausible wrong-helper control that preserves the original business assertions. A caught missing-function error returning400 is not proof of semantic validation; check the actual error and persisted state. A date review in October 2026 found a no-op helper silently ignoring a financial time filter.
 13. Evidence layers: distinguish pure math, actual routes/database, negative/failure/race/replay controls, composed suites, browser behavior and live provenance. Preserve original failed runs and explicitly qualify source-equivalent checks. Temporary safe refusals and disabled slices cannot redefine the owner's full acceptance scope.
+14. Fixture isolation: verify underlying Git routing/index/object/configuration and real common-directory containment, not just temporary cwd. A disposable external sentinel must remain unchanged through direct and nested tests. Wait for pending children and preserve primary versus cleanup errors; never fault-target an active shared ledger.
+15. Stored identities: test actual binding/unique/FK representation with Khmer, supplementary text and malformed UTF-16. Separate insertion failure from native-reader round-trip limitations and untested remote behavior.
+16. Performance and coverage: counters must include real safety helpers. Preserve measured budget mismatches; do not silently relax a cap to accommodate an omitted loader. Compare exact required test identities with raw records, not only totals, and distinguish first-pass results from retries and coverage consistency from semantic correctness.
 
 Run the gates yourself: `node agent-team/scripts/verify.mjs <terms>` for the touched area (its summary says `partial` and what ran). A release candidate is certified by the `.github/workflows/gate.yml` run on GitHub for that exact commit, the full both-package sweep.
 
