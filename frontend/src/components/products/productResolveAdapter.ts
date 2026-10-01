@@ -109,6 +109,7 @@ export type ProductResolveOptions = {
   t: Translate
   canViewCosts: boolean
   canEditCosts: boolean
+  canEditProducts?: boolean
   /** Asked again right before writing: permissions can change while the grid is open. */
   canMerge: () => boolean
   /** A merge step committed: the host's list is out of date even if a later step fails. */
@@ -334,14 +335,14 @@ function defaultImageSource(ctx: Context): number | null {
 }
 
 /** The effective choice per field: an explicit pick, a valid typed value, else the default. */
-function productResolveChoices(ctx: Context): ProductResolveChoices {
+function productResolveChoices(ctx: Context, canEditProducts: boolean): ProductResolveChoices {
   const out: ProductResolveChoices = {}
   const source = (rowKey: string, fallback: number | null) => {
     const id = pickedSource(ctx, rowKey) ?? fallback
     return id === null ? undefined : { source_id: id }
   }
   for (const field of ['name', 'brand', 'category', 'unit'] as const) {
-    const typed = typedValue(ctx, field)
+    const typed = canEditProducts ? typedValue(ctx, field) : null
     if (typed !== null && (field === 'name' ? validName(typed) : validText(typed))) out[field] = { custom: typed.trim() }
     else {
       const choice = source(field, defaultTextSource(ctx, field))
@@ -351,7 +352,7 @@ function productResolveChoices(ctx: Context): ProductResolveChoices {
   const barcode = source('barcode', defaultBarcodeSource(ctx))
   if (barcode) out.barcode = barcode
   for (const [rowKey, field] of [['selling', 'selling_price_usd'], ['wholesale', 'wholesale_price_usd']] as const) {
-    const typed = typedValue(ctx, rowKey)
+    const typed = canEditProducts ? typedValue(ctx, rowKey) : null
     const money = typed === null ? null : typedMoney(typed)
     if (money !== null) out[field] = { custom: money }
     else {
@@ -461,7 +462,7 @@ function blockedMessage(ctx: Context, id: number, t: Translate): string | null {
 // can meet is said in the operator's language, by code first, then by kind.
 // The code and status stay on the error: isStale reads the code and the modal
 // offers Continue only for a network error or a 5xx.
-function localizedRefusal(error: unknown, t: Translate): unknown {
+function localizedRefusal(error: unknown, t: Translate, partial: boolean): unknown {
   const problem = error as { code?: unknown; status?: unknown; errorId?: unknown; message?: unknown } | null
   const code = typeof problem?.code === 'string' ? problem.code : ''
   const errorId = String(problem?.errorId ?? '') || (String(problem?.message ?? '').match(/Reference: ([\w-]+)/)?.[1] ?? '')
@@ -469,15 +470,15 @@ function localizedRefusal(error: unknown, t: Translate): unknown {
   const message = code === 'product_merge_not_duplicates'
     ? tr(t, 'selected_conflict_product_merge_not_duplicates', 'These products are not a current duplicate group. Refresh the Duplicates list and try again.')
     : code === 'resolve_plan_budget'
-      ? tr(t, 'resolve_plan_budget', 'Product resolving is unavailable on this deployment. No changes were saved.')
+      ? partial ? tr(t, 'resolve_partial_refusal_budget', 'Product resolving is unavailable on this deployment.') : tr(t, 'resolve_plan_budget', 'Product resolving is unavailable on this deployment. No changes were saved.')
     : code === 'cost_permission_required'
       ? tr(t, 'resolve_cost_locked', 'Changing the cost needs the cost edit permission.')
     : code === 'merge_failed'
       ? fill(tr(t, 'resolve_refusal_merge_failed', 'The server could not merge these products. Reference: {errorId}'), { errorId })
     : code === 'merge_conflict_retry'
-      ? tr(t, 'resolve_refusal_retry', 'Stock changed while merging. Nothing was saved. Try again.')
+      ? partial ? tr(t, 'resolve_partial_refusal_retry', 'Stock changed while merging. Review the remaining records again.') : tr(t, 'resolve_refusal_retry', 'Stock changed while merging. Nothing was saved. Try again.')
     : code === 'merge_case_exceeds_safe_limit'
-      ? tr(t, 'resolve_refusal_too_large', 'This product has too many linked records for one safe merge. Nothing was saved.')
+      ? partial ? tr(t, 'resolve_partial_refusal_too_large', 'This product has too many linked records for one safe merge.') : tr(t, 'resolve_refusal_too_large', 'This product has too many linked records for one safe merge. Nothing was saved.')
     : code === 'invalid_merge_numeric'
       ? tr(t, 'resolve_refusal_numeric', 'A price or cost is not a valid number. Correct it, then resolve.')
     : code === 'resolve_request_conflict'
@@ -485,9 +486,9 @@ function localizedRefusal(error: unknown, t: Translate): unknown {
     : code === 'invalid_resolve_plan'
       ? tr(t, 'resolve_refusal_invalid_plan', 'These choices are not valid. Review again.')
     : STALE_CODES.has(code)
-      ? tr(t, 'resolve_refusal_changed', 'These records changed. Nothing was saved. Review again.')
+      ? partial ? tr(t, 'resolve_partial_refusal_changed', 'These records changed. Review the remaining records again.') : tr(t, 'resolve_refusal_changed', 'These records changed. Nothing was saved. Review again.')
     : status === 403
-      ? tr(t, 'resolve_refusal_permission', 'You do not have permission to do this. Nothing was saved.')
+      ? partial ? tr(t, 'resolve_partial_refusal_permission', 'You do not have permission to finish this merge.') : tr(t, 'resolve_refusal_permission', 'You do not have permission to do this. Nothing was saved.')
     : status === 404
       ? tr(t, 'resolve_refusal_missing', 'One of these products no longer exists. Refresh and try again.')
     : status >= 400 && status < 500 && status !== 408 && status !== 429
@@ -507,6 +508,7 @@ type Plan = { ctx: Context; rows: ResolveRow[]; choices: ProductResolveChoices |
 
 function buildPlan(data: ProductResolveData, draft: ResolveDraft, options: ProductResolveOptions): Plan {
   const { t, canViewCosts, canEditCosts } = options
+  const canEditProducts = options.canEditProducts === true
   const ctx = contextOf(data, draft)
   const { included, keeperId } = ctx
   const product = (id: number) => data.products.get(id)
@@ -516,7 +518,7 @@ function buildPlan(data: ProductResolveData, draft: ResolveDraft, options: Produ
   const identical = (row: Record<string, ResolveCell>, finalText: string): boolean => included.every((id) => (row[String(id)]?.text ?? '') === finalText)
   const keeper = keeperId === null ? undefined : product(keeperId)
   const mergedProducts = ctx.merged.map((id) => product(id)).filter((entry): entry is ProductResolveRecord => Boolean(entry))
-  const choices = data.choicesSupported ? productResolveChoices(ctx) : null
+  const choices = data.choicesSupported ? productResolveChoices(ctx, canEditProducts) : null
   const final = choices ? productResolveFinalValues(choices, [...data.products.values()]) : {}
   const rowChoice = (rowKey: string): ResolveChoice | undefined => {
     const choice = choices?.[FIELD_OF_ROW[rowKey]]
@@ -538,9 +540,9 @@ function buildPlan(data: ProductResolveData, draft: ResolveDraft, options: Produ
       choice: rowChoice(field),
       identical: identical(row, finalText),
       copyable: true,
-      custom: field === 'name'
+      ...(canEditProducts ? { custom: field === 'name'
         ? { kind: 'text', validate: (value) => (validName(value) ? null : tr(t, 'resolve_name_invalid', 'Enter a name of 1 to 200 characters.')) }
-        : { kind: 'suggest', suggestions: suggestions(field), validate: (value) => (validText(value) ? null : tr(t, 'resolve_text_invalid', 'Use at most 200 characters, without ||.')) },
+        : { kind: 'suggest', suggestions: suggestions(field), validate: (value: string) => (validText(value) ? null : tr(t, 'resolve_text_invalid', 'Use at most 200 characters, without ||.')) } } : {}),
     })
   }
 
@@ -602,7 +604,7 @@ function buildPlan(data: ProductResolveData, draft: ResolveDraft, options: Produ
       final: { text: finalText },
       choice: rowChoice(rowKey),
       identical: identical(row, finalText),
-      custom: { kind: 'money', validate: (value) => (typedMoney(value) === null ? tr(t, 'resolve_price_invalid', 'Enter a price of zero or more.') : null) },
+      ...(canEditProducts ? { custom: { kind: 'money' as const, validate: (value: string) => (typedMoney(value) === null ? tr(t, 'resolve_price_invalid', 'Enter a price of zero or more.') : null) } } : {}),
     })
   }
 
@@ -798,7 +800,7 @@ export function createProductResolveAdapter(options: ProductResolveOptions): Res
         try {
           response = await api.merge(token.keepId, step.mergeId, step.stock, keep) as typeof response
         } catch (error) {
-          throw localizedRefusal(error, t)
+          throw localizedRefusal(error, t, state.index > 0)
         }
         const keeper = response?.keeper && typeof response.keeper === 'object' ? response.keeper : null
         state.index = index + 1
