@@ -78,16 +78,6 @@ function loadModule(relPath, requireShim) {
   return module.exports
 }
 
-// toDbBool copied from lib/db.ts (verbatim) -- branchWrites imports only this
-// one symbol from the heavy db module, so stub the rest of db out.
-function toDbBool(value, fallback = 1) {
-  if (value == null || value === '') return fallback
-  if (typeof value === 'boolean') return value ? 1 : 0
-  if (typeof value === 'number') return value ? 1 : 0
-  const normalized = String(value).trim().toLowerCase()
-  return ['1', 'true', 'yes', 'on'].includes(normalized) ? 1 : 0
-}
-
 const branchRoles = loadModule('lib/branchRoles.ts', require)
 const canonicalBranchIdentity = loadModule('lib/canonicalBranchIdentity.ts', (id) => {
   if (id === './db') return loadStockLifecycleFixture('lib/db.ts')
@@ -95,7 +85,7 @@ const canonicalBranchIdentity = loadModule('lib/canonicalBranchIdentity.ts', (id
   return require(id)
 })
 const branchWrites = loadModule('lib/branchWrites.ts', (id) => {
-  if (id === './db') return { toDbBool }
+  if (id === './db') return loadStockLifecycleFixture('lib/db.ts')
   if (id === './canonicalBranchIdentity') return canonicalBranchIdentity
   return require(id)
 })
