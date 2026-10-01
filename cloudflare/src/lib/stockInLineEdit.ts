@@ -565,7 +565,9 @@ async function applyInner(db: D1Compat, user: SessionUser, movementId: number, b
     const aStock = L - q0
     after.lots.push({ ...A, stock: aStock, receivedQuantity: aRq, receivedCostUsd: aRq === 0 ? (aRc == null ? null : 0) : aRc,
       isActive: aRq === 0 && aStock <= 0 && Number(sourceStock?.elsewhere || 0) <= 0 ? 0 : A.isActive })
-    const lineCost = u == null ? null : multiplyMoney4(u, q1)
+    const lineCost = d === 0 && !costChanged && t0 != null
+      ? t0
+      : u == null ? null : multiplyMoney4(u, q1)
     after.lots.push({
       ...T, isActive: 1, stock: T.stock + q1, stockExists: 1,
       receivedQuantity: (T.receivedQuantity ?? 0) + q1,
