@@ -44,6 +44,8 @@ for (const language of ['en', 'km']) {
       const reviewed = await adapter.review(await adapter.load(signal, empty), empty, signal)
       const progress: number[] = []
       await assert.rejects(adapter.apply(reviewed.token, signal, (done) => progress.push(done)), (error: any) => {
+        const partialKey: Record<string, string> = { access_denied: 'resolve_partial_refusal_permission', merge_conflict_retry: 'resolve_partial_refusal_retry', merge_case_exceeds_safe_limit: 'resolve_partial_refusal_too_large', merge_state_conflict: 'resolve_partial_refusal_changed', resolve_plan_budget: 'resolve_partial_refusal_budget' }
+        assert.equal(error.message, pack[partialKey[code]])
         const fullKeys = ['resolve_refusal_permission', 'resolve_refusal_retry', 'resolve_refusal_too_large', 'resolve_refusal_changed', 'resolve_plan_budget']
         assert.ok(fullKeys.every((key) => error.message !== pack[key]))
         assert.ok(!/Nothing was saved|No changes were saved/.test(error.message))
@@ -54,4 +56,7 @@ for (const language of ['en', 'km']) {
     })
   }
 }
+const host = readFileSync(new URL('../src/components/products/ProductDuplicatesTab.tsx', import.meta.url), 'utf8')
+assert.match(host, /const canEditProducts = can \? can\('products', 'edit'\) : false/)
+assert.match(host, /createProductResolveAdapter\(\{[\s\S]*?canEditProducts,/)
 process.exitCode = failed ? 1 : 0
