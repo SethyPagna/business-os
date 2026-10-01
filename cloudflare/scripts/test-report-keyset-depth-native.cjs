@@ -17,6 +17,17 @@ const h = harness.exports
 ;(async () => {
   const f = h.fixture()
   h.setUser({ ...h.USER, permissions: '{"all":true}' })
+  const queries = []
+  const prepare = f.route.prepare.bind(f.route)
+  f.route.prepare = sql => {
+    const statement = prepare(sql)
+    return { ...statement, all: params => {
+      if (/FROM (?:sale_items si|returns r|return_items ri)\b/.test(sql) && sql.includes('@reportAfterId')) {
+        queries.push({ sql, params })
+      }
+      return statement.all(params)
+    } }
+  }
   const sale = f.raw.prepare(`INSERT INTO sales(receipt_number,sale_status,total_usd,subtotal_usd,created_at,branch_id,payment_method,cashier_name)
     VALUES(@receipt,@status,10,10,@created,1,'Cash','Cashier')`)
   const item = f.raw.prepare('INSERT INTO sale_items(sale_id,product_id,product_name,quantity,total_usd,cost_price_usd) VALUES(@saleId,10,@name,1,10,4)')
@@ -50,6 +61,14 @@ const h = harness.exports
   assert.equal(reference[3].total_count, 0)
   f.raw.db.limits.exprDepth = 100
   for (let index = 0; index < urls.length; index++) assert.deepEqual(await read(urls[index]), reference[index])
+  for (const { sql, params } of queries) {
+    const plan = f.raw.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(params).map(row => row.detail)
+    const alias = /FROM (?:sale_items|returns|return_items) (\w+)/.exec(sql)[1]
+    if (alias === 'r') continue
+    assert.match(plan[0], new RegExp(`SEARCH ${alias} USING INTEGER PRIMARY KEY`), plan.join('\n'))
+    assert.ok(!plan.some(detail => detail.includes('TEMP B-TREE FOR ORDER BY')), plan.join('\n'))
+  }
+  assert.ok(queries.some(({ sql }) => sql.includes('FROM return_items ri')))
   f.raw.db.close()
-  console.log('PASS D1 depth100 report keyset reads preserve search/status/date/time/branch/money filters against depth1000 reference')
+  console.log('PASS D1 depth100 report keyset rows preserve filters and child-first indexed paging without temporary sorts')
 })().catch(error => { console.error(error); process.exitCode = 1 })
