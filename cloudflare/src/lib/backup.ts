@@ -1,4 +1,5 @@
 import { assertStockLifecycleRestoreAllowed } from './stockLifecycle'
+import { withStockRecoveryFence, assertCompleteStockRecoveryGraph, insertStockRecoveryRows } from './stockLifecycleRecovery'
 import { getDb } from './db'
 import type { Env } from '../index'
 import { getPlanLimits } from './planTier'
@@ -230,6 +231,22 @@ export const BACKUP_TABLES = [
   'stock_session_revisions',
   'stock_session_operations',
   'stock_session_members',
+  'stock_disposition_sources',
+  'stock_disposition_allocations',
+  'stock_disposition_events',
+  'stock_disposition_fees',
+  'stock_disposition_receipts',
+  'stock_funding_invoice_openings',
+  'stock_funding_sources',
+  'stock_funding_claims',
+  'stock_funding_events',
+  'stock_funding_receipts',
+  'stock_valuation_sources',
+  'stock_valuation_events',
+  'stock_valuation_segments',
+  'stock_valuation_agreements',
+  'stock_valuation_acceptances',
+  'stock_valuation_receipts',
   'audit_logs',
   'custom_tables',
   'custom_fields',
@@ -599,7 +616,7 @@ export class R2StreamWriter {
 }
 
 export async function createCloudflareBackup(env: Env, source: 'manual' | 'scheduled' = 'manual') {
-  return writeBackupDocument(env, { tables: BACKUP_TABLES, includeAssets: true, source })
+  return withStockRecoveryFence(env, 'backup:snapshot', guarded => writeBackupDocument(guarded, { tables: BACKUP_TABLES, includeAssets: true, source }))
 }
 
 /**
@@ -844,7 +861,7 @@ async function writeBackupDocument(
 export async function createSectionBackup(env: Env, tables: readonly string[], source: 'manual' | 'scheduled' = 'manual') {
   const requested = restoreSafeSectionTables(tables)
   const ordered = BACKUP_TABLES.filter((table) => requested.has(table))
-  return writeBackupDocument(env, { tables: ordered, includeAssets: false, source })
+  return withStockRecoveryFence(env, 'backup:section', guarded => writeBackupDocument(guarded, { tables: ordered, includeAssets: false, source }))
 }
 
 // Queue consumer entry point (called from queue.ts's handleBackupQueue for
@@ -1400,7 +1417,11 @@ async function restoreBackedUpAsset(env: Env, backedUpKey: string, originalKey: 
   }
 }
 
-export async function restoreCloudflareBackup(env: Env, source: string, onProgress?: (progress: RestoreProgress) => Promise<void>) {
+export async function restoreCloudflareBackup(env: Env, source: string, onProgress?: (progress: RestoreProgress) => Promise<void>, ownership?: { token: string; actorId?: number }) {
+  return withStockRecoveryFence(env, source, guarded => restoreCloudflareBackupOwned(guarded, source, onProgress), ownership)
+}
+
+async function restoreCloudflareBackupOwned(env: Env, source: string, onProgress?: (progress: RestoreProgress) => Promise<void>) {
   const key = resolveBackupKey(source)
 
   // Streaming restore (10.1). The old path called object.json() -- the ENTIRE
@@ -1421,6 +1442,7 @@ export async function restoreCloudflareBackup(env: Env, source: string, onProgre
   // trailing summary. Resolve live table presence once after this pass, before
   // pass 2 deletes anything; do not query D1 once per document table.
   const documentTables = new Set<string>()
+  const documentColumns = new Map<string, readonly string[]>()
   let pass1Summary: BackupPayload['summary'] | null = null
   const validatedSource = await openPinnedBackupSource(env, key)
   try {
@@ -1434,6 +1456,7 @@ export async function restoreCloudflareBackup(env: Env, source: string, onProgre
       if (ev.type === 'row' && ev.table === 'custom_tables') assertCustomTableName(ev.row?.name)
       if (ev.type === 'table' && !documentTables.has(ev.table)) {
         documentTables.add(ev.table)
+        documentColumns.set(ev.table, ev.columns)
       } else if (ev.type === 'meta' && ev.key === 'summary') {
         pass1Summary = ev.value as BackupPayload['summary']
       }
@@ -1478,6 +1501,7 @@ export async function restoreCloudflareBackup(env: Env, source: string, onProgre
   // unsafe dependency gaps below; report any unrelated omitted tables rather
   // than letting a scoped restore read as complete.
   const tablesNotInBackup = (BACKUP_TABLES as readonly string[]).filter((t) => !documentTables.has(t))
+  await assertCompleteStockRecoveryGraph(env, documentTables, documentColumns)
   await assertStockLifecycleRestoreAllowed(getDb(env), documentTables)
 
   // Recheck against the live schema even if the caller already validated the
@@ -1517,6 +1541,7 @@ export async function restoreCloudflareBackup(env: Env, source: string, onProgre
     let insertSql = ''
     let insertColumns: string[] = []
     let batch: D1PreparedStatement[] = []
+    let sourceIds: string[] = []
     let restoreTable = ''
     let r2Meta: BackupPayload['r2'] | null = null
     let summaryMeta: BackupPayload['summary'] | null = null
@@ -1530,10 +1555,16 @@ export async function restoreCloudflareBackup(env: Env, source: string, onProgre
 
     const flush = async () => {
       if (!batch.length) return
-      await env.DB.batch(batch)
+      if (['stock_disposition_sources','stock_funding_sources','stock_valuation_sources'].includes(restoreTable)) {
+        await insertStockRecoveryRows(env, restoreTable, batch, sourceIds)
+      } else {
+        const checked = batch.flatMap(row => [row, env.DB.prepare("SELECT CASE WHEN changes()=1 THEN 1 ELSE json_extract('[1]','$[stock_recovery_ignored_insert]') END")])
+        await env.DB.batch(checked)
+      }
       statementCount += batch.length
       tableRowsDone += batch.length
       batch = []
+      sourceIds = []
       flushesSinceProgress += 1
       if (flushesSinceProgress >= 10) {
         flushesSinceProgress = 0
@@ -1566,6 +1597,7 @@ export async function restoreCloudflareBackup(env: Env, source: string, onProgre
         if (restoreTable === 'custom_tables') assertCustomTableName(ev.row?.name)
         const values = insertColumns.map((c) => ev.row[c] ?? null)
         batch.push(env.DB.prepare(insertSql).bind(...values))
+        if (['stock_disposition_sources','stock_funding_sources','stock_valuation_sources'].includes(restoreTable)) sourceIds.push(String(ev.row.id ?? ev.row.source_id))
         if (batch.length >= CHUNK) await flush()
       } else if (ev.type === 'meta') {
         if (ev.key === 'r2') r2Meta = ev.value as BackupPayload['r2']

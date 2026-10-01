@@ -205,7 +205,7 @@ app.post('/', async (c) => {
       try {
         restore = await restoreCloudflareBackup(c.env, sourceDir, async (progress) => {
           await updateMaintenance(c.env, maintenance.token, progress)
-        })
+        }, { token: maintenance.token })
       } catch (error) {
         // Leave maintenance SET -- the database is half-restored and must
         // not quietly serve writes. Record where it died; the admin either

@@ -1,4 +1,6 @@
 import { assertStockLifecycleMutable, stockLifecycleRefusal } from '../lib/stockLifecycle'
+import { withStockRecoveryFence } from '../lib/stockLifecycleRecovery'
+import { MaintenanceAdmissionConflictError } from '../lib/maintenance'
 import { Hono } from 'hono'
 import type { Env } from '../index'
 import { requireAuth } from '../lib/auth'
@@ -100,6 +102,24 @@ function guardSaleRecordReset(statements: ResetStatement[]): ResetStatement[] {
 const app = new Hono<{ Bindings: Env; Variables: { user: any } }>()
 
 app.use('*', requireAuth)
+app.use('*', async (c, next) => {
+  if (c.req.method !== 'POST' || !['/reset-data','/reset-section','/factory-reset'].some(path => c.req.path.endsWith(path))) return next()
+  const denied = denyUnlessRestorePermission(c)
+  if (denied) return denied
+  const original = c.env
+  try {
+    await withStockRecoveryFence(original, `reset:${c.req.path}`, async guarded => {
+      c.env = guarded
+      await assertStockLifecycleMutable(getDb(guarded), { allSources: true })
+      await next()
+    }, { actorId: Number(c.get('user')?.id) || undefined })
+  } catch (error) {
+    const lifecycle = stockLifecycleRefusal(error)
+    if (lifecycle) return c.json({ success: false, ...lifecycle }, 409)
+    if (error instanceof MaintenanceAdmissionConflictError) return c.json({ success: false, error: error.message, code: 'maintenance_admission_conflict' }, 409)
+    return c.json({ success: false, error: error instanceof Error ? error.message : 'Recovery fence failed', code: 'stock_recovery_failed' }, 409)
+  } finally { c.env = original }
+})
 
 // Browser-side crash reporting. The frontend does NOT hold the Sentry DSN
 // and does not talk to Sentry directly: the DSN stays out of the browser
