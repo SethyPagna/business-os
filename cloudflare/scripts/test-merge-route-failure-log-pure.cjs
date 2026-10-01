@@ -93,6 +93,25 @@ async function main() {
     assert.deepEqual(other.filter((line) => line.includes(MERGE_FAILURE_LOG_EVENT)), [], 'routes outside merge/resolve are not logged here')
   })
 
+  await check('DISCRIMINATING: the bulk preview and finalize POSTs still reach their own body guard (the log middleware must not consume the stream first)', async () => {
+    const h = createProductsRouteHarness({ user: ADMIN })
+    h.setUser(ADMIN)
+    const logged = []
+    const lines = await captureLogs(async () => {
+      for (const path of ['/possible-duplicates/merge-batch/preview', '/possible-duplicates/merge-batch/reviews/review-1/finalize']) {
+        const res = await h.request('POST', path, { manifest_version: 1, resolution_version: 2 })
+        assert.notEqual(res.status, 500, `${path} answered 500: ${JSON.stringify(res.json)}`)
+        assert.ok(res.status >= 400 && res.status < 500, `${path}: a body with no groups is a definite refusal, got ${res.status}`)
+        logged.push(res.status)
+      }
+      const big = await h.request('POST', '/possible-duplicates/merge-batch/preview', { merge_groups: [], filler: 'x'.repeat(4 * 1024 * 1024 + 10) })
+      assert.equal(big.status, 413, 'the bounded-body guard still runs and still counts the bytes')
+      assert.equal(big.json.code, 'request_body_too_large')
+    })
+    assert.deepEqual(lines.filter((line) => line.includes(MERGE_FAILURE_LOG_EVENT)), [], 'no 5xx line was written')
+    assert.equal(logged.length, 2)
+  })
+
   console.log(failed ? `\n${failed} check(s) FAILED` : '\nall checks passed')
   if (failed) process.exitCode = 1
 }
