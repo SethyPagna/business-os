@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import ts from 'typescript'
 import { effectivePermissions } from '../src/utils/permissions.ts'
+import { continuousRangeParams, type ContinuousRange } from '../src/utils/continuousRangeParams.ts'
 
 function variable(source: string, name: string): ts.VariableDeclaration {
   const ast = ts.createSourceFile('component.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
@@ -41,8 +42,9 @@ for (const source of [inventory, history]) {
 
 const exportCallback = (variable(branches, 'openBranchExport').initializer as ts.CallExpression).arguments[0].getText()
 type Authority = { actorId: string; allowed: boolean; canViewCosts?: boolean }
-async function branchScenario(tab: string, authority: Authority, onRead?: (read: number, authority: Authority) => void, cost?: unknown) {
+async function branchScenario(tab: string, authority: Authority, onRead?: (read: number, authority: Authority) => void, cost?: unknown, range: ContinuousRange = { startDate: '', endDate: '' }) {
   const reads: number[] = [], published: any[] = [], notices: string[] = []
+  const transferQueries: Record<string, unknown>[] = []
   const inFlight = { current: false }
   const readPage = async (id: number) => {
     reads.push(id)
@@ -54,8 +56,8 @@ async function branchScenario(tab: string, authority: Authority, onRead?: (read:
   const run = evaluate(exportCallback, {
     branchExportAuthorityRef: { current: authority }, branchExportInFlightRef: inFlight,
     setBranchExportLoading: () => {}, tab,
-    branchApi: { getTransfers: (query: any) => readPage(query.page) },
-    branchDateRange: { startDate: '', endDate: '' }, transferFromFilter: 'all', transferToFilter: 'all',
+    branchApi: { getTransfers: (query: any) => { transferQueries.push(query); return readPage(query.page) } },
+    branchDateRange: range, continuousRangeParams, transferFromFilter: 'all', transferToFilter: 'all',
     isTransferRecord: (row: any) => !!row.id, formatTransferDate: () => '', historyExportField: (value: unknown) => value || '',
     notify: (message: string) => notices.push(message), tr: (_key: string, fallback: string) => fallback,
     setExportDialog: (result: unknown) => published.push(result),
@@ -68,7 +70,7 @@ async function branchScenario(tab: string, authority: Authority, onRead?: (read:
   })
   await run()
   assert.equal(inFlight.current, false)
-  return { reads, published, notices }
+  return { reads, published, notices, transferQueries }
 }
 for (const tab of ['branches', 'transfers']) {
   for (const tier of [true, 'review', false]) for (const override of [undefined, false, true, 'false']) {
@@ -86,6 +88,19 @@ for (const tab of ['branches', 'transfers']) {
     assert.equal(result.reads.length, 1, 'revoked/changed authority stops subsequent reads')
     assert.equal(result.published.length, 0, 'late results never open the export dialog')
   }
+}
+for (const endTime of ['23:59', '24:00']) {
+  const result = await branchScenario('transfers', { actorId: '7', allowed: true }, undefined, undefined, {
+    startDate: '2026-10-01', endDate: '2026-10-01', startTime: '22:00', endTime,
+  })
+  assert.deepEqual(result.reads, [1, 2])
+  assert.equal(result.published.length, 1)
+  assert.deepEqual(result.notices, [])
+  assert.deepEqual(result.transferQueries, [1, 2].map(page => ({
+    startDate: '2026-10-01', endDate: '2026-10-01',
+    createdFrom: '2026-10-01 15:00:00', createdTo: '2026-10-01 17:00:00',
+    fromBranchId: undefined, toBranchId: undefined, page, pageSize: 200,
+  })), 'each authorized transfer export page retains exclusive Cambodia UTC bounds')
 }
 for (const canViewCosts of [false, true]) {
   for (const cost of [undefined, null, '', 0, 3.25]) {

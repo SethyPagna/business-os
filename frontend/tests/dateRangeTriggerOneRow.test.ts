@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import ts from 'typescript'
 
 // The current contract supersedes the earlier inline date+time trigger:
 // dates alone stay on one line; editable times remain inside the panel.
@@ -48,7 +49,23 @@ runTest('the closed trigger shows dates only while the panel retains time editin
   assert.match(triggerEndpointBody, /<span>\{date\}<\/span>/)
   assert.doesNotMatch(triggerEndpointBody, /\btime\b|showTimes|startTime|endTime/)
   assert.match(source, /<TimeEntryInput value=\{value\.startTime\} onChange=\{\(next\) => apply\(\{ startTime: next \}\)\}/)
-  assert.match(source, /<TimeEntryInput value=\{value\.endTime\} onChange=\{\(next\) => apply\(\{ endTime: next \}\)\}/)
+  assert.match(source, /<TimeEntryInput allowEndOfDay value=\{value\.endTime\} onChange=\{\(next\) => apply\(\{ endTime: next \}\)\}/)
+})
+
+runTest('only the range end grants end-of-day while ordinary time fields remain strict by default', () => {
+  const ast = ts.createSourceFile('DateTimeRangePicker.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+  const fields: ts.JsxSelfClosingElement[] = []
+  const visit = (node: ts.Node) => {
+    if (ts.isJsxSelfClosingElement(node) && node.tagName.getText(ast) === 'TimeEntryInput') fields.push(node)
+    ts.forEachChild(node, visit)
+  }
+  visit(ast)
+  assert.equal(fields.length, 2)
+  const grants = fields.filter(field => field.attributes.properties.some(attribute => ts.isJsxAttribute(attribute) && attribute.name.getText(ast) === 'allowEndOfDay'))
+  assert.equal(grants.length, 1, 'the start field must not grant end-of-day in any attribute position')
+  assert.ok(grants[0].attributes.properties.some(attribute => ts.isJsxAttribute(attribute) && attribute.getText(ast) === 'value={value.endTime}'))
+  assert.ok(grants[0].attributes.properties.some(attribute => ts.isJsxAttribute(attribute) && attribute.name.getText(ast) === 'allowEndOfDay' && !attribute.initializer))
+  assert.match(readFrontend('src/components/shared/DateEntryInput.tsx'), /export function TimeEntryInput\(\{\s*allowEndOfDay = false,/)
 })
 
 runTest('Start -> End trigger row keeps both endpoints on one row (grid-cols, not grid-rows)', () => {
