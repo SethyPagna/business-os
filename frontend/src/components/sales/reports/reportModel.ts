@@ -72,7 +72,7 @@ export interface ReportViewDef {
 
 export const REPORT_VIEWS: readonly ReportViewDef[] = [
   { id: 'overview', area: 'any', group: 'summary', labelKey: 'rpt_overview', fallback: 'Overview (all)', supportsTime: true, supportsSearch: false, supportsSaleFilters: true },
-  { id: 'shift', area: 'sales', group: 'summary', labelKey: 'shift_report', fallback: 'Shift Report', supportsTime: false, supportsSearch: false, supportsSaleFilters: false },
+  { id: 'shift', area: 'sales', group: 'summary', labelKey: 'shift_report', fallback: 'Shift Report', supportsTime: true, supportsSearch: false, supportsSaleFilters: false },
   { id: 'periods', area: 'sales', group: 'summary', labelKey: 'rpt_periods', fallback: 'By period', supportsTime: true, supportsSearch: false, supportsSaleFilters: true },
   { id: 'sales', area: 'sales', group: 'sales', labelKey: 'rpt_sales_list', fallback: 'Each receipt', supportsTime: true, supportsSearch: true, supportsSaleFilters: true },
   { id: 'products', area: 'sales', group: 'sales', labelKey: 'products', fallback: 'Products', groupedBy: 'product', supportsTime: true, supportsSearch: true, supportsSaleFilters: true },

@@ -55,7 +55,7 @@ test('mounted Shift selection pages beyond200 and revokes old detail before date
     }
     if (id.includes('shiftReportModel')) return require('../src/components/shifts/shiftReportModel.ts')
     if (id.includes('ShiftSummary')) return { __esModule: true, default: Summary }
-    if (id.includes('reportModel')) return { reportFileName: (name: string) => name }
+    if (id.includes('reportModel')) return { reportFileName: (name: string) => name, reportQueryParams: require('../src/components/sales/reports/reportModel.ts').reportQueryParams }
     if (id.includes('reportTypes')) return { exportMenuItems: (_t: any, _can: any, csv: any) => [{ onClick: csv }] }
     if (id.includes('/csv')) return { downloadCSV: (...args: any[]) => exports.push(args) }
     if (id.includes('ShiftGate')) return { SHIFT_STATE_CHANGED_EVENT: 'shift:test' }

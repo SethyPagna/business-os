@@ -43,6 +43,9 @@ const get = async (route, params = {}) => {
       const fullTime = await get(route, { ...day, page_size: '100', createdFrom: '2026-08-31 17:00:00', createdTo: '2026-09-01 17:00:00' })
       assert.deepEqual(fullTime.body.invoices, dateOnly.body.invoices)
       assert.deepEqual(fullTime.body.totals, dateOnly.body.totals)
+      const acrossDays = await get(route, { ...exact, to: '2026-09-02', page_size: '100', createdTo: '2026-09-02 02:01:00' })
+      assert.deepEqual(acrossDays.body.invoices.map(row => row.id).sort(), [1,3,4,5,6], 'continuous span includes intervening hours plus unknown-clock dates')
+      assert.deepEqual(acrossDays.body.totals, { invoices: 5, total_usd: 50, paid_usd: 15, outstanding_usd: 35, outstanding_count: 5 })
       const offsets = await get(route, { ...day, createdFrom: '2026-09-01T09:00:00+07:00', createdTo: '2026-09-01T11:01:00+07:00' })
       assert.deepEqual(offsets.body.totals, narrowed.body.totals)
       for (const invalid of [

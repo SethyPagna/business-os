@@ -140,6 +140,7 @@ let currentUserId = 7
 const primaryD1 = d1(sqlite)
 let activeD1 = primaryD1
 const shiftsRoute = loadReal('routes/shifts.ts', {
+  '../lib/continuousReadWindow': loadReal('lib/continuousReadWindow.ts'),
   '../lib/businessDateWindow': businessDateWindow,
   '../lib/clientTimestamp': loadReal('lib/clientTimestamp.ts'),
   '../lib/db': { getDb: () => activeD1 },
@@ -308,6 +309,7 @@ async function main() {
   empty.exec(fs.readFileSync(path.join(cloudflareRoot, 'migrations', '0132_shift_opening_count_presence.sql'), 'utf8'))
   empty.exec(fs.readFileSync(path.join(cloudflareRoot, 'migrations', '0147_shift_additional_cash.sql'), 'utf8'))
   const stranger = loadReal('routes/shifts.ts', {
+    '../lib/continuousReadWindow': loadReal('lib/continuousReadWindow.ts'),
     '../lib/businessDateWindow': businessDateWindow,
     '../lib/clientTimestamp': loadReal('lib/clientTimestamp.ts'),
     '../lib/db': { getDb: () => d1(empty) },
