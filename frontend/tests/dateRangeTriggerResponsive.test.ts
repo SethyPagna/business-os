@@ -102,12 +102,9 @@ runTest('the Reports mobile range picker takes the full row width instead of a s
   assert.match(reportsCss, /\.reports-mobile-primary\s*>\s*\*\s*\{[^}]*flex:\s*1\s+1\s+100%/s, 'the picker (the only child of .reports-mobile-primary) must claim the full row width')
 })
 
-runTest('the Reports mobile trigger stacks Start above End (not a mid-string wrap) below 400px', () => {
-  const mediaMatch = reportsCss.match(/@media \(max-width: 400px\) \{[\s\S]*?\n\}/)
-  assert.ok(mediaMatch, 'a narrow-width stacking rule for the reports range trigger must exist')
-  const mediaBody = mediaMatch![0]
-  assert.match(mediaBody, /reports-mobile-range.*data-date-range-trigger-values/, 'the stacking rule must target the picker\'s own endpoint track')
-  assert.match(mediaBody, /grid-template-columns:\s*minmax\(0,\s*1fr\)/, 'stacked mode collapses to a single column (two rows), not a shrinking multi-column row')
+runTest('the Reports mobile trigger uses the shared one-row endpoint track', () => {
+  assert.match(reportsCss, /\.reports-mobile-range\s*\{[^}]*display:\s*flex/)
+  assert.doesNotMatch(reportsCss, /\.reports-mobile-range \[data-date-range-trigger-values\]/)
 })
 
 if (failed > 0) {

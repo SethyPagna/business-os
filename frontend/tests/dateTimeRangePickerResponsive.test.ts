@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { STATS_PRESETS } from '../src/components/shared/statsStripPresets.ts'
 import { spawn } from 'node:child_process'
 import fs from 'node:fs'
 import net from 'node:net'
@@ -221,8 +222,7 @@ try {
     assert.doesNotMatch(reportsGeometry.values, /\d{2}:\d{2}/, 'Reports keeps times inside the picker')
     // Below 400px the CSS stacks Start above End (two distinct row tops);
     // at/above it they stay side by side (same row top).
-    if (width < 400) assert.ok(reportsGeometry.endTop > reportsGeometry.startTop, `${width}px reports trigger stacks Start above End`)
-    else assert.equal(reportsGeometry.endTop, reportsGeometry.startTop, `${width}px reports trigger keeps Start and End side by side`)
+    assert.equal(reportsGeometry.endTop, reportsGeometry.startTop, `${width}px reports trigger keeps Start and End side by side`)
   }
 
   await setViewport(320, 480)
@@ -286,7 +286,7 @@ try {
 
   await evaluate(`document.querySelector('[data-date-time-range-panel] button[aria-label="បិទ"]').click(); document.querySelector('[data-direct-fixture] [aria-label="ជួរកាលបរិច្ឆេទ និងម៉ោង"]').click()`)
   await waitFor(async () => await evaluate<boolean>(`Boolean(document.querySelector('[data-date-time-range-panel] [data-date-time-range-presets]'))`) ? true : null)
-  assert.equal(await evaluate<number>(`document.querySelectorAll('[data-date-time-range-panel] [data-date-time-range-presets] button').length`), 6, 'direct callers retain the six picker presets by default')
+  assert.equal(await evaluate<number>(`document.querySelectorAll('[data-date-time-range-panel] [data-date-time-range-presets] button').length`), STATS_PRESETS.length, 'direct callers retain all shared picker presets by default')
 
   console.log('PASS native responsive date range keeps full values, scrolls in viewport, localizes month/year navigation, and preserves preset ownership')
 } catch (error) {

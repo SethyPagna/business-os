@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { transformSync } from 'esbuild'
 import ts from 'typescript'
+import { STATS_PRESETS, statsPresetRange, type StatsPresetKey } from '../src/components/shared/statsStripPresets.ts'
 
 const require = createRequire(import.meta.url)
 const read = (file: string) => readFileSync(new URL(`../src/components/${file}`, import.meta.url), 'utf8')
@@ -53,11 +54,16 @@ for (const file of [
     assert.equal(picker.props.showQuickRanges, false, `${file}: shared picker explicitly disables internal presets`)
     const rail = row.props.children[1]
     assert.match(rail.props.className, /stats-date-presets.*flex-nowrap.*overflow-x-auto/)
-    assert.equal(rail.props.children.length, 8, `${file}: one standard eight-preset row`)
+    assert.deepEqual(rail.props.children.map((preset: { key: string }) => preset.key), STATS_PRESETS.map(({ id }) => id), `${file}: one complete shared preset row in the standard order`)
     for (const preset of rail.props.children) {
       preset.props.onClick()
-      assert.ok('startDate' in state && 'endDate' in state)
-      if (showTime) assert.equal(state.startTime, preset.key === 'all' ? '' : '00:00')
+      const expected = statsPresetRange(preset.key as StatsPresetKey)
+      assert.equal(state.startDate, expected.startDate)
+      assert.equal(state.endDate, expected.endDate)
+      if (showTime) {
+        assert.equal(state.startTime, expected.startTime)
+        assert.equal(state.endTime, expected.endTime)
+      }
     }
     const custom = { ...initial, startTime: '10:45' }
     picker.props.onChange(custom, 'custom')

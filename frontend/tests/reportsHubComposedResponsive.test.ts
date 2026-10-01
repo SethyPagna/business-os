@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { STATS_PRESETS } from '../src/components/shared/statsStripPresets.ts'
 import { spawn } from 'node:child_process'
 import fs from 'node:fs'
 import net from 'node:net'
@@ -25,8 +26,8 @@ const fixtureSource = String.raw`
 `
 
 const appContextSource = String.raw`
-  const en = { overview_all: 'Overview (all)', filters: 'Filters', show: 'Show', quick_range: 'Quick range', date_time_range: 'Date and time range', close: 'Close', clear: 'Clear', previous: 'Previous', next: 'Next', month: 'Month', year: 'Year' }
-  const km = { overview_all: 'ទិដ្ឋភាពទូទៅ (ទាំងអស់)', filters: 'តម្រង', show: 'បង្ហាញ', quick_range: 'ជួររហ័ស', date_time_range: 'ជួរកាលបរិច្ឆេទ និងម៉ោង', close: 'បិទ', clear: 'សម្អាត', previous: 'មុន', next: 'បន្ទាប់', month: 'ខែ', year: 'ឆ្នាំ' }
+  import en from '/src/lang/en.json'
+  import km from '/src/lang/km.json'
   export function useApp() {
     const lang = new URLSearchParams(location.search).get('lang') || 'en'
     const words = lang === 'km' ? km : en
@@ -151,9 +152,9 @@ try {
     assert.ok(geometry.selectedText.trim().length > 0, `${width}px ${lang} selected report has an accessible visible label`)
     assert.ok(geometry.selectedScroll >= geometry.selectedClient, `${width}px ${lang} selected label remains horizontally reachable without ellipsis clipping`)
 
-    const externalPresets = await evaluate<number>(`document.querySelectorAll('[data-reports-hub] > .reports-mobile-controls .reports-mobile-preset').length`)
-    assert.equal(externalPresets, 6, `${width}px ${lang} renders exactly one external six-preset rail`)
-    await evaluate(`document.querySelector('[aria-label="${lang === 'km' ? 'ជួរកាលបរិច្ឆេទ និងម៉ោង' : 'Date and time range'}"]').click()`)
+    const externalPresets = await evaluate<number>(`document.querySelectorAll('[data-reports-hub] .reports-mobile-preset').length`)
+    assert.equal(externalPresets, STATS_PRESETS.length, `${width}px ${lang} renders exactly one canonical preset rail`)
+    await evaluate(`document.querySelector('[data-date-range-trigger-values]').closest('button').click()`)
     const panel = await waitFor(async () => await evaluate<any>(`(() => { const p=document.querySelector('[data-date-time-range-panel]'); if(!p)return null; const r=p.getBoundingClientRect(); return { left:r.left,right:r.right,top:r.top,bottom:r.bottom,client:p.clientHeight,scroll:p.scrollHeight,overflow:getComputedStyle(p).overflowY,innerPresets:p.querySelectorAll('[data-date-time-range-presets] button').length } })()`))
     assert.equal(panel.innerPresets, 0, `${width}px ${lang} picker does not duplicate external presets`)
     assert.ok(panel.left >= 7 && panel.right <= width - 7 && panel.top >= 7 && panel.bottom <= 393, `${width}px ${lang} portaled picker stays within viewport`)
@@ -163,6 +164,43 @@ try {
     await send('Input.dispatchMouseEvent', { type: 'mouseWheel', ...point, deltaX: 0, deltaY: 1200 })
     await waitFor(async () => (await evaluate<number>(`document.querySelector('[data-date-time-range-panel]').scrollTop`)) > 0 ? true : null)
     assert.equal(await evaluate<boolean>(`(() => { const p=document.querySelector('[data-date-time-range-panel]'); const last=[...p.querySelectorAll('button')].at(-1); const a=p.getBoundingClientRect(),b=last.getBoundingClientRect(); return b.top>=a.top&&b.bottom<=a.bottom })()`), true, `${width}px ${lang} final picker control is reachable by native scroll`)
+  }
+  const screenshotDirectory = process.env.BUSINESS_OS_SCREENSHOTS_DIR
+  if (screenshotDirectory) fs.mkdirSync(screenshotDirectory, { recursive: true })
+  for (const width of [360, 1280]) for (const lang of ['en', 'km'] as const) {
+    await navigate(width, lang)
+    await send('Emulation.setDeviceMetricsOverride', { width, height: 800, deviceScaleFactor: 1, mobile: false })
+    await evaluate('document.fonts.ready')
+    const words = JSON.parse(fs.readFileSync(path.join(root, 'src/lang', `${lang}.json`), 'utf8')) as Record<string, string>
+    const trigger = await evaluate<any>(`(() => { const track = document.querySelector('[data-date-range-trigger-values]'); const [start,,end] = track.children; const a=start.getBoundingClientRect(),b=end.getBoundingClientRect(); return { text:track.textContent, startTop:a.top,endTop:b.top,page:document.documentElement.scrollWidth,viewport:innerWidth } })()`)
+    assert.equal(trigger.page, trigger.viewport, `${width}px ${lang} page stays within the viewport`)
+    assert.equal(trigger.startTop, trigger.endTop, `${width}px ${lang} date endpoints share one row`)
+    assert.match(trigger.text, /\d{2}\/\d{2}\/\d{4}/)
+    const rail = await evaluate<any>(`(() => { const rail=document.querySelector('.reports-mobile-presets'); rail.scrollLeft=rail.scrollWidth; const right=rail.scrollLeft; rail.scrollLeft=0; return {count:rail.children.length,right,left:rail.scrollLeft,wrap:getComputedStyle(rail).flexWrap,tops:[...rail.children].map(c=>c.getBoundingClientRect().top)} })()`)
+    assert.equal(rail.count, STATS_PRESETS.length)
+    assert.equal(rail.wrap, 'nowrap')
+    assert.equal(new Set(rail.tops).size, 1)
+    assert.equal(rail.left, 0)
+    if (width === 360) assert.ok(rail.right > 0, `${lang} presets scroll both ways`)
+    if (screenshotDirectory) {
+      const shot = await send('Page.captureScreenshot', { format: 'png' })
+      fs.writeFileSync(path.join(screenshotDirectory, `reports-${lang}-${width}x800-closed.png`), Buffer.from(shot.data, 'base64'))
+    }
+    await evaluate(`document.querySelector('[data-date-range-trigger-values]').closest('button').click()`)
+    await waitFor(async () => await evaluate<boolean>(`Boolean(document.querySelector('[data-date-time-range-panel] input[placeholder="HH:MM"]'))`) ? true : null)
+    const controls = await evaluate<any>(`(() => { const panel=document.querySelector('[data-date-time-range-panel]'); return { labels:[...panel.querySelectorAll('[data-temporal-input-label]')].map(label=>{const l=label.getBoundingClientRect(),input=label.parentElement.querySelector('input'),r=input.getBoundingClientRect();return {text:label.textContent,left:l.left,right:l.right,top:l.top,bottom:l.bottom,inputLeft:r.left,inputRight:r.right,inputTop:r.top,inputBottom:r.bottom,visible:label.scrollWidth<=label.clientWidth+1}}), weekdays:[...panel.querySelectorAll('[data-date-range-weekday]')].map(d=>({text:d.textContent,width:d.clientWidth,scroll:d.scrollWidth})),times:[...panel.querySelectorAll('input[placeholder="HH:MM"]')].map(input=>({value:input.value,type:input.type,mode:input.inputMode})) } })()`)
+    assert.deepEqual(controls.labels.map((label: any) => label.text), [words.range_start, words.range_end, words.start_time, words.end_time])
+    for (const label of controls.labels) {
+      assert.ok(label.left >= label.inputLeft && label.right <= label.inputRight + 1 && label.top >= label.inputTop && label.bottom <= label.inputBottom, `${width}px ${lang} ${label.text} sits inside its input`)
+      assert.ok(label.visible, `${width}px ${lang} ${label.text} remains fully readable`)
+    }
+    assert.deepEqual(controls.weekdays.map((day: any) => day.text), Array.from({length:7},(_,index)=>words[`date_weekday_${index+1}`]))
+    for (const day of controls.weekdays) assert.ok(day.scroll <= day.width + 1, `${width}px ${lang} ${day.text} stays within its calendar column`)
+    assert.deepEqual(controls.times, [{value:'00:00',type:'text',mode:'numeric'},{value:'23:59',type:'text',mode:'numeric'}])
+    if (screenshotDirectory) {
+      const shot = await send('Page.captureScreenshot', { format: 'png' })
+      fs.writeFileSync(path.join(screenshotDirectory, `reports-${lang}-${width}x800-picker.png`), Buffer.from(shot.data, 'base64'))
+    }
   }
   console.log('PASS composed ReportsHub toolbar and portaled date picker at 320/390 EN/KM')
 } catch (error) {
