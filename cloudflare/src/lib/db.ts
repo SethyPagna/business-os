@@ -35,12 +35,20 @@ function translate(sql: string, params: BindParams): { sql: string; values: unkn
   }
   const map = params || {}
   const values: unknown[] = []
-  // @name -> positional ?, in the order they appear (D1/SQLite requires
-  // this order to match .bind() argument order for plain `?` placeholders).
-  const translatedSql = sql.replace(/@(\w+)/g, (_match, name: string) => {
-    values.push((map as Record<string, unknown>)[name] ?? null)
-    return '?'
+  const slots = new Map<string, number>()
+  let positional = false
+  const translatedSql = sql.replace(/'(?:[^']|'')*'|"(?:[^"]|"")*"|`(?:[^`]|``)*`|\[[^\]]*\]|--[^\r\n]*|\/\*[\s\S]*?\*\/|@(\w+)|(\?\d*)/g, (match, name: string | undefined, position: string | undefined) => {
+    if (position !== undefined) positional = true
+    if (name === undefined) return match
+    let slot = slots.get(name)
+    if (slot === undefined) {
+      values.push((map as Record<string, unknown>)[name] ?? null)
+      slot = values.length
+      slots.set(name, slot)
+    }
+    return `?${slot}`
   })
+  if (slots.size && positional) throw new Error('Cannot mix named and positional SQL parameters')
   return { sql: translatedSql, values }
 }
 
