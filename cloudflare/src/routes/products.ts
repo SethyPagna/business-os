@@ -2546,6 +2546,8 @@ app.delete('/:id', async (c) => {
   try {
     await db.batch(productRemoveApplyStatements({ plan, operationId, source: 'direct', requestId, user, transitionStamp, planDigest }))
   } catch (error) {
+    const lifecycle = stockLifecycleRefusal(error)
+    if (lifecycle) return c.json({ success: false, ...lifecycle }, 409)
     const replay = await db.prepare(`SELECT * FROM product_remove_operations WHERE actor_id=@actor AND source='direct' AND request_id=@request`)
       .get<ProductRemoveOperationRow>({ actor: user.id, request: requestId })
     if (replay?.status === 'undo_ready' && replay.product_id === id && replay.reason === reason) {

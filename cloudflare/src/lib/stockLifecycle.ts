@@ -17,23 +17,31 @@ export class StockLifecycleError extends HTTPException {
   readonly statusCode = 409
   readonly code = STOCK_LIFECYCLE_CODE
   constructor() {
-    super(409, { message: STOCK_LIFECYCLE_CODE, res: Response.json({ error: STOCK_LIFECYCLE_MESSAGE, code: STOCK_LIFECYCLE_CODE }, { status: 409 }) })
+    super(409, { message: STOCK_LIFECYCLE_MESSAGE, res: Response.json({ error: STOCK_LIFECYCLE_MESSAGE, code: STOCK_LIFECYCLE_CODE }, { status: 409 }) })
   }
 }
 
-export async function assertStockLifecycleMutable(db: D1Compat, scope: { movementId?: number; batchId?: number; productId?: number; branchId?: number; feeId?: number }) {
-  const objects = await db.prepare("SELECT name FROM sqlite_master WHERE name IN ('stock_disposition_sources','stock_funding_dependencies','stock_disposition_fees')").all<{ name: string }>()
+export async function assertStockLifecycleMutable(db: D1Compat, scope: { movementId?: number; batchId?: number; productId?: number; branchId?: number; feeId?: number; allSources?: boolean }) {
+  const objects = await db.prepare("SELECT name FROM sqlite_master WHERE name IN ('stock_disposition_sources','stock_funding_dependencies','stock_disposition_fees','stock_funding_events')").all<{ name: string }>()
   const present = new Set(objects.map(row => row.name))
-  if (scope.feeId && present.has('stock_disposition_fees')) {
-    if (await db.prepare('SELECT 1 FROM stock_disposition_fees WHERE fee_id=@id LIMIT 1').get({ id: scope.feeId })) throw new StockLifecycleError()
+  if (scope.feeId) {
+    for (const table of ['stock_disposition_fees','stock_funding_events']) {
+      if (present.has(table) && await db.prepare(`SELECT 1 FROM ${table} WHERE fee_id=@id LIMIT 1`).get({ id: scope.feeId })) throw new StockLifecycleError()
+    }
     return
   }
   const clauses: string[] = [], params: Record<string, unknown> = {}
   for (const [field, column] of [['movementId','movement_id'],['batchId','batch_id'],['productId','product_id'],['branchId','branch_id']] as const) {
     if (scope[field] != null) { clauses.push(`${column}=@${field}`); params[field] = scope[field] }
   }
-  if (!clauses.length) return
+  if (!clauses.length && !scope.allSources) return
   for (const table of ['stock_disposition_sources','stock_funding_dependencies']) {
-    if (present.has(table) && await db.prepare(`SELECT 1 FROM ${table} WHERE ${clauses.join(' AND ')} LIMIT 1`).get(params)) throw new StockLifecycleError()
+    if (present.has(table) && await db.prepare(`SELECT 1 FROM ${table}${clauses.length ? ` WHERE ${clauses.join(' AND ')}` : ''} LIMIT 1`).get(params)) throw new StockLifecycleError()
+  }
+}
+
+export async function assertStockLifecycleRestoreAllowed(db: D1Compat, tables: ReadonlySet<string>) {
+  if (['products','product_batches','branch_stock','branch_batch_stock','inventory_movements','suppliers','supplier_invoices','fees','action_history','undo_snapshots','branches','users'].some(table => tables.has(table))) {
+    await assertStockLifecycleMutable(db, { allSources: true })
   }
 }

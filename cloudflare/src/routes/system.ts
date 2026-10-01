@@ -1,3 +1,4 @@
+import { assertStockLifecycleMutable, stockLifecycleRefusal } from '../lib/stockLifecycle'
 import { Hono } from 'hono'
 import type { Env } from '../index'
 import { requireAuth } from '../lib/auth'
@@ -243,6 +244,7 @@ app.post('/reset-data', async (c) => {
   const includeMovements = mode === 'products' && body.includeMovements === true
   const includeSales = mode === 'products' && body.includeSales === true
   const includeImages = mode === 'products' && body.includeImages === true
+  await assertStockLifecycleMutable(getDb(c.env), { allSources: true })
   // Refuse rather than half-delete. Each image delete is one external
   // subrequest and Free allows 50 per invocation, so a reset asking to
   // delete more than maxImageDeletesPerReset files would leave the rest
@@ -422,6 +424,8 @@ app.post('/reset-data', async (c) => {
         message: `Products reset complete - products, their received dates, and their branch stock deleted${includeMovements ? ', movement/audit history deleted' : ''}${includeSales ? ', sales and returns deleted' : ''}${includeImages ? `, ${imagesDeleted} image file(s) deleted` : ''}. ${keptSuffix} A fresh backup was taken first.${imagesOverCap ? ` Note: ${imagesOverCap} more image file(s) were left in storage -- a single request cannot delete more than ${imageDeleteCap}. They are no longer referenced by any product and can be removed from the Library.` : ''}${imageDeleteErrors.length ? ` Note: ${imageDeleteErrors.length} image file(s) failed to delete from storage (the database was still updated correctly).` : ''}`,
       })
     } catch (error) {
+      const lifecycle = stockLifecycleRefusal(error)
+      if (lifecycle) return c.json({ success: false, ...lifecycle }, 409)
       return c.json({ success: false, error: (error as Error).message || 'Reset failed' }, 500)
     }
   }

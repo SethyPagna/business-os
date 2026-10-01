@@ -319,7 +319,7 @@ export async function revertRootMovement(
 // discriminated result rather than throwing, so the route can map it straight
 // to a status/JSON; a CHECK failure inside the batch becomes stock_changed.
 export async function applyMovementRevert(db: D1Compat, m: RevertMovementRow, actor: RevertActor): Promise<RevertResult> {
-  try { await assertStockLifecycleMutable(db, { movementId: Number(m.id) }) } catch (error) {
+  try { await assertStockLifecycleMutable(db, m.batch_id ? { batchId: Number(m.batch_id) } : { movementId: Number(m.id) }) } catch (error) {
     const lifecycle = stockLifecycleRefusal(error)
     if (lifecycle) return refuse(409, 'stock_lifecycle_dependency', lifecycle.error)
     throw error
