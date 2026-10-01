@@ -30,11 +30,11 @@ function temporalInputs(source: string): number[] {
           if (seen.has(value)) return
           seen.add(value)
           if (ts.isStringLiteral(value) || ts.isNoSubstitutionTemplateLiteral(value)) {
-            if (key === 'type' ? nativeTypes.has(value.text) : /dd\/mm\/yyyy|mm\/dd\/yyyy|hh:mm/i.test(value.text)) temporal = true
+            if (key === 'type' ? nativeTypes.has(value.text.toLowerCase()) : /dd\/mm\/yyyy|mm\/dd\/yyyy|hh:mm/i.test(value.text)) temporal = true
           }
           if (ts.isIdentifier(value) || ts.isPropertyAccessExpression(value) || ts.isShorthandPropertyAssignment(value)) {
             const resolved = initializer(value)
-            if (resolved) inspect(key, resolved, seen)
+            if (resolved) { inspect(key, resolved, seen); return }
           }
           ts.forEachChild(value, (child) => inspect(key, child, seen))
         }
@@ -73,6 +73,7 @@ for (const source of [
   '<input type={kind ? "datetime-local" : "text"} />',
   '<input\n placeholder="HH:MM"\n />',
   '<input type={`month`} />',
+  '<input type="TIME" />',
   'const clockType = "time"; const x = <input type={clockType} />',
   'const props = { type: "date" }; const x = <input {...props} />',
   'const props = { placeholder: "HH:MM" }; const more = { ...props }; const x = <input {...more} />',
@@ -82,6 +83,7 @@ assert.deepEqual(temporalInputs('// <input type="date" />\nconst a = <div>{/* <i
 assert.deepEqual(temporalInputs('<input type="number" placeholder="Amount" />'), [])
 assert.deepEqual(temporalInputs('const type="date"; function Field(){const type="text"; return <input type={type} />}'), [])
 assert.deepEqual(temporalInputs('const props={type:"number",placeholder:"Amount"}; const x=<input {...props} />'), [])
+assert.deepEqual(temporalInputs('const props={clock:"text",unused:"date"}; const x=<input type={props.clock} />'), [])
 
 const offenders: string[] = []
 function walk(directory: string) {
