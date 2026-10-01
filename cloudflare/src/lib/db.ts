@@ -92,7 +92,7 @@ const D1_QUOTA_EXCEEDED_ERROR_PATTERN = /Your account has exceeded D1's (?:free 
 // request out into failures in unrelated reads (health/import tracker/etc.).
 // Callers that can safely adapt work (for example the chunked import writer)
 // already handle this class explicitly; ordinary requests must fail once.
-const DETERMINISTIC_SQL_ERROR_PATTERN = /CPU time limit|exceeded its CPU time limit|too many SQL variables|no such (table|column|function)|constraint failed|syntax error|datatype mismatch|ambiguous column|incomplete input|bad JSON path/i
+const DETERMINISTIC_SQL_ERROR_PATTERN = /CPU time limit|exceeded its CPU time limit|too many SQL variables|variable number must be between|no such (table|column|function)|constraint failed|syntax error|datatype mismatch|ambiguous column|incomplete input|bad JSON path/i
 
 async function withD1Retry<T>(run: () => Promise<T>): Promise<T> {
   try {

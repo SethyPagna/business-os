@@ -69,6 +69,10 @@ async function main() {
     assert.deepEqual(await db.prepare('SELECT ?1 AS a,?1 AS b,?2 AS c').get(['one', 'two']), { a: 'one', b: 'one', c: 'two' })
     assert.deepEqual(calls.at(-1), { sql: 'SELECT ?1 AS a,?1 AS b,?2 AS c', values: ['one', 'two'] })
     assert.deepEqual(await db.prepare('SELECT ? AS a,? AS b').get(['one', 'two']), { a: 'one', b: 'two' })
+    const oversized = { ...params, p100: 100 }
+    const beforeOversized = calls.length
+    await assert.rejects(() => db.prepare(`SELECT @p0 AS first WHERE 0 IN (${Array.from({ length: 100 }, (_, i) => `@p${i + 1}`).join(',')})`).get(oversized), /variable number must be between|too many SQL variables/)
+    assert.equal(calls.length - beforeOversized, 1, 'a deterministic numbered-variable limit must not retry')
     console.log('PASS real getDb + local workerd: 100 unique slots/repeats, null/unused/payload values, get/all/run/batch/batchOnce/staging, rollback, positional collision refusal and unchanged array path')
   } finally {
     await mf.dispose()
