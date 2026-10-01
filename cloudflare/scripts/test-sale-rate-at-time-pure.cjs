@@ -109,6 +109,32 @@ function seedLegacySale(sql, rate, status) {
     VALUES(1,1,1,'Serum',1,5,20000,5,20000,0,0,5,20000,0,0,1)`).run()
 }
 const row = (sql, text, ...values) => ({ ...sql.prepare(text).get(...values) })
+function seedSupplierReceipt(sql) {
+  sql.exec(`
+    INSERT INTO suppliers(id,name) VALUES(11,'Acme'),(12,'Other supplier');
+    INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at,batch_number,is_active,
+      supplier_id,unit_cost_usd,received_quantity,received_branch_id,received_cost_usd)
+      VALUES(101,1,'acme-receipt','ACME-101','2026-09-01',1,1,11,2,10,1,20);
+    INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(101,1,10);
+    INSERT INTO inventory_movements(id,product_id,product_name,branch_id,movement_type,quantity,
+      unit_cost_usd,unit_cost_khr,reason,batch_id) VALUES(501,1,'Serum',1,'in',10,2,8000,'Supplier receipt',101);
+  `)
+}
+const supplierReturn = (extra = {}) => ({
+  client_request_id: `rate-supplier-${++requestSeq}`, reason: 'Expired', branch_id: 1,
+  supplier_id: 11, supplier_name: 'Acme', settlement: 'refund',
+  items: [{ product_id: 1, quantity: 1, branch_id: 1, batch_id: 101, cost_price_usd: 2, cost_price_khr: 8000 }], ...extra,
+})
+function durableState(sql) {
+  const typedValue = value => value === null ? ['null'] : typeof value === 'bigint' ? ['integer', value.toString()]
+    : value instanceof Uint8Array ? ['blob', Buffer.from(value).toString('hex')] : [typeof value, value]
+  return JSON.stringify(sql.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all()
+    .map(({ name }) => {
+      const statement = sql.prepare(`SELECT * FROM "${name.replaceAll('"', '""')}"`)
+      statement.setReadBigInts(true)
+      return [name, statement.all().map(row => JSON.stringify(Object.entries(row).map(([key, value]) => [key, typedValue(value)]))).sort()]
+    }))
+}
 const saleMoney = (sql) => row(sql, 'SELECT sale_status,exchange_rate,subtotal_khr,total_khr,amount_paid_khr FROM sales WHERE id=1')
 const settle = (expectedRate, amountKhr) => ({
   sale_status: 'completed', expected_updated_at: 'sale-v1', client_request_id: `settle-${expectedRate}-${amountKhr}`,
@@ -202,18 +228,35 @@ async function run() {
 
   await check('a supplier return books a valid body rate, else the live setting, else the 4100 schema default', async () => {
     const f = fixture()
+    seedSupplierReceipt(f.sql)
     const post = async (extra) => {
-      const res = await f.returns('POST', '/supplier', {
-        client_request_id: `rate-supplier-${++requestSeq}`, reason: 'Expired', branch_id: 1, supplier_name: 'Acme', settlement: 'refund',
-        items: [{ product_id: 1, quantity: 1, branch_id: 1, cost_price_usd: 2, cost_price_khr: 8000 }], ...extra,
-      })
+      const res = await f.returns('POST', '/supplier', supplierReturn(extra))
       assert.equal(res.status, 200, JSON.stringify(res.body))
+      assert.deepEqual(row(f.sql, 'SELECT cost_price_usd,cost_price_khr,total_usd,total_khr FROM return_items WHERE return_id=?', res.body.id),
+        { cost_price_usd: 2, cost_price_khr: 8000, total_usd: 2, total_khr: 8000 })
+      assert.deepEqual(row(f.sql, "SELECT product_id,branch_id,batch_id,quantity,unit_cost_usd,unit_cost_khr FROM inventory_movements WHERE reference_id=? AND movement_type='supplier_return'", res.body.id),
+        { product_id: 1, branch_id: 1, batch_id: 101, quantity: -1, unit_cost_usd: 2, unit_cost_khr: 8000 })
       return row(f.sql, 'SELECT exchange_rate FROM returns WHERE id=?', res.body.id).exchange_rate
     }
     assert.equal(await post({}), 4200, 'no body rate: the live setting at the time of the return')
     assert.equal(await post({ exchange_rate: 4300 }), 4300, 'a valid body rate is the rate this new event was made with')
     f.sql.exec("DELETE FROM settings WHERE key='exchange_rate'")
     assert.equal(await post({}), 4100, 'no body rate and no setting: the schema default')
+    assert.deepEqual(row(f.sql, 'SELECT quantity FROM branch_batch_stock WHERE batch_id=101 AND branch_id=1'), { quantity: 7 })
+    assert.deepEqual(row(f.sql, 'SELECT stock_quantity FROM products WHERE id=1'), { stock_quantity: 7 })
+  })
+
+  await check('supplier identity and selected received lot are required before any write', async () => {
+    for (const extra of [{ supplier_id: 12 }, { items: [{ product_id: 1, quantity: 1, branch_id: 1, batch_id: 999, cost_price_usd: 2, cost_price_khr: 8000 }] },
+      { items: [{ product_id: 1, quantity: 1, branch_id: 1, batch_id: 101, cost_price_usd: 2.01, cost_price_khr: 8000 }] }]) {
+      const f = fixture()
+      seedSupplierReceipt(f.sql)
+      const before = durableState(f.sql)
+      const res = await f.returns('POST', '/supplier', supplierReturn(extra))
+      assert.equal(res.status, 400, JSON.stringify(res.body))
+      assert.deepEqual(durableState(f.sql), before)
+      f.sql.close()
+    }
   })
 
   await check('a new sale books the till rate when sent, else the live setting', async () => {

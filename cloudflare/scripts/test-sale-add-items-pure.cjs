@@ -683,3 +683,53 @@ console.log('PASS 8b -- an unlotted oversell aborts on branch_stock itself, it i
 console.log('PASS 9 -- route, applier and permission-action wiring are all in place')
 
 console.log('\nAll sale add-items checks passed.')
+
+async function loadedLifecycleContract() {
+  const lifecycle = compile('stockLifecycle.ts')
+  assert.strictEqual(lifecycle, compile('stockLifecycle.ts'), 'one cached helper defines the refusal class')
+  const { HTTPException } = require('hono/http-exception')
+  const { getDb } = compile('db.ts')
+  const { sqliteD1Call } = require('./harness/sqlite_d1_bindings.cjs')
+  for (const table of ['stock_disposition_sources', 'stock_funding_dependencies']) {
+    const sqlite = new Database(':memory:')
+    sqlite.exec(`CREATE TABLE ${table}(movement_id INTEGER,batch_id INTEGER,product_id INTEGER,branch_id INTEGER,supplier_id INTEGER);
+      INSERT INTO ${table} VALUES(701,501,100,1,11);
+      CREATE TABLE durable_marker(id INTEGER PRIMARY KEY,value TEXT); INSERT INTO durable_marker VALUES(1,'unchanged');`)
+    let batches = 0
+    const rawStatement = (text, values = []) => ({
+      bind: (...next) => rawStatement(text, next),
+      first: async () => sqliteD1Call(sqlite.prepare(text), 'get', values) ?? null,
+      all: async () => ({ results: sqliteD1Call(sqlite.prepare(text), 'all', values) }),
+      run: async () => ({ meta: { changes: sqliteD1Call(sqlite.prepare(text), 'run', values).changes } }),
+    })
+    const db = getDb({ DB: {
+      prepare: text => rawStatement(text),
+      batch: async () => { batches += 1; throw new Error('Unexpected lifecycle write batch') },
+    } })
+    const state = () => JSON.stringify([sqlite.prepare(`SELECT * FROM ${table}`).all(), sqlite.prepare('SELECT * FROM durable_marker').all()])
+    const before = state()
+    for (const scope of [{ productId: 100 }, { movementId: 701, batchId: 501, productId: 100, branchId: 1, supplierId: 11 }, { supplierIds: [12, 11] }, { allSources: true }]) {
+      let refusal
+      await assert.rejects(lifecycle.assertStockLifecycleMutable(db, scope), error => {
+        refusal = error
+        return error instanceof HTTPException && error.status === 409 && error.statusCode === 409 && error.code === 'stock_lifecycle_dependency'
+      })
+      const response = refusal.getResponse()
+      assert.strictEqual(response.status, 409)
+      assert.deepStrictEqual(await response.json(), { error: lifecycle.STOCK_LIFECYCLE_MESSAGE, code: 'stock_lifecycle_dependency' })
+      assert.deepStrictEqual(lifecycle.stockLifecycleRefusal(refusal), { error: lifecycle.STOCK_LIFECYCLE_MESSAGE, code: 'stock_lifecycle_dependency' })
+      assert.strictEqual(batches, 0)
+      assert.strictEqual(state(), before, 'a linked-source preflight preserves every durable row')
+    }
+    for (const scope of [{}, { productId: 101 }, { batchId: 502 }, { supplierIds: [12] }]) await lifecycle.assertStockLifecycleMutable(db, scope)
+    sqlite.exec(`DELETE FROM ${table}`)
+    await lifecycle.assertStockLifecycleMutable(db, { allSources: true })
+    sqlite.exec(`DROP TABLE ${table}`)
+    await lifecycle.assertStockLifecycleMutable(db, { productId: 100 })
+    assert.strictEqual(batches, 0)
+    sqlite.close()
+  }
+  assert.throws(() => compile('absent-sales-test-module.ts'), /ENOENT/, 'unknown local imports cannot become no-op modules')
+  console.log('PASS 10 -- cached actual lifecycle/db helpers preserve HTTP 409, durable rows and unrelated/empty positives')
+}
+loadedLifecycleContract().catch(error => { console.error(error); process.exitCode = 1 })
