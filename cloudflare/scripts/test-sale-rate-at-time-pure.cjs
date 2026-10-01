@@ -57,6 +57,7 @@ const migrations = fs.readdirSync(path.join(root, 'migrations')).filter((name) =
 // transaction.
 function fixture() {
   const sql = new DatabaseSync(':memory:')
+  const writes = { run: 0, batch: 0 }
   sql.exec('PRAGMA foreign_keys = OFF;')
   for (const text of migrations) sql.exec(text)
   const meta = (result) => ({ meta: { changes: Number(result.changes), last_row_id: Number(result.lastInsertRowid) } })
@@ -65,11 +66,12 @@ function fixture() {
     bind: (...next) => statement(text, next.map((value) => value === undefined ? null : typeof value === 'boolean' ? Number(value) : value)),
     first: async () => sql.prepare(text).get(...values) ?? null,
     all: async () => ({ results: sql.prepare(text).all(...values) }),
-    run: async () => meta(sql.prepare(text).run(...values)),
+    run: async () => { writes.run += 1; return meta(sql.prepare(text).run(...values)) },
   })
   const DB = {
     prepare: (text) => statement(text),
     async batch(statements) {
+      writes.batch += 1
       sql.exec('BEGIN IMMEDIATE')
       try {
         const results = statements.map(({ text, values }) => /^\s*(SELECT|WITH)\b/i.test(text)
@@ -95,7 +97,7 @@ function fixture() {
     INSERT INTO products(id,name,is_active,stock_quantity,selling_price_usd) VALUES(1,'Serum',1,10,NULL),(2,'Toner',1,10,10);
     INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(1,1,10),(2,1,10);
   `)
-  return { sql, sales: call(salesApp), returns: call(returnsApp) }
+  return { sql, writes, sales: call(salesApp), returns: call(returnsApp) }
 }
 
 // A legacy (precision v0) sale booked before the rate moved: 5 USD, KHR at 4000.
@@ -255,6 +257,7 @@ async function run() {
       const res = await f.returns('POST', '/supplier', supplierReturn(extra))
       assert.equal(res.status, 400, JSON.stringify(res.body))
       assert.deepEqual(durableState(f.sql), before)
+      assert.deepEqual(f.writes, { run: 0, batch: 0 }, 'invalid supplier identity/lot/cost refuses before a write call')
       f.sql.close()
     }
   })

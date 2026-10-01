@@ -685,6 +685,20 @@ console.log('PASS 9 -- route, applier and permission-action wiring are all in pl
 console.log('\nAll sale add-items checks passed.')
 
 async function loadedLifecycleContract() {
+  assert.strictEqual(typeof subject.buildOperationAllocationStatements, 'function', 'the actual atomic allocation writer is loaded')
+  for (const deducted of [true, false]) {
+    const { sqlite, apply } = setup()
+    const lines = allocateNewSaleLines([LINE(11)], lotsFor(), 'completed')
+    if (!deducted) lines[0].heldUnits = 0
+    sqlite.exec("CREATE TABLE sale_mutation_members(operation_id TEXT,entity_kind TEXT,ordinal INTEGER,entity_id INTEGER); INSERT INTO sale_mutation_members VALUES('sales-allocations','sale_item',0,700)")
+    apply(subject.buildOperationAllocationStatements(lines, 'sales-allocations', 'released-stamp'))
+    assert.deepStrictEqual(sqlite.prepare('SELECT sale_item_id,batch_id,branch_id,quantity,released_quantity,released_at FROM sale_item_batch_allocations ORDER BY batch_id').all(), [
+      { sale_item_id: 700, batch_id: 501, branch_id: 1, quantity: 8, released_quantity: deducted ? 0 : 8, released_at: deducted ? null : 'released-stamp' },
+      { sale_item_id: 700, batch_id: 502, branch_id: 1, quantity: 3, released_quantity: deducted ? 0 : 3, released_at: deducted ? null : 'released-stamp' },
+    ], 'the in-batch writer allocates both actual lot takes to the operation member')
+    sqlite.close()
+  }
+  console.log('PASS 10a -- actual operation allocator persists multi-lot deducted and released quantities')
   const lifecycle = compile('stockLifecycle.ts')
   assert.strictEqual(lifecycle, compile('stockLifecycle.ts'), 'one cached helper defines the refusal class')
   const { HTTPException } = require('hono/http-exception')
