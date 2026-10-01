@@ -144,6 +144,17 @@ app.use('*', async (c, next) => {
 // Milestone A: one immutable, bounded envelope for existing-product receipts
 // and product-create-plus-opening-receipt. Every durable row is committed by
 // commitStockSession's single D1 batch; cache/broadcast work is post-commit.
+app.post('/disposition-experiment', async (c) => {
+  if ((c.env as Env & { STOCK_DISPOSITION_EXPERIMENT?: string }).STOCK_DISPOSITION_EXPERIMENT !== 'local-fixture-only') return c.json({ error: 'Not found' },404)
+  const kernel = await import('../lib/stockDisposition')
+  try {
+    return c.json(await kernel.commitStockDisposition(c.env,c.get('user'),await c.req.json<unknown>().catch(()=>null)))
+  } catch (error) {
+    if (error instanceof kernel.StockDispositionError) return c.json({ error:error.message,code:error.code },error.statusCode)
+    throw error
+  }
+})
+
 app.post('/sessions', async (c) => {
   const body = await c.req.json<unknown>().catch(() => null)
   const stockSession = await import('../lib/stockSession')
