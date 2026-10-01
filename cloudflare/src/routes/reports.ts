@@ -34,7 +34,7 @@ import {
   type SalesFilters,
 } from '../lib/salesAnalytics'
 import { ReportMoneyPrecisionError, reportMoneyHttpError } from '../lib/reportMoneyPrecision'
-import { localDateAtOrAfter, localDateAtOrBefore, localDateExpr } from '../lib/businessDateWindow'
+import { isLocalRangeClock, localDateAtOrAfter, localDateAtOrBefore, localDateExpr } from '../lib/businessDateWindow'
 import type { Env } from '../index'
 
 // Section 5 (Sep 2, 2026 RC): the "Business summary" Excel workbook the
@@ -122,9 +122,6 @@ export interface PeriodReportRow extends KernelTotals {
   cost_missing_snapshot_lines: number
 }
 
-function isClock(v: unknown): v is string {
-  return typeof v === 'string' && /^\d{2}:\d{2}$/.test(v)
-}
 
 export function parseGranularity(raw: unknown): ReportGranularity {
   const v = String(raw || '').trim().toLowerCase()
@@ -154,7 +151,7 @@ export function parseViewFilters(query: Record<string, string>): SalesFilters {
     if (createdFrom >= createdTo) throw new RangeError('createdTo must be after createdFrom')
     f.createdFrom = createdFrom
     f.createdTo = createdTo
-  } else if (isClock(query.startTime) && isClock(query.endTime)) {
+  } else if (isLocalRangeClock(query.startTime) && isLocalRangeClock(query.endTime, true)) {
     // Backward-compatible recurring daily mask for old/direct callers. The
     // Reports UI no longer emits this shape for endpoint date-times.
     f.startTime = query.startTime

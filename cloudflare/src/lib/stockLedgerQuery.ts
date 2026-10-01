@@ -18,7 +18,7 @@
 // the reported "70+ in vs very few out" skew was this bug, not just data.
 // `row_move_out` and `write_off` are kept for any legacy rows even though
 // current code writes `move_out` / `return_reversal` instead.
-import { localDateAtOrAfter, localDateAtOrBefore, localTimeRangeClause } from './businessDateWindow'
+import { isLocalRangeClock, localDateAtOrAfter, localDateAtOrBefore, localTimeRangeClause } from './businessDateWindow'
 // N13: sale/return-family movements stamp branch_id but not branch_name, so
 // the ledger rendered their Branch column empty. Resolved through the id here
 // (snapshot-first) -- see lib/movementBranchName.ts for why it is read-side.
@@ -370,10 +370,9 @@ export function buildStockLedgerQuery(filters: StockLedgerFilters = {}): StockLe
   const endDate = /^\d{4}-\d{2}-\d{2}$/.test(String(filters.endDate || '')) ? String(filters.endDate) : ''
   if (startDate) { base.push(localDateAtOrAfter('m.created_at')); params.startDate = startDate }
   if (endDate) { base.push(localDateAtOrBefore('m.created_at')); params.endDate = endDate }
-  const LOCAL_TIME_RE = /^(?:[01]\d|2[0-3]):[0-5]\d$/
   const startTime = String(filters.startTime || '').trim()
   const endTime = String(filters.endTime || '').trim()
-  if (LOCAL_TIME_RE.test(startTime) && LOCAL_TIME_RE.test(endTime)) {
+  if (isLocalRangeClock(startTime) && isLocalRangeClock(endTime, true)) {
     base.push(localTimeRangeClause('m.created_at'))
     params.startTime = startTime
     params.endTime = endTime

@@ -296,9 +296,9 @@ export interface TimeEntryResult {
 
 const EMPTY_TIME: TimeEntryResult = { value: null, minutes: null }
 
-function timeCandidate(hour: number, minute: number): TimeEntryResult {
+function timeCandidate(hour: number, minute: number, allowEndOfDay = false): TimeEntryResult {
   if (!Number.isInteger(hour) || !Number.isInteger(minute)) return EMPTY_TIME
-  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return EMPTY_TIME
+  if (hour < 0 || hour > 24 || minute < 0 || minute > 59 || (hour === 24 && (!allowEndOfDay || minute !== 0))) return EMPTY_TIME
   return { value: `${pad2(hour)}:${pad2(minute)}`, minutes: hour * 60 + minute }
 }
 
@@ -318,7 +318,7 @@ function timeCandidate(hour: number, minute: number): TimeEntryResult {
  * means half past one in the morning, and a parser that also accepted
  * '1:30pm' would make the same four keystrokes mean two different minutes.
  */
-export function normalizeTimeEntry(raw: string): TimeEntryResult {
+export function normalizeTimeEntry(raw: string, options?: { allowEndOfDay?: boolean }): TimeEntryResult {
   const text = String(raw ?? '').trim()
   if (!text) return EMPTY_TIME
   // Same separator alphabet as the date half, plus 'h' for '9h30'.
@@ -329,24 +329,28 @@ export function normalizeTimeEntry(raw: string): TimeEntryResult {
     // The operator (or the as-you-type mask) put the separator in, so honour
     // the grouping literally rather than re-cutting the digits.
     const parts = unified.split(':')
-    if (parts.length === 3 && /^\d{1,2}$/.test(parts[2])) parts.pop()
+    if (parts.length === 3 && /^\d{1,2}$/.test(parts[2])) {
+      if (Number(parts[0]) === 24 && Number(parts[2]) !== 0) return EMPTY_TIME
+      parts.pop()
+    }
     if (parts.length !== 2) return EMPTY_TIME
     const [hour, minute] = parts
     if (!/^\d{1,2}$/.test(hour) || !/^\d{1,2}$/.test(minute)) return EMPTY_TIME
-    return timeCandidate(Number(hour), Number(minute))
+    return timeCandidate(Number(hour), Number(minute), options?.allowEndOfDay)
   }
 
   switch (unified.length) {
     case 1:
     case 2:
-      return timeCandidate(Number(unified), 0)
+      return timeCandidate(Number(unified), 0, options?.allowEndOfDay)
     case 3:
-      return timeCandidate(Number(unified.slice(0, 1)), Number(unified.slice(1, 3)))
+      return timeCandidate(Number(unified.slice(0, 1)), Number(unified.slice(1, 3)), options?.allowEndOfDay)
     case 4:
     case 6:
       // 6 digits are HHMMSS; the seconds are dropped for the same reason the
       // date half drops a trailing time -- pasted exports carry them.
-      return timeCandidate(Number(unified.slice(0, 2)), Number(unified.slice(2, 4)))
+      if (unified.length === 6 && Number(unified.slice(0, 2)) === 24 && Number(unified.slice(4)) !== 0) return EMPTY_TIME
+      return timeCandidate(Number(unified.slice(0, 2)), Number(unified.slice(2, 4)), options?.allowEndOfDay)
     default:
       return EMPTY_TIME
   }
@@ -364,11 +368,13 @@ export function normalizeTimeEntry(raw: string): TimeEntryResult {
  * `deleting` suppresses the trailing colon so backspacing over one is not
  * instantly undone.
  */
-export function applyTimeEntryMask(raw: string, options?: { deleting?: boolean }): string {
-  const digits = String(raw ?? '').replace(/\D/g, '').slice(0, 4)
+export function applyTimeEntryMask(raw: string, options?: { deleting?: boolean; allowEndOfDay?: boolean }): string {
+  const allDigits = String(raw ?? '').replace(/\D/g, '')
+  if (options?.allowEndOfDay && allDigits.startsWith('24') && allDigits.length > 4) return allDigits
+  const digits = allDigits.slice(0, 4)
   if (!digits) return ''
   const hour = digits.slice(0, 2)
-  const hourComplete = hour.length === 2 && Number(hour) <= 23
+  const hourComplete = hour.length === 2 && Number(hour) <= (options?.allowEndOfDay ? 24 : 23)
   if (!hourComplete) return digits
   if (digits.length <= 2) return options?.deleting ? hour : `${hour}:`
   return `${hour}:${digits.slice(2)}`

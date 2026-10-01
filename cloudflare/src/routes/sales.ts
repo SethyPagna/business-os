@@ -142,7 +142,7 @@ import { quoteSaleMutationHeader, compareSaleHeaderQuote, SaleHeaderQuoteError }
 import { planNativeSaleChange, NativeSaleChangeValidationError } from '../lib/nativeSaleChange'
 import { normalizeClientReceiptNumber, uniqueBusinessDateTimeNumber } from '../lib/receiptNumber'
 import { sanitizeClientCreatedAt } from '../lib/clientTimestamp'
-import { businessToday, localDateAtOrAfter, localDateAtOrBefore, localDateRangeClause, localTimeRangeClause } from '../lib/businessDateWindow'
+import { isLocalRangeClock, businessToday, localDateAtOrAfter, localDateAtOrBefore, localDateRangeClause, localTimeRangeClause } from '../lib/businessDateWindow'
 import { continuousReadWindowSql, parseContinuousReadWindow } from '../lib/continuousReadWindow'
 import { formatSaleStatusTelegramLines, formatSaleTelegramLines, sendTelegramEvent } from '../lib/telegram'
 import { contactDisplayAddress } from '../lib/contactOptions'
@@ -235,7 +235,6 @@ async function getSalesReadCacheVersion(env: Env): Promise<string> {
   return versions.map((version, index) => `${namespaces[index]}:${version}`).join('|')
 }
 
-const LOCAL_TIME_RE = /^(?:[01]\d|2[0-3]):[0-5]\d$/
 
 function appendLocalTimeRange(
   query: Record<string, string>,
@@ -245,7 +244,7 @@ function appendLocalTimeRange(
 ): { startTime: string; endTime: string } | null {
   const startTime = String(query.startTime || '').trim()
   const endTime = String(query.endTime || '').trim()
-  if (!LOCAL_TIME_RE.test(startTime) || !LOCAL_TIME_RE.test(endTime)) return null
+  if (!isLocalRangeClock(startTime) || !isLocalRangeClock(endTime, true)) return null
   clauses.push(localTimeRangeClause(timestampColumn))
   params.startTime = startTime
   params.endTime = endTime
@@ -5962,7 +5961,7 @@ app.get('/stats-strip', async (c) => {
   const db = getDb(c.env)
   const startTime = String(query.startTime || '').trim()
   const endTime = String(query.endTime || '').trim()
-  const hasTimeRange = LOCAL_TIME_RE.test(startTime) && LOCAL_TIME_RE.test(endTime)
+  const hasTimeRange = isLocalRangeClock(startTime) && isLocalRangeClock(endTime, true)
   const filters = {
     startDate: continuousWindow ? null : startDate,
     endDate: continuousWindow ? null : endDate,
