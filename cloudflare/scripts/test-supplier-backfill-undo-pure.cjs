@@ -28,7 +28,7 @@ function linkedStockFixture(kind) {
   const native = d1.db
   native.exec(`
     INSERT INTO branches(id,name,is_active,is_default) VALUES(9,'Shop',1,1);
-    INSERT INTO users(id,username,name,password,permissions,is_active) VALUES(101,'fixture-owner','Owner','fixture-only','{"products":true,"inventory":true}',1);
+    INSERT INTO users(id,username,name,password,permissions,is_active) VALUES(101,'fixture-owner','Owner','admin123','{"products":true,"inventory":true}',1);
     INSERT INTO suppliers(id,name) VALUES(31,'Pinned supplier');
     INSERT INTO products(id,name,barcode,stock_quantity,is_active) VALUES(91,'Pinned stock','GUARD91',3,1),(92,'Unlinked product','GUARD92',0,0);
     INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at,is_active,batch_number,supplier_id,supplier_name,payment_status,received_quantity,received_cost_usd,received_branch_id,unit_cost_usd)
