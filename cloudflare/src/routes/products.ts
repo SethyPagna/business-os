@@ -144,12 +144,15 @@ app.use('*', requireAuth)
 app.use('*', acquisitionCostResponses)
 // A 5xx on a merge / Resolve route (or an edit that folds a twin) writes one
 // structured line with the route, the product ids and the error text. Inline,
-// not a lib middleware: the body is read here only for the JSON merge POSTs.
+// not a lib middleware: the body is read here only for the two plain-JSON merge
+// POSTs. The bulk preview/finalize handlers meter the raw stream themselves
+// (admitRequestBody), which a body already consumed here would break.
 const MERGE_ROUTE_PATH = /\/(?:merge-duplicates|possible-duplicates\/merge)(?:\/|$|-)/
+const MERGE_JSON_BODY_PATH = /\/(?:merge-duplicates|possible-duplicates\/merge)$/
 app.use('*', async (c, next) => {
   const folds = c.req.method === 'PUT' && /\/\d+$/.test(c.req.path)
   const watched = MERGE_ROUTE_PATH.test(c.req.path) || folds
-  const body = watched && c.req.method === 'POST' ? await c.req.json().catch(() => null) : null
+  const body = watched && c.req.method === 'POST' && MERGE_JSON_BODY_PATH.test(c.req.path) ? await c.req.json().catch(() => null) : null
   await next()
   if (!watched || c.res.status < 500) return
   try {

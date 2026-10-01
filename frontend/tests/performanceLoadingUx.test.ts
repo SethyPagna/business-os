@@ -2418,8 +2418,13 @@ assert.doesNotMatch(
 )
 assert.match(
   usersPage,
-  /import \{ PERMISSION_DEFS \} from '\.\/permissionDefinitions'/,
+  /import \{ rolePermissionLabel \} from '\.\/rolePermissionLabel\.ts'/,
   'Users route should keep lightweight permission labels without pulling in the permission editor UI',
+)
+assert.match(
+  fs.readFileSync(new URL('../src/components/users/rolePermissionLabel.ts', import.meta.url), 'utf8'),
+  /from '\.\/permissionDefinitions\.ts'/,
+  'the label helper reads the lightweight definition module, not the editor',
 )
 assert.match(
   usersPage,

@@ -46,6 +46,8 @@ function dbAdapter(raw) {
 
 function createProductsRouteHarness(options = {}) {
   const raw = openDb(loadAll())
+  // D1 parses with expression depth 100; node:sqlite defaults to 1000 and hid a 500 from every route test.
+  raw.db.limits.exprDepth = options.exprDepth ?? 100
   const db = dbAdapter(raw)
   db.staging = db
   let user = options.user || { id: 1, username: 'tester', name: 'Test User', permissions: '{}' }

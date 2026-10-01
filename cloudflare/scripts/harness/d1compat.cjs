@@ -146,6 +146,8 @@ function openDb(migrationSqls) {
   for (const sql of migrationSqls) {
     raw.exec(sql)
   }
+  // D1 parses with expression depth 100; node:sqlite defaults to 1000, which hid a Resolve 500.
+  raw.limits.exprDepth = 100
   return new D1Compat(raw)
 }
 

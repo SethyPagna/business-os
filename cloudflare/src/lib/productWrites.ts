@@ -29,6 +29,15 @@ type MoneyPlan = { version: 1 | 2; kind: 'create' | 'update'; product_id: number
 export class ProductMoneyWriteError extends Error {
   constructor(readonly code: string, message: string, readonly status = 409) { super(message); this.name = 'ProductMoneyWriteError' }
 }
+// D1 parses with expression depth 100 and a chained AND costs about three levels
+// per term, so a whole product row's equality guard is joined as a balanced tree.
+// Kept local: this lib is loaded on its own by pure-source tests.
+function joinBalanced(terms: readonly string[]): string {
+  if (terms.length === 1) return terms[0]
+  const middle = Math.ceil(terms.length / 2)
+  return `(${joinBalanced(terms.slice(0, middle))} AND ${joinBalanced(terms.slice(middle))})`
+}
+
 function invalidMoneyPlan(): never {
   throw new ProductMoneyWriteError('product_money_plan_invalid', 'The saved product price plan is invalid. Submit a new product edit.')
 }
@@ -307,7 +316,7 @@ export async function updateRow(env: Env, table: string, id: string | number, bo
     const guardGroup = (name: string, members: Record<string, unknown>[]) => env.DB.prepare(`SELECT CASE WHEN
       (SELECT COUNT(*) FROM products WHERE name_key=? AND is_active=1)=?
       AND NOT EXISTS (SELECT 1 FROM json_each(?) expected WHERE NOT EXISTS (
-        SELECT 1 FROM products p WHERE ${groupColumns.map(key => `p."${key}" IS json_extract(expected.value,'$.${key}')`).join(' AND ')}
+        SELECT 1 FROM products p WHERE ${joinBalanced(groupColumns.map(key => `p."${key}" IS json_extract(expected.value,'$.${key}')`))}
       )) THEN 1 ELSE json('product_money_state_conflict') END`)
       .bind(name.toLowerCase(), members.length, JSON.stringify(members))
     try {
