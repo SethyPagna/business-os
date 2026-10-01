@@ -17,7 +17,13 @@ function temporalInputs(source: string): number[] {
     const symbol = ts.isShorthandPropertyAssignment(node)
       ? checker.getShorthandAssignmentValueSymbol(node)
       : checker.getSymbolAtLocation(node)
-    const declaration = symbol?.valueDeclaration
+    let declaration = symbol?.valueDeclaration
+    if (declaration && ts.isBindingElement(declaration) && ts.isObjectBindingPattern(declaration.parent)) {
+      const key = declaration.propertyName || declaration.name
+      if (ts.isIdentifier(key) || ts.isStringLiteral(key)) {
+        declaration = checker.getPropertyOfType(checker.getTypeAtLocation(declaration.parent), key.text)?.valueDeclaration
+      }
+    }
     return declaration && (ts.isVariableDeclaration(declaration) || ts.isPropertyAssignment(declaration)
       || ts.isParameter(declaration)) ? declaration.initializer : undefined
   }
@@ -78,12 +84,16 @@ for (const source of [
   'const props = { type: "date" }; const x = <input {...props} />',
   'const props = { placeholder: "HH:MM" }; const more = { ...props }; const x = <input {...more} />',
   'const types = { clock: "time" }; const x = <input type={types.clock} />',
+  'const { type } = { type: "time" }; const x = <input type={type} />',
+  'const props = { type: "date" }; const { type: calendarType } = props; const x = <input type={calendarType} />',
+  'const { input: { type } } = { input: { type: "time" } }; const x = <input type={type} />',
 ]) assert.deepEqual(temporalInputs(source), [1], source)
 assert.deepEqual(temporalInputs('// <input type="date" />\nconst a = <div>{/* <input type="time" /> */}<input type="text" /></div>'), [])
 assert.deepEqual(temporalInputs('<input type="number" placeholder="Amount" />'), [])
 assert.deepEqual(temporalInputs('const type="date"; function Field(){const type="text"; return <input type={type} />}'), [])
 assert.deepEqual(temporalInputs('const props={type:"number",placeholder:"Amount"}; const x=<input {...props} />'), [])
 assert.deepEqual(temporalInputs('const props={clock:"text",unused:"date"}; const x=<input type={props.clock} />'), [])
+assert.deepEqual(temporalInputs('const props={type:"text",unused:"date"}; const {type}=props; const x=<input type={type} />'), [])
 
 const offenders: string[] = []
 function walk(directory: string) {
