@@ -72,6 +72,11 @@ const h=harness.exports
  const voidOnly=await get('/stats?status=cancelled&search=void')
  assert.equal(voidOnly.total_count,3);assert.equal(voidOnly.revenue_count,0);assert.equal(voidOnly.revenue_usd,0)
  const missing=await get('/stats?search=no-such-customer&cashier=nobody');assert.equal(missing.total_count,0)
+ // D1 parses with expression depth 100: the tokenizer's largest search (6 groups x 8 words), with a status and a date window, nested in the report's keyset reads.
+ const widest=encodeURIComponent(Array.from({length:6},(_,g)=>Array.from({length:8},(_,w)=>`nomatch${g}${w}`).join(' ')).join(', '))
+ for(const window of ['','&startDate=2026-09-13&endDate=2026-09-13']){
+  const wide=await get(`/stats?status=cancelled&cashier=nobody&search=${widest}${window}`);assert.equal(wide.total_count,0)
+ }
  f.raw.prepare("UPDATE returns SET sale_id=? WHERE return_number LIKE 'activity-%'").run([created.body.id])
  const listing=await get('/?startDate=2026-09-13&endDate=2026-09-13')
  const saleRow=listing.find(row=>row.id===created.body.id)
