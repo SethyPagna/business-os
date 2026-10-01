@@ -108,7 +108,7 @@
           "source_id": 71
         },
         "wholesale_price_usd": {
-          "custom": 7.13
+          "custom": 7.123
         },
         "image": {
           "source_id": 72
@@ -121,7 +121,7 @@
         "category": "Face Care",
         "unit": "ml bottle",
         "selling_price_usd": 9.5,
-        "wholesale_price_usd": 7.13,
+        "wholesale_price_usd": 7.123,
         "image_path": "products/glow-72.jpg"
       },
       "columns": {
@@ -137,7 +137,7 @@
         "unit_normalized": "ml bottle",
         "selling_price_usd": 9.5,
         "selling_price_khr": 38950,
-        "wholesale_price_usd": 7.13,
+        "wholesale_price_usd": 7.123,
         "wholesale_price_khr": 0,
         "image_path": "products/glow-72.jpg"
       }

@@ -2,7 +2,7 @@ import type { ReactNode } from 'react'
 import { getMergePreview, mergePossiblySameProducts, type ProductResolveChoices } from '../../api/productWriteTransport.ts'
 import { createClientRequestId } from '../../api/requestIds.ts'
 import { isRetryableFailure } from '../../utils/retryableFailure.ts'
-import { sellingPriceCeilCent } from '../../utils/moneyPrecision.ts'
+import { roundMoney4 } from '../../utils/moneyPrecision.ts'
 import { identityBarcodeKey, isRealBarcode } from '../../utils/productDetailRule.ts'
 import type { ProductConflictCluster, ProductConflictProduct } from '../../utils/selectedConflictMerge.ts'
 import type { ResolveCell, ResolveChoice, ResolveColumn, ResolveOption, ResolveRow } from '../shared/ResolveGrid.tsx'
@@ -304,10 +304,10 @@ function validText(value: string): boolean {
   return trimmed.length <= RESOLVE_TEXT_MAX && !trimmed.includes('||')
 }
 
-function ceilMoney(value: string): number | null {
+function typedMoney(value: string): number | null {
   const trimmed = value.trim()
   if (!trimmed || !Number.isFinite(Number(trimmed)) || Number(trimmed) < 0) return null
-  try { return sellingPriceCeilCent(trimmed) } catch { return null }
+  try { return roundMoney4(trimmed) } catch { return null }
 }
 
 function defaultTextSource(ctx: Context, field: TextField): number | null {
@@ -352,7 +352,7 @@ function productResolveChoices(ctx: Context): ProductResolveChoices {
   if (barcode) out.barcode = barcode
   for (const [rowKey, field] of [['selling', 'selling_price_usd'], ['wholesale', 'wholesale_price_usd']] as const) {
     const typed = typedValue(ctx, rowKey)
-    const money = typed === null ? null : ceilMoney(typed)
+    const money = typed === null ? null : typedMoney(typed)
     if (money !== null) out[field] = { custom: money }
     else {
       const choice = source(rowKey, defaultMoneySource(ctx, field))
@@ -602,7 +602,7 @@ function buildPlan(data: ProductResolveData, draft: ResolveDraft, options: Produ
       final: { text: finalText },
       choice: rowChoice(rowKey),
       identical: identical(row, finalText),
-      custom: { kind: 'money', validate: (value) => (ceilMoney(value) === null ? tr(t, 'resolve_price_invalid', 'Enter a price of zero or more.') : null) },
+      custom: { kind: 'money', validate: (value) => (typedMoney(value) === null ? tr(t, 'resolve_price_invalid', 'Enter a price of zero or more.') : null) },
     })
   }
 

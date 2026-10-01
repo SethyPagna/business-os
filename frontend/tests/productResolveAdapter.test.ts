@@ -215,14 +215,14 @@ await test('choices: a pick or a typed value changes Final and the request; the 
   assert.equal(adapter.reloadWhen!(EMPTY, draft), false, 'picking a field never re-reads the server')
   const rows = adapter.rows(data, draft)
   assert.deepEqual(['name', 'barcode', 'brand', 'unit', 'selling', 'wholesale', 'image'].map((key) => rowOf(rows, key).final.text),
-    ['Serum Glow', '8850000000062', 'Glowy Labs', '', '$13.01', '$9', 'products/62.jpg'])
+    ['Serum Glow', '8850000000062', 'Glowy Labs', '', '$13.001', '$9', 'products/62.jpg'])
   const review = await adapter.review(data, draft, signal)
   assert.equal(review.token.keepId, 60)
   assert.deepEqual(review.token.steps.map((step) => step.mergeId), [61, 62])
   assert.deepEqual(review.token.choices, {
     name: { source_id: 62 }, brand: { custom: 'Glowy Labs' }, category: { source_id: 60 }, unit: { source_id: 60 },
-    barcode: { source_id: 62 }, selling_price_usd: { custom: 13.01 }, wholesale_price_usd: { source_id: 60 }, image: { source_id: 62 },
-  }, 'a typed price is rounded up to the cent, like every product price')
+    barcode: { source_id: 62 }, selling_price_usd: { custom: 13.001 }, wholesale_price_usd: { source_id: 60 }, image: { source_id: 62 },
+  }, 'a typed price keeps four decimals, like every internal number (owner, 30 Sep 2026)')
   assert.deepEqual(review.changes.find((change) => change.label === 'Name'), { label: 'Name', before: 'Glow Serum', after: 'Serum Glow' })
   assert.equal(review.message, 'Merge Glow-Serum 30ml (#61), Serum Glow (#62) into Serum Glow (#60).')
   const invalid = pick({ name: { custom: '   ' }, brand: { custom: 'A||B' }, selling: { custom: '-1' }, wholesale: { custom: 'abc' }, barcode: { custom: '999' } as any, image: { source: '99' } })
@@ -276,8 +276,8 @@ await test('parity with the Worker: the Final values and the request for the sha
 // brand, a record with no category or image, a typed price) as Final values.
 await test('the Final values follow the Worker rules: blank is null, a record value is copied as stored', () => {
   const rows = CLUSTERS.catalog.products as Record_[]
-  assert.deepEqual(productResolveFinalValues({ name: { custom: 'X' }, brand: { custom: '' }, category: { source_id: 62 }, selling_price_usd: { custom: 7.13 }, image: { source_id: 60 }, barcode: { source_id: 60 }, unit: { source_id: 61 } }, rows),
-    { name: 'X', brand: null, category: null, selling_price_usd: 7.13, image_path: null, barcode: 'N/A', unit: 'bottle' })
+  assert.deepEqual(productResolveFinalValues({ name: { custom: 'X' }, brand: { custom: '' }, category: { source_id: 62 }, selling_price_usd: { custom: 7.123 }, image: { source_id: 60 }, barcode: { source_id: 60 }, unit: { source_id: 61 } }, rows),
+    { name: 'X', brand: null, category: null, selling_price_usd: 7.123, image_path: null, barcode: 'N/A', unit: 'bottle' })
 })
 
 await test('N1: finalProductBarcode keeps the stored spelling and fills only a blank one (mirrors keeperFollowsBarcode)', () => {

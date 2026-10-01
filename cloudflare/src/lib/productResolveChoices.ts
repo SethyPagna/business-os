@@ -4,7 +4,7 @@
 // so the route and the undo applier's tests run the same rules. The parity
 // fixture scripts/fixtures/product-resolve-choices-parity.json is the table the
 // frontend adapter must match; no frontend test reads it yet.
-import { sellingPriceCeilCent } from './moneyPrecision'
+import { roundMoney4 } from './moneyPrecision'
 import { compactSearchText, normalizeSearchText } from './searchMatch'
 
 export const INVALID_RESOLVE_CHOICES_CODE = 'invalid_resolve_choices'
@@ -82,8 +82,8 @@ function customText(field: ProductResolveChoiceField, value: unknown): string {
   return trimmed
 }
 
-// Same policy as a product edit (productWrites nextMoney): USD selling and
-// wholesale prices are stored rounded UP to the cent.
+// A typed Resolve price keeps four decimals like every internal number (owner,
+// 30 Sep 2026); it is not the cent-ceiling a product edit applies.
 function customMoney(field: ProductResolveChoiceField, value: unknown): number {
   if ((typeof value !== 'number' && typeof value !== 'string') || (typeof value === 'string' && !value.trim())) {
     throw new ProductResolveChoiceError(`The ${field} must be a number of zero or more.`)
@@ -91,7 +91,7 @@ function customMoney(field: ProductResolveChoiceField, value: unknown): number {
   const parsed = Number(value)
   if (!Number.isFinite(parsed) || parsed < 0) throw new ProductResolveChoiceError(`The ${field} must be a number of zero or more.`)
   try {
-    return sellingPriceCeilCent(typeof value === 'string' ? value.trim() : value)
+    return roundMoney4(typeof value === 'string' ? value.trim() : value)
   } catch {
     throw new ProductResolveChoiceError(`The ${field} is outside the supported range.`)
   }
