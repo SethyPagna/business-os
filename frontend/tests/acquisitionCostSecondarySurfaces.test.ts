@@ -60,7 +60,7 @@ assert.ok(!deniedReview.includes('Importing'), 'edit permission alone cannot mou
 const duplicates = read('../src/components/products/ProductDuplicatesTab.tsx')
 const resolveAdapter = read('../src/components/products/productResolveAdapter.ts')
 assert.ok(!duplicates.includes('updateProduct(') && !duplicates.includes('cost_price_usd:'), 'the conflicts tab writes no cost itself: the grid is the only path')
-assert.ok(resolveAdapter.includes('canEditCosts ? {') || resolveAdapter.includes('canEditCosts\n'), 'the grid locks the cost row without the cost edit permission')
+assert.match(resolveAdapter, /\.\.\.\(canEditCosts\s*\? \{ custom:[^]*?: \{ locked:/, 'the grid locks the cost row without the cost edit permission')
 assert.ok(resolveAdapter.includes('options.canViewCosts && options.canEditCosts'), 'a cost is only sent by a user who can view and edit it')
 const review = read('../src/components/products/import/ProductServerImportReviewScreen.tsx')
 assert.match(review, /if \(!hasPermission\('product_cost_view'\)\) return/)
