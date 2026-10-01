@@ -105,7 +105,7 @@ middleware().catch(error => { console.error(error); process.exitCode = 1 })
 async function supplierResponseContext() {
   console.log('[ORIGINAL_CHECKS_COMPLETE]')
   let cases = 0
-  const aliases = field => [...new Set([field, field.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase()), field.replace(/(^|_)([a-z])/g, (_, prefix, letter) => letter.toUpperCase()), field.toUpperCase()])]
+  const aliases = field => [...new Set([field, field.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase()), field.replace(/(^|_)([a-z])/g, (_, prefix, letter) => letter.toUpperCase()), field.toUpperCase(), field.toUpperCase().replaceAll('_', '')])]
   const markers = ['scope', 'Scope', 'SCOPE', 'return_scope', 'returnScope', 'ReturnScope', 'RETURN_SCOPE', 'RETURNSCOPE']
   const selectors = ['field', 'Field', 'FIELD']
   const verify = (input, expected, label) => {
@@ -132,6 +132,7 @@ async function supplierResponseContext() {
     verify({ [selector]: 'costPriceUsd', old_value: 88, new_value: 99 }, { field: 'costPriceUsd', redacted: true }, 'normalized acquisition selector')
     verify({ entity: 'stock_funding', [selector]: 'amountUsd', old_value: 88, new_value: 99 }, { field: 'amountUsd', redacted: true }, 'normalized lifecycle selector')
   }
+  verify({ scope: 'supplier', FIELD: ' totalUsd ', old_value: 88, new_value: 99 }, { field: ' totalUsd ', redacted: true }, 'trim selector classification retains field label')
   verify({ field: 'product_name', FIELD: 'costPriceUsd', old_value: 88, new_value: 99 }, { field: 'costPriceUsd', redacted: true }, 'all selector aliases are inspected before keeping a benign alias')
   verify({ field: 'totalUsd', Scope: 'supplier', return_scope: 'customer', old_value: 88, new_value: 99 }, { field: 'totalUsd', redacted: true }, 'conflicting supplier marker remains private')
   const groups = ['periodSupplierReturns', 'period_supplier_returns', 'PeriodSupplierReturns', 'PERIOD_SUPPLIER_RETURNS', 'PERIODSUPPLIERRETURNS']
