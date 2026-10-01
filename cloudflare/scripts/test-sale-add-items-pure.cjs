@@ -40,13 +40,22 @@ const ts = require('typescript')
 const assert = require('assert')
 const Database = require('better-sqlite3')
 
+const compiledModules = new Map()
 function compile(file, stubs = {}) {
+  file = path.posix.normalize(file)
+  if (compiledModules.has(file)) return compiledModules.get(file).exports
   const sourcePath = path.join(__dirname, '..', 'src', 'lib', file)
   const output = ts.transpileModule(fs.readFileSync(sourcePath, 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
   }).outputText
   const moduleObj = { exports: {} }
-  const localRequire = (request) => Object.prototype.hasOwnProperty.call(stubs, request) ? stubs[request] : require(request)
+  compiledModules.set(file, moduleObj)
+  const localRequire = (request) => {
+    if (Object.prototype.hasOwnProperty.call(stubs, request)) return stubs[request]
+    if (!request.startsWith('.')) return require(request)
+    const resolved = path.posix.join(path.posix.dirname(file), request)
+    return compile(resolved.endsWith('.ts') ? resolved : `${resolved}.ts`)
+  }
   new Function('exports', 'require', 'module', output)(moduleObj.exports, localRequire, moduleObj)
   return moduleObj.exports
 }
