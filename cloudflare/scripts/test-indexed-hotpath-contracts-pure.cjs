@@ -2,6 +2,7 @@ const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
 const Database = require('better-sqlite3')
+const ts = require('typescript')
 
 const projectRoot = path.join(__dirname, '..', '..')
 const read = (...parts) => fs.readFileSync(path.join(projectRoot, ...parts), 'utf8')
@@ -18,11 +19,25 @@ assert.match(
   /client_request_id = \? AND client_request_id <> '' LIMIT 1/,
   'sale idempotency lookup must include the predicate of its partial unique index',
 )
-assert.equal(
-  (returnsRoute.match(/client_request_id = \? AND client_request_id <> '' LIMIT 1/g) || []).length,
-  1,
-  'the occupied legacy return-request lookup must include the partial-index predicate',
-)
+const returnsAst = ts.createSourceFile('returns.ts', returnsRoute, ts.ScriptTarget.Latest, true)
+const returnRequestQueries = []
+let supplierReturnIdQuery
+function collectReturnRequestQueries(node) {
+  if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)
+    && node.expression.name.text === 'prepare' && node.arguments.length === 1
+    && ts.isStringLiteralLike(node.arguments[0])
+    && /^SELECT\s+id\s+FROM\s+returns\s+WHERE\s+client_request_id\s*=/i.test(node.arguments[0].text)) {
+    returnRequestQueries.push(node.arguments[0].text)
+  }
+  if (ts.isVariableDeclaration(node) && node.name.getText(returnsAst) === 'returnIdExpression'
+    && node.initializer && ts.isStringLiteralLike(node.initializer)) {
+    supplierReturnIdQuery = node.initializer.text.slice(1, -1)
+  }
+  ts.forEachChild(node, collectReturnRequestQueries)
+}
+collectReturnRequestQueries(returnsAst)
+assert.equal(returnRequestQueries.length, 4, 'customer and supplier occupied, committed and catch queries must be checked')
+assert.ok(supplierReturnIdQuery, 'the atomic supplier children must resolve the actual return header query')
 assert.match(
   returnsRoute,
   /FROM return_create_receipts WHERE actor_id=\? AND request_id=\? LIMIT 1/,
@@ -65,11 +80,6 @@ db.exec(`
   CREATE INDEX idx_sales_status_created_pg
     ON sales(sale_status, created_at DESC, id DESC);
 
-  CREATE TABLE returns (id INTEGER PRIMARY KEY, client_request_id TEXT);
-  CREATE UNIQUE INDEX idx_returns_client_request_unique_pg
-    ON returns(client_request_id)
-    WHERE client_request_id IS NOT NULL AND client_request_id <> '';
-
   CREATE TABLE return_create_receipts (
     id TEXT PRIMARY KEY,
     actor_id INTEGER NOT NULL,
@@ -82,6 +92,13 @@ db.exec(`
     ON products(client_request_id)
     WHERE client_request_id IS NOT NULL AND client_request_id <> '';
 `)
+const initialSchema = read('cloudflare', 'migrations', '0001_init.sql')
+const returnTableSchema = initialSchema.match(/CREATE TABLE returns \([\s\S]*?\r?\n\);/)
+const returnRequestIndexSchema = initialSchema.match(/CREATE UNIQUE INDEX idx_returns_client_request_unique_pg[^;]+;/)
+assert.ok(returnTableSchema, 'the actual returns table definition must be loaded')
+assert.ok(returnRequestIndexSchema, 'the actual returns request-key index must be loaded')
+db.exec(`${returnTableSchema[0]}\n${returnRequestIndexSchema[0]}`)
+db.prepare("INSERT INTO returns(id,return_number,client_request_id) VALUES(1,'R1','return:ខ្មែរ'),(2,'R2',''),(3,'R3',''),(4,'R4',NULL)").run()
 
 function plan(sql, params = []) {
   return db.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(...params).map((row) => row.detail).join('\n')
@@ -91,10 +108,24 @@ assert.match(
   plan("SELECT id FROM sales WHERE client_request_id = ? AND client_request_id <> '' LIMIT 1", ['sale:1']),
   /idx_sales_client_request_unique_pg/,
 )
-assert.match(
-  plan("SELECT id FROM returns WHERE client_request_id = ? AND client_request_id <> '' LIMIT 1", ['return:1']),
-  /idx_returns_client_request_unique_pg/,
-)
+function returnQueryParams(sql, key) {
+  return sql.includes('@supplier_write_key') ? { supplier_write_key: key } : key
+}
+function assertReturnRequestIndex(sql) {
+  const queryPlan = plan(sql, [returnQueryParams(sql, 'return:ខ្មែរ')])
+  assert.match(queryPlan, /SEARCH returns USING (?:COVERING )?INDEX idx_returns_client_request_unique_pg/, sql)
+  assert.doesNotMatch(queryPlan, /SCAN returns/, sql)
+  assert.match(sql, /\bclient_request_id\s*<>\s*''/, 'each actual lookup must state its partial-index predicate')
+  for (const key of ['return:ខ្មែរ', 'missing', '', null]) {
+    assert.deepEqual(db.prepare(sql).all(returnQueryParams(sql, key)), key === 'return:ខ្មែរ' ? [{ id: 1 }] : [])
+  }
+}
+for (const sql of [...returnRequestQueries, supplierReturnIdQuery]) {
+  assertReturnRequestIndex(sql)
+  const wrongPredicate = sql.replace(/\s+AND\s+client_request_id\s*<>\s*''/i, '')
+  assert.notEqual(wrongPredicate, sql, 'the wrong-predicate control must actually change the query')
+  assert.throws(() => assertReturnRequestIndex(wrongPredicate), error => error.code === 'ERR_ASSERTION' && /SCAN returns/.test(error.actual))
+}
 assert.match(
   plan('SELECT id FROM return_create_receipts WHERE actor_id=? AND request_id=? LIMIT 1', [7, 'return:1']),
   /sqlite_autoindex_return_create_receipts/,
