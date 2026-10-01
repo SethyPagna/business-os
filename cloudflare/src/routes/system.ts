@@ -1246,6 +1246,8 @@ app.post('/factory-reset', async (c) => {
     }, 409)
   }
 
+  await assertStockLifecycleMutable(db, { allSources: true })
+
   try {
     await createCloudflareBackup(c.env, 'manual')
   } catch (error) {

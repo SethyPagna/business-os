@@ -25,6 +25,30 @@ const Module = require('node:module')
 const ts = require('typescript')
 const { openDb } = require('./harness/d1compat.cjs')
 
+
+const stockDependencyCache = new Map()
+function loadStockDependency(relPath) {
+  if (stockDependencyCache.has(relPath)) return stockDependencyCache.get(relPath).exports
+  if (!['lib/stockLifecycle.ts', 'lib/db.ts', 'lib/importMaintenanceFence.ts'].includes(relPath)) {
+    throw new Error('Unexpected stock dependency: ' + relPath)
+  }
+  const file = path.join(__dirname, '..', 'src', relPath)
+  const loaded = { exports: {} }
+  stockDependencyCache.set(relPath, loaded)
+  const code = ts.transpileModule(fs.readFileSync(file, 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 }, fileName: file,
+  }).outputText
+  const localRequire = (request) => {
+    if (request === 'hono/http-exception') return require(request)
+    if (!request.startsWith('.')) throw new Error('Unexpected stock external: ' + request)
+    const next = path.posix.normalize(path.posix.join(path.posix.dirname(relPath), request))
+    return loadStockDependency(next.endsWith('.ts') ? next : next + '.ts')
+  }
+  try { new Function('exports', 'require', 'module', code)(loaded.exports, localRequire, loaded) }
+  catch (error) { stockDependencyCache.delete(relPath); throw error }
+  return loaded.exports
+}
+
 function loadReal(relPath, overrides = {}) {
   const sourcePath = path.join(__dirname, '..', 'src', relPath)
   const { outputText } = ts.transpileModule(fs.readFileSync(sourcePath, 'utf8'), {
@@ -36,6 +60,7 @@ function loadReal(relPath, overrides = {}) {
   // lazily with await import(), which transpiles to a deferred require().
   const patched = function patchedLoad(request, parent, isMain) {
     if (Object.prototype.hasOwnProperty.call(overrides, request)) return overrides[request]
+    if (request === '../lib/stockLifecycle' || request === './stockLifecycle') return loadStockDependency('lib/stockLifecycle.ts')
     return originalLoad.call(this, request, parent, isMain)
   }
   const mod = { exports: {} }
@@ -239,6 +264,44 @@ async function check(name, fn) {
     assert.equal(res.json?.admin?.password ?? null, null)
   })
 
+
+  for (const table of ['stock_disposition_sources', 'stock_funding_dependencies']) {
+    await check('factory lifecycle refuses linked ' + table + ' before destructive work', async () => {
+      db.exec('CREATE TABLE stock_disposition_sources(product_id INTEGER); CREATE TABLE stock_funding_dependencies(product_id INTEGER);')
+      db.prepare('INSERT INTO ' + table + '(product_id) VALUES(1)').run()
+    const snapshot = () => {
+      const encode = value => JSON.stringify(value, (_, item) => typeof item === 'bigint'
+        ? { integer64: String(item) } : ArrayBuffer.isView(item) ? { blob: Buffer.from(item.buffer, item.byteOffset, item.byteLength).toString('hex') } : item)
+      const schema = db.db.prepare("SELECT type,name,tbl_name,sql FROM sqlite_master ORDER BY type,name").all()
+      const tables = schema.filter(row => row.type === 'table').map(({ name }) => {
+        const quote = text => '"' + text.replaceAll('"', '""') + '"'
+        const columns = db.db.prepare('PRAGMA table_info(' + quote(name) + ')').all()
+        const probes = columns.map(column => 'typeof(' + quote(column.name) + ') AS ' + quote('__stock_type_' + column.name))
+        const rows = db.db.prepare('SELECT *' + (probes.length ? ',' + probes.join(',') : '') + ' FROM ' + quote(name)).all().map(encode).sort()
+        return [name, columns, rows]
+      })
+      return encode([schema, tables])
+    }
+      const before = snapshot()
+      const res = await post(GOOD)
+      assert.equal(res.status, 409, res.text)
+      assert.equal(res.json?.code, 'stock_lifecycle_dependency')
+      assert.equal(snapshot(), before)
+      assert.deepEqual([...cache], [['ratelimit:factory_reset:1', '1']], 'only the existing admission rate limit writes cache')
+      assert.deepEqual(log, ['verify:1->1'], 'only admitted password verification; no backup, custom DDL, reseed or R2')
+    })
+  }
+  await check('factory lifecycle permits empty source tables and unrelated metadata', async () => {
+    db.exec('CREATE TABLE stock_disposition_sources(product_id INTEGER); CREATE TABLE stock_funding_dependencies(product_id INTEGER); CREATE TABLE unrelated_sources(id INTEGER); INSERT INTO unrelated_sources VALUES(1);')
+    const res = await post(GOOD)
+    assert.equal(res.status, 200, res.text)
+    assert.equal(salesLeft(), 0)
+    assert.equal(db.prepare('SELECT COUNT(*) n FROM unrelated_sources').get().n, 1)
+    const realDb = loadStockDependency('lib/db.ts')
+    assert.equal(typeof realDb.getImportFencedDb, 'function')
+    assert.equal(loadStockDependency('lib/db.ts'), realDb, 'cached real db/fence cycle')
+    assert.equal(loadStockDependency('lib/stockLifecycle.ts').StockLifecycleError.prototype instanceof require('hono/http-exception').HTTPException, true)
+  })
   if (failures) { console.error(`${failures} failing`); process.exit(1) }
   console.log('all ok')
 })()

@@ -22,11 +22,36 @@ function transpile(relPath) {
   }
 }
 
+
+const stockDependencyCache = new Map()
+function loadStockDependency(relPath) {
+  if (stockDependencyCache.has(relPath)) return stockDependencyCache.get(relPath).exports
+  if (!['lib/stockLifecycle.ts', 'lib/db.ts', 'lib/importMaintenanceFence.ts'].includes(relPath)) {
+    throw new Error('Unexpected stock dependency: ' + relPath)
+  }
+  const file = path.join(__dirname, '..', 'src', relPath)
+  const loaded = { exports: {} }
+  stockDependencyCache.set(relPath, loaded)
+  const code = ts.transpileModule(fs.readFileSync(file, 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 }, fileName: file,
+  }).outputText
+  const localRequire = (request) => {
+    if (request === 'hono/http-exception') return require(request)
+    if (!request.startsWith('.')) throw new Error('Unexpected stock external: ' + request)
+    const next = path.posix.normalize(path.posix.join(path.posix.dirname(relPath), request))
+    return loadStockDependency(next.endsWith('.ts') ? next : next + '.ts')
+  }
+  try { new Function('exports', 'require', 'module', code)(loaded.exports, localRequire, loaded) }
+  catch (error) { stockDependencyCache.delete(relPath); throw error }
+  return loaded.exports
+}
+
 function loadReal(relPath, requireOverrides = {}) {
   const { sourcePath, outputText } = transpile(relPath)
   const originalLoad = Module._load
   Module._load = function patchedLoad(request, parent, isMain) {
     if (request in requireOverrides) return requireOverrides[request]
+    if (request === '../lib/stockLifecycle' || request === './stockLifecycle') return loadStockDependency('lib/stockLifecycle.ts')
     return originalLoad.call(this, request, parent, isMain)
   }
   const moduleObj = { exports: {} }
@@ -268,6 +293,34 @@ async function main() {
     assert.equal(broadcasts.length, 0)
   })
 
+
+  for (const table of ['stock_disposition_fees', 'stock_funding_events']) {
+    await check('linked ' + table + ' refuses fee edit and delete without writes', async () => {
+      sqlite.exec('CREATE TABLE stock_disposition_fees(fee_id INTEGER); CREATE TABLE stock_funding_events(fee_id INTEGER);')
+      sqlite.prepare('INSERT INTO ' + table + ' VALUES(1)').run()
+      const snapshot = () => JSON.stringify(sqlite.prepare("SELECT name,sql FROM sqlite_master WHERE type='table' ORDER BY name").all()
+        .map(({ name, sql }) => [name, sql, sqlite.prepare('SELECT * FROM "' + name + '"').all().map(row => JSON.stringify(row)).sort()]))
+      const before = snapshot()
+      for (const method of ['PUT', 'DELETE']) {
+        const response = await app.request('/1', { method, headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ label: 'blocked edit', reason: 'blocked delete', expectedUpdatedAt: row().updated_at }) }, {},
+          { waitUntil: () => {}, passThroughOnException: () => {} })
+        const body = await response.json()
+        assert.equal(response.status, 409, JSON.stringify(body))
+        assert.equal(body.code, 'stock_lifecycle_dependency')
+        assert.equal(snapshot(), before)
+        assert.equal(feeUpdateRuns, 0)
+        assert.deepEqual(audits, [])
+        assert.deepEqual(broadcasts, [])
+      }
+    })
+  }
+  await check('empty fee links and irrelevant fee ids permit edits', async () => {
+    sqlite.exec('CREATE TABLE stock_disposition_fees(fee_id INTEGER); CREATE TABLE stock_funding_events(fee_id INTEGER); INSERT INTO stock_funding_events VALUES(99);')
+    assert.equal((await update({ label: 'allowed edit', expectedUpdatedAt: row().updated_at })).status, 200)
+    assert.equal(row().label, 'allowed edit')
+    assert.equal(loadStockDependency('lib/stockLifecycle.ts').StockLifecycleError.prototype instanceof require('hono/http-exception').HTTPException, true)
+  })
   console.log(`\n${passed} fee update version-guard checks passed.`)
 }
 
