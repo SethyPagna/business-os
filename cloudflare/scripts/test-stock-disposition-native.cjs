@@ -75,6 +75,7 @@ function fixture(hooks={},lot={ quantity:4,free:1,cost:9.9999,gross4:99999 }) {
       if (hooks.failAt===index) throw new Error('injected statement failure')
       return statement.execute()
     }); if (atomic) db.exec('COMMIT') } catch(error) { if (atomic) db.exec('ROLLBACK'); throw error }
+    if (hooks.afterCommit) { const hook=hooks.afterCommit; delete hooks.afterCommit; await hook(db) }
     if (hooks.afterBatchThrow) { delete hooks.afterBatchThrow; throw new Error('simulated lost response') }
     return results
   } }
@@ -90,6 +91,44 @@ async function post(f,body,enabled=true) {
 const count=(f,table)=>Number(f.db.prepare(`SELECT COUNT(*) n FROM ${table}`).get().n)
 const snapshot=f=>JSON.stringify(['product_batches','branch_batch_stock','branch_stock','products','inventory_movements','stock_disposition_allocations','stock_disposition_events','stock_disposition_receipts','stock_disposition_fees','fees','fee_operation_receipts','audit_logs'].map(table=>f.db.prepare(`SELECT * FROM ${table}`).all()))
 ;(async()=>{
+  if (process.env.STOCK_DISPOSITION_POSTCONDITION_CASE === 'permission') {
+    const f=fixture(); assert.equal((await post(f,hold())).status,200)
+    f.db.exec(`UPDATE users SET permissions='{"inventory":true,"product_cost_edit":true,"product_cost_view":true,"fees":false}' WHERE id=71`)
+    assert.equal((await post(f,hold())).status,403,'fee-only revocation must fence cached extra-fee replay')
+    const noFee=hold('no-fee-request-0001',{ quantity:1,coverage_usd:0,coverage_state:'none',extra_fee_usd:0,expected_generation:1 })
+    assert.equal((await post(f,noFee)).status,200,'no-fee command retains independent inventory permission')
+    f.db.exec('UPDATE product_batches SET received_cost_usd=20 WHERE id=500')
+    assert.equal((await post(f,noFee)).status,200,'authorized read-only replay does not reread changed entity')
+    const lost=fixture({ afterBatchThrow:true,afterCommit:db=>db.exec(`UPDATE users SET permissions='{"inventory":true,"product_cost_edit":true,"product_cost_view":true,"fees":false}' WHERE id=71`) })
+    assert.equal((await post(lost,hold())).status,403,'fee-only revocation must fence lost-response recovery')
+    assert.equal(count(lost,'stock_disposition_events'),1); assert.equal(count(lost,'fees'),lost.baseline.fees+1)
+    f.db.close(); lost.db.close(); console.log('PASS current required fee permission before cached replay and committed-lost-response recovery; no-fee independent and read-only entity replay'); return
+  }
+  if (process.env.STOCK_DISPOSITION_POSTCONDITION_CASE === 'silent') {
+    for (const [name,sql] of [
+      ['fee','CREATE TRIGGER ignore_fee BEFORE INSERT ON fees BEGIN SELECT RAISE(IGNORE); END'],
+      ['fee receipt','CREATE TRIGGER ignore_fee_receipt BEFORE INSERT ON fee_operation_receipts BEGIN SELECT RAISE(IGNORE); END'],
+      ['fee link','CREATE TRIGGER ignore_fee_link BEFORE INSERT ON stock_disposition_fees BEGIN SELECT RAISE(IGNORE); END'],
+      ['fee audit',"CREATE TRIGGER ignore_fee_audit BEFORE INSERT ON audit_logs WHEN NEW.entity='fee' BEGIN SELECT RAISE(IGNORE); END"],
+      ['stock audit',"CREATE TRIGGER ignore_stock_audit BEFORE INSERT ON audit_logs WHEN NEW.entity='stock_disposition' BEGIN SELECT RAISE(IGNORE); END"],
+      ['allocation','CREATE TRIGGER ignore_allocation BEFORE INSERT ON stock_disposition_allocations BEGIN SELECT RAISE(IGNORE); END'],
+      ['event','CREATE TRIGGER ignore_event BEFORE INSERT ON stock_disposition_events BEGIN SELECT RAISE(IGNORE); END'],
+      ['receipt','CREATE TRIGGER ignore_stock_receipt BEFORE INSERT ON stock_disposition_receipts BEGIN SELECT RAISE(IGNORE); END'],
+      ['batch stock','CREATE TRIGGER ignore_batch_stock BEFORE UPDATE ON branch_batch_stock BEGIN SELECT RAISE(IGNORE); END'],
+      ['branch stock','CREATE TRIGGER ignore_branch_stock BEFORE UPDATE ON branch_stock BEGIN SELECT RAISE(IGNORE); END'],
+      ['catalog stock','CREATE TRIGGER ignore_catalog_stock BEFORE UPDATE ON products BEGIN SELECT RAISE(IGNORE); END'],
+      ['CHECK guards','CREATE TRIGGER ignore_check_guards BEFORE INSERT ON stock_disposition_guards BEGIN SELECT RAISE(IGNORE); END'],
+      ['guard cleanup','CREATE TRIGGER ignore_guard_cleanup BEFORE DELETE ON stock_disposition_guards BEGIN SELECT RAISE(IGNORE); END'],
+    ]) {
+      const f=fixture(); f.db.exec(sql); const before=snapshot(f)
+      const result=await post(f,hold())
+      assert.equal(result.status,409,`${name}: ignored writes must fail closed`)
+      assert.ok(snapshot(f)===before,`${name}: ignored writes rollback all data`)
+      assert.equal(count(f,'stock_disposition_guards'),0,`${name}: no leaked assertion guard`)
+      f.db.close(); console.log(`PASS silent ${name} refuses409 and full rollback`)
+    }
+    return
+  }
   const f=fixture()
   const original=snapshot(f)
   assert.equal((await post(f,hold(),false)).status,404)

@@ -27,10 +27,11 @@ function positiveId(value: unknown): number {
   if (!Number.isSafeInteger(value) || Number(value) <= 0) return refuse('invalid_identity',400)
   return Number(value)
 }
-async function currentActor(db: D1Compat, actor: SessionUser) {
+async function currentActor(db: D1Compat, actor: SessionUser, requiresFeePermission = false) {
   const current = await db.prepare(`SELECT u.id,u.username,u.name,u.permissions,u.role_id,u.is_active,u.deleted_at,
     r.code AS role_code,r.permissions AS role_permissions FROM users u LEFT JOIN roles r ON r.id=u.role_id WHERE u.id=@actor`).get<SessionUser & { deleted_at: string | null }>({ actor: actor.id })
   if (!current || current.is_active !== 1 || current.deleted_at || getActionTier(current,'inventory','adjust') !== 'full' || !canEditAcquisitionCosts(current) || !canViewAcquisitionCosts(current)) return refuse('permission_denied',403)
+  if (requiresFeePermission && getActionTier(current,'fees','add') !== 'full') return refuse('fee_permission_denied',403)
   return current
 }
 async function readReceipt(db: D1Compat, request: string) {
@@ -69,7 +70,7 @@ export async function commitStockDisposition(env: { DB: D1Database; IMPORT_DB?: 
   const generation = Number(raw.expected_generation)
   const requestJson = JSON.stringify({ kind, sourceId,batch,product,branch,supplier,quantity,coverage4,coverageState,extraFee4,allocationId,condition,reason,category,generation })
   const digest = await feeRequestDigest(requestJson), db = getDb(env)
-  const current = await currentActor(db,actor)
+  const current = await currentActor(db,actor,extraFee4 > 0)
   const existing = await readReceipt(db,request)
   if (existing) return replay(existing,actor.id,digest,requestJson)
   const source = await db.prepare('SELECT * FROM stock_disposition_sources WHERE id=@source').get<Source>({ source: sourceId })
@@ -152,7 +153,7 @@ export async function commitStockDisposition(env: { DB: D1Database; IMPORT_DB?: 
     { sql: 'DELETE FROM stock_disposition_guards WHERE token=@token',params: { token:eventId } })
   try { await ordinaryBusinessBatch(db,statements) }
   catch {
-    await currentActor(db,actor)
+    await currentActor(db,actor,extraFee4 > 0)
     const committed = await readReceipt(db,request)
     if (committed) return replay(committed,actor.id,digest,requestJson)
     return refuse('disposition_write_conflict')
