@@ -49,6 +49,9 @@ async function main() {
     const wideSql = `SELECT ${Array.from({ length: 100 }, (_, i) => `?${i + 1} + ?${i + 1} AS c${i}`).join(',')}`
     const wideValues = Array.from({ length: 100 }, (_, i) => i)
     assert.equal(sqliteD1Call(node.prepare(wideSql), 'get', wideValues).c99, 198)
+    for (const sql of [`${wideSql},?101 AS excess`, `SELECT ${Array.from({ length: 101 }, (_, i) => `? AS c${i}`).join(',')}`]) {
+      assert.throws(() => sqliteD1Call(better.prepare(sql), 'get', [...wideValues, 100]), /too many SQL variables|variable number/)
+    }
     if (!process.argv.includes('--sqlite-only')) {
       const { Miniflare, Log, LogLevel } = require('miniflare')
       mf = new Miniflare({ modules: true, script: 'export default {fetch(){return new Response("fixture")}}', compatibilityDate: '2026-07-30', d1Databases: ['DB'], log: new Log(LogLevel.ERROR) })
@@ -61,6 +64,8 @@ async function main() {
       for (const values of [[], [1], [1, 2, 3]]) {
         await assert.rejects(() => d1.prepare('SELECT ?1 AS a,?2 AS b').bind(...values).first())
       }
+      await assert.rejects(() => d1.prepare(`${wideSql},?101 AS excess`).bind(...wideValues, 100).first(), /too many SQL variables|variable number/)
+      await assert.rejects(() => d1.prepare(`SELECT ${Array.from({ length: 101 }, (_, i) => `? AS c${i}`).join(',')}`).bind(...wideValues, 100).first(), /too many SQL variables|variable number/)
       assert.deepEqual({ ...sqliteD1Call(node.prepare(wideSql), 'get', wideValues) }, await d1.prepare(wideSql).bind(...wideValues).first())
       console.log('PASS real-workerd D1 reference for repeated/reordered/mixed/sparse/quoted/zero/NULL/Khmer/NUL and 100 unique slots')
     }

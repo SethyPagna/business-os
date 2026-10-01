@@ -37,6 +37,7 @@ function sqliteD1Call(statement, method, values) {
       slots = Math.max(slots, slot)
     }
   }
+  if (slots > 100 || values.length > 100) throw new Error('D1_ERROR: too many SQL variables')
   if (!numbered.size) return statement[method](...values)
   if (values.length !== slots) throw new Error(`D1 parameter count mismatch: expected ${slots}, got ${values.length}`)
   if (statement.sourceSQL !== undefined) return statement[method](...values)
