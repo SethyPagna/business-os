@@ -20,6 +20,8 @@ function load(rel) {
   let source = process.env.STOCK_FUNDING_BASELINE && rel === 'routes/inventory.ts'
     ? execFileSync('git',['show','38afe764b1182e415c91eba56067b68bc8b05ad1:cloudflare/src/routes/inventory.ts'],{ cwd:path.join(__dirname,'../..'),encoding:'utf8' })
     : fs.readFileSync(sourcePath,'utf8')
+  if (process.env.STOCK_FUNDING_FEE_PROVENANCE_BASELINE && rel === 'lib/stockFunding.ts') source=execFileSync('git',['show','f564ed49a9aa7126d56cb2c178341d8b243b5fa6:cloudflare/src/lib/stockFunding.ts'],{cwd:path.join(__dirname,'../..'),encoding:'utf8'})
+  if (process.env.STOCK_FUNDING_AMBIGUOUS_BASELINE && rel === 'lib/stockFunding.ts') source=execFileSync('git',['show','ba1e58f28947ce4a7a04ff552e2d13514d8134b8:cloudflare/src/lib/stockFunding.ts'],{cwd:path.join(__dirname,'../..'),encoding:'utf8'})
   const output = ts.transpileModule(source,{ compilerOptions:{ module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022 },fileName:sourcePath }).outputText
   const mod = { exports:{} }; cache.set(rel,mod)
   const requireLocal = request => {
@@ -90,7 +92,7 @@ const command=(kind,generation,extra={})=>({kind,source_id:'fund-900',expected_g
 const snapshot=f=>JSON.stringify(['stock_funding_invoice_openings','stock_funding_sources','stock_funding_claims','stock_funding_events','stock_funding_receipts','stock_funding_guards','audit_logs','fees','fee_operation_receipts','product_batches','inventory_movements','branch_batch_stock','branch_stock','products','supplier_invoices'].map(t=>f.db.prepare(`SELECT * FROM ${t}`).all()))
 async function ap(f){const r=await app.request('/funding-experiment/ap',{}, {DB:f.d1,STOCK_FUNDING_EXPERIMENT:'local-fixture-only'},context);return {status:r.status,data:await r.json().catch(()=>null)}}
 async function ok(f,body){const r=await post(f,body);assert.equal(r.status,200,JSON.stringify(r));return r.data}
-async function shippingFee(f){const fees=load('routes/fees.ts').default;const r=await fees.request('/',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({fee_money_version:1,fee_type:'other',label:'Shipping',amount_usd:7,amount_khr:0,fee_date:'2026-10-01',branch_id:1,sale_id:null,delivery_contact_id:null,notes:'Actual extra shipping',client_request_id:'shipping-posted-0001'})},{DB:f.d1},context);const body=await r.json();assert.equal(r.status,201,JSON.stringify(body));return body.fee.id}
+async function shippingFee(f,fault=false){const fees=load('routes/fees.ts').default;const r=await fees.request('/',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({fee_money_version:1,fee_type:'other',label:'Shipping',amount_usd:7,amount_khr:0,fee_date:'2026-10-01',branch_id:1,sale_id:null,delivery_contact_id:null,notes:'Actual extra shipping',client_request_id:'shipping-posted-0001'})},{DB:f.d1},context);const body=await r.json().catch(()=>null);if(!fault)assert.equal(r.status,201,JSON.stringify(body));else {assert.ok([201,500].includes(r.status));assert.equal(Number(f.db.prepare('SELECT COUNT(*) n FROM fees').get().n),f.baseline.fees+1);assert.equal(Number(f.db.prepare('SELECT COUNT(*) n FROM fee_operation_receipts').get().n),f.baseline.fee_operation_receipts+1)}return Number(f.db.prepare('SELECT MAX(id) id FROM fees').get().id)}
 
 function invoice(f,id=100,total=200,paid=80,debt=120){f.db.prepare(`INSERT INTO supplier_invoices(id,source_branch,branch_id,legacy_id,supplier_id,supplier_name,invoice_date,total_amount_usd,amount_paid_usd,outstanding_balance_usd,status,source_file,source_row) VALUES(?,'Shop',1,?,77,'Source supplier','2026-10-01',?,?,?,'partial','proven-opening-fixture',1)`).run(id,id,total,paid,debt)}
 function secondSource(f){f.db.exec(`INSERT INTO products(id,name,sku,stock_quantity,is_active) VALUES(11,'Second source','SECOND',4,1);INSERT INTO product_batches(id,variant_product_id,batch_key,received_at,is_active,supplier_id,received_quantity,received_cost_usd,received_branch_id) VALUES(501,11,'second-fund','2026-10-01',1,77,4,100,1);INSERT INTO inventory_movements(id,product_id,branch_id,batch_id,movement_type,quantity,free_quantity,total_cost_usd,reference_id,user_id) VALUES(901,11,1,501,'add',4,1,100,'second-receipt',71)`)}
@@ -149,6 +151,32 @@ async function rollbackControls(){
  }
  console.log('PASS 9 silent RAISE(IGNORE) and4 driver-captured strict receipt JSON corruption rollback controls; fault reachability not claimed')
 }
+async function shippingReceiptControls(){
+ for(const [name,change] of [
+  ['falseKHR',sql=>sql.replace(/'amount_khr',\?\d+/,"'amount_khr',json('false')")],
+  ['duplicateID',sql=>sql.replace("'id',last_insert_rowid()","'id',last_insert_rowid(),'id',999")],
+  ['duplicateExpected',sql=>sql.replace(/'amount_usd',(\?\d+)/,"'amount_usd',$1,'amount_usd',$1")],
+  ['duplicateEnvelope',sql=>sql.replace(/\)\),(\?\d+)\s*\)/,") ,'fee',json('{}')),$1)")],
+  ['unknownKey',sql=>sql.replace("'fee_type'","'unknown',0,'fee_type'")]
+ ]){
+  const f=fixture({}, {quantity:4,free:1,cost:100,gross4:1000000});await ok(f,admission(40));f.hooks.beforeBatch=(_db,statements)=>{const index=statements.findIndex(s=>s.sql.startsWith('INSERT INTO fee_operation_receipts'));assert.ok(index>=0);const original=statements[index],modified=change(original.sql);assert.notEqual(modified,original.sql,name);statements[index]=f.d1.prepare(modified).bind(...original.values)}
+  const fee=await shippingFee(f,true),before=snapshot(f);const r=await post(f,command('shipping',0,{fee_id:fee,amount_usd:7}));assert.equal(r.status,409,name+' actual existing receipt must refuse '+JSON.stringify(r));assert.equal(snapshot(f),before);f.db.close()
+ }
+ console.log('PASS five captured actual fees receipt false/duplicate/unknown shape controls refused before funding link; existing fee posting retained, no duplicate cash')
+}
+async function ambiguousInvoiceControls(){
+ for(const identity of ['matching','unknownSupplier','unknownBranch']){
+  const f=fixture({}, {quantity:4,free:1,cost:100,gross4:1000000});invoice(f,100,100,40,60)
+  if(identity==='unknownSupplier')f.db.exec('UPDATE supplier_invoices SET supplier_id=NULL WHERE id=100')
+  if(identity==='unknownBranch')f.db.exec('UPDATE supplier_invoices SET branch_id=NULL WHERE id=100')
+  const old=snapshot(f),r=await post(f,admission(40))
+  if(r.status===200){const projection=await ap(f);console.log(`RED control ${identity}: unmapped imported header + native source aggregate debt4=${projection.data.debt4}`)}
+  assert.equal(r.status,409,identity+' imported source mapping must be explicit');assert.equal(snapshot(f),old);f.db.close()
+ }
+ const race=await prepare('admit');race.f.hooks.beforeBatch=db=>invoice({...race.f,db},100,100,40,60);assert.equal((await post(race.f,race.body)).status,409);assert.equal(race.f.db.prepare('SELECT COUNT(*) n FROM stock_funding_sources').get().n,0);race.f.db.close()
+ const later=fixture({}, {quantity:4,free:1,cost:100,gross4:1000000});await ok(later,admission(40));invoice(later,100,100,40,60);assert.equal((await ap(later)).status,409);assert.equal((await post(later,command('pending',0,{amount_usd:30,claim_id:'after-import'}))).status,409);later.db.close()
+ console.log('PASS matching/unknown imported identity requires explicit opening allocation; concurrent/later imports refuse ambiguity without modifying headers')
+}
 async function admissionControls(){
  for(const [name,extra] of [['negative paid',{opening_paid_usd:-1}],['inconsistent opening',{opening_paid_usd:40,opening_debt_usd:70}],['boolean gross',{gross_usd:false}],['excess free',{free_quantity:5}],['unsupported precision',{gross_usd:'100.00001'}],['missing explicit invoice',{invoice_id:undefined}],['unknown supplier',{supplier_id:78}],['nonfinite amount',{gross_usd:'Infinity'}]]){
   const f=fixture({}, {quantity:4,free:1,cost:100,gross4:1000000});const before=snapshot(f);const r=await post(f,admission(0,extra));assert.ok([400,409].includes(r.status),`${name}: ${JSON.stringify(r)}`);assert.equal(snapshot(f),before);f.db.close()
@@ -167,8 +195,10 @@ async function raceControls(){
  console.log('PASS generation race, committed lost response, authorized readonly replay and source/header TOCTOU refusal')
 }
 ;(async()=>{
+ if(process.env.STOCK_FUNDING_AMBIGUOUS_ONLY){await ambiguousInvoiceControls();return}
+ if(process.env.STOCK_FUNDING_SHIPPING_ONLY){await shippingReceiptControls();return}
  if(process.env.STOCK_FUNDING_BASELINE){const f=fixture({}, {quantity:4,free:1,cost:100,gross4:1000000});await ok(f,admission());return}
- if(!process.env.STOCK_FUNDING_SMOKE){await admissionControls();await invoiceControls();await permissionControls();await raceControls();await rollbackControls()}
+ if(!process.env.STOCK_FUNDING_SMOKE){await ambiguousInvoiceControls();await shippingReceiptControls();await admissionControls();await invoiceControls();await permissionControls();await raceControls();await rollbackControls()}
  for(const paid of [0,40,80,100]){
   const f=fixture({}, {quantity:4,free:1,cost:100,gross4:1000000})
   assert.equal((await post(f,admission(paid),false)).status,404)
