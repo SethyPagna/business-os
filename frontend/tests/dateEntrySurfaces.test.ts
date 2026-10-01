@@ -13,6 +13,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import ts from 'typescript'
 import { STATS_PRESETS } from '../src/components/shared/statsStripPresets.ts'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
@@ -44,7 +45,6 @@ const SURFACES: Array<{ file: string; what: string }> = [
   { file: 'components/products/forms/ProductForm.tsx', what: 'product expiry date' },
   { file: 'components/products/StockInSessionsSection.tsx', what: 'stock-in session received date and credit due date' },
   { file: 'components/fees/FeeForm.tsx', what: 'the Expenses record date' },
-  { file: 'components/sales/ExportModal.tsx', what: 'the sales export custom range' },
   { file: 'components/promotions/PromotionsPage.tsx', what: 'promotion and discount start/end' },
   { file: 'components/catalog/ManagePromotionsModal.tsx', what: 'storefront promo show-from / show-until' },
 ]
@@ -59,6 +59,24 @@ for (const surface of SURFACES) {
     assert.ok(source.includes('<DateEntryInput'), `${surface.file} must render <DateEntryInput`)
   })
 }
+
+runTest('sales export uses the shared date and time range', () => {
+  const source = read('components/sales/ExportModal.tsx')
+  assert.match(source, /import DateTimeRangePicker/)
+  const file = ts.createSourceFile('ExportModal.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+  const attributes: string[] = []
+  const visit = (node: ts.Node) => {
+    if ((ts.isJsxSelfClosingElement(node) || ts.isJsxOpeningElement(node)) && node.tagName.getText(file) === 'DateTimeRangePicker') {
+      attributes.push(node.attributes.getText(file))
+    }
+    ts.forEachChild(node, visit)
+  }
+  visit(file)
+  assert.equal(attributes.length, 1)
+  assert.match(attributes[0], /\bshowTime\b/)
+  assert.match(attributes[0], /continuous=\{false\}/)
+  assert.doesNotMatch(source, /<DateEntryInput/)
+})
 
 // The one surface whose column the app did NOT own -- and which turned out
 // not to be a surface at all.
