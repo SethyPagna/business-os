@@ -27,3 +27,9 @@ CREATE TRIGGER stock_lifecycle_recovery_funding_admission BEFORE INSERT ON stock
  WHERE x.table_name='stock_funding_sources' AND j.value=NEW.id
  AND NOT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance'))
  BEGIN SELECT RAISE(ABORT,'stock_recovery_scope_mismatch'); END;
+CREATE TRIGGER stock_lifecycle_recovery_valuation_admission BEFORE INSERT ON stock_valuation_sources
+ WHEN EXISTS(SELECT 1 FROM stock_lifecycle_recovery_context)
+ AND NOT EXISTS(SELECT 1 FROM stock_lifecycle_recovery_context x,json_each(x.source_ids) j
+ WHERE x.table_name='stock_valuation_sources' AND j.value=NEW.source_id
+ AND NOT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance'))
+ BEGIN SELECT RAISE(ABORT,'stock_recovery_scope_mismatch'); END;

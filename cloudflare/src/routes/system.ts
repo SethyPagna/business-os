@@ -112,7 +112,8 @@ app.use('*', async (c, next) => {
       c.env = guarded
       await assertStockLifecycleMutable(getDb(guarded), { allSources: true })
       await next()
-    }, { actorId: Number(c.get('user')?.id) || undefined })
+      if (c.res.status >= 500) throw new Error('Reset failed. Inspect maintenance and the saved backup before retrying.')
+    }, { actorId: Number(c.get('user')?.id) || undefined, requiredPermission: 'backup_restore' })
   } catch (error) {
     const lifecycle = stockLifecycleRefusal(error)
     if (lifecycle) return c.json({ success: false, ...lifecycle }, 409)

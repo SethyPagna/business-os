@@ -1,5 +1,5 @@
 import { assertStockLifecycleRestoreAllowed } from './stockLifecycle'
-import { withStockRecoveryFence, assertCompleteStockRecoveryGraph, insertStockRecoveryRows } from './stockLifecycleRecovery'
+import { withStockRecoveryFence, assertCompleteStockRecoveryGraph, insertStockRecoveryRows, STOCK_RECOVERY_TABLES } from './stockLifecycleRecovery'
 import { getDb } from './db'
 import type { Env } from '../index'
 import { getPlanLimits } from './planTier'
@@ -615,8 +615,8 @@ export class R2StreamWriter {
   }
 }
 
-export async function createCloudflareBackup(env: Env, source: 'manual' | 'scheduled' = 'manual') {
-  return withStockRecoveryFence(env, 'backup:snapshot', guarded => writeBackupDocument(guarded, { tables: BACKUP_TABLES, includeAssets: true, source }))
+export async function createCloudflareBackup(env: Env, source: 'manual' | 'scheduled' = 'manual', authorization?: { actorId: number; requiredPermission: string; requireCostView: boolean }) {
+  return withStockRecoveryFence(env, 'backup:snapshot', guarded => writeBackupDocument(guarded, { tables: BACKUP_TABLES, includeAssets: true, source }), authorization)
 }
 
 /**
@@ -1221,8 +1221,10 @@ export const SALE_REPLAY_RESTORE_BUNDLE = [
 
 function restoreSafeSectionTables(tables: readonly string[]): Set<string> {
   const requested = new Set(tables)
-  if (SALE_REPLAY_RESTORE_BUNDLE.some((table) => requested.has(table))) {
+  if (SALE_REPLAY_RESTORE_BUNDLE.some((table) => requested.has(table)) || STOCK_RECOVERY_TABLES.some(table => requested.has(table))) {
     for (const table of SALE_REPLAY_RESTORE_BUNDLE) requested.add(table)
+    for (const table of STOCK_RECOVERY_TABLES) requested.add(table)
+    for (const table of ['users','roles','supplier_invoices']) requested.add(table)
   }
   return requested
 }
@@ -1417,7 +1419,7 @@ async function restoreBackedUpAsset(env: Env, backedUpKey: string, originalKey: 
   }
 }
 
-export async function restoreCloudflareBackup(env: Env, source: string, onProgress?: (progress: RestoreProgress) => Promise<void>, ownership?: { token: string; actorId?: number }) {
+export async function restoreCloudflareBackup(env: Env, source: string, onProgress?: (progress: RestoreProgress) => Promise<void>, ownership?: { token: string; actorId?: number; requiredPermission?: string }) {
   return withStockRecoveryFence(env, source, guarded => restoreCloudflareBackupOwned(guarded, source, onProgress), ownership)
 }
 
@@ -1454,6 +1456,10 @@ async function restoreCloudflareBackupOwned(env: Env, source: string, onProgress
         throw new Error('Invalid custom table metadata: missing name column.')
       }
       if (ev.type === 'row' && ev.table === 'custom_tables') assertCustomTableName(ev.row?.name)
+      if (ev.type === 'table' && (STOCK_RECOVERY_TABLES as readonly string[]).includes(ev.table) && documentTables.has(ev.table)) throw new Error(`Incomplete stock recovery graph: duplicate ${ev.table}. No business rows have been changed.`)
+      if (ev.type === 'row' && (STOCK_RECOVERY_TABLES as readonly string[]).includes(ev.table)) {
+        for (const column of documentColumns.get(ev.table) || []) if (!Object.hasOwn(ev.row,column)) throw new Error(`Incomplete stock recovery graph: missing ${ev.table}.${column} row value. No business rows have been changed.`)
+      }
       if (ev.type === 'table' && !documentTables.has(ev.table)) {
         documentTables.add(ev.table)
         documentColumns.set(ev.table, ev.columns)

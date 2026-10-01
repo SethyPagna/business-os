@@ -1,5 +1,7 @@
 import type { Env } from '../index'
 import { beginMaintenance, endMaintenance, updateMaintenance } from './maintenance'
+import { hasPermission } from './permissions'
+import { canViewAcquisitionCosts } from './acquisitionCostAccess'
 
 export const STOCK_RECOVERY_TABLES = [
   'stock_disposition_sources', 'stock_disposition_allocations', 'stock_disposition_events',
@@ -9,7 +11,7 @@ export const STOCK_RECOVERY_TABLES = [
   'stock_valuation_agreements', 'stock_valuation_acceptances', 'stock_valuation_receipts',
 ] as const
 
-type Fence = { token: string; destructive: boolean; raw: Env; unwrap: (row: D1PreparedStatement) => D1PreparedStatement }
+type Fence = { token: string; actorId?: number; destructive: boolean; raw: Env; unwrap: (row: D1PreparedStatement) => D1PreparedStatement }
 const fences = new WeakMap<object, Fence>()
 const sourceTables = new Set(['stock_disposition_sources', 'stock_funding_sources', 'stock_valuation_sources'])
 
@@ -25,21 +27,25 @@ function ownerGuard(token: string, actor?: { id: number; snapshot: string }) {
   }
 }
 
-export async function withStockRecoveryFence<T>(env: Env, key: string, run: (guarded: Env) => Promise<T>, options: { token?: string; actorId?: number } = {}): Promise<T> {
+export async function withStockRecoveryFence<T>(env: Env, key: string, run: (guarded: Env) => Promise<T>, options: { token?: string; actorId?: number; requiredPermission?: string; requireCostView?: boolean } = {}): Promise<T> {
   const existing = fences.get(env)
-  if (existing) return run(env)
+  if (existing) {
+    if (options.token && options.token !== existing.token || options.actorId && options.actorId !== existing.actorId) throw new Error('Stock recovery owner changed.')
+    return run(env)
+  }
   const owned = !options.token
   const state = owned ? await beginMaintenance(env, { backupKey: key, startedBy: options.actorId ? String(options.actorId) : 'backup-recovery' }) : null
   const token = options.token || state!.token
   let actor: { id: number; snapshot: string } | undefined
   if (options.actorId) {
-    const row = await env.DB.prepare(`SELECT json_array(u.username,u.permissions,u.role_id,r.code,r.permissions) snapshot
-      FROM users u LEFT JOIN roles r ON r.id=u.role_id WHERE u.id=? AND u.is_active=1 AND u.deleted_at IS NULL`).bind(options.actorId).first<{ snapshot: string }>()
-    if (!row) { if (owned) await endMaintenance(env, token); throw new Error('Stock recovery actor is no longer authorized.') }
+    const row = await env.DB.prepare(`SELECT json_array(u.username,u.permissions,u.role_id,r.code,r.permissions) snapshot,
+      u.permissions,r.code role_code,r.permissions role_permissions
+      FROM users u LEFT JOIN roles r ON r.id=u.role_id WHERE u.id=? AND u.is_active=1 AND u.deleted_at IS NULL`).bind(options.actorId).first<{ snapshot: string; permissions: string; role_code: string; role_permissions: string }>()
+    if (!row || options.requiredPermission && !hasPermission(row, options.requiredPermission) || options.requireCostView && !canViewAcquisitionCosts(row)) { if (owned) await endMaintenance(env, token); throw new Error('Stock recovery actor is no longer authorized.') }
     actor = { id: options.actorId, snapshot: row.snapshot }
   }
   const guard = () => { const item = ownerGuard(token, actor); return env.DB.prepare(item.sql).bind(...item.params) }
-  const fence: Fence = { token, destructive: false, raw: env, unwrap: row => row }
+  const fence: Fence = { token, actorId: options.actorId, destructive: false, raw: env, unwrap: row => row }
   const batch = async <T = unknown>(items: D1PreparedStatement[]): Promise<D1Result<T>[]> => {
     const result = await env.DB.batch<T>([...items, guard()])
     if (result.some(item => !(item as { success: boolean }).success)) throw new Error('Stock recovery database batch failed.')
@@ -91,6 +97,7 @@ export async function withStockRecoveryFence<T>(env: Env, key: string, run: (gua
 }
 
 export async function assertCompleteStockRecoveryGraph(env: Env, tables: ReadonlySet<string>, columns: ReadonlyMap<string, readonly string[]>) {
+  if (fences.get(env)?.actorId && (tables.has('users') || tables.has('roles'))) throw new Error('Authenticated restore cannot replace its own authorization tables. Recover this complete backup into a separate compatible database with an operator-controlled recovery session. No business rows have been changed.')
   if (!['products','product_batches','inventory_movements','suppliers','supplier_invoices','users','branches','fees',...STOCK_RECOVERY_TABLES].some(table => tables.has(table))) return
   const rows = await env.DB.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name IN (SELECT value FROM json_each(?))`).bind(JSON.stringify(STOCK_RECOVERY_TABLES)).all<{ name: string }>()
   for (const { name } of rows.results || []) {
@@ -109,7 +116,8 @@ export async function insertStockRecoveryRows(env: Env, table: string, rows: D1P
   const changed = () => raw.prepare("SELECT CASE WHEN changes()=1 THEN 1 ELSE json_extract('[1]','$[stock_recovery_ignored_write]') END")
   const statements: D1PreparedStatement[] = [raw.prepare(`INSERT INTO stock_lifecycle_recovery_context(token,table_name,source_ids,maintenance_json)
     VALUES(?,?,?,?)`).bind(fence.token, table, JSON.stringify(sourceIds), stored.value),
-    changed(), raw.prepare("DELETE FROM system_flags WHERE key='maintenance' AND value=?").bind(stored.value), changed(),
+    changed(), raw.prepare("SELECT CASE WHEN EXISTS(SELECT 1 FROM system_flags WHERE key='stock_lifecycle_recovery_admission' AND value=?) THEN 1 ELSE json_extract('[1]','$[stock_recovery_admission_marker_missing]') END").bind(fence.token),
+    raw.prepare("DELETE FROM system_flags WHERE key='maintenance' AND value=?").bind(stored.value), changed(),
     ...rows.flatMap(row => [fence.unwrap(row), changed()]),
     raw.prepare("INSERT INTO system_flags(key,value,updated_at) VALUES('maintenance',?,?)").bind(stored.value, stored.updated_at), changed(),
     raw.prepare('DELETE FROM stock_lifecycle_recovery_context WHERE token=?').bind(fence.token), changed(),

@@ -106,7 +106,7 @@ app.post('/', async (c) => {
   try {
     if (type === 'export-folder' || type === 'export-cloudflare' || !type) {
       if (!canViewAcquisitionCosts(user)) return c.json({ error: 'Cost-view permission is required to export an unredacted database backup.', code: 'product_cost_view_required' }, 403)
-      const backup = await createCloudflareBackup(c.env, 'manual')
+      const backup = await createCloudflareBackup(c.env, 'manual', { actorId: Number(user.id), requiredPermission: 'backup', requireCostView: true })
       const retention = await pruneCloudflareBackups(c.env, CLOUDFLARE_BACKUP_KEEP)
       const jobId = crypto.randomUUID()
       const totalAssets = backup.summary.assetCount
@@ -205,7 +205,7 @@ app.post('/', async (c) => {
       try {
         restore = await restoreCloudflareBackup(c.env, sourceDir, async (progress) => {
           await updateMaintenance(c.env, maintenance.token, progress)
-        }, { token: maintenance.token })
+        }, { token: maintenance.token, actorId: Number(user.id), requiredPermission: 'backup_restore' })
       } catch (error) {
         // Leave maintenance SET -- the database is half-restored and must
         // not quietly serve writes. Record where it died; the admin either
