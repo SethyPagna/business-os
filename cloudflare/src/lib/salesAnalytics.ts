@@ -1125,18 +1125,18 @@ async function readSalesReportPass(
     FROM sales s WHERE ${voids.sql}`, 's.id', voids.params, rowBudget)
   const items = await readReportSaleItems(db, f, primary, rowBudget, `SELECT si.id,si.sale_id,${itemColumn('product_id','NULL')},${itemColumn('product_name',"''")},si.quantity,
       ${itemColumn('total_usd','0')},si.cost_price_usd,${itemColumn('product_discount_usd','0')},${itemColumn('manual_discount_usd','0')}
-    FROM sale_items si WHERE EXISTS(SELECT 1 FROM sales s WHERE s.id=si.sale_id AND ${primary.sql})`)
+    FROM sale_items si NOT INDEXED CROSS JOIN sales s ON s.id=si.sale_id WHERE ${primary.sql}`)
   const returns = await reportKeysetRows(db, `SELECT r.id,r.sale_id,r.total_refund_usd,r.status,r.return_scope${returnPrecision}
-    FROM returns r WHERE r.sale_id IS NOT NULL
+    FROM returns r CROSS JOIN sales s ON s.id=r.sale_id WHERE r.sale_id IS NOT NULL
       AND COALESCE(r.status,'completed')<>'cancelled' AND COALESCE(r.return_scope,'customer')='customer'
-      AND EXISTS(SELECT 1 FROM sales s WHERE s.id=r.sale_id AND ${primary.sql})`, 'r.id', primary.params, rowBudget)
+      AND (${primary.sql})`, 'r.id', primary.params, rowBudget)
   const returnItemPrecision = returnItemColumns.has('refund_snapshot_json')
     ? ',ri.sale_item_id,ri.total_usd,ri.refund_snapshot_json'
     : ''
   const returnItems = await reportKeysetRows(db, `SELECT ri.id,ri.return_id,ri.cost_price_usd,ri.quantity,ri.stock_action,ri.return_to_stock${returnItemPrecision}
-    FROM return_items ri WHERE EXISTS(SELECT 1 FROM returns r JOIN sales s ON s.id=r.sale_id
-      WHERE r.id=ri.return_id AND COALESCE(r.status,'completed')<>'cancelled'
-        AND COALESCE(r.return_scope,'customer')='customer' AND ${primary.sql})`, 'ri.id', primary.params, rowBudget)
+    FROM return_items ri NOT INDEXED CROSS JOIN returns r ON r.id=ri.return_id CROSS JOIN sales s ON s.id=r.sale_id
+      WHERE COALESCE(r.status,'completed')<>'cancelled'
+        AND COALESCE(r.return_scope,'customer')='customer' AND (${primary.sql})`, 'ri.id', primary.params, rowBudget)
   let deliveryFees: ReportScalarRow[] = []
   const deliveryFeeColumns = ['id', 'delivery_contact_id', 'amount_usd', 'amount_khr', 'created_at']
   if (includeDeliveryFees && deliveryFeeColumns.every((name) => feeColumns.has(name))) {
