@@ -1,7 +1,10 @@
+import { useApp } from '../../AppContext'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import AppSelect from '../shared/AppSelect.tsx'
 import SuggestionTextInput, { type SuggestionOption } from '../shared/SuggestionTextInput.tsx'
 import StatsRangeRow from '../shared/StatsRangeRow.tsx'
+import { invoiceRangeParams } from '../../utils/invoiceRangeParams.ts'
+import type { ContinuousRange } from '../../utils/continuousRangeParams.ts'
 import ColumnChooser from '../shared/ColumnChooser.tsx'
 import { useColumnPreferences } from '../shared/useColumnPreferences.ts'
 import type { TableColumnDef } from '../shared/columnPreferences.ts'
@@ -75,6 +78,7 @@ const AR_OPTIONAL_COLUMNS: TableColumnDef[] = [
 ]
 
 export default function ArInvoicesSection({ t }: ArInvoicesSectionProps) {
+  const { notify } = useApp()
   const tr = (key: string, fallback: string): string => t(key) || fallback
   const [customer, setCustomer] = useState('all')
   // P11-13: the customer filter is a search box that lists its options (the
@@ -91,6 +95,8 @@ export default function ArInvoicesSection({ t }: ArInvoicesSectionProps) {
   // Worker adds its invoice_date conditions only when from/to arrive.
   const [fromDate, setFromDate] = useState('')
   const [toDate, setToDate] = useState('')
+  const [startTime, setStartTime] = useState('')
+  const [endTime, setEndTime] = useState('')
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
   const [refreshToken, setRefreshToken] = useState(0)
@@ -119,8 +125,7 @@ export default function ArInvoicesSection({ t }: ArInvoicesSectionProps) {
     getCustomerReceivables({
       customer: customer === 'all' ? '' : customer,
       status: status === 'all' ? '' : status,
-      from: fromDate,
-      to: toDate,
+      ...invoiceRangeParams({ startDate: fromDate, endDate: toDate, startTime, endTime }),
       page,
       page_size: pageSize,
     })
@@ -142,7 +147,7 @@ export default function ArInvoicesSection({ t }: ArInvoicesSectionProps) {
         if (aliveRef.current && requestRef.current === requestId) setLoading(false)
       })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [customer, status, fromDate, toDate, page, pageSize, refreshToken])
+  }, [customer, status, fromDate, toDate, startTime, endTime, page, pageSize, refreshToken])
 
   const totals = data?.totals || {}
   const invoices = Array.isArray(data?.invoices) ? data!.invoices! : []
@@ -172,10 +177,23 @@ export default function ArInvoicesSection({ t }: ArInvoicesSectionProps) {
   )
 
   const money = (value: unknown): string => `$${(Number(value) || 0).toFixed(2)}`
-  const anyFilter = customer !== 'all' || status !== 'all' || fromDate !== '' || toDate !== ''
+  const anyFilter = customer !== 'all' || status !== 'all' || fromDate !== '' || toDate !== '' || startTime !== '' || endTime !== ''
   // The open receivable may not survive the new filter, so the float closes
   // with the list it was opened from rather than outliving its row.
   const changeFilter = (apply: () => void) => { apply(); setPage(1); setDetail(null) }
+
+  const changeRange = (range: ContinuousRange) => {
+    try { invoiceRangeParams(range) } catch {
+      notify(tr('please_select_start_end_dates', 'Please select start and end dates'), 'warning')
+      return
+    }
+    changeFilter(() => {
+      setFromDate(range.startDate || '')
+      setToDate(range.endDate || '')
+      setStartTime(range.startTime || '')
+      setEndTime(range.endTime || '')
+    })
+  }
 
   /** What the old system printed on the document, falling back to its row id. */
   const invoiceLabel = (row: ArInvoice): string => String(row.invoice_no || '').trim() || `#${row.legacy_id}`
@@ -205,10 +223,12 @@ export default function ArInvoicesSection({ t }: ArInvoicesSectionProps) {
           control inside the horizontally scrolling filter line below -- the
           position a phone never scrolled to. */}
       <StatsRangeRow
-        range={{ startDate: fromDate, endDate: toDate, startTime: '', endTime: '' }}
-        onRangeChange={(range) => changeFilter(() => { setFromDate(range.startDate || ''); setToDate(range.endDate || '') })}
+        range={{ startDate: fromDate, endDate: toDate, startTime, endTime }}
+        onRangeChange={changeRange}
+        showTime continuous
         t={t}
       />
+      <p className="text-xs text-gray-500 dark:text-gray-400">{tr('invoice_unknown_time_included', 'Invoices without a recorded time remain included for the selected dates.')}</p>
       <div className="flex flex-nowrap items-center gap-2 overflow-x-auto">
         {/* P11-13: a search box that also lists its options, matching the
             standing picker rule -- typing filters, an empty focus lists
@@ -242,7 +262,7 @@ export default function ArInvoicesSection({ t }: ArInvoicesSectionProps) {
           ]}
         />
         {anyFilter ? (
-          <button type="button" className="btn-secondary py-1 text-xs" onClick={() => changeFilter(() => { setCustomer('all'); setStatus('all'); setFromDate(''); setToDate('') })}>
+          <button type="button" className="btn-secondary py-1 text-xs" onClick={() => changeFilter(() => { setCustomer('all'); setStatus('all'); setFromDate(''); setToDate(''); setStartTime(''); setEndTime('') })}>
             {tr('clear', 'Clear')}
           </button>
         ) : null}
