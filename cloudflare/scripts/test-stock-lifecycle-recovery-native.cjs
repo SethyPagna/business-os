@@ -15,7 +15,8 @@ const overrides = {
 function load(rel) {
   if (cache.has(rel)) return cache.get(rel).exports
   const file = path.join(__dirname, '../src', rel)
-  const source = process.env.STOCK_RECOVERY_BASELINE && rel==='lib/backup.ts' ? execFileSync('git',['show','341b85850e85b8f4478a3677fb3461fee0449cf9:cloudflare/src/lib/backup.ts'],{cwd:path.join(__dirname,'../..'),encoding:'utf8'}) : fs.readFileSync(file, 'utf8')
+  const revision=process.env.STOCK_RECOVERY_BASELINE&&rel==='lib/backup.ts'?'341b85850e85b8f4478a3677fb3461fee0449cf9':process.env.STOCK_RECOVERY_SEMANTIC_BASELINE&&['lib/backup.ts','lib/stockLifecycleRecovery.ts'].includes(rel)?'3cda7d24b7db0738c16d95fe0bb0a4e515bc853b':null
+  const source = revision ? execFileSync('git',['show',`${revision}:cloudflare/src/${rel}`],{cwd:path.join(__dirname,'../..'),encoding:'utf8'}) : fs.readFileSync(file, 'utf8')
   const output = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
   const mod = { exports: {} }; cache.set(rel, mod)
   const local = name => Object.hasOwn(overrides,name) ? overrides[name] : name.startsWith('.') ? load(path.posix.normalize(path.posix.join(path.posix.dirname(rel), name)).replace(/(?:\.ts)?$/, '.ts')) : require(name)
@@ -95,10 +96,18 @@ async function main() {
   await backup.restoreCloudflareBackup(target.env, saved.key)
   assert.equal(snapshot(target), snapshot(source), 'full graph exact rows and FK parents retained')
   assert.deepEqual(target.db.prepare('PRAGMA foreign_key_check').all(), [])
+  assert.equal(target.db.prepare("SELECT recognized4 FROM stock_disposition_events WHERE kind='dispose'").get().recognized4,100000,'uncovered disposed loss remains $10 once')
+  assert.equal(target.db.prepare("SELECT remaining_gross4-remaining_coverage4 basis4 FROM stock_disposition_events WHERE kind='dispose'").get().basis4,100000,'held remaining net basis stays $10')
+  const funded=target.db.prepare('SELECT debt4,asset4,credit4,cash_in4 FROM stock_funding_latest').get()
+  assert.deepEqual({...funded},{debt4:0,asset4:0,credit4:300000,cash_in4:100000},'accepted credit and $10 cash refund remain source-local once')
+  assert.deepEqual(await funding.readStockFundingAp(target.env,actor),await funding.readStockFundingAp(source.env,actor),'current AP projection retained exactly')
   assert.equal(target.db.prepare('SELECT COUNT(*) n FROM stock_lifecycle_recovery_context').get().n, 0)
   assert.equal(target.db.prepare("SELECT COUNT(*) n FROM system_flags WHERE key IN ('maintenance','stock_lifecycle_recovery_admission')").get().n, 0)
   assert.equal((await disposition.commitStockDisposition(target.env, actor, hold)).replayed, true)
   assert.equal((await funding.commitStockFunding(target.env, actor, fund)).replayed, true)
+  const targetBeforeReplay=snapshot(target)
+  assert.equal((await funding.commitStockFunding(target.env,actor,command('refund',2,{amount_usd:10,cash_method:'cash',cash_reference:'REC-CASH',cash_recorded_at:'2026-10-01T11:00:00.000Z'}))).replayed,true)
+  assert.equal(snapshot(target),targetBeforeReplay,'restored cash refund replay never duplicates financial history')
   const before = snapshot(source)
   await assert.rejects(() => backup.restoreCloudflareBackup(source.env, saved.key), /linked supplier claim|stock_lifecycle/i)
   assert.equal(snapshot(source), before, 'existing admitted history preserved on refusal')
@@ -107,6 +116,18 @@ async function main() {
   const original = snapshot(empty)
   await assert.rejects(() => backup.restoreCloudflareBackup(empty.env, saved.key), /Incomplete stock recovery graph/)
   assert.equal(snapshot(empty), original)
+  for(const [label, mutate] of [
+    ['missing durable receipt',doc=>doc.tables.stock_funding_receipts.rows.pop()],
+    ['event amount changed',doc=>{doc.tables.stock_funding_events.rows.find(row=>row.kind==='refund').amount4+=1}],
+    ['receipt response changed',doc=>{const receipt=doc.tables.stock_funding_receipts.rows.at(-1);const response=JSON.parse(receipt.response_json);response.cash_in4+=1;receipt.response_json=JSON.stringify(response)}],
+  ]) {
+    const malformed=fixture(), doc=JSON.parse(bytes);mutate(doc)
+    malformed.db.exec("INSERT INTO settings(key,value) VALUES('sentinel','UNCHANGED')")
+    const old=snapshot(malformed); await malformed.env.ASSETS.put(saved.key,JSON.stringify(doc))
+    await assert.rejects(()=>backup.restoreCloudflareBackup(malformed.env,saved.key),/Invalid stock recovery graph/,label)
+    assert.equal(snapshot(malformed),old,label+' refused before any business mutation')
+    malformed.db.close()
+  }
   const recovery = load('lib/stockLifecycleRecovery.ts'), maintenance = load('lib/maintenance.ts')
   const authenticated = fixture(); seed(authenticated); await authenticated.env.ASSETS.put(saved.key, bytes)
   const authLease = await maintenance.beginMaintenance(authenticated.env,{backupKey:saved.key,startedBy:'fixture'})
@@ -196,6 +217,7 @@ async function main() {
   lost.db.close()
   for (const f of [source,target,empty,authenticated,revoke]) f.db.close()
   console.log('PASS actual populated graph fresh restore, immutable target refusal, incomplete graph before mutation, exact FK graph and replay')
+  console.log('PASS three complete-shaped malformed receipt/event bundles refuse before business mutation')
   console.log('PASS actual reset lifecycle refusal; current permission revoke; authenticated own-authority restore refusal; seven ignored protocol writes roll back sources/context with maintenance retained')
   console.log(`PASS all ${protocolLength} source-protocol statement failures; actual funding admission before/after fence; stolen owner; committed-lost-response preserved and retry refused`)
 }

@@ -2,6 +2,9 @@ import type { Env } from '../index'
 import { beginMaintenance, endMaintenance, updateMaintenance } from './maintenance'
 import { hasPermission } from './permissions'
 import { canViewAcquisitionCosts } from './acquisitionCostAccess'
+import { fundingTransition, type FundingState, type FundingKind } from './stockFundingMath'
+import { feeRequestDigest } from './feeOperationReceipt'
+import { exactMoney4, quantityDecimal, subtractQuantity } from './stockDispositionBasis'
 
 export const STOCK_RECOVERY_TABLES = [
   'stock_disposition_sources', 'stock_disposition_allocations', 'stock_disposition_events',
@@ -21,13 +24,14 @@ function ownerGuard(token: string, actor?: { id: number; snapshot: string }) {
     AND json_array(u.username,u.permissions,u.role_id,r.code,r.permissions)=?)` : ''
   return {
     sql: `SELECT CASE WHEN EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance'
-      AND json_extract(value,'$.token')=?)${actorClause}
+      AND json_extract(value,'$.mode')='restore' AND json_extract(value,'$.token')=?)${actorClause}
       THEN 1 ELSE json_extract('[1]','$[stock_recovery_owner_changed]') END`,
     params: actor ? [token, actor.id, actor.snapshot] : [token],
   }
 }
 
 export async function withStockRecoveryFence<T>(env: Env, key: string, run: (guarded: Env) => Promise<T>, options: { token?: string; actorId?: number; requiredPermission?: string; requireCostView?: boolean } = {}): Promise<T> {
+  if(Object.hasOwn(options,'actorId')&&(!Number.isSafeInteger(options.actorId)||Number(options.actorId)<=0))throw new Error('Stock recovery actor identity is invalid.')
   const existing = fences.get(env)
   if (existing) {
     if (options.token && options.token !== existing.token || options.actorId && options.actorId !== existing.actorId) throw new Error('Stock recovery owner changed.')
@@ -122,6 +126,165 @@ export async function insertStockRecoveryRows(env: Env, table: string, rows: D1P
     raw.prepare("INSERT INTO system_flags(key,value,updated_at) VALUES('maintenance',?,?)").bind(stored.value, stored.updated_at), changed(),
     raw.prepare('DELETE FROM stock_lifecycle_recovery_context WHERE token=?').bind(fence.token), changed(),
     raw.prepare("SELECT CASE WHEN NOT EXISTS(SELECT 1 FROM stock_lifecycle_recovery_context) AND NOT EXISTS(SELECT 1 FROM system_flags WHERE key='stock_lifecycle_recovery_admission') THEN 1 ELSE json_extract('[1]','$[stock_recovery_context_leaked]') END")]
-  // Admission's temporary flag removal is invisible outside this transaction.
   await env.DB.batch(statements)
+}
+
+type RecoveryRow = Record<string, any>
+const financialFields = ['gross4','paid4','debt4','credit4','asset4','cash_in4','cash_out4','shipping4'] as const
+const parentFields: Record<string, string[]> = {
+  users:['id'],branches:['id','is_active'],suppliers:['id'],products:['id','is_active'],
+  product_batches:['id','variant_product_id','supplier_id','received_branch_id','received_quantity','received_cost_usd','is_active'],
+  inventory_movements:['id','batch_id','product_id','branch_id','quantity','free_quantity','total_cost_usd','total_cost_khr','movement_type','reference_id'],
+  fees:['id','amount_usd','amount_khr'],supplier_invoices:['id','supplier_id','branch_id','total_amount_usd','amount_paid_usd','outstanding_balance_usd','status','source_branch','legacy_id','source_file','source_row'],
+}
+
+export class StockRecoveryGraphValidation {
+  private rows = new Map<string, RecoveryRow[]>()
+  private bytes = 0
+  private count = 0
+
+  add(table: string, row: RecoveryRow) {
+    const financial=(STOCK_RECOVERY_TABLES as readonly string[]).includes(table)
+    if (!financial && !parentFields[table]) return
+    if(!financial)row=Object.fromEntries(parentFields[table].map(key=>[key,row[key]]))
+    this.bytes += new TextEncoder().encode(JSON.stringify(row)).length
+    if (financial && ++this.count > 10000 || this.bytes > 8 * 1024 * 1024) throw new Error('Stock recovery graph exceeds bounded validation capacity. Recover in a separate compatible database; no business rows have been changed.')
+    for (const [key,value] of Object.entries(row)) if (key.endsWith('4') && (!Number.isSafeInteger(value) || Number(value)<0 || Number(value)>1e15)) this.fail(`${table}.${key} is not exact money`)
+    const list = this.rows.get(table) || []
+    list.push(row); this.rows.set(table,list)
+  }
+
+  private fail(reason: string): never { throw new Error(`Invalid stock recovery graph: ${reason}. No business rows have been changed.`) }
+  private list(table: string) { return this.rows.get(table) || [] }
+  private identity(table: string, key='id') {
+    const entries = this.list(table).map(row => [String(row[key]),row] as const)
+    const map = new Map(entries)
+    if (map.size!==entries.length || entries.some(([id])=>!id || id==='undefined')) this.fail(`${table} duplicate or missing identity`)
+    return map
+  }
+  private equal(actual: unknown, expected: unknown, name: string) {
+    const canonical=(value: any): any=>Array.isArray(value)?value.map(canonical):value&&typeof value==='object'?Object.fromEntries(Object.keys(value).sort().map(key=>[key,canonical(value[key])])):value
+    if (JSON.stringify(canonical(actual))!==JSON.stringify(canonical(expected))) this.fail(`${name} mismatch`)
+  }
+  private state(row: RecoveryRow): FundingState {
+    return { gross4:row.gross4,paid4:row.paid4,debt4:row.debt4,credit4:row.credit4,asset4:row.asset4,cashIn4:row.cash_in4,cashOut4:row.cash_out4,shipping4:row.shipping4 }
+  }
+
+  async validate() {
+    const parents=Object.fromEntries(Object.keys(parentFields).map(table=>[table,this.identity(table)]))
+    for(const source of [...this.list('stock_disposition_sources'),...this.list('stock_funding_sources')]) {
+      const batch=parents.product_batches.get(String(source.batch_id)), movement=parents.inventory_movements.get(String(source.movement_id))
+      if(!batch||!movement||!parents.products.has(String(source.product_id))||!parents.branches.has(String(source.branch_id))||!parents.suppliers.has(String(source.supplier_id)))this.fail('stock source missing physical parent')
+      if(batch.variant_product_id!==source.product_id||batch.supplier_id!==source.supplier_id||batch.received_branch_id!==source.branch_id||movement.batch_id!==source.batch_id||movement.product_id!==source.product_id||movement.branch_id!==source.branch_id)this.fail('stock source physical identity')
+      try {
+        if(quantityDecimal(batch.received_quantity)!==source.quantity||quantityDecimal(movement.quantity)!==source.quantity||quantityDecimal(movement.free_quantity,true)!==source.free_quantity||exactMoney4(batch.received_cost_usd)!==source.gross4||exactMoney4(movement.total_cost_usd)!==source.gross4)this.fail('stock source acquired basis')
+      }catch {this.fail('stock source unsupported acquired basis')}
+      if(source.gross4!==source.opening_paid4+source.opening_debt4)this.fail('stock opening balance')
+      if(source.source_json) {
+        const physical={product_id:batch.variant_product_id,supplier_id:batch.supplier_id,branch_id:batch.received_branch_id,received_quantity:batch.received_quantity,received_cost_usd:batch.received_cost_usd,batch_active:batch.is_active,movement_id:movement.id,batch_id:movement.batch_id,movement_product:movement.product_id,movement_branch:movement.branch_id,quantity:movement.quantity,free_quantity:movement.free_quantity,total_cost_usd:movement.total_cost_usd,total_cost_khr:movement.total_cost_khr,movement_type:movement.movement_type,reference_id:movement.reference_id,product_active:parents.products.get(String(source.product_id))?.is_active,branch_active:parents.branches.get(String(source.branch_id))?.is_active,receipt_count:this.list('inventory_movements').filter(row=>row.batch_id===source.batch_id&&['add','in'].includes(row.movement_type)).length}
+        this.equal(JSON.parse(source.source_json),physical,'funding source immutable preimage')
+      }
+    }
+    for (const prefix of ['stock_funding','stock_disposition','stock_valuation']) {
+      const sources = this.identity(`${prefix}_sources`,prefix==='stock_valuation'?'source_id':'id')
+      const events = this.identity(`${prefix}_events`)
+      const receipts = this.list(`${prefix}_receipts`), covered = new Set<string>()
+      for (const receipt of receipts) {
+        const event=events.get(receipt.event_id)
+        if (!event || covered.has(event.id)) this.fail(`${prefix} receipt event missing or duplicated`)
+        covered.add(event.id)
+        if (receipt.request_digest!==await feeRequestDigest(receipt.request_json)) this.fail(`${prefix} receipt digest`)
+        let response: RecoveryRow, request: RecoveryRow
+        try { response=JSON.parse(receipt.response_json); request=JSON.parse(receipt.request_json) } catch { this.fail(`${prefix} receipt JSON`) }
+        for (const field of ['source_id','kind','actor_id']) {
+          const actual=field==='actor_id'?receipt.actor_id:response[field]
+          this.equal(actual,event[field],`${prefix} receipt ${field}`)
+        }
+        this.equal(response.event_id,event.id,`${prefix} receipt event_id`)
+        const revision=prefix==='stock_valuation'?'revision':'generation'
+        this.equal(response[revision],event[revision],`${prefix} receipt ${revision}`)
+        const fields=prefix==='stock_funding'?financialFields:prefix==='stock_disposition'?['allocation_id','quantity','gross4','coverage4','net4','recognized4','remaining_quantity','remaining_gross4','remaining_coverage4']:[]
+        for (const field of fields) this.equal(response[field],event[field],`${prefix} receipt ${field}`)
+        if (prefix!=='stock_valuation') this.equal(request.sourceId,event.source_id,`${prefix} request source`)
+        this.equal(request.kind,event.kind,`${prefix} request kind`)
+        if(prefix==='stock_funding') {
+          this.equal(request.generation,event.generation===0?0:event.generation-1,'funding request generation')
+          if(!['accept','cancel'].includes(event.kind))this.equal(request.amount4,event.amount4,'funding request amount')
+          if(event.kind==='admit')for(const [field,value] of Object.entries(request.opening||{}))this.equal(value,sources.get(event.source_id)?.[field],`funding opening request ${field}`)
+        }
+        if(prefix==='stock_valuation') {
+          const funding=this.list('stock_funding_events').find(row=>row.id===response.funding?.id)
+          if(!funding||funding.source_id!==event.source_id)this.fail('valuation receipt funding identity')
+          for(const field of financialFields)this.equal(response.funding[field],funding[field],`valuation receipt funding ${field}`)
+          const segments=this.list('stock_valuation_segments').filter(row=>row.event_id===event.id).map(({event_id,...row})=>row)
+          this.equal(response.segments,segments,'valuation receipt segments')
+        }
+      }
+      if (covered.size!==events.size) this.fail(`${prefix} event missing durable receipt`)
+      for (const event of events.values()) if (!sources.has(event.source_id)) this.fail(`${prefix} event missing source`)
+      for(const event of events.values())if(!parents.users.has(String(event.actor_id)))this.fail(`${prefix} event actor parent`)
+      for (const source of sources.values()) {
+        const id=source.id ?? source.source_id
+        const ordered=[...events.values()].filter(e=>e.source_id===id).sort((a,b)=>(a.generation??a.revision)-(b.generation??b.revision))
+        if (!ordered.length) this.fail(`${prefix} source missing event`)
+        const start=prefix==='stock_disposition'?1:0
+        for (let index=0;index<ordered.length;index++) if ((ordered[index].generation??ordered[index].revision)!==index+start) this.fail(`${prefix} event generation gap`)
+        if (prefix==='stock_funding') {
+          let state: FundingState={gross4:source.gross4,paid4:source.opening_paid4,debt4:source.opening_debt4,credit4:0,asset4:0,cashIn4:0,cashOut4:0,shipping4:0}
+          for (const event of ordered) {
+            if (event.generation===0) { if(event.kind!=='admit'||event.amount4!==0)this.fail('funding opening event') }
+            else { try { state=fundingTransition(state,event.kind as FundingKind,event.amount4) } catch { this.fail('funding transition conservation') } }
+            this.equal(this.state(event),state,'funding event balance')
+          }
+        }
+      }
+    }
+    const claims=this.identity('stock_funding_claims'), sources=this.identity('stock_funding_sources')
+    const openings=new Map(this.list('stock_funding_invoice_openings').map(row=>[row.invoice_id,row]))
+    for(const source of sources.values())if(source.invoice_id!=null&&!openings.has(source.invoice_id))this.fail('funding invoice opening missing')
+    for(const opening of openings.values()) {
+      const header=parents.supplier_invoices.get(String(opening.invoice_id))
+      if(!header||header.supplier_id!==opening.supplier_id||header.branch_id!==opening.branch_id||exactMoney4(header.total_amount_usd)!==opening.gross4||exactMoney4(header.amount_paid_usd)!==opening.paid4||exactMoney4(header.outstanding_balance_usd)!==opening.debt4)this.fail('funding invoice opening lineage')
+      this.equal(JSON.parse(opening.header_json),header,'funding invoice immutable preimage')
+    }
+    for (const claim of claims.values()) if(!sources.has(claim.source_id))this.fail('funding claim missing source')
+    for (const event of this.list('stock_funding_events')) if(event.claim_id!=null) {
+      const claim=claims.get(event.claim_id)
+      if(!claim||claim.source_id!==event.source_id||claim.amount4!==event.amount4)this.fail('funding claim/event amount')
+    }
+    const allocations=this.identity('stock_disposition_allocations')
+    for(const event of this.list('stock_disposition_events')) {
+      const allocation=allocations.get(event.allocation_id)
+      if(!allocation||allocation.source_id!==event.source_id)this.fail('disposition event allocation')
+      if(event.net4!==event.gross4-event.coverage4||event.recognized4!==(event.kind==='dispose'?event.net4:0))this.fail('disposition loss conservation')
+    }
+    const valuationEvents=this.identity('stock_valuation_events'), agreements=this.identity('stock_valuation_agreements'), fundingEvents=this.identity('stock_funding_events')
+    for(const source of this.list('stock_valuation_sources'))if(!sources.has(source.source_id))this.fail('valuation funding source')
+    for(const segment of this.list('stock_valuation_segments'))if(!valuationEvents.has(segment.event_id)||segment.coverage4>segment.gross4||segment.recovery4>segment.loss4)this.fail('valuation segment parent or basis')
+    for(const event of valuationEvents.values()) {
+      const source=sources.get(event.source_id)!,segments=this.list('stock_valuation_segments').filter(row=>row.event_id===event.id)
+      if(!source||new Set(segments.map(row=>row.segment_id)).size!==segments.length||segments.reduce((sum,row)=>sum+row.gross4,0)!==source.gross4)this.fail('valuation segment acquired gross')
+      try {if(subtractQuantity(source.quantity,segments.map(row=>row.quantity))!=='0')this.fail('valuation segment acquired quantity')}catch{this.fail('valuation segment acquired quantity')}
+      for(const segment of segments)if(segment.fate==='disposed'?segment.loss4+segment.coverage4-segment.recovery4!==segment.gross4:segment.loss4!==0||segment.recovery4!==0)this.fail('valuation segment fate basis')
+    }
+    for(const share of this.list('stock_valuation_acceptances')) {
+      const event=valuationEvents.get(share.event_id), agreement=agreements.get(share.agreement_id), funding=fundingEvents.get(share.funding_event_id)
+      if(!event||!agreement||!funding||event.source_id!==agreement.source_id||event.source_id!==funding.source_id||funding.kind!=='accept')this.fail('valuation acceptance parent identity')
+      if(!this.list('stock_valuation_segments').some(row=>row.event_id===share.event_id&&row.segment_id===share.target_segment_id))this.fail('valuation acceptance target segment')
+    }
+    for(const agreement of agreements.values())if(this.list('stock_valuation_acceptances').filter(row=>row.agreement_id===agreement.id).reduce((sum,row)=>sum+row.amount4,0)>agreement.amount4)this.fail('valuation agreement over-accepted')
+    for(const event of valuationEvents.values())if(event.kind==='accept') {
+      const shares=this.list('stock_valuation_acceptances').filter(row=>row.event_id===event.id)
+      const linked=new Set(shares.map(row=>row.funding_event_id))
+      if(linked.size!==1||shares.reduce((sum,row)=>sum+row.amount4,0)!==fundingEvents.get(shares[0]?.funding_event_id)?.amount4)this.fail('valuation accepted funding amount')
+    }
+    for(const link of this.list('stock_disposition_fees')) {
+      const fee=parents.fees.get(String(link.fee_id))
+      if(!fee||exactMoney4(fee.amount_usd)!==link.amount4||fee.amount_khr!==0)this.fail('disposition actual fee linkage')
+    }
+    for(const event of fundingEvents.values())if(event.fee_id!=null) {
+      const fee=parents.fees.get(String(event.fee_id))
+      if(!fee||exactMoney4(fee.amount_usd)!==event.amount4||fee.amount_khr!==0)this.fail('funding actual shipping fee linkage')
+    }
+  }
 }

@@ -1,5 +1,5 @@
 import { assertStockLifecycleRestoreAllowed } from './stockLifecycle'
-import { withStockRecoveryFence, assertCompleteStockRecoveryGraph, insertStockRecoveryRows, STOCK_RECOVERY_TABLES } from './stockLifecycleRecovery'
+import { withStockRecoveryFence, assertCompleteStockRecoveryGraph, insertStockRecoveryRows, STOCK_RECOVERY_TABLES, StockRecoveryGraphValidation } from './stockLifecycleRecovery'
 import { getDb } from './db'
 import type { Env } from '../index'
 import { getPlanLimits } from './planTier'
@@ -1445,6 +1445,7 @@ async function restoreCloudflareBackupOwned(env: Env, source: string, onProgress
   // pass 2 deletes anything; do not query D1 once per document table.
   const documentTables = new Set<string>()
   const documentColumns = new Map<string, readonly string[]>()
+  const stockGraph = new StockRecoveryGraphValidation()
   let pass1Summary: BackupPayload['summary'] | null = null
   const validatedSource = await openPinnedBackupSource(env, key)
   try {
@@ -1460,6 +1461,7 @@ async function restoreCloudflareBackupOwned(env: Env, source: string, onProgress
       if (ev.type === 'row' && (STOCK_RECOVERY_TABLES as readonly string[]).includes(ev.table)) {
         for (const column of documentColumns.get(ev.table) || []) if (!Object.hasOwn(ev.row,column)) throw new Error(`Incomplete stock recovery graph: missing ${ev.table}.${column} row value. No business rows have been changed.`)
       }
+      if(ev.type==='row')stockGraph.add(ev.table,ev.row)
       if (ev.type === 'table' && !documentTables.has(ev.table)) {
         documentTables.add(ev.table)
         documentColumns.set(ev.table, ev.columns)
@@ -1508,6 +1510,7 @@ async function restoreCloudflareBackupOwned(env: Env, source: string, onProgress
   // than letting a scoped restore read as complete.
   const tablesNotInBackup = (BACKUP_TABLES as readonly string[]).filter((t) => !documentTables.has(t))
   await assertCompleteStockRecoveryGraph(env, documentTables, documentColumns)
+  await stockGraph.validate()
   await assertStockLifecycleRestoreAllowed(getDb(env), documentTables)
 
   // Recheck against the live schema even if the caller already validated the
