@@ -28,8 +28,8 @@ function fixture(hooks) {
   return f
 }
 const body = (key = 'supplier_guard_key') => ({ client_request_id: key, branch_id: 1, supplier_id: 1, supplier_name: 'Selected supplier', reason: 'broken in delivery', settlement: 'credit', supplier_compensation_usd: 14, supplier_compensation_khr: 0, items: [{ product_id: 10, quantity: 3, unit_cost_usd: 7, batch_id: 501 }] })
-async function post(f, value) {
-  const response = await app.request('/supplier', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(value) }, { DB: f.route }, h.executionCtx)
+async function post(f, value, route = '/supplier') {
+  const response = await app.request(route, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(value) }, { DB: f.route }, h.executionCtx)
   return { status: response.status, body: await response.json() }
 }
 function unchanged(f) {
@@ -127,5 +127,118 @@ async function main() {
     } finally { f.raw.db.close() }
   }
   console.log('PASS finite/nonnegative costs and compensation, alias/settlement/precision conflicts, actual lot cost conservation')
+  const shared = fixture()
+  try {
+    shared.raw.prepare('UPDATE product_batches SET received_quantity=12,received_cost_usd=20,unit_cost_usd=2 WHERE id=501').run()
+    const value = body(); value.items[0].unit_cost_usd = 1.6667; value.supplier_compensation_usd = 2
+    assert.equal((await post(shared, value)).status, 200)
+    const returned = shared.raw.prepare('SELECT supplier_loss_usd FROM returns').get()
+    assert.equal(returned.supplier_loss_usd, 3)
+    assert.equal(shared.raw.prepare('SELECT total_usd FROM return_items').get().total_usd, 5)
+  } finally { shared.raw.db.close() }
+  const unknown = fixture()
+  try {
+    unknown.raw.prepare('UPDATE product_batches SET received_cost_usd=NULL,unit_cost_usd=NULL WHERE id=501').run()
+    assert.equal((await post(unknown, body())).status, 400)
+    unchanged(unknown)
+  } finally { unknown.raw.db.close() }
+  const legacyQuote = fixture()
+  try {
+    const value = body(); delete value.items[0].batch_id; value.items[0].unit_cost_usd = 1; value.supplier_compensation_usd = 0
+    assert.equal((await post(legacyQuote, value)).status, 200)
+    assert.equal(legacyQuote.raw.prepare('SELECT total_usd FROM return_items').get().total_usd, 3)
+    console.log('LIMITATION inherited unselected FIFO valuation intentionally remains caller quote, actual selected receipt basis only')
+  } finally { legacyQuote.raw.db.close() }
+  const replay = fixture()
+  try {
+    const first = await post(replay, body())
+    assert.equal(first.status, 200, JSON.stringify(first))
+    const receipt = replay.raw.prepare('SELECT request_json,sale_id FROM return_create_receipts').get()
+    assert.equal(receipt.sale_id, null)
+    assert.equal(JSON.parse(receipt.request_json).scope, 'supplier_return_v1')
+    replay.raw.prepare('UPDATE branch_batch_stock SET quantity=0 WHERE batch_id=501').run()
+    const same = await post(replay, body())
+    assert.equal(same.status, 200, JSON.stringify(same))
+    assert.equal(same.body.id, first.body.id)
+    assert.equal(same.body.duplicate, true)
+    for (const edit of [v => { v.items[0].quantity = 4 }, v => { v.items[0].product_id = 11 }, v => { v.items[0].batch_id = 500 }, v => { delete v.items[0].batch_id }, v => { v.supplier_id = 2 }, v => { v.items[0].branch_id = 2 }, v => { v.supplier_compensation_usd = 0 }, v => { v.settlement = 'refund' }, v => { v.reason = 'different reason' }, v => { v.notes = 'different note' }, v => { v.items[0].unit_cost_usd = 6 }, v => { v.exchange_rate = 4100 }]) {
+      const changed = body(); edit(changed)
+      const result = await post(replay, changed)
+      assert.equal(result.status, 409, JSON.stringify(result))
+      assert.equal(result.body.code, 'idempotency_conflict')
+    }
+    for (const edit of [v => { v.treatment = 'keep' }, v => { v.items[0].return_to_stock = true }, v => { v.items[0].disposition = 'remove' }]) {
+      const changed = body(); edit(changed)
+      assert.equal((await post(replay, changed)).status, 400)
+    }
+    h.setUser({ ...user, id: 72 })
+    const other = await post(replay, body())
+    assert.equal(other.status, 409, JSON.stringify(other))
+    assert.equal(other.body.id, undefined)
+    h.setUser({ ...user, permissions: '{"returns":false}' })
+    assert.equal((await post(replay, body())).status, 403)
+    for (const permissions of [{ returns: true, product_cost_view: true }, { returns: true, product_cost_edit: true }]) {
+      h.setUser({ ...user, permissions: JSON.stringify(permissions) })
+      assert.equal((await post(replay, body())).status, 403)
+    }
+    h.setUser(user)
+    const customer = await post(replay, { client_request_id: body().client_request_id, reason: 'customer reason', branch_id: 1, items: [{ product_id: 10, quantity: 1, applied_price_usd: 1, return_to_stock: false }] }, '/')
+    assert.equal(customer.status, 409, JSON.stringify(customer))
+    assert.equal(replay.raw.prepare('SELECT COUNT(*) AS n FROM returns').get().n, 1)
+    assert.equal(replay.raw.prepare('SELECT COUNT(*) AS n FROM return_create_receipts').get().n, 1)
+  } finally { h.setUser(user); replay.raw.db.close() }
+  const lost = fixture({ afterBatchThrow: true })
+  try {
+    const result = await post(lost, body())
+    assert.equal(result.status, 200, JSON.stringify(result))
+    assert.equal(result.body.duplicate, true)
+    assert.equal(lost.raw.prepare('SELECT COUNT(*) AS n FROM returns').get().n, 1)
+    assert.equal(lost.raw.prepare('SELECT COUNT(*) AS n FROM return_create_receipts').get().n, 1)
+    assert.equal(lost.raw.prepare('SELECT quantity FROM branch_stock WHERE product_id=10 AND branch_id=1').get().quantity, 7)
+  } finally { lost.raw.db.close() }
+  for (const different of [false, true]) {
+    let injected = false, raced
+    raced = fixture({ async beforeBatch() {
+      if (injected) return
+      injected = true
+      const winning = body(); if (different) winning.items[0].quantity = 2
+      const result = await post(raced, winning)
+      assert.equal(result.status, 200, JSON.stringify(result))
+    } })
+    try {
+      const result = await post(raced, body())
+      assert.equal(result.status, different ? 409 : 200, JSON.stringify(result))
+      assert.equal(raced.raw.prepare('SELECT COUNT(*) AS n FROM returns').get().n, 1)
+      assert.equal(raced.raw.prepare('SELECT COUNT(*) AS n FROM return_create_receipts').get().n, 1)
+      assert.equal(raced.raw.prepare('SELECT quantity FROM branch_stock WHERE product_id=10 AND branch_id=1').get().quantity, different ? 8 : 7)
+    } finally { raced.raw.db.close() }
+  }
+  const legacy = fixture()
+  try {
+    legacy.raw.prepare("INSERT INTO returns(return_number,client_request_id,return_scope,status) VALUES('SRET-LEGACY',?,'supplier','completed')").run([body().client_request_id])
+    assert.equal((await post(legacy, body())).status, 409)
+  } finally { legacy.raw.db.close() }
+  for (const key of ['', 'x'.repeat(121), 'ក'.repeat(41)]) {
+    const f = fixture()
+    try {
+      const value = body(key)
+      assert.equal((await post(f, value)).status, 400)
+      unchanged(f)
+    } finally { f.raw.db.close() }
+  }
+  for (const mode of ['receipt', 'reset', 'restore']) {
+    const f = fixture({ beforeBatch(db, statements) {
+      if (mode === 'receipt') statements.find(statement => /INSERT INTO return_create_receipts/.test(statement.sql)).params.request_json = '{bad'
+      else db.prepare("INSERT INTO system_flags(key,value) VALUES('maintenance',?)").run([JSON.stringify({ mode })])
+    } })
+    try {
+      assert.notEqual((await post(f, body())).status, 200)
+      unchanged(f)
+      assert.equal(f.raw.prepare('SELECT COUNT(*) AS n FROM return_create_receipts').get().n, 0)
+      assert.equal(f.raw.prepare('SELECT COUNT(*) AS n FROM return_items').get().n, 0)
+      assert.equal(f.raw.prepare('SELECT COUNT(*) AS n FROM inventory_movements').get().n, 0)
+    } finally { f.raw.db.close() }
+  }
+  console.log('PASS same-intent durable replay, changed intent/actor/customer scope conflicts, lost response and competing intent races')
 }
 main().catch(error => { console.error(error); process.exitCode = 1 })

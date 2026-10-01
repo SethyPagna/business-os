@@ -144,6 +144,7 @@ const batchCode = loadReal('lib/batchCode.ts')
 
 // Real, pure -- no stubbing needed.
 const productBatches = loadReal('lib/productBatches.ts', { './db': { getDb: () => db }, './batchCode': batchCode, './sqlBinding': loadReal('lib/sqlBinding.ts'), './moneyPrecision': loadReal('lib/moneyPrecision.ts') })
+const supplierReturnGuard = loadReal('lib/supplierReturnGuard.ts', { './productBatches': productBatches, './sqlBinding': loadReal('lib/sqlBinding.ts') })
 const permissions = loadReal('lib/permissions.ts')
 const acquisitionCostAccess = loadReal('lib/acquisitionCostAccess.ts', { './permissions': permissions })
 // P4-3: real, pure -- used by the new damaged-return-disposition tests below
@@ -199,6 +200,7 @@ const saleBulkStatusKernel = {
   }),
 }
 const returnsRoute = loadReal('routes/returns.ts', {
+  '../lib/supplierReturnGuard': supplierReturnGuard,
   '../lib/acquisitionCostAccess': acquisitionCostAccess,
   '../lib/returnCostAccess': loadReal('lib/returnCostAccess.ts'),
   '../lib/branchRoleGuards': loadReal('lib/branchRoleGuards.ts', { './branchRoles': branchRolesKernel }),
@@ -921,6 +923,8 @@ async function main() {
   await check('supplier return of a batch-tracked product deducts from the lot ledger, not just the aggregate', async () => {
     seed()
     const batch = await productBatches.receiveBatchStock(db, { productId: 1, branchId: 1, quantity: 10, receivedDate: '2026-02-10' })
+    rawDb.prepare("INSERT OR IGNORE INTO suppliers(id,name) VALUES(1,'Acme')").run()
+    rawDb.prepare('UPDATE product_batches SET supplier_id=1 WHERE id=?').run([batch.batchId])
     const lotQty = () => rawDb.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id = @b AND branch_id = 1').get({ b: batch.batchId }).quantity
     const aggQty = () => rawDb.prepare('SELECT quantity FROM branch_stock WHERE product_id = 1 AND branch_id = 1').get().quantity
     assert.strictEqual(lotQty(), 10, 'sanity: lot starts at 10')
@@ -933,6 +937,7 @@ async function main() {
       reason: 'Defective batch returned to supplier',
       settlement: 'refund',
       supplier_name: 'Acme',
+      supplier_id: 1,
     })
     assert.strictEqual(status, 200, JSON.stringify(json))
     assert.strictEqual(aggQty(), 6, 'branch_stock drops by the 4 that left')
@@ -942,10 +947,13 @@ async function main() {
   for (const mode of ['reset', 'restore', 'corrupt']) await check(`supplier return ${mode} marker after admission has no header, stock, movement, or audit`, async () => {
     seed()
     await productBatches.receiveBatchStock(db, { productId: 1, branchId: 1, quantity: 10, receivedDate: '2026-02-10' })
+    rawDb.prepare("INSERT OR IGNORE INTO suppliers(id,name) VALUES(1,'Acme')").run()
+    rawDb.prepare('UPDATE product_batches SET supplier_id=1 WHERE variant_product_id=1').run()
     const body = {
       client_request_id: `supplier-maintenance-${mode}`,
       items: [{ product_id: 1, quantity: 4, branch_id: 1, cost_price_usd: 2 }],
       branch_id: 1, reason: 'Supplier maintenance race', settlement: 'refund', supplier_name: 'Acme',
+      supplier_id: 1,
     }
     const before = {
       returns: rawDb.prepare('SELECT COUNT(*) n FROM returns').get().n,
@@ -974,6 +982,8 @@ async function main() {
   await check('supplier return: the same client_request_id sent twice records one return and moves stock once', async () => {
     seed()
     const batch = await productBatches.receiveBatchStock(db, { productId: 1, branchId: 1, quantity: 10, receivedDate: '2026-02-10' })
+    rawDb.prepare("INSERT OR IGNORE INTO suppliers(id,name) VALUES(1,'Acme')").run()
+    rawDb.prepare('UPDATE product_batches SET supplier_id=1 WHERE id=?').run([batch.batchId])
     const lotQty = () => rawDb.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id = @b AND branch_id = 1').get({ b: batch.batchId }).quantity
     const aggQty = () => rawDb.prepare('SELECT quantity FROM branch_stock WHERE product_id = 1 AND branch_id = 1').get().quantity
     const counts = () => ({
@@ -985,6 +995,7 @@ async function main() {
       return_number: 'SRET-20260928-101500',
       items: [{ product_id: 1, quantity: 4, branch_id: 1, cost_price_usd: 2 }],
       branch_id: 1, reason: 'Timed-out retry', settlement: 'refund', supplier_name: 'Acme',
+      supplier_id: 1,
     }
     const before = counts()
     const first = await req('POST', '/supplier', body)
