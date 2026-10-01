@@ -1,9 +1,10 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import Check from 'lucide-react/dist/esm/icons/check.js'
 import Pencil from 'lucide-react/dist/esm/icons/pencil.js'
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
-import { useConfirmDialog, type ConfirmRequest } from './useConfirmDialog.tsx'
+import ConfirmDialog from './ConfirmDialog'
+import type { ConfirmRequest } from './useConfirmDialog.tsx'
 
 // The one list editor behind every reason and label manager (stock reasons,
 // return reasons, expense labels), so the three look and behave the same:
@@ -47,11 +48,61 @@ export type ReasonListEditorProps<T extends ReasonListItem> = {
 
 export const normalizeReasonLabel = (value: string): string => value.trim().replace(/\s+/g, ' ')
 
+// The awaitable confirm of useConfirmDialog.tsx, built on ConfirmDialog
+// directly: that hook has its own chunk (it must stay off the storefront) whose
+// import of ConfirmDialog points back into app-shared, so a shared/ file
+// importing it closes a chunk cycle and the build refuses.
+export function useAskConfirm(tr: Translate) {
+  const [pending, setPending] = useState<(ConfirmRequest & { resolve: (confirmed: boolean) => void }) | null>(null)
+  const pendingRef = useRef<typeof pending>(null)
+  const settle = useCallback((confirmed: boolean) => {
+    const current = pendingRef.current
+    pendingRef.current = null
+    setPending(null)
+    current?.resolve(confirmed)
+  }, [])
+  const askToConfirm = useCallback((request: ConfirmRequest) => new Promise<boolean>((resolve) => {
+    pendingRef.current?.resolve(false)
+    const next = { ...request, resolve }
+    pendingRef.current = next
+    setPending(next)
+  }), [])
+  useEffect(() => () => { pendingRef.current?.resolve(false); pendingRef.current = null }, [])
+  // Escape answers no here rather than closing the manager beneath.
+  const open = pending !== null
+  useEffect(() => {
+    if (!open) return undefined
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented) return
+      event.preventDefault()
+      settle(false)
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [open, settle])
+  const confirmDialog = pending ? (
+    <ConfirmDialog
+      title={pending.title}
+      message={pending.message}
+      items={pending.items}
+      note={pending.note}
+      confirmLabel={pending.confirmLabel}
+      cancelLabel={pending.cancelLabel}
+      danger={pending.danger}
+      layer={pending.layer ?? 'nested'}
+      keyboard
+      t={(key) => tr(key, key)}
+      onConfirm={() => settle(true)}
+      onClose={() => settle(false)}
+    />
+  ) : null
+  return { askToConfirm, confirmDialog }
+}
 export default function ReasonListEditor<T extends ReasonListItem>({
   items, tr, loading = false, busy = false, draft = '', onDraftChange, onAdd, addPlaceholder,
   onRename, onDelete, deleteConfirm, renderExtra, emptyText, onDirtyChange,
 }: ReasonListEditorProps<T>) {
-  const { askToConfirm, confirmDialog } = useConfirmDialog((key, fallback) => tr(key, fallback || key))
+  const { askToConfirm, confirmDialog } = useAskConfirm(tr)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editValue, setEditValue] = useState('')
   const editing = editingId ? items.find((item) => item.id === editingId) ?? null : null
@@ -111,7 +162,7 @@ export default function ReasonListEditor<T extends ReasonListItem>({
           </button>
         </div>
       ) : null}
-      <div className="max-h-[min(22rem,55vh)] space-y-1 overflow-y-auto">
+      <div className="max-h-[min(22rem,calc(55*var(--app-vh)))] space-y-1 overflow-y-auto">
         {loading ? (
           <div className="py-6 text-center text-sm text-slate-400">{tr('loading', 'Loading…')}</div>
         ) : items.length ? items.map((item) => (

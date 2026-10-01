@@ -93,6 +93,9 @@ const BEFORE_AFTER: Array<{
   expects: string
 }> = [
   { entity: 'product', writtenBy: 'products.ts', before: { selling_price_usd: 3 }, after: { selling_price_usd: 4 }, expects: en.label_selling_price },
+  // A stock receipt's selling price is audited as a product edit (source stock_receipt).
+  { entity: 'product', writtenBy: 'batches.ts', before: { selling_price_usd: 3 }, after: { selling_price_usd: 4 }, expects: en.label_selling_price },
+  { entity: 'product', writtenBy: 'inventory.ts', before: { selling_price_usd: 3 }, after: { selling_price_usd: 4 }, expects: en.label_selling_price },
   { entity: 'customer', writtenBy: 'contacts.ts', before: { phone: '012' }, after: { phone: '011' }, expects: en.phone },
   { entity: 'supplier', writtenBy: 'contacts.ts', before: { address: 'Zone A' }, after: { address: 'Zone B' }, expects: en.address },
   { entity: 'delivery_contact', writtenBy: 'contacts.ts', before: { name: 'Dara' }, after: { name: 'Dara S' }, expects: en.name },
