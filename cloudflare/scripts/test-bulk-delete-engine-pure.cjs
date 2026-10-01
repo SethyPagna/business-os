@@ -87,10 +87,7 @@ function stubRequire(id) {
   if (id === './anonymousCustomer') return loadRealLib('anonymousCustomer')
   if (id === './db') return loadStockDependency('lib/db.ts')
   if (id === './stockLifecycle') return loadStockDependency('lib/stockLifecycle.ts')
-  if (id === './importMaintenanceFence') return {
-    getImportFencedDb: async () => { throw new Error('getImportFencedDb should not be called by these pure tests') },
-    isImportMaintenanceFenceError: () => false,
-  }
+  if (id === './importMaintenanceFence') return loadStockDependency('lib/importMaintenanceFence.ts')
   if (id === './importEngine') return { runD1BatchInChunks: async () => { throw new Error('runD1BatchInChunks should not be called by these pure tests') } }
   if (id === './cache') return { bumpVersion: async () => { throw new Error('bumpVersion should not be called by these pure tests') } }
   if (id === '../durable-objects/broadcastHub') return { broadcast: async () => { throw new Error('broadcast should not be called by these pure tests') } }
@@ -259,6 +256,58 @@ const { buildCoreDeleteStatements, ENTITY_CONFIGS, bulkDeleteWriteOffCosts } = m
     console.log("PASS lib/permissions.ts's ENTITY_PERMISSION_MAP already covers every new hard-delete entity's audit label")
   }
 
+
+  {
+    const native = new (require('better-sqlite3'))(':memory:')
+    const { sqliteD1Call } = require('./harness/sqlite_d1_bindings.cjs')
+    native.exec('CREATE TABLE system_flags(key TEXT PRIMARY KEY,value TEXT); CREATE TABLE stock_disposition_sources(supplier_id INTEGER); CREATE TABLE stock_funding_dependencies(supplier_id INTEGER); CREATE TABLE bulk_delete_jobs(id TEXT PRIMARY KEY,entity_type TEXT,status TEXT,reason TEXT,ids_json TEXT,total_count INTEGER,created_by_id INTEGER,created_by_name TEXT);')
+    const queue = []
+    const binding = {
+      prepare(sql) {
+        return { bind(...values) {
+          return { sql, values, async all() { return { results: sqliteD1Call(native.prepare(sql), 'all', values) } } }
+        } }
+      },
+      async batch(statements) {
+        return native.transaction(() => statements.map(({ sql, values }) => {
+          const prepared = native.prepare(sql)
+          if (prepared.reader) return { results: sqliteD1Call(prepared, 'all', values), meta: { changes: 0 } }
+          const result = sqliteD1Call(prepared, 'run', values)
+          return { results: [], meta: { changes: Number(result.changes), last_row_id: Number(result.lastInsertRowid) } }
+        }))()
+      },
+    }
+    const env = { DB: binding, IMPORT_QUEUE: { send: async message => { queue.push(message) } } }
+    const snapshot = () => JSON.stringify(native.prepare("SELECT name,sql FROM sqlite_master WHERE type='table' ORDER BY name").all()
+      .map(({ name, sql }) => [name, sql, native.prepare('SELECT * FROM "' + name + '"').all().map(row => JSON.stringify(row)).sort()]))
+    const lifecycle = loadStockDependency('lib/stockLifecycle.ts')
+    for (const table of ['stock_disposition_sources', 'stock_funding_dependencies']) {
+      native.prepare('INSERT INTO ' + table + ' VALUES(77)').run()
+      const before = snapshot()
+      await assert.rejects(() => moduleObj.exports.createBulkDeleteJob(env, 'suppliers', [77], 'test refusal', { id: 7, name: 'Author' }), error => {
+        assert.equal(error instanceof require('hono/http-exception').HTTPException, true)
+        assert.equal(error.status, 409)
+        return error instanceof lifecycle.StockLifecycleError
+      })
+      assert.equal(snapshot(), before)
+      assert.deepEqual(queue, [])
+      native.exec('DELETE FROM ' + table)
+    }
+    native.exec('INSERT INTO stock_funding_dependencies VALUES(99)')
+    const created = await moduleObj.exports.createBulkDeleteJob(env, 'suppliers', [77], 'test allowed', { id: 7, name: 'Author' })
+    assert.equal(created.totalCount, 1)
+    assert.equal(native.prepare('SELECT COUNT(*) n FROM bulk_delete_jobs').get().n, 1)
+    assert.deepEqual(queue, [{ jobId: created.jobId, kind: 'bulk-delete' }])
+    native.exec("INSERT INTO system_flags VALUES('maintenance','1')")
+    const beforeFence = snapshot(), beforeQueue = [...queue]
+    const fence = loadStockDependency('lib/importMaintenanceFence.ts')
+    await assert.rejects(() => moduleObj.exports.createBulkDeleteJob(env, 'suppliers', [77], 'test fenced', { id: 7, name: 'Author' }), error => error instanceof fence.ImportMaintenanceFenceError)
+    assert.equal(snapshot(), beforeFence)
+    assert.deepEqual(queue, beforeQueue)
+    assert.equal(loadStockDependency('lib/db.ts').getImportFencedDb, fence.getImportFencedDb)
+    native.close()
+    console.log('PASS real lifecycle/db/fence supplier admission refuses linked rows before job or queue writes and allows irrelevant links')
+  }
   console.log('\nAll bulk-delete engine pure-logic checks passed.')
 })().catch((error) => {
   console.error(error)

@@ -314,6 +314,36 @@ async function main() {
   assert.deepEqual(racers.map(result => result.status).sort(), [200, 201])
   assert.deepEqual(racers[0].body, racers[1].body)
   assert.deepEqual(counts(), { fees: beforeRace.fees + 1, receipts: beforeRace.receipts + 1, audits: beforeRace.audits + 1 })
+
+  raw.exec('CREATE TABLE stock_disposition_fees(fee_id INTEGER); CREATE TABLE stock_funding_events(fee_id INTEGER);')
+  const lifecycle = loadStockDependency('lib/stockLifecycle.ts')
+  const lifecycleSnapshot = () => JSON.stringify(raw.prepare("SELECT name,sql FROM sqlite_master WHERE type='table' ORDER BY name").all()
+    .map(({ name, sql }) => [name, sql, raw.prepare('SELECT * FROM "' + name + '"').all().map(row => JSON.stringify(row)).sort()]))
+  for (const table of ['stock_disposition_fees', 'stock_funding_events']) {
+    raw.prepare('INSERT INTO ' + table + ' VALUES(?)').run(fresh.body.fee.id)
+    const before = lifecycleSnapshot(), notifications = [broadcasts.length, telegrams.length]
+    await assert.rejects(() => lifecycle.assertStockLifecycleMutable(db, { feeId: fresh.body.fee.id }), asyncError => {
+      assert.equal(asyncError instanceof require('hono/http-exception').HTTPException, true)
+      assert.equal(asyncError.status, 409)
+      assert.equal(asyncError.code, 'stock_lifecycle_dependency')
+      return asyncError instanceof lifecycle.StockLifecycleError
+    })
+    for (const method of ['PUT', 'DELETE']) {
+      const response = await route.request('/' + fresh.body.fee.id, { method,
+        headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ label: 'blocked', reason: 'blocked' }) }, {},
+        { waitUntil: () => {}, passThroughOnException: () => {} })
+      assert.equal(response.status, 409)
+      assert.equal((await response.json()).code, 'stock_lifecycle_dependency')
+      assert.equal(lifecycleSnapshot(), before)
+      assert.deepEqual([broadcasts.length, telegrams.length], notifications)
+    }
+    raw.exec('DELETE FROM ' + table)
+  }
+  raw.exec('INSERT INTO stock_funding_events VALUES(999999);')
+  await lifecycle.assertStockLifecycleMutable(db, { feeId: fresh.body.fee.id })
+  const irrelevantCreate = await create({ ...normalBody, client_request_id: 'fee-irrelevant-lifecycle-create' })
+  assert.equal(irrelevantCreate.status, 201)
+  assert.equal(loadStockDependency('lib/db.ts'), loadStockDependency('lib/db.ts'))
   raw.close()
   console.log('PASS fee route accepts explicit null courier, replays exactly, conflicts changed data, rejects malformed/nonexistent ids, and writes once')
 }

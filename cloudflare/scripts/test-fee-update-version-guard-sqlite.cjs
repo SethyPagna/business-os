@@ -293,6 +293,34 @@ async function main() {
     assert.equal(broadcasts.length, 0)
   })
 
+
+  for (const table of ['stock_disposition_fees', 'stock_funding_events']) {
+    await check('linked ' + table + ' refuses fee edit and delete without writes', async () => {
+      sqlite.exec('CREATE TABLE stock_disposition_fees(fee_id INTEGER); CREATE TABLE stock_funding_events(fee_id INTEGER);')
+      sqlite.prepare('INSERT INTO ' + table + ' VALUES(1)').run()
+      const snapshot = () => JSON.stringify(sqlite.prepare("SELECT name,sql FROM sqlite_master WHERE type='table' ORDER BY name").all()
+        .map(({ name, sql }) => [name, sql, sqlite.prepare('SELECT * FROM "' + name + '"').all().map(row => JSON.stringify(row)).sort()]))
+      const before = snapshot()
+      for (const method of ['PUT', 'DELETE']) {
+        const response = await app.request('/1', { method, headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ label: 'blocked edit', reason: 'blocked delete', expectedUpdatedAt: row().updated_at }) }, {},
+          { waitUntil: () => {}, passThroughOnException: () => {} })
+        const body = await response.json()
+        assert.equal(response.status, 409, JSON.stringify(body))
+        assert.equal(body.code, 'stock_lifecycle_dependency')
+        assert.equal(snapshot(), before)
+        assert.equal(feeUpdateRuns, 0)
+        assert.deepEqual(audits, [])
+        assert.deepEqual(broadcasts, [])
+      }
+    })
+  }
+  await check('empty fee links and irrelevant fee ids permit edits', async () => {
+    sqlite.exec('CREATE TABLE stock_disposition_fees(fee_id INTEGER); CREATE TABLE stock_funding_events(fee_id INTEGER); INSERT INTO stock_funding_events VALUES(99);')
+    assert.equal((await update({ label: 'allowed edit', expectedUpdatedAt: row().updated_at })).status, 200)
+    assert.equal(row().label, 'allowed edit')
+    assert.equal(loadStockDependency('lib/stockLifecycle.ts').StockLifecycleError.prototype instanceof require('hono/http-exception').HTTPException, true)
+  })
   console.log(`\n${passed} fee update version-guard checks passed.`)
 }
 
