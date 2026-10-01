@@ -162,6 +162,8 @@ const SEED = `
 function fresh() {
   state.native = openDb(loadAll())
   state.native.db.exec(SEED)
+  // D1's SQLite parses with expression depth 100; node's default is 1000.
+  state.native.db.limits.exprDepth = 100
   state.user = ADMIN
   state.audits = []
   state.beforeFold = null

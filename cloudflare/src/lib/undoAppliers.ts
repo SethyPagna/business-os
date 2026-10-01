@@ -583,6 +583,16 @@ function preserveBulkClusterPlan(source: MergeReversal, fresh: MergeReversal): v
   }
 }
 
+// D1 parses with a maximum expression depth of 100 and a left-leaning chain of
+// conjuncts costs about three levels per term, so a wide row's equality guard
+// must be a balanced tree: depth grows with log(terms), not terms.
+export function joinBalanced(terms: readonly string[], operator: 'AND' | 'OR'): string {
+  if (terms.length === 0) throw new Error('joinBalanced needs at least one term')
+  if (terms.length === 1) return terms[0]
+  const middle = Math.ceil(terms.length / 2)
+  return `(${joinBalanced(terms.slice(0, middle), operator)} ${operator} ${joinBalanced(terms.slice(middle), operator)})`
+}
+
 function chunk<T>(arr: T[], size: number): T[][] {
   const out: T[][] = []
   for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size))
@@ -713,7 +723,7 @@ export async function mergeStateFingerprint(
       let index = 0
       const query = read.sql.replace(/\?/g, () => `@fingerprintValue${index++}`)
       if (index !== (read.params || []).length) throw new UndoConflictError('Invalid merge fingerprint bindings.')
-      const equality = columns.map((column) => `live."${column}" IS json_extract(saved.value,'$.${column}')`).join(' AND ')
+      const equality = !columns.length ? '' : joinBalanced(columns.map((column) => `live."${column}" IS json_extract(saved.value,'$.${column}')`), 'AND')
       transactionGuards.push({
         sql: `WITH live AS MATERIALIZED (${query})
           SELECT CASE WHEN (SELECT COUNT(*) FROM live)=json_array_length(@fingerprintRows)
@@ -2680,8 +2690,8 @@ function productMergeGroupPredecessorTimestamps(child: ProductMergeGroupChild, p
     }
     return [...shapes].map(([shape, values]) => ({
       sql: `SELECT CASE WHEN NOT EXISTS(SELECT 1 FROM json_each(@rows) saved WHERE NOT EXISTS(
-        SELECT 1 FROM ${table} live WHERE ${(JSON.parse(shape) as string[])
-          .map((field) => fieldGuard(table, field, omitTimestamp)).join(' AND ')}
+        SELECT 1 FROM ${table} live WHERE ${joinBalanced((JSON.parse(shape) as string[])
+          .map((field) => fieldGuard(table, field, omitTimestamp)), 'AND')}
       )) THEN 1 ELSE json_extract('', '$') END AS product_merge_group_timestamp_guard`,
       params: { rows: JSON.stringify(values) },
     }))
