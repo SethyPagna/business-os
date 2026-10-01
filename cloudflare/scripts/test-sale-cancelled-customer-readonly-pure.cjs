@@ -1,3 +1,4 @@
+const { sqliteD1Call } = require('./harness/sqlite_d1_bindings.cjs')
 // S4-41: a CANCELLED sale is read-only, including its customer.
 //
 // The owner's rule for sale edits is "add/edit sales customer, driver,
@@ -82,16 +83,16 @@ function fixture() {
       return { bind(...params) { return {
         text,
         params,
-        async first() { return sql.prepare(text).get(...params) || null },
-        async all() { return { results: sql.prepare(text).all(...params) } },
-        async run() { const result = sql.prepare(text).run(...params); return { meta: { changes: result.changes, last_row_id: Number(result.lastInsertRowid) } } },
+        async first() { return sqliteD1Call(sql.prepare(text), 'get', params) || null },
+        async all() { return { results: sqliteD1Call(sql.prepare(text), 'all', params) } },
+        async run() { const result = sqliteD1Call(sql.prepare(text), 'run', params); return { meta: { changes: result.changes, last_row_id: Number(result.lastInsertRowid) } } },
       } } }
     },
     async batch(statements) {
       return sql.transaction(() => statements.map((statement) => {
         const prepared = sql.prepare(statement.text)
-        if (prepared.reader) return { results: [prepared.get(...statement.params)], meta: { changes: 0 } }
-        const result = prepared.run(...statement.params)
+        if (prepared.reader) return { results: [sqliteD1Call(prepared, 'get', statement.params)], meta: { changes: 0 } }
+        const result = sqliteD1Call(prepared, 'run', statement.params)
         return { meta: { changes: result.changes, last_row_id: Number(result.lastInsertRowid) } }
       }))()
     },
