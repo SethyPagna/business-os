@@ -4,6 +4,7 @@ import StatsRangeRow from '../shared/StatsRangeRow'
 import SearchInput from '../shared/SearchInput'
 import { fmtDateTime24 } from '../../utils/formatters'
 import { todayStr } from '../../utils/dateHelpers.ts'
+import { continuousRangeParams } from '../../utils/continuousRangeParams.ts'
 import { getLegacyDeletedSales } from '../../api/auditLogTransport.ts'
 import { useApp as useAppHook } from '../../AppContext.tsx'
 import PaginationControls, { clampPage, DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
@@ -64,6 +65,8 @@ export default function LegacyDeletedSalesSection() {
   const initialToday = todayStr()
   const [fromDate, setFromDate] = useState(initialToday)
   const [toDate, setToDate] = useState(initialToday)
+  const [startTime, setStartTime] = useState('')
+  const [endTime, setEndTime] = useState('')
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
   const [refreshToken, setRefreshToken] = useState(0)
@@ -82,13 +85,18 @@ export default function LegacyDeletedSalesSection() {
     const requestId = ++requestRef.current
     setLoading(true)
     setError('')
-    getLegacyDeletedSales({
-      search,
-      cashier: cashier === 'all' ? '' : cashier,
-      from: fromDate,
-      to: toDate,
-      page,
-      page_size: pageSize,
+    Promise.resolve().then(() => {
+      const { createdFrom, createdTo } = continuousRangeParams({ startDate: fromDate, endDate: toDate, startTime, endTime })
+      return getLegacyDeletedSales({
+        search,
+        cashier: cashier === 'all' ? '' : cashier,
+        from: fromDate,
+        to: toDate,
+        page,
+        page_size: pageSize,
+        createdFrom,
+        createdTo,
+      })
     })
       .then((result) => {
         if (!aliveRef.current || requestRef.current !== requestId) return
@@ -108,7 +116,7 @@ export default function LegacyDeletedSalesSection() {
         if (aliveRef.current && requestRef.current === requestId) setLoading(false)
       })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, cashier, fromDate, toDate, page, pageSize, refreshToken])
+  }, [search, cashier, fromDate, toDate, startTime, endTime, page, pageSize, refreshToken])
 
   const totals = data?.totals || {}
   const rows = Array.isArray(data?.items) ? data!.items! : []
@@ -116,7 +124,7 @@ export default function LegacyDeletedSalesSection() {
   const totalLines = Number(data?.total_lines) || 0
 
   const money = (value: unknown): string => `$${(Number(value) || 0).toFixed(2)}`
-  const anyFilter = search !== '' || cashier !== 'all' || fromDate !== '' || toDate !== ''
+  const anyFilter = search !== '' || cashier !== 'all' || fromDate !== '' || toDate !== '' || startTime !== '' || endTime !== ''
 
   const changeFilter = (apply: () => void) => {
     apply()
@@ -158,13 +166,15 @@ export default function LegacyDeletedSalesSection() {
           ]}
         />
         <StatsRangeRow
-          range={{ startDate: fromDate, endDate: toDate, startTime: '', endTime: '' }}
+          range={{ startDate: fromDate, endDate: toDate, startTime, endTime }}
           onRangeChange={(range) => changeFilter(() => {
             setFromDate(range.startDate || '')
             setToDate(range.endDate || '')
+            setStartTime(range.startTime || '')
+            setEndTime(range.endTime || '')
           })}
           t={(key: string) => t(key)}
-          showTime={false}
+          showTime continuous
           showPresets
           className="w-full min-w-0"
         />
@@ -172,7 +182,7 @@ export default function LegacyDeletedSalesSection() {
           <button
             type="button"
             className="btn-secondary py-1 text-xs"
-            onClick={() => changeFilter(() => { setSearch(''); setCashier('all'); setFromDate(''); setToDate('') })}
+            onClick={() => changeFilter(() => { setSearch(''); setCashier('all'); setFromDate(''); setToDate(''); setStartTime(''); setEndTime('') })}
           >
             {tr('clear', 'Clear')}
           </button>

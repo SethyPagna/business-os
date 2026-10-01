@@ -840,16 +840,14 @@ export default function AuditLog() {
           />
         </div>
 
-        {view.preset === 'custom' ? (
           <StatsRangeRow
-            range={{ startDate: view.rangeStart, endDate: view.rangeEnd, startTime: '', endTime: '' }}
-            onRangeChange={(next) => setView((current) => setAuditRange(current, next.startDate || '', next.endDate || ''))}
+            range={{ startDate: String(params.startDate || ''), endDate: String(params.endDate || ''), startTime: view.rangeStartTime || '', endTime: view.rangeEndTime || '' }}
+            onRangeChange={(next) => setView((current) => setAuditRange(current, next.startDate || '', next.endDate || '', next.startTime || '', next.endTime || ''))}
             t={t}
-            showTime={false}
+            showTime continuous
             showPresets={false}
             className="w-full min-w-0"
           />
-        ) : null}
 
         {windowCut ? (
           <p className="px-1 text-xs text-amber-700 dark:text-amber-300" data-audit-window-note>

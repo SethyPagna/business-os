@@ -31,20 +31,26 @@ for (const file of [
   visit(ast)
   assert.equal(hosts.length, 1, `${file}: exactly one shared range/preset owner`)
   assert.doesNotMatch(source, /<DateTimeRangePicker/, `${file}: no direct picker left to duplicate presets`)
-  for (const showTime of file.includes('ExportRangeDialog') ? [false, true] : [file.includes('DeliveryContact')]) {
+  for (const showTime of file.includes('ExportRangeDialog') ? [false, true] : [true]) {
     let state: any = { ...initial }
     const scope = {
-      StatsRangeRow, t: (key: string) => key, range: { ...initial }, showTime,
+      StatsRangeRow, t: (key: string) => key, range: { ...initial }, showTime, continuous: true,
       fromDate: initial.startDate, toDate: initial.endDate,
+      startTime: initial.startTime, endTime: initial.endTime,
       rangeStart: initial.startDate, rangeEnd: initial.endDate,
       movementStartDate: initial.startDate, movementEndDate: initial.endDate,
+      movementStartTime: initial.startTime, movementEndTime: initial.endTime,
       changeFilter: (fn: () => void) => fn(), setRange: (next: unknown) => { state = next },
       setRangeStart: (value: string) => { state.startDate = value },
       setRangeEnd: (value: string) => { state.endDate = value },
       setFromDate: (value: string) => { state.startDate = value },
       setToDate: (value: string) => { state.endDate = value },
+      setStartTime: (value: string) => { state.startTime = value },
+      setEndTime: (value: string) => { state.endTime = value },
       setMovementStartDate: (value: string) => { state.startDate = value },
       setMovementEndDate: (value: string) => { state.endDate = value },
+      setMovementStartTime: (value: string) => { state.startTime = value },
+      setMovementEndTime: (value: string) => { state.endTime = value },
     }
     const element = evaluate(`module.exports = (${hosts[0].getText(ast)})`, scope)
     assert.equal(element.props.showPresets, true, `${file}: explicitly requests external presets`)
@@ -78,18 +84,12 @@ for (const file of [
   console.log(`PASS ${file}: external presets, preserved time capability, custom selection and clear`)
 }
 
-// The Audit Log owns a compact time control instead of the eight-preset rail:
-// Today / 7 days / 30 days / Custom in one select (owner, 30 Sep 2026). Its
-// custom range still goes through the one shared StatsRangeRow, with the
-// picker's own quick ranges, and is only mounted while Custom is chosen.
 {
   const source = read('utils-settings/AuditLog.tsx')
   assert.equal((source.match(/<StatsRangeRow/g) || []).length, 1, 'AuditLog: exactly one shared range owner')
   assert.doesNotMatch(source, /<DateTimeRangePicker/, 'AuditLog: no direct picker')
-  assert.match(source, /view\.preset === 'custom' \? \(\s*<StatsRangeRow[\s\S]*?showPresets=\{false\}/, 'AuditLog: the range picker appears only for Custom, without a second preset rail')
-  // Clearing the custom range does not mean "all time" here: the view state
-  // falls back to the last 30 days, because an unbounded audit read is not on
-  // offer (tests/auditLogView.test.ts pins the fallback).
-  assert.match(source, /onRangeChange=\{\(next\) => setView\(\(current\) => setAuditRange\(current, next\.startDate \|\| '', next\.endDate \|\| ''\)\)\}/, 'AuditLog: the picker writes the custom range through setAuditRange')
-  console.log('PASS utils-settings/AuditLog.tsx: compact time select owns the presets; custom range uses the shared row')
+  assert.doesNotMatch(source, /view\.preset === 'custom' \? \(\s*<StatsRangeRow/, 'AuditLog: hours remain reachable from every preset')
+  assert.match(source, /<StatsRangeRow[\s\S]*?showPresets=\{false\}/, 'AuditLog: no second preset rail')
+  assert.match(source, /onRangeChange=\{\(next\) => setView\(\(current\) => setAuditRange\(current, next\.startDate \|\| '', next\.endDate \|\| '', next\.startTime \|\| '', next\.endTime \|\| ''\)\)\}/, 'AuditLog: the picker writes dates and hours through setAuditRange')
+  console.log('PASS utils-settings/AuditLog.tsx: compact time select and always reachable shared hour range')
 }
