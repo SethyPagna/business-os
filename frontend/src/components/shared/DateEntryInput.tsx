@@ -359,6 +359,7 @@ export default function DateEntryInput({
 }
 
 export interface TimeEntryInputProps {
+  allowEndOfDay?: boolean
   /** Stored value, 24-hour 'HH:mm'. '' when unset. */
   value: string
   /** Receives 'HH:mm', or '' when the field was cleared. */
@@ -383,6 +384,7 @@ export interface TimeEntryInputProps {
  * error contract. '930' settles to 09:30 on Enter or blur.
  */
 export function TimeEntryInput({
+  allowEndOfDay = false,
   value,
   onChange,
   t,
@@ -407,7 +409,7 @@ export function TimeEntryInput({
       if (value) onChange('')
       return { display: '', settled: true }
     }
-    const result = normalizeTimeEntry(trimmed)
+    const result = normalizeTimeEntry(trimmed, { allowEndOfDay })
     if (!result.value) return { display: trimmed, settled: false }
     if (result.value !== value) onChange(result.value)
     return { display: result.value, settled: true }
@@ -415,9 +417,9 @@ export function TimeEntryInput({
 
   return (
     <MaskedEntryField
-      display={normalizeTimeEntry(value).value || ''}
+      display={normalizeTimeEntry(value, { allowEndOfDay }).value || ''}
       syncKey={value}
-      mask={(raw, deleting) => applyTimeEntryMask(raw, { deleting })}
+      mask={(raw, deleting) => applyTimeEntryMask(raw, { deleting, allowEndOfDay })}
       commit={commit}
       errorText={tr('time_entry_invalid', 'Enter the time as hh:mm on the 24-hour clock.')}
       helpText={tr('time_entry_help', 'Type digits only — 930 becomes 09:30 and 1430 becomes 14:30.')}

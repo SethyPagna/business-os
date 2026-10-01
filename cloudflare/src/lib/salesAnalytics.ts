@@ -135,6 +135,8 @@ import { getDb } from './db'
 import { tableColumnSet } from './schemaProbe'
 import type { Env } from '../index'
 import {
+  localRangeClockError,
+  isLocalRangeClock,
   localDateExpr,
   localMonthExpr,
   localDateRangeClause,
@@ -705,6 +707,8 @@ export const CUSTOMER_REFUND_JOIN = `LEFT JOIN (
 // date range (and optional branch)". `alias` lets callers use this against
 // either a bare `sales` table or an aliased `s` in a join.
 export function whereActiveSales(alias: string, f: SalesFilters) {
+  const clockError = localRangeClockError(f.startTime, f.endTime)
+  if (clockError) throw new RangeError(clockError)
   const params: Record<string, unknown> = {}
   const clauses: string[] = []
   // Local-day range, bucketed in the fixed business timezone UTC+7 (Cambodia).
@@ -752,13 +756,13 @@ export function whereActiveSales(alias: string, f: SalesFilters) {
   const shift = shiftWindowWhere(alias, f)
   clauses.push(...shift.clauses)
   Object.assign(params, shift.params)
-  const validTime = (v: unknown): v is string => typeof v === 'string' && /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(v)
-  if (validTime(f.startTime) && validTime(f.endTime)) {
+
+  if (isLocalRangeClock(String(f.startTime || '').trim()) && isLocalRangeClock(String(f.endTime || '').trim(), true)) {
     // The time-of-day window is interpreted in the FIXED business timezone
     // (UTC+7), NOT the viewer's offset -- created_at is stored UTC, so shift by
     // +7h before taking time(). f.tzOffsetMinutes is deliberately ignored.
-    params.startTime = f.startTime
-    params.endTime = f.endTime
+    params.startTime = String(f.startTime || '').trim()
+    params.endTime = String(f.endTime || '').trim()
     clauses.push(localTimeRangeClause(`${alias}.created_at`))
   }
   return { sql: clauses.join(' AND '), params }
@@ -828,10 +832,10 @@ function whereRemovalMovements(f: SalesFilters): { sql: string; params: Record<s
     clauses.push('m.user_id = @cashierId')
     params.cashierId = f.cashierId
   }
-  const validTime = (v: unknown): v is string => typeof v === 'string' && /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(v)
-  if (validTime(f.startTime) && validTime(f.endTime)) {
-    params.startTime = f.startTime
-    params.endTime = f.endTime
+
+  if (isLocalRangeClock(String(f.startTime || '').trim()) && isLocalRangeClock(String(f.endTime || '').trim(), true)) {
+    params.startTime = String(f.startTime || '').trim()
+    params.endTime = String(f.endTime || '').trim()
     clauses.push(localTimeRangeClause('m.created_at'))
   }
   return { sql: clauses.join(' AND '), params }
@@ -1153,11 +1157,11 @@ async function readSalesReportPass(
       if (f.endDate && feeColumns.has('fee_date')) { feeClauses.push('f.fee_date <= @feeEndDate'); feeParams.feeEndDate = f.endDate }
     }
     if (f.branchId && feeColumns.has('branch_id')) { feeClauses.push('f.branch_id = @feeBranchId'); feeParams.feeBranchId = f.branchId }
-    const validTime = (value: unknown): value is string => typeof value === 'string' && /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value)
-    if (!feeCreatedFrom && !feeCreatedTo && validTime(f.startTime) && validTime(f.endTime)) {
+
+    if (!feeCreatedFrom && !feeCreatedTo && isLocalRangeClock(String(f.startTime || '').trim()) && isLocalRangeClock(String(f.endTime || '').trim(), true)) {
       feeClauses.push(localTimeRangeClause('f.created_at').replaceAll('@startTime', '@feeStartTime').replaceAll('@endTime', '@feeEndTime'))
-      feeParams.feeStartTime = f.startTime
-      feeParams.feeEndTime = f.endTime
+      feeParams.feeStartTime = String(f.startTime || '').trim()
+      feeParams.feeEndTime = String(f.endTime || '').trim()
     }
     if (f.contactId != null && f.contactId !== '') {
       feeClauses.push('f.delivery_contact_id = @feeContactId')
@@ -2220,11 +2224,11 @@ export async function getDeliveryContactTotals(
     if (f.endDate) { feeClauses.push('fees.fee_date <= @feeEndDate'); feeParams.feeEndDate = f.endDate }
   }
   if (f.branchId) { feeClauses.push('fees.branch_id = @feeBranchId'); feeParams.feeBranchId = f.branchId }
-  const validTime = (value: unknown): value is string => typeof value === 'string' && /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value)
-  if (!feeCreatedFrom && !feeCreatedTo && validTime(f.startTime) && validTime(f.endTime)) {
+
+  if (!feeCreatedFrom && !feeCreatedTo && isLocalRangeClock(String(f.startTime || '').trim()) && isLocalRangeClock(String(f.endTime || '').trim(), true)) {
     feeClauses.push(localTimeRangeClause('fees.created_at').replaceAll('@startTime', '@feeStartTime').replaceAll('@endTime', '@feeEndTime'))
-    feeParams.feeStartTime = f.startTime
-    feeParams.feeEndTime = f.endTime
+    feeParams.feeStartTime = String(f.startTime || '').trim()
+    feeParams.feeEndTime = String(f.endTime || '').trim()
   }
   if (f.contactId != null && f.contactId !== '') {
     feeClauses.push('fees.delivery_contact_id = @feeContactId')

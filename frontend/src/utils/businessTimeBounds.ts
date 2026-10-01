@@ -17,15 +17,16 @@ const BUSINESS_UTC_OFFSET_HOURS = 7
  */
 export function reportUtcBound(date: string, time: string, plusMinutes = 0): string | null {
   const dateMatch = DATE_RE.exec(date)
-  const timeMatch = CLOCK_RE.exec(time)
+  const endOfDay = time === '24:00' && plusMinutes === 1
+  const timeMatch = CLOCK_RE.exec(endOfDay ? '00:00' : time)
   if (!dateMatch || !timeMatch || !Number.isInteger(plusMinutes)) return null
   const year = Number(dateMatch[1])
   const month = Number(dateMatch[2])
   const day = Number(dateMatch[3])
-  const hour = Number(timeMatch[1])
+  const hour = endOfDay ? 24 : Number(timeMatch[1])
   const minute = Number(timeMatch[2])
   const dateProbe = new Date(Date.UTC(year, month - 1, day))
   if (dateProbe.getUTCFullYear() !== year || dateProbe.getUTCMonth() !== month - 1 || dateProbe.getUTCDate() !== day) return null
-  const utc = new Date(Date.UTC(year, month - 1, day, hour - BUSINESS_UTC_OFFSET_HOURS, minute + plusMinutes, 0))
+  const utc = new Date(Date.UTC(year, month - 1, day, hour - BUSINESS_UTC_OFFSET_HOURS, minute + (endOfDay ? 0 : plusMinutes), 0))
   return utc.toISOString().slice(0, 19).replace('T', ' ')
 }
