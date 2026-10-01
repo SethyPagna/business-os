@@ -42,10 +42,11 @@ await runTest('movement dates initialize once to Cambodia Today and exports inhe
     const todayIsoDate = new Function('todayStr', `${source.match(/function todayIsoDate\(\): string \{[\s\S]*?\n\}/)![0].replace(': string', '')}; return todayIsoDate`)(todayStr)
     assert.deepEqual(initializers.map((initializer) => new Function('todayIsoDate', `return (${initializer})()`)(todayIsoDate)), ['2026-09-11', '2026-09-11'])
   } finally { globalThis.Date = RealDate }
-  assert.match(source, /setMovementExportRange\(\{ startDate: movementStartDate, endDate: movementEndDate \}\)/)
-  assert.match(source, /startDate: movementStartDate \|\| undefined,[\s\S]*?endDate: movementEndDate \|\| undefined/)
+  assert.match(source, /setMovementExportRange\(\{ startDate: movementStartDate, endDate: movementEndDate, startTime: movementStartTime, endTime: movementEndTime \}\)/)
+  assert.match(source, /continuousRangeParams\(\{ startDate: movementStartDate, endDate: movementEndDate, startTime: movementStartTime, endTime: movementEndTime \}\)/)
   const surface = readFileSync(new URL('../src/components/inventory/InventoryMovementsSurface.tsx', import.meta.url), 'utf8')
   assert.match(surface, /setMovementStartDate\(''\)[\s\S]*?setMovementEndDate\(''\)/)
+  assert.match(surface, /setMovementStartTime\(''\)[\s\S]*?setMovementEndTime\(''\)/)
 })
 
 await runTest('transfer in and out rows with same reference become one net-zero group', () => {

@@ -658,6 +658,10 @@ app.get('/products/search', async (c) => {
 })
 
 app.get('/bootstrap', async (c) => {
+  try { parseContinuousReadWindow(c.req.query()) } catch (error) {
+    if (error instanceof RangeError) return c.json({ error: error.message }, 400)
+    throw error
+  }
   const payload = await searchProductsPayload(c.env, c.req.query())
   const db = getDb(c.env)
   // Family-aware, same reasoning as /stats above -- this used to be a flat
@@ -951,6 +955,10 @@ app.get('/stats', async (c) => {
 
 app.get('/movements', async (c) => {
   const query = c.req.query()
+  let continuousWindow
+  try { continuousWindow = parseContinuousReadWindow(query) } catch (error) {
+    return c.json({ error: (error as Error).message }, 400)
+  }
   const page = clampInt(query.page, 1, 1, 100000)
   const pageSize = clampInt(query.pageSize, 100, 1, 50000)
   const offset = (page - 1) * pageSize
@@ -1015,7 +1023,11 @@ app.get('/movements', async (c) => {
   }
 
   const startDate = String(query.startDate || query.start_date || '').trim()
-  if (startDate) {
+  if (continuousWindow) {
+    where.push(continuousReadWindowSql('created_at'))
+    Object.assign(params, continuousWindow)
+  }
+  if (startDate && !continuousWindow) {
     params.startDate = startDate
     // Local (UTC+7) calendar day. The date()-normalized bound is shape-agnostic
     // (inventory_movements.created_at is a MIX of ISO 'T'/'Z' and space forms) and
@@ -1024,7 +1036,7 @@ app.get('/movements', async (c) => {
     where.push(localDateAtOrAfter('created_at'))
   }
   const endDate = String(query.endDate || query.end_date || '').trim()
-  if (endDate) {
+  if (endDate && !continuousWindow) {
     params.endDate = endDate
     // Admits all of the local end day and excludes the next local day.
     where.push(localDateAtOrBefore('created_at'))

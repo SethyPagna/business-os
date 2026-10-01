@@ -28,6 +28,7 @@ import { todayDateTimeRange, type DateTimeRange } from '../shared/DateTimeRangeP
 import PaginationControls, { clampPage, DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
 import ScanSearchButton from '../shared/ScanSearchButton.tsx'
 import StatsRangeRow from '../shared/StatsRangeRow.tsx'
+import { continuousRangeParams } from '../../utils/continuousRangeParams.ts'
 import BarChart3 from 'lucide-react/dist/esm/icons/bar-chart-3.js'
 import MinimizeButton from '../shared/MinimizeButton.tsx'
 import { useIsPageActive } from '../shared/pageActivity'
@@ -544,7 +545,7 @@ export default function Branches({ embedded = false, view, showSectionNavigation
   const loadRequestRef = useRef(0)
   const loadWatchdogRef = useRef<number | null>(null)
   const loadPromiseRef = useRef<Promise<unknown> | null>(null)
-  const loadPromiseModeRef = useRef('')
+  const loadPromiseKeyRef = useRef('')
   const saveInFlightRef = useRef(false)
   const actionHistory = useActionHistory({ limit: 3, notify, enabled: historyReady, user, scope: 'branches' })
   useEffect(() => {
@@ -572,12 +573,8 @@ export default function Branches({ embedded = false, view, showSectionNavigation
    */
   const load = useCallback(async (silent = loadedOnceRef.current) => {
     const requestedMode = tab === 'transfers' ? 'transfers' : 'branches'
-    if (loadPromiseRef.current) {
-      if (requestedMode !== 'transfers' || loadPromiseModeRef.current === 'transfers') {
-        return loadPromiseRef.current
-      }
-      await loadPromiseRef.current.catch(() => null)
-    }
+    const requestedKey = JSON.stringify([requestedMode, ...(requestedMode === 'transfers' ? [branchDateRange, transferFromFilter, transferToFilter, transferPage, transferPageSize] : [])])
+    if (loadPromiseRef.current && loadPromiseKeyRef.current === requestedKey) return loadPromiseRef.current
     const requestId = beginTrackedRequest(loadRequestRef)
     const promise = (async () => {
       if (loadWatchdogRef.current) window.clearTimeout(loadWatchdogRef.current)
@@ -601,10 +598,7 @@ export default function Branches({ embedded = false, view, showSectionNavigation
         if (tab === 'transfers') {
           tasks.transfers = () => withLoaderTimeout(
             () => branchApi.getTransfers({
-              startDate: branchDateRange.startDate || undefined,
-              endDate: branchDateRange.endDate || undefined,
-              startTime: branchDateRange.startTime || undefined,
-              endTime: branchDateRange.endTime || undefined,
+              ...continuousRangeParams(branchDateRange),
               fromBranchId: transferFromFilter !== 'all' ? transferFromFilter : undefined,
               toBranchId: transferToFilter !== 'all' ? transferToFilter : undefined,
               page: transferPage,
@@ -647,8 +641,8 @@ export default function Branches({ embedded = false, view, showSectionNavigation
         }
         return null
       } finally {
-        if (loadWatchdogRef.current) window.clearTimeout(loadWatchdogRef.current)
         if (isTrackedRequestCurrent(loadRequestRef, requestId)) {
+          if (loadWatchdogRef.current) window.clearTimeout(loadWatchdogRef.current)
           setLoading(false)
         }
       }
@@ -656,11 +650,11 @@ export default function Branches({ embedded = false, view, showSectionNavigation
     const wrappedPromise = promise.finally(() => {
       if (loadPromiseRef.current === wrappedPromise) {
         loadPromiseRef.current = null
-        loadPromiseModeRef.current = ''
+        loadPromiseKeyRef.current = ''
       }
     })
     loadPromiseRef.current = wrappedPromise
-    loadPromiseModeRef.current = requestedMode
+    loadPromiseKeyRef.current = requestedKey
     return wrappedPromise
   }, [branchApi, branchDateRange.endDate, branchDateRange.startDate, branchDateRange.endTime, branchDateRange.startTime, notify, transferFromFilter, transferPage, transferPageSize, transferToFilter, tr, tab])
 
@@ -670,7 +664,7 @@ export default function Branches({ embedded = false, view, showSectionNavigation
       if (loadWatchdogRef.current) window.clearTimeout(loadWatchdogRef.current)
       invalidateTrackedRequest(loadRequestRef)
       loadPromiseRef.current = null
-      loadPromiseModeRef.current = ''
+      loadPromiseKeyRef.current = ''
       setLoading(false)
       return
     }
@@ -1035,10 +1029,7 @@ export default function Branches({ embedded = false, view, showSectionNavigation
         do {
           if (!isExportCurrent()) return
           const response = await branchApi.getTransfers({
-            startDate: branchDateRange.startDate || undefined,
-            endDate: branchDateRange.endDate || undefined,
-            startTime: branchDateRange.startTime || undefined,
-            endTime: branchDateRange.endTime || undefined,
+            ...continuousRangeParams(branchDateRange),
             fromBranchId: transferFromFilter !== 'all' ? transferFromFilter : undefined,
             toBranchId: transferToFilter !== 'all' ? transferToFilter : undefined,
             page: exportPage,
@@ -1186,6 +1177,7 @@ export default function Branches({ embedded = false, view, showSectionNavigation
         </div> : null}
         {showDateRange ? (
           <StatsRangeRow
+            continuous
             showTime={tab === 'transfers'}
             range={branchDateRange}
             onRangeChange={(range) => {

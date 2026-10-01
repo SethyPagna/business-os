@@ -474,6 +474,8 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
   // Initialize to the Cambodia business day; an explicit Clear stays all-time.
   const [movementStartDate, setMovementStartDate] = useState(todayIsoDate)
   const [movementEndDate, setMovementEndDate] = useState(todayIsoDate)
+  const [movementStartTime, setMovementStartTime] = useState('00:00')
+  const [movementEndTime, setMovementEndTime] = useState('23:59')
   // The Start → End range picker is the ONE date control on Movements now
   // (user, Aug 31: "remove [All time]; the date is default, and start date
   // and end date for customizing which is for many sections and pages
@@ -831,8 +833,7 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
                 ...branchOpts,
                 search: deferredSearch || undefined,
                 searchMode,
-                startDate: movementStartDate || undefined,
-                endDate: movementEndDate || undefined,
+                ...continuousRangeParams({ startDate: movementStartDate, endDate: movementEndDate, startTime: movementStartTime, endTime: movementEndTime }),
                 page: movementMeta.page,
                 pageSize: movementMeta.pageSize,
               }),
@@ -951,6 +952,8 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
     movementUserFilter,
     movementStartDate,
     movementEndDate,
+    movementStartTime,
+    movementEndTime,
     movementMeta.page,
     movementMeta.pageSize,
     needsMovementData,
@@ -1464,7 +1467,7 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
   useEffect(() => {
     setMovementMeta((current) => ({ ...current, page: 1 }))
     if (needsMovementData) setMovementsLoaded(false)
-  }, [branchFilter, deferredSearch, movementEndDate, movementStartDate, movementUserFilter, needsMovementData, searchMode])
+  }, [branchFilter, deferredSearch, movementEndDate, movementStartDate, movementEndTime, movementStartTime, movementUserFilter, needsMovementData, searchMode])
 
   useEffect(() => {
     if (!isActive || !loadedOnceRef.current || !needsMovementData) return
@@ -1475,9 +1478,11 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
     isActive,
     load,
     movementEndDate,
+    movementEndTime,
     movementMeta.page,
     movementMeta.pageSize,
     movementStartDate,
+    movementStartTime,
     movementUserFilter,
     needsMovementData,
     searchMode,
@@ -1864,9 +1869,9 @@ ${inventoryFeesFormulaText}`,
   // an edited range fetches that window server-side (the /movements
   // endpoint accepts pageSize up to 50k) and applies the same activity/user
   // filters the visible list applies.
-  const [movementExportRange, setMovementExportRange] = useState<{ startDate: string; endDate: string } | null>(null)
-  const runRangedMovementExport = useCallback(async (range: { startDate: string; endDate: string }) => {
-    const sameRange = (range.startDate || '') === (movementStartDate || '') && (range.endDate || '') === (movementEndDate || '')
+  const [movementExportRange, setMovementExportRange] = useState<ExportRange | null>(null)
+  const runRangedMovementExport = useCallback(async (range: ExportRange) => {
+    const sameRange = (range.startDate || '') === (movementStartDate || '') && (range.endDate || '') === (movementEndDate || '') && (range.startTime || '') === movementStartTime && (range.endTime || '') === movementEndTime
     if (sameRange) {
       await exportMovementGroups(visibleMovementGroups, 'inventory-movements')
       return
@@ -1876,8 +1881,7 @@ ${inventoryFeesFormulaText}`,
         ...(branchFilter !== 'all' ? { branchId: parseInt(branchFilter, 10) } : {}),
         search: deferredSearch || undefined,
         searchMode,
-        startDate: range.startDate || undefined,
-        endDate: range.endDate || undefined,
+        ...continuousRangeParams(range),
         page: 1,
         pageSize: 20000,
       }),
@@ -1892,7 +1896,7 @@ ${inventoryFeesFormulaText}`,
     }
     const filtered = items.filter((m) => matchesMulti(movFilter, m.movement_type) && matchesMulti(movementUserFilter, m.user_id))
     await exportMovementGroups(buildMovementGroups(filtered), 'inventory-movements-range')
-  }, [branchFilter, deferredSearch, exportMovementGroups, movFilter, movementEndDate, movementStartDate, movementUserFilter, notify, searchMode, tr, visibleMovementGroups])
+  }, [branchFilter, deferredSearch, exportMovementGroups, movFilter, movementEndDate, movementStartDate, movementEndTime, movementStartTime, movementUserFilter, notify, searchMode, tr, visibleMovementGroups])
 
   // Ranged stats export for the Stats & Branches section (user, Aug 31:
   // "make sure the branch section has the export for these as well and can
@@ -1948,14 +1952,14 @@ ${inventoryFeesFormulaText}`,
     return [
       {
         label: tr('export_movements_range', `Export ${t('movements') || 'movements'}…`),
-        onClick: () => setMovementExportRange({ startDate: movementStartDate, endDate: movementEndDate }),
+        onClick: () => setMovementExportRange({ startDate: movementStartDate, endDate: movementEndDate, startTime: movementStartTime, endTime: movementEndTime }),
         color: 'green',
       },
       selectedMovementGroups.length
         ? { label: tr('export_selected_movement_groups', 'Export selected movement groups'), onClick: () => exportMovementGroups(selectedMovementGroups, 'inventory-movements-selected'), color: 'blue' }
         : null,
     ].filter(Boolean)
-  }, [exportMovementGroups, movementEndDate, movementStartDate, selectedMovementGroups, tab, t, tr])
+  }, [exportMovementGroups, movementEndDate, movementStartDate, movementEndTime, movementStartTime, selectedMovementGroups, tab, t, tr])
 
   const inventoryFilterSections = useMemo(() => {
     if (tab === 'rfid') {
@@ -2439,11 +2443,13 @@ ${inventoryFeesFormulaText}`,
             isMovementScopePartiallySelected={isMovementScopePartiallySelected}
             loading={(loading && !movementsLoaded) || isMovementsFirstLoad}
             movementEndDate={movementEndDate}
+            movementEndTime={movementEndTime}
             movementMeta={movementMeta}
             movementSections={movementSections}
             movementSelectAllRef={movementSelectAllRef}
             movementSelectMode={movementSelectMode}
             movementStartDate={movementStartDate}
+            movementStartTime={movementStartTime}
             onToggleMovementSelectMode={toggleMovementSelectMode}
             openMovementDetail={setMovementDetail}
             selectedMovementGroups={selectedMovementGroups}
@@ -2451,8 +2457,10 @@ ${inventoryFeesFormulaText}`,
             setSelectedMovementIds={setSelectedMovementIds}
             setExpandedMovementGroupPage={setExpandedMovementGroupPage}
             setMovementEndDate={setMovementEndDate}
+            setMovementEndTime={setMovementEndTime}
             setMovementMeta={setMovementMeta}
             setMovementStartDate={setMovementStartDate}
+            setMovementStartTime={setMovementStartTime}
             showMovementActionGroups={showMovementActionGroups}
             t={t}
             toggleAllMovementSelection={toggleAllMovementSelection}
@@ -2656,6 +2664,8 @@ ${inventoryFeesFormulaText}`,
         <Suspense fallback={null}>
           <ExportRangeDialog
             initial={movementExportRange}
+            showTime
+            continuous
             title={`${tr('export', 'Export')} — ${t('movements') || 'Movements'}`}
             t={t}
             onClose={() => setMovementExportRange(null)}

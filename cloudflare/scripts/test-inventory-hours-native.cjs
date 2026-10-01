@@ -15,10 +15,12 @@ h.setUser({ ...h.USER, permissions: '{"all":true}' })
 const sales = h.app
 const returns = h.load('routes/returns.ts').default
 const transfers = h.load('routes/compat.ts').default
+const inventory = h.load('routes/inventory.ts').default
 const f = h.fixture()
 const get = async (app, url) => {
   const response = await app.request(url, {}, { DB: f.route }, h.executionCtx)
-  return { status: response.status, body: await response.json() }
+  const text = await response.text()
+  return { status: response.status, body: text.startsWith('{') || text.startsWith('[') ? JSON.parse(text) : text }
 }
 
 async function main() {
@@ -28,7 +30,25 @@ async function main() {
       f.raw.prepare("INSERT INTO returns(return_number,total_refund_usd,created_at,branch_id,return_scope) VALUES(?,1,?,1,'customer')").run([`hour-return-${index}`, timestamp])
     }
     const dates = 'startDate=2026-09-05&endDate=2026-09-05'
+    for (const route of ['/products/search', '/bootstrap']) {
+      for (const empty of ['', '&query=missing-hour-product']) {
+        assert.equal((await get(inventory, `${route}?createdFrom=2026-09-05%2002:00:00${empty}`)).status, 400, `${route} invalid windows must reject before a populated or empty search`)
+      }
+    }
     const narrow = `${dates}&createdFrom=2026-09-05%2002:00:00&createdTo=2026-09-05T04:00:00Z`
+    for (const timestamp of ['2026-09-04T16:59:59.000Z', '2026-09-04 17:00:00', '2026-09-05T03:00:00.000Z', '2026-09-05 16:59:59', '2026-09-05T17:00:00Z']) {
+      f.raw.prepare("INSERT INTO inventory_movements(product_id,movement_type,quantity,created_at,branch_id) VALUES(10,'stock_in',1,?,1)").run([timestamp])
+    }
+    const selectedMovements = await get(inventory, `/movements?${narrow}&productId=10&page=1&pageSize=20`)
+    assert.equal(selectedMovements.status, 200)
+    assert.equal(selectedMovements.body.total, 1, 'movement list and count must use exact endpoint cohort')
+    const fullMovementDate = await get(inventory, `/movements?${dates}&productId=10&page=1&pageSize=20`)
+    const fullMovementTime = await get(inventory, `/movements?${dates}&createdFrom=2026-09-04%2017:00:00&createdTo=2026-09-05%2017:00:00&productId=10&page=1&pageSize=20`)
+    assert.equal(fullMovementDate.body.total, 3)
+    assert.deepEqual(fullMovementTime.body.items, fullMovementDate.body.items)
+    for (const suffix of ['createdFrom=2026-09-05%2002:00:00', 'createdFrom=2026-09-05%2004:00:00&createdTo=2026-09-05%2002:00:00']) {
+      assert.equal((await get(inventory, `/movements?${dates}&${suffix}`)).status, 400)
+    }
     const selected = await get(sales, `/stats-strip?${narrow}`)
     assert.equal(selected.status, 200, JSON.stringify(selected.body))
     assert.equal(selected.body.totals.tx_count, 1, 'continuous hours must filter recognized sales, not just activity cards')
@@ -56,7 +76,7 @@ async function main() {
       'createdFrom=2026-09-05%2002:00:00&createdTo=2026-09-05%2004:00:00&startTime=09:00&endTime=11:00',
     ]) assert.equal((await get(sales, `/stats-strip?${dates}&${invalid}`)).status, 400, invalid)
     f.raw.prepare("INSERT INTO branches(id,name,is_active) VALUES(2,'Warehouse',1)").run()
-    for (const [index, timestamp] of ['2026-09-04 17:00:00', '2026-09-05T03:00:00Z', '2026-09-05 16:59:59'].entries()) {
+    for (const [index, timestamp] of ['2026-09-04T16:59:59Z', '2026-09-04 17:00:00', '2026-09-05T03:00:00Z', '2026-09-05 16:59:59', '2026-09-05T17:00:00Z'].entries()) {
       f.raw.prepare('INSERT INTO stock_transfers(product_id,quantity,from_branch_id,to_branch_id,created_at) VALUES(10,?,1,2,?)').run([index + 1, timestamp])
     }
     const transferWindow = await get(transfers, `/transfers?${dates}&startTime=09:00&endTime=11:00&page=1&pageSize=20`)
@@ -65,6 +85,15 @@ async function main() {
     const overnight = await get(transfers, `/transfers?${dates}&startTime=22:00&endTime=02:00&page=1&pageSize=20`)
     assert.equal(overnight.status, 200)
     assert.equal(overnight.body.total, 2, 'Branch transfers keep recurring overnight hours')
+    const continuousTransfers = await get(transfers, `/transfers?${narrow}&page=1&pageSize=20`)
+    assert.equal(continuousTransfers.status, 200)
+    assert.equal(continuousTransfers.body.total, 1, 'shared Branch/Inventory endpoint timestamps filter the same continuous cohort')
+    const fullTransfers = await get(transfers, `/transfers?${dates}&createdFrom=2026-09-04%2017:00:00&createdTo=2026-09-05%2017:00:00&page=1&pageSize=20`)
+    assert.equal(fullTransfers.body.total, 3)
+    for (const suffix of ['createdFrom=2026-09-05%2002:00:00', 'createdFrom=2026-09-05%2004:00:00&createdTo=2026-09-05%2002:00:00', 'createdFrom=2026-09-05%2002:00:00&createdTo=2026-09-05%2004:00:00&startTime=09:00&endTime=11:00']) {
+      assert.equal((await get(transfers, `/transfers?${dates}&${suffix}`)).status, 400)
+    }
+    assert.equal((await get(transfers, '/transfers?startDate=2026-02-30&endDate=2026-09-05&createdFrom=2026-09-05%2002:00:00&createdTo=2026-09-05%2004:00:00')).status, 400)
     h.setUser({ ...h.USER, permissions: '{}' })
     assert.equal((await get(sales, `/stats-strip?${narrow}`)).status, 403)
     assert.equal((await get(transfers, `/transfers?${dates}&startTime=09:00&endTime=11:00`)).status, 403)
