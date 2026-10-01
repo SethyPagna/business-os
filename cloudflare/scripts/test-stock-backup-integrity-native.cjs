@@ -13,6 +13,9 @@ function alterResponse(doc, kind, mutate) {
 
 async function main() {
   const backup = load('lib/backup.ts'), disposition = load('lib/stockDisposition.ts'), funding = load('lib/stockFunding.ts')
+  const validation=load('lib/stockLifecycleRecovery.ts').StockRecoveryGraphValidation
+  if(process.env.STOCK_BACKUP_INTEGRITY_CONTROL==='funding')validation.prototype.validateFundingHistory=async()=>{}
+  if(process.env.STOCK_BACKUP_INTEGRITY_CONTROL==='disposition')validation.prototype.validateDispositionHistory=async()=>{}
   const source = fixture(); seed(source)
   const held = await disposition.commitStockDisposition(source.env, actor, hold)
   await disposition.commitStockDisposition(source.env, actor, { kind:'dispose',source_id:'source-900',batch_id:500,product_id:10,branch_id:1,supplier_id:77,allocation_id:held.allocation_id,quantity:1,reason:'Dispose recovery fixture',expense_category:'broken',expected_generation:1,client_request_id:'recovery-dispose-0001' })
@@ -66,7 +69,38 @@ async function main() {
   for(const action of [()=>disposition.commitStockDisposition(positive.env,actor,hold),()=>funding.commitStockFunding(positive.env,actor,fund),()=>funding.commitStockFunding(positive.env,actor,command('accept',1,{claim_id:'recovery-claim'})),()=>funding.commitStockFunding(positive.env,actor,refundCommand)])assert.equal((await action()).replayed,true)
   assert.equal(snapshot(positive),beforeReplay)
   console.log('PASS actual populated v1/v2 exact full graph, projections, accept/refund replay; valuation rows empty')
-  positive.db.close();source.db.close()
+  positive.db.close()
+  const secondHold={...hold,quantity:1,coverage_usd:0,coverage_state:'none',extra_fee_usd:0,expected_generation:2,client_request_id:'second-allocation-0001'}
+  const second=await disposition.commitStockDisposition(source.env,actor,secondHold)
+  const partialDispose={kind:'dispose',source_id:'source-900',batch_id:500,product_id:10,branch_id:1,supplier_id:77,allocation_id:second.allocation_id,quantity:0.5,reason:'Partial second allocation',expense_category:'broken',expected_generation:3,client_request_id:'partial-dispose-0001'}
+  await disposition.commitStockDisposition(source.env,actor,partialDispose)
+  await funding.commitStockFunding(source.env,actor,command('pending',3,{amount_usd:5,claim_id:'canceled-claim'}))
+  await funding.commitStockFunding(source.env,actor,command('cancel',4,{claim_id:'canceled-claim'}))
+  const feeOps=load('lib/feeOperationReceipt.ts'),intent={fee_money_version:1,fee_type:'other',label:'Native shipping',amount_usd:1.7,amount_khr:0,fee_date:load('lib/businessDateWindow.ts').businessToday(),sale_id:null,branch_id:1,delivery_contact_id:null,notes:'Native funding shipping'}
+  const at=new Date().toISOString(),feeJson=feeOps.canonicalFeeCreateRequest(intent),digest=await feeOps.feeRequestDigest(feeJson),requestId='native-shipping-fee-0001'
+  await load('lib/businessMaintenanceGuard.ts').ordinaryBusinessBatch(dbFor(source),[
+    {sql:'INSERT INTO fees(fee_type,label,amount_usd,amount_khr,fee_date,sale_id,branch_id,delivery_contact_id,notes,created_by,created_by_name,created_at,updated_at) VALUES(@type,@label,@amount,0,@date,NULL,1,NULL,@notes,71,@name,@at,@at)',params:{type:intent.fee_type,label:intent.label,amount:intent.amount_usd,date:intent.fee_date,notes:intent.notes,name:'Recovery Writer',at}},
+    feeOps.feeOperationReceiptStatement({receiptId:crypto.randomUUID(),actorId:71,actorName:'Recovery Writer',requestId,digest,requestJson:feeJson,occurredAt:at,intent,resolvedBranchId:1}),
+    feeOps.feeCreateAuditStatement({actorId:71,actorName:'Recovery Writer',requestId,digest,resolvedBranchId:1}),
+  ])
+  const feeId=source.db.prepare('SELECT fee_id FROM fee_operation_receipts WHERE request_id=?').get(requestId).fee_id
+  const shipping=command('shipping',5,{amount_usd:1.7,fee_id:feeId})
+  await funding.commitStockFunding(source.env,actor,shipping)
+  await funding.commitStockFunding(source.env,actor,command('pending',6,{amount_usd:2,claim_id:'second-credit'}))
+  await funding.commitStockFunding(source.env,actor,command('accept',7,{claim_id:'second-credit'}))
+  const secondRefund=command('refund',8,{amount_usd:2,cash_method:'cash',cash_reference:'SECOND-REFUND',cash_recorded_at:'2026-10-01T11:00:00.000Z'})
+  await funding.commitStockFunding(source.env,actor,secondRefund)
+  const expanded=await backup.createCloudflareBackup(source.env),expandedBytes=source.objects.get(expanded.key).bytes,restored=fixture()
+  await restored.env.ASSETS.put(expanded.key,expandedBytes);await backup.restoreCloudflareBackup(restored.env,expanded.key)
+  assert.equal(snapshot(restored),snapshot(source))
+  assert.deepEqual(await disposition.stockDispositionProjection(dbFor(restored),'source-900'),await disposition.stockDispositionProjection(dbFor(source),'source-900'))
+  assert.deepEqual(await funding.readStockFundingAp(restored.env,actor),await funding.readStockFundingAp(source.env,actor))
+  const expandedBefore=snapshot(restored)
+  for(const action of [()=>disposition.commitStockDisposition(restored.env,actor,secondHold),()=>disposition.commitStockDisposition(restored.env,actor,partialDispose),()=>funding.commitStockFunding(restored.env,actor,shipping),()=>funding.commitStockFunding(restored.env,actor,secondRefund)])assert.equal((await action()).replayed,true)
+  assert.equal(snapshot(restored),expandedBefore)
+  assert.deepEqual(restored.db.prepare('PRAGMA foreign_key_check').all(),[])
+  console.log('PASS chronological multiple allocations/partial disposal/canceled claim/shipping fee/second credit/refund exact roundtrip and replay')
+  restored.db.close();source.db.close()
   assert.deepEqual(failures,[],'malformed complete-shaped histories must refuse before business mutation')
 }
 main().catch(error=>{console.error(error);process.exitCode=1})
