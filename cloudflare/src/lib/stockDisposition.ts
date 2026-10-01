@@ -152,12 +152,17 @@ export async function commitStockDisposition(env: { DB: D1Database; IMPORT_DB?: 
       JOIN fee_operation_receipts fr ON fr.fee_id=link.fee_id JOIN fees f ON f.id=link.fee_id
       WHERE link.event_id=@event AND link.amount4=@fee4 AND fr.actor_id=@actor AND fr.request_id=@feeRequest
       AND fr.request_digest=@feeDigest AND fr.request_json=@feeJson AND fr.occurred_at=@occurredAt
-      AND json_extract(fr.response_json,'$.fee.id')=f.id
-      AND NOT EXISTS(SELECT 1 FROM json_each(json_extract(@feeResponse,'$.fee')) expected
-        WHERE json_type(fr.response_json,'$.fee.'||expected.key) IS NULL
-          OR json_extract(fr.response_json,'$.fee.'||expected.key) IS NOT expected.value)
-      AND (SELECT COUNT(*) FROM json_each(json_extract(fr.response_json,'$.fee')) WHERE key!='id')
-        =(SELECT COUNT(*) FROM json_each(json_extract(@feeResponse,'$.fee')))
+      AND json_type(fr.response_json)='object'
+      AND (SELECT COUNT(*) FROM json_each(fr.response_json))=1
+      AND EXISTS(SELECT 1 FROM json_each(fr.response_json) envelope WHERE envelope.key='fee' AND envelope.type='object')
+      AND NOT EXISTS(SELECT actual.key FROM json_each(fr.response_json,'$.fee') actual GROUP BY actual.key HAVING COUNT(*)!=1)
+      AND EXISTS(SELECT 1 FROM json_each(fr.response_json,'$.fee') actual
+        WHERE actual.key='id' AND actual.type IN ('integer','real') AND actual.atom=f.id)
+      AND NOT EXISTS(SELECT 1 FROM json_each(@feeResponse,'$.fee') expected WHERE NOT EXISTS(
+        SELECT 1 FROM json_each(fr.response_json,'$.fee') actual WHERE actual.key=expected.key
+          AND (actual.type=expected.type OR (actual.type IN ('integer','real') AND expected.type IN ('integer','real')))
+          AND actual.atom IS expected.atom))
+      AND (SELECT COUNT(*) FROM json_each(fr.response_json,'$.fee'))=(SELECT COUNT(*) FROM json_each(@feeResponse,'$.fee'))+1
       AND f.fee_type=@feeType AND f.label IS @feeLabel AND f.amount_usd=@feeUsd AND f.amount_khr=0
       AND f.fee_date=@feeDate AND f.sale_id IS NULL AND f.branch_id=@branch AND f.delivery_contact_id IS NULL
       AND f.notes IS @feeNotes AND f.created_by=@actor AND f.created_by_name IS @actorName

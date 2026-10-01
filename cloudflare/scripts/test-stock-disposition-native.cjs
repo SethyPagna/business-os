@@ -132,9 +132,65 @@ async function silentControls() {
     }
     return
 }
+async function jsonReceiptControls() {
+  const controls = [
+    ['false KHR',sql=>sql.replace(/'amount_khr',\?\d+/g,"'amount_khr',json('false')")],
+    ['duplicate id',sql=>sql.replace("'id',last_insert_rowid(),","'id',last_insert_rowid(),'id',999,")],
+    ['duplicate fee envelope',sql=>sql.replace(/('updated_at',\?\d+\s*)\)\),/,"$1),'fee',json_object('id',999)),")],
+    ['duplicate expected key',sql=>sql.replace(/('label',\?\d+,)/,"$1$1")],
+    ['extra outer key',sql=>sql.replace("json_object('fee',json_object(","json_object('unknown','extra','fee',json_object(")],
+    ['missing key',sql=>sql.replace(/'label',\?\d+,/,"")],
+    ['unknown fee key',sql=>sql.replace("'id',last_insert_rowid(),","'unknown','extra','id',last_insert_rowid(),")],
+    ['true branch',sql=>sql.replace(/'branch_id',\?\d+/,"'branch_id',json('true')")],
+    ['string id',sql=>sql.replace("'id',last_insert_rowid(),","'id',CAST(last_insert_rowid() AS TEXT),")],
+    ['null numeric',sql=>sql.replace(/'amount_usd',\?\d+/,"'amount_usd',NULL")],
+    ['string zero',sql=>sql.replace(/'amount_khr',\?\d+/,"'amount_khr','0'")],
+    ['duplicate escaped id',sql=>sql.replace("json_object('fee',json_object(","replace(json_object('fee',json_object(").replace(/('updated_at',\?\d+\s*)\)\),/,"$1)),'}}',',\"\\u0069d\":999}}'),")],
+    ['array fee',sql=>sql.replace("json_object('fee',json_object(","json_object('fee',json_array(")],
+    ['missing fee envelope',sql=>sql.replace("json_object('fee',json_object(","json_object('other',json_object(")],
+    ['real id schema refusal',sql=>sql.replace("'id',last_insert_rowid(),","'id',CAST(last_insert_rowid() AS REAL),")],
+  ]
+  const selected=process.env.STOCK_DISPOSITION_JSON_CASE
+  const expectedControls=selected ? controls.filter(([name])=>name===selected) : controls
+  if (selected) assert.equal(expectedControls.length,1)
+  for (const [name,mutate] of expectedControls) {
+    const f=fixture(); let captured=0
+    f.hooks.beforeBatch=(_db,statements)=>{
+      for (let i=0;i<statements.length;i++) {
+        const statement=statements[i]
+        if (!statement.sql.includes('INSERT INTO fee_operation_receipts')) continue
+        const sql=mutate(statement.sql)
+        assert.notEqual(sql,statement.sql,`${name}: provider fault must change actual captured SQL`)
+        statements[i]=f.d1.prepare(sql).bind(...statement.values); captured++
+      }
+    }
+    const before=snapshot(f),result=await post(f,hold())
+    assert.equal(captured,1,`${name}: one actual production-adapter statement captured`)
+    assert.equal(result.status,409,`${name}: strict JSON receipt refuses corruption`)
+    assert.ok(snapshot(f)===before,`${name}: full atomic rollback`)
+    assert.equal(count(f,'stock_disposition_guards'),0)
+    f.db.close(); console.log(`PASS provider SQL-fault ${name} refuses409 and full rollback`)
+  }
+  if (selected) return
+  const valid=fixture()
+  valid.hooks.beforeBatch=(_db,statements)=>{
+    for (let i=0;i<statements.length;i++) {
+      const statement=statements[i]
+      if (!statement.sql.includes('INSERT INTO fee_operation_receipts')) continue
+      const sql=statement.sql.replace(/'amount_khr',(\?\d+)/,"'amount_khr',CAST($1 AS INTEGER)").replace(/'branch_id',(\?\d+)/,"'branch_id',CAST($1 AS INTEGER)")
+      statements[i]=valid.d1.prepare(sql).bind(...statement.values)
+    }
+  }
+  assert.equal((await post(valid,hold())).status,200,'legitimate integer/real JSON values remain equivalent')
+  const row=valid.db.prepare('SELECT * FROM fee_operation_receipts WHERE fee_id=(SELECT fee_id FROM stock_disposition_fees)').get()
+  const parsed=load('lib/feeOperationReceipt.ts').feeOperationReceiptResponse(row)
+  assert.equal(typeof parsed.fee.id,'number'); assert.equal(parsed.fee.id,row.fee_id)
+  valid.db.close(); console.log('PASS strict receipt feeOperationReceiptResponse parses actual linked numeric id; integer/real equivalence')
+}
 ;(async()=>{
   if (process.env.STOCK_DISPOSITION_POSTCONDITION_CASE === 'permission') return permissionControls()
   if (process.env.STOCK_DISPOSITION_POSTCONDITION_CASE === 'silent') return silentControls()
+  if (process.env.STOCK_DISPOSITION_POSTCONDITION_CASE === 'json') return jsonReceiptControls()
   const f=fixture()
   const original=snapshot(f)
   assert.equal((await post(f,hold(),false)).status,404)
@@ -206,4 +262,5 @@ async function silentControls() {
   console.log(`PASS actual inventory Hono + production getDb native expr100/vars100 Hold->partial/full Dispose; exact99999 basis,30000 accepted credit,7000 cash; fractional0.3/0.1/0.03/0.07 residues; all${holdStatementCount} Hold+${disposeStatementCount} Dispose rollback points; competing generation/replay/current-permission/source/maintenance/lost-response controls; fee FK and append-only guards; maxbindings=${f.maxBindings()}`)
   await permissionControls()
   await silentControls()
+  await jsonReceiptControls()
 })().catch(error=>{ console.error(error); process.exitCode=1 })
