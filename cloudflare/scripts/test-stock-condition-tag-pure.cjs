@@ -184,7 +184,8 @@ const movementReferenceKernel = loadReal('lib/movementReference.ts')
 // P3-L6: deleting a product has to take its HELD units with it and give them
 // back on undo. productDelete.ts only builds statements, so it is driven here
 // exactly as routes/products.ts and lib/undoAppliers.ts drive it.
-const productDelete = loadReal('lib/productDelete.ts', { './actorSnapshot': actorSnapshotKernel })
+const stockLifecycle = loadReal('lib/stockLifecycle.ts')
+const productDelete = loadReal('lib/productDelete.ts', { './actorSnapshot': actorSnapshotKernel, './stockLifecycle': stockLifecycle })
 const movementSearchKernel = loadReal('lib/movementSearch.ts', {
   './movementActorName': movementActorNameKernel,
   './movementBranchName': movementBranchNameKernel,
@@ -220,6 +221,7 @@ const stockLedgerQuery = loadReal('lib/stockLedgerQuery.ts', {
   './stockInSessionsQuery': stockInSessionsQuery,
 })
 const stockRevert = loadReal('lib/stockRevert.ts', {
+  './stockLifecycle': stockLifecycle,
   // p3/supplier: the receipt allowlist the revert mirror keys off.
   './stockInSessionsQuery': stockInSessionsQuery,
   './stockLedgerQuery': stockLedgerQuery,

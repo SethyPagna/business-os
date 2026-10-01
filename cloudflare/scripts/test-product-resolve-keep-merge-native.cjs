@@ -89,6 +89,7 @@ const adapter = {
   },
 }
 
+const stockLifecycle = load('lib/stockLifecycle.ts')
 const moneyPrecision = load('lib/moneyPrecision.ts')
 const permissions = load('lib/permissions.ts')
 const planTier = load('lib/planTier.ts')
@@ -105,6 +106,7 @@ const catalogCost = load('lib/catalogCostRecompute.ts', { './moneyPrecision': mo
 // UI-CONFLICTS B1: the Resolve choices kernel, real, so the route never sees an inert stand-in.
 const resolveChoices = load('lib/productResolveChoices.ts', { './moneyPrecision': moneyPrecision, './searchMatch': load('lib/searchMatch.ts') })
 const undoAppliers = load('lib/undoAppliers.ts', {
+  './stockLifecycle': stockLifecycle,
   './actorSnapshot': actorSnapshot,
   './db': { getDb: () => adapter },
   './audit': noAudit,
@@ -121,6 +123,7 @@ const undoAppliers = load('lib/undoAppliers.ts', {
   './catalogCostRecompute': catalogCost,
 })
 const products = load('routes/products.ts', {
+  '../lib/stockLifecycle': stockLifecycle,
   // U-cost: the merge fold re-derives the keeper's catalog cost too.
   '../lib/catalogCostRecompute': catalogCost,
   '../lib/db': { getDb: () => adapter },

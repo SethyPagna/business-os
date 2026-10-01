@@ -112,6 +112,7 @@ const returnCreateActionKernel = loadReal('lib/returnCreateAction.ts', {
   './customerReturnEntitlement': customerReturnEntitlement,
 })
 const returnsRoute = loadReal('routes/returns.ts', {
+  '../lib/supplierReturnGuard': loadReal('lib/supplierReturnGuard.ts', { './productBatches': productBatches, './sqlBinding': sqlBinding }),
   '../lib/acquisitionCostAccess': acquisitionCostAccess,
   '../lib/returnCostAccess': loadReal('lib/returnCostAccess.ts'),
   '../lib/branchRoles': branchRolesKernel,

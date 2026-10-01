@@ -143,12 +143,15 @@ const lowStockStub = { ...lowStockRule, loadLowStockConfig: async () => lowStock
 
 // N13: the shared actor / branch kernels these routes now import.
 const actorSnapshotKernel = loadReal('lib/actorSnapshot.ts')
+const stockLifecycle = loadReal('lib/stockLifecycle.ts')
 const productDelete = loadReal('lib/productDelete.ts', {
+  './stockLifecycle': stockLifecycle,
   './actorSnapshot': actorSnapshotKernel,
   './db': { getDb: () => dbShim },
 })
 const requestBodyGuard = loadReal('lib/requestBodyGuard.ts')
 const productsRoute = loadReal('routes/products.ts', {
+  '../lib/stockLifecycle': stockLifecycle,
   // N1 added the plan budget gate to products.ts. This pure module must be
   // loaded from src, not resolved relative to this scripts/ harness.
   '../lib/planTier': loadReal('lib/planTier.ts'),

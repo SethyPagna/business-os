@@ -197,6 +197,7 @@ const stockLedgerQuery = loadReal('lib/stockLedgerQuery.ts', {
   './stockInSessionsQuery': stockInSessionsQuery,
 })
 const stockRevert = loadReal('lib/stockRevert.ts', {
+  './stockLifecycle': loadReal('lib/stockLifecycle.ts'),
   // p3/supplier: the receipt allowlist the revert mirror keys off.
   './stockInSessionsQuery': stockInSessionsQuery,
   './stockLedgerQuery': stockLedgerQuery,

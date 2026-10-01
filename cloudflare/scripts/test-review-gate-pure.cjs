@@ -238,6 +238,7 @@ const reviewApply = loadReal('lib/reviewApply.ts', {
 })
 
 const feesRoute = loadReal('routes/fees.ts', {
+  '../lib/stockLifecycle': loadReal('lib/stockLifecycle.ts'),
   '../lib/moneyPrecision': loadReal('lib/moneyPrecision.ts'),
   ...dbStub,
   ...auditStub,
