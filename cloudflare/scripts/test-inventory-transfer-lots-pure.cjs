@@ -135,6 +135,7 @@ const inventoryRequire = (id) => {
     if (dep === '../durable-objects/broadcastHub') return { broadcast: asyncNoop }
     if (dep === './cache') return { bumpVersion: asyncNoop }
     if (dep === './sqlBinding') return sqlBinding
+    if (dep === './stockLifecycle') return loadModule('lib/stockLifecycle.ts', require)
     throw new Error('unexpected transfer dependency '+dep)
   })
   if (id === '../lib/transferOperationReceipt') return loadModule('lib/transferOperationReceipt.ts', require)

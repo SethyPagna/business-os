@@ -35,7 +35,7 @@ const cache = new Map()
 // contactOptions is on this list deliberately: the loader stubs any relative
 // import it does not name, and a stubbed kernel would make every address here
 // resolve to undefined -- a test that agrees with itself and proves nothing.
-const actual = new Set(['businessDateWindow', 'continuousReadWindow', 'businessMaintenanceGuard',
+const actual = new Set(['stockLifecycle', 'businessDateWindow', 'continuousReadWindow', 'businessMaintenanceGuard',
   'offlineSaleOwnership',
   'acquisitionCostAccess',
   'saleCustomerAssignmentGuard',

@@ -131,6 +131,7 @@ const branchRoute = loadModule('routes/branches.ts', (id) => {
     if (dep === './cache') return {bumpVersion:async()=>{}}
     if (dep === '../durable-objects/broadcastHub') return {broadcast:async()=>{}}
     if (dep === './sqlBinding') return { buildInClause, chunkForBinding: (values) => [values], selectInChunks }
+    if (dep === './stockLifecycle') return loadModule('lib/stockLifecycle.ts', require)
     throw new Error('unexpected transfer dependency '+dep)
   })
   if (id === '../lib/transferOperationReceipt') return transferReceipts

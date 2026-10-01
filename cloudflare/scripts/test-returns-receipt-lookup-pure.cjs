@@ -111,7 +111,9 @@ const returnCreateActionKernel = loadReal('lib/returnCreateAction.ts', {
   './moneyPrecision': moneyPrecision,
   './customerReturnEntitlement': customerReturnEntitlement,
 })
+const supplierReturnGuard = loadReal('lib/supplierReturnGuard.ts', { './productBatches': productBatches, './sqlBinding': sqlBinding })
 const returnsRoute = loadReal('routes/returns.ts', {
+  '../lib/supplierReturnGuard': supplierReturnGuard,
   '../lib/acquisitionCostAccess': acquisitionCostAccess,
   '../lib/returnCostAccess': loadReal('lib/returnCostAccess.ts'),
   '../lib/branchRoles': branchRolesKernel,
@@ -323,6 +325,33 @@ async function main() {
     // name it -- that is what keeps the pre-0107 path alive.
     const legacyFree = returnsRoute.buildReceiptLookupQuery({ query: '004488', limit: 20, hasLegacyColumn: false })
     assert.ok(!legacyFree.sql.includes('s.legacy_receipt_number'), 'the pre-0107 statement must not reference the column at all')
+  })
+
+  await check('the actual supplier guard reads only the selected supplier lot and derives its received cost', async () => {
+    rawDb.exec("INSERT INTO suppliers(id,name) VALUES(800,'Selected supplier'),(801,'Other supplier'); INSERT INTO products(id,name,stock_quantity) VALUES(800,'Supplier product',11); INSERT INTO product_batches(id,batch_key,batch_number,variant_product_id,supplier_id,received_quantity,received_cost_usd,unit_cost_usd,is_active) VALUES(800,'selected-supplier',1,800,800,3,15,99,1),(801,'other-supplier',2,800,801,8,80,10,1); INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(800,1,3),(801,1,8);")
+    const availability = await supplierReturnGuard.supplierReturnLots(db, 800, [{ productId: 800, branchId: 1 }])
+    assert.deepStrictEqual(availability.get('800:1').map(lot => [lot.batchId, lot.available, lot.unitCostUsd]), [[800,3,5]])
+    const before = JSON.stringify([...availability])
+    const cost = supplierReturnGuard.supplierReturnCosts([{ product_id: 800, batch_id: 800, quantity: 2 }], 1, availability)
+    assert.deepStrictEqual(cost, [{ usd: 5, khr: 0 }])
+    assert.throws(() => supplierReturnGuard.supplierReturnCosts([{ product_id: 800, batch_id: 800, quantity: 4 }], 1, availability), /does not have enough stock/)
+    assert.throws(() => supplierReturnGuard.supplierReturnCosts([{ product_id: 800, batch_id: 800, quantity: 1, unit_cost_usd: 6 }], 1, availability), /lot cost changed/)
+    assert.throws(() => supplierReturnGuard.validateSupplierReturnMoney({ supplier_compensation_usd: 1.005 }, [{ product_id: 800, quantity: 1 }]), /whole cents/)
+    assert.strictEqual(JSON.stringify([...availability]), before)
+    assert.strictEqual(rawDb.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id=800 AND branch_id=1').get().quantity, 3)
+  })
+  await check('wrong supplier reader and permissive allocator counterparts are independently refuted', async () => {
+    const wrongReader = loadReal('lib/supplierReturnGuard.ts', { './productBatches': productBatches, './sqlBinding': { ...sqlBinding, selectInChunks: async () => [] } })
+    await assert.rejects(async () => {
+      const result = await wrongReader.supplierReturnLots(db, 800, [{ productId: 800, branchId: 1 }])
+      assert.strictEqual(result.get('800:1')?.length, 1)
+    }, { code: 'ERR_ASSERTION' })
+    const availability = await supplierReturnGuard.supplierReturnLots(db, 800, [{ productId: 800, branchId: 1 }])
+    const wrongAllocator = loadReal('lib/supplierReturnGuard.ts', { './productBatches': { ...productBatches, allocateAcrossLots: () => ({ takes: [], uncovered: 0 }) }, './sqlBinding': sqlBinding })
+    assert.throws(() => {
+      assert.deepStrictEqual(wrongAllocator.supplierReturnCosts([{ product_id: 800, batch_id: 800, quantity: 2 }], 1, availability), [{ usd: 5, khr: 0 }])
+    }, { code: 'ERR_ASSERTION' })
+    assert.strictEqual(rawDb.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id=800 AND branch_id=1').get().quantity, 3)
   })
 
   console.log(`\n${passed} checks passed`)

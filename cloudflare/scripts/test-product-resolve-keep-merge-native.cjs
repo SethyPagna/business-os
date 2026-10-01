@@ -32,6 +32,7 @@ const Module = require('node:module')
 const { Hono } = require('hono')
 const { openDb } = require('./harness/d1compat.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')
+const { loadUndoAppliers } = require('./harness/load_undo_appliers.cjs')
 
 const SRC = path.join(__dirname, '../src')
 // A stand-in for every module this test does not exercise. It must also work
@@ -89,6 +90,7 @@ const adapter = {
   },
 }
 
+const stockLifecycle = load('lib/stockLifecycle.ts')
 const moneyPrecision = load('lib/moneyPrecision.ts')
 const permissions = load('lib/permissions.ts')
 const planTier = load('lib/planTier.ts')
@@ -105,6 +107,7 @@ const catalogCost = load('lib/catalogCostRecompute.ts', { './moneyPrecision': mo
 // UI-CONFLICTS B1: the Resolve choices kernel, real, so the route never sees an inert stand-in.
 const resolveChoices = load('lib/productResolveChoices.ts', { './moneyPrecision': moneyPrecision, './searchMatch': load('lib/searchMatch.ts') })
 const undoAppliers = load('lib/undoAppliers.ts', {
+  './stockLifecycle': stockLifecycle,
   './actorSnapshot': actorSnapshot,
   './db': { getDb: () => adapter },
   './audit': noAudit,
@@ -121,6 +124,7 @@ const undoAppliers = load('lib/undoAppliers.ts', {
   './catalogCostRecompute': catalogCost,
 })
 const products = load('routes/products.ts', {
+  '../lib/stockLifecycle': stockLifecycle,
   // U-cost: the merge fold re-derives the keeper's catalog cost too.
   '../lib/catalogCostRecompute': catalogCost,
   '../lib/db': { getDb: () => adapter },
@@ -200,6 +204,59 @@ const preview = (keepId, mergeId, extra = '') => request('GET', `/api/products/p
 let failed = 0
 async function check(name, fn) {
   try { await fn(); console.log(`PASS ${name}`) } catch (error) { failed += 1; console.log(`FAIL ${name}\n  ${String(error && error.stack || error).split('\n').slice(0, 14).join('\n  ')}`) }
+}
+
+function durableDump() {
+  return JSON.stringify(rows("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
+    .map(({ name }) => [name, rows('SELECT * FROM "' + name.replaceAll('"', '""') + '"').map(row => JSON.stringify(row)).sort()]))
+}
+function prepareLinkedSource(productId) {
+  state.native.db.prepare("INSERT INTO suppliers(id,name) VALUES(800,'Linked supplier')").run()
+  state.native.db.prepare("INSERT INTO product_batches(id,batch_key,batch_number,variant_product_id,supplier_id,received_quantity,received_cost_usd,is_active) VALUES(800,'linked-source',1,@product,800,1,5,1)").run({ product: productId })
+  state.native.db.prepare("INSERT INTO inventory_movements(id,product_id,product_name,branch_id,batch_id,movement_type,quantity,reason) VALUES(800,@product,'Linked product',1,800,'in',1,'received')").run({ product: productId })
+}
+function admitLinkedSource(productId, createReceipt = true) {
+  if (createReceipt) prepareLinkedSource(productId)
+  state.native.db.prepare("INSERT INTO stock_disposition_sources(id,movement_id,batch_id,product_id,branch_id,supplier_id,quantity,free_quantity,gross4,opening_paid4,opening_debt4,funding_state) VALUES('linked-source',800,800,@product,1,800,'1','1',50000,0,50000,'reconciled_unpaid')").run({ product: productId })
+}
+function observeLifecycle() {
+  let reads = 0, batches = 0
+  const originalPrepare = state.native.prepare, originalBatch = state.native.batch
+  state.native.prepare = function(sql) {
+    if (/SELECT name FROM sqlite_master.*stock_disposition_sources/.test(sql)) reads += 1
+    return originalPrepare.call(this, sql)
+  }
+  state.native.batch = function(...args) { if (args[0].some(statement => /^(INSERT|UPDATE|DELETE|REPLACE)\b/i.test(statement.sql.trim()))) batches += 1; return originalBatch.apply(this, args) }
+  return { get reads() { return reads }, get batches() { return batches }, restore() { state.native.prepare = originalPrepare; state.native.batch = originalBatch } }
+}
+async function assertLinkedMergeRefuses(productId) {
+  fresh()
+  admitLinkedSource(productId)
+  const before = durableDump(), observed = observeLifecycle()
+  try {
+    const result = await merge({ keepId: 10, mergeId: 11, keep: true, stock: 'merge' })
+    assert.equal(result.status, 409, JSON.stringify(result.body))
+    assert.equal(result.body.code, 'stock_lifecycle_dependency')
+    assert.ok(observed.reads > 0, 'the actual lifecycle lookup must run')
+    assert.equal(observed.batches, 0, 'a linked source must refuse before any fold batch')
+    assert.equal(durableDump(), before, 'all durable tables must remain unchanged')
+  } finally { observed.restore() }
+}
+async function assertLinkedUndoRefuses(factory) {
+  fresh()
+  prepareLinkedSource(11)
+  assert.equal((await merge({ keepId: 10, mergeId: 11, keep: true, stock: 'merge' })).status, 200)
+  const history = one("SELECT id,undo_payload FROM action_history WHERE status='undoable' ORDER BY id DESC LIMIT 1")
+  const counterpart = factory()
+  admitLinkedSource(10, false)
+  const payload = JSON.parse(history.undo_payload), before = durableDump(), observed = observeLifecycle()
+  try {
+    await assert.rejects(() => counterpart.resolveUndoApplier(payload).run(payload, { env: { DB: {} }, user: ADMIN, direction: 'undo', historyId: history.id }),
+      error => error.code === 'stock_lifecycle_dependency' && error.statusCode === 409)
+    assert.ok(observed.reads > 0, 'the actual inherited lifecycle lookup must run')
+    assert.equal(observed.batches, 0, 'linked merge undo must refuse before its batch')
+    assert.equal(durableDump(), before)
+  } finally { observed.restore() }
 }
 
 async function main() {
@@ -584,6 +641,26 @@ async function main() {
     const probe = (operationId) => state.native.db.prepare(resolveChoices.MERGE_APPLIED_PROBE_SQL).get({ operationId })
     assert.equal(probe(done.body.operationId)?.applied, 1)
     assert.equal(probe('00000000-0000-4000-8000-000000000000'), undefined)
+  })
+
+  await check('linked keeper and duplicate sources refuse Resolve before a fold, with every durable table unchanged', async () => {
+    await assertLinkedMergeRefuses(10)
+    await assertLinkedMergeRefuses(11)
+  })
+  await check('a no-op route lifecycle loader is refuted by the early-refusal oracle', async () => {
+    const original = stockLifecycle.assertStockLifecycleMutable
+    stockLifecycle.assertStockLifecycleMutable = async () => {}
+    try { await assert.rejects(() => assertLinkedMergeRefuses(11), { code: 'ERR_ASSERTION' }) }
+    finally { stockLifecycle.assertStockLifecycleMutable = original }
+  })
+  await check('local and inherited undo loaders refuse a linked source before undo writes', async () => {
+    await assertLinkedUndoRefuses(() => undoAppliers)
+    await assertLinkedUndoRefuses(() => loadUndoAppliers(state.native).undoAppliers)
+  })
+  await check('a no-op inherited lifecycle loader is refuted by the exact refusal and unchanged-state oracle', async () => {
+    await assert.rejects(() => assertLinkedUndoRefuses(() => loadUndoAppliers(state.native, {
+      stubs: { './stockLifecycle': { ...stockLifecycle, assertStockLifecycleMutable: async () => {} } },
+    }).undoAppliers), { code: 'ERR_ASSERTION' })
   })
 
   console.log(failed ? `\n${failed} check(s) failed` : '\nall checks passed')
