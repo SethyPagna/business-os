@@ -37,6 +37,30 @@ const { outputText } = ts.transpileModule(source, {
 // Loads a sibling lib/*.ts for real (transpiled) rather than stubbing it --
 // used for './sqlBinding', whose chunking IS part of what these tests
 // assert, so a stub would test the stub.
+
+const stockDependencyCache = new Map()
+function loadStockDependency(relPath) {
+  if (stockDependencyCache.has(relPath)) return stockDependencyCache.get(relPath).exports
+  if (!['lib/stockLifecycle.ts', 'lib/db.ts', 'lib/importMaintenanceFence.ts'].includes(relPath)) {
+    throw new Error('Unexpected stock dependency: ' + relPath)
+  }
+  const file = path.join(__dirname, '..', 'src', relPath)
+  const loaded = { exports: {} }
+  stockDependencyCache.set(relPath, loaded)
+  const code = ts.transpileModule(fs.readFileSync(file, 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 }, fileName: file,
+  }).outputText
+  const localRequire = (request) => {
+    if (request === 'hono/http-exception') return require(request)
+    if (!request.startsWith('.')) throw new Error('Unexpected stock external: ' + request)
+    const next = path.posix.normalize(path.posix.join(path.posix.dirname(relPath), request))
+    return loadStockDependency(next.endsWith('.ts') ? next : next + '.ts')
+  }
+  try { new Function('exports', 'require', 'module', code)(loaded.exports, localRequire, loaded) }
+  catch (error) { stockDependencyCache.delete(relPath); throw error }
+  return loaded.exports
+}
+
 function loadRealLib(relName) {
   const libPath = path.join(__dirname, '..', 'src', 'lib', `${relName}.ts`)
   const { outputText: libOut } = ts.transpileModule(fs.readFileSync(libPath, 'utf8'), {
@@ -61,7 +85,8 @@ function stubRequire(id) {
   // N13: the actor snapshot kernel. Pure, no imports of its own, so it loads
   if (id === './actorSnapshot') return loadRealLib('actorSnapshot')
   if (id === './anonymousCustomer') return loadRealLib('anonymousCustomer')
-  if (id === './db') return { getDb: () => { throw new Error('getDb should not be called by these pure tests') } }
+  if (id === './db') return loadStockDependency('lib/db.ts')
+  if (id === './stockLifecycle') return loadStockDependency('lib/stockLifecycle.ts')
   if (id === './importMaintenanceFence') return {
     getImportFencedDb: async () => { throw new Error('getImportFencedDb should not be called by these pure tests') },
     isImportMaintenanceFenceError: () => false,

@@ -77,6 +77,30 @@ const REAL_LOAD_DEFAULTS = {
   'lib/currentPasswordGuard.ts': { './auth': { currentSessionLimitFamily: async () => null } },
 }
 
+
+const stockDependencyCache = new Map()
+function loadStockDependency(relPath) {
+  if (stockDependencyCache.has(relPath)) return stockDependencyCache.get(relPath).exports
+  if (!['lib/stockLifecycle.ts', 'lib/db.ts', 'lib/importMaintenanceFence.ts'].includes(relPath)) {
+    throw new Error('Unexpected stock dependency: ' + relPath)
+  }
+  const file = path.join(__dirname, '..', 'src', relPath)
+  const loaded = { exports: {} }
+  stockDependencyCache.set(relPath, loaded)
+  const code = ts.transpileModule(fs.readFileSync(file, 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 }, fileName: file,
+  }).outputText
+  const localRequire = (request) => {
+    if (request === 'hono/http-exception') return require(request)
+    if (!request.startsWith('.')) throw new Error('Unexpected stock external: ' + request)
+    const next = path.posix.normalize(path.posix.join(path.posix.dirname(relPath), request))
+    return loadStockDependency(next.endsWith('.ts') ? next : next + '.ts')
+  }
+  try { new Function('exports', 'require', 'module', code)(loaded.exports, localRequire, loaded) }
+  catch (error) { stockDependencyCache.delete(relPath); throw error }
+  return loaded.exports
+}
+
 function loadReal(relPath, requireOverrides = {}) {
   requireOverrides = { ...REAL_LOAD_DEFAULTS[relPath], ...requireOverrides }
   const outputText = transpile(relPath)
@@ -84,11 +108,16 @@ function loadReal(relPath, requireOverrides = {}) {
   const originalLoad = Module._load
   Module._load = function patchedLoad(request, parent, isMain) {
     if (request in requireOverrides) return requireOverrides[request]
+    if (request === '../lib/stockLifecycle' || request === './stockLifecycle') return loadStockDependency('lib/stockLifecycle.ts')
     return originalLoad.call(this, request, parent, isMain)
   }
   // Overrides also answer requires made AFTER load: factory reset imports
   // lib/currentPasswordGuard lazily, at request time, once the patch is gone.
-  const localRequire = (request) => (Object.prototype.hasOwnProperty.call(requireOverrides, request) ? requireOverrides[request] : require(request))
+  const localRequire = (request) => {
+    if (Object.prototype.hasOwnProperty.call(requireOverrides, request)) return requireOverrides[request]
+    if (request === '../lib/stockLifecycle' || request === './stockLifecycle') return loadStockDependency('lib/stockLifecycle.ts')
+    return require(request)
+  }
   const moduleObj = { exports: {} }
   new Function('exports', 'require', 'module', '__filename', '__dirname', outputText)(
     moduleObj.exports, localRequire, moduleObj, sourcePath, path.dirname(sourcePath),
