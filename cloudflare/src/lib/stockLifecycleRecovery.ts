@@ -3,8 +3,9 @@ import { beginMaintenance, endMaintenance, updateMaintenance } from './maintenan
 import { hasPermission } from './permissions'
 import { canViewAcquisitionCosts } from './acquisitionCostAccess'
 import { fundingTransition, type FundingState, type FundingKind } from './stockFundingMath'
-import { feeRequestDigest } from './feeOperationReceipt'
-import { exactMoney4, quantityDecimal, subtractQuantity } from './stockDispositionBasis'
+import { canonicalFeeCreateRequest, feeRequestDigest } from './feeOperationReceipt'
+import { allocateDispositionBasis, exactMoney4, quantityDecimal, subtractQuantity } from './stockDispositionBasis'
+import { STOCK_CONDITION_TAGS } from './stockCondition'
 
 export const STOCK_RECOVERY_TABLES = [
   'stock_disposition_sources', 'stock_disposition_allocations', 'stock_disposition_events',
@@ -135,7 +136,11 @@ const parentFields: Record<string, string[]> = {
   users:['id'],branches:['id','is_active'],suppliers:['id'],products:['id','is_active'],
   product_batches:['id','variant_product_id','supplier_id','received_branch_id','received_quantity','received_cost_usd','is_active'],
   inventory_movements:['id','batch_id','product_id','branch_id','quantity','free_quantity','total_cost_usd','total_cost_khr','movement_type','reference_id'],
-  fees:['id','amount_usd','amount_khr'],supplier_invoices:['id','supplier_id','branch_id','total_amount_usd','amount_paid_usd','outstanding_balance_usd','status','source_branch','legacy_id','source_file','source_row'],
+  fees:['id','fee_type','label','amount_usd','amount_khr','fee_date','sale_id','branch_id','delivery_contact_id','notes','created_by','created_by_name','created_at','updated_at'],supplier_invoices:['id','supplier_id','branch_id','total_amount_usd','amount_paid_usd','outstanding_balance_usd','status','source_branch','legacy_id','source_file','source_row'],
+}
+const historyFields: Record<string,string[]> = {
+  fee_operation_receipts:['id','actor_id','fee_id','request_id','request_digest','request_json','response_json','occurred_at'],
+  branch_batch_stock:['batch_id','branch_id','quantity'],
 }
 
 export class StockRecoveryGraphValidation {
@@ -145,8 +150,9 @@ export class StockRecoveryGraphValidation {
 
   add(table: string, row: RecoveryRow) {
     const financial=(STOCK_RECOVERY_TABLES as readonly string[]).includes(table)
-    if (!financial && !parentFields[table]) return
-    if(!financial)row=Object.fromEntries(parentFields[table].map(key=>[key,row[key]]))
+    const fields=parentFields[table] || historyFields[table]
+    if (!financial && !fields) return
+    if(!financial)row=Object.fromEntries(fields.map(key=>[key,row[key]]))
     this.bytes += new TextEncoder().encode(JSON.stringify(row)).length
     if (financial && ++this.count > 10000 || this.bytes > 8 * 1024 * 1024) throw new Error('Stock recovery graph exceeds bounded validation capacity. Recover in a separate compatible database; no business rows have been changed.')
     for (const [key,value] of Object.entries(row)) if (key.endsWith('4') && (!Number.isSafeInteger(value) || Number(value)<0 || Number(value)>1e15)) this.fail(`${table}.${key} is not exact money`)
@@ -286,5 +292,153 @@ export class StockRecoveryGraphValidation {
       const fee=parents.fees.get(String(event.fee_id))
       if(!fee||exactMoney4(fee.amount_usd)!==event.amount4||fee.amount_khr!==0)this.fail('funding actual shipping fee linkage')
     }
+    await this.validateCanonicalHistory()
+  }
+
+  private object(json: string, label: string): RecoveryRow {
+    let value: RecoveryRow
+    try {value=JSON.parse(json)}catch{this.fail(`${label} JSON`)}
+    if(!value||typeof value!=='object'||Array.isArray(value))this.fail(`${label} object`)
+    return value
+  }
+
+  private canonical(json: string, expected: RecoveryRow, label: string) {
+    if(json!==JSON.stringify(expected))this.fail(`${label} canonical bytes`)
+  }
+
+  private nonempty(value: unknown, maximum: number, label: string) {
+    if(typeof value!=='string'||!value.length||value!==value.trim()||value.length>maximum)this.fail(label)
+  }
+
+  private eventReceipts(prefix: string) {
+    const map=new Map<string,{receipt:RecoveryRow;request:RecoveryRow;response:RecoveryRow}>()
+    for(const receipt of this.list(`${prefix}_receipts`))map.set(receipt.event_id,{receipt,request:this.object(receipt.request_json,`${prefix} request`),response:this.object(receipt.response_json,`${prefix} response`)})
+    return map
+  }
+
+  private jointClaimOrigin(event: RecoveryRow, request: RecoveryRow, claim: RecoveryRow) {
+    const shares=this.list('stock_valuation_acceptances').filter(row=>row.funding_event_id===event.id)
+    const valuationIds=new Set(shares.map(row=>row.event_id)),agreementIds=new Set(shares.map(row=>row.agreement_id))
+    if(!shares.length||valuationIds.size!==1||agreementIds.size!==1)return false
+    const valuation=this.list('stock_valuation_events').find(row=>row.id===shares[0].event_id)
+    const agreement=this.list('stock_valuation_agreements').find(row=>row.id===shares[0].agreement_id)
+    if(!valuation||!agreement||valuation.kind!=='accept'||valuation.source_id!==event.source_id||agreement.source_id!==event.source_id)return false
+    const saved=this.eventReceipts('stock_valuation').get(valuation.id)
+    if(!saved||saved.request.agreement_id!==agreement.id||saved.request.proof!==event.proof||saved.receipt.actor_id!==event.actor_id)return false
+    const expectedShares=Array.isArray(saved.request.shares)?saved.request.shares.map((row:RecoveryRow)=>({segment_id:row.segment_id,amount4:exactMoney4(row.amount_usd)})):[]
+    const actualShares=shares.map(row=>({segment_id:row.target_segment_id,amount4:row.amount4}))
+    this.equal(actualShares.sort((a,b)=>a.segment_id.localeCompare(b.segment_id)),expectedShares.sort((a:RecoveryRow,b:RecoveryRow)=>a.segment_id.localeCompare(b.segment_id)),'joint claim canonical acceptance shares')
+    return event.claim_id===`${agreement.id}:${valuation.id}`&&request.claim===agreement.id&&claim.proof===event.proof&&shares.reduce((sum,row)=>sum+row.amount4,0)===event.amount4
+  }
+
+  private async validateFundingHistory() {
+    const sources=this.identity('stock_funding_sources'),claims=this.identity('stock_funding_claims'),receipts=this.eventReceipts('stock_funding')
+    const origins=new Set<string>(),closed=new Set<string>()
+    for(const source of sources.values()) {
+      const events=this.list('stock_funding_events').filter(row=>row.source_id===source.id).sort((a,b)=>a.generation-b.generation)
+      for(const event of events) {
+        const saved=receipts.get(event.id)!
+        const request=saved.request,admit=event.kind==='admit',cash=['payment','refund'].includes(event.kind),claim=claims.get(event.claim_id)
+        this.nonempty(event.proof,500,'funding event proof')
+        const joint=event.kind==='accept'&&claim&&!origins.has(claim.id)&&this.jointClaimOrigin(event,request,claim)
+        const expectedClaim=['pending','accept','cancel'].includes(event.kind)?joint?request.claim:event.claim_id:null
+        const opening=admit?Object.fromEntries(['id','movement_id','batch_id','product_id','branch_id','supplier_id','quantity','free_quantity','gross4','opening_paid4','opening_debt4','reconciliation_proof','invoice_id'].map(key=>[key,source[key]])):null
+        this.canonical(saved.receipt.request_json,{kind:event.kind,sourceId:event.source_id,generation:admit?0:event.generation-1,opening,amount4:['accept','cancel'].includes(event.kind)?0:event.amount4,claim:expectedClaim,feeId:event.kind==='shipping'?event.fee_id:null,proof:event.proof,cashMethod:cash?event.cash_method:null,cashReference:cash?event.cash_reference:null,cashAt:cash?event.cash_recorded_at:null},'funding request')
+        const response={funding_version:2,source_id:event.source_id,event_id:event.id,generation:event.generation,kind:event.kind,...Object.fromEntries(financialFields.map(key=>[key,event[key]])),claim_id:event.claim_id,fee_id:event.fee_id}
+        this.canonical(saved.receipt.response_json,response,'funding response')
+        if(admit) {
+          this.equal(source.actor_id,event.actor_id,'funding admission actor')
+          this.equal(source.reconciliation_proof,event.proof,'funding admission proof')
+        }
+        if(['pending','accept','cancel'].includes(event.kind)) {
+          if(!claim||claim.source_id!==event.source_id||claim.amount4!==event.amount4)this.fail('funding canonical claim identity')
+          if(event.kind==='pending'||joint) {
+            if(origins.has(claim.id))this.fail('funding duplicate claim origin')
+            this.equal(claim.proof,event.proof,'funding claim origin proof');origins.add(claim.id)
+          }
+          if(event.kind!=='pending') {
+            if(!origins.has(claim.id)||closed.has(claim.id))this.fail('funding claim not pending chronologically')
+            closed.add(claim.id)
+          }
+        }else if(event.claim_id!==null)this.fail('funding unexpected claim')
+        if(cash) {
+          if(event.cash_method!=='cash'||typeof event.cash_recorded_at!=='string'||!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(event.cash_recorded_at)||!Number.isFinite(Date.parse(event.cash_recorded_at)))this.fail('funding cash proof')
+          this.nonempty(event.cash_reference,120,'funding cash reference')
+          this.equal(event.id,`cash-${await feeRequestDigest(`${event.cash_method}:${event.cash_reference}`)}`,'funding cash identity')
+        }else if(event.cash_method!==null||event.cash_reference!==null||event.cash_recorded_at!==null)this.fail('funding unexpected cash proof')
+        if(event.kind==='shipping')await this.validateActualFee(event.fee_id,event.actor_id,source.branch_id,event.amount4)
+        else if(event.fee_id!==null)this.fail('funding unexpected fee')
+      }
+    }
+    if(origins.size!==claims.size)this.fail('funding claim missing canonical origin')
+  }
+
+  private async validateActualFee(feeId: number, actorId: number, branchId: number, amount4: number, disposition?: RecoveryRow) {
+    const fee=this.list('fees').find(row=>row.id===feeId)
+    if(!fee||fee.fee_type!=='other'||fee.sale_id!==null||fee.delivery_contact_id!==null||fee.branch_id!==branchId||fee.created_by!==actorId||fee.amount_khr!==0||exactMoney4(fee.amount_usd)!==amount4)this.fail('fee canonical amount or ownership')
+    const receipts=this.list('fee_operation_receipts').filter(row=>row.fee_id===feeId&&row.actor_id===actorId&&(!disposition||row.request_id===`disposition_${disposition.id}`))
+    if(receipts.length!==1)this.fail('fee missing unique canonical receipt')
+    const receipt=receipts[0],intent=this.object(receipt.request_json,'fee request')
+    if(receipt.request_digest!==await feeRequestDigest(receipt.request_json))this.fail('fee request digest')
+    const expected={fee_type:fee.fee_type,label:fee.label,amount_usd:fee.amount_usd,amount_khr:fee.amount_khr,fee_date:fee.fee_date,sale_id:fee.sale_id,branch_id:fee.branch_id,delivery_contact_id:fee.delivery_contact_id,notes:fee.notes,...(intent.fee_money_version===1?{fee_money_version:1 as const}:{})}
+    if(receipt.request_json!==canonicalFeeCreateRequest(expected))this.fail('fee canonical intent')
+    this.equal(this.object(receipt.response_json,'fee response'),{fee},'fee exact response')
+    this.equal(receipt.occurred_at,fee.created_at,'fee creation time')
+    if(disposition) {
+      this.equal(fee.label,'Stock disposition shipping','disposition fee label')
+      this.equal(fee.notes,`Stock disposition ${disposition.id}`,'disposition fee event identity')
+      this.equal(receipt.occurred_at,disposition.occurred_at,'disposition fee time')
+      this.equal(intent.fee_money_version,1,'disposition fee money version')
+      this.equal(fee.updated_at,fee.created_at,'disposition immutable fee')
+    }
+  }
+
+  private async validateDispositionHistory() {
+    const sources=this.identity('stock_disposition_sources'),allocations=this.identity('stock_disposition_allocations'),receipts=this.eventReceipts('stock_disposition')
+    const originated=new Set<string>(),linkedFees=new Set<number>(),links=this.list('stock_disposition_fees')
+    for(const source of sources.values()) {
+      if(source.funding_state!=='reconciled_unpaid'||source.opening_paid4!==0||source.opening_debt4!==source.gross4)this.fail('disposition source funding')
+      let sellable=source.quantity,sellableGross=source.gross4
+      const remaining=new Map<string,{quantity:string;gross4:number;coverage4:number}>()
+      for(const event of this.list('stock_disposition_events').filter(row=>row.source_id===source.id).sort((a,b)=>a.generation-b.generation)) {
+        const saved=receipts.get(event.id)!,request=saved.request,allocation=allocations.get(event.allocation_id),hold=event.kind==='hold'
+        if(!allocation||allocation.source_id!==source.id||(!hold&&event.kind!=='dispose'))this.fail('disposition allocation identity')
+        this.nonempty(event.reason,500,'disposition reason')
+        const extraFee4=request.extraFee4
+        if(!Number.isSafeInteger(extraFee4)||extraFee4<0||extraFee4>1e15)this.fail('disposition exact extra fee')
+        const coverageState=hold?(event.coverage4>0?'accepted_credit':'none'):'none'
+        this.canonical(saved.receipt.request_json,{kind:event.kind,sourceId:source.id,batch:source.batch_id,product:source.product_id,branch:source.branch_id,supplier:source.supplier_id,quantity:event.quantity,coverage4:hold?event.coverage4:0,coverageState,extraFee4,allocationId:hold?null:allocation.id,condition:hold?allocation.condition_tag:null,reason:event.reason,category:event.expense_category,generation:event.generation-1},'disposition request')
+        let before=hold?{quantity:sellable,gross4:sellableGross,coverage4:0}:remaining.get(allocation.id)
+        if(!before||hold&&originated.has(allocation.id))this.fail('disposition allocation chronological origin')
+        let basis: ReturnType<typeof allocateDispositionBasis>
+        try {basis=allocateDispositionBasis(before.quantity,before.gross4,before.coverage4,event.quantity)}catch{this.fail('disposition chronological basis')}
+        if(hold) {
+          if(!STOCK_CONDITION_TAGS.includes(allocation.condition_tag)||event.coverage4>basis.gross4||event.expense_category!==null)this.fail('disposition hold intent')
+          this.equal({quantity:allocation.quantity,gross4:allocation.gross4,coverage4:allocation.coverage4},{quantity:event.quantity,gross4:basis.gross4,coverage4:event.coverage4},'disposition allocation originating basis')
+          originated.add(allocation.id);sellable=basis.remainingQuantity;sellableGross=basis.remainingGross4
+        }
+        const after=hold?{quantity:event.quantity,gross4:basis.gross4,coverage4:event.coverage4}:{quantity:basis.remainingQuantity,gross4:basis.remainingGross4,coverage4:basis.remainingCoverage4}
+        remaining.set(allocation.id,after)
+        const expected={event_id:event.id,allocation_id:allocation.id,source_id:source.id,generation:event.generation,kind:event.kind,quantity:event.quantity,gross4:basis.gross4,coverage4:hold?event.coverage4:basis.coverage4,coverage_state:hold?coverageState:basis.coverage4>0?'allocated_accepted_credit':'none',net4:hold?basis.gross4-event.coverage4:basis.net4,recognized4:hold?0:basis.net4,remaining_quantity:after.quantity,remaining_gross4:after.gross4,remaining_coverage4:after.coverage4,extra_fee4:extraFee4}
+        for(const field of ['gross4','coverage4','net4','recognized4','remaining_quantity','remaining_gross4','remaining_coverage4'])this.equal(event[field],expected[field as keyof typeof expected],`disposition event ${field}`)
+        this.canonical(saved.receipt.response_json,expected,'disposition response')
+        const eventLinks=links.filter(row=>row.event_id===event.id)
+        if(eventLinks.length!==(extraFee4>0?1:0))this.fail('disposition required extra fee link')
+        if(extraFee4>0) {
+          const link=eventLinks[0]
+          if(linkedFees.has(link.fee_id)||link.amount4!==extraFee4)this.fail('disposition fee reused or wrong amount')
+          linkedFees.add(link.fee_id);await this.validateActualFee(link.fee_id,event.actor_id,source.branch_id,extraFee4,event)
+        }
+      }
+      const physical=this.list('branch_batch_stock').filter(row=>row.batch_id===source.batch_id&&row.branch_id===source.branch_id)
+      if(physical.length!==1||quantityDecimal(physical[0].quantity,true)!==sellable)this.fail('disposition current stock projection')
+    }
+    if(originated.size!==allocations.size)this.fail('disposition allocation missing hold origin')
+    if(linkedFees.size!==links.length)this.fail('disposition orphan fee link')
+  }
+
+  private async validateCanonicalHistory() {
+    await this.validateFundingHistory()
+    await this.validateDispositionHistory()
   }
 }
