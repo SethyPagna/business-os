@@ -8,9 +8,9 @@ import ChevronsLeft from 'lucide-react/dist/esm/icons/chevrons-left.js'
 import ChevronsRight from 'lucide-react/dist/esm/icons/chevrons-right.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import AppSelect from './AppSelect'
-import DateEntryInput from './DateEntryInput.tsx'
-import { normalizeTimeEntry } from '../../utils/dateEntry.ts'
-import { activeStatsPreset, statsPresetRange, type StatsPresetKey } from './statsStripPresets.ts'
+import DateEntryInput, { TimeEntryInput } from './DateEntryInput.tsx'
+import { fmtDateOnly } from '../../utils/formatters.ts'
+import { activeStatsPreset, statsPresetRange, STATS_PRESETS, type StatsPresetKey } from './statsStripPresets.ts'
 
 // X1 (Part 395), redesigned Aug 30 per user direction (twice): a compact
 // trigger pill, and a panel laid out as two ENDPOINT BOXES
@@ -106,11 +106,6 @@ export function todayDateTimeRange(now?: Date): DateTimeRange {
   return statsPresetRange('today', now)
 }
 
-function displayDate(iso: string): string {
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso)
-  return m ? `${m[3]}/${m[2]}/${m[1]}` : ''
-}
-
 // The hand-typed date parser that used to live here (strict MM/DD/YYYY only)
 // moved to utils/dateEntry.ts and grew the keypad forms staff actually use --
 // 9032026, 932026, 20260903 -- so the range row reads them exactly like the
@@ -160,10 +155,6 @@ export default function DateTimeRangePicker({
   const [startInvalid, setStartInvalid] = useState(false)
   const [endInvalid, setEndInvalid] = useState(false)
   const [rangeInvalid, setRangeInvalid] = useState(false)
-  // Time text mirrors the value but stays editable mid-keystroke (like the
-  // date fields) so a half-typed "14" never commits before the ":30".
-  const [startTimeText, setStartTimeText] = useState(() => value.startTime)
-  const [endTimeText, setEndTimeText] = useState(() => value.endTime)
 
   useEffect(() => {
     setStartInvalid(false)
@@ -173,11 +164,6 @@ export default function DateTimeRangePicker({
       setViewMonth(Number(value.startDate.slice(5, 7)))
     }
   }, [value.startDate, value.endDate])
-
-  useEffect(() => {
-    setStartTimeText(value.startTime)
-    setEndTimeText(value.endTime)
-  }, [value.startTime, value.endTime])
 
   useEffect(() => {
     if (!open) return undefined
@@ -284,28 +270,6 @@ export default function DateTimeRangePicker({
     }
   }
 
-  const commitTime = (which: 'start' | 'end', raw: string) => {
-    // The shared normalizer returns both canonical HH:mm and minutes for the
-    // shift forms. This range picker needs the canonical string only. Keep a
-    // cleared field distinct from unreadable text: both have value:null in
-    // the parser, but clear commits '' while invalid input snaps back.
-    const result = normalizeTimeEntry(raw)
-    const norm = raw.trim() ? result.value : ''
-    if (norm === null) {
-      // Unparseable -- snap the field back to the stored value.
-      if (which === 'start') setStartTimeText(value.startTime)
-      else setEndTimeText(value.endTime)
-      return
-    }
-    if (which === 'start') {
-      setStartTimeText(norm)
-      if (norm !== value.startTime) apply({ startTime: norm })
-    } else {
-      setEndTimeText(norm)
-      if (norm !== value.endTime) apply({ endTime: norm })
-    }
-  }
-
   const currentYear = Number(today.slice(0, 4))
   // A generous back-window (10y) plus next year, and ALWAYS the year actually
   // in view -- so chevron-navigating past the window still leaves the Year
@@ -350,14 +314,7 @@ export default function DateTimeRangePicker({
     const label = t(key)
     return label && label !== key ? label : fallback
   }
-  const quickRanges: Array<{ id: StatsPresetKey; label: string }> = [
-    { id: 'all', label: quickRangeLabel('all_time', 'All time') },
-    { id: 'today', label: quickRangeLabel('today', 'Today') },
-    { id: 'yesterday', label: quickRangeLabel('yesterday', 'Yesterday') },
-    { id: '7d', label: quickRangeLabel('last_7_days', 'Last 7 days') },
-    { id: '30d', label: quickRangeLabel('last_30_days', 'Last 30 days') },
-    { id: 'month', label: quickRangeLabel('this_month', 'This month') },
-  ]
+  const quickRanges = STATS_PRESETS.map((preset) => ({ id: preset.id, label: quickRangeLabel(preset.key, preset.fallback) }))
   const applyQuickRange = (preset: StatsPresetKey) => {
     setRangeInvalid(false)
     const next = statsPresetRange(preset)
@@ -372,8 +329,8 @@ export default function DateTimeRangePicker({
   // when a side is empty, as the real date once picked -- never the words
   // "Start Date"/"End Date" (user, Aug 31). Times stay inside the picker;
   // hiding them here must not clear or change the caller's time filters.
-  const startTriggerDate = displayDate(value.startDate) || 'DD/MM/YYYY'
-  const endTriggerDate = displayDate(value.endDate) || 'DD/MM/YYYY'
+  const startTriggerDate = value.startDate ? fmtDateOnly(value.startDate) : 'DD/MM/YYYY'
+  const endTriggerDate = value.endDate ? fmtDateOnly(value.endDate) : 'DD/MM/YYYY'
   // Both date endpoints stay on one line each, without a time suffix.
   //
   // P9 (Sep 16 2026), owner verbatim: "the date start and date end are not
@@ -410,7 +367,6 @@ export default function DateTimeRangePicker({
             : 'border-slate-200 dark:border-slate-600'}`}
         onMouseDown={() => setPickPhase(which)}
       >
-        <div className="text-center text-[10px] font-bold uppercase tracking-wide text-slate-400 dark:text-slate-500">{label}</div>
         {/* Kept compact on purpose -- the user's "make the dates larger"
             was about the OUTSIDE trigger pill, not this panel.
             The typed field is the shared DateEntryInput (Sep 3): a bare
@@ -427,6 +383,7 @@ export default function DateTimeRangePicker({
           showError={false}
           advanceOnCommit={false}
           bare
+          label={label}
           t={t}
           className={`w-full bg-transparent text-center font-semibold outline-none placeholder:font-normal placeholder:text-slate-400 ${invalid ? 'text-red-600 dark:text-red-400' : 'text-slate-900 dark:text-slate-50'}`}
           placeholder="dd/mm/yyyy"
@@ -510,13 +467,13 @@ export default function DateTimeRangePicker({
               available before the manual Start / End fields. */}
           {showQuickRanges ? <div className="mb-2 border-b border-slate-100 pb-2 dark:border-slate-700/60" data-date-time-range-presets>
             <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">{quickRangeLabel('quick_range', 'Quick range')}</div>
-            <div className="flex flex-wrap gap-1">
+            <div className="flex min-w-0 flex-nowrap gap-1 overflow-x-auto overscroll-x-contain pb-1">
               {quickRanges.map((preset) => (
                 <button
                   key={preset.id}
                   type="button"
                   onClick={() => applyQuickRange(preset.id)}
-                  className={`rounded-md border px-2 py-1 text-[11px] font-medium transition ${activePreset === preset.id
+                  className={`shrink-0 whitespace-nowrap rounded-md border px-2 py-1 text-[11px] font-medium transition ${activePreset === preset.id
                     ? 'border-blue-500 bg-blue-600 text-white dark:border-blue-400 dark:bg-blue-500 dark:text-white'
                     : 'border-slate-200 bg-white text-slate-600 hover:border-blue-300 hover:text-blue-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300 dark:hover:border-blue-500 dark:hover:text-blue-200'}`}
                 >
@@ -533,37 +490,15 @@ export default function DateTimeRangePicker({
             {renderEndpointBox('end')}
           </div>
 
-          {/* Time range (optional per surface). Plain 24-hour HH:MM text
-              fields -- NOT <input type="time">, which renders 12-hour AM/PM
-              under the pinned en-US locale. Normalized on blur/Enter. */}
           {showTime ? (
-            <div className="mt-2 flex items-center justify-center gap-1.5 rounded-md border border-slate-200 px-2 py-1.5 dark:border-slate-600">
-              <input
-                inputMode="numeric"
-                maxLength={5}
-                className="w-14 bg-transparent text-center text-xs tabular-nums text-slate-800 outline-none placeholder:text-slate-400 dark:text-slate-100"
-                placeholder="HH:MM"
-                value={startTimeText}
-                onChange={(event) => setStartTimeText(event.target.value)}
-                onBlur={(event) => commitTime('start', event.target.value)}
-                onKeyDown={(event) => { if (event.key === 'Enter') commitTime('start', (event.target as HTMLInputElement).value) }}
-                aria-label={t('start_time') || 'Start time'}
-                aria-invalid={rangeInvalid || undefined}
-              />
-              <span className="text-slate-400">—</span>
-              <input
-                inputMode="numeric"
-                maxLength={5}
-                className="w-14 bg-transparent text-center text-xs tabular-nums text-slate-800 outline-none placeholder:text-slate-400 dark:text-slate-100"
-                placeholder="HH:MM"
-                value={endTimeText}
-                onChange={(event) => setEndTimeText(event.target.value)}
-                onBlur={(event) => commitTime('end', event.target.value)}
-                onKeyDown={(event) => { if (event.key === 'Enter') commitTime('end', (event.target as HTMLInputElement).value) }}
-                aria-label={t('end_time') || 'End time'}
-                aria-invalid={rangeInvalid || undefined}
-              />
-              <span className="ml-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">24h</span>
+            <div className="mt-2 grid min-w-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-1.5" data-date-range-time-inputs>
+              <TimeEntryInput value={value.startTime} onChange={(next) => apply({ startTime: next })}
+                t={t} label={t('start_time') || 'Start time'} ariaLabel={t('start_time') || 'Start time'}
+                placeholder="HH:MM" advanceOnCommit={false} className="text-center tabular-nums" />
+              <span className="text-[10px] font-semibold text-slate-400">24h</span>
+              <TimeEntryInput value={value.endTime} onChange={(next) => apply({ endTime: next })}
+                t={t} label={t('end_time') || 'End time'} ariaLabel={t('end_time') || 'End time'}
+                placeholder="HH:MM" advanceOnCommit={false} className="text-center tabular-nums" />
             </div>
           ) : null}
 

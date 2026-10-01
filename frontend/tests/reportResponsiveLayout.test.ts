@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import { stripTypeScriptTypes } from 'node:module'
-import { statsPresetRange } from '../src/components/shared/statsStripPresets.ts'
+import { statsPresetRange, STATS_PRESETS } from '../src/components/shared/statsStripPresets.ts'
 
 const read = (path: string) => fs.readFileSync(new URL(`../src/${path}`, import.meta.url), 'utf8')
 const hub = read('components/sales/ReportsHub.tsx')
@@ -21,15 +21,12 @@ assert.match(picker, /showCalendarIcon = false/, 'date-range triggers omit decor
 assert.match(picker, /\{showCalendarIcon && <CalendarDays/)
 assert.match(picker, /placeholder="HH:MM"/)
 assert.doesNotMatch(picker, /^\s*<input\s+type="time"/m)
-const ids = (source: string) => [...source.matchAll(/\{ id: '([^']+)'/g)].map((match) => match[1])
-const mobile = hub.slice(hub.indexOf('const mobilePresets:'), hub.indexOf('const selectedMobilePreset'))
-const shared = picker.slice(picker.indexOf('const quickRanges:'), picker.indexOf('const applyQuickRange'))
-assert.deepEqual(ids(mobile), ['all', 'today', 'yesterday', '7d', '30d', 'month'])
-assert.deepEqual(ids(mobile), ids(shared))
+assert.match(hub, /const mobilePresets = STATS_PRESETS\.map\(\(preset\) => \(\{ id: preset\.id, label: trh\(preset\.key, preset\.fallback\) \}\)\)/)
+assert.match(picker, /const quickRanges = STATS_PRESETS\.map\(\(preset\) => \(\{ id: preset\.id, label: quickRangeLabel\(preset\.key, preset\.fallback\) \}\)\)/)
 const helperSource = hub.slice(hub.indexOf('export function mobilePresetRange'), hub.indexOf('export function activeMobilePreset'))
 const helper = new Function('statsPresetRange', `${stripTypeScriptTypes(helperSource.replace('export ', ''))}; return mobilePresetRange`)(statsPresetRange)
 for (const now of [new Date(2026, 0, 1), new Date(2026, 8, 5), new Date(2026, 3, 30)]) {
-  for (const preset of ['all', 'today', 'yesterday', '7d', '30d', 'month'] as const) {
+  for (const { id: preset } of STATS_PRESETS) {
     assert.deepEqual(helper(preset, now), statsPresetRange(preset, now), `${preset} must have identical clock/date semantics`)
   }
 }

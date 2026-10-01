@@ -27,6 +27,8 @@
 // Companion: DateEntryInput.tsx (the shared field) and
 // tests/dateEntry.test.ts (the table of accepted/rejected forms).
 
+import { fmtDateOnly } from './formatters.ts'
+
 export interface DateEntryResult {
   /** Display form, 'DD/MM/YYYY'. null when the text is empty or unreadable. */
   value: string | null
@@ -222,8 +224,8 @@ export function normalizeDateEntry(raw: string, today?: Date): DateEntryResult {
 
 /** ISO 'YYYY-MM-DD' -> 'DD/MM/YYYY' (string surgery only, never a Date). */
 export function isoToDisplayDate(iso: string | null | undefined): string {
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso ?? '').trim())
-  return match ? `${match[3]}/${match[2]}/${match[1]}` : ''
+  const value = String(iso ?? '').trim()
+  return /^\d{4}-\d{2}-\d{2}$/.test(value) ? fmtDateOnly(value) : ''
 }
 
 /**

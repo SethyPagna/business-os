@@ -47,10 +47,8 @@ runTest('the trigger endpoint stays on one line (whitespace-nowrap, tabular-nums
 runTest('the closed trigger shows dates only while the panel retains time editing', () => {
   assert.match(triggerEndpointBody, /<span>\{date\}<\/span>/)
   assert.doesNotMatch(triggerEndpointBody, /\btime\b|showTimes|startTime|endTime/)
-  assert.match(source, /value=\{startTimeText\}/)
-  assert.match(source, /value=\{endTimeText\}/)
-  assert.match(source, /commitTime\('start', event\.target\.value\)/)
-  assert.match(source, /commitTime\('end', event\.target\.value\)/)
+  assert.match(source, /<TimeEntryInput value=\{value\.startTime\} onChange=\{\(next\) => apply\(\{ startTime: next \}\)\}/)
+  assert.match(source, /<TimeEntryInput value=\{value\.endTime\} onChange=\{\(next\) => apply\(\{ endTime: next \}\)\}/)
 })
 
 runTest('Start -> End trigger row keeps both endpoints on one row (grid-cols, not grid-rows)', () => {

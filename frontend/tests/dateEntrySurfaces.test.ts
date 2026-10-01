@@ -13,6 +13,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { STATS_PRESETS } from '../src/components/shared/statsStripPresets.ts'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const SRC = path.join(here, '..', 'src')
@@ -52,7 +53,7 @@ for (const surface of SURFACES) {
   runTest(`${surface.file} enters dates through DateEntryInput (${surface.what})`, () => {
     const source = read(surface.file)
     assert.ok(
-      /import\s+DateEntryInput\s+from\s+'[^']*DateEntryInput(\.tsx)?'/.test(source),
+      /import\s+DateEntryInput(?:,\s*\{\s*TimeEntryInput\s*\})?\s+from\s+'[^']*DateEntryInput(\.tsx)?'/.test(source),
       `${surface.file} must import the shared DateEntryInput`,
     )
     assert.ok(source.includes('<DateEntryInput'), `${surface.file} must render <DateEntryInput`)
@@ -340,12 +341,9 @@ runTest('the range picker still scopes list and stats through the same onChange'
 
 runTest('the range picker exposes the exact ordered presets above the date fields', () => {
   const source = read('components/shared/DateTimeRangePicker.tsx')
-  const quickRanges = /const quickRanges:[\s\S]*?= \[([\s\S]*?)\n  \]/.exec(source)?.[1] || ''
-  const ids = [...quickRanges.matchAll(/\{ id: '([^']+)'/g)].map((match) => match[1])
-  assert.deepEqual(ids, ['all', 'today', 'yesterday', '7d', '30d', 'month'], 'picker presets must remain exact and ordered')
-  for (const label of ['All time', 'Today', 'Yesterday', 'Last 7 days', 'Last 30 days', 'This month']) {
-    assert.ok(quickRanges.includes(`'${label}'`), `picker must render the ${label} fallback label`)
-  }
+  assert.match(source, /STATS_PRESETS\.map\(\(preset\) => \(\{ id: preset\.id, label: quickRangeLabel\(preset\.key, preset\.fallback\) \}\)\)/)
+  assert.deepEqual(STATS_PRESETS.slice(0, 5).map(({ id }) => id), ['all', 'today', 'yesterday', '7d', '30d'])
+  assert.equal(new Set(STATS_PRESETS.map(({ id }) => id)).size, STATS_PRESETS.length)
   assert.match(source, /const applyQuickRange = \(preset: StatsPresetKey\) => \{[\s\S]*?const next = statsPresetRange\(preset\)[\s\S]*?onChange\(showTime \? next : \{ \.\.\.next, startTime: '', endTime: '' \}, preset\)/, 'a preset must return the complete canonical range with its exact identity')
   assert.match(source, /onClick=\{\(\) => applyQuickRange\(preset\.id\)\}/, 'each rendered preset must commit its own identity')
   assert.match(source, /onClick=\{\(\) => onChange\(\{ \.\.\.EMPTY_DATE_TIME_RANGE \}, 'all'\)\}/, 'Clear must return the complete empty range with all-time identity')

@@ -244,7 +244,7 @@ await runTest('the time reader has exactly one implementation', () => {
   // range row and the shift row end up disagreeing about what "930" means.
   const picker = fs.readFileSync(path.join(srcDir, 'components', 'shared', 'DateTimeRangePicker.tsx'), 'utf8')
   assert.doesNotMatch(picker, /function normalizeTime\b/, 'the picker must import the shared reader, not keep its own')
-  assert.match(picker, /normalizeTimeEntry/, 'the picker uses the shared reader')
+  assert.match(picker, /<TimeEntryInput/, 'the picker delegates masking, validation and commit to the shared field')
 })
 
 if (failures) {

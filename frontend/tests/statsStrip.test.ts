@@ -103,10 +103,10 @@ const REPORT_VIEW_FILES = [
 test('shared stats controls own all-time/today presets and expose time only where endpoints honor it', () => {
   const picker = read('src/components/shared/DateTimeRangePicker.tsx')
   const presets = read('src/components/shared/statsStripPresets.ts')
-  assert.ok(picker.includes("{ id: 'all'") && picker.includes("{ id: 'today'"), 'All time and Today live inside the shared picker')
+  assert.match(picker, /STATS_PRESETS\.map/, 'the shared ordered presets include All time and Today inside the picker')
   assert.ok(presets.includes("timeZone: 'Asia/Phnom_Penh'"), 'real quick-range math is anchored to Cambodia business time')
   assert.deepEqual(statsPresetRange('all'), { startDate: '', endDate: '', startTime: '', endTime: '' }, 'All time is the blank/unfiltered range')
-  assert.ok((picker.match(/inputMode="numeric"/g) || []).length === 2, 'the shared picker uses two explicit 24-hour HH:MM fields')
+  assert.equal((picker.match(/<TimeEntryInput /g) || []).length, 2, 'the shared picker uses two shared 24-hour fields')
   assert.ok(picker.includes('Quick range') && picker.includes('quickRanges.map'), 'quick presets are folded into the opened date/time picker')
 
   const sales = read('src/components/sales/Sales.tsx')
@@ -198,7 +198,7 @@ test('compact Stats and range chrome are opt-in, accessible, and preserve full e
   assert.match(picker, /compactTriggerLabels \? 'text-\[clamp\(11px,2\.75vw,12px\)\]'/, 'compact endpoints use a readable bounded responsive size rather than an intrinsic-width floor')
   assert.match(picker, /data-date-range-trigger-values/, 'both complete endpoint values share one shrinkable three-column track')
   assert.match(picker, /triggerEndpoint\(startTriggerDate\)/, 'the closed trigger shows the full date without a time suffix')
-  assert.match(picker, /value=\{startTimeText\}/, 'selected time remains editable inside the picker')
+  assert.match(picker, /<TimeEntryInput value=\{value\.startTime\}/, 'selected time remains editable through the shared field inside the picker')
   assert.doesNotMatch(picker, /min-w-0 truncate/, 'range endpoints must not be silently ellipsized')
 })
 

@@ -798,9 +798,7 @@ const SURFACE_CSS = 'src/components/sales/reports/reports-surface.css'
 test('compact report filters match the stacked mobile control contract', () => {
   const hub = read(HUB)
   const css = read(SURFACE_CSS)
-  for (const preset of ['all', 'today', '7d', '30d', 'month']) {
-    assert.ok(hub.includes(`id: '${preset}'`), `${preset} is offered as a compact quick range`)
-  }
+  assert.match(hub, /const mobilePresets = STATS_PRESETS\.map/, 'every canonical preset is offered in the compact rail')
   assert.ok(hub.includes('aria-pressed={selectedMobilePreset === preset.id}'), 'quick ranges expose their selected state')
   assert.ok(hub.includes("trh('show', 'Show')"), 'compact controls have a primary Show action')
   assert.match(css, /\.reports-mobile-controls\s*\{[\s\S]*display:\s*grid/, 'mobile controls stack in a scoped grid')

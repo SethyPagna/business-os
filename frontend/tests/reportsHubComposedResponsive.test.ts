@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { STATS_PRESETS } from '../src/components/shared/statsStripPresets.ts'
 import { spawn } from 'node:child_process'
 import fs from 'node:fs'
 import net from 'node:net'
@@ -152,7 +153,7 @@ try {
     assert.ok(geometry.selectedScroll >= geometry.selectedClient, `${width}px ${lang} selected label remains horizontally reachable without ellipsis clipping`)
 
     const externalPresets = await evaluate<number>(`document.querySelectorAll('[data-reports-hub] > .reports-mobile-controls .reports-mobile-preset').length`)
-    assert.equal(externalPresets, 6, `${width}px ${lang} renders exactly one external six-preset rail`)
+    assert.equal(externalPresets, STATS_PRESETS.length, `${width}px ${lang} renders exactly one canonical preset rail`)
     await evaluate(`document.querySelector('[aria-label="${lang === 'km' ? 'ជួរកាលបរិច្ឆេទ និងម៉ោង' : 'Date and time range'}"]').click()`)
     const panel = await waitFor(async () => await evaluate<any>(`(() => { const p=document.querySelector('[data-date-time-range-panel]'); if(!p)return null; const r=p.getBoundingClientRect(); return { left:r.left,right:r.right,top:r.top,bottom:r.bottom,client:p.clientHeight,scroll:p.scrollHeight,overflow:getComputedStyle(p).overflowY,innerPresets:p.querySelectorAll('[data-date-time-range-presets] button').length } })()`))
     assert.equal(panel.innerPresets, 0, `${width}px ${lang} picker does not duplicate external presets`)
