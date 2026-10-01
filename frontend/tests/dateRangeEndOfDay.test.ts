@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import ts from 'typescript'
 import { normalizeTimeEntry, applyTimeEntryMask, joinLocalDateTime } from '../src/utils/dateEntry.ts'
 import { reportUtcBound } from '../src/utils/businessTimeBounds.ts'
 import { continuousRangeParams } from '../src/utils/continuousRangeParams.ts'
@@ -14,6 +16,21 @@ function check(name: string, fn: () => void) {
   try { fn(); console.log('PASS ' + name) } catch (error) { failures++; console.error('FAIL ' + name, error) }
 }
 const range = { startDate: '2026-09-30', endDate: '2026-09-30', startTime: '09:00', endTime: '24:00' }
+check('the actual shared picker grants end-of-day only to its end time input', () => {
+  const source = readFileSync(new URL('../src/components/shared/DateTimeRangePicker.tsx', import.meta.url), 'utf8')
+  const tree = ts.createSourceFile('DateTimeRangePicker.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+  let endGrants = 0
+  const visit = (node: ts.Node) => {
+    if (ts.isJsxSelfClosingElement(node) && node.tagName.getText(tree) === 'TimeEntryInput') {
+      const grants = node.attributes.properties.some(attribute => ts.isJsxAttribute(attribute) && attribute.name.getText(tree) === 'allowEndOfDay')
+      const value = node.attributes.properties.find(attribute => ts.isJsxAttribute(attribute) && attribute.name.getText(tree) === 'value')
+      if (grants) { endGrants++; assert.equal(value?.getText(tree), 'value={value.endTime}') }
+    }
+    ts.forEachChild(node, visit)
+  }
+  visit(tree)
+  assert.equal(endGrants, 1)
+})
 check('24 requires an explicit end role and only zero minutes and seconds', () => {
   for (const input of ['24', '2400', '24:00', '24:00:00', '240000']) {
     assert.deepEqual(normalizeTimeEntry(input, { allowEndOfDay: true }), { value: '24:00', minutes: 1440 })

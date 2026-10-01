@@ -74,6 +74,7 @@ try {
       assert.equal(await page.evaluate(() => (window as any).__range.startTime), '09:00')
       assert.equal(await start.getAttribute('aria-invalid'), 'true')
       await start.fill('0900'); await start.press('Tab')
+      await page.waitForFunction(label => document.querySelector<HTMLInputElement>(`input[aria-label="${label}"]`)?.getAttribute('aria-invalid') !== 'true', pack.start_time)
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1), false)
       const bounds = await end.boundingBox()
       assert.ok(bounds && bounds.x >= 0 && bounds.x + bounds.width <= width && bounds.y + bounds.height <= 800)

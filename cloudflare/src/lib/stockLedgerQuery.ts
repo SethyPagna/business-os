@@ -18,7 +18,7 @@
 // the reported "70+ in vs very few out" skew was this bug, not just data.
 // `row_move_out` and `write_off` are kept for any legacy rows even though
 // current code writes `move_out` / `return_reversal` instead.
-import { isLocalRangeClock, localDateAtOrAfter, localDateAtOrBefore, localTimeRangeClause } from './businessDateWindow'
+import { localRangeClockError, isLocalRangeClock, localDateAtOrAfter, localDateAtOrBefore, localTimeRangeClause } from './businessDateWindow'
 // N13: sale/return-family movements stamp branch_id but not branch_name, so
 // the ledger rendered their Branch column empty. Resolved through the id here
 // (snapshot-first) -- see lib/movementBranchName.ts for why it is read-side.
@@ -347,6 +347,8 @@ const LEDGER_FROM = `
     LEFT JOIN product_batches b ON b.id = m.batch_id`
 
 export function buildStockLedgerQuery(filters: StockLedgerFilters = {}): StockLedgerQuery {
+  const clockError = localRangeClockError(filters.startTime, filters.endTime)
+  if (clockError) throw new RangeError(clockError)
   // Base filters: everything EXCEPT the In/Out view predicate, kept separate
   // so the stats summary can report both columns over the same scope while
   // the row list narrows to the selected view.

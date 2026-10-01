@@ -18,7 +18,7 @@ import { getGoogleLoginPublicConfig } from '../lib/googleOauth'
 import { CUSTOMER_REFUND_JOIN, getSalesTotals, getSalesTotalsAndPeriodSeries, identifiedCustomerExpr, reportCustomerNameExpr, netRefundExpr, netSaleExpr, previousPeriodFilters, recognizedExpr, shiftWindowBound, shiftWindowWhere } from '../lib/salesAnalytics'
 import { getFamilyStockAlertPage, getFamilyStockStats, type FamilyStockAlertState } from '../lib/familyStockStats'
 import { loadLowStockConfig } from '../lib/lowStockSettings'
-import { isLocalRangeClock, businessToday, localDateAtOrAfter, localDateAtOrBefore, localDateRangeClause, localHourExpr, localTimeRangeClause } from '../lib/businessDateWindow'
+import { localRangeClockError, isLocalRangeClock, businessToday, localDateAtOrAfter, localDateAtOrBefore, localDateRangeClause, localHourExpr, localTimeRangeClause } from '../lib/businessDateWindow'
 import { continuousReadWindowSql, parseContinuousReadWindow } from '../lib/continuousReadWindow'
 import { actorSnapshot } from '../lib/actorSnapshot'
 import { secretEncryptionStatus } from '../lib/secretCrypto'
@@ -1232,6 +1232,8 @@ app.get('/transfers', async (c) => {
   }
 
   const query = c.req.query()
+  const clockError = localRangeClockError(query.startTime, query.endTime)
+  if (clockError) return c.json({ code: 'invalid_time_range', error: clockError }, 400)
   let continuousWindow
   try { continuousWindow = parseContinuousReadWindow(query) } catch (error) {
     return c.json({ error: (error as Error).message }, 400)

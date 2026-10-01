@@ -34,7 +34,7 @@ import {
   type SalesFilters,
 } from '../lib/salesAnalytics'
 import { ReportMoneyPrecisionError, reportMoneyHttpError } from '../lib/reportMoneyPrecision'
-import { isLocalRangeClock, localDateAtOrAfter, localDateAtOrBefore, localDateExpr } from '../lib/businessDateWindow'
+import { localRangeClockError, isLocalRangeClock, localDateAtOrAfter, localDateAtOrBefore, localDateExpr } from '../lib/businessDateWindow'
 import type { Env } from '../index'
 
 // Section 5 (Sep 2, 2026 RC): the "Business summary" Excel workbook the
@@ -136,6 +136,8 @@ export function parseGranularity(raw: unknown): ReportGranularity {
  * headline totals agree for one set of controls.
  */
 export function parseViewFilters(query: Record<string, string>): SalesFilters {
+  const clockError = localRangeClockError(query.startTime, query.endTime)
+  if (clockError) throw new RangeError(clockError)
   const f: SalesFilters = { ...parseFilters(query) }
   const status = String(query.status || '').trim().toLowerCase()
   if (status) f.status = status
@@ -151,11 +153,11 @@ export function parseViewFilters(query: Record<string, string>): SalesFilters {
     if (createdFrom >= createdTo) throw new RangeError('createdTo must be after createdFrom')
     f.createdFrom = createdFrom
     f.createdTo = createdTo
-  } else if (isLocalRangeClock(query.startTime) && isLocalRangeClock(query.endTime, true)) {
+  } else if (isLocalRangeClock(String(query.startTime || '').trim()) && isLocalRangeClock(String(query.endTime || '').trim(), true)) {
     // Backward-compatible recurring daily mask for old/direct callers. The
     // Reports UI no longer emits this shape for endpoint date-times.
-    f.startTime = query.startTime
-    f.endTime = query.endTime
+    f.startTime = String(query.startTime).trim()
+    f.endTime = String(query.endTime).trim()
   }
   return f
 }

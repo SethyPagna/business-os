@@ -7,8 +7,9 @@ const fixtureStart = source.indexOf('addSale({ id: 101')
 if (fixtureStart < 0) throw new Error('Export fixture boundary missing')
 const prefix = source.slice(0, fixtureStart).replace('const dbOverride = { getDb: (env) => env.DB }', "const dbOverride = { getDb: env => load('lib/db.ts').getDb(env) }")
 const checks = String.raw`
+let databaseReads = 0
 const binding = {
-  prepare(sql) { let values = []; return {
+  prepare(sql) { databaseReads++; let values = []; return {
     bind(...next) { values = next; return this },
     async all() { return { success: true, results: db.db.prepare(sql).all(...values), meta: { changes: 0 } } },
     async run() { const info = db.db.prepare(sql).run(...values); return { success: true, meta: { changes: info.changes, last_row_id: Number(info.lastInsertRowid) } } },
@@ -70,6 +71,45 @@ async function check(name, fn) { try { await fn(); console.log('PASS '+name) } c
     assert.ok(result.body.sales.every(row=>row.cost_price_usd===undefined))
     USER.permissions=JSON.stringify({sales:true,'sales:export':false})
     assert.equal((await get(query)).status,403)
+  })
+  await check('actual Customer purchases preserves alltime and24 rows/count/recognized totals',async()=>{
+    USER.role_code='admin'
+    run('UPDATE sales SET customer_id=33')
+    const customer=async query=>{const response=await app.request('http://local/customer-report?'+new URLSearchParams({customerId:'33',page_size:'100',...query}),{},{DB:binding},executionCtx);return {status:response.status,body:await response.json()}}
+    const selected=await customer({startDate:dates[0],endDate:dates[0],startTime:'09:00',endTime:'24:00'})
+    assert.equal(selected.status,200,JSON.stringify(selected.body))
+    assert.deepEqual(selected.body.sales.map(row=>row.id).sort((a,b)=>a-b),[2,3,6])
+    assert.equal(selected.body.total_sales,3)
+    assert.equal(selected.body.totals.tx_count,3)
+    assert.equal(selected.body.totals.collected_usd,11)
+    const all=await customer({})
+    assert.equal(all.status,200)
+    assert.equal(all.body.startDate,null)
+    assert.equal(all.body.endDate,null)
+    assert.equal(all.body.total_sales,21)
+    const day=await customer({startDate:dates[0],endDate:dates[0]})
+    const full=await customer({startDate:dates[0],endDate:dates[0],startTime:'00:00',endTime:'24:00'})
+    assert.deepEqual(full.body,day.body)
+  })
+  const badClocks=[{startTime:'24:00',endTime:'24:00'},{startTime:'09:00',endTime:'24:01'},{startTime:'9:00',endTime:'24:00'}]
+  const routes=[['sales','/'],['sales','/stats'],['sales','/stats-strip'],['sales','/daily-report'],['sales','/day-report'],['sales','/delivery-contact-report'],['sales','/customer-report'],['sales','/export'],['reports','/overview'],['reports','/periods'],['reports','/grouped'],['reports','/business-summary/expenses'],['compat','/transfers'],['products','/stock-ledger']]
+  for(const [moduleName,endpoint] of routes) await check('explicit invalid recurring clocks refuse before every data query '+moduleName+endpoint,async()=>{
+    const routeApp=moduleName==='sales'?app:load('routes/'+moduleName+'.ts').default
+    for(const clocks of badClocks){const before=databaseReads;const response=await routeApp.request('http://local'+endpoint+'?'+new URLSearchParams({startDate:dates[0],endDate:dates[0],date:dates[0],customerId:'33',contactId:'1',by:'product',...clocks}),{},{DB:binding},executionCtx);assert.equal(response.status,400,moduleName+endpoint+' '+JSON.stringify(clocks));assert.equal(databaseReads,before,'No data query on clock rejection')}
+  })
+  for(const [moduleName,endpoint] of routes) await check('valid end24 remains reachable '+moduleName+endpoint,async()=>{
+    const routeApp=moduleName==='sales'?app:load('routes/'+moduleName+'.ts').default
+    const response=await routeApp.request('http://local'+endpoint+'?'+new URLSearchParams({startDate:dates[0],endDate:dates[0],date:dates[0],customerId:'33',contactId:'1',by:'product',startTime:'09:00',endTime:'24:00'}),{},{DB:binding},executionCtx)
+    const body=await response.json()
+    assert.equal(response.status,200,JSON.stringify(body))
+  })
+  await check('shared validator preserves empty valid clock halves and legacy overnight masks',async()=>{
+    const {localRangeClockError}=load('lib/businessDateWindow.ts')
+    for(const pair of [['',''],['09:00',''],['','24:00'],['22:00','02:00']]) assert.equal(localRangeClockError(...pair),null)
+    for(const pair of [['24:00',''],['','24:01'],['09:00','24:00:30']]) assert.ok(localRangeClockError(...pair))
+    const response=await app.request('http://local/customer-report?customerId=33&page_size=100&startTime=09:00&endTime=',{},{DB:binding},executionCtx)
+    assert.equal(response.status,200)
+    assert.equal((await response.json()).total_sales,21)
   })
   db.db.close()
   process.exitCode=failed?1:0

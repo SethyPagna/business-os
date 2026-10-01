@@ -142,7 +142,7 @@ import { quoteSaleMutationHeader, compareSaleHeaderQuote, SaleHeaderQuoteError }
 import { planNativeSaleChange, NativeSaleChangeValidationError } from '../lib/nativeSaleChange'
 import { normalizeClientReceiptNumber, uniqueBusinessDateTimeNumber } from '../lib/receiptNumber'
 import { sanitizeClientCreatedAt } from '../lib/clientTimestamp'
-import { isLocalRangeClock, businessToday, localDateAtOrAfter, localDateAtOrBefore, localDateRangeClause, localTimeRangeClause } from '../lib/businessDateWindow'
+import { localRangeClockError, isLocalRangeClock, businessToday, localDateAtOrAfter, localDateAtOrBefore, localDateRangeClause, localTimeRangeClause } from '../lib/businessDateWindow'
 import { continuousReadWindowSql, parseContinuousReadWindow } from '../lib/continuousReadWindow'
 import { formatSaleStatusTelegramLines, formatSaleTelegramLines, sendTelegramEvent } from '../lib/telegram'
 import { contactDisplayAddress } from '../lib/contactOptions'
@@ -5513,6 +5513,8 @@ app.get('/', async (c) => {
   if (!canReadSales(user)) {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
+  const clockError = localRangeClockError(query.startTime, query.endTime)
+  if (clockError) return c.json({ code: 'invalid_time_range', error: clockError }, 400)
   const db = getDb(c.env)
 
   const where: string[] = ['1=1']
@@ -5821,6 +5823,8 @@ app.get('/stats', async (c) => {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
 
+  const clockError = localRangeClockError(query.startTime, query.endTime)
+  if (clockError) return c.json({ code: 'invalid_time_range', error: clockError }, 400)
   const where: string[] = ['1=1']
   const params: Record<string, unknown> = {}
   if (query.startDate) { where.push(localDateAtOrAfter('s.created_at')); params.startDate = query.startDate }
@@ -5949,6 +5953,8 @@ app.get('/stats-strip', async (c) => {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
   const query = c.req.query()
+  const clockError = localRangeClockError(query.startTime, query.endTime)
+  if (clockError) return c.json({ code: 'invalid_time_range', error: clockError }, 400)
   let continuousWindow
   try { continuousWindow = parseContinuousReadWindow(query) } catch (error) {
     return c.json({ error: (error as Error).message }, 400)
@@ -6053,6 +6059,8 @@ app.get('/daily-report', async (c) => {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
   const query = c.req.query()
+  const clockError = localRangeClockError(query.startTime, query.endTime)
+  if (clockError) return c.json({ code: 'invalid_time_range', error: clockError }, 400)
   const startDate = String(query.startDate || '').slice(0, 10)
   const endDate = String(query.endDate || '').slice(0, 10)
   const validDate = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value)
@@ -6082,6 +6090,8 @@ app.get('/day-report', async (c) => {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
   const query = c.req.query()
+  const clockError = localRangeClockError(query.startTime, query.endTime)
+  if (clockError) return c.json({ code: 'invalid_time_range', error: clockError }, 400)
   const date = String(query.date || '').slice(0, 10)
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
     return c.json({ error: 'date (YYYY-MM-DD) is required' }, 400)
@@ -6110,6 +6120,8 @@ app.get('/delivery-contact-report', async (c) => {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
   const query = c.req.query()
+  const clockError = localRangeClockError(query.startTime, query.endTime)
+  if (clockError) return c.json({ code: 'invalid_time_range', error: clockError }, 400)
   const startDate = String(query.startDate || '').slice(0, 10)
   const endDate = String(query.endDate || '').slice(0, 10)
   if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
@@ -6148,6 +6160,8 @@ app.get('/customer-report', async (c) => {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
   const query = c.req.query()
+  const clockError = localRangeClockError(query.startTime, query.endTime)
+  if (clockError) return c.json({ code: 'invalid_time_range', error: clockError }, 400)
   const customerId = Number(query.customerId)
   if (!Number.isInteger(customerId) || customerId <= 0) {
     return c.json({ error: 'A valid customerId is required' }, 400)
@@ -6214,6 +6228,8 @@ app.get('/export', async (c) => {
   }
   const db = getDb(c.env)
   const query = c.req.query()
+  const clockError = localRangeClockError(query.startTime, query.endTime)
+  if (clockError) return c.json({ code: 'invalid_time_range', error: clockError }, 400)
   const clamp = (raw: unknown, fallback: number, min: number, max: number): number => {
     const n = Number(raw)
     return Number.isFinite(n) ? Math.max(min, Math.min(max, Math.trunc(n))) : fallback
