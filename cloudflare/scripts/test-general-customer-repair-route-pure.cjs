@@ -11,6 +11,27 @@ const { Hono } = require('hono')
 const { openDb } = require('./harness/d1compat.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')
 
+const lifecycleModules = new Map()
+function loadLifecycleModule(relPath) {
+  if (lifecycleModules.has(relPath)) return lifecycleModules.get(relPath).exports
+  assert.ok(['lib/stockLifecycle.ts', 'lib/db.ts', 'lib/importMaintenanceFence.ts'].includes(relPath))
+  const sourcePath = path.join(__dirname, '..', 'src', relPath)
+  const mod = { exports: {} }
+  lifecycleModules.set(relPath, mod)
+  const code = ts.transpileModule(fs.readFileSync(sourcePath, 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 }, fileName: sourcePath,
+  }).outputText
+  const localRequire = request => {
+    if (request === 'hono/http-exception') return require(request)
+    assert.ok(request.startsWith('.'))
+    const next = path.posix.normalize(path.posix.join(path.posix.dirname(relPath), request))
+    return loadLifecycleModule(next.endsWith('.ts') ? next : `${next}.ts`)
+  }
+  try { new Function('exports', 'require', 'module', code)(mod.exports, localRequire, mod) }
+  catch (error) { lifecycleModules.delete(relPath); throw error }
+  return mod.exports
+}
+
 function transpile(relPath) {
   const sourcePath = path.join(__dirname, '..', 'src', relPath)
   return {
@@ -104,6 +125,7 @@ const runtimeOverrides = {
 }
 
 const systemRoute = loadReal('routes/system.ts', {
+  '../lib/stockLifecycle': loadLifecycleModule('lib/stockLifecycle.ts'),
   // planTier.ts is pure (only `import type`) and holds the free-vs-paid
   // image-delete cap the reset path now reads -- real, not an inert stub,
   // which would make that cap undefined and slice(0, undefined) empty.

@@ -61,17 +61,27 @@ const SRC = path.join(__dirname, '..', 'src', 'lib')
 const BACKUP_TS = process.env.BACKUP_TS || path.join(SRC, 'backup.ts')
 
 // ------------------------------------------------------------ loading
+const loadedModules = new Map()
 function loadModule(file, deps = {}) {
+  file = path.resolve(file)
+  if (loadedModules.has(file)) return loadedModules.get(file).exports
+  const loaded = { exports: {} }
   const outputText = ts.transpileModule(fs.readFileSync(file, 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
     fileName: file,
   }).outputText
-  const loaded = { exports: {} }
+  loadedModules.set(file, loaded)
   const load = (id) => {
     if (Object.prototype.hasOwnProperty.call(deps, id)) return deps[id]
+    if (id === 'hono/http-exception') return require(id)
+    if (id.startsWith('.')) {
+      const resolved = path.resolve(path.dirname(file), id)
+      return loadModule(resolved.endsWith('.ts') ? resolved : `${resolved}.ts`)
+    }
     throw new Error(`${path.basename(file)} imports ${id}, which this test does not provide`)
   }
-  new Function('exports', 'require', 'module', '__filename', '__dirname', outputText)(loaded.exports, load, loaded, file, path.dirname(file))
+  try { new Function('exports', 'require', 'module', '__filename', '__dirname', outputText)(loaded.exports, load, loaded, file, path.dirname(file)) }
+  catch (error) { loadedModules.delete(file); throw error }
   return loaded.exports
 }
 const backup = loadModule(BACKUP_TS, {

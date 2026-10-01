@@ -5,13 +5,17 @@ const ts = require('typescript')
 const { openDb } = require('./harness/d1compat.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')
 
+const realLibModules = new Map()
 function loadRealLib(relName) {
+  relName = path.posix.normalize(relName)
+  if (realLibModules.has(relName)) return realLibModules.get(relName).exports
   const sourcePath = path.join(__dirname, '..', 'src', 'lib', `${relName}.ts`)
   const { outputText } = ts.transpileModule(fs.readFileSync(sourcePath, 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 }, fileName: sourcePath,
   })
   const mod = { exports: {} }
-  new Function('exports','require','module', outputText)(mod.exports, (id) => {
+  realLibModules.set(relName, mod)
+  const localRequire = (id) => {
     // queueDispatch is pure and is what runBulkDeleteJob's self-continuation
     // enqueues through now; a {} stub makes dispatchImportWork undefined.
     if (id === './queueDispatch') return loadRealLib('queueDispatch')
@@ -19,12 +23,14 @@ function loadRealLib(relName) {
     if (id === './sqlBinding') return loadRealLib('sqlBinding')
     if (id === './anonymousCustomer') return loadRealLib('anonymousCustomer')
     if (id === './actorSnapshot') return loadRealLib('actorSnapshot')
-    if (id === './db') return { getDb: () => { throw new Error('unused') } }
     if (id === './importEngine') return { runD1BatchInChunks: async () => { throw new Error('unused') } }
     if (id === './cache') return { bumpVersion: async () => { throw new Error('unused') } }
     if (id === '../durable-objects/broadcastHub') return { broadcast: async () => { throw new Error('unused') } }
+    if (id.startsWith('.')) return loadRealLib(path.posix.join(path.posix.dirname(relName), id).replace(/\.ts$/, ''))
     return require(id)
-  }, mod)
+  }
+  try { new Function('exports','require','module', outputText)(mod.exports, localRequire, mod) }
+  catch (error) { realLibModules.delete(relName); throw error }
   return mod.exports
 }
 
