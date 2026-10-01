@@ -36,13 +36,28 @@ function loadModule(relPath, requireShim) {
 
 // backup.ts pulls in the R2 stream writer and restore stream; only the
 // exported constants/helpers are exercised here, so stub the heavy imports.
+const backupDependencyCache = new Map()
+function loadBackupDependency(relPath) {
+  if (backupDependencyCache.has(relPath)) return backupDependencyCache.get(relPath).exports
+  const module = { exports: {} }
+  backupDependencyCache.set(relPath, module)
+  const sourcePath = path.join(__dirname, '..', 'src', relPath)
+  const code = transpile(relPath)
+  const localRequire = request => request.startsWith('.')
+    ? loadBackupDependency(path.posix.normalize(path.posix.join(path.posix.dirname(relPath), request)) + (request.endsWith('.ts') ? '' : '.ts'))
+    : require(request)
+  new Function('exports', 'require', 'module', '__filename', '__dirname', code)(module.exports, localRequire, module, sourcePath, path.dirname(sourcePath))
+  return module.exports
+}
+
 const backup = loadModule('lib/backup.ts', (id) => {
   if (id === './customTableName') return loadModule('lib/customTableName.ts', require)
   if (id === './planTier') return loadModule('lib/planTier.ts', require)
   if (id === './uploadSecurity') return loadModule('lib/uploadSecurity.ts', require)
   if (id === './backupRestoreStream') return { streamBackupEvents: async function* () {} }
   if (id === './r2') return {}
-  if (id === './db') return {}
+  if (id === './stockLifecycle') return loadBackupDependency('lib/stockLifecycle.ts')
+  if (id === './db') return loadBackupDependency('lib/db.ts')
   return require(id)
 })
 const { BACKUP_TABLES, migrationNumber } = backup

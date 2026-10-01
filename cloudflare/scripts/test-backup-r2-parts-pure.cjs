@@ -61,7 +61,23 @@ function load(relPath, stubs = {}) {
 // backup.ts's runtime imports are ./r2 and ./backupRestoreStream; the writer
 // touches neither, so they are inert stubs here (test-backup-pure.cjs
 // exercises the real ones).
+const backupDependencyCache = new Map()
+function loadBackupDependency(relPath) {
+  if (backupDependencyCache.has(relPath)) return backupDependencyCache.get(relPath).exports
+  const module = { exports: {} }
+  backupDependencyCache.set(relPath, module)
+  const sourcePath = path.join(__dirname, '..', 'src', relPath)
+  const code = transpile(relPath).outputText
+  const localRequire = request => request.startsWith('.')
+    ? loadBackupDependency(path.posix.normalize(path.posix.join(path.posix.dirname(relPath), request)) + (request.endsWith('.ts') ? '' : '.ts'))
+    : require(request)
+  new Function('exports', 'require', 'module', '__filename', '__dirname', code)(module.exports, localRequire, module, sourcePath, path.dirname(sourcePath))
+  return module.exports
+}
+
 const { R2StreamWriter, R2_PART_BYTES } = load('lib/backup.ts', {
+  './stockLifecycle': loadBackupDependency('lib/stockLifecycle.ts'),
+  './db': loadBackupDependency('lib/db.ts'),
   './customTableName': load('lib/customTableName.ts'),
   './r2': {},
   './backupRestoreStream': {},
