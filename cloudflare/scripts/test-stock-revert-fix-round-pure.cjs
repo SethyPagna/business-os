@@ -154,6 +154,29 @@ async function main() {
     } finally { f.sql.close() }
   })
 
+  await check('RF4 a receipt with free units keeps its total money across Revert and Revert of the Revert (10 paid + 2 free at $2 is $20.0000)', async () => {
+    const f = fixture()
+    try {
+      const db = getDb(f.env)
+      const plan = pb.planReceiveBatchStock({ productId: 1, branchId: 1, quantity: 12, receivedDate: '2026-09-12', notes: 'free units', unitCostUsd: 1.6667, receiptTotalUsd: 20, receiptCostPreimage: { batchExists: false, receivedCostUsd: null } })
+      await db.batch([...plan.statements, {
+        sql: `INSERT INTO inventory_movements(product_id,product_name,branch_id,branch_name,movement_type,quantity,free_quantity,unit_cost_usd,total_cost_usd,reason,created_at,batch_id)
+          VALUES(1,'Serum',1,'Shop','in',12,2,1.6667,20,'free units','2026-09-12T03:00:00.000Z',${plan.batchIdSql})`, params: plan.params,
+      }])
+      const lot = () => ({ ...f.sql.prepare('SELECT received_quantity, received_cost_usd FROM product_batches ORDER BY id LIMIT 1').get() })
+      assert.deepEqual(lot(), { received_quantity: 12, received_cost_usd: 20 }, 'control: the receipt itself records the supplier-paid total')
+      let target = f.sql.prepare("SELECT id FROM inventory_movements WHERE movement_type='in'").get().id
+      for (const round of [1, 2, 3, 4]) {
+        const reverted = await revertOf(f, target)
+        assert.equal(reverted.ok, true, JSON.stringify(reverted))
+        target = f.sql.prepare('SELECT id FROM inventory_movements ORDER BY id DESC LIMIT 1').get().id
+        if (round % 2 === 0) {
+          assert.deepEqual(lot(), { received_quantity: 12, received_cost_usd: 20 }, `after round ${round} the lot is back to the paid total, not 12 x 1.6667 = 20.0004`)
+        }
+      }
+    } finally { f.sql.close() }
+  })
+
   await check("RF3 controls: an 'in' row with no lot, or on a lot with no received figures, moves stock only", async () => {
     const f = fixture()
     try {
