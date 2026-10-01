@@ -590,6 +590,8 @@ export async function listShifts(filters: {
   userId?: number | string | null
   from?: string
   to?: string
+  openedFrom?: string
+  openedTo?: string
   limit?: number
   /**
    * Cashier name or shift ID, matched by the Worker (case-insensitive
@@ -603,6 +605,8 @@ export async function listShifts(filters: {
     user_id: filters.userId,
     from: filters.from,
     to: filters.to,
+    openedFrom: filters.openedFrom,
+    openedTo: filters.openedTo,
     limit: filters.limit ?? 50,
     page: filters.page,
     page_size: filters.pageSize,

@@ -44,6 +44,7 @@ import { buildContactPickerSql, buildSalesCustomerPickerSql, CONTACT_PICKER_DEFA
 import { createBulkDeleteJob, getBulkDeleteJob, reapStalledBulkDeleteJobs, type BulkDeleteEntityType } from '../lib/bulkDeleteEngine'
 import { bumpVersion, bumpVersions, cachedJsonResponse, getVersionWithFallback } from '../lib/cache'
 import { localDateAtOrAfter, localDateAtOrBefore, localDateExpr, localDateOf } from '../lib/businessDateWindow'
+import { invoiceReadWindow } from '../lib/invoiceReadWindow'
 import type { Env } from '../index'
 import { actorSnapshot } from '../lib/actorSnapshot'
 import { SALES_CUSTOMER_COLUMNS, buildCustomerDetailsSaleEvent, checkContactSaleSource, contactSourceAuditDetails, customerCreateColumns, readContactSalesSource } from '../lib/contactSalesSource'
@@ -2610,10 +2611,13 @@ app.get('/suppliers/reports/ap-invoices', async (c) => {
   const status = String(query.status || '').trim()
   if (status === 'outstanding') conditions.push('si.outstanding_balance_usd > 0')
   else if (status === 'paid') conditions.push('si.outstanding_balance_usd <= 0')
-  const from = String(query.from || '').slice(0, 10)
-  const to = String(query.to || '').slice(0, 10)
-  if (from) { conditions.push(localDateAtOrAfter('si.invoice_date', '@from')); params.from = from }
-  if (to) { conditions.push(localDateAtOrBefore('si.invoice_date', '@to')); params.to = to }
+  try {
+    const range = invoiceReadWindow('si.invoice_date', query)
+    if (range.sql) conditions.push(range.sql)
+    Object.assign(params, range.params)
+  } catch (error) {
+    return c.json({ error: (error as Error).message }, 400)
+  }
   const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''
 
   type ApRow = {
@@ -2714,10 +2718,13 @@ app.get('/customers/reports/ar-invoices', async (c) => {
   if (status === 'outstanding') conditions.push('cr.outstanding_balance_usd > 0')
   else if (status === 'overpaid') conditions.push('cr.outstanding_balance_usd < 0')
   else if (status === 'settled') conditions.push('cr.outstanding_balance_usd = 0')
-  const from = String(query.from || '').slice(0, 10)
-  const to = String(query.to || '').slice(0, 10)
-  if (from) { conditions.push(localDateAtOrAfter('cr.invoice_date', '@from')); params.from = from }
-  if (to) { conditions.push(localDateAtOrBefore('cr.invoice_date', '@to')); params.to = to }
+  try {
+    const range = invoiceReadWindow('cr.invoice_date', query)
+    if (range.sql) conditions.push(range.sql)
+    Object.assign(params, range.params)
+  } catch (error) {
+    return c.json({ error: (error as Error).message }, 400)
+  }
   const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''
 
   type ArRow = {

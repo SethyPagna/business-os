@@ -24,7 +24,7 @@ import ShiftSummary from '../../shifts/ShiftSummary.tsx'
 import { shiftComparisonRows, shiftFigureRows, shiftFiguresOf, shiftRegisteredRows } from '../../shifts/shiftReportModel.ts'
 import { Button, EmptyState, OverflowMenu, Skeleton } from '../../shared/kit'
 import ReportFrame, { useReportData } from './ReportFrame.tsx'
-import { reportFileName } from './reportModel.ts'
+import { reportFileName, reportQueryParams } from './reportModel.ts'
 import { exportMenuItems, type ReportViewProps } from './reportTypes.ts'
 
 export default function ShiftReport(p: ReportViewProps) {
@@ -33,7 +33,8 @@ export default function ShiftReport(p: ReportViewProps) {
   const branchId = filters.branchId ? Number(filters.branchId) : undefined
   // The authorized list works for admin-exempt reviewers too. Keep selection
   // scoped to actor/permissions/branch, and load expensive figures on demand.
-  const depsKey = JSON.stringify([branchId, filters.startDate, filters.endDate, user?.id, user?.username, user?.role_code, user?.permissions, user?.role_permissions])
+  const openingRange = reportQueryParams(filters, view)
+  const depsKey = JSON.stringify([branchId, filters.startDate, filters.endDate, filters.startTime, filters.endTime, user?.id, user?.username, user?.role_code, user?.permissions, user?.role_permissions])
   // Owner, 23 Sep 2026: "when entering shift, i can search the cashier, or
   // id." The picker is a search box that also lists the shifts. The search
   // runs on the SERVER (q, cashier name or shift ID) because the list is
@@ -49,8 +50,7 @@ export default function ShiftReport(p: ReportViewProps) {
   const page = paging.scope === pageScope ? paging.page : 1
   const pageSize = paging.size
   const listKey = `${pageScope}:${page}:${pageSize}`
-  // Dates select complete shift records by business_date, not clipped sales windows.
-  const listing = useReportData<ShiftListResult>(() => listShifts({ branchId, from: filters.startDate, to: filters.endDate, page, pageSize, q: query }, { fresh: true }), listKey)
+  const listing = useReportData<ShiftListResult>(() => listShifts({ branchId, openedFrom: openingRange.createdFrom, openedTo: openingRange.createdTo, from: filters.startDate, to: filters.endDate, page, pageSize, q: query }, { fresh: true }), listKey)
   const shifts = listing.data?.shifts ?? []
   // A picked shift stays the report until another pick, or until the dates,
   // branch or actor change: searching and paging only change what the picker
@@ -126,6 +126,7 @@ export default function ShiftReport(p: ReportViewProps) {
           vertically, so the list a search box drops would be cut off there.
           Here it floats over the report below it. It is never disabled while
           a page loads -- that would drop the keyboard mid-word. */}
+      <p className="text-xs text-gray-500 dark:text-gray-400">{tr('shift_opening_time_filter', 'Opening time; each selected shift is reported in full.')}</p>
       <div className="flex min-w-0 flex-wrap items-center gap-2">
         <SuggestionTextInput
           id="shift-report-search"

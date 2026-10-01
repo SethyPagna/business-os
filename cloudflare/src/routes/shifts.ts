@@ -3,6 +3,7 @@ import { getDb, type D1Compat } from '../lib/db'
 import { CLIENT_TIMESTAMP_MAX_FUTURE_SKEW_MS } from '../lib/clientTimestamp'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { BUSINESS_TZ_FORWARD, BUSINESS_UTC_OFFSET_MINUTES, localTodayExpr } from '../lib/businessDateWindow'
+import { parseContinuousReadWindow, continuousReadWindowSql } from '../lib/continuousReadWindow'
 import { hasAnyPermission, isAdminControlUser } from '../lib/permissions'
 import { scheduleTelegramShiftOverview, sendTelegramShiftReport } from '../lib/telegram'
 import { firstCharacters } from '../lib/telegramLang'
@@ -729,6 +730,10 @@ app.get('/', async (c) => {
   if (!validDate(from) || !validDate(to) || (from != null && to != null && from > to)) {
     return c.json({ error: 'Invalid shift business date range.' }, 400)
   }
+  let openingWindow: ReturnType<typeof parseContinuousReadWindow>
+  try {
+    openingWindow = parseContinuousReadWindow({ createdFrom: c.req.query('openedFrom'), createdTo: c.req.query('openedTo') })
+  } catch (error) { return c.json({ error: (error as Error).message }, 400) }
   // ---- SEARCH BY CASHIER OR ID (owner, 23 Sep 2026) ----------------------
   //
   // "also make sure when entering shift, i can search the cashier, or id."
@@ -774,12 +779,13 @@ app.get('/', async (c) => {
       AND (@branchId IS NULL OR branch_id = @branchId)
       AND (branch_id IS NULL OR EXISTS (SELECT 1 FROM branches b WHERE b.id=shift_sessions.branch_id AND b.is_active=1))
       AND (@from IS NULL OR business_date >= @from) AND (@to IS NULL OR business_date <= @to)
+      ${openingWindow ? `AND ${continuousReadWindowSql('opened_at')}` : ''}
       AND (@search IS NULL OR user_name LIKE @search ESCAPE '\\' OR shift_sessions.id IN (
         WITH RECURSIVE hit(id) AS (
           SELECT segment.id FROM shift_sessions segment WHERE segment.shift_code LIKE @search ESCAPE '\\'
           UNION SELECT later.id FROM shift_sessions later JOIN hit ON later.parent_shift_id = hit.id)
         SELECT id FROM hit))`
-  const params = { ...visibility.params, requestedUserId, branchId, from, to, limit, search }
+  const params = { ...visibility.params, ...openingWindow, requestedUserId, branchId, from, to, limit, search }
   if (paged) {
     // One statement gives count, clamping and page rows the same SQLite read
     // snapshot. The LEFT JOIN retains metadata even for an empty match set.

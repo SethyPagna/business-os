@@ -122,6 +122,7 @@ function harness(sqlite) {
     loadShiftFigures: async () => ({ marker: 'figures-were-computed' }),
   }
   const route = loadReal('routes/shifts.ts', {
+    '../lib/continuousReadWindow': loadReal('lib/continuousReadWindow.ts'),
     '../lib/businessDateWindow': loadReal('lib/businessDateWindow.ts'),
     '../lib/clientTimestamp': loadReal('lib/clientTimestamp.ts'),
     '../lib/db': dbModule,
