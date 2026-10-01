@@ -4,6 +4,7 @@ import { fillOmittedReturnCosts } from '../lib/returnCostAccess'
 import { getDb } from '../lib/db'
 import { ordinaryBusinessMaintenanceGuard, runOrdinaryBusinessWrite } from '../lib/businessMaintenanceGuard'
 import { selectInChunks } from '../lib/sqlBinding'
+import { supplierReturnLots, supplierReturnCosts, validateSupplierReturnMoney, canonicalSupplierReturnIntent } from '../lib/supplierReturnGuard'
 import { localDateAtOrAfter, localDateAtOrBefore, localDateExpr } from '../lib/businessDateWindow'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit, changedFields } from '../lib/audit'
@@ -2319,7 +2320,7 @@ app.post('/supplier', async (c) => {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
   const body = await c.req.json<{
-    items: Array<{ product_id: number; product_name?: string; quantity: number; cost_price_usd?: number; cost_price_khr?: number; unit_cost_usd?: number; unit_cost_khr?: number; branch_id?: number }>
+    items: Array<{ product_id: number; product_name?: string; quantity: number; cost_price_usd?: number; cost_price_khr?: number; unit_cost_usd?: number; unit_cost_khr?: number; branch_id?: number; batch_id?: number }>
     branch_id?: number
     reason?: string
     notes?: string
@@ -2333,14 +2334,54 @@ app.post('/supplier', async (c) => {
     client_request_id?: string
   }>()
 
-  const clientRequestId = normalizeClientRequestId(body.client_request_id)
+  const clientRequestId = body.client_request_id === undefined ? null : String(body.client_request_id ?? '').trim()
+  if (body.client_request_id !== undefined && (typeof body.client_request_id !== 'string' || !clientRequestId || new TextEncoder().encode(clientRequestId).byteLength > 120)) {
+    return c.json({ error: 'A valid client_request_id of at most 120 bytes is required' }, 400)
+  }
+  const supplierActorId = Number(user?.id)
+  if (!Number.isSafeInteger(supplierActorId) || supplierActorId <= 0) return c.json({ error: 'An authenticated actor is required' }, 403)
   if (!Array.isArray(body.items) || body.items.length === 0) return c.json({ error: 'Return items required' }, 400)
   if (!body.reason) return c.json({ error: 'Reason is required' }, 400)
-
-  if (clientRequestId) {
-    const existing = await db.prepare("SELECT id, return_number FROM returns WHERE client_request_id = ? AND client_request_id <> '' LIMIT 1").get<{ id: number; return_number: string }>([clientRequestId])
-    if (existing) return c.json({ id: existing.id, returnNumber: existing.return_number, duplicate: true })
+  if (!Number.isSafeInteger(body.supplier_id) || Number(body.supplier_id) <= 0) {
+    return c.json({ error: 'A valid supplier is required' }, 400)
   }
+  for (const item of body.items) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)
+      || !Number.isSafeInteger(item.product_id) || !Number.isSafeInteger(item.branch_id ?? body.branch_id)
+      || Number(item.product_id) <= 0 || Number(item.branch_id ?? body.branch_id) <= 0
+      || (Object.prototype.hasOwnProperty.call(item, 'batch_id') && (!Number.isSafeInteger(item.batch_id) || Number(item.batch_id) <= 0))) {
+      return c.json({ error: 'A valid product, branch and selected received lot are required' }, 400)
+    }
+  }
+  try {
+    validateSupplierReturnMoney(body, body.items)
+  } catch (error) {
+    return c.json({ error: (error as Error).message }, 400)
+  }
+
+  let supplierRequestJson: string
+  try {
+    supplierRequestJson = JSON.stringify(canonicalSupplierReturnIntent(body))
+  } catch (error) {
+    return c.json({ error: (error as Error).message }, 400)
+  }
+  const supplierRequestDigest = await sha256Hex(supplierRequestJson)
+  const readSupplierReceipt = async () => clientRequestId ? db.prepare(`SELECT request_digest,response_json FROM return_create_receipts WHERE actor_id=? AND request_id=?`)
+    .get<{ request_digest: string; response_json: string }>([supplierActorId, clientRequestId]) : null
+  const supplierReplayResponse = (receipt: { response_json: string }) => {
+    const response = JSON.parse(receipt.response_json) as { id: number; returnNumber: string }
+    return { id: response.id, returnNumber: response.returnNumber, duplicate: true }
+  }
+  if (clientRequestId) {
+    const receipt = await readSupplierReceipt()
+    if (receipt) {
+      if (receipt.request_digest !== supplierRequestDigest) return c.json({ error: 'client_request_id was already used for different return data.', code: 'idempotency_conflict' }, 409)
+      return c.json(supplierReplayResponse(receipt))
+    }
+    const occupied = await db.prepare('SELECT id FROM returns WHERE client_request_id=?').get([clientRequestId])
+    if (occupied) return c.json({ error: 'client_request_id is already owned by another return.', code: 'idempotency_conflict' }, 409)
+  }
+  if (!await db.prepare('SELECT id FROM suppliers WHERE id=?').get([body.supplier_id])) return c.json({ error: 'A valid supplier is required' }, 400)
 
   const settlement = ['refund', 'credit', 'replacement', 'writeoff'].includes(String(body.settlement || '').toLowerCase())
     ? String(body.settlement).toLowerCase()
@@ -2361,17 +2402,34 @@ app.post('/supplier', async (c) => {
     }
   }
 
+  const supplierFifoLots = await supplierReturnLots(db, Number(body.supplier_id), body.items.map(item => ({
+    productId: item.product_id, branchId: Number(item.branch_id ?? body.branch_id),
+  })))
+  try {
+    const costs = supplierReturnCosts(body.items, body.branch_id, supplierFifoLots)
+    body.items = body.items.map((item, index) => ({ ...item, cost_price_usd: costs[index].usd, cost_price_khr: costs[index].khr }))
+  } catch (error) {
+    return c.json({ error: (error as Error).message }, 400)
+  }
   let totalCostUsd = 0
   let totalCostKhr = 0
   for (const item of body.items) {
     const qty = toNumber(item.quantity, 0)
-    totalCostUsd += qty * toNumber(item.cost_price_usd ?? item.unit_cost_usd, 0)
-    totalCostKhr += qty * toNumber(item.cost_price_khr ?? item.unit_cost_khr, 0)
+    const costUsd = qty * toNumber(item.cost_price_usd ?? item.unit_cost_usd, 0)
+    const costKhr = qty * toNumber(item.cost_price_khr ?? item.unit_cost_khr, 0)
+    totalCostUsd += item.batch_id === undefined ? costUsd : Number(costUsd.toFixed(2))
+    totalCostKhr += item.batch_id === undefined ? costKhr : Math.round(costKhr)
   }
+  if (body.items.every(item => item.batch_id !== undefined)) totalCostUsd = Number(totalCostUsd.toFixed(2))
+  if (!Number.isFinite(totalCostUsd) || !Number.isFinite(totalCostKhr) || totalCostKhr > Number.MAX_SAFE_INTEGER) return c.json({ error: 'Supplier return cost is outside the supported range' }, 400)
   const defaultCompensationUsd = ['refund', 'credit'].includes(settlement) ? totalCostUsd : 0
   const defaultCompensationKhr = ['refund', 'credit'].includes(settlement) ? totalCostKhr : 0
   const supplierCompensationUsd = toNumber(body.supplier_compensation_usd, defaultCompensationUsd)
   const supplierCompensationKhr = toNumber(body.supplier_compensation_khr, defaultCompensationKhr)
+  if (supplierCompensationUsd > totalCostUsd || supplierCompensationKhr > totalCostKhr
+    || (['replacement', 'writeoff'].includes(settlement) && (supplierCompensationUsd !== 0 || supplierCompensationKhr !== 0))) {
+    return c.json({ error: 'Supplier compensation must not exceed the allocated cost and must match the settlement' }, 400)
+  }
   const supplierLossUsd = Math.max(0, Number((totalCostUsd - supplierCompensationUsd).toFixed(2)))
   const supplierLossKhr = Math.max(0, Math.round(totalCostKhr - supplierCompensationKhr))
 
@@ -2443,10 +2501,6 @@ app.post('/supplier', async (c) => {
     // sale of a no-lot line, so a supplier return of a batch-tracked product
     // keeps branch_batch_stock in step with branch_stock instead of leaving the
     // lot ledger high (a product×branch lot drift). Fetched once for the return.
-    const supplierFifoLots = await readFifoLotAvailabilityForCart(
-      db,
-      body.items.map((i) => ({ productId: Number(i.product_id), branchId: Number(i.branch_id || body.branch_id || 0) })),
-    )
     // Part-77 (oversell-clamp audit): validate availability BEFORE composing
     // the deduction — a supplier return can never send back more units than
     // the branch holds, and the old MAX(0, ...) clamp silently floored the
@@ -2519,11 +2573,25 @@ app.post('/supplier', async (c) => {
       let supplierReturnTakes: Array<{ batchId: number; quantity: number }> = []
       if (itemBranchId) {
         const lots = supplierFifoLots.get(`${item.product_id}:${itemBranchId}`) || []
-        const { takes } = allocateAcrossLots(lots, qty)
+        const selected = item.batch_id === undefined ? lots : lots.filter(lot => lot.batchId === item.batch_id)
+        const { takes, uncovered } = allocateAcrossLots(selected, qty)
+        if (uncovered > 0) {
+          const insufficient = new Error('The selected supplier received lot does not have enough stock at this branch')
+          insufficient.name = 'SupplierReturnStockError'
+          throw insufficient
+        }
         supplierReturnTakes = takes
         for (const take of takes) {
           const lot = lots.find((entry) => entry.batchId === take.batchId)
           if (lot) lot.available -= take.quantity
+          statements.push({
+            sql: `SELECT CASE WHEN EXISTS(SELECT 1 FROM product_batches pb JOIN branch_batch_stock bbs ON bbs.batch_id=pb.id
+              WHERE pb.id=@batch_id AND pb.variant_product_id=@product_id AND pb.supplier_id=@supplier_id
+                AND pb.is_active=1 AND bbs.branch_id=@branch_id AND bbs.quantity>=@quantity
+                AND (CASE WHEN pb.received_quantity>0 AND pb.received_cost_usd IS NOT NULL THEN 1.0*pb.received_cost_usd/pb.received_quantity ELSE pb.unit_cost_usd END) IS @unit_cost_usd)
+              THEN 1 ELSE json('supplier_return_lot_changed') END`,
+            params: { batch_id: take.batchId, product_id: item.product_id, supplier_id: body.supplier_id, branch_id: itemBranchId, quantity: take.quantity, unit_cost_usd: lot!.unitCostUsd },
+          })
           statements.push(decrementBatchStockStrictStatement(take.batchId, itemBranchId, take.quantity))
         }
       }
@@ -2575,6 +2643,12 @@ app.post('/supplier', async (c) => {
         params: { productId },
       })
     }
+    statements.push({
+      sql: `INSERT INTO return_create_receipts(id,actor_id,return_id,sale_id,request_id,request_digest,request_json,response_json,occurred_at)
+        VALUES(@receipt_id,@actor_id,${returnIdExpression},NULL,@supplier_write_key,@request_digest,@request_json,
+          json_object('id',${returnIdExpression},'returnNumber',@return_number,'replacementSaleId',NULL,'replacementReceiptNumber',NULL),@occurred_at)`,
+      params: { receipt_id: crypto.randomUUID(), actor_id: supplierActorId, supplier_write_key: supplierWriteKey, request_digest: supplierRequestDigest, request_json: supplierRequestJson, return_number: returnNumber, occurred_at: new Date().toISOString() },
+    })
     await db.batch([...statements, ordinaryBusinessMaintenanceGuard])
     const committed = await db.prepare('SELECT id FROM returns WHERE client_request_id=@supplier_write_key')
       .get<{ id: number }>({ supplier_write_key: supplierWriteKey })
@@ -2582,9 +2656,12 @@ app.post('/supplier', async (c) => {
     returnId = Number(committed.id)
   } catch (error) {
     if (clientRequestId) {
-      const replay = await db.prepare("SELECT id,return_number FROM returns WHERE client_request_id=? AND client_request_id<>'' LIMIT 1")
-        .get<{ id: number; return_number: string }>([clientRequestId])
-      if (replay) return c.json({ id: replay.id, returnNumber: replay.return_number, duplicate: true })
+      const replay = await readSupplierReceipt()
+      if (replay) {
+        if (replay.request_digest !== supplierRequestDigest) return c.json({ error: 'client_request_id was already used for different return data.', code: 'idempotency_conflict' }, 409)
+        return c.json(supplierReplayResponse(replay))
+      }
+      if (await db.prepare('SELECT id FROM returns WHERE client_request_id=?').get([clientRequestId])) return c.json({ error: 'client_request_id is already owned by another return.', code: 'idempotency_conflict' }, 409)
     }
     // An availability refusal is the caller's input problem (400), not a
     // server failure -- everything composed after it never ran (the one
