@@ -2,6 +2,7 @@ const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('n
 const root=path.resolve(__dirname,'../..');
 const req=createRequire(root+'/cloudflare/package.json'),ts=req('typescript');
 const {openDb}=req('./scripts/harness/d1compat.cjs'),{loadAll}=req('./scripts/harness/load_migrations.cjs'),{sqliteD1Call}=req('./scripts/harness/sqlite_d1_bindings.cjs');
+assert.equal(loadAll().filter(sql => sql === fs.readFileSync(path.join(__dirname, '../migrations/0211_stock_lifecycle_guards.sql'), 'utf8')).length, 1)
 function modules(baseline=false){
  const cache=new Map(); function load(rel){if(cache.has(rel))return cache.get(rel).exports;
  const file=root+'/cloudflare/src/'+rel;
