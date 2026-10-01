@@ -1,3 +1,4 @@
+const { sqliteD1Call } = require('./harness/sqlite_d1_bindings.cjs')
 // Actual streaming backup/restore + actual bulk/replay handlers on SQLite.
 // Reuse existing memory R2/KV adapters only; no network or persistent fixtures.
 const fs = require('node:fs')
@@ -15,11 +16,11 @@ function binding(sql, writes) {
   function statement(text, params = []) {
     return {
       text, params, bind: (...values) => statement(text, values),
-      async first() { return sql.prepare(text).get(...params) || null },
-      async all() { return { results: sql.prepare(text).all(...params) } },
+      async first() { return sqliteD1Call(sql.prepare(text), 'get', params) || null },
+      async all() { return { results: sqliteD1Call(sql.prepare(text), 'all', params) } },
       async run() {
         writes.push(text)
-        const result = sql.prepare(text).run(...params)
+        const result = sqliteD1Call(sql.prepare(text), 'run', params)
         return { success: true, meta: { changes: result.changes, last_row_id: Number(result.lastInsertRowid) } }
       },
     }
@@ -27,10 +28,10 @@ function binding(sql, writes) {
   return { prepare: text => statement(text), async batch(items) {
     return sql.transaction(() => items.map(s => {
       if (/^SELECT\b/i.test(s.text.trim())) {
-        return { success: true, results: sql.prepare(s.text).all(...s.params) }
+        return { success: true, results: sqliteD1Call(sql.prepare(s.text), 'all', s.params) }
       }
       writes.push(s.text)
-      const result = sql.prepare(s.text).run(...s.params)
+      const result = sqliteD1Call(sql.prepare(s.text), 'run', s.params)
       return { success: true, meta: { changes: result.changes, last_row_id: Number(result.lastInsertRowid) } }
     }))()
   } }

@@ -1,3 +1,4 @@
+const { sqliteD1Call } = require('./harness/sqlite_d1_bindings.cjs')
 // Actual Hono routes + actual D1 adapter + real SQLite transactions. No SQL mocks.
 const fs = require('node:fs')
 const path = require('node:path')
@@ -46,13 +47,13 @@ function fixture(migrate = true) {
     prepare(text) {
       return {bind(...params) {
         if(params.length>100) throw Error('too many SQL variables')
-        return {text,params, async first(){reads++;return sql.prepare(text).get(...params)||null}, async all(){reads++;const results=sql.prepare(text).all(...params);readRows.push({text,bindings:params.length,rows:results.length});return {results}},async run(){const r=sql.prepare(text).run(...params);return {meta:{changes:r.changes,last_row_id:Number(r.lastInsertRowid)}}}}
+        return {text,params, async first(){reads++;return sqliteD1Call(sql.prepare(text), 'get', params)||null}, async all(){reads++;const results=sqliteD1Call(sql.prepare(text), 'all', params);readRows.push({text,bindings:params.length,rows:results.length});return {results}},async run(){const r=sqliteD1Call(sql.prepare(text), 'run', params);return {meta:{changes:r.changes,last_row_id:Number(r.lastInsertRowid)}}}}
       }}
     },
     async batch(statements) {
       batches++
       if(beforeBatch) {const fn=beforeBatch;beforeBatch=null;await fn()}
-      return sql.transaction(()=>statements.map((s,i)=>{if(failAt!==null&&(i===failAt||s.text.includes(failAt)))throw Error('injected failure');const r=sql.prepare(s.text).run(...s.params);return {meta:{changes:r.changes,last_row_id:Number(r.lastInsertRowid)}}}))()
+      return sql.transaction(()=>statements.map((s,i)=>{if(failAt!==null&&(i===failAt||s.text.includes(failAt)))throw Error('injected failure');const r=sqliteD1Call(sql.prepare(s.text), 'run', s.params);return {meta:{changes:r.changes,last_row_id:Number(r.lastInsertRowid)}}}))()
     }
   }}
   const ctx={waitUntil(){},passThroughOnException(){}}
