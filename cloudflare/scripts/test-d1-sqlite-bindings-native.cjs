@@ -75,6 +75,7 @@ async function main() {
     assert.throws(() => preflightSqliteD1(better.prepare('SELECT * FROM volatile')), /Expression tree is too large/)
     better.exec('ROLLBACK')
     better.exec('CREATE TEMP TABLE "temp.cache"(id INTEGER);CREATE UNIQUE INDEX "cache index" ON "temp.cache"(id);CREATE TEMP VIEW "cache view" AS SELECT * FROM "temp.cache"')
+    better.exec("CREATE INDEX 'single '' quote index' ON \"temp.cache\"(id)")
     preflightSqliteD1(better.prepare('SELECT * FROM "cache view"'))
     better.exec('CREATE TEMP TRIGGER "cache trigger" AFTER INSERT ON "temp.cache" BEGIN SELECT 1;END')
     preflightSqliteD1(better.prepare('INSERT INTO "temp.cache" VALUES(1)'))

@@ -88,7 +88,7 @@ function preflightSqliteD1(statement, { variableNumber = 100 } = {}) {
           let sql = object.sql
           if (object.schema === 'temp') {
             if (object.type === 'index' || /^CREATE\s+VIRTUAL\s+TABLE\b/i.test(sql)) {
-              sql = sql.replace(/^(CREATE\s+(?:(?:UNIQUE\s+)?INDEX|VIRTUAL\s+TABLE)\s+(?:IF\s+NOT\s+EXISTS\s+)?)(?:"(?:[^"]|"")*"|`(?:[^`]|``)*`|\[[^\]]*\]|[^\s(]+)/i, (_, prefix) => `${prefix}temp."${object.name.replaceAll('"', '""')}"`)
+              sql = sql.replace(/^(CREATE\s+(?:(?:UNIQUE\s+)?INDEX|VIRTUAL\s+TABLE)\s+(?:IF\s+NOT\s+EXISTS\s+)?)(?:"(?:[^"]|"")*"|'(?:[^']|'')*'|`(?:[^`]|``)*`|\[[^\]]*\]|[^\s(]+)/i, (_, prefix) => `${prefix}temp."${object.name.replaceAll('"', '""')}"`)
             } else if (!/^CREATE\s+TEMP(?:ORARY)?\b/i.test(sql)) {
               sql = sql.replace(/^CREATE\s+/i, 'CREATE TEMP ')
             }
