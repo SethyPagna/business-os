@@ -2,8 +2,19 @@ const fs = require('node:fs')
 const path = require('node:path')
 const Module = require('node:module')
 const origin = path.join(__dirname, 'test-stock-valuation-joint-native.cjs')
-let harness = fs.readFileSync(origin, 'utf8').split('async function fixtureE')[0]
-harness = harness.replace("const output = ts.transpileModule(source", "if(process.env.STOCK_INTEGRITY_BASELINE && rel==='lib/stockValuation.ts') source=execFileSync('git',['show','a8bd2cffbbede20ac358661c85cba03d840714d9:cloudflare/src/lib/stockValuation.ts'],{cwd:path.join(__dirname,'../..'),encoding:'utf8'}); const output = ts.transpileModule(source")
+const original = fs.readFileSync(origin, 'utf8')
+const controlLoader = String.raw`
+  if(process.env.STOCK_INTEGRITY_BASELINE && rel==='lib/stockValuation.ts') source=execFileSync('git',['show','a8bd2cffbbede20ac358661c85cba03d840714d9:cloudflare/src/lib/stockValuation.ts'],{cwd:path.join(__dirname,'../..'),encoding:'utf8'});
+  if(process.env.STOCK_INTEGRITY_GLOBAL_ONLY_CONTROL && rel==='lib/stockValuationHistory.ts') {
+    const start=source.indexOf('export async function validateValuationHistory');
+    const end=source.indexOf('export function assertValuationHistoryCapacity',start);
+    source=source.slice(0,start)+"export async function validateValuationHistory(db:D1Compat,source:string,rules:HistoryRules){const funding=await db.prepare('SELECT credit4 FROM stock_funding_latest WHERE source_id=@source').get({source});if(funding){const coverage=await db.prepare('SELECT SUM(s.coverage4) amount FROM stock_valuation_segments s JOIN stock_valuation_latest e ON e.id=s.event_id WHERE e.source_id=@source').get({source});requireHistory(coverage?.amount===funding.credit4)}return {guards:[],rowCount:0,eventCount:0}}"+source.slice(end);
+  }
+  if(process.env.STOCK_INTEGRITY_ACCEPT_TOTAL_ONLY_CONTROL && rel==='lib/stockValuationHistory.ts') {
+    source=source.replace("sameFields(actual, { event_id: event.id, agreement_id: raw.agreement_id, target_segment_id: share.segment_id, amount4: share.amount4, funding_event_id: funding!.id });", "requireHistory(acceptedRows.reduce((sum,row)=>sum+row.amount4,0)===shares.reduce((sum,row)=>sum+row.amount4,0));");
+  }
+  const output = ts.transpileModule(source`
+let harness = (process.env.STOCK_INTEGRITY_SECTION==='original' ? original : original.split('async function fixtureE')[0]).replace('const output = ts.transpileModule(source',controlLoader)
 const cases = String.raw`
 async function established() {
   const f=fixture({}, {quantity:4,free:1,cost:100,gross4:1000000})
@@ -123,6 +134,73 @@ async function race() {
   assert.equal(f.db.prepare('SELECT credit4 FROM stock_funding_latest').get().credit4,300000)
   f.db.close(); console.log('PASS synthetic graph race before single atomic batch refuses command effects')
 }
+async function balanced() {
+  const f=fixture({}, {quantity:4,free:1,cost:100,gross4:1000000})
+  await ok(f,admission()); await ok(f,hold(0,0))
+  await ok(f,body('hold',1,0,{segment_id:'original',child_segment_id:'second-held',quantity:1,reason:'broken'}))
+  await ok(f,body('pending',2,0,{agreement_id:'agreement-main',amount_usd:30,targets:[{allocation_id:'affected',amount_usd:20},{allocation_id:'second-held',amount_usd:10}],proof:'Unequal exact target promises'}))
+  const accepted=accept(3,1,[{segment_id:'affected',amount_usd:20},{segment_id:'second-held',amount_usd:10}])
+  await ok(f,accepted)
+  syntheticUpdate(f,'stock_valuation_acceptances',"UPDATE stock_valuation_acceptances SET amount4=CASE target_segment_id WHEN 'affected' THEN 100000 ELSE 200000 END")
+  assert.equal(f.db.prepare('SELECT SUM(amount4) n FROM stock_valuation_acceptances').get().n,300000)
+  const before=snapshot(f),batches=f.batchSizes.length
+  const replayed=await post(f,accepted)
+  const next=await post(f,body('repair',4,2,{segment_id:'affected',child_segment_id:'repaired',quantity:1}))
+  console.log('synthetic balanced wrong shares preserve total30',JSON.stringify({replay:replayed.status,transition:next.status}))
+  assert.equal(replayed.status,409); assert.equal(next.status,409)
+  assert.equal(snapshot(f),before); assert.equal(f.batchSizes.length,batches)
+  f.db.close(); console.log('PASS unequal target acceptance ownership cannot hide behind equal global sum')
+}
+async function capacity() {
+  const f=fixture({}, {quantity:4,free:1,cost:100,gross4:1000000})
+  await ok(f,admission())
+  let segment='original',final
+  for(let revision=0;revision<31;revision++) {
+    const kind=revision%2===0?'hold':'repair'
+    const child='bounded-'+revision
+    final=body(kind,revision,0,{segment_id:segment,child_segment_id:child,quantity:4,...(kind==='hold'?{reason:'broken'}:{})})
+    if(revision===30) {
+      f.hooks.afterBatchThrow=true
+      const batches=f.batchSizes.length
+      const response=await post(f,final)
+      assert.equal(response.status,200); assert.equal(response.data.replayed,true)
+      assert.equal(f.batchSizes.length,batches+1)
+    } else await ok(f,final)
+    segment=child
+  }
+  assert.equal(f.db.prepare('SELECT COUNT(*) n FROM stock_valuation_events').get().n,32)
+  const before=snapshot(f),batches=f.batchSizes.length
+  const replayed=await post(f,final); assert.equal(replayed.status,200); assert.equal(replayed.data.replayed,true)
+  const refused=await post(f,body('repair',31,0,{segment_id:segment,child_segment_id:'overflow',quantity:4}))
+  assert.equal(refused.status,409); assert.equal(refused.data.code,'valuation_history_limit')
+  assert.equal(snapshot(f),before); assert.equal(f.batchSizes.length,batches)
+  assert.ok(Math.max(...f.batchSizes)<=400); assert.ok(f.maxBindings()<=100)
+  console.log('PASS bounded32 event native ledger final lost-response replay once and33rd refused',JSON.stringify({events:32,maxStatements:Math.max(...f.batchSizes),maxBindings:f.maxBindings(),exprDepth:f.db.limits.exprDepth}))
+  f.db.close()
+  const rows=fixture({}, {quantity:4,free:1,cost:100,gross4:1000000}); await ok(rows,admission())
+  let count=0,last
+  while(count<31) {
+    const before=snapshot(rows),batches=rows.batchSizes.length
+    const command=body('hold',count,0,{segment_id:'original',child_segment_id:'small-'+count,quantity:0.01,reason:'broken'})
+    const response=await post(rows,command)
+    if(response.status===409) {
+      assert.equal(response.data.code,'valuation_history_limit')
+      assert.equal(snapshot(rows),before); assert.equal(rows.batchSizes.length,batches)
+      break
+    }
+    assert.equal(response.status,200); count++; last=command
+  }
+  assert.equal(count,18)
+  assert.equal((await post(rows,last)).status,200)
+  const admittedRows=['stock_funding_sources','stock_valuation_sources','stock_valuation_events','stock_valuation_segments','stock_valuation_agreements','stock_valuation_acceptances','stock_valuation_receipts','stock_funding_events','stock_funding_claims','stock_funding_receipts','audit_logs'].reduce((sum,table)=>sum+rows.db.prepare('SELECT COUNT(*) n FROM '+table).get().n,0)
+  assert.equal(admittedRows,252); assert.ok(Math.max(...rows.batchSizes)<=400); assert.ok(rows.maxBindings()<=100)
+  console.log('PASS bounded256 rows native ledger refuses projected275 before writes and permits last replay',JSON.stringify({events:count+1,rows:admittedRows,maxStatements:Math.max(...rows.batchSizes),maxBindings:rows.maxBindings(),exprDepth:rows.db.limits.exprDepth}))
+  rows.db.close()
+  const limit=load('lib/stockValuationHistory.ts').assertValuationHistoryCapacity
+  assert.throws(()=>limit({rowCount:0,eventCount:0},'hold',1,0,401),/valuation_history_limit/)
+  assert.doesNotThrow(()=>limit({rowCount:0,eventCount:0},'hold',1,0,400))
+  console.log('PASS exact400 statement capacity boundary')
+}
 (async()=>{
   const section=process.env.STOCK_INTEGRITY_SECTION
   if (!section||section==='money') await money()
@@ -130,9 +208,11 @@ async function race() {
   if (!section||section==='strong') await strong()
   if (!section||section==='graph') await graph()
   if (!section||section==='race') await race()
+  if (!section||section==='balanced') await balanced()
+  if (!section||section==='capacity') await capacity()
 })().catch(error=>{console.error(error);process.exitCode=1})
 `
 const compiled=new Module(origin,module)
 compiled.filename=origin
 compiled.paths=Module._nodeModulePaths(path.dirname(origin))
-compiled._compile(harness+';'+cases,origin)
+compiled._compile(process.env.STOCK_INTEGRITY_SECTION==='original' ? harness : harness+';'+cases,origin)

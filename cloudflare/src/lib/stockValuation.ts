@@ -5,7 +5,7 @@ import { ordinaryBusinessBatch } from './businessMaintenanceGuard';
 import { exactMoney4, quantityDecimal, subtractQuantity } from './stockDispositionBasis';
 import { feeRequestDigest, normalizeFeeRequestId } from './feeOperationReceipt';
 import { applyValuationCoverage, splitValuationSegment, sumValuationQuantity, valuationTotals, type ValuationSegment } from './stockValuationMath';
-import { validateValuationHistory } from './stockValuationHistory';
+import { assertValuationHistoryCapacity, validateValuationHistory } from './stockValuationHistory';
 export class StockValuationError extends Error {
     constructor(public code: string, public statusCode: 400 | 403 | 409 = 409) { super(code); }
 }
@@ -156,7 +156,7 @@ async function replay(db: D1Compat, actor: SessionUser, request: string, digest:
 }
 async function checkedHistory(db: D1Compat, source: unknown) {
     try { return await validateValuationHistory(db, identity(source), { parseRequest: parseValuationRequest, parseAmounts: parseAttributedAmounts, planPhysical: planPhysicalSegments }); }
-    catch { return refuse('valuation_history_corrupt'); }
+    catch (error) { return refuse(error instanceof Error && error.message === 'valuation_history_limit' ? 'valuation_history_limit' : 'valuation_history_corrupt'); }
 }
 export async function commitStockValuation(env: {
     DB: D1Database;
@@ -327,6 +327,8 @@ export async function commitStockValuation(env: {
     assertSql('EXISTS(SELECT 1 FROM branch_stock WHERE product_id=@product AND branch_id=@branch AND quantity=@branchAfter) AND EXISTS(SELECT 1 FROM products WHERE id=@product AND stock_quantity=@productAfter)');
     statements.push({ sql: 'DELETE FROM stock_valuation_context WHERE token=@token', params }, { sql: 'DELETE FROM stock_valuation_guards WHERE token=@token', params });
     assertSql('NOT EXISTS(SELECT 1 FROM stock_valuation_context WHERE token=@token) AND NOT EXISTS(SELECT 1 FROM stock_valuation_guards WHERE token=@token)');
+    try { assertValuationHistoryCapacity(history, kind, segments.length, shares.length, statements.length); }
+    catch { return refuse('valuation_history_limit'); }
     try {
         await ordinaryBusinessBatch(db, statements);
     }

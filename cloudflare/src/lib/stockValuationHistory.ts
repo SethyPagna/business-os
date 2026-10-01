@@ -15,6 +15,8 @@ type HistoryRules = {
 };
 type Agreement = { amount4: number; targets: { allocation_id: string; amount4: number }[]; accepted: Map<string, number> };
 const requireHistory = (condition: unknown): void => { if (!condition) throw new Error('valuation_history_corrupt'); };
+const maximumHistoryRows = 256;
+const maximumHistoryEvents = 32;
 const same = (actual: unknown, expected: unknown) => requireHistory(JSON.stringify(actual) === JSON.stringify(expected));
 function canonicalJson(value: string): Row {
     const parsed = JSON.parse(value);
@@ -89,11 +91,14 @@ async function readHistory(db: D1Compat, source: string) {
         audit_logs: `(entity='stock_valuation' AND (entity_id IN (${valuationEvents}) OR record_id IN (${valuationEvents}))) OR (entity='stock_funding' AND (entity_id IN (${fundingEvents}) OR record_id IN (${fundingEvents})))`,
     };
     const rows: Record<string, Row[]> = {}, guards: Statement[] = [];
+    let count = 0;
     for (const [table, where] of Object.entries(scopes)) {
-        rows[table] = await db.prepare(`SELECT * FROM ${table} WHERE ${where}`).all<Row>({ source });
+        rows[table] = await db.prepare(`SELECT * FROM ${table} WHERE ${where} LIMIT ${maximumHistoryRows + 1}`).all<Row>({ source });
+        count += rows[table].length;
+        if (count > maximumHistoryRows) throw new Error('valuation_history_limit');
         guards.push(...snapshotGuard(table, where, { source }, rows[table]));
     }
-    return { rows, guards };
+    return { rows, guards, rowCount: count };
 }
 function planAgreement(raw: Record<string, unknown>, segments: ValuationSegment[], rules: HistoryRules): Agreement {
     const amount4 = positiveAmount(raw.amount_usd);
@@ -143,12 +148,65 @@ async function validateFundingReceipt(event: Row, receipt: Row, intent: Request,
     if (cash) requireHistory(event.id === `cash-${await feeRequestDigest(`${cashMethod}:${cashReference}`)}`);
     assertAudit(audits, 'stock_funding', event, responseJson);
 }
+async function validateHistoryIntent(event: Row, revision: number, sourceId: string, generation: number, rows: Record<string, Row[]>, rules: HistoryRules) {
+    requireHistory(event.source_id === sourceId && event.revision === revision && new Date(event.occurred_at).toISOString() === event.occurred_at);
+    const receipts = rows.stock_valuation_receipts.filter(receipt => receipt.event_id === event.id);
+    requireHistory(receipts.length === 1);
+    const receipt = receipts[0];
+    const raw = canonicalJson(receipt.request_json);
+    const intent = rules.parseRequest(raw);
+    const digest = await feeRequestDigest(receipt.request_json);
+    requireHistory(intent.sourceId === sourceId && intent.kind === event.kind && intent.request === receipt.request_id && normalizeFeeRequestId(receipt.request_id) === receipt.request_id && intent.revision === (revision === 0 ? 0 : revision - 1) && intent.generation === generation);
+    sameFields(receipt, { actor_id: event.actor_id, request_digest: digest });
+    canonicalJson(receipt.response_json);
+    return { receipt, raw, intent, digest };
+}
+function planHistoricalAgreement(event: Row, raw: Record<string, unknown>, sourceId: string, segments: ValuationSegment[], agreements: Map<string, Agreement>, rows: Record<string, Row[]>, rules: HistoryRules) {
+    if (event.kind === 'pending') {
+        const id = normalizedText(raw.agreement_id, 120);
+        requireHistory(id === raw.agreement_id && !agreements.has(id) && normalizedText(raw.proof, 120) === raw.proof);
+        const agreement = planAgreement(raw, segments, rules);
+        const actual = rows.stock_valuation_agreements.filter(row => row.id === id);
+        requireHistory(actual.length === 1);
+        sameFields(actual[0], { source_id: sourceId, amount4: agreement.amount4, targets_json: JSON.stringify(agreement.targets), proof: raw.proof });
+        agreements.set(id, agreement);
+        return { amount4: agreement.amount4, claim: id, shares: [] as { segment_id: string; amount4: number }[], segments };
+    }
+    if (event.kind === 'accept') {
+        const id = normalizedText(raw.agreement_id, 120);
+        const agreement = agreements.get(id);
+        requireHistory(id === raw.agreement_id && agreement);
+        return { ...planAcceptance(raw, agreement!, segments, rules), claim: `${id}:${event.id}` };
+    }
+    const amount4 = ['refund', 'payment', 'shipping'].includes(event.kind) ? positiveAmount(raw.amount_usd) : 0;
+    return { amount4, claim: null, shares: [] as { segment_id: string; amount4: number }[], segments };
+}
+function validateHistorySnapshot(event: Row, raw: Record<string, unknown>, source: Row, rows: Record<string, Row[]>, segments: ValuationSegment[], funding: ReturnType<typeof projectedFunding>, state: FundingState, agreements: Map<string, Agreement>, shares: { segment_id: string; amount4: number }[], previous: ReturnType<typeof valuationTotals> | null, receipt: Row) {
+    const acceptedRows = rows.stock_valuation_acceptances.filter(row => row.event_id === event.id);
+    requireHistory(acceptedRows.length === shares.length);
+    for (const share of shares) {
+        const actual = acceptedRows.find(row => row.target_segment_id === share.segment_id);
+        sameFields(actual, { event_id: event.id, agreement_id: raw.agreement_id, target_segment_id: share.segment_id, amount4: share.amount4, funding_event_id: funding!.id });
+    }
+    segments.sort((a, b) => a.segment_id.localeCompare(b.segment_id));
+    const actualSegments = rows.stock_valuation_segments.filter(row => row.event_id === event.id).sort((a, b) => a.segment_id.localeCompare(b.segment_id)).map(({ event_id, ...segment }) => segment);
+    same(actualSegments, segments);
+    const totals = valuationTotals(segments, source.gross4, source.quantity);
+    requireHistory(totals.coverage4 === state.credit4);
+    const pending4 = pendingTotal(agreements);
+    requireHistory(Number.isSafeInteger(pending4) && pending4 >= 0);
+    sameFields(event, { loss4: totals.historical_loss4 - (previous?.historical_loss4 || 0), recovery4: totals.recovery4 - (previous?.recovery4 || 0), expense_category: raw.expense_category ?? null });
+    const responseJson = JSON.stringify({ valuation_version: 3, source_id: source.id, event_id: event.id, revision: event.revision, kind: event.kind, funding, segments, totals, pending4 });
+    requireHistory(responseJson === receipt.response_json);
+    assertAudit(rows.audit_logs, 'stock_valuation', event, responseJson);
+}
 export async function validateValuationHistory(db: D1Compat, sourceId: string, rules: HistoryRules) {
-    const { rows, guards } = await readHistory(db, sourceId);
+    const { rows, guards, rowCount } = await readHistory(db, sourceId);
     const events = rows.stock_valuation_events.sort((a, b) => a.revision - b.revision);
+    if (events.length > maximumHistoryEvents) throw new Error('valuation_history_limit');
     if (!events.length) {
         requireHistory(Object.values(rows).every(list => list.length === 0));
-        return { guards };
+        return { guards, rowCount, eventCount: 0 };
     }
     requireHistory(rows.stock_funding_sources.length === 1 && rows.stock_valuation_sources.length === 1);
     const source = rows.stock_funding_sources[0];
@@ -163,21 +221,13 @@ export async function validateValuationHistory(db: D1Compat, sourceId: string, r
     const fundingEvents = rows.stock_funding_events.sort((a, b) => a.generation - b.generation);
     requireHistory(rows.stock_funding_receipts.length === fundingEvents.length && rows.audit_logs.length === events.length + fundingEvents.length);
     const agreements = new Map<string, Agreement>(), usedClaims = new Set<string>(), usedChildren = new Set(['original']);
-    let segments: ValuationSegment[] = [], fundingIndex = 0, pending4 = 0;
+    let segments: ValuationSegment[] = [], fundingIndex = 0;
     let state: FundingState = { gross4: source.gross4, paid4: source.opening_paid4, debt4: source.opening_debt4, credit4: 0, asset4: 0, cashIn4: 0, cashOut4: 0, shipping4: 0 };
     let funding: ReturnType<typeof projectedFunding> | undefined;
     for (let revision = 0; revision < events.length; revision++) {
         const event = events[revision];
-        requireHistory(event.source_id === sourceId && event.revision === revision && new Date(event.occurred_at).toISOString() === event.occurred_at);
-        const receipts = rows.stock_valuation_receipts.filter(receipt => receipt.event_id === event.id);
-        requireHistory(receipts.length === 1);
-        const receipt = receipts[0], raw = canonicalJson(receipt.request_json), intent = rules.parseRequest(raw);
-        const digest = await feeRequestDigest(receipt.request_json);
-        requireHistory(intent.sourceId === sourceId && intent.kind === event.kind && intent.request === receipt.request_id && normalizeFeeRequestId(receipt.request_id) === receipt.request_id && intent.revision === (revision === 0 ? 0 : revision - 1) && intent.generation === (funding?.generation ?? 0));
-        sameFields(receipt, { actor_id: event.actor_id, request_digest: digest });
-        canonicalJson(receipt.response_json);
+        const { receipt, raw, intent, digest } = await validateHistoryIntent(event, revision, sourceId, funding?.generation ?? 0, rows, rules);
         const previous = revision ? valuationTotals(segments, source.gross4, source.quantity) : null;
-        let amount4 = 0, claim: string | null = null, shares: { segment_id: string; amount4: number }[] = [];
         if (revision === 0) {
             requireHistory(event.kind === 'admit'); validateOpening(source, raw, event.actor_id);
             segments = [{ segment_id: 'original', allocation_id: 'original', fate: 'sellable', quantity: source.quantity, gross4: source.gross4, coverage4: 0, loss4: 0, recovery4: 0, reason: '' }];
@@ -187,22 +237,8 @@ export async function validateValuationHistory(db: D1Compat, sourceId: string, r
             usedChildren.add(raw.child_segment_id as string);
             segments = rules.planPhysical(segments, raw, event.kind);
         }
-        if (event.kind === 'pending') {
-            const id = normalizedText(raw.agreement_id, 120);
-            requireHistory(id === raw.agreement_id && !agreements.has(id) && normalizedText(raw.proof, 120) === raw.proof);
-            const agreement = planAgreement(raw, segments, rules);
-            const actual = rows.stock_valuation_agreements.filter(row => row.id === id);
-            requireHistory(actual.length === 1);
-            sameFields(actual[0], { source_id: sourceId, amount4: agreement.amount4, targets_json: JSON.stringify(agreement.targets), proof: raw.proof });
-            agreements.set(id, agreement); amount4 = agreement.amount4; claim = id;
-        }
-        if (event.kind === 'accept') {
-            const id = normalizedText(raw.agreement_id, 120), agreement = agreements.get(id);
-            requireHistory(id === raw.agreement_id && agreement);
-            const accepted = planAcceptance(raw, agreement!, segments, rules);
-            shares = accepted.shares; amount4 = accepted.amount4; segments = accepted.segments; claim = `${id}:${event.id}`;
-        }
-        if (['refund', 'payment', 'shipping'].includes(event.kind)) amount4 = positiveAmount(raw.amount_usd);
+        const { amount4, claim, shares, segments: nextSegments } = planHistoricalAgreement(event, raw, sourceId, segments, agreements, rows, rules);
+        segments = nextSegments;
         if (['admit', 'pending', 'accept', 'refund', 'payment', 'shipping'].includes(event.kind)) {
             const financial = fundingEvents[fundingIndex];
             requireHistory(financial && financial.generation === fundingIndex && financial.source_id === sourceId && financial.actor_id === event.actor_id && new Date(financial.occurred_at).toISOString() === financial.occurred_at);
@@ -220,25 +256,14 @@ export async function validateValuationHistory(db: D1Compat, sourceId: string, r
             funding = projectedFunding(financial); fundingIndex++;
         }
         requireHistory(funding);
-        const acceptedRows = rows.stock_valuation_acceptances.filter(row => row.event_id === event.id);
-        requireHistory(acceptedRows.length === shares.length);
-        for (const share of shares) {
-            const actual = acceptedRows.find(row => row.target_segment_id === share.segment_id);
-            sameFields(actual, { event_id: event.id, agreement_id: raw.agreement_id, target_segment_id: share.segment_id, amount4: share.amount4, funding_event_id: funding!.id });
-        }
-        segments.sort((a, b) => a.segment_id.localeCompare(b.segment_id));
-        const actualSegments = rows.stock_valuation_segments.filter(row => row.event_id === event.id).sort((a, b) => a.segment_id.localeCompare(b.segment_id)).map(({ event_id, ...segment }) => segment);
-        same(actualSegments, segments);
-        const totals = valuationTotals(segments, source.gross4, source.quantity);
-        requireHistory(totals.coverage4 === state.credit4);
-        pending4 = pendingTotal(agreements);
-        requireHistory(Number.isSafeInteger(pending4) && pending4 >= 0);
-        sameFields(event, { loss4: totals.historical_loss4 - (previous?.historical_loss4 || 0), recovery4: totals.recovery4 - (previous?.recovery4 || 0), expense_category: raw.expense_category ?? null });
-        const responseJson = JSON.stringify({ valuation_version: 3, source_id: sourceId, event_id: event.id, revision, kind: event.kind, funding, segments, totals, pending4 });
-        requireHistory(responseJson === receipt.response_json);
-        assertAudit(rows.audit_logs, 'stock_valuation', event, responseJson);
+        validateHistorySnapshot(event, raw, source, rows, segments, funding!, state, agreements, shares, previous, receipt);
     }
     requireHistory(fundingIndex === fundingEvents.length && agreements.size === rows.stock_valuation_agreements.length && usedClaims.size === rows.stock_funding_claims.length);
     requireHistory(rows.stock_valuation_acceptances.every(row => events.some(event => event.id === row.event_id && event.kind === 'accept') && agreements.has(row.agreement_id)));
-    return { guards };
+    return { guards, rowCount, eventCount: events.length };
+}
+export function assertValuationHistoryCapacity(history: { rowCount: number; eventCount: number }, kind: string, segmentCount: number, shareCount: number, statementCount: number) {
+    const financial = ['admit', 'pending', 'accept', 'refund', 'payment', 'shipping'].includes(kind);
+    const addedRows = 3 + segmentCount + (financial ? 3 : 0) + (kind === 'admit' ? 2 : 0) + (kind === 'pending' ? 2 : 0) + (kind === 'accept' ? 1 + shareCount : 0);
+    if (history.rowCount + addedRows > maximumHistoryRows || history.eventCount + 1 > maximumHistoryEvents || statementCount > 400) throw new Error('valuation_history_limit');
 }
