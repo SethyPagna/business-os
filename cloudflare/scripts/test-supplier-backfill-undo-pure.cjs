@@ -20,6 +20,7 @@ const path = require('node:path')
 const ts = require('typescript')
 // Load the actual dependency before any permissive per-module shim is active.
 const moneyPrecision = require('../src/lib/moneyPrecision.ts')
+const { loadStockLifecycleFixture, nativeStockFixtureBinding } = require('./harness/load_stock_lifecycle_fixture.cjs')
 const Module = require('module')
 const { openDb } = require('./harness/d1compat.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')
@@ -82,7 +83,7 @@ function loadUndoAppliers(d1) {
     },
     '../index': {},
     './auth': {},
-    './db': { getDb: () => dbAdapter },
+    './db': { ...loadStockLifecycleFixture('lib/db.ts'), getDb: () => loadStockLifecycleFixture('lib/db.ts').getDb({ DB: nativeStockFixtureBinding(d1.db, stmts => d1.batch(stmts)) }) },
     './audit': { audit: async () => {} },
     '../durable-objects/broadcastHub': { broadcast: async () => {} },
     './branchWrites': { branchUpdateStatements: () => [] },
@@ -151,7 +152,7 @@ function loadUndoAppliers(d1) {
     fileName: 'undoAppliers.ts',
   })
   const original = Module._load
-  Module._load = (request, parent, isMain) => ['./moneyPrecision', '../lib/moneyPrecision', './moneyPrecision.ts', '../lib/moneyPrecision.ts'].includes(request) ? moneyPrecision :
+  Module._load = (request, parent, isMain) => request === './stockLifecycle' ? loadStockLifecycleFixture() : ['./moneyPrecision', '../lib/moneyPrecision', './moneyPrecision.ts', '../lib/moneyPrecision.ts'].includes(request) ? moneyPrecision :
     Object.prototype.hasOwnProperty.call(stubs, request) ? stubs[request] : original.call(Module, request, parent, isMain)
   const mod = { exports: {} }
   try {

@@ -24,6 +24,7 @@ const ts = require('typescript')
 // Load the actual dependency before any permissive per-module shim is active.
 const moneyPrecision = require('../src/lib/moneyPrecision.ts')
 const assert = require('assert')
+const { loadStockLifecycleFixture, nativeStockFixtureBinding } = require('./harness/load_stock_lifecycle_fixture.cjs')
 const Database = require('better-sqlite3')
 
 // --- load real TS modules with a controlled require shim -------------------
@@ -38,7 +39,7 @@ function transpile(relPath) {
 
 function loadModule(relPath, requireShim) {
   const module = { exports: {} }
-  new Function('exports', 'require', 'module', transpile(relPath))(module.exports, (request) => ['./moneyPrecision', '../lib/moneyPrecision', './moneyPrecision.ts', '../lib/moneyPrecision.ts'].includes(request) ? moneyPrecision : requireShim(request), module)
+  new Function('exports', 'require', 'module', transpile(relPath))(module.exports, (request) => request === './stockLifecycle' ? loadStockLifecycleFixture() : ['./moneyPrecision', '../lib/moneyPrecision', './moneyPrecision.ts', '../lib/moneyPrecision.ts'].includes(request) ? moneyPrecision : requireShim(request), module)
   return module.exports
 }
 
@@ -54,7 +55,7 @@ function toDbBool(value, fallback = 1) {
 
 const branchRoles = loadModule('lib/branchRoles.ts', require)
 const canonicalBranchIdentity = loadModule('lib/canonicalBranchIdentity.ts', (id) => {
-  if (id === './db') return { toDbBool }
+  if (id === './db') return loadStockLifecycleFixture('lib/db.ts')
   if (id === './branchRoles') return branchRoles
   return require(id)
 })
@@ -96,7 +97,7 @@ function wrapDb(sqlite) {
           const st = sqlite.prepare(s.sql)
           const invoke = (method) => s.params == null
             ? st[method]()
-            : Array.isArray(s.params) ? st[method](...s.params) : st[method](s.params)
+            : Array.isArray(s.params) ? require('./harness/sqlite_d1_bindings.cjs').sqliteD1Call(st, method, s.params) : st[method](s.params)
           if (st.reader) return { results: invoke('all') }
           const result = invoke('run')
           return { results: [], changes: result.changes, meta: { changes: result.changes } }
@@ -167,7 +168,7 @@ const undoAppliers = loadModule('lib/undoAppliers.ts', (id) => {
       assert.strictEqual(payload.operation_id, 'settlement-op-1')
     },
   }
-  if (id === './db') return { getDb: () => wrapDb(sharedDb) }
+  if (id === './db') return { ...loadStockLifecycleFixture('lib/db.ts'), getDb: () => loadStockLifecycleFixture('lib/db.ts').getDb({ DB: nativeStockFixtureBinding(sharedDb, stmts => wrapDb(sharedDb).batch(stmts)) }) }
   if (id === './audit') return { audit: async () => {} }
   if (id === '../durable-objects/broadcastHub') return { broadcast: async () => {} }
   if (id === './branchWrites') return branchWrites

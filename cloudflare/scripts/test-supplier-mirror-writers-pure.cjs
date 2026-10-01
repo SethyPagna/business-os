@@ -47,6 +47,7 @@ const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
 
+const { loadStockLifecycleFixture, nativeStockFixtureBinding } = require('./harness/load_stock_lifecycle_fixture.cjs')
 const cloudflareRoot = path.join(__dirname, '..')
 const { openDb } = require('./harness/d1compat.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')
@@ -60,27 +61,9 @@ function ok(cond, label) {
 }
 
 // ---- compile the real writers ----------------------------------------------
-const tscVersion = execSync('npx tsc --version', { cwd: cloudflareRoot, encoding: 'utf8' }).trim()
-const ignoreConfigFlag = /^Version\s+(?:[6-9]|\d{2,})\./.test(tscVersion) ? ' --ignoreConfig' : ''
-const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'supplier-mirror-'))
-try {
-  execSync(
-    `npx tsc "${path.join(cloudflareRoot, 'src', 'lib', 'stockRevert.ts')}" "${path.join(cloudflareRoot, 'src', 'lib', 'stockActionCommit.ts')}" ` +
-      `--outDir "${tmpDir}" --rootDir "${path.join(cloudflareRoot, 'src', 'lib')}" ` +
-      `--module commonjs --target es2022 --moduleResolution node --esModuleInterop --skipLibCheck --noEmitOnError false${ignoreConfigFlag}`,
-    { cwd: cloudflareRoot, stdio: 'pipe' },
-  )
-} catch (err) {
-  // Cloudflare-only TYPES make the standalone compile exit non-zero; the
-  // emitted JS is still correct (see test-stock-revert-pure.cjs).
-  if (!fs.existsSync(path.join(tmpDir, 'stockRevert.js')) || !fs.existsSync(path.join(tmpDir, 'stockActionCommit.js'))) {
-    console.error('tsc did not emit the writers:', String(err && err.stdout || err))
-    throw err
-  }
-}
-const stockRevert = require(path.join(tmpDir, 'stockRevert.js'))
-const productBatches = require(path.join(tmpDir, 'productBatches.js'))
-const stockActionCommit = require(path.join(tmpDir, 'stockActionCommit.js'))
+const stockRevert = loadStockLifecycleFixture('lib/stockRevert.ts')
+const productBatches = loadStockLifecycleFixture('lib/productBatches.ts')
+const stockActionCommit = loadStockLifecycleFixture('lib/stockActionCommit.ts')
 ok(typeof stockRevert.applyMovementRevert === 'function' && typeof productBatches.receiveBatchStock === 'function'
   && typeof stockActionCommit.applyUnifiedStockAdd === 'function', 'real writers compiled')
 
