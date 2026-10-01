@@ -1030,6 +1030,15 @@ function manualChunks(id: string): string | undefined {
     // catch-all below it lands in 'app-shared' and adds ~6 KB to the public
     // catalog closure (tests/performanceBudgets.test.ts).
     if (normalized.includes('/src/components/shared/DraftChipFloat.tsx')) return 'draft-chip-float'
+    // The Resolve grid and modal are requested only by the two lazy Duplicates
+    // tabs. Left to the catch-all they land in 'app-shared' and add ~9 KB to the
+    // public catalog closure (tests/performanceBudgets.test.ts).
+    if (
+      normalized.includes('/src/components/shared/ResolveGrid.tsx')
+      || normalized.includes('/src/components/shared/ResolveModal.tsx')
+    ) {
+      return 'resolve-grid'
+    }
     if (normalized.includes('/src/components/shared/QuickPreferenceToggles.tsx')) return 'shared-ui'
     if (normalized.includes('/src/components/shared/PaginationControls.tsx')) return 'shared-ui'
     if (normalized.includes('/src/components/shared/FilterMenu.tsx')) return 'shared-ui'

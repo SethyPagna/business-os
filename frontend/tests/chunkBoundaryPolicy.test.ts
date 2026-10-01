@@ -39,6 +39,10 @@ const boundaries: Array<[string, string]> = [
   ['components/shared/UnsavedChangesPrompt.tsx', 'shared-modal'],
   // The phone Draft chip body stays off app-shared so the public catalog budget holds (DRAFT-CHIP).
   ['components/shared/DraftChipFloat.tsx', 'draft-chip-float'],
+  // The Resolve grid and modal open only from the two Duplicates tabs (lazy
+  // chunks); in app-shared they added ~9 KB to the public catalog closure.
+  ['components/shared/ResolveGrid.tsx', 'resolve-grid'],
+  ['components/shared/ResolveModal.tsx', 'resolve-grid'],
   ['components/shared/InfoHint.tsx', 'shared-ui'],
   ['components/shared/TruncatedText.tsx', 'shared-ui'],
   ['components/shared/AlphaIndexRail.tsx', 'shared-ui'],
