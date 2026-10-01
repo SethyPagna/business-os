@@ -15,9 +15,13 @@
 // is deliberately NOT part of this mapping -- stock is a "right now" fact and
 // stays unscoped, which is also why /api/inventory/stats takes no dates.
 
+import { continuousRangeParams } from '../../utils/continuousRangeParams.ts'
+
 export type InventoryProductsSearchRange = {
   startDate?: string
   endDate?: string
+  startTime?: string
+  endTime?: string
 }
 
 export type InventoryProductsSearchParams = {
@@ -28,6 +32,8 @@ export type InventoryProductsSearchParams = {
   pageSize: number
   startDate?: string
   endDate?: string
+  createdFrom?: string
+  createdTo?: string
 }
 
 export function buildInventoryProductsSearchParams({
@@ -56,9 +62,6 @@ export function buildInventoryProductsSearchParams({
   // Each bound is sent on its own: a half-open range ("everything since the
   // 1st") is a real answer, and dropping it because the other end is blank
   // would silently widen the window back to all time.
-  const startDate = String(range?.startDate || '').trim()
-  const endDate = String(range?.endDate || '').trim()
-  if (startDate) params.startDate = startDate
-  if (endDate) params.endDate = endDate
+  Object.assign(params, continuousRangeParams(range))
   return params
 }

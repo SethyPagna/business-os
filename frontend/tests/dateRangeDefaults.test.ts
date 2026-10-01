@@ -474,6 +474,7 @@ assert.equal(masked[2].sub, undefined)
 let cleared = 0
 let requested = 0
 await evaluate(variable(inventory, 'loadStatsStrip'), { ...hooks, isActive: true, stripRange: preset('all'),
+  notify: () => {}, tr: (key: string) => key,
   stripRequestRef: { current: 2 }, setStripKernel: () => { cleared++ }, setStripCustomerReturns: () => { cleared++ },
   setStripSupplierReturns: () => { cleared++ }, setStripLoading: () => {}, getSalesStatsStrip: () => { requested++ },
 })()
@@ -481,7 +482,7 @@ assert.equal(cleared, 3)
 assert.equal(requested, 0)
 const csvCall = find(inventory, (node) => ts.isCallExpression(node) && node.expression.getText() === 'downloadCSV'
   && node.arguments[0]?.getText().includes('inventory-stats-'))[0] as ts.CallExpression
-const exportRows = evaluate(csvCall.arguments[1].getText(), { hasRange: false, canViewCosts: true, startDate: '', endDate: '',
+const exportRows = evaluate(csvCall.arguments[1].getText(), { hasRange: false, canViewCosts: true, startDate: '', endDate: '', range: { startTime: '', endTime: '' },
   totalProducts: 17, inStockCount: 10, lowStockCount: 3, outStockCount: 4, totalValue: 80,
   totals: { revenue_usd: 999 }, cust: { count: 999 }, supp: { count: 999 },
 })

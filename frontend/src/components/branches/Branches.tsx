@@ -603,6 +603,8 @@ export default function Branches({ embedded = false, view, showSectionNavigation
             () => branchApi.getTransfers({
               startDate: branchDateRange.startDate || undefined,
               endDate: branchDateRange.endDate || undefined,
+              startTime: branchDateRange.startTime || undefined,
+              endTime: branchDateRange.endTime || undefined,
               fromBranchId: transferFromFilter !== 'all' ? transferFromFilter : undefined,
               toBranchId: transferToFilter !== 'all' ? transferToFilter : undefined,
               page: transferPage,
@@ -660,7 +662,7 @@ export default function Branches({ embedded = false, view, showSectionNavigation
     loadPromiseRef.current = wrappedPromise
     loadPromiseModeRef.current = requestedMode
     return wrappedPromise
-  }, [branchApi, branchDateRange.endDate, branchDateRange.startDate, notify, transferFromFilter, transferPage, transferPageSize, transferToFilter, tr, tab])
+  }, [branchApi, branchDateRange.endDate, branchDateRange.startDate, branchDateRange.endTime, branchDateRange.startTime, notify, transferFromFilter, transferPage, transferPageSize, transferToFilter, tr, tab])
 
   useEffect(() => {
     if (!isActive) {
@@ -1035,6 +1037,8 @@ export default function Branches({ embedded = false, view, showSectionNavigation
           const response = await branchApi.getTransfers({
             startDate: branchDateRange.startDate || undefined,
             endDate: branchDateRange.endDate || undefined,
+            startTime: branchDateRange.startTime || undefined,
+            endTime: branchDateRange.endTime || undefined,
             fromBranchId: transferFromFilter !== 'all' ? transferFromFilter : undefined,
             toBranchId: transferToFilter !== 'all' ? transferToFilter : undefined,
             page: exportPage,
@@ -1113,7 +1117,7 @@ export default function Branches({ embedded = false, view, showSectionNavigation
       branchExportInFlightRef.current = false
       setBranchExportLoading(false)
     }
-  }, [branchApi, branchDateRange.endDate, branchDateRange.startDate, branchExportLoading, branches, notify, tab, transferFromFilter, transferToFilter, tr])
+  }, [branchApi, branchDateRange.endDate, branchDateRange.startDate, branchDateRange.endTime, branchDateRange.startTime, branchExportLoading, branches, notify, tab, transferFromFilter, transferToFilter, tr])
 
   const branchExportButton = canExportBranch ? (
     <button
@@ -1182,6 +1186,7 @@ export default function Branches({ embedded = false, view, showSectionNavigation
         </div> : null}
         {showDateRange ? (
           <StatsRangeRow
+            showTime={tab === 'transfers'}
             range={branchDateRange}
             onRangeChange={(range) => {
               handleBranchDateRangeChange(range)

@@ -55,6 +55,8 @@ import { buildInventoryProductsSearchParams } from './inventoryProductsQuery.ts'
 import StatsStrip, { statsPresetRange, type StatCardDef } from '../shared/StatsStrip.tsx'
 import StatsRangeRow from '../shared/StatsRangeRow.tsx'
 import { type DateTimeRange } from '../shared/DateTimeRangePicker'
+import { continuousRangeParams } from '../../utils/continuousRangeParams.ts'
+import type { ExportRange } from '../shared/ExportRangeDialog.tsx'
 import { getSalesStatsStrip } from '../../api/salesTransport.ts'
 import { getReturnsReport } from '../../api/returnsReadTransport.ts'
 import { normalizeDashboardGrossMetrics } from '../../api/dashboardTransport.ts'
@@ -384,8 +386,8 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
       return
     }
     setStripLoading(true)
-    const dates = { startDate: stripRange.startDate, endDate: stripRange.endDate }
     try {
+      const dates = { ...continuousRangeParams(stripRange), startDate: stripRange.startDate, endDate: stripRange.endDate }
       const [kernel, customer, supplier] = await Promise.all([
         getSalesStatsStrip(dates).catch(() => null),
         getReturnsReport({ ...dates, scope: 'customer' }).catch(() => null),
@@ -395,10 +397,16 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
       setStripKernel((kernel || null) as InventoryStripKernel | null)
       setStripCustomerReturns((customer || null) as InventoryStripReturns | null)
       setStripSupplierReturns((supplier || null) as InventoryStripReturns | null)
+    } catch {
+      if (stripRequestRef.current !== requestId) return
+      setStripKernel(null)
+      setStripCustomerReturns(null)
+      setStripSupplierReturns(null)
+      notify(tr('failed_to_load_data', 'Failed to load data'), 'error')
     } finally {
       if (stripRequestRef.current === requestId) setStripLoading(false)
     }
-  }, [isActive, stripRange.endDate, stripRange.startDate])
+  }, [isActive, notify, stripRange.endDate, stripRange.startDate, stripRange.endTime, stripRange.startTime, tr])
   // The two effects that actually run loadStatsStrip live further down, right
   // after showInventoryStats is known -- see the note there.
   const [branchFilter,  setBranchFilter]  = useState('all')
@@ -690,7 +698,7 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
   // The products page DOES carry the range: its Net sold / Revenue / COGS /
   // Profit columns are scoped by it server-side, so two different windows are
   // two different results and must not share one cached page (N10).
-  const productsScope = JSON.stringify([inventoryStatsScope, productsPage, productsPageSize, stripRange.startDate, stripRange.endDate])
+  const productsScope = JSON.stringify([inventoryStatsScope, productsPage, productsPageSize, stripRange.startDate, stripRange.endDate, stripRange.startTime, stripRange.endTime])
   const needsMovementData = inventorySection === 'movements' || (inventorySection === 'all' && tab === 'movements')
   const needsRfidData = inventorySection === 'rfid' || (inventorySection === 'all' && tab === 'rfid')
 
@@ -734,11 +742,11 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
     } finally {
       if (isTrackedRequestCurrent(productsRequestRef, requestId)) setProductsLoading(false)
     }
-  }, [branchFilter, deferredSearch, isActive, needsProductsData, productsPage, productsPageSize, productsScope, searchMode, stripRange.endDate, stripRange.startDate, tr])
+  }, [branchFilter, deferredSearch, isActive, needsProductsData, productsPage, productsPageSize, productsScope, searchMode, stripRange.endDate, stripRange.startDate, stripRange.endTime, stripRange.startTime, tr])
 
   useEffect(() => {
     setProductsPage(1)
-  }, [branchFilter, deferredSearch, searchMode, stripRange.endDate, stripRange.startDate])
+  }, [branchFilter, deferredSearch, searchMode, stripRange.endDate, stripRange.startDate, stripRange.endTime, stripRange.startTime])
 
   useEffect(() => {
     if (!isActive || !needsProductsData) {
@@ -1893,11 +1901,11 @@ ${inventoryFeesFormulaText}`,
   // returns reports -- the same reads the strip itself uses). The shelf
   // figures (products / stock value / low / out) come from the live
   // stockStats and are labelled as current-state, not range-scoped.
-  const [statsExportRange, setStatsExportRange] = useState<{ startDate: string; endDate: string } | null>(null)
-  const runRangedStatsExport = useCallback(async (range: { startDate: string; endDate: string }) => {
+  const [statsExportRange, setStatsExportRange] = useState<ExportRange | null>(null)
+  const runRangedStatsExport = useCallback(async (range: ExportRange) => {
     const startDate = range.startDate
     const endDate = range.endDate
-    const dates = { startDate, endDate }
+    const dates = { ...continuousRangeParams(range), startDate, endDate }
     const hasRange = !!startDate && !!endDate
     const [kernel, customer, supplier] = await Promise.all(hasRange ? [
       getSalesStatsStrip(dates).catch(() => null),
@@ -1911,6 +1919,8 @@ ${inventoryFeesFormulaText}`,
     downloadCSV(`inventory-stats-${startDate || 'all'}-${endDate || 'all'}.csv`, [
       { metric: 'range_start', value: startDate || 'all' },
       { metric: 'range_end', value: endDate || 'all' },
+      { metric: 'range_start_time', value: range.startTime || '00:00' },
+      { metric: 'range_end_time', value: range.endTime || '23:59' },
       { metric: 'products_current', value: totalProducts },
       { metric: 'in_stock_current', value: inStockCount },
       { metric: 'low_stock_current', value: lowStockCount },
@@ -2218,6 +2228,7 @@ ${inventoryFeesFormulaText}`,
         // above — it leads the section instead, driving the same stripRange.
         <div className="mb-2 space-y-1.5">
           <StatsRangeRow
+            showTime continuous
             range={stripRange} onRangeChange={handleStripRangeChange}
             t={t}
             actions={(
@@ -2226,7 +2237,7 @@ ${inventoryFeesFormulaText}`,
               <button
                 type="button"
                 className="inline-flex h-7 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 text-[11px] font-medium text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"
-                onClick={() => setStatsExportRange({ startDate: stripRange.startDate || '', endDate: stripRange.endDate || '' })}
+                onClick={() => setStatsExportRange({ ...stripRange })}
                 title={tr('export', 'Export')}
               >
                 <Download className="h-3.5 w-3.5 shrink-0" />
@@ -2325,11 +2336,9 @@ ${inventoryFeesFormulaText}`,
             draws this exact control for the same stripRange -- two pickers for
             one clock would be the duplicate-control trap. In the Branches hub
             the range is the hub's own, shared with Overview and Transfers.
-            No showTime: attachInventoryProductMetrics bounds these columns by
-            LOCAL DATE (localDateAtOrAfter on created_at), so advertising a
-            time filter here would be a control that does nothing. */}
+            */}
         {showProductsSection && !showInventoryStats ? (
-          <StatsRangeRow className="pt-1" range={stripRange} onRangeChange={handleStripRangeChange} t={t} />
+          <StatsRangeRow showTime continuous className="pt-1" range={stripRange} onRangeChange={handleStripRangeChange} t={t} />
         ) : null}
         {/* Search row: search input + (products) AND/OR toggle + icon-only
             Filter. Filter placement is consistent across every tab,
@@ -2658,6 +2667,8 @@ ${inventoryFeesFormulaText}`,
         <Suspense fallback={null}>
           <ExportRangeDialog
             initial={statsExportRange}
+            showTime
+            continuous
             title={`${tr('export', 'Export')} — ${tr('stats', 'Stats')}`}
             t={t}
             onClose={() => setStatsExportRange(null)}

@@ -15,6 +15,7 @@ async function operationWritesReady(db: ReturnType<typeof getDb>): Promise<boole
   }
 }
 import { localDateAtOrAfter, localDateAtOrBefore } from '../lib/businessDateWindow'
+import { continuousReadWindowSql, parseContinuousReadWindow } from '../lib/continuousReadWindow'
 import { attachBatchCounts } from '../lib/productBatches'
 import { paginateProductFamilies } from '../lib/familyPagination'
 import { buildProductSalesLedgerSql } from '../lib/productSalesLedger'
@@ -235,6 +236,7 @@ export async function attachInventoryProductMetrics(
   items: Array<Record<string, unknown>>,
   query: InventoryFilterQuery,
 ): Promise<void> {
+  const continuousWindow = parseContinuousReadWindow(query)
   const productIds = [...new Set(items
     .map((item) => Number(item.id))
     .filter((id) => Number.isSafeInteger(id) && id > 0))]
@@ -250,10 +252,11 @@ export async function attachInventoryProductMetrics(
   if (startDate) params.startDate = startDate
   if (endDate) params.endDate = endDate
 
-  const saleClauses = [
+  const saleClauses = continuousWindow ? [continuousReadWindowSql('s.created_at')] : [
     startDate ? localDateAtOrAfter('s.created_at') : '',
     endDate ? localDateAtOrBefore('s.created_at') : '',
   ].filter(Boolean)
+  if (continuousWindow) Object.assign(params, continuousWindow)
   const stockQuantitySql = branchScoped ? 'COALESCE(bs.quantity, 0)' : 'COALESCE(p.stock_quantity, 0)'
   const stockJoinSql = branchScoped
     ? 'LEFT JOIN branch_stock bs ON bs.product_id = ids.product_id AND bs.branch_id = @branchId'
@@ -644,7 +647,15 @@ async function searchProductsPayload(env: Env, query: Record<string, string>) {
   }
 }
 
-app.get('/products/search', async (c) => c.json(await searchProductsPayload(c.env, c.req.query())))
+app.get('/products/search', async (c) => {
+  try {
+    parseContinuousReadWindow(c.req.query())
+    return c.json(await searchProductsPayload(c.env, c.req.query()))
+  } catch (error) {
+    if (error instanceof RangeError) return c.json({ error: error.message }, 400)
+    throw error
+  }
+})
 
 app.get('/bootstrap', async (c) => {
   const payload = await searchProductsPayload(c.env, c.req.query())

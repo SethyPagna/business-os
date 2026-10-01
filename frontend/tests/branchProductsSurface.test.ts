@@ -22,7 +22,7 @@ test('product search has an independent tracked lifecycle and branch-scoped quer
   // helper (tested behaviourally below) so the date mapping is provable; the
   // call site now hands it branch/query/page/pageSize AND the shared range.
   assert.match(inventory, /searchInventoryProducts\(buildInventoryProductsSearchParams\(\{[\s\S]{0,400}branchFilter,[\s\S]{0,300}query: deferredSearch,[\s\S]{0,200}page: productsPage,[\s\S]{0,120}pageSize: productsPageSize,[\s\S]{0,120}range: stripRange/)
-  assert.match(inventory, /\[branchFilter, deferredSearch, isActive, needsProductsData, productsPage, productsPageSize, productsScope, searchMode, stripRange\.endDate, stripRange\.startDate, tr\]/)
+  assert.match(inventory, /\[branchFilter, deferredSearch, isActive, needsProductsData, productsPage, productsPageSize, productsScope, searchMode, stripRange\.endDate, stripRange\.startDate, stripRange\.endTime, stripRange\.startTime, tr\]/)
   assert.doesNotMatch(inventory, /settleLoaderMap\([\s\S]{0,700}searchInventoryProducts/)
 })
 
@@ -72,10 +72,10 @@ test('scope changes reset paging and stale responses cannot replace the latest r
   resolveOld(['stale branch'])
   await first
   assert.deepEqual(rows, ['new branch'])
-  assert.match(inventory, /useEffect\(\(\) => \{\s*setProductsPage\(1\)\s*\}, \[branchFilter, deferredSearch, searchMode, stripRange\.endDate, stripRange\.startDate\]\)/)
+  assert.match(inventory, /useEffect\(\(\) => \{\s*setProductsPage\(1\)\s*\}, \[branchFilter, deferredSearch, searchMode, stripRange\.endDate, stripRange\.startDate, stripRange\.endTime, stripRange\.startTime\]\)/)
   // The cached page is keyed by scope; without the range in the key a
   // date change would keep showing the previous window's money columns.
-  assert.match(inventory, /const productsScope = JSON\.stringify\(\[inventoryStatsScope, productsPage, productsPageSize, stripRange\.startDate, stripRange\.endDate\]\)/)
+  assert.match(inventory, /const productsScope = JSON\.stringify\(\[inventoryStatsScope, productsPage, productsPageSize, stripRange\.startDate, stripRange\.endDate, stripRange\.startTime, stripRange\.endTime\]\)/)
 })
 
 test('compact grouped rows expose scoped quantity, barcode, detail popup and canonical link without SKU', () => {
