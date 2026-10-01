@@ -736,6 +736,50 @@ async function main() {
     exec('DROP TABLE stock_lot_adjustment_operations')
   })
 
+
+  await check('real password admitted factory and product resets refuse linked lifecycle before backup or writes', async () => {
+    exec('CREATE TABLE stock_disposition_sources(product_id INTEGER); CREATE TABLE stock_funding_dependencies(product_id INTEGER);')
+    const snapshot = () => {
+      const encode = value => JSON.stringify(value, (_, item) => typeof item === 'bigint'
+        ? { integer64: String(item) } : ArrayBuffer.isView(item) ? { blob: Buffer.from(item.buffer, item.byteOffset, item.byteLength).toString('hex') } : item)
+      const schema = rawDbHandle.db.prepare("SELECT type,name,tbl_name,sql FROM sqlite_master ORDER BY type,name").all()
+      const tables = schema.filter(row => row.type === 'table').map(({ name }) => {
+        const quote = text => '"' + text.replaceAll('"', '""') + '"'
+        const columns = rawDbHandle.db.prepare('PRAGMA table_info(' + quote(name) + ')').all()
+        const probes = columns.map(column => 'typeof(' + quote(column.name) + ') AS ' + quote('__stock_type_' + column.name))
+        const rows = rawDbHandle.db.prepare('SELECT *' + (probes.length ? ',' + probes.join(',') : '') + ' FROM ' + quote(name)).all().map(encode).sort()
+        return [name, columns, rows]
+      })
+      return encode([schema, tables])
+    }
+    for (const table of ['stock_disposition_sources', 'stock_funding_dependencies']) {
+      for (const endpoint of ['/reset-data', '/factory-reset']) {
+        seed()
+        const password = 'admin123'
+        rawDbHandle.prepare('INSERT OR REPLACE INTO users(id,username,name,password) VALUES(?,?,?,?)')
+          .run([OWNER_USER.id, OWNER_USER.username, OWNER_USER.name, require('bcryptjs').hashSync(password, 4)])
+        rawDbHandle.prepare('INSERT INTO ' + table + '(product_id) VALUES(1)').run()
+        const before = snapshot(), images = [...deletedObjectKeys], backup = [...backupCallLog]
+        sessionUser = OWNER_USER
+        let result
+        try {
+          result = await req('POST', endpoint, endpoint === '/factory-reset'
+            ? { confirm: 'FACTORY RESET', currentPassword: password }
+            : { mode: 'products', includeImages: true }, { ...fakeEnv, BUSINESS_OS_ADMIN_PASSWORD: 'seed-admin-password' })
+        } finally { sessionUser = FAKE_USER }
+        assert.equal(result.status, 409, JSON.stringify(result.json))
+        assert.equal(result.json.code, 'stock_lifecycle_dependency')
+        assert.equal(snapshot(), before, endpoint + ' durable rows unchanged')
+        assert.deepEqual(deletedObjectKeys, images)
+        assert.deepEqual(backupCallLog, backup)
+        exec('DELETE FROM ' + table)
+      }
+    }
+    seed()
+    const allowed = await req('POST', '/reset-data', { mode: 'products' })
+    assert.equal(allowed.status, 200, JSON.stringify(allowed.json))
+    assert.equal(count('products'), 0)
+  })
   console.log(`\n${passed} PASS, 0 FAIL`)
 }
 
