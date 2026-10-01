@@ -6227,6 +6227,10 @@ app.get('/export', async (c) => {
   if (query.startDate) { baseWhere.push(localDateAtOrAfter('s.created_at')); baseParams.startDate = query.startDate }
   if (query.endDate) { baseWhere.push(localDateAtOrBefore('s.created_at')); baseParams.endDate = query.endDate }
   if (query.branchId) { baseWhere.push('s.branch_id = @branchId'); baseParams.branchId = query.branchId }
+  const timeRange = appendLocalTimeRange(query, baseWhere, baseParams, 's.created_at')
+  if ((String(query.startTime || '').trim() || String(query.endTime || '').trim()) && !timeRange) {
+    return c.json({ code: 'invalid_time_range', error: 'Supply both times in 24-hour HH:MM format.' }, 400)
+  }
 
   const requestedSnapshot = Number(query.snapshotMaxId)
   let snapshotMaxId = Number.isSafeInteger(requestedSnapshot) && requestedSnapshot > 0 ? requestedSnapshot : 0
@@ -6394,6 +6398,8 @@ app.get('/export', async (c) => {
   const salesTotals = await getSalesTotals(c.env, {
     startDate: query.startDate || null,
     endDate: query.endDate || null,
+    startTime: timeRange?.startTime || null,
+    endTime: timeRange?.endTime || null,
     branchId: query.branchId || null,
     maxSaleId: snapshotMaxId,
   })

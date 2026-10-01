@@ -1656,12 +1656,12 @@ assert.match(
 )
 assert.match(
   salesExportModal,
-  /withLoaderTimeout\(\s*\(\) => getSalesExportApi\(\)\.getSalesExport\(\{ startDate: dates\.start, endDate: dates\.end \}\),\s*'Sales export preview',\s*SALES_EXPORT_PREVIEW_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => getSalesExportApi\(\)\.getSalesExport\(\{ startDate: dates\.start, endDate: dates\.end, startTime: dates\.startTime, endTime: dates\.endTime \}\),\s*'Sales export preview',\s*SALES_EXPORT_PREVIEW_TIMEOUT_MS,\s*\)/,
   'sales export preview should timeout slow report reads',
 )
 assert.match(
   salesExportModal,
-  /withLoaderTimeout\(\s*\(\) => api\.getSalesExport\(\{ startDate: dates\.start, endDate: dates\.end, detailsOnly: 'true', pageSize: '500' \}\),\s*'Sales export CSV',\s*SALES_EXPORT_CSV_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => api\.getSalesExport\(\{ startDate: dates\.start, endDate: dates\.end, startTime: dates\.startTime, endTime: dates\.endTime, detailsOnly: 'true', pageSize: '500' \}\),\s*'Sales export CSV',\s*SALES_EXPORT_CSV_TIMEOUT_MS,\s*\)/,
   'sales CSV export should timeout slow CSV reads (first page)',
 )
 assert.match(
