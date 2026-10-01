@@ -1,3 +1,4 @@
+import { assertStockLifecycleMutable, stockLifecycleRefusal } from './stockLifecycle'
 import { getDb, type D1Compat } from './db'
 import type { Env } from '../index'
 import type { SessionUser } from './auth'
@@ -1193,6 +1194,9 @@ export async function replayStockSession(env: Env, user: SessionUser, direction:
   if (request.items.some(line => line.quantity > 0) && getActionTier(user, 'inventory', 'adjust') !== 'full') fail('Inventory adjust permission is required.', 403)
   if (request.items.some(line => line.kind === 'create_receive') && getActionTier(user, 'products', 'add') !== 'full') fail('Product add permission is required to reverse this session.', 403)
   if (stockSessionChangesProductImages(request) && getActionTier(user, 'products', 'image') !== 'full') fail('Product image permission is required to reverse this session.', 403)
+  for (const member of await db.prepare('SELECT batch_id FROM stock_session_members WHERE operation_id=@id').all<{ batch_id: number | null }>({ id: op.id })) {
+    if (member.batch_id) await assertStockLifecycleMutable(db, { batchId: member.batch_id })
+  }
   const targetStatus = direction === 'undo' ? 'redoable' : 'undoable'
   const expectedStatus = direction === 'undo' ? 'undoable' : 'redoable'
   if (Number(op.generation) === generation + 1 && op.status === targetStatus) return
@@ -1303,6 +1307,7 @@ export async function replayStockSession(env: Env, user: SessionUser, direction:
   statements.push(...captureReplayState(String(op.id), stateSql))
   checkBounds(statements, snapshot)
   try { await db.batch(statements) } catch (error) {
+    if (stockLifecycleRefusal(error)) throw error
     const saved = await db.prepare('SELECT o.generation,h.status FROM stock_session_operations o JOIN action_history h ON h.id=o.history_id WHERE o.id=@id').get<Row>({ id: op.id })
     if (saved?.generation === generation + 1 && saved.status === targetStatus) return
     if (/constraint/i.test(String(error))) fail('Stock, metadata, references, or revision changed. Nothing was reversed; refresh history.')

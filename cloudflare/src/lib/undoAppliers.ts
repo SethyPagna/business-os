@@ -1,3 +1,4 @@
+import { assertStockLifecycleMutable, stockLifecycleRefusal } from './stockLifecycle'
 import type { Env } from '../index'
 import type { SessionUser } from './auth'
 // Type-only on purpose: dozens of test loaders stub this module's relative
@@ -1848,6 +1849,8 @@ export function mergeKeeperRestoreStatement(r: MergeReversal, canChangeProductIm
 }
 
 async function buildMergeReversalStatements(env: Env, r: MergeReversal, canChangeProductImages = true): Promise<AtomicMergeStatement[]> {
+  await assertStockLifecycleMutable(getDb(env), { productId: r.keeperId })
+  await assertStockLifecycleMutable(getDb(env), { productId: r.dupId })
   const db = getDb(env)
   const keeperId = Number(r.keeperId)
   const dupId = Number(r.dupId)
@@ -2933,12 +2936,14 @@ async function replayProductRemove(payload: Record<string, unknown>, ctx: UndoAp
     || await productRemovePlanDigest(snapshot.plan) !== operation.plan_digest) {
     throw new UndoConflictError('The saved product removal details do not match their receipt.')
   }
+  await assertStockLifecycleMutable(db, { productId: snapshot.plan.product_id })
   const transitionStamp = new Date().toISOString()
   const transitionRequestId = `${ctx.historyId}:${ctx.direction}:${expectedGeneration}`
   try {
     await db.batch(productRemoveReplayStatements({ snapshot, operation, direction: ctx.direction,
       historyId: Number(ctx.historyId), expectedGeneration, user: ctx.user, transitionStamp, transitionRequestId }))
   } catch (error) {
+    if (stockLifecycleRefusal(error)) throw error
     if (/malformed JSON|product_remove_.*guard|constraint/i.test(String(error))) {
       throw new UndoConflictError('This removed product changed concurrently. Nothing was replayed.', UNDO_RECORD_CHANGED_CODE)
     }

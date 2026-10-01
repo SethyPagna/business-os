@@ -1,3 +1,4 @@
+import { assertStockLifecycleMutable } from './stockLifecycle'
 import type { SessionUser } from './auth'
 import { actorSnapshot } from './actorSnapshot'
 import type { getDb } from './db'
@@ -84,6 +85,7 @@ export async function prepareProductRemovePlan(
   productId: number,
   reason: string,
 ): Promise<ProductRemovePlan> {
+  await assertStockLifecycleMutable(db, { productId })
   const product = await db.prepare('SELECT * FROM products WHERE id=@product').get<Record<string, unknown>>({ product: productId })
   if (!product) throw new ProductRemoveError('product_not_found', 'Product not found.', 404)
   if (Number(product.is_active) !== 1 || Number(product.is_group) === 1) {

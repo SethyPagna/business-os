@@ -1,3 +1,4 @@
+import { assertStockLifecycleMutable, stockLifecycleRefusal } from '../lib/stockLifecycle'
 import { Hono, type Context } from 'hono'
 import { acquisitionCostResponses, canViewAcquisitionCosts } from '../lib/acquisitionCostAccess'
 import { broadcast } from '../durable-objects/broadcastHub'
@@ -720,6 +721,9 @@ app.post('/', async (c) => {
     if (request.quantity > available) return c.json({ error: `Insufficient unrecorded stock: requested ${request.quantity}, available ${available}` }, 409)
   }
 
+  if (shouldDeductStock) for (const item of normalized) {
+    if (item.batch_id && !item.damaged_lot_id) await assertStockLifecycleMutable(db, { batchId: Number(item.batch_id) })
+  }
   const explicitBatchResolution = resolveExplicitSaleLineBatches(
     normalized.map((item) => {
       const product = productMap.get(item.product_id)
@@ -1733,6 +1737,8 @@ app.post('/', async (c) => {
     if (!createdSale?.id) throw new Error('sale_create_identity_missing')
     saleId = Number(createdSale.id)
   } catch (error) {
+    const lifecycle = stockLifecycleRefusal(error)
+    if (lifecycle) return c.json(lifecycle, 409)
     const message = (error as Error).message || ''
     // If D1 committed the batch but its response was lost, its retry can hit
     // the unique write key. Reconcile only a sale with durable lines; an old

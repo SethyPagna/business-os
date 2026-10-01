@@ -1,3 +1,4 @@
+import { assertStockLifecycleMutable, stockLifecycleRefusal } from './stockLifecycle'
 // Part 553: reverting a Stock Change ledger row. A revert is a COMPENSATING
 // counter-movement -- it posts the opposite stock effect and records a new
 // movement row (reason "Revert of #N", reference_id "revert:N"); nothing is
@@ -72,7 +73,7 @@ export type RevertRefusalCode =
   | 'revert_stock_in_line_edited' | 'revert_nothing_to_revert' | 'revert_not_revertible' | 'revert_session_generation'
   | 'revert_lineage_unresolved' | 'revert_insufficient_branch_stock' | 'revert_insufficient_lot_stock'
   | 'revert_lot_moved' | 'revert_no_received_date' | 'revert_from_sale' | 'revert_from_return'
-  | 'revert_session_undone' | 'revert_from_merge'
+  | 'revert_session_undone' | 'revert_from_merge' | 'stock_lifecycle_dependency'
 
 export type RevertRefusalParams = Record<string, string | number>
 
@@ -318,6 +319,11 @@ export async function revertRootMovement(
 // discriminated result rather than throwing, so the route can map it straight
 // to a status/JSON; a CHECK failure inside the batch becomes stock_changed.
 export async function applyMovementRevert(db: D1Compat, m: RevertMovementRow, actor: RevertActor): Promise<RevertResult> {
+  try { await assertStockLifecycleMutable(db, { movementId: Number(m.id) }) } catch (error) {
+    const lifecycle = stockLifecycleRefusal(error)
+    if (lifecycle) return refuse(409, 'stock_lifecycle_dependency', lifecycle.error)
+    throw error
+  }
   const productId = Number(m.product_id) || 0
   const branchId = Number(m.branch_id) || 0
   if (!productId || !branchId) {
@@ -574,6 +580,8 @@ export async function applyMovementRevert(db: D1Compat, m: RevertMovementRow, ac
       { sql: 'DELETE FROM stock_session_guards', params: {} },
     ])
   } catch (err) {
+    const lifecycle = stockLifecycleRefusal(err)
+    if (lifecycle) return refuse(409, 'stock_lifecycle_dependency', lifecycle.error)
     // Nothing was written. Tell the loser of a race apart from a stock
     // change by reading what the winner committed.
     if (await revertExists(db, counterRef)) return ALREADY_REVERTED

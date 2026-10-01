@@ -132,6 +132,7 @@ export async function commitStockDisposition(env: { DB: D1Database; IMPORT_DB?: 
     THEN 1 ELSE 0 END)`, params: { ...params,branchName: preimage.branch_name } }]
   if (kind === 'hold') {
     statements.push({ sql: 'INSERT INTO stock_disposition_allocations(id,source_id,quantity,gross4,coverage4,condition_tag) VALUES(@id,@source,@quantity,@gross,@coverage,@condition)',params: { id: allocation,source: sourceId,quantity,gross: basis.gross4,coverage: coverage4,condition } },
+      ...(await db.prepare("SELECT 1 FROM sqlite_master WHERE name='stock_lifecycle_context'").get() ? [{ sql: 'INSERT INTO stock_lifecycle_context(token,source_id,batch_id,branch_id,remaining_quantity) VALUES(@token,@source,@batch,@branch,@remaining)', params: { token: eventId, source: sourceId, batch, branch, remaining: Number(basis.remainingQuantity) } }] : []),
       { sql: 'UPDATE branch_batch_stock SET quantity=@remaining WHERE batch_id=@batch AND branch_id=@branch',params: { remaining: Number(basis.remainingQuantity),batch,branch } },
       { sql: 'UPDATE branch_stock SET quantity=@remaining WHERE product_id=@product AND branch_id=@branch',params: { remaining: Number(subtractQuantity(preimage.branch_stock,[quantity])),product,branch } },
       { sql: 'UPDATE products SET stock_quantity=(SELECT COALESCE(SUM(quantity),0) FROM branch_stock WHERE product_id=@product) WHERE id=@product',params: { product } })
@@ -240,6 +241,7 @@ export async function commitStockDisposition(env: { DB: D1Database; IMPORT_DB?: 
     THEN 1 ELSE 0 END)`,params:postParams },
     { sql: `SELECT CASE WHEN (SELECT COUNT(*) FROM stock_disposition_guards WHERE token IN (@token,@postToken) AND valid=1)=2
       THEN 1 ELSE json_extract('[1]','$[disposition_postcondition_missing]') END`,params:{ token:eventId,postToken } },
+    ...(await db.prepare("SELECT 1 FROM sqlite_master WHERE name='stock_lifecycle_context'").get() ? [{ sql: 'DELETE FROM stock_lifecycle_context WHERE token=@token', params: { token: eventId } }] : []),
     { sql: 'DELETE FROM stock_disposition_guards WHERE token IN (@token,@postToken)',params:{ token:eventId,postToken } },
     { sql: `SELECT CASE WHEN NOT EXISTS(SELECT 1 FROM stock_disposition_guards WHERE token IN (@token,@postToken))
       THEN 1 ELSE json_extract('[1]','$[disposition_guard_cleanup_failed]') END`,params:{ token:eventId,postToken } })

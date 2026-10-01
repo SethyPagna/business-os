@@ -1,3 +1,4 @@
+import { assertStockLifecycleMutable, stockLifecycleRefusal } from './stockLifecycle'
 import { getDb, type D1Compat } from './db'
 import type { Env } from '../index'
 import type { SessionUser } from './auth'
@@ -68,6 +69,9 @@ export async function planTransferOperation(db: D1Compat, args: {
   scope: Scope; fromBranchId: number; toBranchId: number; reason: string;
   lines: TransferLine[]; response: Record<string, unknown>;
 }): Promise<{ statements: Statement[]; operationId: string; allocationSummaries: readonly TransferAllocationSummary[] }> {
+  for (const line of args.lines) {
+    await assertStockLifecycleMutable(db, line.batchId ? { batchId: line.batchId } : { productId: line.productId, branchId: args.fromBranchId })
+  }
   const operationId = crypto.randomUUID()
   const params = { operation: operationId, actor: args.user.id, name: actorSnapshot(args.user), request: args.requestId,
     requestJson: args.requestJson, digest: args.digest, scope: args.scope }
@@ -261,6 +265,8 @@ export type TransferRefusal = { status: 409 | 503; body: { error: string; code: 
  * checks) and the ordinary maintenance guard. Callers check for a committed
  * receipt first: a same-key request that won the race is a replay. */
 export function transferRefusal(error: unknown): TransferRefusal | null {
+  const lifecycle = stockLifecycleRefusal(error)
+  if (lifecycle) return { status: 409, body: lifecycle }
   if (error instanceof TransferConflictError) return { status: 409, body: { error: error.message, code: error.code } }
   const message = error instanceof Error ? error.message : String(error ?? '')
   // House convention (stockLotAdjustment, stockInLineEdit): 503, retry later.

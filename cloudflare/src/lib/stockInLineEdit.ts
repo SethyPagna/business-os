@@ -1,3 +1,4 @@
+import { assertStockLifecycleMutable, stockLifecycleRefusal } from './stockLifecycle'
 // N6 (owner, 23 Sep 2026): "Stock-in sessions editable (today only add or
 // delete)." The ONE writer that edits a saved stock-in line in place:
 //
@@ -370,6 +371,8 @@ export async function applyStockInLineEdit(
   try {
     return await applyInner(db, user, movementId, body)
   } catch (error) {
+    const lifecycle = stockLifecycleRefusal(error)
+    if (lifecycle) return { status: 409, body: lifecycle }
     if (error instanceof EditRefusal) return { status: error.status, body: { error: error.message, code: error.code, ...error.details } }
     throw error
   }
@@ -378,6 +381,7 @@ export async function applyStockInLineEdit(
 async function applyInner(db: D1Compat, user: SessionUser, movementId: number, body: Row): Promise<StockInLineEditResult> {
   const tier = getActionTier(user, 'inventory', 'adjust')
   if (tier !== 'full') refuse(403, 'Editing a stock-in line requires Full Access to adjust inventory.', 'permission_denied')
+  await assertStockLifecycleMutable(db, { movementId })
   const request = parseStockInLineEditRequest(movementId, body)
   if (request.unitCostProvided && !canEditAcquisitionCosts(user)) {
     refuse(403, 'Cost-entry permission is required to change receipt costs.', 'product_cost_edit_required')
@@ -688,6 +692,8 @@ async function applyInner(db: D1Compat, user: SessionUser, movementId: number, b
   } catch (error) {
     const concurrent = await previous()
     if (concurrent) return replay(concurrent)
+    const lifecycle = stockLifecycleRefusal(error)
+    if (lifecycle) return { status: 409, body: lifecycle }
     if (isMaintenanceError(error)) return { status: 503, body: { error: 'Maintenance is in progress. Nothing was changed; try again shortly.', code: 'maintenance_active' } }
     if (/constraint/i.test(String(error))) return { status: 409, body: { error: 'Stock changed while saving. Nothing was changed; reopen the session and try again.', code: 'stale_state' } }
     throw error
@@ -728,6 +734,9 @@ export async function replayStockInLineEdit(
     throw new StockInLineEditReplayError('This stock-in line edit generation is stale. Refresh its history.')
   }
   const revision = JSON.parse(row.revision_json) as Revision
+  for (const lot of [...(JSON.parse(row.before_json) as EditState).lots, ...(JSON.parse(row.after_json) as EditState).lots]) {
+    if (lot.id) await assertStockLifecycleMutable(db, { batchId: lot.id })
+  }
   const forwardBefore = JSON.parse(row.before_json) as EditState
   const forwardAfter = JSON.parse(row.after_json) as EditState
   const targetLotId = revision.targetCreated ? Number(revision.targetLotId) || null : null
@@ -795,6 +804,7 @@ export async function replayStockInLineEdit(
   } catch (error) {
     const current = await db.prepare('SELECT generation,state FROM stock_lot_adjustment_operations WHERE id=@operation').get<OperationRow>({ operation: row.id })
     if (current?.generation === next && current.state === target) return
+    if (stockLifecycleRefusal(error)) throw error
     if (isMaintenanceError(error)) throw new StockInLineEditReplayError('Maintenance is in progress. Nothing was changed.', 503)
     throw new StockInLineEditReplayError('Stock changed after this line edit (a sale, transfer, count or a later edit). Nothing was changed.')
   }
