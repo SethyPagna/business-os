@@ -155,6 +155,19 @@ app.post('/disposition-experiment', async (c) => {
   }
 })
 
+app.post('/funding-experiment', async (c) => {
+  if ((c.env as Env & { STOCK_FUNDING_EXPERIMENT?: string }).STOCK_FUNDING_EXPERIMENT !== 'local-fixture-only') return c.json({ error:'Not found' },404)
+  const kernel = await import('../lib/stockFunding')
+  try { return c.json(await kernel.commitStockFunding(c.env,c.get('user'),await c.req.json<unknown>().catch(()=>null))) }
+  catch(error) { if(error instanceof kernel.StockFundingError) return c.json({error:error.message,code:error.code},error.statusCode); throw error }
+})
+app.get('/funding-experiment/ap', async (c) => {
+  if ((c.env as Env & { STOCK_FUNDING_EXPERIMENT?: string }).STOCK_FUNDING_EXPERIMENT !== 'local-fixture-only') return c.json({ error:'Not found' },404)
+  const kernel = await import('../lib/stockFunding')
+  try { return c.json(await kernel.readStockFundingAp(c.env,c.get('user'))) }
+  catch(error) { if(error instanceof kernel.StockFundingError) return c.json({error:error.message,code:error.code},error.statusCode); throw error }
+})
+
 app.post('/sessions', async (c) => {
   const body = await c.req.json<unknown>().catch(() => null)
   const stockSession = await import('../lib/stockSession')
