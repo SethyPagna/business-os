@@ -102,6 +102,7 @@ const shared = {
   '../lib/catalogCostRecompute': catalogCostMod,
 }
 const inventoryMod = loadReal('routes/inventory.ts', {
+  '../lib/continuousReadWindow': loadReal('lib/continuousReadWindow.ts'),
   ...shared,
   '../lib/productIdentity': productIdentityMod,
   '../lib/movementCostSnapshot': movementCostSnapshotMod,

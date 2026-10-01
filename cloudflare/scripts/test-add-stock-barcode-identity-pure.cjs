@@ -181,6 +181,7 @@ const damagedLotActions = loadReal('lib/damagedLotActions.ts', {
   './sqlBinding': sqlBinding,
 })
 const inventoryRoute = loadReal('routes/inventory.ts', {
+  '../lib/continuousReadWindow': loadReal('lib/continuousReadWindow.ts'),
   '../lib/acquisitionCostAccess': acquisitionCostAccess,
   '../lib/stockCondition': stockCondition,
   '../lib/damagedLotActions': damagedLotActions,
@@ -331,6 +332,16 @@ async function check(name, fn) {
 }
 
 async function main() {
+  await check('the actual movement route validates continuous date bounds before any stock test', async () => {
+    const response = await app.request('/movements?createdFrom=2026-10-01T17%3A00%3A00Z', {}, fakeEnv, fakeExecutionCtx)
+    assert.equal(response.status, 400)
+    assert.equal((await response.json()).error, 'createdFrom and createdTo must be provided together')
+    const window = loadReal('lib/continuousReadWindow.ts')
+    const bounds = window.parseContinuousReadWindow({ createdFrom: '2026-10-01T00:00:00+07:00', createdTo: '2026-10-02T00:00:00+07:00' })
+    assert.deepEqual(bounds, { createdFrom: '2026-09-30 17:00:00', createdTo: '2026-10-01 17:00:00' })
+    const rows = rawDb.prepare(`WITH fixture(created_at) AS (VALUES ('2026-09-30 16:59:59'), ('2026-09-30T17:00:00Z'), ('2026-10-01 16:59:59'), ('2026-10-01T17:00:00Z')) SELECT created_at FROM fixture WHERE ${window.continuousReadWindowSql('created_at')} ORDER BY created_at`).all(bounds)
+    assert.deepEqual(rows.map(row => row.created_at), ['2026-09-30T17:00:00Z', '2026-10-01 16:59:59'])
+  })
   await check('an add at a DIFFERENT cost on the SAME barcode does not fork a second row', async () => {
     seed()
     const before = productCount()
