@@ -44,7 +44,7 @@ function replay(row: Receipt, actor: number, digest: string, requestJson: string
 export async function commitStockDisposition(env: { DB: D1Database; IMPORT_DB?: D1Database }, actor: SessionUser, input: unknown) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) return refuse('invalid_request',400)
   const raw = input as Record<string,unknown>
-  const allowed = ['kind','source_id','batch_id','product_id','branch_id','supplier_id','quantity','coverage_usd','condition_tag','allocation_id','reason','expense_category','extra_fee_usd','expected_generation','client_request_id']
+  const allowed = ['kind','source_id','batch_id','product_id','branch_id','supplier_id','quantity','coverage_usd','coverage_state','condition_tag','allocation_id','reason','expense_category','extra_fee_usd','expected_generation','client_request_id']
   if (Object.keys(raw).some(key => !allowed.includes(key))) return refuse('unsupported_request_field',400)
   const kind = raw.kind
   if (kind !== 'hold' && kind !== 'dispose') return refuse('unsupported_transition',400)
@@ -59,13 +59,15 @@ export async function commitStockDisposition(env: { DB: D1Database; IMPORT_DB?: 
     coverage4 = exactMoney4(raw.coverage_usd === undefined ? 0 : raw.coverage_usd)
     extraFee4 = exactMoney4(raw.extra_fee_usd === undefined ? 0 : raw.extra_fee_usd)
   } catch { return refuse('unsupported_quantity_or_money_precision',400) }
+  const coverageState = coverage4 > 0 ? 'accepted_credit' : 'none'
+  if ((coverage4 > 0 && raw.coverage_state !== coverageState) || (raw.coverage_state !== undefined && raw.coverage_state !== coverageState)) return refuse('unsupported_coverage_state',400)
   const allocationId = kind === 'dispose' ? text(raw.allocation_id,120) : null
   const condition = kind === 'hold' ? text(raw.condition_tag,30) : null
   if (kind === 'hold' && !STOCK_CONDITION_TAGS.includes(condition as typeof STOCK_CONDITION_TAGS[number])) return refuse('invalid_condition_tag',400)
   if ((kind === 'dispose' && (coverage4 !== 0 || raw.condition_tag !== undefined)) || (kind === 'hold' && (raw.allocation_id !== undefined || raw.expense_category !== undefined))) return refuse('unsupported_transition_field',400)
   const category = raw.expense_category == null ? null : text(raw.expense_category,120)
   const generation = Number(raw.expected_generation)
-  const requestJson = JSON.stringify({ kind, sourceId,batch,product,branch,supplier,quantity,coverage4,extraFee4,allocationId,condition,reason,category,generation })
+  const requestJson = JSON.stringify({ kind, sourceId,batch,product,branch,supplier,quantity,coverage4,coverageState,extraFee4,allocationId,condition,reason,category,generation })
   const digest = await feeRequestDigest(requestJson), db = getDb(env)
   const current = await currentActor(db,actor)
   const existing = await readReceipt(db,request)
@@ -112,7 +114,7 @@ export async function commitStockDisposition(env: { DB: D1Database; IMPORT_DB?: 
   if (extraFee4 && (!branchCanSell(String(preimage.branch_name)) || getActionTier(current,'fees','add') !== 'full')) return refuse('fee_permission_or_branch_denied',403)
   const eventId = crypto.randomUUID(), allocation = allocationId || crypto.randomUUID(), occurredAt = new Date().toISOString()
   const after = kind === 'hold' ? { quantity, gross4: basis.gross4,coverage4 } : { quantity: basis.remainingQuantity,gross4: basis.remainingGross4,coverage4: basis.remainingCoverage4 }
-  const response = { event_id: eventId,allocation_id: allocation,source_id: sourceId,generation: generation+1,kind,quantity,gross4: basis.gross4,coverage4: kind === 'hold' ? coverage4 : basis.coverage4,net4: kind === 'hold' ? basis.gross4-coverage4 : basis.net4,recognized4: kind === 'dispose' ? basis.net4 : 0,remaining_quantity: after.quantity,remaining_gross4: after.gross4,remaining_coverage4: after.coverage4,extra_fee4: extraFee4 }
+  const response = { event_id: eventId,allocation_id: allocation,source_id: sourceId,generation: generation+1,kind,quantity,gross4: basis.gross4,coverage4: kind === 'hold' ? coverage4 : basis.coverage4,coverage_state: kind === 'hold' ? coverageState : basis.coverage4 > 0 ? 'allocated_accepted_credit' : 'none',net4: kind === 'hold' ? basis.gross4-coverage4 : basis.net4,recognized4: kind === 'dispose' ? basis.net4 : 0,remaining_quantity: after.quantity,remaining_gross4: after.gross4,remaining_coverage4: after.coverage4,extra_fee4: extraFee4 }
   const params = { source: sourceId, batch,product,branch,supplier,movement: source.movement_id,sourceQty: source.quantity,freeQty: source.free_quantity,sourceGross: source.gross4,
     generation,actor: actor.id,permissions: current.permissions,roleId: current.role_id,rolePermissions: current.role_permissions,roleCode: current.role_code,
     referenceId: preimage.reference_id,branchStock: preimage.branch_stock,sellable: Number(sellable),token: eventId }
