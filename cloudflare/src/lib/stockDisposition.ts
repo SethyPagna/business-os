@@ -90,7 +90,7 @@ export async function commitStockDisposition(env: { DB: D1Database; IMPORT_DB?: 
     subtractQuantity(source.quantity,[source.free_quantity])
   } catch { return refuse('source_basis_unknown_or_changed') }
   const allocations = await db.prepare('SELECT * FROM stock_disposition_allocations WHERE source_id=@source').all<Allocation>({ source: sourceId })
-  const events = await db.prepare('SELECT allocation_id,generation,remaining_quantity,remaining_gross4,remaining_coverage4 FROM stock_disposition_events WHERE source_id=@source ORDER BY generation').all<Event & { allocation_id: string }>({ source: sourceId })
+  const events = await db.prepare('SELECT allocation_id,generation,recognized4,remaining_quantity,remaining_gross4,remaining_coverage4 FROM stock_disposition_events WHERE source_id=@source ORDER BY generation').all<Event & { allocation_id: string; recognized4:number }>({ source: sourceId })
   if ((events.at(-1)?.generation ?? 0) !== generation) return refuse('stale_generation')
   let remainingSource: string, sellable: string, available: string, gross: number, coverage: number
   try {
@@ -138,6 +138,7 @@ export async function commitStockDisposition(env: { DB: D1Database; IMPORT_DB?: 
   }
   statements.push({ sql: `INSERT INTO stock_disposition_events(id,source_id,allocation_id,generation,kind,quantity,gross4,coverage4,net4,recognized4,remaining_quantity,remaining_gross4,remaining_coverage4,reason,expense_category,actor_id,occurred_at)
     VALUES(@event,@source,@allocation,@generation,@kind,@quantity,@gross4,@coverage4,@net4,@recognized4,@remainingQuantity,@remainingGross,@remainingCoverage,@reason,@category,@actor,@occurredAt)`, params: { event: eventId,source: sourceId,allocation,generation:generation+1,kind,quantity,gross4:response.gross4,coverage4:response.coverage4,net4:response.net4,recognized4:response.recognized4,remainingQuantity:after.quantity,remainingGross:after.gross4,remainingCoverage:after.coverage4,reason,category,actor:actor.id,occurredAt } })
+  let feePostcondition = '', feePostconditionParams: Record<string,unknown> = {}
   if (extraFee4) {
     const feeIntent: FeeCreateIntent = { fee_money_version:1,fee_type:'other',label:'Stock disposition shipping',amount_usd:extraFee4/10000,amount_khr:0,fee_date:businessToday(),sale_id:null,branch_id:branch,delivery_contact_id:null,notes:`Stock disposition ${eventId}` }
     const feeRequest = `disposition_${eventId}`, feeJson = canonicalFeeCreateRequest(feeIntent), feeDigest = await feeRequestDigest(feeJson)
@@ -146,11 +147,97 @@ export async function commitStockDisposition(env: { DB: D1Database; IMPORT_DB?: 
       feeOperationReceiptStatement({ receiptId:crypto.randomUUID(),actorId:actor.id,actorName:current.name,requestId:feeRequest,digest:feeDigest,requestJson:feeJson,occurredAt,intent:feeIntent,resolvedBranchId:branch }),
       { sql: 'INSERT INTO stock_disposition_fees(event_id,fee_id,amount4) SELECT @event,fee_id,@amount FROM fee_operation_receipts WHERE actor_id=@actor AND request_id=@request',params: { event:eventId,amount:extraFee4,actor:actor.id,request:feeRequest } },
       feeCreateAuditStatement({ actorId:actor.id,actorName:current.name,requestId:feeRequest,digest:feeDigest,resolvedBranchId:branch }))
+    const feeResponse = JSON.stringify({ fee: { fee_type:feeIntent.fee_type,label:feeIntent.label,amount_usd:feeIntent.amount_usd,amount_khr:0,fee_date:feeIntent.fee_date,sale_id:null,branch_id:branch,delivery_contact_id:null,notes:feeIntent.notes,created_by:actor.id,created_by_name:current.name,created_at:occurredAt,updated_at:occurredAt } })
+    feePostcondition = `AND EXISTS(SELECT 1 FROM stock_disposition_fees link
+      JOIN fee_operation_receipts fr ON fr.fee_id=link.fee_id JOIN fees f ON f.id=link.fee_id
+      WHERE link.event_id=@event AND link.amount4=@fee4 AND fr.actor_id=@actor AND fr.request_id=@feeRequest
+      AND fr.request_digest=@feeDigest AND fr.request_json=@feeJson AND fr.occurred_at=@occurredAt
+      AND json_extract(fr.response_json,'$.fee.id')=f.id
+      AND NOT EXISTS(SELECT 1 FROM json_each(json_extract(@feeResponse,'$.fee')) expected
+        WHERE json_type(fr.response_json,'$.fee.'||expected.key) IS NULL
+          OR json_extract(fr.response_json,'$.fee.'||expected.key) IS NOT expected.value)
+      AND (SELECT COUNT(*) FROM json_each(json_extract(fr.response_json,'$.fee')) WHERE key!='id')
+        =(SELECT COUNT(*) FROM json_each(json_extract(@feeResponse,'$.fee')))
+      AND f.fee_type=@feeType AND f.label IS @feeLabel AND f.amount_usd=@feeUsd AND f.amount_khr=0
+      AND f.fee_date=@feeDate AND f.sale_id IS NULL AND f.branch_id=@branch AND f.delivery_contact_id IS NULL
+      AND f.notes IS @feeNotes AND f.created_by=@actor AND f.created_by_name IS @actorName
+      AND f.created_at=@occurredAt AND f.updated_at=@occurredAt
+      AND (SELECT COUNT(*) FROM audit_logs a WHERE a.user_id=@actor AND a.user_name IS @actorName
+        AND a.action='create' AND a.entity='fee' AND a.entity_id=CAST(f.id AS TEXT)
+        AND a.table_name='fees' AND a.record_id=CAST(f.id AS TEXT)
+        AND a.new_value=json(json_extract(fr.response_json,'$.fee'))
+        AND a.details=json_object('after',json(json_extract(fr.response_json,'$.fee')),'sale_id',NULL,
+          'branch_id',@branch,'client_request_id',@feeRequest,'request_digest',@feeDigest))=1)`
+    feePostconditionParams = { fee4:extraFee4,feeRequest,feeDigest,feeJson,feeResponse,feeType:feeIntent.fee_type,feeLabel:feeIntent.label,feeUsd:feeIntent.amount_usd,feeDate:feeIntent.fee_date,feeNotes:feeIntent.notes }
   }
   const responseJson = JSON.stringify(response)
   statements.push({ sql: `INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details,table_name,record_id,new_value) VALUES(@actor,@name,@action,'stock_disposition',@event,@details,'stock_disposition_events',@event,@details)`,params: { actor:actor.id,name:current.name,action:kind,event:eventId,details:responseJson } },
     { sql: 'INSERT INTO stock_disposition_receipts(id,actor_id,request_id,request_digest,request_json,response_json,event_id) VALUES(@id,@actor,@request,@digest,@json,@response,@event)',params: { id:crypto.randomUUID(),actor:actor.id,request,digest,json:requestJson,response:responseJson,event:eventId } },
-    { sql: 'DELETE FROM stock_disposition_guards WHERE token=@token',params: { token:eventId } })
+  )
+  const latestByAllocation = new Map(events.map(row=>[row.allocation_id,row]))
+  latestByAllocation.delete(allocation)
+  const otherLatest = [...latestByAllocation.values()]
+  const allocatedGross = allocations.reduce((sum,row)=>sum+row.gross4,0)+(kind === 'hold' ? basis.gross4 : 0)
+  const allocatedCoverage = allocations.reduce((sum,row)=>sum+row.coverage4,0)+(kind === 'hold' ? coverage4 : 0)
+  const heldGross = otherLatest.reduce((sum,row)=>sum+row.remaining_gross4,0)+after.gross4
+  const heldCoverage = otherLatest.reduce((sum,row)=>sum+row.remaining_coverage4,0)+after.coverage4
+  const postToken = `post_${eventId}`
+  const postParams = { ...params,...feePostconditionParams,postToken,event:eventId,allocation,kind,quantity,
+    allocatedQuantity: kind === 'hold' ? quantity : allocations.find(row=>row.id===allocation)?.quantity,
+    allocationGross: kind === 'hold' ? basis.gross4 : allocations.find(row=>row.id===allocation)?.gross4,
+    allocationCoverage: kind === 'hold' ? coverage4 : allocations.find(row=>row.id===allocation)?.coverage4,
+    condition: kind === 'hold' ? condition : allocations.find(row=>row.id===allocation)?.condition_tag,
+    gross4:response.gross4,coverage4:response.coverage4,net4:response.net4,recognized4:response.recognized4,
+    remainingQuantity:after.quantity,remainingGross:after.gross4,remainingCoverage:after.coverage4,reason,category,
+    occurredAt,actorName:current.name,request,digest,requestJson,responseJson,
+    afterSellable:kind === 'hold' ? Number(basis.remainingQuantity) : Number(sellable),
+    afterBranch:kind === 'hold' ? Number(subtractQuantity(preimage.branch_stock,[quantity])) : preimage.branch_stock,
+    eventCount:events.length+1,allocationCount:allocations.length+(kind === 'hold' ? 1 : 0),allocatedGross,allocatedCoverage,
+    heldGross,heldCoverage,recognizedTotal:events.reduce((sum,row)=>sum+row.recognized4,0)+response.recognized4 }
+  statements.push({ sql: `INSERT INTO stock_disposition_guards(token,valid) VALUES(@postToken,CASE WHEN
+    EXISTS(SELECT 1 FROM stock_disposition_guards WHERE token=@token AND valid=1)
+    AND EXISTS(SELECT 1 FROM stock_disposition_allocations WHERE id=@allocation AND source_id=@source
+      AND quantity=@allocatedQuantity AND gross4=@allocationGross AND coverage4=@allocationCoverage AND condition_tag=@condition)
+    AND EXISTS(SELECT 1 FROM stock_disposition_events WHERE id=@event AND source_id=@source AND allocation_id=@allocation
+      AND generation=@generation+1 AND kind=@kind AND quantity=@quantity AND gross4=@gross4 AND coverage4=@coverage4
+      AND net4=@net4 AND recognized4=@recognized4 AND remaining_quantity=@remainingQuantity
+      AND remaining_gross4=@remainingGross AND remaining_coverage4=@remainingCoverage AND reason=@reason
+      AND expense_category IS @category AND actor_id=@actor AND occurred_at=@occurredAt)
+    AND EXISTS(SELECT 1 FROM stock_disposition_receipts WHERE actor_id=@actor AND request_id=@request
+      AND request_digest=@digest AND request_json=@requestJson AND response_json=@responseJson AND event_id=@event)
+    AND (SELECT COUNT(*) FROM audit_logs WHERE user_id=@actor AND user_name IS @actorName AND action=@kind
+      AND entity='stock_disposition' AND entity_id=@event AND table_name='stock_disposition_events'
+      AND record_id=@event AND new_value=@responseJson AND details=@responseJson)=1
+    AND EXISTS(SELECT 1 FROM branch_batch_stock WHERE batch_id=@batch AND branch_id=@branch AND quantity=@afterSellable)
+    AND EXISTS(SELECT 1 FROM branch_stock WHERE product_id=@product AND branch_id=@branch AND quantity=@afterBranch)
+    AND EXISTS(SELECT 1 FROM products WHERE id=@product AND is_active=1
+      AND stock_quantity=(SELECT COALESCE(SUM(quantity),0) FROM branch_stock WHERE product_id=@product))
+    AND EXISTS(SELECT 1 FROM product_batches WHERE id=@batch AND variant_product_id=@product AND is_active=1
+      AND supplier_id=@supplier AND payment_status='credit' AND received_branch_id=@branch
+      AND received_quantity=CAST(@sourceQty AS REAL) AND received_cost_usd=@sourceGross/10000.0)
+    AND EXISTS(SELECT 1 FROM inventory_movements WHERE id=@movement AND product_id=@product AND batch_id=@batch AND branch_id=@branch
+      AND quantity=CAST(@sourceQty AS REAL) AND free_quantity=CAST(@freeQty AS REAL) AND total_cost_usd=@sourceGross/10000.0
+      AND reference_id IS @referenceId AND movement_type IN ('add','in'))
+    AND EXISTS(SELECT 1 FROM users u LEFT JOIN roles r ON r.id=u.role_id WHERE u.id=@actor AND u.is_active=1
+      AND u.deleted_at IS NULL AND u.permissions IS @permissions AND u.role_id IS @roleId
+      AND r.permissions IS @rolePermissions AND r.code IS @roleCode)
+    AND (SELECT COUNT(*) FROM stock_disposition_events WHERE source_id=@source)=@eventCount
+    AND (SELECT MAX(generation) FROM stock_disposition_events WHERE source_id=@source)=@generation+1
+    AND (SELECT COALESCE(SUM(recognized4),0) FROM stock_disposition_events WHERE source_id=@source)=@recognizedTotal
+    AND (SELECT COUNT(*) FROM stock_disposition_allocations WHERE source_id=@source)=@allocationCount
+    AND (SELECT COALESCE(SUM(gross4),0) FROM stock_disposition_allocations WHERE source_id=@source)=@allocatedGross
+    AND (SELECT COALESCE(SUM(coverage4),0) FROM stock_disposition_allocations WHERE source_id=@source)=@allocatedCoverage
+    AND (SELECT COALESCE(SUM(e.remaining_gross4),0) FROM stock_disposition_events e WHERE e.source_id=@source
+      AND e.generation=(SELECT MAX(x.generation) FROM stock_disposition_events x WHERE x.allocation_id=e.allocation_id))=@heldGross
+    AND (SELECT COALESCE(SUM(e.remaining_coverage4),0) FROM stock_disposition_events e WHERE e.source_id=@source
+      AND e.generation=(SELECT MAX(x.generation) FROM stock_disposition_events x WHERE x.allocation_id=e.allocation_id))=@heldCoverage
+    ${feePostcondition}
+    THEN 1 ELSE 0 END)`,params:postParams },
+    { sql: `SELECT CASE WHEN (SELECT COUNT(*) FROM stock_disposition_guards WHERE token IN (@token,@postToken) AND valid=1)=2
+      THEN 1 ELSE json_extract('[1]','$[disposition_postcondition_missing]') END`,params:{ token:eventId,postToken } },
+    { sql: 'DELETE FROM stock_disposition_guards WHERE token IN (@token,@postToken)',params:{ token:eventId,postToken } },
+    { sql: `SELECT CASE WHEN NOT EXISTS(SELECT 1 FROM stock_disposition_guards WHERE token IN (@token,@postToken))
+      THEN 1 ELSE json_extract('[1]','$[disposition_guard_cleanup_failed]') END`,params:{ token:eventId,postToken } })
   try { await ordinaryBusinessBatch(db,statements) }
   catch {
     await currentActor(db,actor,extraFee4 > 0)

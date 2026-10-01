@@ -66,7 +66,9 @@ function fixture(hooks={},lot={ quantity:4,free:1,cost:9.9999,gross4:99999 }) {
     }
     return { sql,values,execute,bind:(...params)=>prepared(sql,params),all:async()=>execute(),run:async()=>execute(),first:async()=>execute().results[0] ?? null }
   }
+  const batchSizes=[]
   const d1={ prepare:prepared,batch:async statements=>{
+    batchSizes.push(statements.length)
     if (hooks.beforeBatch) { const hook=hooks.beforeBatch; delete hooks.beforeBatch; await hook(db,statements) }
     const atomic=!process.env.STOCK_DISPOSITION_NONATOMIC_CONTROL
     if (atomic) db.exec('BEGIN IMMEDIATE')
@@ -80,7 +82,7 @@ function fixture(hooks={},lot={ quantity:4,free:1,cost:9.9999,gross4:99999 }) {
     return results
   } }
   const baseline=Object.fromEntries(['fees','fee_operation_receipts','audit_logs','inventory_movements'].map(table=>[table,Number(db.prepare(`SELECT COUNT(*) n FROM ${table}`).get().n)]))
-  return { db,d1,hooks,baseline,maxBindings:()=>maxBindings }
+  return { db,d1,hooks,baseline,batchSizes,maxBindings:()=>maxBindings }
 }
 const hold=(request='hold-request-0001',overrides={})=>({ kind:'hold',source_id:'source-900',batch_id:500,product_id:10,branch_id:1,supplier_id:77,quantity:2,coverage_usd:3,coverage_state:'accepted_credit',condition_tag:'broken',reason:'Broken receipt units',extra_fee_usd:0.7,expected_generation:0,client_request_id:request,...overrides })
 async function post(f,body,enabled=true) {
@@ -90,8 +92,7 @@ async function post(f,body,enabled=true) {
 }
 const count=(f,table)=>Number(f.db.prepare(`SELECT COUNT(*) n FROM ${table}`).get().n)
 const snapshot=f=>JSON.stringify(['product_batches','branch_batch_stock','branch_stock','products','inventory_movements','stock_disposition_allocations','stock_disposition_events','stock_disposition_receipts','stock_disposition_fees','fees','fee_operation_receipts','audit_logs'].map(table=>f.db.prepare(`SELECT * FROM ${table}`).all()))
-;(async()=>{
-  if (process.env.STOCK_DISPOSITION_POSTCONDITION_CASE === 'permission') {
+async function permissionControls() {
     const f=fixture(); assert.equal((await post(f,hold())).status,200)
     f.db.exec(`UPDATE users SET permissions='{"inventory":true,"product_cost_edit":true,"product_cost_view":true,"fees":false}' WHERE id=71`)
     assert.equal((await post(f,hold())).status,403,'fee-only revocation must fence cached extra-fee replay')
@@ -103,8 +104,8 @@ const snapshot=f=>JSON.stringify(['product_batches','branch_batch_stock','branch
     assert.equal((await post(lost,hold())).status,403,'fee-only revocation must fence lost-response recovery')
     assert.equal(count(lost,'stock_disposition_events'),1); assert.equal(count(lost,'fees'),lost.baseline.fees+1)
     f.db.close(); lost.db.close(); console.log('PASS current required fee permission before cached replay and committed-lost-response recovery; no-fee independent and read-only entity replay'); return
-  }
-  if (process.env.STOCK_DISPOSITION_POSTCONDITION_CASE === 'silent') {
+}
+async function silentControls() {
     for (const [name,sql] of [
       ['fee','CREATE TRIGGER ignore_fee BEFORE INSERT ON fees BEGIN SELECT RAISE(IGNORE); END'],
       ['fee receipt','CREATE TRIGGER ignore_fee_receipt BEFORE INSERT ON fee_operation_receipts BEGIN SELECT RAISE(IGNORE); END'],
@@ -119,6 +120,8 @@ const snapshot=f=>JSON.stringify(['product_batches','branch_batch_stock','branch
       ['catalog stock','CREATE TRIGGER ignore_catalog_stock BEFORE UPDATE ON products BEGIN SELECT RAISE(IGNORE); END'],
       ['CHECK guards','CREATE TRIGGER ignore_check_guards BEFORE INSERT ON stock_disposition_guards BEGIN SELECT RAISE(IGNORE); END'],
       ['guard cleanup','CREATE TRIGGER ignore_guard_cleanup BEFORE DELETE ON stock_disposition_guards BEGIN SELECT RAISE(IGNORE); END'],
+      ['fee money mismatch',"CREATE TRIGGER corrupt_fee_money AFTER INSERT ON fees BEGIN UPDATE fees SET amount_usd=9.7 WHERE id=NEW.id; END"],
+      ['fee branch mismatch',"CREATE TRIGGER corrupt_fee_branch AFTER INSERT ON fees BEGIN UPDATE fees SET branch_id=NULL WHERE id=NEW.id; END"],
     ]) {
       const f=fixture(); f.db.exec(sql); const before=snapshot(f)
       const result=await post(f,hold())
@@ -128,13 +131,19 @@ const snapshot=f=>JSON.stringify(['product_batches','branch_batch_stock','branch
       f.db.close(); console.log(`PASS silent ${name} refuses409 and full rollback`)
     }
     return
-  }
+}
+;(async()=>{
+  if (process.env.STOCK_DISPOSITION_POSTCONDITION_CASE === 'permission') return permissionControls()
+  if (process.env.STOCK_DISPOSITION_POSTCONDITION_CASE === 'silent') return silentControls()
   const f=fixture()
   const original=snapshot(f)
   assert.equal((await post(f,hold(),false)).status,404)
   assert.equal(snapshot(f),original)
   const first=await post(f,hold())
   assert.equal(first.status,200,JSON.stringify(first))
+  const holdStatementCount=f.batchSizes[0]
+  assert.ok(holdStatementCount>14,'postconditions add atomic Hold boundaries')
+  assert.equal(count(f,'stock_disposition_guards'),0)
   assert.equal(first.data.gross4,49999); assert.equal(first.data.net4,19999); assert.equal(first.data.recognized4,0)
   assert.equal(f.db.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id=500').get().quantity,2)
   assert.equal(f.db.prepare('SELECT stock_quantity FROM products WHERE id=10').get().stock_quantity,2)
@@ -151,6 +160,8 @@ const snapshot=f=>JSON.stringify(['product_batches','branch_batch_stock','branch
   assert.throws(()=>f.db.prepare('UPDATE stock_disposition_sources SET gross4=0').run(),/immutable/)
   const dispose={ kind:'dispose',source_id:'source-900',batch_id:500,product_id:10,branch_id:1,supplier_id:77,allocation_id:first.data.allocation_id,quantity:1,reason:'Disposed broken unit',expense_category:'broken goods',expected_generation:1,client_request_id:'dispose-request-0001' }
   const second=await post(f,dispose)
+  const disposeStatementCount=f.batchSizes.at(-1)
+  assert.ok(disposeStatementCount>6,'postconditions add atomic Dispose boundaries')
   assert.equal(second.status,200,JSON.stringify(second)); assert.equal(second.data.recognized4,9999); assert.equal(second.data.remaining_gross4-second.data.remaining_coverage4,10000)
   let projection=await kernel.stockDispositionProjection(getDb({ DB:f.d1 }),'source-900')
   assert.equal(projection.held_net4,10000); assert.equal(projection.recognized_loss4,9999); assert.equal(projection.debt4,69999); assert.equal(projection.extra_cash_fee4,7000)
@@ -163,8 +174,8 @@ const snapshot=f=>JSON.stringify(['product_batches','branch_batch_stock','branch
   for (const change of [{ quantity:0 },{ quantity:1.1e9 },{ quantity:'0.123456789012345678901' },{ coverage_usd:-1 },{ coverage_usd:null },{ coverage_state:'pending' },{ coverage_usd:'Infinity' },{ coverage_usd:10 },{ extra_fee_usd:-1 },{ kind:'repair' },{ reason:'' }]) {
     const x=fixture(); const before=snapshot(x); assert.equal((await post(x,hold('invalid-request-0001',change))).status,400); assert.equal(snapshot(x),before); x.db.close()
   }
-  for (let failAt=0;failAt<14;failAt++) {
-    const x=fixture({ failAt }); const before=snapshot(x); assert.equal((await post(x,hold())).status,409,`failure index ${failAt}`); assert.ok(snapshot(x)===before,`rollback index ${failAt}`); x.db.close()
+  for (let failAt=0;failAt<holdStatementCount;failAt++) {
+    const x=fixture({ failAt }); const before=snapshot(x); assert.equal((await post(x,hold())).status,409,`failure index ${failAt}`); assert.ok(snapshot(x)===before,`rollback index ${failAt}`); assert.equal(count(x,'stock_disposition_guards'),0); x.db.close()
   }
   for (const sql of ["UPDATE product_batches SET received_cost_usd=10 WHERE id=500","UPDATE inventory_movements SET free_quantity=0 WHERE id=900","UPDATE users SET permissions='{}' WHERE id=71","UPDATE branch_batch_stock SET quantity=3 WHERE batch_id=500","UPDATE branches SET is_active=0 WHERE id=1","INSERT INTO system_flags(key,value) VALUES('maintenance','active')"]) {
     const x=fixture({ beforeBatch:db=>db.exec(sql) }); const response=await post(x,hold()); assert.ok([403,409].includes(response.status),JSON.stringify(response)); assert.equal(count(x,'stock_disposition_events'),0); assert.equal(count(x,'fees'),x.baseline.fees); x.db.close()
@@ -187,10 +198,12 @@ const snapshot=f=>JSON.stringify(['product_batches','branch_batch_stock','branch
   const competing=fixture(); competing.hooks.beforeBatch=async()=>assert.equal((await post(competing,hold('competing-request-0001'))).status,200)
   assert.equal((await post(competing,hold('competing-request-0002'))).status,409); assert.equal(count(competing,'stock_disposition_events'),1); assert.equal(count(competing,'fees'),competing.baseline.fees+1); competing.db.close()
   const revoked=fixture(); assert.equal((await post(revoked,hold())).status,200); revoked.db.exec("UPDATE users SET permissions='{}' WHERE id=71"); assert.equal((await post(revoked,hold())).status,403); assert.equal(count(revoked,'stock_disposition_events'),1); revoked.db.close()
-  for (let failAt=0;failAt<6;failAt++) {
+  for (let failAt=0;failAt<disposeStatementCount;failAt++) {
     const x=fixture(); const held=await post(x,hold()); const before=snapshot(x); x.hooks.failAt=failAt
-    assert.equal((await post(x,{ ...dispose,allocation_id:held.data.allocation_id })).status,409,`dispose rollback ${failAt}`); assert.equal(snapshot(x),before); x.db.close()
+    assert.equal((await post(x,{ ...dispose,allocation_id:held.data.allocation_id })).status,409,`dispose rollback ${failAt}`); assert.equal(snapshot(x),before); assert.equal(count(x,'stock_disposition_guards'),0); x.db.close()
   }
   f.db.close()
-  console.log(`PASS actual inventory Hono + production getDb native expr100/vars100 Hold->partial/full Dispose; exact99999 basis,30000 accepted credit,7000 cash; fractional0.3/0.1/0.03/0.07 residues; all14 Hold+6 Dispose rollback points; competing generation/replay/current-permission/source/maintenance/lost-response controls; fee FK and append-only guards; maxbindings=${f.maxBindings()}`)
+  console.log(`PASS actual inventory Hono + production getDb native expr100/vars100 Hold->partial/full Dispose; exact99999 basis,30000 accepted credit,7000 cash; fractional0.3/0.1/0.03/0.07 residues; all${holdStatementCount} Hold+${disposeStatementCount} Dispose rollback points; competing generation/replay/current-permission/source/maintenance/lost-response controls; fee FK and append-only guards; maxbindings=${f.maxBindings()}`)
+  await permissionControls()
+  await silentControls()
 })().catch(error=>{ console.error(error); process.exitCode=1 })
