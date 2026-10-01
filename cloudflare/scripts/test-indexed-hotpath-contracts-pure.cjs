@@ -3,6 +3,8 @@ const fs = require('node:fs')
 const path = require('node:path')
 const Database = require('better-sqlite3')
 const ts = require('typescript')
+const { openDb } = require('./harness/d1compat.cjs')
+const { loadAll } = require('./harness/load_migrations.cjs')
 
 const projectRoot = path.join(__dirname, '..', '..')
 const read = (...parts) => fs.readFileSync(path.join(projectRoot, ...parts), 'utf8')
@@ -92,13 +94,9 @@ db.exec(`
     ON products(client_request_id)
     WHERE client_request_id IS NOT NULL AND client_request_id <> '';
 `)
-const initialSchema = read('cloudflare', 'migrations', '0001_init.sql')
-const returnTableSchema = initialSchema.match(/CREATE TABLE returns \([\s\S]*?\r?\n\);/)
-const returnRequestIndexSchema = initialSchema.match(/CREATE UNIQUE INDEX idx_returns_client_request_unique_pg[^;]+;/)
-assert.ok(returnTableSchema, 'the actual returns table definition must be loaded')
-assert.ok(returnRequestIndexSchema, 'the actual returns request-key index must be loaded')
-db.exec(`${returnTableSchema[0]}\n${returnRequestIndexSchema[0]}`)
-db.prepare("INSERT INTO returns(id,return_number,client_request_id) VALUES(1,'R1','return:ខ្មែរ'),(2,'R2',''),(3,'R3',''),(4,'R4',NULL)").run()
+const returnsDb = openDb(loadAll()).db
+assert.equal(returnsDb.limits.exprDepth, 100)
+returnsDb.prepare("INSERT INTO returns(id,return_number,client_request_id) VALUES(1,'R1','return:ខ្មែរ'),(2,'R2',''),(3,'R3',''),(4,'R4',NULL)").run()
 
 function plan(sql, params = []) {
   return db.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(...params).map((row) => row.detail).join('\n')
@@ -112,12 +110,12 @@ function returnQueryParams(sql, key) {
   return sql.includes('@supplier_write_key') ? { supplier_write_key: key } : key
 }
 function assertReturnRequestIndex(sql) {
-  const queryPlan = plan(sql, [returnQueryParams(sql, 'return:ខ្មែរ')])
+  const queryPlan = returnsDb.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(returnQueryParams(sql, 'return:ខ្មែរ')).map(row => row.detail).join('\n')
   assert.match(queryPlan, /SEARCH returns USING (?:COVERING )?INDEX idx_returns_client_request_unique_pg/, sql)
   assert.doesNotMatch(queryPlan, /SCAN returns/, sql)
   assert.match(sql, /\bclient_request_id\s*<>\s*''/, 'each actual lookup must state its partial-index predicate')
   for (const key of ['return:ខ្មែរ', 'missing', '', null]) {
-    assert.deepEqual(db.prepare(sql).all(returnQueryParams(sql, key)), key === 'return:ខ្មែរ' ? [{ id: 1 }] : [])
+    assert.deepEqual(returnsDb.prepare(sql).all(returnQueryParams(sql, key)).map(row => ({ id: row.id })), key === 'return:ខ្មែរ' ? [{ id: 1 }] : [])
   }
 }
 for (const sql of [...returnRequestQueries, supplierReturnIdQuery]) {
@@ -140,4 +138,5 @@ assert.match(
 )
 
 db.close()
+returnsDb.close()
 console.log('PASS request-id, notification-status, and static-cache hot-path contracts')
