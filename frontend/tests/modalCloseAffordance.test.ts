@@ -109,7 +109,9 @@ for (const sibling of ['contacts/SupplierPurchasesModal.tsx', 'contacts/Customer
 type RenderNode = { type: unknown; props: Record<string, any> }
 const modalSource = readFileSync(new URL('../src/components/shared/Modal.tsx', import.meta.url), 'utf8')
 const jsx = (type: unknown, props: Record<string, any>) => ({ type, props: props || {} })
+let hookId = 0
 const hooks = {
+  useId: () => `modal-test-${++hookId}`,
   useRef: (initial: unknown) => ({ current: initial }),
   useState: (initial: unknown) => [typeof initial === 'function' ? (initial as () => unknown)() : initial, () => {}],
 }

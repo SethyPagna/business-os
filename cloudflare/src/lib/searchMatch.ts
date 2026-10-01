@@ -486,15 +486,17 @@ function sqlLiteral(char: string): string {
   return char.replace(/'/g, "''")
 }
 
-// Wraps `expr` (a column reference or any SQL text expression) in nested
-// REPLACE() calls that fold every accented character in DIACRITIC_SQL_PAIRS
-// to its plain-ASCII base letter, mirroring foldDiacritics above.
 export function foldDiacriticsSql(expr: string): string {
-  let out = expr
-  for (const [accented, base] of DIACRITIC_SQL_PAIRS) {
-    out = `REPLACE(${out}, '${sqlLiteral(accented)}', '${base}')`
+  const stages: string[] = []
+  for (let offset = 0; offset < DIACRITIC_SQL_PAIRS.length; offset += 12) {
+    const index = stages.length
+    let value = index === 0 ? expr : 'value'
+    for (const [accented, base] of DIACRITIC_SQL_PAIRS.slice(offset, offset + 12)) {
+      value = `REPLACE(${value}, '${sqlLiteral(accented)}', '${base}')`
+    }
+    stages.push(`search_fold_${index}(value) AS MATERIALIZED (SELECT ${value}${index === 0 ? '' : ` FROM search_fold_${index - 1}`})`)
   }
-  return out
+  return `(WITH ${stages.join(',')} SELECT value FROM search_fold_${stages.length - 1})`
 }
 
 // Wraps `expr` in nested REPLACE() calls turning every joiner character

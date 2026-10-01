@@ -1,5 +1,5 @@
 import X from 'lucide-react/dist/esm/icons/x.js'
-import { useRef, useState, type PointerEvent, type ReactNode } from 'react'
+import { useId, useRef, useState, type PointerEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { useApp as useAppHook } from '../../app/AppContextCore.tsx'
 import { useCloseGuard } from '../../utils/useCloseGuard.ts'
@@ -65,6 +65,7 @@ type ModalProps = {
 }
 
 export default function Modal({ title, onClose, children, wide, size, draggable, headerExtra, onMinimize, closeAffordance = 'visible', closeDisabled = false, layer = 'default', unsavedChanges }: ModalProps) {
+  const titleId = useId()
   const { t } = useApp()
   const tr = (key: string, fallback: string): string => {
     const value = t(key)
@@ -175,6 +176,7 @@ export default function Modal({ title, onClose, children, wide, size, draggable,
       className={`modal-viewport-safe pointer-events-auto fixed inset-0 bg-black/50 flex items-start sm:items-center justify-center ${layer === 'nested' ? 'z-[1070]' : 'z-[1050]'} overflow-y-auto sm:p-4`}
       role="dialog"
       aria-modal="true"
+      aria-labelledby={titleId}
     >
       <div
         ref={panelRef}
@@ -187,7 +189,7 @@ export default function Modal({ title, onClose, children, wide, size, draggable,
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}
         >
-          <h2 className="detail-scroll-text min-w-0 flex-1 text-base font-bold text-gray-900 dark:text-white sm:text-lg" title={typeof title === 'string' ? title : undefined}>{title}</h2>
+          <h2 id={titleId} className="detail-scroll-text min-w-0 flex-1 text-base font-bold text-gray-900 dark:text-white sm:text-lg" title={typeof title === 'string' ? title : undefined}>{title}</h2>
           <div className="flex shrink-0 items-center gap-1">
           {headerExtra}
           {closeAffordance === 'visible' ? (
