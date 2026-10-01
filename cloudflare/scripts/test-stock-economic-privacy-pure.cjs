@@ -33,7 +33,7 @@ const valuation = { valuation_version: 3, source_id: 'paid-source', event_id: 'v
   segments: [held, disposed], totals: { sellable_quantity: '1', held_quantity: '2', sellable_net4: 250000,
     held_net4: 350000, historical_loss4: 250000, recovery4: 150000, coverage4: 300000 }, pending4: 300000 }
 const disposition = { entity: 'stock_disposition', event_id: 'dispose', allocation_id: 'held-allocation', source_id: 'paid-source',
-  kind: 'dispose', quantity: '1', gross4: 250000, coverage4: 150000, net4: 100000, recognized4: 100000,
+  generation: 1, kind: 'dispose', quantity: '1', gross4: 250000, coverage4: 150000, coverage_state: 'allocated_accepted_credit', net4: 100000, recognized4: 100000,
   remaining_quantity: '1', remaining_gross4: 250000, remaining_coverage4: 0, extra_fee4: 17000 }
 const aliases = { openingPaid4: 800000, openingDebt4: 200000, remainingGross4: 250000, remainingCoverage4: 150000,
   remainingNet4: 100000, cashIn4: 100000, cashOut4: 800000, purchase_gross4: 1000000, sellable_gross4: 250000,
@@ -95,6 +95,15 @@ const ap = { funding_version: 2, scope: 'disabled_funding_projection', invoices:
 assert.deepEqual(access.projectAcquisitionCosts(ap, denied), { funding_version: 2, scope: 'disabled_funding_projection',
   invoices: [{ id: 1, supplier_id: 7, source_ids: ['paid-source'] }], native_sources: [] })
 assert.equal(access.hasAcquisitionCostInput(ap, denied), true)
+const dispositionSummary = { purchase_quantity: '4', free_quantity: '0', purchase_gross4: 1000000, sellable_quantity: '1',
+  held_quantity: '2', physical_quantity: '3', sellable_gross4: 250000, held_gross4: 500000, held_net4: 350000,
+  accepted_credit4: 300000, debt4: 0, recognized_loss4: 250000, extra_cash_fee4: 17000 }
+assert.deepEqual(access.projectAcquisitionCosts(dispositionSummary, denied), { purchase_quantity: '4', free_quantity: '0',
+  sellable_quantity: '1', held_quantity: '2', physical_quantity: '3' })
+for (const envelope of [funding, valuation, disposition, dispositionSummary, ap]) {
+  assert.equal(access.projectAcquisitionCosts(envelope, viewer), envelope)
+  assert.equal(access.hasAcquisitionCostInput(envelope, denied), true)
+}
 assert.deepEqual(access.projectAcquisitionCosts({ entity: 'stock_valuation', changes: [{ field: 'amount4', before: 150000, after: 300000 }] }, denied),
   { entity: 'stock_valuation', changes: [{ field: 'amount4', redacted: true }] })
 assert.equal(access.hasAcquisitionCostInput({ entity: 'stock_valuation', changes: [{ field: 'amount4', after: 300000 }] }, denied), true)
