@@ -1,4 +1,5 @@
 import { useApp } from '../../AppContext'
+import type { AppContextCoreValue } from '../../app/AppContextCore.tsx'
 import { canViewAcquisitionCosts } from '../../utils/acquisitionCostAccess.ts'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { supplierDisplay } from '../../utils/supplierDisplay.ts'
@@ -66,7 +67,7 @@ type ApInvoicesSectionProps = {
 }
 
 export default function ApInvoicesSection({ t }: ApInvoicesSectionProps) {
-  const { user, notify } = useApp()
+  const { user, notify } = useApp() as Pick<AppContextCoreValue, 'user' | 'notify'>
   const canViewCosts = canViewAcquisitionCosts(user)
   const tr = (key: string, fallback: string): string => t(key) || fallback
   const [branch, setBranch] = useState('all')
