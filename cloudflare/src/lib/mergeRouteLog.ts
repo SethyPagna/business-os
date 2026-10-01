@@ -43,6 +43,7 @@ export function describeMergeFailure(input: {
   status: number
   productIds: number[]
   error: unknown
+  errorId?: string
 }): string {
   const error = input.error as { name?: unknown; message?: unknown } | null | undefined
   return JSON.stringify({
@@ -51,6 +52,7 @@ export function describeMergeFailure(input: {
     route: input.path,
     status: input.status,
     productIds: input.productIds,
+    ...(input.errorId ? { errorId: input.errorId } : {}),
     errorName: typeof error?.name === 'string' ? error.name : null,
     error: typeof error?.message === 'string' ? error.message.slice(0, MAX_MESSAGE) : 'returned a 5xx without a thrown error',
   })

@@ -898,10 +898,136 @@ async function runBulk() {
   })
 }
 
+// UI-CONFLICTS B1 (owner 30 Sep 2026): a Resolve keep-merge whose grid
+// choices renamed the survivor and re-picked its catalog, prices, barcode and
+// cover. The forward side is the same mirror fold plus the real choice
+// statements; undo is the real applier and must put back every one of those
+// exactly. Stock-in sessions are closed by the merge and stay closed (MERGE-UNBLOCK).
+async function runResolveChoiceUndo() {
+  console.log('\n-- Resolve choices across undo --')
+  const d1 = openDb(loadAll())
+  const undo = loadUndoAppliers(d1)
+  const choices = loadActualDependency(path.join(LIB_DIR, 'productResolveChoices.ts'))
+  const run1 = (sql, p) => d1.db.prepare(sql).run(p == null ? {} : p)
+  const one = (sql, ...a) => { const row = d1.db.prepare(sql).get(...a); return row ? { ...row } : row }
+  const KEEPER = 110, DUP = 111
+  const CHOICE_COLUMNS = 'name,name_normalized,barcode,brand,brands,brand_compact,category,categories,unit,unit_normalized,selling_price_usd,selling_price_khr,wholesale_price_usd,wholesale_price_khr,cost_price_usd,cost_price_khr,image_path'
+  const keeperRow = () => one(`SELECT ${CHOICE_COLUMNS} FROM products WHERE id = ?`, KEEPER)
+
+  function seed() {
+    run1(`INSERT INTO branches (id, name) VALUES (1,'B1')`)
+    run1(`INSERT INTO products (id, name, name_normalized, barcode, brand, brands, brand_compact, category, categories, unit, unit_normalized,
+      selling_price_usd, selling_price_khr, wholesale_price_usd, wholesale_price_khr, cost_price_usd, cost_price_khr, image_path, is_active) VALUES
+      (110,'Glow Serum 30ml','glow serum 30ml (legacy)','8850000000070','Glowy','Glowy','glowy-legacy','Serum','Serum','pcs','pcs',12,49200,10,41000,5,20500,'products/glow-70.jpg',1),
+      (111,'Glow-Serum 30ml','glow serum 30ml','8850000000071','Glowy Lab','Glowy Lab||Glowy','glowylab','Skin Care','Skin Care','bottle','bottle',9.5,38950,8,32800,6,24600,NULL,1),
+      (999,'Unrelated',NULL,'1',NULL,NULL,NULL,NULL,NULL,'pcs','pcs',1,0,0,0,0,0,NULL,1)`)
+    run1(`INSERT INTO sales (id) VALUES (960)`)
+    run1(`INSERT INTO sale_items (id, sale_id, product_id, product_name, quantity) VALUES (760,960,110,'Glow Serum 30ml',1),(761,960,111,'Glow-Serum 30ml',1)`)
+  }
+  seed()
+  const frozenRows = d1.db.prepare(`SELECT * FROM products WHERE id IN (${KEEPER},${DUP})`).all().map((row) => ({ ...row }))
+  const before = keeperRow()
+  const parsed = choices.parseProductResolveChoices({ choices: {
+    name: { source_id: DUP }, barcode: { source_id: DUP }, brand: { source_id: DUP }, category: { custom: 'Face Care' },
+    unit: { source_id: DUP }, selling_price_usd: { source_id: DUP }, wholesale_price_usd: { custom: 7.123 }, image: { source_id: KEEPER },
+  } }, [KEEPER, DUP])
+  assert.equal(parsed.ok, true, JSON.stringify(parsed))
+  const values = choices.resolveChoiceValues(parsed.choices, frozenRows)
+  const choiceBefore = choices.keeperChoiceBefore(one('SELECT * FROM products WHERE id = ?', KEEPER), values)
+  // The mirror fold, then the grid's Final values, as the Resolve merge's one
+  // batch applies them after the economics write.
+  const res = await foldForward(d1, { id: KEEPER, name: 'Glow Serum 30ml' }, { id: DUP, name: 'Glow-Serum 30ml', image_path: null }, new Map([[1, 'B1']]), 'resolve grid keep merge')
+  const reversal = {
+    ...res.reversal,
+    keeperBarcodeBefore: before.barcode,
+    keeperPricingBefore: {
+      selling_price_usd: before.selling_price_usd, selling_price_khr: before.selling_price_khr,
+      wholesale_price_usd: before.wholesale_price_usd, wholesale_price_khr: before.wholesale_price_khr,
+      cost_price_usd: before.cost_price_usd, cost_price_khr: before.cost_price_khr,
+    },
+    keeperChoice: { follows: true, fields: values },
+    ...choiceBefore,
+  }
+  await d1.batch([
+    { sql: 'UPDATE products SET selling_price_usd = 12, selling_price_khr = 49200 WHERE id = @id', params: { id: KEEPER } },
+    ...choices.keeperChoiceStatements(KEEPER, values),
+    ...undo.productNameSnapshotStatements(KEEPER, values.name),
+  ])
+
+  await check('forward: the survivor carries every chosen value', async () => {
+    const after = keeperRow()
+    for (const [column, value] of Object.entries(values)) assert.equal(after[column], value, column)
+    assert.equal(after.selling_price_usd, 9.5, 'the chosen lower selling price, written after the highest-price economics')
+    assert.equal(after.name_normalized, 'glow serum 30ml')
+    assert.equal(one('SELECT product_name FROM sale_items WHERE id = 760').product_name, 'Glow-Serum 30ml')
+  })
+
+  const rec = await undo.recordMergeUndoSnapshot({}, { id: 42, name: 'Merger' }, reversal)
+  const applier = undo.resolveUndoApplier({ applier: 'product.merge', snapshot_id: rec.snapshotId })
+
+  await check('a chosen cover counts as an image effect; the same cover does not', async () => {
+    assert.equal(await undo.mergeReplayChangesProductImages({}, { applier: 'product.merge', snapshot_id: rec.snapshotId }, 'undo'), false,
+      'choosing the survivor\'s own cover changes no image')
+    const moved = { ...reversal, keeperChoice: { follows: true, fields: { ...values, image_path: 'products/glow-72.jpg' } } }
+    const other = d1.db.prepare("INSERT INTO undo_snapshots (kind, status, payload_json) VALUES ('product.merge','applied',?)").run(JSON.stringify(moved))
+    assert.equal(await undo.mergeReplayChangesProductImages({}, { applier: 'product.merge', snapshot_id: Number(other.lastInsertRowid) }, 'undo'), true)
+    run1('DELETE FROM undo_snapshots WHERE id = ?', Number(other.lastInsertRowid))
+  })
+
+  await check('UNDO restores the survivor exactly: name, search name, catalog, prices, barcode and cover', async () => {
+    await applier.run({ applier: 'product.merge', snapshot_id: rec.snapshotId }, { env: {}, user: { id: 42 }, direction: 'undo' })
+    assert.deepEqual(keeperRow(), before)
+    assert.equal(one('SELECT is_active FROM products WHERE id = ?', DUP).is_active, 1)
+    assert.equal(one('SELECT product_name FROM sale_items WHERE id = 760').product_name, 'Glow Serum 30ml', 'the survivor\'s own history reads its name again')
+  })
+
+  await check('an older snapshot without the new fields restores no name', async () => {
+    const statement = undo.mergeKeeperRestoreStatement({ keeperId: KEEPER, dupId: DUP, keeperImagePathBefore: null, dupImagesBefore: [], imagesMovedToKeeper: [] }, false)
+    assert.doesNotMatch(statement.sql, /\bname=/)
+  })
+
+  // A Resolve barcode choice puts the survivor's own barcode on the merged record.
+  // Undo must give each record its own back; a snapshot from any other merge has no
+  // dupBarcodeBefore and must leave the merged record's barcode as it is.
+  async function mergeWithBarcodes(keeperAfter, dupAfter, extra) {
+    const merged = await foldForward(d1, { id: KEEPER, name: 'Glow Serum 30ml' }, { id: DUP, name: 'Glow-Serum 30ml', image_path: null }, new Map([[1, 'B1']]), 'resolve grid keep merge')
+    run1('UPDATE products SET barcode = @k WHERE id = @id', { k: keeperAfter, id: KEEPER })
+    run1('UPDATE products SET barcode = @d WHERE id = @id', { d: dupAfter, id: DUP })
+    const recorded = await undo.recordMergeUndoSnapshot({}, { id: 42, name: 'Merger' }, { ...merged.reversal, keeperBarcodeBefore: '8850000000070', ...extra })
+    const undoer = undo.resolveUndoApplier({ applier: 'product.merge', snapshot_id: recorded.snapshotId })
+    await undoer.run({ applier: 'product.merge', snapshot_id: recorded.snapshotId }, { env: {}, user: { id: 42 }, direction: 'undo' })
+  }
+  const barcodes = () => [one('SELECT barcode FROM products WHERE id = ?', KEEPER).barcode, one('SELECT barcode FROM products WHERE id = ?', DUP).barcode]
+
+  await check('UNDO puts a swapped barcode back on the merged record', async () => {
+    await mergeWithBarcodes('8850000000071', '8850000000070', { dupBarcodeBefore: '8850000000071' })
+    assert.deepEqual(barcodes(), ['8850000000070', '8850000000071'])
+    assert.equal(one('SELECT is_active FROM products WHERE id = ?', DUP).is_active, 1)
+  })
+
+  await check('a snapshot without dupBarcodeBefore leaves the merged record\'s barcode alone', async () => {
+    await mergeWithBarcodes('8850000000070', 'MERGED-ROW-BARCODE', {})
+    assert.deepEqual(barcodes(), ['8850000000070', 'MERGED-ROW-BARCODE'])
+    run1("UPDATE products SET barcode = '8850000000071' WHERE id = ?", DUP)
+  })
+
+  await check('the name-snapshot list matches the rename/merge path in products.ts', async () => {
+    const src = fs.readFileSync(path.join(cloudflareRoot, 'src', 'routes', 'products.ts'), 'utf8')
+    const at = src.indexOf('function linkedProductNameSnapshotStatements(')
+    assert.ok(at > 0, 'linkedProductNameSnapshotStatements is still the rename/merge sync')
+    const body = src.slice(at, src.indexOf('\n}\n', at))
+    if (/productNameSnapshotStatements|PRODUCT_NAME_SNAPSHOT_COLUMNS/.test(body)) return
+    const routeList = [...body.matchAll(/UPDATE (\w+) SET (\w+) = @productName WHERE (\w+) IN/g)]
+      .map(([, table, nameColumn, idColumn]) => ({ table, idColumn, nameColumn }))
+    assert.deepEqual(routeList, undo.PRODUCT_NAME_SNAPSHOT_COLUMNS.map((entry) => ({ ...entry })))
+  })
+}
+
 async function main() {
   await run()
   await runSavedClusterEconomics()
   await runBulk()
+  await runResolveChoiceUndo()
   console.log(`\n${passed} check(s) passed.`)
 }
 

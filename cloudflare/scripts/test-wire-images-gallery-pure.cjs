@@ -222,6 +222,8 @@ const productsRoute = loadReal('routes/products.ts', {
   // never invokes it, but the identity lane imports it from products.ts.
   '../lib/productMerge': productMerge,
   '../lib/productMergeSnapshot': productMergeSnapshot,
+  // Only the merge route reads these; nothing here merges, so an inert stand-in is enough.
+  '../lib/productResolveChoices': { resolveChoicesTypeValues: () => false, ProductResolveChoiceError: class extends Error {} },
   '../lib/productConflictMergeBatch': productConflictMergeBatch,
   '../lib/productConflictActionGroups': productConflictActionGroups,
   '../lib/productDelete': productDelete,

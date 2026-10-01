@@ -30,6 +30,7 @@ import { lotRemainingSql } from '../lib/lotRemaining'
 import { compareCosts, normalizeProductGroupName, resolveMergedCostDetail } from '../lib/productDetailRule'
 import type { CostVerdict, MergedCostOutlier } from '../lib/productDetailRule'
 import { buildAtomicMergeHistoryStatements, closeStockSessionsStatements, readOpenStockSessions, finalizeAtomicMergeHistory, mergeStateFingerprint, PRODUCT_MERGE_GROUP_ACTION_KIND, PRODUCT_MERGE_GROUP_CHILD_KIND, productMergeGroupPrefixFingerprint, registerMergeFold, registerProductMergeGroupRedo, recordSupplierBackfillSnapshot, MERGE_REPARENT_TABLES, type AtomicMergeKnownIds, type AtomicMergeStatement, type MergeReversal, type MergeStockDisposition, type ProductMergeKeeperChoice } from '../lib/undoAppliers'
+import { INVALID_RESOLVE_CHOICES_CODE, KEEPER_CHOICE_BEFORE_SQL, MERGE_APPLIED_PROBE_SQL, ProductResolveChoiceError, RESOLVE_EDIT_PERMISSION_CODE, keeperChoiceBefore, keeperChoiceStatements, mergeFailedBody, parseProductResolveChoices, resolveChoicesTypeValues, resolveChoiceValues, type ProductResolveChoices, type ResolveChoiceValues } from '../lib/productResolveChoices'
 import { createProductMergeClusterPlan, MERGE_COST_FIELDS, MERGE_PRICE_FIELDS, parseProductMergeClusterPlan, productMergeCaseKey, productMergeCasAssertion, productMergeNumericError, productMergeSourceUnmovedAssertion, MERGE_CONFLICT_RETRY, productMergePlanKeeperMatches, productMergePlanSourceMemberMatches, resolveProductMergeClusterPlanEconomics, resolveProductMergeEconomics, type ProductMergeClusterPlan, type ProductMergeEconomics, type ProductMergeNumericIssue } from '../lib/productMerge'
 import { CATALOG_COST_DERIVE_SQL, catalogCostRecomputeIfChangedSql, costEntryActorParams, typedCostEntriesBeforeWriteSql, typedCostEntryBeforeWriteStatement } from '../lib/catalogCostRecompute'
 import { PRODUCT_MERGE_READ_BATCH_MAX_STATEMENTS, productMergeSourceExtent, readProductMergeCaseSnapshot, readProductMergeDependentLotSnapshots, planProductMergeCaseSnapshot, planProductMergeDependentLotSnapshots, runProductMergeReadBatch, type ProductMergeReadPlan } from '../lib/productMergeSnapshot'
@@ -3328,6 +3329,14 @@ function writeOffReason(dup: { id: number; name: string | null }, mergeContext: 
   return `Duplicate product "${dup.name}" ${writeOffMarker(dup.id)} instead of being merged -- ${mergeContext}`
 }
 
+// Same barcode by the exact text or by the leading-zero identity rule (which is
+// a comparison only; spellings are never rewritten). Two empty barcodes match.
+function sameBarcodeText(a: unknown, b: unknown): boolean {
+  const x = String(a ?? '').trim()
+  const y = String(b ?? '').trim()
+  return x === y || (isRealBarcode(x) && isRealBarcode(y) && identityBarcodeKey(x) === identityBarcodeKey(y))
+}
+
 // The complete fold of ONE duplicate product into a keeper -- branch_stock
 // summed per branch (with an inventory_movements record each), gallery +
 // primary image carried over, product_batches re-pointed lot-by-lot (or
@@ -3494,6 +3503,12 @@ export async function foldDuplicateProductInto(
   if (!canonicalBefore || !dupPricing || (!reviewedAuthorityValid && !keeperChoice?.follows && !productsShareExactIdentity(canonicalBefore, dupPricing))) {
     throw new Error('merge_identity_conflict')
   }
+  // The grid's chosen Final values; the survivor's name and
+  // catalog before-image is read here so a redo captures it again too.
+  const choiceFields = keeperChoice?.fields && Object.keys(keeperChoice.fields).length ? keeperChoice.fields : undefined
+  const choiceBefore = choiceFields
+    ? keeperChoiceBefore(await db.prepare(KEEPER_CHOICE_BEFORE_SQL).get<Record<string, unknown>>({ id: canonicalId }), choiceFields)
+    : {}
   if (atomicHistory?.bulkClusterPlan) {
     const plan = atomicHistory.bulkClusterPlan
     const reviewedRedoSourceMatches = (row: Record<string, unknown>) => {
@@ -3563,6 +3578,17 @@ export async function foldDuplicateProductInto(
   const canonicalBarcode = keeperChoice?.follows
     ? keeperFollowsBarcode(canonicalBefore, dupPricing)
     : reviewedAuthorityValid ? reviewedPlan.selected.barcode.value : canonicalProductBarcode([canonicalBefore, dupPricing])
+  // A barcode picked in the Resolve grid is written on the survivor at the step
+  // that merges the record it came from, and the survivor's own barcode moves
+  // onto that record: a barcode is one column, so that record is the only row
+  // free to hold it, and N1 says a barcode that does not survive stays on a
+  // record. Other steps leave the survivor's barcode alone.
+  const chosenBarcode = choiceFields && Object.prototype.hasOwnProperty.call(choiceFields, 'barcode') ? (choiceFields.barcode ?? null) : undefined
+  const barcodeSwap = chosenBarcode !== undefined && sameBarcodeText(dupPricing.barcode, chosenBarcode)
+  const keeperBarcodeBefore = String(canonicalBefore.barcode ?? '')
+  const displacedBarcode = barcodeSwap && keeperBarcodeBefore.trim() && keeperBarcodeBefore.trim() !== String(chosenBarcode ?? '').trim() ? keeperBarcodeBefore : null
+  const keeperBarcodeAfter = barcodeSwap ? chosenBarcode ?? null : canonicalBarcode
+  const dupBarcodeAfter = displacedBarcode ?? dupPricing.barcode ?? null
   // Which of the keeper's prices this fold actually moves. Computed from the
   // same two rows and the same fallback chain the UPDATE below writes, so the
   // audit trail cannot claim a change the fold did not make (or miss one it
@@ -3913,8 +3939,17 @@ BEGIN SELECT RAISE(ABORT,'lot has immutable transfer provenance'); END`,
   // canonicalId covers both the just-reparented dup rows AND any of the
   // keeper's own pre-existing rows -- both are safe to normalize since a
   // same-name merge only ever happens between rows sharing one product name.
-  for (const { sql, params } of linkedProductNameSnapshotStatements([canonicalId], canonicalName)) {
+  for (const { sql, params } of linkedProductNameSnapshotStatements([canonicalId], choiceFields?.name ?? canonicalName)) {
     statements.push({ sql, params })
+  }
+  // After the economics UPDATE on every step, so a later step's highest-price
+  // rule cannot overwrite a chosen lower price (idempotent when repeated).
+  if (choiceFields) {
+    const { barcode: _barcode, ...stepFields } = choiceFields
+    statements.push(...keeperChoiceStatements(canonicalId, barcodeSwap ? choiceFields : stepFields))
+  }
+  if (displacedBarcode !== null) {
+    statements.push({ sql: 'UPDATE products SET barcode = @displacedBarcode, updated_at = CURRENT_TIMESTAMP WHERE id = @dupId', params: { displacedBarcode, dupId: dup.id } })
   }
   // promotion_rules.product_ids: a LIVE product link the walk above structurally
   // cannot reach -- it is a JSON array of ids inside a TEXT column, not an
@@ -3987,7 +4022,7 @@ BEGIN SELECT RAISE(ABORT,'lot has immutable transfer provenance'); END`,
     productName: dup.name,
     mergedIntoProductId: canonicalId,
     mergedIntoProductName: canonicalName,
-    canonicalBarcode,
+    canonicalBarcode: keeperBarcodeAfter,
     stockDisposition,
     priceChanges: priceChangesForAudit,
     batchesMoved: batchesMovedThisDup,
@@ -4005,8 +4040,11 @@ BEGIN SELECT RAISE(ABORT,'lot has immutable transfer provenance'); END`,
     reparentedTables: reparentedByTable.map((e) => `${e.table}:${e.ids.length}`),
     // N1: the merged record's barcode the kept product does not carry stays
     // on the merged (deactivated) record and is named here.
-    ...(keeperChoice?.follows ? { keeperFollows: true, absorbedBarcodes: absorbedBarcodes(canonicalBarcode, dupPricing) } : {}),
+    ...(keeperChoice?.follows ? { keeperFollows: true, absorbedBarcodes: absorbedBarcodes(keeperBarcodeAfter, { barcode: dupBarcodeAfter }) } : {}),
+    // Both records' barcodes before and after, so the swap is readable and undo restores each.
+    ...(barcodeSwap ? { barcodes: { keeper: { before: canonicalBefore.barcode ?? null, after: keeperBarcodeAfter }, merged: { before: dupPricing.barcode ?? null, after: dupBarcodeAfter } } } : {}),
     ...(chosenCost ? { costChosen: chosenCost } : {}),
+    ...(choiceFields ? { choicesApplied: choiceFields } : {}),
     ...(atomicHistory?.auditContext || {}),
   }
   const reversal: MergeReversal & { selectedConflictContext?: Record<string, unknown> } = {
@@ -4017,7 +4055,9 @@ BEGIN SELECT RAISE(ABORT,'lot has immutable transfer provenance'); END`,
     keeperImagePathBefore: canonicalBefore?.image_path ?? null,
     dupImagePathBefore: dup.image_path ?? null,
     keeperBarcodeBefore: canonicalBefore?.barcode ?? null,
+    ...(displacedBarcode !== null ? { dupBarcodeBefore: dupPricing.barcode ?? null } : {}),
     ...(keeperChoice ? { keeperChoice } : {}),
+    ...choiceBefore,
     ...(keeperChoice?.economics ? { fullBatchMetadataFingerprint: true } : {}),
     ...(atomicHistory?.reviewedCatalogBefore ? { keeperCatalogBefore: atomicHistory.reviewedCatalogBefore } : {}),
     keeperPricingBefore: {
@@ -8451,6 +8491,7 @@ type ResolveProductRequest = { requestId: string; reviewedDigest: string; steps:
 type ResolveProductPlan = ResolveProductRequest & {
   keepId: number
   cost: ProductMergeKeeperChoice['cost'] | null
+  choices?: ProductResolveChoices
   rows: Record<string, unknown>[]
   fingerprints: Record<string, string>
 }
@@ -8562,7 +8603,10 @@ app.get('/possible-duplicates/merge-preview', async (c) => {
     closesStockSessions: closingSessions.map((session) => session.operationId),
     // The gate the client has always read and the server has never sent.
     identity,
-    ...(keepMode ? { cluster: inCluster, keeperStock, groupCost, groupProducts: resolveGroup?.rows, reviewedDigest: resolveGroup?.reviewedDigest } : {}),
+    ...(keepMode ? {
+      cluster: inCluster, keeperStock, groupCost, groupProducts: resolveGroup?.rows, reviewedDigest: resolveGroup?.reviewedDigest,
+      choicesSupported: true,
+    } : {}),
     // Read-only warnings, so the reviewer learns BEFORE choosing a keeper that
     // this pair cannot be merged yet, instead of after pressing Apply.
     blocked: keepMode && !inCluster
@@ -8580,7 +8624,7 @@ app.post('/possible-duplicates/merge', async (c) => {
   if (getActionTier(user, 'products', 'merge_duplicates') !== 'full') {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
-  const body = await c.req.json().catch(() => ({})) as { keepId?: unknown; mergeId?: unknown; stock?: unknown; keep?: unknown; cost_price_usd?: unknown; cost_price_khr?: unknown; resolve?: ResolveProductRequest }
+  const body = await c.req.json().catch(() => ({})) as { keepId?: unknown; mergeId?: unknown; stock?: unknown; keep?: unknown; cost_price_usd?: unknown; cost_price_khr?: unknown; resolve?: ResolveProductRequest; choices?: unknown }
   const keepId = Number(body.keepId)
   const mergeId = Number(body.mergeId)
   // The operator's answer for the discarded row's stock. Anything other than
@@ -8615,8 +8659,18 @@ app.post('/possible-duplicates/merge', async (c) => {
     }
     chosenCost = { cost_price_usd: roundMoney4(usd), ...(khr !== null ? { cost_price_khr: roundMoney4(khr) } : {}) }
   }
+  // A typed Final value is a product edit; the Edit product switch decides it, as on PUT.
+  if (resolveChoicesTypeValues(body) && getActionTier(user, 'products', 'edit') !== 'full') {
+    return c.json({ success: false, code: RESOLVE_EDIT_PERMISSION_CODE, error: 'Typing a value in Resolve needs the permission to edit products. Pick a value from one of the products instead.' }, 403)
+  }
   const db = getDb(c.env)
   const resolve = body.resolve
+  // Choices are Final values taken from the frozen reviewed rows, so they
+  // exist only with a Resolve plan.
+  if (body.choices !== undefined && (!keepMode || resolve === undefined)) {
+    return c.json({ success: false, code: INVALID_RESOLVE_CHOICES_CODE, error: 'Field choices need a reviewed Resolve plan.' }, 400)
+  }
+  let choices: ProductResolveChoices = {}
   const resolveGuards: AtomicMergeStatement[] = []
   let resolvePlan: ResolveProductPlan | undefined
   let resolveReplay = false
@@ -8630,12 +8684,17 @@ app.post('/possible-duplicates/merge', async (c) => {
       || !resolve.steps.some((step) => step.mergeId === mergeId && (step.stock ?? null) === stockChoice)) {
       return c.json({ code: 'invalid_resolve_plan', error: 'Invalid product resolve plan.' }, 400)
     }
+    if (body.choices !== undefined) {
+      const parsedChoices = parseProductResolveChoices(body, [keepId, ...resolve.steps.map((step) => step.mergeId)])
+      if (!parsedChoices.ok) return c.json({ success: false, code: parsedChoices.code, error: parsedChoices.error }, 400)
+      choices = parsedChoices.choices
+    }
     const receipts = await db.prepare(`SELECT details FROM audit_logs WHERE action='merge_duplicate' AND entity='product'
       AND user_id=@actor AND json_valid(details) AND json_extract(details,'$.resolvePlan.requestId')=@requestId ORDER BY id`)
       .all<{ details: string }>({ actor: user?.id ?? null, requestId: resolve.requestId })
     const previous = receipts.map((row) => JSON.parse(row.details) as { resolvePlan: ResolveProductPlan; operationId: string; resolvedMergeId: number })
-    const semantic = (plan: Pick<ResolveProductPlan, 'keepId' | 'steps' | 'reviewedDigest' | 'cost'>) => JSON.stringify([plan.keepId, plan.steps, plan.reviewedDigest, plan.cost])
-    const requested = { keepId, steps: resolve.steps, reviewedDigest: resolve.reviewedDigest, cost: chosenCost ?? null }
+    const semantic = (plan: Pick<ResolveProductPlan, 'keepId' | 'steps' | 'reviewedDigest' | 'cost' | 'choices'>) => JSON.stringify([plan.keepId, plan.steps, plan.reviewedDigest, plan.cost, plan.choices ?? {}])
+    const requested = { keepId, steps: resolve.steps, reviewedDigest: resolve.reviewedDigest, cost: chosenCost ?? null, choices }
     if (previous.length) {
       resolvePlan = previous[0].resolvePlan
       if (semantic(resolvePlan) !== semantic(requested)) return c.json({ code: 'resolve_request_conflict', error: 'This resolve request already has different choices.' }, 409)
@@ -8689,6 +8748,15 @@ app.post('/possible-duplicates/merge', async (c) => {
     return c.json({ success: true, replayed: true, keptId: keepId, mergedId: mergeId, keeper: { ...row, stock_quantity: stock.totalQuantity, branch_stock: stock.branches, absorbed_barcodes: absorbedBarcodes(row?.barcode, merged) } })
   }
   if (!keeper.is_active || !dup.is_active) return c.json({ code: 'product_merge_inactive', error: 'Both products must be active — one of them was already merged or deleted' }, 409)
+  let choiceFields: ResolveChoiceValues | undefined
+  if (resolvePlan?.choices && Object.keys(resolvePlan.choices).length) {
+    try {
+      choiceFields = resolveChoiceValues(resolvePlan.choices, resolvePlan.rows)
+    } catch (error) {
+      if (error instanceof ProductResolveChoiceError) return c.json({ success: false, code: error.code, error: error.message }, 400)
+      throw error
+    }
+  }
   if (keeper.is_group || dup.is_group) return c.json({ error: 'Group rows cannot be merged — merge the variant products instead' }, 400)
 
   const branchRows = await db.prepare('SELECT id, name FROM branches').all<{ id: number; name: string }>({})
@@ -8738,10 +8806,10 @@ app.post('/possible-duplicates/merge', async (c) => {
       identity,
     }, 400)
   }
-  if (getActionTier(user, 'products', 'image') !== 'full' && await productMergeChangesImages(
+  if (getActionTier(user, 'products', 'image') !== 'full' && (await productMergeChangesImages(
     db,
     [{ keeper, discarded: dup }],
-  )) {
+  ) || (choiceFields && 'image_path' in choiceFields && String(choiceFields.image_path || '') !== String(keeper.image_path || '')))) {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
 
@@ -8757,7 +8825,7 @@ app.post('/possible-duplicates/merge', async (c) => {
       stockChoice ?? 'merge',
       undefined,
       { operationId, ...(resolvePlan ? { preStatements: resolveGuards, auditContext: { resolvePlan, operationId, resolvedMergeId: mergeId } } : {}) },
-      keepMode ? { follows: true, ...(chosenCost ? { cost: chosenCost } : {}), ...(resolvePlan ? { economics: resolveProductMergeEconomics(resolvePlan.rows) } : {}) } : undefined,
+      keepMode ? { follows: true, ...(chosenCost ? { cost: chosenCost } : {}), ...(resolvePlan ? { economics: resolveProductMergeEconomics(resolvePlan.rows) } : {}), ...(choiceFields ? { fields: choiceFields } : {}) } : undefined,
     )
   } catch (error) {
     if (/merge_state_conflict|merge_identity_conflict/.test(String(error))) {
@@ -8768,7 +8836,15 @@ app.post('/possible-duplicates/merge', async (c) => {
     if (/merge_numeric_invalid:/.test(String(error))) {
       return c.json({ success: false, code: 'invalid_merge_numeric', error: String(error).replace(/^Error:\s*merge_numeric_invalid:/, '') }, 409)
     }
-    throw error
+    // The fold's one atomic batch rolled back, so nothing was written; a
+    // raw 500 would make the browser report an unknown outcome. If the history
+    // row exists the batch did commit, and only then is this rethrown.
+    let applied: unknown = true
+    try { applied = await db.prepare(MERGE_APPLIED_PROBE_SQL).get<{ applied: number }>({ operationId }) } catch { applied = true }
+    if (applied) throw error
+    const errorId = crypto.randomUUID()
+    console.error(describeMergeFailure({ method: c.req.method, path: c.req.path, status: 409, productIds: [keeper.id, dup.id], error, errorId }))
+    return c.json(mergeFailedBody(errorId), 409)
   }
 
   c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))

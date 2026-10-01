@@ -1,5 +1,8 @@
 import type { Env } from '../index'
 import type { SessionUser } from './auth'
+// Type-only on purpose: dozens of test loaders stub this module's relative
+// imports one by one, so a new runtime import would break them.
+import type { ResolveChoiceValues } from './productResolveChoices'
 import { getDb } from './db'
 import { CATALOG_COST_DERIVE_SQL, catalogCostRecomputeIfChangedStatement } from './catalogCostRecompute'
 import { audit } from './audit'
@@ -198,6 +201,11 @@ export interface MergeReversal {
   /** Duplicate primary captured for image-effect permission checks on replay. */
   dupImagePathBefore?: string | null
   keeperBarcodeBefore?: string | null
+  /** Present only when a Resolve barcode choice moved the keeper's own barcode onto this record; undo puts it back. */
+  dupBarcodeBefore?: string | null
+  /** Present only when a Resolve choice rewrote the keeper's name; undo restores both. */
+  keeperNameBefore?: string | null
+  keeperNameNormalizedBefore?: string | null
   /** The Resolve grid's keeper choice (N1/N4); a redo passes it back to the fold. */
   keeperChoice?: ProductMergeKeeperChoice
   /** Optional exact keeper catalog before-image for reviewed v2 merges. */
@@ -294,6 +302,9 @@ const PRODUCT_MERGE_APPLIER_KINDS = new Set(['product.merge', 'product.merge.bul
 
 function mergeReversalHasSavedImageEffect(reversal: MergeReversal): boolean {
   if ((reversal.dupImagesBefore || []).length || (reversal.imagesMovedToKeeper || []).length) return true
+  const fields = reversal.keeperChoice?.fields
+  if (fields && Object.prototype.hasOwnProperty.call(fields, 'image_path')
+    && String(fields.image_path || '').trim() !== String(reversal.keeperImagePathBefore || '').trim()) return true
   if (Object.prototype.hasOwnProperty.call(reversal, 'dupImagePathBefore')) {
     return !String(reversal.keeperImagePathBefore || '').trim() && Boolean(String(reversal.dupImagePathBefore || '').trim())
   }
@@ -383,6 +394,34 @@ export type ProductMergeKeeperChoice = {
   cost?: { cost_price_usd: number; cost_price_khr?: number | null }
   /** Server-frozen group economics; carried through each pair's undo/redo. */
   economics?: ProductMergeEconomics
+  /**
+   * The grid's per-field Final values (lib/productResolveChoices.ts), resolved
+   * from the frozen reviewed rows. Applied after the economics on every step,
+   * so a later step's highest-price rule cannot overwrite a chosen price.
+   */
+  fields?: ResolveChoiceValues
+}
+
+// The history rows that carry a product's name as a snapshot (the rename and
+// merge paths keep them in step with products.name). Undo of a merge whose
+// choice renamed the survivor writes the old name back to the survivor's rows.
+export const PRODUCT_NAME_SNAPSHOT_COLUMNS: ReadonlyArray<{ table: string; idColumn: string; nameColumn: string }> = [
+  { table: 'sale_items', idColumn: 'product_id', nameColumn: 'product_name' },
+  { table: 'inventory_movements', idColumn: 'product_id', nameColumn: 'product_name' },
+  { table: 'return_items', idColumn: 'product_id', nameColumn: 'product_name' },
+  { table: 'stock_transfers', idColumn: 'product_id', nameColumn: 'product_name' },
+  { table: 'damaged_stock_lots', idColumn: 'product_id', nameColumn: 'product_name' },
+  { table: 'return_replacement_items', idColumn: 'product_id', nameColumn: 'product_name' },
+  { table: 'stock_row_moves', idColumn: 'source_product_id', nameColumn: 'source_product_name' },
+  { table: 'stock_row_moves', idColumn: 'destination_product_id', nameColumn: 'destination_product_name' },
+]
+
+export function productNameSnapshotStatements(productId: number, productName: string | null): AtomicMergeStatement[] {
+  if (productName == null || !Number.isSafeInteger(productId) || productId <= 0) return []
+  return PRODUCT_NAME_SNAPSHOT_COLUMNS.map(({ table, idColumn, nameColumn }) => ({
+    sql: `UPDATE ${table} SET ${nameColumn} = @snapshotName WHERE ${idColumn} = @snapshotProductId`,
+    params: { snapshotName: productName, snapshotProductId: productId },
+  }))
 }
 
 // The ONE list of foreign keys a product merge must move onto the survivor.
@@ -1735,12 +1774,16 @@ export function mergeKeeperRestoreStatement(r: MergeReversal, canChangeProductIm
   const catalogSet = catalog
     ? `category=@category,categories=@categories,brand=@brand,brands=@brands,unit=@unit,unit_normalized=@unitNormalized,brand_compact=@brandCompact,`
     : ''
+  // products.name is NOT NULL: a snapshot without a usable name leaves it alone.
+  const restoresName = typeof r.keeperNameBefore === 'string'
+  const nameSet = restoresName ? 'name=@name,name_normalized=@nameNormalized,' : ''
   return {
-    sql: `UPDATE products SET ${imageSet}${r.keeperBarcodeBefore !== undefined ? 'barcode=@barcode,' : ''}${catalogSet}updated_at=CURRENT_TIMESTAMP WHERE id=@keeperId`,
+    sql: `UPDATE products SET ${imageSet}${r.keeperBarcodeBefore !== undefined ? 'barcode=@barcode,' : ''}${nameSet}${catalogSet}updated_at=CURRENT_TIMESTAMP WHERE id=@keeperId`,
     params: {
       keeperId: Number(r.keeperId),
       ...(canChangeProductImages ? { path: r.keeperImagePathBefore ?? null } : {}),
       ...(r.keeperBarcodeBefore !== undefined ? { barcode: r.keeperBarcodeBefore } : {}),
+      ...(restoresName ? { name: r.keeperNameBefore, nameNormalized: r.keeperNameNormalizedBefore ?? null } : {}),
       ...(catalog ? {
         category: catalog.category ?? null,
         categories: catalog.categories ?? null,
@@ -1771,7 +1814,12 @@ async function buildMergeReversalStatements(env: Env, r: MergeReversal, canChang
   const stmts: Array<{ sql: string; params?: Record<string, unknown> }> = []
 
   // 1. Reactivate the merged-away product; restore keeper's image_path.
-  stmts.push({ sql: 'UPDATE products SET is_active = 1, updated_at = CURRENT_TIMESTAMP WHERE id = @dupId', params: { dupId } })
+  // A snapshot without dupBarcodeBefore (every merge but a Resolve barcode swap) leaves the barcode alone.
+  const restoresDupBarcode = r.dupBarcodeBefore !== undefined
+  stmts.push({
+    sql: `UPDATE products SET is_active = 1, ${restoresDupBarcode ? 'barcode = @dupBarcode, ' : ''}updated_at = CURRENT_TIMESTAMP WHERE id = @dupId`,
+    params: { dupId, ...(restoresDupBarcode ? { dupBarcode: r.dupBarcodeBefore } : {}) },
+  })
   stmts.push(mergeKeeperRestoreStatement(r, canChangeProductImages))
   if (r.keeperPricingBefore) {
     // Cost is restored only when the snapshot recorded it. A pre-Sep-4-2026
@@ -1914,6 +1962,14 @@ async function buildMergeReversalStatements(env: Env, r: MergeReversal, canChang
       sql: 'UPDATE products SET parent_id = @parentId, updated_at = CURRENT_TIMESTAMP WHERE id = @keeperId',
       params: { keeperId, parentId: Number(r.keeperParentIdBefore) },
     })
+  }
+
+  // 4e. A chosen name was synced onto the survivor's history rows; the rows
+  //     reparented above are back on the discarded id, so this touches only
+  //     the survivor's own.
+  const chosenName = r.keeperChoice?.fields?.name
+  if (typeof r.keeperNameBefore === 'string' && typeof chosenName === 'string' && chosenName !== r.keeperNameBefore) {
+    stmts.push(...productNameSnapshotStatements(keeperId, r.keeperNameBefore))
   }
 
   // 5. product_images: pull the moved paths off the keeper, restore the dup's
