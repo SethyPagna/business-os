@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -604,21 +604,18 @@ await runTest('inventory adjust, transfer, and batch actions use shared guards a
   // Part 562 also excised the dormant in-page "batch session" apply path
   // (batchApplying/batchInventoryInFlightRef); per-batch editing now lives in
   // the standalone ManageBatchesModal, which carries its OWN synchronous save
-  // guard (asserted in the ManageBatchesModal block below). So Inventory.tsx
-  // itself keeps exactly the two live write guards: adjust and transfer.
+  // guard (asserted in the ManageBatchesModal block below). The adjust form
+  // was retired on 30 Sep 2026: every stock change goes through the Stock
+  // Session, whose commit latch and bounded writes are pinned with the float.
+  // So Inventory.tsx itself keeps exactly one live write guard: transfer.
   assert.match(source, /import \{ beginSingleAction, finishSingleAction \} from '\.\.\/\.\.\/utils\/actionGuards\.ts'/)
-  assert.match(source, /const INVENTORY_STOCK_MUTATION_TIMEOUT_MS = 12000/)
-  assert.match(source, /const adjustStockInFlightRef = useRef\(false\)/)
   assert.match(source, /const transferStockInFlightRef = useRef\(false\)/)
+  assert.doesNotMatch(source, /adjustStockInFlightRef|setAdjustSaving|handleAdjustStock/, 'the retired adjust form must not come back beside the session')
   assert.doesNotMatch(source, /moveStockInFlightRef|moveSaving|moveModal|moveForm|openMove\(|handleMoveStock/, 'standalone Move Stock modal should stay removed')
   assert.doesNotMatch(source, /batchInventoryInFlightRef|batchApplying/, 'the dormant in-page batch-session apply path should stay excised (Part 562)')
-  // SCAN1 F5: stock mutations are writes; a timeout reports an unknown outcome.
-  assert.match(source, /const runInventoryMutation = useCallback\(\(loader: InventoryLoader, label: string\): Promise<any> => \([\s\S]*withWriteTimeout\(loader, label, INVENTORY_STOCK_MUTATION_TIMEOUT_MS, \(key: string\) => tr\(key, ''\)\)/)
-  assert.match(source, /if \(!beginSingleAction\(adjustStockInFlightRef, \{ blocked: adjustSaving \}\)\) return/)
   assert.match(source, /if \(!beginSingleAction\(transferStockInFlightRef, \{ blocked: transferSaving \}\)\) return/)
-  assert.match(source, /finally \{[\s\S]*finishSingleAction\(adjustStockInFlightRef\)[\s\S]*setAdjustSaving\(false\)/)
   assert.match(source, /finally \{[\s\S]*finishSingleAction\(transferStockInFlightRef\)[\s\S]*setTransferSaving\(false\)/)
-  assert.ok(mutationLines.length >= 1, 'inventory adjustment must keep its bounded mutation wrapper')
+  assert.equal(mutationLines.length, 0, 'Inventory sends no direct stock write: adjusting is the session\'s, transferring the durable executor\'s')
   assert.match(source, /api\.executeInventoryTransfer\(run, checkpoint\)/, 'transfer uses the durable executor and shared HTTP deadline')
   assert.match(source, /api\.saveInventoryTransfer\(actorId, run\)/, 'freeze and persist before transfer dispatch')
 
@@ -629,10 +626,6 @@ await runTest('inventory adjust, transfer, and batch actions use shared guards a
   assert.match(manageBatches, /const saveBatchInFlightRef = useRef\(false\)/, 'ManageBatchesModal must keep a synchronous batch-save guard')
   assert.match(manageBatches, /if \(!beginSingleAction\(saveBatchInFlightRef, \{ blocked: savingId != null \}\)\) return/, 'ManageBatchesModal.saveEdit must gate on the ref guard')
   assert.match(manageBatches, /finally \{[\s\S]*finishSingleAction\(saveBatchInFlightRef\)/, 'ManageBatchesModal.saveEdit must release the guard in finally')
-  assert.ok(
-    mutationLines.every((line) => line.includes('runInventoryMutation')),
-    `unbounded inventory mutation lines:\n${mutationLines.filter((line) => !line.includes('runInventoryMutation')).join('\n')}`,
-  )
 })
 
 await runTest('product category manager actions use shared guards and bounded mutations', () => {
@@ -763,7 +756,9 @@ await runTest('product page save and delete actions use shared guards and bounde
   assert.match(source, /runProductWriteMutation\([\s\S]*\(\) => productApi\.updateProduct\([\s\S]*'Redo product bulk update'/)
   assert.match(source, /runProductStockMutation\([\s\S]*\(\) => productApi\.adjustStock\([\s\S]*'Restore product branch stock'/)
   assert.match(source, /runProductStockMutation\([\s\S]*\(\) => productApi\.adjustStock\([\s\S]*'Clear product stock'/)
-  assert.match(source, /runProductStockMutation\([\s\S]*\(\) => productApi\.adjustStock\([\s\S]*'Bulk add product stock'/)
+  // The select-mode stock panel queues Items in the Stock Session; the page's
+  // own bulk add (and its client-side redo) retired with BulkAddStockModal.
+  assert.doesNotMatch(source, /'Bulk add product stock'|addStockToProducts/)
   assert.match(source, /runProductStockMutation\([\s\S]*\(\) => productApi\.transferStock\([\s\S]*'Move product branch stock'/)
   assert.match(source, /runProductStockMutation\([\s\S]*\(\) => productApi\.adjustStock\([\s\S]*'Initialize product branch stock'/)
   assert.doesNotMatch(source, /await\s+(?:window\.api|productApi)\.(adjustStock|transferStock|createProduct|updateProduct|deleteProduct)\(/)
@@ -787,22 +782,18 @@ await runTest('product page save and delete actions use shared guards and bounde
   assert.match(source, /<DeleteConfirmModal[\s\S]*onConfirm=\{runPendingDeleteConfirmed\}[\s\S]*summary=\{summarizeDeleteImpact\(snapshotProductsByIds\(pendingDelete\.ids\)\)\}/)
 })
 
-await runTest('product stock helper modals use shared guards and bounded mutations', () => {
-  const bulk = readFrontend('src/components/products/forms/BulkAddStockModal.tsx')
-
-  for (const [label, source, constant, runner] of [
-    ['bulk stock add', bulk, 'BULK_ADD_STOCK_MUTATION_TIMEOUT_MS', 'runBulkStockMutation'],
-  ]) {
-    assert.match(source, /import \{ beginSingleAction, finishSingleAction \} from '\.\.\/\.\.\/\.\.\/utils\/actionGuards\.ts'/, `${label} should import shared action guards`)
-    assert.match(source, /import \{ withLoaderTimeout \} from '\.\.\/\.\.\/\.\.\/utils\/loaders\.ts'/, `${label} should import loader timeout helper`)
-    assert.match(source, new RegExp(`const ${constant} = 12000`), `${label} should define a stock mutation timeout`)
-    assert.match(source, /const saveInFlightRef = useRef\(false\)/, `${label} should keep a same-tick save guard`)
-    assert.match(source, new RegExp(`const ${runner} = useCallback\\(\\(loader[^,]*, label[^)]*\\) => \\([\\s\\S]*withLoaderTimeout\\(loader, label, ${constant}\\)`), `${label} should route mutations through a timeout helper`)
-    assert.match(source, /if \(!beginSingleAction\(saveInFlightRef, \{ blocked: saving \}\)\) return/, `${label} should block repeat saves`)
-    assert.match(source, new RegExp(`const result = await ${runner}\\(\\(\\) => getProductApi\\(\\)\\.adjustStock\\(`), `${label} adjustStock should be bounded`)
-    assert.match(source, /result\?\.success === false/, `${label} should treat explicit API failures as failures`)
-    assert.match(source, /finally \{[\s\S]*finishSingleAction\(saveInFlightRef\)[\s\S]*setSaving\(false\)/, `${label} should release the guard in finally`)
-  }
+// BulkAddStockModal (the select-mode bulk add) was retired into the Stock
+// Session on 30 Sep 2026; its bulk-add guards retired with it. The session's
+// Complete refuses while a commit runs, the footer disables its buttons, and
+// every write carries its line's stable request id, so a repeat is a replay.
+await runTest('the Stock Session commit refuses a repeat and replays by line id', () => {
+  const float = readFrontend('src/components/inventory/FastStockInModal.tsx')
+  const footer = readFrontend('src/components/stock-session/StockSessionFooter.tsx')
+  const draft = readFrontend('src/utils/stockSessionDraft.ts')
+  assert.match(float, /const performCommit = async \(\) => \{\s*if \(saving\) return/)
+  assert.match(footer, /disabled=\{primaryDisabled \|\| saving\}/)
+  assert.equal((draft.match(/client_request_id: line\.requestId/g) || []).length, 3, 'receive, adjust and set each carry the line id')
+  assert.equal(existsSync(new URL('../src/components/products/forms/BulkAddStockModal.tsx', import.meta.url)), false)
 })
 
 await runTest('files AI provider actions use shared guards and bounded mutations', () => {

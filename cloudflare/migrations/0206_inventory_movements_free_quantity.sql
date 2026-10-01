@@ -1,0 +1,25 @@
+-- UI-STOCK 11.5: free units on a stock receipt.
+--
+-- A receipt may now carry free units riding with the paid quantity ("buy 10,
+-- get 2 free"): stock in = paid + free, the lot and the movement carry the
+-- effective unit cost, and the money recorded is what the supplier was paid.
+-- This column keeps how many of a movement's units were free, so Stock
+-- Changes can show "+12 (2 free)". Written by POST /api/inventory/adjust and
+-- POST /api/batches only when the column exists (lib/schemaProbe.ts), so the
+-- code may deploy before or after this file.
+--
+-- Additive only: one column with a default; no existing row changes meaning
+-- (every historical movement had 0 free units).
+--
+-- Pre-assert:  SELECT COUNT(*) FROM pragma_table_info('inventory_movements')
+--                WHERE name = 'free_quantity'   -- expected 0
+-- Post-assert: the same query                  -- expected 1;
+--              SELECT COUNT(*) FROM inventory_movements WHERE free_quantity <> 0
+--                                              -- expected 0
+-- Deploy order: EITHER. Without the column the routes skip it and the
+--              receipt is recorded exactly the same, minus the free count.
+-- Recovery:    ALTER TABLE inventory_movements DROP COLUMN free_quantity;
+--              (loses only the free counts recorded since; stock, lots and
+--              costs are unaffected).
+
+ALTER TABLE inventory_movements ADD COLUMN free_quantity INTEGER NOT NULL DEFAULT 0;

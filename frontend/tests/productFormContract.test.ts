@@ -3,7 +3,6 @@ import fs from 'node:fs'
 
 const form = fs.readFileSync(new URL('../src/components/products/forms/ProductForm.tsx', import.meta.url), 'utf8')
 const products = fs.readFileSync(new URL('../src/components/products/Products.tsx', import.meta.url), 'utf8')
-const adjust = fs.readFileSync(new URL('../src/components/products/forms/StockAdjustModal.tsx', import.meta.url), 'utf8')
 const variant = fs.readFileSync(new URL('../src/components/products/forms/VariantFormModal.tsx', import.meta.url), 'utf8')
 const workerProducts = fs.readFileSync(new URL('../../cloudflare/src/routes/products.ts', import.meta.url), 'utf8')
 
@@ -35,10 +34,11 @@ assert.match(stockSection, /product-stock-quantity/, 'Stock tab must show quanti
 assert.match(stockSection, /product-initial-branch|branches\.map/, 'Stock tab must show branch information')
 assert.doesNotMatch(stockSection, /product-barcode|BranchStockAdjuster/, 'Stock tab must not contain barcode or inline adjustment controls')
 
-assert.match(products, /setAdjustStockProduct\(detailProduct\)/, 'Product detail Adjust stock must open the floating adjustment flow')
-assert.doesNotMatch(products, /onAdjustStock=\{\(\) => \{ setDetailProduct\(null\); openProductFormTab\(detailProduct, 'stock'\)/, 'Adjust stock must not open ProductForm Stock tab')
-assert.match(products, /<StockAdjustModal[\s\S]*?initialProduct=\{adjustStockProduct\}/, 'floating adjust modal must receive the selected product')
-assert.match(adjust, /getProductsByIds\(\[id\], \{ surface: 'inventory' \}\)/, 'floating adjust flow must refresh the exact product through the inventory read surface before writing stock')
+// Since UI-STOCK-3 the floating adjustment flow is the one Stock Session
+// (adjustFromProductOpensSession.test.ts pins it in full).
+assert.match(products, /setStockSession\(\{ mode: 'add', product: detailProduct \}\)/, 'Product detail Adjust stock must open the floating Stock Session')
+assert.doesNotMatch(products, /openProductFormTab\(detailProduct, 'stock'\)/, 'Adjust stock must not open ProductForm Stock tab')
+assert.match(products, /<FastStockInModal[\s\S]*?initialProduct=\{sessionProduct\(stockSession\.product\)\}/, 'the Stock Session must receive the selected product')
 
 assert.doesNotMatch(variant, /id="variant-form-sku"|name="variant_sku"/, 'Add-row/variant flow must not expose SKU either')
 assert.doesNotMatch(variant, /parent_id:/, 'new same-name rows must not create stored parent-child links')

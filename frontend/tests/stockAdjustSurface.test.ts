@@ -3,32 +3,36 @@ import { readFileSync } from 'node:fs'
 import { batchDisplayLabel } from '../src/utils/batchLabel.ts'
 import { dateEntryDisplayValue } from '../src/utils/dateEntry.ts'
 
-const stockModals = readFileSync(new URL('../src/components/inventory/InventoryStockModals.tsx', import.meta.url), 'utf8')
+// The adjust half of InventoryStockModals (received-date Options fold, quantity
+// presets, its own Save) was retired on 30 Sep 2026: every stock change opens
+// the Stock Session, whose received date is one compact select (owner: "the
+// options into one button compact"). The transfer half stays and follows the
+// same received-date display and button contracts.
 
-const optionsStart = stockModals.indexOf('data-stock-received-date-options="true"')
-const supplierStart = stockModals.indexOf('<SupplierPickerField', optionsStart)
-assert.ok(optionsStart >= 0, 'Adjust Stock must expose one received-date Options control')
-assert.ok(supplierStart > optionsStart, 'the received-date Options section must close before supplier receipt fields')
-const optionsSection = stockModals.slice(optionsStart, supplierStart)
+const read = (rel: string): string => readFileSync(new URL(rel, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
+const stockModals = read('../src/components/inventory/InventoryStockModals.tsx')
+const sessionFiles = [
+  '../src/components/inventory/FastStockInModal.tsx',
+  '../src/components/stock-session/StockSessionSharedDetails.tsx',
+  '../src/components/stock-session/StockSessionLineEntry.tsx',
+  '../src/components/stock-session/StockSessionItems.tsx',
+  '../src/components/stock-session/StockSessionReviewStep.tsx',
+].map((rel) => [rel, read(rel)] as const)
 
-assert.match(optionsSection, /aria-expanded=\{receivedDateOptionsOpen\}/, 'Options must expose its expanded state')
-assert.match(optionsSection, /tr\('options', 'Options', 'ជម្រើស'\)/, 'Options must retain English and Khmer copy without adding language-pack keys')
-assert.match(optionsSection, /\{showBatchPicker \? \([\s\S]*batchDisplayLabel\(batch/, 'existing received-date choices must live inside Options and use the canonical display helper')
-assert.match(optionsSection, /\{receivedDateInputVisible \? \([\s\S]*<DateEntryInput/, 'a new received date must be entered inside Options')
-assert.doesNotMatch(stockModals, /dateToBatchCode|batch_code_preview/, 'Adjust Stock must not show the internal MMDDYYYY received-date code')
-assert.doesNotMatch(stockModals, /addQuantityChoices|setAdjustForm\(f => \(\{ \.\.\.f, quantity: n \}\)\)/, 'quantity preset controls must be removed')
+assert.doesNotMatch(stockModals, /data-stock-received-date-options|receivedDateOptionsOpen/, 'the adjust Options fold is retired with the adjust half')
+for (const [rel, source] of [['InventoryStockModals.tsx', stockModals] as const, ...sessionFiles]) {
+  assert.doesNotMatch(source, /dateToBatchCode|batch_code_preview/, `${rel} must not show the internal MMDDYYYY received-date code`)
+  assert.doesNotMatch(source, /addQuantityChoices|quantity: n \}\)\)/, `${rel} must not bring back quantity preset chips`)
+}
 
-assert.match(
-  stockModals,
-  /className="mt-0\.5 min-w-0 max-w-full text-xs font-medium text-gray-600 dark:text-gray-300" title=\{adjustModal\.name\}><ProductNameRail name=\{String\(adjustModal\.name \?\? ''\)\} \/><\/div>/,
-  'Adjust Stock keeps its original full name and title inside the shared two-line horizontal rail',
-)
-assert.doesNotMatch(stockModals, /<ProductNameRail[^>]*(?:truncate|line-clamp-|\.slice\()/, 'the full name must not be shortened before reaching the shared rail')
-assert.doesNotMatch(stockModals, /<div className="truncate[^>]*>\{adjustModal\.name\}/, 'the Adjust Stock product name must not be truncated')
+// Received dates render through the one display helper wherever they are offered.
+assert.match(stockModals, /label: `\$\{batchDisplayLabel\(batch, tr\('batch', 'Received date'\)\)\} · \$\{batch\.quantity\}`/, 'the transfer lot select labels each received date with the canonical helper')
+assert.match(read('../src/components/inventory/FastStockInModal.tsx'), /label: `\$\{batchDisplayLabel\(lot, tr\('batch', 'Received date'\)\)\} · \$\{lot\.quantity\}/, 'the session lot select uses the same helper')
 
-assert.match(stockModals, /TOOLBAR_BUTTON_BASE, toolbarIconButtonClassName/, 'Adjust Stock must consume the shared 40px button contracts')
-assert.match(stockModals, /onClick=\{onAdjust\} className=\{`btn-primary \$\{TOOLBAR_BUTTON_BASE\} flex-1`\}/, 'Save must use the shared toolbar height')
-assert.match(stockModals, /onClick=\{requestCloseAdjust\} className=\{toolbarIconButtonClassName\}/, 'Close must use the shared 40px icon target')
+// The transfer keeps the shared 40px button contracts.
+assert.match(stockModals, /TOOLBAR_BUTTON_BASE, toolbarIconButtonClassName/, 'the transfer must consume the shared 40px button contracts')
+assert.match(stockModals, /onClick=\{onTransfer\} className=\{`btn-primary \$\{TOOLBAR_BUTTON_BASE\} w-full`\}/, 'Transfer must use the shared toolbar height')
+assert.match(stockModals, /onClick=\{requestCloseTransfer\} disabled=\{transferSaving\} className=\{toolbarIconButtonClassName\}/, 'Close must use the shared 40px icon target')
 
 assert.equal(
   batchDisplayLabel({ id: 7, lot_code: '09112026', received_at: null }),
@@ -46,4 +50,4 @@ assert.equal(
   'a genuine custom lot code must remain a code',
 )
 
-console.log('PASS stock adjust responsive options and received-date display')
+console.log('PASS stock surfaces show received dates through the helper, with no code or presets')

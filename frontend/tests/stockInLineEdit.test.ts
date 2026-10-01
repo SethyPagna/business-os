@@ -110,13 +110,15 @@ runTest('the session surface offers Edit on each received line, in the compact l
   assert.equal((source.match(/aria-label=\{tr\('stock_in_line_edit', 'Edit line'\)\}/g) || []).length, 2, 'desktop table and phone card')
   assert.match(source, /onClick=\{\(\) => startLineEdit\(row\)\}/)
   assert.match(source, /data-testid="stock-in-line-editor"[^>]*>/)
-  assert.match(source, /className="grid grid-cols-2 gap-2 sm:grid-cols-4"/, 'two columns on a phone, one row of four on desktop')
+  assert.match(source, /className="grid grid-cols-2 gap-1\.5 sm:grid-cols-4"/, 'two columns on a phone, one row of four on desktop')
   assert.match(source, /idPrefix="stock-in-line-edit"/)
-  assert.match(source, /\{canEditCosts \? <label[^]*?unit_cost/, 'the cost field is offered only with cost-entry permission')
+  assert.match(source, /\{canEditCosts \? <InsetNumberField label=\{tr\('unit_cost'/, 'the cost field is offered only with cost-entry permission')
   assert.match(source, /Number\(row\.edit_count\) > 0 && row\.id != null\s*\? editStockInLine\(/, 'an edited line is removed as an edit to 0, not a ledger revert')
   assert.match(source, /editStockInLine\(attempt\.movementId, attempt\.body\)/)
   assert.match(source, /<fieldset disabled=\{busy \|\| Boolean\(pendingAttempt\)\}/)
-  assert.match(source, /max=\{STOCK_IN_LINE_MAX_QUANTITY\}/)
+  // The inset number box has no max attribute; the ceiling is enforced where the body is built, before any write.
+  assert.doesNotMatch(source, /max=\{STOCK_IN_LINE_MAX_QUANTITY\}/)
+  assert.match(source, /buildStockInLineEditBody\(lineEdit\.row, lineEdit\.draft/)
   assert.match(source, /onClose=\{closeSession\}/)
 })
 

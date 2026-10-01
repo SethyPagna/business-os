@@ -1,5 +1,7 @@
 import AlertTriangle from 'lucide-react/dist/esm/icons/alert-triangle.js'
+import { ConflictIcon, CONFLICT_ICON_CLASS } from './ConflictIcon.ts'
 import CheckCircle from 'lucide-react/dist/esm/icons/check-circle-2.js'
+import Merge from 'lucide-react/dist/esm/icons/merge.js'
 import { useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
 import { useApp as useAppHook } from '../../app/AppContextCore.tsx'
@@ -36,8 +38,8 @@ import ResolveGrid, {
 // a server fault, where the same frozen token is safe to send again.
 //
 // Closing: the header X is the only close (no Cancel, no Close button). With
-// choices made it asks Discard changes / Back through the shared close guard;
-// while a write is running it cannot be dismissed at all.
+// choices made it asks Discard / Back through the shared close guard; while a
+// write is running it cannot be dismissed at all.
 
 const useApp = useAppHook as unknown as () => { t: (key: string) => string }
 
@@ -347,9 +349,10 @@ export default function ResolveModal<P, T>({ title, adapter, onClose, onApplied,
         ? (failure.refused.done > 0
           ? fill(tr('resolve_apply_refused_partial', 'Stopped after {done} of {total}. The rest was not saved.'), failure.refused)
           : tr('resolve_apply_refused', 'Could not resolve. Nothing was saved.'))
-        : tr('resolve_apply_failed', 'Stopped before finishing. Continue picks up where it stopped.'))
+        : tr('resolve_apply_unknown', 'The result is unknown. Continue checks what was saved and finishes the rest.'))
         : ''
   const retry = () => { void load(Boolean(failure?.stale), latest.current.edits) }
+  const showBlockers = phase === 'ready' && blockers.length > 0
   const stale = changed.size > 0
   const banners = (stale ? 1 : 0) + (online ? 0 : 1)
 
@@ -391,7 +394,7 @@ export default function ResolveModal<P, T>({ title, adapter, onClose, onApplied,
 
   return (
     <Modal
-      title={title}
+      title={<span className="inline-flex min-w-0 items-center gap-2"><ConflictIcon aria-hidden="true" className={`h-4 w-4 shrink-0 ${CONFLICT_ICON_CLASS}`} /><span className="min-w-0">{title}</span></span>}
       onClose={onClose}
       size="xl"
       unsavedChanges={{ dirty }}
@@ -457,32 +460,39 @@ export default function ResolveModal<P, T>({ title, adapter, onClose, onApplied,
         {phase !== 'done' && phase !== 'failed' ? (
           <div className="sticky bottom-0 -mx-3 -mb-3 space-y-2 border-t border-gray-200 bg-white px-3 pb-3 pt-3 dark:border-gray-700 dark:bg-gray-800 sm:-mx-4 sm:-mb-4 sm:px-4 sm:pb-4">
             {failure && data !== null ? (
-              <div role="alert" className="text-xs text-red-700 dark:text-red-300">
+              <div role="alert" data-resolve-failure={failure.refused ? 'refused' : failure.kind} className="text-xs text-red-700 dark:text-red-300">
                 <p className="font-medium">{failureText}</p>
                 {failure.detail ? <p className="break-words">{failure.detail}</p> : null}
                 {failure.kind === 'load' ? <button type="button" className="btn-secondary mt-1" onClick={retry}>{tr('retry', 'Retry')}</button> : null}
               </div>
             ) : null}
             {footerStatus ? <p role="status" className="text-xs font-medium text-gray-700 dark:text-gray-200">{footerStatus}</p> : null}
-            {phase === 'ready' && blockers.length ? (
-              <ul id={statusId} className="space-y-0.5 text-xs text-amber-800 dark:text-amber-200">
-                {blockers.map((blocker, index) => <li key={index}>{blocker}</li>)}
-              </ul>
-            ) : null}
-            <div className="flex justify-end">
+            {/* One row: the blockers on the left, Resolve on the right. On a
+                phone Resolve drops under the blockers only when there are some. */}
+            <div data-resolve-footer="true" className={`flex gap-2 ${showBlockers ? 'flex-col sm:flex-row sm:items-center' : 'items-center justify-end'}`}>
+              {showBlockers ? (
+                <ul id={statusId} className="min-w-0 flex-1 space-y-0.5 text-xs text-amber-800 dark:text-amber-200">
+                  {blockers.map((blocker, index) => <li key={index}>{blocker}</li>)}
+                </ul>
+              ) : null}
               {phase === 'partial' && resume ? (
-                <button type="button" className="btn-primary w-full sm:w-auto sm:min-w-[10rem]" disabled={!online} onClick={() => { void runApply(resume.token) }}>
+                <button type="button" className={`btn-primary inline-flex items-center justify-center gap-1.5 ${showBlockers ? 'w-full sm:w-auto' : ''} sm:min-w-[10rem]`} disabled={!online} onClick={() => { void runApply(resume.token) }}>
                   {tr('continue', 'Continue')}
                 </button>
               ) : (
                 <button
                   type="button"
-                  className="btn-primary w-full sm:w-auto sm:min-w-[10rem]"
+                  className={`btn-primary inline-flex shrink-0 items-center justify-center gap-1.5 ${showBlockers ? 'w-full sm:w-auto' : ''} sm:min-w-[10rem]`}
                   disabled={phase !== 'ready' || blockers.length > 0 || !online}
-                  aria-describedby={[phase === 'ready' && blockers.length ? statusId : '', online ? '' : offlineId].filter(Boolean).join(' ') || undefined}
+                  aria-describedby={[showBlockers ? statusId : '', online ? '' : offlineId].filter(Boolean).join(' ') || undefined}
                   onClick={() => { void startReview() }}
                 >
-                  {working && data !== null ? tr('processing', 'Processing…') : tr('resolve', 'Resolve')}
+                  {working && data !== null ? tr('processing', 'Processing…') : (
+                    <>
+                      <Merge aria-hidden="true" className="h-4 w-4 shrink-0" />
+                      <span>{tr('resolve', 'Resolve')}</span>
+                    </>
+                  )}
                 </button>
               )}
             </div>

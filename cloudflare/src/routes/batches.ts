@@ -2,15 +2,17 @@ import { Hono, type Context } from 'hono'
 import { acquisitionCostResponses, canEditAcquisitionCosts, hasAcquisitionCostInput } from '../lib/acquisitionCostAccess'
 import { getDb } from '../lib/db'
 import { requireAuth, type SessionUser } from '../lib/auth'
-import { audit } from '../lib/audit'
+import { audit, changedFields } from '../lib/audit'
 import { hasPermission, getActionTier, getPermissionTier, isActionBlocked } from '../lib/permissions'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from '../lib/cache'
-import { getTrackedProductIds, listBatchesForProduct, receiveBatchStock } from '../lib/productBatches'
+import { getTrackedProductIds, listBatchesForProduct, parseReceiptSellingPrice, planReceiptSellingPrice, receiveBatchStock, type ReceiptSellingPriceRow } from '../lib/productBatches'
 import { listOpenDamagedLots } from '../lib/returnsStock'
 import { dateToBatchCode, normalizeTypedDate } from '../lib/batchCode'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
-import { appendReceiptNotes, FREE_GOODS_REASON_NOTE, stockReceiptGateCode, stockReceiptGateMessage } from '../lib/stockReceiptGate'
+import { appendReceiptNotes, FREE_GOODS_REASON_NOTE, parseFreeQuantity, stockReceiptGateCode, stockReceiptGateMessage } from '../lib/stockReceiptGate'
+import { effectiveUnitCost } from '../lib/stockSessionMath'
+import { hasColumn } from '../lib/schemaProbe'
 import { STOCK_REASON_MAX_LENGTH, stockReasonTooLong } from '../lib/stockReason'
 import { withStockMutationReceipt } from '../lib/stockMutationReceipt'
 import type { Env } from '../index'
@@ -194,6 +196,11 @@ export type ReceiveBody = {
   unit_cost_usd?: number | null
   /** N14-D: the operator's explicit declaration that a $0.00 receipt was free. */
   free_goods?: boolean
+  /** UI-STOCK 5.3: free units riding with the paid quantity; stock in = quantity + free_quantity. */
+  free_quantity?: number | null
+  /** UI-STOCK 5.2: the product's new selling price, typed on the receipt (latest wins). */
+  selling_price_usd?: number | string | null
+  selling_price_khr?: number | string | null
   payment_status?: string | null
   credit_due_date?: string | null
   session_id?: number | null
@@ -230,16 +237,24 @@ async function runReceiveBatchActionKernel(c: BatchesContext, body: ReceiveBody,
 
   const productId = Number(body.product_id)
   const branchId = Number(body.branch_id)
-  const quantity = Number(body.quantity)
+  const paidQuantity = Number(body.quantity)
+  // A body without free units or a selling price takes the path it always took.
+  const freeQuantity = body.free_quantity == null ? 0 : parseFreeQuantity(body.free_quantity)
+  if (freeQuantity == null) return c.json({ error: 'Free units must be a whole number from 0', code: 'invalid_free_quantity' }, 400)
+  const sellingPrice = body.selling_price_usd == null && body.selling_price_khr == null ? undefined : parseReceiptSellingPrice(body.selling_price_usd, body.selling_price_khr)
+  if (sellingPrice === null) return c.json({ error: 'The selling price is not a valid amount', code: 'invalid_selling_price' }, 400)
   if (!productId || !branchId) return c.json({ error: 'product_id and branch_id are required' }, 400)
-  if (!Number.isFinite(quantity) || quantity <= 0) return c.json({ error: 'quantity must be a positive number' }, 400)
+  // A fully free receipt pays for nothing: 0 paid units plus its free units.
+  if (!Number.isFinite(paidQuantity) || (freeQuantity > 0 ? paidQuantity < 0 : paidQuantity <= 0)) return c.json({ error: 'quantity must be a positive number' }, 400)
+  // Stock in = paid + free units at the effective cost; the supplier is owed for the paid units.
+  const quantity = paidQuantity + freeQuantity
   let unitCostUsd: number | null
   let totalCostUsd: number | null
   try {
     if (body.unit_cost_usd != null && Number(body.unit_cost_usd) < 0) throw new RangeError('Cost must be non-negative')
     unitCostUsd = nullableMoney4(body.unit_cost_usd)
     if (unitCostUsd != null && unitCostUsd < 0) throw new RangeError('Cost must be non-negative')
-    totalCostUsd = unitCostUsd == null ? null : multiplyMoney4(unitCostUsd, quantity)
+    totalCostUsd = unitCostUsd == null ? null : multiplyMoney4(unitCostUsd, paidQuantity)
   } catch {
     return c.json({ error: 'Invalid or out-of-range receipt cost' }, 400)
   }
@@ -254,7 +269,7 @@ async function runReceiveBatchActionKernel(c: BatchesContext, body: ReceiveBody,
   // and ReceiveBatchModal both land here, not on /api/inventory/adjust), so it
   // runs the same gate -- supplier and unit cost required, $0.00 only as
   // declared free goods. A rule enforced on two of three wires is not enforced.
-  const freeGoods = body.free_goods === true
+  const freeGoods = body.free_goods === true || (freeQuantity > 0 && paidQuantity === 0)
   const reason = String(body.reason ?? '').trim() || null
   // The one cap every reason writer shares (lib/stockReason.ts): a receipt
   // reason this wire accepted unbounded could not be edited afterwards.
@@ -271,11 +286,24 @@ async function runReceiveBatchActionKernel(c: BatchesContext, body: ReceiveBody,
     lotSupplierName,
     unitCostUsd,
     freeGoods,
+    quantity: paidQuantity,
+    freeQuantity,
   })
   if (receiptGate) return c.json({ error: stockReceiptGateMessage(receiptGate), code: receiptGate }, 400)
+  const paidUnitCostUsd = unitCostUsd
+  if (freeQuantity > 0) {
+    unitCostUsd = paidQuantity === 0 ? 0 : effectiveUnitCost(paidQuantity, freeQuantity, paidUnitCostUsd ?? 0)
+    totalCostUsd = paidQuantity === 0 ? 0 : totalCostUsd
+  }
 
-  const product = await db.prepare('SELECT id, name FROM products WHERE id = ?').get<{ id: number; name: string }>([productId])
+  const product = await db.prepare('SELECT id, name, selling_price_usd, selling_price_khr FROM products WHERE id = ?').get<{ id: number; name: string } & ReceiptSellingPriceRow>([productId])
   if (!product) return c.json({ error: 'Product not found' }, 404)
+  const sellingPricePlan = sellingPrice ? planReceiptSellingPrice(product, sellingPrice) : null
+  // An unchanged price writes nothing and needs no price permission.
+  if (sellingPricePlan && getActionTier(user, 'products', 'edit') !== 'full') {
+    return c.json({ error: 'Price edit permission is required to change the selling price', code: 'price_edit_required' }, 403)
+  }
+  const movementFreeColumn = freeQuantity > 0 && await hasColumn(db, 'inventory_movements', 'free_quantity')
   const branch = await db.prepare('SELECT id, name FROM branches WHERE id = ?').get<{ id: number; name: string }>([branchId])
 
   const explicitBatchId = Number.isFinite(Number(body.batch_id)) && Number(body.batch_id) > 0 ? Number(body.batch_id) : null
@@ -296,6 +324,7 @@ async function runReceiveBatchActionKernel(c: BatchesContext, body: ReceiveBody,
       supplierId: Number.isFinite(Number(body.supplier_id)) && Number(body.supplier_id) > 0 ? Number(body.supplier_id) : null,
       supplierName: body.supplier_name || null,
       unitCostUsd,
+      receiptTotalUsd: freeQuantity > 0 ? totalCostUsd : null,
       paymentStatus,
       creditDueDate,
       // receiveBatchStock now also moves branch_stock/products.stock_quantity
@@ -307,17 +336,17 @@ async function runReceiveBatchActionKernel(c: BatchesContext, body: ReceiveBody,
       // P4-4a: folded into receiveBatchStock's own db.batch call (via the
       // resolved-batch-id subquery it hands back) instead of a second,
       // separate INSERT round trip after receiveBatchStock returns.
-      buildBatchStatements: ({ batchKey, lotCode: planLotCode, resolvedBatchIdSql }) => [{
+      buildBatchStatements: ({ batchKey, lotCode: planLotCode, resolvedBatchIdSql }) => [...(sellingPricePlan ? [sellingPricePlan.statement] : []), {
         sql: `
           INSERT INTO inventory_movements (
             product_id, product_name, branch_id, branch_name, movement_type, quantity,
             unit_cost_usd, total_cost_usd, reason, reference_id, user_id, user_name,
-            created_at, batch_id
+            created_at, batch_id${movementFreeColumn ? ', free_quantity' : ''}
           )
           VALUES (
             @productId, @productName, @branchId, @branchName, 'add', @quantity,
             @unitCostUsd, @totalCostUsd, @reason, @referenceId, @userId, @userName,
-            CURRENT_TIMESTAMP, ${resolvedBatchIdSql}
+            CURRENT_TIMESTAMP, ${resolvedBatchIdSql}${movementFreeColumn ? ', @freeQuantity' : ''}
           )
         `,
         params: {
@@ -347,6 +376,7 @@ async function runReceiveBatchActionKernel(c: BatchesContext, body: ReceiveBody,
           userName: actorSnapshot(user),
           batchId: explicitBatchId,
           batchKey,
+          ...(movementFreeColumn ? { freeQuantity } : {}),
         },
       }],
     })
@@ -374,13 +404,15 @@ async function runReceiveBatchActionKernel(c: BatchesContext, body: ReceiveBody,
       expiry_date: body.expiry_date || null,
       lot_code: lotCode,
       reason,
+      ...(freeQuantity > 0 ? { free_quantity: freeQuantity, paid_quantity: paidQuantity } : {}),
     }),
+    ...(sellingPricePlan ? [audit(c.env, user?.id ?? null, actorSnapshot(user), 'update', 'product', productId, { source: 'stock_receipt', batchId }, changedFields(sellingPricePlan.before, sellingPricePlan.after))] : []),
     bumpVersion(c.env, 'products'),
     broadcast(c.env, 'inventory', { type: 'batch_received', productId, branchId }),
     broadcast(c.env, 'products', { action: 'update', id: productId }),
   ]))
 
-  return c.json({ success: true, batchId, batchNumber, lotCode })
+  return c.json({ success: true, batchId, batchNumber, lotCode, freeQuantity, sellingPriceUsd: sellingPricePlan ? sellingPricePlan.after.selling_price_usd : null })
 }
 
 app.post('/', async (c) => {

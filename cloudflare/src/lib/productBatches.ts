@@ -33,7 +33,7 @@
 //   routes/inventory.ts's disclosure comment.
 import type { D1Compat } from './db'
 import { dateToBatchCode, normalizeTypedDate } from './batchCode'
-import { addMoney4, multiplyMoney4, roundMoney4 } from './moneyPrecision'
+import { addMoney4, multiplyMoney4, nullableMoney4, roundMoney4, sellingPriceCeilCent } from './moneyPrecision'
 import { buildInClause, selectInChunks } from './sqlBinding'
 
 export type ProductBatchRow = {
@@ -207,6 +207,11 @@ export type ReceiveBatchPlanInput = {
   supplierId?: number | null
   supplierName?: string | null
   unitCostUsd?: number | null
+  /**
+   * This receipt's own money when it is not quantity x unit cost: free units
+   * ride at the effective cost, while the supplier was paid for the paid units.
+   */
+  receiptTotalUsd?: number | null
   paymentStatus?: 'paid' | 'credit' | null
   creditDueDate?: string | null
   /** Internal only: retain an already-recorded catalog/lot snapshot verbatim. */
@@ -284,7 +289,9 @@ export function planReceiveBatchStock(input: ReceiveBatchPlanInput): ReceiveBatc
   const lotCode = dateToBatchCode(receivedAt) as string
   const batchKey = input.provenanceKey ? ` event:${input.provenanceKey}` : input.receiptLotTarget?.batchKey ?? lotCode
   const unitCostUsd = unitCostForReceipt(input.unitCostUsd, input.preserveHistoricalUnitCost === true)
-  const receivedCost = receiptCostUsd(unitCostUsd, quantity)
+  const receivedCost = unitCostUsd !== null && input.receiptTotalUsd != null
+    ? roundMoney4(input.receiptTotalUsd)
+    : receiptCostUsd(unitCostUsd, quantity)
   if (unitCostUsd !== null && !input.receiptCostPreimage) {
     throw new Error('A receipt cost preimage is required before recording priced stock')
   }
@@ -590,6 +597,7 @@ export async function receiveBatchStock(db: D1Compat, input: {
   supplierId?: number | null
   supplierName?: string | null
   unitCostUsd?: number | null
+  receiptTotalUsd?: number | null
   paymentStatus?: 'paid' | 'credit' | null
   creditDueDate?: string | null
   provenanceKey?: string
@@ -653,6 +661,51 @@ export async function receiveBatchStock(db: D1Compat, input: {
     created: !before && input.batchId == null,
     batchNumber: batch.batch_number != null ? Number(batch.batch_number) : null,
     lotCode: batch.lot_code ?? plan.lotCode,
+  }
+}
+
+// A receipt may carry the selling price the operator typed for the product.
+// The latest entered price wins, even when lower (owner, 30 Sep 2026), and it
+// is rounded up to the cent like every selling price. KHR is optional: when it
+// is not sent the row keeps its own KHR price.
+export type ReceiptSellingPrice = { usd: number; khr: number | null }
+
+/** undefined when no price was sent, null when one was sent but is unreadable. */
+export function parseReceiptSellingPrice(usdValue: unknown, khrValue: unknown): ReceiptSellingPrice | null | undefined {
+  const blank = (value: unknown) => value == null || (typeof value === 'string' && value.trim() === '')
+  if (blank(usdValue)) return blank(khrValue) ? undefined : null
+  try {
+    const usd = sellingPriceCeilCent(usdValue as string | number)
+    const khr = blank(khrValue) ? null : nullableMoney4(khrValue as string | number)
+    if (khr != null && khr < 0) return null
+    return { usd, khr }
+  } catch {
+    return null
+  }
+}
+
+export type ReceiptSellingPriceRow = { id: number; selling_price_usd: number | null; selling_price_khr: number | null }
+
+/** The price write a receipt carries, or null when the row already sells at that price. */
+export function planReceiptSellingPrice(row: ReceiptSellingPriceRow, price: ReceiptSellingPrice): {
+  statement: StockWriteStatement
+  before: Record<string, number | null>
+  after: Record<string, number | null>
+} | null {
+  const usdChanged = Number(row.selling_price_usd ?? 0) !== price.usd
+  const khrChanged = price.khr != null && Number(row.selling_price_khr ?? 0) !== price.khr
+  if (!usdChanged && !khrChanged) return null
+  const before: Record<string, number | null> = { selling_price_usd: row.selling_price_usd }
+  const after: Record<string, number | null> = { selling_price_usd: price.usd }
+  if (price.khr != null) { before.selling_price_khr = row.selling_price_khr; after.selling_price_khr = price.khr }
+  return {
+    statement: {
+      sql: `UPDATE products SET selling_price_usd = @sellingUsd${price.khr != null ? ', selling_price_khr = @sellingKhr' : ''},
+          updated_at = CURRENT_TIMESTAMP WHERE id = @productId`,
+      params: { productId: row.id, sellingUsd: price.usd, ...(price.khr != null ? { sellingKhr: price.khr } : {}) },
+    },
+    before,
+    after,
   }
 }
 

@@ -21,6 +21,10 @@
 //   - identical rows fold behind "Show all (n)" with aria-expanded;
 //   - required rows, per-record options, dispositions inside the grid, locked
 //     and masked cells, stale-changed cells, busy = inert;
+//   - the owner's one line above the grid (30 Sep 2026): "Select the details
+//     you want to keep; review the final result." beside the pager, on ONE
+//     row at every width, the pager always there; no info buttons anywhere;
+//     each column's disposition is an icon toggle beside its #id;
 //   - Khmer rows get Khmer line height, and nothing overflows the page.
 //
 // Run: node tests/resolveGrid.test.ts
@@ -130,7 +134,7 @@ const fixtureSource = String.raw`
         final: { text: '$7.75' },
       },
       {
-        key: 'stock', label: 'Stock', kind: 'computed', identical: false, hint: 'Stock is added per branch.',
+        key: 'stock', label: 'Stock', kind: 'computed', identical: false,
         cells: Object.fromEntries(COLUMNS.map((column) => [column.id, column.id === 'p1'
           ? { text: String(STOCK.p1) }
           : { text: String(STOCK[column.id]), options: [{ id: 'carry', label: 'Carry' }, { id: 'writeoff', label: 'Write off' }], choice: stockChoice(column) }])),
@@ -175,7 +179,9 @@ const fixtureSource = String.raw`
 
 const { send, evaluate, press, mouseClick, waitFor, pause, open: openFixture, khmerRoom, run } = await launchResolveFixture('resolve-grid-fixture', fixtureSource)
 const open = (width: number, lang: 'en' | 'km', theme: 'light' | 'dark') => openFixture(width, `lang=${lang}&theme=${theme}`, 'document.querySelector(".resolve-grid tbody [role=rowheader]")')
-const assertKhmerRoom = (label: string) => khmerRoom(label, '.resolve-grid-scroll', 10)
+// The disposition toggles are icons now (their Khmer names are tooltips), so
+// fewer Khmer text nodes remain in the grid than under the old header menus.
+const assertKhmerRoom = (label: string) => khmerRoom(label, '.resolve-grid-scroll', 6)
 
 const cell = (key: string) => `[data-rg-key="${key}"]`
 const active = () => evaluate<string | null>('document.activeElement && document.activeElement.getAttribute("data-rg-key")')
@@ -249,6 +255,25 @@ async function assertPinnedAndPaged(label: string, expectPerView: number, theme:
 }
 
 await run('PASS resolve grid: roles, pinned columns, paging, picks, copy, keyboard, editor, folding, required, dispositions, busy at 375/1280 EN/KM light/dark', async () => {
+  await open(375, 'en', 'light')
+  const toolbar = await evaluate<any>(`(() => {
+    const bar = document.querySelector('[data-rg-toolbar]')
+    const hint = bar.querySelector('[data-rg-hint]')
+    const [prev, next] = [...bar.querySelectorAll('button')]
+    const mid = (node) => { const r = node.getBoundingClientRect(); return Math.round(r.top + r.height / 2) }
+    return {
+      hint: hint.textContent,
+      oneRow: Math.abs(mid(prev) - mid(bar)) <= 1 && Math.abs(mid(next) - mid(bar)) <= 1,
+      hintLeftOfPager: hint.getBoundingClientRect().right <= prev.getBoundingClientRect().left,
+      // InfoHint draws lucide's Info icon; the old grid had one on the Field
+      // header, one per hinted row and one per locked row.
+      infoButtons: bar.parentElement.querySelectorAll('svg.lucide-info').length,
+      lockTitle: document.querySelector('.resolve-grid [title="Needs cost edit permission"]') ? true : false,
+    }
+  })()`)
+  assert.deepEqual(toolbar, { hint: 'Select the details you want to keep; review the final result.', oneRow: true, hintLeftOfPager: true, infoButtons: 0, lockTitle: true },
+    'the hint and the pager share one row above the grid, and no row carries an info button')
+
   // ---------------------------------------------------------------- 375 EN
   await open(375, 'en', 'light')
   const structure = await evaluate<any>(`(() => {
@@ -434,16 +459,15 @@ await run('PASS resolve grid: roles, pinned columns, paging, picks, copy, keyboa
   assert.deepEqual(await lastDisposition(), ['p2', 'separate', null])
   await waitFor('reorder', async () => ((await headerOrder()).join('|') === ['Maybelline Fit Me Matte + Poreless Foundation 30ml', 'Fit me', 'Fit Me Foundation 30ml', 'FIT ME 30ML'].join('|') ? true : null))
   assert.equal(await evaluate<string>(`document.querySelector('${cell('session|#final|keep')}').getAttribute('aria-pressed')`), 'true')
-  // Re-include p2 from its header menu (the AppSelect portals its list to body).
-  await evaluate(`document.querySelector('[aria-label="What to do with Fit Me Foundation 30ml"]').click()`)
-  await waitFor('menu', async () => ((await evaluate<boolean>('Boolean(document.querySelector("[data-app-select-option=include]"))')) ? true : null))
-  await evaluate('document.querySelector("[data-app-select-option=include]").click()')
+  // Re-include p2 from its header toggle (a switch: off = Keep separate).
+  assert.deepEqual(await evaluate<any>(`(() => { const node = document.querySelector('[data-rg-disposition="p2"]'); return [node.getAttribute('role'), node.getAttribute('aria-checked'), node.getAttribute('title'), node.getAttribute('aria-label')] })()`),
+    ['switch', 'false', 'Keep separate', 'Merge in · Fit Me Foundation 30ml'], 'a separate column shows its state in the toggle tooltip')
+  await evaluate(`document.querySelector('[data-rg-disposition="p2"]').click()`)
   await waitFor('re-include', async () => ((await lastDisposition())?.[1] === 'include' ? true : null))
+  assert.equal(await evaluate<string>(`document.querySelector('[data-rg-disposition="p2"]').getAttribute('title')`), 'Merge in')
   assert.deepEqual(await headerOrder(), ['Maybelline Fit Me Matte + Poreless Foundation 30ml', 'Fit Me Foundation 30ml', 'Fit me', 'FIT ME 30ML'])
   // Remove asks for a reason inside the header.
-  await evaluate(`document.querySelector('[aria-label="What to do with Fit me"]').click()`)
-  await waitFor('menu 2', async () => ((await evaluate<boolean>('Boolean(document.querySelector("[data-app-select-option=remove]"))')) ? true : null))
-  await evaluate('document.querySelector("[data-app-select-option=remove]").click()')
+  await evaluate(`document.querySelector('[data-rg-remove="p4"]').click()`)
   await waitFor('reason input', async () => ((await evaluate<boolean>('Boolean(document.querySelector("[aria-label=\'Reason to remove Fit me\']"))')) ? true : null))
   assert.equal(await evaluate<number>('document.querySelector("[aria-label=\'Reason to remove Fit me\']").maxLength'), 500)
   await evaluate('document.querySelector("[aria-label=\'Reason to remove Fit me\']").focus()')

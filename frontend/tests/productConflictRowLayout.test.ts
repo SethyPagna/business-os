@@ -2,17 +2,26 @@
 // 2026), at 375px and 1280px, in English and Khmer.
 //
 //   N2  the conflict card's product row: the name has its own full-width row
-//       and wraps with no ellipsis; barcode, Cost: and Selling: sit on one
-//       row; Keep / Merge / Resolve sit on the stock row; a tap on the name
-//       opens the product preview; nothing overflows the page.
-//   N3  the card's Apply path, the shared ResolveModal driven by the real
-//       product adapter over a fake Worker: the grid renders the product
-//       rows, the confirm shows before -> after, apply shows the after.
+//       and wraps with no ellipsis; barcode, cost, selling, stock and the
+//       branch split share ONE row that scrolls sideways; the card's one
+//       action is the footer Resolve (no Keep / Merge / per-row Resolve); a
+//       tap on the name opens the product preview; nothing overflows the page.
+//   N3  the Resolve path, the shared ResolveModal driven by the real product
+//       adapter over a fake Worker: the grid renders the product rows (no
+//       "Product kept" row), the confirm shows before -> after, apply shows
+//       the after.
 //   N4  the cost row is editable for a cost editor and locked for a viewer.
 //
 // Run: node tests/productConflictRowLayout.test.ts
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { launchResolveFixture } from './resolveBrowserFixture.ts'
+
+const packs: Record<string, Record<string, string>> = {
+  en: JSON.parse(readFileSync(new URL('../src/lang/en.json', import.meta.url), 'utf8')),
+  km: JSON.parse(readFileSync(new URL('../src/lang/km.json', import.meta.url), 'utf8')),
+}
+const pack = (lang: string, key: string): string => packs[lang][key]
 
 const fixtureSource = String.raw`
   import React, { StrictMode, useState } from 'react'
@@ -65,13 +74,13 @@ const fixtureSource = String.raw`
     return React.createElement('div', { style: { padding: 16 } },
       React.createElement('div', { className: 'grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3', id: 'cards' },
         React.createElement(ProductConflictClusterCard, {
-          cluster, t, dismissing: false, merging: false, selected: false, selectable: true, isExact: false,
+          cluster, t, dismissing: false, merging: false, selected: false, selectable: true,
           canRemoveProduct: false, removalReasons: {}, onToggleSelect() {}, onRemovalChange() {}, onDismiss() {},
-          onApplyDecisions() {}, onEdit() {}, onPreview: (entry) => window.__previewed.push(entry.id),
+          onResolve() { window.__resolves = (window.__resolves || 0) + 1 }, onPreview: (entry) => window.__previewed.push(entry.id),
         })))
   }
   function Grid() {
-    const [adapter] = useState(() => createProductResolveAdapter({ cluster, keeperId: 10, t, canViewCosts: true, canEditCosts: editor, canMerge: () => true, api }))
+    const [adapter] = useState(() => createProductResolveAdapter({ cluster, t, canViewCosts: true, canEditCosts: editor, canMerge: () => true, api }))
     return React.createElement(ResolveModal, { title: 'Resolve', adapter, onClose() { window.__closed = true } })
   }
   const value = { ...FALLBACK_APP_CONTEXT, user, t, language: lang, can: () => true, hasPermission: () => true }
@@ -102,11 +111,10 @@ type RowGeometry = {
   metaTexts: string[]
   metaOverflows: boolean
   metaGaps: number[]
-  stockTop: number
-  stockBottom: number
-  actionTops: number[]
-  actionLabels: string[]
-  actionsInside: boolean
+  metaRight: number
+  rowRight: number
+  stockInMeta: boolean
+  buttonsInRow: number
 }
 
 const rowGeometry = (id: number) => evaluate<RowGeometry>(`(() => {
@@ -116,12 +124,10 @@ const rowGeometry = (id: number) => evaluate<RowGeometry>(`(() => {
   const meta = row.querySelector('[data-conflict-meta]')
   const metaItems = [...meta.querySelectorAll(':scope > div > *')]
   const stock = row.querySelector('[data-conflict-stock]')
-  const actions = [...row.querySelectorAll('[data-conflict-actions] button')]
   const rowBox = row.getBoundingClientRect()
   const buttonBox = nameButton.getBoundingClientRect()
   const nameStyle = getComputedStyle(name)
   const lineHeight = parseFloat(nameStyle.lineHeight) || parseFloat(nameStyle.fontSize) * 1.5
-  const stockBox = stock.getBoundingClientRect()
   return {
     pageOverflow: document.scrollingElement.scrollWidth > innerWidth + 1,
     nameFull: buttonBox.width >= rowBox.width - 16,
@@ -133,10 +139,10 @@ const rowGeometry = (id: number) => evaluate<RowGeometry>(`(() => {
     metaTexts: metaItems.map((child) => child.textContent.trim()),
     metaGaps: metaItems.slice(1).map((child, index) => Math.round(child.getBoundingClientRect().left - metaItems[index].getBoundingClientRect().right)),
     metaOverflows: meta.scrollWidth > meta.clientWidth + 1,
-    stockTop: stockBox.top, stockBottom: stockBox.bottom,
-    actionTops: actions.map((button) => Math.round(button.getBoundingClientRect().top)),
-    actionLabels: actions.map((button) => button.textContent.trim()),
-    actionsInside: actions.every((button) => { const box = button.getBoundingClientRect(); return box.top >= stockBox.top - 1 && box.bottom <= stockBox.bottom + 1 && box.right <= rowBox.right + 1 }),
+    metaRight: meta.getBoundingClientRect().right,
+    rowRight: rowBox.right,
+    stockInMeta: Boolean(stock && meta.contains(stock)),
+    buttonsInRow: [...row.querySelectorAll('button')].filter((button) => !button.hasAttribute('data-conflict-name')).length,
   }
 })()`)
 
@@ -153,15 +159,16 @@ await run('PASS product conflict rows (N2) and the product Resolve grid (N3, N4)
         assert.notEqual(row.nameEllipsis, 'ellipsis', `${label} #${id}: no ellipsis`)
         assert.equal(row.nameClipped, false, `${label} #${id}: the whole name is visible`)
         if (width === 375) assert.ok(row.nameLines >= 2, `${label} #${id}: a long name wraps (${row.nameLines} lines)`)
-        assert.equal(new Set(row.metaTops).size, 1, `${label} #${id}: barcode, Cost and Selling on one row ${JSON.stringify(row.metaTexts)}`)
-        assert.equal(row.metaTexts.length, 3, `${label} #${id}: ${JSON.stringify(row.metaTexts)}`)
+        assert.equal(new Set(row.metaTops).size, 1, `${label} #${id}: barcode, cost, selling, stock and branches on one row ${JSON.stringify(row.metaTexts)}`)
+        assert.equal(row.metaTexts.length, id === 10 ? 5 : 6, `${label} #${id}: ${JSON.stringify(row.metaTexts)}`)
         assert.match(row.metaTexts[0], /^880/)
-        assert.ok(row.metaGaps.every((gap) => gap >= 6), `${label} #${id}: the three values are spaced apart ${JSON.stringify(row.metaGaps)}`)
-        assert.equal(row.metaOverflows, false, `${label} #${id}: the meta row fits without scrolling`)
-        assert.equal(row.actionLabels.length, 3, `${label} #${id}: Keep, Merge and Resolve`)
-        assert.equal(new Set(row.actionTops).size, 1, `${label} #${id}: the actions share one line`)
-        assert.equal(row.actionsInside, true, `${label} #${id}: the actions sit on the stock row`)
+        assert.ok(row.metaGaps.every((gap) => gap >= 6), `${label} #${id}: the values are spaced apart ${JSON.stringify(row.metaGaps)}`)
+        assert.equal(row.stockInMeta, true, `${label} #${id}: the stock count is part of the one row`)
+        assert.ok(row.metaRight <= row.rowRight + 1, `${label} #${id}: a long row scrolls inside the card instead of widening it`)
+        assert.equal(row.buttonsInRow, 0, `${label} #${id}: no Keep, Merge or Resolve button on a product row`)
       }
+      const footer = await evaluate<string[]>(`[...document.querySelectorAll('[data-conflict-footer] button')].map((button) => button.textContent.trim())`)
+      assert.deepEqual(footer, [pack(lang, 'resolve')], `${label}: the card's one action is the footer Resolve`)
       await shot(`card-${width}-${lang}`)
       if (lang === 'km') await khmerRoom(label, '#cards', 6)
     }
@@ -170,8 +177,10 @@ await run('PASS product conflict rows (N2) and the product Resolve grid (N3, N4)
   await open(375, 'lang=en', `document.querySelector('[data-conflict-row="11"]')`)
   await mouseClick('[data-conflict-row="11"] [data-conflict-name]')
   await waitFor('tap opens the preview', async () => ((await evaluate<number[]>('window.__previewed')).includes(11) ? true : null))
+  await mouseClick('[data-conflict-footer] button')
+  await waitFor('Resolve is wired', async () => ((await evaluate<number>('window.__resolves || 0')) === 1 ? true : null))
 
-  // The Apply path: the shared grid with the product adapter.
+  // The Resolve path: the shared grid with the product adapter.
   for (const width of [375, 1280]) {
     for (const lang of ['en', 'km']) {
       const label = `grid ${width}px ${lang}`
@@ -203,8 +212,9 @@ await run('PASS product conflict rows (N2) and the product Resolve grid (N3, N4)
     await evaluate(`document.querySelector('[data-click-me="1"]')?.removeAttribute('data-click-me')`)
   }
   const text = await dialogText()
-  assert.match(text, /Product kept/)
-  assert.match(text, /Follows the kept product|Barcode/)
+  assert.doesNotMatch(text, /Product kept|Record kept/, 'the surviving record is implicit')
+  assert.match(text, /Barcode/)
+  assert.match(text, /Select the details you want to keep; review the final result./)
   assert.match(text, /\$6/, 'the rule cost is the default Final')
   await clickButton('^Resolve$')
   await waitFor('confirm', async () => (/Merge .* into/.test(await dialogText()) ? true : null))

@@ -20,6 +20,8 @@
 //   - applying locks the X, reports progress, stops at a partial result or a
 //     dropped connection with Continue re-sending the same frozen token, and
 //     done shows the server's after values with the undo hint and no footer;
+//   - a refusal with a reason (a 4xx) shows that reason, is never re-sent and
+//     offers no Continue;
 //   - offline disables Resolve with a notice and keeps the choices;
 //   - Minimize hands the choices to the host and they come back on reopen;
 //   - Khmer: labels from the pack, Khmer line boxes; phone and desktop: the
@@ -311,9 +313,7 @@ await run('PASS resolve modal: loading, one close, dirty guard, blockers, remove
   await click(cell('brand|p2'))
   await until('brand pick', `${cell('brand|p2')}.getAttribute('aria-selected') === 'true'`)
   const loadsBeforeRemove = await loadsSoFar()
-  await click(`document.querySelector('[aria-label="What to do with FIT ME"]')`)
-  await until('disposition menu', 'document.querySelector("[data-app-select-option=remove]")')
-  await click('document.querySelector("[data-app-select-option=remove]")')
+  await click(`document.querySelector('[data-rg-remove="p3"]')`)
   await until('remove re-reads the records', `__log.loads.length === ${loadsBeforeRemove + 1} && ${gridReady}`)
   assert.deepEqual(await evaluate<any>('__log.loads.at(-1).columns.p3'), { disposition: 'remove' }, 'the re-read is handed the Remove it has to preview')
   const reason = `document.querySelector('[aria-label="Reason to remove FIT ME"]')`
@@ -404,7 +404,8 @@ await run('PASS resolve modal: loading, one close, dirty guard, blockers, remove
   // ----------------------------------------- a dropped write keeps Continue
   await evaluate('__ctl.failApply = 1')
   await click('__ui.primary()')
-  await until('apply failure', `__ui.alerts().some((text) => text.startsWith('Stopped before finishing. Continue picks up where it stopped.'))`)
+  await until('apply failure', `__ui.alerts().some((text) => text.startsWith('The result is unknown. Continue checks what was saved and finishes the rest.'))`)
+  assert.equal(await evaluate<string>(`__ui.main().querySelector('[data-resolve-failure]').getAttribute('data-resolve-failure')`), 'apply')
   assert.equal(await evaluate<boolean>(`__ui.alerts().some((text) => text.includes('Connection dropped'))`), true, 'the failure carries the reason')
   assert.deepEqual(await footer(), { label: 'Continue', disabled: false, described: [] }, 'a dropped write keeps Continue')
 
@@ -503,7 +504,7 @@ await run('PASS resolve modal: loading, one close, dirty guard, blockers, remove
   await click(`__ui.button(__ui.confirm(), 'Resolve')`)
   await until('refusal shown', `__ui.alerts().some((text) => text.startsWith('Could not resolve. Nothing was saved.'))`)
   assert.equal(await evaluate<boolean>(`__ui.alerts().some((text) => text.includes('Product #12 was already merged'))`), true, 'the refusal carries its own reason')
-  assert.equal(await evaluate<boolean>(`__ui.alerts().some((text) => text.includes('Stopped before finishing'))`), false, 'a refusal is not "stopped before finishing"')
+  assert.equal(await evaluate<boolean>(`__ui.alerts().some((text) => text.includes('The result is unknown'))`), false, 'a refusal is not an unknown result')
   assert.deepEqual(await footer(), { label: 'Resolve', disabled: false, described: [] }, 'a refused write offers Resolve again and never Continue')
   assert.equal(await evaluate<number>('__log.applies.length'), sentBefore + 1, 'the refused request was sent once and not re-sent')
   assert.equal(await pressed('session|#final|finalize'), 'true', 'a refusal keeps the choices')

@@ -3,12 +3,17 @@ import { supplierDisplay } from '../../utils/supplierDisplay.ts'
 import Pencil from 'lucide-react/dist/esm/icons/pencil.js'
 import Plus from 'lucide-react/dist/esm/icons/plus.js'
 import Undo2 from 'lucide-react/dist/esm/icons/undo-2.js'
+import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
+import Truck from 'lucide-react/dist/esm/icons/truck.js'
+import CalendarDays from 'lucide-react/dist/esm/icons/calendar-days.js'
+import CalendarClock from 'lucide-react/dist/esm/icons/calendar-clock.js'
+import MessageSquare from 'lucide-react/dist/esm/icons/message-square.js'
 import { getStockInSessionLines, getStockInSessions } from '../../api/productReadTransport.ts'
 import { editStockInLine, revertStockMovement } from '../../api/inventoryWriteTransport.ts'
 import { stockRevertErrorText } from '../../utils/stockRevertError.ts'
 import {
   buildStockInLineEditBody, isStockInLineEditable, newStockInLineEditRequestId, stockInLineDraft, stockInLineEditErrorText,
-  freezeStockInLineEditAttempt, isKnownStockInLineEditRefusal, isStockInLineEditAcknowledged, STOCK_IN_LINE_MAX_QUANTITY,
+  freezeStockInLineEditAttempt, isKnownStockInLineEditRefusal, isStockInLineEditAcknowledged,
   type StockInLineEditDraft, type StockInLineEditAttempt,
 } from '../../utils/stockInLineEdit.ts'
 import { updateBatch } from '../../api/batchesTransport.ts'
@@ -24,8 +29,10 @@ import { StockLineChange } from '../shared/StockLineChange.tsx'
 import DateEntryInput from '../shared/DateEntryInput.tsx'
 import SearchInput from '../shared/SearchInput.tsx'
 import ScanSearchButton from '../shared/ScanSearchButton.tsx'
-import SupplierPickerField, { type SupplierChoice } from '../shared/SupplierPickerField.tsx'
+import { useSupplierSuggestions, type SupplierChoice } from '../shared/SupplierPickerField.tsx'
+import SuggestionTextInput from '../shared/SuggestionTextInput.tsx'
 import AppSelect from '../shared/AppSelect.tsx'
+import { IconField, InsetNumberField } from '../stock-session/StockSessionSharedDetails.tsx'
 import PaginationControls, { clampPage, DEFAULT_PAGE_SIZE } from '../shared/PaginationControls.tsx'
 import InfoHint from '../shared/InfoHint.tsx'
 import { ProductImg, ProductImagePlaceholder } from './shared/primitives.tsx'
@@ -37,6 +44,36 @@ import { canEditAcquisitionCosts, canViewAcquisitionCosts } from '../../utils/ac
 const FastStockInModal = lazyRetry(() => import('../inventory/FastStockInModal.tsx'), 'stock-session-fast-stock-in')
 
 type T = (key: string) => string
+
+// Supplier as one box, the Truck icon and the placeholder naming it -- the
+// look of the Stock Session's own box (its copy is private to that float).
+function CompactSupplierBox({ idPrefix, value, tr, onChange }: {
+  idPrefix: string
+  value: SupplierChoice
+  tr: (key: string, fallback: string) => string
+  onChange: (next: SupplierChoice) => void
+}) {
+  const { options, loading, ensureLoaded, handleChange } = useSupplierSuggestions(value, onChange)
+  const label = tr('supplier', 'Supplier')
+  const shown = value.supplierName.trim()
+  return (
+    <IconField icon={Truck} title={shown ? `${label}: ${shown}` : label}>
+      <SuggestionTextInput
+        id={`${idPrefix}-supplier`}
+        value={value.supplierName}
+        options={options}
+        limit={8}
+        loading={loading}
+        loadingLabel={tr('loading', 'Loading...')}
+        onRequestOptions={ensureLoaded}
+        ariaLabel={label}
+        placeholder={label}
+        inputClassName="input h-10 w-full min-w-0 pl-8 text-sm"
+        onChange={handleChange}
+      />
+    </IconField>
+  )
+}
 type Branch = { id?: string | number; name?: string }
 type Row = {
   // N29: null for a line the Add-products session CREATED at quantity 0 --
@@ -173,6 +210,8 @@ function formatUsd(value: unknown): string {
 
 export default function StockInSessionsSection({ t, notify, branches, onChanged }: { t: T; notify: (message: string, kind?: string) => void; branches: Branch[]; onChanged: () => void }) {
   const tr = useCallback((key: string, fallback: string) => { const value = t(key); return value && value !== key ? value : fallback }, [t])
+  const receivedDateLabel = tr('received_date', 'Received date')
+  const dueDateLabel = tr('due_date', 'Due date')
   const { fmtKHR, user } = useApp() as { fmtKHR: (value: unknown) => string; user: any }
   const canViewCosts = canViewAcquisitionCosts(user)
   // The Worker refuses a cost from anyone without cost-entry permission, so
@@ -552,12 +591,26 @@ export default function StockInSessionsSection({ t, notify, branches, onChanged 
         an operator clicked and the receipt they read back are the same thing. */}
     {selected ? <Modal title={`${tr('stock_in_session', 'Stock-in session')}${stockSessionId(selected.createdAt) ? ` · ${stockSessionId(selected.createdAt)}` : ''}`} onClose={closeSession} closeDisabled={busy || Boolean(pendingAttempt)} size="lg" unsavedChanges={{ dirty: editing || Boolean(lineEdit) || Boolean(pendingAttempt) }}>
       <div className="space-y-3">
-        {editing ? <div className="grid grid-cols-2 gap-2 rounded-lg bg-gray-50 p-2.5 dark:bg-gray-800/60">
-          <label><span className="mb-1 block text-[11px] text-gray-500">{tr('received_date', 'Received date')}</span><DateEntryInput className="h-9 text-sm" t={t} ariaLabel={tr('received_date', 'Received date')} value={String(editDate || '').slice(0, 10)} onChange={(iso) => setEditDate(iso)} /></label>
-          <SupplierPickerField value={editSupplier} onChange={setEditSupplier} tr={(key, fallback = key) => tr(key, fallback)} idPrefix="stock-session-edit" />
-          <label><span className="mb-1 block text-[11px] text-gray-500">{tr('payment', 'Payment')}</span><AppSelect ariaLabel={tr('payment', 'Payment')} value={editPayment} onChange={(value) => setEditPayment(value as 'paid' | 'credit')} buttonClassName="h-9 w-full text-sm" optionClassName="text-sm" options={[{ value: 'paid', label: tr('paid', 'Paid') }, { value: 'credit', label: tr('on_credit', 'Not Yet Paid') }]} /></label>
-          {editPayment === 'credit' ? <label><span className="mb-1 block text-[11px] text-gray-500">{tr('due_date', 'Due date')}</span><DateEntryInput className="h-9 text-sm" t={t} ariaLabel={tr('due_date', 'Due date')} value={String(editCreditDueDate || '').slice(0, 10)} onChange={(iso) => setEditCreditDueDate(iso)} /></label> : <div />}
-          {selected.hasSharedBatch || selected.hasMixedHeader ? <div className="col-span-2 text-[11px] text-amber-700 dark:text-amber-300">{tr('shared_batch_session_edit_blocked', 'This session contains shared received dates or mixed linked headers. Review its receipts before editing; changing them together could rewrite another session.')}</div> : null}
+        {editing ? <div className="space-y-1.5 rounded-lg bg-gray-50 p-2.5 dark:bg-gray-800/60">
+          <div className="grid grid-cols-2 gap-1.5">
+            <IconField icon={CalendarDays} title={receivedDateLabel}>
+              <DateEntryInput className="h-10 w-full pl-8 text-sm" t={t} ariaLabel={receivedDateLabel} placeholder={receivedDateLabel} value={String(editDate || '').slice(0, 10)} onChange={(iso) => setEditDate(iso)} />
+            </IconField>
+            <CompactSupplierBox idPrefix="stock-session-edit" value={editSupplier} onChange={setEditSupplier} tr={tr} />
+          </div>
+          <div className="grid grid-cols-2 gap-1.5">
+            <div role="radiogroup" aria-label={tr('payment', 'Payment')} className="grid h-10 grid-cols-2 gap-0.5 rounded-xl bg-gray-100 p-0.5 dark:bg-gray-900/60">
+              {(['paid', 'credit'] as const).map((status) => (
+                <button key={status} type="button" role="radio" aria-checked={editPayment === status} onClick={() => setEditPayment(status)} className={`rounded-[0.6rem] px-1 text-sm font-semibold ${editPayment === status ? 'bg-white text-blue-700 shadow-sm dark:bg-gray-800 dark:text-blue-300' : 'text-gray-600 dark:text-gray-300'}`}>
+                  {status === 'paid' ? tr('paid', 'Paid') : tr('on_credit', 'Not Yet Paid')}
+                </button>
+              ))}
+            </div>
+            <IconField icon={CalendarClock} title={dueDateLabel}>
+              <DateEntryInput className="h-10 w-full pl-8 text-sm" t={t} ariaLabel={dueDateLabel} placeholder={dueDateLabel} disabled={editPayment !== 'credit'} value={editPayment === 'credit' ? String(editCreditDueDate || '').slice(0, 10) : ''} onChange={(iso) => setEditCreditDueDate(iso)} />
+            </IconField>
+          </div>
+          {selected.hasSharedBatch || selected.hasMixedHeader ? <div className="text-[11px] text-amber-700 dark:text-amber-300">{tr('shared_batch_session_edit_blocked', 'This session contains shared received dates or mixed linked headers. Review its receipts before editing; changing them together could rewrite another session.')}</div> : null}
         </div> : <div className="grid grid-cols-2 gap-x-3 gap-y-1 rounded-lg bg-gray-50 p-2.5 text-xs dark:bg-gray-800/60 sm:grid-cols-4">
           <div className="col-span-2 min-w-0 sm:col-span-1"><div className="detail-scroll-text font-semibold text-gray-900 dark:text-white">{selected.supplier.supplierName || tr('no_supplier_recorded', 'No supplier')}</div><div className="detail-scroll-text text-gray-400">{selected.branchName || '—'}</div></div>
           <div><div className="text-gray-400">{tr('received_date', 'Received date')}</div><div className="text-gray-700 dark:text-gray-200">{fmtDate(selected.receivedDate || selected.createdAt)}</div></div>
@@ -572,12 +625,16 @@ export default function StockInSessionsSection({ t, notify, branches, onChanged 
             four on desktop; the Worker decides what the lot allows. */}
         {lineEdit ? <div data-testid="stock-in-line-editor" className="space-y-2 rounded-xl border border-blue-100 bg-blue-50/55 p-2.5 text-xs dark:border-blue-900/60 dark:bg-blue-950/20">
           <div className="flex min-w-0 items-center gap-2"><Pencil className="h-3.5 w-3.5 shrink-0 text-blue-600" /><span className="min-w-0 break-words font-semibold text-gray-900 dark:text-white">{lineEdit.row.product_name}</span></div>
-          <fieldset disabled={busy || Boolean(pendingAttempt)} className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-            <label className="min-w-0"><span className="mb-1 block text-[11px] text-gray-500">{tr('quantity', 'Quantity')}</span><input className="input h-9 w-full text-sm" type="number" inputMode="decimal" min={0} max={STOCK_IN_LINE_MAX_QUANTITY} step="any" aria-label={tr('quantity', 'Quantity')} value={lineEdit.draft.quantity} onChange={(event) => patchLineDraft({ quantity: event.target.value })} /></label>
-            {canEditCosts ? <label className="min-w-0"><span className="mb-1 block text-[11px] text-gray-500">{tr('unit_cost', 'Unit cost')} (USD)</span><input className="input h-9 w-full text-sm" type="number" inputMode="decimal" min={0} step="any" aria-label={tr('unit_cost', 'Unit cost')} value={lineEdit.draft.unitCostUsd} onChange={(event) => patchLineDraft({ unitCostUsd: event.target.value })} /></label> : null}
-            <label className="min-w-0"><span className="mb-1 block text-[11px] text-gray-500">{tr('received_date', 'Received date')}</span><DateEntryInput className="h-9 text-sm" t={t} ariaLabel={tr('received_date', 'Received date')} value={lineEdit.draft.receivedDate} onChange={(iso) => patchLineDraft({ receivedDate: iso })} /></label>
-            <div className="min-w-0"><SupplierPickerField value={{ supplierId: lineEdit.draft.supplierId, supplierName: lineEdit.draft.supplierName }} onChange={(choice) => patchLineDraft({ supplierId: choice.supplierId ?? null, supplierName: choice.supplierName || '' })} tr={(key, fallback = key) => tr(key, fallback)} idPrefix="stock-in-line-edit" /></div>
-            <label className="col-span-2 min-w-0 sm:col-span-4"><span className="mb-1 block text-[11px] text-gray-500">{tr('reason', 'Reason')}</span><input className="input h-9 w-full text-sm" maxLength={512} aria-label={tr('reason', 'Reason')} value={lineEdit.draft.reason} placeholder={tr('stock_in_line_edit_reason_placeholder', 'Optional, e.g. typo on the invoice')} onChange={(event) => patchLineDraft({ reason: event.target.value })} /></label>
+          <fieldset disabled={busy || Boolean(pendingAttempt)} className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
+            <InsetNumberField label={tr('quantity', 'Quantity')} value={lineEdit.draft.quantity} onChange={(next) => patchLineDraft({ quantity: next })} step="any" />
+            {canEditCosts ? <InsetNumberField label={tr('unit_cost', 'Unit cost')} title={`${tr('unit_cost', 'Unit cost')} (USD)`} value={lineEdit.draft.unitCostUsd} onChange={(next) => patchLineDraft({ unitCostUsd: next })} step="any" /> : null}
+            <IconField icon={CalendarDays} title={receivedDateLabel}>
+              <DateEntryInput className="h-10 w-full pl-8 text-sm" t={t} ariaLabel={receivedDateLabel} placeholder={receivedDateLabel} value={lineEdit.draft.receivedDate} onChange={(iso) => patchLineDraft({ receivedDate: iso })} />
+            </IconField>
+            <CompactSupplierBox idPrefix="stock-in-line-edit" value={{ supplierId: lineEdit.draft.supplierId, supplierName: lineEdit.draft.supplierName }} onChange={(choice) => patchLineDraft({ supplierId: choice.supplierId ?? null, supplierName: choice.supplierName || '' })} tr={tr} />
+            <IconField icon={MessageSquare} title={tr('reason', 'Reason')} className="col-span-2 sm:col-span-4">
+              <input className="input h-10 w-full pl-8 text-sm" maxLength={512} aria-label={tr('reason', 'Reason')} value={lineEdit.draft.reason} placeholder={tr('stock_in_line_edit_reason_placeholder', 'Optional, e.g. typo on the invoice')} onChange={(event) => patchLineDraft({ reason: event.target.value })} />
+            </IconField>
           </fieldset>
           <div className="text-[11px] text-gray-500 dark:text-gray-400">{tr('stock_in_line_edit_hint', 'Lowering the quantity is recorded as a correction, not a loss. Units already sold cannot be taken back.')}</div>
           {pendingAttempt ? <p role="status" className="text-[11px] text-amber-700 dark:text-amber-300">{tr('stock_in_line_pending', 'This edit is not confirmed yet. Retry to check it before making another change.')}</p> : null}

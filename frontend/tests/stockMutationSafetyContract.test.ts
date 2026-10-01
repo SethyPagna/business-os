@@ -71,32 +71,21 @@ runTest('single branch transfer caps explicit lots by aggregate stock and retain
 })
 
 runTest('every direct stock receipt and batch mutation confirms before writing and reports its outcome', () => {
-  const fastStockIn = source('inventory/FastStockInModal.tsx')
-  const receiveBatch = source('inventory/ReceiveBatchModal.tsx')
+  const fastStockIn = source('inventory/FastStockInModal.tsx').replace(/\r\n/g, '\n')
   const batches = source('inventory/ManageBatchesModal.tsx')
   const sessions = source('products/StockInSessionsSection.tsx')
 
-  assert.match(fastStockIn, /confirm_complete_stock_session/)
+  // The Stock Session (every add, remove and set since 30 Sep 2026, including
+  // the Branches Receive that ReceiveBatchModal used to own) reviews before it
+  // writes: Items -> (Payment) -> Review shows before and after per line, and
+  // only the Review step's Complete Session sends anything.
+  const goNext = fastStockIn.slice(fastStockIn.indexOf('const goNext = () => {'), fastStockIn.indexOf('// ---- close / minimize ----'))
+  assert.equal((goNext.match(/performCommit\(\)/g) || []).length, 1, 'one commit call')
+  assert.ok(goNext.indexOf("if (currentStep === 'items')") < goNext.indexOf('performCommit()'), 'Items never commits')
+  assert.ok(goNext.indexOf("setStep('review')") < goNext.indexOf('performCommit()'), 'Payment leads to Review, not to a write')
+  assert.equal((fastStockIn.match(/performCommit\(\)/g) || []).length, 1, 'nothing else commits')
+  assert.match(fastStockIn, /const footerPrimary = currentStep === 'review'\s*\? tr\('complete_session', 'Complete Session'\)/)
   assert.match(fastStockIn, /stock_session_completed/)
-  // P10-19: ReceiveBatchModal's Receive used to end in a bare native
-  // window.confirm() with a generic sentence and no Payment/Due date; a typed
-  // "Not Yet Paid" due date was never reflected back before it committed. The
-  // single 'confirm_receive_batch_details' key it used to show was replaced by
-  // parking the validated request (setPendingReceipt) behind a ConfirmDialog
-  // review built from the actual request (buildReceiveReviewItems); the write
-  // (receiveBatchStock) only runs from commitReceive, after that review is
-  // confirmed.
-  assert.match(receiveBatch, /setPendingReceipt\(\{/, 'the validated receipt must be parked, not written immediately')
-  assert.match(receiveBatch, /onConfirm=\{\(\) => void commitReceive\(\)\}/, 'the receive ConfirmDialog must gate the write behind an explicit confirm')
-  const beginReceiveAt = receiveBatch.indexOf('const beginReceive = ()')
-  const commitReceiveAt = receiveBatch.indexOf('const commitReceive = async ()')
-  assert.ok(beginReceiveAt >= 0 && commitReceiveAt > beginReceiveAt, 'validation (beginReceive) must precede the write (commitReceive)')
-  assert.doesNotMatch(
-    receiveBatch.slice(beginReceiveAt, commitReceiveAt),
-    /receiveBatchStock\(/,
-    'the validating/parking step must not itself call the write API',
-  )
-  assert.match(receiveBatch, /notify\(tr\('batch_received'/)
   assert.match(batches, /confirm_update_batch_details/)
   assert.match(batches, /confirm_deactivate_batch_details/)
   assert.match(batches, /notify\(tr\('batch_updated'/)
@@ -109,27 +98,13 @@ runTest('every direct stock receipt and batch mutation confirms before writing a
 
 runTest('stock adjustments, transfers, and ledger edits retain review plus feedback contracts', () => {
   const inventory = source('inventory/Inventory.tsx')
-  const adjustment = source('products/forms/StockAdjustModal.tsx')
-  const bulk = source('products/forms/BulkAddStockModal.tsx')
   const ledger = source('products/StockChangeSection.tsx')
 
-  // P10-19 (sibling parity with StockAdjustModal.tsx's own pendingAdjust,
-  // Part 563): the bare `window.confirm(adjustConfirmLabel)` sentence -- which
-  // showed no quantity, branch, reason, supplier or Payment/Due date -- was
-  // replaced by parking the validated request (setPendingAdjust) behind a
-  // ConfirmDialog review; commitAdjust performs the actual write only after
-  // that review is confirmed. Assert the parked-review shape survives instead
-  // of the retired inline sentence.
-  assert.match(inventory, /setPendingAdjust\(\{/, 'the validated adjustment must be parked, not written immediately')
-  assert.match(inventory, /onConfirm=\{\(\) => void commitAdjust\(\)\}/, 'the adjust ConfirmDialog must gate the write behind an explicit confirm')
-  const handleAdjustAt = inventory.indexOf('const handleAdjust = async ()')
-  const commitAdjustAt = inventory.indexOf('const commitAdjust = async ()')
-  assert.ok(handleAdjustAt >= 0 && commitAdjustAt > handleAdjustAt, 'validation (handleAdjust) must precede the write (commitAdjust)')
-  assert.doesNotMatch(
-    inventory.slice(handleAdjustAt, commitAdjustAt),
-    /getInventoryApi\(\)\.adjustStock/,
-    'the validating/parking step must not itself call the write API',
-  )
+  // Inventory's own adjust form (parked request + ConfirmDialog, P10-19),
+  // StockAdjustModal and BulkAddStockModal were retired on 30 Sep 2026: every
+  // adjustment is a Stock Session line, reviewed in the session's Review step
+  // (pinned above). Inventory sends no adjust write of its own.
+  assert.doesNotMatch(inventory, /getInventoryApi\(\)\.adjustStock|setPendingAdjust|commitAdjust/)
   assert.match(inventory, /confirm_transfer_stock_details/)
   assert.match(inventory, /stock_transferred_details/)
   assert.match(inventory, /pendingTransfer \|\| !transferRetryReady \|\| !canTransferStock/)
@@ -148,9 +123,6 @@ runTest('stock adjustments, transfers, and ledger edits retain review plus feedb
   assert.match(inventory, /const saved = api\.loadInventoryTransfer\(actorId\)/)
   assert.match(inventory, /const run = saved \|\| api\.prepareInventoryTransfer/)
   assert.doesNotMatch(inventory, /runInventoryMutation\(\(\) => getInventoryApi\(\)\.transferInventoryStock/)
-  assert.match(adjustment, /<ConfirmDialog/)
-  assert.match(adjustment, /notify\(tr\('stock_updated'/)
-  assert.match(bulk, /<ConfirmDialog/)
   assert.match(ledger, /confirmRevert/)
   assert.match(ledger, /confirm_update_stock_reason/)
   assert.match(ledger, /movement_reverted/)

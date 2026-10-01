@@ -1,18 +1,16 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { lazy, Suspense, useState } from 'react'
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
 import AlertTriangle from 'lucide-react/dist/esm/icons/alert-triangle.js'
+import Settings2 from 'lucide-react/dist/esm/icons/settings-2.js'
 import Modal from '../shared/Modal'
-import { useConfirmDialog } from '../shared/useConfirmDialog.tsx'
-import { getInventoryReasons, saveInventoryReasons } from '../../api/methods.ts'
-// Same saved-reason catalog + "Manage reasons" component Inventory's own
-// Adjust-stock modal already uses -- per the
-// user's own framing, delete's reason field is "basically same as
-// inventory page products adjust stock... just different page but same
-// purpose and function", so this reuses the catalog (type: 'delete'
-// alongside its existing 'adjust'/'transfer'/'move' entries) rather than
-// inventing a separate one.
-import InventoryReasonManagerModal from '../inventory/InventoryReasonManagerModal.tsx'
+import SuggestionTextInput from '../shared/SuggestionTextInput.tsx'
+import { toolbarIconButtonClassName } from '../shared/toolbarButtonStyles.ts'
+// Delete's reason reads the same saved-reason catalog as the stock forms
+// (type 'delete'), managed in the one stock reasons manager.
+import { useSavedStockReasonCatalog } from '../../utils/useSavedStockReasons.ts'
 import type { DeleteImpactSummary } from '../../utils/deleteImpactSummary'
+
+const StockReasonsManagerModal = lazy(() => import('../shared/StockReasonsManagerModal'))
 
 type Translate = (key: string, fallback?: string) => string | undefined
 
@@ -22,19 +20,6 @@ interface DeleteConfirmModalProps {
   onConfirm: (reason: string) => void
   summary: DeleteImpactSummary
   working: boolean
-}
-
-type InventoryReasonType = 'adjust' | 'transfer' | 'move' | 'delete'
-
-type InventoryReason = {
-  id: string
-  type?: InventoryReasonType
-  label: string
-}
-
-type ReasonManagerState = {
-  open: boolean
-  type: InventoryReasonType
 }
 
 // The "show what will be affected and require explicit confirmation" half
@@ -60,76 +45,11 @@ export default function DeleteConfirmModal({
     const value = t?.(key)
     return value && value !== key ? value : fallback
   }
-  const { askToConfirm, confirmDialog } = useConfirmDialog(t)
-
-  // Delete now requires a reason, drawn from the same saved-reason catalog
-  // Inventory's Adjust-stock modal uses (inventory_saved_reasons), just
-  // filtered to type: 'delete' -- same chip-picker + free-text + "Manage
-  // reasons" pattern that modal uses, not a separate one-off UI.
+  // Delete requires a reason: a saved one or typed text.
   const [reason, setReason] = useState('')
-  const [inventoryReasons, setInventoryReasons] = useState<InventoryReason[]>([])
-  const [reasonManager, setReasonManager] = useState<ReasonManagerState>({ open: false, type: 'delete' })
-  const [reasonDraft, setReasonDraft] = useState('')
-  const [savingReasons, setSavingReasons] = useState(false)
+  const [reasonsManagerOpen, setReasonsManagerOpen] = useState(false)
+  const { reasons: deleteReasons, reload: reloadDeleteReasons } = useSavedStockReasonCatalog('delete')
   const trimmedReason = reason.trim()
-
-  useEffect(() => {
-    let cancelled = false
-    getInventoryReasons()
-      .then((result) => {
-        if (cancelled) return
-        const items = Array.isArray((result as { items?: unknown })?.items) ? (result as { items: InventoryReason[] }).items : []
-        setInventoryReasons(items)
-      })
-      .catch(() => { if (!cancelled) setInventoryReasons([]) })
-    return () => { cancelled = true }
-  }, [])
-
-  const deleteReasons = useMemo(() => inventoryReasons.filter((item) => item?.type === 'delete'), [inventoryReasons])
-  // Only the 'delete' slice is rendered as picker chips here, but the full
-  // catalog (all types) is what gets saved back -- otherwise saving from
-  // this modal would silently wipe out every Inventory-side adjust/
-  // transfer/move reason, same shared-array trap Inventory.tsx's own
-  // save already guards against.
-  const reasonsByType = useMemo(() => ({ delete: deleteReasons }), [deleteReasons])
-
-  const saveReasonCatalog = useCallback(async (nextItems: InventoryReason[]) => {
-    setSavingReasons(true)
-    try {
-      const result = await saveInventoryReasons(nextItems) as { pending?: boolean; items?: InventoryReason[] } | undefined
-      if (result?.pending) return inventoryReasons
-      const items = Array.isArray(result?.items) ? result.items : []
-      setInventoryReasons(items)
-      return items
-    } finally {
-      setSavingReasons(false)
-    }
-  }, [inventoryReasons])
-  const addSavedReason = useCallback(async () => {
-    const label = reasonDraft.trim()
-    if (!label) return
-    const next = [...inventoryReasons, { id: `delete:${Date.now()}`, type: 'delete' as InventoryReasonType, label }]
-    await saveReasonCatalog(next)
-    setReasonDraft('')
-  }, [inventoryReasons, reasonDraft, saveReasonCatalog])
-  const renameSavedReason = useCallback(async (entry: InventoryReason) => {
-    const nextLabel = window.prompt(T('rename_reason_prompt', 'Rename saved reason'), entry?.label || '')
-    if (!nextLabel) return
-    const next = inventoryReasons.map((item) => (item.id === entry.id ? { ...item, label: nextLabel.trim() } : item))
-    await saveReasonCatalog(next)
-  }, [inventoryReasons, saveReasonCatalog])
-  const deleteSavedReason = useCallback(async (entry: InventoryReason) => {
-    // Same review as Inventory's saved-reason delete (FX-ui), never window.confirm.
-    if (!(await askToConfirm({
-      title: T('delete', 'Delete'),
-      message: T('delete_saved_reason_confirm', 'Delete this saved reason?'),
-      items: [{ label: T('reason', 'Reason'), value: entry.label }],
-      confirmLabel: T('delete', 'Delete'),
-      danger: true,
-    }))) return
-    const next = inventoryReasons.filter((item) => item.id !== entry.id)
-    await saveReasonCatalog(next)
-  }, [askToConfirm, inventoryReasons, saveReasonCatalog])
 
   const isBulk = summary.productCount > 1
   const title = isBulk
@@ -187,38 +107,28 @@ export default function DeleteConfirmModal({
           {T('delete_confirm_soft_delete_note', 'This is a soft delete -- past sales and movement records are unaffected, and you can undo this from the page immediately after.')}
         </p>
 
-        <div>
-          <div className="mb-1 flex items-center justify-between gap-2">
-            <label htmlFor="delete-confirm-reason" className="block text-xs font-medium text-gray-500 dark:text-gray-400">
-              {T('delete_confirm_reason_label', 'Reason for deleting')}
-            </label>
-            <button type="button" className="text-[11px] font-medium text-blue-600 hover:text-blue-700 dark:text-blue-300" onClick={() => setReasonManager({ open: true, type: 'delete' })}>
-              {T('manage_reasons', 'Manage reasons')}
-            </button>
-          </div>
-          {deleteReasons.length ? (
-            <div className="mb-2 flex flex-wrap gap-1">
-              {deleteReasons.map((entry) => (
-                <button
-                  key={entry.id}
-                  type="button"
-                  className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${reason === entry.label ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'}`}
-                  onClick={() => setReason(entry.label)}
-                >
-                  {entry.label}
-                </button>
-              ))}
-            </div>
-          ) : null}
-          <input
+        <div className="flex min-w-0 items-center gap-1.5">
+          <SuggestionTextInput
             id="delete-confirm-reason"
-            type="text"
+            className="min-w-0 flex-1"
+            inputClassName="h-9 text-sm"
             value={reason}
-            onChange={(e) => setReason(e.target.value)}
+            options={deleteReasons.map((entry) => entry.label)}
+            onChange={(next) => setReason(next)}
             disabled={working}
-            placeholder={T('delete_confirm_reason_placeholder', 'Choose a saved reason or type your own')}
-            className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder:text-gray-400 disabled:opacity-40 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
+            ariaLabel={T('delete_confirm_reason_label', 'Reason for deleting')}
+            placeholder={T('delete_confirm_reason_label', 'Reason for deleting')}
           />
+          <button
+            type="button"
+            className={toolbarIconButtonClassName}
+            onClick={() => setReasonsManagerOpen(true)}
+            disabled={working}
+            aria-label={T('manage_reasons', 'Manage reasons')}
+            title={T('manage_reasons', 'Manage reasons')}
+          >
+            <Settings2 className="h-4 w-4" aria-hidden="true" />
+          </button>
         </div>
 
         <div className="sticky bottom-0 -mx-5 -mb-5 flex gap-3 border-t border-gray-200 bg-white px-5 pb-5 pt-4 dark:border-gray-700 dark:bg-gray-800">
@@ -241,21 +151,12 @@ export default function DeleteConfirmModal({
             {T('cancel', 'Cancel')}
           </button>
         </div>
-        <InventoryReasonManagerModal
-          addSavedReason={addSavedReason}
-          deleteSavedReason={deleteSavedReason}
-          reasonDraft={reasonDraft}
-          reasonManager={reasonManager}
-          reasonsByType={reasonsByType}
-          renameSavedReason={renameSavedReason}
-          savingReasons={savingReasons}
-          setReasonDraft={setReasonDraft}
-          setReasonManager={setReasonManager}
-          t={t || (() => undefined)}
-          tr={(key, fallbackEn) => T(key, fallbackEn ?? key)}
-        />
+        {reasonsManagerOpen ? (
+          <Suspense fallback={null}>
+            <StockReasonsManagerModal initialTab="delete" onClose={() => setReasonsManagerOpen(false)} onChanged={reloadDeleteReasons} />
+          </Suspense>
+        ) : null}
       </div>
-      {confirmDialog}
     </Modal>
   )
 }

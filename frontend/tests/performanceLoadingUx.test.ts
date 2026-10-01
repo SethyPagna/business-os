@@ -66,7 +66,8 @@ const mainCss = fs.readFileSync(new URL('../src/styles/main.css', import.meta.ur
 const publicPortalCss = fs.readFileSync(new URL('../src/styles/public-portal.css', import.meta.url), 'utf8')
 const inventory = fs.readFileSync(new URL('../src/components/inventory/Inventory.tsx', import.meta.url), 'utf8')
 const inventoryStockModals = fs.readFileSync(new URL('../src/components/inventory/InventoryStockModals.tsx', import.meta.url), 'utf8')
-const inventoryReasonManagerModal = fs.readFileSync(new URL('../src/components/inventory/InventoryReasonManagerModal.tsx', import.meta.url), 'utf8')
+// InventoryReasonManagerModal was replaced by the shared stock reasons manager (UI-STOCK-3).
+const stockReasonsManagerModal = fs.readFileSync(new URL('../src/components/shared/StockReasonsManagerModal.tsx', import.meta.url), 'utf8')
 const inventoryExport = fs.readFileSync(new URL('../src/components/inventory/inventoryExport.ts', import.meta.url), 'utf8')
 const backup = fs.readFileSync(new URL('../src/components/utils-settings/Backup.tsx', import.meta.url), 'utf8')
 const auditLog = fs.readFileSync(new URL('../src/components/utils-settings/AuditLog.tsx', import.meta.url), 'utf8')
@@ -943,9 +944,9 @@ assert.match(inventory, /const InventoryStockModals = lazyRetry\(\(\) => import\
 assert.doesNotMatch(inventory, /<h2 className="font-bold text-gray-900 dark:text-white">\{t\('adjust_stock'\)\}<\/h2>/, 'Inventory should not keep stock adjust modal markup in the first route chunk')
 assert.match(inventoryStockModals, /export default function InventoryStockModals/, 'Inventory stock modal markup should live in the lazy stock modal component')
 assert.doesNotMatch(inventory, /<h2 className="font-bold text-gray-900 dark:text-white">\{tr\('inventory_batch_session', 'Batch session'\)\}<\/h2>/, 'Inventory should not keep batch session modal markup in the first route chunk')
-assert.match(inventory, /const InventoryReasonManagerModal = lazyRetry\(\(\) => import\('\.\/InventoryReasonManagerModal'\), 'inventory-reason-manager-modal'\) as any/, 'Inventory saved-reasons manager should stay in a click-only lazy chunk')
+assert.match(inventory, /const StockReasonsManagerModal = lazyRetry\(\(\) => import\('\.\.\/shared\/StockReasonsManagerModal'\), 'inventory-stock-reasons-manager'\)/, 'Inventory saved-reasons manager should stay in a click-only lazy chunk')
 assert.doesNotMatch(inventory, /<h2 className="font-bold text-gray-900 dark:text-white">\{tr\('saved_reasons', 'Saved reasons'\)\}<\/h2>/, 'Inventory should not keep saved-reasons manager markup in the first route chunk')
-assert.match(inventoryReasonManagerModal, /export default function InventoryReasonManagerModal/, 'Inventory saved-reasons manager markup should live in the lazy reason manager component')
+assert.match(stockReasonsManagerModal, /export default function StockReasonsManagerModal/, 'Inventory saved-reasons manager markup should live in the lazy reason manager component')
 // The stat-tile -> detail-modal pattern is gone: the StatsStrip rollout
 // (455ea3c9) replaced it with fold-open cards, and statsStrip.test.ts pins
 // that Inventory never references InventoryStatDetailModal again. The
@@ -1673,10 +1674,12 @@ assert.match(
   /const INVENTORY_USER_OPTIONS_TIMEOUT_MS = 8000/,
   'inventory user filter options should use an explicit timeout',
 )
+// Inventory no longer loads the saved reasons itself (UI-STOCK-3): the shared
+// reason hooks read them through apiFetch, whose default read timeout bounds it.
 assert.match(
-  inventory,
-  /const INVENTORY_REASONS_TIMEOUT_MS = 8000/,
-  'inventory saved reasons should use an explicit timeout',
+  fs.readFileSync(new URL('../src/api/http.ts', import.meta.url), 'utf8'),
+  /timeoutMs = timeoutMs \?\? \(isMutation \? WRITE_REQUEST_TIMEOUT_MS : SYNC\.REQUEST_TIMEOUT_MS\)/,
+  'the saved-reasons read keeps a bounded (default) timeout',
 )
 assert.match(
   inventory,
@@ -1714,10 +1717,10 @@ assert.match(
   /withLoaderTimeout\(\(\) => getInventoryApi\(\)\.getUsers\(\), 'Inventory user filters', INVENTORY_USER_OPTIONS_TIMEOUT_MS\)/,
   'inventory user filter options should timeout slow user reads',
 )
-assert.match(
+assert.doesNotMatch(
   inventory,
-  /withLoaderTimeout\(\s*\(\) => getInventoryApi\(\)\.getInventoryReasons\?\.\(\) \?\? Promise\.resolve\(\{ items: \[\] \}\),\s*'Inventory reasons',\s*INVENTORY_REASONS_TIMEOUT_MS,\s*\)/,
-  'inventory saved reasons should timeout slow reason reads',
+  /getInventoryReasons/,
+  'Inventory keeps no host-private reason read; the shared reason hooks own it (see the default read timeout above)',
 )
 assert.match(
   inventory,
@@ -1787,16 +1790,8 @@ assert.match(
   /defaultTransferDestinationBySourceId\.get\(defaultSourceId\)/,
   'inventory transfer defaults should use the precomputed alternate branch map',
 )
-assert.match(
-  inventory,
-  /const selectedBranchStockById = new Map\(/,
-  'inventory adjustment should index selected product branch stock once per submit',
-)
-assert.match(
-  inventory,
-  /const selectedBranchStock = numericBranchId \? selectedBranchStockById\.get\(numericBranchId\) : null/,
-  'inventory adjustment should reuse one branch-stock lookup for undo quantity and validation',
-)
+// Inventory's own adjust submit (its branch-stock index) was retired into the
+// Stock Session by UI-STOCK-3; the rescan guard below stays.
 assert.doesNotMatch(
   inventory,
   /adjustModal\.branch_stock \|\| \[\]\)\.find/,

@@ -140,7 +140,12 @@ await runTest('a short answer is a failure for the missing lines, not a deferral
 // error. Its three decisions are made by the helpers and filter below, which
 // this change does not touch.
 // ---------------------------------------------------------------------------
-const modal = readFileSync(new URL('../src/components/inventory/FastStockInModal.tsx', import.meta.url), 'utf8')
+const modal = readFileSync(new URL('../src/components/inventory/FastStockInModal.tsx', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
+// The Stock Session rewrite (UI-STOCK-2): performCommit reads its own pending lines.
+const performCommitBody = (): string => {
+  const start = modal.indexOf('const performCommit = async () => {')
+  return start < 0 ? '' : modal.slice(start, modal.indexOf('\n  // ---- close / minimize ----', start))
+}
 
 await runTest('old client + new Worker: a deferred line is a retryable failure with an actionable sentence', () => {
   const result = deferred('c')
@@ -149,13 +154,13 @@ await runTest('old client + new Worker: a deferred line is a retryable failure w
 })
 
 await runTest('old client + new Worker: pressing Complete again sends only the lines that are not saved', () => {
-  assert.match(modal, /const pending = received\.filter\(\(line\) => line\.status !== 'saved'\)/)
+  assert.match(performCommitBody(), /let lines = received\s*\n\s*const pending = lines\.filter\(\(line\) => line\.status !== 'saved'\)/)
+  assert.match(performCommitBody(), /const toCommit = lines\.filter\(\(line\) => line\.status !== 'saved'\)/)
 })
 
 await runTest('the modal folds each round durably before the next round, and returns never-attempted lines to queued', () => {
-  const start = modal.indexOf('const performCommit = async (pending: ReceivedLine[]) => {')
-  const body = modal.slice(start, modal.indexOf('\n  const successCount', start))
-  assert.match(body, /batched = await commitFastStockIn\(pending\.map\(buildLineRequest\), foldRound\)/)
+  const body = performCommitBody()
+  assert.match(body, /batched = await commitFastStockIn\(toCommit\.map\(buildLineRequest\), foldRound, \{ session \}\)/)
   assert.match(body, /\} else if \(isDeferredStockInResult\(result\)\) \{\s*failed \+= 1\s*lines = applyLineOutcome\(lines, line\.key, \{ status: 'queued', detail: '' \}\)/,
     'a deferred leftover is queued (no new UI text) and still keeps the modal open')
   assert.match(body, /persistSessionDraft\(lines\)\s*\n\s*setReceived\(lines\.map\(\(item\) => \(unsettled\.has\(item\.key\)/,

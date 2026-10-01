@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 
 // Source-shape pins for the user's Sep 3 rule: "for adjust stock, if the
 // adjustment (add, remove, set) fails for any reason it should not forget
@@ -8,10 +8,14 @@ import { readFileSync } from 'node:fs'
 // or else user will get frustrated when they do a bunch of edits and it just
 // closes when it fails, clearing everything they did."
 //
+// Since 30 Sep 2026 every add, remove and set is a line in the one Stock
+// Session (FastStockInModal); StockAdjustModal and BulkAddStockModal, with
+// their row reducers and retry buttons, are retired. The rule now lives in the
+// session: a failed line stays in Items with its reason inline, the float
+// stays open, and Complete Session again sends only what did not save.
+//
 // These assertions are structural on purpose: the behaviour lives in a React
-// component that a plain-node test cannot render, so what is pinned is the
-// absence of the close/reset call in the failure branch and the presence of
-// the inline reason, the retry label and the ConfirmDialog guard.
+// component that a plain-node test cannot render.
 
 let failed = 0
 function runTest(name: string, fn: () => void): void {
@@ -25,161 +29,81 @@ function runTest(name: string, fn: () => void): void {
   }
 }
 
-const adjustModal = readFileSync(new URL('../src/components/products/forms/StockAdjustModal.tsx', import.meta.url), 'utf8')
-const stockChange = readFileSync(new URL('../src/components/products/StockChangeSection.tsx', import.meta.url), 'utf8')
-const bulkModal = readFileSync(new URL('../src/components/products/forms/BulkAddStockModal.tsx', import.meta.url), 'utf8')
-const stockModals = readFileSync(new URL('../src/components/inventory/InventoryStockModals.tsx', import.meta.url), 'utf8')
-const fastStockIn = readFileSync(new URL('../src/components/inventory/FastStockInModal.tsx', import.meta.url), 'utf8')
-const outcomeUtil = readFileSync(new URL('../src/utils/stockAdjustOutcome.ts', import.meta.url), 'utf8')
-const inventoryRoute = readFileSync(new URL('../../cloudflare/src/routes/inventory.ts', import.meta.url), 'utf8')
+const read = (rel: string): string => readFileSync(new URL(rel, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
+const stockChange = read('../src/components/products/StockChangeSection.tsx')
+const fastStockIn = read('../src/components/inventory/FastStockInModal.tsx')
+const items = read('../src/components/stock-session/StockSessionItems.tsx')
+const outcomeUtil = read('../src/utils/stockAdjustOutcome.ts')
+const inventoryRoute = read('../../cloudflare/src/routes/inventory.ts')
 
-/** The body of `commitAdjust` -- the only place the adjust write happens. */
-function commitAdjustBody(): string {
-  const start = adjustModal.indexOf('const commitAdjust = useCallback')
-  assert.ok(start > 0, 'StockAdjustModal must still have a commitAdjust callback')
-  // S4-21 renamed the close path: the private discard dialog is gone and
-  // `discardFailedAndClose` is now what the shared guard calls on Discard.
-  const end = adjustModal.indexOf('const discardFailedAndClose', start)
-  assert.ok(end > start, 'commitAdjust must be followed by the close guard')
-  return adjustModal.slice(start, end)
+/** The body of performCommit -- where the session writes. */
+function performCommitBody(): string {
+  const start = fastStockIn.indexOf('const performCommit = async () => {')
+  assert.ok(start > 0, 'the Stock Session must still have performCommit')
+  const end = fastStockIn.indexOf('// ---- close / minimize ----', start)
+  assert.ok(end > start)
+  return fastStockIn.slice(start, end)
 }
 
-/** The catch arm of that body -- what happens when the write is refused. */
-function commitAdjustFailureBranch(): string {
-  const body = commitAdjustBody()
-  const start = body.indexOf('} catch (error: unknown) {')
-  assert.ok(start > 0, 'commitAdjust must catch its rejection')
-  const end = body.indexOf('} finally {', start)
-  assert.ok(end > start, 'commitAdjust must have a finally arm')
-  return body.slice(start, end)
-}
-
-runTest('the failure branch never closes the dialog or resets the form', () => {
-  const branch = commitAdjustFailureBranch()
-  // The regression the user hit: onClose() in the failure path threw away
-  // everything they had typed.
-  assert.doesNotMatch(branch, /onClose\(\)/, 'a failed adjustment must not close the modal')
-  assert.doesNotMatch(branch, /onDone\(\)/, 'a failed adjustment must not report itself as done')
-  assert.doesNotMatch(branch, /setPendingAdjust\(null\)/, 'a failed adjustment must keep the parked request')
-  assert.doesNotMatch(branch, /setAdjustForm\(/, 'a failed adjustment must not touch the typed values')
-  assert.doesNotMatch(branch, /setSelectedProduct\(/, 'a failed adjustment must keep the chosen product')
-  // ...and it must positively record the failure instead.
-  assert.match(branch, /classifyStockAdjustFailure\(error\)/)
-  assert.match(branch, /applyRowOutcome\([\s\S]*status: 'failed'/)
-  assert.match(branch, /persistFailedAttempt\(/)
+runTest('the retired one-product and bulk forms stay retired', () => {
+  for (const rel of ['../src/components/products/forms/StockAdjustModal.tsx', '../src/components/products/forms/BulkAddStockModal.tsx']) {
+    assert.equal(existsSync(new URL(rel, import.meta.url)), false, `${rel} must not come back beside the session`)
+  }
 })
 
-runTest('the success branch is the only one that closes, and it marks the row done', () => {
-  const body = commitAdjustBody()
-  assert.match(body, /applyRowOutcome\(prev, target\.rowId, \{ status: 'done' \}\)/)
-  assert.match(body, /dropFailedStockAttempt\(/, 'a committed retry clears its persisted failure record')
-  assert.match(body, /onDone\(\)[\s\S]{0,40}onClose\(\)/)
+runTest('a failed line keeps the float open on Items with everything typed', () => {
+  const body = performCommitBody()
+  const failure = body.slice(body.indexOf('if (failed) {\n      onDone()'))
+  assert.ok(failure.length > 0, 'a partial failure has its own branch')
+  const branch = failure.slice(0, failure.indexOf('return'))
+  assert.doesNotMatch(branch, /onClose\(\)|finishSession\(\)|clearWorkDraft\(/, 'a failure must not close the float or drop the draft')
+  assert.match(branch, /setStep\(requestFailure === 'supplier_total_mismatch' \? 'payment' : 'items'\)/)
+  assert.match(branch, /stock_session_partial/)
+  assert.match(body, /status: 'error',\s*\n?\s*needsRemoval: stockLineNeedsRemoval\(result\)/, 'a refused line records its outcome')
+  assert.match(body, /detail: failureText\(result, tr\('error', 'Error'\)\)/, 'with the refusal in words')
 })
 
-runTest('the submitted row is never one that already committed', () => {
-  const body = commitAdjustBody()
-  // Only a pending or failed row is ever the target of a write, so a retry
-  // can never re-apply a movement that already landed.
-  assert.match(body, /rows\.find\(\(row\) => row\.status === 'pending'\)/)
-  assert.match(body, /rows\.find\(\(row\) => row\.status === 'failed'\)/)
-  assert.doesNotMatch(body, /status === 'done'/)
-  // The retry keeps the SAME client-generated row id rather than minting one.
-  assert.match(adjustModal, /Keep the row's identity across a retry/)
+runTest('a line already saved is never sent again', () => {
+  const body = performCommitBody()
+  assert.match(body, /const pending = lines\.filter\(\(line\) => line\.status !== 'saved'\)/)
+  assert.match(body, /const toCommit = lines\.filter\(\(line\) => line\.status !== 'saved'\)/)
+  assert.match(body, /\/\/ Only lines no round has answered: a line already saved must stay saved\./)
 })
 
-runTest('the failed row shows the server reason inline, not only as a toast', () => {
-  assert.match(adjustModal, /data-stock-adjust-failure="true"/)
-  assert.match(adjustModal, /failedRow\.failure\.message/)
-  assert.match(adjustModal, /failedRow\.failure\.available != null/, 'insufficient stock shows the available quantity')
-  assert.match(adjustModal, /stock_adjust_failed_offline/, 'an offline failure says the entry is kept')
-  // It is pinned to the form itself, not just the review dialog.
-  assert.match(adjustModal, /adjustNotice=\{failureNotice\}/)
-  assert.match(stockModals, /\{adjustNotice\}/)
+runTest('the failed line shows its reason inline in Items', () => {
+  assert.match(items, /line\.status === 'error'/)
+  assert.match(items, /line\.detail/)
 })
 
-runTest('the submit button becomes Retry while a failure is unresolved', () => {
-  assert.match(adjustModal, /submitState\.mode === 'retry'/)
-  assert.match(adjustModal, /retry_failed/)
-  assert.match(adjustModal, /adjustSubmitLabel=\{submitState\.mode === 'retry'/)
-  assert.match(stockModals, /adjustSubmitLabel \|\| t\('save'\)/)
-})
-
-runTest('closing with unsaved failures asks through the ONE shared close guard', () => {
-  // S4-21 retired this surface's private "Discard the unsaved adjustment?"
-  // ConfirmDialog in favour of the app-wide guard. The behaviour the
-  // original test protected is unchanged and still pinned here; what
-  // changed is that one implementation of the question now serves every
-  // modal instead of each surface growing its own.
-  assert.doesNotMatch(adjustModal, /setConfirmDiscard/, 'the private discard dialog must not come back')
-  // The shared adjust chrome does the asking...
-  assert.match(stockModals, /const adjustGuard = useCloseGuard\(\{ dirty: adjustDirty\.dirty \|\| Boolean\(adjustRestoredDirty\) \}, onCloseAdjust, onMinimizeAdjust\)/)
-  assert.match(stockModals, /onClick=\{requestCloseAdjust\}/)
-  assert.match(stockModals, /<UnsavedChangesPrompt guard=\{adjustGuard\} items=\{adjustDiscardItems\} \/>/)
-  assert.match(stockModals, /<MinimizeButton disabled=\{adjustSaving\} tr=\{tr\} onMinimize=\{onMinimizeAdjust\} \/>/, 'minus directly preserves while X still requests close')
-  // ...Discard still runs THIS page's cleanup, not a generic close...
-  assert.match(adjustModal, /onCloseAdjust=\{discardFailedAndClose\}/)
-  assert.match(adjustModal, /hasUnsavedFailures\(rows\)[\s\S]{0,200}?dropFailedStockAttempt\(/)
-  // ...and the failed attempt's values still appear in the prompt.
-  assert.match(adjustModal, /adjustDiscardItems=\{buildAdjustReviewItems\(\)\}/)
-  assert.match(adjustModal, /onMinimizeAdjust=\{onMinimize \? preserveAndMinimize : undefined\}/)
-  assert.match(adjustModal, /writeWorkDraft<StockAdjustDraft>\(currentDraftKey,[\s\S]*?onMinimize\([\s\S]*?onClose\(\)/, 'minimize persists exact typed values before the parent hides the modal')
-  assert.match(adjustModal, /const discardFailedAndClose = useCallback\(\(\) => \{\s*clearWorkDraft\(currentDraftKey\)/, 'Discard removes the exact local draft')
-  // Confirmations go through a rendered dialog -- never a native popup.
-  assert.doesNotMatch(adjustModal, /window\.confirm\(\s*tr\('discard/)
-})
-
-runTest('the Stock Change section lists the unsaved failed attempt', () => {
+runTest('the Stock Change section lists an unsaved failed attempt', () => {
   assert.match(stockChange, /data-failed-stock-attempts="true"/)
   assert.match(stockChange, /readFailedStockAttempts\(/)
-  assert.match(stockChange, /FAILED_ATTEMPTS_EVENT/, 'the list refreshes when a modal records a failure')
+  assert.match(stockChange, /FAILED_ATTEMPTS_EVENT/, 'the list refreshes when a failure is recorded')
   assert.match(stockChange, /unsaved_not_applied/, 'the entry is explicitly marked unsaved')
   assert.match(stockChange, /row\.failure\?\.message/, 'the reason is shown on the entry')
   assert.match(stockChange, /fix_and_retry/)
   assert.match(stockChange, /discardFailedAttempt\(/)
 })
 
-runTest('a listed failure reopens the adjust modal prefilled', () => {
-  assert.match(stockChange, /resumeRow=\{resumeAttempt\?\.rows\[0\] \|\| null\}/)
-  assert.match(stockChange, /resumeAttemptId=\{resumeAttempt\?\.id \|\| null\}/)
-  assert.match(stockChange, /initialProduct=\{resumeAttempt\?\.rows\[0\]\?\.productId != null/)
-  // The modal puts every one of those values back.
-  for (const field of ['type:', 'quantity:', 'reason:', 'branch_id:', 'batch_id:', 'received_date:']) {
-    assert.ok(
-      new RegExp(`${field.replace(':', ':')}\\s*resume\\.`).test(adjustModal),
-      `resuming a failed attempt must restore ${field}`,
-    )
+runTest('a listed failure reopens the session in its mode with its lines queued', () => {
+  const resume = stockChange.slice(stockChange.indexOf('const resumeFailedAttempt = useCallback'), stockChange.indexOf('}, [blurLedgerSearch])', stockChange.indexOf('const resumeFailedAttempt')))
+  assert.match(resume, /const mode: StockMode = first\.type === 'remove' \|\| first\.type === 'set' \? first\.type : 'add'/)
+  for (const field of ['quantity: Number(row.quantity)', 'batchId: Number(row.batchId) > 0', 'reason: row.reason']) {
+    assert.ok(resume.includes(field), `resuming a failed attempt must carry ${field}`)
   }
+  assert.match(resume, /branchId: first\.branchId \?\? null/)
+  const mount = stockChange.slice(stockChange.indexOf('{fastStockInOpen ? ('))
+  assert.match(mount, /initialLines=\{fastStockInResume\?\.lines\}/)
+  assert.match(mount, /defaultBranchId=\{fastStockInResume\?\.branchId \|\| branchId \|\| null\}/)
+  // The record goes only once that session wrote; closing keeps it listed.
+  assert.match(mount, /onDone=\{\(\) => \{\s*if \(fastStockInResume\) discardFailedAttempt\(fastStockInResume\.attemptId\)/)
+  assert.doesNotMatch(mount.slice(0, mount.indexOf('onDone=')), /discardFailedAttempt/, 'closing without writing keeps the record')
 })
 
-runTest('the bulk surface follows the same rule, row by row', () => {
-  assert.match(bulkModal, /rowsToSubmit\(startingRows\)/, 'a retry submits only what failed')
-  assert.match(bulkModal, /classifyStockAdjustFailure\(error\)/)
-  assert.match(bulkModal, /data-bulk-stock-outcomes="true"/, 'per-product outcomes are rendered')
-  assert.match(bulkModal, /row\.failure\.message/)
-  // The old behaviour -- report and close even when rows failed -- is gone.
-  assert.doesNotMatch(bulkModal, /if \(done\) onDone\(/)
-  assert.match(bulkModal, /if \(counts\.failed > 0\) \{[\s\S]{0,600}?return\s/, 'failures keep the bulk dialog open')
-  assert.match(bulkModal, /onClick=\{requestClose\}/)
-  // Same S4-21 merge as the single-product surface above: the private
-  // abandon dialog is gone, the shared guard asks, and the failed/done
-  // counts it used to show are handed to that guard's prompt.
-  assert.doesNotMatch(bulkModal, /setConfirmAbandon/, 'the private abandon dialog must not come back')
-  assert.match(bulkModal, /const closeGuard = useCloseGuard\(\{ dirty: bulkDirty \}, reportAndClose\)/)
-  assert.match(bulkModal, /<UnsavedChangesPrompt guard=\{closeGuard\} items=\{bulkPromptItems\} \/>/)
-  assert.match(bulkModal, /hasUnsavedFailures\(rows\) \|\|/, 'unsaved failures still count as dirty')
-})
-
-runTest('fast stock-in already kept its lines -- that behaviour stays', () => {
-  // The reference implementation this rule generalises: per-line status,
-  // inline detail, saved lines skipped on the next Complete.
-  // Migration 0192: the detail now goes through stockFailureText (a guard
-  // refusal gets a translated sentence, everything else keeps the server's own
-  // words). The behaviour this pins -- per-line status with an inline reason --
-  // is unchanged.
-  assert.match(fastStockIn, /status: 'error',\s*\n?\s*detail: stockFailureText\(error, tr/)
-  assert.match(fastStockIn, /detail: stockFailureText\(result, tr/)
-  assert.match(fastStockIn, /needsRemoval: stockLineNeedsRemoval\(/)
-  assert.match(fastStockIn, /received\.filter\(\(line\) => line\.status !== 'saved'\)/)
+runTest('closing with unsaved work asks through the ONE shared close guard', () => {
+  assert.match(fastStockIn, /const closeGuard = useCloseGuard\(\{ dirty: closeDirty \}, discardAndClose, onMinimize \? preserveAndMinimize : undefined\)/)
+  assert.match(fastStockIn, /const preserveAndMinimize = \(\) => \{\s*if \(saving \|\| !onMinimize\) return\s*flushPendingWorkDraft\(fastStockInDraftKey\)/, 'minimize persists exact typed values before the host hides the float')
+  assert.doesNotMatch(fastStockIn, /window\.confirm\(/)
 })
 
 runTest('the outcome kernel is pure and documents the commit semantics', () => {

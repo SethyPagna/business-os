@@ -111,7 +111,6 @@ for (const [concept, entries] of Object.entries(conciseAliases)) {
 // Long operator guidance must use the same received-date vocabulary as the
 // compact labels; the machine-facing legacy column names remain covered by
 // the CSV compatibility copy and are intentionally not renamed here.
-assert.match(en.product_duplicates_hint, /received-date records/)
 assert.match(en.merge_stock_choice_merge_hint, /received-date record/)
 assert.match(en.merge_stock_choice_write_off_hint, /received-date records/)
 assert.match(en.stock_set_down_hint, /received date/)
@@ -121,7 +120,7 @@ assert.match(en.selected_conflict_move_stock, /received-date records/)
 assert.match(en.merge_duplicates_trail_soft_delete, /received-date/)
 assert.match(en.rfid_requirement_mapping, /received-date record/)
 assert.match(en.rfid_workflow_receiving_desc, /supplier received-date records/)
-for (const key of ['product_duplicates_hint', 'merge_stock_choice_merge_hint', 'merge_stock_choice_write_off_hint', 'stock_set_down_hint', 'identity_link_over_note', 'selected_conflict_review_intro', 'selected_conflict_move_stock', 'merge_duplicates_trail_soft_delete']) {
+for (const key of ['merge_stock_choice_merge_hint', 'merge_stock_choice_write_off_hint', 'stock_set_down_hint', 'identity_link_over_note', 'selected_conflict_review_intro', 'selected_conflict_move_stock', 'merge_duplicates_trail_soft_delete']) {
   assert.doesNotMatch(en[key], /\blots?\b|\bbatches?\b/i, `stale stock-record vocabulary remains in ${key}`)
 }
 
@@ -182,10 +181,16 @@ assert.doesNotMatch(telegram, /`Lot: \$\{change\.lot\}/)
 // though the loaded language file is correct.
 for (const rel of [
   'src/components/inventory/Inventory.tsx',
-  'src/components/products/forms/StockAdjustModal.tsx',
   'src/components/inventory/ManageBatchesModal.tsx',
-  'src/components/inventory/ReceiveBatchModal.tsx',
-  'src/components/products/forms/BulkAddStockModal.tsx',
+  // The Stock Session replaced Adjust stock, Receive batch and Bulk add stock (UI-STOCK-3).
+  'src/components/inventory/FastStockInModal.tsx',
+  'src/components/stock-session/StockSessionHeader.tsx',
+  'src/components/stock-session/StockSessionSharedDetails.tsx',
+  'src/components/stock-session/StockSessionLineEntry.tsx',
+  'src/components/stock-session/StockSessionItems.tsx',
+  'src/components/stock-session/StockSessionPaymentStep.tsx',
+  'src/components/stock-session/StockSessionReviewStep.tsx',
+  'src/components/stock-session/StockSessionFooter.tsx',
   'src/components/pos/POS.tsx',
   'src/components/products/surfaces/ProductDetailModal.tsx',
   'src/components/products/ProductsImageOnlyView.tsx',
@@ -213,7 +218,13 @@ assert.match(saleDetail, /translateOr\('amend_actual_cost_new', 'New actual deli
 for (const rel of [
   'src/components/inventory/InventoryStockModals.tsx',
   'src/components/inventory/FastStockInModal.tsx',
-  'src/components/inventory/ReceiveBatchModal.tsx',
+  'src/components/stock-session/StockSessionHeader.tsx',
+  'src/components/stock-session/StockSessionSharedDetails.tsx',
+  'src/components/stock-session/StockSessionLineEntry.tsx',
+  'src/components/stock-session/StockSessionItems.tsx',
+  'src/components/stock-session/StockSessionPaymentStep.tsx',
+  'src/components/stock-session/StockSessionReviewStep.tsx',
+  'src/components/stock-session/StockSessionFooter.tsx',
   'src/components/branches/TransferModal.tsx',
   'src/components/contacts/SupplierInvoicesSection.tsx',
   'src/components/products/surfaces/ProductRowParts.tsx',

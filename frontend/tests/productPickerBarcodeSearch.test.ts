@@ -131,9 +131,9 @@ assert.match(
 // searchProducts()/getProductBootstrap() (the canonicalizing transport) or,
 // for TransferModal, through the branch-stock endpoint with `query=`.
 const PICKER_SURFACES: Array<[string, string]> = [
-  ['StockAdjustModal (Change stock)', '../src/components/products/forms/StockAdjustModal.tsx'],
-  ['FastStockInModal (receive)', '../src/components/inventory/FastStockInModal.tsx'],
-  ['CreateProductsSessionModal (add existing)', '../src/components/products/CreateProductsSessionModal.tsx'],
+  // Change stock (StockAdjustModal) and Add products (CreateProductsSessionModal)
+  // were retired into the one Stock Session by UI-STOCK-3.
+  ['FastStockInModal (the Stock Session)', '../src/components/inventory/FastStockInModal.tsx'],
   ['Promotions rule picker', '../src/components/promotions/PromotionsPage.tsx'],
   ['NewReturnModal replacement lookup', '../src/components/returns/NewReturnModal.tsx'],
   ['Products page', '../src/components/products/Products.tsx'],
@@ -155,9 +155,7 @@ for (const [label, relPath] of PICKER_SURFACES) {
 }
 
 for (const relPath of [
-  '../src/components/products/forms/StockAdjustModal.tsx',
   '../src/components/inventory/FastStockInModal.tsx',
-  '../src/components/products/CreateProductsSessionModal.tsx',
 ]) {
   const source = readFileSync(new URL(relPath, import.meta.url), 'utf8')
   assert.match(source, /searchProducts\(\{[^}]*surface: 'inventory'[^}]*\}\)/, `${relPath} must authorize product reads through the inventory surface`)
@@ -196,23 +194,18 @@ assert.match(
 
 // A scan must never pick a product on its own -- it fills the search box and
 // the person chooses (standing project rule).
-const stockAdjustModal = readFileSync(
-  new URL('../src/components/products/forms/StockAdjustModal.tsx', import.meta.url),
+const stockSession = readFileSync(
+  new URL('../src/components/inventory/FastStockInModal.tsx', import.meta.url),
   'utf8',
 )
 assert.match(
-  stockAdjustModal,
-  /const handleProductScan[\s\S]{0,400}setSearch\(barcode\)/,
-  'a scan in the Change-stock picker must only fill the search box',
-)
-assert.match(
-  stockAdjustModal,
-  /getProductsByIds\(\[id\], \{ surface: 'inventory' \}\)/,
-  'the Change-stock by-id refresh must retain the inventory read surface',
+  stockSession,
+  /onScan=\{\(value\) => \{\s*const barcode = String\(value \|\| ''\)\.trim\(\)\s*setQuery\(barcode\)\s*setPicked\(null\)/,
+  'a scan in the Stock Session picker must only fill the search box',
 )
 assert.ok(
-  !/setSelectedProduct\([^)]*results\[0\]/.test(stockAdjustModal),
-  'the Change-stock picker must never auto-select the first/only result',
+  !/setPicked\([^)]*(?:results|items|rows)\[0\]/.test(stockSession),
+  'the Stock Session picker must never auto-select the first/only result',
 )
 
 // --- 5. a by-id lookup never resolves by position ------------------------
@@ -244,11 +237,6 @@ assert.match(
 
 const BY_ID_CONSUMERS: Array<[string, string, RegExp]> = [
   [
-    'StockAdjustModal refresh of the picked product',
-    '../src/components/products/forms/StockAdjustModal.tsx',
-    /\.find\(\(row\) => Number\(row\?\.id\) === Number\(id\)\)/,
-  ],
-  [
     'Products fetchProductsByIds (post-save, undo/redo, created-row confirm)',
     '../src/components/products/Products.tsx',
     /wanted\.has\(Number\(\(row as \{ id\?: unknown \}\)\?\.id\)\)/,
@@ -264,23 +252,6 @@ for (const [label, relPath, shape] of BY_ID_CONSUMERS) {
   const source = readFileSync(new URL(relPath, import.meta.url), 'utf8')
   assert.match(source, shape, `${label} must resolve the fetched row by id, not by position`)
 }
-
-const stockAdjustSource = readFileSync(
-  new URL('../src/components/products/forms/StockAdjustModal.tsx', import.meta.url),
-  'utf8',
-)
-assert.ok(
-  !/selectProduct\(\(rows\[0\]/.test(stockAdjustSource),
-  'the Change-stock refresh must never call selectProduct with items[0]',
-)
-// The guard this protects: the availability check reads the SELECTED row's
-// per-branch stock, so binding the form to the wrong row silently validated a
-// removal against a different product's quantity.
-assert.match(
-  stockAdjustSource,
-  /branchStockById/,
-  'the availability guard still derives from the selected product\'s branch stock',
-)
 
 const lookupSnapshots = readFileSync(
   new URL('../src/components/products/lookups/productLookupSnapshots.ts', import.meta.url),

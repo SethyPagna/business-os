@@ -1,4 +1,5 @@
 import Modal from './Modal'
+import { ConflictIcon, CONFLICT_ICON_CLASS } from './ConflictIcon.ts'
 import { fmtDateTime24 } from '../../utils/formatters.ts'
 
 type ConflictEntity = 'settings' | 'sale' | 'return' | 'user' | 'role' | string
@@ -242,7 +243,7 @@ export default function WriteConflictModal({ conflict, onClose, onReload }: Writ
   const fieldRows = getConflictFieldRows(conflict)
 
   return (
-    <Modal title={`${entityLabel} changed on another device`} onClose={onClose} size="lg" unsavedChanges="read-only">
+    <Modal title={<span className="inline-flex min-w-0 items-center gap-2"><ConflictIcon aria-hidden="true" className={`h-4 w-4 shrink-0 ${CONFLICT_ICON_CLASS}`} /><span className="min-w-0">{`${entityLabel} changed on another device`}</span></span>} onClose={onClose} size="lg" unsavedChanges="read-only">
       <div className="space-y-5 text-sm text-gray-700 dark:text-gray-300">
         <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-900/60 dark:bg-amber-900/20">
           <p className="font-semibold text-amber-800 dark:text-amber-300">

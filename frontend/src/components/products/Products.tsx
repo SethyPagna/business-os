@@ -47,8 +47,6 @@ import { useCopyFloat } from '../shared/CopyFloat.tsx'
 import EntityLink from '../shared/EntityLink.tsx'
 import CostCalculationFloat from '../shared/CostCalculationFloat.tsx'
 import { COPY_SELECTOR, deferCopySurfaceAction } from '../shared/textAffordances.ts'
-import LazyPortalMenu from '../shared/LazyPortalMenu'
-import type { PortalMenuItem } from '../shared/PortalMenu'
 import { primaryToolbarButtonClassName } from '../shared/toolbarButtonStyles'
 import type { StockChangeHeaderActions } from './StockChangeSection'
 import {
@@ -142,9 +140,10 @@ import { buildHierarchicalCategoryFilterOptions } from '../shared/CategoryFilter
 import { buildAvailabilityFilterSection } from '../shared/AvailabilityFilterOptions.tsx'
 import { buildSearchModeFilterSection } from '../shared/SearchModeFilterOptions.tsx'
 import { buildAutoMergedFilterSection } from './AutoMergedFilterOptions.tsx'
-import { RESTORE_WORK_EVENT, canRestoreMinimizedWork, consumePendingRestore, markRestoreHandled, minimizeWork, peekPendingRestore, reparkDeniedRestore, type MinimizedWorkEntry, type MinimizedWorkKind } from '../../utils/minimizedWork.ts'
-import { clearWorkDraft, scopedWorkDraftKey } from '../../utils/workDrafts.ts'
-import { readStockAdjustDraft, STOCK_ADJUST_RESTORE_HOST } from '../../utils/stockAdjustDraft.ts'
+import { FAST_STOCK_IN_RESTORE_HOST, RESTORE_WORK_EVENT, canRestoreMinimizedWork, consumePendingRestore, markRestoreHandled, minimizeWork, peekPendingRestore, reparkDeniedRestore, type MinimizedWorkEntry } from '../../utils/minimizedWork.ts'
+import { clearWorkDraft, readWorkDraft, scopedWorkDraftKey } from '../../utils/workDrafts.ts'
+import { readStockAdjustDraft } from '../../utils/stockAdjustDraft.ts'
+import { stockSessionHasItems, stockSessionSavedScope } from '../../utils/stockSessionBusy.ts'
 import { buildIssuesFilterSection } from '../shared/IssuesFilterOptions.tsx'
 import { buildPromotionsFilterSection } from '../shared/PromotionsFilterOptions.ts'
 import type { PromotionRule } from '../../utils/promotionRules.ts'
@@ -168,20 +167,13 @@ const ProductDuplicatesTab = lazyRetry(() => import('./ProductDuplicatesTab.tsx'
 const ManageBrandsModal = lazyRetry(() => import('./lookups/ManageBrandsModal'), 'products-manage-brands-modal')
 const ManageUnitsModal = lazyRetry(() => import('./lookups/ManageUnitsModal'), 'products-manage-units-modal')
 const ImportModeWizard = lazyRetry(() => import('./import/ImportModeWizard'), 'products-bulk-import-wizard')
-const BulkAddStockModal = lazyRetry(() => import('./forms/BulkAddStockModal'), 'products-bulk-add-stock-modal')
-// The Add button's merged "Add Stock" flow (user, Aug 31: "the fast stockin
-// can also do one by one... can be merged into one Add stock function") --
-// the shipment receiver covers a whole delivery AND a single product.
 const VariantFormModal = lazyRetry(() => import('./forms/VariantFormModal'), 'products-variant-form-modal')
 const ProductForm = lazyRetry(() => import('./forms/ProductForm'), 'products-product-form')
-const CreateProductsSessionModal = lazyRetry(() => import('./CreateProductsSessionModal'), 'products-create-products-session-modal')
-type CreateProductsSessionMinimizeDetails = import('../../utils/createProductsSession.ts').CreateProductsSessionMinimizeDetails
-const StockAdjustModal = lazyRetry(() => import('./forms/StockAdjustModal'), 'products-stock-adjust-modal')
-
-function StockAdjustRestoreCommit({ onCommit }: { onCommit: () => void }) {
-  useEffect(() => { onCommit() }, [onCommit])
-  return null
-}
+// The one Stock Session: header Add, the detail's Adjust stock, the select-mode
+// stock panel and old parked chips all open it (owner, 30 Sep 2026).
+const FastStockInModal = lazyRetry(() => import('../inventory/FastStockInModal'), 'products-stock-session')
+type StockMode = import('../inventory/FastStockInModal').StockMode
+const StockReasonsManagerModal = lazyRetry(() => import('../shared/StockReasonsManagerModal'), 'products-stock-reasons-manager')
 const ProductDetailModal = lazyRetry(() => import('./surfaces/ProductDetailModal'), 'products-product-detail-modal')
 // Reused as-is from Inventory's own batches surface (see ManageBatchesModal.tsx)
 // rather than duplicated -- the "click to view/manage batches" affordance the
@@ -199,11 +191,9 @@ type NotificationTone = 'error' | 'info' | 'success' | 'warning' | string
 type SearchMode = 'AND' | 'OR'
 type ProductSortDirection = 'asc' | 'desc' | 'name_asc' | 'name_desc'
 type BulkEditMode = 'branch' | 'info' | 'pricing' | 'stock' | null
-// 'create_session' is the header step (brand + supplier + branch, entered
-// once) that now fronts product creation -- see CreateProductsSessionModal.
-// 'form' remains the bare product form, still used for EDIT and for the
-// minimized add-product chip's restore.
-type ProductModalMode = 'brands' | 'bulk' | 'cats' | 'create_session' | 'form' | 'units' | null
+// 'form' is the bare product form, used for EDIT and for the minimized
+// add-product chip's restore; adding products goes through the Stock Session.
+type ProductModalMode = 'brands' | 'bulk' | 'cats' | 'form' | 'units' | null
 type ProductFormTab = 'basic' | 'pricing' | 'stock'
 
 interface BranchStockRow {
@@ -317,25 +307,30 @@ type BulkEditForm = Record<string, string | number | boolean | undefined> & {
   adjust_skip_zero?: boolean
 }
 
-type BulkAddModalState = {
-  ids: number[]
-  snapshots: ProductRecord[]
-} | null
-
 type RestoredProductEntry = {
   restoredId?: EntityId
   snapshot?: ProductRecord
 }
 
-type BulkAddStockResult = {
-  branchId?: EntityId
-  done?: number
-  failed?: number
-  failedIds?: EntityId[]
-  quantity?: number | string
-  updatedIds?: EntityId[]
-  action?: 'add' | 'remove' | 'set'
-  serverActionHistoryIds?: number[]
+// Mounted inside the float's Suspense: a parked chip is consumed only once
+// the lazy float has really committed, so a failed chunk load keeps it.
+function StockAdjustRestoreCommit({ onCommit }: { onCommit: () => void }) {
+  useEffect(() => { onCommit() }, [onCommit])
+  return null
+}
+
+// The session takes a product with a real id; a list row always has one.
+function sessionProduct(product: ProductRecord | null | undefined): (ProductRecord & { id: EntityId }) | null {
+  return product?.id != null ? { ...product, id: product.id } : null
+}
+
+// What the Stock Session opens with: the mode, a pre-picked product, queued
+// Items, or a draft parked by one of the retired forms.
+type ProductsStockSession = {
+  mode: StockMode
+  product?: ProductRecord | null
+  lines?: Array<{ product: ProductRecord & { id: EntityId }; quantity: number; mode: StockMode }>
+  legacyDraft?: { kind: 'stock_adjust' | 'create_products_session'; data: unknown } | null
 }
 
 type ProductLightboxState = {
@@ -1419,6 +1414,8 @@ function ProductsFullEditor() {
   // kernels, so they gate on the SAME action the Branches-page adjust and
   // fast stock-in check -- not on products:add.
   const canAdjustInventoryStock = can('inventory', 'adjust')
+  // The Worker gates PUT /api/inventory/reasons on the same action.
+  const canEditStockReasons = can('inventory', 'edit_reasons')
   const { syncChannel } = useProductsSync()
   const productApi = getProductApi()
   const isActive = useIsPageActive('products')
@@ -1489,9 +1486,8 @@ function ProductsFullEditor() {
   // row beside info/History/Manage (user, Aug 31). null when that section is
   // not mounted, so the header controls disappear with it.
   const [ledgerActions, setLedgerActions] = useState<StockChangeHeaderActions | null>(null)
-  // Both Add-menu choices now land in one session shell; the initiating
-  // choice only decides which mode is selected first.
-  const [createSessionInitialMode, setCreateSessionInitialMode] = useState<'new' | 'existing'>('new')
+  const [stockSession, setStockSession] = useState<ProductsStockSession | null>(null)
+  const [reasonsManagerOpen, setReasonsManagerOpen] = useState(false)
   // Dashboard stock-card drills land HERE now (the Branches hub's redundant
   // Products slice was removed, Aug 31): BranchesHubPage forwards the old
   // inventory-focus payload as this key, carrying the stock filter.
@@ -1591,11 +1587,23 @@ function ProductsFullEditor() {
   // its own state, while this host rechecks the current action grant before it
   // reopens a write surface.
   useEffect(() => {
-    const open = (kind: MinimizedWorkKind, mode?: 'new' | 'existing') => {
-      setSelected(null)
-      setFormInitialTab('basic')
-      if (kind === 'create_products_session' && mode) setCreateSessionInitialMode(mode)
-      setModal(kind === 'create_products_session' ? 'create_session' : 'form')
+    const open = (kind: 'add_product' | 'create_products_session', entry: MinimizedWorkEntry | null | undefined) => {
+      if (kind === 'add_product') {
+        setSelected(null)
+        setFormInitialTab('basic')
+        setModal('form')
+        return
+      }
+      // A session parked by the retired Add/Create Products form reopens as
+      // the Stock Session, its lines converted from the old draft. An open
+      // session with items keeps the chip parked and shows that session.
+      if (entry && stockSessionHasItems()) {
+        reparkDeniedRestore(entry)
+        setStockSession({ mode: 'add' })
+        return
+      }
+      const draftKey = entry?.draftKey || scopedWorkDraftKey('create_products_session')
+      setStockSession({ mode: 'add', legacyDraft: { kind: 'create_products_session', data: readWorkDraft(draftKey)?.data ?? null } })
     }
     const restore = (kind: 'add_product' | 'create_products_session', entry: MinimizedWorkEntry | null | undefined) => {
       const payload = entry?.payload
@@ -1615,7 +1623,7 @@ function ProductsFullEditor() {
         notify(tr('permission_denied', 'You no longer have permission for this action.', 'អ្នកលែងមានសិទ្ធិសម្រាប់សកម្មភាពនេះទៀតហើយ។'), 'error')
         return
       }
-      open(kind, sessionMode)
+      open(kind, entry)
     }
     for (const kind of ['add_product', 'create_products_session'] as const) {
       const pending = consumePendingRestore(kind)
@@ -1634,8 +1642,8 @@ function ProductsFullEditor() {
   const [detailProduct,setDetailProduct]= useState<ProductRecord | null>(null)
   // The list's cost cell opens the cost calculation directly (owner, 25 Sep 2026).
   const [costFloatProduct, setCostFloatProduct] = useState<ProductRecord | null>(null)
-  const [adjustStockProduct, setAdjustStockProduct] = useState<ProductRecord | null>(null)
-  const [restoreStockAdjustDraftKey, setRestoreStockAdjustDraftKey] = useState<string | null>(null)
+  // An adjustment parked by the retired one-product form reopens as the
+  // Stock Session in its mode, with that product and its typed values.
   const restoringStockAdjustRef = useRef<MinimizedWorkEntry | null>(null)
   useEffect(() => {
     const restore = (entry: MinimizedWorkEntry | null | undefined) => {
@@ -1646,16 +1654,21 @@ function ProductsFullEditor() {
         return
       }
       const draftKey = entry.draftKey || null
-      if (!readStockAdjustDraft(draftKey)) {
-        if (draftKey) clearWorkDraft(draftKey)
+      const draft = readStockAdjustDraft(draftKey)
+      if (!draft) {
         markRestoreHandled('stock_adjust')
+        if (draftKey) clearWorkDraft(draftKey)
         notify(tr('load_failed', 'This saved draft is no longer available.', 'សេចក្តីព្រាងដែលបានរក្សាទុកនេះលែងមានទៀតហើយ។'), 'error')
+        return
+      }
+      if (stockSessionHasItems()) {
+        reparkDeniedRestore(entry)
+        setStockSession({ mode: 'add' })
         return
       }
       if (restoringStockAdjustRef.current?.key === entry.key) return
       restoringStockAdjustRef.current = entry
-      setAdjustStockProduct(null)
-      setRestoreStockAdjustDraftKey(draftKey)
+      setStockSession({ mode: draft.initialType, legacyDraft: { kind: 'stock_adjust', data: draft } })
     }
     restore(peekPendingRestore('stock_adjust'))
     const onRestore = (event: Event) => {
@@ -1669,14 +1682,13 @@ function ProductsFullEditor() {
   const commitStockAdjustRestore = useCallback(() => {
     const entry = restoringStockAdjustRef.current
     if (!entry) return
+    restoringStockAdjustRef.current = null
     if (!canAdjustInventoryStock || !canRestoreMinimizedWork(entry, can)) {
-      restoringStockAdjustRef.current = null
-      setRestoreStockAdjustDraftKey(null)
+      setStockSession(null)
       reparkDeniedRestore(entry)
       notify(tr('permission_denied', 'You no longer have permission for this action.', 'អ្នកលែងមានសិទ្ធិសម្រាប់សកម្មភាពនេះទៀតហើយ។'), 'error')
       return
     }
-    restoringStockAdjustRef.current = null
     markRestoreHandled('stock_adjust')
   }, [can, canAdjustInventoryStock, notify])
   // `toModalProduct(selected)` used to be called inline in the ProductForm
@@ -2085,17 +2097,10 @@ function ProductsFullEditor() {
     return true
   }, [products])
 
-  // StockAdjustModal.tsx (owned by another lane) only reports completion as
-  // onDone: () => void -- no adjust API response reaches Products.tsx, so
-  // "patch from the response" is not reachable here. The productId the
-  // adjustment targeted IS already known locally (it is the product the
-  // modal was opened for), so this refetches exactly that one product
-  // instead of the whole page, and only falls back to a full load(true) when
-  // the product id is unknown (the rare minimized-and-restored session,
-  // where the modal already clears its own draft before calling onDone) or
-  // the refetch comes back empty (the product no longer matches the active
-  // filter/page, e.g. an adjustment moved it out of a stock-state filter --
-  // only a full reload can reflect that correctly).
+  // The Stock Session reports completion as onDone: () => void, with no
+  // response to patch from. When it saved exactly one product (the detail's
+  // Adjust), this refetches just that row, and falls back to a full load(true)
+  // when the id is unknown or the row no longer matches the page.
   const refreshAdjustedProduct = useCallback(async (productId: EntityId | null | undefined): Promise<void> => {
     const id = Number(productId || 0)
     if (!id) {
@@ -2370,25 +2375,6 @@ function ProductsFullEditor() {
       image_gallery: uploadedGallery,
       image_path: uploadedGallery[0] || null,
     }
-  }
-
-  const createProductForSession = async (payload: Record<string, unknown>): Promise<number | string> => {
-    const prepared = await prepareProductForSession(payload)
-    const res = await runProductWriteMutation(() => productApi.createProduct({
-      ...prepared,
-      client_request_id: `product_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-      userId: user?.id,
-      userName: user?.name,
-    }), 'Create product')
-    if (!res?.success) throw new Error(res?.error || 'Failed to create product')
-    // A Review-Required account queues the create instead of applying it, so
-    // there is no product to hang this session's opening stock on yet.
-    if ((res as { pending?: boolean })?.pending) {
-      throw new Error(t('product_creation_pending_review') || 'Product creation is pending review and cannot be added to this session yet.')
-    }
-    const createdId = extractHistoryResultId(res)
-    if (!createdId) throw new Error('Created product could not be loaded')
-    return createdId
   }
 
   const handleSaveWithGallery = async (form: ProductRecord) => {
@@ -2803,13 +2789,17 @@ function ProductsFullEditor() {
     }
   }
 
-  const [bulkAddModal, setBulkAddModal] = useState<BulkAddModalState>(null)
-  const handleBulkAddStock = () => {
+  // The select-mode stock panel queues the selected products as Items, in the
+  // panel's mode and quantity; the session reviews and commits them.
+  const openBulkStockSession = () => {
     if (!selectedVisibleIds.length) return
-    setBulkAddModal({
-      ids: [...selectedVisibleIds],
-      snapshots: snapshotProductsByIds(selectedVisibleIds),
+    const mode: StockMode = bulkEditForm.action === 'remove' || bulkEditForm.action === 'set' ? bulkEditForm.action : 'add'
+    const quantity = Math.max(0, Number(bulkEditForm.qty ?? 1) || 0)
+    const lines = selectedVisibleIds.flatMap((id) => {
+      const product = productsById.get(Number(id))
+      return product ? [{ product: { ...product, id: product.id ?? id }, quantity, mode }] : []
     })
+    if (lines.length) setStockSession({ mode, lines })
   }
 
   // Opens DeleteConfirmModal for a single product instead of deleting
@@ -4144,46 +4134,6 @@ function ProductsFullEditor() {
     await load(true)
   }, [fetchProductsByIds, load, user?.id, user?.name])
 
-  const addStockToProducts = useCallback(async (productIds: EntityId[] = [], quantity: unknown, branchId: unknown, reason = 'Bulk add stock') => {
-    const amount = Number(quantity || 0)
-    const numericBranchId = Number(branchId || 0)
-    if (!productIds.length || !Number.isFinite(amount) || amount <= 0) {
-      return { done: 0, failed: 0, failedIds: [], updatedIds: [] }
-    }
-    const { buildProductStockAdjustmentPayload } = await loadProductWriteHelpers()
-
-    const latestProducts = await fetchProductsByIds(productIds)
-    const latestMap = new Map((latestProducts || []).map((product) => [Number(product?.id || 0), product]))
-
-    const addRun = await runConcurrentTasks<EntityId, number>(productIds, async (productId: EntityId) => {
-      const currentProduct = latestMap.get(Number(productId))
-      if (!currentProduct) {
-        throw new Error('Product not found')
-      }
-      await runProductStockMutation(
-        () => productApi.adjustStock(buildProductStockAdjustmentPayload(currentProduct, {
-          productId,
-          type: 'add',
-          quantity: amount,
-          branchId: Number.isFinite(numericBranchId) && numericBranchId > 0 ? numericBranchId : null,
-          reason,
-          // N14-D: this helper only ever REDOES a bulk add that BulkAddStockModal
-          // already put through the gate with its own supplier and cost. It
-          // cannot restate them (they are not in the redo entry), and it must
-          // not invent them, so it restores the figure as a correction.
-          attribution: 'correction',
-          user: { id: user?.id, name: user?.name },
-        })),
-        'Bulk add product stock',
-      )
-      return Number(productId)
-    })
-    const summary = summarizeProductRun(addRun)
-
-    await load(true)
-    return summary
-  }, [fetchProductsByIds, load, runProductStockMutation, user?.id, user?.name])
-
   const moveProductsToBranch = useCallback(async (productIds: EntityId[] = [], branchId: unknown, reason = 'Bulk branch change') => {
     const numericBranchId = Number(branchId || 0)
     if (!productIds.length || !Number.isFinite(numericBranchId) || numericBranchId <= 0) {
@@ -4831,6 +4781,7 @@ function ProductsFullEditor() {
             onManageCats={canManageLookups ? ()=>setModal('cats') : undefined}
             onManageBrands={canManageLookups ? ()=>setModal('brands') : undefined}
             onManageUnits={canManageLookups ? ()=>setModal('units') : undefined}
+            onManageReasons={canEditStockReasons ? () => setReasonsManagerOpen(true) : undefined}
             onImport={canImportProducts ? ()=>setModal('bulk') : undefined}
             /* Export is context-aware. On the Stock Changes section it runs
                the LEDGER CSV export (folded up out of the section body, user
@@ -4854,11 +4805,9 @@ function ProductsFullEditor() {
             /* Stock Changes section replaces the catalog "Add Product" button
                with its own "Adjust" menu (user, Aug 31) -> drop onAdd there;
                HeaderActions hides any undefined-handler control. */
-            /* S4-12: Add now opens the header step first -- brand, supplier
-               and branch once, then the same product form for each item. */
-            onAdd={(canAddProduct || canAdjustInventoryStock) && activeProductSection !== 'stock_changes' && activeProductSection !== 'stock_in_sessions' ? ()=>{setSelected(null);setFormInitialTab('basic');setCreateSessionInitialMode(canAddProduct ? 'new' : 'existing');setModal('create_session')} : undefined}
-            // The merged Add Stock flow rides the same Add menu. Hidden on
-            // the Stock Changes section, which carries its own Adjust menu.
+            /* Add opens the Stock Session in Add: new products and stock for
+               existing ones in one session. Stock Changes has its own Adjust. */
+            onAdd={(canAddProduct || canAdjustInventoryStock) && activeProductSection !== 'stock_changes' && activeProductSection !== 'stock_in_sessions' ? () => setStockSession({ mode: 'add' }) : undefined}
             onMergeDuplicates={canMergeDuplicates ? openMergeDuplicatesReview : undefined}
             onZeroQuantityCleanup={canZeroQuantityCleanup ? openZeroQuantityCleanup : undefined}
             onWireImages={canWireImages ? openWireImages : undefined}
@@ -4869,36 +4818,21 @@ function ProductsFullEditor() {
             ) : (
               <div className="h-9 min-w-0 flex-1 sm:flex-none sm:min-w-[6.5rem]" aria-hidden="true" />
             )}
-            /* Stock Changes' primary "Adjust" action rides the header row here
-               (user, Aug 31: "Adjust should be moved to same row as the info
-               toolkit, History and Manage"). Its menu opens the section's own
-               modals via the registered callbacks; the section body no longer
-               renders this button. A portal menu (not a bare absolute one) so
-               it can't be clipped by the header row's horizontal overflow. */
+            /* Stock Changes' primary "Adjust" rides the header row (user, Aug 31).
+               One button, straight into the session in Add: the float's own
+               Add / Remove / Set header switches mode (owner, 30 Sep). */
             primaryActionSlot={
               activeProductSection === 'stock_changes' && ledgerActions?.canAdjust ? (
-                <LazyPortalMenu
-                  align="auto"
-                  trigger={(
-                    <button
-                      type="button"
-                      className={primaryToolbarButtonClassName}
-                      aria-haspopup="true"
-                      aria-label={tr('adjust', 'Adjust')}
-                      title={tr('adjust', 'Adjust')}
-                    >
-                      <Boxes className="h-4 w-4 shrink-0" />
-                      <span className="min-w-0 truncate">{tr('adjust', 'Adjust')}</span>
-                    </button>
-                  )}
-                  items={[
-                    // N27: one way to change stock -- the fast flow, opened in
-                    // the chosen mode (add / remove / set).
-                    { label: tr('add_stock', 'Add Stock'), onClick: () => ledgerActions?.openFastStockIn('add'), color: 'blue', icon: <Boxes className="h-4 w-4 shrink-0" /> },
-                    { label: tr('remove_stock', 'Remove Stock'), onClick: () => ledgerActions?.openFastStockIn('remove') },
-                    { label: tr('adjust_quantity', 'Adjust Quantity'), onClick: () => ledgerActions?.openFastStockIn('set') },
-                  ] as PortalMenuItem[]}
-                />
+                <button
+                  type="button"
+                  className={primaryToolbarButtonClassName}
+                  onClick={() => ledgerActions?.openFastStockIn('add')}
+                  aria-label={tr('adjust', 'Adjust')}
+                  title={tr('adjust', 'Adjust')}
+                >
+                  <Boxes className="h-4 w-4 shrink-0" />
+                  <span className="min-w-0 truncate">{tr('adjust', 'Adjust')}</span>
+                </button>
               ) : null
             }
             t={t}
@@ -5276,43 +5210,37 @@ function ProductsFullEditor() {
       )}
 
       {hasSelected && bulkEditMode === 'stock' && (
-        <div className="mb-2 rounded-xl border border-primary-200 bg-white px-4 py-3 dark:border-primary-700 dark:bg-zinc-800">
-          <p className="text-xs text-gray-500 mb-2">{(() => {
-            const [pre, post] = tr('bulk_edit_adjust_stock_for_count', 'Adjust stock for {count} products').split('{count}')
-            return <>{pre}<strong>{selectedVisibleCount}</strong>{post}</>
-          })()}</p>
-          <div className="flex gap-3 flex-wrap items-end">
-            <div><label className="text-xs text-gray-500 block mb-1">{tr('quantity', 'Quantity')}</label>
-              <input className="input text-xs py-1 w-24" type="number" min="0" value={bulkEditForm.qty??1} onChange={e=>setBulkEditForm(f=>({...f,qty:e.target.value}))} />
-              {/* Same 1/5/10/20 quick-pick chips as InventoryStockModals.tsx's
-                  Adjust modal -- this bulk panel was the one remaining
-                  Add/Remove/Set stock flow still missing them. */}
-              <div className="mt-1 flex flex-wrap gap-1">
-                {[1, 5, 10, 20].map((n) => (
-                  <button
-                    key={n}
-                    type="button"
-                    className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${Number(bulkEditForm.qty) === n ? 'bg-primary-600 text-white' : 'bg-gray-100 text-gray-600 dark:bg-zinc-700 dark:text-gray-300'}`}
-                    onClick={() => setBulkEditForm(f => ({ ...f, qty: n }))}
-                  >
-                    {n}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div><label className="text-xs text-gray-500 block mb-1">{tr('action', 'Action')}</label>
-              {/* Same border-2 / primary-50+primary-700 selected-state styling
-                  as Inventory's Adjust-stock modal -- was previously a solid
-                  blue-600 fill, its own separate look for the same
-                  three-way choice. Recolored brass/primary Aug 24 2026. */}
-              <div className="flex gap-1">
-                {[['add', t('add') || 'Add'],['remove', t('remove') || 'Remove'],['set', `= ${t('set')||'Set'}`]].map(([v,l])=>(
-                <button key={v} onClick={()=>setBulkEditForm(f=>({...f,action:v}))} className={`text-xs py-1.5 px-2.5 rounded-lg border-2 font-medium ${(bulkEditForm.action||'add')===v?'border-primary-600 bg-primary-50 text-primary-700 dark:bg-primary-900/30 dark:text-primary-300':'border-gray-200 dark:border-zinc-600 text-gray-600 dark:text-gray-300'}`}>{l}</button>
-                ))}
-              </div>
-            </div>
+        <div className="mb-2 flex flex-wrap items-center gap-1.5 rounded-xl border border-primary-200 bg-white px-2 py-2 dark:border-primary-700 dark:bg-zinc-800">
+          <div role="group" aria-label={tr('bulk_edit_adjust_stock_for_count', 'Adjust stock for {count} products').replace('{count}', String(selectedVisibleCount))} className="grid basis-full grid-cols-3 gap-1 rounded-lg bg-gray-100 p-0.5 dark:bg-zinc-700 sm:basis-auto">
+            {(['add', 'remove', 'set'] as const).map((mode) => {
+              const active = (bulkEditForm.action || 'add') === mode
+              const tone = mode === 'add' ? 'bg-emerald-600' : mode === 'remove' ? 'bg-red-600' : 'bg-amber-500'
+              return (
+                <button
+                  key={mode}
+                  type="button"
+                  aria-pressed={active}
+                  onClick={() => setBulkEditForm((f) => ({ ...f, action: mode }))}
+                  className={`h-8 rounded-md px-3 text-xs font-semibold ${active ? `${tone} text-white` : 'text-gray-600 dark:text-gray-300'}`}
+                >
+                  {tr(`adjust_${mode}`, mode === 'add' ? 'Add' : mode === 'remove' ? 'Remove' : 'Set')}
+                </button>
+              )
+            })}
           </div>
-          <button disabled={bulkActionBusy} className="btn-primary mt-3 px-4 py-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-60" onClick={handleBulkAddStock}>{tr('bulk_edit_apply_to_count', 'Apply to {count} products').replace('{count}', String(selectedVisibleCount))}</button>
+          <input
+            className="input h-9 w-20 text-sm tabular-nums"
+            type="number"
+            min="0"
+            aria-label={tr('quantity', 'Quantity')}
+            title={tr('quantity', 'Quantity')}
+            placeholder={tr('quantity', 'Quantity')}
+            value={bulkEditForm.qty ?? 1}
+            onChange={(e) => setBulkEditForm((f) => ({ ...f, qty: e.target.value }))}
+          />
+          <button disabled={bulkActionBusy} className="btn-primary h-9 min-w-0 flex-1 px-3 text-sm disabled:cursor-not-allowed disabled:opacity-60 sm:flex-none" onClick={openBulkStockSession}>
+            {tr('bulk_edit_apply_to_count', 'Apply to {count} products').replace('{count}', String(selectedVisibleCount))}
+          </button>
         </div>
       )}
 
@@ -5509,8 +5437,8 @@ function ProductsFullEditor() {
             fmtKHR={fmtKHR}
             t={t}
             onEdit={()=>{setDetailProduct(null);openProductFormTab(detailProduct, 'basic')}}
-            onAddVariant={() => { setVariantModal(detailProduct); setDetailProduct(null) }}
-            onAdjustStock={() => { setDetailProduct(null); setAdjustStockProduct(detailProduct) }}
+            onAddVariant={canAddProduct ? () => { setVariantModal(detailProduct); setDetailProduct(null) } : undefined}
+            onAdjustStock={canAdjustInventoryStock ? () => { setDetailProduct(null); setStockSession({ mode: 'add', product: detailProduct }) } : undefined}
             onClose={()=>setDetailProduct(null)}
             onImageClick={(src, gallery, startIndex = 0) => {
               const sourceGallery = buildProductLightboxGalleryInput(src, gallery)
@@ -5521,33 +5449,45 @@ function ProductsFullEditor() {
         </Suspense>
       )}
 
-      {adjustStockProduct || restoreStockAdjustDraftKey ? (
+      {stockSession ? (
         <Suspense fallback={null}>
-          <StockAdjustModal
-            initialProduct={adjustStockProduct}
-            restoreDraftKey={restoreStockAdjustDraftKey}
-            t={t}
-            onClose={() => { setAdjustStockProduct(null); setRestoreStockAdjustDraftKey(null) }}
+          <FastStockInModal
+            branchOptions={branchSelectOptions}
+            defaultBranchId={branchFilter !== 'all' ? branchFilter : (defaultBranchId || null)}
+            initialMode={stockSession.mode}
+            initialProduct={sessionProduct(stockSession.product)}
+            initialLines={stockSession.lines}
+            legacyDraft={stockSession.legacyDraft ?? null}
+            onPrepareProduct={canAddProduct ? prepareProductForSession : undefined}
+            brandOptions={brandOptions}
+            canCreateProducts={canAddProduct}
+            tr={tr}
+            notify={notify}
+            exchangeRate={exchangeRate}
+            onClose={() => setStockSession(null)}
             onDone={() => {
-              const adjustedProductId = adjustStockProduct?.id ?? null
-              setAdjustStockProduct(null)
-              setRestoreStockAdjustDraftKey(null)
-              void refreshAdjustedProduct(adjustedProductId)
+              const productIds = stockSessionSavedScope()?.productIds ?? []
+              void (productIds.length === 1 ? refreshAdjustedProduct(productIds[0]) : load(true))
             }}
-            onMinimize={(label: string, detail: { draftKey: string; productId: EntityId }) => {
+            onMinimize={canAdjustInventoryStock ? (label: string) => {
               minimizeWork({
-                key: `stock-adjust-${String(detail.productId)}`,
-                kind: 'stock_adjust',
-                ...STOCK_ADJUST_RESTORE_HOST,
+                key: 'fast-stockin',
+                kind: 'fast_stockin',
+                ...FAST_STOCK_IN_RESTORE_HOST,
                 label,
-                payload: { productId: detail.productId },
-                draftKey: detail.draftKey,
+                draftKey: scopedWorkDraftKey('fast_stockin'),
                 requiredPermission: { permissionKey: 'inventory', actionKey: 'adjust' },
               })
               notify(tr('minimized_to_chip', 'Minimized. Pick it back up from the chip — nothing was lost.', 'បានបង្រួម។ បន្តវាឡើងវិញពីស្លាក — គ្មានអ្វីបាត់បង់ទេ។'), 'info')
-            }}
+            } : undefined}
           />
           {restoringStockAdjustRef.current ? <StockAdjustRestoreCommit onCommit={commitStockAdjustRestore} /> : null}
+        </Suspense>
+      ) : null}
+
+      {reasonsManagerOpen ? (
+        <Suspense fallback={null}>
+          <StockReasonsManagerModal initialTab="adjust" onClose={() => setReasonsManagerOpen(false)} />
         </Suspense>
       ) : null}
 
@@ -5588,112 +5528,6 @@ function ProductsFullEditor() {
         </Suspense>
       ) : null}
 
-      {bulkAddModal && (
-        <Suspense fallback={null}>
-          <BulkAddStockModal
-            productIds={bulkAddModal.ids}
-            initialAction={(bulkEditForm.action as 'add' | 'remove' | 'set' | undefined) || 'add'}
-            initialQuantity={bulkEditForm.qty}
-            products={products.map((product) => ({
-              ...product,
-              id: product.id ?? 0,
-              name: String(product.name || ''),
-              purchase_price_usd: Number(product.purchase_price_usd || 0),
-              purchase_price_khr: Number(product.purchase_price_khr || 0),
-            }))}
-            branches={branchOptions}
-            user={user}
-            onClose={() => setBulkAddModal(null)}
-            onDone={async ({ quantity, branchId, updatedIds = [], failedIds = [], failed = 0, done = 0, action = 'add', serverActionHistoryIds = [] }: BulkAddStockResult) => {
-              const numericQuantity = Number(quantity || 0)
-              const successfulIds = normalizePositiveProductIds(updatedIds)
-              const restoredSnapshots = (bulkAddModal?.snapshots || []).filter((snapshot) => successfulIds.includes(Number(snapshot?.id || 0)))
-              setBulkAddModal(null)
-              setSelectedIds(new Set(normalizePositiveProductIds(failedIds)))
-              // A scoped Set is undone ONLY through its Worker history rows.
-              if (serverActionHistoryIds.length) await actionHistory.refreshServerItems()
-              // The client closure below re-ADDS on redo, so it is only ever
-              // correct for an add; a bulk remove or set pushing it would
-              // redo as an add of the same quantity.
-              if (action === 'add' && !serverActionHistoryIds.length && done > 0 && restoredSnapshots.length && numericQuantity > 0) {
-                actionHistory.pushAction({
-                  label: `Add stock to ${done} product${done === 1 ? '' : 's'}`,
-                  undo: () => restoreProductSnapshots(restoredSnapshots, 'Undo bulk add stock'),
-                  redo: () => addStockToProducts(successfulIds, numericQuantity, branchId, 'Redo bulk add stock'),
-                })
-              }
-              const verb = action === 'remove' ? 'Removed stock from' : action === 'set' ? 'Set stock for' : 'Added stock to'
-              notify(
-                failed
-                  ? `${verb} ${done} product(s), ${failed} failed`
-                  : `${verb} ${done} product${done === 1 ? '' : 's'}`,
-                failed ? 'warning' : 'success',
-              )
-              // The modal's own mutation loop never refreshes the page
-              // itself -- undo (restoreProductSnapshots) and redo
-              // (addStockToProducts) both already end in `load(true)`,
-              // but the *first* application of a bulk add had no
-              // refresh at all, so the list kept showing pre-add
-              // quantities until something unrelated (a re-search, a
-              // filter change) happened to reload it. Not pinning the
-              // affected rows here -- `branchId` can be '' ("Global (no
-              // branch)"), which the server resolves to its own default
-              // branch that isn't echoed back to this modal, the same
-              // ambiguous-target case already left unpinned in
-              // Inventory.tsx's adjust handler (Part 142) -- just the
-              // refresh a successful mutation should always have had.
-              if (done > 0) await load(true)
-            }}
-            t={t}
-          />
-        </Suspense>
-      )}
-      {/* S4-12: the header step -- brand + supplier + branch once, then the
-          same ProductForm below for every item in the delivery. */}
-      {modal==='create_session' && (
-        <Suspense fallback={null}>
-          <CreateProductsSessionModal
-            categories={categoryOptions}
-            units={unitOptions}
-            branches={branchOptions}
-            brandOptions={brandOptions}
-            groupCandidates={products.map((product) => ({ id: product.id, name: String(product.name || '') }))}
-            defaultBranchId={defaultBranchId}
-            initialMode={createSessionInitialMode}
-            allowNew={canAddProduct}
-            allowExisting={canAdjustInventoryStock}
-            canReceiveStock={canAdjustInventoryStock}
-            onPrepareProduct={prepareProductForSession}
-            onCreateProduct={createProductForSession}
-            onClose={()=>{setModal(null);setSelected(null);setFormInitialTab('basic')}}
-            onMinimize={(canAddProduct || canAdjustInventoryStock) ? (label: string, details: CreateProductsSessionMinimizeDetails) => {
-              const requiredPermission = details.requiredPermissions[0]
-              minimizeWork({
-                key: 'create-products-session',
-                kind: 'create_products_session',
-                pageId: 'products',
-                label,
-                payload: {
-                  draftKey: details.draftKey,
-                  mode: details.mode,
-                  requiredPermissions: details.requiredPermissions,
-                },
-                draftKey: details.draftKey,
-                requiredPermission,
-              })
-              setModal(null); setSelected(null); setFormInitialTab('basic')
-              notify(tr('minimized_to_chip', 'Minimized. Pick it back up from the chip — nothing was lost.', 'បានបង្រួម។ បន្តវាឡើងវិញពីស្លាក — គ្មានអ្វីបាត់បង់ទេ។'), 'info')
-            } : undefined}
-            onDone={() => { void load(true) }}
-            notify={notify}
-            t={t}
-            usdSymbol={usdSymbol}
-            khrSymbol={khrSymbol}
-            exchangeRate={exchangeRate}
-            user={user}
-          />
-        </Suspense>
-      )}
       {modal==='form' && (
         <Suspense fallback={null}>
           <ProductForm

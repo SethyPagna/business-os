@@ -107,7 +107,9 @@ check('keyboard cursor wraps at both ends and starts from nothing highlighted', 
 // --- The cross-surface law: ONE component, and every host renders it.
 const component = read('components/shared/SuggestionTextInput.tsx')
 const productForm = read('components/products/forms/ProductForm.tsx')
-const sessionModal = read('components/products/CreateProductsSessionModal.tsx')
+// The create-products header was retired into the Stock Session (UI-STOCK-3);
+// its Brand now lives in the session's shared details.
+const sessionDetails = read('components/stock-session/StockSessionSharedDetails.tsx')
 const supplierPicker = read('components/shared/SupplierPickerField.tsx')
 
 check('the shared component is the only copy -- ProductForm no longer defines its own', () => {
@@ -134,19 +136,13 @@ check('every catalog field in ProductForm renders the shared control', () => {
   assert.match(productForm, /nameLocked \? \(/, 'the locked variant stays a plain confirm-first input')
 })
 
-check('the create-products header dropped the native datalist for the shared control', () => {
-  assert.doesNotMatch(sessionModal, /<datalist[ >]/, 'a native datalist renders at the browser\'s discretion -- the owner saw nothing')
-  assert.doesNotMatch(sessionModal, /list="create-products-brand-options"/, 'the datalist wiring must go with it')
-  assert.match(sessionModal, /<SuggestionTextInput[\s\S]{0,200}id="create-products-brand"/, 'the header Brand renders the shared control')
-  assert.match(sessionModal, /id="create-products-brand"[\s\S]{0,200}options=\{brandOptions\}/, 'header and item Brand read the SAME list')
-  // Round-2 defect: swapping the datalist for the shared control also demoted
-  // the field's <label> to a bare <span>, so the caption stopped being a
-  // click/tap target and the control lost its accessible-name association --
-  // in a grid where Branch and Received date both still carry real labels.
-  // The label stays a SIBLING of the control (htmlFor), never a wrapper: a
-  // click on an option row inside a <label> bounces focus back to the input.
-  assert.match(sessionModal, /<label htmlFor="create-products-brand"/, 'the header Brand keeps a real label, like every sibling in that grid')
-  assert.doesNotMatch(sessionModal, /<span[^>]*>\{tr\('brand', 'Brand'\)\}<\/span>/, 'a bare span is what the label had been demoted to')
+check('the Stock Session Brand renders the shared control, never a native datalist', () => {
+  assert.doesNotMatch(sessionDetails, /<datalist[ >]/, 'a native datalist renders at the browser\'s discretion -- the owner saw nothing')
+  assert.match(sessionDetails, /<SuggestionTextInput\s+id="stock-session-brand"/, 'the session Brand renders the shared control')
+  assert.match(sessionDetails, /id="stock-session-brand"[\s\S]{0,200}options=\{brandOptions\}/, 'session and item Brand read the SAME list')
+  // Owner, 30 Sep 2026: labels sit inside the input. The caption <label> the
+  // create-products header kept is gone; the accessible name stays.
+  assert.match(sessionDetails, /id="stock-session-brand"[\s\S]{0,400}ariaLabel=\{brandLabel\}[\s\S]{0,80}placeholder=\{brandLabel\}/, 'the Brand keeps its accessible name and shows it as the placeholder')
 })
 
 check('the shared supplier picker delegates to the same control (one implementation)', () => {
@@ -223,13 +219,16 @@ check('DISCRIMINATING: an empty list may only say "nothing saved yet" once its s
 
 check('Brand owns its own source, so a host that plumbs nothing in still suggests', () => {
   const fastStockIn = read('components/inventory/FastStockInModal.tsx')
-  const hostAt = fastStockIn.indexOf('<ProductForm')
-  assert.ok(hostAt > 0, 'FastStockInModal renders ProductForm')
-  const hostBlock = fastStockIn.slice(hostAt, fastStockIn.indexOf('/>', hostAt))
-  // This pin is anchored to the REAL host shape: that file is owned by
-  // another lane and supplies no brandOptions, which is precisely why the
-  // fallback and the gate below have to live inside ProductForm.
-  assert.doesNotMatch(hostBlock, /brandOptions=/, 'this host supplies no brandOptions')
+  assert.ok(fastStockIn.indexOf('<ProductForm') > 0, 'FastStockInModal renders ProductForm')
+  // Anchored to the REAL host shape: the Stock Session only forwards an
+  // OPTIONAL list, and only the Products page supplies one -- Inventory,
+  // Branches and Stock Changes open it without. That is why the fallback and
+  // the gate below have to live inside ProductForm.
+  assert.match(fastStockIn, /brandOptions\?: string\[\]/, 'the session forwards an optional list')
+  const inventory = read('components/inventory/Inventory.tsx')
+  const inventoryHost = inventory.slice(inventory.indexOf('<FastStockInModal'), inventory.indexOf('/>', inventory.indexOf('<FastStockInModal')))
+  assert.ok(inventoryHost.length > 0, 'Inventory opens the session')
+  assert.doesNotMatch(inventoryHost, /brandOptions=/, 'this host supplies no brandOptions')
   assert.doesNotMatch(productForm, /brandOptions = \[\]/, 'a [] default makes "did the host supply a list" unanswerable')
   assert.match(productForm, /const brandOptionsProvided = Array\.isArray\(brandOptions\)/, 'ProductForm can tell a supplied list from none')
   assert.match(productForm, /getProductFilters/, 'and falls back to the brands products actually carry')
@@ -258,7 +257,11 @@ check('every hint in the family answers to the same gate (one rule, one implemen
   }
   assert.match(productForm, /function emptyHintFor[\s\S]{0,400}suggestionEmptyState/, 'the gate is the shared rule, not a per-field literal')
   // Siblings outside ProductForm carry the same rule rather than a copy.
-  assert.match(sessionModal, /emptyHint=\{suggestionEmptyState\(brandOptions\.length > 0, brandOptions\.length\) === 'no-match'/, 'the create-products header Brand is gated too')
+  // The Stock Session Brand (which replaced the create-products header) never
+  // states an empty-list hint, so it cannot claim "nothing saved yet" either.
+  const sessionBrand = sessionDetails.slice(sessionDetails.indexOf('id="stock-session-brand"'), sessionDetails.indexOf('/>', sessionDetails.indexOf('id="stock-session-brand"')))
+  assert.ok(sessionBrand.length > 0)
+  assert.doesNotMatch(sessionBrand, /emptyHint=/, 'the session Brand states no unconditional hint')
   const variantModal = read('components/products/forms/VariantFormModal.tsx')
   assert.match(variantModal, /suggestionEmptyState\(/, "the variant form's Supplier is gated too")
 })

@@ -139,8 +139,9 @@ runTest('the description reader stacks above the sheet it now sits beside', () =
 // beside the backdrop, so the allow-list is gone: ANY offender fails.
 const FORMER_OFFENDERS: Array<{ file: string; floats: string[] }> = [
   { file: 'branches/TransferModal.tsx', floats: ['<ConfirmDialog'] },
-  { file: 'inventory/FastStockInModal.tsx', floats: ['<ConfirmDialog', '<ProductOptionSheet'] },
-  { file: 'inventory/ReceiveBatchModal.tsx', floats: ['<ConfirmDialog'] },
+  // The Stock Session reviews in its own Review step instead of a ConfirmDialog;
+  // ReceiveBatchModal was retired into it (30 Sep 2026).
+  { file: 'inventory/FastStockInModal.tsx', floats: ['<UnsavedChangesPrompt', '<ProductOptionSheet', '<StockReasonsManagerModal'] },
 ]
 
 runTest('the former offenders render their floats beside the backdrop, and still render them', () => {

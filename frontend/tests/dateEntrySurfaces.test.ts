@@ -34,11 +34,12 @@ const read = (relative: string): string => fs.readFileSync(path.join(SRC, relati
 // Every surface that renders a date the operator types, and what it is.
 const SURFACES: Array<{ file: string; what: string }> = [
   { file: 'components/shared/DateTimeRangePicker.tsx', what: 'the Start -> End range row on every data page (Sales, Returns, Inventory, Branches, Expenses, Contacts, Dashboard, Audit log, Stock changes, reports)' },
-  { file: 'components/inventory/ReceiveBatchModal.tsx', what: 'batch received date, expiry, credit due' },
   { file: 'components/inventory/ManageBatchesModal.tsx', what: 'batch date (the lot code) and expiry' },
-  { file: 'components/inventory/FastStockInModal.tsx', what: 'fast stock-in received date, expiry, credit due' },
-  { file: 'components/inventory/InventoryStockModals.tsx', what: 'the add / remove / set stock dialog received date' },
-  { file: 'components/products/forms/BulkAddStockModal.tsx', what: 'bulk add-stock received date' },
+  // The one Stock Session (UI-STOCK-2) replaced Receive batch, Adjust stock and
+  // Bulk add stock (retired by UI-STOCK-3); its dates live in three parts.
+  { file: 'components/stock-session/StockSessionSharedDetails.tsx', what: 'the stock session received date' },
+  { file: 'components/stock-session/StockSessionLineEntry.tsx', what: 'a stock session line expiry' },
+  { file: 'components/stock-session/StockSessionPaymentStep.tsx', what: 'the stock session credit due date' },
   { file: 'components/products/forms/ProductForm.tsx', what: 'product expiry date' },
   { file: 'components/products/StockInSessionsSection.tsx', what: 'stock-in session received date and credit due date' },
   { file: 'components/fees/FeeForm.tsx', what: 'the Expenses record date' },

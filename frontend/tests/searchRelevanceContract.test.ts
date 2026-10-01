@@ -216,7 +216,6 @@ check('no picker re-introduces a bare alphabetical sort over search results', ()
     '../src/components/branches/TransferModal.tsx',
     '../src/components/returns/NewSupplierReturnModal.tsx',
     '../src/components/inventory/FastStockInModal.tsx',
-    '../src/components/products/forms/StockAdjustModal.tsx',
     '../src/components/returns/NewReturnModal.tsx',
     '../src/components/promotions/PromotionsPage.tsx',
   ]) {

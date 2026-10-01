@@ -557,23 +557,20 @@ await runTest('branch transfer exposes the shared icon scanner in single and mul
 })
 
 await runTest('stock workflow scanners stay inside their active product picker', () => {
-  const adjustmentSource = fs.readFileSync(new URL('../src/components/products/forms/StockAdjustModal.tsx', import.meta.url), 'utf8')
+  // Add, Remove and Set are one Stock Session since UI-STOCK-3 (the separate
+  // Change-stock form is retired); its line entry owns the scanner.
   const stockInSource = fs.readFileSync(new URL('../src/components/inventory/FastStockInModal.tsx', import.meta.url), 'utf8')
+  const lineEntrySource = fs.readFileSync(new URL('../src/components/stock-session/StockSessionLineEntry.tsx', import.meta.url), 'utf8')
   const ledgerSource = fs.readFileSync(new URL('../src/components/products/StockChangeSection.tsx', import.meta.url), 'utf8')
 
-  assert.match(
-    adjustmentSource,
-    /const handleProductScan = useCallback\([\s\S]*?setResults\(\[\]\)[\s\S]*?setSearch\(barcode\)/,
-    'Add, Remove, and Set Quantity must route scans to their modal query',
-  )
-  assert.match(adjustmentSource, /<ScanSearchButton\b[\s\S]*?onDetected=\{handleProductScan\}/)
+  assert.match(lineEntrySource, /<ScanSearchButton onDetected=\{onScan\}/, 'the session line entry owns its scanner')
   assert.match(
     stockInSource,
-    /<ScanSearchButton onDetected=\{\(value\) => \{[\s\S]*?setQuery\(barcode\)[\s\S]*?setScannedBarcode\(barcode\)/,
-    'Add Stock must keep barcode lookup in its own query and exact-scan state',
+    /onScan=\{\(value\) => \{[\s\S]*?setQuery\(barcode\)[\s\S]*?setScannedBarcode\(barcode\)/,
+    'every mode keeps barcode lookup in the session query and exact-scan state',
   )
 
-  assert.match(ledgerSource, /const stockWorkflowOpen = adjustType !== null \|\| fastStockInOpen/)
+  assert.match(ledgerSource, /const stockWorkflowOpen = fastStockInOpen/)
   assert.match(ledgerSource, /const blurLedgerSearch = useCallback\([\s\S]*?activeElement\.blur\(\)/)
   assert.match(ledgerSource, /const openFastStockIn = useCallback\(\(nextMode: StockMode = 'add'\) => \{\s*blurLedgerSearch\(\)/)
   assert.match(ledgerSource, /<SearchInput id="stock-ledger-search"[^>]*disabled=\{stockWorkflowOpen\}/)

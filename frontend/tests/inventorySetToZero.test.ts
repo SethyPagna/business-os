@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { stockAdjustQuantityError, STOCK_ADJUST_QUANTITY_FALLBACKS } from '../src/utils/stockReceiptFields.ts'
+import { lineEntryRefusal } from '../src/utils/stockSessionDraft.ts'
 
 // The checkout is CRLF on disk and LF in the index; the pins are written
 // against LF so they hold in both.
@@ -18,6 +19,11 @@ const read = (rel: string): string => readFileSync(new URL(rel, import.meta.url)
 // ONE rule, ONE implementation: `stockAdjustQuantityError` in
 // utils/stockReceiptFields.ts, which both surfaces call and which returns the
 // PACK KEY of the refusal (never a hard-coded English string).
+//
+// UI-STOCK-3 (30 Sep 2026): both of those surfaces were retired into the one
+// Stock Session, whose entry row refuses through lineEntryRefusal
+// (utils/stockSessionDraft.ts). The same rule is pinned there, executed; the
+// helper's own table stays below until its owner removes it (no caller left).
 
 let failed = 0
 
@@ -32,9 +38,6 @@ function runTest(name: string, fn: () => void): void {
   }
 }
 
-const inventorySource = read('../src/components/inventory/Inventory.tsx')
-const adjustModalSource = read('../src/components/products/forms/StockAdjustModal.tsx')
-const stockModalsSource = read('../src/components/inventory/InventoryStockModals.tsx')
 const en = JSON.parse(read('../src/lang/en.json')) as Record<string, string>
 const km = JSON.parse(read('../src/lang/km.json')) as Record<string, string>
 
@@ -77,38 +80,32 @@ runTest('the refusal names a pack key that exists in BOTH packs', () => {
   }
 })
 
-// -- and the two call sites actually route through it, with no hard-coded
-// English left behind on either.
-runTest('the Inventory page per-row adjust dropped its blanket positive guard', () => {
-  assert.doesNotMatch(inventorySource, /if \(!qty \|\| qty <= 0\) return notify\('Invalid quantity'/)
-  assert.match(inventorySource, /const quantityError = stockAdjustQuantityError\(adjustForm\.type, adjustForm\.quantity\)/)
-  assert.match(inventorySource, /if \(quantityError\) return notify\(tr\(quantityError, STOCK_ADJUST_QUANTITY_FALLBACKS\[quantityError\]\), 'error'\)/)
-})
+// -- and the one surface left refuses by the same rule, through its own
+// pure entry-row check, with pack keys only.
+function sessionRefusal(mode: 'add' | 'remove' | 'set', quantity: string) {
+  return lineEntryRefusal({
+    mode, hasProduct: true, branchId: '1', quantity, unitCost: '2', supplierName: 'S', lotChoice: mode === 'add' ? 'new' : 'none',
+    lot: null, canReceive: true, canEditCosts: true, branchQuantity: 5,
+  })?.key ?? null
+}
 
-runTest('the Products page StockAdjustModal dropped the identical guard', () => {
-  assert.doesNotMatch(adjustModalSource, /if \(!qty \|\| qty <= 0\) \{ notify\('Invalid quantity'/)
-  assert.match(adjustModalSource, /const quantityError = stockAdjustQuantityError\(adjustForm\.type, adjustForm\.quantity\)/)
-  assert.match(adjustModalSource, /if \(quantityError\) \{ notify\(tr\(quantityError, STOCK_ADJUST_QUANTITY_FALLBACKS\[quantityError\]\), 'error'\); return \}/)
-})
-
-runTest('both surfaces import the one helper rather than re-deriving the rule', () => {
-  for (const source of [inventorySource, adjustModalSource]) {
-    assert.match(source, /stockAdjustQuantityError/)
-    assert.match(source, /STOCK_ADJUST_QUANTITY_FALLBACKS/)
+runTest('the Stock Session posts a set to zero and refuses a blank or negative one', () => {
+  assert.equal(sessionRefusal('set', '0'), null)
+  for (const raw of ['', '   ', '-1', 'abc']) assert.equal(sessionRefusal('set', raw), 'fast_stockin_set_qty', JSON.stringify(raw))
+  assert.equal(sessionRefusal('remove', '0'), 'fast_stockin_qty')
+  assert.equal(sessionRefusal('add', '-2'), 'fast_stockin_qty')
+  for (const mode of ['add', 'remove', 'set'] as const) assert.equal(sessionRefusal(mode, '3'), null, mode)
+  // An Add of 0 is an all-free item (owner, 30 Sep): its free row carries the units.
+  assert.equal(sessionRefusal('add', '0'), null)
+  for (const key of ['fast_stockin_qty', 'fast_stockin_set_qty']) {
+    assert.equal(typeof en[key], 'string', `en.${key}`)
+    assert.equal(typeof km[key], 'string', `km.${key}`)
   }
 })
 
-// -- the shared form both surfaces render must not fight the rule with its
-// own input floor: a set can be typed down to 0, an add/remove cannot.
-runTest('the shared adjust form floors the Qty input at 0 only in set mode', () => {
-  // Read the ONE element, not the whole file -- the cost and price inputs
-  // below it legitimately carry min="0" and must not answer for this one.
-  const start = stockModalsSource.indexOf('id="inventory-adjust-quantity"')
-  assert.notEqual(start, -1, 'the adjust quantity input is still identifiable')
-  const element = stockModalsSource.slice(start, stockModalsSource.indexOf('/>', start) + 2)
-  assert.ok(element.includes("min={adjustForm.type === 'set' ? 0 : 1}"), element)
-  assert.doesNotMatch(element, /min="0"/)
-  assert.doesNotMatch(element, /min="1"/)
+runTest('no retired per-row guard survives on the Inventory page', () => {
+  const inventorySource = read('../src/components/inventory/Inventory.tsx')
+  assert.doesNotMatch(inventorySource, /if \(!qty \|\| qty <= 0\) return notify\('Invalid quantity'/)
 })
 
 if (failed > 0) {

@@ -236,6 +236,8 @@ const inventoryRoute = loadReal('routes/inventory.ts', {
   '../lib/productBatches': productBatches,
   '../lib/batchCode': batchCode,
   '../lib/stockReceiptGate': stockReceiptGate,
+  '../lib/stockSessionMath': loadReal('lib/stockSessionMath.ts', { './moneyPrecision': moneyPrecision }),
+  '../lib/schemaProbe': loadReal('lib/schemaProbe.ts'),
   // REAL, not a stub: the replay, conflict and release checks below run
   // through the per-line receipt guard.
   '../lib/stockMutationReceipt': stockMutationReceipt,

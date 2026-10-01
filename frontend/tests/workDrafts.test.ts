@@ -105,7 +105,7 @@ await runTest('draft keys are scoped to organization and user', () => {
 const readSource = (path: string): string => readFileSync(new URL(path, import.meta.url), 'utf8').replace(/\r\n?/g, '\n')
 const productFormSource = readSource('../src/components/products/forms/ProductForm.tsx')
 const fastStockInSource = readSource('../src/components/inventory/FastStockInModal.tsx')
-const receiveBatchSource = readSource('../src/components/inventory/ReceiveBatchModal.tsx')
+const branchesSource = readSource('../src/components/branches/Branches.tsx')
 
 await runTest('all flows ride the ONE store -- no leftover hand-rolled localStorage dialects', () => {
   // ProductForm: restore honors server updated_at, persists form + ordered
@@ -118,21 +118,18 @@ await runTest('all flows ride the ONE store -- no leftover hand-rolled localStor
   assert.match(productFormSource, /if \(restoredLegacyDraftKeyRef\.current\) \{\s+clearWorkDraft\(restoredLegacyDraftKeyRef\.current\)/)
   assert.match(productFormSource, /flushPendingWorkDraft\(draftKey\)/)
   assert.doesNotMatch(productFormSource, /localStorage\.(get|set|remove)Item\(draftKey/)
-  // FastStockIn: header + in-progress line persist; Done (and only Done)
-  // completes the batch and clears; X/backdrop keep the shipment
+  // The Stock Session (FastStockInModal since UI-STOCK-2): header + items
+  // persist; Complete Session (and only that) clears; X/backdrop keep it.
   assert.match(fastStockInSource, /scopedWorkDraftKey\('fast_stockin'\)/)
-  assert.match(fastStockInSource, /readWorkDraft<FastStockInDraft>\(fastStockInDraftKey\)/)
-  assert.match(fastStockInSource, /scheduleWorkDraftWrite<FastStockInDraft>\(fastStockInDraftKey/)
+  assert.match(fastStockInSource, /readWorkDraft<unknown>\(fastStockInDraftKey\)/)
+  assert.match(fastStockInSource, /scheduleWorkDraftWrite<StockSessionDraft>\(fastStockInDraftKey/)
   assert.match(fastStockInSource, /clearWorkDraft\(fastStockInDraftKey\)\s+onClose\(\)/)
   // deliberately NO dirty-work guard for the draft-backed shipment
   assert.doesNotMatch(fastStockInSource, /registerDirtyWork/)
-  assert.match(receiveBatchSource, /scheduleWorkDraftWrite\(draftKey/)
-  assert.match(receiveBatchSource, /scopedWorkDraftKey\(`receive_\$\{product\.id\}`\)/)
-})
-
-await runTest('rider: ReceiveBatchModal\'s nav-guard dot points at the live Branches hub, not the retired inventory page', () => {
-  assert.match(receiveBatchSource, /pageId: 'branches',/)
-  assert.doesNotMatch(receiveBatchSource, /pageId: 'inventory',/)
+  // Receive batch was retired into the session (UI-STOCK-3): a chip it parked
+  // still reads its own scoped draft, which goes only once the session closes.
+  assert.match(branchesSource, /scopedWorkDraftKey\(`receive_\$\{productId\}`\)/)
+  assert.match(branchesSource, /if \(receiveTarget\.legacyDraftKey\) clearWorkDraft\(receiveTarget\.legacyDraftKey\)/)
 })
 
 if (failed > 0) {

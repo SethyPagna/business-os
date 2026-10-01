@@ -1,4 +1,5 @@
 import { useMemo } from 'react'
+import Tag from 'lucide-react/dist/esm/icons/tag.js'
 import AppSelect from '../shared/AppSelect'
 import { STOCK_CONDITION_TAGS } from '../../utils/stockCondition.ts'
 
@@ -29,6 +30,8 @@ export type StockConditionTagRowProps = {
   tr: Translate
   disabled?: boolean
   id?: string
+  /** 'select': ONE dropdown whose first option is the untagged default (Stock Session, S4). */
+  variant?: 'row' | 'select'
 }
 
 // The labels read in full on every screen: on a narrow one the segments keep
@@ -38,7 +41,7 @@ const SEGMENT_BASE = 'h-9 shrink-0 whitespace-nowrap rounded-lg border-2 px-2 te
 const SEGMENT_ON = 'border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
 const SEGMENT_OFF = 'border-gray-200 text-gray-600 dark:border-gray-600 dark:text-gray-400'
 
-export default function StockConditionTagRow({ mode, value, onChange, tr, disabled = false, id }: StockConditionTagRowProps) {
+export default function StockConditionTagRow({ mode, value, onChange, tr, disabled = false, id, variant = 'row' }: StockConditionTagRowProps) {
   const tagged = Boolean(value)
   const plainLabel = mode === 'remove'
     ? tr('stock_remove_entirely', 'Remove entirely', 'ដកចេញទាំងស្រុង')
@@ -51,6 +54,29 @@ export default function StockConditionTagRow({ mode, value, onChange, tr, disabl
   const selectedTag = tagged ? value : STOCK_CONDITION_TAGS[0]
   // The label IS the constant -- no tr(), in any language.
   const tagOptions = useMemo(() => STOCK_CONDITION_TAGS.map((tag) => ({ value: tag, label: tag })), [])
+  const plainValueLabel = mode === 'remove'
+    ? plainLabel
+    : tr('stock_tag_sellable', 'Sellable', 'លក់បាន')
+  const selectOptions = useMemo(() => [{ value: '', label: plainValueLabel }, ...tagOptions], [plainValueLabel, tagOptions])
+
+  if (variant === 'select') {
+    return (
+      <div className="relative min-w-0" title={taggedLabel} data-stock-condition-select={mode}>
+        <Tag className="pointer-events-none absolute left-2.5 top-1/2 z-10 h-4 w-4 -translate-y-1/2 text-gray-400" aria-hidden="true" />
+        <AppSelect
+          id={id}
+          value={value}
+          options={selectOptions}
+          disabled={disabled}
+          ariaLabel={taggedLabel}
+          onChange={onChange}
+          className="w-full"
+          buttonClassName="h-10 w-full pl-8 pr-2 text-sm"
+          optionClassName="text-sm"
+        />
+      </div>
+    )
+  }
 
   return (
     <div className="flex w-full min-w-0 items-center gap-1.5 overflow-x-auto overscroll-x-contain pb-0.5" data-stock-condition-row={mode}>

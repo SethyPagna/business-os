@@ -7,6 +7,7 @@ import {
 } from '../src/utils/mobileHomeTiles.ts'
 import { DEFAULT_MOBILE_SECTION_NAV_MODE } from '../src/utils/sectionNavPreference.ts'
 import { getMobileSectionIcon } from '../src/components/navigation/mobileSectionIcons.ts'
+import { ConflictIcon } from '../src/components/shared/ConflictIcon.ts'
 import { getHubDestinations } from '../src/components/shared/hubNavigation.ts'
 
 let failed = 0
@@ -129,6 +130,7 @@ runTest('every permission-visible subpage has its own semantic icon', () => {
   })
   assert.equal(getMobileSectionIcon('contacts', 'duplicates'), getMobileSectionIcon('products', 'duplicates'),
     'Conflicts uses the same visual cue in Contacts and Products')
+  assert.equal(getMobileSectionIcon('products', 'duplicates'), ConflictIcon, 'Conflicts uses the one conflict icon (triangle with !, owner 30 Sep 2026)')
   const otherIcons = icons.filter((_, index) => pairs[index][1] !== 'duplicates')
   assert.equal(new Set(otherIcons).size, otherIcons.length, 'all other subpages retain distinct visual cues')
   assert.equal(new Set(icons).size, pairs.length - 1, 'only the shared Conflicts destinations reuse an icon')

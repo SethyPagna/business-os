@@ -41,8 +41,9 @@ function runTest(name: string, fn: () => void): void {
 }
 
 const sectionSource = readFileSync(new URL('../src/components/products/StockInSessionsSection.tsx', import.meta.url), 'utf8')
-const createModalSource = readFileSync(new URL('../src/components/products/CreateProductsSessionModal.tsx', import.meta.url), 'utf8')
-const fastModalSource = readFileSync(new URL('../src/components/inventory/FastStockInModal.tsx', import.meta.url), 'utf8')
+// The Add-products saved list (CreateProductsSessionModal) and the fast
+// stock-in queue are one Items list now (UI-STOCK-2/3): StockSessionItems.
+const itemsSource = readFileSync(new URL('../src/components/stock-session/StockSessionItems.tsx', import.meta.url), 'utf8')
 
 // A span whose class list clips to one line, wrapping a product-name binding.
 const CLIPPED_NAME = /className="[^"]*\b(?:truncate|dense-cell-truncate)\b[^"]*"[^>]*>[^<{]*\{(?:row\.product_name|row\.name|line\.productName)\}/
@@ -74,26 +75,13 @@ runTest('the receipt shows the full product name, wrapped, with the barcode unde
   assert.match(receipt, /\{canViewCosts \? <td[^>]*>\{unitCost == null[^]*?<\/td> : null\}/)
 })
 
-runTest('the Add-products saved list wraps the name and puts the barcode under it', () => {
-  const list = createModalSource.slice(createModalSource.indexOf('{rows.length ? <div className="mt-2 max-h-56 space-y-1 overflow-y-auto">'), createModalSource.indexOf("tr('create_products_none_yet'"))
-  assert.ok(list.length > 0, 'saved list located')
-  assert.doesNotMatch(list, CLIPPED_NAME)
-  assert.match(list, /<span className="block break-words">\{row\.status === 'saved' \? '✅' : '•'\} \{row\.name\}<\/span>/)
-  assert.match(list, /\{row\.barcode \? <span className="block break-all dense-id text-\[10px\] text-gray-400">\{row\.barcode\}<\/span> : null\}/)
-  // the meta line wraps too -- brand · supplier · branch · date · lot is
-  // exactly the row an operator checks, not decoration to clip
-  assert.match(list, /<span className="block break-words text-\[10px\] text-gray-500">/)
-  assert.doesNotMatch(list, /block truncate/)
-})
-
-runTest('the fast stock-in queue wraps the name and shows the barcode under it', () => {
-  const start = fastModalSource.indexOf('{received.map((line) => (')
-  const queue = fastModalSource.slice(start, fastModalSource.indexOf('))}', start))
-  assert.ok(start > 0 && queue.length > 0, 'queue located')
-  assert.doesNotMatch(queue, CLIPPED_NAME)
-  assert.match(queue, /<span className="block break-words">[^]*?\{line\.productName\}[^]*?<\/span>/)
-  assert.match(queue, /\{line\.product\.barcode \? <span className="block break-all dense-id text-\[10px\] text-gray-400">\{line\.product\.barcode\}<\/span> : null\}/)
-  assert.doesNotMatch(queue, /min-w-0 truncate/)
+runTest('the Stock Session Items list wraps the full name, never clipping it', () => {
+  const start = itemsSource.indexOf('{line.productName}')
+  assert.ok(start > 0, 'Items list located')
+  const row = itemsSource.slice(itemsSource.lastIndexOf('<li ', start), itemsSource.indexOf('</li>', start))
+  assert.doesNotMatch(row, CLIPPED_NAME)
+  assert.match(row, /<span className="min-w-0 break-words[^"]*">\s*\{line\.productName\}/)
+  assert.doesNotMatch(row, /min-w-0 truncate|line-clamp-1/)
 })
 
 const ledgerSource = readFileSync(new URL('../src/components/products/StockChangeSection.tsx', import.meta.url), 'utf8')

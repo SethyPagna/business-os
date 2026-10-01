@@ -104,7 +104,7 @@ console.log('PASS the receipt reaches the table, the card, the detail modal and 
 // facts. A separate lower Barcode fact made the identity look like one of many
 // unrelated technical fields.
 const detailStart = sc.indexOf('{detail ? (')
-const detailEnd = sc.indexOf('{adjustType ? (', detailStart)
+const detailEnd = sc.indexOf('{exportRange ? (', detailStart)
 const movementDetail = sc.slice(detailStart, detailEnd)
 assert.ok(detailStart > 0 && detailEnd > detailStart, 'stock movement detail located')
 assert.ok(

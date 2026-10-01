@@ -207,13 +207,13 @@ await runTest('the sheet reads its derived state from the pure module, not from 
 await runTest('every product picker mounts the shared option sheet', () => {
   // The POS mounts ProductDetailSheet itself -- it IS the sheet. Every other
   // surface reaches that same component through the shared adapter.
+  // StockAdjustModal and CreateProductsSessionModal were retired into the
+  // Stock Session (FastStockInModal) on 30 Sep 2026.
   const sites = [
-    ['components', 'products', 'forms', 'StockAdjustModal.tsx'],
     ['components', 'inventory', 'FastStockInModal.tsx'],
     ['components', 'branches', 'TransferModal.tsx'],
     ['components', 'sales', 'SaleDetailModal.tsx'],
     ['components', 'returns', 'NewReturnModal.tsx'],
-    ['components', 'products', 'CreateProductsSessionModal.tsx'],
   ]
   for (const site of sites) {
     const text = src(...site)
@@ -577,11 +577,10 @@ await runTest('confirming a pick does not fire the host discard path', () => {
   assert.ok(
     !body.includes('onClose()'),
     'confirmPick calling onClose ran the host DISCARD path on top of its accept path -- '
-    + 'CreateProductsSessionModal nulls the picked product in its onClose, so the line form never opened',
+    + 'a host that nulls the picked product in its onClose would never open its line form',
   )
   // ...which only works because every host closes its own sheet on the pick.
   const closesItself: Array<[string[], RegExp]> = [
-    [['components', 'products', 'forms', 'StockAdjustModal.tsx'], /onPick=\{\(product, selection\) => \{\s*\n\s*setPicking\(null\)/],
     [['components', 'branches', 'TransferModal.tsx'], /setPicking\(null\)\s*\n\s*\}\}/],
     [['components', 'returns', 'NewReturnModal.tsx'], /setReplacementPicking\(null\)\s*\n\s*\}\}/],
     [['components', 'inventory', 'FastStockInModal.tsx'], /closeCandidateOptions\(\)/],
@@ -589,19 +588,11 @@ await runTest('confirming a pick does not fire the host discard path', () => {
   for (const [site, pattern] of closesItself) {
     assert.match(src(...site), pattern, `${site.join('/')} must close the sheet from inside its own onPick`)
   }
-  // CreateProductsSessionModal closes it by gate rather than by setter: the
-  // sheet is mounted only while no product is picked.
-  assert.match(
-    src('components', 'products', 'CreateProductsSessionModal.tsx'),
-    /\{selectedGroup && !selectedProduct \? \(/,
-    'the sheet unmounts the moment the pick sets a product, and the line form takes its place',
-  )
 })
 
 await runTest('a single-choice group opens on the row it offers, not on the family root', () => {
   for (const site of [
     ['components', 'inventory', 'FastStockInModal.tsx'],
-    ['components', 'products', 'CreateProductsSessionModal.tsx'],
   ] as string[][]) {
     const text = src(...site)
     assert.doesNotMatch(

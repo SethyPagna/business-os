@@ -77,6 +77,13 @@ export type StockReceiptGateInput = {
   unitCostUsd?: number | string | null
   freeGoods?: boolean | null
   attribution?: string | null
+  /**
+   * The paid quantity and the free units riding with it. Nothing paid and
+   * something free is a fully free receipt: it declares itself free, so its
+   * cost is 0 whatever was typed.
+   */
+  quantity?: number | string | null
+  freeQuantity?: number | string | null
 }
 
 /**
@@ -97,6 +104,7 @@ export function stockReceiptGateCode(input: StockReceiptGateInput): '' | StockRe
   if (!input.isStockIn) return ''
   if (input.attribution === 'correction') return ''
   if (!String(input.supplierName ?? '').trim() && !String(input.lotSupplierName ?? '').trim() && !input.lotAttributionDeferred) return 'supplier_required'
+  if (Number(input.quantity) === 0 && Number(input.freeQuantity) > 0) return ''
   const typed = typeof input.unitCostUsd === 'string' ? input.unitCostUsd.trim() : input.unitCostUsd
   if (typed === '' || typed == null) return 'cost_required'
   const cost = Number(typed)
@@ -105,6 +113,17 @@ export function stockReceiptGateCode(input: StockReceiptGateInput): '' | StockRe
   if (cost === 0 && !input.freeGoods) return 'free_goods_required'
   return ''
 }
+
+export const FREE_QUANTITY_MAX = 1_000_000
+
+/** Free units on a receipt: a whole number from 0 up; absent or blank is 0. Null when unreadable. */
+export function parseFreeQuantity(value: unknown): number | null {
+  if (value == null || (typeof value === 'string' && value.trim() === '')) return 0
+  const parsed = typeof value === 'number' ? value : Number(String(value).trim())
+  return Number.isInteger(parsed) && parsed >= 0 && parsed <= FREE_QUANTITY_MAX ? parsed : null
+}
+
+export const FREE_QUANTITY_NOT_RECEIPT = { error: 'Free units apply to Add only', code: 'free_quantity_not_receipt' } as const
 
 const MESSAGES: Record<StockReceiptGateCode, string> = {
   supplier_required: 'A stock-in must name the supplier the goods came from',

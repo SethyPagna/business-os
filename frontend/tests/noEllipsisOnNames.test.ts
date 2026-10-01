@@ -421,11 +421,10 @@ const TOUCHED_FILES: string[] = [
   'components/files/FilePickerModal.tsx',
   'components/files/FilesPage.tsx',
   'components/inventory/InventoryMovementsSurface.tsx',
-  'components/inventory/InventoryReasonManagerModal.tsx',
+  'components/inventory/FastStockInModal.tsx',
   'components/inventory/InventoryStockModals.tsx',
   'components/inventory/ManageBatchesModal.tsx',
   'components/inventory/ProductHistoryPreviewModal.tsx',
-  'components/inventory/ReceiveBatchModal.tsx',
   'components/loyalty-points/LoyaltyPointsPage.tsx',
   'components/navigation/Sidebar.tsx',
   'components/notes/NotesPage.tsx',
@@ -433,14 +432,12 @@ const TOUCHED_FILES: string[] = [
   'components/pos/POS.tsx',
   'components/pos/ProductCard.tsx',
   'components/pos/ProductDetailSheet.tsx',
-  'components/products/CreateProductsSessionModal.tsx',
   'components/products/Products.tsx',
   'components/products/ProductsImageOnlyView.tsx',
   'components/products/StockInSessionsSection.tsx',
   'components/products/TaggedStockRows.tsx',
   'components/products/WireImagesReviewModal.tsx',
   'components/products/forms/ProductForm.tsx',
-  'components/products/forms/StockAdjustModal.tsx',
   'components/products/import/BulkImportModal.tsx',
   'components/products/import/ImportHub.tsx',
   'components/products/lookups/ManageBrandsModal.tsx',
@@ -467,6 +464,12 @@ const TOUCHED_FILES: string[] = [
   'components/shared/DraftChipFloat.tsx',
   'components/shared/MinimizedWorkTray.tsx',
   'components/shared/NotesWidget.tsx',
+  'components/shared/ReasonListEditor.tsx',
+  'components/shared/StockReasonsManagerModal.tsx',
+  'components/stock-session/StockSessionItems.tsx',
+  'components/stock-session/StockSessionLineEntry.tsx',
+  'components/stock-session/StockSessionReviewStep.tsx',
+  'components/stock-session/StockSessionSharedDetails.tsx',
   'components/users/DeviceApprovals.tsx',
   'components/users/UserProfileModal.tsx',
   'components/users/Users.tsx',
@@ -522,9 +525,6 @@ const DELIBERATELY_CLIPPED: Record<string, Array<[string, Mechanism, string]>> =
   'components/pos/ProductDetailSheet.tsx': [
     ["batchesError || posCopy('Could not load received dates', 'មិនអាចផ្ទុកថ្ងៃចូលបានទេ')", 'static-label', 'A load-failure message, not a record; the retry control sits beside it.'],
   ],
-  'components/products/CreateProductsSessionModal.tsx': [
-    ["tr('create_products_header_step', 'Shared details (entered once)')", 'language-pack', 'A step heading from the language pack.'],
-  ],
   'components/products/Products.tsx': [
     ['opt.label', 'static-label', 'A bulk-action chip caption (productChipLabels), the same words as the menu it triggers.'],
   ],
@@ -543,6 +543,9 @@ const DELIBERATELY_CLIPPED: Record<string, Array<[string, Mechanism, string]>> =
   ],
   'components/shared/NotesWidget.tsx': [
     ['label', 'static-label', 'The floating widget header caption; the notes it holds scroll.'],
+  ],
+  'components/stock-session/StockSessionSharedDetails.tsx': [
+    ['label', 'static-label', 'The tiny inset caption of a number box (Qty / Cost / Price) from the pack; the label title and aria-label carry it whole, and the typed number never clips.'],
   ],
   'components/users/UserProfileModal.tsx': [
     ["tr('session_duration', 'Default login duration')", 'language-pack', 'A field caption from the language pack.'],
@@ -608,8 +611,6 @@ const SCROLLED_VALUES: Array<[string, string]> = [
   ['components/sales/ExportModal.tsx', 'row.product_name'],
   ['components/returns/EditReturnModal.tsx', 'item.product_name'],
   ['components/dashboard/Dashboard.tsx', 'p.product_name'],
-  ['components/products/forms/StockAdjustModal.tsx', 'group.name || String(lead?.id)'],
-  ['components/inventory/ReceiveBatchModal.tsx', 'product.name'],
   ['components/inventory/ManageBatchesModal.tsx', 'product.name'],
   ['components/inventory/InventoryStockModals.tsx', 'transferModal.name'],
   // customer / supplier / delivery / cashier / user names
@@ -630,8 +631,9 @@ const SCROLLED_VALUES: Array<[string, string]> = [
   ['components/products/lookups/ManageBrandsModal.tsx', 'entry.name'],
   ['components/products/lookups/ManageCategoriesModal.tsx', 'category.name'],
   ['components/products/lookups/ManageUnitsModal.tsx', 'unit.name'],
-  ['components/inventory/InventoryReasonManagerModal.tsx', 'entry.label'],
-  ['components/returns/ReturnReasonManagerModal.tsx', 'reason'],
+  // The stock, return and expense managers all list their rows through the
+  // one shared editor since 30 Sep 2026.
+  ['components/shared/ReasonListEditor.tsx', 'item.label'],
   ['components/inventory/InventoryMovementsSurface.tsx', 'group.reasonPrimary'],
   ['components/inventory/ManageBatchesModal.tsx', 'batch.notes'],
   ['components/branches/Branches.tsx', 'branch.notes'],

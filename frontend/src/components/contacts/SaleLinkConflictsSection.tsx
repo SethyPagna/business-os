@@ -11,6 +11,7 @@ import {
 } from './contactDuplicates'
 import type { SaleLinkConflicts, SaleLinkMismatch, SaleLinkMissing } from './contactDuplicates'
 import { useApp } from '../../AppContext.tsx'
+import { ConflictIcon, CONFLICT_ICON_CLASS } from '../shared/ConflictIcon.ts'
 
 type TranslateFn = (key: string) => string | undefined
 type NotifyFn = (message: string, tone?: string) => void
@@ -249,6 +250,7 @@ export default function SaleLinkConflictsSection({ t, notify }: { t: TranslateFn
               <div key={`mm-${key}`} className={`rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 dark:border-amber-900/40 dark:bg-amber-950/30 ${busy ? 'opacity-60' : ''}`}>
                 <div className="mb-1.5 flex items-center justify-between gap-2">
                   <div className="flex items-center gap-1.5">
+                    <ConflictIcon aria-hidden="true" className={`h-3.5 w-3.5 shrink-0 ${CONFLICT_ICON_CLASS}`} />
                     <span className="text-xs font-semibold text-amber-800 dark:text-amber-300">{tr('link_mismatch_title', 'Phone differs from linked contact')}</span>
                     {row.dismissed ? <span className="rounded bg-gray-200 px-1.5 py-0.5 text-[10px] font-medium text-gray-600 dark:bg-white/10 dark:text-gray-300">{tr('kept', 'Kept')}</span> : null}
                   </div>
@@ -321,6 +323,7 @@ export default function SaleLinkConflictsSection({ t, notify }: { t: TranslateFn
               <div key={`ms-${key}`} className={`rounded-xl border border-blue-200 bg-blue-50 px-3 py-2.5 dark:border-blue-900/40 dark:bg-blue-950/30 ${busy ? 'opacity-60' : ''}`}>
                 <div className="mb-1.5 flex items-center justify-between gap-2">
                   <div className="flex items-center gap-1.5">
+                    <ConflictIcon aria-hidden="true" className={`h-3.5 w-3.5 shrink-0 ${CONFLICT_ICON_CLASS}`} />
                     <span className="text-xs font-semibold text-blue-700 dark:text-blue-300">{tr('link_missing_title', 'No matching contact')}</span>
                     {row.dismissed ? <span className="rounded bg-gray-200 px-1.5 py-0.5 text-[10px] font-medium text-gray-600 dark:bg-white/10 dark:text-gray-300">{tr('kept', 'Kept')}</span> : null}
                   </div>

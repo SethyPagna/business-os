@@ -21,7 +21,7 @@ import { buildProductSalesLedgerSql } from '../lib/productSalesLedger'
 import { getFamilyStockStats } from '../lib/familyStockStats'
 import { loadLowStockConfig, lowStockThresholdSql, type LowStockConfig } from '../lib/lowStockSettings'
 import { requireAuth, type SessionUser } from '../lib/auth'
-import { audit } from '../lib/audit'
+import { audit, changedFields } from '../lib/audit'
 import { getPermissionTier, getActionTier } from '../lib/permissions'
 import { STOCK_REASON_MAX_LENGTH, stockReasonTooLong } from '../lib/stockReason'
 import { withStockMutationReceipt, type StockMutationAtomicMark } from '../lib/stockMutationReceipt'
@@ -31,10 +31,12 @@ import { bumpVersion } from '../lib/cache'
 import { findIdentityMatch, identityBarcodeKey, type ProductIdentityRow } from '../lib/productIdentity'
 import { buildIssueStateClauses, buildLikeAliasClause, tokenizeSearchWords } from '../lib/searchMatch'
 import { buildFamilyRelevanceOrderSql, buildProductSearchQuery } from '../lib/productSearchQuery'
-import { fifoRemovalAllocations, isStockRemovalConflict, listBatchesForProduct, planBranchStockRemoval, planReceiveBatchStock, planRemoveStockAcrossBatches, prepareReceiptLotTarget, receiveBatchStock, restoreBatchStockStatements, removeStockFromBatch, InsufficientBatchStockError, type ReceiptCostPreimage, type ReceiptLotTarget, type StockWriteStatement } from '../lib/productBatches'
+import { fifoRemovalAllocations, isStockRemovalConflict, listBatchesForProduct, parseReceiptSellingPrice, planBranchStockRemoval, planReceiptSellingPrice, planReceiveBatchStock, planRemoveStockAcrossBatches, prepareReceiptLotTarget, receiveBatchStock, restoreBatchStockStatements, removeStockFromBatch, InsufficientBatchStockError, type ReceiptCostPreimage, type ReceiptLotTarget, type ReceiptSellingPriceRow, type StockWriteStatement } from '../lib/productBatches'
 import { applyMovementRevert, type RevertMovementRow } from '../lib/stockRevert'
 import { normalizeTypedDate } from '../lib/batchCode'
-import { appendReceiptNotes, FREE_GOODS_REASON_NOTE, stockReceiptGateCode, stockReceiptGateMessage } from '../lib/stockReceiptGate'
+import { appendReceiptNotes, FREE_GOODS_REASON_NOTE, FREE_QUANTITY_NOT_RECEIPT, parseFreeQuantity, stockReceiptGateCode, stockReceiptGateMessage } from '../lib/stockReceiptGate'
+import { effectiveUnitCost } from '../lib/stockSessionMath'
+import { hasColumn } from '../lib/schemaProbe'
 import { parseDatedStockCountEntries, buildDatedStockCountPlan } from '../lib/datedStockCountRoute'
 import { applyDatedStockCountPlan, DatedStockCountConflictError } from '../lib/datedStockCountApply'
 import { parseRawDatedCountRows, resolveDatedStockCountRows } from '../lib/datedStockCountResolve'
@@ -66,7 +68,7 @@ import {
   allocateTaggedLots, isTaggedLotConflict, planDisposeTagged, planHoldAsTagged, planRestoreTagged,
   readOpenTaggedLots, readTaggedLotGroups, TAGGED_LOT_CONFLICT_CODE,
 } from '../lib/damagedLotActions'
-import { addMoney4, roundMoney4 } from '../lib/moneyPrecision'
+import { addMoney4, multiplyMoney4, roundMoney4 } from '../lib/moneyPrecision'
 
 // Inventory routes, ported from backend/src/routes/inventory.ts.
 //
@@ -1544,8 +1546,15 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
   // ledger already held and have no supplier to name. Anything that is not the
   // literal 'correction' -- absent, misspelt, a hand-written request trying its
   // luck -- is a receipt and is gated.
-  const freeGoods = body.freeGoods === true
+  let freeGoods = body.freeGoods === true
   const attribution = body.attribution === 'correction' ? 'correction' : 'receipt'
+  // UI-STOCK 5.2-5.3: a receipt may carry free units riding with the paid
+  // quantity, and the selling price the operator typed for the product. A body
+  // without them takes the path it always took.
+  const freeQuantity = body.freeQuantity == null ? 0 : parseFreeQuantity(body.freeQuantity)
+  if (freeQuantity == null) return c.json({ error: 'Free units must be a whole number from 0', code: 'invalid_free_quantity' }, 400)
+  const sellingPrice = body.sellingPriceUsd == null && body.sellingPriceKhr == null ? undefined : parseReceiptSellingPrice(body.sellingPriceUsd, body.sellingPriceKhr)
+  if (sellingPrice === null) return c.json({ error: 'The selling price is not a valid amount', code: 'invalid_selling_price' }, 400)
   // P3-L6: the condition tag chosen on the remove control ("Keep in group
   // as broken/damaged/...") or on a tagged restock. Absent means the
   // ordinary removal/receipt this route has always done. Both spellings are
@@ -1563,6 +1572,13 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
 
   if (!productId || !Number.isFinite(quantity)) return c.json({ error: 'Missing required fields' }, 400)
   if (!['add', 'remove', 'set'].includes(type)) return c.json({ error: 'Invalid stock action' }, 400)
+  if (freeQuantity > 0 && (type !== 'add' || attribution === 'correction')) return c.json(FREE_QUANTITY_NOT_RECEIPT, 400)
+  if (sellingPrice && (type !== 'add' || attribution === 'correction')) {
+    return c.json({ error: 'A selling price can only ride on a stock receipt', code: 'selling_price_not_receipt' }, 400)
+  }
+  if (sellingPrice && unlockPricing) {
+    return c.json({ error: 'Send the selling price or the unlocked pricing block, not both', code: 'selling_price_conflict' }, 400)
+  }
   // An explicit setScope opts into the ONE lot-level Set writer
   // (lib/stockLotAdjustment.ts): selected received date or branch total, with
   // exact undo/redo and the owner's loss rule. A body without setScope keeps
@@ -1619,7 +1635,8 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
   // the branch is already there); it was simply unreachable, because this guard
   // sits above it. Non-negative, not "any number" -- a branch cannot hold less
   // than nothing.
-  if (type === 'set' ? !(quantity >= 0) : !(quantity > 0)) {
+  // A fully free receipt pays for nothing: 0 paid units plus its free units.
+  if (type === 'set' || (type === 'add' && freeQuantity > 0) ? !(quantity >= 0) : !(quantity > 0)) {
     return c.json({ error: type === 'set' ? 'Quantity cannot be negative' : 'Quantity must be a positive number' }, 400)
   }
   // Every stock change needs a documented cause -- no add/remove/set can go
@@ -1702,9 +1719,31 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
   const lotSupplierName = isReceipt && explicitBatchId
     ? (await db.prepare('SELECT supplier_name FROM product_batches WHERE id = @id').get<{ supplier_name: string | null }>({ id: explicitBatchId }))?.supplier_name ?? null
     : null
-  const gate = stockReceiptGateCode({ isStockIn: isReceipt, supplierName, lotSupplierName, unitCostUsd, freeGoods, attribution })
+  const gate = stockReceiptGateCode({ isStockIn: isReceipt, supplierName, lotSupplierName, unitCostUsd, freeGoods, attribution, quantity, freeQuantity })
   if (gate) return c.json({ error: stockReceiptGateMessage(gate), code: gate }, 400)
+  // Stock in = paid + free units at the effective cost, so the free units
+  // lower the average (owner Q2); the supplier is owed for the paid units only.
+  const paidQuantity = quantity
+  const paidUnitCostUsd = unitCostUsd
+  const receiptTotalUsd = isReceipt && freeQuantity > 0
+    ? (paidQuantity === 0 ? 0 : multiplyMoney4(paidUnitCostUsd ?? 0, paidQuantity))
+    : null
+  if (isReceipt && freeQuantity > 0) {
+    if (paidQuantity === 0) freeGoods = true
+    unitCostUsd = paidQuantity === 0 ? 0 : effectiveUnitCost(paidQuantity, freeQuantity, paidUnitCostUsd ?? 0)
+    quantity = paidQuantity + freeQuantity
+  }
   const reasonNotes = isReceipt && attribution === 'receipt' && freeGoods ? [FREE_GOODS_REASON_NOTE] : []
+  let sellingPricePlan: ReturnType<typeof planReceiptSellingPrice> = null
+  if (sellingPrice) {
+    const priceRow = await db.prepare('SELECT id, selling_price_usd, selling_price_khr FROM products WHERE id = @id').get<ReceiptSellingPriceRow>({ id: productId })
+    sellingPricePlan = priceRow ? planReceiptSellingPrice(priceRow, sellingPrice) : null
+    // An unchanged price writes nothing and needs no price permission.
+    if (sellingPricePlan && getActionTier(user, 'products', 'edit') !== 'full') {
+      return c.json({ error: 'Price edit permission is required to change the selling price', code: 'price_edit_required' }, 403)
+    }
+  }
+  const movementFreeColumn = freeQuantity > 0 && await hasColumn(db, 'inventory_movements', 'free_quantity')
 
   // Resolve which product row actually receives the quantity. Ordinary
   // adds (pricing locked, or type isn't 'add' at all) always target the
@@ -1934,6 +1973,7 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
     if (error instanceof RangeError) return c.json({ error: 'Movement cost is out of range' }, 400)
     throw error
   }
+  if (receiptTotalUsd != null && addMovementCost) addMovementCost = { ...addMovementCost, totalCostUsd: receiptTotalUsd }
 
   // Everything above this line is reads, validation and (for an unlocked add)
   // at most a sibling product row that a retry resolves to again by identity.
@@ -2005,10 +2045,10 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
     return {
       sql: `
       INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity,
-        unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, reference_id, user_id, user_name, created_at, batch_id)
+        unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, reference_id, user_id, user_name, created_at, batch_id${movementFreeColumn ? ', free_quantity' : ''})
       VALUES (@productId, @productName, @branchId, @branchName, @movementType, @quantity,
         @unitCostUsd, @unitCostKhr, @totalCostUsd, @totalCostKhr,
-        @reason, @referenceId, @userId, @userName, CURRENT_TIMESTAMP, @batchId)
+        @reason, @referenceId, @userId, @userName, CURRENT_TIMESTAMP, @batchId${movementFreeColumn ? ', @freeQuantity' : ''})
     `,
       params: {
         productId: targetProductId,
@@ -2028,6 +2068,7 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
         // add, the explicit pick or fully-covering single auto-drained lot
         // on remove; NULL when no single lot owns the whole movement.
         batchId: useBatchLedger ? resolvedBatchId : null,
+        ...(movementFreeColumn ? { freeQuantity } : {}),
       },
     }
   }
@@ -2072,6 +2113,7 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
           supplierId,
           supplierName,
           unitCostUsd: receiptUnitCostUsd,
+          receiptTotalUsd,
           preserveHistoricalUnitCost: unitCostUsd == null,
           paymentStatus,
           creditDueDate,
@@ -2083,11 +2125,11 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
           mergedPricingStatement,
           {
             sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity,
-              unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, reference_id, user_id, user_name, created_at, batch_id)
+              unit_cost_usd, unit_cost_khr, total_cost_usd, total_cost_khr, reason, reference_id, user_id, user_name, created_at, batch_id${movementFreeColumn ? ', free_quantity' : ''})
             VALUES (@productId, @productName, @branchId, @branchName, 'add', @quantity,
               @unitCostUsd, @unitCostKhr, @totalCostUsd, @totalCostKhr,
               @reason, @referenceId, @userId, @userName, CURRENT_TIMESTAMP,
-              (SELECT id FROM product_batches WHERE variant_product_id=@productId AND batch_key=@batchKey))`,
+              (SELECT id FROM product_batches WHERE variant_product_id=@productId AND batch_key=@batchKey)${movementFreeColumn ? ', @freeQuantity' : ''})`,
             params: {
               productId: targetProductId,
               productName: targetProductName,
@@ -2100,6 +2142,7 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
               userId: user?.id ?? null,
               userName: actorSnapshot(user),
               batchKey: plan.batchKey,
+              ...(movementFreeColumn ? { freeQuantity } : {}),
             },
           },
           ...(receiptUnitCostUsd == null && !unlockedReceiptLotTarget ? [] : [{ sql: 'DELETE FROM stock_session_guards', params: {} }]),
@@ -2133,9 +2176,11 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
         supplierId,
         supplierName,
         unitCostUsd: receiptUnitCostUsd,
+        receiptTotalUsd,
         preserveHistoricalUnitCost: unitCostUsd == null,
         paymentStatus,
         creditDueDate,
+        ...(sellingPricePlan ? { buildBatchStatements: () => [sellingPricePlan!.statement] } : {}),
       })
       batchNumber = received.batchNumber
       resolvedBatchId = received.batchId
@@ -2295,7 +2340,8 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
   // audit() writes, so the insert can run after the response is sent --
   // same reasoning as the broadcast/bumpVersion calls it now joins.
   c.executionCtx.waitUntil(Promise.all([
-    audit(c.env, user?.id ?? null, actorSnapshot(user), originalType === 'set' ? 'stock_set' : type === 'remove' ? 'stock_remove' : 'stock_add', 'product', targetProductId, { type: originalType, quantity, reason, branchId, sourceProductId: productId, createdSibling, batchId: batchIdRequested, autoBatchDrainIds, unlockPricing, receivedDate }),
+    audit(c.env, user?.id ?? null, actorSnapshot(user), originalType === 'set' ? 'stock_set' : type === 'remove' ? 'stock_remove' : 'stock_add', 'product', targetProductId, { type: originalType, quantity, reason, branchId, sourceProductId: productId, createdSibling, batchId: batchIdRequested, autoBatchDrainIds, unlockPricing, receivedDate, ...(freeQuantity > 0 ? { freeQuantity, paidQuantity } : {}) }),
+    ...(sellingPricePlan ? [audit(c.env, user?.id ?? null, actorSnapshot(user), 'update', 'product', targetProductId, { source: 'stock_receipt', batchId: resolvedBatchId }, changedFields(sellingPricePlan.before, sellingPricePlan.after))] : []),
     broadcast(c.env, 'products', { action: 'update', id: targetProductId }),
     broadcast(c.env, 'inventory', { action: 'adjust', id: targetProductId }),
     bumpVersion(c.env, 'products'),
@@ -2351,6 +2397,8 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
     batchId: resolvedBatchId,
     lotCode,
     autoBatchDrainIds,
+    freeQuantity,
+    sellingPriceUsd: sellingPricePlan ? sellingPricePlan.after.selling_price_usd : null,
   })
 }
 

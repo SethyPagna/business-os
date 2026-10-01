@@ -4,6 +4,7 @@ import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw.js'
 import Search from 'lucide-react/dist/esm/icons/search.js'
 import EyeOff from 'lucide-react/dist/esm/icons/eye-off.js'
 import Merge from 'lucide-react/dist/esm/icons/merge.js'
+import { ConflictIcon, CONFLICT_ICON_CLASS } from '../shared/ConflictIcon.ts'
 import ConfirmDialog from '../shared/ConfirmDialog.tsx'
 import ResolveModal, { type ResolveDraft } from '../shared/ResolveModal.tsx'
 import { contactMergeRequest, dismissContactDuplicateCluster, undismissContactDuplicateCluster, getContactDuplicateClusters, mergeContacts, planBulkContactMerges } from './contactDuplicates'
@@ -123,6 +124,7 @@ function ClusterCard({
               aria-label={t('select_duplicate_cluster') || 'Select this duplicate group'}
             />
           ) : null}
+          <ConflictIcon aria-hidden="true" className={`h-3.5 w-3.5 shrink-0 ${CONFLICT_ICON_CLASS}`} />
           <span className={`text-xs font-semibold ${SEVERITY_TEXT[cluster.severity]}`}>{t(key) || fallback}</span>
           {cluster.dismissed ? (
             <span className="rounded bg-gray-200 px-1.5 py-0.5 text-[10px] font-medium text-gray-600 dark:bg-white/10 dark:text-gray-300">{t('kept') || 'Kept'}</span>
