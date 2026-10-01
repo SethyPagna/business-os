@@ -118,7 +118,8 @@ function loadUndoAppliers(d1, { audit = async () => {}, realSaleModules = false,
     new Function('exports', 'require', 'module', transpile(filename))(dependency.exports, dependencyRequire, dependency)
     return dependency.exports
   }
-  for (const name of ['stockLifecycle', 'branchWrites', 'customerGenderRestoration', 'saleMoneyPrecision', 'productMergeLineage',
+  if (!Object.prototype.hasOwnProperty.call(stubs, './stockLifecycle')) stubs['./stockLifecycle'] = loadDependency(path.join(LIB_DIR, 'stockLifecycle.ts'))
+  for (const name of ['branchWrites', 'customerGenderRestoration', 'saleMoneyPrecision', 'productMergeLineage',
     'promotionRules', 'saleItemPricing', 'catalogCostRecompute', 'actorSnapshot', 'productMerge']) {
     stubs[`./${name}`] = loadDependency(path.join(LIB_DIR, `${name}.ts`))
   }
