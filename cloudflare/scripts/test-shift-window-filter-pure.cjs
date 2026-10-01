@@ -105,7 +105,7 @@ await analytics.getSalesTotals({}, {
   createdTo: '2026-09-04T11:00:00.000Z',
   cashierId: 7,
 })
-const cohortStatements = captured.filter((statement) => /@reportAfterId/.test(statement.sql) && /(?:FROM sales s|EXISTS\(SELECT 1 FROM sales s)/.test(statement.sql))
+const cohortStatements = captured.filter((statement) => /@reportAfterId/.test(statement.sql) && /(?:FROM sales s|JOIN sales s|EXISTS\(SELECT 1 FROM sales s)/.test(statement.sql))
 assert.ok(cohortStatements.length >= 5, `expected the exact sales/items/returns keyset cohort, got ${cohortStatements.length}`)
 for (const statement of cohortStatements) {
   assert.match(statement.sql, /datetime\([^)]*created_at\) >= @createdFrom/, 'lower bound must normalize stored SQLite/ISO timestamps')
