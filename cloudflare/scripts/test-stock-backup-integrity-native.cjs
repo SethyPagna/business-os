@@ -47,6 +47,9 @@ async function main() {
     ['fee request omitted', d => d.tables.fee_operation_receipts.rows[0].request_json='{}'],
     ['fee response changed', d => { const r=d.tables.fee_operation_receipts.rows[0],v=JSON.parse(r.response_json);v.fee.amount_usd+=1;r.response_json=JSON.stringify(v) }],
     ['fee link duplicated', d => d.tables.stock_disposition_fees.rows.push({...d.tables.stock_disposition_fees.rows[0]})],
+    ['funding receipt request identity duplicated', d => d.tables.stock_funding_receipts.rows[1].request_id=d.tables.stock_funding_receipts.rows[0].request_id],
+    ['actor identity coerced', d => {row(d,'stock_funding_events','refund').actor_id='71';receipt(d,'stock_funding_receipts','refund').actor_id='71'}],
+    ['event occurrence time unsupported', d => row(d,'stock_funding_events','refund').occurred_at='not-a-time'],
   ]
   for (const [name, mutate] of cases) {
     const target=fixture(),doc=JSON.parse(bytes);mutate(doc)
@@ -76,7 +79,7 @@ async function main() {
   await disposition.commitStockDisposition(source.env,actor,partialDispose)
   await funding.commitStockFunding(source.env,actor,command('pending',3,{amount_usd:5,claim_id:'canceled-claim'}))
   await funding.commitStockFunding(source.env,actor,command('cancel',4,{claim_id:'canceled-claim'}))
-  const feeOps=load('lib/feeOperationReceipt.ts'),intent={fee_money_version:1,fee_type:'other',label:'Native shipping',amount_usd:1.7,amount_khr:0,fee_date:load('lib/businessDateWindow.ts').businessToday(),sale_id:null,branch_id:1,delivery_contact_id:null,notes:'Native funding shipping'}
+  const feeOps=load('lib/feeOperationReceipt.ts'),intent={fee_money_version:1,fee_type:'other',label:'Native shipping',amount_usd:1.7,amount_khr:0,fee_date:load('lib/businessDateWindow.ts').businessToday(),sale_id:null,branch_id:null,delivery_contact_id:null,notes:'Native funding shipping'}
   const at=new Date().toISOString(),feeJson=feeOps.canonicalFeeCreateRequest(intent),digest=await feeOps.feeRequestDigest(feeJson),requestId='native-shipping-fee-0001'
   await load('lib/businessMaintenanceGuard.ts').ordinaryBusinessBatch(dbFor(source),[
     {sql:'INSERT INTO fees(fee_type,label,amount_usd,amount_khr,fee_date,sale_id,branch_id,delivery_contact_id,notes,created_by,created_by_name,created_at,updated_at) VALUES(@type,@label,@amount,0,@date,NULL,1,NULL,@notes,71,@name,@at,@at)',params:{type:intent.fee_type,label:intent.label,amount:intent.amount_usd,date:intent.fee_date,notes:intent.notes,name:'Recovery Writer',at}},

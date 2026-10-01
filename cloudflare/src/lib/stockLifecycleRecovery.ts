@@ -334,6 +334,12 @@ export class StockRecoveryGraphValidation {
   private async validateFundingHistory() {
     const sources=this.identity('stock_funding_sources'),claims=this.identity('stock_funding_claims'),receipts=this.eventReceipts('stock_funding')
     const origins=new Set<string>(),closed=new Set<string>()
+    for(const opening of this.list('stock_funding_invoice_openings')) {
+      const admitted=[...sources.values()].filter(source=>source.invoice_id===opening.invoice_id)
+      if(!admitted.length||!admitted.some(source=>source.reconciliation_proof===opening.proof))this.fail('funding invoice opening missing admission origin')
+      for(const source of admitted)if(source.supplier_id!==opening.supplier_id||source.branch_id!==opening.branch_id)this.fail('funding source invoice identity')
+      for(const [sourceField,openingField] of [['gross4','gross4'],['opening_paid4','paid4'],['opening_debt4','debt4']])if(admitted.reduce((sum,source)=>sum+source[sourceField],0)>opening[openingField])this.fail('funding invoice allocation exceeded')
+    }
     for(const source of sources.values()) {
       const events=this.list('stock_funding_events').filter(row=>row.source_id===source.id).sort((a,b)=>a.generation-b.generation)
       for(const event of events) {
@@ -380,7 +386,8 @@ export class StockRecoveryGraphValidation {
     if(receipts.length!==1)this.fail('fee missing unique canonical receipt')
     const receipt=receipts[0],intent=this.object(receipt.request_json,'fee request')
     if(receipt.request_digest!==await feeRequestDigest(receipt.request_json))this.fail('fee request digest')
-    const expected={fee_type:fee.fee_type,label:fee.label,amount_usd:fee.amount_usd,amount_khr:fee.amount_khr,fee_date:fee.fee_date,sale_id:fee.sale_id,branch_id:fee.branch_id,delivery_contact_id:fee.delivery_contact_id,notes:fee.notes,...(intent.fee_money_version===1?{fee_money_version:1 as const}:{})}
+    if(intent.branch_id!==fee.branch_id&&(disposition||intent.branch_id!==null))this.fail('fee requested and resolved branch')
+    const expected={fee_type:fee.fee_type,label:fee.label,amount_usd:fee.amount_usd,amount_khr:fee.amount_khr,fee_date:fee.fee_date,sale_id:fee.sale_id,branch_id:intent.branch_id,delivery_contact_id:fee.delivery_contact_id,notes:fee.notes,...(intent.fee_money_version===1?{fee_money_version:1 as const}:{})}
     if(receipt.request_json!==canonicalFeeCreateRequest(expected))this.fail('fee canonical intent')
     this.equal(this.object(receipt.response_json,'fee response'),{fee},'fee exact response')
     this.equal(receipt.occurred_at,fee.created_at,'fee creation time')
@@ -438,6 +445,21 @@ export class StockRecoveryGraphValidation {
   }
 
   private async validateCanonicalHistory() {
+    this.identity('stock_funding_invoice_openings','invoice_id')
+    for(const prefix of ['stock_disposition','stock_funding','stock_valuation']) {
+      this.identity(`${prefix}_receipts`,'request_id')
+      for(const event of this.list(`${prefix}_events`)) {
+        if(!Number.isSafeInteger(event.actor_id)||event.actor_id<=0)this.fail('stock event actor identity')
+        if(typeof event.occurred_at!=='string'||!Number.isFinite(Date.parse(event.occurred_at))||new Date(event.occurred_at).toISOString()!==event.occurred_at)this.fail('stock event occurrence time')
+      }
+    }
+    const physical=new Set<string>()
+    for(const source of [...this.list('stock_disposition_sources'),...this.list('stock_funding_sources')]) {
+      for(const key of [`batch:${source.batch_id}`,`movement:${source.movement_id}`]) {
+        if(physical.has(key))this.fail('stock physical source admitted more than once')
+        physical.add(key)
+      }
+    }
     await this.validateFundingHistory()
     await this.validateDispositionHistory()
   }
