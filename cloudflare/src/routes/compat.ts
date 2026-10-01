@@ -19,6 +19,7 @@ import { CUSTOMER_REFUND_JOIN, getSalesTotals, getSalesTotalsAndPeriodSeries, id
 import { getFamilyStockAlertPage, getFamilyStockStats, type FamilyStockAlertState } from '../lib/familyStockStats'
 import { loadLowStockConfig } from '../lib/lowStockSettings'
 import { businessToday, localDateAtOrAfter, localDateAtOrBefore, localDateRangeClause, localHourExpr, localTimeRangeClause } from '../lib/businessDateWindow'
+import { continuousReadWindowSql, parseContinuousReadWindow } from '../lib/continuousReadWindow'
 import { actorSnapshot } from '../lib/actorSnapshot'
 import { secretEncryptionStatus } from '../lib/secretCrypto'
 import { gateTotals } from './reports'
@@ -1216,8 +1217,20 @@ app.get('/transfers', async (c) => {
   }
 
   const query = c.req.query()
+  let continuousWindow
+  try { continuousWindow = parseContinuousReadWindow(query) } catch (error) {
+    return c.json({ error: (error as Error).message }, 400)
+  }
   const startDate = String(query.startDate || '').trim()
   const endDate = String(query.endDate || '').trim()
+  if (continuousWindow) {
+    const validDay = (value: string) => {
+      if (!value) return true
+      const date = new Date(`${value}T00:00:00Z`)
+      return /^\d{4}-\d{2}-\d{2}$/.test(value) && Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value
+    }
+    if (!validDay(startDate) || !validDay(endDate) || (startDate && endDate && startDate > endDate)) return c.json({ error: 'Invalid transfer date range' }, 400)
+  }
   const fromBranchId = String(query.fromBranchId || query.from_branch_id || '').trim()
   const toBranchId = String(query.toBranchId || query.to_branch_id || '').trim()
   const clauses: string[] = ['1=1']
@@ -1226,11 +1239,15 @@ app.get('/transfers', async (c) => {
   // Transfer timestamps are stored in UTC. Every other business-day report
   // uses the fixed Cambodia UTC+7 helpers; using raw date(created_at) here
   // misclassified transfers made between 00:00 and 06:59 local time.
-  if (/^\d{4}-\d{2}-\d{2}$/.test(startDate)) {
+  if (continuousWindow) {
+    clauses.push(continuousReadWindowSql('st.created_at'))
+    Object.assign(bindings, continuousWindow)
+  }
+  if (!continuousWindow && /^\d{4}-\d{2}-\d{2}$/.test(startDate)) {
     clauses.push(localDateAtOrAfter('st.created_at'))
     bindings.startDate = startDate
   }
-  if (/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
+  if (!continuousWindow && /^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
     clauses.push(localDateAtOrBefore('st.created_at'))
     bindings.endDate = endDate
   }

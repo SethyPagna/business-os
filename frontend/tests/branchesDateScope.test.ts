@@ -75,8 +75,7 @@ test('Branches keeps branch Overview, product stock and Transfer history separat
 
 test('the shared branch range scopes both transfer history and its export', () => {
   assert.match(source, /const branchDateRange = dateRange \?\? localBranchDateRange/)
-  assert.ok((source.match(/startDate: branchDateRange\.startDate \|\| undefined/g) || []).length >= 2)
-  assert.ok((source.match(/endDate: branchDateRange\.endDate \|\| undefined/g) || []).length >= 2)
+  assert.equal((source.match(/continuousRangeParams\(branchDateRange\)/g) || []).length, 2)
   assert.match(source, /onRangeChange=\{\(range\) => \{\s*handleBranchDateRangeChange\(range\)\s*setTransferPage\(1\)/)
   assert.doesNotMatch(source, /transferStartDate|transferEndDate/)
 })

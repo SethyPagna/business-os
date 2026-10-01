@@ -143,6 +143,7 @@ import { planNativeSaleChange, NativeSaleChangeValidationError } from '../lib/na
 import { normalizeClientReceiptNumber, uniqueBusinessDateTimeNumber } from '../lib/receiptNumber'
 import { sanitizeClientCreatedAt } from '../lib/clientTimestamp'
 import { businessToday, localDateAtOrAfter, localDateAtOrBefore, localDateRangeClause, localTimeRangeClause } from '../lib/businessDateWindow'
+import { continuousReadWindowSql, parseContinuousReadWindow } from '../lib/continuousReadWindow'
 import { formatSaleStatusTelegramLines, formatSaleTelegramLines, sendTelegramEvent } from '../lib/telegram'
 import { contactDisplayAddress } from '../lib/contactOptions'
 import { buildSaleCreationSnapshot, SaleCreationSnapshotError } from '../lib/saleCreationSnapshot'
@@ -5949,6 +5950,10 @@ app.get('/stats-strip', async (c) => {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
   const query = c.req.query()
+  let continuousWindow
+  try { continuousWindow = parseContinuousReadWindow(query) } catch (error) {
+    return c.json({ error: (error as Error).message }, 400)
+  }
   const startDate = String(query.startDate || '').slice(0, 10)
   const endDate = String(query.endDate || '').slice(0, 10)
   if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
@@ -5959,15 +5964,17 @@ app.get('/stats-strip', async (c) => {
   const endTime = String(query.endTime || '').trim()
   const hasTimeRange = LOCAL_TIME_RE.test(startTime) && LOCAL_TIME_RE.test(endTime)
   const filters = {
-    startDate,
-    endDate,
+    startDate: continuousWindow ? null : startDate,
+    endDate: continuousWindow ? null : endDate,
     branchId: query.branchId || null,
     startTime: hasTimeRange ? startTime : null,
     endTime: hasTimeRange ? endTime : null,
+    ...(continuousWindow ?? {}),
   }
-  const rangeParams: Record<string, unknown> = { startDate, endDate }
+  const rangeParams: Record<string, unknown> = { startDate, endDate, ...(continuousWindow ?? {}) }
   // Status mix includes cancelled sales, unlike recognized-money cohorts.
-  const statusClauses = [localDateRangeClause('created_at')]
+  const activityWindow = continuousWindow ? continuousReadWindowSql('created_at') : localDateRangeClause('created_at')
+  const statusClauses = [activityWindow]
   if (hasTimeRange) {
     statusClauses.push(localTimeRangeClause('created_at'))
     rangeParams.startTime = startTime
@@ -5984,7 +5991,7 @@ app.get('/stats-strip', async (c) => {
     // subtract this from a revenue, profit or collected figure -- doing so
     // takes refunds off twice, on mismatched bases, and can drive a period
     // below zero. The sale-basis reversal is SalesTotals.refund_usd.
-    const returnWhere=`${localDateRangeClause('created_at')}
+    const returnWhere=`${activityWindow}
           ${hasTimeRange ? `AND ${localTimeRangeClause('created_at')}` : ''}
           AND COALESCE(return_scope, 'customer') = 'customer'
           AND COALESCE(status, 'completed') <> 'cancelled'
@@ -6028,6 +6035,7 @@ app.get('/stats-strip', async (c) => {
       endDate,
       startTime: hasTimeRange ? startTime : null,
       endTime: hasTimeRange ? endTime : null,
+      ...(continuousWindow ?? {}),
       totals,
       by_payment: byPayment,
       by_status: byStatus || [],
