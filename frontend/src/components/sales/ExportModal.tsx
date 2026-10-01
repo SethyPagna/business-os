@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import Eye from 'lucide-react/dist/esm/icons/eye.js'
 import FileSpreadsheet from 'lucide-react/dist/esm/icons/file-spreadsheet.js'
 import Upload from 'lucide-react/dist/esm/icons/upload.js'
@@ -8,6 +8,7 @@ import StatusBadge from './StatusBadge'
 import { withLoaderTimeout } from '../../utils/loaders.ts'
 import { fmtDateOnly } from '../../utils/formatters.ts'
 import { SALES_IMPORT_COLUMNS } from '../../utils/salesImportContract.ts'
+import { useApp, type AppContextCoreValue } from '../../app/AppContextCore.tsx'
 
 const SALES_EXPORT_PREVIEW_TIMEOUT_MS = 20000
 const SALES_EXPORT_CSV_TIMEOUT_MS = 30000
@@ -91,7 +92,50 @@ function getErrorMessage(error: unknown, fallback: string): string {
 export default function ExportModal({ onClose, t, fmtUSD }: ExportModalProps) {
   const [range, setRange] = useState<DateTimeRange>(todayDateTimeRange)
   const [loading, setLoading] = useState(false)
-  const [preview, setPreview] = useState<SalesExportData | null>(null)
+  const [previewResult, setPreview] = useState<{ owner: string; data: SalesExportData } | null>(null)
+  const { user, getPermissions } = useApp() as AppContextCoreValue
+  const owner = JSON.stringify([user, getPermissions()])
+  const ownerRef = useRef(owner)
+  ownerRef.current = owner
+  const previewGenerationRef = useRef(0)
+  const pendingPreviewRef = useRef<number | null>(null)
+  const mountedRef = useRef(true)
+  const preview = previewResult?.owner === owner ? previewResult.data : null
+
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+      previewGenerationRef.current++
+      pendingPreviewRef.current = null
+    }
+  }, [])
+
+  useEffect(() => {
+    previewGenerationRef.current++
+    setPreview(null)
+    if (pendingPreviewRef.current !== null) {
+      pendingPreviewRef.current = null
+      setLoading(false)
+    }
+  }, [owner])
+
+  const changeRange = (next: DateTimeRange) => {
+    previewGenerationRef.current++
+    setRange(next)
+    setPreview(null)
+    if (pendingPreviewRef.current !== null) {
+      pendingPreviewRef.current = null
+      setLoading(false)
+    }
+  }
+
+  const closeModal = () => {
+    mountedRef.current = false
+    previewGenerationRef.current++
+    pendingPreviewRef.current = null
+    onClose()
+  }
 
   const tr = (key: string, fallback: string): string => {
     const value = typeof t === 'function' ? t(key) : null
@@ -138,8 +182,11 @@ export default function ExportModal({ onClose, t, fmtUSD }: ExportModalProps) {
   }
 
   const handlePreview = async () => {
+    const generation = ++previewGenerationRef.current
+    const isCurrent = () => mountedRef.current && previewGenerationRef.current === generation && ownerRef.current === owner
     try {
       const dates = validateDates()
+      pendingPreviewRef.current = generation
       setLoading(true)
       const data = await withLoaderTimeout(
         () => getSalesExportApi().getSalesExport({ startDate: dates.start, endDate: dates.end, startTime: dates.startTime, endTime: dates.endTime }),
@@ -147,11 +194,14 @@ export default function ExportModal({ onClose, t, fmtUSD }: ExportModalProps) {
         SALES_EXPORT_PREVIEW_TIMEOUT_MS,
       )
       if (typeof data === 'string') throw new Error(tr('error_loading_export', 'Error loading export'))
-      setPreview(data)
+      if (isCurrent()) setPreview({ owner, data })
     } catch (error) {
-      alert(getErrorMessage(error, tr('error_loading_export', 'Error loading export')))
+      if (isCurrent()) alert(getErrorMessage(error, tr('error_loading_export', 'Error loading export')))
     } finally {
-      setLoading(false)
+      if (isCurrent()) {
+        pendingPreviewRef.current = null
+        setLoading(false)
+      }
     }
   }
 
@@ -195,7 +245,7 @@ export default function ExportModal({ onClose, t, fmtUSD }: ExportModalProps) {
   }
 
   return (
-    <Modal title={tr('export_sales_report', 'Export Sales Report')} onClose={onClose} wide unsavedChanges="read-only">
+    <Modal title={tr('export_sales_report', 'Export Sales Report')} onClose={closeModal} wide unsavedChanges="read-only">
       <div className="space-y-5">
         <div className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800/60">
           <div className="rounded-2xl bg-blue-100 p-3 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
@@ -211,7 +261,7 @@ export default function ExportModal({ onClose, t, fmtUSD }: ExportModalProps) {
 
         <fieldset className="min-w-0" disabled={loading}>
           <legend className="mb-2 block text-sm font-semibold text-gray-700 dark:text-gray-300">{tr('report_period', 'Report Period')}</legend>
-          <DateTimeRangePicker value={range} onChange={(next) => { setRange(next); setPreview(null) }} t={(key) => tr(key, key)} showTime continuous={false} className="w-full" triggerClassName="flex w-full items-center justify-between gap-2 px-3 py-2 text-sm" />
+          <DateTimeRangePicker value={range} onChange={changeRange} t={(key) => tr(key, key)} showTime continuous={false} className="w-full" triggerClassName="flex w-full items-center justify-between gap-2 px-3 py-2 text-sm" />
         </fieldset>
 
         <div className="flex flex-col gap-2 sm:flex-row">
