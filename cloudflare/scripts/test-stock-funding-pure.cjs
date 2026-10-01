@@ -1,6 +1,6 @@
 const assert=require('node:assert/strict')
 const fs=require('node:fs'),ts=require('typescript'),path=require('node:path')
-function load(rel){const m={exports:{}};new Function('require','module','exports',ts.transpileModule(fs.readFileSync(path.join(__dirname,'../src/lib',rel+'.ts'),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(r=>load(r.replace('./','')),m,m.exports);return m.exports}
+function load(rel){const m={exports:{}};new Function('require','module','exports',ts.transpileModule(fs.readFileSync(path.join(__dirname,'../src/lib',rel+'.ts'),'utf8').replace(process.env.STOCK_FUNDING_NO_DEBT_CONTROL?'const offset = Math.min(next.debt4,amount4)':'__disabled_control__', 'const offset = 0'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(r=>load(r.replace('./','')),m,m.exports);return m.exports}
 const {fundingTransition}=load('stockFundingMath')
 for(const paid of [0,400000,800000,1000000]){
  const s={gross4:1000000,paid4:paid,debt4:1000000-paid,credit4:0,asset4:0,cashIn4:0,cashOut4:0,shipping4:0}
