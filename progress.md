@@ -5,6 +5,14 @@
 Every item carries an ID (U-1, U-cost, Q15 …). `docs/history/session-log.md` uses the same IDs: each Part lists the IDs it moved
 and their new status, and each item here names the Part that last changed it (e.g. "→ Part 633"). Search either file for an ID to see both sides.
 
+### Current work (2 Oct 2026) — Part 647
+
+| Item | Status |
+|---|---|
+| RC2-HOTFIX | [x] Live; both real merge actions and health checks verified. |
+| RC3-UI and DATE | [~] UI and date/time pickers passed their release gates. Not live; RC3 deploys first after 20:00 Cambodia and a fresh closed-trading check. |
+| STOCK-RETURN | [~] Partial quantity returns and supplier compensation are being built and independently challenged. Whole-suite failures remain; not ready or live. |
+
 ### Deploy checkpoints (26 Sep) — each deploys as soon as it is green; nothing waits for the next
 | Checkpoint | Contents | State |
 |---|---|---|
