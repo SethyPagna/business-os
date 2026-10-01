@@ -139,7 +139,7 @@ function makeFakeD1(schema) {
       return { all: () => ({ results: ['stock_disposition_sources','stock_funding_dependencies','stock_disposition_fees','stock_funding_events'].filter(name => schema[name]).map(name => ({ name })) }) }
     }
     if ((m = sql.match(/^SELECT 1 FROM (stock_disposition_sources|stock_funding_dependencies) LIMIT 1$/))) {
-      return { first: () => schema[m[1]]?.rows.length ? { linked: 1 } : null }
+      return { all: () => ({ results: schema[m[1]]?.rows.length ? [{ linked: 1 }] : [] }) }
     }
     if (sql.includes('FROM sqlite_master AS m LEFT JOIN pragma_foreign_key_list(m.name)')) {
       return { all: () => ({ results: Object.keys(schema).map(table_name => ({ table_name, parent_table: null, fk_id: null, fk_seq: null })) }) }
@@ -862,6 +862,55 @@ async function main() {
     assert.strictEqual(completed.status, 'completed')
     assert.strictEqual(completed.progress, 100)
     assert.ok(completed.finished_at)
+  })
+
+  async function linkedRestoreOracle(sourceTable, admitted = true) {
+    const backupEnv = makeEnv({ schema: { products: { columns: ['id','name'], rows: [{ id: 1, name: 'BACKUP' }] } }, assets: {} })
+    const created = await createCloudflareBackup(backupEnv, 'manual')
+    const schema = {
+      products: { columns: ['id','name'], rows: [{ id: 1, name: 'LIVE' }] },
+      [sourceTable]: { columns: ['source_id'], rows: admitted ? [{ source_id: 'linked' }] : [] },
+    }
+    const env = makeEnv({ schema, assets: {} })
+    for (const [key,value] of backupEnv.ASSETS._store) env.ASSETS._store.set(key,value)
+    let deletes = 0, callbacks = 0, lifecycleReads = 0
+    const prepare = env.DB.prepare.bind(env.DB)
+    env.DB.prepare = sql => {
+      if (/^DELETE\b/i.test(sql.trim())) deletes += 1
+      if (/SELECT name FROM sqlite_master.*stock_disposition_sources/.test(sql)) lifecycleReads += 1
+      return prepare(sql)
+    }
+    const snapshot = () => JSON.stringify({ schema, assets: [...env.ASSETS._store], cache: [...env.CACHE._store] })
+    const before = snapshot()
+    if (admitted) {
+      await assert.rejects(() => restoreCloudflareBackup(env, created.key, async () => { callbacks += 1 }),
+        error => loadBackupDependency('lib/stockLifecycle.ts').stockLifecycleRefusal(error)?.code === 'stock_lifecycle_dependency')
+      assert.strictEqual(deletes, 0, 'linked restore must refuse before DELETE is prepared')
+      assert.strictEqual(callbacks, 0, 'linked restore must refuse before a mutation progress callback')
+      assert.strictEqual(snapshot(), before, 'database, R2 and KV data must remain unchanged')
+    } else {
+      const result = await restoreCloudflareBackup(env, created.key)
+      assert.strictEqual(result.tables, 1)
+      assert.deepStrictEqual(schema.products.rows, [{ id: 1, name: 'BACKUP' }])
+      assert.strictEqual(schema[sourceTable].rows.length, 0)
+      assert.ok(deletes > 0, 'ordinary unadmitted restore must execute')
+    }
+    assert.ok(lifecycleReads > 0, 'the actual restore lifecycle lookup must execute')
+  }
+  await checkAsync('actual restore refuses admitted disposition and funding sources before DELETE and leaves all binding state unchanged', async () => {
+    await linkedRestoreOracle('stock_disposition_sources')
+    await linkedRestoreOracle('stock_funding_dependencies')
+  })
+  await checkAsync('the same actual loader permits normal restore with empty unadmitted lifecycle tables', async () => {
+    await linkedRestoreOracle('stock_disposition_sources', false)
+    await linkedRestoreOracle('stock_funding_dependencies', false)
+  })
+  await checkAsync('a no-op lifecycle loader is refuted by the linked whole-restore oracle', async () => {
+    const lifecycle = loadBackupDependency('lib/stockLifecycle.ts')
+    const original = lifecycle.assertStockLifecycleRestoreAllowed
+    lifecycle.assertStockLifecycleRestoreAllowed = async () => {}
+    try { await assert.rejects(() => linkedRestoreOracle('stock_disposition_sources'), { code: 'ERR_ASSERTION' }) }
+    finally { lifecycle.assertStockLifecycleRestoreAllowed = original }
   })
 
   console.log(`\n${passed} check(s) passed.`)
