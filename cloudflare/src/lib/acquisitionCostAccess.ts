@@ -95,8 +95,30 @@ const SUPPLIER_MONEY_FIELDS = new Set(['line_total_usd', 'total_usd', 'paid_usd'
   'supplier_compensation_usd', 'supplier_compensation_khr', 'supplier_loss_usd', 'supplier_loss_khr',
   'refund_usd', 'refund_khr'])
 
+type RetailPricingParser = (json: string) => { amounts: { gross_usd: number } } | null
+
+function restoreRetailPricingGross(json: string, parsed: unknown, projected: unknown, parser?: RetailPricingParser): unknown {
+  if (!parser || !parsed || typeof parsed !== 'object' || !projected || typeof projected !== 'object') return projected
+  const source = parsed as Record<string, unknown>
+  const amounts = source.amounts
+  if (!amounts || typeof amounts !== 'object') return projected
+  for (const record of [source, amounts as Record<string, unknown>]) {
+    if (hasLifecycleContext(record, false) || Object.entries(record).some(([key, value]) =>
+      ['scope', 'return_scope'].includes(normalizeCostKey(key)) && value === 'supplier')) return projected
+  }
+  try {
+    const validated = parser(json)
+    const result = projected as Record<string, unknown>
+    if (!validated || !result.amounts || typeof result.amounts !== 'object') return projected
+    const projectedAmounts = result.amounts as Record<string, unknown>
+    const retailAmounts = Object.fromEntries(Object.keys(amounts).filter(key => key === 'gross_usd' || Object.hasOwn(projectedAmounts, key))
+      .map(key => [key, key === 'gross_usd' ? validated.amounts.gross_usd : projectedAmounts[key]]))
+    return { ...result, amounts: retailAmounts }
+  } catch { return projected }
+}
+
 /** Response-only projection: never mutate DB snapshots or actor-neutral caches. */
-export function projectAcquisitionCosts(value: unknown, user: PermissionUser, supplierMoney = false): unknown {
+export function projectAcquisitionCosts(value: unknown, user: PermissionUser, supplierMoney = false, retailPricingParser?: RetailPricingParser): unknown {
   if (canViewAcquisitionCosts(user)) return value
   function project(input: unknown, depth: number, supplier = supplierMoney, lifecycle = false): unknown {
     if (depth > MAX_DEPTH) return null
@@ -120,7 +142,10 @@ export function projectAcquisitionCosts(value: unknown, user: PermissionUser, su
           const parsed: unknown = JSON.parse(child)
           // A bare historical scalar has no column identity; do not expose
           // an old/new unit cost merely because its wrapper lost the key.
-          result[key] = parsed && typeof parsed === 'object' ? JSON.stringify(project(parsed, depth + 1, supplier, childLifecycle)) : null
+          if (!parsed || typeof parsed !== 'object') { result[key] = null; continue }
+          const projected = project(parsed, depth + 1, supplier, childLifecycle)
+          result[key] = JSON.stringify(key === 'pricing_snapshot_json' && !supplier && !childLifecycle
+            ? restoreRetailPricingGross(child, parsed, projected, retailPricingParser) : projected)
         }
         catch { result[key] = null }
       } else {
@@ -137,14 +162,16 @@ export function projectAcquisitionCosts(value: unknown, user: PermissionUser, su
  * to c.json after cache reads, before serialization. Never buffer/reparse an
  * HTTP Response or change objects used by calculations and server-side undo.
  */
-export const acquisitionCostResponses: MiddlewareHandler = async (c, next) => {
-  const json: Function = c.json
-  c.json = ((...args: Parameters<Context['json']>) => {
-    args[0] = projectAcquisitionCosts(args[0], c.get('user'), /^\/api\/suppliers(?:\/|$)/.test(c.req.path)) as typeof args[0]
-    c.header('Cache-Control', 'private, no-store')
-    // Preserve Hono's status/header overloads without re-instantiating its
-    // recursive JSON type at this already typed serialization boundary.
-    return Reflect.apply(json, c, args)
-  }) as Context['json']
-  await next()
+export function createAcquisitionCostResponses(retailPricingParser?: RetailPricingParser): MiddlewareHandler {
+  return async (c, next) => {
+    const json: Function = c.json
+    c.json = ((...args: Parameters<Context['json']>) => {
+      args[0] = projectAcquisitionCosts(args[0], c.get('user'), /^\/api\/suppliers(?:\/|$)/.test(c.req.path), retailPricingParser) as typeof args[0]
+      c.header('Cache-Control', 'private, no-store')
+      return Reflect.apply(json, c, args)
+    }) as Context['json']
+    await next()
+  }
 }
+
+export const acquisitionCostResponses: MiddlewareHandler = createAcquisitionCostResponses()

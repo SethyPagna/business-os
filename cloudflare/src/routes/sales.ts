@@ -1,6 +1,6 @@
 import { assertStockLifecycleMutable, stockLifecycleRefusal } from '../lib/stockLifecycle'
 import { Hono, type Context } from 'hono'
-import { acquisitionCostResponses, canViewAcquisitionCosts } from '../lib/acquisitionCostAccess'
+import { createAcquisitionCostResponses, canViewAcquisitionCosts } from '../lib/acquisitionCostAccess'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { getDb } from '../lib/db'
 import { ordinaryBusinessMaintenanceGuard, runOrdinaryBusinessWrite } from '../lib/businessMaintenanceGuard'
@@ -179,7 +179,7 @@ async function saleAllowsPaymentCorrection(db: ReturnType<typeof getDb>, saleId:
   return latest?.action === 'update' || latest?.action === 'sale_payment_correction_opened'
 }
 app.use('*', requireAuth)
-app.use('*', acquisitionCostResponses)
+app.use('*', createAcquisitionCostResponses(parseSaleItemPricing))
 
 const SALES_READ_CACHE_TTL_SECONDS = 20
 
