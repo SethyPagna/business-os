@@ -2378,7 +2378,7 @@ app.post('/supplier', async (c) => {
       if (receipt.request_digest !== supplierRequestDigest) return c.json({ error: 'client_request_id was already used for different return data.', code: 'idempotency_conflict' }, 409)
       return c.json(supplierReplayResponse(receipt))
     }
-    const occupied = await db.prepare('SELECT id FROM returns WHERE client_request_id=?').get([clientRequestId])
+    const occupied = await db.prepare("SELECT id FROM returns WHERE client_request_id=? AND client_request_id<>''").get([clientRequestId])
     if (occupied) return c.json({ error: 'client_request_id is already owned by another return.', code: 'idempotency_conflict' }, 409)
   }
   if (!await db.prepare('SELECT id FROM suppliers WHERE id=?').get([body.supplier_id])) return c.json({ error: 'A valid supplier is required' }, 400)
@@ -2445,7 +2445,7 @@ app.post('/supplier', async (c) => {
   // A server key also covers legacy callers without an idempotency key, so
   // every child can resolve the header within one atomic D1 batch.
   const supplierWriteKey = clientRequestId || `supplier-return:${crypto.randomUUID()}`
-  const returnIdExpression = '(SELECT id FROM returns WHERE client_request_id=@supplier_write_key)'
+  const returnIdExpression = "(SELECT id FROM returns WHERE client_request_id=@supplier_write_key AND client_request_id<>'')"
   const returnHeaderStatement = { sql: `
     INSERT INTO returns (
       return_number, client_request_id, cashier_id, cashier_name, branch_id, branch_name,
@@ -2650,7 +2650,7 @@ app.post('/supplier', async (c) => {
       params: { receipt_id: crypto.randomUUID(), actor_id: supplierActorId, supplier_write_key: supplierWriteKey, request_digest: supplierRequestDigest, request_json: supplierRequestJson, return_number: returnNumber, occurred_at: new Date().toISOString() },
     })
     await db.batch([...statements, ordinaryBusinessMaintenanceGuard])
-    const committed = await db.prepare('SELECT id FROM returns WHERE client_request_id=@supplier_write_key')
+    const committed = await db.prepare("SELECT id FROM returns WHERE client_request_id=@supplier_write_key AND client_request_id<>''")
       .get<{ id: number }>({ supplier_write_key: supplierWriteKey })
     if (!committed?.id) throw new Error('supplier_return_identity_missing')
     returnId = Number(committed.id)
@@ -2661,7 +2661,7 @@ app.post('/supplier', async (c) => {
         if (replay.request_digest !== supplierRequestDigest) return c.json({ error: 'client_request_id was already used for different return data.', code: 'idempotency_conflict' }, 409)
         return c.json(supplierReplayResponse(replay))
       }
-      if (await db.prepare('SELECT id FROM returns WHERE client_request_id=?').get([clientRequestId])) return c.json({ error: 'client_request_id is already owned by another return.', code: 'idempotency_conflict' }, 409)
+      if (await db.prepare("SELECT id FROM returns WHERE client_request_id=? AND client_request_id<>''").get([clientRequestId])) return c.json({ error: 'client_request_id is already owned by another return.', code: 'idempotency_conflict' }, 409)
     }
     // An availability refusal is the caller's input problem (400), not a
     // server failure -- everything composed after it never ran (the one
