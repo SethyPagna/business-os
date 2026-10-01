@@ -166,13 +166,14 @@ assert.match(read(path.join('src', 'lib', 'stockInLineEdit.ts')), /if \(costChan
 assert.deepEqual(lotWriters, Object.keys(LOT_WRITER_CLASSIFICATION).sort(),
   'a file that INSERTs a product_batches row appeared or vanished -- classify it in LOT_WRITER_CLASSIFICATION (gated, or declared not-a-receipt with the reason) before this census can be believed again')
 
-// The one create-products surface that builds its own lines. Its blank cost
-// used to become 0 in the browser before the wire ever saw it, so the server
+// The create-products surface (CreateProductsSessionModal) retired into the Stock
+// Session, whose entry row is the one place a browser line is built. Its blank
+// cost used to become 0 in the browser before the wire ever saw it, so the server
 // gate above could not see a fabrication that had already happened.
-const createModal = fs.readFileSync(path.join(root, '..', 'frontend', 'src', 'components', 'products', 'CreateProductsSessionModal.tsx'), 'utf8')
-assert.ok(!createModal.includes("cost_price_usd === '' ? 0"),
-  'the Add/Create products session must not turn a blank cost into a free receipt before posting')
-assert.ok(createModal.includes('stockReceiptGateCode('), 'both of its line paths run the same kernel the Worker runs')
+const stockSessionDraft = fs.readFileSync(path.join(root, '..', 'frontend', 'src', 'utils', 'stockSessionDraft.ts'), 'utf8')
+assert.ok(!stockSessionDraft.includes("cost_price_usd === '' ? 0") && !/unitCost(?:Usd)?\s*\|\|\s*0\b/.test(stockSessionDraft),
+  'the Stock Session must not turn a blank cost into a free receipt before posting')
+assert.ok(/stockReceiptGateCode\(/.test(stockSessionDraft), 'its line entry runs the same kernel the Worker runs')
 
 // The unified stock-action import's own review screen. It raises a
 // 'receipt_gate' issue per row carrying the kernel's own code (gateCode), but
@@ -182,7 +183,7 @@ assert.ok(createModal.includes('stockReceiptGateCode('), 'both of its line paths
 // IS filled and whose real remedy is a different column entirely. Every
 // sibling gate surface (FastStockInModal, ReceiveBatchModal, Inventory.tsx,
 // StockAdjustModal, CreateProductsSessionModal, BulkAddStockModal,
-// per-product adjust form) shows the refusal's OWN reason; this import review
+// per-product adjust form; the last four retired into the Stock Session) shows the refusal's OWN reason; this import review
 // must too.
 const stockActionImportModal = fs.readFileSync(
   path.join(root, '..', 'frontend', 'src', 'components', 'products', 'import', 'StockActionImportModal.tsx'),

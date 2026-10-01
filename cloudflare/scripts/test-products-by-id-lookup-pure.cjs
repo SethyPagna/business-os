@@ -31,7 +31,7 @@ const productsRoute = fs.readFileSync(path.join(root, 'src', 'routes', 'products
 const frontendRoot = path.join(root, '..', 'frontend', 'src')
 const read = (...parts) => fs.readFileSync(path.join(frontendRoot, ...parts), 'utf8')
 const transport = read('api', 'productReadTransport.ts')
-const stockAdjustModal = read('components', 'products', 'forms', 'StockAdjustModal.tsx')
+const stockSession = read('components', 'inventory', 'FastStockInModal.tsx')
 const inventoryPage = read('components', 'inventory', 'Inventory.tsx')
 const productsPage = read('components', 'products', 'Products.tsx')
 const lookupSnapshots = read('components', 'products', 'lookups', 'productLookupSnapshots.ts')
@@ -173,14 +173,13 @@ check('the transport refuses to hand back a row that was not asked for', () => {
   )
 })
 
-check('StockAdjustModal resolves the refreshed row by id', () => {
+// The one-product Adjust form (StockAdjustModal) retired with the Stock Session; the
+// session is handed the picked product, so the old positional-pick regression has
+// nowhere to come back except through these two shapes.
+check('the Stock Session never binds the picked product to a positional row', () => {
+  assert.ok(!/rows\[0\] as PickedProduct/.test(stockSession), 'positional pick must not come back')
   assert.ok(
-    /const refreshed = \(rows as PickedProduct\[\]\)\.find\(\(row\) => Number\(row\?\.id\) === Number\(id\)\)/.test(stockAdjustModal),
-    'the adjust form must bind to the product the operator picked, not to items[0]',
-  )
-  assert.ok(!/rows\[0\] as PickedProduct/.test(stockAdjustModal), 'positional pick must not come back')
-  assert.ok(
-    !/searchProducts\(\{\s*search:/.test(stockAdjustModal),
+    !/searchProducts\(\{\s*search:/.test(stockSession),
     'the picker must send the canonical `query` key',
   )
 })
