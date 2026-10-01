@@ -12,7 +12,9 @@ const repo = path.resolve(__dirname, '..', '..')
 const read = (rel) => fs.readFileSync(path.join(repo, rel), 'utf8')
 
 const route = read('cloudflare/src/routes/inventory.ts')
-const modal = read('frontend/src/components/inventory/InventoryStockModals.tsx')
+const session = read('frontend/src/components/inventory/FastStockInModal.tsx')
+const entry = read('frontend/src/components/stock-session/StockSessionLineEntry.tsx')
+const draft = read('frontend/src/utils/stockSessionDraft.ts')
 
 assert.match(route, /const originalType = type[\s\S]*if \(type === 'set'\)/, 'set preserves its audit identity')
 assert.match(route, /const current = await branchStockQty\(c\.env, productId, branchId\)/, 'set reads the selected branch total')
@@ -20,15 +22,14 @@ assert.match(route, /const diff = quantity - current/, 'set computes the signed 
 assert.match(route, /type = diff > 0 \? 'add' : 'remove'/, 'positive and negative differences reuse add/remove semantics')
 assert.match(route, /quantity = Math\.abs\(diff\)/, 'the stock kernel receives the absolute movement quantity')
 assert.match(route, /originalType === 'set' \? 'stock_set'/, 'the audit trail still records the operator action as set')
-assert.match(modal, /requestedSetTotal - adjustCurrentQuantity/, 'the main adjust modal previews the exact server-side difference')
-assert.match(modal, /adjustForm\.type === 'set'[\s\S]*adjust_set[\s\S]*stock[\s\S]*total/, 'the set input is explicitly labelled as a final stock total')
-// N14-D: a set that RAISES a branch's stock is a receipt on the live surface
-// (routes/inventory.ts converts it into an add of the difference, proven
-// above), so the Δ-line block that previews the total-to-difference meaning
-// must also carry the receipt hint under the same isStockIn predicate the
-// supplier/cost fields render on -- otherwise a raising set previews the
-// right number while never telling the operator it now owes a supplier and
-// a cost.
-assert.match(modal, /isStockIn \? \(\s*\n\s*<InfoHint[^>]*stock_set_up_hint/, 'a raising set previews the receipt hint next to the total-to-difference meaning')
+// The old Adjust modal retired with the Stock Session (UI-STOCK, 30 Sep 2026): Set
+// is now a mode of the one float. Its entry row labels the input as the total the
+// lot (or branch) ends at and previews the signed difference the Worker will
+// compute, and a Set that would RAISE the branch with no dated lot is refused
+// there instead of sneaking in as a receipt, because raising stock is an Add.
+assert.match(entry, /label=\{mode === 'set' \? tr\('set_to', 'Set to'\) : tr\('stock_line_qty', 'Qty'\)\}/, 'the set input is explicitly labelled as the total it sets to')
+assert.match(draft, /export function scopedSetPreviewForLot\(quantity: string, lot: SessionLot, branchQuantity: number\)[\s\S]*targetQuantity: Number\(raw\), lotQuantity: lot\.quantity, branchQuantity/, 'the entry row previews the difference from the typed total')
+assert.match(session, /const setPreview = mode === 'set' && chosenLot \? scopedSetPreviewForLot\(quantity, chosenLot, branchQuantity\) : null/, 'the session previews the exact difference for the chosen lot')
+assert.match(session, /mode === 'set' && batchChoice === 'none' && Number\(quantity\) > branchQuantity[\s\S]*no_batches_for_branch/, 'a set that would raise the branch with no dated lot is refused: raising is an Add')
 
-console.log('PASS adjust-to-total UI and Worker contract')
+console.log('PASS adjust-to-total Stock Session and Worker contract')
