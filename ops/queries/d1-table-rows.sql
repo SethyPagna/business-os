@@ -169,4 +169,29 @@ SELECT
     'user_sessions', (SELECT COUNT(*) FROM user_sessions),
     'users', (SELECT COUNT(*) FROM users),
     'verification_codes', (SELECT COUNT(*) FROM verification_codes)
-  ) AS rows_9;
+  ) AS rows_9,
+  json_object(
+    'stock_disposition_allocations', (SELECT COUNT(*) FROM stock_disposition_allocations),
+    'stock_disposition_events', (SELECT COUNT(*) FROM stock_disposition_events),
+    'stock_disposition_fees', (SELECT COUNT(*) FROM stock_disposition_fees),
+    'stock_disposition_guards', (SELECT COUNT(*) FROM stock_disposition_guards),
+    'stock_disposition_receipts', (SELECT COUNT(*) FROM stock_disposition_receipts),
+    'stock_disposition_sources', (SELECT COUNT(*) FROM stock_disposition_sources),
+    'stock_funding_claims', (SELECT COUNT(*) FROM stock_funding_claims),
+    'stock_funding_events', (SELECT COUNT(*) FROM stock_funding_events),
+    'stock_funding_guards', (SELECT COUNT(*) FROM stock_funding_guards),
+    'stock_funding_invoice_openings', (SELECT COUNT(*) FROM stock_funding_invoice_openings),
+    'stock_funding_receipts', (SELECT COUNT(*) FROM stock_funding_receipts),
+    'stock_funding_sources', (SELECT COUNT(*) FROM stock_funding_sources),
+    'stock_lifecycle_context', (SELECT COUNT(*) FROM stock_lifecycle_context),
+    'stock_valuation_acceptances', (SELECT COUNT(*) FROM stock_valuation_acceptances),
+    'stock_valuation_agreements', (SELECT COUNT(*) FROM stock_valuation_agreements),
+    'stock_valuation_context', (SELECT COUNT(*) FROM stock_valuation_context)
+  ) AS rows_10,
+  json_object(
+    'stock_valuation_events', (SELECT COUNT(*) FROM stock_valuation_events),
+    'stock_valuation_guards', (SELECT COUNT(*) FROM stock_valuation_guards),
+    'stock_valuation_receipts', (SELECT COUNT(*) FROM stock_valuation_receipts),
+    'stock_valuation_segments', (SELECT COUNT(*) FROM stock_valuation_segments),
+    'stock_valuation_sources', (SELECT COUNT(*) FROM stock_valuation_sources)
+  ) AS rows_11;
