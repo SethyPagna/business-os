@@ -122,6 +122,7 @@ const productSalesLedger = loadTs('lib/productSalesLedger.ts', { './salesAnalyti
 const inventory = loadTs('routes/inventory.ts', {
   hono: { Hono },
   '../lib/businessDateWindow': businessDateWindow,
+  '../lib/continuousReadWindow': loadTs('lib/continuousReadWindow.ts'),
   '../lib/productSalesLedger': productSalesLedger,
 })
 const { attachInventoryProductMetrics } = inventory
@@ -377,6 +378,23 @@ async function main() {
       `the list's profit_usd equals the detail pane's Math.max(0, revenue) - Math.max(0, cogs) (product ${item.id})`,
     )
   }
+
+  await assert.rejects(() => attachInventoryProductMetrics(db, [{ id: 9 }], { createdFrom: '2026-09-05T04:00:00Z' }),
+    { name: 'RangeError', message: 'createdFrom and createdTo must be provided together' })
+  for (const stored of ['2026-09-05 03:00:00', '2026-09-05T03:00:00.000Z']) {
+    db.prepare('UPDATE sales SET created_at = @stored WHERE id = 108').run({ stored })
+    for (const [createdFrom, createdTo, expected] of [
+      ['2026-09-05T04:00:00Z', '2026-09-05T05:00:00Z', [0, 0]],
+      ['2026-09-05T03:00:00Z', '2026-09-05T04:00:00Z', [30, 3]],
+      ['2026-09-05T02:00:00Z', '2026-09-05T03:00:00Z', [0, 0]],
+    ]) {
+      const scoped = [{ id: 9 }]
+      await attachInventoryProductMetrics(db, scoped, { branchId: '1', createdFrom, createdTo })
+      assert.deepEqual([Number(scoped[0].revenue_usd), Number(scoped[0].qty_sold)], expected,
+        'actual metric SQL includes the start and excludes the end for either stored timestamp format')
+    }
+  }
+  console.log('PASS actual continuous metrics reject a missing partner and use half-open SQL bounds')
 
   // ---- the OTHER three call sites actually run ----------------------------
   // attachInventoryProductMetrics above is one of the four surfaces. The other

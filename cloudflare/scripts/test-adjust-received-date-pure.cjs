@@ -182,6 +182,7 @@ const damagedLotActions = loadReal('lib/damagedLotActions.ts', {
   './sqlBinding': sqlBinding,
 })
 const inventoryRoute = loadReal('routes/inventory.ts', {
+  '../lib/continuousReadWindow': loadReal('lib/continuousReadWindow.ts'),
   '../lib/acquisitionCostAccess': acquisitionCostAccess,
   '../lib/stockCondition': stockCondition,
   '../lib/damagedLotActions': damagedLotActions,
@@ -360,6 +361,11 @@ function batchRows() {
 }
 
 async function main() {
+  await check('the actual movement route refuses invalid continuous timestamps before received-date writes', async () => {
+    const response = await app.request('/movements?createdFrom=2026-10-01T24%3A00%3A00Z&createdTo=2026-10-02T00%3A00%3A00Z', {}, fakeEnv, fakeExecutionCtx)
+    assert.equal(response.status, 400)
+    assert.equal((await response.json()).error, 'createdFrom and createdTo must be valid timestamps')
+  })
   await check('add with a historical receivedDate stores the REAL date and derives the lot code from it', async () => {
     seed()
     const { status, json } = await req('POST', '/adjust', {

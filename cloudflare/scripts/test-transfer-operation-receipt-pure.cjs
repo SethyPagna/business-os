@@ -24,7 +24,7 @@ function wrapDb() {
     },
   }
 }
-const realLibraries = new Set(['movementCostSnapshot', 'operationWriteReadiness', 'db', 'sqlBinding', 'batchCode', 'productBatches', 'branchRoles', 'branchRoleGuards', 'canonicalBranchIdentity', 'transferOperationReceipt', 'transferOperation', 'permissions', 'actorSnapshot', 'undoAppliers'])
+const realLibraries = new Set(['continuousReadWindow', 'movementCostSnapshot', 'operationWriteReadiness', 'db', 'sqlBinding', 'batchCode', 'productBatches', 'branchRoles', 'branchRoleGuards', 'canonicalBranchIdentity', 'transferOperationReceipt', 'transferOperation', 'permissions', 'actorSnapshot', 'undoAppliers'])
 realLibraries.add('moneyPrecision')
 realLibraries.add('acquisitionCostAccess')
 realLibraries.add('businessMaintenanceGuard')
@@ -92,6 +92,12 @@ function counts() {
 let checks = 0
 async function check(name, fn) { await fn(); checks++; console.log(`PASS ${name}`) }
 async function main() {
+  await check('actual movements parser rejects a missing continuous partner', async () => {
+    fresh()
+    const response = await request('inventory', '/movements?createdFrom=2026-09-05T04:00:00Z', undefined, 'GET')
+    assert.equal(response.status, 400)
+    assert.deepEqual(response.body, { error: 'createdFrom and createdTo must be provided together' })
+  })
   for (const from of [1, 2]) for (const [app, route, count] of [
     ['branches', '/transfer', 1], ['inventory', '/transfer', 1], ['branches', '/transfer-bulk', 3], ['branches', '/transfer-bulk', 200],
   ]) await check(`${app}${route} ${from}→${from === 1 ? 2 : 1}, ${count} products: one commit/replay/conflict`, async () => {

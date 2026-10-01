@@ -231,6 +231,7 @@ const stockRevert = loadReal('lib/stockRevert.ts', {
 })
 
 const inventoryRoute = loadReal('routes/inventory.ts', {
+  '../lib/continuousReadWindow': loadReal('lib/continuousReadWindow.ts'),
   // p3/reasons: the one shared reason-length cap the route enforces.
   '../lib/stockReason': loadReal('lib/stockReason.ts'),
   '../lib/stockCondition': stockCondition,

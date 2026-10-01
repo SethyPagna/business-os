@@ -134,6 +134,7 @@ const damagedLotActions = loadReal('lib/damagedLotActions.ts', {
   './sqlBinding': sqlBinding,
 })
 const inventoryRoute = loadReal('routes/inventory.ts', {
+  '../lib/continuousReadWindow': loadReal('lib/continuousReadWindow.ts'),
   '../lib/stockCondition': stockCondition,
   '../lib/damagedLotActions': damagedLotActions,
   '../lib/moneyPrecision': moneyPrecision,
