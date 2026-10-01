@@ -53,7 +53,7 @@ for (const extra of [false, true]) {
   assert.equal(parsed.pool.lines[0].product.cost_price_usd, undefined)
   assert.equal(parsed.amounts.gross_usd, extra ? undefined : 30)
 }
-for (const context of [{ funding_version: 2 }, { return_scope: 'supplier' }, { source_id: 'stock-source', kind: 'hold' }]) {
+for (const context of [{ funding_version: 2 }, { return_scope: 'supplier' }, { returnScope: 'supplier' }, { source_id: 'stock-source', kind: 'hold' }]) {
   const projected = access.projectAcquisitionCosts({ ...context, pricing_snapshot_json: original }, cashier, false, pricing.parseSaleItemPricing)
   assert.equal(JSON.parse(projected.pricing_snapshot_json).amounts.gross_usd, undefined)
 }
@@ -67,6 +67,8 @@ for (const context of [{ valuation_version: 1 }, { scope: 'supplier' }, { return
 }
 const alternateKey = access.projectAcquisitionCosts({ pricingSnapshotJson: original }, cashier, false, pricing.parseSaleItemPricing)
 assert.equal(JSON.parse(alternateKey.pricingSnapshotJson).amounts.gross_usd, undefined)
+const supplierAlias = access.projectAcquisitionCosts({ returnScope: 'supplier', total_usd: 12, paid_usd: 8, line_total_usd: 12 }, cashier)
+assert.deepEqual(supplierAlias, { returnScope: 'supplier' }, 'normalized supplier alias protects ordinary supplier money too')
 for (const json of ['{', JSON.stringify({ version: 1, amounts: { gross_usd: 123 } }), original.replace('"gross_usd":30', '"gross_usd":31')]) {
   const projected = access.projectAcquisitionCosts({ pricing_snapshot_json: json }, cashier, false, pricing.parseSaleItemPricing)
   assert.ok(projected.pricing_snapshot_json === null || JSON.parse(projected.pricing_snapshot_json).amounts.gross_usd === undefined)

@@ -97,14 +97,17 @@ const SUPPLIER_MONEY_FIELDS = new Set(['line_total_usd', 'total_usd', 'paid_usd'
 
 type RetailPricingParser = (json: string) => { amounts: { gross_usd: number } } | null
 
+function hasSupplierContext(source: Record<string, unknown>): boolean {
+  return Object.entries(source).some(([key, value]) => ['scope', 'return_scope'].includes(normalizeCostKey(key)) && value === 'supplier')
+}
+
 function restoreRetailPricingGross(json: string, parsed: unknown, projected: unknown, parser?: RetailPricingParser): unknown {
   if (!parser || !parsed || typeof parsed !== 'object' || !projected || typeof projected !== 'object') return projected
   const source = parsed as Record<string, unknown>
   const amounts = source.amounts
   if (!amounts || typeof amounts !== 'object') return projected
   for (const record of [source, amounts as Record<string, unknown>]) {
-    if (hasLifecycleContext(record, false) || Object.entries(record).some(([key, value]) =>
-      ['scope', 'return_scope'].includes(normalizeCostKey(key)) && value === 'supplier')) return projected
+    if (hasLifecycleContext(record, false) || hasSupplierContext(record)) return projected
   }
   try {
     const validated = parser(json)
@@ -125,7 +128,7 @@ export function projectAcquisitionCosts(value: unknown, user: PermissionUser, su
     if (Array.isArray(input)) return input.map(item => project(item, depth + 1, supplier, lifecycle))
     if (!input || typeof input !== 'object') return input
     const source = input as Record<string, unknown>
-    supplier = supplier || source.return_scope === 'supplier' || source.scope === 'supplier'
+    supplier = supplier || hasSupplierContext(source)
     lifecycle = hasLifecycleContext(source, lifecycle)
     // Audit/merge diffs may name the column rather than use it as a key.
     if (typeof source.field === 'string' && (isAcquisitionCostKey(source.field) || isLifecycleAmount(source.field, lifecycle))) return { field: source.field, redacted: true }
