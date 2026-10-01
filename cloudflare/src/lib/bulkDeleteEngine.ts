@@ -38,6 +38,7 @@ import { bumpVersion } from './cache'
 import { broadcast, type BroadcastChannel } from '../durable-objects/broadcastHub'
 import { actorSnapshot } from './actorSnapshot'
 import { customerIsAnonymousSql } from './anonymousCustomer'
+import { assertStockLifecycleMutable, stockLifecycleRefusal } from './stockLifecycle'
 
 export type BulkDeleteEntityType = 'products' | 'customers' | 'suppliers' | 'delivery_contacts'
 
@@ -254,6 +255,7 @@ export async function createBulkDeleteJob(
   if (!uniqueIds.length) throw new Error('No valid ids to delete')
   const jobId = crypto.randomUUID()
   const db = await getImportFencedDb(env)
+  if (entityType === 'suppliers') await assertStockLifecycleMutable(db, { supplierIds: uniqueIds })
   await db.prepare(`
     INSERT INTO bulk_delete_jobs (id, entity_type, status, reason, ids_json, total_count, created_by_id, created_by_name)
     VALUES (@id, @entityType, 'pending', @reason, @idsJson, @totalCount, @userId, @userName)
@@ -330,6 +332,7 @@ export async function runBulkDeleteJob(env: Env, jobId: string): Promise<void> {
       }
     }
     try {
+      if (job.entity_type === 'suppliers') await assertStockLifecycleMutable(db, { supplierIds: deleteChunk })
       // One statement deletes the whole chunk, instead of one DELETE/UPDATE
       // per id -- this is the core of why this is fast at 10k+ scale.
       // Soft (products) vs hard (customers/suppliers/delivery_contacts)
@@ -375,7 +378,7 @@ export async function runBulkDeleteJob(env: Env, jobId: string): Promise<void> {
       cursor += chunk.length
       await db.prepare(`
         UPDATE bulk_delete_jobs SET processed_count = @cursor, failed_count = @failedCount, failed_ids_json = @failedIds, last_error = @error, updated_at = CURRENT_TIMESTAMP WHERE id = @id
-      `).run({ id: jobId, cursor, failedCount: failedIds.length, failedIds: JSON.stringify(failedIds), error: error instanceof Error ? error.message.slice(0, 2000) : String(error) })
+      `).run({ id: jobId, cursor, failedCount: failedIds.length, failedIds: JSON.stringify(failedIds), error: stockLifecycleRefusal(error)?.error ?? (error instanceof Error ? error.message.slice(0, 2000) : String(error)) })
     }
   }
 
