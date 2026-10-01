@@ -8828,7 +8828,7 @@ app.post('/possible-duplicates/merge', async (c) => {
       stockChoice ?? 'merge',
       undefined,
       { operationId, ...(resolvePlan ? { preStatements: resolveGuards, auditContext: { resolvePlan, operationId, resolvedMergeId: mergeId } } : {}) },
-      keepMode ? { follows: true, ...(chosenCost ? { cost: chosenCost } : {}), ...(resolvePlan ? { economics: resolveProductMergeEconomics(resolvePlan.rows) } : {}), ...(choiceFields ? { fields: choiceFields } : {}) } : undefined,
+      keepMode ? { follows: true, requiresProductEdit: resolveChoicesTypeValues({ choices }), ...(chosenCost ? { cost: chosenCost } : {}), ...(resolvePlan ? { economics: resolveProductMergeEconomics(resolvePlan.rows) } : {}), ...(choiceFields ? { fields: choiceFields } : {}) } : undefined,
     )
   } catch (error) {
     if (/merge_state_conflict|merge_identity_conflict/.test(String(error))) {

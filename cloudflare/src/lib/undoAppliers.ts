@@ -20,7 +20,7 @@ import {
   type BranchReplayRow,
   type BranchWriteFields,
 } from './branchWrites'
-import { getActionTier, getPermissionTier, type PermissionTier } from './permissions'
+import { getActionTier, getPermissionTier, getMergedPermissions, isAdminControlUser, type PermissionTier } from './permissions'
 import {
   buildAllocationStatements,
   buildOperationAllocationStatements,
@@ -300,6 +300,45 @@ export const PRODUCT_MERGE_GROUP_ACTION_KIND = 'product.merge.group'
 export const PRODUCT_MERGE_GROUP_CHILD_KIND = 'product.merge.group.child'
 const PRODUCT_MERGE_APPLIER_KINDS = new Set(['product.merge', 'product.merge.bulk', PRODUCT_MERGE_GROUP_ACTION_KIND])
 
+function mergeChoicePermissionError(reversal: MergeReversal, user: SessionUser | null | undefined): string | null {
+  const choice = reversal.keeperChoice
+  if (!choice) return null
+  const needsProductEdit = choice.requiresProductEdit === true
+    || (choice.requiresProductEdit !== false && !!choice.fields && Object.keys(choice.fields).length > 0)
+  if (needsProductEdit && (!user || getActionTier(user, 'products', 'edit') !== 'full')) return 'product_edit_permission_required'
+  if (choice.cost && (!user || (!isAdminControlUser(user) && getMergedPermissions(user).product_cost_edit !== true))) return 'cost_permission_required'
+  return null
+}
+
+function assertMergeChoicePermissions(reversals: MergeReversal[], user: SessionUser | null | undefined): void {
+  for (const reversal of reversals) {
+    const code = mergeChoicePermissionError(reversal, user)
+    if (code) throw Object.assign(new Error('Current permission is required to replay the saved Resolve choices.'), { code, status: 403 })
+  }
+}
+
+export async function mergeReplayChoicePermissionError(env: Env, payload: Record<string, unknown>, user: SessionUser): Promise<string | null> {
+  const kind = String(payload.applier || '')
+  if (kind !== 'product.merge' && kind !== 'product.merge.bulk') return null
+  const snapshotId = Number(payload.snapshot_id || 0)
+  if (!Number.isInteger(snapshotId) || snapshotId <= 0) return 'product_edit_permission_required'
+  const snap = await getDb(env).prepare('SELECT payload_json FROM undo_snapshots WHERE id = ? AND kind = ?')
+    .get<{ payload_json: string }>([snapshotId, kind])
+  if (!snap) return 'product_edit_permission_required'
+  try {
+    const parsed = JSON.parse(snap.payload_json) as MergeReversal & { reversals?: MergeReversal[] }
+    const reversals = kind === 'product.merge.bulk' ? parsed.reversals : [parsed]
+    if (!Array.isArray(reversals) || !reversals.length) return 'product_edit_permission_required'
+    for (const reversal of reversals) {
+      const code = mergeChoicePermissionError(reversal, user)
+      if (code) return code
+    }
+    return null
+  } catch {
+    return 'product_edit_permission_required'
+  }
+}
+
 function mergeReversalHasSavedImageEffect(reversal: MergeReversal): boolean {
   if ((reversal.dupImagesBefore || []).length || (reversal.imagesMovedToKeeper || []).length) return true
   const fields = reversal.keeperChoice?.fields
@@ -391,6 +430,7 @@ export type MergeStockDisposition = 'merge' | 'write_off'
 // the averaged one. Carried in the reversal so a redo repeats it exactly.
 export type ProductMergeKeeperChoice = {
   follows: true
+  requiresProductEdit?: boolean
   cost?: { cost_price_usd: number; cost_price_khr?: number | null }
   /** Server-frozen group economics; carried through each pair's undo/redo. */
   economics?: ProductMergeEconomics
@@ -3307,6 +3347,8 @@ const APPLIERS: Record<string, UndoApplierDef> = {
         throw new Error('The saved details for this merge are unreadable, so it cannot be reversed.')
       }
 
+      assertMergeChoicePermissions([reversal], ctx.user)
+
       if (ctx.direction === 'undo') {
         if (String(snap.status) !== 'applied') throw new UndoConflictError('This merge has already been undone.', UNDO_ALREADY_DONE_CODE)
         await assertMergeStateUnchanged(db, [reversal], reversal.mergedStateFingerprint)
@@ -3384,6 +3426,7 @@ const APPLIERS: Record<string, UndoApplierDef> = {
         throw new Error('The saved details for this merge are unreadable, so it cannot be reversed.')
       }
       if (!reversals.length) throw new Error('This merge has no saved folds to replay.')
+      assertMergeChoicePermissions(reversals, ctx.user)
 
       if (ctx.direction === 'undo') {
         if (String(snap.status) !== 'applied') throw new UndoConflictError('This merge has already been undone.', UNDO_ALREADY_DONE_CODE)

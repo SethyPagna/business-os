@@ -107,7 +107,7 @@ function fakeApi(cluster: Cluster, extra: FakeOptions = {}) {
 const EMPTY: Draft = { selection: {}, columns: {} }
 async function open(cluster: Cluster, perms: { view?: boolean; edit?: boolean } = { view: true, edit: true }, extra: FakeOptions = {}) {
   const { api, calls } = fakeApi(cluster, extra)
-  const adapter = createProductResolveAdapter({ cluster, t, canViewCosts: Boolean(perms.view), canEditCosts: Boolean(perms.edit), canMerge: () => true, api })
+  const adapter = createProductResolveAdapter({ cluster, t, canEditProducts: true, canViewCosts: Boolean(perms.view), canEditCosts: Boolean(perms.edit), canMerge: () => true, api })
   const data = await adapter.load(signal, EMPTY)
   return { adapter, data, calls }
 }

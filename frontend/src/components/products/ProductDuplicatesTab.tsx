@@ -294,6 +294,7 @@ export default function ProductDuplicatesTab({ t, notify, canRemoveProduct, onMe
   canMergeRef.current = can ? can('products', 'merge_duplicates') : true
   const canViewCosts = canViewAcquisitionCosts(user)
   const canEditCosts = canEditAcquisitionCosts(user)
+  const canEditProducts = can ? can('products', 'edit') : false
   const [loading, setLoading] = useState(false)
   const [loaded, setLoaded] = useState(false)
   const [search, setSearch] = useState('')
@@ -394,10 +395,11 @@ export default function ProductDuplicatesTab({ t, notify, canRemoveProduct, onMe
     t: (key) => t(key),
     canViewCosts,
     canEditCosts,
+    canEditProducts,
     canMerge: () => canMergeRef.current,
     onWritten: () => setMergingId(clusterKey(resolving.cluster)),
     imageDisplay: (path) => <ProductImg src={path} alt="" className="h-10 w-10 rounded-lg object-cover" />,
-  }) : null), [resolving, t, canViewCosts, canEditCosts])
+  }) : null), [resolving, t, canViewCosts, canEditCosts, canEditProducts])
   const resolveName = useMemo(() => {
     const first = resolving ? [...resolving.cluster.products].sort((a, b) => Number(a.id) - Number(b.id))[0] : null
     return first ? String(first.name || '').trim() || `#${first.id}` : ''

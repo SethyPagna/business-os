@@ -4,7 +4,7 @@ import { getDb } from '../lib/db'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit } from '../lib/audit'
 import { getActionTier, hasPermission, isAdminControlUser, isSensitiveActionHistory, permissionForActionHistory } from '../lib/permissions'
-import { SALE_ADD_ITEMS_ACTION_KIND, isUndoClosedByMerge, UNDO_CLOSED_BY_MERGE_CODE, UNDO_CLOSED_BY_MERGE_MESSAGE, PRODUCT_MERGE_GROUP_ACTION_KIND, isServerReplayable, resolveUndoApplier, applierPermissionTier, mergeReplayChangesProductImages, replayRefusalCode, UNDO_HISTORY_STALE_CODE, UNDO_NEEDS_ORIGINAL_TAB_CODE, type UndoApplierOutcome } from '../lib/undoAppliers'
+import { SALE_ADD_ITEMS_ACTION_KIND, isUndoClosedByMerge, UNDO_CLOSED_BY_MERGE_CODE, UNDO_CLOSED_BY_MERGE_MESSAGE, PRODUCT_MERGE_GROUP_ACTION_KIND, isServerReplayable, resolveUndoApplier, applierPermissionTier, mergeReplayChangesProductImages, mergeReplayChoicePermissionError, replayRefusalCode, UNDO_HISTORY_STALE_CODE, UNDO_NEEDS_ORIGINAL_TAB_CODE, type UndoApplierOutcome } from '../lib/undoAppliers'
 import { CUSTOMER_GENDER_RESTORATION_KIND, canRestoreCustomerGender, notifyCustomerGenderRestoration } from '../lib/customerGenderRestoration'
 import { PRODUCT_REMOVE_ACTION_KIND } from '../lib/productDelete'
 import type { Env } from '../index'
@@ -165,12 +165,16 @@ async function mapRow(row: ActionHistoryRow, user: SessionUser, env: Env) {
   const replayChangesImages = applier
     ? await mergeReplayChangesProductImages(env, String(row.status || '').toLowerCase() === 'redoable' ? redoPayload : undoPayload, String(row.status || '').toLowerCase() === 'redoable' ? 'redo' : 'undo')
     : false
+  const choicePermissionError = applier
+    ? await mergeReplayChoicePermissionError(env, String(row.status || '').toLowerCase() === 'redoable' ? redoPayload : undoPayload, user)
+    : null
   return {
     ...row,
     reversible: !!row.reversible,
     undo_payload: undoPayload,
     redo_payload: redoPayload,
     server_replayable: !!(applier
+      && !choicePermissionError
       && canUseNamedAppliers(user, [undoPayload, redoPayload])
       && (applier.name !== CUSTOMER_GENDER_RESTORATION_KIND || Number(row.created_by_id) === Number(user.id))
       && (!replayChangesImages || getActionTier(user, 'products', 'image') === 'full')),
@@ -418,6 +422,8 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
     const replayChangesProductImages = applier
       ? await mergeReplayChangesProductImages(c.env, payload, direction)
       : false
+    const choicePermissionError = applier ? await mergeReplayChoicePermissionError(c.env, payload, user) : null
+    if (choicePermissionError) return c.json({ success: false, code: choicePermissionError, error: 'Current permission is required to replay the saved Resolve choices.' }, 403)
     // The applier's own declared permission gates its replay -- full tier,
     // checked HERE at operate time too (recording is gated the same way, but
     // rows written before this gate existed, or by a user since demoted,
