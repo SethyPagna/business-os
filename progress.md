@@ -10,8 +10,8 @@ and their new status, and each item here names the Part that last changed it (e.
 | Item | Status |
 |---|---|
 | RC2-HOTFIX | [x] Live; both real merge actions and health checks verified. |
-| RC3-UI and DATE | [~] Privacy fix reviewed. Product Undo errors are being repaired before release. Not live. |
-| STOCK-RETURN | [~] Review found stock-cost split and retry gaps; correcting them. Partial returns/accounting not live. |
+| RC3-UI and DATE | [~] Product Undo fix underway after five reviews. Full tests running; not live. |
+| STOCK-RETURN | [~] Four fixes pass focused tests; fresh review underway. Partial returns/accounting not live. |
 
 ### Deploy checkpoints (26 Sep) — each deploys as soon as it is green; nothing waits for the next
 | Checkpoint | Contents | State |
