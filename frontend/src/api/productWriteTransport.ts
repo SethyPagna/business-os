@@ -1,6 +1,7 @@
 import { apiFetch, cacheInvalidate, route } from './http.ts'
 import { ensureClientRequestId } from './requestIds.ts'
 import { getClientDeviceInfo } from '../utils/deviceInfo.ts'
+import { executeProductEditRequest, productEditStorageKey, localizeProductEditError } from '../utils/productEditRequests.ts'
 import { captureActorReadScope, assertActorReadScope } from './actorReadScope.ts'
 import type { SelectedConflictGroupFinalizeRequest, SelectedConflictGroupReviewRequest } from '../utils/selectedConflictActionReview.ts'
 
@@ -287,12 +288,13 @@ export async function updateProduct(id: string | number, payload: ProductPayload
   const check = () => { assertActorReadScope(scope, false); assertCurrent?.() }
   check()
   const body = { ...getDevicePayload(), ...(payload || {}) }
-  const result = await route(
-    'products:update',
-    () => { check(); return apiFetch('PUT', `/api/products/${encodeId(id)}`, body) },
-    null,
-    true,
-  )
+  const result = await executeProductEditRequest(window.sessionStorage, productEditStorageKey('saves'), id, body,
+    ({ body }) => route(
+      'products:update',
+      () => { check(); return apiFetch('PUT', `/api/products/${encodeId(id)}`, body) },
+      null,
+      true,
+    ), check).catch(async error => { throw await localizeProductEditError(error) })
   check()
   return result
 }

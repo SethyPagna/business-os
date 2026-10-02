@@ -87,6 +87,7 @@ const REPLAY_REFUSAL_KEYS: Readonly<Record<string, { undo: string; redo: string 
   undo_needs_original_tab: { undo: 'undo_refused_needs_original_tab', redo: 'redo_refused_needs_original_tab' },
   undo_closed_products_merged: { undo: 'undo_refused_closed_by_merge', redo: 'redo_refused_closed_by_merge' },
   merge_conflict_retry: { undo: 'undo_refused_merge_conflict_retry', redo: 'redo_refused_merge_conflict_retry' },
+  product_edit_private_state_unavailable: { undo: 'undo_product_private_state_unavailable', redo: 'redo_product_private_state_unavailable' },
   undo_refused: { undo: 'undo_refused_generic', redo: 'redo_refused_generic' },
 }
 

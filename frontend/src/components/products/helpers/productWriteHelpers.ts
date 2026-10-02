@@ -144,7 +144,7 @@ function stringOrEmpty(value: unknown): string {
   return value ? String(value) : ''
 }
 
-export function buildProductWritePayload(snapshot: ProductRecord = {}, user: UserRecord = {}) {
+export function buildProductWritePayload(snapshot: ProductRecord = {}, user: UserRecord = {}): Record<string, unknown> {
   const gallery = normalizeProductGallery(snapshot.image_gallery, snapshot.image_path || null)
   return {
     name: stringOrEmpty(snapshot.name),
@@ -154,27 +154,17 @@ export function buildProductWritePayload(snapshot: ProductRecord = {}, user: Use
     brand: stringOrEmpty(snapshot.brand),
     unit: stringOrEmpty(snapshot.unit) || 'pcs',
     description: stringOrEmpty(snapshot.description),
-    selling_price_usd: normalizePriceValue(snapshot.selling_price_usd || 0),
-    selling_price_khr: normalizePriceValue(snapshot.selling_price_khr || 0),
-    // The tier column, and NO `?? selling_price` fallback. The old VIP pair
-    // that stood here defaulted to the selling price whenever a snapshot
-    // omitted it, so any writer that built a payload from a partial record
-    // silently stamped the selling price into the tier column -- a
-    // client-composed value overwriting what the server held. That is
-    // exactly the defect that would have re-polluted this column right after
-    // migration 0111 moved 9,552 real prices into it. A snapshot that does
-    // not carry a wholesale price writes 0, which reads as "no wholesale
-    // price set" everywhere and offers no tier at the POS.
-    wholesale_price_usd: normalizePriceValue(snapshot.wholesale_price_usd ?? 0),
-    wholesale_price_khr: normalizePriceValue(snapshot.wholesale_price_khr ?? 0),
-    purchase_price_usd: normalizePriceValue(snapshot.purchase_price_usd || snapshot.cost_price_usd || 0),
-    purchase_price_khr: normalizePriceValue(snapshot.purchase_price_khr || snapshot.cost_price_khr || 0),
-    cost_price_usd: normalizePriceValue(snapshot.cost_price_usd || snapshot.purchase_price_usd || 0),
-    cost_price_khr: normalizePriceValue(snapshot.cost_price_khr || snapshot.purchase_price_khr || 0),
+    ...Object.fromEntries([
+      'selling_price_usd', 'selling_price_khr', 'wholesale_price_usd', 'wholesale_price_khr',
+      'purchase_price_usd', 'purchase_price_khr', 'cost_price_usd', 'cost_price_khr',
+    ].filter(key => Object.prototype.hasOwnProperty.call(snapshot, key) && snapshot[key] !== undefined)
+      .map(key => [key, snapshot[key]])),
     low_stock_threshold: Number(snapshot.low_stock_threshold || 0),
     out_of_stock_threshold: Number(snapshot.out_of_stock_threshold || 0),
     supplier: stringOrEmpty(snapshot.supplier),
-    custom_fields: snapshot.custom_fields || {},
+    ...(Object.prototype.hasOwnProperty.call(snapshot, 'custom_fields') && snapshot.custom_fields !== undefined
+      ? { custom_fields: snapshot.custom_fields == null || typeof snapshot.custom_fields === 'string'
+        ? snapshot.custom_fields : JSON.stringify(snapshot.custom_fields) } : {}),
     image_gallery: gallery,
     image_path: gallery[0] || null,
     is_active: snapshot.is_active ? 1 : 0,

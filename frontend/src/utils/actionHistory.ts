@@ -5,7 +5,7 @@ import {
   isTrackedRequestCurrent,
   withLoaderTimeout,
 } from './loaders'
-import { resolveReplayAction } from './actionReplay'
+import { executeProductEditReplay, productEditStorageKey, productEditHistoryReceipt, localizeProductEditError } from './productEditRequests.ts'
 import { scopedWorkDraftKey } from './workDrafts.ts'
 import { effectivePermissions } from './permissions.ts'
 import { actorReadStorageKey, captureActorReadScope, assertActorReadScope, isActorReadScopeCurrent, type ActorReadScope } from '../api/actorReadScope.ts'
@@ -29,12 +29,6 @@ type ActionHistoryInput = {
   label?: unknown
   undo?: HistoryAction
   redo?: HistoryAction
-  // Optional refresh-only callback (K1). When the server replays the reversal
-  // itself (undo_payload/redo_payload names a registered applier and the
-  // /undo|/redo response is applied:true), the closure must NOT also mutate --
-  // that would be a redundant, and under optimistic-concurrency a conflicting,
-  // second write. If `refresh` is provided it is called INSTEAD of the closure
-  // to re-pull the page's data; without it, the closure runs as before.
   refresh?: HistoryAction
   serverId?: unknown
   server_id?: unknown
@@ -74,6 +68,7 @@ export function buildServerReplayRequest(payload: Record<string, unknown> | unde
     || applier === 'sale.customer.single'
     || applier === 'product.merge.group'
     || applier === 'product.remove'
+    || applier === 'product.edit.v1'
     || applier === 'stock.transfer'
     || applier === 'stock.session'
     || applier === 'stock.quantity_set'
@@ -376,6 +371,15 @@ export function useActionHistory({ limit = 10, notify, scope = 'global', enabled
     return nextEntry
   }, [limit, refreshServerItems, scope])
 
+  const adoptServerAction = useCallback((result: unknown): boolean => {
+    if (actorScopeRef.current !== actorScope || !isActorReadScopeCurrent(readScope, false)) return false
+    const item = productEditHistoryReceipt(result)
+    if (!item) return false
+    setServerItems(current => [item, ...current.filter(row => String(row.id) !== String(item.id))].slice(0, Math.max(3, limit)))
+    refreshServerItems()
+    return true
+  }, [actorScope, limit, refreshServerItems])
+
   const runEntry = useCallback(async (direction: ActionDirection, entryId: string | number | null = null): Promise<boolean> => {
     const source = direction === 'undo' ? undoStack : redoStack
     const entry = entryId ? source.find((item) => String(item.id) === String(entryId)) : source[source.length - 1]
@@ -391,6 +395,10 @@ export function useActionHistory({ limit = 10, notify, scope = 'global', enabled
         const response = direction === 'undo'
           ? await api.undoActionHistory(entry.serverId)
           : await api.redoActionHistory(entry.serverId)
+        if ((response as { pending?: boolean })?.pending === true && (response as { applied?: boolean })?.applied !== true) {
+          refreshServerItems()
+          return false
+        }
         serverTransitioned = true
         // applied:true means the Worker replayed the reversal itself (K1) --
         // the closure must not mutate again; a refresh-only callback (if the
@@ -398,8 +406,11 @@ export function useActionHistory({ limit = 10, notify, scope = 'global', enabled
         serverApplied = !!(response && typeof response === 'object' && (response as { applied?: unknown }).applied)
         refreshServerItems()
       }
-      const replay = resolveReplayAction({ serverApplied, refresh: entry.refresh, action })
-      await Promise.resolve(replay ? replay() : undefined)
+      if (serverApplied) {
+        try { await entry.refresh?.() } catch { refreshServerItems() }
+      } else {
+        await action()
+      }
       if (direction === 'undo') {
         setUndoStack((current) => current.filter((item) => item.id !== entry.id))
         setRedoStack((current) => [...current.slice(-(Math.max(1, limit) - 1)), entry])
@@ -448,7 +459,16 @@ export function useActionHistory({ limit = 10, notify, scope = 'global', enabled
       const item = serverItems.find(item => String(item.id) === String(serverId))
       const payload = item?.[direction === 'undo' ? 'undo_payload' : 'redo_payload'] as Record<string, unknown> | undefined
       const replayRequest = buildServerReplayRequest(payload)
-      const response = payload?.applier === 'stock.transfer'
+      const response = payload?.applier === 'product.edit.v1'
+        ? await executeProductEditReplay(window.sessionStorage, productEditStorageKey('replay'), {
+          serverId, direction, operationId: String(payload.operation_id || ''), generation: Number(payload.generation),
+        }, (pending, body) => pending.direction === 'undo'
+          ? api.undoActionHistory(pending.serverId, body) : api.redoActionHistory(pending.serverId, body),
+        () => {
+          assertActorReadScope(readScope, false)
+          if (actorScopeRef.current !== requestScope) throw new Error('Product history belongs to an earlier account.')
+        })
+        : payload?.applier === 'stock.transfer'
         ? await executeTransferReplay(window.sessionStorage, scopedWorkDraftKey('transfer_history_pending'), {
           serverId, direction, operationId: String(payload.operation_id || ''), generation: Number(payload.generation),
         }, (pending, body) => pending.direction === 'undo'
@@ -458,6 +478,12 @@ export function useActionHistory({ limit = 10, notify, scope = 'global', enabled
           : await api.redoActionHistory(serverId, replayRequest)
       const applied = !!(response && typeof response === 'object' && (response as { applied?: unknown }).applied)
       if (actorScopeRef.current !== requestScope || !isActorReadScopeCurrent(readScope)) return false
+      if ((response as { pending?: boolean })?.pending === true && !applied) {
+        refreshServerItems()
+        const notice = await localizeProductEditError(Object.assign(new Error('Product change submitted for review'), { code: 'product_edit_pending_review' }))
+        if (actorScopeRef.current === requestScope && isActorReadScopeCurrent(readScope, false)) notify?.(getErrorMessage(notice, ''))
+        return false
+      }
       if (!applied) {
         notify?.(`Unable to ${direction} that action right now.`, 'error')
         return false
@@ -467,8 +493,9 @@ export function useActionHistory({ limit = 10, notify, scope = 'global', enabled
       refreshServerItems()
       if (label) notify?.(label)
       return true
-    } catch (error) {
-      notify?.(getErrorMessage(error, `Unable to ${direction} that action right now.`), 'error')
+    } catch (failure) {
+      const error = await localizeProductEditError(failure)
+      if (actorScopeRef.current === requestScope && isActorReadScopeCurrent(readScope, false)) notify?.(getErrorMessage(error, `Unable to ${direction} that action right now.`), 'error')
       return false
     } finally {
       setBusy('')
@@ -493,9 +520,10 @@ export function useActionHistory({ limit = 10, notify, scope = 'global', enabled
     userOptions: enabled && isAdmin && cachedScopeRef.current === actorScope && isActorReadScopeCurrent(readScope) ? userOptions : [],
     refreshServerItems,
     pushAction,
+    adoptServerAction,
     undo,
     redo,
     undoServer,
     redoServer,
-  }), [actorScope, enabled, busy, isAdmin, pushAction, redo, redoServer, redoStack, refreshServerItems, serverItems, undo, undoServer, undoStack, userFilter, userOptions])
+  }), [actorScope, enabled, busy, isAdmin, pushAction, adoptServerAction, redo, redoServer, redoStack, refreshServerItems, serverItems, undo, undoServer, undoStack, userFilter, userOptions])
 }

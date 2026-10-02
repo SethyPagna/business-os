@@ -31,8 +31,10 @@ export type CostBreakdownExclusionReason = 'zero' | 'duplicate' | 'inactive' | '
 const EXCLUSION_REASONS: ReadonlySet<string> = new Set(['zero', 'duplicate', 'inactive', 'superseded', 'overridden', 'depleted'])
 
 export type CostBreakdownInput = {
-  source: 'lot' | 'manual' | 'catalog'
+  source: 'lot' | 'manual' | 'catalog' | 'undo' | 'redo'
   label: string
+  restored_basis?: 'none' | 'entry'
+  target_entry_id?: number | null
   lot_code?: string | null
   batch_number?: number | null
   received_at?: string | null
@@ -154,7 +156,7 @@ export function costRowPrimaryText(input: CostBreakdownInput, formattedReceivedD
  */
 export function costRowMeta(input: CostBreakdownInput, formattedDate: string | null): string {
   const parts: string[] = []
-  if (input.source === 'manual') {
+  if (['manual', 'undo', 'redo'].includes(input.source)) {
     if (formattedDate) parts.push(formattedDate)
     if (input.user_name) parts.push(input.user_name)
   } else {
@@ -169,7 +171,9 @@ export function normalizeCostBreakdown(value: unknown): CostBreakdown | null {
   const raw = value as Record<string, unknown>
   const rawInputs = Array.isArray(raw.inputs) ? raw.inputs as Array<Record<string, unknown>> : []
   const inputs: CostBreakdownInput[] = rawInputs.map((entry) => ({
-    source: entry.source === 'manual' ? 'manual' : entry.source === 'lot' ? 'lot' : 'catalog',
+    source: entry.source === 'undo' || entry.source === 'redo' || entry.source === 'manual' || entry.source === 'lot' ? entry.source : 'catalog',
+    restored_basis: entry.restored_basis === 'none' || entry.restored_basis === 'entry' ? entry.restored_basis : undefined,
+    target_entry_id: typeof entry.target_entry_id === 'number' && Number.isSafeInteger(entry.target_entry_id) ? entry.target_entry_id : null,
     label: entry.label == null ? '' : String(entry.label),
     lot_code: entry.lot_code == null ? null : String(entry.lot_code),
     batch_number: entry.batch_number == null ? null : Number(entry.batch_number),

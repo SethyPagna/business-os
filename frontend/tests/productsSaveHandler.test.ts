@@ -4,6 +4,8 @@ import ts from 'typescript'
 import { beginSingleAction, finishSingleAction } from '../src/utils/actionGuards.ts'
 import { omitUnauthorizedCatalogCosts } from '../src/utils/acquisitionCostAccess.ts'
 import { normalizeProductGallery } from '../src/components/products/helpers/productGalleryHelpers.ts'
+import { productEditHistoryReceipt } from '../src/utils/productEditRequests.ts'
+import { isWriteConflictError } from '../src/api/http.ts'
 import { cloneHistorySnapshot, extractHistoryResultId, resolveCreatedHistorySnapshot } from '../src/utils/historyHelpers.ts'
 
 // Execute the actual wired closure and its actual gallery uploader. Only the
@@ -34,7 +36,7 @@ function deferred() {
   return { promise, resolve }
 }
 type Row = Record<string, unknown>
-function fixture(options: { edit?: boolean; granted?: boolean; failure?: 'api' | 'response' | 'upload' | 'refresh'; hold?: ReturnType<typeof deferred>; holdUpload?: ReturnType<typeof deferred>; holdRefresh?: ReturnType<typeof deferred> } = {}) {
+function fixture(options: { edit?: boolean; granted?: boolean; failure?: 'api' | 'response' | 'upload' | 'refresh' | 'missing-receipt'; pending?: boolean; hold?: ReturnType<typeof deferred>; holdUpload?: ReturnType<typeof deferred>; holdRefresh?: ReturnType<typeof deferred> } = {}) {
   const calls: Array<{ kind: string; payload?: Row }> = []
   const notices: unknown[] = [], history: unknown[] = []
   const guard = { current: false }
@@ -46,10 +48,15 @@ function fixture(options: { edit?: boolean; granted?: boolean; failure?: 'api' |
     calls.push({ kind, payload })
     if (options.hold) await options.hold.promise
     if (options.failure === 'api') throw new Error('403 permission denied')
-    return options.failure === 'response' ? { success: false, error: 'write refused' } : { success: true, id: 12 }
+    if (options.failure === 'response') return { success: false, error: 'write refused' }
+    if (options.pending) return { pending: true, applied: false }
+    const pointer = { applier: 'product.edit.v1', operation_id: '72', generation: 0 }
+    return options.failure === 'missing-receipt' ? { success: true, id: 12 }
+      : { success: true, applied: true, id: 12, action_history_id: 88, operation_id: '72', generation: 0,
+        history: { id: 88, status: 'undoable', undo_payload: pointer, redo_payload: pointer } }
   }
   const scope = {
-    user, isActive: true, can: () => true, productSaveAuthorityRef: authority, productSaveFormRef: formIdentity,
+    user, isActive: true, can: () => true, productSaveAuthorityRef: authority, productSaveFormRef: formIdentity, isWriteConflictError,
     captureProductWriteGuard: (extra?: () => void) => { const captured = actor; return () => { if (actor !== captured) throw new Error('stale actor'); extra?.() } },
     selected: options.edit ? { id: 12, name: 'Before' } : null,
     omitUnauthorizedCatalogCosts, beginSingleAction, finishSingleAction, productSaveInFlightRef: guard,
@@ -75,7 +82,16 @@ function fixture(options: { edit?: boolean; granted?: boolean; failure?: 'api' |
     },
     buildProductIdMap: (rows: Array<{ id: number }>) => new Map(rows.map(row => [row.id, row])),
     pinnedEditedProductsRef: { current: new Map() },
-    actionHistory: { pushAction: (value: unknown) => history.push(value) },
+    actionHistory: {
+      pushAction: (value: unknown) => history.push(value),
+      adoptServerAction: (value: unknown) => {
+        const receipt = productEditHistoryReceipt(value)
+        if (!receipt) return false
+        history.push(receipt)
+        return true
+      },
+    },
+    refreshPendingProductEdits: () => {},
     pushCreatedProductHistory: (value: unknown) => history.push(value),
     restoreProductSnapshots: async () => {}, load: async () => {},
     getErrorMessage: (_error: unknown, fallback: string) => fallback,
@@ -167,10 +183,26 @@ assert.equal(normalClose.history.length, 1, 'normal successful close must retain
 const revokedRefresh = deferred(), revoked = fixture({ edit: true, holdRefresh: revokedRefresh })
 await revoked.save(form)
 revoked.closeForm(); revoked.revoke(); revokedRefresh.resolve(); await tick()
-assert.equal(revoked.history.length, 0, 'post-close permission loss must still suppress enrichment')
+assert.equal(revoked.history.length, 1, 'receipt adopted before revocation remains one entry; late enrichment adds nothing')
 const formUpload = deferred(), changedForm = fixture({ edit: true, holdUpload: formUpload })
 const formSave = changedForm.save({ ...form, image_gallery: ['data:image/png;base64,AA=='] })
 await tick(); changedForm.closeForm(); formUpload.resolve()
 await assert.rejects(formSave)
 assert.equal(changedForm.calls.some(call => call.kind === 'update'), false, 'form change before commit must still block write')
 console.log('PASS actual render normal-close enrichment, post-close revocation and pre-commit form fencing')
+
+const missing = fixture({ edit: true, failure: 'missing-receipt' })
+await assert.rejects(missing.save(form), /pending product save/)
+assert.equal(missing.history.length, 0)
+assert.equal(missing.notices.length, 0)
+const queued = fixture({ edit: true, pending: true })
+await queued.save(form)
+assert.equal(queued.history.length, 0)
+assert.equal(queued.notices.length, 1)
+const heldRead = deferred(), durable = fixture({ edit: true, holdRefresh: heldRead })
+await durable.save(form)
+assert.equal(durable.history.length, 1, 'server History is adopted before optional enrichment resolves')
+heldRead.resolve()
+await tick()
+assert.equal(durable.history.length, 1, 'enrichment never registers a duplicate legacy closure')
+console.log('PASS managed edit receipt adoption precedes enrichment and pending is not applied')

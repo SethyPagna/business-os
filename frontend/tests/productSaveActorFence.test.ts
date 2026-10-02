@@ -37,7 +37,7 @@ function authority() {
 for (const kind of ['createProduct', 'updateProduct']) for (const boundary of ['dispatch', 'completion']) {
   const a = authority(), wait = deferred(); let writes = 0
   const method = compile(functionSource('api/productWriteTransport.ts', kind), {
-    ...a, getDevicePayload: () => ({}), ensureClientRequestId: (body: unknown) => body, encodeId: String,
+    ...a, localizeProductEditError: async (error: unknown) => error, window: { sessionStorage: {} }, productEditStorageKey: () => 'actor', executeProductEditRequest: async (_store: unknown, _key: unknown, id: unknown, body: unknown, send: (intent: unknown) => Promise<unknown>, check: () => void) => { check(); const result = await send({ productId: id, body }); check(); return result }, getDevicePayload: () => ({}), ensureClientRequestId: (body: unknown) => body, encodeId: String,
     route: async (_name: unknown, dispatch: () => Promise<unknown>) => { if (boundary === 'dispatch') await wait.promise; return dispatch() },
     apiFetch: async () => { writes++; if (boundary === 'completion') await wait.promise; return { success: true } },
   }, kind)

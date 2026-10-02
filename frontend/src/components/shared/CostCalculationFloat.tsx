@@ -88,11 +88,14 @@ export default function CostCalculationFloat({ productId, productName, onClose, 
               {breakdown.inputs.length ? breakdown.inputs.map((input, index) => {
                 const excludedKey = costExclusionLabelKey(input.excluded)
                 const excludedLabel = excludedKey ? tr(excludedKey, excludedKey) : ''
-                const isManual = input.source === 'manual'
+                const isManual = ['manual', 'undo', 'redo'].includes(input.source)
                 const formattedDate = isManual
                   ? (input.recorded_at ? fmtDate(input.recorded_at) : null)
                   : (input.received_at ? fmtDate(input.received_at) : null)
-                const primaryText = isManual ? tr('cost_breakdown_manual_tag', 'Override') : costRowPrimaryText(input, formattedDate)
+                const sourceText = input.source === 'undo' ? tr('cost_breakdown_undo_tag', 'Undo')
+                  : input.source === 'redo' ? tr('cost_breakdown_redo_tag', 'Redo')
+                  : isManual ? tr('cost_breakdown_manual_tag', 'Override') : costRowPrimaryText(input, formattedDate)
+                const primaryText = input.restored_basis === 'none' ? `${sourceText} · ${tr('cost_breakdown_restore_catalog', 'Lot costs')}` : sourceText
                 const meta = costRowMeta(input, formattedDate)
                 const currentCostText = input.cost_usd == null ? '—' : fmtUSD(input.cost_usd)
                 const costText = isManual

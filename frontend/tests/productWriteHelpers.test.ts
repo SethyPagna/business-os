@@ -36,17 +36,10 @@ const basePayload = buildProductWritePayload({
 
 assert.equal(basePayload.name, 'Product A')
 assert.equal(basePayload.unit, 'pcs', 'blank unit falls back to pieces')
-assert.equal(basePayload.selling_price_usd, 10)
-// This assertion used to read "special price falls back to selling price",
-// pinning the defect rather than the behaviour: a snapshot with no tier price
-// silently shipped the SELLING price into the tier column, so any writer
-// building a payload from a partial record overwrote the server's value with
-// a client-composed one. The 2026-09-04 ruling moved the tier to wholesale
-// and there is no fallback any more -- absent means 0, which reads as "no
-// wholesale price set" and offers no tier at the POS.
-assert.equal(basePayload.wholesale_price_usd, 0, 'a missing wholesale price must NOT inherit the selling price')
-assert.equal(basePayload.purchase_price_usd, 4, 'purchase price falls back to cost price')
-assert.equal(basePayload.cost_price_usd, 4)
+assert.equal(basePayload.selling_price_usd, '10')
+assert.equal(Object.hasOwn(basePayload, 'wholesale_price_usd'), false, 'unknown snapshot money remains absent')
+assert.equal(Object.hasOwn(basePayload, 'purchase_price_usd'), false, 'purchase is never inferred from cost')
+assert.equal(basePayload.cost_price_usd, '4')
 assert.deepEqual(basePayload.image_gallery, ['/uploads/a.png', '/uploads/b.png'])
 assert.equal(basePayload.image_path, '/uploads/a.png')
 assert.equal(basePayload.low_stock_threshold, 5)
@@ -70,7 +63,7 @@ assert.equal(variantPayload.is_group, 0, 'variants cannot be restored as product
 assert.equal(variantPayload.parent_id, 42)
 assert.deepEqual(variantPayload.image_gallery, ['main.jpg'])
 assert.equal(variantPayload.image_path, 'main.jpg')
-assert.equal(variantPayload.purchase_price_usd, 2.5)
+assert.equal(variantPayload.purchase_price_usd, '', 'raw known value is preserved rather than replaced from cost')
 assert.equal(variantPayload.userId, 'admin')
 assert.equal(variantPayload.userName, 'Admin')
 

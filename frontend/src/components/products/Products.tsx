@@ -57,6 +57,7 @@ import {
 import { useIsPageActive } from '../shared/pageActivity'
 import { buildProductCategorySections, hideZeroStockGroupedChildRows } from '../../utils/productGrouping.ts'
 import { useActionHistory } from '../../utils/actionHistory.ts'
+import { readProductEditIntents, productEditStorageKey, type ProductEditIntent } from '../../utils/productEditRequests.ts'
 import { cloneHistorySnapshot, extractHistoryResultId, resolveCreatedHistorySnapshot } from '../../utils/historyHelpers.ts'
 import { createProductHistoryRequestId, orderProductRestoreSnapshots } from './history/productHistoryHelpers.ts'
 import { toggleIdSet } from '../../utils/recordFilters.ts'
@@ -2377,6 +2378,33 @@ function ProductsFullEditor() {
     }
   }
 
+  const [pendingProductEdits, setPendingProductEdits] = useState<ProductEditIntent[]>([])
+  const [checkingProductEdits, setCheckingProductEdits] = useState(false)
+  const refreshPendingProductEdits = useCallback(() => {
+    try { setPendingProductEdits(readProductEditIntents(window.sessionStorage, productEditStorageKey('saves'))) }
+    catch { setPendingProductEdits([]) }
+  }, [])
+  useEffect(() => { refreshPendingProductEdits() }, [refreshPendingProductEdits, user?.id, isActive])
+  const checkPendingProductEdits = async () => {
+    if (checkingProductEdits) return
+    const assertCurrent = captureProductWriteGuard(() => {
+      if (!isActive || !can('products', 'edit')) throw new Error(tr('permission_denied', 'Permission denied'))
+    })
+    setCheckingProductEdits(true)
+    try {
+      assertCurrent()
+      const pending = readProductEditIntents(window.sessionStorage, productEditStorageKey('saves'))
+      for (const intent of pending) {
+        const result = await productApi.updateProduct(intent.productId, intent.body, assertCurrent)
+        assertCurrent()
+        if (result?.pending === true) notify(tr('product_edit_pending_review', 'Product change submitted for review'))
+        else if (!actionHistory.adoptServerAction(result)) throw new Error(tr('product_edit_outcome_unknown', 'Check the pending product save before retrying.'))
+      }
+      await load(true)
+    } catch (error) { notify(getErrorMessage(error, tr('product_edit_outcome_unknown', 'Check the pending product save before retrying.')), 'error') }
+    finally { refreshPendingProductEdits(); setCheckingProductEdits(false) }
+  }
+
   const handleSaveWithGallery = async (form: ProductRecord) => {
     const revision = productSaveAuthorityRef.current.revision
     const formRevision = productSaveFormRef.current.revision
@@ -2442,6 +2470,11 @@ function ProductsFullEditor() {
         const res = await runProductWriteMutation(() => productApi.updateProduct(selected.id || 0, payload, assertCurrent), 'Update product')
         assertCurrent()
         if (res?.success === false) throw new Error(res.error || 'Failed to update product')
+        if (res?.pending === true) {
+          notify(tr('product_edit_pending_review', 'Product change submitted for review'))
+          return
+        }
+        if (!actionHistory.adoptServerAction(res)) throw new Error(tr('product_edit_outcome_unknown', 'Check the pending product save before retrying.'))
         if ((res as { merged_into?: unknown })?.merged_into) {
           foldedIntoName = String((res as { item?: { name?: unknown } })?.item?.name || form.name || '')
         }
@@ -2484,13 +2517,7 @@ function ProductsFullEditor() {
                 fallbackSnapshot: { ...payload, id: createdProductId },
               }).snapshot
 
-          if (previousSnapshot && targetProductId) {
-            actionHistory.pushAction({
-              label: `Edit product ${previousSnapshot.name || latestProductSnapshot.name || ''}`.trim(),
-              undo: () => restoreProductSnapshots([previousSnapshot], 'Undo product edit'),
-              redo: () => restoreProductSnapshots([latestProductSnapshot], 'Redo product edit'),
-            })
-          } else if (latestProductSnapshot?.id) {
+          if (!previousSnapshot && latestProductSnapshot?.id) {
             pushCreatedProductHistory(latestProductSnapshot, `Add product ${latestProductSnapshot.name || ''}`.trim())
           }
 
@@ -2529,6 +2556,7 @@ function ProductsFullEditor() {
       }
       throw e instanceof Error ? e : new Error(getErrorMessage(e, 'Failed to save product'))
     } finally {
+      refreshPendingProductEdits()
       finishSingleAction(productSaveInFlightRef)
     }
   }
@@ -4722,6 +4750,10 @@ function ProductsFullEditor() {
   // top and nothing bleeds above it.
   return (
     <div className="page-scroll px-3 pb-3 sm:px-6 sm:pb-6">
+      {pendingProductEdits.length > 0 && <div className="flex min-w-0 items-center gap-2 rounded-lg border border-amber-200 px-2 py-1 text-sm" role="status">
+        <span className="min-w-0 flex-1">{tr('product_edit_pending_notice', 'A product save needs checking.')}</span>
+        <button type="button" className="min-h-11 shrink-0 px-2 font-medium" disabled={checkingProductEdits} onClick={() => void checkPendingProductEdits()}>{tr('product_edit_check_save', 'Check save')}</button>
+      </div>}
       {/* Page title + section switcher on the left; Manage / History / Add
           product on the right of the SAME row (Y15/Y16: the header actions
           join the section-chip row instead of getting their own toolbar

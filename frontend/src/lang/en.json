@@ -7161,5 +7161,19 @@
   "resolve_partial_refusal_retry": "Stock changed while merging. Review the remaining records again.",
   "resolve_partial_refusal_too_large": "This product has too many linked records for one safe merge.",
   "resolve_partial_refusal_changed": "These records changed. Review the remaining records again.",
-  "resolve_partial_refusal_budget": "Product resolving is unavailable on this deployment."
+  "resolve_partial_refusal_budget": "Product resolving is unavailable on this deployment.",
+  "product_edit_pending_review": "Product change submitted for review",
+  "product_edit_outcome_unknown": "Check the pending product save before retrying.",
+  "product_edit_pending_notice": "A product save needs checking.",
+  "product_edit_check_save": "Check save",
+  "cost_breakdown_undo_tag": "Undo",
+  "cost_breakdown_redo_tag": "Redo",
+  "undo_product_private_state_unavailable": "This older action has no saved cost state to restore.",
+  "redo_product_private_state_unavailable": "This older action has no saved cost state to restore.",
+  "product_edit_actor_unavailable": "Sign in again before saving this product.",
+  "product_edit_retry_invalid": "The saved product request is invalid. Keep this tab open and contact an administrator.",
+  "product_edit_retry_unavailable": "The retry could not be saved. No new request was sent.",
+  "product_edit_pending": "Check the pending product save before making another change.",
+  "product_edit_replay_pending": "Check the pending Product Undo or Redo first.",
+  "cost_breakdown_restore_catalog": "Lot costs"
 }
