@@ -1,3 +1,4 @@
+import { assertStockEpochSessionReplay, planStockEpochStockSession } from './stockEpochPublication'
 import { assertStockLifecycleMutable, stockLifecycleRefusal } from './stockLifecycle'
 import { getDb, type D1Compat } from './db'
 import type { Env } from '../index'
@@ -572,8 +573,9 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
   }
   const db = getDb(env)
   const submittedCanonical = JSON.stringify(request)
-  const previous = await db.prepare('SELECT request_json,receipt_json FROM stock_session_operations WHERE actor_id=@actor AND request_id=@request')
+  const previous = await db.prepare('SELECT id,request_json,receipt_json FROM stock_session_operations WHERE actor_id=@actor AND request_id=@request')
     .get<Row>({ actor: user.id, request: request.client_request_id })
+  if (previous) await assertStockEpochSessionReplay(env, user, String(previous.id))
   if (previous?.request_json === submittedCanonical) return parseStoredReceipt(previous, true)
   // Resolve a legacy encoded alias to the stored DB identity before the
   // idempotency fingerprint, while the legacy raw money is still intact.
@@ -848,6 +850,7 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
   }
   const rev = (type: string, key: unknown) => revisions.get(revisionKey(type, key)) || 0
   const operationId = crypto.randomUUID()
+  const epochPlan = await planStockEpochStockSession(env, user, operationId, request, receiptTargets)
   const snapshot: Row = {
     version: 2,
     operationId,
@@ -856,6 +859,7 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
     revisions: Object.fromEntries(revisions),
   }
   const statements: StockWriteStatement[] = [
+    ...epochPlan.prefix,
     assertion("NOT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance')"),
   ]
   const receiptTotalCostUsd = sumMoney4(request.items.flatMap((line) =>
@@ -1064,6 +1068,7 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
   statements.push({ sql: 'DELETE FROM stock_session_guards', params: {} })
   const replayStateSql = await stockReplayStateSql(env)
   statements.push(...captureReplayState(operationId, replayStateSql, true))
+  statements.push(...epochPlan.finish)
   checkBounds(statements, snapshot)
   try {
     await db.batch(statements)

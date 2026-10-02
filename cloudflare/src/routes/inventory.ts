@@ -1,4 +1,5 @@
 import { Hono, type Context } from 'hono'
+import { StockEpochError } from '../lib/stockEpochPublication'
 import { acquisitionCostResponses, hasAcquisitionCostInput } from '../lib/acquisitionCostAccess'
 import { getDb, type D1Compat } from '../lib/db'
 import { ordinaryBusinessBatch, runOrdinaryBusinessWrite } from '../lib/businessMaintenanceGuard'
@@ -160,7 +161,7 @@ app.post('/valuation-experiment', async (c) => {
   const kernel=await import('../lib/stockValuation')
   const funding=await import('../lib/stockFunding')
   try{return c.json(await kernel.commitStockValuation(c.env,c.get('user'),await c.req.json<unknown>().catch(()=>null)))}
-  catch(error){if(error instanceof kernel.StockValuationError||error instanceof funding.StockFundingError)return c.json({error:error.message,code:error.code},error.statusCode);throw error}
+  catch(error){if(error instanceof kernel.StockValuationError||error instanceof funding.StockFundingError||error instanceof StockEpochError)return c.json({error:error.message,code:error.code},error.statusCode);throw error}
 })
 
 app.post('/funding-experiment', async (c) => {
@@ -184,6 +185,7 @@ app.post('/sessions', async (c) => {
     if (!receipt.replayed) c.executionCtx.waitUntil(stockSession.notifyStockSession(c.env, receipt))
     return c.json(receipt)
   } catch (error) {
+    if (error instanceof StockEpochError) return c.json({ error: error.message, code: error.code }, error.statusCode)
     if (error instanceof stockSession.StockSessionError) {
       return c.json({ error: error.message, code: error.code, ...(error.details || {}) }, error.statusCode)
     }

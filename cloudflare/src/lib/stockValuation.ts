@@ -8,6 +8,7 @@ import { applyValuationCoverage, planValuationSaleSegments, splitValuationSegmen
 import { assertValuationHistoryCapacity, validateValuationHistory } from './stockValuationHistory';
 import { getActionTier, hasAnyPermission } from './permissions';
 import { actorSnapshot } from './actorSnapshot';
+import { commitStockEpochTransition } from './stockEpochPublication';
 export class StockValuationError extends Error {
     constructor(public code: string, public statusCode: 400 | 403 | 409 = 409) { super(code); }
 }
@@ -384,6 +385,8 @@ export async function planStockValuation(env: {
 }
 
 export async function commitStockValuation(env: { DB: D1Database; IMPORT_DB?: D1Database }, actor: SessionUser, input: unknown) {
+    const typed = await commitStockEpochTransition(env, actor, parseValuationRequest(input).raw);
+    if (typed) return typed;
     const plan = await planStockValuation(env, actor, input);
     if ('replay' in plan) return plan.replay;
     const db = getDb(env);
