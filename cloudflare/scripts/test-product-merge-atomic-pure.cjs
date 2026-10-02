@@ -7,6 +7,73 @@ const moneyPrecision = require('../src/lib/moneyPrecision.ts')
 const Module = require('module')
 const { openDb } = require('./harness/d1compat.cjs')
 const { loadStockLifecycleFixture, nativeStockFixtureBinding } = require('./harness/load_stock_lifecycle_fixture.cjs')
+const lifecycleEffects = []
+
+function linkedStockFixture(kind) {
+  const d1 = require('./harness/d1compat.cjs').openDb(require('./harness/load_migrations.cjs').loadAll())
+  const native = d1.db
+  native.exec(`
+    INSERT INTO branches(id,name,is_active,is_default) VALUES(9,'Shop',1,1);
+    INSERT INTO users(id,username,name,password,permissions,is_active) VALUES(101,'fixture-owner','Owner','admin123','{"products":true,"inventory":true}',1);
+    INSERT INTO suppliers(id,name) VALUES(31,'Pinned supplier');
+    INSERT INTO products(id,name,barcode,stock_quantity,is_active) VALUES(91,'Pinned stock','GUARD91',3,1),(92,'Unlinked product','GUARD92',0,0);
+    INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at,is_active,batch_number,supplier_id,supplier_name,payment_status,received_quantity,received_cost_usd,received_branch_id,unit_cost_usd)
+      VALUES(951,91,'GUARD951','GUARD951','2026-10-01',1,1,31,'Pinned supplier','credit',3,7.0001,9,2.3334);
+    INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(951,9,3);
+    INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(91,9,3);
+    INSERT INTO inventory_movements(id,product_id,branch_id,batch_id,movement_type,quantity,free_quantity,total_cost_usd,reference_id,user_id)
+      VALUES(991,91,9,951,'add',3,0.5,7.0001,'fixture-real-source',101);
+  `)
+  if (kind === 'disposition') native.exec("INSERT INTO stock_disposition_sources(id,movement_id,batch_id,product_id,branch_id,supplier_id,quantity,free_quantity,gross4,opening_paid4,opening_debt4,funding_state) VALUES('source-disposition',991,951,91,9,31,'3','0.5',70001,0,70001,'reconciled_unpaid')")
+  else native.exec("INSERT INTO stock_funding_sources(id,movement_id,batch_id,product_id,branch_id,supplier_id,quantity,free_quantity,gross4,opening_paid4,opening_debt4,reconciliation_proof,actor_id,source_json) VALUES('source-funding',991,951,91,9,31,'3','0.5',70001,40000,30001,'fixture trusted opening',101,'{}'); INSERT INTO stock_funding_events(id,source_id,generation,kind,amount4,gross4,paid4,debt4,credit4,asset4,cash_in4,cash_out4,shipping4,proof,actor_id,occurred_at) VALUES('funding-admit','source-funding',0,'admit',0,70001,40000,30001,0,0,0,0,0,'fixture trusted opening',101,'2026-10-01T00:00:00Z')")
+  return { d1, native }
+}
+
+function linkedStockSnapshot(native) {
+  const encode = value => JSON.stringify(value, (_, cell) => typeof cell === 'bigint' ? { integer64: String(cell) }
+    : ArrayBuffer.isView(cell) ? { blob: Buffer.from(cell.buffer, cell.byteOffset, cell.byteLength).toString('hex') } : cell)
+  const schema = native.prepare('SELECT type,name,tbl_name,sql FROM sqlite_master ORDER BY type,name').all()
+  const quote = value => '"' + value.replaceAll('"', '""') + '"'
+  const tables = schema.filter(row => row.type === 'table').map(({ name }) => {
+    const columns = native.prepare('PRAGMA table_info(' + quote(name) + ')').all()
+    const probes = columns.map(column => 'typeof(' + quote(column.name) + ') AS ' + quote('__stock_type_' + column.name))
+    const rows = native.prepare('SELECT *' + (probes.length ? ',' + probes.join(',') : '') + ' FROM ' + quote(name)).all().map(encode).sort()
+    return [name, columns, rows]
+  })
+  return encode([schema, tables])
+}
+async function verifyLinkedMergeLifecycle() {
+  for (const kind of ['disposition', 'funding']) {
+    const fixture = linkedStockFixture(kind)
+    try {
+      const undo = loadUndoAppliers(fixture.d1)
+      const reversal = { keeperId: 91, keeperName: 'Pinned stock', dupId: 92, dupName: 'Unlinked product',
+        keeperImagePathBefore: null, dupImagePathBefore: null, keeperStockBefore: [], dupStockBefore: [],
+        dupImagesBefore: [], imagesMovedToKeeper: [], repointedBatches: [], foldedBatches: [],
+        reparentedSaleItemIds: [], reparentedMovementIds: [], adjustmentMovementIds: [] }
+      const recorded = await undo.recordMergeUndoSnapshot({}, { id: 101, username: 'fixture-owner' }, reversal)
+      const payload = { applier: 'product.merge', snapshot_id: recorded.snapshotId }
+      const applier = undo.resolveUndoApplier(payload)
+      assert.ok(applier)
+      const before = linkedStockSnapshot(fixture.native)
+      const effectsBefore = [...lifecycleEffects]
+      await assert.rejects(() => applier.run(payload, { env: {}, user: { id: 101, username: 'fixture-owner' }, direction: 'undo' }), error => {
+        assert.equal(error instanceof require('hono/http-exception').HTTPException, true)
+        assert.equal(error.status, 409)
+        assert.equal(error.code, 'stock_lifecycle_dependency')
+        return true
+      })
+      assert.equal(linkedStockSnapshot(fixture.native), before)
+      assert.deepEqual(lifecycleEffects, effectsBefore)
+      const db = loadStockLifecycleFixture('lib/db.ts').getDb({ DB: nativeStockFixtureBinding(fixture.native, statements => fixture.d1.batch(statements)) })
+      await loadStockLifecycleFixture().assertStockLifecycleMutable(db, { productId: 92 })
+      await loadStockLifecycleFixture().assertStockLifecycleMutable(db, { productId: 91, branchId: 8 })
+      console.log('PASS actual ' + kind + ' linked merge replay refuses before effects; unrelated scopes remain allowed')
+    } finally { fixture.native.close() }
+  }
+}
+
+
 
 const libDir = path.join(__dirname, '..', 'src', 'lib')
 
@@ -40,8 +107,8 @@ function loadUndoAppliers(db) {
   const actualDb = loadStockLifecycleFixture('lib/db.ts').getDb({ DB: nativeStockFixtureBinding(db.db, statements => dbAdapter.batch(statements)) })
   const stubs = {
     './stockLifecycle': loadStockLifecycleFixture(),
-    '../index': {}, './auth': {}, './db': { ...loadStockLifecycleFixture('lib/db.ts'), getDb: () => actualDb }, './audit': { audit: async () => {} },
-    '../durable-objects/broadcastHub': { broadcast: async () => {} }, './branchWrites': { branchUpdateStatements: () => [] },
+    '../index': {}, './auth': {}, './db': { ...loadStockLifecycleFixture('lib/db.ts'), getDb: () => actualDb }, './audit': { audit: async () => { lifecycleEffects.push('audit') } },
+    '../durable-objects/broadcastHub': { broadcast: async () => { lifecycleEffects.push('broadcast') } }, './branchWrites': { branchUpdateStatements: () => [] },
     './permissions': { getActionTier: () => 'full', getPermissionTier: () => 'full' },
     './actorSnapshot': { actorSnapshot: (user) => user?.name || user?.username || null },
     './productMerge': loadProductMerge(),
@@ -114,6 +181,7 @@ function loadUndoAppliers(db) {
 }
 
 async function main() {
+  await verifyLinkedMergeLifecycle()
   const db = openDb([`
     CREATE TABLE products(id INTEGER PRIMARY KEY,is_active INTEGER NOT NULL);
     CREATE TABLE undo_snapshots(
