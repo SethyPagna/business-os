@@ -50,6 +50,13 @@ function authorize(user: SessionUser, effects?: ProductEditEffects, full = false
   if (effects?.money_fields.length && !canEditAcquisitionCosts(user)) denied('product_cost_edit_required')
   if (effects?.images && !imageOnly && (getActionTier(user, 'products', 'image') === 'none' || (full && getActionTier(user, 'products', 'image') !== 'full'))) denied('product_image_edit_required')
 }
+async function refreshedActor(env: Env, user: SessionUser, effects: ProductEditEffects): Promise<SessionUser> {
+  const current = await getDb(env).prepare(`SELECT u.id,u.username,u.name,u.organization_id,u.role_id,u.permissions,u.is_active,r.code AS role_code,r.permissions AS role_permissions,r.name AS role_name
+    FROM users u LEFT JOIN roles r ON r.id=u.role_id WHERE u.id=@id AND u.is_active=1 AND u.deleted_at IS NULL`).get<SessionUser>({ id: user.id })
+  if (!current) denied()
+  authorize(current, effects)
+  return current
+}
 function canonical(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonical)
   if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([key, item]) => [key, canonical(item)]))
@@ -177,8 +184,8 @@ export async function commitProductEdit(env: Env, user: SessionUser, productId: 
   statements.push({ sql: `INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,old_value,new_value,details) SELECT @actor,@name,'update','product',@product,json_extract(payload_json,'$.before.rows'),json_extract(payload_json,'$.after.rows'),json_object('action_history_id',json_extract(payload_json,'$.history_id'),'operation_id',CAST(id AS TEXT),'requested_by',@actor,'reviewed_by',@reviewer) FROM undo_snapshots WHERE ${selector}`, params: { ...identityParams, name: actorSnapshot(user), product: String(productId), reviewer: approval?.reviewer.id ?? null } })
   try { await db.batch(statements) } catch (error) {
     const winner = await lookup(db, user.id, identity.requestId)
-    if (winner && parse(winner).digest === identity.digest && winner.status !== 'applying' && winner.status !== 'approval_pending') return response(env, winner, user, true)
-    if (/malformed JSON|constraint/i.test(String(error))) throw new ProductEditError('product_edit_state_conflict', 'The product changed while the edit was being saved. Nothing was saved.')
+    if (winner && parse(winner).digest === identity.digest && winner.status !== 'applying' && winner.status !== 'approval_pending') return response(env, winner, await refreshedActor(env, user, parse(winner).effects), true)
+    if (/malformed JSON|constraint/i.test(String(error))) throw new ProductEditError(moneyPlan ? 'product_money_state_conflict' : 'product_edit_state_conflict', 'The product changed while the edit was being saved. Nothing was saved.')
     throw error
   }
   return response(env, (await lookup(db, user.id, identity.requestId))!, user)
@@ -294,7 +301,7 @@ export async function replayProductEdit(env: Env, user: SessionUser, operationId
   try { await db.batch(statements) } catch (error) {
     const recovered = await db.prepare(`SELECT id,status,payload_json,created_by_id FROM undo_snapshots WHERE id=@id AND kind='product.edit.v1'`).get<SnapshotRow>({ id: snapshot.id })
     if (recovered && parse(recovered).transitions.some(item => item.generation === expectedGeneration && item.direction === direction)) {
-      authorize(user, parse(recovered).effects)
+      await refreshedActor(env, user, parse(recovered).effects)
       return { complete: true, continuation_required: false, processed_children: 1, pending_children: 0, generation: nextGeneration, current_generation: parse(recovered).generation, applied: true, replayed: true }
     }
     if (/malformed JSON|constraint/i.test(String(error))) throw new ProductEditError('product_edit_state_conflict', 'The product changed during replay. Nothing was changed.')

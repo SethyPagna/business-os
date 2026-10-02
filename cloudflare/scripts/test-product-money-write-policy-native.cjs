@@ -30,6 +30,7 @@ const DB = {
     return statement
   },
   async batch(statements) {
+    if (beforeProductUpdate) { const hook = beforeProductUpdate; beforeProductUpdate = null; hook() }
     if (beforeBatch) { const hook = beforeBatch; beforeBatch = null; hook() }
     raw.exec('BEGIN IMMEDIATE')
     try { const results = []; for (const statement of statements) results.push(await statement.run()); raw.exec('COMMIT'); return results }
@@ -37,20 +38,17 @@ const DB = {
   },
 }
 const env = { DB }
-const real = new Set(['acquisitionCostAccess', 'productWrites', 'moneyPrecision', 'productMerge', 'productIdentity', 'productDetailRule', 'db', 'sqlBinding', 'searchMatch', 'batchCode', 'actorSnapshot', 'pendingActions', 'reviewGate', 'reviewApply', 'conflictControl', 'renameCascade', 'schemaProbe'])
+const real = new Set(['acquisitionCostAccess', 'productEditOperation', 'catalogCostRecompute', 'permissions', 'productWrites', 'moneyPrecision', 'productMerge', 'productIdentity', 'productDetailRule', 'db', 'sqlBinding', 'searchMatch', 'batchCode', 'actorSnapshot', 'pendingActions', 'reviewGate', 'reviewApply', 'conflictControl', 'renameCascade', 'schemaProbe'])
 const noop = new Proxy(function () {}, { get: () => noop, apply: () => undefined, construct: () => ({}) })
 class ProductImageAssetError extends Error {}
 const services = {
   auth: { requireAuth: async (c, next) => { c.set('user', c.env.TEST_USER); await next() } },
-  permissions: {
-    getPermissionTier: (u) => u.tier || 'full', getActionTier: (u) => u.tier || 'full',
-    hasPermission: (u) => u.tier !== 'none', isActionBlocked: () => false, isAdminControlUser: () => true,
-  },
   audit: { audit: async () => { auditCount++ }, changedFields: () => null, auditChangeColumns: () => ({ old_value: null, new_value: null }), isSecretShapedAuditKey: () => false, },
   cache: { bumpVersion: async () => {}, bumpVersions: async () => {} },
   broadcastHub: { broadcast: async () => {} },
   media: { sanitizeMediaList: () => [] },
   importImageMatch: { MAX_IMAGES_PER_PRODUCT: 3 },
+  productDelete: { parseProductRemovePendingPointer: () => null },
   productImagePermission: { ProductImageAssetError, productImageFieldsChanged: () => false, productImageFieldsChangedResolved: async () => false, resolveProductImageFields: async () => {}, omitUnchangedProductImageFields: () => {} },
 }
 const cache = new Map()
@@ -92,16 +90,25 @@ const frontendWriter = loadFrontend('components/products/helpers/productWriteHel
 const context = { waitUntil: () => {}, passThroughOnException: () => {} }
 // Administrator control comes from the role, not the name (FX-sec).
 const admin = { id: 1, username: 'admin', name: 'Admin', role_code: 'admin', tier: 'full' }
-const requester = { id: 2, username: 'requester', name: 'Requester', tier: 'review', permissions: JSON.stringify({ product_cost_edit: true, product_cost_view: true }) }
+const requester = { id: 2, username: 'requester', name: 'Requester', tier: 'review', permissions: JSON.stringify({ products: 'review', review: true, product_cost_edit: true, product_cost_view: true }) }
 async function request(app, method, url, body, user = admin) {
   const response = await app.request(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, { ...env, TEST_USER: user }, context)
   return { status: response.status, body: await response.json() }
+}
+function pendingBody(pending) {
+  const pointer = JSON.parse(pending.payload_json)._product_edit
+  return pointer ? JSON.parse(raw.prepare('SELECT payload_json FROM undo_snapshots WHERE id=?').get(Number(pointer.operation_id)).payload_json).body : JSON.parse(pending.payload_json)
+}
+function legacyPendingCopy(pending) {
+  const id = Number(raw.prepare("INSERT INTO pending_actions(section,action_type,entity_type,entity_id,payload_json,status,requested_by) VALUES('products','update','product',?,?,'rejected',2)").run(pending.entity_id, JSON.stringify(pendingBody(pending))).lastInsertRowid)
+  return raw.prepare('SELECT * FROM pending_actions WHERE id=?').get(id)
 }
 const row = id => raw.prepare('SELECT * FROM products WHERE id=?').get(id)
 function seed(name = 'Existing') {
   return Number(raw.prepare(`INSERT INTO products(name,cost_price_usd,cost_price_khr,selling_price_usd,selling_price_khr,wholesale_price_usd,wholesale_price_khr,purchase_price_usd,purchase_price_khr,updated_at) VALUES(?,1.2345,5000.1234,1.234567,5000,1.1,4500,2.345678,9000.123456,NULL)`).run(name).lastInsertRowid)
 }
 ;(async () => {
+  raw.prepare("INSERT INTO users(id,username,name,password,permissions,is_active) VALUES(2,'requester','Requester','admin123',?,1)").run(requester.permissions)
   const created = await request(products, 'POST', '/', { name: 'Direct New', cost_price_usd: 1.2345, purchase_price_usd: '2.34565', purchase_price_khr: '9000.12345', selling_price_usd: '1.23004', selling_price_khr: 4321.1234 })
   assert.equal(created.status, 200, JSON.stringify(created))
   assert.equal(row(created.body.id).cost_price_usd, 1.2345)
@@ -162,13 +169,13 @@ function seed(name = 'Existing') {
     }
   }
   const deniedBefore = row(id)
-  assert.equal((await request(products, 'PUT', `/${id}`, { cost_price_usd: 2 }, { ...admin, tier: 'none' })).status, 403)
+  assert.equal((await request(products, 'PUT', `/${id}`, { cost_price_usd: 2 }, { ...admin, role_code: 'manager', tier: 'none', permissions: JSON.stringify({ products: false }) })).status, 403)
   assert.deepEqual(row(id), deniedBefore)
   const queued = await request(products, 'PUT', `/${id}`, { cost_price_usd: 1.2345, selling_price_usd: '1.23004' }, requester)
   assert.equal(queued.status, 202, JSON.stringify(queued))
   const pendingId = queued.body.pendingActionId
   const pending = raw.prepare('SELECT * FROM pending_actions WHERE id=?').get(pendingId)
-  const payload = JSON.parse(pending.payload_json)
+  const payload = pendingBody(pending)
   assert.equal(payload.product_money_policy_version, 2)
   assert.equal(payload._product_money_write_plan.version, 2)
   assert.equal(payload._product_money_write_plan.before.selling_price_usd, 1.234567)
@@ -179,7 +186,7 @@ function seed(name = 'Existing') {
   assert.equal(row(id).selling_price_usd, 1.24)
   assert.equal(row(id).cost_price_usd, 1.2345)
   const textOnly = await request(products, 'PUT', `/${id}`, { description: 'Review description only' }, requester)
-  const textPending = raw.prepare('SELECT * FROM pending_actions WHERE id=?').get(textOnly.body.pendingActionId)
+  const textPending = legacyPendingCopy(raw.prepare('SELECT * FROM pending_actions WHERE id=?').get(textOnly.body.pendingActionId))
   const textPayload = JSON.parse(textPending.payload_json)
   assert.equal(textPayload.product_money_policy_version, 2, 'every newly queued request is distinguishable from historical unversioned/v1 requests')
   assert.deepEqual(textPayload._product_money_write_plan.after, {})
@@ -225,10 +232,11 @@ function seed(name = 'Existing') {
   assert.equal(row(id).cost_price_usd, 7)
   assert.equal(row(id).selling_price_usd, 9)
   raw.prepare("UPDATE pending_actions SET status='rejected' WHERE id=?").run(race.body.pendingActionId)
-  const saved = JSON.parse(raw.prepare('SELECT payload_json FROM pending_actions WHERE id=?').get(race.body.pendingActionId).payload_json)
+  const legacyRace = legacyPendingCopy(raw.prepare('SELECT * FROM pending_actions WHERE id=?').get(race.body.pendingActionId))
+  const saved = JSON.parse(legacyRace.payload_json)
   const changed = { ...saved }; delete changed._product_money_write_plan; delete changed.product_money_policy_version
-  assert.equal((await request(reviews, 'POST', `/${race.body.pendingActionId}/resubmit`, { payload: changed }, requester)).body.code, 'product_money_plan_immutable')
-  assert.equal((await request(reviews, 'POST', `/${race.body.pendingActionId}/resubmit`, { payload: saved }, requester)).status, 200)
+  assert.equal((await request(reviews, 'POST', `/${legacyRace.id}/resubmit`, { payload: changed }, requester)).body.code, 'product_money_plan_immutable')
+  assert.equal((await request(reviews, 'POST', `/${legacyRace.id}/resubmit`, { payload: saved }, requester)).status, 200)
   const oldId = Number(raw.prepare("INSERT INTO pending_actions(section,action_type,entity_type,entity_id,payload_json,status,requested_by) VALUES('products','update','product',?,?,'open',2)").run(id, JSON.stringify({ cost_price_usd: 1.234567, selling_price_usd: 1.23004 })).lastInsertRowid)
   assert.equal((await request(reviews, 'POST', `/${oldId}/approve`, {})).status, 200)
   assert.equal(row(id).cost_price_usd, 1.234567, 'old unversioned plan is not restamped or repriced')

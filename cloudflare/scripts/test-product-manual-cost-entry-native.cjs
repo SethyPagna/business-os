@@ -20,13 +20,14 @@ const database = openDb(loadAll(path.resolve(__dirname, '../migrations')))
 const raw = database.db
 let failSql = null
 let beforeBatch = null
+let beforeRead = null
 
 const DB = {
   prepare(sql) {
     let values = []
     const statement = {
       bind(...args) { values = args; return statement },
-      async all() { return { results: raw.prepare(sql).all(...values) } },
+      async all() { if (beforeRead) { const callback = beforeRead; beforeRead = null; callback() } return { results: raw.prepare(sql).all(...values) } },
       async first() { return raw.prepare(sql).get(...values) ?? null },
       async run() {
         if (failSql?.test(sql)) throw new Error('injected cost transaction failure')
@@ -46,7 +47,7 @@ const DB = {
 const env = { DB }
 
 const real = new Set([
-  'acquisitionCostAccess',
+  'acquisitionCostAccess', 'productEditOperation', 'catalogCostRecompute', 'permissions',
   'productWrites', 'moneyPrecision', 'productMerge', 'productIdentity', 'productDetailRule', 'db',
   'sqlBinding', 'searchMatch', 'batchCode', 'actorSnapshot', 'pendingActions', 'reviewGate',
   'reviewApply', 'conflictControl', 'renameCascade', 'schemaProbe', 'catalogCostRecompute',
@@ -55,15 +56,12 @@ const noop = new Proxy(function () {}, { get: () => noop, apply: () => undefined
 class ProductImageAssetError extends Error {}
 const services = {
   auth: { requireAuth: async (c, next) => { c.set('user', c.env.TEST_USER); await next() } },
-  permissions: {
-    getPermissionTier: (u) => u.tier || 'full', getActionTier: (u) => u.tier || 'full',
-    hasPermission: (u) => u.tier !== 'none', isActionBlocked: () => false, isAdminControlUser: () => true,
-  },
   audit: { audit: async () => {}, changedFields: () => null, auditChangeColumns: () => ({ old_value: null, new_value: null }), isSecretShapedAuditKey: () => false, },
   cache: { bumpVersion: async () => {}, bumpVersions: async () => {} },
   broadcastHub: { broadcast: async () => {} },
   media: { sanitizeMediaList: () => [] },
   importImageMatch: { MAX_IMAGES_PER_PRODUCT: 3 },
+  productDelete: { parseProductRemovePendingPointer: () => null },
   productImagePermission: { ProductImageAssetError, productImageFieldsChanged: () => false, productImageFieldsChangedResolved: async () => false, resolveProductImageFields: async () => {}, omitUnchangedProductImageFields: () => {} },
 }
 const cache = new Map()
@@ -87,7 +85,7 @@ function load(relative) {
 
 const products = load('routes/products.ts').default
 const context = { waitUntil: () => {}, passThroughOnException: () => {} }
-const admin = { id: 9, username: 'sethy', name: 'Sethy Owner', tier: 'full', permissions: JSON.stringify({ product_cost_view: true, product_cost_edit: true }) }
+const admin = { id: 9, username: 'sethy', name: 'Sethy Owner', tier: 'full', permissions: JSON.stringify({ products: true, product_cost_view: true, product_cost_edit: true }) }
 
 async function request(method, url, body) {
   const response = await products.request(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, { ...env, TEST_USER: admin }, context)
@@ -313,9 +311,7 @@ async function main() {
     const id = seedProduct('OrderedOverride')
     seedLot(id,7)
     let concurrentId
-    // Same-price receipt does not alter guarded money; it still must be in
-    // the baseline even though it arrived after the route prepared its plan.
-    beforeBatch = () => { concurrentId = seedLot(id,7) }
+    beforeRead = () => { concurrentId = seedLot(id,7) }
     assert.equal((await request('PUT',`/${id}`,{cost_price_usd:10})).status,200)
     assert.equal(costEntries(id)[0].baseline_batch_id,concurrentId)
     assert.equal(row(id).cost_price_usd,10)
@@ -327,6 +323,22 @@ async function main() {
     assert.equal((await request('PUT',`/${id}`,{cost_price_usd:6})).status,409,'changed money rejects stale override entirely')
     assert.deepEqual(costEntries(id),entriesBefore)
     assert.equal(row(id).cost_price_usd,14)
+  })
+  await check('same-price receipt after valuation capture rejects the stale override without publishing a receipt', async () => {
+    const id = seedProduct('CapturedValuationRace')
+    seedLot(id,7)
+    const entriesBefore = costEntries(id)
+    const receiptsBefore = raw.prepare("SELECT COUNT(*) n FROM undo_snapshots WHERE kind='product.edit.v1'").get().n
+    const historyBefore = raw.prepare('SELECT COUNT(*) n FROM action_history').get().n
+    let concurrentId
+    beforeBatch = () => { concurrentId = seedLot(id,7) }
+    const result = await request('PUT',`/${id}`,{cost_price_usd:10})
+    assert.equal(result.status,409,JSON.stringify(result))
+    assert.deepEqual(costEntries(id),entriesBefore)
+    assert.equal(row(id).cost_price_usd,7)
+    assert.ok(raw.prepare('SELECT id FROM product_batches WHERE id=?').get(concurrentId))
+    assert.equal(raw.prepare("SELECT COUNT(*) n FROM undo_snapshots WHERE kind='product.edit.v1'").get().n,receiptsBefore)
+    assert.equal(raw.prepare('SELECT COUNT(*) n FROM action_history').get().n,historyBefore)
   })
   await check('previous cost preserves unknown NULL and exact historical precision, without inferred backfill', async () => {
     for (const previous of [null,3.123456]) {

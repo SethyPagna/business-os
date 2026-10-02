@@ -344,7 +344,7 @@ export async function planProductRowUpdate(env: Env, table: string, id: string |
             oldValue: JSON.stringify({ cost_price_usd: costBefore.cost_price_usd, cost_price_khr: costBefore.cost_price_khr }) } },
         catalogCostRecomputeStatement(Number(id)),
       ]
-  } else statements = [statement]
+  } else statements = moneyPlan ? [statement, { sql: `SELECT CASE WHEN changes()>0 THEN 1 ELSE json('product_money_state_conflict') END` }] : [statement]
   return { statements, updateIndex, payload, manualEntry: !!manualEntry, guarded: !!moneyPlan }
 }
 

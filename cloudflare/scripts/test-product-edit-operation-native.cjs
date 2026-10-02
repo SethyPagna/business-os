@@ -8,7 +8,7 @@ const { loadAll } = require('./harness/load_migrations.cjs')
 const database = openDb(loadAll(path.resolve(__dirname, '../migrations')))
 const raw = database.db
 const src = path.resolve(__dirname, '../src')
-let beforeBatch = null, failStatement = -1, loseResponse = false
+let beforeBatch = null, afterCommit = null, failStatement = -1, loseResponse = false, lastBatchLength = 0
 const DB = {
   prepare(sql) {
     let values = []
@@ -21,6 +21,7 @@ const DB = {
     return statement
   },
   async batch(statements) {
+    lastBatchLength = statements.length
     if (beforeBatch) { const hook = beforeBatch; beforeBatch = null; hook() }
     raw.exec('BEGIN IMMEDIATE')
     try {
@@ -30,6 +31,7 @@ const DB = {
         results.push(await statements[i].run())
       }
       raw.exec('COMMIT')
+      if (afterCommit) { const hook = afterCommit; afterCommit = null; hook() }
       if (loseResponse) { loseResponse = false; throw new Error('fixture response lost after commit') }
       return results
     } catch (error) { if (raw.isTransaction) raw.exec('ROLLBACK'); throw error }
@@ -60,7 +62,7 @@ const cache = new Map()
 function load(relative) {
   if (cache.has(relative)) return cache.get(relative)
   const mod = { exports: {} }; cache.set(relative, mod.exports)
-  const filename = path.join(src, relative)
+  const filename = relative === 'lib/productEditOperation.ts' && process.env.BOS_PRODUCT_EDIT_SOURCE_CONTROL ? process.env.BOS_PRODUCT_EDIT_SOURCE_CONTROL : path.join(src, relative)
   const code = ts.transpileModule(fs.readFileSync(filename, 'utf8'), { fileName: filename, compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText
   const localRequire = request => {
     if (request === 'hono') return { Hono }
@@ -95,6 +97,7 @@ const row = id => raw.prepare('SELECT * FROM products WHERE id=?').get(id)
 const receipt = id => JSON.parse(raw.prepare('SELECT payload_json FROM undo_snapshots WHERE id=?').get(Number(id)).payload_json)
 const authoritative = () => JSON.stringify(Object.fromEntries(['products', 'product_images', 'product_cost_entries', 'audit_logs', 'undo_snapshots', 'action_history', 'pending_actions'].map(table => [table, raw.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()])))
 async function main() {
+  raw.prepare(`INSERT INTO users(id,username,name,password,permissions,is_active) VALUES(7,'fixture7','Fixture 7','admin123',?,1)`).run(actor.permissions)
   const { DatabaseSync } = require('node:sqlite')
   const migration = fs.readFileSync(path.resolve(__dirname, '../migrations/0219_product_edit_request_identity.sql'), 'utf8')
   for (const requestId of ['abcdefgh\0evil', 'abcdefgh', 'abcdefgh\n']) {
@@ -203,5 +206,29 @@ async function main() {
   assert.equal(failed.status, 500, JSON.stringify(failed))
   assert.equal(authoritative(), failureState)
   console.log('PASS committed response loss reconciles save and replay; mid-batch failure leaves all authoritative tables unchanged')
+  const revokedId = seed()
+  const revokedBody = { cost_price_usd: 13.75, client_request_id: 'native-revoke-001' }
+  loseResponse = true
+  afterCommit = () => raw.prepare('UPDATE users SET permissions=? WHERE id=7').run(user(7).permissions)
+  const revokedRecovery = await request(products, 'PUT', `/${revokedId}`, revokedBody)
+  assert.equal(revokedRecovery.status, 403, JSON.stringify(revokedRecovery))
+  assert.equal(row(revokedId).cost_price_usd, 13.75)
+  assert.ok(!revokedRecovery.body.item && !revokedRecovery.body.action_history_id)
+  const committedCount = raw.prepare(`SELECT COUNT(*) n FROM undo_snapshots WHERE kind='product.edit.v1' AND json_extract(payload_json,'$.request_id')=?`).get(revokedBody.client_request_id).n
+  assert.equal(committedCount, 1)
+  raw.prepare('UPDATE users SET permissions=? WHERE id=7').run(actor.permissions)
+  const recoveredGrant = await request(products, 'PUT', `/${revokedId}`, revokedBody)
+  assert.equal(recoveredGrant.status, 200, JSON.stringify(recoveredGrant))
+  assert.equal(raw.prepare('SELECT COUNT(*) n FROM product_cost_entries WHERE product_id=?').get(revokedId).n, 1)
+  loseResponse = true
+  afterCommit = () => raw.prepare('UPDATE users SET permissions=? WHERE id=7').run(user(7).permissions)
+  const revokedReplay = await request(histories, 'POST', `/${recoveredGrant.body.action_history_id}/undo`, { expected_generation: 0 })
+  assert.equal(revokedReplay.status, 403, JSON.stringify(revokedReplay))
+  assert.equal(row(revokedId).cost_price_usd, 7.123456)
+  raw.prepare('UPDATE users SET permissions=? WHERE id=7').run(actor.permissions)
+  const recoveredReplay = await request(histories, 'POST', `/${recoveredGrant.body.action_history_id}/undo`, { expected_generation: 0 })
+  assert.equal(recoveredReplay.status, 200, JSON.stringify(recoveredReplay))
+  assert.equal(raw.prepare('SELECT COUNT(*) n FROM product_cost_entries WHERE product_id=?').get(revokedId).n, 2)
+  console.log('PASS grant revoked after commit refuses receipt disclosure; original key and generation reconcile after grant restoration')
 }
 main().then(() => raw.close()).catch(error => { console.error(error); raw.close(); process.exitCode = 1 })

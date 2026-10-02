@@ -57,6 +57,11 @@ function loadRoute(state) {
   const stubs = {
     '../lib/acquisitionCostAccess': loadMoneyDependency('acquisitionCostAccess'),
     '../lib/productWrites': productWrites,
+    '../lib/productEditOperation': {
+      productEditPendingPointer: () => null,
+      ProductEditError: class ProductEditError extends Error {},
+      fixtureSeam: 'Legacy image-only pending row never selects the typed product edit classifier.',
+    },
     hono: { Hono },
     '../lib/auth': { requireAuth },
     '../lib/permissions': {
