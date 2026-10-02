@@ -17,6 +17,8 @@ export async function localizeProductEditError(error: unknown): Promise<unknown>
   const aliases: Record<string, string> = {
     product_cost_edit_required: 'product_edit_cost_permission_required',
     product_image_edit_required: 'product_edit_image_permission_required',
+    product_brand_manage_required: 'product_edit_brand_manage_required',
+    product_brand_intent_invalid: 'product_edit_brand_intent_invalid',
     invalid_client_request_id: 'product_edit_request_invalid',
     idempotency_conflict: 'product_edit_request_immutable',
     request_permission_revoked: 'product_edit_permission_required',

@@ -7184,5 +7184,7 @@
   "product_edit_image_permission_required": "Image edit permission is required for this action.",
   "product_edit_history_label": "Product edited",
   "product_edit_history_undo": "Product edit undone",
-  "product_edit_history_redo": "Product edit redone"
+  "product_edit_history_redo": "Product edit redone",
+  "product_edit_brand_manage_required": "Full brand management permission is required for this action.",
+  "product_edit_brand_intent_invalid": "The brand rename no longer matches this product. Refresh and review it."
 }

@@ -7184,5 +7184,7 @@
   "product_edit_image_permission_required": "ត្រូវការសិទ្ធិកែរូបភាពសម្រាប់សកម្មភាពនេះ។",
   "product_edit_history_label": "បានកែប្រែផលិតផល",
   "product_edit_history_undo": "បានមិនធ្វើការកែប្រែផលិតផលវិញ",
-  "product_edit_history_redo": "បានធ្វើការកែប្រែផលិតផលឡើងវិញ"
+  "product_edit_history_redo": "បានធ្វើការកែប្រែផលិតផលឡើងវិញ",
+  "product_edit_brand_manage_required": "ត្រូវការសិទ្ធិគ្រប់គ្រងម៉ាកពេញលេញសម្រាប់សកម្មភាពនេះ។",
+  "product_edit_brand_intent_invalid": "ការប្ដូរឈ្មោះម៉ាកលែងត្រូវគ្នានឹងផលិតផលនេះ។ សូមផ្ទុកឡើងវិញ និងពិនិត្យម្ដងទៀត។"
 }

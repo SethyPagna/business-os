@@ -101,3 +101,24 @@ assert.equal(pending.receipt().applied, false)
 assert.equal(pending.counts().directRenames, 0)
 assert.equal(pending.sent[0].__brand_rename, undefined)
 console.log('PASS carry retry preserves the durable body, refusal preserves draft, and ordinary only-row review stays pending')
+
+const requestSource = readFileSync(new URL('../src/utils/productEditRequests.ts', import.meta.url), 'utf8')
+const requestAst = ts.createSourceFile('productEditRequests.ts', requestSource, ts.ScriptTarget.Latest, true)
+const mapper = requestAst.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === 'localizeProductEditError')
+assert.ok(mapper)
+const mapperCode = ts.transpileModule(mapper.getText(requestAst).replace(/^export /, ''), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText
+for (const language of ['en', 'km']) {
+  const pack = JSON.parse(readFileSync(new URL(`../src/lang/${language}.json`, import.meta.url), 'utf8'))
+  const localize = new Function('require', 'document', `${mapperCode}; return localizeProductEditError`)(
+    () => ({ default: pack }), { documentElement: { getAttribute: () => language } },
+  )
+  for (const [code, key] of [['product_brand_manage_required', 'product_edit_brand_manage_required'], ['product_brand_intent_invalid', 'product_edit_brand_intent_invalid']]) {
+    assert.equal(typeof pack[key], 'string', `${language} must explain ${code}`)
+    const error = Object.assign(new Error('Server detail'), { code, status: 403 })
+    assert.equal(await localize(error), error)
+    assert.equal(error.message, pack[key])
+    assert.equal(error.code, code)
+    assert.equal(error.status, 403)
+  }
+}
+console.log('PASS actual brand refusal mapper uses EN/KM packs while preserving structured refusal identity')
