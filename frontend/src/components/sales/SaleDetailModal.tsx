@@ -761,9 +761,9 @@ export default function SaleDetailModal({
   // drop the received-date step from an addition that genuinely needs one and
   // move stock with no lot recorded -- so the last known set is kept and the
   // failure is logged, exactly as POS.tsx and TransferModal.tsx do.
-  const canLoadAddItems = !!onAddItems
+  const canLoadSaleProducts = !!onAddItems || !!onAmend
   useEffect(() => {
-    if (!canLoadAddItems) return undefined
+    if (!canLoadSaleProducts) return undefined
     let cancelled = false
     setTrackedBatchLookupState('loading')
     setTrackedBatchLookupError('')
@@ -780,11 +780,11 @@ export default function SaleDetailModal({
         setTrackedBatchLookupError(error instanceof Error && error.message ? error.message : 'Could not verify received-date tracking.')
       })
     return () => { cancelled = true }
-  }, [canLoadAddItems, detailScope, sale?.branch_id, trackedBatchReloadKey])
+  }, [canLoadSaleProducts, detailScope, sale?.branch_id, trackedBatchReloadKey])
 
   const loadAddProductSearchPage = async (text: string, page: number, append: boolean): Promise<void> => {
     const query = text.trim()
-    if (!canLoadAddItems || query.length < 2) return
+    if (!canLoadSaleProducts || query.length < 2) return
     const seq = ++addSearchSeqRef.current
     const requestScope = detailScope
     if (append) setAddLoadingMore(true)
@@ -827,7 +827,7 @@ export default function SaleDetailModal({
     setAddSearchError('')
     setAddSearchFailedPage(1)
     setAddSearchPage({ page: 1, pageSize: SALE_DETAIL_PRODUCT_PAGE_SIZE, total: 0, totalPages: 1 })
-    if (!canLoadAddItems || text.length < 2) {
+    if (!canLoadSaleProducts || text.length < 2) {
       setAddCandidates([])
       setAddSearching(false)
       setAddLoadingMore(false)
@@ -839,7 +839,7 @@ export default function SaleDetailModal({
     // The request function deliberately belongs to this effect's render. Its
     // scope/query are captured and independently checked before publication.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [addQuery, canLoadAddItems, detailScope, sale?.branch_id])
+  }, [addQuery, canLoadSaleProducts, detailScope, sale?.branch_id])
 
   // What makes two staged lines the SAME line, and how a pick folds into
   // what is already staged, both live in saleAddLines.ts -- one rule, tested
