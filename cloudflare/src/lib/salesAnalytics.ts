@@ -982,17 +982,22 @@ async function reportTableColumns(db: ReturnType<typeof getDb>, table: string): 
 }
 
 export async function stockValuationSaleCostsAvailable(db: ReturnType<typeof getDb>): Promise<boolean> {
-  const columns = await db.prepare('PRAGMA table_info(stock_valuation_sale_costs)').all<{ name: string }>()
-  if (!columns.length) {
-    const links = await db.prepare('PRAGMA table_info(stock_valuation_sale_links)').all<{ name: string }>()
-    if (links.length) throw new ReportMoneyPrecisionError('unsupported_row')
+  const readColumns = async (table: string) => {
+    const statement = db.prepare(`SELECT group_concat(name) AS columns FROM pragma_table_info('${table}')`)
+    return typeof statement.get === 'function' ? statement.get<{ columns: string | null }>()
+      : (await statement.all<{ columns: string | null }>())[0]
+  }
+  const columns = await readColumns('stock_valuation_sale_costs')
+  if (!columns?.columns) {
+    const links = await readColumns('stock_valuation_sale_links')
+    if (links?.columns) throw new ReportMoneyPrecisionError('unsupported_row')
     return false
   }
-  const names = new Set(columns.map(row => row.name))
+  const names = new Set(columns.columns.split(','))
   if (!['sale_item_id', 'managed', 'quantity', 'cost4', 'recovery4', 'net4'].every(name => names.has(name))) {
     throw new ReportMoneyPrecisionError('unsupported_row')
   }
-  return true
+  return Boolean(await db.prepare('SELECT 1 AS present FROM stock_valuation_sale_links LIMIT 1').get())
 }
 
 export async function assertStockValuationSaleCostRows(db: ReturnType<typeof getDb>): Promise<void> {
@@ -3067,6 +3072,8 @@ export async function getProductSalesRanking(env: Env, f: SalesFilters, limit = 
   const { sql: whereSql, params } = whereActiveSales('s', f)
   const itemProjection = await reportItemCostProjection(db)
   const cap = Math.max(1, Math.min(1000, Math.trunc(limit) || 200))
+  const costColumn = itemProjection.join ? `COALESCE(SUM(${itemProjection.cost}), 0) AS cost_usd`
+    : 'COALESCE(SUM(si.cost_price_usd * si.quantity), 0) AS cost_usd'
   // Two stock ledgers, never mixed: branch_stock when the report is scoped to
   // a branch, products.stock_quantity when it is not.
   const onHandExpr = f.branchId
@@ -3078,7 +3085,7 @@ export async function getProductSalesRanking(env: Env, f: SalesFilters, limit = 
            COUNT(DISTINCT s.id) AS sale_count,
            COALESCE(SUM(si.quantity), 0) AS qty,
            COALESCE(SUM(si.total_usd), 0) AS line_sales_usd,
-           COALESCE(SUM(${itemProjection.cost}), 0) AS cost_usd,
+           ${costColumn},
            COALESCE(SUM(CASE WHEN ${itemProjection.missing} THEN 1 ELSE 0 END), 0) AS cost_missing_snapshot_lines,
            MAX(COALESCE(p.barcode, '')) AS barcode,
            MAX(COALESCE(p.category, '')) AS category_name,
