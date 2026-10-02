@@ -10,7 +10,7 @@ and their new status, and each item here names the Part that last changed it (e.
 | Item | Status |
 |---|---|
 | RC2-HOTFIX | [x] Live; both real merge actions and health checks verified. |
-| RC3-UI and DATE | [~] UI and date/time pickers passed their release gates. Not live; RC3 deploys first after 20:00 Cambodia and a fresh closed-trading check. |
+| RC3-UI and DATE | [~] Earlier gates passed, but a new cost-permission check failed. Fix, independent review and fresh gates required before release; then after 20:00 Cambodia with trading closed. |
 | STOCK-RETURN | [~] Full check: 704/718 passed. Report/database fixes passed targeted checks; cost-privacy repair continues. Partial returns and accounting remain unfinished; not live. |
 
 ### Deploy checkpoints (26 Sep) — each deploys as soon as it is green; nothing waits for the next
