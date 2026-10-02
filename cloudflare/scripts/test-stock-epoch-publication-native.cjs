@@ -639,7 +639,52 @@ async function basisDomainAndReceipt() {
   console.log('PASS10 activated malformed SQL quantity operands; unavailable committed receipt is truthful and retry only reads the original publication');
 }
 
-const cases = { admission, fractionalAdmission, decimalQuantity, rollback, redundantRecompute, malformedPublication, permissionAndClosure, disabledOrdinaryRoutes, physicalPartition, fractionalPartition, partitionRollback, partitionLostResponse, partitionTampering, guardRegressions, exactBasisSql, basisDomainAndReceipt };
+async function quantityTextFormat() {
+  const fields = {
+    stock_epoch_sources: ['quantity', 'free_quantity'],
+    stock_epoch_segments: ['quantity'],
+    stock_epoch_lines: ['original_quantity'],
+    stock_epoch_line_allocations: ['original_quantity'],
+    stock_epoch_epochs: ['target_quantity', 'returned_quantity'],
+    stock_epoch_assignments: ['quantity'],
+    stock_epoch_source_states: ['sellable_quantity', 'held_quantity', 'disposed_quantity', 'consumed_quantity'],
+    stock_epoch_lot_heads: ['quantity', 'received_quantity'],
+    stock_epoch_lot_effects: ['quantity_before', 'quantity_after', 'received_before', 'received_after'],
+    stock_epoch_commands: ['quantity_before', 'quantity_after', 'branch_before', 'branch_after', 'product_before', 'product_after'],
+  };
+  const expected = Object.entries(fields).flatMap(([table, columns]) => columns.map(column => `${table}.${column}`)).sort();
+  const full = fixture();
+  try {
+    const actual = full.db.prepare("SELECT name FROM sqlite_schema WHERE type='table' AND name LIKE 'stock_epoch_%'").all().flatMap(({ name }) => full.db.prepare(`PRAGMA table_info(${name})`).all().filter(column => column.type === 'TEXT' && (/quantity/.test(column.name) || /^(received|branch|product)_(before|after)$/.test(column.name))).map(column => `${name}.${column.name}`)).sort();
+    assert.deepEqual(actual, expected);
+    assert.equal(expected.length, 24);
+  } finally { full.db.close(); }
+  const migrationPath = path.join(__dirname, '../migrations/0220_stock_epoch_quantity_text.sql');
+  const migration = fs.existsSync(migrationPath) ? fs.readFileSync(migrationPath, 'utf8') : '';
+  const tables = Object.entries(fields).map(([table, columns]) => `CREATE TABLE ${table}(${columns.map(column => `${column} TEXT NOT NULL DEFAULT '0'`).join(',')});`).join('\n');
+  const db = require('./harness/d1compat.cjs').openDb([tables, migration]).db;
+  try {
+    for (const [table, columns] of Object.entries(fields)) for (const column of columns) {
+      for (const value of ['0', '1', '0.125', '0.000000000000000000000001', '1000000000']) {
+        const row = db.prepare(`INSERT INTO ${table}(${column}) VALUES(?)`).run(value).lastInsertRowid;
+        assert.equal(db.prepare(`SELECT ${column} AS value FROM ${table} WHERE rowid=?`).get(row).value, value);
+        db.prepare(`UPDATE ${table} SET ${column}=? WHERE rowid=?`).run(value, row);
+        assert.equal(db.prepare(`SELECT ${column} AS value FROM ${table} WHERE rowid=?`).get(row).value, value);
+      }
+      assert.throws(() => db.prepare(`INSERT INTO ${table}(${column}) VALUES(?)`).run('1\u0000'), /epoch quantity text bytes/, `${table}.${column} accepted the known truncated-byte format`);
+      const row = db.prepare(`INSERT INTO ${table}(${column}) VALUES('1')`).run().lastInsertRowid;
+      assert.throws(() => db.prepare(`UPDATE ${table} SET ${column}=? WHERE rowid=?`).run('1\u0000', row), /epoch quantity text bytes/);
+      assert.equal(db.prepare(`SELECT ${column} AS value FROM ${table} WHERE rowid=?`).get(row).value, '1');
+    }
+    console.log('PASS fixed quantity TEXT format:24 mapped columns,5 valid decimals unchanged on insert/update, known embedded-NUL format refused');
+  } finally { db.close(); }
+}
+
+async function quantityTextPositive() {
+  for (const test of [admission, fractionalAdmission, decimalQuantity, physicalPartition, fractionalPartition, disabledOrdinaryRoutes]) await test();
+}
+
+const cases = { admission, fractionalAdmission, decimalQuantity, rollback, redundantRecompute, malformedPublication, permissionAndClosure, disabledOrdinaryRoutes, physicalPartition, fractionalPartition, partitionRollback, partitionLostResponse, partitionTampering, guardRegressions, exactBasisSql, basisDomainAndReceipt, quantityTextFormat, quantityTextPositive };
 (async () => {
   const selected = process.env.STOCK_EPOCH_SECTION;
   assert.ok(!selected || Object.hasOwn(cases, selected), 'Unknown publication section');
