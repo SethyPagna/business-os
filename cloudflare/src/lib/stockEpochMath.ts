@@ -26,7 +26,7 @@ export function epochReceiptOpening(quantity: unknown, unitCost: unknown, paymen
 }
 
 export function splitEpochBasis(fragment: EpochFragment, quantity: unknown, childId: string) {
-  if (!childId || childId === fragment.segment_id) throw new RangeError('epoch_fragment_identity_invalid');
+  if (!childId || childId === fragment.segment_id || `${childId}-remaining` === fragment.segment_id) throw new RangeError('epoch_fragment_identity_invalid');
   const split = allocateDispositionBasis(fragment.quantity, fragment.gross4, fragment.coverage4, quantity);
   return {
     selected: { ...fragment, segment_id: childId, parent_segment_id: fragment.segment_id, quantity: split.quantity, gross4: split.gross4, coverage4: split.coverage4 },
@@ -38,6 +38,8 @@ export function assertEpochPartition(before: readonly EpochFragment[], after: re
   const keys = new Set<string>();
   const parents = new Map<string, EpochFragment>();
   for (const fragment of before) {
+    quantityDecimal(fragment.quantity);
+    if (money(fragment.coverage4) > money(fragment.gross4)) throw new RangeError('epoch_coverage_invalid');
     const key = JSON.stringify([fragment.source_id, fragment.event_id, fragment.segment_id]);
     const parent = JSON.stringify([fragment.source_id, fragment.segment_id]);
     if (keys.has(key) || parents.has(parent)) throw new RangeError('epoch_before_member_duplicate');
@@ -49,8 +51,9 @@ export function assertEpochPartition(before: readonly EpochFragment[], after: re
     const key = JSON.stringify([fragment.source_id, fragment.segment_id]);
     if (childKeys.has(key) || !fragment.parent_segment_id || !parents.has(JSON.stringify([fragment.source_id, fragment.parent_segment_id]))) throw new RangeError('epoch_after_member_invalid');
     childKeys.add(key);
-    quantityDecimal(fragment.quantity, true);
+    const quantity = quantityDecimal(fragment.quantity, true);
     if (money(fragment.coverage4) > money(fragment.gross4)) throw new RangeError('epoch_coverage_invalid');
+    if (quantity === '0' && (fragment.gross4 !== 0 || fragment.coverage4 !== 0)) throw new RangeError('epoch_empty_fragment_basis');
   }
   for (const [key, parent] of parents) {
     const children = after.filter(child => child.source_id === parent.source_id && child.parent_segment_id === parent.segment_id);
@@ -58,6 +61,15 @@ export function assertEpochPartition(before: readonly EpochFragment[], after: re
     if (!children.length || sumValuationQuantity(children.map(child => child.quantity)) !== quantityDecimal(parent.quantity)
       || children.reduce((sum, child) => money(sum + child.gross4), 0) !== money(parent.gross4)
       || children.reduce((sum, child) => money(sum + child.coverage4), 0) !== money(parent.coverage4 + coverage)) throw new RangeError('epoch_partition_not_conserved');
+    let remainingQuantity = parent.quantity, remainingGross4 = parent.gross4, remainingCoverage4 = money(parent.coverage4 + coverage);
+    for (const child of children) {
+      if (quantityDecimal(child.quantity, true) === '0') continue;
+      const share = allocateDispositionBasis(remainingQuantity, remainingGross4, remainingCoverage4, child.quantity);
+      if (share.gross4 !== child.gross4 || share.coverage4 !== child.coverage4) throw new RangeError('epoch_partition_order_mismatch');
+      remainingQuantity = share.remainingQuantity;
+      remainingGross4 = share.remainingGross4;
+      remainingCoverage4 = share.remainingCoverage4;
+    }
   }
   for (const key of accepted.keys()) if (!parents.has(key)) throw new RangeError('epoch_acceptance_target_invalid');
 }

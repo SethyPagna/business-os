@@ -26,6 +26,22 @@ assert.throws(()=>assertEpochPartition([original],[first.selected]),/not_conserv
 assert.throws(()=>assertEpochPartition([original],[first.selected,first.selected,first.remaining]),/after_member_invalid/);
 assert.throws(()=>assertEpochPartition([original],[{...first.selected,source_id:'foreign'},first.remaining]),/after_member_invalid/);
 assert.throws(()=>assertEpochPartition([original],[{...first.selected,gross4:23334},first.remaining]),/not_conserved/);
+const refuterControls = [
+  ['negative before coverage masked by acceptance', () => assertEpochPartition([{...original,quantity:'1',gross4:100,coverage4:-1}], [{...first.selected,quantity:'1',gross4:100,coverage4:0}], new Map([[JSON.stringify(['s','p']),1]]))],
+  ['zero quantity carries basis', () => assertEpochPartition([original], [{...first.selected,quantity:'0',gross4:70001},{...first.remaining,quantity:'3',gross4:0}])],
+  ['conserved but misallocated ordered basis', () => assertEpochPartition([original], [{...first.selected,gross4:0},{...first.remaining,gross4:70001}])],
+  ['generated remaining identity collides with parent', () => splitEpochBasis({...original,segment_id:'x-remaining'},'1','x')],
+];
+const admittedRefuterControls = refuterControls.filter(([,run]) => { try { run(); return true; } catch(error) { assert.ok(error instanceof RangeError); return false; } }).map(([name])=>name);
+assert.deepEqual(admittedRefuterControls, [], 'Independent reviewer counterexamples must all be rejected');
+const fullTake=splitEpochBasis(original,'3','full');
+assertEpochPartition([original],[fullTake.selected,fullTake.remaining]);
+assert.deepEqual([fullTake.remaining.quantity,fullTake.remaining.gross4,fullTake.remaining.coverage4],['0',0,0]);
+const coveredParent={...original,coverage4:3};
+const coveredSplit=splitEpochBasis(coveredParent,'1','covered');
+assert.deepEqual([coveredSplit.selected.gross4,coveredSplit.selected.coverage4,coveredSplit.remaining.gross4,coveredSplit.remaining.coverage4],[23333,1,46668,2]);
+assertEpochPartition([coveredParent],[coveredSplit.selected,coveredSplit.remaining]);
+assertEpochPartition([{...original,quantity:'1',gross4:100}],[{...first.selected,quantity:'1',gross4:100,coverage4:1}],new Map([[JSON.stringify(['s','p']),1]]));
 const promise=id=>({source_id:'s',agreement_id:id,amount4:100000,remaining4:100000,targets:[{allocation_id:'x',amount4:100000,remaining4:100000}]});
 const share=(agreement,amount)=>[{source_id:'s',agreement_id:agreement,allocation_id:'x',amount4:amount}];
 const a=acceptEpochAgreement(promise('a'),share('a',80000));
@@ -56,5 +72,8 @@ const targetBalance={source_id:'s',agreement_id:'a',amount4:100000,remaining4:10
 assert.throws(()=>acceptEpochAgreement(targetBalance,share('a',80000)),/epoch_agreement_target_exhausted/);
 const uncappedTarget=mutant('amount > target.remaining4','false');
 assert.throws(()=>assert.throws(()=>uncappedTarget.acceptEpochAgreement(targetBalance,share('a',80000)),/epoch_agreement_target_exhausted/),assert.AssertionError);
+const uncheckedOrder=mutant('share.gross4 !== child.gross4 || share.coverage4 !== child.coverage4','false');
+assert.throws(()=>assert.throws(()=>uncheckedOrder.assertEpochPartition([original],[{...first.selected,gross4:0},{...first.remaining,gross4:70001}]),/epoch_partition_order_mismatch/),assert.AssertionError);
 console.log('PASS exact ordered70001 residue, distinct split membership, partial agreement caps, receipt-specific paid/debt and active quantity math');
-console.log('PASS independent literal assertions reject wrong-residue, duplicate-before and removed target-cap source mutants');
+console.log('PASS four reviewer counterexamples rejected; full-take empty remainder, covered ordered split and explicit acceptance remain valid');
+console.log('PASS independent literal assertions reject wrong-residue, duplicate-before, removed target-cap and unchecked-order source mutants');
