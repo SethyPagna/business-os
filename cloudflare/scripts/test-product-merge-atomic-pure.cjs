@@ -6,6 +6,7 @@ const ts = require('typescript')
 const moneyPrecision = require('../src/lib/moneyPrecision.ts')
 const Module = require('module')
 const { openDb } = require('./harness/d1compat.cjs')
+const { loadStockLifecycleFixture, nativeStockFixtureBinding } = require('./harness/load_stock_lifecycle_fixture.cjs')
 
 const libDir = path.join(__dirname, '..', 'src', 'lib')
 
@@ -36,8 +37,10 @@ function loadUndoAppliers(db) {
     batch: (statements) => db.batch(statements),
   }
   const never = () => { throw new Error('unrelated undo branch invoked') }
+  const actualDb = loadStockLifecycleFixture('lib/db.ts').getDb({ DB: nativeStockFixtureBinding(db.db, statements => dbAdapter.batch(statements)) })
   const stubs = {
-    '../index': {}, './auth': {}, './db': { getDb: () => dbAdapter }, './audit': { audit: async () => {} },
+    './stockLifecycle': loadStockLifecycleFixture(),
+    '../index': {}, './auth': {}, './db': { ...loadStockLifecycleFixture('lib/db.ts'), getDb: () => actualDb }, './audit': { audit: async () => {} },
     '../durable-objects/broadcastHub': { broadcast: async () => {} }, './branchWrites': { branchUpdateStatements: () => [] },
     './permissions': { getActionTier: () => 'full', getPermissionTier: () => 'full' },
     './actorSnapshot': { actorSnapshot: (user) => user?.name || user?.username || null },

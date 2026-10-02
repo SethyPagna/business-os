@@ -23,6 +23,7 @@ const path = require('node:path')
 const ts = require('typescript')
 const Module = require('module')
 const { openDb } = require('./harness/d1compat.cjs')
+const { loadStockLifecycleFixture, nativeStockFixtureBinding } = require('./harness/load_stock_lifecycle_fixture.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')
 
 const cloudflareRoot = path.join(__dirname, '..')
@@ -102,7 +103,9 @@ function loadUndoAppliers(d1) {
       })))
     },
   }
+  const actualDb = loadStockLifecycleFixture('lib/db.ts').getDb({ DB: nativeStockFixtureBinding(d1.db, statements => dbAdapter.batch(statements)) })
   const stubs = {
+    './stockLifecycle': loadStockLifecycleFixture(),
     './customerGenderRestoration': loadActualDependency(path.join(LIB_DIR, 'customerGenderRestoration.ts')),
     // undoAppliers.ts now imports the exact money kernels; Module._load only
     // maps listed keys, so unlisted relative requests would resolve against this
@@ -134,7 +137,7 @@ function loadUndoAppliers(d1) {
     },
     '../index': {},
     './auth': {},
-    './db': { getDb: () => dbAdapter },
+    './db': { ...loadStockLifecycleFixture('lib/db.ts'), getDb: () => actualDb },
     './audit': { audit: async () => {} },
     '../durable-objects/broadcastHub': { broadcast: async () => {} },
     './branchWrites': { branchUpdateStatements: () => [] },
