@@ -43,7 +43,8 @@ async function checkEnvelopeRoutes(api) {
   const modules = new Map()
   function pure(name) {
     if (modules.has(name)) return modules.get(name).exports
-    assert.ok(['permissions', 'actorSnapshot', 'db', 'pendingActions'].includes(name), name)
+    if (['branchWrites', 'canonicalBranchIdentity', 'branchRoles'].includes(name)) assert.ok(name, 'selected real branch dependency')
+    else assert.ok(['permissions', 'actorSnapshot', 'db', 'pendingActions'].includes(name), name)
     const m = { exports: {} }; modules.set(name, m)
     const code = ts.transpileModule(fs.readFileSync(path.join(root, 'lib', name + '.ts'), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
     new Function('require', 'module', 'exports', code)(id => {
@@ -76,6 +77,26 @@ async function checkEnvelopeRoutes(api) {
     '../lib/stockSession': { STOCK_SESSION_KIND: 'stock.session' }, '../lib/transferOperation': { TRANSFER_OPERATION_KIND: 'stock.transfer' },
     '../lib/stockLotAdjustment': { STOCK_LOT_SET_KIND: 'stock.quantity_set' }, '../lib/stockInLineEdit': { STOCK_IN_LINE_EDIT_KIND: 'stock.session_line_edit' },
   }
+  DB.batch = async statements => {
+    native.exec('BEGIN')
+    try { const result=[]; for(const statement of statements)result.push(await statement.run());native.exec('COMMIT');return result }
+    catch(error){native.exec('ROLLBACK');throw error}
+  }
+  native.exec(init.match(/CREATE TABLE branches \([\s\S]*?\n\);/)[0])
+  for(const table of ['sales','inventory_movements','returns','stock_row_moves'])native.exec('CREATE TABLE '+table+'(branch_id INTEGER,branch_name TEXT,updated_at TEXT)')
+  native.exec("INSERT INTO branches(id,name,is_default,is_active,notes)VALUES(1,'Warehouse',1,1,'after'),(2,'Shop',0,1,NULL)")
+  const declarations=undoSource.statements.filter(node=>
+    (ts.isFunctionDeclaration(node)&&['applierPermissionTier','branchReplayExpectedFields','resolveUndoApplier','isServerReplayable','mergeReplayChoicePermissionError','mergeReplayChangesProductImages','replayRefusalCode'].includes(node.name?.text))
+    ||(ts.isClassDeclaration(node)&&node.name?.text==='UndoConflictError')
+    ||(ts.isVariableStatement(node)&&node.declarationList.declarations.some(d=>/^(UNDO_|STOCK_SESSION_UNDO_CLOSED_BY_MERGE$|isUndoClosedByMerge$|PRODUCT_MERGE_GROUP_ACTION_KIND$|PRODUCT_MERGE_APPLIER_KINDS$)/.test(d.name.getText(undoSource)))))
+  const registry=undoSource.statements.filter(ts.isVariableStatement).flatMap(node=>[...node.declarationList.declarations]).find(d=>d.name.getText(undoSource)==='APPLIERS')
+  const branch=registry.initializer.properties.find(prop=>prop.name?.getText(undoSource)==="'branch.update'")
+  assert.ok(branch)
+  const bindings={...pure('permissions'),...pure('db'),...pure('actorSnapshot'),...pure('branchWrites'),audit:stubs['../lib/audit'].audit,broadcast:stubs['../durable-objects/broadcastHub'].broadcast}
+  const actual={exports:{}},code=ts.transpileModule(declarations.map(n=>n.getText(undoSource)).join('\n')+'\nconst APPLIERS={'+branch.getText(undoSource)+'};',{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText
+  new Function('module','exports',...Object.keys(bindings),code)(actual,actual.exports,...Object.values(bindings))
+  Object.assign(stubs['../lib/undoAppliers'],actual.exports)
+
   const app = new Hono()
   for (const [file, mount] of [['actionHistory', '/history'], ['reviewQueue', '/review']]) {
     const m = { exports: {} }, code = ts.transpileModule(fs.readFileSync(path.join(root, 'routes', file + '.ts'), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
@@ -90,6 +111,85 @@ async function checkEnvelopeRoutes(api) {
   const post = (url, payload) => app.request(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }, { DB }, context)
   const get = url => app.request(url, {}, { DB }, context)
   const snapshot = () => JSON.stringify({ history: native.prepare('SELECT * FROM action_history ORDER BY id').all(), pending: native.prepare('SELECT * FROM pending_actions ORDER BY id').all() })
+  async function checkHistoryBoundaryRoles() {
+    const cost = JSON.stringify({ cost_price_usd: 73129, count: 2 }), safe = JSON.stringify({ count: 2 })
+    const financial = [
+      ['root', [cost], [safe]], ['opaque', { opaque: [cost] }, { opaque: [safe] }],
+      ['nested', { outer: { opaque: [[cost]] } }, { outer: { opaque: [[safe]] } }],
+      ['tuple-member', { names: [[11, { opaque: [cost] }]] }, { names: [[11, { opaque: [safe] }]] }],
+      ['malformed', { opaque: ['{unclosed'] }, { opaque: [null] }],
+      ['known', { details: [cost] }, { details: [safe] }], ['direct', { cost_price_usd: 73129, count: 2 }, { count: 2 }],
+    ]
+    const roles = [['denied', false, false], ['view-only', true, false], ['edit-only', false, true], ['both', true, true], ['admin', false, false]]
+    const roleUser = ([name, view, edit], branches = true) => ({ id: 7, role_code: name === 'admin' ? 'admin' : 'manager', permissions: JSON.stringify({ products: true, inventory: true, sales: true, branches, audit_log: true, review: true, product_cost_view: view, product_cost_edit: edit }) })
+    const reset = () => native.exec('DELETE FROM action_history; DELETE FROM pending_actions')
+    const seed = (undo, redo = undo, status = 'undoable') => native.prepare("INSERT INTO action_history(id,scope,entity,label,reversible,status,undo_payload,redo_payload,created_by_id) VALUES(1,'global',NULL,'Saved action',1,?,?,?,7)").run(status, JSON.stringify(undo), JSON.stringify(redo))
+    const pending = payload => native.prepare("INSERT INTO pending_actions(id,section,action_type,entity_type,payload_json,status,requested_by) VALUES(1,'inventory','update','fixture',?,'rejected',7)").run(JSON.stringify(payload))
+    const observations = []
+    for (const role of roles) {
+      for (const [name, payload, redacted] of financial) {
+        user = roleUser(role)
+        const editable = api.canEditAcquisitionCosts(user), visible = api.canViewAcquisitionCosts(user)
+        for (const route of ['history', 'review']) {
+          reset(); if (route === 'review') pending({ count: 1 })
+          const before = snapshot(), counters = [operations, auditWrites, broadcasts]
+          const res = await post(route === 'history' ? '/history' : '/review/1/resubmit', route === 'history' ? { label: 'Boundary financial fixture', undo_payload: payload, redo_payload: payload } : { payload }), response = await res.json()
+          const correct = editable ? res.status === 200 : res.status === 403 && snapshot() === before && auditWrites === counters[1] && broadcasts === counters[2]
+          observations.push({ kind: 'edited-admission', role: role[0], name, route, status: res.status, editable, correct, operationDelta: operations - counters[0], auditDelta: auditWrites - counters[1], broadcastDelta: broadcasts - counters[2], unchanged: snapshot() === before })
+          if (editable) {
+            if (route === 'history') assert.equal(native.prepare('SELECT undo_payload FROM action_history').get().undo_payload, JSON.stringify(payload))
+            else assert.equal(native.prepare('SELECT payload_json FROM pending_actions').get().payload_json, JSON.stringify(payload))
+          }
+        }
+        for (const direction of ['undo', 'redo']) {
+          reset(); seed(payload, payload, direction === 'undo' ? 'undoable' : 'redoable')
+          const res = await post('/history/1/' + direction, {}), response = await res.json(), expected = visible ? payload : redacted
+          observations.push({ kind: 'legacy-transition-read', role: role[0], name, direction, status: res.status, visible, correct: res.status === 200 && JSON.stringify(response.payload) === JSON.stringify(expected), actual: response.payload, expected })
+          assert.equal(native.prepare('SELECT status FROM action_history').get().status, direction === 'undo' ? 'redoable' : 'undoable')
+          const fallback=await app.request('/history/1',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:direction==='undo'?'undoable':'redoable',last_error:'Forward mutation refused by current permission'})},{DB},context)
+          assert.equal(fallback.status,200,'client closure failure can acknowledge original status');assert.equal(native.prepare('SELECT status FROM action_history').get().status,direction==='undo'?'undoable':'redoable')
+        }
+        reset(); seed(payload)
+        const patched = await app.request('/history/1', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'redoable' }) }, { DB }, context)
+        assert.equal(patched.status, 200, 'existing owner status acknowledgement does not acquire invented cost restriction')
+      }
+      user = roleUser(role)
+      for(const ignored of ['ordinary scalar','{"cost_price_usd":73129}',null,17,false]) {
+        reset();const res=await post('/history',{label:'Discarded scalar compatibility',undo_payload:ignored,redo_payload:ignored});assert.equal(res.status,200);const stored=native.prepare('SELECT undo_payload,redo_payload FROM action_history').get();assert.equal(stored.undo_payload,'{}');assert.equal(stored.redo_payload,'{}')
+      }
+      for(const status of ['failed','recorded']){reset();seed(financial[1][1]);const res=await app.request('/history/1',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({status,last_error:'Metadata only'})},{DB},context);assert.equal(res.status,200);assert.equal(native.prepare('SELECT status FROM action_history').get().status,status)}
+      for (const body of [null, {}, { summary: 'Please look again' }]) {
+        reset(); pending(financial[1][1]); const before = native.prepare('SELECT payload_json FROM pending_actions').get().payload_json
+        const res = body === null ? await app.request('/review/1/resubmit', { method: 'POST' }, { DB }, context) : await post('/review/1/resubmit', body), response = await res.json()
+        assert.equal(res.status, 200); assert.equal(native.prepare('SELECT payload_json FROM pending_actions').get().payload_json, before)
+        assert.equal(native.prepare('SELECT status FROM pending_actions').get().status, 'open')
+        assert.equal(response.data.payload_json, JSON.stringify(api.canViewAcquisitionCosts(user) ? financial[1][1] : financial[1][2]))
+        observations.push({ kind: 'unchanged-resubmit', role: role[0], body, correct: true })
+      }
+      for (const payload of literalProducerPayloads()) {
+        reset(); const created = await post('/history', { label: 'Literal boundary fixture', undo_payload: payload, redo_payload: payload }); assert.equal(created.status, 200)
+        const id = (await created.json()).id, transitioned = await post('/history/' + id + '/undo', {}), response = await transitioned.json()
+        assert.equal(transitioned.status, 200); assert.deepEqual(response.payload, payload)
+        pending({}); assert.equal((await post('/review/1/resubmit', { payload })).status, 200)
+      }
+      for (const allowed of [false, true]) for (const direction of ['undo', 'redo']) {
+        reset(); user = roleUser(role, allowed)
+        const undo = { applier: 'branch.update', id: 1, fields: { notes: 'before' } }, redo = { applier: 'branch.update', id: 1, fields: { notes: 'after' } }
+        native.prepare('UPDATE branches SET notes=? WHERE id=1').run(direction === 'undo' ? 'after' : 'before'); seed(undo, redo, direction === 'undo' ? 'undoable' : 'redoable')
+        const before = snapshot(), branchBefore = JSON.stringify(native.prepare('SELECT * FROM branches ORDER BY id').all())
+        const res = await post('/history/1/' + direction, { require_applied: true }), response = await res.json(), permitted = allowed || role[0] === 'admin'
+        assert.equal(res.status, permitted ? 200 : 403); if (permitted) { assert.equal(response.applied, true); assert.equal(native.prepare('SELECT notes FROM branches WHERE id=1').get().notes, direction === 'undo' ? 'before' : 'after') } else { assert.equal(snapshot(), before); assert.equal(JSON.stringify(native.prepare('SELECT * FROM branches ORDER BY id').all()), branchBefore) }
+        observations.push({ kind: 'real-branch-applier', role: role[0], allowed, correct: true, status: res.status })
+      }
+    }
+    for(const role of roles){user=roleUser(role);let deep={cost_price_usd:73129};for(let i=0;i<35;i++)deep={nested:deep};reset();const admission=await post('/history',{label:'Deep boundary',undo_payload:deep});assert.equal(admission.status,api.canEditAcquisitionCosts(user)?200:403);reset();seed(deep);const replay=await post('/history/1/undo',{}),body=await replay.json();assert.equal(replay.status,200);assert.equal(JSON.stringify(body.payload).includes('73129'),api.canViewAcquisitionCosts(user))}
+    user=roleUser(roles[2]);reset();const largeRow=JSON.stringify({cost_price_usd:73129,count:2,note:'x'.repeat(1000000)}),large=Array(9).fill(largeRow);seed(large)
+    const largeResponse=await post('/history/1/undo',{}),largeBody=await largeResponse.json();assert.equal(largeResponse.status,200);assert.ok(!JSON.stringify(largeBody).includes('cost_price_usd'));assert.ok(largeBody.payload.every(row=>row===null),'whole response budget shared after item undo+redo consumes16MiB')
+    console.log('HISTORY_BOUNDARY_BUDGET',JSON.stringify({originalPayloadBytes:Buffer.byteLength(JSON.stringify(large)),responseBytes:Buffer.byteLength(JSON.stringify(largeBody)),nullReplayMembers:largeBody.payload.filter(row=>row===null).length}))
+    console.log('HISTORY_BOUNDARY_ROLE_OBSERVATIONS', JSON.stringify({ exprDepth: native.limits.exprDepth, observations, total: observations.length, failures: observations.filter(row => !row.correct).length }))
+    assert.ok(observations.every(row => row.correct), 'actual route financial envelope admission and no-view replay projection')
+  }
+
   const specimens = [{ cost_price_usd: 73 }, { costPriceUsd: 73 }, { nested: { cost_price_khr: 28000 } }]
   try {
     for (const payload of specimens) {
@@ -293,11 +393,13 @@ async function checkEnvelopeRoutes(api) {
     }
     user = null
     assert.equal((await post('/history', { label: 'Fixture edit' })).status, 401)
+    await checkHistoryBoundaryRoles()
     console.log('PASS actual actionHistory/reviewQueue admission, native depth100 durable writes/refusals, real permissions/db/pending helpers; identity injected, replay/approval/audit delivery excluded')
   } finally { native.close() }
 }
 
 async function checkLiteralEnvelopeRoutes() {
+  checkReplayResponseProjectionContract(access)
   await checkAuditProducerLiterals(access)
   await checkEnvelopeRoutes(access)
   await checkLiteralProductGallery(access)
@@ -456,4 +558,18 @@ async function checkAuditProducerLiterals(api) {
  console.log(JSON.stringify({ label: 'LITERAL_ACTUAL_AUDIT_PRODUCERS', exprDepth: native.limits.exprDepth, method: 'Actual producer AST expressions; real buildAuditStatement + native SQLite; actual compat audit handler + real readAuditLogPage/permissions/projection. Authentication identity injected; no live call.', observations }, null, 2))
  native.close()
  assert.ok(observations.every(row => row.preserved && !row.inputDenied), 'actual producer literal audit bytes and denied admission preserved')
+}
+
+function checkReplayResponseProjectionContract(api) {
+ const source=ts.createSourceFile('actionHistory.ts',fs.readFileSync(path.join(root,'routes/actionHistory.ts'),'utf8'),ts.ScriptTarget.Latest,true)
+ const node=source.statements.find(node=>ts.isFunctionDeclaration(node)&&node.name?.text==='visibleHistoryReplayResponse');assert.ok(node)
+ const code=ts.transpileModule(node.getText(source)+'\nreturn visibleHistoryReplayResponse',{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText,project=new Function('projectAcquisitionCosts',code)(api.projectAcquisitionCosts)
+ const privateRow=JSON.stringify({cost_price_usd:73129,count:2}),safeRow=JSON.stringify({count:2})
+ const raw={success:true,undo_payload:{names:['existing undo slot']},response_json:{names:['existing response slot']},original_json:{labels:['existing original slot']},item:{undo_payload:{opaque:[privateRow]},redo_payload:{opaque:[privateRow]}},payload:{opaque:[privateRow]},names:['000012',privateRow]},before=JSON.stringify(raw)
+ for(const who of [denied,viewer,editor,actor({product_cost_view:true,product_cost_edit:true}),actor({product_cost_view:false,product_cost_edit:false},{},'admin')]){
+  const result=project(raw,who);assert.deepEqual(Object.keys(result),Object.keys(raw));assert.deepEqual(result.undo_payload,raw.undo_payload);assert.deepEqual(result.response_json,raw.response_json);assert.deepEqual(result.original_json,raw.original_json);assert.deepEqual(result.names,raw.names)
+  if(api.canViewAcquisitionCosts(who))assert.equal(JSON.stringify(result),before,'authorized response bytes/order unchanged');else{assert.deepEqual(result.payload,{opaque:[safeRow]});assert.deepEqual(result.item,{undo_payload:{opaque:[safeRow]},redo_payload:{opaque:[safeRow]}})}
+  assert.equal(JSON.stringify(raw),before,'raw response and applier payload not mutated')
+ }
+ console.log('PASS actual response projector collision/authorized bytes/ordinary literals/raw immutability')
 }
