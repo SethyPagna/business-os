@@ -95,7 +95,7 @@ function seed() {
 }
 const row = id => raw.prepare('SELECT * FROM products WHERE id=?').get(id)
 const receipt = id => JSON.parse(raw.prepare('SELECT payload_json FROM undo_snapshots WHERE id=?').get(Number(id)).payload_json)
-const authoritative = () => JSON.stringify(Object.fromEntries(['products', 'product_images', 'product_cost_entries', 'audit_logs', 'undo_snapshots', 'action_history', 'pending_actions'].map(table => [table, raw.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()])))
+const authoritative = () => JSON.stringify(Object.fromEntries(['products', 'product_images', 'product_cost_entries', 'inventory_movements', 'product_batches', 'branch_batch_stock', 'branch_stock', 'audit_logs', 'undo_snapshots', 'action_history', 'pending_actions'].map(table => [table, raw.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()])))
 async function main() {
   raw.prepare(`INSERT INTO users(id,username,name,password,permissions,is_active) VALUES(7,'fixture7','Fixture 7','admin123',?,1)`).run(actor.permissions)
   const { DatabaseSync } = require('node:sqlite')
@@ -230,5 +230,141 @@ async function main() {
   assert.equal(recoveredReplay.status, 200, JSON.stringify(recoveredReplay))
   assert.equal(raw.prepare('SELECT COUNT(*) n FROM product_cost_entries WHERE product_id=?').get(revokedId).n, 2)
   console.log('PASS grant revoked after commit refuses receipt disclosure; original key and generation reconcile after grant restoration')
+  for (const prior of ['none','positive','zero']) {
+    const targetId=seed(), controlId=seed()
+    const lot=(product,cost,key,quantity=1)=>{ const id=Number(raw.prepare('INSERT INTO product_batches(variant_product_id,batch_key,is_active,unit_cost_usd) VALUES(?,?,1,?)').run(product,key,cost).lastInsertRowid); raw.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(?,1,?)').run(id,quantity); return id }
+    lot(targetId,4,`basis-${prior}-a1`); const targetBase=lot(targetId,8,`basis-${prior}-a2`)
+    lot(controlId,4,`basis-${prior}-c1`); const controlBase=lot(controlId,8,`basis-${prior}-c2`)
+    if(prior!=='none') for(const [product,baseline] of [[targetId,targetBase],[controlId,controlBase]]) raw.prepare("INSERT INTO product_cost_entries(product_id,cost_usd,cost_khr,source,baseline_batch_id) VALUES(?,?,NULL,'manual',?)").run(product,prior==='zero'?0:6.125678,baseline)
+    raw.prepare('UPDATE products SET cost_price_usd=7.123456,purchase_price_usd=8.654321,cost_price_khr=NULL,purchase_price_khr=32000 WHERE id=?').run(targetId)
+    const before= row(targetId)
+    const a=await request(products,'PUT',`/${targetId}`,{cost_price_usd:9.4321,client_request_id:`basis-a-${prior}`})
+    assert.equal(a.status,200,JSON.stringify(a)); const afterA=row(targetId)
+    lot(targetId,14,`basis-${prior}-a3`); lot(controlId,14,`basis-${prior}-c3`)
+    const b=await request(products,'PUT',`/${targetId}`,{cost_price_usd:19,client_request_id:`basis-b-${prior}`})
+    assert.equal(b.status,200,JSON.stringify(b))
+    const targetNew=lot(targetId,24,`basis-${prior}-a4`),controlNew=lot(controlId,24,`basis-${prior}-c4`)
+    const entriesBefore=raw.prepare('SELECT * FROM product_cost_entries WHERE product_id=? ORDER BY id').all(targetId)
+    const undoA=await request(histories,'POST',`/${a.body.action_history_id}/undo`,{expected_generation:0})
+    assert.equal(undoA.status,200,JSON.stringify(undoA))
+    for(const field of ['cost_price_usd','purchase_price_usd','cost_price_khr','purchase_price_khr']) assert.equal(row(targetId)[field],before[field],prior+' '+field)
+    assert.deepEqual(raw.prepare('SELECT * FROM product_cost_entries WHERE product_id=? AND id<=? ORDER BY id').all(targetId,entriesBefore.at(-1).id),entriesBefore)
+    const overlay=raw.prepare('SELECT * FROM product_cost_entries WHERE product_id=? ORDER BY id DESC LIMIT 1').get(targetId)
+    assert.equal(overlay.baseline_batch_id,prior==='none'?0:targetBase)
+    assert.equal(overlay.cost_usd,prior==='positive'?6.125678:0)
+    for(const id of [targetNew,controlNew]) raw.prepare('UPDATE branch_batch_stock SET quantity=2 WHERE batch_id=?').run(id)
+    assert.equal(row(targetId).cost_price_usd,row(controlId).cost_price_usd,prior+' future stock uses saved basis')
+    const redoA=await request(histories,'POST',`/${a.body.action_history_id}/redo`,{expected_generation:1})
+    assert.equal(redoA.status,200,JSON.stringify(redoA))
+    for(const field of ['cost_price_usd','purchase_price_usd','cost_price_khr','purchase_price_khr']) assert.equal(row(targetId)[field],afterA[field],prior+' redo '+field)
+    raw.prepare("INSERT INTO product_cost_entries(product_id,cost_usd,cost_khr,source,baseline_batch_id) VALUES(?,9.4321,NULL,'manual',?)").run(controlId,controlBase)
+    for(const id of [targetNew,controlNew]) raw.prepare('UPDATE branch_batch_stock SET quantity=3 WHERE batch_id=?').run(id)
+    assert.equal(row(targetId).cost_price_usd,row(controlId).cost_price_usd,prior+' redo future stock uses original A baseline')
+    const retryState=authoritative()
+    const oldRetry=await request(histories,'POST',`/${a.body.action_history_id}/undo`,{expected_generation:0})
+    assert.equal(oldRetry.status,200,JSON.stringify(oldRetry)); assert.equal(oldRetry.body.generation,1); assert.equal(oldRetry.body.current_generation,2); assert.equal(oldRetry.body.item.undo_payload.generation,2); assert.equal(authoritative(),retryState)
+  }
+  console.log('PASS three saved-basis states; A/B/later lots; exact raw Undo/Redo and real subsequent stock triggers match untouched basis controls; old generation retry acknowledges without rewriting')
+  for (const original of [null,0,8.654321]) {
+    const product=seed(); raw.prepare('UPDATE products SET purchase_price_usd=? WHERE id=?').run(original,product)
+    const before=row(product)
+    const save=await request(products,'PUT',`/${product}`,{purchase_price_usd:3.123456,client_request_id:`purchase-only-${product}`})
+    assert.equal(save.status,200,JSON.stringify(save)); assert.deepEqual(receipt(save.body.operation_id).effects.ordinary_fields,[])
+    raw.prepare("UPDATE products SET description='Later ordinary' WHERE id=?").run(product)
+    assert.equal((await request(histories,'POST',`/${save.body.action_history_id}/undo`,{expected_generation:0})).status,200)
+    assert.equal(row(product).purchase_price_usd,original); assert.equal(row(product).cost_price_usd,before.cost_price_usd); assert.equal(row(product).description,'Later ordinary')
+    assert.equal(raw.prepare('SELECT COUNT(*) n FROM product_cost_entries WHERE product_id=?').get(product).n,0)
+  }
+  const khrId=seed(),khrBefore=row(khrId)
+  const khrSave=await request(products,'PUT',`/${khrId}`,{cost_price_khr:6000,client_request_id:'khr-manual-001'})
+  assert.equal(khrSave.status,200,JSON.stringify(khrSave)); assert.equal(receipt(khrSave.body.operation_id).effects.manual_cost,true)
+  assert.ok(receipt(khrSave.body.operation_id).effects.money_fields.includes('cost_price_usd')); assert.ok(receipt(khrSave.body.operation_id).effects.money_fields.includes('purchase_price_usd'))
+  assert.equal((await request(histories,'POST',`/${khrSave.body.action_history_id}/undo`,{expected_generation:0})).status,200)
+  for(const field of ['cost_price_usd','purchase_price_usd','cost_price_khr','purchase_price_khr']) assert.equal(row(khrId)[field],khrBefore[field],field)
+  console.log('PASS purchase-only null/zero/historical precision without catalog entries or ordinary scope; KHR-only actual manual baseline owns exact USD restoration')
+  const galleryId=seed()
+  raw.prepare('UPDATE products SET image_path=? WHERE id=?').run('/uploads/old.png',galleryId)
+  for(const [order,image] of ['/uploads/old.png','/uploads/second.png'].entries()) raw.prepare('INSERT INTO product_images(product_id,image_path,sort_order) VALUES(?,?,?)').run(galleryId,image,order)
+  const gallery=()=>raw.prepare('SELECT image_path FROM product_images WHERE product_id=? ORDER BY sort_order,id').all(galleryId).map(r=>r.image_path)
+  const galleryUser={...user(9),permissions:JSON.stringify({products:false,products_image_only:true})}
+  const gallerySave=await request(products,'PUT',`/${galleryId}`,{image_path:'/uploads/second.png',image_gallery:['/uploads/second.png','/uploads/old.png'],client_request_id:'gallery-only-0001'},galleryUser)
+  assert.equal(gallerySave.status,200,JSON.stringify(gallerySave));assert.deepEqual(gallery(),['/uploads/second.png','/uploads/old.png'])
+  assert.ok(!JSON.stringify(gallerySave.body.item).includes('Original description')); assert.deepEqual(receipt(gallerySave.body.operation_id).effects.money_fields,[])
+  const galleryUndo=await request(histories,'POST',`/${gallerySave.body.action_history_id}/undo`,{expected_generation:0},galleryUser)
+  assert.equal(galleryUndo.status,200,JSON.stringify(galleryUndo)); assert.deepEqual(gallery(),['/uploads/old.png','/uploads/second.png']);assert.equal(row(galleryId).image_path,'/uploads/old.png')
+  assert.equal((await request(histories,'POST',`/${gallerySave.body.action_history_id}/redo`,{expected_generation:1},galleryUser)).status,200)
+  assert.deepEqual(gallery(),['/uploads/second.png','/uploads/old.png'])
+  const imageDenied={...user(9),permissions:JSON.stringify({products:true,'products:image':false})}
+  const galleryState=authoritative(); const deniedImage=await request(histories,'POST',`/${gallerySave.body.action_history_id}/undo`,{expected_generation:2},imageDenied)
+  assert.equal(deniedImage.status,403,JSON.stringify(deniedImage));assert.equal(authoritative(),galleryState)
+  console.log('PASS restricted image-only gallery/order Undo/Redo and revoked-image whole-operation refusal; asset service remains a declared fixture seam')
+  const renameId=seed()
+  const movement=Number(raw.prepare('INSERT INTO inventory_movements(product_id,product_name,quantity) VALUES(?,?,1)').run(renameId,'Historical display name').lastInsertRowid)
+  const renameBefore=row(renameId).name
+  const rename=await request(products,'PUT',`/${renameId}`,{name:'Renamed native product',client_request_id:'native-rename-001'})
+  assert.equal(rename.status,200,JSON.stringify(rename));assert.equal(raw.prepare('SELECT product_name FROM inventory_movements WHERE id=?').get(movement).product_name,'Renamed native product')
+  assert.equal((await request(histories,'POST',`/${rename.body.action_history_id}/undo`,{expected_generation:0})).status,200)
+  assert.equal(row(renameId).name,renameBefore);assert.equal(raw.prepare('SELECT product_name FROM inventory_movements WHERE id=?').get(movement).product_name,'Historical display name')
+  assert.equal((await request(histories,'POST',`/${rename.body.action_history_id}/redo`,{expected_generation:1})).status,200)
+  assert.equal(raw.prepare('SELECT product_name FROM inventory_movements WHERE id=?').get(movement).product_name,'Renamed native product')
+  let renameState,concurrentMovement
+  beforeBatch=()=>{concurrentMovement=Number(raw.prepare('INSERT INTO inventory_movements(product_id,product_name,quantity) VALUES(?,?,1)').run(renameId,'Concurrent writer name').lastInsertRowid);renameState=authoritative()}
+  const renameConflict=await request(histories,'POST',`/${rename.body.action_history_id}/undo`,{expected_generation:2})
+  assert.equal(renameConflict.status,409,JSON.stringify(renameConflict))
+  assert.equal(authoritative(),renameState);assert.equal(raw.prepare('SELECT product_name FROM inventory_movements WHERE id=?').get(concurrentMovement).product_name,'Concurrent writer name')
+  console.log('PASS canonical linked-name replay and concurrent linked-row addition refuses without overwriting its evidence')
+  const namespaceId=seed(), namespaceOriginal=row(namespaceId).name, outsideId=seed()
+  const namespaceSave=await request(products,'PUT',`/${namespaceId}`,{name:'Namespace renamed',client_request_id:'namespace-race-001'})
+  assert.equal(namespaceSave.status,200,JSON.stringify(namespaceSave))
+  let namespaceConcurrentState
+  beforeBatch=()=>{raw.prepare('UPDATE products SET name=? WHERE id=?').run(namespaceOriginal,outsideId);namespaceConcurrentState=authoritative()}
+  const namespaceUndo=await request(histories,'POST',`/${namespaceSave.body.action_history_id}/undo`,{expected_generation:0})
+  assert.equal(namespaceUndo.status,409,JSON.stringify(namespaceUndo));assert.equal(authoritative(),namespaceConcurrentState)
+  console.log('PASS destination name namespace concurrent membership refuses replay atomically')
+  const rejectedId=seed(),rejectedBody={description:'Rejected edit',client_request_id:'rejected-save-001'}
+  const rejectedSave=await request(products,'PUT',`/${rejectedId}`,rejectedBody,reviewUser)
+  assert.equal(rejectedSave.status,202,JSON.stringify(rejectedSave))
+  assert.equal((await request(reviews,'POST',`/${rejectedSave.body.pendingActionId}/reject`,{reason:'Needs correction'})).status,200)
+  const rejectedRetry=await request(products,'PUT',`/${rejectedId}`,rejectedBody,reviewUser)
+  assert.equal(rejectedRetry.status,409,JSON.stringify(rejectedRetry)); assert.equal(rejectedRetry.body.code,'review_state_conflict');assert.equal(row(rejectedId).description,'Original description')
+  const rejectedPointer=JSON.parse(raw.prepare('SELECT payload_json FROM pending_actions WHERE id=?').get(rejectedSave.body.pendingActionId).payload_json)
+  assert.equal((await request(reviews,'POST',`/${rejectedSave.body.pendingActionId}/resubmit`,{payload:{...rejectedPointer,description:'Injected'}},reviewUser)).body.code,'product_edit_request_immutable')
+  assert.equal((await request(reviews,'POST',`/${rejectedSave.body.pendingActionId}/resubmit`,{payload:rejectedPointer},reviewUser)).status,200)
+  assert.equal((await request(products,'PUT',`/${rejectedId}`,rejectedBody,reviewUser)).status,202)
+  assert.equal((await request(reviews,'POST',`/${rejectedSave.body.pendingActionId}/approve`,{})).status,200)
+  const rejectedHistory=receipt(rejectedSave.body.operation_id).history_id
+  const rejectedReplay=await request(histories,'POST',`/${rejectedHistory}/undo`,{expected_generation:0},reviewUser)
+  assert.equal(rejectedReplay.status,202,JSON.stringify(rejectedReplay))
+  assert.equal((await request(reviews,'POST',`/${rejectedReplay.body.pendingActionId}/reject`,{reason:'Needs correction'})).status,200)
+  assert.equal((await request(histories,'POST',`/${rejectedHistory}/undo`,{expected_generation:0},reviewUser)).status,409)
+  console.log('PASS rejected save/replay cannot report pending; exact typed pointer resubmission restores the original approval intent')
+  const fullAdmin={...actor,role_code:'admin'}
+  const managedState=authoritative()
+  const forged=await request(histories,'POST','/',{scope:'products',entity:'product',entity_id:String(id),label:'Forged',reversible:true,undo_payload:saved.body.undo_payload,redo_payload:saved.body.redo_payload},fullAdmin)
+  assert.ok([400,403,409].includes(forged.status),JSON.stringify(forged))
+  assert.ok([400,403,409].includes((await request(histories,'PATCH',`/${saved.body.action_history_id}`,{status:'redoable'},fullAdmin)).status))
+  assert.equal(authoritative(),managedState)
+  console.log('PASS public History POST/PATCH cannot forge or mutate managed product edit even for administrator')
+  for (const flow of ['save','undo','approval']) {
+    const setup=async()=>{
+      const product=seed(),body={cost_price_usd:22,name:'Atomic '+product,image_path:'/uploads/atomic.png',image_gallery:['/uploads/atomic.png'],description:'Atomic matrix',client_request_id:`atomic-${flow}-${product}`}
+      raw.prepare('INSERT INTO inventory_movements(product_id,product_name,quantity) VALUES(?,?,1)').run(product,'Historical atomic name')
+      if(flow==='save') return ()=>request(products,'PUT',`/${product}`,body)
+      const saved=await request(products,'PUT',`/${product}`,body,flow==='approval'?reviewUser:actor)
+      assert.equal(saved.status,flow==='approval'?202:200,JSON.stringify(saved))
+      return ()=>flow==='approval'?request(reviews,'POST',`/${saved.body.pendingActionId}/approve`,{}):request(histories,'POST',`/${saved.body.action_history_id}/undo`,{expected_generation:0})
+    }
+    const probe=await setup(); assert.equal((await probe()).status,200); const length=lastBatchLength
+    for(let position=0;position<length;position++) {
+      const invoke=await setup(),before=authoritative();failStatement=position
+      const result=await invoke();failStatement=-1
+      assert.equal(result.status,500,flow+' '+position+' '+JSON.stringify(result));assert.equal(authoritative(),before,flow+' rollback '+position)
+    }
+    console.log('PASS every '+flow+' batch statement failure rolls back authoritative state: '+length+' positions')
+  }
+
+
+
+
 }
 main().then(() => raw.close()).catch(error => { console.error(error); raw.close(); process.exitCode = 1 })

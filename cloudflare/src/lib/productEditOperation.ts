@@ -14,7 +14,7 @@ type SqlStatement = { sql: string; params?: BindParams }
 type ProductRow = Record<string, string | number | null>
 type Direction = 'undo' | 'redo'
 type LinkedRow = { id: number; product_id: number; value: string | null }
-type ProductEditState = { rows: ProductRow[]; gallery: ProductRow[]; basis: SavedCatalogCostBasis; linked: Record<string, LinkedRow[]>; valuation?: ProductRow[] }
+type ProductEditState = { rows: ProductRow[]; gallery: ProductRow[]; basis: SavedCatalogCostBasis; linked: Record<string, LinkedRow[]>; valuation?: ProductRow[]; namespaces?: Array<{ key: string; rows: ProductRow[] }> }
 type ProductEditEffects = { ordinary_fields: string[]; money_fields: string[]; manual_cost: boolean; images: boolean; renamed_ids: number[] }
 type ProductEditReceipt = {
   version: 1; request_id: string; digest: string; product_id: number; actor_id: number; actor_name: string | null;
@@ -81,10 +81,18 @@ async function lookup(db: D1Compat, actorId: number, requestId: string): Promise
   return db.prepare(`SELECT id,status,payload_json,created_by_id FROM undo_snapshots WHERE kind='product.edit.v1' AND created_by_id=@actor AND json_extract(payload_json,'$.request_id')=@request`).get<SnapshotRow>({ actor: actorId, request: requestId })
 }
 const pointer = (id: number, generation: number) => ({ applier: PRODUCT_EDIT_KIND, operation_id: String(id), generation })
+async function assertOpenProductEditPending(env: Env, snapshotId: number, saved: ProductEditReceipt, pendingId: number | null, actorId: number, direction: 'save' | Direction, generation?: number): Promise<void> {
+  const row = await getDb(env).prepare('SELECT * FROM pending_actions WHERE id=@id').get<PendingActionRow>({ id: pendingId })
+  const pending = row && productEditPendingPointer(row)
+  if (!row || row.status !== 'open' || row.section !== 'products' || row.entity_type !== 'product' || row.entity_id !== saved.product_id || row.requested_by !== actorId || !pending || pending.operation_id !== String(snapshotId) || pending.direction !== direction || (direction === 'save' ? pending.digest !== saved.digest : pending.generation !== generation)) throw new ProductEditError('review_state_conflict', 'The original product request is no longer awaiting review.')
+}
 async function response(env: Env, row: SnapshotRow, user: SessionUser, replayed = false): Promise<Record<string, unknown>> {
   const saved = parse(row)
   authorize(user, saved.effects)
-  if (row.status === 'approval_pending') return { success: true, applied: false, pending: true, pendingActionId: saved.pending_id, operation_id: String(row.id), generation: saved.generation, replayed }
+  if (row.status === 'approval_pending') {
+    await assertOpenProductEditPending(env, row.id, saved, saved.pending_id, saved.actor_id, 'save')
+    return { success: true, applied: false, pending: true, pendingActionId: saved.pending_id, operation_id: String(row.id), generation: saved.generation, replayed }
+  }
   const db = getDb(env)
   const history = await db.prepare('SELECT * FROM action_history WHERE id=@id').get<Record<string, unknown>>({ id: saved.history_id })
   if (!history || history.entity_id !== String(saved.product_id) || Number(history.created_by_id) !== saved.actor_id) throw new ProductEditError('undo_history_unusable', 'The product edit history is unavailable.')
@@ -108,7 +116,7 @@ function rowJson(columns: string[], alias = 'p'): string {
 }
 const basisSql = (productId: number) => `COALESCE((SELECT json_object('kind','entry','original_entry_id',id,'cost_usd',cost_usd,'cost_khr',cost_khr,'baseline_batch_id',baseline_batch_id) FROM product_cost_entries WHERE product_id=${productId} ORDER BY id DESC LIMIT 1),json_object('kind','none'))`
 const valuationSql = `SELECT pb.id,pb.unit_cost_usd,pb.received_at,pb.is_active,bbs.branch_id,bbs.quantity FROM product_batches pb LEFT JOIN branch_batch_stock bbs ON bbs.batch_id=pb.id WHERE pb.variant_product_id=@product ORDER BY pb.id,bbs.branch_id`
-async function capture(env: Env, productId: number, ids: number[], renamedIds: number[]): Promise<ProductEditState> {
+async function capture(env: Env, productId: number, ids: number[], renamedIds: number[], targetNames: string[] = []): Promise<ProductEditState> {
   const db = getDb(env)
   const rows = await db.prepare('SELECT * FROM products WHERE id IN (SELECT value FROM json_each(@ids)) ORDER BY id').all<ProductRow>({ ids: json(ids) })
   if (rows.length !== ids.length) throw new ProductEditError('product_edit_state_conflict', 'A product is no longer available.')
@@ -119,19 +127,29 @@ async function capture(env: Env, productId: number, ids: number[], renamedIds: n
   if (renamedIds.length) for (const [table, productColumn, nameColumn] of nameRelations) {
     linked[`${table}.${nameColumn}`] = await db.prepare(`SELECT id,"${productColumn}" AS product_id,"${nameColumn}" AS value FROM "${table}" WHERE "${productColumn}" IN (SELECT value FROM json_each(@ids)) ORDER BY id`).all<LinkedRow>({ ids: json(renamedIds) })
   }
-  return { rows, gallery, basis: JSON.parse(basis!.value), linked, valuation }
+  const namespaces: Array<{ key: string; rows: ProductRow[] }> = []
+  if (renamedIds.length) {
+    const names = await db.prepare('SELECT DISTINCT lower(trim(value)) AS key FROM json_each(@names)').all<{ key: string }>({ names: json([...rows.map(row => row.name), ...targetNames]) })
+    for (const { key } of names) namespaces.push({ key, rows: await db.prepare('SELECT * FROM products WHERE name_key=@key AND is_active=1 ORDER BY id').all<ProductRow>({ key }) })
+  }
+  return { rows, gallery, basis: JSON.parse(basis!.value), linked, valuation, namespaces }
 }
 function stateGuards(state: ProductEditState, productId: number, columns: string[], images: boolean, money: boolean): SqlStatement[] {
   const statements = [guard(`NOT EXISTS (SELECT 1 FROM json_each(@rows) e WHERE NOT EXISTS (SELECT 1 FROM products p WHERE ${balanced(columns.map(column => `p."${column}" IS json_extract(e.value,'$.${column}')`))}))`, { rows: json(state.rows) })]
+  for (const namespace of state.namespaces || []) statements.push(guard(`(SELECT COUNT(*) FROM products WHERE name_key=@key AND is_active=1)=json_array_length(@rows) AND NOT EXISTS(SELECT 1 FROM json_each(@rows) e WHERE NOT EXISTS(SELECT 1 FROM products p WHERE ${balanced(columns.map(column => `p."${column}" IS json_extract(e.value,'$.${column}')`))}))`, { key: namespace.key, rows: json(namespace.rows) }))
   if (money) statements.push(guard(`NOT EXISTS(SELECT 1 FROM json_each(@basis) e WHERE json_extract(${basisSql(productId)},'$.'||e.key) IS NOT e.value)`, { basis: json(state.basis) }))
   if (money) statements.push(guard(`(SELECT COUNT(*) FROM (${valuationSql}))=json_array_length(@rows) AND NOT EXISTS(SELECT 1 FROM json_each(@rows) e WHERE NOT EXISTS(SELECT 1 FROM (${valuationSql}) actual WHERE ${balanced(['id','unit_cost_usd','received_at','is_active','branch_id','quantity'].map(key => `actual."${key}" IS json_extract(e.value,'$.${key}')`))}))`, { product: productId, rows: json(state.valuation || []) }))
   if (images) statements.push(guard(`(SELECT json_group_array(json_object('id',id,'product_id',product_id,'image_path',image_path,'sort_order',sort_order,'created_at',created_at)) FROM (SELECT * FROM product_images WHERE product_id=@id ORDER BY sort_order,id))=@gallery`, { id: productId, gallery: json(state.gallery) }))
   for (const [table, productColumn, nameColumn] of nameRelations) {
     const key = `${table}.${nameColumn}`
     if (!owns(state.linked, key)) continue
-    statements.push(guard(`NOT EXISTS(SELECT 1 FROM json_each(@rows) e WHERE NOT EXISTS(SELECT 1 FROM "${table}" r WHERE r.id=json_extract(e.value,'$.id') AND r."${productColumn}"=json_extract(e.value,'$.product_id') AND r."${nameColumn}" IS json_extract(e.value,'$.value')))`, { rows: json(state.linked[key]) }))
+    statements.push(guard(`(SELECT COUNT(*) FROM "${table}" WHERE "${productColumn}" IN (SELECT value FROM json_each(@ids)))=json_array_length(@rows) AND NOT EXISTS(SELECT 1 FROM json_each(@rows) e WHERE NOT EXISTS(SELECT 1 FROM "${table}" r WHERE r.id=json_extract(e.value,'$.id') AND r."${productColumn}"=json_extract(e.value,'$.product_id') AND r."${nameColumn}" IS json_extract(e.value,'$.value')))`, { rows: json(state.linked[key]), ids: json(state.rows.map(row => row.id)) }))
   }
   return statements
+}
+function linkedStateSql(renamedIds: number[]): string {
+  if (!renamedIds.length) return "json('{}')"
+  return `json_object(${nameRelations.flatMap(([table, productColumn, nameColumn]) => [`'${table}.${nameColumn}'`, `json((SELECT json_group_array(json_object('id',id,'product_id',"${productColumn}",'value',"${nameColumn}")) FROM (SELECT * FROM "${table}" WHERE "${productColumn}" IN (SELECT value FROM json_each(@ids)) ORDER BY id)))`]).join(',')})`
 }
 function galleryStatements(productId: number, gallery: string[]): SqlStatement[] {
   return [{ sql: 'DELETE FROM product_images WHERE product_id=@id', params: { id: productId } }, ...gallery.map((imagePath, sortOrder) => ({ sql: 'INSERT INTO product_images(product_id,image_path,sort_order) VALUES(@id,@path,@order)', params: { id: productId, path: imagePath, order: sortOrder } }))]
@@ -157,7 +175,7 @@ export async function commitProductEdit(env: Env, user: SessionUser, productId: 
   const moneyPlan = readProductMoneyPlan(body)
   const ids = moneyPlan?.group_rename ? moneyPlan.group_rename.members.map(row => Number(row.id)).sort((a, b) => a - b) : [productId]
   const renamedIds = owns(body, 'name') ? ids : []
-  const before = await capture(env, productId, ids, renamedIds)
+  const before = await capture(env, productId, ids, renamedIds, owns(body, 'name') ? [String(body.name)] : [])
   const original = before.rows.find(row => row.id === productId)!
   const effects: ProductEditEffects = {
     ordinary_fields: Object.keys(plan.payload).filter(key => !derivedFields.has(key) && !moneyFields.includes(key)),
@@ -177,7 +195,7 @@ export async function commitProductEdit(env: Env, user: SessionUser, productId: 
   statements.push(...stateGuards(before, productId, columns, effects.images, effects.manual_cost), ...plan.statements)
   if (owns(body, 'image_gallery')) statements.push(...galleryStatements(productId, validateProductImageGallery(body.image_gallery, 5)))
   for (const id of renamedIds) statements.push(...linkedStatements(before, id, String(body.name)))
-  statements.push({ sql: `UPDATE undo_snapshots SET payload_json=json_set(payload_json,'$.after',json_object('rows',json((SELECT json_group_array(json(r)) FROM (SELECT ${rowJson(columns)} r FROM products p WHERE id IN (SELECT value FROM json_each(@ids)) ORDER BY id))), 'basis',json(${basisSql(productId)}),'gallery',json((SELECT json_group_array(json_object('image_path',image_path,'sort_order',sort_order)) FROM (SELECT * FROM product_images WHERE product_id=@product ORDER BY sort_order,id))),'linked',json('{}'))) WHERE ${selector}`, params: { ...identityParams, ids: json(ids), product: productId } })
+  statements.push({ sql: `UPDATE undo_snapshots SET payload_json=json_set(payload_json,'$.after',json_object('rows',json((SELECT json_group_array(json(r)) FROM (SELECT ${rowJson(columns)} r FROM products p WHERE id IN (SELECT value FROM json_each(@ids)) ORDER BY id))), 'basis',json(${basisSql(productId)}),'gallery',json((SELECT json_group_array(json_object('image_path',image_path,'sort_order',sort_order)) FROM (SELECT * FROM product_images WHERE product_id=@product ORDER BY sort_order,id))),'linked',${linkedStateSql(renamedIds)})) WHERE ${selector}`, params: { ...identityParams, ids: json(ids), product: productId } })
   statements.push({ sql: `INSERT INTO action_history(scope,entity,entity_id,label,undo_label,redo_label,reversible,status,undo_payload,redo_payload,created_by_id,created_by_name)
     SELECT 'products','product',@product,'product.edit.v1','undo','redo',1,'undoable',json_object('applier','product.edit.v1','operation_id',CAST(id AS TEXT),'generation',0),json_object('applier','product.edit.v1','operation_id',CAST(id AS TEXT),'generation',0),@actor,@name FROM undo_snapshots WHERE ${selector}`, params: { ...identityParams, product: String(productId), name: actorSnapshot(user) } }, changedGuard())
   statements.push({ sql: `UPDATE undo_snapshots SET status='undoable',payload_json=json_set(payload_json,'$.history_id',last_insert_rowid()),updated_at=CURRENT_TIMESTAMP WHERE ${selector}`, params: identityParams })
@@ -252,6 +270,7 @@ export async function replayProductEdit(env: Env, user: SessionUser, operationId
     if (saved.pending_replay) {
       const pending = saved.pending_replay
       if (pending.direction !== direction || pending.generation !== expectedGeneration || pending.actor_id !== user.id) throw new ProductEditError('review_state_conflict', 'Another product replay is awaiting review.')
+      await assertOpenProductEditPending(env, snapshot.id, saved, pending.id, pending.actor_id, direction, pending.generation)
       return { complete: false, continuation_required: false, processed_children: 0, pending_children: 1, generation: saved.generation, pending: true, pendingActionId: pending.id, applied: false }
     }
     const payload = { _product_edit: { operation_id: operationId, direction, generation: expectedGeneration } }
@@ -266,7 +285,7 @@ export async function replayProductEdit(env: Env, user: SessionUser, operationId
   if (approval && (!saved.pending_replay || saved.pending_replay.id !== approval.row.id || saved.pending_replay.actor_id !== user.id || saved.pending_replay.direction !== direction || saved.pending_replay.generation !== expectedGeneration)) throw new ProductEditError('review_state_conflict', 'The product replay approval changed.')
   const target = direction === 'undo' ? saved.before : saved.after
   const ids = target.rows.map(row => Number(row.id))
-  const current = await capture(env, saved.product_id, ids, saved.effects.renamed_ids)
+  const current = await capture(env, saved.product_id, ids, saved.effects.renamed_ids, target.rows.map(row => String(row.name)))
   const columns = [...await tableColumns(env, 'products')]
   const nextGeneration = saved.generation + 1
   const nextStatus = direction === 'undo' ? 'redoable' : 'undoable'
