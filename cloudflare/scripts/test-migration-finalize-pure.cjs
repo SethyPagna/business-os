@@ -20,10 +20,11 @@ const assert = require('assert')
 const Module = require('module')
 const { openDb } = require('./harness/d1compat.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')
+const { loadStockLifecycleFixture, nativeStockFixtureBinding } = require('./harness/load_stock_lifecycle_fixture.cjs')
 
 const rawDbHandle = openDb(loadAll())
 const db = rawDbHandle
-const fakeEnv = { DB: db, ASSETS: null, CACHE: { get: async () => null, put: async () => {} } }
+const fakeEnv = { DB: nativeStockFixtureBinding(rawDbHandle.db, items => rawDbHandle.batch(items)), ASSETS: null, CACHE: { get: async () => null, put: async () => {} } }
 
 function transpile(relPath) {
   const sourcePath = path.join(__dirname, '..', 'src', relPath)
@@ -44,10 +45,9 @@ function loadReal(relPath, requireOverrides = {}) {
     return originalLoad.call(this, request, parent, isMain)
   }
   const moduleObj = { exports: {} }
-  new Function('exports', 'require', 'module', '__filename', '__dirname', outputText)(
+  try { new Function('exports', 'require', 'module', '__filename', '__dirname', outputText)(
     moduleObj.exports, require, moduleObj, sourcePath, path.dirname(sourcePath),
-  )
-  Module._load = originalLoad
+  ) } finally { Module._load = originalLoad }
   return moduleObj.exports
 }
 
@@ -70,7 +70,8 @@ const systemRoute = loadReal('routes/system.ts', {
   // which would make that cap undefined and slice(0, undefined) empty.
   '../lib/planTier': loadReal('lib/planTier.ts'),
   '../lib/actorSnapshot': actorSnapshotKernel,
-  '../lib/db': { getDb: () => db },
+  '../lib/db': loadStockLifecycleFixture('lib/db.ts'),
+  '../lib/stockLifecycle': loadStockLifecycleFixture(),
   '../lib/auth': { requireAuth: async (c, next) => { c.set('user', FAKE_USER); return next() } },
   '../lib/audit': { audit: async () => {} },
   '../lib/permissions': permissions,
@@ -87,7 +88,7 @@ const systemRoute = loadReal('routes/system.ts', {
   '../lib/importRetention': { cleanOrphanImportStaging: async () => ({ applied: false, tables: {}, r2Keys: 0 }) },
   '../lib/coreDataInvariants': loadReal('lib/coreDataInvariants.ts', {
     './customTableName': loadReal('lib/customTableName.ts'),
-    './db': { getDb: () => db },
+    './db': loadStockLifecycleFixture('lib/db.ts'),
     './sqlBinding': loadReal('lib/sqlBinding.ts', {}),
   }),
   '../lib/backup': {

@@ -22,23 +22,12 @@ const fs = require('node:fs')
 const path = require('node:path')
 const ts = require('typescript')
 const Database = require('better-sqlite3')
+const { loadStockLifecycleFixture, nativeStockFixtureBinding } = require('./harness/load_stock_lifecycle_fixture.cjs')
 
 let sqlite
 let waits = []
 let user = { id: 7, name: 'Operator', permissions: JSON.stringify({ inventory: true, product_cost_edit: true, product_cost_view: true }) }
 const modules = new Map()
-
-function wrapDb() {
-  return {
-    prepare(sql) {
-      const statement = sqlite.prepare(sql)
-      return Object.fromEntries(['get', 'all', 'run'].map((method) => [method, async (params) => Array.isArray(params) ? statement[method](...params) : statement[method](params || {})]))
-    },
-    async batch(statements) {
-      return sqlite.transaction(() => statements.map(({ sql, params }) => sqlite.prepare(sql).run(params || {})))()
-    },
-  }
-}
 
 // Everything under lib/ is loaded for real (transpiled from source); only
 // the small set of side-effecting externals below are stubbed.
@@ -50,9 +39,9 @@ function load(relative) {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
   }).outputText
   new Function('exports', 'require', 'module', code)(module.exports, (id) => {
-    if (id === 'hono') return require('hono')
+    if (id === 'hono' || id === 'hono/http-exception') return require(id)
     const name = id.split('/').at(-1)
-    if (name === 'db') return { ...load('lib/db.ts'), getDb: wrapDb }
+    if (['db', 'importMaintenanceFence', 'stockLifecycle'].includes(name)) return loadStockLifecycleFixture(`lib/${name}.ts`)
     if (name === 'auth') return { requireAuth: async (c, next) => { c.set('user', user); return next() } }
     if (name === 'broadcastHub') return { broadcast: async () => {} }
     if (name === 'cache') return { bumpVersion: async () => {} }
@@ -61,14 +50,17 @@ function load(relative) {
       const resolved = id.startsWith('../lib/') ? `lib/${name}.ts` : `lib/${name}.ts`
       if (fs.existsSync(path.join(__dirname, '../src', resolved))) return load(resolved)
     }
-    return new Proxy({}, { get: (_target, property) => () => { throw new Error(`Unexpected dependency ${id}.${String(property)}`) } })
+    throw new Error(`Unexpected dependency ${id}`)
   }, module)
   modules.set(relative, module.exports)
   return module.exports
 }
 
 const inventory = load('routes/inventory.ts').default
-inventory.onError((error, c) => c.json({ error: error.message }, 500))
+inventory.onError((error, c) => {
+  const refusal = loadStockLifecycleFixture().stockLifecycleRefusal(error)
+  return refusal ? c.json({ success: false, ...refusal }, 409) : c.json({ error: error.message }, 500)
+})
 
 function fresh() {
   sqlite = new Database(':memory:')
@@ -81,7 +73,7 @@ function fresh() {
 }
 
 async function request(body) {
-  const response = await inventory.request('/adjust', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, {}, {
+  const response = await inventory.request('/adjust', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, { DB: nativeStockFixtureBinding(sqlite) }, {
     waitUntil: (promise) => { waits.push(Promise.resolve(promise)) }, passThroughOnException: () => {},
   })
   await Promise.all(waits.splice(0))
