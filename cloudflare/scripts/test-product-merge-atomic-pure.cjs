@@ -43,7 +43,7 @@ function linkedStockSnapshot(native) {
   return encode([schema, tables])
 }
 async function verifyLinkedMergeLifecycle() {
-  for (const kind of ['disposition', 'funding']) {
+  for (const kind of ['disposition', 'funding']) for (const linkedSide of ['keeper', 'duplicate']) {
     const fixture = linkedStockFixture(kind)
     try {
       const undo = loadUndoAppliers(fixture.d1)
@@ -51,6 +51,10 @@ async function verifyLinkedMergeLifecycle() {
         keeperImagePathBefore: null, dupImagePathBefore: null, keeperStockBefore: [], dupStockBefore: [],
         dupImagesBefore: [], imagesMovedToKeeper: [], repointedBatches: [], foldedBatches: [],
         reparentedSaleItemIds: [], reparentedMovementIds: [], adjustmentMovementIds: [] }
+      if (linkedSide === 'duplicate') {
+        ;[reversal.keeperId, reversal.dupId] = [reversal.dupId, reversal.keeperId]
+        ;[reversal.keeperName, reversal.dupName] = [reversal.dupName, reversal.keeperName]
+      }
       const recorded = await undo.recordMergeUndoSnapshot({}, { id: 101, username: 'fixture-owner' }, reversal)
       const payload = { applier: 'product.merge', snapshot_id: recorded.snapshotId }
       const applier = undo.resolveUndoApplier(payload)
@@ -68,7 +72,7 @@ async function verifyLinkedMergeLifecycle() {
       const db = loadStockLifecycleFixture('lib/db.ts').getDb({ DB: nativeStockFixtureBinding(fixture.native, statements => fixture.d1.batch(statements)) })
       await loadStockLifecycleFixture().assertStockLifecycleMutable(db, { productId: 92 })
       await loadStockLifecycleFixture().assertStockLifecycleMutable(db, { productId: 91, branchId: 8 })
-      console.log('PASS actual ' + kind + ' linked merge replay refuses before effects; unrelated scopes remain allowed')
+      console.log('PASS actual ' + kind + ' linked ' + linkedSide + ' merge replay refuses before effects; unrelated scopes remain allowed')
     } finally { fixture.native.close() }
   }
 }
