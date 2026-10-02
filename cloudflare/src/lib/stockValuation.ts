@@ -158,7 +158,7 @@ async function checkedHistory(db: D1Compat, source: unknown) {
     try { return await validateValuationHistory(db, identity(source), { parseRequest: parseValuationRequest, parseAmounts: parseAttributedAmounts, planPhysical: planPhysicalSegments }); }
     catch (error) { return refuse(error instanceof Error && error.message === 'valuation_history_limit' ? 'valuation_history_limit' : 'valuation_history_corrupt'); }
 }
-export async function commitStockValuation(env: {
+export async function planStockValuation(env: {
     DB: D1Database;
     IMPORT_DB?: D1Database;
 }, actor: SessionUser, input: unknown) {
@@ -170,7 +170,7 @@ export async function commitStockValuation(env: {
     const history = await checkedHistory(db, sourceId);
     const cached = await replay(db, actor, request, digest, requestJson);
     if (cached)
-        return cached;
+        return { replay: cached };
     const at = new Date().toISOString(), event = crypto.randomUUID(), token = `${request}:valuation`, params: Record<string, unknown> = { source: sourceId, actor: actor.id, event, revision, nextRevision: kind === 'admit' ? 0 : revision + 1, kind, at, token, request, digest, requestJson };
     const statements: Statement[] = [...history.guards], assertSql = (condition: string) => statements.push({ sql: `SELECT CASE WHEN (${condition}) THEN 1 ELSE json_extract('[1]','$[valuation_assertion_failed]') END`, params });
     const latest = await db.prepare('SELECT id,revision FROM stock_valuation_latest WHERE source_id=@source').get<{
@@ -329,16 +329,23 @@ export async function commitStockValuation(env: {
     assertSql('NOT EXISTS(SELECT 1 FROM stock_valuation_context WHERE token=@token) AND NOT EXISTS(SELECT 1 FROM stock_valuation_guards WHERE token=@token)');
     try { assertValuationHistoryCapacity(history, kind, segments.length, shares.length, statements.length); }
     catch { return refuse('valuation_history_limit'); }
+    return { statements, response, request, digest, requestJson, cash: ['refund', 'payment', 'shipping'].includes(kind) };
+}
+
+export async function commitStockValuation(env: { DB: D1Database; IMPORT_DB?: D1Database }, actor: SessionUser, input: unknown) {
+    const plan = await planStockValuation(env, actor, input);
+    if ('replay' in plan) return plan.replay;
+    const db = getDb(env);
     try {
-        await ordinaryBusinessBatch(db, statements);
+        await ordinaryBusinessBatch(db, plan.statements);
     }
     catch {
-        await currentFundingActor(db, actor, ['refund', 'payment', 'shipping'].includes(kind));
-        const saved = await replay(db, actor, request, digest, requestJson);
+        await currentFundingActor(db, actor, plan.cash);
+        const saved = await replay(db, actor, plan.request, plan.digest, plan.requestJson);
         if (saved)
             return saved;
         return refuse('valuation_atomic_conflict');
     }
-    await currentFundingActor(db, actor, ['refund', 'payment', 'shipping'].includes(kind));
-    return { ...response, replayed: false };
+    await currentFundingActor(db, actor, plan.cash);
+    return { ...plan.response, replayed: false };
 }

@@ -131,4 +131,47 @@ async function repairedSale() {
     console.log('PASS repaired share ordinary checkout captures exact basis in one transaction')
   } finally {f.db.close()}
 }
-(async()=>{await otherLot();await repairedSale()})().catch(error=>{console.error(error);process.exitCode=1})
+function consumptionMath() {
+  const { planValuationSaleSegments, applyValuationCoverage, valuationTotals }=load('lib/stockValuationMath.ts')
+  const original=[
+    {segment_id:'original',allocation_id:'original',fate:'sellable',quantity:'2',gross4:500000,coverage4:0,loss4:0,recovery4:0,reason:''},
+    {segment_id:'disposed',allocation_id:'affected',fate:'disposed',quantity:'1',gross4:250000,coverage4:150000,loss4:250000,recovery4:150000,reason:'broken'},
+    {segment_id:'repaired',allocation_id:'affected',fate:'sellable',quantity:'1',gross4:250000,coverage4:150000,loss4:0,recovery4:0,reason:''},
+  ]
+  const saved=JSON.stringify(original)
+  for(const credit of [50000,100000]) {
+    let segments=planValuationSaleSegments(original,{kind:'consume',segment_id:'repaired',child_segment_id:'consumed',quantity:1,consumption_id:'sale-link'})
+    let totals=valuationTotals(segments,1000000,'4',4)
+    assert.equal(totals.consumed_cost4,100000)
+    assert.equal(totals.consumed_recovery4,0)
+    segments=segments.map(segment=>segment.segment_id==='consumed'?applyValuationCoverage(segment,credit):segment)
+    totals=valuationTotals(segments,1000000,'4',4)
+    assert.equal(totals.consumed_cost4-totals.consumed_recovery4,100000-credit)
+    assert.equal(totals.historical_loss4,250000)
+    assert.equal(totals.recovery4,150000)
+    segments=planValuationSaleSegments(segments,{kind:'restore',segment_id:'consumed',quantity:1,consumption_id:'sale-link'})
+    totals=valuationTotals(segments,1000000,'4',4)
+    assert.equal(totals.consumed_cost4,0)
+    assert.equal(totals.consumed_recovery4,0)
+    assert.equal(totals.sellable_net4,600000-credit)
+    assert.throws(()=>planValuationSaleSegments(segments,{kind:'restore',segment_id:'consumed',quantity:1,consumption_id:'sale-link'}))
+    segments=planValuationSaleSegments(segments,{kind:'reconsume',segment_id:'consumed',quantity:1,consumption_id:'sale-link'})
+    totals=valuationTotals(segments,1000000,'4',4)
+    assert.equal(totals.consumed_cost4,100000-credit)
+    assert.equal(totals.consumed_recovery4,0)
+    assert.equal(totals.historical_loss4,250000)
+    assert.equal(totals.recovery4,150000)
+  }
+  assert.equal(JSON.stringify(original),saved)
+  for(const [quantity,gross4,takes] of [['3',70001,['1','1','1']],['0.3',99999,['0.1','0.1','0.1']]]) {
+    let segments=[{segment_id:'pool',allocation_id:'pool',fate:'sellable',quantity,gross4,coverage4:0,loss4:0,recovery4:0,reason:''}]
+    for(const [index,take] of takes.entries()) segments=planValuationSaleSegments(segments,{kind:'consume',segment_id:'pool',child_segment_id:`take-${index}`,quantity:take,consumption_id:`link-${index}`})
+    const totals=valuationTotals(segments,gross4,quantity,4)
+    assert.equal(totals.consumed_cost4,gross4)
+    assert.equal(totals.sellable_quantity,'0')
+    assert.equal(totals.consumed_quantity,quantity)
+  }
+  assert.notEqual(23334*3,70001,'four-decimal unit snapshots cannot replace exact captured line cost')
+  console.log('PASS exact consumed10 credit5/10 restore5/0 reconsume5/0; disposed history unchanged')
+}
+(async()=>{consumptionMath();if(process.env.STOCK_CONSUMPTION_SECTION!=='math'){await otherLot();await repairedSale()}})().catch(error=>{console.error(error);process.exitCode=1})
