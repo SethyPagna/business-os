@@ -7,7 +7,7 @@
 // per supplier. Owner: "when revert, edit, etc, for stockin, I want you to
 // make it also edit automatically in the contacts supplier".
 //
-// The writers are the REAL modules compiled from source (tsc emit of
+// The writers are the REAL modules transpiled from source (
 // lib/stockRevert.ts + lib/stockActionCommit.ts and their import graphs;
 // lib/stockSession.ts through the shared session fixture), driven against the
 // REAL migration chain. The readers are the REAL SQL extracted verbatim from
@@ -42,11 +42,44 @@
 //
 // Run: node scripts/test-supplier-mirror-writers-pure.cjs
 const assert = require('node:assert/strict')
-const { execSync } = require('node:child_process')
 const fs = require('node:fs')
-const os = require('node:os')
 const path = require('node:path')
 
+const { loadStockLifecycleFixture, nativeStockFixtureBinding } = require('./harness/load_stock_lifecycle_fixture.cjs')
+
+function linkedStockFixture(kind) {
+  const d1 = require('./harness/d1compat.cjs').openDb(require('./harness/load_migrations.cjs').loadAll())
+  const native = d1.db
+  native.exec(`
+    INSERT INTO branches(id,name,is_active,is_default) VALUES(9,'Shop',1,1);
+    INSERT INTO users(id,username,name,password,permissions,is_active) VALUES(101,'fixture-owner','Owner','admin123','{"products":true,"inventory":true}',1);
+    INSERT INTO suppliers(id,name) VALUES(31,'Pinned supplier');
+    INSERT INTO products(id,name,barcode,stock_quantity,is_active) VALUES(91,'Pinned stock','GUARD91',3,1),(92,'Unlinked product','GUARD92',0,0);
+    INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at,is_active,batch_number,supplier_id,supplier_name,payment_status,received_quantity,received_cost_usd,received_branch_id,unit_cost_usd)
+      VALUES(951,91,'GUARD951','GUARD951','2026-10-01',1,1,31,'Pinned supplier','credit',3,7.0001,9,2.3334);
+    INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(951,9,3);
+    INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(91,9,3);
+    INSERT INTO inventory_movements(id,product_id,branch_id,batch_id,movement_type,quantity,free_quantity,total_cost_usd,reference_id,user_id)
+      VALUES(991,91,9,951,'add',3,0.5,7.0001,'fixture-real-source',101);
+  `)
+  if (kind === 'disposition') native.exec("INSERT INTO stock_disposition_sources(id,movement_id,batch_id,product_id,branch_id,supplier_id,quantity,free_quantity,gross4,opening_paid4,opening_debt4,funding_state) VALUES('source-disposition',991,951,91,9,31,'3','0.5',70001,0,70001,'reconciled_unpaid')")
+  else native.exec("INSERT INTO stock_funding_sources(id,movement_id,batch_id,product_id,branch_id,supplier_id,quantity,free_quantity,gross4,opening_paid4,opening_debt4,reconciliation_proof,actor_id,source_json) VALUES('source-funding',991,951,91,9,31,'3','0.5',70001,40000,30001,'fixture trusted opening',101,'{}'); INSERT INTO stock_funding_events(id,source_id,generation,kind,amount4,gross4,paid4,debt4,credit4,asset4,cash_in4,cash_out4,shipping4,proof,actor_id,occurred_at) VALUES('funding-admit','source-funding',0,'admit',0,70001,40000,30001,0,0,0,0,0,'fixture trusted opening',101,'2026-10-01T00:00:00Z')")
+  return { d1, native }
+}
+
+function linkedStockSnapshot(native) {
+  const encode = value => JSON.stringify(value, (_, cell) => typeof cell === 'bigint' ? { integer64: String(cell) }
+    : ArrayBuffer.isView(cell) ? { blob: Buffer.from(cell.buffer, cell.byteOffset, cell.byteLength).toString('hex') } : cell)
+  const schema = native.prepare('SELECT type,name,tbl_name,sql FROM sqlite_master ORDER BY type,name').all()
+  const quote = value => '"' + value.replaceAll('"', '""') + '"'
+  const tables = schema.filter(row => row.type === 'table').map(({ name }) => {
+    const columns = native.prepare('PRAGMA table_info(' + quote(name) + ')').all()
+    const probes = columns.map(column => 'typeof(' + quote(column.name) + ') AS ' + quote('__stock_type_' + column.name))
+    const rows = native.prepare('SELECT *' + (probes.length ? ',' + probes.join(',') : '') + ' FROM ' + quote(name)).all().map(encode).sort()
+    return [name, columns, rows]
+  })
+  return encode([schema, tables])
+}
 const cloudflareRoot = path.join(__dirname, '..')
 const { openDb } = require('./harness/d1compat.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')
@@ -60,27 +93,9 @@ function ok(cond, label) {
 }
 
 // ---- compile the real writers ----------------------------------------------
-const tscVersion = execSync('npx tsc --version', { cwd: cloudflareRoot, encoding: 'utf8' }).trim()
-const ignoreConfigFlag = /^Version\s+(?:[6-9]|\d{2,})\./.test(tscVersion) ? ' --ignoreConfig' : ''
-const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'supplier-mirror-'))
-try {
-  execSync(
-    `npx tsc "${path.join(cloudflareRoot, 'src', 'lib', 'stockRevert.ts')}" "${path.join(cloudflareRoot, 'src', 'lib', 'stockActionCommit.ts')}" ` +
-      `--outDir "${tmpDir}" --rootDir "${path.join(cloudflareRoot, 'src', 'lib')}" ` +
-      `--module commonjs --target es2022 --moduleResolution node --esModuleInterop --skipLibCheck --noEmitOnError false${ignoreConfigFlag}`,
-    { cwd: cloudflareRoot, stdio: 'pipe' },
-  )
-} catch (err) {
-  // Cloudflare-only TYPES make the standalone compile exit non-zero; the
-  // emitted JS is still correct (see test-stock-revert-pure.cjs).
-  if (!fs.existsSync(path.join(tmpDir, 'stockRevert.js')) || !fs.existsSync(path.join(tmpDir, 'stockActionCommit.js'))) {
-    console.error('tsc did not emit the writers:', String(err && err.stdout || err))
-    throw err
-  }
-}
-const stockRevert = require(path.join(tmpDir, 'stockRevert.js'))
-const productBatches = require(path.join(tmpDir, 'productBatches.js'))
-const stockActionCommit = require(path.join(tmpDir, 'stockActionCommit.js'))
+const stockRevert = loadStockLifecycleFixture('lib/stockRevert.ts')
+const productBatches = loadStockLifecycleFixture('lib/productBatches.ts')
+const stockActionCommit = loadStockLifecycleFixture('lib/stockActionCommit.ts')
 ok(typeof stockRevert.applyMovementRevert === 'function' && typeof productBatches.receiveBatchStock === 'function'
   && typeof stockActionCommit.applyUnifiedStockAdd === 'function', 'real writers compiled')
 
@@ -374,5 +389,26 @@ function readers(sql) {
   assert.deepEqual(readAll(), gone, 'W8: level 3 -> gone again, no phantom line')
   ok(true, 'W8 revert-of-revert restores the purchase under the same supplier on all four readers; a third revert removes it again')
 
+
+  for (const kind of ['disposition', 'funding']) {
+    const f = linkedStockFixture(kind)
+    try {
+      let batches = 0
+      const binding = nativeStockFixtureBinding(f.native, stmts => { batches += 1; return f.d1.batch(stmts) })
+      const actualDb = loadStockLifecycleFixture('lib/db.ts').getDb({ DB: binding })
+      const lifecycle = loadStockLifecycleFixture(), before = linkedStockSnapshot(f.native)
+      const movement = { ...f.native.prepare('SELECT * FROM inventory_movements WHERE id=991').get() }
+      const refused = await stockRevert.applyMovementRevert(actualDb, movement, { userId: 101, userName: 'fixture-owner' })
+      assert.equal(refused.ok, false)
+      assert.equal(refused.status, 409, JSON.stringify(refused))
+      assert.equal(refused.code, 'stock_lifecycle_dependency')
+      assert.equal(batches, 0, 'actual lifecycle refusal precedes any mutation batch, rather than relying on a late trigger')
+      assert.equal(linkedStockSnapshot(f.native), before)
+      await assert.rejects(() => lifecycle.assertStockLifecycleMutable(actualDb, { movementId: 991 }), error => error instanceof require('hono/http-exception').HTTPException && error.status === 409)
+      await lifecycle.assertStockLifecycleMutable(actualDb, { productId: 92 })
+      assert.equal(loadStockLifecycleFixture('lib/db.ts').getImportFencedDb, loadStockLifecycleFixture('lib/importMaintenanceFence.ts').getImportFencedDb)
+      ok(true, 'actual ' + kind + ' source refuses revert before writes; unrelated product remains mutable')
+    } finally { f.native.close() }
+  }
   console.log(`\nAll ${checks} supplier-mirror writer checks passed`)
 })().catch((err) => { console.error(err); process.exitCode = 1 })

@@ -24,6 +24,42 @@ const ts = require('typescript')
 // Load the actual dependency before any permissive per-module shim is active.
 const moneyPrecision = require('../src/lib/moneyPrecision.ts')
 const assert = require('assert')
+const { loadStockLifecycleFixture, nativeStockFixtureBinding } = require('./harness/load_stock_lifecycle_fixture.cjs')
+const replayEffectCalls = []
+
+function linkedStockFixture(kind) {
+  const d1 = require('./harness/d1compat.cjs').openDb(require('./harness/load_migrations.cjs').loadAll())
+  const native = d1.db
+  native.exec(`
+    INSERT INTO branches(id,name,is_active,is_default) VALUES(9,'Shop',1,1);
+    INSERT INTO users(id,username,name,password,permissions,is_active) VALUES(101,'fixture-owner','Owner','admin123','{"products":true,"inventory":true}',1);
+    INSERT INTO suppliers(id,name) VALUES(31,'Pinned supplier');
+    INSERT INTO products(id,name,barcode,stock_quantity,is_active) VALUES(91,'Pinned stock','GUARD91',3,1),(92,'Unlinked product','GUARD92',0,0);
+    INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at,is_active,batch_number,supplier_id,supplier_name,payment_status,received_quantity,received_cost_usd,received_branch_id,unit_cost_usd)
+      VALUES(951,91,'GUARD951','GUARD951','2026-10-01',1,1,31,'Pinned supplier','credit',3,7.0001,9,2.3334);
+    INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(951,9,3);
+    INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(91,9,3);
+    INSERT INTO inventory_movements(id,product_id,branch_id,batch_id,movement_type,quantity,free_quantity,total_cost_usd,reference_id,user_id)
+      VALUES(991,91,9,951,'add',3,0.5,7.0001,'fixture-real-source',101);
+  `)
+  if (kind === 'disposition') native.exec("INSERT INTO stock_disposition_sources(id,movement_id,batch_id,product_id,branch_id,supplier_id,quantity,free_quantity,gross4,opening_paid4,opening_debt4,funding_state) VALUES('source-disposition',991,951,91,9,31,'3','0.5',70001,0,70001,'reconciled_unpaid')")
+  else native.exec("INSERT INTO stock_funding_sources(id,movement_id,batch_id,product_id,branch_id,supplier_id,quantity,free_quantity,gross4,opening_paid4,opening_debt4,reconciliation_proof,actor_id,source_json) VALUES('source-funding',991,951,91,9,31,'3','0.5',70001,40000,30001,'fixture trusted opening',101,'{}'); INSERT INTO stock_funding_events(id,source_id,generation,kind,amount4,gross4,paid4,debt4,credit4,asset4,cash_in4,cash_out4,shipping4,proof,actor_id,occurred_at) VALUES('funding-admit','source-funding',0,'admit',0,70001,40000,30001,0,0,0,0,0,'fixture trusted opening',101,'2026-10-01T00:00:00Z')")
+  return { d1, native }
+}
+
+function linkedStockSnapshot(native) {
+  const encode = value => JSON.stringify(value, (_, cell) => typeof cell === 'bigint' ? { integer64: String(cell) }
+    : ArrayBuffer.isView(cell) ? { blob: Buffer.from(cell.buffer, cell.byteOffset, cell.byteLength).toString('hex') } : cell)
+  const schema = native.prepare('SELECT type,name,tbl_name,sql FROM sqlite_master ORDER BY type,name').all()
+  const quote = value => '"' + value.replaceAll('"', '""') + '"'
+  const tables = schema.filter(row => row.type === 'table').map(({ name }) => {
+    const columns = native.prepare('PRAGMA table_info(' + quote(name) + ')').all()
+    const probes = columns.map(column => 'typeof(' + quote(column.name) + ') AS ' + quote('__stock_type_' + column.name))
+    const rows = native.prepare('SELECT *' + (probes.length ? ',' + probes.join(',') : '') + ' FROM ' + quote(name)).all().map(encode).sort()
+    return [name, columns, rows]
+  })
+  return encode([schema, tables])
+}
 const Database = require('better-sqlite3')
 
 // --- load real TS modules with a controlled require shim -------------------
@@ -38,28 +74,18 @@ function transpile(relPath) {
 
 function loadModule(relPath, requireShim) {
   const module = { exports: {} }
-  new Function('exports', 'require', 'module', transpile(relPath))(module.exports, (request) => ['./moneyPrecision', '../lib/moneyPrecision', './moneyPrecision.ts', '../lib/moneyPrecision.ts'].includes(request) ? moneyPrecision : requireShim(request), module)
+  new Function('exports', 'require', 'module', transpile(relPath))(module.exports, (request) => request === './stockLifecycle' ? loadStockLifecycleFixture() : ['./moneyPrecision', '../lib/moneyPrecision', './moneyPrecision.ts', '../lib/moneyPrecision.ts'].includes(request) ? moneyPrecision : requireShim(request), module)
   return module.exports
-}
-
-// toDbBool copied from lib/db.ts (verbatim) -- branchWrites imports only this
-// one symbol from the heavy db module, so stub the rest of db out.
-function toDbBool(value, fallback = 1) {
-  if (value == null || value === '') return fallback
-  if (typeof value === 'boolean') return value ? 1 : 0
-  if (typeof value === 'number') return value ? 1 : 0
-  const normalized = String(value).trim().toLowerCase()
-  return ['1', 'true', 'yes', 'on'].includes(normalized) ? 1 : 0
 }
 
 const branchRoles = loadModule('lib/branchRoles.ts', require)
 const canonicalBranchIdentity = loadModule('lib/canonicalBranchIdentity.ts', (id) => {
-  if (id === './db') return { toDbBool }
+  if (id === './db') return loadStockLifecycleFixture('lib/db.ts')
   if (id === './branchRoles') return branchRoles
   return require(id)
 })
 const branchWrites = loadModule('lib/branchWrites.ts', (id) => {
-  if (id === './db') return { toDbBool }
+  if (id === './db') return loadStockLifecycleFixture('lib/db.ts')
   if (id === './canonicalBranchIdentity') return canonicalBranchIdentity
   return require(id)
 })
@@ -71,6 +97,7 @@ const { branchUpdateStatements } = branchWrites
 // no-ops (the applier composes them; the test asserts the DB effect, not the
 // side channels, which have their own coverage).
 let sharedDb = null
+let sharedNativeBatch = null
 let settlementReplayCalls = 0
 let exerciseAtomicSaleItems = false
 let failAtomicAllocation = false
@@ -96,7 +123,7 @@ function wrapDb(sqlite) {
           const st = sqlite.prepare(s.sql)
           const invoke = (method) => s.params == null
             ? st[method]()
-            : Array.isArray(s.params) ? st[method](...s.params) : st[method](s.params)
+            : Array.isArray(s.params) ? require('./harness/sqlite_d1_bindings.cjs').sqliteD1Call(st, method, s.params) : st[method](s.params)
           if (st.reader) return { results: invoke('all') }
           const result = invoke('run')
           return { results: [], changes: result.changes, meta: { changes: result.changes } }
@@ -167,9 +194,9 @@ const undoAppliers = loadModule('lib/undoAppliers.ts', (id) => {
       assert.strictEqual(payload.operation_id, 'settlement-op-1')
     },
   }
-  if (id === './db') return { getDb: () => wrapDb(sharedDb) }
-  if (id === './audit') return { audit: async () => {} }
-  if (id === '../durable-objects/broadcastHub') return { broadcast: async () => {} }
+  if (id === './db') return { ...loadStockLifecycleFixture('lib/db.ts'), getDb: () => loadStockLifecycleFixture('lib/db.ts').getDb({ DB: nativeStockFixtureBinding(sharedDb, stmts => sharedNativeBatch ? sharedNativeBatch(stmts) : wrapDb(sharedDb).batch(stmts)) }) }
+  if (id === './audit') return { audit: async () => { replayEffectCalls.push('audit') } }
+  if (id === '../durable-objects/broadcastHub') return { broadcast: async () => { replayEffectCalls.push('broadcast') } }
   if (id === './branchWrites') return branchWrites
   // undoAppliers now derives an applier's effective tier through permissions
   // (getActionTier for action-gated appliers like product.merge, else
@@ -941,6 +968,37 @@ await check('source lock: routes/actionHistory.ts stamps server_replayable and r
   assert.ok(refusalAt < statusFlipAt, 'the require_applied refusal must run before the status flip')
 })
 
+
+for (const kind of ['disposition', 'funding']) {
+  await check('actual ' + kind + ' source refuses authoritative merge undo before effects', async () => {
+    const f = linkedStockFixture(kind)
+    const prior = sharedDb, priorBatch = sharedNativeBatch
+    sharedDb = f.native
+    sharedNativeBatch = stmts => f.d1.batch(stmts)
+    try {
+      const reversal = { keeperId: 91, keeperName: 'Pinned stock', dupId: 92, dupName: 'Unlinked product',
+        keeperImagePathBefore: null, dupImagePathBefore: null, keeperStockBefore: [], dupStockBefore: [],
+        dupImagesBefore: [], imagesMovedToKeeper: [], repointedBatches: [], foldedBatches: [],
+        reparentedSaleItemIds: [], reparentedMovementIds: [], adjustmentMovementIds: [] }
+      const rec = await undoAppliers.recordMergeUndoSnapshot({}, { id: 101, username: 'fixture-owner' }, reversal)
+      const payload = { applier: 'product.merge', snapshot_id: rec.snapshotId }
+      const applier = resolveUndoApplier(payload), lifecycle = loadStockLifecycleFixture()
+      const before = linkedStockSnapshot(f.native), effectsBefore = [...replayEffectCalls]
+      await assert.rejects(() => applier.run(payload, { env: {}, user: { id: 101, username: 'fixture-owner' }, direction: 'undo' }), error => {
+        assert.equal(error instanceof require('hono/http-exception').HTTPException, true)
+        assert.equal(error.status, 409)
+        return error.code === 'stock_lifecycle_dependency'
+      })
+      assert.equal(linkedStockSnapshot(f.native), before)
+      assert.deepEqual(replayEffectCalls, effectsBefore)
+      const db = loadStockLifecycleFixture('lib/db.ts').getDb({ DB: nativeStockFixtureBinding(f.native, stmts => f.d1.batch(stmts)) })
+      await lifecycle.assertStockLifecycleMutable(db, { productId: 92 })
+      const permissions = loadStockLifecycleFixture('lib/permissions.ts')
+      assert.equal(permissions.getActionTier({ permissions: '{"products":true}' }, applier.permission, applier.action), 'full')
+      assert.equal(permissions.getActionTier({ permissions: '{"products":true,"products:merge_duplicates":false}' }, applier.permission, applier.action), 'none')
+    } finally { sharedDb = prior; sharedNativeBatch = priorBatch; f.native.close() }
+  })
+}
 }
 
 main().then(() => {
