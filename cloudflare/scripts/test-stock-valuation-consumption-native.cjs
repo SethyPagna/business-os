@@ -413,7 +413,8 @@ async function replayPermissions() {
     console.log('PASS checkout/status lost response, exact intent replay, current permission recheck and no-cost cashier disclosure')
   } finally {actor=originalActor;f.db.close()}
 }
-async function newReceiptAfterCancel() {
+async function historicalAncestralEntitlement() {
+  console.log('HISTORICAL SUPERSEDED POLICY: permanent ancestral entitlement was rejected by the 2026-10-02 council; this is not current acceptance')
   const f=await soldFixture()
   try {
     const consumed=f.db.prepare('SELECT segment_id FROM stock_valuation_sale_links').get()
@@ -454,6 +455,120 @@ async function newReceiptAfterCancel() {
     await assertCostProjection(f,newItem.id,20000,0)
     assert.deepEqual(f.db.prepare('SELECT cost_price_usd FROM sale_items ORDER BY id').all().map(row=>row.cost_price_usd),[10,5,3])
     assert.equal(f.db.prepare("SELECT credit4 FROM stock_funding_latest WHERE source_id='fund-900'").get().credit4,380000)
+  } finally {f.db.close()}
+}
+async function unidentifiedBatchAdmission() {
+  const f=fixture()
+  try {
+    f.db.exec("UPDATE products SET stock_quantity=2,cost_price_usd=10 WHERE id=10;UPDATE product_batches SET received_quantity=2,received_cost_usd=20,unit_cost_usd=10 WHERE id=500;UPDATE branch_batch_stock SET quantity=2 WHERE batch_id=500;UPDATE branch_stock SET quantity=2 WHERE product_id=10;UPDATE inventory_movements SET quantity=1,free_quantity=0,total_cost_usd=10 WHERE id=900;INSERT INTO inventory_movements(id,product_id,branch_id,batch_id,movement_type,quantity,free_quantity,total_cost_usd,reference_id,user_id) VALUES(901,10,1,500,'add',1,0,10,'unadmitted-second-receipt',71)")
+    const before=businessState(f),body=valuation('admit',0,0,{funding:{movement_id:900,batch_id:500,product_id:10,branch_id:1,supplier_id:77,quantity:1,free_quantity:0,gross_usd:10,opening_paid_usd:10,opening_debt_usd:0,reconciliation_proof:'Only X is identified; Y source is not admitted',invoice_id:null}})
+    const response=await call(f,inventory,'/valuation-experiment',body)
+    assert.equal(response.status,409,JSON.stringify(response))
+    assert.equal(response.data.code,'funding_source_identity_or_shared_receipt')
+    assert.equal(businessState(f),before)
+    console.log('PASS actual shared-batch unidentified-Y admission refuses atomically; this is the upstream admission boundary, NOT an uncancel-selection certificate')
+  } finally {f.db.close()}
+}
+async function currentAssignmentXY(variant='available') {
+  const f=fixture()
+  const currentSegments=()=>f.db.prepare("SELECT s.* FROM stock_valuation_history_segments s JOIN stock_valuation_latest e ON e.id=s.event_id WHERE e.source_id='fund-900' ORDER BY s.segment_id").all()
+  const immutableTables=['stock_valuation_history_events','stock_valuation_history_segments','stock_valuation_history_acceptances','stock_valuation_history_receipts','stock_valuation_sale_links','stock_valuation_sale_movements']
+  const immutableSnapshot=()=>immutableTables.map(table=>[table,f.db.prepare(`SELECT * FROM ${table}`).all().map(row=>JSON.stringify(row))])
+  const assertImmutable=saved=>{for(const [table,rows] of saved){const current=new Set(f.db.prepare(`SELECT * FROM ${table}`).all().map(row=>JSON.stringify(row)));for(const row of rows)assert.ok(current.has(row),`immutable ${table}: ${row}`)}}
+  const assertClean=()=>{for(const {name} of f.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND (name GLOB 'stock_*context' OR name GLOB 'stock_*guards')").all())assert.equal(f.db.prepare(`SELECT COUNT(*) n FROM ${name}`).get().n,0,`capability cleanup ${name}`)}
+  const cancel=request=>({sale_status:'cancelled',cancel_reason:'other',cancel_note:'Current assignment X/Y',client_request_id:request})
+  const head=()=>f.db.prepare("SELECT e.revision,g.generation FROM stock_valuation_latest e JOIN stock_funding_latest g ON g.source_id=e.source_id WHERE e.source_id='fund-900'").get()
+  const select=(segment)=>{const body=saleBody(),latest=head();body.items[0].stock_valuation={source_id:'fund-900',segment_id:segment,expected_revision:latest.revision,expected_generation:latest.generation};return body}
+  const stock=()=>f.db.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id=500 AND branch_id=1').get().quantity
+  try {
+    f.db.exec('UPDATE products SET stock_quantity=2,cost_price_usd=10 WHERE id=10;UPDATE product_batches SET received_quantity=2,received_cost_usd=20,unit_cost_usd=10 WHERE id=500;UPDATE branch_batch_stock SET quantity=2 WHERE batch_id=500;UPDATE branch_stock SET quantity=2 WHERE product_id=10;UPDATE inventory_movements SET quantity=2,free_quantity=0,total_cost_usd=20 WHERE id=900')
+    await command(f,valuation('admit',0,0,{funding:{movement_id:900,batch_id:500,product_id:10,branch_id:1,supplier_id:77,quantity:2,free_quantity:0,gross_usd:20,opening_paid_usd:20,opening_debt_usd:0,reconciliation_proof:'X/Y original paid receipt',invoice_id:null}}))
+    await command(f,valuation('hold',0,0,{segment_id:'original',child_segment_id:'x-held',quantity:1,reason:'broken'}))
+    await command(f,valuation('pending',1,0,{agreement_id:'x-credit-eight',amount_usd:8,targets:[{allocation_id:'x-held',amount_usd:8}],proof:'X only eight'}))
+    await command(f,valuation('accept',2,1,{agreement_id:'x-credit-eight',shares:[{segment_id:'x-held',amount_usd:8}],proof:'X accepted eight'}))
+    await command(f,valuation('repair',3,2,{segment_id:'x-held',child_segment_id:'x-repaired',quantity:1}))
+    assert.deepEqual(currentSegments().map(s=>[s.allocation_id,s.quantity,s.gross4-s.coverage4]).sort(),[['original','1',100000],['x-held','1',20000]])
+    const parentBody=select('x-repaired'),parentResponse=await call(f,sales,'/',parentBody)
+    assert.equal(parentResponse.status,200,JSON.stringify(parentResponse))
+    const parent=f.db.prepare('SELECT * FROM sale_items').get()
+    await assertCostProjection(f,parent.id,20000,0)
+    const parentHistory=immutableSnapshot(),parentMoney=JSON.stringify(f.db.prepare('SELECT cost_price_usd,cost_price_khr,total_usd,total_khr,pricing_snapshot_json FROM sale_items WHERE id=?').get(parent.id))
+    const firstCancel=cancel(`xy-parent-cancel-${++serial}`)
+    assert.equal((await call(f,sales,`/${parent.sale_id}/status`,firstCancel,'PATCH')).status,200)
+    await assertCostProjection(f,parent.id,0,0)
+    assert.equal(stock(),2)
+    assertImmutable(parentHistory)
+    assertClean()
+    const cancelled=businessState(f)
+    assert.equal((await call(f,sales,`/${parent.sale_id}/status`,firstCancel,'PATCH')).status,200)
+    assert.equal(businessState(f),cancelled,'cancel replay has no durable effects')
+    const restoredX=currentSegments().find(s=>s.allocation_id==='x-held'&&s.fate==='sellable')
+    assert.equal(restoredX.gross4-restoredX.coverage4,20000)
+    const childBody=select(restoredX.segment_id),beforeChild=f.batches.length,childResponse=await call(f,sales,'/',childBody)
+    if(childResponse.status!==200) {
+      assert.equal(businessState(f),cancelled,'refused child checkout must be atomic')
+      assertClean()
+      console.log(`OBSERVED X/Y ${variant}: actual admit Q2/G20, X accepted8/repaired2, parent checkout2/cancel/replay succeeded; child checkout=${childResponse.status}. Parent select-Y, later X credit, second cancel and variant assertions NOT EXECUTED.`)
+    }
+    assert.equal(childResponse.status,200,`current-assignment policy requires a new receipt to buy restored X2: ${JSON.stringify(childResponse)}`)
+    const childBatches=f.batches.slice(beforeChild),businessBatches=childBatches.filter(statements=>statements.some(sql=>/INSERT INTO sales\b/.test(sql)))
+    assert.equal(businessBatches.length,1)
+    assert.ok(childBatches.every(statements=>statements===businessBatches[0]||statements.every(sql=>!/stock_valuation|sale_items|inventory_movements|branch_stock|branch_batch_stock/.test(sql))))
+    const child=f.db.prepare('SELECT * FROM sale_items WHERE id<>?').get(parent.id)
+    await assertCostProjection(f,child.id,20000,0)
+    const afterChild=businessState(f)
+    assert.equal((await call(f,sales,'/',childBody)).status,200)
+    assert.equal(businessState(f),afterChild,'child checkout replay adds no epoch or effects')
+    const uncancel={sale_status:'completed',client_request_id:`xy-parent-uncancel-${++serial}`}
+    if(variant!=='available') {
+      if(variant==='held') {const latest=head();await command(f,valuation('hold',latest.revision,latest.generation,{segment_id:'original',child_segment_id:'y-held',quantity:1,reason:'broken'}))}
+      else if(variant==='consumed') assert.equal((await call(f,sales,'/',select('original'))).status,200)
+      else throw Error(`Unsupported actual X/Y variant ${variant}`)
+      const unavailable=businessState(f),response=await call(f,sales,`/${parent.sale_id}/status`,uncancel,'PATCH')
+      assert.equal(response.status,409,JSON.stringify(response))
+      assert.equal(businessState(f),unavailable,'unavailable Y must not take child-owned X')
+      await assertCostProjection(f,child.id,20000,0)
+      assertImmutable(parentHistory)
+      assertClean()
+      console.log(`PASS actual X/Y ${variant} selection refusal is atomic while child owns X`)
+      return
+    }
+    const beforeUncancel=immutableSnapshot(),response=await call(f,sales,`/${parent.sale_id}/status`,uncancel,'PATCH')
+    assert.equal(response.status,200,`parent selects eligible Y10 while child owns X2: ${JSON.stringify(response)}`)
+    await assertCostProjection(f,parent.id,100000,0)
+    await assertCostProjection(f,child.id,20000,0)
+    assert.equal(stock(),0)
+    assertImmutable(beforeUncancel)
+    const reconsumed=businessState(f)
+    assert.equal((await call(f,sales,`/${parent.sale_id}/status`,uncancel,'PATCH')).status,200)
+    assert.equal(businessState(f),reconsumed,'uncancel replay must not select again')
+    const childX=currentSegments().find(s=>s.allocation_id==='x-held'&&s.fate==='consumed'),creditHead=head()
+    await command(f,valuation('pending',creditHead.revision,creditHead.generation,{agreement_id:'x-credit-one',amount_usd:1,targets:[{allocation_id:'x-held',amount_usd:1}],proof:'Additional X only one'}))
+    const acceptHead=head(),accepted=await command(f,valuation('accept',acceptHead.revision,acceptHead.generation,{agreement_id:'x-credit-one',shares:[{segment_id:childX.segment_id,amount_usd:1}],proof:'Child X accepted one'}))
+    assert.equal(accepted.funding.credit4,90000)
+    assert.equal(accepted.funding.asset4,90000)
+    await assertCostProjection(f,parent.id,100000,0)
+    await assertCostProjection(f,child.id,20000,10000)
+    const beforeFinal=immutableSnapshot(),secondCancel=cancel(`xy-parent-second-cancel-${++serial}`)
+    assert.equal((await call(f,sales,`/${parent.sale_id}/status`,secondCancel,'PATCH')).status,200)
+    await assertCostProjection(f,parent.id,0,0)
+    await assertCostProjection(f,child.id,20000,10000)
+    assert.equal(stock(),1)
+    assert.deepEqual(currentSegments().map(s=>[s.allocation_id,s.fate,s.quantity,s.gross4-s.coverage4]).sort(),[['original','sellable','1',100000],['x-held','consumed','1',10000]])
+    assertImmutable(beforeFinal)
+    assertImmutable(parentHistory)
+    assert.equal(JSON.stringify(f.db.prepare('SELECT cost_price_usd,cost_price_khr,total_usd,total_khr,pricing_snapshot_json FROM sale_items WHERE id=?').get(parent.id)),parentMoney)
+    const rows=f.db.prepare('SELECT sale_item_id,managed,quantity,cost4,recovery4,net4 FROM stock_valuation_sale_costs ORDER BY sale_item_id').all().map(row=>({...row}))
+    assert.deepEqual(rows,[{sale_item_id:parent.id,managed:1,quantity:1,cost4:0,recovery4:0,net4:0},{sale_item_id:child.id,managed:1,quantity:1,cost4:20000,recovery4:10000,net4:10000}])
+    const activity=f.db.prepare('SELECT sale_item_id,SUM(consumed_cost4) cost4,SUM(consumed_recovery4) recovery4 FROM stock_valuation_sale_recoveries GROUP BY sale_item_id ORDER BY sale_item_id').all().map(row=>({...row}))
+    assert.deepEqual(activity,[{sale_item_id:parent.id,cost4:0,recovery4:0},{sale_item_id:child.id,cost4:20000,recovery4:10000}])
+    assert.deepEqual(f.db.prepare("SELECT sale_item_id,SUM(consumed_recovery4) recovery4 FROM stock_valuation_sale_recoveries WHERE kind='accept' GROUP BY sale_item_id").all().map(row=>({...row})),[{sale_item_id:child.id,recovery4:10000}])
+    assert.equal(f.db.prepare('SELECT COUNT(*) n FROM (SELECT sale_item_id,event_id,COUNT(*) n FROM stock_valuation_sale_recoveries GROUP BY sale_item_id,event_id HAVING COUNT(*)>1)').get().n,0,'activity aggregates assignments without fanout')
+    const completed=businessState(f)
+    assert.equal((await call(f,sales,`/${parent.sale_id}/status`,secondCancel,'PATCH')).status,200)
+    assert.equal(businessState(f),completed)
+    assertClean()
+    console.log('PASS actual X2/Y10 current epochs: child owns X, parent selects/releases Y, X credit stays child-only, quantity once, immutable history and exact current/dated money')
   } finally {f.db.close()}
 }
 function consumptionMath() {
@@ -499,4 +614,4 @@ function consumptionMath() {
   assert.notEqual(23334*3,70001,'four-decimal unit snapshots cannot replace exact captured line cost')
   console.log('PASS exact consumed10 credit5/10 restore5/0 reconsume5/0; disposed history unchanged')
 }
-(async()=>{const section=process.env.STOCK_CONSUMPTION_SECTION;consumptionMath();if(section!=='math'){await otherLot();await repairedSale();if(!section||section==='failures')await failures();if(!section||section==='security'){await custody();await replayPermissions();await racesAndMovementProof();await reconsumeIgnores()}if(!section||section==='exact'){await repairedSale(10);await exactPool()}if(section==='new-receipt')await newReceiptAfterCancel()}})().catch(error=>{console.error(error);process.exitCode=1})
+(async()=>{const section=process.env.STOCK_CONSUMPTION_SECTION;consumptionMath();if(section==='epoch-unidentified'){await unidentifiedBatchAdmission();return}if(section==='epoch-xy'||section==='new-receipt'){await currentAssignmentXY();return}if(section==='epoch-xy-held'||section==='epoch-xy-consumed'){await currentAssignmentXY(section.slice('epoch-xy-'.length));return}if(section!=='math'){await otherLot();await repairedSale();if(!section||section==='failures')await failures();if(!section||section==='security'){await custody();await replayPermissions();await racesAndMovementProof();await reconsumeIgnores()}if(!section||section==='exact'){await repairedSale(10);await exactPool()}if(section==='historical-ancestry')await historicalAncestralEntitlement()}})().catch(error=>{console.error(error);process.exitCode=1})
