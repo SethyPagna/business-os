@@ -1,5 +1,5 @@
 import { Hono, type Context } from 'hono'
-import { acquisitionCostResponses, hasAcquisitionCostInput } from '../lib/acquisitionCostAccess'
+import { acquisitionCostResponses, hasAcquisitionCostInput, projectAcquisitionCosts } from '../lib/acquisitionCostAccess'
 import { getDb } from '../lib/db'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit } from '../lib/audit'
@@ -76,9 +76,12 @@ function normalizeText(value: unknown, fallback: string, maxLength: number): str
   return text.slice(0, Math.max(1, Number(maxLength || 120)))
 }
 
+function historyPayloadObject(value: unknown): object {
+  return value && typeof value === 'object' ? value : {}
+}
+
 function serializePayload(value: unknown): string {
-  if (!value || typeof value !== 'object') return '{}'
-  const serialized = JSON.stringify(value)
+  const serialized = JSON.stringify(historyPayloadObject(value))
   if (serialized.length > 20_000) {
     throw new Error('Action history payload is too large')
   }
@@ -134,7 +137,7 @@ function isServerManagedPayload(value: unknown): boolean {
 }
 
 function canRecordHistory(user: SessionUser, body: Record<string, unknown>): boolean {
-  if (hasAcquisitionCostInput([body.undo_payload, body.redo_payload], user)) return false
+  if (hasAcquisitionCostInput({ undo_payload: historyPayloadObject(body.undo_payload), redo_payload: historyPayloadObject(body.redo_payload) }, user)) return false
   if ([body.undo_payload, body.redo_payload].some(isServerManagedPayload)) return false
   if (isAdminControlUser(user)) return true
   if (!canUseNamedAppliers(user, [body.undo_payload, body.redo_payload])) return false
@@ -147,6 +150,12 @@ function canRecordHistory(user: SessionUser, body: Record<string, unknown>): boo
     sensitivity: body.sensitivity || null,
   }
   return !isSensitiveActionHistory({ entity: body.entity, scope: body.scope, payload })
+}
+
+function visibleHistoryReplayResponse(response: Record<string, unknown>, user: SessionUser): Record<string, unknown> {
+  const { payload, ...fields } = response
+  const projected = projectAcquisitionCosts({ response_json: fields, undo_payload: payload }, user) as { response_json: Record<string, unknown>; undo_payload: unknown }
+  return Object.fromEntries(Object.keys(response).map(key => [key, key === 'payload' ? projected.undo_payload : projected.response_json[key]]))
 }
 
 async function mapRow(row: ActionHistoryRow, user: SessionUser, env: Env) {
@@ -498,7 +507,7 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
           .catch((error) => console.error('[telegram] return status notification failed', error)))
       }
       const row = await db.prepare('SELECT * FROM action_history WHERE id = @id').get<ActionHistoryRow>({ id: existing.id })
-      return c.json({
+      return c.json(visibleHistoryReplayResponse({
         success: true,
         applied: true,
         item: row ? await mapRow(row, user, c.env) : null,
@@ -506,7 +515,7 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
         ...(applier.name === PRODUCT_MERGE_GROUP_ACTION_KIND || genderReplay
           ? (outcome || { complete: true, continuation_required: false, processed_children: 0, pending_children: 0, generation: Number(body.expected_generation || 0) })
           : {}),
-      })
+      }, user))
     }
 
     await db.prepare(`
@@ -518,12 +527,12 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
       { actionHistoryId: existing.id, scope: existing.scope, label: existing.label, status: nextStatus, serverApplied: applied, appliedBy: applier?.name || null })
 
     const row = await db.prepare('SELECT * FROM action_history WHERE id = @id').get<ActionHistoryRow>({ id: existing.id })
-    return c.json({
+    return c.json(visibleHistoryReplayResponse({
       success: true,
       applied,
       item: row ? await mapRow(row, user, c.env) : null,
       payload,
-    })
+    }, user))
   } catch (error) {
     return c.json({ success: false, error: (error as Error)?.message || `Failed to ${direction} action history` }, 500)
   }

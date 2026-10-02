@@ -42,9 +42,25 @@ const NEEDS_ORIGINAL_TAB = 'undo_needs_original_tab'
 const GENERIC_REFUSAL = 'undo_refused'
 const notify = async () => {}
 
+function loadLibrary(name, dependencies = {}) {
+  const filename = path.join(__dirname, '..', 'src', 'lib', name + '.ts')
+  const code = ts.transpileModule(fs.readFileSync(filename, 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+    fileName: filename,
+  }).outputText
+  const mod = { exports: {} }
+  new Function('exports', 'require', 'module', code)(mod.exports, request => {
+    if (Object.prototype.hasOwnProperty.call(dependencies, request)) return dependencies[request]
+    throw new Error(`Unexpected ${name} dependency: ${request}`)
+  }, mod)
+  return mod.exports
+}
+
+const acquisitionCostAccess = loadLibrary('acquisitionCostAccess', { './permissions': loadLibrary('permissions') })
+
 function loadHistoryRoute(db, undoAppliers) {
   const stubs = {
-    '../lib/acquisitionCostAccess': { acquisitionCostResponses: async (_c, next) => next(), hasAcquisitionCostInput: () => false },
+    '../lib/acquisitionCostAccess': acquisitionCostAccess,
     '../lib/db': { getDb: () => db },
     '../lib/auth': { requireAuth: async (c, next) => { c.set('user', USER); return next() } },
     '../lib/audit': { audit: async () => {} },
