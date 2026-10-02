@@ -11,7 +11,7 @@ let actor = { id:71, permissions:'{"inventory":true,"product_cost_edit":true,"pr
 const overrides = {
   '../lib/auth': { requireAuth:async(c,next)=>{c.set('user',actor);return next()} },
   '../durable-objects/broadcastHub': { broadcast:async()=>{} },
-  '../lib/telegram': { telegramMoney:()=>'',sendTelegramEvent:async()=>{},formatStockChangeTelegramLines:()=>[],formatTransferTelegramLines:()=>[],formatSaleTelegramLines:()=>[] },
+  '../lib/telegram': { telegramMoney:()=>'',sendTelegramEvent:async()=>{},formatStockChangeTelegramLines:()=>[],formatTransferTelegramLines:()=>[],formatSaleTelegramLines:()=>[],formatSaleStatusTelegramLines:()=>[] },
   '../lib/cache': { bumpVersion:async()=>{},getVersion:async()=>0,cacheKey:(...values)=>values.join(':'),cachedJson:async(c,key,ttl,fn)=>c.json(await fn()) },
 }
 function load(relative) {
@@ -124,7 +124,10 @@ async function repairedSale() {
     const before=f.batches.length
     const response=await call(f,sales,'/',saleBody())
     assert.equal(response.status,200,`repaired admitted share must use ordinary checkout: ${JSON.stringify(response)}`)
-    assert.equal(f.batches.length,before+1,'stock valuation and ordinary checkout share one transaction')
+    const checkoutBatches=f.batches.slice(before).filter(statements=>statements.some(sql=>/INSERT INTO sales\b/.test(sql)))
+    assert.equal(checkoutBatches.length,1,'ordinary checkout commits exactly one business transaction')
+    assert.equal(checkoutBatches[0].filter(sql=>/INSERT INTO stock_valuation_events_v4\b/.test(sql)).length,1,'valuation is in the same ordinary checkout transaction')
+    assert.ok(f.batches.slice(before).every(statements=>statements===checkoutBatches[0]||statements.every(sql=>!/stock_valuation|sale_items|inventory_movements|branch_stock|branch_batch_stock/.test(sql))),'background setting registration cannot commit business stock separately')
     const item=f.db.prepare('SELECT * FROM sale_items').get()
     assert.equal(item.cost_price_usd,10,'captured basis is exact repaired net basis')
     assert.equal(f.db.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id=500 AND branch_id=1').get().quantity,2)

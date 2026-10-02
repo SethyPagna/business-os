@@ -75,7 +75,7 @@ export function planValuationSaleSegments(segments: ValuationSegment[], input: {
     const original = next[index];
     const quantity = quantityDecimal(input.quantity);
     if (input.kind === 'consume') {
-        if (original.fate !== 'sellable' || !input.child_segment_id || next.some(segment => segment.segment_id === input.child_segment_id)) throw new RangeError('valuation_sale_segment_conflict');
+        if (original.fate !== 'sellable' || original.consumption_id || !input.child_segment_id || next.some(segment => segment.segment_id === input.child_segment_id)) throw new RangeError('valuation_sale_segment_conflict');
         const { child, remainder } = splitValuationSegment(original, quantity, input.child_segment_id, 'consumed');
         child.consumption_id = input.consumption_id;
         child.consumed_cost4 = child.gross4 - child.coverage4;

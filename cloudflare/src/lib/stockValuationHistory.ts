@@ -3,7 +3,7 @@ import { stockFundingPhysicalSql } from './stockFunding';
 import { fundingTransition, type FundingKind, type FundingState } from './stockFundingMath';
 import { exactMoney4, quantityDecimal, subtractQuantity } from './stockDispositionBasis';
 import { feeRequestDigest, normalizeFeeRequestId } from './feeOperationReceipt';
-import { applyValuationCoverage, valuationTotals, type ValuationSegment } from './stockValuationMath';
+import { applyValuationCoverage, planValuationSaleSegments, valuationSegmentsV4, valuationTotals, type ValuationSegment } from './stockValuationMath';
 
 type Row = Record<string, any>;
 type Statement = { sql: string; params: Record<string, unknown> };
@@ -74,7 +74,7 @@ function snapshotGuard(table: string, where: string, params: Record<string, unkn
     return guards;
 }
 async function readHistory(db: D1Compat, source: string) {
-    const valuationEvents = 'SELECT id FROM stock_valuation_events WHERE source_id=@source';
+    const valuationEvents = 'SELECT id FROM stock_valuation_history_events WHERE source_id=@source';
     const fundingEvents = 'SELECT id FROM stock_funding_events WHERE source_id=@source';
     const agreements = 'SELECT id FROM stock_valuation_agreements WHERE source_id=@source';
     const scopes: Record<string, string> = {
@@ -87,16 +87,21 @@ async function readHistory(db: D1Compat, source: string) {
         stock_valuation_receipts: `event_id IN (${valuationEvents}) OR json_extract(request_json,'$.source_id')=@source OR json_extract(response_json,'$.source_id')=@source`,
         stock_funding_events: 'source_id=@source',
         stock_funding_claims: `source_id=@source OR id IN (SELECT claim_id FROM stock_funding_events WHERE source_id=@source AND claim_id IS NOT NULL)`,
-        stock_funding_receipts: `event_id IN (${fundingEvents}) OR json_extract(request_json,'$.sourceId')=@source OR json_extract(response_json,'$.source_id')=@source OR request_id IN (SELECT 'valuation-fund-'||request_digest FROM stock_valuation_receipts WHERE event_id IN (${valuationEvents}))`,
+        stock_funding_receipts: `event_id IN (${fundingEvents}) OR json_extract(request_json,'$.sourceId')=@source OR json_extract(response_json,'$.source_id')=@source OR request_id IN (SELECT 'valuation-fund-'||request_digest FROM stock_valuation_history_receipts WHERE event_id IN (${valuationEvents}))`,
+        stock_valuation_event_identities: 'source_id=@source',
+        stock_valuation_request_identities: `event_id IN (${valuationEvents})`,
+        stock_valuation_sale_links: 'source_id=@source',
         audit_logs: `(entity='stock_valuation' AND (entity_id IN (${valuationEvents}) OR record_id IN (${valuationEvents}))) OR (entity='stock_funding' AND (entity_id IN (${fundingEvents}) OR record_id IN (${fundingEvents})))`,
     };
     const rows: Record<string, Row[]> = {}, guards: Statement[] = [];
     let count = 0;
+    const historyTables: Record<string, string> = { stock_valuation_events: 'stock_valuation_history_events', stock_valuation_segments: 'stock_valuation_history_segments', stock_valuation_receipts: 'stock_valuation_history_receipts', stock_valuation_acceptances: 'stock_valuation_history_acceptances' };
     for (const [table, where] of Object.entries(scopes)) {
-        rows[table] = await db.prepare(`SELECT * FROM ${table} WHERE ${where} LIMIT ${maximumHistoryRows + 1}`).all<Row>({ source });
+        const physicalTable = historyTables[table] ?? table;
+        rows[table] = await db.prepare(`SELECT * FROM ${physicalTable} WHERE ${where} LIMIT ${maximumHistoryRows + 1}`).all<Row>({ source });
         count += rows[table].length;
         if (count > maximumHistoryRows) throw new Error('valuation_history_limit');
-        guards.push(...snapshotGuard(table, where, { source }, rows[table]));
+        guards.push(...snapshotGuard(physicalTable, where, { source }, rows[table]));
     }
     return { rows, guards, rowCount: count };
 }
@@ -189,14 +194,15 @@ function validateHistorySnapshot(event: Row, raw: Record<string, unknown>, sourc
         sameFields(actual, { event_id: event.id, agreement_id: raw.agreement_id, target_segment_id: share.segment_id, amount4: share.amount4, funding_event_id: funding!.id });
     }
     segments.sort((a, b) => a.segment_id.localeCompare(b.segment_id));
-    const actualSegments = rows.stock_valuation_segments.filter(row => row.event_id === event.id).sort((a, b) => a.segment_id.localeCompare(b.segment_id)).map(({ event_id, ...segment }) => segment);
+    const actualSegments = rows.stock_valuation_segments.filter(row => row.event_id === event.id).sort((a, b) => a.segment_id.localeCompare(b.segment_id)).map(({ event_id, consumption_id, consumed_cost4, consumed_recovery4, ...segment }) => event.schema_version === 4 ? { ...segment, consumption_id, consumed_cost4, consumed_recovery4 } : segment);
     same(actualSegments, segments);
-    const totals = valuationTotals(segments, source.gross4, source.quantity);
+    const totals = valuationTotals(segments, source.gross4, source.quantity, event.schema_version);
     requireHistory(totals.coverage4 === state.credit4);
     const pending4 = pendingTotal(agreements);
     requireHistory(Number.isSafeInteger(pending4) && pending4 >= 0);
     sameFields(event, { loss4: totals.historical_loss4 - (previous?.historical_loss4 || 0), recovery4: totals.recovery4 - (previous?.recovery4 || 0), expense_category: raw.expense_category ?? null });
-    const responseJson = JSON.stringify({ valuation_version: 3, source_id: source.id, event_id: event.id, revision: event.revision, kind: event.kind, funding, segments, totals, pending4 });
+    sameFields(event, { consumed_cost4: (totals.consumed_cost4 ?? 0) - (previous?.consumed_cost4 ?? 0), consumed_recovery4: (totals.consumed_recovery4 ?? 0) - (previous?.consumed_recovery4 ?? 0) });
+    const responseJson = JSON.stringify({ valuation_version: event.schema_version, source_id: source.id, event_id: event.id, revision: event.revision, kind: event.kind, funding, segments, totals, pending4 });
     requireHistory(responseJson === receipt.response_json);
     assertAudit(rows.audit_logs, 'stock_valuation', event, responseJson);
 }
@@ -218,6 +224,12 @@ export async function validateValuationHistory(db: D1Compat, sourceId: string, r
     requireHistory(['add', 'in'].includes(physical!.movement_type) && quantityDecimal(physical!.quantity) === source.quantity && quantityDecimal(physical!.received_quantity) === source.quantity && quantityDecimal(physical!.free_quantity, true) === source.free_quantity && exactMoney4(physical!.total_cost_usd) === source.gross4 && exactMoney4(physical!.received_cost_usd) === source.gross4 && (physical!.total_cost_khr === null || physical!.total_cost_khr === 0));
     requireHistory(!await db.prepare('SELECT id FROM stock_disposition_sources WHERE movement_id=@movement OR batch_id=@batch').get({ movement: source.movement_id, batch: source.batch_id }));
     requireHistory(rows.stock_valuation_receipts.length === events.length && rows.stock_valuation_segments.length > 0);
+    requireHistory(rows.stock_valuation_event_identities.length === events.length && rows.stock_valuation_request_identities.length === events.length);
+    for (const event of events) {
+        sameFields(rows.stock_valuation_event_identities.find(row => row.event_id === event.id), { source_id: sourceId, revision: event.revision, schema_version: event.schema_version });
+        const receipt = rows.stock_valuation_receipts.find(row => row.event_id === event.id);
+        sameFields(rows.stock_valuation_request_identities.find(row => row.event_id === event.id), { request_id: receipt?.request_id, schema_version: event.schema_version });
+    }
     const fundingEvents = rows.stock_funding_events.sort((a, b) => a.generation - b.generation);
     requireHistory(rows.stock_funding_receipts.length === fundingEvents.length && rows.audit_logs.length === events.length + fundingEvents.length);
     const agreements = new Map<string, Agreement>(), usedClaims = new Set<string>(), usedChildren = new Set(['original']);
@@ -227,7 +239,8 @@ export async function validateValuationHistory(db: D1Compat, sourceId: string, r
     for (let revision = 0; revision < events.length; revision++) {
         const event = events[revision];
         const { receipt, raw, intent, digest } = await validateHistoryIntent(event, revision, sourceId, funding?.generation ?? 0, rows, rules);
-        const previous = revision ? valuationTotals(segments, source.gross4, source.quantity) : null;
+        const previous = revision ? valuationTotals(segments, source.gross4, source.quantity, events[revision - 1].schema_version) : null;
+        if (event.schema_version === 4) segments = valuationSegmentsV4(segments);
         if (revision === 0) {
             requireHistory(event.kind === 'admit'); validateOpening(source, raw, event.actor_id);
             segments = [{ segment_id: 'original', allocation_id: 'original', fate: 'sellable', quantity: source.quantity, gross4: source.gross4, coverage4: 0, loss4: 0, recovery4: 0, reason: '' }];
@@ -236,6 +249,16 @@ export async function validateValuationHistory(db: D1Compat, sourceId: string, r
             requireHistory(typeof raw.child_segment_id === 'string' && !usedChildren.has(raw.child_segment_id));
             usedChildren.add(raw.child_segment_id as string);
             segments = rules.planPhysical(segments, raw, event.kind);
+        }
+        if (['consume', 'restore', 'reconsume'].includes(event.kind)) {
+            requireHistory(event.schema_version === 4);
+            const link = rows.stock_valuation_sale_links.find(row => row.id === raw.consumption_id);
+            requireHistory(link && link.source_id === sourceId && link.quantity === quantityDecimal(raw.quantity) && link.sale_request_id === raw.sale_request_id && link.sale_line_key === raw.sale_line_key && link.sale_intent_json === raw.sale_intent_json);
+            if (event.kind === 'consume') {
+                requireHistory(!usedChildren.has(String(raw.child_segment_id)) && link!.original_event_id === event.id && link!.segment_id === raw.child_segment_id);
+                usedChildren.add(String(raw.child_segment_id));
+            } else requireHistory(link!.segment_id === raw.segment_id);
+            segments = planValuationSaleSegments(segments, { kind: event.kind, segment_id: String(raw.segment_id), child_segment_id: raw.child_segment_id as string | undefined, quantity: raw.quantity, consumption_id: String(raw.consumption_id) });
         }
         const { amount4, claim, shares, segments: nextSegments } = planHistoricalAgreement(event, raw, sourceId, segments, agreements, rows, rules);
         segments = nextSegments;
@@ -260,10 +283,18 @@ export async function validateValuationHistory(db: D1Compat, sourceId: string, r
     }
     requireHistory(fundingIndex === fundingEvents.length && agreements.size === rows.stock_valuation_agreements.length && usedClaims.size === rows.stock_funding_claims.length);
     requireHistory(rows.stock_valuation_acceptances.every(row => events.some(event => event.id === row.event_id && event.kind === 'accept') && agreements.has(row.agreement_id)));
+    requireHistory(rows.stock_valuation_sale_links.every(link => events.some(event => event.id === link.original_event_id && event.kind === 'consume')));
+    for (const link of rows.stock_valuation_sale_links) {
+        const actual = await db.prepare('SELECT a.*,i.product_id,i.quantity AS line_quantity,i.branch_id AS line_branch,i.batch_id AS line_batch,s.client_request_id,s.sale_status,json_extract(i.pricing_snapshot_json,\'$.line_key\') AS line_key FROM sale_item_batch_allocations a JOIN sale_items i ON i.id=a.sale_item_id JOIN sales s ON s.id=i.sale_id WHERE a.id=@allocation AND i.id=@item AND s.id=@sale').get<Row>({ allocation: link.sale_allocation_id, item: link.sale_item_id, sale: link.sale_id });
+        requireHistory(actual && actual.product_id === source.product_id && actual.batch_id === source.batch_id && actual.branch_id === source.branch_id && actual.line_branch === source.branch_id && actual.line_batch === source.batch_id && quantityDecimal(actual.quantity) === link.quantity && quantityDecimal(actual.line_quantity) === link.quantity && actual.client_request_id === link.sale_request_id && actual.line_key === link.sale_line_key);
+        const current = segments.filter(segment => segment.consumption_id === link.id);
+        requireHistory(current.length === 1 && current[0].segment_id === link.segment_id && current[0].quantity === link.quantity && actual!.released_quantity === (current[0].fate === 'consumed' ? 0 : Number(link.quantity)) && (current[0].fate === 'consumed' ? actual!.sale_status !== 'cancelled' : actual!.sale_status === 'cancelled'));
+        guards.push(...snapshotGuard('sale_item_batch_allocations', 'id=@allocation', { allocation: link.sale_allocation_id }, [await db.prepare('SELECT * FROM sale_item_batch_allocations WHERE id=@allocation').get<Row>({ allocation: link.sale_allocation_id }) as Row]));
+    }
     return { guards, rowCount, eventCount: events.length };
 }
 export function assertValuationHistoryCapacity(history: { rowCount: number; eventCount: number }, kind: string, segmentCount: number, shareCount: number, statementCount: number) {
     const financial = ['admit', 'pending', 'accept', 'refund', 'payment', 'shipping'].includes(kind);
-    const addedRows = 3 + segmentCount + (financial ? 3 : 0) + (kind === 'admit' ? 2 : 0) + (kind === 'pending' ? 2 : 0) + (kind === 'accept' ? 1 + shareCount : 0);
+    const addedRows = 5 + segmentCount + (financial ? 3 : 0) + (kind === 'admit' ? 2 : 0) + (kind === 'pending' ? 2 : 0) + (kind === 'accept' ? 1 + shareCount : 0) + (kind === 'consume' ? 1 : 0);
     if (history.rowCount + addedRows > maximumHistoryRows || history.eventCount + 1 > maximumHistoryEvents || statementCount > 400) throw new Error('valuation_history_limit');
 }

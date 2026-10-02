@@ -1,4 +1,6 @@
 import { assertStockLifecycleMutable, stockLifecycleRefusal } from '../lib/stockLifecycle'
+import { assertStockValuationSaleReplay, orderStockValuationReconsume, planStockValuationCheckout, planStockValuationSaleStatus } from '../lib/stockValuationConsumption'
+import { StockValuationError } from '../lib/stockValuation'
 import { Hono, type Context } from 'hono'
 import { createAcquisitionCostResponses, canViewAcquisitionCosts } from '../lib/acquisitionCostAccess'
 import { broadcast } from '../durable-objects/broadcastHub'
@@ -259,6 +261,7 @@ function appendLocalTimeRange(
 // lib/importEngine.ts's sales import so a third copy doesn't drift too.
 
 type SaleItemInput = {
+  stock_valuation?: unknown
   client_line_key?: string
   pricing_source?: PricingSource
   display_price_mode?: 'selling'|'wholesale'
@@ -530,6 +533,7 @@ app.post('/', async (c) => {
       .get<{ id: number; receipt_number: string; cashier_id: number | null; item_count: number }>([clientRequestId])
     if (existingSale) {
       if (existingSale.cashier_id !== offlineOwner.actor_id) return c.json(offlineSaleOwnerMismatch(), 409)
+      await assertStockValuationSaleReplay(db, user, existingSale.id, body)
       // A prior interrupted checkout can have a durable header but no lines.
       // Treating that row as a completed idempotent replay clears the client's
       // offline payload and makes the incomplete sale impossible to retry.
@@ -721,8 +725,9 @@ app.post('/', async (c) => {
     if (request.quantity > available) return c.json({ error: `Insufficient unrecorded stock: requested ${request.quantity}, available ${available}` }, 409)
   }
 
+  const valuationPlans = await planStockValuationCheckout(c.env, user, normalized, body, saleWriteKey, shouldDeductStock)
   if (shouldDeductStock) for (const item of normalized) {
-    if (item.batch_id && !item.damaged_lot_id) await assertStockLifecycleMutable(db, { batchId: Number(item.batch_id) })
+    if (item.batch_id && !item.damaged_lot_id && !valuationPlans.has(item.client_line_key!)) await assertStockLifecycleMutable(db, { batchId: Number(item.batch_id) })
   }
   const explicitBatchResolution = resolveExplicitSaleLineBatches(
     normalized.map((item) => {
@@ -966,8 +971,8 @@ app.post('/', async (c) => {
       pricing_snapshot_json:'',
       product_discount_usd: divideMoney4(exact.product_discount_usd,item.quantity),
       product_discount_khr: multiplyMoney4(divideMoney4(exact.product_discount_usd,item.quantity),exchangeRate),
-      costPriceUsd: product?.cost_price_usd == null ? null : newSaleMoney4(product.cost_price_usd),
-      costPriceKhr: product?.cost_price_khr == null ? null : newSaleMoney4(product.cost_price_khr),
+      costPriceUsd: valuationPlans.get(item.client_line_key!)?.costPriceUsd ?? (product?.cost_price_usd == null ? null : newSaleMoney4(product.cost_price_usd)),
+      costPriceKhr: valuationPlans.has(item.client_line_key!) ? 0 : (product?.cost_price_khr == null ? null : newSaleMoney4(product.cost_price_khr)),
     }
   })
   subtotalUsd = sumMoney4(priced.map(line => line.lineTotalUsd))
@@ -1607,6 +1612,7 @@ app.post('/', async (c) => {
           })
         }
       }
+      statements.push(...(valuationPlans.get(item.client_line_key!)?.prefix ?? []))
       // A damaged-source line's stock ALREADY moved (the lot draw above);
       // only its ledger entry rides this batch. Regular branch/batch
       // deductions never apply to it.
@@ -1693,6 +1699,7 @@ app.post('/', async (c) => {
           params: { product_id: item.product_id, quantity: item.quantity },
         })
       }
+      statements.push(...(valuationPlans.get(item.client_line_key!)?.finish ?? []))
     }
     statements.push(
       {sql:'DELETE FROM sale_mutation_guards',params:{}},
@@ -1749,6 +1756,7 @@ app.post('/', async (c) => {
       .get<{ id: number; receipt_number: string; cashier_id: number | null; item_count: number }>({ sale_write_key: saleWriteKey })
     if (committedSale && committedSale.cashier_id !== offlineOwner.actor_id) return c.json(offlineSaleOwnerMismatch(), 409)
     if (committedSale && Number(committedSale.item_count) > 0) {
+      await assertStockValuationSaleReplay(db, user, committedSale.id, body)
       saleId = Number(committedSale.id)
       resolvedReceiptNumber = committedSale.receipt_number
       recoveredCommittedCreate = true
@@ -1879,6 +1887,7 @@ app.post('/', async (c) => {
     itemCount: priced.length,
   })
   } catch (error) {
+    if (error instanceof StockValuationError) return c.json({ error: error.message, code: error.code }, error.statusCode)
     if (error instanceof SaleMoneyContractError || error instanceof MoneyPrecisionError || error instanceof SaleItemPricingError) return c.json({ error: error.message, code: error.code }, 400)
     throw error
   }
@@ -2090,6 +2099,8 @@ app.patch('/:id/status', async (c) => {
   const statusSourceId = statusRequestId ? `actor:${Number(user.id)}:request:${statusRequestId}` : null
   const statusCanonical = statusRequestId ? JSON.stringify(saleStatusReceiptCanonical(Number(id), body)) : null
   const statusDigest = statusCanonical ? await saleMutationDigest(JSON.parse(statusCanonical)) : null
+  try { await assertStockValuationSaleReplay(db, user, Number(id)) }
+  catch (error) { if (error instanceof StockValuationError) return c.json({ error: error.message, code: error.code }, error.statusCode); throw error }
   if (statusSourceId && statusDigest) {
     const previous = await db.prepare(`
       SELECT request_digest,response_json FROM sale_record_events
@@ -2320,6 +2331,9 @@ app.patch('/:id/status', async (c) => {
   // emitted for this same request. Records suppresses a twin only by this
   // identity; actor/status/timestamp proximity is not proof of one act.
   const statusOperationId = statusSourceId || crypto.randomUUID()
+  let valuationStatusPlan: Awaited<ReturnType<typeof planStockValuationSaleStatus>>
+  try { valuationStatusPlan = await planStockValuationSaleStatus(c.env, user, Number(id), oldStatus, saleStatus, statusOperationId, skipStock, returnedByItem) }
+  catch (error) { if (error instanceof StockValuationError) return c.json({ error: error.message, code: error.code }, error.statusCode); throw error }
   const statements: Array<{ sql: string; params: Record<string, unknown> }> = [saleRevisionGuard(Number(id), Number(sale.write_revision))]
   const updates = ['sale_status = @sale_status', 'updated_at = @updated_at']
   const updateParams: Record<string, unknown> = { sale_status: saleStatus, id, updated_at: mutationStamp }
@@ -2590,7 +2604,9 @@ app.patch('/:id/status', async (c) => {
     })
   }
   statements.push(...settlementLineStatements)
-  statements.push(...plan.statements)
+  statements.push(...valuationStatusPlan.prefix)
+  statements.push(...orderStockValuationReconsume(plan.statements, valuationStatusPlan.reconsumeOrder))
+  statements.push(...valuationStatusPlan.finish)
 
   // A provisional restore can be spent by another request before a status
   // conflict is discovered. Keep damaged stock and its ledger in the SAME
@@ -2720,6 +2736,8 @@ app.patch('/:id/status', async (c) => {
     }
   } catch (error) {
     const message = (error as Error).message || ''
+    try { await assertStockValuationSaleReplay(db, user, Number(id)) }
+    catch (valuationError) { if (valuationError instanceof StockValuationError) return c.json({ error: valuationError.message, code: valuationError.code }, valuationError.statusCode); throw valuationError }
     if (settlementRequestId && settlementDigest) {
       const retry = await db.prepare(`
         SELECT request_digest,response_json FROM sale_mutation_receipts
@@ -2748,7 +2766,7 @@ app.patch('/:id/status', async (c) => {
     // between the availability read above and this write. The batch rolled
     // back atomically (status unchanged, nothing moved), so just report
     // the shortage as a 409 rather than a 500.
-    if (/CHECK constraint|constraint failed/i.test(message)) {
+    if (/CHECK constraint|constraint failed|malformed JSON|stock_lifecycle_dependency|valuation_/i.test(message)) {
       return c.json({ error: 'Insufficient stock to complete this sale: another sale took the last units first. Refresh and try again.', code: 'stock_conflict' }, 409)
     }
     throw error
