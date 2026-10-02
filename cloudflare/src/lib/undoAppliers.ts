@@ -4,6 +4,7 @@ import type { SessionUser } from './auth'
 // imports one by one, so a new runtime import would break them.
 import type { ResolveChoiceValues } from './productResolveChoices'
 import { getDb } from './db'
+import { PRODUCT_EDIT_KIND, replayProductEdit } from './productEditOperation'
 import { CATALOG_COST_DERIVE_SQL, catalogCostRecomputeIfChangedStatement } from './catalogCostRecompute'
 import { audit } from './audit'
 import { hasRecordedSaleMoneyPrecision } from './saleMoneyPrecision'
@@ -93,6 +94,11 @@ export interface UndoApplierOutcome {
   processed_children: number
   pending_children: number
   generation: number
+  current_generation?: number
+  pending?: boolean
+  pendingActionId?: number
+  applied?: boolean
+  replayed?: boolean
 }
 
 export type UndoApplier = (payload: Record<string, unknown>, ctx: UndoApplierContext) => Promise<void | UndoApplierOutcome>
@@ -2972,6 +2978,13 @@ async function branchReplayExpectedFields(
 }
 
 const APPLIERS: Record<string, UndoApplierDef> = {
+  [PRODUCT_EDIT_KIND]: {
+    permission: 'products', action: 'edit',
+    run: async (payload, ctx) => {
+      if (!ctx.user || !ctx.historyId) throw new UndoConflictError('The product edit actor is unavailable.', 'undo_history_unusable')
+      return replayProductEdit(ctx.env, ctx.user, String(payload.operation_id), ctx.historyId, ctx.direction, ctx.generation)
+    },
+  },
   [CUSTOMER_GENDER_RESTORATION_KIND]: { permission: 'contacts', action: 'edit', run: replayCustomerGenderRestoration },
   // Scoped Set (lib/stockLotAdjustment.ts): the server replays the exact lot
   // and branch snapshots of one generation and refuses 409 when current stock

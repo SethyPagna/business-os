@@ -265,6 +265,17 @@ export type CostBreakdownLotInput = {
 }
 
 /** One manual cost-price edit (product_cost_entries row) -- see recordManualCostEntry. */
+export type SavedCatalogCostBasis = { kind: 'none' } | { kind: 'entry'; original_entry_id: number; cost_usd: number; cost_khr: number | null; baseline_batch_id: number }
+
+export function planCatalogCostRestoration(productId: number, basis: SavedCatalogCostBasis, direction: 'undo' | 'redo', actor: { id: number; name: string | null }, previousUsd: number | null): { sql: string; params: Record<string, unknown> } {
+  return {
+    sql: `INSERT INTO product_cost_entries(product_id,cost_usd,cost_khr,previous_cost_usd,source,user_id,user_name,baseline_batch_id)
+      VALUES(@product,@usd,@khr,@previous,@source,@actor,@name,@baseline)`,
+    params: { product: productId, usd: basis.kind === 'none' ? 0 : basis.cost_usd, khr: basis.kind === 'none' ? null : basis.cost_khr,
+      previous: previousUsd, source: direction, actor: actor.id, name: actor.name, baseline: basis.kind === 'none' ? 0 : basis.baseline_batch_id },
+  }
+}
+
 export type CostBreakdownManualInput = {
   id: number
   previous_cost_usd?: number | null
@@ -274,10 +285,11 @@ export type CostBreakdownManualInput = {
   created_at: string | null
   /** The product_batches.id this entry overrode as of the edit -- see recordManualCostEntry/migration 0177. */
   baseline_batch_id: number | null
+  source?: string
 }
 
 export type CostBreakdownInputRow = {
-  source: 'lot' | 'manual' | 'catalog'
+  source: 'lot' | 'manual' | 'catalog' | 'undo' | 'redo'
   previous_cost_usd?: number | null
   /** Kept for older clients: the existing "<batch> · <branch>" text (or "Manual · <user>" for a manual entry). */
   label: string
@@ -337,7 +349,8 @@ function costBreakdownLotLabel(lot: CostBreakdownLotInput): string {
 
 /** The label a manual cost-price edit shows in the breakdown. */
 function costBreakdownManualLabel(entry: CostBreakdownManualInput): string {
-  return entry.user_name ? `Manual · ${entry.user_name}` : 'Manual'
+  const label = entry.source === 'undo' ? 'Undo' : entry.source === 'redo' ? 'Redo' : 'Manual'
+  return entry.user_name ? `${label} · ${entry.user_name}` : label
 }
 
 function positiveCost(value: number | null | undefined): number | null {
@@ -434,7 +447,7 @@ export function buildCatalogCostBreakdown(
     const entry = row.entry
     const cost = entry.cost_usd != null && Number.isFinite(Number(entry.cost_usd)) ? Number(entry.cost_usd) : null
     const base = {
-      source: 'manual' as const, label: costBreakdownManualLabel(entry), cost_usd: cost, cost_khr: entry.cost_khr ?? null,
+      source: entry.source === 'undo' ? 'undo' as const : entry.source === 'redo' ? 'redo' as const : 'manual' as const, label: costBreakdownManualLabel(entry), cost_usd: cost, cost_khr: entry.cost_khr ?? null,
       previous_cost_usd: entry.previous_cost_usd ?? null,
       lot_code: null, batch_number: null, received_at: null, branch_name: null,
       user_name: entry.user_name ?? null, recorded_at: entry.created_at ?? null, remaining_quantity: null,
@@ -484,7 +497,7 @@ export async function getCatalogCostBreakdown(db: D1Compat, productId: number): 
   `).all<CostBreakdownLotInput>({ id: productId })
 
   const manualEntries = await db.prepare(`
-    SELECT id, cost_usd, cost_khr, previous_cost_usd, user_name, created_at, baseline_batch_id
+    SELECT id, cost_usd, cost_khr, previous_cost_usd, user_name, created_at, baseline_batch_id, source
     FROM product_cost_entries
     WHERE product_id = @id
     ORDER BY id ASC

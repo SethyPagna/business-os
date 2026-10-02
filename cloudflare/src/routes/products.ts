@@ -198,6 +198,7 @@ import {
 } from '../lib/productWrites'
 import { actorSnapshot, actorId } from '../lib/actorSnapshot'
 import { prepareProductMoneyWrite, readProductMoneyPlan, ProductMoneyWriteError, PRODUCT_MONEY_PLAN, PRODUCT_MONEY_VERSION } from '../lib/productWrites'
+import { productEditIdentity, recoverProductEdit, commitProductEdit, queueProductEdit, ProductEditError } from '../lib/productEditOperation'
 export {
   PRODUCT_SKIP_KEYS, nowIso, tableColumns, clampNegativeStockQuantity,
   cleanPayload, insertRow, updateRow, syncProductImageGallery, defaultBranchId,
@@ -2153,6 +2154,16 @@ app.put('/:id', async (c) => {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
 
+  let editIdentity
+  try {
+    editIdentity = await productEditIdentity(Number(id), body)
+    const recovered = await recoverProductEdit(c.env, user, editIdentity)
+    if (recovered) return c.json(recovered, recovered.pending ? 202 : 200)
+  } catch (error) {
+    if (error instanceof ProductEditError) return c.json({ success: false, error: error.message, code: error.code }, error.statusCode as 400 | 403 | 409)
+    throw error
+  }
+
   // Optimistic-concurrency guard, the same one every other editable entity
   // enforces (contacts/sales/branches/notes/... via conflictControl). The
   // client (productWriteTransport.updateProduct) already sends an
@@ -2366,15 +2377,12 @@ app.put('/:id', async (c) => {
   // guaranteed no-op for this branch; skipping it here avoids a pointless
   // call and keeps this branch's control flow easy to audit on its own.
   if (!isImageOnlyEdit) {
-    const pendingId = await maybeQueueForReview(c.env, user, 'products', {
-      actionType: 'update',
-      entityType: 'product',
-      entityId: Number(id),
-      payload: body,
-      summary: `Update product #${id}`,
-    })
-    if (pendingId != null) {
-      return c.json({ success: true, pending: true, pendingActionId: pendingId }, 202)
+    if (getActionTier(user, 'products', 'edit') === 'review') {
+      try { return c.json(await queueProductEdit(c.env, user, Number(id), body, editIdentity), 202) }
+      catch (error) {
+        if (error instanceof ProductEditError) return c.json({ success: false, error: error.message, code: error.code }, error.statusCode as 400 | 403 | 409)
+        throw error
+      }
     }
   }
 
@@ -2392,78 +2400,17 @@ app.put('/:id', async (c) => {
     if (normalizedBrands !== undefined) body.brands = normalizedBrands
   }
 
-  // The money plan's own `before` image (fetched by prepareProductMoneyWrite
-  // above, against THIS row's id) is the pre-edit cost figure -- reading it
-  // back out of the plan avoids a second SELECT for the common (non-fold)
-  // case. Absent for a create/group-rename-only plan, in which case there is
-  // no cost field to record anyway.
-  // A plain field edit (price, barcode, category, unit, description, image,
-  // active flag) wrote NOTHING to audit_logs before this -- the Audit Log had
-  // no record that a selling price had ever been changed, by whom, or from
-  // what. One row per edit, carrying only the columns that actually moved.
-  const productAuditColumns = Object.keys(cleanPayload(body, await tableColumns(c.env, 'products')))
-    .filter((column) => !PRODUCT_AUDIT_EXCLUDED_COLUMNS.has(column) && !isSecretShapedAuditKey(column))
-  const productBefore = productAuditColumns.length
-    ? await getDb(c.env)
-      .prepare(`SELECT ${productAuditColumns.map((column) => `"${column}"`).join(', ')} FROM products WHERE id = @id`)
-      .get<Record<string, unknown>>({ id })
-    : null
-  try { await updateRow(c.env, 'products', id, body, { id: actorId(user), name: actorSnapshot(user) }) } catch (error) {
-    if (error instanceof ProductMoneyWriteError) return c.json({ error: error.message, code: error.code }, error.status as 400 | 409)
+  try {
+    const saved = await commitProductEdit(c.env, user, Number(id), body, editIdentity)
+    await bumpVersion(c.env, 'products')
+    c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update', id }))
+    if (isImageOnlyEdit && saved.item) saved.item = restrictToImageOnlyFields(saved.item as Record<string, unknown>, getMergedPermissions(user))
+    return c.json(saved)
+  } catch (error) {
+    if (error instanceof ProductEditError) return c.json({ success: false, error: error.message, code: error.code }, error.statusCode as 400 | 403 | 409)
+    if (error instanceof ProductMoneyWriteError) return c.json({ success: false, error: error.message, code: error.code }, error.status as 400 | 409)
     throw error
   }
-  const appliedGroupRename = readProductMoneyPlan(body)?.group_rename
-  if (appliedGroupRename) {
-    await audit(c.env, user?.id ?? null, actorSnapshot(user), 'rename', 'product_group', id,
-      { from: appliedGroupRename.from, to: appliedGroupRename.to, rows: appliedGroupRename.members.length })
-    wroteProductRenameAudit = true
-  }
-  // Real, latent gap this session found while wiring the image-only role's
-  // gallery writes through this same handler: `image_gallery` is a virtual
-  // key (see syncProductImageGallery's own comment) that updateRow's
-  // cleanPayload silently drops -- it's not a real `products` column, so a
-  // body containing ONLY `image_gallery` (no other real column changed)
-  // left `changes` at 0 and this used to 404 BEFORE ever reaching the
-  // syncProductImageGallery call below, even though the write was
-  // perfectly valid. Never triggered by the full editor (ProductForm.tsx
-  // always sends `image_path` alongside `image_gallery`, and `image_path`
-  // IS a real column), but the image-only role's new gallery editor can
-  // legitimately send a gallery-only body (e.g. reordering without the
-  // first image changing) -- so this can no longer assume "no real column
-  // changed" means "nothing to do". Fetch the row first and use its
-  // existence (not `changes`) as the real 404 condition; `changes === 0`
-  // on an existing row (nothing to update, or an image_gallery-only body)
-  // is not an error.
-  const item = await getDb(c.env).prepare('SELECT * FROM products WHERE id = @id').get({ id })
-  if (!item) return c.json({ error: 'Product not found or unchanged' }, 404)
-  // `name` is held back only when a rename row was ACTUALLY written, tracked
-  // with the writes themselves. The first version keyed this off
-  // renamedProductName, which is set for ANY name change while the rename row
-  // fires only under __rename_scope === 'group' -- so a default-scope rename
-  // (the common case: rename this row only) was recorded nowhere at all.
-  // An edit that changed nothing audited (an image-gallery-only reorder, a
-  // resave of identical values) yields no diff and therefore no row.
-  const productFieldChange = changedFields(productBefore, item as Record<string, unknown>, {
-    keys: wroteProductRenameAudit
-      ? productAuditColumns.filter((column) => column !== 'name')
-      : productAuditColumns,
-  })
-  if (productFieldChange) {
-    await audit(c.env, user?.id ?? null, actorSnapshot(user), 'update', 'product', id, null, productFieldChange)
-  }
-  if (renamedProductName && renamedProductIds.length) {
-    await syncLinkedProductNameSnapshots(c.env, renamedProductIds, renamedProductName)
-  }
-  if ('image_gallery' in body) {
-    // validateImageGalleryPayload already proved this is either inside the
-    // caller's limit or a preservation-only edit of an existing admin
-    // gallery, so the writer may retain all five stored positions.
-    const gallery = await syncProductImageGallery(c.env, id, body.image_gallery, ADMIN_MAX_IMAGES_PER_PRODUCT)
-    ;(item as Record<string, unknown>).image_gallery = gallery
-  }
-  await bumpVersion(c.env, 'products')
-  c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update', id }))
-  return c.json({ item: isImageOnlyEdit ? restrictToImageOnlyFields(item as Record<string, unknown>, getMergedPermissions(user)) : item, success: true })
 })
 
 app.delete('/:id', async (c) => {

@@ -18,6 +18,7 @@
 // approved without the real change having happened.
 
 import { getDb } from './db'
+import { productEditPendingPointer, approveProductEdit, ProductEditError } from './productEditOperation'
 import { audit } from './audit'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from './cache'
@@ -388,6 +389,14 @@ export async function applyApprovedPendingAction(
   reviewerUser?: SessionUser,
   waitUntil?: ReviewWaitUntil,
 ): Promise<ReviewApplyOutcome> {
+  if (productEditPendingPointer(row)) {
+    const requester = await loadPendingRequester(env, row.requested_by)
+    if (!requester || !reviewerUser) throw new ProductEditError('request_permission_revoked', 'The requester is no longer allowed to apply this product change.', 403)
+    await approveProductEdit(env, row, requester, reviewerUser)
+    await bumpVersion(env, 'products')
+    await notify(env, waitUntil, 'products', { action: 'update', id: row.entity_id })
+    return { pendingActionMarkedAtomically: true }
+  }
   if (productRemovePendingPointer(row)) return applyApprovedProductRemove(env, row, reviewer, reviewerUser, waitUntil)
   const fn = appliers.get(applierKey(row.section, row.action_type, row.entity_type))
   if (!fn) throw new NoReviewApplierError(row.section, row.action_type, row.entity_type)

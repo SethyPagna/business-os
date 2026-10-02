@@ -285,7 +285,7 @@ export async function insertRow(env: Env, table: string, body: Record<string, un
   return result.meta?.last_row_id
 }
 
-export async function updateRow(env: Env, table: string, id: string | number, body: Record<string, unknown>, costOverrideActor?: { id: number | null; name: string | null }) {
+export async function planProductRowUpdate(env: Env, table: string, id: string | number, body: Record<string, unknown>, costOverrideActor?: { id: number | null; name: string | null }) {
   const moneyPlan = readProductMoneyPlan(body)
   if (moneyPlan && (table !== 'products' || moneyPlan.kind !== 'update' || moneyPlan.product_id !== Number(id))) invalidMoneyPlan()
   const columns = await tableColumns(env, table)
@@ -293,19 +293,20 @@ export async function updateRow(env: Env, table: string, id: string | number, bo
   applySearchNormalizedColumns(payload, body, columns, false)
   if (columns.has('updated_at')) payload.updated_at = nowIso()
   const keys = Object.keys(payload).filter((key) => columns.has(key))
-  if (!keys.length) return 0
+  if (!keys.length) return { statements: [], updateIndex: 0, payload, manualEntry: false, guarded: !!moneyPlan }
   const assignments = keys.map((key) => `"${key}" = ?`).join(', ')
   const beforeKeys = moneyPlan ? [...moneyFields(moneyPlan.version), 'updated_at', 'name'] as const : []
   const guard = moneyPlan ? beforeKeys.map(field => ` AND "${field}" IS ?`).join('') : ''
   const updateSql = `UPDATE "${table}" SET ${assignments} WHERE id = ?${guard}`
   const updateParams = [...keys.map((key) => payload[key]), id, ...(moneyPlan ? beforeKeys.map(field => moneyPlan.before![field]) : [])]
-  const statement = env.DB.prepare(updateSql).bind(...updateParams)
+  const statement = { sql: updateSql, params: updateParams }
   // This option is server-owned, never body metadata. Preserve the existing
   // full money preimage guard before recording an override or its baseline.
   if (costOverrideActor && (!moneyPlan || table !== 'products')) invalidMoneyPlan()
   const costBefore = moneyPlan?.before as { cost_price_usd: number | null; cost_price_khr: number | null } | null
   const manualEntry = costOverrideActor && costBefore ? planManualCostEntry(Number(id), costBefore, body, costOverrideActor) : null
-  let result
+  let statements: Array<{ sql: string; params?: Record<string, unknown> | unknown[] }>
+  let updateIndex = 0
   if (moneyPlan?.group_rename) {
     // No rename or audit happens before target admission. A failed target CAS
     // aborts the same batch before touching any sibling, including name-only races.
@@ -313,29 +314,23 @@ export async function updateRow(env: Env, table: string, id: string | number, bo
     const groupColumns = Object.keys(group.members[0])
     if (groupColumns.length !== columns.size || groupColumns.some(key => !columns.has(key))
       || [...group.members, ...group.target_members].some(member => Object.keys(member).sort().join(',') !== [...groupColumns].sort().join(','))) invalidMoneyPlan()
-    const guardGroup = (name: string, members: Record<string, unknown>[]) => env.DB.prepare(`SELECT CASE WHEN
+    const guardGroup = (name: string, members: Record<string, unknown>[]) => ({ sql: `SELECT CASE WHEN
       (SELECT COUNT(*) FROM products WHERE name_key=? AND is_active=1)=?
       AND NOT EXISTS (SELECT 1 FROM json_each(?) expected WHERE NOT EXISTS (
         SELECT 1 FROM products p WHERE ${joinBalanced(groupColumns.map(key => `p."${key}" IS json_extract(expected.value,'$.${key}')`))}
-      )) THEN 1 ELSE json('product_money_state_conflict') END`)
-      .bind(name.toLowerCase(), members.length, JSON.stringify(members))
-    try {
-      const results = await env.DB.batch([
+      )) THEN 1 ELSE json('product_money_state_conflict') END`,
+      params: [name.toLowerCase(), members.length, JSON.stringify(members)] })
+      statements = [
         guardGroup(group.from, group.members),
         guardGroup(group.to, group.target_members),
         statement,
-        env.DB.prepare(`SELECT CASE WHEN changes() > 0 THEN 1 ELSE json('product_money_state_conflict') END`),
-        env.DB.prepare(`UPDATE products SET name = ?, updated_at = ? WHERE name_key = ? AND is_active = 1 AND id != ?`)
-          .bind(group.to, payload.updated_at, group.from.toLowerCase(), id),
-      ])
-      result = results[2]
-    } catch (error) {
-      if (/malformed JSON|product_money_state_conflict/i.test(String(error))) throw new ProductMoneyWriteError('product_money_state_conflict', 'The product changed before the group rename. Submit a new edit.')
-      throw error
-    }
+        { sql: `SELECT CASE WHEN changes() > 0 THEN 1 ELSE json('product_money_state_conflict') END` },
+        { sql: `UPDATE products SET name = ?, updated_at = ? WHERE name_key = ? AND is_active = 1 AND id != ?`,
+          params: [group.to, payload.updated_at, group.from.toLowerCase(), id] },
+      ]
+      updateIndex = 2
   } else if (manualEntry && costOverrideActor && costBefore) {
-    try {
-      const results = await getDb(env).batch([
+      statements = [
         { sql: updateSql, params: updateParams },
         { sql: `SELECT CASE WHEN changes()>0 THEN 1 ELSE json('product_money_state_conflict') END` },
         manualEntry,
@@ -348,15 +343,23 @@ export async function updateRow(env: Env, table: string, id: string | number, bo
           params: { actorId: costOverrideActor.id, actorName: costOverrideActor.name, productId: Number(id), entityId: String(id),
             oldValue: JSON.stringify({ cost_price_usd: costBefore.cost_price_usd, cost_price_khr: costBefore.cost_price_khr }) } },
         catalogCostRecomputeStatement(Number(id)),
-      ])
-      result = results[0]
-    } catch (error) {
-      if (/malformed JSON|product_money_state_conflict/i.test(String(error))) throw new ProductMoneyWriteError('product_money_state_conflict', 'The product changed after the price plan was prepared. Submit a new edit.')
-      throw error
-    }
-  } else result = await statement.run()
-  if (moneyPlan && !result.meta?.changes) throw new ProductMoneyWriteError('product_money_state_conflict', 'The product changed after the price plan was prepared. Submit a new edit.')
-  return result.meta?.changes || 0
+      ]
+  } else statements = [statement]
+  return { statements, updateIndex, payload, manualEntry: !!manualEntry, guarded: !!moneyPlan }
+}
+
+export async function updateRow(env: Env, table: string, id: string | number, body: Record<string, unknown>, costOverrideActor?: { id: number | null; name: string | null }) {
+  const plan = await planProductRowUpdate(env, table, id, body, costOverrideActor)
+  if (!plan.statements.length) return 0
+  try {
+    const results = await getDb(env).batch(plan.statements)
+    const changes = results[plan.updateIndex]?.meta?.changes || 0
+    if (plan.guarded && !changes) throw new ProductMoneyWriteError('product_money_state_conflict', 'The product changed after the price plan was prepared. Submit a new edit.')
+    return changes
+  } catch (error) {
+    if (/malformed JSON|product_money_state_conflict/i.test(String(error))) throw new ProductMoneyWriteError('product_money_state_conflict', 'The product changed after the price plan was prepared. Submit a new edit.')
+    throw error
+  }
 }
 
 // --- multi-category / multi-brand normalization ---------------------------
