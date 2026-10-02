@@ -58,6 +58,8 @@ const FAKE_USER = { id: 1, username: 'tester', name: 'Test User', permissions: J
 let backupCallLog = []
 let backupShouldFail = false
 let sectionBackupTables = null
+let backupBeforeReturn = null
+let finalizationEffects = []
 
 const permissions = loadReal('lib/permissions.ts')
 const media = loadReal('lib/media.ts')
@@ -73,16 +75,16 @@ const systemRoute = loadReal('routes/system.ts', {
   '../lib/db': loadStockLifecycleFixture('lib/db.ts'),
   '../lib/stockLifecycle': loadStockLifecycleFixture(),
   '../lib/auth': { requireAuth: async (c, next) => { c.set('user', FAKE_USER); return next() } },
-  '../lib/audit': { audit: async () => {} },
+  '../lib/audit': { audit: async () => { finalizationEffects.push('audit') } },
   '../lib/permissions': permissions,
   '../lib/dataIntegrity': { runDataIntegrityCheck: async () => ({}) },
   '../lib/errorReporting': { reportError: async () => false },
   '../lib/rateLimit': { checkRateLimit: async () => ({ allowed: true, retryAfterSeconds: 0 }), getClientIp: () => '127.0.0.1' },
   '../lib/r2': {
-    listObjects: async () => [],
-    deleteObject: async () => {},
+    listObjects: async () => { finalizationEffects.push('r2-list'); return [] },
+    deleteObject: async () => { finalizationEffects.push('r2-delete') },
     // K4: the prefix-wide sweeps delete through the chunked bulk helper now.
-    deleteObjectsBulk: async (_bucket, keys) => ({ deleted: keys.length, errors: [] }),
+    deleteObjectsBulk: async (_bucket, keys) => { finalizationEffects.push('r2-delete-bulk'); return { deleted: keys.length, errors: [] } },
   },
   // K4: orphan-staging engine has its own pure test -- irrelevant here.
   '../lib/importRetention': { cleanOrphanImportStaging: async () => ({ applied: false, tables: {}, r2Keys: 0 }) },
@@ -97,12 +99,13 @@ const systemRoute = loadReal('routes/system.ts', {
       backupCallLog.push('section')
       sectionBackupTables = [...tables]
       if (backupShouldFail) throw new Error('simulated backup failure')
+      if (backupBeforeReturn) await backupBeforeReturn()
       return { name: 'fake-section-backup' }
     },
   },
   '../lib/media': media,
-  '../durable-objects/broadcastHub': { broadcast: async () => {} },
-  '../lib/cache': { bumpVersion: async () => {} },
+  '../durable-objects/broadcastHub': { broadcast: async () => { finalizationEffects.push('broadcast') } },
+  '../lib/cache': { bumpVersion: async () => { finalizationEffects.push('cache-version') } },
 })
 
 const app = systemRoute.default
@@ -235,7 +238,76 @@ async function main() {
     assert.strictEqual(backupCallLog.length, 0, 'a rejected step must not even take a backup')
   })
 
+  await lifecycleFinalizeContract()
   console.log(`\n${passed} checks passed.`)
 }
 
 main().catch((error) => { console.error(error); process.exit(1) })
+
+async function lifecycleFinalizeContract() {
+  const encode = value => JSON.stringify(value, (_, item) => typeof item === 'bigint'
+    ? ['integer64', String(item)] : item instanceof Uint8Array ? ['blob', Buffer.from(item).toString('hex')] : item)
+  for (const funding of [false, true]) for (const step of ['zero_stock', 'park_lots']) for (const late of [false, true]) {
+    const handle = openDb(loadAll()), sql = handle.db, batchId = step === 'park_lots' ? 2 : 1
+    sql.exec(`INSERT INTO users(id,username,name,password,permissions,is_active) SELECT 1,'fixture-actor','Fixture actor','admin123','{}',1 WHERE NOT EXISTS(SELECT 1 FROM users WHERE id=1);
+      INSERT INTO branches(id,name,is_active,is_default) VALUES(1,'Main',1,1);
+      INSERT INTO suppliers(id,name) VALUES(31,'Linked supplier');
+      INSERT INTO products(id,name,stock_quantity) VALUES(1,'Linked source',6);
+      INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,notes,is_active,supplier_id,payment_status,received_quantity,received_cost_usd,received_branch_id,unit_cost_usd)
+        VALUES(1,1,'OPEN','OPEN','Received via product import',1,31,'credit',3,3,1,1),(2,1,'HIST','HIST','Unified stock import fixture',1,31,'credit',3,3,1,1);
+      INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(1,1,3),(2,1,3);
+      INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(1,1,6);
+      INSERT INTO inventory_movements(id,product_id,branch_id,batch_id,movement_type,quantity,free_quantity,total_cost_usd,unit_cost_usd,user_id) VALUES(701,1,1,${batchId},'add',3,0,3,1,1);`)
+    const admit = () => {
+      sql.exec(funding
+        ? `INSERT INTO stock_funding_sources(id,movement_id,batch_id,product_id,branch_id,supplier_id,quantity,free_quantity,gross4,opening_paid4,opening_debt4,reconciliation_proof,actor_id,source_json) VALUES('linked',701,${batchId},1,1,31,'3','0',30000,0,30000,'Fixture proof',1,'{}');`
+        : `INSERT INTO stock_disposition_sources(id,movement_id,batch_id,product_id,branch_id,supplier_id,quantity,free_quantity,gross4,opening_paid4,opening_debt4,funding_state) VALUES('linked',701,${batchId},1,1,31,'3','0',30000,0,30000,'reconciled_unpaid');`)
+      assert.equal(Number(sql.prepare('SELECT batch_id FROM stock_lifecycle_dependencies WHERE movement_id=701').get().batch_id), batchId)
+      assert.equal(sql.prepare('SELECT notes FROM product_batches WHERE id=?').get(batchId).notes.startsWith('Unified stock import'), step === 'park_lots')
+    }
+    const snapshot = () => encode(sql.prepare("SELECT type,name,tbl_name,sql FROM sqlite_master ORDER BY type,name").all().map(object => {
+      if (object.type !== 'table') return [object, []]
+      const statement = sql.prepare(`SELECT * FROM "${object.name.replaceAll('"', '""')}"`)
+      statement.setReadBigInts(true)
+      return [object, statement.all().map(encode).sort()]
+    }))
+    let before
+    if (!late) { admit(); before = snapshot() }
+    const writes = { run: 0, batch: 0 }, cache = new Map([['refusal-sentinel', 'retained']]), cacheWrites = [], requests = [], waits = []
+    const binding = nativeStockFixtureBinding(sql, items => handle.batch(items)), prepare = binding.prepare.bind(binding), batch = binding.batch.bind(binding)
+    binding.prepare = text => { const statement = prepare(text), bind = statement.bind.bind(statement); statement.bind = (...values) => { const bound = bind(...values), run = bound.run.bind(bound); bound.run = async () => { writes.run++; return run() }; return bound }; return statement }
+    binding.batch = async items => { writes.batch++; return batch(items) }
+    const env = { DB: binding, CACHE: { get: async key => cache.get(key) ?? null, put: async (key,value) => { cacheWrites.push(['put',key,value]); cache.set(key,value) }, delete: async key => { cacheWrites.push(['delete',key]); cache.delete(key) } },
+      ASSETS: { get: async key => { requests.push(['get',key]); return null }, put: async key => { requests.push(['put',key]) }, delete: async key => { requests.push(['delete',key]) } } }
+    backupCallLog = []; backupShouldFail = false; finalizationEffects = []
+    backupBeforeReturn = late ? async () => { admit(); before = snapshot() } : null
+    const response = await app.request('/finalize-migration', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ step }) }, env,
+      { waitUntil: value => { waits.push(Promise.resolve(value)) }, passThroughOnException: () => {} })
+    await Promise.all(waits)
+    const result = await response.json()
+    assert.equal(response.status, 409, JSON.stringify(result))
+    assert.equal(result.code, 'stock_lifecycle_dependency')
+    assert.equal(snapshot(), before)
+    assert.deepEqual(backupCallLog, late ? ['section'] : [])
+    assert.deepEqual(writes, late ? (step === 'zero_stock' ? { run: 0, batch: 1 } : { run: 1, batch: 0 }) : { run: 0, batch: 0 })
+    assert.deepEqual(cacheWrites, [['put','ratelimit:finalize_migration:1','1']])
+    assert.deepEqual([...cache].sort(), [['ratelimit:finalize_migration:1','1'],['refusal-sentinel','retained']])
+    assert.deepEqual(requests, [])
+    assert.deepEqual(finalizationEffects, [])
+    backupBeforeReturn = null
+    if (step === 'zero_stock' && !late) {
+      const positive = await app.request('/finalize-migration', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ step: 'park_lots' }) }, env,
+        { waitUntil: value => { waits.push(Promise.resolve(value)) }, passThroughOnException: () => {} })
+      await Promise.all(waits)
+      assert.equal(positive.status, 200, await positive.text())
+      assert.equal(Number(sql.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id=1').get().quantity), 3)
+      assert.equal(Number(sql.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id=2').get().quantity), 0)
+    }
+    sql.close()
+  }
+  const realDb = loadStockLifecycleFixture('lib/db.ts'), fence = loadStockLifecycleFixture('lib/importMaintenanceFence.ts')
+  assert.strictEqual(realDb.getImportFencedDb, fence.getImportFencedDb)
+  assert.strictEqual(realDb, loadStockLifecycleFixture('lib/db.ts'))
+  assert.equal(loadStockLifecycleFixture().StockLifecycleError.prototype instanceof require('hono/http-exception').HTTPException, true)
+  console.log('PASS actual finalize linked disposition/funding preflight before backup/writes and late trigger rollback; unrelated opening lots admitted; only existing admission KV write')
+}

@@ -1110,6 +1110,20 @@ app.post('/finalize-migration', async (c) => {
 
   // Same hard prerequisite as every reset: a fresh, scoped backup must
   // succeed before any write runs, so the operation is always undoable.
+  try {
+    if (step === 'zero_stock') {
+      await assertStockLifecycleMutable(db, { allSources: true })
+    } else {
+      const lots = await db.prepare(
+        "SELECT DISTINCT batch_id AS id FROM branch_batch_stock WHERE quantity <> 0 AND batch_id IN (SELECT id FROM product_batches WHERE instr(notes, 'Unified stock import') = 1)",
+      ).all<{ id: number }>()
+      for (const lot of lots) await assertStockLifecycleMutable(db, { batchId: lot.id })
+    }
+  } catch (error) {
+    const lifecycle = stockLifecycleRefusal(error)
+    if (lifecycle) return c.json({ success: false, ...lifecycle }, 409)
+    throw error
+  }
   const backupTables = step === 'zero_stock' ? ['branch_stock', 'products'] : ['branch_batch_stock']
   try {
     await createSectionBackup(c.env, backupTables, 'manual')
@@ -1172,6 +1186,8 @@ app.post('/finalize-migration', async (c) => {
       message: `Parked ${affected.branch_batch_stock} historical row(s) — the POS picker will now skip un-allocatable "Unified stock import" received dates. A fresh backup was taken first.`,
     })
   } catch (error) {
+    const lifecycle = stockLifecycleRefusal(error)
+    if (lifecycle) return c.json({ success: false, ...lifecycle }, 409)
     return c.json({ success: false, error: (error as Error).message || 'Finalize migration failed' }, 500)
   }
 })

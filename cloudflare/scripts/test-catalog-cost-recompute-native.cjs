@@ -26,6 +26,7 @@ const { loadStockLifecycleFixture, nativeStockFixtureBinding } = require('./harn
 
 let sqlite
 let waits = []
+let externalEffects = []
 let user = { id: 7, name: 'Operator', permissions: JSON.stringify({ inventory: true, product_cost_edit: true, product_cost_view: true }) }
 const modules = new Map()
 
@@ -43,9 +44,9 @@ function load(relative) {
     const name = id.split('/').at(-1)
     if (['db', 'importMaintenanceFence', 'stockLifecycle'].includes(name)) return loadStockLifecycleFixture(`lib/${name}.ts`)
     if (name === 'auth') return { requireAuth: async (c, next) => { c.set('user', user); return next() } }
-    if (name === 'broadcastHub') return { broadcast: async () => {} }
-    if (name === 'cache') return { bumpVersion: async () => {} }
-    if (name === 'telegram') return { formatStockChangeTelegramLines: () => [], formatTransferTelegramLines: () => [], sendTelegramEvent: async () => {} }
+    if (name === 'broadcastHub') return { broadcast: async () => { externalEffects.push('broadcast') } }
+    if (name === 'cache') return { bumpVersion: async () => { externalEffects.push('cache') } }
+    if (name === 'telegram') return { formatStockChangeTelegramLines: () => [], formatTransferTelegramLines: () => [], sendTelegramEvent: async () => { externalEffects.push('telegram') } }
     if (id.startsWith('../lib/') || id.startsWith('./')) {
       const resolved = id.startsWith('../lib/') ? `lib/${name}.ts` : `lib/${name}.ts`
       if (fs.existsSync(path.join(__dirname, '../src', resolved))) return load(resolved)
@@ -57,8 +58,13 @@ function load(relative) {
 }
 
 const inventory = load('routes/inventory.ts').default
+function fixtureLifecycleRefusal(error) {
+  const d1Error = error?.code === 'SQLITE_CONSTRAINT_TRIGGER' && error.message === 'stock_lifecycle_dependency'
+    ? new Error('D1_ERROR: stock_lifecycle_dependency: SQLITE_CONSTRAINT_TRIGGER') : error
+  return loadStockLifecycleFixture().stockLifecycleRefusal(d1Error)
+}
 inventory.onError((error, c) => {
-  const refusal = loadStockLifecycleFixture().stockLifecycleRefusal(error)
+  const refusal = fixtureLifecycleRefusal(error)
   return refusal ? c.json({ success: false, ...refusal }, 409) : c.json({ error: error.message }, 500)
 })
 
@@ -69,6 +75,7 @@ function fresh() {
   sqlite.exec("INSERT INTO branches(id,name,is_active,is_default) VALUES(1,'Shop',1,1)")
   sqlite.exec("INSERT INTO products(id,name,stock_quantity,cost_price_usd,cost_price_khr) VALUES(1,'Widget',0,0,0)")
   waits = []
+  externalEffects = []
   user = { id: 7, name: 'Operator', permissions: JSON.stringify({ inventory: true, product_cost_edit: true, product_cost_view: true }) }
 }
 
@@ -201,7 +208,49 @@ async function main() {
     assert.equal(state(),beforeDenied,'movement failure rolls back both stock ledgers and product quantity')
   })
 
+  await catalogLifecycleContract()
   console.log(`\n${checks} checks passed`)
 }
 
 main().catch((e) => { console.error(e); process.exitCode = 1 })
+
+async function catalogLifecycleContract() {
+  const encode = value => JSON.stringify(value, (_, item) => typeof item === 'bigint'
+    ? ['integer64', String(item)] : Buffer.isBuffer(item) ? ['blob', item.toString('hex')] : item)
+  const snapshot = () => encode(sqlite.prepare("SELECT type,name,tbl_name,sql FROM sqlite_master ORDER BY type,name").all().map(object => [object,
+    object.type === 'table' ? sqlite.prepare(`SELECT * FROM "${object.name.replaceAll('"', '""')}"`).safeIntegers(true).all().map(encode).sort() : []]))
+  for (const funding of [false, true]) for (const linked of [true, false]) {
+    fresh()
+    assert.equal((await request(addBody({ unitCostUsd: 3, receivedDate: '01/09/2026' }))).status, 200)
+    const productId = linked ? 1 : 2, batchId = linked ? 1 : 2
+    sqlite.exec(`INSERT INTO users(id,username,name,password,permissions,is_active) SELECT 1,'fixture-actor','Fixture actor','admin123','{}',1 WHERE NOT EXISTS(SELECT 1 FROM users WHERE id=1);
+      INSERT INTO suppliers(id,name) VALUES(31,'Linked supplier');`)
+    if (!linked) sqlite.exec(`INSERT INTO products(id,name,stock_quantity) VALUES(2,'Unrelated source',3);
+      INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,is_active) VALUES(2,2,'OTHER','OTHER',1);
+      INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(2,1,3);
+      INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(2,1,3);`)
+    sqlite.exec(`UPDATE product_batches SET supplier_id=31,payment_status='credit',received_quantity=3,received_cost_usd=3,received_branch_id=1,unit_cost_usd=1 WHERE id=${batchId};
+      INSERT INTO inventory_movements(id,product_id,branch_id,batch_id,movement_type,quantity,free_quantity,total_cost_usd,unit_cost_usd,user_id) VALUES(701,${productId},1,${batchId},'add',3,0,3,1,1);`)
+    if (funding) sqlite.exec(`INSERT INTO stock_funding_sources(id,movement_id,batch_id,product_id,branch_id,supplier_id,quantity,free_quantity,gross4,opening_paid4,opening_debt4,reconciliation_proof,actor_id,source_json)
+      VALUES('linked',701,${batchId},${productId},1,31,'3','0',30000,0,30000,'Fixture proof',1,'{}');`)
+    else sqlite.exec(`INSERT INTO stock_disposition_sources(id,movement_id,batch_id,product_id,branch_id,supplier_id,quantity,free_quantity,gross4,opening_paid4,opening_debt4,funding_state)
+      VALUES('linked',701,${batchId},${productId},1,31,'3','0',30000,0,30000,'reconciled_unpaid');`)
+    const before = snapshot()
+    externalEffects = []
+    const result = await request({ productId: 1, type: 'add', quantity: 1, reason: 'Count correction', branchId: 1, batchId: 1, attribution: 'correction' })
+    assert.equal(result.status, linked ? 409 : 200, JSON.stringify(result))
+    if (linked) {
+      assert.equal(result.body.code, 'stock_lifecycle_dependency')
+      assert.equal(snapshot(), before)
+      assert.deepEqual(externalEffects, [])
+    } else assert.equal(sqlite.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id=1 AND branch_id=1').get().quantity, 2)
+    sqlite.close()
+  }
+  const realDb = loadStockLifecycleFixture('lib/db.ts'), fence = loadStockLifecycleFixture('lib/importMaintenanceFence.ts')
+  assert.strictEqual(realDb.getImportFencedDb, fence.getImportFencedDb)
+  assert.strictEqual(realDb, loadStockLifecycleFixture('lib/db.ts'))
+  assert.equal(loadStockLifecycleFixture().StockLifecycleError.prototype instanceof require('hono/http-exception').HTTPException, true)
+  assert.equal(fixtureLifecycleRefusal(Object.assign(new Error('other trigger'), { code: 'SQLITE_CONSTRAINT_TRIGGER' })), null)
+  assert.equal(fixtureLifecycleRefusal(Object.assign(new Error('stock_lifecycle_dependency'), { code: 'SQLITE_CONSTRAINT_FOREIGNKEY' })), null)
+  console.log('PASS catalog linked disposition/funding rollback with coded refusal and no external effects; unrelated source corrections admitted')
+}
