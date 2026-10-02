@@ -124,11 +124,11 @@ import { netSaleExpr, recognizedExpr, RESTOCKED_RETURN_LINE, stockValuationSaleC
 import type { D1Compat } from './db'
 
 export type ProductSalesLedgerOptions = {
+  managedCosts?: boolean
   /**
    * Restrict both sides to a `requested_ids(product_id)` CTE the CALLER
    * declares, so a paged endpoint enriches only the rows it returned.
    */
-  managedCosts?: boolean
   requestedIds?: boolean
   /**
    * Scope the SALE LINE to @branchId, and APPORTION each return line across

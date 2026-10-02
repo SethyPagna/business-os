@@ -63,7 +63,7 @@ async function lifecycle(credit=5){
   await costs(f,10-credit,`uncancel${10-credit}`)
   assert.equal((await get(f,'/consumption-recoveries')).recovery_usd,0,'uncancel lower capture does not reopen reversed recovery')
   assert.deepEqual({...f.db.prepare('SELECT cost_price_usd AS cost,total_usd AS total FROM sale_items WHERE id=?').get(item.id)},captured)
-  console.log('PASS actual report API/totals/export/ranking consumption10 credit5 cancel0 uncancel5, immutable capture')
+  console.log(`PASS actual report API/totals/export/ranking consumption10 credit${credit} cancel0 uncancel${10-credit}, immutable capture`)
  }finally{f.db.close()}
 }
 async function exactResidue(){
@@ -93,6 +93,12 @@ async function gates(){
   const customer=(await analytics.getSalesGroupedTotals(env(f),{},'customer')).find(row=>row.entity_id===88)
   assert.equal(customer.cost_usd,10)
   assert.equal((await get(f,'/consumption-recoveries?customerId=88')).recovery_usd,0)
+  const consumed=f.db.prepare("SELECT s.* FROM stock_valuation_segments_v4 s JOIN stock_valuation_latest e ON e.id=s.event_id WHERE s.fate='consumed'").get()
+  await h.command(f,h.valuation('pending',6,2,{agreement_id:'gate-credit',amount_usd:5,targets:[{allocation_id:'affected',amount_usd:5}],proof:'Pending reader recovery filters'}))
+  await h.command(f,h.valuation('accept',7,3,{agreement_id:'gate-credit',shares:[{segment_id:consumed.segment_id,amount_usd:5}],proof:'Pending reader exact consumed recovery'}))
+  const credited=await analytics.getSalesTotals(env(f),{});assert.equal(credited.cost_usd,5);assert.equal(credited.pending_cost_usd,5)
+  for(const query of ['status=awaiting_payment','customerId=88','branchId=1','productId=10'])assert.equal((await get(f,'/consumption-recoveries?'+query)).recovery_usd,5,query)
+  for(const query of ['status=completed','customerId=89','branchId=2','productId=20'])assert.equal((await get(f,'/consumption-recoveries?'+query)).recovery_usd,0,query)
   h.setActor({...normal,permissions:'{"sales":"view"}'})
   const hidden=await get(f,'/overview'),listing=await get(f,'/business-summary/sales?intent=export')
   const inspect=value=>{if(!value||typeof value!=='object')return;for(const key of ['cost_usd','profit_usd','pending_cost_usd','pending_profit_usd','cost4','recovery4','net4','managedSaleCosts'])assert.equal(Object.hasOwn(value,key),false,key);for(const child of Object.values(value))inspect(child)}
@@ -139,4 +145,31 @@ async function partialSchema(){
   console.log('PASS incomplete valuation schema refuses instead of permissive legacy fallback')
  }finally{corrupt.db.close()}
 }
-(async()=>{if(process.env.STOCK_READER_SECTION==='residue')await exactResidue();else if(process.env.STOCK_READER_SECTION==='gates')await gates();else{await lifecycle();await lifecycle(10);await exactResidue();await gates();await partialSchema()}})().catch(error=>{console.error(error);process.exitCode=1})
+async function coherentReads(){
+ for(const kind of ['current','activity']){
+  const f=await h.repairedFixture()
+  try{
+   assert.equal((await h.call(f,h.sales,'/',h.saleBody())).status,200)
+   const consumed=f.db.prepare("SELECT s.* FROM stock_valuation_segments_v4 s JOIN stock_valuation_latest e ON e.id=s.event_id WHERE s.fate='consumed'").get()
+   await h.command(f,h.valuation('pending',6,2,{agreement_id:'race-credit',amount_usd:5,targets:[{allocation_id:'affected',amount_usd:5}],proof:'Coherent reader race'}))
+   let reads=0;const prepare=f.d1.prepare
+   const decorate=(statement,sql)=>({...statement,bind:(...values)=>decorate(statement.bind(...values),sql),all:async()=>{
+    const result=await statement.all()
+    const matched=kind==='current'?sql.includes('SELECT l.sale_item_id,l.source_id,l.quantity,s.consumed_cost4'):sql.includes('FROM (SELECT r.*,r.occurred_at AS created_at')
+    if(matched&&++reads===1)await h.command(f,h.valuation('accept',7,3,{agreement_id:'race-credit',shares:[{segment_id:consumed.segment_id,amount_usd:5}],proof:'Atomic accepted credit between reader passes'}))
+    return result
+   }})
+   f.d1.prepare=sql=>decorate(prepare(sql),sql)
+   if(kind==='current'){
+    assert.equal((await analytics.getSalesTotals(env(f),{})).cost_usd,5)
+    assert.ok(reads>=4,'changed current net triggers coherent snapshot retry')
+   }else{
+    const response=await reports.request('/consumption-recoveries',{},env(f),h.context)
+    assert.equal(response.status,409);assert.equal((await response.json()).code,'snapshot_changed');assert.equal(reads,2)
+   }
+   f.d1.prepare=prepare
+   console.log(`PASS actual accepted-credit ${kind} read race yields coherent latest cost or coded activity409`)
+  }finally{f.db.close()}
+ }
+}
+(async()=>{if(process.env.STOCK_READER_SECTION==='residue')await exactResidue();else if(process.env.STOCK_READER_SECTION==='gates')await gates();else{await lifecycle();await lifecycle(10);await exactResidue();await gates();await partialSchema();await coherentReads()}})().catch(error=>{console.error(error);process.exitCode=1})

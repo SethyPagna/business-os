@@ -1710,7 +1710,7 @@ export async function readStockConsumptionRecoveryActivity(env: Env, f: SalesFil
       activity.kind,activity.occurred_at,activity.consumed_cost4,activity.consumed_recovery4
     FROM (SELECT r.*,r.occurred_at AS created_at FROM stock_valuation_sale_recoveries r) activity
     JOIN sales s ON s.id=activity.sale_id JOIN sale_items si ON si.id=activity.sale_item_id
-    WHERE ${clauses.join(' AND ')} ORDER BY activity.event_id,activity.consumption_id LIMIT ${REPORT_MONEY_MAX_ROWS + 1}`)
+    WHERE ${clauses.join(' AND ')} ORDER BY activity.occurred_at,activity.event_id,activity.consumption_id LIMIT ${REPORT_MONEY_MAX_ROWS + 1}`)
     .all<Record<string, unknown>>(params)
   const rows = await read()
   await assertReportReadable(db)
