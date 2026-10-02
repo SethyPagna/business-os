@@ -281,7 +281,7 @@ async function lifecycleFinalizeContract() {
       for (const ids of [[batchId], [999, batchId], [batchId, batchId]]) await refuses({ batchIds: ids })
       await refuses({ batchIds: [batchId], branchId: 1, productId: 1, movementId: 701, supplierIds: [31] })
       for (const scope of [
-        { batchIds: [] }, { batchIds: [], allSources: true }, { batchIds: [999] },
+        { batchIds: [] }, { batchIds: [], allSources: true }, { batchIds: [999] }, { batchIds: [batchId + 0.9] },
         { batchIds: [batchId], batchId: 999 }, { batchIds: [batchId], branchId: 999 },
         { batchIds: [batchId], productId: 999 }, { batchIds: [batchId], movementId: 999 },
         { batchIds: [batchId], supplierId: 999 }, { batchIds: [batchId], supplierIds: [999] },

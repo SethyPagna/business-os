@@ -39,7 +39,7 @@ export async function assertStockLifecycleMutable(db: D1Compat, scope: { movemen
     params.supplierIds = JSON.stringify(scope.supplierIds)
   }
   if (scope.batchIds) {
-    clauses.push('batch_id IN (SELECT CAST(value AS INTEGER) FROM json_each(@batchIds))')
+    clauses.push('batch_id IN (SELECT value FROM json_each(@batchIds))')
     params.batchIds = JSON.stringify(scope.batchIds)
   }
   if (!clauses.length && !scope.allSources) return
