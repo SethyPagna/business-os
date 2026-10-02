@@ -1073,10 +1073,11 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
   try {
     await db.batch(statements)
   } catch (error) {
-    const retry = await db.prepare('SELECT request_json,receipt_json FROM stock_session_operations WHERE actor_id=@actor AND request_id=@request')
+    const retry = await db.prepare('SELECT id,request_json,receipt_json FROM stock_session_operations WHERE actor_id=@actor AND request_id=@request')
       .get<Row>({ actor: user.id, request: request.client_request_id })
     if (retry) {
       if (retry.request_json !== canonical) fail('client_request_id was already used with different data.', 409, 'idempotency_conflict')
+      await assertStockEpochSessionReplay(env, user, String(retry.id))
       return parseStoredReceipt(retry, true)
     }
     if (/constraint/i.test(String(error))) fail('Product, branch, batch, stock, or asset state changed. Nothing was applied; refresh and retry.', 409, 'stale_state')

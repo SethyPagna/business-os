@@ -94,10 +94,16 @@ export async function commitStockEpochTransition(env: Env, actor: SessionUser, r
   if (source.revision !== raw.expected_revision || source.funding_generation !== raw.expected_generation) return fail('epoch_revision_conflict');
   const original = await db.prepare(`SELECT g.* FROM stock_epoch_current_fragments h JOIN stock_epoch_segments g ON g.event_id=h.event_id AND g.segment_id=h.segment_id WHERE h.source_id=@source AND h.segment_id=@segment`).get<Row>({ source: source.id, segment: raw.segment_id });
   if (!original || original.fate !== (raw.kind === 'hold' ? 'sellable' : 'held')) return fail('epoch_fragment_fate_conflict');
-  if (typeof raw.child_segment_id !== 'string' || !raw.child_segment_id.trim() || raw.child_segment_id.length > 100) return fail('epoch_fragment_identity_invalid', 400);
+  if (typeof raw.child_segment_id !== 'string' || !raw.child_segment_id.trim() || raw.child_segment_id.length > 100 || raw.child_segment_id === original.segment_id || `${raw.child_segment_id}-remaining` === original.segment_id) return fail('epoch_fragment_identity_invalid', 400);
+  let quantity: string;
+  try { quantity = quantityDecimal(raw.quantity); subtractQuantity(original.quantity, [quantity]); }
+  catch (error) {
+    if (error instanceof RangeError) return fail('epoch_quantity_invalid', 400);
+    throw error;
+  }
   if (await db.prepare('SELECT 1 FROM stock_epoch_segments g JOIN stock_epoch_events e ON e.id=g.event_id WHERE e.source_id=@source AND g.segment_id IN (@child,@remaining) LIMIT 1').get({ source: source.id, child: raw.child_segment_id, remaining: `${raw.child_segment_id}-remaining` })) return fail('epoch_fragment_identity_conflict');
   const event = crypto.randomUUID(), operation = `transition-${event}`, at = new Date().toISOString();
-  const split = splitEpochBasis(original as any, raw.quantity, raw.child_segment_id);
+  const split = splitEpochBasis(original as any, quantity, raw.child_segment_id);
   const selected = { ...original, ...split.selected, event_id: event, fate: raw.kind === 'hold' ? 'held' : 'sellable', allocation_id: raw.kind === 'hold' && original.allocation_id === 'origin' ? raw.child_segment_id : original.allocation_id, reason: raw.kind === 'hold' ? String(raw.reason || '') : '' };
   if (raw.kind === 'hold' && (!selected.reason.trim() || selected.reason.length > 500)) return fail('epoch_reason_required', 400);
   const remainder = { ...original, ...split.remaining, event_id: event };
@@ -156,5 +162,7 @@ export async function commitStockEpochTransition(env: Env, actor: SessionUser, r
     return fail('epoch_atomic_conflict');
   }
   await currentStockEpochActor(env, actor);
-  return { ...response, replayed: false };
+  const committed = await db.prepare('SELECT r.* FROM stock_epoch_receipts r JOIN stock_epoch_events e ON e.id=r.event_id JOIN stock_epoch_publications p ON p.operation_id=e.operation_id WHERE r.request_id=@request').get<Row>({ request: raw.client_request_id });
+  if (!committed || committed.actor_id !== actor.id || committed.request_digest !== digest || committed.request_json !== requestJson) return fail('epoch_committed_receipt_unavailable');
+  return { ...JSON.parse(committed.response_json), replayed: false };
 }

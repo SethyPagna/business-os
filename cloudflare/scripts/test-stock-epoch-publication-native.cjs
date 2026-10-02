@@ -405,7 +405,241 @@ async function partitionTampering() {
   console.log('PASS activated duplicate-before replacement, unrequested retired child and consistently falsified receipt/audit all reject atomically');
 }
 
-const cases = { admission, fractionalAdmission, decimalQuantity, rollback, redundantRecompute, malformedPublication, permissionAndClosure, disabledOrdinaryRoutes, physicalPartition, fractionalPartition, partitionRollback, partitionLostResponse, partitionTampering };
+function mutateColumn(statement, column, value) {
+  const match = statement.sql.match(/^INSERT INTO [^(]+\(([^)]+)\) VALUES\(([^)]+)\)/);
+  assert.ok(match, statement.sql);
+  const index = match[1].split(',').indexOf(column);
+  assert.ok(index >= 0, column);
+  const binding = match[2].split(',')[index].match(/^\?(\d+)$/);
+  assert.ok(binding, column);
+  statement.values[Number(binding[1]) - 1] = value;
+}
+
+async function proportionalMutation() {
+  const f = await partitionFixture();
+  try {
+    const before = completeState(f);
+    let activated = 0;
+    f.hooks.beforeBatch = (db, statements) => {
+      for (const statement of statements) {
+        if (statement.sql.startsWith('INSERT INTO stock_epoch_segments')) {
+          if (statement.values.includes('x') && statement.values.includes('held')) { mutateColumn(statement, 'gross4', 1); activated++; }
+          else if (statement.values.includes('x-remaining')) { mutateColumn(statement, 'gross4', 199999); activated++; }
+        }
+        if (statement.sql.startsWith('INSERT INTO stock_epoch_source_states')) {
+          mutateColumn(statement, 'sellable_net4', 199999);
+          mutateColumn(statement, 'held_net4', 1);
+          activated++;
+        }
+        for (const [index, value] of statement.values.entries()) {
+          if (typeof value !== 'string' || !value.startsWith('{')) continue;
+          let response;
+          try { response = JSON.parse(value); } catch { continue; }
+          if (response.protocol !== 2 || response.kind !== 'hold' || !response.totals) continue;
+          response.totals.held_net4 = 1;
+          response.totals.sellable_net4 = 199999;
+          for (const fragment of response.changed_segments) fragment.gross4 = fragment.segment_id === 'x' ? 1 : 199999;
+          statement.values[index] = JSON.stringify(response);
+          activated++;
+        }
+      }
+    };
+    const result = await call(f, inventory, '/valuation-experiment', f.command);
+    assert.equal(activated, 6);
+    assert.equal(result.status, 409, 'F1 six-site conserved but misallocated basis published');
+    assert.equal(completeState(f), before);
+  } finally { f.db.close(); }
+}
+
+async function invalidTransitionQuantity() {
+  const f = await partitionFixture();
+  try {
+    const before = completeState(f);
+    for (const quantity of [0, -1, 3, 1000000001, 'bad', '0.0000000000000000000000001']) {
+      const result = await call(f, inventory, '/valuation-experiment', { ...f.command, quantity });
+      assert.equal(result.status, 400, `F2 quantity ${quantity}: ${JSON.stringify(result)}`);
+      assert.equal(result.data.code, 'epoch_quantity_invalid');
+      assert.equal(completeState(f), before);
+    }
+    const supported = await call(f, inventory, '/valuation-experiment', { ...f.command, quantity: '1' });
+    assert.equal(supported.status, 200, JSON.stringify(supported));
+  } finally { f.db.close(); }
+}
+
+async function sessionLostAuthority() {
+  for (const revoke of [true, false]) {
+    const f = fixture();
+    try {
+      emptyProduct(f);
+      const body = receipt(`session-lost-authority-${revoke}`, 2);
+      body.items[0].unit_cost_usd = 10;
+      f.hooks.lost = true;
+      const batch = f.d1.batch;
+      let activated = 0;
+      f.d1.batch = async statements => {
+        try { return await batch(statements); }
+        catch (error) {
+          if (!f.db.isTransaction) {
+            if (revoke) f.db.exec("UPDATE users SET permissions='{}' WHERE id=71");
+            activated++;
+          }
+          throw error;
+        }
+      };
+      const result = await call(f, inventory, '/sessions', body);
+      assert.equal(activated, 1);
+      assert.equal(result.status, revoke ? 403 : 200, `F3 ${JSON.stringify(result)}`);
+      assert.equal(f.db.prepare('SELECT COUNT(*) n FROM stock_epoch_publications').get().n, 1);
+      const committed = completeState(f);
+      const replay = await call(f, inventory, '/sessions', body);
+      assert.equal(replay.status, revoke ? 403 : 200);
+      if (!revoke) assert.deepEqual(replay.data, result.data);
+      assert.equal(completeState(f), committed);
+    } finally { f.db.close(); }
+  }
+}
+
+async function requestKindMutation() {
+  const f = await partitionFixture();
+  try {
+    assert.equal((await call(f, inventory, '/valuation-experiment', f.command)).status, 200);
+    const body = { kind: 'repair', source_id: f.command.source_id, expected_revision: 1, expected_generation: 0, client_request_id: 'kind-identity-repair', segment_id: 'x', child_segment_id: 'fixed', quantity: 1 };
+    const before = completeState(f), crypto = require('node:crypto');
+    const altered = { ...body, kind: 'hold', reason: 'tampered operation intent' };
+    const digest = value => crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex');
+    let activated = 0;
+    f.hooks.beforeBatch = (db, statements) => {
+      for (const statement of statements) for (const [index, value] of statement.values.entries()) {
+        if (value === digest(body)) { statement.values[index] = digest(altered); activated++; }
+        if (value === JSON.stringify(body)) { statement.values[index] = JSON.stringify(altered); activated++; }
+      }
+    };
+    const result = await call(f, inventory, '/valuation-experiment', body);
+    assert.equal(activated, 4);
+    assert.equal(result.status, 409, 'F4 matching-digest altered intent published');
+    assert.equal(completeState(f), before);
+  } finally { f.db.close(); }
+}
+
+async function guardRegressions() {
+  const failures = [];
+  for (const test of [proportionalMutation, invalidTransitionQuantity, sessionLostAuthority, requestKindMutation]) {
+    try { await test(); console.log(`PASS ${test.name}`); }
+    catch (error) { failures.push(`${test.name}: ${error.stack}`); }
+  }
+  assert.deepEqual(failures, []);
+}
+
+async function exactBasisSql() {
+  const f = fixture();
+  try {
+    const migration = fs.readFileSync(path.join(__dirname, '../migrations/0218_stock_epoch_publication_guards.sql'), 'utf8');
+    const start = migration.indexOf('WITH RECURSIVE\n'), end = migration.indexOf('\n)=2 THEN', start);
+    assert.ok(start > 0 && end > start);
+    const columns = 'operation_id,event_id,before_quantity,selected_quantity,before_gross4,before_coverage4,selected_gross4,selected_coverage4';
+    const query = migration.slice(start, end).replace('WITH RECURSIVE\n', `WITH RECURSIVE stock_epoch_basis_inputs(${columns}) AS (VALUES('proof','event',?2,?3,?4,?5,?6,?7)),\n`).replaceAll('NEW.operation_id', '?1');
+    const proof = f.db.prepare(query);
+    const products = f.db.prepare(query.slice(0, query.lastIndexOf('SELECT COUNT(*) FROM floors')) + 'SELECT metric,side,position,carry,digits,typeof(carry) AS carry_type FROM products WHERE position=8 ORDER BY metric,side');
+    const coefficients = f.db.prepare(query.slice(0, query.lastIndexOf('SELECT COUNT(*) FROM floors')) + 'SELECT COUNT(*) n,MAX(coefficient) maximum,MIN(typeof(coefficient)) minimum_type,MAX(typeof(coefficient)) maximum_type FROM coefficients');
+    const scale = text => { const [whole, fraction = ''] = text.split('.'); return BigInt(whole) * 10n ** 24n + BigInt(fraction.padEnd(24, '0')); };
+    const examples = [
+      ['3', '1', 70001, 0, 23333, 0],
+      ['3', '2', 70001, 0, 46667, 0],
+      ['2', '1', 46668, 0, 23334, 0],
+      ['3', '1', 70001, 60001, 23333, 20000],
+      ['3', '2', 70001, 1, 46667, 1],
+      ['2', '1', 46668, 1, 23334, 1],
+      ['0.000000000000000000000003', '0.000000000000000000000001', 70001, 60001, 23333, 20000],
+      ['1000000000', '1000000000', 1000000000000000, 1, 1000000000000000, 1],
+      ['1000000000', '999999999.999999', 1000000000000000, 999999999999999],
+      ['999999999.123456', '0.000000000000000000000001', 1000000000000000, 0],
+      ['0.3', '0.1', 0, 0, 0, 0],
+    ];
+    let seed = 1977;
+    for (let index = 0; index < 100; index++) {
+      seed = (seed * 48271) % 2147483647;
+      const total = seed % 1000000 + 1, selected = seed % total + 1, gross = seed * 43217, covered = seed % (gross + 1);
+      examples.push([String(total), String(selected), gross, covered]);
+    }
+    let mutations = 0;
+    for (const [total, selected, gross, coverage, literalGross, literalCoverage] of examples) {
+      const Q = scale(total), q = scale(selected), G = BigInt(gross), N = G - BigInt(coverage);
+      const g = Number(G * q / Q), n = Number(N * q / Q), c = g - n;
+      if (literalGross !== undefined) assert.deepEqual([g, c], [literalGross, literalCoverage]);
+      const args = ['proof', total, selected, BigInt(gross), BigInt(coverage), BigInt(g), BigInt(c)];
+      assert.equal(Object.values(proof.get(...args))[0], 2, `${total}/${selected}/${gross}/${coverage}`);
+      const actualProducts = products.all(...args);
+      assert.equal(actualProducts.length, 6);
+      for (const row of actualProducts) {
+        const sourceMoney = row.metric === 0 ? G : N, selectedMoney = BigInt(row.metric === 0 ? g : n);
+        const expected = row.side === 1 ? sourceMoney * q : (selectedMoney + BigInt(row.side === 2 ? 1 : 0)) * Q;
+        assert.equal(row.digits, String(expected).padStart(54, '0'));
+        assert.equal(row.carry, 0);
+        assert.equal(row.carry_type, 'integer');
+      }
+      const shape = coefficients.get(...args);
+      assert.equal(shape.n, 48);
+      assert.equal(shape.minimum_type, 'integer');
+      assert.equal(shape.maximum_type, 'integer');
+      assert.ok(shape.maximum < 3000000000000);
+      if (g < gross) { assert.notEqual(Object.values(proof.get('proof', total, selected, BigInt(gross), BigInt(coverage), BigInt(g + 1), BigInt(c)))[0], 2); mutations++; }
+      if (c < g) { assert.notEqual(Object.values(proof.get('proof', total, selected, BigInt(gross), BigInt(coverage), BigInt(g), BigInt(c + 1)))[0], 2); mutations++; }
+    }
+    for (const [from, to] of [["json_each('[0,1]') m", "json_each('[0]') m"], ["json_each('[0,1]') m", "json_each('[0,1,2]') m"], ["json_each('[0,1,2]') s", "json_each('[0,1]') s"], ["json_each('[0,1,2]') s", "json_each('[0,1,2,3]') s"]]) {
+      assert.equal(query.split(from).length, 2);
+      assert.notEqual(Object.values(f.db.prepare(query.replace(from, to)).get('proof', '3', '1', 70001n, 60001n, 23333n, 20000n))[0], 2);
+    }
+    console.log(`PASS exact SQL gross/net floor: ${examples.length} independent BigInt cases, ${mutations} wrong-basis controls, all6 product rows and48 bounded integer coefficients per case`);
+  } finally { f.db.close(); }
+}
+
+async function basisDomainAndReceipt() {
+  for (const quantity of ['', '1bad', '01', '1.', '1.0', '+1', '1e0', '1..0', '0.0000000000000000000000001', '1000000000.000000000000000000000001']) {
+    const f = await partitionFixture();
+    try {
+      const before = completeState(f);
+      let activated = 0;
+      f.hooks.beforeBatch = (db, statements) => {
+        for (const statement of statements) if (statement.sql.startsWith('INSERT INTO stock_epoch_segments') && statement.values.includes('held')) {
+          mutateColumn(statement, 'quantity', quantity);
+          activated++;
+        }
+      };
+      const result = await call(f, inventory, '/valuation-experiment', f.command);
+      assert.equal(activated, 1);
+      assert.equal(result.status, 409, `SQL quantity ${quantity} published`);
+      assert.equal(completeState(f), before);
+    } finally { f.db.close(); }
+  }
+  const f = await partitionFixture();
+  try {
+    const batch = f.d1.batch, prepare = f.d1.prepare;
+    let armed = false, activated = 0;
+    f.d1.batch = async statements => { const result = await batch(statements); armed = true; return result; };
+    f.d1.prepare = sql => {
+      const wrap = statement => ({ ...statement, bind: (...values) => wrap(statement.bind(...values)), all: async () => {
+        if (armed && sql.startsWith('SELECT r.* FROM stock_epoch_receipts')) { armed = false; activated++; return { success: true, results: [], meta: { changes: 0 } }; }
+        return statement.all();
+      } });
+      return wrap(prepare(sql));
+    };
+    const result = await call(f, inventory, '/valuation-experiment', f.command);
+    assert.equal(activated, 1);
+    assert.equal(result.status, 409);
+    assert.equal(result.data.code, 'epoch_committed_receipt_unavailable');
+    const committed = completeState(f), batchCount = f.batches.length;
+    const replay = await call(f, inventory, '/valuation-experiment', f.command);
+    assert.equal(replay.status, 200);
+    assert.equal(replay.data.replayed, true);
+    assert.equal(f.batches.length, batchCount);
+    assert.equal(completeState(f), committed);
+    const stored = JSON.parse(f.db.prepare('SELECT response_json FROM stock_epoch_receipts WHERE request_id=?').get(f.command.client_request_id).response_json);
+    assert.deepEqual(replay.data, { ...stored, replayed: true });
+  } finally { f.db.close(); }
+  console.log('PASS10 activated malformed SQL quantity operands; unavailable committed receipt is truthful and retry only reads the original publication');
+}
+
+const cases = { admission, fractionalAdmission, decimalQuantity, rollback, redundantRecompute, malformedPublication, permissionAndClosure, disabledOrdinaryRoutes, physicalPartition, fractionalPartition, partitionRollback, partitionLostResponse, partitionTampering, guardRegressions, exactBasisSql, basisDomainAndReceipt };
 (async () => {
   const selected = process.env.STOCK_EPOCH_SECTION;
   assert.ok(!selected || Object.hasOwn(cases, selected), 'Unknown publication section');
