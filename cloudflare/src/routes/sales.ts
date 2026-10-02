@@ -1715,6 +1715,10 @@ app.post('/', async (c) => {
             THEN 1 ELSE json_extract('sale_create_incomplete', '$') END`,
       params: { sale_write_key: saleWriteKey, item_count: priced.length },
     }, saleCreationAuditStatement)
+    if (valuationPlans.size) statements.push({
+      sql: `SELECT CASE WHEN (SELECT COUNT(*) FROM audit_logs a JOIN sales s ON a.entity_id=CAST(s.id AS TEXT) WHERE s.client_request_id=@sale_write_key AND a.entity='sale_creation')=1 AND EXISTS(SELECT 1 FROM audit_logs a JOIN sales s ON a.entity_id=CAST(s.id AS TEXT) WHERE s.client_request_id=@sale_write_key AND a.entity='sale_creation' AND a.action='create' AND a.user_id IS @user_id AND a.user_name IS @user_name AND a.details=@details AND a.new_value=@details AND a.table_name='sales' AND a.record_id=CAST(s.id AS TEXT)) THEN 1 ELSE json_extract('[1]','$[valuation_sale_audit_missing]') END`,
+      params: saleCreationAuditStatement.params,
+    })
     statements.push(ordinaryBusinessMaintenanceGuard)
     // Receipt-race retry. A failed batch rolled back completely, so re-running
     // it with a fresh number re-evaluates every guard (stock, pricing,

@@ -299,6 +299,16 @@ export async function validateValuationHistory(db: D1Compat, sourceId: string, r
     requireHistory(rows.stock_valuation_sale_links.every(link => events.some(event => event.id === link.original_event_id && event.kind === 'consume')));
     requireHistory(rows.stock_valuation_sale_movements.length === events.filter(event => ['consume', 'restore', 'reconsume'].includes(event.kind)).length);
     for (const link of rows.stock_valuation_sale_links) {
+        const openingRow = await db.prepare('SELECT id,creation_snapshot_json FROM sales WHERE id=@sale').get<Row>({ sale: link.sale_id });
+        requireHistory(openingRow);
+        const opening = canonicalJson(openingRow!.creation_snapshot_json);
+        requireHistory(Array.isArray(opening.products) && opening.actor && opening.actor.id === events.find(event => event.id === link.original_event_id)?.actor_id);
+        const creation = await db.prepare("SELECT * FROM audit_logs WHERE entity='sale_creation' AND entity_id=@sale").all<Row>({ sale: String(link.sale_id) });
+        requireHistory(creation.length === 1);
+        const details = JSON.stringify({ kind: 'sale.creation', receiptNumber: opening.receipt_number, itemCount: opening.products.length, totalUsd: opening.total_usd, saleStatus: opening.sale_status, origin: opening.origin });
+        sameFields(creation[0], { user_id: opening.actor.id, user_name: opening.actor.username, action: 'create', entity: 'sale_creation', entity_id: String(link.sale_id), details, table_name: 'sales', record_id: String(link.sale_id), new_value: details });
+        guards.push(...snapshotGuard('audit_logs', "entity='sale_creation' AND entity_id=@sale", { sale: String(link.sale_id) }, creation));
+        guards.push(...snapshotGuard('sales', 'id=@sale', { sale: link.sale_id }, [openingRow!]));
         const actual = await db.prepare('SELECT a.*,i.product_id,i.quantity AS line_quantity,i.branch_id AS line_branch,i.batch_id AS line_batch,s.client_request_id,s.sale_status,json_extract(i.pricing_snapshot_json,\'$.line_key\') AS line_key FROM sale_item_batch_allocations a JOIN sale_items i ON i.id=a.sale_item_id JOIN sales s ON s.id=i.sale_id WHERE a.id=@allocation AND i.id=@item AND s.id=@sale').get<Row>({ allocation: link.sale_allocation_id, item: link.sale_item_id, sale: link.sale_id });
         requireHistory(actual && actual.product_id === source.product_id && actual.batch_id === source.batch_id && actual.branch_id === source.branch_id && actual.line_branch === source.branch_id && actual.line_batch === source.batch_id && quantityDecimal(actual.quantity) === link.quantity && quantityDecimal(actual.line_quantity) === link.quantity && actual.client_request_id === link.sale_request_id && actual.line_key === link.sale_line_key);
         const current = segments.filter(segment => segment.consumption_id === link.id);

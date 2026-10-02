@@ -119,7 +119,7 @@ async function otherLot() {
     console.log('PASS actual ordinary checkout consumes different nonadmitted lot of the same product')
   } finally {f.db.close()}
 }
-async function repairedSale() {
+async function repairedSale(credit=5) {
   const f=await repairedFixture()
   try {
     const before=f.batches.length
@@ -142,14 +142,14 @@ async function repairedSale() {
     assert.equal(replay.data.valuation_version,3)
     assert.equal(replay.data.replayed,true)
     assert.equal(JSON.stringify({...replay.data,replayed:undefined}),v3.response_json)
-    await command(f,valuation('pending',6,2,{agreement_id:'agreement-consumed',amount_usd:5,targets:[{allocation_id:'affected',amount_usd:5}],proof:'Extra accepted consumed-share credit'}))
-    const accepted=await command(f,valuation('accept',7,3,{agreement_id:'agreement-consumed',shares:[{segment_id:consumed.segment_id,amount_usd:5}],proof:'Exact consumed share accepted'}))
+    await command(f,valuation('pending',6,2,{agreement_id:'agreement-consumed',amount_usd:credit,targets:[{allocation_id:'affected',amount_usd:credit}],proof:'Extra accepted consumed-share credit'}))
+    const accepted=await command(f,valuation('accept',7,3,{agreement_id:'agreement-consumed',shares:[{segment_id:consumed.segment_id,amount_usd:credit}],proof:'Exact consumed share accepted'}))
     assert.equal(accepted.totals.consumed_cost4,100000)
-    assert.equal(accepted.totals.consumed_recovery4,50000)
+    assert.equal(accepted.totals.consumed_recovery4,credit*10000)
     assert.equal(accepted.totals.historical_loss4,250000)
     assert.equal(accepted.totals.recovery4,150000)
-    assert.equal(accepted.funding.asset4,150000)
-    await assertCostProjection(f,item.id,100000,50000)
+    assert.equal(accepted.funding.asset4,(10+credit)*10000)
+    await assertCostProjection(f,item.id,100000,credit*10000)
     const saleId=item.sale_id
     const cancellation={sale_status:'cancelled',cancel_reason:'other',cancel_note:'Customer cancelled',client_request_id:`consumption-cancel-${++serial}`}
     const batchesBeforeCancel=f.batches.length
@@ -158,7 +158,7 @@ async function repairedSale() {
     assert.equal(f.batches.length,batchesBeforeCancel+1)
     const restored=f.db.prepare('SELECT s.* FROM stock_valuation_segments_v4 s JOIN stock_valuation_latest e ON e.id=s.event_id WHERE s.segment_id=?').get(consumed.segment_id)
     assert.equal(restored.fate,'sellable')
-    assert.equal(restored.gross4-restored.coverage4,50000)
+    assert.equal(restored.gross4-restored.coverage4,(10-credit)*10000)
     assert.equal(restored.consumed_cost4,0)
     assert.equal(restored.consumed_recovery4,0)
     await assertCostProjection(f,item.id,0,0)
@@ -173,13 +173,34 @@ async function repairedSale() {
     assert.equal(uncancelled.status,200,JSON.stringify(uncancelled))
     const takenAgain=f.db.prepare('SELECT s.* FROM stock_valuation_segments_v4 s JOIN stock_valuation_latest e ON e.id=s.event_id WHERE s.segment_id=?').get(consumed.segment_id)
     assert.equal(takenAgain.fate,'consumed')
-    assert.equal(takenAgain.consumed_cost4,50000)
+    assert.equal(takenAgain.consumed_cost4,(10-credit)*10000)
     assert.equal(takenAgain.consumed_recovery4,0)
-    await assertCostProjection(f,item.id,50000,0)
+    await assertCostProjection(f,item.id,(10-credit)*10000,0)
     const dated=f.db.prepare('SELECT r.kind,r.consumed_cost4,r.consumed_recovery4 FROM stock_valuation_sale_recoveries r JOIN stock_valuation_history_events e ON e.id=r.event_id WHERE r.sale_item_id=? ORDER BY e.revision').all(item.id).map(row=>({...row}))
-    assert.deepEqual(dated,[{kind:'consume',consumed_cost4:100000,consumed_recovery4:0},{kind:'accept',consumed_cost4:0,consumed_recovery4:50000},{kind:'restore',consumed_cost4:-100000,consumed_recovery4:-50000},{kind:'reconsume',consumed_cost4:50000,consumed_recovery4:0}])
+    assert.deepEqual(dated,[{kind:'consume',consumed_cost4:100000,consumed_recovery4:0},{kind:'accept',consumed_cost4:0,consumed_recovery4:credit*10000},{kind:'restore',consumed_cost4:-100000,consumed_recovery4:-credit*10000},...(credit===10?[]:[{kind:'reconsume',consumed_cost4:(10-credit)*10000,consumed_recovery4:0}])])
     assert.equal(f.db.prepare('SELECT cost_price_usd FROM sale_items WHERE id=?').get(item.id).cost_price_usd,10)
-    console.log('PASS actual repaired checkout10 late credit5 cancel basis5 uncancel cost5, immutable sale money')
+    console.log(`PASS actual repaired checkout10 late credit${credit} cancel basis${10-credit} uncancel cost${10-credit}, immutable sale money`)
+  } finally {f.db.close()}
+}
+async function exactPool() {
+  const f=fixture()
+  try {
+    f.db.exec('UPDATE products SET stock_quantity=3 WHERE id=10;UPDATE product_batches SET received_quantity=3,received_cost_usd=7.0001 WHERE id=500;UPDATE branch_batch_stock SET quantity=3 WHERE batch_id=500;UPDATE branch_stock SET quantity=3 WHERE product_id=10;UPDATE inventory_movements SET quantity=3,total_cost_usd=7.0001 WHERE id=900')
+    await command(f,valuation('admit',0,0,{funding:{movement_id:900,batch_id:500,product_id:10,branch_id:1,supplier_id:77,quantity:3,free_quantity:1,gross_usd:7.0001,opening_paid_usd:7.0001,opening_debt_usd:0,reconciliation_proof:'Paid plus free exact average pool',invoice_id:null}}))
+    const costs=[]
+    for(let revision=0;revision<3;revision++) {
+      const body=saleBody();body.items[0].stock_valuation={source_id:'fund-900',segment_id:'original',expected_revision:revision,expected_generation:0}
+      const response=await call(f,sales,'/',body)
+      assert.equal(response.status,200,JSON.stringify(response))
+      const item=f.db.prepare('SELECT id,cost_price_usd FROM sale_items ORDER BY id DESC LIMIT 1').get()
+      const cost=f.db.prepare('SELECT cost4 FROM stock_valuation_sale_costs WHERE sale_item_id=?').get(item.id).cost4
+      costs.push(cost)
+      await assertCostProjection(f,item.id,cost,0)
+    }
+    assert.equal(costs.reduce((sum,n)=>sum+n,0),70001)
+    assert.equal(f.db.prepare('SELECT SUM(quantity) quantity FROM branch_batch_stock WHERE batch_id=500').get().quantity,0)
+    assert.notEqual(costs[0]*3,70001)
+    console.log('PASS three actual paid-plus-free pool checkouts preserve exact70001 residue with SQL/API parity')
   } finally {f.db.close()}
 }
 async function assertCostProjection(f,item,cost4,recovery4) {
@@ -214,7 +235,7 @@ async function failures() {
       assert.equal(businessState(f),baseline,`checkout rollback ${index}`)
     }
     delete f.hooks.failAt
-    for(const [index,sql] of checkout.entries()) if(/^(INSERT INTO stock_valuation|DELETE FROM stock_valuation|UPDATE branch_batch_stock|INSERT INTO branch_stock|UPDATE products|INSERT INTO inventory_movements)/.test(sql.trim())) {
+    for(const [index,sql] of checkout.entries()) if(/^(INSERT INTO stock_valuation|DELETE FROM stock_valuation|UPDATE branch_batch_stock|INSERT INTO branch_stock|UPDATE products|INSERT INTO inventory_movements|INSERT INTO audit_logs)/.test(sql.trim())) {
       f.hooks.skipAt=index
       const result=await call(f,sales,'/',body)
       assert.notEqual(result.status,200,`checkout ignored write ${index}: ${sql}`)
@@ -238,7 +259,7 @@ async function failures() {
       assert.equal(businessState(r),saved,`restore rollback ${index}`)
     }
     delete r.hooks.failAt
-    for(const [index,sql] of restore.entries()) if(/^(INSERT INTO stock_valuation|DELETE FROM stock_valuation|INSERT INTO branch_batch_stock|UPDATE sale_item_batch_allocations)/.test(sql.trim())) {
+    for(const [index,sql] of restore.entries()) if(/^(INSERT INTO stock_valuation|DELETE FROM stock_valuation|INSERT INTO branch_batch_stock|UPDATE sale_item_batch_allocations|INSERT INTO inventory_movements|INSERT INTO audit_logs)/.test(sql.trim())) {
       r.hooks.skipAt=index
       const response=await call(r,sales,`/${r.item.sale_id}/status`,cancel,'PATCH')
       assert.notEqual(response.status,200,`restore ignored write ${index}: ${sql}`)
@@ -263,6 +284,16 @@ async function custody() {
     assert.equal(businessState(f),baseline)
     let probes=0
     f.hooks.beforeStatement=(db,statement)=>{
+      if(/^INSERT INTO stock_valuation_sale_operation_context/.test(statement.sql.trim())) {
+        const event=db.prepare("SELECT * FROM stock_valuation_latest WHERE source_id='fund-900'").get()
+        const link=db.prepare('SELECT * FROM stock_valuation_sale_links').get(),token=db.prepare('SELECT token FROM stock_valuation_guards').get().token
+        const valid=[token,event.id,'fund-900','restore',link.segment_id,link.id,link.sale_allocation_id,0,1,3]
+        for(const [index,value] of [[2,'foreign-source'],[3,'consume'],[4,'foreign-segment'],[5,'foreign-consumption'],[6,999999]]) {
+          const wrong=[...valid];wrong[index]=value
+          assert.throws(()=>db.prepare('INSERT INTO stock_valuation_sale_operation_context VALUES(?,?,?,?,?,?,?,?,?,?)').run(...wrong),/valuation_sale_context_unowned/)
+          probes++
+        }
+      }
       if(!/^INSERT INTO branch_batch_stock/.test(statement.sql.trim())) return
       assert.equal(db.prepare("SELECT kind FROM stock_valuation_sale_operation_context").get().kind,'restore')
       for(const [batch,branch,quantity] of [[500,1,0.5],[500,1,2],[500,2,1]]) {
@@ -277,7 +308,7 @@ async function custody() {
     }
     const response=await call(f,sales,`/${f.item.sale_id}/status`,cancel,'PATCH')
     assert.equal(response.status,200,JSON.stringify(response))
-    assert.equal(probes,7)
+    assert.equal(probes,12)
     delete f.hooks.beforeStatement
     assert.equal(f.db.prepare('SELECT COUNT(*) n FROM stock_valuation_sale_operation_context').get().n,0)
     assert.throws(()=>f.db.exec('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(500,1,1) ON CONFLICT(batch_id,branch_id) DO UPDATE SET quantity=quantity+1'),/stock_lifecycle_dependency/)
@@ -290,6 +321,57 @@ async function custody() {
     assert.ok(ordered.every(row=>original.includes(row)))
     assert.ok(ordered.findIndex(row=>/^UPDATE branch_batch_stock/.test(row.sql))<ordered.findIndex(row=>/^INSERT INTO branch_stock/.test(row.sql)))
     console.log('PASS global v3/v4 id/revision/request identities, exact restore capability negatives and unchanged reconsume statement multiset')
+  } finally {f.db.close()}
+}
+async function racesAndMovementProof() {
+  const f=await repairedFixture(),loser=saleBody(),winner=saleBody()
+  try {
+    let winnerState
+    f.hooks.beforeBatch=async()=>{const response=await call(f,sales,'/',winner);assert.equal(response.status,200,JSON.stringify(response));winnerState=businessState(f)}
+    const response=await call(f,sales,'/',loser)
+    assert.equal(response.status,409,JSON.stringify(response))
+    assert.equal(businessState(f),winnerState)
+  } finally {f.db.close()}
+  const r=await soldFixture()
+  try {
+    let winnerState
+    const cancel={sale_status:'cancelled',cancel_reason:'other',cancel_note:'Concurrent cancellation',client_request_id:`race-cancel-${++serial}`}
+    r.hooks.beforeBatch=async()=>{const response=await call(r,sales,`/${r.item.sale_id}/status`,{...cancel,client_request_id:`race-winner-${++serial}`},'PATCH');assert.equal(response.status,200,JSON.stringify(response));winnerState=businessState(r)}
+    const response=await call(r,sales,`/${r.item.sale_id}/status`,cancel,'PATCH')
+    assert.equal(response.status,409,JSON.stringify(response))
+    assert.equal(businessState(r),winnerState)
+  } finally {r.db.close()}
+  for(const sabotage of ['duplicate','quantity','cost','foreign','actor']) {
+    const n=await repairedFixture(),saved=businessState(n)
+    try {
+      n.hooks.beforeStatement=(db,statement)=>{
+        if(!/^INSERT INTO stock_valuation_sale_movements/.test(statement.sql)) return
+        if(sabotage==='duplicate') db.exec("INSERT INTO inventory_movements(product_id,branch_id,batch_id,movement_type,quantity,unit_cost_usd,unit_cost_khr,reference_id,user_id,user_name) SELECT product_id,branch_id,batch_id,movement_type,quantity,unit_cost_usd,unit_cost_khr,reference_id,user_id,user_name FROM inventory_movements WHERE movement_type='sale'")
+        else db.exec(`UPDATE inventory_movements SET ${sabotage==='quantity'?'quantity=-2':sabotage==='cost'?'unit_cost_usd=99':sabotage==='foreign'?'batch_id=NULL':'user_id=NULL'} WHERE movement_type='sale'`)
+      }
+      const response=await call(n,sales,'/',saleBody())
+      assert.notEqual(response.status,200,`movement ${sabotage}`)
+      assert.equal(businessState(n),saved,`movement ${sabotage} rollback`)
+    } finally {n.db.close()}
+  }
+  console.log('PASS actual checkout/cancel races preserve winner, duplicate/missing/foreign/wrong quantity-cost-actor movement rollback')
+}
+async function reconsumeIgnores() {
+  const f=await soldFixture(),cancel={sale_status:'cancelled',cancel_reason:'other',cancel_note:'Ignored reconsume probe',client_request_id:`ignore-restore-${++serial}`}
+  try {
+    assert.equal((await call(f,sales,`/${f.item.sale_id}/status`,cancel,'PATCH')).status,200)
+    const saved=businessState(f),body={sale_status:'completed',client_request_id:`ignore-reconsume-${++serial}`}
+    let selected
+    f.hooks.beforeBatch=(db,statements)=>{selected=statements.map((statement,index)=>({index,sql:statement.sql})); f.hooks.failAt=0}
+    assert.notEqual((await call(f,sales,`/${f.item.sale_id}/status`,body,'PATCH')).status,200)
+    delete f.hooks.failAt
+    for(const {index,sql} of selected) if(/^(UPDATE branch_batch_stock|UPDATE sale_item_batch_allocations|DELETE FROM stock_valuation|INSERT INTO stock_valuation_sale_movements|INSERT INTO inventory_movements)/.test(sql.trim())) {
+      f.hooks.skipAt=index
+      const response=await call(f,sales,`/${f.item.sale_id}/status`,body,'PATCH')
+      assert.notEqual(response.status,200,`ignored reconsume ${index}: ${sql}`)
+      assert.equal(businessState(f),saved,`ignored reconsume rollback ${index}`)
+    }
+    console.log('PASS reconsume ignored lot/allocation/movement and final context cleanup rollback')
   } finally {f.db.close()}
 }
 async function replayPermissions() {
@@ -390,4 +472,4 @@ function consumptionMath() {
   assert.notEqual(23334*3,70001,'four-decimal unit snapshots cannot replace exact captured line cost')
   console.log('PASS exact consumed10 credit5/10 restore5/0 reconsume5/0; disposed history unchanged')
 }
-(async()=>{consumptionMath();if(process.env.STOCK_CONSUMPTION_SECTION!=='math'){await otherLot();await repairedSale();if(process.env.STOCK_CONSUMPTION_SECTION==='failures')await failures();if(process.env.STOCK_CONSUMPTION_SECTION==='security'){await custody();await replayPermissions()}if(process.env.STOCK_CONSUMPTION_SECTION==='new-receipt')await newReceiptAfterCancel()}})().catch(error=>{console.error(error);process.exitCode=1})
+(async()=>{const section=process.env.STOCK_CONSUMPTION_SECTION;consumptionMath();if(section!=='math'){await otherLot();await repairedSale();if(!section||section==='failures')await failures();if(!section||section==='security'){await custody();await replayPermissions();await racesAndMovementProof();await reconsumeIgnores()}if(!section||section==='exact'){await repairedSale(10);await exactPool()}if(section==='new-receipt')await newReceiptAfterCancel()}})().catch(error=>{console.error(error);process.exitCode=1})
