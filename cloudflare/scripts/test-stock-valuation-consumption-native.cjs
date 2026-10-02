@@ -427,6 +427,33 @@ async function newReceiptAfterCancel() {
     assert.equal(newItem.cost_price_usd,5)
     await assertCostProjection(f,f.item.id,0,0)
     await assertCostProjection(f,newItem.id,50000,0)
+    const oldUncancel={sale_status:'completed',client_request_id:`parent-reclaim-${++serial}`}
+    assert.equal((await call(f,sales,`/${f.item.sale_id}/status`,oldUncancel,'PATCH')).status,409,'parent cannot reclaim units still consumed by child')
+    const child=f.db.prepare('SELECT * FROM stock_valuation_sale_links WHERE sale_item_id=?').get(newItem.id)
+    await command(f,valuation('pending',10,4,{agreement_id:'child-credit',amount_usd:2,targets:[{allocation_id:'affected',amount_usd:2}],proof:'Child later credit'}))
+    await command(f,valuation('accept',11,5,{agreement_id:'child-credit',shares:[{segment_id:child.segment_id,amount_usd:2}],proof:'Child accepted two'}))
+    const cancel=(request)=>({sale_status:'cancelled',cancel_reason:'other',cancel_note:'Reallocation lifecycle',client_request_id:request})
+    assert.equal((await call(f,sales,`/${child.sale_id}/status`,cancel(`child-cancel-${++serial}`),'PATCH')).status,200)
+    const grand=saleBody();grand.items[0].stock_valuation={source_id:'fund-900',segment_id:child.segment_id,expected_revision:13,expected_generation:6}
+    const grandResponse=await call(f,sales,'/',grand)
+    assert.equal(grandResponse.status,200,JSON.stringify(grandResponse))
+    const grandItem=f.db.prepare('SELECT * FROM sale_items ORDER BY id DESC LIMIT 1').get(),grandLink=f.db.prepare('SELECT * FROM stock_valuation_sale_links WHERE sale_item_id=?').get(grandItem.id)
+    await assertCostProjection(f,grandItem.id,30000,0)
+    await command(f,valuation('pending',14,6,{agreement_id:'grandchild-credit',amount_usd:1,targets:[{allocation_id:'affected',amount_usd:1}],proof:'Grandchild later credit'}))
+    await command(f,valuation('accept',15,7,{agreement_id:'grandchild-credit',shares:[{segment_id:grandLink.segment_id,amount_usd:1}],proof:'Grandchild accepted one'}))
+    assert.equal((await call(f,sales,`/${grandItem.sale_id}/status`,cancel(`grandchild-cancel-${++serial}`),'PATCH')).status,200)
+    const reclaimed=await call(f,sales,`/${f.item.sale_id}/status`,oldUncancel,'PATCH')
+    assert.equal(reclaimed.status,200,`all same units are restored, parent must reclaim current basis2: ${JSON.stringify(reclaimed)}`)
+    await assertCostProjection(f,f.item.id,20000,0)
+    await assertCostProjection(f,newItem.id,0,0)
+    await assertCostProjection(f,grandItem.id,0,0)
+    assert.equal((await call(f,sales,`/${child.sale_id}/status`,{sale_status:'completed',client_request_id:`child-blocked-${++serial}`},'PATCH')).status,409)
+    assert.equal((await call(f,sales,`/${f.item.sale_id}/status`,cancel(`parent-second-cancel-${++serial}`),'PATCH')).status,200)
+    const childReclaimed=await call(f,sales,`/${child.sale_id}/status`,{sale_status:'completed',client_request_id:`child-reclaim-${++serial}`},'PATCH')
+    assert.equal(childReclaimed.status,200,JSON.stringify(childReclaimed))
+    await assertCostProjection(f,newItem.id,20000,0)
+    assert.deepEqual(f.db.prepare('SELECT cost_price_usd FROM sale_items ORDER BY id').all().map(row=>row.cost_price_usd),[10,5,3])
+    assert.equal(f.db.prepare("SELECT credit4 FROM stock_funding_latest WHERE source_id='fund-900'").get().credit4,380000)
   } finally {f.db.close()}
 }
 function consumptionMath() {
