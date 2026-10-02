@@ -19,7 +19,7 @@ import { MarginCard, DualPriceInput, parseNumericInput, sanitizeNumericInput } f
 import { editableMoneyValue, formatPriceNumber, normalizeInternalMoney, normalizePriceValue } from '../../../utils/pricing.ts'
 import RenameCascadeModal, { type RenameCascadeChoice, type RenameCascadeRequest } from '../../shared/RenameCascadeModal.tsx'
 import ConfirmDialog, { ConfirmDialogLayerContext, type ConfirmReviewItem } from '../../shared/ConfirmDialog.tsx'
-import { getRenameImpact, renameBrandEverywhere } from '../../../api/renameCascadeTransport.ts'
+import { getRenameImpact } from '../../../api/renameCascadeTransport.ts'
 import { classifyCreateMatches, type CreateMatchVerdict, type CreateMatchCandidate } from '../helpers/productCreateMatch.ts'
 import {
   PRODUCT_MATCH_DEBOUNCE_MS,
@@ -138,6 +138,7 @@ export interface ProductFormState extends GroupCandidate {
 }
 
 interface ProductSavePayload extends ProductFormState {
+  __brand_rename?: { from: string; to: string }
   selling_price_usd: number
   selling_price_khr: number
   wholesale_price_usd: number
@@ -1299,7 +1300,7 @@ export default function ProductForm({
           if (impact.products_primary + impact.products_secondary > 1) {
             const choice = await askRenameChoice({ kind: 'brand', from: oldBrand, to: newBrand, impact, choices: ['carry', 'only'] })
             if (choice === 'cancel') { saveInFlightRef.current = false; return }
-            if (choice === 'carry') await renameBrandEverywhere(oldBrand, newBrand)
+            if (choice === 'carry') payload.__brand_rename = { from: oldBrand, to: newBrand }
           }
         } catch { /* preview unavailable -- brand changes on this row only */ }
       }
