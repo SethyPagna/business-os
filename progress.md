@@ -10,7 +10,7 @@ and their new status, and each item here names the Part that last changed it (e.
 | Item | Status |
 |---|---|
 | RC2-HOTFIX | [x] Live; both real merge actions and health checks verified. |
-| RC3-UI and DATE | [~] Fixing image handling and cost permissions after independent review. Not live. |
+| RC3-UI and DATE | [~] Image and permission fixes pass focused tests. Independent review and full tests running. Not live. |
 | STOCK-RETURN | [~] Earlier full check: 704/718 passed. Review found repeat-cancellation and supplier-source limits; fixes underway. Partial returns/accounting remain unfinished; not live. |
 
 ### Deploy checkpoints (26 Sep) — each deploys as soon as it is green; nothing waits for the next
