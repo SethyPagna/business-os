@@ -61,17 +61,27 @@ const SRC = path.join(__dirname, '..', 'src', 'lib')
 const BACKUP_TS = process.env.BACKUP_TS || path.join(SRC, 'backup.ts')
 
 // ------------------------------------------------------------ loading
+const loadedModules = new Map()
 function loadModule(file, deps = {}) {
+  file = path.resolve(file)
+  if (loadedModules.has(file)) return loadedModules.get(file).exports
+  const loaded = { exports: {} }
   const outputText = ts.transpileModule(fs.readFileSync(file, 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
     fileName: file,
   }).outputText
-  const loaded = { exports: {} }
+  loadedModules.set(file, loaded)
   const load = (id) => {
     if (Object.prototype.hasOwnProperty.call(deps, id)) return deps[id]
+    if (id === 'hono/http-exception') return require(id)
+    if (id.startsWith('.')) {
+      const resolved = path.resolve(path.dirname(file), id)
+      return loadModule(resolved.endsWith('.ts') ? resolved : `${resolved}.ts`)
+    }
     throw new Error(`${path.basename(file)} imports ${id}, which this test does not provide`)
   }
-  new Function('exports', 'require', 'module', '__filename', '__dirname', outputText)(loaded.exports, load, loaded, file, path.dirname(file))
+  try { new Function('exports', 'require', 'module', '__filename', '__dirname', outputText)(loaded.exports, load, loaded, file, path.dirname(file)) }
+  catch (error) { loadedModules.delete(file); throw error }
   return loaded.exports
 }
 const backup = loadModule(BACKUP_TS, {
@@ -246,12 +256,13 @@ function makeWorld() {
     async delete(key) { kv.delete(key) },
   }
   const db = makeDb()
-  return { objects, requests, hooks, store, db, env: { DB: db.DB, ASSETS: bucket, CACHE } }
+  return { objects, requests, hooks, store, db, kv, env: { DB: db.DB, ASSETS: bucket, CACHE } }
 }
 
 // ------------------------------------------------------ D1 on node:sqlite
 function makeDb() {
   const sql = new DatabaseSync(':memory:')
+  const writes = { run: 0, batch: 0 }
   sql.exec('CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT)')
   sql.exec("INSERT INTO settings (key, value) VALUES ('business_name', 'Live name')")
   const statement = (text, params = []) => ({
@@ -260,13 +271,15 @@ function makeDb() {
     bind: (...values) => statement(text, values),
     async first() { return sql.prepare(text).get(...params) ?? null },
     async all() { return { results: sql.prepare(text).all(...params) } },
-    async run() { const result = sql.prepare(text).run(...params); return { success: true, meta: { changes: result.changes } } },
+    async run() { writes.run += 1; const result = sql.prepare(text).run(...params); return { success: true, meta: { changes: result.changes } } },
   })
   return {
     sql,
+    writes,
     DB: {
       prepare: (text) => statement(text),
       async batch(items) {
+        writes.batch += 1
         sql.exec('BEGIN')
         try {
           const out = items.map((item) => {
@@ -381,6 +394,7 @@ const withheldOf = (result) => new Map(((result && result.withheldAssets) || [])
 
 async function main() {
   purge = await import(pathToFileURL(PURGE_SOURCE).href)
+  await lifecycleRestoreContract()
   // --------------------------------------------------- 1. every fixture
   await scenario('every fixture', async (expect) => {
     const world = makeWorld()
@@ -856,3 +870,49 @@ main().catch((error) => {
   console.error(error)
   process.exitCode = 1
 })
+
+async function lifecycleRestoreContract() {
+  const { HTTPException } = require('hono/http-exception')
+  const lifecycleFile = path.join(SRC, 'stockLifecycle.ts')
+  assert.strictEqual(loadModule(lifecycleFile), loadModule(lifecycleFile))
+  assert.equal(typeof loadModule(path.join(SRC, 'db.ts')).getDb, 'function')
+  const state = world => {
+    const sql = world.db.sql
+    const typed = value => value === null ? ['null'] : typeof value === 'bigint' ? ['integer', value.toString()] : value instanceof Uint8Array ? ['blob', Buffer.from(value).toString('hex')] : [typeof value, value]
+    const tables = sql.prepare("SELECT name,sql FROM sqlite_master WHERE type='table' ORDER BY name").all().map(row => {
+      const statement = sql.prepare(`SELECT * FROM "${row.name.replaceAll('"', '""')}"`)
+      statement.setReadBigInts(true)
+      return [row.name, row.sql, statement.all().map(values => JSON.stringify(Object.entries(values).map(([key, value]) => [key, typed(value)]))).sort()]
+    })
+    return JSON.stringify([tables, snapshot(world, ''), [...world.kv].sort()])
+  }
+  for (const table of ['stock_disposition_sources', 'stock_funding_dependencies']) {
+    const world = makeWorld()
+    world.db.sql.exec(`CREATE TABLE products(id INTEGER PRIMARY KEY,name TEXT); INSERT INTO products VALUES(100,'Live product');
+      CREATE TABLE ${table}(movement_id INTEGER,batch_id INTEGER,product_id INTEGER,branch_id INTEGER,supplier_id INTEGER);
+      INSERT INTO ${table} VALUES(701,501,100,1,77);
+      CREATE TABLE durable_marker(id INTEGER PRIMARY KEY,payload BLOB,amount INTEGER,label TEXT);
+      INSERT INTO durable_marker VALUES(1,X'0001ff00',9007199254740993,'ខ្មែរ');`)
+    const key = seedBackup(world, { name: `linked-${table}`, entries: [] })
+    const document = JSON.parse(Buffer.from(world.objects.get(key).bytes).toString('utf8'))
+    document.tables.products = { columns: ['id', 'name'], rows: [{ id: 100, name: 'Backed-up product' }] }
+    document.summary.tableCount = 2
+    document.summary.rowCount = 2
+    world.store(key, F.enc(JSON.stringify(document)), { httpMetadata: { contentType: 'application/json; charset=utf-8' }, customMetadata: { format: 'business-os-cloudflare-backup' } })
+    const before = state(world)
+    const progress = []
+    await assert.rejects(backup.restoreCloudflareBackup(world.env, key, async value => { progress.push(value) }), error => error instanceof HTTPException && error.status === 409 && error.code === 'stock_lifecycle_dependency')
+    assert.equal(state(world), before)
+    assert.deepEqual(world.db.writes, { run: 0, batch: 0 })
+    assert.deepEqual(progress, [])
+    assert.deepEqual(world.requests.filter(request => request.op === 'put' || request.op === 'delete'), [])
+    world.db.sql.exec(`DELETE FROM ${table}`)
+    const restored = await backup.restoreCloudflareBackup(world.env, key)
+    assert.equal(restored.summary.rowCount, 2)
+    assert.equal(world.db.sql.prepare('SELECT name FROM products WHERE id=100').get().name, 'Backed-up product')
+    assert.equal(world.db.sql.prepare("SELECT value FROM settings WHERE key='business_name'").get().value, 'Backed-up name')
+    world.db.sql.close()
+  }
+  for (let attempt = 0; attempt < 2; attempt += 1) assert.throws(() => loadModule(path.join(SRC, 'absent-asset-fixture.ts')), /ENOENT/)
+  console.log('PASS actual restore refuses linked stock before DB/R2/KV/progress effects, then restores an empty-ledger positive')
+}
