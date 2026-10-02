@@ -238,6 +238,7 @@ async function main() {
     assert.strictEqual(backupCallLog.length, 0, 'a rejected step must not even take a backup')
   })
 
+  await parkLotsBoundedQueries()
   await lifecycleFinalizeContract()
   console.log(`\n${passed} checks passed.`)
 }
@@ -273,6 +274,20 @@ async function lifecycleFinalizeContract() {
     }))
     let before
     if (!late) { admit(); before = snapshot() }
+    if (!late) {
+      const lifecycle = loadStockLifecycleFixture()
+      const guardDb = loadStockLifecycleFixture('lib/db.ts').getDb({ DB: nativeStockFixtureBinding(sql, items => handle.batch(items)) })
+      const refuses = scope => assert.rejects(() => lifecycle.assertStockLifecycleMutable(guardDb, scope), error => error.code === 'stock_lifecycle_dependency')
+      for (const ids of [[batchId], [999, batchId], [batchId, batchId]]) await refuses({ batchIds: ids })
+      await refuses({ batchIds: [batchId], branchId: 1, productId: 1, movementId: 701, supplierIds: [31] })
+      for (const scope of [
+        { batchIds: [] }, { batchIds: [], allSources: true }, { batchIds: [999] },
+        { batchIds: [batchId], batchId: 999 }, { batchIds: [batchId], branchId: 999 },
+        { batchIds: [batchId], productId: 999 }, { batchIds: [batchId], movementId: 999 },
+        { batchIds: [batchId], supplierId: 999 }, { batchIds: [batchId], supplierIds: [999] },
+      ]) await lifecycle.assertStockLifecycleMutable(guardDb, scope)
+      assert.equal(snapshot(), before)
+    }
     const writes = { run: 0, batch: 0 }, cache = new Map([['refusal-sentinel', 'retained']]), cacheWrites = [], requests = [], waits = []
     const binding = nativeStockFixtureBinding(sql, items => handle.batch(items)), prepare = binding.prepare.bind(binding), batch = binding.batch.bind(binding)
     binding.prepare = text => { const statement = prepare(text), bind = statement.bind.bind(statement); statement.bind = (...values) => { const bound = bind(...values), run = bound.run.bind(bound); bound.run = async () => { writes.run++; return run() }; return bound }; return statement }
@@ -310,4 +325,28 @@ async function lifecycleFinalizeContract() {
   assert.strictEqual(realDb, loadStockLifecycleFixture('lib/db.ts'))
   assert.equal(loadStockLifecycleFixture().StockLifecycleError.prototype instanceof require('hono/http-exception').HTTPException, true)
   console.log('PASS actual finalize linked disposition/funding preflight before backup/writes and late trigger rollback; unrelated opening lots admitted; only existing admission KV write')
+}
+
+async function parkLotsBoundedQueries() {
+  const counts = []
+  for (const count of [1, 10, 100, 1000]) {
+    seed()
+    for (let i = 1; i < count; i++) {
+      rawDbHandle.db.prepare("INSERT INTO product_batches(id,variant_product_id,batch_key,notes,is_active) VALUES(?,1,?,'Unified stock import bounded fixture',1)").run(1000 + i, `BOUNDED${i}`)
+      rawDbHandle.db.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(?,1,1)').run(1000 + i)
+    }
+    let prepares = 0
+    const env = { ...fakeEnv, DB: { ...fakeEnv.DB, prepare: text => { prepares++; return fakeEnv.DB.prepare(text) } } }
+    const response = await app.request('/finalize-migration', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ step: 'park_lots' }),
+    }, env, fakeExecutionCtx)
+    const body = await response.json()
+    assert.equal(response.status, 200, JSON.stringify(body))
+    assert.equal(body.affected.branch_batch_stock, count)
+    assert.equal(row('SELECT quantity FROM branch_batch_stock WHERE batch_id=1').quantity, 5)
+    assert.ok(prepares <= 6, `park_lots used ${prepares} prepares for ${count} lots`)
+    counts.push(prepares)
+  }
+  assert.ok(counts.every(count => count === counts[0]), JSON.stringify(counts))
+  console.log(`PASS park_lots query count is constant for 1/10/100/1000 lots: ${counts.join('/')}`)
 }

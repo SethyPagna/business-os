@@ -1117,7 +1117,7 @@ app.post('/finalize-migration', async (c) => {
       const lots = await db.prepare(
         "SELECT DISTINCT batch_id AS id FROM branch_batch_stock WHERE quantity <> 0 AND batch_id IN (SELECT id FROM product_batches WHERE instr(notes, 'Unified stock import') = 1)",
       ).all<{ id: number }>()
-      for (const lot of lots) await assertStockLifecycleMutable(db, { batchId: lot.id })
+      await assertStockLifecycleMutable(db, { batchIds: lots.map(lot => lot.id) })
     }
   } catch (error) {
     const lifecycle = stockLifecycleRefusal(error)
