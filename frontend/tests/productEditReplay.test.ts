@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { stripTypeScriptTypes } from 'node:module'
+import { runInNewContext } from 'node:vm'
 import ts from 'typescript'
 import { productEditHistoryReceipt, type ProductEditReplayIntent } from '../src/utils/productEditRequests.ts'
 import { resolveReplayAction } from '../src/utils/actionReplay.ts'
@@ -69,6 +70,7 @@ const result = { applied: true, action_history_id: 88, operation_id: '72', gener
 let rows: Array<Record<string, unknown>> = [], refreshes = 0, actorCurrent = true
 const adopt = closure('adoptServerAction', {
   actorScopeRef: { current: 'actor7' }, actorScope: 'actor7', readScope: {}, limit: 10,
+  serverItemsAuthority: {}, setServerItemsAuthority() {}, captureActorReadScope: () => ({}),
   isActorReadScopeCurrent: () => actorCurrent, productEditHistoryReceipt,
   setServerItems: (change: (previous: typeof rows) => typeof rows) => { rows = change(rows) },
   refreshServerItems: () => { refreshes++ },
@@ -130,6 +132,7 @@ for (const change of ['invalidation', 'actor', 'permission', 'stale']) {
   const current = (_scope: unknown, invalidation = true) => currentActor && (!invalidation || revision === 0)
   const run = closure('runServerEntry', {
     busy: '', actorScope: 'actor7', actorScopeRef: actorRef, readScope: {}, setBusy() {}, notify() {}, refreshServerItems() {},
+    serverItemsAuthority: {}, setServerItemsAuthority() {}, captureActorReadScope: () => ({}),
     serverItems: [{ id: 88, undo_payload: pointer, redo_payload: pointer }], setServerItems() {},
     navigator: { onLine: true }, window: { sessionStorage: storage }, productEditStorageKey: () => 'replay',
     executeProductEditReplay, buildServerReplayRequest: build, isActorReadScopeCurrent: current,
@@ -148,3 +151,121 @@ for (const change of ['invalidation', 'actor', 'permission', 'stale']) {
   assert.equal(sent, change === 'stale' ? 0 : 1)
 }
 console.log('PASS actual server replay accepts own invalidation; actor, permission and stale pre-dispatch controls remain fenced')
+
+function dependencyHooks() {
+  const slots: any[] = []
+  let cursor = 0
+  let effects: Array<() => void> = []
+  const same = (left: unknown[] | undefined, right: unknown[] | undefined) => !!left && !!right
+    && left.length === right.length && left.every((value, index) => Object.is(value, right[index]))
+  const memo = (factory: () => unknown, dependencies?: unknown[]) => {
+    const index = cursor++
+    if (!slots[index] || !same(slots[index].dependencies, dependencies)) slots[index] = { value: factory(), dependencies }
+    return slots[index].value
+  }
+  return {
+    begin() { cursor = 0 },
+    commit() { const pending = effects; effects = []; pending.forEach(effect => effect()) },
+    useState(initial: any) {
+      const index = cursor++
+      if (!(index in slots)) slots[index] = { value: typeof initial === 'function' ? initial() : initial }
+      return [slots[index].value, (value: any) => { slots[index].value = typeof value === 'function' ? value(slots[index].value) : value }]
+    },
+    useRef(initial: unknown) { const index = cursor++; return slots[index] ||= { current: initial } },
+    useMemo: memo,
+    useCallback(fn: unknown, dependencies: unknown[]) { return memo(() => fn, dependencies) },
+    useEffect(effect: () => void | (() => void), dependencies?: unknown[]) {
+      const index = cursor++
+      if (!slots[index] || !same(slots[index].dependencies, dependencies)) {
+        const cleanup = slots[index]?.cleanup
+        slots[index] = { dependencies }
+        effects.push(() => { cleanup?.(); slots[index].cleanup = effect() })
+      }
+    },
+  }
+}
+
+function mapStorage() {
+  const values = new Map<string, string>()
+  return { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => { values.set(key, String(value)) }, removeItem: (key: string) => { values.delete(key) } }
+}
+
+const hookWindow = {
+  localStorage: mapStorage(), sessionStorage: mapStorage(), location: { origin: 'https://product.test' },
+  addEventListener() {}, setTimeout: () => 1, clearTimeout() {},
+}
+hookWindow.sessionStorage.setItem('businessos_user', JSON.stringify({ id: 7 }))
+const hookModules: Record<string, any> = {
+  './httpState.ts': { getSyncServerUrl: () => 'https://worker.test' },
+  './unresolvedSignout.ts': { isSignoutBlocked: () => false },
+}
+function loadHookModule(relative: string) {
+  const original = readFileSync(new URL(relative, import.meta.url), 'utf8')
+  const javascript = ts.transpileModule(original, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText
+  const exports: Record<string, any> = {}
+  runInNewContext(javascript, { exports, require: (name: string) => {
+    assert.ok(name in hookModules, `missing actual hook dependency ${name}`)
+    return hookModules[name]
+  }, window: hookWindow, navigator: { onLine: true }, console, Date, Math, globalThis: { crypto: { randomUUID: () => 'hook-runtime' } } })
+  return exports
+}
+const actualReadScope = loadHookModule('../src/api/actorReadScope.ts')
+const hooks = dependencyHooks()
+let hookRows: Array<Record<string, unknown>> = [{ id: 88, status: 'undoable', undo_payload: pointer, redo_payload: pointer }]
+let hookSends = 0
+const sentHookBodies: unknown[] = []
+const hookTransport = {
+  getActionHistory: async () => ({ items: hookRows }),
+  getActionHistoryUsers: async () => [],
+  undoActionHistory: async (_id: unknown, body: { expected_generation: number }) => hookReply(body, 'redoable'),
+  redoActionHistory: async (_id: unknown, body: { expected_generation: number }) => hookReply(body, 'undoable'),
+}
+function hookReply(body: { expected_generation: number }, status: string) {
+  hookSends++
+  sentHookBodies.push(body)
+  actualReadScope.invalidateActorReadChannel('actionHistory')
+  const generation = body.expected_generation + 1
+  const latestPointer = { ...pointer, generation }
+  const item = { id: 88, status, undo_payload: latestPointer, redo_payload: latestPointer }
+  hookRows = [item]
+  return { applied: true, action_history_id: 88, operation_id: '72', generation, current_generation: generation, item }
+}
+Object.assign(hookModules, {
+  react: hooks,
+  '../api/actorReadScope.ts': actualReadScope,
+  './productEditRequests.ts': { executeProductEditReplay, productEditHistoryReceipt, productEditStorageKey: () => 'hook-replay', localizeProductEditError: async (error: unknown) => error },
+  './workDrafts.ts': { scopedWorkDraftKey: (key: string) => key },
+  './permissions.ts': { effectivePermissions: (user: unknown) => user },
+  './loaders': {
+    beginTrackedRequest: (ref: { current: number }) => ++ref.current,
+    invalidateTrackedRequest: (ref: { current: number }) => ++ref.current,
+    isTrackedRequestCurrent: (ref: { current: number }, id: number) => ref.current === id,
+    withLoaderTimeout: (task: () => unknown) => Promise.resolve().then(task),
+  },
+  '../api/actionHistoryTransport.ts': hookTransport,
+})
+const actualHistory = loadHookModule('../src/utils/actionHistory.ts')
+const hookUser = { id: 7, isAdmin: false, products_edit: true }
+const hookNotify = () => {}
+const renderHistory = () => { hooks.begin(); const view = actualHistory.useActionHistory({ scope: 'products', user: hookUser, notify: hookNotify }); hooks.commit(); return view }
+let hookView = renderHistory()
+await hookView.refreshServerItems()
+hookView = renderHistory()
+assert.equal(hookView.serverItems.length, 1)
+const earlierUndo = hookView.undoServer
+actualReadScope.invalidateActorReadChannel('actionHistory')
+hookView = renderHistory()
+assert.equal(hookView.serverItems.length, 0, 'an unrelated invalidation must hide previously fetched rows even when every memo input except read revision is unchanged')
+await hookView.refreshServerItems()
+hookView = renderHistory()
+assert.equal(hookView.serverItems.length, 1, 'refresh may return the same rows array and must still restore current visibility')
+assert.equal(await earlierUndo(88), false, 'a callback held across invalidation remains stale')
+assert.equal(hookSends, 0)
+assert.equal(await hookView.undoServer(88), true, 'a fresh UI callback must use the refreshed read revision')
+await new Promise(resolve => setImmediate(resolve))
+hookView = renderHistory()
+assert.equal(hookView.serverItems[0].status, 'redoable')
+assert.equal(await hookView.redoServer(88), true)
+assert.deepEqual(JSON.parse(JSON.stringify(sentHookBodies)), [{ require_applied: true, expected_generation: 0 }, { require_applied: true, expected_generation: 1 }])
+assert.equal(hookWindow.sessionStorage.getItem('hook-replay'), null)
+console.log('PASS dependency-aware actual History hook hides invalidated rows, refreshes unchanged arrays and replays both directions with fresh authority')

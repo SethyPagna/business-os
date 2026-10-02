@@ -245,10 +245,12 @@ export function useActionHistory({ limit = 10, notify, scope = 'global', enabled
   const [undoStack, setUndoStack] = useState<ActionHistoryEntry[]>([])
   const [redoStack, setRedoStack] = useState<ActionHistoryEntry[]>([])
   const [serverItems, setServerItems] = useState<ServerHistoryItem[]>(() => enabled ? readCachedServerItems(actorScope, readScope) : [])
+  const [serverItemsAuthority, setServerItemsAuthority] = useState(readScope)
   const cachedScopeRef = useRef(actorScope)
   const [busy, setBusy] = useState<ActionDirection | ''>('')
   const [userFilter, setUserFilter] = useState('all')
   const [userOptions, setUserOptions] = useState<UserOption[]>([])
+  const [userOptionsAuthority, setUserOptionsAuthority] = useState(readScope)
   const historyRequestRef = useRef(0)
   const usersRequestRef = useRef(0)
   const isAdmin = useMemo(() => effectivePermissions(user).isAdmin, [user])
@@ -275,6 +277,7 @@ export function useActionHistory({ limit = 10, notify, scope = 'global', enabled
         const record = result as { items?: ServerHistoryItem[] } | null
         const items = Array.isArray(record?.items) ? record.items : []
         setServerItems(items)
+        setServerItemsAuthority(authority)
         // Only cache the unfiltered, default view -- an admin's per-user
         // filter result isn't what the next mount (or a different user)
         // should see flashed in before the real fetch resolves.
@@ -284,6 +287,7 @@ export function useActionHistory({ limit = 10, notify, scope = 'global', enabled
         if (!isActorReadScopeCurrent(authority) || !isTrackedRequestCurrent(historyRequestRef, requestId) || actorScopeRef.current !== requestScope) return
         if ([401, 403].includes(Number((error as { status?: unknown })?.status))) {
           setServerItems([])
+          setServerItemsAuthority(authority)
           writeCachedServerItems(actorScope, [], authority)
         }
       })
@@ -299,7 +303,9 @@ export function useActionHistory({ limit = 10, notify, scope = 'global', enabled
     setUndoStack([])
     setRedoStack([])
     setServerItems(enabled ? readCachedServerItems(actorScope, readScope) : [])
+    setServerItemsAuthority(readScope)
     setUserOptions([])
+    setUserOptionsAuthority(readScope)
     setUserFilter('all')
   }, [actorScope, scope])
 
@@ -308,7 +314,7 @@ export function useActionHistory({ limit = 10, notify, scope = 'global', enabled
     return scheduleActionHistoryRead(() => {
       refreshServerItems()
     })
-  }, [enabled, refreshServerItems])
+  }, [enabled, readScope.authority, readScope.revision, refreshServerItems])
 
   useEffect(() => {
     if (!enabled) return
@@ -329,6 +335,7 @@ export function useActionHistory({ limit = 10, notify, scope = 'global', enabled
         .then((rows) => {
           if (actorScopeRef.current !== actorScope || !isActorReadScopeCurrent(authority) || !isTrackedRequestCurrent(usersRequestRef, requestId)) return
           setUserOptions(Array.isArray(rows) ? rows : [])
+          setUserOptionsAuthority(authority)
         })
         .catch((error: unknown) => {
           if (isActorReadScopeCurrent(authority) && isTrackedRequestCurrent(usersRequestRef, requestId) && [401, 403].includes(Number((error as { status?: unknown })?.status))) setUserOptions([])
@@ -338,7 +345,7 @@ export function useActionHistory({ limit = 10, notify, scope = 'global', enabled
       cancelScheduledRead()
       invalidateTrackedRequest(usersRequestRef)
     }
-  }, [actorScope, enabled, isAdmin])
+  }, [actorScope, enabled, isAdmin, readScope.authority, readScope.revision])
 
   useEffect(() => () => {
     invalidateTrackedRequest(historyRequestRef)
@@ -375,10 +382,12 @@ export function useActionHistory({ limit = 10, notify, scope = 'global', enabled
     if (actorScopeRef.current !== actorScope || !isActorReadScopeCurrent(readScope, false)) return false
     const item = productEditHistoryReceipt(result)
     if (!item) return false
-    setServerItems(current => [item, ...current.filter(row => String(row.id) !== String(item.id))].slice(0, Math.max(3, limit)))
+    const authority = captureActorReadScope('actionHistory')
+    setServerItems(current => [item, ...(isActorReadScopeCurrent(serverItemsAuthority) ? current : []).filter(row => String(row.id) !== String(item.id))].slice(0, Math.max(3, limit)))
+    setServerItemsAuthority(authority)
     refreshServerItems()
     return true
-  }, [actorScope, limit, refreshServerItems])
+  }, [actorScope, limit, refreshServerItems, serverItemsAuthority])
 
   const runEntry = useCallback(async (direction: ActionDirection, entryId: string | number | null = null): Promise<boolean> => {
     const source = direction === 'undo' ? undoStack : redoStack
@@ -454,9 +463,10 @@ export function useActionHistory({ limit = 10, notify, scope = 'global', enabled
     setBusy(direction)
     try {
       const api = await loadActionHistoryTransport()
-      if (actorScopeRef.current !== requestScope || !isActorReadScopeCurrent(readScope)) return false
+      if (actorScopeRef.current !== requestScope || !isActorReadScopeCurrent(readScope) || !isActorReadScopeCurrent(serverItemsAuthority)) return false
       if (navigator.onLine === false) throw new Error('Connect to the server to replay history.')
       const item = serverItems.find(item => String(item.id) === String(serverId))
+      if (!item) return false
       const payload = item?.[direction === 'undo' ? 'undo_payload' : 'redo_payload'] as Record<string, unknown> | undefined
       const replayRequest = buildServerReplayRequest(payload)
       const response = payload?.applier === 'product.edit.v1'
@@ -489,7 +499,10 @@ export function useActionHistory({ limit = 10, notify, scope = 'global', enabled
         return false
       }
       const updated = (response as { item?: ServerHistoryItem }).item
-      if (updated) setServerItems((current) => current.map((row) => String(row.id) === String(updated.id) ? updated : row))
+      if (updated) {
+        setServerItems((current) => isActorReadScopeCurrent(serverItemsAuthority) ? current.map((row) => String(row.id) === String(updated.id) ? updated : row) : [updated])
+        setServerItemsAuthority(captureActorReadScope('actionHistory'))
+      }
       refreshServerItems()
       if (label && (!(response as { reconciled_direction?: string }).reconciled_direction || (response as { reconciled_direction?: string }).reconciled_direction === direction)) notify?.(label)
       return true
@@ -500,10 +513,12 @@ export function useActionHistory({ limit = 10, notify, scope = 'global', enabled
     } finally {
       setBusy('')
     }
-  }, [actorScope, busy, notify, refreshServerItems, serverItems])
+  }, [actorScope, busy, notify, readScope.authority, readScope.revision, refreshServerItems, serverItems, serverItemsAuthority])
 
   const undoServer = useCallback((serverId: ActionHistoryId, label = '') => runServerEntry('undo', serverId, label), [runServerEntry])
   const redoServer = useCallback((serverId: ActionHistoryId, label = '') => runServerEntry('redo', serverId, label), [runServerEntry])
+  const serverItemsCurrent = enabled && cachedScopeRef.current === actorScope && isActorReadScopeCurrent(serverItemsAuthority)
+  const userOptionsCurrent = enabled && isAdmin && cachedScopeRef.current === actorScope && isActorReadScopeCurrent(userOptionsAuthority)
 
   return useMemo(() => ({
     busy,
@@ -513,11 +528,11 @@ export function useActionHistory({ limit = 10, notify, scope = 'global', enabled
     lastRedoLabel: redoStack[redoStack.length - 1]?.label || '',
     undoItems: undoStack,
     redoItems: redoStack,
-    serverItems: enabled && cachedScopeRef.current === actorScope && isActorReadScopeCurrent(readScope) ? serverItems : [],
+    serverItems: serverItemsCurrent ? serverItems : [],
     isAdmin,
     userFilter,
     setUserFilter,
-    userOptions: enabled && isAdmin && cachedScopeRef.current === actorScope && isActorReadScopeCurrent(readScope) ? userOptions : [],
+    userOptions: userOptionsCurrent ? userOptions : [],
     refreshServerItems,
     pushAction,
     adoptServerAction,
@@ -525,5 +540,5 @@ export function useActionHistory({ limit = 10, notify, scope = 'global', enabled
     redo,
     undoServer,
     redoServer,
-  }), [actorScope, enabled, busy, isAdmin, pushAction, adoptServerAction, redo, redoServer, redoStack, refreshServerItems, serverItems, undo, undoServer, undoStack, userFilter, userOptions])
+  }), [actorScope, enabled, busy, isAdmin, pushAction, adoptServerAction, redo, redoServer, redoStack, refreshServerItems, serverItems, serverItemsCurrent, undo, undoServer, undoStack, userFilter, userOptions, userOptionsCurrent])
 }
