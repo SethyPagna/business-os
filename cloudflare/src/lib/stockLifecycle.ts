@@ -21,7 +21,7 @@ export class StockLifecycleError extends HTTPException {
   }
 }
 
-export async function assertStockLifecycleMutable(db: D1Compat, scope: { movementId?: number; batchId?: number; productId?: number; branchId?: number; supplierId?: number; supplierIds?: readonly number[]; feeId?: number; allSources?: boolean }) {
+export async function assertStockLifecycleMutable(db: D1Compat, scope: { movementId?: number; batchId?: number; batchIds?: readonly number[]; productId?: number; branchId?: number; supplierId?: number; supplierIds?: readonly number[]; feeId?: number; allSources?: boolean }) {
   const objects = await db.prepare("SELECT name FROM sqlite_master WHERE name IN ('stock_disposition_sources','stock_funding_dependencies','stock_disposition_fees','stock_funding_events')").all<{ name: string }>()
   const present = new Set(objects.map(row => row.name))
   if (scope.feeId) {
@@ -37,6 +37,10 @@ export async function assertStockLifecycleMutable(db: D1Compat, scope: { movemen
   if (scope.supplierIds?.length) {
     clauses.push('supplier_id IN (SELECT CAST(value AS INTEGER) FROM json_each(@supplierIds))')
     params.supplierIds = JSON.stringify(scope.supplierIds)
+  }
+  if (scope.batchIds) {
+    clauses.push('batch_id IN (SELECT value FROM json_each(@batchIds))')
+    params.batchIds = JSON.stringify(scope.batchIds)
   }
   if (!clauses.length && !scope.allSources) return
   for (const table of ['stock_disposition_sources','stock_funding_dependencies']) {
