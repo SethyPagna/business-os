@@ -298,6 +298,7 @@ async function checkEnvelopeRoutes(api) {
 }
 
 async function checkLiteralEnvelopeRoutes() {
+  await checkAuditProducerLiterals(access)
   await checkEnvelopeRoutes(access)
   await checkLiteralProductGallery(access)
 }
@@ -305,6 +306,8 @@ checkLiteralEnvelopeRoutes().catch(error => { console.error(error); process.exit
 
 function literalProducerPayloads() {
   return [
+    { keys: ['store_name','telegram_topic_id'], added:['KHQR'], entries:['line_added'], changed_columns:['sales.subtotal_usd'], membership_to_notes:['000012','{"cost_price_usd":7}'] },
+    { moved:{products_by_name:[[11,'{"cost_price_usd":7}']],product_batches_by_name:[[12,'ខូច']],supplier_invoices_by_name:[[13,null]],customer_receivables_by_name:[[14,'000012']]} },
     { image_gallery: ['/uploads/rose-1.jpg', '/uploads/rose-2.jpg', '/uploads/rose-3.jpg'], name: 'Rose' },
     { imagePaths: ['/uploads/rose-1.jpg'], imageNames: ['Rose_1.jpg'], currentGallery: ['/uploads/old.jpg'] },
     { absorbedBarcodes: ['00012345'], reparentedTables: ['sale_items:1'], imagesMovedToKeeper: ['/uploads/old.jpg'] },
@@ -317,6 +320,9 @@ function literalProducerPayloads() {
 function literalStructuredCases() {
   const row = JSON.stringify({ cost_price_usd: 7, count: 2 }), safe = JSON.stringify({ count: 2 })
   return [
+    ...['keys','added','entries','membership_to_notes','changed_columns'].map(key=>[{details:{[key]:[{opaque:[row]}]}},{details:{[key]:[{opaque:[safe]}]}}]),
+    [{details:{moved:{products_by_name:[[11,{opaque:[row]}]]}}},{details:{moved:{products_by_name:[[11,{opaque:[safe]}]]}}}],
+    [{details:{moved:{products_by_name:[['1',row]]}}},{details:{moved:{products_by_name:[[null,safe]]}}}],
     [{ details: { names: [{ opaque: [row] }] } }, { details: { names: [{ opaque: [safe] }] } }],
     [{ details: { tags: [{ opaque: [row] }] } }, { details: { tags: [{ opaque: [safe] }] } }],
     [{ details: { source_ids_json: JSON.stringify([{ opaque: [row] }]) } }, { details: { source_ids_json: JSON.stringify([{ opaque: [safe] }]) } }],
@@ -370,4 +376,84 @@ async function checkLiteralProductGallery(api) {
       assert.equal(JSON.stringify(payload), original); assert.equal(JSON.stringify(native.prepare('SELECT * FROM product_images ORDER BY id').all()), before)
     }
   } finally { native.close() }
+}
+
+
+function createLiteralAuditLoader() {
+ const cache=new Map(),sourceRoot=root
+ function read(file){return fs.readFileSync(file,'utf8')}
+ function compile(source, imports){const m={exports:{}};new Function('require','module','exports',ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(imports,m,m.exports);return m.exports}
+ function load(file){file=path.resolve(file);if(cache.has(file))return cache.get(file);const exports=compile(read(file),id=>id.startsWith('.')?load(path.resolve(path.dirname(file),id+'.ts')):require(id));cache.set(file,exports);return exports}
+ function ast(file){return ts.createSourceFile(file,read(path.join(sourceRoot,file)),ts.ScriptTarget.Latest,true)}
+ function find(node,predicate){if(predicate(node))return node;let hit;ts.forEachChild(node,child=>{if(!hit)hit=find(child,predicate)});return hit}
+ function evaluate(node,tree,bindings){return new Function(...Object.keys(bindings),'return ('+node.getText(tree)+')')(...Object.values(bindings))}
+ return {load,compile,read,ast,find,evaluate,sourceRoot}
+}
+async function checkAuditProducerLiterals(api) {
+ const {load,compile,read,ast,find,evaluate,sourceRoot}=createLiteralAuditLoader(),{DatabaseSync}=require('node:sqlite')
+ const wt=path.resolve(root,'../..')
+ const access = api, permissions = load(path.join(sourceRoot, 'lib/permissions.ts'))
+ const reader = load(path.join(sourceRoot, 'lib/auditLogPage.ts')), query = load(path.join(sourceRoot, 'lib/auditLogQuery.ts'))
+ const audit = compile(read(path.join(sourceRoot, 'lib/audit.ts')), id => { assert.equal(id, './db'); return { getDb: () => { throw Error('Unselected audit service') } } })
+ const settings = ast('routes/settings.ts'), sales = ast('routes/sales.ts')
+ const keysNode = find(settings, n => ts.isObjectLiteralExpression(n) && n.getText(settings) === '{ keys: attemptedKeys }')
+ const addedNode = find(settings, n => ts.isObjectLiteralExpression(n) && n.properties.some(p => p.name?.getText(settings) === 'action' && p.initializer?.getText(settings) === "'payment_methods_backfill'"))
+ const entriesNode = find(sales, n => ts.isPropertyAssignment(n) && n.name.getText(sales) === 'entries' && n.initializer.getText(sales).startsWith('ledgerEntries.map'))
+ assert.ok(keysNode); assert.ok(addedNode); assert.ok(entriesNode)
+ const legacy=ast('lib/legacySubtotalRepair.ts'), changedNode=find(legacy,n=>ts.isPropertyAssignment(n)&&n.name.getText(legacy)==='changed_columns')
+ const topic=ast('lib/telegramTopicSetting.ts'),topicNode=find(topic,n=>ts.isObjectLiteralExpression(n)&&n.getText(topic)==='{ keys }')
+ assert.ok(changedNode);assert.ok(topicNode)
+ const cases = [
+  { name: 'legacy-subtotal-field-audit', entity: 'sale', expected: {changed_columns:evaluate(changedNode.initializer,legacy,{})} },
+  { name: 'topic-settings-key-audit', entity: 'settings', expected:evaluate(topicNode,topic,{keys:['telegram_topic_id']}) },
+  { name: 'settings-key-audit', entity: 'settings', expected: evaluate(keysNode, settings, { attemptedKeys: ['store_name', 'pos_payment_methods'] }) },
+  { name: 'payment-method-backfill-audit', entity: 'settings', expected: evaluate(addedNode, settings, { merged: { added: ['KHQR', 'ABA'] } }) },
+  { name: 'sale-amendment-ledger-kind-audit', entity: 'sale', expected: { entries: evaluate(entriesNode.initializer, sales, { ledgerEntries: [{ kind: 'line_added' }, { kind: 'line_updated' }] }) } },
+ ]
+ const native = new DatabaseSync(':memory:'); native.limits.exprDepth = 100
+ const schema = read(path.join(wt, 'cloudflare/migrations/0001_init.sql'))
+ for (const table of ['audit_logs', 'users', 'user_sessions']) { const match = schema.match(new RegExp('CREATE TABLE ' + table + ' \\([\\s\\S]*?\\n\\);')); assert.ok(match); native.exec(match[0]) }
+ const db = { prepare(sql) { return { async all(params = {}) { return native.prepare(sql).all(params) } } } }
+ for (let i = 0; i < cases.length; i++) { const c = cases[i], statement = audit.buildAuditStatement(null, 'fixture actor', 'update', c.entity, String(i + 1), c.expected); native.prepare(statement.sql).run(statement.params) }
+ const merge = load(path.join(sourceRoot, 'lib/contactMerge.ts'))
+ native.exec('CREATE TABLE returns(id INTEGER PRIMARY KEY,supplier_id INTEGER,customer_id INTEGER); CREATE TABLE products(id INTEGER PRIMARY KEY,supplier TEXT); CREATE TABLE product_batches(id INTEGER PRIMARY KEY,supplier_id INTEGER,supplier_name TEXT); CREATE TABLE supplier_invoices(id INTEGER PRIMARY KEY,supplier_id INTEGER,supplier_name TEXT); CREATE TABLE customer_receivables(id INTEGER PRIMARY KEY,customer_id INTEGER,customer_name TEXT); CREATE TABLE sales(id INTEGER PRIMARY KEY,customer_id INTEGER); CREATE TABLE customer_share_submissions(id INTEGER PRIMARY KEY,customer_id INTEGER); CREATE TABLE loyalty_point_adjustments(id INTEGER PRIMARY KEY,customer_id INTEGER)')
+ const named = '{"cost_price_usd":7}', membership = '000012'
+ for(const sql of ['INSERT INTO products VALUES(11,?)','INSERT INTO product_batches VALUES(12,NULL,?)','INSERT INTO supplier_invoices VALUES(13,NULL,?)','INSERT INTO customer_receivables VALUES(14,NULL,?)']) native.prepare(sql).run(named)
+ for(const table of ['suppliers','customers']) {
+  const plan = merge.buildContactMergePlan({table,entity:table,editableColumns:['name','notes',...(table==='customers'?['membership_number']:[])],keeper:{id:1,name:'Keeper',notes:'',membership_number:'chosen'},members:[{id:2,name:named,notes:'',membership_number:membership}],membershipSourceId:1,portalAccounts:[],hasCustomerReceivables:true,hasSupplierInvoices:true,audit:{operationId:'literal-'+table,userId:null,userName:'Fixture',deviceName:null,deviceTz:null}})
+  const statement = plan.statements.find(row=>row.sql.startsWith('INSERT INTO audit_logs'))
+  assert.ok(statement)
+  native.prepare(statement.sql).run(statement.params)
+  const stored=native.prepare('SELECT * FROM audit_logs ORDER BY id DESC LIMIT 1').get()
+  const prior=JSON.parse(stored.old_value),after=JSON.parse(stored.new_value)
+  for(const field of table==='customers'?['customer_receivables_by_name']:['products_by_name','product_batches_by_name','supplier_invoices_by_name']) {
+   assert.equal(prior.moved[field].length,1);assert.equal(prior.moved[field][0].length,2);assert.ok(Number.isSafeInteger(prior.moved[field][0][0]));assert.equal(prior.moved[field][0][1],named)
+  }
+  if(table==='customers')assert.deepEqual(after.membership_to_notes,[membership])
+  const columns=table==='customers'?['old_value','new_value']:['old_value']
+  for(const column of columns) cases.push({name:table+'-merge-'+column,entity:table,id:String(stored.entity_id),rowId:stored.id,column,expected:JSON.parse(stored[column])})
+ }
+ const before = JSON.stringify(native.prepare('SELECT * FROM audit_logs').all())
+ let user
+ const app = new Hono(); app.use('*', async (c, next) => { c.set('user', user); await next() }); app.use('*', access.acquisitionCostResponses)
+ const compat = ast('routes/compat.ts'), handler = find(compat, n => ts.isExpressionStatement(n) && n.getText(compat).startsWith("app.get('/system/audit-logs',"))
+ assert.ok(handler)
+ new Function('app', 'requireAuth', 'getActionTier', 'decodeAuditCursor', 'readAuditLogPage', 'getDb', ts.transpileModule(handler.getText(compat), { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText)(app, async (c, next) => next(), permissions.getActionTier, query.decodeAuditCursor, reader.readAuditLogPage, () => db)
+ const roles = [
+  { name: 'denied', permissions: { audit_log: true, product_cost_view: false, product_cost_edit: false } },
+  { name: 'edit-only', permissions: { audit_log: true, product_cost_view: false, product_cost_edit: true } },
+  { name: 'view-only', permissions: { audit_log: true, product_cost_view: true, product_cost_edit: false } },
+  { name: 'admin-false', role_code: 'admin', permissions: { audit_log: true, product_cost_view: false, product_cost_edit: false } },
+ ]
+ assert.equal(cases.length,8)
+ const observations = []
+ for (const role of roles) {
+  user = { id: 7, role_code: role.role_code || 'manager', permissions: JSON.stringify(role.permissions), role_permissions: JSON.stringify({ product_cost_view: true, product_cost_edit: true }) }
+  const response = await app.request('/system/audit-logs?counts=none'), body = await response.json(); assert.equal(response.status, 200, JSON.stringify(body))
+  for (let i = 0; i < cases.length; i++) { const c = cases[i], row = body.items.find(row => c.rowId ? row.id === c.rowId : row.entity_id === String(i + 1) && row.entity === c.entity); assert.ok(row); observations.push({ role: role.name, case: c.name, expected: c.expected, actual: JSON.parse(row[c.column || 'details']), inputDenied: access.hasAcquisitionCostInput({ details: c.expected }, user), preserved: JSON.stringify(JSON.parse(row[c.column || 'details'])) === JSON.stringify(c.expected) }) }
+ }
+ assert.equal(JSON.stringify(native.prepare('SELECT * FROM audit_logs').all()), before)
+ console.log(JSON.stringify({ label: 'LITERAL_ACTUAL_AUDIT_PRODUCERS', exprDepth: native.limits.exprDepth, method: 'Actual producer AST expressions; real buildAuditStatement + native SQLite; actual compat audit handler + real readAuditLogPage/permissions/projection. Authentication identity injected; no live call.', observations }, null, 2))
+ native.close()
+ assert.ok(observations.every(row => row.preserved && !row.inputDenied), 'actual producer literal audit bytes and denied admission preserved')
 }

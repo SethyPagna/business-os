@@ -52,7 +52,15 @@ const LITERAL_ARRAY_FIELDS = new Set(['names', 'product_names', 'merged_names', 
   'undo_pending_operation_ids', 'undo_unavailable_operation_ids', 'operation_ids', 'closes_stock_sessions',
   'configured_methods', 'configured_before', 'configured_after', 'historical_snapshots_preserved', 'phones', 'allowed_actions',
   'editable_columns', 'partial_fields', 'available_years', 'customer', 'supplier', 'units', 'suppliers',
+  'keys', 'added', 'entries', 'membership_to_notes', 'changed_columns',
   'conflicts', 'errors', 'kept', 'ignored', 'auto_wired', 'duplicate_header_keys', 'unmatched', 'ambiguous'].map(keyFingerprint))
+
+const CONTACT_NAME_TUPLE_FIELDS = new Set(['products_by_name', 'product_batches_by_name', 'supplier_invoices_by_name', 'customer_receivables_by_name'].map(keyFingerprint))
+
+function isContactNameTuple(value: unknown, depth: number): value is [number, string | null] {
+  return depth + 2 <= MAX_DEPTH && Array.isArray(value) && value.length === 2
+    && Number.isSafeInteger(value[0]) && value[0] > 0 && (typeof value[1] === 'string' || value[1] === null)
+}
 
 function isLiteralArrayField(key: string): boolean {
   return LITERAL_ARRAY_FIELDS.has(keyFingerprint(key))
@@ -125,9 +133,10 @@ function selectedPrivateField(source: Record<string, unknown>, supplier: boolean
 export function hasAcquisitionCostInput(value: unknown, user: PermissionUser): boolean {
   if (canEditAcquisitionCosts(user)) return false
   const budget = { bytes: MAX_DECODED_BYTES }
-  function contains(input: unknown, depth: number, supplier = false, governed = false, literalStrings = false): boolean {
+  function contains(input: unknown, depth: number, supplier = false, governed = false, literalStrings = false, literalNameTuples = false): boolean {
     if (depth > MAX_DEPTH) return true
-    if (Array.isArray(input)) return input.some(item => !(literalStrings && typeof item === 'string') && contains(item, depth + 1, supplier, governed))
+    if (Array.isArray(input)) return input.some(item => !(literalStrings && typeof item === 'string')
+      && !(literalNameTuples && isContactNameTuple(item, depth)) && contains(item, depth + 1, supplier, governed))
     if (typeof input === 'string' && governed) {
       const decoded = decodeFinancialContainer(input, depth, budget)
       return !decoded || contains(decoded.value, decoded.depth, supplier, true)
@@ -142,12 +151,13 @@ export function hasAcquisitionCostInput(value: unknown, user: PermissionUser): b
       const childGoverned = isSerializedCostEnvelope(key)
         || isFinancialRowContainer(key) || (governed && typeof child !== 'string')
       const literalArray = isLiteralArrayField(key)
+      const nameTuples = CONTACT_NAME_TUPLE_FIELDS.has(keyFingerprint(key))
       if (typeof child === 'string' && (isSerializedCostEnvelope(key) || childGoverned)) {
         if (!child.trim()) return false
         const decoded = decodeFinancialContainer(child, depth, budget)
-        return !decoded || contains(decoded.value, decoded.depth, childSupplier, childGoverned, literalArray)
+        return !decoded || contains(decoded.value, decoded.depth, childSupplier, childGoverned, literalArray, nameTuples)
       }
-      return contains(child, depth + 1, childSupplier, childGoverned, literalArray)
+      return contains(child, depth + 1, childSupplier, childGoverned, literalArray, nameTuples)
     })
   }
   return contains(value, 0)
@@ -156,9 +166,10 @@ export function hasAcquisitionCostInput(value: unknown, user: PermissionUser): b
 export function projectAcquisitionCosts(value: unknown, user: PermissionUser, supplierMoney = false): unknown {
   if (canViewAcquisitionCosts(user)) return value
   const budget = { bytes: MAX_DECODED_BYTES }
-  function project(input: unknown, depth: number, supplier = supplierMoney, governed = false, literalStrings = false): unknown {
+  function project(input: unknown, depth: number, supplier = supplierMoney, governed = false, literalStrings = false, literalNameTuples = false): unknown {
     if (depth > MAX_DEPTH) return null
-    if (Array.isArray(input)) return input.map(item => literalStrings && typeof item === 'string' ? item : project(item, depth + 1, supplier, governed))
+    if (Array.isArray(input)) return input.map(item => literalStrings && typeof item === 'string' ? item
+      : literalNameTuples && isContactNameTuple(item, depth) ? [...item] : project(item, depth + 1, supplier, governed))
     if (typeof input === 'string' && governed) {
       const decoded = decodeFinancialContainer(input, depth, budget)
       return decoded ? encodeFinancialContainer(project(decoded.value, decoded.depth, supplier, true), decoded.layers) : null
@@ -175,12 +186,13 @@ export function projectAcquisitionCosts(value: unknown, user: PermissionUser, su
       const childGoverned = isSerializedCostEnvelope(key)
         || isFinancialRowContainer(key) || (governed && typeof child !== 'string')
       const literalArray = isLiteralArrayField(key)
+      const nameTuples = CONTACT_NAME_TUPLE_FIELDS.has(keyFingerprint(key))
       if (typeof child === 'string' && (isSerializedCostEnvelope(key) || childGoverned)) {
         if (!child.trim()) { result[key] = child; continue }
         const decoded = decodeFinancialContainer(child, depth, budget)
-        result[key] = decoded ? encodeFinancialContainer(project(decoded.value, decoded.depth, childSupplier, childGoverned, literalArray), decoded.layers) : null
+        result[key] = decoded ? encodeFinancialContainer(project(decoded.value, decoded.depth, childSupplier, childGoverned, literalArray, nameTuples), decoded.layers) : null
       } else {
-        result[key] = project(child, depth + 1, childSupplier, childGoverned, literalArray)
+        result[key] = project(child, depth + 1, childSupplier, childGoverned, literalArray, nameTuples)
       }
     }
     return result

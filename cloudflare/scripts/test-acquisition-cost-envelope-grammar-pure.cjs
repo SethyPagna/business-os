@@ -173,3 +173,39 @@ function checkLiteralArrayContract(api) {
   console.log('PASS typed immediate literal-array strings; structured objects/nested arrays retain governed financial privacy')
 }
 checkLiteralArrayContract(access)
+
+function checkProducerPositionContract(api) {
+ const fields=['keys','added','entries','membership_to_notes','changed_columns'];const tupleFields=['products_by_name','product_batches_by_name','supplier_invoices_by_name','customer_receivables_by_name'];
+ const literals=['000012','ខូច','{"cost_price_usd":7}']; const cost=JSON.stringify({cost_price_usd:7,count:2}),safe=JSON.stringify({count:2});
+ for(const field of fields)for(const key of [field,field.toUpperCase()])for(const value of [literals,[null,7,...literals]])for(const envelope of ['details','old_value','new_value','redo_payload']){
+  const payload={[envelope]:JSON.stringify({[key]:value})},before=JSON.stringify(payload);
+  assert.deepEqual(api.projectAcquisitionCosts(payload,denied),payload,'producer immediate literal '+field);assert.equal(api.hasAcquisitionCostInput(payload,denied),false);assert.equal(JSON.stringify(payload),before);
+  for(const nested of [[{opaque:[cost]}],[[cost]]]){const input={[envelope]:{[key]:nested}},expected={[envelope]:{[key]:nested.map(item=>Array.isArray(item)?[safe]:{opaque:[safe]})}};assert.deepEqual(api.projectAcquisitionCosts(input,denied),expected);assert.equal(api.hasAcquisitionCostInput(input,denied),true)}
+ }
+ for(const field of tupleFields)for(const key of [field,field.toUpperCase()])for(const envelope of ['old_value','new_value','details']){
+  const value=[[11,literals[0]],[12,literals[1]],[13,literals[2]],[14,null]],payload={[envelope]:JSON.stringify({moved:{[key]:value}})};
+  assert.deepEqual(api.projectAcquisitionCosts(payload,denied),payload,'producer id/name tuple '+field);assert.equal(api.hasAcquisitionCostInput(payload,denied),false);assert.equal(api.projectAcquisitionCosts(payload,viewer),payload);
+  for(const invalid of [[cost],[0,cost],[-1,cost],[1.5,cost],['1',cost],[11,cost,7],[11,{opaque:[cost]}],[[11,cost]]]){
+   const input={[envelope]:{moved:{[key]:[invalid]}}};assert.equal(api.hasAcquisitionCostInput(input,denied),true,'nonproducer tuple cannot grant literal authority');assert.ok(!JSON.stringify(api.projectAcquisitionCosts(input,denied)).includes('cost_price_usd'),'structured tuple members protected')
+  }
+ }
+ console.log('PASS producer immediate literals and exact id/name tuple positions; invalid and structured members remain private')
+}
+checkProducerPositionContract(access)
+
+function checkProducerTupleDepth(api){
+ for(const nesting of [28,29]){let input={details:{products_by_name:[[11,'{"cost_price_usd":7}']]}};for(let i=0;i<nesting;i++)input={wrapper:input};
+  assert.equal(api.hasAcquisitionCostInput(input,denied),nesting===29);const projected=api.projectAcquisitionCosts(input,denied);if(nesting===28)assert.deepEqual(projected,input);else assert.ok(!JSON.stringify(projected).includes('cost_price_usd'))
+ }
+}
+checkProducerTupleDepth(access)
+
+function checkContactTupleProducerCoverage(api){
+ const source=ts.createSourceFile('contactMerge.ts',fs.readFileSync(path.join(root,'lib/contactMerge.ts'),'utf8'),ts.ScriptTarget.Latest,true)
+ const declaration=source.statements.filter(ts.isVariableStatement).flatMap(node=>[...node.declarationList.declarations]).find(node=>node.name.getText(source)==='MOVED_BY_NAME')
+ assert.ok(declaration);const code=ts.transpileModule('const mapping='+declaration.initializer.getText(source)+';return mapping',{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText
+ const mapping=new Function(code)(),fields=Object.values(mapping).flat().map(([table])=>table+'_by_name');assert.equal(fields.length,4)
+ for(const field of fields){const input={old_value:JSON.stringify({moved:{[field]:[[11,'{"cost_price_usd":7}']]}})};assert.deepEqual(api.projectAcquisitionCosts(input,denied),input);assert.equal(api.hasAcquisitionCostInput(input,denied),false)}
+ console.log('PASS source-derived MOVED_BY_NAME tuple literal coverage',JSON.stringify(fields))
+}
+checkContactTupleProducerCoverage(access)
