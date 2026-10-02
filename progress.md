@@ -11,7 +11,7 @@ and their new status, and each item here names the Part that last changed it (e.
 |---|---|
 | RC2-HOTFIX | [x] Live; both real merge actions and health checks verified. |
 | RC3-UI and DATE | [~] Independent review found an undo/redo permission gap; fixing before release. Not live. |
-| STOCK-RETURN | [~] Receipt and supplier-credit safeguards being implemented after independent review. Partial returns/accounting not live. |
+| STOCK-RETURN | [~] Stock calculations and supplier-credit safeguards are under test. Partial returns/accounting not live. |
 
 ### Deploy checkpoints (26 Sep) — each deploys as soon as it is green; nothing waits for the next
 | Checkpoint | Contents | State |
