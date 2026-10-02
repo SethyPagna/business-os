@@ -250,13 +250,14 @@ function makeWorld() {
     },
   }
   const kv = new Map()
+  const cacheWrites = { put: 0, delete: 0 }
   const CACHE = {
     async get(key) { return kv.has(key) ? kv.get(key) : null },
-    async put(key, value) { kv.set(key, value) },
-    async delete(key) { kv.delete(key) },
+    async put(key, value) { cacheWrites.put += 1; kv.set(key, value) },
+    async delete(key) { cacheWrites.delete += 1; kv.delete(key) },
   }
   const db = makeDb()
-  return { objects, requests, hooks, store, db, kv, env: { DB: db.DB, ASSETS: bucket, CACHE } }
+  return { objects, requests, hooks, store, db, kv, cacheWrites, env: { DB: db.DB, ASSETS: bucket, CACHE } }
 }
 
 // ------------------------------------------------------ D1 on node:sqlite
@@ -888,6 +889,7 @@ async function lifecycleRestoreContract() {
   }
   for (const table of ['stock_disposition_sources', 'stock_funding_dependencies']) {
     const world = makeWorld()
+    world.kv.set('refusal-sentinel', 'retained')
     world.db.sql.exec(`CREATE TABLE products(id INTEGER PRIMARY KEY,name TEXT); INSERT INTO products VALUES(100,'Live product');
       CREATE TABLE ${table}(movement_id INTEGER,batch_id INTEGER,product_id INTEGER,branch_id INTEGER,supplier_id INTEGER);
       INSERT INTO ${table} VALUES(701,501,100,1,77);
@@ -904,8 +906,10 @@ async function lifecycleRestoreContract() {
     await assert.rejects(backup.restoreCloudflareBackup(world.env, key, async value => { progress.push(value) }), error => error instanceof HTTPException && error.status === 409 && error.code === 'stock_lifecycle_dependency')
     assert.equal(state(world), before)
     assert.deepEqual(world.db.writes, { run: 0, batch: 0 })
+    assert.deepEqual(world.cacheWrites, { put: 0, delete: 0 })
     assert.deepEqual(progress, [])
     assert.deepEqual(world.requests.filter(request => request.op === 'put' || request.op === 'delete'), [])
+    assert.ok(world.requests.some(request => request.op === 'get' && request.key === key && request.bytesRead > 0))
     world.db.sql.exec(`DELETE FROM ${table}`)
     const restored = await backup.restoreCloudflareBackup(world.env, key)
     assert.equal(restored.summary.rowCount, 2)
