@@ -33,7 +33,7 @@ async function lifecycle(credit=5){
   await costs(f,0,'cancel0')
   assert.equal((await h.call(f,h.sales,`/${item.sale_id}/status`,{sale_status:'completed',client_request_id:'reader-uncancel'},'PATCH')).status,200)
   await costs(f,10-credit,`uncancel${10-credit}`)
-  assert.deepEqual(f.db.prepare('SELECT cost_price_usd AS cost,total_usd AS total FROM sale_items WHERE id=?').get(item.id),captured)
+  assert.deepEqual({...f.db.prepare('SELECT cost_price_usd AS cost,total_usd AS total FROM sale_items WHERE id=?').get(item.id)},captured)
   console.log('PASS actual report API/totals/export/ranking consumption10 credit5 cancel0 uncancel5, immutable capture')
  }finally{f.db.close()}
 }

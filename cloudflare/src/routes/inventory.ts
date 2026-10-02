@@ -18,7 +18,7 @@ import { localDateAtOrAfter, localDateAtOrBefore } from '../lib/businessDateWind
 import { continuousReadWindowSql, parseContinuousReadWindow } from '../lib/continuousReadWindow'
 import { attachBatchCounts } from '../lib/productBatches'
 import { paginateProductFamilies } from '../lib/familyPagination'
-import { buildProductSalesLedgerSql } from '../lib/productSalesLedger'
+import { buildProductSalesLedgerSqlForDb as buildProductSalesLedgerSql } from '../lib/productSalesLedger'
 import { getFamilyStockStats } from '../lib/familyStockStats'
 import { loadLowStockConfig, lowStockThresholdSql, type LowStockConfig } from '../lib/lowStockSettings'
 import { requireAuth, type SessionUser } from '../lib/auth'
@@ -307,7 +307,7 @@ export async function attachInventoryProductMetrics(
       SELECT DISTINCT CAST(value AS INTEGER)
       FROM json_each(@productIdsJson)
     ),
-    ledger AS (${buildProductSalesLedgerSql({ requestedIds: true, branchScoped, saleClauses })})
+    ledger AS (${await buildProductSalesLedgerSql(db, { requestedIds: true, branchScoped, saleClauses })})
     SELECT ids.product_id,
            ${stockQuantitySql} AS display_quantity,
            ${stockQuantitySql} * COALESCE(NULLIF(p.purchase_price_usd, 0), p.cost_price_usd, 0) AS stock_value_usd,
@@ -806,7 +806,7 @@ app.get('/summary', async (c) => {
         GROUP BY bs2.product_id
       ) bsj ON bsj.product_id = p.id
       -- One financial join, one implementation (lib/productSalesLedger.ts).
-      LEFT JOIN (${buildProductSalesLedgerSql({ branchScoped: true })}) fin ON fin.product_id = p.id
+      LEFT JOIN (${await buildProductSalesLedgerSql(db, { branchScoped: true })}) fin ON fin.product_id = p.id
       WHERE p.is_active = 1
       ORDER BY lower(p.name) ASC
     `).all<Record<string, unknown>>({ branchId })
@@ -858,7 +858,7 @@ app.get('/summary', async (c) => {
       GROUP BY bs2.product_id
     ) bsj ON bsj.product_id = p.id
     -- One financial join, one implementation (lib/productSalesLedger.ts).
-    LEFT JOIN (${buildProductSalesLedgerSql()}) fin ON fin.product_id = p.id
+    LEFT JOIN (${await buildProductSalesLedgerSql(db)}) fin ON fin.product_id = p.id
     WHERE p.is_active = 1
     ORDER BY lower(p.name) ASC
   `).all<Record<string, unknown>>({})
@@ -885,9 +885,9 @@ app.get('/summary', async (c) => {
 // BOTH readings of the same population: net-of-returns (revenue_usd/cogs_usd),
 // and gross-of-returns (gross_revenue_usd/gross_cogs_usd) for the stat cards,
 // which the owner keeps gross with refunds reported separately (Z10).
-function buildInventoryFinancialJoinSql(branchScoped: boolean): string {
+async function buildInventoryFinancialJoinSql(db: D1Compat, branchScoped: boolean): Promise<string> {
   return `
-    LEFT JOIN (${buildProductSalesLedgerSql({ branchScoped })}) fin ON fin.product_id = p.id
+    LEFT JOIN (${await buildProductSalesLedgerSql(db, { branchScoped })}) fin ON fin.product_id = p.id
   `
 }
 
@@ -912,8 +912,8 @@ app.get('/stats', async (c) => {
   const joinSql = joins.join('\n')
   const whereSql = `WHERE ${where.join(' AND ')}`
   const branchScoped = Number.isFinite(Number(params.branchId))
-  const financialJoinSql = buildInventoryFinancialJoinSql(branchScoped)
   const db = getDb(c.env)
+  const financialJoinSql = await buildInventoryFinancialJoinSql(db, branchScoped)
 
   // total_products/in_stock/low_stock/out_of_stock are family-aware (see
   // familyStockStats.ts) so they agree with the family-grouped pagination

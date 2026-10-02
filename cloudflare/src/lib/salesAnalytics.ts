@@ -132,6 +132,7 @@
 // reports the reversal the COGS floor could not absorb, which is the missing
 // cost snapshot the floor used to swallow silently.
 import { getDb } from './db'
+import type { StockValuationSaleCost } from './stockValuationConsumption'
 import { tableColumnSet } from './schemaProbe'
 import type { Env } from '../index'
 import {
@@ -892,6 +893,7 @@ export interface SalesReportSnapshot {
   deliveryFees: ReportScalarRow[]
   precision_mode: ReportMoneyPrecisionMode
   row_count: number
+  managedSaleCosts?: Array<[number, StockValuationSaleCost]>
 }
 
 export class SalesReportExportTooLargeError extends RangeError {
@@ -977,6 +979,53 @@ function applySalesReportScalarScope<T extends { sql: string; params: Record<str
 // firing a fresh PRAGMA table_info() every time.
 async function reportTableColumns(db: ReturnType<typeof getDb>, table: string): Promise<Set<string>> {
   return tableColumnSet(db, table)
+}
+
+export async function stockValuationSaleCostsAvailable(db: ReturnType<typeof getDb>): Promise<boolean> {
+  const columns = await db.prepare('PRAGMA table_info(stock_valuation_sale_costs)').all<{ name: string }>()
+  if (!columns.length) {
+    const links = await db.prepare('PRAGMA table_info(stock_valuation_sale_links)').all<{ name: string }>()
+    if (links.length) throw new ReportMoneyPrecisionError('unsupported_row')
+    return false
+  }
+  const names = new Set(columns.map(row => row.name))
+  if (!['sale_item_id', 'managed', 'quantity', 'cost4', 'recovery4', 'net4'].every(name => names.has(name))) {
+    throw new ReportMoneyPrecisionError('unsupported_row')
+  }
+  return true
+}
+
+export async function assertStockValuationSaleCostRows(db: ReturnType<typeof getDb>): Promise<void> {
+  const invalid = await db.prepare(`SELECT v.sale_item_id FROM stock_valuation_sale_costs v LEFT JOIN sale_items si ON si.id=v.sale_item_id
+    WHERE si.id IS NULL OR v.quantity IS NOT si.quantity OR v.cost4 IS NULL OR v.recovery4 IS NULL OR v.net4 IS NULL
+      OR v.cost4<0 OR v.recovery4<0 OR v.net4<0 OR v.net4<>v.cost4-v.recovery4 LIMIT 1`).get()
+  if (invalid) throw new ReportMoneyPrecisionError('unsupported_row')
+}
+
+export function stockValuationSaleItemCostSql(managed: boolean, alias = 'si'): { join: string; cost: string; missing: string } {
+  const legacy = `${alias}.cost_price_usd * ${alias}.quantity`
+  if (!managed) return { join: '', cost: legacy, missing: `${alias}.cost_price_usd IS NULL` }
+  return {
+    join: `LEFT JOIN stock_valuation_sale_costs valuation_cost ON valuation_cost.sale_item_id=${alias}.id`,
+    cost: `CASE WHEN valuation_cost.managed IS NULL THEN ${legacy}
+      WHEN valuation_cost.quantity=${alias}.quantity AND valuation_cost.net4 IS NOT NULL AND valuation_cost.net4>=0
+        THEN valuation_cost.net4/10000.0 ELSE json_extract('invalid valuation sale cost','$') END`,
+    missing: `valuation_cost.managed IS NULL AND ${alias}.cost_price_usd IS NULL`,
+  }
+}
+
+function reportLineCost(item: ReportScalarRow, version: 0 | 1, managed: Map<number, StockValuationSaleCost>): ReportExactDecimal | null {
+  const cost = managed.get(Number(item.id))
+  if (cost) {
+    if (ReportExactDecimal.quantity(cost.quantity).compare(ReportExactDecimal.quantity(item.quantity as string | number)) !== 0
+      || !Number.isSafeInteger(cost.cost4) || !Number.isSafeInteger(cost.recovery4)
+      || !Number.isSafeInteger(cost.net4) || cost.net4<0) throw new ReportMoneyPrecisionError('unsupported_row')
+    return ReportExactDecimal.recorded(String(cost.net4)).divide(ReportExactDecimal.quantity('10000'))
+  }
+  if (item.cost_price_usd == null) return null
+  const unit = reportMoney(item, 'cost_price_usd', version, false)
+  if (unit.isNegative()) throw new ReportMoneyPrecisionError(version === 1 ? 'invalid_saved_money4' : 'invalid_recorded_decimal')
+  return unit.multiply(ReportExactDecimal.quantity(item.quantity as string | number))
 }
 
 async function reportRestoreActive(db: ReturnType<typeof getDb>): Promise<boolean> {
@@ -1069,7 +1118,7 @@ function reportRowsEqual(left: readonly string[], right: readonly string[]): boo
 }
 
 function reportSnapshotScalars(snapshot: SalesReportSnapshot): string[] {
-  const rows = [`precision:${snapshot.precision_mode}`]
+  const rows = [`precision:${snapshot.precision_mode}`, `managed-costs:${JSON.stringify(snapshot.managedSaleCosts || [])}`]
   for (const [kind, values] of [
     ['sales', snapshot.sales], ['void-sales', snapshot.voidSales], ['items', snapshot.items],
     ['returns', snapshot.returns], ['return-items', snapshot.returnItems], ['delivery-fees', snapshot.deliveryFees],
@@ -1130,6 +1179,14 @@ async function readSalesReportPass(
   const items = await readReportSaleItems(db, f, primary, rowBudget, `SELECT si.id,si.sale_id,${itemColumn('product_id','NULL')},${itemColumn('product_name',"''")},si.quantity,
       ${itemColumn('total_usd','0')},si.cost_price_usd,${itemColumn('product_discount_usd','0')},${itemColumn('manual_discount_usd','0')}
     FROM sale_items si NOT INDEXED CROSS JOIN sales s ON s.id=si.sale_id WHERE ${primary.sql}`)
+  let managedSaleCosts: Array<[number, StockValuationSaleCost]> = []
+  if (await stockValuationSaleCostsAvailable(db)) {
+    const { readStockValuationSaleCosts } = await import('./stockValuationConsumption')
+    await assertStockValuationSaleCostRows(db)
+    managedSaleCosts = [...await readStockValuationSaleCosts(db, items.map(item => Number(item.id)))]
+    const managed = new Map(managedSaleCosts)
+    for (const item of items) reportLineCost(item, 0, managed)
+  }
   const returns = await reportKeysetRows(db, `SELECT r.id,r.sale_id,r.total_refund_usd,r.status,r.return_scope${returnPrecision}
     FROM returns r CROSS JOIN sales s ON s.id=r.sale_id WHERE r.sale_id IS NOT NULL
       AND COALESCE(r.status,'completed')<>'cancelled' AND COALESCE(r.return_scope,'customer')='customer'
@@ -1179,7 +1236,7 @@ async function readSalesReportPass(
     || sales.some((row) => Number(row.money_precision_version) === 0)
     || returns.some((row) => Number(row.money_precision_version) === 0)
   return {
-    sales, voidSales, items, returns, returnItems, deliveryFees,
+    sales, voidSales, items, returns, returnItems, deliveryFees, managedSaleCosts,
     precision_mode: legacy ? 'exact_recorded' : 'canonical_v1',
     row_count: rowBudget.count,
   }
@@ -1339,6 +1396,7 @@ function reportV1RefundReversal(
 }
 
 function reportSaleFacts(snapshot: SalesReportSnapshot): ReportSaleFacts[] {
+  const managed = new Map(snapshot.managedSaleCosts || [])
   const items = new Map<number, ReportScalarRow[]>()
   for (const row of snapshot.items) { const id = Number(row.sale_id); items.set(id, [...(items.get(id) || []), row]) }
   const returns = new Map<number, ReportScalarRow[]>()
@@ -1396,10 +1454,8 @@ function reportSaleFacts(snapshot: SalesReportSnapshot): ReportSaleFacts[] {
       reportMoney(item, 'total_usd', version)
       const discount = reportMoney(item, 'product_discount_usd', version).add(reportMoney(item, 'manual_discount_usd', version))
       if (recognized) itemDiscount = itemDiscount.add(discount)
-      if (item.cost_price_usd == null) { if (recognized && valued) missingCostLines += 1; continue }
-      const unit = reportMoney(item, 'cost_price_usd', version, false)
-      if (unit.isNegative()) throw new ReportMoneyPrecisionError(version === 1 ? 'invalid_saved_money4' : 'invalid_recorded_decimal')
-      const lineCost = unit.multiply(quantity)
+      const lineCost = reportLineCost(item, version, managed)
+      if (lineCost === null) { if (recognized && valued) missingCostLines += 1; continue }
       if (recognized && valued) cost = cost.add(lineCost)
       if (recognized && !valued) unvaluedCost = unvaluedCost.add(lineCost)
       if (awaiting) pendingCost = pendingCost.add(lineCost)
@@ -1608,13 +1664,20 @@ export function businessSummarySalesRowsFromSnapshot(snapshot: SalesReportSnapsh
 // column isolates the unpaid part of the realised figure rather than naming a
 // cohort held outside it (clause 4 of the scoping rule). This is what keeps
 // revenue and COGS a matched pair: the same sales are on both sides.
-export const ITEM_COST_COLUMNS = `
-             COALESCE(SUM(CASE WHEN ${recognizedValuedExpr('s.')} THEN si.cost_price_usd * si.quantity ELSE 0 END), 0) AS cost_usd,
-             COALESCE(SUM(CASE WHEN ${recognizedExpr('s.')} AND NOT ${valuedSaleExpr('s.')} THEN si.cost_price_usd * si.quantity ELSE 0 END), 0) AS unvalued_cost_usd,
-             COALESCE(SUM(CASE WHEN ${recognizedValuedExpr('s.')} AND si.cost_price_usd IS NULL THEN 1 ELSE 0 END), 0) AS missing_snapshot_lines,
-             COALESCE(SUM(CASE WHEN ${awaitingExpr('s.')} THEN si.cost_price_usd * si.quantity ELSE 0 END), 0) AS pending_cost_usd,
+function itemCostColumns(cost: string, missing: string): string { return `
+             COALESCE(SUM(CASE WHEN ${recognizedValuedExpr('s.')} THEN ${cost} ELSE 0 END), 0) AS cost_usd,
+             COALESCE(SUM(CASE WHEN ${recognizedExpr('s.')} AND NOT ${valuedSaleExpr('s.')} THEN ${cost} ELSE 0 END), 0) AS unvalued_cost_usd,
+             COALESCE(SUM(CASE WHEN ${recognizedValuedExpr('s.')} AND ${missing} THEN 1 ELSE 0 END), 0) AS missing_snapshot_lines,
+             COALESCE(SUM(CASE WHEN ${awaitingExpr('s.')} THEN ${cost} ELSE 0 END), 0) AS pending_cost_usd,
              COALESCE(SUM(CASE WHEN ${recognizedExpr('s.')} THEN COALESCE(si.product_discount_usd, 0) + COALESCE(si.manual_discount_usd, 0) ELSE 0 END), 0) AS item_discount_usd,
-             COALESCE(SUM(CASE WHEN ${awaitingExpr('s.')} THEN COALESCE(si.product_discount_usd, 0) + COALESCE(si.manual_discount_usd, 0) ELSE 0 END), 0) AS pending_item_discount_usd`
+             COALESCE(SUM(CASE WHEN ${awaitingExpr('s.')} THEN COALESCE(si.product_discount_usd, 0) + COALESCE(si.manual_discount_usd, 0) ELSE 0 END), 0) AS pending_item_discount_usd` }
+export const ITEM_COST_COLUMNS = itemCostColumns('si.cost_price_usd * si.quantity', 'si.cost_price_usd IS NULL')
+export async function reportItemCostProjection(db: ReturnType<typeof getDb>) {
+  const managed = await stockValuationSaleCostsAvailable(db)
+  if (managed) await assertStockValuationSaleCostRows(db)
+  const projection = stockValuationSaleItemCostSql(managed)
+  return { ...projection, columns: itemCostColumns(projection.cost, projection.missing) }
+}
 export const ITEM_COST_STATUS_CLAUSE = `(${recognizedExpr('s.')} OR ${awaitingExpr('s.')})`
 
 interface ItemCostRow { cost_usd: number; unvalued_cost_usd: number; missing_snapshot_lines: number; pending_cost_usd: number; item_discount_usd: number; pending_item_discount_usd: number }
@@ -2817,6 +2880,8 @@ export async function getSalesGroupedTotals(env: Env, f: SalesFilters, groupBy: 
     return rows.slice(0, cap)
   }
   const db = getDb(env)
+  const itemProjection = await reportItemCostProjection(db)
+  const ITEM_COST_COLUMNS = itemProjection.columns
   const level = salesGroupExprs('sales', groupBy)
   const joined = salesGroupExprs('s', groupBy)
   const { sql: whereLevel, params: paramsLevel } = whereActiveSales('sales', f)
@@ -2842,6 +2907,7 @@ export async function getSalesGroupedTotals(env: Env, f: SalesFilters, groupBy: 
       SELECT ${joined.key} AS grp_key,
              ${ITEM_COST_COLUMNS}
       FROM sale_items si
+      ${itemProjection.join}
       JOIN sales s ON s.id = si.sale_id
       WHERE ${whereCost} AND ${ITEM_COST_STATUS_CLAUSE}
       GROUP BY grp_key
@@ -2947,6 +3013,7 @@ export async function getProductSalesRanking(env: Env, f: SalesFilters, limit = 
   {
     const snapshot = await readSalesReportSnapshot(env, f)
     const saleById = new Map(snapshot.sales.map((sale) => [Number(sale.id), sale]))
+    const managed = new Map(snapshot.managedSaleCosts || [])
     const groups = new Map<string, { product_id: number | null; product_name: string; saleIds: Set<number>; qty: number;
       lineSales: ReportExactDecimal; cost: ReportExactDecimal; missing: number }>()
     for (const item of snapshot.items) {
@@ -2961,12 +3028,9 @@ export async function getProductSalesRanking(env: Env, f: SalesFilters, limit = 
       group.qty += Number(item.quantity)
       group.saleIds.add(Number(sale.id))
       group.lineSales = group.lineSales.add(reportMoney(item, 'total_usd', version))
-      if (item.cost_price_usd == null) group.missing += 1
-      else {
-        const unit = reportMoney(item, 'cost_price_usd', version, false)
-        if (unit.isNegative()) throw new ReportMoneyPrecisionError(version === 1 ? 'invalid_saved_money4' : 'invalid_recorded_decimal')
-        group.cost = group.cost.add(unit.multiply(quantity))
-      }
+      const lineCost = reportLineCost(item, version, managed)
+      if (lineCost === null) group.missing += 1
+      else group.cost = group.cost.add(lineCost)
       groups.set(key, group)
     }
     const db = getDb(env)
@@ -3001,6 +3065,7 @@ export async function getProductSalesRanking(env: Env, f: SalesFilters, limit = 
   }
   const db = getDb(env)
   const { sql: whereSql, params } = whereActiveSales('s', f)
+  const itemProjection = await reportItemCostProjection(db)
   const cap = Math.max(1, Math.min(1000, Math.trunc(limit) || 200))
   // Two stock ledgers, never mixed: branch_stock when the report is scoped to
   // a branch, products.stock_quantity when it is not.
@@ -3013,13 +3078,14 @@ export async function getProductSalesRanking(env: Env, f: SalesFilters, limit = 
            COUNT(DISTINCT s.id) AS sale_count,
            COALESCE(SUM(si.quantity), 0) AS qty,
            COALESCE(SUM(si.total_usd), 0) AS line_sales_usd,
-           COALESCE(SUM(si.cost_price_usd * si.quantity), 0) AS cost_usd,
-           COALESCE(SUM(CASE WHEN si.cost_price_usd IS NULL THEN 1 ELSE 0 END), 0) AS cost_missing_snapshot_lines,
+           COALESCE(SUM(${itemProjection.cost}), 0) AS cost_usd,
+           COALESCE(SUM(CASE WHEN ${itemProjection.missing} THEN 1 ELSE 0 END), 0) AS cost_missing_snapshot_lines,
            MAX(COALESCE(p.barcode, '')) AS barcode,
            MAX(COALESCE(p.category, '')) AS category_name,
            MAX(cat.id) AS category_id,
            MAX(${onHandExpr}) AS on_hand_qty
     FROM sale_items si
+    ${itemProjection.join}
     JOIN sales s ON s.id = si.sale_id
     LEFT JOIN products p ON p.id = si.product_id
     LEFT JOIN categories cat ON lower(trim(cat.name)) = lower(trim(COALESCE(p.category, ''))) AND COALESCE(p.category, '') <> ''
@@ -3140,6 +3206,8 @@ export async function getBusinessSummaryDayRows(env: Env, f: SalesFilters): Prom
     }).sort((a, b) => a.date.localeCompare(b.date))
   }
   const db = getDb(env)
+  const itemProjection = await reportItemCostProjection(db)
+  const ITEM_COST_COLUMNS = itemProjection.columns
   const periodExprS = localDateExpr('sales.created_at')
   const periodExprJoined = localDateExpr('s.created_at')
   const { sql: whereLevel, params: paramsLevel } = whereActiveSales('sales', f)
@@ -3164,6 +3232,7 @@ export async function getBusinessSummaryDayRows(env: Env, f: SalesFilters): Prom
       SELECT ${periodExprJoined} AS period,
              ${ITEM_COST_COLUMNS}
       FROM sale_items si
+      ${itemProjection.join}
       JOIN sales s ON s.id = si.sale_id
       WHERE ${whereCost} AND ${ITEM_COST_STATUS_CLAUSE}
       GROUP BY ${periodExprJoined}

@@ -120,13 +120,15 @@
 // against. Per-product revenue is derived from the LINE totals, which those
 // receipts do carry, so the pair is already matched and dropping them would
 // delete real line income instead of protecting it.
-import { netSaleExpr, recognizedExpr, RESTOCKED_RETURN_LINE } from './salesAnalytics'
+import { netSaleExpr, recognizedExpr, RESTOCKED_RETURN_LINE, stockValuationSaleCostsAvailable, assertStockValuationSaleCostRows, stockValuationSaleItemCostSql } from './salesAnalytics'
+import type { D1Compat } from './db'
 
 export type ProductSalesLedgerOptions = {
   /**
    * Restrict both sides to a `requested_ids(product_id)` CTE the CALLER
    * declares, so a paged endpoint enriches only the rows it returned.
    */
+  managedCosts?: boolean
   requestedIds?: boolean
   /**
    * Scope the SALE LINE to @branchId, and APPORTION each return line across
@@ -180,8 +182,15 @@ function refundBasisLineExpr(lineCol: string, subtotalCol: string, netSql: strin
  * subquery/CTE and read the columns off it; every caller in routes/inventory.ts
  * does, so the four surfaces cannot drift apart again.
  */
+export async function buildProductSalesLedgerSqlForDb(db: D1Compat, options: ProductSalesLedgerOptions = {}): Promise<string> {
+  const managedCosts = await stockValuationSaleCostsAvailable(db)
+  if (managedCosts) await assertStockValuationSaleCostRows(db)
+  return buildProductSalesLedgerSql({ ...options, managedCosts })
+}
+
 export function buildProductSalesLedgerSql(options: ProductSalesLedgerOptions = {}): string {
-  const { requestedIds = false, branchScoped = false, saleClauses = [] } = options
+  const { requestedIds = false, branchScoped = false, saleClauses = [], managedCosts = false } = options
+  const projection = stockValuationSaleItemCostSql(managedCosts)
   const soldIdsJoin = requestedIds ? 'JOIN requested_ids ids ON ids.product_id = si.product_id' : ''
   const returnIdsJoin = requestedIds ? 'JOIN requested_ids ids ON ids.product_id = ri.product_id' : ''
   // The sale-side predicate, shared verbatim by both halves apart from the
@@ -213,9 +222,10 @@ export function buildProductSalesLedgerSql(options: ProductSalesLedgerOptions = 
              SUM(${memberDiscountKhr}) AS membership_discount_khr,
              MAX(0, SUM(si.total_usd - ${allDiscountUsd})) AS net_usd,
              MAX(0, SUM(si.total_khr - ${allDiscountKhr})) AS net_khr,
-             SUM(si.cost_price_usd * si.quantity) AS cogs_usd,
-             SUM(si.cost_price_khr * si.quantity) AS cogs_khr
+             SUM(${projection.cost}) AS cogs_usd,
+             SUM(${managedCosts ? `CASE WHEN valuation_cost.managed IS NOT NULL THEN (${projection.cost}) * s.exchange_rate ELSE si.cost_price_khr * si.quantity END` : 'si.cost_price_khr * si.quantity'}) AS cogs_khr
       FROM sale_items si
+      ${projection.join}
       ${soldIdsJoin}
       JOIN sales s ON s.id = si.sale_id
       WHERE ${scope}

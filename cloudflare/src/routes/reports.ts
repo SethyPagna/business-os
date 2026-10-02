@@ -14,6 +14,7 @@ import {
   SalesReportExportTooLargeError,
   type SalesReportSnapshot,
   getSalesTotals,
+  reportItemCostProjection,
   getDeliveryContactTotals,
   getSalesGroupedTotals,
   reportCustomerNameExpr,
@@ -314,7 +315,8 @@ export function salesExportCohort(snapshot: SalesReportSnapshot, search: string)
   const returnItems = snapshot.returnItems.filter((row) => returnIds.has(Number(row.return_id)))
   return { sales, items, returns, returnItems, voidSales: sales.filter((row) => voidIds.has(Number(row.id))), deliveryFees: [],
     precision_mode: [...sales, ...returns].some((row) => Number(row.money_precision_version) !== 1) ? 'exact_recorded' : 'canonical_v1',
-    row_count: sales.length + items.length + returns.length + returnItems.length }
+    row_count: sales.length + items.length + returns.length + returnItems.length,
+    ...(snapshot.managedSaleCosts ? { managedSaleCosts: snapshot.managedSaleCosts.filter(([id]) => items.some(item => Number(item.id) === id)) } : {}) }
 }
 
 function salesExportStamp(raw: string): number {
@@ -708,7 +710,8 @@ for (const kind of ['sales', 'returns', 'expenses'] as const) {
       // summing to the Overview COGS and profit sitting above it, and each
       // unvalued receipt showed a loss the size of its own goods.
       const recognizedValued = recognizedValuedExpr('s.')
-      const rawCost = `(COALESCE((SELECT SUM(si.cost_price_usd * si.quantity) FROM sale_items si WHERE si.sale_id=s.id),0)
+      const itemProjection = await reportItemCostProjection(db)
+      const rawCost = `(COALESCE((SELECT SUM(${itemProjection.cost}) FROM sale_items si ${itemProjection.join} WHERE si.sale_id=s.id),0)
         - COALESCE((SELECT SUM(CASE WHEN ${RESTOCKED_RETURN_LINE} THEN ri.cost_price_usd * ri.quantity ELSE 0 END)
           FROM return_items ri JOIN returns r ON r.id=ri.return_id WHERE r.sale_id=s.id
           AND COALESCE(r.status,'completed')<>'cancelled' AND COALESCE(r.return_scope,'customer')='customer'),0))`
@@ -719,7 +722,7 @@ for (const kind of ['sales', 'returns', 'expenses'] as const) {
       const costCol = `CASE WHEN ${recognizedValued} THEN ${cost} ELSE 0 END`
       const adminColumns = canViewAcquisitionCosts(user) ? `, ${costCol} AS cost_usd,
         CASE WHEN ${recognizedValued} THEN ${rawCost} ELSE 0 END AS cost_before_floor_usd,
-        CASE WHEN ${recognizedValued} THEN (SELECT COUNT(*) FROM sale_items si WHERE si.sale_id=s.id AND si.cost_price_usd IS NULL) ELSE 0 END AS cost_missing_snapshot_lines,
+        CASE WHEN ${recognizedValued} THEN (SELECT COUNT(*) FROM sale_items si ${itemProjection.join} WHERE si.sale_id=s.id AND ${itemProjection.missing}) ELSE 0 END AS cost_missing_snapshot_lines,
         CASE WHEN ${recognized} THEN ${net}-${refund}+${customerDeliveryFeeExpr('s.')}-${deliveryActualCostExpr('s.')} ELSE 0 END - ${costCol} AS gross_profit_usd` : ''
       select = `s.id, s.created_at AS cursor_at, s.created_at AS date, ${localDateExpr('s.created_at')} AS business_date,
         s.receipt_number, s.branch_name AS branch, s.cashier_name AS cashier, ${reportCustomerNameExpr('s.')} AS customer,
