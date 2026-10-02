@@ -31,7 +31,7 @@ const pointer = { applier: 'product.edit.v1', operation_id: '72', generation: 0 
 const receipt = { success: true, applied: true, action_history_id: 88, operation_id: '72', generation: 0, history: { id: 88, status: 'undoable', server_replayable: true, undo_payload: pointer, redo_payload: pointer } }
 const send = async (intent: { productId: string; body: Record<string, unknown> }) => {
   assert.ok(rows.get('actor-7'), 'identity must be durable before dispatch')
-  sent.push(structuredClone(intent))
+  sent.push(structuredClone({ productId: intent.productId, body: intent.body }))
   const id = String(intent.body.client_request_id)
   if (!receipts.has(id)) { commits++; receipts.set(id, receipt) }
   if (sent.length === 1) throw new Error('lost committed response')
@@ -50,11 +50,16 @@ assert.equal(productEditHistoryReceipt({ ...receipt, pending: true }), null)
 assert.equal(productEditHistoryReceipt({ ...receipt, generation: 1 }), null)
 await assert.rejects(executeProductEditRequest(storage, 'actor-7', 12, body, async () => ({ success: true }), guard), /not confirmed/)
 assert.ok(rows.get('actor-7'), 'success-shaped missing receipt does not discard retry evidence')
+const unknownIdentity = JSON.parse(rows.get('actor-7')!)['12'].body.client_request_id
+for (const response of [{ applied: true }, { ...receipt, action_history_id: 99 }, { ...receipt, generation: 1 }, { pending: true, applied: false }]) {
+  await assert.rejects(executeProductEditRequest(storage, 'actor-7', 12, body, async () => response, guard), /not confirmed/)
+  assert.equal(JSON.parse(rows.get('actor-7')!)['12'].body.client_request_id, unknownIdentity, 'invalid applied or pending receipt retains the original identity')
+}
 current = false
 await assert.rejects(executeProductEditRequest(storage, 'actor-7', 12, body, send, guard), /stale actor/)
 assert.equal(sent.length, 2)
 current = true
-await executeProductEditRequest(storage, 'actor-7', 12, body, async () => ({ pending: true, applied: false }), guard)
+await executeProductEditRequest(storage, 'actor-7', 12, body, async () => ({ pending: true, applied: false, pendingActionId: 51, operation_id: '72', generation: 0 }), guard)
 assert.equal(rows.size, 0, 'confirmed review queue is distinct from applied and needs no duplicate submission')
 let dispatches = 0
 await assert.rejects(executeProductEditRequest({ ...storage, setItem() {} }, 'lost-storage', 12, body, async () => { dispatches++; return receipt }, guard), /retry could not be saved/)
@@ -112,3 +117,80 @@ for (const language of ['en', 'km']) {
   assert.ok(html.includes('Dara'))
 }
 console.log('PASS actual cost float renders Undo, Redo and restored lot basis in English and Khmer')
+
+const barSource = readFileSync(new URL('../src/components/shared/ActionHistoryBar.tsx', import.meta.url), 'utf8')
+const barCode = ts.transpileModule(barSource, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX } }).outputText
+for (const language of ['en', 'km']) for (const direction of ['undo', 'redo'] as const) {
+  const pack = JSON.parse(readFileSync(new URL(`../src/lang/${language}.json`, import.meta.url), 'utf8'))
+  const module = { exports: {} as { default?: React.ComponentType<any> } }
+  const buttons: Array<{ onClick?: () => void; children?: unknown }> = []
+  const jsx = require('react/jsx-runtime')
+  const collect = (name: string) => (type: unknown, props: Record<string, unknown>, key: unknown) => {
+    if (type === 'button') buttons.push(props)
+    return jsx[name](type, props, key)
+  }
+  const shim = (id: string): any => {
+    if (id === 'react/jsx-runtime') return { ...jsx, jsx: collect('jsx'), jsxs: collect('jsxs') }
+    if (id.includes('LazyPortalMenu')) return { default: ({ content }: { content: (value: unknown) => React.ReactNode }) => React.createElement('section', null, content({ closeMenu() {} })) }
+    if (id.includes('AppSelect') || id.includes('history.js')) return { default: () => null }
+    if (id.includes('formatters')) return { fmtDateTime24: String }
+    return require(id)
+  }
+  new Function('require', 'module', 'exports', barCode)(shim, module, module.exports)
+  const clicked: unknown[] = []
+  const history = { undo() {}, redo() {}, undoItems: [], redoItems: [], serverItems: [
+    { ...receipt.history, label: 'product.edit.v1', status: direction === 'undo' ? 'undoable' : 'redoable', server_replayable: true },
+    { id: 99, label: 'Sale 42', status: 'recorded' },
+  ], undoServer: (...args: unknown[]) => clicked.push(args), redoServer: (...args: unknown[]) => clicked.push(args) }
+  const html = renderToStaticMarkup(React.createElement(module.exports.default!, { history, t: (key: string) => pack[key] }))
+  assert.ok(html.includes(pack.product_edit_history_label))
+  assert.ok(html.includes('Sale 42'), 'unrelated labels are preserved')
+  assert.ok(!html.includes('product.edit.v1'))
+  for (const button of buttons) button.onClick?.()
+  assert.deepEqual(clicked, [[88, pack[direction === 'undo' ? 'product_edit_history_undo' : 'product_edit_history_redo']]])
+}
+console.log('PASS actual History bar and replay completion labels use both packs without changing sibling labels')
+
+const transportSource = readFileSync(new URL('../src/api/productWriteTransport.ts', import.meta.url), 'utf8')
+const transportAst = ts.createSourceFile('productWriteTransport.ts', transportSource, ts.ScriptTarget.Latest, true)
+const updateFunction = transportAst.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === 'updateProduct')
+assert.ok(updateFunction)
+const updateCode = ts.transpileModule(updateFunction.getText(transportAst).replace(/^export /, ''), { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
+let clock = 0
+const transmitted: Array<Record<string, unknown>> = []
+const scope = {
+  captureActorReadScope: () => ({}), assertActorReadScope: () => {}, window: { sessionStorage: storage },
+  productEditStorageKey: () => 'actual-transport', executeProductEditRequest, localizeProductEditError: async (error: unknown) => error,
+  getDevicePayload: () => ({ clientTime: `2026-10-02T06:00:0${clock++}Z`, deviceTz: 'Asia/Phnom_Penh', deviceName: 'Test Browser' }),
+  encodeId: String, route: async (_channel: string, dispatch: () => Promise<unknown>) => dispatch(),
+  apiFetch: async (_method: string, _url: string, value: Record<string, unknown>) => {
+    transmitted.push(structuredClone(value))
+    if (transmitted.length === 1) throw new Error('actual transport reply lost')
+    return receipt
+  },
+}
+const updateProduct = new Function(...Object.keys(scope), `${updateCode}; return updateProduct`)(...Object.values(scope))
+await assert.rejects(updateProduct(12, body), /actual transport reply lost/)
+await updateProduct(12, { ...body, expectedUpdatedAt: 'newest' })
+assert.deepEqual(transmitted[0], transmitted[1], 'real transport must retain original body despite new client clock and version metadata')
+console.log('PASS actual update transport retries the original request after clock and version changes')
+
+let releaseFirst!: () => void
+const firstRefusal = new Promise<void>(resolve => { releaseFirst = resolve })
+let sends = 0
+const concurrent = async () => {
+  sends++
+  if (sends === 1) { await firstRefusal; throw Object.assign(new Error('first refused'), { status: 403 }) }
+  throw new Error('second committed reply lost')
+}
+const first = executeProductEditRequest(storage, 'concurrent', 12, body, concurrent, guard)
+await assert.rejects(executeProductEditRequest(storage, 'concurrent', 12, body, concurrent, guard), /second committed reply lost/)
+const concurrentIdentity = JSON.parse(rows.get('concurrent')!)['12'].body.client_request_id
+releaseFirst()
+await assert.rejects(first, /first refused/)
+assert.equal(JSON.parse(rows.get('concurrent')!)['12'].body.client_request_id, concurrentIdentity)
+await executeProductEditRequest(storage, 'concurrent', 12, body, async intent => {
+  assert.equal(intent.body.client_request_id, concurrentIdentity)
+  return receipt
+}, guard)
+console.log('PASS a concurrent earlier refusal cannot erase a later uncertain send')

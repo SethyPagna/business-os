@@ -2395,7 +2395,7 @@ function ProductsFullEditor() {
       assertCurrent()
       const pending = readProductEditIntents(window.sessionStorage, productEditStorageKey('saves'))
       for (const intent of pending) {
-        const result = await productApi.updateProduct(intent.productId, intent.body, assertCurrent)
+        const result = await runProductWriteMutation(() => productApi.updateProduct(intent.productId, intent.body, assertCurrent), 'Check product save')
         assertCurrent()
         if (result?.pending === true) notify(tr('product_edit_pending_review', 'Product change submitted for review'))
         else if (!actionHistory.adoptServerAction(result)) throw new Error(tr('product_edit_outcome_unknown', 'Check the pending product save before retrying.'))

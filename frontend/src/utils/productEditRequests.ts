@@ -4,8 +4,8 @@ import { STORAGE_KEYS } from '../constants.ts'
 
 type Store = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>
 type Body = Record<string, unknown>
-export type ProductEditIntent = { productId: string; body: Body }
-export type ProductEditReplayIntent = { serverId: string | number; operationId: string; direction: 'undo' | 'redo'; generation: number }
+export type ProductEditIntent = { productId: string; body: Body; attempt?: number }
+export type ProductEditReplayIntent = { serverId: string | number; operationId: string; direction: 'undo' | 'redo'; generation: number; attempt?: number }
 export type ProductEditHistory = { id: string | number; undo_payload: Body; redo_payload: Body; [key: string]: unknown }
 
 function requestError(code: string, message: string): Error {
@@ -14,11 +14,20 @@ function requestError(code: string, message: string): Error {
 
 export async function localizeProductEditError(error: unknown): Promise<unknown> {
   const candidate = error as { code?: string; message?: string }
-  if (!candidate?.code?.startsWith('product_edit_')) return error
+  const aliases: Record<string, string> = {
+    product_cost_edit_required: 'product_edit_cost_permission_required',
+    product_image_edit_required: 'product_edit_image_permission_required',
+    invalid_client_request_id: 'product_edit_request_invalid',
+    idempotency_conflict: 'product_edit_request_immutable',
+    request_permission_revoked: 'product_edit_permission_required',
+    review_state_conflict: 'product_edit_state_conflict',
+  }
+  const key = aliases[candidate?.code || ''] || (candidate?.code?.startsWith('product_edit_') ? candidate.code : '')
+  if (!key) return error
   try {
     const language = typeof document === 'undefined' ? '' : document.documentElement?.getAttribute('lang') || ''
     const pack = (language.startsWith('km') ? (await import('../lang/km.json')).default : (await import('../lang/en.json')).default) as Record<string, unknown>
-    if (typeof pack[candidate.code] === 'string') candidate.message = String(pack[candidate.code])
+    if (typeof pack[key] === 'string') candidate.message = String(pack[key])
   } catch {}
   return error
 }
@@ -61,7 +70,7 @@ function canonical(value: unknown): string {
 
 function editFields(body: Body): Body {
   const result = { ...body }
-  for (const key of ['client_request_id', 'expectedUpdatedAt', 'expected_updated_at', 'updated_at', 'userId', 'userName', 'deviceId', 'deviceName', 'deviceType', 'device_name', 'device_id', 'device_type']) delete result[key]
+  for (const key of ['client_request_id', 'expectedUpdatedAt', 'expected_updated_at', 'updated_at', 'userId', 'userName', 'clientTime', 'deviceTz', 'deviceId', 'deviceName', 'deviceType', 'device_name', 'device_id', 'device_type']) delete result[key]
   return result
 }
 
@@ -82,13 +91,17 @@ export async function executeProductEditRequest(
   if (previous && (previous.productId !== id || canonical(editFields(previous.body)) !== canonical(editFields(body)))) {
     throw requestError('product_edit_pending', 'Check the pending product save before making another change.')
   }
-  const intent = previous || { productId: id, body: { ...body, client_request_id: String(body.client_request_id || createClientRequestId('product_edit')) } }
+  const intent = {
+    ...(previous || { productId: id, body: { ...body, client_request_id: String(body.client_request_id || createClientRequestId('product_edit')) } }),
+    attempt: previous ? Number(previous.attempt || 1) + 1 : 1,
+  }
   if (!/^[A-Za-z0-9_-]{8,120}$/.test(String(intent.body.client_request_id || ''))) throw requestError('product_edit_retry_invalid', 'The saved product request identity is invalid.')
   persist(storage, key, { ...requests, [id]: intent })
-  const clear = () => {
+  const clear = (firstRefusal = false) => {
     assertCurrent()
     const current = read<Record<string, ProductEditIntent>>(storage, key) || {}
     if (current[id]?.body.client_request_id !== intent.body.client_request_id) return
+    if (firstRefusal && current[id]?.attempt !== intent.attempt) return
     delete current[id]
     if (Object.keys(current).length) persist(storage, key, current)
     else storage.removeItem(key)
@@ -98,13 +111,13 @@ export async function executeProductEditRequest(
     const result = await send(intent)
     assertCurrent()
     const response = result as { success?: boolean; applied?: boolean; pending?: boolean } | null
-    if (!response || response.success === false || (response.pending !== true && !productEditHistoryReceipt(result))) {
+    if (!response || response.success === false || (!productEditPendingReceipt(result) && !productEditHistoryReceipt(result))) {
       throw requestError('product_edit_outcome_unknown', 'The product save is not confirmed. Check the pending save before retrying.')
     }
     clear()
     return result
   } catch (error) {
-    if (!previous && definiteRefusal(error)) clear()
+    if (!previous && definiteRefusal(error)) clear(true)
     throw error
   }
 }
@@ -116,7 +129,7 @@ export async function executeProductEditReplay(
 ): Promise<unknown> {
   assertCurrent()
   const previous = read<ProductEditReplayIntent>(storage, key)
-  const pending = previous || requested
+  const pending = { ...(previous || requested), attempt: previous ? Number(previous.attempt || 1) + 1 : 1 }
   if (String(pending.serverId) !== String(requested.serverId) || pending.operationId !== requested.operationId) throw requestError('product_edit_replay_pending', 'Check the pending Product Undo or Redo first.')
   if (!pending.operationId || !Number.isSafeInteger(pending.generation) || pending.generation < 0 || !['undo', 'redo'].includes(pending.direction)) throw requestError('product_edit_retry_invalid', 'The saved Product Undo request is invalid.')
   persist(storage, key, pending)
@@ -124,13 +137,21 @@ export async function executeProductEditReplay(
     assertCurrent()
     const result = await send(pending, { require_applied: true, expected_generation: pending.generation })
     assertCurrent()
-    const response = result as { applied?: boolean; pending?: boolean } | null
-    if (response?.pending === true && response.applied !== true) return result
-    if (response?.applied !== true) throw requestError('product_edit_outcome_unknown', 'Product Undo or Redo is not confirmed. Retry the pending action.')
+    const response = result as Body | null
+    if (productEditPendingReceipt(result) && String(response?.operation_id) === pending.operationId && response?.generation === pending.generation) return result
+    const currentGeneration = response?.current_generation
+    const receipt = response && productEditHistoryReceipt({ ...response, generation: currentGeneration, history: response.item })
+    if (!receipt || String(response?.action_history_id) !== String(pending.serverId) || String(response?.operation_id) !== pending.operationId
+      || response?.generation !== pending.generation + 1 || Number(currentGeneration) < Number(response?.generation)) {
+      throw requestError('product_edit_outcome_unknown', 'Product Undo or Redo is not confirmed. Retry the pending action.')
+    }
     storage.removeItem(key)
-    return result
+    return { ...response, reconciled_direction: pending.direction }
   } catch (error) {
-    if (!previous && definiteRefusal(error)) { assertCurrent(); storage.removeItem(key) }
+    if (!previous && definiteRefusal(error)) {
+      assertCurrent()
+      if (read<ProductEditReplayIntent>(storage, key)?.attempt === pending.attempt) storage.removeItem(key)
+    }
     throw error
   }
 }
@@ -146,4 +167,12 @@ export function productEditHistoryReceipt(result: unknown): ProductEditHistory |
       || !Number.isSafeInteger(payload.generation) || payload.generation !== response.generation) return null
   }
   return history
+}
+
+export function productEditPendingReceipt(result: unknown): boolean {
+  if (!result || typeof result !== 'object') return false
+  const response = result as Body
+  return response.pending === true && response.applied === false && Number.isSafeInteger(response.pendingActionId)
+    && Number(response.pendingActionId) > 0 && /^[1-9][0-9]*$/.test(String(response.operation_id || ''))
+    && Number.isSafeInteger(response.generation) && Number(response.generation) >= 0
 }

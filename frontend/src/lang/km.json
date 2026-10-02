@@ -7175,5 +7175,14 @@
   "product_edit_retry_unavailable": "មិនអាចរក្សាទុកការព្យាយាមម្ដងទៀតបានទេ។ មិនទាន់បានផ្ញើសំណើថ្មីទេ។",
   "product_edit_pending": "សូមពិនិត្យការរក្សាទុកផលិតផលដែលមិនទាន់បញ្ជាក់ មុនធ្វើការកែប្រែផ្សេងទៀត។",
   "product_edit_replay_pending": "សូមពិនិត្យសកម្មភាពមិនធ្វើវិញ ឬធ្វើឡើងវិញរបស់ផលិតផលដែលមិនទាន់បញ្ជាក់ជាមុន។",
-  "cost_breakdown_restore_catalog": "ថ្លៃដើមតាមឡូត៍"
+  "cost_breakdown_restore_catalog": "ថ្លៃដើមតាមឡូត៍",
+  "product_edit_request_invalid": "សំណើផលិតផលមិនត្រឹមត្រូវ។ សូមពិនិត្យមុនព្យាយាមម្ដងទៀត។",
+  "product_edit_state_conflict": "ផលិតផលបានផ្លាស់ប្ដូរ។ សូមផ្ទុកឡើងវិញ និងពិនិត្យតម្លៃបច្ចុប្បន្ន។",
+  "product_edit_request_immutable": "សំណើនេះជារបស់ការកែប្រែផ្សេងរួចហើយ។ សូមពិនិត្យសកម្មភាពដែលមិនទាន់បញ្ជាក់។",
+  "product_edit_permission_required": "សិទ្ធិរបស់អ្នកលែងអនុញ្ញាតឱ្យធ្វើសកម្មភាពនេះហើយ។",
+  "product_edit_cost_permission_required": "ត្រូវការសិទ្ធិកែប្រែថ្លៃដើមសម្រាប់សកម្មភាពនេះ។",
+  "product_edit_image_permission_required": "ត្រូវការសិទ្ធិកែរូបភាពសម្រាប់សកម្មភាពនេះ។",
+  "product_edit_history_label": "បានកែប្រែផលិតផល",
+  "product_edit_history_undo": "បានមិនធ្វើការកែប្រែផលិតផលវិញ",
+  "product_edit_history_redo": "បានធ្វើការកែប្រែផលិតផលឡើងវិញ"
 }

@@ -239,7 +239,7 @@ export function writeCachedServerItems(scope: string, items: ServerHistoryItem[]
 
 export function useActionHistory({ limit = 10, notify, scope = 'global', enabled = true, user = null }: ActionHistoryOptions = {}) {
   const readScope = captureActorReadScope('actionHistory')
-  const actorScope = actorReadStorageKey(`${scopedWorkDraftKey(`history_${scope}`)}:${JSON.stringify(effectivePermissions(user))}:${enabled}`, readScope)
+  const actorScope = actorReadStorageKey(`${scopedWorkDraftKey(`history_${scope}`)}:${JSON.stringify(effectivePermissions(user))}:${enabled}`, { ...readScope, revision: 'actor' })
   const actorScopeRef = useRef(actorScope)
   actorScopeRef.current = actorScope
   const [undoStack, setUndoStack] = useState<ActionHistoryEntry[]>([])
@@ -254,9 +254,9 @@ export function useActionHistory({ limit = 10, notify, scope = 'global', enabled
   const isAdmin = useMemo(() => effectivePermissions(user).isAdmin, [user])
 
   const refreshServerItems = useCallback((): Promise<void> => {
-    if (!enabled || actorScopeRef.current !== actorScope || !isActorReadScopeCurrent(readScope)) return Promise.resolve()
+    if (!enabled || actorScopeRef.current !== actorScope || !isActorReadScopeCurrent(readScope, false)) return Promise.resolve()
     const requestScope = actorScope
-    const authority = readScope
+    const authority = captureActorReadScope('actionHistory')
     const requestId = beginTrackedRequest(historyRequestRef)
     return withLoaderTimeout(
       async () => {
@@ -477,7 +477,7 @@ export function useActionHistory({ limit = 10, notify, scope = 'global', enabled
           ? await api.undoActionHistory(serverId, replayRequest)
           : await api.redoActionHistory(serverId, replayRequest)
       const applied = !!(response && typeof response === 'object' && (response as { applied?: unknown }).applied)
-      if (actorScopeRef.current !== requestScope || !isActorReadScopeCurrent(readScope)) return false
+      if (actorScopeRef.current !== requestScope || !isActorReadScopeCurrent(readScope, false)) return false
       if ((response as { pending?: boolean })?.pending === true && !applied) {
         refreshServerItems()
         const notice = await localizeProductEditError(Object.assign(new Error('Product change submitted for review'), { code: 'product_edit_pending_review' }))
@@ -491,7 +491,7 @@ export function useActionHistory({ limit = 10, notify, scope = 'global', enabled
       const updated = (response as { item?: ServerHistoryItem }).item
       if (updated) setServerItems((current) => current.map((row) => String(row.id) === String(updated.id) ? updated : row))
       refreshServerItems()
-      if (label) notify?.(label)
+      if (label && (!(response as { reconciled_direction?: string }).reconciled_direction || (response as { reconciled_direction?: string }).reconciled_direction === direction)) notify?.(label)
       return true
     } catch (failure) {
       const error = await localizeProductEditError(failure)

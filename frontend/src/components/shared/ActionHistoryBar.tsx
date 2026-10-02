@@ -42,6 +42,7 @@ type HistoryItem = {
 
 function bulkHistoryLabel(item: HistoryItem, T: Translate): string {
   const p = item.undo_payload
+  if (p?.applier === 'product.edit.v1') return T('product_edit_history_label', 'Product edited')
   if (p?.applier === 'sale.status.bulk') return T('sale_bulk_history_summary', '{changed} sales → {status}; {unchanged} unchanged')
     .replace('{changed}', String(p.changed_count)).replace('{unchanged}', String(p.unchanged_count))
     .replace('{status}', T(`status_${String(p.target_status)}`, String(p.target_status).replaceAll('_', ' ')))
@@ -221,7 +222,7 @@ export default function ActionHistoryBar({
   // Preview list for the hover tooltip: most-recent few actions across
   // undo/redo/recorded, most recent first -- just enough to answer "what
   // happened lately" without opening the full interactive panel.
-  const previewLabels = [...undoItems, ...redoItems, ...recordedItems.map((item) => item.label).filter((label): label is string => !!label)].slice(0, 3)
+  const previewLabels = [...undoItems, ...redoItems, ...recordedItems.map((item) => bulkHistoryLabel(item, T)).filter(Boolean)].slice(0, 3)
 
   const clearPreviewTimer = () => {
     if (previewTimerRef.current) {
@@ -361,7 +362,9 @@ export default function ActionHistoryBar({
                 && typeof runServer === 'function'
                 && item?.id != null
               if (serverActionable) {
-                const doneLabel = (direction === 'redo' ? item.redo_label : item.undo_label) || item.label || ''
+                const doneLabel = item.undo_payload?.applier === 'product.edit.v1'
+                  ? direction === 'redo' ? T('product_edit_history_redo', 'Product edit redone') : T('product_edit_history_undo', 'Product edit undone')
+                  : (direction === 'redo' ? item.redo_label : item.undo_label) || item.label || ''
                 return (
                   <div key={`recorded-${item.id || item.label}`}>
                   <button

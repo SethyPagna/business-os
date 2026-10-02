@@ -7175,5 +7175,14 @@
   "product_edit_retry_unavailable": "The retry could not be saved. No new request was sent.",
   "product_edit_pending": "Check the pending product save before making another change.",
   "product_edit_replay_pending": "Check the pending Product Undo or Redo first.",
-  "cost_breakdown_restore_catalog": "Lot costs"
+  "cost_breakdown_restore_catalog": "Lot costs",
+  "product_edit_request_invalid": "The product request is invalid. Review it before trying again.",
+  "product_edit_state_conflict": "The product changed. Refresh and review the current values.",
+  "product_edit_request_immutable": "This request already belongs to a different change. Check the pending action.",
+  "product_edit_permission_required": "Your permissions no longer allow this action.",
+  "product_edit_cost_permission_required": "Cost edit permission is required for this action.",
+  "product_edit_image_permission_required": "Image edit permission is required for this action.",
+  "product_edit_history_label": "Product edited",
+  "product_edit_history_undo": "Product edit undone",
+  "product_edit_history_redo": "Product edit redone"
 }

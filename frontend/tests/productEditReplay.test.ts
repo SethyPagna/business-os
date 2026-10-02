@@ -22,9 +22,14 @@ for (const direction of ['undo', 'redo'] as const) {
   const receipts = new Map<string, unknown>()
   const send = async (intent: ProductEditReplayIntent, body: unknown) => {
     assert.ok(raw)
-    sent.push({ intent, body })
-    const id = JSON.stringify(intent)
-    if (!receipts.has(id)) { commits++; receipts.set(id, { applied: true, generation: 1 }) }
+    sent.push({ intent: { serverId: intent.serverId, operationId: intent.operationId, direction: intent.direction, generation: intent.generation }, body })
+    const id = JSON.stringify([intent.serverId, intent.operationId, intent.direction, intent.generation])
+    if (!receipts.has(id)) {
+      commits++
+      const pointer = { applier: 'product.edit.v1', operation_id: '7', generation: 3 }
+      receipts.set(id, { applied: true, action_history_id: 42, operation_id: '7', generation: 1, current_generation: 3,
+        item: { id: 42, undo_payload: pointer, redo_payload: pointer } })
+    }
     if (sent.length === 1) throw new Error('lost response')
     return receipts.get(id)
   }
@@ -36,8 +41,9 @@ for (const direction of ['undo', 'redo'] as const) {
   assert.deepEqual(sent[0], sent[1])
   assert.equal(commits, 1)
   assert.equal(raw, null)
-  const queued = await executeProductEditReplay(store, 'actor', pending, async () => ({ pending: true, applied: false }), () => {})
-  assert.deepEqual(queued, { pending: true, applied: false })
+  const queueReceipt = { pending: true, applied: false, pendingActionId: 51, operation_id: '7', generation: 0 }
+  const queued = await executeProductEditReplay(store, 'actor', pending, async () => queueReceipt, () => {})
+  assert.deepEqual(queued, queueReceipt)
   assert.ok(raw, 'pending approval retains the exact transition')
   await assert.rejects(executeProductEditReplay(store, 'actor', pending, async () => ({ applied: false }), () => {}), /not confirmed/)
   assert.ok(raw)
@@ -92,3 +98,53 @@ for (const direction of ['undo', 'redo'] as const) for (const response of [{ app
   assert.equal(moved, 'pending' in response ? 0 : 2)
 }
 console.log('PASS actual History adoption and replay skip legacy writes after applied and do not advance pending review')
+
+let replayRaw: string | null = null
+const replayStore = { getItem: () => replayRaw, setItem: (_key: string, value: string) => { replayRaw = value }, removeItem: () => { replayRaw = null } }
+let release!: () => void
+const hold = new Promise<void>(resolve => { release = resolve })
+let attempts = 0
+const requested = { serverId: 88, operationId: '72', direction: 'undo' as const, generation: 0 }
+const concurrent = async () => {
+  if (++attempts === 1) { await hold; throw Object.assign(new Error('first refused'), { status: 403 }) }
+  throw new Error('second outcome unknown')
+}
+const first = executeProductEditReplay(replayStore, 'actor', requested, concurrent, () => {})
+await assert.rejects(executeProductEditReplay(replayStore, 'actor', requested, concurrent, () => {}), /second outcome unknown/)
+release()
+await assert.rejects(first, /first refused/)
+assert.ok(replayRaw)
+for (const reply of [{ applied: true }, { ...result, generation: 1, current_generation: 1, item: result.history }]) {
+  await assert.rejects(executeProductEditReplay(replayStore, 'actor', requested, async () => reply, () => {}), /not confirmed/)
+  assert.ok(replayRaw, 'invalid completion pointers cannot clear the pending transition')
+}
+console.log('PASS concurrent replay refusals and malformed completion receipts retain original transition')
+
+for (const change of ['invalidation', 'actor', 'permission', 'stale']) {
+  let revision = change === 'stale' ? 1 : 0, currentActor = true, stored: string | null = null, sent = 0
+  const actorRef = { current: 'actor7' }
+  const storage = { getItem: () => stored, setItem: (_key: string, value: string) => { stored = value }, removeItem: () => { stored = null } }
+  const currentPointer = { ...pointer, generation: 1 }
+  const response = { applied: true, action_history_id: 88, operation_id: '72', generation: 1, current_generation: 1,
+    item: { id: 88, undo_payload: currentPointer, redo_payload: currentPointer } }
+  const current = (_scope: unknown, invalidation = true) => currentActor && (!invalidation || revision === 0)
+  const run = closure('runServerEntry', {
+    busy: '', actorScope: 'actor7', actorScopeRef: actorRef, readScope: {}, setBusy() {}, notify() {}, refreshServerItems() {},
+    serverItems: [{ id: 88, undo_payload: pointer, redo_payload: pointer }], setServerItems() {},
+    navigator: { onLine: true }, window: { sessionStorage: storage }, productEditStorageKey: () => 'replay',
+    executeProductEditReplay, buildServerReplayRequest: build, isActorReadScopeCurrent: current,
+    assertActorReadScope: (scope: unknown, invalidation = true) => { if (!current(scope, invalidation)) throw new Error('stale actor or revision') },
+    localizeProductEditError: async (error: unknown) => error, getErrorMessage: String,
+    loadActionHistoryTransport: async () => ({ undoActionHistory: async () => {
+      sent++
+      if (change === 'actor') currentActor = false
+      else if (change === 'permission') actorRef.current = 'actor7:revoked'
+      else revision++
+      return response
+    } }),
+  })
+  assert.equal(await run('undo', 88), change === 'invalidation', 'normal write invalidation must not become a failed replay; actor switches must remain fenced')
+  assert.equal(stored === null, change === 'invalidation' || change === 'stale')
+  assert.equal(sent, change === 'stale' ? 0 : 1)
+}
+console.log('PASS actual server replay accepts own invalidation; actor, permission and stale pre-dispatch controls remain fenced')
