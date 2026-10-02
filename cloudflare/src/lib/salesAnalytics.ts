@@ -879,7 +879,9 @@ export async function removalLossesFor(env: Env, f: SalesFilters): Promise<Remov
  *  profit_after_losses_usd by hand. */
 export function withRemovalLosses<T extends SalesTotals>(totals: T, loss: RemovalLossSummary | null): T {
   if (!loss) return totals
-  return { ...totals, ...removalLossTotals(totals.revenue_usd, totals.profit_usd, loss) }
+  const result = { ...totals, ...removalLossTotals(totals.revenue_usd, totals.profit_usd, loss) }
+  const diagnostic = reportMoneyDiagnostic(totals)
+  return diagnostic ? attachReportDiagnostic(result, diagnostic) : result
 }
 
 type ReportScalarRow = Record<string, unknown> & { id: number }
@@ -1003,6 +1005,8 @@ export async function stockValuationSaleCostsAvailable(db: ReturnType<typeof get
 export async function assertStockValuationSaleCostRows(db: ReturnType<typeof getDb>): Promise<void> {
   const invalid = await db.prepare(`SELECT v.sale_item_id FROM stock_valuation_sale_costs v LEFT JOIN sale_items si ON si.id=v.sale_item_id
     WHERE si.id IS NULL OR v.quantity IS NOT si.quantity OR v.cost4 IS NULL OR v.recovery4 IS NULL OR v.net4 IS NULL
+      OR typeof(v.cost4)<>'integer' OR typeof(v.recovery4)<>'integer' OR typeof(v.net4)<>'integer'
+      OR v.cost4>9007199254740991 OR v.recovery4>9007199254740991 OR v.net4>9007199254740991
       OR v.cost4<0 OR v.recovery4<0 OR v.net4<0 OR v.net4<>v.cost4-v.recovery4 LIMIT 1`).get()
   if (invalid) throw new ReportMoneyPrecisionError('unsupported_row')
 }
@@ -1013,7 +1017,8 @@ export function stockValuationSaleItemCostSql(managed: boolean, alias = 'si'): {
   return {
     join: `LEFT JOIN stock_valuation_sale_costs valuation_cost ON valuation_cost.sale_item_id=${alias}.id`,
     cost: `CASE WHEN valuation_cost.managed IS NULL THEN ${legacy}
-      WHEN valuation_cost.quantity=${alias}.quantity AND valuation_cost.net4 IS NOT NULL AND valuation_cost.net4>=0
+      WHEN valuation_cost.quantity=${alias}.quantity AND typeof(valuation_cost.net4)='integer'
+        AND valuation_cost.net4 BETWEEN 0 AND 9007199254740991
         THEN valuation_cost.net4/10000.0 ELSE json_extract('invalid valuation sale cost','$') END`,
     missing: `valuation_cost.managed IS NULL AND ${alias}.cost_price_usd IS NULL`,
   }
@@ -1682,6 +1687,43 @@ export async function reportItemCostProjection(db: ReturnType<typeof getDb>) {
   if (managed) await assertStockValuationSaleCostRows(db)
   const projection = stockValuationSaleItemCostSql(managed)
   return { ...projection, columns: itemCostColumns(projection.cost, projection.missing) }
+}
+
+export async function readStockConsumptionRecoveryActivity(env: Env, f: SalesFilters & { productId?: number; customerId?: number }) {
+  const db = getDb(env)
+  await assertReportReadable(db)
+  if (!await stockValuationSaleCostsAvailable(db)) return { rows: [], recovery_usd: 0 }
+  const columns = await db.prepare("SELECT group_concat(name) AS columns FROM pragma_table_info('stock_valuation_sale_recoveries')").get<{ columns: string | null }>()
+  const names = new Set((columns?.columns || '').split(','))
+  if (!['sale_id', 'sale_item_id', 'consumption_id', 'event_id', 'kind', 'occurred_at', 'consumed_cost4', 'consumed_recovery4'].every(name => names.has(name))) {
+    throw new ReportMoneyPrecisionError('unsupported_row')
+  }
+  const saleScope = whereActiveSales('s', { ...f, startDate: null, endDate: null, startTime: null, endTime: null, createdFrom: null, createdTo: null })
+  if (!String(f.status || '').trim()) saleScope.sql = saleScope.sql.replace("COALESCE(s.sale_status, 'completed') <> 'cancelled'", '1=1')
+  const dateScope = whereActiveSales('activity', { startDate: f.startDate, endDate: f.endDate, startTime: f.startTime, endTime: f.endTime, createdFrom: f.createdFrom, createdTo: f.createdTo })
+  dateScope.sql = dateScope.sql.replace("COALESCE(activity.sale_status, 'completed') <> 'cancelled'", '1=1')
+  const clauses = [saleScope.sql, dateScope.sql]
+  const params: Record<string, unknown> = { ...saleScope.params, ...dateScope.params }
+  if (f.productId) { clauses.push('si.product_id=@recoveryProduct'); params.recoveryProduct = f.productId }
+  if (f.customerId) { clauses.push('s.customer_id=@recoveryCustomer'); params.recoveryCustomer = f.customerId }
+  const read = () => db.prepare(`SELECT activity.sale_id,activity.sale_item_id,activity.consumption_id,activity.event_id,
+      activity.kind,activity.occurred_at,activity.consumed_cost4,activity.consumed_recovery4
+    FROM (SELECT r.*,r.occurred_at AS created_at FROM stock_valuation_sale_recoveries r) activity
+    JOIN sales s ON s.id=activity.sale_id JOIN sale_items si ON si.id=activity.sale_item_id
+    WHERE ${clauses.join(' AND ')} ORDER BY activity.event_id,activity.consumption_id LIMIT ${REPORT_MONEY_MAX_ROWS + 1}`)
+    .all<Record<string, unknown>>(params)
+  const rows = await read()
+  await assertReportReadable(db)
+  const second = await read()
+  await assertReportReadable(db)
+  if (rows.length>REPORT_MONEY_MAX_ROWS) throw new ReportMoneyPrecisionError('too_many_rows')
+  if (JSON.stringify(rows)!==JSON.stringify(second)) throw new ReportMoneyPrecisionError('snapshot_changed')
+  let recovery = ReportExactDecimal.zero()
+  for (const row of rows) {
+    if (!Number.isSafeInteger(row.consumed_cost4) || !Number.isSafeInteger(row.consumed_recovery4)) throw new ReportMoneyPrecisionError('unsupported_row')
+    recovery = recovery.add(ReportExactDecimal.recorded(String(row.consumed_recovery4)).divide(ReportExactDecimal.quantity('10000')))
+  }
+  return { rows, recovery_usd: recovery.toNumber() }
 }
 export const ITEM_COST_STATUS_CLAUSE = `(${recognizedExpr('s.')} OR ${awaitingExpr('s.')})`
 

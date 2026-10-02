@@ -3,11 +3,15 @@ const harnessFile=path.join(__dirname,'test-stock-valuation-consumption-native.c
 const harnessSource=fs.readFileSync(harnessFile,'utf8'),boundary=harnessSource.lastIndexOf('(async()=>{consumptionMath();')
 assert.ok(boundary>0)
 const harness=new Module(harnessFile,module);harness.filename=harnessFile;harness.paths=module.paths
-harness._compile(harnessSource.slice(0,boundary)+'\nmodule.exports={fixture,repairedFixture,command,call,saleBody,valuation,sales,inventory,load,context,setActor(value){actor=value}};',harnessFile)
+assert.equal(harnessSource.split('function fixture() {').length,2)
+assert.equal(harnessSource.split('openDb(loadAll()).db').length,2)
+const fixtureSource=harnessSource.slice(0,boundary).replace('function fixture() {','function fixture(migrations=loadAll()) {').replace('openDb(loadAll()).db','openDb(migrations).db')
+harness._compile(fixtureSource+'\nmodule.exports={fixture,repairedFixture,command,call,saleBody,valuation,sales,inventory,load,context,setActor(value){actor=value}};',harnessFile)
 const h=harness.exports,analytics=h.load('lib/salesAnalytics.ts'),reports=h.load('routes/reports.ts').default
-const env=f=>({DB:f.d1,PLAN_TIER:'paid',STOCK_VALUATION_EXPERIMENT:'local-fixture-only',CACHE:{get:async()=>null,put:async()=>{}}})
+const env=f=>({DB:f.d1,PLAN_TIER:'paid',STOCK_VALUATION_EXPERIMENT:'local-fixture-only',CACHE:{get:async()=>null,put:async()=>{throw Error('unexpected report KV write')}}})
 async function get(f,url){const response=await reports.request(url,{},env(f),h.context);const text=await response.text();assert.equal(response.status,200,text);return JSON.parse(text)}
 async function costs(f,expected,label){
+ const before=f.batches.length
  const snapshot=await analytics.readSalesReportSnapshot(env(f),{})
  assert.equal(analytics.salesTotalsFromSnapshot(snapshot).cost_usd,expected,`${label}: snapshot reducer`)
  assert.equal((await analytics.getSalesTotals(env(f),{})).cost_usd,expected,`${label}: actual totals`)
@@ -17,6 +21,18 @@ async function costs(f,expected,label){
  assert.equal((await get(f,'/overview')).sales.totals.cost_usd,expected,`${label}: real report API`)
  assert.equal((await get(f,'/business-summary/sales')).rows.reduce((sum,row)=>sum+row.cost_usd,0),expected,`${label}: real record list`)
  assert.equal((await get(f,'/business-summary/sales?intent=export')).totals.cost_usd,expected,`${label}: real export`)
+ const db=h.load('lib/db.ts').getDb(env(f)),ledger=h.load('lib/productSalesLedger.ts')
+ const ledgerSql=await ledger.buildProductSalesLedgerSqlForDb(db)
+ const rows=await db.prepare(ledgerSql).all()
+ assert.ok(Math.abs(rows.reduce((sum,row)=>sum+Number(row.cogs_usd),0)-expected)<.005,`${label}: actual product ledger`)
+ const metrics=[{id:10}];await h.load('routes/inventory.ts').attachInventoryProductMetrics(db,metrics,{})
+ assert.ok(Math.abs(Number(metrics[0].cogs_usd)-(rows.find(row=>row.product_id===10)?.cogs_usd||0))<1e-10,`${label}: real inventory records`)
+ for(const url of ['/summary','/summary?branchId=1','/stats']){
+  const response=await h.inventory.request(url,{},env(f),h.context),text=await response.text();assert.equal(response.status,200,text)
+  const body=JSON.parse(text),cost=Array.isArray(body)?body.reduce((sum,row)=>sum+Number(row.cogs_usd),0):body.item.cogs_usd
+  assert.ok(Math.abs(cost-expected)<.005,`${label}: inventory ${url}`)
+ }
+ assert.equal(f.batches.length,before,`${label}: readers never write business batches`)
 }
 async function lifecycle(credit=5){
  const f=await h.repairedFixture()
@@ -29,10 +45,23 @@ async function lifecycle(credit=5){
   await h.command(f,h.valuation('pending',6,2,{agreement_id:'reader-credit',amount_usd:credit,targets:[{allocation_id:'affected',amount_usd:credit}],proof:'Reader late credit'}))
   await h.command(f,h.valuation('accept',7,3,{agreement_id:'reader-credit',shares:[{segment_id:consumed.segment_id,amount_usd:credit}],proof:'Reader exact accepted share'}))
   await costs(f,10-credit,`latecredit${credit}`)
+  const day=f.db.prepare("SELECT date(occurred_at,'+7 hours') day FROM stock_valuation_sale_recoveries WHERE kind='accept'").get().day
+  assert.equal((await get(f,`/consumption-recoveries?startDate=${day}&endDate=${day}`)).recovery_usd,credit)
+  assert.equal((await get(f,'/consumption-recoveries?startDate=2026-09-01&endDate=2026-09-01')).recovery_usd,0)
+  assert.equal((await analytics.getSalesTotals(env(f),{startDate:'2026-09-01',endDate:'2026-09-01'})).cost_usd,10-credit,'sale bucket uses current net without adding dated activity')
+  assert.equal((await analytics.getSalesTotals(env(f),{startDate:day,endDate:day})).cost_usd,0,'credit-day window has no sale COGS')
+  assert.equal((await get(f,'/consumption-recoveries?branchId=2')).recovery_usd,0)
+  assert.equal((await get(f,'/consumption-recoveries?productId=20')).recovery_usd,0)
+  assert.equal((await get(f,'/consumption-recoveries?customerId=200')).recovery_usd,0)
   assert.equal((await h.call(f,h.sales,`/${item.sale_id}/status`,{sale_status:'cancelled',cancel_reason:'other',cancel_note:'Reader reversal',client_request_id:'reader-cancel'},'PATCH')).status,200)
   await costs(f,0,'cancel0')
+  const current=await h.load('lib/stockValuationConsumption.ts').readStockValuationSaleCosts(h.load('lib/db.ts').getDb(env(f)),[item.id])
+  assert.equal(current.get(item.id).managed,true);assert.equal(current.get(item.id).net4,0)
+  const reversed=await get(f,'/consumption-recoveries');assert.equal(reversed.recovery_usd,0)
+  assert.ok(reversed.rows.some(row=>row.kind==='restore'&&row.consumed_recovery4===-credit*10000),'recovery reversal is separately dated signed evidence')
   assert.equal((await h.call(f,h.sales,`/${item.sale_id}/status`,{sale_status:'completed',client_request_id:'reader-uncancel'},'PATCH')).status,200)
   await costs(f,10-credit,`uncancel${10-credit}`)
+  assert.equal((await get(f,'/consumption-recoveries')).recovery_usd,0,'uncancel lower capture does not reopen reversed recovery')
   assert.deepEqual({...f.db.prepare('SELECT cost_price_usd AS cost,total_usd AS total FROM sale_items WHERE id=?').get(item.id)},captured)
   console.log('PASS actual report API/totals/export/ranking consumption10 credit5 cancel0 uncancel5, immutable capture')
  }finally{f.db.close()}
@@ -53,4 +82,61 @@ async function exactResidue(){
   console.log('PASS exact70001/Q3 versus rounded70002 at aggregate cent boundary with separate legacy line')
  }finally{f.db.close()}
 }
-(async()=>{if(process.env.STOCK_READER_SECTION==='residue')await exactResidue();else{await lifecycle();await lifecycle(10);await exactResidue()}})().catch(error=>{console.error(error);process.exitCode=1})
+async function gates(){
+ const f=await h.repairedFixture(),normal={id:71,permissions:'{"inventory":true,"product_cost_edit":true,"product_cost_view":true,"fees":true,"contacts":true,"sales":true,"pos":true}'}
+ try{
+  f.db.exec("INSERT INTO customers(id,name) VALUES(88,'Reader customer');INSERT INTO branches(id,name,is_active) VALUES(2,'Other branch',1)")
+  const body={...h.saleBody(),customer_id:88,sale_status:'awaiting_payment',payment_method:'Credit',amount_paid_usd:0}
+  const sale=await h.call(f,h.sales,'/',body);assert.equal(sale.status,200,JSON.stringify(sale))
+  const totals=await analytics.getSalesTotals(env(f),{});assert.equal(totals.cost_usd,10);assert.equal(totals.pending_cost_usd,10)
+  assert.equal((await analytics.getSalesTotals(env(f),{branchId:2})).cost_usd,0)
+  const customer=(await analytics.getSalesGroupedTotals(env(f),{},'customer')).find(row=>row.entity_id===88)
+  assert.equal(customer.cost_usd,10)
+  assert.equal((await get(f,'/consumption-recoveries?customerId=88')).recovery_usd,0)
+  h.setActor({...normal,permissions:'{"sales":"view"}'})
+  const hidden=await get(f,'/overview'),listing=await get(f,'/business-summary/sales?intent=export')
+  const inspect=value=>{if(!value||typeof value!=='object')return;for(const key of ['cost_usd','profit_usd','pending_cost_usd','pending_profit_usd','cost4','recovery4','net4','managedSaleCosts'])assert.equal(Object.hasOwn(value,key),false,key);for(const child of Object.values(value))inspect(child)}
+  inspect(hidden);inspect(listing)
+  assert.equal((await reports.request('/consumption-recoveries',{},env(f),h.context)).status,403)
+  h.setActor({...normal,permissions:'{}'})
+  for(const url of ['/overview','/business-summary/sales','/consumption-recoveries'])assert.equal((await reports.request(url,{},env(f),h.context)).status,403)
+  h.setActor(normal)
+  f.db.exec('DROP TRIGGER stock_valuation_sale_items_identity;UPDATE sale_items SET quantity=2')
+  const mismatch=await reports.request('/overview',{},env(f),h.context);assert.equal(mismatch.status,422);assert.equal((await mismatch.json()).code,'unsupported_row')
+  await assert.rejects(()=>h.load('lib/productSalesLedger.ts').buildProductSalesLedgerSqlForDb(h.load('lib/db.ts').getDb(env(f))),error=>error.code==='unsupported_row')
+  console.log('PASS actual pending/branch/customer/cost permission gates and corrupt partial managed-line refusal')
+ }finally{h.setActor(normal);f.db.close()}
+ const unvalued=await h.repairedFixture()
+ try{
+  const body=h.saleBody();body.amount_paid_usd=0;body.items[0]={...body.items[0],pricing_source:'manual',selling_price_input_usd:0,price_usd:0,price_khr:0,pricing_quote:{gross_usd:0,product_discount_usd:0,manual_discount_usd:0,total_usd:0,total_khr:0}}
+  const sale=await h.call(unvalued,h.sales,'/',body);assert.equal(sale.status,200,JSON.stringify(sale))
+  const totals=await analytics.getSalesTotals(env(unvalued),{});assert.equal(totals.cost_usd,0);assert.equal(totals.unvalued_cost_usd,10)
+  assert.equal((await analytics.getProductSalesRanking(env(unvalued),{}))[0].cost_usd,10,'product line view retains its independent unvalued-line policy')
+  console.log('PASS actual zero-price managed sale preserves valued/unvalued versus product line gates')
+ }finally{unvalued.db.close()}
+}
+async function partialSchema(){
+ const migrations=require('./harness/load_migrations.cjs').loadAll(),before215=migrations.filter(sql=>!sql.includes('CREATE TABLE stock_valuation_events_v4'))
+ assert.equal(before215.length,migrations.length-1)
+ const f=h.fixture(before215)
+ try{
+  assert.equal(f.db.prepare("SELECT COUNT(*) n FROM sqlite_master WHERE name='stock_valuation_sale_costs'").get().n,0)
+  f.db.exec("INSERT INTO sales(id,receipt_number,sale_status,subtotal_usd,total_usd,branch_id,money_precision_version) VALUES(9000,'legacy-partial','completed',20,20,1,0);INSERT INTO sale_items(sale_id,product_id,product_name,quantity,total_usd,cost_price_usd,branch_id) VALUES(9000,10,'Legacy cost',2,20,3,1)")
+  await costs(f,6,'real pre0215 legacy')
+  assert.equal((await get(f,'/consumption-recoveries')).recovery_usd,0)
+  f.db.exec('UPDATE sale_items SET cost_price_usd=NULL')
+  const missing=await analytics.getSalesTotals(env(f),{});assert.equal(missing.cost_usd,0);assert.equal(analytics.reportMoneyDiagnostic(missing).unknown_cost_lines,1)
+  f.db.exec('UPDATE sale_items SET cost_price_usd=0')
+  const zero=await analytics.getSalesTotals(env(f),{});assert.equal(zero.cost_usd,0);assert.equal(analytics.reportMoneyDiagnostic(zero).unknown_cost_lines,0)
+  f.db.exec("INSERT INTO system_flags(key,value) VALUES('maintenance','restore')")
+  const fenced=await reports.request('/consumption-recoveries',{},env(f),h.context);assert.equal(fenced.status,409);assert.equal((await fenced.json()).code,'maintenance_restore')
+  console.log('PASS actual pre0215 schema capability, legacy NULL diagnostics/knownzero and recovery restore fence')
+ }finally{f.db.close()}
+ const corrupt=h.fixture()
+ try{
+  corrupt.db.exec('DROP VIEW stock_valuation_sale_costs')
+  const response=await reports.request('/overview',{},env(corrupt),h.context);assert.equal(response.status,422);assert.equal((await response.json()).code,'unsupported_row')
+  console.log('PASS incomplete valuation schema refuses instead of permissive legacy fallback')
+ }finally{corrupt.db.close()}
+}
+(async()=>{if(process.env.STOCK_READER_SECTION==='residue')await exactResidue();else if(process.env.STOCK_READER_SECTION==='gates')await gates();else{await lifecycle();await lifecycle(10);await exactResidue();await gates();await partialSchema()}})().catch(error=>{console.error(error);process.exitCode=1})

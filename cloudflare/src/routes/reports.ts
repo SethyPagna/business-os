@@ -15,6 +15,7 @@ import {
   type SalesReportSnapshot,
   getSalesTotals,
   reportItemCostProjection,
+  readStockConsumptionRecoveryActivity,
   getDeliveryContactTotals,
   getSalesGroupedTotals,
   reportCustomerNameExpr,
@@ -313,10 +314,11 @@ export function salesExportCohort(snapshot: SalesReportSnapshot, search: string)
   const returns = snapshot.returns.filter((row) => ids.has(Number(row.sale_id)))
   const returnIds = new Set(returns.map((row) => Number(row.id)))
   const returnItems = snapshot.returnItems.filter((row) => returnIds.has(Number(row.return_id)))
+  const itemIds = new Set(items.map(item => Number(item.id)))
   return { sales, items, returns, returnItems, voidSales: sales.filter((row) => voidIds.has(Number(row.id))), deliveryFees: [],
     precision_mode: [...sales, ...returns].some((row) => Number(row.money_precision_version) !== 1) ? 'exact_recorded' : 'canonical_v1',
     row_count: sales.length + items.length + returns.length + returnItems.length,
-    ...(snapshot.managedSaleCosts ? { managedSaleCosts: snapshot.managedSaleCosts.filter(([id]) => items.some(item => Number(item.id) === id)) } : {}) }
+    ...(snapshot.managedSaleCosts ? { managedSaleCosts: snapshot.managedSaleCosts.filter(([id]) => itemIds.has(id)) } : {}) }
 }
 
 function salesExportStamp(raw: string): number {
@@ -494,6 +496,23 @@ app.get('/overview', async (c) => {
   }
 
   return c.json(out)
+})
+
+app.get('/consumption-recoveries', async (c) => {
+  const user = c.get('user')
+  if (!canReadSales(user) || !canViewAcquisitionCosts(user)) return c.json({ error: 'Forbidden' }, 403)
+  const query = c.req.query()
+  let f: SalesFilters
+  try { f = parseViewFilters(query) } catch (error) { return c.json({ error: filterError(error) }, 400) }
+  for (const key of ['productId', 'customerId']) {
+    if (query[key] !== undefined && (!/^\d+$/.test(query[key]) || !Number.isSafeInteger(Number(query[key])) || Number(query[key]) < 1)) {
+      return c.json({ error: `Invalid ${key}` }, 400)
+    }
+  }
+  const activity = await readStockConsumptionRecoveryActivity(c.env, { ...f,
+    productId: query.productId ? Number(query.productId) : undefined,
+    customerId: query.customerId ? Number(query.customerId) : undefined })
+  return c.json({ metric: 'supplier_consumption_recovery_activity', ...activity })
 })
 
 // ---------------------------------------------------------------------------
