@@ -45,7 +45,14 @@ const MAX_DECODED_BYTES = 16 * 1024 * 1024
 
 const FINANCIAL_ROW_FIELDS = new Set(['records', 'rows', 'items', 'events', 'segments', 'invoices', 'changes', 'targets', 'allocations', 'shares', 'lines', 'native_sources'])
 
-const LITERAL_ARRAY_FIELDS = new Set(['names', 'product_names', 'merged_names', 'labels', 'tags', 'categories', 'brands', 'source_ids', 'source_ids_json'].map(keyFingerprint))
+const LITERAL_ARRAY_FIELDS = new Set(['names', 'product_names', 'merged_names', 'labels', 'tags', 'categories', 'brands', 'source_ids', 'source_ids_json',
+  'image_gallery', 'image_names', 'image_paths', 'current_gallery', 'previous_gallery', 'images_moved_to_keeper', 'gallery',
+  'absorbed_barcodes', 'reparented_tables', 'fields', 'choices_applied', 'from', 'backfilled', 'unknown_after_fields',
+  'source_group_keys', 'source_group_keys_json', 'case_keys', 'processed_case_keys', 'pending_case_keys', 'merge_operation_ids',
+  'undo_pending_operation_ids', 'undo_unavailable_operation_ids', 'operation_ids', 'closes_stock_sessions',
+  'configured_methods', 'configured_before', 'configured_after', 'historical_snapshots_preserved', 'phones', 'allowed_actions',
+  'editable_columns', 'partial_fields', 'available_years', 'customer', 'supplier', 'units', 'suppliers',
+  'conflicts', 'errors', 'kept', 'ignored', 'auto_wired', 'duplicate_header_keys', 'unmatched', 'ambiguous'].map(keyFingerprint))
 
 function isLiteralArrayField(key: string): boolean {
   return LITERAL_ARRAY_FIELDS.has(keyFingerprint(key))
@@ -118,9 +125,9 @@ function selectedPrivateField(source: Record<string, unknown>, supplier: boolean
 export function hasAcquisitionCostInput(value: unknown, user: PermissionUser): boolean {
   if (canEditAcquisitionCosts(user)) return false
   const budget = { bytes: MAX_DECODED_BYTES }
-  function contains(input: unknown, depth: number, supplier = false, governed = false): boolean {
+  function contains(input: unknown, depth: number, supplier = false, governed = false, literalStrings = false): boolean {
     if (depth > MAX_DEPTH) return true
-    if (Array.isArray(input)) return input.some(item => contains(item, depth + 1, supplier, governed))
+    if (Array.isArray(input)) return input.some(item => !(literalStrings && typeof item === 'string') && contains(item, depth + 1, supplier, governed))
     if (typeof input === 'string' && governed) {
       const decoded = decodeFinancialContainer(input, depth, budget)
       return !decoded || contains(decoded.value, decoded.depth, supplier, true)
@@ -132,14 +139,15 @@ export function hasAcquisitionCostInput(value: unknown, user: PermissionUser): b
     return Object.entries(source).some(([key, child]) => {
       if (isPrivateMoneyField(key, supplier)) return true
       const childSupplier = supplier || isSupplierGroupKey(key)
-      const childGoverned = !isLiteralArrayField(key) && (isSerializedCostEnvelope(key)
-        || isFinancialRowContainer(key) || (governed && typeof child !== 'string'))
+      const childGoverned = isSerializedCostEnvelope(key)
+        || isFinancialRowContainer(key) || (governed && typeof child !== 'string')
+      const literalArray = isLiteralArrayField(key)
       if (typeof child === 'string' && (isSerializedCostEnvelope(key) || childGoverned)) {
         if (!child.trim()) return false
         const decoded = decodeFinancialContainer(child, depth, budget)
-        return !decoded || contains(decoded.value, decoded.depth, childSupplier, childGoverned)
+        return !decoded || contains(decoded.value, decoded.depth, childSupplier, childGoverned, literalArray)
       }
-      return contains(child, depth + 1, childSupplier, childGoverned)
+      return contains(child, depth + 1, childSupplier, childGoverned, literalArray)
     })
   }
   return contains(value, 0)
@@ -148,9 +156,9 @@ export function hasAcquisitionCostInput(value: unknown, user: PermissionUser): b
 export function projectAcquisitionCosts(value: unknown, user: PermissionUser, supplierMoney = false): unknown {
   if (canViewAcquisitionCosts(user)) return value
   const budget = { bytes: MAX_DECODED_BYTES }
-  function project(input: unknown, depth: number, supplier = supplierMoney, governed = false): unknown {
+  function project(input: unknown, depth: number, supplier = supplierMoney, governed = false, literalStrings = false): unknown {
     if (depth > MAX_DEPTH) return null
-    if (Array.isArray(input)) return input.map(item => project(item, depth + 1, supplier, governed))
+    if (Array.isArray(input)) return input.map(item => literalStrings && typeof item === 'string' ? item : project(item, depth + 1, supplier, governed))
     if (typeof input === 'string' && governed) {
       const decoded = decodeFinancialContainer(input, depth, budget)
       return decoded ? encodeFinancialContainer(project(decoded.value, decoded.depth, supplier, true), decoded.layers) : null
@@ -164,14 +172,15 @@ export function projectAcquisitionCosts(value: unknown, user: PermissionUser, su
     for (const [key, child] of Object.entries(source)) {
       if (isPrivateMoneyField(key, supplier)) continue
       const childSupplier = supplier || isSupplierGroupKey(key)
-      const childGoverned = !isLiteralArrayField(key) && (isSerializedCostEnvelope(key)
-        || isFinancialRowContainer(key) || (governed && typeof child !== 'string'))
+      const childGoverned = isSerializedCostEnvelope(key)
+        || isFinancialRowContainer(key) || (governed && typeof child !== 'string')
+      const literalArray = isLiteralArrayField(key)
       if (typeof child === 'string' && (isSerializedCostEnvelope(key) || childGoverned)) {
         if (!child.trim()) { result[key] = child; continue }
         const decoded = decodeFinancialContainer(child, depth, budget)
-        result[key] = decoded ? encodeFinancialContainer(project(decoded.value, decoded.depth, childSupplier, childGoverned), decoded.layers) : null
+        result[key] = decoded ? encodeFinancialContainer(project(decoded.value, decoded.depth, childSupplier, childGoverned, literalArray), decoded.layers) : null
       } else {
-        result[key] = project(child, depth + 1, childSupplier, childGoverned)
+        result[key] = project(child, depth + 1, childSupplier, childGoverned, literalArray)
       }
     }
     return result

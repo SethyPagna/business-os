@@ -209,6 +209,7 @@ async function checkEnvelopeRoutes(api) {
     }
   ]
 ]
+    encodedCases.push(...literalStructuredCases())
     const encodedObservations = []
     for (const [payload, expected] of encodedCases) {
       user = { ...editor, id: 7 }
@@ -250,6 +251,25 @@ async function checkEnvelopeRoutes(api) {
       console.log('ENCODED_ROUTE', JSON.stringify(observation))
       native.prepare('DELETE FROM pending_actions WHERE id=1').run()
     }
+    for (const payload of literalProducerPayloads()) {
+      user = { ...denied, id: 7 }
+      const created = await post('/history', { label: 'Independent ordinary money', undo_payload: payload }), createdBody = await created.json()
+      assert.equal(created.status, 200)
+      assert.equal(native.prepare('SELECT undo_payload FROM action_history WHERE id=?').get(createdBody.id).undo_payload, JSON.stringify(payload))
+      native.prepare("INSERT INTO pending_actions(id,section,action_type,entity_type,payload_json,status,requested_by) VALUES(1,'inventory','update','fixture','{}','rejected',7)").run()
+      assert.equal((await post('/review/1/resubmit', { payload })).status, 200)
+      user = { ...denied, id: 9, permissions: JSON.stringify({ audit_log: true, product_cost_view: false, product_cost_edit: false }) }
+      const before = snapshot(), visible = await get('/history?scope=global&all=1&limit=20'), visibleBody = await visible.json()
+      assert.equal(visible.status, 200)
+      assert.deepEqual(visibleBody.items.find(row => row.id === createdBody.id).undo_payload, payload)
+      user = { ...user, id: 7 }
+      const mine = await get('/review/mine'), mineBody = await mine.json()
+      assert.equal(mine.status, 200)
+      assert.equal(mineBody.data.find(row => row.id === 1).payload_json, JSON.stringify(payload))
+      assert.equal(snapshot(), before)
+      console.log('INDEPENDENT_DOMAIN_ROUTE', JSON.stringify({ payload, historyStatus: created.status, reviewStatus: 200, historyReadExact: true, mineReadExact: true }))
+      native.prepare('DELETE FROM pending_actions WHERE id=1').run()
+    }
     for (const observation of encodedObservations) {
       assert.deepEqual(observation.historyOutput, observation.expected, 'different denied actor actual history retrieval')
       assert.deepEqual(observation.mineOutput, observation.expected, 'denied requester actual review/mine retrieval')
@@ -277,4 +297,77 @@ async function checkEnvelopeRoutes(api) {
   } finally { native.close() }
 }
 
-checkEnvelopeRoutes(access).catch(error => { console.error(error); process.exitCode = 1 })
+async function checkLiteralEnvelopeRoutes() {
+  await checkEnvelopeRoutes(access)
+  await checkLiteralProductGallery(access)
+}
+checkLiteralEnvelopeRoutes().catch(error => { console.error(error); process.exitCode = 1 })
+
+function literalProducerPayloads() {
+  return [
+    { image_gallery: ['/uploads/rose-1.jpg', '/uploads/rose-2.jpg', '/uploads/rose-3.jpg'], name: 'Rose' },
+    { imagePaths: ['/uploads/rose-1.jpg'], imageNames: ['Rose_1.jpg'], currentGallery: ['/uploads/old.jpg'] },
+    { absorbedBarcodes: ['00012345'], reparentedTables: ['sale_items:1'], imagesMovedToKeeper: ['/uploads/old.jpg'] },
+    { unknown_after_fields: ['customer_id', 'membership_number'], backfilled: ['name'] },
+    { configuredBefore: ['cash'], configuredAfter: ['cash', 'KHQR'], configured_methods: ['cash', 'KHQR'] },
+    { source_group_keys_json: JSON.stringify(['000012', 'ខូច']), source_ids: ['paid-source'], caseKeys: ['keeper:discarded'] },
+  ]
+}
+
+function literalStructuredCases() {
+  const row = JSON.stringify({ cost_price_usd: 7, count: 2 }), safe = JSON.stringify({ count: 2 })
+  return [
+    [{ details: { names: [{ opaque: [row] }] } }, { details: { names: [{ opaque: [safe] }] } }],
+    [{ details: { tags: [{ opaque: [row] }] } }, { details: { tags: [{ opaque: [safe] }] } }],
+    [{ details: { source_ids_json: JSON.stringify([{ opaque: [row] }]) } }, { details: { source_ids_json: JSON.stringify([{ opaque: [safe] }]) } }],
+    [{ details: { names: [[row]] } }, { details: { names: [[safe]] } }],
+    [{ details: { image_gallery: [{ opaque: [row] }] } }, { details: { image_gallery: [{ opaque: [safe] }] } }],
+  ]
+}
+
+function compileLiteralModule(source, imports = {}) {
+  const mod = { exports: {} }, code = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
+  new Function('require', 'module', 'exports', code)(name => { assert.ok(Object.hasOwn(imports, name), 'real literal dependency ' + name); return imports[name] }, mod, mod.exports)
+  return mod.exports
+}
+
+async function checkLiteralProductGallery(api) {
+  const { DatabaseSync } = require('node:sqlite'), native = new DatabaseSync(':memory:')
+  native.limits.exprDepth = 100
+  native.exec("CREATE TABLE product_images(id INTEGER PRIMARY KEY, product_id INTEGER, image_path TEXT, sort_order INTEGER); INSERT INTO product_images VALUES(1,7,'/uploads/front.jpg',0),(2,7,'/uploads/back.jpg',1),(3,7,'/uploads/side.jpg',2)")
+  const DB = { prepare(sql) { return { async all(params) { return native.prepare(sql).all(params) } } } }
+  const media = compileLiteralModule(fs.readFileSync(path.join(root, 'lib/media.ts'), 'utf8'))
+  const sqlBinding = compileLiteralModule(fs.readFileSync(path.join(root, 'lib/sqlBinding.ts'), 'utf8'))
+  const productText = fs.readFileSync(path.join(root, 'routes/products.ts'), 'utf8'), ast = ts.createSourceFile('products.ts', productText, ts.ScriptTarget.Latest, true)
+  const attachNode = ast.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === 'attachImageGallery')
+  const searchNode = ast.statements.find(node => ts.isExpressionStatement(node) && node.getText(ast).startsWith("app.get('/search',"))
+  assert.ok(attachNode); assert.ok(searchNode)
+  const limitText = fs.readFileSync(path.join(root, 'lib/importImageMatch.ts'), 'utf8'), limit = Number(limitText.match(/export const ADMIN_MAX_IMAGES_PER_PRODUCT\s*=\s*(\d+)/)[1])
+  const attachCode = ts.transpileModule(attachNode.getText(ast) + '\nreturn attachImageGallery;', { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
+  const attach = new Function('getDb', 'selectInChunks', 'buildInClause', 'sanitizeMediaList', 'ADMIN_MAX_IMAGES_PER_PRODUCT', attachCode)(env => env.DB, sqlBinding.selectInChunks, sqlBinding.buildInClause, media.sanitizeMediaList, limit)
+  const frontend = fs.readFileSync(path.resolve(root, '../../frontend/src/components/products/helpers/productGalleryHelpers.ts'), 'utf8'), frontAst = ts.createSourceFile('gallery.ts', frontend, ts.ScriptTarget.Latest, true)
+  const selected = frontAst.statements.filter(node => ts.isFunctionDeclaration(node) && ['normalizeProductGallery', 'getProductGalleryImages', 'buildProductThumbnailState'].includes(node.name?.text))
+  const cap = frontAst.statements.find(node => ts.isVariableStatement(node) && node.declarationList.declarations.some(declaration => declaration.name.getText(frontAst) === 'MAX_PRODUCT_GALLERY_IMAGES'))
+  assert.equal(selected.length, 3); assert.ok(cap)
+  const client = compileLiteralModule(cap.getText(frontAst) + '\n' + selected.map(node => node.getText(frontAst)).join('\n'))
+  try {
+    const products = await attach({ DB }, [{ id: 7, name: 'Gallery fixture', image_path: '/uploads/front.jpg', cost_price_usd: 3 }]), expected = ['/uploads/front.jpg', '/uploads/back.jpg', '/uploads/side.jpg']
+    const payload = { items: products, total: 1, page: 1, pageSize: 20, totalPages: 1 }, original = JSON.stringify(payload), before = JSON.stringify(native.prepare('SELECT * FROM product_images ORDER BY id').all())
+    for (const who of [denied, viewer, actor({ product_cost_view: false }, {}, 'admin')]) {
+      const app = new Hono()
+      app.use('*', async (c, next) => { c.set('user', who); await next() }); app.use('*', api.acquisitionCostResponses)
+      const handler = ts.transpileModule(searchNode.getText(ast), { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
+      new Function('app', 'parseProductReadSurface', 'productSurfaceDenialReason', 'productSearchCacheVersion', 'cachedJsonResponse', 'searchProductsWithIndexFallback', 'refreshCachedProductRows', 'isImageOnlyRead', 'restrictListPayloadForImageOnly', handler)(app, () => 'products', () => null, async () => 'fixture', async (_r, _ctx, _version, _ttl, produce) => produce(), async () => payload, () => { throw Error('Unexpected refresh') }, () => false, () => { throw Error('Unexpected image-only restriction') })
+      app.get('/detail', c => c.json({ item: products[0] }))
+      const res = await app.request('/search', {}, {}, { waitUntil() {}, passThroughOnException() {} }), body = await res.json(), detail = await app.request('/detail'), detailBody = await detail.json()
+      console.log('LITERAL_GALLERY_ROUTE', JSON.stringify({ role: who.role_code, viewCost: api.canViewAcquisitionCosts(who), status: res.status, returned: body.items[0].image_gallery, client: client.normalizeProductGallery(body.items[0].image_gallery, body.items[0].image_path) }))
+      assert.equal(res.status, 200); assert.equal(res.headers.get('cache-control'), 'private, no-store')
+      assert.deepEqual(body.items[0].image_gallery, expected)
+      assert.deepEqual(client.getProductGalleryImages(body.items[0]), expected)
+      assert.deepEqual(client.buildProductThumbnailState(body.items[0]).gallery, expected)
+      assert.deepEqual(detailBody.item.image_gallery, expected)
+      assert.equal(body.items[0].cost_price_usd, api.canViewAcquisitionCosts(who) ? 3 : undefined)
+      assert.equal(JSON.stringify(payload), original); assert.equal(JSON.stringify(native.prepare('SELECT * FROM product_images ORDER BY id').all()), before)
+    }
+  } finally { native.close() }
+}

@@ -129,3 +129,47 @@ async function checkRetailBasket() {
   console.log('PASS bounded decode, UTF8 shared budget, literal provenance, private selectors and real 200-line retail basket', JSON.stringify({ responseBytes: Buffer.byteLength(original) }))
 }
 checkRetailBasket().catch(error => { console.error(error); process.exitCode = 1 })
+
+function literalProducerFields() {
+  return ['names', 'product_names', 'merged_names', 'labels', 'tags', 'categories', 'brands', 'source_ids', 'source_ids_json',
+    'image_gallery', 'imageNames', 'imagePaths', 'currentGallery', 'previousGallery', 'imagesMovedToKeeper', 'gallery',
+    'absorbedBarcodes', 'absorbed_barcodes', 'reparentedTables', 'fields', 'choicesApplied', 'from', 'backfilled', 'unknown_after_fields',
+    'source_group_keys', 'source_group_keys_json', 'caseKeys', 'processedCaseKeys', 'pendingCaseKeys', 'mergeOperationIds',
+    'undoPendingOperationIds', 'undoUnavailableOperationIds', 'operation_ids', 'closesStockSessions',
+    'configured_methods', 'configuredBefore', 'configuredAfter', 'historical_snapshots_preserved', 'phones', 'allowedActions',
+    'editableColumns', 'partialFields', 'availableYears', 'customer', 'supplier', 'units', 'suppliers',
+    'conflicts', 'errors', 'kept', 'ignored', 'autoWired', 'duplicateHeaderKeys', 'unmatched', 'ambiguous']
+}
+
+function literalStructuredCases() {
+  const row = JSON.stringify({ cost_price_usd: 7, count: 2 }), safe = JSON.stringify({ count: 2 })
+  return [
+    [{ details: { names: [{ opaque: [row] }] } }, { details: { names: [{ opaque: [safe] }] } }],
+    [{ details: { tags: [{ opaque: [row] }] } }, { details: { tags: [{ opaque: [safe] }] } }],
+    [{ details: { source_ids_json: JSON.stringify([{ opaque: [row] }]) } }, { details: { source_ids_json: JSON.stringify([{ opaque: [safe] }]) } }],
+    [{ details: { names: [[row]] } }, { details: { names: [[safe]] } }],
+    [{ details: { image_gallery: [{ opaque: [row] }] } }, { details: { image_gallery: [{ opaque: [safe] }] } }],
+  ]
+}
+
+function checkLiteralArrayContract(api) {
+  const entries = ['000012', 'ខូច', '/uploads/rose-1.jpg', JSON.stringify({ cost_price_usd: 7, count: 2 })]
+  for (const key of literalProducerFields().flatMap(key => [key, key.toUpperCase(), key.replaceAll('_', '').toUpperCase()])) {
+    const value = { details: { [key]: key.toLowerCase().endsWith('_json') || key.toLowerCase().endsWith('json') ? JSON.stringify(entries) : entries } }
+    assert.deepEqual(api.projectAcquisitionCosts(value, denied), value, 'literal immediate string values ' + key)
+    assert.equal(api.hasAcquisitionCostInput(value, denied), false, 'literal input ' + key)
+    const structured = { details: { [key]: [{ opaque: [JSON.stringify({ cost_price_usd: 7, count: 2 })] }] } }
+    assert.deepEqual(api.projectAcquisitionCosts(structured, denied), { details: { [key]: [{ opaque: [JSON.stringify({ count: 2 })] }] } }, 'structured member retains governed state ' + key)
+    assert.equal(api.hasAcquisitionCostInput(structured, denied), true)
+  }
+  for (const [value, expected] of literalStructuredCases()) {
+    assert.deepEqual(api.projectAcquisitionCosts(value, denied), expected)
+    assert.equal(api.hasAcquisitionCostInput(value, denied), true)
+  }
+  for (const value of [
+    { details: { image_gallery: [{ FIELD: 'cost_price_usd', old_value: 7, new_value: 8 }] } },
+    { scope: 'supplier', details: { imagePaths: [{ total_usd: 7, count: 2 }] } },
+  ]) assert.equal(api.hasAcquisitionCostInput(value, denied), true)
+  console.log('PASS typed immediate literal-array strings; structured objects/nested arrays retain governed financial privacy')
+}
+checkLiteralArrayContract(access)
