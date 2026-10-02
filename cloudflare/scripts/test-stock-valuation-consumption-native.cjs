@@ -128,7 +128,42 @@ async function repairedSale() {
     const item=f.db.prepare('SELECT * FROM sale_items').get()
     assert.equal(item.cost_price_usd,10,'captured basis is exact repaired net basis')
     assert.equal(f.db.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id=500 AND branch_id=1').get().quantity,2)
-    console.log('PASS repaired share ordinary checkout captures exact basis in one transaction')
+    const consumed=f.db.prepare("SELECT s.* FROM stock_valuation_segments_v4 s JOIN stock_valuation_latest e ON e.id=s.event_id WHERE e.source_id='fund-900' AND s.fate='consumed'").get()
+    assert.equal(consumed.consumed_cost4,100000)
+    assert.equal(consumed.consumed_recovery4,0)
+    await command(f,valuation('pending',6,2,{agreement_id:'agreement-consumed',amount_usd:5,targets:[{allocation_id:'affected',amount_usd:5}],proof:'Extra accepted consumed-share credit'}))
+    const accepted=await command(f,valuation('accept',7,3,{agreement_id:'agreement-consumed',shares:[{segment_id:consumed.segment_id,amount_usd:5}],proof:'Exact consumed share accepted'}))
+    assert.equal(accepted.totals.consumed_cost4,100000)
+    assert.equal(accepted.totals.consumed_recovery4,50000)
+    assert.equal(accepted.totals.historical_loss4,250000)
+    assert.equal(accepted.totals.recovery4,150000)
+    assert.equal(accepted.funding.asset4,150000)
+    const saleId=item.sale_id
+    const cancellation={sale_status:'cancelled',cancel_reason:'other',cancel_note:'Customer cancelled',client_request_id:`consumption-cancel-${++serial}`}
+    const batchesBeforeCancel=f.batches.length
+    const cancelled=await call(f,sales,`/${saleId}/status`,cancellation,'PATCH')
+    assert.equal(cancelled.status,200,JSON.stringify(cancelled))
+    assert.equal(f.batches.length,batchesBeforeCancel+1)
+    const restored=f.db.prepare('SELECT s.* FROM stock_valuation_segments_v4 s JOIN stock_valuation_latest e ON e.id=s.event_id WHERE s.segment_id=?').get(consumed.segment_id)
+    assert.equal(restored.fate,'sellable')
+    assert.equal(restored.gross4-restored.coverage4,50000)
+    assert.equal(restored.consumed_cost4,0)
+    assert.equal(restored.consumed_recovery4,0)
+    assert.equal(f.db.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id=500 AND branch_id=1').get().quantity,3)
+    const immutableSale=f.db.prepare('SELECT cost_price_usd,total_usd FROM sale_items WHERE id=?').get(item.id)
+    assert.equal(immutableSale.cost_price_usd,10)
+    assert.equal(immutableSale.total_usd,40,'supplier credit does not alter customer money')
+    const saved=f.db.prepare('SELECT COUNT(*) n FROM stock_valuation_events_v4').get().n
+    assert.equal((await call(f,sales,`/${saleId}/status`,cancellation,'PATCH')).status,200)
+    assert.equal(f.db.prepare('SELECT COUNT(*) n FROM stock_valuation_events_v4').get().n,saved)
+    const uncancelled=await call(f,sales,`/${saleId}/status`,{sale_status:'completed',client_request_id:`consumption-uncancel-${++serial}`},'PATCH')
+    assert.equal(uncancelled.status,200,JSON.stringify(uncancelled))
+    const takenAgain=f.db.prepare('SELECT s.* FROM stock_valuation_segments_v4 s JOIN stock_valuation_latest e ON e.id=s.event_id WHERE s.segment_id=?').get(consumed.segment_id)
+    assert.equal(takenAgain.fate,'consumed')
+    assert.equal(takenAgain.consumed_cost4,50000)
+    assert.equal(takenAgain.consumed_recovery4,0)
+    assert.equal(f.db.prepare('SELECT cost_price_usd FROM sale_items WHERE id=?').get(item.id).cost_price_usd,10)
+    console.log('PASS actual repaired checkout10 late credit5 cancel basis5 uncancel cost5, immutable sale money')
   } finally {f.db.close()}
 }
 function consumptionMath() {
