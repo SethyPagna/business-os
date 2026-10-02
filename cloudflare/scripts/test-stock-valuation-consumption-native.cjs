@@ -70,6 +70,7 @@ function fixture() {
       const result=statements.map((statement,index)=>{
         if(index===hooks.failAt) throw Error('injected statement failure')
         if(index===hooks.skipAt) return {success:true,results:[],meta:{changes:0}}
+        if(hooks.beforeStatement) hooks.beforeStatement(db,statement,index)
         return statement.execute()
       })
       db.exec('COMMIT')
@@ -134,6 +135,13 @@ async function repairedSale() {
     const consumed=f.db.prepare("SELECT s.* FROM stock_valuation_segments_v4 s JOIN stock_valuation_latest e ON e.id=s.event_id WHERE e.source_id='fund-900' AND s.fate='consumed'").get()
     assert.equal(consumed.consumed_cost4,100000)
     assert.equal(consumed.consumed_recovery4,0)
+    await assertCostProjection(f,item.id,100000,0)
+    const v3=f.db.prepare("SELECT * FROM stock_valuation_receipts WHERE request_id LIKE 'consumption-repair-%'").get()
+    const replay=await call(f,inventory,'/valuation-experiment',JSON.parse(v3.request_json))
+    assert.equal(replay.status,200,JSON.stringify(replay))
+    assert.equal(replay.data.valuation_version,3)
+    assert.equal(replay.data.replayed,true)
+    assert.equal(JSON.stringify({...replay.data,replayed:undefined}),v3.response_json)
     await command(f,valuation('pending',6,2,{agreement_id:'agreement-consumed',amount_usd:5,targets:[{allocation_id:'affected',amount_usd:5}],proof:'Extra accepted consumed-share credit'}))
     const accepted=await command(f,valuation('accept',7,3,{agreement_id:'agreement-consumed',shares:[{segment_id:consumed.segment_id,amount_usd:5}],proof:'Exact consumed share accepted'}))
     assert.equal(accepted.totals.consumed_cost4,100000)
@@ -141,6 +149,7 @@ async function repairedSale() {
     assert.equal(accepted.totals.historical_loss4,250000)
     assert.equal(accepted.totals.recovery4,150000)
     assert.equal(accepted.funding.asset4,150000)
+    await assertCostProjection(f,item.id,100000,50000)
     const saleId=item.sale_id
     const cancellation={sale_status:'cancelled',cancel_reason:'other',cancel_note:'Customer cancelled',client_request_id:`consumption-cancel-${++serial}`}
     const batchesBeforeCancel=f.batches.length
@@ -152,6 +161,7 @@ async function repairedSale() {
     assert.equal(restored.gross4-restored.coverage4,50000)
     assert.equal(restored.consumed_cost4,0)
     assert.equal(restored.consumed_recovery4,0)
+    await assertCostProjection(f,item.id,0,0)
     assert.equal(f.db.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id=500 AND branch_id=1').get().quantity,3)
     const immutableSale=f.db.prepare('SELECT cost_price_usd,total_usd FROM sale_items WHERE id=?').get(item.id)
     assert.equal(immutableSale.cost_price_usd,10)
@@ -165,8 +175,176 @@ async function repairedSale() {
     assert.equal(takenAgain.fate,'consumed')
     assert.equal(takenAgain.consumed_cost4,50000)
     assert.equal(takenAgain.consumed_recovery4,0)
+    await assertCostProjection(f,item.id,50000,0)
+    const dated=f.db.prepare('SELECT r.kind,r.consumed_cost4,r.consumed_recovery4 FROM stock_valuation_sale_recoveries r JOIN stock_valuation_history_events e ON e.id=r.event_id WHERE r.sale_item_id=? ORDER BY e.revision').all(item.id).map(row=>({...row}))
+    assert.deepEqual(dated,[{kind:'consume',consumed_cost4:100000,consumed_recovery4:0},{kind:'accept',consumed_cost4:0,consumed_recovery4:50000},{kind:'restore',consumed_cost4:-100000,consumed_recovery4:-50000},{kind:'reconsume',consumed_cost4:50000,consumed_recovery4:0}])
     assert.equal(f.db.prepare('SELECT cost_price_usd FROM sale_items WHERE id=?').get(item.id).cost_price_usd,10)
     console.log('PASS actual repaired checkout10 late credit5 cancel basis5 uncancel cost5, immutable sale money')
+  } finally {f.db.close()}
+}
+async function assertCostProjection(f,item,cost4,recovery4) {
+  const {getDb}=load('lib/db.ts'),{readStockValuationSaleCosts}=load('lib/stockValuationConsumption.ts')
+  const result=await readStockValuationSaleCosts(getDb({DB:f.d1}),[item,999999])
+  assert.deepEqual(result.get(item),{managed:true,quantity:'1',cost4,recovery4,net4:cost4-recovery4,sourceIds:['fund-900']})
+  assert.equal(result.has(999999),false)
+  assert.deepEqual({...f.db.prepare('SELECT managed,quantity,cost4,recovery4,net4,source_ids_json FROM stock_valuation_sale_costs WHERE sale_item_id=?').get(item)},{managed:1,quantity:1,cost4,recovery4,net4:cost4-recovery4,source_ids_json:'["fund-900"]'})
+}
+
+function businessState(f) {
+  const tables=f.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND (name LIKE 'stock_%' OR name LIKE 'sale%' OR name IN ('products','product_batches','branch_stock','branch_batch_stock','inventory_movements','audit_logs','fees','sqlite_sequence')) ORDER BY name").all()
+  return JSON.stringify(tables.map(({name})=>[name,f.db.prepare(`SELECT * FROM "${name}" ORDER BY rowid`).all()]))
+}
+async function soldFixture() {
+  const f=await repairedFixture(),body=saleBody()
+  const response=await call(f,sales,'/',body)
+  assert.equal(response.status,200,JSON.stringify(response))
+  const item=f.db.prepare('SELECT * FROM sale_items').get()
+  return {...f,body,item}
+}
+async function failures() {
+  const template=await soldFixture()
+  const checkout=template.batches.find(statements=>statements.some(sql=>/INSERT INTO sales\b/.test(sql)))
+  template.db.close()
+  const f=await repairedFixture(),body=saleBody(),baseline=businessState(f)
+  try {
+    for(let index=0;index<checkout.length;index++) {
+      f.hooks.failAt=index
+      const result=await call(f,sales,'/',body)
+      assert.notEqual(result.status,200,`checkout ignored failure ${index}`)
+      assert.equal(businessState(f),baseline,`checkout rollback ${index}`)
+    }
+    delete f.hooks.failAt
+    for(const [index,sql] of checkout.entries()) if(/^(INSERT INTO stock_valuation|DELETE FROM stock_valuation|UPDATE branch_batch_stock|INSERT INTO branch_stock|UPDATE products|INSERT INTO inventory_movements)/.test(sql.trim())) {
+      f.hooks.skipAt=index
+      const result=await call(f,sales,'/',body)
+      assert.notEqual(result.status,200,`checkout ignored write ${index}: ${sql}`)
+      assert.equal(businessState(f),baseline,`checkout ignored write rollback ${index}`)
+    }
+    console.log(`PASS checkout each statement rollback ${checkout.length}, ignored required valuation/stock writes`)
+  } finally {f.db.close()}
+  const s=await soldFixture(),cancel={sale_status:'cancelled',cancel_reason:'other',cancel_note:'Native test cancellation',client_request_id:`negative-cancel-${++serial}`}
+  let restore
+  try {
+    const response=await call(s,sales,`/${s.item.sale_id}/status`,cancel,'PATCH')
+    assert.equal(response.status,200,JSON.stringify(response))
+    restore=s.batches.find(statements=>statements.some(sql=>/INSERT INTO stock_valuation_events_v4/.test(sql))&&statements.some(sql=>/SET sale_status/.test(sql)))
+  } finally {s.db.close()}
+  const r=await soldFixture(),saved=businessState(r)
+  try {
+    for(let index=0;index<restore.length;index++) {
+      r.hooks.failAt=index
+      const response=await call(r,sales,`/${r.item.sale_id}/status`,cancel,'PATCH')
+      assert.notEqual(response.status,200,`restore ignored failure ${index}`)
+      assert.equal(businessState(r),saved,`restore rollback ${index}`)
+    }
+    delete r.hooks.failAt
+    for(const [index,sql] of restore.entries()) if(/^(INSERT INTO stock_valuation|DELETE FROM stock_valuation|INSERT INTO branch_batch_stock|UPDATE sale_item_batch_allocations)/.test(sql.trim())) {
+      r.hooks.skipAt=index
+      const response=await call(r,sales,`/${r.item.sale_id}/status`,cancel,'PATCH')
+      assert.notEqual(response.status,200,`restore ignored write ${index}: ${sql}`)
+      assert.equal(businessState(r),saved,`restore ignored write rollback ${index}`)
+    }
+    console.log(`PASS cancellation each statement rollback ${restore.length}, ignored upsert/allocation/context cleanup`)
+  } finally {r.db.close()}
+}
+async function custody() {
+  const f=await soldFixture(),cancel={sale_status:'cancelled',cancel_reason:'other',cancel_note:'Native test cancellation',client_request_id:`custody-cancel-${++serial}`}
+  try {
+    const baseline=businessState(f)
+    const v3=f.db.prepare('SELECT * FROM stock_valuation_events ORDER BY revision LIMIT 1').get()
+    assert.throws(()=>f.db.prepare('INSERT INTO stock_valuation_events(id,source_id,revision,kind,loss4,recovery4,actor_id,occurred_at) VALUES(?,?,7,\'hold\',0,0,71,?)').run('old-writer','fund-900',v3.occurred_at),/valuation_global_identity_conflict/)
+    assert.throws(()=>f.db.prepare('INSERT INTO stock_valuation_events_v4(id,source_id,revision,kind,loss4,recovery4,actor_id,occurred_at,consumed_cost4,consumed_recovery4) VALUES(?,?,7,\'hold\',0,0,71,?,0,0)').run(v3.id,'fund-900',v3.occurred_at),/valuation_global_identity_conflict/)
+    assert.throws(()=>f.db.prepare('INSERT INTO stock_valuation_events_v4(id,source_id,revision,kind,loss4,recovery4,actor_id,occurred_at,consumed_cost4,consumed_recovery4) VALUES(?,?,6,\'hold\',0,0,71,?,0,0)').run('collision','fund-900',v3.occurred_at),/valuation_global_identity_conflict/)
+    f.db.exec('SAVEPOINT global_receipt')
+    const receipt=f.db.prepare('SELECT * FROM stock_valuation_receipts LIMIT 1').get()
+    f.db.prepare('INSERT INTO stock_valuation_events_v4(id,source_id,revision,kind,loss4,recovery4,actor_id,occurred_at,consumed_cost4,consumed_recovery4) VALUES(?,?,7,\'hold\',0,0,71,?,0,0)').run('receipt-collision','fund-900',v3.occurred_at)
+    assert.throws(()=>f.db.prepare('INSERT INTO stock_valuation_receipts_v4 VALUES(?,?,?,?,?,?)').run(receipt.request_id,'receipt-collision',71,receipt.request_digest,receipt.request_json,receipt.response_json),/UNIQUE constraint failed: stock_valuation_request_identities.request_id/)
+    f.db.exec('ROLLBACK TO global_receipt; RELEASE global_receipt')
+    assert.equal(businessState(f),baseline)
+    let probes=0
+    f.hooks.beforeStatement=(db,statement)=>{
+      if(!/^INSERT INTO branch_batch_stock/.test(statement.sql.trim())) return
+      assert.equal(db.prepare("SELECT kind FROM stock_valuation_sale_operation_context").get().kind,'restore')
+      for(const [batch,branch,quantity] of [[500,1,0.5],[500,1,2],[500,2,1]]) {
+        assert.throws(()=>db.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(?,?,?) ON CONFLICT(batch_id,branch_id) DO UPDATE SET quantity=quantity+excluded.quantity').run(batch,branch,quantity),/stock_lifecycle_dependency/)
+        probes++
+      }
+      assert.throws(()=>db.exec('UPDATE stock_valuation_sale_operation_context SET sale_allocation_id=999'),/valuation context immutable/)
+      assert.throws(()=>db.exec('UPDATE stock_valuation_sale_operation_context SET source_id=\'other\''),/valuation context immutable/)
+      assert.throws(()=>db.exec('UPDATE stock_valuation_context SET remaining_quantity=999'),/valuation context immutable|stock_lifecycle_dependency/)
+      assert.throws(()=>db.exec('DELETE FROM branch_batch_stock WHERE batch_id=500 AND branch_id=1'),/stock_lifecycle_dependency/)
+      probes+=4
+    }
+    const response=await call(f,sales,`/${f.item.sale_id}/status`,cancel,'PATCH')
+    assert.equal(response.status,200,JSON.stringify(response))
+    assert.equal(probes,7)
+    delete f.hooks.beforeStatement
+    assert.equal(f.db.prepare('SELECT COUNT(*) n FROM stock_valuation_sale_operation_context').get().n,0)
+    assert.throws(()=>f.db.exec('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(500,1,1) ON CONFLICT(batch_id,branch_id) DO UPDATE SET quantity=quantity+1'),/stock_lifecycle_dependency/)
+    const {planSaleStockTransition}=load('lib/saleTransitions.ts'),{orderStockValuationReconsume}=load('lib/stockValuationConsumption.ts')
+    const allocation=f.db.prepare('SELECT * FROM sale_item_batch_allocations WHERE sale_item_id=?').get(f.item.id)
+    const original=planSaleStockTransition({saleId:f.item.sale_id,oldStatus:'cancelled',newStatus:'completed',items:[{...f.item,allocations:[allocation]}],returnedByItem:new Map(),reason:'restore exact',userId:71,userName:'Writer',skipStock:false}).statements
+    const ordered=orderStockValuationReconsume(original,{batchId:500,branchId:1,productId:10,allocationId:allocation.id,quantity:1})
+    assert.equal(ordered.length,original.length)
+    assert.deepEqual(ordered.map(row=>JSON.stringify(row)).sort(),original.map(row=>JSON.stringify(row)).sort())
+    assert.ok(ordered.every(row=>original.includes(row)))
+    assert.ok(ordered.findIndex(row=>/^UPDATE branch_batch_stock/.test(row.sql))<ordered.findIndex(row=>/^INSERT INTO branch_stock/.test(row.sql)))
+    console.log('PASS global v3/v4 id/revision/request identities, exact restore capability negatives and unchanged reconsume statement multiset')
+  } finally {f.db.close()}
+}
+async function replayPermissions() {
+  const originalActor=actor
+  const f=await repairedFixture(),body=saleBody()
+  try {
+    f.hooks.lost=true
+    const response=await call(f,sales,'/',body)
+    assert.equal(response.status,200,JSON.stringify(response))
+    assert.equal(response.data.duplicate,true)
+    const item=f.db.prepare('SELECT * FROM sale_items').get(),saved=businessState(f)
+    assert.equal((await call(f,sales,'/',body)).status,200)
+    assert.equal(businessState(f),saved)
+    const changed=structuredClone(body); changed.items[0].stock_valuation.segment_id='original'
+    const conflict=await call(f,sales,'/',changed)
+    assert.equal(conflict.status,409,JSON.stringify(conflict))
+    assert.equal(conflict.data.code,'valuation_sale_intent_conflict')
+    const basic='{"sales":true,"pos":true}'
+    f.db.prepare('UPDATE users SET permissions=? WHERE id=71').run(basic)
+    actor={...actor,permissions:basic}
+    const hidden=await call(f,sales,'/',body)
+    assert.equal(hidden.status,200,JSON.stringify(hidden))
+    const wire=JSON.stringify(hidden.data)
+    assert.equal(/cost_price|consumed_cost4|consumed_recovery4|gross4|coverage4/.test(wire),false,wire)
+    assert.equal(hidden.data.sale.items[0].applied_price_usd,40)
+    f.db.prepare('UPDATE users SET permissions=? WHERE id=71').run('{}')
+    const forbidden=await call(f,sales,'/',body)
+    assert.equal(forbidden.status,403,JSON.stringify(forbidden))
+    f.db.prepare('UPDATE users SET permissions=? WHERE id=71').run(originalActor.permissions)
+    actor=originalActor
+    const cancel={sale_status:'cancelled',cancel_reason:'other',cancel_note:'Native test cancellation',client_request_id:`lost-cancel-${++serial}`}
+    f.hooks.lost=true
+    assert.equal((await call(f,sales,`/${item.sale_id}/status`,cancel,'PATCH')).status,200)
+    const cancelled=businessState(f)
+    assert.equal((await call(f,sales,`/${item.sale_id}/status`,cancel,'PATCH')).status,200)
+    assert.equal(businessState(f),cancelled)
+    f.db.prepare('UPDATE users SET permissions=? WHERE id=71').run('{"pos":true}')
+    assert.equal((await call(f,sales,`/${item.sale_id}/status`,cancel,'PATCH')).status,403)
+    console.log('PASS checkout/status lost response, exact intent replay, current permission recheck and no-cost cashier disclosure')
+  } finally {actor=originalActor;f.db.close()}
+}
+async function newReceiptAfterCancel() {
+  const f=await soldFixture()
+  try {
+    const consumed=f.db.prepare('SELECT segment_id FROM stock_valuation_sale_links').get()
+    await command(f,valuation('pending',6,2,{agreement_id:'new-receipt-credit',amount_usd:5,targets:[{allocation_id:'affected',amount_usd:5}],proof:'Later accepted credit'}))
+    await command(f,valuation('accept',7,3,{agreement_id:'new-receipt-credit',shares:[{segment_id:consumed.segment_id,amount_usd:5}],proof:'Accepted consumed five'}))
+    assert.equal((await call(f,sales,`/${f.item.sale_id}/status`,{sale_status:'cancelled',cancel_reason:'other',cancel_note:'Native test cancellation',client_request_id:`new-receipt-cancel-${++serial}`},'PATCH')).status,200)
+    const next=saleBody();next.items[0].stock_valuation={source_id:'fund-900',segment_id:consumed.segment_id,expected_revision:9,expected_generation:4}
+    const response=await call(f,sales,'/',next)
+    assert.equal(response.status,200,`new receipt must consume restored lower basis preserving original lineage: ${JSON.stringify(response)}`)
+    const newItem=f.db.prepare('SELECT id,cost_price_usd FROM sale_items WHERE sale_id<>?').get(f.item.sale_id)
+    assert.equal(newItem.cost_price_usd,5)
+    await assertCostProjection(f,f.item.id,0,0)
+    await assertCostProjection(f,newItem.id,50000,0)
   } finally {f.db.close()}
 }
 function consumptionMath() {
@@ -212,4 +390,4 @@ function consumptionMath() {
   assert.notEqual(23334*3,70001,'four-decimal unit snapshots cannot replace exact captured line cost')
   console.log('PASS exact consumed10 credit5/10 restore5/0 reconsume5/0; disposed history unchanged')
 }
-(async()=>{consumptionMath();if(process.env.STOCK_CONSUMPTION_SECTION!=='math'){await otherLot();await repairedSale()}})().catch(error=>{console.error(error);process.exitCode=1})
+(async()=>{consumptionMath();if(process.env.STOCK_CONSUMPTION_SECTION!=='math'){await otherLot();await repairedSale();if(process.env.STOCK_CONSUMPTION_SECTION==='failures')await failures();if(process.env.STOCK_CONSUMPTION_SECTION==='security'){await custody();await replayPermissions()}if(process.env.STOCK_CONSUMPTION_SECTION==='new-receipt')await newReceiptAfterCancel()}})().catch(error=>{console.error(error);process.exitCode=1})
