@@ -1215,7 +1215,7 @@ const REPORT_EXACT_KEYS = [
   'gross','storeDiscount','membershipDiscount','tax','delivery','storeDelivery','deliveryActual',
   'recognizedNet','pendingRevenue','recognizedTax','recognizedDelivery','recognizedStoreDelivery','recognizedDeliveryCost',
   'collected','refund','refundPaid','refundCharged','refundExcess','pendingGross','pendingStoreDiscount',
-  'pendingMembershipDiscount','pendingDelivery','pendingDeliveryCost','cost','pendingCost','returnedCost',
+  'pendingMembershipDiscount','pendingDelivery','pendingDeliveryCost','cost','pendingCost','returnedCost','pendingReturnedCost',
   'itemDiscount','pendingItemDiscount','unvaluedCost',
 ] as const
 type ReportExactKey = typeof REPORT_EXACT_KEYS[number]
@@ -1278,7 +1278,7 @@ type ReportSaleFacts = {
   net: ReportExactDecimal; adjustment: ReportExactDecimal; refund: ReportExactDecimal; refundPaid: ReportExactDecimal
   refundExcess: ReportExactDecimal
   delivery: ReportExactDecimal; deliveryActual: ReportExactDecimal; cost: ReportExactDecimal; returnedCost: ReportExactDecimal
-  itemDiscount: ReportExactDecimal; pendingCost: ReportExactDecimal; unvaluedCost: ReportExactDecimal; missingCostLines: number
+  itemDiscount: ReportExactDecimal; unvaluedCost: ReportExactDecimal; missingCostLines: number
 }
 
 type V1RefundLine = { row: ReportScalarRow; snapshot: CustomerReturnRefundSnapshotV1 }
@@ -1392,7 +1392,7 @@ function reportSaleFacts(snapshot: SalesReportSnapshot): ReportSaleFacts[] {
     const basis = legacyBasis.add(v1Refund.merchandise)
     const refund = net.min(basis)
     const refundExcess = basis.subtract(net).max(ReportExactDecimal.zero())
-    let cost = ReportExactDecimal.zero(), pendingCost = ReportExactDecimal.zero(), unvaluedCost = ReportExactDecimal.zero()
+    let cost = ReportExactDecimal.zero(), unvaluedCost = ReportExactDecimal.zero()
     let itemDiscount = ReportExactDecimal.zero()
     for (const item of items.get(Number(sale.id)) || []) {
       const quantity = ReportExactDecimal.quantity(item.quantity as string | number)
@@ -1405,14 +1405,13 @@ function reportSaleFacts(snapshot: SalesReportSnapshot): ReportSaleFacts[] {
       const lineCost = unit.multiply(quantity)
       if (recognized && valued) cost = cost.add(lineCost)
       if (recognized && !valued) unvaluedCost = unvaluedCost.add(lineCost)
-      if (awaiting) pendingCost = pendingCost.add(lineCost)
     }
     const delivery = String(sale.delivery_fee_paid_by || 'customer') === 'store'
       ? ReportExactDecimal.zero() : reportMoney(sale, 'delivery_fee_usd', version)
     const deliveryActual = Number(sale.delivery_has_linked_fee) !== 0
       ? ReportExactDecimal.zero() : reportMoney(sale, 'delivery_actual_cost_usd', version)
     return { sale, version, recognized, awaiting, valued, net, adjustment, refund, refundPaid, refundExcess, delivery, deliveryActual,
-      cost, returnedCost, itemDiscount, pendingCost, unvaluedCost, missingCostLines }
+      cost, returnedCost, itemDiscount, unvaluedCost, missingCostLines }
   })
 }
 
@@ -1475,10 +1474,12 @@ function aggregateReportSnapshot(
     }
     if (fact.awaiting) {
       bucket.pendingTx += 1
-      reportAdd(bucket, 'pendingRevenue', recognizedNet); reportAdd(bucket, 'pendingGross', subtotal)
+      reportAdd(bucket, 'pendingRevenue', recognizedNet.subtract(fact.refund)); reportAdd(bucket, 'pendingGross', subtotal)
       reportAdd(bucket, 'pendingStoreDiscount', storeDiscount); reportAdd(bucket, 'pendingMembershipDiscount', membershipDiscount)
       reportAdd(bucket, 'pendingDelivery', fact.delivery); reportAdd(bucket, 'pendingDeliveryCost', fact.deliveryActual)
-      reportAdd(bucket, 'pendingCost', fact.pendingCost); reportAdd(bucket, 'pendingItemDiscount', fact.itemDiscount)
+      reportAdd(bucket, 'pendingCost', fact.cost)
+      reportAdd(bucket, 'pendingReturnedCost', fact.valued ? fact.returnedCost : ReportExactDecimal.zero())
+      reportAdd(bucket, 'pendingItemDiscount', fact.itemDiscount)
     }
   }
   for (const sale of snapshot.voidSales) getBucket(bucketForSale(sale)).cancelledTx += 1
@@ -1495,7 +1496,8 @@ function exactReportTotals(bucket: ReportExactBucket, snapshot: SalesReportSnaps
   const returnedCostShortfall = m.returnedCost.subtract(m.cost).max(zero)
   const deliveryNet = m.recognizedDelivery.subtract(m.recognizedDeliveryCost)
   const profit = revenue.subtract(netCost).add(deliveryNet)
-  const pendingProfit = m.pendingRevenue.subtract(m.pendingCost).add(m.pendingDelivery.subtract(m.pendingDeliveryCost))
+  const pendingCost = m.pendingCost.subtract(m.pendingReturnedCost).max(zero)
+  const pendingProfit = m.pendingRevenue.subtract(pendingCost).add(m.pendingDelivery.subtract(m.pendingDeliveryCost))
   const diagnostic: ReportMoneyReadDiagnostic = {
     precision_mode: snapshot.precision_mode,
     complete: bucket.missingCostLines === 0,
@@ -1526,7 +1528,7 @@ function exactReportTotals(bucket: ReportExactBucket, snapshot: SalesReportSnaps
     pending_membership_discount_usd: m.pendingMembershipDiscount.toNumber(),
     pending_delivery_usd: m.pendingDelivery.toNumber(),
     pending_delivery_cost_usd: m.pendingDeliveryCost.toNumber(),
-    pending_cost_usd: m.pendingCost.toNumber(),
+    pending_cost_usd: pendingCost.toNumber(),
     pending_profit_usd: pendingProfit.toNumber(),
     pending_item_discount_usd: m.pendingItemDiscount.toNumber(),
     cancelled_tx_count: bucket.cancelledTx,

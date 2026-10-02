@@ -182,7 +182,7 @@ insRet.run(2, 6, 15, 'completed', 'customer', AT(16), 1)  // S6 refund 15
 insRet.run(3, 6, 5, 'completed', 'customer', AT(16), 1)   // S6 refund 5  (two returns, one sale)
 insRet.run(4, 2, 100, 'completed', 'supplier', AT(16), 1) // supplier scope -> MUST be ignored for revenue
 insRet.run(5, 1, 999, 'cancelled', 'customer', AT(16), 1) // cancelled return -> ignored
-insRet.run(6, 4, 30, 'completed', 'customer', AT(16), 1)  // refund on awaiting sale -> doesn't touch revenue
+insRet.run(6, 4, 30, 'completed', 'customer', AT(16), 1)  // reverses the same net recognition in revenue and its pending subset
 
 // What came back on the shelf. Return 1 is S1's $20 refund; 1 unit at cost 12
 // went back sellable, so 12 of S1's 30 of COGS is no longer cost of goods SOLD.
@@ -206,7 +206,7 @@ const EXPECT = {
   refunds: 17 + 15 + 27,             // includes S4's 30 * 180/200 = 27
   refundsChargedBasis: 20 + 20,      // the old, doubled figure     = 40
   revenue: 410 - 59,                 //                             = 351
-  pending: 180,                      // S4 net (200-20)             = 180
+  pending: 180 - 27,                 // S4 net minus its net refund = 153
   grossCost: 30 + 10 + 8 + 50 + 12,  // all non-cancelled items      = 110
   returnedCost: 12,                  // S1's restocked unit -- back on the shelf
   storeDelivery: 3,                  // S3 store-absorbed: reported, NOT a cost

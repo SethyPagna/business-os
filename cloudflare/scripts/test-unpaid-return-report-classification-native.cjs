@@ -47,13 +47,13 @@ async function createSale(f, key, paid = false, delivery = false) {
   return result.body.sale
 }
 
-async function createReturn(f, sale, key, quantity = 1) {
+async function createReturn(f, sale, key, quantity = 1, stockAction = 'restock') {
   const quoted = await send(returns, f, 'POST', '/quote', { sale_id: sale.id,
     items: [{ sale_item_id: sale.items[0].id, quantity }] })
   const { customer_return_create_version: _create, customer_return_edit_version: _edit, ...expected_quote } = quoted
   return send(returns, f, 'POST', '/', { client_request_id: key, money_precision_version: 1,
     sale_id: sale.id, reason: 'Unpaid return reporting regression', expected_quote,
-    items: [{ sale_item_id: sale.items[0].id, quantity, stock_action: 'restock', branch_id: 1 }] })
+    items: [{ sale_item_id: sale.items[0].id, quantity, stock_action: stockAction, branch_id: 1 }] })
 }
 
 async function status(f, id, target, key) {
@@ -78,20 +78,31 @@ async function assertUnpaidConsumers(f, rawStatus, label) {
   const row = analytics.businessSummarySalesRowsFromSnapshot(snapshot)[0]
   assert.equal(row.collected_total_usd, 0, `${label}: export row collected`)
   assert.equal(row.status, rawStatus, `${label}: raw export status is retained`)
+  const remaining = rawStatus === 'returned' ? 0 : rawStatus === 'partial_return' ? 1 : 2
+  assert.equal(totals.pending_revenue_usd, remaining * 9.5, `${label}: pending revenue reverses the same merchandise recognition as revenue`)
+  assert.equal(row.pending_revenue_usd, totals.pending_revenue_usd, `${label}: aggregate pending and export row agree`)
+  assert.equal(totals.pending_cost_usd, remaining * 4, `${label}: pending COGS reverses only restocked cost`)
+  assert.equal(totals.pending_profit_usd, remaining * 5.5, `${label}: pending profit is the same recognized unpaid subset`)
   const payment = analytics.paymentMethodBreakdownFromSnapshot(snapshot)[0]
   assert.equal(payment.collected_usd, 0, `${label}: payment collected`)
   const day = await analytics.getSalesDayReport(env, date)
   assert.equal(day.totals.collected_total_usd, 0, `${label}: day collected`)
+  assert.equal(day.totals.pending_revenue_usd, totals.pending_revenue_usd, `${label}: day pending amount`)
   assert.equal(day.sales[0].collected_usd, 0, `${label}: day row collected`)
   const cashier = (await analytics.getSalesGroupedTotals(env, filters, 'cashier'))[0]
   assert.equal(cashier.paid_tx_count, 0, `${label}: live SQL cashier paid counter`)
+  assert.equal(cashier.pending_revenue_usd, totals.pending_revenue_usd, `${label}: cashier pending amount`)
+  assert.equal(cashier.pending_cost_usd, totals.pending_cost_usd, `${label}: cashier pending COGS`)
+  assert.equal(cashier.pending_profit_usd, totals.pending_profit_usd, `${label}: cashier pending profit`)
   const customer = await analytics.getCustomerSalesTotals(env, { ...filters, customerId: 7 })
   assert.equal(customer.collected_usd, 0, `${label}: direct SQL customer eligibility`)
   const exported = await send(reports, f, 'GET', `/business-summary/sales?intent=export&startDate=${date}&endDate=${date}`)
   assert.equal(exported.totals.collected_total_usd, 0, `${label}: actual export route total`)
+  assert.equal(exported.totals.pending_revenue_usd, row.pending_revenue_usd, `${label}: actual export pending amount`)
   assert.equal(exported.rows[0].collected_total_usd, 0, `${label}: actual export route row`)
   const strip = await send(h.app, f, 'GET', `/stats-strip?startDate=${date}&endDate=${date}`)
   assert.equal(strip.totals.collected_total_usd, 0, `${label}: actual stats route`)
+  assert.equal(strip.totals.pending_revenue_usd, totals.pending_revenue_usd, `${label}: actual stats pending amount`)
   const overview = await telegram.shiftOverviewFigures(env, { business_date: date, branch_id: 1 })
   assert.equal(overview.creditUsd, totals.pending_revenue_usd, `${label}: actual Telegram overview input`)
   assert.equal(overview.revenueUsd, totals.revenue_usd, `${label}: Telegram recognized basis unchanged`)
@@ -115,6 +126,7 @@ function sqlEligibility(f, id, retained = 'sales.status_before_return') {
     f.raw.prepare('UPDATE sales SET customer_id=7 WHERE id=?').run([sale.id])
     const rawCustomerBeforeReturn = await analytics.getCustomerSalesTotals({ DB: f.route }, { ...filters, customerId: 7 })
     const firstReturn = await createReturn(f, sale, 'unpaid-report-partial')
+    f.raw.prepare("UPDATE returns SET created_at='2026-10-01 01:00:00' WHERE id=?").run([firstReturn.id])
     const saved = f.raw.prepare('SELECT sale_status,status_before_return FROM sales WHERE id=?').get([sale.id])
     assert.equal(saved.sale_status, 'partial_return')
     assert.equal(saved.status_before_return, 'awaiting_payment')
@@ -202,6 +214,9 @@ function sqlEligibility(f, id, retained = 'sales.status_before_return') {
       assert.equal(courier.receivable_fee_usd, paid ? 0 : 2, 'retained unpaid delivery stays receivable')
       assert.equal(courier.paid_fee_usd, paid ? 2 : 0, 'delivery collection uses the same reporting authority')
       assert.equal(totals.pending_tx_count, paid ? 0 : 1)
+      assert.equal(totals.pending_revenue_usd, paid ? 0 : 9.5, 'delivery charge stays outside net pending merchandise')
+      assert.equal(totals.pending_cost_usd, paid ? 0 : 4)
+      assert.equal(totals.pending_profit_usd, paid ? 0 : 7.5, 'unpaid profit includes established delivery margin once')
       if (paid) assert.ok(totals.collected_total_usd > 0, 'actual paid return remains eligible for recorded collection')
       else assert.equal(totals.collected_total_usd, 0)
       const customer = await analytics.getCustomerSalesTotals({ DB: delivery.route }, { ...filters, customerId: 7 })
@@ -213,9 +228,57 @@ function sqlEligibility(f, id, retained = 'sales.status_before_return') {
       h.setUser({ ...h.USER, permissions: '{}' })
       assert.equal((await reports.request(`/business-summary/sales?intent=export&startDate=${date}&endDate=${date}`, {}, { DB: delivery.route }, h.executionCtx)).status, 403)
       h.setUser(owner)
+      await createReturn(delivery, sale, `delivery-return-full-${paid}`)
+      const full = await analytics.getSalesTotals({ DB: delivery.route }, filters)
+      assert.equal(full.pending_revenue_usd, 0)
+      assert.equal(full.pending_cost_usd, 0)
+      assert.equal(full.pending_profit_usd, paid ? 0 : 2, 'a full merchandise return retains the established delivery margin')
     } finally { delivery.raw.db.close() }
   }
   console.log('PASS actual paid/unpaid delivery return controls and employee export permission/redaction')
+  const disposition = h.fixture()
+  try {
+    const sale = await createSale(disposition, 'unpaid-none')
+    await createReturn(disposition, sale, 'unpaid-none-return', 1, 'none')
+    const totals = await analytics.getSalesTotals({ DB: disposition.route }, filters)
+    assert.equal(totals.pending_revenue_usd, 9.5)
+    assert.equal(totals.pending_cost_usd, 8, 'a non-restock return does not put cost back on the sellable shelf')
+    assert.equal(totals.pending_profit_usd, 1.5)
+    await createReturn(disposition, sale, 'unpaid-none-full', 1, 'none')
+    const full = await analytics.getSalesTotals({ DB: disposition.route }, filters)
+    assert.equal(full.pending_revenue_usd, 0)
+    assert.equal(full.pending_cost_usd, 8)
+    assert.equal(full.pending_profit_usd, -8, 'a real recognized loss is not clamped at the pending display')
+    console.log('PASS actual non-restock partial/full returns preserve COGS and unfloored pending loss')
+  } finally { disposition.raw.db.close() }
+  const floor = h.fixture()
+  try {
+    for (const [id, current, subtotal, cost] of [[1, 'awaiting_payment', 19, null], [2, 'awaiting_payment', 19, 10],
+      [3, 'completed', 19, 20], [4, 'awaiting_payment', 0, 9], [5, 'cancelled', 19, 100]]) {
+      floor.raw.prepare(`INSERT INTO sales(id,receipt_number,sale_status,subtotal_usd,total_usd,money_precision_version,
+        created_at,branch_id) VALUES(?,?,?, ?,?,0,'2026-09-13 01:00:00',1)`).run([id, `FLOOR-${id}`, current, subtotal, subtotal])
+      floor.raw.prepare('INSERT INTO sale_items(id,sale_id,quantity,total_usd,cost_price_usd) VALUES(?,?,1,?,?)').run([id, id, subtotal, cost])
+    }
+    for (const [id, saleId, scope, current, cost] of [[1, 1, 'customer', 'completed', 6], [2, 3, 'customer', 'completed', 30],
+      [3, 2, 'supplier', 'completed', 100], [4, 2, 'customer', 'cancelled', 100], [5, 5, 'customer', 'completed', 100]]) {
+      floor.raw.prepare(`INSERT INTO returns(id,sale_id,return_scope,status,total_refund_usd,money_precision_version,created_at)
+        VALUES(?,?,?,?,0,0,'2026-10-01 01:00:00')`).run([id, saleId, scope, current])
+      floor.raw.prepare(`INSERT INTO return_items(id,return_id,sale_item_id,quantity,cost_price_usd,stock_action)
+        VALUES(?,?,?,1,?,'restock')`).run([id, id, saleId, cost])
+    }
+    const snapshot = await analytics.readSalesReportSnapshot({ DB: floor.route }, filters)
+    const totals = analytics.salesTotalsFromSnapshot(snapshot)
+    assert.equal(totals.pending_revenue_usd, 38)
+    assert.equal(totals.pending_cost_usd, 4, 'one pending-cohort floor: valued cost10 minus pending restock6, excluding paid/supplier/cancelled/unvalued effects')
+    assert.equal(totals.pending_profit_usd, 34)
+    assert.equal(totals.unvalued_cost_usd, 9)
+    assert.equal(totals.returned_cost_shortfall_usd, 6, 'recognized cohort floor retains its independent existing diagnostic')
+    const rows = analytics.businessSummarySalesRowsFromSnapshot(snapshot)
+    assert.equal(rows.reduce((sum, row) => sum + row.pending_revenue_usd, 0), totals.pending_revenue_usd)
+    assert.equal(rows.filter(row => [1, 2, 4].includes(row.id)).reduce((sum, row) => sum + row.cost_usd, 0), 10,
+      'receipt cost floors remain distinct from the established aggregate cohort floor')
+    console.log('PASS mixed paid/unpaid/unvalued cost cohorts, supplier/cancelled scope and one exact pending bucket floor')
+  } finally { floor.raw.db.close() }
   const legacy = h.fixture()
   try {
     h.load('lib/schemaProbe.ts').__resetSchemaProbeCacheForTests()
