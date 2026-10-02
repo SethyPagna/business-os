@@ -165,7 +165,8 @@ insRetItem.run(4, 4, 1, 40, 1, 'restock')
 //   revenue = (85+50+35+180+60) - (17+15+27) = 410 - 59 = 351
 //   COGS    = (30+10+8+50+12) - 12 restocked = 98
 //   profit  = 351 - 98 + (6-4)               = 255
-const IN = { revenue: 351, cogs: 98, profit: 255, credit: 180 }
+//   credit  = 180 - 27 net refund            = 153 (net recognized subset)
+const IN = { revenue: 351, cogs: 98, profit: 255, credit: 153 }
 // CREDIT OUT (the pre-Sep-6 rule, what must NOT ship): drop S4 from every sum.
 //   revenue = (85+50+35+60) - (17+15) = 230 - 32 = 198
 //   COGS    = (30+10+8+12) - 12       = 48
@@ -200,9 +201,9 @@ check(`kernel reports the credit additionally as pending_revenue_usd (${IN.credi
 check('the credit is POSITIVE -- the owner\'s "$n, not $-n", at the source',
   kernel.pending_revenue_usd > 0)
 check('the credit is a SUBSET of revenue, not a complement (revenue > credit, and revenue is not revenue+credit)',
-  kernel.revenue_usd > kernel.pending_revenue_usd && kernel.revenue_usd !== OUT.revenue + IN.credit)
-check('subtracting the credit from revenue would produce a figure no surface may show',
-  kernel.revenue_usd - kernel.pending_revenue_usd === 171 && kernel.revenue_usd - kernel.pending_revenue_usd !== OUT.revenue)
+  kernel.revenue_usd > kernel.pending_revenue_usd && kernel.revenue_usd !== IN.revenue + IN.credit)
+check('the net credit partitions recognized revenue without replacing its inclusive headline',
+  kernel.revenue_usd - kernel.pending_revenue_usd === OUT.revenue)
 check('collected cash is the ONE figure the credit stays out of',
   kernel.collected_total_usd === 208 && kernel.collected_total_usd < kernel.revenue_usd + 12 + 6)
 

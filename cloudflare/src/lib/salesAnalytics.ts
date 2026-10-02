@@ -485,8 +485,11 @@ export function saleStatusExpr(p: string): string { return `COALESCE(NULLIF(${p}
 // Business results count every sale that has left stock, including receivables.
 // Cash collection is a separate concern (see collectedSaleExpr).
 export function recognizedExpr(p: string): string { return `${saleStatusExpr(p)} <> 'cancelled'` }
-export function awaitingExpr(p: string): string { return `${saleStatusExpr(p)} = 'awaiting_payment'` }
-export function collectedSaleExpr(p: string): string { return `${saleStatusExpr(p)} NOT IN ('cancelled', 'awaiting_payment')` }
+export function reportingSaleStatusExpr(p: string, retainedStatusExpr = 'NULL'): string {
+  return `CASE WHEN ${saleStatusExpr(p)} IN ('partial_return', 'returned') AND ${retainedStatusExpr} = 'awaiting_payment' THEN 'awaiting_payment' ELSE ${saleStatusExpr(p)} END`
+}
+export function awaitingExpr(p: string, retainedStatusExpr = 'NULL'): string { return `(${reportingSaleStatusExpr(p, retainedStatusExpr)}) = 'awaiting_payment'` }
+export function collectedSaleExpr(p: string, retainedStatusExpr = 'NULL'): string { return `(${reportingSaleStatusExpr(p, retainedStatusExpr)}) NOT IN ('cancelled', 'awaiting_payment')` }
 // Net sale value (subtotal minus both discounts) -- tax and delivery excluded.
 //
 // Floored at zero PER SALE (owner rule N6). Nothing in the schema stops
@@ -1110,7 +1113,7 @@ async function readSalesReportPass(
   const primary = applySalesReportScalarScope(whereActiveSales('s', f), scalarScope)
   const voids = applySalesReportScalarScope(whereActiveSales('s', { ...f, status: 'cancelled' }), scalarScope)
   const rowBudget = { count: 0 }
-  const sales = await reportKeysetRows(db, `SELECT s.id,s.created_at,s.sale_status,s.branch_id,s.branch_name,
+  const sales = await reportKeysetRows(db, `SELECT s.id,s.created_at,s.sale_status,${saleColumn('status_before_return','NULL')},s.branch_id,s.branch_name,
       s.cashier_id,s.cashier_name,s.customer_id,s.customer_name,s.customer_phone,s.receipt_number,s.payment_method,
       ${customerAnonymous} AS customer_is_anonymous,
       s.subtotal_usd,s.discount_usd,s.membership_discount_usd,s.tax_usd,s.total_usd,
@@ -1212,7 +1215,7 @@ const REPORT_EXACT_KEYS = [
   'gross','storeDiscount','membershipDiscount','tax','delivery','storeDelivery','deliveryActual',
   'recognizedNet','pendingRevenue','recognizedTax','recognizedDelivery','recognizedStoreDelivery','recognizedDeliveryCost',
   'collected','refund','refundPaid','refundCharged','refundExcess','pendingGross','pendingStoreDiscount',
-  'pendingMembershipDiscount','pendingDelivery','pendingDeliveryCost','cost','pendingCost','returnedCost',
+  'pendingMembershipDiscount','pendingDelivery','pendingDeliveryCost','cost','pendingCost','returnedCost','pendingReturnedCost',
   'itemDiscount','pendingItemDiscount','unvaluedCost',
 ] as const
 type ReportExactKey = typeof REPORT_EXACT_KEYS[number]
@@ -1245,6 +1248,10 @@ function reportMoney(row: ReportScalarRow, key: string, version: 0 | 1, nullable
   return ReportExactDecimal.money(value, version)
 }
 function reportStatus(row: ReportScalarRow): string { return String(row.sale_status || 'completed') }
+function reportAwaiting(row: ReportScalarRow): boolean {
+  const status = reportStatus(row)
+  return status === 'awaiting_payment' || (['partial_return', 'returned'].includes(status) && row.status_before_return === 'awaiting_payment')
+}
 function reportHeaderAdjustment(row: ReportScalarRow, version: 0 | 1): ReportExactDecimal {
   const owns = (key: string) => Object.prototype.hasOwnProperty.call(row, key)
   if (!owns('money_precision_version') && !owns('calculated_total_usd') && !owns('rounding_adjustment_usd')) {
@@ -1271,7 +1278,7 @@ type ReportSaleFacts = {
   net: ReportExactDecimal; adjustment: ReportExactDecimal; refund: ReportExactDecimal; refundPaid: ReportExactDecimal
   refundExcess: ReportExactDecimal
   delivery: ReportExactDecimal; deliveryActual: ReportExactDecimal; cost: ReportExactDecimal; returnedCost: ReportExactDecimal
-  itemDiscount: ReportExactDecimal; pendingCost: ReportExactDecimal; unvaluedCost: ReportExactDecimal; missingCostLines: number
+  itemDiscount: ReportExactDecimal; unvaluedCost: ReportExactDecimal; missingCostLines: number
 }
 
 type V1RefundLine = { row: ReportScalarRow; snapshot: CustomerReturnRefundSnapshotV1 }
@@ -1350,7 +1357,7 @@ function reportSaleFacts(snapshot: SalesReportSnapshot): ReportSaleFacts[] {
     const net = rawNet.max(ReportExactDecimal.zero())
     const valued = subtotal.isPositive() && !rawNet.isNegative()
     const recognized = reportStatus(sale) !== 'cancelled'
-    const awaiting = reportStatus(sale) === 'awaiting_payment'
+    const awaiting = reportAwaiting(sale)
     const adjustment = reportHeaderAdjustment(sale, version)
     let refundPaid = ReportExactDecimal.zero()
     let legacyRefundPaid = ReportExactDecimal.zero()
@@ -1385,7 +1392,7 @@ function reportSaleFacts(snapshot: SalesReportSnapshot): ReportSaleFacts[] {
     const basis = legacyBasis.add(v1Refund.merchandise)
     const refund = net.min(basis)
     const refundExcess = basis.subtract(net).max(ReportExactDecimal.zero())
-    let cost = ReportExactDecimal.zero(), pendingCost = ReportExactDecimal.zero(), unvaluedCost = ReportExactDecimal.zero()
+    let cost = ReportExactDecimal.zero(), unvaluedCost = ReportExactDecimal.zero()
     let itemDiscount = ReportExactDecimal.zero()
     for (const item of items.get(Number(sale.id)) || []) {
       const quantity = ReportExactDecimal.quantity(item.quantity as string | number)
@@ -1398,14 +1405,13 @@ function reportSaleFacts(snapshot: SalesReportSnapshot): ReportSaleFacts[] {
       const lineCost = unit.multiply(quantity)
       if (recognized && valued) cost = cost.add(lineCost)
       if (recognized && !valued) unvaluedCost = unvaluedCost.add(lineCost)
-      if (awaiting) pendingCost = pendingCost.add(lineCost)
     }
     const delivery = String(sale.delivery_fee_paid_by || 'customer') === 'store'
       ? ReportExactDecimal.zero() : reportMoney(sale, 'delivery_fee_usd', version)
     const deliveryActual = Number(sale.delivery_has_linked_fee) !== 0
       ? ReportExactDecimal.zero() : reportMoney(sale, 'delivery_actual_cost_usd', version)
     return { sale, version, recognized, awaiting, valued, net, adjustment, refund, refundPaid, refundExcess, delivery, deliveryActual,
-      cost, returnedCost, itemDiscount, pendingCost, unvaluedCost, missingCostLines }
+      cost, returnedCost, itemDiscount, unvaluedCost, missingCostLines }
   })
 }
 
@@ -1459,7 +1465,7 @@ function aggregateReportSnapshot(
     reportAdd(bucket, 'returnedCost', fact.valued ? fact.returnedCost : ReportExactDecimal.zero())
     reportAdd(bucket, 'itemDiscount', fact.itemDiscount); reportAdd(bucket, 'unvaluedCost', fact.unvaluedCost)
     if (!fact.valued) bucket.unvaluedTx += 1
-    const collected = reportStatus(sale) !== 'awaiting_payment'
+    const collected = !fact.awaiting
     if (collected) {
       const payable = Number(sale.source_return_id || 0) !== 0
         ? reportMoney(sale, 'amount_paid_usd', version) : reportMoney(sale, 'total_usd', version)
@@ -1468,10 +1474,12 @@ function aggregateReportSnapshot(
     }
     if (fact.awaiting) {
       bucket.pendingTx += 1
-      reportAdd(bucket, 'pendingRevenue', recognizedNet); reportAdd(bucket, 'pendingGross', subtotal)
+      reportAdd(bucket, 'pendingRevenue', recognizedNet.subtract(fact.refund)); reportAdd(bucket, 'pendingGross', subtotal)
       reportAdd(bucket, 'pendingStoreDiscount', storeDiscount); reportAdd(bucket, 'pendingMembershipDiscount', membershipDiscount)
       reportAdd(bucket, 'pendingDelivery', fact.delivery); reportAdd(bucket, 'pendingDeliveryCost', fact.deliveryActual)
-      reportAdd(bucket, 'pendingCost', fact.pendingCost); reportAdd(bucket, 'pendingItemDiscount', fact.itemDiscount)
+      reportAdd(bucket, 'pendingCost', fact.cost)
+      reportAdd(bucket, 'pendingReturnedCost', fact.valued ? fact.returnedCost : ReportExactDecimal.zero())
+      reportAdd(bucket, 'pendingItemDiscount', fact.itemDiscount)
     }
   }
   for (const sale of snapshot.voidSales) getBucket(bucketForSale(sale)).cancelledTx += 1
@@ -1488,7 +1496,8 @@ function exactReportTotals(bucket: ReportExactBucket, snapshot: SalesReportSnaps
   const returnedCostShortfall = m.returnedCost.subtract(m.cost).max(zero)
   const deliveryNet = m.recognizedDelivery.subtract(m.recognizedDeliveryCost)
   const profit = revenue.subtract(netCost).add(deliveryNet)
-  const pendingProfit = m.pendingRevenue.subtract(m.pendingCost).add(m.pendingDelivery.subtract(m.pendingDeliveryCost))
+  const pendingCost = m.pendingCost.subtract(m.pendingReturnedCost).max(zero)
+  const pendingProfit = m.pendingRevenue.subtract(pendingCost).add(m.pendingDelivery.subtract(m.pendingDeliveryCost))
   const diagnostic: ReportMoneyReadDiagnostic = {
     precision_mode: snapshot.precision_mode,
     complete: bucket.missingCostLines === 0,
@@ -1519,7 +1528,7 @@ function exactReportTotals(bucket: ReportExactBucket, snapshot: SalesReportSnaps
     pending_membership_discount_usd: m.pendingMembershipDiscount.toNumber(),
     pending_delivery_usd: m.pendingDelivery.toNumber(),
     pending_delivery_cost_usd: m.pendingDeliveryCost.toNumber(),
-    pending_cost_usd: m.pendingCost.toNumber(),
+    pending_cost_usd: pendingCost.toNumber(),
     pending_profit_usd: pendingProfit.toNumber(),
     pending_item_discount_usd: m.pendingItemDiscount.toNumber(),
     cancelled_tx_count: bucket.cancelledTx,
@@ -1561,7 +1570,7 @@ export function businessSummarySalesRowsFromSnapshot(snapshot: SalesReportSnapsh
     const deliveryActual = fact.recognized ? fact.deliveryActual : ReportExactDecimal.zero()
     const payable = Number(sale.source_return_id || 0) !== 0
       ? reportMoney(sale, 'amount_paid_usd', version) : reportMoney(sale, 'total_usd', version)
-    const collected = reportStatus(sale) === 'awaiting_payment' || !fact.recognized
+    const collected = fact.awaiting || !fact.recognized
       ? ReportExactDecimal.zero() : payable.subtract(fact.refundPaid)
     const raw = String(sale.created_at || '')
     const parsed = new Date(/(?:[zZ]|[+-]\d{2}:?\d{2})$/.test(raw) ? raw : `${raw.replace(' ', 'T')}Z`)
@@ -2119,7 +2128,7 @@ function deliveryContactTotalsFromSnapshot(
     group.deliveries += 1
     group.charged = group.charged.add(customerFee)
     if (String(sale.delivery_fee_paid_by || 'customer') === 'store') group.absorbed = group.absorbed.add(fee)
-    if (reportStatus(sale) === 'awaiting_payment') group.receivable = group.receivable.add(customerFee)
+    if (reportAwaiting(sale)) group.receivable = group.receivable.add(customerFee)
     else if (reportStatus(sale) !== 'cancelled') {
       group.paid = group.paid.add(customerFee)
       const method = String(sale.payment_method || '').trim() || 'Unknown'
@@ -2380,11 +2389,12 @@ export async function getCustomerSalesTotals(
   f: SalesFilters & { customerId: number | string },
 ): Promise<CustomerSalesTotalsRow> {
   const db = getDb(env)
+  const retainedStatusExpr = (await reportTableColumns(db, 'sales')).has('status_before_return') ? 'sales.status_before_return' : 'NULL'
   const { sql: whereSql, params } = whereActiveSales('sales', f)
   params.customerId = f.customerId
   const row = await db.prepare(`
     SELECT COUNT(*) AS tx_count,
-           COALESCE(SUM(${collectedExpr('')}), 0) AS collected_usd,
+           COALESCE(SUM(CASE WHEN ${collectedSaleExpr('sales.', retainedStatusExpr)} THEN ${collectedExpr('')} ELSE 0 END), 0) AS collected_usd,
            COALESCE(SUM(discount_usd), 0) AS discount_usd,
            COALESCE(SUM(membership_discount_usd), 0) AS membership_discount_usd,
            COALESCE(SUM(membership_points_redeemed), 0) AS points_redeemed,
@@ -2642,6 +2652,7 @@ interface CohortCounts { new_customer_count: number; return_customer_count: numb
 
 async function cohortCountsByGroup(env: Env, f: SalesFilters, keyExpr: string): Promise<Map<string, CohortCounts>> {
   const db = getDb(env)
+  const retainedStatusExpr = (await reportTableColumns(db, 'sales')).has('status_before_return') ? 'sales.status_before_return' : 'NULL'
   const { sql: whereSql, params } = whereActiveSales('sales', f)
   const rows = await db.prepare(`
     ${FIRST_SALE_CTE}
@@ -2649,7 +2660,7 @@ async function cohortCountsByGroup(env: Env, f: SalesFilters, keyExpr: string): 
            COUNT(DISTINCT CASE WHEN sales.customer_id IS NOT NULL AND datetime(sales.created_at) = fs.first_at THEN sales.customer_id END) AS new_customer_count,
            COUNT(DISTINCT CASE WHEN sales.customer_id IS NOT NULL AND datetime(sales.created_at) > fs.first_at THEN sales.customer_id END) AS return_customer_count,
            COALESCE(SUM(CASE WHEN ${identifiedCustomerExpr('sales.')} IS NULL THEN 1 ELSE 0 END), 0) AS unregistered_count,
-           COALESCE(SUM(CASE WHEN ${collectedSaleExpr('sales.')} THEN 1 ELSE 0 END), 0) AS paid_tx_count
+           COALESCE(SUM(CASE WHEN ${collectedSaleExpr('sales.', retainedStatusExpr)} THEN 1 ELSE 0 END), 0) AS paid_tx_count
     FROM sales
     LEFT JOIN first_sale fs ON fs.customer_id = sales.customer_id
     WHERE ${whereSql}

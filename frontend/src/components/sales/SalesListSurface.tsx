@@ -105,10 +105,10 @@ interface SalesListSurfaceProps {
    * claim the credit cohort was left out, which described neither
    * `isRevenueCountedSale` nor GET /api/sales/stats. */
   revenueCount: number
-  /** How much of `revenue` is still owed: the credit annotation (owner,
+  /** The net recognized credit subset of `revenue` (owner,
    * Sep 6 2026). Printed POSITIVE beside the revenue, never with a minus and
    * never as a deduction — these rows are already inside `revenue`. */
-  creditUsd: number
+  creditUsd: number | null
   /** Predicate: does this sale count toward the money shown? Used to make the
    * day-group header counts money-counting too, so they sum to the footer. */
   isCountedSale: (sale: SaleRecord) => boolean
@@ -387,7 +387,7 @@ export default function SalesListSurface({
           {revenueCount} {t('sales')} | {fmtUSD(revenue)}
           {/* The credit rides BESIDE the revenue, positive and unsigned: it is
               part of the figure to its left, not something to take off it. */}
-          {creditUsd > 0 ? <> · {t('rpt_pending_credit') || 'Not Paid'} {fmtUSD(creditUsd)}</> : null}
+          {creditUsd === null || creditUsd > 0 ? <> · {t('rpt_pending_credit') || 'Not Paid'} {creditUsd === null ? '—' : fmtUSD(creditUsd)}</> : null}
         </div>
       </div>
 
