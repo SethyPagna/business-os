@@ -48,7 +48,7 @@ function compile(file, stubs = {}) {
 }
 
 const salesStatus = compile('salesStatus.ts')
-const productBatches = compile('productBatches.ts', {
+const productBatches = compile('productBatches.ts', { './receivingBranch': compile('receivingBranch.ts'),
   './db': {},
   './batchCode': compile('batchCode.ts'),
   './sqlBinding': compile('sqlBinding.ts'),
