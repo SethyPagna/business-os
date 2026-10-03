@@ -1,5 +1,5 @@
 import Modal from './Modal'
-import { useApp } from '../../AppContext.tsx'
+import { useApp, type AppContextCoreValue } from '../../app/AppContextCore.tsx'
 import { ConflictIcon, CONFLICT_ICON_CLASS } from './ConflictIcon.ts'
 import { fmtDateTime24 } from '../../utils/formatters.ts'
 
@@ -7,11 +7,13 @@ type ConflictEntity = 'settings' | 'sale' | 'return' | 'user' | 'role' | string
 type ConflictRecord = Record<string, unknown>
 
 interface ConflictSummaryRow {
+  key: string
   label: string
   value: string
 }
 
 interface ConflictFieldRow {
+  key: string
   label: string
   attempted: string
   current: string
@@ -56,7 +58,7 @@ function asConflictRecord(value: unknown): ConflictRecord {
 }
 
 function fieldLabel(key: string, tr: Translate): string {
-  const label = tr(Object.hasOwn(FIELD_KEYS, key) ? FIELD_KEYS[key] : key, key)
+  const label = Object.hasOwn(FIELD_KEYS, key) ? tr(FIELD_KEYS[key], key) : key
   return key === 'total_refund_usd' ? label + ' (USD)' : label
 }
 
@@ -90,6 +92,7 @@ function summarizeCurrentValue(entity: string, current: unknown, tr: Translate):
     .slice(0, entity === 'settings' ? 6 : 4)
   return keys.filter(key => !summaryFields || (record[key] != null && record[key] !== ''))
     .map(key => ({
+      key,
       label: key === 'name' && ['role', 'product', 'branch'].includes(entity) ? tr(entity, entity)
         : fieldLabel(entity === 'branch' && key === 'notes' ? 'description' : key, tr),
       value: key.endsWith('_at') ? formatConflictTime(record[key], tr) : formatValue(record[key], tr, key),
@@ -112,6 +115,7 @@ function getConflictFieldRows(conflict: WriteConflict, tr: Translate): ConflictF
   const attempted = asConflictRecord(conflict.attempted)
   const current = asConflictRecord(conflict.current)
   const row = (key: string, labelKey = key, attemptedValue = attempted[key], currentValue = current[key]): ConflictFieldRow => ({
+    key,
     label: fieldLabel(labelKey, tr), attempted: formatValue(attemptedValue, tr, key), current: formatValue(currentValue, tr, key),
   })
   if (entity === 'settings') return Object.keys(attempted).map(key => row(key))
@@ -144,7 +148,7 @@ function getConflictFieldRows(conflict: WriteConflict, tr: Translate): ConflictF
 }
 
 export default function WriteConflictModal({ conflict, onClose, onReload }: WriteConflictModalProps) {
-  const { t } = useApp()
+  const { t } = useApp() as Pick<AppContextCoreValue, 't'>
   const tr: Translate = (key, fallback) => { const value = t(key); return typeof value === 'string' && value !== key ? value : fallback }
   if (!conflict) return null
 
@@ -191,7 +195,7 @@ export default function WriteConflictModal({ conflict, onClose, onReload }: Writ
             </div>
             <div className="divide-y divide-gray-100 dark:divide-gray-800">
               {fieldRows.map((row) => (
-                <div key={row.label} className="grid gap-3 px-4 py-3 sm:grid-cols-[140px_1fr_1fr]">
+                <div key={row.key} className="grid gap-3 px-4 py-3 sm:grid-cols-[140px_1fr_1fr]">
                   <div className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                     {row.label}
                   </div>
@@ -216,7 +220,7 @@ export default function WriteConflictModal({ conflict, onClose, onReload }: Writ
             </div>
             <div className="divide-y divide-gray-100 dark:divide-gray-800">
               {currentSummary.map((row) => (
-                <div key={row.label} className="flex items-start justify-between gap-4 px-4 py-3">
+                <div key={row.key} className="flex items-start justify-between gap-4 px-4 py-3">
                   <span className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                     {row.label}
                   </span>

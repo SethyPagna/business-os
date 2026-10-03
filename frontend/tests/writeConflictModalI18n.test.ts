@@ -19,7 +19,7 @@ function render(language: string, conflict: any) {
     './Modal': { default: ({ title, children }: any) => React.createElement('section', { role: 'dialog' }, title, children) },
     './ConflictIcon.ts': { ConflictIcon: () => null, CONFLICT_ICON_CLASS: '' },
     '../../utils/formatters.ts': { fmtDateTime24 },
-    '../../AppContext.tsx': { useApp: () => ({ t: (key: string) => messages[key] ?? key }) },
+    '../../app/AppContextCore.tsx': { useApp: () => ({ t: (key: string) => messages[key] ?? key }) },
   }
   new Function('require', 'module', 'exports', compiled)((id: string) => {
     if (id in dependencies) return dependencies[id]
@@ -93,6 +93,9 @@ for (const language of ['en', 'km']) {
     assert(html.includes('Future Label')); assert(html.includes('future_field')); assert(html.includes('unparsed timestamp'))
     const unusual = render(language, { entity: 'constructor', entityLabel: 'Custom Identity', current: { constructor: 'Stored raw' } })
     assert(unusual.html.includes('Custom Identity')); assert(unusual.html.includes('constructor')); assert(unusual.html.includes('Stored raw'))
+    const collision = render(language, { entity: 'future_kind', current: { cancel: 'Unchanged custom data' } })
+    assert(collision.html.includes('>cancel<'), 'Unknown field identifiers must not become unrelated translated UI actions')
+    assert(collision.html.includes('Unchanged custom data'))
     const flags = render(language, { entity: 'user', attempted: { is_active: 0 }, current: { is_active: 1 } })
     assert(flags.html.includes(flags.messages.no)); assert(flags.html.includes(flags.messages.yes))
   })
@@ -105,6 +108,21 @@ for (const language of ['en', 'km']) {
     buttons[0].props.onClick(); buttons[1].props.onClick(); tree.props.onClose()
     assert.deepEqual(calls, ['close', 'reload', 'close'])
     assert.equal(render(language, null).html, '')
+  })
+  check(`${language}: distinct fields keep unique React identities when their translated labels match`, () => {
+    const { tree, html } = render(language, { entity: 'settings',
+      attempted: { status: 'First attempted', sale_status: 'Second attempted' },
+      current: { status: 'First saved', sale_status: 'Second saved' } })
+    for (const value of ['First attempted', 'Second attempted', 'First saved', 'Second saved']) assert(html.includes(value))
+    let keyedLists = 0
+    for (const node of nodes(tree)) {
+      if (!Array.isArray(node.props?.children)) continue
+      const keys = node.props.children.filter((child: any) => child?.key != null).map((child: any) => child.key)
+      if (keys.length < 2) continue
+      keyedLists++
+      assert.equal(new Set(keys).size, keys.length, 'Distinct source fields must not share a translated React key')
+    }
+    assert.equal(keyedLists, 2)
   })
 }
 if (failures) process.exitCode = 1
