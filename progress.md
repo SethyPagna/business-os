@@ -10,8 +10,8 @@ and their new status, and each item here names the Part that last changed it (e.
 | Item | Status |
 |---|---|
 | RC2-HOTFIX | [x] Live; both real merge actions and health checks verified. |
-| RC3-UI and DATE | [~] Sales baseline gate passed: 709 Worker + 678 frontend (37098964791). Latest combined ea843e6e gate37101322999 running. Not live. |
-| Branch consolidation | [~] Metadata slice a00362a2 committed; independent review found permission/freshness issues. Stock transfer and cutover remain pending. |
+| RC3-UI and DATE | [~] Sales baseline b85a200a passed: 709 Worker + 678 frontend (37099648343). Latest ea843e6e gate37101322999 running. Not live. |
+| Branch consolidation | [~] Fix df09a8cd committed; permissions/default checks pass, independent review continues. Conflict/approval safeguards and stock transfer pending. |
 | STOCK-RETURN | [~] Quantity correction reviewed; partial returns/accounting still in progress. Not live. |
 | Product edit / Undo | [~] Backend/client checkpoints preserved; brand/group/fold/create-stock completion and integration pending. |
 | One combined release | [~] Sales and reviewed mobile fix merged; independent deployment held. Employee browser11/11 passes, including EN/KM mobile/desktop and scroll limits. |
