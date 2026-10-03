@@ -25,17 +25,13 @@ export interface BranchWriteFields {
   is_active?: unknown
 }
 
-// Preserve the existing snapshot repair behavior. Identity enforcement keeps
-// the stored name unchanged, so these are normally no-ops for new edits while
-// still repairing a stale snapshot that predates this contract.
 function branchNameSnapshotStatements(id: string | number): Array<{ sql: string; params?: Record<string, unknown> }> {
-  const params = { id }
-  return [
-    { sql: `UPDATE sales SET branch_name=(SELECT name FROM branches WHERE id=@id), updated_at=CURRENT_TIMESTAMP WHERE branch_id=@id AND COALESCE(branch_name,'')<>(SELECT name FROM branches WHERE id=@id)`, params },
-    { sql: `UPDATE inventory_movements SET branch_name=(SELECT name FROM branches WHERE id=@id) WHERE branch_id=@id AND COALESCE(branch_name,'')<>(SELECT name FROM branches WHERE id=@id)`, params },
-    { sql: `UPDATE returns SET branch_name=(SELECT name FROM branches WHERE id=@id) WHERE branch_id=@id AND COALESCE(branch_name,'')<>(SELECT name FROM branches WHERE id=@id)`, params },
-    { sql: `UPDATE stock_row_moves SET branch_name=(SELECT name FROM branches WHERE id=@id) WHERE branch_id=@id AND COALESCE(branch_name,'')<>(SELECT name FROM branches WHERE id=@id)`, params },
-  ]
+  return ['sales', 'inventory_movements', 'returns', 'stock_row_moves'].map(table => ({
+    sql: `UPDATE ${table} SET branch_name=(SELECT name FROM branches WHERE id=@id)${table === 'sales' ? ', updated_at=CURRENT_TIMESTAMP' : ''}
+          WHERE branch_id=@id AND COALESCE(branch_name,'')<>(SELECT name FROM branches WHERE id=@id)
+          AND (TRIM(COALESCE(branch_name,''))='' OR LOWER(TRIM(branch_name))=(SELECT LOWER(TRIM(name)) FROM branches WHERE id=@id))`,
+    params: { id },
+  }))
 }
 
 // When a canonical row is made default, only the other canonical row is
