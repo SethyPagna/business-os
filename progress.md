@@ -14,7 +14,7 @@ and their new status, and each item here names the Part that last changed it (e.
 | Branch consolidation | [~] Historical labels and old-session migration compatibility are reviewed and merged. Snapshot corrections pass 28 Cloudflare table checks plus five populated/race checks. Selling review, historical actions and final stock proof remain open. No live rename or stock move. |
 | STOCK-RETURN | [~] Quantity correction reviewed; partial returns/accounting still in progress. Not live. |
 | Product edit / Undo | [~] Backend/client checkpoints preserved; brand/group/fold/create-stock completion and integration pending. |
-| One combined release | [~] Gate37134010887 on acc0204aa is RED: 720/721 backend and 684/687 frontend tests pass. Four failures are under correction. History changes are merged into candidate21d8acef; affected checks are running. Last verified live is 14b86ed6a6ef. |
+| One combined release | [~] Gate37134010887 on acc0204aa is RED: 720/721 backend and 684/687 frontend tests pass. Four failures are under correction. Candidate21d8acef is pushed; affected checks pass71/72 initially, with the crashed test passing an isolated retry. Last verified live is 14b86ed6a6ef. |
 | Versions / portfolio | [~] Four redundant local checkouts removed and independently verified; branches and recovery archive preserved. Other useful/unique work retained. Portfolio coordination pending. |
 | Full owner goal | [~] Set and active; all requests retained in 35 groups, including 1,115 historical IDs, 511 progress markers and 13 master-plan entries. Completion requires evidence for each item; confirmed defects remain open. |
 
