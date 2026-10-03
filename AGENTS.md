@@ -2,6 +2,8 @@
 
 Read `progress.md` before planning or editing. It is the live coordination and deployment ledger. Load the relevant project skill from the current tool's skill directory. Tool-specific adapters may add mechanics but must not override this provider-neutral guide.
 
+For substantial work, explicitly read `META-HARNESS.md` and follow its portable harness locator. If the harness is unavailable, report that limit and manually confirm the checkout, governing instructions, workflow, ownership, recoverable checkpoint and verification evidence. A pointer does not install or activate tools, skills or plugins, or grant additional permissions.
+
 ## Workflow
 
 - Start rigorous work with the `work-mode` skill: it picks a playbook (bug, feature, lane, refute, checkpoint, recover, forensics, perf, cleanup, council, loop) and routes to the other skills. Index: `agent-team/skills/INDEX.md`.

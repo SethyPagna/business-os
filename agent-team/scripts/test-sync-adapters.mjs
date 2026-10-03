@@ -90,11 +90,39 @@ function checkDescriptionLimit() {
   assert.equal(atLimit.status, 0, atLimit.output);
 }
 
+function checkPortableProjectEntrypoints() {
+  const read = (path) => readFileSync(join(root, path), "utf8");
+  const guide = read("AGENTS.md");
+  assert.match(guide, /explicitly read [`\[]?META-HARNESS\.md/, "the canonical entry must discover the portable harness");
+  assert.match(guide, /unavailable[\s\S]*manually/i, "an unavailable harness must have an honest manual fallback");
+  const base = read("agent-team/prompts/_base.md");
+  assert.match(base, /read[\s\S]*AGENTS\.md[\s\S]*META-HARNESS\.md/, "every generated specialist must name both governing entry files");
+  assert.match(base, /missing capability[\s\S]*NOT RUN/, "unavailable tools must not become claimed execution");
+  for (const path of [".github/copilot-instructions.md", ".cursor/rules/meta-harness.mdc", "GEMINI.md"]) {
+    const pointer = read(path);
+    for (const target of ["AGENTS.md", "META-HARNESS.md", "progress.md"]) assert.ok(pointer.includes(target), `${path} routes to ${target}`);
+    assert.doesNotMatch(pointer, /[A-Za-z]:[\\/]|\/Users\/|\/home\//, `${path} must not publish a private device installation path`);
+    assert.ok(pointer.split(/\r?\n/).length <= 15, `${path} remains a pointer, not duplicate policy`);
+  }
+  assert.match(read(".cursor/rules/meta-harness.mdc"), /^---\r?\n[\s\S]*alwaysApply: true\r?\n---/);
+}
+
+function checkPlaywrightDiscoversExistingSuite() {
+  const prompt = readFileSync(join(root, "agent-team/prompts/playwright-tester.md"), "utf8");
+  assert.ok(existsSync(join(root, "frontend/playwright.config.ts")), "the regression targets a repository with an existing config");
+  assert.doesNotMatch(prompt, /currently has no Playwright suite|not-applicable.*introduce one/i, "a stale absence claim must not skip an existing suite");
+  assert.match(prompt, /[Dd]iscover[\s\S]*configuration[\s\S]*specs/);
+  assert.match(prompt, /NOT RUN[\s\S]*actual missing prerequisite/, "report a real capability gap instead of assuming no tests exist");
+  assert.match(prompt, /Never target production or guess credentials/, "preserve safe execution boundaries");
+}
+
 const checks = [
   checkEmptyLeftoverFolderIsReportedThenRemoved,
   checkFolderWithFilesButNoSkillIsReportedAndKept,
   checkRetiredSkillLeavesNoFolder,
   checkDescriptionLimit,
+  checkPortableProjectEntrypoints,
+  checkPlaywrightDiscoversExistingSuite,
 ];
 const failed = [];
 try {
