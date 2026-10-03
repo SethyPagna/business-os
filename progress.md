@@ -5,13 +5,13 @@
 Every item carries an ID (U-1, U-cost, Q15 …). `docs/history/session-log.md` uses the same IDs: each Part lists the IDs it moved
 and their new status, and each item here names the Part that last changed it (e.g. "→ Part 633"). Search either file for an ID to see both sides.
 
-### Current work (3 Oct 2026) — Part 653
+### Current work (3 Oct 2026) — Part 654
 
 | Item | Status |
 |---|---|
 | RC2-HOTFIX | [x] Live; both real merge actions and health checks verified. |
-| RC3-UI and DATE | [~] ea843e6e passed exact gate37101322999: 709 Worker + 678 frontend. Dashboard date-label correction d7e43c9b passes focused tests; remaining consumer visual checks pending. Not live. |
-| Branch consolidation | [~] df09a8cd independently verified within scope. Inert schema0223 committed; stale-edit and approval safeguards in progress. Stock transfer and live renames pending. |
+| RC3-UI and DATE | [~] Date fixes merged in d2b369fc; exact gate37105062061 running. All 24 EN/KM mobile/desktop picker cases reviewed, with backend limits recorded. Previous gate passed 709 Worker + 678 frontend. Not live. |
+| Branch consolidation | [~] Stale-edit, atomic audit and draft/Undo localization fixes committed; independent rechecks running. Lost-response recovery and stock transfer remain open. No live rename or stock move. |
 | STOCK-RETURN | [~] Quantity correction reviewed; partial returns/accounting still in progress. Not live. |
 | Product edit / Undo | [~] Backend/client checkpoints preserved; brand/group/fold/create-stock completion and integration pending. |
 | One combined release | [~] Sales and reviewed mobile fix merged; independent deployment held. Employee browser11/11 passes, including EN/KM mobile/desktop and scroll limits. |
