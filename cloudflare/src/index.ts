@@ -425,15 +425,17 @@ app.use('*', async (c, next) => {
   return next()
 })
 
-// Refuse writes during DELETE/reinsert restore. Auth/restore and reads retain
-// their existing exemptions; a missing system_flags table still fails open.
 app.use('/api/*', async (c, next) => {
-  if (isMaintenanceGatedRequest(c.req.method, c.req.path)) {
+  if (isMaintenanceGatedRequest(c.req.method, c.req.path, 'branch-cutover')) {
     const maintenance = await getMaintenance(c.env)
-    if (maintenance) {
+    if (maintenance && isMaintenanceGatedRequest(c.req.method, c.req.path, maintenance.mode)) {
       return c.json({
-        error: 'A backup restore is in progress. The system is read-only until it finishes.',
-        maintenance: { mode: maintenance.mode, phase: maintenance.phase, startedAt: maintenance.startedAt },
+        error: maintenance.mode === 'restore'
+          ? 'A backup restore is in progress. The system is read-only until it finishes.'
+          : 'Maintenance is in progress. The system is read-only until it finishes.',
+        maintenance: maintenance.mode === 'restore'
+          ? { mode: maintenance.mode, phase: maintenance.phase, startedAt: maintenance.startedAt }
+          : { mode: maintenance.mode },
       }, 503)
     }
   }

@@ -131,7 +131,8 @@ async function check(name, fn) {
 
   await check('wiring: index.ts gates writes + skips the scheduled tick under maintenance', () => {
     const indexSrc = fs.readFileSync(path.join(cloudflareRoot, 'src', 'index.ts'), 'utf8')
-    assert.match(indexSrc, /isMaintenanceGatedRequest\(c\.req\.method, c\.req\.path\)/)
+    assert.match(indexSrc, /if \(isMaintenanceGatedRequest\(c\.req\.method, c\.req\.path, 'branch-cutover'\)\) \{\s*const maintenance = await getMaintenance\(c\.env\)/)
+    assert.match(indexSrc, /if \(maintenance && isMaintenanceGatedRequest\(c\.req\.method, c\.req\.path, maintenance\.mode\)\) \{/)
     assert.match(indexSrc, /if \(await getMaintenance\(env\)\) return/)
   })
 

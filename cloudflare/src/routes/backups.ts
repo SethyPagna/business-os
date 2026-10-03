@@ -15,7 +15,7 @@ import {
   storeSystemJob,
   validateCloudflareBackup,
 } from '../lib/backup'
-import { beginMaintenance, endMaintenance, getMaintenance, updateMaintenance, MaintenanceAdmissionConflictError } from '../lib/maintenance'
+import { beginMaintenance, endMaintenance, getMaintenance, updateMaintenance, maintenanceStatus, isMaintenanceGatedRequest, MaintenanceAdmissionConflictError } from '../lib/maintenance'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 
@@ -35,6 +35,15 @@ app.use('*', requireAuth)
 app.use('*', async (c, next) => {
   const user = c.get('user')
   if (!hasPermission(user, 'backup')) return c.json({ error: 'You do not have permission to perform this action' }, 403)
+  return next()
+})
+
+app.use('*', async (c, next) => {
+  if (isMaintenanceGatedRequest(c.req.method, '/api/backups', 'branch-cutover')) {
+    const state = await getMaintenance(c.env)
+    if (state && state.mode !== 'restore') return c.json({ code: 'maintenance_active',
+      error: 'Maintenance is in progress. Backup writes are unavailable until it finishes.', maintenance: maintenanceStatus(state) }, 503)
+  }
   return next()
 })
 
@@ -72,7 +81,7 @@ app.get('/', async (c) => {
 // force flag so no client clears it as a reflex.
 app.get('/maintenance', async (c) => {
   const maintenance = await getMaintenance(c.env)
-  return c.json({ maintenance })
+  return c.json({ maintenance: maintenanceStatus(maintenance) })
 })
 
 app.post('/maintenance/clear', async (c) => {
@@ -83,18 +92,20 @@ app.post('/maintenance/clear', async (c) => {
   const body = (await c.req.json<{ force?: boolean }>().catch(() => ({}))) as { force?: boolean }
   const maintenance = await getMaintenance(c.env)
   if (!maintenance) return c.json({ cleared: true, wasSet: false })
+  if (maintenance.mode !== 'restore') return c.json({ cleared: false, code: 'maintenance_active',
+    error: 'Restore controls cannot clear this maintenance hold.', maintenance: maintenanceStatus(maintenance) }, 503)
   if (body.force !== true) {
     return c.json({
       error: 'Clearing maintenance re-opens writes on a database whose restore did not finish. '
         + 'Pass force: true only if you accept the half-restored state (or restart the restore instead).',
-      maintenance,
+      maintenance: maintenanceStatus(maintenance),
     }, 400)
   }
   const cleared = await endMaintenance(c.env, null, { force: true, expectedRevision: maintenance.revision })
   if (!cleared) return c.json({ cleared: false, code: 'maintenance_changed',
     error: 'Maintenance changed while clearing it. Inspect the current state before trying again.' }, 409)
   await audit(c.env, user.id, user.username || null, 'update', 'backup', 'maintenance-clear', {
-    cleared_state: maintenance,
+    cleared_state: maintenanceStatus(maintenance),
   })
   return c.json({ cleared: true, wasSet: true })
 })
