@@ -101,6 +101,7 @@ export async function recoverUnresolvedSignout(intent: SignoutIntent, retryLogou
 }
 type RouteOptions = {
   isWrite?: boolean
+  writeScope?: ActorReadScope
   raceLocalFallback?: boolean
   staleWhileRevalidate?: boolean
   signal?: AbortSignal
@@ -402,6 +403,8 @@ function createApiError(status: number, parsed: LooseRecord | null, text: string
   const error = new Error(parsed?.error || text || `HTTP ${status}`) as ApiRuntimeError
   error.status = status
   error.code = parsed?.code || null
+  if (parsed?.outcome === 'unknown' || parsed?.outcome === 'not_dispatched') error.outcome = parsed.outcome
+  if (['refresh_before_create', 'refresh_before_edit', 'retry_same_request'].includes(parsed?.action)) error.action = parsed?.action
   // A refusal that states a wait (a sign-in lockout) keeps it, so the sign-in
   // screen can say it in the operator's language (utils/authErrorText.ts).
   error.retryAfterSeconds = parsed?.retryAfterSeconds ?? null
@@ -1451,6 +1454,7 @@ export async function route<T = any>(
   const syncServerUrl = getSyncServerUrl()
   const readServerBaseUrl = getReadServerBaseUrl()
   const isWrite = typeof options === 'boolean' ? options : !!options?.isWrite
+  const writeScope = typeof options === 'boolean' ? undefined : options.writeScope
   // An authenticated read must observe the server's permission decision before
   // considering offline data; a fast mirror must not beat a later 401/403.
   // Cookie-authenticated cold starts may not have recreated their JS session
@@ -1596,6 +1600,7 @@ export async function route<T = any>(
   }
 
   // ?€?€ Writes ?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€?€
+  if (writeScope) assertActorSessionDispatchAllowed(writeScope)
   if (!syncServerUrl) {
     const message = 'Server is not connected. Changes are invalid until a live server is configured.'
     logCall(channel, 'local-write-skipped', 0, false)
@@ -1632,11 +1637,16 @@ export async function route<T = any>(
     // the next write would succeed; try the write and let the request result
     // decide whether the operation is valid.
     const result = await serverFn()
+    if (writeScope) assertActorReadScope(writeScope, false)
     cacheInvalidateWithDerived(channel.split(':')[0])
     setServerHealth(true)
     logCall(channel, 'server', Date.now() - t0)
     return result
   } catch (e: any) {
+    if (writeScope && !isActorReadScopeCurrent(writeScope, false)) {
+      if (e && typeof e === 'object') e.outcome = 'unknown'
+      throw e
+    }
     const ms = Date.now() - t0
     if (isConnectivityError(e) || e?.outcome === 'unknown') {
       e.outcome = 'unknown'
