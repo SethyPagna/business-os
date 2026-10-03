@@ -7211,5 +7211,11 @@
   "write_conflict_code": "Code",
   "write_conflict_fee": "Fee",
   "write_conflict_ai_provider": "AI provider",
-  "write_conflict_file": "File"
+  "write_conflict_file": "File",
+  "receiving_branch_inactive": "This branch is inactive. Choose an active branch for new stock. Previously submitted lines keep their original branch.",
+  "receiving_submission_locked": "Previously submitted lines keep their original details. Retry them unchanged, or check Stock Changes before removing them.",
+  "receiving_submission_unavailable": "This saved line has an unknown outcome. Check Stock Changes before removing it; its original request cannot be reconstructed.",
+  "receiving_submission_not_saved": "The request could not be saved on this device. No new request was sent. Check available storage and try again.",
+  "product_create_outcome_unknown": "Product creation may have completed. Refresh Products and check pending review before creating again. This saved request will not be resent.",
+  "product_create_approval_unconfirmed": "The approval result could not be confirmed. Refresh the review queue before retrying this same request."
 }

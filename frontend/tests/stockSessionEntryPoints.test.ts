@@ -258,4 +258,14 @@ await runTest('the select-mode stock panel keeps Add / Remove / Set on its own r
   assert.match(panel, /className="btn-primary h-9 min-w-0 flex-1[^"]*sm:flex-none"[^>]*onClick=\{openBulkStockSession\}/, 'Apply fills the second row')
 })
 
+await runTest('history retains all branches while ordinary receiving gets only active choices', () => {
+  const history = read('../src/components/products/StockChangeSection.tsx')
+  const modal = jsxBlock(history, 'FastStockInModal')
+  assert.match(history, /isActive: row\.is_active === true \|\| row\.is_active === 1/)
+  assert.match(modal, /branchOptions=\{branches\.map\(/)
+  assert.match(modal, /receivingBranchOptions=\{branches\.filter\(\(branch\) => branch\.isActive\)\.map\(/)
+  const stale = modal.replace('branches.filter((branch) => branch.isActive).map', 'branches.map')
+  assert.doesNotMatch(stale, /receivingBranchOptions=\{branches\.filter\(\(branch\) => branch\.isActive\)\.map\(/)
+})
+
 if (failed > 0) process.exitCode = 1

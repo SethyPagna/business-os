@@ -173,6 +173,30 @@ const STOCK_CHANGED_RETRY: StockRequestFailureEntry = {
 }
 
 const STOCK_REQUEST_FAILURE_ENTRIES: Record<string, StockRequestFailureEntry> = {
+  product_create_outcome_unknown: {
+    key: 'product_create_outcome_unknown',
+    fallback: 'Product creation may have completed. Refresh Products and check pending review before creating again. This saved request will not be resent.',
+  },
+  product_pending_review: {
+    key: 'product_creation_pending_review',
+    fallback: 'Product creation is pending review and cannot be added to this stock-in session yet.',
+  },
+  receiving_submission_not_saved: {
+    key: 'receiving_submission_not_saved',
+    fallback: 'The request could not be saved on this device. No new request was sent. Check available storage and try again.',
+  },
+  receiving_branch_inactive: {
+    key: 'receiving_branch_inactive',
+    fallback: 'This branch is inactive. Choose an active branch for new stock. Previously submitted lines keep their original branch.',
+  },
+  receiving_submission_locked: {
+    key: 'receiving_submission_locked',
+    fallback: 'Previously submitted lines keep their original details. Retry them unchanged, or check Stock Changes before removing them.',
+  },
+  receiving_submission_unavailable: {
+    key: 'receiving_submission_unavailable',
+    fallback: 'This saved line has an unknown outcome. Check Stock Changes before removing it; its original request cannot be reconstructed.',
+  },
   stock_request_in_flight: {
     key: 'stock_request_in_flight',
     fallback: 'This line is still being recorded on the server. Wait a moment and try again.',

@@ -206,7 +206,7 @@ function recordedCostLabel(usd: number | null, khr: number | null, notRecorded: 
   return values.length ? values.join(' · ') : notRecorded
 }
 
-type BranchOption = { id: number; name: string }
+type BranchOption = { id: number; name: string; isActive: boolean }
 
 // The Stock Changes section's header-row actions, registered UP to Products.tsx
 // so its "Adjust" menu and ledger export render on the page header row beside
@@ -443,7 +443,7 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
         if (cancelled || !Array.isArray(rows)) return
         setBranches(rows
           .filter((row): row is Record<string, unknown> => !!row && typeof row === 'object')
-          .map((row) => ({ id: Number(row.id) || 0, name: String(row.name || '') }))
+          .map((row) => ({ id: Number(row.id) || 0, name: String(row.name || ''), isActive: row.is_active === true || row.is_active === 1 }))
           .filter((row) => row.id > 0))
       })
       .catch(() => { /* filter row simply stays branch-less */ })
@@ -1494,6 +1494,7 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
         <Suspense fallback={null}>
           <FastStockInModal
             branchOptions={branches.map((branch) => ({ value: String(branch.id), label: branch.name || String(branch.id) }))}
+            receivingBranchOptions={branches.filter((branch) => branch.isActive).map((branch) => ({ value: String(branch.id), label: branch.name || String(branch.id) }))}
             defaultBranchId={fastStockInResume?.branchId || branchId || null}
             initialMode={fastStockInMode}
             initialLines={fastStockInResume?.lines}

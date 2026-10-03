@@ -42,7 +42,10 @@ assert.doesNotMatch(discardBody, /onMinimize/, 'Discard must not park a minimize
 // stores the protected value, never the blank revoked display.
 assert.match(modal, /const \[protectedUnitCost, setProtectedUnitCost\] = useState\(init\.draft\.unitCost\)/, 'receipt cost restores into protected draft state')
 assert.match(modal, /const unitCost = String\(costEntry\.value\('unitCost', protectedUnitCost, ''\)\)/, 'restored cost displays only through the permission-scoped entry')
-assert.match(modal, /const currentDraft = \(lines: StockSessionLine\[\] = received\): StockSessionDraft => \(\{[\s\S]*?unitCost: protectedUnitCost,[\s\S]*?batchChoice,[\s\S]*?lines,\s*\}\)/)
+assert.match(modal, /const currentDraft = \(lines: StockSessionLine\[\] = received\): StockSessionDraft & \{ receivingSubmissions\?: ReceivingSubmissions \} => \{\s*overlayReceivingProductAttempts\(user\?\.id, submissionsRef\.current, lines\)\s*return \{[\s\S]*?unitCost: protectedUnitCost,[\s\S]*?batchChoice,[\s\S]*?createdProductIds, lines,/)
+assert.match(modal, /receivingSubmissions: retainReceivingSubmissions\(submissionsRef\.current, lines\)/, 'the saved draft retains exact submitted wires alongside protected values')
+assert.match(modal, /const submissions = restoreReceivingSubmissions\(storedRaw, opened\.lines\)/, 'reload recovers submission facts alongside the unchanged core normalizer')
+assert.match(modal, /overlayReceivingProductAttempts\(user\?\.id, submissions, opened\.lines\)\s*if \(rewrite\) writeWorkDraft/, 'authoritative attempt outcomes overlay before a restored draft is rewritten')
 assert.match(modal, /useEffect\(\(\) => scheduleWorkDraftWrite<StockSessionDraft>\(fastStockInDraftKey, currentDraft\(\)\)/, 'the debounced autosave snapshots the live queue')
 assert.match(modal, /const persistSessionDraft = \(lines: StockSessionLine\[\] = received\) => \{\s*writeWorkDraft<StockSessionDraft>\(fastStockInDraftKey, currentDraft\(lines\)\)/, 'the synchronous writer defaults to the live queue')
 assert.match(modal, /const pendingBatchRestoreRef = useRef<LotChoice \| null>\(init\.draft\.picked \? init\.draft\.batchChoice : null\)/, 'a parked lot choice must be revalidated by the options effect')

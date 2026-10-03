@@ -70,7 +70,9 @@ runTest('a 404 from the batched endpoint -- and ONLY a 404 -- falls back to the 
 })
 
 runTest('one line-building function feeds both the batched request and the sequential fallback (no second, driftable copy of the wire bodies)', () => {
-  assert.match(modal, /const buildLineRequest = \(line: StockSessionLine\) => buildStockLineRequest\(line, \{/)
+  assert.match(modal, /const buildLineRequest = \(line: StockSessionLine\) => submissionsRef\.current\.requests\[line\.key\] \|\| buildStockLineRequest\(line, \{/)
+  assert.match(modal, /for \(const line of toCommit\) captureReceivingRequest\(submissionsRef\.current, line, buildLineRequest\(line\)\)/, 'new wires are captured once before either transport path')
+  assert.match(modal, /try \{ persistSubmissionDraft\(lines\) \} catch \(error\) \{[\s\S]*?return/, 'failed durable capture refuses dispatch')
   assert.match(draftUtil, /export function buildStockLineRequest\(line: StockSessionLine, ctx: LineRequestContext\): FastStockInCommitLine \{/)
   // Both call sites reuse it.
   assert.match(modal, /batched = await commitFastStockIn\(toCommit\.map\(buildLineRequest\), foldRound, \{ session \}\)/)
