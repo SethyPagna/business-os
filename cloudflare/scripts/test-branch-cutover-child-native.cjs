@@ -9,7 +9,18 @@ function load(relative) {
   relative = path.posix.normalize(relative.endsWith('.ts') ? relative : relative + '.ts')
   if (cache.has(relative)) return cache.get(relative).exports
   const module = { exports: {} }; cache.set(relative, module)
-  const source = fs.readFileSync(path.join(root, 'src', relative), 'utf8')
+  let source = fs.readFileSync(path.join(root, 'src', relative), 'utf8')
+  if (relative === 'lib/branchCutoverChild.ts' && process.env.CHILD_WRONG_CONTROL) {
+    const mutations = {
+      retry: ['await db.batchOnce(statements)', 'await db.batch(statements)'],
+      guards: ['SELECT CASE WHEN (${condition}) THEN 1', 'SELECT CASE WHEN (1) THEN 1'],
+      receipt_order: ['if (existing.receipt) return', 'if (false && existing.receipt) return'],
+      tenant: ['actor.organization_id === organizationId', 'true'],
+      split: ['await db.batchOnce(statements)', 'await (async () => { await db.batchOnce(statements.slice(0, -6)); return db.batchOnce(statements.slice(-6)) })()'],
+    }
+    const mutation = mutations[process.env.CHILD_WRONG_CONTROL]
+    assert.ok(mutation && source.includes(mutation[0])); source = source.replace(mutation[0], mutation[1])
+  }
   const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
   new Function('require', 'module', 'exports', compiled)(request => {
     if (['./importMaintenanceFence', '../durable-objects/broadcastHub', './cache'].includes(request)) return new Proxy({}, { get: () => () => { throw Error('Unexpected effect ' + request) } })
@@ -80,8 +91,14 @@ async function planned(w, transfer = {}) {
 const execute = (w, p, overrides = {}) => child.executePlannedBranchCutoverChild(w.db, overrides.actor || actor, overrides.proof || p.proof, overrides.expected || p.expected, overrides.budget || budget, overrides.organizationId === undefined ? 1 : overrides.organizationId)
 const tables = ['branch_stock', 'branch_batch_stock', 'product_batches', 'products', 'inventory_movements', 'stock_transfers', 'transfer_operation_receipts', 'transfer_operation_members', 'action_history', 'audit_logs', 'branch_cutovers', 'system_flags']
 const snapshot = w => JSON.stringify(Object.fromEntries(tables.map(table => [table, w.raw.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()])))
+function legacyMutation(w, table, sql) {
+  const triggers = w.raw.prepare("SELECT name,sql FROM sqlite_master WHERE type='trigger' AND tbl_name=?").all(table)
+  for (const trigger of triggers) w.raw.exec(`DROP TRIGGER "${trigger.name}"`)
+  w.raw.exec('PRAGMA ignore_check_constraints=ON')
+  try { w.raw.exec(sql) } finally { w.raw.exec('PRAGMA ignore_check_constraints=OFF'); for (const trigger of triggers) w.raw.exec(trigger.sql) }
+}
 let checks = 0
-async function check(name, fn) { await fn(); checks++; console.log('PASS ' + name) }
+async function check(name, fn) { if (process.env.CHILD_TEST_PATTERN && !new RegExp(process.env.CHILD_TEST_PATTERN).test(name)) return; await fn(); checks++; console.log('PASS ' + name) }
 async function main() {
   await check('actual one-batch transfer and journal progress', async () => {
     const w = world(); const p = await planned(w); const result = await execute(w, p)
@@ -90,6 +107,180 @@ async function main() {
     assert.equal(w.raw.prepare('SELECT quantity FROM branch_stock WHERE branch_id=2').get().quantity, 1)
     assert.equal(w.raw.prepare('SELECT COUNT(*) n FROM transfer_operation_receipts').get().n, 1)
     w.raw.close()
+  })
+  for (const [name, lots, untracked] of [['two same-date lots', [1, 2], 0], ['128 lots', Array(128).fill(1), 0], ['mixed tracked and untracked', [1], 2], ['fractional', [0.5, 0.3], 0], ['untracked only', [], 2]]) await check(name + ' conservation, dates and costs', async () => {
+    const w = world(lots, untracked); const p = await planned(w)
+    const before = w.raw.prepare('SELECT id,batch_key,lot_code,received_at,expiry_date,notes,unit_cost_usd FROM product_batches ORDER BY id').all()
+    const result = await execute(w, p)
+    assert.equal(result.replayed, false); assert.equal(w.stats.batches, 1); assert.ok(w.stats.binds <= 100)
+    assert.deepEqual(w.raw.prepare('SELECT id,batch_key,lot_code,received_at,expiry_date,notes,unit_cost_usd FROM product_batches ORDER BY id').all(), before)
+    assert.ok(Math.abs(w.raw.prepare('SELECT SUM(quantity) n FROM branch_stock').get().n - w.quantity) < 1e-9)
+    assert.ok(Math.abs(w.raw.prepare('SELECT quantity FROM branch_stock WHERE branch_id=1').get().quantity) < 1e-9)
+    assert.ok(Math.abs(w.raw.prepare('SELECT SUM(quantity) n FROM branch_batch_stock').get().n - lots.reduce((a, b) => a + b, 0)) < 1e-9)
+    assert.equal(w.raw.prepare('SELECT stock_quantity FROM products').get().stock_quantity, w.quantity)
+    for (const table of ['transfer_operation_receipts', 'transfer_operation_members', 'action_history', 'audit_logs', 'stock_transfers']) assert.equal(w.raw.prepare(`SELECT COUNT(*) n FROM ${table}`).get().n, 1)
+    const movements = w.raw.prepare('SELECT movement_type,batch_id,quantity,unit_cost_usd,unit_cost_khr,total_cost_usd,total_cost_khr FROM inventory_movements ORDER BY id').all()
+    const direction = value => movements.filter(m => m.movement_type === value).map(({ movement_type, ...m }) => m)
+    assert.deepEqual(direction('transfer_out'), direction('transfer_in'))
+    for (const movement of movements) assert.equal(movement.unit_cost_usd, movement.batch_id ?? 2.5)
+    console.log(JSON.stringify({ scenario: name, reads: w.stats.reads, statements: w.stats.statements, maxBindings: w.stats.binds }))
+    await assert.rejects(journal.abortEffectFreeBranchCutoverJournal(w.db, p.proof, result.row.revision, 'No effects'))
+    w.raw.close()
+  })
+  await check('lost acknowledgement recovers one committed receipt before mutable planning; later child does not hide replay', async () => {
+    const w = world(); const p = await planned(w)
+    w.stats.after = () => { throw Error('network acknowledgement lost') }
+    const result = await execute(w, p); assert.equal(result.replayed, true); assert.equal(w.stats.batches, 1)
+    const next = JSON.stringify({ ...JSON.parse(p.expected.childJson), sequence: 1 })
+    await journal.sealBranchCutoverChild(w.db, p.proof, result.row.revision, next)
+    w.raw.exec('UPDATE products SET cost_price_usd=99; UPDATE branches SET is_active=0 WHERE id=1')
+    const before = snapshot(w); const batches = w.stats.batches; w.stats.sql = []
+    const replay = await execute(w, p)
+    assert.equal(replay.replayed, true); assert.deepEqual(replay.receipt, result.receipt); assert.equal(snapshot(w), before); assert.equal(w.stats.batches, batches)
+    assert.ok(w.stats.sql.every(sql => !/FROM products|FROM product_batches|JOIN branch_batch_stock/i.test(sql)))
+    w.raw.close()
+  })
+  await check('lost acknowledgement with unreadable proof stays unknown and never sends a second write', async () => {
+    const w = world(); const p = await planned(w)
+    w.stats.after = () => { w.stats.unreadable = true; throw Error('ack lost') }
+    await assert.rejects(execute(w, p), error => error.code === 'branch_cutover_child_outcome_unknown')
+    assert.equal(w.stats.batches, 1); assert.equal(w.raw.prepare('SELECT next_sequence FROM branch_cutovers').get().next_sequence, 1)
+    w.stats.unreadable = false; assert.equal((await execute(w, p)).replayed, true); assert.equal(w.stats.batches, 1); w.raw.close()
+  })
+  await check('every atomic statement failure conserves complete business and journal state', async () => {
+    const reference = world(); const rp = await planned(reference); await execute(reference, rp); const count = reference.stats.statements; reference.raw.close()
+    for (let at = 0; at < count; at++) {
+      const w = world(); const p = await planned(w); const before = snapshot(w); w.stats.failAt = at
+      await assert.rejects(execute(w, p)); assert.equal(w.stats.batches, 1); assert.equal(snapshot(w), before, 'boundary ' + at); w.raw.close()
+    }
+  })
+  await check('two simultaneous invocations commit one effect and one journal advance', async () => {
+    const w = world(); const p = await planned(w)
+    let release; const barrier = new Promise(resolve => { release = resolve }); let arrived = false
+    w.stats.before = async () => { arrived = true; await barrier }
+    const first = execute(w, p)
+    while (!arrived) await new Promise(resolve => setImmediate(resolve))
+    const second = await execute(w, p); release(); const loser = await first
+    assert.equal(second.replayed, false); assert.equal(loser.replayed, true); assert.equal(w.stats.batches, 2)
+    assert.equal(w.raw.prepare('SELECT COUNT(*) n FROM transfer_operation_receipts').get().n, 1)
+    assert.equal(w.raw.prepare('SELECT next_sequence FROM branch_cutovers').get().next_sequence, 1); w.raw.close()
+  })
+  for (const mutation of ["UPDATE branch_stock SET quantity=quantity+1 WHERE branch_id=1", "UPDATE branch_stock SET quantity=quantity+1 WHERE branch_id=2", "UPDATE product_batches SET received_at='2020-01-01'", 'UPDATE product_batches SET unit_cost_usd=99', 'DELETE FROM branch_batch_stock', 'UPDATE products SET cost_price_usd=99', 'UPDATE branches SET is_active=0 WHERE id=2', "INSERT INTO branches(name,is_active) VALUES('Shop',1)", "UPDATE users SET permissions='{}' WHERE id=7", 'UPDATE users SET organization_id=NULL WHERE id=7']) await check('batch-time race refused: ' + mutation, async () => {
+    const w = world(); const p = await planned(w); let raced
+    w.stats.before = raw => { raw.exec(mutation); raced = snapshot(w) }
+    await assert.rejects(execute(w, p)); assert.equal(snapshot(w), raced); assert.equal(w.stats.batches, 1); w.raw.close()
+  })
+  for (const patch of [{ actor: { ...actor, organization_id: null } }, { organizationId: 2 }, { actor: { ...actor, id: 8 } }, { actor: { ...actor, is_active: 0 } }, { proof: { operationId: uuid(1), actorId: 7, organizationId: '1', controlIncarnation: uuid(99), token: uuid(3) } }]) await check('wrong actor / organization / ownership refused', async () => {
+    const w = world(); const p = await planned(w); const before = snapshot(w)
+    await assert.rejects(execute(w, p, patch)); assert.equal(w.stats.batches, 0); assert.equal(snapshot(w), before); w.raw.close()
+  })
+  for (const permissions of ['{}', '{"branches":"review"}', '{"branches":true,"branches:transfer":false}']) await check('current granular grant refuses ' + permissions, async () => {
+    const w = world(); const p = await planned(w); w.raw.prepare('UPDATE users SET permissions=?').run(permissions)
+    await assert.rejects(execute(w, p)); assert.equal(w.stats.batches, 0); w.raw.close()
+  })
+  for (const patch of [{ version: 0 }, { kind: 'transfer' }, { reason: '' }, { transfer: { productId: 1, quantity: 1 } }, { transfer: { productId: 1, destProductId: 2, quantity: 1, batchId: null } }, { sequence: 1 }]) await check('strict child envelope refuses ' + JSON.stringify(patch), async () => {
+    const w = world(); const p = await planned(w); const expected = { ...p.expected, childJson: JSON.stringify({ ...JSON.parse(p.expected.childJson), ...patch }) }
+    await assert.rejects(execute(w, p, { expected })); assert.equal(w.stats.batches, 0); w.raw.close()
+  })
+  for (const prepare of [w => legacyMutation(w, 'product_batches', 'UPDATE product_batches SET is_active=0'), w => w.raw.exec('UPDATE branch_stock SET quantity=0 WHERE branch_id=1'), w => legacyMutation(w, 'branch_batch_stock', 'UPDATE branch_batch_stock SET quantity=-1'), w => w.raw.exec('UPDATE branch_batch_stock SET quantity=2'), w => w.raw.exec('UPDATE branch_stock SET quantity=1e999 WHERE branch_id=1')]) await check('stock/lot anomaly refuses without writes', async () => {
+    const w = world(); const p = await planned(w); prepare(w); const before = snapshot(w)
+    await assert.rejects(execute(w, p)); assert.equal(snapshot(w), before); w.raw.close()
+  })
+  await check('129 positive lots refused even when selected batch needs only one', async () => {
+    const w = world(Array(129).fill(1)); const p = await planned(w, { batchId: 1, quantity: 1 }); const before = snapshot(w)
+    await assert.rejects(execute(w, p)); assert.equal(w.stats.batches, 0); assert.equal(snapshot(w), before); w.raw.close()
+  })
+  await check('UTF-8 metadata and invocation budget refuse before writes', async () => {
+    const w = world(); const p = await planned(w)
+    w.raw.prepare('UPDATE product_batches SET notes=?').run('ខ'.repeat(90000)); await assert.rejects(execute(w, p)); assert.equal(w.stats.batches, 0)
+    w.raw.exec("UPDATE product_batches SET notes='small'")
+    await assert.rejects(execute(w, p, { budget: { ...budget, alreadyUsed: 990 } })); assert.equal(w.stats.batches, 0); w.raw.close()
+  })
+  await check('zero-row journal update must throw and roll back transfer', async () => {
+    const w = world(); const p = await planned(w)
+    w.raw.exec("CREATE TRIGGER fixture_skip BEFORE UPDATE ON branch_cutovers WHEN NEW.next_sequence>OLD.next_sequence BEGIN SELECT RAISE(IGNORE); END")
+    const before = snapshot(w); await assert.rejects(execute(w, p)); assert.equal(snapshot(w), before); w.raw.close()
+  })
+  for (const [table, sql] of [
+    ['transfer_operation_receipts', "UPDATE transfer_operation_receipts SET response_json=json_set(response_json,'$.operation_id','forged')"],
+    ['transfer_operation_receipts', 'UPDATE transfer_operation_receipts SET generation=1'],
+    ['transfer_operation_receipts', "UPDATE transfer_operation_receipts SET replay_state='reversed'"],
+    ['transfer_operation_receipts', "UPDATE transfer_operation_receipts SET status='planning'"],
+    ['transfer_operation_receipts', 'UPDATE transfer_operation_receipts SET provenance_version=0'],
+    ['transfer_operation_members', 'UPDATE transfer_operation_members SET destination_product_id=2'],
+    ['transfer_operation_members', "UPDATE transfer_operation_members SET allocations_json='[]'"],
+    ['action_history', 'DELETE FROM action_history'],
+  ]) await check('incomplete/forged committed provenance refuses: ' + sql, async () => {
+    const w = world(); const p = await planned(w); await execute(w, p); legacyMutation(w, table, sql)
+    const before = snapshot(w); const batches = w.stats.batches
+    await assert.rejects(execute(w, p)); assert.equal(w.stats.batches, batches); assert.equal(snapshot(w), before); w.raw.close()
+  })
+  await check('journal-only and receipt-only states refuse without repair', async () => {
+    for (const missing of ['receipt', 'journal']) {
+      const w = world(); const p = await planned(w)
+      if (missing === 'receipt') w.raw.exec('UPDATE branch_cutovers SET next_sequence=1,committed_children=1,revision=revision+1,planned_child_json=NULL,planned_child_key=NULL,planned_child_digest=NULL')
+      else {
+        await execute(w, p)
+        legacyMutation(w, 'branch_cutovers', `UPDATE branch_cutovers SET next_sequence=0,committed_children=0,revision=${p.row.revision},planned_child_json='${p.expected.childJson}',planned_child_key='${p.row.planned_child_key}',planned_child_digest='${p.row.planned_child_digest}'`)
+      }
+      const before = snapshot(w); const batches = w.stats.batches
+      await assert.rejects(execute(w, p)); assert.equal(w.stats.batches, batches); assert.equal(snapshot(w), before); w.raw.close()
+    }
+  })
+  for (const value of [null, '{}', '{"mode":"restore"}', '{bad']) await check('missing/corrupt/wrong-mode maintenance refuses ' + value, async () => {
+    const w = world(); const p = await planned(w)
+    legacyMutation(w, 'system_flags', value === null ? "DELETE FROM system_flags WHERE key='maintenance'" : `UPDATE system_flags SET value='${value}' WHERE key='maintenance'`)
+    await assert.rejects(execute(w, p)); assert.equal(w.stats.batches, 0); w.raw.close()
+  })
+  await check('changed control incarnation refuses restored old ownership', async () => {
+    const w = world(); const p = await planned(w)
+    legacyMutation(w, 'system_flags', `UPDATE system_flags SET value='${uuid(100)}' WHERE key='branch_cutover_control_incarnation'`)
+    await assert.rejects(execute(w, p)); assert.equal(w.stats.batches, 0); w.raw.close()
+  })
+  await check('explicit lot uses its exact ID and leaves other same-date stock intact', async () => {
+    const w = world([2, 3]); const p = await planned(w, { batchId: 2, quantity: 1 })
+    const result = await execute(w, p); assert.equal(result.receipt.destBatchId, 2)
+    assert.equal(w.raw.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id=1 AND branch_id=1').get().quantity, 2)
+    assert.equal(w.raw.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id=2 AND branch_id=1').get().quantity, 2)
+    assert.equal((await execute(w, p)).replayed, true); w.raw.close()
+  })
+  await check('actual query budget exact limit and one over; Free is explicitly refused', async () => {
+    for (const [used, allowed] of [[932, true], [933, false]]) {
+      const w = world(); const p = await planned(w)
+      if (allowed) { await execute(w, p, { budget: { ...budget, alreadyUsed: used } }); assert.equal(w.stats.statements, 30) }
+      else { await assert.rejects(execute(w, p, { budget: { ...budget, alreadyUsed: used } })); assert.equal(w.stats.batches, 0) }
+      w.raw.close()
+    }
+    const w = world(); const p = await planned(w)
+    await assert.rejects(execute(w, p, { budget: { ...budget, tier: 'free' } })); assert.equal(w.stats.batches, 0); w.raw.close()
+  })
+  await check('actual total SQL/parameter UTF-8 budget at nearest character boundary and one over', async () => {
+    const w = world(); const p = await planned(w); const realBatch = w.db.batchOnce.bind(w.db)
+    let measured = 0
+    w.db.batchOnce = async statements => { measured = statements.reduce((n, s) => n + Buffer.byteLength(s.sql) + Buffer.byteLength(JSON.stringify(s.params || {})), 0); throw Error('measurement only') }
+    const permissions = n => JSON.stringify({ branches: true, padding: 'ខ'.repeat(n) })
+    const measure = async n => { measured = 0; w.raw.prepare('UPDATE users SET permissions=?').run(permissions(n)); await assert.rejects(execute(w, p)); return measured }
+    const zero = await measure(0); const one = await measure(1); const slope = one - zero
+    assert.ok(slope >= 3 && zero > 0)
+    const count = Math.floor((1048576 - zero) / slope)
+    assert.ok(await measure(count)); assert.equal(await measure(count + 1), 0)
+    w.db.batchOnce = realBatch; w.raw.prepare('UPDATE users SET permissions=?').run(permissions(count))
+    await execute(w, p); assert.equal(w.stats.batches, 1); w.raw.close()
+  })
+  await check('bounded planner prevents a post-admission oversized metadata/lot read from writing', async () => {
+    const w = world(); const p = await planned(w); const prepare = w.db.prepare.bind(w.db); let changed = false
+    w.db.prepare = sql => {
+      if (!changed && sql.startsWith('SELECT * FROM (SELECT id,')) {
+        changed = true; w.raw.prepare('UPDATE product_batches SET notes=?').run('ខ'.repeat(90000))
+      }
+      return prepare(sql)
+    }
+    await assert.rejects(execute(w, p)); assert.equal(changed, true); assert.equal(w.stats.batches, 0); w.raw.close()
+  })
+  await check('fractional quantity lost in a large REAL destination is refused before writes', async () => {
+    const w = world([], 0.1); const p = await planned(w)
+    w.raw.prepare('UPDATE branch_stock SET quantity=? WHERE branch_id=2').run(Number.MAX_SAFE_INTEGER - 1)
+    await assert.rejects(execute(w, p)); assert.equal(w.stats.batches, 0); w.raw.close()
   })
   console.log(`${checks} branch cutover child native groups passed`)
 }

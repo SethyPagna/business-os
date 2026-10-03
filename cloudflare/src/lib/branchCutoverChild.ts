@@ -1,4 +1,4 @@
-import type { D1Compat } from './db'
+import type { BindParams, D1Compat } from './db'
 import type { SessionUser } from './auth'
 import { getActionTier } from './permissions'
 import { readBranchCutoverJournal, type BranchCutoverJournalRow, type BranchCutoverOwnership } from './branchCutoverJournal'
@@ -86,6 +86,8 @@ function receiptProof(row: BranchCutoverJournalRow, child: Child, exactJson: str
     && response.operation_id === r.operation_id && response.action_history_id === r.action_history_id && response.generation === 0 && response.provenance_version === 1)
   const source = object(m.source_snapshot); const destination = object(m.destination_snapshot)
   requireChild(source.id === child.transfer.productId && destination.id === child.transfer.productId && typeof m.allocations_json === 'string' && bytes(m.allocations_json) <= SNAPSHOT_BYTES)
+  const { untracked_cost_snapshot: untrackedCost, ...catalogSource } = source
+  requireChild(source.is_active === 1 && JSON.stringify(catalogSource) === JSON.stringify(destination))
   const allocations: unknown = JSON.parse(m.allocations_json)
   requireChild(Array.isArray(allocations) && allocations.length <= 128)
   const seen = new Set<number>(); let total = Number(m.untracked_quantity)
@@ -101,7 +103,7 @@ function receiptProof(row: BranchCutoverJournalRow, child: Child, exactJson: str
     validateCost(a.cost_snapshot, a.quantity)
   }
   requireChild(Math.abs(total - child.transfer.quantity) <= EPSILON && (child.transfer.batchId === null || m.untracked_quantity === 0))
-  if (Number(m.untracked_quantity) > 0) validateCost(source.untracked_cost_snapshot, Number(m.untracked_quantity))
+  if (Number(m.untracked_quantity) > 0) validateCost(untrackedCost, Number(m.untracked_quantity))
   requireChild(response.destBatchId === (child.transfer.batchId === null ? null : child.transfer.batchId))
   return response
 }
@@ -117,17 +119,20 @@ const assertSql = (condition: string, params: Record<string, unknown>): Statemen
 const positiveLots = `SELECT b.id,b.variant_product_id,b.batch_key,b.lot_code,b.received_at,b.expiry_date,b.notes,b.is_active,b.batch_number,b.unit_cost_usd,s.branch_id,s.quantity
   FROM product_batches b JOIN branch_batch_stock s ON s.batch_id=b.id WHERE b.variant_product_id=@product AND s.branch_id IN (@source,@target) AND s.quantity>0`
 const lotFingerprint = `SELECT json_group_array(json_array(id,variant_product_id,batch_key,lot_code,received_at,expiry_date,notes,is_active,batch_number,unit_cost_usd,branch_id,quantity)) FROM (${positiveLots} ORDER BY b.id,s.branch_id)`
+const lotBytes = `COALESCE(SUM(length(CAST(json_array(id,variant_product_id,batch_key,lot_code,received_at,expiry_date,notes,is_active,batch_number,unit_cost_usd,branch_id,quantity) AS BLOB))+1),0)+2`
 
 export async function executePlannedBranchCutoverChild(db: D1Compat, actor: SessionUser, ownership: BranchCutoverOwnership,
   expected: { sequence: number; childJson: string }, budget: TransferInvocationBudget, organizationId: number): Promise<BranchCutoverChildResult> {
   requireChild(positiveId(organizationId) && actor.id === ownership.actorId && actor.organization_id === organizationId
     && ownership.organizationId === String(organizationId) && actor.is_active === 1)
   requireChild(budget.extraAtomicStatements === 0)
-  const reservedBudget = { ...budget, remainingReads: budget.remainingReads + 12, retryQueries: budget.retryQueries + 7 }
+  assertTransferStatementsFit(budget, 38)
+  const reservedBudget = { ...budget, remainingReads: budget.remainingReads + 24, retryQueries: budget.retryQueries + 14 }
   assertTransferStatementsFit(reservedBudget, 0)
   const current = await db.prepare(actorSelect).get<SessionUser>({ actor: actor.id })
   requireChild(current && current.is_active === 1 && current.organization_id === organizationId && getActionTier(current, 'branches', 'transfer') === 'full')
   const row = await readBranchCutoverJournal(db, ownership)
+  requireChild(['moving', 'verifying', 'ready'].includes(row.phase))
   const child = childIntent(row, expected); const key = `bc_${row.operation_id}_${expected.sequence}`; const digest = await transferRequestDigest(expected.childJson)
   const receiptParams = { actor: actor.id, request: key }
   const existing = await readReceipt(db, receiptParams)
@@ -138,20 +143,48 @@ export async function executePlannedBranchCutoverChild(db: D1Compat, actor: Sess
   const summary = await db.prepare(`SELECT COUNT(*) AS count,COUNT(DISTINCT id) AS lots,COALESCE(SUM(length(CAST(json_array(id,variant_product_id,batch_key,lot_code,received_at,expiry_date,notes,is_active,batch_number,unit_cost_usd,branch_id,quantity) AS BLOB))+1),0)+2 AS bytes,
     COALESCE(SUM(CASE WHEN branch_id=@source THEN quantity ELSE 0 END),0) AS sourceTotal,
     COALESCE(SUM(CASE WHEN branch_id=@target THEN quantity ELSE 0 END),0) AS targetTotal,
-    COALESCE(SUM(CASE WHEN is_active<>1 OR quantity>9007199254740991 THEN 1 ELSE 0 END),0) AS invalid FROM (${positiveLots})`).get<Record<string, number>>(stockParams)
+    COALESCE(SUM(CASE WHEN COALESCE(is_active,0)<>1 OR quantity>9007199254740991 THEN 1 ELSE 0 END),0) AS invalid FROM (${positiveLots})`).get<Record<string, number>>(stockParams)
   requireChild(summary && summary.lots <= 128 && summary.count <= 256 && summary.bytes <= SNAPSHOT_BYTES && summary.invalid === 0)
   const stocks = await db.prepare(`SELECT branch_id,quantity FROM branch_stock WHERE product_id=@product AND branch_id IN (@source,@target) ORDER BY branch_id`).all<{ branch_id: number; quantity: number }>(stockParams)
   const sourceStock = stocks.find(stock => stock.branch_id === child.sourceBranchId)?.quantity
-  const targetStock = stocks.find(stock => stock.branch_id === child.targetBranchId)?.quantity ?? 0
+  const targetRow = stocks.find(stock => stock.branch_id === child.targetBranchId)
+  const targetStock = targetRow ? targetRow.quantity : 0
   requireChild(quantity(sourceStock) && quantity(targetStock) && quantity(targetStock + child.transfer.quantity) && sourceStock >= child.transfer.quantity
-    && summary.sourceTotal <= sourceStock + EPSILON && summary.targetTotal <= targetStock + EPSILON)
-  const fingerprint = await db.prepare(`SELECT (${lotFingerprint}) AS value`).get<{ value: string }>(stockParams)
-  requireChild(fingerprint && bytes(fingerprint.value) <= SNAPSHOT_BYTES)
-  assertTransferStatementsFit(reservedBudget, 27 + summary.lots)
-  const planned = await planTransferOperation(db, { user: current, requestId: key, requestJson: expected.childJson, digest, scope: 'branches',
+    && summary.sourceTotal <= sourceStock + EPSILON && summary.targetTotal <= targetStock + EPSILON
+    && Math.abs((targetStock + child.transfer.quantity) - targetStock - child.transfer.quantity) <= EPSILON
+    && Math.abs(sourceStock - (sourceStock - child.transfer.quantity) - child.transfer.quantity) <= EPSILON)
+  const boundedLots = `(SELECT COUNT(DISTINCT id)<=128 AND COUNT(*)<=256 AND ${lotBytes}<=${SNAPSHOT_BYTES} FROM (${positiveLots}))`
+  const fingerprint = await db.prepare(`SELECT CASE WHEN ${boundedLots} THEN (${lotFingerprint}) END AS value`).get<{ value: string }>(stockParams)
+  requireChild(fingerprint && typeof fingerprint.value === 'string' && bytes(fingerprint.value) <= SNAPSHOT_BYTES)
+  assertTransferStatementsFit(reservedBudget, 29 + summary.lots)
+  const boundedReadGate = boundedLots.replaceAll('@product', String(child.transfer.productId)).replaceAll('@source', String(child.sourceBranchId)).replaceAll('@target', String(child.targetBranchId))
+    + ` AND EXISTS(SELECT 1 FROM products WHERE id=${child.transfer.productId} AND length(CAST(json_array(name,barcode,created_at) AS BLOB))<=65536)`
+  const planningDb = new Proxy(db, { get(target, property, receiver) {
+    if (property !== 'prepare') return Reflect.get(target, property, receiver)
+    return (sql: string) => ({ all: async <T>(params?: BindParams): Promise<T[]> => {
+      const rows = await target.prepare(`SELECT * FROM (${sql}) WHERE ${boundedReadGate} LIMIT 129`).all<T>(params)
+      requireChild(rows.length <= 128 && bytes(JSON.stringify(rows)) <= SNAPSHOT_BYTES)
+      return rows
+    } })
+  } })
+  const planned = await planTransferOperation(planningDb, { user: current, requestId: key, requestJson: expected.childJson, digest, scope: 'branches',
     fromBranchId: child.sourceBranchId, toBranchId: child.targetBranchId, reason: child.reason,
     lines: [{ productId: child.transfer.productId, destProductId: child.transfer.productId, quantity: child.transfer.quantity, batchId: child.transfer.batchId }],
     response: { success: true, parent_operation_id: row.operation_id, child_sequence: expected.sequence } })
+  const lotQuantities = JSON.parse(fingerprint.value) as unknown[][]
+  for (const take of planned.allocationSummaries[0].takes) {
+    const from = lotQuantities.find(lot => lot[0] === take.batchId && lot[10] === child.sourceBranchId)?.[11]
+    const to = lotQuantities.find(lot => lot[0] === take.batchId && lot[10] === child.targetBranchId)?.[11] ?? 0
+    requireChild(quantity(from) && quantity(to) && from >= take.quantity && quantity(to + take.quantity)
+      && Math.abs(from - (from - take.quantity) - take.quantity) <= EPSILON
+      && Math.abs((to + take.quantity) - to - take.quantity) <= EPSILON)
+  }
+  for (const statement of planned.statements) {
+    if (typeof statement.params?.allocations !== 'string') continue
+    const allocations = JSON.parse(statement.params.allocations) as Array<{ cost_snapshot: unknown; quantity: number }>
+    for (const allocation of allocations) validateCost(allocation.cost_snapshot, allocation.quantity)
+    if (Number(statement.params.untracked) > 0) validateCost(object(statement.params.sourceSnapshot).untracked_cost_snapshot, Number(statement.params.untracked))
+  }
   const params = { operation: row.operation_id, revision: row.revision, sequence: row.next_sequence, actor: actor.id, organization: organizationId,
     organizationText: row.organization_id, token: ownership.token, control: ownership.controlIncarnation, flag: row.maintenance_flag_json,
     child: expected.childJson, key, digest, role: current.role_id, permissions: current.permissions, roleCode: current.role_code ?? null,
