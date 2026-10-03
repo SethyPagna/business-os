@@ -20,7 +20,7 @@ function loadAttempts(change: (text: string) => string = text => text): typeof A
     if (cache.has(file)) return cache.get(file)!.exports
     const mod = { exports: {} }
     cache.set(file, mod)
-    const text = readFileSync(file, 'utf8')
+    const text = readFileSync(file, 'utf8').replace(/\r\n/g, '\n')
     new Function('require', 'module', 'exports', js(file === helperPath ? change(text) : text))((name: string) => {
       assert(name.startsWith('.'), `unexpected dependency ${name}`)
       const target = resolve(dirname(file), name)
