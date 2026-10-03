@@ -64,9 +64,8 @@ function fieldLabel(key: string, tr: Translate): string {
 
 function formatConflictTime(value: unknown, tr: Translate): string {
   if (!value) return tr('unknown', 'Unknown')
-  const date = new Date(String(value))
-  if (Number.isNaN(date.getTime())) return String(value)
-  return fmtDateTime24(date)
+  const formatted = fmtDateTime24(value instanceof Date ? value : String(value))
+  return formatted === '—' ? String(value) : formatted
 }
 
 function formatValue(value: unknown, tr: Translate, key = ''): string {

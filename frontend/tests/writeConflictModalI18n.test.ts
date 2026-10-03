@@ -44,6 +44,21 @@ function check(name: string, run: () => void) {
   catch (error) { failures++; console.error(`FAIL ${name}`, error) }
 }
 for (const language of ['en', 'km']) {
+  check(language + ': SQL UTC and ISO timestamps display the same Cambodia day and hour on every client timezone', () => {
+    const previousZone = process.env.TZ
+    try {
+      for (const zone of ['Asia/Phnom_Penh', 'America/New_York', 'UTC']) {
+        process.env.TZ = zone
+        for (const raw of ['2026-10-03 20:30:00', '2026-10-03T20:30:00Z', '2026-10-04T03:30:00+07:00']) {
+          const { html } = render(language, { entity: 'branch', expectedUpdatedAt: raw, actualUpdatedAt: raw, current: { updated_at: raw } })
+          assert.equal(html.split('04/10/2026 03:30').length - 1, 3, zone + ': raw SQL UTC must not become client-local time')
+        }
+      }
+    } finally {
+      if (previousZone === undefined) delete process.env.TZ
+      else process.env.TZ = previousZone
+    }
+  })
   check(language + ': absent branch snapshot is unknown while a known empty value stays empty', () => {
     for (const current of [null, undefined, {}]) {
       const { tree, messages } = render(language, { entity: 'branch', attempted: { notes: 'Retained attempt' }, current })
