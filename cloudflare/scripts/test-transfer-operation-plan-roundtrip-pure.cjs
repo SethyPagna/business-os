@@ -80,6 +80,7 @@ const canonicalBranchIdentity = loadReal('lib/canonicalBranchIdentity.ts', { './
 const transferOperationReceipt = loadReal('lib/transferOperationReceipt.ts', { './db': {} })
 const movementCostSnapshot = loadReal('lib/movementCostSnapshot.ts', { './moneyPrecision': moneyPrecision })
 const productBatches = loadReal('lib/productBatches.ts', {
+  './receivingBranch': loadReal('lib/receivingBranch.ts'),
   './db': {}, './batchCode': batchCode, './moneyPrecision': moneyPrecision, './sqlBinding': sqlBinding,
 })
 const transferOperation = loadReal('lib/transferOperation.ts', {
