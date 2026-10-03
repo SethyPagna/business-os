@@ -214,18 +214,23 @@ runTest('the entry row is [Qty][Cost][Price]; the free row lives in Items; Price
   assert.doesNotMatch(shared, /stock_receipt_free_goods/, 'Free is never a shared detail')
 })
 
-runTest('a new product is held, then created once under its held request id at Complete Session, before it is received', () => {
+runTest('a new product is held, then dispatched from its captured attempt at Complete Session, before it is received', () => {
   const held = line({ product: { id: '', name: 'Glow Toner' }, createPayload: { name: 'Glow Toner' }, createRequestId: 'product_req_1' })
   assert.equal(lineNeedsCreate(held), true, 'a held payload with no id still needs its create')
   assert.equal(lineNeedsCreate({ ...held, product: { ...held.product, id: 501 } }), false, 'once the id is written, a retry only receives')
   assert.equal(lineNeedsCreate(line()), false, 'an existing product is never created')
   const modal = src('components/inventory/FastStockInModal.tsx')
-  assert.match(modal, /client_request_id: line\.createRequestId/, 'the create replays under the id minted when the payload was held')
+  assert.match(modal, /client_request_id: line\.createRequestId/, 'the create attempt keeps the id minted when the payload was held')
   const create = modal.indexOf('const id = await createHeldProduct(line)')
   const persist = modal.indexOf('persistSessionDraft(lines)', create)
   const receive = modal.indexOf('await commitFastStockIn(')
   assert.ok(create > 0 && persist > create && receive > persist, 'create, then the id is persisted synchronously, then the receipt')
-  assert.match(modal, /if \(result\?\.pending\) throw Object\.assign\([\s\S]{0,260}code: 'product_pending_review'/, 'a review-pending create is refused for this session')
+  const assertPendingRefusal = (source: string) => {
+    assert.match(source, /if \(result\?\.pending\) \{\s*try \{ await finishReceivingProductAttempt\(attempt, 'pending'\) \} catch \{ throw unknownError\(\) \}\s*submissionsRef\.current\.productOutcomes\[line\.key\] = 'pending'\s*throw Object\.assign\(new Error\([^\n]+\), \{ code: 'product_pending_review' \}\)/, 'a review-pending create is durably retained and refused for this session')
+  }
+  assertPendingRefusal(modal)
+  assert.throws(() => assertPendingRefusal(modal.replace("finishReceivingProductAttempt(attempt, 'pending')", "finishReceivingProductAttempt(attempt, 'not_dispatched')")), assert.AssertionError)
+  assert.throws(() => assertPendingRefusal(modal.replace("code: 'product_pending_review'", "code: 'ignored_pending'")), assert.AssertionError)
   assert.match(modal, /reviewPending \? \{ needsRemoval: true \} : \{\}/, 'a pending-review line offers only removal')
   assert.equal((modal.match(/createHeldProduct\(/g) || []).length, 1, 'the held create has one caller, the Complete Session loop')
   assert.equal((modal.match(/createProduct\(/g) || []).length, 1, 'createProduct has one call site')

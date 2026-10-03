@@ -70,8 +70,56 @@ console.log('PASS product image permission follows the effective Full grant with
 
 // A Review-tier create goes to review on the normal product route; the float
 // refuses to receive stock against a product that does not exist yet.
-assert.match(floatSource, /const result = await createProduct\(\{/)
-assert.match(floatSource, /if \(result\?\.pending\) throw Object\.assign\(new Error\([\s\S]*?\{ code: 'product_pending_review' \}\)/)
 const applierSource = readFileSync(new URL('../../cloudflare/src/lib/reviewApply.ts', import.meta.url), 'utf8')
-assert.match(applierSource, /registerApplier\('products', 'create', 'product'[\s\S]*?body\.stock_quantity[\s\S]*?seedBranchStockForNewProduct[\s\S]*?seedInitialBatchForNewProduct/)
+const writerSource = readFileSync(new URL('../../cloudflare/src/lib/productWrites.ts', import.meta.url), 'utf8')
+function assertReviewCreatePaths(modal: string, appliers: string, writers: string) {
+  const start = modal.indexOf('  const createHeldProduct = ')
+  const end = modal.indexOf('  // ---- commit ----', start)
+  assert.ok(start > 0 && end > start)
+  const create = modal.slice(start, end)
+  assert.match(create, /const payload = \{[\s\S]*?client_request_id: line\.createRequestId,[\s\S]*?stock_quantity: 0,/)
+  assert.match(create, /const attempt = await reserveReceivingProductAttempt\(user\?\.id, line\.createRequestId, payload, validateDestination\)/)
+  assert.match(create, /result = await createProduct\(JSON\.parse\(attempt\.bodyJson!\), assertDispatch\)/)
+  assert.match(create, /if \(result\?\.pending\) \{\s*try \{ await finishReceivingProductAttempt\(attempt, 'pending'\) \} catch \{ throw unknownError\(\) \}\s*submissionsRef\.current\.productOutcomes\[line\.key\] = 'pending'\s*throw Object\.assign\(new Error\([^\n]+\), \{ code: 'product_pending_review' \}\)/)
+  const applierAst = ts.createSourceFile('reviewApply.ts', appliers, ts.ScriptTarget.Latest, true)
+  const registration = applierAst.statements.find(item => ts.isExpressionStatement(item) && ts.isCallExpression(item.expression)
+    && item.expression.expression.getText(applierAst) === 'registerApplier'
+    && item.expression.arguments.slice(0, 3).map(value => ts.isStringLiteral(value) ? value.text : '').join('/') === 'products/create/product')
+  assert.ok(registration)
+  const registered = registration.getText(applierAst)
+  assert.match(registered, /await createProductWithInitialStock\(env, body,[\s\S]*?\{ row, reviewer: \{ reviewedBy: reviewer\.id, reviewedByName: reviewer\.name \} \}\)/)
+  assert.match(registered, /return \{ pendingActionMarkedAtomically: true \}/)
+  const writerAst = ts.createSourceFile('productWrites.ts', writers, ts.ScriptTarget.Latest, true)
+  const functionText = (name: string) => {
+    const node = writerAst.statements.find(item => ts.isFunctionDeclaration(item) && item.name?.text === name)
+    assert.ok(node, name)
+    return node.getText(writerAst)
+  }
+  assert.match(functionText('productCreateDestination'), /const rawQuantity = body\.stock_quantity \?\? 0/)
+  const writer = functionText('createProductWithInitialStock')
+  assert.match(writer, /const \{ branchId, quantity \} = await productCreateDestination\(env, body\)/)
+  assert.match(writer, /planInsertRow\('products',[\s\S]*?stock_quantity: quantity, client_request_id: key/)
+  for (const table of ['branch_stock', 'product_batches', 'branch_batch_stock']) {
+    const insert = writer.indexOf('INSERT INTO ' + table + '(')
+    assert.ok(insert > 0 && insert < writer.indexOf('await db.batchOnce(statements)'), table)
+  }
+  assert.match(writer, /if \(approval\) \{\s*statements\.push\(\.\.\.pendingActionApprovalStatements\(approval\.row, approval\.reviewer\)\)/)
+  assert.match(writer, /statements\.push\(receivingBranchAssertion\(branchId\)\)/)
+  assert.equal((writer.match(/await db\.batchOnce\(statements\)/g) || []).length, 1)
+}
+assertReviewCreatePaths(floatSource, applierSource, writerSource)
+for (const [before, after] of [
+  ['stock_quantity: 0,', 'stock_quantity: 1,'],
+  ['JSON.parse(attempt.bodyJson!), assertDispatch', 'JSON.parse(attempt.bodyJson!)'],
+  ["finishReceivingProductAttempt(attempt, 'pending')", "finishReceivingProductAttempt(attempt, 'unknown')"],
+  ["code: 'product_pending_review'", "code: 'ignored_pending'"],
+]) {
+  const start = floatSource.indexOf('  const createHeldProduct = ')
+  const changed = floatSource.slice(0, start) + floatSource.slice(start).replace(before, after)
+  assert.throws(() => assertReviewCreatePaths(changed, applierSource, writerSource), assert.AssertionError)
+}
+assert.throws(() => assertReviewCreatePaths(floatSource, applierSource.replace('await createProductWithInitialStock(env, body', 'await insertRow(env, body'), writerSource), assert.AssertionError)
+for (const before of ['INSERT INTO branch_stock(', 'INSERT INTO product_batches(', 'INSERT INTO branch_batch_stock(', '...pendingActionApprovalStatements(approval.row, approval.reviewer)']) {
+  assert.throws(() => assertReviewCreatePaths(floatSource, applierSource, writerSource.replace(before, 'removed_atomic_statement')), assert.AssertionError)
+}
 console.log('PASS Review-tier product creation stays on the review workflow; the Stock Session refuses a pending product')
