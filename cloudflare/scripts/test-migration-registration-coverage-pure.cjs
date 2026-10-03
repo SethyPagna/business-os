@@ -62,6 +62,7 @@ const NAMED_COMPANIONS = {
   223: 'test-branch-review-state-pure.cjs',
   224: 'test-branch-cutover-journal-native.cjs',
   225: 'test-branch-cutover-journal-native.cjs',
+  226: 'test-branch-history-labels-native.cjs',
 }
 
 function listMigrationNumbers() {
