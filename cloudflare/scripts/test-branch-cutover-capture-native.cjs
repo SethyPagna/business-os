@@ -15,6 +15,70 @@ function stock(w) {
 async function main() {
   let checks = 0
   async function check(name, fn) { if (process.env.PARENT_TEST_FILTER && !name.includes(process.env.PARENT_TEST_FILTER)) return; await fn(); console.log('PASS ' + name); checks++ }
+  await check('raw REAL exactness refuses both signed native non-roundtrip costs before a page batch', async () => {
+    for (const value of [3.5702545241480925e141, -3.5702545241480925e141]) {
+      const w = world(); stock(w)
+      w.raw.prepare('UPDATE product_batches SET unit_cost_usd=? WHERE id=101').run(value)
+      const native = w.raw.prepare("SELECT unit_cost_usd raw,printf('%!.17g',unit_cost_usd) encoded FROM product_batches WHERE id=101").get()
+      assert.equal(native.raw, value); assert.notEqual(Number(native.encoded), native.raw)
+      const schema = await w.capture.readCutoverCaptureSchema(w.db)
+      const tables = [...new Set([...w.capture.BRANCH_SCALAR_REFERENCES.map(v => v[0]), 'products', ...w.capture.UNCLASSIFIED_JSON_FAMILIES])].sort().filter(t => t !== 'branch_cutovers' && !w.capture.UNCLASSIFIED_JSON_FAMILIES.includes(t))
+      const cursor = { ...w.capture.initialCaptureCursor(), index: tables.indexOf('product_batches') }, batches = w.stats.batches
+      await assert.rejects(w.capture.readCutoverCapturePage(w.db, schema, { sourceBranchId: 2, targetBranchId: 1 }, cursor, '0'.repeat(64), 1, { 1: 'Warehouse', 2: 'Shop' }, false), e => e.code === 'branch_cutover_parent_capability')
+      assert.equal(w.stats.batches, batches)
+      assert.equal(w.raw.prepare('SELECT unit_cost_usd FROM product_batches WHERE id=101').get().unit_cost_usd, value)
+      w.raw.close()
+    }
+  })
+  await check('raw REAL sidecars bind cardinality order storage types and bounded native projections', async () => {
+    const w = world(); stock(w)
+    w.raw.exec("INSERT INTO product_batches(id,variant_product_id,batch_key,received_branch_id,unit_cost_usd) VALUES(102,10,'lot102',2,4); ALTER TABLE product_batches ADD COLUMN precision_integer; UPDATE product_batches SET precision_integer=9223372036854775807")
+    const schema = await w.capture.readCutoverCaptureSchema(w.db)
+    const tables = [...new Set([...w.capture.BRANCH_SCALAR_REFERENCES.map(v => v[0]), 'products', ...w.capture.UNCLASSIFIED_JSON_FAMILIES])].sort().filter(t => t !== 'branch_cutovers' && !w.capture.UNCLASSIFIED_JSON_FAMILIES.includes(t))
+    const cursor = { ...w.capture.initialCaptureCursor(), index: tables.indexOf('product_batches') }
+    const realKey = 'r' + schema.columns.product_batches.indexOf('unit_cost_usd'), integerKey = 'r' + schema.columns.product_batches.indexOf('precision_integer')
+    const originalPrepare = w.db.prepare.bind(w.db)
+    let transform = rows => rows, captures = 0, returnedBytes = 0, sqlBytes = 0
+    w.db.prepare = sql => {
+      const statement = originalPrepare(sql)
+      if (sql.startsWith('WITH capture_rows AS MATERIALIZED')) {
+        const all = statement.all.bind(statement)
+        statement.all = async params => {
+          const rows = await all(params); captures++; returnedBytes = Buffer.byteLength(JSON.stringify(rows)); sqlBytes = Buffer.byteLength(sql)
+          assert.equal(rows.length, 3); assert.equal(rows[1][realKey], 3); assert.equal(rows[2][realKey], 4)
+          assert.equal(rows[1][integerKey], null); assert.equal(rows[2][integerKey], null)
+          return transform(rows)
+        }
+      }
+      return statement
+    }
+    const page = () => w.capture.readCutoverCapturePage(w.db, schema, { sourceBranchId: 2, targetBranchId: 1 }, cursor, '0'.repeat(64), 2, { 1: 'Warehouse', 2: 'Shop' }, false)
+    const reads = w.stats.reads, valid = await page()
+    assert.equal(captures, 1); assert.equal(w.stats.reads - reads, 2); assert.ok(returnedBytes < 262144); assert.ok(sqlBytes < 100000); assert.ok(w.stats.maxBinds <= 100)
+    await w.db.batch(valid.statements)
+    const cases = [
+      rows => rows.slice(0, 2),
+      rows => [...rows, rows[1]],
+      rows => [rows[0], rows[2], rows[1]],
+      rows => { rows[1][realKey] = null; return rows },
+      rows => { rows[1][realKey] = '3'; return rows },
+      rows => { rows[1][realKey] = 4; return rows },
+      rows => { delete rows[1][realKey]; return rows },
+      rows => { rows[1][integerKey] = 1; return rows },
+      rows => { rows[1].k = 999; return rows },
+      rows => { rows[1].row_kind = 0; return rows },
+      rows => { rows[1].value = '[]'; return rows },
+      rows => { rows[0][realKey] = 3; return rows },
+      rows => { rows[0].value = JSON.stringify(JSON.parse(rows[0].value).map(([key, text]) => { const record = JSON.parse(text); delete record.unit_cost_usd; return [key, JSON.stringify(record)] })); return rows },
+    ]
+    for (const alter of cases) {
+      transform = alter; const batches = w.stats.batches
+      await assert.rejects(page(), e => e.code === 'branch_cutover_parent_capability')
+      assert.equal(w.stats.batches, batches)
+    }
+    console.log('REAL SIDECAR METRICS ' + JSON.stringify({ returnedBytes, sqlBytes, maximumBinds: w.stats.maxBinds, captures, malformedCases: cases.length }))
+    w.raw.close()
+  })
   await check('precision quantity retains the original admitted twelve-place REAL in both manifest totals', async () => {
     const w = world(); stock(w); const quantity = 1000.123456789012
     w.raw.prepare('UPDATE branch_stock SET quantity=? WHERE branch_id=2').run(quantity)

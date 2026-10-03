@@ -106,14 +106,15 @@ export async function readUnclassifiedCutoverFamilies(db: D1Compat): Promise<Arr
   }
   return result
 }
-function capturedScalar(value: unknown): string | number | null {
+function capturedScalar(value: unknown, rawReal: unknown): string | number | null {
   if (Array.isArray(value) && value.length === 2) {
     const [type, text] = value
+    if (type !== 'real' && rawReal !== null) throw new BranchCutoverCapabilityError('capture_scalar_sidecar_invalid')
     if (type === 'null' && text === null) return null
     if (typeof text === 'string') {
       if (type === 'text') return text
       if (type === 'integer' && /^-?(0|[1-9][0-9]*)$/.test(text)) return text
-      if (type === 'real' && text.trim() && Number.isFinite(Number(text))) return Number(text)
+      if (type === 'real' && text.trim() && typeof rawReal === 'number' && Number.isFinite(rawReal) && Object.is(Number(text), rawReal)) return rawReal
     }
   }
   throw new BranchCutoverCapabilityError('capture_scalar_unsupported')
@@ -128,22 +129,34 @@ export async function readCutoverCapturePage(db: D1Compat, schema: CaptureSchema
     const field = quote(column)
     return `'${column.replaceAll("'", "''")}',json_array(typeof(${field}),CASE typeof(${field}) WHEN 'integer' THEN CAST(${field} AS TEXT) WHEN 'real' THEN printf('%!.17g',${field}) WHEN 'text' THEN ${field} END)`
   }).join(',')})`
-  const rowsSql = `SELECT rowid AS k,${json} AS j FROM ${quote(table)} WHERE (${predicate(table)}) AND rowid>@after ORDER BY rowid LIMIT @limit`
+  const pageFrom = `FROM ${quote(table)} WHERE (${predicate(table)}) AND rowid>@after ORDER BY rowid LIMIT @limit`
+  const rowsSql = `SELECT rowid AS k,${json} AS j ${pageFrom}`
   const fingerprintSql = `SELECT json_group_array(json_array(k,j)) FROM (${rowsSql})`
+  const realColumns = columns.map((column, index) => `CASE WHEN typeof(${quote(column)})='real' THEN ${quote(column)} END AS r${index}`)
+  const sidecarSql = `WITH capture_rows AS MATERIALIZED (SELECT rowid AS k,${json} AS j,${realColumns.join(',')} ${pageFrom}),
+    capture_fingerprint AS (SELECT json_group_array(json_array(k,j)) AS value FROM (SELECT k,j FROM capture_rows ORDER BY k))
+    SELECT 0 AS row_kind,NULL AS k,CASE WHEN length(CAST(value AS BLOB))<=262144 THEN value END AS value,${columns.map((_, index) => `NULL AS r${index}`).join(',')} FROM capture_fingerprint
+    UNION ALL SELECT 1 AS row_kind,k,NULL AS value,${columns.map((_, index) => `r${index}`).join(',')} FROM capture_rows ORDER BY row_kind,k`
   const params = { source: identity.sourceBranchId, target: identity.targetBranchId, after: cursor.key, limit: pageSize }
   if (cursor.key === 0) {
     const invalid = await db.prepare(`SELECT count(*) AS n FROM ${quote(table)} WHERE (${predicate(table)}) AND rowid<=0`).get<{ n: number }>(params)
     if (invalid?.n) throw new BranchCutoverCapabilityError('capture_nonpositive_rowid:' + table)
   }
-  const page = await db.prepare(`SELECT CASE WHEN length(CAST(value AS BLOB))<=262144 THEN value END AS value FROM (${fingerprintSql.replace('SELECT json_group_array(json_array(k,j))', 'SELECT json_group_array(json_array(k,j)) AS value')})`).get<{ value: string | null }>(params)
-  if (!page || page.value === null) throw new BranchCutoverCapabilityError('capture_page_bytes_exceeded')
-  const rows = JSON.parse(page.value) as Array<[number, string]>
-  const next = { ...cursor }; const statements = [cutoverAssert(`(${fingerprintSql})=@fingerprint`, { ...params, fingerprint: page.value }),
+  const page = await db.prepare(sidecarSql).all<Record<string, unknown>>(params)
+  const header = page[0]
+  if (!header || typeof header.value !== 'string' || cutoverBytes(JSON.stringify(page)) > 262144) throw new BranchCutoverCapabilityError('capture_page_bytes_exceeded')
+  const rows = JSON.parse(header.value) as Array<[number, string]>
+  if (header.row_kind !== 0 || header.k !== null || columns.some((_, index) => header[`r${index}`] !== null)
+    || page.length !== rows.length + 1 || rows.length > pageSize) throw new BranchCutoverCapabilityError('capture_scalar_sidecar_invalid')
+  const next = { ...cursor }; const statements = [cutoverAssert(`(${fingerprintSql})=@fingerprint`, { ...params, fingerprint: header.value }),
     cutoverAssert(`NOT EXISTS(SELECT 1 FROM ${quote(table)} WHERE (${predicate(table)}) AND rowid<=0)`, params)]
-  for (const [key, raw] of rows) {
+  for (const [rowIndex, [key, raw]] of rows.entries()) {
     if (!Number.isSafeInteger(key) || key <= next.key || cutoverBytes(raw) > 65536) throw new BranchCutoverCapabilityError('capture_row_invalid_or_oversize')
+    const sidecar = page[rowIndex + 1]
+    if (sidecar.row_kind !== 1 || sidecar.k !== key || sidecar.value !== null || Object.keys(sidecar).length !== columns.length + 3) throw new BranchCutoverCapabilityError('capture_scalar_sidecar_invalid')
     const encoded = JSON.parse(raw) as Record<string, unknown>
-    const record = Object.fromEntries(Object.entries(encoded).map(([field, value]) => [field, capturedScalar(value)]))
+    if (Object.keys(encoded).length !== columns.length) throw new BranchCutoverCapabilityError('capture_scalar_sidecar_invalid')
+    const record = Object.fromEntries(columns.map((field, index) => [field, capturedScalar(encoded[field], sidecar[`r${index}`])]))
     for (const [field, branchField] of snapshots[table] || []) {
       const name = names[Number(record[branchField])]
       if (name !== undefined && (record[field] === null || record[field] === undefined || typeof record[field] === 'string' && !(record[field] as string).trim())) encoded[field] = ['text', name]

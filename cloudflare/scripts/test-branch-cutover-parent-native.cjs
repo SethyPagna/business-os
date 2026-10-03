@@ -81,6 +81,21 @@ async function step(w, row, pageSize = 8) { return w.parent.continueBranchCutove
 async function main() {
   let checks = 0
   async function check(name, fn) { if (process.env.PARENT_TEST_FILTER && !name.includes(process.env.PARENT_TEST_FILTER)) return; await fn(); console.log('PASS ' + name); checks++ }
+  await check('non-roundtrip REAL metadata refuses the checkpoint preserving its exact journal and hold', async () => {
+    const w = world()
+    w.raw.exec("INSERT INTO products(id,name,stock_quantity) VALUES(10,'Item',1); INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(10,2,1); INSERT INTO product_batches(id,variant_product_id,batch_key,received_branch_id,unit_cost_usd) VALUES(101,10,'lot101',2,3); INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(101,2,1)")
+    let { row } = await begin(w)
+    const tables = [...new Set([...w.capture.BRANCH_SCALAR_REFERENCES.map(v => v[0]), 'products', ...w.capture.UNCLASSIFIED_JSON_FAMILIES])].sort().filter(t => t !== 'branch_cutovers' && !w.capture.UNCLASSIFIED_JSON_FAMILIES.includes(t))
+    while (w.capture.parseCaptureCursor(row.capture_cursor_json).index !== tables.indexOf('product_batches')) row = (await step(w, row)).row
+    w.raw.prepare('UPDATE product_batches SET unit_cost_usd=? WHERE id=101').run(3.5702545241480925e141)
+    const before = w.raw.prepare('SELECT * FROM branch_cutovers').get(), batches = w.stats.batches
+    const hold = w.raw.prepare("SELECT value FROM system_flags WHERE key='maintenance'").get().value
+    await assert.rejects(step(w, row), e => e.code === 'branch_cutover_parent_capability')
+    assert.equal(w.stats.batches, batches); assert.deepEqual(w.raw.prepare('SELECT * FROM branch_cutovers').get(), before)
+    assert.equal(w.raw.prepare("SELECT value FROM system_flags WHERE key='maintenance'").get().value, hold)
+    assert.equal(w.raw.prepare('SELECT unit_cost_usd FROM product_batches WHERE id=101').get().unit_cost_usd, 3.5702545241480925e141)
+    assert.equal(w.raw.prepare('SELECT count(*) n FROM inventory_movements').get().n, 0); w.raw.close()
+  })
   await check('old lossy capture registry cannot resume or silently rebase its held journal', async () => {
     const w = world(); const plan = await inspect(w)
     const registryDigest = '25c31b35e5c80204d5daff886a79872951f441dcd44937a461b00f65c8180cf8'
