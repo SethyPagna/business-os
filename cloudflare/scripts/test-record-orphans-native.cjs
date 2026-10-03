@@ -39,6 +39,7 @@ const assert = require('node:assert/strict')
 const crypto = require('node:crypto')
 const fs = require('node:fs')
 const path = require('node:path')
+const { DatabaseSync } = require('node:sqlite')
 const Database = require('better-sqlite3')
 const { build } = require('esbuild')
 const { Miniflare, Log, LogLevel } = require('miniflare')
@@ -251,6 +252,48 @@ function auditFileText(relations) {
   ].join('\n')
 }
 
+const BRANCH_RELATIONS = [
+  'branches.successor_branch_id->branches',
+  'branch_cutovers.actor_id->users',
+  'branch_cutovers.source_branch_id->branches',
+  'branch_cutovers.target_branch_id->branches',
+]
+
+function assertBranchOrphanControls(relations) {
+  const selected = BRANCH_RELATIONS.map(key => {
+    const relation = relations.find(item => `${item.child}.${item.column}->${item.parent}` === key)
+    assert.ok(relation, `the audit lost a branch relation: ${key}`)
+    return relation
+  })
+  const db = new DatabaseSync(':memory:')
+  db.limits.exprDepth = 100
+  try {
+    db.exec(`CREATE TABLE users(id INTEGER PRIMARY KEY);
+      CREATE TABLE branches(id INTEGER PRIMARY KEY, successor_branch_id INTEGER, is_active INTEGER);
+      CREATE TABLE branch_cutovers(actor_id INTEGER, source_branch_id INTEGER, target_branch_id INTEGER);
+      INSERT INTO users VALUES(7);
+      INSERT INTO branches VALUES(1,NULL,1),(2,1,0);
+      INSERT INTO branch_cutovers VALUES(7,2,1);`)
+    const audit = () => selected.map(relation => db.prepare(orphanSql(relation)).get())
+      .filter(row => row.orphan_count !== 0).map(row => ({ relation: row.relation, orphan_count: row.orphan_count }))
+    assert.deepEqual(audit(), [], 'an inactive source with a present successor and actor is not orphaned')
+    for (const [column, original, parent] of [['actor_id', 7, 'users'], ['source_branch_id', 2, 'branches'], ['target_branch_id', 1, 'branches']]) {
+      db.prepare(`UPDATE branch_cutovers SET ${column}=?`).run(99)
+      assert.deepEqual(audit(), [{ relation: `branch_cutovers.${column}->${parent}`, orphan_count: 1 }])
+      db.prepare(`UPDATE branch_cutovers SET ${column}=?`).run(original)
+      assert.deepEqual(audit(), [])
+    }
+    db.exec('UPDATE branches SET successor_branch_id=99 WHERE id=2')
+    assert.deepEqual(audit(), [{ relation: 'branches.successor_branch_id->branches', orphan_count: 1 }])
+    db.exec('UPDATE branches SET successor_branch_id=1 WHERE id=2; UPDATE branches SET is_active=0 WHERE id=1')
+    assert.deepEqual(audit(), [], 'an inactive but present parent is not orphaned')
+    db.exec('UPDATE branches SET successor_branch_id=NULL WHERE id=2')
+    assert.deepEqual(audit(), [], 'a nullable successor is not an orphan')
+  } finally {
+    db.close()
+  }
+}
+
 // ---------------------------------------------------------------------------
 // 2. The Worker under test: the real routers, fixtures only for auth/audit/
 //    cache/telegram/broadcast.
@@ -362,6 +405,7 @@ async function main() {
       `these *_id columns resolve to no owning table -- map them in OWNER_TABLE/CHILD_SCOPED or list them in NOT_A_REFERENCE with a reason:\n${schema.unresolved.join('\n')}`)
     assert.ok(schema.relations.length > 150, `only ${schema.relations.length} relations derived; the derivation is broken`)
     for (const required of [
+      ...BRANCH_RELATIONS,
       'sale_items.sale_id->sales', 'return_items.return_id->returns', 'return_items.sale_item_id->sale_items',
       'sale_amendments.sale_id->sales', 'sale_mutation_receipts.sale_id->sales', 'returns.sale_id->sales',
       'customer_receivables.customer_id->customers', 'sales.customer_id->customers',
@@ -376,6 +420,11 @@ async function main() {
       'a HISTORICAL_REFERENCE entry names a column the schema no longer has, or one stopped matching')
     report('every *_id column in the schema is audited or explicitly classified')
   } catch (error) { report('every *_id column in the schema is audited or explicitly classified', error) }
+
+  try {
+    assertBranchOrphanControls(schema.relations)
+    report('branch relation queries discriminate missing, inactive and nullable parents at native depth100')
+  } catch (error) { report('branch relation queries discriminate missing, inactive and nullable parents at native depth100', error) }
 
   try {
     const expected = auditFileText(schema.relations)

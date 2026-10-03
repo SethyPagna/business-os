@@ -33,8 +33,12 @@ SELECT 'ai_response_logs.provider_config_id->ai_provider_configs' AS relation, C
 SELECT 'audit_logs.user_id->users' AS relation, COUNT(*) AS orphan_count FROM audit_logs c LEFT JOIN users p ON p.id = c.user_id WHERE c.user_id IS NOT NULL AND p.id IS NULL;
 SELECT 'branch_batch_stock.batch_id->product_batches' AS relation, COUNT(*) AS orphan_count FROM branch_batch_stock c LEFT JOIN product_batches p ON p.id = c.batch_id WHERE c.batch_id IS NOT NULL AND p.id IS NULL;
 SELECT 'branch_batch_stock.branch_id->branches' AS relation, COUNT(*) AS orphan_count FROM branch_batch_stock c LEFT JOIN branches p ON p.id = c.branch_id WHERE c.branch_id IS NOT NULL AND p.id IS NULL;
+SELECT 'branch_cutovers.actor_id->users' AS relation, COUNT(*) AS orphan_count FROM branch_cutovers c LEFT JOIN users p ON p.id = c.actor_id WHERE c.actor_id IS NOT NULL AND p.id IS NULL;
+SELECT 'branch_cutovers.source_branch_id->branches' AS relation, COUNT(*) AS orphan_count FROM branch_cutovers c LEFT JOIN branches p ON p.id = c.source_branch_id WHERE c.source_branch_id IS NOT NULL AND p.id IS NULL;
+SELECT 'branch_cutovers.target_branch_id->branches' AS relation, COUNT(*) AS orphan_count FROM branch_cutovers c LEFT JOIN branches p ON p.id = c.target_branch_id WHERE c.target_branch_id IS NOT NULL AND p.id IS NULL;
 SELECT 'branch_stock.branch_id->branches' AS relation, COUNT(*) AS orphan_count FROM branch_stock c LEFT JOIN branches p ON p.id = c.branch_id WHERE c.branch_id IS NOT NULL AND p.id IS NULL;
 SELECT 'branch_stock.product_id->products' AS relation, COUNT(*) AS orphan_count FROM branch_stock c LEFT JOIN products p ON p.id = c.product_id WHERE c.product_id IS NOT NULL AND p.id IS NULL;
+SELECT 'branches.successor_branch_id->branches' AS relation, COUNT(*) AS orphan_count FROM branches c LEFT JOIN branches p ON p.id = c.successor_branch_id WHERE c.successor_branch_id IS NOT NULL AND p.id IS NULL;
 SELECT 'bulk_delete_jobs.created_by_id->users' AS relation, COUNT(*) AS orphan_count FROM bulk_delete_jobs c LEFT JOIN users p ON p.id = c.created_by_id WHERE c.created_by_id IS NOT NULL AND p.id IS NULL;
 SELECT 'catalog_cost_recompute_0175.product_id->products' AS relation, COUNT(*) AS orphan_count FROM catalog_cost_recompute_0175 c LEFT JOIN products p ON p.id = c.product_id WHERE c.product_id IS NOT NULL AND p.id IS NULL;
 SELECT 'catalog_cost_repair_0195_backup.product_id->products' AS relation, COUNT(*) AS orphan_count FROM catalog_cost_repair_0195_backup c LEFT JOIN products p ON p.id = c.product_id WHERE c.product_id IS NOT NULL AND p.id IS NULL;
