@@ -42,6 +42,7 @@ import {
   resolveCanonicalTransferPair,
   type CanonicalTransferBranchRow,
   type CanonicalTransferPair,
+  type BranchIdentitySnapshot,
 } from '../lib/canonicalBranchIdentity'
 // Transfers run in either direction between Shop and Warehouse. The exact
 // opposite-role rule lives with the canonical branch roles rather than being
@@ -1014,8 +1015,8 @@ app.put('/:id', async (c) => {
   const body = await c.req.json<BranchInput & Record<string, unknown>>()
   const db = getDb(c.env)
 
-  const current = await db.prepare('SELECT id, name, is_active, updated_at FROM branches WHERE id = ?')
-    .get<{ id: number; name: string; is_active: number; updated_at: string }>([id])
+  const current = await db.prepare('SELECT * FROM branches WHERE id = ?')
+    .get<BranchIdentitySnapshot & { updated_at: string }>([id])
   try {
     assertUpdatedAtMatch('branch', current, getExpectedUpdatedAt(body))
   } catch (error) {
@@ -1026,8 +1027,11 @@ app.put('/:id', async (c) => {
     throw error
   }
   if (!current) return c.json({ error: 'Branch not found' }, 404)
+  const directory = Number(current.is_active) === 0
+    ? await db.prepare('SELECT * FROM branches ORDER BY id').all<BranchIdentitySnapshot>()
+    : []
   try {
-    prepareCanonicalBranchUpdate(current, body)
+    prepareCanonicalBranchUpdate(current, body, directory)
   } catch (error) {
     if (error instanceof CanonicalBranchIdentityError) {
       return c.json({ error: CANONICAL_BRANCH_IDENTITY_ERROR, code: CANONICAL_BRANCH_IDENTITY_CODE }, 409)
@@ -1054,7 +1058,7 @@ app.put('/:id', async (c) => {
 
   // Field write shared with the server-side undo/redo applier -- see
   // lib/branchWrites.ts for why this is one definition, not two.
-  await db.batch([...branchUpdateStatements(id, body, current), ordinaryBusinessMaintenanceGuard])
+  await db.batch([...branchUpdateStatements(id, body, current, directory), ordinaryBusinessMaintenanceGuard])
 
   await audit(c.env, user?.id ?? null, actorSnapshot(user), 'update', 'branch', id, { name: current.name })
   c.executionCtx.waitUntil(broadcast(c.env, 'branches', { action: 'update', id }))

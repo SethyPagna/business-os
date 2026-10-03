@@ -7,11 +7,48 @@ export type BranchIdentitySnapshot = {
   id: number | string
   name: unknown
   is_active: unknown
+  role?: unknown
+  canonical_key?: unknown
+  successor_branch_id?: unknown
+  is_default?: unknown
+  updated_at?: unknown
+}
+
+function activeSuccessorPath(
+  rows: readonly BranchIdentitySnapshot[],
+  source: BranchIdentitySnapshot,
+): BranchIdentitySnapshot[] | null {
+  const byId = new Map<number, BranchIdentitySnapshot>()
+  for (const row of rows) {
+    const id = Number(row.id)
+    if (!Number.isSafeInteger(id) || id <= 0 || byId.has(id)) return null
+    byId.set(id, row)
+  }
+  if (!byId.has(Number(source.id))) return null
+  const seen = new Set<number>([Number(source.id)])
+  const path: BranchIdentitySnapshot[] = []
+  let current = source
+  for (let hop = 0; current && hop < 8; hop += 1) {
+    const nextId = Number(current.successor_branch_id)
+    if (!Number.isSafeInteger(nextId) || nextId <= 0 || seen.has(nextId)) return null
+    seen.add(nextId)
+    const next = byId.get(nextId)
+    if (!next) return null
+    path.push(next)
+    if (Number(next.is_active) === 1) return next.successor_branch_id == null ? path : null
+    if (Number(next.is_active) !== 0) return null
+    current = next
+  }
+  return null
 }
 
 export type BranchIdentityFields = {
   name?: unknown
   is_active?: unknown
+  role?: unknown
+  canonical_key?: unknown
+  successor_branch_id?: unknown
+  is_default?: unknown
 }
 
 export type CanonicalTransferBranchRow = BranchIdentitySnapshot
@@ -63,6 +100,23 @@ export function canonicalBranchName(value: unknown): CanonicalBranchName | null 
 
 export function isCanonicalBranchName(value: unknown): boolean {
   return canonicalBranchName(value) !== null
+}
+
+export function canonicalBranchIdentityOf(row: BranchIdentitySnapshot): CanonicalBranchName | null {
+  return canonicalBranchName(row.canonical_key == null ? row.name : row.canonical_key)
+}
+
+function metadataSuccessors(current: BranchIdentitySnapshot, rows: readonly BranchIdentitySnapshot[]): BranchIdentitySnapshot[] {
+  if (!canonicalBranchIdentityOf(current)
+    || (current.role != null && branchRoleFromName(current.role) === 'other')) throw new CanonicalBranchIdentityError()
+  if (toDbBool(current.is_active, 0) === 1) {
+    if (current.successor_branch_id != null) throw new CanonicalBranchIdentityError()
+    return []
+  }
+  const path = activeSuccessorPath(rows, current)
+  if (!path || path.some(row => !canonicalBranchIdentityOf(row)
+    || (row.role != null && branchRoleFromName(row.role) === 'other'))) throw new CanonicalBranchIdentityError()
+  return path
 }
 
 /**
@@ -160,16 +214,26 @@ export function assertCanonicalBranchSetMutationAllowed(): never {
 export function prepareCanonicalBranchUpdate(
   current: BranchIdentitySnapshot,
   requested: BranchIdentityFields,
+  rows: readonly BranchIdentitySnapshot[] = [],
 ): { name: string; is_active: number; canonicalName: CanonicalBranchName } {
-  const currentCanonicalName = canonicalBranchName(current.name)
+  const currentCanonicalName = canonicalBranchIdentityOf(current)
   const currentActive = toDbBool(current.is_active, 0)
-  if (!currentCanonicalName || currentActive !== 1) throw new CanonicalBranchIdentityError()
+  if (!currentCanonicalName) throw new CanonicalBranchIdentityError()
+  metadataSuccessors(current, rows)
+  if (!currentActive && (toDbBool(current.is_default, 0) || toDbBool(requested.is_default, 0))) {
+    throw new CanonicalBranchIdentityError()
+  }
+  for (const field of ['role', 'canonical_key', 'successor_branch_id'] as const) {
+    if (Object.prototype.hasOwnProperty.call(requested, field) && requested[field] !== current[field]) {
+      throw new CanonicalBranchIdentityError()
+    }
+  }
 
   const requestedName = requested.name == null ? current.name : requested.name
   const requestedActive = requested.is_active == null || requested.is_active === ''
     ? currentActive
     : toDbBool(requested.is_active, currentActive)
-  if (canonicalBranchName(requestedName) !== currentCanonicalName || requestedActive !== currentActive) {
+  if (String(requestedName).trim().toLowerCase() !== String(current.name).trim().toLowerCase() || requestedActive !== currentActive) {
     throw new CanonicalBranchIdentityError()
   }
 
@@ -185,23 +249,30 @@ export function prepareCanonicalBranchUpdate(
  * On a missing or changed row, this deliberately attempts a NULL name insert;
  * branches.name is NOT NULL, so D1 throws and rolls the entire batch back.
  */
-export function canonicalBranchIdentityGuardStatement(current: BranchIdentitySnapshot): {
+export function canonicalBranchIdentityGuardStatement(current: BranchIdentitySnapshot, rows: readonly BranchIdentitySnapshot[] = []): {
   sql: string
   params: Record<string, unknown>
 } {
+  const snapshots = [current, ...metadataSuccessors(current, rows)]
+  const params: Record<string, unknown> = {}
+  const checks = snapshots.map((row, index) => {
+    const prefix = `identity_${index}`
+    params[`${prefix}_id`] = row.id
+    params[`${prefix}_name`] = row.name
+    params[`${prefix}_active`] = toDbBool(row.is_active, 0)
+    const conditions = [`id = @${prefix}_id`, `name IS @${prefix}_name`, `is_active IS @${prefix}_active`]
+    for (const field of ['role', 'canonical_key', 'successor_branch_id', 'is_default', 'updated_at'] as const) {
+      if (Object.prototype.hasOwnProperty.call(row, field)) {
+        params[`${prefix}_${field}`] = row[field] ?? null
+        conditions.push(`${field} IS @${prefix}_${field}`)
+      }
+    }
+    return `EXISTS (SELECT 1 FROM branches WHERE ${conditions.join(' AND ')})`
+  })
   return {
     sql: `INSERT INTO branches (name)
       SELECT NULL
-      WHERE NOT EXISTS (
-        SELECT 1 FROM branches
-        WHERE id = @identity_id
-          AND name IS @identity_name
-          AND is_active IS @identity_active
-      )`,
-    params: {
-      identity_id: current.id,
-      identity_name: current.name,
-      identity_active: toDbBool(current.is_active, 0),
-    },
+      WHERE NOT (${checks.join(' AND ')})`,
+    params,
   }
 }

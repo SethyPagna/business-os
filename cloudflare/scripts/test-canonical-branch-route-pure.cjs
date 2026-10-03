@@ -135,12 +135,7 @@ const branchRoute = loadModule('routes/branches.ts', (id) => {
   })
   if (id === '../lib/transferOperationReceipt') return transferReceipts
   if (id === '../lib/telegram') return { formatTransferTelegramLines: noop, sendTelegramEvent: async () => {} }
-  if (id === '../lib/conflictControl') return {
-    assertUpdatedAtMatch: () => {},
-    getExpectedUpdatedAt: () => undefined,
-    writeConflictResponse: (error) => ({ body: { error: error.message }, status: 409 }),
-    WriteConflictError: class WriteConflictError extends Error {},
-  }
+  if (id === '../lib/conflictControl') return loadModule('lib/conflictControl.ts', require)
   if (id === '../lib/productIdentity') return { findIdentityMatch: async () => null, findIdentityMatches: async () => new Map() }
   if (id === '../lib/productBatches') return {
     decrementBatchStockStrictStatement: noop,
@@ -202,6 +197,29 @@ async function check(name, fn) {
 }
 
 async function main() {
+  await check('retired description saves and forbids lifecycle/default changes before review', async () => {
+    sqlite.exec(`ALTER TABLE branches ADD COLUMN role TEXT;
+      ALTER TABLE branches ADD COLUMN canonical_key TEXT;
+      ALTER TABLE branches ADD COLUMN successor_branch_id INTEGER;
+      UPDATE branches SET name='Old Shop',role='shop',canonical_key='shop',is_active=0,is_default=0,successor_branch_id=2 WHERE id=1;
+      UPDATE branches SET name='LC Store',role='shop',canonical_key='warehouse',is_default=1 WHERE id=2;`)
+    const saved = await request('PUT', '/1', { name: 'Old Shop', notes: 'legacy description', is_active: 0, is_default: 0 })
+    assert.equal(saved.status, 200)
+    assert.equal(sqlite.prepare('SELECT notes FROM branches WHERE id=1').get().notes, 'legacy description')
+    for (const mutation of [{ is_active: 1 }, { is_default: 1 }, { successor_branch_id: null }, { canonical_key: 'warehouse' }]) {
+      const queuedBefore = queueCalls
+      const result = await request('PUT', '/1', mutation)
+      assert.equal(result.status, 409)
+      assert.equal(result.json.code, identity.CANONICAL_BRANCH_IDENTITY_CODE)
+      assert.equal(queueCalls, queuedBefore)
+    }
+    const before = sqlite.prepare('SELECT * FROM branches ORDER BY id').all()
+    const stale = await request('PUT', '/1', { notes: 'stale', expected_updated_at: '2000-01-01' })
+    assert.equal(stale.status, 409)
+    assert.equal(stale.json.code, 'write_conflict')
+    assert.deepEqual(sqlite.prepare('SELECT * FROM branches ORDER BY id').all(), before)
+  })
+
   await check('full-authority create and delete return 409 without queue or write', async () => {
     const before = sqlite.prepare('SELECT * FROM branches ORDER BY id').all()
     for (const [method, url, body] of [['POST', '/', { name: 'Depot' }], ['DELETE', '/2', null]]) {

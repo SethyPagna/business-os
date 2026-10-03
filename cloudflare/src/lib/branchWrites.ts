@@ -1,6 +1,7 @@
 import { toDbBool } from './db'
 import {
   canonicalBranchIdentityGuardStatement,
+  CanonicalBranchIdentityError,
   prepareCanonicalBranchUpdate,
   type BranchIdentitySnapshot,
 } from './canonicalBranchIdentity'
@@ -23,6 +24,9 @@ export interface BranchWriteFields {
   notes?: unknown
   is_default?: unknown
   is_active?: unknown
+  role?: unknown
+  canonical_key?: unknown
+  successor_branch_id?: unknown
 }
 
 function branchNameSnapshotStatements(id: string | number): Array<{ sql: string; params?: Record<string, unknown> }> {
@@ -43,16 +47,18 @@ export function branchUpdateStatements(
   id: string | number,
   fields: BranchWriteFields,
   currentIdentity: BranchIdentitySnapshot,
+  directory: readonly BranchIdentitySnapshot[] = [],
 ): Array<{ sql: string; params?: Record<string, unknown> }> {
-  const identity = prepareCanonicalBranchUpdate(currentIdentity, fields)
+  const identity = prepareCanonicalBranchUpdate(currentIdentity, fields, directory)
   const defaultFlag = toDbBool(fields.is_default, 0)
+  if (!identity.is_active && defaultFlag) throw new CanonicalBranchIdentityError()
   const statements: Array<{ sql: string; params?: Record<string, unknown> }> = [
-    canonicalBranchIdentityGuardStatement(currentIdentity),
+    canonicalBranchIdentityGuardStatement(currentIdentity, directory),
   ]
   if (defaultFlag) {
     statements.push({
       sql: `UPDATE branches SET is_default = 0
-            WHERE id != @id AND lower(trim(name)) IN ('shop', 'warehouse')`,
+            WHERE id != @id AND ${canonicalActiveBranchSql(currentIdentity)}`,
       params: { id },
     })
   }
@@ -92,10 +98,7 @@ type BranchStatement = { sql: string; params?: Record<string, unknown> }
 export const BRANCH_REPLAY_TEXT_FIELDS = ['location', 'phone', 'manager', 'notes'] as const
 const BRANCH_REPLAY_FIELDS = ['name', ...BRANCH_REPLAY_TEXT_FIELDS, 'is_default', 'is_active'] as const
 
-export interface BranchReplayRow {
-  id: number | string
-  name: unknown
-  is_active: unknown
+export interface BranchReplayRow extends BranchIdentitySnapshot {
   location?: unknown
   phone?: unknown
   manager?: unknown
@@ -104,11 +107,17 @@ export interface BranchReplayRow {
 }
 
 export const BRANCH_REPLAY_ROW_SQL =
-  'SELECT id, name, is_active, location, phone, manager, notes, is_default FROM branches WHERE id = ?'
+  'SELECT * FROM branches WHERE id = ?'
 
 // Canonical, active rows are the only ones that may hold the default flag
 // (the same scope branchUpdateStatements clears within).
 const CANONICAL_ACTIVE_BRANCH_SQL = `is_active = 1 AND lower(trim(name)) IN ('shop', 'warehouse')`
+
+function canonicalActiveBranchSql(current: BranchIdentitySnapshot): string {
+  return Object.prototype.hasOwnProperty.call(current, 'canonical_key')
+    ? `is_active = 1 AND lower(trim(COALESCE(canonical_key, name))) IN ('shop', 'warehouse')`
+    : CANONICAL_ACTIVE_BRANCH_SQL
+}
 
 // The value branchUpdateStatements stores for a text field (`value || null`),
 // with a stored empty string read as the same "blank" as NULL.
@@ -180,6 +189,12 @@ export function branchReplayDropsDefault(fields: BranchWriteFields, current: Bra
 export const OTHER_CANONICAL_BRANCH_SQL =
   `SELECT id FROM branches WHERE id != ? AND ${CANONICAL_ACTIVE_BRANCH_SQL} ORDER BY id LIMIT 1`
 
+export function otherCanonicalBranchSql(current: BranchIdentitySnapshot): string {
+  return Object.prototype.hasOwnProperty.call(current, 'canonical_key')
+    ? `SELECT id FROM branches WHERE id != ? AND ${canonicalActiveBranchSql(current)} ORDER BY id LIMIT 1`
+    : OTHER_CANONICAL_BRANCH_SQL
+}
+
 /**
  * Appended after branchUpdateStatements in a replay so a replay that moves the
  * default flag can never leave zero or two default branches. Setting the flag
@@ -197,18 +212,19 @@ export function branchReplayDefaultStatements(
 ): BranchStatement[] {
   if (toDbBool(fields.is_default, 0) === toDbBool(current.is_default, 0)) return []
   const statements: BranchStatement[] = []
+  const activeBranchSql = canonicalActiveBranchSql(current)
   if (!toDbBool(fields.is_default, 0)) {
     statements.push({
       sql: `UPDATE branches SET is_default = 1, updated_at = CURRENT_TIMESTAMP
-            WHERE id = (SELECT id FROM branches WHERE id != @id AND ${CANONICAL_ACTIVE_BRANCH_SQL} ORDER BY id LIMIT 1)
-              AND NOT EXISTS (SELECT 1 FROM branches WHERE COALESCE(is_default, 0) = 1 AND ${CANONICAL_ACTIVE_BRANCH_SQL})`,
+            WHERE id = (SELECT id FROM branches WHERE id != @id AND ${activeBranchSql} ORDER BY id LIMIT 1)
+              AND NOT EXISTS (SELECT 1 FROM branches WHERE COALESCE(is_default, 0) = 1 AND ${activeBranchSql})`,
       params: { id },
     })
   }
   statements.push({
     sql: `INSERT INTO branches (name)
       SELECT NULL
-      WHERE (SELECT COUNT(*) FROM branches WHERE COALESCE(is_default, 0) = 1 AND ${CANONICAL_ACTIVE_BRANCH_SQL}) <> 1`,
+      WHERE (SELECT COUNT(*) FROM branches WHERE COALESCE(is_default, 0) = 1 AND ${activeBranchSql}) <> 1`,
   })
   return statements
 }

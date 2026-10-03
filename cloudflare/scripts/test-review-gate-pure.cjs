@@ -229,6 +229,7 @@ const reviewApply = loadReal('lib/reviewApply.ts', {
   './productWrites': productWrites,
   './branchWrites': branchWrites,
   './canonicalBranchIdentity': canonicalBranchIdentity,
+  './conflictControl': loadReal('lib/conflictControl.ts'),
   './branchRoleGuards': branchRoleGuards,
   './permissions': permissions,
   './productImagePermission': productImagePermission,

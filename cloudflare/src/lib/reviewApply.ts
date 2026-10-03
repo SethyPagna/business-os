@@ -23,7 +23,8 @@ import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from './cache'
 import { insertRow, updateRow, defaultBranchId, syncProductImageGallery, seedBranchStockForNewProduct, seedInitialBatchForNewProduct, readProductMoneyPlan } from './productWrites'
 import { branchUpdateStatements } from './branchWrites'
-import { assertCanonicalBranchSetMutationAllowed } from './canonicalBranchIdentity'
+import { assertCanonicalBranchSetMutationAllowed, type BranchIdentitySnapshot } from './canonicalBranchIdentity'
+import { assertUpdatedAtMatch, getExpectedUpdatedAt } from './conflictControl'
 import { getActionTier } from './permissions'
 import { omitUnchangedProductImageFields, productImageFieldsChanged, productImageFieldsChangedResolved, resolveProductImageFields } from './productImagePermission'
 import { parseProductRemovePendingPointer, parseProductRemovePlan, productRemoveApprovalStatements, productRemovePlanDigest,
@@ -311,10 +312,14 @@ registerApplier('branches', 'update', 'branch', async (env, row, reviewer, waitU
   if (id == null) throw new Error('Pending branch update is missing its entity id')
   const body = JSON.parse(row.payload_json || '{}') as Record<string, unknown>
   const db = getDb(env)
-  const current = await db.prepare('SELECT id, name, is_active FROM branches WHERE id = @id')
-    .get<{ id: number; name: string; is_active: number }>({ id })
+  const current = await db.prepare('SELECT * FROM branches WHERE id = @id')
+    .get<BranchIdentitySnapshot & { updated_at: string }>({ id })
+  assertUpdatedAtMatch('branch', current, getExpectedUpdatedAt(body))
   if (!current) throw new Error('The branch this pending action targeted no longer exists.')
-  await db.batch(branchUpdateStatements(id, body, current))
+  const directory = Number(current.is_active) === 0
+    ? await db.prepare('SELECT * FROM branches ORDER BY id').all<BranchIdentitySnapshot>()
+    : []
+  await db.batch(branchUpdateStatements(id, body, current, directory))
   await audit(env, reviewer.id, reviewer.name, 'update', 'branch', id, { name: current.name })
   await notify(env, waitUntil, 'branches', { action: 'update', id })
 })

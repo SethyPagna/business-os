@@ -78,7 +78,7 @@ function restoreBranchForm(base: BranchFormState, draft?: Partial<BranchFormStat
     phone: typeof draft.phone === 'string' ? draft.phone : base.phone,
     manager: typeof draft.manager === 'string' ? draft.manager : base.manager,
     notes: typeof draft.notes === 'string' ? draft.notes : base.notes,
-    is_default: typeof draft.is_default === 'boolean' || draft.is_default === 0 || draft.is_default === 1
+    is_default: !base.is_active ? base.is_default : typeof draft.is_default === 'boolean' || draft.is_default === 0 || draft.is_default === 1
       ? draft.is_default
       : base.is_default,
     is_active: base.is_active,
@@ -246,6 +246,7 @@ export default function BranchForm({ branch, onSave, onClose }: BranchFormProps)
             aria-label="Set branch as default"
             type="checkbox"
             checked={!!form.is_default}
+            disabled={!form.is_active}
             onChange={(event) => set('is_default', event.target.checked ? 1 : 0)}
             className="h-4 w-4"
           />

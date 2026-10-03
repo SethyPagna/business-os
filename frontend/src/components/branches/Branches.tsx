@@ -121,6 +121,17 @@ interface BranchRecord {
   is_default?: BranchFlag | null
   is_active?: BranchFlag | null
   updated_at?: string | null
+  role?: string | null
+  canonical_key?: string | null
+  successor_branch_id?: number | null
+}
+
+function canEditBranchRecord(branch: BranchRecord): boolean {
+  const key = branch.canonical_key == null ? branch.name : branch.canonical_key
+  if (branchRoleFromName(key) === 'other') return false
+  if (branch.role != null && branchRoleFromName(branch.role) === 'other') return false
+  if (branch.is_active === 1) return branch.successor_branch_id == null
+  return branch.is_active === 0 && Number.isSafeInteger(branch.successor_branch_id) && Number(branch.successor_branch_id) > 0
 }
 
 interface BranchFormPayload {
@@ -426,7 +437,7 @@ export default function Branches({ embedded = false, view, showSectionNavigation
         notify(tr('branch_not_found', 'Branch not found'), 'warning')
         return false
       }
-      if (branchRoleFromName(currentBranch.name) === 'other' || !currentBranch.is_active) {
+      if (!canEditBranchRecord(currentBranch)) {
         reparkDeniedRestore(entry)
         notify(tr('access_denied', 'Access denied'), 'warning')
         return false
@@ -1357,7 +1368,7 @@ export default function Branches({ embedded = false, view, showSectionNavigation
                           >
                             <Warehouse className="h-3.5 w-3.5" />
                           </button>
-                          {canEditBranch && branchRoleFromName(branch.name) !== 'other' && !!branch.is_active ? <button
+                          {canEditBranch && canEditBranchRecord(branch) ? <button
                             onClick={() => { setSelected(branch); setModal('form') }}
                             className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg border border-slate-200 text-slate-600 transition-colors hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 dark:border-slate-600 dark:text-slate-300 dark:hover:border-blue-500 dark:hover:bg-blue-900/20"
                             title={tr('edit', 'Edit')}

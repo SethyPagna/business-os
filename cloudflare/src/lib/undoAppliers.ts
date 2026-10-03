@@ -10,7 +10,7 @@ import { hasRecordedSaleMoneyPrecision } from './saleMoneyPrecision'
 import { broadcast } from '../durable-objects/broadcastHub'
 import {
   BRANCH_REPLAY_ROW_SQL,
-  OTHER_CANONICAL_BRANCH_SQL,
+  otherCanonicalBranchSql,
   branchReplayDefaultStatements,
   branchReplayDropsDefault,
   branchReplayStateGuardStatement,
@@ -3292,14 +3292,17 @@ const APPLIERS: Record<string, UndoApplierDef> = {
         throw new UndoConflictError(`This branch was edited after this change (${stale.join(', ')}), so it can no longer be ${verb} without overwriting that edit. Nothing was changed.`, UNDO_RECORD_CHANGED_CODE)
       }
       const replayFields = completeBranchReplayFields(fields, existing)
+      const directory = Number(existing.is_active) === 0
+        ? await db.prepare('SELECT * FROM branches ORDER BY id').all<BranchReplayRow>()
+        : []
       if (branchReplayDropsDefault(replayFields, existing)
-        && !(await db.prepare(OTHER_CANONICAL_BRANCH_SQL).get<{ id: number }>([id]))) {
+        && !(await db.prepare(otherCanonicalBranchSql(existing)).get<{ id: number }>([id]))) {
         throw new UndoConflictError(`This change cannot be ${verb}: it would leave no default branch. Nothing was changed.`, UNDO_NO_DEFAULT_BRANCH_CODE)
       }
       try {
         await db.batch([
           branchReplayStateGuardStatement(id, expected),
-          ...branchUpdateStatements(id, replayFields, existing),
+          ...branchUpdateStatements(id, replayFields, existing, directory),
           ...branchReplayDefaultStatements(id, replayFields, existing),
         ])
       } catch (error) {

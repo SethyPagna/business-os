@@ -59,8 +59,9 @@ async function liveEdit(world, id, changes, { record = true } = {}) {
   const { d1, branchWrites } = world
   const before = read(d1, id)
   const after = { ...before, ...changes }
-  const identity = d1.db.prepare('SELECT id, name, is_active FROM branches WHERE id = ?').get(id)
-  await d1.batch(branchWrites.branchUpdateStatements(id, formPayload(after), identity))
+  const identity = d1.db.prepare('SELECT * FROM branches WHERE id = ?').get(id)
+  const directory = d1.db.prepare('SELECT * FROM branches ORDER BY id').all()
+  await d1.batch(branchWrites.branchUpdateStatements(id, formPayload(after), identity, directory))
   if (!record) return null
   const info = d1.db.prepare(`INSERT INTO action_history (scope, entity, entity_id, label, reversible, status, undo_payload, redo_payload, created_by_id, created_by_name)
     VALUES ('branches', 'branch', @entity, 'Edit branch', 1, 'undoable', @undo, @redo, @by, @byName)`).run({
@@ -238,6 +239,26 @@ async function main() {
       ),
       /no recorded result/,
     )
+  })
+
+  await check('retired branch descriptions undo and redo without restoring activation or old names', async () => {
+    const world = freshWorld()
+    world.d1.db.exec(`ALTER TABLE branches ADD COLUMN role TEXT;
+      ALTER TABLE branches ADD COLUMN canonical_key TEXT;
+      ALTER TABLE branches ADD COLUMN successor_branch_id INTEGER;
+      UPDATE branches SET name='Old Shop',role='shop',canonical_key='shop',is_active=0,is_default=0,successor_branch_id=2 WHERE id=1;
+      UPDATE branches SET name='LC Store',role='shop',canonical_key='warehouse',is_default=1 WHERE id=2;`)
+    const history = await liveEdit(world, SHOP, { notes: 'legacy description' })
+    await replay(world, history, 'undo')
+    assert.equal(read(world.d1, SHOP).notes, 'front till')
+    await replay(world, history, 'redo')
+    assert.equal(read(world.d1, SHOP).notes, 'legacy description')
+    assert.equal(read(world.d1, SHOP).name, 'Old Shop')
+    assert.equal(read(world.d1, SHOP).is_active, 0)
+    assert.deepEqual(defaults(world.d1), [WAREHOUSE])
+    await liveEdit(world, SHOP, { notes: 'later description' }, { record: false })
+    await assertConflict(replay(world, history, 'undo'), /notes/)
+    assert.equal(read(world.d1, SHOP).notes, 'later description')
   })
 
   console.log(`\n${passed} check(s) passed, ${failed.length} failed.`)
