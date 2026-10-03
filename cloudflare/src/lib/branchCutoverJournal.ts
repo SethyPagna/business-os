@@ -110,9 +110,14 @@ function flagFor(input: BranchCutoverBegin, intentDigest: string): Record<string
 function terminal(row: BranchCutoverJournalRow): boolean { return row.phase === 'completed' || row.phase === 'aborted' }
 function validateManifest(row: BranchCutoverJournalRow, text: string): Record<string, unknown> {
   const value = objectJson(text, 16384)
-  const keys = ['version', 'sourceBranchId', 'targetBranchId', 'capturedRecords', 'movingProducts', 'sourceQuantityText', 'sourceLotQuantityText', 'anomalies', 'captureDigest']
+  const keys = ['version', 'sourceBranchId', 'targetBranchId', 'capturedRecords', 'movingProducts', 'sourceQuantityText', 'sourceLotQuantityText', 'anomalies', 'captureDigest', ...(value.version === 2 ? ['coverage'] : [])]
   requireState(Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key)))
-  requireState(value.version === 1 && value.sourceBranchId === row.source_branch_id && value.targetBranchId === row.target_branch_id)
+  requireState((value.version === 1 || value.version === 2) && value.sourceBranchId === row.source_branch_id && value.targetBranchId === row.target_branch_id)
+  if (value.version === 2) {
+    const coverage = value.coverage as Record<string, unknown>
+    requireState(coverage && coverage.kind === 'scalar-reference-capture' && coverage.scalarReferences === 32 && coverage.historicalReplayCertified === false
+      && digestPattern.test(String(coverage.registryDigest)) && digestPattern.test(String(coverage.schemaDigest)) && Array.isArray(coverage.unclassifiedFamilies))
+  }
   requireState(value.capturedRecords === row.capture_records && value.captureDigest === row.capture_digest && value.anomalies === 0)
   requireState(integer(value.movingProducts) && value.movingProducts <= row.capture_records)
   for (const key of ['sourceQuantityText', 'sourceLotQuantityText']) requireState(typeof value[key] === 'string' && /^(0|[1-9][0-9]{0,30})(\.[0-9]{1,12})?$/.test(value[key] as string))
