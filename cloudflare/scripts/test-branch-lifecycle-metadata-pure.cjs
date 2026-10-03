@@ -206,6 +206,7 @@ function reviewHandler(db, beforeBatch = () => {}) {
   const adapter = {
     prepare: sql => ({ get: async params => db.prepare(sql).get(params || {}), all: async params => db.prepare(sql).all(params || {}) }),
     batch: async statements => { beforeBatch(); execute(db, statements) },
+    batchOnce: async statements => { beforeBatch(); execute(db, statements) },
   }
   const conflict = load('conflictControl')
   const requesterError = tree.statements.find(node => ts.isClassDeclaration(node) && node.name?.text === 'ReviewRequesterPermissionError')
@@ -213,6 +214,7 @@ function reviewHandler(db, beforeBatch = () => {}) {
     ReviewRequesterPermissionError: evaluate(requesterError.getText(tree), {}, 'ReviewRequesterPermissionError'),
     registerApplier: (_section, _action, _entity, callback) => { handler = callback },
     getDb: () => adapter, audit: async () => {}, notify: async () => {} }
+  dependencies.recoverApprovedBranchAction = evaluate(functionSource(tree, 'recoverApprovedBranchAction'), dependencies, 'recoverApprovedBranchAction')
   new Function(...Object.keys(dependencies), compiled)(...Object.values(dependencies))
   db.exec(`CREATE TABLE roles(id INTEGER PRIMARY KEY,code TEXT,permissions TEXT);
     CREATE TABLE users(id INTEGER PRIMARY KEY,username TEXT,role_id INTEGER,permissions TEXT,is_active INTEGER,deleted_at TEXT);

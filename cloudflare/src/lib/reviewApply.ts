@@ -22,10 +22,10 @@ import { audit, buildAuditStatement } from './audit'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from './cache'
 import { insertRow, updateRow, defaultBranchId, syncProductImageGallery, seedBranchStockForNewProduct, seedInitialBatchForNewProduct, readProductMoneyPlan } from './productWrites'
-import { branchUpdateStatements, assertBranchExpectedState, BranchEditConflictError, isBranchEditGuardError } from './branchWrites'
+import { branchUpdateStatements, assertBranchExpectedState, BranchEditConflictError, isBranchEditGuardError, BranchApprovalReceiptError } from './branchWrites'
 import { assertCanonicalBranchSetMutationAllowed, type BranchIdentitySnapshot } from './canonicalBranchIdentity'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt } from './conflictControl'
-import { getActionTier } from './permissions'
+import { getActionTier, hasPermission } from './permissions'
 import { omitUnchangedProductImageFields, productImageFieldsChanged, productImageFieldsChangedResolved, resolveProductImageFields } from './productImagePermission'
 import { parseProductRemovePendingPointer, parseProductRemovePlan, productRemoveApprovalStatements, productRemovePlanDigest,
   ProductRemoveError, type ProductRemoveOperationRow } from './productDelete'
@@ -46,7 +46,7 @@ export interface ReviewerInfo {
   name: string | null
 }
 
-export type ReviewApplyOutcome = { pendingActionMarkedAtomically: boolean }
+export type ReviewApplyOutcome = { pendingActionMarkedAtomically: boolean; replayedBranchAction?: PendingActionRow }
 // The approving request's waitUntil. Supplied by routes/reviewQueue.ts so a
 // broadcast never holds the approval response; without one (tests, any
 // non-request caller) the broadcast is awaited as before. broadcast() never
@@ -75,6 +75,35 @@ export class ReviewRequesterPermissionError extends Error {
   constructor(message: string) {
     super(message)
     this.name = 'ReviewRequesterPermissionError'
+  }
+}
+
+export async function recoverApprovedBranchAction(env: Env, expected: PendingActionRow, reviewerId: number | null): Promise<PendingActionRow | null> {
+  if (expected.section !== 'branches' || expected.action_type !== 'update' || expected.entity_type !== 'branch'
+    || !Number.isSafeInteger(expected.id) || expected.id <= 0 || !Number.isSafeInteger(reviewerId) || Number(reviewerId) <= 0) return null
+  const db = getDb(env)
+  try {
+    const receipt = await db.prepare('SELECT * FROM pending_actions WHERE id=@id').get<PendingActionRow>({ id: expected.id })
+    const keys = ['id', 'section', 'action_type', 'entity_type', 'entity_id', 'requested_by', 'payload_json', 'summary', 'expected_entity_state_json'] as const
+    if (!receipt || receipt.status !== 'approved' || receipt.reviewed_by !== reviewerId
+      || typeof receipt.reviewed_at !== 'string' || !receipt.reviewed_at.trim()
+      || keys.some(key => receipt[key] !== expected[key])) return null
+    try {
+      const baseline = JSON.parse(receipt.expected_entity_state_json || 'null')
+      if (!baseline || baseline.entity_id !== receipt.entity_id) return null
+      assertBranchExpectedState(baseline.state, receipt.expected_entity_state_json)
+    } catch { return null }
+    const reviewer = await db.prepare(`SELECT u.id,u.username,u.permissions,u.is_active,
+      r.code AS role_code,r.permissions AS role_permissions
+      FROM users u LEFT JOIN roles r ON r.id=u.role_id
+      WHERE u.id=@id AND u.is_active=1 AND u.deleted_at IS NULL`).get<SessionUser>({ id: reviewerId })
+    if (!reviewer || !hasPermission(reviewer, 'review')) throw new BranchApprovalReceiptError('review_permission_revoked')
+    const final = await db.prepare('SELECT * FROM pending_actions WHERE id=@id').get<PendingActionRow>({ id: expected.id })
+    if (!final || Object.keys(receipt).some(key => final[key as keyof PendingActionRow] !== receipt[key as keyof PendingActionRow])) return null
+    return final
+  } catch (error) {
+    if (error instanceof BranchApprovalReceiptError) throw error
+    throw new BranchApprovalReceiptError()
   }
 }
 
@@ -329,7 +358,7 @@ registerApplier('branches', 'update', 'branch', async (env, row, reviewer, waitU
     ? await db.prepare('SELECT * FROM branches ORDER BY id').all<BranchIdentitySnapshot>()
     : []
   try {
-    await db.batch([
+    await db.batchOnce([
       { sql: `INSERT INTO branches(name) SELECT NULL WHERE NOT EXISTS (
         SELECT 1 FROM pending_actions WHERE id=@pending_id AND status='open' AND section='branches'
           AND action_type='update' AND entity_type='branch' AND entity_id IS @entity_id
@@ -350,6 +379,8 @@ registerApplier('branches', 'update', 'branch', async (env, row, reviewer, waitU
         params: { pending_id: row.id, reviewer_id: reviewer.id, reviewer_name: reviewer.name } },
     ])
   } catch (error) {
+    const receipt = await recoverApprovedBranchAction(env, row, reviewer.id)
+    if (receipt) return { pendingActionMarkedAtomically: true, replayedBranchAction: receipt }
     if (isBranchEditGuardError(error)) throw new BranchEditConflictError()
     throw error
   }

@@ -44,6 +44,16 @@ export class BranchEditConflictError extends Error {
   }
 }
 
+export class BranchApprovalReceiptError extends Error {
+  constructor(readonly code: 'unknown_outcome' | 'review_permission_revoked' = 'unknown_outcome') {
+    super(code === 'unknown_outcome'
+      ? 'The result could not be confirmed. Retry the same approval request.'
+      : 'Your permission to review has changed. This approval may already have completed. Refresh the review queue.')
+    this.name = 'BranchApprovalReceiptError'
+  }
+  get status(): 403 | 503 { return this.code === 'unknown_outcome' ? 503 : 403 }
+}
+
 export function captureBranchEditState(row: BranchIdentitySnapshot): BranchEditState {
   const source = row as Record<string, unknown>
   const state: BranchEditState = {}

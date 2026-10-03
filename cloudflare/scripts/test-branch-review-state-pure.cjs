@@ -34,6 +34,7 @@ function adapter(db) {
       if (afterBatch) { const inject = afterBatch; afterBatch = null; inject(db) }
       return results
     },
+    batchOnce: async statements => adapter(db).batch(statements),
   }
 }
 function load(name) {
@@ -90,7 +91,7 @@ function approvalHandler(dependencies = {}) {
     && node.expression.expression.getText(tree) === 'registerApplier'
     && node.expression.arguments.slice(0, 3).map(arg => arg.text).join('/') === 'branches/update/branch')
   const permissionError = tree.statements.find(node => node.name?.text === 'ReviewRequesterPermissionError').getText(tree)
-  return evaluate(`${permissionError}\nconst handler=${statement.expression.arguments[3].getText(tree)}`, {
+  return evaluate(`${permissionError}\n${functionSource(tree, 'recoverApprovedBranchAction')}\nconst handler=${statement.expression.arguments[3].getText(tree)}`, {
     ...writes, ...load('permissions'), ...load('conflictControl'), ...load('audit'), getDb: () => adapter(currentDb), notify: async () => {}, ...dependencies,
   }, 'handler')
 }
@@ -370,4 +371,246 @@ async function main() {
   }
   if (failures) process.exitCode = 1
 }
-main().catch(error => { console.error(error); process.exitCode = 1 })
+async function receiptTransportTests() {
+const fs = require('node:fs')
+const path = require('node:path')
+const assert = require('node:assert/strict')
+const crypto = require('node:crypto')
+const { DatabaseSync } = require('node:sqlite')
+const root = path.resolve(__dirname, '../..')
+const ts = require(path.join(root, 'cloudflare/node_modules/typescript'))
+const results = []
+const sources = new Map()
+const sha = bytes => crypto.createHash('sha256').update(bytes).digest('hex')
+function read(rel) {
+  const file = path.join(root, rel)
+  const bytes = fs.readFileSync(file)
+  sources.set(rel, { sha256: sha(bytes), bytes: bytes.length })
+  return bytes.toString('utf8')
+}
+function compile(source) {
+  return ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
+}
+const cache = new Map()
+function load(rel) {
+  rel = path.posix.normalize(rel.replaceAll('\\', '/'))
+  if (!rel.endsWith('.ts')) rel += '.ts'
+  if (cache.has(rel)) return cache.get(rel).exports
+  const mod = { exports: {} }
+  cache.set(rel, mod)
+  new Function('require', 'module', 'exports', compile(read(rel)))(request => {
+    if (!request.startsWith('.')) throw new Error(`Unexpected dependency ${rel}: ${request}`)
+    return load(path.posix.join(path.posix.dirname(rel), request))
+  }, mod, mod.exports)
+  return mod.exports
+}
+const lib = name => load(`cloudflare/src/lib/${name}`)
+function tree(rel) { return ts.createSourceFile(rel, read(rel), ts.ScriptTarget.Latest, true) }
+function named(rel, names) {
+  const ast = tree(rel)
+  return names.map(name => {
+    const node = ast.statements.find(n => n.name?.text === name || n.declarationList?.declarations.some(d => d.name?.text === name))
+    assert.ok(node, `Declaration exists: ${rel}/${name}`)
+    return node.getText(ast)
+  }).join('\n')
+}
+function evaluate(source, deps, result) {
+  return new Function(...Object.keys(deps), 'exports', `${compile(source)}\nreturn ${result}`)(...Object.values(deps), {})
+}
+function selectRoute(rel, method, route) {
+  const ast = tree(rel)
+  const node = ast.statements.find(n => ts.isExpressionStatement(n) && ts.isCallExpression(n.expression)
+    && n.expression.expression.getText(ast) === `app.${method}` && n.expression.arguments[0]?.text === route)
+  assert.ok(node, `Route exists ${method} ${route}`)
+  return node.expression.arguments[1].getText(ast)
+}
+function nativeD1(db) {
+  const control = { beforeBatch: null, afterBatch: null, beforeRun: null, beforeRead: null, afterRead: null, batches: 0, broadcasts: [], broadcastFailure: false }
+  function prepared(sql, values = []) {
+    function args() { return /\?\d/.test(sql) ? [Object.fromEntries(values.map((v, i) => [String(i + 1), v]))] : values }
+    function runSync(readOnly) {
+      const statement = db.prepare(sql)
+      if (readOnly) return { success: true, results: statement.all(...args()), meta: { changes: 0 } }
+      const value = statement.run(...args())
+      return { success: true, results: [], meta: { changes: Number(value.changes), last_row_id: Number(value.lastInsertRowid) } }
+    }
+    return { sql, values, bind: (...next) => prepared(sql, next), _execute: () => runSync(/^\s*(SELECT|WITH|PRAGMA)\b/i.test(sql)),
+      all: async () => { if (control.beforeRead) await control.beforeRead(sql, db); const value = runSync(true); if (control.afterRead) await control.afterRead(sql, db); return value },
+      run: async () => { if (control.beforeRun) await control.beforeRun(sql, db); return runSync(false) } }
+  }
+  const d1 = { prepare: prepared, batch: async statements => {
+    control.batches++
+    if (control.beforeBatch) { const hook = control.beforeBatch; control.beforeBatch = null; await hook(db) }
+    db.exec('BEGIN IMMEDIATE')
+    let values
+    try { values = statements.map(s => s._execute()); db.exec('COMMIT') }
+    catch (error) { db.exec('ROLLBACK'); throw error }
+    if (control.afterBatch) { const hook = control.afterBatch; control.afterBatch = null; await hook(db) }
+    return values
+  } }
+  const env = { DB: d1, BROADCAST_HUB: { idFromName: name => name, get: () => ({ fetch: async (_url, init) => {
+    control.broadcasts.push(JSON.parse(init.body)); if (control.broadcastFailure) throw new Error('fixture broadcast unavailable'); return new Response('{}')
+  } }) } }
+  return { db, env, control }
+}
+const migrations = fs.readdirSync(path.join(root, 'cloudflare/migrations')).filter(n => n.endsWith('.sql')).sort()
+function world(old = false) {
+  const db = new DatabaseSync(':memory:')
+  db.limits.exprDepth = 100
+  db.exec('PRAGMA foreign_keys=OFF')
+  for (const migration of migrations.filter(n => !old || Number(n.slice(0, 4)) < 223)) db.exec(read(`cloudflare/migrations/${migration}`))
+  db.exec(`INSERT INTO branches(id,name,location,phone,manager,notes,is_active,is_default,updated_at) VALUES
+    (1,'Shop','Market','123','Manager','before',1,1,'2026-10-03 00:00:00'),(2,'Warehouse','Depot',NULL,NULL,'bulk',1,0,'2026-10-03 00:00:00');
+    INSERT INTO roles(id,name,code,permissions) VALUES(3,'Requester','employee','{"branches":"review"}'),(4,'Reviewer','manager','{"review":true}');
+    INSERT INTO users(id,username,name,password,role_id,permissions,is_active) VALUES(7,'requester','Requester','admin123',3,'{}',1),(8,'reviewer','Reviewer','admin123',4,'{}',1);`)
+  return nativeD1(db)
+}
+const writes = lib('branchWrites')
+const permissions = lib('permissions')
+const broadcast = load('cloudflare/src/durable-objects/broadcastHub').broadcast
+const branchDeps = { ...lib('db'), ...writes, ...permissions, ...lib('conflictControl'), ...lib('canonicalBranchIdentity'), ...lib('reviewGate'), ...lib('businessMaintenanceGuard'), ...lib('actorSnapshot'), ...lib('audit'), broadcast }
+function branchRoute(method, route, overrides = {}) {
+  return evaluate(`const handler=${selectRoute('cloudflare/src/routes/branches.ts', method, route)}`, { ...branchDeps, ...overrides }, 'handler')
+}
+const reviewRel = 'cloudflare/src/lib/reviewApply.ts'
+function reviewCode() {
+  const ast = tree(reviewRel)
+  const registrations = ast.statements.filter(n => ts.isExpressionStatement(n) && ts.isCallExpression(n.expression) && n.expression.expression.getText(ast) === 'registerApplier'
+    && ['branches/update/branch', 'fees/delete/fee'].includes(n.expression.arguments.slice(0, 3).map(a => a.text).join('/'))).map(n => n.getText(ast)).join('\n')
+  return named(reviewRel, ['NoReviewApplierError', 'ReviewRequesterPermissionError', 'notify', 'appliers', 'applierKey', 'registerApplier', 'productRemovePendingPointer', 'applyApprovedPendingAction', 'recoverApprovedBranchAction']) + '\n' + registrations
+}
+function review(overrides = {}) {
+  return evaluate(reviewCode(), { ...branchDeps, ...lib('productDelete'), applyApprovedProductRemove: () => { throw new Error('Out of scope product removal invoked') }, ...overrides },
+    '{ applyApprovedPendingAction, NoReviewApplierError, ReviewRequesterPermissionError, productRemovePendingPointer, recoverApprovedBranchAction }')
+}
+const moneyErrors = evaluate(named('cloudflare/src/lib/productWrites.ts', ['ProductMoneyWriteError']), {}, '{ProductMoneyWriteError}')
+const imageErrors = evaluate(named('cloudflare/src/lib/productImagePermission.ts', ['ProductImageAssetError']), {}, '{ProductImageAssetError}')
+function reviewRoute(route, overrides = {}, reviewOverrides = {}) {
+  return evaluate(`const handler=${selectRoute('cloudflare/src/routes/reviewQueue.ts', 'post', route)}`, {
+    ...branchDeps, ...lib('pendingActions'), ...review(reviewOverrides), ...moneyErrors, ...imageErrors, ...lib('productDelete'),
+    ...lib('acquisitionCostAccess'), hasProductMoneyPolicy: () => { throw new Error('Out of scope product money path invoked') }, ...overrides,
+  }, 'handler')
+}
+const directUser = { id: 7, name: 'Requester', permissions: '{"branches":true}' }
+const reviewUser = { id: 8, name: 'Reviewer', permissions: '{"review":true}' }
+const requestUser = { id: 7, name: 'Requester', permissions: '{"branches":"review"}' }
+function ctx(w, body = {}, user = directUser, id = 1) {
+  return { env: w.env, req: { param: () => String(id), json: async () => body, query: () => undefined }, get: () => user,
+    json: (value, status = 200) => ({ status, value }), executionCtx: { waitUntil: promise => { promise.catch(error => { throw error }) } } }
+}
+const branch = w => w.db.prepare('SELECT * FROM branches WHERE id=1').get()
+const pending = w => w.db.prepare('SELECT * FROM pending_actions ORDER BY id DESC LIMIT 1').get()
+async function queue(w, body = {}) {
+  const response = await branchRoute('put', '/:id')(ctx(w, { notes: 'approved', expectedEditEtag: await writes.branchEditEtag(branch(w)), ...body }, requestUser))
+  assert.equal(response.status, 202)
+  return pending(w)
+}
+async function check(name, fn) {
+  try { const detail = await fn(); results.push({ name, status: 'PASS', detail }); console.log(`PASS ${name}`) }
+  catch (error) { results.push({ name, status: 'FAIL', error: error.stack }); console.error(`FAIL ${name}: ${error.stack}`); process.exitCode = 1 }
+
+}
+async function main() {
+  await check('lost acknowledgement recovers exact same-actor receipt with one batch and one branch audit', async () => {
+    const w = world(); const row = await queue(w)
+    w.control.afterBatch = () => { throw new Error('D1_ERROR: internal error acknowledgement lost') }
+    const response = await reviewRoute('/:id/approve')(ctx(w, {}, reviewUser, row.id))
+    assert.equal(response.status, 200)
+    assert.equal(response.value.replayed, true)
+    assert.equal(response.value.data.id, row.id)
+    assert.equal(w.control.batches, 1)
+    assert.equal(branch(w).notes, 'approved')
+    assert.equal(pending(w).status, 'approved')
+    assert.equal(w.db.prepare("SELECT COUNT(*) AS n FROM audit_logs WHERE entity='branch'").get().n, 1)
+    assert.equal(w.db.prepare("SELECT COUNT(*) AS n FROM audit_logs WHERE entity='pending_action'").get().n, 0)
+    w.db.close()
+  })
+  await check('same-ID same actor retry acknowledges retained receipt after later legitimate branch change without writes', async () => {
+    const w = world(); const row = await queue(w)
+    assert.equal((await reviewRoute('/:id/approve')(ctx(w, {}, reviewUser, row.id))).status, 200)
+    w.db.exec("UPDATE branches SET notes='later legitimate' WHERE id=1")
+    const before = { branch: branch(w), pending: pending(w), audits: w.db.prepare('SELECT * FROM audit_logs').all(), batches: w.control.batches }
+    const response = await reviewRoute('/:id/approve')(ctx(w, {}, reviewUser, row.id))
+    assert.equal(response.status, 200)
+    assert.equal(response.value.replayed, true)
+    assert.deepEqual(response.value.data, before.pending)
+    assert.deepEqual(branch(w), before.branch)
+    assert.deepEqual(w.db.prepare('SELECT * FROM audit_logs').all(), before.audits)
+    assert.equal(w.control.batches, before.batches)
+    w.db.close()
+  })
+  await check('precommit failure refuses with no writes and no retry', async () => {
+    const w = world(); const row = await queue(w)
+    const before = { branch: branch(w), pending: pending(w) }
+    w.control.beforeBatch = () => { throw new Error('fixture precommit unavailable') }
+    const response = await reviewRoute('/:id/approve')(ctx(w, {}, reviewUser, row.id))
+    assert.notEqual(response.status, 200); assert.equal(w.control.batches, 1)
+    assert.deepEqual(branch(w), before.branch); assert.deepEqual(pending(w), before.pending)
+    assert.equal(w.db.prepare('SELECT COUNT(*) AS n FROM audit_logs').get().n, 0); w.db.close()
+  })
+  await check('unreadable committed receipt reports explicit uncertainty without retrying write', async () => {
+    const w = world(); const row = await queue(w)
+    w.control.afterBatch = () => {
+      w.control.beforeRead = sql => { if (/FROM pending_actions/i.test(sql)) throw new Error('fixture receipt unavailable') }
+      throw new Error('D1_ERROR: internal error acknowledgement lost')
+    }
+    const response = await reviewRoute('/:id/approve')(ctx(w, {}, reviewUser, row.id))
+    assert.equal(response.status, 503); assert.equal(response.value.code, 'unknown_outcome')
+    assert.equal(response.value.action, 'retry_same_request'); assert.equal(w.control.batches, 1)
+    assert.equal(pending(w).status, 'approved'); assert.equal(branch(w).notes, 'approved'); w.db.close()
+  })
+  await check('same-turn receipt tuple substitution and other approving actor cannot recover', async () => {
+    for (const mutation of ["payload_json='{}'", "summary='changed'", 'expected_entity_state_json=NULL', 'requested_by=99', "section='fees'", "action_type='create'", "entity_type='fee'", 'entity_id=2', 'reviewed_by=99', "reviewed_at=''", "status='rejected'"]) {
+      const w = world(); const row = await queue(w)
+      w.control.afterBatch = db => { db.exec(`UPDATE pending_actions SET ${mutation}`); throw new Error('D1_ERROR: internal error acknowledgement lost') }
+      const response = await reviewRoute('/:id/approve')(ctx(w, {}, reviewUser, row.id))
+      assert.notEqual(response.status, 200, mutation); assert.equal(w.control.batches, 1)
+      assert.equal(w.db.prepare("SELECT COUNT(*) AS n FROM audit_logs WHERE entity='pending_action'").get().n, 0); w.db.close()
+    }
+  })
+  await check('recovery reloads current reviewer grants and active user state', async () => {
+    for (const mutation of ["UPDATE users SET permissions='{\"review\":false}' WHERE id=8", "UPDATE roles SET permissions='{\"review\":false}' WHERE id=4", 'UPDATE users SET is_active=0 WHERE id=8', "UPDATE users SET deleted_at='gone' WHERE id=8", 'DELETE FROM users WHERE id=8', "UPDATE roles SET code='employee',permissions='{}' WHERE id=4"]) {
+      const w = world(); const row = await queue(w)
+      w.control.afterBatch = db => { db.exec(mutation); throw new Error('D1_ERROR: internal error acknowledgement lost') }
+      const response = await reviewRoute('/:id/approve')(ctx(w, {}, reviewUser, row.id))
+      assert.equal(response.status, 403, mutation); assert.equal(response.value.code, 'review_permission_revoked')
+      assert.equal(pending(w).status, 'approved'); assert.equal(w.control.batches, 1); w.db.close()
+    }
+  })
+  await check('final receipt reread detects replacement between proof and response', async () => {
+    const w = world(); const row = await queue(w)
+    w.control.afterBatch = () => {
+      let reads = 0
+      w.control.afterRead = (sql, db) => { if (/FROM pending_actions/i.test(sql) && ++reads === 1) db.exec("UPDATE pending_actions SET summary='interposed'") }
+      throw new Error('D1_ERROR: internal error acknowledgement lost')
+    }
+    assert.notEqual((await reviewRoute('/:id/approve')(ctx(w, {}, reviewUser, row.id))).status, 200)
+    assert.equal(w.control.batches, 1); w.db.close()
+  })
+  await check('legacy or malformed approved baselines and other actor cannot replay', async () => {
+    for (const baseline of [null, '{}', '[]', '{"kind":"branch-edit-state","version":2}', '{"kind":"branch-edit-state","version":1,"entity_id":1,"state":{}}']) {
+      const w = world(); const row = await queue(w)
+      assert.equal((await reviewRoute('/:id/approve')(ctx(w, {}, reviewUser, row.id))).status, 200)
+      w.db.prepare('UPDATE pending_actions SET expected_entity_state_json=?').run(baseline)
+      const audits = w.db.prepare('SELECT COUNT(*) AS n FROM audit_logs').get().n
+      assert.equal((await reviewRoute('/:id/approve')(ctx(w, {}, reviewUser, row.id))).status, 409)
+      assert.equal(w.control.batches, 1); assert.equal(w.db.prepare('SELECT COUNT(*) AS n FROM audit_logs').get().n, audits); w.db.close()
+    }
+    const w = world(); const row = await queue(w)
+    assert.equal((await reviewRoute('/:id/approve')(ctx(w, {}, reviewUser, row.id))).status, 200)
+    assert.equal((await reviewRoute('/:id/approve')(ctx(w, {}, {...reviewUser,id:99}, row.id))).status, 409)
+    assert.equal((await reviewRoute('/:id/approve')(ctx(w, {}, {...reviewUser,permissions:'{}'}, row.id))).status, 403)
+    assert.equal(w.control.batches, 1); w.db.close()
+  })
+  await check('broadcast failure cannot invalidate a proven recovered receipt', async () => {
+    const w = world(); const row = await queue(w); w.control.broadcastFailure = true
+    w.control.afterBatch = () => { throw new Error('D1_ERROR: internal error acknowledgement lost') }
+    const response = await reviewRoute('/:id/approve')(ctx(w, {}, reviewUser, row.id))
+    assert.equal(response.status, 200); assert.equal(response.value.replayed, true); assert.equal(w.control.batches, 1); w.db.close()
+  })
+}
+
+await main()
+if (results.some(result => result.status === 'FAIL')) throw new Error('Branch approval receipt transport checks failed')
+}
+main().then(receiptTransportTests).catch(error => { console.error(error); process.exitCode = 1 })

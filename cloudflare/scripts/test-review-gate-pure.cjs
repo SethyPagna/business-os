@@ -94,6 +94,7 @@ const db = {
     }
     return results
   },
+  async batchOnce(items) { return this.batch(items) },
   exec(sql) {
     rawDb.exec(sql)
   },
