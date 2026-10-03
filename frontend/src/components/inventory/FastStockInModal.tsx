@@ -765,8 +765,13 @@ export default function FastStockInModal({
     overlayReceivingProductAttempts(user?.id, submissionsRef.current, [line])
     const unknownCode = 'product_create_outcome_unknown'
     const unknownError = () => Object.assign(new Error(stockFailureText({ code: unknownCode }, tr, '')), { code: unknownCode })
+    const assertDispatch = () => {
+      assertReceivingProductAttemptDispatch(attempt)
+      if (Number(destinationRef.current.branchId) !== Number(payload.branch_id)
+        || !activeReceivingDestination(destinationRef.current.branchId, destinationRef.current.options)) throw unknownError()
+    }
     let result: CreateProductResult
-    try { result = await createProduct(JSON.parse(attempt.bodyJson!), () => assertReceivingProductAttemptDispatch(attempt)) as CreateProductResult } catch (error) {
+    try { result = await createProduct(JSON.parse(attempt.bodyJson!), assertDispatch) as CreateProductResult } catch (error) {
       const failure = error as { code?: string; outcome?: string } | null
       if (failure?.code === 'write_requires_live_server' && failure.outcome !== 'unknown') {
         await finishReceivingProductAttempt(attempt, 'not_dispatched')

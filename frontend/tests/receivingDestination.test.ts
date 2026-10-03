@@ -156,7 +156,7 @@ const controller = (source: string, response: (payload: Record<string, unknown>,
   const submissionsRef = { current: empty() }
   let calls = 0, storageFails = false, options = active, persisted: unknown
   const deps = {
-    ...attempts, destinationRef: { current: { branchId: '1' } },
+    ...attempts, activeReceivingDestination, destinationRef: { current: { branchId: '1', get options() { return options } } },
     submissionsRef, productCreationRefusal, branchId: '1', user: { id: 7, name: 'Actor' },
     require: () => ({ createProduct: async (payload: Record<string, unknown>, check: () => void) => {
       check()

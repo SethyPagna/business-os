@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import ts from 'typescript'
-import { productCreationRefusal, receivingDestinationRefusal, receivingDetailsLocked, restoreReceivingSubmissions, retainReceivingSubmissions } from '../src/utils/receivingDestination.ts'
+import { activeReceivingDestination, productCreationRefusal, receivingDestinationRefusal, receivingDetailsLocked, restoreReceivingSubmissions, retainReceivingSubmissions } from '../src/utils/receivingDestination.ts'
 import { stockFailureText } from '../src/utils/stockAdjustOutcome.ts'
 import type { StockSessionLine } from '../src/utils/stockSessionDraft.ts'
 import type * as AttemptModule from '../src/utils/receivingProductAttempt.ts'
@@ -74,7 +74,7 @@ function controller(id: string, response: (payload: Record<string, unknown>) => 
   const submissionsRef = { current: restoreReceivingSubmissions(null, []) }
   const destinationRef = { current: { branchId: '1', options: [{ value: '1', label: 'Active' }] } }
   let calls = 0, failDraft = false
-  const deps = { ...api, submissionsRef, destinationRef, productCreationRefusal, branchId: '1', user: { id: 7, name: 'Actor' },
+  const deps = { ...api, submissionsRef, destinationRef, productCreationRefusal, activeReceivingDestination, branchId: '1', user: { id: 7, name: 'Actor' },
     require: () => ({ createProduct: async (payload: Record<string, unknown>, check?: () => void) => {
       check?.()
       assert.equal(lockDepth, 0, 'network must run outside the Web Lock')
@@ -272,3 +272,18 @@ await assert.rejects(wrongA.create())
 await assert.rejects(wrongB.create())
 assert.equal(wrongA.calls() + wrongB.calls(), 2, 'wrong generic failure reset must reproduce duplicate dispatch')
 console.log('PASS discriminating controls: lock bypass violates held-lock schedule; unknown reset duplicates actual controller dispatch')
+
+const retirementId = requestId()
+const retirementApi = loadAttempts()
+await retirementApi.registerReceivingProductAttempt(7, retirementId)
+const retirement = controller(retirementId, async () => ({ id: 76 }), {
+  ...retirementApi,
+  reserveReceivingProductAttempt: async (...args) => {
+    const attempt = await retirementApi.reserveReceivingProductAttempt(...args)
+    retirement.destinationRef.current.options = []
+    return attempt
+  },
+})
+await assert.rejects(retirement.create(), code('product_create_outcome_unknown'))
+assert.equal(retirement.calls(), 0)
+console.log('PASS destination retirement after reservation refuses before transport and retains uncertainty fence')
