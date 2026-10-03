@@ -5,16 +5,16 @@
 Every item carries an ID (U-1, U-cost, Q15 …). `docs/history/session-log.md` uses the same IDs: each Part lists the IDs it moved
 and their new status, and each item here names the Part that last changed it (e.g. "→ Part 633"). Search either file for an ID to see both sides.
 
-### Current work (3 Oct 2026) — Part 659
+### Current work (3 Oct 2026) — Part 660
 
 | Item | Status |
 |---|---|
 | RC2-HOTFIX | [x] Live; both real merge actions and health checks verified. |
 | RC3-UI and DATE | [~] d2b369fc passed exact gate37105062061: 709 Worker + 678 frontend (one browser timeout passed on retry). All 24 picker cases reviewed; missing Returns/Inventory requests verified in 8 follow-up cases. Not live. |
-| Branch consolidation | [~] d0bbd2d7 package/build checks pass. Independent review caught a journal replacement flaw; held for correction. Sales/receiving name guards also need correction before LC Store. No live rename or stock move. |
+| Branch consolidation | [~] Journal replacement correction passed independent checks. Receiving safeguards are being implemented; selling and historical compatibility remain open. No live rename or stock move. |
 | STOCK-RETURN | [~] Quantity correction reviewed; partial returns/accounting still in progress. Not live. |
 | Product edit / Undo | [~] Backend/client checkpoints preserved; brand/group/fold/create-stock completion and integration pending. |
-| One combined release | [~] 714 Worker tests running at depth 100 on frozen d0bbd2d7. Failures retained; fixture corrections undergoing review. Full frontend, stable screenshots and new exact gate pending. |
+| One combined release | [~] 714 Worker files checked at depth 100: 702 passed, 12 failed. Repairs and isolated crash reruns continue. Full frontend, stable screenshots and new exact gate pending. |
 | Versions / portfolio | [~] Four redundant local checkouts removed and independently verified; branches and recovery archive preserved. Other useful/unique work retained. Portfolio coordination pending. |
 | Full owner goal | [~] Active and rechecked: 35 requirement groups, 1,115 historical IDs, 511 progress markers and 13 master-plan entries retained. Every open item stays tracked. |
 
