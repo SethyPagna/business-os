@@ -137,7 +137,7 @@ const PAID = {
   importRetentionMaxJobsPerTier: 20,
   ephemeralDeleteBatch: 5000,
   catalogIntegrityMaxProducts: 50000,
-  stockInLinesPerRequest: 29,
+  stockInLinesPerRequest: 28,
   d1DailyRowsRead: 833000000,
   d1DailyRowsWritten: 1666000,
   d1MaxDatabaseBytes: 10 * 1024 * 1024 * 1024,
