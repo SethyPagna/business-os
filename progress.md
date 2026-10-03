@@ -5,17 +5,17 @@
 Every item carries an ID (U-1, U-cost, Q15 …). `docs/history/session-log.md` uses the same IDs: each Part lists the IDs it moved
 and their new status, and each item here names the Part that last changed it (e.g. "→ Part 633"). Search either file for an ID to see both sides.
 
-### Current work (3 Oct 2026) — Part 652
+### Current work (3 Oct 2026) — Part 653
 
 | Item | Status |
 |---|---|
 | RC2-HOTFIX | [x] Live; both real merge actions and health checks verified. |
-| RC3-UI and DATE | [~] Sales baseline b85a200a passed: 709 Worker + 678 frontend (37099648343). Latest ea843e6e gate37101322999 running. Not live. |
-| Branch consolidation | [~] Fix df09a8cd committed; permissions/default checks pass, independent review continues. Conflict/approval safeguards and stock transfer pending. |
+| RC3-UI and DATE | [~] ea843e6e passed exact gate37101322999: 709 Worker + 678 frontend. Dashboard date-label correction d7e43c9b passes focused tests; remaining consumer visual checks pending. Not live. |
+| Branch consolidation | [~] df09a8cd independently verified within scope. Inert schema0223 committed; stale-edit and approval safeguards in progress. Stock transfer and live renames pending. |
 | STOCK-RETURN | [~] Quantity correction reviewed; partial returns/accounting still in progress. Not live. |
 | Product edit / Undo | [~] Backend/client checkpoints preserved; brand/group/fold/create-stock completion and integration pending. |
 | One combined release | [~] Sales and reviewed mobile fix merged; independent deployment held. Employee browser11/11 passes, including EN/KM mobile/desktop and scroll limits. |
-| Versions / portfolio | [~] Live/cloud identities checked. Four redundant local candidates inventoried; active-use/recovery checks pending. No deletion; portfolio coordination pending. |
+| Versions / portfolio | [~] Four redundant local checkouts removed and independently verified; branches and recovery archive preserved. Other useful/unique work retained. Portfolio coordination pending. |
 | Full owner goal | [~] Active; 35 scope groups and 1,115 historical IDs retained. Independent coverage audit complete; implementation/live reconciliation continues. |
 
 ### Deploy checkpoints (26 Sep) — each deploys as soon as it is green; nothing waits for the next
