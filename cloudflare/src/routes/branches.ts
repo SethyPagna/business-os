@@ -1069,7 +1069,19 @@ app.put('/:id', async (c) => {
     committedBranch = results[results.length - 1]?.results?.[0] as BranchIdentitySnapshot | undefined
   } catch (error) {
     const conflict = error instanceof BranchEditConflictError ? error : isBranchEditGuardError(error) ? new BranchEditConflictError() : null
-    if (conflict) return c.json({ success: false, error: conflict.message, code: conflict.code, conflict: true }, 409)
+    if (conflict) {
+      if (conflict.code === 'branch_edit_conflict') {
+        try {
+          const latest = await db.prepare('SELECT * FROM branches WHERE id = ?')
+            .get<BranchIdentitySnapshot & { updated_at: string | null }>([id])
+          const { body: conflictBody } = writeConflictResponse(new WriteConflictError(
+            'branch', latest || null, getExpectedUpdatedAt(body), latest ? 'updated' : 'deleted',
+          ))
+          return c.json({ ...conflictBody, error: conflict.message, code: conflict.code }, 409)
+        } catch {}
+      }
+      return c.json({ success: false, error: conflict.message, code: conflict.code, conflict: true }, 409)
+    }
     throw error
   }
 
