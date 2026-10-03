@@ -10,11 +10,11 @@ and their new status, and each item here names the Part that last changed it (e.
 | Item | Status |
 |---|---|
 | RC2-HOTFIX | [x] Live; both real merge actions and health checks verified. |
-| RC3-UI and DATE | [~] Base gate passed: 705 Worker + 676 frontend (37096850723). Sales merged into b85a200a; newer gate 37099648343 running. Not live. |
+| RC3-UI and DATE | [~] Sales baseline gate passed: 709 Worker + 678 frontend (37098964791). Latest combined ea843e6e gate37101322999 running. Not live. |
 | Branch consolidation | [~] Metadata slice a00362a2 committed; independent review found permission/freshness issues. Stock transfer and cutover remain pending. |
 | STOCK-RETURN | [~] Quantity correction reviewed; partial returns/accounting still in progress. Not live. |
 | Product edit / Undo | [~] Backend/client checkpoints preserved; brand/group/fold/create-stock completion and integration pending. |
-| One combined release | [~] Sales 6ddb2ca merged; independent deployment held. Employee browser 11/11 passed, then mobile clipping found and fixed in 735b372a; final checks running. |
+| One combined release | [~] Sales and reviewed mobile fix merged; independent deployment held. Employee browser11/11 passes, including EN/KM mobile/desktop and scroll limits. |
 | Versions / portfolio | [~] Live/cloud identities checked. Four redundant local candidates inventoried; active-use/recovery checks pending. No deletion; portfolio coordination pending. |
 | Full owner goal | [~] Active; 35 scope groups and 1,115 historical IDs retained. Independent coverage audit complete; implementation/live reconciliation continues. |
 
