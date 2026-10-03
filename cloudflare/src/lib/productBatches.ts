@@ -32,6 +32,7 @@
 //   the standard expiry-tracked-inventory rule referenced in
 //   routes/inventory.ts's disclosure comment.
 import type { D1Compat } from './db'
+import { receivingBranchAssertion } from './receivingBranch'
 import { dateToBatchCode, normalizeTypedDate } from './batchCode'
 import { addMoney4, multiplyMoney4, nullableMoney4, roundMoney4, sellingPriceCeilCent } from './moneyPrecision'
 import { buildInClause, selectInChunks } from './sqlBinding'
@@ -602,6 +603,7 @@ export async function receiveBatchStock(db: D1Compat, input: {
   creditDueDate?: string | null
   provenanceKey?: string
   preserveHistoricalUnitCost?: boolean
+  ordinaryReceiving?: true
   /** Internal stock-revert only: replay the recorded lot, not a new purchase. */
   historicalReceiptReplay?: boolean
   // P4-4a: statements that need this receipt's own resolved batch_id (e.g. an
@@ -641,6 +643,7 @@ export async function receiveBatchStock(db: D1Compat, input: {
     ? input.buildBatchStatements({ batchKey: plan.batchKey, lotCode: plan.lotCode, resolvedBatchIdSql })
     : []
   await db.batch([
+    ...(input.ordinaryReceiving ? [receivingBranchAssertion(input.branchId)] : []),
     ...plan.statements,
     ...(hasEnteredCost || receiptLotTarget ? [{ sql: 'DELETE FROM stock_session_guards', params: {} }] : []),
     ...extraStatements,

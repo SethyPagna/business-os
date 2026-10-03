@@ -1,3 +1,4 @@
+import { requireReceivingBranch, isReceivingBranchError, RECEIVING_BRANCH_INACTIVE } from '../lib/receivingBranch'
 import { Hono, type Context } from 'hono'
 import { acquisitionCostResponses, canEditAcquisitionCosts, hasAcquisitionCostInput } from '../lib/acquisitionCostAccess'
 import { getDb } from '../lib/db'
@@ -224,7 +225,13 @@ export async function runReceiveBatchAction(c: BatchesContext, body: ReceiveBody
     'receive',
     body as unknown as Record<string, unknown>,
     (value, status) => c.json(value as never, status as never),
-    (markWritten) => runReceiveBatchActionKernel(c, body, markWritten),
+    async (markWritten) => {
+      try { return await runReceiveBatchActionKernel(c, body, markWritten) }
+      catch (error) {
+        if (isReceivingBranchError(error)) return c.json(RECEIVING_BRANCH_INACTIVE, 409)
+        throw error
+      }
+    },
   )
 }
 
@@ -304,6 +311,7 @@ async function runReceiveBatchActionKernel(c: BatchesContext, body: ReceiveBody,
     return c.json({ error: 'Price edit permission is required to change the selling price', code: 'price_edit_required' }, 403)
   }
   const movementFreeColumn = freeQuantity > 0 && await hasColumn(db, 'inventory_movements', 'free_quantity')
+  await requireReceivingBranch(db, branchId)
   const branch = await db.prepare('SELECT id, name FROM branches WHERE id = ?').get<{ id: number; name: string }>([branchId])
 
   const explicitBatchId = Number.isFinite(Number(body.batch_id)) && Number(body.batch_id) > 0 ? Number(body.batch_id) : null
@@ -314,6 +322,7 @@ async function runReceiveBatchActionKernel(c: BatchesContext, body: ReceiveBody,
   await markWritten()
   try {
     received = await receiveBatchStock(db, {
+      ordinaryReceiving: true,
       productId,
       branchId,
       quantity,
@@ -384,6 +393,7 @@ async function runReceiveBatchActionKernel(c: BatchesContext, body: ReceiveBody,
     // The explicit-lot pick can fail validation ("Selected batch does not
     // belong to this product") -- a caller mistake, not a server fault, so
     // it answers 400 exactly as /inventory/adjust's batch path does.
+    if (isReceivingBranchError(err)) return c.json(RECEIVING_BRANCH_INACTIVE, 409)
     return c.json({ error: err instanceof Error ? err.message : 'Failed to receive stock' }, 400)
   }
   const { batchId, batchNumber, lotCode } = received
