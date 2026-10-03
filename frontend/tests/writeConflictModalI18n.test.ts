@@ -44,10 +44,25 @@ function check(name: string, run: () => void) {
   catch (error) { failures++; console.error(`FAIL ${name}`, error) }
 }
 for (const language of ['en', 'km']) {
+  check(language + ': absent branch snapshot is unknown while a known empty value stays empty', () => {
+    for (const current of [null, undefined, {}]) {
+      const { tree, messages } = render(language, { entity: 'branch', attempted: { notes: 'Retained attempt' }, current })
+      const rows = nodes(tree).filter(node => node.key === 'notes')
+      assert.equal(rows.length, 1)
+      assert(text(rows[0]).includes(messages.unknown), 'Missing branch snapshot must remain Unknown')
+      assert(!text(rows[0]).includes(messages.write_conflict_empty), 'Unavailable saved data is not a known empty value')
+      assert(text(rows[0]).includes('Retained attempt'))
+    }
+    const { tree, messages } = render(language, { entity: 'branch', attempted: { notes: 'Retained attempt' }, current: { notes: '' } })
+    const rows = nodes(tree).filter(node => node.key === 'notes')
+    assert.equal(rows.length, 1)
+    assert(text(rows[0]).includes(messages.write_conflict_empty))
+    assert(!text(rows[0]).includes(messages.unknown))
+  })
   check(`${language}: rendered branch conflict localizes chrome and preserves real descriptions`, () => {
     const { html, messages } = render(language, { entity: 'branch', entityLabel: 'Branch',
       attempted: { notes: 'My description <script>keep as text</script>', location: '', is_default: false },
-      current: { id: 27, name: 'Old Shop', location: null, notes: 'Saved description', is_default: true },
+      current: { id: 27, name: 'Old Shop', location: null, notes: 'Saved description', is_default: true, updated_at: '2026-10-03T00:00:00Z' },
       expectedUpdatedAt: '2026-10-03T00:00:00Z', actualUpdatedAt: null })
     assert(html.includes(messages.dismiss), 'Dismiss must use the selected language')
     for (const key of ['write_conflict_title', 'write_conflict_older_version', 'write_conflict_background_refresh',
@@ -62,6 +77,9 @@ for (const language of ['en', 'km']) {
     assert(html.includes('Saved description'))
     assert(html.includes(fmtDateTime24(new Date('2026-10-03T00:00:00Z'))))
     assert(!html.includes('>null<'))
+    for (const key of ['default', 'updated']) assert(nodes(render(language, { entity: 'branch', current: { is_default: true, updated_at: '2026-10-03T00:00:00Z' } }).tree)
+      .some(node => (node.type === 'span' || node.type === 'div') && text(node.props.children) === messages[key]), `${language} renders mapped ${key} label`)
+    for (const key of ['is_default', 'updated_at']) assert(!html.includes('>' + key + '</'), `${language} must not expose raw known field ${key}`)
   })
   check(`${language}: existing variants render localized known labels without translating stored values`, () => {
     const cases = [

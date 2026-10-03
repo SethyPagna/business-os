@@ -1,4 +1,4 @@
-import { apiFetch, route } from './http.ts'
+import { apiFetch, isWriteConflictError, route } from './http.ts'
 import { appendQuery, buildQueryString, type QueryParams } from './query.ts'
 import { getClientDeviceInfo } from '../utils/deviceInfo.ts'
 import { ensureClientRequestId } from './requestIds.ts'
@@ -137,9 +137,17 @@ export function createBranch(payload: BranchPayload = {}): Promise<unknown> {
 
 export function updateBranch(id: string | number, payload: BranchPayload = {}): Promise<unknown> {
   const body = { ...getDevicePayload(), ...(payload || {}) }
+  const attempted = Object.fromEntries(['location', 'phone', 'manager', 'notes', 'is_default']
+    .filter(key => Object.hasOwn(body, key)).map(key => [key, body[key]]))
   return route(
     'branches:update',
-    () => apiFetch('PUT', `/api/branches/${encodeId(id)}`, body),
+    async () => {
+      try { return await apiFetch('PUT', `/api/branches/${encodeId(id)}`, body) }
+      catch (error) {
+        if (isWriteConflictError(error)) Object.assign(error as object, { entity: 'branch', attempted })
+        throw error
+      }
+    },
     null,
     true,
   )

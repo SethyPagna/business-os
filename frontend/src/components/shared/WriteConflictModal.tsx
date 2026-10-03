@@ -58,7 +58,7 @@ function asConflictRecord(value: unknown): ConflictRecord {
 }
 
 function fieldLabel(key: string, tr: Translate): string {
-  const label = Object.hasOwn(FIELD_KEYS, key) ? tr(FIELD_KEYS[key], key) : key
+  const label = Object.hasOwn(FIELD_KEYS, key) ? tr(FIELD_KEYS[key], FIELD_KEYS[key]) : key
   return key === 'total_refund_usd' ? label + ' (USD)' : label
 }
 
@@ -120,7 +120,8 @@ function getConflictFieldRows(conflict: WriteConflict, tr: Translate): ConflictF
   })
   if (entity === 'settings') return Object.keys(attempted).map(key => row(key))
   if (entity === 'branch') return ['location', 'phone', 'manager', 'notes', 'is_default'].filter(key =>
-    Object.prototype.hasOwnProperty.call(attempted, key)).map(key => row(key, key === 'notes' ? 'description' : key))
+    Object.prototype.hasOwnProperty.call(attempted, key)).map(key => row(key, key === 'notes' ? 'description' : key,
+      attempted[key], Object.hasOwn(current, key) ? current[key] : tr('unknown', 'Unknown')))
   if (entity === 'sale') {
     const rows: ConflictFieldRow[] = []
     if (Object.prototype.hasOwnProperty.call(attempted, 'sale_status')) rows.push(row('sale_status'))
