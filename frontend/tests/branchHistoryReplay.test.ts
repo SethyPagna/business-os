@@ -34,14 +34,14 @@ type Request = {
   fields: Row
   expected: Row
   readBranch: (id: string | number) => Promise<Row | null | undefined>
-  writeBranch: (id: string | number, body: Row) => Promise<{ success?: boolean; error?: string } | null | undefined>
+  writeBranch: (id: string | number, body: Row) => Promise<{ success?: boolean; error?: string; pending?: boolean; branch?: Row } | null | undefined>
   refusal: string
   failure: string
 }
 type Module = {
   BRANCH_REPLAY_TEXT_FIELDS: readonly string[]
   staleBranchReplayFields: (current: Row, expected: Row) => string[]
-  replayBranchEdit: (request: Request) => Promise<void>
+  replayBranchEdit: (request: Request) => Promise<Row>
 }
 let mod: Module | null = null
 try {
@@ -54,10 +54,7 @@ const need = (): Module => { assert.ok(mod, 'components/branches/branchHistoryRe
 const UNDO_REFUSED = 'Undo refused, in the page language'
 const REDO_REFUSED = 'Redo refused, in the page language'
 
-// GET /api/branches and PUT /branches/:id as the Worker behaves:
-// branchUpdateStatements stores `value || null` for text and toDbBool for the
-// flag and stamps updated_at; assertUpdatedAtMatch refuses a sent version the
-// row no longer has (409 write_conflict) and checks nothing when none is sent.
+// Small store models complete-row content tokens and committed response snapshots.
 function branchStore(initial: Row) {
   let tick = 0
   const stamp = () => `2026-09-27 10:00:${String(tick++).padStart(2, '0')}`
@@ -68,24 +65,31 @@ function branchStore(initial: Row) {
     return next
   }
   let row: Row = { ...initial, ...stored(initial), updated_at: stamp() }
+  const token = () => { const { edit_etag: _old, ...state } = row; row.edit_etag = JSON.stringify(state) }
+  token()
+  const before = { ...row }
+  let after = { ...row }
   const writes: Row[] = []
   return {
     get row(): Row { return row },
-    writes,
+    writes, before,
+    get after(): Row { return after },
+    captureAfter(): void { after = { ...row } },
     // Another device's save, or the forward edit itself.
-    edit(fields: Row): void { row = { ...row, ...stored(fields), updated_at: stamp() } },
+    edit(fields: Row): void { row = { ...row, ...stored(fields), updated_at: stamp() }; token() },
+    sameSecondEdit(fields: Row): void { row = { ...row, ...fields }; token() },
     read: async (id: string | number): Promise<Row | null> => (String(id) === String(row.id) ? { ...row } : null),
     async write(id: string | number, body: Row): Promise<Row> {
       writes.push(body)
       if (String(id) !== String(row.id)) throw Object.assign(new Error('Branch not found'), { status: 404 })
       const expected = String(body.expectedUpdatedAt ?? body.expected_updated_at ?? body.updated_at ?? body.updatedAt ?? '').trim()
-      if (expected && expected !== row.updated_at) {
+      if (!body.expectedEditEtag || body.expectedEditEtag !== row.edit_etag || (expected && expected !== row.updated_at)) {
         throw Object.assign(new Error('This branch changed on another device. Refresh and try again.'), {
-          status: 409, code: 'write_conflict', conflict: true,
+          status: 409, code: 'branch_edit_conflict', conflict: true,
         })
       }
       this.edit(body)
-      return {}
+      return { success: true, branch: { ...row } }
     },
   }
 }
@@ -101,16 +105,17 @@ const body = (snapshot: Row): Row => ({
 
 type Store = ReturnType<typeof branchStore>
 const undoOf = (store: Store, over: Partial<Request> = {}): Request => ({
-  id: 1, fields: body(BEFORE), expected: AFTER, readBranch: store.read, writeBranch: (id, b) => store.write(id, b),
+  id: 1, fields: body(BEFORE), expected: store.after, readBranch: store.read, writeBranch: (id, b) => store.write(id, b),
   refusal: UNDO_REFUSED, failure: 'Failed to restore branch', ...over,
 })
 const redoOf = (store: Store, over: Partial<Request> = {}): Request => ({
-  id: 1, fields: body(AFTER), expected: BEFORE, readBranch: store.read, writeBranch: (id, b) => store.write(id, b),
+  id: 1, fields: body(AFTER), expected: store.before, readBranch: store.read, writeBranch: (id, b) => store.write(id, b),
   refusal: REDO_REFUSED, failure: 'Failed to reapply branch changes', ...over,
 })
 const edited = (): Store => {
   const store = branchStore(BEFORE)
   store.edit(AFTER)
+  store.captureAfter()
   return store
 }
 const refusedWith = (message: string) => (error: unknown) => (error as Error)?.message === message
@@ -133,7 +138,7 @@ await runTest('DISCRIMINATING: a later edit to a field the edit itself left alon
 
 await runTest('DISCRIMINATING: an in-tab Redo refuses once a later edit changed what the Undo restored', async () => {
   const store = edited()
-  await need().replayBranchEdit(undoOf(store))
+  Object.assign(store.before, await need().replayBranchEdit(undoOf(store)))
   store.edit({ is_default: 0 })
   await assert.rejects(need().replayBranchEdit(redoOf(store)), refusedWith(REDO_REFUSED))
   assert.equal(store.writes.length, 1, 'only the Undo was sent')
@@ -143,7 +148,7 @@ await runTest('DISCRIMINATING: an in-tab Redo refuses once a later edit changed 
 await runTest('a clean Undo then Redo restores each side, each write held to the version it read', async () => {
   const store = edited()
   const beforeUndo = store.row.updated_at
-  await need().replayBranchEdit(undoOf(store))
+  Object.assign(store.before, await need().replayBranchEdit(undoOf(store)))
   assert.equal(store.writes[0].expectedUpdatedAt, beforeUndo, 'the Undo carries the version it read')
   assert.equal(store.row.phone, null)
   assert.equal(store.row.notes, null)
@@ -152,7 +157,7 @@ await runTest('a clean Undo then Redo restores each side, each write held to the
   assert.equal(store.writes[1].expectedUpdatedAt, beforeRedo, 'the Redo carries the version it read')
   assert.equal(store.row.phone, '012 345 678')
   assert.equal(store.row.notes, 'Opens at 7')
-  const { expectedUpdatedAt: _undoVersion, ...undoBody } = store.writes[0]
+  const { expectedUpdatedAt: _undoVersion, expectedEditEtag: _undoToken, ...undoBody } = store.writes[0]
   assert.deepEqual(undoBody, body(BEFORE), 'the Undo sends the restored snapshot unchanged')
 })
 
@@ -207,14 +212,51 @@ await runTest('the fields compared are the ones the Worker applier compares', ()
 await runTest('Branches.tsx sends both closures through the guarded replay, never the bare snapshot', () => {
   const branches = code(read('../src/components/branches/Branches.tsx'))
   assert.match(branches, /import \{[^}]*\breplayBranchEdit\b[^}]*\} from '\.\/branchHistoryReplay\.ts'/)
-  assert.match(branches, /undo: async \(\) => \{\s*await replayBranchEdit\(branchReplayRequest\('undo', existingSnapshot, nextSnapshot\)\)/,
+  assert.match(branches, /undo: async \(\) => \{\s*Object\.assign\(existingSnapshot, await replayBranchEdit\(branchReplayRequest\('undo', existingSnapshot, nextSnapshot\)\)/,
     'Undo restores the pre-edit snapshot only while the branch holds the edit')
-  assert.match(branches, /redo: async \(\) => \{\s*await replayBranchEdit\(branchReplayRequest\('redo', nextSnapshot, existingSnapshot\)\)/,
+  assert.match(branches, /redo: async \(\) => \{\s*Object\.assign\(nextSnapshot, await replayBranchEdit\(branchReplayRequest\('redo', nextSnapshot, existingSnapshot\)\)/,
     'Redo reapplies the edit only while the branch holds what the Undo restored')
   assert.match(branches, /fields: buildBranchPayload\(restore\),\s*expected,/)
   assert.match(branches, /tr\('undo_refused_record_changed',/)
   assert.match(branches, /tr\('redo_refused_record_changed',/)
   assert.doesNotMatch(branches, /updateBranch\((?:existingSnapshot|nextSnapshot)\.id/, 'no closure PUTs a snapshot directly')
+})
+
+await runTest('DISCRIMINATING: same-second canonical metadata change refuses the stored token without replacing it from GET', async () => {
+  const store = edited()
+  const timestamp = store.row.updated_at
+  store.sameSecondEdit({ successor_branch_id: 3 })
+  assert.equal(store.row.updated_at, timestamp)
+  await assert.rejects(need().replayBranchEdit(undoOf(store)), refusedWith(UNDO_REFUSED))
+  assert.equal(store.writes.length, 0)
+})
+
+await runTest('DISCRIMINATING: legacy history without captured token refuses even when fresh row text matches', async () => {
+  const store = edited()
+  await assert.rejects(need().replayBranchEdit(undoOf(store, { expected: AFTER })), refusedWith(UNDO_REFUSED))
+  assert.equal(store.writes.length, 0)
+})
+
+await runTest('DISCRIMINATING: same-second read-to-write race is refused by the stored token', async () => {
+  const store = edited()
+  const timestamp = store.row.updated_at
+  const request = undoOf(store, { readBranch: async (id) => {
+    const current = await store.read(id)
+    store.sameSecondEdit({ notes: 'racing edit' })
+    return current
+  } })
+  await assert.rejects(need().replayBranchEdit(request), refusedWith(UNDO_REFUSED))
+  assert.equal(store.row.updated_at, timestamp)
+  assert.equal(store.row.notes, 'racing edit')
+  assert.equal(store.writes.length, 1)
+  assert.equal(store.writes[0].expectedEditEtag, store.after.edit_etag)
+})
+
+await runTest('queued replay and missing committed state cannot claim local application', async () => {
+  const store = edited()
+  for (const result of [{ success: true, pending: true }, { success: true }]) {
+    await assert.rejects(need().replayBranchEdit(undoOf(store, { writeBranch: async () => result })), refusedWith(UNDO_REFUSED))
+  }
 })
 
 if (failed) {

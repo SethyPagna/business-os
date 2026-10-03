@@ -7189,5 +7189,7 @@
   "date_weekday_6": "Sat",
   "date_weekday_7": "Sun",
   "invoice_unknown_time_included": "Invoices without a recorded time remain included for the selected dates.",
-  "shift_opening_time_filter": "Opening time; each selected shift is reported in full."
+  "shift_opening_time_filter": "Opening time; each selected shift is reported in full.",
+  "branch_edit_conflict": "This branch edit can no longer be verified. Refresh Branches and submit a new edit.",
+  "branch_review_schema_required": "Branch review is not ready. Refresh after the update and try again."
 }
