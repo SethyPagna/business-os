@@ -18,6 +18,7 @@
 // approved without the real change having happened.
 
 import { getDb } from './db'
+import { ordinaryBusinessMaintenanceGuard } from './businessMaintenanceGuard'
 import { audit, buildAuditStatement } from './audit'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from './cache'
@@ -377,6 +378,7 @@ registerApplier('branches', 'update', 'branch', async (env, row, reviewer, waitU
       { sql: `UPDATE pending_actions SET status='approved', reviewed_by=@reviewer_id, reviewed_by_name=@reviewer_name,
         reviewed_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP WHERE id=@pending_id AND status='open'`,
         params: { pending_id: row.id, reviewer_id: reviewer.id, reviewer_name: reviewer.name } },
+      ordinaryBusinessMaintenanceGuard,
     ])
   } catch (error) {
     const receipt = await recoverApprovedBranchAction(env, row, reviewer.id)

@@ -92,7 +92,7 @@ function approvalHandler(dependencies = {}) {
     && node.expression.arguments.slice(0, 3).map(arg => arg.text).join('/') === 'branches/update/branch')
   const permissionError = tree.statements.find(node => node.name?.text === 'ReviewRequesterPermissionError').getText(tree)
   return evaluate(`${permissionError}\n${functionSource(tree, 'recoverApprovedBranchAction')}\nconst handler=${statement.expression.arguments[3].getText(tree)}`, {
-    ...writes, ...load('permissions'), ...load('conflictControl'), ...load('audit'), getDb: () => adapter(currentDb), notify: async () => {}, ...dependencies,
+    ...writes, ...load('permissions'), ...load('conflictControl'), ...load('audit'), ...load('businessMaintenanceGuard'), getDb: () => adapter(currentDb), notify: async () => {}, ...dependencies,
   }, 'handler')
 }
 async function queuedBranch(db, body = { notes: 'approved' }) {
@@ -515,6 +515,43 @@ async function check(name, fn) {
 
 }
 async function main() {
+  await check('maintenance acquired after branch approval pre-read rolls back branch pending and audit together', async () => {
+    for (const flag of ['{"mode":"restore","token":"held"}', '{"mode":"branch-cutover","token":"held"}', '{corrupt']) {
+      const w = world(); const row = await queue(w)
+      const before = { branch: branch(w), pending: pending(w), audits: w.db.prepare('SELECT * FROM audit_logs').all() }
+      w.control.beforeBatch = db => db.prepare("INSERT INTO system_flags(key,value) VALUES('maintenance',?)").run(flag)
+      const response = await reviewRoute('/:id/approve')(ctx(w, {}, reviewUser, row.id))
+      assert.notEqual(response.status, 200)
+      assert.equal(w.control.batches, 1)
+      assert.deepEqual(branch(w), before.branch)
+      assert.deepEqual(pending(w), before.pending)
+      assert.deepEqual(w.db.prepare('SELECT * FROM audit_logs').all(), before.audits)
+      assert.equal(w.db.prepare("SELECT value FROM system_flags WHERE key='maintenance'").get().value, flag)
+      assert.equal(w.control.broadcasts.length, 0)
+      w.db.exec("DELETE FROM system_flags WHERE key='maintenance'")
+      const approved = await reviewRoute('/:id/approve')(ctx(w, {}, reviewUser, row.id))
+      assert.equal(approved.status, 200)
+      assert.equal(branch(w).notes, 'approved')
+      assert.equal(pending(w).status, 'approved')
+      assert.equal(w.db.prepare("SELECT COUNT(*) AS n FROM audit_logs WHERE entity='branch'").get().n, 1)
+      assert.equal(w.control.batches, 2)
+      w.db.close()
+    }
+  })
+  await check('already committed branch approval receipt replays read-only during maintenance', async () => {
+    const w = world(); const row = await queue(w)
+    assert.equal((await reviewRoute('/:id/approve')(ctx(w, {}, reviewUser, row.id))).status, 200)
+    w.db.exec("INSERT INTO system_flags(key,value) VALUES('maintenance','held')")
+    const before = { branch: branch(w), pending: pending(w), audits: w.db.prepare('SELECT * FROM audit_logs').all(), batches: w.control.batches }
+    const replayed = await reviewRoute('/:id/approve')(ctx(w, {}, reviewUser, row.id))
+    assert.equal(replayed.status, 200)
+    assert.equal(replayed.value.replayed, true)
+    assert.deepEqual(branch(w), before.branch)
+    assert.deepEqual(pending(w), before.pending)
+    assert.deepEqual(w.db.prepare('SELECT * FROM audit_logs').all(), before.audits)
+    assert.equal(w.control.batches, before.batches)
+    w.db.close()
+  })
   await check('lost acknowledgement recovers exact same-actor receipt with one batch and one branch audit', async () => {
     const w = world(); const row = await queue(w)
     w.control.afterBatch = () => { throw new Error('D1_ERROR: internal error acknowledgement lost') }
