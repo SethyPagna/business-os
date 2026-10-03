@@ -10,6 +10,11 @@ const query = dashboardRangeQuery(range)
 assert.deepEqual(query, { startDate: '2026-09-19', endDate: '2026-09-20', createdFrom: '2026-09-19 15:00:00', createdTo: '2026-09-19 19:01:00' })
 assert.deepEqual(query, reportQueryParams({ ...range, branchId: '', status: '', paymentMethod: '' }, getReportView('overview')), 'Dashboard and Reports use identical continuous business-time bounds')
 assert.match(dashboardRangeLabel(range), /22:00.*02:00.*UTC\+7/)
+assert.equal(dashboardRangeLabel(range), '19/09/2026 22:00 - 20/09/2026 02:00 (UTC+7)')
+assert.equal(dashboardRangeLabel({ startDate: '2026-09-03', endDate: '2026-09-04', startTime: '', endTime: '' }), '03/09/2026 - 04/09/2026')
+assert.equal(dashboardRangeLabel({ startDate: '2026-12-31', endDate: '2027-01-01', startTime: '00:00', endTime: '24:00' }), '31/12/2026 00:00 - 01/01/2027 24:00 (UTC+7)')
+assert.equal(dashboardRangeLabel({ startDate: '', endDate: '', startTime: '', endTime: '' }), '… - …')
+assert.equal(dashboardRangeLabel({ startDate: '2024-02-29', endDate: '', startTime: '', endTime: '' }), '29/02/2024 - …')
 for (const times of [{ startTime: '', endTime: '' }, { startTime: '00:00', endTime: '23:59' }]) {
   assert.deepEqual(dashboardRangeQuery({ ...range, ...times }), { startDate: range.startDate, endDate: range.endDate })
 }
