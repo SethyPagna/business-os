@@ -1929,8 +1929,9 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
     ?? filtered.filter(isCountedSale).length
 
   // Credit is already inside revenue; this positive figure simply identifies
-  // how much of the shown revenue remains owed.
-  const creditUsd = salesStats
+  // how much of the net recognized revenue is unpaid; absent V1 authority
+  // keeps the fallback unavailable until authoritative server stats arrive.
+  const creditUsd: number | null = salesStats
     ? salesStats.pending_revenue_usd
     : saleListCreditUsd(filtered)
 

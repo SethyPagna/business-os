@@ -16,6 +16,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
+import ts from 'typescript'
 import {
   revenueTerms, profitTerms, equationResidual, equationCloses, buildEquation,
   isRevenueCountedSale, saleListRevenueUsd, isCreditSale, saleListCreditUsd,
@@ -286,11 +287,68 @@ test('footer count: only cancelled is excluded, matching /stats revenue_count', 
 
 test('Credit is a positive awaiting-payment subset of recognized revenue', () => {
   assert.deepEqual(LIST_ROWS.filter(isCreditSale).map((sale) => sale.id), [4])
-  assert.equal(saleListCreditUsd(LIST_ROWS), 180, 'credit uses the same nonnegative net-sales basis as the server pending figure')
+  assert.equal(saleListCreditUsd(LIST_ROWS), 153, 'credit uses the same net recognized basis after the capped refund as the server pending figure')
   assert.equal(saleListCreditUsd([
     { sale_status: 'awaiting_payment', subtotal_usd: 10, discount_usd: 30, refund_usd: 0 },
     { sale_status: 'cancelled', subtotal_usd: 50, discount_usd: 0, refund_usd: 0 },
   ]), 0, 'bad net inputs and cancelled rows cannot print negative credit')
+})
+
+test('Credit preserves explicit retained unpaid authority only while return status is current', () => {
+  const rows = [
+    { sale_status: 'partial_return', status_before_return: 'awaiting_payment', subtotal_usd: 19, refund_usd: 9.5 },
+    { sale_status: 'returned', status_before_return: 'awaiting_payment', subtotal_usd: 19, refund_usd: 19 },
+    { sale_status: 'completed', status_before_return: 'awaiting_payment', subtotal_usd: 19 },
+    { sale_status: 'cancelled', status_before_return: 'awaiting_payment', subtotal_usd: 19 },
+    { sale_status: 'partial_return', subtotal_usd: 19 },
+    { sale_status: 'returned', status_before_return: ' awaiting_payment', subtotal_usd: 19 },
+  ]
+  assert.deepEqual(rows.map(isCreditSale), [true, true, false, false, false, false])
+  assert.equal(saleListCreditUsd(rows), 9.5)
+})
+
+test('Credit fallback refuses V1 authority rather than interpreting payout as a legacy reversal', () => {
+  const legacy = { sale_status: 'awaiting_payment', subtotal_usd: 19, refund_usd: 9.5 }
+  const precise = { sale_status: 'partial_return', status_before_return: 'awaiting_payment', money_precision_version: 1, subtotal_usd: 19, refund_usd: 9.5 }
+  assert.equal(saleListCreditUsd([precise]), null)
+  assert.equal(saleListCreditUsd([legacy, precise]), null, 'an unsupported row makes the complete credit cohort unavailable')
+  assert.equal(saleListCreditUsd([{ ...precise, sale_status: 'awaiting_payment', refund_usd: 0 }]), null, 'a zero payout still lacks V1 adjustment authority')
+  assert.equal(saleListCreditUsd([legacy, { ...precise, sale_status: 'completed' }]), 9.5, 'a V1 non-credit row does not erase computable legacy credit')
+  assert.equal(saleListCreditUsd([]), 0)
+})
+
+test('the actual Sales surface prints unavailable Credit as a dash in EN/KM without formatting fake money', () => {
+  const jsx = (type: unknown, props: Record<string, unknown>) => ({ type, props })
+  const output = ts.transpileModule(read('src/components/sales/SalesListSurface.tsx'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX },
+  }).outputText
+  const mod: { exports: any } = { exports: {} }
+  const localRequire = (name: string) => {
+    if (name === 'react/jsx-runtime') return { jsx, jsxs: jsx, Fragment: 'Fragment' }
+    if (name === 'react') return { Fragment: 'Fragment' }
+    if (name.includes('AppContext')) return { useApp: () => ({ can: () => false }) }
+    if (name.includes('useColumnPreferences')) return { useColumnPreferences: () => ({ visibleCount: 0, isVisible: () => false }) }
+    if (name.includes('salesListColumns')) return { SALES_COLUMNS_SURFACE_KEY: 'test', SALES_OPTIONAL_COLUMNS: [] }
+    return {}
+  }
+  new Function('require', 'module', 'exports', output)(localRequire, mod, mod.exports)
+  const text = (node: any): string => Array.isArray(node) ? node.map(text).join('')
+    : node && typeof node === 'object' ? text(node.props?.children) : node == null || typeof node === 'boolean' ? '' : String(node)
+  for (const pack of ['en', 'km']) {
+    const strings = JSON.parse(read(`src/lang/${pack}.json`)) as Record<string, string>
+    for (const creditUsd of [null, 0, 5.5]) {
+      const formatted: number[] = []
+      const tree = mod.exports.default({ collapsedSalesSections: new Set(), filtered: [], filteredIds: [],
+        loading: false, revenue: 19, revenueCount: 1, creditUsd, salesSections: [], selectedIds: new Set(),
+        selectionModeActive: false, t: (key: string) => strings[key] || key,
+        fmtUSD: (value: number) => { assert.equal(typeof value, 'number'); formatted.push(value); return `$${value.toFixed(2)}` } })
+      const rendered = text(tree)
+      if (creditUsd === null) assert.ok(rendered.includes(`${strings.rpt_pending_credit} —`), pack)
+      else if (creditUsd === 0) assert.equal(rendered.includes(strings.rpt_pending_credit), false, pack)
+      else assert.ok(rendered.includes(`${strings.rpt_pending_credit} $5.50`), pack)
+      assert.deepEqual(formatted, creditUsd ? [19, creditUsd] : [19], 'unavailable and zero credit never reach the money formatter')
+    }
+  }
 })
 
 test('footer fallback: a zero-subtotal receipt with a refund contributes 0, never a minus', () => {

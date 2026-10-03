@@ -153,11 +153,11 @@ assert.equal(closed, 0, 'late old-actor completion cannot close current detail')
 
 let trackedReads = 0
 const trackedEnv: any = {
-  canLoadAddItems: true, detailScope: 'actor1:sale1', sale: { branch_id: 2 }, trackedBatchReloadKey: 0,
+  canLoadSaleProducts: true, detailScope: 'actor1:sale1', sale: { branch_id: 2 }, trackedBatchReloadKey: 0,
   getTrackedBatchProductIds: () => { trackedReads++; return Promise.resolve({ productIds: [3263] }) },
   setTrackedBatchLookupState: () => {}, setTrackedBatchLookupError: () => {}, setTrackedBatchProductIds: () => {},
 }
-const trackedEffect = effect('if (!canLoadAddItems) return undefined', trackedEnv)
+const trackedEffect = effect('if (!canLoadSaleProducts) return undefined', trackedEnv)
 trackedEffect.render(); await flush()
 for (let i = 0; i < 5; i++) trackedEffect.render()
 assert.equal(trackedReads, 1, 'unchanged capability does not refetch tracked IDs on parent callbacks')

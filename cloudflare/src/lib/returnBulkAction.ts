@@ -454,14 +454,17 @@ async function v1EntitlementGuards(db: D1Compat, members: Member[], target: 'bef
       fail('The exact refund entitlement changed. Review the return history before restoring it.', 409)
     }
     const activeIds = new Set(projected.map(row => row.id))
+    const lines = saleLines.filter(row => Number(row.sale_id) === saleId)
+    const linesById = new Map(lines.map(line => [Number(line.sale_item_id), line]))
     const returned = new Map<number, number[]>()
     for (const item of parsed.items.filter(item => activeIds.has(Number(item.return_id)))) {
       const id = Number(item.sale_item_id)
       if (!Number.isSafeInteger(id) || id <= 0) fail('The exact refund entitlement changed. Review the return history before restoring it.', 409)
+      const line = linesById.get(id)
+      if (!line || line.product_id !== item.product_id) fail('The exact refund entitlement changed. Review the return history before restoring it.', 409)
       const quantities = returned.get(id) || []
       quantities.push(Number(item.quantity)); returned.set(id, quantities)
     }
-    const lines = saleLines.filter(row => Number(row.sale_id) === saleId)
     if (!lines.length) fail('The exact refund entitlement changed. Review the return history before restoring it.', 409)
     let fullyReturned = projected.length > 0
     try {

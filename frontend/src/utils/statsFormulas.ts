@@ -234,12 +234,13 @@ export function saleListRevenueUsd(rows: readonly SaleRevenueRow[]): number {
  * payment", which were four names for this one predicate.
  */
 export function isCreditSale(sale: SaleRevenueRow): boolean {
-  return saleStatus(sale) === 'awaiting_payment'
+  const status = saleStatus(sale)
+  return status === 'awaiting_payment' || (['partial_return', 'returned'].includes(status) && sale.status_before_return === 'awaiting_payment')
 }
 
 /**
  * The credit annotation beside the footer's revenue: `SUM over credit rows of
- * netSaleExpr`, the client mirror of the kernel's `pending_revenue_usd`
+ * netSaleExpr minus the capped net refund`, the client mirror of the kernel's `pending_revenue_usd`
  * (cloudflare/src/lib/salesAnalytics.ts).
  *
  * Two properties it must keep, both of them owner rules:
@@ -250,18 +251,18 @@ export function isCreditSale(sale: SaleRevenueRow): boolean {
  *  * A SUBSET, NOT A COMPLEMENT. These same rows are already inside
  *    `saleListRevenueUsd` (isRevenueCountedSale excludes only cancelled).
  *    Nothing may add this to a revenue or subtract it from one; it says how
- *    much of the revenue already shown is still owed.
+ *    much of the net revenue already shown belongs to credit rows.
  *
- * No refund term, matching the kernel: `pending_revenue_usd` is netSaleExpr
- * alone, so the header's credit and the kernel's credit stay byte-identical.
- * cloudflare/scripts/test-credit-in-revenue-pure.cjs asserts that equality
- * against a real SQLite fixture.
+ * V1 list rows lack the immutable refund reversal and header-adjustment
+ * authority needed by the exact report kernel. A cohort containing one
+ * V1 credit row is unavailable until authoritative server stats arrive.
  */
-export function saleListCreditUsd(rows: readonly SaleRevenueRow[]): number {
+export function saleListCreditUsd(rows: readonly SaleRevenueRow[]): number | null {
   let total = 0
   for (const sale of rows || []) {
     if (!isCreditSale(sale)) continue
-    total += saleNetSalesUsd(sale)
+    if (Number(sale.money_precision_version) === 1) return null
+    total += saleNetSalesUsd(sale) - saleNetRefundUsd(sale)
   }
   return round2(total)
 }

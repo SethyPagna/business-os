@@ -2698,11 +2698,23 @@ app.patch('/:id', async (c) => {
     return c.json({ error: 'Exact net-entitlement returns cannot be edited until the v1 edit flow is available.',
       code: 'customer_return_edit_v1_not_supported', action: 'review_required' }, 409)
   }
+  type LinkedSaleState = {
+    id: number; sale_status: string | null; status_before_return: string | null
+    receipt_number: string | null; write_revision: number; money_precision_version: number | null
+  }
+  let linkedSale: LinkedSaleState | null = null
+  if (existing.sale_id) {
+    linkedSale = await db.prepare(`SELECT s.id,s.sale_status,s.status_before_return,s.receipt_number,s.money_precision_version,
+      COALESCE(v.revision,0) AS write_revision
+      FROM sales s LEFT JOIN sale_write_revisions v ON v.sale_id=s.id WHERE s.id=?`)
+      .get<LinkedSaleState>([existing.sale_id]) || null
+    if (!linkedSale) return c.json({ error: 'Original sale not found' }, 400)
+  }
   // The sale decides here too. A v0 return row attached to a v1 sale can only
   // be a legacy-shaped row recorded before that rule was enforced; the edit
   // path below re-derives the refund on the legacy gross-price basis and writes
   // total_refund_* back, which would restate exact money as legacy money.
-  if ((await saleMoneyPrecisionVersion(db, existing.sale_id)) === 1) {
+  if (Number(linkedSale?.money_precision_version) === 1) {
     return c.json({ ...MONEY_PRECISION_REVIEW_NEEDED }, 409)
   }
   // A cancelled return counts for nothing and its restock was already taken
@@ -2843,18 +2855,8 @@ app.patch('/:id', async (c) => {
     editLotPlans.push({ splits: plan.splits, plainQuantity: plan.plainQuantity })
   }
 
-  type LinkedSaleState = {
-    id: number; sale_status: string | null; status_before_return: string | null
-    receipt_number: string | null; write_revision: number
-  }
-  let linkedSale: LinkedSaleState | null = null
   let projectedSaleStatus: string | null = null
-  if (existing.sale_id) {
-    linkedSale = await db.prepare(`SELECT s.id,s.sale_status,s.status_before_return,s.receipt_number,
-      COALESCE(v.revision,0) AS write_revision
-      FROM sales s LEFT JOIN sale_write_revisions v ON v.sale_id=s.id WHERE s.id=?`)
-      .get<LinkedSaleState>([existing.sale_id]) || null
-    if (!linkedSale) return c.json({ error: 'Original sale not found' }, 400)
+  if (linkedSale) {
     const soldLines = await db.prepare('SELECT id,product_id,quantity FROM sale_items WHERE sale_id=? ORDER BY id')
       .all<{ id: number; product_id: number | null; quantity: number }>([existing.sale_id])
     const siblingLines = await db.prepare(`SELECT ri.sale_item_id,ri.product_id,ri.quantity
@@ -2868,6 +2870,11 @@ app.patch('/:id', async (c) => {
       product_id: item.product_id ?? null,
       quantity: Number(item.quantity) || 0,
     }))
+    try {
+      assertReturnCreateCapacity(soldLines, siblingLines, proposedLines)
+    } catch (error) {
+      return c.json({ error: (error as Error).message }, 400)
+    }
     projectedSaleStatus = projectedSaleStatusForReturnEdit(
       soldLines,
       [...siblingLines, ...proposedLines],
