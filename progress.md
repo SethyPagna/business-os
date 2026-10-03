@@ -5,7 +5,7 @@
 Every item carries an ID (U-1, U-cost, Q15 …). `docs/history/session-log.md` uses the same IDs: each Part lists the IDs it moved
 and their new status, and each item here names the Part that last changed it (e.g. "→ Part 633"). Search either file for an ID to see both sides.
 
-### Current work (3 Oct 2026) — Part 666
+### Current work (3 Oct 2026) — Part 667
 
 | Item | Status |
 |---|---|
@@ -14,7 +14,7 @@ and their new status, and each item here names the Part that last changed it (e.
 | Branch consolidation | [~] Conflict display and two-tab receiving checks pass in English/Khmer on mobile/desktop. Review found a transfer audit-trail gap; its correction, selling, history and final stock checks remain open. No live rename or stock move. |
 | STOCK-RETURN | [~] Quantity correction reviewed; partial returns/accounting still in progress. Not live. |
 | Product edit / Undo | [~] Backend/client checkpoints preserved; brand/group/fold/create-stock completion and integration pending. |
-| One combined release | [~] Candidate 7d9adad00 matches GitHub. All six corrected backend tests pass after independent review; the full 720-file depth-100 run is underway. Eight browser cases passed on the same application code. Final frontend suite and exact gate remain pending; last verified live version is 14b86ed6a6ef. |
+| One combined release | [~] Candidate 7d9adad00 matches GitHub. The 720-file depth-100 run continues; further fixture and permission-order failures are being corrected separately. Khmer toast-label fix passed independent review. Final frontend/build/gate remain pending; last verified live version is 14b86ed6a6ef. |
 | Versions / portfolio | [~] Four redundant local checkouts removed and independently verified; branches and recovery archive preserved. Other useful/unique work retained. Portfolio coordination pending. |
 | Full owner goal | [~] Set and active; all requests retained in 35 groups, including 1,115 historical IDs, 511 progress markers and 13 master-plan entries. Completion requires evidence for each item; confirmed defects remain open. |
 
