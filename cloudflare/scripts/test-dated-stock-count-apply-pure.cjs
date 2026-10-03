@@ -94,6 +94,7 @@ function loadReal(relPath) {
 // loadReal / to no-op stand-ins, same trick load_import_engine.cjs
 // uses elsewhere in this scripts dir.
 const relMap = {
+  './receivingBranch': () => loadReal('lib/receivingBranch.ts'),
   './productBatches': () => loadReal('lib/productBatches.ts'),
   './productBatches.ts': () => loadReal('lib/productBatches.ts'),
   './batchCode': () => loadReal('lib/batchCode.ts'),

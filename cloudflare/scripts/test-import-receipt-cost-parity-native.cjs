@@ -20,6 +20,7 @@ const money = compile(read('moneyPrecision'))
 const batches = compile(read('productBatches'), {
   './batchCode': compile(read('batchCode')), './moneyPrecision': money,
   './sqlBinding': compile(read('sqlBinding')),
+  './receivingBranch': compile(read('receivingBranch')),
 })
 const catalog = compile(read('catalogCostRecompute'), { './moneyPrecision': money })
 const source = read('importEngine')

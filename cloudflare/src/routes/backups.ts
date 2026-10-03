@@ -15,7 +15,7 @@ import {
   storeSystemJob,
   validateCloudflareBackup,
 } from '../lib/backup'
-import { beginMaintenance, endMaintenance, getMaintenance, updateMaintenance, maintenanceStatus, isMaintenanceGatedRequest, MaintenanceAdmissionConflictError } from '../lib/maintenance'
+import { beginMaintenance, endMaintenance, getMaintenance, updateMaintenance, maintenanceStatus, MaintenanceAdmissionConflictError } from '../lib/maintenance'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 
@@ -35,15 +35,6 @@ app.use('*', requireAuth)
 app.use('*', async (c, next) => {
   const user = c.get('user')
   if (!hasPermission(user, 'backup')) return c.json({ error: 'You do not have permission to perform this action' }, 403)
-  return next()
-})
-
-app.use('*', async (c, next) => {
-  if (isMaintenanceGatedRequest(c.req.method, '/api/backups', 'branch-cutover')) {
-    const state = await getMaintenance(c.env)
-    if (state && state.mode !== 'restore') return c.json({ code: 'maintenance_active',
-      error: 'Maintenance is in progress. Backup writes are unavailable until it finishes.', maintenance: maintenanceStatus(state) }, 503)
-  }
   return next()
 })
 
@@ -114,9 +105,21 @@ app.post('/', async (c) => {
   const user = c.get('user')
   const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
   const type = String(body.type || '').trim()
+  if (type === 'export-folder' || type === 'export-cloudflare' || !type) {
+    if (!canViewAcquisitionCosts(user)) return c.json({ error: 'Cost-view permission is required to export an unredacted database backup.', code: 'product_cost_view_required' }, 403)
+  } else if (type === 'import-folder') {
+    if (!canEditAcquisitionCosts(user)) return c.json({ error: 'Cost-entry permission is required to restore database costs.', code: 'product_cost_edit_required' }, 403)
+    if (!hasPermission(user, 'backup_restore')) {
+      return c.json({ error: 'You do not have permission to perform this action' }, 403)
+    }
+  } else {
+    return c.json({ error: `Unsupported backup action: ${type}` }, 400)
+  }
+  const state = await getMaintenance(c.env)
+  if (state && state.mode !== 'restore') return c.json({ code: 'maintenance_active',
+    error: 'Maintenance is in progress. Backup writes are unavailable until it finishes.', maintenance: maintenanceStatus(state) }, 503)
   try {
     if (type === 'export-folder' || type === 'export-cloudflare' || !type) {
-      if (!canViewAcquisitionCosts(user)) return c.json({ error: 'Cost-view permission is required to export an unredacted database backup.', code: 'product_cost_view_required' }, 403)
       const backup = await createCloudflareBackup(c.env, 'manual')
       const retention = await pruneCloudflareBackups(c.env, CLOUDFLARE_BACKUP_KEEP)
       const jobId = crypto.randomUUID()
@@ -158,10 +161,6 @@ app.post('/', async (c) => {
     }
 
     if (type === 'import-folder') {
-      if (!canEditAcquisitionCosts(user)) return c.json({ error: 'Cost-entry permission is required to restore database costs.', code: 'product_cost_edit_required' }, 403)
-      if (!hasPermission(user, 'backup_restore')) {
-        return c.json({ error: 'You do not have permission to perform this action' }, 403)
-      }
       const sourceDir = String(body.sourceDir || '').trim()
       if (!sourceDir) return c.json({ error: 'Missing backup key or backup file name' }, 400)
       if (body.dryRun === true) {

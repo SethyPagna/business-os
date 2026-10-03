@@ -43,6 +43,7 @@ const productBatches = loadModule('lib/productBatches.ts', (id) => {
   if (id === './batchCode') return batchCode
   if (id === './sqlBinding') return sqlBinding
   if (id === './moneyPrecision') return moneyPrecision
+  if (id === './receivingBranch') return loadModule('lib/receivingBranch.ts', require)
   return require(id)
 })
 const { readFifoLotAvailability, allocateAcrossLots, decrementBatchStockStrictStatement, incrementBatchStockStatement } = productBatches
@@ -96,6 +97,7 @@ const taggedLotActions = loadModule('lib/damagedLotActions.ts', (id) => {
   return require(id)
 })
 const inventoryRequire = (id) => {
+  if (id === '../lib/receivingBranch') return loadModule('lib/receivingBranch.ts', require)
   if (id === '../lib/acquisitionCostAccess') return loadModule('lib/acquisitionCostAccess.ts', dep => dep === './permissions' ? loadModule('lib/permissions.ts', require) : require(dep))
   if (id === '../lib/stockCondition') return taggedStockCondition
   if (id === '../lib/damagedLotActions') return taggedLotActions
