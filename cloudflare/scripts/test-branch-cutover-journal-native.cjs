@@ -20,14 +20,17 @@ function load(name) {
 }
 const migration = path.join(root, 'migrations/0224_branch_cutover_journal.sql')
 assert(fs.existsSync(migration), '0224 journal schema must exist')
+const activeInsertMigration = path.join(root, 'migrations/0225_branch_cutover_active_insert_guard.sql')
+assert(fs.existsSync(activeInsertMigration), '0225 active insert guard must exist')
 const journal = load('branchCutoverJournal')
 const { D1Compat } = load('db')
 const uuid = n => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`
-function world() {
+function world({ activeGuard = true } = {}) {
   const raw = new DatabaseSync(':memory:')
   raw.limits.exprDepth = 100
   raw.exec(fs.readFileSync(path.join(root, 'migrations/0089_system_flags.sql'), 'utf8'))
   raw.exec(fs.readFileSync(migration, 'utf8'))
+  if (activeGuard) raw.exec(fs.readFileSync(activeInsertMigration, 'utf8'))
   raw.prepare('INSERT INTO system_flags(key,value) VALUES(?,?)').run('branch_cutover_control_incarnation', uuid(99))
   const control = { batches: 0, before: null, after: null, failAt: -1, statements: [] }
   function prepared(sql, values = []) {
@@ -63,6 +66,31 @@ const proof = (row, patch = {}) => ({ operationId: row.operation_id, actorId: ro
   controlIncarnation: row.control_incarnation, token: row.maintenance_token, ...patch })
 const digest = 'a'.repeat(64)
 async function start(w, patch) { return (await journal.beginBranchCutoverJournal(w.db, input(patch))).row }
+function insertNewIdentity(w, row, replace) {
+  const flag = JSON.stringify({ ...JSON.parse(row.maintenance_flag_json), operationId: uuid(70), beginRequestId: 'cutover_begin_070' })
+  w.raw.prepare(`INSERT ${replace ? 'OR REPLACE ' : ''}INTO branch_cutovers(operation_id,begin_request_id,actor_id,organization_id,
+    control_incarnation,maintenance_token,source_branch_id,target_branch_id,intent_json,intent_digest,source_preimage_json,
+    target_preimage_json,maintenance_flag_json,capture_digest,snapshot_digest,verification_digest,created_at,updated_at)
+    SELECT ?,?,actor_id,organization_id,control_incarnation,maintenance_token,source_branch_id,target_branch_id,intent_json,
+    intent_digest,source_preimage_json,target_preimage_json,?,capture_digest,snapshot_digest,verification_digest,created_at,updated_at
+    FROM branch_cutovers WHERE operation_id=?`).run(uuid(70), 'cutover_begin_070', flag, row.operation_id)
+}
+async function phaseWorld(phase, recursive) {
+  const w = world()
+  w.raw.exec(`PRAGMA recursive_triggers=${recursive}`)
+  let row = await start(w)
+  if (phase === 'moving') {
+    row = await journal.checkpointBranchCutoverJournal(w.db, proof(row), row.revision, { phase: 'capturing', cursorJson: '{"id":1}', records: 1, digest })
+    row = await journal.sealBranchCutoverManifest(w.db, proof(row), row.revision, JSON.stringify({ version: 1, sourceBranchId: 1, targetBranchId: 2,
+      capturedRecords: 1, movingProducts: 1, sourceQuantityText: '1', sourceLotQuantityText: '1', anomalies: 0, captureDigest: digest }))
+    row = await journal.finishBranchCutoverSnapshots(w.db, proof(row), row.revision)
+  } else if (phase !== 'capturing') row = await seal(w, row)
+  if (phase === 'verifying' || phase === 'ready') {
+    row = await journal.finishBranchCutoverSnapshots(w.db, proof(row), row.revision)
+    if (phase === 'ready') w.raw.prepare("UPDATE branch_cutovers SET phase='ready',revision=revision+1 WHERE operation_id=?").run(row.operation_id)
+  }
+  return { w, row: w.raw.prepare('SELECT * FROM branch_cutovers WHERE operation_id=?').get(row.operation_id) }
+}
 async function seal(w, row, movingProducts = 0) {
   return journal.sealBranchCutoverManifest(w.db, proof(row), row.revision, JSON.stringify({ version: 1, sourceBranchId: 1,
     targetBranchId: 2, capturedRecords: 0, movingProducts, sourceQuantityText: movingProducts ? '1' : '0',
@@ -76,9 +104,74 @@ async function check(name, run) {
 async function main() {
   await check('schema is LF-only, one new table, no mutable-row foreign keys, native depth100', () => {
     assert(!fs.readFileSync(migration, 'utf8').includes('\r'))
+    assert(!fs.readFileSync(activeInsertMigration, 'utf8').includes('\r'))
     const w = world()
     assert.deepEqual(w.raw.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all().map(row => row.name), ['branch_cutovers', 'system_flags'])
     assert.equal(w.raw.prepare('PRAGMA foreign_key_list(branch_cutovers)').all().length, 0); w.raw.close()
+  })
+  await check('new operation and begin identities cannot replace or insert over any active phase at recursive0 or1', async () => {
+    for (const recursive of [0, 1]) for (const phase of ['capturing', 'snapshots', 'moving', 'verifying', 'ready']) {
+      const { w, row } = await phaseWorld(phase, recursive)
+      try {
+        const before = JSON.stringify(w.raw.prepare('SELECT * FROM branch_cutovers ORDER BY operation_id').all())
+        for (const replace of [false, true]) {
+          let rejected = false
+          try { insertNewIdentity(w, row, replace) } catch { rejected = true }
+          const after = JSON.stringify(w.raw.prepare('SELECT * FROM branch_cutovers ORDER BY operation_id').all())
+          assert.equal(after, before, `active ${phase} must survive new-ID ${replace ? 'REPLACE' : 'INSERT'} at recursive=${recursive}`)
+          assert.equal(rejected, true)
+          assert.equal(w.raw.prepare("SELECT value FROM system_flags WHERE key='maintenance'").get().value, row.maintenance_flag_json)
+        }
+        const replay = await journal.beginBranchCutoverJournal(w.db, input())
+        assert.equal(replay.replayed, true); assert.equal(replay.row.phase, phase)
+      } finally { w.raw.close() }
+    }
+  })
+  await check('wrong identity-only insert guard permits the original new-ID replacement at recursive0', async () => {
+    const { w, row } = await phaseWorld('capturing', 0)
+    try {
+      w.raw.exec(`DROP TRIGGER branch_cutovers_no_active_insert;
+        CREATE TRIGGER branch_cutovers_no_active_insert BEFORE INSERT ON branch_cutovers
+        WHEN EXISTS (SELECT 1 FROM branch_cutovers WHERE operation_id=NEW.operation_id OR begin_request_id=NEW.begin_request_id)
+        BEGIN SELECT RAISE(ABORT, 'wrong_identity_only_guard'); END;`)
+      insertNewIdentity(w, row, true)
+      assert.equal(w.raw.prepare('SELECT operation_id FROM branch_cutovers').get().operation_id, uuid(70))
+      assert.equal(w.raw.prepare('SELECT COUNT(*) AS n FROM branch_cutovers WHERE operation_id=?').get(row.operation_id).n, 0)
+    } finally { w.raw.close() }
+  })
+  await check('0225 installs over an existing active0224 journal without rewriting journal or flags', async () => {
+    const w = world({ activeGuard: false })
+    try {
+      w.raw.exec('PRAGMA recursive_triggers=0')
+      const row = await start(w)
+      const snapshot = () => JSON.stringify([w.raw.prepare('SELECT * FROM branch_cutovers').all(), w.raw.prepare('SELECT * FROM system_flags ORDER BY key').all()])
+      const before = snapshot()
+      w.raw.exec(fs.readFileSync(activeInsertMigration, 'utf8'))
+      assert.equal(snapshot(), before)
+      assert.throws(() => insertNewIdentity(w, row, true), /branch_cutover_active_insert_refused/)
+      assert.equal(snapshot(), before)
+    } finally { w.raw.close() }
+  })
+  await check('terminal abort history and exact replay remain immutable while a fresh begin is admitted at recursive0 or1', async () => {
+    for (const recursive of [0, 1]) {
+      const w = world(); w.raw.exec(`PRAGMA recursive_triggers=${recursive}`)
+      try {
+        const first = await start(w)
+        const terminal = await journal.abortEffectFreeBranchCutoverJournal(w.db, proof(first), 0, 'before any effects')
+        const before = JSON.stringify(w.raw.prepare('SELECT * FROM branch_cutovers WHERE operation_id=?').get(first.operation_id))
+        assert.equal((await journal.beginBranchCutoverJournal(w.db, input())).replayed, true)
+        assert.throws(() => w.raw.exec('INSERT OR REPLACE INTO branch_cutovers SELECT * FROM branch_cutovers'), /branch_cutover_invalid_initial_state/)
+        assert.equal(JSON.stringify(w.raw.prepare('SELECT * FROM branch_cutovers WHERE operation_id=?').get(first.operation_id)), before)
+        const next = await journal.beginBranchCutoverJournal(w.db, input({ operationId: uuid(70), beginRequestId: 'cutover_begin_070', token: uuid(71) }))
+        assert.equal(next.replayed, false); assert.equal(next.row.phase, 'capturing')
+        assert.equal(w.raw.prepare('SELECT COUNT(*) AS n FROM branch_cutovers').get().n, 2)
+        assert.equal(JSON.stringify(w.raw.prepare('SELECT * FROM branch_cutovers WHERE operation_id=?').get(first.operation_id)), before)
+        const replay = await journal.beginBranchCutoverJournal(w.db, input())
+        assert.equal(replay.replayed, true); assert.equal(replay.row.terminal_json, terminal.terminal_json)
+        assert.throws(() => w.raw.prepare('DELETE FROM branch_cutovers WHERE operation_id=?').run(first.operation_id), /branch_cutover_no_delete/)
+        assert.throws(() => w.raw.prepare('UPDATE branch_cutovers SET revision=revision+1 WHERE operation_id=?').run(first.operation_id), /branch_cutover_terminal_immutable/)
+      } finally { w.raw.close() }
+    }
   })
   await check('begin binds exact durable identity and replay survives lost acknowledgment without retry', async () => {
     const w = world(); w.control.after = () => { throw Error('D1_ERROR: internal error lost acknowledgement') }
@@ -179,7 +272,9 @@ async function main() {
   })
   await check('identity, manifest and terminal evidence cannot be rewritten through raw SQL', async () => {
     const w = world(); let row = await start(w)
-    assert.throws(() => w.raw.exec('INSERT OR REPLACE INTO branch_cutovers SELECT * FROM branch_cutovers'), /branch_cutover_invalid_initial_state/)
+    const before = JSON.stringify(w.raw.prepare('SELECT * FROM branch_cutovers').all())
+    assert.throws(() => w.raw.exec('INSERT OR REPLACE INTO branch_cutovers SELECT * FROM branch_cutovers'), /branch_cutover_(invalid_initial_state|active_insert_refused)/)
+    assert.equal(JSON.stringify(w.raw.prepare('SELECT * FROM branch_cutovers').all()), before)
     for (const [key, value] of [['actor_id','8'], ['intent_json',"'{}'"], ['maintenance_token',`'${uuid(4)}'`]]) assert.throws(() => w.raw.exec(`UPDATE branch_cutovers SET ${key}=${value},revision=revision+1`))
     row = await seal(w, row)
     assert.throws(() => w.raw.exec("UPDATE branch_cutovers SET manifest_json='{}',revision=revision+1"))
