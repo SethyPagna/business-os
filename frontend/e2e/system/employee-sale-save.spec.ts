@@ -236,16 +236,40 @@ for (const language of ['en', 'km']) for (const width of [1280, 360]) {
   test(`native employee replacement picker layout ${language} ${width}`, async ({ page }, info) => {
     await page.setViewportSize({ width, height: 800 })
     await signIn(page, 912, 'e2e_employee_amend', language)
-    await openFreshSale(page)
+    const sale = await openFreshSale(page)
     const labels = language === 'km' ? { edit: km.edit, replace: km.amend_replace, search: km.add_items_search_placeholder } : { edit: 'Edit', replace: 'Replace', search: 'Search by name or barcode' }
     await page.locator('[data-sale-line-edit]').getByRole('button', { name: labels.edit, exact: true }).click()
     await page.getByRole('button', { name: labels.replace, exact: true }).click()
     await page.getByPlaceholder(labels.search, { exact: true }).fill('E2E Replacement')
     await expect(page.getByText('E2E Replacement Balm', { exact: true }).first()).toBeVisible()
-    const bounds = await page.evaluate(() => ({ viewport: innerWidth, document: document.documentElement.scrollWidth }))
+    const bounds = await page.getByPlaceholder(labels.search, { exact: true }).evaluate(search => {
+      const panel = search.closest('td')!
+      const controls = [...panel.querySelectorAll('input, button, [role="button"]')].map(element => {
+        const rect = element.getBoundingClientRect()
+        let left = 0, right = innerWidth
+        for (let parent = element.parentElement; parent; parent = parent.parentElement) {
+          if (['auto', 'scroll', 'hidden', 'clip'].includes(getComputedStyle(parent).overflowX)) {
+            const bounds = parent.getBoundingClientRect()
+            left = Math.max(left, bounds.left + parent.clientLeft)
+            right = Math.min(right, bounds.left + parent.clientLeft + parent.clientWidth)
+          }
+        }
+        return { label: element.getAttribute('placeholder') || element.textContent?.trim(), left: rect.left, right: rect.right, clipLeft: left, clipRight: right }
+      })
+      return { viewport: innerWidth, document: document.documentElement.scrollWidth, controls }
+    })
     expect(bounds.document).toBeLessThanOrEqual(bounds.viewport + 1)
     await page.screenshot({ path: info.outputPath(`employee-replacement-${language}-${width}.png`), fullPage: false })
     await info.attach('layout-bounds', { body: JSON.stringify(bounds), contentType: 'application/json' })
+    expect(bounds.controls.length).toBeGreaterThanOrEqual(6)
+    for (const control of bounds.controls) {
+      expect(control.left, `${control.label} left edge is clipped`).toBeGreaterThanOrEqual(control.clipLeft - 1)
+      expect(control.right, `${control.label} right edge is clipped`).toBeLessThanOrEqual(control.clipRight + 1)
+    }
+    await page.getByText('E2E Replacement Balm', { exact: true }).first().click()
+    await page.getByRole('button', { name: labels.replace, exact: true }).last().click()
+    await submit(page, `/api/sales/${sale.id}/amendments`, () => page.getByRole('button', { name: language === 'km' ? km.amend_confirm : 'Apply change', exact: true }).click())
+    await persistedReload(page, sale, 'E2E Replacement Balm')
   })
 }
 

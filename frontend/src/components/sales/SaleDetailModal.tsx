@@ -2023,6 +2023,7 @@ export default function SaleDetailModal({
               Names use at most two balanced, untruncated rows inside their own
               scroller; the table owns any remaining narrow-screen overflow. */}
           <SectionCard title={`${t('items') || 'Items'} (${items.length})`}>
+            <div style={{ containerType: 'inline-size' }}>
             <div className="overflow-x-auto">
               <table className="w-full text-[11px]">
                 <thead className="border-b border-gray-200 text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:border-gray-700">
@@ -2142,6 +2143,7 @@ export default function SaleDetailModal({
                       {editingLine ? (
                         <tr className="bg-gray-50 dark:bg-gray-900/40">
                           <td colSpan={5} className="px-1.5 py-2 sm:px-2">
+                            <div className="sticky left-1.5 w-[calc(100cqw-1rem)] max-w-full sm:left-2">
                             {savedMoneyVersion === 0 ? <p className="mb-1 text-xs text-gray-600 dark:text-gray-300">{translateOr('sale_recorded_pricing', 'Recorded pricing', 'តម្លៃដែលបានកត់ត្រា')}{preview?.recordedTotalDerived ? ` · ${translateOr('sale_recorded_unit_fallback', 'Line total derived from the recorded unit price and quantity.', 'សរុបបន្ទាត់គណនាពីតម្លៃឯកតា និងបរិមាណដែលបានកត់ត្រា។')}` : ''}</p> : null}
                             <div className="flex flex-wrap items-center gap-2">
                               <button
@@ -2243,6 +2245,7 @@ export default function SaleDetailModal({
                                 ) : null}
                               </div>
                             ) : null}
+                            </div>
                           </td>
                         </tr>
                       ) : null}
@@ -2459,6 +2462,7 @@ export default function SaleDetailModal({
                       print it. */}
                 </tfoot>
               </table>
+            </div>
             </div>
           </SectionCard>
 
