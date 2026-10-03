@@ -129,7 +129,8 @@ export function localizeBranchReviewError(row: BranchReviewIdentity, error: unkn
     ['request_permission_revoked', 'The requester no longer has permission to edit branches.', 'branch_approval_request_permission_revoked'],
   ] as const
   for (const [code, legacy, key] of messages) {
-    if (detail?.code === code || (!detail?.code && text === legacy)) return t(key) || text
+    const legacyCode = !detail?.code || (code === 'unknown_outcome' && detail.code === 'write_outcome_unknown')
+    if (detail?.code === code || (legacyCode && text === legacy)) return t(key) || text
   }
   if (!detail?.code && detail?.status === 403 && text === 'Forbidden') {
     return t('branch_approval_review_permission_revoked') || text

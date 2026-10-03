@@ -25,6 +25,17 @@ const createApiError = load(http, 'createApiError', {
     TRANSIENT_GATEWAY_STATUSES: load(http, 'TRANSIENT_GATEWAY_STATUSES'),
   }),
 })
+const isTransientGatewayError = load(http, 'isTransientGatewayError', { TRANSIENT_GATEWAY_STATUSES: load(http, 'TRANSIENT_GATEWAY_STATUSES') })
+const isInvalidSessionError = load(http, 'isInvalidSessionError')
+const realRoute = load(http, 'route', {
+  getSyncServerUrl: () => 'https://fixture.invalid', getReadServerBaseUrl: () => 'https://fixture.invalid',
+  hasStoredAuthSession: () => true, getSameOriginApiBaseUrl: () => '', throwIfRequestAborted: () => {}, _serverOnline: true,
+  cacheInvalidateWithDerived: () => {}, setServerHealth: () => {}, logCall: () => {}, createSyncErrorId: () => 'fixture-event',
+  isConnectivityError: load(http, 'isConnectivityError', { isInvalidSessionError, isTransientGatewayError, isNetErr: load(http, 'isNetErr') }),
+  isInvalidSessionError, isWriteConflictError: load(http, 'isWriteConflictError'),
+  getConflictRefreshChannels: load(http, 'getConflictRefreshChannels', { getChannelRefreshKey: (channel: string) => channel.split(':')[0] }),
+  dispatchGlobalDataRefresh: () => {}, window: { dispatchEvent: () => {} },
+})
 const source = read('../src/components/review/ReviewQueue.tsx')
 const transport = read('../src/api/reviewQueueTransport.ts')
 const branchRow = { id: 31, section: 'branches', action_type: 'update', entity_type: 'branch', status: 'open' }
@@ -39,7 +50,7 @@ function fixture(language: 'en' | 'km', response: unknown, error?: Error) {
   const pack = JSON.parse(read(`../src/lang/${language}.json`))
   const effects = { calls: [] as string[], notices: [] as unknown[][], loads: 0, busy: [] as unknown[], locks: { current: new Set<string>() } }
   const approvePendingAction = load(transport, 'approvePendingAction', {
-    route: (_key: unknown, remote: () => unknown) => remote(),
+    route: realRoute,
     apiFetch: async (_method: string, url: string) => { effects.calls.push(url); if (error) throw error; return response },
   })
   const run = load(source, 'handleApprove', {
@@ -129,6 +140,24 @@ for (const language of ['en', 'km'] as const) {
     const { run, effects, pack } = fixture(language, null, createApiError(403, { error: 'Forbidden' }, ''))
     await run(branchRow)
     assert.equal(effects.notices[0][0], pack.branch_approval_review_permission_revoked)
+    assert.equal(effects.notices[0][1], 'error')
+  })
+  await check(`${language} uncoded legacy HTTP503 crosses actual route uncertainty annotation before localization`, async () => {
+    const error = createApiError(503, { error: english.branch_approval_unknown_outcome }, '')
+    assert.equal(error.code, null)
+    const { run, effects, pack } = fixture(language, null, error)
+    await run(branchRow)
+    assert.equal(error.code, 'write_outcome_unknown')
+    assert.equal(error.outcome, 'unknown')
+    assert.equal(effects.notices[0][0], pack.branch_approval_unknown_outcome)
+    assert.equal(effects.notices[0][1], 'error')
+    assert.equal(effects.loads, 0)
+  })
+  await check(`${language} approval network uncertainty never becomes direct edit refresh guidance`, async () => {
+    const error = new TypeError('Failed to fetch')
+    const { run, effects } = fixture(language, null, error)
+    await run(branchRow)
+    assert.equal(effects.notices[0][0], 'Failed to fetch')
     assert.equal(effects.notices[0][1], 'error')
   })
 }
