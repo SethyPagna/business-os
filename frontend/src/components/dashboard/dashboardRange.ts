@@ -1,4 +1,5 @@
 import { reportUtcBound } from '../../utils/businessTimeBounds.ts'
+import { fmtDateOnly } from '../../utils/formatters.ts'
 import type { DateTimeRange } from '../shared/DateTimeRangePicker.tsx'
 
 export type DashboardRangeQuery = { startDate: string; endDate: string; createdFrom?: string; createdTo?: string }
@@ -24,6 +25,8 @@ export function dashboardRangeQuery(range: DateTimeRange): DashboardRangeQuery {
 }
 
 export function dashboardRangeLabel(range: DateTimeRange): string {
-  if (!range.startTime && !range.endTime) return `${range.startDate || '…'} - ${range.endDate || '…'}`
-  return `${range.startDate} ${range.startTime || '00:00'} - ${range.endDate} ${range.endTime || '23:59'} (UTC+7)`
+  const startDate = range.startDate ? fmtDateOnly(range.startDate) : '…'
+  const endDate = range.endDate ? fmtDateOnly(range.endDate) : '…'
+  if (!range.startTime && !range.endTime) return `${startDate} - ${endDate}`
+  return `${startDate} ${range.startTime || '00:00'} - ${endDate} ${range.endTime || '23:59'} (UTC+7)`
 }

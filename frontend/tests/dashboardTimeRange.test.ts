@@ -4,12 +4,18 @@ import ts from 'typescript'
 import { dashboardRangeQuery, dashboardRangeLabel } from '../src/components/dashboard/dashboardRange.ts'
 import { reportQueryParams, getReportView } from '../src/components/sales/reports/reportModel.ts'
 import { beginTrackedRequest, isTrackedRequestCurrent, invalidateTrackedRequest } from '../src/utils/loaders.ts'
+import { STATS_PRESETS, statsPresetRange, type StatsPresetKey } from '../src/components/shared/statsStripPresets.ts'
 
 const range = { startDate: '2026-09-19', endDate: '2026-09-20', startTime: '22:00', endTime: '02:00' }
 const query = dashboardRangeQuery(range)
 assert.deepEqual(query, { startDate: '2026-09-19', endDate: '2026-09-20', createdFrom: '2026-09-19 15:00:00', createdTo: '2026-09-19 19:01:00' })
 assert.deepEqual(query, reportQueryParams({ ...range, branchId: '', status: '', paymentMethod: '' }, getReportView('overview')), 'Dashboard and Reports use identical continuous business-time bounds')
 assert.match(dashboardRangeLabel(range), /22:00.*02:00.*UTC\+7/)
+assert.equal(dashboardRangeLabel(range), '19/09/2026 22:00 - 20/09/2026 02:00 (UTC+7)')
+assert.equal(dashboardRangeLabel({ startDate: '2026-09-03', endDate: '2026-09-04', startTime: '', endTime: '' }), '03/09/2026 - 04/09/2026')
+assert.equal(dashboardRangeLabel({ startDate: '2026-12-31', endDate: '2027-01-01', startTime: '00:00', endTime: '24:00' }), '31/12/2026 00:00 - 01/01/2027 24:00 (UTC+7)')
+assert.equal(dashboardRangeLabel({ startDate: '', endDate: '', startTime: '', endTime: '' }), '… - …')
+assert.equal(dashboardRangeLabel({ startDate: '2024-02-29', endDate: '', startTime: '', endTime: '' }), '29/02/2024 - …')
 for (const times of [{ startTime: '', endTime: '' }, { startTime: '00:00', endTime: '23:59' }]) {
   assert.deepEqual(dashboardRangeQuery({ ...range, ...times }), { startDate: range.startDate, endDate: range.endDate })
 }
@@ -40,9 +46,19 @@ function effectContaining(fragment: string): string {
 const names = ['validDashboardCustomDates', 'normalizeDashboardRangeId', 'todayDashboardFilterPrefs', 'readDashboardFilterPrefs', 'resolveDashboardFilterRange', 'dashboardPrefsForSelection']
 const helpers = tree.statements.filter((n) => ts.isFunctionDeclaration(n) && names.includes(n.name!.text)).map((n) => n.getText(tree)).join('\n')
 const stored = new Map<string, string>()
-const prefEnv: any = { dashboardRangeQuery, window: { localStorage: { getItem: (key: string) => stored.get(key) ?? null } }, todayStr: () => '2026-09-20', statsPresetRange: () => ({ startDate: '2026-09-20', endDate: '2026-09-20' }) }
+const prefEnv: any = { dashboardRangeQuery, STATS_PRESETS, window: { localStorage: { getItem: (key: string) => stored.get(key) ?? null } }, todayStr: () => '2026-09-20', statsPresetRange: (id: StatsPresetKey) => statsPresetRange(id, new Date(2026, 9, 3)) }
 const prefsCode = ts.transpileModule(helpers + `\nreturn {${names.join(',')}}`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
 const prefs = new Function('env', `with(env){${prefsCode}}`)(prefEnv)
+for (const { id } of STATS_PRESETS) {
+  const next = statsPresetRange(id, new Date(2026, 9, 3))
+  const selection = prefs.dashboardPrefsForSelection(next, id)
+  assert.equal(selection?.rangeId, id, `Dashboard accepts visible preset ${id}`)
+  stored.set(`preset-${id}`, JSON.stringify(selection))
+  const restored = prefs.readDashboardFilterPrefs(`preset-${id}`)
+  assert.equal(restored.rangeId, id, `Dashboard persists visible preset ${id}`)
+  assert.deepEqual(prefs.resolveDashboardFilterRange(restored), { ...next, startTime: '', endTime: '' }, `Dashboard reload resolves actual preset ${id}`)
+}
+for (const invalid of ['last_13_months', '', null, {}, ['last_month']]) assert.equal(prefs.normalizeDashboardRangeId(invalid), null)
 const selected = prefs.dashboardPrefsForSelection(range, 'custom')
 stored.set('actor-A', JSON.stringify(selected))
 assert.deepEqual(prefs.resolveDashboardFilterRange(prefs.readDashboardFilterPrefs('actor-A')), range)

@@ -7,6 +7,7 @@ import { effectiveLowStockThreshold } from '../../utils/lowStockSettings.ts'
 import { useMemo } from 'react'
 import { useRef } from 'react'
 import StatsStrip, { statsPresetRange, type StatCardDef, type StatsPresetKey } from '../shared/StatsStrip.tsx'
+import { STATS_PRESETS } from '../shared/statsStripPresets.ts'
 import { fmtTime } from '../../utils/formatters'
 import { todayStr } from '../../utils/dateHelpers'
 import { buildEquation, revenueTerms, profitTerms } from '../../utils/statsFormulas'
@@ -469,8 +470,8 @@ function downsampleChartRows(rows: DashboardPeriodRow[] = [], limit = DASHBOARD_
 }
 
 function normalizeDashboardRangeId(rangeId: unknown): DashboardRangeId | null {
-  if (rangeId === 'all' || rangeId === 'today' || rangeId === 'yesterday' || rangeId === '7d' || rangeId === '30d' || rangeId === 'week' || rangeId === 'month' || rangeId === 'year' || rangeId === 'custom') return rangeId
-  return null
+  if (rangeId === 'custom') return rangeId
+  return STATS_PRESETS.find(preset => preset.id === rangeId)?.id ?? null
 }
 
 function resolveDashboardFilterRange(prefs: DashboardFilterPrefs | null): DateTimeRange {
