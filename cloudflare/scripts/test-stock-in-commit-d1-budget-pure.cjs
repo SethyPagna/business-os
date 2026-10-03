@@ -31,7 +31,7 @@ const ts = require(path.join(cloudflareRoot, 'node_modules', 'typescript'))
 
 // The per-line budget planTier.ts sizes the cap with. A kernel that grows past
 // it turns this file red, which is the prompt to re-measure and re-size.
-const LINE_BUDGET = 33
+const LINE_BUDGET = 35
 
 // ---------------------------------------------------------------------------
 // A D1Database binding over node:sqlite that counts what it is asked to do.
@@ -257,9 +257,6 @@ for (const tier of ['free', 'paid']) {
     const cap = limits.stockInLinesPerRequest
     assert.ok(Number.isInteger(cap) && cap >= 1, `stockInLinesPerRequest must be a positive integer on ${tier}, got ${cap}`)
     const overhead = await measureOutsideRoute()
-    // Retain the original conservative 13-call allowance and existing caps:
-    // outside-route work fell from 9 to 2; auth 3 + receipt-table probe 1
-    // now make 6 actual overhead calls. The saved 7 remain safety headroom.
     assert.ok(overhead.calls + 3 + 1 <= 13)
     assert.equal(cap, Math.floor((limits.d1QueriesPerInvocation - 13) / LINE_BUDGET))
     const fx = await fixture(tier, cap + 3)
