@@ -831,7 +831,17 @@ export default function Branches({ embedded = false, view, showSectionNavigation
           ? result.filter(isBranchRecord).find((branch) => String(branch.id) === String(id)) || null
           : null
       },
-      writeBranch: (id, body) => runBranchMutation(() => branchApi.updateBranch(id, body as BranchTransportPayload), label),
+      writeBranch: async (id, body) => {
+        try {
+          return await runBranchMutation(() => branchApi.updateBranch(id, body as BranchTransportPayload), label)
+        } catch (error) {
+          const message = localizeBranchSaveError(error, (key) => tr(key, ''))
+          if (error instanceof Error && message !== error.message) {
+            throw Object.assign(new Error(message), error, { message, cause: error })
+          }
+          throw error
+        }
+      },
       refusal: direction === 'undo'
         ? tr('undo_refused_record_changed', 'Someone changed this record after this action, so Undo was refused to protect the newer data.')
         : tr('redo_refused_record_changed', 'Someone changed this record after this action, so Redo was refused to protect the newer data.'),

@@ -78,7 +78,7 @@ export async function replayBranchEdit(request: BranchReplayRequest): Promise<Br
   try {
     result = await request.writeBranch(request.id, { ...request.fields, expectedUpdatedAt: version, expectedEditEtag })
   } catch (error) {
-    if (isWriteConflict(error)) throw new Error(request.refusal)
+    if (isWriteConflict(error)) throw Object.assign(new Error(request.refusal), error, { message: request.refusal, cause: error })
     throw error
   }
   if (result?.success === false) throw new Error(result.error || request.failure)

@@ -3,6 +3,8 @@ import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { localizeBranchRuleError } from '../src/api/branchRuleErrors.ts'
 import * as branchErrors from '../src/api/branchRuleErrors.ts'
+import { replayBranchEdit } from '../src/components/branches/branchHistoryReplay.ts'
+import { resolveReplayAction } from '../src/utils/actionReplay.ts'
 
 const ts = createRequire(new URL('../../cloudflare/package.json', import.meta.url))('typescript')
 const read = (file: string): string => readFileSync(new URL(file, import.meta.url), 'utf8')
@@ -48,7 +50,7 @@ function formSave(outcome: unknown) {
   })
   return { effects, run }
 }
-function pageSave(response: unknown, error?: Error, language?: 'en' | 'km') {
+function pageSave(response: unknown, error?: Error, language?: 'en' | 'km', dependencies: Record<string, unknown> = {}) {
   const pack = language ? JSON.parse(read(`../src/lang/${language}.json`)) : {}
   const effects = { sent: [] as any[], history: [] as any[], closed: 0, notices: [] as unknown[], replay: [] as any[] }
   const run = load(pageSource, 'handleSaveBranch', {
@@ -66,6 +68,7 @@ function pageSave(response: unknown, error?: Error, language?: 'en' | 'km') {
     branchReplayRequest: (direction: string, fields: unknown, expected: unknown) => ({ direction, fields, expected }),
     replayBranchEdit: async (request: any) => { effects.replay.push(JSON.parse(JSON.stringify(request))); return { ...request.fields, edit_etag: request.direction + '-committed' } },
     setModal: () => { effects.closed++ }, setSelected: () => {}, load: async () => {},
+    ...dependencies,
   })
   return { effects, run }
 }
@@ -190,5 +193,91 @@ await check('unknown save errors retain their exact message; shared branch-rule 
   assert.equal(localizeBranchRuleError(english, () => 'translation'), english)
   const timestamp = createApiError(409, { error: 'This branch changed on another device. Refresh and try again.', code: 'write_conflict' }, '')
   assert.equal(localizeBranchRuleError(timestamp, () => 'translation'), timestamp.message)
+})
+async function replayWorkflow(language: 'en' | 'km', direction: 'undo' | 'redo') {
+  const pack = JSON.parse(read(`../src/lang/${language}.json`))
+  let row = { ...branch }
+  let token = 0
+  let rejection: Error | undefined
+  let queued = false
+  const notices: unknown[][] = []
+  let undoStack: any[] = []
+  let redoStack: any[] = []
+  const tr = (key: string, fallback: string) => pack[key] || fallback
+  const api = {
+    getBranches: async () => [{ ...row }],
+    updateBranch: async (_id: unknown, body: any) => {
+      if (rejection) throw rejection
+      if (queued) return { success: true, pending: true }
+      row = { ...row, notes: body.notes, edit_etag: `committed-${++token}` }
+      return { success: true, branch: { ...row } }
+    },
+  }
+  const buildBranchPayload = load(pageSource, 'buildBranchPayload', { useCallback: (fn: unknown) => fn, user: { id: 7, name: 'Editor' } })
+  const branchReplayRequest = load(pageSource, 'branchReplayRequest', {
+    useCallback: (fn: unknown) => fn, branchApi: api, buildBranchPayload, tr,
+    runBranchMutation: (fn: () => unknown) => fn(), withLoaderTimeout: (fn: () => unknown) => fn(),
+    BRANCHES_LIST_TIMEOUT_MS: 12000, isBranchRecord: load(pageSource, 'isBranchRecord'), ...branchErrors,
+  })
+  const page = pageSave(null, undefined, language, {
+    selected: { ...branch }, branchApi: api, buildBranchPayload, branchReplayRequest, replayBranchEdit,
+    actionHistory: { pushAction: (entry: any) => { undoStack.push({ ...entry, id: 1 }) } },
+  })
+  assert.equal(await page.run({ ...initial(branch), notes: 'committed edit' }), true)
+  const historySource = read('../src/utils/actionHistory.ts')
+  const run = (action: 'undo' | 'redo') => load(historySource, 'runEntry', {
+    useCallback: (fn: unknown) => fn, undoStack, redoStack, busy: '', limit: 10,
+    setBusy: () => {}, refreshServerItems: () => {}, resolveReplayAction,
+    setUndoStack: (update: (current: any[]) => any[]) => { undoStack = update(undoStack) },
+    setRedoStack: (update: (current: any[]) => any[]) => { redoStack = update(redoStack) },
+    notify: (...args: unknown[]) => notices.push(args), getErrorMessage: load(historySource, 'getErrorMessage'),
+  })(action)
+  if (direction === 'redo') assert.equal(await run('undo'), true)
+  return {
+    pack, notices, run, get row() { return row },
+    get entry() { return (direction === 'undo' ? undoStack : redoStack)[0] },
+    reject(error: Error) { rejection = error }, queue() { queued = true },
+  }
+}
+for (const language of ['en', 'km'] as const) {
+  for (const direction of ['undo', 'redo'] as const) {
+    for (const kind of ['permission', 'timestamp'] as const) {
+      await check(`actual successful save then ${language} local ${direction} ${kind} refusal reaches translated history notification`, async () => {
+        const flow = await replayWorkflow(language, direction)
+        const error = kind === 'permission'
+          ? createApiError(403, { error: 'You do not have permission to perform this action' }, '')
+          : createApiError(409, { error: 'This branch changed on another device. Refresh and try again.', code: 'write_conflict', conflict: true }, '')
+        flow.reject(error)
+        const before = { ...flow.row }
+        const key = kind === 'permission' ? 'permission_denied' : `${direction}_refused_record_changed`
+        assert.equal(await flow.run(direction), false)
+        assert.equal(flow.notices[0][0], flow.pack[key])
+        assert.deepEqual(flow.row, before)
+        assert.ok(flow.entry, 'refused replay keeps its original history stack')
+        await assert.rejects(flow.entry[direction](), (caught: any) => {
+          assert.equal(caught.status, error.status)
+          assert.equal(caught.code, error.code)
+          assert.ok(caught === error || caught.cause, 'localized wrapper preserves the original error chain')
+          return true
+        })
+      })
+    }
+  }
+}
+await check('unknown replay error remains the original error and queued replay cannot move local history', async () => {
+  for (const direction of ['undo', 'redo'] as const) {
+    const flow = await replayWorkflow('km', direction)
+    const error = createApiError(503, { error: 'Unknown upstream failure', code: 'future_failure' }, '')
+    flow.reject(error)
+    await assert.rejects(flow.entry[direction](), (caught: unknown) => caught === error)
+    assert.equal(await flow.run(direction), false)
+    assert.equal(flow.notices[0][0], error.message)
+    const queued = await replayWorkflow('km', direction)
+    queued.queue()
+    const before = { ...queued.row }
+    assert.equal(await queued.run(direction), false)
+    assert.deepEqual(queued.row, before)
+    assert.ok(queued.entry)
+  }
 })
 if (failed) process.exitCode = 1
