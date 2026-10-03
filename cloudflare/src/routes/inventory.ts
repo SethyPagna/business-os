@@ -1,3 +1,4 @@
+import { requireReceivingBranch, receivingBranchAssertion, isReceivingBranchError, RECEIVING_BRANCH_INACTIVE } from '../lib/receivingBranch'
 import { Hono, type Context } from 'hono'
 import { acquisitionCostResponses, hasAcquisitionCostInput } from '../lib/acquisitionCostAccess'
 import { getDb, type D1Compat } from '../lib/db'
@@ -1454,7 +1455,7 @@ const STOCK_REMOVAL_CONFLICT = {
   code: 'stock_removal_conflict',
 } as const
 
-async function applyStockDelta(env: Env, productId: number, branchId: number, delta: number) {
+async function applyStockDelta(env: Env, productId: number, branchId: number, delta: number, ordinaryReceiving = false) {
   const db = getDb(env)
   if (delta < 0) {
     // SCAN1 STK-C: a decrement must never go through the accumulating UPSERT
@@ -1466,6 +1467,7 @@ async function applyStockDelta(env: Env, productId: number, branchId: number, de
     return
   }
   await db.batch([
+    ...(ordinaryReceiving ? [receivingBranchAssertion(branchId)] : []),
     {
       sql: `INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (@productId, @branchId, @delta)
             ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = quantity + excluded.quantity`,
@@ -1498,7 +1500,13 @@ export async function runAdjustAction(c: InventoryContext, body: Record<string, 
     'adjust',
     body,
     (value, status) => c.json(value as never, status as never),
-    (markWritten, atomicMark) => runAdjustActionKernel(c, body, markWritten, atomicMark),
+    async (markWritten, atomicMark) => {
+      try { return await runAdjustActionKernel(c, body, markWritten, atomicMark) }
+      catch (error) {
+        if (isReceivingBranchError(error)) return c.json(RECEIVING_BRANCH_INACTIVE, 409)
+        throw error
+      }
+    },
   )
 }
 
@@ -1529,7 +1537,7 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
   let type = String(body.type || '')
   let quantity = Number(body.quantity)
   const reason = body.reason != null ? String(body.reason).trim() || null : null
-  const requestedBranchId = body.branchId != null ? Number.parseInt(String(body.branchId), 10) : null
+  const requestedBranchId = body.branchId != null ? Number(body.branchId) : null
   // D4 (11.28): stock recorded late may carry the REAL received date. It
   // only feeds receiveBatchStock below, whose date->code matching
   // (lib/batchCode.ts) decides create-vs-top-up exactly as the Receive
@@ -1725,6 +1733,7 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
   // like the mandatory-reason check above, so no path can record goods with an
   // invented supplier or an invented cost.
   const isReceipt = type === 'add'
+  if (isReceipt) await requireReceivingBranch(db, body.branchId != null ? Number(body.branchId) : branchId)
   // A top-up of an EXISTING lot inherits that lot's supplier -- first
   // attribution sticks server-side, so the pickers send no supplier for an
   // attributed lot and show the locked name instead. Read it rather than
@@ -2101,6 +2110,7 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
     // supplier/payment, cumulative received money and the catalog override.
     // Both stock ledgers and the non-purchase movement share the lot guard.
     await db.batch([
+      receivingBranchAssertion(branchId),
       { sql: `INSERT INTO stock_session_guards(guard_value) SELECT CASE WHEN EXISTS(
           SELECT 1 FROM product_batches WHERE id=@batchId AND variant_product_id=@productId
             AND unit_cost_usd IS @unitCostUsd) THEN 1 ELSE 0 END`,
@@ -2144,6 +2154,7 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
           receiptLotTarget: unlockedReceiptLotTarget,
         })
         await db.batch([
+          receivingBranchAssertion(branchId),
           ...plan.statements,
           mergedPricingStatement,
           {
@@ -2180,6 +2191,7 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
         movementWrittenAtomically = true
       } else {
       const received = await receiveBatchStock(db, {
+        ordinaryReceiving: true,
         productId: targetProductId,
         branchId,
         quantity,
@@ -2210,6 +2222,7 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
       lotCode = received.lotCode
       }
     } catch (err) {
+      if (isReceivingBranchError(err)) return c.json(RECEIVING_BRANCH_INACTIVE, 409)
       return c.json({ error: err instanceof Error ? err.message : 'Failed to receive stock' }, 400)
     }
     // P10-4 (owner ruling 2026-09-16): a receipt just wrote a new lot cost --
@@ -2280,7 +2293,7 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
       movementWrittenAtomically = true
     }
   } else if (delta !== 0) {
-    await applyStockDelta(c.env, targetProductId, branchId, delta)
+    await applyStockDelta(c.env, targetProductId, branchId, delta, type === 'add')
   }
 
   // P3-L6 HOLD (remove): the units have just left sellable stock above. A

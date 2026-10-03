@@ -106,7 +106,9 @@ const productIdentityMod = loadReal('lib/productIdentity.ts', {
   './db': dbOverride, './sqlBinding': sqlBindingMod, './productDetailRule': productDetailRuleMod,
 })
 const movementCostSnapshotMod = loadReal('lib/movementCostSnapshot.ts', { './moneyPrecision': moneyMod })
+const receivingBranchMod = loadReal('lib/receivingBranch.ts')
 const productBatchesMod = loadReal('lib/productBatches.ts', {
+  './receivingBranch': receivingBranchMod,
   './db': dbOverride, './batchCode': batchCodeMod, './moneyPrecision': moneyMod, './sqlBinding': sqlBindingMod,
 })
 // The module under test, loaded ONCE and shared with both kernels so the
@@ -129,6 +131,7 @@ const inventoryMod = loadReal('routes/inventory.ts', {
   '../lib/cache': cacheStub,
   '../durable-objects/broadcastHub': broadcastStub,
   '../lib/productBatches': productBatchesMod,
+  '../lib/receivingBranch': receivingBranchMod,
   '../lib/batchCode': batchCodeMod,
   '../lib/stockReceiptGate': stockReceiptGateMod,
   '../lib/productIdentity': productIdentityMod,
@@ -147,6 +150,7 @@ const batchesMod = loadReal('routes/batches.ts', {
   '../durable-objects/broadcastHub': broadcastStub,
   '../lib/cache': cacheStub,
   '../lib/productBatches': productBatchesMod,
+  '../lib/receivingBranch': receivingBranchMod,
   '../lib/batchCode': batchCodeMod,
   '../lib/stockReceiptGate': stockReceiptGateMod,
   '../lib/stockReason': stockReasonMod,

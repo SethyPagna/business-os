@@ -74,7 +74,8 @@ const permissionsMod = loadReal('lib/permissions.ts')
 const productDetailRuleMod = loadReal('lib/productDetailRule.ts', { './moneyPrecision': moneyMod })
 const productIdentityMod = loadReal('lib/productIdentity.ts', { './db': dbOverride, './sqlBinding': sqlBindingMod, './productDetailRule': productDetailRuleMod })
 const movementCostSnapshotMod = loadReal('lib/movementCostSnapshot.ts', { './moneyPrecision': moneyMod })
-const productBatchesMod = loadReal('lib/productBatches.ts', { './db': dbOverride, './batchCode': batchCodeMod, './moneyPrecision': moneyMod, './sqlBinding': sqlBindingMod })
+const receivingBranchMod = loadReal('lib/receivingBranch.ts')
+const productBatchesMod = loadReal('lib/productBatches.ts', { './db': dbOverride, './batchCode': batchCodeMod, './moneyPrecision': moneyMod, './sqlBinding': sqlBindingMod, './receivingBranch': receivingBranchMod })
 const stockMutationReceiptMod = loadReal('lib/stockMutationReceipt.ts')
 const stockSessionMathMod = loadReal('lib/stockSessionMath.ts', { './moneyPrecision': moneyMod })
 const schemaProbeMod = loadReal('lib/schemaProbe.ts')
@@ -90,6 +91,7 @@ const shared = {
   '../lib/cache': { bumpVersion: async () => {} },
   '../durable-objects/broadcastHub': { broadcast: async () => {} },
   '../lib/productBatches': productBatchesMod,
+  '../lib/receivingBranch': receivingBranchMod,
   '../lib/batchCode': batchCodeMod,
   '../lib/stockReceiptGate': gateMod,
   '../lib/stockReason': stockReasonMod,

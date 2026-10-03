@@ -97,7 +97,8 @@ const stockReceiptGate = loadReal('lib/stockReceiptGate.ts')
 const stockMutationReceipt = loadReal('lib/stockMutationReceipt.ts')
 const sqlBinding = loadReal('lib/sqlBinding.ts')
 const moneyPrecision = loadReal('lib/moneyPrecision.ts')
-const productBatches = loadReal('lib/productBatches.ts', { './db': { getDb: () => db }, './batchCode': batchCode, './moneyPrecision': moneyPrecision, './sqlBinding': sqlBinding })
+const receivingBranch = loadReal('lib/receivingBranch.ts')
+const productBatches = loadReal('lib/productBatches.ts', { './db': { getDb: () => db }, './batchCode': batchCode, './moneyPrecision': moneyPrecision, './sqlBinding': sqlBinding, './receivingBranch': receivingBranch })
 const productDetailRule = loadReal('lib/productDetailRule.ts', { './moneyPrecision': moneyPrecision })
 const permissions = loadReal('lib/permissions.ts')
 const acquisitionCostAccess = loadReal('lib/acquisitionCostAccess.ts', { './permissions': permissions })
@@ -211,6 +212,7 @@ const inventoryRoute = loadReal('routes/inventory.ts', {
   '../lib/salesAnalytics': salesAnalytics,
   '../lib/productSalesLedger': productSalesLedger,
   '../lib/productBatches': productBatches,
+  '../lib/receivingBranch': receivingBranch,
   '../lib/batchCode': batchCode,
   '../lib/stockReceiptGate': stockReceiptGate,
   '../lib/stockSessionMath': loadReal('lib/stockSessionMath.ts', { './moneyPrecision': moneyPrecision }),
@@ -305,6 +307,7 @@ const batchesRoute = loadReal('routes/batches.ts', {
   '../durable-objects/broadcastHub': { broadcast: async () => {} },
   '../lib/cache': { bumpVersion: async () => {} },
   '../lib/productBatches': productBatches,
+  '../lib/receivingBranch': receivingBranch,
   '../lib/batchCode': batchCode,
   '../lib/stockReceiptGate': stockReceiptGate,
   '../lib/stockSessionMath': loadReal('lib/stockSessionMath.ts', { './moneyPrecision': moneyPrecision }),

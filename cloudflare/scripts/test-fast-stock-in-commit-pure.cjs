@@ -143,7 +143,9 @@ const productIdentityMod = loadReal('lib/productIdentity.ts', {
   './db': dbOverride, './sqlBinding': sqlBindingMod, './productDetailRule': productDetailRuleMod,
 })
 const movementCostSnapshotMod = loadReal('lib/movementCostSnapshot.ts', { './moneyPrecision': moneyMod })
+const receivingBranchMod = loadReal('lib/receivingBranch.ts')
 const productBatchesMod = loadReal('lib/productBatches.ts', {
+  './receivingBranch': receivingBranchMod,
   './db': dbOverride, './batchCode': batchCodeMod, './moneyPrecision': moneyMod, './sqlBinding': sqlBindingMod,
 })
 // Migration 0192: both kernels wrap their body in the per-line receipt guard,
@@ -166,6 +168,7 @@ const broadcastStub = { broadcast: async () => {} }
 const authStub = { requireAuth: async (c, next) => { await next() } }
 
 const inventoryMod = loadReal('routes/inventory.ts', {
+  '../lib/receivingBranch': receivingBranchMod,
   '../lib/continuousReadWindow': loadReal('lib/continuousReadWindow.ts'),
   '../lib/db': dbOverride,
   '../lib/auth': authStub,
@@ -186,6 +189,7 @@ const inventoryMod = loadReal('routes/inventory.ts', {
 })
 
 const batchesMod = loadReal('routes/batches.ts', {
+  '../lib/receivingBranch': receivingBranchMod,
   '../lib/db': dbOverride,
   '../lib/auth': authStub,
   '../lib/audit': auditStub,

@@ -103,7 +103,9 @@ const productIdentity = loadReal('lib/productIdentity.ts', {
   './sqlBinding': sqlBinding,
   './productDetailRule': productDetailRule,
 })
+const receivingBranch = loadReal('lib/receivingBranch.ts')
 const productBatches = loadReal('lib/productBatches.ts', {
+  './receivingBranch': receivingBranch,
   './db': { getDb: () => db },
   './batchCode': batchCode,
   './sqlBinding': sqlBinding,
@@ -211,6 +213,7 @@ const inventoryRoute = loadReal('routes/inventory.ts', {
   '../lib/salesAnalytics': salesAnalytics,
   '../lib/productSalesLedger': productSalesLedger,
   '../lib/productBatches': productBatches,
+  '../lib/receivingBranch': receivingBranch,
   '../lib/batchCode': batchCode,
   '../lib/stockReceiptGate': stockReceiptGate,
   '../lib/stockSessionMath': loadReal('lib/stockSessionMath.ts', { './moneyPrecision': moneyPrecision }),
