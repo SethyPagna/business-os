@@ -25,9 +25,9 @@
 //      waiting file there); its number sorts after every chain file that
 //      touches a table it reads or writes (0195 among them), so moving it in
 //      unchanged runs it after all of them. It need not be the last file: a
-//      chain file numbered above it must touch none of those tables, and the
-//      whole chain plus it applies to a fresh database in either order, to
-//      the same schema.
+//      chain file numbered above it must preserve repair inputs and abort
+//      guards; structurally independent additions also require both orders
+//      to preserve the full populated schema, rows and repair outcomes.
 //   7. Owner-run audit: every command in the header is --command (never
 //      --file), and each one cut from the audit file is exactly that audit
 //      statement and runs, returning the numbers the header says to read.
@@ -373,7 +373,96 @@ const additiveUnread = (text, repairText) => {
   return columns.every((column) => !namedIn(repairText)(column))
 }
 
-check('held: not in cloudflare/migrations; sorts after every chain file touching a table it reads or writes (0195 among them), not necessarily last; the chain plus it applies to a fresh database in either order', () => {
+const mixedAdditiveUnread = (text, repairText) => {
+  if (/--|\/\*/.test(text)) return false
+  let sql = text.replace(/\s+/g, ' ').trim()
+  const columns = new Set()
+  let indexes = 0, guards = 0
+  while (sql) {
+    let match = /^ALTER TABLE (\w+) ADD COLUMN (\w+) (TEXT|INTEGER)([^;]*);\s*/i.exec(sql)
+    if (match) {
+      const [, table, column, type, tail] = match
+      if (namedIn(repairText)(column) || columns.has(`${table}.${column}`.toLowerCase())) return false
+      const enumCheck = new RegExp(`^ CHECK \\(${column} IS NULL OR ${column} IN \\('[A-Za-z0-9_]+'(?:, '[A-Za-z0-9_]+')*\\)\\)$`, 'i')
+      const jsonCheck = new RegExp(`^ CHECK \\(${column} IS NULL OR json_valid\\(${column}\\)\\)$`, 'i')
+      const referenceCheck = new RegExp(`^ REFERENCES ${table}\\(id\\) CHECK \\(${column} IS NULL OR \\(typeof\\(${column}\\) = 'integer' AND ${column} > 0 AND ${column} <> id AND is_active IS 0 AND is_default IS 0\\)\\)$`, 'i')
+      if (tail && !(type.toUpperCase() === 'TEXT' && (enumCheck.test(tail) || jsonCheck.test(tail)))
+        && !(type.toUpperCase() === 'INTEGER' && referenceCheck.test(tail))) return false
+      columns.add(`${table}.${column}`.toLowerCase())
+    } else if ((match = /^CREATE UNIQUE INDEX \w+ ON (\w+)\((\w+)\) WHERE \2 IS NOT NULL;\s*/i.exec(sql))) {
+      if (!columns.has(`${match[1]}.${match[2]}`.toLowerCase())) return false
+      indexes++
+    } else if ((match = /^CREATE TRIGGER \w+ BEFORE UPDATE OF (\w+) ON (\w+) WHEN OLD\.\1 IS NOT NULL AND NEW\.\1 IS NOT OLD\.\1 BEGIN SELECT RAISE\(ABORT, '[A-Za-z0-9_]+'\); END;\s*/i.exec(sql))) {
+      if (!columns.has(`${match[2]}.${match[1]}`.toLowerCase())) return false
+      guards++
+    } else return false
+    sql = sql.slice(match[0].length)
+  }
+  return columns.size > 0 && indexes > 0 && guards > 0
+}
+
+function completeState(raw) {
+  const quote = name => `"${name.replaceAll('"', '""')}"`
+  const schema = raw.prepare('SELECT type,name,tbl_name,sql FROM sqlite_master ORDER BY type,name').all()
+  const tables = raw.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all().map(({ name }) => {
+    const columns = raw.prepare(`PRAGMA table_info(${quote(name)})`).all().map(({ name: column }) => column)
+    const fields = columns.map(column => `quote(${quote(column)}) AS ${quote(column)}`)
+    try { raw.prepare(`SELECT rowid FROM ${quote(name)} LIMIT 0`); fields.unshift('quote(rowid) AS "__probe_rowid__"') }
+    catch (error) { assert.match(error.message, /no such column/) }
+    const rows = raw.prepare(`SELECT ${fields.join(',')} FROM ${quote(name)}`).all()
+      .map(row => Object.fromEntries(Object.entries(row))).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)))
+    return { name, rows }
+  })
+  return { schema, tables }
+}
+
+function assertPopulatedOrders(chain, chainText, mixed) {
+  const { raw, ids } = seed()
+  raw.limits.exprDepth = 100
+  raw.function('current_timestamp', () => '2026-10-03 10:00:00')
+  try {
+    const heldNumber = Number(heldName.slice(0, 4))
+    for (const file of chain.filter(file => Number(file.slice(0, 4)) > 195 && Number(file.slice(0, 4)) < heldNumber)) raw.exec(chainText(file))
+    raw.exec("INSERT INTO pending_actions(section,action_type,entity_type,entity_id,payload_json,status) VALUES('branches','update','branch',1,'{}','open')")
+    const later = chain.filter(file => Number(file.slice(0, 4)) > heldNumber)
+    const run = (before, override = new Map(), repeat = true) => {
+      raw.exec('SAVEPOINT held_order_probe')
+      try {
+        for (const file of (before ? [heldName, ...later] : [...later, heldName])) raw.exec(file === heldName ? migrationText : override.get(file) ?? chainText(file))
+        const state = completeState(raw)
+        const audit = auditStatements().map(statement => raw.prepare(statement).all())
+        const repaired = raw.prepare('SELECT sale_item_id,new_cost_price_usd FROM sale_cost_repair_0200 ORDER BY sale_item_id').all()
+        const returned = raw.prepare('SELECT return_item_id,new_cost_price_usd FROM sale_cost_repair_0200_return_items ORDER BY return_item_id').all()
+        if (repeat) {
+          raw.exec(migrationText)
+          assert.deepEqual(completeState(raw), state, 'populated second apply preserves complete state')
+        }
+        assert.throws(() => raw.exec('INSERT INTO branches(name) SELECT NULL WHERE 1'), /NOT NULL/, 'branch sentinel still aborts')
+        raw.exec(recoverySql())
+        return { state, audit, repaired, returned, recovered: completeState(raw) }
+      } finally { raw.exec('ROLLBACK TO held_order_probe; RELEASE held_order_probe') }
+    }
+    const before = run(true), after = run(false)
+    assert.deepEqual(before, after, 'populated full-chain orders preserve schema, all rows, audit, repair and recovery outcomes')
+    assert.deepEqual(before.repaired.map(row => row.new_cost_price_usd), [12.0769, 12.4, 12.4444, 7, 8])
+    assert.deepEqual(before.returned.map(row => row.new_cost_price_usd), [12.4])
+    for (const file of mixed) {
+      const original = chainText(file)
+      const dml = `${original}\nUPDATE sale_items SET cost_price_usd=123 WHERE id=${ids.s0.lineId};`
+      const ignore = `${original}\nCREATE TRIGGER wrong_ignore BEFORE INSERT ON branches WHEN NEW.name IS NULL BEGIN SELECT RAISE(IGNORE); END;`
+      const oldField = `${original}\nCREATE TRIGGER wrong_old_field BEFORE UPDATE OF cost_price_usd ON sale_items WHEN OLD.cost_price_usd IS NOT NULL AND NEW.cost_price_usd IS NOT OLD.cost_price_usd BEGIN SELECT RAISE(ABORT, 'wrong_old_field'); END;`
+      for (const wrong of [dml, ignore, oldField, original.replace('json_valid(expected_entity_state_json)', 'unknown_function(expected_entity_state_json)'), original.replace('role IS NULL OR role IN', 'is_active IS 0 AND role IN')]) {
+        assert.notEqual(wrong, original)
+        assert.equal(mixedAdditiveUnread(wrong, migrationText), false, 'unsafe mixed SQL remains a dependency')
+      }
+      assert.notDeepEqual(run(true, new Map([[file, dml]]), false).state, run(false, new Map([[file, dml]]), false).state, 'later data mutation is order-dependent')
+      assert.throws(() => run(true, new Map([[file, ignore]])), /Missing expected exception/, 'INSERT-ignore control must lose the sentinel')
+      assert.throws(() => run(false, new Map([[file, oldField]])), /wrong_old_field/, 'old-field update guard must affect the repair')
+    }
+  } finally { raw.close() }
+}
+
+check('held: outside deploy chain, after dependencies including0195; independent additions preserve fresh and populated outcomes in both orders', () => {
   const chain = fs.readdirSync(migrationsDir).filter((f) => f.endsWith('.sql')).sort()
   const chainText = (f) => fs.readFileSync(path.join(migrationsDir, f), 'utf8')
   assert.ok(!chain.some((f) => /sale_cost_on_hand_repair/.test(f)), 'the repair must not sit in the deploy chain')
@@ -390,7 +479,8 @@ check('held: not in cloudflare/migrations; sorts after every chain file touching
   const fresh = openDb(chain.map(chainText)).db
   const tables = fresh.prepare("SELECT name FROM sqlite_master WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite_%'").all().map((r) => r.name)
   const touched = tables.filter(namedIn(migrationText))
-  const dependencies = chain.filter((f) => !indexOnly(chainText(f)) && !additiveUnread(chainText(f), migrationText) && touched.some(namedIn(chainText(f))))
+  const mixed = chain.filter(file => mixedAdditiveUnread(chainText(file), migrationText))
+  const dependencies = chain.filter((f) => !indexOnly(chainText(f)) && !additiveUnread(chainText(f), migrationText) && !mixed.includes(f) && touched.some(namedIn(chainText(f))))
   assert.ok(['sale_items', 'return_items', 'catalog_cost_repair_0195_backup'].every((t) => touched.includes(t)), 'control: the scan sees the two tables it writes and the 0195 backup it reads')
   assert.ok(dependencies.includes('0195_catalog_cost_on_hand.sql'), 'control: the scan finds 0195')
   assert.ok(indexOnly('-- x\nCREATE INDEX IF NOT EXISTS i ON sale_items(id);\nCREATE UNIQUE INDEX j ON sale_items(id);'), 'control: an index-only file is skipped')
@@ -400,7 +490,7 @@ check('held: not in cloudflare/migrations; sorts after every chain file touching
   const later = chain.filter((f) => movedIn.indexOf(f) > movedIn.indexOf(heldName))
   assert.deepEqual(later.filter((f) => dependencies.includes(f)), [],
     `these chain files sort after ${heldName} yet touch a table it reads or writes (${touched.join(', ')}). ` +
-    'It need not be the last file, but a file numbered above it must touch none of those tables: wrangler applies whatever is ' +
+    'A later file must have proven structural independence: wrangler applies whatever is ' +
     'unapplied in file-number order, so where that file is already applied (production) the repair runs after it, and on a ' +
     'fresh database it runs before it -- the two orders agree only when they cannot interact. Otherwise number the repair ' +
     'above that file in the owner-approved move.')
@@ -412,6 +502,7 @@ check('held: not in cloudflare/migrations; sorts after every chain file touching
   const schema = (db) => db.prepare('SELECT type, name, tbl_name, sql FROM sqlite_master ORDER BY type, name').all()
   assert.deepEqual(schema(byNumber), schema(fresh), `before or after ${later.join(', ') || 'no later file'}: the same schema`)
   assert.throws(() => openDb(loadAll({ through: 194 })).db.exec(migrationText), /catalog_cost_repair_0195_backup/, 'without 0195 it refuses to run')
+  assertPopulatedOrders(chain, chainText, mixed)
 })
 
 check('owner-run audit: every header command is --command (never --file); the cut statements are the audit verbatim and run', () => {
