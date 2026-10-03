@@ -17,6 +17,10 @@ function load(relative) {
       receipt_order: ['if (existing.receipt) return', 'if (false && existing.receipt) return'],
       tenant: ['actor.organization_id === organizationId', 'true'],
       split: ['await db.batchOnce(statements)', 'await (async () => { await db.batchOnce(statements.slice(0, -6)); return db.batchOnce(statements.slice(-6)) })()'],
+      quantity_gap: ['requireChild(quantity(total) && Math.abs(total - amount) <= roundoff)', 'requireChild(quantity(total) && Math.abs(total - amount) <= EPSILON)'],
+      quantity_zero: ['requireChild(portions.length > 0 && portions.every(value => quantity(value) && value > 0))', 'if (portions.length === 0) return; requireChild(portions.every(value => quantity(value) && value > 0))'],
+      quantity_minimum: ['requireChild(quantity(total) && Math.abs(total - amount) <= roundoff)', 'requireChild(amount >= EPSILON && Math.abs(total - amount) <= EPSILON)'],
+      quantity_exact: ['requireChild(quantity(total) && Math.abs(total - amount) <= roundoff)', 'requireChild(total === amount)'],
     }
     const mutation = mutations[process.env.CHILD_WRONG_CONTROL]
     assert.ok(mutation && source.includes(mutation[0])); source = source.replace(mutation[0], mutation[1])
@@ -76,11 +80,11 @@ function world(lots = [1], untracked = 0) {
   return { raw, db, stats, quantity }
 }
 const ownership = row => ({ operationId: row.operation_id, actorId: row.actor_id, organizationId: row.organization_id, controlIncarnation: row.control_incarnation, token: row.maintenance_token })
-async function planned(w, transfer = {}) {
+async function planned(w, transfer = {}, manifestQuantityText = w.quantity.toLocaleString('en-US', { useGrouping: false, maximumSignificantDigits: 21 })) {
   let row = (await journal.beginBranchCutoverJournal(w.db, { operationId: uuid(1), beginRequestId: 'cutover_begin_001', actorId: 7, organizationId: '1', controlIncarnation: uuid(99), token: uuid(2), sourceBranchId: 1, targetBranchId: 2,
     intentJson: '{"action":"retire","sourceBranchId":1,"targetBranchId":2}', sourcePreimageJson: '{"id":1,"name":"Shop"}', targetPreimageJson: '{"id":2,"name":"Warehouse"}' })).row
   row = await journal.checkpointBranchCutoverJournal(w.db, ownership(row), row.revision, { phase: 'capturing', records: 1, cursorJson: '{"id":1}', digest: 'a'.repeat(64) })
-  row = await journal.sealBranchCutoverManifest(w.db, ownership(row), row.revision, JSON.stringify({ version: 1, sourceBranchId: 1, targetBranchId: 2, capturedRecords: 1, movingProducts: 1, sourceQuantityText: String(w.quantity), sourceLotQuantityText: String(w.quantity), anomalies: 0, captureDigest: row.capture_digest }))
+  row = await journal.sealBranchCutoverManifest(w.db, ownership(row), row.revision, JSON.stringify({ version: 1, sourceBranchId: 1, targetBranchId: 2, capturedRecords: 1, movingProducts: 1, sourceQuantityText: manifestQuantityText, sourceLotQuantityText: manifestQuantityText, anomalies: 0, captureDigest: row.capture_digest }))
   row = await journal.finishBranchCutoverSnapshots(w.db, ownership(row), row.revision)
   const envelope = { version: 1, kind: 'branch-cutover-child', operationId: row.operation_id, sequence: 0, actorId: 7, organizationId: '1', controlIncarnation: row.control_incarnation, sourceBranchId: 1, targetBranchId: 2, reason: 'Retire Shop', transfer: { productId: 1, quantity: w.quantity, batchId: null, ...transfer } }
   const childJson = JSON.stringify(envelope)
@@ -100,6 +104,59 @@ function legacyMutation(w, table, sql) {
 let checks = 0
 async function check(name, fn) { if (process.env.CHILD_TEST_PATTERN && !new RegExp(process.env.CHILD_TEST_PATTERN).test(name)) return; await fn(); checks++; console.log('PASS ' + name) }
 async function main() {
+  for (const amount of [Number.MIN_VALUE, 1e-20, 1e-10]) await check('zero represented portions refuse positive quantity ' + amount, async () => {
+    const w = world([], 1); const p = await planned(w, { quantity: amount }); const before = snapshot(w)
+    await assert.rejects(execute(w, p), /branch_cutover_child_conflict/)
+    assert.equal(w.stats.batches, 0); assert.equal(snapshot(w), before); w.raw.close()
+  })
+  for (const mode of ['planning', 'stored']) await check(mode + ' deficit above independently bounded IEEE roundoff refuses', async () => {
+    const unit = new Float64Array([1]); const bits = new BigUint64Array(unit.buffer); bits[0] += 1n
+    const spacing = unit[0] - 1; const deficit = 1e-14
+    const w = mode === 'planning' ? world([1], deficit) : world([1, deficit])
+    const p = await planned(w, {}, '1')
+    const represented = 1; const independentUpperBound = spacing * 2
+    assert.ok(w.quantity - represented > independentUpperBound && w.quantity - represented < 1e-9)
+    if (mode === 'stored') {
+      await execute(w, p)
+      legacyMutation(w, 'transfer_operation_members', "UPDATE transfer_operation_members SET allocations_json=json_remove(allocations_json,'$[1]')")
+    }
+    const before = snapshot(w); const batches = w.stats.batches
+    await assert.rejects(execute(w, p), /branch_cutover_child_conflict/)
+    assert.equal(w.stats.batches, batches); assert.equal(snapshot(w), before); w.raw.close()
+  })
+  for (const [name, lots, untracked] of [['pure', [], 1e-10], ['mixed', [1], 1e-10]]) await check(name + ' positive untracked deficit refuses before dispatch', async () => {
+    const w = world(lots, untracked); const p = await planned(w); const before = snapshot(w)
+    await assert.rejects(execute(w, p), /branch_cutover_child_conflict/)
+    assert.equal(w.stats.batches, 0); assert.equal(snapshot(w), before); w.raw.close()
+  })
+  for (const [name, lots, keep] of [['pure', [1e-10], 0], ['mixed', [1, 1e-10], 1]]) await check(name + ' stored positive provenance deficit refuses replay without writes', async () => {
+    const w = world(lots); const p = await planned(w); await execute(w, p)
+    const allocations = JSON.parse(w.raw.prepare('SELECT allocations_json FROM transfer_operation_members').get().allocations_json).slice(0, keep)
+    legacyMutation(w, 'transfer_operation_members', `UPDATE transfer_operation_members SET allocations_json='${JSON.stringify(allocations).replaceAll("'", "''")}'`)
+    const before = snapshot(w); const batches = w.stats.batches
+    await assert.rejects(execute(w, p), /branch_cutover_child_conflict/)
+    assert.equal(w.stats.batches, batches); assert.equal(snapshot(w), before); w.raw.close()
+  })
+  for (const [name, lots, untracked, requested] of [['tiny tracked', [1e-10], 0], ['ordinary untracked', [], 0.8], ['decimal thirds', [0.1, 0.2, 0.3], 0], ['mixed fractions', [0.1, 0.2], 0.4], ['lower rounding', [0.7, 0.2], 0, 0.9], ['128 fractional lots', Array(128).fill(0.1), 0]]) await check(name + ' represented fractional provenance commits and replays', async () => {
+    const w = world(lots, untracked)
+    if (requested !== undefined) {
+      w.quantity = requested; w.raw.prepare('UPDATE branch_stock SET quantity=? WHERE branch_id=1').run(requested)
+      w.raw.prepare('UPDATE products SET stock_quantity=? WHERE id=1').run(requested)
+    }
+    const p = await planned(w, {}, w.quantity.toFixed(12)); const result = await execute(w, p)
+    assert.equal(result.replayed, false); assert.equal(w.stats.batches, 1)
+    const member = w.raw.prepare('SELECT quantity,untracked_quantity,allocations_json FROM transfer_operation_members').get()
+    const allocations = JSON.parse(member.allocations_json)
+    const represented = allocations.reduce((total, allocation) => total + allocation.quantity, member.untracked_quantity)
+    assert.ok(represented > 0 && Math.abs(represented - member.quantity) <= 1e-9)
+    assert.equal(allocations.length, lots.length)
+    const movements = w.raw.prepare('SELECT movement_type,quantity FROM inventory_movements ORDER BY id').all()
+    for (const direction of ['transfer_out', 'transfer_in']) {
+      const values = movements.filter(movement => movement.movement_type === direction).map(movement => movement.quantity)
+      assert.deepEqual(values, [...allocations.map(allocation => allocation.quantity), ...(member.untracked_quantity > 0 ? [member.untracked_quantity] : [])])
+    }
+    assert.equal((await execute(w, p)).replayed, true); assert.equal(w.stats.batches, 1); w.raw.close()
+  })
   await check('actual one-batch transfer and journal progress', async () => {
     const w = world(); const p = await planned(w); const result = await execute(w, p)
     assert.equal(result.replayed, false); assert.equal(result.row.next_sequence, 1); assert.equal(result.row.planned_child_json, null)

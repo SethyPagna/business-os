@@ -24,6 +24,14 @@ const positiveId = (value: unknown): value is number => Number.isSafeInteger(val
 const quantity = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= Number.MAX_SAFE_INTEGER
 const bytes = (value: string): number => encoder.encode(value).length
 function requireChild(condition: unknown): asserts condition { if (!condition) throw new Error('branch_cutover_child_conflict') }
+function requireRepresentedQuantity(amount: number, untracked: unknown, allocations: Array<{ quantity: unknown }>): void {
+  requireChild(quantity(untracked))
+  const portions = [...allocations.map(allocation => allocation.quantity), ...(untracked > 0 ? [untracked] : [])]
+  requireChild(portions.length > 0 && portions.every(value => quantity(value) && value > 0))
+  const total = (portions as number[]).reduce((sum, value) => sum + value, 0)
+  const roundoff = Math.min(EPSILON, Number.EPSILON * Math.max(amount, total) * portions.length)
+  requireChild(quantity(total) && Math.abs(total - amount) <= roundoff)
+}
 function object(text: unknown, limit = SNAPSHOT_BYTES): Record<string, unknown> {
   requireChild(typeof text === 'string' && bytes(text) <= limit)
   const result: unknown = JSON.parse(text)
@@ -103,6 +111,7 @@ function receiptProof(row: BranchCutoverJournalRow, child: Child, exactJson: str
     validateCost(a.cost_snapshot, a.quantity)
   }
   requireChild(Math.abs(total - child.transfer.quantity) <= EPSILON && (child.transfer.batchId === null || m.untracked_quantity === 0))
+  requireRepresentedQuantity(child.transfer.quantity, m.untracked_quantity, allocations)
   if (Number(m.untracked_quantity) > 0) validateCost(untrackedCost, Number(m.untracked_quantity))
   requireChild(response.destBatchId === (child.transfer.batchId === null ? null : child.transfer.batchId))
   return response
@@ -179,12 +188,17 @@ export async function executePlannedBranchCutoverChild(db: D1Compat, actor: Sess
       && Math.abs(from - (from - take.quantity) - take.quantity) <= EPSILON
       && Math.abs((to + take.quantity) - to - take.quantity) <= EPSILON)
   }
+  let provenanceMembers = 0
   for (const statement of planned.statements) {
     if (typeof statement.params?.allocations !== 'string') continue
+    provenanceMembers++
     const allocations = JSON.parse(statement.params.allocations) as Array<{ cost_snapshot: unknown; quantity: number }>
+    requireChild(statement.params.quantity === child.transfer.quantity)
+    requireRepresentedQuantity(child.transfer.quantity, statement.params.untracked, allocations)
     for (const allocation of allocations) validateCost(allocation.cost_snapshot, allocation.quantity)
     if (Number(statement.params.untracked) > 0) validateCost(object(statement.params.sourceSnapshot).untracked_cost_snapshot, Number(statement.params.untracked))
   }
+  requireChild(provenanceMembers === 1)
   const params = { operation: row.operation_id, revision: row.revision, sequence: row.next_sequence, actor: actor.id, organization: organizationId,
     organizationText: row.organization_id, token: ownership.token, control: ownership.controlIncarnation, flag: row.maintenance_flag_json,
     child: expected.childJson, key, digest, role: current.role_id, permissions: current.permissions, roleCode: current.role_code ?? null,
