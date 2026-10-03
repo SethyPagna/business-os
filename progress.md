@@ -5,7 +5,7 @@
 Every item carries an ID (U-1, U-cost, Q15 …). `docs/history/session-log.md` uses the same IDs: each Part lists the IDs it moved
 and their new status, and each item here names the Part that last changed it (e.g. "→ Part 633"). Search either file for an ID to see both sides.
 
-### Current work (3 Oct 2026) — Part 662
+### Current work (3 Oct 2026) — Part 663
 
 | Item | Status |
 |---|---|
@@ -14,9 +14,9 @@ and their new status, and each item here names the Part that last changed it (e.
 | Branch consolidation | [~] Receiving safeguards merged and focused tests pass. Review found stale-tab creation retry and branch Set gaps; corrections remain open. Stock transfer, selling and historical compatibility are unfinished. No live rename or stock move. |
 | STOCK-RETURN | [~] Quantity correction reviewed; partial returns/accounting still in progress. Not live. |
 | Product edit / Undo | [~] Backend/client checkpoints preserved; brand/group/fold/create-stock completion and integration pending. |
-| One combined release | [~] Candidate f509fad28 pushed. Six receiving tests and compiler pass; branch browser 12/12 pass after test corrections. Screenshot review found a time display bug; fix under review. Earlier full run remains 702/714; new full suites and exact gate pending. |
+| One combined release | [~] Candidate f509fad28 pushed. Six receiving tests and compiler pass; branch browser 12/12 pass after test corrections. Time display fix passed independent checks; integration and browser recheck pending. Earlier full run remains 702/714; new full suites and exact gate pending. |
 | Versions / portfolio | [~] Four redundant local checkouts removed and independently verified; branches and recovery archive preserved. Other useful/unique work retained. Portfolio coordination pending. |
-| Full owner goal | [~] Active and rechecked: 35 requirement groups, 1,115 historical IDs, 511 progress markers and 13 master-plan entries retained. Every open item stays tracked. |
+| Full owner goal | [~] Set and active; all requests retained in 35 groups, including 1,115 historical IDs, 511 progress markers and 13 master-plan entries. Completion requires evidence for each item; confirmed defects remain open. |
 
 ### Deploy checkpoints (26 Sep) — each deploys as soon as it is green; nothing waits for the next
 | Checkpoint | Contents | State |
