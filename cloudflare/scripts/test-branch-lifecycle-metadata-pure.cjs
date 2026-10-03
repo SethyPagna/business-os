@@ -210,13 +210,14 @@ function reviewHandler(db, beforeBatch = () => {}) {
   }
   const conflict = load('conflictControl')
   const requesterError = tree.statements.find(node => ts.isClassDeclaration(node) && node.name?.text === 'ReviewRequesterPermissionError')
-  const dependencies = { ...writes, ...conflict, ...load('permissions'), ...load('audit'),
+  const dependencies = { ...writes, ...conflict, ...load('permissions'), ...load('audit'), ...load('businessMaintenanceGuard'),
     ReviewRequesterPermissionError: evaluate(requesterError.getText(tree), {}, 'ReviewRequesterPermissionError'),
     registerApplier: (_section, _action, _entity, callback) => { handler = callback },
     getDb: () => adapter, audit: async () => {}, notify: async () => {} }
   dependencies.recoverApprovedBranchAction = evaluate(functionSource(tree, 'recoverApprovedBranchAction'), dependencies, 'recoverApprovedBranchAction')
   new Function(...Object.keys(dependencies), compiled)(...Object.values(dependencies))
   db.exec(`CREATE TABLE roles(id INTEGER PRIMARY KEY,code TEXT,permissions TEXT);
+    CREATE TABLE system_flags(key TEXT PRIMARY KEY,value TEXT,updated_at TEXT);
     CREATE TABLE users(id INTEGER PRIMARY KEY,username TEXT,role_id INTEGER,permissions TEXT,is_active INTEGER,deleted_at TEXT);
     INSERT INTO users VALUES(8,'requester',NULL,'{"branches":"review"}',1,NULL);
     CREATE TABLE pending_actions(id INTEGER PRIMARY KEY,section TEXT,action_type TEXT,entity_type TEXT,entity_id INTEGER,
@@ -265,6 +266,16 @@ async function reviewTests() {
       const approve = reviewHandler(db, () => db.exec('UPDATE branches SET is_active=0 WHERE id=1'))
       await assert.rejects(approve({ notes: 'raced' }), error => error.code === 'branch_edit_conflict')
       assert.equal(db.prepare('SELECT notes FROM branches WHERE id=2').get().notes, 'past'); db.close()
+    }],
+    ['real approval handler rolls back when maintenance arrives before its batch', async () => {
+      const db = world()
+      const approve = reviewHandler(db, () => db.exec("INSERT INTO system_flags(key,value) VALUES('maintenance','held')"))
+      await assert.rejects(approve({ notes: 'must not save' }))
+      assert.equal(db.prepare('SELECT notes FROM branches WHERE id=2').get().notes, 'past')
+      assert.equal(db.prepare('SELECT status FROM pending_actions WHERE id=1').get().status, 'open')
+      assert.equal(db.prepare('SELECT COUNT(*) AS n FROM audit_logs').get().n, 0)
+      assert.equal(db.prepare("SELECT value FROM system_flags WHERE key='maintenance'").get().value, 'held')
+      db.close()
     }],
   ]) {
     try { await run(); console.log(`PASS ${name}`) }

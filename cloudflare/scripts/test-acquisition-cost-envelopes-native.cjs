@@ -64,6 +64,7 @@ async function checkEnvelopeRoutes(api) {
   const stubs = {
     '../lib/acquisitionCostAccess': api, '../lib/permissions': pure('permissions'), '../lib/db': pure('db'),
     '../lib/actorSnapshot': pure('actorSnapshot'), '../lib/pendingActions': pure('pendingActions'),
+    '../lib/branchWrites': pure('branchWrites'),
     '../lib/auth': { requireAuth: async (c, next) => { if (!user) return c.json({ error: 'Unauthorized' }, 401); c.set('user', user); return next() } },
     '../lib/audit': { audit: async () => { auditWrites++ } }, '../durable-objects/broadcastHub': { broadcast: async () => { broadcasts++ } },
     '../lib/productWrites': { hasProductMoneyPolicy: unused },

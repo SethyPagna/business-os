@@ -178,7 +178,7 @@ function formPayload(row) {
 async function branchEdit(world, id, changes) {
   const before = branch(world, id)
   const after = { ...before, ...changes }
-  const identity = world.d1.db.prepare('SELECT id, name, is_active FROM branches WHERE id = ?').get(id)
+  const identity = world.d1.db.prepare('SELECT * FROM branches WHERE id = ?').get(id)
   await world.d1.batch(world.branchWrites.branchUpdateStatements(id, formPayload(after), identity))
   const info = world.run(`INSERT INTO action_history (scope, entity, entity_id, label, reversible, status, undo_payload, redo_payload, created_by_id, created_by_name)
     VALUES ('branches', 'branch', @entity, 'Edit branch', 1, 'undoable', @undo, @redo, @by, @byName)`, {
