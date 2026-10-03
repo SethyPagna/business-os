@@ -42,7 +42,7 @@ function loadMoneyDependency(name) {
       isImportMaintenanceFenceError: () => false,
       ImportMaintenanceFenceError: class ImportMaintenanceFenceError extends Error {},
     }
-    const allowed = new Set(['./permissions', './moneyPrecision', './catalogCostRecompute', './db', './media', './batchCode', './searchMatch', './schemaProbe'])
+    const allowed = new Set(['./permissions', './moneyPrecision', './catalogCostRecompute', './db', './media', './batchCode', './searchMatch', './schemaProbe', './receivingBranch', './businessMaintenanceGuard', './pendingActions', './audit', './branchWrites', './canonicalBranchIdentity', './branchRoles'])
     if (allowed.has(request)) return loadMoneyDependency(request.slice(2))
     throw new Error(`Unmapped money-policy dependency: ${request}`)
   }
@@ -57,6 +57,8 @@ function loadRoute(state) {
   const stubs = {
     '../lib/acquisitionCostAccess': loadMoneyDependency('acquisitionCostAccess'),
     '../lib/productWrites': productWrites,
+    '../lib/branchWrites': loadMoneyDependency('branchWrites'),
+    '../lib/db': loadMoneyDependency('db'),
     hono: { Hono },
     '../lib/auth': { requireAuth },
     '../lib/permissions': {

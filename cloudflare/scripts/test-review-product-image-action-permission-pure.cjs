@@ -7,6 +7,8 @@ const fs = require('node:fs')
 const Module = require('node:module')
 const path = require('node:path')
 const ts = require('typescript')
+const { openDb } = require('./harness/d1compat.cjs')
+const { loadAll } = require('./harness/load_migrations.cjs')
 
 const srcRoot = path.join(__dirname, '..', 'src')
 
@@ -50,6 +52,10 @@ const dbLib = loadTs('lib/db.ts', { './importMaintenanceFence': {
 const realProductWrites = loadTs('lib/productWrites.ts', {
   './catalogCostRecompute': loadTs('lib/catalogCostRecompute.ts', { './moneyPrecision': loadTs('lib/moneyPrecision.ts') }),
   './db': dbLib,
+  './receivingBranch': loadTs('lib/receivingBranch.ts'),
+  './businessMaintenanceGuard': loadTs('lib/businessMaintenanceGuard.ts'),
+  './pendingActions': loadTs('lib/pendingActions.ts', { './db': dbLib }),
+  './audit': loadTs('lib/audit.ts', { './db': dbLib }),
   './moneyPrecision': loadTs('lib/moneyPrecision.ts'),
   './media': media,
   './batchCode': loadTs('lib/batchCode.ts'),
@@ -91,6 +97,45 @@ function freshState(requester) {
   }
 }
 
+async function runNativeCreate(state, body, required, maxImages, approval) {
+  const database = openDb(loadAll(path.resolve(__dirname, '../migrations')))
+  const raw = database.db
+  assert.equal(raw.limits.exprDepth, 100)
+  const pendingRow = { ...approval.row, created_at: null, updated_at: null }
+  const keys = Object.keys(pendingRow)
+  raw.prepare(`INSERT INTO pending_actions(${keys.join(',')}) VALUES(${keys.map(() => '?').join(',')})`).run(...keys.map(key => pendingRow[key]))
+  const DB = {
+    prepare(sql) {
+      let values = []
+      const statement = {
+        bind(...args) { values = args; return statement },
+        args() { return /\?\d/.test(sql) ? [Object.fromEntries(values.map((value, index) => [String(index + 1), value]))] : values },
+        async all() { return { results: raw.prepare(sql).all(...statement.args()) } },
+        async run() {
+          const prepared = raw.prepare(sql)
+          if (prepared.columns().length) return { success: true, results: prepared.all(...statement.args()), meta: { changes: 0 } }
+          const result = prepared.run(...statement.args())
+          return { success: true, meta: { changes: Number(result.changes), last_row_id: Number(result.lastInsertRowid) } }
+        },
+      }
+      return statement
+    },
+    async batch(statements) {
+      raw.exec('BEGIN IMMEDIATE')
+      try { const results=[]; for (const statement of statements) results.push(await statement.run()); raw.exec('COMMIT'); return results }
+      catch(error) { raw.exec('ROLLBACK'); throw error }
+    },
+  }
+  try {
+    const result = await realProductWrites.createProductWithInitialStock({ DB }, body, required, maxImages, { ...approval, row: pendingRow })
+    state.inserted.push(...raw.prepare('SELECT * FROM products').all())
+    state.synced.push(raw.prepare('SELECT image_path FROM product_images WHERE product_id=? ORDER BY sort_order').all(result.id).map(row => row.image_path))
+    assert.equal(raw.prepare('SELECT status FROM pending_actions WHERE id=?').get(pendingRow.id).status, 'approved')
+    assert.equal(raw.prepare('SELECT COUNT(*) n FROM product_batches WHERE variant_product_id=?').get(result.id).n, 1)
+    return result
+  } finally { raw.close() }
+}
+
 function loadReviewApply(state, updateChanges = 1) {
   const db = {
     prepare(sql) {
@@ -115,7 +160,7 @@ function loadReviewApply(state, updateChanges = 1) {
   }
   const productWrites = {
     readProductMoneyPlan: realProductWrites.readProductMoneyPlan,
-    insertRow: async (_env, _table, body) => { state.inserted.push({ ...body }); return 77 },
+    createProductWithInitialStock: async (_env, body, required, maxImages, approval) => runNativeCreate(state, body, required, maxImages, approval),
     updateRow: async (_env, _table, _id, body) => { state.updated.push({ ...body }); return updateChanges },
     defaultBranchId: async () => 1,
     syncProductImageGallery: async (_env, _id, gallery) => { state.synced.push([...gallery]); return [...gallery] },
