@@ -23,9 +23,9 @@ async function signIn(page: Page, actor: number, username: string, language = 'e
     await expect(page.getByRole('button', { name: km.login, exact: true })).toBeVisible()
   }
   await page.locator('#login-username').fill(username)
-  await page.locator('#login-password').fill('e2e-password')
+  await page.locator('#login-password').fill('admin123')
   await expect(page.locator('#login-username')).toHaveValue(username)
-  await expect(page.locator('#login-password')).toHaveValue('e2e-password')
+  await expect(page.locator('#login-password')).toHaveValue('admin123')
   const login = page.waitForResponse(r => new URL(r.url()).pathname === '/api/auth/login' && r.request().method() === 'POST')
   await page.getByRole('button', { name: language === 'km' ? km.login : 'Login', exact: true }).click()
   expect((await login).status()).toBe(200)

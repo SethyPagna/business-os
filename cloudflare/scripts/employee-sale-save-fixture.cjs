@@ -15,7 +15,7 @@ const port = Number(process.env.EMPLOYEE_SAVE_PORT || 4349)
 const origin = `http://127.0.0.1:${port}`
 const dist = path.resolve(process.env.EMPLOYEE_SAVE_DIST || path.join(repo, 'frontend/dist'))
 const evidencePath = process.env.EMPLOYEE_SAVE_SERVER_RECEIPT
-const password = 'e2e-password'
+const password = 'admin123'
 const actors = [
   { id: 901, username: 'e2e_admin', code: 'admin', permissions: { all: true } },
   { id: 911, username: 'e2e_employee_add', code: 'employee', permissions: { sales: true, 'sales:add_items': true, 'sales:amend': false, pos: false, products: false, product_cost_view: false, product_cost_edit: false } },
