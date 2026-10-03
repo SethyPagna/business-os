@@ -221,6 +221,9 @@ type AddProductCandidate = SaleAddCandidate
 // api/salesTransport.ts's SaleAmendmentRequest -- one shape, so the button and
 // the request cannot drift.
 interface SaleAmendmentRequest {
+  client_request_id?: string
+  expected_updated_at?: string
+  expected_exchange_rate?: number
   expected_recorded_line_total_usd?: number
   expected_header_quote?: SaleMutationHeaderQuote
   pricing_quote?: { gross_usd: number; product_discount_usd: number; manual_discount_usd: number; total_usd: number; total_khr: number }
@@ -242,6 +245,15 @@ interface SaleAmendmentRequest {
   delivery_contact_id?: number
   replacement?: { product_id: number; quantity: number; applied_price_usd?: number; branch_id?: number | null } & Partial<ReturnType<typeof stagedLinePricingIntent>>
   notes?: string
+}
+
+type SaleLineDraft = {
+  detail: string
+  actor: string
+  scope: ReturnType<typeof captureActorReadScope>
+  saleId: string
+  expectedUpdatedAt: string
+  exchangeRate: number
 }
 
 type DeliveryContactOption = {
@@ -319,6 +331,8 @@ interface SaleDetailModalProps {
   sale?: SaleDetail | null
   settings?: unknown
   onClose: () => void
+  lineRefreshRequired?: boolean
+  onRefreshLineReview?: () => unknown
   pendingStatus?: boolean
   statusRecoveryOwner?: SyncProblemPresentationOwner | null
   onRetryStatus?: () => Promise<void>
@@ -398,6 +412,8 @@ export default function SaleDetailModal({
   sale,
   settings,
   onClose,
+  lineRefreshRequired = false,
+  onRefreshLineReview,
   pendingStatus = false,
   statusRecoveryOwner,
   onRetryStatus,
@@ -529,7 +545,10 @@ export default function SaleDetailModal({
   const [addLines, setAddLines] = useState<StagedAddLine[]>([])
   const [addSaving, setAddSaving] = useState(false)
   const [addConfirmOpen, setAddConfirmOpen] = useState(false)
-  const [addReviewedHeader, setAddReviewedHeader] = useState<SaleMutationHeaderQuote | null>(null)
+  const [addReview, setAddReview] = useState<{ draft: SaleLineDraft; body: Record<string, unknown>; lines: StagedAddLine[]; subtotalUsd: number } | null>(null)
+  const addReviewedHeader = addReview?.body.expected_header_quote as SaleMutationHeaderQuote | undefined
+  const addDraftRef = useRef<SaleLineDraft | null>(null)
+  const amendDraftRef = useRef<SaleLineDraft | null>(null)
   // ONE step, and it is the POS's. WHICH row of the family, at WHICH branch,
   // with WHICH received date is the shared option sheet's question on every
   // surface (components/shared/ProductOptionSheet.tsx mounts the POS's own
@@ -632,7 +651,7 @@ export default function SaleDetailModal({
   const [amendDiscountText, setAmendDiscountText] = useState('')
   const [amendDiscountType, setAmendDiscountType] = useState<'percent' | 'fixed' | null>(null)
   const [amendSaving, setAmendSaving] = useState(false)
-  const [amendConfirm, setAmendConfirm] = useState<{ request: SaleAmendmentRequest; title: string; summary: string } | null>(null)
+  const [amendConfirm, setAmendConfirm] = useState<{ request: SaleAmendmentRequest; draft: SaleLineDraft; title: string; summary: string } | null>(null)
   // The delivery fee editor: the CORRECTED value, not a delta. A cashier
   // reading "$1.50" and typing what it should be cannot get the arithmetic
   // wrong; the ledger derives the "+$0.50" the owner asked to see.
@@ -696,6 +715,11 @@ export default function SaleDetailModal({
     settlementRequestIdRef.current = createSettlementRequestId()
     addRequestIdRef.current = createSettlementRequestId()
     amendRequestIdRef.current = createSettlementRequestId()
+    addDraftRef.current = null
+    amendDraftRef.current = null
+    setAddReview(null)
+    setAddConfirmOpen(false)
+    setAmendConfirm(null)
     setMutationExchangeRate(Number(sale?.exchange_rate))
     setAddMutationError('')
     setAmendMutationError('')
@@ -855,6 +879,7 @@ export default function SaleDetailModal({
     if (!line) return
     setAddQuery('')
     setAddCandidates([])
+    if (!addLines.length) addDraftRef.current = captureLineDraft()
     setAddLines((current) => mergeStagedAddLine(current, line))
   }
   // If the tracking-index lookup is unavailable, treat every row currently in
@@ -1019,20 +1044,36 @@ export default function SaleDetailModal({
     } catch { setLineRecoveryError(t('money_checkout_recovery_required')) }
   }, [lineMutationActor, detailScope])
 
-  const submitAmendment = async (request: SaleAmendmentRequest): Promise<void> => {
-    if (!onAmend || !sale) return
+  const captureLineDraft = (): SaleLineDraft | null => {
+    const expectedUpdatedAt = typeof sale?.updated_at === 'string' ? sale.updated_at : ''
+    if (lineRefreshRequired || !sale?.id || !expectedUpdatedAt || !(savedExchangeRate > 0) || !lineMutationActor) return null
+    return { detail: detailScope, actor: lineMutationActor, scope: captureActorReadScope('sale-line-review'), saleId: String(sale.id), expectedUpdatedAt, exchangeRate: savedExchangeRate }
+  }
+
+  const lineDraftOwned = (draft: SaleLineDraft | null): draft is SaleLineDraft => !lineRefreshRequired && !!draft
+    && draft.detail === detailScope && draft.actor === lineMutationActor && draft.saleId === String(sale?.id)
+    && isActorReadScopeCurrent(draft.scope)
+
+  const lineDraftCurrent = (draft: SaleLineDraft | null): draft is SaleLineDraft => lineDraftOwned(draft)
+    && draft.expectedUpdatedAt === sale?.updated_at && draft.exchangeRate === savedExchangeRate
+
+  const lineDraftConflict = () => t('write_conflict_older_version').replace('{entityLower}', t('sale') || 'sale')
+
+  const stageAmendReview = (review: { request: SaleAmendmentRequest; title: string; summary: string }, draft = amendDraftRef.current): void => {
+    if (!lineDraftCurrent(draft)) { setAmendMutationError(lineDraftConflict()); return }
+    setAmendConfirm({ ...review, draft, request: structuredClone({ ...review.request,
+      money_precision_version: 1, client_request_id: amendRequestIdRef.current,
+      expected_exchange_rate: draft.exchangeRate, expected_updated_at: draft.expectedUpdatedAt,
+    }) })
+  }
+
+  const submitAmendment = async (review = amendConfirm): Promise<void> => {
+    if (!onAmend || !sale || !review || !lineDraftOwned(review.draft)) return
     const requestScope = detailScope
     setAmendSaving(true)
     try {
       moneyCapability.assertReady()
-      if (!(savedExchangeRate > 0)) throw new Error('money_precision_unavailable')
-      const result = await executeLineMutation('sale-amendment', {
-        ...request,
-        money_precision_version: 1,
-        client_request_id: amendRequestIdRef.current,
-        expected_exchange_rate: savedExchangeRate,
-        expected_updated_at: settlementSession.expectedUpdatedAt,
-      })
+      const result = await executeLineMutation('sale-amendment', { ...review.request })
       if (!detailAliveRef.current || detailScopeRef.current !== requestScope) return
       const changedRate = result && typeof result === 'object' ? Number((result as { exchangeRateChanged?: unknown }).exchangeRateChanged) : NaN
       const mutationError = result && typeof result === 'object' ? String((result as { mutationError?: unknown }).mutationError || '') : ''
@@ -1067,6 +1108,7 @@ export default function SaleDetailModal({
 
   /** Open the amend controls on one line, prefilled with its current quantity. */
   const startAmendLine = (lineId: number, currentQuantity: number, currentBasePrice: number, currentDiscountType: 'percent' | 'fixed' | null, currentDiscountValue: number): void => {
+    amendDraftRef.current = captureLineDraft()
     setAmendLineId(lineId)
     setReplaceLineId(null)
     setAmendQtyText(String(currentQuantity))
@@ -1093,7 +1135,7 @@ export default function SaleDetailModal({
       if (!preview) { setAmendMutationError(translateOr('amend_no_change', 'Enter a new quantity, price, or discount.')); return }
       amendRequestIdRef.current = createSettlementRequestId()
       setAmendMutationError('')
-      setAmendConfirm({
+      stageAmendReview({
         request: { ...preview.request, expected_header_quote: headerQuote(preview.subtotalUsd) },
         title: translateOr('amend_line_update_title', 'Update this item?', 'ធ្វើបច្ចុប្បន្នភាពទំនិញនេះ?'),
         summary: `${preview.pricingBasis === 'recorded' ? `${translateOr('sale_recorded_pricing', 'Recorded pricing', 'តម្លៃដែលបានកត់ត្រា')} · ` : ''}${name}: ${currentQuantity} → ${preview.quantity} · ${fmtUSD(currentBasePrice)} → ${fmtUSD(preview.basePriceUsd)} · ${translateOr('discount', 'Discount', 'បញ្ចុះតម្លៃ')} ${fmtUSD(currentManualDiscount)} → ${fmtUSD(preview.manualDiscountUsd)} · ${translateOr('total', 'Total', 'សរុប')} ${fmtUSD(preview.lineTotalUsd)}${preview.recordedTotalDerived ? ` · ${translateOr('sale_recorded_unit_fallback', 'Line total derived from the recorded unit price and quantity.', 'សរុបបន្ទាត់គណនាពីតម្លៃឯកតា និងបរិមាណដែលបានកត់ត្រា។')}` : ''}`,
@@ -1110,11 +1152,11 @@ export default function SaleDetailModal({
     catch { setAmendMutationError(t('money_precision_unavailable')); return }
     amendRequestIdRef.current = createSettlementRequestId()
     setAmendMutationError('')
-    setAmendConfirm({
+    stageAmendReview({
       request: { kind: 'line_removed', sale_item_id: lineId, expected_header_quote: expectedHeader, ...(removal.recordedTotalDerived ? { expected_recorded_line_total_usd: removal.expectedRecordedLineTotal } : {}) },
       title: translateOr('amend_remove_title', 'Take this off the sale?', 'ដកចេញពីការលក់នេះ?'),
       summary: `${name} × ${currentQuantity}${removal.recordedTotalDerived ? ` · ${translateOr('sale_recorded_unit_fallback', 'Line total derived from the recorded unit price and quantity.', 'សរុបបន្ទាត់គណនាពីតម្លៃឯកតា និងបរិមាណដែលបានកត់ត្រា។')}` : ''}`,
-    })
+    }, captureLineDraft())
   }
 
   /**
@@ -1149,7 +1191,7 @@ export default function SaleDetailModal({
     setAddCandidates([])
     amendRequestIdRef.current = createSettlementRequestId()
     setAmendMutationError('')
-    setAmendConfirm({
+    stageAmendReview({
       request: {
         kind: 'line_replaced',
         expected_header_quote: replacementHeader,
@@ -1201,7 +1243,7 @@ export default function SaleDetailModal({
     catch { setAmendMutationError(t('money_precision_unavailable')); return }
     amendRequestIdRef.current = createSettlementRequestId()
     setAmendMutationError('')
-    setAmendConfirm({
+    stageAmendReview({
       request: { kind: 'delivery_fee_changed', delivery_fee_usd: next, delivery_fee_paid_by: feePayer, expected_header_quote: expectedHeader },
       title: translateOr('amend_fee_title', 'Correct the delivery fee?', 'កែថ្លៃដឹកជញ្ជូន?'),
       // The payer is named in the summary only when it actually moves, so a
@@ -1229,7 +1271,7 @@ export default function SaleDetailModal({
     }
     amendRequestIdRef.current = createSettlementRequestId()
     setAmendMutationError('')
-    setAmendConfirm({
+    stageAmendReview({
       request: { kind: 'delivery_actual_cost_changed', delivery_actual_cost_usd: next },
       title: translateOr('amend_actual_cost_title', 'Correct the actual delivery cost?', 'កែថ្លៃដឹកដើម?'),
       summary: `${currentCostUsd === null ? translateOr('not_recorded', 'Not recorded', 'មិនទាន់កត់ត្រា') : fmtUSD(currentCostUsd)} → ${next === null ? translateOr('not_recorded', 'Not recorded', 'មិនទាន់កត់ត្រា') : fmtUSD(next)}`,
@@ -1257,7 +1299,7 @@ export default function SaleDetailModal({
     catch { setAmendMutationError(t('money_precision_unavailable')); return }
     amendRequestIdRef.current = createSettlementRequestId()
     setAmendMutationError('')
-    setAmendConfirm({
+    stageAmendReview({
       request: {
         kind: 'delivery_added',
         expected_header_quote: expectedHeader,
@@ -1524,18 +1566,17 @@ export default function SaleDetailModal({
     line.stockQuantity <= 0 || line.quantity > line.stockQuantity
   ))
 
-  const submitAddItems = async (): Promise<void> => {
-    if (!onAddItems || !addLines.length || addHasStockError) return
-    const requestScope = detailScope
-    setAddSaving(true)
+  const stageAddReview = (): void => {
+    const draft = addDraftRef.current
+    if (!lineDraftCurrent(draft)) { setAddMutationError(lineDraftConflict()); return }
+    if (!addHeaderQuote) { setAddMutationError(t('money_precision_unavailable')); return }
+    addRequestIdRef.current = createSettlementRequestId()
+    setAddMutationError('')
     try {
-      moneyCapability.assertReady()
-      if (!(savedExchangeRate > 0)) throw new Error('money_precision_unavailable')
-      if (!addReviewedHeader) throw new Error('money_precision_unavailable')
-      const result = await executeLineMutation('sale-add-items', { items: addLines.map((line) => ({
+      const body = { items: addLines.map((line) => ({
         product_id: line.productId,
         quantity: line.quantity,
-        ...stagedLinePricingIntent(line, savedExchangeRate),
+        ...stagedLinePricingIntent(line, draft.exchangeRate),
         // The shelf the sheet resolved. Without it the Worker inherited the
         // sale's own branch, which is not necessarily the branch whose
         // quantity -- and whose lots -- the operator was reading.
@@ -1546,11 +1587,23 @@ export default function SaleDetailModal({
         ...(line.unlottedStock ? { unlotted_stock: true } : {}),
       })), notes: '',
         money_precision_version: 1,
-        expected_header_quote: addReviewedHeader,
+        expected_header_quote: structuredClone(addHeaderQuote),
         client_request_id: addRequestIdRef.current,
-        expected_exchange_rate: savedExchangeRate,
-        expected_updated_at: settlementSession.expectedUpdatedAt,
-      })
+        expected_exchange_rate: draft.exchangeRate,
+        expected_updated_at: draft.expectedUpdatedAt,
+      }
+      setAddReview({ draft, body: structuredClone(body), lines: structuredClone(addLines), subtotalUsd: addedSubtotalUsd })
+      setAddConfirmOpen(true)
+    } catch { setAddMutationError(t('money_precision_unavailable')) }
+  }
+
+  const submitAddItems = async (): Promise<void> => {
+    if (!onAddItems || !addReview || !lineDraftOwned(addReview.draft)) return
+    const requestScope = detailScope
+    setAddSaving(true)
+    try {
+      moneyCapability.assertReady()
+      const result = await executeLineMutation('sale-add-items', addReview.body)
       if (!detailAliveRef.current || detailScopeRef.current !== requestScope) return
       const changedRate = result && typeof result === 'object' ? Number((result as { exchangeRateChanged?: unknown }).exchangeRateChanged) : NaN
       const mutationError = result && typeof result === 'object' ? String((result as { mutationError?: unknown }).mutationError || '') : ''
@@ -1755,6 +1808,10 @@ export default function SaleDetailModal({
             {lineHeaderConflict?.actor === lineMutationActor ? <button type="button" disabled={lineRecoveryBusy} className="ml-2 mt-2 rounded border px-3 py-2 disabled:opacity-50" onClick={() => { void reviewLineHeader() }}>{translateOr('sale_line_review_updated_total', 'Review the updated total', 'ពិនិត្យសរុបដែលបានធ្វើបច្ចុប្បន្នភាព')}</button> : null}
           </div>
         ) : null}
+        {lineRefreshRequired ? <div role="alert" className="mx-4 my-2 rounded border p-2 text-sm">
+          <span>{t('sale_amended')}</span>
+          <button type="button" className="ml-2 underline" onClick={() => { void onRefreshLineReview?.() }}>{t('write_conflict_reload_latest')}</button>
+        </div> : null}
         <div inert={pendingLineMutation?.actor === lineMutationActor || !!lineRecoveryError} className="modal-scroll space-y-4 p-4">
           <div className="grid gap-4 md:grid-cols-2">
             <SectionCard title={t('sale') || 'Sale'}>
@@ -1857,6 +1914,7 @@ export default function SaleDetailModal({
                         setAmendMutationError('')
                         setDeliveryAdding((open) => {
                           if (!open) {
+                            amendDraftRef.current = captureLineDraft()
                             setFeeText('0')
                             setActualCostText('')
                             setDeliverySearch('')
@@ -1924,7 +1982,7 @@ export default function SaleDetailModal({
                           <button type="button" disabled={amendSaving} onClick={() => setActualCostEditing(false)} className="min-h-10 shrink-0 rounded px-1 text-xs">{t('cancel') || 'Cancel'}</button>
                       </> : <>
                         <span className="text-sm tabular-nums">{actualCostUsd === null ? translateOr('not_recorded', 'Not recorded', 'មិនទាន់កត់ត្រា') : fmtUSD(actualCostUsd)}</span>
-                        {canAmendDeliveryMoney ? <button type="button" disabled={amendSaving} onClick={() => { setActualCostText(actualCostUsd === null ? '' : String(actualCostUsd)); setActualCostEditing(true); setAmendMutationError('') }} className="min-h-10 shrink-0 rounded px-1 text-xs font-semibold text-blue-700 dark:text-blue-300">{t('edit') || 'Edit'}</button> : null}
+                        {canAmendDeliveryMoney ? <button type="button" disabled={amendSaving} onClick={() => { amendDraftRef.current = captureLineDraft(); setActualCostText(actualCostUsd === null ? '' : String(actualCostUsd)); setActualCostEditing(true); setAmendMutationError('') }} className="min-h-10 shrink-0 rounded px-1 text-xs font-semibold text-blue-700 dark:text-blue-300">{t('edit') || 'Edit'}</button> : null}
                       </>}
                     </div>
                     {amendMutationError && actualCostEditing && !amendConfirm ? <p role="alert" className="text-xs text-red-600">{amendMutationError}</p> : null}
@@ -2311,9 +2369,9 @@ export default function SaleDetailModal({
                         <>
                           {translateOr('delivery_free', 'Free', 'ឥតគិតថ្លៃ')}{' '}
                           <span className="font-normal text-gray-400 line-through">{fmtUSD(deliveryFeeUsd)}</span>
-                          {canAmendDeliveryMoney ? <button type="button" disabled={amendSaving} onClick={() => { setFeeText(String(deliveryFeeUsd)); setFeePayer(deliveryPaidByStore ? 'store' : 'customer'); setFeeEditing(true); setAmendMutationError('') }} className="ml-1 rounded px-1 py-0.5 text-[11px] font-semibold text-blue-700 dark:text-blue-300">{t('edit') || 'Edit'}</button> : null}
+                          {canAmendDeliveryMoney ? <button type="button" disabled={amendSaving} onClick={() => { amendDraftRef.current = captureLineDraft(); setFeeText(String(deliveryFeeUsd)); setFeePayer(deliveryPaidByStore ? 'store' : 'customer'); setFeeEditing(true); setAmendMutationError('') }} className="ml-1 rounded px-1 py-0.5 text-[11px] font-semibold text-blue-700 dark:text-blue-300">{t('edit') || 'Edit'}</button> : null}
                         </>
-                      ) : <span className="inline-flex items-center gap-1">{fmtUSD(deliveryFeeUsd)}{canAmendDeliveryMoney ? <button type="button" disabled={amendSaving} onClick={() => { setFeeText(String(deliveryFeeUsd)); setFeePayer(deliveryPaidByStore ? 'store' : 'customer'); setFeeEditing(true); setAmendMutationError('') }} className="rounded px-1 py-0.5 text-[11px] font-semibold text-blue-700 dark:text-blue-300">{t('edit') || 'Edit'}</button> : null}</span>}
+                      ) : <span className="inline-flex items-center gap-1">{fmtUSD(deliveryFeeUsd)}{canAmendDeliveryMoney ? <button type="button" disabled={amendSaving} onClick={() => { amendDraftRef.current = captureLineDraft(); setFeeText(String(deliveryFeeUsd)); setFeePayer(deliveryPaidByStore ? 'store' : 'customer'); setFeeEditing(true); setAmendMutationError('') }} className="rounded px-1 py-0.5 text-[11px] font-semibold text-blue-700 dark:text-blue-300">{t('edit') || 'Edit'}</button> : null}</span>}
                       sub={deliveryFeeKhr > 0
                         ? (deliveryPaidByStore ? <span className="line-through">{fmtKHR(deliveryFeeKhr)}</span> : fmtKHR(deliveryFeeKhr))
                         : null}
@@ -2665,13 +2723,7 @@ export default function SaleDetailModal({
                     type="button"
                     className="btn-primary mt-3 w-full text-xs"
                     disabled={addSaving || addLines.length === 0 || addHasStockError}
-                    onClick={() => {
-                      addRequestIdRef.current = createSettlementRequestId()
-                      setAddMutationError('')
-                      if (!addHeaderQuote) { setAddMutationError(t('money_precision_unavailable')); return }
-                      setAddReviewedHeader(structuredClone(addHeaderQuote))
-                      setAddConfirmOpen(true)
-                    }}
+                    onClick={stageAddReview}
                   >
                     {addSaving ? (t('loading') || 'Saving') : (translateOr('add_items_submit', 'Add to sale', 'បន្ថែមទៅការលក់'))}
                   </button>
@@ -2988,13 +3040,13 @@ export default function SaleDetailModal({
               title={translateOr('add_items_to_sale', 'Add items to this sale', 'បន្ថែមទំនិញទៅការលក់នេះ')}
               message={sale.receipt_number ? `#${sale.receipt_number}` : undefined}
               items={[
-                ...addLines.map((line): ConfirmReviewItem => ({
+                ...(addReview?.lines || []).map((line): ConfirmReviewItem => ({
                   label: line.name,
                   value: `${line.quantity} × ${fmtUSD(line.unitPriceUsd)} = ${fmtUSD(multiplyMoney4(line.unitPriceUsd, line.quantity))}`,
                 })),
                 {
                   label: translateOr('add_items_added_subtotal', 'Added subtotal', 'សរុបរងបន្ថែម'),
-                  value: fmtUSD(addedSubtotalUsd),
+                  value: fmtUSD(addReview?.subtotalUsd || 0),
                 },
                 {
                   label: t('total') || 'Total',
@@ -3008,7 +3060,7 @@ export default function SaleDetailModal({
                 },
                 {
                   label: t('exchange_rate') || 'Exchange rate',
-                  value: `1 USD = ${mutationExchangeRate.toLocaleString(undefined, { maximumFractionDigits: 4 })} KHR`,
+                  value: `1 USD = ${Number(addReview?.body.expected_exchange_rate).toLocaleString(undefined, { maximumFractionDigits: 4 })} KHR`,
                 },
                 ...(addMutationError ? [{ label: t('error') || 'Error', value: addMutationError }] : []),
               ]}
@@ -3051,14 +3103,14 @@ export default function SaleDetailModal({
                 },
                 {
                   label: t('exchange_rate') || 'Exchange rate',
-                  value: `1 USD = ${mutationExchangeRate.toLocaleString(undefined, { maximumFractionDigits: 4 })} KHR`,
+                  value: `1 USD = ${Number(amendConfirm.request.expected_exchange_rate).toLocaleString(undefined, { maximumFractionDigits: 4 })} KHR`,
                 },
                 ...(amendMutationError ? [{ label: t('error') || 'Error', value: amendMutationError }] : []),
               ]}
               note={translateOr('amend_confirm_note', 'The receipt keeps its number and prints the new total. This change stays in the sale history.', 'វិក្កយបត្ររក្សាលេខដដែល ហើយបោះពុម្ពសរុបថ្មី។ ការកែប្រែនេះនៅក្នុងប្រវត្តិការលក់។')}
               confirmLabel={translateOr('amend_confirm', 'Apply change', 'អនុវត្តការកែប្រែ')}
               working={amendSaving}
-              onConfirm={() => submitAmendment(amendConfirm.request)}
+              onConfirm={() => submitAmendment(amendConfirm)}
               onClose={() => { if (!amendSaving) setAmendConfirm(null) }}
             />
           ) : null}
