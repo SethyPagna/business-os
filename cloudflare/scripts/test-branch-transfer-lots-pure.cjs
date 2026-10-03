@@ -52,6 +52,7 @@ const productBatches = loadModule('lib/productBatches.ts', (id) => {
   if (id === './batchCode') return batchCode
   if (id === './sqlBinding') return sqlBinding
   if (id === './moneyPrecision') return moneyPrecision
+  if (id === './receivingBranch') return loadModule('lib/receivingBranch.ts', require)
   return require(id)
 })
 const roles = loadModule('lib/branchRoles.ts', require)

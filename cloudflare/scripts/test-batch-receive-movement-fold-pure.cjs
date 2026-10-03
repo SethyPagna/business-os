@@ -80,6 +80,7 @@ const productBatches = loadReal('lib/productBatches.ts', {
   './batchCode': batchCode,
   './moneyPrecision': moneyPrecision,
   './sqlBinding': sqlBinding,
+  './receivingBranch': loadReal('lib/receivingBranch.ts'),
 })
 
 // Statement-execution counter, same shape as the audit round-trip test's:

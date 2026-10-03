@@ -3,6 +3,17 @@ const fs = require('node:fs')
 const path = require('node:path')
 const ts = require('typescript')
 const { Hono } = require('hono')
+const { DatabaseSync } = require('node:sqlite')
+const controlDb = new DatabaseSync(':memory:')
+controlDb.limits.exprDepth = 100
+controlDb.limits.variableNumber = 100
+controlDb.exec('CREATE TABLE system_flags (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT)')
+let maintenanceReads = 0
+const env = { DB: { prepare(sql) {
+  assert.equal(sql, 'SELECT value FROM system_flags WHERE key = ?')
+  const statement = controlDb.prepare(sql)
+  return { bind(key) { return { async first() { maintenanceReads++; return statement.get(key) ?? null } } } }
+} } }
 const root = path.resolve(__dirname, '../src')
 let user, opens = 0
 const modules = new Map()
@@ -43,7 +54,7 @@ app.onError((e, c) => c.json({ error: e.message }, e.message === 'D1 tripwire' ?
 app.route('/imports', load(path.join(root, 'routes/importJobs.ts')).default)
 app.route('/backups', load(path.join(root, 'routes/backups.ts')).default)
 app.route('/returns', load(path.join(root, 'routes/returns.ts')).default)
-async function post(url, body) { return app.request(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, {}) }
+async function post(url, body) { return app.request(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, env) }
 async function main() {
   user = actor({ returns: true, product_cost_edit: true })
   opens = 0
@@ -68,6 +79,16 @@ async function main() {
       else assert.notEqual(response.status, 403, `${type} explicit grant/admin permitted`)
     }
   }
+  assert.equal(maintenanceReads, 12)
+  assert.equal(controlDb.prepare('SELECT COUNT(*) AS n FROM system_flags').get().n, 0)
+  controlDb.prepare('INSERT INTO system_flags (key, value) VALUES (?, ?)').run('maintenance', '{')
+  user = actor({ all: true })
+  opens = 0
+  const held = await post('/backups', { type: 'export-folder' })
+  assert.equal(held.status, 503)
+  assert.equal((await held.json()).code, 'maintenance_active')
+  assert.equal(opens, 0)
+  assert.equal(maintenanceReads, 13)
   console.log('PASS residual cost permission matrix: defaults, independent view/edit, imports, backups, canonical return costs, supplier aliases, delivery distinction')
 }
 main().catch(e => { console.error(e); process.exitCode = 1 })
