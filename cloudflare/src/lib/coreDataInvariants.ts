@@ -394,6 +394,10 @@ export async function ensureCoreDataInvariants(env: Env): Promise<CoreDataInvari
       FROM products p
       WHERE p.is_active = 1
         AND p.id NOT IN (SELECT product_id FROM branch_stock)
+        AND NOT EXISTS (SELECT 1 FROM system_flags WHERE key = 'maintenance')
+        AND @branchId = (
+          SELECT id FROM branches WHERE is_active = 1 ORDER BY is_default DESC, id ASC LIMIT 1
+        )
     `).run({ branchId: activeDefaultBranch.id })
   }
 
