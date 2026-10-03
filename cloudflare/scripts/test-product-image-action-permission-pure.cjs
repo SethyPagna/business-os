@@ -8,6 +8,8 @@ const Module = require('node:module')
 const path = require('node:path')
 const ts = require('typescript')
 const { Hono } = require('hono')
+const { openDb } = require('./harness/d1compat.cjs')
+const { loadAll } = require('./harness/load_migrations.cjs')
 
 const cloudflareRoot = path.join(__dirname, '..')
 const srcRoot = path.join(cloudflareRoot, 'src')
@@ -45,6 +47,10 @@ const acquisitionCostAccess = loadTs('lib/acquisitionCostAccess.ts', { './permis
 const moneyPrecision = loadTs('lib/moneyPrecision.ts')
 const productMerge = loadTs('lib/productMerge.ts', { './moneyPrecision': moneyPrecision })
 const loadProductWrites = db => loadTs('lib/productWrites.ts', {
+  './receivingBranch': loadTs('lib/receivingBranch.ts'),
+  './businessMaintenanceGuard': loadTs('lib/businessMaintenanceGuard.ts'),
+  './pendingActions': loadTs('lib/pendingActions.ts', { './db': db }),
+  './audit': loadTs('lib/audit.ts', { './db': db }),
   './moneyPrecision': moneyPrecision,
   './catalogCostRecompute': loadTs('lib/catalogCostRecompute.ts', { './moneyPrecision': moneyPrecision }),
   './db': db,
@@ -122,6 +128,18 @@ function loadProductsRoute(state) {
     return realProductWrites.cleanPayload(body, new Set(Object.keys(body)))
   }
   const productWrites = {
+    productCreateDestination: realProductWrites.productCreateDestination,
+    productCreateErrorResponse: realProductWrites.productCreateErrorResponse,
+    createProductWithInitialStock: async (env, body, required, maxImages) => {
+      const backing = openDb(loadAll())
+      backing.batchOnce = items => backing.batch(items)
+      try {
+        const actual = loadProductWrites({ getDb: () => backing })
+        const result = await actual.createProductWithInitialStock(env, body, required, maxImages)
+        state.inserted.push(persistableBody(body))
+        return result
+      } finally { backing.db.close() }
+    },
     prepareProductMoneyWrite: realProductWrites.prepareProductMoneyWrite,
     ProductMoneyWriteError: realProductWrites.ProductMoneyWriteError,
     readProductMoneyPlan: realProductWrites.readProductMoneyPlan,

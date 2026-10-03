@@ -30,6 +30,18 @@ function compileNamedFunctions(source, names) {
 }
 
 function loadProductWrites(db) {
+  const dependencies = new Map()
+  for (const name of ['receivingBranch', 'businessMaintenanceGuard', 'pendingActions', 'audit']) {
+    const mod = { exports: {} }
+    const output = ts.transpileModule(fs.readFileSync(path.join(libRoot, `${name}.ts`), 'utf8'), {
+      compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+    }).outputText
+    new Function('exports', 'require', 'module', output)(mod.exports, request => {
+      if (request === './db') return { getDb: () => db }
+      throw new Error(`Unexpected ${name} dependency: ${request}`)
+    }, mod)
+    dependencies.set(`./${name}`, mod.exports)
+  }
   const sourcePath = path.join(libRoot, 'productWrites.ts')
   const output = ts.transpileModule(fs.readFileSync(sourcePath, 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
@@ -37,6 +49,7 @@ function loadProductWrites(db) {
   }).outputText
   const originalLoad = Module._load
   Module._load = function patchedLoad(request, parent, isMain) {
+    if (dependencies.has(request)) return dependencies.get(request)
     if (request === './catalogCostRecompute') return catalogCostModule.exports
     if (['./moneyPrecision', '../lib/moneyPrecision', './moneyPrecision.ts', '../lib/moneyPrecision.ts'].includes(request)) return moneyPrecision
     if (request === './db') return { getDb: () => db }
