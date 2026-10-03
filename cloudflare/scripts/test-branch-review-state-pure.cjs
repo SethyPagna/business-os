@@ -84,14 +84,14 @@ function context(body, user = { id: 7, permissions: JSON.stringify({ branches: t
   return { env: {}, req: { param: () => '1', json: async () => body }, get: () => user,
     json: (value, status = 200) => ({ status, value }), executionCtx: { waitUntil: () => {} } }
 }
-function approvalHandler() {
+function approvalHandler(dependencies = {}) {
   const tree = sourceTree('lib/reviewApply.ts')
   const statement = tree.statements.find(node => ts.isExpressionStatement(node) && ts.isCallExpression(node.expression)
     && node.expression.expression.getText(tree) === 'registerApplier'
     && node.expression.arguments.slice(0, 3).map(arg => arg.text).join('/') === 'branches/update/branch')
   const permissionError = tree.statements.find(node => node.name?.text === 'ReviewRequesterPermissionError').getText(tree)
   return evaluate(`${permissionError}\nconst handler=${statement.expression.arguments[3].getText(tree)}`, {
-    ...writes, ...load('permissions'), ...load('conflictControl'), getDb: () => adapter(currentDb), audit: async () => {}, notify: async () => {},
+    ...writes, ...load('permissions'), ...load('conflictControl'), getDb: () => adapter(currentDb), audit: async () => {}, notify: async () => {}, ...dependencies,
   }, 'handler')
 }
 async function queuedBranch(db, body = { notes: 'approved' }) {
@@ -264,6 +264,77 @@ async function main() {
       assert.deepEqual(db.prepare('SELECT * FROM pending_actions').get(), saved)
     }
     db.close()
+  })
+  await check('old schema supports generic queues and direct edits, review readiness refreshes after migration', async () => {
+    currentDb = openDb(loadAll({ through: 222 })).db
+    const db = currentDb
+    db.exec("INSERT INTO branches(id,name,notes,is_active,is_default,updated_at) VALUES(1,'Shop','old schema',1,1,'same'),(2,'Warehouse','bulk',1,0,'same')")
+    const generic = await load('pendingActions').createPendingAction({}, { section: 'fees', actionType: 'delete', entityType: 'fee', payload: {} })
+    assert.ok(generic > 0)
+    const get = routeHandler('get', '/')
+    const legacy = (await get(context({}))).value.find(row => row.id === 1)
+    assert.equal(typeof legacy.edit_etag, 'string')
+    const put = routeHandler('put', '/:id')
+    const user = { id: 7, permissions: '{"branches":"review"}' }
+    const refused = await put(context({ notes: 'waiting', expectedEditEtag: legacy.edit_etag }, user))
+    assert.equal(refused.status, 409)
+    assert.equal(refused.value.code, 'branch_review_schema_required')
+    const direct = await put(context({ notes: 'direct', expectedEditEtag: legacy.edit_etag }))
+    assert.equal(direct.status, 200)
+    db.exec(fs.readFileSync(migrationPath, 'utf8'))
+    assert.equal((await put(context({ notes: 'stale schema', expectedEditEtag: direct.value.branch.edit_etag }, user))).status, 409)
+    const fresh = (await get(context({}))).value.find(row => row.id === 1)
+    assert.equal((await put(context({ notes: 'now queued', expectedEditEtag: fresh.edit_etag }, user))).status, 202)
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM pending_actions WHERE section='branches'").get().n, 1)
+    assert.equal(db.prepare('SELECT notes FROM branches WHERE id=1').get().notes, 'direct')
+    db.close()
+  })
+  await check('malformed or foreign baseline refuses and content state explicitly permits exact ABA', async () => {
+    const db = world()
+    const row = db.prepare('SELECT * FROM branches WHERE id=1').get()
+    const baseline = JSON.parse(writes.branchExpectedStateJson(row))
+    for (const invalid of [null, '{}', '[]', 'broken', JSON.stringify({ ...baseline, version: 2 }), JSON.stringify({ ...baseline, entity_id: 2 }), JSON.stringify({ ...baseline, state: { id: 1 } }), JSON.stringify({ ...baseline, state: [] })]) {
+      assert.throws(() => writes.assertBranchExpectedState(row, invalid), error => error.code === 'branch_edit_conflict')
+    }
+    const token = await writes.branchEditEtag(row)
+    db.exec("UPDATE branches SET notes='B' WHERE id=1; UPDATE branches SET notes='before' WHERE id=1")
+    await writes.assertBranchEditEtag(db.prepare('SELECT * FROM branches WHERE id=1').get(), token)
+    db.close()
+  })
+  await check('full requester remains approvable and trailing pending failure rolls back metadata', async () => {
+    for (const fail of [false, true]) {
+      const db = world(); const row = await queuedBranch(db)
+      db.exec("UPDATE roles SET permissions='{\"branches\":true}' WHERE id=3")
+      if (fail) db.exec("CREATE TRIGGER refuse_pending_approval BEFORE UPDATE OF status ON pending_actions WHEN NEW.status='approved' BEGIN SELECT RAISE(ABORT,'fixture trailing refusal'); END")
+      if (fail) {
+        await assert.rejects(approvalHandler()({}, row, { id: 8, name: 'Reviewer' }), /fixture trailing refusal/)
+        assert.equal(db.prepare('SELECT notes FROM branches WHERE id=1').get().notes, 'before')
+        assert.deepEqual(db.prepare('SELECT * FROM pending_actions').get(), row)
+      } else {
+        assert.equal((await approvalHandler()({}, row, { id: 8, name: 'Reviewer' })).pendingActionMarkedAtomically, true)
+        assert.equal(db.prepare('SELECT notes FROM branches WHERE id=1').get().notes, 'approved')
+      }
+      db.close()
+    }
+  })
+  await check('wrong-helper controls expose the stale direct and queued writes the regressions reject', async () => {
+    {
+      const db = world(); const row = db.prepare('SELECT * FROM branches WHERE id=1').get()
+      const token = await writes.branchEditEtag(row)
+      db.exec("UPDATE branches SET notes='later' WHERE id=1")
+      const unsafe = routeHandler('put', '/:id', { assertBranchEditEtag: async () => {} })
+      assert.equal((await unsafe(context({ notes: 'unsafe stale', expectedEditEtag: token }))).status, 200)
+      assert.equal(db.prepare('SELECT notes FROM branches WHERE id=1').get().notes, 'unsafe stale')
+      db.close()
+    }
+    {
+      const db = world(); const row = await queuedBranch(db)
+      db.exec("UPDATE branches SET notes='later' WHERE id=1")
+      const unsafe = approvalHandler({ assertBranchExpectedState: () => {} })
+      assert.equal((await unsafe({}, row, { id: 8, name: 'Reviewer' })).pendingActionMarkedAtomically, true)
+      assert.equal(db.prepare('SELECT notes FROM branches WHERE id=1').get().notes, 'approved')
+      db.close()
+    }
   })
   if (failures) process.exitCode = 1
 }
