@@ -115,8 +115,16 @@ function validateManifest(row: BranchCutoverJournalRow, text: string): Record<st
   requireState((value.version === 1 || value.version === 2) && value.sourceBranchId === row.source_branch_id && value.targetBranchId === row.target_branch_id)
   if (value.version === 2) {
     const coverage = value.coverage as Record<string, unknown>
-    requireState(coverage && coverage.kind === 'scalar-reference-capture' && coverage.scalarReferences === 32 && coverage.historicalReplayCertified === false
+    requireState(coverage && Object.keys(coverage).sort().join(',') === 'historicalReplayCertified,kind,registryDigest,scalarReferences,schemaDigest,unclassifiedFamilies'
+      && coverage.kind === 'scalar-reference-capture' && coverage.scalarReferences === 32 && coverage.historicalReplayCertified === false
       && digestPattern.test(String(coverage.registryDigest)) && digestPattern.test(String(coverage.schemaDigest)) && Array.isArray(coverage.unclassifiedFamilies))
+    const families = coverage.unclassifiedFamilies as Array<Record<string, unknown>>
+    requireState(families.length <= 4 && new Set(families.map(item => item?.family)).size === families.length)
+    for (const item of families) requireState(item && Object.keys(item).sort().join(',') === 'family,rows,support'
+      && ['action_history', 'undo_snapshots', 'pending_actions', 'stock_session_operations'].includes(String(item.family))
+      && integer(item.rows, 1) && item.support === 'unclassified')
+    const intent = JSON.parse(row.intent_json)
+    requireState(intent.parentVersion === 1 && intent.registryDigest === coverage.registryDigest && intent.schemaDigest === coverage.schemaDigest)
   }
   requireState(value.capturedRecords === row.capture_records && value.captureDigest === row.capture_digest && value.anomalies === 0)
   requireState(integer(value.movingProducts) && value.movingProducts <= row.capture_records)

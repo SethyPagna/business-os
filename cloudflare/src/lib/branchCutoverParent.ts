@@ -5,14 +5,31 @@ import { assertTransferStatementsFit, type TransferInvocationBudget } from './tr
 import { beginBranchCutoverJournal, checkpointBranchCutoverJournal, finishBranchCutoverSnapshots, readBranchCutoverJournal,
   sealBranchCutoverManifest, type BranchCutoverJournalRow, type BranchCutoverOwnership } from './branchCutoverJournal'
 import { BRANCH_SCALAR_REFERENCES, BranchCutoverCapabilityError, captureRegistryDigest, captureSchemaGuard, cutoverAssert,
-  cutoverBytes, initialCaptureCursor, missingSnapshotGuards, parseCaptureCursor, readCutoverCapturePage, readCutoverCaptureSchema,
-  readUnclassifiedCutoverFamilies, type CaptureSchema, type CutoverIdentity, type CutoverStatement } from './branchCutoverCapture'
+  cutoverBytes, missingSnapshotGuards, parseCaptureCursor, readCutoverCapturePage, readCutoverCaptureSchema,
+  readUnclassifiedCutoverFamilies, unclassifiedFamilyGuards, type CaptureSchema, type CutoverIdentity, type CutoverStatement } from './branchCutoverCapture'
 
 type Principal = Pick<SessionUser, 'id' | 'organization_id' | 'is_active'>
 type ParentIntent = CutoverIdentity & { action: 'retire'; parentVersion: 1; registryDigest: string; schemaDigest: string }
 const actorSql = `SELECT u.id,u.username,u.name,u.organization_id,u.role_id,u.permissions,u.is_active,r.code AS role_code,r.permissions AS role_permissions
   FROM users u LEFT JOIN roles r ON r.id=u.role_id WHERE u.id=@actor AND u.deleted_at IS NULL`
-const emptyDigest = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'
+const unsupportedStockSql = `SELECT
+  EXISTS(SELECT 1 FROM damaged_stock_lots WHERE branch_id=@source AND quantity_remaining<>0) AS damaged,
+  EXISTS(SELECT 1 FROM rfid_tags WHERE branch_id=@source AND status='active') AS rfid,
+  EXISTS(SELECT 1 FROM branch_stock s LEFT JOIN products p ON p.id=s.product_id WHERE s.branch_id IN (@source,@target)
+    AND (s.quantity IS NULL OR s.quantity<0 OR s.quantity<>0 AND (p.id IS NULL OR p.is_active IS NOT 1))) AS stock,
+  EXISTS(SELECT 1 FROM branch_batch_stock s LEFT JOIN product_batches b ON b.id=s.batch_id LEFT JOIN products p ON p.id=b.variant_product_id
+    WHERE s.branch_id IN (@source,@target) AND (s.quantity IS NULL OR s.quantity<0 OR s.quantity<>0 AND (b.id IS NULL OR b.is_active IS NOT 1 OR p.id IS NULL OR p.is_active IS NOT 1))) AS lots,
+  EXISTS(SELECT 1 FROM branch_batch_stock s JOIN product_batches b ON b.id=s.batch_id WHERE s.branch_id IN (@source,@target)
+    GROUP BY s.branch_id,b.variant_product_id HAVING sum(s.quantity)>coalesce((SELECT quantity FROM branch_stock WHERE branch_id=s.branch_id AND product_id=b.variant_product_id),0)) AS lotExcess`
+async function stockCapabilities(db: D1Compat, identity: CutoverIdentity) {
+  const counts = await db.prepare(unsupportedStockSql).get<Record<string, number>>({ source: identity.sourceBranchId, target: identity.targetBranchId })
+  requireParent(counts)
+  return Object.entries(counts).filter(([, count]) => count !== 0).map(([detail]) => ({ code: 'unsupported_stock_state', detail }))
+}
+function stockGuard(identity: CutoverIdentity): CutoverStatement {
+  return cutoverAssert(`EXISTS(SELECT 1 FROM (${unsupportedStockSql}) WHERE damaged=0 AND rfid=0 AND stock=0 AND lots=0 AND lotExcess=0)`,
+    { source: identity.sourceBranchId, target: identity.targetBranchId })
+}
 export class BranchCutoverParentOutcomeUnknown extends Error {
   readonly code = 'branch_cutover_parent_outcome_unknown'
   readonly outcome = 'unknown'
@@ -22,11 +39,12 @@ function requireParent(condition: unknown): asserts condition { if (!condition) 
 function metered(db: D1Compat, budget: TransferInvocationBudget): D1Compat {
   requireParent(budget.extraAtomicStatements === 0)
   let attempts = 0; let batches = 0
+  const chargeRead = () => { assertTransferStatementsFit({ ...budget, remainingReads: budget.remainingReads + attempts }, 2); attempts += 2 }
   return new Proxy(db, { get(target, key, receiver) {
     if (key === 'prepare') return (sql: string) => {
       const prepared = target.prepare(sql)
-      return { get: async (params?: Record<string, unknown> | unknown[]) => { attempts += 2; assertTransferStatementsFit({ ...budget, remainingReads: budget.remainingReads + attempts }, 0); return prepared.get(params) },
-        all: async (params?: Record<string, unknown> | unknown[]) => { attempts += 2; assertTransferStatementsFit({ ...budget, remainingReads: budget.remainingReads + attempts }, 0); return prepared.all(params) } }
+      return { get: async (params?: Record<string, unknown> | unknown[]) => { chargeRead(); return prepared.get(params) },
+        all: async (params?: Record<string, unknown> | unknown[]) => { chargeRead(); return prepared.all(params) } }
     }
     if (key === 'batchOnce') return async (statements: CutoverStatement[]) => {
       requireParent(batches++ === 0)
@@ -52,7 +70,7 @@ async function branches(db: D1Compat, identity: CutoverIdentity): Promise<{ sour
   const source = rows.find(row => row.id === identity.sourceBranchId), target = rows.find(row => row.id === identity.targetBranchId)
   requireParent(source && target && source.is_active === 1 && target.is_active === 1
     && String(source.name).trim().toLowerCase() === 'shop' && String(target.name).trim().toLowerCase() === 'warehouse'
-    && (source.canonical_key === null || source.canonical_key === 'shop') && (target.canonical_key === null || target.canonical_key === 'warehouse'))
+    && source.canonical_key === 'shop' && target.canonical_key === 'warehouse' && source.role === 'shop' && target.role === 'warehouse')
   requireParent(cutoverBytes(JSON.stringify(source)) <= 16384 && cutoverBytes(JSON.stringify(target)) <= 16384)
   return { source, target }
 }
@@ -90,13 +108,15 @@ export async function inspectBranchCutover(db: D1Compat, actor: Principal, organ
     (SELECT count(*) FROM damaged_stock_lots WHERE branch_id=@source AND quantity_remaining<>0) AS damaged,
     (SELECT count(*) FROM rfid_tags WHERE branch_id=@source AND status='active') AS rfid`).get<Record<string, number>>({ source: identity.sourceBranchId })
   return { sourcePreimageJson: JSON.stringify(state.source), targetPreimageJson: JSON.stringify(state.target), schemaDigest: schema.digest,
-    registryDigest: await captureRegistryDigest(), scalarReferences: BRANCH_SCALAR_REFERENCES, capabilities: schema.capabilities,
+    registryDigest: await captureRegistryDigest(), scalarReferences: BRANCH_SCALAR_REFERENCES, capabilities: [...schema.capabilities, ...await stockCapabilities(db, identity)],
     unclassifiedFamilies, stock, coverage: 'scalar-reference-capture', historicalReplayCertified: false, activationReady: false }
 }
 export async function beginBranchCutover(db: D1Compat, actor: Principal, organizationId: number,
   input: CutoverIdentity & { requestId: string; controlIncarnation: string; expectedSourceJson: string; expectedTargetJson: string; expectedSchemaDigest: string }, budget: TransferInvocationBudget) {
   db = metered(db, budget); const current = await principal(db, actor, organizationId); const state = await branches(db, input)
   const schema = await readCutoverCaptureSchema(db); requireSchema(schema)
+  const unsupported = await stockCapabilities(db, input)
+  if (unsupported.length) throw new BranchCutoverCapabilityError(unsupported.map(v => v.code + ':' + v.detail).join(';'))
   requireParent(schema.digest === input.expectedSchemaDigest && JSON.stringify(state.source) === input.expectedSourceJson && JSON.stringify(state.target) === input.expectedTargetJson)
   const intent: ParentIntent = { action: 'retire', parentVersion: 1, sourceBranchId: input.sourceBranchId, targetBranchId: input.targetBranchId,
     registryDigest: await captureRegistryDigest(), schemaDigest: schema.digest }
@@ -116,7 +136,7 @@ export async function beginBranchCutover(db: D1Compat, actor: Principal, organiz
     AND NOT EXISTS(SELECT 1 FROM shift_sessions WHERE closed_at IS NULL AND cancelled_at IS NULL)
     AND (SELECT count(*) FROM branches WHERE is_active=1 AND lower(trim(name)) IN ('shop','warehouse'))=2`)
   const final = cutoverAssert(`EXISTS(SELECT 1 FROM branch_cutovers WHERE operation_id=@operation AND begin_request_id=@request AND phase='capturing' AND revision=0 AND intent_json=@intent)`, { operation: operationId, request: input.requestId, intent: intentJson })
-  try { return await beginBranchCutoverJournal(compose(db, [...guardsFor(current, schema, state), admission], [final]), begin) }
+  try { return await beginBranchCutoverJournal(compose(db, [...guardsFor(current, schema, state), stockGuard(input), admission], [final]), begin) }
   catch (cause) {
     try { const row = await readBranchCutoverJournal(db, begin); requireParent(row.intent_json === intentJson && row.begin_request_id === input.requestId); return { row, replayed: true } } catch { }
     throw new BranchCutoverParentOutcomeUnknown(cause)
@@ -128,7 +148,9 @@ export async function continueBranchCutover(db: D1Compat, actor: Principal, orga
   const stored = await db.prepare('SELECT * FROM branch_cutovers WHERE operation_id=@id').get<BranchCutoverJournalRow>({ id: input.operationId })
   requireParent(stored && stored.actor_id === current.id && stored.organization_id === String(organizationId))
   const row = await readBranchCutoverJournal(db, proof(stored)); const intent = JSON.parse(row.intent_json) as ParentIntent
-  if (intent.parentVersion !== 1 || intent.registryDigest !== await captureRegistryDigest()) throw new BranchCutoverCapabilityError('parent_capture_contract_required')
+  if (intent.parentVersion !== 1 || intent.action !== 'retire' || intent.sourceBranchId !== row.source_branch_id || intent.targetBranchId !== row.target_branch_id
+    || Object.keys(intent).sort().join(',') !== 'action,parentVersion,registryDigest,schemaDigest,sourceBranchId,targetBranchId'
+    || intent.registryDigest !== await captureRegistryDigest()) throw new BranchCutoverCapabilityError('parent_capture_contract_required')
   requireParent(Number.isSafeInteger(input.expectedRevision) && input.expectedRevision >= 0)
   if (row.revision > input.expectedRevision) return { row, replayed: true }
   requireParent(row.revision === input.expectedRevision && ['capturing', 'snapshots'].includes(row.phase))
@@ -138,7 +160,9 @@ export async function continueBranchCutover(db: D1Compat, actor: Principal, orga
   const cursor = parseCaptureCursor(row[`${stage}_cursor_json`]); const priorDigest = row[`${stage}_digest`]
   const page = await readCutoverCapturePage(db, schema, intent, cursor, priorDigest, input.pageSize ?? 8,
     { [intent.sourceBranchId]: String(state.source.name), [intent.targetBranchId]: String(state.target.name) }, stage === 'snapshot')
-  const before = [...guardsFor(current, schema, state), ...page.statements]
+  const unsupported = await stockCapabilities(db, intent)
+  if (unsupported.length) throw new BranchCutoverCapabilityError(unsupported.map(v => v.code + ':' + v.detail).join(';'))
+  const before = [...guardsFor(current, schema, state), stockGuard(intent), ...page.statements]
   const final = cutoverAssert(`EXISTS(SELECT 1 FROM branch_cutovers WHERE operation_id=@operation AND revision=@revision+1)`, { operation: row.operation_id, revision: row.revision })
   let perform: (composed: D1Compat) => Promise<BranchCutoverJournalRow>
   if (page.records > 0) {
@@ -157,7 +181,9 @@ export async function continueBranchCutover(db: D1Compat, actor: Principal, orga
     const families = await readUnclassifiedCutoverFamilies(db)
     if (families.length) throw new BranchCutoverCapabilityError('unclassified_historical_payloads:' + families.map(f => f.family + '=' + f.rows).join(','))
     requireParent(row.snapshot_digest === row.capture_digest && row.snapshot_records === row.capture_records)
-    before.push(...missingSnapshotGuards(intent))
+    before.push(...missingSnapshotGuards(intent), ...unclassifiedFamilyGuards())
+    if (manifest.movingProducts === 0) before.push(cutoverAssert(`NOT EXISTS(SELECT 1 FROM branch_stock WHERE branch_id=@source AND quantity<>0)
+      AND NOT EXISTS(SELECT 1 FROM branch_batch_stock WHERE branch_id=@source AND quantity<>0)`, { source: intent.sourceBranchId }))
     perform = composed => finishBranchCutoverSnapshots(composed, proof(row), row.revision)
   }
   try { return { row: await perform(compose(db, before, [final])), replayed: false } }

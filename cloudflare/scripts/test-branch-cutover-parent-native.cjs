@@ -10,13 +10,20 @@ function modules() {
     name = path.posix.normalize(name.endsWith('.ts') ? name : name + '.ts')
     if (cache.has(name)) return cache.get(name).exports
     const module = { exports: {} }; cache.set(name, module)
-    let source = fs.readFileSync(path.join(root, 'src', name), 'utf8')
+    const controlFile = process.env.PARENT_CONTROL_SOURCE && path.join(process.env.PARENT_CONTROL_SOURCE, name)
+    let source = fs.readFileSync(controlFile && fs.existsSync(controlFile) ? controlFile : path.join(root, 'src', name), 'utf8')
     if (process.env.PARENT_WRONG_CONTROL === 'guards' && name === 'lib/branchCutoverParent.ts') {
       assert.ok(source.includes('return guards')); source = source.replace('return guards', 'return []')
     }
+    if (process.env.PARENT_WRONG_CONTROL === 'page' && name === 'lib/branchCutoverCapture.ts') {
+      assert.ok(source.includes('(${fingerprintSql})=@fingerprint')); source = source.replace('(${fingerprintSql})=@fingerprint', '1=1')
+    }
+    if (process.env.PARENT_WRONG_CONTROL === 'families' && name === 'lib/branchCutoverCapture.ts') {
+      assert.ok(source.includes('return UNCLASSIFIED_JSON_FAMILIES.map')); source = source.replace('return UNCLASSIFIED_JSON_FAMILIES.map', 'return [].map')
+    }
     const js = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
     new Function('require', 'module', 'exports', js)(request => {
-      if (request === './importMaintenanceFence') return {}
+      if (request === './importMaintenanceFence') return new Proxy({}, { get() { throw Error('Unexpected maintenance dependency execution') } })
       assert.ok(request.startsWith('.'), request)
       return load(path.posix.join(path.posix.dirname(name), request))
     }, module, module.exports)
@@ -66,7 +73,7 @@ async function begin(w, requestId = 'parent_request_001') {
 async function step(w, row, pageSize = 8) { return w.parent.continueBranchCutover(w.db, actor, 1, { operationId: row.operation_id, expectedRevision: row.revision, pageSize }, budget) }
 async function main() {
   let checks = 0
-  async function check(name, fn) { await fn(); console.log('PASS ' + name); checks++ }
+  async function check(name, fn) { if (process.env.PARENT_TEST_FILTER && !name.includes(process.env.PARENT_TEST_FILTER)) return; await fn(); console.log('PASS ' + name); checks++ }
   await check('dry-run is read-only and lists exactly32 scalar references', async () => {
     const w = world(); const p = await inspect(w); assert.equal(p.scalarReferences.length, 32); assert.equal(p.capabilities.length, 0); assert.equal(w.stats.batches, 0); w.raw.close()
   })
@@ -92,6 +99,50 @@ async function main() {
     while (row.phase !== 'verifying' && turns++ < 150) row = (await step(w, row, 2)).row
     assert.equal(row.phase, 'verifying'); assert.equal(row.next_sequence, 0); assert.equal(row.verification_records, 0); assert.equal(w.raw.prepare('SELECT count(*) n FROM transfer_operation_receipts').get().n, 0)
     assert.equal(JSON.parse(row.manifest_json).version, 2); assert.equal(JSON.parse(row.manifest_json).coverage.kind, 'scalar-reference-capture'); w.raw.close()
+  })
+  await check('unclassified new scalar schema and unsupported stock refuse before admission', async () => {
+    for (const mutation of ["CREATE TABLE future_reference(id INTEGER PRIMARY KEY,branch_id INTEGER)",
+      "INSERT INTO rfid_tags(epc_id,product_id,branch_id,status) VALUES('tag',1,2,'active')",
+      "INSERT INTO damaged_stock_lots(product_id,branch_id,quantity_remaining) VALUES(1,2,1)",
+      "INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(1,2,1)"]) {
+      const w = world(); w.raw.exec(mutation); assert.ok((await inspect(w)).capabilities.length)
+      await assert.rejects(begin(w), e => e.code === 'branch_cutover_parent_capability'); assert.equal(w.stats.batches, 0); w.raw.close()
+    }
+  })
+  await check('schema or unsupported stock arriving after admission reads rolls back owned hold', async () => {
+    for (const mutation of ["CREATE TABLE future_reference(id INTEGER PRIMARY KEY,branch_id INTEGER)",
+      "INSERT INTO rfid_tags(epc_id,product_id,branch_id,status) VALUES('tag',1,2,'active')"]) {
+      const w = world(); w.stats.before = raw => raw.exec(mutation); await assert.rejects(begin(w))
+      assert.equal(w.stats.batches, 1); assert.equal(w.raw.prepare('SELECT count(*) n FROM branch_cutovers').get().n, 0); w.raw.close()
+    }
+  })
+  await check('v1 journal rows cannot enter parent execution; forged organization and exhausted budget refuse', async () => {
+    const w = world(); const p = await inspect(w)
+    const { row } = await w.journal.beginBranchCutoverJournal(w.db, { operationId: '00000000-0000-4000-8000-000000000001', token: '00000000-0000-4000-8000-000000000002',
+      actorId: 7, organizationId: '1', controlIncarnation: '00000000-0000-4000-8000-000000000099', beginRequestId: 'legacy_request_001', ...identity,
+      intentJson: JSON.stringify({ action: 'retire', ...identity }), sourcePreimageJson: p.sourcePreimageJson, targetPreimageJson: p.targetPreimageJson })
+    const batches = w.stats.batches; await assert.rejects(step(w, row), e => e.code === 'branch_cutover_parent_capability')
+    await assert.rejects(w.parent.inspectBranchCutover(w.db, { ...actor, organization_id: 2 }, 2, identity, budget))
+    await assert.rejects(w.parent.inspectBranchCutover(w.db, actor, 1, identity, { ...budget, alreadyUsed: 999 }), /budget/)
+    assert.equal(w.stats.batches, batches); w.raw.close()
+  })
+  await check('v2 manifest rejects invented coverage and malformed families before write', async () => {
+    const w = world(); let { row } = await begin(w)
+    while (row.phase === 'capturing') row = (await step(w, row)).row
+    const ownership = { operationId: row.operation_id, actorId: 7, organizationId: '1', controlIncarnation: row.control_incarnation, token: row.maintenance_token }
+    const manifest = JSON.parse(row.manifest_json)
+    for (const patch of [{ historicalReplayCertified: true }, { schemaDigest: '0'.repeat(64) }, { extra: 1 }, { unclassifiedFamilies: [{ family: 'invented', rows: 1, support: 'unclassified' }] }]) {
+      const text = JSON.stringify({ ...manifest, coverage: { ...manifest.coverage, ...patch } })
+      const db = new Proxy(w.db, { get(target, key, receiver) {
+        if (key === 'prepare') return sql => ({ get: async params => {
+          const value = await target.prepare(sql).get(params)
+          return value?.operation_id ? { ...value, manifest_json: text, manifest_digest: await w.capture.cutoverDigest(text) } : value
+        }, all: params => target.prepare(sql).all(params) })
+        return Reflect.get(target, key, receiver)
+      } })
+      await assert.rejects(w.journal.readBranchCutoverJournal(db, ownership), /journal_conflict/)
+    }
+    w.raw.close()
   })
   console.log(`${checks} branch cutover parent native groups passed`)
 }

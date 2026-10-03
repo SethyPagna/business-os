@@ -37,7 +37,7 @@ export const cutoverAssert = (condition: string, params: Record<string, unknown>
 })
 const schemaSql = `SELECT json_group_array(json_array(name,cid,column_name,type,pk,definition)) AS value FROM (
   SELECT m.name,p.cid,p.name AS column_name,p.type,p.pk,CASE WHEN p.cid=0 THEN m.sql END AS definition FROM sqlite_master m JOIN pragma_table_info(m.name) p
-  WHERE m.type='table' AND m.name IN (SELECT value FROM json_each(@tables)) ORDER BY m.name,p.cid)`
+  WHERE m.type='table' AND (m.name IN (SELECT value FROM json_each(@tables)) OR p.name='branch_id' OR p.name GLOB '*_branch_id') ORDER BY m.name,p.cid)`
 export type CaptureSchema = { value: string; digest: string; columns: Record<string, string[]>; capabilities: Array<{ code: string; detail: string }> }
 export async function readCutoverCaptureSchema(db: D1Compat): Promise<CaptureSchema> {
   const result = await db.prepare(schemaSql).get<{ value: string }>({ tables: JSON.stringify(tables) })
@@ -46,6 +46,10 @@ export async function readCutoverCaptureSchema(db: D1Compat): Promise<CaptureSch
   const columns: Record<string, string[]> = {}; const capabilities: CaptureSchema['capabilities'] = []
   for (const [table, , column, , , definition] of entries) {
     if (/WITHOUT\s+ROWID/i.test(definition || '')) throw new BranchCutoverCapabilityError('capture_requires_stable_rowid:' + table)
+    if (/^(rowid|_rowid_|oid)$/i.test(column)) capabilities.push({ code: 'capture_shadowed_rowid', detail: table })
+    if ((column === 'branch_id' || column.endsWith('_branch_id')) && !BRANCH_SCALAR_REFERENCES.some(([name, field]) => name === table && field === column)) {
+      capabilities.push({ code: 'unclassified_scalar_reference', detail: `${table}.${column}` })
+    }
     ;(columns[table] ||= []).push(column)
   }
   for (const table of tables) if (!columns[table]) capabilities.push({ code: 'capture_table_required', detail: table })
@@ -111,10 +115,15 @@ export async function readCutoverCapturePage(db: D1Compat, schema: CaptureSchema
   const rowsSql = `SELECT rowid AS k,${json} AS j FROM ${quote(table)} WHERE (${predicate(table)}) AND rowid>@after ORDER BY rowid LIMIT @limit`
   const fingerprintSql = `SELECT json_group_array(json_array(k,j)) FROM (${rowsSql})`
   const params = { source: identity.sourceBranchId, target: identity.targetBranchId, after: cursor.key, limit: pageSize }
+  if (cursor.key === 0) {
+    const invalid = await db.prepare(`SELECT count(*) AS n FROM ${quote(table)} WHERE (${predicate(table)}) AND rowid<=0`).get<{ n: number }>(params)
+    if (invalid?.n) throw new BranchCutoverCapabilityError('capture_nonpositive_rowid:' + table)
+  }
   const page = await db.prepare(`SELECT CASE WHEN length(CAST(value AS BLOB))<=262144 THEN value END AS value FROM (${fingerprintSql.replace('SELECT json_group_array(json_array(k,j))', 'SELECT json_group_array(json_array(k,j)) AS value')})`).get<{ value: string | null }>(params)
   if (!page || page.value === null) throw new BranchCutoverCapabilityError('capture_page_bytes_exceeded')
   const rows = JSON.parse(page.value) as Array<[number, string]>
-  const next = { ...cursor }; const statements = [cutoverAssert(`(${fingerprintSql})=@fingerprint`, { ...params, fingerprint: page.value })]
+  const next = { ...cursor }; const statements = [cutoverAssert(`(${fingerprintSql})=@fingerprint`, { ...params, fingerprint: page.value }),
+    cutoverAssert(`NOT EXISTS(SELECT 1 FROM ${quote(table)} WHERE (${predicate(table)}) AND rowid<=0)`, params)]
   for (const [key, raw] of rows) {
     if (!Number.isSafeInteger(key) || key <= next.key || cutoverBytes(raw) > 65536) throw new BranchCutoverCapabilityError('capture_row_invalid_or_oversize')
     const record = JSON.parse(raw) as Record<string, unknown>
@@ -144,4 +153,7 @@ export function missingSnapshotGuards(identity: CutoverIdentity): CutoverStateme
     `NOT EXISTS(SELECT 1 FROM ${quote(table)} WHERE ${quote(branch)} IN (@source,@target) AND trim(coalesce(${quote(field)},''))='')`,
     { source: identity.sourceBranchId, target: identity.targetBranchId },
   )))
+}
+export function unclassifiedFamilyGuards(): CutoverStatement[] {
+  return UNCLASSIFIED_JSON_FAMILIES.map(family => cutoverAssert(`NOT EXISTS(SELECT 1 FROM ${quote(family)})`))
 }
