@@ -77,6 +77,7 @@ function wrapDb(db) {
       })()
       return results
     },
+    async batchOnce(statements) { return this.batch(statements) },
   }
 }
 

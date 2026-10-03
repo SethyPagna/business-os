@@ -1055,9 +1055,17 @@ app.put('/:id', async (c) => {
       summary: `Update branch #${id}${body.name ? ` "${body.name}"` : ''}`,
     })
     if (pendingId != null) return c.json({ success: true, pending: true, pendingActionId: pendingId }, 202)
-    const results = await db.batch([...branchUpdateStatements(id, body, current, directory), ordinaryBusinessMaintenanceGuard,
+    const statements = [...branchUpdateStatements(id, body, current, directory), ordinaryBusinessMaintenanceGuard,
       buildAuditStatement(user?.id ?? null, actorSnapshot(user), 'update', 'branch', id, { name: current.name }),
-      { sql: 'SELECT * FROM branches WHERE id=@branch_response_id', params: { branch_response_id: id } }])
+      { sql: 'SELECT * FROM branches WHERE id=@branch_response_id', params: { branch_response_id: id } }]
+    let results: Awaited<ReturnType<typeof db.batchOnce>>
+    try {
+      results = await db.batchOnce(statements)
+    } catch (error) {
+      if (isBranchEditGuardError(error)) throw error
+      return c.json({ success: false, code: 'branch_edit_outcome_unknown', outcome: 'unknown', action: 'refresh_before_edit',
+        error: 'The result of this branch edit could not be confirmed. It may have been saved. Refresh Branches and check the details before making another edit.' }, 503)
+    }
     committedBranch = results[results.length - 1]?.results?.[0] as BranchIdentitySnapshot | undefined
   } catch (error) {
     const conflict = error instanceof BranchEditConflictError ? error : isBranchEditGuardError(error) ? new BranchEditConflictError() : null

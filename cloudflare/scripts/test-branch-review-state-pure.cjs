@@ -362,7 +362,11 @@ async function main() {
       const original = db.prepare('SELECT * FROM branches WHERE id=1').get()
       db.exec("CREATE TRIGGER refuse_branch_audit BEFORE INSERT ON audit_logs WHEN NEW.entity='branch' BEGIN SELECT RAISE(ABORT,'fixture audit refusal'); END")
       if (pending) await assert.rejects(approvalHandler()({}, pending, { id: 8, name: 'Reviewer' }), /fixture audit refusal/)
-      else await assert.rejects(routeHandler('put', '/:id')(context({ notes: 'must not save', expectedEditEtag: await writes.branchEditEtag(original) })), /fixture audit refusal/)
+      else {
+        const response = await routeHandler('put', '/:id')(context({ notes: 'must not save', expectedEditEtag: await writes.branchEditEtag(original) }))
+        assert.equal(response.status, 503)
+        assert.equal(response.value.code, 'branch_edit_outcome_unknown')
+      }
       assert.deepEqual(db.prepare('SELECT * FROM branches WHERE id=1').get(), original)
       if (pending) assert.deepEqual(db.prepare('SELECT * FROM pending_actions').get(), pending)
       assert.equal(db.prepare('SELECT COUNT(*) AS n FROM audit_logs').get().n, 0)
@@ -645,6 +649,66 @@ async function main() {
     assert.equal(recovered.status, 200); assert.equal(recovered.value.replayed, true)
     assert.deepEqual(w.db.prepare('SELECT * FROM audit_logs').all(), audits)
     w.db.close()
+  })
+  await check('direct lost acknowledgement returns uncertainty once and never infers success from durable equality', async () => {
+    const w = world(); const token = await writes.branchEditEtag(branch(w))
+    w.control.afterBatch = () => { throw new Error('D1_ERROR: internal error acknowledgement lost') }
+    const response = await branchRoute('put', '/:id')(ctx(w, { notes: 'mine', expectedEditEtag: token }))
+    assert.equal(response.status, 503)
+    assert.equal(response.value.success, false)
+    assert.equal(response.value.code, 'branch_edit_outcome_unknown')
+    assert.equal(response.value.outcome, 'unknown')
+    assert.equal(response.value.action, 'refresh_before_edit')
+    assert.equal(response.value.conflict, undefined)
+    assert.equal(response.value.branch, undefined)
+    assert.equal(w.control.batches, 1)
+    assert.equal(branch(w).notes, 'mine')
+    assert.equal(w.db.prepare("SELECT COUNT(*) AS n FROM audit_logs WHERE entity='branch'").get().n, 1)
+    w.db.close()
+  })
+  await check('direct precommit transport and real audit abort remain zero-effect uncertainty without write retry', async () => {
+    for (const mode of ['transport', 'audit']) {
+      const w = world(); const before = branch(w); const token = await writes.branchEditEtag(before)
+      if (mode === 'transport') w.control.beforeBatch = () => { throw new Error('D1_ERROR: internal error before transaction') }
+      else w.db.exec("CREATE TRIGGER refuse_branch_audit BEFORE INSERT ON audit_logs WHEN NEW.entity='branch' BEGIN SELECT RAISE(ABORT,'fixture audit refusal'); END")
+      const response = await branchRoute('put', '/:id')(ctx(w, { notes: 'mine', expectedEditEtag: token }))
+      assert.equal(response.status, 503); assert.equal(response.value.code, 'branch_edit_outcome_unknown')
+      assert.equal(w.control.batches, 1); assert.deepEqual(branch(w), before)
+      assert.equal(w.db.prepare('SELECT COUNT(*) AS n FROM audit_logs').get().n, 0)
+      w.db.close()
+    }
+  })
+  await check('direct proven guard conflict stays409 with no mutation or audit', async () => {
+    const w = world(); const token = await writes.branchEditEtag(branch(w))
+    w.control.beforeBatch = db => db.exec("UPDATE branches SET notes='other actor' WHERE id=1")
+    const response = await branchRoute('put', '/:id')(ctx(w, { notes: 'mine', expectedEditEtag: token }))
+    assert.equal(response.status, 409); assert.equal(response.value.code, 'branch_edit_conflict')
+    assert.equal(w.control.batches, 1); assert.equal(branch(w).notes, 'other actor')
+    assert.equal(w.db.prepare('SELECT COUNT(*) AS n FROM audit_logs').get().n, 0); w.db.close()
+  })
+  await check('wrong retrying batch helper turns a durable direct edit into false409 instead of uncertainty', async () => {
+    const w = world(); const token = await writes.branchEditEtag(branch(w))
+    w.control.afterBatch = () => { throw new Error('D1_ERROR: internal error acknowledgement lost') }
+    const wrong = branchRoute('put', '/:id', { getDb: env => {
+      const db = lib('db').getDb(env)
+      db.batchOnce = db.batch.bind(db)
+      return db
+    } })
+    const response = await wrong(ctx(w, { notes: 'mine', expectedEditEtag: token }))
+    assert.equal(response.status, 409); assert.equal(w.control.batches, 2); assert.equal(branch(w).notes, 'mine')
+    assert.equal(w.db.prepare("SELECT COUNT(*) AS n FROM audit_logs WHERE entity='branch'").get().n, 1); w.db.close()
+  })
+  await check('actual D1Compat normal direct200 and queued202 controls retain committed response semantics', async () => {
+    const w = world(); const token = await writes.branchEditEtag(branch(w))
+    const response = await branchRoute('put', '/:id')(ctx(w, { notes: 'saved', expectedEditEtag: token }))
+    assert.equal(response.status, 200); assert.equal(response.value.success, true)
+    assert.equal(response.value.branch.notes, 'saved')
+    assert.equal(response.value.branch.edit_etag, await writes.branchEditEtag(branch(w)))
+    assert.equal(w.control.batches, 1)
+    const queued = await branchRoute('put', '/:id')(ctx(w, { notes: 'queued', expectedEditEtag: response.value.branch.edit_etag }, requestUser))
+    assert.equal(queued.status, 202); assert.equal(queued.value.pending, true); assert.equal(queued.value.branch, undefined)
+    assert.equal(pending(w).status, 'open'); assert.equal(branch(w).notes, 'saved'); assert.equal(w.control.batches, 1)
+    assert.equal(w.db.prepare("SELECT COUNT(*) AS n FROM audit_logs WHERE entity='branch'").get().n, 1); w.db.close()
   })
 }
 
