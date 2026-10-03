@@ -33,6 +33,23 @@ assert.equal(lineReceivesStock(line({ mode: 'set', batchChoice: 9, expectedLotQu
 assert.equal(receivingDestinationRefusal('2', active, [line({ quantity: 0, freeQuantity: 0, createPayload: { name: 'New' } })], empty()), 'receiving_branch_inactive')
 console.log('PASS active membership, no default substitution, removal and positive/negative Set boundaries')
 
+for (const scope of ['branch', 'lot', undefined] as const) {
+  for (const target of [7, 8, 9, 10, 11]) {
+    const item = line({ mode: 'set', batchChoice: 9, setScope: scope, expectedLotQuantity: 8, quantity: target,
+      product: { id: 10, stock_quantity: 10, branch_stock: [{ branch_id: 2, quantity: 10 }] } })
+    const positive = target > (scope === 'branch' ? 10 : 8)
+    assert.equal(lineReceivesStock(item, '2'), positive, `${scope ?? 'default lot'} Set ${target}`)
+    assert.equal(receivingDestinationRefusal('2', active, [item], empty()), positive ? 'receiving_branch_inactive' : null)
+  }
+}
+for (const missing of [undefined, NaN, Infinity]) {
+  assert.equal(lineReceivesStock(line({ mode: 'set', batchChoice: 9, expectedLotQuantity: missing, quantity: 1 }), '2'), true)
+}
+assert.equal(lineReceivesStock(line({ mode: 'set', batchChoice: 9, setScope: 'branch', expectedLotQuantity: 10, quantity: 5,
+  product: { id: 10, stock_quantity: 2, branch_stock: [{ branch_id: 2, quantity: 2 }] } }), '2'), true)
+assert.equal(lineReceivesStock(line({ mode: 'set', batchChoice: 'new', setScope: 'lot', expectedLotQuantity: 1, quantity: 3 }), '2'), false)
+console.log('PASS Set branch/lot/default scope matrix and conservative unavailable lot snapshot')
+
 const original = line()
 const request = buildStockLineRequest(original, context)
 const state = empty()

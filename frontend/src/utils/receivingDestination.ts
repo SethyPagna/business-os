@@ -21,8 +21,10 @@ export function activeReceivingDestination(branchId: string, options: readonly R
 export function lineReceivesStock(line: StockSessionLine, branchId: string): boolean {
   if (line.mode === 'remove') return false
   if (line.mode === 'add') return line.quantity + line.freeQuantity > 0 || Boolean(line.createPayload)
-  const before = typeof line.batchChoice === 'number' && line.expectedLotQuantity != null
-    ? line.expectedLotQuantity : adjustBranchQuantity(line.product.branch_stock, branchId, line.product.stock_quantity)
+  const lotScope = typeof line.batchChoice === 'number' && (line.setScope ?? 'lot') === 'lot'
+  if (lotScope && !Number.isFinite(line.expectedLotQuantity)) return true
+  const before = lotScope ? Number(line.expectedLotQuantity)
+    : adjustBranchQuantity(line.product.branch_stock, branchId, line.product.stock_quantity)
   return line.quantity > before
 }
 
