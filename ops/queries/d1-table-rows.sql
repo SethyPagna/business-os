@@ -156,6 +156,7 @@ SELECT
     'supplier_invoices', (SELECT COUNT(*) FROM supplier_invoices)
   ) AS rows_8,
   json_object(
+    'branch_cutovers', (SELECT COUNT(*) FROM branch_cutovers),
     'suppliers', (SELECT COUNT(*) FROM suppliers),
     'system_flags', (SELECT COUNT(*) FROM system_flags),
     'telegram_scheduled_sends', (SELECT COUNT(*) FROM telegram_scheduled_sends),
