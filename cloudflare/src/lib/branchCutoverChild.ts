@@ -5,6 +5,7 @@ import { readBranchCutoverJournal, type BranchCutoverJournalRow, type BranchCuto
 import { planTransferOperation } from './transferOperation'
 import { transferRequestDigest } from './transferOperationReceipt'
 import { assertTransferStatementsFit, type TransferInvocationBudget } from './transferRunBudget'
+import { subtractDecimalSum } from './moneyPrecision'
 
 type Statement = { sql: string; params?: Record<string, unknown> }
 type Child = { version: 1; kind: 'branch-cutover-child'; operationId: string; sequence: number; actorId: number; organizationId: string; controlIncarnation: string; sourceBranchId: number; targetBranchId: number; reason: string; transfer: { productId: number; quantity: number; batchId: number | null; destProductId?: number } }
@@ -31,6 +32,12 @@ function requireRepresentedQuantity(amount: number, untracked: unknown, allocati
   const total = (portions as number[]).reduce((sum, value) => sum + value, 0)
   const roundoff = Math.min(EPSILON, Number.EPSILON * Math.max(amount, total) * portions.length)
   requireChild(quantity(total) && Math.abs(total - amount) <= roundoff)
+}
+function requireQuantityDelta(before: number, amount: number, direction: 1 | -1): void {
+  const after = before + direction * amount
+  requireChild(quantity(after) && (direction === 1 ? after > before : after < before))
+  const realized = Number(direction === 1 ? subtractDecimalSum(after, [before]) : subtractDecimalSum(before, [after]))
+  requireRepresentedQuantity(amount, realized, [])
 }
 function object(text: unknown, limit = SNAPSHOT_BYTES): Record<string, unknown> {
   requireChild(typeof text === 'string' && bytes(text) <= limit)
@@ -127,8 +134,9 @@ function validateCost(value: unknown, amount: number): void {
 const assertSql = (condition: string, params: Record<string, unknown>): Statement => ({ sql: `SELECT CASE WHEN (${condition}) THEN 1 ELSE json_extract('[1]','$[branch_cutover_child_conflict]') END`, params })
 const positiveLots = `SELECT b.id,b.variant_product_id,b.batch_key,b.lot_code,b.received_at,b.expiry_date,b.notes,b.is_active,b.batch_number,b.unit_cost_usd,s.branch_id,s.quantity
   FROM product_batches b JOIN branch_batch_stock s ON s.batch_id=b.id WHERE b.variant_product_id=@product AND s.branch_id IN (@source,@target) AND s.quantity>0`
-const lotFingerprint = `SELECT json_group_array(json_array(id,variant_product_id,batch_key,lot_code,received_at,expiry_date,notes,is_active,batch_number,unit_cost_usd,branch_id,quantity)) FROM (${positiveLots} ORDER BY b.id,s.branch_id)`
-const lotBytes = `COALESCE(SUM(length(CAST(json_array(id,variant_product_id,batch_key,lot_code,received_at,expiry_date,notes,is_active,batch_number,unit_cost_usd,branch_id,quantity) AS BLOB))+1),0)+2`
+const lotFingerprintFields = `id,variant_product_id,batch_key,lot_code,received_at,expiry_date,notes,is_active,batch_number,CASE WHEN unit_cost_usd IS NULL THEN NULL ELSE printf('%!.17g',unit_cost_usd) END,branch_id,printf('%!.17g',quantity)`
+const lotFingerprint = `SELECT json_group_array(json_array(${lotFingerprintFields})) FROM (${positiveLots} ORDER BY b.id,s.branch_id)`
+const lotBytes = `COALESCE(SUM(length(CAST(json_array(${lotFingerprintFields}) AS BLOB))+1),0)+2`
 
 export async function executePlannedBranchCutoverChild(db: D1Compat, actor: SessionUser, ownership: BranchCutoverOwnership,
   expected: { sequence: number; childJson: string }, budget: TransferInvocationBudget, organizationId: number): Promise<BranchCutoverChildResult> {
@@ -149,7 +157,7 @@ export async function executePlannedBranchCutoverChild(db: D1Compat, actor: Sess
   requireChild(row.phase === 'moving' && row.revision < Number.MAX_SAFE_INTEGER && row.next_sequence === expected.sequence && row.next_sequence < Number.MAX_SAFE_INTEGER
     && row.planned_child_json === expected.childJson && row.planned_child_key === key && row.planned_child_digest === digest)
   const stockParams = { product: child.transfer.productId, source: child.sourceBranchId, target: child.targetBranchId }
-  const summary = await db.prepare(`SELECT COUNT(*) AS count,COUNT(DISTINCT id) AS lots,COALESCE(SUM(length(CAST(json_array(id,variant_product_id,batch_key,lot_code,received_at,expiry_date,notes,is_active,batch_number,unit_cost_usd,branch_id,quantity) AS BLOB))+1),0)+2 AS bytes,
+  const summary = await db.prepare(`SELECT COUNT(*) AS count,COUNT(DISTINCT id) AS lots,${lotBytes} AS bytes,
     COALESCE(SUM(CASE WHEN branch_id=@source THEN quantity ELSE 0 END),0) AS sourceTotal,
     COALESCE(SUM(CASE WHEN branch_id=@target THEN quantity ELSE 0 END),0) AS targetTotal,
     COALESCE(SUM(CASE WHEN COALESCE(is_active,0)<>1 OR quantity>9007199254740991 THEN 1 ELSE 0 END),0) AS invalid FROM (${positiveLots})`).get<Record<string, number>>(stockParams)
@@ -159,9 +167,9 @@ export async function executePlannedBranchCutoverChild(db: D1Compat, actor: Sess
   const targetRow = stocks.find(stock => stock.branch_id === child.targetBranchId)
   const targetStock = targetRow ? targetRow.quantity : 0
   requireChild(quantity(sourceStock) && quantity(targetStock) && quantity(targetStock + child.transfer.quantity) && sourceStock >= child.transfer.quantity
-    && summary.sourceTotal <= sourceStock + EPSILON && summary.targetTotal <= targetStock + EPSILON
-    && Math.abs((targetStock + child.transfer.quantity) - targetStock - child.transfer.quantity) <= EPSILON
-    && Math.abs(sourceStock - (sourceStock - child.transfer.quantity) - child.transfer.quantity) <= EPSILON)
+    && summary.sourceTotal <= sourceStock + EPSILON && summary.targetTotal <= targetStock + EPSILON)
+  requireQuantityDelta(sourceStock, child.transfer.quantity, -1)
+  requireQuantityDelta(targetStock, child.transfer.quantity, 1)
   const boundedLots = `(SELECT COUNT(DISTINCT id)<=128 AND COUNT(*)<=256 AND ${lotBytes}<=${SNAPSHOT_BYTES} FROM (${positiveLots}))`
   const fingerprint = await db.prepare(`SELECT CASE WHEN ${boundedLots} THEN (${lotFingerprint}) END AS value`).get<{ value: string }>(stockParams)
   requireChild(fingerprint && typeof fingerprint.value === 'string' && bytes(fingerprint.value) <= SNAPSHOT_BYTES)
@@ -182,11 +190,11 @@ export async function executePlannedBranchCutoverChild(db: D1Compat, actor: Sess
     response: { success: true, parent_operation_id: row.operation_id, child_sequence: expected.sequence } })
   const lotQuantities = JSON.parse(fingerprint.value) as unknown[][]
   for (const take of planned.allocationSummaries[0].takes) {
-    const from = lotQuantities.find(lot => lot[0] === take.batchId && lot[10] === child.sourceBranchId)?.[11]
-    const to = lotQuantities.find(lot => lot[0] === take.batchId && lot[10] === child.targetBranchId)?.[11] ?? 0
-    requireChild(quantity(from) && quantity(to) && from >= take.quantity && quantity(to + take.quantity)
-      && Math.abs(from - (from - take.quantity) - take.quantity) <= EPSILON
-      && Math.abs((to + take.quantity) - to - take.quantity) <= EPSILON)
+    const from = Number(lotQuantities.find(lot => lot[0] === take.batchId && lot[10] === child.sourceBranchId)?.[11])
+    const to = Number(lotQuantities.find(lot => lot[0] === take.batchId && lot[10] === child.targetBranchId)?.[11] ?? 0)
+    requireChild(quantity(from) && quantity(to) && from >= take.quantity && quantity(to + take.quantity))
+    requireQuantityDelta(from, take.quantity, -1)
+    requireQuantityDelta(to, take.quantity, 1)
   }
   let provenanceMembers = 0
   for (const statement of planned.statements) {

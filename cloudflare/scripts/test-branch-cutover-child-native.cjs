@@ -21,6 +21,11 @@ function load(relative) {
       quantity_zero: ['requireChild(portions.length > 0 && portions.every(value => quantity(value) && value > 0))', 'if (portions.length === 0) return; requireChild(portions.every(value => quantity(value) && value > 0))'],
       quantity_minimum: ['requireChild(quantity(total) && Math.abs(total - amount) <= roundoff)', 'requireChild(amount >= EPSILON && Math.abs(total - amount) <= EPSILON)'],
       quantity_exact: ['requireChild(quantity(total) && Math.abs(total - amount) <= roundoff)', 'requireChild(total === amount)'],
+      delta_zero_only: ['requireRepresentedQuantity(amount, realized, [])', 'requireChild(realized > 0)'],
+      delta_absolute: ['requireRepresentedQuantity(amount, realized, [])', 'requireChild(realized > 0 && Math.abs(realized - amount) <= EPSILON)'],
+      delta_binary: ['const realized = Number(direction === 1 ? subtractDecimalSum(after, [before]) : subtractDecimalSum(before, [after]))', 'const realized = direction === 1 ? after - before : before - after'],
+      delta_lot: ['requireQuantityDelta(to, take.quantity, 1)', 'requireChild(true)'],
+      delta_serialization: ["branch_id,printf('%!.17g',quantity)", 'branch_id,quantity'],
     }
     const mutation = mutations[process.env.CHILD_WRONG_CONTROL]
     assert.ok(mutation && source.includes(mutation[0])); source = source.replace(mutation[0], mutation[1])
@@ -104,6 +109,96 @@ function legacyMutation(w, table, sql) {
 let checks = 0
 async function check(name, fn) { if (process.env.CHILD_TEST_PATTERN && !new RegExp(process.env.CHILD_TEST_PATTERN).test(name)) return; await fn(); checks++; console.log('PASS ' + name) }
 async function main() {
+  await check('actual fingerprint distinguishes adjacent REAL costs and preserves null with matching byte admission', async () => {
+    const w = world([1]); const p = await planned(w); const prepare = w.db.prepare.bind(w.db); let observed
+    w.db.prepare = sql => {
+      if (sql.startsWith('SELECT CASE WHEN') && sql.includes('json_group_array')) observed = sql
+      return prepare(sql)
+    }
+    await execute(w, p); assert.ok(observed)
+    const summarySql = w.stats.sql.find(sql => sql.startsWith('SELECT COUNT(*) AS count'))
+    const fingerprint = () => {
+      const params = { product: 1, source: 1, target: 2 }
+      const value = w.raw.prepare(observed).get(params).value
+      const measured = w.raw.prepare(summarySql).get(params).bytes
+      assert.ok(measured >= Buffer.byteLength(value) && measured <= Buffer.byteLength(value) + 1)
+      return value
+    }
+    w.raw.prepare('UPDATE product_batches SET unit_cost_usd=?').run(1.0000000000000002)
+    const first = fingerprint()
+    w.raw.prepare('UPDATE product_batches SET unit_cost_usd=?').run(1.0000000000000004)
+    const second = fingerprint(); assert.notEqual(first, second)
+    assert.equal(Number(JSON.parse(first)[0][9]), 1.0000000000000002)
+    assert.equal(Number(JSON.parse(second)[0][9]), 1.0000000000000004)
+    w.raw.exec('UPDATE product_batches SET unit_cost_usd=NULL')
+    assert.equal(JSON.parse(fingerprint())[0][9], null); w.raw.close()
+  })
+  await check('lot fingerprint preserves low digits needed for actual delta refusal', async () => {
+    const w = world([2e-10]); const lotBalance = 999999.9998999991
+    w.raw.exec('UPDATE branch_stock SET quantity=1000000 WHERE branch_id=2')
+    w.raw.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(1,2,?)').run(lotBalance)
+    const { subtractDecimalSum } = load('lib/moneyPrecision')
+    const rounded = JSON.parse(w.raw.prepare('SELECT json_array(quantity) AS value FROM branch_batch_stock WHERE branch_id=2').get().value)[0]
+    assert.notEqual(rounded, lotBalance)
+    assert.equal(Number(subtractDecimalSum(rounded + 2e-10, [rounded])), 2e-10)
+    assert.equal(Number(subtractDecimalSum(lotBalance + 2e-10, [lotBalance])), 3e-10)
+    const p = await planned(w); const before = snapshot(w)
+    await assert.rejects(execute(w, p), /branch_cutover_child_conflict/)
+    assert.equal(w.stats.batches, 0); assert.equal(snapshot(w), before); w.raw.close()
+  })
+  await check('partial decimal debit 0.9 minus 0.7 preserves native branch and lot quantities', async () => {
+    const w = world([0.9]); const p = await planned(w, { quantity: 0.7 }); await execute(w, p)
+    const { subtractDecimalSum } = load('lib/moneyPrecision')
+    for (const table of ['branch_stock', 'branch_batch_stock']) {
+      const after = w.raw.prepare(`SELECT quantity FROM ${table} WHERE branch_id=1`).get().quantity
+      assert.equal(String(after), '0.20000000000000007')
+      const delta = Number(subtractDecimalSum(0.9, [after]))
+      assert.ok(delta > 0 && Math.abs(delta - 0.7) <= 0.7 * 2 ** -52)
+    }
+    assert.equal((await execute(w, p)).replayed, true); w.raw.close()
+  })
+  for (const branch of [1, 2]) await check('negative branch balance refuses without effects ' + branch, async () => {
+    const w = world(); const p = await planned(w)
+    legacyMutation(w, 'branch_stock', `UPDATE branch_stock SET quantity=-0.1 WHERE branch_id=${branch}`)
+    const before = snapshot(w); await assert.rejects(execute(w, p), /branch_cutover_child_conflict/)
+    assert.equal(w.stats.batches, 0); assert.equal(snapshot(w), before); w.raw.close()
+  })
+  await check('same-lot credit drift refuses even when branch decimal delta is represented', async () => {
+    const w = world([1e-10])
+    w.raw.exec('UPDATE branch_stock SET quantity=1000000 WHERE branch_id=2; INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(1,2,999999.9999)')
+    const { subtractDecimalSum } = load('lib/moneyPrecision')
+    assert.equal(Number(subtractDecimalSum(1000000 + 1e-10, [1000000])), 1e-10)
+    assert.equal(Number(subtractDecimalSum(999999.9999 + 1e-10, [999999.9999])), 2e-10)
+    const p = await planned(w); const before = snapshot(w)
+    await assert.rejects(execute(w, p), /branch_cutover_child_conflict/)
+    assert.equal(w.stats.batches, 0); assert.equal(snapshot(w), before); w.raw.close()
+  })
+  for (const [name, balance, amount] of [['zero', 1e9, 1e-10], ['disproportionate nonzero', 1e6, 1.5e-10]]) for (const direction of ['source', 'target']) await check(direction + ' branch and lot ' + name + ' actual delta refuses before dispatch', async () => {
+    const w = world([amount]); const branch = direction === 'source' ? 1 : 2
+    w.raw.prepare('UPDATE branch_stock SET quantity=? WHERE branch_id=?').run(balance, branch)
+    w.raw.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(1,?,?) ON CONFLICT(batch_id,branch_id) DO UPDATE SET quantity=excluded.quantity').run(branch, balance)
+    w.raw.prepare('UPDATE products SET stock_quantity=?').run(balance)
+    const realized = direction === 'source' ? balance - (balance - amount) : (balance + amount) - balance
+    assert.ok(name === 'zero' ? realized === 0 : realized > 0 && Math.abs(realized - amount) > amount * 0.1)
+    const p = await planned(w, { quantity: amount }, '1'); const before = snapshot(w)
+    await assert.rejects(execute(w, p), /branch_cutover_child_conflict/)
+    assert.equal(w.stats.batches, 0); assert.equal(snapshot(w), before); w.raw.close()
+  })
+  for (const balance of [100, 1e9]) for (const direction of ['source', 'target']) await check(direction + ' canonical decimal delta at balance ' + balance + ' remains valid', async () => {
+    const amount = 0.1; const w = world([amount]); const branch = direction === 'source' ? 1 : 2
+    w.raw.prepare('UPDATE branch_stock SET quantity=? WHERE branch_id=?').run(balance, branch)
+    w.raw.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(1,?,?) ON CONFLICT(batch_id,branch_id) DO UPDATE SET quantity=excluded.quantity').run(branch, balance)
+    const p = await planned(w, { quantity: amount }, '1'); const result = await execute(w, p)
+    assert.equal(result.replayed, false); assert.equal(w.stats.batches, 1)
+    const expected = direction === 'source' ? (balance === 100 ? '99.9' : '999999999.9') : (balance === 100 ? '100.1' : '1000000000.1')
+    const { subtractDecimalSum } = load('lib/moneyPrecision')
+    for (const table of ['branch_stock', 'branch_batch_stock']) {
+      const after = w.raw.prepare(`SELECT quantity FROM ${table} WHERE branch_id=?`).get(branch).quantity
+      assert.equal(String(after), expected)
+      assert.equal(Number(direction === 'source' ? subtractDecimalSum(balance, [after]) : subtractDecimalSum(after, [balance])), amount)
+    }
+    assert.equal((await execute(w, p)).replayed, true); w.raw.close()
+  })
   for (const amount of [Number.MIN_VALUE, 1e-20, 1e-10]) await check('zero represented portions refuse positive quantity ' + amount, async () => {
     const w = world([], 1); const p = await planned(w, { quantity: amount }); const before = snapshot(w)
     await assert.rejects(execute(w, p), /branch_cutover_child_conflict/)
