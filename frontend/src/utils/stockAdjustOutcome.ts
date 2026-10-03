@@ -173,6 +173,14 @@ const STOCK_CHANGED_RETRY: StockRequestFailureEntry = {
 }
 
 const STOCK_REQUEST_FAILURE_ENTRIES: Record<string, StockRequestFailureEntry> = {
+  product_create_outcome_unknown: {
+    key: 'product_create_outcome_unknown',
+    fallback: 'Product creation may have completed. Refresh Products and check pending review before creating again. This saved request will not be resent.',
+  },
+  product_pending_review: {
+    key: 'product_creation_pending_review',
+    fallback: 'Product creation is pending review and cannot be added to this stock-in session yet.',
+  },
   receiving_submission_not_saved: {
     key: 'receiving_submission_not_saved',
     fallback: 'The request could not be saved on this device. No new request was sent. Check available storage and try again.',

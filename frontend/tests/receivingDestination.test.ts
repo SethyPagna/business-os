@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { activeReceivingDestination, captureReceivingRequest, lineReceivesStock, receivingDestinationRefusal, receivingDetailsLocked, restoreReceivingSubmissions, retainReceivingSubmissions } from '../src/utils/receivingDestination.ts'
+import ts from 'typescript'
+import { activeReceivingDestination, captureReceivingRequest, lineReceivesStock, productCreationRefusal, receivingDestinationRefusal, receivingDetailsLocked, restoreReceivingSubmissions, retainReceivingSubmissions } from '../src/utils/receivingDestination.ts'
 import { emptyStockSessionDraft, normalizeStockSessionDraft, buildStockLineRequest, commitSessionBlock, type StockSessionLine } from '../src/utils/stockSessionDraft.ts'
 import { stockFailureText, stockLineNeedsRemoval } from '../src/utils/stockAdjustOutcome.ts'
 
@@ -74,16 +75,29 @@ console.log('PASS normalizer/reload retains exact wire, dates and money; legacy 
 const held = line({ product: { id: '', name: 'New' }, createPayload: { name: 'New' }, createRequestId: 'new-product-request' })
 const productState = empty()
 productState.products[held.key] = { name: 'New', branch_id: '2', stock_quantity: 0, client_request_id: held.createRequestId }
-assert.equal(receivingDestinationRefusal('2', active, [held], productState, true), null)
-assert.equal(receivingDestinationRefusal('1', active, [held], productState, true), 'receiving_submission_locked')
+assert.equal(receivingDestinationRefusal('2', active, [held], productState), 'product_create_outcome_unknown')
+assert.equal(receivingDestinationRefusal('1', active, [held], productState), 'product_create_outcome_unknown')
+productState.productOutcomes[held.key] = 'not_sent'
+assert.equal(receivingDetailsLocked(productState, [held]), false)
+assert.equal(receivingDestinationRefusal('1', active, [held], productState), null)
 assert.equal(receivingDestinationRefusal('2', active, [held], productState), 'receiving_branch_inactive')
-assert.equal(receivingDestinationRefusal('2', active, [{ ...held, product: { id: 42 } }], productState, true), 'receiving_branch_inactive')
+productState.productOutcomes[held.key] = 'pending'
+assert.equal(receivingDestinationRefusal('1', active, [held], productState), 'product_pending_review')
+assert.equal(receivingDestinationRefusal('2', active, [{ ...held, product: { id: 42 } }], productState), 'receiving_branch_inactive')
 assert.equal(stockFailureText({ code: 'receiving_branch_inactive', status: 409 }, key => `translated:${key}`, 'fallback'), 'translated:receiving_branch_inactive')
 assert.equal(stockLineNeedsRemoval({ code: 'receiving_branch_inactive', status: 409 }), false)
 assert.equal(receivingDetailsLocked(state, [original]), true)
 const saved = line({ key: 'saved', requestId: 'saved-request', status: 'saved' })
 assert.equal(commitSessionBlock({ lines: [saved, original], paidAmount: '13', paymentStatus: 'credit', creditDueDate: context.creditDueDate, canViewCosts: true })?.supplierTotalUsd, 6.5)
-console.log('PASS product replay cannot admit new stock; inactive409 preserves snapshot; partial replay retains supplier-total accounting')
+assert.equal(stockFailureText({ code: 'product_create_outcome_unknown', status: 503 }, key => `translated:${key}`, 'fallback'), 'translated:product_create_outcome_unknown')
+assert.equal(stockFailureText({ code: 'product_pending_review' }, key => `translated:${key}`, 'fallback'), 'translated:product_creation_pending_review')
+for (const outcome of ['not_sent', 'unknown', 'pending'] as const) {
+  const reopened = restoreReceivingSubmissions({ lines: [{ ...held, status: 'error' }], receivingSubmissions: { ...productState, productOutcomes: { [held.key]: outcome } } }, [{ ...held, status: 'error' }])
+  assert.equal(reopened.productOutcomes[held.key], outcome)
+  assert.equal(receivingDetailsLocked(reopened, [held]), outcome !== 'not_sent')
+}
+assert.equal(Object.keys(retainReceivingSubmissions(productState, []).productOutcomes).length, 0)
+console.log('PASS product uncertainty and pending approval stay distinct; only proven unsent creation unlocks; stock409 and partial receipt accounting remain intact')
 
 const modal = readFileSync(new URL('../src/components/inventory/FastStockInModal.tsx', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 const persistStart = modal.indexOf('  const persistSubmissionDraft = ')
@@ -102,3 +116,67 @@ assert.throws(() => {
 }, (error: unknown) => (error as { code: string }).code === 'receiving_submission_not_saved')
 assert.equal(dispatched, false)
 console.log('PASS actual modal submission persistence reads back exact draft and blocks transport after storage failure')
+
+const createStart = modal.indexOf('  const createHeldProduct = ')
+const createEnd = modal.indexOf('  // ---- commit ----', createStart)
+assert(createStart > 0 && createEnd > createStart)
+const createSource = modal.slice(createStart, createEnd)
+const controller = (source: string, response: (payload: Record<string, unknown>, calls: number) => Promise<unknown>) => {
+  const entry = line({ ...held, key: 'create-controller' })
+  const submissionsRef = { current: empty() }
+  let calls = 0, storageFails = false, options = active, persisted: unknown
+  const deps = {
+    submissionsRef, productCreationRefusal, branchId: '1', user: { id: 7, name: 'Actor' },
+    require: () => ({ createProduct: async (payload: Record<string, unknown>) => {
+      calls++
+      assert.equal((persisted as { productOutcomes: Record<string, string> }).productOutcomes[entry.key], 'unknown')
+      return response(payload, calls)
+    } }),
+    destinationError: (lines: StockSessionLine[]) => receivingDestinationRefusal('1', options, lines, submissionsRef.current),
+    persistSubmissionDraft: () => {
+      if (storageFails) throw Object.assign(new Error('storage failed'), { code: 'receiving_submission_not_saved' })
+      persisted = JSON.parse(JSON.stringify(submissionsRef.current))
+    },
+    stockFailureText, tr: (key: string) => key,
+    extractHistoryResultId: (result: { id?: number }) => result?.id,
+  }
+  const js = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText
+  const create = new Function(...Object.keys(deps), js + 'return createHeldProduct;')(...Object.values(deps)) as (entry: StockSessionLine) => Promise<number>
+  return { entry, submissionsRef, create, calls: () => calls, retire: () => { options = [] }, failStorage: (fail: boolean) => { storageFails = fail }, reload: () => {
+    submissionsRef.current = restoreReceivingSubmissions({ lines: [{ ...entry, status: 'error' }], receivingSubmissions: persisted }, [{ ...entry, status: 'error' }])
+  } }
+}
+for (const retired of [false, true]) {
+  const subject = controller(createSource, async () => { throw new TypeError('Failed to fetch after commit') })
+  await assert.rejects(subject.create(subject.entry), (error: { code?: string }) => error.code === 'product_create_outcome_unknown')
+  if (retired) subject.retire()
+  await assert.rejects(subject.create(subject.entry), (error: { code?: string }) => error.code === 'product_create_outcome_unknown')
+  subject.reload()
+  await assert.rejects(subject.create(subject.entry), (error: { code?: string }) => error.code === 'product_create_outcome_unknown')
+  assert.equal(subject.calls(), 1)
+}
+for (const failure of [Object.assign(new Error('unknown'), { status: 503, code: 'product_create_outcome_unknown', outcome: 'unknown' }), Object.assign(new Error('unknown offline'), { code: 'write_requires_live_server', outcome: 'unknown' }), Object.assign(new Error('refused'), { status: 400 })]) {
+  const subject = controller(createSource, async () => { throw failure })
+  await assert.rejects(subject.create(subject.entry))
+  await assert.rejects(subject.create(subject.entry))
+  assert.equal(subject.calls(), 1)
+}
+const unsent = controller(createSource, async () => ({ id: 72 }))
+unsent.failStorage(true)
+await assert.rejects(unsent.create(unsent.entry), (error: { code?: string }) => error.code === 'receiving_submission_not_saved')
+assert.equal(unsent.calls(), 0)
+assert.equal(receivingDetailsLocked(unsent.submissionsRef.current, [unsent.entry]), false)
+unsent.failStorage(false)
+assert.equal(await unsent.create(unsent.entry), 72)
+const offline = controller(createSource, async (_payload, calls) => {
+  if (calls === 1) throw Object.assign(new Error('offline before dispatch'), { code: 'write_requires_live_server' })
+  return { id: 73 }
+})
+await assert.rejects(offline.create(offline.entry), (error: { code?: string }) => error.code === 'write_requires_live_server')
+assert.equal(receivingDetailsLocked(offline.submissionsRef.current, [offline.entry]), false)
+assert.equal(await offline.create(offline.entry), 73)
+const pending = controller(createSource, async () => ({ pending: true }))
+await assert.rejects(pending.create(pending.entry), (error: { code?: string }) => error.code === 'product_pending_review')
+await assert.rejects(pending.create(pending.entry), (error: { code?: string }) => error.code === 'product_pending_review')
+assert.equal(pending.calls(), 1)
+console.log('PASS actual create controller preserves unknown/pending outcomes and never resends them; proven no-dispatch failures recover')

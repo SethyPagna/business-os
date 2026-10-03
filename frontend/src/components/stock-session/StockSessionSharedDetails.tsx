@@ -113,6 +113,7 @@ type SharedDetailsProps = {
   branchOptions: Array<{ value: string; label: string }>
   branchInvalid?: boolean
   submissionLocked?: boolean
+  submissionMessage?: string
   receivedDate: string
   onReceivedDate: (iso: string) => void
   disabled?: boolean
@@ -124,7 +125,7 @@ type SharedDetailsProps = {
  */
 export default function StockSessionSharedDetails({
   tr, packLookup, brand, onBrand, brandOptions, onRequestBrands, supplier, onSupplier, supplierInvalid = false,
-  branchId, onBranch, branchOptions, branchInvalid = false, submissionLocked = false, receivedDate, onReceivedDate, disabled = false,
+  branchId, onBranch, branchOptions, branchInvalid = false, submissionLocked = false, submissionMessage, receivedDate, onReceivedDate, disabled = false,
 }: SharedDetailsProps) {
   const brandLabel = tr('brand', 'Brand')
   const branchLabel = tr('branch', 'Branch')
@@ -175,7 +176,7 @@ export default function StockSessionSharedDetails({
         </IconField>
       </div>
       {branchInvalid ? <p role="alert" className="mt-1 text-xs text-red-600 dark:text-red-400">{tr('receiving_branch_inactive', 'This branch is inactive. Choose an active branch for new stock. Previously submitted lines keep their original branch.')}</p> : null}
-      {submissionLocked ? <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{tr('receiving_submission_locked', 'Previously submitted lines keep their original details. Retry them unchanged, or check Stock Changes before removing them.')}</p> : null}
+      {submissionLocked ? <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{submissionMessage || tr('receiving_submission_locked', 'Previously submitted lines keep their original details. Retry them unchanged, or check Stock Changes before removing them.')}</p> : null}
     </fieldset>
   )
 }
