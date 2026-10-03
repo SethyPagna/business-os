@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import km from '../../src/lang/km.json'
+import km from '../../src/lang/km.json' with { type: 'json' }
 
 const origin = process.env.E2E_SYSTEM_ORIGIN || 'http://127.0.0.1:4349'
 test.describe.configure({ mode: 'serial', timeout: 120_000 })
