@@ -69,6 +69,37 @@ function world(labels = true) {
   } })
   return { raw, db, stats, parent, capture, journal: load('lib/branchCutoverJournal') }
 }
+function installLossyCaptureCost(w) {
+  const native = w.raw.prepare("SELECT unit_cost_usd raw,printf('%!.15g',unit_cost_usd) encoded FROM product_batches WHERE id=101").get()
+  assert.ok(Number.isFinite(native.raw) && Number.isFinite(Number(native.encoded)))
+  assert.notEqual(Number(native.encoded), native.raw)
+  const prepare = w.db.prepare
+  let calls = 0
+  w.db.prepare = sql => {
+    const statement = prepare.call(w.db, sql)
+    if (!sql.startsWith('WITH capture_rows AS MATERIALIZED') || !sql.includes('FROM "product_batches" WHERE')) return statement
+    const all = statement.all.bind(statement)
+    statement.all = async params => {
+      const rows = await all(params)
+      const unchangedSidecars = JSON.stringify(rows.slice(1))
+      const records = JSON.parse(rows[0].value)
+      const entry = records.find(([key]) => key === 101)
+      assert.ok(entry)
+      const record = JSON.parse(entry[1])
+      assert.equal(record.unit_cost_usd[0], 'real')
+      const sidecar = rows.find(row => row.row_kind === 1 && row.k === 101)
+      assert.equal(sidecar?.['r' + Object.keys(record).indexOf('unit_cost_usd')], native.raw)
+      record.unit_cost_usd[1] = native.encoded
+      entry[1] = JSON.stringify(record)
+      rows[0].value = JSON.stringify(records)
+      assert.equal(JSON.stringify(rows.slice(1)), unchangedSidecars)
+      calls++
+      return rows
+    }
+    return statement
+  }
+  return { native, calls: () => calls, restore() { w.db.prepare = prepare } }
+}
 const actor = { id: 7, organization_id: 1, is_active: 1 }
 const budget = { tier: 'paid', alreadyUsed: 0, remainingReads: 0, retryQueries: 0, completionQueries: 0, safetyQueries: 0, extraAtomicStatements: 0 }
 const identity = { sourceBranchId: 2, targetBranchId: 1 }
@@ -90,7 +121,11 @@ async function main() {
     w.raw.prepare('UPDATE product_batches SET unit_cost_usd=? WHERE id=101').run(3.5702545241480925e141)
     const before = w.raw.prepare('SELECT * FROM branch_cutovers').get(), batches = w.stats.batches
     const hold = w.raw.prepare("SELECT value FROM system_flags WHERE key='maintenance'").get().value
-    await assert.rejects(step(w, row), e => e.code === 'branch_cutover_parent_capability')
+    const prepare = w.db.prepare, lossy = installLossyCaptureCost(w)
+    try {
+      await assert.rejects(step(w, row), e => e.code === 'branch_cutover_parent_capability')
+      assert.equal(lossy.calls(), 1)
+    } finally { lossy.restore(); assert.equal(w.db.prepare, prepare) }
     assert.equal(w.stats.batches, batches); assert.deepEqual(w.raw.prepare('SELECT * FROM branch_cutovers').get(), before)
     assert.equal(w.raw.prepare("SELECT value FROM system_flags WHERE key='maintenance'").get().value, hold)
     assert.equal(w.raw.prepare('SELECT unit_cost_usd FROM product_batches WHERE id=101').get().unit_cost_usd, 3.5702545241480925e141)
@@ -195,5 +230,5 @@ async function main() {
   assert.ok(checks > 0, 'test filter must select a group')
   console.log(`${checks} branch cutover parent native groups passed`)
 }
-module.exports = { world, actor, budget, identity, inspect, begin, step }
+module.exports = { world, actor, budget, identity, inspect, begin, step, installLossyCaptureCost }
 if (require.main === module) main().catch(e => { console.error(e); process.exitCode = 1 })
