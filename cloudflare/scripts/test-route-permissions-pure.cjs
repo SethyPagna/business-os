@@ -286,7 +286,7 @@ const { hasPermission, hasAnyPermission, isAdminControlUser, getActionTier, getP
   assert.match(reviewApplySrc, /registerApplier\('branches', 'update', 'branch'/, 'reviewApply.ts must register an applier for branches/update/branch')
   assert.match(reviewApplySrc, /registerApplier\('branches', 'delete', 'branch'/, 'reviewApply.ts must register an applier for branches/delete/branch')
   assert.equal((reviewApplySrc.match(/assertCanonicalBranchSetMutationAllowed\(\)/g) || []).length, 2, 'historical create and delete approvals must both fail closed')
-  assert.match(reviewApplySrc, /SELECT id, name, is_active FROM branches WHERE id = @id[\s\S]*branchUpdateStatements\(id, body, current\)/, 'reviewed metadata updates must reload and guard the current identity')
+  assert.match(reviewApplySrc, /SELECT \* FROM branches WHERE id = @id[\s\S]*assertBranchExpectedState\(current, row\.expected_entity_state_json\)[\s\S]*branchUpdateStatements\(id, body, current, directory\)/, 'reviewed metadata updates must reload and guard the current identity')
   console.log('PASS lib/reviewApply.ts keeps historical action registration while refusing create/delete and guarding canonical metadata updates')
 }
 {
