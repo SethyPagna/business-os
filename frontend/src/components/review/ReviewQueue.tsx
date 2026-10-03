@@ -178,19 +178,24 @@ export default function ReviewQueue() {
       notify(status === 'approved' ? tr('pending_action_approved', 'Approved -- the change has been applied') : tr('pending_action_rejected', 'Rejected'), status === 'approved' ? 'success' : 'info')
       await load(true)
     }
-    const reconcile = async (failure?: unknown) => {
-      if (!current() || confirmed) return
-      let response: Awaited<ReturnType<typeof reconcileProductCreatePendingAction>> | undefined
-      try { response = await reconcileProductCreatePendingAction(pendingId, actorScope) } catch {}
-      if (!current() || confirmed) return
-      if (isProductCreateReviewState(pendingId, response?.data, 'approved')) await publish('approved')
-      else if (isProductCreateReviewState(pendingId, response?.data, 'rejected')) await publish('rejected')
-      else {
-        notify((failure as { code?: string } | undefined)?.code === 'receiving_branch_inactive'
-          ? tr('receiving_branch_inactive', 'This branch is inactive. Choose an active branch for new stock. Previously submitted lines keep their original branch.')
-          : unconfirmed(), 'error')
-        await load(true)
-      }
+    let reconciliation: Promise<void> | null = null
+    const reconcile = (failure?: unknown): Promise<void> => {
+      if (reconciliation) return reconciliation
+      reconciliation = (async () => {
+        if (!current() || confirmed) return
+        let response: Awaited<ReturnType<typeof reconcileProductCreatePendingAction>> | undefined
+        try { response = await reconcileProductCreatePendingAction(pendingId, actorScope) } catch {}
+        if (!current() || confirmed) return
+        if (isProductCreateReviewState(pendingId, response?.data, 'approved')) await publish('approved')
+        else if (isProductCreateReviewState(pendingId, response?.data, 'rejected')) await publish('rejected')
+        else {
+          notify((failure as { code?: string } | undefined)?.code === 'receiving_branch_inactive'
+            ? tr('receiving_branch_inactive', 'This branch is inactive. Choose an active branch for new stock. Previously submitted lines keep their original branch.')
+            : unconfirmed(), 'error')
+          await load(true)
+        }
+      })().finally(() => { reconciliation = null })
+      return reconciliation
     }
     setBusyId(pendingId)
     const physical = (async () => {

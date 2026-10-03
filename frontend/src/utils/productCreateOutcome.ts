@@ -1,6 +1,4 @@
-import type { PendingActionRow } from '../api/reviewQueueTransport.ts'
-
-export function isProductCreateReviewState(id: number, value: unknown, status: 'approved' | 'rejected'): value is PendingActionRow {
+export function isProductCreateReviewState(id: number, value: unknown, status: 'approved' | 'rejected'): boolean {
   if (!Number.isSafeInteger(id) || id <= 0 || !value || typeof value !== 'object' || Array.isArray(value)) return false
   const row = value as Record<string, unknown>
   return row.id === id && row.status === status && row.section === 'products' && row.action_type === 'create' && row.entity_type === 'product'

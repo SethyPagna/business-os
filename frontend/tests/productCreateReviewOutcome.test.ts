@@ -141,4 +141,13 @@ await check('approval ID is captured before mutable queue data changes',async()=
   assert.equal(f.effects.events.some(event=>event.includes('/99')),false)
   assert.equal(f.effects.locks.current.size,0)
 })
+await check('timeout and physical failure share unresolved reconciliation before releasing admission',async()=>{
+  const pending=deferred(),earlyRead=deferred();let reads=0
+  const f=fixture(()=>pending.promise,()=>++reads===1?earlyRead.promise:Promise.resolve({data:row}))
+  const run=f.run(row);await new Promise(resolve=>setTimeout(resolve,10))
+  pending.reject(Error('lost acknowledgement'));await flush()
+  const observed={reads,held:f.effects.locks.current.has('41')}
+  earlyRead.resolve({data:row});await run;await flush()
+  assert.deepEqual(observed,{reads:1,held:true})
+})
 if(failed)process.exitCode=1
