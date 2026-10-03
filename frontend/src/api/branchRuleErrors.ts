@@ -101,7 +101,7 @@ export function localizeBranchRuleError(message: unknown, t: (key: string) => st
   return t(key) || text
 }
 
-export function localizeBranchSaveError(error: unknown, t: (key: string) => string | undefined): string {
+function localizeBranchRefusalError(error: unknown, t: (key: string) => string | undefined): string {
   const text = branchRuleErrorText(error)
   const code = error && typeof error === 'object' ? (error as BranchRuleErrorLike).code : null
   if (code === 'permission_denied' || (!code && text === 'You do not have permission to perform this action')) {
@@ -111,6 +111,18 @@ export function localizeBranchSaveError(error: unknown, t: (key: string) => stri
     return t('branch_edit_conflict') || text
   }
   return localizeBranchRuleError(error, t)
+}
+
+export function localizeBranchSaveError(error: unknown, t: (key: string) => string | undefined): string {
+  const detail = error && typeof error === 'object' ? error as BranchRuleErrorLike & { outcome?: unknown } : null
+  const fallback = 'The result of this branch edit could not be confirmed. It may have been saved. Refresh Branches and check the details before making another edit.'
+  if (detail?.code === 'branch_edit_outcome_unknown'
+    || (!detail?.code && branchRuleErrorText(error) === fallback)
+    || (detail?.code !== 'unknown_outcome' && (detail?.outcome === 'unknown'
+      || ['loader_timeout', 'request_timeout', 'write_outcome_unknown'].includes(String(detail?.code || ''))))) {
+    return t('branch_edit_outcome_unknown') || fallback
+  }
+  return localizeBranchRefusalError(error, t)
 }
 
 type BranchReviewIdentity = { section?: unknown; action_type?: unknown; entity_type?: unknown }
@@ -135,5 +147,5 @@ export function localizeBranchReviewError(row: BranchReviewIdentity, error: unkn
   if (!detail?.code && detail?.status === 403 && text === 'Forbidden') {
     return t('branch_approval_review_permission_revoked') || text
   }
-  return localizeBranchSaveError(error, t)
+  return localizeBranchRefusalError(error, t)
 }

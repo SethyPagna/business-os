@@ -5,6 +5,8 @@ import { localizeBranchRuleError } from '../src/api/branchRuleErrors.ts'
 import * as branchErrors from '../src/api/branchRuleErrors.ts'
 import { replayBranchEdit } from '../src/components/branches/branchHistoryReplay.ts'
 import { resolveReplayAction } from '../src/utils/actionReplay.ts'
+import { withLoaderTimeout } from '../src/utils/loaders.ts'
+import { withWriteTimeout } from '../src/utils/writeIntent.ts'
 
 const ts = createRequire(new URL('../../cloudflare/package.json', import.meta.url))('typescript')
 const read = (file: string): string => readFileSync(new URL(file, import.meta.url), 'utf8')
@@ -280,4 +282,90 @@ await check('unknown replay error remains the original error and queued replay c
     assert.ok(queued.entry)
   }
 })
+const unknownBranchEdit = 'The result of this branch edit could not be confirmed. It may have been saved. Refresh Branches and check the details before making another edit.'
+for (const language of ['en', 'km'] as const) {
+  await check(`${language} actual direct 503 and network unknown preserve captured draft and never claim application`, async () => {
+    const pack = JSON.parse(read(`../src/lang/${language}.json`))
+    const errors = [
+      createApiError(503, { error: unknownBranchEdit, code: 'branch_edit_outcome_unknown', outcome: 'unknown', action: 'refresh_before_edit' }, ''),
+      Object.assign(new TypeError('Failed to fetch'), { code: 'write_outcome_unknown', outcome: 'unknown' }),
+      Object.assign(new Error('Request timed out after 45s'), { code: 'request_timeout', outcome: 'unknown' }),
+    ]
+    for (const error of errors) {
+      const page = pageSave(null, error, language)
+      const draft = initial(branch)
+      const form = formSave(() => page.run(draft))
+      await form.run()
+      assert.ok(pack.branch_edit_outcome_unknown)
+      assert.equal((page.effects.notices[0] as unknown[])[0], pack.branch_edit_outcome_unknown)
+      assert.equal(form.effects.closed, 0)
+      assert.equal(form.effects.cleared, 0)
+      assert.equal(form.effects.dirty.current, true)
+      assert.equal(page.effects.history.length, 0)
+      assert.equal(page.effects.sent.length, 1)
+      assert.equal(page.effects.sent[0].expectedEditEtag, 'original')
+      assert.equal(draft.expectedEditEtag, 'original')
+    }
+    if (language === 'en') assert.equal(pack.branch_edit_outcome_unknown, unknownBranchEdit)
+  })
+  await check(`${language} actual mutation deadline reports uncertainty while its single write can commit late`, async () => {
+    const pack = JSON.parse(read(`../src/lang/${language}.json`))
+    const tr = (key: string, fallback: string) => pack[key] || fallback
+    const mutate = load(pageSource, 'runBranchMutation', { useCallback: (fn: unknown) => fn, withLoaderTimeout, withWriteTimeout, BRANCH_MUTATION_TIMEOUT_MS: 12000, tr })
+    const timers: Array<{ fire: () => void; ms: number }> = []
+    const originalSet = globalThis.setTimeout
+    const originalClear = globalThis.clearTimeout
+    let complete!: () => void
+    let calls = 0
+    let commits = 0
+    let caught: any
+    try {
+      globalThis.setTimeout = ((fire: () => void, ms: number) => { timers.push({ fire, ms }); return 1 }) as any
+      globalThis.clearTimeout = (() => {}) as any
+      const page = pageSave(null, undefined, language, {
+        runBranchMutation: async (loader: () => Promise<unknown>, label: string) => { try { return await mutate(loader, label) } catch (error) { caught = error; throw error } },
+        branchApi: { updateBranch: async () => { calls++; return new Promise(resolve => {
+          complete = () => { commits++; resolve({ success: true, branch: { ...branch, edit_etag: 'late-committed' } }) }
+        }) } },
+      })
+      const draft = initial(branch)
+      const form = formSave(() => page.run(draft))
+      const saved = form.run()
+      assert.equal(timers.length, 1)
+      assert.equal(timers[0].ms, 12000)
+      timers[0].fire()
+      await saved
+      assert.equal(caught.code, 'loader_timeout')
+      assert.equal(caught.outcome, 'unknown')
+      assert.equal(caught.timeoutMs, 12000)
+      assert.equal((page.effects.notices[0] as unknown[])[0], pack.branch_edit_outcome_unknown)
+      complete()
+      await Promise.resolve()
+      assert.equal(calls, 1)
+      assert.equal(commits, 1)
+      assert.equal(form.effects.closed, 0)
+      assert.equal(form.effects.cleared, 0)
+      assert.equal(form.effects.dirty.current, true)
+      assert.equal(draft.expectedEditEtag, 'original')
+      assert.equal(page.effects.history.length, 0)
+    } finally {
+      globalThis.setTimeout = originalSet
+      globalThis.clearTimeout = originalClear
+    }
+  })
+  await check(`${language} local replay uncertainty preserves its history entry and expected state`, async () => {
+    for (const direction of ['undo', 'redo'] as const) {
+      const flow = await replayWorkflow(language, direction)
+      const before = { ...flow.row }
+      const entry = flow.entry
+      const error = Object.assign(createApiError(503, { error: unknownBranchEdit, code: 'branch_edit_outcome_unknown' }, ''), { outcome: 'unknown' })
+      flow.reject(error)
+      assert.equal(await flow.run(direction), false)
+      assert.equal(flow.notices[0][0], flow.pack.branch_edit_outcome_unknown)
+      assert.deepEqual(flow.row, before)
+      assert.equal(flow.entry, entry)
+      await assert.rejects(flow.entry[direction](), (caught: any) => caught.code === error.code && caught.status === 503 && caught.outcome === 'unknown')
+    }
+  })
+}
 if (failed) process.exitCode = 1

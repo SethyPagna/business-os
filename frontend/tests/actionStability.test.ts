@@ -565,7 +565,7 @@ await runTest('canonical branch metadata edits and transfers use shared guards',
   assert.match(branches, /import \{ beginSingleAction, finishSingleAction \} from '\.\.\/\.\.\/utils\/actionGuards\.ts'/)
   assert.match(branches, /const BRANCH_MUTATION_TIMEOUT_MS = 12000/)
   assert.match(branches, /const saveInFlightRef = useRef\(false\)/)
-  assert.match(branches, /withLoaderTimeout\(loader, label, BRANCH_MUTATION_TIMEOUT_MS\)/)
+  assert.match(branches, /withWriteTimeout\(loader, label, BRANCH_MUTATION_TIMEOUT_MS, \(key\) => tr\(key, ''\)\)/)
   assert.match(branches, /if \(!selected\) return/)
   assert.match(branches, /if \(!beginSingleAction\(saveInFlightRef\)\) return/)
   assert.match(branches, /await runBranchMutation\(\(\) => branchApi\.updateBranch\(selected\.id, payload\), 'Update branch'\)/)

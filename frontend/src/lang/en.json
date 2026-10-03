@@ -7194,5 +7194,6 @@
   "branch_review_schema_required": "Branch review is not ready. Refresh after the update and try again.",
   "branch_approval_unknown_outcome": "The result could not be confirmed. Retry the same approval request.",
   "branch_approval_review_permission_revoked": "Your permission to review has changed. This approval may already have completed. Refresh the review queue.",
-  "branch_approval_request_permission_revoked": "The requester no longer has permission to edit branches."
+  "branch_approval_request_permission_revoked": "The requester no longer has permission to edit branches.",
+  "branch_edit_outcome_unknown": "The result of this branch edit could not be confirmed. It may have been saved. Refresh Branches and check the details before making another edit."
 }

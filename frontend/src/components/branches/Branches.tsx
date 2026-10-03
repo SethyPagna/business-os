@@ -63,6 +63,7 @@ import {
   settleLoaderMap,
   withLoaderTimeout,
 } from '../../utils/loaders.ts'
+import { withWriteTimeout } from '../../utils/writeIntent.ts'
 import {
   getBranches as getBranchesRequest,
   getBranchStock as getBranchStockRequest,
@@ -813,8 +814,8 @@ export default function Branches({ embedded = false, view, showSectionNavigation
   }), [user?.id, user?.name])
 
   const runBranchMutation = useCallback((loader: () => Promise<BranchMutationResult>, label: string) => (
-    withLoaderTimeout(loader, label, BRANCH_MUTATION_TIMEOUT_MS)
-  ), [])
+    withWriteTimeout(loader, label, BRANCH_MUTATION_TIMEOUT_MS, (key) => tr(key, ''))
+  ), [tr])
 
   // The in-tab Undo / Redo of a branch edit (the history row has no server id
   // yet, or its create failed) restores `restore` only while the branch still
