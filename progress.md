@@ -5,16 +5,17 @@
 Every item carries an ID (U-1, U-cost, Q15 …). `docs/history/session-log.md` uses the same IDs: each Part lists the IDs it moved
 and their new status, and each item here names the Part that last changed it (e.g. "→ Part 633"). Search either file for an ID to see both sides.
 
-### Current work (4 Oct 2026) — Part 672
+### Current work (4 Oct 2026) — Part 673
 
 | Item | Status |
 |---|---|
 | RC2-HOTFIX | [x] Live; both real merge actions and health checks verified. |
+| Employee repeated edits | [~] New owner report: employees can edit only once or a few times before a rate limit. Diagnose and remove the unintended editing restriction; exact cause and regression pending. |
 | RC3-UI and DATE | [~] d2b369fc passed exact gate37105062061: 709 Worker + 678 frontend (one browser timeout passed on retry). All 24 picker cases reviewed; missing Returns/Inventory requests verified in 8 follow-up cases. Not live. |
 | Branch consolidation | [~] History and snapshot corrections have bounded reviews; real migration fixtures pass 49 groups. Selling core review is complete. Remaining selling paths, historical actions and final stock proof are open. No live rename or stock move. |
 | STOCK-RETURN | [~] Quantity correction reviewed; partial returns/accounting still in progress. Not live. |
 | Product edit / Undo | [~] Backend/client checkpoints preserved; brand/group/fold/create-stock completion and integration pending. |
-| One combined release | [~] Four reviewed lanes merged and pushed as bb639041. New full gate37139900977 and local affected checks are running. Previous full gate37134010887 remains recorded RED. Both live sites rechecked: 14b86ed6a6ef, Paid. |
+| One combined release | [~] Local and GitHub candidate bb639041 match. Exact gate37139900977 RED: 722/725 Worker; 687/687 frontend after two browser retries. One of three failures has reviewed correction169d421 with four strict local tests passing; two native failures need diagnosis. Both live sites rechecked: 14b86ed6a6ef, Paid. No new deployment. |
 | Versions / portfolio | [~] Four redundant local checkouts removed and independently verified; branches and recovery archive preserved. Other useful/unique work retained. Portfolio coordination pending. |
 | Full owner goal | [~] Reconfirmed active with independent coverage review: 35 areas, 1,115 historical IDs, 511 progress markers and 13 master-plan entries retained. These counts track scope, not completion. Each item needs verified evidence or an explicit owner decision. |
 
