@@ -215,12 +215,21 @@ test('amend-only employee quantity and line Replace Save reload preserve both st
   const amendments = await api(page, `/api/sales/${sale.id}/amendments`)
   expect(records.status).toBe(200); expect(records.body.count).toBeGreaterThan(0); redacted(records.body)
   expect(amendments.status).toBe(200); expect(amendments.body.entries).toHaveLength(3); redacted(amendments.body)
+  const nextAmendment = { kind: 'line_updated', sale_item_id: after.lines[0].id, quantity: 3, money_precision_version: 1,
+    expected_exchange_rate: 4000, client_request_id: `amend-stale-${sale.id}`, expected_updated_at: sale.updated_at,
+    pricing_quote: { gross_usd: 9, product_discount_usd: 0, manual_discount_usd: 0, total_usd: 9, total_khr: 36000 } }
+  const stale = await api(page, `/api/sales/${sale.id}/amendments`, 'POST', nextAmendment)
+  expect(stale.status).toBe(409); expect(stale.body.code).toBe('write_conflict'); redacted(stale.body)
+  const quote = await api(page, `/api/sales/${sale.id}/amendments`, 'POST', { ...nextAmendment,
+    client_request_id: `amend-review-${sale.id}`, expected_updated_at: replaced.body.updated_at })
+  expect(quote.status).toBe(409); expect(quote.body.code).toBe('sale_header_quote_conflict'); redacted(quote.body)
+  expect(quote.body.header_quote.total_usd).toBe(9)
   expect(await state(page, sale.id)).toEqual(after)
   const denied = await api(page, `/api/sales/${sale.id}/items`, 'POST', { client_request_id: 'amend-only-denied-add', money_precision_version: 1, items: [] })
   expect(denied.status).toBe(403); expect(await state(page, sale.id)).toEqual(after)
   await persistedReload(page, sale, 'E2E Replacement Balm')
   await page.screenshot({ path: info.outputPath('employee-replace-persisted.png'), fullPage: true })
-  await info.attach('native-amend-before-after-and-requests', { body: JSON.stringify({ before, increased, after, quantity, replaced, replay, resolved, records, amendments, deniedStatus: denied.status }, null, 2), contentType: 'application/json' })
+  await info.attach('native-amend-before-after-and-requests', { body: JSON.stringify({ before, increased, after, quantity, replaced, replay, resolved, records, amendments, stale, quote, deniedStatus: denied.status }, null, 2), contentType: 'application/json' })
 })
 
 for (const language of ['en', 'km']) for (const width of [1440, 390]) {
@@ -315,7 +324,9 @@ test('authorized cost viewer retains success replay and stale costs while employ
   await signIn(page, 914, 'e2e_employee_cost_view')
   const sale = await openFreshSale(page)
   const me = await api(page, '/api/auth/me'), actor = me.body.user || me.body
-  const permissions = typeof actor.permissions === 'string' ? JSON.parse(actor.permissions) : actor.permissions
+  const rolePermissions = typeof actor.role_permissions === 'string' ? JSON.parse(actor.role_permissions) : actor.role_permissions
+  const userPermissions = typeof actor.permissions === 'string' ? JSON.parse(actor.permissions) : actor.permissions
+  const permissions = { ...rolePermissions, ...userPermissions }
   expect(permissions.product_cost_view).toBe(true); expect(permissions.product_cost_edit).toBe(false)
   await stageAddedSerum(page)
   await page.getByRole('button', { name: /^Add to sale$/ }).click()
@@ -332,7 +343,8 @@ test('authorized cost viewer retains success replay and stale costs while employ
   expect(typeof stale.body.current.items).toBe('string')
   expect(JSON.parse(stale.body.current.items).every((line: any) => line.cost_price_usd === 1.2345)).toBe(true)
   expect(stale.body.current.total_usd).toBe(16.75)
-  const quoteRequest = { ...saved.request, client_request_id: `viewer-review-${sale.id}`, expected_updated_at: saved.body.updated_at }
+  const quoteRequest = { ...saved.request, client_request_id: `viewer-review-${sale.id}`, expected_updated_at: saved.body.updated_at,
+    items: saved.request.items.map((line: any) => ({ ...line, client_line_key: `viewer-review-line-${sale.id}` })) }
   delete quoteRequest.expected_header_quote
   const quote = await api(page, `/api/sales/${sale.id}/items`, 'POST', quoteRequest)
   expect(quote.status).toBe(409); expect(quote.body.code).toBe('sale_header_quote_conflict'); expect(quote.body.header_quote.total_usd).toBe(24)
