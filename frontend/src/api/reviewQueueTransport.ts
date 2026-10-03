@@ -75,7 +75,7 @@ export async function approveProductCreatePendingAction(id: number, scope: Actor
     const result = await apiFetch('POST', `/api/review/${encodeURIComponent(String(id))}/approve`)
     assertActorReadScope(scope, false)
     return result
-  }, null, true)
+  }, null, { isWrite: true, writeScope: scope })
   assertActorReadScope(scope, false)
   return response
 }
