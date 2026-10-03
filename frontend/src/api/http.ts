@@ -402,6 +402,8 @@ function createApiError(status: number, parsed: LooseRecord | null, text: string
   const error = new Error(parsed?.error || text || `HTTP ${status}`) as ApiRuntimeError
   error.status = status
   error.code = parsed?.code || null
+  if (parsed?.outcome === 'unknown' || parsed?.outcome === 'not_dispatched') error.outcome = parsed.outcome
+  if (['refresh_before_create', 'refresh_before_edit', 'retry_same_request'].includes(parsed?.action)) error.action = parsed?.action
   // A refusal that states a wait (a sign-in lockout) keeps it, so the sign-in
   // screen can say it in the operator's language (utils/authErrorText.ts).
   error.retryAfterSeconds = parsed?.retryAfterSeconds ?? null

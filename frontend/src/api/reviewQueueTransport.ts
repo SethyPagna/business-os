@@ -1,4 +1,5 @@
-import { apiFetch, route } from './http.ts'
+import { apiFetch, cacheInvalidate, route } from './http.ts'
+import { assertActorReadScope, assertActorSessionDispatchAllowed, type ActorReadScope } from './actorReadScope.ts'
 import { appendQuery, buildQueryString, type QueryParams } from './query.ts'
 
 // Frontend transport for the Review/Approval queue page
@@ -65,6 +66,31 @@ export function approvePendingAction(id: number): Promise<{ success: boolean; da
     null,
     true,
   ) as Promise<{ success: boolean; data: PendingActionRow }>
+}
+
+export async function approveProductCreatePendingAction(id: number, scope: ActorReadScope): Promise<unknown> {
+  assertActorSessionDispatchAllowed(scope)
+  const response = await route('review:approve', async () => {
+    assertActorSessionDispatchAllowed(scope)
+    const result = await apiFetch('POST', `/api/review/${encodeURIComponent(String(id))}/approve`)
+    assertActorReadScope(scope, false)
+    return result
+  }, null, true)
+  assertActorReadScope(scope, false)
+  return response
+}
+
+export async function reconcileProductCreatePendingAction(id: number, scope: ActorReadScope): Promise<{ data: PendingActionRow }> {
+  assertActorSessionDispatchAllowed(scope)
+  cacheInvalidate('review')
+  const response = await route(`review:get-one:${id}`, async () => {
+    assertActorSessionDispatchAllowed(scope)
+    const result = await apiFetch('GET', `/api/review/${encodeURIComponent(String(id))}`)
+    assertActorReadScope(scope, false)
+    return result
+  }, null, { raceLocalFallback: false }) as { data: PendingActionRow }
+  assertActorReadScope(scope, false)
+  return response
 }
 
 export function rejectPendingAction(id: number, reason?: string | null): Promise<{ success: boolean; data: PendingActionRow }> {

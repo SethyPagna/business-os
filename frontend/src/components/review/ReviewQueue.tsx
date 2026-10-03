@@ -13,8 +13,13 @@ import {
 } from '../../utils/loaders.ts'
 import { beginKeyedAction, finishKeyedAction } from '../../utils/actionGuards.ts'
 import { isBranchReviewUpdate, localizeBranchReviewError } from '../../api/branchRuleErrors.ts'
+import { cacheInvalidate } from '../../api/http.ts'
+import { captureActorReadScope, isActorReadScopeCurrent } from '../../api/actorReadScope.ts'
+import { isConfirmedProductCreateApproval, isProductCreateReviewState } from '../../utils/productCreateOutcome.ts'
 import {
   approvePendingAction,
+  approveProductCreatePendingAction,
+  reconcileProductCreatePendingAction,
   getPendingActions as getPendingActionsRequest,
   rejectPendingAction,
   type PendingActionRow,
@@ -109,8 +114,10 @@ export default function ReviewQueue() {
 
   const loadRequestRef = useRef(0)
   const actionRef = useRef<Set<string>>(new Set())
+  const productReviewEpochRef = useRef(0)
 
   const load = useCallback(async (silent = false) => {
+    const actorScope = captureActorReadScope('review')
     const requestId = beginTrackedRequest(loadRequestRef)
     if (!silent) setLoading(true)
     setLoadError(null)
@@ -123,13 +130,13 @@ export default function ReviewQueue() {
         'review:list',
         REVIEW_LOAD_TIMEOUT_MS,
       )
-      if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
+      if (!isTrackedRequestCurrent(loadRequestRef, requestId) || !isActorReadScopeCurrent(actorScope, false)) return
       setRows(response?.data || [])
     } catch (error) {
-      if (!isTrackedRequestCurrent(loadRequestRef, requestId)) return
+      if (!isTrackedRequestCurrent(loadRequestRef, requestId) || !isActorReadScopeCurrent(actorScope, false)) return
       setLoadError(error instanceof Error ? error.message : String(error || ''))
     } finally {
-      if (isTrackedRequestCurrent(loadRequestRef, requestId)) {
+      if (isTrackedRequestCurrent(loadRequestRef, requestId) && isActorReadScopeCurrent(actorScope, false)) {
         setLoading(false)
         setHasLoadedOnce(true)
       }
@@ -148,6 +155,7 @@ export default function ReviewQueue() {
 
   useEffect(() => () => {
     invalidateTrackedRequest(loadRequestRef)
+    productReviewEpochRef.current++
   }, [])
 
   const sectionOptions = useMemo(() => {
@@ -156,8 +164,63 @@ export default function ReviewQueue() {
     return Array.from(set).sort()
   }, [rows])
 
+  const handleProductCreateApprove = async (row: PendingActionRow) => {
+    const pendingId = row.id
+    const actorScope = captureActorReadScope('review')
+    const epoch = productReviewEpochRef.current
+    if (!beginKeyedAction(actionRef, pendingId)) return
+    const current = () => epoch === productReviewEpochRef.current && isActorReadScopeCurrent(actorScope, false)
+    const unconfirmed = () => tr('product_create_approval_unconfirmed', 'The approval result could not be confirmed. Refresh the review queue before retrying this same request.')
+    let confirmed = false
+    const publish = async (status: 'approved' | 'rejected') => {
+      if (!current() || confirmed) return
+      confirmed = true
+      notify(status === 'approved' ? tr('pending_action_approved', 'Approved -- the change has been applied') : tr('pending_action_rejected', 'Rejected'), status === 'approved' ? 'success' : 'info')
+      await load(true)
+    }
+    const reconcile = async (failure?: unknown) => {
+      if (!current() || confirmed) return
+      let response: Awaited<ReturnType<typeof reconcileProductCreatePendingAction>> | undefined
+      try { response = await reconcileProductCreatePendingAction(pendingId, actorScope) } catch {}
+      if (!current() || confirmed) return
+      if (isProductCreateReviewState(pendingId, response?.data, 'approved')) await publish('approved')
+      else if (isProductCreateReviewState(pendingId, response?.data, 'rejected')) await publish('rejected')
+      else {
+        notify((failure as { code?: string } | undefined)?.code === 'receiving_branch_inactive'
+          ? tr('receiving_branch_inactive', 'This branch is inactive. Choose an active branch for new stock. Previously submitted lines keep their original branch.')
+          : unconfirmed(), 'error')
+        await load(true)
+      }
+    }
+    setBusyId(pendingId)
+    const physical = (async () => {
+      try {
+        let response: unknown
+        let failure: unknown
+        try { response = await approveProductCreatePendingAction(pendingId, actorScope) } catch (error) { failure = error }
+        if (!current()) return
+        cacheInvalidate('products')
+        if (isConfirmedProductCreateApproval(pendingId, response)) await publish('approved')
+        else await reconcile(failure)
+      } finally {
+        finishKeyedAction(actionRef, pendingId)
+        if (current()) setBusyId(id => id === pendingId ? null : id)
+      }
+    })()
+    try { await withLoaderTimeout(physical, 'review:approve', REVIEW_MUTATION_TIMEOUT_MS) } catch {
+      if (current() && !confirmed) {
+        cacheInvalidate('products')
+        await reconcile()
+      }
+    }
+  }
+
   const handleApprove = async (row: PendingActionRow) => {
     if (!canReview) { notify(tr('perm_view_only_generic', 'View only: you do not have permission to make this change.'), 'error'); return }
+    if (row.section === 'products' && row.action_type === 'create' && row.entity_type === 'product') {
+      await handleProductCreateApprove(row)
+      return
+    }
     if (!beginKeyedAction(actionRef, row.id)) return
     setBusyId(row.id)
     try {

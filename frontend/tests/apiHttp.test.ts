@@ -1934,6 +1934,29 @@ for (const deduped of [false, true]) {
   }))
 }
 
+await runTest('HTTP errors preserve only known outcome and action metadata without retrying', async () => {
+  const originalFetch = globalThis.fetch
+  try {
+    for (const [outcome, action, expectedOutcome, expectedAction] of [
+      ['unknown', 'refresh_before_create', 'unknown', 'refresh_before_create'],
+      ['not_dispatched', 'retry_same_request', 'not_dispatched', 'retry_same_request'],
+      ['unknown', 'refresh_before_edit', 'unknown', 'refresh_before_edit'],
+      ['created', 'delete_everything', undefined, undefined],
+      [{ unsafe: true }, ['refresh_before_create'], undefined, undefined],
+    ]) {
+      resetApiState(); setSyncServerUrl('https://sync.example.test')
+      let calls = 0
+      globalThis.fetch = (async () => { calls++; return new Response(JSON.stringify({ error:'Specific refusal', code:'specific_refusal', outcome, action, privateField:'omitted' }), {status:409}) }) as typeof fetch
+      await assert.rejects(apiFetch('POST','/api/review/41/approve',undefined,1000), (error: any) => {
+        assert.equal(error.status,409); assert.equal(error.code,'specific_refusal'); assert.equal(error.message,'Specific refusal')
+        assert.equal(error.outcome,expectedOutcome); assert.equal(error.action,expectedAction); assert.equal(error.privateField,undefined)
+        return true
+      })
+      assert.equal(calls,1)
+    }
+  } finally { globalThis.fetch=originalFetch; resetApiState() }
+})
+
 if (failed > 0) {
   process.exitCode = 1
 }
