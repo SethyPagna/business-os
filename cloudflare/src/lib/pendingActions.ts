@@ -133,6 +133,20 @@ export interface ReviewPendingActionInput {
   rejectReason?: string | null
 }
 
+export function pendingActionApprovalStatements(row: PendingActionRow, input: ReviewPendingActionInput) {
+  const fields = ['section', 'action_type', 'entity_type', 'entity_id', 'payload_json', 'summary', 'requested_by', 'requested_by_name', 'reviewed_by', 'reviewed_by_name', 'reviewed_at', 'reject_reason', 'created_at', 'updated_at'] as const
+  return [{
+    sql: `UPDATE pending_actions SET status='approved', reviewed_by=@reviewedBy, reviewed_by_name=@reviewedByName,
+      reviewed_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP
+      WHERE id=@id AND status='open' AND ${fields.map(field => `${field} IS @before_${field}`).join(' AND ')}`,
+    params: { id: row.id, reviewedBy: input.reviewedBy ?? null, reviewedByName: input.reviewedByName ?? null,
+      ...Object.fromEntries(fields.map(field => [`before_${field}`, row[field] ?? null])) },
+  }, {
+    sql: `SELECT CASE WHEN changes()=1 THEN 1 ELSE json_extract('[1]', '$[product_create_review_conflict]') END`,
+    params: {},
+  }]
+}
+
 // Marks a row approved. Does NOT re-apply the payload against the real
 // write path -- that's the caller's job (the route that owns this
 // section's actual write logic), matching this file's own "generic

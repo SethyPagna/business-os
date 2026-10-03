@@ -17,6 +17,10 @@ import { MAX_IMAGES_PER_PRODUCT } from './importImageMatch'
 import type { Env } from '../index'
 import { roundMoney4, sellingPriceCeilCent, subtractDecimalSum } from './moneyPrecision'
 import { planManualCostEntry, catalogCostRecomputeStatement } from './catalogCostRecompute'
+import { requireReceivingBranch, receivingBranchAssertion, ReceivingBranchError, isReceivingBranchError, RECEIVING_BRANCH_INACTIVE } from './receivingBranch'
+import { ordinaryBusinessMaintenanceGuard } from './businessMaintenanceGuard'
+import { pendingActionApprovalStatements, type PendingActionRow, type ReviewPendingActionInput } from './pendingActions'
+import { buildAuditStatement } from './audit'
 
 export const PRODUCT_MONEY_VERSION = 'product_money_policy_version'
 export const PRODUCT_MONEY_PLAN = '_product_money_write_plan'
@@ -283,6 +287,79 @@ export async function insertRow(env: Env, table: string, body: Record<string, un
     .bind(...keys.map((key) => payload[key]))
     .run()
   return result.meta?.last_row_id
+}
+
+export class ProductCreateError extends Error {
+  constructor(readonly code: string, message: string, readonly status: 400 | 409 | 503) { super(message); this.name = 'ProductCreateError' }
+}
+
+export function productCreateErrorResponse(error: unknown) {
+  if (isReceivingBranchError(error)) return { body: RECEIVING_BRANCH_INACTIVE, status: 409 as const }
+  if (error instanceof ProductCreateError) return { body: { error: error.message, code: error.code,
+    ...(error.code === 'product_create_outcome_unknown' ? { outcome: 'unknown', action: 'refresh_before_create' } : {}) }, status: error.status }
+  return null
+}
+
+export async function productCreateDestination(env: Env, body: Record<string, unknown>) {
+  const rawQuantity = body.stock_quantity ?? 0
+  if ((typeof rawQuantity !== 'string' && typeof rawQuantity !== 'number') || !Number.isFinite(Number(rawQuantity))) {
+    throw new ProductCreateError('product_initial_quantity_invalid', 'Initial stock must be a finite number.', 400)
+  }
+  const quantity = Math.max(0, Number(rawQuantity))
+  if (body.branch_id != null && typeof body.branch_id !== 'number' && typeof body.branch_id !== 'string') throw new ReceivingBranchError()
+  const explicit = body.branch_id != null && String(body.branch_id).trim() !== ''
+  const branchId = explicit ? Number(body.branch_id) : await defaultBranchId(env)
+  if (branchId != null) await requireReceivingBranch(getDb(env), branchId)
+  else if (quantity > 0) throw new ReceivingBranchError()
+  return { branchId, quantity }
+}
+
+export async function createProductWithInitialStock(
+  env: Env, body: Record<string, unknown>, required: Record<string, unknown>, maxImages = MAX_IMAGES_PER_PRODUCT,
+  approval?: { row: PendingActionRow; reviewer: ReviewPendingActionInput },
+) {
+  const db = getDb(env)
+  const { branchId, quantity } = await productCreateDestination(env, body)
+  const gallery = 'image_gallery' in body ? validateProductImageGallery(body.image_gallery, maxImages) : null
+  const key = `product-create:${crypto.randomUUID()}`
+  const params = { key, branchId, quantity, lotCode: dateToBatchCode(new Date().toISOString().slice(0, 10)) }
+  const statements: Array<{ sql: string; params?: import('./db').BindParams }> = [
+    planInsertRow('products', body, await tableColumns(env, 'products'), { ...required, stock_quantity: quantity, client_request_id: key }),
+    { sql: `INSERT INTO branch_stock(product_id,branch_id,quantity)
+      SELECT p.id,b.id,CASE WHEN b.id=@branchId THEN @quantity ELSE 0 END
+      FROM products p CROSS JOIN branches b WHERE p.client_request_id=@key AND b.is_active=1`, params },
+    { sql: `INSERT INTO product_batches(variant_product_id,batch_key,lot_code,received_at,is_active,notes,batch_number)
+      SELECT id,'initial:'||id,@lotCode,datetime('now'),1,'Default received date created with product',1
+      FROM products WHERE client_request_id=@key`, params },
+  ]
+  if (branchId != null) statements.push({ sql: `INSERT INTO branch_batch_stock(batch_id,branch_id,quantity)
+    SELECT pb.id,@branchId,@quantity FROM product_batches pb JOIN products p ON p.id=pb.variant_product_id
+    WHERE p.client_request_id=@key AND pb.batch_key='initial:'||p.id AND pb.is_active=1`, params })
+  for (const [order, path] of (gallery ?? []).entries()) statements.push({
+    sql: `INSERT INTO product_images(product_id,image_path,sort_order) SELECT id,@path,@order FROM products WHERE client_request_id=@key`,
+    params: { key, path, order },
+  })
+  if (approval) {
+    statements.push(...pendingActionApprovalStatements(approval.row, approval.reviewer))
+    const audit = buildAuditStatement(approval.reviewer.reviewedBy ?? null, approval.reviewer.reviewedByName ?? null, 'create', 'product', null)
+    statements.push({ sql: audit.sql.replace(/@entity_id\b/g, '(SELECT id FROM products WHERE client_request_id=@createdProductKey)'),
+      params: { ...audit.params, createdProductKey: key } })
+  }
+  if (branchId != null) statements.push(receivingBranchAssertion(branchId))
+  statements.push(ordinaryBusinessMaintenanceGuard, { sql: 'SELECT * FROM products WHERE client_request_id=@key', params: { key } })
+  let results
+  try { results = await db.batchOnce(statements) } catch (error) {
+    if (isReceivingBranchError(error)) throw new ReceivingBranchError()
+    if (/bad JSON path: ['"]\$\[product_create_review_conflict\]['"]/i.test(error instanceof Error ? error.message : String(error))) {
+      throw new ProductCreateError('product_create_review_conflict', 'This product request changed or was already reviewed. Refresh the review queue.', 409)
+    }
+    if (/CPU time limit|too many SQL variables|variable number must be between|no such (table|column|function)|constraint failed|syntax error|datatype mismatch|ambiguous column|incomplete input|bad JSON path|D1 DB is overloaded|Requests queued for too long|Exceeded maximum DB size/i.test(error instanceof Error ? error.message : String(error))) throw error
+    throw new ProductCreateError('product_create_outcome_unknown', 'The product may have been created. Refresh Products before trying again.', 503)
+  }
+  const item = results[results.length - 1]?.results?.[0] as Record<string, unknown> | undefined
+  if (!item || !Number.isSafeInteger(item.id)) throw new ProductCreateError('product_create_outcome_unknown', 'The product may have been created. Refresh Products before trying again.', 503)
+  if (gallery) item.image_gallery = gallery
+  return { item, id: Number(item.id) }
 }
 
 export async function updateRow(env: Env, table: string, id: string | number, body: Record<string, unknown>, costOverrideActor?: { id: number | null; name: string | null }) {
