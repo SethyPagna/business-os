@@ -94,7 +94,7 @@ const customerReturnEntitlement = loadReal('lib/customerReturnEntitlement.ts', {
   './saleItemPricing': saleItemPricing, './saleMoneyPrecision': saleMoneyPrecision,
 })
 const analyticsPrecision = { './saleMoneyPrecision': saleMoneyPrecision, './reportMoneyPrecision': reportMoneyPrecision, './customerReturnEntitlement': customerReturnEntitlement, './refundMoneyPrecision': refundMoneyPrecision }
-const productBatches = loadReal('lib/productBatches.ts', { './db': { getDb: () => db }, './batchCode': batchCode, './sqlBinding': sqlBinding, './moneyPrecision': moneyPrecision })
+const productBatches = loadReal('lib/productBatches.ts', { './receivingBranch': loadReal('lib/receivingBranch.ts'), './db': { getDb: () => db }, './batchCode': batchCode, './sqlBinding': sqlBinding, './moneyPrecision': moneyPrecision })
 const permissions = loadReal('lib/permissions.ts')
 const acquisitionCostAccess = loadReal('lib/acquisitionCostAccess.ts', { './permissions': permissions })
 const branchRoles = loadReal('lib/branchRoles.ts')
@@ -134,6 +134,7 @@ const damagedLotActions = loadReal('lib/damagedLotActions.ts', {
   './sqlBinding': sqlBinding,
 })
 const inventoryRoute = loadReal('routes/inventory.ts', {
+  '../lib/receivingBranch': loadReal('lib/receivingBranch.ts'),
   '../lib/continuousReadWindow': loadReal('lib/continuousReadWindow.ts'),
   '../lib/stockCondition': stockCondition,
   '../lib/damagedLotActions': damagedLotActions,

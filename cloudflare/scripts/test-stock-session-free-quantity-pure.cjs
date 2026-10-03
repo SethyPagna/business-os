@@ -78,7 +78,7 @@ const permissionsMod = loadReal('lib/permissions.ts')
 const productDetailRuleMod = loadReal('lib/productDetailRule.ts', { './moneyPrecision': moneyMod })
 const productIdentityMod = loadReal('lib/productIdentity.ts', { './db': dbOverride, './sqlBinding': sqlBindingMod, './productDetailRule': productDetailRuleMod })
 const movementCostSnapshotMod = loadReal('lib/movementCostSnapshot.ts', { './moneyPrecision': moneyMod })
-const productBatchesMod = loadReal('lib/productBatches.ts', { './db': dbOverride, './batchCode': batchCodeMod, './moneyPrecision': moneyMod, './sqlBinding': sqlBindingMod })
+const productBatchesMod = loadReal('lib/productBatches.ts', { './receivingBranch': loadReal('lib/receivingBranch.ts'), './db': dbOverride, './batchCode': batchCodeMod, './moneyPrecision': moneyMod, './sqlBinding': sqlBindingMod })
 const stockMutationReceiptMod = loadReal('lib/stockMutationReceipt.ts')
 const stockSessionMathMod = loadReal('lib/stockSessionMath.ts', { './moneyPrecision': moneyMod })
 const schemaProbeMod = loadReal('lib/schemaProbe.ts')
@@ -87,6 +87,7 @@ const realAudit = loadReal('lib/audit.ts')
 let auditCalls = []
 const auditStub = { audit: async (...args) => { auditCalls.push(args) }, changedFields: realAudit.changedFields }
 const shared = {
+  '../lib/receivingBranch': loadReal('lib/receivingBranch.ts'),
   '../lib/db': dbOverride,
   '../lib/auth': { requireAuth: async (_c, next) => { await next() } },
   '../lib/audit': auditStub,

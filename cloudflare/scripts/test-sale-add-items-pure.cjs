@@ -61,7 +61,7 @@ const saleItemPricing = compile('saleItemPricing.ts', {
 })
 const productMergeLineage = compile('productMergeLineage.ts')
 const productMerge = compile('productMerge.ts', { './moneyPrecision': moneyPrecision })
-const productBatches = compile('productBatches.ts', {
+const productBatches = compile('productBatches.ts', { './receivingBranch': compile('receivingBranch.ts'),
   './db': {},
   './batchCode': compile('batchCode.ts'),
   './sqlBinding': compile('sqlBinding.ts'),
