@@ -21,6 +21,7 @@ import { loadLowStockConfig } from '../lib/lowStockSettings'
 import { localRangeClockError, isLocalRangeClock, businessToday, localDateAtOrAfter, localDateAtOrBefore, localDateRangeClause, localHourExpr, localTimeRangeClause } from '../lib/businessDateWindow'
 import { continuousReadWindowSql, parseContinuousReadWindow } from '../lib/continuousReadWindow'
 import { actorSnapshot } from '../lib/actorSnapshot'
+import { branchHistoryNameSql } from '../lib/stockInSessionsQuery'
 import { secretEncryptionStatus } from '../lib/secretCrypto'
 import { gateTotals } from './reports'
 
@@ -1222,6 +1223,13 @@ app.get('/import-jobs/:id/review', async (c) => {
 // routes/branches.ts gate behind those permissions, so a merely
 // authenticated account (e.g. a cashier-only role) should not read it
 // either. Matches this file's own denyUnless() pattern used by /dashboard.
+function publicTransferRow(row: Record<string, unknown>): Record<string, unknown> {
+  const result = { ...row }
+  delete result.from_branch_name
+  delete result.to_branch_name
+  return result
+}
+
 app.get('/transfers', async (c) => {
   const user = c.get('user')
   // Transfer history is a read surface shared by Inventory and Branches.
@@ -1297,7 +1305,7 @@ app.get('/transfers', async (c) => {
     // array. The current Branches page always requests paging, so no UI data
     // is hidden behind this legacy safety cap.
     const rows = await db.prepare(`
-      SELECT st.*, st.notes AS note, b1.name AS from_name, b2.name AS to_name
+      SELECT st.*, st.notes AS note, ${branchHistoryNameSql('st.from_branch_name', 'b1.name')} AS from_name, ${branchHistoryNameSql('st.to_branch_name', 'b2.name')} AS to_name
       FROM stock_transfers st
       LEFT JOIN branches b1 ON b1.id = st.from_branch_id
       LEFT JOIN branches b2 ON b2.id = st.to_branch_id
@@ -1305,7 +1313,7 @@ app.get('/transfers', async (c) => {
       ORDER BY st.created_at DESC, st.id DESC
       LIMIT 500
     `).all(bindings)
-    return c.json(rows || [])
+    return c.json((rows || []).map(publicTransferRow))
   }
 
   const page = clampInt(query.page, 1, 1, 100000)
@@ -1314,7 +1322,7 @@ app.get('/transfers', async (c) => {
   const countRow = await db.prepare(`SELECT COUNT(*) AS count FROM stock_transfers st ${where}`).get<{ count: number }>(bindings)
   const total = Number(countRow?.count || 0)
   const items = await db.prepare(`
-    SELECT st.*, st.notes AS note, b1.name AS from_name, b2.name AS to_name
+    SELECT st.*, st.notes AS note, ${branchHistoryNameSql('st.from_branch_name', 'b1.name')} AS from_name, ${branchHistoryNameSql('st.to_branch_name', 'b2.name')} AS to_name
     FROM stock_transfers st
     LEFT JOIN branches b1 ON b1.id = st.from_branch_id
     LEFT JOIN branches b2 ON b2.id = st.to_branch_id
@@ -1324,7 +1332,7 @@ app.get('/transfers', async (c) => {
   `).all({ ...bindings, pageSize, offset })
 
   return c.json({
-    items: items || [],
+    items: (items || []).map(publicTransferRow),
     total,
     page,
     pageSize,

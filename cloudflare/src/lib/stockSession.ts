@@ -983,12 +983,12 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
     }
     if (line.quantity === 0) {
       if (fold) {
-        statements.push({ sql: `INSERT INTO stock_session_members(operation_id,line_id,command_kind,product_id,product_created,branch_id,batch_id,movement_id,quantity,unit_cost_usd)
-          VALUES(@operationId,@lineId,@kind,@productId,0,@branchId,NULL,NULL,0,@unitCostUsd)`,
+        statements.push({ sql: `INSERT INTO stock_session_members(operation_id,line_id,command_kind,product_id,product_created,branch_id,branch_name,batch_id,movement_id,quantity,unit_cost_usd)
+          VALUES(@operationId,@lineId,@kind,@productId,0,@branchId,(SELECT name FROM branches WHERE id=@branchId),NULL,NULL,0,@unitCostUsd)`,
         params: { operationId, lineId: line.line_id, kind: line.kind, productId: fold.id, branchId: line.branch_id, unitCostUsd: line.unit_cost_usd } })
       } else {
-        statements.push({ sql: `INSERT INTO stock_session_members(operation_id,line_id,command_kind,product_id,product_created,branch_id,batch_id,movement_id,quantity,unit_cost_usd)
-          SELECT @operationId,@lineId,@kind,id,1,@branchId,NULL,NULL,0,@unitCostUsd FROM products WHERE client_request_id=@productRequestId`,
+        statements.push({ sql: `INSERT INTO stock_session_members(operation_id,line_id,command_kind,product_id,product_created,branch_id,branch_name,batch_id,movement_id,quantity,unit_cost_usd)
+          SELECT @operationId,@lineId,@kind,id,1,@branchId,(SELECT name FROM branches WHERE id=@branchId),NULL,NULL,0,@unitCostUsd FROM products WHERE client_request_id=@productRequestId`,
         params: { operationId, lineId: line.line_id, kind: line.kind, branchId: line.branch_id, unitCostUsd: line.unit_cost_usd, productRequestId } })
       }
       continue
@@ -1010,8 +1010,8 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
       })(),
     })
     statements.push(...plan.statements)
-    statements.push({ sql: `INSERT INTO stock_session_members(operation_id,line_id,command_kind,product_id,product_created,branch_id,batch_id,quantity,unit_cost_usd)
-      VALUES(@operationId,@lineId,@kind,${plan.productIdSql},@created,@branchId,${plan.batchIdSql},@quantity,@unitCostUsd)`, params: { ...plan.params, operationId, lineId: line.line_id, kind: line.kind, created: line.kind === 'create_receive' ? 1 : 0 } })
+    statements.push({ sql: `INSERT INTO stock_session_members(operation_id,line_id,command_kind,product_id,product_created,branch_id,branch_name,batch_id,quantity,unit_cost_usd)
+      VALUES(@operationId,@lineId,@kind,${plan.productIdSql},@created,@branchId,(SELECT name FROM branches WHERE id=@branchId),${plan.batchIdSql},@quantity,@unitCostUsd)`, params: { ...plan.params, operationId, lineId: line.line_id, kind: line.kind, created: line.kind === 'create_receive' ? 1 : 0 } })
     // 'add' -- the ledger's canonical receipt type, the same string POST
     // /api/inventory/adjust and POST /api/batches write, and the one this
     // file's own redo path already emits below. This used to write the
