@@ -5,16 +5,16 @@
 Every item carries an ID (U-1, U-cost, Q15 …). `docs/history/session-log.md` uses the same IDs: each Part lists the IDs it moved
 and their new status, and each item here names the Part that last changed it (e.g. "→ Part 633"). Search either file for an ID to see both sides.
 
-### Current work (3 Oct 2026) — Part 664
+### Current work (3 Oct 2026) — Part 665
 
 | Item | Status |
 |---|---|
 | RC2-HOTFIX | [x] Live; both real merge actions and health checks verified. |
 | RC3-UI and DATE | [~] d2b369fc passed exact gate37105062061: 709 Worker + 678 frontend (one browser timeout passed on retry). All 24 picker cases reviewed; missing Returns/Inventory requests verified in 8 follow-up cases. Not live. |
-| Branch consolidation | [~] Reviewed stock-in and stale-tab safeguards merged. Stock transfer, selling and historical compatibility remain unfinished. A legacy branch conflict-display defect is being corrected. No live rename or stock move. |
+| Branch consolidation | [~] Conflict display and two-tab receiving checks pass in English/Khmer on mobile/desktop. Review found a transfer audit-trail gap; its correction, selling, history and final stock checks remain open. No live rename or stock move. |
 | STOCK-RETURN | [~] Quantity correction reviewed; partial returns/accounting still in progress. Not live. |
 | Product edit / Undo | [~] Backend/client checkpoints preserved; brand/group/fold/create-stock completion and integration pending. |
-| One combined release | [~] Candidate a1fd29246 contains reviewed receiving fixes. Three composed stock tests and Worker compiler pass; timestamp/layout browser 12/12 pass. New frontend run found a Windows test-loader issue; correction awaits review. Final full suites and exact gate pending. |
+| One combined release | [~] Candidate e842e2214 matches GitHub. Focused checks: 41 pass, 6 backend tests need correction; typechecks/build pass, catalog 860389 B within budget. Eight browser cases pass. Full suites and exact gate remain pending; live stays 14b86ed6a6ef. |
 | Versions / portfolio | [~] Four redundant local checkouts removed and independently verified; branches and recovery archive preserved. Other useful/unique work retained. Portfolio coordination pending. |
 | Full owner goal | [~] Set and active; all requests retained in 35 groups, including 1,115 historical IDs, 511 progress markers and 13 master-plan entries. Completion requires evidence for each item; confirmed defects remain open. |
 
