@@ -67,7 +67,8 @@ const lot = (snapshot: any, batch: number) => Number(snapshot.lots.find((r: any)
 function redacted(value: any) {
   if (!value || typeof value !== 'object') return
   for (const [key, child] of Object.entries(value)) {
-    if (/^(cost_price_|purchase_price_|total_cost_)/.test(key)) expect(child, `employee response ${key} must remain redacted`).toBeNull()
+    if (/^(cost_price_|purchase_price_|total_cost_|unit_cost_|received_cost_|batch_unit_cost_|stock_value_|cogs_|gross_profit_|margin_)/.test(key)) expect(child, `employee response ${key} must remain redacted`).toBeNull()
+    else if (typeof child === 'string' && child.trim() && (key === 'items' || key.endsWith('_json') || ['details', 'old_value', 'new_value', 'undo_payload', 'redo_payload'].includes(key))) redacted(JSON.parse(child))
     else redacted(child)
   }
 }

@@ -45,7 +45,9 @@ export function hasAcquisitionCostInput(value: unknown, user: PermissionUser): b
   return contains(value, 0)
 }
 
-const SERIALIZED_FIELDS = new Set(['details', 'old_value', 'new_value', 'undo_payload', 'redo_payload'])
+// Sale conflict snapshots retain DB-serialized items; project their contents
+// while preserving the existing string wire contract.
+const SERIALIZED_FIELDS = new Set(['details', 'old_value', 'new_value', 'undo_payload', 'redo_payload', 'items'])
 const MAX_SERIALIZED_CHARS = 2_000_000
 const MAX_DEPTH = 32
 const SUPPLIER_MONEY_FIELDS = new Set(['line_total_usd', 'total_usd', 'paid_usd', 'outstanding_usd',

@@ -108,6 +108,29 @@ assert.equal(canEditAcquisitionCosts(actor('manager', {}, { product_cost_edit: t
 assert.equal(canViewAcquisitionCosts(actor('admin', { product_cost_view: false, product_cost_edit: false })), true)
 checks += 12
 
+// Sale write-conflict responses keep items as a serialized DB envelope. Staff
+// must retain its wire shape and selling data without acquisition costs.
+const saleConflict = { error: 'This sale changed.', code: 'write_conflict', current: {
+  id: 1, total_usd: 19, items: JSON.stringify([{ id: 4, product_id: 201, quantity: 2,
+    unit_price_usd: 9.5, cost_price_usd: 1.2345, cost_price_khr: 4938,
+    batches: [{ id: 701, quantity: 2, unit_cost_usd: 1.2345 }],
+  }]),
+}, note: '{"cost_price_usd":1.2345}' }
+const saleConflictOriginal = JSON.stringify(saleConflict)
+const employee = actor('employee', { sales: true, 'sales:add_items': true, product_cost_view: false })
+const expectedConflictItems = [{ id: 4, product_id: 201, quantity: 2, unit_price_usd: 9.5, batches: [{ id: 701, quantity: 2 }] }]
+const projectedConflict = projectAcquisitionCosts(saleConflict, employee)
+assert.equal(typeof projectedConflict.current.items, 'string')
+assert.deepEqual(JSON.parse(projectedConflict.current.items), expectedConflictItems)
+assert.equal(projectedConflict.current.total_usd, 19)
+assert.equal(projectedConflict.note, saleConflict.note, 'ordinary note text is not an envelope')
+assert.equal(JSON.stringify(saleConflict), saleConflictOriginal, 'private snapshot is unchanged')
+for (const allowed of [...admins, viewer]) assert.equal(projectAcquisitionCosts(saleConflict, allowed), saleConflict)
+for (const items of ['{broken', '7', 'x'.repeat(2_000_001)]) {
+  assert.equal(projectAcquisitionCosts({ current: { items } }, employee).current.items, null)
+}
+checks += 13
+
 const app = new Hono()
 app.onError((error, c) => error.message === 'D1 tripwire' ? c.json({ reached: true }, 598) : (() => { throw error })())
 app.route('/api/products', load(path.join(root, 'routes/products.ts')).default)
@@ -121,12 +144,23 @@ fixture.use('*', async (c, next) => { c.set('user', user); await next() })
 fixture.use('*', acquisitionCostResponses)
 fixture.get('/cached', c => c.json(cached, 201, { 'X-Fixture': 'preserved' }))
 fixture.get('/supplier', c => c.json(supplier))
+fixture.get('/sale-conflict', c => c.json(saleConflict, 409, { 'X-Fixture': 'preserved' }))
 app.route('/fixture', fixture)
 async function request(url, actor, method = 'GET', body) {
   user = actor; dbOpens = 0
   return app.request(`http://test${url}`, { method, ...(body ? { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) } : {}) }, {})
 }
 async function main() {
+  const conflictResponse = await request('/fixture/sale-conflict', employee)
+  assert.equal(conflictResponse.status, 409)
+  assert.equal(conflictResponse.headers.get('X-Fixture'), 'preserved')
+  assert.equal(conflictResponse.headers.get('Cache-Control'), 'private, no-store')
+  const conflictBody = await conflictResponse.json()
+  assert.deepEqual(JSON.parse(conflictBody.current.items), expectedConflictItems)
+  assert.equal(conflictBody.current.total_usd, 19)
+  assert.equal((await (await request('/fixture/sale-conflict', viewer)).json()).current.items, saleConflict.current.items)
+  assert.equal(JSON.stringify(saleConflict), saleConflictOriginal)
+  checks += 7
   branchRows = [{ id: 1, name: 'Tea', branch_quantity: 2, purchase_price_usd: 0, selling_price_usd: 3 }]
   for (const allowed of [false, true]) {
     const res = await request('/api/branches/1/stock', actor('staff', { branches: true, product_cost_view: allowed }))
