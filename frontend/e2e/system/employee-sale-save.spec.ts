@@ -244,7 +244,11 @@ for (const language of ['en', 'km']) for (const width of [1280, 360]) {
     await expect(page.getByText('E2E Replacement Balm', { exact: true }).first()).toBeVisible()
     const bounds = await page.getByPlaceholder(labels.search, { exact: true }).evaluate(search => {
       const panel = search.closest('td')!
-      const controls = [...panel.querySelectorAll('input, button, [role="button"]')].map(element => {
+      const scroller = search.closest('table')!.parentElement!
+      const initialScroll = scroller.scrollLeft
+      const controls = [initialScroll, 0, scroller.scrollWidth - scroller.clientWidth].flatMap(scrollLeft => {
+        scroller.scrollLeft = scrollLeft
+        return [...panel.querySelectorAll('input, button, [role="button"]')].map(element => {
         const rect = element.getBoundingClientRect()
         let left = 0, right = innerWidth
         for (let parent = element.parentElement; parent; parent = parent.parentElement) {
@@ -254,8 +258,10 @@ for (const language of ['en', 'km']) for (const width of [1280, 360]) {
             right = Math.min(right, bounds.left + parent.clientLeft + parent.clientWidth)
           }
         }
-        return { label: element.getAttribute('placeholder') || element.textContent?.trim(), left: rect.left, right: rect.right, clipLeft: left, clipRight: right }
+        return { label: element.getAttribute('placeholder') || element.textContent?.trim(), scrollLeft: scroller.scrollLeft, left: rect.left, right: rect.right, clipLeft: left, clipRight: right }
+        })
       })
+      scroller.scrollLeft = initialScroll
       return { viewport: innerWidth, document: document.documentElement.scrollWidth, controls }
     })
     expect(bounds.document).toBeLessThanOrEqual(bounds.viewport + 1)
