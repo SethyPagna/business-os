@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
 import { acquisitionCostResponses, hasAcquisitionCostInput } from '../lib/acquisitionCostAccess'
-import { hasProductMoneyPolicy, ProductMoneyWriteError } from '../lib/productWrites'
+import { productCreateErrorResponse, hasProductMoneyPolicy, ProductMoneyWriteError } from '../lib/productWrites'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { hasPermission, getActionTier, getPermissionTier } from '../lib/permissions'
 import { audit } from '../lib/audit'
@@ -226,6 +226,10 @@ app.post('/:id/approve', async (c) => {
     if (outcome.replayedBranchAction) return c.json({ success: true, data: outcome.replayedBranchAction, replayed: true })
     pendingActionMarkedAtomically = outcome.pendingActionMarkedAtomically
   } catch (err) {
+    if (row.section === 'products' && row.action_type === 'create' && row.entity_type === 'product') {
+      const response = productCreateErrorResponse(err)
+      if (response) return c.json(response.body, response.status)
+    }
     if (err instanceof BranchApprovalReceiptError) return c.json({ success: false, error: err.message, code: err.code,
       ...(err.code === 'unknown_outcome' ? { action: 'retry_same_request' } : {}) }, err.status)
     if (err instanceof BranchEditConflictError) return c.json({ success: false, error: err.message, code: err.code, conflict: true }, 409)

@@ -22,7 +22,7 @@ import { ordinaryBusinessMaintenanceGuard } from './businessMaintenanceGuard'
 import { audit, buildAuditStatement } from './audit'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from './cache'
-import { insertRow, updateRow, defaultBranchId, syncProductImageGallery, seedBranchStockForNewProduct, seedInitialBatchForNewProduct, readProductMoneyPlan } from './productWrites'
+import { createProductWithInitialStock, insertRow, updateRow, defaultBranchId, syncProductImageGallery, seedBranchStockForNewProduct, seedInitialBatchForNewProduct, readProductMoneyPlan } from './productWrites'
 import { branchUpdateStatements, assertBranchExpectedState, BranchEditConflictError, isBranchEditGuardError, BranchApprovalReceiptError } from './branchWrites'
 import { assertCanonicalBranchSetMutationAllowed, type BranchIdentitySnapshot } from './canonicalBranchIdentity'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt } from './conflictControl'
@@ -181,35 +181,11 @@ registerApplier('products', 'create', 'product', async (env, row, reviewer, wait
   const changesImages = productImageFieldsChanged(body)
   if (changesImages) await assertPendingProductImagePermission(env, row)
   else omitUnchangedProductImageFields(body)
-  const id = await insertRow(env, 'products', body, { name, is_active: body.is_active == null ? 1 : body.is_active })
-
-  const rawBranchId = Number.parseInt(String(body.branch_id ?? ''), 10)
-  const branchId = Number.isFinite(rawBranchId) && rawBranchId > 0 ? rawBranchId : await defaultBranchId(env)
-  // Was a hand-rolled single-branch INSERT here (only the chosen branch
-  // got a branch_stock row at all) -- despite this applier's own comment
-  // above claiming "same branch_stock seed" as the direct-write path, it
-  // wasn't actually the same call. That reproduced, for any product
-  // created through Review Required and then approved, the exact "new
-  // products only showed up at the one branch they were created
-  // against" bug seedBranchStockForNewProduct was written to fix for the
-  // direct-create path (routes/products.ts's own POST /) -- every other
-  // active branch had no row at all instead of an explicit tracked 0, so
-  // a branch-filtered Products/Inventory/POS view made the product look
-  // like it didn't exist there. Switched to the same shared helper the
-  // direct path calls, so both creation paths seed every active branch
-  // identically instead of two different implementations drifting apart.
-  // seedInitialBatchForNewProduct was missing entirely too -- a
-  // review-approved product had no "day added" default batch, unlike a
-  // directly-created one.
-  const initialQty = Math.max(0, Number(body.stock_quantity ?? 0) || 0)
-  await seedBranchStockForNewProduct(env, id as number, branchId, initialQty)
-  await seedInitialBatchForNewProduct(env, id as number, branchId, initialQty)
-  if ('image_gallery' in body) {
-    await syncProductImageGallery(env, id as number, body.image_gallery)
-  }
-  await audit(env, reviewer.id, reviewer.name, 'create', 'product', id as number, null)
+  const { id } = await createProductWithInitialStock(env, body, { name, is_active: body.is_active == null ? 1 : body.is_active }, undefined,
+    { row, reviewer: { reviewedBy: reviewer.id, reviewedByName: reviewer.name } })
   await bumpVersion(env, 'products')
   await notify(env, waitUntil, 'products', { action: 'create', id })
+  return { pendingActionMarkedAtomically: true }
 })
 
 // --- products / update / product -----------------------------------

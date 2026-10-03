@@ -197,7 +197,7 @@ import {
   normalizeMultiValue, validateProductImageGallery, validatePreservedProductImageGallery, ProductImageLimitError,
 } from '../lib/productWrites'
 import { actorSnapshot, actorId } from '../lib/actorSnapshot'
-import { prepareProductMoneyWrite, readProductMoneyPlan, ProductMoneyWriteError, PRODUCT_MONEY_PLAN, PRODUCT_MONEY_VERSION } from '../lib/productWrites'
+import { createProductWithInitialStock, productCreateDestination, productCreateErrorResponse, prepareProductMoneyWrite, readProductMoneyPlan, ProductMoneyWriteError, PRODUCT_MONEY_PLAN, PRODUCT_MONEY_VERSION } from '../lib/productWrites'
 export {
   PRODUCT_SKIP_KEYS, nowIso, tableColumns, clampNegativeStockQuantity,
   cleanPayload, insertRow, updateRow, syncProductImageGallery, defaultBranchId,
@@ -1940,6 +1940,11 @@ app.post('/', async (c) => {
   // merges such rows, so manual create must not mint a silent twin the
   // import path would never allow. Same name with a DIFFERENT REAL barcode
   // stays a legitimate child row and passes through untouched.
+  try { await productCreateDestination(c.env, body) } catch (error) {
+    const response = productCreateErrorResponse(error)
+    if (response) return c.json(response.body, response.status)
+    throw error
+  }
   const duplicate = await findSameProductIdentityProduct(c.env, name, body.barcode, null)
   if (duplicate) {
     return c.json(await foldCreateIntoExisting(c.env, user, duplicate, name, body))
@@ -1994,33 +1999,13 @@ app.post('/', async (c) => {
   const normalizedBrands = normalizeMultiValue(body.brand, body.brands)
   if (normalizedBrands !== undefined) body.brands = normalizedBrands
 
-  const id = await insertRow(c.env, 'products', body, { name, is_active: body.is_active == null ? 1 : body.is_active })
-
-  // `branch_id` isn't a products column (cleanPayload/insertRow drops it
-  // silently), so without this the product would have no branch_stock row
-  // at all -- invisible the moment POS or Inventory filters by a specific
-  // branch. Use whatever branch the form sent; if none was sent (e.g. a
-  // caller that predates the branch picker), fall back to the default
-  // branch rather than leaving the product unassigned.
-  const rawBranchId = Number.parseInt(String(body.branch_id ?? ''), 10)
-  const branchId = Number.isFinite(rawBranchId) && rawBranchId > 0 ? rawBranchId : await defaultBranchId(c.env)
-  // `|| 0` alone only catches NaN/0/''-falsy input -- a genuinely negative
-  // number (e.g. -5) is truthy and would sail straight through. Same
-  // "no negative stock" rule as cleanPayload's clampNegativeStockQuantity
-  // above; this branch_stock insert is a separate write path that never
-  // goes through cleanPayload at all. Seeds every active branch (not just
-  // the chosen one) at 0, per the Aug 19 2026 report that new products only
-  // showed up at the one branch they were created against -- see
-  // seedBranchStockForNewProduct's own comment.
-  const initialQty = Math.max(0, Number(body.stock_quantity ?? 0) || 0)
-  await seedBranchStockForNewProduct(c.env, id as number, branchId, initialQty)
-  await seedInitialBatchForNewProduct(c.env, id as number, branchId, initialQty)
-
-  const item = await getDb(c.env).prepare('SELECT * FROM products WHERE id = @id').get({ id })
-  if ('image_gallery' in body) {
-    const gallery = await syncProductImageGallery(c.env, id as number, body.image_gallery, imageLimitForUser(user))
-    if (item) (item as Record<string, unknown>).image_gallery = gallery
+  let created
+  try { created = await createProductWithInitialStock(c.env, body, { name, is_active: body.is_active == null ? 1 : body.is_active }, imageLimitForUser(user)) } catch (error) {
+    const response = productCreateErrorResponse(error)
+    if (response) return c.json(response.body, response.status)
+    throw error
   }
+  const { item, id } = created
   c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'create', id }))
   return c.json({ item, id, success: true })
@@ -2677,20 +2662,16 @@ app.post('/variant', async (c) => {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
   if (!changesImages) omitUnchangedProductImageFields(body)
-  const id = await insertRow(c.env, 'products', body, { name, is_active: 1 })
-
-  const rawBranchId = Number.parseInt(String(body.branch_id ?? ''), 10)
-  const branchId = Number.isFinite(rawBranchId) && rawBranchId > 0 ? rawBranchId : await defaultBranchId(c.env)
-  // Same clamp as POST / above -- `|| 0` alone doesn't catch a genuinely
-  // negative number, which is truthy. Same all-active-branches seeding as
-  // POST / above -- see seedBranchStockForNewProduct's own comment.
-  const initialQty = Math.max(0, Number(body.stock_quantity ?? 0) || 0)
-  await seedBranchStockForNewProduct(c.env, id as number, branchId, initialQty)
-  await seedInitialBatchForNewProduct(c.env, id as number, branchId, initialQty)
-
+  let created
+  try { created = await createProductWithInitialStock(c.env, body, { name, is_active: 1 }, imageLimitForUser(user)) } catch (error) {
+    const response = productCreateErrorResponse(error)
+    if (response) return c.json(response.body, response.status)
+    throw error
+  }
+  const { item, id } = created
   c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'create', id }))
-  return c.json({ item: await getDb(c.env).prepare('SELECT * FROM products WHERE id = @id').get({ id }), id, success: true })
+  return c.json({ item, id, success: true })
 })
 
 // POST /api/products/merge-duplicates -- retroactive cleanup for products
