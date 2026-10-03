@@ -57,6 +57,7 @@ import type { SessionUser } from './auth'
 import { getActionTier } from './permissions'
 import { actorSnapshot } from './actorSnapshot'
 import { ordinaryBusinessBatch } from './businessMaintenanceGuard'
+import { requireReceivingBranch, receivingBranchAssertion, isReceivingBranchError, RECEIVING_BRANCH_INACTIVE } from './receivingBranch'
 import { resolveMovementCostSnapshot, type MovementCostPair } from './movementCostSnapshot'
 import { planHoldAsTagged } from './damagedLotActions'
 import type { StockWriteStatement } from './productBatches'
@@ -349,6 +350,12 @@ export async function applyStockLotSet(
     batchId: request.batchId, setScope: request.setScope, createdSibling: false,
   }
   if (lotDelta === 0) return { status: 200, body: { ...base, movementType: 'set', quantity: 0, before, after } }
+  if (lotDelta > 0) {
+    try { await requireReceivingBranch(db, request.branchId) } catch (error) {
+      if (isReceivingBranchError(error)) return { status: 409, body: RECEIVING_BRANCH_INACTIVE }
+      throw error
+    }
+  }
 
   const effect: Effect = {
     productName: facts.product_name, branchName: facts.branch_name, unitCostUsd: facts.unit_cost_usd ?? null,
@@ -371,6 +378,7 @@ export async function applyStockLotSet(
   }
   const statements: Statement[] = [
     stateGuard(before),
+    ...(lotDelta > 0 ? [receivingBranchAssertion(request.branchId)] : []),
     ...(recordOperation ? [{ sql: `INSERT INTO stock_lot_adjustment_operations(id,actor_id,request_id,request_json,request_digest,response_json,before_json,after_json,revision_json)
       VALUES(@operation,@actor,@requestId,@requestJson,@digest,@response,@before,@after,@revision)`, params: opParams }] : []),
     ...quantityStatements(before, after),
@@ -391,6 +399,7 @@ export async function applyStockLotSet(
       if (concurrent) return replay(concurrent)
     }
     if (isMaintenanceError(error)) return MAINTENANCE_RESPONSE
+    if (isReceivingBranchError(error)) return { status: 409, body: RECEIVING_BRANCH_INACTIVE }
     return conflict('Stock changed while saving. No correction was applied; refresh and try again.')
   }
   if (!recordOperation) return { status: 200, body: response }
