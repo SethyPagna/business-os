@@ -187,7 +187,12 @@ await check('actual route preserves current-actor genuine network unknown behavi
     route:actualRoute(globalEvents,invalidations),apiFetch:async()=>{throw error},
     assertActorSessionDispatchAllowed:()=>{},assertActorReadScope:extract(actorSource,'assertActorReadScope',{isActorReadScopeCurrent:()=>true}),isActorReadScopeCurrent:()=>true,
   })
-  await assert.rejects(leaf(41,scope),(received:any)=>{assert.equal(received,error);assert.equal(received.outcome,'unknown');return true})
+  await assert.rejects(leaf(41,scope),(received:unknown)=>{
+    assert.equal(received,error)
+    assert.ok(received instanceof Error && 'outcome' in received)
+    assert.equal(received.outcome,'unknown')
+    return true
+  })
   assert.equal(globalEvents.length,1);assert.equal(globalEvents[0].type,'sync:error');assert.equal(globalEvents[0].detail.outcome,'unknown')
   assert.deepEqual(invalidations,[])
 })
