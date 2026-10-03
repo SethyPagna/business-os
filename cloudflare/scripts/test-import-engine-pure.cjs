@@ -276,6 +276,7 @@ const productImagePermissionModule = loadPureSibling('productImagePermission', (
 })
 
 function requireForProductBatches(request) {
+  if (request === './receivingBranch') return loadPureSibling('receivingBranch')
   if (request === './productDetailRule') return productDetailRuleModuleObj.exports
   if (request === './productDescriptionSections') return productDescriptionSectionsModuleObj.exports
   if (request === './batchCode') return batchCodeModuleObj.exports

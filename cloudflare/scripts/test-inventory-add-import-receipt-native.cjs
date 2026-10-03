@@ -16,7 +16,7 @@ function compile(name, dependencies = {}, allowUncalledStubs = false) {
 }
 const money = compile('moneyPrecision')
 const sqlBinding = compile('sqlBinding')
-const batches = compile('productBatches', { './moneyPrecision': money, './sqlBinding': sqlBinding, './batchCode': compile('batchCode') })
+const batches = compile('productBatches', { './moneyPrecision': money, './sqlBinding': sqlBinding, './batchCode': compile('batchCode'), './receivingBranch': compile('receivingBranch') })
 const catalog = compile('catalogCostRecompute', { './moneyPrecision': money })
 const engine = compile('importEngine', { './productBatches': batches, './catalogCostRecompute': catalog,
   './moneyPrecision': money, './sqlBinding': sqlBinding, './stockReceiptGate': compile('stockReceiptGate') }, true)

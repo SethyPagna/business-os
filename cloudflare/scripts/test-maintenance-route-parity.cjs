@@ -70,8 +70,15 @@ async function main() {
       assert.equal(env.restoreCalls, 0)
       assert.equal(env.events.length, 0, 'raced admission must not record job or audit')
       assert.equal(db.prepare('SELECT * FROM system_flags').get(), undefined)
+    } else if (scenario === 'corrupt-clear-replaced') {
+      assert.equal(response.status, 503); assert.equal(result.cleared, false)
+      assert.equal(result.code, 'maintenance_active')
+      assert.equal(reads, 1)
+      assert.equal(env.events.length, 0, 'corrupt hold must not claim a successful clear')
+      assert.equal(db.prepare('SELECT value FROM system_flags').get().value, replacement)
     } else if (scenario.endsWith('replaced')) {
       assert.equal(response.status, 409); assert.equal(result.cleared, false)
+      assert.equal(reads, 2)
       assert.equal(env.events.length, 0, 'failed clear must not claim success in audit')
       assert.equal(db.prepare('SELECT value FROM system_flags').get().value, replacement)
     } else if (scenario === 'restore-release-failed') {
