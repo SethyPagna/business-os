@@ -86,13 +86,7 @@ const db = {
     }
   },
   async batch(items) {
-    const results = []
-    for (const item of items) {
-      const stmt = rawDb.prepare(item.sql)
-      const r = stmt.run(item.params || {})
-      results.push({ changes: r.meta?.changes ?? 0, lastInsertRowid: Number(r.meta?.last_row_id ?? 0) })
-    }
-    return results
+    return rawDb.batch(items)
   },
   async batchOnce(items) { return this.batch(items) },
   exec(sql) {
@@ -208,6 +202,10 @@ const branchWrites = loadReal('lib/branchWrites.ts', {
 const branchRoleGuards = loadReal('lib/branchRoleGuards.ts', { './branchRoles': branchRoles })
 const schemaProbeReal = loadReal('lib/schemaProbe.ts')
 const productWrites = loadReal('lib/productWrites.ts', { './schemaProbe': schemaProbeReal,
+  './receivingBranch': loadReal('lib/receivingBranch.ts'),
+  './businessMaintenanceGuard': loadReal('lib/businessMaintenanceGuard.ts'),
+  './pendingActions': pendingActions,
+  './audit': realAudit,
   './catalogCostRecompute': loadReal('lib/catalogCostRecompute.ts', { './moneyPrecision': loadReal('lib/moneyPrecision.ts') }),
   './moneyPrecision': loadReal('lib/moneyPrecision.ts'),
   ...dbStub,
@@ -328,6 +326,20 @@ async function check(name, fn) {
 }
 
 async function main() {
+  await check('atomic adapter rolls back failures and retains mixed SELECT results', async () => {
+    rawDb.exec('CREATE TEMP TABLE fixture_atomic_probe (value INTEGER NOT NULL)')
+    await assert.rejects(db.batchOnce([
+      { sql: 'INSERT INTO fixture_atomic_probe VALUES (1)', params: {} },
+      { sql: 'INSERT INTO fixture_atomic_probe VALUES (NULL)', params: {} },
+    ]), /NOT NULL/)
+    assert.equal(rawDb.prepare('SELECT COUNT(*) AS n FROM fixture_atomic_probe').get().n, 0)
+    const results = await db.batchOnce([
+      { sql: 'INSERT INTO fixture_atomic_probe VALUES (2)', params: {} },
+      { sql: 'SELECT value FROM fixture_atomic_probe', params: {} },
+    ])
+    assert.equal(results[1].results[0].value, 2)
+    rawDb.exec('DROP TABLE fixture_atomic_probe')
+  })
   await check('a Full Access user deletes a fee directly, no pending row created', async () => {
     const feeId = seedFee()
     const { status, json } = await req(feesApp, FULL_USER, 'DELETE', `/${feeId}`)

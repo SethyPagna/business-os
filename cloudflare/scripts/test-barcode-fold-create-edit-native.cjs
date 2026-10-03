@@ -48,13 +48,9 @@ const db = {
     return api
   },
   async batch(items) {
-    if (items.every(({ sql }) => /^\s*(?:SELECT|WITH|PRAGMA)\b/i.test(sql))) {
-      return items.map(({ sql, params }) => ({ success: true, results: db.prepare(sql).all(params || {}) }))
-    }
-    const out = []
-    for (const item of items) out.push(db.prepare(item.sql).run(item.params || {}))
-    return out
+    return rawDb.batch(items)
   },
+  async batchOnce(items) { return this.batch(items) },
   async transaction(fn) { return fn(db) },
 }
 const fakeEnv = { DB: db }
@@ -190,6 +186,20 @@ async function check(name, fn) {
 }
 
 async function main() {
+  await check('atomic adapter rolls back failures and retains mixed SELECT results', async () => {
+    rawDb.exec('CREATE TEMP TABLE fixture_atomic_probe (value INTEGER NOT NULL)')
+    await assert.rejects(db.batchOnce([
+      { sql: 'INSERT INTO fixture_atomic_probe VALUES (1)', params: {} },
+      { sql: 'INSERT INTO fixture_atomic_probe VALUES (NULL)', params: {} },
+    ]), /NOT NULL/)
+    assert.equal(rawDb.prepare('SELECT COUNT(*) AS n FROM fixture_atomic_probe').get().n, 0)
+    const results = await db.batchOnce([
+      { sql: 'INSERT INTO fixture_atomic_probe VALUES (2)', params: {} },
+      { sql: 'SELECT value FROM fixture_atomic_probe', params: {} },
+    ])
+    assert.equal(results[1].results[0].value, 2)
+    rawDb.exec('DROP TABLE fixture_atomic_probe')
+  })
   await check('create-fold: existing padded barcode "0123456" + incoming "123456" same name -> ONE product, stored barcode cleaned, no 409', async () => {
     seedBranch()
     rawDb.prepare(`INSERT INTO products (id, name, barcode, is_active, cost_price_usd, cost_price_khr, selling_price_usd)

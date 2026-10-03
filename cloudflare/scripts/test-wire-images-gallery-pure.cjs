@@ -123,6 +123,10 @@ const productConflictActionGroups = loadReal('lib/productConflictActionGroups.ts
 const productMergeSnapshot = loadReal('lib/productMergeSnapshot.ts', { './db': { getDb: () => dbShim } })
 const schemaProbeReal = loadReal('lib/schemaProbe.ts')
 const productWrites = loadReal('lib/productWrites.ts', { './schemaProbe': schemaProbeReal,
+  './receivingBranch': loadReal('lib/receivingBranch.ts'),
+  './businessMaintenanceGuard': loadReal('lib/businessMaintenanceGuard.ts'),
+  './pendingActions': loadReal('lib/pendingActions.ts', { './db': { getDb: () => dbShim } }),
+  './audit': loadReal('lib/audit.ts', { './db': { getDb: () => dbShim } }),
   './catalogCostRecompute': loadReal('lib/catalogCostRecompute.ts'),
   './db': { getDb: () => dbShim },
   './media': media,

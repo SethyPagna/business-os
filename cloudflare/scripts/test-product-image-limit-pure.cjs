@@ -38,6 +38,10 @@ function load(relativePath, stubs = {}) {
 
 const media = load('lib/media.ts')
 const productWrites = load('lib/productWrites.ts', {
+  './receivingBranch': load('lib/receivingBranch.ts'),
+  './businessMaintenanceGuard': load('lib/businessMaintenanceGuard.ts'),
+  './pendingActions': load('lib/pendingActions.ts', { './db': { getDb: () => { throw new Error('No DB in gallery validation') } } }),
+  './audit': load('lib/audit.ts', { './db': { getDb: () => { throw new Error('No DB in gallery validation') } } }),
   './moneyPrecision': load('lib/moneyPrecision.ts'),
   './catalogCostRecompute': load('lib/catalogCostRecompute.ts', { './moneyPrecision': load('lib/moneyPrecision.ts') }),
   './db': { getDb: () => { throw new Error('DB must not be touched by pure gallery validation') } },
