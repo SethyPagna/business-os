@@ -225,7 +225,7 @@ export default function BranchForm({ branch, onSave, onClose }: BranchFormProps)
 
       <div>
         <label htmlFor="branch-notes" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-          {t('notes') || 'Notes'}
+          {t('description')}
         </label>
         <textarea
           id="branch-notes"
@@ -234,7 +234,7 @@ export default function BranchForm({ branch, onSave, onClose }: BranchFormProps)
           rows={2}
           value={form.notes}
           onChange={(event) => set('notes', event.target.value)}
-          placeholder={t('notes_placeholder') || 'Any notes...'}
+          placeholder={t('description')}
         />
       </div>
 

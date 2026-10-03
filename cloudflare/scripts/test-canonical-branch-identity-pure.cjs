@@ -166,6 +166,27 @@ async function main() {
     assert.equal(db.prepare('SELECT is_default FROM branches WHERE id=3').get().is_default, 1)
   })
 
+  await check('description edits retain historical branch names and sales timestamps', () => {
+    const db = freshDb()
+    const tables = ['sales', 'inventory_movements', 'returns', 'stock_row_moves']
+    for (const table of tables) {
+      for (const name of ['Original warehouse', ' Warehouse ', '', null]) {
+        db.prepare(`INSERT INTO ${table}(branch_id,branch_name) VALUES (?,?)`).run(2, name)
+      }
+      db.prepare(`INSERT INTO ${table}(branch_id,branch_name) VALUES (?,?)`).run(1, 'Original shop')
+    }
+    db.prepare("UPDATE sales SET updated_at='2026-09-01 08:00:00'").run()
+    const current = db.prepare('SELECT id,name,is_active FROM branches WHERE id=2').get()
+    runBatch(db, writes.branchUpdateStatements(2, { notes: 'Receiving and storage' }, current))
+    assert.equal(db.prepare('SELECT notes FROM branches WHERE id=2').get().notes, 'Receiving and storage')
+    for (const table of tables) {
+      assert.deepStrictEqual(db.prepare(`SELECT branch_name FROM ${table} ORDER BY rowid`).all().map(row => row.branch_name),
+        ['Original warehouse', 'Warehouse', 'Warehouse', 'Warehouse', 'Original shop'], table)
+    }
+    assert.equal(db.prepare('SELECT updated_at FROM sales WHERE rowid=1').get().updated_at, '2026-09-01 08:00:00')
+    db.close()
+  })
+
   await check('rename, deactivation, and legacy-row conversion fail before SQL is built', () => {
     const shop = { id: 1, name: 'Shop', is_active: 1 }
     assert.throws(() => writes.branchUpdateStatements(1, { name: 'Depot' }, shop), identity.CanonicalBranchIdentityError)
