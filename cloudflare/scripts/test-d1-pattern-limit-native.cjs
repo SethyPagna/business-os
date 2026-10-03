@@ -209,6 +209,7 @@ async function verifyRealSettlementRoute(migration) {
   const original = oldSchema()
   const required = new Set([...tables,'sales','sale_items','users','returns','return_items','settings','sale_item_batch_allocations','sale_write_revisions','sale_mutation_receipts','sale_mutation_guards','sale_bulk_guards','action_history','audit_logs','system_flags','products','branches','branch_stock','inventory_movements','fees','delivery_contacts','return_write_revisions','return_bulk_guards','return_item_batch_allocations','return_replacement_items','damaged_stock_lots','product_batches','branch_batch_stock','transfer_operation_receipts'])
   required.add('customers')
+  required.add('pending_actions')
   // Preserve all transitive foreign-key targets instead of turning FK checks off.
   for (const name of required) for (const fk of original.prepare(`PRAGMA foreign_key_list(${name})`).all()) required.add(fk.table)
   const objects = original.prepare("SELECT name,tbl_name,type,sql FROM sqlite_master WHERE sql IS NOT NULL").all().filter(o => required.has(o.tbl_name))
@@ -220,7 +221,7 @@ async function verifyRealSettlementRoute(migration) {
     // contract. Apply its exact migration while retaining the old pattern
     // CHECKs so the before/after 0156 regression remains meaningful. The
     // seeded users row likewise carries 0202's must_change_password column.
-    for (const file of ['0158_sale_return_money_precision.sql', '0159_sale_item_pricing_snapshot.sql', '0160_customer_return_refund_snapshot.sql', '0202_users_must_change_password.sql']) {
+    for (const file of ['0158_sale_return_money_precision.sql', '0159_sale_item_pricing_snapshot.sql', '0160_customer_return_refund_snapshot.sql', '0202_users_must_change_password.sql', '0223_branch_lifecycle_identity.sql']) {
       await db.batch(split(fs.readFileSync(path.join(migrations, file), 'utf8')).map(sql => db.prepare(sql)))
     }
     const inserts = []
