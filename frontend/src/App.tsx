@@ -1158,6 +1158,7 @@ class PageErrorBoundary extends Component<PageErrorBoundaryProps, PageErrorBound
 }
 
 function Notification({ notification, onDismiss }: NotificationProps) {
+  const { t } = useApp()
   // Toast notifications are rendered once here so feature pages only need to
   // enqueue messages through AppContext.
   if (!notification) return null
@@ -1171,7 +1172,7 @@ function Notification({ notification, onDismiss }: NotificationProps) {
       <span className="flex-1 min-w-0 break-words">{prefix}{notification.message}</span>
       <button
         type="button"
-        aria-label="Dismiss notification"
+        aria-label={t('dismiss_notification')}
         onClick={onDismiss}
         className="shrink-0 -mt-0.5 -mr-0.5 rounded-full p-1 leading-none text-white/80 hover:text-white hover:bg-white/15 transition-colors"
       >
