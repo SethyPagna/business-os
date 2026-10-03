@@ -18,7 +18,7 @@ import { buildInClause, chunkForBinding, selectInChunks } from '../lib/sqlBindin
 import { attachBeforeQty, buildStockLedgerQuery, loadMovementStockBalances, movementBalanceFields, type MovementStockBalance, type StockLedgerView } from '../lib/stockLedgerQuery'
 import { buildStockInSessionListQuery, parseStockInSessionKey, stockInSessionLineParams, stockInSessionLinesSql, STOCK_RECEIPT_TYPE_SQL } from '../lib/stockInSessionsQuery'
 import { getProductSalesBreakdown } from '../lib/salesAnalytics'
-import { localDateExpr, localMonthExpr } from '../lib/businessDateWindow'
+import { localRangeClockError, localDateExpr, localMonthExpr } from '../lib/businessDateWindow'
 import { isPublicImageFormat, UNSUPPORTED_IMAGE_MESSAGE, validateUploadedBuffer, type DetectedUploadFormat } from '../lib/uploadSecurity'
 import { checkRateLimit, getClientIp } from '../lib/rateLimit'
 import { admitRequestBody } from '../lib/requestBodyGuard'
@@ -1621,6 +1621,8 @@ app.get('/stock-ledger', async (c) => {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
   const query = c.req.query()
+  const clockError = localRangeClockError(query.startTime, query.endTime)
+  if (clockError) return c.json({ code: 'invalid_time_range', error: clockError }, 400)
   const page = Math.max(1, Number(query.page) || 1)
   // 1000-cap (was 100): the Stock Changes CSV export walks pages of this
   // endpoint for a chosen date range -- 10x fewer round trips per export,

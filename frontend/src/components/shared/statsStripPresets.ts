@@ -17,6 +17,7 @@ export interface DateTimeRange {
 const FULL_DAY_TIMES = { startTime: '00:00', endTime: '23:59' }
 
 export type StatsPresetKey = 'all' | 'today' | 'yesterday' | '7d' | '30d' | 'week' | 'month' | 'year'
+  | 'last_month' | 'quarter' | 'last_quarter' | '6m' | 'half_year' | 'last_half_year' | 'last_year'
 
 export const STATS_PRESETS: ReadonlyArray<{ id: StatsPresetKey; key: string; fallback: string }> = [
   { id: 'all', key: 'all_time', fallback: 'All time' },
@@ -27,6 +28,13 @@ export const STATS_PRESETS: ReadonlyArray<{ id: StatsPresetKey; key: string; fal
   { id: 'week', key: 'this_week', fallback: 'This week' },
   { id: 'month', key: 'this_month', fallback: 'This month' },
   { id: 'year', key: 'this_year', fallback: 'This year' },
+  { id: 'last_month', key: 'last_month', fallback: 'Last month' },
+  { id: 'quarter', key: 'this_quarter', fallback: 'This quarter' },
+  { id: 'last_quarter', key: 'last_quarter', fallback: 'Last quarter' },
+  { id: '6m', key: 'last_6_months', fallback: 'Last 6 months' },
+  { id: 'half_year', key: 'this_half_year', fallback: 'This half-year' },
+  { id: 'last_half_year', key: 'last_half_year', fallback: 'Last half-year' },
+  { id: 'last_year', key: 'last_year', fallback: 'Last year' },
 ]
 
 function pad2(n: number): string {
@@ -43,6 +51,13 @@ function presetNow(now?: Date): Date {
   // than inheriting whatever timezone the user's device happens to use.
   if (now) return new Date(now.getTime())
   return new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Phnom_Penh' }))
+}
+
+function calendarPeriodRange(current: Date, months: number, previous: boolean): DateTimeRange {
+  const firstMonth = Math.floor(current.getMonth() / months) * months
+  const start = new Date(current.getFullYear(), firstMonth - (previous ? months : 0), 1)
+  const end = previous ? new Date(current.getFullYear(), firstMonth, 0) : current
+  return { ...FULL_DAY_TIMES, startDate: isoDay(start), endDate: isoDay(end) }
 }
 
 /** Full-day range for the quick-range controls inside DateTimeRangePicker. */
@@ -79,17 +94,28 @@ export function statsPresetRange(preset: StatsPresetKey, now?: Date): DateTimeRa
   if (preset === 'month') {
     return { ...FULL_DAY_TIMES, startDate: `${current.getFullYear()}-${pad2(current.getMonth() + 1)}-01`, endDate: end }
   }
+  if (preset === 'last_month') return calendarPeriodRange(current, 1, true)
+  if (preset === 'quarter') return calendarPeriodRange(current, 3, false)
+  if (preset === 'last_quarter') return calendarPeriodRange(current, 3, true)
+  if (preset === 'half_year') return calendarPeriodRange(current, 6, false)
+  if (preset === 'last_half_year') return calendarPeriodRange(current, 6, true)
+  if (preset === 'last_year') return calendarPeriodRange(current, 12, true)
+  if (preset === '6m') {
+    const start = new Date(current.getFullYear(), current.getMonth() - 6, 1)
+    const lastDay = new Date(start.getFullYear(), start.getMonth() + 1, 0).getDate()
+    start.setDate(Math.min(current.getDate(), lastDay) + 1)
+    return { ...FULL_DAY_TIMES, startDate: isoDay(start), endDate: end }
+  }
   return { ...FULL_DAY_TIMES, startDate: `${current.getFullYear()}-01-01`, endDate: end }
 }
 
 /** Which legacy preset (if any) the current range equals. */
 export function activeStatsPreset(range: DateTimeRange, now?: Date): StatsPresetKey | null {
   // Custom partial-day ranges must not highlight a full-day preset.
-  if ((range.startTime && range.startTime !== '00:00') || (range.endTime && range.endTime !== '23:59')) return null
+  if ((range.startTime && range.startTime !== '00:00') || (range.endTime && range.endTime !== '23:59' && range.endTime !== '24:00')) return null
   // Match the common picker order. On dates such as April 30, 30d and month
   // are the same range; the first visible matching choice owns the highlight.
-  const presets: StatsPresetKey[] = ['all', 'today', 'yesterday', '7d', '30d', 'week', 'month', 'year']
-  for (const preset of presets) {
+  for (const { id: preset } of STATS_PRESETS) {
     const candidate = statsPresetRange(preset, now)
     if (candidate.startDate === range.startDate && candidate.endDate === range.endDate) return preset
   }

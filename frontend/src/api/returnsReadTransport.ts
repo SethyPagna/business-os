@@ -8,7 +8,7 @@ export function returnRangeParams(range: { startDate: string; endDate: string; s
   const params: QueryParams = { startDate: range.startDate || undefined, endDate: range.endDate || undefined }
   const startTime = range.startTime || '00:00'
   const endTime = range.endTime || '23:59'
-  if (startTime === '00:00' && endTime === '23:59') return params
+  if (startTime === '00:00' && (endTime === '23:59' || endTime === '24:00')) return params
   const createdFrom = reportUtcBound(range.startDate, startTime)
   const createdTo = reportUtcBound(range.endDate, endTime, 1)
   if (!createdFrom || !createdTo || createdFrom >= createdTo) throw new RangeError('Return end date/time must be after the start date/time; both dates are required.')

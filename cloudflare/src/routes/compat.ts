@@ -18,7 +18,8 @@ import { getGoogleLoginPublicConfig } from '../lib/googleOauth'
 import { CUSTOMER_REFUND_JOIN, getSalesTotals, getSalesTotalsAndPeriodSeries, identifiedCustomerExpr, reportCustomerNameExpr, netRefundExpr, netSaleExpr, previousPeriodFilters, recognizedExpr, shiftWindowBound, shiftWindowWhere } from '../lib/salesAnalytics'
 import { getFamilyStockAlertPage, getFamilyStockStats, type FamilyStockAlertState } from '../lib/familyStockStats'
 import { loadLowStockConfig } from '../lib/lowStockSettings'
-import { businessToday, localDateAtOrAfter, localDateAtOrBefore, localDateRangeClause, localHourExpr, localTimeRangeClause } from '../lib/businessDateWindow'
+import { localRangeClockError, isLocalRangeClock, businessToday, localDateAtOrAfter, localDateAtOrBefore, localDateRangeClause, localHourExpr, localTimeRangeClause } from '../lib/businessDateWindow'
+import { continuousReadWindowSql, parseContinuousReadWindow } from '../lib/continuousReadWindow'
 import { actorSnapshot } from '../lib/actorSnapshot'
 import { secretEncryptionStatus } from '../lib/secretCrypto'
 import { gateTotals } from './reports'
@@ -692,12 +693,17 @@ app.get('/system/audit-logs', requireAuth, async (c) => {
       lockedUserId: ownOnly ? Number(user?.id) : undefined,
       startDate: c.req.query('startDate'),
       endDate: c.req.query('endDate'),
+      createdFrom: c.req.query('createdFrom'),
+      createdTo: c.req.query('createdTo'),
+      startTime: c.req.query('startTime'),
+      endTime: c.req.query('endTime'),
       order: c.req.query('order'),
       cursor,
       pageSize: c.req.query('pageSize'),
       counts: c.req.query('counts'),
     }))
   } catch (error) {
+    if (error instanceof RangeError) return c.json({ error: error.message }, 400)
     // A db error is a 500, never an empty 200 that reads as "no logs": the
     // client falls back to its local mirror (and says so) instead of
     // presenting an error as an empty trail.
@@ -747,6 +753,11 @@ app.get('/system/legacy-deleted-sales', requireAuth, async (c) => {
   const denied = denyUnless(c, 'audit_log')
   if (denied) return denied
   const query = c.req.query()
+  let continuousWindow
+  try { continuousWindow = parseContinuousReadWindow(query) } catch (error) {
+    if (error instanceof RangeError) return c.json({ error: error.message }, 400)
+    throw error
+  }
   const page = Math.max(1, Number.parseInt(query.page || '1', 10) || 1)
   const pageSize = Math.min(200, Math.max(1, Number.parseInt(query.page_size || '50', 10) || 50))
 
@@ -775,8 +786,13 @@ app.get('/system/legacy-deleted-sales', requireAuth, async (c) => {
   // no date filter set).
   const from = String(query.from || '').slice(0, 10)
   const to = String(query.to || '').slice(0, 10)
-  if (from) { conditions.push(`d.deleted_at IS NOT NULL AND ${localDateAtOrAfter('d.deleted_at', '@from')}`); params.from = from }
-  if (to) { conditions.push(`d.deleted_at IS NOT NULL AND ${localDateAtOrBefore('d.deleted_at', '@to')}`); params.to = to }
+  if (continuousWindow) {
+    conditions.push(continuousReadWindowSql('d.deleted_at'))
+    Object.assign(params, continuousWindow)
+  } else {
+    if (from) { conditions.push(`d.deleted_at IS NOT NULL AND ${localDateAtOrAfter('d.deleted_at', '@from')}`); params.from = from }
+    if (to) { conditions.push(`d.deleted_at IS NOT NULL AND ${localDateAtOrBefore('d.deleted_at', '@to')}`); params.to = to }
+  }
   const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''
 
   try {
@@ -1216,8 +1232,22 @@ app.get('/transfers', async (c) => {
   }
 
   const query = c.req.query()
+  const clockError = localRangeClockError(query.startTime, query.endTime)
+  if (clockError) return c.json({ code: 'invalid_time_range', error: clockError }, 400)
+  let continuousWindow
+  try { continuousWindow = parseContinuousReadWindow(query) } catch (error) {
+    return c.json({ error: (error as Error).message }, 400)
+  }
   const startDate = String(query.startDate || '').trim()
   const endDate = String(query.endDate || '').trim()
+  if (continuousWindow) {
+    const validDay = (value: string) => {
+      if (!value) return true
+      const date = new Date(`${value}T00:00:00Z`)
+      return /^\d{4}-\d{2}-\d{2}$/.test(value) && Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value
+    }
+    if (!validDay(startDate) || !validDay(endDate) || (startDate && endDate && startDate > endDate)) return c.json({ error: 'Invalid transfer date range' }, 400)
+  }
   const fromBranchId = String(query.fromBranchId || query.from_branch_id || '').trim()
   const toBranchId = String(query.toBranchId || query.to_branch_id || '').trim()
   const clauses: string[] = ['1=1']
@@ -1226,11 +1256,15 @@ app.get('/transfers', async (c) => {
   // Transfer timestamps are stored in UTC. Every other business-day report
   // uses the fixed Cambodia UTC+7 helpers; using raw date(created_at) here
   // misclassified transfers made between 00:00 and 06:59 local time.
-  if (/^\d{4}-\d{2}-\d{2}$/.test(startDate)) {
+  if (continuousWindow) {
+    clauses.push(continuousReadWindowSql('st.created_at'))
+    Object.assign(bindings, continuousWindow)
+  }
+  if (!continuousWindow && /^\d{4}-\d{2}-\d{2}$/.test(startDate)) {
     clauses.push(localDateAtOrAfter('st.created_at'))
     bindings.startDate = startDate
   }
-  if (/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
+  if (!continuousWindow && /^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
     clauses.push(localDateAtOrBefore('st.created_at'))
     bindings.endDate = endDate
   }
@@ -1238,10 +1272,9 @@ app.get('/transfers', async (c) => {
   // bound above -- same "date and time range" picker/route pattern
   // sales.ts's appendLocalTimeRange already uses. Both start/end must be
   // present and valid to take effect.
-  const LOCAL_TIME_RE = /^(?:[01]\d|2[0-3]):[0-5]\d$/
   const startTime = String(query.startTime || '').trim()
   const endTime = String(query.endTime || '').trim()
-  if (LOCAL_TIME_RE.test(startTime) && LOCAL_TIME_RE.test(endTime)) {
+  if (isLocalRangeClock(startTime) && isLocalRangeClock(endTime, true)) {
     clauses.push(localTimeRangeClause('st.created_at'))
     bindings.startTime = startTime
     bindings.endTime = endTime

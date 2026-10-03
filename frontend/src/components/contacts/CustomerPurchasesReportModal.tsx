@@ -76,6 +76,8 @@ export default function CustomerPurchasesReportModal({ customerId, customerName,
   // literal empty strings).
   const [fromDate, setFromDate] = useState('')
   const [toDate, setToDate] = useState('')
+  const [startTime, setStartTime] = useState('')
+  const [endTime, setEndTime] = useState('')
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
   const [result, setResult] = useState<CustomerReportResult | null>(null)
@@ -85,7 +87,7 @@ export default function CustomerPurchasesReportModal({ customerId, customerName,
 
   const trText = (key: string, fallback: string): string => tr(t, key, fallback)
 
-  useEffect(() => { setPage(1) }, [customerId, fromDate, toDate])
+  useEffect(() => { setPage(1) }, [customerId, fromDate, toDate, startTime, endTime])
 
   const load = useCallback(async () => {
     const requestId = requestRef.current + 1
@@ -100,6 +102,7 @@ export default function CustomerPurchasesReportModal({ customerId, customerName,
       }
       if (fromDate) params.startDate = fromDate
       if (toDate) params.endDate = toDate
+      if (startTime && endTime) Object.assign(params, { startTime, endTime })
       const response = await getCustomerSalesReport(params) as CustomerReportResult | null
       if (requestRef.current !== requestId) return
       setResult(response || null)
@@ -110,7 +113,7 @@ export default function CustomerPurchasesReportModal({ customerId, customerName,
     } finally {
       if (requestRef.current === requestId) setLoading(false)
     }
-  }, [customerId, fromDate, toDate, page, pageSize, t])
+  }, [customerId, fromDate, toDate, startTime, endTime, page, pageSize, t])
 
   useEffect(() => { load() }, [load])
 
@@ -126,10 +129,13 @@ export default function CustomerPurchasesReportModal({ customerId, customerName,
           than a second nested scrollbar. */}
       <div className="flex h-full min-h-0 flex-col gap-3">
         <StatsRangeRow
-          range={{ startDate: fromDate, endDate: toDate, startTime: '', endTime: '' }}
+          showTime
+          range={{ startDate: fromDate, endDate: toDate, startTime, endTime }}
           onRangeChange={(range) => {
             setFromDate(range.startDate || '')
             setToDate(range.endDate || '')
+            setStartTime(range.startTime || '')
+            setEndTime(range.endTime || '')
           }}
           t={t}
         />

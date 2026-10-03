@@ -15,6 +15,7 @@ async function operationWritesReady(db: ReturnType<typeof getDb>): Promise<boole
   }
 }
 import { localDateAtOrAfter, localDateAtOrBefore } from '../lib/businessDateWindow'
+import { continuousReadWindowSql, parseContinuousReadWindow } from '../lib/continuousReadWindow'
 import { attachBatchCounts } from '../lib/productBatches'
 import { paginateProductFamilies } from '../lib/familyPagination'
 import { buildProductSalesLedgerSql } from '../lib/productSalesLedger'
@@ -235,6 +236,7 @@ export async function attachInventoryProductMetrics(
   items: Array<Record<string, unknown>>,
   query: InventoryFilterQuery,
 ): Promise<void> {
+  const continuousWindow = parseContinuousReadWindow(query)
   const productIds = [...new Set(items
     .map((item) => Number(item.id))
     .filter((id) => Number.isSafeInteger(id) && id > 0))]
@@ -250,10 +252,11 @@ export async function attachInventoryProductMetrics(
   if (startDate) params.startDate = startDate
   if (endDate) params.endDate = endDate
 
-  const saleClauses = [
+  const saleClauses = continuousWindow ? [continuousReadWindowSql('s.created_at')] : [
     startDate ? localDateAtOrAfter('s.created_at') : '',
     endDate ? localDateAtOrBefore('s.created_at') : '',
   ].filter(Boolean)
+  if (continuousWindow) Object.assign(params, continuousWindow)
   const stockQuantitySql = branchScoped ? 'COALESCE(bs.quantity, 0)' : 'COALESCE(p.stock_quantity, 0)'
   const stockJoinSql = branchScoped
     ? 'LEFT JOIN branch_stock bs ON bs.product_id = ids.product_id AND bs.branch_id = @branchId'
@@ -644,9 +647,21 @@ async function searchProductsPayload(env: Env, query: Record<string, string>) {
   }
 }
 
-app.get('/products/search', async (c) => c.json(await searchProductsPayload(c.env, c.req.query())))
+app.get('/products/search', async (c) => {
+  try {
+    parseContinuousReadWindow(c.req.query())
+    return c.json(await searchProductsPayload(c.env, c.req.query()))
+  } catch (error) {
+    if (error instanceof RangeError) return c.json({ error: error.message }, 400)
+    throw error
+  }
+})
 
 app.get('/bootstrap', async (c) => {
+  try { parseContinuousReadWindow(c.req.query()) } catch (error) {
+    if (error instanceof RangeError) return c.json({ error: error.message }, 400)
+    throw error
+  }
   const payload = await searchProductsPayload(c.env, c.req.query())
   const db = getDb(c.env)
   // Family-aware, same reasoning as /stats above -- this used to be a flat
@@ -940,6 +955,10 @@ app.get('/stats', async (c) => {
 
 app.get('/movements', async (c) => {
   const query = c.req.query()
+  let continuousWindow
+  try { continuousWindow = parseContinuousReadWindow(query) } catch (error) {
+    return c.json({ error: (error as Error).message }, 400)
+  }
   const page = clampInt(query.page, 1, 1, 100000)
   const pageSize = clampInt(query.pageSize, 100, 1, 50000)
   const offset = (page - 1) * pageSize
@@ -1004,7 +1023,11 @@ app.get('/movements', async (c) => {
   }
 
   const startDate = String(query.startDate || query.start_date || '').trim()
-  if (startDate) {
+  if (continuousWindow) {
+    where.push(continuousReadWindowSql('created_at'))
+    Object.assign(params, continuousWindow)
+  }
+  if (startDate && !continuousWindow) {
     params.startDate = startDate
     // Local (UTC+7) calendar day. The date()-normalized bound is shape-agnostic
     // (inventory_movements.created_at is a MIX of ISO 'T'/'Z' and space forms) and
@@ -1013,7 +1036,7 @@ app.get('/movements', async (c) => {
     where.push(localDateAtOrAfter('created_at'))
   }
   const endDate = String(query.endDate || query.end_date || '').trim()
-  if (endDate) {
+  if (endDate && !continuousWindow) {
     params.endDate = endDate
     // Admits all of the local end day and excludes the next local day.
     where.push(localDateAtOrBefore('created_at'))

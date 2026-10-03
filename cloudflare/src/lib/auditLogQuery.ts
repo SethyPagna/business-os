@@ -25,6 +25,7 @@
 // the created_at prefilter there keeps the index usable).
 
 import { businessToday, localDateExpr } from './businessDateWindow'
+import { continuousReadWindowSql, parseContinuousReadWindow } from './continuousReadWindow'
 import {
   AUDIT_ENTITY_SECTION,
   AUDIT_KEYLESS_ACTION_SECTION,
@@ -65,6 +66,10 @@ export type AuditLogFilterInput = {
   section?: string
   startDate?: string
   endDate?: string
+  createdFrom?: string
+  createdTo?: string
+  startTime?: string
+  endTime?: string
   order?: string
   cursor?: string
 }
@@ -201,6 +206,7 @@ const SEARCH_COLUMNS = [
 ]
 
 export function buildAuditLogFilters(input: AuditLogFilterInput, omit: AuditLogFilterOmit = {}): AuditLogFilterClause {
+  const continuousWindow = parseContinuousReadWindow({ createdFrom: input.createdFrom, createdTo: input.createdTo, startTime: input.startTime, endTime: input.endTime })
   const clauses: string[] = []
   const params: Record<string, string | number> = {}
 
@@ -266,6 +272,10 @@ export function buildAuditLogFilters(input: AuditLogFilterInput, omit: AuditLogF
     params.endDate = input.endDate
     clauses.push(`${localDateExpr('created_at')} <= @endDate`)
     if (!(cursor && !ascending)) clauses.push(`${likelyWindowBound("created_at < date(@endDate, '+1 day')")}`)
+  }
+  if (continuousWindow) {
+    clauses.push(continuousReadWindowSql('created_at'))
+    Object.assign(params, continuousWindow)
   }
 
   const searchWords = String(input.search || '')

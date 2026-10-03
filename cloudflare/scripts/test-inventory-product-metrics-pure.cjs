@@ -49,6 +49,7 @@ const inventory = loadTs('routes/inventory.ts', {
   hono: { Hono },
   '../lib/businessDateWindow': { localDateAtOrAfter, localDateAtOrBefore },
   '../lib/productSalesLedger': productSalesLedger,
+  '../lib/continuousReadWindow': fs.existsSync(path.join(srcRoot, 'lib/continuousReadWindow.ts')) ? loadTs('lib/continuousReadWindow.ts') : {},
   '../index': {},
 })
 const familyPagination = loadTs('lib/familyPagination.ts')
@@ -185,6 +186,21 @@ async function main() {
   assert.match(metricQueries[0].sql, /date\(s\.created_at, '\+7 hours'\)/)
   assert.match(metricQueries[0].sql, /sale_status, ''\), 'completed'\) <> 'cancelled'/)
   assert.doesNotMatch(metricQueries[0].sql, /NOT IN \('awaiting_payment', 'cancelled'\)/)
+
+  const timed = [{ id: 1 }]
+  await attachInventoryProductMetrics(db, timed, {
+    branchId: '1', startDate: '2026-09-05', endDate: '2026-09-05',
+    createdFrom: '2026-09-05T02:00:00Z', createdTo: '2026-09-05 04:00:00',
+  })
+  assert.equal(timed[0].qty_sold, 4, 'continuous hours include the sale and its later refund on the sale basis, excluding early-morning sales')
+  assert.equal(timed[0].revenue_usd, 40)
+  assert.equal(timed[0].cogs_usd, 12)
+  assert.equal(timed[0].display_quantity, 5, 'shelf quantity stays current')
+  for (const bounds of [
+    { createdFrom: '2026-09-05 04:00:00' },
+    { createdFrom: '2026-09-05 04:00:00', createdTo: '2026-09-05 03:00:00' },
+    { createdFrom: '2026-02-30 04:00:00', createdTo: '2026-03-01 03:00:00' },
+  ]) await assert.rejects(() => attachInventoryProductMetrics(db, [{ id: 1 }], bounds), RangeError)
 
   const inventorySource = fs.readFileSync(path.join(srcRoot, 'routes/inventory.ts'), 'utf8')
   assert.doesNotMatch(inventorySource, /NOT IN \('awaiting_payment', 'cancelled'\)/,

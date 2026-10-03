@@ -72,7 +72,7 @@ export interface ReportViewDef {
 
 export const REPORT_VIEWS: readonly ReportViewDef[] = [
   { id: 'overview', area: 'any', group: 'summary', labelKey: 'rpt_overview', fallback: 'Overview (all)', supportsTime: true, supportsSearch: false, supportsSaleFilters: true },
-  { id: 'shift', area: 'sales', group: 'summary', labelKey: 'shift_report', fallback: 'Shift Report', supportsTime: false, supportsSearch: false, supportsSaleFilters: false },
+  { id: 'shift', area: 'sales', group: 'summary', labelKey: 'shift_report', fallback: 'Shift Report', supportsTime: true, supportsSearch: false, supportsSaleFilters: false },
   { id: 'periods', area: 'sales', group: 'summary', labelKey: 'rpt_periods', fallback: 'By period', supportsTime: true, supportsSearch: false, supportsSaleFilters: true },
   { id: 'sales', area: 'sales', group: 'sales', labelKey: 'rpt_sales_list', fallback: 'Each receipt', supportsTime: true, supportsSearch: true, supportsSaleFilters: true },
   { id: 'products', area: 'sales', group: 'sales', labelKey: 'products', fallback: 'Products', groupedBy: 'product', supportsTime: true, supportsSearch: true, supportsSaleFilters: true },
@@ -185,7 +185,7 @@ export function reportQueryParams(f: ReportFilters, view: ReportViewDef): Record
   // Date-only views normalize clocks even for the existing All-dates sentinel.
   // Preserve that persisted shape when switching back to a timed view.
   const allDates = !f.startDate && !f.endDate
-    && (!f.startTime || f.startTime === '00:00') && (!f.endTime || f.endTime === '23:59')
+    && (!f.startTime || f.startTime === '00:00') && (!f.endTime || f.endTime === '23:59' || f.endTime === '24:00')
   if (view.supportsTime && !allDates && (f.startTime || f.endTime)) {
     // Clearing one clock means the corresponding day edge, not permission to
     // discard the other boundary. Populated invalid clocks must fail closed.
@@ -194,7 +194,7 @@ export function reportQueryParams(f: ReportFilters, view: ReportViewDef): Record
     const createdFrom = reportUtcBound(f.startDate, startTime)
     const createdTo = reportUtcBound(f.endDate, endTime, 1)
     if (!createdFrom || !createdTo || createdFrom >= createdTo) throw new RangeError('Report end date/time must be after the start date/time')
-    if (startTime !== '00:00' || endTime !== '23:59') {
+    if (startTime !== '00:00' || (endTime !== '23:59' && endTime !== '24:00')) {
       q.createdFrom = createdFrom
       q.createdTo = createdTo
     }

@@ -141,6 +141,7 @@ const inventoryRequire = (id) => {
   if (id === '../lib/telegram') return { formatStockChangeTelegramLines: noop,
     formatTransferTelegramLines: input => { telegramInputs.push(input); return [] }, sendTelegramEvent: asyncNoop }
   if (id === '../lib/businessDateWindow') return { localDateAtOrAfter: noop, localDateAtOrBefore: noop }
+  if (id === '../lib/continuousReadWindow') return loadModule('lib/continuousReadWindow.ts', require)
   if (id === '../lib/familyPagination') return { paginateProductFamilies: asyncNoop }
   if (id === '../lib/productSalesLedger') return { buildProductSalesLedgerSql: noop }
   if (id === '../lib/familyStockStats') return { getFamilyStockStats: asyncNoop }
@@ -275,6 +276,13 @@ async function check(name, fn) {
 }
 
 async function main() {
+await check('the actual movement route refuses mixed continuous and recurring hours before transfer reads', async () => {
+  routeUser = { id: 7, name: 'Stock manager', tier: 'full' }
+  routeDb = null
+  const response = await inventoryApp.request('/movements?createdFrom=2026-10-01T00%3A00%3A00Z&createdTo=2026-10-02T00%3A00%3A00Z&startTime=08%3A00', {}, {}, { waitUntil: () => {}, passThroughOnException: () => {} })
+  assert.equal(response.status, 400)
+  assert.equal((await response.json()).error, 'Continuous timestamps and recurring hours cannot be combined')
+})
 
 await check('a transfer spanning two lots moves each lot FIFO, atomically, keeping lot identity', async () => {
   const db = freshDb()

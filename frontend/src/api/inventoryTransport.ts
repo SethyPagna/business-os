@@ -9,6 +9,8 @@ type InventoryMovementParams = {
   searchMode?: string | null
   startDate?: string | null
   endDate?: string | null
+  createdFrom?: string | null
+  createdTo?: string | null
   page?: string | number | null
   pageSize?: string | number | null
 }
@@ -114,6 +116,8 @@ export function getInventoryMovements({
   searchMode,
   startDate,
   endDate,
+  createdFrom,
+  createdTo,
   page = 1,
   pageSize = 10000,
 }: InventoryMovementParams = {}): Promise<unknown> {
@@ -127,6 +131,8 @@ export function getInventoryMovements({
     searchMode,
     startDate,
     endDate,
+    createdFrom,
+    createdTo,
     page: safePage,
     pageSize: safePageSize,
   })

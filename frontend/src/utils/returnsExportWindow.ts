@@ -25,7 +25,7 @@ export function returnsStatementParams(range: ReturnsStatementRange): Record<str
   const month = anniversary.getUTCMonth()
   anniversary.setUTCFullYear(anniversary.getUTCFullYear() + 1)
   if (anniversary.getUTCMonth() !== month) anniversary.setUTCDate(0)
-  const localEndExclusive = Date.parse(`${range.endDate}T${endTime}:00Z`) + 60000
+  const localEndExclusive = Date.parse(createdTo.replace(' ', 'T') + 'Z') + 7 * 60 * 60 * 1000
   if (localEndExclusive > anniversary.getTime()) {
     throw new RangeError('Return statements may cover at most one calendar year; use separate downloads for longer periods')
   }

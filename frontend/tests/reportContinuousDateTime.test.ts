@@ -109,8 +109,8 @@ test('actual Reports hub validation renders an alert without mounting request/ex
   }
   const view = getReportView('sales')
   const invalid = filters({ endTime: '25:00' })
-  const rangeError = evaluate(guard, { view, filters: invalid, reportQueryParams })()
-  assert.match(rangeError, /must be after/)
+  const rangeError = evaluate(guard, { view, filters: invalid, reportQueryParams, trh: (_key: string, fallback: string) => fallback })()
+  assert.equal(rangeError, 'End date / End time ≥ Start date / Start time')
   assert.equal(invalid.endTime, '25:00', 'validation preserves the entered draft')
   let mounts = 0
   const SalesListReport = () => { mounts++; return React.createElement('div', null, 'valid-report') }

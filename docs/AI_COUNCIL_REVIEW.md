@@ -10,6 +10,17 @@ Apply this protocol when the owner submits an idea or decision for evaluation or
 
 Use bounded read-only agents when appropriate and authorized. If one model simulates the views, disclose this; do not claim five independent reviewers or blind validation. The expansionist does not waive safety, business constraints or action permissions. Follow agent-team/TEAMWORK.md for durable coordination.
 
+## Evidence and refutation discipline
+
+- Give an independent reviewer the owner acceptance criteria and exact base/head artifacts before the author's conclusions. Separate contexts using the same model are separate reviews, not model diversity. Record any exposure to peer conclusions; filter coordination inventories to claims so historical messages do not contaminate a blind first pass.
+- Every perspective challenges a different assumption and proposes a discriminating counterexample. Anonymous cross-critique must preserve disagreements. A majority verdict is not proof of correctness; the Chairman names the unresolved risk and the next experiment that can disprove the preferred design.
+- Bind each observation to committed source, dirty state, command or method, raw result and coverage. Distinguish pure invariants, actual route/database behavior, failure/race/replay controls, composed whole-suite checks, browser interaction and deployed provenance. Passing one layer does not imply another ran.
+- A test must fail for a plausible wrong implementation. Check semantic error identity and persisted state, not only a status code or toast. Permissive import stubs can silently accept invalid inputs or ignore filters; enumerate recursive, custom, extracted and inherited loaders as well as named loader patterns.
+- Preserve original failures and retries. Classify infrastructure failures separately from assertions; a corrected test fixture needs its own evidence that the original business assertions remain intact. Source-equivalent evidence is qualified by exact content comparison and does not replace the release gate on the final SHA.
+- A precise protective refusal is a useful interim safeguard, not completion of a requested user flow. State unsupported consumers and recovery paths explicitly and keep the full owner acceptance scope until they pass. Never promise absence of all loopholes from a finite test or review scope.
+
+Incident: an independent October 2026 date review found a profit fixture's no-op helper silently returned revenue outside the selected time window while its existing tests passed; custom loader and exact boundary controls exposed the gap.
+
 ## Required code-review evidence
 
 Cover dead functions, files, UI components, routes, APIs, variables, imports and dependencies; duplicate logic; needless complexity; legacy paths; redundant queries and requests; disconnected files; and technical debt.

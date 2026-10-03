@@ -32,6 +32,16 @@
 /** Minutes east of UTC for the fixed business timezone (Asia/Phnom_Penh). */
 export const BUSINESS_UTC_OFFSET_MINUTES = 420
 
+export function isLocalRangeClock(value: unknown, end = false): value is string {
+  return typeof value === 'string' && (/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value) || (end && value === '24:00'))
+}
+
+export function localRangeClockError(start: unknown, end: unknown): string | null {
+  const startTime = String(start ?? '').trim(), endTime = String(end ?? '').trim()
+  return (startTime && !isLocalRangeClock(startTime)) || (endTime && !isLocalRangeClock(endTime, true))
+    ? 'Use valid 24-hour HH:MM times; 24:00 is allowed only as the range end.' : null
+}
+
 /** SQLite datetime modifier that shifts a stored UTC timestamp to local time. */
 export const BUSINESS_TZ_FORWARD = '+7 hours'
 /** SQLite datetime modifier that shifts a local wall-clock instant back to UTC. */

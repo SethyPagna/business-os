@@ -1,10 +1,13 @@
 import { useApp } from '../../AppContext'
+import type { AppContextCoreValue } from '../../app/AppContextCore.tsx'
 import { canViewAcquisitionCosts } from '../../utils/acquisitionCostAccess.ts'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { supplierDisplay } from '../../utils/supplierDisplay.ts'
 import AppSelect from '../shared/AppSelect.tsx'
 import SuggestionTextInput, { type SuggestionOption } from '../shared/SuggestionTextInput.tsx'
 import StatsRangeRow from '../shared/StatsRangeRow.tsx'
+import { invoiceRangeParams } from '../../utils/invoiceRangeParams.ts'
+import type { ContinuousRange } from '../../utils/continuousRangeParams.ts'
 // fmtDate, not fmtDateOnly: these are full UTC instants converted from the
 // old system's Bangkok wall clock, so the calendar day must be read in the
 // business timezone (an fmtDateOnly UTC slice would show the previous day
@@ -64,7 +67,7 @@ type ApInvoicesSectionProps = {
 }
 
 export default function ApInvoicesSection({ t }: ApInvoicesSectionProps) {
-  const { user } = useApp() as { user: any }
+  const { user, notify } = useApp() as Pick<AppContextCoreValue, 'user' | 'notify'>
   const canViewCosts = canViewAcquisitionCosts(user)
   const tr = (key: string, fallback: string): string => t(key) || fallback
   const [branch, setBranch] = useState('all')
@@ -84,6 +87,8 @@ export default function ApInvoicesSection({ t }: ApInvoicesSectionProps) {
   // this asks for the whole ledger rather than an unbounded-looking today.
   const [fromDate, setFromDate] = useState('')
   const [toDate, setToDate] = useState('')
+  const [startTime, setStartTime] = useState('')
+  const [endTime, setEndTime] = useState('')
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
   const [refreshToken, setRefreshToken] = useState(0)
@@ -110,8 +115,7 @@ export default function ApInvoicesSection({ t }: ApInvoicesSectionProps) {
       branch: branch === 'all' ? '' : branch,
       supplier: supplier === 'all' ? '' : supplier,
       status: status === 'all' ? '' : status,
-      from: fromDate,
-      to: toDate,
+      ...invoiceRangeParams({ startDate: fromDate, endDate: toDate, startTime, endTime }),
       page,
       page_size: pageSize,
     })
@@ -133,7 +137,7 @@ export default function ApInvoicesSection({ t }: ApInvoicesSectionProps) {
         if (aliveRef.current && requestRef.current === requestId) setLoading(false)
       })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [branch, supplier, status, fromDate, toDate, page, pageSize, refreshToken])
+  }, [branch, supplier, status, fromDate, toDate, startTime, endTime, page, pageSize, refreshToken])
 
   const totals = data?.totals || {}
   const invoices = Array.isArray(data?.invoices) ? data!.invoices! : []
@@ -158,7 +162,7 @@ export default function ApInvoicesSection({ t }: ApInvoicesSectionProps) {
   )
 
   const money = (value: unknown): string => `$${(Number(value) || 0).toFixed(2)}`
-  const anyFilter = branch !== 'all' || supplier !== 'all' || status !== 'all' || fromDate !== '' || toDate !== ''
+  const anyFilter = branch !== 'all' || supplier !== 'all' || status !== 'all' || fromDate !== '' || toDate !== '' || startTime !== '' || endTime !== ''
 
   const changeFilter = (apply: () => void) => {
     apply()
@@ -171,6 +175,19 @@ export default function ApInvoicesSection({ t }: ApInvoicesSectionProps) {
   const branchLabel = (value: string): string => (
     value === 'warehouse' ? tr('warehouse', 'Warehouse') : tr('shop', 'Shop')
   )
+
+  const changeRange = (range: ContinuousRange) => {
+    try { invoiceRangeParams(range) } catch {
+      notify(tr('please_select_start_end_dates', 'Please select start and end dates'), 'warning')
+      return
+    }
+    changeFilter(() => {
+      setFromDate(range.startDate || '')
+      setToDate(range.endDate || '')
+      setStartTime(range.startTime || '')
+      setEndTime(range.endTime || '')
+    })
+  }
 
   /** What the old system printed on the document, falling back to its row id. */
   const invoiceLabel = (row: ApInvoice): string => String(row.invoice_no || '').trim() || `#${row.legacy_id}`
@@ -204,13 +221,12 @@ export default function ApInvoicesSection({ t }: ApInvoicesSectionProps) {
           control inside the horizontally scrolling filter line below where a
           phone never reached it. Presets come with StatsRangeRow. */}
       <StatsRangeRow
-        range={{ startDate: fromDate, endDate: toDate, startTime: '', endTime: '' }}
-        onRangeChange={(range) => changeFilter(() => {
-          setFromDate(range.startDate || '')
-          setToDate(range.endDate || '')
-        })}
+        range={{ startDate: fromDate, endDate: toDate, startTime, endTime }}
+        onRangeChange={changeRange}
+        showTime continuous
         t={t}
       />
+      <p className="text-xs text-gray-500 dark:text-gray-400">{tr('invoice_unknown_time_included', 'Invoices without a recorded time remain included for the selected dates.')}</p>
       {/* Part 567: filters kept to a single scrollable line (user: "the
           filters options one row") rather than wrapping. */}
       <div className="flex flex-nowrap items-center gap-2 overflow-x-auto">
@@ -259,7 +275,7 @@ export default function ApInvoicesSection({ t }: ApInvoicesSectionProps) {
           <button
             type="button"
             className="btn-secondary py-1 text-xs"
-            onClick={() => changeFilter(() => { setBranch('all'); setSupplier('all'); setStatus('all'); setFromDate(''); setToDate('') })}
+            onClick={() => changeFilter(() => { setBranch('all'); setSupplier('all'); setStatus('all'); setFromDate(''); setToDate(''); setStartTime(''); setEndTime('') })}
           >
             {tr('clear', 'Clear')}
           </button>

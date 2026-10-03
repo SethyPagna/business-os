@@ -20,6 +20,7 @@ export default function ExportRangeDialog({
   t,
   title,
   showTime = false,
+  continuous = false,
 }: {
   initial: ExportRange
   onClose: () => void
@@ -28,6 +29,7 @@ export default function ExportRangeDialog({
   t: Translate
   title?: string
   showTime?: boolean
+  continuous?: boolean
 }) {
   const tr = (key: string, fallback: string): string => {
     const value = t(key)
@@ -59,6 +61,7 @@ export default function ExportRangeDialog({
             onRangeChange={(next) => setRange({ startDate: next.startDate || '', endDate: next.endDate || '', ...(showTime ? { startTime: next.startTime || '', endTime: next.endTime || '' } : {}) })}
             t={t}
             showTime={showTime}
+            continuous={continuous}
             showPresets
             className="w-full min-w-0"
           />

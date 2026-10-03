@@ -7,6 +7,8 @@
 //     derived from the business "today", never the device clock);
 //   - the per-section / per-user counts are asked for on the FIRST page only.
 
+import { continuousRangeParams } from './continuousRangeParams.ts'
+
 export type AuditScope = 'all' | 'section' | 'user'
 export type AuditTimePreset = 'today' | '7d' | '30d' | 'custom'
 export type AuditOrder = 'asc' | 'desc'
@@ -40,6 +42,8 @@ export interface AuditViewState {
   preset: AuditTimePreset
   rangeStart: string
   rangeEnd: string
+  rangeStartTime?: string
+  rangeEndTime?: string
   search: string
   /** 'all' or a comma list of section ids (used only in Section scope). */
   section: string
@@ -115,13 +119,13 @@ export function setAuditScope(state: AuditViewState, scope: AuditScope, canSeeAl
 }
 
 export function setAuditPreset(state: AuditViewState, preset: AuditTimePreset, today: string): AuditViewState {
-  if (preset !== 'custom') return { ...state, preset }
+  if (preset !== 'custom') return { ...state, preset, rangeStartTime: '', rangeEndTime: '' }
   const shown = auditWindowFor(state, today)
   return { ...state, preset, rangeStart: shown.startDate, rangeEnd: shown.endDate }
 }
 
-export function setAuditRange(state: AuditViewState, rangeStart: string, rangeEnd: string): AuditViewState {
-  return { ...state, preset: 'custom', rangeStart, rangeEnd }
+export function setAuditRange(state: AuditViewState, rangeStart: string, rangeEnd: string, rangeStartTime = '', rangeEndTime = ''): AuditViewState {
+  return { ...state, preset: 'custom', rangeStart, rangeEnd, rangeStartTime, rangeEndTime }
 }
 
 export function buildAuditRequestParams(
@@ -133,8 +137,7 @@ export function buildAuditRequestParams(
   const cursor = options.cursor || undefined
   return {
     pageSize: options.pageSize ?? AUDIT_PAGE_SIZE,
-    startDate: window.startDate,
-    endDate: window.endDate,
+    ...continuousRangeParams({ ...window, startTime: state.rangeStartTime, endTime: state.rangeEndTime }),
     search: search || undefined,
     section: state.scope === 'section' && state.section !== 'all' ? state.section : undefined,
     userId: state.scope === 'user' && state.userId !== 'all' ? state.userId : undefined,

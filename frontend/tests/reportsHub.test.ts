@@ -607,7 +607,7 @@ test('views: permissions gate the picker, the stored view survives only while al
   assert.equal(resolveReportView('bogus', all), 'overview')
   assert.equal(resolveReportView('sales', { sales: false, returns: false, fees: false, shift: false }), null, 'nothing readable -> null (the hub shows its EmptyState)')
   for (const v of REPORT_VIEWS) {
-    assert.equal(v.supportsTime, v.id !== 'shift', `${v.id} exposes only filters its endpoint understands`)
+    assert.equal(v.supportsTime, true, `${v.id} exposes its implemented timestamp filter`)
     if (v.groupedBy) assert.ok(v.area === 'sales', `${v.id} grouped views are sales-gated`)
   }
   const ids = REPORT_VIEWS.map((v) => v.id)
@@ -798,9 +798,7 @@ const SURFACE_CSS = 'src/components/sales/reports/reports-surface.css'
 test('compact report filters match the stacked mobile control contract', () => {
   const hub = read(HUB)
   const css = read(SURFACE_CSS)
-  for (const preset of ['all', 'today', '7d', '30d', 'month']) {
-    assert.ok(hub.includes(`id: '${preset}'`), `${preset} is offered as a compact quick range`)
-  }
+  assert.match(hub, /const mobilePresets = STATS_PRESETS\.map/, 'every canonical preset is offered in the compact rail')
   assert.ok(hub.includes('aria-pressed={selectedMobilePreset === preset.id}'), 'quick ranges expose their selected state')
   assert.ok(hub.includes("trh('show', 'Show')"), 'compact controls have a primary Show action')
   assert.match(css, /\.reports-mobile-controls\s*\{[\s\S]*display:\s*grid/, 'mobile controls stack in a scoped grid')

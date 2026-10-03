@@ -127,6 +127,7 @@ type InventoryMovementsSurfaceProps = {
   isMovementScopePartiallySelected: (ids: MovementId[]) => boolean
   loading: boolean
   movementEndDate: string
+  movementEndTime: string
   movementMeta: MovementMeta
   movementSections: MovementSection[]
   movementSelectAllRef: RefObject<HTMLInputElement>
@@ -136,6 +137,7 @@ type InventoryMovementsSurfaceProps = {
   // (Inventory.tsx's effect).
   movementSelectMode: boolean
   movementStartDate: string
+  movementStartTime: string
   onToggleMovementSelectMode: () => void
   // U-records: a row opens THAT movement's own record float (before ->
   // after), not the product card -- Inventory.tsx's MovementDetailFloat.
@@ -145,8 +147,10 @@ type InventoryMovementsSurfaceProps = {
   setSelectedMovementIds: Dispatch<SetStateAction<Set<MovementId>>>
   setExpandedMovementGroupPage: (groupId: MovementId, page: number) => void
   setMovementEndDate: (value: string) => void
+  setMovementEndTime: (value: string) => void
   setMovementMeta: Dispatch<SetStateAction<MovementMeta>>
   setMovementStartDate: (value: string) => void
+  setMovementStartTime: (value: string) => void
   showMovementActionGroups: boolean
   t: Translator
   toggleAllMovementSelection: (checked: boolean) => void
@@ -205,11 +209,13 @@ export default function InventoryMovementsSurface({
   isMovementScopePartiallySelected,
   loading,
   movementEndDate,
+  movementEndTime,
   movementMeta,
   movementSections,
   movementSelectAllRef,
   movementSelectMode,
   movementStartDate,
+  movementStartTime,
   onToggleMovementSelectMode,
   openMovementDetail,
   selectedMovementGroups,
@@ -217,8 +223,10 @@ export default function InventoryMovementsSurface({
   setSelectedMovementIds,
   setExpandedMovementGroupPage,
   setMovementEndDate,
+  setMovementEndTime,
   setMovementMeta,
   setMovementStartDate,
+  setMovementStartTime,
   showMovementActionGroups,
   t,
   toggleAllMovementSelection,
@@ -392,13 +400,15 @@ export default function InventoryMovementsSurface({
                 </button>
 
                 <StatsRangeRow
-                  range={{ startDate: movementStartDate, endDate: movementEndDate, startTime: '', endTime: '' }}
+                  range={{ startDate: movementStartDate, endDate: movementEndDate, startTime: movementStartTime, endTime: movementEndTime }}
                   onRangeChange={(range) => {
                     setMovementStartDate(range.startDate || '')
                     setMovementEndDate(range.endDate || '')
+                    setMovementStartTime(range.startTime || '')
+                    setMovementEndTime(range.endTime || '')
                   }}
                   t={t}
-                  showTime={false}
+                  showTime continuous
                   showPresets
                   className="w-full min-w-0"
                 />
@@ -409,6 +419,8 @@ export default function InventoryMovementsSurface({
                     onClick={() => {
                       setMovementStartDate('')
                       setMovementEndDate('')
+                      setMovementStartTime('')
+                      setMovementEndTime('')
                     }}
                   >
                     {t('clear') || 'Clear'}

@@ -10,6 +10,8 @@ import { buildQueryString } from '../src/api/query.ts'
 import { feeRangeParams } from '../src/api/feesTransport.ts'
 import { returnRangeParams } from '../src/api/returnsReadTransport.ts'
 import { buildAuditRequestParams, initialAuditViewState } from '../src/utils/auditLogView.ts'
+import { continuousRangeParams } from '../src/utils/continuousRangeParams.ts'
+import { invoiceRangeParams } from '../src/utils/invoiceRangeParams.ts'
 
 // Execute the production initializers, preference functions and request
 // expressions. No duplicate date-policy implementation lives in the fixture.
@@ -49,13 +51,17 @@ function stateCell(source: string, stateName: string, context: Record<string, un
   return { initial, set, current: () => current }
 }
 function jsxHandler(source: string, attributeName: string, contains: string): string {
-  const attribute = find(source, (node) => ts.isJsxAttribute(node)
-    && node.name.getText() === attributeName
-    && Boolean(node.initializer?.getText().includes(contains)))[0] as ts.JsxAttribute
-  if (!attribute?.initializer || !ts.isJsxExpression(attribute.initializer) || !attribute.initializer.expression) {
-    throw new Error(`production ${attributeName} handler containing ${contains} exists`)
+  for (const candidate of find(source, (node) => ts.isJsxAttribute(node) && node.name.getText() === attributeName)) {
+    const attribute = candidate as ts.JsxAttribute
+    if (!attribute.initializer || !ts.isJsxExpression(attribute.initializer) || !attribute.initializer.expression) continue
+    const expression = attribute.initializer.expression
+    const declaration = ts.isIdentifier(expression)
+      ? find(source, (node) => ts.isVariableDeclaration(node) && node.name.getText() === expression.getText())[0] as ts.VariableDeclaration | undefined
+      : undefined
+    const handler = declaration?.initializer?.getText() || expression.getText()
+    if (handler.includes(contains)) return handler
   }
-  return attribute.initializer.expression.getText()
+  throw new Error(`production ${attributeName} handler containing ${contains} exists`)
 }
 const hooks = { useMemo: (fn: () => unknown) => fn(), useCallback: (fn: unknown) => fn }
 let now = new Date(2026, 8, 11, 12)
@@ -225,8 +231,12 @@ for (const surface of todayInvoiceSurfaces) {
     ? read('contacts/useStockInInvoiceReport.ts') : dates.source
   const request = evaluate(requestArgs(requestSource, surface.endpoint)[0], {
     ...surface.context, fromDate: dates.from, toDate: dates.to, page: 1, pageSize: 20,
+    ...continuousRangeParams({ startDate: dates.from, endDate: dates.to, startTime: '', endTime: '' }),
+    createdFrom: undefined, createdTo: undefined,
   })
   assert.deepEqual([request.from, request.to], [day1, day1], `${surface.endpoint} first request is Today`)
+  assert.equal(request.createdFrom, undefined)
+  assert.equal(request.createdTo, undefined)
 }
 
 // P3-10. The AP and AR ledgers are the opposite case and must NOT open on
@@ -246,10 +256,15 @@ for (const surface of allTimeInvoiceSurfaces) {
   assert.doesNotMatch(source, /todayStr/, `${surface.file} must not reach for the business-day helper at all`)
   const from = stateCell(source, '[fromDate, setFromDate]')
   const to = stateCell(source, '[toDate, setToDate]')
+  const startClock = stateCell(source, '[startTime, setStartTime]')
+  const endClock = stateCell(source, '[endTime, setEndTime]')
   assert.equal(from.initial, '', `${surface.file} start initializer is All time`)
   assert.equal(to.initial, '', `${surface.file} end initializer is All time`)
+  assert.equal(startClock.initial, '')
+  assert.equal(endClock.initial, '')
   const request = evaluate(requestArgs(source, surface.endpoint)[0], {
     ...surface.context, fromDate: from.initial, toDate: to.initial, page: 1, pageSize: 20,
+    invoiceRangeParams, startTime: startClock.initial, endTime: endClock.initial,
   })
   assert.deepEqual([request.from, request.to], ['', ''], `${surface.endpoint} first request carries no date bounds`)
   // Choosing Today from the preset chips must still bound the request, so the
@@ -257,8 +272,17 @@ for (const surface of allTimeInvoiceSurfaces) {
   const today = preset('today')
   const bounded = evaluate(requestArgs(source, surface.endpoint)[0], {
     ...surface.context, fromDate: today.startDate, toDate: today.endDate, page: 1, pageSize: 20,
+    invoiceRangeParams, startTime: '', endTime: '',
   })
   assert.deepEqual([bounded.from, bounded.to], [day1, day1], `${surface.endpoint} still honours a chosen range`)
+  assert.equal(bounded.createdFrom, undefined)
+  assert.equal(bounded.createdTo, undefined)
+  const timed = evaluate(requestArgs(source, surface.endpoint)[0], {
+    ...surface.context, fromDate: today.startDate, toDate: today.endDate, page: 1, pageSize: 20,
+    invoiceRangeParams, startTime: '09:00', endTime: '11:00',
+  })
+  assert.equal(timed.createdFrom, `${day1} 02:00:00`)
+  assert.equal(timed.createdTo, `${day1} 04:01:00`)
 }
 // The mechanism the all-time default depends on: empty values never reach the
 // query string, so "no bound" really means "no bound" at the Worker.
@@ -323,7 +347,7 @@ assert.match(
   const paramsEnd = source.indexOf('const response = await getCustomerSalesReport')
   assert.ok(paramsStart >= 0 && paramsEnd > paramsStart, 'CustomerPurchasesReportModal still builds params before calling getCustomerSalesReport')
   const paramsBuilderBody = source.slice(paramsStart, paramsEnd)
-  const buildParams = evaluate(`(fromDate, toDate) => { ${paramsBuilderBody} return params }`, { customerId: 17, page: 1, pageSize: 20 })
+  const buildParams = evaluate(`(fromDate, toDate, startTime = '', endTime = '') => { ${paramsBuilderBody} return params }`, { customerId: 17, page: 1, pageSize: 20 })
   const firstRequestParams = buildParams(fromCell.initial, toCell.initial)
   assert.equal('startDate' in firstRequestParams, false, 'getCustomerSalesReport first request carries no startDate')
   assert.equal('endDate' in firstRequestParams, false, 'getCustomerSalesReport first request carries no endDate')
@@ -331,36 +355,31 @@ assert.match(
   toCell.set('2026-08-31')
   const rangedParams = buildParams(fromCell.current(), toCell.current())
   assert.deepEqual([rangedParams.startDate, rangedParams.endDate], ['2026-08-01', '2026-08-31'], 'a chosen range still narrows the request')
+  const recurringParams = buildParams('', '', '09:00', '11:00')
+  assert.deepEqual([recurringParams.startTime, recurringParams.endTime], ['09:00', '11:00'])
+  assert.equal('startDate' in recurringParams, false)
+  assert.equal('endDate' in recurringParams, false)
 }
 
 const salesExport = read('sales/ExportModal.tsx')
-const exportPeriod = stateCell(salesExport, '[period, setPeriod]')
-const exportStart = stateCell(salesExport, '[startDate, setStartDate]')
-const exportEnd = stateCell(salesExport, '[endDate, setEndDate]')
-assert.equal(exportPeriod.initial, 'daily')
-assert.equal(exportStart.initial, '', 'custom export start remains an empty data-entry field')
-assert.equal(exportEnd.initial, '', 'custom export end remains an empty data-entry field')
-const computeExportDates = evaluate(variable(salesExport, 'computeDates'), {
-  todayStr: () => day1, businessYear: () => 2026, businessMonth: () => 9,
-  startDate: exportStart.initial, endDate: exportEnd.initial,
-})
-const initialExportDates = evaluate(variable(salesExport, 'previewDates'), {
-  ...hooks, computeDates: computeExportDates, period: exportPeriod.initial,
-  startDate: exportStart.initial, endDate: exportEnd.initial,
-})
-assert.deepEqual(initialExportDates, { start: day1, end: day1 })
+const exportRange = stateCell(salesExport, '[range, setRange]', { todayDateTimeRange: () => preset('today') })
+const exportDates = (range: unknown) => evaluate(variable(salesExport, 'validateDates'), {
+  range, tr: (_key: string, fallback: string) => fallback,
+})()
+const initialExportDates = exportDates(exportRange.initial)
+assert.deepEqual(initialExportDates, { start: day1, end: day1, startTime: '00:00', endTime: '23:59' })
 const detailedExportRequest = evaluate(requestArgs(salesExport, 'getSalesExport')[1], { dates: initialExportDates })
 assert.deepEqual([detailedExportRequest.startDate, detailedExportRequest.endDate], [day1, day1])
+assert.deepEqual([detailedExportRequest.startTime, detailedExportRequest.endTime], ['00:00', '23:59'])
 assert.equal(detailedExportRequest.detailsOnly, 'true')
-assert.deepEqual(evaluate(variable(salesExport, 'computeDates'), {
-  todayStr: () => day1, businessYear: () => 2026, businessMonth: () => 9,
-  startDate: '2026-08-01', endDate: '2026-08-31',
-})('custom'), { start: '2026-08-01', end: '2026-08-31' })
+exportRange.set({ startDate: '2026-08-01', endDate: '2026-08-31', startTime: '22:00', endTime: '02:00' })
+assert.deepEqual(exportDates(exportRange.current()), { start: '2026-08-01', end: '2026-08-31', startTime: '22:00', endTime: '02:00' })
 const cursorRequest = evaluate(requestArgs(salesExport, 'getSalesExport')[2], {
   dates: initialExportDates, page: { snapshot_max_id: 91 }, cursor: { created_at: '2026-09-11T04:00:00Z', id: 44 },
 })
 assert.deepEqual([cursorRequest.snapshotMaxId, cursorRequest.afterCreatedAt, cursorRequest.afterId],
   ['91', '2026-09-11T04:00:00Z', '44'], 'export paging cursor remains independent from the default range')
+assert.deepEqual([cursorRequest.startTime, cursorRequest.endTime], ['00:00', '23:59'])
 
 const lineRequest = evaluate(requestArgs(read('contacts/useStockInInvoiceReport.ts'), 'getStockInInvoiceLines')[0], {
   group: { supplier_key: 'supplier:7', received_day: '2026-08-31' }, branchId: 'all',
@@ -383,6 +402,7 @@ for (const [file, fromSetter, toSetter, attribute] of [
   let to = day1
   const handler = evaluate(jsxHandler(source, attribute, fromSetter), {
     changeFilter: (apply: () => void) => apply(),
+    invoiceRangeParams, notify: () => {}, tr: (_key: string, fallback: string) => fallback,
     setStartTime: () => {}, setEndTime: () => {},
     [fromSetter]: (value: string) => { from = value },
     [toSetter]: (value: string) => { to = value },
@@ -416,7 +436,10 @@ for (const range of [preset('today'), preset('all')]) {
     assert.equal(evaluated.createdTo, undefined)
   }
   for (const params of requestArgs(read('branches/Branches.tsx'), 'getTransfers')) {
-    checkWire(evaluate(params, { ...common, branchDateRange: range, pageSize: 500 }))
+    const evaluated = evaluate(params, { ...common, continuousRangeParams, branchDateRange: range, pageSize: 500 })
+    checkWire(evaluated)
+    assert.equal(evaluated.createdFrom, bounded ? '2026-09-10 17:00:00' : undefined)
+    assert.equal(evaluated.createdTo, bounded ? '2026-09-11 17:00:00' : undefined)
   }
   const inventoryParams = requestArgs(read('inventory/Inventory.tsx'), 'buildInventoryProductsSearchParams')[0]
   checkWire(buildInventoryProductsSearchParams(evaluate(inventoryParams, { ...common, stripRange: range })))
@@ -474,6 +497,7 @@ assert.equal(masked[2].sub, undefined)
 let cleared = 0
 let requested = 0
 await evaluate(variable(inventory, 'loadStatsStrip'), { ...hooks, isActive: true, stripRange: preset('all'),
+  notify: () => {}, tr: (key: string) => key,
   stripRequestRef: { current: 2 }, setStripKernel: () => { cleared++ }, setStripCustomerReturns: () => { cleared++ },
   setStripSupplierReturns: () => { cleared++ }, setStripLoading: () => {}, getSalesStatsStrip: () => { requested++ },
 })()
@@ -481,7 +505,7 @@ assert.equal(cleared, 3)
 assert.equal(requested, 0)
 const csvCall = find(inventory, (node) => ts.isCallExpression(node) && node.expression.getText() === 'downloadCSV'
   && node.arguments[0]?.getText().includes('inventory-stats-'))[0] as ts.CallExpression
-const exportRows = evaluate(csvCall.arguments[1].getText(), { hasRange: false, canViewCosts: true, startDate: '', endDate: '',
+const exportRows = evaluate(csvCall.arguments[1].getText(), { hasRange: false, canViewCosts: true, startDate: '', endDate: '', range: { startTime: '', endTime: '' },
   totalProducts: 17, inStockCount: 10, lowStockCount: 3, outStockCount: 4, totalValue: 80,
   totals: { revenue_usd: 999 }, cust: { count: 999 }, supp: { count: 999 },
 })

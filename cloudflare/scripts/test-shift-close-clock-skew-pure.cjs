@@ -113,6 +113,7 @@ function scenario() {
   const sqlite = database()
   let actor = owner
   const route = loadReal('routes/shifts.ts', {
+    '../lib/continuousReadWindow': loadReal('lib/continuousReadWindow.ts'),
     '../lib/businessDateWindow': loadReal('lib/businessDateWindow.ts'),
     '../lib/clientTimestamp': loadReal('lib/clientTimestamp.ts'),
     '../lib/db': { getDb: () => d1(sqlite) },

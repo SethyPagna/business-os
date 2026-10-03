@@ -78,6 +78,7 @@ interface MaskedEntryFieldProps {
   className?: string
   bare?: boolean
   ariaLabel?: string
+  label?: string
   placeholder: string
   disabled?: boolean
   autoFocus?: boolean
@@ -99,6 +100,7 @@ export interface DateEntryInputProps {
   /** Drops the `.input` chrome -- for fields drawn inside their own box (the range picker). */
   bare?: boolean
   ariaLabel?: string
+  label?: string
   placeholder?: string
   disabled?: boolean
   autoFocus?: boolean
@@ -168,6 +170,7 @@ function MaskedEntryField({
   className = '',
   bare = false,
   ariaLabel,
+  label,
   placeholder,
   disabled = false,
   autoFocus = false,
@@ -246,6 +249,7 @@ function MaskedEntryField({
 
   return (
     <span className="relative inline-flex w-full min-w-0 items-center gap-1">
+      {label ? <span data-temporal-input-label className="pointer-events-none absolute inset-x-1 top-1 z-[1] truncate text-center text-[10px] leading-3 text-slate-500 dark:text-slate-400">{label}</span> : null}
       <input
         ref={inputRef}
         id={id}
@@ -254,7 +258,7 @@ function MaskedEntryField({
         inputMode="numeric"
         autoComplete="off"
         // 'date-entry-input' carries the 13px desktop / 16px phone sizing.
-        className={`date-entry-input ${bare ? '' : 'input'} min-w-0 flex-1 ${invalid ? 'date-entry-input--invalid' : ''} ${className}`.replace(/\s+/g, ' ').trim()}
+        className={`date-entry-input ${bare ? '' : 'input'} min-w-0 flex-1 ${label ? 'min-h-10 !pt-4 !pb-1' : ''} ${invalid ? 'date-entry-input--invalid' : ''} ${className}`.replace(/\s+/g, ' ').trim()}
         placeholder={placeholder}
         aria-label={ariaLabel}
         aria-invalid={invalid ? 'true' : 'false'}
@@ -300,6 +304,7 @@ export default function DateEntryInput({
   className = '',
   bare = false,
   ariaLabel,
+  label,
   placeholder = 'dd/mm/yyyy',
   disabled = false,
   autoFocus = false,
@@ -342,6 +347,7 @@ export default function DateEntryInput({
       className={className}
       bare={bare}
       ariaLabel={ariaLabel}
+      label={label}
       placeholder={placeholder}
       disabled={disabled}
       autoFocus={autoFocus}
@@ -353,6 +359,7 @@ export default function DateEntryInput({
 }
 
 export interface TimeEntryInputProps {
+  allowEndOfDay?: boolean
   /** Stored value, 24-hour 'HH:mm'. '' when unset. */
   value: string
   /** Receives 'HH:mm', or '' when the field was cleared. */
@@ -363,6 +370,7 @@ export interface TimeEntryInputProps {
   className?: string
   bare?: boolean
   ariaLabel?: string
+  label?: string
   placeholder?: string
   disabled?: boolean
   autoFocus?: boolean
@@ -376,6 +384,7 @@ export interface TimeEntryInputProps {
  * error contract. '930' settles to 09:30 on Enter or blur.
  */
 export function TimeEntryInput({
+  allowEndOfDay = false,
   value,
   onChange,
   t,
@@ -384,6 +393,7 @@ export function TimeEntryInput({
   className = '',
   bare = false,
   ariaLabel,
+  label,
   placeholder = 'hh:mm',
   disabled = false,
   autoFocus = false,
@@ -399,7 +409,7 @@ export function TimeEntryInput({
       if (value) onChange('')
       return { display: '', settled: true }
     }
-    const result = normalizeTimeEntry(trimmed)
+    const result = normalizeTimeEntry(trimmed, { allowEndOfDay })
     if (!result.value) return { display: trimmed, settled: false }
     if (result.value !== value) onChange(result.value)
     return { display: result.value, settled: true }
@@ -407,9 +417,9 @@ export function TimeEntryInput({
 
   return (
     <MaskedEntryField
-      display={normalizeTimeEntry(value).value || ''}
+      display={normalizeTimeEntry(value, { allowEndOfDay }).value || ''}
       syncKey={value}
-      mask={(raw, deleting) => applyTimeEntryMask(raw, { deleting })}
+      mask={(raw, deleting) => applyTimeEntryMask(raw, { deleting, allowEndOfDay })}
       commit={commit}
       errorText={tr('time_entry_invalid', 'Enter the time as hh:mm on the 24-hour clock.')}
       helpText={tr('time_entry_help', 'Type digits only — 930 becomes 09:30 and 1430 becomes 14:30.')}
@@ -420,6 +430,7 @@ export function TimeEntryInput({
       className={className}
       bare={bare}
       ariaLabel={ariaLabel}
+      label={label}
       placeholder={placeholder}
       disabled={disabled}
       autoFocus={autoFocus}

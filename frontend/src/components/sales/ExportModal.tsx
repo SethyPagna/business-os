@@ -1,21 +1,20 @@
-import { useMemo, useState } from 'react'
-import CalendarRange from 'lucide-react/dist/esm/icons/calendar-range.js'
+import { useEffect, useRef, useState } from 'react'
 import Eye from 'lucide-react/dist/esm/icons/eye.js'
 import FileSpreadsheet from 'lucide-react/dist/esm/icons/file-spreadsheet.js'
 import Upload from 'lucide-react/dist/esm/icons/upload.js'
 import Modal from '../shared/Modal'
-import DateEntryInput from '../shared/DateEntryInput.tsx'
+import DateTimeRangePicker, { todayDateTimeRange, type DateTimeRange } from '../shared/DateTimeRangePicker.tsx'
 import StatusBadge from './StatusBadge'
 import { withLoaderTimeout } from '../../utils/loaders.ts'
-import { todayStr, businessYear, businessMonth } from '../../utils/dateHelpers'
+import { fmtDateOnly } from '../../utils/formatters.ts'
 import { SALES_IMPORT_COLUMNS } from '../../utils/salesImportContract.ts'
+import { useApp, type AppContextCoreValue } from '../../app/AppContextCore.tsx'
 
 const SALES_EXPORT_PREVIEW_TIMEOUT_MS = 20000
 const SALES_EXPORT_CSV_TIMEOUT_MS = 30000
 
 type TranslateFn = (key: string) => string
 type MoneyFormatter = (value: number) => string
-type ExportPeriod = 'daily' | 'monthly' | 'yearly' | 'custom'
 
 interface ExportModalProps {
   onClose: () => void
@@ -26,6 +25,8 @@ interface ExportModalProps {
 interface ExportDates {
   start: string
   end: string
+  startTime: string
+  endTime: string
 }
 
 type CsvRow = Record<string, unknown>
@@ -74,7 +75,7 @@ interface SalesExportData {
 
 interface SalesExportApi {
   getSalesExport: (params: {
-    startDate: string; endDate: string; format?: 'csv'; detailsOnly?: string; pageSize?: string
+    startDate: string; endDate: string; startTime: string; endTime: string; format?: 'csv'; detailsOnly?: string; pageSize?: string
     snapshotMaxId?: string; afterCreatedAt?: string; afterId?: string
   }) => Promise<SalesExportData | string>
 }
@@ -89,45 +90,60 @@ function getErrorMessage(error: unknown, fallback: string): string {
 }
 
 export default function ExportModal({ onClose, t, fmtUSD }: ExportModalProps) {
-  const [period, setPeriod] = useState<ExportPeriod>('daily')
-  const [startDate, setStartDate] = useState('')
-  const [endDate, setEndDate] = useState('')
+  const [range, setRange] = useState<DateTimeRange>(todayDateTimeRange)
   const [loading, setLoading] = useState(false)
-  const [preview, setPreview] = useState<SalesExportData | null>(null)
+  const [previewResult, setPreview] = useState<{ owner: string; data: SalesExportData } | null>(null)
+  const { user, getPermissions } = useApp() as AppContextCoreValue
+  const owner = JSON.stringify([user, getPermissions()])
+  const ownerRef = useRef(owner)
+  ownerRef.current = owner
+  const previewGenerationRef = useRef(0)
+  const pendingPreviewRef = useRef<number | null>(null)
+  const mountedRef = useRef(true)
+  const preview = previewResult?.owner === owner ? previewResult.data : null
+
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+      previewGenerationRef.current++
+      pendingPreviewRef.current = null
+    }
+  }, [])
+
+  useEffect(() => {
+    previewGenerationRef.current++
+    setPreview(null)
+    if (pendingPreviewRef.current !== null) {
+      pendingPreviewRef.current = null
+      setLoading(false)
+    }
+  }, [owner])
+
+  const changeRange = (next: DateTimeRange) => {
+    previewGenerationRef.current++
+    setRange(next)
+    setPreview(null)
+    if (pendingPreviewRef.current !== null) {
+      pendingPreviewRef.current = null
+      setLoading(false)
+    }
+  }
+
+  const closeModal = () => {
+    mountedRef.current = false
+    previewGenerationRef.current++
+    pendingPreviewRef.current = null
+    onClose()
+  }
 
   const tr = (key: string, fallback: string): string => {
     const value = typeof t === 'function' ? t(key) : null
     return value && value !== key ? value : fallback
   }
 
-  // Uses the business timezone (Asia/Phnom_Penh), not the device's own --
-  // previously mixed UTC (`toISOString()`) for daily/month-end with
-  // device-local for the month/year start, so "This Month"/"This Year"
-  // could disagree with "Today" for users outside Cambodia's timezone.
-  const computeDates = (selectedPeriod: ExportPeriod): ExportDates => {
-    if (selectedPeriod === 'daily') {
-      const day = todayStr()
-      return { start: day, end: day }
-    }
-    if (selectedPeriod === 'monthly') {
-      const year = businessYear()
-      const month = businessMonth()
-      const start = `${year}-${String(month).padStart(2, '0')}-01`
-      const lastDay = new Date(year, month, 0)
-      const end = `${lastDay.getFullYear()}-${String(lastDay.getMonth() + 1).padStart(2, '0')}-${String(lastDay.getDate()).padStart(2, '0')}`
-      return { start, end }
-    }
-    if (selectedPeriod === 'yearly') {
-      const year = businessYear()
-      return { start: `${year}-01-01`, end: `${year}-12-31` }
-    }
-    return { start: startDate, end: endDate }
-  }
-
-  const previewDates = useMemo(() => computeDates(period), [period, startDate, endDate])
-
   const validateDates = (): ExportDates => {
-    const dates = computeDates(period)
+    const dates = { start: range.startDate, end: range.endDate, startTime: range.startTime, endTime: range.endTime }
     if (!dates.start || !dates.end) {
       throw new Error(tr('please_select_start_end_dates', 'Please select start and end dates'))
     }
@@ -166,20 +182,26 @@ export default function ExportModal({ onClose, t, fmtUSD }: ExportModalProps) {
   }
 
   const handlePreview = async () => {
+    const generation = ++previewGenerationRef.current
+    const isCurrent = () => mountedRef.current && previewGenerationRef.current === generation && ownerRef.current === owner
     try {
       const dates = validateDates()
+      pendingPreviewRef.current = generation
       setLoading(true)
       const data = await withLoaderTimeout(
-        () => getSalesExportApi().getSalesExport({ startDate: dates.start, endDate: dates.end }),
+        () => getSalesExportApi().getSalesExport({ startDate: dates.start, endDate: dates.end, startTime: dates.startTime, endTime: dates.endTime }),
         'Sales export preview',
         SALES_EXPORT_PREVIEW_TIMEOUT_MS,
       )
       if (typeof data === 'string') throw new Error(tr('error_loading_export', 'Error loading export'))
-      setPreview(data)
+      if (isCurrent()) setPreview({ owner, data })
     } catch (error) {
-      alert(getErrorMessage(error, tr('error_loading_export', 'Error loading export')))
+      if (isCurrent()) alert(getErrorMessage(error, tr('error_loading_export', 'Error loading export')))
     } finally {
-      setLoading(false)
+      if (isCurrent()) {
+        pendingPreviewRef.current = null
+        setLoading(false)
+      }
     }
   }
 
@@ -189,7 +211,7 @@ export default function ExportModal({ onClose, t, fmtUSD }: ExportModalProps) {
       setLoading(true)
       const api = getSalesExportApi()
       const first = await withLoaderTimeout(
-        () => api.getSalesExport({ startDate: dates.start, endDate: dates.end, detailsOnly: 'true', pageSize: '500' }),
+        () => api.getSalesExport({ startDate: dates.start, endDate: dates.end, startTime: dates.startTime, endTime: dates.endTime, detailsOnly: 'true', pageSize: '500' }),
         'Sales export CSV',
         SALES_EXPORT_CSV_TIMEOUT_MS,
       )
@@ -203,7 +225,7 @@ export default function ExportModal({ onClose, t, fmtUSD }: ExportModalProps) {
         }
         const next = await withLoaderTimeout(
           () => api.getSalesExport({
-            startDate: dates.start, endDate: dates.end, detailsOnly: 'true', pageSize: '500',
+            startDate: dates.start, endDate: dates.end, startTime: dates.startTime, endTime: dates.endTime, detailsOnly: 'true', pageSize: '500',
             snapshotMaxId: String(page.snapshot_max_id), afterCreatedAt: cursor.created_at, afterId: String(cursor.id),
           }),
           'Sales export CSV page',
@@ -223,7 +245,7 @@ export default function ExportModal({ onClose, t, fmtUSD }: ExportModalProps) {
   }
 
   return (
-    <Modal title={tr('export_sales_report', 'Export Sales Report')} onClose={onClose} wide unsavedChanges="read-only">
+    <Modal title={tr('export_sales_report', 'Export Sales Report')} onClose={closeModal} wide unsavedChanges="read-only">
       <div className="space-y-5">
         <div className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800/60">
           <div className="rounded-2xl bg-blue-100 p-3 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
@@ -237,47 +259,9 @@ export default function ExportModal({ onClose, t, fmtUSD }: ExportModalProps) {
           </div>
         </div>
 
-        <fieldset className="min-w-0">
+        <fieldset className="min-w-0" disabled={loading}>
           <legend className="mb-2 block text-sm font-semibold text-gray-700 dark:text-gray-300">{tr('report_period', 'Report Period')}</legend>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-            {([
-              ['daily', tr('period_daily', 'Daily')],
-              ['monthly', tr('period_monthly', 'Monthly')],
-              ['yearly', tr('period_yearly', 'Yearly')],
-              ['custom', tr('period_custom', 'Custom')],
-            ] satisfies Array<[ExportPeriod, string]>).map(([value, label]) => (
-              <button
-                key={value}
-                type="button"
-                onClick={() => setPeriod(value)}
-                className={`rounded-xl border-2 px-3 py-2 text-sm font-medium ${
-                  period === value
-                    ? 'border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
-                    : 'border-gray-200 text-gray-600 dark:border-gray-600 dark:text-gray-400'
-                }`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-
-          {period === 'custom' ? (
-            <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <div>
-                <label htmlFor="sales-export-start-date" className="mb-1 block text-xs text-gray-500">{tr('start_date', 'Start Date')}</label>
-                <DateEntryInput id="sales-export-start-date" className="text-sm" t={t} ariaLabel={tr('start_date', 'Start Date')} value={startDate} onChange={(iso) => setStartDate(iso)} />
-              </div>
-              <div>
-                <label htmlFor="sales-export-end-date" className="mb-1 block text-xs text-gray-500">{tr('end_date', 'End Date')}</label>
-                <DateEntryInput id="sales-export-end-date" className="text-sm" t={t} ariaLabel={tr('end_date', 'End Date')} value={endDate} onChange={(iso) => setEndDate(iso)} />
-              </div>
-            </div>
-          ) : (
-            <div className="mt-3 inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-500 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-400">
-              <CalendarRange className="h-4 w-4" />
-              {previewDates.start} to {previewDates.end}
-            </div>
-          )}
+          <DateTimeRangePicker value={range} onChange={changeRange} t={(key) => tr(key, key)} showTime continuous={false} className="w-full" triggerClassName="flex w-full items-center justify-between gap-2 px-3 py-2 text-sm" />
         </fieldset>
 
         <div className="flex flex-col gap-2 sm:flex-row">
@@ -300,7 +284,7 @@ export default function ExportModal({ onClose, t, fmtUSD }: ExportModalProps) {
             ) : null}
             <div className="rounded-xl bg-gray-50 p-4 dark:bg-gray-700/50">
               <div className="mb-3 text-sm font-semibold text-gray-700 dark:text-gray-300">
-                {tr('accounting_summary', 'Accounting Summary')} {tr('accounting_summary_period', '{start} to {end}').replace('{start}', String(preview.period?.start ?? '')).replace('{end}', String(preview.period?.end ?? ''))}
+                {tr('accounting_summary', 'Accounting Summary')} {tr('accounting_summary_period', '{start} to {end}').replace('{start}', fmtDateOnly(preview.period?.start ?? '')).replace('{end}', fmtDateOnly(preview.period?.end ?? ''))}
               </div>
               <div className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
                 {([

@@ -1,10 +1,3 @@
-// Regression for the four visible unassociated labels reproduced in the
-// Sales -> Export -> Detailed sales report -> Custom flow. Source-shape is
-// intentional here: the frontend utility suite has no DOM, while the exact
-// rendered `HTMLLabelElement.control` contract is covered by the browser
-// acceptance used to identify this regression.
-//
-// Run: node tests/salesFormLabelAssociation.test.ts
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -21,19 +14,11 @@ const labels = (source: string): string[] => Array.from(source.matchAll(/<label\
 assert.match(
   exportModal,
   /<fieldset\b[^>]*>[\s\S]*?<legend[^>]*>\{tr\('report_period', 'Report Period'\)\}<\/legend>[\s\S]*?<\/fieldset>/,
-  'the period buttons are named by a fieldset legend rather than an unassociated label',
+  'the shared range is named by a fieldset legend rather than an unassociated label',
 )
 
-for (const [name, id] of [
-  ['start_date', 'sales-export-start-date'],
-  ['end_date', 'sales-export-end-date'],
-] as const) {
-  assert.match(
-    exportModal,
-    new RegExp(`<label htmlFor="${id}"[^>]*>\\{tr\\('${name}', '[^']+'\\)\\}<\\/label>[\\s\\S]*?<DateEntryInput id="${id}"`),
-    `${name} label points to the DateEntryInput control`,
-  )
-}
+assert.match(exportModal, /<DateTimeRangePicker\b/)
+assert.doesNotMatch(exportModal, /<DateEntryInput\b/)
 
 for (const label of labels(exportModal)) {
   assert.match(label, /\bhtmlFor=/, 'every remaining ExportModal label names its control')
@@ -50,4 +35,4 @@ assert.equal(
   'both responsive section headers conditionally render the label only in selection mode',
 )
 
-console.log('PASS sales custom export and responsive section headers have associated labels')
+console.log('PASS sales shared export range and responsive section headers have associated labels')

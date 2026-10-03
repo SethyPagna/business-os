@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import { stripTypeScriptTypes } from 'node:module'
-import { statsPresetRange } from '../src/components/shared/statsStripPresets.ts'
+import { statsPresetRange, STATS_PRESETS } from '../src/components/shared/statsStripPresets.ts'
+import { getReportView, reportQueryParams } from '../src/components/sales/reports/reportModel.ts'
 
 const read = (path: string) => fs.readFileSync(new URL(`../src/${path}`, import.meta.url), 'utf8')
 const hub = read('components/sales/ReportsHub.tsx')
@@ -21,15 +22,12 @@ assert.match(picker, /showCalendarIcon = false/, 'date-range triggers omit decor
 assert.match(picker, /\{showCalendarIcon && <CalendarDays/)
 assert.match(picker, /placeholder="HH:MM"/)
 assert.doesNotMatch(picker, /^\s*<input\s+type="time"/m)
-const ids = (source: string) => [...source.matchAll(/\{ id: '([^']+)'/g)].map((match) => match[1])
-const mobile = hub.slice(hub.indexOf('const mobilePresets:'), hub.indexOf('const selectedMobilePreset'))
-const shared = picker.slice(picker.indexOf('const quickRanges:'), picker.indexOf('const applyQuickRange'))
-assert.deepEqual(ids(mobile), ['all', 'today', 'yesterday', '7d', '30d', 'month'])
-assert.deepEqual(ids(mobile), ids(shared))
+assert.match(hub, /const mobilePresets = STATS_PRESETS\.map\(\(preset\) => \(\{ id: preset\.id, label: trh\(preset\.key, preset\.fallback\) \}\)\)/)
+assert.match(picker, /const quickRanges = STATS_PRESETS\.map\(\(preset\) => \(\{ id: preset\.id, label: quickRangeLabel\(preset\.key, preset\.fallback\) \}\)\)/)
 const helperSource = hub.slice(hub.indexOf('export function mobilePresetRange'), hub.indexOf('export function activeMobilePreset'))
 const helper = new Function('statsPresetRange', `${stripTypeScriptTypes(helperSource.replace('export ', ''))}; return mobilePresetRange`)(statsPresetRange)
 for (const now of [new Date(2026, 0, 1), new Date(2026, 8, 5), new Date(2026, 3, 30)]) {
-  for (const preset of ['all', 'today', 'yesterday', '7d', '30d', 'month'] as const) {
+  for (const { id: preset } of STATS_PRESETS) {
     assert.deepEqual(helper(preset, now), statsPresetRange(preset, now), `${preset} must have identical clock/date semantics`)
   }
 }
@@ -68,6 +66,29 @@ assert.equal(invalid, false)
 assert.equal(published.length, 1)
 apply({ endDate: '2026-09-06', endTime: '09:00' })
 assert.equal(published.length, 2, 'overnight continuous endpoints on different dates remain valid')
+for (const range of [
+  { startDate: '', endDate: '', startTime: '', endTime: '' },
+  { startDate: '2026-09-05', endDate: '', startTime: '', endTime: '' },
+  { startDate: '', endDate: '2026-09-05', startTime: '', endTime: '' },
+]) {
+  let refusal: unknown = false
+  const callbacks: unknown[] = []
+  makeApply(range, true, (value: unknown) => { refusal = value }, (value: unknown) => callbacks.push(value))({ startTime: '09:00' })
+  assert.equal(refusal, 'dates')
+  assert.equal(callbacks.length, 0, 'missing continuous dates cannot reach a host serializer')
+  makeApply(range, false, () => {}, (value: unknown) => callbacks.push(value))({ startTime: '09:00' })
+  assert.equal(callbacks.length, 1, 'recurring clocks preserve their all-time API contract')
+}
+const rangeErrorSource = hub.slice(hub.indexOf('const rangeError = useMemo('), hub.indexOf('const activeFilterCount'))
+const getRangeError = new Function('ctx', `with(ctx){${stripTypeScriptTypes(rangeErrorSource)};return rangeError}`)
+for (const language of ['en', 'km']) {
+  const pack = JSON.parse(fs.readFileSync(new URL(`../src/lang/${language}.json`, import.meta.url), 'utf8'))
+  const trh = (key: string, fallback: string) => pack[key] || fallback
+  const filters = { startDate: '', endDate: '', startTime: '09:00', endTime: '11:00', branchId: '', status: '', paymentMethod: '' }
+  const context = { filters, view: getReportView('sales'), trh, reportQueryParams, useMemo: (fn: () => string) => fn() }
+  assert.equal(getRangeError(context), pack.please_select_start_end_dates)
+  assert.equal(getRangeError({ ...context, filters: { ...filters, startDate: '2026-09-05', endDate: '2026-09-05', startTime: '18:00' } }), `${pack.end_date} / ${pack.end_time} ≥ ${pack.start_date} / ${pack.start_time}`)
+}
 for (const lang of ['en', 'km']) {
   const pack = JSON.parse(read(`lang/${lang}.json`))
   for (const key of ['start_date', 'end_date', 'start_time', 'end_time']) assert.ok(pack[key], `${lang} validation label ${key}`)

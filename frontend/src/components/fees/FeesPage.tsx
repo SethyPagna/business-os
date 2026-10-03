@@ -713,6 +713,7 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
         ) : null}
         range={stripRange}
         showTime
+        continuous
         onRangeChange={setStripRange}
       />
 

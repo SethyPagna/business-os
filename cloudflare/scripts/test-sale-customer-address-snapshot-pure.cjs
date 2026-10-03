@@ -35,7 +35,7 @@ const cache = new Map()
 // contactOptions is on this list deliberately: the loader stubs any relative
 // import it does not name, and a stubbed kernel would make every address here
 // resolve to undefined -- a test that agrees with itself and proves nothing.
-const actual = new Set(['businessMaintenanceGuard',
+const actual = new Set(['businessDateWindow', 'continuousReadWindow', 'businessMaintenanceGuard',
   'offlineSaleOwnership',
   'acquisitionCostAccess',
   'saleCustomerAssignmentGuard',
@@ -169,6 +169,13 @@ function fixture(options = {}) {
 }
 
 async function run() {
+  const clocks = fixture()
+  const invalidStart = await clocks.read('/?startTime=24:00&endTime=24:00')
+  assert.equal(invalidStart.status, 400)
+  assert.equal(invalidStart.body.error, 'Use valid 24-hour HH:MM times; 24:00 is allowed only as the range end.')
+  const validEnd = await clocks.read('/?startTime=00:00&endTime=24:00')
+  assert.equal(validEnd.status, 200, JSON.stringify(validEnd))
+  console.log('PASS actual sales GET rejects start 24:00 and accepts end 24:00')
   // 1. PATCH /sales/:id/customer -- the writer that produced the owner's rows.
   const f = fixture()
   const linked = await f.call('/1/customer', { customerId: 1, expected_updated_at: 'sale-v1', client_request_id: 'address-link-1' })

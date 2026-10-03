@@ -39,8 +39,8 @@ const km = JSON.parse(read('src/lang/km.json')) as Record<string, string>
 assert.equal(en.yesterday, 'Yesterday')
 assert.ok(km.yesterday && km.yesterday.trim(), 'km.json carries yesterday')
 const picker = read('src/components/shared/DateTimeRangePicker.tsx')
-assert.match(picker, /\{ id: 'today'[^\n]*\n\s*\{ id: 'yesterday', label: quickRangeLabel\('yesterday', 'Yesterday'\) \}/, 'the picker offers Yesterday directly after Today')
+assert.match(picker, /STATS_PRESETS\.map/, 'the picker offers the shared ordered presets')
 const hub = read('src/components/sales/ReportsHub.tsx')
-assert.match(hub, /\{ id: 'today'[^\n]*\n\s*\{ id: 'yesterday', label: trh\('yesterday', 'Yesterday'\) \}/, 'the hub offers Yesterday directly after Today')
+assert.match(hub, /STATS_PRESETS\.map/, 'the hub offers the shared ordered presets')
 
 console.log('PASS report yesterday preset')

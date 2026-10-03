@@ -89,7 +89,7 @@ function mount(source = REPORT) {
     }
     if (id.includes('shiftReportModel')) return require('../src/components/shifts/shiftReportModel.ts')
     if (id.includes('ShiftSummary')) return { __esModule: true, default: 'Summary' }
-    if (id.includes('reportModel')) return { reportFileName: (name: string) => name }
+    if (id.includes('reportModel')) return { reportFileName: (name: string) => name, reportQueryParams: require('../src/components/sales/reports/reportModel.ts').reportQueryParams }
     if (id.includes('reportTypes')) return { exportMenuItems: () => [] }
     if (id.includes('/csv')) return { downloadCSV: () => {} }
     if (id.includes('ShiftGate')) return { SHIFT_STATE_CHANGED_EVENT: 'shift:test' }
