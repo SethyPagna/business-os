@@ -4,6 +4,7 @@ import ts from 'typescript'
 import { dashboardRangeQuery, dashboardRangeLabel } from '../src/components/dashboard/dashboardRange.ts'
 import { reportQueryParams, getReportView } from '../src/components/sales/reports/reportModel.ts'
 import { beginTrackedRequest, isTrackedRequestCurrent, invalidateTrackedRequest } from '../src/utils/loaders.ts'
+import { STATS_PRESETS, statsPresetRange, type StatsPresetKey } from '../src/components/shared/statsStripPresets.ts'
 
 const range = { startDate: '2026-09-19', endDate: '2026-09-20', startTime: '22:00', endTime: '02:00' }
 const query = dashboardRangeQuery(range)
@@ -45,9 +46,19 @@ function effectContaining(fragment: string): string {
 const names = ['validDashboardCustomDates', 'normalizeDashboardRangeId', 'todayDashboardFilterPrefs', 'readDashboardFilterPrefs', 'resolveDashboardFilterRange', 'dashboardPrefsForSelection']
 const helpers = tree.statements.filter((n) => ts.isFunctionDeclaration(n) && names.includes(n.name!.text)).map((n) => n.getText(tree)).join('\n')
 const stored = new Map<string, string>()
-const prefEnv: any = { dashboardRangeQuery, window: { localStorage: { getItem: (key: string) => stored.get(key) ?? null } }, todayStr: () => '2026-09-20', statsPresetRange: () => ({ startDate: '2026-09-20', endDate: '2026-09-20' }) }
+const prefEnv: any = { dashboardRangeQuery, STATS_PRESETS, window: { localStorage: { getItem: (key: string) => stored.get(key) ?? null } }, todayStr: () => '2026-09-20', statsPresetRange: (id: StatsPresetKey) => statsPresetRange(id, new Date(2026, 9, 3)) }
 const prefsCode = ts.transpileModule(helpers + `\nreturn {${names.join(',')}}`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
 const prefs = new Function('env', `with(env){${prefsCode}}`)(prefEnv)
+for (const { id } of STATS_PRESETS) {
+  const next = statsPresetRange(id, new Date(2026, 9, 3))
+  const selection = prefs.dashboardPrefsForSelection(next, id)
+  assert.equal(selection?.rangeId, id, `Dashboard accepts visible preset ${id}`)
+  stored.set(`preset-${id}`, JSON.stringify(selection))
+  const restored = prefs.readDashboardFilterPrefs(`preset-${id}`)
+  assert.equal(restored.rangeId, id, `Dashboard persists visible preset ${id}`)
+  assert.deepEqual(prefs.resolveDashboardFilterRange(restored), { ...next, startTime: '', endTime: '' }, `Dashboard reload resolves actual preset ${id}`)
+}
+for (const invalid of ['last_13_months', '', null, {}, ['last_month']]) assert.equal(prefs.normalizeDashboardRangeId(invalid), null)
 const selected = prefs.dashboardPrefsForSelection(range, 'custom')
 stored.set('actor-A', JSON.stringify(selected))
 assert.deepEqual(prefs.resolveDashboardFilterRange(prefs.readDashboardFilterPrefs('actor-A')), range)
