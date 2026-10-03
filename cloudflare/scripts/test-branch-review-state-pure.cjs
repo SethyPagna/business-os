@@ -6,6 +6,8 @@ const { loadAll } = require('./harness/load_migrations.cjs')
 const ts = require('typescript')
 const moduleCache = new Map()
 let currentDb
+let beforeBatch
+let afterBatch
 function compile(source) {
   return ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
 }
@@ -26,7 +28,12 @@ function adapter(db) {
       all: async params => Array.isArray(params) ? db.prepare(sql).all(...params) : db.prepare(sql).all(params || {}),
       run: async params => { const result = db.prepare(sql).run(params || {}); return { changes: result.changes, lastInsertRowid: Number(result.lastInsertRowid) } },
     }),
-    batch: async statements => execute(db, statements),
+    batch: async statements => {
+      if (beforeBatch) { const inject = beforeBatch; beforeBatch = null; inject(db) }
+      const results = execute(db, statements)
+      if (afterBatch) { const inject = afterBatch; afterBatch = null; inject(db) }
+      return results
+    },
   }
 }
 function load(name) {
@@ -42,10 +49,21 @@ function load(name) {
 }
 function execute(db, statements) {
   db.exec('BEGIN')
-  try { for (const { sql, params } of statements) db.prepare(sql).run(params || {}); db.exec('COMMIT') }
+  try {
+    const results = statements.map(({ sql, params }) => {
+      const statement = db.prepare(sql)
+      if (/^\s*SELECT/i.test(sql)) return { results: statement.all(params || {}), success: true }
+      const result = statement.run(params || {})
+      return { results: [], success: true, meta: { changes: result.changes, last_row_id: Number(result.lastInsertRowid) } }
+    })
+    db.exec('COMMIT')
+    return results
+  }
   catch (error) { db.exec('ROLLBACK'); throw error }
 }
 function world() {
+  beforeBatch = null
+  afterBatch = null
   currentDb = openDb(loadAll()).db
   currentDb.exec("INSERT INTO branches(id,name,location,notes,is_active,is_default,updated_at) VALUES(1,'Shop','Market','before',1,1,'same'),(2,'Warehouse','Depot','bulk',1,0,'same')")
   return currentDb
@@ -65,6 +83,33 @@ function routeHandler(method, routePath, dependencies = {}) {
 function context(body, user = { id: 7, permissions: JSON.stringify({ branches: true }) }) {
   return { env: {}, req: { param: () => '1', json: async () => body }, get: () => user,
     json: (value, status = 200) => ({ status, value }), executionCtx: { waitUntil: () => {} } }
+}
+function approvalHandler() {
+  const tree = sourceTree('lib/reviewApply.ts')
+  const statement = tree.statements.find(node => ts.isExpressionStatement(node) && ts.isCallExpression(node.expression)
+    && node.expression.expression.getText(tree) === 'registerApplier'
+    && node.expression.arguments.slice(0, 3).map(arg => arg.text).join('/') === 'branches/update/branch')
+  const permissionError = tree.statements.find(node => node.name?.text === 'ReviewRequesterPermissionError').getText(tree)
+  return evaluate(`${permissionError}\nconst handler=${statement.expression.arguments[3].getText(tree)}`, {
+    ...writes, ...load('permissions'), ...load('conflictControl'), getDb: () => adapter(currentDb), audit: async () => {}, notify: async () => {},
+  }, 'handler')
+}
+async function queuedBranch(db, body = { notes: 'approved' }) {
+  db.exec(`INSERT INTO roles(id,name,code,permissions) VALUES(3,'Requester','employee','{"branches":"review"}');
+    INSERT INTO users(id,username,name,password,role_id,permissions,is_active) VALUES(7,'requester','Requester','fixture',3,'{}',1);`)
+  const current = db.prepare('SELECT * FROM branches WHERE id=1').get()
+  const id = await load('pendingActions').createPendingAction({}, { section: 'branches', actionType: 'update', entityType: 'branch', entityId: 1,
+    payload: body, expectedEntityStateJson: writes.branchExpectedStateJson(current), requestedBy: 7 })
+  return db.prepare('SELECT * FROM pending_actions WHERE id=?').get(id)
+}
+function resubmitHandler() {
+  const tree = sourceTree('routes/reviewQueue.ts')
+  const statement = tree.statements.find(node => ts.isExpressionStatement(node) && ts.isCallExpression(node.expression)
+    && node.expression.expression.getText(tree) === 'app.post' && node.expression.arguments[0]?.text === '/:id/resubmit')
+  return evaluate(`const handler=${statement.expression.arguments[1].getText(tree)}`, {
+    ...writes, ...load('pendingActions'), getDb: () => adapter(currentDb), hasAcquisitionCostInput: () => false,
+    productRemovePendingPointer: () => null, audit: async () => {}, broadcast: async () => {}, actorSnapshot: () => 'Requester',
+  }, 'handler')
 }
 
 const migrationPath = path.join(__dirname, '../migrations/0223_branch_lifecycle_identity.sql')
@@ -153,6 +198,71 @@ async function main() {
     const row = db.prepare('SELECT * FROM pending_actions').get()
     assert.equal(row.expected_entity_state_json, writes.branchExpectedStateJson(current))
     assert.equal(db.prepare('SELECT notes FROM branches WHERE id=1').get().notes, 'same-second later')
+    db.close()
+  })
+  await check('direct PUT returns its committed state even after a postcommit edit', async () => {
+    const db = world()
+    const row = db.prepare('SELECT * FROM branches WHERE id=1').get()
+    afterBatch = db => db.exec("UPDATE branches SET notes='postcommit other writer' WHERE id=1")
+    const response = await routeHandler('put', '/:id')(context({ notes: 'mine', expectedEditEtag: await writes.branchEditEtag(row) }))
+    assert.equal(response.status, 200)
+    assert.equal(response.value.success, true)
+    assert.equal(response.value.branch.notes, 'mine')
+    assert.equal(response.value.branch.edit_etag, await writes.branchEditEtag(response.value.branch))
+    assert.equal(db.prepare('SELECT notes FROM branches WHERE id=1').get().notes, 'postcommit other writer')
+    db.close()
+  })
+  await check('approval atomically changes metadata and pending status using trusted baseline', async () => {
+    const db = world()
+    const row = await queuedBranch(db)
+    const result = await approvalHandler()({}, row, { id: 8, name: 'Reviewer' })
+    assert.equal(result.pendingActionMarkedAtomically, true)
+    assert.equal(db.prepare('SELECT notes FROM branches WHERE id=1').get().notes, 'approved')
+    assert.equal(db.prepare('SELECT status FROM pending_actions').get().status, 'approved')
+    await assert.rejects(approvalHandler()({}, row, { id: 8, name: 'Reviewer' }))
+    db.close()
+  })
+  await check('approval refuses legacy baseline and same-second changed branch without changing pending history', async () => {
+    for (const mutation of ['UPDATE pending_actions SET expected_entity_state_json=NULL', "UPDATE branches SET notes='later' WHERE id=1"]) {
+      const db = world(); const row = await queuedBranch(db)
+      db.exec(mutation)
+      const saved = db.prepare('SELECT * FROM pending_actions WHERE id=?').get(row.id)
+      const before = JSON.stringify(db.prepare('SELECT * FROM branches').all())
+      await assert.rejects(approvalHandler()({}, saved, { id: 8, name: 'Reviewer' }), error => error.code === 'branch_edit_conflict')
+      assert.equal(JSON.stringify(db.prepare('SELECT * FROM branches').all()), before)
+      assert.deepEqual(db.prepare('SELECT * FROM pending_actions WHERE id=?').get(row.id), saved)
+      db.close()
+    }
+  })
+  await check('approval requester denial or commit-time authority and pending changes abort', async () => {
+    for (const mutation of ["UPDATE users SET permissions='{\"branches:edit\":false}' WHERE id=7", 'UPDATE users SET is_active=0 WHERE id=7', "UPDATE users SET deleted_at='gone' WHERE id=7", 'DELETE FROM users WHERE id=7']) {
+      const db = world(); const row = await queuedBranch(db); db.exec(mutation)
+      await assert.rejects(approvalHandler()({}, row, { id: 8, name: 'Reviewer' }), error => error.code === 'request_permission_revoked')
+      assert.equal(db.prepare('SELECT notes FROM branches WHERE id=1').get().notes, 'before')
+      assert.equal(db.prepare('SELECT status FROM pending_actions').get().status, 'open'); db.close()
+    }
+    for (const mutation of ["UPDATE roles SET permissions='{\"branches\":false}' WHERE id=3", "UPDATE users SET permissions='{\"branches:edit\":false}' WHERE id=7", "UPDATE pending_actions SET status='rejected'", "UPDATE pending_actions SET payload_json='{}'", 'UPDATE pending_actions SET requested_by=99', 'UPDATE pending_actions SET expected_entity_state_json=NULL']) {
+      const db = world(); const row = await queuedBranch(db)
+      beforeBatch = db => db.exec(mutation)
+      await assert.rejects(approvalHandler()({}, row, { id: 8, name: 'Reviewer' }), error => error.code === 'branch_edit_conflict')
+      assert.equal(db.prepare('SELECT notes FROM branches WHERE id=1').get().notes, 'before')
+      assert.notEqual(db.prepare('SELECT status FROM pending_actions').get().status, 'approved'); db.close()
+    }
+  })
+  await check('resubmit keeps DB baseline and refuses stale or legacy baseline without losing pending history', async () => {
+    const db = world(); const row = await queuedBranch(db)
+    db.exec("UPDATE pending_actions SET status='rejected'")
+    const edited = await resubmitHandler()(context({ payload: { notes: 'changed desired', expected_entity_state_json: 'forged' } }))
+    assert.equal(edited.status, 200)
+    assert.equal(db.prepare('SELECT expected_entity_state_json FROM pending_actions').get().expected_entity_state_json, row.expected_entity_state_json)
+    db.exec("UPDATE pending_actions SET status='rejected'")
+    assert.equal((await resubmitHandler()(context({}))).status, 200)
+    for (const mutation of ["UPDATE branches SET notes='later' WHERE id=1", 'UPDATE pending_actions SET expected_entity_state_json=NULL']) {
+      db.exec("UPDATE pending_actions SET status='rejected'"); db.exec(mutation)
+      const saved = db.prepare('SELECT * FROM pending_actions').get()
+      assert.equal((await resubmitHandler()(context({ payload: { notes: 'must not reopen' } }))).status, 409)
+      assert.deepEqual(db.prepare('SELECT * FROM pending_actions').get(), saved)
+    }
     db.close()
   })
   if (failures) process.exitCode = 1

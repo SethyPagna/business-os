@@ -76,6 +76,16 @@ export function branchExpectedStateJson(row: BranchIdentitySnapshot): string {
   return JSON.stringify({ kind: 'branch-edit-state', version: 1, entity_id: state.id, state })
 }
 
+export function assertBranchExpectedState(row: BranchIdentitySnapshot, stored: unknown): void {
+  try {
+    if (typeof stored !== 'string') throw new BranchEditConflictError()
+    const parsed = JSON.parse(stored)
+    if (!parsed || parsed.kind !== 'branch-edit-state' || parsed.version !== 1 || parsed.entity_id !== Number(row.id)
+      || !parsed.state || Array.isArray(parsed.state)
+      || JSON.stringify(captureBranchEditState(parsed.state)) !== JSON.stringify(captureBranchEditState(row))) throw new BranchEditConflictError()
+  } catch { throw new BranchEditConflictError() }
+}
+
 export async function branchEditEtag(row: BranchIdentitySnapshot): Promise<string> {
   const bytes = new TextEncoder().encode(branchExpectedStateJson(row))
   const digest = await crypto.subtle.digest('SHA-256', bytes)

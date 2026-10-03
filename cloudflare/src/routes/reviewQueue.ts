@@ -18,6 +18,9 @@ import { ProductImageAssetError } from '../lib/productImagePermission'
 import { ProductRemoveError } from '../lib/productDelete'
 import type { Env } from '../index'
 import { actorSnapshot } from '../lib/actorSnapshot'
+import { getDb } from '../lib/db'
+import { assertBranchExpectedState, BranchEditConflictError } from '../lib/branchWrites'
+import type { BranchIdentitySnapshot } from '../lib/canonicalBranchIdentity'
 
 // The Review/Approval page itself -- see progress.md's "Permissions UI
 // redesign" item. Gated Full Access only, same pattern Users already
@@ -126,6 +129,21 @@ app.post('/:id/resubmit', async (c) => {
     }
   }
 
+  const existing = await getPendingAction(c.env, id)
+  if (existing?.requested_by === Number(user.id) && existing.section === 'branches'
+    && existing.action_type === 'update' && existing.entity_type === 'branch') {
+    try {
+      const current = await getDb(c.env).prepare('SELECT * FROM branches WHERE id = @id')
+        .get<BranchIdentitySnapshot>({ id: existing.entity_id })
+      if (!current) throw new BranchEditConflictError()
+      assertBranchExpectedState(current, existing.expected_entity_state_json)
+    } catch (error) {
+      if (error instanceof BranchEditConflictError) {
+        return c.json({ success: false, error: error.message, code: error.code, conflict: true }, 409)
+      }
+      throw error
+    }
+  }
   const ok = await resubmitPendingAction(c.env, id, { requestedBy: Number(user.id), payloadJson, summary })
   // One response for "not yours", "doesn't exist" and "not in a rejected
   // state" -- distinguishing them would confirm the existence of other
@@ -197,6 +215,7 @@ app.post('/:id/approve', async (c) => {
       (promise) => c.executionCtx.waitUntil(promise))
     pendingActionMarkedAtomically = outcome.pendingActionMarkedAtomically
   } catch (err) {
+    if (err instanceof BranchEditConflictError) return c.json({ success: false, error: err.message, code: err.code, conflict: true }, 409)
     if (err instanceof ProductMoneyWriteError) return c.json({ error: err.message, code: err.code }, err.status as 400 | 409)
     if (err instanceof NoReviewApplierError) {
       return c.json({ error: err.message, code: 'no_review_applier' }, 501)

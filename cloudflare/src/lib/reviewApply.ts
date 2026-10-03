@@ -22,7 +22,7 @@ import { audit } from './audit'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from './cache'
 import { insertRow, updateRow, defaultBranchId, syncProductImageGallery, seedBranchStockForNewProduct, seedInitialBatchForNewProduct, readProductMoneyPlan } from './productWrites'
-import { branchUpdateStatements } from './branchWrites'
+import { branchUpdateStatements, assertBranchExpectedState, BranchEditConflictError, isBranchEditGuardError } from './branchWrites'
 import { assertCanonicalBranchSetMutationAllowed, type BranchIdentitySnapshot } from './canonicalBranchIdentity'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt } from './conflictControl'
 import { getActionTier } from './permissions'
@@ -52,7 +52,7 @@ export type ReviewApplyOutcome = { pendingActionMarkedAtomically: boolean }
 // non-request caller) the broadcast is awaited as before. broadcast() never
 // rejects, so deferring it cannot hide an error the response would carry.
 export type ReviewWaitUntil = (promise: Promise<unknown>) => void
-type Applier = (env: Env, row: PendingActionRow, reviewer: ReviewerInfo, waitUntil?: ReviewWaitUntil) => Promise<void>
+type Applier = (env: Env, row: PendingActionRow, reviewer: ReviewerInfo, waitUntil?: ReviewWaitUntil) => Promise<void | ReviewApplyOutcome>
 
 async function notify(env: Env, waitUntil: ReviewWaitUntil | undefined, channel: Parameters<typeof broadcast>[1], payload: unknown): Promise<void> {
   const sent = broadcast(env, channel, payload)
@@ -312,16 +312,49 @@ registerApplier('branches', 'update', 'branch', async (env, row, reviewer, waitU
   if (id == null) throw new Error('Pending branch update is missing its entity id')
   const body = JSON.parse(row.payload_json || '{}') as Record<string, unknown>
   const db = getDb(env)
+  const requester = await db.prepare(`SELECT u.id, u.username, u.role_id, u.permissions, u.is_active,
+    r.id AS guard_role_id, r.code AS role_code, r.permissions AS role_permissions
+    FROM users u LEFT JOIN roles r ON r.id=u.role_id
+    WHERE u.id=@id AND u.is_active=1 AND u.deleted_at IS NULL`)
+    .get<SessionUser & { guard_role_id: number | null }>({ id: row.requested_by })
+  if (!requester || getActionTier(requester, 'branches', 'edit') === 'none') {
+    throw new ReviewRequesterPermissionError('The requester no longer has permission to edit branches.')
+  }
   const current = await db.prepare('SELECT * FROM branches WHERE id = @id')
     .get<BranchIdentitySnapshot & { updated_at: string }>({ id })
+  if (!current) throw new BranchEditConflictError()
+  assertBranchExpectedState(current, row.expected_entity_state_json)
   assertUpdatedAtMatch('branch', current, getExpectedUpdatedAt(body))
-  if (!current) throw new Error('The branch this pending action targeted no longer exists.')
   const directory = Number(current.is_active) === 0
     ? await db.prepare('SELECT * FROM branches ORDER BY id').all<BranchIdentitySnapshot>()
     : []
-  await db.batch(branchUpdateStatements(id, body, current, directory))
+  try {
+    await db.batch([
+      { sql: `INSERT INTO branches(name) SELECT NULL WHERE NOT EXISTS (
+        SELECT 1 FROM pending_actions WHERE id=@pending_id AND status='open' AND section='branches'
+          AND action_type='update' AND entity_type='branch' AND entity_id IS @entity_id
+          AND requested_by IS @requester_id AND payload_json IS @payload AND summary IS @summary
+          AND expected_entity_state_json IS @baseline)`,
+        params: { pending_id: row.id, entity_id: row.entity_id, requester_id: row.requested_by, payload: row.payload_json, summary: row.summary, baseline: row.expected_entity_state_json } },
+      { sql: `INSERT INTO branches(name) SELECT NULL WHERE NOT EXISTS (
+        SELECT 1 FROM users u LEFT JOIN roles r ON r.id=u.role_id
+        WHERE u.id=@requester_id AND u.username IS @username AND u.is_active=1 AND u.deleted_at IS NULL
+          AND u.role_id IS @role_id AND u.permissions IS @permissions AND r.id IS @joined_role_id
+          AND r.code IS @role_code AND r.permissions IS @role_permissions)`,
+        params: { requester_id: requester.id, username: requester.username, role_id: requester.role_id,
+          permissions: requester.permissions, joined_role_id: requester.guard_role_id, role_code: requester.role_code, role_permissions: requester.role_permissions } },
+      ...branchUpdateStatements(id, body, current, directory),
+      { sql: `UPDATE pending_actions SET status='approved', reviewed_by=@reviewer_id, reviewed_by_name=@reviewer_name,
+        reviewed_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP WHERE id=@pending_id AND status='open'`,
+        params: { pending_id: row.id, reviewer_id: reviewer.id, reviewer_name: reviewer.name } },
+    ])
+  } catch (error) {
+    if (isBranchEditGuardError(error)) throw new BranchEditConflictError()
+    throw error
+  }
   await audit(env, reviewer.id, reviewer.name, 'update', 'branch', id, { name: current.name })
   await notify(env, waitUntil, 'branches', { action: 'update', id })
+  return { pendingActionMarkedAtomically: true }
 })
 
 // --- branches / delete / branch -----------------------------------
@@ -396,6 +429,6 @@ export async function applyApprovedPendingAction(
   if (productRemovePendingPointer(row)) return applyApprovedProductRemove(env, row, reviewer, reviewerUser, waitUntil)
   const fn = appliers.get(applierKey(row.section, row.action_type, row.entity_type))
   if (!fn) throw new NoReviewApplierError(row.section, row.action_type, row.entity_type)
-  await fn(env, row, reviewer, waitUntil)
-  return { pendingActionMarkedAtomically: false }
+  const outcome = await fn(env, row, reviewer, waitUntil)
+  return outcome ?? { pendingActionMarkedAtomically: false }
 }

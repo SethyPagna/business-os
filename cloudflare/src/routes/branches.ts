@@ -1039,6 +1039,7 @@ app.put('/:id', async (c) => {
     throw error
   }
 
+  let committedBranch: BranchIdentitySnapshot | undefined
   try {
     await assertBranchEditEtag(current, body.expectedEditEtag)
     if (getActionTier(user, 'branches', 'edit') === 'review') {
@@ -1054,7 +1055,9 @@ app.put('/:id', async (c) => {
       summary: `Update branch #${id}${body.name ? ` "${body.name}"` : ''}`,
     })
     if (pendingId != null) return c.json({ success: true, pending: true, pendingActionId: pendingId }, 202)
-    await db.batch([...branchUpdateStatements(id, body, current, directory), ordinaryBusinessMaintenanceGuard])
+    const results = await db.batch([...branchUpdateStatements(id, body, current, directory), ordinaryBusinessMaintenanceGuard,
+      { sql: 'SELECT * FROM branches WHERE id=@branch_response_id', params: { branch_response_id: id } }])
+    committedBranch = results[results.length - 1]?.results?.[0] as BranchIdentitySnapshot | undefined
   } catch (error) {
     const conflict = error instanceof BranchEditConflictError ? error : isBranchEditGuardError(error) ? new BranchEditConflictError() : null
     if (conflict) return c.json({ success: false, error: conflict.message, code: conflict.code, conflict: true }, 409)
@@ -1063,7 +1066,8 @@ app.put('/:id', async (c) => {
 
   await audit(c.env, user?.id ?? null, actorSnapshot(user), 'update', 'branch', id, { name: current.name })
   c.executionCtx.waitUntil(broadcast(c.env, 'branches', { action: 'update', id }))
-  return c.json({})
+  if (!committedBranch) throw new Error('The committed branch response is unavailable.')
+  return c.json({ success: true, branch: { ...committedBranch, edit_etag: await branchEditEtag(committedBranch) } })
 })
 
 app.delete('/:id', async (c) => {

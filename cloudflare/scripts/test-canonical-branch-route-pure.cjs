@@ -65,15 +65,17 @@ function wrapDb(db) {
         beforeBatch = null
         inject(db)
       }
-      db.transaction(() => {
+      const results = db.transaction(() => {
+        const results = []
         for (const item of statements) {
           const statement = db.prepare(item.sql)
-          if (item.params == null) statement.run()
-          else if (Array.isArray(item.params)) statement.run(...item.params)
-          else statement.run(item.params)
+          const values = item.params == null ? [] : Array.isArray(item.params) ? item.params : [item.params]
+          if (statement.reader) results.push({ results: statement.all(...values), success: true })
+          else results.push({ results: [], meta: statement.run(...values), success: true })
         }
+        return results
       })()
-      return []
+      return results
     },
   }
 }

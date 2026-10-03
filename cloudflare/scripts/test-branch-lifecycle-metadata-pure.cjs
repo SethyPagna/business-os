@@ -208,11 +208,24 @@ function reviewHandler(db, beforeBatch = () => {}) {
     batch: async statements => { beforeBatch(); execute(db, statements) },
   }
   const conflict = load('conflictControl')
-  new Function('registerApplier', 'getDb', 'branchUpdateStatements', 'assertUpdatedAtMatch', 'getExpectedUpdatedAt', 'audit', 'notify', compiled)(
-    (_section, _action, _entity, callback) => { handler = callback }, () => adapter, writes.branchUpdateStatements,
-    conflict.assertUpdatedAtMatch, conflict.getExpectedUpdatedAt, async () => {}, async () => {},
-  )
-  return body => handler({}, { entity_id: 2, payload_json: JSON.stringify(body) }, { id: 7, name: 'Reviewer' })
+  const requesterError = tree.statements.find(node => ts.isClassDeclaration(node) && node.name?.text === 'ReviewRequesterPermissionError')
+  const dependencies = { ...writes, ...conflict, ...load('permissions'),
+    ReviewRequesterPermissionError: evaluate(requesterError.getText(tree), {}, 'ReviewRequesterPermissionError'),
+    registerApplier: (_section, _action, _entity, callback) => { handler = callback },
+    getDb: () => adapter, audit: async () => {}, notify: async () => {} }
+  new Function(...Object.keys(dependencies), compiled)(...Object.values(dependencies))
+  db.exec(`CREATE TABLE roles(id INTEGER PRIMARY KEY,code TEXT,permissions TEXT);
+    CREATE TABLE users(id INTEGER PRIMARY KEY,username TEXT,role_id INTEGER,permissions TEXT,is_active INTEGER,deleted_at TEXT);
+    INSERT INTO users VALUES(8,'requester',NULL,'{"branches":"review"}',1,NULL);
+    CREATE TABLE pending_actions(id INTEGER PRIMARY KEY,section TEXT,action_type TEXT,entity_type TEXT,entity_id INTEGER,
+      requested_by INTEGER,payload_json TEXT,summary TEXT,expected_entity_state_json TEXT,status TEXT,
+      reviewed_by INTEGER,reviewed_by_name TEXT,reviewed_at TEXT,updated_at TEXT);`)
+  return body => {
+    const baseline = writes.branchExpectedStateJson(db.prepare('SELECT * FROM branches WHERE id=2').get())
+    db.prepare(`INSERT INTO pending_actions(id,section,action_type,entity_type,entity_id,requested_by,payload_json,expected_entity_state_json,status)
+      VALUES(1,'branches','update','branch',2,8,?,?,'open')`).run(JSON.stringify(body), baseline)
+    return handler({}, db.prepare('SELECT * FROM pending_actions WHERE id=1').get(), { id: 7, name: 'Reviewer' })
+  }
 }
 async function reviewTests() {
   for (const [name, run] of [
@@ -245,7 +258,7 @@ async function reviewTests() {
     ['real approval handler fences a successor change inside the write', async () => {
       const db = world()
       const approve = reviewHandler(db, () => db.exec('UPDATE branches SET is_active=0 WHERE id=1'))
-      await assert.rejects(approve({ notes: 'raced' }), /NOT NULL/)
+      await assert.rejects(approve({ notes: 'raced' }), error => error.code === 'branch_edit_conflict')
       assert.equal(db.prepare('SELECT notes FROM branches WHERE id=2').get().notes, 'past'); db.close()
     }],
   ]) {
