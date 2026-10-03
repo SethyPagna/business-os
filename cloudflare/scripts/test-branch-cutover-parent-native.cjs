@@ -40,6 +40,7 @@ function world(labels = true) {
   raw.exec(`INSERT INTO branches(id,name,is_active,is_default,canonical_key,role,created_at) VALUES(2,'Shop',1,1,'shop','shop','2026-10-03 00:00:00'),(1,'Warehouse',1,0,'warehouse','warehouse','2026-10-03 00:00:00');
     INSERT INTO users(id,username,password,name,organization_id,permissions,is_active) VALUES(7,'operator','fixture','Operator',1,'{"branches":true,"backup_restore":true}',1);
     INSERT INTO system_flags(key,value) VALUES('branch_cutover_control_incarnation','00000000-0000-4000-8000-000000000099')`)
+  raw.limits.functionArg = 100
   const stats = { reads: 0, batches: 0, statements: 0, maxBinds: 0, retryReads: false, before: null, after: null }
   const pendingReadRetries = new Set()
   const prepared = (sql, values = []) => {

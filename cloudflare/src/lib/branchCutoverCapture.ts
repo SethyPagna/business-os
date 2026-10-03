@@ -125,10 +125,15 @@ export async function readCutoverCapturePage(db: D1Compat, schema: CaptureSchema
   if (cursor.index === streamTables.length) return { cursor, digest, records: 0, statements: [], done: true }
   const table = streamTables[cursor.index]; const columns = schema.columns[table]
   if (!columns) throw new BranchCutoverCapabilityError('capture_table_required:' + table)
-  const json = `json_object(${columns.map(column => {
+  const fields = columns.map(column => {
     const field = quote(column)
     return `'${column.replaceAll("'", "''")}',json_array(typeof(${field}),CASE typeof(${field}) WHEN 'integer' THEN CAST(${field} AS TEXT) WHEN 'real' THEN printf('%!.17g',${field}) WHEN 'text' THEN ${field} END)`
-  }).join(',')})`
+  })
+  let json = 'json_object()'
+  for (let index = 0; index < fields.length; index += 32) {
+    const chunk = `json_object(${fields.slice(index, index + 32).join(',')})`
+    json = index === 0 ? chunk : `json_patch(${json},${chunk})`
+  }
   const pageFrom = `FROM ${quote(table)} WHERE (${predicate(table)}) AND rowid>@after ORDER BY rowid LIMIT @limit`
   const rowsSql = `SELECT rowid AS k,${json} AS j ${pageFrom}`
   const fingerprintSql = `SELECT json_group_array(json_array(k,j)) FROM (${rowsSql})`

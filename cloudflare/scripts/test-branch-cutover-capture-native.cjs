@@ -15,6 +15,46 @@ function stock(w) {
 async function main() {
   let checks = 0
   async function check(name, fn) { if (process.env.PARENT_TEST_FILTER && !name.includes(process.env.PARENT_TEST_FILTER)) return; await fn(); console.log('PASS ' + name); checks++ }
+  await check('all registered capture streams and page guards execute at function arity100', async () => {
+    const w = world(); w.raw.limits.functionArg = 100
+    const schema = await w.capture.readCutoverCaptureSchema(w.db)
+    const tables = [...new Set([...w.capture.BRANCH_SCALAR_REFERENCES.map(v => v[0]), 'products', ...w.capture.UNCLASSIFIED_JSON_FAMILIES])].sort().filter(t => t !== 'branch_cutovers' && !w.capture.UNCLASSIFIED_JSON_FAMILIES.includes(t))
+    assert.equal(schema.columns.sales.length, 68); assert.equal(tables.length, 28)
+    for (const [index, table] of tables.entries()) {
+      const cursor = { ...w.capture.initialCaptureCursor(), index }, reads = w.stats.reads
+      const page = await w.capture.readCutoverCapturePage(w.db, schema, { sourceBranchId: 2, targetBranchId: 1 }, cursor, '0'.repeat(64), 1, { 1: 'Warehouse', 2: 'Shop' }, false)
+      assert.equal(w.stats.reads - reads, 2, table)
+      await w.db.batch(page.statements)
+      assert.ok(w.stats.maxBinds <= 100, table)
+    }
+    assert.equal(w.raw.limits.functionArg, 100); assert.equal(w.raw.limits.exprDepth, 100); w.raw.close()
+  })
+  await check('wide populated JSON preserves ordered typed fields nulls escaped text hash and last-chunk CAS', async () => {
+    const w = world()
+    w.raw.exec("ALTER TABLE sales ADD COLUMN arity_text; ALTER TABLE sales ADD COLUMN arity_integer; ALTER TABLE sales ADD COLUMN arity_real; ALTER TABLE sales ADD COLUMN arity_null; INSERT INTO sales(id,branch_id,branch_name) VALUES(20,2,'Shop')")
+    const text = 'ខ្មែរ "quoted" \\ path\nnext'
+    w.raw.prepare('UPDATE sales SET arity_text=?,arity_integer=9223372036854775807,arity_real=?,arity_null=NULL WHERE id=20').run(text, 1.0000000000000002)
+    const schema = await w.capture.readCutoverCaptureSchema(w.db)
+    const tables = [...new Set([...w.capture.BRANCH_SCALAR_REFERENCES.map(v => v[0]), 'products', ...w.capture.UNCLASSIFIED_JSON_FAMILIES])].sort().filter(t => t !== 'branch_cutovers' && !w.capture.UNCLASSIFIED_JSON_FAMILIES.includes(t))
+    const cursor = { ...w.capture.initialCaptureCursor(), index: tables.indexOf('sales') }
+    const encoded = Object.fromEntries(schema.columns.sales.map(field => {
+      const quoted = '"' + field.replaceAll('"', '""') + '"'
+      const value = w.raw.prepare(`SELECT typeof(${quoted}) type,CASE typeof(${quoted}) WHEN 'integer' THEN CAST(${quoted} AS TEXT) WHEN 'real' THEN printf('%!.17g',${quoted}) WHEN 'text' THEN ${quoted} END value FROM sales WHERE id=20`).get()
+      return [field, [value.type, value.value]]
+    }))
+    assert.deepEqual(encoded.arity_text, ['text', text]); assert.deepEqual(encoded.arity_integer, ['integer', '9223372036854775807'])
+    assert.deepEqual(encoded.arity_real, ['real', '1.0000000000000002']); assert.deepEqual(encoded.arity_null, ['null', null])
+    const reads = w.stats.reads
+    const page = await w.capture.readCutoverCapturePage(w.db, schema, { sourceBranchId: 2, targetBranchId: 1 }, cursor, '0'.repeat(64), 1, { 1: 'Warehouse', 2: 'Shop' }, false)
+    assert.equal(w.stats.reads - reads, 2)
+    assert.equal(page.statements[0].params.fingerprint, JSON.stringify([[20, JSON.stringify(encoded)]]))
+    assert.equal(page.digest, hash(['0'.repeat(64), 'sales', 20, encoded]))
+    await w.db.batch(page.statements)
+    w.raw.prepare('UPDATE sales SET arity_real=? WHERE id=20').run(1.0000000000000004)
+    await assert.rejects(w.db.batch(page.statements))
+    assert.equal(w.raw.prepare('SELECT arity_real FROM sales WHERE id=20').get().arity_real, 1.0000000000000004)
+    assert.equal(w.raw.limits.functionArg, 100); w.raw.close()
+  })
   await check('raw REAL exactness refuses both signed native non-roundtrip costs before a page batch', async () => {
     for (const value of [3.5702545241480925e141, -3.5702545241480925e141]) {
       const w = world(); stock(w)
