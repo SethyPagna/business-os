@@ -143,6 +143,10 @@ test('add-only employee Save reload and exact retry preserve stock audit and gra
   expect(after.foreignKeyCheck).toEqual([])
   const retry = await api(page, `/api/sales/${sale.id}/items`, 'POST', saved.request)
   expect(retry.status).toBe(200); redacted(retry.body)
+  expect(retry.body.sale).toEqual(saved.body.sale)
+  const resolved = await api(page, `/api/sales/${sale.id}/line-receipt/add_items`, 'POST', saved.request)
+  expect(resolved.status).toBe(200); expect(resolved.body.committed).toBe(true); redacted(resolved.body)
+  expect(resolved.body.response.sale).toEqual(saved.body.sale)
   expect(await state(page, sale.id)).toEqual(after)
   const changed = await api(page, `/api/sales/${sale.id}/items`, 'POST', { ...saved.request, items: saved.request.items.map((r: any) => ({ ...r, quantity: 2 })) })
   expect(changed.status).toBe(409); expect(changed.body.code).toBe('idempotency_conflict')
@@ -152,7 +156,15 @@ test('add-only employee Save reload and exact retry preserve stock audit and gra
   expect(await state(page, sale.id)).toEqual(after)
   await persistedReload(page, sale, 'E2E Added Serum')
   await page.screenshot({ path: info.outputPath('employee-add-persisted.png'), fullPage: true })
-  await info.attach('native-add-before-after-and-request', { body: JSON.stringify({ before, after, request: saved.request, response: saved.body, retryStatus: retry.status, changedStatus: changed.status, deniedStatus: denied.status }, null, 2), contentType: 'application/json' })
+  const recordsRead = page.waitForResponse(r => new URL(r.url()).pathname === `/api/sales/${sale.id}/records` && r.request().method() === 'GET')
+  await page.locator('[data-sale-records-action]').click()
+  const recordsResponse = await recordsRead, records = await recordsResponse.json()
+  expect(recordsResponse.status()).toBe(200); expect(records.count).toBeGreaterThan(0); redacted(records)
+  await expect(page.getByText('Product added', { exact: true }).first()).toBeVisible()
+  await page.screenshot({ path: info.outputPath('employee-add-records.png'), fullPage: true })
+  expect(await state(page, sale.id)).toEqual(after)
+  expect(JSON.parse(after.receipts[0].response_json).sale.items[0].cost_price_usd).toBe(1.2345)
+  await info.attach('native-add-before-after-and-request', { body: JSON.stringify({ before, after, request: saved.request, response: saved.body, retry, resolved, records, changedStatus: changed.status, deniedStatus: denied.status }, null, 2), contentType: 'application/json' })
 })
 
 test('amend-only employee quantity and line Replace Save reload preserve both stock ledgers', async ({ page }, info) => {
@@ -194,13 +206,21 @@ test('amend-only employee quantity and line Replace Save reload preserve both st
   expect(after.amendments.some((r: any) => r.kind === 'line_removed' && r.product_id === 201)).toBe(true)
   expect(after.amendments.some((r: any) => r.kind === 'line_added' && r.product_id === 203)).toBe(true)
   expect(after.foreignKeyCheck).toEqual([])
-  expect((await api(page, `/api/sales/${sale.id}/amendments`, 'POST', replaced.request)).status).toBe(200)
+  const replay = await api(page, `/api/sales/${sale.id}/amendments`, 'POST', replaced.request)
+  expect(replay.status).toBe(200); redacted(replay.body); expect(replay.body.sale).toEqual(replaced.body.sale)
+  const resolved = await api(page, `/api/sales/${sale.id}/line-receipt/amendment`, 'POST', replaced.request)
+  expect(resolved.status).toBe(200); expect(resolved.body.committed).toBe(true); redacted(resolved.body)
+  expect(resolved.body.response.sale).toEqual(replaced.body.sale)
+  const records = await api(page, `/api/sales/${sale.id}/records`)
+  const amendments = await api(page, `/api/sales/${sale.id}/amendments`)
+  expect(records.status).toBe(200); expect(records.body.count).toBeGreaterThan(0); redacted(records.body)
+  expect(amendments.status).toBe(200); expect(amendments.body.entries).toHaveLength(3); redacted(amendments.body)
   expect(await state(page, sale.id)).toEqual(after)
   const denied = await api(page, `/api/sales/${sale.id}/items`, 'POST', { client_request_id: 'amend-only-denied-add', money_precision_version: 1, items: [] })
   expect(denied.status).toBe(403); expect(await state(page, sale.id)).toEqual(after)
   await persistedReload(page, sale, 'E2E Replacement Balm')
   await page.screenshot({ path: info.outputPath('employee-replace-persisted.png'), fullPage: true })
-  await info.attach('native-amend-before-after-and-requests', { body: JSON.stringify({ before, increased, after, quantity, replaced, deniedStatus: denied.status }, null, 2), contentType: 'application/json' })
+  await info.attach('native-amend-before-after-and-requests', { body: JSON.stringify({ before, increased, after, quantity, replaced, replay, resolved, records, amendments, deniedStatus: denied.status }, null, 2), contentType: 'application/json' })
 })
 
 for (const language of ['en', 'km']) for (const width of [1440, 390]) {
@@ -264,6 +284,11 @@ test('actual Worker refuses stale FX bad pricing missing identity and insufficie
   const sale = await openFreshSale(page), before = await state(page, sale.id)
   const base: any = { money_precision_version: 1, expected_exchange_rate: 4000, expected_updated_at: sale.updated_at, client_request_id: `native-controls-${sale.id}`, items: [{ product_id: 202, quantity: 1, branch_id: 1, batch_id: 702, client_line_key: 'negative-control', pricing_source: 'selling', pricing_quote: { gross_usd: 7.25, product_discount_usd: 0, manual_discount_usd: 0, total_usd: 7.25, total_khr: 29000 } }] }
   const controls: any[] = []
+  const headerReview = await api(page, `/api/sales/${sale.id}/items`, 'POST', base)
+  expect(headerReview.status).toBe(409); expect(headerReview.body.code).toBe('sale_header_quote_conflict'); redacted(headerReview.body)
+  expect(headerReview.body.header_quote.total_usd).toBe(16.75)
+  expect(await state(page, sale.id)).toEqual(before)
+  controls.push({ name: 'header-review', ...headerReview })
   for (const [name, body, status, code] of [
     ['missing-id', { ...base, client_request_id: null }, 400, 'client_request_id_required'],
     ['stale-fx', { ...base, client_request_id: `native-fx-${sale.id}`, expected_exchange_rate: 4100 }, 409, 'exchange_rate_changed'],
@@ -285,3 +310,59 @@ test('actual Worker refuses stale FX bad pricing missing identity and insufficie
   controls.push({ name: 'insufficient-stock', ...rejected })
   await info.attach('native-negative-controls', { body: JSON.stringify({ before, controls, after: await state(page, sale.id) }, null, 2), contentType: 'application/json' })
 })
+
+test('authorized cost viewer retains success replay and stale costs while employee Records and snapshots remain safe', async ({ page, browser }, info) => {
+  await signIn(page, 914, 'e2e_employee_cost_view')
+  const sale = await openFreshSale(page)
+  const me = await api(page, '/api/auth/me'), actor = me.body.user || me.body
+  const permissions = typeof actor.permissions === 'string' ? JSON.parse(actor.permissions) : actor.permissions
+  expect(permissions.product_cost_view).toBe(true); expect(permissions.product_cost_edit).toBe(false)
+  await stageAddedSerum(page)
+  await page.getByRole('button', { name: /^Add to sale$/ }).click()
+  const saved = await submitViewer(page, `/api/sales/${sale.id}/items`, () => page.getByRole('button', { name: /^Add to sale$/ }).last().click())
+  expect(saved.body.sale.total_usd).toBe(16.75)
+  expect(saved.body.sale.items.every((line: any) => line.cost_price_usd === 1.2345)).toBe(true)
+  const persisted = await state(page, sale.id)
+  const replay = await api(page, `/api/sales/${sale.id}/items`, 'POST', saved.request)
+  const resolved = await api(page, `/api/sales/${sale.id}/line-receipt/add_items`, 'POST', saved.request)
+  expect(replay.status).toBe(200); expect(replay.body.sale).toEqual(saved.body.sale)
+  expect(resolved.status).toBe(200); expect(resolved.body.committed).toBe(true); expect(resolved.body.response.sale).toEqual(saved.body.sale)
+  const stale = await api(page, `/api/sales/${sale.id}/items`, 'POST', { ...saved.request, client_request_id: `viewer-stale-${sale.id}`, expected_updated_at: sale.updated_at })
+  expect(stale.status).toBe(409); expect(stale.body.code).toBe('write_conflict')
+  expect(typeof stale.body.current.items).toBe('string')
+  expect(JSON.parse(stale.body.current.items).every((line: any) => line.cost_price_usd === 1.2345)).toBe(true)
+  expect(stale.body.current.total_usd).toBe(16.75)
+  const quoteRequest = { ...saved.request, client_request_id: `viewer-review-${sale.id}`, expected_updated_at: saved.body.updated_at }
+  delete quoteRequest.expected_header_quote
+  const quote = await api(page, `/api/sales/${sale.id}/items`, 'POST', quoteRequest)
+  expect(quote.status).toBe(409); expect(quote.body.code).toBe('sale_header_quote_conflict'); expect(quote.body.header_quote.total_usd).toBe(24)
+  const viewerRecords = await api(page, `/api/sales/${sale.id}/records`)
+  expect(viewerRecords.status).toBe(200); expect(viewerRecords.body.count).toBeGreaterThan(0)
+  await persistedReload(page, sale, 'E2E Added Serum')
+  const recordsRead = page.waitForResponse(r => new URL(r.url()).pathname === `/api/sales/${sale.id}/records` && r.request().method() === 'GET')
+  await page.locator('[data-sale-records-action]').click()
+  expect((await recordsRead).status()).toBe(200)
+  await expect(page.getByText('Product added', { exact: true }).first()).toBeVisible()
+  await page.screenshot({ path: info.outputPath('employee-cost-viewer-records.png'), fullPage: true })
+  const context = await browser.newContext()
+  try {
+    const employeePage = await context.newPage()
+    await signIn(employeePage, 911, 'e2e_employee_add')
+    const employeeRecords = await api(employeePage, `/api/sales/${sale.id}/records`)
+    expect(employeeRecords.status).toBe(200); redacted(employeeRecords.body)
+    expect(employeeRecords.body).toEqual(viewerRecords.body)
+    const otherActorReceipt = await api(employeePage, `/api/sales/${sale.id}/line-receipt/add_items`, 'POST', saved.request)
+    expect(otherActorReceipt.status).toBe(200); expect(otherActorReceipt.body.committed).toBe(false); redacted(otherActorReceipt.body)
+  } finally { await context.close() }
+  expect(await state(page, sale.id)).toEqual(persisted)
+  expect(JSON.parse(persisted.receipts[0].response_json).sale.items[0].cost_price_usd).toBe(1.2345)
+  await info.attach('native-authorized-cost-viewer-paths', { body: JSON.stringify({ saved, replay, resolved, stale, quote, viewerRecords, persisted, afterReads: await state(page, sale.id) }, null, 2), contentType: 'application/json' })
+})
+
+async function submitViewer(page: Page, path: string, trigger: () => Promise<unknown>) {
+  const response = page.waitForResponse(r => new URL(r.url()).pathname === path && r.request().method() === 'POST')
+  await trigger()
+  const actual = await response, body = await actual.json()
+  expect(actual.status(), JSON.stringify(body)).toBe(200)
+  return { body, request: actual.request().postDataJSON() }
+}
