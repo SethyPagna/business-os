@@ -78,6 +78,7 @@ function renderDialog(source: string, conflict: Record<string, unknown>): string
   new Function('require', 'module', 'exports', compiled)((name: string) => {
     if (name === 'react/jsx-runtime') return { jsx, jsxs: jsx, Fragment: 'fragment' }
     if (name.includes('utils/formatters')) return formatters
+    if (name.includes('/AppContext')) return { useApp: () => ({ t: (key: string) => key }) }
     if (name.includes('/ConflictIcon')) return { ConflictIcon: 'svg', CONFLICT_ICON_CLASS: '' }
     if (name.includes('./Modal')) return { default: (props: Record<string, any>) => ({ type: 'modal', props: { children: [props.title, props.children] } }) }
     throw new Error('unexpected import ' + name)
@@ -104,7 +105,7 @@ const productConflict = {
 }
 {
   // Negative control: the pre-fix generic branch printed values verbatim.
-  const old = dialogSource.replace("value: key.endsWith('_at') ? formatConflictTime(value) : valueToString(value),", 'value: valueToString(value),')
+  const old = dialogSource.replace("value: key.endsWith('_at') ? formatConflictTime(record[key], tr) : formatValue(record[key], tr, key),", 'value: String(record[key]),')
   assert.notEqual(old, dialogSource)
   const text = renderDialog(old, { ...productConflict, entity: 'file asset', entityLabel: 'File', current: { id: 9, updated_at: ISO } })
   ok(text.includes(ISO), 'negative control: the verbatim branch leaks the raw ISO, so the check above discriminates')
