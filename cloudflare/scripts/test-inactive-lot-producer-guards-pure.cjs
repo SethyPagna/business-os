@@ -85,7 +85,9 @@ const batchCode = loadReal('lib/batchCode.ts')
 const conflictControl = loadReal('lib/conflictControl.ts')
 const costPermissions = loadReal('lib/permissions.ts')
 const acquisitionCostAccess = loadReal('lib/acquisitionCostAccess.ts', { './permissions': costPermissions })
+const receivingBranch = loadReal('lib/receivingBranch.ts')
 const batchRoute = loadReal('routes/batches.ts', {
+  '../lib/receivingBranch': receivingBranch,
   '../lib/acquisitionCostAccess': acquisitionCostAccess,
   '../lib/db': { getDb: () => routeFixture.db },
   '../lib/auth': { requireAuth: async (c, next) => { c.set('user', { id: 1, name: 'Tester', permissions: JSON.stringify({ inventory: true, product_cost_edit: true, product_cost_view: true }) }); return next() } },
@@ -121,6 +123,7 @@ const stockLotAdjustment = loadReal('lib/stockLotAdjustment.ts', {
   './permissions': { getActionTier: () => 'full' },
   './actorSnapshot': { actorSnapshot: () => 'Tester' },
   './businessMaintenanceGuard': loadReal('lib/businessMaintenanceGuard.ts'),
+  './receivingBranch': receivingBranch,
   './movementCostSnapshot': loadReal('lib/movementCostSnapshot.ts'),
   './damagedLotActions': { planHoldAsTagged: () => { throw new Error('not used') } },
   './stockReason': loadReal('lib/stockReason.ts'),
@@ -161,6 +164,7 @@ const stockActionCommit = loadReal('lib/stockActionCommit.ts', {
   './saleCreationSnapshot': saleCreationSnapshot,
   './productBatches': loadReal('lib/productBatches.ts', {
     './batchCode': batchCode,
+    './receivingBranch': receivingBranch,
     './sqlBinding': loadReal('lib/sqlBinding.ts'),
   }),
   './catalogCostRecompute': loadReal('lib/catalogCostRecompute.ts'),
