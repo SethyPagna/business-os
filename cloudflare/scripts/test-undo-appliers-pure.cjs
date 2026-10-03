@@ -418,7 +418,7 @@ async function main() {
 await check('branchUpdateStatements applies canonical metadata without changing identity', () => {
   const db = freshDb()
   db.prepare(`INSERT INTO branches (id, name, location, phone, manager, notes, is_default, is_active) VALUES (2, 'Shop', 'New Loc', '070', 'Bob', 'edited', 0, 1)`).run()
-  const current = db.prepare('SELECT id,name,is_active FROM branches WHERE id=2').get()
+  const current = db.prepare('SELECT * FROM branches WHERE id=2').get()
   const undoFields = { name: 'Shop', location: 'Old Loc', phone: '012', manager: 'Alice', notes: 'orig', is_default: 0, is_active: 1 }
   runStatements(db, branchUpdateStatements(2, undoFields, current))
   assert.deepStrictEqual(readBranch(db, 2), { name: 'Shop', location: 'Old Loc', phone: '012', manager: 'Alice', notes: 'orig', is_default: 0, is_active: 1 })
@@ -439,7 +439,7 @@ await check('branchUpdateStatements changes the default only among canonical row
   db.prepare(`INSERT INTO branches (id, name, is_default, is_active) VALUES (1, 'Warehouse', 1, 1)`).run()
   db.prepare(`INSERT INTO branches (id, name, is_default, is_active) VALUES (2, 'Shop', 0, 1)`).run()
   db.prepare(`INSERT INTO branches (id, name, is_default, is_active) VALUES (3, 'Legacy Depot', 1, 1)`).run()
-  const current = db.prepare('SELECT id,name,is_active FROM branches WHERE id=2').get()
+  const current = db.prepare('SELECT * FROM branches WHERE id=2').get()
   const redoStatements = branchUpdateStatements(2, { name: 'Shop', is_default: true, is_active: 1 }, current)
   assert.ok(redoStatements.some((s) => /UPDATE branches SET is_default = 0/.test(s.sql)), 'expected the clear-other-defaults statement')
   runStatements(db, redoStatements)

@@ -180,6 +180,10 @@ function reset() {
 }
 
 async function request(method, url, body) {
+  if (method === 'PUT' && /^\/\d+$/.test(url) && body && !Object.prototype.hasOwnProperty.call(body, 'expectedEditEtag')) {
+    const row = sqlite.prepare('SELECT * FROM branches WHERE id=?').get(Number(url.slice(1)))
+    if (row) body = { ...body, expectedEditEtag: await writes.branchEditEtag(row) }
+  }
   const response = await app.request(url, {
     method,
     headers: { 'Content-Type': 'application/json' },
@@ -198,10 +202,7 @@ async function check(name, fn) {
 
 async function main() {
   await check('retired description saves and forbids lifecycle/default changes before review', async () => {
-    sqlite.exec(`ALTER TABLE branches ADD COLUMN role TEXT;
-      ALTER TABLE branches ADD COLUMN canonical_key TEXT;
-      ALTER TABLE branches ADD COLUMN successor_branch_id INTEGER;
-      UPDATE branches SET name='Old Shop',role='shop',canonical_key='shop',is_active=0,is_default=0,successor_branch_id=2 WHERE id=1;
+    sqlite.exec(`UPDATE branches SET name='Old Shop',role='shop',canonical_key='shop',is_active=0,is_default=0,successor_branch_id=2 WHERE id=1;
       UPDATE branches SET name='LC Store',role='shop',canonical_key='warehouse',is_default=1 WHERE id=2;`)
     const saved = await request('PUT', '/1', { name: 'Old Shop', notes: 'legacy description', is_active: 0, is_default: 0 })
     assert.equal(saved.status, 200)
@@ -272,7 +273,7 @@ async function main() {
   await check('interposed identity rename or deletion aborts all route effects', async () => {
     beforeBatch = (db) => db.prepare("UPDATE branches SET name='Changed elsewhere' WHERE id=1").run()
     let result = await request('PUT', '/1', { name: 'Shop', location: 'raced', is_default: 1, is_active: 1 })
-    assert.equal(result.status, 500)
+    assert.equal(result.status, 409)
     assert.deepStrictEqual(sqlite.prepare('SELECT name,location FROM branches WHERE id=1').get(), { name: 'Changed elsewhere', location: 'shop old' })
     assert.equal(audits.length, 0)
     assert.equal(broadcasts.length, 0)
@@ -280,7 +281,7 @@ async function main() {
     reset()
     beforeBatch = (db) => db.prepare('DELETE FROM branches WHERE id=1').run()
     result = await request('PUT', '/1', { name: 'Shop', location: 'raced', is_default: 1, is_active: 1 })
-    assert.equal(result.status, 500)
+    assert.equal(result.status, 409)
     assert.equal(sqlite.prepare('SELECT COUNT(*) AS count FROM branches WHERE id=1').get().count, 0)
     assert.equal(sqlite.prepare('SELECT is_default FROM branches WHERE id=2').get().is_default, 0, 'default clear rolled back')
     assert.equal(audits.length, 0)

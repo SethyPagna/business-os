@@ -29,6 +29,74 @@ export interface BranchWriteFields {
   successor_branch_id?: unknown
 }
 
+const BRANCH_EDIT_REQUIRED_FIELDS = ['id', 'name', 'location', 'phone', 'manager', 'notes', 'is_default', 'is_active', 'updated_at'] as const
+const BRANCH_EDIT_OPTIONAL_FIELDS = ['role', 'canonical_key', 'successor_branch_id'] as const
+export type BranchEditState = Record<string, string | number | null>
+
+export class BranchEditConflictError extends Error {
+  readonly status = 409
+  readonly conflict = true
+  constructor(readonly code = 'branch_edit_conflict') {
+    super(code === 'branch_review_schema_required'
+      ? 'Branch review is not ready. Refresh after the update and try again.'
+      : 'This branch edit can no longer be verified. Refresh Branches and submit a new edit.')
+    this.name = 'BranchEditConflictError'
+  }
+}
+
+export function captureBranchEditState(row: BranchIdentitySnapshot): BranchEditState {
+  const source = row as Record<string, unknown>
+  const state: BranchEditState = {}
+  for (const field of [...BRANCH_EDIT_REQUIRED_FIELDS, ...BRANCH_EDIT_OPTIONAL_FIELDS]) {
+    if (!Object.prototype.hasOwnProperty.call(source, field)) {
+      if ((BRANCH_EDIT_REQUIRED_FIELDS as readonly string[]).includes(field)) throw new BranchEditConflictError()
+      continue
+    }
+    const value = source[field]
+    if (field === 'id') {
+      const id = Number(value)
+      if (!Number.isSafeInteger(id) || id <= 0) throw new BranchEditConflictError()
+      state[field] = id
+    } else if (field === 'is_default' || field === 'is_active') {
+      if (value !== null && value !== 0 && value !== 1) throw new BranchEditConflictError()
+      state[field] = value
+    } else if (field === 'successor_branch_id') {
+      if (value !== null && (typeof value !== 'number' || !Number.isSafeInteger(value) || value <= 0)) throw new BranchEditConflictError()
+      state[field] = value as number | null
+    } else {
+      if (value !== null && typeof value !== 'string') throw new BranchEditConflictError()
+      state[field] = value
+    }
+  }
+  return state
+}
+
+export function branchExpectedStateJson(row: BranchIdentitySnapshot): string {
+  const state = captureBranchEditState(row)
+  return JSON.stringify({ kind: 'branch-edit-state', version: 1, entity_id: state.id, state })
+}
+
+export async function branchEditEtag(row: BranchIdentitySnapshot): Promise<string> {
+  const bytes = new TextEncoder().encode(branchExpectedStateJson(row))
+  const digest = await crypto.subtle.digest('SHA-256', bytes)
+  return `branch-v1-${Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('')}`
+}
+
+export async function assertBranchEditEtag(row: BranchIdentitySnapshot, expected: unknown): Promise<void> {
+  if (typeof expected !== 'string' || expected !== await branchEditEtag(row)) throw new BranchEditConflictError()
+}
+
+export function branchEditStateGuardStatement(row: BranchIdentitySnapshot): { sql: string; params: Record<string, unknown> } {
+  const state = captureBranchEditState(row)
+  const params = Object.fromEntries(Object.entries(state).map(([key, value]) => [`branch_state_${key}`, value]))
+  const terms = Object.keys(state).map(key => `${key} IS @branch_state_${key}`)
+  return { sql: `INSERT INTO branches(name) SELECT NULL WHERE NOT EXISTS (SELECT 1 FROM branches WHERE ${terms.join(' AND ')})`, params }
+}
+
+export function isBranchEditGuardError(error: unknown): boolean {
+  return /NOT NULL constraint failed: branches\.name/i.test(String(error))
+}
+
 function branchNameSnapshotStatements(id: string | number): Array<{ sql: string; params?: Record<string, unknown> }> {
   return ['sales', 'inventory_movements', 'returns', 'stock_row_moves'].map(table => ({
     sql: `UPDATE ${table} SET branch_name=(SELECT name FROM branches WHERE id=@id)${table === 'sales' ? ', updated_at=CURRENT_TIMESTAMP' : ''}
@@ -55,6 +123,7 @@ export function branchUpdateStatements(
   if (!identity.is_active && defaultFlag) throw new CanonicalBranchIdentityError()
   const statements: Array<{ sql: string; params?: Record<string, unknown> }> = [
     canonicalBranchIdentityGuardStatement(currentIdentity, directory),
+    branchEditStateGuardStatement(currentIdentity),
   ]
   if (writesDefault && defaultFlag) {
     statements.push({

@@ -28,7 +28,7 @@ import { audit } from '../lib/audit'
 import { formatTransferTelegramLines, sendTelegramEvent } from '../lib/telegram'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
 import { findIdentityMatch, findIdentityMatches, type ProductIdentityRow } from '../lib/productIdentity'
-import { branchUpdateStatements } from '../lib/branchWrites'
+import { branchUpdateStatements, branchEditEtag, assertBranchEditEtag, branchExpectedStateJson, BranchEditConflictError, isBranchEditGuardError } from '../lib/branchWrites'
 import {
   CANONICAL_BRANCH_CONFIGURATION_CODE,
   CANONICAL_BRANCH_CONFIGURATION_ERROR,
@@ -126,8 +126,8 @@ type BranchInput = {
 
 app.get('/', async (c) => {
   const db = getDb(c.env)
-  const branches = await db.prepare('SELECT * FROM branches ORDER BY is_default DESC, name').all()
-  return c.json(branches)
+  const branches = await db.prepare('SELECT * FROM branches ORDER BY is_default DESC, name').all<BranchIdentitySnapshot>()
+  return c.json(await Promise.all(branches.map(async branch => ({ ...branch, edit_etag: await branchEditEtag(branch) }))))
 })
 
 // GET /api/branches/summary -- was returning an ARRAY of per-branch rows
@@ -1039,26 +1039,27 @@ app.put('/:id', async (c) => {
     throw error
   }
 
-  // Review Required tier: the conflict check above already confirmed the
-  // request is against the current row, so queueing here is safe to
-  // replay later exactly as-is -- same reasoning as the create path
-  // above. Runs AFTER the conflict check (unlike products.ts's update,
-  // which has no such check to run) so a stale edit is rejected up front
-  // rather than queued and only discovered wrong at approval time.
-  const pendingId = await maybeQueueForReview(c.env, user, 'branches', {
-    actionType: 'update',
-    entityType: 'branch',
-    entityId: Number(id),
-    payload: body,
-    summary: `Update branch #${id}${body.name ? ` "${body.name}"` : ''}`,
-  })
-  if (pendingId != null) {
-    return c.json({ success: true, pending: true, pendingActionId: pendingId }, 202)
+  try {
+    await assertBranchEditEtag(current, body.expectedEditEtag)
+    if (getActionTier(user, 'branches', 'edit') === 'review') {
+      const columns = await db.prepare('PRAGMA table_info(pending_actions)').all<{ name: string }>()
+      if (!columns.some(column => column.name === 'expected_entity_state_json')) throw new BranchEditConflictError('branch_review_schema_required')
+    }
+    const pendingId = await maybeQueueForReview(c.env, user, 'branches', {
+      actionType: 'update',
+      entityType: 'branch',
+      entityId: Number(id),
+      payload: body,
+      expectedEntityStateJson: branchExpectedStateJson(current),
+      summary: `Update branch #${id}${body.name ? ` "${body.name}"` : ''}`,
+    })
+    if (pendingId != null) return c.json({ success: true, pending: true, pendingActionId: pendingId }, 202)
+    await db.batch([...branchUpdateStatements(id, body, current, directory), ordinaryBusinessMaintenanceGuard])
+  } catch (error) {
+    const conflict = error instanceof BranchEditConflictError ? error : isBranchEditGuardError(error) ? new BranchEditConflictError() : null
+    if (conflict) return c.json({ success: false, error: conflict.message, code: conflict.code, conflict: true }, 409)
+    throw error
   }
-
-  // Field write shared with the server-side undo/redo applier -- see
-  // lib/branchWrites.ts for why this is one definition, not two.
-  await db.batch([...branchUpdateStatements(id, body, current, directory), ordinaryBusinessMaintenanceGuard])
 
   await audit(c.env, user?.id ?? null, actorSnapshot(user), 'update', 'branch', id, { name: current.name })
   c.executionCtx.waitUntil(broadcast(c.env, 'branches', { action: 'update', id }))
