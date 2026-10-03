@@ -608,6 +608,44 @@ async function main() {
     const response = await reviewRoute('/:id/approve')(ctx(w, {}, reviewUser, row.id))
     assert.equal(response.status, 200); assert.equal(response.value.replayed, true); assert.equal(w.control.batches, 1); w.db.close()
   })
+  await check('resubmit precheck race opens a stale request but approval refuses without losing later branch state', async () => {
+    const w = world(); const row = await queue(w)
+    w.db.exec("UPDATE pending_actions SET status='rejected'")
+    w.control.beforeRun = (sql, db) => {
+      if (/UPDATE pending_actions/i.test(sql)) {
+        w.control.beforeRun = null
+        db.exec("UPDATE branches SET notes='later valid edit' WHERE id=1")
+      }
+    }
+    assert.equal((await reviewRoute('/:id/resubmit')(ctx(w, {}, requestUser, row.id))).status, 200)
+    assert.equal(pending(w).status, 'open')
+    assert.equal((await reviewRoute('/:id/approve')(ctx(w, {}, reviewUser, row.id))).status, 409)
+    assert.equal(branch(w).notes, 'later valid edit')
+    assert.equal(pending(w).status, 'open'); assert.equal(w.control.batches, 0)
+    assert.equal(w.db.prepare("SELECT COUNT(*) AS n FROM audit_logs WHERE entity='branch'").get().n, 0)
+    w.db.close()
+  })
+  await check('resubmit cannot alter a request concurrently reopened and approved first', async () => {
+    const w = world(); const row = await queue(w)
+    w.db.exec("UPDATE pending_actions SET status='rejected'")
+    w.control.beforeRun = async sql => {
+      if (/UPDATE pending_actions/i.test(sql)) {
+        w.control.beforeRun = null
+        assert.equal((await reviewRoute('/:id/resubmit')(ctx(w, { payload: { notes: 'winner' } }, requestUser, row.id))).status, 200)
+        const approved = await reviewRoute('/:id/approve')(ctx(w, {}, reviewUser, row.id))
+        assert.equal(approved.status, 200); assert.equal(approved.value.replayed, undefined)
+      }
+    }
+    assert.equal((await reviewRoute('/:id/resubmit')(ctx(w, { payload: { notes: 'loser' } }, requestUser, row.id))).status, 404)
+    assert.equal(pending(w).status, 'approved'); assert.equal(JSON.parse(pending(w).payload_json).notes, 'winner')
+    assert.equal(branch(w).notes, 'winner'); assert.equal(w.control.batches, 1)
+    assert.equal(w.db.prepare("SELECT COUNT(*) AS n FROM audit_logs WHERE entity='branch'").get().n, 1)
+    const audits = w.db.prepare('SELECT * FROM audit_logs').all()
+    const recovered = await reviewRoute('/:id/approve')(ctx(w, {}, reviewUser, row.id))
+    assert.equal(recovered.status, 200); assert.equal(recovered.value.replayed, true)
+    assert.deepEqual(w.db.prepare('SELECT * FROM audit_logs').all(), audits)
+    w.db.close()
+  })
 }
 
 await main()
