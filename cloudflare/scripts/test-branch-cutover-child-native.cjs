@@ -25,7 +25,7 @@ function load(relative) {
       delta_absolute: ['requireRepresentedQuantity(amount, realized, [])', 'requireChild(realized > 0 && Math.abs(realized - amount) <= EPSILON)'],
       delta_binary: ['const realized = Number(direction === 1 ? subtractDecimalSum(after, [before]) : subtractDecimalSum(before, [after]))', 'const realized = direction === 1 ? after - before : before - after'],
       delta_lot: ['requireQuantityDelta(to, take.quantity, 1)', 'requireChild(true)'],
-      delta_serialization: ["branch_id,printf('%!.17g',quantity)", 'branch_id,quantity'],
+      delta_serialization: ["branch_id,printf('%!.17g',quantity)", "branch_id,printf('%!.15g',quantity)"],
     }
     const mutation = mutations[process.env.CHILD_WRONG_CONTROL]
     assert.ok(mutation && source.includes(mutation[0])); source = source.replace(mutation[0], mutation[1])
@@ -138,7 +138,8 @@ async function main() {
     w.raw.exec('UPDATE branch_stock SET quantity=1000000 WHERE branch_id=2')
     w.raw.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(1,2,?)').run(lotBalance)
     const { subtractDecimalSum } = load('lib/moneyPrecision')
-    const rounded = JSON.parse(w.raw.prepare('SELECT json_array(quantity) AS value FROM branch_batch_stock WHERE branch_id=2').get().value)[0]
+    assert.equal(w.raw.prepare('SELECT quantity FROM branch_batch_stock WHERE branch_id=2').get().quantity, lotBalance)
+    const rounded = JSON.parse('[999999.999899999]')[0]
     assert.notEqual(rounded, lotBalance)
     assert.equal(Number(subtractDecimalSum(rounded + 2e-10, [rounded])), 2e-10)
     assert.equal(Number(subtractDecimalSum(lotBalance + 2e-10, [lotBalance])), 3e-10)
