@@ -24,7 +24,7 @@ import { getActionTier } from '../lib/permissions'
 import { maybeQueueForReview } from '../lib/reviewGate'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from '../lib/cache'
-import { audit } from '../lib/audit'
+import { audit, buildAuditStatement } from '../lib/audit'
 import { formatTransferTelegramLines, sendTelegramEvent } from '../lib/telegram'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
 import { findIdentityMatch, findIdentityMatches, type ProductIdentityRow } from '../lib/productIdentity'
@@ -1056,6 +1056,7 @@ app.put('/:id', async (c) => {
     })
     if (pendingId != null) return c.json({ success: true, pending: true, pendingActionId: pendingId }, 202)
     const results = await db.batch([...branchUpdateStatements(id, body, current, directory), ordinaryBusinessMaintenanceGuard,
+      buildAuditStatement(user?.id ?? null, actorSnapshot(user), 'update', 'branch', id, { name: current.name }),
       { sql: 'SELECT * FROM branches WHERE id=@branch_response_id', params: { branch_response_id: id } }])
     committedBranch = results[results.length - 1]?.results?.[0] as BranchIdentitySnapshot | undefined
   } catch (error) {
@@ -1064,7 +1065,6 @@ app.put('/:id', async (c) => {
     throw error
   }
 
-  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'update', 'branch', id, { name: current.name })
   c.executionCtx.waitUntil(broadcast(c.env, 'branches', { action: 'update', id }))
   if (!committedBranch) throw new Error('The committed branch response is unavailable.')
   return c.json({ success: true, branch: { ...committedBranch, edit_etag: await branchEditEtag(committedBranch) } })

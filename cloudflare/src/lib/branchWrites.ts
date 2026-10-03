@@ -100,6 +100,10 @@ export function branchEditStateGuardStatement(row: BranchIdentitySnapshot): { sq
   const state = captureBranchEditState(row)
   const params = Object.fromEntries(Object.entries(state).map(([key, value]) => [`branch_state_${key}`, value]))
   const terms = Object.keys(state).map(key => `${key} IS @branch_state_${key}`)
+  params.branch_state_schema_mask = BRANCH_EDIT_OPTIONAL_FIELDS.reduce((mask, field, index) =>
+    mask + (Object.prototype.hasOwnProperty.call(state, field) ? 2 ** index : 0), 0)
+  terms.push(`(SELECT COALESCE(SUM(CASE name WHEN 'role' THEN 1 WHEN 'canonical_key' THEN 2 WHEN 'successor_branch_id' THEN 4 ELSE 0 END),0)
+    FROM pragma_table_info('branches')) = @branch_state_schema_mask`)
   return { sql: `INSERT INTO branches(name) SELECT NULL WHERE NOT EXISTS (SELECT 1 FROM branches WHERE ${terms.join(' AND ')})`, params }
 }
 

@@ -18,7 +18,7 @@
 // approved without the real change having happened.
 
 import { getDb } from './db'
-import { audit } from './audit'
+import { audit, buildAuditStatement } from './audit'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from './cache'
 import { insertRow, updateRow, defaultBranchId, syncProductImageGallery, seedBranchStockForNewProduct, seedInitialBatchForNewProduct, readProductMoneyPlan } from './productWrites'
@@ -344,6 +344,7 @@ registerApplier('branches', 'update', 'branch', async (env, row, reviewer, waitU
         params: { requester_id: requester.id, username: requester.username, role_id: requester.role_id,
           permissions: requester.permissions, joined_role_id: requester.guard_role_id, role_code: requester.role_code, role_permissions: requester.role_permissions } },
       ...branchUpdateStatements(id, body, current, directory),
+        buildAuditStatement(reviewer.id, reviewer.name, 'update', 'branch', id, { name: current.name }),
       { sql: `UPDATE pending_actions SET status='approved', reviewed_by=@reviewer_id, reviewed_by_name=@reviewer_name,
         reviewed_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP WHERE id=@pending_id AND status='open'`,
         params: { pending_id: row.id, reviewer_id: reviewer.id, reviewer_name: reviewer.name } },
@@ -352,7 +353,6 @@ registerApplier('branches', 'update', 'branch', async (env, row, reviewer, waitU
     if (isBranchEditGuardError(error)) throw new BranchEditConflictError()
     throw error
   }
-  await audit(env, reviewer.id, reviewer.name, 'update', 'branch', id, { name: current.name })
   await notify(env, waitUntil, 'branches', { action: 'update', id })
   return { pendingActionMarkedAtomically: true }
 })

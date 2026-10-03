@@ -136,7 +136,9 @@ const { toDbBool } = loadReal('lib/db.ts', { './importMaintenanceFence': {
     ImportMaintenanceFenceError: class ImportMaintenanceFenceError extends Error {},
   } })
 const dbStub = { './db': { getDb: () => db, toDbBool }, '../lib/db': { getDb: () => db, toDbBool } }
+const realAudit = loadReal('lib/audit.ts', dbStub)
 const auditStub = { './audit': { changedFields: () => null, auditChangeColumns: () => ({ old_value: null, new_value: null }), isSecretShapedAuditKey: () => false, audit: async () => {} }, '../lib/audit': { changedFields: () => null, auditChangeColumns: () => ({ old_value: null, new_value: null }), isSecretShapedAuditKey: () => false, audit: async () => {} } }
+for (const stub of Object.values(auditStub)) stub.buildAuditStatement = realAudit.buildAuditStatement
 const broadcastStub = {
   './broadcastHub': { broadcast: async () => {} },
   '../durable-objects/broadcastHub': { broadcast: async () => {} },

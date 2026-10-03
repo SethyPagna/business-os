@@ -77,7 +77,7 @@ function routeHandler(method, routePath, dependencies = {}) {
   const callback = statement.expression.arguments[1].getText(tree)
   return evaluate(`const handler = ${callback}`, {
     ...writes, ...load('permissions'), ...load('conflictControl'), ...load('canonicalBranchIdentity'), ...load('reviewGate'),
-    ...load('businessMaintenanceGuard'), getDb: () => adapter(currentDb), audit: async () => {}, broadcast: async () => {}, actorSnapshot: () => 'User', ...dependencies,
+    ...load('businessMaintenanceGuard'), ...load('audit'), getDb: () => adapter(currentDb), broadcast: async () => {}, actorSnapshot: () => 'User', ...dependencies,
   }, 'handler')
 }
 function context(body, user = { id: 7, permissions: JSON.stringify({ branches: true }) }) {
@@ -91,7 +91,7 @@ function approvalHandler(dependencies = {}) {
     && node.expression.arguments.slice(0, 3).map(arg => arg.text).join('/') === 'branches/update/branch')
   const permissionError = tree.statements.find(node => node.name?.text === 'ReviewRequesterPermissionError').getText(tree)
   return evaluate(`${permissionError}\nconst handler=${statement.expression.arguments[3].getText(tree)}`, {
-    ...writes, ...load('permissions'), ...load('conflictControl'), getDb: () => adapter(currentDb), audit: async () => {}, notify: async () => {}, ...dependencies,
+    ...writes, ...load('permissions'), ...load('conflictControl'), ...load('audit'), getDb: () => adapter(currentDb), notify: async () => {}, ...dependencies,
   }, 'handler')
 }
 async function queuedBranch(db, body = { notes: 'approved' }) {
@@ -210,6 +210,9 @@ async function main() {
     assert.equal(response.value.branch.notes, 'mine')
     assert.equal(response.value.branch.edit_etag, await writes.branchEditEtag(response.value.branch))
     assert.equal(db.prepare('SELECT notes FROM branches WHERE id=1').get().notes, 'postcommit other writer')
+    assert.deepEqual({ ...db.prepare("SELECT user_id,user_name,action,entity,CAST(entity_id AS INTEGER) AS entity_id FROM audit_logs WHERE entity='branch'").get() },
+      { user_id: 7, user_name: 'User', action: 'update', entity: 'branch', entity_id: 1 })
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM audit_logs WHERE entity='branch'").get().n, 1)
     db.close()
   })
   await check('approval atomically changes metadata and pending status using trusted baseline', async () => {
@@ -219,6 +222,9 @@ async function main() {
     assert.equal(result.pendingActionMarkedAtomically, true)
     assert.equal(db.prepare('SELECT notes FROM branches WHERE id=1').get().notes, 'approved')
     assert.equal(db.prepare('SELECT status FROM pending_actions').get().status, 'approved')
+    assert.deepEqual({ ...db.prepare("SELECT user_id,user_name,action,entity,CAST(entity_id AS INTEGER) AS entity_id FROM audit_logs WHERE entity='branch'").get() },
+      { user_id: 8, user_name: 'Reviewer', action: 'update', entity: 'branch', entity_id: 1 })
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM audit_logs WHERE entity='branch'").get().n, 1)
     await assert.rejects(approvalHandler()({}, row, { id: 8, name: 'Reviewer' }))
     db.close()
   })
@@ -336,6 +342,32 @@ async function main() {
       db.close()
     }
   })
+  await check('schema installation between pre-read and direct batch refuses the old presence mask', async () => {
+    currentDb = openDb(loadAll({ through: 222 })).db
+    const db = currentDb
+    db.exec("INSERT INTO branches(id,name,notes,is_active,is_default,updated_at) VALUES(1,'Shop','before',1,1,'same'),(2,'Warehouse','bulk',1,0,'same')")
+    const original = db.prepare('SELECT * FROM branches WHERE id=1').get()
+    beforeBatch = db => db.exec(fs.readFileSync(migrationPath, 'utf8'))
+    const response = await routeHandler('put', '/:id')(context({ notes: 'must not save', expectedEditEtag: await writes.branchEditEtag(original) }))
+    assert.equal(response.status, 409)
+    assert.equal(db.prepare('SELECT notes FROM branches WHERE id=1').get().notes, 'before')
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM audit_logs').get().n, 0)
+    db.close()
+  })
+  for (const mode of ['direct', 'approval']) {
+    await check(`real audit insert failure rolls ${mode} branch writes back`, async () => {
+      const db = world()
+      const pending = mode === 'approval' ? await queuedBranch(db) : null
+      const original = db.prepare('SELECT * FROM branches WHERE id=1').get()
+      db.exec("CREATE TRIGGER refuse_branch_audit BEFORE INSERT ON audit_logs WHEN NEW.entity='branch' BEGIN SELECT RAISE(ABORT,'fixture audit refusal'); END")
+      if (pending) await assert.rejects(approvalHandler()({}, pending, { id: 8, name: 'Reviewer' }), /fixture audit refusal/)
+      else await assert.rejects(routeHandler('put', '/:id')(context({ notes: 'must not save', expectedEditEtag: await writes.branchEditEtag(original) })), /fixture audit refusal/)
+      assert.deepEqual(db.prepare('SELECT * FROM branches WHERE id=1').get(), original)
+      if (pending) assert.deepEqual(db.prepare('SELECT * FROM pending_actions').get(), pending)
+      assert.equal(db.prepare('SELECT COUNT(*) AS n FROM audit_logs').get().n, 0)
+      db.close()
+    })
+  }
   if (failures) process.exitCode = 1
 }
 main().catch(error => { console.error(error); process.exitCode = 1 })

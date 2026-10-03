@@ -81,6 +81,10 @@ function wrapDb(db) {
 }
 
 const dbCompat = () => wrapDb(sqlite)
+const realAudit = loadModule('lib/audit.ts', id => {
+  if (id === './db') return { getDb: dbCompat }
+  throw new Error(`unexpected audit import ${id}`)
+})
 const branchGuards = loadModule('lib/branchRoleGuards.ts', (id) => {
   if (id === './branchRoles') return roles
   throw new Error(`unexpected guard import ${id}`)
@@ -121,7 +125,7 @@ const branchRoute = loadModule('routes/branches.ts', (id) => {
     broadcast: async (...args) => { broadcasts.push(args) },
   }
   if (id === '../lib/cache') return { bumpVersion: async () => {} }
-  if (id === '../lib/audit') return { audit: async (...args) => { audits.push(args) } }
+  if (id === '../lib/audit') return { ...realAudit, audit: async (...args) => { audits.push(args) } }
   if (id === '../lib/transferOperation') return loadModule('lib/transferOperation.ts', dep => {
     if (dep === './movementCostSnapshot') return loadModule('lib/movementCostSnapshot.ts', require)
     if (dep === './db') return {getDb:dbCompat}
@@ -257,7 +261,8 @@ async function main() {
     assert.equal(sqlite.prepare('SELECT is_default FROM branches WHERE id=1').get().is_default, 0)
     assert.equal(queueCalls, 1)
     assert.equal(batchCalls, 1)
-    assert.equal(audits.length, 1)
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs WHERE entity='branch' AND action='update'").get().n, 1)
+    assert.equal(audits.length, 0)
   })
 
   await check('rename and deactivate return 409 before queue or write', async () => {

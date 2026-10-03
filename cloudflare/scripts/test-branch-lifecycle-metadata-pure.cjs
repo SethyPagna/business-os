@@ -209,7 +209,7 @@ function reviewHandler(db, beforeBatch = () => {}) {
   }
   const conflict = load('conflictControl')
   const requesterError = tree.statements.find(node => ts.isClassDeclaration(node) && node.name?.text === 'ReviewRequesterPermissionError')
-  const dependencies = { ...writes, ...conflict, ...load('permissions'),
+  const dependencies = { ...writes, ...conflict, ...load('permissions'), ...load('audit'),
     ReviewRequesterPermissionError: evaluate(requesterError.getText(tree), {}, 'ReviewRequesterPermissionError'),
     registerApplier: (_section, _action, _entity, callback) => { handler = callback },
     getDb: () => adapter, audit: async () => {}, notify: async () => {} }
@@ -219,7 +219,10 @@ function reviewHandler(db, beforeBatch = () => {}) {
     INSERT INTO users VALUES(8,'requester',NULL,'{"branches":"review"}',1,NULL);
     CREATE TABLE pending_actions(id INTEGER PRIMARY KEY,section TEXT,action_type TEXT,entity_type TEXT,entity_id INTEGER,
       requested_by INTEGER,payload_json TEXT,summary TEXT,expected_entity_state_json TEXT,status TEXT,
-      reviewed_by INTEGER,reviewed_by_name TEXT,reviewed_at TEXT,updated_at TEXT);`)
+      reviewed_by INTEGER,reviewed_by_name TEXT,reviewed_at TEXT,updated_at TEXT);
+    CREATE TABLE user_sessions(id INTEGER,user_id INTEGER,device_name TEXT,device_tz TEXT,revoked_at TEXT,last_seen_at TEXT);
+    CREATE TABLE audit_logs(user_id INTEGER,user_name TEXT,action TEXT,entity TEXT,entity_id TEXT,details TEXT,table_name TEXT,
+      record_id TEXT,old_value TEXT,new_value TEXT,device_name TEXT,device_tz TEXT);`)
   return body => {
     const baseline = writes.branchExpectedStateJson(db.prepare('SELECT * FROM branches WHERE id=2').get())
     db.prepare(`INSERT INTO pending_actions(id,section,action_type,entity_type,entity_id,requested_by,payload_json,expected_entity_state_json,status)
