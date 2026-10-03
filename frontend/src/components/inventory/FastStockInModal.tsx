@@ -17,6 +17,7 @@ import { getProductFilters, searchProducts } from '../../api/methods.ts'
 import { readWorkDraft, scheduleWorkDraftWrite, clearWorkDraft, flushPendingWorkDraft, writeWorkDraft, scopedWorkDraftKey } from '../../utils/workDrafts.ts'
 import { createClientRequestId } from '../../api/requestIds.ts'
 import { stockFailureText, stockLineNeedsRemoval } from '../../utils/stockAdjustOutcome.ts'
+import { activeReceivingDestination, captureReceivingRequest, receivingDestinationRefusal, receivingDetailsLocked, restoreReceivingSubmissions, retainReceivingSubmissions, type ReceivingSubmissions } from '../../utils/receivingDestination.ts'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import { batchDisplayLabel, formatBatchReceivedDate, lotCodeAsDate } from '../../utils/batchLabel.ts'
 import { todayStr } from '../../utils/dateHelpers.ts'
@@ -102,6 +103,7 @@ function applyLineOutcome(
 
 interface FastStockInModalProps {
   branchOptions: Array<{ value: string; label: string }>
+  receivingBranchOptions?: Array<{ value: string; label: string }>
   defaultBranchId?: string | number | null
   tr: TranslationWithFallback
   notify: (message: string, kind?: string) => void
@@ -162,7 +164,7 @@ function withoutInlineImages(payload: Record<string, unknown>): Record<string, u
 const priceText = (value: unknown): string => (value == null || String(value).trim() === '' ? '' : String(Number(value)))
 
 export default function FastStockInModal({
-  branchOptions, defaultBranchId, tr, notify, onClose, onDone, onMinimize, initialHeader, initialMode,
+  branchOptions, receivingBranchOptions = branchOptions, defaultBranchId, tr, notify, onClose, onDone, onMinimize, initialHeader, initialMode,
   exchangeRate: exchangeRateOverride, initialProduct, initialLines, onPrepareProduct, brandOptions, canCreateProducts, legacyDraft,
 }: FastStockInModalProps) {
   const app = useApp() as { user: any; exchangeRate: number; usdSymbol: string; khrSymbol: string }
@@ -190,7 +192,7 @@ export default function FastStockInModal({
 
   // Resolved once per mount (S1): the draft, the mode it opens in, and the
   // pristine snapshot, all from the same resolution.
-  const initRef = useRef<{ draft: StockSessionDraft; pristine: StockSessionDraft; legacyBlocked: string } | null>(null)
+  const initRef = useRef<{ draft: StockSessionDraft; pristine: StockSessionDraft; legacyBlocked: string; submissions: ReceivingSubmissions } | null>(null)
   if (initRef.current === null) {
     const mintLineId = () => createClientRequestId('stockline')
     const seed = (mode: StockMode, sessionId: number) => emptyStockSessionDraft({
@@ -201,12 +203,14 @@ export default function FastStockInModal({
     let rewrite = false
     let legacyBlocked = ''
     let legacyConverted = false
+    let storedRaw: unknown = null
     if (legacyDraft) {
       const converted = convertLegacyStockDraft(legacyDraft, mintLineId)
       if (converted.draft) { stored = converted.draft; rewrite = true; legacyConverted = true } else legacyBlocked = converted.blocked
     }
     if (!stored) {
       const raw = readWorkDraft<unknown>(fastStockInDraftKey)?.data
+      storedRaw = raw
       const rawLines = raw && typeof raw === 'object' ? (raw as { lines?: unknown }).lines : null
       stored = normalizeStockSessionDraft(raw, mintLineId)
       // Ids minted for an older draft are written back now, not by the debounced autosave.
@@ -237,7 +241,8 @@ export default function FastStockInModal({
       opened = { ...opened, ...entryFor(initialProduct, opened.mode) }
       if (!stored) pristine = { ...pristine, ...entryFor(initialProduct, opened.mode) }
     }
-    if (rewrite) writeWorkDraft<StockSessionDraft>(fastStockInDraftKey, opened)
+    const submissions = restoreReceivingSubmissions(storedRaw, opened.lines)
+    if (rewrite) writeWorkDraft(fastStockInDraftKey, { ...opened, receivingSubmissions: submissions })
     // The work now lives in the session draft, so the retired surface's copy goes.
     // A blocked conversion keeps it: it is the evidence of an unknown outcome.
     if (legacyDraft && legacyConverted) {
@@ -248,15 +253,18 @@ export default function FastStockInModal({
         clearWorkDraft(scopedWorkDraftKey('create_products_session'))
       }
     }
-    initRef.current = { draft: opened, pristine, legacyBlocked }
+    initRef.current = { draft: opened, pristine, legacyBlocked, submissions }
   }
   const init = initRef.current
+  const submissionsRef = useRef(init.submissions)
+  const destinationRef = useRef({ branchId: init.draft.branchId, options: receivingBranchOptions })
 
   // ---- shared (applies to every line) ----
   const [mode, setModeState] = useState<StockMode>(init.draft.mode)
   const [step, setStep] = useState<StockSessionStep>(init.draft.step)
   const [brand, setBrand] = useState(init.draft.brand)
   const [branchId, setBranchId] = useState(init.draft.branchId)
+  destinationRef.current = { branchId, options: receivingBranchOptions }
   const [receivedDate, setReceivedDate] = useState(init.draft.receivedDate)
   const [supplier, setSupplier] = useState<SupplierChoice>(init.draft.supplier)
   const [paymentStatus, setPaymentStatus] = useState(init.draft.paymentStatus)
@@ -319,13 +327,32 @@ export default function FastStockInModal({
   const lotsReady = !lotsKey || lotsLoadedFor === lotsKey
   const steps = sessionSteps(mode, received)
   const pendingLines = received.filter((line) => line.status !== 'saved')
+  const detailsLocked = receivingDetailsLocked(submissionsRef.current, received)
+  const destinationInvalid = (mode === 'add' && !activeReceivingDestination(branchId, receivingBranchOptions))
+    || receivingDestinationRefusal(branchId, receivingBranchOptions, pendingLines, submissionsRef.current) === 'receiving_branch_inactive'
+  const destinationError = (lines: readonly StockSessionLine[], productReplay = false) => receivingDestinationRefusal(
+    destinationRef.current.branchId, destinationRef.current.options, lines, submissionsRef.current, productReplay,
+  )
+  const refuseDestination = (lines: readonly StockSessionLine[], productReplay = false): boolean => {
+    const code = destinationError(lines, productReplay)
+    if (!code) return false
+    notify(stockFailureText({ code }, tr, tr('failed', 'Failed')), 'error')
+    setStep('items')
+    return true
+  }
+  const changeBranch = (next: string) => {
+    if (detailsLocked || saving) return
+    if (mode === 'add' && !activeReceivingDestination(next, receivingBranchOptions)) return
+    setBranchId(next)
+  }
   const currentStep: StockSessionStep = steps.includes(step) && (step === 'items' || pendingLines.length > 0) ? step : 'items'
 
-  const currentDraft = (lines: StockSessionLine[] = received): StockSessionDraft => ({
+  const currentDraft = (lines: StockSessionLine[] = received): StockSessionDraft & { receivingSubmissions?: ReceivingSubmissions } => ({
     version: 2, sessionId: sessionIdRef.current, mode, step: currentStep, brand, branchId, receivedDate, supplier,
     paymentStatus, creditDueDate, paidAmount, query, picked, quantity, unitCost: protectedUnitCost,
     sellingPrice, expiryDate, reason, conditionTag, batchChoice, createPayload, createRequestId, scannedBarcode,
     createdProductIds, lines,
+    ...(receivingDetailsLocked(submissionsRef.current, lines) ? { receivingSubmissions: retainReceivingSubmissions(submissionsRef.current, lines) } : {}),
   })
 
   // Keystrokes ride the debounced autosave. No dirtyWork registration: with the
@@ -338,6 +365,14 @@ export default function FastStockInModal({
   // are written synchronously, before React renders them.
   const persistSessionDraft = (lines: StockSessionLine[] = received) => {
     writeWorkDraft<StockSessionDraft>(fastStockInDraftKey, currentDraft(lines))
+  }
+  const persistSubmissionDraft = (lines: StockSessionLine[] = received) => {
+    const draft = currentDraft(lines)
+    writeWorkDraft(fastStockInDraftKey, draft)
+    if (JSON.stringify(readWorkDraft(fastStockInDraftKey)?.data) !== JSON.stringify(draft)) {
+      const code = 'receiving_submission_not_saved'
+      throw Object.assign(new Error(stockFailureText({ code }, tr, '')), { code })
+    }
   }
 
   useEffect(() => {
@@ -515,6 +550,7 @@ export default function FastStockInModal({
 
   function editLine(line: StockSessionLine) {
     if (saving || line.status === 'saved' || line.needsRemoval) return
+    if (receivingDetailsLocked(submissionsRef.current, [line])) { notify(stockFailureText({ code: 'receiving_submission_locked' }, tr, ''), 'error'); return }
     setEditingKey(line.key)
     if (line.mode !== mode) setModeState(line.mode)
     applyEntry({
@@ -557,7 +593,7 @@ export default function FastStockInModal({
   // S3: the option sheet's branch fills the shared Branch, its received date the line's.
   const pickFromGroup = (candidate: ProductCandidate, selection?: { branchId?: string | null; batch?: { batchId?: number } }) => {
     sheetBatchRef.current = selection?.batch?.batchId != null ? Number(selection.batch.batchId) : null
-    if (selection?.branchId != null && String(selection.branchId) !== String(branchId)) setBranchId(String(selection.branchId))
+    if (selection?.branchId != null && String(selection.branchId) !== String(branchId)) changeBranch(String(selection.branchId))
     pick(candidate)
     closeCandidateOptions()
   }
@@ -584,6 +620,7 @@ export default function FastStockInModal({
 
   const addLine = () => {
     if (saving) return
+    if (detailsLocked) { notify(stockFailureText({ code: 'receiving_submission_locked' }, tr, ''), 'error'); return }
     if (refusal || !picked) {
       setAddAttempted(true)
       notify(refusalMessage || tr('fast_stockin_pick_product', 'Pick a product first'), 'error')
@@ -644,6 +681,7 @@ export default function FastStockInModal({
   }
 
   const setLineFree = (key: string, value: string) => {
+    if (detailsLocked) return
     const nextLines = setLineFreeQuantity(received, key, value)
     persistSessionDraft(nextLines)
     setReceived(nextLines)
@@ -653,6 +691,7 @@ export default function FastStockInModal({
   const removeLine = (key: string) => {
     if (saving) return
     const nextLines = received.filter((line) => line.key !== key)
+    submissionsRef.current = retainReceivingSubmissions(submissionsRef.current, nextLines)
     persistSessionDraft(nextLines)
     setReceived(nextLines)
     if (editingKey === key) { setEditingKey(''); resetLine() }
@@ -661,6 +700,7 @@ export default function FastStockInModal({
   // ---- + Create "text" -> ProductForm -> the payload is held on the line ----
   const createText = mode === 'add' && canCreate && !picked && query.trim().length >= 2 && searchCompleteFor === query.trim() ? query.trim() : null
   const openCreate = () => {
+    if (!activeReceivingDestination(branchId, receivingBranchOptions) || detailsLocked) { notify(stockFailureText({ code: detailsLocked ? 'receiving_submission_locked' : 'receiving_branch_inactive' }, tr, ''), 'error'); return }
     const text = query.trim()
     if (!text) return
     persistSessionDraft()
@@ -690,14 +730,19 @@ export default function FastStockInModal({
 
   const createHeldProduct = async (line: StockSessionLine): Promise<number> => {
     const { createProduct } = await import('../../api/productWriteTransport.ts')
-    const result = await createProduct({
+    const code = destinationError([line], true)
+    if (code) throw Object.assign(new Error(stockFailureText({ code }, tr, '')), { code })
+    const payload = submissionsRef.current.products[line.key] || {
       ...(line.createPayload || {}),
       client_request_id: line.createRequestId,
       branch_id: branchId,
       stock_quantity: 0,
       userId: user?.id,
       userName: user?.name,
-    }) as CreateProductResult
+    }
+    submissionsRef.current.products[line.key] = JSON.parse(JSON.stringify(payload)) as Record<string, unknown>
+    persistSubmissionDraft()
+    const result = await createProduct(payload) as CreateProductResult
     if (result?.success === false) throw new Error(result.error || tr('failed', 'Failed'))
     if (result?.pending) throw Object.assign(new Error(tr('product_creation_pending_review', 'Product creation is pending review and cannot be added to this stock-in session yet.')), { code: 'product_pending_review' })
     const id = extractHistoryResultId(result as never)
@@ -716,7 +761,7 @@ export default function FastStockInModal({
           : tr('received', 'Received')
   )
 
-  const buildLineRequest = (line: StockSessionLine) => buildStockLineRequest(line, {
+  const buildLineRequest = (line: StockSessionLine) => submissionsRef.current.requests[line.key] || buildStockLineRequest(line, {
     branchId, receivedDate, supplier, paymentStatus, creditDueDate, sessionId: sessionIdRef.current, canEditPrice,
     reasonFor: (entry) => stockLineReason(entry, tr),
   })
@@ -765,6 +810,7 @@ export default function FastStockInModal({
     let lines = received
     const pending = lines.filter((line) => line.status !== 'saved')
     if (!pending.length) { finishSession(); return }
+    if (refuseDestination(pending, true)) return
     if (!(Number(branchId) > 0)) { notify(tr('fast_stockin_pick_branch', 'Pick a branch'), 'error'); return }
     if (!canEditCosts && pending.some((line) => line.mode === 'add' && line.quantity + line.freeQuantity > 0)) {
       notify(tr('product_cost_edit_required', 'Cost edit permission is required to receive stock.'), 'error')
@@ -807,7 +853,14 @@ export default function FastStockInModal({
     const toCommit = lines.filter((line) => line.status !== 'saved')
     let requestFailure = ''
     if (toCommit.length) {
+      if (refuseDestination(toCommit)) { persistSessionDraft(lines); setReceived(lines); setSaving(false); return }
       const session = commitSessionBlock({ lines, paidAmount, paymentStatus, creditDueDate, canViewCosts })
+      for (const line of toCommit) captureReceivingRequest(submissionsRef.current, line, buildLineRequest(line))
+      try { persistSubmissionDraft(lines) } catch (error) {
+        setSaving(false)
+        notify(failureText(error, tr('failed', 'Failed')), 'error')
+        return
+      }
       let batched: FastStockInCommitLineResult[] | null = null
       const unsettled = new Set(toCommit.map((line) => line.key))
       lines = lines.map((line) => (unsettled.has(line.key) ? { ...line, status: 'saving' as const } : line))
@@ -870,6 +923,7 @@ export default function FastStockInModal({
   const paymentLines = received.filter((line) => line.mode === 'add' && line.status !== 'saved')
 
   const matchPaid = (force: boolean) => {
+    if (detailsLocked) return
     if (paidAmount.trim() === '' || (!force && Math.abs(difference) <= 0.005)) return
     const result = applyPaidToLines(received, paidAmount)
     if (!result.ok) {
@@ -882,12 +936,14 @@ export default function FastStockInModal({
     setReceived(result.lines)
   }
   const resetCosts = () => {
+    if (detailsLocked) return
     const next = resetLineCosts(received)
     persistSessionDraft(next)
     setReceived(next)
     setPaidAmount('')
   }
   const setLineCost = (key: string, value: string) => {
+    if (detailsLocked) return
     setReceived((prev) => prev.map((line) => (line.key === key ? { ...line, typedUnitCost: line.typedUnitCost ?? line.unitCost, unitCost: value } : line)))
   }
 
@@ -904,6 +960,7 @@ export default function FastStockInModal({
   }
   const goNext = () => {
     if (saving) return
+    if (refuseDestination(pendingLines, true)) return
     if (currentStep === 'items') {
       if (!pendingLines.length) { if (received.length) finishSession(); return }
       if (!(Number(branchId) > 0)) { notify(tr('fast_stockin_pick_branch', 'Pick a branch'), 'error'); return }
@@ -997,7 +1054,7 @@ export default function FastStockInModal({
           draftScope={`fast-stock-in-${sessionIdRef.current}-${createForm.barcode || createForm.name}`}
           categories={createCategories}
           units={createUnits.length ? createUnits : [{ id: 'pcs', name: 'pcs' }]}
-          branches={branchOptions.map((option) => ({ id: option.value, name: option.label, is_default: String(option.value) === String(defaultBranchId || '') }))}
+          branches={receivingBranchOptions.map((option) => ({ id: option.value, name: option.label, is_default: String(option.value) === String(defaultBranchId || '') }))}
           brandOptions={brandOptions}
           sessionDuplicateCheck={(candidate) => Boolean(findSessionProductDuplicate(duplicateRows, candidate))}
           onSave={(payload) => holdNewProduct((payload || {}) as Record<string, unknown>)}
@@ -1035,7 +1092,7 @@ export default function FastStockInModal({
           onMinimize={onMinimize ? preserveAndMinimize : undefined}
           onClose={requestCloseIfIdle}
         />
-        <StockSessionSteps steps={steps} current={currentStep} onStep={setStep} disabled={busy} tr={tr} />
+        <StockSessionSteps steps={steps} current={currentStep} onStep={(next) => { if (next === 'items' || !refuseDestination(pendingLines, true)) setStep(next) }} disabled={busy} tr={tr} />
 
         <div className="modal-scroll space-y-2 px-3 pb-3 pt-1 sm:px-4 sm:pb-4">
           {currentStep === 'items' ? (
@@ -1054,17 +1111,19 @@ export default function FastStockInModal({
                 }}
                 supplierInvalid={invalidField === 'supplier' || (supplierRefused && !supplier.supplierName.trim())}
                 branchId={branchId}
-                onBranch={(next) => { if (!modeSwitchBlocked(received) || !received.some((line) => line.status === 'saved')) setBranchId(next) }}
-                branchOptions={branchOptions}
+                onBranch={changeBranch}
+                branchOptions={mode === 'add' ? receivingBranchOptions : branchOptions}
+                branchInvalid={destinationInvalid}
+                submissionLocked={detailsLocked}
                 receivedDate={receivedDate}
                 onReceivedDate={setReceivedDate}
-                disabled={busy}
+                disabled={busy || detailsLocked}
               />
               <StockSessionLineEntry
                 tr={tr}
                 packLookup={packLookup}
                 mode={mode}
-                busy={busy}
+                busy={busy || detailsLocked}
                 searchInputRef={searchInputRef}
                 query={query}
                 onQuery={(text) => { setQuery(text); setPicked(null); setScannedBarcode(''); setCreatePayload(null) }}
@@ -1130,7 +1189,7 @@ export default function FastStockInModal({
               tr={tr}
               packLookup={packLookup}
               usdSymbol={usdSymbol}
-              busy={busy}
+              busy={busy || detailsLocked}
               paymentStatus={paymentStatus}
               onPaymentStatus={(next) => { setPaymentStatus(next); if (next === 'paid') setCreditDueDate('') }}
               creditDueDate={creditDueDate}

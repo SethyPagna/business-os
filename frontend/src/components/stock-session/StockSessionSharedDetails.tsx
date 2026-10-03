@@ -111,6 +111,8 @@ type SharedDetailsProps = {
   branchId: string
   onBranch: (next: string) => void
   branchOptions: Array<{ value: string; label: string }>
+  branchInvalid?: boolean
+  submissionLocked?: boolean
   receivedDate: string
   onReceivedDate: (iso: string) => void
   disabled?: boolean
@@ -122,11 +124,13 @@ type SharedDetailsProps = {
  */
 export default function StockSessionSharedDetails({
   tr, packLookup, brand, onBrand, brandOptions, onRequestBrands, supplier, onSupplier, supplierInvalid = false,
-  branchId, onBranch, branchOptions, receivedDate, onReceivedDate, disabled = false,
+  branchId, onBranch, branchOptions, branchInvalid = false, submissionLocked = false, receivedDate, onReceivedDate, disabled = false,
 }: SharedDetailsProps) {
   const brandLabel = tr('brand', 'Brand')
   const branchLabel = tr('branch', 'Branch')
   const dateLabel = tr('received_date', 'Received date')
+  const shownBranches = branchId && !branchOptions.some(option => String(option.value) === branchId)
+    ? [{ value: branchId, label: `${branchLabel} #${branchId}`, disabled: true }, ...branchOptions] : branchOptions
   return (
     <fieldset className="min-w-0 rounded-xl border border-gray-200 px-2 pb-2 dark:border-gray-700" data-stock-session-shared>
       <legend className="px-1 text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{tr('applies_to_every_line', 'Applies to every line')}</legend>
@@ -153,9 +157,9 @@ export default function StockSessionSharedDetails({
             ariaLabel={branchLabel}
             disabled={disabled}
             className="w-full"
-            buttonClassName="h-10 w-full pl-8 pr-2 text-sm"
+            buttonClassName={`h-10 w-full pl-8 pr-2 text-sm ${branchInvalid ? INVALID_RING : ''}`}
             optionClassName="text-sm"
-            options={branchOptions}
+            options={shownBranches}
           />
         </IconField>
         <IconField icon={CalendarDays} title={dateLabel}>
@@ -170,6 +174,8 @@ export default function StockSessionSharedDetails({
           />
         </IconField>
       </div>
+      {branchInvalid ? <p role="alert" className="mt-1 text-xs text-red-600 dark:text-red-400">{tr('receiving_branch_inactive', 'This branch is inactive. Choose an active branch for new stock. Previously submitted lines keep their original branch.')}</p> : null}
+      {submissionLocked ? <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{tr('receiving_submission_locked', 'Previously submitted lines keep their original details. Retry them unchanged, or check Stock Changes before removing them.')}</p> : null}
     </fieldset>
   )
 }
