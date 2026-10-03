@@ -243,10 +243,7 @@ async function main() {
 
   await check('retired branch descriptions undo and redo without restoring activation or old names', async () => {
     const world = freshWorld()
-    world.d1.db.exec(`ALTER TABLE branches ADD COLUMN role TEXT;
-      ALTER TABLE branches ADD COLUMN canonical_key TEXT;
-      ALTER TABLE branches ADD COLUMN successor_branch_id INTEGER;
-      UPDATE branches SET name='Old Shop',role='shop',canonical_key='shop',is_active=0,is_default=0,successor_branch_id=2 WHERE id=1;
+    world.d1.db.exec(`UPDATE branches SET name='Old Shop',role='shop',canonical_key='shop',is_active=0,is_default=0,successor_branch_id=2 WHERE id=1;
       UPDATE branches SET name='LC Store',role='shop',canonical_key='warehouse',is_default=1 WHERE id=2;`)
     const history = await liveEdit(world, SHOP, { notes: 'legacy description' })
     await replay(world, history, 'undo')
