@@ -2,6 +2,12 @@
 // Stock Change ledger reads, so it resolves the account username the same
 // way -- one rule, one implementation (lib/movementActorName.ts).
 import { movementActorNameSql } from './movementActorName'
+
+export function branchHistoryNameSql(snapshot: string, fallback: string): string {
+  const whitespace = 'char(9,10,11,12,13,32,160,5760,8192,8193,8194,8195,8196,8197,8198,8199,8200,8201,8202,8232,8233,8239,8287,12288,65279)'
+  return `CASE WHEN trim(COALESCE(${snapshot},''),${whitespace})<>'' THEN ${snapshot} ELSE ${fallback} END`
+}
+
 // The movement types that mean "goods were received". 'add' is the canonical
 // one -- POST /api/inventory/adjust, POST /api/batches and (since this change)
 // the unified stock-in session all write it, and it is the only receipt string
@@ -223,7 +229,7 @@ function sessionLineRowsSql(where: { movement: string; zero: string }): string {
     UNION ALL
     SELECT 'session:' || CAST(o.rowid AS TEXT) AS session_key,
            NULL AS id, sm.line_id AS session_line_id, sm.product_id, p.name AS product_name, ${PRODUCT_COLUMNS_SQL},
-           sm.branch_id, br.name AS branch_name, 'add' AS movement_type, 0 AS quantity,
+           sm.branch_id, ${branchHistoryNameSql('sm.branch_name', 'br.name')} AS branch_name, 'add' AS movement_type, 0 AS quantity,
            sm.unit_cost_usd, NULL AS unit_cost_khr, 0 AS total_cost_usd, NULL AS total_cost_khr,
            0 AS cost_missing,
            0 AS received_quantity, sm.unit_cost_usd AS received_unit_cost_usd, 0 AS received_total_cost_usd,
