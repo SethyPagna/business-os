@@ -197,7 +197,7 @@ runTest('sale writers require one real active Shop header and identical line bra
   assert.match(salesSource, /branchId !== saleHeaderBranchId/)
   assert.match(salesSource, /COALESCE\(is_active,1\)=1/)
   assert.match(salesSource, /firstUnsellableBranch\(\[amendmentBranch\]\)/)
-  assert.match(salesSource, /branchCanSell\(cancellationBranch\.name\)/, 'automatic cancellation expenses inherit a verified Shop sale link')
+  assert.match(salesSource, /branchCanSell\(cancellationBranch\)/, 'automatic cancellation expenses inherit a verified Shop sale link')
   assert.match(returnsSource, /replacementInputs\.some\(\(line\) => Number\(line\.branch_id \|\| branchId\) !== branchId\)/)
   assert.match(returnsSource, /const lineBranchId = Number\(input\.branch_id \|\| branchId\)/)
   assert.match(salesImportSource, /branchId !== saleHeaderBranchId/)

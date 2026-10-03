@@ -30,7 +30,7 @@ import { mergePaymentMethods, parseConfiguredMethods, saleMethodsUsed } from '..
 import { planSaleSettlement, SettlementValidationError } from '../lib/paymentSettlement'
 // Sales are Shop-only. The same predicate runs in the UI and here where an
 // offline replay, direct API caller, or stale client cannot bypass it.
-import { firstUnsellableBranch } from '../lib/branchRoleGuards'
+import { firstUnsellableBranch, sellingBranchConditionSql, sellingBranchGuardStatement } from '../lib/branchRoleGuards'
 import { branchCanSell } from '../lib/branchRoles'
 import {
   SALE_SETTLEMENT_ACTION_KIND,
@@ -608,8 +608,8 @@ app.post('/', async (c) => {
   // actually resolved to rather than trusting body.branch_id alone.
   const saleBranchIds = [saleHeaderBranchId]
   const saleBranchRows = await selectInChunks(saleBranchIds, 0, (chunk) => db
-    .prepare(`SELECT id, name, is_active FROM branches WHERE id IN (${chunk.map(() => '?').join(',')})`)
-    .all<{ id: number; name: string | null; is_active: number | null }>(chunk))
+    .prepare(`SELECT id, name, role, is_active FROM branches WHERE id IN (${chunk.map(() => '?').join(',')})`)
+    .all<{ id: number; name: string | null; role: unknown; is_active: number | null }>(chunk))
   if (saleBranchRows.length !== saleBranchIds.length
     || saleBranchRows.some((branch) => Number(branch.is_active ?? 1) !== 1)
     || firstUnsellableBranch(saleBranchRows)) {
@@ -1486,8 +1486,7 @@ app.post('/', async (c) => {
                 JOIN products p ON p.id = @product_id
                 LEFT JOIN current_batch cb ON 1 = 1
                 WHERE b.id = @branch_id
-                  AND COALESCE(b.is_active, 1) = 1
-                  AND lower(trim(b.name)) = 'shop'
+                  AND ${sellingBranchConditionSql('b')}
                   AND (@batch_id IS NULL OR cb.batch_id IS NOT NULL)
                 LIMIT 1
               )
@@ -1570,8 +1569,7 @@ app.post('/', async (c) => {
                      AND bbs.quantity >= @quantity
                     JOIN branches b
                       ON b.id = bbs.branch_id
-                     AND COALESCE(b.is_active, 1) = 1
-                     AND lower(trim(b.name)) = 'shop'
+                     AND ${sellingBranchConditionSql('b')}
                     WHERE pb.id = @batch_id
                       AND pb.variant_product_id = @product_id
                       AND pb.is_active = 1
@@ -2502,11 +2500,12 @@ app.patch('/:id/status', async (c) => {
       return c.json({ error: SHOP_ONLY_SALE_ERROR }, 400)
     }
     const cancellationBranch = await db.prepare(
-      'SELECT id,name FROM branches WHERE id=@id AND COALESCE(is_active,1)=1 LIMIT 1',
-    ).get<{ id: number; name: string | null }>({ id: cancellationBranchId })
-    if (!cancellationBranch || !branchCanSell(cancellationBranch.name)) {
+      'SELECT id,name,role FROM branches WHERE id=@id AND COALESCE(is_active,1)=1 LIMIT 1',
+    ).get<{ id: number; name: string | null; role: unknown }>({ id: cancellationBranchId })
+    if (!cancellationBranch || !branchCanSell(cancellationBranch)) {
       return c.json({ error: SHOP_ONLY_SALE_ERROR }, 400)
     }
+    statements.push(sellingBranchGuardStatement(cancellationBranchId))
     statements.push({
       sql: `INSERT INTO fees (fee_type, label, amount_usd, amount_khr, fee_date, sale_id, branch_id, notes, created_by, created_by_name)
             VALUES ('expense', @label, @amount_usd, @amount_khr, @fee_date, @sale_id, @branch_id, @notes, @created_by, @created_by_name)`,
@@ -3274,8 +3273,8 @@ app.post('/:id/items', async (c) => {
   // same selling-branch rule.
   const addedBranchIds = [saleHeaderBranchId]
   const addedBranchRows = await selectInChunks(addedBranchIds, 0, (chunk) => db
-    .prepare(`SELECT id, name, is_active FROM branches WHERE id IN (${chunk.map(() => '?').join(',')})`)
-    .all<{ id: number; name: string | null; is_active: number | null }>(chunk))
+    .prepare(`SELECT id, name, role, is_active FROM branches WHERE id IN (${chunk.map(() => '?').join(',')})`)
+    .all<{ id: number; name: string | null; role: unknown; is_active: number | null }>(chunk))
   if (addedBranchRows.length !== addedBranchIds.length
     || addedBranchRows.some((branch) => Number(branch.is_active ?? 1) !== 1)
     || firstUnsellableBranch(addedBranchRows)) {
@@ -3578,6 +3577,7 @@ app.post('/:id/items', async (c) => {
     const atomicStatements: StatementList = [
       { sql: 'DELETE FROM sale_mutation_guards', params: {} },
       { sql: 'DELETE FROM sale_bulk_guards', params: {} },
+      sellingBranchGuardStatement(saleHeaderBranchId),
       amendmentSettingsGuard(moneySettings),
       saleRevisionGuard(saleId, Number(sale.write_revision)),
       precisionBasket.guard,
@@ -4022,8 +4022,8 @@ app.post('/:id/amendments', async (c) => {
   if (!Number.isSafeInteger(saleHeaderBranchId) || saleHeaderBranchId <= 0) {
     return c.json({ error: SHOP_ONLY_SALE_ERROR }, 400)
   }
-  const amendmentBranch = await db.prepare('SELECT id, name, is_active FROM branches WHERE id = ?')
-    .get<{ id: number; name: string | null; is_active: number | null }>([saleHeaderBranchId])
+  const amendmentBranch = await db.prepare('SELECT id, name, role, is_active FROM branches WHERE id = ?')
+    .get<{ id: number; name: string | null; role: unknown; is_active: number | null }>([saleHeaderBranchId])
   if (!amendmentBranch
     || Number(amendmentBranch.is_active ?? 1) !== 1
     || firstUnsellableBranch([amendmentBranch])) {
@@ -4204,6 +4204,7 @@ app.post('/:id/amendments', async (c) => {
       await db.batch([
         { sql: 'DELETE FROM sale_mutation_guards', params: {} },
         { sql: 'DELETE FROM sale_bulk_guards', params: {} },
+        sellingBranchGuardStatement(saleHeaderBranchId),
         amendmentSettingsGuard(moneySettings),
         contactReferenceGuard,
         saleRevisionGuard(saleId, Number(sale.write_revision)),
@@ -4314,6 +4315,7 @@ app.post('/:id/amendments', async (c) => {
       await db.batch([
         { sql: 'DELETE FROM sale_mutation_guards', params: {} },
         { sql: 'DELETE FROM sale_bulk_guards', params: {} },
+        sellingBranchGuardStatement(saleHeaderBranchId),
         amendmentSettingsGuard(moneySettings),
         saleRevisionGuard(saleId, Number(sale.write_revision)),
         ...(precisionBasket?[precisionBasket.guard]:[]),
@@ -4444,6 +4446,7 @@ app.post('/:id/amendments', async (c) => {
       await db.batch([
         { sql: 'DELETE FROM sale_mutation_guards', params: {} },
         { sql: 'DELETE FROM sale_bulk_guards', params: {} },
+        sellingBranchGuardStatement(saleHeaderBranchId),
         amendmentSettingsGuard(moneySettings),
         saleRevisionGuard(saleId, Number(sale.write_revision)),
         precisionBasket!.guard,
@@ -4929,6 +4932,7 @@ app.post('/:id/amendments', async (c) => {
     await db.batch([
       { sql: 'DELETE FROM sale_mutation_guards', params: {} },
       { sql: 'DELETE FROM sale_bulk_guards', params: {} },
+      sellingBranchGuardStatement(saleHeaderBranchId),
       amendmentSettingsGuard(moneySettings),
       saleRevisionGuard(saleId, Number(sale.write_revision)),
       precisionBasket!.guard,

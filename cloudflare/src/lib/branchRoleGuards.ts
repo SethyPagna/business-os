@@ -14,7 +14,7 @@ import { branchCanTransferBetween, branchCanSell } from './branchRoles'
 export const WAREHOUSE_NOT_SELLABLE_ERROR = 'Only allow Shop sale. Please transfer to Shop first.'
 export const TRANSFER_DIRECTION_ERROR = 'Transfers move stock only between Shop and Warehouse.'
 
-export type BranchNameRow = { id: number; name: string | null }
+export type BranchNameRow = { id: number; name: string | null; role?: unknown }
 
 /**
  * The first branch on this write that may not carry a sale line, or null
@@ -26,7 +26,7 @@ export type BranchNameRow = { id: number; name: string | null }
  */
 export function firstUnsellableBranch(rows: readonly BranchNameRow[]): BranchNameRow | null {
   for (const row of rows) {
-    if (!branchCanSell(row?.name)) return row
+    if (!branchCanSell(row)) return row
   }
   return null
 }
@@ -38,4 +38,18 @@ export function firstUnsellableBranch(rows: readonly BranchNameRow[]): BranchNam
  */
 export function transferDirectionError(fromName: unknown, toName: unknown): string | null {
   return branchCanTransferBetween(fromName, toName) ? null : TRANSFER_DIRECTION_ERROR
+}
+
+export function sellingBranchConditionSql(alias = 'b'): string {
+  const whitespace = 'char(9,10,11,12,13,32,160,5760,8192,8193,8194,8195,8196,8197,8198,8199,8200,8201,8202,8232,8233,8239,8287,12288,65279)'
+  return `COALESCE(${alias}.is_active,1)=1 AND typeof(COALESCE(${alias}.role,${alias}.name))='text' AND lower(trim(COALESCE(${alias}.role,${alias}.name),${whitespace}))='shop'`
+}
+
+export function sellingBranchGuardStatement(branchId: number): { sql: string; params: Record<string, unknown> } {
+  return {
+    sql: `INSERT INTO sale_bulk_guards(guard_value) SELECT CASE WHEN EXISTS(
+      SELECT 1 FROM branches b WHERE b.id=@sellingBranchId AND ${sellingBranchConditionSql()}
+    ) THEN 1 ELSE 0 END`,
+    params: { sellingBranchId: branchId },
+  }
 }
