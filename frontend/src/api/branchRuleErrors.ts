@@ -112,3 +112,27 @@ export function localizeBranchSaveError(error: unknown, t: (key: string) => stri
   }
   return localizeBranchRuleError(error, t)
 }
+
+type BranchReviewIdentity = { section?: unknown; action_type?: unknown; entity_type?: unknown }
+
+export function isBranchReviewUpdate(row: BranchReviewIdentity): boolean {
+  return row.section === 'branches' && row.action_type === 'update' && row.entity_type === 'branch'
+}
+
+export function localizeBranchReviewError(row: BranchReviewIdentity, error: unknown, t: (key: string) => string | undefined): string {
+  const text = branchRuleErrorText(error)
+  if (!isBranchReviewUpdate(row)) return error instanceof Error ? error.message : String(error || '')
+  const detail = error && typeof error === 'object' ? error as BranchRuleErrorLike & { status?: unknown } : null
+  const messages = [
+    ['unknown_outcome', 'The result could not be confirmed. Retry the same approval request.', 'branch_approval_unknown_outcome'],
+    ['review_permission_revoked', 'Your permission to review has changed. This approval may already have completed. Refresh the review queue.', 'branch_approval_review_permission_revoked'],
+    ['request_permission_revoked', 'The requester no longer has permission to edit branches.', 'branch_approval_request_permission_revoked'],
+  ] as const
+  for (const [code, legacy, key] of messages) {
+    if (detail?.code === code || (!detail?.code && text === legacy)) return t(key) || text
+  }
+  if (!detail?.code && detail?.status === 403 && text === 'Forbidden') {
+    return t('branch_approval_review_permission_revoked') || text
+  }
+  return localizeBranchSaveError(error, t)
+}
