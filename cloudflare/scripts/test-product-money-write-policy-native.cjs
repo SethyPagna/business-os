@@ -11,19 +11,24 @@ const src = path.resolve(__dirname, '../src')
 const frontendSrc = path.resolve(__dirname, '../../frontend/src')
 const database = openDb(loadAll(path.resolve(__dirname, '../migrations')))
 const raw = database.db
+assert.equal(raw.limits.exprDepth, 100)
 let beforeProductUpdate = null, afterRead = null, beforeBatch = null, auditCount = 0
 const DB = {
   prepare(sql) {
     let values = []
     const statement = {
+      sql,
       bind(...args) { values = args; return statement },
+      args() { return /\?\d/.test(sql) ? [Object.fromEntries(values.map((value, index) => [String(index + 1), value]))] : values },
       // D1Compat.get() reads row 0 of all() since A0 (first() returns no meta),
       // so the injected-race hook fires on all() the same way it did on first().
-      async all() { const results = raw.prepare(sql).all(...values); if (afterRead) afterRead(sql, results[0] ?? null); return { results } },
-      async first() { const value = raw.prepare(sql).get(...values) ?? null; if (afterRead) afterRead(sql, value); return value },
+      async all() { const results = raw.prepare(sql).all(...statement.args()); if (afterRead) afterRead(sql, results[0] ?? null); return { results } },
+      async first() { const value = raw.prepare(sql).get(...statement.args()) ?? null; if (afterRead) afterRead(sql, value); return value },
       async run() {
         if (/^UPDATE "products" SET/.test(sql) && beforeProductUpdate) { const hook = beforeProductUpdate; beforeProductUpdate = null; hook() }
-        const result = raw.prepare(sql).run(...values)
+        const prepared = raw.prepare(sql)
+        if (prepared.columns().length) return { success: true, results: prepared.all(...statement.args()), meta: { changes: 0 } }
+        const result = prepared.run(...statement.args())
         return { success: true, meta: { changes: Number(result.changes), last_row_id: Number(result.lastInsertRowid) } }
       },
     }
@@ -31,22 +36,24 @@ const DB = {
   },
   async batch(statements) {
     if (beforeBatch) { const hook = beforeBatch; beforeBatch = null; hook() }
+    if (beforeProductUpdate && statements.some(statement => /^UPDATE "products" SET/.test(statement.sql))) { const hook = beforeProductUpdate; beforeProductUpdate = null; hook() }
     raw.exec('BEGIN IMMEDIATE')
     try { const results = []; for (const statement of statements) results.push(await statement.run()); raw.exec('COMMIT'); return results }
     catch (error) { raw.exec('ROLLBACK'); throw error }
   },
 }
 const env = { DB }
-const real = new Set(['acquisitionCostAccess', 'productWrites', 'moneyPrecision', 'productMerge', 'productIdentity', 'productDetailRule', 'db', 'sqlBinding', 'searchMatch', 'batchCode', 'actorSnapshot', 'pendingActions', 'reviewGate', 'reviewApply', 'conflictControl', 'renameCascade', 'schemaProbe'])
-const noop = new Proxy(function () {}, { get: () => noop, apply: () => undefined, construct: () => ({}) })
+const real = new Set(['acquisitionCostAccess', 'productWrites', 'moneyPrecision', 'productMerge', 'productIdentity', 'productDetailRule', 'db', 'sqlBinding', 'searchMatch', 'batchCode', 'actorSnapshot', 'pendingActions', 'reviewGate', 'reviewApply', 'conflictControl', 'renameCascade', 'schemaProbe', 'receivingBranch', 'businessMaintenanceGuard', 'catalogCostRecompute', 'branchWrites', 'canonicalBranchIdentity', 'branchRoles'])
+const unavailable = name => new Proxy(function () {}, { get: (_target, key) => unavailable(`${name}.${String(key)}`), apply: () => { throw new Error(`Unexpected fixture dependency: ${name}`) }, construct: () => { throw new Error(`Unexpected fixture dependency: ${name}`) } })
 class ProductImageAssetError extends Error {}
 const services = {
+  undoAppliers: { registerMergeFold: () => {}, registerProductMergeGroupRedo: () => {}, MERGE_REPARENT_TABLES: [] },
   auth: { requireAuth: async (c, next) => { c.set('user', c.env.TEST_USER); await next() } },
   permissions: {
     getPermissionTier: (u) => u.tier || 'full', getActionTier: (u) => u.tier || 'full',
     hasPermission: (u) => u.tier !== 'none', isActionBlocked: () => false, isAdminControlUser: () => true,
   },
-  audit: { audit: async () => { auditCount++ }, changedFields: () => null, auditChangeColumns: () => ({ old_value: null, new_value: null }), isSecretShapedAuditKey: () => false, },
+  audit: { buildAuditStatement: (...args) => load('lib/audit.ts').buildAuditStatement(...args), audit: async () => { auditCount++ }, changedFields: () => null, auditChangeColumns: () => ({ old_value: null, new_value: null }), isSecretShapedAuditKey: () => false, },
   cache: { bumpVersion: async () => {}, bumpVersions: async () => {} },
   broadcastHub: { broadcast: async () => {} },
   media: { sanitizeMediaList: () => [] },
@@ -65,7 +72,7 @@ function load(relative) {
     if (relative === 'lib/acquisitionCostAccess.ts' && name === 'permissions') return load('lib/permissions.ts')
     if (services[name]) return services[name]
     if (real.has(name)) return load(`lib/${name}.ts`)
-    if (request.startsWith('.')) return noop
+    if (request.startsWith('.')) return unavailable(request)
     return require(request)
   }
   new Function('require', 'module', 'exports', output)(localRequire, mod, mod.exports)
