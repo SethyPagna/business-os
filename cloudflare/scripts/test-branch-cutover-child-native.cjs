@@ -110,13 +110,13 @@ let checks = 0
 async function check(name, fn) { if (process.env.CHILD_TEST_PATTERN && !new RegExp(process.env.CHILD_TEST_PATTERN).test(name)) return; await fn(); checks++; console.log('PASS ' + name) }
 async function main() {
   await check('actual fingerprint distinguishes adjacent REAL costs and preserves null with matching byte admission', async () => {
-    const w = world([1]); const p = await planned(w); const prepare = w.db.prepare.bind(w.db); let observed
+    const w = world([1]); const p = await planned(w); const prepare = w.db.prepare.bind(w.db); let observed; let summarySql
     w.db.prepare = sql => {
       if (sql.startsWith('SELECT CASE WHEN') && sql.includes('json_group_array')) observed = sql
+      if (sql.startsWith('SELECT COUNT(*) AS count')) summarySql = sql
       return prepare(sql)
     }
     await execute(w, p); assert.ok(observed)
-    const summarySql = w.stats.sql.find(sql => sql.startsWith('SELECT COUNT(*) AS count'))
     const fingerprint = () => {
       const params = { product: 1, source: 1, target: 2 }
       const value = w.raw.prepare(observed).get(params).value
