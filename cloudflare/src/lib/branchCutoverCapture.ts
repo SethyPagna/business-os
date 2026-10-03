@@ -66,8 +66,8 @@ export function captureSchemaGuard(schema: CaptureSchema): CutoverStatement {
 const affectedProducts = `SELECT product_id FROM branch_stock WHERE branch_id IN (@source,@target)
   UNION SELECT b.variant_product_id FROM product_batches b JOIN branch_batch_stock s ON s.batch_id=b.id WHERE s.branch_id IN (@source,@target)`
 const streamTables = tables.filter(table => table !== 'branch_cutovers' && !UNCLASSIFIED_JSON_FAMILIES.some(family => family === table))
-export const captureRegistryDigest = (): Promise<string> => cutoverDigest(JSON.stringify({ version: 1, references: BRANCH_SCALAR_REFERENCES,
-  streamTables, snapshots, blankCharacters, opaqueFamilies: UNCLASSIFIED_JSON_FAMILIES, control: 'branch_cutovers:owned_identity', ordering: 'stable-rowid', metadata: 'products-and-original-batches' }))
+export const captureRegistryDigest = (): Promise<string> => cutoverDigest(JSON.stringify({ version: 2, references: BRANCH_SCALAR_REFERENCES,
+  streamTables, snapshots, blankCharacters, opaqueFamilies: UNCLASSIFIED_JSON_FAMILIES, control: 'branch_cutovers:owned_identity', ordering: 'stable-rowid', metadata: 'products-and-original-batches', scalarEncoding: 'sqlite-type-and-roundtrip-real-v1' }))
 function predicate(table: string): string {
   if (table === 'products') return `id IN (${affectedProducts})`
   if (table === 'branches') return 'id IN (@source,@target) OR successor_branch_id IN (@source,@target)'
@@ -106,13 +106,28 @@ export async function readUnclassifiedCutoverFamilies(db: D1Compat): Promise<Arr
   }
   return result
 }
+function capturedScalar(value: unknown): string | number | null {
+  if (Array.isArray(value) && value.length === 2) {
+    const [type, text] = value
+    if (type === 'null' && text === null) return null
+    if (typeof text === 'string') {
+      if (type === 'text') return text
+      if (type === 'integer' && /^-?(0|[1-9][0-9]*)$/.test(text)) return text
+      if (type === 'real' && text.trim() && Number.isFinite(Number(text))) return Number(text)
+    }
+  }
+  throw new BranchCutoverCapabilityError('capture_scalar_unsupported')
+}
 export async function readCutoverCapturePage(db: D1Compat, schema: CaptureSchema, identity: CutoverIdentity, cursor: CaptureCursor,
   digest: string, pageSize: number, names: Record<number, string>, materialize: boolean): Promise<{ cursor: CaptureCursor; digest: string; records: number; statements: CutoverStatement[]; done: boolean }> {
   if (!Number.isSafeInteger(pageSize) || pageSize < 1 || pageSize > 32) throw new BranchCutoverCapabilityError('capture_page_size_invalid')
   if (cursor.index === streamTables.length) return { cursor, digest, records: 0, statements: [], done: true }
   const table = streamTables[cursor.index]; const columns = schema.columns[table]
   if (!columns) throw new BranchCutoverCapabilityError('capture_table_required:' + table)
-  const json = `json_object(${columns.map(column => `'${column.replaceAll("'", "''")}',${quote(column)}`).join(',')})`
+  const json = `json_object(${columns.map(column => {
+    const field = quote(column)
+    return `'${column.replaceAll("'", "''")}',json_array(typeof(${field}),CASE typeof(${field}) WHEN 'integer' THEN CAST(${field} AS TEXT) WHEN 'real' THEN printf('%!.17g',${field}) WHEN 'text' THEN ${field} END)`
+  }).join(',')})`
   const rowsSql = `SELECT rowid AS k,${json} AS j FROM ${quote(table)} WHERE (${predicate(table)}) AND rowid>@after ORDER BY rowid LIMIT @limit`
   const fingerprintSql = `SELECT json_group_array(json_array(k,j)) FROM (${rowsSql})`
   const params = { source: identity.sourceBranchId, target: identity.targetBranchId, after: cursor.key, limit: pageSize }
@@ -127,12 +142,13 @@ export async function readCutoverCapturePage(db: D1Compat, schema: CaptureSchema
     cutoverAssert(`NOT EXISTS(SELECT 1 FROM ${quote(table)} WHERE (${predicate(table)}) AND rowid<=0)`, params)]
   for (const [key, raw] of rows) {
     if (!Number.isSafeInteger(key) || key <= next.key || cutoverBytes(raw) > 65536) throw new BranchCutoverCapabilityError('capture_row_invalid_or_oversize')
-    const record = JSON.parse(raw) as Record<string, unknown>
+    const encoded = JSON.parse(raw) as Record<string, unknown>
+    const record = Object.fromEntries(Object.entries(encoded).map(([field, value]) => [field, capturedScalar(value)]))
     for (const [field, branchField] of snapshots[table] || []) {
       const name = names[Number(record[branchField])]
-      if (name !== undefined && (record[field] === null || record[field] === undefined || typeof record[field] === 'string' && !(record[field] as string).trim())) record[field] = name
+      if (name !== undefined && (record[field] === null || record[field] === undefined || typeof record[field] === 'string' && !(record[field] as string).trim())) encoded[field] = ['text', name]
     }
-    digest = await cutoverDigest(JSON.stringify([digest, table, key, record]))
+    digest = await cutoverDigest(JSON.stringify([digest, table, key, encoded]))
     next.key = key; next.rows++
     if (Number(record.branch_id) === identity.sourceBranchId && table === 'branch_stock') {
       next.sourceQuantityText = addQuantity(next.sourceQuantityText, record.quantity)

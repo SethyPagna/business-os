@@ -15,6 +15,118 @@ function stock(w) {
 async function main() {
   let checks = 0
   async function check(name, fn) { if (process.env.PARENT_TEST_FILTER && !name.includes(process.env.PARENT_TEST_FILTER)) return; await fn(); console.log('PASS ' + name); checks++ }
+  await check('precision quantity retains the original admitted twelve-place REAL in both manifest totals', async () => {
+    const w = world(); stock(w); const quantity = 1000.123456789012
+    w.raw.prepare('UPDATE branch_stock SET quantity=? WHERE branch_id=2').run(quantity)
+    w.raw.prepare('UPDATE branch_batch_stock SET quantity=? WHERE branch_id=2').run(quantity)
+    w.raw.prepare('UPDATE products SET stock_quantity=? WHERE id=10').run(quantity + 5)
+    const row = await until(w, (await begin(w)).row, 'moving')
+    const manifest = JSON.parse(row.manifest_json)
+    assert.equal(manifest.sourceQuantityText, '1000.123456789012')
+    assert.equal(manifest.sourceLotQuantityText, '1000.123456789012')
+    assert.equal(row.capture_digest, row.snapshot_digest)
+    assert.equal(w.raw.prepare('SELECT quantity FROM branch_stock WHERE branch_id=2').get().quantity, quantity)
+    assert.equal(w.raw.prepare('SELECT quantity FROM branch_batch_stock WHERE branch_id=2').get().quantity, quantity)
+    w.raw.close()
+  })
+  await check('precision adjacent REAL cost between passes refuses completion', async () => {
+    const w = world(); stock(w)
+    w.raw.prepare('UPDATE product_batches SET unit_cost_usd=? WHERE id=101').run(1.0000000000000002)
+    const row = await until(w, (await begin(w)).row, 'snapshots')
+    w.raw.prepare('UPDATE product_batches SET unit_cost_usd=? WHERE id=101').run(1.0000000000000004)
+    await assert.rejects(until(w, row, 'moving'))
+    assert.equal(w.raw.prepare('SELECT phase FROM branch_cutovers').get().phase, 'snapshots')
+    assert.equal(w.raw.prepare('SELECT unit_cost_usd FROM product_batches WHERE id=101').get().unit_cost_usd, 1.0000000000000004)
+    w.raw.close()
+  })
+  await check('precision adjacent REAL read-to-batch mutation rolls back its entire checkpoint', async () => {
+    const w = world(); stock(w)
+    w.raw.prepare('UPDATE product_batches SET unit_cost_usd=? WHERE id=101').run(1.0000000000000002)
+    const tables = [...new Set([...w.capture.BRANCH_SCALAR_REFERENCES.map(v => v[0]), 'products', ...w.capture.UNCLASSIFIED_JSON_FAMILIES])].sort().filter(t => t !== 'branch_cutovers' && !w.capture.UNCLASSIFIED_JSON_FAMILIES.includes(t))
+    let { row } = await begin(w)
+    while (w.capture.parseCaptureCursor(row.capture_cursor_json).index !== tables.indexOf('product_batches')) row = (await step(w, row)).row
+    const prior = w.raw.prepare('SELECT * FROM branch_cutovers').get()
+    w.stats.before = raw => raw.prepare('UPDATE product_batches SET unit_cost_usd=? WHERE id=101').run(1.0000000000000004)
+    await assert.rejects(step(w, row))
+    assert.deepEqual(w.raw.prepare('SELECT * FROM branch_cutovers').get(), prior)
+    assert.equal(w.raw.prepare('SELECT unit_cost_usd FROM product_batches WHERE id=101').get().unit_cost_usd, 1.0000000000000004)
+    assert.equal(w.raw.prepare('SELECT count(*) n FROM inventory_movements').get().n, 0)
+    w.raw.close()
+  })
+  await check('typed scalar roots distinguish null integer REAL text and adjacent full-width integers', async () => {
+    const w = world(); stock(w); w.raw.exec('ALTER TABLE products ADD COLUMN precision_scalar')
+    const schema = await w.capture.readCutoverCaptureSchema(w.db)
+    const tables = [...new Set([...w.capture.BRANCH_SCALAR_REFERENCES.map(v => v[0]), 'products', ...w.capture.UNCLASSIFIED_JSON_FAMILIES])].sort().filter(t => t !== 'branch_cutovers' && !w.capture.UNCLASSIFIED_JSON_FAMILIES.includes(t))
+    const cursor = { ...w.capture.initialCaptureCursor(), index: tables.indexOf('products') }
+    const page = () => w.capture.readCutoverCapturePage(w.db, schema, { sourceBranchId: 2, targetBranchId: 1 }, cursor, '0'.repeat(64), 1, { 1: 'Warehouse', 2: 'Shop' }, false)
+    const roots = []
+    for (const literal of ['NULL', '1', '1.0', "'1'", "''", '9223372036854775807', '9223372036854775806', '1.0000000000000002', '1.0000000000000004']) {
+      w.raw.exec('UPDATE products SET precision_scalar=' + literal + ' WHERE id=10')
+      const readCount = w.stats.reads; const captured = await page()
+      assert.equal(w.stats.reads - readCount, 2)
+      await w.db.batch(captured.statements)
+      roots.push(captured.digest)
+    }
+    assert.equal(new Set(roots).size, roots.length)
+    w.raw.exec('UPDATE products SET precision_scalar=1 WHERE id=10')
+    const integerPage = await page()
+    w.raw.exec('UPDATE products SET precision_scalar=1.0 WHERE id=10')
+    assert.equal(w.raw.prepare('SELECT typeof(precision_scalar) t FROM products WHERE id=10').get().t, 'real')
+    await assert.rejects(w.db.batch(integerPage.statements))
+    for (const literal of ['1e999', '-1e999', "X'01'"]) {
+      w.raw.exec('UPDATE products SET precision_scalar=' + literal + ' WHERE id=10')
+      const batches = w.stats.batches
+      await assert.rejects(page(), e => e.code === 'branch_cutover_parent_capability')
+      assert.equal(w.stats.batches, batches)
+    }
+    for (const value of [Number.MIN_VALUE, Number.MAX_VALUE, -Number.MAX_VALUE, 0]) {
+      w.raw.prepare('UPDATE products SET precision_scalar=? WHERE id=10').run(value)
+      const captured = await page(); await w.db.batch(captured.statements)
+      assert.equal(w.raw.prepare('SELECT precision_scalar FROM products WHERE id=10').get().precision_scalar, value)
+    }
+    w.raw.close()
+  })
+  await check('typed capture static page sizes preserve one root and original exact decimal totals', async () => {
+    const w = world(); stock(w); const quantity = 1000.123456789012
+    w.raw.prepare('UPDATE branch_stock SET quantity=? WHERE branch_id=2').run(quantity)
+    w.raw.prepare('UPDATE branch_batch_stock SET quantity=? WHERE branch_id=2').run(quantity)
+    const feeBase = w.raw.prepare('SELECT coalesce(max(id),0) id FROM fees').get().id
+    for (let i = 1; i <= 35; i++) w.raw.prepare("INSERT INTO fees(id,branch_id,notes,fee_date) VALUES(?,2,?,'2026-10-03')").run(feeBase + i * 3, 'note' + i)
+    const schema = await w.capture.readCutoverCaptureSchema(w.db); const roots = [], counts = []
+    for (const size of [1, 3, 32]) {
+      let cursor = w.capture.initialCaptureCursor(), digest = '0'.repeat(64), records = 0, pages = 0
+      while (true) {
+        const page = await w.capture.readCutoverCapturePage(w.db, schema, { sourceBranchId: 2, targetBranchId: 1 }, cursor, digest, size, { 1: 'Warehouse', 2: 'Shop' }, false)
+        cursor = page.cursor; digest = page.digest; records += page.records
+        assert.ok(++pages < 150)
+        if (page.done) break
+      }
+      assert.equal(cursor.sourceQuantityText, '1000.123456789012'); assert.equal(cursor.sourceLotQuantityText, '1000.123456789012')
+      roots.push(digest); counts.push([cursor.rows, records])
+    }
+    assert.equal(new Set(roots).size, 1); assert.deepEqual(counts[0], counts[1]); assert.deepEqual(counts[1], counts[2]); w.raw.close()
+  })
+  await check('typed capture keeps free and unknown costs distinct and accepts its smallest decimal quantity', async () => {
+    const roots = []
+    for (const cost of [0, null]) {
+      const w = world(); stock(w)
+      w.raw.prepare('UPDATE product_batches SET unit_cost_usd=? WHERE id=101').run(cost)
+      w.raw.prepare('UPDATE branch_stock SET quantity=? WHERE branch_id=2').run(1e-12)
+      w.raw.prepare('UPDATE branch_batch_stock SET quantity=? WHERE branch_id=2').run(1e-12)
+      const row = await until(w, (await begin(w)).row, 'moving', 3)
+      assert.equal(JSON.parse(row.manifest_json).sourceQuantityText, '0.000000000001')
+      assert.equal(JSON.parse(row.manifest_json).sourceLotQuantityText, '0.000000000001')
+      assert.equal(w.raw.prepare('SELECT unit_cost_usd FROM product_batches WHERE id=101').get().unit_cost_usd, cost)
+      assert.equal(row.capture_digest, row.snapshot_digest); roots.push(row.capture_digest); w.raw.close()
+    }
+    assert.notEqual(roots[0], roots[1])
+    const w = world(); stock(w)
+    w.raw.prepare('UPDATE branch_stock SET quantity=? WHERE branch_id=2').run(1e-13)
+    w.raw.prepare('UPDATE branch_batch_stock SET quantity=? WHERE branch_id=2').run(1e-13)
+    const row = (await begin(w)).row
+    await assert.rejects(until(w, row, 'snapshots'), e => e.code === 'branch_cutover_parent_capability')
+    assert.equal(w.raw.prepare('SELECT phase FROM branch_cutovers').get().phase, 'capturing'); w.raw.close()
+  })
   await check('canonical capture digest independent of page size with exact fractional lot metadata', async () => {
     const roots = []
     for (const size of [1, 8]) {

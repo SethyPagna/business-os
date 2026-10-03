@@ -81,6 +81,20 @@ async function step(w, row, pageSize = 8) { return w.parent.continueBranchCutove
 async function main() {
   let checks = 0
   async function check(name, fn) { if (process.env.PARENT_TEST_FILTER && !name.includes(process.env.PARENT_TEST_FILTER)) return; await fn(); console.log('PASS ' + name); checks++ }
+  await check('old lossy capture registry cannot resume or silently rebase its held journal', async () => {
+    const w = world(); const plan = await inspect(w)
+    const registryDigest = '25c31b35e5c80204d5daff886a79872951f441dcd44937a461b00f65c8180cf8'
+    assert.notEqual(plan.registryDigest, registryDigest)
+    const { row } = await w.journal.beginBranchCutoverJournal(w.db, { operationId: '00000000-0000-4000-8000-000000000001', token: '00000000-0000-4000-8000-000000000002',
+      actorId: 7, organizationId: '1', controlIncarnation: '00000000-0000-4000-8000-000000000099', beginRequestId: 'legacy_capture_001', ...identity,
+      intentJson: JSON.stringify({ action: 'retire', parentVersion: 1, ...identity, registryDigest, schemaDigest: plan.schemaDigest }), sourcePreimageJson: plan.sourcePreimageJson, targetPreimageJson: plan.targetPreimageJson })
+    const before = w.raw.prepare('SELECT * FROM branch_cutovers').get(), batches = w.stats.batches
+    const hold = w.raw.prepare("SELECT value FROM system_flags WHERE key='maintenance'").get().value
+    await assert.rejects(step(w, row), e => e.code === 'branch_cutover_parent_capability')
+    await assert.rejects(begin(w, 'legacy_capture_001'))
+    assert.equal(w.stats.batches, batches); assert.deepEqual(w.raw.prepare('SELECT * FROM branch_cutovers').get(), before)
+    assert.equal(w.raw.prepare("SELECT value FROM system_flags WHERE key='maintenance'").get().value, hold); w.raw.close()
+  })
   await check('dry-run is read-only and lists exactly32 scalar references', async () => {
     const w = world(); const p = await inspect(w); assert.equal(p.scalarReferences.length, 32); assert.equal(p.capabilities.length, 0); assert.equal(w.stats.batches, 0); w.raw.close()
   })
