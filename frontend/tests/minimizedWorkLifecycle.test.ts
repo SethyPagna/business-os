@@ -329,7 +329,7 @@ assert.match(branchesSource, /kind: 'fast_stockin',[\s\S]*?\.\.\.FAST_STOCK_IN_R
 assert.match(branchesSource, /if \(!canReceiveStock\) return false[\s\S]*?setReceiveTarget/, 'the host must recheck current permission before reopening')
 assert.match(branchesSource, /requiredPermission: \{ permissionKey: 'inventory', actionKey: 'adjust' \}/, 'the parked entry must carry the existing action grant')
 assert.match(branchesSource, /if \(!canReceiveStock\) \{[\s\S]*?reparkDeniedRestore\(entry\)[\s\S]*?return/, 'a host-side permission race must put the exact chip back')
-assert.match(branchFormSource, /readWorkDraft<Partial<BranchFormState>>\(draftKey, \{[\s\S]*?notOlderThanMs: branch\.updated_at \? Date\.parse\(branch\.updated_at\)/, 'branch edit restore must reject a draft older than the current server row')
+assert.doesNotMatch(branchFormSource, /notOlderThanMs/, 'branch edit restore must retain stale unsaved input and its captured token for conflict handling')
 assert.match(branchFormSource, /name: base\.name,[\s\S]*?is_active: base\.is_active/, 'a restored legacy draft must preserve the current canonical identity fields')
 assert.match(branchFormSource, /discard: \(\) => clearWorkDraft\(draftKey\)/, 'branch discard must clear the exact scoped draft')
 assert.match(branchFormSource, /flushPendingWorkDraft\(draftKey\)[\s\S]*?scheduleWorkDraftWrite\(draftKey, form\)/, 'branch minimize/unmount must flush its pending draft writer')

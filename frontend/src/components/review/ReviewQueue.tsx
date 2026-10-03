@@ -12,6 +12,7 @@ import {
   withLoaderTimeout,
 } from '../../utils/loaders.ts'
 import { beginKeyedAction, finishKeyedAction } from '../../utils/actionGuards.ts'
+import { isBranchReviewUpdate, localizeBranchReviewError } from '../../api/branchRuleErrors.ts'
 import {
   approvePendingAction,
   getPendingActions as getPendingActionsRequest,
@@ -160,15 +161,18 @@ export default function ReviewQueue() {
     if (!beginKeyedAction(actionRef, row.id)) return
     setBusyId(row.id)
     try {
-      await withLoaderTimeout(
+      const response = await withLoaderTimeout(
         () => approvePendingAction(row.id),
         'review:approve',
         REVIEW_MUTATION_TIMEOUT_MS,
       )
+      if (isBranchReviewUpdate(row) && (!response?.success || response.data?.id !== row.id || response.data?.status !== 'approved')) {
+        throw Object.assign(new Error('The result could not be confirmed. Retry the same approval request.'), { code: 'unknown_outcome' })
+      }
       notify(tr('pending_action_approved', 'Approved -- the change has been applied'), 'success')
       await load(true)
     } catch (error) {
-      notify(error instanceof Error ? error.message : String(error || ''), 'error')
+      notify(localizeBranchReviewError(row, error, (key) => tr(key, '')), 'error')
     } finally {
       finishKeyedAction(actionRef, row.id)
       setBusyId(null)

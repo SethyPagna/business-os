@@ -1,22 +1,5 @@
-// Undo / Redo of a branch edit from Branches.tsx's own history closures
-// (FX-undo2, refuter R-undo C7, 27 Sep 2026).
-//
-// utils/actionHistory.ts pushes a history entry at once and learns its server
-// row id only when createActionHistory answers. Until then -- or for good, if
-// that request failed -- Undo and Redo run the page's closures instead of
-// POST /api/action-history/:id/undo|redo. The server applier ('branch.update'
-// in cloudflare/src/lib/undoAppliers.ts) refuses a replay once the branch no
-// longer holds what the recorded action left behind, but the closures PUT the
-// old snapshot with no version, and PUT /branches/:id checks a version only
-// when one is sent (assertUpdatedAtMatch), so a later edit was overwritten.
-//
-// The closures now make the applier's check themselves: read the branch,
-// refuse unless every field the applier compares still holds what the action
-// left behind -- the edit's values for an Undo, the restored values for a
-// Redo -- and send the version just read as expectedUpdatedAt, so an edit that
-// lands between that read and the write is refused by the route. Both
-// refusals reach the user in the page language, as the server's own coded
-// refusal does (api/actionHistoryTransport.ts).
+// Local replay uses the token captured with its expected server snapshot.
+// The committed response becomes the expectation for the opposite replay.
 
 export type BranchReplayRow = {
   location?: unknown
@@ -25,6 +8,7 @@ export type BranchReplayRow = {
   notes?: unknown
   is_default?: unknown
   updated_at?: unknown
+  edit_etag?: unknown
 }
 
 // The fields staleBranchReplayFields (cloudflare/src/lib/branchWrites.ts)
@@ -63,10 +47,10 @@ export function staleBranchReplayFields(current: BranchReplayRow, expected: Bran
 // longer matches the row.
 function isWriteConflict(error: unknown): boolean {
   const detail = error && typeof error === 'object' ? error as { conflict?: unknown; code?: unknown } : null
-  return !!detail && (detail.conflict === true || detail.code === 'write_conflict')
+  return !!detail && (detail.conflict === true || detail.code === 'write_conflict' || detail.code === 'branch_edit_conflict')
 }
 
-export type BranchReplayWriteResult = { success?: boolean; error?: string } | null | undefined
+export type BranchReplayWriteResult = { success?: boolean; error?: string; pending?: boolean; branch?: BranchReplayRow } | null | undefined
 
 export type BranchReplayRequest = {
   id: string | number
@@ -82,20 +66,24 @@ export type BranchReplayRequest = {
   failure: string
 }
 
-export async function replayBranchEdit(request: BranchReplayRequest): Promise<void> {
+export async function replayBranchEdit(request: BranchReplayRequest): Promise<BranchReplayRow> {
   const current = await request.readBranch(request.id)
   const version = String(current?.updated_at ?? '').trim()
-  // No row, no version to hold the write to, or a field a later edit changed:
-  // nothing is sent.
-  if (!current || !version || staleBranchReplayFields(current, request.expected).length) {
+  const expectedEditEtag = typeof request.expected.edit_etag === 'string' ? request.expected.edit_etag : ''
+  if (!current || !version || !expectedEditEtag || current.edit_etag !== expectedEditEtag
+    || staleBranchReplayFields(current, request.expected).length) {
     throw new Error(request.refusal)
   }
   let result: BranchReplayWriteResult
   try {
-    result = await request.writeBranch(request.id, { ...request.fields, expectedUpdatedAt: version })
+    result = await request.writeBranch(request.id, { ...request.fields, expectedUpdatedAt: version, expectedEditEtag })
   } catch (error) {
-    if (isWriteConflict(error)) throw new Error(request.refusal)
+    if (isWriteConflict(error)) throw Object.assign(new Error(request.refusal), error, { message: request.refusal, cause: error })
     throw error
   }
   if (result?.success === false) throw new Error(result.error || request.failure)
+  if (result?.pending || !result?.branch || typeof result.branch.edit_etag !== 'string' || !result.branch.edit_etag) {
+    throw new Error(request.refusal)
+  }
+  return result.branch
 }

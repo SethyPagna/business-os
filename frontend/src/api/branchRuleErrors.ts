@@ -17,6 +17,8 @@
 // pinned against en.json by frontend/tests/productSheetState.test.ts and
 // against the Worker's constants by Cloudflare's branch guard tests.
 export const BRANCH_RULE_MESSAGE_KEYS: ReadonlyArray<readonly [string, string]> = [
+  ['This branch edit can no longer be verified. Refresh Branches and submit a new edit.', 'branch_edit_conflict'],
+  ['Branch review is not ready. Refresh after the update and try again.', 'branch_review_schema_required'],
   ['Only allow Shop sale. Please transfer to Shop first.', 'pos_warehouse_not_sellable'],
   ['Transfers move stock only between Shop and Warehouse.', 'transfer_canonical_pair_only'],
   // Keep the previous one-way response localized while an older cached
@@ -35,6 +37,8 @@ export const BRANCH_RULE_MESSAGE_KEYS: ReadonlyArray<readonly [string, string]> 
 ]
 
 export const BRANCH_RULE_CODE_KEYS: Readonly<Record<string, string>> = {
+  branch_edit_conflict: 'branch_edit_conflict',
+  branch_review_schema_required: 'branch_review_schema_required',
   canonical_branch_configuration_invalid: 'canonical_branch_configuration_invalid',
   transfer_stock_changed: 'transfer_stock_changed',
   transfer_selected_lot_short: 'transfer_selected_lot_short',
@@ -95,4 +99,53 @@ export function localizeBranchRuleError(message: unknown, t: (key: string) => st
   const key = branchRuleErrorKey(message)
   if (!key) return text
   return t(key) || text
+}
+
+function localizeBranchRefusalError(error: unknown, t: (key: string) => string | undefined): string {
+  const text = branchRuleErrorText(error)
+  const code = error && typeof error === 'object' ? (error as BranchRuleErrorLike).code : null
+  if (code === 'permission_denied' || (!code && text === 'You do not have permission to perform this action')) {
+    return t('permission_denied') || text
+  }
+  if (code === 'write_conflict' || (!code && text === 'This branch changed on another device. Refresh and try again.')) {
+    return t('branch_edit_conflict') || text
+  }
+  return localizeBranchRuleError(error, t)
+}
+
+export function localizeBranchSaveError(error: unknown, t: (key: string) => string | undefined): string {
+  const detail = error && typeof error === 'object' ? error as BranchRuleErrorLike & { outcome?: unknown } : null
+  const fallback = 'The result of this branch edit could not be confirmed. It may have been saved. Refresh Branches and check the details before making another edit.'
+  if (detail?.code === 'branch_edit_outcome_unknown'
+    || (!detail?.code && branchRuleErrorText(error) === fallback)
+    || (detail?.code !== 'unknown_outcome' && (detail?.outcome === 'unknown'
+      || ['loader_timeout', 'request_timeout', 'write_outcome_unknown'].includes(String(detail?.code || ''))))) {
+    return t('branch_edit_outcome_unknown') || fallback
+  }
+  return localizeBranchRefusalError(error, t)
+}
+
+type BranchReviewIdentity = { section?: unknown; action_type?: unknown; entity_type?: unknown }
+
+export function isBranchReviewUpdate(row: BranchReviewIdentity): boolean {
+  return row.section === 'branches' && row.action_type === 'update' && row.entity_type === 'branch'
+}
+
+export function localizeBranchReviewError(row: BranchReviewIdentity, error: unknown, t: (key: string) => string | undefined): string {
+  const text = branchRuleErrorText(error)
+  if (!isBranchReviewUpdate(row)) return error instanceof Error ? error.message : String(error || '')
+  const detail = error && typeof error === 'object' ? error as BranchRuleErrorLike & { status?: unknown } : null
+  const messages = [
+    ['unknown_outcome', 'The result could not be confirmed. Retry the same approval request.', 'branch_approval_unknown_outcome'],
+    ['review_permission_revoked', 'Your permission to review has changed. This approval may already have completed. Refresh the review queue.', 'branch_approval_review_permission_revoked'],
+    ['request_permission_revoked', 'The requester no longer has permission to edit branches.', 'branch_approval_request_permission_revoked'],
+  ] as const
+  for (const [code, legacy, key] of messages) {
+    const legacyCode = !detail?.code || (code === 'unknown_outcome' && detail.code === 'write_outcome_unknown')
+    if (detail?.code === code || (legacyCode && text === legacy)) return t(key) || text
+  }
+  if (!detail?.code && detail?.status === 403 && text === 'Forbidden') {
+    return t('branch_approval_review_permission_revoked') || text
+  }
+  return localizeBranchRefusalError(error, t)
 }

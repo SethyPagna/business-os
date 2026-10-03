@@ -34,6 +34,7 @@ interface BranchRecord {
   is_default?: BranchFlag | boolean | null
   is_active?: BranchFlag | boolean | null
   updated_at?: string | null
+  edit_etag?: string | null
 }
 
 interface BranchFormState {
@@ -44,11 +45,12 @@ interface BranchFormState {
   notes: string
   is_default: BranchFlag | boolean
   is_active: BranchFlag | boolean
+  expectedEditEtag: string
 }
 
 interface BranchFormProps {
   branch: BranchRecord
-  onSave: (form: BranchFormState) => Promise<void> | void
+  onSave: (form: BranchFormState) => Promise<boolean> | boolean
   onClose: () => void
 }
 
@@ -65,6 +67,7 @@ function initialBranchForm(branch: BranchRecord): BranchFormState {
     notes: branch?.notes || '',
     is_default: branch?.is_default || 0,
     is_active: branch?.is_active ?? 1,
+    expectedEditEtag: typeof branch.edit_etag === 'string' ? branch.edit_etag : '',
   }
 }
 
@@ -82,6 +85,7 @@ function restoreBranchForm(base: BranchFormState, draft?: Partial<BranchFormStat
       ? draft.is_default
       : base.is_default,
     is_active: base.is_active,
+    expectedEditEtag: typeof draft.expectedEditEtag === 'string' ? draft.expectedEditEtag : '',
   }
 }
 
@@ -90,9 +94,7 @@ export default function BranchForm({ branch, onSave, onClose }: BranchFormProps)
   const draftKey = scopedWorkDraftKey(branchFormDraftBaseKey(branch.id))
   const restoredDraftRef = useRef<ReturnType<typeof readWorkDraft<Partial<BranchFormState>>> | undefined>(undefined)
   if (restoredDraftRef.current === undefined) {
-    restoredDraftRef.current = readWorkDraft<Partial<BranchFormState>>(draftKey, {
-      notOlderThanMs: branch.updated_at ? Date.parse(branch.updated_at) || 0 : 0,
-    })
+    restoredDraftRef.current = readWorkDraft<Partial<BranchFormState>>(draftKey)
   }
   const [form, setForm] = useState<BranchFormState>(() => restoreBranchForm(
     initialBranchForm(branch),
@@ -138,7 +140,7 @@ export default function BranchForm({ branch, onSave, onClose }: BranchFormProps)
   const handleSave = async () => {
     try {
       setSaving(true)
-      await onSave(form)
+      if (await onSave(form) !== true) return
       // Saved for real: nothing is at risk any more, so the close below
       // must not raise the discard prompt (the classic save-then-prompt
       // bug). Latched before onClose, never after.

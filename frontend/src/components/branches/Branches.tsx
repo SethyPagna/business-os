@@ -34,6 +34,7 @@ import MinimizeButton from '../shared/MinimizeButton.tsx'
 import { useIsPageActive } from '../shared/pageActivity'
 import BranchForm, { branchFormDraftBaseKey, branchFormWorkKey } from './BranchForm'
 import { replayBranchEdit, type BranchReplayRequest } from './branchHistoryReplay.ts'
+import { localizeBranchSaveError } from '../../api/branchRuleErrors.ts'
 import { useActionHistory } from '../../utils/actionHistory.ts'
 import { cloneHistorySnapshot } from '../../utils/historyHelpers.ts'
 import { lazyRetry } from '../../utils/lazyImport.ts'
@@ -62,6 +63,7 @@ import {
   settleLoaderMap,
   withLoaderTimeout,
 } from '../../utils/loaders.ts'
+import { withWriteTimeout } from '../../utils/writeIntent.ts'
 import {
   getBranches as getBranchesRequest,
   getBranchStock as getBranchStockRequest,
@@ -121,6 +123,7 @@ interface BranchRecord {
   is_default?: BranchFlag | null
   is_active?: BranchFlag | null
   updated_at?: string | null
+  edit_etag?: string | null
   role?: string | null
   canonical_key?: string | null
   successor_branch_id?: number | null
@@ -142,6 +145,7 @@ interface BranchFormPayload {
   notes: string
   is_default: BranchFlag | boolean
   is_active: BranchFlag | boolean
+  expectedEditEtag: string
 }
 
 interface BranchPayload {
@@ -216,6 +220,9 @@ interface BranchTransferPage {
 interface BranchMutationResult {
   success?: boolean
   error?: string
+  pending?: boolean
+  pendingActionId?: number
+  branch?: BranchRecord
   id?: unknown
   data?: { id?: unknown } | null
   item?: { id?: unknown } | null
@@ -807,8 +814,8 @@ export default function Branches({ embedded = false, view, showSectionNavigation
   }), [user?.id, user?.name])
 
   const runBranchMutation = useCallback((loader: () => Promise<BranchMutationResult>, label: string) => (
-    withLoaderTimeout(loader, label, BRANCH_MUTATION_TIMEOUT_MS)
-  ), [])
+    withWriteTimeout(loader, label, BRANCH_MUTATION_TIMEOUT_MS, (key) => tr(key, ''))
+  ), [tr])
 
   // The in-tab Undo / Redo of a branch edit (the history row has no server id
   // yet, or its create failed) restores `restore` only while the branch still
@@ -825,7 +832,17 @@ export default function Branches({ embedded = false, view, showSectionNavigation
           ? result.filter(isBranchRecord).find((branch) => String(branch.id) === String(id)) || null
           : null
       },
-      writeBranch: (id, body) => runBranchMutation(() => branchApi.updateBranch(id, body as BranchTransportPayload), label),
+      writeBranch: async (id, body) => {
+        try {
+          return await runBranchMutation(() => branchApi.updateBranch(id, body as BranchTransportPayload), label)
+        } catch (error) {
+          const message = localizeBranchSaveError(error, (key) => tr(key, ''))
+          if (error instanceof Error && message !== error.message) {
+            throw Object.assign(new Error(message), error, { message, cause: error })
+          }
+          throw error
+        }
+      },
       refusal: direction === 'undo'
         ? tr('undo_refused_record_changed', 'Someone changed this record after this action, so Undo was refused to protect the newer data.')
         : tr('redo_refused_record_changed', 'Someone changed this record after this action, so Redo was refused to protect the newer data.'),
@@ -949,10 +966,14 @@ export default function Branches({ embedded = false, view, showSectionNavigation
   /**
    * 6. Canonical branch metadata edits
    */
-  const handleSaveBranch = async (form: BranchFormPayload) => {
-    if (!selected) return
-    if (!beginSingleAction(saveInFlightRef)) return
+  const handleSaveBranch = async (form: BranchFormPayload): Promise<boolean> => {
+    if (!selected) return false
+    if (!beginSingleAction(saveInFlightRef)) return false
     try {
+      if (typeof form.expectedEditEtag !== 'string' || !form.expectedEditEtag.trim()) {
+        notify(tr('branch_edit_conflict', 'This branch edit can no longer be verified. Refresh Branches and submit a new edit.'), 'error')
+        return false
+      }
       const existingSnapshot = cloneHistorySnapshot(selected)
       const payload: BranchTransportPayload = {
         ...form,
@@ -966,30 +987,38 @@ export default function Branches({ embedded = false, view, showSectionNavigation
       }
       const res = await runBranchMutation(() => branchApi.updateBranch(selected.id, payload), 'Update branch')
       if (res?.success === false) {
-        notify(res.error || 'Failed to save branch', 'error')
-        return
+        notify(localizeBranchSaveError(res, (key) => tr(key, '')) || 'Failed to save branch', 'error')
+        return false
       }
-      const nextSnapshot = cloneHistorySnapshot({ ...existingSnapshot, ...payload, id: selected.id })
+      if (res?.pending) {
+        notify(tr('reason_submitted_for_review', 'Submitted for review -- changes will appear once approved.'))
+        return true
+      }
+      if (!res?.branch || String(res.branch.id) !== String(selected.id) || !res.branch.edit_etag) {
+        notify(tr('branch_edit_conflict', 'This branch edit can no longer be verified. Refresh Branches and submit a new edit.'), 'error')
+        return false
+      }
+      const nextSnapshot = cloneHistorySnapshot(res.branch)
       actionHistory.pushAction({
         label: `Edit branch ${existingSnapshot.name || nextSnapshot.name || ''}`.trim(),
         undo_payload: { applier: 'branch.update', id: selected.id, fields: buildBranchPayload(existingSnapshot) },
         redo_payload: { applier: 'branch.update', id: selected.id, fields: buildBranchPayload(nextSnapshot) },
         refresh: async () => { await load() },
         undo: async () => {
-          await replayBranchEdit(branchReplayRequest('undo', existingSnapshot, nextSnapshot))
+          Object.assign(existingSnapshot, await replayBranchEdit(branchReplayRequest('undo', existingSnapshot, nextSnapshot)))
           await load()
         },
         redo: async () => {
-          await replayBranchEdit(branchReplayRequest('redo', nextSnapshot, existingSnapshot))
+          Object.assign(nextSnapshot, await replayBranchEdit(branchReplayRequest('redo', nextSnapshot, existingSnapshot)))
           await load()
         },
       })
       notify(tr('branch_updated', 'Branch updated'))
-      setModal(null)
-      setSelected(null)
-      await load()
+      void load()
+      return true
     } catch (error) {
-      notify(getErrorMessage(error, 'Failed to save branch'), 'error')
+      notify(localizeBranchSaveError(error, (key) => tr(key, '')) || getErrorMessage(error, 'Failed to save branch'), 'error')
+      return false
     } finally {
       finishSingleAction(saveInFlightRef)
     }
