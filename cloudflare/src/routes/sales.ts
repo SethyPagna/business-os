@@ -4932,11 +4932,7 @@ app.post('/:id/amendments', async (c) => {
       amendmentSettingsGuard(moneySettings),
       saleRevisionGuard(saleId, Number(sale.write_revision)),
       precisionBasket!.guard,
-      ...statements,
-      ...taxPlan.statements,
-      canonicalSaleChildrenGuard(saleId,Number((sale as Record<string,unknown>).money_precision_version)),
-      saleMoneyUpdateStatement(saleId, moneyAfterSnapshot),
-      ...ledgerEntries.map(amendmentEntryStatement),
+      // Replacement members reference this receipt through an immediate foreign key.
       saleMutationReceiptStatement({
         operationId: mutationOperationId,
         actorId: Number(user.id),
@@ -4951,6 +4947,17 @@ app.post('/:id/amendments', async (c) => {
         response,
         stamp: mutationStamp,
       }),
+      ...statements,
+      ...taxPlan.statements,
+      canonicalSaleChildrenGuard(saleId,Number((sale as Record<string,unknown>).money_precision_version)),
+      saleMoneyUpdateStatement(saleId, moneyAfterSnapshot),
+      ...ledgerEntries.map(amendmentEntryStatement),
+      {
+        sql: `UPDATE sale_mutation_receipts SET
+          sale_revision=COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=@saleId),0),
+          response_json=${canonicalMutationResponseSql('@responseJson')} WHERE id=@operation`,
+        params: { operation: mutationOperationId, saleId, responseJson: JSON.stringify(response), validatedIdentityBindings: JSON.stringify(precisionBasket!.identityBindings) },
+      },
       ...(replacementLines ? [{sql:`UPDATE sale_mutation_receipts SET after_json=json_set(after_json,@path,
         (SELECT entity_id FROM sale_mutation_members WHERE operation_id=@operation AND entity_kind='sale_item' AND ordinal=0)) WHERE id=@operation`,
         params:{operation:mutationOperationId,path:`$.lines[${lineMoneyAfterAtLatestRate.findIndex(row=>row.id===0)}].id`}}] : []),
