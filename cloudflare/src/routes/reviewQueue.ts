@@ -13,11 +13,14 @@ import {
   resubmitPendingAction,
   type PendingActionStatus,
 } from '../lib/pendingActions'
-import { applyApprovedPendingAction, NoReviewApplierError, productRemovePendingPointer, ReviewRequesterPermissionError } from '../lib/reviewApply'
+import { applyApprovedPendingAction, NoReviewApplierError, productRemovePendingPointer, ReviewRequesterPermissionError, recoverApprovedBranchAction } from '../lib/reviewApply'
 import { ProductImageAssetError } from '../lib/productImagePermission'
 import { ProductRemoveError } from '../lib/productDelete'
 import type { Env } from '../index'
 import { actorSnapshot } from '../lib/actorSnapshot'
+import { getDb } from '../lib/db'
+import { assertBranchExpectedState, BranchEditConflictError, BranchApprovalReceiptError } from '../lib/branchWrites'
+import type { BranchIdentitySnapshot } from '../lib/canonicalBranchIdentity'
 
 // The Review/Approval page itself -- see progress.md's "Permissions UI
 // redesign" item. Gated Full Access only, same pattern Users already
@@ -126,6 +129,21 @@ app.post('/:id/resubmit', async (c) => {
     }
   }
 
+  const existing = await getPendingAction(c.env, id)
+  if (existing?.requested_by === Number(user.id) && existing.section === 'branches'
+    && existing.action_type === 'update' && existing.entity_type === 'branch') {
+    try {
+      const current = await getDb(c.env).prepare('SELECT * FROM branches WHERE id = @id')
+        .get<BranchIdentitySnapshot>({ id: existing.entity_id })
+      if (!current) throw new BranchEditConflictError()
+      assertBranchExpectedState(current, existing.expected_entity_state_json)
+    } catch (error) {
+      if (error instanceof BranchEditConflictError) {
+        return c.json({ success: false, error: error.message, code: error.code, conflict: true }, 409)
+      }
+      throw error
+    }
+  }
   const ok = await resubmitPendingAction(c.env, id, { requestedBy: Number(user.id), payloadJson, summary })
   // One response for "not yours", "doesn't exist" and "not in a rejected
   // state" -- distinguishing them would confirm the existence of other
@@ -185,6 +203,16 @@ app.post('/:id/approve', async (c) => {
     return c.json({ error: 'Full product removal permission is required to approve this request.' }, 403)
   }
   if (row.status !== 'open') {
+    if (row.status === 'approved' && row.section === 'branches' && row.action_type === 'update' && row.entity_type === 'branch') {
+      try {
+        const receipt = await recoverApprovedBranchAction(c.env, row, user.id)
+        if (receipt) return c.json({ success: true, data: receipt, replayed: true })
+      } catch (error) {
+        if (error instanceof BranchApprovalReceiptError) return c.json({ success: false, error: error.message, code: error.code,
+          ...(error.code === 'unknown_outcome' ? { action: 'retry_same_request' } : {}) }, error.status)
+        throw error
+      }
+    }
     if (productRemoveApproval && row.status === 'approved') {
       return c.json({ success: true, data: row, replayed: true })
     }
@@ -195,8 +223,12 @@ app.post('/:id/approve', async (c) => {
   try {
     const outcome = await applyApprovedPendingAction(c.env, row, { id: user.id, name: actorSnapshot(user) }, user,
       (promise) => c.executionCtx.waitUntil(promise))
+    if (outcome.replayedBranchAction) return c.json({ success: true, data: outcome.replayedBranchAction, replayed: true })
     pendingActionMarkedAtomically = outcome.pendingActionMarkedAtomically
   } catch (err) {
+    if (err instanceof BranchApprovalReceiptError) return c.json({ success: false, error: err.message, code: err.code,
+      ...(err.code === 'unknown_outcome' ? { action: 'retry_same_request' } : {}) }, err.status)
+    if (err instanceof BranchEditConflictError) return c.json({ success: false, error: err.message, code: err.code, conflict: true }, 409)
     if (err instanceof ProductMoneyWriteError) return c.json({ error: err.message, code: err.code }, err.status as 400 | 409)
     if (err instanceof NoReviewApplierError) {
       return c.json({ error: err.message, code: 'no_review_applier' }, 501)

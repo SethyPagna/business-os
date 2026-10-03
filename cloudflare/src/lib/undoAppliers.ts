@@ -10,8 +10,7 @@ import { hasRecordedSaleMoneyPrecision } from './saleMoneyPrecision'
 import { broadcast } from '../durable-objects/broadcastHub'
 import {
   BRANCH_REPLAY_ROW_SQL,
-  OTHER_CANONICAL_BRANCH_SQL,
-  branchReplayDefaultStatements,
+  otherCanonicalBranchSql,
   branchReplayDropsDefault,
   branchReplayStateGuardStatement,
   branchUpdateStatements,
@@ -3266,9 +3265,8 @@ const APPLIERS: Record<string, UndoApplierDef> = {
   // one applier serves both directions -- the direction only decides which
   // stored payload the route hands in.
   'branch.update': {
-    // Same section the live PUT /branches/:id gates on (getPermissionTier
-    // (user, 'branches') in routes/branches.ts).
     permission: 'branches',
+    action: 'edit',
     run: async (payload, ctx) => {
       const db = getDb(ctx.env)
       const id = Number(payload.id || 0)
@@ -3292,15 +3290,17 @@ const APPLIERS: Record<string, UndoApplierDef> = {
         throw new UndoConflictError(`This branch was edited after this change (${stale.join(', ')}), so it can no longer be ${verb} without overwriting that edit. Nothing was changed.`, UNDO_RECORD_CHANGED_CODE)
       }
       const replayFields = completeBranchReplayFields(fields, existing)
+      const directory = Number(existing.is_active) === 0
+        ? await db.prepare('SELECT * FROM branches ORDER BY id').all<BranchReplayRow>()
+        : []
       if (branchReplayDropsDefault(replayFields, existing)
-        && !(await db.prepare(OTHER_CANONICAL_BRANCH_SQL).get<{ id: number }>([id]))) {
+        && !(await db.prepare(otherCanonicalBranchSql(existing)).get<{ id: number }>([id]))) {
         throw new UndoConflictError(`This change cannot be ${verb}: it would leave no default branch. Nothing was changed.`, UNDO_NO_DEFAULT_BRANCH_CODE)
       }
       try {
         await db.batch([
           branchReplayStateGuardStatement(id, expected),
-          ...branchUpdateStatements(id, replayFields, existing),
-          ...branchReplayDefaultStatements(id, replayFields, existing),
+          ...branchUpdateStatements(id, replayFields, existing, directory),
         ])
       } catch (error) {
         // Every guard in this batch (identity, staleness, one default) aborts

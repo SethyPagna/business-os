@@ -17,6 +17,7 @@ import {
   branchCanTransferBetween,
   branchCanSell,
   branchRoleFromName,
+  branchRole,
 } from '../src/utils/branchRoles.ts'
 
 let failed = 0
@@ -41,11 +42,13 @@ const asRunnable = workerSource
   .replace(/export type BranchRole[^\n]*\n/, '')
   .replace(/: BranchRole/g, '')
   .replace(/\(name: unknown\)/g, '(name)')
+  .replace(/\(branch: unknown\)/g, '(branch)')
   .replace(/\(fromName: unknown, toName: unknown\)/g, '(fromName, toName)')
   .replace(/: boolean/g, '')
   .replace(/export function/g, 'function')
 const worker = new Function(`${asRunnable}
-return { branchRoleFromName, branchCanSell, branchCanBeTransferSource, branchCanBeTransferDestination, branchCanTransferBetween }`)() as {
+return { branchRoleFromName, branchRole, branchCanSell, branchCanBeTransferSource, branchCanBeTransferDestination, branchCanTransferBetween }`)() as {
+  branchRole: (branch: unknown) => string
   branchRoleFromName: (name: unknown) => string
   branchCanSell: (name: unknown) => boolean
   branchCanBeTransferSource: (name: unknown) => boolean
@@ -61,6 +64,23 @@ const NAMES: unknown[] = [
   'warehouse', 'Warehouse', '  WAREHOUSE ', 'warehouse 2', 'Warehouses',
   'Depot', 'Kiosk', '', '   ', null, undefined, 0, 12,
 ]
+
+runTest('explicit roles agree across packages and cannot borrow authority from the display name', () => {
+  for (const [row, expected] of [
+    [{ name: 'LC Store', role: 'shop' }, 'shop'],
+    [{ name: 'Shop', role: 'warehouse' }, 'warehouse'],
+    [{ name: 'Shop', role: 'invalid' }, 'other'],
+    [{ name: 'Shop', role: '' }, 'other'],
+    [{ name: 'Shop', role: ['shop'] }, 'other'],
+    [{ name: 'Shop', role: { toString: () => 'shop' } }, 'other'],
+    [{ name: 'Shop', role: true }, 'other'],
+    [{ name: 'Shop', role: null }, 'shop'],
+  ] as const) {
+    assert.equal(branchRole(row), expected)
+    assert.equal(worker.branchRole(row), expected)
+    assert.equal(worker.branchCanSell(row), branchCanSell(row))
+  }
+})
 
 runTest('both packages answer identically for every branch-name shape', () => {
   for (const name of NAMES) {
@@ -103,9 +123,7 @@ runTest('the rule itself: stock moves both ways between opposite canonical roles
   assert.equal(branchCanTransferBetween('Depot', 'Shop'), false)
 })
 
-runTest('nothing keys on is_default, or on any column other than the name', () => {
-  // is_default only says which branch a blank picker preselects. Both copies
-  // must be a pure function OF THE NAME -- no other field may appear.
+runTest('operational roles do not derive authority from default flags or ids', () => {
   for (const source of [workerSource, read('../src/utils/branchRoles.ts')]) {
     const code = source.split('export type BranchRole')[1] || ''
     assert.doesNotMatch(code, /is_default/)

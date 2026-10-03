@@ -24,11 +24,11 @@ import { getActionTier } from '../lib/permissions'
 import { maybeQueueForReview } from '../lib/reviewGate'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from '../lib/cache'
-import { audit } from '../lib/audit'
+import { audit, buildAuditStatement } from '../lib/audit'
 import { formatTransferTelegramLines, sendTelegramEvent } from '../lib/telegram'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
 import { findIdentityMatch, findIdentityMatches, type ProductIdentityRow } from '../lib/productIdentity'
-import { branchUpdateStatements } from '../lib/branchWrites'
+import { branchUpdateStatements, branchEditEtag, assertBranchEditEtag, branchExpectedStateJson, BranchEditConflictError, isBranchEditGuardError } from '../lib/branchWrites'
 import {
   CANONICAL_BRANCH_CONFIGURATION_CODE,
   CANONICAL_BRANCH_CONFIGURATION_ERROR,
@@ -42,6 +42,7 @@ import {
   resolveCanonicalTransferPair,
   type CanonicalTransferBranchRow,
   type CanonicalTransferPair,
+  type BranchIdentitySnapshot,
 } from '../lib/canonicalBranchIdentity'
 // Transfers run in either direction between Shop and Warehouse. The exact
 // opposite-role rule lives with the canonical branch roles rather than being
@@ -125,8 +126,8 @@ type BranchInput = {
 
 app.get('/', async (c) => {
   const db = getDb(c.env)
-  const branches = await db.prepare('SELECT * FROM branches ORDER BY is_default DESC, name').all()
-  return c.json(branches)
+  const branches = await db.prepare('SELECT * FROM branches ORDER BY is_default DESC, name').all<BranchIdentitySnapshot>()
+  return c.json(await Promise.all(branches.map(async branch => ({ ...branch, edit_etag: await branchEditEtag(branch) }))))
 })
 
 // GET /api/branches/summary -- was returning an ARRAY of per-branch rows
@@ -1014,8 +1015,8 @@ app.put('/:id', async (c) => {
   const body = await c.req.json<BranchInput & Record<string, unknown>>()
   const db = getDb(c.env)
 
-  const current = await db.prepare('SELECT id, name, is_active, updated_at FROM branches WHERE id = ?')
-    .get<{ id: number; name: string; is_active: number; updated_at: string }>([id])
+  const current = await db.prepare('SELECT * FROM branches WHERE id = ?')
+    .get<BranchIdentitySnapshot & { updated_at: string }>([id])
   try {
     assertUpdatedAtMatch('branch', current, getExpectedUpdatedAt(body))
   } catch (error) {
@@ -1026,8 +1027,11 @@ app.put('/:id', async (c) => {
     throw error
   }
   if (!current) return c.json({ error: 'Branch not found' }, 404)
+  const directory = Number(current.is_active) === 0
+    ? await db.prepare('SELECT * FROM branches ORDER BY id').all<BranchIdentitySnapshot>()
+    : []
   try {
-    prepareCanonicalBranchUpdate(current, body)
+    prepareCanonicalBranchUpdate(current, body, directory)
   } catch (error) {
     if (error instanceof CanonicalBranchIdentityError) {
       return c.json({ error: CANONICAL_BRANCH_IDENTITY_ERROR, code: CANONICAL_BRANCH_IDENTITY_CODE }, 409)
@@ -1035,30 +1039,43 @@ app.put('/:id', async (c) => {
     throw error
   }
 
-  // Review Required tier: the conflict check above already confirmed the
-  // request is against the current row, so queueing here is safe to
-  // replay later exactly as-is -- same reasoning as the create path
-  // above. Runs AFTER the conflict check (unlike products.ts's update,
-  // which has no such check to run) so a stale edit is rejected up front
-  // rather than queued and only discovered wrong at approval time.
-  const pendingId = await maybeQueueForReview(c.env, user, 'branches', {
-    actionType: 'update',
-    entityType: 'branch',
-    entityId: Number(id),
-    payload: body,
-    summary: `Update branch #${id}${body.name ? ` "${body.name}"` : ''}`,
-  })
-  if (pendingId != null) {
-    return c.json({ success: true, pending: true, pendingActionId: pendingId }, 202)
+  let committedBranch: BranchIdentitySnapshot | undefined
+  try {
+    await assertBranchEditEtag(current, body.expectedEditEtag)
+    if (getActionTier(user, 'branches', 'edit') === 'review') {
+      const columns = await db.prepare('PRAGMA table_info(pending_actions)').all<{ name: string }>()
+      if (!columns.some(column => column.name === 'expected_entity_state_json')) throw new BranchEditConflictError('branch_review_schema_required')
+    }
+    const pendingId = await maybeQueueForReview(c.env, user, 'branches', {
+      actionType: 'update',
+      entityType: 'branch',
+      entityId: Number(id),
+      payload: body,
+      expectedEntityStateJson: branchExpectedStateJson(current),
+      summary: `Update branch #${id}${body.name ? ` "${body.name}"` : ''}`,
+    })
+    if (pendingId != null) return c.json({ success: true, pending: true, pendingActionId: pendingId }, 202)
+    const statements = [...branchUpdateStatements(id, body, current, directory), ordinaryBusinessMaintenanceGuard,
+      buildAuditStatement(user?.id ?? null, actorSnapshot(user), 'update', 'branch', id, { name: current.name }),
+      { sql: 'SELECT * FROM branches WHERE id=@branch_response_id', params: { branch_response_id: id } }]
+    let results: Awaited<ReturnType<typeof db.batchOnce>>
+    try {
+      results = await db.batchOnce(statements)
+    } catch (error) {
+      if (isBranchEditGuardError(error)) throw error
+      return c.json({ success: false, code: 'branch_edit_outcome_unknown', outcome: 'unknown', action: 'refresh_before_edit',
+        error: 'The result of this branch edit could not be confirmed. It may have been saved. Refresh Branches and check the details before making another edit.' }, 503)
+    }
+    committedBranch = results[results.length - 1]?.results?.[0] as BranchIdentitySnapshot | undefined
+  } catch (error) {
+    const conflict = error instanceof BranchEditConflictError ? error : isBranchEditGuardError(error) ? new BranchEditConflictError() : null
+    if (conflict) return c.json({ success: false, error: conflict.message, code: conflict.code, conflict: true }, 409)
+    throw error
   }
 
-  // Field write shared with the server-side undo/redo applier -- see
-  // lib/branchWrites.ts for why this is one definition, not two.
-  await db.batch([...branchUpdateStatements(id, body, current), ordinaryBusinessMaintenanceGuard])
-
-  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'update', 'branch', id, { name: current.name })
   c.executionCtx.waitUntil(broadcast(c.env, 'branches', { action: 'update', id }))
-  return c.json({})
+  if (!committedBranch) throw new Error('The committed branch response is unavailable.')
+  return c.json({ success: true, branch: { ...committedBranch, edit_etag: await branchEditEtag(committedBranch) } })
 })
 
 app.delete('/:id', async (c) => {

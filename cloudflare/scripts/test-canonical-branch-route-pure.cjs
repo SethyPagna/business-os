@@ -65,20 +65,27 @@ function wrapDb(db) {
         beforeBatch = null
         inject(db)
       }
-      db.transaction(() => {
+      const results = db.transaction(() => {
+        const results = []
         for (const item of statements) {
           const statement = db.prepare(item.sql)
-          if (item.params == null) statement.run()
-          else if (Array.isArray(item.params)) statement.run(...item.params)
-          else statement.run(item.params)
+          const values = item.params == null ? [] : Array.isArray(item.params) ? item.params : [item.params]
+          if (statement.reader) results.push({ results: statement.all(...values), success: true })
+          else results.push({ results: [], meta: statement.run(...values), success: true })
         }
+        return results
       })()
-      return []
+      return results
     },
+    async batchOnce(statements) { return this.batch(statements) },
   }
 }
 
 const dbCompat = () => wrapDb(sqlite)
+const realAudit = loadModule('lib/audit.ts', id => {
+  if (id === './db') return { getDb: dbCompat }
+  throw new Error(`unexpected audit import ${id}`)
+})
 const branchGuards = loadModule('lib/branchRoleGuards.ts', (id) => {
   if (id === './branchRoles') return roles
   throw new Error(`unexpected guard import ${id}`)
@@ -119,7 +126,7 @@ const branchRoute = loadModule('routes/branches.ts', (id) => {
     broadcast: async (...args) => { broadcasts.push(args) },
   }
   if (id === '../lib/cache') return { bumpVersion: async () => {} }
-  if (id === '../lib/audit') return { audit: async (...args) => { audits.push(args) } }
+  if (id === '../lib/audit') return { ...realAudit, audit: async (...args) => { audits.push(args) } }
   if (id === '../lib/transferOperation') return loadModule('lib/transferOperation.ts', dep => {
     if (dep === './movementCostSnapshot') return loadModule('lib/movementCostSnapshot.ts', require)
     if (dep === './db') return {getDb:dbCompat}
@@ -135,12 +142,7 @@ const branchRoute = loadModule('routes/branches.ts', (id) => {
   })
   if (id === '../lib/transferOperationReceipt') return transferReceipts
   if (id === '../lib/telegram') return { formatTransferTelegramLines: noop, sendTelegramEvent: async () => {} }
-  if (id === '../lib/conflictControl') return {
-    assertUpdatedAtMatch: () => {},
-    getExpectedUpdatedAt: () => undefined,
-    writeConflictResponse: (error) => ({ body: { error: error.message }, status: 409 }),
-    WriteConflictError: class WriteConflictError extends Error {},
-  }
+  if (id === '../lib/conflictControl') return loadModule('lib/conflictControl.ts', require)
   if (id === '../lib/productIdentity') return { findIdentityMatch: async () => null, findIdentityMatches: async () => new Map() }
   if (id === '../lib/productBatches') return {
     decrementBatchStockStrictStatement: noop,
@@ -185,6 +187,10 @@ function reset() {
 }
 
 async function request(method, url, body) {
+  if (method === 'PUT' && /^\/\d+$/.test(url) && body && !Object.prototype.hasOwnProperty.call(body, 'expectedEditEtag')) {
+    const row = sqlite.prepare('SELECT * FROM branches WHERE id=?').get(Number(url.slice(1)))
+    if (row) body = { ...body, expectedEditEtag: await writes.branchEditEtag(row) }
+  }
   const response = await app.request(url, {
     method,
     headers: { 'Content-Type': 'application/json' },
@@ -202,6 +208,26 @@ async function check(name, fn) {
 }
 
 async function main() {
+  await check('retired description saves and forbids lifecycle/default changes before review', async () => {
+    sqlite.exec(`UPDATE branches SET name='Old Shop',role='shop',canonical_key='shop',is_active=0,is_default=0,successor_branch_id=2 WHERE id=1;
+      UPDATE branches SET name='LC Store',role='shop',canonical_key='warehouse',is_default=1 WHERE id=2;`)
+    const saved = await request('PUT', '/1', { name: 'Old Shop', notes: 'legacy description', is_active: 0, is_default: 0 })
+    assert.equal(saved.status, 200)
+    assert.equal(sqlite.prepare('SELECT notes FROM branches WHERE id=1').get().notes, 'legacy description')
+    for (const mutation of [{ is_active: 1 }, { is_default: 1 }, { successor_branch_id: null }, { canonical_key: 'warehouse' }]) {
+      const queuedBefore = queueCalls
+      const result = await request('PUT', '/1', mutation)
+      assert.equal(result.status, 409)
+      assert.equal(result.json.code, identity.CANONICAL_BRANCH_IDENTITY_CODE)
+      assert.equal(queueCalls, queuedBefore)
+    }
+    const before = sqlite.prepare('SELECT * FROM branches ORDER BY id').all()
+    const stale = await request('PUT', '/1', { notes: 'stale', expected_updated_at: '2000-01-01' })
+    assert.equal(stale.status, 409)
+    assert.equal(stale.json.code, 'write_conflict')
+    assert.deepEqual(sqlite.prepare('SELECT * FROM branches ORDER BY id').all(), before)
+  })
+
   await check('full-authority create and delete return 409 without queue or write', async () => {
     const before = sqlite.prepare('SELECT * FROM branches ORDER BY id').all()
     for (const [method, url, body] of [['POST', '/', { name: 'Depot' }], ['DELETE', '/2', null]]) {
@@ -236,7 +262,8 @@ async function main() {
     assert.equal(sqlite.prepare('SELECT is_default FROM branches WHERE id=1').get().is_default, 0)
     assert.equal(queueCalls, 1)
     assert.equal(batchCalls, 1)
-    assert.equal(audits.length, 1)
+    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM audit_logs WHERE entity='branch' AND action='update'").get().n, 1)
+    assert.equal(audits.length, 0)
   })
 
   await check('rename and deactivate return 409 before queue or write', async () => {
@@ -254,7 +281,7 @@ async function main() {
   await check('interposed identity rename or deletion aborts all route effects', async () => {
     beforeBatch = (db) => db.prepare("UPDATE branches SET name='Changed elsewhere' WHERE id=1").run()
     let result = await request('PUT', '/1', { name: 'Shop', location: 'raced', is_default: 1, is_active: 1 })
-    assert.equal(result.status, 500)
+    assert.equal(result.status, 409)
     assert.deepStrictEqual(sqlite.prepare('SELECT name,location FROM branches WHERE id=1').get(), { name: 'Changed elsewhere', location: 'shop old' })
     assert.equal(audits.length, 0)
     assert.equal(broadcasts.length, 0)
@@ -262,7 +289,7 @@ async function main() {
     reset()
     beforeBatch = (db) => db.prepare('DELETE FROM branches WHERE id=1').run()
     result = await request('PUT', '/1', { name: 'Shop', location: 'raced', is_default: 1, is_active: 1 })
-    assert.equal(result.status, 500)
+    assert.equal(result.status, 409)
     assert.equal(sqlite.prepare('SELECT COUNT(*) AS count FROM branches WHERE id=1').get().count, 0)
     assert.equal(sqlite.prepare('SELECT is_default FROM branches WHERE id=2').get().is_default, 0, 'default clear rolled back')
     assert.equal(audits.length, 0)

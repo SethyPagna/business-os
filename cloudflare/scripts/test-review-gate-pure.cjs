@@ -94,6 +94,7 @@ const db = {
     }
     return results
   },
+  async batchOnce(items) { return this.batch(items) },
   exec(sql) {
     rawDb.exec(sql)
   },
@@ -136,7 +137,9 @@ const { toDbBool } = loadReal('lib/db.ts', { './importMaintenanceFence': {
     ImportMaintenanceFenceError: class ImportMaintenanceFenceError extends Error {},
   } })
 const dbStub = { './db': { getDb: () => db, toDbBool }, '../lib/db': { getDb: () => db, toDbBool } }
+const realAudit = loadReal('lib/audit.ts', dbStub)
 const auditStub = { './audit': { changedFields: () => null, auditChangeColumns: () => ({ old_value: null, new_value: null }), isSecretShapedAuditKey: () => false, audit: async () => {} }, '../lib/audit': { changedFields: () => null, auditChangeColumns: () => ({ old_value: null, new_value: null }), isSecretShapedAuditKey: () => false, audit: async () => {} } }
+for (const stub of Object.values(auditStub)) stub.buildAuditStatement = realAudit.buildAuditStatement
 const broadcastStub = {
   './broadcastHub': { broadcast: async () => {} },
   '../durable-objects/broadcastHub': { broadcast: async () => {} },
@@ -229,6 +232,7 @@ const reviewApply = loadReal('lib/reviewApply.ts', {
   './productWrites': productWrites,
   './branchWrites': branchWrites,
   './canonicalBranchIdentity': canonicalBranchIdentity,
+  './conflictControl': loadReal('lib/conflictControl.ts'),
   './branchRoleGuards': branchRoleGuards,
   './permissions': permissions,
   './productImagePermission': productImagePermission,
@@ -263,6 +267,7 @@ const feesRoute = loadReal('routes/fees.ts', {
 })
 
 const reviewQueueRoute = loadReal('routes/reviewQueue.ts', {
+  ...dbStub,
   '../lib/acquisitionCostAccess': acquisitionCostAccess,
   '../lib/productWrites': productWrites,
   '../lib/actorSnapshot': actorSnapshotKernel,
@@ -272,6 +277,7 @@ const reviewQueueRoute = loadReal('routes/reviewQueue.ts', {
   ...broadcastStub,
   '../lib/pendingActions': pendingActions,
   '../lib/reviewApply': reviewApply,
+  '../lib/branchWrites': branchWrites,
   '../lib/productImagePermission': productImagePermission,
   '../lib/productDelete': productDeleteStub,
 })
@@ -496,6 +502,7 @@ async function main() {
   })
 
   await check('historical branch create/delete/identity actions stay open and cannot bypass the fixed pair', async () => {
+    db.prepare(`INSERT INTO users(id,username,name,password,permissions,is_active) VALUES(71,'branch-requester','Branch requester','fixture','{"branches":"review"}',1)`).run()
     const shopId = db.prepare(`INSERT INTO branches (name, location, is_default, is_active) VALUES ('Shop', 'before', 1, 1)`).run().lastInsertRowid
     const attempts = [
       { action: 'create', entityId: null, payload: { name: 'Test Branch' } },
@@ -505,9 +512,10 @@ async function main() {
     ]
     for (const attempt of attempts) {
       const inserted = db.prepare(`
-        INSERT INTO pending_actions (section, action_type, entity_type, entity_id, payload_json, status)
-        VALUES ('branches', @action, 'branch', @entityId, @payload, 'open')
-      `).run({ action: attempt.action, entityId: attempt.entityId, payload: JSON.stringify(attempt.payload) })
+        INSERT INTO pending_actions (section, action_type, entity_type, entity_id, payload_json, status, requested_by, expected_entity_state_json)
+        VALUES ('branches', @action, 'branch', @entityId, @payload, 'open',71,@baseline)
+      `).run({ action: attempt.action, entityId: attempt.entityId, payload: JSON.stringify(attempt.payload),
+        baseline: branchWrites.branchExpectedStateJson(db.prepare('SELECT * FROM branches WHERE id=@id').get({ id: shopId })) })
       const { status, json } = await req(reviewApp, REVIEWER_USER, 'POST', `/${inserted.lastInsertRowid}/approve`)
       assert.strictEqual(status, 500, JSON.stringify(json))
       assert.strictEqual(json.error, canonicalBranchIdentity.CANONICAL_BRANCH_IDENTITY_ERROR)
@@ -523,9 +531,10 @@ async function main() {
     const shop = db.prepare(`SELECT id FROM branches WHERE lower(trim(name))='shop' ORDER BY id DESC LIMIT 1`).get()
     assert.ok(shop)
     const inserted = db.prepare(`
-      INSERT INTO pending_actions (section, action_type, entity_type, entity_id, payload_json, status)
-      VALUES ('branches', 'update', 'branch', @entityId, @payload, 'open')
-    `).run({ entityId: shop.id, payload: JSON.stringify({ name: 'Shop', is_active: 1, location: 'approved metadata' }) })
+      INSERT INTO pending_actions (section, action_type, entity_type, entity_id, payload_json, status,requested_by,expected_entity_state_json)
+      VALUES ('branches', 'update', 'branch', @entityId, @payload, 'open',71,@baseline)
+    `).run({ entityId: shop.id, payload: JSON.stringify({ name: 'Shop', is_active: 1, location: 'approved metadata' }),
+      baseline: branchWrites.branchExpectedStateJson(db.prepare('SELECT * FROM branches WHERE id=@id').get({ id: shop.id })) })
     const { status, json } = await req(reviewApp, REVIEWER_USER, 'POST', `/${inserted.lastInsertRowid}/approve`)
     assert.strictEqual(status, 200, JSON.stringify(json))
     assert.strictEqual(json.data.status, 'approved')
@@ -534,6 +543,17 @@ async function main() {
     })
   })
 
+  await check('legacy branch approval returns conflict and preserves pending history and metadata', async () => {
+    const shop = db.prepare(`SELECT * FROM branches WHERE lower(trim(name))='shop' ORDER BY id DESC LIMIT 1`).get()
+    const inserted = db.prepare(`INSERT INTO pending_actions(section,action_type,entity_type,entity_id,payload_json,status,requested_by)
+      VALUES('branches','update','branch',@id,'{"notes":"must not apply"}','open',71)`).run({ id: shop.id })
+    const pending = db.prepare('SELECT * FROM pending_actions WHERE id=@id').get({ id: inserted.lastInsertRowid })
+    const { status, json } = await req(reviewApp, REVIEWER_USER, 'POST', `/${pending.id}/approve`)
+    assert.strictEqual(status, 409, JSON.stringify(json))
+    assert.strictEqual(json.code, 'branch_edit_conflict')
+    assert.deepStrictEqual(db.prepare('SELECT * FROM pending_actions WHERE id=@id').get({ id: pending.id }), pending)
+    assert.deepStrictEqual(db.prepare('SELECT * FROM branches WHERE id=@id').get({ id: shop.id }), shop)
+  })
   console.log(`\n${passed} check(s) passed.`)
 }
 

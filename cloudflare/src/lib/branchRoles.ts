@@ -1,19 +1,5 @@
-// The two canonical branches, in one place.
-//
-// This lineage has no `kind`/`role` column on `branches`: the only
-// discriminator that exists anywhere is the branch NAME, matched
-// case-insensitively after trimming -- see cloudflare/src/lib/
-// stockActionCatalog.ts's `LOWER(TRIM(name)) IN ('shop', 'warehouse')`,
-// which is the rule the unified stock-action importer has always used.
-// `is_default` is NOT that discriminator (it only says which branch a
-// blank picker preselects), so nothing here may key on it.
-//
-// `shop` rings every sale. `warehouse` holds stock and never sells.
-// Stock can move between the two canonical roles in either direction,
-// while selling remains Shop-only. Both halves of
-// the app enforce that, so this file has a byte-for-byte twin at
-// frontend/src/utils/branchRoles.ts -- keep the two in step (pinned by
-// frontend/tests/branchRoleParity.test.ts).
+// Explicit roles survive display-name changes; legacy rows use the name.
+// Keep the frontend twin identical, verified by branchRoleParity.test.ts.
 export type BranchRole = 'shop' | 'warehouse' | 'other'
 
 export function branchRoleFromName(name: unknown): BranchRole {
@@ -23,12 +9,21 @@ export function branchRoleFromName(name: unknown): BranchRole {
   return 'other'
 }
 
+export function branchRole(branch: unknown): BranchRole {
+  if (branch !== null && typeof branch === 'object') {
+    const role = Reflect.get(branch, 'role')
+    if (role != null && typeof role !== 'string') return 'other'
+    return branchRoleFromName(role == null ? Reflect.get(branch, 'name') : role)
+  }
+  return branchRoleFromName(branch)
+}
+
 // A branch that may appear on a SALE line (POS, add-items-to-sale, a
-// replacement line). Sales are intentionally Shop-only: stock held at the
+// replacement line). Sales require the shop role: stock held at the
 // Warehouse or any other/missing branch must be transferred to the canonical
 // Shop first. Unknown and blank names are refused rather than guessed.
 export function branchCanSell(name: unknown): boolean {
-  return branchRoleFromName(name) === 'shop'
+  return branchRole(name) === 'shop'
 }
 
 // Either canonical branch can be an endpoint of a transfer. Direction is
@@ -36,16 +31,16 @@ export function branchCanSell(name: unknown): boolean {
 // valid pair. Unknown and historical branch names remain visible but cannot
 // become new stock-action identities.
 export function branchCanBeTransferSource(name: unknown): boolean {
-  return branchRoleFromName(name) !== 'other'
+  return branchRole(name) !== 'other'
 }
 
 export function branchCanBeTransferDestination(name: unknown): boolean {
-  return branchRoleFromName(name) !== 'other'
+  return branchRole(name) !== 'other'
 }
 
 export function branchCanTransferBetween(fromName: unknown, toName: unknown): boolean {
-  const fromRole = branchRoleFromName(fromName)
-  const toRole = branchRoleFromName(toName)
+  const fromRole = branchRole(fromName)
+  const toRole = branchRole(toName)
   return (fromRole === 'shop' && toRole === 'warehouse')
     || (fromRole === 'warehouse' && toRole === 'shop')
 }

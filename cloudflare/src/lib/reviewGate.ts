@@ -34,6 +34,7 @@ export interface MaybeQueueForReviewInput {
   entityType: string
   entityId?: number | null
   payload: unknown
+  expectedEntityStateJson?: string
   summary?: string | null
 }
 
@@ -60,6 +61,7 @@ export async function maybeQueueForReview(
     entityType: input.entityType,
     entityId: input.entityId ?? null,
     payload: input.payload,
+    expectedEntityStateJson: input.expectedEntityStateJson,
     summary: input.summary ?? null,
     requestedBy: user?.id ?? null,
     requestedByName: actorSnapshot(user),

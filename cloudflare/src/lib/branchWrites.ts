@@ -1,6 +1,7 @@
 import { toDbBool } from './db'
 import {
   canonicalBranchIdentityGuardStatement,
+  CanonicalBranchIdentityError,
   prepareCanonicalBranchUpdate,
   type BranchIdentitySnapshot,
 } from './canonicalBranchIdentity'
@@ -23,6 +24,101 @@ export interface BranchWriteFields {
   notes?: unknown
   is_default?: unknown
   is_active?: unknown
+  role?: unknown
+  canonical_key?: unknown
+  successor_branch_id?: unknown
+}
+
+const BRANCH_EDIT_REQUIRED_FIELDS = ['id', 'name', 'location', 'phone', 'manager', 'notes', 'is_default', 'is_active', 'updated_at'] as const
+const BRANCH_EDIT_OPTIONAL_FIELDS = ['role', 'canonical_key', 'successor_branch_id'] as const
+export type BranchEditState = Record<string, string | number | null>
+
+export class BranchEditConflictError extends Error {
+  readonly status = 409
+  readonly conflict = true
+  constructor(readonly code = 'branch_edit_conflict') {
+    super(code === 'branch_review_schema_required'
+      ? 'Branch review is not ready. Refresh after the update and try again.'
+      : 'This branch edit can no longer be verified. Refresh Branches and submit a new edit.')
+    this.name = 'BranchEditConflictError'
+  }
+}
+
+export class BranchApprovalReceiptError extends Error {
+  constructor(readonly code: 'unknown_outcome' | 'review_permission_revoked' = 'unknown_outcome') {
+    super(code === 'unknown_outcome'
+      ? 'The result could not be confirmed. Retry the same approval request.'
+      : 'Your permission to review has changed. This approval may already have completed. Refresh the review queue.')
+    this.name = 'BranchApprovalReceiptError'
+  }
+  get status(): 403 | 503 { return this.code === 'unknown_outcome' ? 503 : 403 }
+}
+
+export function captureBranchEditState(row: BranchIdentitySnapshot): BranchEditState {
+  const source = row as Record<string, unknown>
+  const state: BranchEditState = {}
+  for (const field of [...BRANCH_EDIT_REQUIRED_FIELDS, ...BRANCH_EDIT_OPTIONAL_FIELDS]) {
+    if (!Object.prototype.hasOwnProperty.call(source, field)) {
+      if ((BRANCH_EDIT_REQUIRED_FIELDS as readonly string[]).includes(field)) throw new BranchEditConflictError()
+      continue
+    }
+    const value = source[field]
+    if (field === 'id') {
+      const id = Number(value)
+      if (!Number.isSafeInteger(id) || id <= 0) throw new BranchEditConflictError()
+      state[field] = id
+    } else if (field === 'is_default' || field === 'is_active') {
+      if (value !== null && value !== 0 && value !== 1) throw new BranchEditConflictError()
+      state[field] = value
+    } else if (field === 'successor_branch_id') {
+      if (value !== null && (typeof value !== 'number' || !Number.isSafeInteger(value) || value <= 0)) throw new BranchEditConflictError()
+      state[field] = value as number | null
+    } else {
+      if (value !== null && typeof value !== 'string') throw new BranchEditConflictError()
+      state[field] = value
+    }
+  }
+  return state
+}
+
+export function branchExpectedStateJson(row: BranchIdentitySnapshot): string {
+  const state = captureBranchEditState(row)
+  return JSON.stringify({ kind: 'branch-edit-state', version: 1, entity_id: state.id, state })
+}
+
+export function assertBranchExpectedState(row: BranchIdentitySnapshot, stored: unknown): void {
+  try {
+    if (typeof stored !== 'string') throw new BranchEditConflictError()
+    const parsed = JSON.parse(stored)
+    if (!parsed || parsed.kind !== 'branch-edit-state' || parsed.version !== 1 || parsed.entity_id !== Number(row.id)
+      || !parsed.state || Array.isArray(parsed.state)
+      || JSON.stringify(captureBranchEditState(parsed.state)) !== JSON.stringify(captureBranchEditState(row))) throw new BranchEditConflictError()
+  } catch { throw new BranchEditConflictError() }
+}
+
+export async function branchEditEtag(row: BranchIdentitySnapshot): Promise<string> {
+  const bytes = new TextEncoder().encode(branchExpectedStateJson(row))
+  const digest = await crypto.subtle.digest('SHA-256', bytes)
+  return `branch-v1-${Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('')}`
+}
+
+export async function assertBranchEditEtag(row: BranchIdentitySnapshot, expected: unknown): Promise<void> {
+  if (typeof expected !== 'string' || expected !== await branchEditEtag(row)) throw new BranchEditConflictError()
+}
+
+export function branchEditStateGuardStatement(row: BranchIdentitySnapshot): { sql: string; params: Record<string, unknown> } {
+  const state = captureBranchEditState(row)
+  const params = Object.fromEntries(Object.entries(state).map(([key, value]) => [`branch_state_${key}`, value]))
+  const terms = Object.keys(state).map(key => `${key} IS @branch_state_${key}`)
+  params.branch_state_schema_mask = BRANCH_EDIT_OPTIONAL_FIELDS.reduce((mask, field, index) =>
+    mask + (Object.prototype.hasOwnProperty.call(state, field) ? 2 ** index : 0), 0)
+  terms.push(`(SELECT COALESCE(SUM(CASE name WHEN 'role' THEN 1 WHEN 'canonical_key' THEN 2 WHEN 'successor_branch_id' THEN 4 ELSE 0 END),0)
+    FROM pragma_table_info('branches')) = @branch_state_schema_mask`)
+  return { sql: `INSERT INTO branches(name) SELECT NULL WHERE NOT EXISTS (SELECT 1 FROM branches WHERE ${terms.join(' AND ')})`, params }
+}
+
+export function isBranchEditGuardError(error: unknown): boolean {
+  return /NOT NULL constraint failed: branches\.name/i.test(String(error))
 }
 
 function branchNameSnapshotStatements(id: string | number): Array<{ sql: string; params?: Record<string, unknown> }> {
@@ -43,33 +139,36 @@ export function branchUpdateStatements(
   id: string | number,
   fields: BranchWriteFields,
   currentIdentity: BranchIdentitySnapshot,
+  directory: readonly BranchIdentitySnapshot[] = [],
 ): Array<{ sql: string; params?: Record<string, unknown> }> {
-  const identity = prepareCanonicalBranchUpdate(currentIdentity, fields)
-  const defaultFlag = toDbBool(fields.is_default, 0)
+  const identity = prepareCanonicalBranchUpdate(currentIdentity, fields, directory)
+  const writesDefault = Object.prototype.hasOwnProperty.call(fields, 'is_default')
+  const defaultFlag = toDbBool(writesDefault ? fields.is_default : currentIdentity.is_default, 0)
+  if (!identity.is_active && defaultFlag) throw new CanonicalBranchIdentityError()
   const statements: Array<{ sql: string; params?: Record<string, unknown> }> = [
-    canonicalBranchIdentityGuardStatement(currentIdentity),
+    canonicalBranchIdentityGuardStatement(currentIdentity, directory),
+    branchEditStateGuardStatement(currentIdentity),
   ]
-  if (defaultFlag) {
+  if (writesDefault && defaultFlag) {
     statements.push({
       sql: `UPDATE branches SET is_default = 0
-            WHERE id != @id AND lower(trim(name)) IN ('shop', 'warehouse')`,
+            WHERE id != @id AND ${canonicalActiveBranchSql(currentIdentity)}`,
       params: { id },
     })
   }
-  statements.push({
-    sql: `UPDATE branches SET name=@name, location=@location, phone=@phone, manager=@manager, notes=@notes,
-          is_default=@is_default, is_active=@is_active, updated_at=CURRENT_TIMESTAMP WHERE id=@id`,
-    params: {
-      name: identity.name,
-      location: fields.location || null,
-      phone: fields.phone || null,
-      manager: fields.manager || null,
-      notes: fields.notes || null,
-      is_default: defaultFlag,
-      is_active: identity.is_active,
-      id,
-    },
-  })
+  const assignments = ['name=@name', 'is_active=@is_active', 'updated_at=CURRENT_TIMESTAMP']
+  const params: Record<string, unknown> = { name: identity.name, is_active: identity.is_active, id }
+  for (const field of BRANCH_REPLAY_TEXT_FIELDS) {
+    if (!Object.prototype.hasOwnProperty.call(fields, field)) continue
+    assignments.push(`${field}=@${field}`)
+    params[field] = fields[field] || null
+  }
+  if (writesDefault) {
+    assignments.push('is_default=@is_default')
+    params.is_default = defaultFlag
+  }
+  statements.push({ sql: `UPDATE branches SET ${assignments.join(', ')} WHERE id=@id`, params })
+  if (writesDefault) statements.push(...branchReplayDefaultStatements(id, fields, currentIdentity))
   statements.push(...branchNameSnapshotStatements(id))
   return statements
 }
@@ -92,10 +191,7 @@ type BranchStatement = { sql: string; params?: Record<string, unknown> }
 export const BRANCH_REPLAY_TEXT_FIELDS = ['location', 'phone', 'manager', 'notes'] as const
 const BRANCH_REPLAY_FIELDS = ['name', ...BRANCH_REPLAY_TEXT_FIELDS, 'is_default', 'is_active'] as const
 
-export interface BranchReplayRow {
-  id: number | string
-  name: unknown
-  is_active: unknown
+export interface BranchReplayRow extends BranchIdentitySnapshot {
   location?: unknown
   phone?: unknown
   manager?: unknown
@@ -104,11 +200,17 @@ export interface BranchReplayRow {
 }
 
 export const BRANCH_REPLAY_ROW_SQL =
-  'SELECT id, name, is_active, location, phone, manager, notes, is_default FROM branches WHERE id = ?'
+  'SELECT * FROM branches WHERE id = ?'
 
 // Canonical, active rows are the only ones that may hold the default flag
 // (the same scope branchUpdateStatements clears within).
 const CANONICAL_ACTIVE_BRANCH_SQL = `is_active = 1 AND lower(trim(name)) IN ('shop', 'warehouse')`
+
+function canonicalActiveBranchSql(current: BranchIdentitySnapshot): string {
+  return Object.prototype.hasOwnProperty.call(current, 'canonical_key')
+    ? `is_active = 1 AND lower(trim(COALESCE(canonical_key, name))) IN ('shop', 'warehouse')`
+    : CANONICAL_ACTIVE_BRANCH_SQL
+}
 
 // The value branchUpdateStatements stores for a text field (`value || null`),
 // with a stored empty string read as the same "blank" as NULL.
@@ -180,13 +282,19 @@ export function branchReplayDropsDefault(fields: BranchWriteFields, current: Bra
 export const OTHER_CANONICAL_BRANCH_SQL =
   `SELECT id FROM branches WHERE id != ? AND ${CANONICAL_ACTIVE_BRANCH_SQL} ORDER BY id LIMIT 1`
 
+export function otherCanonicalBranchSql(current: BranchIdentitySnapshot): string {
+  return Object.prototype.hasOwnProperty.call(current, 'canonical_key')
+    ? `SELECT id FROM branches WHERE id != ? AND ${canonicalActiveBranchSql(current)} ORDER BY id LIMIT 1`
+    : OTHER_CANONICAL_BRANCH_SQL
+}
+
 /**
- * Appended after branchUpdateStatements in a replay so a replay that moves the
- * default flag can never leave zero or two default branches. Setting the flag
+ * Included by branchUpdateStatements when an explicit change moves the
+ * default flag, so direct writes, approvals and replays preserve one default. Setting the flag
  * already clears the other canonical row; clearing it hands the flag back to
  * the other canonical row when none is left (the forward edit that made this
  * row default had taken it from there). The closing assertion aborts the batch
- * unless exactly one canonical, active branch is default. A replay that leaves
+ * unless exactly one canonical, active branch is default. A write that leaves
  * this row's flag as it is adds nothing: it neither causes nor repairs the
  * default elsewhere.
  */
@@ -197,18 +305,19 @@ export function branchReplayDefaultStatements(
 ): BranchStatement[] {
   if (toDbBool(fields.is_default, 0) === toDbBool(current.is_default, 0)) return []
   const statements: BranchStatement[] = []
+  const activeBranchSql = canonicalActiveBranchSql(current)
   if (!toDbBool(fields.is_default, 0)) {
     statements.push({
       sql: `UPDATE branches SET is_default = 1, updated_at = CURRENT_TIMESTAMP
-            WHERE id = (SELECT id FROM branches WHERE id != @id AND ${CANONICAL_ACTIVE_BRANCH_SQL} ORDER BY id LIMIT 1)
-              AND NOT EXISTS (SELECT 1 FROM branches WHERE COALESCE(is_default, 0) = 1 AND ${CANONICAL_ACTIVE_BRANCH_SQL})`,
+            WHERE id = (SELECT id FROM branches WHERE id != @id AND ${activeBranchSql} ORDER BY id LIMIT 1)
+              AND NOT EXISTS (SELECT 1 FROM branches WHERE COALESCE(is_default, 0) = 1 AND ${activeBranchSql})`,
       params: { id },
     })
   }
   statements.push({
     sql: `INSERT INTO branches (name)
       SELECT NULL
-      WHERE (SELECT COUNT(*) FROM branches WHERE COALESCE(is_default, 0) = 1 AND ${CANONICAL_ACTIVE_BRANCH_SQL}) <> 1`,
+      WHERE (SELECT COUNT(*) FROM branches WHERE COALESCE(is_default, 0) = 1 AND ${activeBranchSql}) <> 1`,
   })
   return statements
 }

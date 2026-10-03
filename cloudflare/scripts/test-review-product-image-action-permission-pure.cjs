@@ -132,6 +132,7 @@ function loadReviewApply(state, updateChanges = 1) {
     './productWrites': productWrites,
     './branchWrites': { branchUpdateStatements: () => [] },
     './canonicalBranchIdentity': canonicalBranchIdentity,
+    './conflictControl': loadTs('lib/conflictControl.ts'),
     './permissions': permissions,
     './productImagePermission': imagePermission,
     './productDelete': {

@@ -155,7 +155,7 @@ async function main() {
 
   await check('metadata/default edits preserve identity and leave legacy defaults untouched', () => {
     const db = freshDb()
-    const current = db.prepare('SELECT id,name,is_active FROM branches WHERE id=2').get()
+    const current = db.prepare('SELECT * FROM branches WHERE id=2').get()
     runBatch(db, writes.branchUpdateStatements(2, {
       name: ' warehouse ', is_active: 'true', location: 'new', notes: 'metadata', is_default: 1,
     }, current))
@@ -176,7 +176,7 @@ async function main() {
       db.prepare(`INSERT INTO ${table}(branch_id,branch_name) VALUES (?,?)`).run(1, 'Original shop')
     }
     db.prepare("UPDATE sales SET updated_at='2026-09-01 08:00:00'").run()
-    const current = db.prepare('SELECT id,name,is_active FROM branches WHERE id=2').get()
+    const current = db.prepare('SELECT * FROM branches WHERE id=2').get()
     runBatch(db, writes.branchUpdateStatements(2, { notes: 'Receiving and storage' }, current))
     assert.equal(db.prepare('SELECT notes FROM branches WHERE id=2').get().notes, 'Receiving and storage')
     for (const table of tables) {
@@ -205,7 +205,7 @@ async function main() {
       (db) => db.prepare('DELETE FROM branches WHERE id=2').run(),
     ]) {
       const db = freshDb()
-      const current = db.prepare('SELECT id,name,is_active FROM branches WHERE id=2').get()
+      const current = db.prepare('SELECT * FROM branches WHERE id=2').get()
       const statements = writes.branchUpdateStatements(2, { location: 'should rollback', is_default: 1 }, current)
       mutate(db)
       assert.throws(() => runBatch(db, statements), /NOT NULL/)
@@ -228,12 +228,12 @@ async function main() {
     assert.match(post, /CANONICAL_BRANCH_IDENTITY_CODE/)
     assert.match(remove, /CANONICAL_BRANCH_IDENTITY_CODE/)
     assert.ok(put.indexOf('prepareCanonicalBranchUpdate') < put.indexOf('maybeQueueForReview'))
-    assert.match(put, /branchUpdateStatements\(id, body, current\)/)
-    assert.match(review, /branchUpdateStatements\(id, body, current\)/)
+    assert.match(put, /branchUpdateStatements\(id, body, current, directory\)/)
+    assert.match(review, /branchUpdateStatements\(id, body, current, directory\)/)
     // FX-undo: the replay writes the payload completed from the current row
     // (so an older snapshot cannot blank a column), still through the one
     // identity-guarded writer.
-    assert.match(undo, /branchUpdateStatements\(id, replayFields, existing\)/)
+    assert.match(undo, /branchUpdateStatements\(id, replayFields, existing, directory\)/)
     assert.equal((review.match(/assertCanonicalBranchSetMutationAllowed\(\)/g) || []).length, 2)
     assert.equal((route.match(/resolveCanonicalTransferPair\(/g) || []).length, 2)
     assert.equal((route.match(/await planTransferOperation\(/g) || []).length, 2, 'both branch transfer routes delegate their final atomic plan')

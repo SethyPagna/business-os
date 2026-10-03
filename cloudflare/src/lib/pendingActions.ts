@@ -23,6 +23,7 @@ export interface PendingActionRow {
   entity_type: string
   entity_id: number | null
   payload_json: string
+  expected_entity_state_json?: string | null
   summary: string | null
   status: PendingActionStatus
   requested_by: number | null
@@ -41,6 +42,7 @@ export interface CreatePendingActionInput {
   entityType: string
   entityId?: number | null
   payload: unknown
+  expectedEntityStateJson?: string
   summary?: string | null
   requestedBy?: number | null
   requestedByName?: string | null
@@ -56,10 +58,10 @@ export async function createPendingAction(env: Env, input: CreatePendingActionIn
   const result = await db.prepare(`
     INSERT INTO pending_actions (
       section, action_type, entity_type, entity_id, payload_json, summary,
-      status, requested_by, requested_by_name
+      status, requested_by, requested_by_name${input.expectedEntityStateJson === undefined ? '' : ', expected_entity_state_json'}
     ) VALUES (
       @section, @action_type, @entity_type, @entity_id, @payload_json, @summary,
-      'open', @requested_by, @requested_by_name
+      'open', @requested_by, @requested_by_name${input.expectedEntityStateJson === undefined ? '' : ', @expected_entity_state_json'}
     )
   `).run({
     section: input.section,
@@ -70,6 +72,7 @@ export async function createPendingAction(env: Env, input: CreatePendingActionIn
     summary: input.summary ?? null,
     requested_by: input.requestedBy ?? null,
     requested_by_name: input.requestedByName ?? null,
+    ...(input.expectedEntityStateJson === undefined ? {} : { expected_entity_state_json: input.expectedEntityStateJson }),
   })
   if (result.lastInsertRowid) return result.lastInsertRowid
   // Fallback for a fake/test D1 adapter that doesn't populate
