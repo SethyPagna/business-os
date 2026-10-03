@@ -60,6 +60,8 @@ const NAMED_COMPANIONS = {
   // retries, reopen + reclose and the toggle.
   194: 'test-telegram-shift-overview-pure.cjs',
   223: 'test-branch-review-state-pure.cjs',
+  224: 'test-branch-cutover-journal-native.cjs',
+  225: 'test-branch-cutover-journal-native.cjs',
 }
 
 function listMigrationNumbers() {
