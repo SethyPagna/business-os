@@ -4,6 +4,7 @@ import ts from 'typescript'
 import { activeReceivingDestination, captureReceivingRequest, lineReceivesStock, productCreationRefusal, receivingDestinationRefusal, receivingDetailsLocked, restoreReceivingSubmissions, retainReceivingSubmissions } from '../src/utils/receivingDestination.ts'
 import { emptyStockSessionDraft, normalizeStockSessionDraft, buildStockLineRequest, commitSessionBlock, type StockSessionLine } from '../src/utils/stockSessionDraft.ts'
 import { stockFailureText, stockLineNeedsRemoval } from '../src/utils/stockAdjustOutcome.ts'
+import * as attempts from '../src/utils/receivingProductAttempt.ts'
 
 const active = [{ value: '1', label: 'LC Store' }, { value: '3', label: 'Other' }]
 const line = (patch: Partial<StockSessionLine> = {}): StockSessionLine => ({
@@ -138,18 +139,35 @@ const createStart = modal.indexOf('  const createHeldProduct = ')
 const createEnd = modal.indexOf('  // ---- commit ----', createStart)
 assert(createStart > 0 && createEnd > createStart)
 const createSource = modal.slice(createStart, createEnd)
+const attemptStorage = new Map<string, string>([
+  ['businessos_user', JSON.stringify({ id: 7 })], ['businessos_read_session', 'receiving-destination-test'],
+])
+const store = { getItem: (key: string) => attemptStorage.get(key) ?? null, setItem: (key: string, value: string) => { attemptStorage.set(key, value) } }
+Object.defineProperty(globalThis, 'window', { configurable: true, value: { localStorage: store, sessionStorage: store, location: { origin: 'https://receiving.test' }, addEventListener() {}, dispatchEvent() {} } })
+let lockTail = Promise.resolve<unknown>(undefined), controllerId = 0
+Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { locks: { request: (_key: string, _options: unknown, action: () => unknown) => {
+  const next = lockTail.catch(() => {}).then(action)
+  lockTail = next
+  return next
+} } } })
 const controller = (source: string, response: (payload: Record<string, unknown>, calls: number) => Promise<unknown>) => {
-  const entry = line({ ...held, key: 'create-controller' })
+  const entry = line({ ...held, key: 'create-controller', createRequestId: `create-controller-${++controllerId}` })
+  const ready = attempts.registerReceivingProductAttempt(7, entry.createRequestId!)
   const submissionsRef = { current: empty() }
   let calls = 0, storageFails = false, options = active, persisted: unknown
   const deps = {
+    ...attempts, destinationRef: { current: { branchId: '1' } },
     submissionsRef, productCreationRefusal, branchId: '1', user: { id: 7, name: 'Actor' },
-    require: () => ({ createProduct: async (payload: Record<string, unknown>) => {
+    require: () => ({ createProduct: async (payload: Record<string, unknown>, check: () => void) => {
+      check()
       calls++
-      assert.equal((persisted as { productOutcomes: Record<string, string> }).productOutcomes[entry.key], 'unknown')
+      assert.equal(attempts.readReceivingProductAttempt(7, entry.createRequestId)?.state, 'attempting')
       return response(payload, calls)
     } }),
-    destinationError: (lines: StockSessionLine[]) => receivingDestinationRefusal('1', options, lines, submissionsRef.current),
+    destinationError: (lines: StockSessionLine[]) => {
+      attempts.overlayReceivingProductAttempts(7, submissionsRef.current, lines)
+      return receivingDestinationRefusal('1', options, lines, submissionsRef.current)
+    },
     persistSubmissionDraft: () => {
       if (storageFails) throw Object.assign(new Error('storage failed'), { code: 'receiving_submission_not_saved' })
       persisted = JSON.parse(JSON.stringify(submissionsRef.current))
@@ -159,7 +177,7 @@ const controller = (source: string, response: (payload: Record<string, unknown>,
   }
   const js = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText
   const create = new Function(...Object.keys(deps), js + 'return createHeldProduct;')(...Object.values(deps)) as (entry: StockSessionLine) => Promise<number>
-  return { entry, submissionsRef, create, calls: () => calls, retire: () => { options = [] }, failStorage: (fail: boolean) => { storageFails = fail }, reload: () => {
+  return { entry, submissionsRef, create: async (item: StockSessionLine) => { await ready; return create(item) }, calls: () => calls, retire: () => { options = [] }, failStorage: (fail: boolean) => { storageFails = fail }, reload: () => {
     submissionsRef.current = restoreReceivingSubmissions({ lines: [{ ...entry, status: 'error' }], receivingSubmissions: persisted }, [{ ...entry, status: 'error' }])
   } }
 }

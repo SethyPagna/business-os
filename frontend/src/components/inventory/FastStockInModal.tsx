@@ -18,6 +18,7 @@ import { readWorkDraft, scheduleWorkDraftWrite, clearWorkDraft, flushPendingWork
 import { createClientRequestId } from '../../api/requestIds.ts'
 import { stockFailureText, stockLineNeedsRemoval } from '../../utils/stockAdjustOutcome.ts'
 import { activeReceivingDestination, captureReceivingRequest, productCreationRefusal, receivingDestinationRefusal, receivingDetailsLocked, restoreReceivingSubmissions, retainReceivingSubmissions, type ReceivingSubmissions } from '../../utils/receivingDestination.ts'
+import { assertReceivingProductAttemptDispatch, finishReceivingProductAttempt, overlayReceivingProductAttempts, registerReceivingProductAttempt, reserveReceivingProductAttempt } from '../../utils/receivingProductAttempt.ts'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import { batchDisplayLabel, formatBatchReceivedDate, lotCodeAsDate } from '../../utils/batchLabel.ts'
 import { todayStr } from '../../utils/dateHelpers.ts'
@@ -242,6 +243,7 @@ export default function FastStockInModal({
       if (!stored) pristine = { ...pristine, ...entryFor(initialProduct, opened.mode) }
     }
     const submissions = restoreReceivingSubmissions(storedRaw, opened.lines)
+    overlayReceivingProductAttempts(user?.id, submissions, opened.lines)
     if (rewrite) writeWorkDraft(fastStockInDraftKey, { ...opened, receivingSubmissions: submissions })
     // The work now lives in the session draft, so the retired surface's copy goes.
     // A blocked conversion keeps it: it is the evidence of an unknown outcome.
@@ -327,13 +329,15 @@ export default function FastStockInModal({
   const lotsReady = !lotsKey || lotsLoadedFor === lotsKey
   const steps = sessionSteps(mode, received)
   const pendingLines = received.filter((line) => line.status !== 'saved')
+  overlayReceivingProductAttempts(user?.id, submissionsRef.current, received)
   const detailsLocked = receivingDetailsLocked(submissionsRef.current, received)
   const submissionLockCode = pendingLines.map(line => productCreationRefusal(submissionsRef.current, line)).find(Boolean) || 'receiving_submission_locked'
   const destinationInvalid = (mode === 'add' && !activeReceivingDestination(branchId, receivingBranchOptions))
     || receivingDestinationRefusal(branchId, receivingBranchOptions, pendingLines, submissionsRef.current) === 'receiving_branch_inactive'
-  const destinationError = (lines: readonly StockSessionLine[]) => receivingDestinationRefusal(
-    destinationRef.current.branchId, destinationRef.current.options, lines, submissionsRef.current,
-  )
+  const destinationError = (lines: readonly StockSessionLine[]) => {
+    overlayReceivingProductAttempts(user?.id, submissionsRef.current, lines)
+    return receivingDestinationRefusal(destinationRef.current.branchId, destinationRef.current.options, lines, submissionsRef.current)
+  }
   const refuseDestination = (lines: readonly StockSessionLine[]): boolean => {
     const code = destinationError(lines)
     if (!code) return false
@@ -348,13 +352,16 @@ export default function FastStockInModal({
   }
   const currentStep: StockSessionStep = steps.includes(step) && (step === 'items' || pendingLines.length > 0) ? step : 'items'
 
-  const currentDraft = (lines: StockSessionLine[] = received): StockSessionDraft & { receivingSubmissions?: ReceivingSubmissions } => ({
-    version: 2, sessionId: sessionIdRef.current, mode, step: currentStep, brand, branchId, receivedDate, supplier,
-    paymentStatus, creditDueDate, paidAmount, query, picked, quantity, unitCost: protectedUnitCost,
-    sellingPrice, expiryDate, reason, conditionTag, batchChoice, createPayload, createRequestId, scannedBarcode,
-    createdProductIds, lines,
-    ...(receivingDetailsLocked(submissionsRef.current, lines) || Object.keys(submissionsRef.current.products).length ? { receivingSubmissions: retainReceivingSubmissions(submissionsRef.current, lines) } : {}),
-  })
+  const currentDraft = (lines: StockSessionLine[] = received): StockSessionDraft & { receivingSubmissions?: ReceivingSubmissions } => {
+    overlayReceivingProductAttempts(user?.id, submissionsRef.current, lines)
+    return {
+      version: 2, sessionId: sessionIdRef.current, mode, step: currentStep, brand, branchId, receivedDate, supplier,
+      paymentStatus, creditDueDate, paidAmount, query, picked, quantity, unitCost: protectedUnitCost,
+      sellingPrice, expiryDate, reason, conditionTag, batchChoice, createPayload, createRequestId, scannedBarcode,
+      createdProductIds, lines,
+      ...(receivingDetailsLocked(submissionsRef.current, lines) || Object.keys(submissionsRef.current.products).length ? { receivingSubmissions: retainReceivingSubmissions(submissionsRef.current, lines) } : {}),
+    }
+  }
 
   // Keystrokes ride the debounced autosave. No dirtyWork registration: with the
   // draft persisting, leaving is safe -- everything is here on reopen.
@@ -667,7 +674,7 @@ export default function FastStockInModal({
       reason: reason.trim(),
       conditionTag: mode === 'set' && !setLowers ? '' : conditionTag,
       createdProduct: Boolean(heldPayload) || createdProductIds.includes(String(picked.id)),
-      ...(heldPayload ? { createPayload: heldPayload, createRequestId: createRequestId || createClientRequestId('product') } : {}),
+      ...(heldPayload ? { createPayload: heldPayload, createRequestId } : {}),
       status: 'queued',
       detail: '',
     }
@@ -720,16 +727,21 @@ export default function FastStockInModal({
       selling_price_usd: held.selling_price_usd as number | undefined, cost_price_usd: held.cost_price_usd as number | undefined,
       stock_quantity: 0, branch_stock: [],
     }
+    const requestId = createClientRequestId('product')
+    try { await registerReceivingProductAttempt(user?.id, requestId) } catch (error) {
+      throw Object.assign(new Error(stockFailureText(error, tr, tr('failed', 'Failed'))), { code: (error as { code?: string })?.code })
+    }
     applyEntry({
       picked: product, query: name, quantity: canReceive ? String(openingQuantity || 1) : '0',
       unitCost: canViewCosts && held.cost_price_usd != null ? String(held.cost_price_usd) : '', sellingPrice: priceText(held.selling_price_usd),
-      expiryDate: String(held.expiry_date || ''), createPayload: held, createRequestId: createClientRequestId('product'), scannedBarcode: '',
+      expiryDate: String(held.expiry_date || ''), createPayload: held, createRequestId: requestId, scannedBarcode: '',
     })
     setBatchChoice('new')
     if (held.supplier && !supplier.supplierName.trim()) setSupplier({ supplierId: null, supplierName: String(held.supplier) })
   }
 
   const createHeldProduct = async (line: StockSessionLine): Promise<number> => {
+    overlayReceivingProductAttempts(user?.id, submissionsRef.current, [line])
     const creationCode = productCreationRefusal(submissionsRef.current, line)
     if (creationCode) throw Object.assign(new Error(stockFailureText({ code: creationCode }, tr, '')), { code: creationCode })
     const payload = {
@@ -743,31 +755,36 @@ export default function FastStockInModal({
     submissionsRef.current.products[line.key] = JSON.parse(JSON.stringify(payload)) as Record<string, unknown>
     submissionsRef.current.productOutcomes[line.key] = 'not_sent'
     const { createProduct } = await import('../../api/productWriteTransport.ts')
-    const code = destinationError([line])
-    if (code) throw Object.assign(new Error(stockFailureText({ code }, tr, '')), { code })
-    submissionsRef.current.productOutcomes[line.key] = 'unknown'
-    try { persistSubmissionDraft() } catch (error) {
-      submissionsRef.current.productOutcomes[line.key] = 'not_sent'
-      throw error
+    const validateDestination = () => {
+      const code = Number(destinationRef.current.branchId) !== Number(payload.branch_id) ? 'receiving_submission_locked' : destinationError([line])
+      if (code) throw Object.assign(new Error(stockFailureText({ code }, tr, '')), { code })
     }
+    validateDestination()
+    persistSubmissionDraft()
+    const attempt = await reserveReceivingProductAttempt(user?.id, line.createRequestId, payload, validateDestination)
+    overlayReceivingProductAttempts(user?.id, submissionsRef.current, [line])
     const unknownCode = 'product_create_outcome_unknown'
     const unknownError = () => Object.assign(new Error(stockFailureText({ code: unknownCode }, tr, '')), { code: unknownCode })
     let result: CreateProductResult
-    try { result = await createProduct(payload) as CreateProductResult } catch (error) {
+    try { result = await createProduct(JSON.parse(attempt.bodyJson!), () => assertReceivingProductAttemptDispatch(attempt)) as CreateProductResult } catch (error) {
       const failure = error as { code?: string; outcome?: string } | null
       if (failure?.code === 'write_requires_live_server' && failure.outcome !== 'unknown') {
-        submissionsRef.current.productOutcomes[line.key] = 'not_sent'
+        await finishReceivingProductAttempt(attempt, 'not_dispatched')
+        overlayReceivingProductAttempts(user?.id, submissionsRef.current, [line])
         throw error
       }
+      try { await finishReceivingProductAttempt(attempt, 'unknown') } catch { }
       throw unknownError()
     }
     if (result?.pending) {
+      try { await finishReceivingProductAttempt(attempt, 'pending') } catch { throw unknownError() }
       submissionsRef.current.productOutcomes[line.key] = 'pending'
       throw Object.assign(new Error(tr('product_creation_pending_review', 'Product creation is pending review and cannot be added to this stock-in session yet.')), { code: 'product_pending_review' })
     }
     if (result?.success === false) throw unknownError()
     const id = extractHistoryResultId(result as never)
     if (!id) throw unknownError()
+    try { await finishReceivingProductAttempt(attempt, 'confirmed', id) } catch { throw unknownError() }
     return id
   }
 
