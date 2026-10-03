@@ -27,12 +27,13 @@ function load(entry, overrides = {}) {
   }
   return read(path.join(root, 'src', entry))
 }
-function fixture(beforeLabelMigration = null) {
+function fixture(beforeLabelMigration = null, omitLabelMigration = false) {
   const sql = new DatabaseSync(':memory:')
   sql.limits.exprDepth = 100
   sql.limits.variableNumber = 100
   sql.exec('PRAGMA foreign_keys=OFF')
   for (const file of fs.readdirSync(path.join(root, 'migrations')).filter(file => file.endsWith('.sql')).sort()) {
+    if (file === '0226_branch_history_labels.sql' && omitLabelMigration) continue
     if (file === '0226_branch_history_labels.sql' && beforeLabelMigration) beforeLabelMigration(sql)
     sql.exec(fs.readFileSync(path.join(root, 'migrations', file), 'utf8'))
   }
@@ -127,6 +128,39 @@ async function main() {
     await session.replayStockSession(f.env, actor, 'undo', result.actionHistoryId, 0, JSON.parse(history.undo_payload))
     await session.replayStockSession(f.env, actor, 'redo', result.actionHistoryId, 1, { ...JSON.parse(history.redo_payload), generation: 1 })
     assert.equal(f.sql.prepare('SELECT branch_name FROM stock_session_members').get().branch_name, 'Shop')
+    assert.equal(f.sql.prepare('SELECT quantity FROM branch_stock WHERE product_id=1 AND branch_id=1').get().quantity, 5)
+    f.sql.close()
+  })
+  await check('pre-label version2 session postimages still allow exact Undo and Redo after migration', async () => {
+    const f = fixture()
+    const result = await session.commitStockSession(f.env, actor, receive())
+    f.sql.exec(`UPDATE undo_snapshots SET payload_json=json_set(payload_json,
+      '$.after.members',json((SELECT json_group_array(json_remove(value,'$.branch_name')) FROM json_each(payload_json,'$.after.members'))),
+      '$.expected.members',json((SELECT json_group_array(json_remove(value,'$.branch_name')) FROM json_each(payload_json,'$.expected.members'))))`)
+    f.sql.exec('UPDATE stock_session_members SET branch_name=NULL')
+    const history = f.sql.prepare('SELECT * FROM action_history WHERE id=?').get(result.actionHistoryId)
+    await session.replayStockSession(f.env, actor, 'undo', result.actionHistoryId, 0, JSON.parse(history.undo_payload))
+    await session.replayStockSession(f.env, actor, 'redo', result.actionHistoryId, 1, { ...JSON.parse(history.redo_payload), generation: 1 })
+    assert.equal(f.sql.prepare('SELECT branch_name FROM stock_session_members').get().branch_name, null)
+    assert.equal(f.sql.prepare('SELECT quantity FROM branch_stock WHERE product_id=1 AND branch_id=1').get().quantity, 5)
+    const materialized = '  ហាងដើម  '
+    f.sql.prepare('UPDATE stock_session_members SET branch_name=?').run(materialized)
+    await session.replayStockSession(f.env, actor, 'undo', result.actionHistoryId, 2, { ...JSON.parse(history.undo_payload), generation: 2 })
+    await session.replayStockSession(f.env, actor, 'redo', result.actionHistoryId, 3, { ...JSON.parse(history.redo_payload), generation: 3 })
+    assert.equal(f.sql.prepare('SELECT branch_name FROM stock_session_members').get().branch_name, materialized)
+    f.sql.exec("UPDATE branches SET name='LC Store' WHERE id=1")
+    await assert.rejects(() => session.replayStockSession(f.env, actor, 'undo', result.actionHistoryId, 4, { ...JSON.parse(history.undo_payload), generation: 4 }))
+    assert.equal(f.sql.prepare('SELECT branch_name FROM stock_session_members').get().branch_name, materialized)
+    assert.equal(f.sql.prepare('SELECT quantity FROM branch_stock WHERE product_id=1 AND branch_id=1').get().quantity, 5)
+    f.sql.close()
+  })
+  await check('new session postimages still reject changed captured labels', async () => {
+    const f = fixture()
+    const result = await session.commitStockSession(f.env, actor, receive())
+    const history = f.sql.prepare('SELECT * FROM action_history WHERE id=?').get(result.actionHistoryId)
+    f.sql.exec("UPDATE stock_session_members SET branch_name='Changed snapshot'")
+    await assert.rejects(() => session.replayStockSession(f.env, actor, 'undo', result.actionHistoryId, 0, JSON.parse(history.undo_payload)))
+    assert.equal(f.sql.prepare('SELECT branch_name FROM stock_session_members').get().branch_name, 'Changed snapshot')
     assert.equal(f.sql.prepare('SELECT quantity FROM branch_stock WHERE product_id=1 AND branch_id=1').get().quantity, 5)
     f.sql.close()
   })
@@ -228,6 +262,7 @@ async function main() {
     f.sql.close()
   })
   if (failures.length) throw new Error(`${failures.length} history-label groups failed: ${failures.join('; ')}`)
-  console.log('PASS branch history labels: 8 groups, SQLite expression depth 100 / binds 100')
+  console.log('PASS branch history labels: 10 groups, SQLite expression depth 100 / binds 100')
 }
-main().catch(error => { console.error(error); process.exitCode = 1 })
+module.exports = { fixture, load, actor, receive }
+if (require.main === module) main().catch(error => { console.error(error); process.exitCode = 1 })

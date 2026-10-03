@@ -1112,10 +1112,11 @@ const REPLAY_MUTATION_ORDER = {
   redo: ['products', 'batches', 'branchStock', 'branchBatchStock'],
 } as const
 
-async function stockReplayStateSql(env: Env): Promise<string> {
+async function stockReplayStateSql(env: Env, memberBranchNamesCaptured = true): Promise<string> {
   const fields: string[] = []
   for (const [key, [table, where]] of Object.entries(REPLAY_TABLES)) {
-    const columns = [...await tableColumns(env, table)].sort()
+    const columns = [...await tableColumns(env, table)]
+      .filter(column => memberBranchNamesCaptured || key !== 'members' || column !== 'branch_name').sort()
     // Keep each json_object below SQLite's older function-argument ceiling.
     let row = "json('{}')"
     for (let i = 0; i < columns.length; i += 40) row = `json_set(${row},${columns.slice(i, i + 40).map(c => `'$.${c}',t."${c}"`).join(',')})`
@@ -1202,7 +1203,12 @@ export async function replayStockSession(env: Env, user: SessionUser, direction:
   if (members.length !== request.items.length || members.length > STOCK_SESSION_MAX_LINES) fail('Stock session members are incomplete.')
   const after = snapshot.after as Record<string, Row[]>
   const before = snapshot.before as Record<string, Row[]>
-  const stateSql = await stockReplayStateSql(env)
+  const expectedMembers = (snapshot.expected as Record<string, Row[]>).members
+  if (!Array.isArray(expectedMembers) || expectedMembers.length !== members.length) fail('Stock session member postimages are incomplete.')
+  const memberBranchNamesCaptured = expectedMembers.some(row => Object.prototype.hasOwnProperty.call(row, 'branch_name'))
+  if (memberBranchNamesCaptured && expectedMembers.some(row => !Object.prototype.hasOwnProperty.call(row, 'branch_name'))) fail('Stock session member postimages have inconsistent branch labels.')
+  // Pre-0226 postimages omit this display field; replay never rewrites member labels.
+  const stateSql = await stockReplayStateSql(env, memberBranchNamesCaptured)
   const statements: StockWriteStatement[] = [
     assertion("NOT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance')"),
     assertion(`EXISTS(SELECT 1 FROM stock_session_operations o JOIN action_history h ON h.id=o.history_id
