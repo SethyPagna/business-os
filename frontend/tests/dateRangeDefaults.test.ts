@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { transformSync } from 'esbuild'
 import ts from 'typescript'
-import { statsPresetRange } from '../src/components/shared/statsStripPresets.ts'
+import { STATS_PRESETS, statsPresetRange } from '../src/components/shared/statsStripPresets.ts'
 import { buildInventoryProductsSearchParams } from '../src/components/inventory/inventoryProductsQuery.ts'
 import { withDashboardRangeScope } from '../src/api/dashboardTransport.ts'
 import { buildQueryString } from '../src/api/query.ts'
@@ -77,8 +77,8 @@ const helperNames = ['getDashboardFilterStorageKey', 'todayDashboardFilterPrefs'
   'readDashboardFilterPrefs', 'normalizeDashboardRangeId', 'resolveDashboardFilterRange', 'dashboardPrefsForSelection']
 const helperCode = transformSync(`${helperNames.map((name) => fn(dashboard, name)).join('\n')}; return { ${helperNames.join(',')} }`, { loader: 'ts', format: 'cjs' }).code
 const { dashboardRangeQuery } = await import('../src/components/dashboard/dashboardRange.ts')
-const helpers = new Function('window', 'DASHBOARD_FILTER_STORAGE_PREFIX', 'statsPresetRange', 'todayStr', 'dashboardRangeQuery', helperCode)(
-  windowMock, 'bos_dashboard_filters:', preset, () => preset('today').startDate, dashboardRangeQuery,
+const helpers = new Function('window', 'DASHBOARD_FILTER_STORAGE_PREFIX', 'statsPresetRange', 'todayStr', 'dashboardRangeQuery', 'STATS_PRESETS', helperCode)(
+  windowMock, 'bos_dashboard_filters:', preset, () => preset('today').startDate, dashboardRangeQuery, STATS_PRESETS,
 )
 const key = helpers.getDashboardFilterStorageKey({ id: 17 })
 const day1 = '2026-09-11'
