@@ -322,8 +322,9 @@ function transferEffectStatements(operation: string, reverse: boolean, generatio
       ON CONFLICT(product_id,branch_id) DO UPDATE SET quantity=quantity+excluded.quantity`, params },
     { sql: `UPDATE products SET stock_quantity=(SELECT COALESCE(SUM(quantity),0) FROM branch_stock WHERE product_id=products.id),updated_at=CURRENT_TIMESTAMP
       WHERE id IN(SELECT from_product FROM (${members}) UNION SELECT to_product FROM (${members}))`, params },
-    { sql: `INSERT INTO stock_transfers(product_id,product_name,from_branch_id,to_branch_id,quantity,notes,user_id,user_name,client_request_id,receipt_id,member_ordinal,generation)
-      SELECT from_product,json_extract(from_snapshot,'$.name'),from_branch,to_branch,quantity,
+    { sql: `INSERT INTO stock_transfers(product_id,product_name,from_branch_id,to_branch_id,from_branch_name,to_branch_name,quantity,notes,user_id,user_name,client_request_id,receipt_id,member_ordinal,generation)
+      SELECT from_product,json_extract(from_snapshot,'$.name'),from_branch,to_branch,
+        (SELECT name FROM branches WHERE id=from_branch),(SELECT name FROM branches WHERE id=to_branch),quantity,
         CASE WHEN from_product<>to_product THEN @reason||' -- Added to existing product "'||json_extract(to_snapshot,'$.name')||'" (#'||to_product||') at '||(SELECT name FROM branches WHERE id=to_branch) ELSE @reason END,
         @actor,@name,@operation,receipt_id,ordinal,@generation FROM (${members})`, params },
     ...(['out', 'in'] as const).map(direction => {
