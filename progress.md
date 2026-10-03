@@ -10,7 +10,7 @@ and their new status, and each item here names the Part that last changed it (e.
 | Item | Status |
 |---|---|
 | RC2-HOTFIX | [x] Live; both real merge actions and health checks verified. |
-| RC3-UI and DATE | [~] Date fixes merged in d2b369fc; exact gate37105062061 running. All 24 EN/KM mobile/desktop picker cases reviewed, with backend limits recorded. Previous gate passed 709 Worker + 678 frontend. Not live. |
+| RC3-UI and DATE | [~] d2b369fc passed exact gate37105062061: 709 Worker + 678 frontend (one browser timeout passed on retry). All 24 picker cases reviewed; missing Returns/Inventory requests verified in 8 follow-up cases. Not live. |
 | Branch consolidation | [~] Stale-edit, atomic audit and draft/Undo localization fixes committed; independent rechecks running. Lost-response recovery and stock transfer remain open. No live rename or stock move. |
 | STOCK-RETURN | [~] Quantity correction reviewed; partial returns/accounting still in progress. Not live. |
 | Product edit / Undo | [~] Backend/client checkpoints preserved; brand/group/fold/create-stock completion and integration pending. |
