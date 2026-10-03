@@ -5,7 +5,7 @@
 Every item carries an ID (U-1, U-cost, Q15 …). `docs/history/session-log.md` uses the same IDs: each Part lists the IDs it moved
 and their new status, and each item here names the Part that last changed it (e.g. "→ Part 633"). Search either file for an ID to see both sides.
 
-### Current work (4 Oct 2026) — Part 671
+### Current work (4 Oct 2026) — Part 672
 
 | Item | Status |
 |---|---|
@@ -14,7 +14,7 @@ and their new status, and each item here names the Part that last changed it (e.
 | Branch consolidation | [~] History and snapshot corrections have bounded reviews; real migration fixtures pass 49 groups. Selling core review is complete. Remaining selling paths, historical actions and final stock proof are open. No live rename or stock move. |
 | STOCK-RETURN | [~] Quantity correction reviewed; partial returns/accounting still in progress. Not live. |
 | Product edit / Undo | [~] Backend/client checkpoints preserved; brand/group/fold/create-stock completion and integration pending. |
-| One combined release | [~] Latest full gate37134010887 remains RED: 720/721 backend and 684/687 frontend. Corrections are reviewed, awaiting integration and a new full gate. Candidate21d8acef is pushed; its affected checks retain one initial crash with a passing retry. Last verified live is 14b86ed6a6ef. |
+| One combined release | [~] Four reviewed lanes merged and pushed as bb639041. New full gate37139900977 and local affected checks are running. Previous full gate37134010887 remains recorded RED. Both live sites rechecked: 14b86ed6a6ef, Paid. |
 | Versions / portfolio | [~] Four redundant local checkouts removed and independently verified; branches and recovery archive preserved. Other useful/unique work retained. Portfolio coordination pending. |
 | Full owner goal | [~] Reconfirmed active with independent coverage review: 35 areas, 1,115 historical IDs, 511 progress markers and 13 master-plan entries retained. These counts track scope, not completion. Each item needs verified evidence or an explicit owner decision. |
 
