@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { localizeBranchRuleError } from '../src/api/branchRuleErrors.ts'
+import * as branchErrors from '../src/api/branchRuleErrors.ts'
 
 const ts = createRequire(new URL('../../cloudflare/package.json', import.meta.url))('typescript')
 const read = (file: string): string => readFileSync(new URL(file, import.meta.url), 'utf8')
@@ -26,6 +27,12 @@ function load(source: string, name: string, dependencies: Record<string, unknown
 }
 const initial = load(formSource, 'initialBranchForm')
 const restore = load(formSource, 'restoreBranchForm')
+const httpSource = read('../src/api/http.ts')
+const createApiError = load(httpSource, 'createApiError', {
+  isTransientGatewayError: load(httpSource, 'isTransientGatewayError', {
+    TRANSIENT_GATEWAY_STATUSES: load(httpSource, 'TRANSIENT_GATEWAY_STATUSES'),
+  }),
+})
 const branch = { id: 2, name: 'Old Shop', location: 'A', phone: '', manager: '', notes: 'saved', is_active: 0, is_default: 0, updated_at: 'same second', edit_etag: 'original' }
 let failed = 0
 async function check(name: string, run: () => unknown | Promise<unknown>): Promise<void> {
@@ -35,13 +42,14 @@ async function check(name: string, run: () => unknown | Promise<unknown>): Promi
 function formSave(outcome: unknown) {
   const effects = { cleared: 0, closed: 0, saved: { current: false }, dirty: { current: true }, restored: { current: { data: { notes: 'unsaved' } } as unknown } }
   const run = load(formSource, 'handleSave', {
-    setSaving: () => {}, onSave: async () => outcome, form: { notes: 'unsaved' },
+    setSaving: () => {}, onSave: async () => typeof outcome === 'function' ? outcome() : outcome, form: { notes: 'unsaved' },
     savedRef: effects.saved, dirtyRef: effects.dirty, restoredDraftRef: effects.restored,
     clearWorkDraft: () => { effects.cleared++ }, draftKey: 'branch_2', onClose: () => { effects.closed++ },
   })
   return { effects, run }
 }
-function pageSave(response: unknown, error?: Error) {
+function pageSave(response: unknown, error?: Error, language?: 'en' | 'km') {
+  const pack = language ? JSON.parse(read(`../src/lang/${language}.json`)) : {}
   const effects = { sent: [] as any[], history: [] as any[], closed: 0, notices: [] as unknown[], replay: [] as any[] }
   const run = load(pageSource, 'handleSaveBranch', {
     selected: { ...branch, edit_etag: 'current' }, user: { id: 7, name: 'Editor' }, saveInFlightRef: { current: false },
@@ -50,10 +58,9 @@ function pageSave(response: unknown, error?: Error) {
     runBranchMutation: (fn: () => unknown) => fn(), branchApi: { updateBranch: async (_id: unknown, payload: unknown) => {
       effects.sent.push(payload); if (error) throw error; return response
     } },
-    notify: (...args: unknown[]) => effects.notices.push(args), tr: (_key: string, fallback: string) => fallback,
+    notify: (...args: unknown[]) => effects.notices.push(args), tr: (key: string, fallback: string) => pack[key] || fallback,
     getErrorMessage: (value: unknown, fallback: string) => (value as Error)?.message || fallback,
-    localizeBranchRuleError: (value: unknown) => (value as Error)?.message || String(value),
-    branchRuleErrorKey: () => null,
+    ...branchErrors,
     buildBranchPayload: (value: unknown) => value,
     actionHistory: { pushAction: (value: unknown) => effects.history.push(value) },
     branchReplayRequest: (direction: string, fields: unknown, expected: unknown) => ({ direction, fields, expected }),
@@ -146,5 +153,42 @@ await check('both new server errors localize by code and exact fallback in both 
       assert.equal(localizeBranchRuleError(message, key => pack[key]), pack[code])
     }
   }
+})
+for (const language of ['en', 'km'] as const) {
+  const pack = JSON.parse(read(`../src/lang/${language}.json`))
+  for (const [label, status, payload, key] of [
+    ['legacy permission', 403, { error: 'You do not have permission to perform this action' }, 'permission_denied'],
+    ['coded permission', 403, { error: 'Permission changed', code: 'permission_denied' }, 'permission_denied'],
+    ['timestamp conflict', 409, { error: 'This branch changed on another device. Refresh and try again.', code: 'write_conflict', conflict: true, entity: 'branch' }, 'branch_edit_conflict'],
+    ['legacy timestamp conflict', 409, { error: 'This branch changed on another device. Refresh and try again.' }, 'branch_edit_conflict'],
+    ['content conflict', 409, { error: 'This branch edit can no longer be verified. Refresh Branches and submit a new edit.', code: 'branch_edit_conflict', conflict: true }, 'branch_edit_conflict'],
+  ] as const) {
+    await check(`actual API error through ${language} save localizes ${label} and preserves draft`, async () => {
+      const error = createApiError(status, payload, '')
+      const page = pageSave(null, error, language)
+      const form = formSave(() => page.run(initial(branch)))
+      await form.run()
+      assert.equal((page.effects.notices[0] as unknown[])[0], pack[key])
+      assert.equal(form.effects.cleared, 0)
+      assert.equal(form.effects.closed, 0)
+      assert.equal(form.effects.dirty.current, true)
+      assert.equal(page.effects.history.length, 0)
+    })
+  }
+}
+await check('unknown save errors retain their exact message; shared branch-rule callers are unchanged', async () => {
+  for (const payload of [
+    { error: 'Unrecognized server fault', code: 'future_server_fault' },
+    { error: 'You do not have permission to perform this action on a locked batch' },
+    { error: 'This product changed on another device. Refresh and try again.' },
+  ]) {
+    const page = pageSave(null, createApiError(409, payload, ''), 'km')
+    assert.equal(await page.run(initial(branch)), false)
+    assert.equal((page.effects.notices[0] as unknown[])[0], payload.error)
+  }
+  const english = 'You do not have permission to perform this action'
+  assert.equal(localizeBranchRuleError(english, () => 'translation'), english)
+  const timestamp = createApiError(409, { error: 'This branch changed on another device. Refresh and try again.', code: 'write_conflict' }, '')
+  assert.equal(localizeBranchRuleError(timestamp, () => 'translation'), timestamp.message)
 })
 if (failed) process.exitCode = 1

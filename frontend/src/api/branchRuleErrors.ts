@@ -100,3 +100,15 @@ export function localizeBranchRuleError(message: unknown, t: (key: string) => st
   if (!key) return text
   return t(key) || text
 }
+
+export function localizeBranchSaveError(error: unknown, t: (key: string) => string | undefined): string {
+  const text = branchRuleErrorText(error)
+  const code = error && typeof error === 'object' ? (error as BranchRuleErrorLike).code : null
+  if (code === 'permission_denied' || (!code && text === 'You do not have permission to perform this action')) {
+    return t('permission_denied') || text
+  }
+  if (code === 'write_conflict' || (!code && text === 'This branch changed on another device. Refresh and try again.')) {
+    return t('branch_edit_conflict') || text
+  }
+  return localizeBranchRuleError(error, t)
+}

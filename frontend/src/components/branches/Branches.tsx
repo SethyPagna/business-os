@@ -34,7 +34,7 @@ import MinimizeButton from '../shared/MinimizeButton.tsx'
 import { useIsPageActive } from '../shared/pageActivity'
 import BranchForm, { branchFormDraftBaseKey, branchFormWorkKey } from './BranchForm'
 import { replayBranchEdit, type BranchReplayRequest } from './branchHistoryReplay.ts'
-import { localizeBranchRuleError } from '../../api/branchRuleErrors.ts'
+import { localizeBranchSaveError } from '../../api/branchRuleErrors.ts'
 import { useActionHistory } from '../../utils/actionHistory.ts'
 import { cloneHistorySnapshot } from '../../utils/historyHelpers.ts'
 import { lazyRetry } from '../../utils/lazyImport.ts'
@@ -976,7 +976,7 @@ export default function Branches({ embedded = false, view, showSectionNavigation
       }
       const res = await runBranchMutation(() => branchApi.updateBranch(selected.id, payload), 'Update branch')
       if (res?.success === false) {
-        notify(localizeBranchRuleError(res, (key) => tr(key, '')) || 'Failed to save branch', 'error')
+        notify(localizeBranchSaveError(res, (key) => tr(key, '')) || 'Failed to save branch', 'error')
         return false
       }
       if (res?.pending) {
@@ -1006,7 +1006,7 @@ export default function Branches({ embedded = false, view, showSectionNavigation
       void load()
       return true
     } catch (error) {
-      notify(localizeBranchRuleError(error, (key) => tr(key, '')) || getErrorMessage(error, 'Failed to save branch'), 'error')
+      notify(localizeBranchSaveError(error, (key) => tr(key, '')) || getErrorMessage(error, 'Failed to save branch'), 'error')
       return false
     } finally {
       finishSingleAction(saveInFlightRef)
