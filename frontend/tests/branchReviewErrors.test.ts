@@ -94,6 +94,11 @@ for (const language of ['en', 'km'] as const) {
     assert.equal(effects.notices[0][0], pack.branch_approval_unknown_outcome)
     assert.equal(effects.notices[0][1], 'error')
     assert.equal(effects.loads, 0)
+    const genericRow = { ...branchRow, section: 'products', entity_type: 'product' }
+    const generic = fixture(language, { success: true, pending: true, data: genericRow })
+    await generic.run(genericRow)
+    assert.equal(generic.effects.notices[0][1], 'success', 'branch receipt guard must not change generic queue behavior')
+    assert.equal(generic.effects.loads, 1)
   })
   await check(`${language} retry after unknown outcome uses the same approval ID and accepts its recovered receipt`, async () => {
     const flow = fixture(language, null, createApiError(503, { error: english.branch_approval_unknown_outcome, code: 'unknown_outcome', action: 'retry_same_request' }, ''))
