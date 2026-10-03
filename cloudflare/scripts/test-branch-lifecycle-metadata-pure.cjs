@@ -4,6 +4,21 @@ const path = require('node:path')
 const ts = require('typescript')
 const { DatabaseSync } = require('node:sqlite')
 
+function sourceTree(relative) {
+  const source = fs.readFileSync(path.join(__dirname, '../src', relative), 'utf8')
+  return ts.createSourceFile(relative, source, ts.ScriptTarget.Latest, true)
+}
+function evaluate(source, dependencies, result) {
+  const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
+  return new Function(...Object.keys(dependencies), 'exports', `${compiled}; return ${result}`)(...Object.values(dependencies), {})
+}
+function functionSource(tree, name) {
+  const node = tree.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === name)
+  assert.ok(node, `actual ${name} exists`)
+  return node.getText(tree)
+}
+const toDbBool = evaluate(functionSource(sourceTree('lib/db.ts'), 'toDbBool'), {}, 'toDbBool')
+
 const modules = new Map()
 function load(relative) {
   if (modules.has(relative)) return modules.get(relative)
@@ -11,7 +26,7 @@ function load(relative) {
   const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
   const module = { exports: {} }
   new Function('require', 'module', 'exports', compiled)((request) => {
-    if (request === './db') return { toDbBool: (value, fallback = 1) => value == null || value === '' ? fallback : ['true', '1', 'yes', 'on'].includes(String(value).toLowerCase()) ? 1 : 0 }
+    if (request === './db') return { toDbBool }
     if (request.startsWith('./')) return load(request.slice(2))
     throw new Error(`Unexpected import ${request}`)
   }, module, module.exports)
@@ -112,6 +127,73 @@ test('roles honor explicit metadata and reject invalid explicit authority', () =
   assert.equal(roles.branchCanSell({ name: 'Shop', role: 'invalid' }), false)
   assert.equal(roles.branchCanSell({ name: 'Shop', role: null }), true)
 })
+
+test('partial metadata preserves omitted fields and the sole active default', () => {
+  const db = world()
+  db.exec("UPDATE branches SET location='Market',phone='012',manager='Dara' WHERE id=1")
+  const current = db.prepare('SELECT * FROM branches WHERE id=1').get()
+  execute(db, writes.branchUpdateStatements(1, { notes: 'only notes' }, current))
+  const after = db.prepare('SELECT * FROM branches WHERE id=1').get()
+  for (const key of ['location', 'phone', 'manager', 'is_default', 'name', 'is_active']) assert.equal(after[key], current[key], key)
+  assert.equal(after.notes, 'only notes')
+  execute(db, writes.branchUpdateStatements(1, { phone: null, notes: '' }, after))
+  const cleared = db.prepare('SELECT * FROM branches WHERE id=1').get()
+  assert.equal(cleared.phone, null)
+  assert.equal(cleared.notes, null)
+  assert.equal(cleared.location, 'Market')
+  assert.equal(cleared.is_default, 1)
+  db.close()
+})
+
+test('explicit default removal preserves one active default or rolls back', () => {
+  const db = world()
+  const current = db.prepare('SELECT * FROM branches WHERE id=1').get()
+  const before = dump(db)
+  assert.throws(() => execute(db, writes.branchUpdateStatements(1, { is_default: 0, notes: 'must rollback' }, current)))
+  assert.equal(dump(db), before)
+  db.exec("UPDATE branches SET name='Shop',is_active=1,successor_branch_id=NULL WHERE id=2")
+  execute(db, writes.branchUpdateStatements(1, { is_default: 0 }, current))
+  assert.deepEqual(db.prepare('SELECT id FROM branches WHERE is_active=1 AND is_default=1').all().map(row => row.id), [2])
+  db.close()
+})
+
+test('malformed explicit role values fail closed', () => {
+  for (const role of [['shop'], ['warehouse'], { toString: () => 'shop' }, 1, true]) {
+    assert.equal(roles.branchCanSell({ name: 'Shop', role }), false)
+    assert.equal(roles.branchCanBeTransferSource({ name: 'Shop', role }), false)
+  }
+})
+
+test('branch Undo record and operate use the current granular edit grant', () => {
+  const permissions = load('permissions')
+  const undoTree = sourceTree('lib/undoAppliers.ts')
+  const registry = undoTree.statements.flatMap(node => ts.isVariableStatement(node) ? [...node.declarationList.declarations] : []).find(node => node.name.getText(undoTree) === 'APPLIERS')
+  const entry = registry.initializer.properties.find(node => node.name?.text === 'branch.update')
+  const applier = evaluate(`const definition = ${entry.initializer.getText(undoTree)}`, {}, '({name:"branch.update", ...definition})')
+  const tier = evaluate(functionSource(undoTree, 'applierPermissionTier'), permissions, 'applierPermissionTier')
+  const route = sourceTree('routes/actionHistory.ts')
+  const deps = { ...permissions, resolveUndoApplier: () => applier, applierPermissionTier: tier,
+    TRANSFER_OPERATION_KIND: 'transfer', STOCK_SESSION_KIND: 'stock', CUSTOMER_GENDER_RESTORATION_KIND: 'gender',
+    hasAcquisitionCostInput: () => false, historyPayloadObject: value => value, isServerManagedPayload: () => false }
+  const canRecord = evaluate(`${functionSource(route, 'canUseNamedAppliers')}\n${functionSource(route, 'canRecordHistory')}`, deps, 'canRecordHistory')
+  let gate
+  function visit(node) {
+    if (ts.isIfStatement(node) && node.expression.getText(route).includes('applierPermissionTier(user, applier)')) gate = node
+    ts.forEachChild(node, visit)
+  }
+  visit(route)
+  assert.ok(gate, 'actual operate permission gate exists')
+  const operate = evaluate(`function operate(user) { ${gate.getText(route)}; return {status:200} }`, {
+    ...deps, applier, replayChangesProductImages: false, c: { json: (_body, status) => ({ status }) },
+  }, 'operate')
+  const user = { permissions: JSON.stringify({ branches: true, 'branches:edit': true }) }
+  const payload = { applier: 'branch.update', id: 2, fields: { notes: 'restore' } }
+  for (const [section, edit, allowed] of [[true, false, false], ['review', true, false], [true, true, true], [true, false, false]]) {
+    user.permissions = JSON.stringify({ branches: section, 'branches:edit': edit })
+    assert.equal(canRecord(user, { scope: 'branches', entity: 'branch', undo_payload: payload, redo_payload: payload }), allowed)
+    assert.equal(operate(user).status, allowed ? 200 : 403)
+  }
+})
 function reviewHandler(db, beforeBatch = () => {}) {
   const source = fs.readFileSync(path.join(__dirname, '../src/lib/reviewApply.ts'), 'utf8')
   const tree = ts.createSourceFile('reviewApply.ts', source, ts.ScriptTarget.Latest, true)
@@ -139,6 +221,18 @@ async function reviewTests() {
       await reviewHandler(db)({ notes: 'approved', expected_updated_at: '2026-10-01 00:00:00' })
       assert.equal(db.prepare('SELECT notes FROM branches WHERE id=2').get().notes, 'approved')
       assert.equal(db.prepare('SELECT branch_name FROM sales WHERE branch_id=2').get().branch_name, 'Shop')
+      db.close()
+    }],
+    ['real approval partial edit preserves metadata and active default', async () => {
+      const db = world()
+      db.exec("UPDATE branches SET is_default=0 WHERE id=1; UPDATE branches SET is_active=1,is_default=1,successor_branch_id=NULL,location='Market',phone='012',manager='Dara' WHERE id=2")
+      await reviewHandler(db)({ notes: 'approved partial', expected_updated_at: '2026-10-01 00:00:00' })
+      const after = db.prepare('SELECT * FROM branches WHERE id=2').get()
+      assert.equal(after.notes, 'approved partial')
+      assert.equal(after.location, 'Market')
+      assert.equal(after.phone, '012')
+      assert.equal(after.manager, 'Dara')
+      assert.equal(after.is_default, 1)
       db.close()
     }],
     ['real approval handler refuses stale metadata before any effect', async () => {

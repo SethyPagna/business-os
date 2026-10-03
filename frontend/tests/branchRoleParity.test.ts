@@ -71,6 +71,9 @@ runTest('explicit roles agree across packages and cannot borrow authority from t
     [{ name: 'Shop', role: 'warehouse' }, 'warehouse'],
     [{ name: 'Shop', role: 'invalid' }, 'other'],
     [{ name: 'Shop', role: '' }, 'other'],
+    [{ name: 'Shop', role: ['shop'] }, 'other'],
+    [{ name: 'Shop', role: { toString: () => 'shop' } }, 'other'],
+    [{ name: 'Shop', role: true }, 'other'],
     [{ name: 'Shop', role: null }, 'shop'],
   ] as const) {
     assert.equal(branchRole(row), expected)

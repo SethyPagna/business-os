@@ -11,7 +11,6 @@ import { broadcast } from '../durable-objects/broadcastHub'
 import {
   BRANCH_REPLAY_ROW_SQL,
   otherCanonicalBranchSql,
-  branchReplayDefaultStatements,
   branchReplayDropsDefault,
   branchReplayStateGuardStatement,
   branchUpdateStatements,
@@ -3266,9 +3265,8 @@ const APPLIERS: Record<string, UndoApplierDef> = {
   // one applier serves both directions -- the direction only decides which
   // stored payload the route hands in.
   'branch.update': {
-    // Same section the live PUT /branches/:id gates on (getPermissionTier
-    // (user, 'branches') in routes/branches.ts).
     permission: 'branches',
+    action: 'edit',
     run: async (payload, ctx) => {
       const db = getDb(ctx.env)
       const id = Number(payload.id || 0)
@@ -3303,7 +3301,6 @@ const APPLIERS: Record<string, UndoApplierDef> = {
         await db.batch([
           branchReplayStateGuardStatement(id, expected),
           ...branchUpdateStatements(id, replayFields, existing, directory),
-          ...branchReplayDefaultStatements(id, replayFields, existing),
         ])
       } catch (error) {
         // Every guard in this batch (identity, staleness, one default) aborts

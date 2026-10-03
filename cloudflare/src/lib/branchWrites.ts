@@ -50,32 +50,32 @@ export function branchUpdateStatements(
   directory: readonly BranchIdentitySnapshot[] = [],
 ): Array<{ sql: string; params?: Record<string, unknown> }> {
   const identity = prepareCanonicalBranchUpdate(currentIdentity, fields, directory)
-  const defaultFlag = toDbBool(fields.is_default, 0)
+  const writesDefault = Object.prototype.hasOwnProperty.call(fields, 'is_default')
+  const defaultFlag = toDbBool(writesDefault ? fields.is_default : currentIdentity.is_default, 0)
   if (!identity.is_active && defaultFlag) throw new CanonicalBranchIdentityError()
   const statements: Array<{ sql: string; params?: Record<string, unknown> }> = [
     canonicalBranchIdentityGuardStatement(currentIdentity, directory),
   ]
-  if (defaultFlag) {
+  if (writesDefault && defaultFlag) {
     statements.push({
       sql: `UPDATE branches SET is_default = 0
             WHERE id != @id AND ${canonicalActiveBranchSql(currentIdentity)}`,
       params: { id },
     })
   }
-  statements.push({
-    sql: `UPDATE branches SET name=@name, location=@location, phone=@phone, manager=@manager, notes=@notes,
-          is_default=@is_default, is_active=@is_active, updated_at=CURRENT_TIMESTAMP WHERE id=@id`,
-    params: {
-      name: identity.name,
-      location: fields.location || null,
-      phone: fields.phone || null,
-      manager: fields.manager || null,
-      notes: fields.notes || null,
-      is_default: defaultFlag,
-      is_active: identity.is_active,
-      id,
-    },
-  })
+  const assignments = ['name=@name', 'is_active=@is_active', 'updated_at=CURRENT_TIMESTAMP']
+  const params: Record<string, unknown> = { name: identity.name, is_active: identity.is_active, id }
+  for (const field of BRANCH_REPLAY_TEXT_FIELDS) {
+    if (!Object.prototype.hasOwnProperty.call(fields, field)) continue
+    assignments.push(`${field}=@${field}`)
+    params[field] = fields[field] || null
+  }
+  if (writesDefault) {
+    assignments.push('is_default=@is_default')
+    params.is_default = defaultFlag
+  }
+  statements.push({ sql: `UPDATE branches SET ${assignments.join(', ')} WHERE id=@id`, params })
+  if (writesDefault) statements.push(...branchReplayDefaultStatements(id, fields, currentIdentity))
   statements.push(...branchNameSnapshotStatements(id))
   return statements
 }
@@ -196,12 +196,12 @@ export function otherCanonicalBranchSql(current: BranchIdentitySnapshot): string
 }
 
 /**
- * Appended after branchUpdateStatements in a replay so a replay that moves the
- * default flag can never leave zero or two default branches. Setting the flag
+ * Included by branchUpdateStatements when an explicit change moves the
+ * default flag, so direct writes, approvals and replays preserve one default. Setting the flag
  * already clears the other canonical row; clearing it hands the flag back to
  * the other canonical row when none is left (the forward edit that made this
  * row default had taken it from there). The closing assertion aborts the batch
- * unless exactly one canonical, active branch is default. A replay that leaves
+ * unless exactly one canonical, active branch is default. A write that leaves
  * this row's flag as it is adds nothing: it neither causes nor repairs the
  * default elsewhere.
  */

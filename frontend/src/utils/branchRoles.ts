@@ -12,6 +12,7 @@ export function branchRoleFromName(name: unknown): BranchRole {
 export function branchRole(branch: unknown): BranchRole {
   if (branch !== null && typeof branch === 'object') {
     const role = Reflect.get(branch, 'role')
+    if (role != null && typeof role !== 'string') return 'other'
     return branchRoleFromName(role == null ? Reflect.get(branch, 'name') : role)
   }
   return branchRoleFromName(branch)
