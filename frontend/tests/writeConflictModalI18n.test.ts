@@ -44,6 +44,21 @@ function check(name: string, run: () => void) {
   catch (error) { failures++; console.error(`FAIL ${name}`, error) }
 }
 for (const language of ['en', 'km']) {
+  check(language + ': absent branch snapshot is unknown while a known empty value stays empty', () => {
+    for (const current of [null, undefined, {}]) {
+      const { tree, messages } = render(language, { entity: 'branch', attempted: { notes: 'Retained attempt' }, current })
+      const rows = nodes(tree).filter(node => node.key === 'notes')
+      assert.equal(rows.length, 1)
+      assert(text(rows[0]).includes(messages.unknown), 'Missing branch snapshot must remain Unknown')
+      assert(!text(rows[0]).includes(messages.write_conflict_empty), 'Unavailable saved data is not a known empty value')
+      assert(text(rows[0]).includes('Retained attempt'))
+    }
+    const { tree, messages } = render(language, { entity: 'branch', attempted: { notes: 'Retained attempt' }, current: { notes: '' } })
+    const rows = nodes(tree).filter(node => node.key === 'notes')
+    assert.equal(rows.length, 1)
+    assert(text(rows[0]).includes(messages.write_conflict_empty))
+    assert(!text(rows[0]).includes(messages.unknown))
+  })
   check(`${language}: rendered branch conflict localizes chrome and preserves real descriptions`, () => {
     const { html, messages } = render(language, { entity: 'branch', entityLabel: 'Branch',
       attempted: { notes: 'My description <script>keep as text</script>', location: '', is_default: false },

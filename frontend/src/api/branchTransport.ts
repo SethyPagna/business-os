@@ -144,7 +144,7 @@ export function updateBranch(id: string | number, payload: BranchPayload = {}): 
     async () => {
       try { return await apiFetch('PUT', `/api/branches/${encodeId(id)}`, body) }
       catch (error) {
-        if (isWriteConflictError(error)) Object.assign(error as object, { attempted })
+        if (isWriteConflictError(error)) Object.assign(error as object, { entity: 'branch', attempted })
         throw error
       }
     },

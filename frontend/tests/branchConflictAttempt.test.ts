@@ -57,5 +57,7 @@ response = Object.assign(new Error('Changed'), { code: 'branch_edit_conflict', c
 await assert.rejects(mod.exports.updateBranch('a/b', { notes: 'Only description' }))
 assert.deepEqual(observed.attempted, { notes: 'Only description' })
 assert.equal(sent.url, '/api/branches/a%2Fb')
+assert.equal(observed.entity, 'branch', 'Branch ETag conflicts omit server entity; the known transport must identify the branch')
+assert.equal(observed.current, undefined, 'No saved record may be fabricated when the server omitted it')
 assert.equal(requests, 5)
 console.log('PASS absent editable fields stay absent and branch identity remains encoded')

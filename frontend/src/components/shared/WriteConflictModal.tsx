@@ -120,7 +120,8 @@ function getConflictFieldRows(conflict: WriteConflict, tr: Translate): ConflictF
   })
   if (entity === 'settings') return Object.keys(attempted).map(key => row(key))
   if (entity === 'branch') return ['location', 'phone', 'manager', 'notes', 'is_default'].filter(key =>
-    Object.prototype.hasOwnProperty.call(attempted, key)).map(key => row(key, key === 'notes' ? 'description' : key))
+    Object.prototype.hasOwnProperty.call(attempted, key)).map(key => row(key, key === 'notes' ? 'description' : key,
+      attempted[key], Object.hasOwn(current, key) ? current[key] : tr('unknown', 'Unknown')))
   if (entity === 'sale') {
     const rows: ConflictFieldRow[] = []
     if (Object.prototype.hasOwnProperty.call(attempted, 'sale_status')) rows.push(row('sale_status'))
