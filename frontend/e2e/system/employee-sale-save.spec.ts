@@ -14,10 +14,14 @@ test.beforeAll(async ({ request }) => {
 
 async function signIn(page: Page, actor: number, username: string, language = 'en') {
   await page.route('**/*', route => new URL(route.request().url()).origin === origin ? route.continue() : route.abort())
-  await page.addInitScript(({ actor, language }) => { localStorage.setItem('businessos_device_id', `employee-save-device-${actor}`); localStorage.setItem('businessos_language', language) }, { actor, language })
+  await page.addInitScript(actor => { localStorage.setItem('businessos_device_id', `employee-save-device-${actor}`) }, actor)
   await page.goto(origin)
   await expect(page.locator('#login-username')).toBeVisible()
   await expect(page.locator('#login-username')).toBeFocused()
+  if (language === 'km') {
+    await page.getByRole('button', { name: 'Switch to Khmer', exact: true }).click()
+    await expect(page.getByRole('button', { name: km.login, exact: true })).toBeVisible()
+  }
   await page.locator('#login-username').fill(username)
   await page.locator('#login-password').fill('e2e-password')
   await expect(page.locator('#login-username')).toHaveValue(username)
@@ -42,8 +46,7 @@ async function openFreshSale(page: Page) {
   const sale = body.sale
   expect(sale.id).toBeGreaterThan(0)
   await page.goto(origin + '/sales')
-  await expect(page.getByText(String(sale.receipt_number), { exact: true }).first()).toBeVisible({ timeout: 60_000 })
-  await page.getByText(String(sale.receipt_number), { exact: true }).first().click()
+  await openReceipt(page, sale)
   await expect(page.locator('[data-sale-line-name]').getByText('E2E Original Powder', { exact: true })).toBeVisible()
   return sale
 }
@@ -70,9 +73,15 @@ function redacted(value: any) {
 }
 async function persistedReload(page: Page, sale: any, name: string) {
   await page.reload()
-  await expect(page.getByText(String(sale.receipt_number), { exact: true }).first()).toBeVisible()
-  await page.getByText(String(sale.receipt_number), { exact: true }).first().click()
+  await openReceipt(page, sale)
   await expect(page.locator('[data-sale-line-name]').getByText(name, { exact: true })).toBeVisible()
+}
+async function openReceipt(page: Page, sale: any) {
+  const label = page.getByText(String(sale.receipt_number), { exact: true }).filter({ visible: true }).first()
+  await expect(label).toBeVisible({ timeout: 60_000 })
+  if ((page.viewportSize()?.width || 1440) < 768) {
+    await page.locator('div.card').filter({ has: page.getByText(String(sale.receipt_number), { exact: true }) }).filter({ visible: true }).click({ position: { x: 8, y: 8 } })
+  } else await label.click()
 }
 async function submit(page: Page, path: string, trigger: () => Promise<unknown>) {
   const response = page.waitForResponse(r => new URL(r.url()).pathname === path && r.request().method() === 'POST')
@@ -179,7 +188,7 @@ test('amend-only employee quantity and line Replace Save reload preserve both st
   expect(after.sales[0].total_usd).toBe(6)
   expect(after.receipts).toHaveLength(2)
   expect(after.receipts.every((r: any) => r.actor_id === 912)).toBe(true)
-  expect(after.history.some((r: any) => r.created_by_id === 912)).toBe(true)
+  expect(after.amendments.every((r: any) => r.user_id === 912)).toBe(true)
   expect(after.audits.some((r: any) => r.user_id === 912)).toBe(true)
   expect(after.amendments.some((r: any) => r.kind === 'line_removed' && r.product_id === 201)).toBe(true)
   expect(after.amendments.some((r: any) => r.kind === 'line_added' && r.product_id === 203)).toBe(true)
@@ -269,7 +278,7 @@ test('actual Worker refuses stale FX bad pricing missing identity and insufficie
     expect(await state(page, sale.id)).toEqual(before)
     rejected = await api(page, `/api/sales/${sale.id}/items`, 'POST', { ...oversell, expected_header_quote: rejected.body.header_quote })
   }
-  expect(rejected.status, JSON.stringify(rejected.body)).toBe(400)
+  expect(rejected.status, JSON.stringify(rejected.body)).toBe(409)
   expect(String(rejected.body.error)).toMatch(/stock|quantity/i)
   expect(await state(page, sale.id)).toEqual(before)
   controls.push({ name: 'insufficient-stock', ...rejected })
