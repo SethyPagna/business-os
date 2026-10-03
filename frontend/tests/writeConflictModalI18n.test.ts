@@ -47,7 +47,7 @@ for (const language of ['en', 'km']) {
   check(`${language}: rendered branch conflict localizes chrome and preserves real descriptions`, () => {
     const { html, messages } = render(language, { entity: 'branch', entityLabel: 'Branch',
       attempted: { notes: 'My description <script>keep as text</script>', location: '', is_default: false },
-      current: { id: 27, name: 'Old Shop', location: null, notes: 'Saved description', is_default: true },
+      current: { id: 27, name: 'Old Shop', location: null, notes: 'Saved description', is_default: true, updated_at: '2026-10-03T00:00:00Z' },
       expectedUpdatedAt: '2026-10-03T00:00:00Z', actualUpdatedAt: null })
     assert(html.includes(messages.dismiss), 'Dismiss must use the selected language')
     for (const key of ['write_conflict_title', 'write_conflict_older_version', 'write_conflict_background_refresh',
@@ -62,6 +62,9 @@ for (const language of ['en', 'km']) {
     assert(html.includes('Saved description'))
     assert(html.includes(fmtDateTime24(new Date('2026-10-03T00:00:00Z'))))
     assert(!html.includes('>null<'))
+    for (const key of ['default', 'updated']) assert(nodes(render(language, { entity: 'branch', current: { is_default: true, updated_at: '2026-10-03T00:00:00Z' } }).tree)
+      .some(node => (node.type === 'span' || node.type === 'div') && text(node.props.children) === messages[key]), `${language} renders mapped ${key} label`)
+    for (const key of ['is_default', 'updated_at']) assert(!html.includes('>' + key + '</'), `${language} must not expose raw known field ${key}`)
   })
   check(`${language}: existing variants render localized known labels without translating stored values`, () => {
     const cases = [

@@ -58,7 +58,7 @@ function asConflictRecord(value: unknown): ConflictRecord {
 }
 
 function fieldLabel(key: string, tr: Translate): string {
-  const label = Object.hasOwn(FIELD_KEYS, key) ? tr(FIELD_KEYS[key], key) : key
+  const label = Object.hasOwn(FIELD_KEYS, key) ? tr(FIELD_KEYS[key], FIELD_KEYS[key]) : key
   return key === 'total_refund_usd' ? label + ' (USD)' : label
 }
 
