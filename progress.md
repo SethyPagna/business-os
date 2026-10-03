@@ -5,18 +5,18 @@
 Every item carries an ID (U-1, U-cost, Q15 …). `docs/history/session-log.md` uses the same IDs: each Part lists the IDs it moved
 and their new status, and each item here names the Part that last changed it (e.g. "→ Part 633"). Search either file for an ID to see both sides.
 
-### Current work (3 Oct 2026) — Part 670
+### Current work (4 Oct 2026) — Part 671
 
 | Item | Status |
 |---|---|
 | RC2-HOTFIX | [x] Live; both real merge actions and health checks verified. |
 | RC3-UI and DATE | [~] d2b369fc passed exact gate37105062061: 709 Worker + 678 frontend (one browser timeout passed on retry). All 24 picker cases reviewed; missing Returns/Inventory requests verified in 8 follow-up cases. Not live. |
-| Branch consolidation | [~] Historical labels and old-session migration compatibility are reviewed and merged. Snapshot corrections pass 28 Cloudflare table checks plus five populated/race checks. Selling review, historical actions and final stock proof remain open. No live rename or stock move. |
+| Branch consolidation | [~] History and snapshot corrections have bounded reviews; real migration fixtures pass 49 groups. Selling core review is complete. Remaining selling paths, historical actions and final stock proof are open. No live rename or stock move. |
 | STOCK-RETURN | [~] Quantity correction reviewed; partial returns/accounting still in progress. Not live. |
 | Product edit / Undo | [~] Backend/client checkpoints preserved; brand/group/fold/create-stock completion and integration pending. |
-| One combined release | [~] Gate37134010887 on acc0204aa is RED: 720/721 backend and 684/687 frontend tests pass. Four failures are under correction. Candidate21d8acef is pushed; affected checks pass71/72 initially, with the crashed test passing an isolated retry. Last verified live is 14b86ed6a6ef. |
+| One combined release | [~] Latest full gate37134010887 remains RED: 720/721 backend and 684/687 frontend. Corrections are reviewed, awaiting integration and a new full gate. Candidate21d8acef is pushed; its affected checks retain one initial crash with a passing retry. Last verified live is 14b86ed6a6ef. |
 | Versions / portfolio | [~] Four redundant local checkouts removed and independently verified; branches and recovery archive preserved. Other useful/unique work retained. Portfolio coordination pending. |
-| Full owner goal | [~] Set and active; all requests retained in 35 groups, including 1,115 historical IDs, 511 progress markers and 13 master-plan entries. Completion requires evidence for each item; confirmed defects remain open. |
+| Full owner goal | [~] Reconfirmed active with independent coverage review: 35 areas, 1,115 historical IDs, 511 progress markers and 13 master-plan entries retained. These counts track scope, not completion. Each item needs verified evidence or an explicit owner decision. |
 
 ### Deploy checkpoints (26 Sep) — each deploys as soon as it is green; nothing waits for the next
 | Checkpoint | Contents | State |
