@@ -35,8 +35,7 @@ function world(labels = true) {
   const { parent, capture, D1Compat, load } = modules()
   const raw = new DatabaseSync(':memory:'); raw.limits.exprDepth = 100; raw.limits.variableNumber = 100
   raw.exec('PRAGMA foreign_keys=OFF')
-  for (const file of fs.readdirSync(path.join(root, 'migrations')).filter(n => n.endsWith('.sql')).sort()) raw.exec(fs.readFileSync(path.join(root, 'migrations', file), 'utf8'))
-  if (labels) raw.exec('ALTER TABLE stock_transfers ADD COLUMN from_branch_name TEXT; ALTER TABLE stock_transfers ADD COLUMN to_branch_name TEXT; ALTER TABLE stock_session_members ADD COLUMN branch_name TEXT')
+  for (const file of fs.readdirSync(path.join(root, 'migrations')).filter(n => n.endsWith('.sql') && (labels || n !== '0226_branch_history_labels.sql')).sort()) raw.exec(fs.readFileSync(path.join(root, 'migrations', file), 'utf8'))
   raw.exec(`INSERT INTO branches(id,name,is_active,is_default,canonical_key,role,created_at) VALUES(2,'Shop',1,1,'shop','shop','2026-10-03 00:00:00'),(1,'Warehouse',1,0,'warehouse','warehouse','2026-10-03 00:00:00');
     INSERT INTO users(id,username,password,name,organization_id,permissions,is_active) VALUES(7,'operator','fixture','Operator',1,'{"branches":true,"backup_restore":true}',1);
     INSERT INTO system_flags(key,value) VALUES('branch_cutover_control_incarnation','00000000-0000-4000-8000-000000000099')`)
