@@ -11,7 +11,7 @@ and their new status, and each item here names the Part that last changed it (e.
 |---|---|
 | RC2-HOTFIX | [x] Live; both real merge actions and health checks verified. |
 | RC3-UI and DATE | [~] d2b369fc passed exact gate37105062061: 709 Worker + 678 frontend (one browser timeout passed on retry). All 24 picker cases reviewed; missing Returns/Inventory requests verified in 8 follow-up cases. Not live. |
-| Branch consolidation | [~] Stock inventory checked; move planning continues. Independent review found a Khmer error-message gap, now being fixed. Direct-edit uncertainty fix awaits independent verification. No rename or stock move. |
+| Branch consolidation | [~] Metadata, drafts and error fixes independently checked and combined in151a5737; combined tests running. Stock move needs a resumable process. No live rename or stock move. |
 | STOCK-RETURN | [~] Quantity correction reviewed; partial returns/accounting still in progress. Not live. |
 | Product edit / Undo | [~] Backend/client checkpoints preserved; brand/group/fold/create-stock completion and integration pending. |
 | One combined release | [~] Sales and reviewed mobile fix merged; independent deployment held. Employee browser11/11 passes, including EN/KM mobile/desktop and scroll limits. |
