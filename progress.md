@@ -5,16 +5,16 @@
 Every item carries an ID (U-1, U-cost, Q15 …). `docs/history/session-log.md` uses the same IDs: each Part lists the IDs it moved
 and their new status, and each item here names the Part that last changed it (e.g. "→ Part 633"). Search either file for an ID to see both sides.
 
-### Current work (3 Oct 2026) — Part 657
+### Current work (3 Oct 2026) — Part 658
 
 | Item | Status |
 |---|---|
 | RC2-HOTFIX | [x] Live; both real merge actions and health checks verified. |
 | RC3-UI and DATE | [~] d2b369fc passed exact gate37105062061: 709 Worker + 678 frontend (one browser timeout passed on retry). All 24 picker cases reviewed; missing Returns/Inventory requests verified in 8 follow-up cases. Not live. |
-| Branch consolidation | [~] d0bbd2d7 combines independently reviewed dialog, stock-startup and approval fixes. Full checks and new screenshots pending. Stock move journal in progress; no live rename or stock move. |
+| Branch consolidation | [~] d0bbd2d7 package/build checks pass. Independent review caught a journal replacement flaw; held for correction. Sales/receiving name guards also need correction before LC Store. No live rename or stock move. |
 | STOCK-RETURN | [~] Quantity correction reviewed; partial returns/accounting still in progress. Not live. |
 | Product edit / Undo | [~] Backend/client checkpoints preserved; brand/group/fold/create-stock completion and integration pending. |
-| One combined release | [~] Sales and reviewed mobile fix merged; independent deployment held. Employee browser11/11 passes, including EN/KM mobile/desktop and scroll limits. |
+| One combined release | [~] Full714 Worker depth100 run continues on frozend0bb. Four test-fixture failures corrected separately and independently checked. Frontend, screenshots and new exact gate remain pending. |
 | Versions / portfolio | [~] Four redundant local checkouts removed and independently verified; branches and recovery archive preserved. Other useful/unique work retained. Portfolio coordination pending. |
 | Full owner goal | [~] Active; 35 scope groups and 1,115 historical IDs retained. Independent coverage audit complete; implementation/live reconciliation continues. |
 
