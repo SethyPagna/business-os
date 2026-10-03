@@ -167,6 +167,82 @@ test('add-only employee Save reload and exact retry preserve stock audit and gra
   await info.attach('native-add-before-after-and-request', { body: JSON.stringify({ before, after, request: saved.request, response: saved.body, retry, resolved, records, changedStatus: changed.status, deniedStatus: denied.status }, null, 2), contentType: 'application/json' })
 })
 
+test('amend-only employee sequential quantity saves keep one detail open and advance confirmed versions', async ({ page }, info) => {
+  await signIn(page, 912, 'e2e_employee_amend')
+  const sale = await openFreshSale(page), before = await state(page, sale.id)
+  const header = await page.locator('[data-sale-detail-header]').elementHandle()
+  expect(header).not.toBeNull()
+  await expect(page.getByText('Add items to this sale', { exact: true })).toHaveCount(0)
+  const requestIds = new Set<string>()
+  const evidence: any[] = []
+  let latestVersion = String(sale.updated_at), previousQuantity = 1
+  let previous = before
+  expect(latestVersion).toBe(String(before.sales[0].updated_at))
+  try {
+    for (const quantity of [2, 3, 1]) {
+      await expect(page.locator('[data-sale-detail-header]')).toBeVisible()
+      expect(await header!.evaluate(element => element.isConnected), 'the original detail must remain open').toBe(true)
+      const line = page.locator('tr').filter({ has: page.locator('[data-sale-line-name]').getByText('E2E Original Powder', { exact: true }) })
+      await expect(line.getByRole('button', { name: /^Edit$/ })).toBeEnabled()
+      await line.getByRole('button', { name: /^Edit$/ }).click()
+      const input = page.locator('input[id="amend-qty-' + before.lines[0].id + '"]')
+      await expect(input, 'the next editor must show the last committed quantity').toHaveValue(String(previousQuantity))
+      await input.fill(String(quantity))
+      await page.getByRole('button', { name: /^Apply$/ }).click()
+      const pending = page.waitForResponse(response => new URL(response.url()).pathname === '/api/sales/' + sale.id + '/amendments' && response.request().method() === 'POST')
+      await page.getByRole('button', { name: /^Apply change$/ }).click()
+      const response = await pending, body = await response.json(), request = response.request().postDataJSON()
+      const after = await state(page, sale.id)
+      evidence.push({ quantity, expectedVersion: latestVersion, status: response.status(), request, response: body, before: previous, after })
+      redacted(body)
+      expect(request.expected_updated_at, 'each new edit must use the latest confirmed version, without reopening').toBe(latestVersion)
+      expect(typeof request.client_request_id).toBe('string')
+      expect(request.client_request_id.length).toBeGreaterThan(0)
+      expect(requestIds.has(request.client_request_id), 'separate edits need distinct request identities').toBe(false)
+      requestIds.add(request.client_request_id)
+      expect(response.status(), JSON.stringify(body)).toBe(200)
+      expect(Number(body.sale.id)).toBe(Number(sale.id))
+      expect(typeof body.updated_at).toBe('string')
+      expect(body.updated_at).not.toBe(latestVersion)
+      expect(after.sales[0].updated_at).toBe(body.updated_at)
+      expect(after.lines.map((row: any) => [row.id, row.product_id, row.quantity])).toEqual([[before.lines[0].id, 201, quantity]])
+      expect(after.allocations).toHaveLength(1)
+      expect(after.allocations[0].id).toBe(before.allocations[0].id)
+      expect(after.allocations[0].quantity).toBe(quantity)
+      expect(stock(after, 201)).toBe(stock(before, 201) - (quantity - 1))
+      expect(lot(after, 701)).toBe(lot(before, 701) - (quantity - 1))
+      expect(after.sales[0].total_usd).toBe(quantity * 9.5)
+      expect(after.sales[0].total_khr).toBe(quantity * 38000)
+      expect(Number(after.sales[0].amount_paid_usd)).toBe(Number(before.sales[0].amount_paid_usd))
+      expect(after.sales[0].sale_status).toBe(before.sales[0].sale_status)
+      expect(after.receipts).toHaveLength(before.receipts.length + requestIds.size)
+      expect(after.receipts.every((row: any) => row.actor_id === 912)).toBe(true)
+      expect(after.amendments.length).toBeGreaterThan(previous.amendments.length)
+      expect(after.amendments.every((row: any) => row.user_id === 912)).toBe(true)
+      expect(after.audits.filter((row: any) => row.user_id === 912 && !previous.audits.some((old: any) => old.id === row.id)).length).toBeGreaterThan(0)
+      expect(after.foreignKeyCheck).toEqual([])
+      const receipt = await api(page, '/api/sales/' + sale.id + '/line-receipt/amendment', 'POST', request)
+      expect(receipt.status).toBe(200)
+      expect(receipt.body.committed).toBe(true)
+      redacted(receipt.body)
+      expect(receipt.body.response.sale).toEqual(body.sale)
+      expect(await state(page, sale.id)).toEqual(after)
+      await expect(page.getByRole('button', { name: /^Apply change$/ })).toHaveCount(0)
+      await expect(input).toHaveCount(0)
+      await expect(line.getByRole('button', { name: /^Edit$/ })).toBeEnabled()
+      latestVersion = body.updated_at
+      previousQuantity = quantity
+      previous = after
+    }
+    expect(requestIds.size).toBe(3)
+    expect(await header!.evaluate(element => element.isConnected)).toBe(true)
+    await expect(page.locator('[data-sale-detail-header]').getByRole('button', { name: /^Close$/ })).toBeEnabled()
+  } finally {
+    await info.attach('same-open-detail-quantity-requests-and-effects', { body: JSON.stringify({ sale, before, steps: evidence }, null, 2), contentType: 'application/json' })
+    await page.screenshot({ path: info.outputPath('employee-repeated-quantity-same-detail.png'), fullPage: true })
+  }
+})
+
 test('amend-only employee quantity and line Replace Save reload preserve both stock ledgers', async ({ page }, info) => {
   await signIn(page, 912, 'e2e_employee_amend')
   const sale = await openFreshSale(page), before = await state(page, sale.id)
