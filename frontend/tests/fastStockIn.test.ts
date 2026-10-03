@@ -172,7 +172,17 @@ runTest('STK-06: creation reuses ProductForm and resumes without losing the stoc
   assert.match(modalSource, /lazyRetry\(\(\) => import\('\.\.\/products\/forms\/ProductForm'\)/)
   assert.match(modalSource, /import\('\.\.\/\.\.\/api\/productWriteTransport\.ts'\)/)
   // The product is created only when the session completes, with no stock of its own.
-  assert.match(modalSource, /const result = await createProduct\(\{[^]*?client_request_id: line\.createRequestId,[^]*?stock_quantity: 0,/)
+  const assertCapturedCreation = (source: string) => {
+    const start = source.indexOf('  const createHeldProduct = ')
+    const end = source.indexOf('  // ---- commit ----', start)
+    assert.ok(start > 0 && end > start)
+    assert.match(source.slice(start, end), /const payload = \{[\s\S]*?client_request_id: line\.createRequestId,[\s\S]*?stock_quantity: 0,[\s\S]*?const attempt = await reserveReceivingProductAttempt\(user\?\.id, line\.createRequestId, payload, validateDestination\)[\s\S]*?result = await createProduct\(JSON\.parse\(attempt\.bodyJson!\), assertDispatch\)/)
+  }
+  assertCapturedCreation(modalSource)
+  for (const [before, after] of [
+    ['client_request_id: line.createRequestId', 'client_request_id: crypto.randomUUID()'],
+    ['JSON.parse(attempt.bodyJson!), assertDispatch', 'payload'],
+  ]) assert.throws(() => assertCapturedCreation(modalSource.replace(before, after)), assert.AssertionError)
   assert.match(modalSource, /const fastStockInDraftKey = scopedWorkDraftKey\('fast_stockin'\)/,
     'stock session drafts should be scoped to the signed-in user')
   assert.match(modalSource, /writeWorkDraft<StockSessionDraft>\(fastStockInDraftKey/)
