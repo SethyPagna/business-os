@@ -79,7 +79,7 @@ async function main() {
   const cancelledControl = sql.replace('AND s.cancelled_at IS NULL', '')
   assert.equal(fixture.db.prepare(cancelledControl).all()[1].open_shifts, 1)
   fixture.db.close()
-  console.log('PASS branch cutover inventory query: migrated depth100, 34 fixture assertions, 2 discriminating controls, no writes')
+  console.log('PASS branch cutover inventory query: migrated depth100, fixture assertions, 2 discriminating controls, no writes')
 }
 
 main().catch(error => { console.error(error); process.exitCode = 1 })
