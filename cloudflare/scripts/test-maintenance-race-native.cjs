@@ -27,7 +27,7 @@ async function main() {
         return Response.json({current,refusal,ended,raw,cleared});
       }
       const old = await begin(); let replacement=null, intercepted=false;
-      if(input.mode==='corrupt-force-race')await db.prepare('UPDATE system_flags SET value=?').bind('{broken').run();
+      if(input.mode==='corrupt-force-race')await db.prepare('UPDATE system_flags SET value=?').bind('{"mode":"restore","token":null}').run();
       const wrapped = {DB:{prepare(sql){const statement=db.prepare(sql);return {bind(...args){const bound=statement.bind(...args);return {
         first:()=>bound.first(),
         run:async()=>{
@@ -72,13 +72,16 @@ async function main() {
     assert.equal((await call({ mode: 'progress-after-clear' })).current, null)
     const valid = { mode: 'restore', token: 'old', phase: 'deleting', backupKey: 'backup', startedBy: 'admin', startedAt: '2026-09-21T00:00:00Z', updatedAt: '2026-09-21T00:00:00Z' }
     const malformed = [{ phase: {} }, { startedAt: [] }, { table: {} }, { rowsDone: -1 }, { rowsDone: '1' }, { error: {} }].map(patch => JSON.stringify({ ...valid, ...patch }))
-    for (const raw of ['{', 'null', '[]', '{"mode":"restore","token":3}', '{"mode":"other","token":"x"}', '{"mode":"restore","token":""}', ...malformed]) {
+    for (const raw of ['{', 'null', '[]', '{"mode":"restore","token":3}', '{"mode":"other","token":"x"}', '{"mode":"branch-cutover","token":"x"}', '{"mode":"restore","token":""}', ...malformed]) {
       const result = await call({ mode: 'corrupt', raw })
       assert.equal(result.current.phase, 'failed'); assert.equal(result.current.token, '')
       assert.equal(result.refusal, true); assert.equal(result.ended, false)
-      assert.equal(result.raw, raw); assert.equal(result.cleared, true)
+      let mode
+      try { mode = JSON.parse(raw)?.mode } catch {}
+      assert.equal(result.raw, raw); assert.equal(result.cleared, mode === 'restore')
+      assert.equal(result.current.mode, mode === 'restore' ? 'restore' : mode === 'other' ? 'unknown' : 'corrupt')
     }
-    console.log('PASS native maintenance acquisition, stale progress, ordinary/force clear races and twelve corrupt states')
+    console.log('PASS native maintenance acquisition, stale progress, ordinary/force clear races and mode-aware corrupt states')
   } finally { await mf.dispose() }
 }
 main().catch(error => { console.error(error); process.exitCode = 1 })

@@ -29,7 +29,7 @@ export class MaintenanceAdmissionConflictError extends Error {
   }
 }
 
-export interface MaintenanceState {
+export interface RestoreMaintenanceState {
   mode: 'restore'
   token: string
   backupKey: string
@@ -46,6 +46,36 @@ export interface MaintenanceState {
   revision?: string
 }
 
+export interface BranchCutoverMaintenanceState {
+  mode: 'branch-cutover'
+  operationId: string
+  token: string
+  actorId: number
+  organizationId: string
+  controlIncarnation: string
+  beginRequestId: string
+  intentDigest: string
+  revision?: string
+}
+
+export interface InvalidMaintenanceState {
+  mode: 'unknown' | 'corrupt'
+  token: ''
+  phase: 'failed'
+  error: string
+  revision?: string
+}
+
+export type MaintenanceState = RestoreMaintenanceState | BranchCutoverMaintenanceState | InvalidMaintenanceState
+
+function storedMode(raw: unknown): unknown {
+  if (typeof raw !== 'string') return undefined
+  try {
+    const value = JSON.parse(raw)
+    return value && typeof value === 'object' && !Array.isArray(value) ? value.mode : undefined
+  } catch { return undefined }
+}
+
 async function stateRevision(raw: string): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(raw))
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('')
@@ -55,7 +85,20 @@ function parseState(raw: unknown): MaintenanceState | null {
   if (typeof raw !== 'string' || !raw) return null
   try {
     const value = JSON.parse(raw)
-    if (!value || typeof value !== 'object' || Array.isArray(value) || value.mode !== 'restore') return null
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+    if (value.mode === 'branch-cutover') {
+      const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+      if (![value.operationId, value.token, value.controlIncarnation].every(item => typeof item === 'string' && uuid.test(item))
+        || !Number.isSafeInteger(value.actorId) || value.actorId <= 0
+        || typeof value.organizationId !== 'string' || !value.organizationId || value.organizationId !== value.organizationId.trim()
+        || new TextEncoder().encode(value.organizationId).length > 128
+        || typeof value.beginRequestId !== 'string' || !/^[A-Za-z0-9_-]{8,120}$/.test(value.beginRequestId)
+        || typeof value.intentDigest !== 'string' || !/^[0-9a-f]{64}$/.test(value.intentDigest)) return null
+      return { mode: 'branch-cutover', operationId: value.operationId, token: value.token, actorId: value.actorId,
+        organizationId: value.organizationId, controlIncarnation: value.controlIncarnation,
+        beginRequestId: value.beginRequestId, intentDigest: value.intentDigest }
+    }
+    if (value.mode !== 'restore') return null
     for (const field of ['token', 'backupKey', 'startedAt', 'startedBy', 'updatedAt']) {
       if (typeof value[field] !== 'string' || !value[field].trim()) return null
     }
@@ -81,10 +124,14 @@ export async function getMaintenance(env: Env): Promise<MaintenanceState | null>
     const row = await env.DB.prepare('SELECT value FROM system_flags WHERE key = ?')
       .bind(MAINTENANCE_FLAG_KEY).first<{ value: string }>()
     if (!row) return null
-    const state: MaintenanceState = parseState(row.value) || {
+    const mode = storedMode(row.value)
+    const state: MaintenanceState = parseState(row.value) || (mode === 'restore' ? {
       mode: 'restore', token: '', backupKey: '', startedAt: '', startedBy: '',
       phase: 'failed', updatedAt: '', error: 'Maintenance state is corrupt. An administrator must inspect and explicitly clear it.',
-    }
+    } : {
+      mode: typeof mode === 'string' && mode !== 'branch-cutover' ? 'unknown' : 'corrupt', token: '',
+      phase: 'failed', error: 'Maintenance ownership cannot be verified. Restore controls cannot clear this hold.',
+    })
     return { ...state, revision: await stateRevision(row.value) }
   } catch (error) {
     // Only the legacy missing-table case is compatible absence. An unavailable
@@ -97,8 +144,8 @@ export async function getMaintenance(env: Env): Promise<MaintenanceState | null>
 // Begins maintenance; refuses if another restore already holds it (the
 // caller decides whether to surface "force clear first"). Returns the state
 // with the holder token the caller uses for updates/end.
-export async function beginMaintenance(env: Env, input: { backupKey: string; startedBy: string }): Promise<MaintenanceState> {
-  const state: MaintenanceState = {
+export async function beginMaintenance(env: Env, input: { backupKey: string; startedBy: string }): Promise<RestoreMaintenanceState> {
+  const state: RestoreMaintenanceState = {
     mode: 'restore',
     token: crypto.randomUUID(),
     backupKey: input.backupKey,
@@ -127,11 +174,13 @@ export async function beginMaintenance(env: Env, input: { backupKey: string; sta
   return state
 }
 
-export async function updateMaintenance(env: Env, token: string, patch: Partial<Pick<MaintenanceState, 'phase' | 'table' | 'rowsDone' | 'error'>>): Promise<void> {
+export async function updateMaintenance(env: Env, token: string, patch: Partial<Pick<RestoreMaintenanceState, 'phase' | 'table' | 'rowsDone' | 'error'>>): Promise<void> {
   if (!token.trim()) return
   const row = await env.DB.prepare('SELECT value FROM system_flags WHERE key = ?')
     .bind(MAINTENANCE_FLAG_KEY).first<{ value: string }>()
-  if (!row || parseState(row.value)?.token !== token) return
+  if (!row) return
+  const state = parseState(row.value)
+  if (state?.mode !== 'restore' || state.token !== token) return
   // The exact validated snapshot is the CAS fence: malformed state is never
   // repaired by an old progress callback, and UPDATE cannot resurrect a clear.
   await env.DB.prepare(`UPDATE system_flags SET value = json_patch(value, ?), updated_at = CURRENT_TIMESTAMP
@@ -148,6 +197,7 @@ export async function endMaintenance(env: Env, token: string | null, options: { 
     const row = await env.DB.prepare('SELECT value FROM system_flags WHERE key = ?')
       .bind(MAINTENANCE_FLAG_KEY).first<{ value: string }>()
     if (!row) return true
+    if (storedMode(row.value) !== 'restore') return false
     if (options.expectedRevision !== undefined && await stateRevision(row.value) !== options.expectedRevision) return false
     if (!options.force && (!token || parseState(row.value)?.token !== token)) return false
     // Even force clear is scoped to the exact observed row. A newer holder or
@@ -160,19 +210,21 @@ export async function endMaintenance(env: Env, token: string | null, options: { 
   }
 }
 
-// The write gate's allowlist. While a restore runs, every state-changing
-// /api request is refused EXCEPT:
-// - /api/auth/*     -- the admin running the restore must stay signed in,
-//                      and a locked-out admin could otherwise never clear a
-//                      crashed restore's flag.
-// - /api/backups/*  -- the restore flow itself (begin, progress polls, the
-//                      force-clear endpoint) and its system-job reads; every
-//                      endpoint there is already permission-gated.
-const WRITE_GATE_ALLOWLIST = ['/api/auth/', '/api/backups'] as const
 const WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
 
-export function isMaintenanceGatedRequest(method: string, path: string): boolean {
+export function isMaintenanceGatedRequest(method: string, path: string, mode: MaintenanceState['mode'] = 'restore'): boolean {
   if (!WRITE_METHODS.has(method.toUpperCase())) return false
   if (!path.startsWith('/api/')) return false
-  return !WRITE_GATE_ALLOWLIST.some((prefix) => path.startsWith(prefix))
+  if (path === '/api/auth' || path.startsWith('/api/auth/')) return false
+  if (mode === 'restore' && (path === '/api/backups' || path.startsWith('/api/backups/'))) return false
+  return true
+}
+
+export function maintenanceStatus(state: MaintenanceState | null): Record<string, unknown> | null {
+  if (!state) return null
+  if (state.mode === 'branch-cutover') return { mode: state.mode, operationId: state.operationId, revision: state.revision }
+  if (state.mode !== 'restore') return { mode: state.mode, phase: state.phase, error: state.error, revision: state.revision }
+  const { token, ...status } = state
+  void token
+  return status
 }
