@@ -28,6 +28,7 @@ const snapshots: Record<string, Array<[string, string]>> = {
 const tables = [...new Set([...BRANCH_SCALAR_REFERENCES.map(([table]) => table), 'products', ...UNCLASSIFIED_JSON_FAMILIES])].sort()
 const quote = (name: string): string => '"' + name.replaceAll('"', '""') + '"'
 const encoder = new TextEncoder()
+const blankCharacters = '\u0009\u000a\u000b\u000c\u000d\u0020\u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000\ufeff'
 export const cutoverBytes = (text: string): number => encoder.encode(text).length
 export async function cutoverDigest(text: string): Promise<string> {
   return [...new Uint8Array(await crypto.subtle.digest('SHA-256', encoder.encode(text)))].map(v => v.toString(16).padStart(2, '0')).join('')
@@ -66,7 +67,7 @@ const affectedProducts = `SELECT product_id FROM branch_stock WHERE branch_id IN
   UNION SELECT b.variant_product_id FROM product_batches b JOIN branch_batch_stock s ON s.batch_id=b.id WHERE s.branch_id IN (@source,@target)`
 const streamTables = tables.filter(table => table !== 'branch_cutovers' && !UNCLASSIFIED_JSON_FAMILIES.some(family => family === table))
 export const captureRegistryDigest = (): Promise<string> => cutoverDigest(JSON.stringify({ version: 1, references: BRANCH_SCALAR_REFERENCES,
-  streamTables, snapshots, opaqueFamilies: UNCLASSIFIED_JSON_FAMILIES, control: 'branch_cutovers:owned_identity', ordering: 'stable-rowid', metadata: 'products-and-original-batches' }))
+  streamTables, snapshots, blankCharacters, opaqueFamilies: UNCLASSIFIED_JSON_FAMILIES, control: 'branch_cutovers:owned_identity', ordering: 'stable-rowid', metadata: 'products-and-original-batches' }))
 function predicate(table: string): string {
   if (table === 'products') return `id IN (${affectedProducts})`
   if (table === 'branches') return 'id IN (@source,@target) OR successor_branch_id IN (@source,@target)'
@@ -141,8 +142,8 @@ export async function readCutoverCapturePage(db: D1Compat, schema: CaptureSchema
   }
   if (materialize && rows.length) for (const [field, branchField] of snapshots[table] || []) statements.push({
     sql: `UPDATE ${quote(table)} SET ${quote(field)}=CASE ${quote(branchField)} WHEN @source THEN @sourceName WHEN @target THEN @targetName END
-      WHERE rowid IN (SELECT value FROM json_each(@keys)) AND ${quote(branchField)} IN (@source,@target) AND trim(coalesce(${quote(field)},''))=''`,
-    params: { ...params, sourceName: names[identity.sourceBranchId], targetName: names[identity.targetBranchId], keys: JSON.stringify(rows.map(([key]) => key)) },
+      WHERE rowid IN (SELECT value FROM json_each(@keys)) AND ${quote(branchField)} IN (@source,@target) AND trim(coalesce(${quote(field)},''),@blankCharacters)=''`,
+    params: { ...params, blankCharacters, sourceName: names[identity.sourceBranchId], targetName: names[identity.targetBranchId], keys: JSON.stringify(rows.map(([key]) => key)) },
   })
   let records = rows.length
   if (rows.length < pageSize) { digest = await cutoverDigest(JSON.stringify([digest, table, 'end'])); next.index++; next.key = 0; records++ }
@@ -150,8 +151,8 @@ export async function readCutoverCapturePage(db: D1Compat, schema: CaptureSchema
 }
 export function missingSnapshotGuards(identity: CutoverIdentity): CutoverStatement[] {
   return Object.entries(snapshots).flatMap(([table, fields]) => fields.map(([field, branch]) => cutoverAssert(
-    `NOT EXISTS(SELECT 1 FROM ${quote(table)} WHERE ${quote(branch)} IN (@source,@target) AND trim(coalesce(${quote(field)},''))='')`,
-    { source: identity.sourceBranchId, target: identity.targetBranchId },
+    `NOT EXISTS(SELECT 1 FROM ${quote(table)} WHERE ${quote(branch)} IN (@source,@target) AND trim(coalesce(${quote(field)},''),@blankCharacters)='')`,
+    { source: identity.sourceBranchId, target: identity.targetBranchId, blankCharacters },
   )))
 }
 export function unclassifiedFamilyGuards(): CutoverStatement[] {

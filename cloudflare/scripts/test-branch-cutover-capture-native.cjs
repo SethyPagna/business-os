@@ -29,16 +29,18 @@ async function main() {
   await check('only missing historical labels materialize while stock date supplier and cost bytes stay unchanged', async () => {
     const w = world(); stock(w)
     w.raw.exec(`INSERT INTO sales(id,branch_id,branch_name) VALUES(20,2,NULL),(21,1,'Warehouse as sold');
-      INSERT INTO returns(id,branch_id,branch_name) VALUES(20,2,' ');
+      INSERT INTO returns(id,sale_id,branch_id,branch_name) VALUES(20,20,2,' ');
       INSERT INTO inventory_movements(id,branch_id,branch_name,quantity) VALUES(20,1,NULL,0);
       INSERT INTO stock_row_moves(id,source_product_id,destination_product_id,branch_id,quantity) VALUES(20,10,11,2,0);
       INSERT INTO stock_transfers(id,from_branch_id,to_branch_id,quantity) VALUES(20,2,1,0)`)
     const before = hash(['products', 'product_batches', 'branch_stock', 'branch_batch_stock'].map(t => w.raw.prepare('SELECT * FROM '+t+' ORDER BY rowid').all()))
+    const priorRevision = w.raw.prepare('SELECT revision FROM sale_write_revisions WHERE sale_id=20').get().revision
     const row = await until(w, (await begin(w)).row, 'moving')
     assert.equal(row.capture_digest, row.snapshot_digest)
     assert.equal(w.raw.prepare('SELECT branch_name FROM sales WHERE id=20').get().branch_name, 'Shop')
     assert.equal(w.raw.prepare('SELECT branch_name FROM sales WHERE id=21').get().branch_name, 'Warehouse as sold')
     assert.equal(w.raw.prepare('SELECT branch_name FROM returns WHERE id=20').get().branch_name, 'Shop')
+    assert.equal(w.raw.prepare('SELECT revision FROM sale_write_revisions WHERE sale_id=20').get().revision, priorRevision + 2)
     assert.equal(w.raw.prepare('SELECT branch_name FROM stock_row_moves WHERE id=20').get().branch_name, 'Shop')
     assert.equal(w.raw.prepare('SELECT branch_name FROM inventory_movements WHERE id=20').get().branch_name, 'Warehouse')
     assert.deepEqual({ ...w.raw.prepare('SELECT from_branch_name,to_branch_name FROM stock_transfers WHERE id=20').get() }, { from_branch_name: 'Shop', to_branch_name: 'Warehouse' })
@@ -65,6 +67,12 @@ async function main() {
       const w = world(); let row = (await begin(w)).row
       if (!race) w.raw.exec("INSERT INTO action_history(label) VALUES('Legacy undo')")
       row = await until(w, row, 'snapshots')
+      if (!race) {
+        const batches = w.stats.batches
+        await assert.rejects(step(w, row), e => e.code === 'branch_cutover_parent_capability')
+        assert.equal(w.stats.batches, batches); assert.equal(w.raw.prepare('SELECT snapshot_records n FROM branch_cutovers').get().n, 0)
+        w.raw.close(); continue
+      }
       while (true) {
         const cursor = w.capture.parseCaptureCursor(row.snapshot_cursor_json)
         const schema = await w.capture.readCutoverCaptureSchema(w.db)
@@ -82,6 +90,23 @@ async function main() {
     assert.equal(result.replayed, true); assert.equal(row.revision, prior.revision + 1); const batches = w.stats.batches
     const replay = await step(w, prior); assert.equal(replay.row.capture_cursor_json, row.capture_cursor_json); assert.equal(w.stats.batches, batches); w.raw.close()
   })
+  await check('simultaneous identical checkpoint requests have one durable winner', async () => {
+    const w = world(); const { row } = await begin(w); const results = await Promise.all([step(w, row), step(w, row)])
+    assert.equal(results[0].row.capture_digest, results[1].row.capture_digest)
+    assert.equal(w.raw.prepare('SELECT revision FROM branch_cutovers').get().revision, 1)
+    assert.equal(results.filter(result => !result.replayed).length, 1); w.raw.close()
+  })
+  await check('source stock inserted after completed snapshot scan cannot enter empty verification', async () => {
+    const w = world(); let row = await until(w, (await begin(w)).row, 'snapshots')
+    while (true) {
+      const cursor = w.capture.parseCaptureCursor(row.snapshot_cursor_json)
+      const page = await w.capture.readCutoverCapturePage(w.db, await w.capture.readCutoverCaptureSchema(w.db), {sourceBranchId:2,targetBranchId:1}, cursor, row.snapshot_digest, 8, {1:'Warehouse',2:'Shop'}, false)
+      if (page.done && page.records === 0) break
+      row = (await step(w, row)).row
+    }
+    w.stats.before = raw => raw.exec("INSERT INTO products(id,name) VALUES(100,'Late stock'); INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(100,2,1)")
+    await assert.rejects(step(w, row)); assert.equal(w.raw.prepare('SELECT phase FROM branch_cutovers').get().phase, 'snapshots'); w.raw.close()
+  })
   await check('bounded UTF8 rows and nonpositive row ids fail recoverably without checkpoint', async () => {
     for (const large of [true, false]) {
       const w = world(); const key = large ? w.raw.prepare('SELECT max(id)+1 AS id FROM fees').get().id : -1
@@ -90,6 +115,7 @@ async function main() {
       assert.equal(w.raw.prepare('SELECT phase FROM branch_cutovers').get().phase, 'capturing'); w.raw.close()
     }
   })
+  assert.ok(checks > 0, 'test filter must select a group')
   console.log(`${checks} branch cutover capture native groups passed`)
 }
 if (require.main === module) main().catch(e => { console.error(e); process.exitCode = 1 })

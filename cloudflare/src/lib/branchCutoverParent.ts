@@ -10,6 +10,7 @@ import { BRANCH_SCALAR_REFERENCES, BranchCutoverCapabilityError, captureRegistry
 
 type Principal = Pick<SessionUser, 'id' | 'organization_id' | 'is_active'>
 type ParentIntent = CutoverIdentity & { action: 'retire'; parentVersion: 1; registryDigest: string; schemaDigest: string }
+const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
 const actorSql = `SELECT u.id,u.username,u.name,u.organization_id,u.role_id,u.permissions,u.is_active,r.code AS role_code,r.permissions AS role_permissions
   FROM users u LEFT JOIN roles r ON r.id=u.role_id WHERE u.id=@actor AND u.deleted_at IS NULL`
 const unsupportedStockSql = `SELECT
@@ -36,20 +37,26 @@ export class BranchCutoverParentOutcomeUnknown extends Error {
   constructor(cause: unknown) { super('Reconcile this same branch cutover operation before continuing.', { cause }) }
 }
 function requireParent(condition: unknown): asserts condition { if (!condition) throw new Error('branch_cutover_parent_conflict') }
+function checkStatement(sql: string, params?: Record<string, unknown> | unknown[]): void {
+  requireParent(cutoverBytes(sql) <= 100000 && Object.keys(params || {}).length <= 100
+    && cutoverBytes(sql) + cutoverBytes(JSON.stringify(params || {})) <= 1048576)
+}
 function metered(db: D1Compat, budget: TransferInvocationBudget): D1Compat {
   requireParent(budget.extraAtomicStatements === 0)
   let attempts = 0; let batches = 0
   const chargeRead = () => { assertTransferStatementsFit({ ...budget, remainingReads: budget.remainingReads + attempts }, 2); attempts += 2 }
   return new Proxy(db, { get(target, key, receiver) {
     if (key === 'prepare') return (sql: string) => {
+      checkStatement(sql)
       const prepared = target.prepare(sql)
-      return { get: async (params?: Record<string, unknown> | unknown[]) => { chargeRead(); return prepared.get(params) },
-        all: async (params?: Record<string, unknown> | unknown[]) => { chargeRead(); return prepared.all(params) } }
+      return { get: async (params?: Record<string, unknown> | unknown[]) => { checkStatement(sql, params); chargeRead(); return prepared.get(params) },
+        all: async (params?: Record<string, unknown> | unknown[]) => { checkStatement(sql, params); chargeRead(); return prepared.all(params) } }
     }
     if (key === 'batchOnce') return async (statements: CutoverStatement[]) => {
       requireParent(batches++ === 0)
       assertTransferStatementsFit({ ...budget, remainingReads: budget.remainingReads + attempts + 12 }, statements.length)
-      requireParent(statements.every(s => cutoverBytes(s.sql) <= 100000) && statements.reduce((n, s) => n + cutoverBytes(s.sql) + cutoverBytes(JSON.stringify(s.params || {})), 0) <= 1048576)
+      statements.forEach(s => checkStatement(s.sql, s.params))
+      requireParent(statements.reduce((n, s) => n + cutoverBytes(s.sql) + cutoverBytes(JSON.stringify(s.params || {})), 0) <= 1048576)
       return target.batchOnce(statements)
     }
     return Reflect.get(target, key, receiver)
@@ -113,6 +120,9 @@ export async function inspectBranchCutover(db: D1Compat, actor: Principal, organ
 }
 export async function beginBranchCutover(db: D1Compat, actor: Principal, organizationId: number,
   input: CutoverIdentity & { requestId: string; controlIncarnation: string; expectedSourceJson: string; expectedTargetJson: string; expectedSchemaDigest: string }, budget: TransferInvocationBudget) {
+  requireParent(/^[A-Za-z0-9_-]{8,120}$/.test(input.requestId) && uuidPattern.test(input.controlIncarnation)
+    && /^[0-9a-f]{64}$/.test(input.expectedSchemaDigest) && typeof input.expectedSourceJson === 'string' && typeof input.expectedTargetJson === 'string'
+    && cutoverBytes(input.expectedSourceJson) <= 16384 && cutoverBytes(input.expectedTargetJson) <= 16384)
   db = metered(db, budget); const current = await principal(db, actor, organizationId); const state = await branches(db, input)
   const schema = await readCutoverCaptureSchema(db); requireSchema(schema)
   const unsupported = await stockCapabilities(db, input)
@@ -144,6 +154,7 @@ export async function beginBranchCutover(db: D1Compat, actor: Principal, organiz
 }
 export async function continueBranchCutover(db: D1Compat, actor: Principal, organizationId: number,
   input: { operationId: string; expectedRevision: number; pageSize?: number }, budget: TransferInvocationBudget) {
+  requireParent(uuidPattern.test(input.operationId))
   db = metered(db, budget); const current = await principal(db, actor, organizationId)
   const stored = await db.prepare('SELECT * FROM branch_cutovers WHERE operation_id=@id').get<BranchCutoverJournalRow>({ id: input.operationId })
   requireParent(stored && stored.actor_id === current.id && stored.organization_id === String(organizationId))
@@ -157,12 +168,17 @@ export async function continueBranchCutover(db: D1Compat, actor: Principal, orga
   const schema = await readCutoverCaptureSchema(db); requireSchema(schema); requireParent(schema.digest === intent.schemaDigest)
   const state = await branches(db, intent); requireParent(JSON.stringify(state.source) === row.source_preimage_json && JSON.stringify(state.target) === row.target_preimage_json)
   const stage = row.phase === 'capturing' ? 'capture' : 'snapshot'
+  if (stage === 'snapshot') {
+    const families = await readUnclassifiedCutoverFamilies(db)
+    if (families.length) throw new BranchCutoverCapabilityError('unclassified_historical_payloads:' + families.map(f => f.family + '=' + f.rows).join(','))
+  }
   const cursor = parseCaptureCursor(row[`${stage}_cursor_json`]); const priorDigest = row[`${stage}_digest`]
   const page = await readCutoverCapturePage(db, schema, intent, cursor, priorDigest, input.pageSize ?? 8,
     { [intent.sourceBranchId]: String(state.source.name), [intent.targetBranchId]: String(state.target.name) }, stage === 'snapshot')
   const unsupported = await stockCapabilities(db, intent)
   if (unsupported.length) throw new BranchCutoverCapabilityError(unsupported.map(v => v.code + ':' + v.detail).join(';'))
   const before = [...guardsFor(current, schema, state), stockGuard(intent), ...page.statements]
+  if (stage === 'snapshot') before.push(...unclassifiedFamilyGuards())
   const final = cutoverAssert(`EXISTS(SELECT 1 FROM branch_cutovers WHERE operation_id=@operation AND revision=@revision+1)`, { operation: row.operation_id, revision: row.revision })
   let perform: (composed: D1Compat) => Promise<BranchCutoverJournalRow>
   if (page.records > 0) {
@@ -178,10 +194,8 @@ export async function continueBranchCutover(db: D1Compat, actor: Principal, orga
   } else {
     const manifest = JSON.parse(row.manifest_json || 'null')
     if (manifest?.version !== 2 || manifest.coverage?.kind !== 'scalar-reference-capture') throw new BranchCutoverCapabilityError('parent_manifest_v2_required')
-    const families = await readUnclassifiedCutoverFamilies(db)
-    if (families.length) throw new BranchCutoverCapabilityError('unclassified_historical_payloads:' + families.map(f => f.family + '=' + f.rows).join(','))
     requireParent(row.snapshot_digest === row.capture_digest && row.snapshot_records === row.capture_records)
-    before.push(...missingSnapshotGuards(intent), ...unclassifiedFamilyGuards())
+    before.push(...missingSnapshotGuards(intent))
     if (manifest.movingProducts === 0) before.push(cutoverAssert(`NOT EXISTS(SELECT 1 FROM branch_stock WHERE branch_id=@source AND quantity<>0)
       AND NOT EXISTS(SELECT 1 FROM branch_batch_stock WHERE branch_id=@source AND quantity<>0)`, { source: intent.sourceBranchId }))
     perform = composed => finishBranchCutoverSnapshots(composed, proof(row), row.revision)

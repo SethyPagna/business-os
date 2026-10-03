@@ -40,7 +40,8 @@ function world(labels = true) {
   raw.exec(`INSERT INTO branches(id,name,is_active,is_default,canonical_key,role,created_at) VALUES(2,'Shop',1,1,'shop','shop','2026-10-03 00:00:00'),(1,'Warehouse',1,0,'warehouse','warehouse','2026-10-03 00:00:00');
     INSERT INTO users(id,username,password,name,organization_id,permissions,is_active) VALUES(7,'operator','fixture','Operator',1,'{"branches":true,"backup_restore":true}',1);
     INSERT INTO system_flags(key,value) VALUES('branch_cutover_control_incarnation','00000000-0000-4000-8000-000000000099')`)
-  const stats = { reads: 0, batches: 0, statements: 0, maxBinds: 0, before: null, after: null }
+  const stats = { reads: 0, batches: 0, statements: 0, maxBinds: 0, retryReads: false, before: null, after: null }
+  const pendingReadRetries = new Set()
   const prepared = (sql, values = []) => {
     assert.ok(values.length <= 100); stats.maxBinds = Math.max(stats.maxBinds, values.length)
     const execute = () => {
@@ -49,7 +50,13 @@ function world(labels = true) {
       if (/^\s*(SELECT|WITH|PRAGMA)/i.test(sql)) return { success: true, results: statement.all(...args), meta: { changes: 0 } }
       const r = statement.run(...args); return { success: true, results: [], meta: { changes: Number(r.changes), last_row_id: Number(r.lastInsertRowid) } }
     }
-    return { bind: (...v) => prepared(sql, v), execute, all: async () => { stats.reads++; return execute() } }
+    return { bind: (...v) => prepared(sql, v), execute, all: async () => {
+      stats.reads++
+      const retryKey = JSON.stringify([sql, values])
+      if (stats.retryReads && !pendingReadRetries.has(retryKey)) { pendingReadRetries.add(retryKey); throw Error('D1_ERROR: transient network timeout') }
+      pendingReadRetries.delete(retryKey)
+      return execute()
+    } }
   }
   const db = new D1Compat({ prepare: prepared, batch: async statements => {
     stats.batches++; stats.statements = statements.length
@@ -144,6 +151,19 @@ async function main() {
     }
     w.raw.close()
   })
+  await check('one actual READ retry and lost acknowledgement fit explicit budget; one-less budget stops before batch', async () => {
+    const w = world(); const p = await inspect(w); const input = { ...identity, requestId: 'budget_request_001', controlIncarnation: '00000000-0000-4000-8000-000000000099',
+      expectedSourceJson: p.sourcePreimageJson, expectedTargetJson: p.targetPreimageJson, expectedSchemaDigest: p.schemaDigest }
+    const beforeReads = w.stats.reads; w.stats.retryReads = true; w.stats.after = () => { throw Error('lost acknowledgement') }
+    const result = await w.parent.beginBranchCutover(w.db, actor, 1, input, { ...budget, alreadyUsed: 965 })
+    assert.equal(result.replayed, true); assert.equal(w.stats.batches, 1); assert.equal(w.stats.reads - beforeReads, 16)
+    assert.equal(w.stats.statements, 11); assert.ok(w.stats.reads - beforeReads + w.stats.statements <= 35); w.raw.close()
+    const stopped = world(); const plan = await inspect(stopped)
+    await assert.rejects(stopped.parent.beginBranchCutover(stopped.db, actor, 1, { ...input, expectedSchemaDigest: plan.schemaDigest,
+      expectedSourceJson: plan.sourcePreimageJson, expectedTargetJson: plan.targetPreimageJson }, { ...budget, alreadyUsed: 966 }))
+    assert.equal(stopped.stats.batches, 0); stopped.raw.close()
+  })
+  assert.ok(checks > 0, 'test filter must select a group')
   console.log(`${checks} branch cutover parent native groups passed`)
 }
 module.exports = { world, actor, budget, identity, inspect, begin, step }
