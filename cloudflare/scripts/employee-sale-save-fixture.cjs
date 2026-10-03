@@ -40,7 +40,7 @@ async function main() {
   mf = new Miniflare({ modules: true, script: bundle.outputFiles[0].text, compatibilityDate: '2026-07-01', compatibilityFlags: ['nodejs_compat'],
     d1Databases: ['DB'], r2Buckets: ['ASSETS'], kvNamespaces: ['CACHE'],
     durableObjects: { BROADCAST_HUB: 'BroadcastHub', SYNC_UPLOADS: 'SyncUploadSession' },
-    bindings: { PLAN_TIER: 'paid', BUSINESS_OS_PUBLIC_URL: origin, BUSINESS_OS_ADMIN_URL: origin, BUSINESS_OS_ORGANIZATION_SLUG: 'leang-cosmetics', BUSINESS_OS_ORGANIZATION_NAME: 'Disposable E2E' },
+    bindings: { PLAN_TIER: 'paid', BUSINESS_OS_LOCAL_DEV: '1', BUSINESS_OS_PUBLIC_URL: origin, BUSINESS_OS_ADMIN_URL: origin, BUSINESS_OS_ORGANIZATION_SLUG: 'leang-cosmetics', BUSINESS_OS_ORGANIZATION_NAME: 'Disposable E2E' },
     outboundService: request => { receipt.outboundRefusals.push({ method: request.method, url: request.url }); return new Response('External network refused by local fixture', { status: 503 }) }, log: new Log(LogLevel.ERROR) })
   const db = await mf.getD1Database('DB')
   const run = (sql, ...values) => db.prepare(sql).bind(...values).run()

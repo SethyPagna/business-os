@@ -232,9 +232,9 @@ test('amend-only employee quantity and line Replace Save reload preserve both st
   await info.attach('native-amend-before-after-and-requests', { body: JSON.stringify({ before, increased, after, quantity, replaced, replay, resolved, records, amendments, stale, quote, deniedStatus: denied.status }, null, 2), contentType: 'application/json' })
 })
 
-for (const language of ['en', 'km']) for (const width of [1440, 390]) {
+for (const language of ['en', 'km']) for (const width of [1280, 360]) {
   test(`native employee replacement picker layout ${language} ${width}`, async ({ page }, info) => {
-    await page.setViewportSize({ width, height: 900 })
+    await page.setViewportSize({ width, height: 800 })
     await signIn(page, 912, 'e2e_employee_amend', language)
     await openFreshSale(page)
     const labels = language === 'km' ? { edit: km.edit, replace: km.amend_replace, search: km.add_items_search_placeholder } : { edit: 'Edit', replace: 'Replace', search: 'Search by name or barcode' }
@@ -244,7 +244,7 @@ for (const language of ['en', 'km']) for (const width of [1440, 390]) {
     await expect(page.getByText('E2E Replacement Balm', { exact: true }).first()).toBeVisible()
     const bounds = await page.evaluate(() => ({ viewport: innerWidth, document: document.documentElement.scrollWidth }))
     expect(bounds.document).toBeLessThanOrEqual(bounds.viewport + 1)
-    await page.screenshot({ path: info.outputPath(`employee-replacement-${language}-${width}.png`), fullPage: true })
+    await page.screenshot({ path: info.outputPath(`employee-replacement-${language}-${width}.png`), fullPage: false })
     await info.attach('layout-bounds', { body: JSON.stringify(bounds), contentType: 'application/json' })
   })
 }
