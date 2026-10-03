@@ -134,7 +134,7 @@ export interface ReviewPendingActionInput {
 }
 
 export function pendingActionApprovalStatements(row: PendingActionRow, input: ReviewPendingActionInput) {
-  const fields = ['section', 'action_type', 'entity_type', 'entity_id', 'payload_json', 'expected_entity_state_json', 'summary', 'requested_by', 'requested_by_name', 'reviewed_by', 'reviewed_by_name', 'reviewed_at', 'reject_reason', 'created_at', 'updated_at'] as const
+  const fields = ['section', 'action_type', 'entity_type', 'entity_id', 'payload_json', 'summary', 'requested_by', 'requested_by_name', 'reviewed_by', 'reviewed_by_name', 'reviewed_at', 'reject_reason', 'created_at', 'updated_at'] as const
   return [{
     sql: `UPDATE pending_actions SET status='approved', reviewed_by=@reviewedBy, reviewed_by_name=@reviewedByName,
       reviewed_at=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP

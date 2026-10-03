@@ -22,7 +22,7 @@ import { ordinaryBusinessMaintenanceGuard } from './businessMaintenanceGuard'
 import { audit, buildAuditStatement } from './audit'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from './cache'
-import { createProductWithInitialStock, insertRow, updateRow, defaultBranchId, syncProductImageGallery, seedBranchStockForNewProduct, seedInitialBatchForNewProduct, readProductMoneyPlan } from './productWrites'
+import { createProductWithInitialStock, updateRow, syncProductImageGallery, readProductMoneyPlan } from './productWrites'
 import { branchUpdateStatements, assertBranchExpectedState, BranchEditConflictError, isBranchEditGuardError, BranchApprovalReceiptError } from './branchWrites'
 import { assertCanonicalBranchSetMutationAllowed, type BranchIdentitySnapshot } from './canonicalBranchIdentity'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt } from './conflictControl'
@@ -167,11 +167,6 @@ registerApplier('fees', 'delete', 'fee', async (env, row, reviewer, waitUntil) =
 })
 
 // --- products / create / product -----------------------------------
-// Mirrors routes/products.ts's own POST / direct-write branch: same
-// insertRow() call (exported by products.ts for exactly this reuse, see
-// its own comment), same branch_stock seed, same image_gallery sync,
-// same cache bump + broadcast. The pending row's payload is the exact
-// request body the requester originally sent, unchanged since queueing.
 registerApplier('products', 'create', 'product', async (env, row, reviewer, waitUntil) => {
   const body = JSON.parse(row.payload_json || '{}') as Record<string, unknown>
   readProductMoneyPlan(body)

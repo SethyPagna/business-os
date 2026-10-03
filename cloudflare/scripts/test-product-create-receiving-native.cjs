@@ -9,6 +9,7 @@ const src = path.resolve(__dirname, '../src')
 
 const database = openDb(loadAll(path.resolve(__dirname, '../migrations')))
 const raw = database.db
+assert.equal(raw.limits.exprDepth,100)
 let afterRead = null, beforeBatch = null, afterStatement = null, loseAck = false, batchCount = 0
 const DB = {
   prepare(sql) {
@@ -40,15 +41,13 @@ const DB = {
   },
 }
 const env = { DB }
-const real = new Set(['acquisitionCostAccess', 'productWrites', 'moneyPrecision', 'productMerge', 'productIdentity', 'productDetailRule', 'db', 'sqlBinding', 'searchMatch', 'batchCode', 'actorSnapshot', 'pendingActions', 'reviewGate', 'reviewApply', 'conflictControl', 'renameCascade', 'schemaProbe', 'receivingBranch', 'businessMaintenanceGuard', 'media', 'audit', 'permissions', 'productImagePermission'])
+const real = new Set(['acquisitionCostAccess', 'productWrites', 'moneyPrecision', 'productMerge', 'productIdentity', 'productDetailRule', 'db', 'sqlBinding', 'searchMatch', 'batchCode', 'actorSnapshot', 'pendingActions', 'reviewGate', 'reviewApply', 'conflictControl', 'renameCascade', 'schemaProbe', 'receivingBranch', 'businessMaintenanceGuard', 'media', 'audit', 'permissions', 'productImagePermission', 'importImageMatch'])
 const unavailable = name => new Proxy(function () {}, { get: (_target, property) => unavailable(`${name}.${String(property)}`), apply: () => { throw new Error(`Unexpected fixture dependency: ${name}`) }, construct: () => { throw new Error(`Unexpected fixture dependency: ${name}`) } })
-class ProductImageAssetError extends Error {}
 const services = {
   undoAppliers: { registerMergeFold: () => {}, registerProductMergeGroupRedo: () => {}, MERGE_REPARENT_TABLES: [] },
   auth: { requireAuth: async (c, next) => { c.set('user', c.env.TEST_USER); await next() } },
   cache: { bumpVersion: async () => {}, bumpVersions: async () => {} },
   broadcastHub: { broadcast: async () => {} },
-  importImageMatch: { MAX_IMAGES_PER_PRODUCT: 3 },
 }
 const cache = new Map()
 function load(relative) {
@@ -74,7 +73,6 @@ function load(relative) {
 
 const products=load('routes/products.ts').default
 const reviews=load('routes/reviewQueue.ts').default
-const writer=load('lib/productWrites.ts')
 const admin={id:1,username:'admin',name:'Admin',role_code:'admin',tier:'full'}
 const context={waitUntil:p=>Promise.resolve(p).catch(()=>{}),passThroughOnException:()=>{}}
 async function request(app,method,url,body,user=admin){const response=await app.request(url,{method,headers:{'Content-Type':'application/json'},body:JSON.stringify(body)},{...env,TEST_USER:user},context);const text=await response.text();let result;try{result=JSON.parse(text)}catch{result={raw:text}}return {status:response.status,body:result}}
@@ -88,7 +86,7 @@ function pass(name) { console.log(`PASS ${name}`) }
 async function run(){
  raw.exec("INSERT INTO branches(id,name,is_active,is_default) VALUES(1,'Old Shop',0,0),(2,'Warehouse',1,1),(3,'Other',1,0)")
  raw.exec("INSERT INTO users(id,username,name,password,permissions) VALUES(1,'admin','Admin','fixture','{\"all\":true}'),(2,'requester','Requester','fixture','{\"products\":\"review\"}')")
- for (const url of ['/', '/variant']) for(const branch_id of [1,'2x',0,-1,1.5]) {
+ for (const url of ['/', '/variant']) for(const branch_id of [1,'2x',0,-1,1.5,[2],[],{},true]) {
   const before=snapshot(),res=await request(products,'POST',url,{name:`Inactive ${url} ${branch_id}`,branch_id,stock_quantity:5})
   assert.equal(res.status,409,JSON.stringify(res));assert.equal(res.body.code,'receiving_branch_inactive');assert.equal(snapshot(),before)
  }
@@ -160,7 +158,25 @@ async function run(){
  assert.equal(res.status,503,JSON.stringify(res));assert.equal(batchCount,attempts+1);assert.equal(raw.prepare('SELECT status FROM pending_actions WHERE id=?').get(pending).status,'approved')
  const approvedCount=count('products');res=await request(reviews,'POST',`/${pending}/approve`,{});assert.equal(res.status,409);assert.equal(count('products'),approvedCount)
  pass('approval lost acknowledgement retains atomic approved status and prevents duplicate reapply')
- console.log('COMPLETE 13 native groups at SQLite expression depth100; no runtime service')
+
+ const replayBody={name:'Same key variant',branch_id:2,stock_quantity:3,client_request_id:'same-client-create-key'}
+ loseAck=true;res=await request(products,'POST','/variant',replayBody);assert.equal(res.status,503)
+ res=await request(products,'POST','/variant',replayBody);assert.equal(res.status,200,JSON.stringify(res))
+ const variantDuplicates=raw.prepare("SELECT id,client_request_id FROM products WHERE name='Same key variant' ORDER BY id").all()
+ assert.equal(variantDuplicates.length,2);assert.notEqual(variantDuplicates[0].client_request_id,variantDuplicates[1].client_request_id)
+ assert.equal(raw.prepare("SELECT SUM(bs.quantity) AS n FROM branch_stock bs JOIN products p ON p.id=bs.product_id WHERE p.name='Same key variant'").get().n,6)
+ pass('negative replay contract: identical variant client key after lost acknowledgement creates TWO products')
+ const directReplay={name:'Same key direct',branch_id:2,stock_quantity:3,client_request_id:'same-direct-create-key'}
+ loseAck=true;res=await request(products,'POST','/',directReplay);assert.equal(res.status,503)
+ const directOriginal=raw.prepare("SELECT id FROM products WHERE name='Same key direct'").get().id
+ res=await request(products,'POST','/',directReplay);assert.equal(res.status,200,JSON.stringify(res));assert.equal(res.body.folded_into,directOriginal)
+ assert.equal(raw.prepare("SELECT COUNT(*) n FROM audit_logs WHERE entity='product' AND entity_id=? AND action='fold'").get(directOriginal).n,1)
+ raw.exec('UPDATE branches SET is_active=0 WHERE id=2')
+ res=await request(products,'POST','/',directReplay);assert.equal(res.status,409);assert.equal(res.body.code,'receiving_branch_inactive')
+ raw.exec('UPDATE branches SET is_active=1 WHERE id=2')
+ res=await request(products,'POST','/',{...directReplay,name:'Changed intent same direct key'});assert.equal(res.status,200,JSON.stringify(res));assert.notEqual(res.body.id,directOriginal)
+ pass('direct repeated key performs identity fold, refuses retired destination, and accepts changed intent: NOT receipt replay')
+ console.log('COMPLETE 15 native groups at SQLite expression depth100; no runtime service')
  database.close?.()
 }
 run().catch(error=>{console.error(error);process.exitCode=1})

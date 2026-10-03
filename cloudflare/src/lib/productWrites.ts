@@ -306,6 +306,7 @@ export async function productCreateDestination(env: Env, body: Record<string, un
     throw new ProductCreateError('product_initial_quantity_invalid', 'Initial stock must be a finite number.', 400)
   }
   const quantity = Math.max(0, Number(rawQuantity))
+  if (body.branch_id != null && typeof body.branch_id !== 'number' && typeof body.branch_id !== 'string') throw new ReceivingBranchError()
   const explicit = body.branch_id != null && String(body.branch_id).trim() !== ''
   const branchId = explicit ? Number(body.branch_id) : await defaultBranchId(env)
   if (branchId != null) await requireReceivingBranch(getDb(env), branchId)
