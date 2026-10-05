@@ -404,7 +404,7 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
   {
     key: 'fees',
     tKey: 'perm_section_fees',
-    label: 'Fees',
+    label: 'Expenses',
     description: 'Tax, delivery, and other charges.',
     permissions: [
       // tier: true -- 'fees' is the one section whose Review Required tier
@@ -418,7 +418,7 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
       {
         key: 'fees',
         tKey: 'perm_fees',
-        label: 'Fees',
+        label: 'Expenses',
         sensitivity: 'high',
         tier: true,
         reviewTKey: 'perm_fees_review_desc',

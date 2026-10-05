@@ -1326,8 +1326,8 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
         message = 'This product changed on another device. Latest data is loading now.'
         entityLabel = 'Product'
       } else if (entity === 'fee') {
-        message = 'This fee changed on another device. Latest data is loading now.'
-        entityLabel = 'Fee'
+        message = 'This expense changed on another device. Latest data is loading now.'
+        entityLabel = 'Expense'
       } else if (entity === 'customer') {
         message = 'This customer changed on another device. Latest data is loading now.'
         entityLabel = 'Customer'

@@ -70,7 +70,7 @@ export const ROLE_PRESETS: RolePreset[] = [
     labelKey: 'role_preset_manager',
     label: 'Manager',
     descriptionKey: 'role_preset_manager_desc',
-    description: "Full day-to-day operational access -- Dashboard, Customer Portal, POS, Products, Inventory, Branches, Sales, Returns, Fees, Contacts, Library, Audit Log, and the Review/Approval queue -- but not Users and roles, Backup restore/reset, or Security settings, which stay Admin-only.",
+    description: "Full day-to-day operational access -- Dashboard, Website Editor, POS, Products, Inventory, Branches, Sales, Returns, Expenses, Contacts, Library, Audit Log, and the Review/Approval queue -- but not Users and roles, Backup restore/reset, or Security settings, which stay Admin-only.",
     permissions: {
       dashboard: true,
       dashboard_export: true,

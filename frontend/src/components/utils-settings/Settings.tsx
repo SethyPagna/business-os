@@ -2180,7 +2180,7 @@ export default function Settings() {
                 ['telegram_sales_enabled', t('telegram_cat_sales') || 'Sales & new receipts', t('telegram_cat_sales_desc') || 'Receipt number, status, totals, items, customer, and branch'],
                 ['telegram_status_enabled', t('telegram_cat_status') || 'Receipt status changes', t('telegram_cat_status_desc') || 'Payment, delivery, completion, and cancellation changes'],
                 ['telegram_returns_enabled', t('telegram_cat_returns') || 'Customer returns', t('telegram_cat_returns_desc') || 'Return recorded, cancelled or restored: receipt, customer, items and refund'],
-                ['telegram_fees_enabled', t('fees') || 'Fees', t('telegram_cat_fees_desc') || 'New fee type, amount, date, label, and note'],
+                ['telegram_fees_enabled', t('fees') || 'Expenses', t('telegram_cat_fees_desc') || 'New expense: type, amount, date, label, and note'],
                 ['telegram_stock_in_enabled', t('stock_in') || 'Stock in', t('telegram_cat_stock_in_desc') || 'Product, quantity, branch, reason, and received date'],
                 ['telegram_stock_out_enabled', t('stock_out') || 'Stock out', t('telegram_cat_stock_out_desc') || 'Product, quantity, branch, and reason'],
                 // T10: the Worker reads this key (lib/telegram.ts getTelegramConfig)
