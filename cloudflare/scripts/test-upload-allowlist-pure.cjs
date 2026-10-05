@@ -236,10 +236,17 @@ const ASSETS = {
       writeHttpMetadata(headers) { if (entry.contentType) headers.set('content-type', entry.contentType) },
     }
   },
-  delete: async (key) => { store.delete(key) },
+  // R2's binding deletes one key or an array of keys in one call.
+  delete: async (key) => { for (const k of [].concat(key)) store.delete(k) },
 }
 const permissions = loadTs('lib/permissions.ts')
 const enqueued = []
+// The REAL variant writer/deleter (lib/imageVariantStore.ts), so the route is proven to call it.
+const imageVariantStore = loadTs('lib/imageVariantStore.ts', {
+  '../index': {},
+  './uploadSecurity': security,
+  './imageVariants': loadTs('lib/imageVariants.ts', { './quotaGuard': {}, './r2': {}, '../index': {} }),
+})
 
 const filesRoute = loadTs('routes/files.ts', {
   hono: { Hono },
@@ -258,6 +265,7 @@ const filesRoute = loadTs('routes/files.ts', {
   '../lib/uploadSecurity': security,
   '../lib/libraryLogicalAssets': { logicalLibraryName: (name) => name },
   '../lib/imageAudit': { enqueueImageNormalization: async (_env, key) => { enqueued.push(key) } },
+  '../lib/imageVariantStore': imageVariantStore,
   '../lib/imagePipeline': { optimizeImage: async () => ({ ok: false }), IMAGE_MAX_BYTES: 1024 },
   '../lib/rateLimit': { checkRateLimit: async () => ({ allowed: true }), getClientIp: () => '127.0.0.1' },
   '../lib/audit': { audit: async () => {} },
@@ -481,6 +489,27 @@ async function chunkedUpload(buffer, fileName, mime, manifestOverrides = {}) {
     const del = await call('/' + result.json.id, { method: 'DELETE', headers: { 'content-type': 'application/json' }, body: '{}' }, librarian)
     assert.equal(del.status, 200, await del.clone().text())
     assert.ok(!store.has(key), 'delete must remove the uploads/ object')
+  }
+
+  // The browser's thumbnails ride in the same request: stored at the ORIGINAL's
+  // name (never the client's), refused unless WebP, and removed with the original.
+  {
+    puts.length = 0
+    const form = new FormData()
+    form.append('file', new File([PNG], 'thumbs.png', { type: 'image/png' }))
+    form.append('variant_w320', new File([WEBP], '../../evil.webp', { type: 'image/webp' }))
+    form.append('variant_w640', new File([JPEG], 'x.webp', { type: 'image/webp' }))
+    const result = await call('/upload', { method: 'POST', body: form }, librarian)
+    assert.equal(result.status, 200, await result.clone().text())
+    const asset = await result.json()
+    const keys = puts.map((p) => p.key)
+    assert.ok(keys.includes('variants/w320/' + asset.stored_name + '.webp'), 'w320 thumbnail stored under the original name: ' + keys.join())
+    assert.ok(!keys.some((k) => k.includes('evil')), 'the client file name never reaches a key')
+    assert.ok(!keys.includes('variants/w640/' + asset.stored_name + '.webp'), 'a JPEG sent as w640 is refused (bytes decide)')
+    const del = await call('/' + asset.id, { method: 'DELETE', headers: { 'content-type': 'application/json' }, body: '{}' }, librarian)
+    assert.equal(del.status, 200, await del.clone().text())
+    assert.ok(!store.has('variants/w320/' + asset.stored_name + '.webp'), 'deleting the file deletes its thumbnail')
+    assert.ok(!store.has('uploads/' + asset.stored_name))
   }
 
   // Chunked path: HTML is rejected on the reassembled buffer, nothing

@@ -88,6 +88,8 @@ const app = loadReal('routes/system.ts', {
     deleteObjectsBulk: async (_bucket, keys) => ({ deleted: keys.length, errors: [] }),
   },
   '../lib/importRetention': { cleanOrphanImportStaging: async () => ({}) },
+  // Thumbnails derived from uploads/: the pure key helper only (the wipe itself is by prefix).
+  '../lib/imageVariantStore': { variantKeysForUploadKeys: () => [] },
   '../lib/media': { sanitizeMediaList: (v) => v },
   '../lib/coreDataInvariants': {
     FACTORY_RESET_TABLES: ['sales'],
@@ -237,6 +239,13 @@ async function check(name, fn) {
     assert.ok(backupAt < log.indexOf('reseed'))
     assert.equal(res.text.includes(SEED_SECRET), false, 'the seed admin password never leaves the Worker')
     assert.equal(res.json?.admin?.password ?? null, null)
+  })
+
+  await check('the R2 wipe covers variants/ (thumbnails of the wiped uploads/ must not stay reachable)', async () => {
+    const res = await post(GOOD)
+    assert.equal(res.status, 200, res.text)
+    const listed = log.filter((entry) => entry.startsWith('r2-list:'))
+    assert.deepEqual(listed, ['r2-list:uploads/', 'r2-list:variants/', 'r2-list:imports/'])
   })
 
   if (failures) { console.error(`${failures} failing`); process.exit(1) }

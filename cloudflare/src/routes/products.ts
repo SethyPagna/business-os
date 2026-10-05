@@ -13,6 +13,7 @@ import { requireAuth, type SessionUser } from '../lib/auth'
 import { hasPermission, getPermissionTier, getActionTier, getMergedPermissions, isAdminControlUser } from '../lib/permissions'
 import { normalizeCatalogText, hasSuspiciousCatalogText } from '../lib/catalogText'
 import { getMediaType, buildUniqueStoredName, sanitizeOriginalFileName } from '../lib/fileAssets'
+import { persistClientImageVariants } from '../lib/imageVariantStore'
 import { sanitizeMediaList } from '../lib/media'
 import { buildInClause, chunkForBinding, selectInChunks } from '../lib/sqlBinding'
 import { attachBeforeQty, buildStockLedgerQuery, loadMovementStockBalances, movementBalanceFields, type MovementStockBalance, type StockLedgerView } from '../lib/stockLedgerQuery'
@@ -9299,6 +9300,9 @@ app.post('/upload-image', async (c) => {
   await c.env.ASSETS.put(objectKey, buffer, { httpMetadata: { contentType: mimeType } })
   // K3: same on-upload normalization every other image entry point gets.
   await enqueueImageNormalization(c.env, objectKey)
+  // The browser's 320 px and 640 px WebP thumbnails ride in the same request (lib/imageVariantStore.ts):
+  // best effort, never fails the upload, and a missing one falls back to the original.
+  await persistClientImageVariants(c.env, storedName, form)
   const publicPath = `/uploads/${storedName}`
 
   const db = getDb(c.env)
