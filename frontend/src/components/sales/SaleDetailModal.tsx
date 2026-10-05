@@ -10,6 +10,7 @@ import { getSaleDeliveryOptions, getSaleLineReceipt } from '../../api/salesTrans
 import { captureActorReadScope, isActorReadScopeCurrent } from '../../api/actorReadScope.ts'
 import { getSyncServerUrl } from '../../api/httpState.ts'
 import { loadPendingDirectMutation, runSaleLineMutation, replaceReviewedSaleLineHeader, withSaleLineMutationLock, type SaleLineMutationKind } from '../../utils/directMutationRequest.ts'
+import { saleSubmitRefusalText } from '../../api/saleSubmitErrors.ts'
 import { localizeBranchRuleError } from '../../api/branchRuleErrors.ts'
 import ConfirmDialog, { type ConfirmReviewItem } from '../shared/ConfirmDialog.tsx'
 import { fmtDateOnly, fmtDateTime24, fmtTime } from '../../utils/formatters.ts'
@@ -1094,7 +1095,7 @@ export default function SaleDetailModal({
         // A replacement line the Worker refuses because its branch is the
         // warehouse comes back as the exact English of a pack key; show the
         // pack's own sentence so a Khmer session does not read an English one.
-        setAmendMutationError(localizeBranchRuleError(mutationError, t))
+        setAmendMutationError(saleSubmitRefusalText(result, t) ?? localizeBranchRuleError(mutationError, t))
       } else if (result !== false) {
         setAmendLineId(null)
         setReplaceLineId(null)
@@ -1151,8 +1152,8 @@ export default function SaleDetailModal({
         title: translateOr('amend_line_update_title', 'Update this item?', 'ធ្វើបច្ចុប្បន្នភាពទំនិញនេះ?'),
         summary: `${preview.pricingBasis === 'recorded' ? `${translateOr('sale_recorded_pricing', 'Recorded pricing', 'តម្លៃដែលបានកត់ត្រា')} · ` : ''}${name}: ${currentQuantity} → ${preview.quantity} · ${fmtUSD(currentBasePrice)} → ${fmtUSD(preview.basePriceUsd)} · ${translateOr('discount', 'Discount', 'បញ្ចុះតម្លៃ')} ${fmtUSD(currentManualDiscount)} → ${fmtUSD(preview.manualDiscountUsd)} · ${translateOr('total', 'Total', 'សរុប')} ${fmtUSD(preview.lineTotalUsd)}${preview.recordedTotalDerived ? ` · ${translateOr('sale_recorded_unit_fallback', 'Line total derived from the recorded unit price and quantity.', 'សរុបបន្ទាត់គណនាពីតម្លៃឯកតា និងបរិមាណដែលបានកត់ត្រា។')}` : ''}`,
       })
-    } catch {
-      setAmendMutationError(t('money_precision_unavailable'))
+    } catch (error) {
+      setAmendMutationError(saleSubmitRefusalText(error, t) ?? t('money_precision_unavailable'))
     }
   }
 
@@ -1646,7 +1647,7 @@ export default function SaleDetailModal({
       if (Number.isFinite(changedRate) && changedRate > 0) {
         setAddMutationError(translateOr('sale_mutation_rate_changed', 'The exchange rate changed. Review the updated KHR rate, then confirm again.', 'អត្រាប្តូរប្រាក់បានផ្លាស់ប្តូរ។ សូមពិនិត្យអត្រា KHR ថ្មី ហើយបញ្ជាក់ម្តងទៀត។'))
       } else if (mutationError) {
-        setAddMutationError(localizeBranchRuleError(mutationError, t))
+        setAddMutationError(saleSubmitRefusalText(result, t) ?? localizeBranchRuleError(mutationError, t))
       } else if (result !== false) {
         setAddLines([])
         setAddConfirmOpen(false)
@@ -2159,14 +2160,16 @@ export default function SaleDetailModal({
                       : item.batch_id
                         ? `#${item.batch_id}`
                         : ''
-                    const editor = amendLineId === lineId ? (() => {
-                      try { return saleLineEditPreview(items as unknown as Record<string, unknown>[], sale as unknown as Record<string, unknown>, lineId, {
+                    const editorResult = amendLineId === lineId ? (() => {
+                      try { return { refusal: null, editor: saleLineEditPreview(items as unknown as Record<string, unknown>[], sale as unknown as Record<string, unknown>, lineId, {
                         quantity: Number(amendQtyText),
                         ...(Number(amendPriceText) !== baseUnitUsd ? { selling_price_input_usd: sellingPriceCeilCent(amendPriceText) } : {}),
                         ...(amendDiscountType !== manualDiscountType ? { manual_discount_type: amendDiscountType } : {}),
                         ...(Number(amendDiscountText) !== manualDiscountValue ? { manual_discount_value: Number(amendDiscountText) } : {}),
-                      }) } catch { return null }
+                      }) } } catch (error) { return { refusal: saleSubmitRefusalText(error, t), editor: null } }
                     })() : null
+                    const editor = editorResult?.editor ?? null
+                    const editorRefusal = editorResult?.refusal ?? null
                     const preview = editor?.ok ? editor : null
                     const displayQty = preview?.quantity ?? qty
                     const displayPrice = preview?.sellingPriceUsd ?? lineFigures.sellingUnitUsd
@@ -2212,7 +2215,7 @@ export default function SaleDetailModal({
                           {editingLine ? <input id={`amend-qty-${lineId}`} aria-label={t('qty_short') || 'Qty'} type="number" min="0" step="any" inputMode="decimal" disabled={amendSaving} value={amendQtyText} onChange={(event) => setAmendQtyText(event.target.value)} style={{ width: saleEditorInputWidth(amendQtyText) }} className="h-7 min-w-10 rounded border border-gray-300 bg-white px-1 py-0.5 text-right text-[11px] dark:border-gray-600 dark:bg-gray-800" /> : displayQty}
                         </td>
                         <td data-sale-line-price="" className="whitespace-nowrap px-1.5 py-1.5 text-right align-top text-[11px] tabular-nums sm:px-2">
-                          {editingLine ? <div data-sale-line-editor="" className="inline-flex min-w-max flex-nowrap items-center justify-end gap-1">
+                          {editingLine ? <><div data-sale-line-editor="" className="inline-flex min-w-max flex-nowrap items-center justify-end gap-1">
                             <label className="inline-flex items-center justify-end gap-0.5"><span className="sr-only">{t('price') || 'Price'}</span><span aria-hidden="true">$</span><input id={`amend-price-${lineId}`} aria-label={t('price') || 'Price'} type="number" min="0" step="0.01" inputMode="decimal" disabled={amendSaving} value={amendPriceText} onChange={(event) => setAmendPriceText(event.target.value)} style={{ width: saleEditorInputWidth(amendPriceText) }} className="h-7 min-w-10 rounded border border-gray-300 bg-white px-1 py-0.5 text-right text-[11px] dark:border-gray-600 dark:bg-gray-800" /></label>
                             <div className="inline-flex flex-nowrap items-center justify-end gap-0.5 text-[10px] text-amber-700 dark:text-amber-400">
                               <span>{t('discount') || 'Discount'}</span>
@@ -2220,7 +2223,7 @@ export default function SaleDetailModal({
                               <input id={`amend-discount-${lineId}`} aria-label={t('discount') || 'Discount'} type="number" min="0" step="0.01" inputMode="decimal" disabled={amendSaving} value={amendDiscountText} onChange={(event) => { if (!amendDiscountType) setAmendDiscountType('fixed'); setAmendDiscountText(event.target.value) }} style={{ width: saleEditorInputWidth(amendDiscountText) }} className="h-7 min-w-10 rounded border border-amber-300 bg-white px-1 py-0.5 text-right text-[11px] dark:border-amber-700 dark:bg-gray-800" />
                               <button type="button" disabled={amendSaving} aria-label={translateOr('clear_discount', 'Clear discount', 'លុបការបញ្ចុះតម្លៃ')} onClick={() => { setAmendDiscountType(null); setAmendDiscountText('0') }} className="rounded px-1 py-0.5">×</button>
                             </div>
-                          </div> : <span className="inline-flex items-baseline gap-1">{unknownRecordedUnit ? '—' : fmtUSD(displayPrice)}{!unknownRecordedUnit && !unknownRecordedTotal && displayDiscount > 0 ? <span className="text-[10px] text-amber-700 dark:text-amber-400" title={String(item.product_discount_label || '')}>(-{fmtUSD(displayDiscount)}{promotionLabel ? ` ${promotionLabel}` : ''})</span> : null}</span>}
+                          </div>{editorRefusal ? <p role="alert" data-sale-line-discount-refusal="" className="ml-auto mt-0.5 max-w-[16rem] whitespace-normal text-right text-[10px] font-medium text-red-600 dark:text-red-400">{editorRefusal}</p> : null}</> : <span className="inline-flex items-baseline gap-1">{unknownRecordedUnit ? '—' : fmtUSD(displayPrice)}{!unknownRecordedUnit && !unknownRecordedTotal && displayDiscount > 0 ? <span className="text-[10px] text-amber-700 dark:text-amber-400" title={String(item.product_discount_label || '')}>(-{fmtUSD(displayDiscount)}{promotionLabel ? ` ${promotionLabel}` : ''})</span> : null}</span>}
                         </td>
                         <td data-sale-line-total="" className="whitespace-nowrap px-1.5 py-1.5 text-right align-top text-[11px] font-semibold tabular-nums sm:px-2">{unknownRecordedTotal && !preview ? '—' : fmtUSD(displayTotal)}</td>
                         <td data-sale-line-edit="" className="whitespace-nowrap px-1.5 py-1.5 text-right align-top sm:px-2">
@@ -2336,6 +2339,7 @@ export default function SaleDetailModal({
                                 ) : null}
                               </div>
                             ) : null}
+                            {amendMutationError && !amendConfirm && amendMutationError !== editorRefusal ? <p role="alert" data-sale-line-edit-error="" className="mt-1 text-[11px] font-medium text-red-600 dark:text-red-400">{amendMutationError}</p> : null}
                             </div>
                           </td>
                         </tr>
