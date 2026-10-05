@@ -37,6 +37,7 @@ import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.
 import { pruneSelectionToVisibleIds } from '../../utils/rowSelection.ts'
 import {
   directMutationOutcomeIsUnknown,
+  directMutationRefusedBeforeWrite,
   freezeDirectMutationBody,
   loadPendingDirectMutationSlot,
   pendingDirectMutationForScope,
@@ -1230,6 +1231,7 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
     if (!canBulkReturns) throw new Error(tr('permission_denied', 'You do not have permission to perform this action.'))
     if (!beginSingleAction(bulkActionInFlightRef)) throw new Error(tr('return_bulk_in_progress', 'A return bulk action is already running.'))
     setBulkActionSaving(true)
+    const retry = bulkRetryMemory.current?.key === bulkRetryKey && bulkRetryMemory.current.request?.client_request_id === request.client_request_id
     savePendingBulkRequest(request)
     try {
       const { bulkUpdateReturns } = await loadReturnsWriteTransport()
@@ -1251,13 +1253,18 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
       // unknown. A retry therefore receives the server's original receipt
       // instead of applying stock/refund effects twice. A coded refusal (a
       // restore that would over-count a legacy sale) is shown in the UI language.
+      // A first send the Worker refused before its atomic write is released.
+      if (!retry && directMutationRefusedBeforeWrite(error)) {
+        savePendingBulkRequest(null)
+        void loadReturns(true)
+      }
       notify(returnRefusalText(error, tr) ?? (error instanceof Error ? error.message : String(error || '')), 'error')
       throw error
     } finally {
       finishSingleAction(bulkActionInFlightRef)
       setBulkActionSaving(false)
     }
-  }, [actionHistory, canBulkReturns, loadReturns, notify, savePendingBulkRequest, tr])
+  }, [actionHistory, bulkRetryKey, canBulkReturns, loadReturns, notify, savePendingBulkRequest, tr])
 
   useEffect(() => {
     if (!selectAllRef.current) return

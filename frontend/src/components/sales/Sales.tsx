@@ -70,6 +70,7 @@ import { useConfirmDialog } from '../shared/useConfirmDialog.tsx'
 import { createSingleUseResult, type SingleUseResult } from './saleStatusConfirmation.ts'
 import {
   directMutationOutcomeIsUnknown,
+  directMutationRefusedBeforeWrite,
   freezeDirectMutationBody,
   loadPendingDirectMutationSlot,
   pendingDirectMutationForScope,
@@ -2276,7 +2277,7 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
       // The review saw that sale as paid, so this page's copy of it is stale:
       // reload, and the next review names it.
       const unpaid = (error as { code?: string } | null)?.code === 'insufficient_payment_for_status'
-      if (unpaid) {
+      if (unpaid || (!retryRequest && directMutationRefusedBeforeWrite(error))) {
         savePendingBulkRequest(null)
         void loadSales(true)
       }
@@ -2317,7 +2318,7 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
       // (a committed original would have been answered with its receipt), so
       // the retry body is dropped and the list reloaded to show the status.
       const cancelled = saleCancelledRefusal(error)
-      if (cancelled) {
+      if (cancelled || (!retryRequest && directMutationRefusedBeforeWrite(error))) {
         savePendingBulkFieldRequest(null)
         void loadSales(true)
       }

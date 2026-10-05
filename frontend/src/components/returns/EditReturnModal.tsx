@@ -286,7 +286,7 @@ export default function EditReturnModal({ ret, onClose, onSuccess, fmtUSD, notif
     } catch (error) {
       if (isWriteConflict(error)) {
         clearPendingRequest()
-        onSuccess?.()
+        window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'returns' } }))
         return
       }
       if (!directMutationOutcomeIsUnknown(error) && (error as { code?: unknown } | null)?.code !== 'pending_request_persistence_failed') clearPendingRequest()

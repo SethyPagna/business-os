@@ -539,6 +539,14 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
     return () => window.removeEventListener(RESTORE_WORK_EVENT, onRestore)
   }, [restoreFeeForm])
 
+  // A refused or timed-out save reloads the list; the open form's version
+  // follows it so the next Save is not refused for the same stale version.
+  useEffect(() => {
+    if (!selected) return
+    const fresh = fees.find((row) => Number(row.id) === Number(selected.id))
+    if (fresh && fresh.updated_at !== selected.updated_at) setSelected(fresh)
+  }, [fees, selected])
+
   const handleSave = async (payload: FeePayload) => {
     try {
       if (selected) {
