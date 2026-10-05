@@ -775,7 +775,7 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
       if (selected && oldName && oldName.toLowerCase() !== newName.toLowerCase()) {
         const impact = await getCustomerApi().getCustomerRenameImpact(selected.id, newName)
         if (impact.target_exists) {
-          notify(`"${newName}" already exists. Use Possible Duplicates to choose which customer to keep.`, 'warning')
+          notify(`"${newName}" already exists. Use Conflicts to choose which customer to keep.`, 'warning')
           return
         }
         const choice = await askRenameChoice({ kind: 'customer', from: oldName, to: newName, impact, choices: ['carry', 'only'] })

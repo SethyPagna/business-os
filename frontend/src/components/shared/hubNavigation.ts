@@ -50,7 +50,7 @@ export function getHubDestinations(page: string, access: HubAccess): HubDestinat
     ['products', 'products', 'Products', can('products')],
     ['stock_changes', 'stock_change_ledger', 'Stock Changes', can('products')],
     ['stock_in_sessions', 'stock_in_sessions', 'Stock-in Sessions', can('products') && act('inventory', 'adjust')],
-    ['duplicates', 'product_duplicates_section', 'Duplicates', can('products') && act('products', 'merge_duplicates')],
+    ['duplicates', 'product_duplicates_section', 'Conflicts', can('products') && act('products', 'merge_duplicates')],
   ] : page === 'review' ? [
     ['review', 'review_queue', 'Review queue', can('review')],
     ['audit', 'audit_log', 'Audit Log', can('audit_log')],
