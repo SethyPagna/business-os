@@ -1567,6 +1567,7 @@ export default function SaleDetailModal({
   ))
 
   const stageAddReview = (): void => {
+    if (!onAddItems || !addLines.length || addHasStockError) return
     const draft = addDraftRef.current
     if (!lineDraftCurrent(draft)) { setAddMutationError(lineDraftConflict()); return }
     if (!addHeaderQuote) { setAddMutationError(t('money_precision_unavailable')); return }

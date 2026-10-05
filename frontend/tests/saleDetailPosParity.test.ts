@@ -259,7 +259,7 @@ assert.match(detail, /sellingPriceInputUsd: text, unitPriceUsd:[^\n]*sellingPric
 assert.match(detail, /batch_id: line\.batchId/)
 assert.match(detail, /batch_label: line\.batchLabel/)
 assert.match(detail, /batch_expiry_date: line\.batchExpiryDate/)
-assert.match(detail, /\.\.\.stagedLinePricingIntent\(line, savedExchangeRate\)/)
+assert.match(detail, /\.\.\.stagedLinePricingIntent\(line, draft\.exchangeRate\)/)
 // Runtime coverage of these two named choices and their actual submit/confirm
 // callbacks includes exact pricing quotes, branch/lot and refusal invariants.
 await import('./posMoneyV1.test.ts')
