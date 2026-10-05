@@ -584,7 +584,7 @@ export default function Settings() {
       }
     : {
         eyebrow: 'English',
-        title: 'Leang Beauty',
+        title: 'Leang Cosmetics',
         sidebar: 'Sidebar item',
         section: 'Section heading',
         body: 'Products, receipts, settings, and forms will use this font family and size scale.',
