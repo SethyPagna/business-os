@@ -36,7 +36,8 @@ app.onError((error, c) => {
   if (error instanceof Tripwire) return c.json({ tripwire: true }, 598)
   throw error
 })
-for (const name of ['returns', 'fees', 'reports', 'batches']) {
+// routes/sales.ts mounts before compat, matching index.ts.
+for (const name of ['returns', 'fees', 'reports', 'batches', 'sales']) {
   app.route(`/api/${name}`, load(path.join(root, `routes/${name}.ts`)).default)
 }
 // Match production mount order: import authority belongs to importJobs.
@@ -50,7 +51,10 @@ async function request(url, session, options = {}, fixture) {
   user = session
   opens = reads = 0
   db = fixture || { prepare() { reads++; throw new Tripwire('Data access reached') } }
-  const response = await app.request(`http://local.test/api${url}`, options, {})
+  // The KV cache-version read is data access too (sales list/stats read it
+  // before D1), so it trips the same wire and counts against a denial.
+  const env = { CACHE: { get() { reads++; throw new Tripwire('KV reached') } } }
+  const response = await app.request(`http://local.test/api${url}`, options, env)
   checks++
   return response
 }
@@ -68,7 +72,11 @@ async function reachesData(url, session, method = 'GET') {
 const domains = {
   returns: ['/returns', '/returns/1', '/returns/report', '/returns/damaged-lots?product_id=1', '/returns/receipt-lookup?query=123', '/returns/reason-presets', '/returns/reasons/impact?from=old&to=new', '/reports/business-summary/returns'],
   fees: ['/fees', '/fees/1', '/fees/report', '/fees/labels', '/fees/labels/impact?from=old&to=new', '/fees/labels/type-impact?label=old', '/reports/business-summary/expenses'],
-  sales: ['/reports/periods', '/reports/grouped?by=customer', '/reports/grouped?by=product', '/reports/grouped?by=courier', '/reports/business-summary/sales'],
+  sales: ['/reports/periods', '/reports/grouped?by=customer', '/reports/grouped?by=product', '/reports/grouped?by=courier', '/reports/business-summary/sales',
+    // routes/sales.ts reads share the reports rule: an explicit sales:view false
+    // hides the sale list, aggregates, drills, per-sale trails and the export.
+    '/sales', '/sales/stats', '/sales/stats-strip?startDate=2026-10-01&endDate=2026-10-01', '/sales/daily-report', '/sales/day-report?date=2026-10-01',
+    '/sales/1/records', '/sales/1/amendments', '/sales/export'],
 }
 const batchUrls = ['/batches/tracked-product-ids', '/batches?productId=1&branchId=1', '/batches/damaged-lots?productId=1']
 ;(async () => {
@@ -156,6 +164,55 @@ const batchUrls = ['/batches/tracked-product-ids', '/batches?productId=1&branchI
     assert.ok(payload[key])
     for (const hidden of ['sales', 'returns', 'expenses'].filter(value => value !== key)) assert.equal(hidden in payload, false)
     assert.ok(sqls.length > 0)
+  }
+  // routes/sales.ts reads end to end over empty books: Full and View grants get
+  // a real 200 body, while an explicit sales:view false (user override on a
+  // Full or View role, or set on the role itself) and no grant get 403 before
+  // any KV or D1 read. canReadSales once read only the section tier, which let
+  // every view-revoked principal below through with a 200.
+  {
+    const salesReads = ['/sales', '/sales/stats', '/sales/stats-strip?startDate=2026-10-01&endDate=2026-10-01', '/sales/daily-report',
+      '/sales/day-report?date=2026-10-01', '/sales/1/records', '/sales/1/amendments', '/sales/export']
+    const saleRow = { id: 1, receipt_number: 'R1', sale_status: 'completed', total_usd: 0, created_at: '2026-10-01 00:00:00', updated_at: '2026-10-01 00:00:00' }
+    const emptyBooks = { prepare(sql) {
+      reads++
+      return { get: async () => (/FROM sales WHERE id = \?/.test(sql) ? { ...saleRow } : null), all: async () => [], run: async () => ({}) }
+    }, batch: async statements => statements.map(() => ({ results: [] })) }
+    const previousCaches = globalThis.caches
+    globalThis.caches = { default: { match: async () => undefined, put: async () => {} } }
+    const ctx = { waitUntil() {}, passThroughOnException() {} }
+    const salesRequest = async (url, session) => {
+      user = session
+      opens = reads = 0
+      db = emptyBooks
+      const env = { CACHE: { get: async () => { reads++; return null }, put: async () => {} } }
+      const response = await app.request(`http://local.test/api${url}`, {}, env, ctx)
+      checks++
+      return response
+    }
+    try {
+      for (const url of salesReads) {
+        for (const tier of [true, 'view']) {
+          const response = await salesRequest(url, staff({ sales: tier }))
+          assert.equal(response.status, 200, `GET ${url} must serve sales ${tier} with 200, got ${response.status}`)
+          assert.ok(reads > 0, `GET ${url} must reach the real read handler`)
+          await response.json()
+        }
+        for (const session of [
+          staff({ sales: true }, { 'sales:view': false }),
+          staff({ sales: 'view' }, { 'sales:view': false }),
+          staff({ sales: true, 'sales:view': false }),
+          staff({}),
+        ]) {
+          const response = await salesRequest(url, session)
+          assert.equal(response.status, 403, `GET ${url} must refuse ${session.role_permissions} + ${session.permissions}, got ${response.status}`)
+          assert.equal(opens + reads, 0, `GET ${url} must refuse before any KV or D1 read`)
+        }
+      }
+    } finally {
+      if (previousCaches === undefined) delete globalThis.caches
+      else globalThis.caches = previousCaches
+    }
   }
   // GET revocation must leave create/adjust independently action-gated. Empty
   // payloads reach the real write validator, and never write to a database.

@@ -12,13 +12,16 @@ import { chunkForBinding, selectInChunks } from '../lib/sqlBinding'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { canonicalOfflineSaleOwner, offlineSaleOwnerError, offlineSaleOwnerMismatch } from '../lib/offlineSaleOwnership'
 import { audit } from '../lib/audit'
-import { hasAnyPermission, getPermissionTier, getActionTier, isAdminControlUser } from '../lib/permissions'
+import { hasAnyPermission, getActionTier, isAdminControlUser } from '../lib/permissions'
 
 // Sales is a VIEW_TIER section (Part 557 slice 2): a 'view' grant can READ
 // every sales list/stat/report but perform no writes. Reads use this
-// (tier != none = view OR full); writes use action-specific Full gates.
+// (effective view != none = view OR full); writes use action-specific Full
+// gates. The action form honours an explicit 'sales:view': false the same way
+// routes/reports.ts, batches.ts and products.ts already do (ff4bee06e), so
+// hiding Sales hides it on every read surface, not only on Reports.
 function canReadSales(user: SessionUser): boolean {
-  return getPermissionTier(user, 'sales') !== 'none'
+  return getActionTier(user, 'sales', 'view') !== 'none'
 }
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
 import { bumpVersion, bumpVersions, cachedJsonResponse, getVersionWithFallback } from '../lib/cache'
@@ -3715,10 +3718,10 @@ app.get('/delivery-options', async (c) => {
 
 // ---------------------------------------------------------------------------
 app.get('/:id/amendments', async (c) => {
-  const db = getDb(c.env)
   if (!canReadSales(c.get('user'))) {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
+  const db = getDb(c.env)
   const saleId = Number(c.req.param('id'))
   if (!Number.isFinite(saleId) || saleId <= 0) return c.json({ error: 'Sale not found' }, 404)
 
@@ -3759,10 +3762,10 @@ app.get('/:id/amendments', async (c) => {
 // would defeat the feature.
 // ---------------------------------------------------------------------------
 app.get('/:id/records', async (c) => {
-  const db = getDb(c.env)
   if (!canReadSales(c.get('user'))) {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
+  const db = getDb(c.env)
   const saleId = Number(c.req.param('id'))
   if (!Number.isFinite(saleId) || saleId <= 0) return c.json({ error: 'Sale not found' }, 404)
 
@@ -6234,7 +6237,10 @@ app.get('/customer-report', async (c) => {
 // or disappear between pages. Summary aggregates are computed over the whole
 // frozen snapshot and only need to be requested on page 1.
 app.get('/export', async (c) => {
-  if (getActionTier(c.get('user'), 'sales', 'export') === 'none') {
+  // Exporting is reading every sale in the range, so it needs the read grant
+  // as well as its own export switch: a sales:view false user is refused here
+  // exactly as on GET / and on /reports/business-summary/sales.
+  if (!canReadSales(c.get('user')) || getActionTier(c.get('user'), 'sales', 'export') === 'none') {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
   const db = getDb(c.env)
