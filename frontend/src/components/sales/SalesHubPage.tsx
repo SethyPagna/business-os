@@ -1,11 +1,13 @@
 import { getHubDestinations, useHubSection } from '../shared/hubNavigation.ts'
-import { Suspense, lazy } from 'react'
+import { Suspense } from 'react'
 import BadgeDollarSign from 'lucide-react/dist/esm/icons/badge-dollar-sign.js'
 import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw.js'
 import HandCoins from 'lucide-react/dist/esm/icons/hand-coins.js'
 import BarChart3 from 'lucide-react/dist/esm/icons/bar-chart-3.js'
 import { useApp as useAppHook } from '../../AppContext.tsx'
 import HubSectionNav, { type HubSectionDef, readStoredHubSection } from '../shared/HubSectionNav.tsx'
+import Skeleton from '../shared/kit/Skeleton.tsx'
+import { lazyRetry } from '../../utils/lazyImport.ts'
 
 // E2 (Part 407): Sales absorbs Returns and Fees as sections of one Sales
 // page -- the same hub pattern E3/E4 established (ReviewLogsPage /
@@ -14,13 +16,15 @@ import HubSectionNav, { type HubSectionDef, readStoredHubSection } from '../shar
 // ('sales' / 'returns' / 'fees'); only the standalone returns/fees PAGE
 // ids retire, and their old URLs land here with the right section open.
 
-const SalesSection = lazy(() => import('./Sales'))
-const ReturnsSection = lazy(() => import('../returns/Returns'))
-const FeesSection = lazy(() => import('../fees/FeesPage.tsx'))
+// lazyRetry, not lazy: a till tab left open across a deploy requests chunks that
+// no longer exist, and a plain lazy() would leave the section blank for good.
+const SalesSection = lazyRetry(() => import('./Sales'), 'sales-hub-sales')
+const ReturnsSection = lazyRetry(() => import('../returns/Returns'), 'sales-hub-returns')
+const FeesSection = lazyRetry(() => import('../fees/FeesPage.tsx'), 'sales-hub-fees')
 // The Reports hub (Aug 29): a top-level section running any combination of
 // the Sales / Returns / Fees reports over one shared range. Shown to anyone
 // who can see at least one of those areas.
-const ReportsSection = lazy(() => import('./ReportsHub'))
+const ReportsSection = lazyRetry(() => import('./ReportsHub'), 'sales-hub-reports')
 
 type SalesHubAppContext = {
   navigateTo: (pageId: string, anchor?: string) => void
@@ -85,7 +89,7 @@ export default function SalesHubPage() {
           -- same contract as before, just page-scroll now lives here instead
           of on the hub's own outer element). */}
       <div className="page-scroll flex min-h-0 min-w-0 flex-1 flex-col">
-        <Suspense fallback={<p className="p-4 text-sm text-gray-500">{trh('loading', 'Loading')}...</p>}>
+        <Suspense fallback={<div className="p-3"><Skeleton rows={6} /></div>}>
           {section === 'returns' && canReturns ? <ReturnsSection embedded />
             : section === 'fees' && canFees ? <FeesSection embedded />
             : section === 'reports' && canReports ? <ReportsSection embedded />
