@@ -455,18 +455,49 @@ const splitStatements = (code) => {
   return out
 }
 
-const flagColumnsUnread = (text, repairText) => {
+// B2b (RET-B-VERIFY round 2): CREATE TABLE IF NOT EXISTS on a table that
+// already exists is a no-op, and the INSERT after it fires that table's
+// triggers (legacy_inventory_effects -> products, branch_stock, lots,
+// inventory_movements). So a helper counts only when its name did NOT exist
+// before this file ran (`priorTables`, from applying the chain file by file).
+// And a table the repair writes INDIRECTLY -- through triggers on what it
+// writes, to a fixed point (sale_items -> sale_write_revisions, 0120) -- is
+// treated like a table it writes: naming one, even in a WHERE, makes the
+// file's own result depend on the order. No context -> not independent.
+const KEYWORD_TARGETS = new Set(['on', 'of', 'or', 'set']) // trigger headers, OR-clauses, DO UPDATE SET
+function flagOnlyContext(chain, chainText, repairText) {
+  const probe = openDb([]).db
+  const names = () => new Set(probe.prepare("SELECT name FROM sqlite_master WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite_%'").all()
+    .map((row) => row.name.toLowerCase()))
+  const priorTables = new Map()
+  for (const file of chain) { priorTables.set(file, names()); probe.exec(chainText(file)) }
+  const indirectWrites = new Set(repairWrites(repairText))
+  const triggers = probe.prepare("SELECT lower(tbl_name) AS tbl, sql FROM sqlite_master WHERE type = 'trigger'").all()
+    .map((row) => ({ tbl: row.tbl, writes: repairWrites(String(row.sql).slice(Math.max(0, String(row.sql).search(/\bBEGIN\b/i)))).filter((t) => !KEYWORD_TARGETS.has(t)) }))
+  for (let grew = true; grew;) {
+    grew = false
+    for (const trigger of triggers) {
+      if (!indirectWrites.has(trigger.tbl)) continue
+      for (const table of trigger.writes) if (!indirectWrites.has(table)) { indirectWrites.add(table); grew = true }
+    }
+  }
+  return { priorTables, indirectWrites, finalTables: names() }
+}
+
+const flagColumnsUnread = (text, repairText, context) => {
+  if (!(context?.priorTables instanceof Set) || !(context?.indirectWrites instanceof Set)) return false
   const statements = splitStatements(sqlCode(text)).map((s) => s.replace(/\s+/g, ' ').trim()).filter(Boolean)
   if (!statements.length) return false
   const named = namedIn(repairText)
-  if (repairWrites(repairText).some((table) => namedIn(text)(table))) return false
+  if ([...context.indirectWrites].some((table) => namedIn(text)(table))) return false
   const own = new Set()
   let flagged = 0
   for (const statement of statements) {
     let match
     if ((match = /^CREATE TABLE IF NOT EXISTS (\w+) \(/i.exec(statement))) {
-      if (named(match[1])) return false
-      own.add(match[1].toLowerCase())
+      const name = match[1].toLowerCase()
+      if (named(name) || context.priorTables.has(name) || own.has(name)) return false
+      own.add(name)
     } else if ((match = /^(?:INSERT (?:OR IGNORE )?INTO|DELETE FROM) (\w+)\b/i.exec(statement))) {
       if (!own.has(match[1].toLowerCase())) return false
     } else if ((match = /^UPDATE (\w+) SET (.+?) WHERE /i.exec(statement))) {
@@ -578,7 +609,10 @@ check('held: outside deploy chain, after dependencies including0195; independent
   const tables = fresh.prepare("SELECT name FROM sqlite_master WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite_%'").all().map((r) => r.name)
   const touched = tables.filter(namedIn(migrationText))
   const mixed = chain.filter(file => mixedAdditiveUnread(chainText(file), migrationText))
-  const flagOnly = chain.filter(file => flagColumnsUnread(chainText(file), migrationText))
+  // ---- RET-B 0235 call (begin) ----
+  const flagContext = flagOnlyContext(chain, chainText, migrationText)
+  const flagOnly = chain.filter(file => flagColumnsUnread(chainText(file), migrationText, { priorTables: flagContext.priorTables.get(file), indirectWrites: flagContext.indirectWrites }))
+  // ---- RET-B 0235 call (end) ----
   const dependencies = chain.filter((f) => !indexOnly(chainText(f)) && !additiveUnread(chainText(f), migrationText) && !mixed.includes(f) && !flagOnly.includes(f) && touched.some(namedIn(chainText(f))))
   assert.ok(['sale_items', 'return_items', 'catalog_cost_repair_0195_backup'].every((t) => touched.includes(t)), 'control: the scan sees the two tables it writes and the 0195 backup it reads')
   assert.ok(dependencies.includes('0195_catalog_cost_on_hand.sql'), 'control: the scan finds 0195')
@@ -593,7 +627,20 @@ check('held: outside deploy chain, after dependencies including0195; independent
   // ---- RET-B 0235 rule controls (begin) ----
   assert.deepEqual(repairWrites(migrationText).filter((t) => ['sale_items', 'return_items'].includes(t)).sort(), ['return_items', 'sale_items'], 'control: the repair writes sale_items and return_items')
   const flagFile = 'CREATE TABLE IF NOT EXISTS zz_mark (id INTEGER PRIMARY KEY);\nINSERT OR IGNORE INTO zz_mark (id) SELECT id FROM sales;\nUPDATE sales SET stock_skipped = 1, stock_skipped_by_name = \'m\' WHERE id IN (SELECT id FROM zz_mark);'
-  assert.ok(flagColumnsUnread(flagFile, migrationText), 'control: a mark-only file on allowlisted columns is independent')
+  const atEnd = { priorTables: flagContext.finalTables, indirectWrites: flagContext.indirectWrites }
+  assert.ok(flagColumnsUnread(flagFile, migrationText, atEnd), 'control: a mark-only file on allowlisted columns is independent')
+  assert.equal(flagColumnsUnread(flagFile, migrationText), false, 'control: without the chain context nothing is independent (fail closed)')
+  assert.ok(flagContext.indirectWrites.has('sale_write_revisions'), 'control: the repair writes sale_write_revisions through the 0120 trigger')
+  assert.ok(!flagContext.priorTables.get('0235_imported_sales_stock_skipped.sql').has('imported_sale_stock_skip_0235'), 'control: 0235 creates its work table fresh')
+  // B2b: an "own" helper that already exists fires its triggers. The same
+  // file with no prior tables would pass, so the rejection is the new check.
+  const existingHelper = "CREATE TABLE IF NOT EXISTS legacy_inventory_effects (source_key TEXT PRIMARY KEY, product_id INTEGER NOT NULL, branch_id INTEGER NOT NULL, batch_id INTEGER, quantity_delta REAL NOT NULL DEFAULT 0, movement_quantity REAL NOT NULL, movement_type TEXT NOT NULL, reason TEXT, reference_id INTEGER, occurred_at TEXT NOT NULL);\nINSERT INTO legacy_inventory_effects (source_key, product_id, branch_id, quantity_delta, movement_quantity, movement_type, occurred_at) VALUES ('b2b', 10, 1, 5, 5, 'adjustment', '2026-10-06');\nUPDATE sales SET stock_skipped = 1 WHERE id = 1;"
+  assert.ok(flagContext.finalTables.has('legacy_inventory_effects'), 'control: legacy_inventory_effects exists in the chain')
+  assert.ok(flagColumnsUnread(existingHelper, migrationText, { priorTables: new Set(), indirectWrites: flagContext.indirectWrites }), 'control: only the prior-table check stands between this file and acceptance')
+  assert.equal(flagColumnsUnread(existingHelper, migrationText, atEnd), false, 'B2b: CREATE IF NOT EXISTS on an existing trigger-bearing table is not a helper')
+  const revisionRead = 'UPDATE sales SET stock_skipped = 1 WHERE id IN (SELECT sale_id FROM sale_write_revisions WHERE revision > 1);'
+  assert.ok(flagColumnsUnread(revisionRead, migrationText, { priorTables: flagContext.finalTables, indirectWrites: new Set(repairWrites(migrationText)) }), 'control: only the indirect-write check rejects the revision read')
+  assert.equal(flagColumnsUnread(revisionRead, migrationText, atEnd), false, 'B2b: a WHERE reading a table the repair writes through a trigger is order-dependent')
   assert.ok(flagOnly.includes('0235_imported_sales_stock_skipped.sql'), 'the 0235 stock_skipped backfill is admitted by this rule, then proven by assertPopulatedOrders')
   const markOnly = (table, set) => `CREATE TABLE IF NOT EXISTS zz_mark (id INTEGER PRIMARY KEY);\nINSERT OR IGNORE INTO zz_mark (id) SELECT id FROM ${table};\nUPDATE ${table} SET ${set} WHERE id IN (SELECT id FROM zz_mark);`
   for (const wrong of [
@@ -615,7 +662,10 @@ check('held: outside deploy chain, after dependencies including0195; independent
     markOnly('sales', '(stock_skipped, rowid) = (1, rowid + 1000000)'),
     markOnly('sales', "notes = 'x'"),
     markOnly('sales', 'stock_skipped = 1').replace('UPDATE sales', 'UPDATE OR REPLACE sales'),
-  ]) assert.equal(flagColumnsUnread(wrong, migrationText), false, `control: still a dependency: ${wrong.split('\n').pop()}`)
+    // RET-B-VERIFY round 2 (B2b)
+    'CREATE TABLE IF NOT EXISTS sale_write_revisions (sale_id INTEGER PRIMARY KEY, revision INTEGER);\nUPDATE sale_write_revisions SET revision = 0 WHERE sale_id > 0;\nUPDATE sales SET stock_skipped = 1 WHERE id = 1;',
+    'CREATE TABLE IF NOT EXISTS zz_mark (id INTEGER PRIMARY KEY);\nCREATE TABLE IF NOT EXISTS zz_mark (id INTEGER PRIMARY KEY);\nUPDATE sales SET stock_skipped = 1 WHERE id IN (SELECT id FROM zz_mark);',
+  ]) assert.equal(flagColumnsUnread(wrong, migrationText, atEnd), false, `control: still a dependency: ${wrong.split('\n').pop()}`)
   // ---- RET-B 0235 rule controls (end) ----
   for (const file of mixed) {
     assert.ok(mixedAdditiveUnread(`-- header: UPDATE sale_items SET cost_price_usd = 1;\n/* DROP TABLE sale_items; */\n${chainText(file)}`, migrationText), `control: a comment header leaves ${file} independent`)
