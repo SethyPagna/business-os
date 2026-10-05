@@ -2871,6 +2871,14 @@ const PHONE_KEY_SQL = (column: string): string =>
   `ltrim(replace(replace(replace(replace(trim(COALESCE(${column},'')),' ',''),'-',''),'(',''),')',''),'0')`
 
 app.get('/customers/link-conflicts', async (c) => {
+  // N5: spend per customer/phone is the same data contacts:financial_history
+  // exists to hide from cashiers (see /customers/reports/ar-invoices). A user
+  // without it still gets the list -- they may hold resolve_conflicts and need
+  // to see which links to fix -- but total_usd and sale_count (purchase
+  // frequency) are omitted from every row, and the order no longer ranks by
+  // sale count. Refusing the whole list would leave link conflicts unresolvable
+  // for exactly the staff the Conflicts tab is for.
+  const canSeeSpend = getActionTier(c.get('user'), 'contacts', 'financial_history') === 'full'
   const db = getDb(c.env)
   const salePhone = PHONE_KEY_SQL('s.customer_phone')
   const custPhone = PHONE_KEY_SQL('c.phone')
@@ -2958,7 +2966,7 @@ app.get('/customers/link-conflicts', async (c) => {
       WHERE d.contact_table = 'customers' AND d.cluster_type = 'link_missing'
         AND d.cluster_value = lower(g.name) || '|' || g.phone_key
     )`}
-    ORDER BY g.sale_count DESC, g.last_at DESC
+    ORDER BY ${canSeeSpend ? 'g.sale_count DESC, ' : ''}g.last_at DESC
     LIMIT @limit OFFSET @offset
   `).all<MissingRow>({ limit: pageSize, offset: missingOffset })
 
@@ -2991,11 +2999,15 @@ app.get('/customers/link-conflicts', async (c) => {
       )`}
     `).get<{ total: number }>(),
   ])
+  const withoutSpend = <T extends { sale_count?: number; total_usd?: number }>(row: T): Omit<T, 'sale_count' | 'total_usd'> => {
+    const { sale_count: _saleCount, total_usd: _totalUsd, ...rest } = row
+    return rest
+  }
   const mismatchTotal = Number(mismatchCountRow?.total) || 0
   const missingTotal = Number(missingCountRow?.total) || 0
   return c.json({
-    mismatches,
-    missing,
+    mismatches: canSeeSpend ? mismatches : mismatches.map(withoutSpend),
+    missing: canSeeSpend ? missing : missing.map(withoutSpend),
     pagination: {
       pageSize,
       mismatches: { page: mismatchPage, total: mismatchTotal, totalPages: Math.max(1, Math.ceil(mismatchTotal / pageSize)) },

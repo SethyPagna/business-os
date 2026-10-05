@@ -454,10 +454,11 @@ export type SaleLinkMismatch = {
   sale_phone: string
   phone_key: string
   sale_name: string | null
-  sale_count: number
+  // Omitted by the server for a user without contacts:financial_history.
+  sale_count?: number
   first_at: string
   last_at: string
-  total_usd: number
+  total_usd?: number
   phone_owner_count: number
   suggested_id: number | null
   suggested_name: string | null
@@ -471,10 +472,11 @@ export type SaleLinkMissing = {
   name: string
   phone: string
   phone_key: string
-  sale_count: number
+  // Omitted by the server for a user without contacts:financial_history.
+  sale_count?: number
   first_at: string
   last_at: string
-  total_usd: number
+  total_usd?: number
   phone_owner_count: number
   suggested_id: number | null
   suggested_name: string | null

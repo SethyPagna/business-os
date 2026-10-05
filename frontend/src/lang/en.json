@@ -102,6 +102,8 @@
   "sales_relinked_toast": "Relinked {count} sale(s)",
   "sales_linked_toast": "Linked {count} sale(s)",
   "relink_sales_action": "Relink {count} sale(s)",
+  "relink_sales_action_no_count": "Relink these sales",
+  "create_and_link_action_no_count": "Create contact & link these sales",
   "relink_confirm_hint": "Tap again to confirm — these sales will link to {name}",
   "phone_belongs_to": "This phone belongs to {name}",
   "linked_to": "Linked to",

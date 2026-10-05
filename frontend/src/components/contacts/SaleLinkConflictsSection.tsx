@@ -39,6 +39,10 @@ const missingKey = (row: SaleLinkMissing): string => `${row.name.toLowerCase()}|
 export default function SaleLinkConflictsSection({ t, notify }: { t: TranslateFn; notify: NotifyFn }) {
   const { can } = useApp() as { can: (permissionKey: string, actionKey: string) => boolean }
   const canResolveConflicts = can('contacts', 'resolve_conflicts')
+  // Spend and sale counts per group are contact financial history: the server
+  // omits both without this action (GET /customers/link-conflicts), so the card
+  // shows only the date range and count-free action labels.
+  const canViewFinancialHistory = can('contacts', 'financial_history')
   const tr = (key: string, fallback: string): string => t(key) || fallback
   const [data, setData] = useState<SaleLinkConflicts | null>(null)
   const [loading, setLoading] = useState(true)
@@ -164,8 +168,9 @@ export default function SaleLinkConflictsSection({ t, notify }: { t: TranslateFn
   const mismatches = data?.mismatches || []
   const missing = data?.missing || []
 
-  const groupMeta = (row: { sale_count: number; total_usd: number; first_at: string; last_at: string }): string => {
+  const groupMeta = (row: { sale_count?: number; total_usd?: number; first_at: string; last_at: string }): string => {
     const range = row.first_at === row.last_at ? fmtDate(row.first_at) : `${fmtDate(row.first_at)} – ${fmtDate(row.last_at)}`
+    if (!canViewFinancialHistory || row.sale_count == null || row.total_usd == null) return range
     return `${row.sale_count} × ${money(row.total_usd)} · ${range}`
   }
 
@@ -306,7 +311,9 @@ export default function SaleLinkConflictsSection({ t, notify }: { t: TranslateFn
                       <Link2 className="h-3 w-3" />
                       {pending
                         ? tr('confirm', 'Confirm')
-                        : replaceVars(tr('relink_sales_action', 'Relink {count} sale(s)'), { count: row.sale_count })}
+                        : row.sale_count == null
+                          ? tr('relink_sales_action_no_count', 'Relink these sales')
+                          : replaceVars(tr('relink_sales_action', 'Relink {count} sale(s)'), { count: row.sale_count })}
                     </button>
                   </div>
                 ) : null}
@@ -375,7 +382,9 @@ export default function SaleLinkConflictsSection({ t, notify }: { t: TranslateFn
                       ? tr('confirm', 'Confirm')
                       : linkExisting
                         ? replaceVars(tr('link_to_existing_action', 'Link to {name}'), { name: row.suggested_name || '' })
-                        : replaceVars(tr('create_and_link_action', 'Create contact & link {count} sale(s)'), { count: row.sale_count })}
+                        : row.sale_count == null
+                          ? tr('create_and_link_action_no_count', 'Create contact & link these sales')
+                          : replaceVars(tr('create_and_link_action', 'Create contact & link {count} sale(s)'), { count: row.sale_count })}
                   </button>
                 </div> : null}
               </div>

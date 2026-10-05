@@ -102,6 +102,8 @@
   "sales_relinked_toast": "បានភ្ជាប់ឡើងវិញ {count} ការលក់",
   "sales_linked_toast": "បានភ្ជាប់ {count} ការលក់",
   "relink_sales_action": "ភ្ជាប់ឡើងវិញ {count} ការលក់",
+  "relink_sales_action_no_count": "ភ្ជាប់ឡើងវិញការលក់ទាំងនេះ",
+  "create_and_link_action_no_count": "បង្កើតទំនាក់ទំនង និងភ្ជាប់ការលក់ទាំងនេះ",
   "relink_confirm_hint": "ចុចម្តងទៀតដើម្បីបញ្ជាក់ — ការលក់ទាំងនេះនឹងភ្ជាប់ទៅ {name}",
   "phone_belongs_to": "លេខទូរស័ព្ទនេះជារបស់ {name}",
   "linked_to": "បានភ្ជាប់ទៅ",

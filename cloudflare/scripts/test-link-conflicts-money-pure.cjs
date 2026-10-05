@@ -125,6 +125,70 @@ async function main() {
     seed()
   })
 
+  await check('N5: a user without financial_history gets the list but no total_usd or sale_count on any row', async () => {
+    seed()
+    for (const user of [cashier, resolver]) {
+      const { status, json } = await get(user)
+      assert.equal(status, 200, JSON.stringify(json))
+      assert.equal(json.mismatches.length, 1, 'the conflict itself must stay visible so it can be resolved')
+      assert.equal(json.missing.length, 1)
+      for (const row of [...json.mismatches, ...json.missing]) {
+        assert.ok(!('total_usd' in row), 'total_usd must be omitted: ' + JSON.stringify(row))
+        assert.ok(!('sale_count' in row), 'sale_count must be omitted: ' + JSON.stringify(row))
+      }
+      // The fields a resolver needs are intact.
+      assert.equal(json.mismatches[0].customer_id, 1)
+      assert.equal(json.mismatches[0].phone_key, '222')
+      assert.equal(json.missing[0].name, 'Stranger')
+      assert.equal(json.pagination.mismatches.total, 1)
+    }
+  })
+
+  await check('N5: financial_history holders (default manager, admin) still receive spend and counts', async () => {
+    seed()
+    for (const user of [withSpend, mkUser(1, 'admin', {})]) {
+      const { status, json } = await get(user)
+      assert.equal(status, 200)
+      assert.equal(json.mismatches[0].total_usd, 15)
+      assert.equal(json.mismatches[0].sale_count, 3)
+      assert.equal(json.missing[0].total_usd, 20)
+      assert.equal(json.missing[0].sale_count, 2)
+    }
+  })
+
+  await check('N5: a per-user explicit deny narrows a manager who has the section default', async () => {
+    seed()
+    const narrowed = { ...withSpend, id: 13, permissions: JSON.stringify({ 'contacts:financial_history': false }) }
+    const { json } = await get(narrowed)
+    assert.ok(!('total_usd' in json.mismatches[0]))
+  })
+
+  await check('N5: without financial_history the order cannot rank customers by how often they bought', async () => {
+    seed()
+    // Group B: one very recent sale; group A (Stranger) has two older ones.
+    rawDb.prepare("INSERT INTO sales (customer_id, customer_name, customer_phone, total_usd, sale_status, created_at) VALUES (NULL,'Newer','0444',1,'completed','2026-09-30 10:00:00')").run()
+    const names = async (user) => (await get(user)).json.missing.map((row) => row.name)
+    assert.deepEqual(await names(withSpend), ['Stranger', 'Newer'], 'spend holders keep the busiest-first order')
+    assert.deepEqual(await names(cashier), ['Newer', 'Stranger'], 'others get most-recent-first')
+  })
+
+  await check('N5: a user with no Contacts access still gets no list at all', async () => {
+    const { status } = await get(mkUser(14, 'employee', { sales: true }))
+    assert.equal(status, 403)
+  })
+
+  await check('N5 UI parity: the section shows spend and counts only with the same contacts:financial_history action the route checks', async () => {
+    const ui = fs.readFileSync(path.join(root, '..', 'frontend', 'src', 'components', 'contacts', 'SaleLinkConflictsSection.tsx'), 'utf8')
+    assert.match(ui, /can\('contacts', 'financial_history'\)/)
+    const meta = ui.slice(ui.indexOf('const groupMeta'), ui.indexOf('return (', ui.indexOf('const groupMeta')))
+    assert.match(meta, /!canViewFinancialHistory[\s\S]*return range/, 'money is rendered only after the action check')
+    assert.match(ui, /relink_sales_action_no_count/)
+    for (const pack of ['en', 'km']) {
+      const strings = JSON.parse(fs.readFileSync(path.join(root, '..', 'frontend', 'src', 'lang', pack + '.json'), 'utf8'))
+      assert.ok(strings.relink_sales_action_no_count && strings.create_and_link_action_no_count, pack + ' pack carries the count-free labels')
+    }
+  })
+
   console.log(`\n${passed} check(s) passed.`)
 }
 
