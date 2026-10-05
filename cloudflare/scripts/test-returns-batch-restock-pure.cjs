@@ -313,10 +313,31 @@ function seedReplacementStock() {
 // even though nothing here calls it.
 const fakeExecutionCtx = { waitUntil: (p) => { p?.catch?.(() => {}) }, passThroughOnException: () => {} }
 
+// RET-A F6 (owner, 5 Oct 2026): every customer return is linked to a sale, and
+// POST / refuses one without sale_id (return_sale_required). The checks below
+// that used a manual return only as a convenient fixture are linked to sale 1
+// here: each sale-less line gets its own sale line for the same product, branch,
+// quantity and posted price, with no lot -- the same refund and the same
+// restock (a dated return lot) the manual return produced.
+// test-return-sale-required-native.cjs pins the refusal itself.
+function linkToSale(body) {
+  if (body.sale_id != null || !Array.isArray(body.items)) return body
+  const insert = rawDb.prepare(`INSERT INTO sale_items (sale_id, product_id, product_name, quantity, branch_id, applied_price_usd, applied_price_khr, total_usd, total_khr)
+    VALUES (1, @product, 'Linked fixture line', @quantity, @branch, @usd, @khr, @usd * @quantity, @khr * @quantity)`)
+  const items = body.items.map((item) => {
+    if (item.sale_item_id != null) return item
+    const quantity = Number(item.quantity) || 1
+    const info = insert.run({ product: Number(item.product_id), quantity, branch: Number(item.branch_id || body.branch_id || 1),
+      usd: Number(item.applied_price_usd) || 0, khr: Number(item.applied_price_khr) || 0 })
+    return { ...item, sale_item_id: Number(info.lastInsertRowid) }
+  })
+  return { ...body, sale_id: 1, items }
+}
+
 async function req(method, url, body) {
   let requestBody = body
   if (method === 'POST' && url === '/' && body && typeof body === 'object') {
-    requestBody = { client_request_id: body.client_request_id || `return-create-${crypto.randomUUID()}`, ...body }
+    requestBody = { client_request_id: body.client_request_id || `return-create-${crypto.randomUUID()}`, ...linkToSale(body) }
   }
   if (method === 'PATCH' && /^\/\d+$/.test(url) && body && typeof body === 'object') {
     const returnId = Number(url.slice(1))
@@ -836,18 +857,22 @@ async function main() {
 
   await check('status-unchanged and no-parent edits persist receipts without inventing sale events', async () => {
     seed()
-    const created = await req('POST', '/', {
-      reason: 'Manual no-parent return', branch_id: 1,
-      items: [{ product_id: 1, product_name: 'Widget', quantity: 2, return_to_stock: true }],
-    })
-    assert.strictEqual(created.status, 200, JSON.stringify(created.json))
-    const edited = await req('PATCH', `/${created.json.id}`, {
-      client_request_id: 'return-edit-no-parent', reason: 'Manual edited',
-      items: [{ product_id: 1, product_name: 'Widget', quantity: 1, return_to_stock: true }],
-    })
+    // RET-A F6: a no-parent (manual) return can no longer be recorded, so the
+    // one edited here is a row written before that rule. Its reason can still
+    // change -- receipted, with no invented sale event -- but its items cannot.
+    rawDb.prepare(`INSERT INTO returns (id, return_number, sale_id, branch_id, branch_name, return_scope, reason, total_refund_usd, total_refund_khr, exchange_rate, status)
+      VALUES (40, 'RET-MANUAL-OLD', NULL, 1, 'Shop', 'customer', 'Manual no-parent return', 0, 0, 4100, 'completed')`).run()
+    rawDb.prepare(`INSERT INTO return_items (return_id, product_id, product_name, quantity, return_to_stock, stock_action, branch_id)
+      VALUES (40, 1, 'Widget', 2, 0, 'none', 1)`).run()
+    const edited = await req('PATCH', '/40', { client_request_id: 'return-edit-no-parent', reason: 'Manual edited' })
     assert.strictEqual(edited.status, 200, JSON.stringify(edited.json))
     assert.strictEqual(rawDb.prepare("SELECT COUNT(*) n FROM return_mutation_receipts WHERE request_id='return-edit-no-parent'").get().n, 1)
     assert.strictEqual(rawDb.prepare("SELECT COUNT(*) n FROM sale_record_events WHERE source_kind='return_edit'").get().n, 0)
+    const itemsEdit = await req('PATCH', '/40', { client_request_id: 'return-edit-no-parent-items', reason: 'Manual edited',
+      items: [{ product_id: 1, product_name: 'Widget', quantity: 1, return_to_stock: true }] })
+    assert.strictEqual(itemsEdit.status, 400, JSON.stringify(itemsEdit.json))
+    assert.strictEqual(itemsEdit.json.code, 'manual_return_items_locked')
+    assert.strictEqual(rawDb.prepare('SELECT quantity FROM return_items WHERE return_id=40').get().quantity, 2, 'the old manual return keeps its items')
 
     seed()
     rawDb.prepare("UPDATE sales SET sale_status='completed' WHERE id=1").run()
@@ -1289,10 +1314,12 @@ async function main() {
   })
 
   await check('replacement sale rejects missing, Warehouse, and mixed branch identities before writes', async () => {
+    // RET-A F6: every return is now linked to a sale, and a replacement with no
+    // branch of its own takes that sale's branch -- so "missing" is no longer a
+    // reachable identity; an unknown branch (999) is the unresolvable case.
     for (const replacement of [
       { product_id: 2, quantity: 1, branch_id: 999, applied_price_usd: 10 },
       { product_id: 2, quantity: 1, branch_id: 2, applied_price_usd: 10 },
-      { product_id: 2, quantity: 1, applied_price_usd: 10 },
     ]) {
       seed()
       const beforeSales = rawDb.prepare('SELECT COUNT(*) n FROM sales').get().n
@@ -1923,10 +1950,10 @@ async function main() {
     assert.strictEqual(legacy.json.code, 'client_request_id_required')
     assert.strictEqual(legacy.json.action, 'refresh_required')
     assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM returns').get().n, 0)
-    const payload = {
+    const payload = linkToSale({
       client_request_id: 'return-create-frozen-response', return_number: 'RET-FROZEN',
       reason: 'Original intent', items: [{ product_id: 1, quantity: 1, stock_action: 'none', branch_id: 1 }],
-    }
+    })
     const first = await reqExact('POST', '/', payload)
     assert.strictEqual(first.status, 200, JSON.stringify(first.json))
     rawDb.prepare("UPDATE products SET name='Changed after commit' WHERE id=1").run()
@@ -1974,7 +2001,7 @@ async function main() {
     assert.strictEqual(rawDb.prepare('SELECT sale_status FROM sales WHERE id=1').get().sale_status, 'returned')
   })
 
-  await check('status-unchanged and manual creates keep receipts without inventing sale events', async () => {
+  await check('status-unchanged creates keep receipts without inventing sale events; a manual create is refused with none', async () => {
     seed()
     rawDb.prepare("INSERT INTO sale_items(id,sale_id,product_id,product_name,quantity) VALUES(1,1,1,'Widget',3)").run()
     const first = await reqExact('POST', '/', {
@@ -1993,8 +2020,11 @@ async function main() {
       client_request_id: 'return-create-manual', return_number: 'RET-MANUAL', reason: 'Manual',
       items: [{ product_id: 1, quantity: 1, stock_action: 'none', branch_id: 1 }],
     })
-    assert.strictEqual(manual.status, 200, JSON.stringify(manual.json))
-    assert.strictEqual(rawDb.prepare("SELECT COUNT(*) n FROM return_create_receipts WHERE request_id='return-create-manual'").get().n, 1)
+    // RET-A F6 (owner, 5 Oct 2026): every return is linked to a sale.
+    assert.strictEqual(manual.status, 400, JSON.stringify(manual.json))
+    assert.strictEqual(manual.json.code, 'return_sale_required')
+    assert.strictEqual(rawDb.prepare("SELECT COUNT(*) n FROM return_create_receipts WHERE request_id='return-create-manual'").get().n, 0)
+    assert.strictEqual(rawDb.prepare("SELECT COUNT(*) n FROM returns WHERE return_number='RET-MANUAL'").get().n, 0)
   })
 
   await check('event or receipt constraint failure rolls the entire create back with zero guards', async () => {
@@ -2013,10 +2043,10 @@ async function main() {
     assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM return_create_guards').get().n, 0)
 
     corruptNextReturnCreateReceipt = true
-    const badReceipt = await reqExact('POST', '/', {
+    const badReceipt = await reqExact('POST', '/', linkToSale({
       client_request_id: 'return-create-bad-receipt', return_number: 'RET-BAD-RECEIPT', reason: 'Bad receipt',
       items: [{ product_id: 1, quantity: 1, stock_action: 'none', branch_id: 1 }],
-    })
+    }))
     assert.strictEqual(badReceipt.status, 409, JSON.stringify(badReceipt.json))
     assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM returns').get().n, 0)
     assert.strictEqual(rawDb.prepare("SELECT COUNT(*) n FROM audit_logs WHERE entity='return_create'").get().n, createAuditBefore)

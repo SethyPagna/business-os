@@ -16,10 +16,10 @@
 //   4. a product sold on two lines at DIFFERENT prices is refused with
 //      return_refund_price_ambiguous and writes nothing;
 //   5. a product sold on two lines at the SAME price prices fine;
-//   6. a return with no sale at all still takes the posted price (unchanged);
+//   6. a return with no sale at all is refused (RET-A F6 / N1, 5-6 Oct 2026);
 //   7. PATCH /:id on a linked return caps a product-matched line the same way;
 //   8. PATCH /:id refuses a linked line naming neither sale item nor product;
-//   9. PATCH /:id on an unlinked return keeps the posted price (unchanged).
+//   9. PATCH /:id cannot restate the lines of an old unlinked return (RET-A F6).
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
@@ -197,10 +197,18 @@ async function main() {
     assert.deepEqual(await money(samePrice.body.id), { usd: 60.06, khr: 0, lines: [[30.03, 0, 60.06]] },
       'posted khr 0 is below the recorded khr, so it stays 0 (cap, not replace)')
 
-    // 6. No sale at all: the posted price is the only number (unchanged).
+    // 6. RET-A F6 / N1: no sale at all is refused, so a posted price never
+    //    stands alone; nothing is written.
+    const beforeManual = await counts()
     const manual = await create('manual', null, [{ product_id: 3, quantity: 1, applied_price_usd: 999.99, applied_price_khr: 3999960 }])
-    assert.equal(manual.status, 200, JSON.stringify(manual.body))
-    assert.deepEqual(await money(manual.body.id), { usd: 999.99, khr: 3999960, lines: [[999.99, 3999960, 999.99]] })
+    assert.equal(manual.status, 400, JSON.stringify(manual.body))
+    assert.equal(manual.body.code, 'return_sale_required', JSON.stringify(manual.body))
+    assert.equal(await counts(), beforeManual, 'a sale-less return writes nothing')
+    // A manual return recorded before F6 stays in history.
+    await db.prepare(`INSERT INTO returns(id,return_number,sale_id,branch_id,branch_name,return_scope,reason,total_refund_usd,total_refund_khr,exchange_rate,status)
+      VALUES(900,'RET-OLD-MANUAL',NULL,1,'Shop','customer','old manual',999.99,3999960,4000,'completed')`).run()
+    await db.prepare(`INSERT INTO return_items(return_id,product_id,product_name,quantity,applied_price_usd,applied_price_khr,total_usd,total_khr,return_to_stock,stock_action,branch_id)
+      VALUES(900,3,'Line',1,999.99,3999960,999.99,3999960,0,'none',1)`).run()
 
     // 7. PATCH on a linked return caps a product-matched line.
     const edited = await edit(linked.body.id, 'edit-spoof', [{ product_id: 3, quantity: 1, applied_price_usd: 999.99, applied_price_khr: 3999960 }])
@@ -215,12 +223,15 @@ async function main() {
     assert.equal(anonymous.body.code, 'return_refund_sale_line_required', JSON.stringify(anonymous.body))
     assert.equal(JSON.stringify(await money(linked.body.id)), beforeAnonymous, 'the refused edit rewrote no money')
 
-    // 9. PATCH on an unlinked return keeps the posted price (unchanged).
-    const manualEdit = await edit(manual.body.id, 'edit-manual', [{ product_id: 3, quantity: 1, applied_price_usd: 500, applied_price_khr: 2000000 }])
-    assert.equal(manualEdit.status, 200, JSON.stringify(manualEdit.body))
-    assert.deepEqual(await money(manual.body.id), { usd: 500, khr: 2000000, lines: [[500, 2000000, 500]] })
+    // 9. RET-A F6: an old unlinked return's lines (and so its price) can no
+    //    longer be restated; its money is unchanged.
+    const manualBefore = JSON.stringify(await money(900))
+    const manualEdit = await edit(900, 'edit-manual', [{ product_id: 3, quantity: 1, applied_price_usd: 500, applied_price_khr: 2000000 }])
+    assert.equal(manualEdit.status, 400, JSON.stringify(manualEdit.body))
+    assert.equal(manualEdit.body.code, 'manual_return_items_locked', JSON.stringify(manualEdit.body))
+    assert.equal(JSON.stringify(await money(900)), manualBefore, 'the old manual return keeps its recorded money')
 
-    console.log('PASS native return refund price: a return against a sale refunds that sale\'s recorded line price (product-matched lines capped at it, ambiguous prices refused), create and edit alike; a linked line and a sale-less return are unchanged')
+    console.log('PASS native return refund price: a return against a sale refunds that sale\'s recorded line price (product-matched lines capped at it, ambiguous prices refused), create and edit alike; a sale-less return is refused and an old one cannot be restated')
   } finally {
     await mf.dispose()
   }
