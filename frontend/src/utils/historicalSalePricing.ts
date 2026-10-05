@@ -1,4 +1,5 @@
 import { multiplyMoney4, percentageProductMoney4, roundMoney4, sellingPriceCeilCent, subtractMoney4, sumMoney4, sumProductsMoney4 } from './moneyPrecision.ts'
+import { SaleDiscountRefusedError } from './saleItemPricing.ts'
 
 export class HistoricalSalePricingError extends Error {
   readonly code = 'historical_sale_pricing_invalid'
@@ -45,11 +46,16 @@ export function planHistoricalSaleLine(row: Record<string, unknown>, body: Recor
   } else {
     const canonicalBase = roundMoney4(base)
     gross = multiplyMoney4(canonicalBase, nextQuantity)
+    // A fixed discount larger than the price is refused, not clamped to a $0 line
+    // (owner, 5 Oct 2026). Only reached when the price or discount is being
+    // changed; a quantity-only edit above keeps the recorded amounts untouched.
+    const fixedDiscount = type === 'fixed' ? multiplyMoney4(roundMoney4(value), nextQuantity) : 0
+    if (fixedDiscount > gross) throw new SaleDiscountRefusedError('sale_discount_exceeds_price')
     manual = type === 'percent' ? percentageProductMoney4(canonicalBase, nextQuantity, value)
-      : type === 'fixed' ? Math.min(gross, multiplyMoney4(roundMoney4(value), nextQuantity)) : 0
+      : type === 'fixed' ? fixedDiscount : 0
     total = subtractMoney4(gross, manual)
     const unitManual = type === 'percent' ? percentageProductMoney4(canonicalBase, 1, value)
-      : type === 'fixed' ? Math.min(canonicalBase, roundMoney4(value)) : 0
+      : type === 'fixed' ? roundMoney4(value) : 0
     Object.assign(next, { base_price_usd: canonicalBase, base_price_khr: multiplyMoney4(canonicalBase, rate),
       manual_discount_type: type, manual_discount_value: type === 'percent' ? value : roundMoney4(value),
       manual_discount_usd: unitManual, manual_discount_khr: multiplyMoney4(unitManual, rate),

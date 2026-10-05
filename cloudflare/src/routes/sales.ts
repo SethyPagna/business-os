@@ -4,7 +4,7 @@ import { broadcast } from '../durable-objects/broadcastHub'
 import { getDb } from '../lib/db'
 import { ordinaryBusinessMaintenanceGuard, runOrdinaryBusinessWrite } from '../lib/businessMaintenanceGuard'
 import { hasColumn, tableColumnSet } from '../lib/schemaProbe'
-import { capturedPricingMetadata, capturePricingProduct, evaluateCapturedPricingPool, materializeCapturedPricingRow, parseSaleItemPricing, pricingRowsStatement, pricingSourceGuard, serializeSaleItemPricing, validateCapturedSaleBasket, SaleItemPricingError, type CapturedPricingPool, type PricingSource } from '../lib/saleItemPricing'
+import { capturedPricingMetadata, capturePricingProduct, evaluateCapturedPricingPool, materializeCapturedPricingRow, parseSaleItemPricing, pricingRowsStatement, pricingSourceGuard, serializeSaleItemPricing, validateCapturedSaleBasket, SaleDiscountRefusedError, SaleItemPricingError, type CapturedPricingPool, type PricingSource } from '../lib/saleItemPricing'
 import { planHistoricalSaleLine, recordedHistoricalLineTotal, HistoricalSalePricingError } from '../lib/historicalSalePricing'
 import { normalizePromotionRule } from '../lib/promotionRules'
 import { resolveProductMergeLineage, ProductMergeLineageError, findSaleItemsRequiringIdentityReview } from '../lib/productMergeLineage'
@@ -929,7 +929,8 @@ app.post('/', async (c) => {
     }),
   }
   const pricingQuantities=Object.fromEntries(normalized.map(item=>[item.client_line_key!,item.quantity]))
-  const exactPricing=evaluateCapturedPricingPool(pricingPool,pricingQuantities)
+  // Every line of a new sale is new: a fixed discount over the price is refused (sale_discount_exceeds_price).
+  const exactPricing=evaluateCapturedPricingPool(pricingPool,pricingQuantities,{refuseOversizedFixed:true})
   const capturedSourceGuard=pricingSourceGuard(products,pricingRuleRows)
   for (const item of normalized) {
     const exact=exactPricing.get(item.client_line_key!)!
@@ -3325,7 +3326,7 @@ app.post('/:id/items', async (c) => {
           value:raw.manual_discount_type==='percent'?raw.manual_discount_value??0:newSaleMoney4(raw.manual_discount_value)}}
     })}
   const addedQuantities=Object.fromEntries(requested.map((line,index)=>[addedPool.lines[index].line_key,line.quantity]))
-  const addedPricing=evaluateCapturedPricingPool(addedPool,addedQuantities)
+  const addedPricing=evaluateCapturedPricingPool(addedPool,addedQuantities,{refuseOversizedFixed:true})
   const provisionalAllocation={version:1 as const,lines:addedPool.lines.map(line=>({line_key:line.line_key,amount:addedPricing.get(line.line_key)!.total_usd})),discount_usd:0,membership_discount_usd:0,tax_usd:0}
   const existingPricing=Number(sale.money_precision_version)===1?validateCapturedSaleBasket(precisionBasket.lines,sale,precisionBasket.identityBindings):[]
   if (addedPool.lines.some(line=>existingPricing.some(old=>old.line_key===line.line_key))) throw new SaleMoneyContractError('money_precision_invalid_snapshot')
@@ -3673,7 +3674,7 @@ app.post('/:id/items', async (c) => {
   if (historyId > 0) response.actionHistoryId = response.undoActionId = historyId
   return c.json(response)
   } catch (error) {
-    if (error instanceof SaleHeaderQuoteError) return c.json({error:error.message,code:error.code},400)
+    if (error instanceof SaleHeaderQuoteError || error instanceof SaleDiscountRefusedError) return c.json({error:error.message,code:error.code},400)
     if (error instanceof SaleMoneyContractError || error instanceof MoneyPrecisionError || error instanceof SaleItemPricingError || error instanceof ProductMergeLineageError) return c.json({ error: error.message, code: error.code },409)
     throw error
   }
@@ -4607,7 +4608,10 @@ app.post('/:id/amendments', async (c) => {
     }
     if (target.manual.type==='none') target.manual.value=0
     else if (body.manual_discount_value!==undefined) target.manual.value=target.manual.type==='percent'?Number(body.manual_discount_value):newSaleMoney4(body.manual_discount_value)
-    const evaluated=evaluateCapturedPricingPool(pool,quantities), targetMoney=evaluated.get(target.line_key)!
+    // Only a changed price or discount is held to the rule; a quantity-only edit of a line recorded
+    // before it existed must still go through (the replay clamps, see evaluateCapturedPricingPool).
+    const discountOrPriceChanged=body.manual_discount_type!==undefined||body.manual_discount_value!==undefined||body.selling_price_input_usd!==undefined
+    const evaluated=evaluateCapturedPricingPool(pool,quantities,{refuseOversizedFixed:discountOrPriceChanged?new Set([target.line_key]):false}), targetMoney=evaluated.get(target.line_key)!
     const quote=body.pricing_quote as SaleItemInput['pricing_quote']
     if (!quote || ['gross_usd','product_discount_usd','manual_discount_usd','total_usd','total_khr'].some(k=>quote[k as keyof typeof quote]!==targetMoney[k as keyof typeof quote]))
       return c.json({error:'Review the recalculated captured-pricing pool.',code:'sale_pricing_quote_conflict',pricing_quotes:[...evaluated].map(([client_line_key,amounts])=>({client_line_key,...amounts}))},409)
@@ -4770,7 +4774,7 @@ app.post('/:id/amendments', async (c) => {
       manual:{type:replacement.manual_discount_type==null?'none':replacement.manual_discount_type as 'fixed'|'percent',value:replacement.manual_discount_type==='percent'?replacement.manual_discount_value??0:newSaleMoney4(replacement.manual_discount_value)}
     }]}
     const replacementQuantities={[replacement.client_line_key]:quantity}
-    const replacementPricing=evaluateCapturedPricingPool(replacementPool,replacementQuantities).get(replacement.client_line_key)!
+    const replacementPricing=evaluateCapturedPricingPool(replacementPool,replacementQuantities,{refuseOversizedFixed:true}).get(replacement.client_line_key)!
     const quote=replacement.pricing_quote
     if (!quote || (['gross_usd','product_discount_usd','manual_discount_usd','total_usd','total_khr'] as const).some(key=>quote[key]!==replacementPricing[key]))
       return c.json({error:'Replacement pricing changed. Review the authoritative quote.',code:'sale_pricing_quote_conflict',quotes:{[replacement.client_line_key]:replacementPricing}},409)
@@ -5004,7 +5008,7 @@ app.post('/:id/amendments', async (c) => {
 
   return c.json(await committedMutationResponse(db,mutationOperationId))
   } catch (error) {
-    if (error instanceof SaleHeaderQuoteError || error instanceof HistoricalSalePricingError) return c.json({error:error.message,code:error.code},400)
+    if (error instanceof SaleHeaderQuoteError || error instanceof HistoricalSalePricingError || error instanceof SaleDiscountRefusedError) return c.json({error:error.message,code:error.code},400)
     if (error instanceof SaleMoneyContractError || error instanceof MoneyPrecisionError || error instanceof SaleItemPricingError || error instanceof ProductMergeLineageError || error instanceof AllocationShortfallError) return c.json({ error: error.message, code: error.code },409)
     throw error
   }
