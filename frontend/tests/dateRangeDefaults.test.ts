@@ -213,7 +213,22 @@ const productQuery = evaluate(variable(products, 'productQuery'), {
   catFilter: new Set(), brandFilter: new Set(), supplierFilter: new Set(), unitFilter: '',
   branchFilter: 'all', effectiveStockState: 'all', groupFilter: 'all', initialFilter: 'all',
   issueFilter: 'all', promoFilter: 'all', mergedFilter: 'all', productSortDirection: 'name_asc',
+  // G37: the search part of the request comes from productSearchRequest();
+  // an empty search yields no params at all.
+  productSearchParamsKey: '{}',
 })
+// The same request with a ranked search swaps the text for ranked ids and
+// still carries no date window.
+const rankedProductQuery = evaluate(variable(products, 'productQuery'), {
+  productPage: 1, productPageSize: 20, cleanedSearchQuery: 'pallet', searchMode: 'AND',
+  catFilter: new Set(), brandFilter: new Set(), supplierFilter: new Set(), unitFilter: '',
+  branchFilter: 'all', effectiveStockState: 'all', groupFilter: 'all', initialFilter: 'all',
+  issueFilter: 'all', promoFilter: 'all', mergedFilter: 'all', productSortDirection: 'name_asc',
+  productSearchParamsKey: JSON.stringify({ rankIds: '7,3', rankTiers: '0,1' }),
+})
+assert.equal(rankedProductQuery.rankIds, '7,3', 'a ranked Products search sends the ranked ids')
+assert.ok(!('query' in rankedProductQuery), 'a ranked Products search does not also send the text')
+assert.ok(!('batchDateFrom' in rankedProductQuery) && !('batchDateTo' in rankedProductQuery), 'a ranked Products search stays all-time')
 const productRequest = evaluate(requestArgs(products, 'searchProducts').at(-1)!, { productQuery })
 assert.ok(!('batchDateFrom' in productRequest), 'Products catalog request is all-time, not Today-scoped')
 assert.ok(!('batchDateTo' in productRequest), 'Products catalog request carries no received-date upper bound')
