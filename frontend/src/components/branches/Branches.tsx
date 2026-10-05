@@ -81,6 +81,7 @@ import {
  */
 
 const BRANCHES_LIST_TIMEOUT_MS = 10000
+const BRANCH_SUMMARY_SYNC_CHANNELS = new Set(['branches', 'products', 'inventory', 'sales', 'returns', 'settings'])
 const BRANCH_TRANSFERS_TIMEOUT_MS = 12000
 const BRANCH_MUTATION_TIMEOUT_MS = 12000
 
@@ -376,6 +377,12 @@ export default function Branches({ embedded = false, view, showSectionNavigation
   const [statsLoading, setStatsLoading] = useState(false)
   const [statsError, setStatsError] = useState('')
   const [statsRefresh, setStatsRefresh] = useState(0)
+  // The summary counts active products, stock levels against the low-stock
+  // settings, and branches. Any other channel (customers, fees, users, ...)
+  // left it unchanged but re-ran the whole family-stock scan (G39 5.1).
+  useEffect(() => {
+    if (syncChannel?.channel && BRANCH_SUMMARY_SYNC_CHANNELS.has(syncChannel.channel)) setStatsRefresh((current) => current + 1)
+  }, [syncChannel?.channel, syncChannel?.ts])
   useEffect(() => {
     if (!statsOpen || !isActive) return
     let current = true
@@ -386,7 +393,7 @@ export default function Branches({ embedded = false, view, showSectionNavigation
       .catch((error) => { if (current) { setBranchSummary(null); setStatsError(getErrorMessage(error, tr('failed_to_load_data', 'Failed to load data'))) } })
       .finally(() => { if (current) setStatsLoading(false) })
     return () => { current = false }
-  }, [statsOpen, isActive, statsRefresh, syncChannel?.ts, tr])
+  }, [statsOpen, isActive, statsRefresh, tr])
   const [internalTab, setInternalTab] = useState<BranchTab>('branches')
   const tab = view ?? internalTab
   const setTab = useCallback((nextTab: BranchTab) => {

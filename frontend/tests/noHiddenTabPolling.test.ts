@@ -18,7 +18,6 @@ const ALLOWED: Record<string, [number, string]> = {
   'index.tsx': [1, 'service-worker update check; returns early in a hidden tab, checks on visibilitychange'],
   'components/pos/ShiftGate.tsx': [1, 'local clock, no request'],
   'components/server/ServerPage.tsx': [1, 'local 1 s clock, no request'],
-  'components/utils-settings/Settings.tsx': [1, 'local 1 s preview clock, no request'],
   'components/utils-settings/ResetData.tsx': [1, 'local elapsed counter, no request'],
 }
 
