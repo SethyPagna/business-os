@@ -65,7 +65,7 @@ test('both dispositions are offered and neither is pre-selected', () => {
   // Starting unanswered is the point: a pre-selected option would let a
   // distracted Enter pick a disposition nobody chose.
   assert.match(dialog, /useState<MergeStockChoice \| null>\(null\)/)
-  assert.match(dialog, /confirmDisabled=\{needsChoice && !choice\}/)
+  assert.match(dialog, /confirmDisabled=\{\(needsChoice && !choice\) \|\| priceNeedsEdit\}/)
   assert.match(dialog, /danger=\{choice === 'write_off' \|\| identityDiffers\}/, 'writing stock off is the destructive branch')
 })
 

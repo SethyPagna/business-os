@@ -80,7 +80,7 @@ const fixtureSource = String.raw`
         })))
   }
   function Grid() {
-    const [adapter] = useState(() => createProductResolveAdapter({ cluster, t, canViewCosts: true, canEditCosts: editor, canMerge: () => true, api }))
+    const [adapter] = useState(() => createProductResolveAdapter({ cluster, t, canEditProducts: true, canViewCosts: true, canEditCosts: editor, canMerge: () => true, api }))
     return React.createElement(ResolveModal, { title: 'Resolve', adapter, onClose() { window.__closed = true } })
   }
   const value = { ...FALLBACK_APP_CONTEXT, user, t, language: lang, can: () => true, hasPermission: () => true }

@@ -110,6 +110,13 @@ export type ProductResolveOptions = {
   canViewCosts: boolean
   canEditCosts: boolean
   canEditProducts?: boolean
+  /**
+   * Taking another record's selling or wholesale price is a product edit (owner,
+   * 5 Oct 2026; the Worker refuses it with product_edit_permission_required). The
+   * host passes the FULL-tier answer; absent means "same as canEditProducts".
+   * Without it the price rows are locked on the survivor's own price.
+   */
+  canCopyPrices?: boolean
   /** Asked again right before writing: permissions can change while the grid is open. */
   canMerge: () => boolean
   /** A merge step committed: the host's list is out of date even if a later step fails. */
@@ -335,7 +342,7 @@ function defaultImageSource(ctx: Context): number | null {
 }
 
 /** The effective choice per field: an explicit pick, a valid typed value, else the default. */
-function productResolveChoices(ctx: Context, canEditProducts: boolean): ProductResolveChoices {
+function productResolveChoices(ctx: Context, canEditProducts: boolean, canCopyPrices: boolean): ProductResolveChoices {
   const out: ProductResolveChoices = {}
   const source = (rowKey: string, fallback: number | null) => {
     const id = pickedSource(ctx, rowKey) ?? fallback
@@ -352,6 +359,12 @@ function productResolveChoices(ctx: Context, canEditProducts: boolean): ProductR
   const barcode = source('barcode', defaultBarcodeSource(ctx))
   if (barcode) out.barcode = barcode
   for (const [rowKey, field] of [['selling', 'selling_price_usd'], ['wholesale', 'wholesale_price_usd']] as const) {
+    // Without the product-edit grant a price can only stay the survivor's own: no
+    // typed value, no pick of another record, no group maximum.
+    if (!canCopyPrices) {
+      if (ctx.keeperId !== null) out[field] = { source_id: ctx.keeperId }
+      continue
+    }
     const typed = canEditProducts ? typedValue(ctx, rowKey) : null
     const money = typed === null ? null : typedMoney(typed)
     if (money !== null) out[field] = { custom: money }
@@ -473,6 +486,8 @@ function localizedRefusal(error: unknown, t: Translate, partial: boolean): unkno
       ? partial ? tr(t, 'resolve_partial_refusal_budget', 'Product resolving is unavailable on this deployment.') : tr(t, 'resolve_plan_budget', 'Product resolving is unavailable on this deployment. No changes were saved.')
     : code === 'cost_permission_required'
       ? tr(t, 'resolve_cost_locked', 'Changing the cost needs the cost edit permission.')
+    : code === 'product_edit_permission_required'
+      ? tr(t, 'merge_needs_product_edit', 'This merge changes product details or prices, which needs the permission to edit products. Nothing was changed.')
     : code === 'merge_failed'
       ? fill(tr(t, 'resolve_refusal_merge_failed', 'The server could not merge these products. Reference: {errorId}'), { errorId })
     : code === 'merge_conflict_retry'
@@ -509,6 +524,7 @@ type Plan = { ctx: Context; rows: ResolveRow[]; choices: ProductResolveChoices |
 function buildPlan(data: ProductResolveData, draft: ResolveDraft, options: ProductResolveOptions): Plan {
   const { t, canViewCosts, canEditCosts } = options
   const canEditProducts = options.canEditProducts === true
+  const canCopyPrices = options.canCopyPrices ?? canEditProducts
   const ctx = contextOf(data, draft)
   const { included, keeperId } = ctx
   const product = (id: number) => data.products.get(id)
@@ -518,7 +534,7 @@ function buildPlan(data: ProductResolveData, draft: ResolveDraft, options: Produ
   const identical = (row: Record<string, ResolveCell>, finalText: string): boolean => included.every((id) => (row[String(id)]?.text ?? '') === finalText)
   const keeper = keeperId === null ? undefined : product(keeperId)
   const mergedProducts = ctx.merged.map((id) => product(id)).filter((entry): entry is ProductResolveRecord => Boolean(entry))
-  const choices = data.choicesSupported ? productResolveChoices(ctx, canEditProducts) : null
+  const choices = data.choicesSupported ? productResolveChoices(ctx, canEditProducts, canCopyPrices) : null
   const final = choices ? productResolveFinalValues(choices, [...data.products.values()]) : {}
   const rowChoice = (rowKey: string): ResolveChoice | undefined => {
     const choice = choices?.[FIELD_OF_ROW[rowKey]]
@@ -604,7 +620,9 @@ function buildPlan(data: ProductResolveData, draft: ResolveDraft, options: Produ
       final: { text: finalText },
       choice: rowChoice(rowKey),
       identical: identical(row, finalText),
-      ...(canEditProducts ? { custom: { kind: 'money' as const, validate: (value: string) => (typedMoney(value) === null ? tr(t, 'resolve_price_invalid', 'Enter a price of zero or more.') : null) } } : {}),
+      ...(canCopyPrices
+        ? (canEditProducts ? { custom: { kind: 'money' as const, validate: (value: string) => (typedMoney(value) === null ? tr(t, 'resolve_price_invalid', 'Enter a price of zero or more.') : null) } } : {})
+        : { locked: tr(t, 'resolve_price_locked', 'Taking a price from another product needs the permission to edit products.') }),
     })
   }
 
