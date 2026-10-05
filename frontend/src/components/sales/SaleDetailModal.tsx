@@ -34,7 +34,7 @@ import { receiptLineFigures } from '../../utils/receiptLineMath.ts'
 import { saleLineEditPreview, saleRemovalSubtotal } from '../../utils/saleLineEditor.ts'
 import { quoteSaleMutationHeader, compareSaleHeaderQuote, type SaleMutationHeaderQuote } from '../../utils/saleMutationHeaderQuote.ts'
 import { useSaleMoneyCapability } from './useSaleMoneyCapability.ts'
-import { multiplyMoney4, sellingPriceCeilCent, sumMoney4 } from '../../utils/moneyPrecision.ts'
+import { multiplyMoney4, sellingPriceCeilCent, subtractMoney4, sumMoney4 } from '../../utils/moneyPrecision.ts'
 import { promotionLabelText, saleEditorInputWidth } from '../../utils/saleItemNameLayout.ts'
 import ProductNameRail from '../shared/ProductNameRail.tsx'
 import CopyableId from '../shared/CopyableId.tsx'
@@ -148,6 +148,8 @@ interface SaleDetail {
   total_khr?: number | string | null
   refund_usd?: number | string | null
   refund_khr?: number | string | null
+  /** RET-A F1: what returns took off a Not Paid debt (GET /api/sales). */
+  return_owed_reduction_usd?: number | string | null
   membership_discount_usd?: number | string | null
   membership_discount_khr?: number | string | null
   membership_points_redeemed?: number | string | null
@@ -481,7 +483,10 @@ export default function SaleDetailModal({
       paymentMethod: selectedSale?.payment_method,
       amountPaidUsd: selectedSale?.amount_paid_usd,
       amountPaidKhr: selectedSale?.amount_paid_khr,
-      totalUsd: toNumber(selectedSale?.total_usd || selectedSale?.total),
+      // RET-A F1: the prefilled shortfall is measured against the total less
+      // the debt this sale's returns lowered, as the Worker settles it.
+      totalUsd: subtractMoney4(toNumber(selectedSale?.total_usd || selectedSale?.total),
+        Math.max(0, toNumber(selectedSale?.return_owed_reduction_usd))),
       exchangeRate,
       moneyPrecisionVersion: savedRate ? 1 : 0,
       configuredMethods,
