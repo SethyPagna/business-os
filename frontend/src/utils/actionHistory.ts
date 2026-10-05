@@ -36,6 +36,11 @@ type ActionHistoryInput = {
   // second write. If `refresh` is provided it is called INSTEAD of the closure
   // to re-pull the page's data; without it, the closure runs as before.
   refresh?: HistoryAction
+  // F2 (5 Oct 2026): the undo closure only EXPLAINS why this action cannot be
+  // undone here (it moved stock, which is reversed from its own ledger record)
+  // and where to go instead. Such an Undo never transitions the server row,
+  // never marks it failed and never moves to the redo stack.
+  undoRefused?: boolean
   serverId?: unknown
   server_id?: unknown
   scope?: unknown
@@ -54,6 +59,7 @@ type ActionHistoryEntry = {
   undo?: HistoryAction
   redo?: HistoryAction
   refresh?: HistoryAction
+  undoRefused: boolean
   serverId: ActionHistoryId | null
   scope: string
   entity: unknown | null
@@ -184,6 +190,7 @@ function normalizeEntry(entry: ActionHistoryInput = {}, index = 0): ActionHistor
     undo: entry.undo,
     redo: entry.redo,
     refresh: entry.refresh,
+    undoRefused: entry.undoRefused === true,
     serverId: normalizeActionHistoryId(entry.serverId || entry.server_id),
     scope: String(entry.scope || 'global'),
     entity: entry.entity || null,
@@ -382,6 +389,17 @@ export function useActionHistory({ limit = 10, notify, scope = 'global', enabled
     if (!entry || busy) return false
     const action = direction === 'undo' ? entry.undo : entry.redo
     if (typeof action !== 'function') return false
+    if (direction === 'undo' && entry.undoRefused) {
+      setBusy(direction)
+      try {
+        await Promise.resolve(action())
+      } catch (error) {
+        notify?.(getErrorMessage(error, 'Unable to undo that action right now.'), 'error')
+      } finally {
+        setBusy('')
+      }
+      return false
+    }
     setBusy(direction)
     let serverTransitioned = false
     let serverApplied = false

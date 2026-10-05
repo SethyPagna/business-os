@@ -2487,8 +2487,8 @@ function ProductsFullEditor() {
           if (previousSnapshot && targetProductId) {
             actionHistory.pushAction({
               label: `Edit product ${previousSnapshot.name || latestProductSnapshot.name || ''}`.trim(),
-              undo: () => restoreProductSnapshots([previousSnapshot], 'Undo product edit'),
-              redo: () => restoreProductSnapshots([latestProductSnapshot], 'Redo product edit'),
+              undo: () => restoreProductSnapshots([previousSnapshot]),
+              redo: () => restoreProductSnapshots([latestProductSnapshot]),
             })
           } else if (latestProductSnapshot?.id) {
             pushCreatedProductHistory(latestProductSnapshot, `Add product ${latestProductSnapshot.name || ''}`.trim())
@@ -2635,7 +2635,7 @@ function ProductsFullEditor() {
         actionHistory.pushAction({
           label: `Delete ${deletedSnapshots.length} product${deletedSnapshots.length === 1 ? '' : 's'}`,
           undo: async () => {
-            restoredEntries = await restoreDeletedProducts(deletedSnapshots, 'Undo product delete')
+            restoredEntries = await restoreDeletedProducts(deletedSnapshots)
           },
           redo: async () => {
             const idsToDelete = restoredEntries.length
@@ -2729,7 +2729,10 @@ function ProductsFullEditor() {
         const affectedIds = normalizePositiveProductIds(affectedSnapshots, (snapshot) => snapshot.id)
         actionHistory.pushAction({
           label: `Set ${done} product${done === 1 ? '' : 's'} out of stock`,
-          undo: () => restoreProductSnapshots(affectedSnapshots, 'Undo out-of-stock action'),
+          // F2: the removals are ledgered stock changes; Undo explains and
+          // points at Stock Changes, where each one is reverted on its own.
+          undoRefused: true,
+          undo: () => refuseStockUndo('out_of_stock'),
           redo: () => clearProductStockByIds(affectedIds, 'Redo out-of-stock action'),
         })
       }
@@ -2774,7 +2777,10 @@ function ProductsFullEditor() {
       if (done > 0 && restoredSnapshots.length) {
         actionHistory.pushAction({
           label: `Move ${done} product${done === 1 ? '' : 's'} to ${branch.name}`,
-          undo: () => restoreProductSnapshots(restoredSnapshots, 'Undo branch move'),
+          // F2: the move is a stock transfer with its own History entry in
+          // Branches, which reverses it exactly; Undo here points there.
+          undoRefused: true,
+          undo: () => refuseStockUndo('branch_move'),
           redo: () => moveProductsToBranch(updatedIds, branchId, 'Redo bulk branch change'),
         })
       }
@@ -2830,7 +2836,7 @@ function ProductsFullEditor() {
       actionHistory.pushAction({
         label: `Delete product ${snapshot.name || ''}`.trim(),
         undo: async () => {
-          restoredEntries = await restoreDeletedProducts([snapshot], 'Undo product delete')
+          restoredEntries = await restoreDeletedProducts([snapshot])
         },
         redo: async () => {
           const targetId = Number(restoredEntries[0]?.restoredId || snapshot.id || 0)
@@ -3969,60 +3975,71 @@ function ProductsFullEditor() {
     (await loadProductWriteHelpers()).buildProductWritePayload(snapshot, { id: user?.id, name: user?.name })
   ), [user?.id, user?.name])
 
-  const restoreProductBranchStock = useCallback(async (productId: EntityId, snapshot: ProductRecord, currentProduct: ProductRecord, reason: string) => {
-    const {
-      buildProductBranchStockAdjustments,
-      buildProductStockAdjustmentPayload,
-    } = await loadProductWriteHelpers()
-    const adjustments = buildProductBranchStockAdjustments(snapshot, currentProduct)
-    const syncRun = await runConcurrentTasks(adjustments, async ({ branchId, type, quantity }: { branchId: EntityId; type: string; quantity: unknown }) => {
-      await runProductStockMutation(
-        () => productApi.adjustStock(buildProductStockAdjustmentPayload(snapshot, {
-          productId,
-          productName: snapshot?.name || currentProduct?.name || '',
-          type,
-          quantity,
-          branchId,
-          reason,
-          // N14-D: a restore puts a branch back to the figure the snapshot
-          // recorded. It is not a new receipt -- there is no supplier and no
-          // cost to state -- so it declares itself a correction instead of
-          // being handed an invented one.
-          attribution: 'correction',
-          user: { id: user?.id, name: user?.name },
-        })),
-        'Restore product branch stock',
-      )
-    })
-    if (syncRun.failures.length) throw (syncRun.failures[0]?.error || new Error('Failed to restore branch stock'))
-  }, [runProductStockMutation, user?.id, user?.name])
-
-  const restoreProductSnapshots = useCallback(async (snapshots: ProductRecord[] = [], reason = 'Restore products') => {
+  // F2 / RV-1 (5 Oct 2026): Undo/Redo here restores product FIELDS only. The
+  // old path also posted an /adjust "correction" of snapshot minus current per
+  // branch, writing an old stock figure over every sale, receipt and transfer
+  // since the snapshot. Stock is reversed only from its own ledgered record.
+  const restoreProductSnapshots = useCallback(async (snapshots: ProductRecord[] = []) => {
     if (!snapshots.length) return
-    const latestProducts = await fetchProductsByIds(normalizePositiveProductIds(snapshots, (snapshot) => snapshot?.id))
-    const latestMap = new Map((latestProducts || []).map((product) => [Number(product?.id || 0), product]))
-    const restoreRun = await runConcurrentTasks<ProductRecord, void>(snapshots, async (snapshot: ProductRecord) => {
-      const productId = Number(snapshot?.id || 0)
-      const currentProduct = latestMap.get(productId)
-      if (!currentProduct) return
-      const payload = await buildProductWritePayload(snapshot) as Record<string, unknown>
-      // Undo/redo writes over whatever is current: the version is the fresh read above.
-      payload.expectedUpdatedAt = currentProduct.updated_at || undefined
-      await runProductWriteMutation(() => productApi.updateProduct(productId, payload), 'Restore product')
-      await restoreProductBranchStock(productId, snapshot, currentProduct, reason)
+    const { restoreProductSnapshotFields } = await loadProductWriteHelpers()
+    await restoreProductSnapshotFields(snapshots, {
+      fetchProductsByIds: (ids) => fetchProductsByIds(ids),
+      buildPayload: (snapshot) => buildProductWritePayload(snapshot as ProductRecord) as Promise<Record<string, unknown>>,
+      // Undo/redo writes the snapshot's fields over the version just read.
+      updateProduct: (productId, payload) => runProductWriteMutation(() => productApi.updateProduct(productId, payload), 'Restore product'),
     })
-    if (restoreRun.failures.length) throw (restoreRun.failures[0]?.error || new Error('Failed to restore products'))
     await load(true)
-  }, [buildProductWritePayload, fetchProductsByIds, load, restoreProductBranchStock, runProductWriteMutation])
+  }, [buildProductWritePayload, fetchProductsByIds, load, runProductWriteMutation])
 
-  const restoreDeletedProducts = useCallback(async (snapshots: ProductRecord[] = [], reason = 'Restore deleted products'): Promise<RestoredProductEntry[]> => {
+  // The owner's refusal pattern (5 Oct 2026): say WHY Undo is not allowed and
+  // WHERE to reverse it instead, with the way there built in. Shown instead of
+  // writing anything; the history entry stays as it was.
+  const refuseStockUndo = useCallback(async (kind: 'out_of_stock' | 'branch_move') => {
+    const outOfStock = kind === 'out_of_stock'
+    const why = outOfStock
+      ? tr('product_undo_refused_stock_removed', 'This action removed stock. Undo here would put back an old stock figure over newer sales and receipts, so nothing was changed.', 'សកម្មភាពនេះបានដកស្តុកចេញ។ ការត្រឡប់វិញនៅទីនេះនឹងដាក់តួលេខស្តុកចាស់មកវិញ ពីលើការលក់ និងការទទួលថ្មីៗ ដូច្នេះគ្មានអ្វីត្រូវបានផ្លាស់ប្ដូរទេ។')
+      : tr('product_undo_refused_stock_moved', 'This action moved stock between branches. Undo here would put back an old stock figure over newer sales and receipts, so nothing was changed.', 'សកម្មភាពនេះបានផ្ទេរស្តុករវាងសាខា។ ការត្រឡប់វិញនៅទីនេះនឹងដាក់តួលេខស្តុកចាស់មកវិញ ពីលើការលក់ និងការទទួលថ្មីៗ ដូច្នេះគ្មានអ្វីត្រូវបានផ្លាស់ប្ដូរទេ។')
+    const where = outOfStock
+      ? tr('product_undo_where_stock_changes', 'Revert each removal from Stock Changes.', 'ត្រឡប់ការដកនីមួយៗវិញពី ការផ្លាស់ប្តូរស្តុក។')
+      : tr('product_undo_where_branch_history', 'Undo the stock transfer from Branches → History.', 'ត្រឡប់ការផ្ទេរស្តុកវិញពី សាខា → ប្រវត្តិ។')
+    const canOpen = outOfStock ? productSectionIds.includes('stock_changes') : can('branches', 'transfer')
+    if (!canOpen) {
+      notify(`${why} ${where}`, 'warning')
+      return
+    }
+    const go = await askToConfirm({
+      title: tr('product_undo_refused_title', "Can't undo", 'មិនអាចត្រឡប់វិញបានទេ'),
+      message: why,
+      items: [{ label: tr('product_undo_where_label', 'Where', 'ទីកន្លែង'), value: where }],
+      confirmLabel: `${outOfStock ? tr('stock_change_ledger', 'Stock Changes') : tr('branches', 'Branches')} →`,
+      cancelLabel: tr('back', 'Back'),
+    })
+    if (!go) return
+    if (outOfStock) setActiveProductSection('stock_changes')
+    else navigateTo('branches')
+  }, [askToConfirm, can, navigateTo, notify, productSectionIds, setActiveProductSection, tr])
+
+  const restoreDeletedProducts = useCallback(async (snapshots: ProductRecord[] = []): Promise<RestoredProductEntry[]> => {
     if (!snapshots.length) return []
     const {
       buildDeletedProductIdSet,
       getDefaultProductRestoreBranchId,
       getPreferredProductRestoreBranchId,
       resolveRestoredProductParentId,
+      snapshotHoldsStock,
+      PRODUCT_UNDO_STOCK_REFUSED,
     } = await loadProductWriteHelpers()
+    // F2: the product was removed with stock on hand, and that stock left
+    // through the removal's own write-off. Re-creating it here could only put
+    // back the old figure, so refuse before writing anything and name the
+    // record that brings the product back with its real stock.
+    if (snapshots.some((snapshot) => snapshotHoldsStock(snapshot))) {
+      throw Object.assign(new Error(tr(
+        'product_undo_refused_removed_with_stock',
+        'Cannot restore here: this product was removed with stock on hand, and restoring it here would put back an old stock figure. Nothing was changed. Undo "Remove product" in History instead; it brings the product back with its real stock.',
+        'មិនអាចស្ដារនៅទីនេះបានទេ៖ ផលិតផលនេះត្រូវបានដកចេញ ខណៈមានស្តុកនៅសល់ ហើយការស្ដារនៅទីនេះនឹងដាក់តួលេខស្តុកចាស់មកវិញ។ គ្មានអ្វីត្រូវបានផ្លាស់ប្ដូរទេ។ សូមត្រឡប់ "ដកផលិតផល" វិញក្នុង ប្រវត្តិ ជំនួសវិញ ដែលនឹងនាំផលិតផលមកវិញជាមួយស្តុកពិតរបស់វា។',
+      )), { code: PRODUCT_UNDO_STOCK_REFUSED })
+    }
     const defaultBranchId = getDefaultProductRestoreBranchId(branches)
     const restored: RestoredProductEntry[] = []
     const orderedSnapshots = orderProductRestoreSnapshots(snapshots)
@@ -4048,17 +4065,9 @@ function ProductsFullEditor() {
       if (snapshotId > 0) restoredIdMap.set(snapshotId, restoredId)
       restored.push({ snapshot, restoredId })
     }
-    const latestProducts = await fetchProductsByIds(normalizePositiveProductIds(restored, (entry) => entry.restoredId))
-    const latestMap = new Map((latestProducts || []).map((product) => [Number(product?.id || 0), product]))
-    const stockRestoreRun = await runConcurrentTasks<RestoredProductEntry, void>(restored, async (entry: RestoredProductEntry) => {
-      if (!entry.restoredId || !entry.snapshot) return
-      const currentProduct = latestMap.get(Number(entry.restoredId))
-      await restoreProductBranchStock(entry.restoredId, entry.snapshot, currentProduct || { branch_stock: [] }, reason)
-    })
-    if (stockRestoreRun.failures.length) throw (stockRestoreRun.failures[0]?.error || new Error('Failed to restore deleted product stock'))
     await load(true)
     return restored
-  }, [branches, buildProductWritePayload, fetchProductsByIds, load, restoreProductBranchStock, runProductWriteMutation])
+  }, [branches, buildProductWritePayload, load, runProductWriteMutation, tr])
 
   const pushCreatedProductHistory = useCallback((snapshot: ProductRecord, label = '') => {
     const baseSnapshot = cloneHistorySnapshot(snapshot)
@@ -4073,7 +4082,7 @@ function ProductsFullEditor() {
         await load(true)
       },
       redo: async () => {
-        restoredEntries = await restoreDeletedProducts([baseSnapshot], 'Redo product create')
+        restoredEntries = await restoreDeletedProducts([baseSnapshot])
         activeCreatedProductId = Number(restoredEntries[0]?.restoredId || activeCreatedProductId)
       },
     })
@@ -4246,7 +4255,7 @@ function ProductsFullEditor() {
       if (done > 0 && restoredSnapshots.length) {
         actionHistory.pushAction({
           label: `Update ${done} product${done === 1 ? '' : 's'}`,
-          undo: () => restoreProductSnapshots(restoredSnapshots, 'Undo product bulk update'),
+          undo: () => restoreProductSnapshots(restoredSnapshots),
           redo: async () => {
             const redoRun = await runConcurrentTasks<ProductRecord, void>(restoredSnapshots, async (snapshot: ProductRecord) => {
               if (!snapshot.id) return
@@ -4443,7 +4452,7 @@ function ProductsFullEditor() {
       if (done > 0 && restoredSnapshots.length) {
         actionHistory.pushAction({
           label: `${verb} prices on ${done} product${done === 1 ? '' : 's'}`,
-          undo: () => restoreProductSnapshots(restoredSnapshots, 'Undo price adjustment'),
+          undo: () => restoreProductSnapshots(restoredSnapshots),
           redo: async () => {
             const redoRun = await runConcurrentTasks<ProductRecord, void>(restoredSnapshots, async (snapshot: ProductRecord) => {
               const snapshotId = Number(snapshot?.id || 0)

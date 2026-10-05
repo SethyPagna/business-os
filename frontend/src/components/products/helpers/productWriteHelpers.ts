@@ -53,12 +53,6 @@ interface BranchRecord {
   [key: string]: unknown
 }
 
-interface BranchStockAdjustment {
-  branchId: number
-  type: StockAdjustmentType
-  quantity: number
-}
-
 interface ClearStockAdjustment {
   branchId: number
   quantity: number
@@ -78,10 +72,11 @@ interface ProductStockAdjustmentOptions {
   user?: UserRecord
   /**
    * N14-D. 'correction' marks a movement that restores a figure the ledger
-   * already held -- undo, redo of an undo, a snapshot restore. Those are the
-   * only writes exempt from the supplier + cost a stock-in must carry, and the
-   * exemption is stated on the wire rather than inferred from a reason string,
-   * so routes/inventory.ts can record which it was.
+   * already held. Those are the only writes exempt from the supplier + cost a
+   * stock-in must carry, and the exemption is stated on the wire rather than
+   * inferred from a reason string, so routes/inventory.ts can record which it
+   * was. Since F2 (5 Oct 2026) no Products-page Undo sends one: a snapshot
+   * restore writes product fields only.
    */
   attribution?: 'receipt' | 'correction'
   supplierId?: unknown
@@ -185,34 +180,58 @@ export function buildProductWritePayload(snapshot: ProductRecord = {}, user: Use
   }
 }
 
-export function buildProductBranchStockAdjustments(snapshot: ProductRecord = {}, currentProduct: ProductRecord = {}): BranchStockAdjustment[] {
-  const targetMap = new Map<number, number>()
-  for (const entry of snapshot?.branch_stock || []) {
-    const branchId = Number(entry?.branch_id || 0)
-    if (!Number.isFinite(branchId) || branchId <= 0) continue
-    targetMap.set(branchId, toFiniteNumber(entry?.quantity, 0))
-  }
+// F2 / RV-1 (5 Oct 2026). An Undo or Redo on the Products page restores
+// product FIELDS only -- never stock. It used to post an /adjust "correction"
+// of snapshot minus current for every branch, which wrote an old figure back
+// over whatever happened since: edit while 10 on hand, sell 3, Undo, and 3
+// phantom units appeared on a correction lot while the sale still stood (an
+// Undo after a receipt removed the received units the same way). Stock moves
+// only through ledgered stock actions, each reversed from its own record.
+export const PRODUCT_RESTORE_STOCK_KEYS = Object.freeze(['stock_quantity', 'branch_stock', 'branch_batch_stock', 'rfid_confirmed_qty'] as const)
 
-  const currentMap = new Map<number, number>()
-  for (const entry of currentProduct?.branch_stock || []) {
-    const branchId = Number(entry?.branch_id || 0)
-    if (!Number.isFinite(branchId) || branchId <= 0) continue
-    currentMap.set(branchId, toFiniteNumber(entry?.quantity, 0))
-  }
+export const PRODUCT_UNDO_STOCK_REFUSED = 'product_undo_stock_refused'
 
-  const branchIds = [...new Set([...targetMap.keys(), ...currentMap.keys()])]
-  return branchIds
-    .map((branchId): BranchStockAdjustment | null => {
-      const targetQty = toFiniteNumber(targetMap.get(branchId), 0)
-      const currentQty = toFiniteNumber(currentMap.get(branchId), 0)
-      if (targetQty === currentQty) return null
-      return {
-        branchId,
-        type: targetQty > currentQty ? 'add' : 'remove',
-        quantity: Math.abs(targetQty - currentQty),
-      }
-    })
-    .filter((entry): entry is BranchStockAdjustment => entry !== null)
+// True when a snapshot carries stock on hand in any branch (or, for an older
+// row without branch detail, in its rollup). Restoring such a product from the
+// Products page would have to invent that stock, so it is refused instead.
+export function snapshotHoldsStock(snapshot: ProductRecord = {}): boolean {
+  const branches = Array.isArray(snapshot?.branch_stock) ? snapshot.branch_stock : []
+  if (branches.some((entry) => toFiniteNumber(entry?.quantity, 0) !== 0)) return true
+  return !branches.length && toFiniteNumber(snapshot?.stock_quantity, 0) !== 0
+}
+
+export function stripProductStockFields<T extends Record<string, unknown>>(payload: T): T {
+  const next = { ...payload }
+  for (const key of PRODUCT_RESTORE_STOCK_KEYS) delete (next as Record<string, unknown>)[key]
+  return next
+}
+
+export interface ProductSnapshotFieldRestoreDeps {
+  fetchProductsByIds: (ids: number[]) => Promise<ProductRecord[] | null | undefined>
+  buildPayload: (snapshot: ProductRecord) => Promise<Record<string, unknown>> | Record<string, unknown>
+  updateProduct: (productId: number, payload: Record<string, unknown>) => Promise<unknown>
+}
+
+// Writes each snapshot's product fields back, against the version read just
+// now, and nothing else. Returns how many products were written; throws the
+// first failure after every product has been tried.
+export async function restoreProductSnapshotFields(snapshots: ProductRecord[] = [], deps: ProductSnapshotFieldRestoreDeps): Promise<number> {
+  const ids = [...new Set(snapshots.map((snapshot) => Number(snapshot?.id || 0)).filter((id) => Number.isInteger(id) && id > 0))]
+  if (!ids.length) return 0
+  const latest = await deps.fetchProductsByIds(ids)
+  const latestById = new Map((latest || []).map((product) => [Number(product?.id || 0), product]))
+  const results = await Promise.allSettled(snapshots.map(async (snapshot) => {
+    const productId = Number(snapshot?.id || 0)
+    const current = latestById.get(productId)
+    if (!current) return 0
+    const payload = stripProductStockFields(await deps.buildPayload(snapshot))
+    payload.expectedUpdatedAt = current.updated_at || undefined
+    await deps.updateProduct(productId, payload)
+    return 1
+  }))
+  const failure = results.find((result): result is PromiseRejectedResult => result.status === 'rejected')
+  if (failure) throw (failure.reason || new Error('Failed to restore products'))
+  return results.reduce((sum, result) => sum + (result.status === 'fulfilled' ? result.value : 0), 0)
 }
 
 export function buildProductClearStockAdjustments(product: ProductRecord = {}): ClearStockAdjustment[] {
