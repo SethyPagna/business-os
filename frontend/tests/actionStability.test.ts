@@ -752,11 +752,12 @@ await runTest('product page save and delete actions use shared guards and bounde
   assert.match(save, /finally \{\s*finishSingleAction\(productSaveInFlightRef\)/)
   assert.match(save, /runProductWriteMutation\(\(\) => productApi\.updateProduct\(selected\.id \|\| 0, payload, assertCurrent\), 'Update product'\)/)
   assert.match(source, /runProductWriteMutation\([\s\S]*\(\) => productApi\.uploadProductImage\(\{ productId, filePath: entry, fileName \}, assertCurrent\),[\s\S]*PRODUCT_IMAGE_UPLOAD_TIMEOUT_MS/)
-  assert.match(source, /const payload = await buildProductWritePayload\(snapshot\)[\s\S]*runProductWriteMutation\(\(\) => productApi\.updateProduct\(productId, payload\), 'Restore product'\)/)
+  // RET-B F2: Undo/Redo restores product fields only, through the shared helper.
+  assert.match(source, /restoreProductSnapshotFields\(snapshots, \{[\s\S]*runProductWriteMutation\(\(\) => productApi\.updateProduct\(productId, payload\), 'Restore product'\)/)
   assert.match(source, /runProductWriteMutation\(\(\) => productApi\.createProduct\(createPayload\), 'Restore deleted product'\)/)
   assert.match(source, /runProductWriteMutation\([\s\S]*\(\) => productApi\.updateProduct\([\s\S]*'Bulk update product'/)
   assert.match(source, /runProductWriteMutation\([\s\S]*\(\) => productApi\.updateProduct\([\s\S]*'Redo product bulk update'/)
-  assert.match(source, /runProductStockMutation\([\s\S]*\(\) => productApi\.adjustStock\([\s\S]*'Restore product branch stock'/)
+  assert.doesNotMatch(source, /'Restore product branch stock'/, 'RET-B F2: no Undo writes stock back from a snapshot')
   assert.match(source, /runProductStockMutation\([\s\S]*\(\) => productApi\.adjustStock\([\s\S]*'Clear product stock'/)
   // The select-mode stock panel queues Items in the Stock Session; the page's
   // own bulk add (and its client-side redo) retired with BulkAddStockModal.
