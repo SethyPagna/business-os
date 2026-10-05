@@ -205,6 +205,11 @@ const stockRevert = loadReal('lib/stockRevert.ts', {
   './stockCondition': stockCondition,
   // Sale/return-made stock is named by its record (revert_from_sale / _from_return).
   './movementReference': movementReferenceKernel,
+  // RET-D: a short-stock refusal names the movement that took the units. REAL
+  // (read-only, refusal path only), on this file's own query kernels.
+  './stockRefusalBlocker': loadReal('lib/stockRefusalBlocker.ts', {
+    './stockLedgerQuery': stockLedgerQuery, './movementReference': movementReferenceKernel, './stockInSessionsQuery': stockInSessionsQuery,
+  }),
 })
 
 const inventoryRoute = loadReal('routes/inventory.ts', {

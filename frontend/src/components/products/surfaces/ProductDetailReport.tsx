@@ -8,7 +8,7 @@ import TrendingUp from 'lucide-react/dist/esm/icons/trending-up.js'
 import Users from 'lucide-react/dist/esm/icons/users.js'
 import type { LucideIcon } from 'lucide-react'
 import { getProductDetailReport, getStockLedger, getProductSalesDetail, getProductSupplierPurchases } from '../../../api/productReadTransport.ts'
-import { movementColorClass, translateMovementType } from '../../inventory/movementGroups.ts'
+import { movementColorClass, translateMovementRowType } from '../../inventory/movementGroups.ts'
 import { fmtDate, fmtDateTime24 } from '../../../utils/formatters'
 import { batchDisplayLabel } from '../../../utils/batchLabel.ts'
 // N13: this report's movement rows come from the same /stock-ledger kernel the
@@ -310,7 +310,8 @@ export default function ProductDetailReport({ productId, barcode, t, fmtUSD, lea
         <>
           {movements.map((row) => {
             const expanded = openMovementId === row.id
-            const typeLabel = translateMovementType(row.movement_type, t as (key: string) => string)
+            // RET-D: the row's own label (a stock-in correction or a Revert), as the Stock Changes ledger words it.
+            const typeLabel = translateMovementRowType(row, t as (key: string) => string)
             // The record this movement belongs to, worded exactly as the Stock
             // Change ledger words it. Falls back to the raw id only for the
             // rows that name no record (stock-in session tokens, reverts).

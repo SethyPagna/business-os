@@ -2,6 +2,8 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import ts from 'typescript'
 import * as helpers from '../src/utils/stockInLineEdit.ts'
+import * as refusalHelpers from '../src/utils/stockRefusal.ts'
+import { stockRevertErrorText } from '../src/utils/stockRevertError.ts'
 
 // Execute the actual component handlers with deterministic hook slots and a
 // synthetic transport. Only the JSX rendering is omitted; no handler is
@@ -23,6 +25,8 @@ function harness(componentSource = source) {
     revertDispatch: async (_id: number): Promise<unknown> => undefined }
   const deps = {
     ...helpers,
+    // RET-D: the refusal WHY/WHERE helpers and the ledger read the line-focus hand-off uses.
+    ...refusalHelpers, stockRevertErrorText, getStockLedger: async () => ({ items: [] }),
     useState(initial: unknown) { const index = slot++; if (!(index in slots)) slots[index] = typeof initial === 'function' ? initial() : initial; return [slots[index], (next: unknown) => { slots[index] = typeof next === 'function' ? next(slots[index]) : next }] },
     useRef(initial: unknown) { const index = slot++; if (!(index in slots)) slots[index] = { current: initial }; return slots[index] },
     useCallback: (fn: unknown) => fn, useMemo: (fn: () => unknown) => fn(), useEffect: () => {},

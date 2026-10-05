@@ -6,6 +6,11 @@ import { getStockLedger, getStockLedgerMovementBalance } from '../../api/product
 import { revertStockMovement, editStockMovementReason } from '../../api/inventoryWriteTransport.ts'
 import { getStockMovementRevertPreview, undoActionHistory, redoActionHistory, type StockMovementRevertPreview } from '../../api/actionHistoryTransport.ts'
 import { stockRevertErrorText } from '../../utils/stockRevertError.ts'
+import {
+  STOCK_IN_SESSIONS_ANCHOR, STOCK_RECORD_FOCUS_EVENT, queueStockInLineFocus, stockInCorrectionLineId, stockRefusalInfo, takeStockRecordFocus,
+  type StockRefusalInfo,
+} from '../../utils/stockRefusal.ts'
+import StockRefusalLine from '../shared/StockRefusalLine.tsx'
 
 // The one Stock Session float, opened by the header Adjust and by resuming a
 // failed attempt; lazy so it loads only when opened.
@@ -249,6 +254,7 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
     can: (section: string, action: string) => boolean
     notify: (message: string, type?: string) => void
     user?: { id?: string | number; username?: string } | null
+    navigateTo?: (page: string, anchor?: string) => void
   }
   const canAdjust = app.can('inventory', 'adjust')
   const canViewCosts = canViewAcquisitionCosts(app.user)
@@ -291,6 +297,8 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
   const [editingReason, setEditingReason] = useState<string | null>(null)
   const [confirmRevert, setConfirmRevert] = useState(false)
   const [revertPreview, setRevertPreview] = useState<StockMovementRevertPreview | null>(null)
+  // RET-D: WHY a Revert was refused and WHERE the blocking record is (utils/stockRefusal.ts).
+  const [revertRefusal, setRevertRefusal] = useState<StockRefusalInfo | null>(null)
   const detailEpochRef = useRef(0)
   const previewInFlightRef = useRef<number | null>(null)
   const detailActorRef = useRef(app.user?.id ?? app.user?.username ?? null)
@@ -460,6 +468,7 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
     detailEpochRef.current += 1
     previewInFlightRef.current = null
     setRevertPreview(null)
+    setRevertRefusal(null)
     setRowBusy(false)
     setDetail(row)
     setEditingReason(null)
@@ -471,6 +480,7 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
     detailEpochRef.current += 1
     previewInFlightRef.current = null
     setRevertPreview(null)
+    setRevertRefusal(null)
     setRowBusy(false)
     setDetail(null); setEditingReason(null); setConfirmRevert(false); setReasonReview(null)
   }, [])
@@ -492,6 +502,16 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
   }, [app, openDetail, t])
 
   useEffect(() => { closeDetail() }, [app.user?.id, app.user?.username, closeDetail])
+
+  // RET-D: a refusal elsewhere (Stock-in Sessions) links here to the record
+  // that blocked it. Declared after the reset above so the record it opens
+  // is not closed again on the same mount.
+  useEffect(() => {
+    const consume = () => { const id = takeStockRecordFocus(); if (id) void openMovementById(id) }
+    consume()
+    window.addEventListener(STOCK_RECORD_FOCUS_EVENT, consume)
+    return () => window.removeEventListener(STOCK_RECORD_FOCUS_EVENT, consume)
+  }, [openMovementById])
 
   // N13: the ONE composition of "which record is this" -- "Sale 20260901-193100",
   // "Return RET-...". Defined once here and used by the desktop row, the mobile
@@ -597,7 +617,10 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
       setRevertPreview(preview)
       setConfirmRevert(true)
     } catch (error) {
-      if (isCurrent()) app.notify(stockRevertErrorText(error, (key, fallback) => tr(t, key, fallback)), 'error')
+      if (isCurrent()) {
+        app.notify(stockRevertErrorText(error, (key, fallback) => tr(t, key, fallback)), 'error')
+        setRevertRefusal(stockRefusalInfo(error, (key, fallback) => tr(t, key, fallback)))
+      }
     } finally {
       if (isCurrent()) {
         previewInFlightRef.current = null
@@ -630,7 +653,10 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
       closeDetail()
       void load()
     } catch (error) {
-      if (isCurrent()) app.notify(stockRevertErrorText(error, (key, fallback) => tr(t, key, fallback)), 'error')
+      if (isCurrent()) {
+        app.notify(stockRevertErrorText(error, (key, fallback) => tr(t, key, fallback)), 'error')
+        setRevertRefusal(stockRefusalInfo(error, (key, fallback) => tr(t, key, fallback)))
+      }
     } finally {
       revertInFlightRef.current = false
       if (isCurrent()) setRowBusy(false)
@@ -1044,9 +1070,13 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
   // A Revert that puts stock back is not a receipt, whatever its type.
   const detailShowsReceiptAccounting = detail ? showReceiptAccounting(detail.movement_type) && detailRevertsId == null : false
   // A reverted row offers its Revert's link instead: a second revert is refused.
-  const detailCanRevert = detail ? isRevertibleStockMovement(detail.movement_type, detail.reference_id) && detailRevertedById == null : false
+  // RET-D: a stock-in line correction is changed from its line (edit it again,
+  // or Undo the edit in History), never reverted here -- the Worker refuses it
+  // (revert_use_history). Say so up front, with the way to the line.
+  const detailCorrectionLineId = detail ? stockInCorrectionLineId(detail.reference_id) : null
+  const detailCanRevert = detail ? isRevertibleStockMovement(detail.movement_type, detail.reference_id) && detailRevertedById == null && detailCorrectionLineId == null : false
   // Stock a sale or a return moved is changed from that record, never here.
-  const detailSourceKind = detail && !detailCanRevert
+  const detailSourceKind = detail && !detailCanRevert && detailCorrectionLineId == null
     ? (detail.movement_type === 'sale' || detail.movement_type === 'sale_from_damaged' ? 'sale' : detail.reference_kind ?? null)
     : null
   const revertScopeText = !revertPreview || revertPreview.kind === 'movement'
@@ -1377,6 +1407,7 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
               <span title={`${tr(t, 'branch', 'Branch')}`}>{buildHistoryRowModel(detail).branch}</span>
               <span title={`${tr(t, 'cashier_user', 'User')}`}>{buildHistoryRowModel(detail).actor}</span>
             </div>
+            {revertRefusal ? <StockRefusalLine info={revertRefusal} onOpen={(id) => void openMovementById(id)} /> : null}
             {/* Row context actions -- Edit reason + Revert -- only for a user
                 with Inventory adjust access (the server enforces the same).
                 Revert remains a two-step inline confirmation. */}
@@ -1432,6 +1463,17 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
                       <Undo2 className="h-4 w-4 shrink-0" aria-hidden="true" />
                       <span>{tr(t, 'revert', 'Revert')}</span>
                     </button>
+                  ) : detailCorrectionLineId != null ? (
+                    <span data-revert-source="stock_in_correction" className="inline-flex min-w-0 flex-wrap items-center gap-x-1.5 text-xs text-gray-500 dark:text-gray-400">
+                      <span className="min-w-0 break-words">{tr(t, 'stock_in_correction_change_from_line', 'A correction of stock-in line #{id}. Change it by editing that line.').replace('{id}', String(detailCorrectionLineId))}</span>
+                      <button
+                        type="button"
+                        className="shrink-0 font-semibold text-blue-700 underline-offset-2 hover:underline dark:text-blue-300"
+                        onClick={() => { queueStockInLineFocus(detailCorrectionLineId); closeDetail(); app.navigateTo?.('products', STOCK_IN_SESSIONS_ANCHOR) }}
+                      >
+                        {tr(t, 'stock_in_correction_open_line', 'Open stock-in line')}
+                      </button>
+                    </span>
                   ) : detailSourceKind ? (
                     <span data-revert-source={detailSourceKind} className="min-w-0 break-words text-xs text-gray-500 dark:text-gray-400">
                       {detailSourceKind === 'sale'

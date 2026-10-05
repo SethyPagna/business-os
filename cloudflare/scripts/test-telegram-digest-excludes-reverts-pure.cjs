@@ -47,4 +47,21 @@ try {
   const moved = f.sql.prepare(`SELECT inventory_movements.product_id FROM inventory_movements WHERE ${telegram.stockDigestOutWhere()} AND substr(inventory_movements.created_at, 1, 10) = '2026-09-21'`).all()
   assert.equal(moved.length, 0, 'a reverted removal does not put its product on the low-stock-moved list')
   console.log('PASS past days drop reverted originals and keep restored ones')
+
+  // RET-D (owner, 5 Oct 2026): a stock-in line lowered from 10 to 7 is a
+  // correction of the receipt, not a removal. Its delta rows (a NEGATIVE
+  // 'remove' and a 0-quantity cost row) net into Stock in and never count as
+  // Stock out. Before: in {1, 10}, out {2, -1} -- the correction subtracted
+  // from the day's real outflow.
+  const line = Number(insert.run('add', 10, 'Receipt 1 Oct', '9001', '2026-10-01 03:00:00').lastInsertRowid)
+  insert.run('remove', -3, `Edit of stock-in line #${line}`, `stock-in-edit:${line}:op-1:0`, '2026-10-01 04:00:00')
+  insert.run('adjustment', 0, `Edit of stock-in line #${line}`, `stock-in-edit:${line}:op-1:0`, '2026-10-01 04:00:00')
+  insert.run('remove', 2, 'Damaged 1 Oct', null, '2026-10-01 05:00:00')
+  assert.deepEqual({ ...count(telegram.stockDigestInWhere(), '2026-10-01') }, { count: 2, quantity: 7 }, 'stock in: the receipt net of its correction')
+  assert.deepEqual({ ...count(telegram.stockDigestOutWhere(), '2026-10-01') }, { count: 1, quantity: 2 }, 'stock out: the real removal only')
+  // Its undo (the next generation, same line prefix) nets back in.
+  insert.run('add', 3, `Undo: Edit of stock-in line #${line}`, `stock-in-edit:${line}:op-1:1`, '2026-10-01 06:00:00')
+  assert.deepEqual({ ...count(telegram.stockDigestInWhere(), '2026-10-01') }, { count: 3, quantity: 10 }, 'an undone correction restores the receipt')
+  assert.deepEqual({ ...count(telegram.stockDigestOutWhere(), '2026-10-01') }, { count: 1, quantity: 2 })
+  console.log('PASS a stock-in line correction nets into stock in and is never stock out')
 } finally { f.sql.close() }

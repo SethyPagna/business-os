@@ -76,6 +76,7 @@ import {
 } from './stockInSessionsQuery'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { isUndoClosedByMerge } from './undoAppliers'
+import { findConsumingBlocker, findLaterChangeBlocker, type StockRefusalDetails } from './stockRefusalBlocker'
 import { bumpVersion } from './cache'
 
 export const STOCK_IN_LINE_EDIT_KIND = 'stock.session_line_edit'
@@ -515,15 +516,21 @@ async function applyInner(db: D1Compat, user: SessionUser, movementId: number, b
 
   const B = Number(facts.branch_qty) || 0
   const branchAfter = B + d
+  // RET-D (owner, 5 Oct 2026): a refusal names WHY and WHERE -- the sale,
+  // transfer or removal that took these units since the receipt -- read only
+  // now that the edit is already refused (lib/stockRefusalBlocker.ts).
+  const consumedBy = async (lotScoped: boolean) => (await findConsumingBlocker(db, {
+    productId, branchId, batchId: lotScoped ? A.id : null, afterMovementId: movementId,
+  })) ?? {}
   if (move && L < q0) {
-    refuse(409, `${q0 - L} of these units were already sold or moved out of this received date, so the line cannot move to another date. Change the quantity or cost only.`, 'move_consumed', { consumed: q0 - L })
+    refuse(409, `${q0 - L} of these units were already sold or moved out of this received date, so the line cannot move to another date. Change the quantity or cost only.`, 'move_consumed', { consumed: q0 - L, ...await consumedBy(true) })
   }
   if (!move && d < 0 && L < -d) {
     const minimum = Math.max(0, q0 - L)
-    refuse(409, `${q0 - L} of these units were already sold or moved out of this received date. The lowest quantity allowed is ${minimum}.`, 'below_consumed', { minimum, consumed: q0 - L })
+    refuse(409, `${q0 - L} of these units were already sold or moved out of this received date. The lowest quantity allowed is ${minimum}.`, 'below_consumed', { minimum, consumed: q0 - L, ...await consumedBy(true) })
   }
   // The lot guard above is the specific answer; this is the drifted-aggregate backstop.
-  if (branchAfter < 0) refuse(409, 'The branch does not hold enough of this product for that quantity.', 'branch_below_zero')
+  if (branchAfter < 0) refuse(409, 'The branch does not hold enough of this product for that quantity.', 'branch_below_zero', { ...await consumedBy(false) })
 
   // ---- Snapshots.
   const before: EditState = { productId, branchId, branchQty: B, branchExists: Number(facts.branch_exists) ? 1 : 0, lots: [A] }
@@ -705,7 +712,8 @@ export async function notifyStockInLineEdit(env: Env): Promise<void> {
 }
 
 export class StockInLineEditReplayError extends Error {
-  constructor(message: string, readonly statusCode = 409) { super(message) }
+  // `refusal` (RET-D): the blocking record, passed through by the History route.
+  constructor(message: string, readonly statusCode = 409, readonly refusal: StockRefusalDetails | null = null) { super(message) }
 }
 
 /** Server-side undo/redo of one line-edit generation. */
@@ -796,6 +804,16 @@ export async function replayStockInLineEdit(
     const current = await db.prepare('SELECT generation,state FROM stock_lot_adjustment_operations WHERE id=@operation').get<OperationRow>({ operation: row.id })
     if (current?.generation === next && current.state === target) return
     if (isMaintenanceError(error)) throw new StockInLineEditReplayError('Maintenance is in progress. Nothing was changed.', 503)
-    throw new StockInLineEditReplayError('Stock changed after this line edit (a sale, transfer, count or a later edit). Nothing was changed.')
+    // RET-D: name the change this exact-snapshot replay collided with -- the
+    // newest movement of the product at the branch since this operation's
+    // own rows (another edit of the line counts; its own rows do not).
+    const ownPrefix = `${STOCK_IN_EDIT_REFERENCE_PREFIX}${revision.rootMovementId}:${row.id}:`
+    const own = await db.prepare('SELECT MAX(id) AS id FROM inventory_movements WHERE reference_id >= @lo AND reference_id < @hi')
+      .get<{ id: number | null }>({ lo: ownPrefix, hi: `${ownPrefix.slice(0, -1)};` }).catch(() => null)
+    const refusal = await findLaterChangeBlocker(db, {
+      pairs: [{ productId: revision.productId, branchId: revision.branchId }],
+      afterMovementId: Number(own?.id) || revision.rootMovementId,
+    })
+    throw new StockInLineEditReplayError('Stock changed after this line edit (a sale, transfer, count or a later edit). Nothing was changed.', 409, refusal)
   }
 }

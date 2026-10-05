@@ -129,6 +129,8 @@ const stockLotAdjustment = loadReal('lib/stockLotAdjustment.ts', {
   './stockReason': loadReal('lib/stockReason.ts'),
   '../durable-objects/broadcastHub': { broadcast: async () => {} },
   './cache': { bumpVersion: async () => {} },
+  // RET-D: names the blocker of a refused Undo; no refusal here is about naming it.
+  './stockRefusalBlocker': { findLaterChangeBlocker: async () => null },
 })
 const baseModuleLoad = Module._load
 Module._load = function stockLotAdjustmentHook(request, parent, isMain) {

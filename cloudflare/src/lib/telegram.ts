@@ -986,8 +986,16 @@ const notARevert = (): string => `(reference_id IS NULL OR CAST(reference_id AS 
 // (see stockInSessionsQuery.ts's STOCK_RECEIPT_MOVEMENT_TYPES) -- without it
 // this digest under-counted every session committed through the Products
 // page's "Add products" entry.
-export const stockDigestInWhere = (): string => `movement_type IN ('add', 'stock_in', 'transfer_in', 'move_in') AND ${notARevert()}`
-export const stockDigestOutWhere = (): string => `${STOCK_OUT_MOVEMENT} AND ${notARevert()}`
+// RET-D (owner, 5 Oct 2026): editing a stock-in line's quantity is a
+// correction of the RECEIPT, not a removal. Its delta rows (stamped
+// `stock-in-edit:<line>:...`, lib/stockInLineEdit.ts) net into Stock in with
+// their sign -- a line lowered by 1 reads one fewer received -- and never
+// count as Stock out (a lowered line writes a NEGATIVE 'remove' row, which
+// the plain SUM below used to subtract from the day's outflow).
+// COALESCE: a NULL reference_id must read as "not an edit row", or NOT(...) would drop every plain removal.
+const STOCK_IN_EDIT_ROW = "COALESCE(reference_id >= 'stock-in-edit:' AND reference_id < 'stock-in-edit;', 0)"
+export const stockDigestInWhere = (): string => `(movement_type IN ('add', 'stock_in', 'transfer_in', 'move_in') OR (${STOCK_IN_EDIT_ROW} AND quantity <> 0)) AND ${notARevert()}`
+export const stockDigestOutWhere = (): string => `${STOCK_OUT_MOVEMENT} AND NOT ${STOCK_IN_EDIT_ROW} AND ${notARevert()}`
 
 /** Items at or below their alert level now that were sold or taken out of stock on the scope's day and branch. */
 async function lowStockMovedOnDay(env: Env, filters: SalesFilters): Promise<{ rows: LowStockRow[]; more: number }> {

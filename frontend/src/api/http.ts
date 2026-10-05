@@ -439,6 +439,11 @@ function createApiError(status: number, parsed: LooseRecord | null, text: string
   error.conflict = !!parsed?.conflict || parsed?.code === 'write_conflict'
   error.entity = parsed?.entity || null
   error.reason = parsed?.reason || null
+  // RET-D: the record that blocked a stock Revert / Undo / line edit, and
+  // where to open it (cloudflare/src/lib/stockRefusalBlocker.ts ->
+  // utils/stockRefusal.ts), so the refusal can say WHY and link WHERE.
+  error.blocker = parsed?.blocker && typeof parsed.blocker === 'object' && !Array.isArray(parsed.blocker) ? parsed.blocker : null
+  error.destination = parsed?.destination && typeof parsed.destination === 'object' && !Array.isArray(parsed.destination) ? parsed.destination : null
   // The values a coded refusal's sentence names (POST /api/returns/bulk's
   // return_restore_over_capacity: product, returned, sold), so the restated
   // sentence keeps them -- see returns/helpers/returnRefusalError.ts.
