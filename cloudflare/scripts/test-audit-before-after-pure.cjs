@@ -367,8 +367,10 @@ async function feesRoute() {
     '../index': {},
   }).default
   const ctx = { waitUntil: (p) => p, passThroughOnException() {} }
+  // N13: an expense edit states the version it read (expected_updated_at is mandatory).
   const put = (body) => route.request('/1', {
-    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(Object.assign({ expected_updated_at: (db.prepare('SELECT updated_at FROM fees WHERE id = 1').get() || {}).updated_at }, body)),
   }, {}, ctx)
 
   const unchanged = { fee_type: 'expense', label: 'Packing tape', amount_usd: 2.5, amount_khr: 0, fee_date: '2026-09-11', branch_id: 2, notes: 'counter' }

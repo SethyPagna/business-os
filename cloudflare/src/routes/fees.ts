@@ -16,7 +16,7 @@ import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit, changedFields } from '../lib/audit'
 import { getPermissionTier, getActionTier } from '../lib/permissions'
 import { broadcast } from '../durable-objects/broadcastHub'
-import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
+import { assertRequiredUpdatedAtMatch, EXPECTED_UPDATED_AT_REQUIRED, getExpectedUpdatedAt, hasExpectedUpdatedAtField, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
 import { maybeQueueForReview } from '../lib/reviewGate'
 import { businessToday } from '../lib/businessDateWindow'
 import { sendTelegramEvent, telegramMoney } from '../lib/telegram'
@@ -666,13 +666,17 @@ app.put('/:id', async (c) => {
   const id = Number(c.req.param('id'))
   if (!Number.isFinite(id)) return c.json({ error: 'Invalid fee id' }, 400)
   const body = await c.req.json().catch(() => ({} as Record<string, unknown>))
+  // N13: the edit-conflict check is mandatory. It used to run only when the
+  // client happened to send a version, so a client that omitted it overwrote a
+  // newer edit silently. Refused before any read or write.
+  if (!hasExpectedUpdatedAtField(body as Record<string, unknown>)) return c.json(EXPECTED_UPDATED_AT_REQUIRED, 400)
 
   const existing = await db.prepare(`SELECT * FROM fees WHERE id = @id`).get<FeeRow>({ id })
   if (!existing) return c.json({ error: 'Fee not found' }, 404)
 
   const expectedUpdatedAt = getExpectedUpdatedAt(body)
   try {
-    assertUpdatedAtMatch('fee', existing, expectedUpdatedAt)
+    assertRequiredUpdatedAtMatch('fee', existing, expectedUpdatedAt)
   } catch (err) {
     if (err instanceof WriteConflictError) {
       const { body: conflictBody, status } = writeConflictResponse(err)
@@ -721,7 +725,7 @@ app.put('/:id', async (c) => {
     UPDATE fees SET fee_type = @feeType, label = @label, amount_usd = @amountUsd, amount_khr = @amountKhr,
       fee_date = @feeDate, sale_id = @saleId, branch_id = @branchId,
       delivery_contact_id = @deliveryContactId, notes = @notes, updated_at = @now
-    WHERE id = @id${expectedUpdatedAt ? ' AND updated_at IS @expectedUpdatedAt' : ''}
+    WHERE id = @id AND updated_at IS @expectedUpdatedAt
   `).run({ feeType, label, amountUsd, amountKhr, feeDate, saleId, branchId, deliveryContactId, notes, now, id, expectedUpdatedAt })
 
   // The pre-read check gives callers an immediate conflict response, while
@@ -731,7 +735,6 @@ app.put('/:id', async (c) => {
   // side effects for a write that never happened.
   if (updateResult.changes === 0) {
     const current = await db.prepare(`SELECT * FROM fees WHERE id = @id`).get<FeeRow>({ id })
-    if (!expectedUpdatedAt) return c.json({ error: current ? 'Fee was not updated' : 'Fee not found' }, current ? 409 : 404)
     const conflict = new WriteConflictError('fee', current || null, expectedUpdatedAt, current ? 'updated' : 'deleted')
     const { body: conflictBody, status } = writeConflictResponse(conflict)
     return c.json(conflictBody, status)

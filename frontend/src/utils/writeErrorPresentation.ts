@@ -55,7 +55,10 @@ export function presentWriteError(error: WriteErrorDetail, t: WriteErrorTranslat
     }
   }
 
-  if (code === 'client_request_id_required') {
+  // N13: the Worker refuses a write that omits its request identity, or an expense /
+  // promotion edit that omits the version it read (expected_updated_at). Both can only
+  // come from an app build that predates the requirement, so both mean "reload the app".
+  if (code === 'client_request_id_required' || code === 'expected_updated_at_required') {
     return {
       title: copy(t, 'write_failed_title', 'Write failed'),
       detail: copy(t, 'write_failed_app_out_of_date', 'This app is out of date. Restart or reload it, then try again.'),

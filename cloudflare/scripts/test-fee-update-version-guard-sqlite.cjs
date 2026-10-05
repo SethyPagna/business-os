@@ -189,7 +189,10 @@ async function main() {
       ...['amount_usd','amount_khr'].flatMap(field => [null, '', '-0.000000001', 'NaN', true].map(value => ({ [field]: value }))),
       { fee_money_version: null }, { fee_money_version: 0 }, { fee_money_version: '1' },
     ]) {
-      assert.equal((await update({ fee_money_version: 1, ...body })).status, 400)
+      // Carry the version so a 400 here can only come from the money rules.
+      const refused = await update({ fee_money_version: 1, expectedUpdatedAt: before.updated_at, ...body })
+      assert.equal(refused.status, 400)
+      assert.equal(refused.body.code === 'expected_updated_at_required', false, 'refused for money, not for a missing version')
       assert.deepEqual(row(), before)
       assert.equal(feeUpdateRuns, 0)
       assert.equal(audits.length, 0)
@@ -246,18 +249,52 @@ async function main() {
     assert.equal(broadcasts.length, 0)
   })
 
-  for (const expectedUpdatedAt of [undefined, null]) {
-    await check(`deleted row with ${expectedUpdatedAt === null ? 'null' : 'absent'} version does not report a saved edit`, async () => {
-      beforeFeeUpdate = (db) => db.prepare('DELETE FROM fees WHERE id = 1').run()
-      const result = await update({ label: 'lost edit', expectedUpdatedAt })
-      assert.equal(result.status, 404, JSON.stringify(result.body))
-      assert.equal(result.body.error, 'Fee not found')
-      assert.equal(feeUpdateRuns, 1)
-      assert.equal(audits.length, 0)
-      assert.equal(broadcasts.length, 0)
-      assert.equal(sqlite.prepare('SELECT COUNT(*) AS n FROM fees').get().n, 0)
-    })
-  }
+  // N13: the version is mandatory. Before, the guard ran only when the client sent one,
+  // so an edit without it overwrote a newer edit silently.
+  await check('N13: an edit with no version is refused before any read or write', async () => {
+    const before = row()
+    for (const body of [{ label: 'blind overwrite' }, { label: 'blind overwrite', expectedUpdatedAt: undefined }, { label: 'x', amount_usd: 50 }]) {
+      const result = await update(body)
+      assert.equal(result.status, 400, JSON.stringify(result.body))
+      assert.equal(result.body.code, 'expected_updated_at_required')
+    }
+    assert.deepStrictEqual(row(), before)
+    assert.equal(feeUpdateRuns, 0)
+    assert.equal(audits.length, 0)
+    assert.equal(broadcasts.length, 0)
+  })
+
+  await check('N13: a stale edit over a newer one is a conflict, not a silent overwrite (snake_case alias too)', async () => {
+    sqlite.exec("UPDATE fees SET label='newer edit', updated_at='2026-09-08T00:00:05.000Z' WHERE id=1")
+    for (const stale of [{ expectedUpdatedAt: '2026-09-08T00:00:00.000Z' }, { expected_updated_at: '2026-09-08T00:00:00.000Z' }, { expectedUpdatedAt: null }]) {
+      const result = await update({ label: 'stale overwrite', ...stale })
+      assert.equal(result.status, 409, JSON.stringify(result.body))
+      assert.equal(result.body.code, 'write_conflict')
+    }
+    assert.equal(row().label, 'newer edit')
+    assert.equal(feeUpdateRuns, 0)
+  })
+
+  await check('N13: a legacy row whose updated_at is NULL stays editable by stating null, and the next edit needs the new version', async () => {
+    sqlite.exec(`DROP TABLE fees; CREATE TABLE fees (id INTEGER PRIMARY KEY, fee_type TEXT NOT NULL, label TEXT, amount_usd REAL NOT NULL, amount_khr REAL NOT NULL, fee_date TEXT NOT NULL, sale_id INTEGER, branch_id INTEGER, delivery_contact_id INTEGER, notes TEXT, created_by INTEGER, created_by_name TEXT, created_at TEXT NOT NULL, updated_at TEXT);
+      INSERT INTO fees (id, fee_type, label, amount_usd, amount_khr, fee_date, branch_id, created_at, updated_at) VALUES (1, 'expense', 'legacy', 10, 0, '2026-09-08', 2, '2026-09-01T00:00:00.000Z', NULL);`)
+    assert.equal((await update({ label: 'no version' })).status, 400)
+    const first = await update({ label: 'edited legacy', expectedUpdatedAt: null })
+    assert.equal(first.status, 200, JSON.stringify(first.body))
+    assert.ok(row().updated_at, 'the edit stamps a version')
+    assert.equal((await update({ label: 'again', expectedUpdatedAt: null })).status, 409, 'null is now stale')
+  })
+
+  await check('N13: the version check also holds when a concurrent writer removes the row after the pre-read', async () => {
+    beforeFeeUpdate = (db) => db.prepare('DELETE FROM fees WHERE id = 1').run()
+    const result = await update({ label: 'lost edit', expectedUpdatedAt: '2026-09-08T00:00:00.000Z' })
+    assert.equal(result.status, 409, JSON.stringify(result.body))
+    assert.equal(result.body.reason, 'deleted')
+    assert.equal(feeUpdateRuns, 1)
+    assert.equal(audits.length, 0)
+    assert.equal(broadcasts.length, 0)
+    assert.equal(sqlite.prepare('SELECT COUNT(*) AS n FROM fees').get().n, 0)
+  })
 
   await check('deleted versioned row returns a conflict without side effects', async () => {
     beforeFeeUpdate = (db) => db.prepare('DELETE FROM fees WHERE id = 1').run()
