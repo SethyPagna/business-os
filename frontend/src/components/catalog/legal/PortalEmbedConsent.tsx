@@ -19,8 +19,8 @@ type CopyFn = (key: string, fallback?: string, fallbackKm?: string) => string
 
 export const MAP_CONSENT_STORAGE_KEY = 'business-os-portal-map-consent-v1'
 
-export const MAP_CONSENT_BODY_EN = 'The map is loaded from Google Maps, which can set its own cookies. Load it only if you want to.'
-export const MAP_CONSENT_BODY_KM = 'ផែនទីផ្ទុកពី Google Maps ដែលអាចកំណត់ខូឃីផ្ទាល់ខ្លួន។ សូមផ្ទុកតែបើអ្នកចង់។'
+export const MAP_CONSENT_BODY_EN = 'The map is loaded from Google Maps, which sets its own cookies. Load it only if you want to.'
+export const MAP_CONSENT_BODY_KM = 'ផែនទីផ្ទុកពី Google Maps ដែលកំណត់ខូឃីផ្ទាល់ខ្លួន។ សូមផ្ទុកតែបើអ្នកចង់។'
 export const MAP_CONSENT_LOAD_EN = 'Load the map'
 export const MAP_CONSENT_LOAD_KM = 'ផ្ទុកផែនទី'
 export const MAP_CONSENT_LINK_EN = 'Open in Google Maps instead'
