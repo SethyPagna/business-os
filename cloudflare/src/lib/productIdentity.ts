@@ -477,7 +477,15 @@ export function keeperFollowsBarcode(
   merged: { barcode?: unknown } | null | undefined,
 ): string | null {
   const own = keeper?.barcode
-  if (String(own ?? '').trim()) return String(own)
+  if (String(own ?? '').trim()) {
+    // Owner's standing merge rule (5 Oct 2026): two barcodes identical except for leading zeros are one
+    // barcode, and the survivor carries the spelling WITHOUT them -- the same function every other merge
+    // path uses. Any other difference keeps the kept product's own spelling, as N1 says.
+    if (isRealBarcode(own) && isRealBarcode(merged?.barcode) && identityBarcodeKey(own) === identityBarcodeKey(merged?.barcode)) {
+      return canonicalProductBarcode([{ barcode: own }, { barcode: merged?.barcode }])
+    }
+    return String(own)
+  }
   return isRealBarcode(merged?.barcode) ? String(merged?.barcode).trim() : (own == null ? null : String(own))
 }
 

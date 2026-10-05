@@ -5,7 +5,6 @@ import { costAverageRows } from './mergeConfirmationRule'
 import { useApp } from '../../AppContext'
 import { canViewAcquisitionCosts } from '../../utils/acquisitionCostAccess.ts'
 import type { PermissionUser } from '../../utils/permissions.ts'
-import { canCopyMergePrice, mergeChangesPrices } from '../../utils/productMergePriceAccess.ts'
 
 // "What happens when I save one and the other row also has stock?"
 //
@@ -140,8 +139,7 @@ export default function MergeStockChoiceDialog({
   // dangerous case (a distracted Enter) pick a disposition nobody chose, which
   // is the exact failure this dialog exists to remove.
   const [choice, setChoice] = useState<MergeStockChoice | null>(null)
-  const actor = (useApp() as { user: PermissionUser }).user
-  const canViewCosts = canViewAcquisitionCosts(actor)
+  const canViewCosts = canViewAcquisitionCosts((useApp() as { user: PermissionUser }).user)
   const T = (key: string, fallback: string): string => {
     const value = t(key)
     return value && value !== key ? value : fallback
@@ -150,10 +148,6 @@ export default function MergeStockChoiceDialog({
   const pcs = T('pcs', 'pcs')
   const lotWord = T('batches', 'received dates')
   const priceChanges = (pricing?.changes ?? []).filter(change => canViewCosts || !/cost|purchase/i.test(change.field))
-  // Owner, 5 Oct 2026: copying another product's price needs the product-edit grant.
-  // The Worker refuses it (403 product_edit_permission_required); the button says why first.
-  const priceNeedsEdit = mergeChangesPrices(pricing?.changes) && !canCopyMergePrice(actor)
-  const priceNeedsEditText = T('merge_price_needs_edit', "This merge would copy another product's price onto the kept product. That needs the permission to edit products.")
   const identityDiffers = Boolean(identity && !identity.same && identity.differs.length)
   // The kept row has no cost of its own and takes the removed row's. Not a
   // difference and not a warning -- but it changes what the kept product cost,
@@ -227,8 +221,7 @@ export default function MergeStockChoiceDialog({
       confirmLabel={choice === 'write_off' ? T('remove', 'Remove') : T('merge', 'Merge')}
       danger={choice === 'write_off' || identityDiffers}
       working={working}
-      confirmDisabled={(needsChoice && !choice) || priceNeedsEdit}
-      confirmDisabledReason={priceNeedsEdit ? priceNeedsEditText : undefined}
+      confirmDisabled={needsChoice && !choice}
       onConfirm={() => onConfirm(needsChoice ? (choice as MergeStockChoice) : 'merge')}
       onClose={onClose}
     >

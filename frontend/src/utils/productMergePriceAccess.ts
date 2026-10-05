@@ -1,19 +1,19 @@
 import { effectivePermissions, type PermissionUser } from './permissions.ts'
 
-// Owner, 5 Oct 2026: copying another product's selling or wholesale price during a
-// merge needs the product-edit permission (merge permission alone is not enough).
-// Mirrors the Worker's rule in foldDuplicateProductInto: the actor's products tier
-// must be FULL and the edit action not switched off (getActionTier(user,
-// 'products', 'edit') === 'full'). A Partial-access (review) user can merge only
-// where no price would move, exactly like a user without the edit switch.
-export function canCopyMergePrice(user: PermissionUser): boolean {
-  const { isAdmin, getPermissionTier, can } = effectivePermissions(user)
-  return isAdmin || (getPermissionTier('products') === 'full' && can('products', 'edit'))
+// Owner, 5 Oct 2026: a merge applies the standing rule by itself (highest selling and wholesale price,
+// quantity-weighted cost, the barcode without leading zeros) and needs no permission. Only a MANUAL choice
+// of a price different from that rule is a product edit, and so is changing a product's default price anywhere.
+// Employee default: product information and images, never the default selling or wholesale price (they adjust a
+// price per sale in the POS cart).
+
+/** May change a product's default selling or wholesale price: Edit product and the price action both on. */
+export function canChangeProductPrices(user: PermissionUser): boolean {
+  const { isAdmin, can } = effectivePermissions(user)
+  return isAdmin || (can('products', 'edit') && can('products', 'price'))
 }
 
-const PRICE_FIELD = /^(selling|wholesale)_price_(usd|khr)$/
-
-/** True when a merge preview says it would move a selling or wholesale price onto the kept product. */
-export function mergeChangesPrices(changes: ReadonlyArray<{ field: string }> | null | undefined): boolean {
-  return Boolean(changes?.some((change) => PRICE_FIELD.test(change.field)))
+/** May pick a merge price other than the rule. Mirrors the Worker's fold: Edit product at FULL tier and the price action not off. */
+export function canOverrideMergePrice(user: PermissionUser): boolean {
+  const { isAdmin, getPermissionTier } = effectivePermissions(user)
+  return isAdmin || (getPermissionTier('products') === 'full' && canChangeProductPrices(user))
 }

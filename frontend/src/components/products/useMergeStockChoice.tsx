@@ -72,10 +72,6 @@ function localizeRefusal(t: TranslateFn, error: unknown): unknown {
       || 'These two costs are too far apart to be one product\u2019s cost ({min} and {max}). Averaging them would store a cost nobody paid, so nothing was merged \u2014 correct whichever figure is wrong, then merge.'
     return new Error(replaceVars(template, { min: outlier?.min ?? '', max: outlier?.max ?? '' }))
   }
-  // Owner, 5 Oct 2026: a merge that copies another product's price is a product edit.
-  if (code === 'product_edit_permission_required') {
-    return Object.assign(new Error(t('merge_needs_product_edit') || 'This merge changes product details or prices, which needs the permission to edit products. Nothing was changed.'), { code })
-  }
   // Both leave every table untouched; the operator's next move is to try again.
   if (code === 'merge_conflict_retry') {
     return Object.assign(new Error(t('resolve_refusal_retry') || 'Stock changed while merging. Nothing was saved. Try again.'), { code })

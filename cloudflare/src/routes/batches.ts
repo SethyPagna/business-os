@@ -307,7 +307,8 @@ async function runReceiveBatchActionKernel(c: BatchesContext, body: ReceiveBody,
   if (!product) return c.json({ error: 'Product not found' }, 404)
   const sellingPricePlan = sellingPrice ? planReceiptSellingPrice(product, sellingPrice) : null
   // An unchanged price writes nothing and needs no price permission.
-  if (sellingPricePlan && getActionTier(user, 'products', 'edit') !== 'full') {
+  // Owner, 5 Oct 2026: the default selling price is also behind the products price action (off for Employee).
+  if (sellingPricePlan && (getActionTier(user, 'products', 'edit') !== 'full' || getActionTier(user, 'products', 'price') === 'none')) {
     return c.json({ error: 'Price edit permission is required to change the selling price', code: 'price_edit_required' }, 403)
   }
   const movementFreeColumn = freeQuantity > 0 && await hasColumn(db, 'inventory_movements', 'free_quantity')

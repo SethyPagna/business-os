@@ -47,8 +47,6 @@ type ConfirmDialogProps = {
   workingLabel?: ReactNode
   /** Independently disables Confirm (e.g. a required reason not yet filled). */
   confirmDisabled?: boolean
-  /** Tooltip on the disabled Confirm button: why it cannot be pressed (translated by the caller). */
-  confirmDisabledReason?: string
   /** Explicit stacking for prompts opened from another modal. */
   layer?: ConfirmDialogLayer
   /**
@@ -78,7 +76,6 @@ export default function ConfirmDialog({
   working = false,
   workingLabel,
   confirmDisabled = false,
-  confirmDisabledReason,
   layer,
   keyboard = false,
   onConfirm,
@@ -136,7 +133,6 @@ export default function ConfirmDialog({
             onClick={onConfirm}
             autoFocus={keyboard && !danger}
             disabled={working || confirmDisabled}
-            title={confirmDisabled && confirmDisabledReason ? confirmDisabledReason : undefined}
             className={`${primaryActionClass} min-w-0 flex-1 break-words`}
           >
             {working ? (workingLabel || T('saving', 'Saving...')) : (confirmLabel || T('confirm', 'Confirm'))}

@@ -8,26 +8,37 @@ export const MERGE_PRICE_FIELDS = [
   'wholesale_price_khr',
 ] as const
 
-// Owner, 5 Oct 2026: copying another product's selling or wholesale price onto
-// the kept product during a merge is a product edit. Merge permission alone moves
-// no price. The fold computes the keeper's FINAL price columns (the group maximum,
-// or the Resolve grid's chosen Final) and refuses when any differs from the
-// keeper's own today and the actor cannot edit products (full tier).
+// Owner, 5 Oct 2026 (revised the same evening): a merge applies the standing rule by itself and
+// never needs a permission. The rule, one place per part, shared by every merge path (pair,
+// whole catalog, reviewed groups, selected-conflict batches, redo):
+//   selling and wholesale price = the HIGHEST of the merged rows  (resolveProductMergeEconomics)
+//   cost                        = the quantity-weighted mean       (catalogCostRecompute, after lots move)
+//   barcode                     = the spelling without leading zeros (canonicalProductBarcode)
+// Only a MANUAL choice in Resolve that sets a USD price different from that rule is a product
+// edit. The fold computes the rule's value and the chosen Final and refuses the difference when
+// the actor cannot change product prices (Edit product at full tier and the price action on).
 export const MERGE_PRICE_EDIT_CODE = 'product_edit_permission_required'
-export const MERGE_PRICE_EDIT_MESSAGE = 'Copying a price from another product during a merge needs the permission to edit products. Nothing was changed.'
+export const MERGE_PRICE_EDIT_MESSAGE = 'Choosing a price other than the merge rule (the highest of the merged products) needs the permission to edit product prices. Nothing was changed.'
 
-export type MergePriceCopyChange = { field: typeof MERGE_PRICE_FIELDS[number]; from: number; to: number }
+export const MERGE_PRICE_OVERRIDE_FIELDS = ['selling_price_usd', 'wholesale_price_usd'] as const
+export type MergePriceOverride = { field: typeof MERGE_PRICE_OVERRIDE_FIELDS[number]; rule: number; chosen: number }
 
-/** The price columns whose final value differs from the keeper's current one (4 decimal places, as every merge comparison). */
-export function mergePriceCopyChanges(
-  before: Record<string, unknown> | null | undefined,
-  final: Partial<Record<typeof MERGE_PRICE_FIELDS[number], unknown>>,
-): MergePriceCopyChange[] {
-  const out: MergePriceCopyChange[] = []
-  for (const field of MERGE_PRICE_FIELDS) {
-    const from = Number(before?.[field]) || 0
-    const to = Number(final[field]) || 0
-    if (roundMoney4(from) !== roundMoney4(to)) out.push({ field, from, to })
+/**
+ * The USD price columns a Resolve choice sets to something other than the merge rule's value (4 decimal
+ * places). Absent choices, and choices equal to the rule (a tie, or the row that holds the highest), are
+ * not overrides. KHR follows the chosen USD row and is not compared.
+ */
+export function mergePriceOverrides(
+  rule: Partial<Record<typeof MERGE_PRICE_OVERRIDE_FIELDS[number], unknown>>,
+  chosen: Partial<Record<string, unknown>> | null | undefined,
+): MergePriceOverride[] {
+  const out: MergePriceOverride[] = []
+  if (!chosen) return out
+  for (const field of MERGE_PRICE_OVERRIDE_FIELDS) {
+    if (!Object.prototype.hasOwnProperty.call(chosen, field)) continue
+    const ruleValue = Number(rule[field]) || 0
+    const chosenValue = Number(chosen[field]) || 0
+    if (roundMoney4(ruleValue) !== roundMoney4(chosenValue)) out.push({ field, rule: ruleValue, chosen: chosenValue })
   }
   return out
 }

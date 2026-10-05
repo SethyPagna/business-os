@@ -38,6 +38,7 @@ import {
 } from '../../../utils/loaders.ts'
 import { ADMIN_MAX_PRODUCT_GALLERY_IMAGES, MAX_PRODUCT_GALLERY_IMAGES } from '../helpers/productGalleryHelpers.ts'
 import { effectivePermissions, isAdminControlUser } from '../../../utils/permissions.ts'
+import { canChangeProductPrices } from '../../../utils/productMergePriceAccess.ts'
 import { canViewAcquisitionCosts, canEditAcquisitionCosts, omitUnauthorizedCatalogCosts } from '../../../utils/acquisitionCostAccess.ts'
 
 const importBarcodeScannerModal = () => import('../scanning/BarcodeScannerModal')
@@ -497,6 +498,9 @@ export default function ProductForm({
 }: ProductFormProps) {
   const canViewCosts = canViewAcquisitionCosts(user)
   const canEditCosts = canEditAcquisitionCosts(user)
+  // Owner, 5 Oct 2026: the DEFAULT selling and wholesale price is its own action (off for the Employee default, who
+  // adjust a price per sale in the POS cart). The Worker refuses a changed price with product_price_edit_required.
+  const canEditPrices = canChangeProductPrices(user)
   const [blindCostInputs, setBlindCostInputs] = useState({ usd: '', khr: '' })
   const defaultBranchId = branches.find((branch) => branch.is_default)?.id?.toString()
     || branches[0]?.id?.toString()
@@ -678,6 +682,7 @@ export default function ProductForm({
     if (value && value !== key) return value
     return isKhmer ? fallbackKm : fallbackEn
   }
+  const priceReadOnlyTip = canEditPrices ? undefined : tr('product_price_read_only', 'You do not have permission to change product prices. Adjust the price per sale in the cart instead.', 'អ្នកគ្មានសិទ្ធិប្ដូរតម្លៃផលិតផលទេ។ សូមកែតម្លៃក្នុងការលក់នីមួយៗនៅក្នុងកន្ត្រកជំនួសវិញ។')
 
   // Category/Unit arrive from GET /api/categories and /api/units, which now
   // return the lookup table UNION the values products actually carry (see
@@ -1812,7 +1817,7 @@ export default function ProductForm({
             />
           </fieldset> : null}
 
-          <div className="min-w-0 rounded-xl border border-green-100 bg-green-50 p-3 dark:border-green-800 dark:bg-green-900/10">
+          <fieldset disabled={!canEditPrices} title={priceReadOnlyTip} className="min-w-0 rounded-xl border border-green-100 bg-green-50 p-3 dark:border-green-800 dark:bg-green-900/10">
             <div className="mb-2">
               <p className="text-sm font-bold text-green-700 dark:text-green-400">{tr('selling_price_to_customer', 'Selling price', 'តម្លៃលក់')}</p>
               <p className="text-xs text-green-600 dark:text-green-500">{tr('what_customers_pay_pos', 'What customers pay at point of sale', 'តម្លៃដែលអតិថិជនបង់នៅកន្លែងលក់')}</p>
@@ -1835,7 +1840,7 @@ export default function ProductForm({
               exchangeRate={exchangeRate}
               t={t}
             />
-          </div>
+          </fieldset>
 
           {/* The "Special Price"/VIP block that stood here is deleted. The
               2026-09-04 ruling established that this tier was never a VIP
@@ -1843,7 +1848,7 @@ export default function ProductForm({
               migration 0111 moved the numbers into wholesale_price_* and the
               form now offers the one tier that exists. Keeping both boxes
               would have re-created the ambiguity the ruling settled. */}
-          <div className="min-w-0 rounded-xl border border-indigo-100 bg-indigo-50 p-3 dark:border-indigo-800 dark:bg-indigo-900/10">
+          <fieldset disabled={!canEditPrices} title={priceReadOnlyTip} className="min-w-0 rounded-xl border border-indigo-100 bg-indigo-50 p-3 dark:border-indigo-800 dark:bg-indigo-900/10">
             <div className="mb-2">
               <p className="text-sm font-bold text-indigo-700 dark:text-indigo-400">{tr('wholesale_price', 'Wholesale price', 'តម្លៃបោះដុំ')}</p>
               <p className="text-xs text-indigo-600 dark:text-indigo-500">{tr('wholesale_price_hint', "The shop's bulk price. Selectable at the POS, and applied on its own above a quantity when that setting is on.", 'តម្លៃបោះដុំរបស់ហាង។ អាចជ្រើសនៅ POS និងប្រើដោយខ្លួនឯងពេលបរិមាណលើសកម្រិត ប្រសិនបើបានបើកការកំណត់នោះ។')}</p>
@@ -1866,7 +1871,7 @@ export default function ProductForm({
               exchangeRate={exchangeRate}
               t={t}
             />
-          </div>
+          </fieldset>
           </div>
           </> : null}
 

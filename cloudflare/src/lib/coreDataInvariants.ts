@@ -57,7 +57,9 @@ const DEFAULT_ROLE_PERMISSIONS: Record<string, Record<string, DefaultRolePermiss
     // Owner, 5 Oct 2026: front-line staff edit product information and upload
     // images, and nothing else on Products. The section is Full with every other
     // action switched off (an override can only remove what the tier grants), so
-    // View, Edit and Image stay on. Cost is a separate pair of grants that stays
+    // View, Edit and Image stay on. Evening revision: the DEFAULT selling and
+    // wholesale price is its own action, off here (they adjust a price per sale in
+    // the POS cart instead). Cost is a separate pair of grants that stays
     // off by default: cost price is never visible or editable to an Employee
     // until an admin turns product_cost_view / product_cost_edit on.
     products: true,
@@ -71,6 +73,7 @@ const DEFAULT_ROLE_PERMISSIONS: Record<string, Record<string, DefaultRolePermiss
     'products:merge_duplicates': false,
     'products:zero_qty_cleanup': false,
     'products:manage_lookups': false,
+    'products:price': false,
     product_cost_view: false,
     product_cost_edit: false,
     sales: true,

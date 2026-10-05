@@ -111,6 +111,9 @@ export const PERMISSION_ACTIONS: Record<string, PermissionAction[]> = {
     { key: 'zero_qty_cleanup', tKey: 'perm_act_products_zero_qty', label: 'Zero-quantity cleanup', review: 'block' },
     // POST /lookups/replace -> strict hasPermission() (products.ts ~1639)
     { key: 'manage_lookups', tKey: 'perm_act_products_manage_lookups', label: 'Manage brands, categories, units', review: 'block' },
+    // Owner, 5 Oct 2026 (evening): the DEFAULT selling and wholesale price. Off for the Employee default; PUT /:id,
+    // /bulk-price-adjust, the receipt-time selling price and a merge price choice other than the rule all require it.
+    { key: 'price', tKey: 'perm_act_products_price', label: 'Change selling and wholesale price', review: 'block' },
   ],
 
   // cloudflare/src/routes/inventory.ts, plus routes/batches.ts (receive/

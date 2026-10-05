@@ -2955,9 +2955,7 @@ function ProductsFullEditor() {
         mergedGroups += Math.max(0, Number(result?.mergedGroups || 0))
         mergedProducts += Math.max(0, Number(result?.mergedProducts || 0))
         if (result?.interrupted || Number(result?.undoPendingCount || 0) > 0 || (result?.refusals?.length || 0) > 0) {
-          notify(result?.error
-            || (result?.refusals?.[0]?.code === 'product_edit_permission_required' ? t('merge_needs_product_edit') : '')
-            || result?.refusals?.[0]?.error
+          notify(result?.error || result?.refusals?.[0]?.error
             || 'The safe merge stopped. Review the refreshed candidates before continuing.', 'error')
           await load(true)
           if (!requestIsCurrent()) return
@@ -3097,12 +3095,7 @@ function ProductsFullEditor() {
       // plus the first refusal's own sentence, which is the half that says
       // what to do about it.
       const refusals = Array.from(refusalsByCase.values())
-      const firstRefusalServerText = refusals.find((r) => r?.error)?.error || ''
-      // Owner, 5 Oct 2026: a price copy without product-edit is refused by code; say it in the operator's language.
-      const priceEditRefusal = refusals.find((r) => r?.code === 'product_edit_permission_required')
-      const firstRefusal = priceEditRefusal && priceEditRefusal.error === firstRefusalServerText
-        ? (t('merge_needs_product_edit') || firstRefusalServerText)
-        : firstRefusalServerText
+      const firstRefusal = refusals.find((r) => r?.error)?.error || ''
       const refusalNote = refusals.length
         ? [
           (t('merge_duplicates_refused_count') || '{count} pair(s) were left alone')
