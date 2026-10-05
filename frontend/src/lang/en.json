@@ -3517,11 +3517,11 @@
           "question": "Are the products shown here available in store?"
         },
         "3": {
-          "answer": "Open the Membership section, enter your membership number, and you can review purchase history, returns, and current points from your customer account.",
-          "question": "How do I check my membership points?"
+          "answer": "Sign in and open your account. Your membership ID is shown there. Points are coming soon.",
+          "question": "Where can I see my membership?"
         },
         "4": {
-          "answer": "Share our store on social media, upload your screenshot in the portal, and our staff will review it. Approved submissions can receive reward points in your membership account.",
+          "answer": "Share our store on social media, then upload your screenshot here. Our staff review every submission. Membership points are coming soon.",
           "question": "How does Share & Reward work?"
         },
         "5": {
@@ -3581,7 +3581,7 @@
           "question": "Should I trust the AI as medical or skin-treatment advice?"
         },
         "19": {
-          "answer": "The assistant compares your question against the live store catalog, so it may show a short list when several products fit your needs or when stock can change by branch.",
+          "answer": "The assistant compares your question with the live store catalogue and shows a short list when several products fit your needs.",
           "question": "Why does the assistant sometimes suggest several options instead of one product?"
         },
         "20": {
