@@ -109,14 +109,26 @@ export function isAdminHostname(): boolean {
     || hostname.startsWith('admin.')
 }
 
+// Owner, 27 Sep 2026: the public site never shows admin. On a storefront host
+// every document is the storefront -- /login is the customer sign-in
+// (PublicCatalogPage opens the account drawer) and /pos, /admin, /products or
+// a stray /index.html show the shop. Staff use admin.* directly. The same
+// rule lives in index.html's bootstrap (tests/publicHostNeverAdmin.test.ts).
 export function isPublicCatalogPath(pathname: unknown): boolean {
   const value = normalizeAppPath(pathname)
   if (!value) return false
-  if (value === '/') return !isAdminHostname()
   if (value === '/health') return false
   if (value.startsWith(API_PREFIX)) return false
   if (value.startsWith(UPLOADS_PREFIX)) return false
+  if (!isAdminHostname()) return true
+  if (value === '/') return false
   if (STATIC_ASSET_RE.test(value)) return false
   if (isAdminAppPath(value)) return false
   return true
+}
+
+// /login (and /login/...) on a storefront host is the customer sign-in.
+export function isStorefrontSignInPath(pathname: unknown): boolean {
+  const value = normalizeAppPath(pathname)
+  return value === '/login' || value.startsWith('/login/')
 }

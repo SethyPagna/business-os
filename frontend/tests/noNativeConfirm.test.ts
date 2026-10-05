@@ -64,15 +64,9 @@ function sourceFiles(dir: string): string[] {
 // Native confirm() calls that remain, by file (relative to frontend/src).
 // Lower a number -- or delete the line -- when you replace one.
 //
-// FX-ui (27 Sep 2026) replaced every admin-side call with the shared dialog.
-// The one left is deliberate: CatalogAccountSection is the CUSTOMER storefront
-// (its own multi-language portal packs via getPortalLanguageText, not en/km), its
-// question is an informational sign-up reminder rather than an admin
-// mutation, and ConfirmDialog/Modal are admin chrome. Moving it needs a
-// storefront-styled dialog, which belongs to the public-website lane.
-const REMAINING: Record<string, number> = {
-  'components/catalog/CatalogAccountSection.tsx': 1,
-}
+// FX-ui (27 Sep 2026) replaced every admin-side call with the shared dialog;
+// G38 P0 (5 Oct 2026) replaced the last one, the storefront sign-up reminder.
+const REMAINING: Record<string, number> = {}
 
 runTest('positive control: every native form is counted, comments and a local confirm are not', () => {
   assert.equal(nativeConfirmCalls('a.tsx', `if (!window.confirm('x')) return; if (!confirm('y')) return; globalThis.confirm('z')`), 3)
@@ -82,7 +76,7 @@ runTest('positive control: every native form is counted, comments and a local co
 })
 
 runTest('the stock record and user account surfaces use the shared review dialog, not confirm()', () => {
-  for (const rel of ['components/products/StockChangeSection.tsx', 'components/products/StockInSessionsSection.tsx', 'components/users/UserProfileModal.tsx', 'components/users/Users.tsx']) {
+  for (const rel of ['components/products/StockChangeSection.tsx', 'components/products/StockInSessionsSection.tsx', 'components/users/UserProfileModal.tsx', 'components/users/Users.tsx', 'components/catalog/CatalogAccountSection.tsx']) {
     const source = fs.readFileSync(path.join(srcRoot, rel), 'utf8')
     assert.equal(nativeConfirmCalls(rel, source), 0, `${rel} calls native confirm()`)
     assert.match(source, /<ConfirmDialog\b/, `${rel} renders the shared ConfirmDialog`)

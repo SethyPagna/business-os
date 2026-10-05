@@ -1,4 +1,4 @@
-import { Hono } from 'hono'
+import { Hono, type Context } from 'hono'
 import { getDb } from '../lib/db'
 import { buildInClause, inlineIntegerIds, selectInChunks } from '../lib/sqlBinding'
 import { cachedJsonResponse, getVersionWithFallback } from '../lib/cache'
@@ -6,7 +6,9 @@ import { admitRequestBody, SMALL_BODY_BYTES, PORTAL_SCREENSHOT_BODY_BYTES } from
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { hasPermission } from '../lib/permissions'
 import { audit } from '../lib/audit'
-import { checkRateLimit, getClientIp } from '../lib/rateLimit'
+import { checkRateLimit, getClientNetworkKey, peekRateLimit, recordRateLimitEvent, releaseRateLimitSlot } from '../lib/rateLimit'
+import { getPlanLimits } from '../lib/planTier'
+import { BUSINESS_UTC_OFFSET_MINUTES, businessToday } from '../lib/businessDateWindow'
 import { portalAbuseKey } from '../lib/portalAbuseKey'
 import { normalizePortalUploadPath, normalizeSafeLinkUrl } from '../lib/safeLinkUrl'
 import { AUTOMATIC_PORTAL_LANGUAGE, capPortalText, normalizePortalImageAlt, plainText, portalLanguageCode } from '../lib/portalText'
@@ -523,6 +525,10 @@ export function buildPortalConfig(settings: SettingsMap, env: Env) {
     language: languageSetting === AUTOMATIC_PORTAL_LANGUAGE ? 'en' : languageSetting,
     translations: normalizePortalTranslations(settings.customer_portal_translations),
     aiEnabled: normalizeBoolean(settings.customer_portal_ai_enabled, true),
+    // G38 P0 owner answer (5 Oct): new phone + password sign-ups stay open
+    // until Telegram verification ships (Phase 3); this switch lets the owner
+    // pause them without a deploy. Existing accounts always sign in.
+    signupEnabled: normalizeBoolean(settings.customer_portal_signup_enabled, true),
     aiTitle: settings.customer_portal_ai_title || 'Beauty Assistant',
     aiIntro: capPortalText(settings.customer_portal_ai_intro, MAX_PORTAL_AI_INTRO_LENGTH),
     aiDisclaimer: settings.customer_portal_ai_disclaimer
@@ -1159,7 +1165,55 @@ function hasAiProfilePreference(profile: Record<string, unknown> = {}): boolean 
 // only -- not used for auth or logging identity. Ported from backend/src/
 // routes/portal.ts's getVisitorFingerprint (req.ip -> Workers' CF-Connecting-IP).
 async function getVisitorFingerprint(env: Env, request: Request): Promise<string | null> {
-  return portalAbuseKey(env, 'portal:ai:visitor', getClientIp(request).slice(0, 120))
+  return portalAbuseKey(env, 'portal:ai:visitor', getClientNetworkKey(request).slice(0, 120))
+}
+
+// G38 P0 (design S8): a daily spending cap on the public assistant. Each chat
+// is one paid AI-provider call and the per-minute window alone let a script
+// run all day. Two counters per business day (UTC+7, so they reset at the
+// shop's midnight): one per visitor network and one for the whole
+// storefront. The defaults follow the Workers plan (lib/planTier.ts); a
+// positive integer in PORTAL_AI_DAILY_MAX / PORTAL_AI_VISITOR_DAILY_MAX
+// overrides them. A chat is counted before the provider is called.
+type PortalAiBudgetEnv = Env & { PORTAL_AI_DAILY_MAX?: string; PORTAL_AI_VISITOR_DAILY_MAX?: string }
+const PORTAL_AI_DAY_WINDOW_MS = 26 * 60 * 60 * 1000
+const PORTAL_AI_BUDGET_OVERRIDE_MAX = 100_000
+
+function budgetOverride(value: unknown, fallback: number): number {
+  const text = String(value ?? '').trim()
+  if (!/^\d+$/.test(text)) return fallback
+  const parsed = Number(text)
+  return parsed >= 1 && parsed <= PORTAL_AI_BUDGET_OVERRIDE_MAX ? parsed : fallback
+}
+
+export function portalAiDailyBudget(env: Env): { daily: number; perVisitor: number } {
+  const limits = getPlanLimits(env)
+  const overrides = env as PortalAiBudgetEnv
+  return {
+    daily: budgetOverride(overrides.PORTAL_AI_DAILY_MAX, limits.portalAiDailyMax),
+    perVisitor: budgetOverride(overrides.PORTAL_AI_VISITOR_DAILY_MAX, limits.portalAiVisitorDailyMax),
+  }
+}
+
+function secondsUntilNextBusinessDay(nowMs: number): number {
+  const [year, month, day] = businessToday(nowMs).split('-').map(Number)
+  const nextMidnightUtc = Date.UTC(year, month - 1, day + 1) - BUSINESS_UTC_OFFSET_MINUTES * 60 * 1000
+  return Math.max(1, Math.ceil((nextMidnightUtc - nowMs) / 1000))
+}
+
+async function reservePortalAiBudget(env: Env, visitorKey: string): Promise<{ allowed: boolean; retryAfterSeconds: number }> {
+  const now = Date.now()
+  const day = businessToday(now)
+  const { daily, perVisitor } = portalAiDailyBudget(env)
+  const visitorBucketKey = `${visitorKey}:${day}`
+  const visitor = await checkRateLimit(env, 'portal:ai_chat:visitor-day', visitorBucketKey, perVisitor, PORTAL_AI_DAY_WINDOW_MS)
+  if (!visitor.allowed) return { allowed: false, retryAfterSeconds: secondsUntilNextBusinessDay(now) }
+  const storefront = await checkRateLimit(env, 'portal:ai_chat:day', day, daily, PORTAL_AI_DAY_WINDOW_MS)
+  if (!storefront.allowed) {
+    await releaseRateLimitSlot(env, 'portal:ai_chat:visitor-day', visitorBucketKey, visitor.slot)
+    return { allowed: false, retryAfterSeconds: secondsUntilNextBusinessDay(now) }
+  }
+  return { allowed: true, retryAfterSeconds: 0 }
 }
 
 function collectRecommendationCitations(recommendations: Array<{ citations?: unknown[] }> = []) {
@@ -1203,7 +1257,7 @@ async function loadPortalAiCatalog(env: Env, showOutOfStockProducts: boolean) {
            discount_enabled, discount_type, discount_percent,
            discount_amount_usd, discount_amount_khr,
            discount_starts_at, discount_ends_at, image_path
-    FROM products
+    FROM products p
     WHERE ${visibleFilter}
     ORDER BY COALESCE(created_at, updated_at) DESC, id DESC
     LIMIT 500
@@ -1244,7 +1298,7 @@ async function loadPortalAiCatalog(env: Env, showOutOfStockProducts: boolean) {
 // instead of an in-memory Map).
 app.post('/ai/chat', async (c) => {
   try {
-    const clientKey = await portalAbuseKey(c.env, 'portal:ai_chat:ip', getClientIp(c.req.raw))
+    const clientKey = await portalAbuseKey(c.env, 'portal:ai_chat:ip', getClientNetworkKey(c.req.raw))
     const visitorFingerprint = await getVisitorFingerprint(c.env, c.req.raw)
     if (!clientKey || !visitorFingerprint) {
       return c.json({ error: 'Portal privacy protection is not configured.', code: 'portal_privacy_unavailable' }, 503)
@@ -1271,6 +1325,12 @@ app.post('/ai/chat', async (c) => {
     const profile = sanitizeAiProfile(body?.profile)
     if (!question && !hasAiProfilePreference(profile)) {
       return c.json({ error: 'Add a question or at least one shopping preference first' }, 400)
+    }
+
+    const budget = await reservePortalAiBudget(c.env, visitorFingerprint)
+    if (!budget.allowed) {
+      c.header('Retry-After', String(budget.retryAfterSeconds))
+      return c.json({ error: 'The shopping assistant has reached today\'s limit. Please try again tomorrow.', code: 'portal_ai_budget_exhausted' }, 429)
     }
 
     const products = await loadPortalAiCatalog(c.env, config.showOutOfStockProducts)
@@ -1644,13 +1704,18 @@ async function loadAccountProfile(env: Env, accountId: number): Promise<{ member
 }
 
 app.post('/auth/signup', async (c) => {
-  const ip = getClientIp(c.req.raw)
+  const ip = getClientNetworkKey(c.req.raw)
   const ipKey = await portalAbuseKey(c.env, 'portal:signup:ip', ip)
   if (!ipKey) return c.json({ error: 'Portal privacy protection is not configured.', code: 'portal_privacy_unavailable' }, 503)
   const ipWindow = await checkRateLimit(c.env, 'portal:signup:ip', ipKey, 30, 15 * 60 * 1000)
   if (!ipWindow.allowed) {
     c.header('Retry-After', String(ipWindow.retryAfterSeconds))
     return c.json({ error: `Too many attempts. Try again in ${ipWindow.retryAfterSeconds} seconds.`, code: 'rate_limited' }, 429)
+  }
+  // Checked before the body is read or any customer is looked up, so a
+  // paused sign-up answers the same for every phone and writes nothing.
+  if (!buildPortalConfig(await loadSettingsMap(c.env), c.env).signupEnabled) {
+    return c.json({ error: 'New accounts are paused. Existing members can still sign in.', code: 'portal_signup_paused' }, 403)
   }
   const lock = await getPortalLockoutState(c.env, 'signup', ipKey)
   if (lock.locked) {
@@ -1675,36 +1740,51 @@ app.post('/auth/signup', async (c) => {
   return c.json({ ok: true, account: { membershipId: result.membershipId, name: result.name, email: null } })
 })
 
+// G38 P0: the 10-fail sign-in lockout is keyed on phone + network. Keyed on
+// the phone alone, anyone who knew a customer's number could fail it ten
+// times and lock the real customer out for 30 minutes. Now the failing
+// network waits and the customer's does not. Guessing spread across
+// networks is still bounded by a phone-wide failure ceiling: one network
+// adds at most 10 failures per 30 minutes, so filling it takes five.
+// Successes never spend it.
+export const PORTAL_SIGNIN_PHONE_WIDE_MAX = 50
+export const PORTAL_SIGNIN_PHONE_WIDE_WINDOW_MS = 30 * 60 * 1000
+
+function portalSigninLocked(c: Context<{ Bindings: Env; Variables: { user: SessionUser } }>, retryAfterSeconds: number) {
+  c.header('Retry-After', String(retryAfterSeconds))
+  return c.json({ error: `Too many sign-in attempts. Please wait ${Math.ceil(retryAfterSeconds / 60)} minutes, or contact us.`, code: 'locked' }, 429)
+}
+
 app.post('/auth/signin', async (c) => {
-  const ip = getClientIp(c.req.raw)
+  const network = getClientNetworkKey(c.req.raw)
   const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>))
-  const ipKey = await portalAbuseKey(c.env, 'portal:signin:ip', ip)
+  const ipKey = await portalAbuseKey(c.env, 'portal:signin:ip', network)
   if (!ipKey) return c.json({ error: 'Portal privacy protection is not configured.', code: 'portal_privacy_unavailable' }, 503)
   const ipWindow = await checkRateLimit(c.env, 'portal:signin:ip', ipKey, 40, 15 * 60 * 1000)
   if (!ipWindow.allowed) {
     c.header('Retry-After', String(ipWindow.retryAfterSeconds))
     return c.json({ error: `Too many attempts. Try again in ${ipWindow.retryAfterSeconds} seconds.`, code: 'rate_limited' }, 429)
   }
-  // Flat 10-fail cap keyed on the canonical phone (so one targeted account
-  // can't be hammered from rotating IPs), falling back to IP when no phone is
-  // supplied at all.
   const canonicalPhone = canonicalizePhone(body.phone)
-  const phoneKey = canonicalPhone
-    ? await portalAbuseKey(c.env, 'portal:signin:phone', canonicalPhone)
+  const lockKey = canonicalPhone
+    ? await portalAbuseKey(c.env, 'portal:signin:phone-network', `${canonicalPhone}\u0000${network}`)
     : ipKey
-  if (!phoneKey) return c.json({ error: 'Portal privacy protection is not configured.', code: 'portal_privacy_unavailable' }, 503)
-  const lock = await getPortalLockoutState(c.env, 'signin', phoneKey)
-  if (lock.locked) {
-    c.header('Retry-After', String(lock.retryAfterSeconds))
-    return c.json({ error: `Too many sign-in attempts. Please wait about ${Math.ceil(lock.retryAfterSeconds / 60)} minutes, or reset your password.`, code: 'locked' }, 429)
+  const phoneWideKey = canonicalPhone ? await portalAbuseKey(c.env, 'portal:signin:phone', canonicalPhone) : null
+  if (!lockKey || (canonicalPhone && !phoneWideKey)) return c.json({ error: 'Portal privacy protection is not configured.', code: 'portal_privacy_unavailable' }, 503)
+  const lock = await getPortalLockoutState(c.env, 'signin', lockKey)
+  if (lock.locked) return portalSigninLocked(c, lock.retryAfterSeconds)
+  if (phoneWideKey) {
+    const phoneWide = await peekRateLimit(c.env, 'portal:signin:phone-wide', phoneWideKey, PORTAL_SIGNIN_PHONE_WIDE_MAX, PORTAL_SIGNIN_PHONE_WIDE_WINDOW_MS)
+    if (!phoneWide.allowed) return portalSigninLocked(c, phoneWide.retryAfterSeconds)
   }
 
   const result = await signinPortalAccount(c.env, { identifier: body.identifier, phone: body.phone, password: body.password, consent: body.consent, consentLocale: body.consentLocale })
   if (!result.ok) {
-    await recordPortalFailure(c.env, 'signin', phoneKey)
+    await recordPortalFailure(c.env, 'signin', lockKey)
+    if (phoneWideKey) await recordRateLimitEvent(c.env, 'portal:signin:phone-wide', phoneWideKey)
     return c.json({ error: result.error, code: result.code }, result.status as 401 | 428 | 503)
   }
-  await clearPortalLockout(c.env, 'signin', phoneKey)
+  await clearPortalLockout(c.env, 'signin', lockKey)
   const session = await createPortalSession(c.env, result.accountId)
   setPortalCookie(c, session.token, session.expiresAt)
   const profile = await loadAccountProfile(c.env, result.accountId)
@@ -1832,7 +1912,7 @@ app.post('/submissions', async (c) => {
   // between the open internet and an image-hosting write was counting. It
   // now needs a real session, and the customer comes from that session's
   // account, never from the body (N45).
-  const submissionKey = await portalAbuseKey(c.env, 'portal:submissions:ip', getClientIp(c.req.raw))
+  const submissionKey = await portalAbuseKey(c.env, 'portal:submissions:ip', getClientNetworkKey(c.req.raw))
   if (!submissionKey) return c.json({ error: 'Portal privacy protection is not configured.', code: 'portal_privacy_unavailable' }, 503)
   const rate = await checkRateLimit(c.env, 'portal:submissions', submissionKey, 12, 15 * 60 * 1000)
   if (!rate.allowed) {

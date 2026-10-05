@@ -196,6 +196,6 @@ export async function askPortalAi(payload: PortalPayload = {}): Promise<unknown>
     body: JSON.stringify(payload || {}),
   })
   const json = await readJsonObject(res)
-  if (!res.ok) throw new Error(String(json.error || `Portal AI failed: ${res.status}`))
+  if (!res.ok) throw Object.assign(new Error(String(json.error || `Portal AI failed: ${res.status}`)), { code: json.code })
   return json
 }

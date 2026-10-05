@@ -39,12 +39,14 @@ const storefront: Array<[string, string]> = [
   ['leangbeauty.com', '/'],
   ['leangbeauty.com', '/privacy'],
   ['leangbeauty.com', '/leang-beauty-phnom-penh'],
+  // G38 P0: staff paths on the shop host are the storefront too.
+  ['leangbeauty.com', '/dashboard'],
+  ['leangbeauty.com', '/login'],
 ]
 const admin: Array<[string, string]> = [
   ['admin.leangbeauty.com', '/'],
   ['admin.leangbeauty.com', '/pos'],
   ['localhost', '/products'],
-  ['leangbeauty.com', '/dashboard'],
 ]
 
 for (const [hostname, pathname] of storefront) {

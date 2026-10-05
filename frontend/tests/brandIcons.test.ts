@@ -70,7 +70,7 @@ assert.ok(staticHead.includes(`<link rel="apple-touch-icon" sizes="180x180" href
 assert.match(indexHtml, /adminManifest\.setAttribute\('href', '\/manifest\.json'\)/, 'admin bootstrap should restore the staff manifest')
 assert.ok(indexHtml.includes(`adminAppleIcon.setAttribute('href', '${STAFF_APPLE_TOUCH_ICON}')`), 'admin bootstrap should restore the staff Apple icon')
 assert.match(indexHtml, /hostname\.indexOf\('admin\.'\) === 0/, 'the bootstrap should distinguish the admin hostname')
-assert.match(indexHtml, /pathname === '\/'\s*\? !adminHostname/, 'the public production root must not be classified as admin')
+assert.match(indexHtml, /var publicRoute = !adminHostname\s*\? documentRoute/, 'on the shop host every document is the storefront (the public site never shows admin)')
 
 assert.equal(manifest.name, 'Leang Cosmetics Admin', 'manifest.json remains the staff app manifest')
 assert.deepEqual(
@@ -175,7 +175,7 @@ assert.ok(adminHostGuard > 0, 'the storefront identity swap must stop on an admi
 for (const swapped of ['link[rel="icon"]', 'link[rel="manifest"]', 'link[rel="apple-touch-icon"]', 'meta[name="apple-mobile-web-app-title"]']) {
   assert.ok(brandEffect.indexOf(swapped) > adminHostGuard, `${swapped} is swapped before the admin-host guard`)
 }
-assert.match(publicCatalog, /import \{ isAdminHostname \} from '\.\.\/\.\.\/app\/pathRouting\.ts'/, 'the guard uses the one shared host predicate')
+assert.match(publicCatalog, /import \{ isAdminHostname(?:, \w+)* \} from '\.\.\/\.\.\/app\/pathRouting\.ts'/, 'the guard uses the one shared host predicate')
 assert.match(publicCatalog, /const STOREFRONT_HOME_SCREEN_NAME = 'Leang'/, 'the iPhone home-screen label is the owner\'s short name')
 assert.match(brandEffect, /appleTitle\.setAttribute\('content', STOREFRONT_HOME_SCREEN_NAME\)/)
 assert.match(publicCatalog, /const STOREFRONT_NAME = 'Leang Cosmetics'/)
@@ -271,8 +271,9 @@ const STAFF_IDENTITY = {
 const identityCases: Array<[hostname: string, pathname: string, identity: typeof SHOP_IDENTITY, route: 'public' | 'admin']> = [
   ['leangbeauty.com', '/', SHOP_IDENTITY, 'public'],
   ['leangbeauty.com', '/some-shop', SHOP_IDENTITY, 'public'],
-  ['leangbeauty.com', '/login', SHOP_IDENTITY, 'admin'],
-  ['leangbeauty.com', '/pos', SHOP_IDENTITY, 'admin'],
+  // G38 P0 (owner 27 Sep): the shop host never renders the staff app.
+  ['leangbeauty.com', '/login', SHOP_IDENTITY, 'public'],
+  ['leangbeauty.com', '/pos', SHOP_IDENTITY, 'public'],
   ['admin.leangbeauty.com', '/', STAFF_IDENTITY, 'admin'],
   ['admin.leangbeauty.com', '/pos', STAFF_IDENTITY, 'admin'],
   ['admin.leangbeauty.com', '/some-unknown-path', STAFF_IDENTITY, 'public'],

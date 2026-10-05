@@ -57,6 +57,7 @@ import { ADMIN_DOCUMENT_REWRITES, APP_DOCUMENT_ROUTES, shouldRewriteAdminDocumen
 import { robotsTxt, sitemapXml } from './lib/publicSeo'
 import { broadcastHubStub } from './durable-objects/broadcastHub'
 import { originGuard } from './lib/originGuard'
+import { isBlockedOnStorefrontHost } from './lib/publicHostGate'
 import { requestMetricsMiddleware, runBackground } from './lib/requestMetrics'
 
 export type Env = {
@@ -261,6 +262,13 @@ app.use('*', async (c, next) => {
   c.header('Referrer-Policy', 'strict-origin-when-cross-origin')
   c.header('Permissions-Policy', 'geolocation=(), microphone=(), camera=(self), payment=(), usb=()')
   c.header('Strict-Transport-Security', 'max-age=15552000; includeSubDomains')
+})
+// G38 P0: the public site never shows admin -- on the shop host only the
+// storefront's own API answers; staff endpoints and the live-update socket are
+// 404 there (lib/publicHostGate.ts). Before any body, seeding or DB work.
+app.use('*', async (c, next) => {
+  if (isBlockedOnStorefrontHost(c.req.url)) return c.json({ error: 'Not found' }, 404)
+  return next()
 })
 app.use('/api/*', originGuard) // F4: refuse cross-site writes before any body, seeding or DB work
 

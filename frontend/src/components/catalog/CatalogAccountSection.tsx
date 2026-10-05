@@ -1,4 +1,4 @@
-import { useId, useState } from 'react'
+import { useEffect, useId, useState } from 'react'
 import UserIcon from 'lucide-react/dist/esm/icons/user.js'
 import LogOut from 'lucide-react/dist/esm/icons/log-out.js'
 import ShoppingBag from 'lucide-react/dist/esm/icons/shopping-bag.js'
@@ -7,6 +7,7 @@ import Eye from 'lucide-react/dist/esm/icons/eye.js'
 import EyeOff from 'lucide-react/dist/esm/icons/eye-off.js'
 import PortalNoPaymentNotice from './PortalNoPaymentNotice.tsx'
 import SignupConsentField, { CONSENT_REQUIRED_EN, CONSENT_REQUIRED_KM } from './legal/SignupConsentField.tsx'
+import ConfirmDialog from '../shared/ConfirmDialog.tsx'
 import type { PortalAccountProfile } from './portalAccount.ts'
 
 // The storefront Account area (§2). Replaces the old anonymous membership
@@ -21,6 +22,7 @@ const PORTAL_MIN_PASSWORD_LENGTH = 6
 const PASSWORD_HINT_EN = 'At least 6 characters. Use a password you do not reuse elsewhere.'
 const PASSWORD_HINT_KM = 'យ៉ាងតិច ៦ តួអក្សរ។ ប្រើពាក្យសម្ងាត់ដែលអ្នកមិនប្រើឡើងវិញនៅកន្លែងផ្សេង។'
 const REMINDER = 'If you have previously bought from Leang Cosmetics/Leang Beauty, please contact us for your membership ID — your phone number must match. Just a reminder.'
+const REMINDER_KM = 'ប្រសិនបើអ្នកធ្លាប់ទិញពី Leang Cosmetics/Leang Beauty សូមទាក់ទងយើងដើម្បីទទួលលេខសមាជិករបស់អ្នក — លេខទូរស័ព្ទរបស់អ្នកត្រូវតែដូចគ្នា។ នេះគ្រាន់តែជាការរំលឹកប៉ុណ្ណោះ។'
 
 export default function CatalogAccountSection({
   copy,
@@ -35,6 +37,7 @@ export default function CatalogAccountSection({
   consentLocale = 'en',
   cartCount,
   wishlistCount,
+  signupEnabled = true,
 }: {
   copy: CopyFn
   account: PortalAccountProfile | null
@@ -48,8 +51,12 @@ export default function CatalogAccountSection({
   consentLocale?: string
   cartCount: number
   wishlistCount: number
+  /** Owner switch customer_portal_signup_enabled (G38 P0): false pauses new accounts. */
+  signupEnabled?: boolean
 }) {
   const [mode, setMode] = useState<'signin' | 'signup'>('signin')
+  const [reminderOpen, setReminderOpen] = useState(false)
+  const showSignup = signupEnabled && mode === 'signup'
   // Sign-in fields
   const [identifier, setIdentifier] = useState('')
   const [signinPhone, setSigninPhone] = useState('')
@@ -85,18 +92,33 @@ export default function CatalogAccountSection({
     }
     setConsentError('')
     // The membership-id-empty reminder: existing customers should use their ID
-    // (their phone must match), not create a fresh account.
+    // (their phone must match), not create a fresh account. Asked in the
+    // shared review dialog, never the browser's untranslatable confirm().
     if (!membershipId.trim()) {
-      const proceed = typeof window === 'undefined'
-        ? true
-        : window.confirm(copy('signupReminder', REMINDER))
-      if (!proceed) return
+      setReminderOpen(true)
+      return
     }
+    await submitSignUp()
+  }
+
+  const submitSignUp = async () => {
     const ok = await signUp({ name, phone: signupPhone, membershipId, password: signupPassword, consent, consentLocale })
     if (ok) {
       setName(''); setSignupPhone(''); setMembershipId(''); setSignupPassword(''); setConsent(false)
     }
   }
+
+  // The shared dialog leaves Escape to its host.
+  useEffect(() => {
+    if (!reminderOpen) return undefined
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented) return
+      event.preventDefault()
+      setReminderOpen(false)
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [reminderOpen])
 
   return (
     // Drawer-native body: the top-bar Account drawer supplies the header/close
@@ -154,6 +176,7 @@ export default function CatalogAccountSection({
           </div>
         ) : (
           <div className="rounded-[24px] border border-slate-200 bg-white p-5 shadow-sm dark:border-neutral-700 dark:bg-neutral-900">
+            {signupEnabled ? (
             <div className="mb-4 inline-flex rounded-2xl bg-slate-100 p-1 text-sm dark:bg-white/5">
               <button
                 type="button"
@@ -172,6 +195,11 @@ export default function CatalogAccountSection({
                 {copy('signUp', 'Sign up')}
               </button>
             </div>
+            ) : (
+              <p data-portal-signup-paused="true" className="mb-4 rounded-xl bg-slate-50 px-3 py-2 text-xs leading-relaxed text-slate-600 dark:bg-white/5 dark:text-neutral-300">
+                {copy('signupPaused', 'New accounts are paused for now. Existing members can sign in below.', 'ការបង្កើតគណនីថ្មីត្រូវបានផ្អាកសិន។ សមាជិកដែលមានស្រាប់អាចចូលគណនីខាងក្រោម។')}
+              </p>
+            )}
 
             {error ? (
               // A sign-in failure used to be colour only: the box appeared below
@@ -186,7 +214,7 @@ export default function CatalogAccountSection({
               </div>
             ) : null}
 
-            {mode === 'signin' ? (
+            {!showSignup ? (
               <form onSubmit={onSignIn} className="space-y-3" autoComplete="on">
                 <Field label={copy('nameOrMembershipId', 'Name or Membership ID')}>
                   {(fieldId, describedBy) => (
@@ -272,7 +300,7 @@ export default function CatalogAccountSection({
                   {copy('signupPasswordHint', PASSWORD_HINT_EN, PASSWORD_HINT_KM)}
                 </p>
                 <p className="rounded-xl bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-800 dark:bg-amber-400/10 dark:text-amber-200">
-                  {copy('signupReminder', REMINDER)}
+                  {copy('signupReminder', REMINDER, REMINDER_KM)}
                 </p>
                 <SignupConsentField
                   copy={copy}
@@ -290,6 +318,18 @@ export default function CatalogAccountSection({
 
         <PortalNoPaymentNotice copy={copy} variant="short" />
       </div>
+      {reminderOpen ? (
+        <ConfirmDialog
+          title={copy('signupReminderTitle', 'Before you create an account', 'មុនពេលបង្កើតគណនី')}
+          message={copy('signupReminder', REMINDER, REMINDER_KM)}
+          confirmLabel={copy('createAccount', 'Create account', 'បង្កើតគណនី')}
+          cancelLabel={copy('back', 'Back', 'ត្រឡប់')}
+          keyboard
+          layer="nested"
+          onConfirm={() => { setReminderOpen(false); void submitSignUp() }}
+          onClose={() => setReminderOpen(false)}
+        />
+      ) : null}
     </div>
   )
 }

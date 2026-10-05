@@ -15,8 +15,10 @@
 export const FAQ_STARTER_TEXT = [
   ['1', 'How do I compare products for my skin type?', 'Use the catalogue description and manufacturer label to compare products. For allergies, reactions, skin conditions, medicines, or pregnancy, ask a qualified health professional.'],
   ['2', 'Are the products shown here available in store?', 'The portal reads from our current Business OS catalog. Stock can still change during busy periods, so please contact the store if you need a final confirmation before visiting.'],
-  ['3', 'How do I check my membership points?', 'Sign in and open your account. Your membership ID and current account details are shown there securely.'],
-  ['4', 'How does Share & Reward work?', 'Share our store on social media, upload your screenshot in the portal, and our staff will review it. Approved submissions can receive reward points in your membership account.'],
+  // G38 P0: the owner's rule (30 Sep) is membership stays, the points value
+  // reads "coming soon" -- never a promise of points, history or rewards.
+  ['3', 'Where can I see my membership?', 'Sign in and open your account. Your membership ID is shown there. Points are coming soon.'],
+  ['4', 'How does Share & Reward work?', 'Share our store on social media, then upload your screenshot here. Our staff review every submission. Membership points are coming soon.'],
   ['5', 'How can I contact the store?', 'Use the verified contact links on this page to ask about a product or request a current stock check.'],
   ['6', 'How should I choose a product for sensitive skin?', 'Read the product label and ingredient list and ask a qualified health professional about allergies or reactions. The catalogue and AI assistant do not provide medical advice.'],
   ['7', 'Can I ask about a product or brand line?', 'Contact the store about the specific item and ask what packaging, batch, supplier, or sourcing information can be verified before buying.'],
@@ -39,6 +41,6 @@ export const AI_FAQ_STARTER_TEXT = [
   ['16', 'What details help the AI recommend better products?', 'Add your skin type, concerns, brand preferences, and what you want the product to do. The assistant uses that together with our current catalog to narrow better matches.'],
   ['17', 'Which products can the AI recommend?', 'The assistant receives a limited set of products from the current public catalogue. Stock can change, so confirm availability with the store.'],
   ['18', 'Should I trust the AI as medical or skin-treatment advice?', 'No. AI answers are for general product comparison only. Ask a qualified health professional about sensitive skin, allergies, reactions, treatment, medicines, or pregnancy.'],
-  ['19', 'Why does the assistant sometimes suggest several options instead of one product?', 'The assistant compares your question against the live store catalog, so it may show a short list when several products fit your needs or when stock can change by branch.'],
+  ['19', 'Why does the assistant sometimes suggest several options instead of one product?', 'The assistant compares your question with the live store catalogue and shows a short list when several products fit your needs.'],
   ['20', 'Can the assistant explain why a product was suggested?', 'A suggestion can include a catalogue-based reason, use instructions and cautions. The assistant does not browse for reviews or prove product claims.'],
 ]

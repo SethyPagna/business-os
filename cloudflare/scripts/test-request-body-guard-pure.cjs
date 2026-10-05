@@ -148,7 +148,7 @@ async function main() {
       setPortalCookie: () => {}, clearPortalCookie: () => {}, revokePortalSession: async () => {},
       getPortalAccountState: async () => ({ status: 'unauthenticated', account: null }),
     },
-    '../lib/rateLimit': { getClientIp: () => 'unit', checkRateLimit: async () => { calls.rate++; return { allowed, retryAfterSeconds: 1 } } },
+    '../lib/rateLimit': { getClientIp: () => 'unit', getClientNetworkKey: () => 'unit', checkRateLimit: async () => { calls.rate++; return { allowed, retryAfterSeconds: 1 } } },
     '../lib/db': { getDb: () => ({ prepare: (sql) => {
       assert.match(sql, /^SELECT key, value FROM settings$/)
       calls.settings++
@@ -197,6 +197,8 @@ async function main() {
     // Real module too: the poisoned proxy would throw as middleware on every
     // /api request (F4 origin guard, mounted ahead of body admission).
     './lib/originGuard': load('lib/originGuard.ts'),
+    // Real module too: G38 P0's storefront-host gate runs ahead of everything.
+    './lib/publicHostGate': load('lib/publicHostGate.ts'),
     // Real module too, for the same reason: A0's per-request metrics
     // middleware is mounted first on /api/* and must call next().
     './lib/requestMetrics': load('lib/requestMetrics.ts', { './analytics': load('lib/analytics.ts'), 'node:async_hooks': require('node:async_hooks') }),
@@ -207,8 +209,16 @@ async function main() {
   }).default
   const ctx = { waitUntil() {} }
   const env = { BUSINESS_OS_PUBLIC_URL: 'https://unit.test' }
+  // The staff app's host: on a storefront host only the storefront API exists
+  // (lib/publicHostGate.ts), so staff routes are exercised on admin.*.
   async function send(route, size, length, extra = {}) {
-    return worker.fetch(streamRequest(`https://unit.test${route}`, new Uint8Array(size).fill(32), length, extra).request, env, ctx)
+    return worker.fetch(streamRequest(`https://admin.unit.test${route}`, new Uint8Array(size).fill(32), length, extra).request, env, ctx)
+  }
+  {
+    const before = { ...calls }
+    const shop = await worker.fetch(streamRequest('https://unit.test/api/auth/login', new Uint8Array(small + 1).fill(32), '1').request, env, ctx)
+    assert.equal(shop.status, 404, 'staff login does not exist on the storefront host')
+    assert.deepEqual(calls, before, 'the host gate answers before body admission, bootstrap or any handler')
   }
   assert.equal(smallBodyAccess('POST', '/api/system/finalize-migration'), 'staff')
   const repairPath = '/api/system/finalize-migration'

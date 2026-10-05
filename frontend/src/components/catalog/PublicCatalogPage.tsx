@@ -56,7 +56,7 @@ import InstallPromptBand from '../shared/InstallPromptBand.tsx'
 import InstallAppButton from '../install/InstallAppButton.tsx'
 import { installBeforeInstallPromptCapture, installStandaloneExternalLinkGuard } from '../../utils/standaloneNavigation.ts'
 import { normalizePortalLanguage, readPublicStorefrontLanguage, storePortalLanguage } from './portalLanguageOptions.ts'
-import { isAdminHostname } from '../../app/pathRouting.ts'
+import { isAdminHostname, isStorefrontSignInPath } from '../../app/pathRouting.ts'
 
 const loadCatalogProductsSection = () => import('./CatalogProductsSection')
 const CatalogProductsSection = lazyRetry(loadCatalogProductsSection, 'public-catalog-products-section')
@@ -485,7 +485,9 @@ export default function PublicCatalogPage() {
   // Account (profile / sign-in) and Wishlist each open as a slide-in drawer
   // from their own top-bar icon (user request), same overlay pattern as the
   // cart bucket drawer below.
-  const [accountOpen, setAccountOpen] = useState(false)
+  // G38 P0 (owner 27 Sep): on the shop host /login is the customer sign-in,
+  // never the staff app, so arriving there opens this drawer.
+  const [accountOpen, setAccountOpen] = useState(() => typeof window !== 'undefined' && isStorefrontSignInPath(window.location?.pathname))
   const [wishlistOpen, setWishlistOpen] = useState(false)
   // Two independent toggles, not one shared boolean: the drawer's inline
   // "contact us" shortcut and the standalone contact FAB used to both read
@@ -940,7 +942,9 @@ export default function PublicCatalogPage() {
     setAssistantError('')
     withLoaderTimeout(() => getCatalogApi().askPortalAi?.({ question, profile: assistantProfile, dataUseConsent: true }) || Promise.reject(new Error('AI assistant API unavailable')), 'AI assistant', PUBLIC_PORTAL_AI_TIMEOUT_MS)
       .then((result) => setAssistantResponse((result || null) as LooseRecord | null))
-      .catch((error) => setAssistantError(getErrorMessage(error, 'AI assistant failed')))
+      .catch((error) => setAssistantError((error as { code?: unknown } | null)?.code === 'portal_ai_budget_exhausted'
+        ? copy('assistantDailyLimit', 'The assistant has reached today\'s limit. Please try again tomorrow.', 'ជំនួយការបានដល់ចំនួនកំណត់សម្រាប់ថ្ងៃនេះហើយ។ សូមព្យាយាមម្តងទៀតនៅថ្ងៃស្អែក។')
+        : getErrorMessage(error, 'AI assistant failed')))
       .finally(() => setAssistantLoading(false))
   }
 
@@ -1447,6 +1451,7 @@ export default function PublicCatalogPage() {
               consentLocale={String(displayConfig.language || 'en')}
               cartCount={bucket.count}
               wishlistCount={wishlist.count}
+              signupEnabled={displayConfig.signupEnabled !== false}
             />
           </Suspense>
         </div>

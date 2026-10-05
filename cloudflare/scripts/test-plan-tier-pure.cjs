@@ -144,6 +144,8 @@ const PAID = {
   d1DailyRowsWritten: 1666000,
   d1MaxDatabaseBytes: 10 * 1024 * 1024 * 1024,
   d1QueriesPerInvocation: 1000,
+  portalAiDailyMax: 300,
+  portalAiVisitorDailyMax: 30,
 }
 const FREE = {
   tier: 'free',
@@ -167,6 +169,8 @@ const FREE = {
   d1DailyRowsWritten: 100000,
   d1MaxDatabaseBytes: 500 * 1024 * 1024,
   d1QueriesPerInvocation: 50,
+  portalAiDailyMax: 100,
+  portalAiVisitorDailyMax: 10,
 }
 
 check('the paid table is exactly the numbers production runs today', async () => {

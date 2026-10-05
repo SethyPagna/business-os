@@ -9,10 +9,12 @@ import type { Env } from '../index'
 // Kept in its own table (portal_auth_lockouts) so the two philosophies never
 // share a row.
 //
-// scope is 'signup' or 'signin'. key is the CANONICAL phone for signin (so a
-// single targeted account can't be hammered regardless of source IP) and the
-// client IP for signup (there is no stable account yet). The caller layers a
-// per-IP sliding window (lib/rateLimit.ts) on top for broad abuse.
+// scope is 'signup' or 'signin'. key is the canonical phone + client network
+// for signin (G38 P0: a phone-only key let a stranger lock the real customer
+// out; routes/portal.ts bounds cross-network guessing with a phone-wide
+// failure ceiling) and the client network for signup (there is no stable
+// account yet). The caller layers a per-network sliding window
+// (lib/rateLimit.ts) on top for broad abuse.
 
 export type PortalLockoutScope = 'signup' | 'signin'
 
