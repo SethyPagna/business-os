@@ -1476,7 +1476,7 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
           t={t}
           extraButtons={[
             ...(canViewFinancialHistory ? [{ label: tr(t, 'customer_purchases', 'Purchases'), onClick: () => setModal('purchases') }] : []),
-            ...(canReadFieldHistory ? [{ label: tr(t, 'field_history', 'Field history'), onClick: () => setModal('records') }] : []),
+            ...(canReadFieldHistory ? [{ label: tr(t, 'field_history', 'Records'), onClick: () => setModal('records') }] : []),
           ]}
         />
       ) : null}

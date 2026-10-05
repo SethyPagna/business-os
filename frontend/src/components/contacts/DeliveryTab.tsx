@@ -1426,7 +1426,7 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
           onEdit={() => setModal('form')} onDelete={canDeleteContact ? () => handleDelete(selected) : undefined} onClose={() => { setModal(null); setSelected(null) }} t={t}
           extraButtons={[
             ...(canViewFinancialHistory ? [{ label: tr('delivery_report', 'Deliveries'), onClick: () => setModal('report') }] : []),
-            ...(getPermissionTier('audit_log') === 'full' ? [{ label: tr('field_history', 'Field history'), onClick: () => setModal('records') }] : []),
+            ...(getPermissionTier('audit_log') === 'full' ? [{ label: tr('field_history', 'Records'), onClick: () => setModal('records') }] : []),
           ]} />
       )}
       {/* The contact's field history: who changed this name, phone, address

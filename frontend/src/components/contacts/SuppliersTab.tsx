@@ -1548,7 +1548,7 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
           wrapValuesAnywhere
           extraButtons={[
             { label: tr('supplier_purchases', 'Purchases'), onClick: () => setModal('purchases') },
-            ...(getPermissionTier('audit_log') === 'full' ? [{ label: tr('field_history', 'Field history'), onClick: () => setModal('records') }] : []),
+            ...(getPermissionTier('audit_log') === 'full' ? [{ label: tr('field_history', 'Records'), onClick: () => setModal('records') }] : []),
           ]}
         />
       ) : null}
