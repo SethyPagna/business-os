@@ -85,9 +85,9 @@ export const PORTAL_SESSION_SWEEP_WHERE = `revoked_at IS NOT NULL
 // row itself stays (status 'closed') so its W- code is never issued again and
 // any link history still points at something. A member with a pending link
 // request is waiting on staff, so it is left alone.
-// "Never verified": Phase 1 has no verified sign-in methods, so every member
-// is unverified. Phase 2 adds portal_login_identities; once that table exists
-// a verified identity exempts the member here automatically.
+// "Never verified": migration 0232 (G38 Telegram) adds portal_login_identities;
+// a member with a verified identity (Telegram proves the phone) is exempt. The
+// probe below keeps the sweep working on a database that predates 0232.
 export const PORTAL_MEMBER_INACTIVE_PURGE_DAYS = 180
 const PORTAL_MEMBER_PURGE_BATCH = 200
 
@@ -276,6 +276,9 @@ export async function maybeRunScheduledEphemeralRetention(env: Env): Promise<Eph
   await step('user_sessions', () => batchDeleteById(env, db, 'user_sessions', "revoked_at IS NOT NULL OR (expires_at IS NOT NULL AND expires_at < CURRENT_TIMESTAMP)", {}))
   await step('portal_sessions', () => batchDeleteById(env, db, 'portal_sessions', PORTAL_SESSION_SWEEP_WHERE, {}))
   await step('portal_members_inactive', () => purgeInactivePortalMembers(db))
+  // Telegram sign-in handshakes (lib/portalTelegram.ts) live 10 minutes; an
+  // expired one can never be used again, so it goes, consumed or not.
+  await step('portal_telegram_challenges', () => batchDeleteById(env, db, 'portal_telegram_challenges', 'expires_at < @now', { now: sqliteUtcTimestamp(Date.now()) }))
   const verificationNow = Date.now()
   await step('verification_codes', () => batchDeleteById(env, db, 'verification_codes', `
     created_at <= @historyCutoff

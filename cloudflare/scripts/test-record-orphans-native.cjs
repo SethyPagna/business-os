@@ -151,6 +151,10 @@ const CHILD_SCOPED = {
   'portal_member_link_events.link_request_id': 'portal_member_link_requests',
   'portal_member_link_requests.account_id': 'portal_accounts',
   'portal_member_link_requests.decided_event_id': 'portal_member_link_events',
+  // G38 Telegram (0232): a member's sign-in identities, and the attach
+  // handshake's account. Members are closed, never deleted, so both hold.
+  'portal_login_identities.account_id': 'portal_accounts',
+  'portal_telegram_challenges.account_id': 'portal_accounts',
   'rfid_tags.last_seen_session_id': 'rfid_scan_sessions',
   'rfid_session_items.session_id': 'rfid_scan_sessions',
   'rfid_events.session_id': 'rfid_scan_sessions',

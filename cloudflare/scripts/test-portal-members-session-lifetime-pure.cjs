@@ -135,9 +135,8 @@ async function main() {
     h.raw.prepare("INSERT INTO portal_member_link_requests (account_id, status) VALUES (@a, 'pending')").run({ a: waiting })
     h.raw.prepare("INSERT INTO portal_member_link_requests (account_id, status, note) VALUES (@a, 'withdrawn', 'call me on 012 345 678')").run({ a: gone })
     h.raw.prepare("INSERT INTO portal_sessions (account_id, token_hash, expires_at) VALUES (@a, 'gone-session', '2999-01-01')").run({ a: gone })
-    // Phase 2's table, as the design specifies it: a verified identity exempts.
-    h.raw.exec('CREATE TABLE portal_login_identities (id INTEGER PRIMARY KEY, account_id INTEGER NOT NULL, provider TEXT, subject_key TEXT, verified_at TEXT)')
-    h.raw.prepare("INSERT INTO portal_login_identities (account_id, provider, subject_key, verified_at) VALUES (@a, 'email', 'k', '2026-01-01')").run({ a: verified })
+    // The real table (migration 0232, G38 Telegram): a verified identity exempts.
+    h.raw.prepare("INSERT INTO portal_login_identities (account_id, provider, subject_key, verified_at) VALUES (@a, 'telegram', '424242', '2026-01-01')").run({ a: verified })
 
     const closed = await retention.purgeInactivePortalMembers(h.db)
     assert.equal(closed, 2)

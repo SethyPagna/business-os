@@ -74,7 +74,9 @@ check('both files are LF only, numbered once, and carry purpose, assertions and 
   }
   const numbers = fs.readdirSync(dir).filter((f) => /^023[01]_/.test(f))
   assert.deepEqual(numbers.sort(), [M1_NAME, M2_NAME])
-  assert.equal(fs.readdirSync(dir).some((f) => f.startsWith('0232')), false, '0232 is reserved for Phase 2 email')
+  // 0232 was reserved for Phase 2 email; the lead gave it to G38 Telegram on 6 Oct
+  // (test-portal-telegram-signin-pure.cjs pins that file).
+  assert.deepEqual(fs.readdirSync(dir).filter((f) => f.startsWith('0232')), ['0232_portal_telegram_identities.sql'])
 })
 
 check('0230: same rows, ids and old column values; new columns at their defaults; sequence preserved', () => {
