@@ -41,7 +41,7 @@ export const ROLE_PRESETS: RolePreset[] = [
     labelKey: 'role_preset_employee',
     label: 'Employee',
     descriptionKey: 'role_preset_employee_desc',
-    description: 'Day-to-day front-line access: POS and individual Sales and Returns actions, plus the dashboard and customer portal. Product, inventory, and contact changes use Partial Access. Bulk changes, imports, exports, contact financial history, supplier records, and administrative areas stay unavailable.',
+    description: 'Day-to-day front-line access: POS and individual Sales and Returns actions, plus the dashboard and Website Editor. Product, inventory, and contact changes use Partial Access. Bulk changes, imports, exports, contact financial history, supplier records, and administrative areas stay unavailable.',
     permissions: {
       dashboard: true,
       customer_portal: true,
