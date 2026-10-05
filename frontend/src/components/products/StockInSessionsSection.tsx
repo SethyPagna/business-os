@@ -7,9 +7,11 @@ import Truck from 'lucide-react/dist/esm/icons/truck.js'
 import CalendarDays from 'lucide-react/dist/esm/icons/calendar-days.js'
 import CalendarClock from 'lucide-react/dist/esm/icons/calendar-clock.js'
 import MessageSquare from 'lucide-react/dist/esm/icons/message-square.js'
-import { getStockInSessionLines, getStockInSessions } from '../../api/productReadTransport.ts'
+import { getStockInSessionLines, getStockInSessions, getStockLedger } from '../../api/productReadTransport.ts'
 import { editStockInLine, revertStockMovement } from '../../api/inventoryWriteTransport.ts'
 import { stockRevertErrorText } from '../../utils/stockRevertError.ts'
+import { STOCK_IN_LINE_FOCUS_EVENT, stockInSessionKeyForReceipt, stockRefusalInfo, takeStockInLineFocus, type StockRefusalInfo } from '../../utils/stockRefusal.ts'
+import StockRefusalLine from '../shared/StockRefusalLine.tsx'
 import {
   buildStockInLineEditBody, isStockInLineEditable, newStockInLineEditRequestId, stockInLineDraft, stockInLineEditErrorText,
   freezeStockInLineEditAttempt, isKnownStockInLineEditRefusal, isStockInLineEditAcknowledged,
@@ -255,6 +257,9 @@ export default function StockInSessionsSection({ t, notify, branches, onChanged 
   const [editCreditDueDate, setEditCreditDueDate] = useState('')
   const [addMore, setAddMore] = useState<Session | null>(null)
   const [review, setReview] = useState<SessionReview | null>(null)
+  // RET-D: WHY the last line edit / Revert was refused and WHERE the blocking
+  // record is. Kept across the review reopen that follows a refusal.
+  const [lineRefusal, setLineRefusal] = useState<StockRefusalInfo | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -331,6 +336,7 @@ export default function StockInSessionsSection({ t, notify, branches, onChanged 
         activeBranchCount: payload.active_branch_count ?? null,
       } satisfies Session
       if (settledAttempt) rememberAttempt(null)
+      else setLineRefusal(null)
       setSelected(session); setSelectedLine(null); setLineEdit(null); setReview(null); setEditing(false); setEditDate(session.receivedDate); setEditSupplier(session.supplier)
       setEditPayment(session.paymentStatus === 'credit' ? 'credit' : 'paid'); setEditCreditDueDate(session.creditDueDate)
       return true
@@ -339,6 +345,35 @@ export default function StockInSessionsSection({ t, notify, branches, onChanged 
       return false
     } finally { setOpening(false) }
   }
+  // RET-D: Stock Changes links a stock-in correction row here (WHERE: the line
+  // it corrects). Read that receipt row through the ledger kernel and open its
+  // session; a legacy receipt with no session key falls back to a product search.
+  const openRef = useRef(open)
+  openRef.current = open
+  useEffect(() => {
+    const consume = async () => {
+      const lineId = takeStockInLineFocus()
+      if (!lineId) return
+      try {
+        const response = await getStockLedger({ movementId: lineId, page: 1, pageSize: 1 }) as { items?: Array<Record<string, unknown>> }
+        const row = Array.isArray(response?.items) ? response.items[0] : undefined
+        if (!row) throw new Error(tr('revert_err_movement_not_found', 'This change no longer exists. Refresh and try again.'))
+        const key = stockInSessionKeyForReceipt(row.reference_id)
+        if (!key) { setSearch(String(row.product_name || '')); setPage(1); return }
+        await openRef.current({
+          key, rows: [], quantity: 0, lineCount: 0, revertedLines: 0, costUsd: null, linesWithoutCost: 0,
+          supplier: { supplierId: Number(row.batch_supplier_id) || null, supplierName: String(row.batch_supplier_name || '') },
+          receivedDate: String(row.batch_received_at || ''), branchId: row.branch_id ? String(row.branch_id) : '',
+          branchName: String(row.branch_name || ''), userName: String(row.user_name || ''), createdAt: String(row.created_at || ''),
+          paymentStatus: '', creditDueDate: '', hasSharedBatch: false, hasMixedHeader: false,
+        })
+      } catch (error) { notify(error instanceof Error ? error.message : tr('load_failed', 'Could not load stock-in session'), 'error') }
+    }
+    const onFocus = () => { void consume() }
+    onFocus()
+    window.addEventListener(STOCK_IN_LINE_FOCUS_EVENT, onFocus)
+    return () => window.removeEventListener(STOCK_IN_LINE_FOCUS_EVENT, onFocus)
+  }, [notify, tr])
   // Why a header edit cannot be saved, or null. Checked when the review opens
   // AND again by saveHeader, which stays the one gate a confirm runs through.
   const headerSaveRefusal = (session: Session): string | null => {
@@ -384,19 +419,20 @@ export default function StockInSessionsSection({ t, notify, branches, onChanged 
     if (removeInFlightRef.current) return
     if (Number(row.edit_count) > 0 && selected) {
       try { await commitLineAttempt(lineRemovalAttempt(row), selected, () => removeLine(row)) }
-      catch (error) { notify(stockInLineEditErrorText(error, tr), 'error') }
+      catch (error) { notify(stockInLineEditErrorText(error, tr), 'error'); setLineRefusal(stockRefusalInfo(error, tr)) }
       return
     }
     removeInFlightRef.current = true
     setBusy(true)
     try { await removeLine(row); notify(tr('movement_reverted', 'Change reverted')); setSelected(null); await load(); onChanged() }
-    catch (error) { notify(Number(row.edit_count) > 0 ? stockInLineEditErrorText(error, tr) : stockRevertErrorText(error, tr), 'error') }
+    catch (error) { notify(Number(row.edit_count) > 0 ? stockInLineEditErrorText(error, tr) : stockRevertErrorText(error, tr), 'error'); setLineRefusal(stockRefusalInfo(error, tr)) }
     finally { removeInFlightRef.current = false; setBusy(false) }
   }
   const startLineEdit = (row: Row) => {
     if (!isStockInLineEditable(row) || busy || pendingAttemptRef.current || lineAttemptBusyRef.current || sessionRemovalBusyRef.current) return
     setSelectedLine(null)
     setEditing(false)
+    setLineRefusal(null)
     setLineEdit({ row, draft: stockInLineDraft(row), requestId: newStockInLineEditRequestId() })
   }
   const patchLineDraft = (patch: Partial<StockInLineEditDraft>) => {
@@ -405,7 +441,7 @@ export default function StockInSessionsSection({ t, notify, branches, onChanged 
     setLineEdit((current) => current ? { ...current, draft: { ...current.draft, ...patch } } : current)
   }
   const cancelLineEdit = () => { if (!pendingAttemptRef.current && !lineAttemptBusyRef.current && !sessionRemovalBusyRef.current) setLineEdit(null) }
-  const closeSession = () => { if (!pendingAttemptRef.current && !lineAttemptBusyRef.current && !sessionRemovalBusyRef.current) setSelected(null) }
+  const closeSession = () => { if (!pendingAttemptRef.current && !lineAttemptBusyRef.current && !sessionRemovalBusyRef.current) { setSelected(null); setLineRefusal(null) } }
   const closeLine = () => { setSelectedLine(null); setCostFloatOpen(false) }
   const editHeader = () => {
     if (busy || pendingAttemptRef.current || lineAttemptBusyRef.current || sessionRemovalBusyRef.current) return
@@ -448,6 +484,7 @@ export default function StockInSessionsSection({ t, notify, branches, onChanged 
     } catch (error) {
       if (actorRef.current !== attempt.actorId) { unknownAttemptRef.current = attempt; return false }
       notify(stockInLineEditErrorText(error, tr), 'error')
+      setLineRefusal(stockRefusalInfo(error, tr))
       if (isKnownStockInLineEditRefusal(error, unknownAttemptRef.current === attempt)) await open(summary, attempt)
       else unknownAttemptRef.current = attempt
       return false
@@ -493,7 +530,7 @@ export default function StockInSessionsSection({ t, notify, branches, onChanged 
       }
       notify(tr('stock_session_reverted', 'Stock-in session reverted'))
       setSelected(null); await load(); onChanged()
-    } catch (error) { notify(error instanceof Error ? error.message : tr('update_failed', 'Update failed'), 'error') }
+    } catch (error) { notify(error instanceof Error ? stockRevertErrorText(error, tr) : tr('update_failed', 'Update failed'), 'error'); setLineRefusal(stockRefusalInfo(error, tr)) }
     finally { sessionRemovalBusyRef.current = false; setBusy(false) }
   }
 
@@ -619,6 +656,7 @@ export default function StockInSessionsSection({ t, notify, branches, onChanged 
           <div><div className="text-gray-400">{tr('quantity', 'Quantity')}</div><div className="font-semibold text-emerald-600">+{selected.quantity} <span className="font-normal text-gray-400">· {selected.rows.length} {tr('items', 'Items').toLowerCase()}</span></div></div>
           {canViewCosts && selected.linesWithoutCost ? <div className="col-span-2 text-[11px] text-amber-700 dark:text-amber-300 sm:col-span-4">{selected.linesWithoutCost} {tr('stock_lines_without_cost', 'line(s) have no receipt-level cost. Shared received-date totals are not guessed.')}</div> : null}
         </div>}
+        {lineRefusal ? <StockRefusalLine info={lineRefusal} /> : null}
         {/* N6: edit one saved line. Compact: two columns on a phone, one row of
             four on desktop; the Worker decides what the lot allows. */}
         {lineEdit ? <div data-testid="stock-in-line-editor" className="space-y-2 rounded-xl border border-blue-100 bg-blue-50/55 p-2.5 text-xs dark:border-blue-900/60 dark:bg-blue-950/20">

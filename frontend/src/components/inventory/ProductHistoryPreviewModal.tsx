@@ -1,6 +1,6 @@
 import History from 'lucide-react/dist/esm/icons/history.js'
 import Modal from '../shared/Modal'
-import { translateMovementType } from './movementGroups'
+import { translateMovementRowType } from './movementGroups'
 // N13: the same row model the Stock Change ledger and the movement drill
 // use. This preview used to DROP the branch span and silently omit the
 // actor and reason when they were absent, so one movement read three ways.
@@ -105,7 +105,7 @@ export default function ProductHistoryPreviewModal({ state, onClose, onRetry, on
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-1.5">
                     <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${badgeClass(movement)}`}>
-                      {translateMovementType(movement.movement_type, t)}
+                      {translateMovementRowType(movement, t)}
                     </span>
                     <span className="detail-scroll-text text-gray-500 dark:text-gray-400" title={model.branch}>{model.branch}</span>
                   </div>

@@ -11,7 +11,7 @@
 import { useEffect, useState } from 'react'
 import Modal from '../shared/Modal.tsx'
 import { StockLineChange } from '../shared/StockLineChange.tsx'
-import { signedMovementQuantity, translateMovementType } from './movementGroups.ts'
+import { signedMovementQuantity, translateMovementRowType } from './movementGroups.ts'
 import { buildHistoryRowModel, formatHistoryReference } from '../../utils/historyRowModel.ts'
 
 export type MovementDetailRecord = {
@@ -111,7 +111,7 @@ export default function MovementDetailFloat({ movement, t, fmtTime, loadBalance,
   const model = buildHistoryRowModel(movement)
   const receipt = formatHistoryReference(model.reference, { sale: tr('sale', 'Sale'), return: tr('return', 'Return') })
   const facts: Array<[string, string]> = [
-    [tr('type', 'Type'), translateMovementType(movement.movement_type, t)],
+    [tr('type', 'Type'), translateMovementRowType(movement, t)],
     [tr('recorded_at', 'Recorded at'), fmtTime(movement.created_at)],
     [tr('branch', 'Branch'), model.branch],
     [tr('user', 'User'), model.actor],

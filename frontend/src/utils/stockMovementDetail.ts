@@ -36,6 +36,15 @@ export function isStockSetMovement(referenceId: unknown): boolean {
   return String(referenceId ?? '').startsWith(STOCK_SET_REFERENCE_PREFIX)
 }
 
+// RET-D: the delta rows of a stock-in line edit (Worker
+// lib/stockInSessionsQuery.ts STOCK_IN_EDIT_REFERENCE_PREFIX) -- a correction
+// of the receipt, never a removal (owner, 5 Oct 2026).
+export const STOCK_IN_EDIT_REFERENCE_PREFIX = 'stock-in-edit:'
+
+export function isStockInCorrectionRow(row: { reference_id?: unknown } | null | undefined): boolean {
+  return String(row?.reference_id ?? '').startsWith(STOCK_IN_EDIT_REFERENCE_PREFIX)
+}
+
 export function isRevertibleStockMovement(value: unknown, referenceId?: unknown): boolean {
   if (String(referenceId ?? '').startsWith(DAMAGED_LOT_REFERENCE_PREFIX)) return false
   return revertibleTypes.has(normalizedMovementType(value))

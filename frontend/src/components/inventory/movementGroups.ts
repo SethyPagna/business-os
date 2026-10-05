@@ -1,5 +1,5 @@
 import { lotCodeAsDate } from '../../utils/batchLabel.ts'
-import { revertsMovementId } from '../../utils/stockMovementDetail.ts'
+import { isStockInCorrectionRow, revertsMovementId } from '../../utils/stockMovementDetail.ts'
 
 type MovementRecord = Record<string, unknown>
 
@@ -127,6 +127,13 @@ function describeMovementType(type: unknown): string {
 /** A recorded row's type: a Revert reads "Revert" whichever way it moved stock. */
 export function translateMovementRowType(row: { movement_type?: unknown; reference_id?: unknown; reverts_movement_id?: unknown }, t?: (key: string) => string | undefined): string {
   if (revertsMovementId(row) != null) return (typeof t === 'function' ? t('revert') : undefined) || 'Revert'
+  // RET-D (owner, 5 Oct 2026): editing a stock-in line's quantity is a
+  // correction of the receipt, not a removal. Its delta rows (stamped
+  // `stock-in-edit:<line>:...` by cloudflare/src/lib/stockInLineEdit.ts) are
+  // stored as 'add' / a NEGATIVE 'remove', and read "Stock-in correction"
+  // instead of "Remove Stock" / "Add Stock". Read-side, so every saved row
+  // reads right with no backfill.
+  if (isStockInCorrectionRow(row)) return (typeof t === 'function' ? t('movement_type_stock_in_correction') : undefined) || 'Stock-in correction'
   return translateMovementType(row.movement_type, t)
 }
 
