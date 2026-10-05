@@ -940,7 +940,9 @@ export default function PublicCatalogPage() {
     setAssistantError('')
     withLoaderTimeout(() => getCatalogApi().askPortalAi?.({ question, profile: assistantProfile, dataUseConsent: true }) || Promise.reject(new Error('AI assistant API unavailable')), 'AI assistant', PUBLIC_PORTAL_AI_TIMEOUT_MS)
       .then((result) => setAssistantResponse((result || null) as LooseRecord | null))
-      .catch((error) => setAssistantError(getErrorMessage(error, 'AI assistant failed')))
+      .catch((error) => setAssistantError((error as { code?: unknown } | null)?.code === 'portal_ai_budget_exhausted'
+        ? copy('assistantDailyLimit', 'The assistant has reached today\'s limit. Please try again tomorrow.', 'ជំនួយការបានដល់ចំនួនកំណត់សម្រាប់ថ្ងៃនេះហើយ។ សូមព្យាយាមម្តងទៀតនៅថ្ងៃស្អែក។')
+        : getErrorMessage(error, 'AI assistant failed')))
       .finally(() => setAssistantLoading(false))
   }
 
@@ -1447,6 +1449,7 @@ export default function PublicCatalogPage() {
               consentLocale={String(displayConfig.language || 'en')}
               cartCount={bucket.count}
               wishlistCount={wishlist.count}
+              signupEnabled={displayConfig.signupEnabled !== false}
             />
           </Suspense>
         </div>
