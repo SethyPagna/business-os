@@ -114,6 +114,9 @@ export const PERMISSION_ACTIONS: Record<string, PermissionAction[]> = {
     // Owner, 5 Oct 2026 (evening): the DEFAULT selling and wholesale price. Off for the Employee default; PUT /:id,
     // /bulk-price-adjust, the receipt-time selling price and a merge price choice other than the rule all require it.
     { key: 'price', tKey: 'perm_act_products_price', label: 'Change selling and wholesale price', review: 'block' },
+    // Owner, 5 Oct 2026 (evening): the Products sub-pages -- Stock Changes, Stock-in Sessions and a product's sales and
+    // supplier history. Off for the Employee default, who see only the main Products page.
+    { key: 'history', tKey: 'perm_act_products_history', label: 'Stock changes, sessions and product history', review: 'block' },
   ],
 
   // cloudflare/src/routes/inventory.ts, plus routes/batches.ts (receive/

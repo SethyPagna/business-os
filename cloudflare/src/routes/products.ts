@@ -1360,8 +1360,13 @@ app.get('/:id/detail-report', async (c) => {
 // /detail-report above: a products OR inventory grant. Both are READ-ONLY and
 // product-scoped, and their filters mirror /detail-report's own aggregates so
 // the drilled numbers can never disagree with the row that opened them.
+// Owner, 5 Oct 2026 (evening): an Employee sees ONLY the main Products page (information and images). Everything
+// below the list is a sub-page: the Stock Changes ledger, Stock-in Sessions and a product's sales / supplier / merge
+// history. The products route to read them needs the products:history action (off for the Employee default, and a
+// manual override can only narrow it); an Inventory view grant remains its own way in.
 function canReadProductDetail(user: SessionUser): boolean {
-  return getActionTier(user, 'products', 'view') !== 'none' || getActionTier(user, 'inventory', 'view') !== 'none'
+  const productsRead = getActionTier(user, 'products', 'view') !== 'none' && getActionTier(user, 'products', 'history') !== 'none'
+  return productsRead || getActionTier(user, 'inventory', 'view') !== 'none'
 }
 
 // Individual sales of this product within ONE day or month (the period a row on
@@ -9256,7 +9261,8 @@ function buildLookupUsageEntries(
 // admin screen (shows how many products reference each value before you
 // bulk-rename or delete one) -- had no Cloudflare route at all before this.
 app.get('/lookups/usage', async (c) => {
-  if (getActionTier(c.get('user'), 'products', 'view') !== 'full') {
+  // Only the Manage brands / categories / units modals read this, so it needs the same action as changing them.
+  if (getActionTier(c.get('user'), 'products', 'view') !== 'full' || getActionTier(c.get('user'), 'products', 'manage_lookups') !== 'full') {
     return c.json({ success: false, error: 'No permission', code: 'forbidden', permission: 'products' }, 403)
   }
   try {

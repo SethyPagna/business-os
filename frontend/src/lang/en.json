@@ -161,6 +161,7 @@
   "perm_act_products_export": "Export",
   "perm_act_products_image": "Upload product image",
   "perm_act_products_price": "Change selling and wholesale price",
+  "perm_act_products_history": "Stock changes, sessions and product history",
   "product_price_read_only": "You do not have permission to change product prices. Adjust the price per sale in the cart instead.",
   "perm_act_products_import": "Import",
   "perm_act_products_import_replace_all": "Import: replace all",

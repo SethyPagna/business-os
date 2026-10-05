@@ -74,6 +74,7 @@ const DEFAULT_ROLE_PERMISSIONS: Record<string, Record<string, DefaultRolePermiss
     'products:zero_qty_cleanup': false,
     'products:manage_lookups': false,
     'products:price': false,
+    'products:history': false,
     product_cost_view: false,
     product_cost_edit: false,
     sales: true,

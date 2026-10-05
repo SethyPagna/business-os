@@ -69,6 +69,7 @@ export const ROLE_PRESETS: RolePreset[] = [
       'products:zero_qty_cleanup': false,
       'products:manage_lookups': false,
       'products:price': false,
+      'products:history': false,
       product_cost_view: false,
       product_cost_edit: false,
       inventory: 'review',

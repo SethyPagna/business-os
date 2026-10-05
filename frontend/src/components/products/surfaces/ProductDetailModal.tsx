@@ -136,7 +136,10 @@ export default function ProductDetailModal({
   navigateTo,
   t,
 }: ProductDetailModalProps) {
-  const { user, getPermissionTier } = useApp() as { user: PermissionUser; getPermissionTier: (key: string) => string }
+  const { user, getPermissionTier, can } = useApp() as { user: PermissionUser; getPermissionTier: (key: string) => string; can?: (key: string, action: string) => boolean }
+  // Owner, 5 Oct 2026 (evening): the sales / supplier history report is a Products sub-page; the Employee default
+  // (products:history off) sees only the product's own information and images here. The Worker refuses the reads too.
+  const canReadProductHistory = can ? can('products', 'history') : false
   const canViewCosts = canViewAcquisitionCosts(user)
   const [descriptionDetailOpen, setDescriptionDetailOpen] = useState(false)
   // P10-6: the calculated-cost float.
@@ -416,7 +419,7 @@ export default function ProductDetailModal({
             {/* The links row, rendered ONCE at every width (it used to mount
                 the report twice, one copy hidden by CSS, so every open fetched
                 it twice). Content-sized chips wrap to a second line on phones. */}
-            {productId > 0 ? (
+            {productId > 0 && canReadProductHistory ? (
               <div className="border-t border-gray-100 pt-2.5 dark:border-gray-700" data-detail-links-row="">
                 <Suspense fallback={<div className="flex flex-wrap gap-1.5">{leadingPills}</div>}>
                   <ProductDetailReport productId={productId} barcode={p.barcode} t={t || (() => undefined)} fmtUSD={fmtUSD} leadingPills={leadingPills} />

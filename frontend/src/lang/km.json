@@ -161,6 +161,7 @@
   "perm_act_products_export": "នាំចេញ",
   "perm_act_products_image": "ផ្ទុករូបភាពផលិតផលឡើង",
   "perm_act_products_price": "ប្ដូរតម្លៃលក់រាយ និងតម្លៃលក់ដុំ",
+  "perm_act_products_history": "ការផ្លាស់ប្ដូរស្តុក សម័យបញ្ចូលស្តុក និងប្រវត្តិផលិតផល",
   "product_price_read_only": "អ្នកគ្មានសិទ្ធិប្ដូរតម្លៃផលិតផលទេ។ សូមកែតម្លៃក្នុងការលក់នីមួយៗនៅក្នុងកន្ត្រកជំនួសវិញ។",
   "perm_act_products_import": "នាំចូល",
   "perm_act_products_import_replace_all": "នាំចូល៖ ជំនួសទាំងអស់",
