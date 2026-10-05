@@ -5,6 +5,11 @@ const SALE_SUBMIT_REFUSAL_KEYS: Readonly<Record<string, string>> = {
   // Another sale minted the same receipt number at the same moment; nothing
   // was recorded and a retry mints afresh.
   receipt_number_conflict: 'receipt_number_conflict',
+  // A fixed discount over the item price, or a sale discount over the subtotal
+  // (owner, 5 Oct 2026): refused by the Worker on sale create, add-items and
+  // amendments, and by the till's own pricing before it ever asks.
+  sale_discount_exceeds_price: 'sale_discount_exceeds_price',
+  sale_discount_exceeds_subtotal: 'sale_discount_exceeds_subtotal',
 }
 
 /**

@@ -1,7 +1,7 @@
 import { normalizePriceValue } from '../../utils/pricing.ts'
 import { divideMoney4, multiplyMoney4, percentageMoney4, roundMoney2, roundMoney4, sellingPriceCeilCent, settlementRounding4, subtractMoney4, sumMoney4 } from '../../utils/moneyPrecision.ts'
 import { evaluatePromotionPricing, evaluateCartPromotionAdjustments, type PromotionRule } from '../../utils/promotionRules.ts'
-import { capturePricingProduct, evaluateCapturedPricingPool, type CapturedPricingPool, type ExactLinePricing, type PricingSource } from '../../utils/saleItemPricing.ts'
+import { capturePricingProduct, evaluateCapturedPricingPool, SaleDiscountRefusedError, type CapturedPricingPool, type ExactLinePricing, type PricingSource } from '../../utils/saleItemPricing.ts'
 import { buildProductGroups, compareProductsByNameBranchPriceBarcode } from '../../utils/productGrouping.ts'
 import type { ProductRecord as ProductGroupRecord } from '../../utils/productGrouping.ts'
 import { aggregateInitialOptions } from '../../utils/initials.ts'
@@ -43,6 +43,7 @@ export function posV1BasketTotals(input: {
   const percent = String(input.discountPercent ?? '').trim() || '0'
   if (input.discountType === 'percent' && (percent.startsWith('-') || !Number.isFinite(Number(percent)) || Number(percent) > 100)) throw new Error('invalid_money_input')
   const discUsd = input.discountType === 'percent' ? percentageMoney4(subtotalUsd, percent) : fromPair(input.discountUsd, input.discountKhr)
+  if (discUsd > subtotalUsd) throw new SaleDiscountRefusedError('sale_discount_exceeds_subtotal')
   const membershipDiscUsd = fromPair(input.membershipUsd, input.membershipKhr)
   const afterDiscUsd = subtractMoney4(subtractMoney4(subtotalUsd, discUsd), membershipDiscUsd)
   if (afterDiscUsd < 0) throw new Error('invalid_money_input')
@@ -191,7 +192,9 @@ export type ManualDiscountResult = {
  * and so it's directly unit-testable without mounting POS.tsx.
  *
  * - 'percent': value is 0-100, clamped; discount = base * (value/100).
- * - 'fixed': value is a per-unit USD amount, clamped to [0, base_price_usd].
+ * - 'fixed': value is a per-unit USD amount in [0, base_price_usd]. One larger than the
+ *   price is REFUSED (throws SaleDiscountRefusedError), never clamped to a $0 line
+ *   (owner, 5 Oct 2026) -- the same rule the Worker applies on save.
  *   The KHR-side discount is derived from the *resulting* applied price via
  *   the exchange rate, not by re-converting the discount amount itself, so
  *   applied_price_khr always stays internally consistent with
@@ -213,7 +216,8 @@ export function applyManualDiscount(
     const baseKhr = hasUsdBasis ? multiplyMoney4(base, exchangeRate) : roundMoney4(basePriceKhr || 0)
     const activeType = type && Number.isFinite(rawValue) && rawValue > 0 ? type : null
     const value = activeType === 'percent' ? Math.min(100, rawValue) : activeType === 'fixed' ? roundMoney4(Math.max(0, rawValue)) : 0
-    const discount = Math.min(base, activeType === 'percent' ? percentageMoney4(base, value) : value)
+    if (activeType === 'fixed' && value > base) throw new SaleDiscountRefusedError('sale_discount_exceeds_price')
+    const discount = activeType === 'percent' ? percentageMoney4(base, value) : value
     const applied = Math.max(0, subtractMoney4(base, discount))
     const appliedKhr = hasUsdBasis ? multiplyMoney4(applied, exchangeRate) : baseKhr
     return {
@@ -247,9 +251,10 @@ export function applyManualDiscount(
     }
   }
   const value = type === 'percent' ? Math.min(100, Math.max(0, rawValue)) : Math.max(0, rawValue)
+  if (type === 'fixed' && value > base) throw new SaleDiscountRefusedError('sale_discount_exceeds_price')
   const discountUsd = type === 'percent'
     ? normalizePriceValue(base * (value / 100), 0)
-    : Math.min(value, base)
+    : value
   const appliedUsd = normalizePriceValue(Math.max(0, base - discountUsd), 0)
   const appliedKhr = hasUsdBasis
     ? normalizePriceValue(appliedUsd * exchangeRate, 0)
@@ -596,7 +601,8 @@ export function quoteSaleCartLines(cart: readonly ProductRecord[], rules: readon
       manual: { type: (record.manual_discount_type === 'percent' || record.manual_discount_type === 'fixed' ? record.manual_discount_type : 'none') as 'none' | 'percent' | 'fixed', value: Number(record.manual_discount_value ?? 0) } }
   })
   const pool: CapturedPricingPool = { version: 1, pool_key: 'client-quote', evaluation_time: new Date(now instanceof Date ? now.getTime() : now).toISOString(), exchange_rate: exchangeRate, rules: [...rules], lines }
-  const amounts = evaluateCapturedPricingPool(pool, Object.fromEntries(cart.map(item => [getCartLineId(item), Number((item as Record<string, unknown>).quantity)])))
+  // A new basket: a fixed discount over a line's price is refused here, as the Worker will on save.
+  const amounts = evaluateCapturedPricingPool(pool, Object.fromEntries(cart.map(item => [getCartLineId(item), Number((item as Record<string, unknown>).quantity)])), { refuseOversizedFixed: true })
   return new Map(lines.map(line => {
     const amount = amounts.get(line.line_key)!
     return [line.line_key, { ...amount, client_line_key: line.line_key, pricing_source: line.source,
