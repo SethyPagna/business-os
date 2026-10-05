@@ -5138,6 +5138,7 @@
   "show_footer": "បង្ហាញសារបិទ",
   "show_less": "បង្ហាញតិច",
   "show_more": "បង្ហាញបន្ថែម",
+  "search_results_shown": "{shown} នៃ {total}",
   "show_logo": "បង្ហាញនិមិត្តសញ្ញា",
   "show_password": "បង្ហាញពាក្យសម្ងាត់",
   "show_payment": "បង្ហាញការទូទាត់",

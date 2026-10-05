@@ -14,6 +14,7 @@ import type { SupplierChoice } from '../shared/SupplierPickerField.tsx'
 import { receiveBatchStock, getProductBatches, type ProductBatch } from '../../api/batchesTransport.ts'
 import { adjustStock, commitFastStockIn, isDeferredStockInResult, type FastStockInCommitLineResult, type FastStockInCommitSettled } from '../../api/inventoryWriteTransport.ts'
 import { getProductFilters, searchProducts } from '../../api/methods.ts'
+import { productSearchRequest, useProductSearchIndex } from '../../api/productSearchIndex.ts'
 import { readWorkDraft, scheduleWorkDraftWrite, clearWorkDraft, flushPendingWorkDraft, writeWorkDraft, scopedWorkDraftKey } from '../../utils/workDrafts.ts'
 import { createClientRequestId } from '../../api/requestIds.ts'
 import { stockFailureText, stockLineNeedsRemoval } from '../../utils/stockAdjustOutcome.ts'
@@ -147,6 +148,11 @@ function normalizeLookupOptions(value: unknown): LookupOption[] {
 }
 
 const brandKey = (value: unknown): string => String(value ?? '').trim().replace(/\s+/g, ' ').toLowerCase()
+
+// The picker's page: 30 rows (was 8, which hid "Hourglass Blush Palette Evil
+// Eye" at rank 9 of 13 for "Blush Palette", G37 defect 1), with the total
+// and a "more" control for the rest.
+const CANDIDATE_PAGE_SIZE = 30
 
 function productMatchesBrand(product: ProductCandidate, brand: string): boolean {
   const wanted = brandKey(brand)
@@ -305,6 +311,9 @@ export default function FastStockInModal({
 
   // ---- transient ----
   const [candidates, setCandidates] = useState<ProductCandidate[]>([])
+  const [candidateTotal, setCandidateTotal] = useState(0)
+  const [candidatePage, setCandidatePage] = useState(1)
+  const [candidateMoreBusy, setCandidateMoreBusy] = useState(false)
   const [searchCompleteFor, setSearchCompleteFor] = useState('')
   const [selectedGroup, setSelectedGroup] = useState<ProductGroup | null>(null)
   const [batchOptions, setBatchOptions] = useState<ProductBatch[]>([])
@@ -393,21 +402,55 @@ export default function FastStockInModal({
   }, [])
 
   // ---- product search ----
+  // G37: the text is matched on this device by the shared search core and
+  // the ranked ids are hydrated here (prices, stock, families stay
+  // server-side); until the index is ready the server text search answers.
+  const searchIndexGeneration = useProductSearchIndex()
+  const candidateRequest = (text: string, page: number) => ({
+    ...productSearchRequest(text).params,
+    page,
+    pageSize: CANDIDATE_PAGE_SIZE,
+    ...(brand.trim() ? { brand: brand.trim() } : {}),
+  })
   useEffect(() => {
     const text = query.trim()
     setSearchCompleteFor('')
-    if (picked || selectedGroup || text.length < 2) { setCandidates([]); return }
+    if (picked || selectedGroup || text.length < 2) { setCandidates([]); setCandidateTotal(0); return }
     const seq = ++searchSeqRef.current
     const timer = window.setTimeout(async () => {
       try {
-        const payload = await searchProducts({ query: text, pageSize: brand.trim() ? 20 : 8, surface: 'inventory' }) as { items?: ProductCandidate[] }
+        const payload = await searchProducts({ ...candidateRequest(text, 1), surface: 'inventory' }) as { items?: ProductCandidate[]; total?: unknown }
         if (seq !== searchSeqRef.current) return
-        setCandidates(Array.isArray(payload?.items) ? payload.items : [])
+        const items = Array.isArray(payload?.items) ? payload.items : []
+        setCandidates(items)
+        setCandidatePage(1)
+        setCandidateTotal(Number(payload?.total ?? items.length) || items.length)
         setSearchCompleteFor(text)
       } catch { /* suggestions only -- typing again retries */ }
-    }, 300)
+    }, 200)
     return () => window.clearTimeout(timer)
-  }, [query, picked, selectedGroup, brand])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query, picked, selectedGroup, brand, searchIndexGeneration])
+
+  const loadMoreCandidates = async () => {
+    const text = query.trim()
+    if (candidateMoreBusy || !text) return
+    const seq = searchSeqRef.current
+    setCandidateMoreBusy(true)
+    try {
+      const payload = await searchProducts({ ...candidateRequest(text, candidatePage + 1), surface: 'inventory' }) as { items?: ProductCandidate[]; total?: unknown }
+      if (seq !== searchSeqRef.current) return
+      const items = Array.isArray(payload?.items) ? payload.items : []
+      setCandidates((current) => {
+        const seen = new Set(current.map((row) => row.id))
+        return [...current, ...items.filter((row) => !seen.has(row.id))]
+      })
+      setCandidatePage((page) => page + 1)
+      if (payload?.total != null) setCandidateTotal(Number(payload.total) || 0)
+    } catch { /* the control stays; pressing it again retries */ } finally {
+      setCandidateMoreBusy(false)
+    }
+  }
 
   const visibleCandidates = useMemo(() => candidates.filter((candidate) => productMatchesBrand(candidate, brand)), [candidates, brand])
   const productsById = useMemo(() => new Map<unknown, ProductRecord>(visibleCandidates.map((product) => [product.id, product as ProductRecord])), [visibleCandidates])
@@ -1172,6 +1215,9 @@ export default function FastStockInModal({
                 query={query}
                 onQuery={(text) => { setQuery(text); setPicked(null); setScannedBarcode(''); setCreatePayload(null) }}
                 groups={candidateGroups.map((group) => ({ key: group.key, name: group.name, options: group.sellableItems.length || group.items.length, stock: group.stockTotal }))}
+                total={Math.max(candidateTotal, candidateGroups.length)}
+                onMore={candidateGroups.length < candidateTotal ? () => { void loadMoreCandidates() } : null}
+                moreBusy={candidateMoreBusy}
                 onOpenGroup={(key) => { const group = candidateGroups.find((entry) => entry.key === key); if (group) setSelectedGroup(group) }}
                 createText={createText}
                 onCreate={openCreate}

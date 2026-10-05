@@ -18,6 +18,7 @@ import Plus from 'lucide-react/dist/esm/icons/plus.js'
 import Download from 'lucide-react/dist/esm/icons/download.js'
 import Warehouse from 'lucide-react/dist/esm/icons/warehouse.js'
 import { useApp as useAppHook, useLowStockConfig, useSync as useSyncHook } from '../../AppContext.tsx'
+import { productSearchRequest, useProductSearchIndex } from '../../api/productSearchIndex.ts'
 import { effectiveLowStockThreshold } from '../../utils/lowStockSettings.ts'
 import type { QueryParams } from '../../api/query.ts'
 import Modal from '../shared/Modal'
@@ -231,7 +232,7 @@ interface BranchMutationResult {
 interface BranchApi {
   getBranches: () => Promise<unknown>
   getTransfers: (params: QueryParams) => Promise<unknown>
-  getBranchStock: (branchId: string | number, options: { page: number; pageSize: number; stockState: string; query?: string }) => Promise<BranchStockState>
+  getBranchStock: (branchId: string | number, options: { page: number; pageSize: number; stockState: string; query?: string; rankIds?: string; rankTiers?: string }) => Promise<BranchStockState>
   updateBranch: (id: string | number, payload: BranchTransportPayload) => Promise<BranchMutationResult>
 }
 
@@ -880,6 +881,10 @@ export default function Branches({ embedded = false, view, showSectionNavigation
   }
 
   const getBranchStockQuery = (branchId: string | number): string => (branchStockSearch[String(branchId)] ?? '').trim()
+  // G37: the per-branch search box matches on this device with the shared
+  // search core and asks for the ranked ids; the text search answers until
+  // the index is ready.
+  useProductSearchIndex()
 
   const loadMoreBranchStock = async (branchId: string | number) => {
     const current = branchStocks[branchId]
@@ -895,7 +900,7 @@ export default function Branches({ embedded = false, view, showSectionNavigation
           stockState: current.stockState || 'positive',
           // Keep the active search on later pages, or "Show more" would
           // silently switch back to the unfiltered listing mid-scroll.
-          ...(activeQuery ? { query: activeQuery } : {}),
+          ...(activeQuery ? productSearchRequest(activeQuery).params : {}),
         }),
         'More branch stock',
         12000,
@@ -925,7 +930,7 @@ export default function Branches({ embedded = false, view, showSectionNavigation
     const query = rawQuery.trim()
     try {
       const stock = await withLoaderTimeout(
-        () => branchApi.getBranchStock(branchId, { page: 1, pageSize: 20, stockState: 'positive', ...(query ? { query } : {}) }),
+        () => branchApi.getBranchStock(branchId, { page: 1, pageSize: 20, stockState: 'positive', ...(query ? productSearchRequest(query).params : {}) }),
         'Branch stock search',
         12000,
       )

@@ -171,8 +171,8 @@ assert.match(
 assert.doesNotMatch(transferModal, /batchDateFrom|batchDateTo/, 'Transfer product eligibility must not depend on received date')
 assert.match(
   transferModal,
-  /fuzzyTextMatches\(\[product\.name, product\.sku, product\.barcode\]/,
-  'TransferModal\'s client re-filter must keep barcode in the haystack',
+  /createRowSearch\(multiProducts, \(product\) => \(\{ name: product\.name, sku: product\.sku, barcode: product\.barcode \}\)\)/,
+  'TransferModal\'s in-memory search (the shared core) must keep barcode in the haystack',
 )
 
 const posPage = readFileSync(new URL('../src/components/pos/POS.tsx', import.meta.url), 'utf8')

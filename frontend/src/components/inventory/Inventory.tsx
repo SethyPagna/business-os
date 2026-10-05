@@ -13,6 +13,7 @@ import { isBrokenLocalizedString, useApp, useSync } from '../../AppContext'
 import { canViewAcquisitionCosts } from '../../utils/acquisitionCostAccess.ts'
 import { fmtTime } from '../../utils/formatters'
 import { matchesSearchTermGroups } from '../../utils/searchMatch.ts'
+import { productSearchRequest, rankedSearchOverride, useProductSearchIndex } from '../../api/productSearchIndex.ts'
 import { useDebouncedValue } from '../../utils/useDebouncedValue.ts'
 import LazyPortalMenu from '../shared/LazyPortalMenu'
 import type { PortalMenuItem } from '../shared/PortalMenu'
@@ -442,6 +443,15 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
   // resets below waits out the pause.
   const debouncedSearch = useDebouncedValue(search, 180)
   const deferredSearch = String(debouncedSearch || '').trim()
+  // G37: product search (products tab + stats) matches on this device with
+  // the shared search core and sends ranked ids; movements keep their own
+  // server text search.
+  const searchIndexGeneration = useProductSearchIndex(isActive)
+  const productSearchParamsKey = useMemo(
+    () => JSON.stringify(productSearchRequest(deferredSearch, { mode: searchMode }).params),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [deferredSearch, searchMode, searchIndexGeneration],
+  )
   const [rfidStatus, setRfidStatus] = useState<LegacyInventoryRecord | null>(null)
   const [tab,           setTab]           = useState<string>(hostSection && !['stats', 'all'].includes(hostSection) ? hostSection : 'products')
   const [inventorySection, setInventorySection] = useState<string>(hostSection || 'products')
@@ -696,7 +706,7 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
   // Stock state (the summary cards: products, in/low/out of stock, stock
   // value) is a "right now" fact and stays deliberately date-free -- so does
   // its scope key, and /api/inventory/stats takes no date params at all.
-  const inventoryStatsScope = JSON.stringify([branchFilter, deferredSearch, searchMode])
+  const inventoryStatsScope = JSON.stringify([branchFilter, deferredSearch, searchMode, productSearchParamsKey])
   // The products page DOES carry the range: its Net sold / Revenue / COGS /
   // Profit columns are scoped by it server-side, so two different windows are
   // two different results and must not share one cached page (N10).
@@ -711,14 +721,17 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
     setProductsError(null)
     try {
       const response = await withLoaderTimeout(
-        () => getInventoryApi().searchInventoryProducts(buildInventoryProductsSearchParams({
-          branchFilter,
-          query: deferredSearch,
-          searchMode,
-          page: productsPage,
-          pageSize: productsPageSize,
-          range: stripRange,
-        })),
+        () => getInventoryApi().searchInventoryProducts({
+          ...buildInventoryProductsSearchParams({
+            branchFilter,
+            query: deferredSearch,
+            searchMode,
+            page: productsPage,
+            pageSize: productsPageSize,
+            range: stripRange,
+          }),
+          ...rankedSearchOverride(productSearchParamsKey),
+        }),
         'Inventory products',
         INVENTORY_PRODUCTS_TIMEOUT_MS,
       )
@@ -744,7 +757,7 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
     } finally {
       if (isTrackedRequestCurrent(productsRequestRef, requestId)) setProductsLoading(false)
     }
-  }, [branchFilter, deferredSearch, isActive, needsProductsData, productsPage, productsPageSize, productsScope, searchMode, stripRange.endDate, stripRange.startDate, stripRange.endTime, stripRange.startTime, tr])
+  }, [branchFilter, deferredSearch, isActive, needsProductsData, productSearchParamsKey, productsPage, productsPageSize, productsScope, searchMode, stripRange.endDate, stripRange.startDate, stripRange.endTime, stripRange.startTime, tr])
 
   useEffect(() => {
     setProductsPage(1)
@@ -812,6 +825,7 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
         branchId: branchOpts.branchId,
         query: deferredSearch,
         searchMode,
+        ...rankedSearchOverride(productSearchParamsKey),
       }
       try {
         const primaryLoaders = {

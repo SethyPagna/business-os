@@ -154,7 +154,9 @@ check('a scanned barcode narrows an in-memory picker instead of matching everyth
 
 check('the fully client-side pickers rank their own results', () => {
   const transferModal = read('../src/components/branches/TransferModal.tsx')
-  assert.match(transferModal, /sortBySearchRelevance\(/,
+  // G37: ranked by the shared search core (utils/rowSearch.ts -> searchCore.ts), whose
+  // tiers are the same 0 barcode / 1 exact name / 2 name prefix contract.
+  assert.match(transferModal, /return multiSearch\(query\)\.filter/,
     'the bulk transfer picker filters an UNPAGED, unranked branch-stock read -- it must rank client-side')
 
   const supplierReturn = read('../src/components/returns/NewSupplierReturnModal.tsx')
@@ -277,7 +279,7 @@ check('the unpaged branch-stock payload still carries the barcode the bulk picke
     'the unpaged branch-stock SELECT must include p.barcode -- the bulk transfer picker ranks on it')
   assert.match(
     read('../src/components/branches/TransferModal.tsx'),
-    /fuzzyTextMatches\(\[product\.name, product\.sku, product\.barcode\]/,
+    /createRowSearch\(multiProducts, \(product\) => \(\{ name: product\.name, sku: product\.sku, barcode: product\.barcode \}\)\)/,
     'the bulk transfer picker must keep barcode in its client-side haystack',
   )
 })
