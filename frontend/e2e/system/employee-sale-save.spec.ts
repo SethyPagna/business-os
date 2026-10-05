@@ -339,6 +339,30 @@ test('an employee edit with an unknown outcome stays frozen and Retry resends th
 })
 
 
+test('an employee edits a line and then records payment in the same open detail', async ({ page }, info) => {
+  await signIn(page, 912, 'e2e_employee_amend')
+  const sale = await openFreshSale(page), before = await state(page, sale.id)
+  const line = page.locator('tr').filter({ has: page.locator('[data-sale-line-name]').getByText('E2E Original Powder', { exact: true }) })
+  await line.getByRole('button', { name: /^Edit$/ }).click()
+  await page.locator('input[id="amend-qty-' + before.lines[0].id + '"]').fill('2')
+  await page.getByRole('button', { name: /^Apply$/ }).click()
+  const amended = page.waitForResponse(r => new URL(r.url()).pathname === `/api/sales/${sale.id}/amendments` && r.request().method() === 'POST')
+  await page.getByRole('button', { name: /^Apply change$/ }).click()
+  const amendment = await amended, amendmentBody = await amendment.json()
+  expect(amendment.status(), JSON.stringify(amendmentBody)).toBe(200)
+  await expect(line.getByRole('button', { name: /^Edit$/ })).toBeEnabled()
+  await page.getByRole('button', { name: /^Record payment$/ }).click()
+  const paid = page.waitForResponse(r => new URL(r.url()).pathname === `/api/sales/${sale.id}/status` && r.request().method() === 'PATCH')
+  await page.locator('[data-sale-status-review-actions]').getByRole('button', { name: /^Update$/ }).click()
+  const payment = await paid, paymentBody = await payment.json(), paymentRequest = payment.request().postDataJSON()
+  const after = await state(page, sale.id)
+  await info.attach('amend-then-record-payment', { body: JSON.stringify({ sale, before, amendment: { request: amendment.request().postDataJSON(), response: amendmentBody }, payment: { status: payment.status(), request: paymentRequest, response: paymentBody }, after }, null, 2), contentType: 'application/json' })
+  expect(paymentRequest.expected_updated_at, 'payment after an edit in the same detail uses the edit’s committed version').toBe(amendmentBody.updated_at)
+  expect(payment.status(), JSON.stringify(paymentBody)).toBe(200)
+  expect(after.sales[0].sale_status).toBe('completed')
+  expect(Number(after.sales[0].amount_paid_usd)).toBe(19)
+})
+
 test('amend-only employee quantity and line Replace Save reload preserve both stock ledgers', async ({ page }, info) => {
   await signIn(page, 912, 'e2e_employee_amend')
   const sale = await openFreshSale(page), before = await state(page, sale.id)
