@@ -1456,6 +1456,8 @@ export default function PublicCatalogPage() {
               cartCount={bucket.count}
               wishlistCount={wishlist.count}
               signupEnabled={displayConfig.signupEnabled !== false}
+              language={pageLanguage}
+              onTelegramDone={portalAccount.adoptAccount}
             />
           </Suspense>
         </div>

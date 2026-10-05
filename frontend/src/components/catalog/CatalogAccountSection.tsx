@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from 'react'
+import { Suspense, useEffect, useId, useState } from 'react'
 import UserIcon from 'lucide-react/dist/esm/icons/user.js'
 import LogOut from 'lucide-react/dist/esm/icons/log-out.js'
 import ShoppingBag from 'lucide-react/dist/esm/icons/shopping-bag.js'
@@ -9,6 +9,10 @@ import PortalNoPaymentNotice from './PortalNoPaymentNotice.tsx'
 import SignupConsentField, { CONSENT_REQUIRED_EN, CONSENT_REQUIRED_KM } from './legal/SignupConsentField.tsx'
 import ConfirmDialog from '../shared/ConfirmDialog.tsx'
 import type { PortalAccountProfile } from './portalAccount.ts'
+import { lazyRetry } from '../../utils/lazyImport.ts'
+
+// G38 Telegram: its own lazily loaded chunk ('portal-telegram').
+const PortalTelegramSignIn = lazyRetry(() => import('./PortalTelegramSignIn.tsx'), 'public-catalog-telegram-sign-in')
 
 // The storefront Account area (§2). Replaces the old anonymous membership
 // lookup: guests can still use everything, and an account only adds "permanent
@@ -38,6 +42,8 @@ export default function CatalogAccountSection({
   cartCount,
   wishlistCount,
   signupEnabled = true,
+  language = 'km',
+  onTelegramDone,
 }: {
   copy: CopyFn
   account: PortalAccountProfile | null
@@ -53,6 +59,10 @@ export default function CatalogAccountSection({
   wishlistCount: number
   /** Owner switch customer_portal_signup_enabled (G38 P0): false pauses new accounts. */
   signupEnabled?: boolean
+  /** The storefront page language ('en' | 'km'): the Telegram bot answers in it. */
+  language?: string
+  /** G38 Telegram: the Worker's answer after a Telegram sign-in or connect. */
+  onTelegramDone?: (result: Record<string, unknown>) => void
 }) {
   const [mode, setMode] = useState<'signin' | 'signup'>('signin')
   const [reminderOpen, setReminderOpen] = useState(false)
@@ -165,6 +175,13 @@ export default function CatalogAccountSection({
             <p className="mt-3 text-xs text-slate-500 dark:text-neutral-400">
               {copy('accountMemoryHint', 'Your list and saved items are kept with your account, so they follow you across devices.')}
             </p>
+            {onTelegramDone ? (
+              <div className="mt-3">
+                <Suspense fallback={null}>
+                  <PortalTelegramSignIn copy={copy} mode="attach" language={language} onDone={onTelegramDone} />
+                </Suspense>
+              </div>
+            ) : null}
             <button
               type="button"
               onClick={signOut}
@@ -176,6 +193,14 @@ export default function CatalogAccountSection({
           </div>
         ) : (
           <div className="rounded-[24px] border border-slate-200 bg-white p-5 shadow-sm dark:border-neutral-700 dark:bg-neutral-900">
+            {onTelegramDone ? (
+              // Owner, 6 Oct 2026: new members join through Telegram, which
+              // proves the phone. Existing members can still use the password
+              // form below.
+              <Suspense fallback={<div aria-hidden="true" className="mb-5 h-11 animate-pulse rounded-2xl bg-slate-100 dark:bg-white/5" />}>
+                <PortalTelegramSignIn copy={copy} mode="signin" language={language} consentLocale={consentLocale} onDone={onTelegramDone} />
+              </Suspense>
+            ) : null}
             {signupEnabled ? (
             <div className="mb-4 inline-flex rounded-2xl bg-slate-100 p-1 text-sm dark:bg-white/5">
               <button

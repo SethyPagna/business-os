@@ -182,6 +182,20 @@ function keyFallbackTuples(file: string, site: string): StorefrontCopyEntry[] {
   return entries
 }
 
+// [key, en, km] triples: PortalTelegramSignIn's error-code table (G38 Telegram).
+function keyEnKmTriples(file: string, site: string): StorefrontCopyEntry[] {
+  const entries: StorefrontCopyEntry[] = []
+  const visit = (node: ts.Node) => {
+    if (ts.isArrayLiteralExpression(node) && node.elements.length === 3) {
+      const [key, en, km] = node.elements.map((element) => stringValue(element as ts.Expression, file))
+      if (key && en !== undefined && km !== undefined && /^portal_[a-z_]+$/.test(key)) entries.push({ key, en, km, site })
+    }
+    ts.forEachChild(node, visit)
+  }
+  visit(parseSource(file))
+  return entries
+}
+
 export const LEGAL_KEYS = new Set(Object.keys(PORTAL_LEGAL_EN))
 const legalEntries = (site: string): StorefrontCopyEntry[] =>
   [...LEGAL_KEYS].map((key) => ({ key, en: legalText('en', key), km: legalText('km', key), site }))
@@ -193,6 +207,8 @@ const DYNAMIC_KEY_SOURCES: Record<string, (file: string, site: string) => Storef
   'components/catalog/PortalNoPaymentNotice.tsx copy(privacyKey, legalText(\'en\', privacyKey), legalText(\'km\', privacyKey))': (_file, site) => legalEntries(site),
   // InstallPromptBand's translate wrapper; its calls are scanned under `translate` below.
   'components/catalog/PublicCatalogPage.tsx copy(key, fallback, fallbackKm)': () => [],
+  // G38 Telegram: the Worker's error code picks a [key, en, km] row of ERRORS.
+  'components/catalog/PortalTelegramSignIn.tsx copy(key, en, km)': keyEnKmTriples,
 }
 
 // writeErrorPresentation has its own copy(t, key, fallback) over the admin `t`;

@@ -169,5 +169,15 @@ export function usePortalAccount(bucket: BucketLike, wishlist: WishlistLike) {
 
   const clearError = useCallback(() => setError(''), [])
 
-  return { account, ready, busy, error, signIn, signUp, signOut, clearError }
+  // G38 Telegram: the Worker already set the session cookie; adopt the member
+  // it returned and merge the lists, as a password sign-in does.
+  const adoptAccount = useCallback((result: unknown) => {
+    const profile = readProfile(result)
+    if (!profile) return
+    setError('')
+    setAccount(profile)
+    void hydrate()
+  }, [hydrate])
+
+  return { account, ready, busy, error, signIn, signUp, signOut, clearError, adoptAccount }
 }

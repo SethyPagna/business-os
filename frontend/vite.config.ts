@@ -945,6 +945,10 @@ function manualChunks(id: string): string | undefined {
     ) {
       return 'portal-tools'
     }
+    // G38 Telegram sign-in: lazily loaded from the account drawer only. Its own
+    // chunk keeps it out of the catalog-products closure (performanceBudgets)
+    // and out of the admin 'catalog' chunk.
+    if (normalized.includes('/src/components/catalog/PortalTelegramSignIn.tsx')) return 'portal-telegram'
     if (normalized.includes('/src/components/catalog/')) return 'catalog'
     if (normalized.includes('/src/components/utils-settings/ResetData.tsx')) return 'backup-reset-tools'
     // Only the repair panels inside ResetData import these. The '/src/api/'
