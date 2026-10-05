@@ -31,10 +31,27 @@ interface ProductImagePlaceholderProps {
   compact?: boolean
 }
 
+interface MarginCardLabels {
+  title: string
+  cost: string
+  margin: string
+  selling: string
+  belowCost: string
+}
+
+const MARGIN_CARD_ENGLISH: MarginCardLabels = {
+  title: 'Margin analysis',
+  cost: 'Cost',
+  margin: 'Margin',
+  selling: 'Selling',
+  belowCost: 'Selling price is below cost price',
+}
+
 interface MarginCardProps {
   costUsd: number
   sellingUsd: number
   usdSymbol: string
+  labels?: Partial<MarginCardLabels>
 }
 
 interface DualPriceInputProps {
@@ -185,32 +202,33 @@ function ProductImagePlaceholder({ className = '', compact = false }: ProductIma
   )
 }
 
-function MarginCard({ costUsd, sellingUsd, usdSymbol }: MarginCardProps) {
+function MarginCard({ costUsd, sellingUsd, usdSymbol, labels }: MarginCardProps) {
+  const text = { ...MARGIN_CARD_ENGLISH, ...labels }
   const margin = sellingUsd - costUsd
   const pct = sellingUsd > 0 ? (margin / sellingUsd * 100) : 0
   const isProfit = margin >= 0
 
   return (
     <div className={`rounded-xl border p-4 ${isProfit ? 'border-blue-100 bg-blue-50 dark:border-blue-800 dark:bg-blue-900/20' : 'border-yellow-200 bg-yellow-50 dark:border-yellow-800 dark:bg-yellow-900/20'}`}>
-      <p className="mb-2 text-xs font-semibold text-gray-500 dark:text-gray-400">Margin Analysis</p>
+      <p className="mb-2 text-xs font-semibold text-gray-500 dark:text-gray-400">{text.title}</p>
       <div className="grid grid-cols-3 gap-3 text-center">
         <div>
           <div className="text-lg font-bold text-red-600">{usdSymbol}{costUsd.toFixed(2)}</div>
-          <div className="text-xs text-gray-500">Cost</div>
+          <div className="text-xs text-gray-500">{text.cost}</div>
         </div>
         <div>
           <div className={`text-lg font-bold ${isProfit ? 'text-blue-600' : 'text-yellow-600'}`}>{usdSymbol}{margin.toFixed(2)}</div>
-          <div className="text-xs text-gray-500">Margin ({pct.toFixed(1)}%)</div>
+          <div className="text-xs text-gray-500">{text.margin} ({pct.toFixed(1)}%)</div>
         </div>
         <div>
           <div className="text-lg font-bold text-green-600">{usdSymbol}{sellingUsd.toFixed(2)}</div>
-          <div className="text-xs text-gray-500">Selling</div>
+          <div className="text-xs text-gray-500">{text.selling}</div>
         </div>
       </div>
       {!isProfit ? (
         <p className="mt-2 flex items-center justify-center gap-1 text-xs text-yellow-600 dark:text-yellow-400">
           <AlertTriangle className="h-3.5 w-3.5" />
-          Selling price is below purchase price
+          {text.belowCost}
         </p>
       ) : null}
     </div>

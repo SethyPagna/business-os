@@ -1884,6 +1884,13 @@ export default function ProductForm({
               costUsd={Number(form.cost_price_usd || 0)}
               sellingUsd={Number(form.selling_price_usd || 0)}
               usdSymbol={usdSymbol}
+              labels={{
+                title: tr('margin_analysis_title', 'Margin analysis', 'វិភាគអត្រាចំណេញ'),
+                cost: tr('cost', 'Cost', 'ថ្លៃដើម'),
+                margin: tr('margin', 'Margin', 'អត្រាចំណេញ'),
+                selling: tr('selling', 'Selling', 'តម្លៃលក់'),
+                belowCost: tr('margin_selling_below_cost', 'Selling price is below cost price', 'តម្លៃលក់ទាបជាងថ្លៃដើម'),
+              }}
             />
           ) : null}
         </div>
