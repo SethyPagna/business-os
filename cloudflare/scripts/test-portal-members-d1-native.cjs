@@ -17,6 +17,10 @@
 //   - the storefront credential guard refuses a text/plain sign-in;
 //   - a member's link request, a staff link (in person) after which the
 //     member sees the LC number, and a revert of that link, all native;
+//   - a LINKS-ONLY staff user (portal_member_links, no Contacts view) sees
+//     the linked member with the customer withheld, cannot search by LC, and
+//     gets one identical 403 from /link for an existing, a held and a missing
+//     customer id (no existence oracle, nothing written) -- owner ruling E1;
 //   - control: on the same database a malformed W- code is refused by the
 //     CHECK, so the passing writes above were really checked.
 //
@@ -58,7 +62,8 @@ async function workerBundle() {
         const fixtures = {
           auth: `export const requireAuth=async(c,next)=>{const raw=c.req.header('x-test-permissions');
             if(!raw)return c.json({error:'Unauthorized'},401);
-            c.set('user',{id:7,username:'admin',name:'Fixture Admin',role_code:'admin',permissions:raw,role_permissions:'{}'});return next()}`,
+            const admin=JSON.parse(raw).all===true;
+            c.set('user',{id:admin?7:8,username:admin?'admin':'linker',name:admin?'Fixture Admin':'Links Only',role_code:admin?'admin':'staff',permissions:raw,role_permissions:'{}'});return next()}`,
           broadcastHub: 'export const broadcast=async()=>{}',
           portalAi: 'export const generatePortalAiResponse=async()=>({summary:"",recommendations:[],requestPolicy:{}})',
         }
@@ -120,10 +125,11 @@ async function main() {
     console.log(`migrated in ${Math.round((Date.now() - started) / 1000)}s`)
 
     const BROWSER = { 'content-type': 'application/json', 'sec-fetch-site': 'same-origin', 'cf-connecting-ip': '203.0.113.50' }
+    const LINKS_ONLY = { portal_member_links: true }
     async function call(url, { method = 'POST', body, headers = {}, cookie, staff = false, raw } = {}) {
       const all = { ...BROWSER, ...headers }
       if (cookie) all.cookie = cookie
-      if (staff) all['x-test-permissions'] = JSON.stringify({ all: true })
+      if (staff) all['x-test-permissions'] = JSON.stringify(staff === true ? { all: true } : staff)
       const response = await mf.dispatchFetch(`https://leangbeauty.com${url}`, {
         method, headers: all, body: raw !== undefined ? raw : body === undefined ? undefined : JSON.stringify(body),
       })
@@ -218,6 +224,32 @@ async function main() {
       const request2 = await db.prepare('SELECT status, decided_event_id FROM portal_member_link_requests WHERE account_id = ?').bind(accountId).first()
       assert.equal(request2.status, 'approved')
       assert.ok(request2.decided_event_id)
+    })
+
+    await step('links-only staff: customer withheld, no LC search, /link refuses every id identically before lookup', async () => {
+      await db.prepare("INSERT INTO customers (id, name, phone, phone_normalized, membership_number) VALUES (901, 'Other Customer', '012 345 901', '012345901', 'LC-00901')").run()
+      const detail = await call(`/api/portal-members/${accountId}`, { method: 'GET', staff: LINKS_ONLY })
+      assert.equal(detail.status, 200, JSON.stringify(detail.body))
+      assert.equal(detail.body.member.chip, 'linked')
+      assert.equal(detail.body.member.customer, null)
+      assert.equal(detail.body.member.customerVisible, false)
+      const listed = await call('/api/portal-members?filter=all', { method: 'GET', staff: LINKS_ONLY })
+      assert.equal(JSON.stringify(listed.body).includes('Store Customer') || JSON.stringify(listed.body).includes('LC-00900'), false)
+      assert.deepEqual((await call('/api/portal-members?q=LC-00900', { method: 'GET', staff: LINKS_ONLY })).body.items, [])
+      const history = await call(`/api/portal-members/${accountId}/history`, { method: 'GET', staff: LINKS_ONLY })
+      assert.equal(JSON.stringify(history.body).includes('Store Customer'), false)
+      const before = Number((await db.prepare('SELECT COUNT(*) AS n FROM portal_member_link_events').first()).n)
+      const answers = []
+      for (const customerId of [900, 901, 99999]) {
+        const res = await call(`/api/portal-members/${accountId}/link`, { staff: LINKS_ONLY, body: { customerId, expectedLinkVersion: 99, evidence: 'in_person', move: true } })
+        answers.push(`${res.status} ${JSON.stringify(res.body)}`)
+      }
+      assert.match(answers[0], /^403 .*contacts_view_required/)
+      assert.deepEqual(answers, [answers[0], answers[0], answers[0]])
+      assert.equal(Number((await db.prepare('SELECT COUNT(*) AS n FROM portal_member_link_events').first()).n), before)
+      // control: the admin fixture sees the customer
+      const full = await call(`/api/portal-members/${accountId}`, { method: 'GET', staff: true })
+      assert.equal(full.body.member.customer.membershipNumber, 'LC-00900')
     })
 
     await step('staff revert of the link (removes it, no evidence needed) appends one event', async () => {
