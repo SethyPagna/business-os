@@ -1064,6 +1064,15 @@ export default function Users() {
       notify(tr('role_name_required', 'Role name is required'), 'error')
       return
     }
+    // An edit that changes nothing is not sent: the Worker would write nothing
+    // either, and the people holding this role would only be told to refresh.
+    if (selectedRole && !roleFormDirty) {
+      notify(tr('settings_no_changes', 'No changes to save'), 'info')
+      setModal(null)
+      setSelectedRole(null)
+      setRoleForm(INITIAL_ROLE_FORM)
+      return
+    }
     if (!beginSingleAction(saveRoleInFlightRef, { blocked: saving })) return
 
     setSaving(true)

@@ -201,7 +201,8 @@ await runTest('the app keeps clearKeys when it normalises write options on the w
   assert.deepEqual(normalizeSettingsWriteOptions({}).clearKeys, [])
   const appContext = readFileSync(new URL('../src/AppContext.tsx', import.meta.url), 'utf8')
   assert.match(appContext, /const normalizedOptions = normalizeSettingsWriteOptions\(options\)/)
-  assert.match(appContext, /api\.saveSettings\?\.\(serverUpdates, normalizedOptions\)/)
+  assert.match(appContext, /const sendOptions = \{ \.\.\.normalizedOptions, answerAdopted: true \}/)
+  assert.match(appContext, /api\.saveSettings\?\.\(changed, sendOptions\)/)
 })
 
 await runTest('a serverOnly settings read asks the server even over a fresh cached copy, and fails rather than fall back', async () => {

@@ -148,7 +148,7 @@ test('resume reasons are never a generic id-less refresh reason', () => {
 test('shell listeners do not turn a no-gap resume into extra reads', () => {
   const read = (rel: string) => fs.readFileSync(new URL(`../src/${rel}`, import.meta.url), 'utf8').replace(/\r\n/g, '\n')
   const appContext = read('AppContext.tsx')
-  assert.match(appContext, /if \(channel === 'settings' && detail\.reason !== FOREGROUND_RESUME_REASON\) loadSettings\(\)/, 'settings is re-read only when a push could have been missed')
+  assert.match(appContext, /if \(channel === 'settings' && detail\.reason !== FOREGROUND_RESUME_REASON && [^\n]*\) loadSettings\(\)/, 'settings is re-read only when a push could have been missed')
   const bell = read('components/shared/NotificationCenter.tsx')
   assert.match(bell, /if \(syncChannel\.reason === FOREGROUND_RESUME_REASON\) return/, 'the bell skips a no-gap resume burst')
   assert.match(bell, /document\.visibilityState === 'visible' && refreshDueWhileHiddenRef\.current/, 'showing the tab only catches up a refresh that came due while hidden')

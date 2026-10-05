@@ -171,6 +171,10 @@ app.put('/rules/:id', requireAction('promotions', 'manage'), async (c) => {
   const input = normalizeRuleWrite(body)
   const error = ruleWriteError(input, body)
   if (error) return c.json({ error }, 400)
+  // A save that changes nothing writes nothing: no UPDATE, no audit row, and
+  // above all no products-version bump, which throws away every cached product
+  // search (the promoted-first ordering lives inside them).
+  if (!changedFields(current as Record<string, unknown>, input as Record<string, unknown>, { keys: Object.keys(input) })) return c.json(current)
   await db.prepare(`
     UPDATE promotion_rules SET
       title=@title, show_title=@show_title, rule_type=@rule_type, min_quantity=@min_quantity,
@@ -318,6 +322,8 @@ app.put('/:id', requireKey('products'), async (c) => {
   }
   // No order sent: the card keeps its place (was: silently moved to 0).
   if (input.sort_order == null) input.sort_order = Number((current as { sort_order?: unknown }).sort_order ?? 0)
+  // Nothing changed: nothing is written, audited or broadcast.
+  if (!changedFields(current as Record<string, unknown>, input as Record<string, unknown>, { keys: Object.keys(input) })) return c.json(current)
 
   await db.prepare(`
     UPDATE promotions SET
@@ -343,9 +349,17 @@ app.put('/reorder/all', requireKey('products'), async (c) => {
   if (!order.length) return c.json({ error: 'order array required' }, 400)
 
   const db = getDb(c.env)
-  await db.batch(order.map((id, index) => ({
+  // Only the cards whose place actually changes are written: moving one card
+  // used to rewrite sort_order and updated_at on every promotion.
+  const current = await db.prepare('SELECT * FROM promotions ORDER BY sort_order ASC, id ASC').all<{ id: number; sort_order: number | null }>()
+  const currentOrder = new Map(current.map((row) => [Number(row.id), row.sort_order]))
+  const moved = order
+    .map((id, index) => ({ id: Number(id), index }))
+    .filter(({ id, index }) => currentOrder.has(id) && Number(currentOrder.get(id)) !== index)
+  if (!moved.length) return c.json(current)
+  await db.batch(moved.map(({ id, index }) => ({
     sql: 'UPDATE promotions SET sort_order = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-    params: [index, Number(id)],
+    params: [index, id],
   })))
 
   await audit(c.env, user?.id ?? null, actorSnapshot(user), 'reorder', 'promotion', null, { order })

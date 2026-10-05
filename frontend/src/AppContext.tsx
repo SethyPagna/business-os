@@ -29,6 +29,7 @@ import { fmtDayFirst } from './utils/formatters.ts'
 import { withLoaderTimeout } from './utils/loaders.ts'
 import { refreshAppData } from './utils/appRefresh.ts'
 import { normalizeSettingsWriteOptions } from './utils/settingsWriteOptions.ts'
+import { isOwnSettingsWrite, sendChangedSettings } from './utils/settingsSave.ts'
 import { presentWriteError, type WriteErrorDetail } from './utils/writeErrorPresentation.ts'
 import type { SettingsWriteOptions } from './types/settingsContracts.ts'
 import {
@@ -147,6 +148,9 @@ type SyncChannelUpdate = {
   channel: string
   reason?: string | null
   source?: string | null
+  // Set on the dispatch a settings save makes in the tab that saved: that tab
+  // already holds the saved values, so a page need not reload for it.
+  ownSettingsWrite?: boolean
   ts: number
 }
 type WriteConflictDetail = AppRecord & {
@@ -218,7 +222,7 @@ type AppContextValue = {
   page: string
   persistAuthenticatedUser: (nextUser: AppUser, sessionDuration?: string, sessionExpiresAt?: string) => Promise<void>
   reloadWriteConflict: () => Promise<void>
-  saveSettings: (newSettings: AppSettings, options?: SettingsWriteOptions) => Promise<WriteConflictDetail | { success: boolean; error?: unknown }>
+  saveSettings: (newSettings: AppSettings, options?: SettingsWriteOptions) => Promise<WriteConflictDetail | { success: boolean; unchanged?: boolean; normalized?: string[]; error?: unknown }>
   setPage: (page: string) => void
   settings: AppSettings
   /** C5: navigator.storage.persist()'s answer for this device, null until asked.
@@ -718,6 +722,9 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
   const [storagePersisted,    setStoragePersisted]    = useState<boolean | null>(null)
   const persistentStorageAskedForRef = useRef<number | null>(null)
   const settingsRef = useRef<AppSettings>({})
+  // Settings keys with a save still in flight, so a second save of the same key
+  // is never judged "unchanged" against a snapshot that has not caught up.
+  const inFlightSettingKeysRef = useRef<Map<string, number>>(new Map())
   const authRecoveryRef = useRef(false)
   const authEstablishedAtRef = useRef(0)
   const writeBlockedNoticeAtRef = useRef(0)
@@ -1212,9 +1219,13 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     if (permissionRefreshRef.current.pending) schedulePermissionRefresh()
 
     const onUpdate = (e: Event) => {
-      const detail = eventDetail<{ channel?: string; reason?: string | null; source?: string | null; payload?: { action?: string; id?: string | number } | null }>(e)
+      const detail = eventDetail<{ channel?: string; reason?: string | null; source?: string | null; ownSettingsWrite?: boolean; payload?: { action?: string; id?: string | number; writeId?: string } | null }>(e)
       const channel = String(detail.channel || '')
       if (!channel) return
+      // The Worker broadcasts a settings write to every socket, this tab's
+      // included. This tab saved it, already holds the values and has already
+      // told its pages through its own dispatch, so the echo does nothing.
+      if (channel === 'settings' && isOwnSettingsWrite(detail.payload)) return
       const roleId = (user as { role_id?: string | number | null } | null)?.role_id
       if (notePermissionRefreshIntent(permissionRefreshRef.current, detail, { userId: user?.id, roleId })) {
         schedulePermissionRefresh()
@@ -1224,12 +1235,15 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
         delete debounceRef.current[channel]
         // Settings changes from other devices apply immediately; no reload needed.
         // A resume with the socket open throughout missed no settings push.
-        if (channel === 'settings' && detail.reason !== FOREGROUND_RESUME_REASON) loadSettings().catch(() => {})
+        // A save made in this tab is not re-read: its answer already carried the
+        // saved values (see saveSettings).
+        if (channel === 'settings' && detail.reason !== FOREGROUND_RESUME_REASON && !detail.ownSettingsWrite && !isOwnSettingsWrite(detail.payload)) loadSettings().catch(() => {})
         setSyncChannel({
           channel,
           ts: Date.now(),
           reason: detail.reason || null,
           source: detail.source || null,
+          ...(detail.ownSettingsWrite ? { ownSettingsWrite: true } : {}),
         })
       }, SYNC.EVENT_DEBOUNCE_MS)
     }
@@ -2222,22 +2236,33 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     const normalizedOptions = normalizeSettingsWriteOptions(options)
     try {
       const nextSettings = newSettings || {}
-      const serverUpdates: AppSettings = {}
+      const requestedServerUpdates: AppSettings = {}
       const deviceUpdates: AppSettings = {}
       Object.entries(nextSettings).forEach(([key, value]) => {
         if (DEVICE_LOCAL_SETTING_KEYS.has(key)) deviceUpdates[key] = value
-        else serverUpdates[key] = value
+        else requestedServerUpdates[key] = value
       })
-
-      if (Object.keys(serverUpdates).length) {
-        const api = getAppApi()
-        const serverResult = await withLoaderTimeout(
-          () => api.saveSettings?.(serverUpdates, normalizedOptions),
+      // Only what differs from the settings this tab holds is sent, and nothing
+      // at all when nothing differs (see sendChangedSettings).
+      const api = getAppApi()
+      // answerAdopted: this function merges the answer into state below, so the
+      // transport may skip the re-read of the settings table after the write.
+      const sendOptions = { ...normalizedOptions, answerAdopted: true }
+      const sendResult = await sendChangedSettings({
+        requested: requestedServerUpdates,
+        snapshot: settingsRef.current,
+        inFlight: inFlightSettingKeysRef.current,
+        clearKeys: normalizedOptions.clearKeys,
+        send: (changed) => withLoaderTimeout(
+          () => api.saveSettings?.(changed, sendOptions),
           'Save settings',
           APP_SETTINGS_SAVE_TIMEOUT_MS,
-        )
-        if (serverResult && 'conflict' in serverResult && serverResult.conflict) return serverResult
-      }
+        ),
+      })
+      if (sendResult.conflict) return sendResult.conflict as WriteConflictDetail
+      const serverUpdates: AppSettings = sendResult.sent
+      const workerNormalised: AppSettings = sendResult.normalised
+      const sentKeys = Object.keys(serverUpdates)
       if (Object.keys(deviceUpdates).length) {
         applyDeviceSettings(deviceUpdates)
         if (normalizedOptions.refreshChannels.length) {
@@ -2247,7 +2272,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
           })
         }
       }
-      const mergedUpdates = { ...serverUpdates, ...deviceUpdates }
+      const mergedUpdates = { ...requestedServerUpdates, ...deviceUpdates }
       if (Object.prototype.hasOwnProperty.call(mergedUpdates, 'login_session_duration')) {
         const normalizedSessionDuration = writeStoredSessionDuration(mergedUpdates.login_session_duration)
         const api = getAppApi()
@@ -2277,11 +2302,21 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
           })
         }
       }
-      if (Object.keys(serverUpdates).length) {
-        setSettings((prev) => ({ ...prev, ...serverUpdates }))
+      if (sentKeys.length) {
+        // The saved values -- and any text the Worker normalised -- are adopted
+        // here, in the ref at once (a save made before the next render must diff
+        // against them) and in state, so nothing is re-read from the server.
+        const adopted = { ...serverUpdates, ...workerNormalised }
+        settingsRef.current = { ...settingsRef.current, ...adopted }
+        setSettings((prev) => ({ ...prev, ...adopted }))
       }
-      if (!normalizedOptions.silentToast) notify(t('settings_saved'))
-      return { success: true }
+      const nothingChanged = !sentKeys.length && !Object.keys(deviceUpdates).length
+      if (!normalizedOptions.silentToast) {
+        if (nothingChanged) notify(t('settings_no_changes'), 'info')
+        else notify(t('settings_saved'))
+      }
+      if (nothingChanged) return { success: true, unchanged: true }
+      return { success: true, normalized: Object.keys(workerNormalised) }
     } catch (error: unknown) {
       const detail = error && typeof error === 'object' ? error as WriteConflictDetail : {}
       if (detail.conflict || detail.code === 'write_conflict' || detail.code === 'settings_conflict') {

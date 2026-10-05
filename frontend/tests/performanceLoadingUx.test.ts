@@ -1087,7 +1087,7 @@ assert.match(
 )
 assert.match(
   appContext,
-  /withLoaderTimeout\(\s*\(\) => api\.saveSettings\?\.\(serverUpdates, normalizedOptions\),\s*'Save settings',\s*APP_SETTINGS_SAVE_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => api\.saveSettings\?\.\(changed, sendOptions\),\s*'Save settings',\s*APP_SETTINGS_SAVE_TIMEOUT_MS,\s*\)/,
   'settings writes should timeout slow server saves',
 )
 assert.match(
@@ -2277,23 +2277,15 @@ assert.match(
 )
 assert.match(
   receiptSettingsPage,
-  /const RECEIPT_SETTINGS_REFRESH_TIMEOUT_MS = 10000/,
-  'receipt settings refresh should use an explicit timeout constant',
-)
-assert.match(
-  receiptSettingsPage,
   /'Receipt settings save',\s*RECEIPT_SETTINGS_SAVE_TIMEOUT_MS,/,
   'receipt settings save should timeout slow settings writes with the explicit constant',
 )
-assert.match(
+// SETTINGS-DIFF-SAVE: a receipt save no longer re-reads the whole settings table;
+// saveSettings merges the Worker's answer into the app's settings instead.
+assert.doesNotMatch(
   receiptSettingsPage,
-  /'Receipt settings refresh',\s*RECEIPT_SETTINGS_REFRESH_TIMEOUT_MS,/,
-  'receipt settings manual refresh should timeout slow settings reads',
-)
-assert.match(
-  receiptSettingsPage,
-  /'Receipt settings silent refresh',\s*RECEIPT_SETTINGS_REFRESH_TIMEOUT_MS,/,
-  'receipt settings silent refresh should timeout slow settings reads',
+  /Receipt settings (silent )?refresh|loadSettingsRef/,
+  'receipt settings must not re-read every setting after each save',
 )
 assert.match(
   receiptPreview,

@@ -12,6 +12,7 @@ import { isReceiptCardPaper, normalizeReceiptTemplate, receiptRenditionPrintSett
 import { RECEIPT_SHELL_HORIZONTAL_PADDING_PX } from '../../utils/receiptItemColumns.ts'
 import type { ReceiptPrintSettings } from '../../types/receiptContracts'
 import InfoHint from '../shared/InfoHint.tsx'
+import { settingsSaveSucceeded } from '../../utils/settingsSave.ts'
 
 type Translate = (key: string, fallback?: string) => string | undefined
 type AppSettings = Record<string, unknown> & { receipt_print_settings?: unknown }
@@ -175,7 +176,9 @@ export default function PrintSettings({ t: tProp, previewTargetRef = null, setti
     if (typeof saveAppSettings !== 'function') return
     if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current)
     saveTimerRef.current = window.setTimeout(() => {
-      void saveAppSettings(
+      // saveSettings answers a failed write instead of throwing; a silent
+      // autosave that failed must still say so.
+      void Promise.resolve(saveAppSettings(
         { receipt_print_settings: JSON.stringify(next) },
         {
           silentToast: true,
@@ -183,7 +186,9 @@ export default function PrintSettings({ t: tProp, previewTargetRef = null, setti
           reason: 'receipt-print-settings-saved',
           source: 'receipt-settings:print',
         },
-      )
+      )).then((result) => {
+        if (!settingsSaveSucceeded(result)) notify?.(T('settings_save_failed_kept', 'Settings were not saved. Your changes are still here.'), 'error')
+      }).catch(() => {})
     }, 350)
   }
 

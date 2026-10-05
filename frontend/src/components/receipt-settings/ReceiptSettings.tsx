@@ -30,9 +30,9 @@ import { withLoaderTimeout } from '../../utils/loaders.ts'
 import { buildAppliedReceiptConfig } from '../../utils/receiptAppliedConfig.ts'
 import { normalizeSocialQrUrl } from '../../utils/socialQrLink.ts'
 import { normalizeReceiptTextContrast } from '../../utils/receiptTextContrast.ts'
+import { settingsSaveOutcome, settingsSaveSucceeded } from '../../utils/settingsSave.ts'
 
 const RECEIPT_SETTINGS_SAVE_TIMEOUT_MS = 12000
-const RECEIPT_SETTINGS_REFRESH_TIMEOUT_MS = 10000
 
 type Translate = (key: string, fallback?: string) => string
 type AppSettings = Record<string, unknown> & {
@@ -56,12 +56,10 @@ type SaveSettings = (
   settings: Record<string, unknown>,
   options?: SaveSettingsOptions,
 ) => Promise<SaveSettingsResult | void> | SaveSettingsResult | void
-type LoadSettings = () => Promise<Record<string, unknown> | void> | Record<string, unknown> | void
 type Notify = (message: string, type?: string) => void
 type ReceiptSettingsApp = {
   t?: Translate
   settings?: AppSettings
-  loadSettings?: LoadSettings
   saveSettings?: SaveSettings
   notify?: Notify
 }
@@ -333,7 +331,6 @@ export default function ReceiptSettings() {
   const app = useReceiptSettingsApp()
   const t: Translate = (typeof app?.t === 'function') ? app.t : ((key) => key)
   const settings: AppSettings = app?.settings || {}
-  const loadSettings: LoadSettings = app?.loadSettings || (async () => ({}))
   const saveSettings: SaveSettings = app?.saveSettings || (async () => ({ success: false, error: new Error('Settings save unavailable') }))
   const notify: Notify = app?.notify || (() => {})
 
@@ -347,7 +344,6 @@ export default function ReceiptSettings() {
   const latestTemplateRef = useRef<ReceiptTemplate>(DEFAULT_TEMPLATE)
   const saveTimerRef     = useRef<ReturnType<typeof window.setTimeout> | null>(null)
   const isMountedRef     = useRef(false)   // guard: skip auto-save on first render
-  const loadSettingsRef  = useRef<LoadSettings>(loadSettings)
   const saveInFlightRef  = useRef(false)
   const queuedSaveRef    = useRef<PersistOptions | null>(null)
   const aliveRef         = useRef(true)
@@ -359,8 +355,6 @@ export default function ReceiptSettings() {
   const footerSaveTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null)
   latestTemplateRef.current = tpl
 
-  // Keep loadSettings ref current without re-triggering effects
-  useEffect(() => { loadSettingsRef.current = loadSettings }, [loadSettings])
   useEffect(() => () => {
     aliveRef.current = false
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
@@ -448,23 +442,16 @@ export default function ReceiptSettings() {
       if (result?.conflict) {
         throw new Error(t('settings_conflict') || 'Settings changed on another device. Reload and try again.')
       }
-      persistedTemplateRef.current = serializedTemplate
-
-      if (options.showToast) {
-        try {
-          await withLoaderTimeout(
-            () => loadSettingsRef.current(),
-            'Receipt settings refresh',
-            RECEIPT_SETTINGS_REFRESH_TIMEOUT_MS,
-          )
-        } catch (_) {}
-      } else {
-        void withLoaderTimeout(
-          () => loadSettingsRef.current(),
-          'Receipt settings silent refresh',
-          RECEIPT_SETTINGS_REFRESH_TIMEOUT_MS,
-        ).catch(() => {})
+      if (settingsSaveOutcome(result) === 'failed') {
+        // saveSettings answers a failed write instead of throwing. The template
+        // stays marked unsaved so the next edit tries again; a manual save has
+        // already been told why, an autosave has not.
+        if (!options.showToast) notify(t('settings_save_failed_kept'), 'error')
+        return
       }
+      // The saved template is already in the app's settings (saveSettings
+      // merged the Worker's answer), so nothing is re-read from the server.
+      persistedTemplateRef.current = serializedTemplate
     } catch (error) {
       if (options.showToast) {
         notify(getErrorMessage(error, 'Save failed - check server connection'), 'error')
@@ -531,7 +518,7 @@ export default function ReceiptSettings() {
         RECEIPT_SETTINGS_SAVE_TIMEOUT_MS,
       ).then((result) => {
         if (!aliveRef.current) return
-        if (!result?.conflict) persistedFooterRef.current = valueToPersist
+        if (settingsSaveSucceeded(result)) persistedFooterRef.current = valueToPersist
       }).catch(() => {})
     }, 900)
     return () => { if (footerSaveTimerRef.current) clearTimeout(footerSaveTimerRef.current) }

@@ -75,6 +75,8 @@ function load(rel, overrides = {}) {
 }
 
 const conflictControl = load('lib/conflictControl.ts')
+// The real diff helpers: the route now decides "nothing changed" with changedFields().
+const realAudit = load('lib/audit.ts', { './db': { getDb: () => { throw new Error('unselected') } } })
 const usersRoute = load('routes/users.ts', {
   hono: require('hono'),
   bcryptjs: { hashSync: () => 'hash', compareSync: () => true },
@@ -87,7 +89,7 @@ const usersRoute = load('routes/users.ts', {
     requireAuth: async (c, next) => { c.set('user', currentActor); return next() },
     revokeUserSessions: async () => {},
   },
-  '../lib/audit': { changedFields: () => null, auditChangeColumns: () => ({ old_value: null, new_value: null }), isSecretShapedAuditKey: () => false, audit: async () => { legacyAuditCalls += 1 } },
+  '../lib/audit': { changedFields: realAudit.changedFields, auditChangeColumns: realAudit.auditChangeColumns, isSecretShapedAuditKey: () => false, audit: async () => { legacyAuditCalls += 1 } },
   '../lib/permissions': { isAdminControlUser: (actor) => actor?.isAdmin === true },
   '../lib/conflictControl': conflictControl,
   '../durable-objects/broadcastHub': {
@@ -179,6 +181,44 @@ async function main() {
     }])
     assert.equal(legacyAuditCalls, 0, 'the best-effort out-of-batch audit helper must not be used')
     assert.equal(broadcasts.length, 1)
+  })
+
+  // Owner, 5 Oct 2026: a Save that changes nothing must not write. A no-op role
+  // save used to move updated_at (another admin's open editor then conflicted),
+  // add an audit row with an empty diff and broadcast `roles`, which every other
+  // tab answers by refetching its session and permissions.
+  await check('a role save that changes nothing writes, audits and broadcasts nothing (same grants in a different key order)', async () => {
+    const before = role()
+    const result = await updateRole({ name: 'Employee', permissions: { pos: true, sales: true }, expectedUpdatedAt: INITIAL_VERSION })
+    assert.equal(result.status, 200, JSON.stringify(result.body))
+    assert.equal(result.body.unchanged, true)
+    assert.equal(result.body.updated_at, INITIAL_VERSION, 'the answer carries the unchanged version')
+    assert.deepEqual(role(), before, 'the row is untouched, updated_at included')
+    assert.equal(audits().length, 0)
+    assert.equal(broadcasts.length, 0)
+  })
+
+  await check('control: one grant flipped is still a real write with its own audit row and broadcast', async () => {
+    const result = await updateRole({ name: 'Employee', permissions: { sales: true, pos: false }, expectedUpdatedAt: INITIAL_VERSION })
+    assert.equal(result.status, 200, JSON.stringify(result.body))
+    assert.equal(result.body.unchanged, undefined)
+    assert.deepEqual(JSON.parse(role().permissions), { sales: true, pos: false })
+    assert.equal(audits().length, 1)
+    assert.equal(broadcasts.length, 1)
+  })
+
+  await check('true and 1 are different grants (permission checks are strict), so that save is a real write', async () => {
+    const result = await updateRole({ name: 'Employee', permissions: { sales: 1, pos: true }, expectedUpdatedAt: INITIAL_VERSION })
+    assert.equal(result.status, 200, JSON.stringify(result.body))
+    assert.equal(result.body.unchanged, undefined)
+    assert.deepEqual(JSON.parse(role().permissions), { sales: 1, pos: true })
+  })
+
+  await check('a rename alone is a real write', async () => {
+    const result = await updateRole({ name: 'Employee II', permissions: { sales: true, pos: true }, expectedUpdatedAt: INITIAL_VERSION })
+    assert.equal(result.status, 200, JSON.stringify(result.body))
+    assert.equal(role().name, 'Employee II')
+    assert.equal(audits().length, 1)
   })
 
   await check('stale client version is refused before any write side effect', async () => {

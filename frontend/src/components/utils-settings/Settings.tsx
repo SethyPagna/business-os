@@ -53,6 +53,8 @@ import { startVisibleInterval } from '../../utils/visibilityPolling.ts'
 import { useIsPageActive } from '../shared/pageActivity'
 import { beginKeyedAction, beginSingleAction, finishKeyedAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import { buildSettingsConflictState, diffSettingsConflictFields } from './settingsConflict.ts'
+import SettingsRenderBoundary from './SettingsRenderBoundary.tsx'
+import { diffSettings, settingsSaveOutcome, settingsSaveSucceeded } from '../../utils/settingsSave.ts'
 import type { SettingsConflictState } from './settingsConflict.ts'
 import {
   createInitialUploadState,
@@ -559,6 +561,12 @@ export default function Settings() {
   const uploadOriginalValuesRef = useRef<Map<string, string>>(new Map())
   const uploadPreviewUrlsRef = useRef<Map<string, string>>(new Map())
   const formHydratedRef = useRef(false)
+  // The settings the form was last filled from. A save sends only the keys that
+  // differ from THIS, i.e. what the person actually changed -- not every field
+  // the form happens to hold, and not whatever another device has since written
+  // to a field this person never touched.
+  const loadedSnapshotRef = useRef<SettingsRecord>({})
+  const [saveError, setSaveError] = useState('')
   const formDirtyRef = useRef(false)
   const aliveRef = useRef(true)
   const sectionStorageKey = 'business-os:settings:section'
@@ -642,6 +650,7 @@ export default function Settings() {
     if (!Object.keys(nextSettings).length && formHydratedRef.current) return
     if (formDirtyRef.current) return
     setForm({ ...nextSettings })
+    loadedSnapshotRef.current = { ...nextSettings }
     formHydratedRef.current = true
   }, [settings])
 
@@ -674,6 +683,7 @@ export default function Settings() {
 
   const setValue = (key: string, value: SettingValue) => {
     formDirtyRef.current = true
+    setSaveError('')
     setForm((current) => ({ ...current, [key]: value }))
   }
   // The tax switch, read through the SAME helper the till and the Worker use,
@@ -804,7 +814,7 @@ export default function Settings() {
   const savePaymentMethods = async (updated: string[]): Promise<boolean> => {
     const normalized = normalizePaymentMethods(updated)
     try {
-      await saveSettings(
+      const result = await saveSettings(
         { pos_payment_methods: JSON.stringify(normalized) },
         {
           silentToast: true,
@@ -813,6 +823,11 @@ export default function Settings() {
           source: 'settings:payment-methods',
         },
       )
+      // saveSettings answers a failed write instead of throwing; never call it saved.
+      if (!settingsSaveSucceeded(result)) {
+        notify(t('settings_save_failed_kept'), 'error')
+        return false
+      }
       setPmList(normalized)
       notify('Payment methods saved.', 'success')
       return true
@@ -1005,14 +1020,18 @@ export default function Settings() {
       )
       return
     }
+    setSaveError('')
+    // Only the fields the person changed leave the page.
+    const { changed } = diffSettings(sanitizedForm, loadedSnapshotRef.current)
     try {
-      const result = await saveSettings(sanitizedForm, {
+      const result = await saveSettings(changed, {
         reason: 'settings-saved',
         source: 'settings:form-save',
       })
-      if (result?.conflict) {
+      const outcome = settingsSaveOutcome(result)
+      if (outcome === 'conflict') {
         setSettingsConflict(buildSettingsConflictState({
-          attempted: result?.attempted || sanitizedForm,
+          attempted: result?.attempted || changed,
           currentSettings: result?.currentSettings || {},
           actualUpdatedAt: result?.actualUpdatedAt || null,
           expectedUpdatedAt: result?.expectedUpdatedAt || null,
@@ -1020,6 +1039,15 @@ export default function Settings() {
         setShowConflictReview(false)
         return
       }
+      if (outcome === 'failed') {
+        // saveSettings has already shown the reason. The form and its dirty flag
+        // stay exactly as they are: marking a failed write saved would let the
+        // next refresh refill the form from the old server values and the
+        // person's edits would vanish.
+        setSaveError(t('settings_save_failed_kept'))
+        return
+      }
+      loadedSnapshotRef.current = { ...loadedSnapshotRef.current, ...changed }
       setForm((current) => ({
         ...current,
         ui_app_favicon_image: sanitizedForm.ui_app_favicon_image,
@@ -1059,36 +1087,42 @@ export default function Settings() {
 
   const reloadLatestSettings = useCallback(async () => {
     const latest = await loadSettings({ force: true }).catch(() => null)
+    // The conflict answer carries only the keys this save attempted, so the
+    // fallback lays them over the whole snapshot instead of replacing it.
     const nextSettings = latest && typeof latest === 'object'
       ? latest
-      : (settingsConflict?.serverSettings || {})
+      : { ...loadedSnapshotRef.current, ...(settingsConflict?.serverSettings || {}) }
     setForm({ ...nextSettings } as SettingsRecord)
+    loadedSnapshotRef.current = { ...nextSettings } as SettingsRecord
     formDirtyRef.current = false
     setSettingsConflict(null)
     setShowConflictReview(false)
   }, [loadSettings, settingsConflict])
 
   const keepServerSettings = useCallback(() => {
-    setForm({ ...(settingsConflict?.serverSettings || {}) } as SettingsRecord)
+    // Keep server = drop the draft: the whole form returns to the loaded
+    // snapshot with the server's newer values for the conflicting keys laid over.
+    const serverSettings = (settingsConflict?.serverSettings || {}) as SettingsRecord
+    loadedSnapshotRef.current = { ...loadedSnapshotRef.current, ...serverSettings }
+    setForm({ ...loadedSnapshotRef.current })
     formDirtyRef.current = false
     setSettingsConflict(null)
     setShowConflictReview(false)
   }, [settingsConflict])
 
   const retrySaveWithLatest = useCallback(async () => {
-    const mergedDraft = {
-      ...(settingsConflict?.serverSettings || {}),
-      ...form,
-    }
-    const normalizedMergedDraft = mergedDraft as SettingsRecord
-    setForm(normalizedMergedDraft)
-    const result = await saveSettings(withoutServerOwnedSettings(normalizedMergedDraft), {
+    // Retry with the newest version: the person's own changes go out again, and
+    // nothing else. The fields another device changed that this person did not
+    // touch are not re-sent, so they are not overwritten with stale values.
+    const { changed } = diffSettings(withoutServerOwnedSettings(form), loadedSnapshotRef.current)
+    const result = await saveSettings(changed, {
       reason: 'settings-merged',
       source: 'settings:conflict-merge',
     })
-    if (result?.conflict) {
+    const outcome = settingsSaveOutcome(result)
+    if (outcome === 'conflict') {
       setSettingsConflict(buildSettingsConflictState({
-        attempted: result?.attempted || mergedDraft,
+        attempted: result?.attempted || changed,
         currentSettings: result?.currentSettings || {},
         actualUpdatedAt: result?.actualUpdatedAt || null,
         expectedUpdatedAt: result?.expectedUpdatedAt || null,
@@ -1096,9 +1130,15 @@ export default function Settings() {
       setShowConflictReview(true)
       return
     }
+    if (outcome === 'failed') {
+      setSaveError(t('settings_save_failed_kept'))
+      return
+    }
+    loadedSnapshotRef.current = { ...loadedSnapshotRef.current, ...changed }
+    formDirtyRef.current = false
     setSettingsConflict(null)
     setShowConflictReview(false)
-  }, [form, saveSettings, settingsConflict])
+  }, [form, saveSettings, t])
 
   const notificationRealertValue = String(form.notifications_realert_minutes || '10')
   const notificationRealertPreset = ['5', '10', '30', '60'].includes(notificationRealertValue)
@@ -1138,6 +1178,12 @@ export default function Settings() {
           </span>
         )}
       </div>
+
+      {saveError ? (
+        <div role="alert" className="mx-auto mb-4 max-w-[96rem] rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm leading-relaxed text-red-800 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-100">
+          {saveError}
+        </div>
+      ) : null}
 
       <LoadingWatchdog
         loading={uploadingImage}
@@ -1211,6 +1257,11 @@ export default function Settings() {
       ) : null}
 
       <div className="mx-auto max-w-[96rem] space-y-4">
+        <SettingsRenderBoundary
+          message={t('settings_section_display_failed')}
+          actionLabel={t('settings_section_show_again')}
+          resetKey={settingsSection}
+        >
         {isAdmin && showSettingsSection('business') ? (
         <SettingsSection title={t('business_info')} defaultOpen>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -2326,6 +2377,7 @@ export default function Settings() {
             </div>
           </SettingsSection>
         ) : null}
+        </SettingsRenderBoundary>
 
         <button type="button" className="btn-primary px-8 py-3 text-base w-full sm:w-auto" onClick={handleSaveSettings} disabled={savingSettings || uploadingImage}>
           {savingSettings ? (t('saving') || 'Saving...') : t('save')}

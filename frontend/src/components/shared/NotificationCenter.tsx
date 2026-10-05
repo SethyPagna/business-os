@@ -29,6 +29,7 @@ import { IMPORT_JOBS_SHARED_LIMIT, onImportJobPush } from '../../utils/importJob
 import AppSelect from './AppSelect'
 import PaginationControls from './PaginationControls'
 import { getStatusBadgeLabel } from '../sales/StatusBadge.tsx'
+import { settingsSaveSucceeded } from '../../utils/settingsSave.ts'
 
 type Tone = 'danger' | 'warning' | 'success' | 'info'
 type ToneFilter = Tone | 'all'
@@ -836,7 +837,8 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
     const nextValue = !preferenceValue(section.enabledKey, settings, true)
     setSavingKey(section.enabledKey)
     try {
-      await saveSettings({ [section.enabledKey]: nextValue ? 'true' : 'false' })
+      const result = await saveSettings({ [section.enabledKey]: nextValue ? 'true' : 'false' })
+      if (!settingsSaveSucceeded(result)) return
       void loadSummary(true)
     } catch (error) {
       notify(getErrorMessage(error) || tr('notification_setting_update_failed', 'Failed to update notification setting', 'បរាជ័យក្នុងការកែប្រែការជូនដំណឹង'), 'error')

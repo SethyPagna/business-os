@@ -13,6 +13,7 @@ import {
   notePermissionRefreshIntent,
   permissionSnapshotKey,
 } from '../src/utils/permissionRefreshAccumulator.ts'
+import { isOwnSettingsWrite } from '../src/utils/settingsSave.ts'
 
 const subject = { userId: 'me', roleId: 'cashier' }
 const appContextSource = readFileSync(new URL('../src/AppContext.tsx', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
@@ -133,6 +134,7 @@ async function runExtractedHandlerCounts(events: Array<{ channel: string; reason
     escalatePermissionRefresh,
     finishPermissionRefresh,
     FOREGROUND_RESUME_REASON,
+    isOwnSettingsWrite,
     notePermissionRefreshIntent,
     permissionSnapshotKey,
     clearTimeout: clearTimer,

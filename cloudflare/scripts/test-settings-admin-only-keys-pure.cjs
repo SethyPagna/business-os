@@ -119,7 +119,9 @@ async function main() {
     const settingsTsx = fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 'src', 'components', 'utils-settings', 'Settings.tsx'), 'utf8')
     assert.match(settingsTsx, /const SERVER_OWNED_SETTING_PREFIXES = \['drive_sync_'\]/)
     assert.match(settingsTsx, /const sanitizedForm = withoutServerOwnedSettings\(\{/)
-    assert.match(settingsTsx, /saveSettings\(withoutServerOwnedSettings\(normalizedMergedDraft\)/)
+    // The save diffs sanitizedForm and the conflict retry diffs the form through the same filter.
+    assert.match(settingsTsx, /diffSettings\(sanitizedForm, loadedSnapshotRef\.current\)/)
+    assert.match(settingsTsx, /diffSettings\(withoutServerOwnedSettings\(form\), loadedSnapshotRef\.current\)/)
   })
 
   if (failures.length) throw new Error(`${failures.length} check(s) failed`)
