@@ -56,7 +56,7 @@ import InstallPromptBand from '../shared/InstallPromptBand.tsx'
 import InstallAppButton from '../install/InstallAppButton.tsx'
 import { installBeforeInstallPromptCapture, installStandaloneExternalLinkGuard } from '../../utils/standaloneNavigation.ts'
 import { normalizePortalLanguage, readPublicStorefrontLanguage, storePortalLanguage } from './portalLanguageOptions.ts'
-import { isAdminHostname } from '../../app/pathRouting.ts'
+import { isAdminHostname, isStorefrontSignInPath } from '../../app/pathRouting.ts'
 
 const loadCatalogProductsSection = () => import('./CatalogProductsSection')
 const CatalogProductsSection = lazyRetry(loadCatalogProductsSection, 'public-catalog-products-section')
@@ -485,7 +485,9 @@ export default function PublicCatalogPage() {
   // Account (profile / sign-in) and Wishlist each open as a slide-in drawer
   // from their own top-bar icon (user request), same overlay pattern as the
   // cart bucket drawer below.
-  const [accountOpen, setAccountOpen] = useState(false)
+  // G38 P0 (owner 27 Sep): on the shop host /login is the customer sign-in,
+  // never the staff app, so arriving there opens this drawer.
+  const [accountOpen, setAccountOpen] = useState(() => typeof window !== 'undefined' && isStorefrontSignInPath(window.location?.pathname))
   const [wishlistOpen, setWishlistOpen] = useState(false)
   // Two independent toggles, not one shared boolean: the drawer's inline
   // "contact us" shortcut and the standalone contact FAB used to both read

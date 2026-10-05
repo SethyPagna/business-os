@@ -124,12 +124,12 @@ for (const expected of ['pos', 'notes', 'promotions', 'promos', 'review', 'revie
 
 function assertAdminBlocksTranslation(source: string): void {
   const segmentPaths = adminSegments.map((segment) => `/${segment}`)
-  // The shop host still renders the staff app at the staff routes: install
-  // identity follows the host (tests/brandIcons.test.ts), rendering does not.
+  // The shop host never renders the staff app (G38 P0, owner 27 Sep), so the
+  // opt-out is pinned on the two admin hosts; the storefront check below
+  // covers the staff paths on the shop host.
   for (const [hostname, adminPaths] of [
     ['admin.leangbeauty.com', ['/', ...segmentPaths]],
     ['localhost', ['/', ...segmentPaths]],
-    ['leangbeauty.com', segmentPaths],
   ] as const) {
     for (const pathname of adminPaths) {
       const run = runBootstrap(source, hostname, pathname)
@@ -147,20 +147,24 @@ function assertAdminBlocksTranslation(source: string): void {
 assertAdminBlocksTranslation(bootstrapSource)
 
 // The storefront stays translatable: a customer may still run the browser's
-// own page translator on it.
-for (const [hostname, pathname] of [
-  ['leangbeauty.com', '/'],
-  ['leangbeauty.com', '/privacy'],
-  ['leangbeauty.com', '/terms'],
-  ['leangbeauty.com', '/leang-beauty-phnom-penh'],
-  ['leangbeauty.com', '/some-shop'],
-  ['admin.leangbeauty.com', '/some-shop'],
-] as const) {
-  const run = runBootstrap(bootstrapSource, hostname, pathname)
-  assert.equal(run.route, 'public', `${hostname}${pathname} should be the storefront`)
-  assert.equal(run.translate, null, 'the storefront must never be marked translate="no"')
-  assert.deepEqual(run.metas, [], 'the storefront must never receive the notranslate meta')
+// own page translator on it. Every staff path on the shop host is storefront.
+function assertStorefrontTranslatable(source: string): void {
+  for (const [hostname, pathname] of [
+    ['leangbeauty.com', '/'],
+    ['leangbeauty.com', '/privacy'],
+    ['leangbeauty.com', '/terms'],
+    ['leangbeauty.com', '/leang-beauty-phnom-penh'],
+    ['leangbeauty.com', '/some-shop'],
+    ['admin.leangbeauty.com', '/some-shop'],
+    ...adminSegments.map((segment) => ['leangbeauty.com', `/${segment}`] as const),
+  ] as const) {
+    const run = runBootstrap(source, hostname, pathname)
+    assert.equal(run.route, 'public', `${hostname}${pathname} should be the storefront`)
+    assert.equal(run.translate, null, 'the storefront must never be marked translate="no"')
+    assert.deepEqual(run.metas, [], 'the storefront must never receive the notranslate meta')
+  }
 }
+assertStorefrontTranslatable(bootstrapSource)
 
 // Negative control: drop one admin segment from the bootstrap's table and the
 // parity assertion must fail -- this is the exact drift that shipped.
@@ -186,13 +190,23 @@ expectControlFails(
 )
 
 // Negative control: key the opt-out on the host, as the install identity is,
-// and the staff app rendered on the shop host must lose it.
+// and the storefront rendered on an admin host must wrongly receive it.
 const bootstrapOptOutByHost = bootstrapSource.replace('if (!publicRoute) {', 'if (adminHostname) {')
 assert.notEqual(bootstrapOptOutByHost, bootstrapSource, 'the negative control must actually re-key the opt-out')
-assert.equal(runBootstrap(bootstrapOptOutByHost, 'leangbeauty.com', '/pos').route, 'admin', 'the control bootstrap must still execute')
+assert.equal(runBootstrap(bootstrapOptOutByHost, 'admin.leangbeauty.com', '/some-shop').route, 'public', 'the control bootstrap must still execute')
 expectControlFails(
-  'negative control: an opt-out keyed on the host still passed the admin assertion',
-  () => assertAdminBlocksTranslation(bootstrapOptOutByHost),
+  'negative control: an opt-out keyed on the host still passed the storefront assertion',
+  () => assertStorefrontTranslatable(bootstrapOptOutByHost),
+)
+
+// Negative control: the pre-G38 rule (staff paths on the shop host render
+// the staff app) must fail the storefront assertion.
+const bootstrapHostBlind = bootstrapSource.replace('var publicRoute = !adminHostname\n          ? documentRoute\n          : pathname', 'var publicRoute = pathname === \'/\' ? !adminHostname : pathname')
+assert.notEqual(bootstrapHostBlind, bootstrapSource, 'the host-blind control must actually change the rule')
+assert.equal(runBootstrap(bootstrapHostBlind, 'leangbeauty.com', '/pos').route, 'admin', 'the host-blind control bootstrap must still execute')
+expectControlFails(
+  'negative control: a host-blind bootstrap still passed the storefront assertion',
+  () => assertStorefrontTranslatable(bootstrapHostBlind),
 )
 
 // --- B. a committed close is durable BEFORE React renders it --------------
