@@ -474,7 +474,12 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
         // Every 409 refusal names a machine code, so the client can restate it
         // in the operator's language.
         const refusalCode = status === 409 ? replayRefusalCode(error) : null
-        return c.json({ success: false, error: (error as Error)?.message || `Failed to ${direction} this action`, ...(refusalCode ? { code: refusalCode } : {}), ...(saleCustomerReplay && isLoyaltyAssignmentError(error) ? { code: LOYALTY_REASSIGNMENT_CODE } : {}) }, status)
+        // RET-D: a stock applier that named the record it collided with
+        // (lib/stockRefusalBlocker.ts) hands { reason, blocker, destination }
+        // through, so the refusal can say WHY and link WHERE.
+        const blocking = status === 409 ? (error as { refusal?: unknown })?.refusal : null
+        const blockingFields = blocking && typeof blocking === 'object' && !Array.isArray(blocking) ? blocking as Record<string, unknown> : {}
+        return c.json({ success: false, error: (error as Error)?.message || `Failed to ${direction} this action`, ...blockingFields, ...(refusalCode ? { code: refusalCode } : {}), ...(saleCustomerReplay && isLoyaltyAssignmentError(error) ? { code: LOYALTY_REASSIGNMENT_CODE } : {}) }, status)
       }
     }
 

@@ -19,6 +19,7 @@ import { actorSnapshot } from './actorSnapshot'
 import { STOCK_REASON_MAX_LENGTH, stockReasonTooLong } from './stockReason'
 import { multiplyMoney4, roundMoney4, sumMoney4 } from './moneyPrecision'
 import { catalogCostRecomputeIfChangedStatement, catalogCostRecomputeStatement } from './catalogCostRecompute'
+import { findLaterChangeBlocker } from './stockRefusalBlocker'
 
 export const STOCK_SESSION_KIND = 'stock.session'
 export const STOCK_SESSION_MAX_LINES = 25
@@ -131,6 +132,9 @@ export class StockSessionError extends Error {
     super(message)
     this.name = 'StockSessionError'
   }
+
+  // RET-D: the blocking record a replay refusal names (routes/actionHistory.ts reads it).
+  get refusal(): unknown { return this.details?.refusal ?? null }
 }
 
 // Action history must use the same permission union as the authoritative
@@ -1311,7 +1315,20 @@ export async function replayStockSession(env: Env, user: SessionUser, direction:
   try { await db.batch(statements) } catch (error) {
     const saved = await db.prepare('SELECT o.generation,h.status FROM stock_session_operations o JOIN action_history h ON h.id=o.history_id WHERE o.id=@id').get<Row>({ id: op.id })
     if (saved?.generation === generation + 1 && saved.status === targetStatus) return
-    if (/constraint/i.test(String(error))) fail('Stock, metadata, references, or revision changed. Nothing was reversed; refresh history.')
+    if (/constraint/i.test(String(error))) {
+      // RET-D: name the newest stock change on one of the session's product +
+      // branch pairs since the session's own rows (its receipts and every
+      // undo/redo generation, all stamped with its rowid). A metadata-only
+      // change has no movement; the sentence then stands on its own.
+      const own = await db.prepare(`SELECT
+          MAX(COALESCE((SELECT MAX(id) FROM inventory_movements WHERE reference_id = o.rowid AND movement_type IN ('add', 'remove')
+              AND reason LIKE 'Stock session ' || o.id || ' %'), 0),
+            COALESCE((SELECT MAX(movement_id) FROM stock_session_members WHERE operation_id = o.id), 0)) AS last_id
+        FROM stock_session_operations o WHERE o.id = @id`).get<{ last_id: number }>({ id: op.id }).catch(() => null)
+      const pairs = [...new Map(members.map((m) => [`${m.product_id}:${m.branch_id}`, { productId: Number(m.product_id), branchId: Number(m.branch_id) }])).values()]
+      const refusal = own ? await findLaterChangeBlocker(db, { pairs, afterMovementId: Number(own.last_id) || 0 }) : null
+      fail('Stock, metadata, references, or revision changed. Nothing was reversed; refresh history.', 409, 'stock_session_rejected', refusal ? { refusal } : undefined)
+    }
     throw error
   }
 }

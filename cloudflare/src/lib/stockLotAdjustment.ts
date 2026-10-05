@@ -65,6 +65,7 @@ import type { StockConditionTag } from './stockCondition'
 import { STOCK_REASON_MAX_LENGTH, stockReasonTooLong } from './stockReason'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from './cache'
+import { findLaterChangeBlocker, type StockRefusalDetails } from './stockRefusalBlocker'
 
 export const STOCK_LOT_SET_KIND = 'stock.quantity_set'
 export const STOCK_SET_REFERENCE_PREFIX = 'stock-set:'
@@ -417,9 +418,12 @@ export async function notifyStockLotSet(env: Env): Promise<void> {
 
 export class StockLotSetReplayError extends Error {
   readonly statusCode: number
-  constructor(message: string, statusCode = 409) {
+  // RET-D: the blocking record, passed through by the History route.
+  readonly refusal: StockRefusalDetails | null
+  constructor(message: string, statusCode = 409, refusal: StockRefusalDetails | null = null) {
     super(message)
     this.statusCode = statusCode
+    this.refusal = refusal
   }
 }
 
@@ -507,6 +511,16 @@ export async function replayStockLotSet(
     const current = await db.prepare('SELECT generation,state FROM stock_lot_adjustment_operations WHERE id=@operation').get<OperationRow>({ operation: row.id })
     if (current?.generation === next && current.state === target) return
     if (isMaintenanceError(error)) throw new StockLotSetReplayError('Maintenance is in progress. Nothing was changed.', 503)
-    throw new StockLotSetReplayError('Stock changed after this correction (a sale, transfer, count or tagged-row action). Nothing was changed.')
+    // RET-D: name the change this exact-snapshot replay collided with -- the
+    // newest movement of the product at the branch after this correction's own
+    // rows (its stock-set:<operation>:<generation> rows and their Reverts).
+    const prefix = `${STOCK_SET_REFERENCE_PREFIX}${row.id}:`
+    const own = await db.prepare(`SELECT MAX(id) AS id FROM inventory_movements WHERE (reference_id >= @lo AND reference_id < @hi)
+        OR reference_id IN (SELECT 'revert:' || CAST(id AS TEXT) FROM inventory_movements WHERE reference_id >= @lo AND reference_id < @hi)`)
+      .get<{ id: number | null }>({ lo: prefix, hi: `${prefix.slice(0, -1)};` }).catch(() => null)
+    const refusal = Number(own?.id) > 0
+      ? await findLaterChangeBlocker(db, { pairs: [{ productId: before.productId, branchId: before.branchId }], afterMovementId: Number(own?.id) })
+      : null
+    throw new StockLotSetReplayError('Stock changed after this correction (a sale, transfer, count or tagged-row action). Nothing was changed.', 409, refusal)
   }
 }

@@ -28,6 +28,7 @@ import { multiplyMoney4 } from './moneyPrecision'
 import { MOVEMENT_RETURN_REFERENCE_TYPES, movementReferenceKindSql } from './movementReference'
 import { STOCK_RECEIPT_MOVEMENT_TYPES, isStockInEditReference, stockInEditRange } from './stockInSessionsQuery'
 import { STOCK_CONDITION_TAGS, isDamagedLotReference, taggedReasonText } from './stockCondition'
+import { findConsumingBlocker, type StockRefusalDetails } from './stockRefusalBlocker'
 
 const OUT_TYPES = new Set<string>(LEDGER_OUT_TYPES)
 const RECEIPT_TYPES = new Set<string>(STOCK_RECEIPT_MOVEMENT_TYPES)
@@ -78,7 +79,7 @@ export type RevertRefusalParams = Record<string, string | number>
 
 export type RevertResult =
   | { ok: true; revertType: 'add' | 'remove'; quantity: number; usedBatchId: number | null; movementId: number }
-  | { ok: false; status: 400 | 409; error: string; code: RevertRefusalCode; params?: RevertRefusalParams }
+  | { ok: false; status: 400 | 409; error: string; code: RevertRefusalCode; params?: RevertRefusalParams; refusal?: StockRefusalDetails }
 
 function refuse(status: 400 | 409, code: RevertRefusalCode, error: string, params?: RevertRefusalParams): RevertResult {
   return params ? { ok: false, status, code, error, params } : { ok: false, status, code, error }
@@ -425,7 +426,7 @@ export async function applyMovementRevert(db: D1Compat, m: RevertMovementRow, ac
   if (revertType === 'remove') {
     const current = await branchQty(db, productId, branchId)
     if (magnitude > current) {
-      return refuse(400, 'revert_insufficient_branch_stock', `Cannot revert: only ${current} in stock at ${m.branch_name || 'this branch'}, ${magnitude} needed.`, { available: current, needed: magnitude, branch: m.branch_name || '' })
+      return withBlocker(db, refuse(400, 'revert_insufficient_branch_stock', `Cannot revert: only ${current} in stock at ${m.branch_name || 'this branch'}, ${magnitude} needed.`, { available: current, needed: magnitude, branch: m.branch_name || '' }), { productId, branchId, batchId: null, afterMovementId: Number(m.id) })
     }
     if (batchId != null) {
       // Strict (unclamped) lot + branch decrement in the same batch as the
@@ -439,7 +440,7 @@ export async function applyMovementRevert(db: D1Compat, m: RevertMovementRow, ac
       `).get<{ available: number }>({ batchId, productId, branchId })
       if (!lot) return refuse(400, 'revert_lot_moved', 'Selected received date does not belong to this product')
       const available = Number(lot.available) || 0
-      if (magnitude > available) return lotShortRefusal(available, magnitude)
+      if (magnitude > available) return withBlocker(db, lotShortRefusal(available, magnitude), { productId, branchId, batchId, afterMovementId: Number(m.id) })
       statements.push(...planRemoveStockFromBatch({ batchId, productId, branchId, quantity: magnitude }).statements)
       usedBatchId = batchId
       // Un-purchase: the lot loses this receipt's units and money; supplier
@@ -458,7 +459,7 @@ export async function applyMovementRevert(db: D1Compat, m: RevertMovementRow, ac
         const lot = await db.prepare('SELECT COALESCE(quantity, 0) AS available FROM branch_batch_stock WHERE batch_id = @batchId AND branch_id = @branchId')
           .get<{ available: number }>({ batchId: share.batchId, branchId })
         const available = Number(lot?.available) || 0
-        if (share.quantity > available) return lotShortRefusal(available, share.quantity)
+        if (share.quantity > available) return withBlocker(db, lotShortRefusal(available, share.quantity), { productId, branchId, batchId: share.batchId, afterMovementId: Number(m.id) })
         statements.push(decrementBatchStockStrictStatement(share.batchId, branchId, share.quantity))
       }
       const fromLots = shares.reduce((sum, share) => sum + share.quantity, 0)
@@ -603,6 +604,15 @@ const ALREADY_REVERTED_GUARD = `INSERT INTO stock_session_guards (guard_value)
     OR NOT EXISTS (SELECT 1 FROM inventory_movements WHERE id = @movementId) THEN 0 ELSE 1 END`
 
 const ALREADY_REVERTED: RevertResult = refuse(409, 'already_reverted', 'This movement has already been reverted.')
+
+// RET-D (owner, 5 Oct 2026): a short-stock refusal names the movement that
+// took the units since this one -- WHY and WHERE (lib/stockRefusalBlocker.ts).
+// Read only after the refusal is decided, never on the success path.
+async function withBlocker(db: D1Compat, result: RevertResult, input: Parameters<typeof findConsumingBlocker>[1]): Promise<RevertResult> {
+  if (result.ok) return result
+  const refusal = await findConsumingBlocker(db, input)
+  return refusal ? { ...result, refusal } : result
+}
 
 function lotShortRefusal(available: number, needed: number): RevertResult {
   return refuse(400, 'revert_insufficient_lot_stock', `Cannot revert: only ${available} available under this received date at this branch, ${needed} needed.`, { available, needed })
