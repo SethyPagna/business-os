@@ -1203,7 +1203,7 @@ async function loadPortalAiCatalog(env: Env, showOutOfStockProducts: boolean) {
            discount_enabled, discount_type, discount_percent,
            discount_amount_usd, discount_amount_khr,
            discount_starts_at, discount_ends_at, image_path
-    FROM products
+    FROM products p
     WHERE ${visibleFilter}
     ORDER BY COALESCE(created_at, updated_at) DESC, id DESC
     LIMIT 500
