@@ -176,9 +176,24 @@ async function readIntent(db: D1Compat, current: SessionUser, organizationId: nu
   const row = await readBranchCutoverJournal(db, proof(stored)); const intent = JSON.parse(row.intent_json) as ParentIntent
   if (intent.parentVersion !== 2 || intent.action !== 'retire' || intent.sourceBranchId !== row.source_branch_id || intent.targetBranchId !== row.target_branch_id
     || Object.keys(intent).sort().join(',') !== 'action,parentVersion,registryDigest,retiredName,schemaDigest,sourceBranchId,successorName,targetBranchId'
-    || !validName(intent.retiredName) || !validName(intent.successorName)
-    || intent.registryDigest !== await captureRegistryDigest()) throw new BranchCutoverCapabilityError('parent_capture_contract_required')
+    || !validName(intent.retiredName) || !validName(intent.successorName)) throw new BranchCutoverCapabilityError('parent_capture_contract_required')
+  requireSameContract('registry', intent.registryDigest, await captureRegistryDigest())
   return { row, intent }
+}
+/**
+ * Code freeze (verifier E7). The capture registry digest (every captured table, predicate, history rule and page
+ * cap) and the schema digest are sealed into the intent at begin. A run never resumes under a different contract:
+ * it refuses with this explicit capability instead of a generic conflict. Nothing is written by the refusal, the
+ * maintenance fence stays held, and the same operation resumes as soon as the deployed build (or the schema) is
+ * back to the digests recorded at begin. Operator procedure: docs in the LB report, section E7.
+ */
+export const BRANCH_CUTOVER_CONTRACT_CHANGED = 'contract_changed_since_begin'
+function requireSameContract(kind: 'registry' | 'schema', begun: string, deployed: string): void {
+  if (begun === deployed) return
+  throw new BranchCutoverCapabilityError(`${BRANCH_CUTOVER_CONTRACT_CHANGED}:${kind}:${String(begun).slice(0, 16)}:${String(deployed).slice(0, 16)}`,
+    kind === 'registry'
+      ? `The deployed cutover code is not the code this run began with (capture registry ${begun} at begin, ${deployed} now). Nothing was changed. Redeploy the build recorded at begin, or a build whose registry digest is identical, then continue this same operation.`
+      : `The database schema changed after this run began (schema ${begun} at begin, ${deployed} now). Nothing was changed. Undo the schema change (or redeploy the build recorded at begin) so the schema digest matches again, then continue this same operation.`)
 }
 async function commit(db: D1Compat, row: BranchCutoverJournalRow, before: CutoverStatement[], perform: (composed: D1Compat) => Promise<BranchCutoverJournalRow>,
   accept: (saved: BranchCutoverJournalRow) => boolean, next: (saved: BranchCutoverJournalRow) => BranchCutoverNext): Promise<Step> {
@@ -285,7 +300,7 @@ function manifestOf(row: BranchCutoverJournalRow): Record<string, any> {
 }
 
 async function captureStep(db: D1Compat, current: SessionUser, row: BranchCutoverJournalRow, intent: ParentIntent, pageSize: number): Promise<Step> {
-  const schema = await readCutoverCaptureSchema(db); requireSchema(schema); requireParent(schema.digest === intent.schemaDigest)
+  const schema = await readCutoverCaptureSchema(db); requireSameContract('schema', intent.schemaDigest, schema.digest); requireSchema(schema)
   const state = await branches(db, intent); requireParent(JSON.stringify(state.source) === row.source_preimage_json && JSON.stringify(state.target) === row.target_preimage_json)
   const stage = row.phase === 'capturing' ? 'capture' : 'snapshot'
   const cursor = parseCaptureCursor(row[`${stage}_cursor_json`]); const priorDigest = row[`${stage}_digest`]
@@ -659,7 +674,7 @@ async function verifyStep(db: D1Compat, current: SessionUser, row: BranchCutover
 
 async function finalizeStep(db: D1Compat, current: SessionUser, row: BranchCutoverJournalRow, intent: ParentIntent): Promise<Step> {
   const manifest = manifestOf(row)
-  const schema = await readCutoverCaptureSchema(db); requireSchema(schema); requireParent(schema.digest === intent.schemaDigest)
+  const schema = await readCutoverCaptureSchema(db); requireSameContract('schema', intent.schemaDigest, schema.digest); requireSchema(schema)
   const state = await branches(db, intent); requireParent(JSON.stringify(state.source) === row.source_preimage_json && JSON.stringify(state.target) === row.target_preimage_json)
   const verify = parseVerify(row.verification_cursor_json); requireParent(verify.stage === 'done')
   const ids = { source: intent.sourceBranchId, target: intent.targetBranchId }

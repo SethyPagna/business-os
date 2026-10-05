@@ -12,7 +12,7 @@ export type CaptureCursor = {
 }
 export class BranchCutoverCapabilityError extends Error {
   readonly code = 'branch_cutover_parent_capability'
-  constructor(readonly capability: string) { super(capability) }
+  constructor(readonly capability: string, message?: string) { super(message ?? capability) }
 }
 export const BRANCH_SCALAR_REFERENCES = [
   ['branch_batch_stock', 'branch_id'], ['branch_cutovers', 'source_branch_id'], ['branch_cutovers', 'target_branch_id'],

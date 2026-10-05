@@ -45,6 +45,8 @@ const CONTROLS = {
   ['lib/branchCutoverHistory.ts', [['  return [\n    // Every row is still exactly the open row the page read.\n    assert(', '  return [\n    assert(`1=1`, {}) || assert(']]]],
   'no-close': [['lib/branchCutoverHistory.ts', [['  if (!input.closes.length) return []', '  return []']]]],
   'no-rule': [['lib/branchCutoverHistory.ts', [["  'sale.add_items': 'close_if_source',", "  'sale.add_items': 'leave',"]]]],
+  // a mid-run redeploy that changes a capture registry input (verifier P7), used by the E7 check, not a RED control
+  'page-cap': [['lib/branchCutoverCapture.ts', [['export const CAPTURE_PAGE_CAP = 256', 'export const CAPTURE_PAGE_CAP = 128']]]],
 }
 function modules(control) {
   const cache = new Map()
@@ -191,7 +193,7 @@ function world({ control, generatedProducts = 28, duplicate = false } = {}) {
     return result
   } })
   const w = { raw, stats, history, products, lots, get m() { return m }, db: makeDb() }
-  w.reload = () => { m = modules(control); w.db = makeDb() }
+  w.reload = (next = control) => { m = modules(next); w.db = makeDb() }
   return w
 }
 
@@ -481,6 +483,43 @@ async function main() {
     w.raw.exec(`INSERT INTO products(id,name,sku,is_active,stock_quantity,cost_price_usd) VALUES(60,'binary exact','SKU60',1,0.75,1);
       INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(60,2,0.25),(60,1,0.5);`)
     assert.deepEqual((await w.m.parent.inspectBranchCutover(w.db, ACTOR, 1, IDS, PARENT_BUDGET)).capabilities, [])
+    w.raw.close()
+  })
+  await check('E7 a redeploy or migration that changes the begin contract refuses explicitly, writes nothing, and the begin build resumes', async () => {
+    const w = world({ generatedProducts: 4 })
+    const base = snapshot(w.raw)
+    const turn = async () => {
+      const row = status(w)
+      if (labelOf(row) === 'child') await w.m.child.executePlannedBranchCutoverChild(w.db, ACTOR, ownership(row), { sequence: row.next_sequence, childJson: row.planned_child_json }, CHILD_BUDGET, 1)
+      else await w.m.parent.continueBranchCutover(w.db, ACTOR, 1, { operationId: row.operation_id, expectedRevision: row.revision }, PARENT_BUDGET)
+      invariants(w.raw, base, 'E7 ' + labelOf(status(w)))
+      return status(w)
+    }
+    const plan = await w.m.parent.inspectBranchCutover(w.db, ACTOR, 1, IDS, PARENT_BUDGET)
+    await w.m.parent.beginBranchCutover(w.db, ACTOR, 1, { ...IDS, ...NAMES, requestId: 'cutover_night_e7', controlIncarnation: INCARNATION,
+      expectedSourceJson: plan.sourcePreimageJson, expectedTargetJson: plan.targetPreimageJson, expectedSchemaDigest: plan.schemaDigest }, PARENT_BUDGET)
+    let row = status(w)
+    while (!(row.phase === 'moving' && row.committed_children >= 3 && !row.planned_child_json)) row = await turn()
+    const frozen = () => JSON.stringify([w.raw.prepare('SELECT * FROM branch_cutovers ORDER BY operation_id').all(), w.raw.prepare('SELECT * FROM branch_stock ORDER BY rowid').all(),
+      w.raw.prepare("SELECT value FROM system_flags WHERE key='maintenance'").get()])
+    // P7: CAPTURE_PAGE_CAP 256 -> 128 redeployed mid-run
+    const held = frozen()
+    w.reload('page-cap')
+    await assert.rejects(turn(), error => error.capability.startsWith('contract_changed_since_begin:registry:')
+      && /not the code this run began with/.test(error.message) && /Nothing was changed/.test(error.message) && error.capability !== 'parent_capture_contract_required')
+    assert.equal(frozen(), held, 'the refusal writes nothing and keeps the fence')
+    // redeploying the begin build resumes the same operation
+    w.reload()
+    while (row.phase !== 'ready') row = await turn()
+    // a migration applied before finalize: explicit schema refusal; reverting it lets finalize complete
+    w.raw.exec('ALTER TABLE fees ADD COLUMN cutover_probe TEXT')
+    const ready = frozen()
+    await assert.rejects(turn(), error => error.capability.startsWith('contract_changed_since_begin:schema:') && /schema changed after this run began/.test(error.message))
+    assert.equal(frozen(), ready)
+    w.raw.exec('ALTER TABLE fees DROP COLUMN cutover_probe')
+    row = await turn()
+    assert.equal(row.phase, 'completed')
+    for (const [p, q] of base.product) assert.ok(near(w.raw.prepare('SELECT coalesce(sum(quantity),0) n FROM branch_stock WHERE product_id=? AND branch_id=1').get(p).n, q), 'LC Store product ' + p)
     w.raw.close()
   })
   // ---- discriminating controls: each plausible wrong implementation must fail this test
