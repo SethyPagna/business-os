@@ -170,4 +170,8 @@ SELECT
     'user_sessions', (SELECT COUNT(*) FROM user_sessions),
     'users', (SELECT COUNT(*) FROM users),
     'verification_codes', (SELECT COUNT(*) FROM verification_codes)
-  ) AS rows_9;
+  ) AS rows_9,
+  json_object(
+    'portal_member_link_events', (SELECT COUNT(*) FROM portal_member_link_events),
+    'portal_member_link_requests', (SELECT COUNT(*) FROM portal_member_link_requests)
+  ) AS rows_10;
