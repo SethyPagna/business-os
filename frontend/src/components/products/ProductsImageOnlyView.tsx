@@ -17,7 +17,6 @@ import ProductNameRail from '../shared/ProductNameRail'
 // fields this role can't see or touch.
 
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useDebouncedValue } from '../../utils/useDebouncedValue.ts'
 import Upload from 'lucide-react/dist/esm/icons/upload.js'
 import Camera from 'lucide-react/dist/esm/icons/camera.js'
 import FolderOpen from 'lucide-react/dist/esm/icons/folder-open.js'
@@ -178,7 +177,9 @@ export default function ProductsImageOnlyView() {
   const [total, setTotal] = useState(0)
   const [search, setSearch] = useState('')
   // Same 180 ms the full Products editor waits before searching; every
-  // keystroke used to send its own request (G39 5.1).
+  // keystroke used to send its own request (G39 5.1). G37 made the same fix
+  // independently: one request per settled query, and the shared
+  // products:search abort group drops a superseded one in flight.
   const debouncedSearch = useDebouncedValue(search, 180)
   const [page, setPage] = useState(1)
   // Back to page 1 in the same render the new term arrives, so the narrowed
@@ -307,9 +308,6 @@ export default function ProductsImageOnlyView() {
     return sections
   }, [showCategory, showBrand, filterOptions, categoryFilter, brandFilter, t])
 
-  // G37: one request per settled query (was one per keystroke); the shared
-  // products:search abort group drops a superseded one in flight.
-  const debouncedSearch = useDebouncedValue(search, 250)
   const load = useCallback(async () => {
     const requestId = requestIdRef.current + 1
     requestIdRef.current = requestId
