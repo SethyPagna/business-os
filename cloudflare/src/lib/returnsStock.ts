@@ -180,7 +180,7 @@ export class ReturnLotRequiredError extends Error {
 // when they sit in different branches (the operator must name the line).
 export type ReturnSaleLine = { id: number; product_id: number | null; branch_id: number | null }
 export type ReturnLinePinRefusal = {
-  code: 'return_line_not_on_sale' | 'return_line_product_mismatch' | 'return_sale_item_required'
+  code: 'return_line_not_on_sale' | 'return_line_product_mismatch' | 'return_sale_item_required' | 'return_refund_sale_line_required'
   error: string
 }
 export function pinReturnLineToSale<T extends { sale_item_id?: number | null; product_id?: number | null; branch_id?: number | null }>(
@@ -198,6 +198,8 @@ export function pinReturnLineToSale<T extends { sale_item_id?: number | null; pr
     }
     return { ok: true, item: { ...item, sale_item_id: Number(line.id), product_id: line.product_id, branch_id: line.branch_id ?? saleBranchId } }
   }
+  // A line naming neither keeps the refund-price contract's own code.
+  if (!productId) return { ok: false, code: 'return_refund_sale_line_required', error: 'Each return line needs a sale item or a product.' }
   const candidates = lines.filter((row) => productId && Number(row.product_id) === productId)
   if (!candidates.length) return { ok: false, code: 'return_line_not_on_sale', error: 'This item is not on the sale being returned.' }
   const branches = new Set(candidates.map((row) => row.branch_id ?? saleBranchId))
