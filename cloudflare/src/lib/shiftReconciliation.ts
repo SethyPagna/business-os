@@ -907,7 +907,8 @@ export async function loadShiftCloseDrift(
   if (!components.length && !drifted.length) return null
   const named = drifted.slice(0, SHIFT_CLOSE_DRIFT_SALE_LIMIT)
   if (named.length) {
-    // sql-bound-params: bounded by SHIFT_CLOSE_DRIFT_SALE_LIMIT (20).
+    // sql-bound-params: bounded by construction -- `named` is
+    // drifted.slice(0, SHIFT_CLOSE_DRIFT_SALE_LIMIT), at most 20 slots.
     const params = Object.fromEntries(named.map((entry, index) => [`s${index}`, entry.sale_id]))
     const labels = await getDb(env).prepare(`SELECT id, receipt_number, created_at, sale_status FROM sales
       WHERE id IN (${named.map((_entry, index) => `@s${index}`).join(',')})`)

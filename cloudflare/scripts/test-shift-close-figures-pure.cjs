@@ -160,6 +160,23 @@ function load(rel, sourceText = null, cacheKey = rel) {
   return mod.exports
 }
 
+// D1 refuses a statement with more than 100 bound parameters, which
+// better-sqlite3 does not (test-d1-bound-params-repro.cjs). The close batch
+// re-evaluates the whole input digest, so enforce the limit here on every
+// statement these routes bind -- the close, its guard, the figures and the
+// drift reads -- and keep the largest seen for the check below.
+const D1_MAX_BOUND_PARAMS = 100
+const bound = { max: 0, text: '', guard: 0 }
+function d1BoundLimit(text, params) {
+  // Conservative: lib/db.ts numbers a reused name once (?5 ... ?5), but count
+  // every placeholder OCCURRENCE too and take the larger, so the budget holds
+  // even if the binding ever goes back to one slot per occurrence.
+  const slots = Math.max(params.length, (text.match(/\?/g) || []).length)
+  if (slots > D1_MAX_BOUND_PARAMS) throw new Error(`D1_ERROR: too many SQL variables (${slots}): ${text.slice(0, 120)}`)
+  if (slots > bound.max) Object.assign(bound, { max: slots, text })
+  if (text.includes('shift_close_inputs_changed')) bound.guard = Math.max(bound.guard, slots)
+}
+
 function fixture() {
   const fx = { batches: 0, beforeBatch: null }
   const sql = new Database(':memory:')
@@ -171,6 +188,7 @@ function fixture() {
   const env = { DB: {
     prepare(text) {
       return { bind(...params) {
+        d1BoundLimit(text, params)
         return {
           text, params,
           async first() { return sqliteD1Call(sql.prepare(text), 'get', params) || null },
@@ -521,5 +539,11 @@ async function gapChecks() {
   await migrationChecks()
   await routeChecks()
   await gapChecks()
+  await check('D1 bound-parameter limit: every statement above ran under 100, the close-inputs guard included', () => {
+    assert.throws(() => d1BoundLimit('SELECT 1', new Array(101).fill(0)), /too many SQL variables/, 'control: the shim does refuse 101')
+    assert.ok(bound.guard > 5, `the guard was measured with its digest params, not just its own five (${bound.guard})`)
+    assert.ok(bound.max <= D1_MAX_BOUND_PARAMS, `largest statement bound ${bound.max}`)
+    console.log(`    largest statement: ${bound.max} params; close-inputs guard: ${bound.guard}`)
+  })
   console.log(`OK ${passed} checks: a closed shift's figures are stored at close and later drift is shown, not absorbed (N4)`)
 })().catch((error) => { console.error(error); process.exit(1) })
