@@ -1203,7 +1203,7 @@ export default function SaleDetailModal({
     setAmendMutationError('')
     setAmendConfirm({
       request: { kind: 'delivery_fee_changed', delivery_fee_usd: next, delivery_fee_paid_by: feePayer, expected_header_quote: expectedHeader },
-      title: translateOr('amend_fee_title', 'Correct the delivery fee?', 'កែថ្លៃដឹកជញ្ជូន?'),
+      title: translateOr('amend_fee_title', 'Correct the delivery fee?', 'កែថ្លៃដឹក?'),
       // The payer is named in the summary only when it actually moves, so a
       // plain amount correction still confirms in the owner's own terms.
       summary: `${fmtUSD(currentFeeUsd)} → ${fmtUSD(next)}${payerChanged
