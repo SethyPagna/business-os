@@ -45,6 +45,7 @@ import { bootstrapPageSizeMatchesViewer, CATALOG_DEFAULT_PAGE_SIZE, normalizeCat
 import { getPortalGridClass, getPortalMobileGridClass, buildPortalPricePresentation, resolvePortalStockStatus } from './portalCatalogDisplay.ts'
 import type { PromotionRule } from '../../utils/promotionRules.ts'
 import { mergePortalCatalogProducts } from './portalProductGrouping.ts'
+import { DEFAULT_PORTAL_BROWSE_SORT, isDefaultPortalBrowse, isPortalPriceSort, portalBrowseParams, usePortalBrowse } from './portalBrowse.ts'
 import { normalizeGoogleMapsEmbed } from './portalEditorUtils.ts'
 import { resolveCatalogAssetUrl } from './catalogAssetUrls'
 import { usePortalBucket, usePortalWishlist, formatPortalBucketText, downloadPortalBucketFile } from './portalBucket.ts'
@@ -461,6 +462,12 @@ export default function PublicCatalogPage() {
   // G1b: the storefront's promo facet -- '' (off), 'promoted' (the "only
   // deals" toggle) or 'rule:<id>' (a campaign chip on the promo strip).
   const [promoFacet, setPromoFacet] = useState('')
+  // PUBLIC-FILTER-MENU: View (brand by default) + Sort, from the URL and back
+  // into it. The ref is for the bootstrap handler below, which closes over its
+  // first render and would otherwise judge the payload against stale state.
+  const { view: browseView, sort: browseSort, setView: setBrowseView, setSort: setBrowseSort } = usePortalBrowse(true)
+  const browseRef = useRef({ view: browseView, sort: browseSort })
+  browseRef.current = { view: browseView, sort: browseSort }
   const [filtersOpen, setFiltersOpen] = useState(false)
   const [loading, setLoading] = useState(true)
   const [refreshingProducts, setRefreshingProducts] = useState(false)
@@ -651,10 +658,15 @@ export default function PublicCatalogPage() {
       },
       onBootstrap: (payload) => {
         const next = normalizeBootstrapPayload(payload)
-        const mergedProducts = mergePortalCatalogProducts(next.products)
+        // The server's order is final (brand-first, or the shopper's View and
+        // Sort): re-sorting A-Z here scrambled the brand groups on every page.
+        const mergedProducts = mergePortalCatalogProducts(next.products, true)
         // This payload is only the grid's page when it was cut at the size
-        // the shopper actually browses at.
+        // the shopper actually browses at AND in the default View/Sort -- a
+        // shared link that opens on Category or Lowest price must not paint
+        // the brand-ordered page first.
         const bootstrapMatchesViewer = bootstrapPageSizeMatchesViewer(next.catalog.pageSize, viewerPageSizeRef.current)
+          && isDefaultPortalBrowse(browseRef.current.view, browseRef.current.sort)
         setConfig(next.config)
         setRealConfigInHand(true)
         setLoadFailed(false)
@@ -700,7 +712,7 @@ export default function PublicCatalogPage() {
 
   useEffect(() => {
     setProductPage(1)
-  }, [brandFilter, branchFilter, categoryFilter, deferredSearch, productInitial, promoFacet, stockFilter])
+  }, [brandFilter, branchFilter, browseSort, browseView, categoryFilter, deferredSearch, productInitial, promoFacet, stockFilter])
 
   // The shopper's 20/50/100 choice from the pager. Kept in the ref as well as
   // in state so every later bootstrap keeps deferring to it, persisted for the
@@ -712,6 +724,18 @@ export default function PublicCatalogPage() {
     writeStoredCatalogPageSize(size)
     setProductPageSize(size)
     setProductPage(1)
+  }
+
+  // A new View or Sort re-cuts the list, so page 1 goes in the SAME update as
+  // the change: the search effect then runs once, for the right page, instead of
+  // once for the old page and again after the reset effect above.
+  const changeBrowseView: typeof setBrowseView = (view) => {
+    setProductPage(1)
+    setBrowseView(view)
+  }
+  const changeBrowseSort: typeof setBrowseSort = (sort) => {
+    setProductPage(1)
+    setBrowseSort(sort)
   }
 
   useEffect(() => {
@@ -736,15 +760,17 @@ export default function PublicCatalogPage() {
       stockState: config.showStockStatus === false ? '' : stockFilter.join(','),
       promo: promoFacet,
       initial: productInitial,
+      // Empty for the default pair, so an untouched storefront asks for the
+      // same URL (and hits the same cache entry) it always did.
+      ...portalBrowseParams(browseView, browseSort),
     }
     withLoaderTimeout(() => getCatalogApi().searchPortalCatalogProducts?.(params) || Promise.reject(new Error('Portal product search API unavailable')), 'Portal product search', PUBLIC_PORTAL_PRODUCT_SEARCH_TIMEOUT_MS)
       .then((result) => {
         if (!aliveRef.current || !isTrackedRequestCurrent(productRequestRef, requestId)) return
         const data = (result || {}) as LooseRecord
-        // Search response: keep the server's relevance order (see
-        // portalProductGrouping.ts). The bootstrap merge above stays A-Z
-        // because it is a browse payload, not an answer to a query.
-        const nextItems = mergePortalCatalogProducts(data.items, Boolean(String(deferredSearch || '').trim()))
+        // Keep the server's order (see portalProductGrouping.ts): relevance
+        // while a term is typed, otherwise the View/Sort it was asked for.
+        const nextItems = mergePortalCatalogProducts(data.items, true)
         const nextInitials = normalizePortalInitialOptions(data.initials)
         const nextTotal = Number(data.total || 0)
         const responsePage = Number(data.page || productPage) || 1
@@ -788,7 +814,7 @@ export default function PublicCatalogPage() {
     return () => {
       invalidateTrackedRequest(productRequestRef)
     }
-  }, [brandFilter, branchFilter, categoryFilter, config.showCatalog, config.showStockStatus, deferredSearch, loadFailed, loading, productInitial, productPage, productPageSize, products.length, promoFacet, stockFilter])
+  }, [brandFilter, branchFilter, browseSort, browseView, categoryFilter, config.showCatalog, config.showStockStatus, deferredSearch, loadFailed, loading, productInitial, productPage, productPageSize, products.length, promoFacet, stockFilter])
 
   // Re-arm on mount, not just tear down: React 18 StrictMode (dev) runs
   // mount -> cleanup (simulated unmount) -> mount again on the SAME refs.
@@ -808,6 +834,11 @@ export default function PublicCatalogPage() {
     () => localizeDefaultConfigCopy({ ...DEFAULT_PUBLIC_CONFIG, ...config }, pageLanguage),
     [config, pageLanguage],
   )
+  // A price sort from a stale link or bookmark on a store that now hides its
+  // prices: drop back to the default rather than order by a hidden number.
+  useEffect(() => {
+    if (realConfigInHand && !displayConfig.showPrices && isPortalPriceSort(browseSort)) setBrowseSort(DEFAULT_PORTAL_BROWSE_SORT)
+  }, [realConfigInHand, displayConfig.showPrices, browseSort, setBrowseSort])
   const darkMode = theme === 'dark'
   const portalBackground = buildPortalBackground(displayConfig, darkMode)
   const previewTitle = String(displayConfig.businessName || displayConfig.title || '').trim()
@@ -1119,6 +1150,10 @@ export default function PublicCatalogPage() {
         stockFilter={stockFilter}
         promoFacet={promoFacet}
         setPromoFacet={setPromoFacet}
+        browseView={browseView}
+        setBrowseView={changeBrowseView}
+        browseSort={browseSort}
+        setBrowseSort={changeBrowseSort}
         setStockFilter={setStockFilter}
         toggleFilterValue={toggleFilterValue}
         toggleFilterValues={toggleFilterValues}

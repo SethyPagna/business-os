@@ -78,9 +78,11 @@ function combineMergedStockStatus(merged: CatalogProduct[], sourceById: Map<stri
 // `preserveInputOrder` is for a SEARCH response. The storefront search
 // hits the same ranked backend the admin pickers do, and collapsing the
 // payload used to re-sort it A-Z, so a shopper who typed a product name
-// got their answer wherever the alphabet filed it. Bootstrap/cache reads
-// are browse lists and keep A-Z. Sibling-surface parity with POS, the
-// Products page, Branches and the transfer picker, which all made the
+// got their answer wherever the alphabet filed it. The storefront now passes
+// it for EVERY response (bootstrap included): the server owns the order -- brand-first, or the shopper's View and
+// Sort -- and re-sorting A-Z by name here scattered each brand across the page.
+// The default (false) stays A-Z for any caller that really wants a browse list.
+// Sibling-surface parity with POS, the Products page, Branches and the transfer picker, which all made the
 // same mistake through this same helper.
 export function mergePortalCatalogProducts(products: unknown, preserveInputOrder = false): CatalogProduct[] {
   const source = Array.isArray(products) ? products as CatalogProduct[] : []

@@ -862,6 +862,10 @@ function manualChunks(id: string): string | undefined {
       // portalActiveFilters.ts (filter chips) is imported by
       // CatalogProductsSection (catalog-products); same reason.
       || normalized.includes('/src/components/catalog/portalActiveFilters.ts')
+      // portalBrowse.ts (View/Sort allowlists, URL state, group headers) is imported by
+      // CatalogProductsSection (catalog-products), PublicCatalogPage (catalog-public) and
+      // the admin CatalogPage (catalog), so it lives in the shared core chunk.
+      || normalized.includes('/src/components/catalog/portalBrowse.ts')
       // BrandIcons.tsx lives under components/shared/ but is only ever imported by
       // two catalog surfaces (CatalogEditorSurface -> catalog-editor,
       // PublicCatalogPage -> catalog-public). Left to the generic
@@ -908,6 +912,8 @@ function manualChunks(id: string): string | undefined {
     }
     if (
       normalized.includes('/src/components/catalog/CatalogProductsSection.tsx')
+      // The View/Sort chip row has CatalogProductsSection as its only importer.
+      || normalized.includes('/src/components/catalog/PortalBrowseRow.tsx')
       // Unpinned, Rollup files it with its first importer, the admin catalog chunk,
       // and catalog-products would statically pull catalog.
       || normalized.endsWith('/src/utils/safeLinkUrl.ts')

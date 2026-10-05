@@ -33,6 +33,7 @@ import { SectionShell } from './catalogUi'
 import CatalogPreviewSurface from './CatalogPreviewSurface'
 import PortalFooter from './legal/LegalPages.tsx'
 import { bootstrapPageSizeMatchesViewer, CATALOG_DEFAULT_PAGE_SIZE, normalizeCatalogPageSize, readStoredCatalogPageSize, writeStoredCatalogPageSize } from './catalogPagination'
+import { DEFAULT_PORTAL_BROWSE_SORT, isDefaultPortalBrowse, isPortalPriceSort, portalBrowseParams, usePortalBrowse } from './portalBrowse.ts'
 import {
   createAboutBlock,
   createPromoItem,
@@ -1221,8 +1222,16 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
   // browse payload A-Z by name, so no prefix of it is page 1 at another size.
   // Seeding it anyway showed 50 cards under a pager that read "1 / total-over-
   // 20", so the grid waits on the corrective search instead.
+  // View + Sort (PUBLIC-FILTER-MENU): the live storefront starts from the URL
+  // and writes back to it; the editor preview keeps its own, URL-free choice.
+  // The cached and bootstrap payloads are cut in the DEFAULT order, so a
+  // non-default View/Sort must wait for its own search instead of seeding them.
+  const { view: browseView, sort: browseSort, setView: setBrowseView, setSort: setBrowseSort } = usePortalBrowse(publicView)
+  const browseRef = useRef({ view: browseView, sort: browseSort })
+  browseRef.current = { view: browseView, sort: browseSort }
   const seedMatchesViewerPageSize = !cachedPortal
-    || bootstrapPageSizeMatchesViewer(cachedPortal.catalog?.pageSize, viewerPageSizeRef.current)
+    || (bootstrapPageSizeMatchesViewer(cachedPortal.catalog?.pageSize, viewerPageSizeRef.current)
+      && isDefaultPortalBrowse(browseView, browseSort))
   const [products, setProducts] = useState<CatalogProduct[]>(() => (
     seedMatchesViewerPageSize && Array.isArray(cachedPortal?.products) ? cachedPortal.products : []
   ))
@@ -1404,6 +1413,11 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     ) as PortalConfig,
     [language, portalContentI18nModule, previewConfig, shouldLocalizePortalContent]
   )
+  // A price sort left over from a link, or from before the store hid its prices:
+  // drop back to the default rather than order the grid by a hidden number.
+  useEffect(() => {
+    if (portalConfigReady && !displayConfig.showPrices && isPortalPriceSort(browseSort)) setBrowseSort(DEFAULT_PORTAL_BROWSE_SORT)
+  }, [portalConfigReady, displayConfig.showPrices, browseSort, setBrowseSort])
   const displayProducts = useMemo<CatalogProduct[]>(
     () => (
       shouldLocalizePortalContent && portalContentI18nModule
@@ -1667,6 +1681,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
       const nextProducts = Array.isArray(portalProducts) ? portalProducts : []
 
       skipNextBootstrappedProductSearchRef.current = bootstrapPageSizeMatchesViewer(catalogPage?.pageSize, viewerPageSizeRef.current)
+        && isDefaultPortalBrowse(browseRef.current.view, browseRef.current.sort)
       // The very same question decides the grid seed: this payload is only the
       // grid's page when it was cut at the size the viewer actually browses at,
       // which is exactly when the follow-up search is skipped.
@@ -1797,7 +1812,7 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
 
   useEffect(() => {
     setPortalProductPage(1)
-  }, [brandFilter, branchFilter, categoryFilter, portalProductInitial, portalSearchQuery, promoFacet, stockFilter])
+  }, [brandFilter, branchFilter, browseSort, browseView, categoryFilter, portalProductInitial, portalSearchQuery, promoFacet, stockFilter])
 
   // The viewer's 20/50/100 choice from the pager -- identical to the
   // standalone storefront's handler, including the page-1 reset and the
@@ -1808,6 +1823,17 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     writeStoredCatalogPageSize(size)
     setPortalProductPageSize(size)
     setPortalProductPage(1)
+  }
+
+  // A new View or Sort re-cuts the list: page 1 goes in the SAME update as the
+  // change, so the search effect runs once, for the right page.
+  const changeBrowseView: typeof setBrowseView = (view) => {
+    setPortalProductPage(1)
+    setBrowseView(view)
+  }
+  const changeBrowseSort: typeof setBrowseSort = (sort) => {
+    setPortalProductPage(1)
+    setBrowseSort(sort)
   }
 
   useEffect(() => {
@@ -1832,6 +1858,8 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
       stockState: previewConfig.showStockStatus === false ? '' : stockFilter.join(','),
       promo: promoFacet,
       initial: portalProductInitial,
+      // Empty for the default pair: an untouched page asks for the URL it always did.
+      ...portalBrowseParams(browseView, browseSort),
     }
 
     withLoaderTimeout(
@@ -1899,6 +1927,8 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
   }, [
     brandFilter,
     branchFilter,
+    browseSort,
+    browseView,
     categoryFilter,
     isPageActive,
     portalProductInitial,
@@ -3140,6 +3170,10 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
     setStockFilter,
     promoFacet,
     setPromoFacet,
+    browseView,
+    setBrowseView: changeBrowseView,
+    browseSort,
+    setBrowseSort: changeBrowseSort,
     toggleFilterValue,
     toggleFilterValues,
     previewConfig: displayConfig,

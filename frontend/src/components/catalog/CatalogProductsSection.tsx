@@ -1,16 +1,23 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import type { Dispatch, SetStateAction } from 'react'
+import ArrowDownAZ from 'lucide-react/dist/esm/icons/arrow-down-a-z.js'
+import ArrowDownWideNarrow from 'lucide-react/dist/esm/icons/arrow-down-wide-narrow.js'
+import ArrowDownZA from 'lucide-react/dist/esm/icons/arrow-down-z-a.js'
 import ArrowRight from 'lucide-react/dist/esm/icons/arrow-right.js'
+import ArrowUpNarrowWide from 'lucide-react/dist/esm/icons/arrow-up-narrow-wide.js'
 import BadgeCheck from 'lucide-react/dist/esm/icons/badge-check.js'
 import BadgePercent from 'lucide-react/dist/esm/icons/badge-percent.js'
 import Flame from 'lucide-react/dist/esm/icons/flame.js'
 import Medal from 'lucide-react/dist/esm/icons/medal.js'
 import Plus from 'lucide-react/dist/esm/icons/plus.js'
 import Heart from 'lucide-react/dist/esm/icons/heart.js'
+import Layers from 'lucide-react/dist/esm/icons/layers.js'
+import List from 'lucide-react/dist/esm/icons/list.js'
 import Search from 'lucide-react/dist/esm/icons/search.js'
 import SlidersHorizontal from 'lucide-react/dist/esm/icons/sliders-horizontal.js'
 import ShoppingBag from 'lucide-react/dist/esm/icons/shopping-bag.js'
 import Sparkles from 'lucide-react/dist/esm/icons/sparkles.js'
+import Tags from 'lucide-react/dist/esm/icons/tags.js'
 import Trophy from 'lucide-react/dist/esm/icons/trophy.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import type { LucideIcon } from 'lucide-react'
@@ -28,6 +35,15 @@ import { buildPortalActiveFilterChips, withoutFilterValue, type PortalActiveFilt
 import { buildPortalHighlightBadges, buildPortalPricePresentation, resolvePortalStockStatus, shouldShowStockStatus } from './portalCatalogDisplay.ts'
 import { isProductPromoted, type PromotionRule } from '../../utils/promotionRules.ts'
 import { aggregateInitialOptions, getInitialKey } from '../../utils/initials.ts'
+import PortalBrowseRow, { type BrowseOption } from './PortalBrowseRow'
+import {
+  DEFAULT_PORTAL_BROWSE_SORT,
+  DEFAULT_PORTAL_BROWSE_VIEW,
+  buildPortalGroupHeaders,
+  isPortalPriceSort,
+  type PortalBrowseSort,
+  type PortalBrowseView,
+} from './portalBrowse.ts'
 import { getKhmerTextProps } from '../../utils/scriptTypography.ts'
 import { PORTAL_MERCHANT_COLOR_DEFAULTS, ensureAccessibleSurface } from './portalContrast.ts'
 
@@ -133,6 +149,14 @@ type CatalogProductsSectionProps = {
   // Optional so a surface without server-side search can omit it.
   promoFacet?: string
   setPromoFacet?: (value: string) => void
+  // View (how the grid is grouped) and Sort (the order inside each group), owned
+  // by the page because the server orders and pages by them. Both setters are
+  // optional: a caller without server-side search simply gets no View/Sort
+  // controls instead of controls that cannot do anything.
+  browseView?: PortalBrowseView
+  setBrowseView?: (view: PortalBrowseView) => void
+  browseSort?: PortalBrowseSort
+  setBrowseSort?: (sort: PortalBrowseSort) => void
   toggleFilterValue: (currentValues: string[], setter: StringListSetter, value: string) => void
   // Optional: batch-select a whole "Main - Sub" hierarchical category group
   // in one tap (see utils/categoryGrouping.ts / PortalFilterCombobox's
@@ -243,6 +267,10 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
     setStockFilter,
     promoFacet = '',
     setPromoFacet,
+    browseView = DEFAULT_PORTAL_BROWSE_VIEW,
+    setBrowseView,
+    browseSort = DEFAULT_PORTAL_BROWSE_SORT,
+    setBrowseSort,
     toggleFilterValue,
     toggleFilterValues,
     previewConfig,
@@ -351,48 +379,45 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
     [promotionItems]
   )
 
-  // Category-first section headers -- mirrors the admin Products/
-  // Inventory pages' own category-header grouping (Part 226), but computed
-  // per-page from whatever order the backend already returned rather than
-  // re-sorted client-side, since both callers of this component fetch a
-  // server-paginated, already category-sorted page (see portal.ts's
-  // PORTAL_CATALOG_DEFAULT_ORDER_SQL). Suppressed while an active search
-  // term is in play -- the backend switches to relevance ordering then, so
-  // consecutive items no longer share a category and a header would be
-  // misleading -- and while the category chip itself is configured hidden,
-  // so this never surfaces category info a merchant deliberately turned off
-  // elsewhere on the card. A category that happens to span a page boundary
-  // shows its header again at the top of the next page rather than being
-  // treated as "continuing" -- a reasonable limit of per-page grouping over
-  // a paginated feed, not attempted to solve here.
-  const showCategoryHeaders = !String(search || '').trim() && previewConfig.showProductCategory !== false
+  // Section headers follow the shopper's View (brand by default, or category;
+  // "all products" has none). They are computed per page from the order the
+  // server already returned -- it orders and pages by the view's group key --
+  // so nothing is re-sorted here. A group that spans a page boundary shows its
+  // header again at the top of the next page, a reasonable limit of grouping
+  // over a paginated feed.
+  //
+  // Suppressed while a search term is ranking by relevance (Featured sort):
+  // consecutive items then no longer share a group and a header would mislead.
+  // An explicit sort keeps the grouping even while searching, so it keeps the
+  // headers. Also suppressed while the merchant hides the very field the
+  // headers would print (brand chip off = no brand headers), so a header never
+  // surfaces info that was deliberately turned off on the card.
+  const relevanceOrdered = !!String(search || '').trim() && browseSort === 'featured'
+  const groupFieldVisible = browseView === 'category'
+    ? previewConfig.showProductCategory !== false
+    : previewConfig.showProductBrand !== false
+  const showGroupHeaders = !relevanceOrdered && (browseView === 'all' || groupFieldVisible)
   const categoryHeaderAt = useMemo(() => {
-    const headers = new Map<number, string>()
-    if (!showCategoryHeaders) return headers
-    // G1: the server puts promoted products in a block ABOVE the
-    // category-alphabetical run. That leading run gets ONE "Promotions"
-    // header; normal category headers begin after it, so a promoted item
-    // never drags its whole category header to the top with it.
+    if (!showGroupHeaders) return new Map<number, string>()
+    // G1: the server puts promoted products in a block ABOVE the grouped run,
+    // under the Featured sort only. That leading run gets ONE "Promotions"
+    // header; the group headers begin after it, so a promoted item never drags
+    // its whole group header to the top with it.
     let promotedRun = 0
     while (
-      promotedRun < pagedProducts.length
+      browseSort === 'featured'
+      && promotedRun < pagedProducts.length
       && promotionRules.length
       && isProductPromoted(pagedProducts[promotedRun], promotionRules)
     ) promotedRun++
-    if (promotedRun > 0) headers.set(0, copy('promotionsHeader', 'Promotions'))
-    // G4: BRAND headers -- the grid browses brand-first now (server
-    // ordering matches), so the section breaks follow p.brand.
-    let lastKey: string | null = null
-    pagedProducts.forEach((product, index) => {
-      if (index < promotedRun) return
-      const raw = String(product.brand || '').trim()
-      const key = raw.toLowerCase()
-      if (key === lastKey) return
-      lastKey = key
-      headers.set(index, raw || copy('noBrandHeader', 'Other Brands'))
+    return buildPortalGroupHeaders(pagedProducts, {
+      view: browseView,
+      promotedRun,
+      promotionsLabel: copy('promotionsHeader', 'Promotions'),
+      noBrandLabel: copy('noBrandHeader', 'Other Brands'),
+      noCategoryLabel: copy('noCategoryHeader', 'Other categories'),
     })
-    return headers
-  }, [pagedProducts, showCategoryHeaders, copy, promotionRules])
+  }, [pagedProducts, showGroupHeaders, browseView, browseSort, copy, promotionRules])
 
   const stockLabels: Record<string, string> = {
     in_stock: copy('inStock', 'In Stock'),
@@ -421,14 +446,36 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
     else updateInitialFilter?.(RAIL_ALL_KEY)
   }
 
+  const browseViewOptions: BrowseOption<PortalBrowseView>[] = [
+    { value: 'brand', icon: Tags, label: copy('brand', 'Brand'), tip: copy('portalViewByBrand', 'Group by brand') },
+    { value: 'category', icon: Layers, label: copy('category', 'Category'), tip: copy('portalViewByCategory', 'Group by category') },
+    { value: 'all', icon: List, label: copy('portalViewAll', 'All products'), tip: copy('portalViewAllTip', 'One list, no groups') },
+  ]
+  // A price sort is only offered while prices are shown: ordering by a number
+  // the shopper cannot see would leak it (the Worker refuses it too).
+  const browseSortOptions: BrowseOption<PortalBrowseSort>[] = [
+    { value: 'featured', icon: Sparkles, label: copy('portalSortFeatured', 'Featured'), tip: copy('portalSortFeaturedTip', 'Promotions first, then A-Z') },
+    { value: 'name_asc', icon: ArrowDownAZ, label: copy('portalSortNameAsc', 'A-Z'), tip: copy('portalSortNameAscTip', 'Name, A to Z') },
+    { value: 'name_desc', icon: ArrowDownZA, label: copy('portalSortNameDesc', 'Z-A'), tip: copy('portalSortNameDescTip', 'Name, Z to A') },
+    { value: 'price_asc', icon: ArrowUpNarrowWide, label: copy('portalSortPriceAsc', 'Low price'), tip: copy('portalSortPriceAscTip', 'Price, low to high') },
+    { value: 'price_desc', icon: ArrowDownWideNarrow, label: copy('portalSortPriceDesc', 'High price'), tip: copy('portalSortPriceDescTip', 'Price, high to low') },
+  ].filter((option) => previewConfig.showPrices === true || !isPortalPriceSort(option.value)) as BrowseOption<PortalBrowseSort>[]
+
   // Shared filter-field body, most useful first (P-public-10, owner
   // 2026-09-25): category, brand, promotions, then the admin-only branch and
-  // stock status. Rendered twice: inside the body-portalled filter layer below
+  // stock status -- with View and Sort (PUBLIC-FILTER-MENU) ahead of them all. Rendered twice: inside the body-portalled filter layer below
   // `lg`, and inside the slim collapsible panel under the search row at `lg`
   // and up. Extracted to a function rather than duplicated JSX so the two
   // call sites can never drift apart.
   const renderFilterFields = () => (
     <>
+      {setBrowseView ? (
+        <PortalBrowseRow label={copy('portalBrowseView', 'View')} options={browseViewOptions} value={browseView} defaultValue={DEFAULT_PORTAL_BROWSE_VIEW} onChange={setBrowseView} />
+      ) : null}
+      {setBrowseSort ? (
+        <PortalBrowseRow label={copy('portalBrowseSort', 'Sort')} options={browseSortOptions} value={browseSort} defaultValue={DEFAULT_PORTAL_BROWSE_SORT} onChange={setBrowseSort} />
+      ) : null}
+
       <div className="rounded-[1.1rem] bg-slate-50 p-2 ring-1 ring-slate-100 dark:bg-neutral-800 dark:ring-neutral-700">
         <div className="grid grid-cols-[5rem_minmax(0,1fr)] items-start gap-2 sm:grid-cols-[5.6rem_minmax(0,1fr)] lg:grid-cols-1 lg:gap-1">
           <div className="min-w-0 pt-1.5 text-[10px] font-bold uppercase tracking-wide text-gray-500 dark:text-neutral-400 lg:pt-0">
