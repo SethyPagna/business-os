@@ -1705,7 +1705,14 @@ app.get('/stock-ledger/:id/balance', async (c) => {
 const BULK_PRICE_FIELDS = new Set(['selling_price_usd', 'selling_price_khr', 'wholesale_price_usd', 'wholesale_price_khr', 'cost_price_usd', 'cost_price_khr'])
 app.post('/bulk-price-adjust', async (c) => {
   const user = c.get('user')
-  if (getPermissionTier(user, 'products') !== 'full') {
+  // A catalog-wide price change is a product edit (Edit product) AND a catalog-wide
+  // cascade, which the sibling POST /rename-brand and /lookups/replace gate on the
+  // Full manage_lookups action. Owner, 5 Oct 2026: the Employee default is product
+  // information edits and images only, so it must not reach this route; before this
+  // the tier alone decided it and any Full Products role could reprice everything.
+  if (getPermissionTier(user, 'products') !== 'full'
+    || getActionTier(user, 'products', 'edit') !== 'full'
+    || getActionTier(user, 'products', 'manage_lookups') !== 'full') {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
   const body = await c.req.json<{
@@ -2638,7 +2645,11 @@ app.post('/bulk-delete-jobs/:id/cancel', async (c) => {
 
 app.post('/variant', async (c) => {
   const user = c.get('user')
-  if (!hasPermission(user, 'products')) {
+  // Add variant creates a product row. The old check read the section grant alone, so a
+  // role with Products Full and "Add variant" switched off (the Employee default, owner
+  // 5 Oct 2026) could still create products here; the action tier honours the override
+  // and is identical to the section grant when no override exists.
+  if (getActionTier(user, 'products', 'variant') !== 'full') {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
   const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>

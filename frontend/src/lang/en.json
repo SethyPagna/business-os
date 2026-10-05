@@ -4803,7 +4803,7 @@
   "role_preset_admin": "Administrator",
   "role_preset_admin_desc": "Full access to every page and action, with nothing gated -- same as the existing \"Administrator (full access)\" override.",
   "role_preset_employee": "Employee",
-  "role_preset_employee_desc": "Day-to-day front-line access: POS and individual Sales and Returns actions, plus the dashboard and Website Editor. Product, inventory, and contact changes use Partial Access. Bulk changes, imports, exports, contact financial history, supplier records, and administrative areas stay unavailable.",
+  "role_preset_employee_desc": "Day-to-day front-line access: POS and individual Sales and Returns actions, plus the dashboard and Website Editor. Products: view, edit product information and upload images, with costs hidden. Inventory and contact changes use Partial Access. Bulk changes, imports, exports, contact financial history, supplier records, and administrative areas stay unavailable.",
   "role_preset_label": "Start from a preset (optional)",
   "role_preset_manager": "Manager",
   "role_preset_manager_desc": "Full day-to-day operational access -- Dashboard, Website Editor, POS, Products, Inventory, Branches, Sales, Returns, Fees, Contacts, Library, Audit Log, and the Review/Approval queue -- but not Users and roles, Backup restore/reset, or Security settings, which stay Admin-only.",

@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import { ROLE_PRESETS } from '../src/components/users/rolePresetDefaults.ts'
+import { effectivePermissions } from '../src/utils/permissions.ts'
+import { canViewAcquisitionCosts, canEditAcquisitionCosts } from '../src/utils/acquisitionCostAccess.ts'
+import { PERMISSION_ACTIONS } from '../src/utils/permissionActions.ts'
 
 const employee = ROLE_PRESETS.find((preset) => preset.key === 'employee')
 assert.ok(employee, 'Employee preset must exist')
@@ -19,6 +22,18 @@ assert.equal(employee.permissions.contacts, 'review', 'Employee contact changes 
 assert.equal(employee.permissions['contacts:bulk'], false)
 assert.equal(employee.permissions['contacts:financial_history'], false)
 assert.equal(employee.permissions.contacts_suppliers, false)
+// Owner, 5 Oct 2026: Employee on Products = view, product information edits and image upload, never costs.
+const ALLOWED_PRODUCT_ACTIONS = ['view', 'edit', 'image']
+assert.equal(employee.permissions.products, true, 'Employee products is Full tier so image upload is not blocked; every other action is switched off below')
+assert.equal(employee.permissions.product_cost_view, false, 'cost price is never visible by default')
+assert.equal(employee.permissions.product_cost_edit, false, 'cost price is never editable by default')
+const employeeUser = { role_code: 'employee', permissions: employee.permissions }
+assert.equal(canViewAcquisitionCosts(employeeUser), false)
+assert.equal(canEditAcquisitionCosts(employeeUser), false)
+const employeeAuthority = effectivePermissions(employeeUser)
+for (const action of PERMISSION_ACTIONS.products) {
+  assert.equal(employeeAuthority.can('products', action.key), ALLOWED_PRODUCT_ACTIONS.includes(action.key), 'Employee products action ' + action.key)
+}
 assert.equal(employee.permissions.all, undefined)
 assert.equal(employee.permissions.settings, undefined)
 assert.equal(employee.permissions.backup_restore, undefined)
@@ -47,7 +62,29 @@ for (const fragment of [
   "'contacts:financial_history': false",
   'contacts_suppliers: false',
 ]) assert.match(seededEmployee, new RegExp(fragment.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
-for (const unrelated of ['dashboard:', 'customer_portal:', 'products:', 'inventory:']) {
+for (const fragment of [
+  'products: true',
+  "'products:add': false",
+  "'products:delete': false",
+  "'products:bulk_delete': false",
+  "'products:variant': false",
+  "'products:import': false",
+  "'products:import_replace_all': false",
+  "'products:export': false",
+  "'products:merge_duplicates': false",
+  "'products:zero_qty_cleanup': false",
+  "'products:manage_lookups': false",
+  'product_cost_view: false',
+  'product_cost_edit: false',
+]) assert.match(seededEmployee, new RegExp(fragment.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), 'the fresh Employee seed carries ' + fragment)
+// The seed and the one-click preset must say the same thing about Products and costs.
+for (const key of Object.keys(employee.permissions).filter((name) => name === 'products' || name.startsWith('products:') || name.startsWith('product_cost_'))) {
+  const expected: string = JSON.stringify(employee.permissions[key])
+  const seeded: RegExpMatchArray | null = seededEmployee.match(new RegExp("(?:'" + key + "'|" + key + "): ([^,\\n]+),"))
+  assert.ok(seeded, 'seed carries ' + key)
+  assert.equal(seeded[1].replace(/'/g, '"'), expected, 'seed and preset agree on ' + key)
+}
+for (const unrelated of ['dashboard:', 'customer_portal:', 'inventory:']) {
   assert.doesNotMatch(seededEmployee, new RegExp(unrelated.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), `fresh runtime Employee seed must not add unrelated ${unrelated}`)
 }
 assert.match(invariants, /if \(code === 'admin'\)/, 'only Admin may be force-reset by core invariants')

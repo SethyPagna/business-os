@@ -54,6 +54,25 @@ const DEFAULT_ROLE_PERMISSIONS: Record<string, Record<string, DefaultRolePermiss
     // permissionDefinitions.ts's own 'receipt_settings' row for the rest of
     // this key's plumbing.
     receipt_settings: true,
+    // Owner, 5 Oct 2026: front-line staff edit product information and upload
+    // images, and nothing else on Products. The section is Full with every other
+    // action switched off (an override can only remove what the tier grants), so
+    // View, Edit and Image stay on. Cost is a separate pair of grants that stays
+    // off by default: cost price is never visible or editable to an Employee
+    // until an admin turns product_cost_view / product_cost_edit on.
+    products: true,
+    'products:add': false,
+    'products:delete': false,
+    'products:bulk_delete': false,
+    'products:variant': false,
+    'products:import': false,
+    'products:import_replace_all': false,
+    'products:export': false,
+    'products:merge_duplicates': false,
+    'products:zero_qty_cleanup': false,
+    'products:manage_lookups': false,
+    product_cost_view: false,
+    product_cost_edit: false,
     sales: true,
     'sales:status': true,
     'sales:customer': true,

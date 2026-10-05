@@ -41,7 +41,7 @@ export const ROLE_PRESETS: RolePreset[] = [
     labelKey: 'role_preset_employee',
     label: 'Employee',
     descriptionKey: 'role_preset_employee_desc',
-    description: 'Day-to-day front-line access: POS and individual Sales and Returns actions, plus the dashboard and customer portal. Product, inventory, and contact changes use Partial Access. Bulk changes, imports, exports, contact financial history, supplier records, and administrative areas stay unavailable.',
+    description: 'Day-to-day front-line access: POS and individual Sales and Returns actions, plus the dashboard and customer portal. Products: view, edit product information and upload images, with costs hidden. Inventory and contact changes use Partial Access. Bulk changes, imports, exports, contact financial history, supplier records, and administrative areas stay unavailable.',
     permissions: {
       dashboard: true,
       customer_portal: true,
@@ -54,7 +54,22 @@ export const ROLE_PRESETS: RolePreset[] = [
       'sales:bulk': false,
       'sales:import': false,
       'sales:export': false,
-      products: 'review',
+      // Owner, 5 Oct 2026: product information edits and image upload, no costs. Full
+      // tier with every other Products action off (keep in step with
+      // cloudflare/src/lib/coreDataInvariants.ts DEFAULT_ROLE_PERMISSIONS.employee).
+      products: true,
+      'products:add': false,
+      'products:delete': false,
+      'products:bulk_delete': false,
+      'products:variant': false,
+      'products:import': false,
+      'products:import_replace_all': false,
+      'products:export': false,
+      'products:merge_duplicates': false,
+      'products:zero_qty_cleanup': false,
+      'products:manage_lookups': false,
+      product_cost_view: false,
+      product_cost_edit: false,
       inventory: 'review',
       returns: true,
       'returns:bulk': false,

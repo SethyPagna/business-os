@@ -5197,6 +5197,8 @@ function ProductsFullEditor() {
                   UPDATEs with a true preview count; never materializes the
                   catalog's ids in the client, and has NO undo (stated in
                   the confirm). */}
+              {/* The Worker gates this route on Edit product AND the catalog-wide manage_lookups action (5 Oct 2026), so the Employee default never sees it. */}
+              {canManageLookups && can('products', 'edit') ? (
               <button
                 disabled={bulkActionBusy}
                 className="rounded-lg border border-amber-300 px-4 py-1.5 text-xs font-medium text-amber-700 hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-amber-600/50 dark:text-amber-300 dark:hover:bg-amber-900/20"
@@ -5204,6 +5206,7 @@ function ProductsFullEditor() {
               >
                 {tr('bulk_price_apply_all', 'Apply to ALL products in the system…')}
               </button>
+              ) : null}
             </div>
           </div>
         </div>
