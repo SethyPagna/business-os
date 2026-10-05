@@ -1330,6 +1330,23 @@ export default function SaleDetailModal({
   const baseCloseGuard = useCloseGuard({ dirty: settlementDirty || addLines.length > 0 || amendLineId !== null || feeEditing || actualCostEditing || deliveryAdding || driverChanging || !!statusNotes.trim() }, () => { if (!saleWriteBusy) onClose() })
   const closeGuard = { ...baseCloseGuard, requestClose: () => { if (!saleWriteBusy) baseCloseGuard.requestClose() } }
 
+  // A committed edit that keeps this detail open moves the sale's version and
+  // total. Payment that has not been opened yet starts from the new row, so
+  // Record payment does not send the version from before the edit; an opened,
+  // saving or pending payment keeps exactly what was reviewed.
+  const paymentEntryOpen = sale?.sale_status === 'awaiting_payment' && (newStatus === 'completed' || newStatus === 'awaiting_delivery')
+  const settlementVersionRef = useRef(`${detailScope}:${sale?.updated_at || ''}`)
+  useEffect(() => {
+    const version = `${detailScope}:${sale?.updated_at || ''}`
+    if (settlementVersionRef.current === version || paymentEntryOpen || statusSaving || pendingStatus) return
+    settlementVersionRef.current = version
+    const next = settlementSnapshot(sale)
+    setSettlementSession((current) => ({ ...next, configuredMethods: current.configuredMethods, exchangeRate: current.exchangeRate }))
+    setSettlementRows(next.rows)
+    settlementBaselineRef.current = next.rows
+    settlementRequestIdRef.current = createSettlementRequestId()
+  }, [detailScope, sale?.updated_at, paymentEntryOpen, statusSaving, pendingStatus])
+
   useEffect(() => {
     if (!saleId) return
     const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
