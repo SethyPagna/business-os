@@ -3,6 +3,7 @@ import fs from 'node:fs'
 import ts from 'typescript'
 import { beginSingleAction, finishSingleAction } from '../src/utils/actionGuards.ts'
 import { subtractDecimalSum } from '../src/utils/moneyPrecision.ts'
+import { refundCurrencyField } from '../src/components/returns/helpers/refundCurrency.ts'
 
 // Execute shipping callback ASTs, not reimplementations/source regex claims.
 function callback(file: string, name: string, bindings: Record<string, unknown>): (...args: any[]) => Promise<void> {
@@ -37,7 +38,7 @@ function setup(options: { restored?: boolean; storageFailure?: boolean; timeout?
     setSubmitting: (value: boolean) => events.push('busy:' + value), loadReturnsTransport: async () => transport,
     pendingV1: null, pendingLoaded: true, reviewedPendingBody: options.restored ? pending.bodyJson : null, setReviewedPendingBody: () => {}, user: { id: 7 }, isV1Sale: true, quote: { sale_id: 11 }, reviewedIntentRef: { current: 'exact' }, quoteIntent: 'exact', pendingError: '',
     replacements: [], activeItems: [{ id: 3, returnQty: 1, stock_action: 'none', branch_id: 2 }], finalReason: 'reason', itemsMissingLot: [],
-    notes: '', returnType: 'refund', foundSale: { id: 11, branch_id: 2 }, setPendingV1: (value: unknown) => events.push(value ? 'pending' : 'unpending'),
+    notes: '', returnType: 'refund', refundCurrency: 'USD', refundCurrencyField, foundSale: { id: 11, branch_id: 2 }, setPendingV1: (value: unknown) => events.push(value ? 'pending' : 'unpending'),
     withLoaderTimeout: async (fn: () => Promise<unknown>) => { const promise = fn(); if (options.timeout) { void promise.catch(() => {}); throw Error('timeout') } return promise }, RETURN_CREATE_TIMEOUT_MS: 1,
     notify: () => events.push('notify'), T: (_key: string, fallback: string) => fallback, getLoaderErrorMessage: (e: Error) => e.message,
     window: { dispatchEvent: () => events.push('invalidate') }, CustomEvent: class {},

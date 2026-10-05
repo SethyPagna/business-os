@@ -28,6 +28,7 @@ import StockConditionTagRow from '../inventory/StockConditionTagRow.tsx'
 import { DEFAULT_STOCK_CONDITION_TAG } from '../../utils/stockCondition.ts'
 import type { DamagedDisposition } from './helpers/returnOptions.ts'
 import { returnRefusalText } from './helpers/returnRefusalError.ts'
+import { REFUND_CURRENCY_CHOICES, refundCurrencyField, type RefundCurrency } from './helpers/refundCurrency.ts'
 import { normalizeReturnReasonList } from './helpers/returnReasonPresets.ts'
 import { useReturnReasonPresets } from './helpers/useReturnReasonPresets.ts'
 import { useCloseGuard } from '../../utils/useCloseGuard.ts'
@@ -320,6 +321,10 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
   const [reason,        setReason]        = useState(RETURN_REASONS[0])
   const [customReason,  setCustomReason]  = useState('')
   const [returnType,    setReturnType]    = useState<ReturnType>('restock')
+  // Owner rule 29 Sep 2026 (picker ruled in 6 Oct): the refund records the
+  // currency the cash went out in, $ by default. The shift close takes it
+  // from that drawer; the Worker converts riel to USD at the sale's rate.
+  const [refundCurrency, setRefundCurrency] = useState<RefundCurrency>('USD')
   const [notes,         setNotes]         = useState('')
   const [submitting,    setSubmitting]    = useState(false)
   const [quote, setQuote] = useState<ReturnQuoteV1 | null>(null)
@@ -827,6 +832,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
           total_refund_usd: totalRefund,
           total_refund_khr: totalRefundKhr,
           exchange_rate:    toNumber(foundSale?.exchange_rate) || 4100,
+          ...refundCurrencyField(refundCurrency),
           items: activeItems.map((it) => ({
             sale_item_id:      it.id || null,
             product_id:        it.product_id,
@@ -981,6 +987,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
         pending = await transport.prepareReturnCreateV1(user?.id, {
           reason: finalReason, return_type: returnType, notes: notes || null,
           branch_id: foundSale?.branch_id || null,
+          ...refundCurrencyField(refundCurrency),
           items: activeItems.map(it => ({ sale_item_id: Number(it.id), product_id: it.product_id, quantity: it.returnQty,
             stock_action: it.stock_action, return_to_stock: it.stock_action === 'restock', branch_id: it.branch_id || foundSale?.branch_id || null,
             ...(it.stock_action === 'damaged' ? {
@@ -1619,6 +1626,29 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
                 <div className="flex justify-between font-bold text-base text-gray-900 dark:text-white pt-2 mt-1 border-t border-gray-300 dark:border-gray-600">
                   <span>{T('total_refunded','Total Refund')}</span>
                   <span>{fmtUSD(totalRefund)}</span>
+                </div>
+                <div data-refund-currency="" className="flex items-center justify-between gap-2 pt-1 text-xs text-gray-600 dark:text-gray-300">
+                  <span>{T('return_refund_paid_in', 'Refund paid in')}</span>
+                  <span className="flex items-center gap-2">
+                    {refundCurrency === 'KHR' && totalRefundKhr > 0 ? (
+                      <span className="font-medium text-gray-900 dark:text-white">{Math.round(totalRefundKhr).toLocaleString()}៛</span>
+                    ) : null}
+                    <span role="group" aria-label={T('return_refund_paid_in', 'Refund paid in')} className="inline-flex rounded-lg bg-gray-200 p-0.5 dark:bg-gray-700">
+                      {REFUND_CURRENCY_CHOICES.map((choice) => (
+                        <button
+                          key={choice.value}
+                          type="button"
+                          onClick={() => setRefundCurrency(choice.value)}
+                          aria-pressed={refundCurrency === choice.value}
+                          title={T(choice.labelKey, choice.labelEn)}
+                          aria-label={T(choice.labelKey, choice.labelEn)}
+                          className={`min-w-[2rem] rounded-md px-2 py-0.5 font-semibold transition ${refundCurrency === choice.value ? 'bg-white text-gray-900 shadow-sm dark:bg-gray-900 dark:text-white' : 'text-gray-500 dark:text-gray-400'}`}
+                        >
+                          {choice.symbol}
+                        </button>
+                      ))}
+                    </span>
+                  </span>
                 </div>
               </div>
 
