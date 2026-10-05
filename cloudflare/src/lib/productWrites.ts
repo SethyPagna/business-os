@@ -194,6 +194,16 @@ export function clampNegativeStockQuantity(key: string, value: unknown): unknown
   return Number.isFinite(n) && n < 0 ? 0 : value
 }
 
+// RET-B F2 (5 Oct 2026): a product UPDATE never writes stock. ProductForm
+// sends the figure it loaded (read-only in edit mode) with every Save, and the
+// products.stock_quantity rollup took it verbatim: open the form at 10, sell
+// 3, save a price change, and the rollup read 10 while branch_stock held 7.
+// Stock moves only through ledgered stock actions; the rollup is derived from
+// branch_stock. Creates are unaffected (createProductWithInitialStock).
+export function omitProductUpdateStock(body: Record<string, unknown>): void {
+  delete body.stock_quantity
+}
+
 export function cleanPayload(body: Record<string, unknown>, columns: Set<string>) {
   const payload: Record<string, unknown> = {}
   for (const [key, value] of Object.entries(body || {})) {
@@ -367,6 +377,9 @@ export async function updateRow(env: Env, table: string, id: string | number, bo
   if (moneyPlan && (table !== 'products' || moneyPlan.kind !== 'update' || moneyPlan.product_id !== Number(id))) invalidMoneyPlan()
   const columns = await tableColumns(env, table)
   const payload = cleanPayload(body, columns)
+  // Every caller (PUT, its edit-fold, the review-queue apply) is a product
+  // edit; none may write the stock rollup.
+  if (table === 'products') omitProductUpdateStock(payload)
   applySearchNormalizedColumns(payload, body, columns, false)
   if (columns.has('updated_at')) payload.updated_at = nowIso()
   const keys = Object.keys(payload).filter((key) => columns.has(key))
