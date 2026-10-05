@@ -200,6 +200,7 @@ async function main() {
     const baselineBody = JSON.stringify(baseline.items.map((item) => ({ ...item, tone: 'x', kind: 'inventory_low_stock', pageId: 'inventory', anchor: `product-${item.id}` })))
     assert.ok(first.bytes < baselineBody.length / 3, `summary ${first.bytes} B vs baseline inventory alone ${baselineBody.length} B`)
     assert.ok(first.bytes < 20 * 1024, `summary stays under 20 KB (${first.bytes} B)`)
+    console.log(`  measured: inventory statement rows ${rowsOf('inventory')} (baseline ${baseline.rows}); summary body ${first.bytes} B vs baseline inventory items alone ${baselineBody.length} B`)
   })
 
   await check('the public shape is otherwise unchanged: preferences carry no cache-only fields', () => {
