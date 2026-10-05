@@ -104,7 +104,7 @@ assert.match(newReturn, /useState\(\(\) => String\(initialReceiptQuery \|\| ''\)
 // like a scan, narrows the list; the person picks. (Reworked Sep 3 2026 when
 // the receipt search became a typeahead; the old autoSearchedRef one-shot went
 // with it.)
-assert.match(newReturn, /useEffect\(\(\) => \{\s*const query = searchQuery\.trim\(\)[\s\S]*?lookupReceiptSuggestions\(query, RECEIPT_SUGGEST_LIMIT\)[\s\S]*?\}, \[searchQuery, step\]\)/, 'the seeded query must flow through the debounced receipt typeahead effect')
+assert.match(newReturn, /useEffect\(\(\) => \{\s*const query = searchQuery\.trim\(\)[\s\S]*?lookupReceiptSuggestions\(query, RECEIPT_SUGGEST_LIMIT\)[\s\S]*?\}, \[searchQuery, foundSale\]\)/, 'the seeded query must flow through the debounced receipt typeahead effect')
 assert.doesNotMatch(newReturn, /autoSearchedRef|autoResolvedRef/, 'no one-shot auto-search may open a sale on the seed alone')
 assert.equal((newReturn.match(/\[initialReceiptQuery\]/g) || []).length, 0, 'nothing but the initial state may key off the seed prop')
 

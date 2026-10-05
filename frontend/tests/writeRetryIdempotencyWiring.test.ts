@@ -235,7 +235,7 @@ await runTest('legacy customer return: a timed-out or lost create keeps its id A
       'api/returnsTransport.ts': { createReturn: write.fn },
     },
   })
-  const confirmReturn = shown('submit_return', 'Confirm Return')
+  const confirmReturn = shown('confirm', 'Confirm')
   const onConfirmStep = (): boolean => page.findAll((node) => node.tagName === 'BUTTON' && accessibleText(node).includes(confirmReturn)).length > 0
   try {
     await page.waitFor(() => page.findAll((node) => node.getAttribute('role') === 'option' && node.textContent.includes(sale.receipt_number)).length > 0, 'the matching receipt')
@@ -246,7 +246,7 @@ await runTest('legacy customer return: a timed-out or lost create keeps its id A
         if (onConfirmStep()) await page.click(page.button(shown('back', 'Back')))
         await page.type(page.find((node) => node.tagName === 'INPUT' && node.getAttribute('type') === 'number', `the return quantity for ${serumLine.product_name}`), form.quantity)
         await page.type(page.find((node) => node.tagName === 'TEXTAREA', 'the return notes'), form.notes)
-        await page.click(page.button(new RegExp(`^${escapeRegExp(shown('confirm', 'Review'))} →`)))
+        await page.click(page.button(new RegExp(`^${escapeRegExp(shown('return_review', 'Review'))}`)))
         await page.click(page.button(confirmReturn), pressing(write))
       },
       write,

@@ -147,7 +147,7 @@ runTest('Edit and New return modals route refusals through the mapping', () => {
   assert.match(catchBlock(edit, 'the edit submit'), /notify\([^\n]*\(returnRefusalText\(error, T\) \?\? getLoaderErrorMessage\(error\)\)/,
     'an edit refusal (cancelled return, refund price) shows the mapped text')
   const createSource = read('src/components/returns/NewReturnModal.tsx')
-  const legacy = slice(createSource, 'const handleSubmit = async (', '\n  const STEPS')
+  const legacy = slice(createSource, 'const handleSubmit = async (', '\n  const reviewReturn')
   assert.ok(legacy.includes('createReturnRequest({'), 'the slice is the legacy create submit')
   assert.match(catchBlock(legacy, 'the legacy create submit'), /notify\([^\n]*\(returnRefusalText\(error, T\) \?\? localizeBranchRuleError\(/,
     'a legacy create refusal (refund price) shows the mapped text')
