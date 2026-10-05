@@ -10,9 +10,9 @@
 // wiring and passes after.
 //
 // Cases chosen so the plausible wrong implementation fails each:
-//   - original present, variant absent  -> 200 ORIGINAL, short max-age
+//   - original present, variant absent  -> 302 to /uploads/<name>, short max-age
 //     (a 404 here is the live bug; an `immutable` year here would pin the
-//     big file under the thumbnail URL for good)
+//     fallback under the thumbnail URL for good)
 //   - variant persisted                 -> 200 THE VARIANT, immutable, etag
 //     (serving the original here saves nothing)
 //   - plain /uploads/<name>             -> unchanged: the original, immutable
@@ -66,12 +66,20 @@ async function get(seed, pathname) {
 const tests = []
 const test = (name, fn) => tests.push([name, fn])
 
-test('variant URL, original only: 200 with the original and a SHORT max-age (not a 404, not a pinned year)', async () => {
-  const { res, text } = await get({ [`uploads/${NAME}`]: ORIGINAL }, `/uploads/_v/w320/${NAME}`)
-  assert.equal(res.status, 200)
-  assert.equal(text, ORIGINAL)
+test('variant URL, original only: a 302 to the original and a SHORT max-age (not a 404, not a pinned year)', async () => {
+  const { res } = await get({ [`uploads/${NAME}`]: ORIGINAL }, `/uploads/_v/w320/${NAME}`)
+  assert.equal(res.status, 302)
+  assert.equal(res.headers.get('location'), `/uploads/${NAME}`)
   assert.equal(res.headers.get('cache-control'), 'public, max-age=300')
-  assert.equal(res.headers.get('content-type'), 'image/jpeg')
+})
+
+test('following that redirect through the same handler serves the original, immutable', async () => {
+  const seed = { [`uploads/${NAME}`]: ORIGINAL }
+  const first = await get(seed, `/uploads/_v/w320/${NAME}`)
+  const second = await get(seed, first.res.headers.get('location'))
+  assert.equal(second.res.status, 200)
+  assert.equal(second.text, ORIGINAL)
+  assert.match(second.res.headers.get('cache-control'), /max-age=31536000/)
 })
 
 test('variant URL, variant persisted: the variant, immutable, with an etag', async () => {

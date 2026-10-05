@@ -6,9 +6,11 @@
 //
 //   GET /uploads/_v/w320/<storedName>   ->  R2 key variants/w320/<storedName>.webp
 //
-// The first request transforms (Cloudflare Images binding, metered through
-// quotaGuard) and writes the result back to R2; every later request is a plain
-// R2 read, so each (image, width) spends at most one transformation ever.
+// Variants normally arrive with the upload (the browser makes a 320 and a 640
+// WebP, lib/imageVariantStore.ts). When one is missing, the first request MAY
+// transform (Cloudflare Images binding, metered through quotaGuard) and writes
+// the result back to R2, so each (image, width) spends at most one
+// transformation ever; otherwise the request is redirected to the original.
 //
 // The top half is pure -- parsing and key building, no bindings -- so the
 // allowlist and the traversal rules are testable without a Worker. The
@@ -110,7 +112,7 @@ export function parseImageVariantPath(uploadRelativePath: string): ImageVariantR
 
 type WaitUntilContext = { waitUntil(promise: Promise<unknown>): void }
 
-/** Browsers re-ask after this long when they got the ORIGINAL for a variant URL. */
+/** Browsers re-ask after this long when they were sent to the ORIGINAL for a variant URL. */
 export const IMAGE_VARIANT_FALLBACK_CACHE_CONTROL = 'public, max-age=300'
 const IMAGE_VARIANT_CACHE_CONTROL = 'public, max-age=31536000, immutable'
 const IMAGE_VARIANT_QUALITY = 80
@@ -132,37 +134,57 @@ export async function serveUpload(env: Env, requestPath: string, request: Reques
 }
 
 /**
- * The ORIGINAL, served for a variant URL with a short cache lifetime, so the
- * browser asks again later and upgrades once a variant can be produced.
- * Deliberately never written to the edge cache under the variant URL.
+ * No variant yet: send the browser to the ORIGINAL (`/uploads/<name>`), with a
+ * short lifetime so it asks again later and upgrades once a variant exists.
+ *
+ * A redirect rather than the original's bytes under the variant URL, on
+ * purpose. The variant URL cannot be cached long (it must upgrade), and the
+ * original URL is `immutable` for a year: serving the bytes here would make
+ * every un-backfilled thumbnail re-download ~0.84 MB every five minutes,
+ * while a bodiless 302 costs a few hundred bytes and the original itself
+ * stays in the browser cache. Never written to the edge cache under the
+ * variant URL (a cached redirect would outlive the variant that replaces it).
+ * The name is one validated segment, so the target can only be an upload.
  */
-function originalAsFallback(variant: ImageVariantRequest, original: R2ObjectBody): Response {
-  // Typed by the original's extension alone: a variant source always has an
-  // image extension (isSafeVariantSourceName), and the uploader's stored
-  // type is never an input to the serving policy.
-  const headers = applySafeUploadHeaders(new Headers(), variant.originalKey)
-  // Unreachable for a name that passed isSafeVariantSourceName (every source
-  // extension is servable), but the serving policy stays the single authority.
-  if (!headers) return notFound()
-  headers.set('cache-control', IMAGE_VARIANT_FALLBACK_CACHE_CONTROL)
-  return new Response(original.body, { headers })
+function redirectToOriginal(variant: ImageVariantRequest): Response {
+  return new Response(null, {
+    status: 302,
+    headers: {
+      location: `/uploads/${encodeURIComponent(variant.storedName)}`,
+      'cache-control': IMAGE_VARIANT_FALLBACK_CACHE_CONTROL,
+      'x-content-type-options': 'nosniff',
+    },
+  })
 }
 
-async function refetchOriginalAsFallback(env: Env, variant: ImageVariantRequest): Promise<Response> {
+/** One-byte ranged read (an EMPTY object refuses a range, so that case re-asks plainly). */
+async function originalExists(env: Env, key: string): Promise<boolean> {
+  let probe: R2ObjectBody | null
   try {
-    const original = await env.ASSETS.get(variant.originalKey)
-    return original ? originalAsFallback(variant, original) : notFound()
+    probe = await env.ASSETS.get(key, { range: { offset: 0, length: 1 } })
   } catch {
-    return new Response('Unavailable', { status: 503, headers: { 'cache-control': 'no-store', 'retry-after': '30' } })
+    probe = await env.ASSETS.get(key)
   }
+  if (!probe) return false
+  await probe.body?.cancel().catch(() => undefined)
+  return true
 }
 
 /**
  * hit  -> the persisted variant (immutable, R2 ETag, edge-cached)
- * miss -> meter one transformation, transform, persist in waitUntil, serve
- * no binding / quota spent / any failure -> the original, max-age=300
+ * miss -> original absent: 404 (checked BEFORE any quota is spent)
+ *         no binding / quota not comfortably 'ok' / any failure: redirect to
+ *         the original (max-age=300)
+ *         otherwise meter one transformation, transform, persist in
+ *         waitUntil, serve
  *
  * Never a 500: every failure after validation degrades to the original.
+ *
+ * On-demand transformation is a nice-to-have, not the primary source: the
+ * browser stores variants at upload time (lib/imageVariantStore.ts) and an
+ * owner-run backfill covers the rest. It shares the 5,000/month Images
+ * allowance with the upload normaliser (the part that must not starve), so it
+ * only spends while the quota is 'ok' (under 70% of the image ceiling).
  */
 export async function serveImageVariant(env: Env, variant: ImageVariantRequest, request: Request, ctx?: WaitUntilContext): Promise<Response> {
   try {
@@ -172,25 +194,28 @@ export async function serveImageVariant(env: Env, variant: ImageVariantRequest, 
     // A failed variant read is a miss, not an error.
   }
 
-  let original: R2ObjectBody | null
+  // Existence first: the common miss (no binding, quota spent) never streams
+  // the whole original. Checked BEFORE any quota is spent, so probing random
+  // names costs nothing.
   try {
-    original = await env.ASSETS.get(variant.originalKey)
+    if (!(await originalExists(env, variant.originalKey))) return notFound()
   } catch {
-    return refetchOriginalAsFallback(env, variant)
+    return new Response('Unavailable', { status: 503, headers: { 'cache-control': 'no-store', 'retry-after': '30' } })
   }
-  // Checked BEFORE any quota is spent, so probing random names costs nothing.
-  if (!original) return notFound()
-  if (!env.IMAGES) return originalAsFallback(variant, original)
+  if (!env.IMAGES) return redirectToOriginal(variant)
 
   try {
     const quota = await consumeQuota(env, 'cf_images_transform')
-    // Image work leaves the video reserve alone (quotaGuard VIDEO_RESERVE).
-    if (!quota.allowed || quota.reservedZone === 'exhausted') return originalAsFallback(variant, original)
+    // Image work leaves the video reserve alone (quotaGuard VIDEO_RESERVE), and
+    // a variant is the first thing to give way once the allowance runs warm.
+    if (!quota.allowed || quota.reservedZone === 'exhausted' || quota.zone !== 'ok') return redirectToOriginal(variant)
   } catch {
-    return originalAsFallback(variant, original)
+    return redirectToOriginal(variant)
   }
 
   try {
+    const original = await env.ASSETS.get(variant.originalKey)
+    if (!original) return notFound()
     const result = await env.IMAGES
       .input(original.body)
       // Never enlarges: a source narrower than the width comes back as-is.
@@ -209,7 +234,6 @@ export async function serveImageVariant(env: Env, variant: ImageVariantRequest, 
     return new Response(bytes, { headers })
   } catch {
     // Includes 9422 (monthly transformation limit) and undecodable input.
-    // The original's body was handed to the transformer, so read it again.
-    return refetchOriginalAsFallback(env, variant)
+    return redirectToOriginal(variant)
   }
 }
