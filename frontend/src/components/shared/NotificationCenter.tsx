@@ -22,6 +22,7 @@ import { getNotificationSummary as getNotificationSummaryRequest } from '../../a
 import { listImportJobs as listImportJobsRequest } from '../../api/importJobsTransport.ts'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import { startVisibleInterval } from '../../utils/visibilityPolling.ts'
+import { FOREGROUND_RESUME_REASON } from '../../utils/permissionRefreshAccumulator.ts'
 import AppSelect from './AppSelect'
 import PaginationControls from './PaginationControls'
 import { getStatusBadgeLabel } from '../sales/StatusBadge.tsx'
@@ -116,6 +117,7 @@ type AppContextValue = {
 type SyncContextValue = {
   syncChannel?: {
     channel?: string
+    reason?: string | null
     ts?: unknown
   }
 }
@@ -156,8 +158,8 @@ const NOTIFICATION_SUMMARY_TIMEOUT_MS = 8000
 // backup poll, not the primary "something changed" signal -- most sections
 // (inventory/sales/returns/customers/contacts/catalog/settings/backup) are
 // already re-fetched near-instantly via the sync-channel broadcast effect
-// below (see the `syncChannel?.channel` effect), and a tab regaining focus
-// always re-fetches too (`onVisible`). This interval only covers the
+// below (see the `syncChannel?.channel` effect), and a tab shown again after
+// a socket gap re-fetches through that same effect. This interval only covers the
 // remaining case: nothing pushed and the tab never lost focus. Previously a
 // bare `30000` (30s), which meant an idle-but-open tab hit the endpoint
 // roughly twice a minute for no reason. `buildExpirySection` (notifications.ts)
@@ -453,6 +455,7 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
   const visibleLoadRequestRef = useRef(0)
   const aliveRef = useRef(true)
   const refreshTimerRef = useRef<number | null>(null)
+  const refreshDueWhileHiddenRef = useRef(false)
   const failureCountRef = useRef(0)
 
   useEffect(() => {
@@ -468,9 +471,12 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
       refreshTimerRef.current = null
       // A hidden tab skips this read (F2); the visibilitychange listener
       // below reloads the summary, and reschedules, when the tab is shown.
-      if (aliveRef.current && document.visibilityState !== 'hidden') {
-        void loadSummary(true)
+      if (!aliveRef.current) return
+      if (document.visibilityState === 'hidden') {
+        refreshDueWhileHiddenRef.current = true
+        return
       }
+      void loadSummary(true)
     }, delayMs)
   }, [])
 
@@ -533,8 +539,12 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
     }
     aliveRef.current = true
     void loadSummary()
+    // Pushes keep the bell current while the tab is hidden, and a long
+    // absence with the socket down arrives as a foreground-resume-gap sync
+    // event (effect below). Showing the tab only catches up a skipped tick.
     const onVisible = () => {
-      if (document.visibilityState === 'visible') {
+      if (document.visibilityState === 'visible' && refreshDueWhileHiddenRef.current) {
+        refreshDueWhileHiddenRef.current = false
         void loadSummary(true)
       }
     }
@@ -601,6 +611,7 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
   useEffect(() => {
     if (!visibilityActive) return
     if (!syncChannel?.channel) return
+    if (syncChannel.reason === FOREGROUND_RESUME_REASON) return
     // 'contacts' and 'backup' here used to be copy-pasted from
     // PAGE_PERMISSIONS' page-id keys (AppContext.tsx), not real sync
     // channel names -- nothing ever broadcasts a sync:update on either,
@@ -615,7 +626,7 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
     if (['inventory', 'sales', 'returns', 'customers', 'suppliers', 'deliveryContacts', 'notifications', 'catalog', 'settings'].includes(syncChannel.channel)) {
       void loadSummary(true)
     }
-  }, [loadSummary, syncChannel?.channel, syncChannel?.ts, visibilityActive])
+  }, [loadSummary, syncChannel?.channel, syncChannel?.reason, syncChannel?.ts, visibilityActive])
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent | TouchEvent) => {

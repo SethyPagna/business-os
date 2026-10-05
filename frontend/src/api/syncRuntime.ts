@@ -41,12 +41,12 @@ export function requestPersistentAppStorage(): Promise<boolean> {
   return persistentStorageRequest
 }
 
-export function dispatchSyncUpdates(channels: readonly string[] = [], reason = ''): void {
+export function dispatchSyncUpdates(channels: readonly string[] = [], reason = '', extra: Record<string, unknown> = {}): void {
   if (typeof window === 'undefined') return
   const ts = Date.now()
   for (const channel of channels) {
     window.dispatchEvent(new CustomEvent('sync:update', {
-      detail: { channel, reason, ts },
+      detail: { ...extra, channel, reason, ts },
     }))
   }
 }

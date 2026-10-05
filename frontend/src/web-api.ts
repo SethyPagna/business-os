@@ -14,7 +14,7 @@
  */
 
 import { setSyncServerUrl, setSyncToken, getSyncServerUrl, getCallLog, clearCallLog, startHealthCheck, cacheClearAll, pingServerHealth } from './api/http.ts'
-import { disconnectWS, resumeWS, scheduleConnectWS } from './api/websocket.ts'
+import { disconnectWS, isWSConnected, resumeWS, scheduleConnectWS } from './api/websocket.ts'
 import {
   dispatchSyncUpdates,
   emitSyncQueueChanged,
@@ -22,6 +22,7 @@ import {
   hasStoredUserSession,
 } from './api/syncRuntime.ts'
 import { STORAGE_KEYS }            from './constants.ts'
+import { FOREGROUND_RESUME_GAP_REASON, FOREGROUND_RESUME_REASON } from './utils/permissionRefreshAccumulator.ts'
 import { sanitizeSyncServerUrl }   from './platform/runtime/clientRuntime.ts'
 import {
   shouldSuppressRuntimeError,
@@ -58,6 +59,9 @@ let offlineVaultUnlockedAt = 0
 let offlineVaultIdleTimer: number | null = null
 let sessionRecoveryListenersRegistered = false
 let backgroundedAt = 0
+// Last time the sync socket was seen closing. A resume compares it with
+// backgroundedAt: a socket that stayed open delivered every push.
+let syncSocketDroppedAt = 0
 let lastForegroundRecoveryAt = 0
 let deferredForegroundRecoveryTimer = 0
 let methodsModulePromise: Promise<MethodsModule> | null = null
@@ -254,7 +258,11 @@ function ensureSessionRecoveryListeners(): void {
   if (typeof window === 'undefined' || sessionRecoveryListenersRegistered) return
   sessionRecoveryListenersRegistered = true
 
-  const recoverForegroundSession = (reason: string, force = false, refreshData = false): boolean => {
+  window.addEventListener('sync:status', (event: Event) => {
+    if ((event as CustomEvent<{ connected?: boolean }>).detail?.connected !== true) syncSocketDroppedAt = Date.now()
+  })
+
+  const recoverForegroundSession = (reason: string, force = false, refreshData = false, hiddenSince = 0): boolean => {
     if (!hasStoredUserSession()) return false
     const now = Date.now()
     const elapsedSinceRecovery = now - lastForegroundRecoveryAt
@@ -266,7 +274,7 @@ function ensureSessionRecoveryListeners(): void {
         if (deferredForegroundRecoveryTimer) window.clearTimeout(deferredForegroundRecoveryTimer)
         deferredForegroundRecoveryTimer = window.setTimeout(() => {
           deferredForegroundRecoveryTimer = 0
-          recoverForegroundSession(reason, true, true)
+          recoverForegroundSession(reason, true, true, hiddenSince)
           backgroundedAt = 0
         }, Math.max(0, FOREGROUND_RECOVERY_THROTTLE_MS - elapsedSinceRecovery + 20))
       }
@@ -277,7 +285,13 @@ function ensureSessionRecoveryListeners(): void {
     startHealthCheck()
     pingServerHealth(force).catch(() => {})
     if (refreshData) {
-      dispatchSyncUpdates(FOREGROUND_RESUME_SYNC_UPDATE_CHANNELS, reason)
+      // After resumeWS(): a stale socket it just replaced counts as a drop.
+      const socketStayedOpen = hiddenSince > 0 && isWSConnected() && syncSocketDroppedAt < hiddenSince
+      dispatchSyncUpdates(
+        FOREGROUND_RESUME_SYNC_UPDATE_CHANNELS,
+        socketStayedOpen ? FOREGROUND_RESUME_REASON : FOREGROUND_RESUME_GAP_REASON,
+        { trigger: reason },
+      )
     }
     return true
   }
@@ -285,7 +299,9 @@ function ensureSessionRecoveryListeners(): void {
   const recoverAfterBackground = (reason: string, persisted = false) => {
     const elapsed = backgroundedAt > 0 ? Date.now() - backgroundedAt : 0
     const needsFullRefresh = persisted || elapsed >= FOREGROUND_REFRESH_AFTER_MS
-    const recovered = recoverForegroundSession(reason, needsFullRefresh, needsFullRefresh)
+    // A back/forward-cache restore froze the socket with the page.
+    const hiddenSince = persisted ? 0 : backgroundedAt
+    const recovered = recoverForegroundSession(reason, needsFullRefresh, needsFullRefresh, hiddenSince)
     if (recovered || !needsFullRefresh) backgroundedAt = 0
   }
 
