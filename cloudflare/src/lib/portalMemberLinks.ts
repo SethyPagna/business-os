@@ -39,6 +39,7 @@ export type MemberLinkGuardCode =
   | 'member_link_customer_unavailable'
   | 'member_link_request_not_pending'
   | 'member_link_already_reverted'
+  | 'member_closed'
 
 function guard(condition: string, params: Record<string, unknown>, code: MemberLinkGuardCode): MemberLinkStatement {
   return {
@@ -297,15 +298,23 @@ export type MemberRevertTarget = {
   restoreCustomerId: number | null
 }
 
+// A revert that puts a member back on a customer re-creates a link, so it
+// carries the same evidence a link does (checked by the route with
+// checkMemberLinkEvidence) and records it on the revert event. A revert that
+// only takes a link away needs none. A closed member is never touched.
 export function buildMemberRevertStatements(input: {
   targets: MemberRevertTarget[]
   groupId: string | null
   note: string | null
   clientRequestId: string | null
   actor: MemberLinkActor
+  evidence?: MemberLinkEvidence | null
 }): MemberLinkStatement[] {
   const { targets } = input
   if (!targets.length) throw new Error('member_link_revert_empty')
+  if (targets.some((target) => target.restoreCustomerId != null) && !input.evidence) {
+    throw new Error('member_link_revert_evidence_required')
+  }
   const statements: MemberLinkStatement[] = []
   const targetParams: Record<string, unknown> = {}
   const targetList = targets.map((target, index) => {
@@ -314,6 +323,11 @@ export function buildMemberRevertStatements(input: {
   }).join(', ')
   for (const target of targets) {
     statements.push(
+      guard(
+        "EXISTS (SELECT 1 FROM portal_accounts WHERE id = @accountId AND status <> 'closed')",
+        { accountId: target.accountId },
+        'member_closed',
+      ),
       guard(
         'EXISTS (SELECT 1 FROM portal_accounts WHERE id = @accountId AND link_version = @version AND contact_id IS @currentCustomerId)',
         { accountId: target.accountId, version: target.linkVersionAfter, currentCustomerId: target.currentCustomerId },
@@ -354,6 +368,7 @@ export function buildMemberRevertStatements(input: {
         action: 'revert',
         fromCustomerId: target.currentCustomerId,
         toCustomerId: target.restoreCustomerId,
+        evidence: target.restoreCustomerId != null ? input.evidence ?? null : null,
         note: input.note,
         groupId: input.groupId,
         revertsEventId: target.eventId,

@@ -19,31 +19,51 @@
 // plus evidence rules, sessions revoked on unlink / suspend / reset, link
 // requests approved through the link action, list filters and conflicts.
 //
+// Verifier follow-ups (G38 P1 re-certification):
+//   E1 customer search and suggestions also need Contacts view;
+//   E2 a closed member cannot be reverted (route check AND batch guard);
+//   E3 a revert that re-creates a link needs link evidence, recorded on the
+//      revert event; a revert that only removes a link needs none;
+//   E6 a password reset on "called the number on file" is admin-only and
+//      needs a note, which reaches the audit log;
+//   E8 filter=legacy_claims lists links the old sign-up made to an existing
+//      customer that no staff action has replaced since.
+//
 // Discriminating controls in-run: the CAS check is repeated against a mutant
 // builder whose version guard is removed, under a real concurrent change, and
 // the mutant must write the event the real code refuses.
+//
+// SECURITY_TEST_BASE=<sha> loads that commit's routes/portalMembers.ts and
+// lib/portalMemberLinks.ts: at 9300c775e the E1, E2, E3, E6 and E8 checks FAIL.
 //
 // Run: node scripts/test-portal-members-links-pure.cjs
 'use strict'
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
+const { execFileSync } = require('node:child_process')
 const { createPortalHarness } = require('./harness/load_portal_auth_route.cjs')
+
+const BASE_SOURCES = process.env.SECURITY_TEST_BASE
+  ? Object.fromEntries(['routes/portalMembers.ts', 'lib/portalMemberLinks.ts'].map((rel) => [rel,
+    execFileSync('git', ['show', `${process.env.SECURITY_TEST_BASE}:cloudflare/src/${rel}`], { cwd: path.resolve(__dirname, '..'), encoding: 'utf8' })]))
+  : {}
 
 const USERS = {
   owner: { id: 1, username: 'owner', name: 'Owner', role_code: 'admin', permissions: '{}', role_permissions: '{}' },
-  linker: { id: 2, username: 'linker', name: 'Linker', role_code: 'staff', permissions: JSON.stringify({ portal_member_links: true }), role_permissions: '{}' },
+  linker: { id: 2, username: 'linker', name: 'Linker', role_code: 'staff', permissions: JSON.stringify({ portal_member_links: true, contacts: true }), role_permissions: '{}' },
+  linksOnly: { id: 5, username: 'linksonly', name: 'Links Only', role_code: 'staff', permissions: JSON.stringify({ portal_member_links: true }), role_permissions: '{}' },
   clerk: { id: 3, username: 'clerk', name: 'Clerk', role_code: 'staff', permissions: JSON.stringify({ contacts: true }), role_permissions: '{}' },
   nobody: { id: 4, username: 'nobody', name: 'Nobody', role_code: 'staff', permissions: '{}', role_permissions: '{}' },
 }
 
-function harness(sources = {}) {
-  const state = { user: USERS.linker, audits: [], beforeBatch: null }
+function harness(sources = BASE_SOURCES) {
+  const state = { user: USERS.linker, audits: [], auditDetails: [], beforeBatch: null }
   const h = createPortalHarness({
     sources,
     overrides: {
       '../lib/auth': { requireAuth: async (c, next) => { c.set('user', state.user); await next() } },
-      '../lib/audit': { audit: async (...args) => { state.audits.push(args.slice(3, 6)) } },
+      '../lib/audit': { audit: async (...args) => { state.audits.push(args.slice(3, 6)); state.auditDetails.push(args[6]) } },
     },
   })
   const batch = h.db.batch
@@ -266,7 +286,7 @@ async function main() {
     const before = t.events(m).length
     const snapshot = JSON.stringify(t.events(m))
 
-    const ok = await t.call('POST', `/${m}/revert`, { eventId: relinkEvent.id, note: 'wrong customer picked' })
+    const ok = await t.call('POST', `/${m}/revert`, { eventId: relinkEvent.id, note: 'wrong customer picked', evidence: 'in_person' })
     assert.equal(ok.status, 200, JSON.stringify(ok.body))
     assert.equal(t.account(m).contact_id, 301, 'the prior customer is restored')
     const after = t.events(m)
@@ -276,6 +296,7 @@ async function main() {
     assert.equal(after.at(-1).reverts_event_id, relinkEvent.id)
     assert.equal(after.at(-1).from_customer_id, 302)
     assert.equal(after.at(-1).to_customer_id, 301)
+    assert.equal(after.at(-1).evidence, 'in_person', 'the relinking revert records its evidence')
 
     const again = await t.call('POST', `/${m}/revert`, { eventId: relinkEvent.id })
     assert.equal(again.status, 409)
@@ -295,7 +316,7 @@ async function main() {
     await link(t, a, 401)
     await link(t, b, 401, { move: true })
     const moveEvent = t.events(b).at(-1)
-    const res = await t.call('POST', `/${b}/revert`, { eventId: moveEvent.id })
+    const res = await t.call('POST', `/${b}/revert`, { eventId: moveEvent.id, evidence: 'in_person' })
     assert.equal(res.status, 200, JSON.stringify(res.body))
     assert.equal(t.account(a).contact_id, 401)
     assert.equal(t.account(b).contact_id, null)
@@ -304,6 +325,109 @@ async function main() {
     assert.equal(ra.action, 'revert')
     assert.equal(rb.action, 'revert')
     assert.ok(ra.group_id && ra.group_id === rb.group_id)
+    assert.equal(ra.evidence, 'in_person', 'the holder is relinked: evidence recorded')
+    assert.equal(rb.evidence, null, 'the mover is only unlinked: no evidence claimed')
+  })
+
+  await check('E1: customer search and suggestions need Contacts view; the member list does not', async () => {
+    const t = harness()
+    const m = t.member('Viewer Test', '012000077')
+    t.customer(577, 'Viewer Customer', '012 000 077', { lc: 'LC-00577' })
+    for (const url of ['/customer-search?q=Viewer', `/${m}/suggestions`]) {
+      const refused = await t.call('GET', url, undefined, USERS.linksOnly)
+      assert.equal(refused.status, 403, url)
+      assert.equal(refused.body.code, 'contacts_view_required', url)
+      assert.equal(JSON.stringify(refused.body).includes('Viewer Customer'), false, 'no customer data in the refusal')
+      assert.equal((await t.call('GET', url, undefined, USERS.linker)).status, 200, `positive control ${url}`)
+      assert.equal((await t.call('GET', url, undefined, USERS.owner)).status, 200, `admin ${url}`)
+    }
+    assert.equal((await t.call('GET', '/', undefined, USERS.linksOnly)).status, 200, 'the member list stays open to the link permission')
+  })
+
+  await check('E2: a closed member cannot be reverted -- refused up front and by the batch guard under a race', async () => {
+    const t = harness()
+    const m = t.member('Closer', '012000088')
+    t.customer(588, 'Closer Customer', '012 000 088')
+    await link(t, m, 588)
+    const linkEvent = t.events(m).at(-1)
+    t.raw.prepare("UPDATE portal_accounts SET status = 'closed' WHERE id = @id").run({ id: m })
+    const before = t.events(m).length
+    const refused = await t.call('POST', `/${m}/revert`, { eventId: linkEvent.id })
+    assert.equal(refused.status, 409)
+    assert.equal(refused.body.code, 'member_closed')
+    assert.equal(t.events(m).length, before)
+    assert.equal(t.account(m).contact_id, 588)
+
+    const t2 = harness()
+    const m2 = t2.member('Racer', '012000089')
+    t2.customer(589, 'Racer Customer', '012 000 089')
+    await link(t2, m2, 589)
+    const event2 = t2.events(m2).at(-1)
+    t2.state.beforeBatch = async () => { t2.raw.prepare("UPDATE portal_accounts SET status = 'closed' WHERE id = @id").run({ id: m2 }) }
+    const raced = await t2.call('POST', `/${m2}/revert`, { eventId: event2.id })
+    assert.equal(raced.status, 409)
+    assert.equal(raced.body.code, 'member_closed')
+    assert.equal(t2.events(m2).length, 1, 'no revert event')
+    assert.equal(t2.account(m2).contact_id, 589, 'the closed member was not touched')
+  })
+
+  await check('E3: a revert that re-creates a link needs link evidence; one that only removes a link does not', async () => {
+    const t = harness()
+    const m = t.member('Evidence Revert', '012000099')
+    t.customer(599, 'Old Customer', '012 000 599')
+    await link(t, m, 599)
+    await t.call('POST', `/${m}/unlink`, { expectedLinkVersion: t.account(m).link_version, reasonCode: 'wrong_person' })
+    const unlinkEvent = t.events(m).at(-1)
+    assert.equal(unlinkEvent.action, 'unlink')
+    const count = t.events(m).length
+    const none = await t.call('POST', `/${m}/revert`, { eventId: unlinkEvent.id })
+    assert.equal(none.status, 400)
+    assert.equal(none.body.code, 'member_link_evidence_required')
+    const wrong = await t.call('POST', `/${m}/revert`, { eventId: unlinkEvent.id, evidence: 'called_number_on_file', checkCode: '000000' })
+    assert.equal(wrong.status, 422)
+    assert.equal(wrong.body.code, 'member_link_check_failed')
+    assert.equal((await t.call('POST', `/${m}/revert`, { eventId: unlinkEvent.id, evidence: 'owner_override', note: 'boss' })).status, 403, 'override is admin-only')
+    assert.equal(t.events(m).length, count, 'nothing written by a refused revert')
+    assert.equal(t.account(m).contact_id, null)
+    const accounts = t.h.load('lib/portalAccounts.ts')
+    const { code } = await accounts.portalLinkCheckCode(t.h.env, m, t.account(m).link_version)
+    const ok = await t.call('POST', `/${m}/revert`, { eventId: unlinkEvent.id, evidence: 'called_number_on_file', checkCode: code })
+    assert.equal(ok.status, 200, JSON.stringify(ok.body))
+    assert.equal(t.account(m).contact_id, 599)
+    assert.equal(t.events(m).at(-1).evidence, 'called_number_on_file')
+    assert.equal(t.state.auditDetails.at(-1).evidence, 'called_number_on_file')
+
+    // Reverting a first link only removes it: no evidence asked or recorded.
+    const n = t.member('Unlink Only', '012000098')
+    t.customer(598, 'Unlink Customer', '012 000 598')
+    await link(t, n, 598)
+    const first = await t.call('POST', `/${n}/revert`, { eventId: t.events(n).at(-1).id })
+    assert.equal(first.status, 200, JSON.stringify(first.body))
+    assert.equal(t.account(n).contact_id, null)
+    assert.equal(t.events(n).at(-1).evidence, null)
+
+    // A Move that relinks TWO members cannot be proved by one member's code.
+    const a = t.member('Holder Two', '012000097')
+    const b = t.member('Mover Two', '012000096')
+    t.customer(597, 'Contested', '012 000 597')
+    t.customer(596, 'Mover Before', '012 000 596')
+    await link(t, a, 597)
+    await link(t, b, 596)
+    await link(t, b, 597, { move: true })
+    const moveEvent = t.events(b).at(-1)
+    const twoCode = await accounts.portalLinkCheckCode(t.h.env, b, t.account(b).link_version)
+    const ambiguous = await t.call('POST', `/${b}/revert`, { eventId: moveEvent.id, evidence: 'called_number_on_file', checkCode: twoCode.code })
+    assert.equal(ambiguous.status, 400)
+    assert.equal(ambiguous.body.code, 'member_revert_check_one_member')
+    const inPerson = await t.call('POST', `/${b}/revert`, { eventId: moveEvent.id, evidence: 'in_person' })
+    assert.equal(inPerson.status, 200, JSON.stringify(inPerson.body))
+    assert.deepEqual([t.account(a).contact_id, t.account(b).contact_id], [597, 596])
+
+    // The builder refuses a relinking revert without evidence, so no caller can skip it.
+    const lib = t.h.load('lib/portalMemberLinks.ts')
+    const target = { accountId: 1, eventId: 1, linkVersionAfter: 1, currentCustomerId: null, restoreCustomerId: 5 }
+    assert.throws(() => lib.buildMemberRevertStatements({ targets: [target], groupId: null, note: null, clientRequestId: null, actor: { userId: 1, userName: 'x' } }), /member_link_revert_evidence_required/)
+    assert.doesNotThrow(() => lib.buildMemberRevertStatements({ targets: [{ ...target, restoreCustomerId: null, currentCustomerId: 5 }], groupId: null, note: null, clientRequestId: null, actor: { userId: 1, userName: 'x' } }))
   })
 
   await check('evidence: required; the phone check needs the member\'s code; owner override needs an admin and a note', async () => {
@@ -395,8 +519,19 @@ async function main() {
     const m = t.member('Forgetful', '012999991')
     assert.equal((await t.call('POST', `/${m}/reset-password`, {})).body.code, 'member_link_evidence_required')
     const before = t.account(m).password_hash
-    const res = await t.call('POST', `/${m}/reset-password`, { evidence: 'called_number_on_file' })
+    // E6: no code proves a phone call for a member who cannot sign in, so it
+    // is an admin's word, with a note.
+    const notAdmin = await t.call('POST', `/${m}/reset-password`, { evidence: 'called_number_on_file', note: 'called 012 999 991' })
+    assert.equal(notAdmin.status, 403)
+    assert.equal(notAdmin.body.code, 'member_reset_call_admin_only')
+    const noNote = await t.call('POST', `/${m}/reset-password`, { evidence: 'called_number_on_file' }, USERS.owner)
+    assert.equal(noNote.status, 400)
+    assert.equal(noNote.body.code, 'member_link_note_required')
+    assert.equal(t.account(m).password_hash, before, 'refused resets change nothing')
+    assert.equal(t.liveSessions(m), 1)
+    const res = await t.call('POST', `/${m}/reset-password`, { evidence: 'called_number_on_file', note: 'called 012 999 991, member confirmed name' }, USERS.owner)
     assert.equal(res.status, 200)
+    assert.deepEqual(t.state.auditDetails.at(-1), { evidence: 'called_number_on_file', note: 'called 012 999 991, member confirmed name' })
     assert.match(res.body.temporaryPassword, /^[A-HJ-NP-Z2-9]{10}$/)
     assert.notEqual(t.account(m).password_hash, before)
     assert.equal(t.liveSessions(m), 0)
@@ -460,6 +595,32 @@ async function main() {
     assert.deepEqual(await ids('q=lc-00901'), [linked], 'the linked customer\'s store number finds the member')
     assert.deepEqual(await ids(`q=${encodeURIComponent('+855 12 901 903')}`), [paused])
     assert.equal((await t.call('GET', '/?filter=everything')).status, 400)
+  })
+
+  await check('E8: filter=legacy_claims lists only carried-forward sign-up claims still in place', async () => {
+    const t = harness()
+    t.customer(1101, 'Claimed', '012 110 101')
+    t.customer(1102, 'Created', '012 110 102')
+    t.customer(1103, 'Claimed Then Fixed', '012 110 103')
+    t.customer(1104, 'Staff Checked', '012 110 104')
+    const claimed = t.member('Claimer', '012110101', { contactId: 1101 })
+    const created = t.member('Creator', '012110102', { contactId: 1102 })
+    const fixed = t.member('Fixed', '012110103', { contactId: 1103 })
+    const legacy = (accountId, customerId, reason) => t.raw.prepare(`INSERT INTO portal_member_link_events
+      (account_id, action, from_customer_id, to_customer_id, evidence, reason_code, link_version_after)
+      VALUES (@a, 'legacy_import', NULL, @c, 'system', @r, 0)`).run({ a: accountId, c: customerId, r: reason })
+    legacy(claimed, 1101, 'signup_claimed_customer')
+    legacy(created, 1102, 'signup_created_customer')
+    legacy(fixed, 1103, 'signup_claimed_customer')
+    await link(t, fixed, 1104)
+    const res = await t.call('GET', '/?filter=legacy_claims')
+    assert.equal(res.status, 200)
+    assert.deepEqual(res.body.items.map((item) => item.id), [claimed])
+    assert.equal(res.body.total, 1)
+    const all = (await t.call('GET', '/?filter=all')).body.items
+    assert.deepEqual(all.filter((item) => item.legacyClaim).map((item) => item.id), [claimed])
+    assert.equal((await t.call('GET', `/${claimed}`)).body.member.legacyClaim, true)
+    assert.equal((await t.call('GET', `/${created}`)).body.member.legacyClaim, false)
   })
 
   await check('history lists every event with customers and marks only the latest revertible one', async () => {

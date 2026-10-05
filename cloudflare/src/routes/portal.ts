@@ -2,7 +2,7 @@ import { Hono, type Context } from 'hono'
 import { getDb } from '../lib/db'
 import { buildInClause, inlineIntegerIds, selectInChunks } from '../lib/sqlBinding'
 import { cachedJsonResponse, getVersionWithFallback } from '../lib/cache'
-import { admitRequestBody, SMALL_BODY_BYTES, PORTAL_SCREENSHOT_BODY_BYTES } from '../lib/requestBodyGuard'
+import { admitRequestBody, SMALL_BODY_BYTES, PORTAL_SCREENSHOT_BODY_BYTES, requireJsonSameOriginCredentialPost } from '../lib/requestBodyGuard'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { hasPermission } from '../lib/permissions'
 import { audit } from '../lib/audit'
@@ -534,10 +534,11 @@ export function buildPortalConfig(settings: SettingsMap, env: Env) {
     language: languageSetting === AUTOMATIC_PORTAL_LANGUAGE ? 'en' : languageSetting,
     translations: normalizePortalTranslations(settings.customer_portal_translations),
     aiEnabled: normalizeBoolean(settings.customer_portal_ai_enabled, true),
-    // G38 P0 owner answer (5 Oct): new phone + password sign-ups stay open
-    // until Telegram verification ships (Phase 3); this switch lets the owner
-    // pause them without a deploy. Existing accounts always sign in.
-    signupEnabled: normalizeBoolean(settings.customer_portal_signup_enabled, true),
+    // G38 owner ruling (6 Oct): phone + password sign-ups are OFF until the
+    // owner turns them on (Telegram phone verification is the way in). An
+    // unset setting therefore means paused; only an explicit true opens
+    // sign-up. Existing accounts always sign in.
+    signupEnabled: normalizeBoolean(settings.customer_portal_signup_enabled, false),
     aiTitle: settings.customer_portal_ai_title || 'Beauty Assistant',
     aiIntro: capPortalText(settings.customer_portal_ai_intro, MAX_PORTAL_AI_INTRO_LENGTH),
     aiDisclaimer: settings.customer_portal_ai_disclaimer
@@ -1691,6 +1692,13 @@ function sanitizePortalBucketItems(raw: unknown, max: number, withQty: boolean):
   }
   return out
 }
+
+// G38 E5 (login CSRF): every write under /auth/* -- sign-up, sign-in,
+// sign-out -- and the member's own link request must be a same-origin JSON
+// request (lib/requestBodyGuard credentialPostRefusal). Registered before the
+// handlers so Hono runs it first; GET /auth/me and GET link-request pass.
+app.use('/auth/*', requireJsonSameOriginCredentialPost)
+app.use('/account/link-request', requireJsonSameOriginCredentialPost)
 
 app.post('/auth/signup', async (c) => {
   const ip = getClientNetworkKey(c.req.raw)

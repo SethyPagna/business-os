@@ -1,9 +1,10 @@
 import { Hono, type Context } from 'hono'
 import { getDb } from '../lib/db'
+import { inlineIntegerIds } from '../lib/sqlBinding'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit } from '../lib/audit'
 import { actorSnapshot } from '../lib/actorSnapshot'
-import { hasPermission, isAdminControlUser } from '../lib/permissions'
+import { getActionTier, hasPermission, isAdminControlUser } from '../lib/permissions'
 import { checkRateLimit } from '../lib/rateLimit'
 import { hashPassword } from '../lib/passwordHash'
 import { canonicalizePhone } from '../lib/phone'
@@ -26,6 +27,7 @@ import {
   memberChip,
   normalizeMemberEmail,
   type MemberConflict,
+  type MemberLinkEvidence,
   type MemberLinkStatement,
   type MemberRevertTarget,
   type MemberSuggestionCandidate,
@@ -58,6 +60,24 @@ app.use('*', async (c, next) => {
   await next()
 })
 
+// Reads that return customer records (the Link float's customer search and
+// the suggestions) also need Contacts view: "Approve member links" alone does
+// not open the customer directory (verifier E1).
+function canViewCustomers(user: SessionUser): boolean {
+  return getActionTier(user, 'contacts', 'view') !== 'none'
+}
+function contactsViewRequired(c: Ctx) {
+  return c.json({ error: 'You need Contacts view access to search customers.', code: 'contacts_view_required' }, 403)
+}
+
+// A link carried forward by 0231 from the old sign-up, which attached the
+// member to an EXISTING customer found by phone + LC number without any staff
+// check (reason signup_claimed_customer), and still in place: staff review
+// these (verifier E8). Uses idx_pmle_account.
+const LEGACY_CLAIM_SQL = `EXISTS (SELECT 1 FROM portal_member_link_events lc
+  WHERE lc.account_id = a.id AND lc.action = 'legacy_import' AND lc.reason_code = 'signup_claimed_customer'
+    AND lc.link_version_after = a.link_version AND lc.to_customer_id = a.contact_id)`
+
 const LIST_DEFAULT_LIMIT = 50
 const LIST_MAX_LIMIT = 100
 const HISTORY_LIMIT = 200
@@ -88,6 +108,7 @@ type MemberRow = {
   request_created_at: string | null
   conflict_customer_unavailable: number | null
   conflict_phone_taken: number | null
+  legacy_claim: number | null
   has_password: number | null
   has_telegram: number | null
   verified: number | null
@@ -102,6 +123,7 @@ function memberSelect(extraColumns = '', extraJoins = ''): string {
          r.id AS request_id, r.note AS request_note, r.created_at AS request_created_at,
          CASE WHEN ${MEMBER_CONFLICT_CUSTOMER_UNAVAILABLE_SQL} THEN 1 ELSE 0 END AS conflict_customer_unavailable,
          CASE WHEN ${MEMBER_CONFLICT_PHONE_TAKEN_SQL} THEN 1 ELSE 0 END AS conflict_phone_taken,
+         CASE WHEN ${LEGACY_CLAIM_SQL} THEN 1 ELSE 0 END AS legacy_claim,
          CASE WHEN a.password_hash IS NOT NULL THEN 1 ELSE 0 END AS has_password,
          EXISTS (SELECT 1 FROM portal_login_identities li WHERE li.account_id = a.id AND li.provider = 'telegram') AS has_telegram,
          EXISTS (SELECT 1 FROM portal_login_identities lv WHERE lv.account_id = a.id AND lv.verified_at IS NOT NULL) AS verified
@@ -129,6 +151,9 @@ export type StaffMemberView = {
   closedAt: string | null
   pendingRequest: { id: number; note: string | null; createdAt: string | null } | null
   conflicts: MemberConflict[]
+  // Linked by the old sign-up to a customer it did not create, never checked
+  // by staff since (filter=legacy_claims).
+  legacyClaim: boolean
 }
 
 export function staffMemberView(row: MemberRow): StaffMemberView {
@@ -159,6 +184,7 @@ export function staffMemberView(row: MemberRow): StaffMemberView {
     closedAt: row.closed_at ?? null,
     pendingRequest: row.request_id == null ? null : { id: Number(row.request_id), note: row.request_note ?? null, createdAt: row.request_created_at ?? null },
     conflicts,
+    legacyClaim: Number(row.legacy_claim) === 1,
   }
 }
 
@@ -229,6 +255,7 @@ const LIST_FILTERS: Record<string, string> = {
   requests: "EXISTS (SELECT 1 FROM portal_member_link_requests rq WHERE rq.account_id = a.id AND rq.status = 'pending')",
   conflicts: `(${MEMBER_CONFLICT_CUSTOMER_UNAVAILABLE_SQL} OR ${MEMBER_CONFLICT_PHONE_TAKEN_SQL})`,
   suspended: "a.status = 'suspended'",
+  legacy_claims: LEGACY_CLAIM_SQL,
 }
 
 app.get('/', async (c) => {
@@ -320,6 +347,7 @@ app.post('/link-requests/:requestId/reject', async (c) => {
 // ---------------------------------------------------------------------------
 // Customer search for the Link float (profiles only, with who holds each).
 app.get('/customer-search', async (c) => {
+  if (!canViewCustomers(c.get('user'))) return contactsViewRequired(c)
   const q = String(c.req.query('q') || '').trim().slice(0, 80)
   if (q.length < 2) return c.json({ customers: [] })
   const phone = /^[\d\s()+.-]{6,}$/.test(q) ? canonicalizePhone(q) : null
@@ -422,6 +450,7 @@ app.get('/:id/history', async (c) => {
 })
 
 app.get('/:id/suggestions', async (c) => {
+  if (!canViewCustomers(c.get('user'))) return contactsViewRequired(c)
   const accountId = positiveInt(c.req.param('id'))
   if (!accountId) return c.json({ error: 'Member not found.', code: 'member_not_found' }, 404)
   const db = getDb(c.env)
@@ -456,8 +485,10 @@ app.get('/:id/suggestions', async (c) => {
   const ids = [...new Set(candidates.map((row) => Number(row.id)))].slice(0, 75)
   const linked = new Map<number, number>()
   if (ids.length) {
-    const holders = await db.prepare(`SELECT id, contact_id FROM portal_accounts WHERE contact_id IN (${ids.map(() => '?').join(',')})`)
-      .all<{ id: number; contact_id: number }>(ids)
+    // Server-produced customer ids (rows of the two queries above, at most 75),
+    // inlined as integers so no bound-parameter budget is spent.
+    const holders = await db.prepare(`SELECT id, contact_id FROM portal_accounts WHERE contact_id IN (${inlineIntegerIds(ids)})`)
+      .all<{ id: number; contact_id: number }>([])
     for (const holder of holders) linked.set(Number(holder.contact_id), Number(holder.id))
   }
   return c.json({ suggestions: classifyMemberSuggestions(member, candidates, linked) })
@@ -630,6 +661,10 @@ app.post('/:id/revert', async (c) => {
   const event = await db.prepare('SELECT * FROM portal_member_link_events WHERE id = @id AND account_id = @aid LIMIT 1').get<EventRow>({ id: eventId, aid: accountId })
   if (!event) return c.json({ error: 'Event not found.', code: 'member_link_event_not_found' }, 404)
   if (await replayedEvent(env, accountId, clientRequestId)) return c.json({ ok: true, replayed: true, member: await loadMember(env, accountId) })
+  // As /link: a closed member is never relinked or otherwise changed (E2).
+  const urlAccount = await loadAccountState(env, accountId)
+  if (!urlAccount) return c.json({ error: 'Member not found.', code: 'member_not_found' }, 404)
+  if (urlAccount.status === 'closed') return conflict(c, 'member_closed', 'This member closed their account.')
   if (!MEMBER_REVERTIBLE_ACTIONS.includes(event.action)) return conflict(c, 'member_link_not_revertible', 'This entry cannot be reverted.')
 
   // A Move is two events under one group id; revert them together.
@@ -644,27 +679,58 @@ app.post('/:id/revert', async (c) => {
     currentCustomerId: row.to_customer_id == null ? null : Number(row.to_customer_id),
     restoreCustomerId: row.from_customer_id == null ? null : Number(row.from_customer_id),
   }))
-  const reverted = await db.prepare(`SELECT 1 AS hit FROM portal_member_link_events WHERE reverts_event_id IN (${targets.map(() => '?').join(',')}) LIMIT 1`)
-    .get<{ hit: number }>(targets.map((target) => target.eventId))
+  // Event ids read from portal_member_link_events above (one, or a Move's two).
+  const revertedSql = `SELECT 1 AS hit FROM portal_member_link_events WHERE reverts_event_id IN (${inlineIntegerIds(targets.map((target) => target.eventId))}) LIMIT 1`
+  const reverted = await db.prepare(revertedSql).get<{ hit: number }>([])
   if (reverted) return conflict(c, 'member_link_already_reverted', 'This entry was already reverted.')
   for (const target of targets) {
     const state = await loadAccountState(env, target.accountId)
+    if (state?.status === 'closed') return conflict(c, 'member_closed', 'A member in this change closed their account.')
     if (!state || Number(state.link_version) !== target.linkVersionAfter || state.contact_id !== target.currentCustomerId) return staleResponse(c, accountId)
   }
 
-  const actor = actorOf(c.get('user'))
+  // E3: a revert that puts a member back on a customer re-creates a link and
+  // needs the same evidence as /link. The six-digit code proves ONE member,
+  // so it is accepted only when exactly one member is relinked; it is checked
+  // against that member's current link version and rate-limited as on /link.
+  const user = c.get('user')
+  const relinked = targets.filter((target) => target.restoreCustomerId != null)
+  let evidence: { evidence: MemberLinkEvidence; note: string | null } | null = null
+  if (relinked.length) {
+    let checkCodeValid: boolean | null = null
+    if (body.evidence === 'called_number_on_file') {
+      if (relinked.length !== 1) {
+        return c.json({ error: 'This revert reconnects more than one member. Confirm in person, or as an owner override.', code: 'member_revert_check_one_member' }, 400)
+      }
+      const subject = relinked[0]
+      const rate = await checkRateLimit(env, 'portal-member:link-check', `${user?.id ?? 0}:${subject.accountId}`, LINK_CHECK_MAX_ATTEMPTS, LINK_CHECK_WINDOW_MS)
+      if (!rate.allowed) {
+        c.header('Retry-After', String(rate.retryAfterSeconds))
+        return c.json({ error: 'Too many code attempts. Try again later.', code: 'rate_limited' }, 429)
+      }
+      checkCodeValid = await verifyPortalLinkCheckCode(env, subject.accountId, subject.linkVersionAfter, body.checkCode)
+    }
+    const checked = checkMemberLinkEvidence({ evidence: body.evidence, note: body.note, isAdmin: isAdminControlUser(user), checkCodeValid })
+    if (!checked.ok) return c.json({ error: checked.error, code: checked.code }, checked.status)
+    evidence = { evidence: checked.evidence, note: checked.note }
+  }
+
+  const actor = actorOf(user)
   const failure = await runBatch(env, buildMemberRevertStatements({
     targets,
     groupId: targets.length > 1 ? crypto.randomUUID() : null,
-    note: noteOf(body.note),
+    note: evidence ? evidence.note : noteOf(body.note),
     clientRequestId,
     actor,
+    evidence: evidence?.evidence ?? null,
   }))
   if (failure) {
     if (await replayedEvent(env, accountId, clientRequestId)) return c.json({ ok: true, replayed: true, member: await loadMember(env, accountId) })
-    const again = await db.prepare(`SELECT 1 AS hit FROM portal_member_link_events WHERE reverts_event_id IN (${targets.map(() => '?').join(',')}) LIMIT 1`)
-      .get<{ hit: number }>(targets.map((target) => target.eventId))
+    const again = await db.prepare(revertedSql).get<{ hit: number }>([])
     if (again) return conflict(c, 'member_link_already_reverted', 'This entry was already reverted.')
+    for (const target of targets) {
+      if ((await loadAccountState(env, target.accountId))?.status === 'closed') return conflict(c, 'member_closed', 'A member in this change closed their account.')
+    }
     for (const target of targets) {
       if (target.restoreCustomerId == null) continue
       const customerNow = await db.prepare(`SELECT id FROM customers WHERE id = @id AND ${customerIsProfileSql()} LIMIT 1`).get<{ id: number }>({ id: target.restoreCustomerId })
@@ -676,6 +742,7 @@ app.post('/:id/revert', async (c) => {
   await audit(env, actor.userId, actor.userName, 'member_revert', 'portal_member', accountId, {
     eventIds: targets.map((target) => target.eventId),
     accountIds: targets.map((target) => target.accountId),
+    evidence: evidence?.evidence ?? null,
   })
   return c.json({ ok: true, member: await loadMember(env, accountId) })
 })
@@ -713,8 +780,11 @@ app.post('/:id/reactivate', (c) => setStatus(c, 'suspended', 'active', 'member_r
 // the old POST /api/customers/:id/portal-reset, which had no caller and no
 // identity check). The member cannot sign in to show a code, so
 // called_number_on_file here means staff called the phone on the account (or
-// on the linked customer) and spoke to the member; owner_override still needs
-// an admin and a note. Returns the temporary password once.
+// on the linked customer) and spoke to the member. Because no code proves
+// that call, it is ADMIN-ONLY here and needs a note saying which number was
+// called and what the member confirmed (verifier E6); the note goes to the
+// audit log. owner_override still needs an admin and a note; in_person is
+// open to any linker. Returns the temporary password once.
 app.post('/:id/reset-password', async (c) => {
   const accountId = positiveInt(c.req.param('id'))
   if (!accountId) return c.json({ error: 'Member not found.', code: 'member_not_found' }, 404)
@@ -726,7 +796,14 @@ app.post('/:id/reset-password', async (c) => {
   if (account.status !== 'active' || !account.phone) {
     return conflict(c, 'member_reset_unavailable', 'Only an active phone + password account can be reset here.')
   }
-  const evidence = checkMemberLinkEvidence({ evidence: body.evidence, note: body.note, isAdmin: isAdminControlUser(user), checkCodeValid: true })
+  const isAdmin = isAdminControlUser(user)
+  if (body.evidence === 'called_number_on_file') {
+    if (!isAdmin) return c.json({ error: 'Only an administrator can reset a password after a phone call.', code: 'member_reset_call_admin_only' }, 403)
+    if (!noteOf(body.note)) return c.json({ error: 'Add a note: which number you called and what the member confirmed.', code: 'member_link_note_required' }, 400)
+  }
+  // No code exists for a member who cannot sign in, so the call is taken on
+  // the admin's word (above) rather than verified.
+  const evidence = checkMemberLinkEvidence({ evidence: body.evidence, note: body.note, isAdmin, checkCodeValid: true })
   if (!evidence.ok) return c.json({ error: evidence.error, code: evidence.code }, evidence.status)
   // A readable-but-random temporary password (no ambiguous characters).
   const alphabet = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'

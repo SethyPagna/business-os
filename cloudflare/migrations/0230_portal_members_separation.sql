@@ -19,6 +19,10 @@
 --       set counter every link change bumps), created_contact_id (the customer
 --       the old sign-up itself created, for staff review), last_seen_at and
 --       closed_at;
+--     * last_seen_at is backfilled for every existing account from the best
+--       evidence of activity it has (its latest session, consent, update or
+--       creation time), so the 180-day retention rule never treats an account
+--       that was used recently as never seen;
 --     * contact_id becomes UNIQUE where set: one member per customer.
 --   No table references portal_accounts by foreign key and no trigger or view
 --   names it (checked at write time: grep of cloudflare/migrations), so the
@@ -48,6 +52,8 @@
 --   SELECT seq FROM sqlite_sequence WHERE name = 'portal_accounts';     -- >= pre
 --   SELECT COUNT(*) FROM portal_accounts WHERE member_code IS NOT NULL;  -- 0
 --   SELECT COUNT(*) FROM portal_accounts WHERE status <> 'active' OR link_version <> 0;  -- 0
+--   SELECT COUNT(*) FROM portal_accounts WHERE last_seen_at IS NULL
+--     AND COALESCE(created_at, updated_at, consent_at) IS NOT NULL;   -- 0 (backfilled)
 --   SELECT COUNT(*) FROM sqlite_master WHERE name IN ('idx_portal_accounts_phone',
 --     'idx_portal_accounts_membership', 'idx_portal_accounts_member_code',
 --     'idx_portal_accounts_contact', 'idx_portal_accounts_status_seen');  -- 5
@@ -98,7 +104,19 @@ CREATE TABLE portal_accounts (
   consent_version TEXT,
   consent_at TEXT,
   consent_locale TEXT,
-  member_code TEXT CHECK (member_code IS NULL OR member_code GLOB 'W-[0-9A-HJKMNP-TV-Z][0-9A-HJKMNP-TV-Z][0-9A-HJKMNP-TV-Z][0-9A-HJKMNP-TV-Z]-[0-9A-HJKMNP-TV-Z][0-9A-HJKMNP-TV-Z][0-9A-HJKMNP-TV-Z][0-9A-HJKMNP-TV-Z]'),
+  -- Native D1 refuses any LIKE/GLOB pattern over 50 bytes at run time
+  -- ("LIKE or GLOB pattern too complex"), so the shape is checked as fixed
+  -- positions plus four two-character GLOBs of 36 bytes each (same rule as
+  -- 0156; pinned by test-d1-pattern-limit-native.cjs).
+  member_code TEXT CHECK (member_code IS NULL OR (
+    length(member_code) = 11
+    AND substr(member_code, 1, 2) = 'W-'
+    AND substr(member_code, 7, 1) = '-'
+    AND substr(member_code, 3, 2) GLOB '[0-9A-HJKMNP-TV-Z][0-9A-HJKMNP-TV-Z]'
+    AND substr(member_code, 5, 2) GLOB '[0-9A-HJKMNP-TV-Z][0-9A-HJKMNP-TV-Z]'
+    AND substr(member_code, 8, 2) GLOB '[0-9A-HJKMNP-TV-Z][0-9A-HJKMNP-TV-Z]'
+    AND substr(member_code, 10, 2) GLOB '[0-9A-HJKMNP-TV-Z][0-9A-HJKMNP-TV-Z]'
+  )),
   status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'suspended', 'closed')),
   link_version INTEGER NOT NULL DEFAULT 0 CHECK (link_version >= 0),
   created_contact_id INTEGER,
@@ -110,7 +128,7 @@ INSERT INTO portal_accounts (
   id, membership_id, name, phone, password_hash, email, contact_id,
   cart_json, wishlist_json, created_at, updated_at,
   consent_version, consent_at, consent_locale,
-  created_contact_id
+  created_contact_id, last_seen_at
 )
 SELECT
   o.id, o.membership_id, o.name, o.phone, o.password_hash, o.email, o.contact_id,
@@ -124,7 +142,16 @@ SELECT
       AND o.membership_id IS NOT NULL
       AND lower(trim(c.membership_number)) = lower(trim(o.membership_id))
       AND c.created_at IS NOT NULL AND o.created_at IS NOT NULL
-      AND abs(julianday(c.created_at) - julianday(o.created_at)) * 86400.0 <= 5)
+      AND abs(julianday(c.created_at) - julianday(o.created_at)) * 86400.0 <= 5),
+  -- Latest evidence of activity, normalised by datetime() so the session
+  -- columns (ISO or CURRENT_TIMESTAMP text) compare correctly with the rest.
+  NULLIF(max(
+    COALESCE((SELECT max(datetime(COALESCE(s.last_seen_at, s.created_at)))
+      FROM portal_sessions s WHERE s.account_id = o.id), ''),
+    COALESCE(datetime(o.consent_at), ''),
+    COALESCE(datetime(o.updated_at), ''),
+    COALESCE(datetime(o.created_at), '')
+  ), '')
 FROM portal_accounts_0230_old o
 ORDER BY o.id;
 

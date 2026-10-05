@@ -20,6 +20,8 @@ const assert = require('node:assert/strict')
 const path = require('node:path')
 const { execFileSync } = require('node:child_process')
 const { createPortalHarness } = require('./harness/load_portal_auth_route.cjs')
+// Sign-up is off unless explicitly enabled (owner ruling 6 Oct); these checks need it on.
+const SIGNUP_OPEN = { customer_portal_signup_enabled: 'true' }
 
 const root = path.resolve(__dirname, '..')
 const base = process.env.SECURITY_TEST_BASE
@@ -53,35 +55,35 @@ const setSession = (h, accountId, fields) => {
 
 async function main() {
   await check('control: a session signed in 89 days ago and used yesterday still works', async () => {
-    const h = createPortalHarness({ sources })
+    const h = createPortalHarness({ sources, settings: SIGNUP_OPEN })
     const { cookie, accountId } = await signedIn(h, 'Control', '012 401 401')
     setSession(h, accountId, { created_at: sqlTime(-89 * DAY), last_seen_at: sqlTime(-1 * DAY), expires_at: iso(5 * DAY) })
     assert.ok((await me(h, cookie)).account, 'the control must authenticate, or the checks below prove nothing')
   })
 
   await check('90-day absolute limit: a session signed in 91 days ago stops, however recently used', async () => {
-    const h = createPortalHarness({ sources })
+    const h = createPortalHarness({ sources, settings: SIGNUP_OPEN })
     const { cookie, accountId } = await signedIn(h, 'Absolute', '012 402 402')
     setSession(h, accountId, { created_at: sqlTime(-91 * DAY), last_seen_at: sqlTime(-60 * 1000), expires_at: iso(200 * DAY) })
     assert.equal((await me(h, cookie)).account, null)
   })
 
   await check('30-day idle limit: a session not seen for 31 days stops', async () => {
-    const h = createPortalHarness({ sources })
+    const h = createPortalHarness({ sources, settings: SIGNUP_OPEN })
     const { cookie, accountId } = await signedIn(h, 'Idle', '012 403 403')
     setSession(h, accountId, { created_at: sqlTime(-40 * DAY), last_seen_at: sqlTime(-31 * DAY), expires_at: iso(300 * DAY) })
     assert.equal((await me(h, cookie)).account, null)
   })
 
   await check('a row from the old 399-day rule (signed in 100 days ago, expiring next year) stops', async () => {
-    const h = createPortalHarness({ sources })
+    const h = createPortalHarness({ sources, settings: SIGNUP_OPEN })
     const { cookie, accountId } = await signedIn(h, 'Legacy Row', '012 404 404')
     setSession(h, accountId, { created_at: sqlTime(-100 * DAY), last_seen_at: sqlTime(-1 * DAY), expires_at: iso(299 * DAY) })
     assert.equal((await me(h, cookie)).account, null)
   })
 
   await check('a suspended member is signed out at once (the status gate in the session read)', async () => {
-    const h = createPortalHarness({ sources })
+    const h = createPortalHarness({ sources, settings: SIGNUP_OPEN })
     const { cookie, accountId } = await signedIn(h, 'Suspended', '012 405 405')
     assert.ok((await me(h, cookie)).account)
     h.raw.prepare("UPDATE portal_accounts SET status = 'suspended' WHERE id = @id").run({ id: accountId })
@@ -89,7 +91,7 @@ async function main() {
   })
 
   await check('a new session is 30 days; a slide never goes past sign-in + 90 days', async () => {
-    const h = createPortalHarness({ sources })
+    const h = createPortalHarness({ sources, settings: SIGNUP_OPEN })
     const { cookie, accountId } = await signedIn(h, 'Slider', '012 406 406')
     const row = () => h.raw.prepare('SELECT created_at, expires_at FROM portal_sessions WHERE account_id = @id').get({ id: accountId })
     const ttlDays = (Date.parse(row().expires_at) - Date.now()) / DAY
@@ -103,7 +105,7 @@ async function main() {
   })
 
   await check('the retention sweep deletes exactly the sessions the read refuses', async () => {
-    const h = createPortalHarness({ sources })
+    const h = createPortalHarness({ sources, settings: SIGNUP_OPEN })
     const retention = h.load('lib/ephemeralRetention.ts')
     const insert = (label, fields) => h.raw.prepare(`INSERT INTO portal_sessions (account_id, token_hash, expires_at, created_at, last_seen_at, revoked_at)
       VALUES (1, @t, @e, @c, @l, @r)`).run({ t: label, e: fields.e, c: fields.c, l: fields.l ?? null, r: fields.r ?? null })
@@ -117,7 +119,7 @@ async function main() {
   })
 
   await check('180-day retention closes only unlinked, unverified, inactive members, clearing their personal fields', async () => {
-    const h = createPortalHarness({ sources })
+    const h = createPortalHarness({ sources, settings: SIGNUP_OPEN })
     const retention = h.load('lib/ephemeralRetention.ts')
     h.raw.prepare("INSERT INTO customers (id, name) VALUES (77, 'Linked Customer')").run({})
     const add = (name, fields = {}) => Number(h.raw.prepare(`INSERT INTO portal_accounts (name, phone, password_hash, email, cart_json, member_code, contact_id, status, created_at, last_seen_at)
