@@ -200,7 +200,7 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
     key: 'products',
     tKey: 'perm_section_products',
     label: 'Products',
-    description: 'The Products page, including its bulk-import tools. "Products (conditions hidden)" below is a separate, narrower way into this same page -- a role can have real Products access (Full or Review Required) OR that narrower option, never both at once; granting real access always overrides and disables the narrower one.',
+    description: 'The Products page, including its bulk-import tools. "Products (conditions hidden)" below is a separate, narrower way into this same page -- a role can have real Products access (Full or Partial Access) OR that narrower option, never both at once; granting real access always overrides and disables the narrower one.',
     permissions: [
       // tier: true -- Products' Review Required tier is wired end to end:
       // create/update/delete all queue via lib/reviewGate.ts's
@@ -219,7 +219,7 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
         sensitivity: 'normal',
         tier: true,
         reviewTKey: 'perm_products_review_desc',
-        reviewDescription: 'Under Review Required, viewing and searching products works directly. Adding, editing, or deleting a product goes to the Review/Approval queue for an admin to approve or reject. Import, export, merge-duplicates, and the zero-quantity cleanup tool all require Full Access.',
+        reviewDescription: 'Under Partial Access, viewing and searching products works directly. Adding, editing, or deleting a product goes to the Review/Approval queue for an admin to approve or reject. Import, export, merge-duplicates, and the zero-quantity cleanup tool all require Full Access.',
       },
       // Moved here from the old "Sensitive settings" bucket -- confirmed
       // by source (components/products/import/BulkImportModal.tsx) that
@@ -326,7 +326,7 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
         sensitivity: 'high',
         tier: true,
         reviewTKey: 'perm_inventory_review_desc',
-        reviewDescription: 'Under Review Required, viewing inventory works directly. Editing the saved reasons list goes to the Review/Approval queue for an admin to approve or reject. Stock adjustments, branch transfers, and moving stock between rows all require Full Access.',
+        reviewDescription: 'Under Partial Access, viewing inventory works directly. Editing the saved reasons list goes to the Review/Approval queue for an admin to approve or reject. Stock adjustments, branch transfers, and moving stock between rows all require Full Access.',
       },
     ],
   },
@@ -346,7 +346,7 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
         sensitivity: 'high',
         tier: true,
         reviewTKey: 'perm_branches_review_desc',
-        reviewDescription: 'Under Review Required, viewing and exporting branches works directly. Editing canonical branch details goes to the Review/Approval queue. Transferring stock and repairing misplaced stock require Full Access.',
+        reviewDescription: 'Under Partial Access, viewing and exporting branches works directly. Editing canonical branch details goes to the Review/Approval queue. Transferring stock and repairing misplaced stock require Full Access.',
       },
     ],
   },
@@ -397,7 +397,7 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
         sensitivity: 'high',
         tier: true,
         reviewTKey: 'perm_returns_review_desc',
-        reviewDescription: 'Under Review Required, viewing, searching, and creating a return all work directly. Editing an existing return requires Full Access. There is no delete action for returns in this app.',
+        reviewDescription: 'Under Partial Access, viewing, searching, and creating a return all work directly. Editing an existing return requires Full Access. There is no delete action for returns in this app.',
       },
     ],
   },
@@ -422,7 +422,7 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
         sensitivity: 'high',
         tier: true,
         reviewTKey: 'perm_fees_review_desc',
-        reviewDescription: 'Under Review Required, create, edit, search, and export work directly. Only delete goes to the Review/Approval queue for an admin to approve or reject.',
+        reviewDescription: 'Under Partial Access, create, edit, search, and export work directly. Only delete goes to the Review/Approval queue for an admin to approve or reject.',
       },
     ],
   },
@@ -450,7 +450,7 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
         sensitivity: 'normal',
         tier: true,
         reviewTKey: 'perm_contacts_review_desc',
-        reviewDescription: 'Under Review Required, viewing, searching, and adding a contact all work directly. Editing an existing contact is limited to the name field -- every other change is silently dropped, with a warning shown after saving. Deleting a contact requires Full Access.',
+        reviewDescription: 'Under Partial Access, viewing, searching, and adding a contact all work directly. Editing an existing contact is limited to the name field -- every other change is silently dropped, with a warning shown after saving. Deleting a contact requires Full Access.',
       },
       // Supplier privacy (Part 383 R2): the Suppliers tab (and every
       // /suppliers endpoint -- list with contact details, duplicates,
@@ -476,7 +476,7 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
     key: 'review',
     tKey: 'perm_section_review',
     label: 'Review',
-    description: 'None / View only / Full. The Review/Approval queue for every section’s Review Required tier above. View only shows the pending queue read-only; approving and rejecting require Full Access.',
+    description: 'None / View only / Full. The Review/Approval queue for every section’s Partial Access tier above. View only shows the pending queue read-only; approving and rejecting require Full Access.',
     permissions: [
       // View-tier section (Part 557 slice 5): reading the pending queue
       // (routes/reviewQueue.ts GET / and GET /:id) admits a 'view' grant; the

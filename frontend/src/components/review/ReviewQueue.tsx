@@ -277,7 +277,7 @@ export default function ReviewQueue() {
             {tr('review_queue', 'Review Queue')}
           </h1>
           <p className="text-xs text-slate-400 dark:text-slate-500">
-            {tr('review_queue_hint', 'Approve or reject changes submitted by Review Required users.')}
+            {tr('review_queue_hint', 'Approve or reject changes submitted by Partial Access users.')}
           </p>
         </div>
       </div>
