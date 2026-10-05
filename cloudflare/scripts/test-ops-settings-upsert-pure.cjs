@@ -432,7 +432,7 @@ async function main() {
 
   await check('the route\'s audit call and version bump are the shape the batch reproduces', () => {
     const once = (needle, label) => assert.strictEqual(POST_HANDLER.split(needle).length - 1, 1, label)
-    once("await audit(c.env, user?.id ?? null, actorSnapshot(user), 'update', 'settings', null, { keys: attemptedKeys },", 'audit(): update / settings / null entity id / { keys }')
+    once("await audit(c.env, user?.id ?? null, actorSnapshot(user), 'update', 'settings', null, { keys: changedKeys },", 'audit(): update / settings / null entity id / { keys }')
     once('redact: (key) => isSensitiveSettingKey(key) || isSecretShapedAuditKey(key),', 'the redaction the route applies')
     once("c.executionCtx.waitUntil(bumpVersion(c.env, 'settings'))", 'the settings version bump')
     const auditTs = read('cloudflare', 'src', 'lib', 'audit.ts')

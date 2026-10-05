@@ -499,7 +499,7 @@ async function checkAuditProducerLiterals(api) {
  const reader = load(path.join(sourceRoot, 'lib/auditLogPage.ts')), query = load(path.join(sourceRoot, 'lib/auditLogQuery.ts'))
  const audit = compile(read(path.join(sourceRoot, 'lib/audit.ts')), id => { assert.equal(id, './db'); return { getDb: () => { throw Error('Unselected audit service') } } })
  const settings = ast('routes/settings.ts'), sales = ast('routes/sales.ts')
- const keysNode = find(settings, n => ts.isObjectLiteralExpression(n) && n.getText(settings) === '{ keys: attemptedKeys }')
+ const keysNode = find(settings, n => ts.isObjectLiteralExpression(n) && n.getText(settings) === '{ keys: changedKeys }')
  const addedNode = find(settings, n => ts.isObjectLiteralExpression(n) && n.properties.some(p => p.name?.getText(settings) === 'action' && p.initializer?.getText(settings) === "'payment_methods_backfill'"))
  const entriesNode = find(sales, n => ts.isPropertyAssignment(n) && n.name.getText(sales) === 'entries' && n.initializer.getText(sales).startsWith('ledgerEntries.map'))
  assert.ok(keysNode); assert.ok(addedNode); assert.ok(entriesNode)
@@ -509,7 +509,7 @@ async function checkAuditProducerLiterals(api) {
  const cases = [
   { name: 'legacy-subtotal-field-audit', entity: 'sale', expected: {changed_columns:evaluate(changedNode.initializer,legacy,{})} },
   { name: 'topic-settings-key-audit', entity: 'settings', expected:evaluate(topicNode,topic,{keys:['telegram_topic_id']}) },
-  { name: 'settings-key-audit', entity: 'settings', expected: evaluate(keysNode, settings, { attemptedKeys: ['store_name', 'pos_payment_methods'] }) },
+  { name: 'settings-key-audit', entity: 'settings', expected: evaluate(keysNode, settings, { changedKeys: ['store_name', 'pos_payment_methods'] }) },
   { name: 'payment-method-backfill-audit', entity: 'settings', expected: evaluate(addedNode, settings, { merged: { added: ['KHQR', 'ABA'] } }) },
   { name: 'sale-amendment-ledger-kind-audit', entity: 'sale', expected: { entries: evaluate(entriesNode.initializer, sales, { ledgerEntries: [{ kind: 'line_added' }, { kind: 'line_updated' }] }) } },
  ]

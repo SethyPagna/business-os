@@ -71,20 +71,40 @@ async function getSettingsUpdatedAt(env: Env, keys?: string[]): Promise<string |
   return row?.updated_at || new Date().toISOString()
 }
 
-// Keep the settings conflict payload scoped to exactly the fields the client
-// was editing.  Sending the whole settings table would leak unrelated
-// configuration into a conflict response and would make it far too easy for
-// a retry to overwrite another page's work.
-async function getSettingsValues(env: Env, keys: string[]): Promise<Record<string, string>> {
-  if (!keys.length) return {}
-  const db = getDb(env)
-  const rows = await db.prepare(
-    `SELECT key, value FROM settings WHERE key IN (SELECT value FROM json_each(@keysJson))`,
-  ).all<{ key: string; value: string }>({ keysJson: JSON.stringify(keys) })
-  return rows.reduce<Record<string, string>>((values, row) => {
-    values[row.key] = row.value
-    return values
-  }, {})
+type StoredSettingRow = { key: string; value: string; updated_at: string | null }
+
+// ONE read of the keys a save names, taken once and reused by every check in
+// POST / (admin-only keys, the version check, the conflict payload, the
+// payment-method and language lookups, the audit before-image and the
+// changed-keys diff). Each of those used to run its own SELECT. It also keeps
+// the conflict payload scoped to exactly the fields the client was editing:
+// sending the whole table would leak unrelated configuration and make it far
+// too easy for a retry to overwrite another page's work.
+async function loadStoredSettingRows(env: Env, keys: string[]): Promise<Map<string, StoredSettingRow>> {
+  const stored = new Map<string, StoredSettingRow>()
+  if (!keys.length) return stored
+  const rows = await getDb(env).prepare(
+    `SELECT key, value, updated_at FROM settings WHERE key IN (SELECT value FROM json_each(@keysJson))`,
+  ).all<StoredSettingRow>({ keysJson: JSON.stringify(keys) })
+  for (const row of rows) stored.set(row.key, row)
+  return stored
+}
+
+function storedSettingValues(stored: Map<string, StoredSettingRow>): Record<string, string> {
+  const values: Record<string, string> = {}
+  for (const [key, row] of stored) values[key] = row.value
+  return values
+}
+
+// Same answer getSettingsUpdatedAt(env, keys) gives, from rows already read:
+// the newest stamp among the named keys, else (none of them exist yet) the
+// table-wide newest.
+async function scopedUpdatedAt(env: Env, stored: Map<string, StoredSettingRow>): Promise<string | null> {
+  let newest: string | null = null
+  for (const row of stored.values()) {
+    if (row.updated_at && (newest === null || row.updated_at > newest)) newest = row.updated_at
+  }
+  return newest ?? await getSettingsUpdatedAt(env)
 }
 
 app.get('/', async (c) => {
@@ -962,10 +982,9 @@ const PORTAL_LANGUAGE_KEY = 'customer_portal_language'
 const PORTAL_TRANSLATIONS_KEY = 'customer_portal_translations'
 
 // A language stored before the English/Khmer decision comes back unchanged from the editor; it already publishes as automatic.
-async function portalLanguageForWrite(env: Env, sent: unknown): Promise<string | null> {
+function portalLanguageForWrite(stored: string | undefined, sent: unknown): string | null {
   const language = portalLanguageSetting(sent)
   if (language) return language
-  const stored = (await getSettingsValues(env, [PORTAL_LANGUAGE_KEY]))[PORTAL_LANGUAGE_KEY]
   return sent === stored ? AUTOMATIC_PORTAL_LANGUAGE : null
 }
 
@@ -1012,12 +1031,21 @@ app.post('/', async (c) => {
   const permissionRefusal = settingsPermissionRefusal(user, attemptedKeys)
   if (permissionRefusal) return c.json({ error: permissionRefusal }, 403)
 
+  // What the client sent, as text, before any normalisation below: the
+  // answer names every key the Worker stored differently from this.
+  const sentAsText: Record<string, string> = {}
+  for (const key of attemptedKeys) {
+    const raw = body[key]
+    sentAsText[key] = typeof raw === 'string' ? raw : JSON.stringify(raw)
+  }
+  // The one read every check below shares (see loadStoredSettingRows).
+  const stored = await loadStoredSettingRows(c.env, attemptedKeys)
+
   // P1-3: routing, retention and credential rows (lib/settingsAdminKeys.ts)
   // need administrator control to CHANGE here. An unchanged value -- the
   // Settings form resending what it loaded -- is a no-op and stays allowed.
   if (!isAdminControlUser(user)) {
-    const storedAdminOnly = await getSettingsValues(c.env, attemptedKeys)
-    const changedAdminOnlyKey = firstChangedAdminOnlySettingKey(attemptedKeys, storedAdminOnly, (key) => {
+    const changedAdminOnlyKey = firstChangedAdminOnlySettingKey(attemptedKeys, storedSettingValues(stored), (key) => {
       const raw = body[key]
       return typeof raw === 'string' ? raw : JSON.stringify(raw)
     })
@@ -1060,7 +1088,7 @@ app.post('/', async (c) => {
     body.customer_portal_about_image_alt = normalizePortalImageAlt(body.customer_portal_about_image_alt)
   }
   if (attemptedKeys.includes(PORTAL_LANGUAGE_KEY)) {
-    const language = await portalLanguageForWrite(c.env, body[PORTAL_LANGUAGE_KEY])
+    const language = portalLanguageForWrite(stored.get(PORTAL_LANGUAGE_KEY)?.value, body[PORTAL_LANGUAGE_KEY])
     if (!language) {
       return c.json({ error: 'The website language must be English or Khmer.', code: 'invalid_portal_language' }, 400)
     }
@@ -1141,8 +1169,7 @@ app.post('/', async (c) => {
     if (!normalized) {
       return c.json({ error: 'Payment methods must be a non-empty JSON list of bounded names.', code: 'invalid_payment_methods_setting' }, 400)
     }
-    const rawRow = await getDb(c.env).prepare("SELECT value FROM settings WHERE key='pos_payment_methods'").get<{ value: string }>()
-    paymentMethodsRawBefore = rawRow?.value ?? null
+    paymentMethodsRawBefore = stored.get('pos_payment_methods')?.value ?? null
     const current = await loadPaymentMethodSetting(c.env)
     if (current) {
       const spellingOnlyChange = current.methods.find((method) => {
@@ -1161,7 +1188,7 @@ app.post('/', async (c) => {
 
   const expectedUpdatedAt = getExpectedUpdatedAt(body)
   if (expectedUpdatedAt) {
-    const currentUpdatedAt = await getSettingsUpdatedAt(c.env, attemptedKeys)
+    const currentUpdatedAt = await scopedUpdatedAt(c.env, stored)
     try {
       assertUpdatedAtMatch('settings', { updated_at: currentUpdatedAt }, expectedUpdatedAt)
     } catch (error) {
@@ -1172,34 +1199,43 @@ app.post('/', async (c) => {
         // generic `current` record only has an updated_at timestamp here.
         return c.json({
           ...conflictBody,
-          currentSettings: await getSettingsValues(c.env, attemptedKeys),
+          currentSettings: storedSettingValues(stored),
         }, status)
       }
       throw error
     }
   }
 
-  // The audit row used to say only WHICH keys were saved. Read the stored
-  // values once before the batch so the row can say what each key changed
-  // from and to; secret-bearing keys (settings' own isSensitiveSettingKey,
-  // widened by the audit module's secret-shaped-key test) record that they
-  // changed without recording either value.
-  const settingsBefore = await getSettingsValues(c.env, attemptedKeys)
+  // Only a key whose value actually changes is written. The Settings form and
+  // the Website Editor resend every field they loaded; upserting each one cost
+  // a D1 write apiece, moved its updated_at (so another device's next save of
+  // that key looked like a conflict) and, on the Free plan, still invalidated
+  // the storefront cache. The stored text is compared with the text this save
+  // would store, after the sanitising above.
   const settingsAfter: Record<string, unknown> = {}
-  const db = getDb(c.env)
-  const statements: Array<{ sql: string; params: Record<string, unknown> }> = attemptedKeys.map((key) => {
+  const changedKeys: string[] = []
+  for (const key of attemptedKeys) {
     const raw = body[key]
     const value = key === 'receipt_template' ? sanitizeReceiptTemplateValue(raw)
       : key === 'receipt_print_settings' ? sanitizeReceiptPrintSettingsValue(raw)
         : (typeof raw === 'string' ? raw : JSON.stringify(raw))
+    const existing = stored.get(key)
+    if (existing && existing.value === value) continue
     settingsAfter[key] = value
-    return {
-      sql: `INSERT INTO settings (key, value, updated_at) VALUES (@key, @value, CURRENT_TIMESTAMP)
-            ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP`,
-      params: { key, value },
-    }
-  })
-  if (paymentMethodsRawBefore !== undefined) {
+    changedKeys.push(key)
+  }
+  if (changedKeys.length === 0) {
+    // Nothing to write, audit, cache-bump or broadcast.
+    return c.json({ updatedAt: await scopedUpdatedAt(c.env, stored), keys: [], unchanged: attemptedKeys })
+  }
+
+  const db = getDb(c.env)
+  const statements: Array<{ sql: string; params: Record<string, unknown> }> = changedKeys.map((key) => ({
+    sql: `INSERT INTO settings (key, value, updated_at) VALUES (@key, @value, CURRENT_TIMESTAMP)
+          ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP`,
+    params: { key, value: settingsAfter[key] },
+  }))
+  if (paymentMethodsRawBefore !== undefined && changedKeys.includes('pos_payment_methods')) {
     statements.unshift(
       { sql: 'DELETE FROM sale_mutation_guards', params: {} },
       {
@@ -1225,10 +1261,12 @@ app.post('/', async (c) => {
     throw error
   }
 
-  const updatedAt = await getSettingsUpdatedAt(c.env)
-  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'update', 'settings', null, { keys: attemptedKeys },
-    changedFields(settingsBefore, settingsAfter, {
-      keys: attemptedKeys,
+  // The audit row says what each CHANGED key moved from and to; secret-bearing
+  // keys (settings' own isSensitiveSettingKey, widened by the audit module's
+  // secret-shaped-key test) record that they changed without either value.
+  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'update', 'settings', null, { keys: changedKeys },
+    changedFields(storedSettingValues(stored), settingsAfter, {
+      keys: changedKeys,
       redact: (key) => isSensitiveSettingKey(key) || isSecretShapedAuditKey(key),
     }))
   // 6.3 (reproduced live by the Part-400 sweep): the portal caches its
@@ -1238,8 +1276,25 @@ app.post('/', async (c) => {
   // died (~60s). Settings writes now carry their own version; the portal
   // cache key composes it (see portalCacheVersion).
   c.executionCtx.waitUntil(bumpVersion(c.env, 'settings'))
-  c.executionCtx.waitUntil(broadcast(c.env, 'settings', { action: 'update', keys: attemptedKeys }))
-  return c.json({ updatedAt, keys: attemptedKeys })
+  // `writeId` lets the saving tab recognise this broadcast as its own echo.
+  const writeId = crypto.randomUUID()
+  c.executionCtx.waitUntil(broadcast(c.env, 'settings', { action: 'update', keys: changedKeys, writeId }))
+  // Values the Worker stored differently from what was sent (a trimmed link,
+  // a normalised language, the receipt template's text contrast, ...): the
+  // saver adopts these instead of re-reading the whole settings table.
+  const saved: Record<string, string> = {}
+  for (const key of changedKeys) {
+    if (settingsAfter[key] !== sentAsText[key] && !isSensitiveSettingKey(key) && !isSecretShapedAuditKey(key)) saved[key] = settingsAfter[key] as string
+  }
+  return c.json({
+    // Scoped to the keys just written: a primary-key read of those rows, not
+    // the table-wide MAX(updated_at) scan this answer used to run.
+    updatedAt: await getSettingsUpdatedAt(c.env, changedKeys),
+    writeId,
+    keys: changedKeys,
+    ...(changedKeys.length < attemptedKeys.length ? { unchanged: attemptedKeys.filter((key) => !changedKeys.includes(key)) } : {}),
+    ...(Object.keys(saved).length ? { saved } : {}),
+  })
 })
 
 export default app
