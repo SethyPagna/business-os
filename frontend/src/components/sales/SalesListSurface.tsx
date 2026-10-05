@@ -2,7 +2,7 @@ import { Fragment, Children, isValidElement, useEffect, type ReactNode, type Com
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
 import Printer from 'lucide-react/dist/esm/icons/printer.js'
-import StatusBadge from './StatusBadge.tsx'
+import StatusBadge, { DebtLoweredTag } from './StatusBadge.tsx'
 import { consumeLongPressClick, createLongPressHandlers, type LongPressState } from '../../utils/longPress.ts'
 import ColumnChooser from '../shared/ColumnChooser.tsx'
 import { useColumnPreferences } from '../shared/useColumnPreferences.ts'
@@ -48,6 +48,8 @@ interface SaleRecord {
   total_usd?: number
   total?: number
   total_khr?: number
+  // RET-A F1: what returns took off a Not Paid debt (GET /api/sales), shown as a tag.
+  return_owed_reduction_usd?: number | string | null
   items?: SaleItem[] | string | null
   // Y17: the customer column folds name + phone into one cell; the full
   // membership/address detail opens in SaleDetailModal on row click.
@@ -355,7 +357,7 @@ export default function SalesListSurface({
                                   {sale.customer_phone?.trim() ? <div className="detail-scroll-text text-xs text-gray-400"><EntityLink page="contacts" anchor="hub:contacts:customers" search={sale.customer_phone} navigate={navigateTo}>{sale.customer_phone}</EntityLink></div> : null}
                                 </div>
                               </td>
-                              <td className="px-3 py-1.5"><StatusBadge status={status} t={t} /></td>
+                              <td className="px-3 py-1.5"><span className="inline-flex flex-wrap items-center gap-1"><StatusBadge status={status} t={t} /><DebtLoweredTag amountUsd={sale.return_owed_reduction_usd} fmtUSD={fmtUSD} t={t} /></span></td>
                               {cols.isVisible('cashier') ? <td className="hidden px-3 py-1.5 text-gray-700 dark:text-gray-300 lg:table-cell">{sale.cashier_name || 'N/A'}</td> : null}
                               <td className="px-3 py-1.5">{sale.payment_method ? <EntityLink page="settings" anchor="hub:settings:settings" navigate={navigateTo}><span className="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">{sale.payment_method}</span></EntityLink> : <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">N/A</span>}</td>
                               {cols.isVisible('branch') ? <td className="hidden px-3 py-1.5 text-[11px] text-gray-500 md:table-cell">{branchLabel ? <EntityLink page="branches" anchor="hub:branches:overview" navigate={navigateTo}>{branchLabel}</EntityLink> : 'N/A'}</td> : null}
@@ -560,6 +562,7 @@ export default function SalesListSurface({
                             <div data-sales-card-status-meta="" className="mt-1 flex min-w-0 flex-nowrap items-center gap-1.5 overflow-x-auto overscroll-x-contain whitespace-nowrap [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                               {branchLabel ? <span className="shrink-0" aria-label={`${t('branch') || 'Branch'}: ${branchLabel}`}><EntityLink page="branches" anchor="hub:branches:overview" navigate={navigateTo}>{branchLabel}</EntityLink></span> : null}
                               <span className="shrink-0"><StatusBadge status={status} t={t} /></span>
+                              {Number(sale.return_owed_reduction_usd) > 0 ? <span className="shrink-0"><DebtLoweredTag amountUsd={sale.return_owed_reduction_usd} fmtUSD={fmtUSD} t={t} /></span> : null}
                               {sale.payment_method ? <EntityLink page="settings" anchor="hub:settings:settings" navigate={navigateTo} className="shrink-0 whitespace-nowrap"><span className="badge-blue shrink-0 whitespace-nowrap text-xs">{sale.payment_method}</span></EntityLink> : <span className="badge-blue shrink-0 whitespace-nowrap text-xs">N/A</span>}
                               <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-xs font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300">{items.length} {t('items')}</span>
                             </div>

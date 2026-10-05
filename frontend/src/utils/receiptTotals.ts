@@ -80,6 +80,8 @@ export interface ReceiptTotalsSale extends ReceiptDeliveryInput {
   change_khr?: number | string | null
   refund_usd?: number | string | null
   refund_khr?: number | string | null
+  /** What the sale's active returns took off a Not Paid debt instead of refunding cash (GET /api/sales). */
+  return_owed_reduction_usd?: number | string | null
   sale_status?: string | null
 }
 
@@ -128,6 +130,10 @@ export interface ReceiptTotalsFigures {
   paidTotalUsd: number
   changeUsd: number
   changeKhr: number
+  /** What returns took off a Not Paid debt instead of refunding cash (owner rule 29 Sep 2026). */
+  debtLoweredUsd: number
+  /** What the payment is measured against: total less the debt returns lowered. */
+  payableUsd: number
   /** Still owed on the sale as transacted. Zero once the tender covers it. */
   outstandingUsd: number
   outstandingKhr: number
@@ -197,6 +203,7 @@ export function receiptTotalsFigures(
   // $9.61 sale at 4,100 is paid, never "$0.00 due"), otherwise the exact
   // shortfall -- on the same money basis the status rules use. Money the
   // kernel cannot read owes the whole total.
+  const debtLoweredUsd = Math.max(0, num(sale.return_owed_reduction_usd))
   let owedUsd: number
   let outstandingUsd: number
   try {
@@ -207,6 +214,7 @@ export function receiptTotalsFigures(
       exchange_rate: exchangeRate,
       money_precision_version: sale.money_precision_version,
       calculated_total_usd: sale.calculated_total_usd,
+      return_owed_reduction_usd: debtLoweredUsd,
     })
     outstandingUsd = version1 ? owedUsd : round2(owedUsd)
   } catch {
@@ -243,6 +251,8 @@ export function receiptTotalsFigures(
     paidTotalUsd,
     changeUsd: num(sale.change_usd ?? sale.change_returned),
     changeKhr: num(sale.change_khr),
+    debtLoweredUsd,
+    payableUsd: version1 ? subtractMoney4(totalUsd, debtLoweredUsd) : round2(totalUsd - debtLoweredUsd),
     outstandingUsd,
     // Riel converts what is owed, once. A legacy column prints dollars to the
     // cent, so converting the printed figure doubled a small debt: 21 riel

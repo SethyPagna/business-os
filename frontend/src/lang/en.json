@@ -6124,6 +6124,8 @@
   "copy_return_id": "Copy return ID",
   "return_blocked_cancelled_sale": "This sale was cancelled, so there is nothing to return.",
   "return_blocked_fully_returned": "Every item on this sale has already been returned.",
+  "return_not_paid_lowers_debt": "Not Paid: this return lowers what the customer owes first; cash is refunded only beyond that.",
+  "sale_tag_debt_lowered": "Returned · debt lowered {amount}",
   "retry_failed": "Retry failed",
   "discard": "Discard",
   "keep_editing": "Keep editing",

@@ -7,7 +7,7 @@ import Settings2 from 'lucide-react/dist/esm/icons/settings-2.js'
 import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.tsx'
 import { fmtClock24 } from '../../utils/formatters'
 import { buildEquation, revenueTerms, profitTerms, isRevenueCountedSale, saleListRevenueUsd, saleListCreditUsd } from '../../utils/statsFormulas'
-import { getSaleReturnBlockReason } from '../../utils/saleReturnGuard.ts'
+import { getSaleReturnBlockReason, getSaleReturnNote } from '../../utils/saleReturnGuard.ts'
 import type { SaleAmendmentRow } from '../../utils/saleAmendments.ts'
 import LazyPortalMenu from '../shared/LazyPortalMenu'
 import type { PortalMenuItem } from '../shared/PortalMenu'
@@ -1598,6 +1598,11 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
     if (reason === 'fully_returned') return translateOr('return_blocked_fully_returned', 'Every item on this sale has already been returned.', 'ទំនិញទាំងអស់ក្នុងការលក់នេះ ត្រូវបានប្រគល់មកវិញរួចហើយ។')
     return ''
   }, [translateOr])
+  const returnNoteFor = useCallback((sale: SaleRecord | null): string => (
+    getSaleReturnNote(sale as { sale_status?: string | null; items?: unknown } | null) === 'lowers_debt'
+      ? translateOr('return_not_paid_lowers_debt', "Not Paid: this return lowers what the customer owes first; cash is refunded only beyond that.", "ប្រាក់ជំពាក់៖ ការប្រគល់មកវិញនេះ បន្ថយប្រាក់ដែលអតិថិជនជំពាក់ជាមុន; សងសាច់ប្រាក់តែផ្នែកលើសពីនោះប៉ុណ្ណោះ។")
+      : ''
+  ), [translateOr])
 
   // Search, status, date, cashier, sorting, and pagination are authoritative
   // on the server. Re-filtering a server page here used a different search
@@ -2557,6 +2562,7 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
           onReturn={canAddReturn ? () => { setSelectedSale(null); startReturnForSale(selectedSale) } : undefined}
           returnLabel={t('return') || 'Return'}
           returnDisabledReason={returnBlockedReasonFor(selectedSale)}
+          returnNote={returnNoteFor(selectedSale)}
         />
       </Suspense>
     )

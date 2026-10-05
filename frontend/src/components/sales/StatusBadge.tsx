@@ -56,6 +56,30 @@ type StatusBadgeProps = {
   t?: TranslateFn
 }
 
+type DebtLoweredTagProps = {
+  /** GET /api/sales `return_owed_reduction_usd`: what returns took off a Not Paid debt. */
+  amountUsd?: unknown
+  fmtUSD: (value: number) => string
+  t?: TranslateFn
+}
+
+/**
+ * Owner rule 29 Sep 2026, confirmed 5 Oct: a return on a Not Paid sale lowers
+ * the debt instead of paying cash out, and the sale says so beside its status.
+ */
+export function DebtLoweredTag({ amountUsd, fmtUSD, t }: DebtLoweredTagProps) {
+  const amount = Number(amountUsd)
+  if (!Number.isFinite(amount) || amount <= 0) return null
+  const key = 'sale_tag_debt_lowered'
+  const translated = t?.(key)
+  const template = translated && translated !== key ? translated : 'Returned · debt lowered {amount}'
+  return (
+    <span data-sale-debt-lowered-tag="" className="whitespace-nowrap rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800 dark:bg-amber-900/40 dark:text-amber-200">
+      {template.replace('{amount}', fmtUSD(amount))}
+    </span>
+  )
+}
+
 export default function StatusBadge({ status, t }: StatusBadgeProps) {
   const s = isSaleStatus(status) ? status : 'completed'
   return (

@@ -13,7 +13,7 @@ import { loadPendingDirectMutation, runSaleLineMutation, replaceReviewedSaleLine
 import { localizeBranchRuleError } from '../../api/branchRuleErrors.ts'
 import ConfirmDialog, { type ConfirmReviewItem } from '../shared/ConfirmDialog.tsx'
 import { fmtDateOnly, fmtDateTime24, fmtTime } from '../../utils/formatters.ts'
-import { getSaleReturnBlockReason } from '../../utils/saleReturnGuard.ts'
+import { getSaleReturnBlockReason, getSaleReturnNote } from '../../utils/saleReturnGuard.ts'
 import { DELIVERY_AMOUNT_ERROR_KEYS, deliveryAmountChanged, parseDeliveryAmountUsd } from '../../utils/deliveryAmounts.ts'
 import { buildProductGroups } from '../../utils/productGrouping.ts'
 // S4-30: the STAFF-facing half of an amended sale. The receipt uses none of
@@ -41,7 +41,7 @@ import CopyableId from '../shared/CopyableId.tsx'
 import { SaleCopyValue as EntityLink } from './SalesListSurface.tsx'
 import { DetailRow, DetailRowGroup, MoneyRow } from '../shared/DetailRows.tsx'
 import InfoHint from '../shared/InfoHint.tsx'
-import StatusBadge, { getStatusBadgeLabel as getStatusLabel } from './StatusBadge.tsx'
+import StatusBadge, { DebtLoweredTag, getStatusBadgeLabel as getStatusLabel } from './StatusBadge.tsx'
 import {
   mergeStagedAddLine,
   stagedAddLineKey,
@@ -1381,6 +1381,9 @@ export default function SaleDetailModal({
     : returnBlockReason === 'fully_returned'
       ? translateOr('return_blocked_fully_returned', 'Every item on this sale has already been returned.', 'ទំនិញទាំងអស់ក្នុងការលក់នេះ ត្រូវបានប្រគល់មកវិញរួចហើយ។')
       : ''
+  const returnHint = returnBlockedReason || (getSaleReturnNote({ sale_status: currentStatus, items }) === 'lowers_debt'
+    ? translateOr('return_not_paid_lowers_debt', "Not Paid: this return lowers what the customer owes first; cash is refunded only beyond that.", "ប្រាក់ជំពាក់៖ ការប្រគល់មកវិញនេះ បន្ថយប្រាក់ដែលអតិថិជនជំពាក់ជាមុន; សងសាច់ប្រាក់តែផ្នែកលើសពីនោះប៉ុណ្ណោះ។")
+    : '')
   // ONE derivation of this sale's money column, shared with the printed
   // receipt (utils/receiptTotals.ts): the delivery fee split by who actually
   // paid it, the refund and net total, and a 'still owed' that counts riel.
@@ -1677,7 +1680,7 @@ export default function SaleDetailModal({
       }
       // The one definition of paid, on the basis the Worker's settlement uses:
       // a tender inside the half-cent band completes the sale here and there.
-      if (settlementOutstandingUsd(settlementRows, { totalUsd, exchangeRate: settlementSession.exchangeRate, moneyPrecisionVersion: usesSavedExchangeRate ? 1 : 0 }) > 0) {
+      if (settlementOutstandingUsd(settlementRows, { totalUsd: totals.payableUsd, exchangeRate: settlementSession.exchangeRate, moneyPrecisionVersion: usesSavedExchangeRate ? 1 : 0 }) > 0) {
         setPayError(translateOr('sale_settlement_full_required', 'The full sale balance must be covered before completing it.', 'ត្រូវទូទាត់គ្រប់ចំនួនសរុប មុនបញ្ចប់ការលក់។'))
         return
       }
@@ -1772,6 +1775,7 @@ export default function SaleDetailModal({
                 />
               </div>
               <StatusBadge status={currentStatus} t={t} />
+              <DebtLoweredTag amountUsd={totals.debtLoweredUsd} fmtUSD={fmtUSD} t={t} />
             </div>
             <div data-sale-detail-secondary-meta="" className="mt-1 flex min-w-0 items-center gap-2 overflow-x-auto whitespace-nowrap text-xs text-gray-500">
               <span>{fmtTime(sale.created_at)}</span>
@@ -2964,7 +2968,7 @@ export default function SaleDetailModal({
                   rows={settlementRows}
                   configuredMethods={settlementSession.configuredMethods}
                   exchangeRate={settlementSession.exchangeRate}
-                  totalUsd={totalUsd}
+                  totalUsd={totals.payableUsd}
                   moneyPrecisionVersion={usesSavedExchangeRate ? 1 : 0}
                   saving={statusSaving || !paymentConfigReady}
                   error={payError}
@@ -3021,8 +3025,8 @@ export default function SaleDetailModal({
                   </button>
                   {/* Why the action is unavailable stays behind the hint, not
                       as inline prose next to the button. */}
-                  {returnBlockedReason ? (
-                    <InfoHint text={returnBlockedReason} label={t('return') || 'Return'} />
+                  {returnHint ? (
+                    <InfoHint text={returnHint} label={t('return') || 'Return'} />
                   ) : null}
                 </span>
               ) : null}
