@@ -65,6 +65,7 @@ const NAMED_COMPANIONS = {
   226: 'test-branch-history-labels-native.cjs',
   // Cutover lane LA: the identity backfill and the remaining history labels.
   229: 'test-branch-identity-backfill-native.cjs',
+  236: 'test-branch-label-columns-native.cjs',
 }
 
 function listMigrationNumbers() {
