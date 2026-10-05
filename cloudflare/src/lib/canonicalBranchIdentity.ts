@@ -1,5 +1,5 @@
 import { toDbBool } from './db'
-import { branchActiveSuccessorPath, branchRoleFromName, resolveActiveSuccessor } from './branchRoles'
+import { branchActiveSuccessorPath, branchRole, branchRoleFromName, resolveActiveSuccessor } from './branchRoles'
 
 // F2 of the branch cutover design: a recorded branch id -> the active branch a
 // stock effect must land on (identity for an active branch). The walker lives
@@ -51,10 +51,16 @@ export const CANONICAL_BRANCH_CONFIGURATION_CODE = 'canonical_branch_configurati
 export const CANONICAL_BRANCH_CONFIGURATION_ERROR =
   'Stock transfer is unavailable because the branch setup must contain exactly one active Shop and one active Warehouse. Ask an administrator to repair the branch records before trying again.'
 
+// The operational role of a branch row in SQL: the explicit role, else the name
+// (the JS twin is branchRole() in branchRoles.ts). While role is NULL on every
+// row this is exactly the old name test; once a branch is renamed (Warehouse ->
+// "LC Store") the role still answers.
+const BRANCH_ROLE_SQL = 'LOWER(TRIM(COALESCE(role, name)))'
+
 export const CANONICAL_TRANSFER_BRANCHES_SQL = `
-  SELECT id, name, is_active
+  SELECT id, name, role, is_active
   FROM branches
-  WHERE LOWER(TRIM(name)) IN ('shop', 'warehouse')
+  WHERE ${BRANCH_ROLE_SQL} IN ('shop', 'warehouse')
   ORDER BY id ASC
 `
 
@@ -112,8 +118,8 @@ function metadataSuccessors(current: BranchIdentitySnapshot, rows: readonly Bran
  */
 export function resolveCanonicalTransferPair(rows: CanonicalTransferBranchRow[]): CanonicalTransferPair {
   const active = rows.filter((row) => toDbBool(row.is_active, 0) === 1)
-  const shops = active.filter((row) => canonicalBranchName(row.name) === 'Shop')
-  const warehouses = active.filter((row) => canonicalBranchName(row.name) === 'Warehouse')
+  const shops = active.filter((row) => branchRole(row) === 'shop')
+  const warehouses = active.filter((row) => branchRole(row) === 'warehouse')
   if (shops.length !== 1 || warehouses.length !== 1) throw new CanonicalBranchConfigurationError()
   return { shop: shops[0], warehouse: warehouses[0] }
 }
@@ -144,23 +150,23 @@ export function canonicalTransferAuthorityGuardStatement(
       WHERE NOT (
         (SELECT COUNT(*) FROM branches
           WHERE COALESCE(is_active, 0) = 1
-            AND LOWER(TRIM(name)) = 'warehouse') = 1
+            AND ${BRANCH_ROLE_SQL} = 'warehouse') = 1
         AND (SELECT COUNT(*) FROM branches
           WHERE COALESCE(is_active, 0) = 1
-            AND LOWER(TRIM(name)) = 'shop') = 1
+            AND ${BRANCH_ROLE_SQL} = 'shop') = 1
         AND (
           (
             EXISTS (
               SELECT 1 FROM branches
               WHERE id = @transfer_from_branch_id
                 AND COALESCE(is_active, 0) = 1
-                AND LOWER(TRIM(name)) = 'warehouse'
+                AND ${BRANCH_ROLE_SQL} = 'warehouse'
             )
             AND EXISTS (
               SELECT 1 FROM branches
               WHERE id = @transfer_to_branch_id
                 AND COALESCE(is_active, 0) = 1
-                AND LOWER(TRIM(name)) = 'shop'
+                AND ${BRANCH_ROLE_SQL} = 'shop'
             )
           )
           OR (
@@ -168,13 +174,13 @@ export function canonicalTransferAuthorityGuardStatement(
               SELECT 1 FROM branches
               WHERE id = @transfer_from_branch_id
                 AND COALESCE(is_active, 0) = 1
-                AND LOWER(TRIM(name)) = 'shop'
+                AND ${BRANCH_ROLE_SQL} = 'shop'
             )
             AND EXISTS (
               SELECT 1 FROM branches
               WHERE id = @transfer_to_branch_id
                 AND COALESCE(is_active, 0) = 1
-                AND LOWER(TRIM(name)) = 'warehouse'
+                AND ${BRANCH_ROLE_SQL} = 'warehouse'
             )
           )
         )

@@ -35,9 +35,14 @@ export function firstUnsellableBranch(rows: readonly BranchNameRow[]): BranchNam
  * Null only when the source and destination have opposite canonical roles;
  * every same-role, unknown, or historical identity is refused with the same
  * client-facing message.
+ *
+ * Pass the branch ROWS ({ name, role }), not their names: a row answers from
+ * its explicit role, so a renamed branch keeps its identity, and only a row
+ * whose role is NULL falls back to the name. A bare name still works for
+ * callers that only hold one.
  */
-export function transferDirectionError(fromName: unknown, toName: unknown): string | null {
-  return branchCanTransferBetween(fromName, toName) ? null : TRANSFER_DIRECTION_ERROR
+export function transferDirectionError(from: unknown, to: unknown): string | null {
+  return branchCanTransferBetween(from, to) ? null : TRANSFER_DIRECTION_ERROR
 }
 
 export function sellingBranchConditionSql(alias = 'b'): string {

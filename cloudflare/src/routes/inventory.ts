@@ -2636,8 +2636,8 @@ app.post('/transfer', async (c) => {
   if (quantity > available) return c.json({ error: 'Insufficient stock in source branch', code: 'transfer_insufficient_stock' }, 400)
 
   const [fromBranch, toBranch, canonicalTransferRows] = await Promise.all([
-    db.prepare('SELECT id, name FROM branches WHERE id = @id').get<{ id: number; name: string }>({ id: fromBranchId }),
-    db.prepare('SELECT id, name FROM branches WHERE id = @id').get<{ id: number; name: string }>({ id: toBranchId }),
+    db.prepare('SELECT id, name, role FROM branches WHERE id = @id').get<{ id: number; name: string; role: string | null }>({ id: fromBranchId }),
+    db.prepare('SELECT id, name, role FROM branches WHERE id = @id').get<{ id: number; name: string; role: string | null }>({ id: toBranchId }),
     db.prepare(CANONICAL_TRANSFER_BRANCHES_SQL).all<CanonicalTransferBranchRow>(),
   ])
 
@@ -2658,7 +2658,7 @@ app.post('/transfer', async (c) => {
   // db.batch below, i.e. before any stock moves. The selected rows and the
   // complete canonical-role set are read separately so duplicate active
   // identities cannot be hidden by an id lookup.
-  const directionError = transferDirectionError(fromBranch?.name, toBranch?.name)
+  const directionError = transferDirectionError(fromBranch, toBranch)
     || (!isCanonicalTransferSelection(canonicalTransferPair, fromBranchId, toBranchId)
       ? TRANSFER_DIRECTION_ERROR
       : null)
