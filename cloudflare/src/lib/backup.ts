@@ -159,6 +159,9 @@ export const BACKUP_TABLES = [
   'ai_provider_configs',
   'shift_sessions',
   'shift_session_amendments',
+  // The figures each shift was closed on (0237, N4): immutable children of
+  // shift_sessions, restored after it like the amendment ledger.
+  'shift_close_figures',
   'sales',
   'sale_items',
   'sale_item_batch_allocations',

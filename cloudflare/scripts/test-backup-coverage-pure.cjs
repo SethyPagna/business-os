@@ -82,6 +82,14 @@ check('shift sessions and their immutable amendment ledger are restored together
   assert.match(migration, /json_extract\(value, '\$\.mode'\) = 'restore'/)
 })
 
+check('the figures each shift closed on (0237) are restored after their shift, behind the same restore guard', () => {
+  assert.ok(BACKUP_TABLES.includes('shift_close_figures'))
+  assert.ok(BACKUP_TABLES.indexOf('shift_close_figures') > BACKUP_TABLES.indexOf('shift_sessions'))
+  const migration = fs.readFileSync(path.join(__dirname, '..', 'migrations', '0237_shift_close_figures.sql'), 'utf8')
+  assert.match(migration, /key = 'maintenance'/)
+  assert.match(migration, /json_extract\(value, '\$\.mode'\) = 'restore'/)
+})
+
 check('selected-conflict run receipts survive in parent-first dependency order', () => {
   assert.ok(BACKUP_TABLES.includes('product_conflict_merge_runs'))
   assert.ok(BACKUP_TABLES.includes('product_conflict_merge_run_cases'))
