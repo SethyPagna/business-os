@@ -1026,7 +1026,7 @@ export default function ProductDetailSheet({
                         aria-pressed={sheetState.selectedUnlottedProductId === option.productId}
                         className={pillClass(sheetState.selectedUnlottedProductId === option.productId, false)}
                         onClick={() => chooseUnlottedStock(option.productId)}>
-                        <span>{posCopy('Received date not recorded', 'មិនបានកត់ត្រាកាលបរិច្ឆេទទទួល')}{unlottedStockOptions.length > 1 ? ` ${optionIndex + 1}` : ''}</span>
+                        <span>{posCopy('Received date not recorded', 'មិនបានកត់ត្រាថ្ងៃចូល')}{unlottedStockOptions.length > 1 ? ` ${optionIndex + 1}` : ''}</span>
                         <span className="ml-1 text-[10px] font-normal opacity-75">({option.quantity} {effectiveVariant.unit})</span>
                       </button>)}
                     </div>
@@ -1134,7 +1134,7 @@ export default function ProductDetailSheet({
                   aria-pressed={sheetState.selectedUnlottedProductId === option.productId}
                   className={pillClass(sheetState.selectedUnlottedProductId === option.productId, false)}
                   onClick={() => chooseUnlottedStock(option.productId)}>
-                  <span>{posCopy('Received date not recorded', 'មិនបានកត់ត្រាកាលបរិច្ឆេទទទួល')}</span>
+                  <span>{posCopy('Received date not recorded', 'មិនបានកត់ត្រាថ្ងៃចូល')}</span>
                   <span className="ml-1 text-[10px] font-normal opacity-75">({option.quantity} {product.unit})</span>
                 </button>)}
               </div>

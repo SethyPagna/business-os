@@ -346,7 +346,7 @@ export async function applySaleBulkStatus(env: Env, user: SessionUser, raw: Row)
         throw new SaleBulkError('Select fewer sale lines (maximum 150).', 400);
     const allocations = await rowsIn<Allocation>(db, sourceMatchedIds, m => `SELECT a.* FROM sale_item_batch_allocations a JOIN sale_items si ON si.id=a.sale_item_id WHERE si.sale_id IN (${m}) ORDER BY a.id LIMIT 301`);
     if (allocations.length > 300)
-        throw new SaleBulkError('Select fewer batch allocations (maximum 300).', 400);
+        throw new SaleBulkError('Select fewer received-date allocations (maximum 300).', 400);
     const returns = await rowsIn<{
         sale_id: number;
         sale_item_id: number | null;
@@ -467,7 +467,7 @@ export async function applySaleBulkStatus(env: Env, user: SessionUser, raw: Row)
                 else if (item.allocations?.length) {
                     const capacity = item.allocations.reduce((n, a) => n + (delta > 0 ? a.quantity - a.released_quantity : a.released_quantity), 0);
                     if (capacity < Math.abs(delta) || item.allocations.some(a => a.released_quantity < 0 || a.released_quantity > a.quantity))
-                        fail('Sale batch allocations cannot cover the transition.');
+                        fail('Sale received-date allocations cannot cover the transition.');
                 }
             }
         // Do not create an undoable action already at the fingerprint ceiling:

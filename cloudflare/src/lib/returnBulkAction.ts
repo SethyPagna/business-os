@@ -496,7 +496,7 @@ async function buildMembers(db: D1Compat, request: BulkRequest): Promise<{ membe
   const items = await rowsForIds<ReturnItem>(db, matchingIds, (marks) => `SELECT ri.* FROM return_items ri WHERE ri.return_id IN (${marks}) ORDER BY ri.id LIMIT 301`)
   if (items.length > 300) fail('Select fewer return lines (maximum 300).', 400)
   const allocations = await rowsForIds<Allocation>(db, matchingIds, (marks) => `SELECT a.* FROM return_item_batch_allocations a JOIN return_items ri ON ri.id=a.return_item_id WHERE ri.return_id IN (${marks}) ORDER BY a.id LIMIT 401`)
-  if (allocations.length > 400) fail('Select fewer return lot allocations (maximum 400).', 400)
+  if (allocations.length > 400) fail('Select fewer received-date allocations to return (maximum 400).', 400)
   const damaged = await rowsForIds<DamagedLot>(db, matchingIds, (marks) => `SELECT * FROM damaged_stock_lots WHERE return_id IN (${marks}) ORDER BY id LIMIT 301`)
   if (damaged.length > 300) fail('Select fewer damaged-stock rows.', 400)
   const trackedProducts = new Set<number>()
@@ -594,7 +594,7 @@ async function buildMembers(db: D1Compat, request: BulkRequest): Promise<{ membe
         const ownAllocations = allocations.filter((allocation) => allocation.return_item_id === item.id)
         if (ownAllocations.length) {
           const allocated = ownAllocations.reduce((sum, allocation) => sum + Number(allocation.quantity || 0), 0)
-          if (Math.abs(allocated - quantity) > 0.000001) fail(`Return ${expected.id} has incomplete lot provenance.`, 400)
+          if (Math.abs(allocated - quantity) > 0.000001) fail(`Return ${expected.id} has incomplete received-date provenance.`, 400)
           for (const allocation of ownAllocations) {
             if (Number(allocation.branch_id) !== branchId) fail(`Return ${expected.id} has a lot allocation for a different branch.`, 400)
             member.stock.push({ productId, productName: item.product_name, branchId, batchId: Number(allocation.batch_id), damagedLotId: null, quantity: (scope === 'customer' ? (cancelling ? -1 : 1) : (cancelling ? 1 : -1)) * Number(allocation.quantity), costUsd: Number(item.cost_price_usd) || 0, costKhr: Number(item.cost_price_khr) || 0, movementType: '' })
@@ -602,7 +602,7 @@ async function buildMembers(db: D1Compat, request: BulkRequest): Promise<{ membe
         } else if (item.batch_id) {
           member.stock.push({ productId, productName: item.product_name, branchId, batchId: Number(item.batch_id), damagedLotId: null, quantity: (scope === 'customer' ? (cancelling ? -1 : 1) : (cancelling ? 1 : -1)) * quantity, costUsd: Number(item.cost_price_usd) || 0, costKhr: Number(item.cost_price_khr) || 0, movementType: '' })
         } else if (trackedProducts.has(productId)) {
-          fail(`Return ${expected.id} predates exact lot tracking. Its stock cannot be changed safely in bulk; edit stock with the recorded lot details first.`, 400)
+          fail(`Return ${expected.id} predates exact received-date tracking. Its stock cannot be changed safely in bulk; edit stock with the recorded received-date details first.`, 400)
         } else {
           member.stock.push({ productId, productName: item.product_name, branchId, batchId: null, damagedLotId: null, quantity: (scope === 'customer' ? (cancelling ? -1 : 1) : (cancelling ? 1 : -1)) * quantity, costUsd: Number(item.cost_price_usd) || 0, costKhr: Number(item.cost_price_khr) || 0, movementType: '' })
         }

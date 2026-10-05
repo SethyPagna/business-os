@@ -158,7 +158,7 @@ export function resolveReceiptLotTarget(
   if (explicitBatchId != null) {
     const lot = lots.find(candidate => Number(candidate.id) === explicitBatchId)
     if (!lot || lot.id <= baselineBatchId || !sameCost(lot)) {
-      throw new Error('Selected batch price or override baseline changed; choose a new receipt batch.')
+      throw new Error('Selected received-date price or override baseline changed; choose the received date again.')
     }
     return { batchKey: lot.batch_key, baselineBatchId, existingBatchId: lot.id }
   }

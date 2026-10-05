@@ -65,7 +65,7 @@ export default function PermissionEditor({ permissions, onChange, t }: Permissio
   // `tier: true` without also adding its own explanation.
   const reviewDescriptionFor = (permission: PermissionDefinition): string => {
     const fallback = permission.reviewDescription
-      || translate('review_required_generic_desc', 'Some actions in this section require admin approval under Review Required.')
+      || translate('review_required_generic_desc', 'Some actions in this section are limited or need admin approval under Partial Access.')
     return permission.reviewTKey ? translate(permission.reviewTKey, fallback) : fallback
   }
   const sensitivityLabel = (value: PermissionSensitivity): string => {

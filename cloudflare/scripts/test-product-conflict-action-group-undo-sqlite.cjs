@@ -141,7 +141,7 @@ async function main() {
     await f.run('undo', 0)
     f.d1.db.prepare(`UPDATE products SET ${mutation} WHERE id=10000`).run()
     const before = f.state()
-    await assert.rejects(() => f.run('undo', 0), /later stock or batch activity/)
+    await assert.rejects(() => f.run('undo', 0), /later stock or received-date activity/)
     assert.equal(f.state(), before)
   }
   {

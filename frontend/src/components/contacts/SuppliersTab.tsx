@@ -882,7 +882,7 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
         try {
           const impact = await getRenameImpact('supplier', oldSupplierName, newSupplierName)
           if (impact.target_exists) {
-            notify(`"${newSupplierName}" already exists. Use Possible Duplicates to choose which supplier to keep.`, 'warning')
+            notify(`"${newSupplierName}" already exists. Use Conflicts to choose which supplier to keep.`, 'warning')
             return
           }
           const choice = await askRenameChoice({ kind: 'supplier', from: oldSupplierName, to: newSupplierName, impact, choices: ['carry', 'only', 'copy'] })
@@ -1548,7 +1548,7 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
           wrapValuesAnywhere
           extraButtons={[
             { label: tr('supplier_purchases', 'Purchases'), onClick: () => setModal('purchases') },
-            ...(getPermissionTier('audit_log') === 'full' ? [{ label: tr('field_history', 'Field history'), onClick: () => setModal('records') }] : []),
+            ...(getPermissionTier('audit_log') === 'full' ? [{ label: tr('field_history', 'Records'), onClick: () => setModal('records') }] : []),
           ]}
         />
       ) : null}

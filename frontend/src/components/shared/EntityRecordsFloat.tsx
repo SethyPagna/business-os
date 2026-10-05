@@ -32,7 +32,7 @@ interface EntityRecordsFloatProps {
 }
 
 export default function EntityRecordsFloat({ entity, entityId, subject, onClose, t, fmtUSD, fmtKHR }: EntityRecordsFloatProps) {
-  const heading = t('field_history') || 'Field history'
+  const heading = t('field_history') || 'Records'
   return (
     <RecordsFloat
       title={subject ? `${heading} · ${subject}` : heading}

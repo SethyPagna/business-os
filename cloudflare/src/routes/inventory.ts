@@ -1533,7 +1533,7 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
   // falling through to a full-access write now that the top-level
   // middleware admits review-tier users for reads.
   if (getActionTier(user, 'inventory', 'adjust') !== 'full') {
-    return c.json({ error: 'Stock adjustments require Full Access to Inventory -- Review Required support for this action is not built yet.' }, 403)
+    return c.json({ error: 'Stock adjustments require Full Access to Inventory -- Partial Access support for this action is not built yet.' }, 403)
   }
   const productId = Number.parseInt(String(body.productId ?? ''), 10)
   let type = String(body.type || '')
@@ -1749,7 +1749,7 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
     ? await db.prepare('SELECT id,variant_product_id,unit_cost_usd,batch_number,lot_code FROM product_batches WHERE id=@id AND variant_product_id=@productId')
       .get<{ id: number; variant_product_id: number; unit_cost_usd: number | null; batch_number: number | null; lot_code: string | null }>({ id: explicitBatchId, productId })
     : undefined
-  if (isSelectedLotCorrection && !correctionLot) return c.json({ error: 'Selected batch does not belong to this product.', code: 'batch_mismatch' }, 409)
+  if (isSelectedLotCorrection && !correctionLot) return c.json({ error: 'Selected received date does not belong to this product.', code: 'batch_mismatch' }, 409)
   const lotSupplierName = isReceipt && explicitBatchId
     ? (await db.prepare('SELECT supplier_name FROM product_batches WHERE id = @id').get<{ supplier_name: string | null }>({ id: explicitBatchId }))?.supplier_name ?? null
     : null
@@ -2473,7 +2473,7 @@ app.post('/dated-stock-count/resolve', async (c) => {
   // so it's gated the same way /apply already is, not treated as
   // read-only.
   if (getActionTier(user, 'inventory', 'stock_count') !== 'full') {
-    return c.json({ error: 'Dated stock-count import requires Full Access to Inventory -- Review Required support for this action is not built yet.' }, 403)
+    return c.json({ error: 'Dated stock-count import requires Full Access to Inventory -- Partial Access support for this action is not built yet.' }, 403)
   }
   const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
   const parsed = parseRawDatedCountRows(body)
@@ -2503,7 +2503,7 @@ app.post('/dated-stock-count/resolve', async (c) => {
 app.post('/dated-stock-count/resolve/apply-decisions', async (c) => {
   const user = c.get('user')
   if (getActionTier(user, 'inventory', 'stock_count') !== 'full') {
-    return c.json({ error: 'Dated stock-count import requires Full Access to Inventory -- Review Required support for this action is not built yet.' }, 403)
+    return c.json({ error: 'Dated stock-count import requires Full Access to Inventory -- Partial Access support for this action is not built yet.' }, 403)
   }
   const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
   const resolvedIn = Array.isArray(body.resolved) ? body.resolved : null
@@ -2525,7 +2525,7 @@ app.post('/dated-stock-count/resolve/apply-decisions', async (c) => {
 app.post('/dated-stock-count/preview', async (c) => {
   const user = c.get('user')
   if (getActionTier(user, 'inventory', 'stock_count') !== 'full') {
-    return c.json({ error: 'Dated stock-count import requires Full Access to Inventory -- Review Required support for this action is not built yet.' }, 403)
+    return c.json({ error: 'Dated stock-count import requires Full Access to Inventory -- Partial Access support for this action is not built yet.' }, 403)
   }
   const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
   const parsed = parseDatedStockCountEntries(body)
@@ -2540,7 +2540,7 @@ app.post('/dated-stock-count/preview', async (c) => {
 app.post('/dated-stock-count/apply', async (c) => {
   const user = c.get('user')
   if (getActionTier(user, 'inventory', 'stock_count') !== 'full') {
-    return c.json({ error: 'Dated stock-count import requires Full Access to Inventory -- Review Required support for this action is not built yet.' }, 403)
+    return c.json({ error: 'Dated stock-count import requires Full Access to Inventory -- Partial Access support for this action is not built yet.' }, 403)
   }
   const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
   const parsed = parseDatedStockCountEntries(body)
@@ -2580,7 +2580,7 @@ app.post('/transfer', async (c) => {
   // Same reasoning as /adjust above -- not wired into the review queue
   // yet, explicitly blocked rather than silently allowed through.
   if (getActionTier(user, 'inventory', 'transfer') !== 'full') {
-    return c.json({ error: 'Branch transfers require Full Access to Inventory -- Review Required support for this action is not built yet.' }, 403)
+    return c.json({ error: 'Branch transfers require Full Access to Inventory -- Partial Access support for this action is not built yet.' }, 403)
   }
   const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
   if (body.transfer_provenance_version !== 1) return c.json({ error: 'Refresh the app before transferring stock.', code: 'client_upgrade_required' }, 409)
@@ -2742,7 +2742,7 @@ app.post('/move-row', async (c) => {
   // Same reasoning as /adjust above -- not wired into the review queue
   // yet, explicitly blocked rather than silently allowed through.
   if (getActionTier(user, 'inventory', 'move_row') !== 'full') {
-    return c.json({ error: 'Moving stock between rows requires Full Access to Inventory -- Review Required support for this action is not built yet.' }, 403)
+    return c.json({ error: 'Moving stock between rows requires Full Access to Inventory -- Partial Access support for this action is not built yet.' }, 403)
   }
   const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
   const sourceProductId = Number.parseInt(String(body.sourceProductId ?? body.source_product_id ?? ''), 10)

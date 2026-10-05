@@ -242,7 +242,7 @@ function own(db, rowNumber, jobId = 'job-1') {
     const error = await applyHistoricalSaleImport(f.route, { jobId: 'job-1', rowNumber: 6, data: saleData(), nowIso: NOW, actor: ACTOR })
       .then(() => null, (e) => e)
     assert.ok(error, 'a stale reference must fail the row')
-    assert.match(String(error.message), /batch\/lot reference changed/)
+    assert.match(String(error.message), /received-date reference changed/)
     assert.equal(batches, 1, 'a non-receipt failure is not retried')
     console.log('PASS control: a stale batch/lot reference still fails as a reference change, without a receipt retry')
   })

@@ -508,7 +508,7 @@ app.patch('/:id', async (c) => {
       cost = nullableMoney4(bodyExtra.unit_cost_usd)
       if (cost != null && cost < 0) throw new RangeError('Cost must be non-negative')
     } catch {
-      return c.json({ error: 'Invalid or out-of-range batch cost' }, 400)
+      return c.json({ error: 'Invalid or out-of-range received-date cost' }, 400)
     }
     updates.push('unit_cost_usd = @unit_cost_usd')
     params.unit_cost_usd = cost

@@ -125,7 +125,7 @@ test('all THREE contact tabs carry it, each under its own audit entity', () => {
   for (const [path, entity] of tabs) {
     const tab = read(path)
     assert.match(tab, new RegExp(`entity="${entity}"`), `${path} does not read the ${entity} trail`)
-    assert.match(tab, /'field_history', 'Field history'/, `${path} has no Field history button`)
+    assert.match(tab, /'field_history', 'Records'/, `${path} has no Records button (owner, 30 Sep: "Records" instead of "Field history")`)
     assert.match(tab, /getPermissionTier\('audit_log'\) === 'full'/, `${path} does not gate on the tier that sees the whole trail`)
     // Closing the float returns to the detail it was opened from, rather than
     // dropping the reader back to the list.

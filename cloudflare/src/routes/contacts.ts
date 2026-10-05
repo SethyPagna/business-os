@@ -1325,7 +1325,7 @@ function registerContactRoutes(config: ContactConfig) {
   app.post(`${config.path}/merge`, async (c) => {
     const user = c.get('user')
     if (getPermissionTier(user, 'contacts') === 'review') {
-      return c.json({ error: `Merging ${config.entity}s requires Full Access to Contacts -- Review Required support for this action is not built.` }, 403)
+      return c.json({ error: `Merging ${config.entity}s requires Full Access to Contacts -- Partial Access support for this action is not built.` }, 403)
     }
     // The Duplicates tab offers Merge only with contacts:resolve_conflicts
     // (DuplicatesTab.tsx canMergeDuplicates); the same gate as the sibling
@@ -1783,7 +1783,7 @@ function registerContactRoutes(config: ContactConfig) {
         const collision = await db.prepare(`SELECT id, name FROM ${config.table} WHERE id != @id AND lower(trim(name)) = lower(trim(@name)) LIMIT 1`).get<{ id: number; name: string }>({ id, name })
         if (collision) {
           return c.json({
-            error: `"${name}" already exists. Open Possible Duplicates and explicitly choose which record to keep, or cancel this rename.`,
+            error: `"${name}" already exists. Open Conflicts and explicitly choose which record to keep, or cancel this rename.`,
             code: 'merge_required',
             duplicate: collision,
           }, 409)
@@ -2076,7 +2076,7 @@ function registerContactRoutes(config: ContactConfig) {
     // treating it as queueable would be inventing a spec line, not
     // following one.
     if (getPermissionTier(user, 'contacts') === 'review') {
-      return c.json({ error: `Deleting a ${config.entity} requires Full Access to Contacts -- Review Required support for this action is not built.` }, 403)
+      return c.json({ error: `Deleting a ${config.entity} requires Full Access to Contacts -- Partial Access support for this action is not built.` }, 403)
     }
     // Per-action override (Part 546): 'contacts:delete' switched off.
     if (getActionTier(user, 'contacts', 'delete') === 'none') {
@@ -2134,7 +2134,7 @@ function registerContactRoutes(config: ContactConfig) {
     const tier = getPermissionTier(user, 'contacts')
     if (tier === 'none') return c.json({ error: 'You do not have permission to perform this action' }, 403)
     if (tier === 'review') {
-      return c.json({ error: `Bulk delete requires Full Access to Contacts -- Review Required support for this action is not built.` }, 403)
+      return c.json({ error: `Bulk delete requires Full Access to Contacts -- Partial Access support for this action is not built.` }, 403)
     }
     // Per-action override (Part 546): 'contacts:bulk_delete' switched off.
     if (getActionTier(user, 'contacts', 'bulk_delete') === 'none') {

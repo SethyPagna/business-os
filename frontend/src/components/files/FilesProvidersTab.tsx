@@ -164,7 +164,7 @@ export default function FilesProvidersTab({
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h2 className="text-lg font-semibold text-slate-900 dark:text-white">{tr('library_ai_providers', 'AI Providers', 'AI Providers')}</h2>
-            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{tr('ai_providers_hint', 'Store provider keys securely, keep them masked after save, and test each connection before using it in the portal.', 'រក្សាទុកសោ provider ឲ្យមានសុវត្ថិភាព លាក់វាបន្ទាប់ពីរក្សាទុក ហើយសាកល្បងមុនប្រើក្នុង Customer Portal។')}</p>
+            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{tr('ai_providers_hint', 'Store provider keys securely, keep them masked after save, and test each connection before using it on the website.', 'រក្សាទុកសោ provider ឲ្យមានសុវត្ថិភាព លាក់វាបន្ទាប់ពីរក្សាទុក ហើយសាកល្បងមុនប្រើនៅលើគេហទំព័រ។')}</p>
           </div>
           <button type="button" className="btn-secondary shrink-0 whitespace-nowrap text-sm" onClick={loadProviders}>
             <RefreshCcw className="mr-2 inline h-4 w-4" />

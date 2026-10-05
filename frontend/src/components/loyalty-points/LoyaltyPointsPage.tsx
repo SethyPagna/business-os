@@ -119,12 +119,12 @@ const COPY: Record<'en' | 'km', LocaleCopy> = {
     redeemPoints: 'Minimum redemption points',
     redeemValueUsd: 'Value per redemption unit (USD)',
     redeemValueKhr: 'Value per redemption unit (KHR)',
-    showPointValue: 'Show point value on customer portal',
+    showPointValue: 'Show point value on the website',
     membershipPointsEnabled: 'Membership points',
     membershipPointsEnabledHint: 'Default points earning for each new order; the POS switch overrides it for that order only. When off, redemption stays disabled. Existing points are kept.',
     membershipPointsOff: 'Default earning is off',
     infoText: 'Customer-facing membership note',
-    infoTextHint: 'This note appears in the customer portal membership panel under the point summary and redemption rules.',
+    infoTextHint: 'This note appears in the website membership panel under the point summary and redemption rules.',
     submissionRewardPoints: 'Default reward points per approved share',
     validationUsd: 'USD redemption value uses whole numbers only.',
     validationKhr: 'KHR redemption value uses whole 1000 riel units and cannot be below 1000 when enabled.',
@@ -147,7 +147,7 @@ const COPY: Record<'en' | 'km', LocaleCopy> = {
     behaviorTitle: 'How points move',
     behavior1: 'Completed sales earn points based on the active earning basis.',
     behavior2: 'Partial and full returns deduct points from the refunded value.',
-    behavior3: 'Awaiting payment and cancelled sales do not count until completed.',
+    behavior3: 'Not Paid sales and cancelled sales do not earn points until they are completed.',
     behavior4: 'Staff can attach a customer later in Sales when an anonymous purchase needs points added afterward.',
     attachHint: 'Use Sales > sale details > attach customer when a past anonymous sale should start counting for membership.',
     pointsPreview: 'Current policy preview',
@@ -181,7 +181,7 @@ const COPY: Record<'en' | 'km', LocaleCopy> = {
     redeemPoints: 'ពិន្ទុអប្បបរមាសម្រាប់ប្តូរ',
     redeemValueUsd: 'តម្លៃក្នុងមួយឯកតាប្តូរ (USD)',
     redeemValueKhr: 'តម្លៃក្នុងមួយឯកតាប្តូរ (KHR)',
-    showPointValue: 'បង្ហាញតម្លៃពិន្ទុនៅ Customer Portal',
+    showPointValue: 'បង្ហាញតម្លៃពិន្ទុនៅលើគេហទំព័រ',
     membershipPointsEnabled: 'ពិន្ទុសមាជិក',
     membershipPointsEnabledHint: 'កំណត់លំនាំដើមនៃការគិតពិន្ទុសម្រាប់ការលក់ថ្មី។ អ្នកអាចប្តូរបានសម្រាប់ការបញ្ជាទិញនីមួយៗនៅ POS។ ពេលបិទ មិនអាចប្តូរពិន្ទុបានទេ។ ពិន្ទុចាស់ត្រូវបានរក្សាទុក។',
     membershipPointsOff: 'ការគិតពិន្ទុតាមលំនាំដើមត្រូវបានបិទ',
@@ -208,7 +208,7 @@ const COPY: Record<'en' | 'km', LocaleCopy> = {
     behaviorTitle: 'របៀបផ្លាស់ប្តូរពិន្ទុ',
     behavior1: 'ការលក់ដែលបានបញ្ចប់ទើបគិតពិន្ទុតាមគោលការណ៍ដែលបានជ្រើស។',
     behavior2: 'Partial return និង full return កាត់ពិន្ទុតាមតម្លៃ Refund។',
-    behavior3: 'ការលក់ awaiting payment និង cancelled មិនរាប់ចូលរហូតដល់ completed។',
+    behavior3: 'ការលក់ជាប្រាក់ជំពាក់ និងការលក់ដែលបានលុបចោល មិនទទួលបានពិន្ទុ រហូតដល់បញ្ចប់។',
     behavior4: 'បុគ្គលិកអាចភ្ជាប់អតិថិជនបន្ថែមនៅ Sales ប្រសិនបើការលក់ចាស់ត្រូវបន្ថែមពិន្ទុពេលក្រោយ។',
     attachHint: 'ប្រើ Sales > sale details > attach customer នៅពេលត្រូវភ្ជាប់សមាជិកទៅការលក់អនាមិកចាស់។',
     pointsPreview: 'ការមើលជាមុននៃច្បាប់បច្ចុប្បន្ន',
@@ -784,7 +784,7 @@ export default function LoyaltyPointsPage() {
 
               <label htmlFor="show-point-value" className="mt-4 flex items-center justify-between rounded-2xl border border-gray-200 px-4 py-3 dark:border-gray-700">
                 <div>
-                  <div className="text-sm font-medium text-gray-700 dark:text-gray-300">{copy('showPointValue', 'Show point value on customer portal')}</div>
+                  <div className="text-sm font-medium text-gray-700 dark:text-gray-300">{copy('showPointValue', 'Show point value on the website')}</div>
                   <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">{copy('wholeUnitsOnly', 'Customers can view balances with decimals, but staff redeem points only in whole units.')}</div>
                 </div>
                 <input
@@ -806,7 +806,7 @@ export default function LoyaltyPointsPage() {
                   value={form.customer_portal_membership_info_text || ''}
                   onChange={(event: ChangeEvent<HTMLTextAreaElement>) => setValue('customer_portal_membership_info_text', event.target.value)}
                 />
-                <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">{copy('infoTextHint', 'This note appears in the customer portal membership panel under the point summary and redemption rules.')}</p>
+                <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">{copy('infoTextHint', 'This note appears in the website membership panel under the point summary and redemption rules.')}</p>
               </div>
             </section>
             ) : null}
@@ -822,7 +822,7 @@ export default function LoyaltyPointsPage() {
                   <ul className="mt-3 space-y-2 text-sm text-gray-600 dark:text-gray-300">
                     <li>{copy('behavior1', 'Completed sales earn points based on the active earning basis.')}</li>
                     <li>{copy('behavior2', 'Partial and full returns deduct points from the refunded value.')}</li>
-                    <li>{copy('behavior3', 'Awaiting payment and cancelled sales do not count until completed.')}</li>
+                    <li>{copy('behavior3', 'Not Paid sales and cancelled sales do not earn points until they are completed.')}</li>
                     <li>{copy('behavior4', 'Staff can attach a customer later in Sales when an anonymous purchase needs points added afterward.')}</li>
                   </ul>
                   <p className="mt-3 text-xs text-gray-500 dark:text-gray-400">{copy('attachHint', 'Use Sales > sale details > attach customer when a past anonymous sale should start counting for membership.')}</p>
@@ -844,7 +844,7 @@ export default function LoyaltyPointsPage() {
                   <div className="mt-3 space-y-2 text-sm text-gray-600 dark:text-gray-300">
                     <div>{policySummary}</div>
                     <div>{copy('unitLabel', '1 redemption unit')}: {redeemPoints} pts = {fmtUSD(redeemValueUsd)} / {fmtKHR(redeemValueKhr)}</div>
-                    <div>{copy('showPointValue', 'Show point value on customer portal')}: {form.customer_portal_show_point_value ? 'ON' : 'OFF'}</div>
+                    <div>{copy('showPointValue', 'Show point value on the website')}: {form.customer_portal_show_point_value ? 'ON' : 'OFF'}</div>
                     <div>{copy('submissionRewardPoints', 'Default reward points per approved share')}: {rewardPoints}</div>
                   </div>
                 </div>

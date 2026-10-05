@@ -41,7 +41,7 @@ export const ROLE_PRESETS: RolePreset[] = [
     labelKey: 'role_preset_employee',
     label: 'Employee',
     descriptionKey: 'role_preset_employee_desc',
-    description: 'Day-to-day front-line access: POS and individual Sales and Returns actions, plus the dashboard and customer portal. Product, inventory, and contact changes use Partial Access. Bulk changes, imports, exports, contact financial history, supplier records, and administrative areas stay unavailable.',
+    description: 'Day-to-day front-line access: POS and individual Sales and Returns actions, plus the dashboard and Website Editor. Product, inventory, and contact changes use Partial Access. Bulk changes, imports, exports, contact financial history, supplier records, and administrative areas stay unavailable.',
     permissions: {
       dashboard: true,
       customer_portal: true,
@@ -70,7 +70,7 @@ export const ROLE_PRESETS: RolePreset[] = [
     labelKey: 'role_preset_manager',
     label: 'Manager',
     descriptionKey: 'role_preset_manager_desc',
-    description: "Full day-to-day operational access -- Dashboard, Customer Portal, POS, Products, Inventory, Branches, Sales, Returns, Fees, Contacts, Library, Audit Log, and the Review/Approval queue -- but not Users and roles, Backup restore/reset, or Security settings, which stay Admin-only.",
+    description: "Full day-to-day operational access -- Dashboard, Website Editor, POS, Products, Inventory, Branches, Sales, Returns, Expenses, Contacts, Library, Audit Log, and the Review/Approval queue -- but not Users and roles, Backup restore/reset, or Security settings, which stay Admin-only.",
     permissions: {
       dashboard: true,
       dashboard_export: true,

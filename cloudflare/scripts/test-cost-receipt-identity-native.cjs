@@ -97,10 +97,10 @@ async function main() {
   const b = await batches.receiveBatchStock(getDb(legacy.env), {...input,unitCostUsd:5})
   assert.notEqual(a.batchId,b.batchId)
   assert.equal((await batches.receiveBatchStock(getDb(legacy.env),input)).batchId,a.batchId)
-  await assert.rejects(batches.receiveBatchStock(getDb(legacy.env),{...input,batchId:a.batchId,unitCostUsd:5}), /Selected batch price/)
+  await assert.rejects(batches.receiveBatchStock(getDb(legacy.env),{...input,batchId:a.batchId,unitCostUsd:5}), /Selected received-date price/)
   const replayBaseline = Math.max(...lotRows(legacy).map(row=>row.id))
   legacy.sql.prepare("INSERT INTO product_cost_entries(product_id,cost_usd,baseline_batch_id,source) VALUES(1,10,?,'manual')").run(replayBaseline)
-  await assert.rejects(batches.receiveBatchStock(getDb(legacy.env),{...input,batchId:a.batchId}), /Selected batch price/)
+  await assert.rejects(batches.receiveBatchStock(getDb(legacy.env),{...input,batchId:a.batchId}), /Selected received-date price/)
   assert.equal((await batches.receiveBatchStock(getDb(legacy.env),{...input,batchId:a.batchId,historicalReceiptReplay:true,preserveHistoricalUnitCost:true})).batchId,a.batchId)
   console.log('PASS shared manual/batch helper uses same guarded price identity')
 

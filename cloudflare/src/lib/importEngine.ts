@@ -3556,9 +3556,9 @@ export async function classifySales(db: D1Compat, rows: ParsedCsvRow[]): Promise
       const batchMatches = batchLabel ? batchesByProductAndLot.get(`${product.id}\u0001${lower(batchLabel)}`) || [] : []
       const batchMatch = batchMatches.length === 1 ? batchMatches[0] : null
       if (batchLabel && batchMatches.length !== 1) {
-        error = `Batch/lot "${batchLabel}" was not found for product "${product.name || sku || barcode}". The receipt was refused so the requested batch identity is not discarded.`
+        error = `Received date "${batchLabel}" was not found for product "${product.name || sku || barcode}". The receipt was refused so the requested received date is not discarded.`
         if (batchMatches.length > 1) {
-          error = `Batch/lot "${batchLabel}" is ambiguous for product "${product.name || sku || barcode}". The receipt was refused so no batch is selected by database row order.`
+          error = `Received date "${batchLabel}" is ambiguous for product "${product.name || sku || barcode}". The receipt was refused so no received date is chosen by database row order.`
         }
         break
       }

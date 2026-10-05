@@ -775,7 +775,7 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
       if (selected && oldName && oldName.toLowerCase() !== newName.toLowerCase()) {
         const impact = await getCustomerApi().getCustomerRenameImpact(selected.id, newName)
         if (impact.target_exists) {
-          notify(`"${newName}" already exists. Use Possible Duplicates to choose which customer to keep.`, 'warning')
+          notify(`"${newName}" already exists. Use Conflicts to choose which customer to keep.`, 'warning')
           return
         }
         const choice = await askRenameChoice({ kind: 'customer', from: oldName, to: newName, impact, choices: ['carry', 'only'] })
@@ -1476,7 +1476,7 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
           t={t}
           extraButtons={[
             ...(canViewFinancialHistory ? [{ label: tr(t, 'customer_purchases', 'Purchases'), onClick: () => setModal('purchases') }] : []),
-            ...(canReadFieldHistory ? [{ label: tr(t, 'field_history', 'Field history'), onClick: () => setModal('records') }] : []),
+            ...(canReadFieldHistory ? [{ label: tr(t, 'field_history', 'Records'), onClick: () => setModal('records') }] : []),
           ]}
         />
       ) : null}

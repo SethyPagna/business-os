@@ -609,7 +609,7 @@ export default function Settings() {
       }
     : {
         eyebrow: 'English',
-        title: 'Leang Beauty',
+        title: 'Leang Cosmetics',
         sidebar: 'Sidebar item',
         section: 'Section heading',
         body: 'Products, receipts, settings, and forms will use this font family and size scale.',
@@ -1360,7 +1360,7 @@ export default function Settings() {
           <label className="flex items-center justify-between rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 dark:border-gray-700 dark:bg-gray-800/70">
             <div className="pr-3">
               <div className="text-sm font-medium text-gray-800 dark:text-gray-100">{t('pos_show_item_discount') || 'Show Discount in Cart'}</div>
-              <div className="text-xs text-gray-500 dark:text-gray-400">{t('pos_show_item_discount_desc') || 'Show the original price and savings for each item in the cart when a special price or discount applies. The price can still be changed in the cart either way.'}</div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">{t('pos_show_item_discount_desc') || 'Show the original price and savings for each item in the cart when a wholesale price or discount applies. The price can still be changed in the cart either way.'}</div>
             </div>
             <input
               type="checkbox"
@@ -2085,7 +2085,7 @@ export default function Settings() {
                 ['notifications_inventory_enabled', 'notification_inventory_alerts', 'Inventory alerts', 'notification_inventory_alerts_desc', 'Low stock and out of stock warnings'],
                 ['notifications_expiry_enabled', 'notification_expiry_alerts', 'Expiry alerts', 'notification_expiry_alerts_desc', 'Products expiring soon or already expired'],
                 ['notifications_supplier_credit_enabled', 'notification_supplier_credit_alerts', 'Not Yet Paid supplier purchase alerts', 'notification_supplier_credit_alerts_desc', 'Not Yet Paid supplier purchases coming due or overdue'],
-                ['notifications_sales_enabled', 'notification_sales_alerts', 'Sales alerts', 'notification_sales_alerts_desc', 'Awaiting payment and delivery follow-up'],
+                ['notifications_sales_enabled', 'notification_sales_alerts', 'Sales alerts', 'notification_sales_alerts_desc', 'Not Paid and delivery follow-up'],
                 ['notifications_loyalty_enabled', 'notification_loyalty_alerts', 'Loyalty alerts', 'notification_loyalty_alerts_desc', 'Customers who reached your points target'],
                 ['notifications_portal_enabled', 'notification_portal_alerts', 'Website alerts', 'notification_portal_alerts_desc', 'Other website notices (pending Share & Reward submissions always appear, regardless of this setting)'],
                 ['notifications_system_enabled', 'notification_system_alerts', 'System alerts', 'notification_system_alerts_desc', 'Only actionable system reminders'],
@@ -2243,7 +2243,7 @@ export default function Settings() {
                 ['telegram_sales_enabled', t('telegram_cat_sales') || 'Sales & new receipts', t('telegram_cat_sales_desc') || 'Receipt number, status, totals, items, customer, and branch'],
                 ['telegram_status_enabled', t('telegram_cat_status') || 'Receipt status changes', t('telegram_cat_status_desc') || 'Payment, delivery, completion, and cancellation changes'],
                 ['telegram_returns_enabled', t('telegram_cat_returns') || 'Customer returns', t('telegram_cat_returns_desc') || 'Return recorded, cancelled or restored: receipt, customer, items and refund'],
-                ['telegram_fees_enabled', t('fees') || 'Fees', t('telegram_cat_fees_desc') || 'New fee type, amount, date, label, and note'],
+                ['telegram_fees_enabled', t('fees') || 'Expenses', t('telegram_cat_fees_desc') || 'New expense: type, amount, date, label, and note'],
                 ['telegram_stock_in_enabled', t('stock_in') || 'Stock in', t('telegram_cat_stock_in_desc') || 'Product, quantity, branch, reason, and received date'],
                 ['telegram_stock_out_enabled', t('stock_out') || 'Stock out', t('telegram_cat_stock_out_desc') || 'Product, quantity, branch, and reason'],
                 // T10: the Worker reads this key (lib/telegram.ts getTelegramConfig)

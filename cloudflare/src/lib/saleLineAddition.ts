@@ -177,21 +177,21 @@ export function resolveExplicitSaleLineBatches(
       continue
     }
     if (!line.branchId) {
-      return { ok: false, error: `Added item #${index + 1} cannot use a batch without a branch.` }
+      return { ok: false, error: `Added item #${index + 1} cannot use a received date without a branch.` }
     }
 
     const key = `${line.productId}:${line.branchId}`
     const batchId = Number(line.batchId)
     const lot = (lotsByKey.get(key) || []).find((entry) => entry.batchId === batchId)
     if (!lot) {
-      return { ok: false, error: `Batch #${batchId} is not an active, available lot for added item #${index + 1} at this branch.` }
+      return { ok: false, error: `Received stock #${batchId} is not active or available for added item #${index + 1} at this branch.` }
     }
 
     const availabilityKey = `${key}:${batchId}`
     const available = remaining.has(availabilityKey) ? remaining.get(availabilityKey)! : lot.available
     const quantity = Math.max(0, Number(line.quantity) || 0)
     if (quantity > available) {
-      return { ok: false, error: `Insufficient batch stock for added item #${index + 1}: requested ${quantity}, available ${available}.` }
+      return { ok: false, error: `Insufficient stock on that received date for added item #${index + 1}: requested ${quantity}, available ${available}.` }
     }
     remaining.set(availabilityKey, available - quantity)
     resolved.push({

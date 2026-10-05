@@ -19,7 +19,7 @@ export default function BulkSaleCancelModal({ sales, saving = false, translate, 
   const hint = [
     translate('bulk_cancel_review_hint', 'Review every sale before cancelling.', 'ពិនិត្យការលក់នីមួយៗមុនពេលបោះបង់។'),
     translate('cancel_stock_hint', 'Anything not already returned goes back into stock.', 'ទំនិញដែលមិនទាន់ត្រឡប់នឹងបញ្ចូលទៅក្នុងស្តុកវិញ។'),
-    translate('cancel_lost_fee_hint', 'e.g. a delivery fee already paid that the buyer refused to cover. Recorded as an expense on the Expenses page.', 'ឧ. ថ្លៃដឹកជញ្ជូនដែលបានបង់រួច ប៉ុន្តែអ្នកទិញបដិសេធ។ វានឹងត្រូវកត់ត្រាជាចំណាយនៅទំព័រចំណាយ។'),
+    translate('cancel_lost_fee_hint', 'e.g. a delivery fee already paid that the buyer refused to cover. Recorded as an expense on the Expenses page.', 'ឧ. ថ្លៃដឹកដែលបានបង់រួច ប៉ុន្តែអតិថិជនមិនព្រមសង។ កត់ត្រាជាចំណាយនៅទំព័រ «ចំណាយ»។'),
   ].join('\n\n')
 
   return (

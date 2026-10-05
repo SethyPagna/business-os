@@ -325,19 +325,22 @@ console.log('PASS 5 -- two lines of the same product share one pool of lot avail
 // ---- 5b: explicit lot picks are server-resolved before any write ----------
 {
   const invalidPicks = [
-    ['foreign product', LINE(2, { batchId: 601 }), lotsFor()],
-    ['nonexistent', LINE(2, { batchId: 999 }), lotsFor()],
-    ['inactive', LINE(2, { batchId: 503 }), lotsFor()],
-    ['wrong branch', LINE(2, { batchId: 501, branchId: 2 }), lotsFor()],
-    ['insufficient', LINE(9, { batchId: 501 }), lotsFor()],
+    // Each refusal names the pick the way the screens do ("received stock" / "received date");
+    // the two reasons stay distinguishable: not selectable at all vs selectable but too small.
+    ['foreign product', LINE(2, { batchId: 601 }), lotsFor(), /Received stock #601 is not active or available/],
+    ['nonexistent', LINE(2, { batchId: 999 }), lotsFor(), /Received stock #999 is not active or available/],
+    ['inactive', LINE(2, { batchId: 503 }), lotsFor(), /Received stock #503 is not active or available/],
+    ['wrong branch', LINE(2, { batchId: 501, branchId: 2 }), lotsFor(), /Received stock #501 is not active or available/],
+    ['insufficient', LINE(9, { batchId: 501 }), lotsFor(), /Insufficient stock on that received date/],
   ]
-  for (const [name, line, availability] of invalidPicks) {
+  for (const [name, line, availability, expectedError] of invalidPicks) {
     const { sqlite } = setup()
     seedShelf(sqlite)
     const before = sqlite.serialize()
     const resolved = resolveExplicitSaleLineBatches([line], availability)
     assert.strictEqual(resolved.ok, false, `${name} explicit batch must be rejected`)
-    assert.match(resolved.error, /batch|lot/i)
+    assert.match(resolved.error, expectedError, `${name} says why, in the received-date wording`)
+    assert.doesNotMatch(resolved.error, /(batch|lot)/i, `${name} refusal must not leak the internal batch/lot terms to the user`)
     assert.deepStrictEqual(sqlite.serialize(), before, `${name} rejection must perform zero writes`)
     assert.strictEqual(num(sqlite, 'SELECT COUNT(*) FROM sale_items'), 0)
     assert.strictEqual(num(sqlite, 'SELECT COUNT(*) FROM inventory_movements'), 0)

@@ -680,7 +680,7 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
     }
     if (line.batch_id != null) {
       const batch = explicitBatchMap.get(line.batch_id)
-      if (!batch || Number(batch.variant_product_id) !== line.product_id) fail(`Batch ${line.batch_id} does not belong to product ${line.product_id}.`, 409, 'batch_mismatch')
+      if (!batch || Number(batch.variant_product_id) !== line.product_id) fail(`Received stock ${line.batch_id} does not belong to product ${line.product_id}.`, 409, 'batch_mismatch')
     }
   }
 
@@ -745,7 +745,7 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
       receiptTargets.set(line.line_id, resolveReceiptLotTarget(lots, line.received_date, line.unit_cost_usd,
         baselineByProduct.get(line.product_id as number) || 0, line.batch_id))
     } catch {
-      fail('Selected batch price or override baseline changed; choose a new receipt batch.', 409, 'batch_cost_mismatch')
+      fail('Selected received-date price or override baseline changed; choose the received date again.', 409, 'batch_cost_mismatch')
     }
   }
   const receiptBatchKey = (line: CanonicalLine) => receiptTargets.get(line.line_id)?.batchKey ?? receivedBatchKey(line.received_date)
@@ -1073,7 +1073,7 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
       if (retry.request_json !== canonical) fail('client_request_id was already used with different data.', 409, 'idempotency_conflict')
       return parseStoredReceipt(retry, true)
     }
-    if (/constraint/i.test(String(error))) fail('Product, branch, batch, stock, or asset state changed. Nothing was applied; refresh and retry.', 409, 'stale_state')
+    if (/constraint/i.test(String(error))) fail('Product, branch, received date, stock, or asset state changed. Nothing was applied; refresh and retry.', 409, 'stale_state')
     throw error
   }
   const saved = await db.prepare('SELECT receipt_json FROM stock_session_operations WHERE id=@id').get<Row>({ id: operationId })

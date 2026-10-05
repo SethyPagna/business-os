@@ -306,7 +306,7 @@ assert.match(backend, /allocateNewSaleLines\(/)
 assert.match(backend, /const lineBranchId = Number\(item\.branch_id \?\? saleHeaderBranchId\)/)
 assert.match(backend, /lineBranchId !== saleHeaderBranchId/)
 assert.match(backend, /branchId: lineBranchId/)
-assert.match(saleLineAdditionBackend, /if \(!line\.branchId\) \{[\s\S]{0,160}cannot use a batch without a branch/)
+assert.match(saleLineAdditionBackend, /if \(!line\.branchId\) \{[\s\S]{0,160}cannot use a received date without a branch/)
 assert.match(saleLineAdditionBackend, /if \(!line\.branchId \|\| line\.heldUnits <= 0\) continue/)
 assert.match(salesStatusBackend, /\['completed', 'awaiting_payment', 'awaiting_delivery'\]/)
 

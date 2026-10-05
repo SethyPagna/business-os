@@ -179,11 +179,11 @@ export const PERMISSION_ACTIONS: Record<string, PermissionAction[]> = {
   // cloudflare/src/routes/fees.ts
   fees: [
     { key: 'view', tKey: 'perm_act_fees_view', label: 'View and search', review: 'allow' },
-    { key: 'add', tKey: 'perm_act_fees_add', label: 'Add fee', review: 'allow' },
-    { key: 'edit', tKey: 'perm_act_fees_edit', label: 'Edit fee', review: 'allow' },
+    { key: 'add', tKey: 'perm_act_fees_add', label: 'Add expense', review: 'allow' },
+    { key: 'edit', tKey: 'perm_act_fees_edit', label: 'Edit expense', review: 'allow' },
     // DELETE /:id -> maybeQueueForReview (fees.ts ~263). The only Fees
     // action that does not apply directly.
-    { key: 'delete', tKey: 'perm_act_fees_delete', label: 'Delete fee', review: 'queue' },
+    { key: 'delete', tKey: 'perm_act_fees_delete', label: 'Delete expense', review: 'queue' },
     // Export packages rows the caller may already read. Keep that historical
     // Full/Review default and allow an explicit false override to narrow it.
     { key: 'export', tKey: 'export', label: 'Export', review: 'allow' },
