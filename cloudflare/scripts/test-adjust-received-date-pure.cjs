@@ -421,7 +421,7 @@ async function main() {
       reason: 'fractional top-up', branchId: 1, batchId: first.json.batchId, receivedDate: '2026-09-13',
     })
     assert.strictEqual(second.status, 400, 'a different price cannot overwrite the selected existing lot')
-    assert.match(second.json.error, /batch price or override baseline changed/)
+    assert.match(second.json.error, /received-date price or override baseline changed/)
     assert.strictEqual(rawDb.prepare('SELECT received_cost_usd FROM product_batches WHERE id=?').get([first.json.batchId]).received_cost_usd, 3.7038)
     assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM inventory_movements').get().n, 1, 'rejected repricing writes no movement')
     const pricedReceipt = {

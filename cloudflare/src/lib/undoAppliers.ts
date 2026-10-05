@@ -871,7 +871,7 @@ async function assertMergeStateUnchanged(
   // fingerprintPending until a complete expected value is stored.
   if (transactionGuards && !expected) throw new UndoConflictError('This group merge is missing its safety fingerprint.')
   if (expected && await mergeStateFingerprint(db, reversals, transactionGuards) !== expected) {
-    throw new UndoConflictError('This merge has later stock or batch activity, so it can no longer be undone safely.', UNDO_RECORD_CHANGED_CODE)
+    throw new UndoConflictError('This merge has later stock or received-date activity, so it can no longer be undone safely.', UNDO_RECORD_CHANGED_CODE)
   }
 }
 
@@ -1176,7 +1176,7 @@ async function assertLegacyMergeUnchanged(
   )
   const row = await db.prepare(`SELECT CASE WHEN ${whole.sql} THEN 1 ELSE 0 END AS ok`).get<{ ok: number }>(whole.params)
   if (Number(row?.ok) !== 1) {
-    throw new UndoConflictError('These products changed after the merge (stock, lots, prices or cover image), so it can no longer be undone safely. Nothing was changed.', UNDO_RECORD_CHANGED_CODE)
+    throw new UndoConflictError('These products changed after the merge (stock, received dates, prices or cover image), so it can no longer be undone safely. Nothing was changed.', UNDO_RECORD_CHANGED_CODE)
   }
   const guards: AtomicMergeStatement[] = new Array(folds.length)
   for (let i = folds.length - 1; i >= 0; i--) {

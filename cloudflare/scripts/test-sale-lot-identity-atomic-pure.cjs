@@ -209,7 +209,7 @@ function counts(db) {
       batch_expiry_date: '2099-01-01',
     }], 'wrong-product')
     assert.equal(result.status, 409, JSON.stringify(result.body))
-    assert.match(result.body.error, /not an active, available lot/i)
+    assert.match(result.body.error, /is not active or available for added item/i)
     assert.deepEqual(counts(db), before)
   }
   console.log('PASS 1 -- explicit batches are product + Shop branch identities')

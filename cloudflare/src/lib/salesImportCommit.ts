@@ -151,11 +151,11 @@ export async function applyHistoricalSaleImport(
     const batchLabel = String(item.batch_label ?? '').trim()
     if ((!Number.isSafeInteger(batchId) || batchId <= 0) && !batchLabel) return []
     if (!Number.isSafeInteger(batchId) || batchId <= 0 || !batchLabel) {
-      throw new Error(`Sale on row ${rowNumber} has an incomplete batch/lot identity`)
+      throw new Error(`Sale on row ${rowNumber} has an incomplete received-date identity`)
     }
     const productId = Number(item.product_id)
     if (!Number.isSafeInteger(productId) || productId <= 0) {
-      throw new Error(`Sale on row ${rowNumber} has an invalid product for batch/lot "${batchLabel}"`)
+      throw new Error(`Sale on row ${rowNumber} has an invalid product for received date "${batchLabel}"`)
     }
     return [{ batch_id: batchId, product_id: productId, batch_label: batchLabel }]
   })
@@ -183,7 +183,7 @@ export async function applyHistoricalSaleImport(
              AND lower(trim(COALESCE(matching_pb.lot_code, ''))) = lower(trim(CAST(json_extract(expected.value, '$.batch_label') AS TEXT)))) != 1
   `).get<{ n: number }>({ batch_refs_json: batchRefsJson, branch_id: saleHeaderBranchId })
   if (Number(invalidBatchReferences?.n || 0) > 0) {
-    throw new Error(`Sale on row ${rowNumber} references a batch/lot that is missing, inactive, assigned to another product, renamed, or unavailable at the Shop`)
+    throw new Error(`Sale on row ${rowNumber} references a received date that is missing, inactive, assigned to another product, renamed, or unavailable at the Shop`)
   }
 
   // A sales CSV's receipt_number column carries whatever the source system
@@ -503,6 +503,6 @@ export async function applyHistoricalSaleImport(
   const committed = await db.prepare(`
     SELECT status FROM import_sales_commits WHERE job_id = @job_id AND group_key = @group_key
   `).get<{ status: string }>({ job_id: jobId, group_key: groupKey })
-  if (committed?.status !== 'applied') throw new Error('Historical sale did not commit because its Shop branch or batch/lot reference changed before the atomic write')
+  if (committed?.status !== 'applied') throw new Error('Historical sale did not commit because its Shop branch or received-date reference changed before the atomic write')
   return { alreadyApplied: false, clientRequestId }
 }

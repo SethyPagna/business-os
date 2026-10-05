@@ -1747,7 +1747,7 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
     ? await db.prepare('SELECT id,variant_product_id,unit_cost_usd,batch_number,lot_code FROM product_batches WHERE id=@id AND variant_product_id=@productId')
       .get<{ id: number; variant_product_id: number; unit_cost_usd: number | null; batch_number: number | null; lot_code: string | null }>({ id: explicitBatchId, productId })
     : undefined
-  if (isSelectedLotCorrection && !correctionLot) return c.json({ error: 'Selected batch does not belong to this product.', code: 'batch_mismatch' }, 409)
+  if (isSelectedLotCorrection && !correctionLot) return c.json({ error: 'Selected received date does not belong to this product.', code: 'batch_mismatch' }, 409)
   const lotSupplierName = isReceipt && explicitBatchId
     ? (await db.prepare('SELECT supplier_name FROM product_batches WHERE id = @id').get<{ supplier_name: string | null }>({ id: explicitBatchId }))?.supplier_name ?? null
     : null

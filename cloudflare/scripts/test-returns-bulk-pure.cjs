@@ -377,7 +377,7 @@ async function run() {
   f = fixture(); seed(f)
   f.sql.prepare('DELETE FROM return_item_batch_allocations WHERE return_item_id=3').run()
   const ambiguous = snapshot(f)
-  await assert.rejects(() => helper.applyReturnBulkAction(f.env, user, request(f, [3], 'status', 'completed', 'cancelled', 'supplier-legacy-001')), /predates exact lot tracking/)
+  await assert.rejects(() => helper.applyReturnBulkAction(f.env, user, request(f, [3], 'status', 'completed', 'cancelled', 'supplier-legacy-001')), /predates exact received-date tracking/)
   assert.equal(snapshot(f), ambiguous)
   console.log('PASS historical supplier return with ambiguous lot provenance is refused without writes')
 

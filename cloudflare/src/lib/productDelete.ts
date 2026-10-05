@@ -92,7 +92,7 @@ export async function prepareProductRemovePlan(
   const lotCount = await db.prepare('SELECT COUNT(*) AS count FROM product_batches WHERE variant_product_id=@product')
     .get<{ count: number }>({ product: productId })
   if (Number(lotCount?.count) > PRODUCT_REMOVE_MAX_LOTS) {
-    throw new ProductRemoveError('remove_graph_too_large', 'This product has too many receipt lots for one reversible removal.', 413)
+    throw new ProductRemoveError('remove_graph_too_large', 'This product has too many received dates for one reversible removal.', 413)
   }
   const branchStock = rows(await db.prepare(`SELECT bs.id,bs.product_id,bs.branch_id,bs.quantity,bs.rfid_confirmed_qty,b.name AS branch_name
     FROM branch_stock bs LEFT JOIN branches b ON b.id=bs.branch_id WHERE bs.product_id=@product ORDER BY bs.id`)
@@ -151,7 +151,7 @@ export async function prepareProductRemoveReviewPlans(
     else if (Number(product.is_active) !== 1 || Number(product.is_group) === 1) {
       blocked.set(removal.product_id, { code: 'product_not_removable', message: 'Only an active non-group product can be removed.' })
     } else if (lotCount > PRODUCT_REMOVE_MAX_LOTS) {
-      blocked.set(removal.product_id, { code: 'remove_graph_too_large', message: 'This product has too many receipt lots for one reversible removal.' })
+      blocked.set(removal.product_id, { code: 'remove_graph_too_large', message: 'This product has too many received dates for one reversible removal.' })
     } else if (retainedLots + lotCount > PRODUCT_REMOVE_MAX_REVIEW_LOTS) {
       blocked.set(removal.product_id, { code: 'remove_review_too_large', message: 'This removal exceeds the bounded receipt detail for one review.' })
     } else {

@@ -596,7 +596,7 @@ async function run() {
     assert.match(appliersSrc, /DELETE FROM inventory_movements WHERE id IN/)
     assert.match(productsSrc, /UPDATE sale_item_batch_allocations SET batch_id = @keeperBatchId WHERE batch_id = @dupBatchId/)
     assert.match(productsSrc, /UPDATE return_item_batch_allocations SET batch_id = @keeperBatchId WHERE batch_id = @dupBatchId/)
-    assert.match(appliersSrc, /This merge has later stock or batch activity/)
+    assert.match(appliersSrc, /This merge has later stock or received-date activity/)
   })
 
   await check('image-denied image-free undo omits image SQL and preserves a concurrent keeper cover', async () => {
@@ -640,7 +640,7 @@ async function run() {
     run1('UPDATE branch_stock SET quantity = quantity + 1 WHERE product_id = @productId AND branch_id = @branchId', { productId: KEEPER, branchId: B1 })
     await assert.rejects(
       applier.run({ applier: 'product.merge', snapshot_id: snapshotId }, { env: {}, user: { id: 42 }, direction: 'undo' }),
-      /later stock or batch activity/,
+      /later stock or received-date activity/,
     )
     assert.equal(d1.db.prepare('SELECT is_active FROM products WHERE id=?').get(DUP).is_active, 0, 'refusal mutates nothing')
   })

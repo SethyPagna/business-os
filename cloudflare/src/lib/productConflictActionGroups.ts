@@ -370,7 +370,7 @@ export function parseProductConflictActionApplyRequest(value: unknown): ProductC
 export function refuseProductConflictActionGroupDetail(
   plan: ProductConflictActionGroupPlan,
   detailRowCount: number,
-  message = 'This group has too much lot history for one bounded review. Review it separately.',
+  message = 'This group has too much received-date history for one bounded review. Review it separately.',
   compact = false,
 ): ProductConflictActionGroupPlan {
   return {
