@@ -364,12 +364,27 @@ async function main() {
     const compat = readCf('routes/compat.ts')
     assert.match(compat, /from '\.\.\/lib\/familyStockStats'/,
       'routes/compat.ts must import the family stock helper that consumes lowStockThresholdSql')
-    assert.match(compat, /getFamilyStockStats\(/,
-      'the Dashboard badge must use familyStockStats rather than a local threshold expression')
+    // G39 item 1: the badge and the preview lists come from ONE statement,
+    // getFamilyStockOverview, through lib/dashboardStockOverview.ts (shared,
+    // cached). Its equality with getFamilyStockStats + getFamilyStockAlertPage
+    // is pinned by test-dashboard-stock-overview-pure.cjs.
+    assert.match(compat, /loadDashboardStockOverview\(env, overviewCtx\)/,
+      'the Dashboard badge and its lists must come from the shared family-stock overview')
+    const overview = readCf('lib/dashboardStockOverview.ts')
+    assert.match(overview, /getFamilyStockOverview\(\{ db, lowStock, previewSize/,
+      'the overview must build badge and lists from the family-aware helper')
+    assert.match(overview, /loadLowStockConfig\(env\)/,
+      "the overview must read the owner's low-stock setting, not assume one")
+    const family = readCf('lib/familyStockStats.ts')
+    const overviewFn = family.slice(family.indexOf('export async function getFamilyStockOverview'))
+    assert.match(overviewFn, /lowStockThresholdSql\(lowStock, 'p\.low_stock_threshold'\)/,
+      'the one-pass overview must use the shared threshold expression')
     assert.match(compat, /getFamilyStockAlertPage\(/,
       'the Dashboard drill list must use the same family-aware threshold path as its badge')
-    assert.doesNotMatch(compat, /low_stock_threshold,\s*10\)/,
-      'the Dashboard route must not restore the old literal threshold while delegating')
+    for (const [name, text] of [['routes/compat.ts', compat], ['lib/dashboardStockOverview.ts', overview], ['getFamilyStockOverview', overviewFn]]) {
+      assert.doesNotMatch(text, /low_stock_threshold,\s*10\)/,
+        `${name} must not restore the old literal threshold while delegating`)
+    }
   })
 
   await check('the two shapes that alerts-off would otherwise break stay stated', () => {
