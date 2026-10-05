@@ -229,6 +229,18 @@ export type PlanLimits = {
   // account plus `wrangler tail` -- a deploy, and therefore an owner
   // decision. Until then: 50.
   d1QueriesPerInvocation: number
+
+  // ---- Storefront AI assistant (G38 P0) ----------------------------------
+
+  // routes/portal.ts POST /ai/chat daily budget: chats per business day
+  // (UTC+7) for the whole storefront, and per visitor network. Each chat is
+  // one paid call to the AI provider, so an anonymous script must not turn
+  // the shop's provider bill into a number of its choosing. Free runs the
+  // assistant on a 10 ms CPU budget, so it gets the smaller allowance.
+  // PORTAL_AI_DAILY_MAX / PORTAL_AI_VISITOR_DAILY_MAX in [vars] override
+  // both tiers (routes/portal.ts portalAiDailyBudget).
+  portalAiDailyMax: number
+  portalAiVisitorDailyMax: number
 }
 
 const PAID_LIMITS: PlanLimits = {
@@ -251,6 +263,8 @@ const PAID_LIMITS: PlanLimits = {
   d1DailyRowsWritten: 1_666_000,
   d1MaxDatabaseBytes: 10 * 1024 * 1024 * 1024,
   d1QueriesPerInvocation: 1000,
+  portalAiDailyMax: 300,
+  portalAiVisitorDailyMax: 30,
 }
 
 const FREE_LIMITS: PlanLimits = {
@@ -273,6 +287,8 @@ const FREE_LIMITS: PlanLimits = {
   d1DailyRowsWritten: 100_000,
   d1MaxDatabaseBytes: 500 * 1024 * 1024,
   d1QueriesPerInvocation: 50,
+  portalAiDailyMax: 100,
+  portalAiVisitorDailyMax: 10,
 }
 
 /**

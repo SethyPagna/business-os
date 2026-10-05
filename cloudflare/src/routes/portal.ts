@@ -6,7 +6,9 @@ import { admitRequestBody, SMALL_BODY_BYTES, PORTAL_SCREENSHOT_BODY_BYTES } from
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { hasPermission } from '../lib/permissions'
 import { audit } from '../lib/audit'
-import { checkRateLimit, getClientNetworkKey, peekRateLimit, recordRateLimitEvent } from '../lib/rateLimit'
+import { checkRateLimit, getClientNetworkKey, peekRateLimit, recordRateLimitEvent, releaseRateLimitSlot } from '../lib/rateLimit'
+import { getPlanLimits } from '../lib/planTier'
+import { BUSINESS_UTC_OFFSET_MINUTES, businessToday } from '../lib/businessDateWindow'
 import { portalAbuseKey } from '../lib/portalAbuseKey'
 import { normalizePortalUploadPath, normalizeSafeLinkUrl } from '../lib/safeLinkUrl'
 import { AUTOMATIC_PORTAL_LANGUAGE, capPortalText, normalizePortalImageAlt, plainText, portalLanguageCode } from '../lib/portalText'
@@ -1162,6 +1164,54 @@ async function getVisitorFingerprint(env: Env, request: Request): Promise<string
   return portalAbuseKey(env, 'portal:ai:visitor', getClientNetworkKey(request).slice(0, 120))
 }
 
+// G38 P0 (design S8): a daily spending cap on the public assistant. Each chat
+// is one paid AI-provider call and the per-minute window alone let a script
+// run all day. Two counters per business day (UTC+7, so they reset at the
+// shop's midnight): one per visitor network and one for the whole
+// storefront. The defaults follow the Workers plan (lib/planTier.ts); a
+// positive integer in PORTAL_AI_DAILY_MAX / PORTAL_AI_VISITOR_DAILY_MAX
+// overrides them. A chat is counted before the provider is called.
+type PortalAiBudgetEnv = Env & { PORTAL_AI_DAILY_MAX?: string; PORTAL_AI_VISITOR_DAILY_MAX?: string }
+const PORTAL_AI_DAY_WINDOW_MS = 26 * 60 * 60 * 1000
+const PORTAL_AI_BUDGET_OVERRIDE_MAX = 100_000
+
+function budgetOverride(value: unknown, fallback: number): number {
+  const text = String(value ?? '').trim()
+  if (!/^\d+$/.test(text)) return fallback
+  const parsed = Number(text)
+  return parsed >= 1 && parsed <= PORTAL_AI_BUDGET_OVERRIDE_MAX ? parsed : fallback
+}
+
+export function portalAiDailyBudget(env: Env): { daily: number; perVisitor: number } {
+  const limits = getPlanLimits(env)
+  const overrides = env as PortalAiBudgetEnv
+  return {
+    daily: budgetOverride(overrides.PORTAL_AI_DAILY_MAX, limits.portalAiDailyMax),
+    perVisitor: budgetOverride(overrides.PORTAL_AI_VISITOR_DAILY_MAX, limits.portalAiVisitorDailyMax),
+  }
+}
+
+function secondsUntilNextBusinessDay(nowMs: number): number {
+  const [year, month, day] = businessToday(nowMs).split('-').map(Number)
+  const nextMidnightUtc = Date.UTC(year, month - 1, day + 1) - BUSINESS_UTC_OFFSET_MINUTES * 60 * 1000
+  return Math.max(1, Math.ceil((nextMidnightUtc - nowMs) / 1000))
+}
+
+async function reservePortalAiBudget(env: Env, visitorKey: string): Promise<{ allowed: boolean; retryAfterSeconds: number }> {
+  const now = Date.now()
+  const day = businessToday(now)
+  const { daily, perVisitor } = portalAiDailyBudget(env)
+  const visitorBucketKey = `${visitorKey}:${day}`
+  const visitor = await checkRateLimit(env, 'portal:ai_chat:visitor-day', visitorBucketKey, perVisitor, PORTAL_AI_DAY_WINDOW_MS)
+  if (!visitor.allowed) return { allowed: false, retryAfterSeconds: secondsUntilNextBusinessDay(now) }
+  const storefront = await checkRateLimit(env, 'portal:ai_chat:day', day, daily, PORTAL_AI_DAY_WINDOW_MS)
+  if (!storefront.allowed) {
+    await releaseRateLimitSlot(env, 'portal:ai_chat:visitor-day', visitorBucketKey, visitor.slot)
+    return { allowed: false, retryAfterSeconds: secondsUntilNextBusinessDay(now) }
+  }
+  return { allowed: true, retryAfterSeconds: 0 }
+}
+
 function collectRecommendationCitations(recommendations: Array<{ citations?: unknown[] }> = []) {
   const citations: unknown[] = []
   for (const recommendation of recommendations) {
@@ -1271,6 +1321,12 @@ app.post('/ai/chat', async (c) => {
     const profile = sanitizeAiProfile(body?.profile)
     if (!question && !hasAiProfilePreference(profile)) {
       return c.json({ error: 'Add a question or at least one shopping preference first' }, 400)
+    }
+
+    const budget = await reservePortalAiBudget(c.env, visitorFingerprint)
+    if (!budget.allowed) {
+      c.header('Retry-After', String(budget.retryAfterSeconds))
+      return c.json({ error: 'The shopping assistant has reached today\'s limit. Please try again tomorrow.', code: 'portal_ai_budget_exhausted' }, 429)
     }
 
     const products = await loadPortalAiCatalog(c.env, config.showOutOfStockProducts)
