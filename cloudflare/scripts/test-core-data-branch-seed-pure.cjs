@@ -62,7 +62,7 @@ const core = loadReal('lib/coreDataInvariants.ts', {
   './db': { getDb: () => currentDb },
   './sqlBinding': sqlBinding,
   '../index': {},
-  bcryptjs: { __esModule: true, default: { hashSync: () => 'focused-test-hash' } },
+  './passwordHash': { hashPassword: async () => 'focused-test-hash' },
 })
 
 const env = {

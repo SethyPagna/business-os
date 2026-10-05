@@ -9,7 +9,7 @@
 //
 // Part A drives the REAL lib/passwordPolicy.ts. Part B drives the REAL
 // routes/users.ts (create, self change, admin reset) over in-memory SQLite
-// with a bcrypt stub that records exactly what was hashed. Part C drives the
+// with a password-hash stub that records exactly what was hashed. Part C drives the
 // REAL routes/auth.ts resets (e-mail link, authenticator code) over the full
 // migrated schema: a refused password spends neither the link nor the code.
 //
@@ -19,7 +19,7 @@ const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
 const ts = require('typescript')
-const bcrypt = require('bcryptjs')
+const { passwordHashStub } = require('./harness/password_hash_stub.cjs')
 const { openDb } = require('./harness/d1compat.cjs')
 const { createAuthHarness } = require('./harness/load_auth_route.cjs')
 
@@ -72,7 +72,7 @@ const hashed = (value) => `hash:${value}`
 
 const usersRoute = load('routes/users.ts', {
   hono: require('hono'),
-  bcryptjs: { hashSync: (v) => hashed(v), compareSync: (plain, hash) => hash === hashed(plain) },
+  '../lib/passwordHash': passwordHashStub,
   '../lib/imageAudit': { enqueueImageNormalization: noop },
   '../lib/db': { getDb: (env) => env.DB },
   '../lib/userIdentity': { buildUserRenameStatements: () => [] },
@@ -238,7 +238,10 @@ const REFUSED = [
     h.addUser(RESET_USER)
     return { h, consumed }
   }
-  const passwordIs = (h, plain) => bcrypt.compareSync(plain, h.userRow(RESET_USER.id).password)
+  // The REAL lib/passwordHash.ts: the auth harness hashes for real, legacy
+  // bcrypt rows (addUser) and new PBKDF2 rows (a reset) alike.
+  const realPasswordHash = load('lib/passwordHash.ts')
+  const passwordIs = async (h, plain) => (await realPasswordHash.verifyPassword(plain, h.userRow(RESET_USER.id).password)).ok
 
   await check('e-mail link reset refuses each problem with its code, before the link is spent', async () => {
     for (const { password, code } of REFUSED) {
@@ -248,7 +251,7 @@ const REFUSED = [
       assert.equal(res.body.success, false)
       assert.equal(res.body.code, code, JSON.stringify(password))
       assert.deepEqual(consumed, [], 'the link can still be used with a valid password')
-      assert.equal(passwordIs(h, 'old-pass-21'), true)
+      assert.equal(await passwordIs(h, 'old-pass-21'), true)
     }
   })
 
@@ -259,7 +262,7 @@ const REFUSED = [
       assert.equal(res.status, 400, `${JSON.stringify(password)} -> ${JSON.stringify(res.body)}`)
       assert.equal(res.body.success, false)
       assert.equal(res.body.code, code, JSON.stringify(password))
-      assert.equal(passwordIs(h, 'old-pass-21'), true)
+      assert.equal(await passwordIs(h, 'old-pass-21'), true)
     }
   })
 
@@ -269,12 +272,12 @@ const REFUSED = [
     assert.equal(res.status, 200, JSON.stringify(res.body))
     assert.equal(res.body.username, 'dara')
     assert.deepEqual(consumed, ['link-token'])
-    assert.equal(passwordIs(h, 'fresh link 22'), true)
+    assert.equal(await passwordIs(h, 'fresh link 22'), true)
     ;({ h } = resetHarness())
     res = await h.request('/password-reset/otp', 'POST', { identifier: 'DARA', otp: await h.codeAt(OTP_SECRET), newPassword: KHMER_KA.repeat(24) })
     assert.equal(res.status, 200, JSON.stringify(res.body))
     assert.equal(res.body.username, 'dara', 'the account username, not what was typed')
-    assert.equal(passwordIs(h, KHMER_KA.repeat(24)), true)
+    assert.equal(await passwordIs(h, KHMER_KA.repeat(24)), true)
   })
 
   if (failures) { console.error(`${failures} failing`); process.exit(1) }

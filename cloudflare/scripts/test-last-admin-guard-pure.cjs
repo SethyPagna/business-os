@@ -82,6 +82,7 @@ const app = load('routes/users.ts', {
   '../lib/currentPasswordGuard': { CURRENT_PASSWORD_RATE_LIMITED_ERROR: 'x', verifyCurrentPassword: async () => ({ ok: true }) },
   // Real module (pure, no imports): a hand-rolled stub lags every member the route starts importing.
   '../lib/passwordPolicy': load('lib/passwordPolicy.ts'),
+  '../lib/passwordHash': load('lib/passwordHash.ts'),
   '../lib/googleOauth': { isGoogleLinkReady: () => false },
   '../index': {},
   '../lib/actorSnapshot': { actorSnapshot: (u) => u?.username || null },

@@ -22,6 +22,7 @@ const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
 const ts = require('typescript')
+const { passwordHashStub } = require('./harness/password_hash_stub.cjs')
 const { openDb } = require('./harness/d1compat.cjs')
 
 function load(rel, overrides = {}) {
@@ -95,8 +96,7 @@ const cookie = require('hono/cookie')
 const rateLimit = load('lib/rateLimit.ts', { './db': libDb, '../index': {} })
 const authLib = load('lib/auth.ts', { './db': libDb, 'hono/cookie': cookie, '../index': {} })
 const policy = load('lib/passwordPolicy.ts', {})
-const bcryptStub = { hashSync: (v) => `hash:${v}`, compareSync: (plain, hash) => hash === `hash:${plain}` }
-const guardOverrides = { './rateLimit': rateLimit, './auth': authLib, bcryptjs: bcryptStub, 'hono/cookie': cookie, '../index': {} }
+const guardOverrides = { './rateLimit': rateLimit, './auth': authLib, './passwordHash': passwordHashStub, 'hono/cookie': cookie, '../index': {} }
 const guard = load('lib/currentPasswordGuard.ts', guardOverrides)
 const audits = []
 // audit(env, actorId, actorName, action, entity, entityId, details): drop env.
@@ -105,7 +105,7 @@ let resetLinkConsumed = 0
 
 const usersRoute = load('routes/users.ts', {
   hono: require('hono'),
-  bcryptjs: bcryptStub,
+  '../lib/passwordHash': passwordHashStub,
   '../lib/imageAudit': { enqueueImageNormalization: noop },
   '../lib/db': { getDb: (env) => env.DB },
   '../lib/userIdentity': { buildUserRenameStatements: () => [] },
@@ -127,7 +127,7 @@ const usersRoute = load('routes/users.ts', {
 
 const authRoute = load('routes/auth.ts', {
   hono: require('hono'),
-  bcryptjs: bcryptStub,
+  '../lib/passwordHash': passwordHashStub,
   '../lib/db': { getDb: (env) => env.DB },
   '../lib/auth': authLib,
   '../lib/verification': {

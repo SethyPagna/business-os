@@ -15,6 +15,7 @@
 const fs = require('fs')
 const path = require('path')
 const ts = require('typescript')
+const { loadRealPasswordHash } = require('./harness/password_hash_stub.cjs')
 const assert = require('assert')
 const Module = require('module')
 const { openDb } = require('./harness/d1compat.cjs')
@@ -72,9 +73,12 @@ function transpile(relPath) {
 // wins. lib/currentPasswordGuard.ts keys its limit on the session's sign-in
 // (S-auth4: './auth' currentSessionLimitFamily). With no session here the
 // family is unknown and the guard keeps its per-cookie fallback; its verdict,
-// a real bcrypt compare, is unchanged. Unused when no caller loads it real.
+// a real password check (lib/passwordHash.ts), is unchanged. Unused when no
+// caller loads it real.
 const REAL_LOAD_DEFAULTS = {
   'lib/currentPasswordGuard.ts': { './auth': { currentSessionLimitFamily: async () => null } },
+  // lib/coreDataInvariants.ts hashes a seeded admin password through it.
+  'lib/coreDataInvariants.ts': { './passwordHash': loadRealPasswordHash() },
 }
 
 function loadReal(relPath, requireOverrides = {}) {
@@ -147,10 +151,11 @@ const systemRoute = loadReal('routes/system.ts', {
   '../lib/actorSnapshot': actorSnapshotKernel,
   '../lib/db': { getDb: () => db },
   '../lib/auth': { requireAuth: async (c, next) => { c.set('user', sessionUser); return next() } },
-  // The REAL current-password guard and a real bcrypt compare; only its
+  // The REAL current-password guard and the real lib/passwordHash.ts (a
+  // legacy bcrypt row below, so a real bcrypt compare); only its
   // rate-limit store is stubbed, like '../lib/rateLimit' below.
   '../lib/currentPasswordGuard': loadReal('lib/currentPasswordGuard.ts', {
-    bcryptjs: { __esModule: true, default: require('bcryptjs') },
+    './passwordHash': loadRealPasswordHash(),
     './rateLimit': { checkRateLimit: async () => ({ allowed: true, retryAfterSeconds: 0, slot: 'test' }), releaseRateLimitSlot: async () => {} },
   }),
   '../lib/audit': { audit: async () => {} },

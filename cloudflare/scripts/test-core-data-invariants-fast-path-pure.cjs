@@ -54,7 +54,7 @@ function loadCore(legacy = false) {
     './db': dbModule,
     './sqlBinding': load('lib/sqlBinding.ts'),
     './customTableName': load('lib/customTableName.ts'),
-    bcryptjs: { hashSync: () => 'focused-test-hash' },
+    './passwordHash': { hashPassword: async () => 'focused-test-hash' },
   }, text + '\nexport { tryFastPath }\n')
 }
 const core = loadCore()

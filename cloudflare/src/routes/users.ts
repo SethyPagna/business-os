@@ -1,6 +1,6 @@
 import { Hono, type Context } from 'hono'
 import { enqueueImageNormalization } from '../lib/imageAudit'
-import bcrypt from 'bcryptjs'
+import { hashPassword } from '../lib/passwordHash'
 import { getDb } from '../lib/db'
 import { buildUserRenameStatements } from '../lib/userIdentity'
 import { requireAuth, revokeUserSessions, type SessionUser } from '../lib/auth'
@@ -560,7 +560,7 @@ app.post('/users', async (c) => {
 
   try {
     const { orgId, groupId } = await resolveDefaultOrg(c, actor)
-    const hash = bcrypt.hashSync(password, 10)
+    const hash = await hashPassword(password)
     const db = getDb(c.env)
     const role = await db.prepare('SELECT id FROM roles WHERE id = @id LIMIT 1').get<{ id: number }>({ id: roleId })
     if (!role) return c.json({ success: false, error: 'Selected role no longer exists' }, 400)
@@ -847,7 +847,7 @@ async function handlePasswordChange(c: Ctx, options: { requireCurrent: boolean; 
     if (refused) return refused
   }
 
-  const hash = bcrypt.hashSync(newPassword, 10)
+  const hash = await hashPassword(newPassword)
   await db.prepare('UPDATE users SET password = @password, updated_at = CURRENT_TIMESTAMP WHERE id = @id').run({ password: hash, id: targetId })
   // A new password that is not publicly known ends a forced change.
   await setPasswordMustChange(db, targetId, false)

@@ -23,6 +23,7 @@ const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
 const ts = require('typescript')
+const { passwordHashStub } = require('./harness/password_hash_stub.cjs')
 const { openDb } = require('./harness/d1compat.cjs')
 
 function load(rel, overrides = {}) {
@@ -68,7 +69,7 @@ const ctx = { waitUntil(p) { p?.catch?.(() => {}) }, passThroughOnException() {}
 
 const app = load('routes/users.ts', {
   hono: require('hono'),
-  bcryptjs: { hashSync: (v) => `hash:${v}`, compareSync: (plain, hash) => hash === `hash:${plain}` },
+  '../lib/passwordHash': passwordHashStub,
   '../lib/imageAudit': { enqueueImageNormalization: noop },
   '../lib/db': { getDb: (env) => env.DB },
   '../lib/userIdentity': { buildUserRenameStatements: () => [] },

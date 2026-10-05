@@ -17,6 +17,7 @@ const crypto = require('node:crypto')
 const fs = require('node:fs')
 const path = require('node:path')
 const ts = require('typescript')
+const { passwordHashStub } = require('./harness/password_hash_stub.cjs')
 const { openDb } = require('./harness/d1compat.cjs')
 
 function load(rel, overrides = {}) {
@@ -52,7 +53,7 @@ let actor
 const authLib = load('lib/auth.ts', { './db': { getDb: (env) => env.DB } })
 const usersRoute = load('routes/users.ts', {
   hono: require('hono'),
-  bcryptjs: { hashSync: (v) => `hash:${v}`, compareSync: (plain, hash) => hash === `hash:${plain}` },
+  '../lib/passwordHash': passwordHashStub,
   '../lib/imageAudit': { enqueueImageNormalization: async () => {} },
   '../lib/db': { getDb: (env) => env.DB },
   '../lib/userIdentity': { buildUserRenameStatements: () => [] },

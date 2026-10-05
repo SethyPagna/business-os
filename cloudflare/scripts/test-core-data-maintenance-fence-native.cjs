@@ -38,7 +38,7 @@ function world() {
   }
   const core = load('coreDataInvariants', {
     './db': dbModule, './customTableName': load('customTableName'), './sqlBinding': load('sqlBinding'),
-    bcryptjs: { hashSync: () => 'synthetic-test-hash' },
+    './passwordHash': { hashPassword: async () => 'synthetic-test-hash' },
   })
   return { raw, control, core, env: { DB: { prepare: prepared }, BUSINESS_OS_ADMIN_PASSWORD: 'synthetic-test-password' } }
 }

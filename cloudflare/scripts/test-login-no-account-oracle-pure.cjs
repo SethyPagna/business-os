@@ -7,26 +7,44 @@
 //     ("012345678", "012-345-678") are two typed keys but one account, so the
 //     second failure read 2 for a staff phone and 1 for a stranger's; the same
 //     linkage showed an email or name belonged to a known username;
-//   - bcrypt only ran when an account resolved, so an unknown, ambiguous or
-//     inactive identifier answered in about a millisecond and a real one in a
-//     full cost-10 compare.
+//   - the password check only ran when an account resolved, so an unknown,
+//     ambiguous or inactive identifier answered in about a millisecond and a
+//     real one in a full password check.
 //
-// Drives the REAL routes/auth.ts (real lib/loginLockout.ts, lib/rateLimit.ts)
-// over the full migrated schema (harness/load_auth_route.cjs), with the real
-// bcryptjs behind a counting wrapper.
+// E6 (5 Oct 2026): the check is now PBKDF2-SHA256 through WebCrypto
+// (lib/passwordHash.ts), so the work is counted as WebCrypto derivations and
+// their iteration count; bcrypt runs only for a legacy bcrypt row.
+//
+// Drives the REAL routes/auth.ts (real lib/loginLockout.ts, lib/rateLimit.ts,
+// lib/passwordHash.ts) over the full migrated schema
+// (harness/load_auth_route.cjs), with the real bcryptjs behind a counting
+// wrapper and the real WebCrypto deriveBits behind another.
 //
 // Run: node scripts/test-login-no-account-oracle-pure.cjs
 
 const assert = require('node:assert/strict')
+const nodeCrypto = require('node:crypto')
 const bcrypt = require('bcryptjs')
 const { createAuthHarness } = require('./harness/load_auth_route.cjs')
 
+const CURRENT_ITERATIONS = 10000
 const compared = []
 const countingBcrypt = {
   ...bcrypt,
   compareSync: (plain, hash) => { compared.push(String(hash)); return bcrypt.compareSync(plain, hash) },
 }
-const costOf = (hash) => Number(/^\$2[abxy]?\$(\d{2})\$/.exec(hash)?.[1] || 0)
+const derived = []
+const subtle = globalThis.crypto.subtle
+const realDeriveBits = subtle.deriveBits.bind(subtle)
+subtle.deriveBits = (algorithm, ...rest) => { derived.push(algorithm.iterations); return realDeriveBits(algorithm, ...rest) }
+
+// A current-format row computed by node:crypto, not by the module under test.
+function currentFormatRow(password) {
+  const salt = nodeCrypto.randomBytes(16)
+  const key = nodeCrypto.pbkdf2Sync(Buffer.from(password, 'utf8'), salt, CURRENT_ITERATIONS, 32, 'sha256')
+  const b64 = (b) => b.toString('base64').replace(/=+$/, '')
+  return `$pbkdf2-sha256$i=${CURRENT_ITERATIONS}$${b64(salt)}$${b64(key)}`
+}
 
 let ipSeq = 0
 const freshIp = () => `198.51.100.${(ipSeq += 1)}`
@@ -34,11 +52,13 @@ const freshIp = () => `198.51.100.${(ipSeq += 1)}`
 function harness() {
   const h = createAuthHarness({ overrides: { bcryptjs: countingBcrypt } })
   h.addUser({ id: 701, username: 'dara', name: 'Dara Sok', email: 'dara@shop.test', password: 'right-password' })
-  h.raw.prepare("UPDATE users SET phone_lookup = '012345678', password = @hash WHERE id = 701").run({ hash: bcrypt.hashSync('right-password', 10) })
+  h.raw.prepare("UPDATE users SET phone_lookup = '012345678', password = @hash WHERE id = 701").run({ hash: currentFormatRow('right-password') })
   h.addUser({ id: 702, username: 'sok1', name: 'Twin Name', password: 'pw-702' })
   h.addUser({ id: 703, username: 'sok2', name: 'Twin Name', password: 'pw-703' })
   h.addUser({ id: 704, username: 'gone', name: 'Gone Staff', password: 'pw-704' })
   h.raw.prepare('UPDATE users SET is_active = 0 WHERE id = 704').run({})
+  h.addUser({ id: 705, username: 'legacy', name: 'Legacy Staff', password: 'pw-705' })
+  h.raw.prepare('UPDATE users SET password = @hash WHERE id = 705').run({ hash: bcrypt.hashSync('pw-705', 10) })
   return h
 }
 
@@ -51,7 +71,7 @@ async function secondFailure(h, first, second) {
 
 let failures = 0
 async function check(name, fn) {
-  try { compared.length = 0; await fn(); console.log(`ok - ${name}`) } catch (error) { failures += 1; console.error(`not ok - ${name}\n${error.stack || error}`) }
+  try { compared.length = 0; derived.length = 0; await fn(); console.log(`ok - ${name}`) } catch (error) { failures += 1; console.error(`not ok - ${name}\n${error.stack || error}`) }
 }
 
 ;(async () => {
@@ -75,20 +95,31 @@ async function check(name, fn) {
     assert.equal(res.body.failedAttempts, 2)
   })
 
-  await check('unknown, ambiguous and inactive identifiers each spend one cost-10 compare, like a wrong password', async () => {
+  await check('unknown, ambiguous and inactive identifiers each spend one current-count derivation, like a wrong password', async () => {
     const h = harness()
     for (const username of ['nobody-here', 'Twin Name', 'gone', '099888777']) {
       compared.length = 0
+      derived.length = 0
       const res = await h.request('/login', 'POST', { username, password: 'wrong' }, { ip: freshIp() })
       assert.equal(res.status, 401, `${username}: ${JSON.stringify(res.body)}`)
-      assert.equal(compared.length, 1, `${username}: one bcrypt compare, as for a real account`)
-      assert.equal(costOf(compared[0]), 10, `${username}: the compare runs at the cost staff hashes use (got ${compared[0].slice(0, 7)})`)
+      assert.deepEqual(derived, [CURRENT_ITERATIONS], `${username}: one PBKDF2 derivation at the current count, as for a real account`)
+      assert.equal(compared.length, 0, `${username}: no bcrypt on the no-account path`)
     }
     compared.length = 0
+    derived.length = 0
     const real = await h.request('/login', 'POST', { username: 'dara', password: 'wrong' }, { ip: freshIp() })
     assert.equal(real.status, 401)
+    assert.deepEqual(derived, [CURRENT_ITERATIONS])
+    assert.equal(compared.length, 0)
+  })
+
+  await check('transition gap, pinned so it is visible: a legacy bcrypt row costs one cost-10 compare and no derivation', async () => {
+    const h = harness()
+    const res = await h.request('/login', 'POST', { username: 'legacy', password: 'wrong' }, { ip: freshIp() })
+    assert.equal(res.status, 401)
     assert.equal(compared.length, 1)
-    assert.equal(costOf(compared[0]), 10)
+    assert.match(compared[0], /^\$2[aby]\$10\$/)
+    assert.deepEqual(derived, [])
   })
 
   await check('wall clock: an unknown identifier takes at least half as long as a wrong password', async () => {
