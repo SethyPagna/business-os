@@ -39,6 +39,8 @@ type TranslateFn = (key: string) => string
 
 interface SaleRecordsFloatProps {
   sale: { id: number | string; receipt_number?: string | null }
+  /** The viewer's product_cost_view. Omitted means no: cost lines stay hidden. */
+  canViewCosts?: boolean
   onClose: () => void
   t: TranslateFn
   fmtUSD: (value: number | string) => string
@@ -186,7 +188,7 @@ export function SaleRecordChangeTable({ record, t, fmtUSD, fmtKHR }: SaleRecordC
   return <RecordChangeTable record={record as unknown as RecordItem} adapter={SALE_RECORDS_ADAPTER} t={t} fmtUSD={fmtUSD} fmtKHR={fmtKHR} />
 }
 
-export default function SaleRecordsFloat({ sale, onClose, t, fmtUSD, fmtKHR }: SaleRecordsFloatProps) {
+export default function SaleRecordsFloat({ sale, canViewCosts, onClose, t, fmtUSD, fmtKHR }: SaleRecordsFloatProps) {
   const label = (key: string, fallback: string): string => {
     const value = t(key)
     return value && value !== key ? value : fallback
@@ -200,6 +202,7 @@ export default function SaleRecordsFloat({ sale, onClose, t, fmtUSD, fmtKHR }: S
       recordKey={`sale:${sale.id}`}
       load={() => getSaleRecords(sale.id)}
       adapter={SALE_RECORDS_ADAPTER}
+      canViewCosts={canViewCosts}
       onClose={onClose}
       t={t}
       fmtUSD={fmtUSD}

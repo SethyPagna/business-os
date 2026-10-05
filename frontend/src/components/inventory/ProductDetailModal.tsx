@@ -442,6 +442,8 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
           entity="product"
           entityId={Number((p as { id?: unknown }).id) || 0}
           subject={String(p.name || '')}
+          createdAt={(p as { created_at?: string | null }).created_at}
+          canViewCosts={canViewCosts}
           onClose={() => setFieldHistoryOpen(false)}
           t={(key) => (typeof t === 'function' ? (t(key) ?? key) : key)}
           fmtUSD={(value) => fmtUSD(Number(value))}

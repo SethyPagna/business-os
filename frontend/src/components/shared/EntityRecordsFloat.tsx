@@ -25,13 +25,21 @@ interface EntityRecordsFloatProps {
   entityId: string | number
   /** What this record is called -- the product name, the contact name. */
   subject?: string | null
+  /**
+   * A product's own created date: its Records show it as the "created" line
+   * when the audit trail has none (the product list has no created-date
+   * filter; the date lives here).
+   */
+  createdAt?: string | null
+  /** The viewer's product_cost_view. Omitted means no: cost lines stay hidden. */
+  canViewCosts?: boolean
   onClose: () => void
   t: (key: string) => string
   fmtUSD: (value: number | string) => string
   fmtKHR: (value: number | string) => string
 }
 
-export default function EntityRecordsFloat({ entity, entityId, subject, onClose, t, fmtUSD, fmtKHR }: EntityRecordsFloatProps) {
+export default function EntityRecordsFloat({ entity, entityId, subject, createdAt, canViewCosts, onClose, t, fmtUSD, fmtKHR }: EntityRecordsFloatProps) {
   const heading = t('field_history') || 'Records'
   return (
     <RecordsFloat
@@ -39,6 +47,8 @@ export default function EntityRecordsFloat({ entity, entityId, subject, onClose,
       recordKey={`${entity}:${entityId}`}
       load={() => getEntityAuditRecords(entity, entityId).then(auditPayloadToRecords)}
       adapter={ENTITY_RECORDS_ADAPTER}
+      createdAt={createdAt}
+      canViewCosts={canViewCosts}
       onClose={onClose}
       t={t}
       fmtUSD={fmtUSD}

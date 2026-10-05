@@ -33,16 +33,25 @@
 //                             comparison, and two open side by side is how a
 //                             reader ends up reading the wrong record's
 //                             numbers.
+//   "more details"            5 Oct 2026: an icon on the open row opens
+//                             RecordDetailFloat, a SECOND float over this one
+//                             that is VIEW ONLY (no inputs, no actions). The
+//                             "tap a record to view details" hint stays beside
+//                             the count.
 import { useEffect, useMemo, useState } from 'react'
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
+import Info from 'lucide-react/dist/esm/icons/info.js'
 import Modal from './Modal.tsx'
 import FilterMenu from './FilterMenu.tsx'
+import RecordDetailFloat from './RecordDetailFloat.tsx'
 import { fmtDateTime24 } from '../../utils/formatters.ts'
 import {
   filterRecords,
   normalizeRecordsResponse,
+  recordForViewer,
   recordKindCounts,
+  withCreatedRecord,
   type RecordItem,
   type RecordRenderContext,
   type RecordsAdapter,
@@ -62,6 +71,14 @@ export interface RecordsFloatProps {
   /** Reads the records. One call, on open; a failed read says so. */
   load: () => Promise<unknown>
   adapter: RecordsAdapter
+  /**
+   * A product's own created date, when this float is that product's Records:
+   * it becomes the "created" line if the audit trail has none (see
+   * withCreatedRecord). Other records leave it out.
+   */
+  createdAt?: string | null
+  /** Fail closed: a viewer is assumed NOT to hold product_cost_view. */
+  canViewCosts?: boolean
   onClose: () => void
   t: TranslateFn
   fmtUSD: (value: number | string) => string
@@ -71,6 +88,7 @@ export interface RecordsFloatProps {
 export interface RecordChangeTableProps {
   record: RecordItem
   adapter: RecordsAdapter
+  canViewCosts?: boolean
   t: TranslateFn
   fmtUSD: (value: number | string) => string
   fmtKHR: (value: number | string) => string
@@ -84,10 +102,10 @@ function makeLabel(t: TranslateFn) {
 }
 
 /** The expanded Field | Before | After table, exported so it is testable. */
-export function RecordChangeTable({ record, adapter, t, fmtUSD, fmtKHR }: RecordChangeTableProps) {
+export function RecordChangeTable({ record, adapter, canViewCosts = false, t, fmtUSD, fmtKHR }: RecordChangeTableProps) {
   const label = makeLabel(t)
   const ctx: RecordRenderContext = { label, t, fmtUSD, fmtKHR }
-  const rows = adapter.fieldRows(record, ctx)
+  const rows = adapter.fieldRows(recordForViewer(record, canViewCosts), ctx)
   if (rows.length === 0) return <p className="text-xs text-gray-400">{label('historical_details_unavailable', 'Historical details unavailable')}</p>
   return (
     <table className="w-full text-[11px]">
@@ -112,6 +130,8 @@ export function RecordChangeTable({ record, adapter, t, fmtUSD, fmtKHR }: Record
 export interface RecordRowProps extends RecordChangeTableProps {
   open: boolean
   onToggle: () => void
+  /** Opens the view-only details float. Without it the row has no such icon. */
+  onOpenDetails?: () => void
 }
 
 /**
@@ -120,7 +140,7 @@ export interface RecordRowProps extends RecordChangeTableProps {
  * contract (the username, the branch only where there is one, press-to-open)
  * is pinned by a rendered test rather than by reading the JSX.
  */
-export function RecordRow({ record, adapter, open, onToggle, t, fmtUSD, fmtKHR }: RecordRowProps) {
+export function RecordRow({ record, adapter, canViewCosts = false, open, onToggle, onOpenDetails, t, fmtUSD, fmtKHR }: RecordRowProps) {
   const label = makeLabel(t)
   const ctx: RecordRenderContext = { label, t, fmtUSD, fmtKHR }
   // The via badge. Only the two replay directions are named: nearly every
@@ -164,19 +184,35 @@ export function RecordRow({ record, adapter, open, onToggle, t, fmtUSD, fmtKHR }
         </span>
       </button>
       {open ? (
-        <div className="px-1 pb-3 pl-6">
-          <RecordChangeTable record={record} adapter={adapter} t={t} fmtUSD={fmtUSD} fmtKHR={fmtKHR} />
+        <div className="flex items-start gap-1 px-1 pb-3 pl-6">
+          <div className="min-w-0 flex-1">
+            <RecordChangeTable record={record} adapter={adapter} canViewCosts={canViewCosts} t={t} fmtUSD={fmtUSD} fmtKHR={fmtKHR} />
+          </div>
+          {/* Icon only, with its translated name as the tooltip and the
+              accessible name (the button policy: one main action keeps its
+              word; everything else is an icon). */}
+          {onOpenDetails ? (
+            <button
+              type="button"
+              data-records-more-details=""
+              aria-label={label('more_details', 'More Details')}
+              title={label('more_details', 'More Details')}
+              onClick={onOpenDetails}
+              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100 hover:text-blue-700 dark:text-gray-300 dark:hover:bg-gray-700 dark:hover:text-blue-300"
+            ><Info className="h-4 w-4" aria-hidden="true" /></button>
+          ) : null}
         </div>
       ) : null}
     </li>
   )
 }
 
-export default function RecordsFloat({ title, recordKey, load, adapter, onClose, t, fmtUSD, fmtKHR }: RecordsFloatProps) {
+export default function RecordsFloat({ title, recordKey, load, adapter, createdAt = null, canViewCosts = false, onClose, t, fmtUSD, fmtKHR }: RecordsFloatProps) {
   const [records, setRecords] = useState<RecordItem[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [openId, setOpenId] = useState<string | null>(null)
+  const [detailId, setDetailId] = useState<string | null>(null)
   const [kinds, setKinds] = useState<Set<string>>(new Set())
 
   const label = makeLabel(t)
@@ -189,7 +225,7 @@ export default function RecordsFloat({ title, recordKey, load, adapter, onClose,
     load()
       .then((payload) => {
         if (cancelled) return
-        setRecords(normalizeRecordsResponse(payload))
+        setRecords(withCreatedRecord(normalizeRecordsResponse(payload), createdAt, String(recordKey)))
       })
       .catch((cause: unknown) => {
         if (cancelled) return
@@ -204,6 +240,7 @@ export default function RecordsFloat({ title, recordKey, load, adapter, onClose,
 
   const visible = useMemo(() => filterRecords(records, kinds, adapter), [records, kinds, adapter])
   const counts = useMemo(() => recordKindCounts(records, adapter), [records, adapter])
+  const detailRecord = detailId == null ? null : records.find((record) => record.id === detailId) || null
 
   const toggleKind = (kind: string): void => {
     setKinds((current) => {
@@ -215,13 +252,17 @@ export default function RecordsFloat({ title, recordKey, load, adapter, onClose,
   }
 
   return (
+    <>
     <Modal title={title} onClose={onClose} size="lg" unsavedChanges="read-only">
       <div className="space-y-2">
         <div className="flex items-center justify-between gap-2">
-          <span className="text-xs text-gray-500 dark:text-gray-400">
+          {/* Khmer glyphs need vertical room: leading-relaxed. The hint stays
+              on the count's line and wraps under it on a phone. */}
+          <span className="min-w-0 text-xs leading-relaxed text-gray-500 dark:text-gray-400">
             {visible.length === records.length
               ? `${records.length} ${label('records', 'records')}`
               : `${visible.length} / ${records.length}`}
+            {visible.length > 0 ? <span data-records-hint=""> · {label('tap_to_view_details', 'Tap a record to view details.')}</span> : null}
           </span>
           {/* Chosen filters live INSIDE the menu -- never as chips beside it. */}
           <FilterMenu
@@ -255,8 +296,10 @@ export default function RecordsFloat({ title, recordKey, load, adapter, onClose,
                 key={record.id}
                 record={record}
                 adapter={adapter}
+                canViewCosts={canViewCosts}
                 open={openId === record.id}
                 onToggle={() => setOpenId(openId === record.id ? null : record.id)}
+                onOpenDetails={() => setDetailId(record.id)}
                 t={t}
                 fmtUSD={fmtUSD}
                 fmtKHR={fmtKHR}
@@ -266,5 +309,17 @@ export default function RecordsFloat({ title, recordKey, load, adapter, onClose,
         )}
       </div>
     </Modal>
+    {detailRecord ? (
+      <RecordDetailFloat
+        record={detailRecord}
+        adapter={adapter}
+        canViewCosts={canViewCosts}
+        onClose={() => setDetailId(null)}
+        t={t}
+        fmtUSD={fmtUSD}
+        fmtKHR={fmtKHR}
+      />
+    ) : null}
+    </>
   )
 }

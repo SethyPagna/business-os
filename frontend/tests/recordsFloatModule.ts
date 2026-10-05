@@ -19,8 +19,8 @@ import { transformSync } from 'esbuild'
 const require = createRequire(import.meta.url)
 const React = require('react')
 
-export function loadRecordsFloatModule(): Record<string, unknown> {
-  const source = readFileSync(new URL('../src/components/shared/RecordsFloat.tsx', import.meta.url), 'utf8')
+function compileComponent(relative: string): Record<string, unknown> {
+  const source = readFileSync(new URL(relative, import.meta.url), 'utf8')
   const compiled = transformSync(source, { loader: 'tsx', format: 'cjs', jsx: 'automatic' }).code
   const mod = { exports: {} as Record<string, unknown> }
   new Function('require', 'module', 'exports', compiled)((id: string) => {
@@ -28,7 +28,22 @@ export function loadRecordsFloatModule(): Record<string, unknown> {
     if (id.includes('utils/entityRecords')) return require('../src/utils/entityRecords.ts')
     if (id.includes('utils/formatters')) return { fmtDateTime24: () => '08/09/2026 12:00' }
     if (id.includes('lucide-react')) return { __esModule: true, default: () => null }
-    return { __esModule: true, default: ({ children }: { children?: unknown }) => React.createElement(React.Fragment, null, children) }
+    // The view-only details float is REAL here (the float opens it, and its
+    // contract is pinned by recordDetailFloat.test.ts); everything else that
+    // is chrome stays a pass-through shell.
+    if (id.includes('RecordDetailFloat')) return loadRecordDetailFloatModule()
+    // The Modal shell keeps its title (a plain-text heading) so a test can
+    // read what the float is called; everything else it draws is chrome.
+    return { __esModule: true, default: ({ children, title }: { children?: unknown; title?: unknown }) => React.createElement(React.Fragment, null, typeof title === 'string' ? React.createElement('h2', { 'data-modal-title': '' }, title) : null, children) }
   }, mod, mod.exports)
   return mod.exports
+}
+
+/** Compiles components/shared/RecordDetailFloat.tsx: the view-only details float. */
+export function loadRecordDetailFloatModule(): Record<string, unknown> {
+  return compileComponent('../src/components/shared/RecordDetailFloat.tsx')
+}
+
+export function loadRecordsFloatModule(): Record<string, unknown> {
+  return compileComponent('../src/components/shared/RecordsFloat.tsx')
 }
