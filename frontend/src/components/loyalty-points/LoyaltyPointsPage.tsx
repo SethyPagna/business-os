@@ -20,6 +20,7 @@ import {
 import { createClientRequestId } from '../../api/requestIds.ts'
 import { identityForIntent, withWriteTimeout, type IntentIdentityRef } from '../../utils/writeIntent.ts'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
+import { settingsSaveSucceeded } from '../../utils/settingsSave.ts'
 import { fmtTime } from '../../utils/formatters.ts'
 import { getCustomerPointSummaries } from '../../api/contactsTransport.ts'
 import { awardCustomerPoints } from '../../api/contactWriteTransport.ts'
@@ -505,7 +506,7 @@ export default function LoyaltyPointsPage() {
     if (!beginSingleAction(saveInFlightRef)) return
     try {
       setSaving(true)
-      await saveSettings({
+      const result = await saveSettings({
         customer_portal_points_basis: basis,
         customer_portal_points_per_usd: basis === 'usd' ? String(Math.max(0, Number(form.customer_portal_points_per_usd || 1))) : '0',
         customer_portal_points_per_khr: basis === 'khr' ? String(Math.max(0, Number(form.customer_portal_points_per_khr || 0))) : '0',
@@ -517,6 +518,9 @@ export default function LoyaltyPointsPage() {
         customer_portal_submission_reward_points: String(rewardPoints),
         loyalty_points_enabled: form.loyalty_points_enabled ? 'true' : 'false',
       })
+      // saveSettings answers a failed write (after its own error toast) instead
+      // of throwing; "saved" is only said when the write landed.
+      if (!settingsSaveSucceeded(result)) return
       notify(copy('saved', 'Point rules saved.'))
     } catch (error) {
       notify(getErrorMessage(error, 'Failed to save point rules'), 'error')

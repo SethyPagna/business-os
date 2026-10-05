@@ -23,6 +23,7 @@ import ShiftHistoryPanel from '../shifts/ShiftHistoryPanel.tsx'
 import { UserAvatarImage } from './UserAvatar.tsx'
 import { createAvatarRemoveFlow, uploadAndAttachAvatar } from './avatarFlow.ts'
 import { currentPasswordRateLimitMessage } from './currentPasswordErrors.ts'
+import { settingsSaveSucceeded } from '../../utils/settingsSave.ts'
 
 const PROFILE_LOAD_TIMEOUT_MS = 10000
 const PROFILE_OTP_STATUS_TIMEOUT_MS = 8000
@@ -849,7 +850,9 @@ export default function UserProfileModal({ onClose }: UserProfileModalProps) {
     if (saveSessionInFlightRef.current) return
     saveSessionInFlightRef.current = true
     Promise.resolve(saveSettings?.({ login_session_duration: sessionDuration }))
-      .then(() => {
+      .then((result) => {
+        // A failed save has already been reported; it leaves no undo entry.
+        if (!settingsSaveSucceeded(result)) return
         actionHistory.pushAction({
           scope: 'profile',
           entity: 'user',
