@@ -203,16 +203,20 @@ runTest('every allowlist entry is still a real finding', () => {
     `allowlist has ${names.length} entries but ${allowed.length} matched; drop the stale ones`)
 })
 
-runTest('routes/sales.ts no longer imports the sale line price-edit planner', () => {
-  // The specific zombie this gate was created for, pinned by behaviour rather
-  // than by line number: sales.ts imported planSaleLinePriceEdit at line 97 and
-  // never called it. Removed 2026-09-14. If a future change genuinely needs the
-  // planner it will import AND call it, and this assertion is the place to
-  // record that decision.
-  const text = fs.readFileSync(path.join(root, 'src', 'routes', 'sales.ts'), 'utf8')
-  const importsPlanner = /import\s[^\n]*\bplanSaleLinePriceEdit\b/.test(text)
-  const callsPlanner = /planSaleLinePriceEdit\s*\(/.test(text)
-  assert.equal(importsPlanner && !callsPlanner, false, 'planSaleLinePriceEdit is imported into routes/sales.ts but never called')
+runTest('the retired sale line price-edit planner stays deleted', () => {
+  // The specific zombie this gate was created for: sales.ts imported
+  // planSaleLinePriceEdit and never called it (import removed 2026-09-14).
+  // The route had stopped calling it on 13 Sep (4a2ce71bf), when recorded-line
+  // price edits moved to evaluateCapturedPricingPool plus the mandatory
+  // pricing_quote match. Its module lib/saleLineEdit.ts then lived on with a
+  // test as its only consumer and a doc comment claiming "server authority"
+  // it no longer had; both were deleted 2026-10-05. A future change that needs
+  // a line-edit planner should call the live pricing evaluator, and this
+  // assertion is the place to record that decision.
+  assert.equal(fs.existsSync(path.join(root, 'src', 'lib', 'saleLineEdit.ts')), false,
+    'lib/saleLineEdit.ts is the retired planner; live line edits use lib/saleItemPricing.ts')
+  const mentions = files.filter(file => /\bplanSaleLinePriceEdit\b/.test(fs.readFileSync(file, 'utf8')))
+  assert.deepEqual(mentions.map(file => path.relative(root, file)), [], 'planSaleLinePriceEdit is the retired planner')
 })
 
 // tsconfig note (reported, not changed): `noUnusedLocals` would subsume this
