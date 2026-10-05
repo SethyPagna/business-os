@@ -1,5 +1,6 @@
 import { Hono, type Context } from 'hono'
 import { getDb } from '../lib/db'
+import { inlineIntegerIds } from '../lib/sqlBinding'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit } from '../lib/audit'
 import { actorSnapshot } from '../lib/actorSnapshot'
@@ -475,8 +476,10 @@ app.get('/:id/suggestions', async (c) => {
   const ids = [...new Set(candidates.map((row) => Number(row.id)))].slice(0, 75)
   const linked = new Map<number, number>()
   if (ids.length) {
-    const holders = await db.prepare(`SELECT id, contact_id FROM portal_accounts WHERE contact_id IN (${ids.map(() => '?').join(',')})`)
-      .all<{ id: number; contact_id: number }>(ids)
+    // Server-produced customer ids (rows of the two queries above, at most 75),
+    // inlined as integers so no bound-parameter budget is spent.
+    const holders = await db.prepare(`SELECT id, contact_id FROM portal_accounts WHERE contact_id IN (${inlineIntegerIds(ids)})`)
+      .all<{ id: number; contact_id: number }>([])
     for (const holder of holders) linked.set(Number(holder.contact_id), Number(holder.id))
   }
   return c.json({ suggestions: classifyMemberSuggestions(member, candidates, linked) })
@@ -667,8 +670,9 @@ app.post('/:id/revert', async (c) => {
     currentCustomerId: row.to_customer_id == null ? null : Number(row.to_customer_id),
     restoreCustomerId: row.from_customer_id == null ? null : Number(row.from_customer_id),
   }))
-  const reverted = await db.prepare(`SELECT 1 AS hit FROM portal_member_link_events WHERE reverts_event_id IN (${targets.map(() => '?').join(',')}) LIMIT 1`)
-    .get<{ hit: number }>(targets.map((target) => target.eventId))
+  // Event ids read from portal_member_link_events above (one, or a Move's two).
+  const revertedSql = `SELECT 1 AS hit FROM portal_member_link_events WHERE reverts_event_id IN (${inlineIntegerIds(targets.map((target) => target.eventId))}) LIMIT 1`
+  const reverted = await db.prepare(revertedSql).get<{ hit: number }>([])
   if (reverted) return conflict(c, 'member_link_already_reverted', 'This entry was already reverted.')
   for (const target of targets) {
     const state = await loadAccountState(env, target.accountId)
@@ -713,8 +717,7 @@ app.post('/:id/revert', async (c) => {
   }))
   if (failure) {
     if (await replayedEvent(env, accountId, clientRequestId)) return c.json({ ok: true, replayed: true, member: await loadMember(env, accountId) })
-    const again = await db.prepare(`SELECT 1 AS hit FROM portal_member_link_events WHERE reverts_event_id IN (${targets.map(() => '?').join(',')}) LIMIT 1`)
-      .get<{ hit: number }>(targets.map((target) => target.eventId))
+    const again = await db.prepare(revertedSql).get<{ hit: number }>([])
     if (again) return conflict(c, 'member_link_already_reverted', 'This entry was already reverted.')
     for (const target of targets) {
       if ((await loadAccountState(env, target.accountId))?.status === 'closed') return conflict(c, 'member_closed', 'A member in this change closed their account.')
