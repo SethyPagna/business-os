@@ -33,6 +33,11 @@ export default function ExpenseLabelManagerModal({ canEdit, onClose, onChanged, 
     return value && value !== key ? value : fallback
   }, [t])
   const { askToConfirm, confirmDialog } = useConfirmDialog(t)
+  // A failure reads in the operator's language; the server's own message, when it sent one, follows.
+  const failureText = (key: string, fallback: string, error: unknown) => {
+    const detail = error instanceof Error ? error.message : ''
+    return detail ? `${tr(key, fallback)}: ${detail}` : tr(key, fallback)
+  }
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -40,7 +45,7 @@ export default function ExpenseLabelManagerModal({ canEdit, onClose, onChanged, 
       const response = await getFeeLabels()
       setLabels(Array.isArray(response?.labels) ? response.labels : [])
     } catch (error) {
-      notify(error instanceof Error ? error.message : 'Failed to load expense labels', 'error')
+      notify(failureText('expense_labels_load_failed', 'Failed to load expense labels', error), 'error')
     } finally {
       setLoading(false)
     }
@@ -70,11 +75,11 @@ export default function ExpenseLabelManagerModal({ canEdit, onClose, onChanged, 
       if (!canEdit()) return false
       await replaceFeeLabel(entry.label, to)
       if (!canEdit()) return false
-      notify(impact.target_exists ? 'Expense labels merged.' : 'Expense label and linked records updated.', 'success')
+      notify(impact.target_exists ? tr('expense_labels_merged', 'Expense labels merged.') : tr('expense_label_updated', 'Expense label and linked records updated.'), 'success')
       await Promise.all([load(), Promise.resolve(onChanged())])
       return true
     } catch (error) {
-      notify(error instanceof Error ? error.message : 'Failed to update expense label', 'error')
+      notify(failureText('expense_label_update_failed', 'Failed to update expense label', error), 'error')
       return false
     } finally {
       setRenaming(null)
@@ -107,10 +112,10 @@ export default function ExpenseLabelManagerModal({ canEdit, onClose, onChanged, 
       if (!canEdit()) return
       const result = await classifyFeeLabel(entry.label, feeType)
       if (!canEdit()) return
-      notify(`${Number(result.changed) || 0} expense record${Number(result.changed) === 1 ? '' : 's'} classified as ${nextLabel}.`, 'success')
+      notify(tr('expense_labels_classified', '{n} expense record(s) classified as {type}.').replace('{n}', String(Number(result.changed) || 0)).replace('{type}', nextLabel), 'success')
       await Promise.all([load(), Promise.resolve(onChanged())])
     } catch (error) {
-      notify(error instanceof Error ? error.message : 'Failed to classify expense label', 'error')
+      notify(failureText('expense_label_classify_failed', 'Failed to classify expense label', error), 'error')
     } finally {
       setClassifying(null)
     }
