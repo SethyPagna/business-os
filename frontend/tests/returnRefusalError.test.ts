@@ -28,9 +28,11 @@ function runTest(name: string, fn: () => void): void {
 
 const packs = { en: JSON.parse(read('src/lang/en.json')), km: JSON.parse(read('src/lang/km.json')) } as Record<string, Record<string, string>>
 const trFrom = (pack: Record<string, string>) => (key: string, fallback: string) => pack[key] ?? fallback
-const CODES = ['return_edit_cancelled', 'return_restore_over_capacity', 'return_refund_price_ambiguous', 'return_refund_sale_line_required']
+const CODES = ['return_edit_cancelled', 'return_restore_over_capacity', 'return_refund_price_ambiguous', 'return_refund_sale_line_required',
+  // RET-A F6 (5 Oct 2026): every return is linked to a sale.
+  'return_sale_required', 'manual_return_items_locked']
 
-runTest('the mapping covers exactly the four FX-returns refusal codes', () => {
+runTest('the mapping covers exactly the FX-returns and RET-A refusal codes', () => {
   assert.deepEqual(Object.keys(RETURN_REFUSAL_ERRORS).sort(), [...CODES].sort())
 })
 
@@ -105,6 +107,9 @@ runTest('every mapped code is one the Worker actually sends, and the route forwa
   assert.ok(route.includes("throw new RefundSaleLineError('return_refund_sale_line_required',"), 'PATCH /:id refuses a line naming neither sale item nor product')
   assert.equal(route.split('if (error instanceof RefundSaleLineError) return c.json({ error: error.message, code: error.code }, 400)').length - 1, 2,
     'POST / and PATCH /:id both forward the refund-price refusal code')
+  // RET-A F6: each new code is one the Worker sends.
+  assert.ok(route.includes("code: 'return_sale_required', action: 'fix_request' }, 400)"), 'POST / refuses a return with no sale')
+  assert.ok(route.includes("code: 'manual_return_items_locked', action: 'fix_request' }, 400)"), 'PATCH /:id locks the items of an old manual return')
 })
 
 // Each surface is sliced to the one handler that receives the refusal -- from

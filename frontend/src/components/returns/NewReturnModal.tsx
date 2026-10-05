@@ -1077,7 +1077,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
           {step === 'search' && (
             <div className="space-y-4">
               <div className="bg-blue-50 dark:bg-blue-900/20 rounded-xl p-3 text-sm text-blue-700 dark:text-blue-400">
-                {T('search_receipt_hint','Enter a receipt number or sale ID. You can also skip and do a manual return.')}
+                {T('search_receipt_hint','Enter receipt # or sale ID to find the original sale')}
               </div>
               <div>
                 <label className="text-sm font-medium text-gray-700 dark:text-gray-300 block mb-2">
@@ -1147,12 +1147,9 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
                   <div className="mt-1 text-xs text-amber-600 dark:text-amber-400">{T('no_receipts_found', 'No receipt matches that yet.')}</div>
                 ) : null}
               </div>
-              <div className="border-t border-gray-200 dark:border-gray-700 pt-3">
-                <button onClick={() => { invalidateTrackedRequest(searchRequestRef); finishSingleAction(searchInFlightRef); setSearching(false); setFoundSale(null); setSelectedItems([]); setStep('items') }}
-                  className="text-sm text-blue-600 dark:text-blue-400 hover:underline">
-                  {T('btn_manual_return','→ Skip — manual return (no sale linked)')}
-                </button>
-              </div>
+              {/* RET-A F6 (owner, 5 Oct 2026): every return is linked to a
+                  sale, so there is no "skip -- manual return" way past this
+                  step; the Worker refuses one (return_sale_required). */}
             </div>
           )}
 
@@ -1171,11 +1168,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
                     </div>
                   ) : null}
                 </div>
-              ) : (
-                <div className="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-3 text-sm text-gray-500">
-                  {T('manual_return','Manual return')} — {T('no_data','not linked to a sale')}.
-                </div>
-              )}
+              ) : null}
 
               {/* Return type */}
               <div>
@@ -1378,7 +1371,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
 
               {selectedItems.length === 0 && (
                 <div className="text-sm text-gray-400 bg-gray-50 dark:bg-gray-700/50 rounded-xl p-4 text-center">
-                  {T('manual_return','No sale items linked. This will be recorded as a manual return.')}
+                  {T('return_pick_items', 'Pick the items being returned from this sale.')}
                 </div>
               )}
 

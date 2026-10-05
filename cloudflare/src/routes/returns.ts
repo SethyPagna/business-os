@@ -1488,6 +1488,14 @@ app.post('/', async (c) => {
     }
     return c.json(JSON.parse(priorReceipt.response_json) as ReturnCreateResponse)
   }
+  // RET-A F6 (owner decision 5 Oct 2026, LH-10): every customer return is
+  // linked to a sale -- a return with no sale had no quantity or refund cap
+  // and counted as drawer cash. A replay of one recorded before this rule
+  // still answers above; returns to a supplier are POST /supplier.
+  if (!requestedSaleId) {
+    return c.json({ error: 'Every return must be linked to a sale. Find the sale this item came from.',
+      code: 'return_sale_required', action: 'fix_request' }, 400)
+  }
   const occupiedRequest = await db.prepare("SELECT id FROM returns WHERE client_request_id=? AND client_request_id<>'' LIMIT 1")
     .get<{ id: number }>([clientRequestId])
   if (occupiedRequest) {
@@ -2820,6 +2828,13 @@ app.patch('/:id', async (c) => {
   if (!existing) return c.json({ error: 'Return not found' }, 404)
   if (normalizeScope(existing.return_scope, CUSTOMER_SCOPE) !== CUSTOMER_SCOPE) {
     return c.json({ error: 'Supplier returns cannot be edited from this form yet.' }, 400)
+  }
+  // RET-A F6: a manual return (no sale) recorded before every return had to
+  // name its sale keeps its history, but its items -- and with them its
+  // uncapped stock and refund -- can no longer change. Cancel it instead.
+  if (!existing.sale_id && Array.isArray(body.items)) {
+    return c.json({ error: 'This return is not linked to a sale, so its items cannot be changed. Cancel it and record the return against the sale.',
+      code: 'manual_return_items_locked', action: 'fix_request' }, 400)
   }
   if (Number(existing.money_precision_version) === 1) {
     return c.json({ error: 'Exact net-entitlement returns cannot be edited until the v1 edit flow is available.',
