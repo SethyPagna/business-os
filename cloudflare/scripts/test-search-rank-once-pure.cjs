@@ -128,7 +128,10 @@ async function page(rawQuery, { pageNo = 1, pageSize = 15, mode, old = false } =
       const q = buildProductSearchQuery('glow', params)
       const rank = old ? OLD_RANK() : q.matchRankSql
       await paginateProductFamilies({ db: spyDb, selectColumns: 'p.id, p.name', joinSql: '', whereSql: `WHERE ${q.whereClause}`, params, page: 1, pageSize: 10, familyOrderSql: 'match_rank ASC, family_name ASC', intraFamilyOrderSql: 'id ASC', matchRankSql: rank, rankCteSql: old ? undefined : q.rankCteSql })
-      const s = captured[0]
+      // The page statement carries the rank; since G37 the COUNT carries no
+      // ordering keys at all (familyPagination drops them there).
+      assert.ok(!/__match_rank|__match_tier/.test(captured[0].sql), 'the COUNT computes no rank or tier')
+      const s = captured[1]
       const names = [...new Set([...s.sql.matchAll(/@(\w+)/g)].map((m) => m[1]))]
       const bind = Object.fromEntries(names.map((n) => [n, s.params[n] ?? null]))
       return raw.prepare(`EXPLAIN QUERY PLAN ${s.sql}`).all(bind).map((r) => r.detail).join(' | ')

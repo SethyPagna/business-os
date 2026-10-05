@@ -48,7 +48,7 @@ import {
 // opposite-role rule lives with the canonical branch roles rather than being
 // restated at each call site.
 import { TRANSFER_DIRECTION_ERROR, transferDirectionError } from '../lib/branchRoleGuards'
-import { buildFamilyRelevanceOrderSql, buildProductSearchQuery } from '../lib/productSearchQuery'
+import { buildFamilyRelevanceOrderSql, buildProductSearchQuery, parseRankedIds } from '../lib/productSearchQuery'
 import type { Env } from '../index'
 import { actorSnapshot } from '../lib/actorSnapshot'
 import { planTransferOperation, transferRefusal } from '../lib/transferOperation'
@@ -849,8 +849,9 @@ function buildBranchStockWhere(c: any, branchId: number, lowStock: LowStockConfi
   // (lib/productSearchQuery.ts), so it gains bm25 plus the exact-barcode/
   // exact-name/name-prefix tier, and a future picker cannot be built
   // without them.
-  const searchQuery = buildProductSearchQuery(rawQuery, params)
+  const searchQuery = buildProductSearchQuery(rawQuery, params, { rankedIds: parseRankedIds(c.req.query('rankIds'), c.req.query('rankTiers')) })
   if (searchQuery.whereClause) where.push(searchQuery.whereClause)
+  if (searchQuery.activeWhereSql) where[0] = searchQuery.activeWhereSql
   const matchRankSql = searchQuery.matchRankSql
   const rankCteSql = searchQuery.rankCteSql
   const matchTierSql = searchQuery.matchTierSql
