@@ -51,10 +51,10 @@ import {
 import { canonicalMoney4, SaleMoneyContractError } from '../lib/saleMoneyPrecision'
 import { sumMoney4 } from '../lib/moneyPrecision'
 import {
-  PRIOR_RETURN_MONEY_SQL, priorReturnMoney, ReturnRefundSplitError, saleStatusWithReturns, splitReturnRefund,
-  type PriorReturnMoney, type PriorReturnMoneyRow, type ReturnDebtSale, type ReturnRefundSplit,
+  PRIOR_RETURN_MONEY_SQL, priorReturnMoney, ReturnRefundSplitError, saleCarriesDebt, saleRowOwedUsd, saleStatusWithReturns, splitReplacementPayment, splitReturnRefund,
+  type PriorReturnMoney, type PriorReturnMoneyRow, type ReplacementPaymentSplit, type ReturnDebtSale, type ReturnRefundSplit,
 } from '../lib/returnRefundSplit'
-import { refundRielFigure, type RefundCurrency } from '../lib/refundTender'
+import { refundCashKhr, refundRielFigure, type RefundCurrency } from '../lib/refundTender'
 import { ProductMergeLineageError, resolveProductMergeLineage } from '../lib/productMergeLineage'
 import { TAGGED_DISPOSAL_MOVEMENT_TYPE } from '../lib/stockCondition'
 
@@ -1882,15 +1882,39 @@ app.post('/', async (c) => {
     customer_id: number; exists: number; is_anonymous: number; membership_number: string
   } | null = null
   const replacementPaymentMethod = String(body.replacement_payment_method || '').trim() || DEFAULT_REPLACEMENT_PAYMENT_METHOD
+  // RET-A P1: on a sale that carries a debt the replacement follows the
+  // original's payment state -- paid only from the cash part of this refund,
+  // the rest owed (lib/returnRefundSplit.ts splitReplacementPayment). A sale
+  // with no debt keeps the counter rule: the customer pays it like any sale.
+  const replacementFollowsDebt = !!debtState && saleCarriesDebt(debtState.sale, debtState.prior.loweredDebt)
+  let replacementSplit: ReplacementPaymentSplit | null = null
+  let replacementTender: { status: 'completed' | 'awaiting_payment'; method: string; details: Array<{ method: string; amount_usd: number; amount_khr: number }> } | null = null
   if (replacementLines.length) {
     replacementReceiptNumber = await uniqueBusinessDateTimeNumber('', async (candidate) => !!(await db.prepare('SELECT 1 FROM sales WHERE receipt_number=? LIMIT 1').get([candidate])))
     const subtotalUsd = Number(replacementLines.reduce((sum, line) => sum + line.totalUsd, 0).toFixed(2))
     const exchangeRate = returnExchangeRate
+    replacementSplit = splitReplacementPayment({ carriesDebt: replacementFollowsDebt, cashUsd: refundSplit.cashUsd, replacementUsd: subtotalUsd })
+    const fromRefund = replacementSplit.followsDebt
+    // The refund's own cash, in the currency it would have left the drawer in.
+    const paidFromRefundKhr = fromRefund && refundCurrency === 'KHR'
+      ? refundCashKhr(totalRefundKhr, replacementSplit.paidFromRefundUsd, totalRefundUsd) : 0
+    const paidFromRefundUsd = fromRefund && refundCurrency !== 'KHR' ? replacementSplit.paidFromRefundUsd : 0
     replacementTotals = computeSaleTotals({
       subtotalUsd, discountUsd: 0, membershipDiscountUsd: 0, taxUsd: 0, deliveryFeeUsd: 0,
       deliveryFeePaidBy: 'customer', isDelivery: false, exchangeRate,
-      rawAmountPaidUsd: subtotalUsd, rawAmountPaidKhr: 0,
+      rawAmountPaidUsd: fromRefund ? paidFromRefundUsd : subtotalUsd, rawAmountPaidKhr: paidFromRefundKhr,
     })
+    if (fromRefund) {
+      const paid = replacementTotals.amountPaidUsd > 0 || replacementTotals.amountPaidKhr > 0
+      const method = paid ? DEFAULT_REPLACEMENT_PAYMENT_METHOD : replacementPaymentMethod
+      const owes = saleRowOwedUsd({ total_usd: replacementTotals.totalUsd, amount_paid_usd: replacementTotals.amountPaidUsd,
+        amount_paid_khr: replacementTotals.amountPaidKhr, exchange_rate: exchangeRate, money_precision_version: 0 }) > 0
+      replacementTender = { status: owes ? 'awaiting_payment' : 'completed', method,
+        details: paid ? [{ method, amount_usd: replacementTotals.amountPaidUsd, amount_khr: replacementTotals.amountPaidKhr }] : [] }
+    } else {
+      replacementTender = { status: 'completed', method: replacementPaymentMethod,
+        details: subtotalUsd > 0 ? [{ method: replacementPaymentMethod, amount_usd: subtotalUsd, amount_khr: 0 }] : [] }
+    }
     const candidateCustomerId = Number(body.customer_id || saleMeta?.customer_id) || null
     const candidateCustomer = candidateCustomerId
       ? await db.prepare('SELECT id,membership_number,is_anonymous FROM customers WHERE id=?')
@@ -1909,26 +1933,26 @@ app.post('/', async (c) => {
     replacementCustomerPhone = candidateIsAnonymous ? null : saleMeta?.customer_phone || null
     replacementCustomerAddress = candidateIsAnonymous ? null : contactDisplayAddress(saleMeta?.customer_address) || null
     replacementMembershipNumber = candidateCustomer && !candidateIsAnonymous ? candidateCustomer.membership_number || null : null
-    const paymentDetails = subtotalUsd > 0 ? [{ method: replacementPaymentMethod, amount_usd: subtotalUsd, amount_khr: 0 }] : []
+    const paymentDetails = replacementTender.details
     replacementCreationSnapshot = buildSaleCreationSnapshot({
       origin: 'return_replacement', recordedAt: occurredAt, saleAt: occurredAt,
       receiptNumber: replacementReceiptNumber, actor: user, cashierId: authenticatedActorId,
-      cashierName: actorSnapshot(user), saleStatus: 'completed',
+      cashierName: actorSnapshot(user), saleStatus: replacementTender.status,
       items: replacementLines.map((line) => ({ product_id: line.productId, product_name: line.productName, quantity: line.quantity, applied_price_usd: line.priceUsd, total_usd: line.totalUsd })),
-      totalUsd: replacementTotals.totalUsd, paymentMethod: replacementPaymentMethod, paymentDetails,
+      totalUsd: replacementTotals.totalUsd, paymentMethod: replacementTender.method, paymentDetails,
       amountPaidUsd: replacementTotals.amountPaidUsd, amountPaidKhr: replacementTotals.amountPaidKhr,
       changeUsd: 0, changeKhr: 0, isDelivery: false, deliveryFeeUsd: 0,
       customerSnapshot: replacementCustomerId || String(replacementCustomerName || '').trim() ? { id: replacementCustomerId, name: replacementCustomerName } : null,
       membershipSnapshot: replacementMembershipNumber ? { number: replacementMembershipNumber, discountUsd: 0, discountKhr: 0, pointsRedeemed: 0 } : null,
     })
     replacementNotice = {
-      status: 'completed', createdAt: occurredAt, receiptNumber: replacementReceiptNumber,
+      status: replacementTender.status, createdAt: occurredAt, receiptNumber: replacementReceiptNumber,
       cashier: actorSnapshot(user), customer: replacementCustomerName, phone: replacementCustomerPhone,
       branch: branchName, items: replacementLines.map((line) => ({ name: line.productName, quantity: line.quantity, unitPriceUsd: line.priceUsd, basePriceUsd: null, lineTotalUsd: line.totalUsd })),
       exchangeRate, isDelivery: false, deliveryFeeUsd: 0, deliveryPaidBy: null, driver: null,
       subtotalUsd, discountUsd: 0, taxUsd: 0, totalUsd: replacementTotals.totalUsd,
       totalKhr: replacementTotals.totalKhr, paidUsd: replacementTotals.amountPaidUsd,
-      paidKhr: replacementTotals.amountPaidKhr, changeUsd: 0, changeKhr: 0, paymentMethod: replacementPaymentMethod,
+      paidKhr: replacementTotals.amountPaidKhr, changeUsd: 0, changeKhr: 0, paymentMethod: replacementTender.method,
     }
   }
 
@@ -2116,12 +2140,12 @@ app.post('/', async (c) => {
     },
   })
 
-  if (replacementLines.length && replacementTotals && replacementReceiptNumber) {
+  if (replacementLines.length && replacementTotals && replacementReceiptNumber && replacementTender) {
     const subtotalUsd = Number(replacementLines.reduce((sum, line) => sum + line.totalUsd, 0).toFixed(2))
     const exchangeRate = returnExchangeRate
     const originalReceipt = body.receipt_number || saleMeta?.receipt_number || null
     const note = `Replacement for return ${returnNumber}${originalReceipt ? ` / receipt ${originalReceipt}` : ''}`
-    const paymentDetails = subtotalUsd > 0 ? [{ method: replacementPaymentMethod, amount_usd: subtotalUsd, amount_khr: 0 }] : []
+    const paymentDetails = replacementTender.details
     statements.push({
       sql: `INSERT INTO sales(
         receipt_number,client_request_id,cashier_id,cashier_name,branch_id,branch_name,
@@ -2134,7 +2158,7 @@ app.post('/', async (c) => {
         @receipt_number,@replacementClientRequestId,@cashier_id,@cashier_name,@branch_id,@branch_name,
         @customer_id,@customer_name,@customer_phone,@customer_address,@payment_method,@payment_details,
         'USD',@exchange_rate,@subtotal_usd,@subtotal_khr,0,0,0,0,@total_usd,@total_khr,@amount_paid_usd,
-        @amount_paid_khr,0,0,0,0,0,0,1,'completed',@notes,@items,@search_normalized,
+        @amount_paid_khr,0,0,0,0,0,0,1,@sale_status,@notes,@items,@search_normalized,
         ${returnIdExpression},@creation_snapshot_json,@occurredAt
       )`,
       params: {
@@ -2144,7 +2168,8 @@ app.post('/', async (c) => {
         customer_name: replacementCustomerName,
         customer_phone: replacementCustomerPhone,
         customer_address: replacementCustomerAddress,
-        payment_method: replacementPaymentMethod, payment_details: JSON.stringify(paymentDetails), exchange_rate: exchangeRate,
+        payment_method: replacementTender.method, payment_details: JSON.stringify(paymentDetails), exchange_rate: exchangeRate,
+        sale_status: replacementTender.status,
         subtotal_usd: subtotalUsd, subtotal_khr: replacementTotals.totalKhr,
         total_usd: replacementTotals.totalUsd, total_khr: replacementTotals.totalKhr,
         amount_paid_usd: replacementTotals.amountPaidUsd, amount_paid_khr: replacementTotals.amountPaidKhr,

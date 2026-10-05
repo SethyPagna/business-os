@@ -68,6 +68,49 @@ export function splitReturnRefund(input: { sale: ReturnDebtSale; prior: PriorRet
   return { owedReductionUsd, cashUsd }
 }
 
+/** What a stored sale row still owes (saleStatusResolution's reading), for callers that import only this module. */
+export function saleRowOwedUsd(sale: RecordedSaleMoney): number {
+  return recordedSaleOutstandingUsd(sale)
+}
+
+export type ReplacementPaymentSplit = {
+  /** The original sale carries a debt, so the replacement follows its payment state. */
+  followsDebt: boolean
+  /** Part of the replacement paid with the cash the return would otherwise hand back. */
+  paidFromRefundUsd: number
+  /** Part of the replacement added to what the customer owes (a Not Paid replacement sale). */
+  owedUsd: number
+  /** Cash still handed back after the replacement is paid from the refund. */
+  payoutUsd: number
+}
+
+/**
+ * RET-A P1 (verifier, 6 Oct 2026): an exchange on a sale that carries a debt.
+ * The return lowers the debt first (splitReturnRefund); the replacement then
+ * follows the original sale's payment state: it is paid only from the cash
+ * part of the refund, and the rest of its value is owed -- so the drawer
+ * never expects money that did not arrive, and the customer owes exactly the
+ * goods they hold less what they paid.
+ *   Not Paid $10, $4 back, $4 out:   drawer 0, owes $6 + $4 = $10
+ *   $10 with $7 paid, $4 back ($3 lowers the debt, $1 cash), $4 out:
+ *                                     $1 pays the replacement, owes $3, drawer 0
+ *   ... $0.50 out:                    $0.50 paid from the refund, $0.50 paid out
+ * A sale with no debt keeps the counter rule: the refund is paid out in full
+ * and the customer pays the replacement like any sale.
+ */
+export function splitReplacementPayment(input: { carriesDebt: boolean; cashUsd: number; replacementUsd: number }): ReplacementPaymentSplit {
+  const cashUsd = roundMoney4(Math.max(0, input.cashUsd))
+  const replacementUsd = roundMoney4(Math.max(0, input.replacementUsd))
+  if (!input.carriesDebt) return { followsDebt: false, paidFromRefundUsd: 0, owedUsd: 0, payoutUsd: cashUsd }
+  const paidFromRefundUsd = Math.min(cashUsd, replacementUsd)
+  return {
+    followsDebt: true,
+    paidFromRefundUsd,
+    owedUsd: subtractMoney4(replacementUsd, paidFromRefundUsd),
+    payoutUsd: subtractMoney4(cashUsd, paidFromRefundUsd),
+  }
+}
+
 /**
  * The sale's status once its active returns are counted: Not Paid while the
  * customer still owes, otherwise what the returned quantities make it.

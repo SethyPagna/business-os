@@ -48,6 +48,17 @@ export function refundTender(row: RefundTenderRow): RefundTender {
 }
 
 /**
+ * Riel handed back for the cash part of a riel refund: the refund's riel
+ * figure in proportion to its cash share. The same arithmetic as
+ * REFUND_DRAWER_KHR_SQL, so a screen, a replacement paid from the refund and
+ * the drawer agree to the riel.
+ */
+export function refundCashKhr(refundKhr: number, cashUsd: number, refundUsd: number): number {
+  if (!(refundUsd > 0) || !(cashUsd > 0)) return 0
+  return Math.round(finite(refundKhr) * cashUsd / refundUsd)
+}
+
+/**
  * RET-A P2 (verifier N6/N7): the riel figure a refund is recorded with.
  * A riel refund whose lines carry no riel price (a legacy line, or a
  * product-matched line that posted 0) would otherwise record 0 riel and leave
