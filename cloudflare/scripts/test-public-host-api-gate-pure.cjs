@@ -76,7 +76,8 @@ check('the gate exists and is wired before every other API middleware and route'
   assert.ok(indexSource.includes("import { isBlockedOnStorefrontHost } from './lib/publicHostGate'"), 'index.ts imports the gate')
   const gateAt = indexSource.indexOf('if (isBlockedOnStorefrontHost(c.req.url)) return c.json({ error: \'Not found\' }, 404)')
   assert.ok(gateAt > 0, 'index.ts answers 404 from the gate')
-  for (const later of ["app.use('/api/*', originGuard)", 'ensureCoreDataInvariantsOnce(c.env)', "app.get('/ws'", "app.route('/api/auth', authRoute)", "app.route('/api/portal', portalRoute)"]) {
+  // E3 (G39 item 3) renamed the invariants middleware call to ensureCoreDataInvariantsForRequest.
+  for (const later of ["app.use('/api/*', originGuard)", 'ensureCoreDataInvariantsForRequest(c.env)', "app.get('/ws'", "app.route('/api/auth', authRoute)", "app.route('/api/portal', portalRoute)"]) {
     const at = indexSource.indexOf(later)
     assert.ok(at > gateAt, `the gate runs before ${later}`)
   }
