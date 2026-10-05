@@ -28,6 +28,10 @@ const neutralChunks: ReadonlyArray<readonly [string, string]> = [
   ['/src/components/shared/UnsavedChangesPrompt.tsx', 'shared-modal'],
   ['/src/components/shared/MinimizeButton.tsx', 'shared-modal'],
   ['/src/components/shared/modalCloseContext.ts', 'shared-modal'],
+  // Modal's keyboard contract (SALES-UI A15/A16). Its only importer is Modal;
+  // left to the shared catch-all it lands in app-shared and closes a static
+  // shared-modal -> app-shared -> shared-modal chunk cycle.
+  ['/src/components/shared/useDialogKeyboard.ts', 'shared-modal'],
   ['/src/components/shared/InfoHint.tsx', 'shared-ui'],
   ['/src/components/shared/TruncatedText.tsx', 'shared-ui'],
   ['/src/components/shared/textAffordances.ts', 'shared-ui'],
