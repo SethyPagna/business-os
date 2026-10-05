@@ -103,6 +103,11 @@ const RULES: Rule[] = [
     ],
   },
   {
+    id: 'R5 cost price, not purchase price', owner: '10 Sep: Cost price / ថ្លៃដើម',
+    old: /purchase price|តម្លៃទិញ/i, sampleOld: 'Selling price is below purchase price', sampleNew: 'Selling price is below cost price',
+    packs: ['en', 'km'], code: true, worker: true,
+  },
+  {
     id: 'R7 wholesale, not VIP / special price', owner: '4-5 Sep S4-28',
     old: /\bVIP\b|special price|តម្លៃពិសេស/i, sampleOld: 'VIP Price (KHR)', sampleNew: 'Wholesale price (KHR)',
     packs: ['en', 'km'], code: true, worker: true,
