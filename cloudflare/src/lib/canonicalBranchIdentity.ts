@@ -1,5 +1,12 @@
 import { toDbBool } from './db'
-import { branchRoleFromName } from './branchRoles'
+import { branchActiveSuccessorPath, branchRoleFromName, resolveActiveSuccessor } from './branchRoles'
+
+// F2 of the branch cutover design: a recorded branch id -> the active branch a
+// stock effect must land on (identity for an active branch). The walker lives
+// in branchRoles.ts so the till can use the same rule; this module is where
+// the Worker routes import it from.
+export { resolveActiveSuccessor }
+export type { ActiveBranchSuccessor } from './branchRoles'
 
 export type CanonicalBranchName = 'Shop' | 'Warehouse'
 
@@ -18,28 +25,7 @@ function activeSuccessorPath(
   rows: readonly BranchIdentitySnapshot[],
   source: BranchIdentitySnapshot,
 ): BranchIdentitySnapshot[] | null {
-  const byId = new Map<number, BranchIdentitySnapshot>()
-  for (const row of rows) {
-    const id = Number(row.id)
-    if (!Number.isSafeInteger(id) || id <= 0 || byId.has(id)) return null
-    byId.set(id, row)
-  }
-  if (!byId.has(Number(source.id))) return null
-  const seen = new Set<number>([Number(source.id)])
-  const path: BranchIdentitySnapshot[] = []
-  let current = source
-  for (let hop = 0; current && hop < 8; hop += 1) {
-    const nextId = Number(current.successor_branch_id)
-    if (!Number.isSafeInteger(nextId) || nextId <= 0 || seen.has(nextId)) return null
-    seen.add(nextId)
-    const next = byId.get(nextId)
-    if (!next) return null
-    path.push(next)
-    if (Number(next.is_active) === 1) return next.successor_branch_id == null ? path : null
-    if (Number(next.is_active) !== 0) return null
-    current = next
-  }
-  return null
+  return branchActiveSuccessorPath(rows, source)
 }
 
 export type BranchIdentityFields = {
