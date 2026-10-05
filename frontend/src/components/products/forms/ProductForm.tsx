@@ -1944,14 +1944,14 @@ export default function ProductForm({
             {isCreateMode && showReceivedDate ? (
               <div className="min-w-0">
                 <label htmlFor="product-received-date" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-                  {tr('received_date', 'Received date', 'កាលបរិច្ឆេទទទួល')}
+                  {tr('received_date', 'Received date', 'ថ្ងៃចូល')}
                 </label>
                 <DateEntryInput
                   id="product-received-date"
                   name="product_received_date"
                   className="min-h-11 min-w-0"
                   t={t}
-                  ariaLabel={tr('received_date', 'Received date', 'កាលបរិច្ឆេទទទួល')}
+                  ariaLabel={tr('received_date', 'Received date', 'ថ្ងៃចូល')}
                   value={form.received_date || ''}
                   onChange={(iso) => setField('received_date', iso)}
                 />
