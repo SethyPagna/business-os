@@ -298,13 +298,13 @@ await runTest('supplier return: the id survives a timeout, a lost answer and a f
     },
   })
   try {
-    await page.waitFor(() => page.findAll((node) => node.tagName === 'TR' && node.textContent.includes(serum.name)).length > 0, 'the branch stock list')
+    await page.waitFor(() => page.findAll((node) => node.tagName === 'LI' && node.textContent.includes(serum.name)).length > 0, 'the branch stock list')
     await page.type(page.field('supplier-return-supplier'), 'Glow')
     await page.click(page.find((node) => node.getAttribute('role') === 'option' && node.textContent.includes('Glow Co'), 'supplier option Glow Co'))
     await proveOneIdentityPerMountedIntent({
       press: async () => {
         await page.type(page.field('supplier-return-reason'), form.reason)
-        await page.type(page.find((node) => node.tagName === 'INPUT' && !!node.closest('tr')?.textContent.includes(serum.name), `quantity for ${serum.name}`), '2')
+        await page.type(page.find((node) => node.tagName === 'INPUT' && !!node.closest('li')?.textContent.includes(serum.name), `quantity for ${serum.name}`), '2')
         await page.click(page.button(shown('save', 'Save')), pressing(write))
       },
       write,
