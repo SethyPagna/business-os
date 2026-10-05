@@ -24,6 +24,9 @@ type AppSelectProps = {
   // Ultra-compact hosts (e.g. DateTimeRangePicker's per-endpoint month/year
   // selects) drop the ▾ chevron entirely -- the label alone is the control.
   showChevron?: boolean
+  // A short label shown inside the control, before the chosen value ("From",
+  // "To"): the field's name without a caption row above it. Not part of the menu.
+  prefix?: ReactNode
 }
 
 function optionValue(value: string | number): string {
@@ -43,6 +46,7 @@ export default function AppSelect({
   optionClassName = '',
   disabled = false,
   showChevron = true,
+  prefix,
 }: AppSelectProps) {
   const [open, setOpen] = useState(false)
   const [position, setPosition] = useState({ top: 0, left: 0, width: 160 })
@@ -181,6 +185,7 @@ export default function AppSelect({
         }}
         onKeyDown={handleKeyDown}
       >
+        {prefix ? <span className="shrink-0 text-xs font-normal leading-relaxed text-slate-400" data-app-select-prefix="true">{prefix}</span> : null}
         <span className="min-w-0 flex-1 detail-scroll-text" data-app-select-selected="true">{selectedOption?.label ?? selectedValue}</span>
         {showChevron ? <ChevronDown className={`h-3.5 w-3.5 shrink-0 text-slate-500 transition-transform dark:text-slate-300 ${open ? 'rotate-180' : ''}`} aria-hidden="true" /> : null}
       </button>

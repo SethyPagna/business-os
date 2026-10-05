@@ -7,6 +7,7 @@ import { useVisualViewportInset } from '../../utils/useVisualViewportInset.ts'
 import type { DraftPreservingMinimize, UnsavedChangesDeclaration } from '../../utils/closeGuard.ts'
 import { ModalCloseContext } from './modalCloseContext.ts'
 import UnsavedChangesPrompt from './UnsavedChangesPrompt.tsx'
+import { useDialogKeyboard } from './useDialogKeyboard.ts'
 
 // Same cast UnsavedChangesPrompt.tsx uses next to this file -- Modal is
 // rendered from every admin surface, all of which sit under the one
@@ -37,6 +38,8 @@ type ModalProps = {
   closeAffordance?: 'visible' | 'omitted'
   /** Blocks every dismissal affordance while a child operation must finish. */
   closeDisabled?: boolean
+  /** Opt in to the dialog keyboard contract (useDialogKeyboard): focus in/out, Tab trap, Escape through the guard. */
+  keyboard?: boolean
   wide?: boolean
   size?: ModalSize
   // Lets the operator drag the modal window around by its header -- added
@@ -64,7 +67,7 @@ type ModalProps = {
   unsavedChanges: UnsavedChangesDeclaration
 }
 
-export default function Modal({ title, onClose, children, wide, size, draggable, headerExtra, onMinimize, closeAffordance = 'visible', closeDisabled = false, layer = 'default', unsavedChanges }: ModalProps) {
+export default function Modal({ title, onClose, children, wide, size, draggable, headerExtra, onMinimize, closeAffordance = 'visible', closeDisabled = false, keyboard = false, layer = 'default', unsavedChanges }: ModalProps) {
   const titleId = useId()
   const { t } = useApp()
   const tr = (key: string, fallback: string): string => {
@@ -89,6 +92,7 @@ export default function Modal({ title, onClose, children, wide, size, draggable,
   const [offset, setOffset] = useState({ x: 0, y: 0 })
   const dragRef = useRef<{ startX: number; startY: number; originX: number; originY: number } | null>(null)
   const panelRef = useRef<HTMLDivElement>(null)
+  useDialogKeyboard(panelRef, { enabled: keyboard, promptOpen: closeGuard.promptOpen, onEscape: requestClose, onPromptEscape: closeGuard.dismissPrompt })
   // Keep the whole panel inside the visible viewport whenever it fits. The
   // former 48px "still grabbable" rule allowed almost the entire analytics
   // dialog to be dragged beyond an iPhone edge.
