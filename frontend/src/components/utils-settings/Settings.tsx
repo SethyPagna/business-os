@@ -2022,7 +2022,7 @@ export default function Settings() {
                 ['notifications_inventory_enabled', 'notification_inventory_alerts', 'Inventory alerts', 'notification_inventory_alerts_desc', 'Low stock and out of stock warnings'],
                 ['notifications_expiry_enabled', 'notification_expiry_alerts', 'Expiry alerts', 'notification_expiry_alerts_desc', 'Products expiring soon or already expired'],
                 ['notifications_supplier_credit_enabled', 'notification_supplier_credit_alerts', 'Not Yet Paid supplier purchase alerts', 'notification_supplier_credit_alerts_desc', 'Not Yet Paid supplier purchases coming due or overdue'],
-                ['notifications_sales_enabled', 'notification_sales_alerts', 'Sales alerts', 'notification_sales_alerts_desc', 'Awaiting payment and delivery follow-up'],
+                ['notifications_sales_enabled', 'notification_sales_alerts', 'Sales alerts', 'notification_sales_alerts_desc', 'Not Paid and delivery follow-up'],
                 ['notifications_loyalty_enabled', 'notification_loyalty_alerts', 'Loyalty alerts', 'notification_loyalty_alerts_desc', 'Customers who reached your points target'],
                 ['notifications_portal_enabled', 'notification_portal_alerts', 'Website alerts', 'notification_portal_alerts_desc', 'Other website notices (pending Share & Reward submissions always appear, regardless of this setting)'],
                 ['notifications_system_enabled', 'notification_system_alerts', 'System alerts', 'notification_system_alerts_desc', 'Only actionable system reminders'],
