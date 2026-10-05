@@ -64,7 +64,7 @@ check('open pages subscribe to every reference channel they render', () => {
   assert.match(sales, /setDetailSale\(refreshOpen\)/, 'open sale detail must rebind to the refreshed stable id')
   assert.match(sales, /setSelectedSale\(refreshOpen\)/, 'open receipt/print must rebind to the refreshed stable id')
   assert.match(returns, /setDetailRet\(refreshOpen\)/, 'open return detail must rebind to the refreshed stable id')
-  assert.match(returns, /setEditRet\(refreshOpen\)/, 'open return editor must rebind to the refreshed stable id')
+  assert.match(returns, /setEditRet\(\(current\) => current \? \{ \.\.\.\(refreshOpen\(current\) as ReturnRow\), updated_at: current\.updated_at \} : current\)/, 'open return editor must rebind to the refreshed stable id and keep the version its fields came from')
   for (const channel of ['suppliers', 'users']) assert.ok(inventory.includes(`'${channel}'`), `Inventory misses ${channel}`)
   assert.match(branches, /channel === 'users'/)
   assert.match(files, /channel === 'files' \|\| channel === 'users'/)
