@@ -5975,6 +5975,7 @@
   "perm_act_promotions_manage": "បង្កើត កែ និងលុបច្បាប់ប្រូម៉ូសិន",
   "perm_act_sales_customer": "ប្តូរអតិថិជនដែលបានភ្ជាប់",
   "perm_act_sales_export": "នាំចេញការលក់",
+  "perm_act_sales_view": "មើលការលក់ និងរបាយការណ៍",
   "perm_act_sales_import": "នាំចូលការលក់",
   "perm_act_sales_status": "ប្តូរ ឬបោះបង់ស្ថានភាពលក់",
   "perm_act_sales_bulk": "ផ្លាស់ប្តូរការលក់ច្រើនក្នុងពេលតែមួយ",

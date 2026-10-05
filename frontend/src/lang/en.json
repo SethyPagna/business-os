@@ -5979,6 +5979,7 @@
   "perm_act_promotions_manage": "Create, edit, and delete promotion rules",
   "perm_act_sales_customer": "Change linked customer",
   "perm_act_sales_export": "Export sales",
+  "perm_act_sales_view": "View sales and reports",
   "perm_act_sales_import": "Import sales",
   "perm_act_sales_status": "Change or cancel sale status",
   "perm_act_sales_bulk": "Change multiple sales at once",
