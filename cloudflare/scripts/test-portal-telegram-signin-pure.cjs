@@ -26,7 +26,6 @@ const { Hono } = require('hono')
 const { createPortalHarness } = require('./harness/load_portal_auth_route.cjs')
 
 const SRC = path.join(__dirname, '..', 'src')
-const MIGRATIONS = path.join(__dirname, '..', 'migrations')
 const read = (rel) => fs.readFileSync(path.join(SRC, rel), 'utf8')
 
 const SECRET = 'Portal_webhook_secret-0123456789abcdefXYZ'
@@ -562,23 +561,13 @@ function createStaffApp(h) {
   }
 }
 
-// ---- 13. migration 0232 ---------------------------------------------------------------
-scenario('0232 is LF only, idempotent, carries its header, and enforces one Telegram per member and per account',
-  null,
+// ---- 13. retention -----------------------------------------------------------------------
+// The 0232 schema itself (header assertions, idempotence, constraints) is
+// test-migration-0232-portal-telegram-pure.cjs.
+scenario('the retention sweep deletes expired Telegram handshakes and keeps live ones',
+  { label: 'the sweep has no step for the challenges', edits: [['lib/ephemeralRetention.ts', "await step('portal_telegram_challenges', ", "void ('portal_telegram_challenges', "]] },
   async () => {
-    const name = '0232_portal_telegram_identities.sql'
-    const text = fs.readFileSync(path.join(MIGRATIONS, name), 'utf8')
-    assert.equal(Buffer.from(text, 'utf8').includes(0x0d), false, 'LF only')
-    for (const section of ['PURPOSE', 'PRE-ASSERTIONS', 'POST-ASSERTIONS', 'IDEMPOTENCE', 'RECOVERY']) assert.ok(text.includes(section), `header lacks ${section}`)
     const h = makeHarness()
-    h.raw.exec(text) // re-run on the migrated database: changes nothing, no error
-    assert.equal(h.count('portal_login_identities'), 0)
-    const ins = (account, subject) => h.raw.prepare("INSERT INTO portal_login_identities (account_id, provider, subject_key, verified_at) VALUES (@a, 'telegram', @s, CURRENT_TIMESTAMP)").run({ a: account, s: subject })
-    ins(1, '111')
-    assert.throws(() => ins(2, '111'), /UNIQUE/, 'one member per Telegram account')
-    assert.throws(() => ins(1, '222'), /UNIQUE/, 'one Telegram account per member')
-    assert.throws(() => h.raw.prepare("INSERT INTO portal_telegram_challenges (nonce_hash, browser_hash, purpose, expires_at) VALUES (@n, @b, 'attach', '2999-01-01')").run({ n: 'a'.repeat(64), b: 'b'.repeat(64) }), /CHECK/, 'an attach names its account')
-    assert.throws(() => h.raw.prepare("INSERT INTO portal_telegram_challenges (nonce_hash, browser_hash, purpose, expires_at) VALUES (@n, @b, 'signin', '2999-01-01')").run({ n: 'raw-nonce', b: 'b'.repeat(64) }), /CHECK/, 'only a 64-hex hash fits')
     // Retention: the real scheduled sweep removes expired challenges (consumed
     // or not) and keeps live ones.
     const challenge = (n, status, expires) => h.raw.prepare(`INSERT INTO portal_telegram_challenges (nonce_hash, browser_hash, purpose, status, expires_at)
