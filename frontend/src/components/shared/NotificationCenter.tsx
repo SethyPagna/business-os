@@ -23,6 +23,7 @@ import { listImportJobs as listImportJobsRequest } from '../../api/importJobsTra
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import { startVisibleInterval } from '../../utils/visibilityPolling.ts'
 import { FOREGROUND_RESUME_REASON } from '../../utils/permissionRefreshAccumulator.ts'
+import { IMPORT_JOBS_SHARED_LIMIT, onImportJobPush } from '../../utils/importJobRefresh.ts'
 import AppSelect from './AppSelect'
 import PaginationControls from './PaginationControls'
 import { getStatusBadgeLabel } from '../sales/StatusBadge.tsx'
@@ -568,7 +569,7 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
     let cancelled = false
     const loadImportJobs = async () => {
       try {
-        const result: any = await listImportJobsRequest({ limit: 8 })
+        const result: any = await listImportJobsRequest({ limit: IMPORT_JOBS_SHARED_LIMIT })
         const jobs: any[] = Array.isArray(result) ? result : (Array.isArray(result?.jobs) ? result.jobs : [])
         if (cancelled) return
         const reportable = jobs.filter((job) => IMPORT_REPORT_STATUSES.has(normalizeImportJobStatus(job)))
@@ -602,9 +603,11 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
     }
     void loadImportJobs()
     const stopPolling = startVisibleInterval(() => { void loadImportJobs() }, NOTIFICATION_SUMMARY_IDLE_REFRESH_MS)
+    const stopPush = onImportJobPush(() => { void loadImportJobs() })
     return () => {
       cancelled = true
       stopPolling()
+      stopPush()
     }
   }, [tr, visibilityActive])
 

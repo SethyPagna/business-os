@@ -15,7 +15,7 @@ import X from 'lucide-react/dist/esm/icons/x.js'
 import XCircle from 'lucide-react/dist/esm/icons/x-circle.js'
 import { useApp as useAppHook } from '../../app/AppContextCore.tsx'
 import { isTransientGatewayError } from '../../api/http.ts'
-import { dispatchImportCompletionRefresh, onImportTrackerPoke, shouldDispatchImportCompletionRefresh } from '../../utils/importJobRefresh.ts'
+import { dispatchImportCompletionRefresh, IMPORT_JOBS_SHARED_LIMIT, importTrackerPollIntervalMs, onImportJobPush, onImportTrackerPoke, shouldDispatchImportCompletionRefresh } from '../../utils/importJobRefresh.ts'
 import { beginNamedAction, finishNamedAction } from '../../utils/actionGuards.ts'
 import { withLoaderTimeout } from '../../utils/loaders.ts'
 import { lazyRetry } from '../../utils/lazyImport.ts'
@@ -130,7 +130,7 @@ type ImportPreflightResult = {
 }
 
 type ImportTrackerApi = {
-  listImportJobs?: (options: { limit: number }) => Promise<ImportJobListResult | ImportJob[]>
+  listImportJobs?: (options: { limit: number }, readOptions?: { fresh?: boolean }) => Promise<ImportJobListResult | ImportJob[]>
   cancelImportJob: (jobId: string) => Promise<unknown>
   retryImportJob: (jobId: string) => Promise<unknown>
   preflightImportJob?: (jobId: string) => Promise<ImportPreflightResult>
@@ -281,7 +281,16 @@ function writeDismissedJobs(map: DismissedJobsMap): void {
 // the extra polls over a job's lifetime are negligible; the idle cadence and the
 // failure backoff are unchanged.
 const IMPORT_TRACKER_ACTIVE_POLL_MS = 3000
+// Failure backoff floor. There is no idle poll any more (G39 item 7): with no
+// active job the tracker reads once on mount, then on the Worker's import push
+// or this tab's own import activity. It polls while a job is active and for
+// IMPORT_TRACKER_RECENT_START_MS after an import action, so a job created a
+// moment before its row is listed is still picked up.
 const IMPORT_TRACKER_IDLE_POLL_MS = 12000
+const IMPORT_TRACKER_RECENT_START_MS = 60_000
+// importJobsTransport.ts actions that put a job into motion. cancel lands in
+// 'cancelling' (an active status, so it polls anyway); dismiss/delete do not.
+const IMPORT_TRACKER_START_ACTIONS = new Set(['create', 'upload-csv', 'upload-zip', 'upload-images', 'start', 'approve', 'retry'])
 const IMPORT_TRACKER_MAX_BACKOFF_MS = 60000
 const IMPORT_TRACKER_LOAD_TIMEOUT_MS = 8000
 // Raised from 15000/12000 to match importJobsTransport.ts's
@@ -797,6 +806,7 @@ export default function BackgroundImportTracker() {
   }, [])
   const [dismissedJobs, setDismissedJobs] = useState<DismissedJobsMap>(() => readDismissedJobs())
   const [pollBackoffMs, setPollBackoffMs] = useState(0)
+  const [recentStartAt, setRecentStartAt] = useState(0)
   const [dragPos, setDragPos] = useState<DragPos | null>(() => readDragPos())
   const [isDragging, setIsDragging] = useState(false)
   // Separate from dismissing a job (which is only allowed once it's reached
@@ -952,11 +962,12 @@ export default function BackgroundImportTracker() {
   // "Applying changes" for something that has actually stopped.
   const primaryJob = attentionJobs[0] || activeJobs[0] || reviewJobs[0] || visibleJobs[0] || null
 
-  const loadJobs = useCallback(async () => {
+  // fresh: polling at 3 s must not be answered from the 20 s read cache.
+  const loadJobs = useCallback(async (fresh = true) => {
     try {
       const api = getImportTrackerApi()
       const result = await withLoaderTimeout(
-        () => api.listImportJobs?.({ limit: 8 }),
+        () => api.listImportJobs?.({ limit: IMPORT_JOBS_SHARED_LIMIT }, { fresh }),
         'Import tracker',
         IMPORT_TRACKER_LOAD_TIMEOUT_MS,
       )
@@ -999,25 +1010,51 @@ export default function BackgroundImportTracker() {
 
   useEffect(() => {
     aliveRef.current = true
-    loadJobs()
-    const baseIntervalMs = activeJobs.length ? IMPORT_TRACKER_ACTIVE_POLL_MS : IMPORT_TRACKER_IDLE_POLL_MS
-    const intervalMs = Math.max(baseIntervalMs, pollBackoffMs || 0)
+    void loadJobs(false)
+    return () => { aliveRef.current = false }
+  }, [loadJobs])
+
+  const pollIntervalMs = importTrackerPollIntervalMs({
+    activeJobs: activeJobs.length,
+    recentStart: recentStartAt > 0,
+    backoffMs: pollBackoffMs,
+    activeMs: IMPORT_TRACKER_ACTIVE_POLL_MS,
+  })
+  useEffect(() => {
+    if (pollIntervalMs == null) return undefined
     // Paused while the tab is hidden, even with a job running (F2): the job
     // runs server-side either way, and the read on return -- immediate when a
     // tick came due -- still dispatches its completion refresh.
-    const stopPolling = startVisibleInterval(() => { loadJobs() }, intervalMs)
-    return () => {
-      aliveRef.current = false
-      stopPolling()
-    }
-  }, [activeJobs.length, loadJobs, pollBackoffMs])
+    return startVisibleInterval(() => { void loadJobs() }, pollIntervalMs)
+  }, [loadJobs, pollIntervalMs])
 
-  // Any import modal's createImportJob (api/methods.ts) fires this the
-  // instant a job row exists server-side, so a brand-new import shows up
-  // here right away instead of waiting for the next scheduled poll tick
-  // (up to IMPORT_TRACKER_IDLE_POLL_MS if nothing else was active).
   useEffect(() => {
-    return onImportTrackerPoke(() => { loadJobs() })
+    if (!recentStartAt) return undefined
+    const timer = window.setTimeout(() => setRecentStartAt(0), Math.max(0, recentStartAt + IMPORT_TRACKER_RECENT_START_MS - Date.now()))
+    return () => window.clearTimeout(timer)
+  }, [recentStartAt])
+
+  // Any import modal's createImportJob (api/methods.ts) fires the poke the
+  // instant a job row exists server-side, and every job action in this tab
+  // fires import-job:activity; both read now and open the recent-start
+  // polling window. The Worker's import push covers imports from elsewhere.
+  useEffect(() => {
+    const onLocalImportStart = () => {
+      setRecentStartAt(Date.now())
+      void loadJobs()
+    }
+    const onLocalImportActivity = (event: Event) => {
+      const action = String((event as CustomEvent<{ action?: unknown }>).detail?.action || '')
+      if (IMPORT_TRACKER_START_ACTIONS.has(action)) onLocalImportStart()
+    }
+    const stopPoke = onImportTrackerPoke(onLocalImportStart)
+    const stopPush = onImportJobPush(() => { void loadJobs() })
+    window.addEventListener('import-job:activity', onLocalImportActivity)
+    return () => {
+      stopPoke()
+      stopPush()
+      window.removeEventListener('import-job:activity', onLocalImportActivity)
+    }
   }, [loadJobs])
 
   const hasAttention = attentionJobs.length > 0

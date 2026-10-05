@@ -110,6 +110,11 @@ type RouteOptions = {
   // own timeout, while still retrying an immediate failure such as
   // `Failed to fetch` within that outer deadline.
   retryTimedOutRead?: boolean
+  // Skip the fresh/stale read cache for this call (in-flight dedupe still
+  // applies, and the answer still refreshes the cache for other readers).
+  // For a caller polling faster than CACHE_TTL, which would otherwise be
+  // handed the same cached answer until it expires.
+  bypassCache?: boolean
   // Opt a read into "only the latest request in this group survives"
   // semantics: starting a new route() call tagged with the same
   // searchGroup aborts whatever request is still in flight for that
@@ -1489,7 +1494,8 @@ export async function route<T = any>(
     const token: ReadCacheToken = { channel, valid: true, pending: 0, scope }
     return trackCacheRead(token, async () => {
       if (readServerBaseUrl) {
-        const { data: cached, stale } = cacheGetStale(channel)
+        const bypassCache = typeof options === 'object' && options.bypassCache === true
+        const { data: cached, stale } = bypassCache ? { data: null, stale: false } : cacheGetStale(channel)
 
         if (cached !== null && !stale) {
           // Fresh cache hit ??return immediately

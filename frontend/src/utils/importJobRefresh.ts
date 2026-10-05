@@ -121,6 +121,33 @@ export function pokeImportTracker(): void {
   window.dispatchEvent(new CustomEvent(IMPORT_TRACKER_POKE_EVENT))
 }
 
+// The Worker broadcasts { action: 'import', jobId } on the channels an import
+// wrote to when it finishes (lib/importEngine.ts). That push is how an idle tab
+// learns about an import it did not start, so nothing needs to poll for it.
+export function isImportJobPush(event: Event): boolean {
+  const payload = (event as CustomEvent<{ payload?: { action?: unknown } | null }>).detail?.payload
+  return !!payload && payload.action === 'import'
+}
+
+export function onImportJobPush(handler: () => void): () => void {
+  if (typeof window === 'undefined') return () => {}
+  const listener = (event: Event) => { if (isImportJobPush(event)) handler() }
+  window.addEventListener('sync:update', listener)
+  return () => window.removeEventListener('sync:update', listener)
+}
+
+// Shared by the tracker, the bell and the Dashboard card so their reads land
+// on one cache key (importJobs:list:limit=8) and dedupe into one request.
+export const IMPORT_JOBS_SHARED_LIMIT = 8
+
+// The tracker's read cadence: null means no timer at all. It polls only while
+// a job is active or an import was just started from this tab; a failing read
+// backs off. Idle, the push and local activity are the only triggers.
+export function importTrackerPollIntervalMs(input: { activeJobs: number; recentStart: boolean; backoffMs?: number; activeMs: number }): number | null {
+  if (input.activeJobs <= 0 && !input.recentStart) return null
+  return Math.max(input.activeMs, input.backoffMs || 0)
+}
+
 export function onImportTrackerPoke(handler: () => void): () => void {
   if (typeof window === 'undefined') return () => {}
   window.addEventListener(IMPORT_TRACKER_POKE_EVENT, handler)

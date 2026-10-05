@@ -24,6 +24,8 @@ import { beginTrackedRequest, invalidateTrackedRequest, isTrackedRequestCurrent 
 import { getAnalytics, getDashboard, getDashboardInsightList, getDashboardStartup, getDashboardStockAlerts, normalizeDashboardGrossMetrics, type DashboardInsightKind, type DashboardStockAlertState } from '../../api/dashboardTransport.ts'
 import { isInvalidSessionError } from '../../api/http.ts'
 import { listImportJobs } from '../../api/importJobsTransport.ts'
+import { IMPORT_JOBS_SHARED_LIMIT, onImportJobPush } from '../../utils/importJobRefresh.ts'
+import { FOREGROUND_RESUME_GAP_REASON } from '../../utils/permissionRefreshAccumulator.ts'
 import AlertTriangle from 'lucide-react/dist/esm/icons/alert-triangle.js'
 import DollarSign from 'lucide-react/dist/esm/icons/dollar-sign.js'
 import FileText from 'lucide-react/dist/esm/icons/file-text.js'
@@ -72,6 +74,7 @@ interface AppContextValue {
 interface SyncContextValue {
   syncChannel?: {
     channel?: string
+    reason?: string | null
     ts?: string | number
   } | null
 }
@@ -1295,9 +1298,11 @@ export default function Dashboard() {
   // loadSummary/loadAnalytics above -- this doesn't depend on the
   // date-range filter those use, and a failure here shouldn't block the
   // rest of the dashboard from rendering.
+  // Read with the tracker's and the bell's limit so all three share one cached
+  // request; the card shows the newest five.
   const mapRecentImportJobs = (result: unknown): ImportFileSummary[] => {
     const jobs = Array.isArray((result as { jobs?: unknown })?.jobs) ? (result as { jobs: Record<string, unknown>[] }).jobs : []
-    return jobs.map((j) => ({
+    return jobs.slice(0, 5).map((j) => ({
       id: String(j.id),
       type: (j.type as string) ?? null,
       status: (j.status as string) ?? null,
@@ -1311,7 +1316,7 @@ export default function Dashboard() {
     if (!isActive) return
     let cancelled = false
     const loadRecentImportFiles = () => {
-      listImportJobs({ limit: 5 })
+      listImportJobs({ limit: IMPORT_JOBS_SHARED_LIMIT })
         .then((result) => {
           if (cancelled) return
           setRecentImportFiles(mapRecentImportJobs(result))
@@ -1322,6 +1327,7 @@ export default function Dashboard() {
     loadRecentImportFiles()
     const onActivity = () => loadRecentImportFiles()
     window.addEventListener('import-job:activity', onActivity)
+    const stopPush = onImportJobPush(onActivity)
     // A job that finishes purely from background polling (nobody in this
     // tab triggered it -- 'import-job:activity' only fires for actions the
     // current tab itself initiated, see notifyImportJobActivity in
@@ -1332,37 +1338,26 @@ export default function Dashboard() {
     return () => {
       cancelled = true
       window.removeEventListener('import-job:activity', onActivity)
+      stopPush()
     }
   }, [isActive])
 
-  // Real bug found here: this used to gate on
-  // `syncChannel?.channel !== 'dashboard'` -- but 'dashboard' was never a
-  // real channel name to begin with (see durable-objects/broadcastHub.ts's
-  // own `BroadcastChannel` union: it isn't in the list), and nothing on
-  // the backend ever broadcasts one (lib/importEngine.ts's own import-
-  // completion broadcast sends 'sales', 'inventory', or 'products' --
-  // never 'dashboard'). So this effect was dead code: it could never
-  // fire from a real completion, only from this tab's own
-  // 'import-job:activity' event above -- meaning an import finished by
-  // another tab, another device, or purely via background polling never
-  // refreshed this card at all, and it could sit empty or stale for the
-  // rest of the session. Listening for the channels that are actually
-  // broadcast fixes that. Also guarded with the same `cancelled` pattern
-  // as the effect above -- this one had none, so a slower-to-resolve
-  // request from an earlier sync tick could land after (and stomp on) a
-  // newer one.
-  const IMPORT_RELATED_SYNC_CHANNELS = new Set(['products', 'inventory', 'sales', 'customers', 'suppliers', 'deliveryContacts'])
+  // Imports finished on another tab or device arrive as the Worker's
+  // { action: 'import' } push (effect above). Re-reading on every products/
+  // inventory/sales event re-read import jobs after each sale at a till
+  // (G39 item 7), so the only other catch-up is a resume after a socket gap,
+  // when a push may have been missed.
   useEffect(() => {
-    if (!isActive || !syncChannel?.channel || !IMPORT_RELATED_SYNC_CHANNELS.has(syncChannel.channel)) return
+    if (!isActive || syncChannel?.channel !== 'dashboard' || syncChannel.reason !== FOREGROUND_RESUME_GAP_REASON) return
     let cancelled = false
-    listImportJobs({ limit: 5 })
+    listImportJobs({ limit: IMPORT_JOBS_SHARED_LIMIT })
       .then((result) => {
         if (cancelled) return
         setRecentImportFiles(mapRecentImportJobs(result))
       })
       .catch(() => { /* non-critical widget -- silently leave it as-is on failure */ })
     return () => { cancelled = true }
-  }, [isActive, syncChannel?.channel, syncChannel?.ts])
+  }, [isActive, syncChannel?.channel, syncChannel?.reason, syncChannel?.ts])
 
   const summaryReady = isDashboardSummaryPayload(summary)
   const analyticsReady = isDashboardAnalyticsPayload(analytics)
