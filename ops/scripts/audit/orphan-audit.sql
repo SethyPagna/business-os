@@ -20,6 +20,9 @@
 --   product_merge_pairs_0168.loser_id -- the seed pair names a product 0168 goes on to delete; kept for provenance/idempotence
 --   product_merge_map_0174.loser_id -- the merged product is deleted by 0174; the map keeps its id as provenance
 --   product_merge_pairs_0174.loser_id -- the seed pair names a product 0174 goes on to delete; kept for provenance/idempotence
+--   portal_accounts.created_contact_id -- provenance: the customer the old sign-up created; a merge can delete it
+--   portal_member_link_events.from_customer_id -- append-only link history keeps the customer id of the time; a merge deletes that customer
+--   portal_member_link_events.to_customer_id -- append-only link history keeps the customer id of the time; a merge deletes that customer
 --
 -- Every statement is a SELECT. There are no writes and no PRAGMA here.
 -- A healthy database answers 0 for every relation. A nonzero count on a
@@ -84,6 +87,13 @@ SELECT 'loyalty_point_adjustments.customer_id->customers' AS relation, COUNT(*) 
 SELECT 'organization_groups.organization_id->organizations' AS relation, COUNT(*) AS orphan_count FROM organization_groups c LEFT JOIN organizations p ON p.id = c.organization_id WHERE c.organization_id IS NOT NULL AND p.id IS NULL;
 SELECT 'password_reset_requests.user_id->users' AS relation, COUNT(*) AS orphan_count FROM password_reset_requests c LEFT JOIN users p ON p.id = c.user_id WHERE c.user_id IS NOT NULL AND p.id IS NULL;
 SELECT 'portal_accounts.contact_id->customers' AS relation, COUNT(*) AS orphan_count FROM portal_accounts c LEFT JOIN customers p ON p.id = c.contact_id WHERE c.contact_id IS NOT NULL AND p.id IS NULL;
+SELECT 'portal_member_link_events.account_id->portal_accounts' AS relation, COUNT(*) AS orphan_count FROM portal_member_link_events c LEFT JOIN portal_accounts p ON p.id = c.account_id WHERE c.account_id IS NOT NULL AND p.id IS NULL;
+SELECT 'portal_member_link_events.actor_user_id->users' AS relation, COUNT(*) AS orphan_count FROM portal_member_link_events c LEFT JOIN users p ON p.id = c.actor_user_id WHERE c.actor_user_id IS NOT NULL AND p.id IS NULL;
+SELECT 'portal_member_link_events.link_request_id->portal_member_link_requests' AS relation, COUNT(*) AS orphan_count FROM portal_member_link_events c LEFT JOIN portal_member_link_requests p ON p.id = c.link_request_id WHERE c.link_request_id IS NOT NULL AND p.id IS NULL;
+SELECT 'portal_member_link_events.reverts_event_id->portal_member_link_events' AS relation, COUNT(*) AS orphan_count FROM portal_member_link_events c LEFT JOIN portal_member_link_events p ON p.id = c.reverts_event_id WHERE c.reverts_event_id IS NOT NULL AND p.id IS NULL;
+SELECT 'portal_member_link_requests.account_id->portal_accounts' AS relation, COUNT(*) AS orphan_count FROM portal_member_link_requests c LEFT JOIN portal_accounts p ON p.id = c.account_id WHERE c.account_id IS NOT NULL AND p.id IS NULL;
+SELECT 'portal_member_link_requests.decided_by_id->users' AS relation, COUNT(*) AS orphan_count FROM portal_member_link_requests c LEFT JOIN users p ON p.id = c.decided_by_id WHERE c.decided_by_id IS NOT NULL AND p.id IS NULL;
+SELECT 'portal_member_link_requests.decided_event_id->portal_member_link_events' AS relation, COUNT(*) AS orphan_count FROM portal_member_link_requests c LEFT JOIN portal_member_link_events p ON p.id = c.decided_event_id WHERE c.decided_event_id IS NOT NULL AND p.id IS NULL;
 SELECT 'portal_password_resets.account_id->portal_accounts' AS relation, COUNT(*) AS orphan_count FROM portal_password_resets c LEFT JOIN portal_accounts p ON p.id = c.account_id WHERE c.account_id IS NOT NULL AND p.id IS NULL;
 SELECT 'portal_sessions.account_id->portal_accounts' AS relation, COUNT(*) AS orphan_count FROM portal_sessions c LEFT JOIN portal_accounts p ON p.id = c.account_id WHERE c.account_id IS NOT NULL AND p.id IS NULL;
 SELECT 'product_batches.received_branch_id->branches' AS relation, COUNT(*) AS orphan_count FROM product_batches c LEFT JOIN branches p ON p.id = c.received_branch_id WHERE c.received_branch_id IS NOT NULL AND p.id IS NULL;

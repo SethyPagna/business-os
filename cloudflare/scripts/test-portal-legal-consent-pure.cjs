@@ -176,7 +176,9 @@ async function run() {
   })
 
   await check('signup fails closed BEFORE migration 0130 is applied', async () => {
-    const preDb = openDb(migrationSql((f) => f !== CONSENT_MIGRATION))
+    // The chain as it stood before 0130 reached production: 0230 (G38) rebuilds
+    // portal_accounts FROM the consent columns, so it cannot run without them.
+    const preDb = openDb(migrationSql((f) => f !== CONSENT_MIGRATION && f < '0230'))
     const columns = preDb.prepare('PRAGMA table_info("portal_accounts")').all().map((r) => r.name)
     assert.ok(!columns.includes('consent_version'), 'the pre-migration fixture already has the column')
     const preAccounts = buildAccounts(preDb)

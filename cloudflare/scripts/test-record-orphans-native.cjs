@@ -124,6 +124,17 @@ const HISTORICAL_REFERENCE = {
   // loser is deleted, the map/pairs keep its id. Pinned by test-migration-0174-pure.cjs.
   'product_merge_map_0174.loser_id': 'the merged product is deleted by 0174; the map keeps its id as provenance',
   'product_merge_pairs_0174.loser_id': 'the seed pair names a product 0174 goes on to delete; kept for provenance/idempotence',
+  // G38 (migrations 0230/0231): website-member link history. A contact merge
+  // re-points or unlinks the member and DELETES the merged customer, while the
+  // append-only event keeps the customer id the member was linked to at that
+  // moment (merge_repoint / merge_unlink from_customer_id); a later merge does
+  // the same to any earlier link's to_customer_id. created_contact_id records
+  // which customer the pre-G38 sign-up itself created, and that customer can be
+  // merged away too. Pinned by test-portal-members-merge-events-pure.cjs, which
+  // merges a linked customer and asserts the event keeps the deleted id.
+  'portal_accounts.created_contact_id': 'provenance: the customer the old sign-up created; a merge can delete it',
+  'portal_member_link_events.from_customer_id': 'append-only link history keeps the customer id of the time; a merge deletes that customer',
+  'portal_member_link_events.to_customer_id': 'append-only link history keeps the customer id of the time; a merge deletes that customer',
 }
 /** Leading qualifiers that describe a ROLE, not a different kind of parent. */
 const QUALIFIER = new Set(['from', 'to', 'source', 'destination', 'expected', 'seen', 'last_seen', 'last',
@@ -133,6 +144,13 @@ const QUALIFIER = new Set(['from', 'to', 'source', 'destination', 'expected', 's
 const CHILD_SCOPED = {
   'portal_sessions.account_id': 'portal_accounts',
   'portal_password_resets.account_id': 'portal_accounts',
+  // G38: member link history and requests. Members are closed, never deleted
+  // (lib/ephemeralRetention.ts purgeInactivePortalMembers), so these hold.
+  'portal_member_link_events.account_id': 'portal_accounts',
+  'portal_member_link_events.reverts_event_id': 'portal_member_link_events',
+  'portal_member_link_events.link_request_id': 'portal_member_link_requests',
+  'portal_member_link_requests.account_id': 'portal_accounts',
+  'portal_member_link_requests.decided_event_id': 'portal_member_link_events',
   'rfid_tags.last_seen_session_id': 'rfid_scan_sessions',
   'rfid_session_items.session_id': 'rfid_scan_sessions',
   'rfid_events.session_id': 'rfid_scan_sessions',
