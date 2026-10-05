@@ -447,7 +447,8 @@ export function classifyMemberSuggestions(
 // Staff list: status chip and conflicts (design §4.3, §4.5).
 export type MemberChip = 'closed' | 'suspended' | 'linked' | 'verified' | 'unverified'
 
-// Phase 1 has no verified sign-in methods yet, so `verified` stays false.
+// `verified`: the member has a proven sign-in method in portal_login_identities
+// (0232; Telegram proves the phone). Linked still wins over it.
 export function memberChip(row: { status: string; contact_id: number | null; verified?: boolean }): MemberChip {
   if (row.status === 'closed') return 'closed'
   if (row.status === 'suspended') return 'suspended'

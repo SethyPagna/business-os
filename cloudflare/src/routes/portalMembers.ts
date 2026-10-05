@@ -88,6 +88,9 @@ type MemberRow = {
   request_created_at: string | null
   conflict_customer_unavailable: number | null
   conflict_phone_taken: number | null
+  has_password: number | null
+  has_telegram: number | null
+  verified: number | null
 }
 
 function memberSelect(extraColumns = '', extraJoins = ''): string {
@@ -98,7 +101,10 @@ function memberSelect(extraColumns = '', extraJoins = ''): string {
          CASE WHEN c.id IS NOT NULL AND ${customerIsProfileSql('c')} THEN 1 ELSE 0 END AS customer_available,
          r.id AS request_id, r.note AS request_note, r.created_at AS request_created_at,
          CASE WHEN ${MEMBER_CONFLICT_CUSTOMER_UNAVAILABLE_SQL} THEN 1 ELSE 0 END AS conflict_customer_unavailable,
-         CASE WHEN ${MEMBER_CONFLICT_PHONE_TAKEN_SQL} THEN 1 ELSE 0 END AS conflict_phone_taken
+         CASE WHEN ${MEMBER_CONFLICT_PHONE_TAKEN_SQL} THEN 1 ELSE 0 END AS conflict_phone_taken,
+         CASE WHEN a.password_hash IS NOT NULL THEN 1 ELSE 0 END AS has_password,
+         EXISTS (SELECT 1 FROM portal_login_identities li WHERE li.account_id = a.id AND li.provider = 'telegram') AS has_telegram,
+         EXISTS (SELECT 1 FROM portal_login_identities lv WHERE lv.account_id = a.id AND lv.verified_at IS NOT NULL) AS verified
   FROM portal_accounts a
   LEFT JOIN customers c ON c.id = a.contact_id
   LEFT JOIN portal_member_link_requests r ON r.account_id = a.id AND r.status = 'pending'${extraJoins}`
@@ -114,6 +120,7 @@ export type StaffMemberView = {
   email: string | null
   status: string
   chip: ReturnType<typeof memberChip>
+  methods: { password: boolean; telegram: boolean }
   linkVersion: number
   customer: { id: number; name: string | null; membershipNumber: string | null; available: boolean } | null
   createdFromSignup: boolean
@@ -136,7 +143,9 @@ export function staffMemberView(row: MemberRow): StaffMemberView {
     phone: row.phone ?? null,
     email: row.email ?? null,
     status: String(row.status),
-    chip: memberChip(row),
+    // G38 Telegram (0232): a proven sign-in method makes the member Verified.
+    chip: memberChip({ status: row.status, contact_id: row.contact_id, verified: Number(row.verified) === 1 }),
+    methods: { password: Number(row.has_password) === 1, telegram: Number(row.has_telegram) === 1 },
     linkVersion: Number(row.link_version),
     customer: row.contact_id == null ? null : {
       id: Number(row.contact_id),
