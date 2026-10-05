@@ -525,6 +525,10 @@ export function buildPortalConfig(settings: SettingsMap, env: Env) {
     language: languageSetting === AUTOMATIC_PORTAL_LANGUAGE ? 'en' : languageSetting,
     translations: normalizePortalTranslations(settings.customer_portal_translations),
     aiEnabled: normalizeBoolean(settings.customer_portal_ai_enabled, true),
+    // G38 P0 owner answer (5 Oct): new phone + password sign-ups stay open
+    // until Telegram verification ships (Phase 3); this switch lets the owner
+    // pause them without a deploy. Existing accounts always sign in.
+    signupEnabled: normalizeBoolean(settings.customer_portal_signup_enabled, true),
     aiTitle: settings.customer_portal_ai_title || 'Beauty Assistant',
     aiIntro: capPortalText(settings.customer_portal_ai_intro, MAX_PORTAL_AI_INTRO_LENGTH),
     aiDisclaimer: settings.customer_portal_ai_disclaimer
@@ -1707,6 +1711,11 @@ app.post('/auth/signup', async (c) => {
   if (!ipWindow.allowed) {
     c.header('Retry-After', String(ipWindow.retryAfterSeconds))
     return c.json({ error: `Too many attempts. Try again in ${ipWindow.retryAfterSeconds} seconds.`, code: 'rate_limited' }, 429)
+  }
+  // Checked before the body is read or any customer is looked up, so a
+  // paused sign-up answers the same for every phone and writes nothing.
+  if (!buildPortalConfig(await loadSettingsMap(c.env), c.env).signupEnabled) {
+    return c.json({ error: 'New accounts are paused. Existing members can still sign in.', code: 'portal_signup_paused' }, 403)
   }
   const lock = await getPortalLockoutState(c.env, 'signup', ipKey)
   if (lock.locked) {

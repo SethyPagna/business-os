@@ -35,6 +35,12 @@ function dbAdapter(raw) {
   }
 }
 
+// The Workers Cache API does not exist in Node; an always-miss cache makes
+// every cached public read (lib/cache.ts) run its producer, as a cold edge does.
+if (typeof globalThis.caches === 'undefined') {
+  globalThis.caches = { default: { match: async () => undefined, put: async () => {}, delete: async () => false } }
+}
+
 function createPortalHarness(options = {}) {
   const raw = openDb(loadAll())
   const db = dbAdapter(raw)
