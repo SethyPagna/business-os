@@ -27,7 +27,6 @@ async function runTest(name: string, fn: () => Promise<void>): Promise<void> {
   }
 }
 const last = (): Wire => sent[sent.length - 1]
-const REQUEST_ID = /^[A-Za-z0-9_-]{8,120}$/
 
 try {
   await runTest('expense edit: expectedUpdatedAt is always on the wire, null when the row has none', async () => {
