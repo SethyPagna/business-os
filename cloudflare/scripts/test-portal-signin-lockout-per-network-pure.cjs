@@ -21,6 +21,8 @@ const fs = require('node:fs')
 const path = require('node:path')
 const { execFileSync } = require('node:child_process')
 const { createPortalHarness } = require('./harness/load_portal_auth_route.cjs')
+// Sign-up is off unless explicitly enabled (owner ruling 6 Oct); these checks need it on.
+const SIGNUP_OPEN = { customer_portal_signup_enabled: 'true' }
 
 const root = path.resolve(__dirname, '..')
 const PORTAL_REL = 'routes/portal.ts'
@@ -40,7 +42,7 @@ async function check(name, fn) {
 }
 
 async function harnessWithAccount(source = portalSource) {
-  const h = createPortalHarness({ sources: { [PORTAL_REL]: source } })
+  const h = createPortalHarness({ sources: { [PORTAL_REL]: source }, settings: SIGNUP_OPEN })
   const signup = await h.request('/auth/signup', 'POST', { name: 'Dara', phone: PHONE, password: PASSWORD, consent: true, consentLocale: 'en' }, { ip: '192.0.2.1' })
   assert.equal(signup.status, 200, `fixture sign-up failed: ${JSON.stringify(signup.body)}`)
   return h

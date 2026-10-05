@@ -534,10 +534,11 @@ export function buildPortalConfig(settings: SettingsMap, env: Env) {
     language: languageSetting === AUTOMATIC_PORTAL_LANGUAGE ? 'en' : languageSetting,
     translations: normalizePortalTranslations(settings.customer_portal_translations),
     aiEnabled: normalizeBoolean(settings.customer_portal_ai_enabled, true),
-    // G38 P0 owner answer (5 Oct): new phone + password sign-ups stay open
-    // until Telegram verification ships (Phase 3); this switch lets the owner
-    // pause them without a deploy. Existing accounts always sign in.
-    signupEnabled: normalizeBoolean(settings.customer_portal_signup_enabled, true),
+    // G38 owner ruling (6 Oct): phone + password sign-ups are OFF until the
+    // owner turns them on (Telegram phone verification is the way in). An
+    // unset setting therefore means paused; only an explicit true opens
+    // sign-up. Existing accounts always sign in.
+    signupEnabled: normalizeBoolean(settings.customer_portal_signup_enabled, false),
     aiTitle: settings.customer_portal_ai_title || 'Beauty Assistant',
     aiIntro: capPortalText(settings.customer_portal_ai_intro, MAX_PORTAL_AI_INTRO_LENGTH),
     aiDisclaimer: settings.customer_portal_ai_disclaimer

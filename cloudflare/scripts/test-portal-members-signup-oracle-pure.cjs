@@ -25,6 +25,8 @@ const assert = require('node:assert/strict')
 const path = require('node:path')
 const { execFileSync } = require('node:child_process')
 const { createPortalHarness } = require('./harness/load_portal_auth_route.cjs')
+// Sign-up is off unless explicitly enabled (owner ruling 6 Oct); these checks need it on.
+const SIGNUP_OPEN = { customer_portal_signup_enabled: 'true' }
 
 const root = path.resolve(__dirname, '..')
 const base = process.env.SECURITY_TEST_BASE
@@ -54,7 +56,7 @@ function shape(value) {
 
 async function main() {
   await check('a phone in customers and one that is not: same status, body shape, cookie; no customer written', async () => {
-    const h = createPortalHarness({ sources })
+    const h = createPortalHarness({ sources, settings: SIGNUP_OPEN })
     h.raw.prepare("INSERT INTO customers (name, phone, phone_normalized, membership_number) VALUES ('Known Customer', '012 777 111', '012777111', 'LC-00010')").run({})
     const customersBefore = count(h, 'customers')
     const known = await signup(h, { name: 'Known Customer', phone: '012 777 111' }, '203.0.113.1')
@@ -68,7 +70,7 @@ async function main() {
   })
 
   await check("membershipId 'LC-00001' + the matching phone does not link the account", async () => {
-    const h = createPortalHarness({ sources })
+    const h = createPortalHarness({ sources, settings: SIGNUP_OPEN })
     h.raw.prepare("INSERT INTO customers (name, phone, phone_normalized, membership_number) VALUES ('Receipt Holder', '012 600 600', '012600600', 'LC-00001')").run({})
     const res = await signup(h, { name: 'Receipt Holder', phone: '012 600 600', membershipId: 'LC-00001' }, '203.0.113.3')
     assert.equal(res.status, 200, JSON.stringify(res.body))
@@ -77,7 +79,7 @@ async function main() {
   })
 
   await check('/auth/me is an allowlist; a linked member sees the store number, nothing else of the customer', async () => {
-    const h = createPortalHarness({ sources })
+    const h = createPortalHarness({ sources, settings: SIGNUP_OPEN })
     const res = await signup(h, { name: 'Web Dara', phone: '012 300 300' }, '203.0.113.4')
     const cookie = cookieOf(res)
     const unlinked = await h.request('/auth/me', 'GET', undefined, withCookie(cookie))
@@ -103,7 +105,7 @@ async function main() {
   })
 
   await check('sign-in answers with the same allowlisted view', async () => {
-    const h = createPortalHarness({ sources })
+    const h = createPortalHarness({ sources, settings: SIGNUP_OPEN })
     await signup(h, { name: 'Sign In', phone: '012 301 301' }, '203.0.113.5')
     const res = await h.request('/auth/signin', 'POST', { identifier: 'Sign In', phone: '012 301 301', password: 'visitor-pass', consent: true }, { ip: '203.0.113.6' })
     assert.equal(res.status, 200)
@@ -111,7 +113,7 @@ async function main() {
   })
 
   await check('Request link: always in_review, one pending per member, withdrawable; linked members are told', async () => {
-    const h = createPortalHarness({ sources })
+    const h = createPortalHarness({ sources, settings: SIGNUP_OPEN })
     const res = await signup(h, { name: 'Asker', phone: '012 302 302' }, '203.0.113.7')
     const cookie = cookieOf(res)
     assert.equal((await h.request('/account/link-request', 'POST', {}, { ip: '203.0.113.7' })).status, 401, 'needs a session')
@@ -136,7 +138,7 @@ async function main() {
   })
 
   await check('the identity-check code: six digits, accepted by the staff verifier, dead after a link change', async () => {
-    const h = createPortalHarness({ sources })
+    const h = createPortalHarness({ sources, settings: SIGNUP_OPEN })
     const res = await signup(h, { name: 'Coder', phone: '012 303 303' }, '203.0.113.8')
     const cookie = cookieOf(res)
     const got = await h.request('/account/link-code', 'GET', undefined, withCookie(cookie))
