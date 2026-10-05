@@ -1,10 +1,9 @@
 import { Fragment, Children, isValidElement, useEffect, type ReactNode, type ComponentProps, type RefObject } from 'react'
-import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
-import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
 import Printer from 'lucide-react/dist/esm/icons/printer.js'
 import StatusBadge from './StatusBadge.tsx'
 import { consumeLongPressClick, createLongPressHandlers, type LongPressState } from '../../utils/longPress.ts'
 import ColumnChooser from '../shared/ColumnChooser.tsx'
+import DayGroupHeader from '../shared/DayGroupHeader.tsx'
 import { useColumnPreferences } from '../shared/useColumnPreferences.ts'
 import { isDeliveryFreeForCustomer, resolveDriverLabel } from '../../utils/salesDriverLabel.ts'
 import { SALES_COLUMNS_SURFACE_KEY, SALES_OPTIONAL_COLUMNS } from './salesListColumns.ts'
@@ -242,37 +241,19 @@ export default function SalesListSurface({
                   <Fragment key={section.id}>
                     <tr className="bg-slate-100/90 dark:bg-slate-800/80">
                       <td colSpan={columnCount} className="px-4 py-2">
-                        <div className="flex items-center justify-between gap-3 text-xs">
-                          {selectionModeActive ? (
-                            <label className="inline-flex min-w-0 items-center gap-2 font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-                              <input
-                                type="checkbox"
-                                className="h-4 w-4 rounded"
-                                checked={isSelectionScopeFullySelected(section.ids)}
-                                ref={(node) => {
-                                  if (node) node.indeterminate = isSelectionScopePartiallySelected(section.ids)
-                                }}
-                                onChange={(event) => toggleSelectionScope(section.ids, event.target.checked)}
-                                aria-label={`${t('select')} ${section.label}`}
-                              />
-                              <span>{section.label}</span>
-                              <span className="text-slate-400">{countedCount} sale{countedCount === 1 ? '' : 's'}</span>
-                            </label>
-                          ) : (
-                            <div className="inline-flex min-w-0 items-center gap-2 font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-                              <span>{section.label}</span>
-                              <span className="text-slate-400">{countedCount} sale{countedCount === 1 ? '' : 's'}</span>
-                            </div>
-                          )}
-                          <button
-                            type="button"
-                            className="inline-flex shrink-0 items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-500 hover:bg-white/70 hover:text-slate-700 dark:text-slate-300 dark:hover:bg-slate-700/60 dark:hover:text-white"
-                            onClick={() => toggleSalesSection(section.id)}
-                          >
-                            {isCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-                            {isCollapsed ? (t('expand') || 'Expand') : (t('collapse') || 'Collapse')}
-                          </button>
-                        </div>
+                        <DayGroupHeader
+                          label={section.label}
+                          count={countedCount}
+                          collapsed={isCollapsed}
+                          onToggle={() => toggleSalesSection(section.id)}
+                          selection={selectionModeActive ? {
+                            checked: isSelectionScopeFullySelected(section.ids),
+                            indeterminate: isSelectionScopePartiallySelected(section.ids),
+                            onChange: (checked) => toggleSelectionScope(section.ids, checked),
+                            ariaLabel: `${t('select')} ${section.label}`,
+                          } : undefined}
+                          t={t}
+                        />
                       </td>
                     </tr>
                     {!isCollapsed ? section.groups.map((group) => (
@@ -431,33 +412,19 @@ export default function SalesListSurface({
           return (
             <div key={section.id} className="space-y-2">
               <div className="rounded-xl bg-slate-100 px-3 py-2 dark:bg-slate-800/70">
-                <div className="flex items-center justify-between gap-3 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-                  {selectionModeActive ? (
-                    <label className="inline-flex min-w-0 items-center gap-2">
-                      <input
-                        type="checkbox"
-                        className="h-4 w-4 rounded"
-                        checked={isSelectionScopeFullySelected(section.ids)}
-                        ref={(node) => {
-                          if (node) node.indeterminate = isSelectionScopePartiallySelected(section.ids)
-                        }}
-                        onChange={(event) => toggleSelectionScope(section.ids, event.target.checked)}
-                        aria-label={`${t('select')} ${section.label}`}
-                      />
-                      <span>{section.label}</span>
-                      <span className="normal-case tracking-normal text-slate-400">{countedCount}</span>
-                    </label>
-                  ) : (
-                    <div className="inline-flex min-w-0 items-center gap-2">
-                      <span>{section.label}</span>
-                      <span className="normal-case tracking-normal text-slate-400">{countedCount}</span>
-                    </div>
-                  )}
-                  <button type="button" className="inline-flex shrink-0 items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-500 hover:bg-white/70 hover:text-slate-700 dark:text-slate-300 dark:hover:bg-slate-700/60 dark:hover:text-white" onClick={() => toggleSalesSection(section.id)}>
-                    {isCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-                    {isCollapsed ? (t('expand') || 'Expand') : (t('collapse') || 'Collapse')}
-                  </button>
-                </div>
+                <DayGroupHeader
+                  label={section.label}
+                  count={countedCount}
+                  collapsed={isCollapsed}
+                  onToggle={() => toggleSalesSection(section.id)}
+                  selection={selectionModeActive ? {
+                    checked: isSelectionScopeFullySelected(section.ids),
+                    indeterminate: isSelectionScopePartiallySelected(section.ids),
+                    onChange: (checked) => toggleSelectionScope(section.ids, checked),
+                    ariaLabel: `${t('select')} ${section.label}`,
+                  } : undefined}
+                  t={t}
+                />
               </div>
               {!isCollapsed ? section.groups.map((group) => (
                 <div key={group.id} className="space-y-2">
@@ -567,8 +534,8 @@ export default function SalesListSurface({
                           <div className="flex-shrink-0 text-right">
                             <div className={`font-semibold ${status === 'cancelled' ? 'line-through text-gray-400' : 'text-gray-900 dark:text-white'}`}>{fmtUSD(totalUsd)}</div>
                             {totalKhr > 0 ? <div className="text-xs text-gray-400">{fmtKHR(totalKhr)}</div> : null}
-                            <button className="mt-1 text-xs text-blue-500 underline" onClick={(event) => { event.stopPropagation(); setSelectedSale(sale) }}>
-                              {t('print') || 'Print'}
+                            <button type="button" className="ml-auto mt-0.5 flex h-9 w-9 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-blue-600 dark:hover:bg-slate-800" aria-label={t('print') || 'Print'} title={t('print') || 'Print'} onClick={(event) => { event.stopPropagation(); setSelectedSale(sale) }}>
+                              <Printer className="h-4 w-4" aria-hidden="true" />
                             </button>
                           </div>
                         </div>
