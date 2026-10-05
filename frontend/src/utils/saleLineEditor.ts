@@ -53,7 +53,12 @@ export function capturedSaleLineEdit(items: readonly Record<string, unknown>[], 
   if (changes.selling_price_input_usd !== undefined) { capture.source = 'manual'; capture.selling_price_input_usd = changes.selling_price_input_usd }
   if (changes.manual_discount_type !== undefined) capture.manual.type = changes.manual_discount_type ?? 'none'
   if (changes.manual_discount_value !== undefined) capture.manual.value = changes.manual_discount_value
-  const quotes = evaluateCapturedPricingPool(pool, { ...snapshot.quantities, [snapshot.line_key]: changes.quantity })
+  // A changed price or discount may not push a fixed discount over the line's price (the Worker
+  // refuses the same edit with sale_discount_exceeds_price). A quantity-only edit of a line
+  // recorded before the rule existed is left alone: replay clamps, see evaluateCapturedPricingPool.
+  const discountOrPriceChanged = changes.selling_price_input_usd !== undefined || changes.manual_discount_type !== undefined || changes.manual_discount_value !== undefined
+  const quotes = evaluateCapturedPricingPool(pool, { ...snapshot.quantities, [snapshot.line_key]: changes.quantity },
+    { refuseOversizedFixed: discountOrPriceChanged ? new Set([snapshot.line_key]) : false })
   const exact = quotes.get(snapshot.line_key)!
   const subtotalUsd = sumMoney4(snapshots.map(row => row.pool.pool_key === pool.pool_key ? quotes.get(row.line_key)!.total_usd : row.amounts.total_usd))
   return { ok: true as const, quantity: changes.quantity, basePriceUsd: exact.base_price_usd, appliedPriceUsd: exact.applied_price_usd,
