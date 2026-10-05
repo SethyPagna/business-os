@@ -72,7 +72,7 @@ Module._load = function(request, parent, isMain) {
   // A0's per-request metrics middleware is mounted first on /api/*: same
   // reason as the origin guard, the real module (it calls next()).
   if (request === './lib/requestMetrics') return originalLoad.call(this, path.join(root, 'src', 'lib', 'requestMetrics.ts'), parent, isMain)
-  if (request === './lib/coreDataInvariants') return { ensureCoreDataInvariantsOnce: async () => {} }
+  if (request === './lib/coreInvariantsGate') return { ensureCoreDataInvariantsForRequest: async () => {} }
   if (request === './lib/maintenance') return { getMaintenance: async () => null, isMaintenanceGatedRequest: () => false }
   if (request === './lib/errorReporting') return { reportError: async () => {} }
   if (request.startsWith('./queue')) return new Proxy({}, { get: () => harmless })

@@ -244,15 +244,28 @@ const NEW_TODAY = `date(created_at, '+7 hours') = date('now', '+7 hours') AND cr
   {
     const summary = src.slice(src.indexOf('async function dashboardSummary'), src.indexOf('async function dashboardAnalytics'))
     check('compat.ts dashboardSummary was located for the alert-scope lock', summary.length > 500)
-    const expiryQueries = summary.split('db.prepare(').filter((chunk) => /COALESCE\(expiry_alert_days/.test(chunk))
-    check('compat.ts keeps both catalog-wide expiry queries (preview and count)', expiryQueries.length === 2)
-    check('compat.ts expiry queries filter on the active catalog only -- no sales/date scope',
-      expiryQueries.every((chunk) => /p\.is_active = 1/.test(chunk) && !/sale_items|localDateRangeClause|@startDate/.test(chunk.slice(0, chunk.indexOf('`).')))))
-    check('compat.ts family stock stats are catalog-wide too, so the card badges match their lists',
-      /whereSql: 'WHERE p\.is_active = 1',/.test(summary))
-    check('compat.ts pages the low/out drill lists through the same family-aware stock helper',
-      (summary.match(/getFamilyStockAlertPage\(\{[^}]*state: '(?:low|out)'[^}]*\}\)/g) || []).length === 2
-      && !/getFamilyStockAlertPage\(\{[^}]*@startDate/.test(summary))
+    // G39 item 1 moved the stock/alert block, unchanged in scope, into
+    // lib/dashboardStockOverview.ts (one family pass + two expiry statements,
+    // shared and cached). The summary takes it whole and passes it NO range,
+    // branch or sales parameter -- the lock follows the queries there.
+    check('compat.ts dashboardSummary takes the stock block from the shared, range-free overview',
+      /loadDashboardStockOverview\(env, overviewCtx\)/.test(summary)
+      && !/loadDashboardStockOverview\([^)]*(params|range|branchId)/.test(summary))
+    const overviewSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'dashboardStockOverview.ts'), 'utf8')
+    const familySrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'familyStockStats.ts'), 'utf8')
+    const expiryWhere = (overviewSrc.match(/DASHBOARD_EXPIRY_WHERE_SQL = `([^`]*)`/) || [])[1] || ''
+    const expiryQueries = overviewSrc.split('db.prepare(').filter((chunk) => /\$\{DASHBOARD_EXPIRY_WHERE_SQL\}/.test(chunk))
+    check('the overview keeps both catalog-wide expiry queries (preview and count)', expiryQueries.length === 2)
+    check('the overview expiry queries filter on the active catalog only -- no sales/date scope',
+      /^p\.is_active = 1 AND expiry_date IS NOT NULL AND date\(expiry_date\) <= /.test(expiryWhere)
+      && expiryQueries.every((chunk) => !/sale_items|localDateRangeClause|@startDate|@branchId/.test(chunk.slice(0, chunk.indexOf('`)')))))
+    const overviewFn = familySrc.slice(familySrc.indexOf('export async function getFamilyStockOverview'))
+    check('the overview family stock stats are catalog-wide too, so the card badges match their lists',
+      /FROM products p\s+LEFT JOIN products parent ON parent\.id = p\.parent_id\s+WHERE p\.is_active = 1\s+\)/.test(overviewFn)
+      && !/@startDate|@branchId|sale_items/.test(overviewFn))
+    check('the overview pages the low/out drill lists by the same family-aware rule (one pass, both states)',
+      /CASE WHEN has_low = 1 THEN 'low' ELSE 'out' END AS alert_state/.test(overviewFn)
+      && /PARTITION BY alert_state ORDER BY minimum_qty ASC, family_name ASC, family_root_id ASC/.test(overviewFn))
   }
   check('compat.ts returns the field names consumed by the dashboard',
     /AS return_count/.test(src) && /AS items_returned/.test(src) && /AS loss_usd/.test(src))

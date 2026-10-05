@@ -63,6 +63,10 @@ const NAMED_COMPANIONS = {
   224: 'test-branch-cutover-journal-native.cjs',
   225: 'test-branch-cutover-journal-native.cjs',
   226: 'test-branch-history-labels-native.cjs',
+  // 0228 adds the Dashboard expiry partial index. Its companion applies the
+  // chain without and with it, pins both plans, identical rows, idempotency,
+  // the documented recovery and LF-only.
+  228: 'test-dashboard-stock-overview-pure.cjs',
 }
 
 function listMigrationNumbers() {

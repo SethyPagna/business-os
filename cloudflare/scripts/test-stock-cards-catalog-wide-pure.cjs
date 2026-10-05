@@ -19,9 +19,13 @@
 // slow-moving stock stopped raising low-stock and expiry warnings at all.
 //
 // Every getFamilyStockStats() caller in the Worker is checked, not just the
-// dashboard: routes/compat.ts (dashboard summary), routes/branches.ts (the
-// branch hub's stats and the per-branch stock summary) and
-// routes/inventory.ts (/stats and /bootstrap). Their static call sites all
+// dashboard: routes/branches.ts (the branch hub's stats and the per-branch
+// stock summary) and routes/inventory.ts (/stats and /bootstrap). The
+// dashboard no longer calls it: since G39 item 1 (b8ec738d8) compat.ts
+// dashboardSummary takes its whole stock block from
+// lib/dashboardStockOverview.ts (loadDashboardStockOverview ->
+// getFamilyStockOverview, one statement, cached), which is pinned below on
+// the same terms. The static getFamilyStockStats call sites all
 // read `whereSql: 'WHERE p.is_active = 1'`, and the two that build a WHERE
 // dynamically build it from branch/search predicates only. That shape is
 // what this file pins, so the sibling audit is mechanical rather than done
@@ -37,6 +41,7 @@ const check = (label, cond) => { assert.ok(cond, label); passed++; console.log(`
 
 const read = (...parts) => fs.readFileSync(path.join(__dirname, '..', ...parts), 'utf8')
 const compat = read('src', 'routes', 'compat.ts')
+const stockOverview = read('src', 'lib', 'dashboardStockOverview.ts')
 const branches = read('src', 'routes', 'branches.ts')
 const inventory = read('src', 'routes', 'inventory.ts')
 const familyStockStats = read('src', 'lib', 'familyStockStats.ts')
@@ -78,8 +83,8 @@ const byFile = {
   'routes/inventory.ts': familyStatsCalls(inventory),
 }
 
-check('every Worker family-stock-stats caller is covered here (compat 1, branches 2, inventory 2)',
-  byFile['routes/compat.ts'].length === 1
+check('every Worker family-stock-stats caller is covered here (compat 0 -- it uses the overview --, branches 2, inventory 2)',
+  byFile['routes/compat.ts'].length === 0
   && byFile['routes/branches.ts'].length === 2
   && byFile['routes/inventory.ts'].length === 2)
 
@@ -90,8 +95,40 @@ for (const [file, calls] of Object.entries(byFile)) {
 }
 
 // ---- The static call sites keep the plain active-catalog shape ----
-check('compat.ts dashboard stock stats are the plain active catalog',
-  /whereSql: 'WHERE p\.is_active = 1',/.test(compat))
+// The dashboard's stock block: compat.ts hands the overview NOTHING but the
+// env and a cache context (no range, no branch, no params), and the overview
+// itself is the plain active catalog. A range argument added to the call, or
+// a range clause added inside the one-pass helper, would fail here.
+{
+  const overviewCalls = compat.match(/loadDashboardStockOverview\([^)]*\)/g) || []
+  check('compat.ts dashboardSummary loads the shared stock overview exactly once',
+    overviewCalls.length === 1)
+  check('compat.ts passes the overview no date range, branch or query params',
+    overviewCalls[0] === 'loadDashboardStockOverview(env, overviewCtx)')
+  check('compat.ts no longer builds the dashboard stock block from range-bearing params',
+    !/getFamilyStockStats\(/.test(compat) && !/getFamilyStockAlertPage\(\{[^}]*(params|range|startDate|endDate)/.test(compat))
+
+  const compute = stockOverview.slice(stockOverview.indexOf('export async function computeDashboardStockOverview'), stockOverview.indexOf('// Bump when the cached shape changes'))
+  check('the overview compute function was located', compute.length > 300)
+  check('the overview computes the family block through the one-pass helper with no where/join/range input',
+    /getFamilyStockOverview\(\{ db, lowStock, previewSize: DASHBOARD_STOCK_PREVIEW_SIZE \}\)/.test(compute)
+    && !RANGE_SCOPE.test(compute))
+  check('the overview expiry list and count both use the one active-catalog predicate',
+    (compute.match(/WHERE \$\{DASHBOARD_EXPIRY_WHERE_SQL\}/g) || []).length === 2)
+  const expiryWhere = (stockOverview.match(/export const DASHBOARD_EXPIRY_WHERE_SQL = `([^`]*)`/) || [])[1] || ''
+  check('the overview expiry predicate starts from the active catalog and carries no date/sales range scope',
+    /^p\.is_active = 1 AND /.test(expiryWhere) && !RANGE_SCOPE.test(expiryWhere))
+
+  const overviewFn = familyStockStats.slice(familyStockStats.indexOf('export async function getFamilyStockOverview'))
+  const overviewSql = overviewFn.slice(0, overviewFn.indexOf('.all<'))
+  check('getFamilyStockOverview starts from the plain active catalog',
+    /FROM products p\s+LEFT JOIN products parent ON parent\.id = p\.parent_id\s+WHERE p\.is_active = 1\s+\)/.test(overviewSql))
+  check('getFamilyStockOverview carries no date/sales range scope and takes no where/join/params from its caller',
+    !RANGE_SCOPE.test(overviewSql)
+    && /opts: \{\s*db: D1Compat\s*lowStock: LowStockConfig\s*previewSize: number\s*\}/.test(overviewFn))
+  check('getFamilyStockOverview shares the configured low-stock threshold expression',
+    /lowStockThresholdSql\(lowStock, 'p\.low_stock_threshold'\)/.test(overviewSql))
+}
 check('branches.ts hub stock stats are the plain active catalog',
   /whereSql: 'WHERE p\.is_active = 1',/.test(branches))
 check('inventory.ts stock stats are the plain active catalog',
@@ -109,16 +146,14 @@ check('inventory.ts stock stats are the plain active catalog',
 {
   const summary = compat.slice(compat.indexOf('async function dashboardSummary'), compat.indexOf('async function dashboardAnalytics'))
   check('compat.ts dashboardSummary was located', summary.length > 500)
-  const expiryAlerts = summary.split('db.prepare(').filter((chunk) => /COALESCE\(expiry_alert_days/.test(chunk))
-  check('compat.ts still has both expiry inventory alert queries', expiryAlerts.length === 2)
-  for (const chunk of expiryAlerts) {
-    const sql = chunk.slice(0, chunk.indexOf('`).'))
-    check(`compat.ts expiry alert query is catalog-wide: ${sql.trim().split('\n').pop().trim().slice(0, 60)}...`,
-      /p\.is_active = 1/.test(sql) && !RANGE_SCOPE.test(sql))
-  }
-  const familyAlertCalls = summary.match(/getFamilyStockAlertPage\(\{[^}]*state: '(?:low|out)'[^}]*\}\)/g) || []
-  check('compat.ts pages both low/out lists through the family-aware helper', familyAlertCalls.length === 2)
-  check('compat.ts low/out family pages carry no date/sales range scope', familyAlertCalls.every((call) => !RANGE_SCOPE.test(call)))
+  check('compat.ts dashboardSummary no longer runs its own expiry or low/out alert queries (they are catalog-wide in the overview, pinned above)',
+    !/COALESCE\(expiry_alert_days/.test(summary) && !/getFamilyStockAlertPage\(/.test(summary))
+  // The drill-down route still pages one state at a time through the same
+  // family-aware helper, with only state/page/pageSize.
+  const drill = compat.slice(compat.indexOf("app.get('/dashboard/stock-alerts'"), compat.indexOf("app.get('/analytics'"))
+  const drillCalls = drill.match(/getFamilyStockAlertPage\(\{[^}]*\}\)/g) || []
+  check('compat.ts stock-alerts drill-down pages through the family-aware helper', drillCalls.length === 1)
+  check('compat.ts stock-alerts drill-down carries no date/sales range scope', drillCalls.every((call) => !RANGE_SCOPE.test(call)) && !RANGE_SCOPE.test(drill))
   check('the family alert helper itself starts from the active catalog and shares the configured low-stock threshold',
     /export async function getFamilyStockAlertPage/.test(familyStockStats)
     && /WHERE p\.is_active = 1/.test(familyStockStats)

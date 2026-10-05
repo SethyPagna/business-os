@@ -75,8 +75,9 @@ check('the sitemap is the home page and the three legal pages, on the request or
 check('the handlers are registered above the D1 middleware and never touch the database', () => {
   const start = workerIndex.indexOf("app.on(['GET', 'HEAD'], '/robots.txt'")
   const sitemap = workerIndex.indexOf("app.on(['GET', 'HEAD'], '/sitemap.xml'")
-  const dbMiddleware = workerIndex.indexOf('await ensureCoreDataInvariantsOnce(c.env)')
+  const dbMiddleware = workerIndex.indexOf('await ensureCoreDataInvariantsForRequest(c.env)')
   assert.ok(start > 0 && sitemap > 0, 'both handlers exist')
+  assert.ok(dbMiddleware > 0, 'the seeding middleware exists (a renamed entry must fail here, not pass vacuously)')
   assert.ok(start < dbMiddleware && sitemap < dbMiddleware, 'registered before the seeding middleware')
   const handlers = workerIndex.slice(start, workerIndex.indexOf('\n\n', sitemap))
   assert.doesNotMatch(handlers, /getDb|c\.env\.DB|c\.env\.CACHE/, 'no D1 or KV on a crawler probe')

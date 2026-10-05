@@ -113,7 +113,9 @@ async function main() {
     const mounts = index.match(/app\.use\('\/api\/\*', originGuard\)/g) || []
     assert.equal(mounts.length, 1, 'mounted exactly once')
     const at = index.indexOf("app.use('/api/*', originGuard)")
-    assert.ok(at < index.indexOf('ensureCoreDataInvariantsOnce(c.env)'), 'before core-data seeding')
+    const seeding = index.indexOf('ensureCoreDataInvariantsForRequest(c.env)')
+    assert.ok(seeding > 0, 'the core-data seeding middleware exists')
+    assert.ok(at < seeding, 'before core-data seeding')
     assert.ok(at < index.indexOf("smallBodyAccess(c.req.method, c.req.path) === 'public'"), 'before public body admission')
     assert.ok(at < index.indexOf("app.route('/api/settings', settingsRoute)"), 'before every route')
   })

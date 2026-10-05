@@ -138,6 +138,8 @@ const PAID = {
   ephemeralDeleteBatch: 5000,
   catalogIntegrityMaxProducts: 50000,
   stockInLinesPerRequest: 28,
+  coreInvariantsReverifySeconds: 21600,
+  dashboardStockOverviewCacheSeconds: 30,
   d1DailyRowsRead: 833000000,
   d1DailyRowsWritten: 1666000,
   d1MaxDatabaseBytes: 10 * 1024 * 1024 * 1024,
@@ -159,6 +161,8 @@ const FREE = {
   ephemeralDeleteBatch: 1000,
   catalogIntegrityMaxProducts: 2000,
   stockInLinesPerRequest: 1,
+  coreInvariantsReverifySeconds: 86400,
+  dashboardStockOverviewCacheSeconds: 300,
   d1DailyRowsRead: 5000000,
   d1DailyRowsWritten: 100000,
   d1MaxDatabaseBytes: 500 * 1024 * 1024,
@@ -180,21 +184,29 @@ check('both tables carry exactly the same field set, with no extras', async () =
   assert.deepEqual(free, Object.keys(FREE).sort(), 'a new field needs a reader and a pin here')
 })
 
+// Read-cost LIFETIMES (planTier.ts "Read-cost lifetimes"): a longer lifetime
+// reads fewer D1 rows, so on these Free is deliberately the LARGER number.
+// Listed by name so a ceiling can never slip into this exemption unnoticed.
+const FREE_IS_LONGER = ['coreInvariantsReverifySeconds', 'dashboardStockOverviewCacheSeconds']
+
 // ---- POSITIVE CONTROL -----------------------------------------------------
 //
 // Without this, every assertion above still passes when the free table is a
 // verbatim copy of the paid one -- i.e. when the split does nothing at all.
-check('POSITIVE CONTROL: free actually differs from paid, and is never larger', async () => {
+check('POSITIVE CONTROL: free actually differs from paid; ceilings are smaller, lifetimes longer', async () => {
   const free = PLAN_LIMITS_BY_TIER.free
   const paid = PLAN_LIMITS_BY_TIER.paid
   const same = []
   for (const key of Object.keys(paid)) {
     if (key === 'tier') continue
     if (free[key] === paid[key]) same.push(key)
-    if (typeof paid[key] === 'number') {
+    if (typeof paid[key] === 'number' && FREE_IS_LONGER.includes(key)) {
+      assert.ok(free[key] > paid[key], `free.${key} (${free[key]}) is a lifetime and must be strictly LONGER than paid.${key} (${paid[key]})`)
+    } else if (typeof paid[key] === 'number') {
       assert.ok(free[key] < paid[key], `free.${key} (${free[key]}) must be strictly smaller than paid.${key} (${paid[key]})`)
     }
   }
+  for (const key of FREE_IS_LONGER) assert.ok(Object.hasOwn(paid, key), `FREE_IS_LONGER names a field that does not exist: ${key}`)
   assert.deepEqual(same, [], `these fields are identical on both tiers, so the split does nothing for them: ${same.join(', ')}`)
   // And the control's own control: a deliberately identical pair must be
   // REPORTED as identical, so a green run above cannot come from the

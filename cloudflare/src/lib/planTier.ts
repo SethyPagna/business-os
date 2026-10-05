@@ -191,6 +191,30 @@ export type PlanLimits = {
 
   stockInLinesPerRequest: number
 
+  // ---- Read-cost lifetimes (G39 efficiency) -------------------------------
+  //
+  // These are LIFETIMES, so unlike every ceiling above, Free's number is the
+  // LARGER one: a longer lifetime means fewer D1 rows read, and Free's
+  // 5,000,000 rows/day is a hard wall. scripts/test-plan-tier-pure.cjs keeps
+  // an explicit list of such fields and checks they run the other way.
+
+  // lib/coreDataInvariants.ts ensureCoreDataInvariantsForBuild: how long one
+  // isolate's full stock-coverage scan (~16-25k rows) stays valid for the
+  // same deployed build before another isolate re-runs it. Products created
+  // after the scan are still checked on every cold isolate (by id watermark),
+  // so this only bounds how long coverage lost some OTHER way (a re-activated
+  // product, a deleted branch_stock row, a restore) can go unhealed.
+  // Paid 6 h, Free 24 h.
+  coreInvariantsReverifySeconds: number
+
+  // lib/dashboardStockOverview.ts: lifetime of the shared Dashboard stock /
+  // expiry overview. Freshness comes from the 'products' + 'stock' cache
+  // versions in its key (every sale and stock write bumps one), so this is
+  // only the ceiling for a writer that does not bump and for the expiry
+  // window's clock. Paid 30 s (the order of the 20 s product-search cache),
+  // Free 300 s.
+  dashboardStockOverviewCacheSeconds: number
+
   // ---- Documented platform facts (no behavioural reader) -----------------
   //
   // These four are REPORTED, not enforced: the tier readout on
@@ -247,6 +271,8 @@ const PAID_LIMITS: PlanLimits = {
   ephemeralDeleteBatch: 5000,
   catalogIntegrityMaxProducts: 50_000,
   stockInLinesPerRequest: 28,
+  coreInvariantsReverifySeconds: 6 * 60 * 60,
+  dashboardStockOverviewCacheSeconds: 30,
   d1DailyRowsRead: 833_000_000,
   d1DailyRowsWritten: 1_666_000,
   d1MaxDatabaseBytes: 10 * 1024 * 1024 * 1024,
@@ -269,6 +295,8 @@ const FREE_LIMITS: PlanLimits = {
   ephemeralDeleteBatch: 1000,
   catalogIntegrityMaxProducts: 2000,
   stockInLinesPerRequest: 1,
+  coreInvariantsReverifySeconds: 24 * 60 * 60,
+  dashboardStockOverviewCacheSeconds: 300,
   d1DailyRowsRead: 5_000_000,
   d1DailyRowsWritten: 100_000,
   d1MaxDatabaseBytes: 500 * 1024 * 1024,
