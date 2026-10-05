@@ -4,6 +4,7 @@ import { lazyRetry } from '../../utils/lazyImport.ts'
 import { startVisibleInterval } from '../../utils/visibilityPolling.ts'
 import { fuzzyTextMatches, matchesSearchTermGroups, sortBySearchRelevance } from '../../utils/searchMatch.ts'
 import { fmtTime } from '../../utils/formatters.ts'
+import { settingsSaveNormalisedKeys } from '../../utils/settingsSave.ts'
 import { deriveTelegramLink } from '../../utils/socialLinks.ts'
 import { canWriteSettingKey } from '../../utils/portalPermissions.ts'
 import { registerDirtyWork } from '../../utils/dirtyWork.ts'
@@ -253,7 +254,7 @@ type CatalogAppContext = {
   t: (key: string) => string
   language?: string
 }
-type CatalogSyncContext = { syncChannel?: { channel?: string } | null }
+type CatalogSyncContext = { syncChannel?: { channel?: string; ownSettingsWrite?: boolean } | null }
 
 function getCatalogApi(): CatalogApi {
   return (window as Window & { api?: CatalogApi }).api || {}
@@ -2021,6 +2022,9 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
 
   useEffect(() => {
     if (!isPageActive || !syncChannel) return undefined
+    // The dispatch this editor's own Save makes: the editor already holds what it
+    // saved (see savePortalDraft), so it does not re-read the whole website.
+    if (syncChannel.ownSettingsWrite) return undefined
     if (!['products', 'settings', 'customers', 'sales', 'returns', 'branches', 'categories', 'inventory'].includes(String(syncChannel.channel || ''))) {
       return undefined
     }
@@ -2723,7 +2727,13 @@ export default function CatalogPage({ publicView = false }: { publicView?: boole
       const settledMediaValues = Object.fromEntries(Object.entries(savedMediaValues).filter(([key]) => !stillEdited.has(key)))
       setEditorDraft((current) => replaceDraftValues(current, settledMediaValues))
       setConfig((current) => applyDraft(current, replaceDraftValues(editorDraft, savedMediaValues)))
-      await loadPortal().catch((error) => notify(getCatalogErrorMessage(error, 'Failed to load the website'), 'error'))
+      // The website is re-read only when the Worker stored something other than
+      // what was sent (it names those keys in the answer); otherwise the editor
+      // already holds exactly what was saved and a read of the whole storefront
+      // bootstrap -- invalidated by this very save -- buys nothing.
+      if (settingsSaveNormalisedKeys(result).length) {
+        await loadPortal().catch((error) => notify(getCatalogErrorMessage(error, 'Failed to load the website'), 'error'))
+      }
       return { ok: true }
     } catch (error) {
       notify(getCatalogErrorMessage(error, 'Failed to save portal'), 'error')
