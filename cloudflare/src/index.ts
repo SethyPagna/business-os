@@ -36,7 +36,7 @@ import { createSyncRoute } from './routes/sync'
 import { getSessionUser } from './lib/auth'
 import { hasPermission, isAdminControlUser } from './lib/permissions'
 import { admitRequestBody, SMALL_BODY_BYTES, MIGRATION_FINALIZE_BODY_BYTES, smallBodyAccess } from './lib/requestBodyGuard'
-import { ensureCoreDataInvariantsOnce } from './lib/coreDataInvariants'
+import { ensureCoreDataInvariantsForRequest } from './lib/coreInvariantsGate'
 import { getMaintenance, isMaintenanceGatedRequest } from './lib/maintenance'
 import { reportError } from './lib/errorReporting'
 import { serveObject } from './lib/r2'
@@ -420,8 +420,11 @@ app.use('*', async (c, next) => {
 
 // Fresh D1 databases need a default org/branch/roles/admin. Memoized per isolate;
 // run after public body admission so rejected bodies cannot trigger seeding.
-app.use('*', async (c, next) => {
-  await ensureCoreDataInvariantsOnce(c.env)
+// /api/* only (G39 item 3): /uploads/*, /ws and /health need no seeded data
+// and must not wait on D1 on a cold isolate. The stock-coverage scan inside
+// it runs once per deployed build (lib/coreInvariantsGate.ts).
+app.use('/api/*', async (c, next) => {
+  await ensureCoreDataInvariantsForRequest(c.env)
   return next()
 })
 

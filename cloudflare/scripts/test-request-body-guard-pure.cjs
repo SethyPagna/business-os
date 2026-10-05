@@ -201,7 +201,7 @@ async function main() {
     // middleware is mounted first on /api/* and must call next().
     './lib/requestMetrics': load('lib/requestMetrics.ts', { './analytics': load('lib/analytics.ts'), 'node:async_hooks': require('node:async_hooks') }),
     './lib/requestBodyGuard': guard, './lib/auth': auth, './lib/permissions': permissions,
-    './lib/coreDataInvariants': { ensureCoreDataInvariantsOnce: async () => { calls.bootstrap++ } },
+    './lib/coreInvariantsGate': { ensureCoreDataInvariantsForRequest: async () => { calls.bootstrap++ } },
     './lib/maintenance': { isMaintenanceGatedRequest: () => true, getMaintenance: async () => { calls.maintenance++; return null } },
     './lib/errorReporting': { reportError: async () => {} },
   }).default

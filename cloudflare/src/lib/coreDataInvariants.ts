@@ -115,6 +115,23 @@ export function resolveSeedAdminPassword(env: Env): string | null {
   return null
 }
 
+// The organization identity this deployment is configured with. See the
+// comment in runCoreDataInvariants() on why it is configured, not hardcoded.
+function configuredOrganizationIdentity(env: Env): { orgName: string; orgSlug: string; publicId: string } {
+  const orgName = String(env.BUSINESS_OS_ORGANIZATION_NAME || '').trim() || 'Business OS'
+  const orgSlug = String(env.BUSINESS_OS_ORGANIZATION_SLUG || '').trim().toLowerCase() || 'business-os'
+  return { orgName, orgSlug, publicId: `org_${orgSlug.replace(/-/g, '_')}` }
+}
+
+// The one expensive question the fast path asks: is there an active product
+// with no branch_stock row at all? It reads every active product plus a
+// branch_stock probe per product (~16-25k rows at production scale), against
+// ~10 rows for every other check in the projection. Kept as one fragment so
+// the projection and the once-per-build gate (ensureCoreDataInvariantsForBuild
+// below) can never ask two different questions.
+const MISSING_BRANCH_STOCK_SQL = `EXISTS(SELECT 1 FROM products p
+        WHERE p.is_active = 1 AND p.id NOT IN (SELECT product_id FROM branch_stock))`
+
 // Read-only pre-check for ensureCoreDataInvariants(). Every request on a
 // fresh Worker isolate runs ensureCoreDataInvariants() once (see
 // ensureCoreDataInvariantsOnce() below) -- and until this fast path
@@ -139,7 +156,12 @@ async function tryFastPath(
   orgName: string,
   orgSlug: string,
   publicId: string,
+  // false = identity checks only (organization, group, branch, roles, admin):
+  // ~10 indexed/small-table rows. Used by the once-per-build gate, which asks
+  // the stock-coverage question separately and at most once per build.
+  options: { checkStockCoverage?: boolean } = {},
 ): Promise<CoreDataInvariants | null> {
+  const stockCoverageSql = options.checkStockCoverage === false ? '0' : MISSING_BRANCH_STOCK_SQL
   // Keep each selector's original predicates and ordering. In particular,
   // check permissions AFTER choosing the admin role, and retain NOT IN's
   // semantics for stock coverage. Scalar subqueries preserve missing rows
@@ -166,8 +188,7 @@ async function tryFastPath(
       (SELECT id FROM roles WHERE code = 'manager' LIMIT 1) AS managerRoleId,
       (SELECT id FROM roles WHERE code = 'employee' LIMIT 1) AS employeeRoleId,
       (SELECT id FROM users WHERE lower(trim(username)) = 'admin' AND deleted_at IS NULL LIMIT 1) AS adminUserId,
-      EXISTS(SELECT 1 FROM products p
-        WHERE p.is_active = 1 AND p.id NOT IN (SELECT product_id FROM branch_stock)) AS missingBranchStock
+      ${stockCoverageSql} AS missingBranchStock
     FROM org
   `).get<{
     organizationId: number
@@ -197,6 +218,21 @@ async function tryFastPath(
 }
 
 export async function ensureCoreDataInvariants(env: Env): Promise<CoreDataInvariants> {
+  return (await runCoreDataInvariants(env)).invariants
+}
+
+export type CoreDataInvariantsRun = {
+  invariants: CoreDataInvariants
+  // True only when the READ-ONLY fast path certified every invariant,
+  // including stock coverage. False whenever the write-capable path ran:
+  // that path can legitimately finish with something still missing (no seed
+  // password, a maintenance fence on the backfill), so it never certifies
+  // anything. The once-per-build gate records a build as verified only on
+  // true.
+  certifiedHealthy: boolean
+}
+
+export async function runCoreDataInvariants(env: Env): Promise<CoreDataInvariantsRun> {
   const db = getDb(env)
 
   // The organization's identity is CONFIGURED, not hardcoded.
@@ -212,9 +248,7 @@ export async function ensureCoreDataInvariants(env: Env): Promise<CoreDataInvari
   //
   // Defaults preserve the old values exactly, so a deployment that sets
   // nothing behaves as before.
-  const orgName = String(env.BUSINESS_OS_ORGANIZATION_NAME || '').trim() || 'Business OS'
-  const orgSlug = String(env.BUSINESS_OS_ORGANIZATION_SLUG || '').trim().toLowerCase() || 'business-os'
-  const publicId = `org_${orgSlug.replace(/-/g, '_')}`
+  const { orgName, orgSlug, publicId } = configuredOrganizationIdentity(env)
 
   // Identities this deployment's row may STILL carry from before a rename.
   // Every rename in this app's history appends here: matching a previous
@@ -230,7 +264,7 @@ export async function ensureCoreDataInvariants(env: Env): Promise<CoreDataInvari
   ]
 
   const fastPathResult = await tryFastPath(db, orgName, orgSlug, publicId)
-  if (fastPathResult) return fastPathResult
+  if (fastPathResult) return { invariants: fastPathResult, certifiedHealthy: true }
 
   // Prefer the configured identity; fall back to previous identities (most
   // recent first) so an existing organization is adopted and renamed in
@@ -402,13 +436,16 @@ export async function ensureCoreDataInvariants(env: Env): Promise<CoreDataInvari
   }
 
   return {
-    organizationId,
-    organizationGroupId,
-    branchId,
-    adminRoleId: adminRole?.id ?? null,
-    adminUserId,
-    adminUserCreated,
-    adminPassword,
+    invariants: {
+      organizationId,
+      organizationGroupId,
+      branchId,
+      adminRoleId: adminRole?.id ?? null,
+      adminUserId,
+      adminUserCreated,
+      adminPassword,
+    },
+    certifiedHealthy: false,
   }
 }
 
@@ -431,6 +468,220 @@ export function ensureCoreDataInvariantsOnce(env: Env): Promise<CoreDataInvarian
     })
   }
   return coreInvariantsPromise
+}
+
+// ---------------------------------------------------------------------------
+// Once-per-build gate for the stock-coverage scan (G39 efficiency item 3).
+//
+// WHY: ensureCoreDataInvariantsOnce() runs the fast path once per ISOLATE, and
+// every cold isolate therefore paid the MISSING_BRANCH_STOCK_SQL scan (~16-25k
+// rows at production scale) to re-learn what the previous isolate of the same
+// build had just learned. Everything else in the projection is ~10 rows.
+//
+// WHAT CHANGES, AND WHAT DOES NOT:
+//   - The identity checks (organization, group, default branch, the three
+//     roles, admin permissions, the admin user) still run on every cold
+//     isolate, exactly as before, and an unhealthy answer still takes the
+//     write-capable repair path before the request continues.
+//   - The FULL stock-coverage scan runs once per deployed build (and again
+//     after `reverifyAfterMs`), by ONE isolate holding a short lease in
+//     system_flags, and is recorded only when the read-only fast path
+//     certified the whole state healthy.
+//   - Every other cold isolate of a verified build checks only the products
+//     created since that scan (products.id is AUTOINCREMENT, so "id > the
+//     recorded watermark" is exactly the set the scan has not seen). A product
+//     created without a branch_stock row is therefore still healed on the next
+//     cold isolate, as before. Coverage lost any other way (a product
+//     re-activated, a branch_stock row deleted, a restore) is healed on the
+//     next build or within `reverifyAfterMs`.
+//
+// FAIL SAFE: any failure to read the flag or take the lease runs the full
+// legacy check in this isolate. A failure to RECORD the result only costs the
+// next isolate another scan. Nothing here ever skips a check because a write
+// failed.
+//
+// system_flags (0089) is excluded from backups and every reader filters by
+// key, so one more key is invisible to them.
+export const CORE_INVARIANTS_BUILD_FLAG_KEY = 'core_invariants_build'
+export const CORE_INVARIANTS_LEASE_MS = 30_000
+
+export type CoreInvariantsGateOptions = {
+  // Identity of the deployed build (lib/coreInvariantsGate.ts derives it from
+  // the build stamp). Never blank: an unstamped build uses the legacy path.
+  buildKey: string
+  // How long a recorded verification stays valid for the same build.
+  reverifyAfterMs: number
+  leaseMs?: number
+  now?: () => number
+  newToken?: () => string
+}
+
+// 'verified'  identity healthy; build verified, no product created since is uncovered
+// 'checked'   this isolate held the lease, scanned, and the state was certified
+// 'repaired'  the write-capable path ran (identity unhealthy or coverage missing)
+// 'deferred'  identity healthy; another isolate holds the scan lease right now
+// 'fallback'  reading the flag or taking the lease failed; the legacy check ran
+export type CoreInvariantsGateOutcome = 'verified' | 'checked' | 'repaired' | 'deferred' | 'fallback'
+
+type GateFlagRow = { flag: string | null; newUncovered: number | null }
+type GateFlag =
+  | { status: 'verified'; build: string; at: number; watermark: number }
+  | { status: 'checking'; build: string; until: number; token: string }
+
+export function parseCoreInvariantsBuildFlag(raw: unknown): GateFlag | null {
+  if (typeof raw !== 'string') return null
+  let value: Record<string, unknown>
+  try { value = JSON.parse(raw) } catch { return null }
+  if (!value || typeof value !== 'object' || typeof value.build !== 'string' || !value.build) return null
+  if (value.status === 'verified' && Number.isFinite(value.at) && Number.isInteger(value.watermark) && Number(value.watermark) >= 0) {
+    return { status: 'verified', build: value.build, at: Number(value.at), watermark: Number(value.watermark) }
+  }
+  if (value.status === 'checking' && Number.isFinite(value.until) && typeof value.token === 'string' && value.token) {
+    return { status: 'checking', build: value.build, until: Number(value.until), token: value.token }
+  }
+  return null
+}
+
+// The flag, plus -- only when the flag is a fresh verification of THIS build --
+// whether an active product created after its watermark lacks branch_stock.
+// The nested CASE keeps json_extract away from malformed JSON and keeps the
+// products probe from running at all unless the flag is usable.
+//
+// `+p.is_active` is deliberate: without it the planner (no sqlite_stat1)
+// prefers idx_products_active_grouped_pg's is_active equality and walks every
+// active product -- the very scan this gate exists to avoid. The unary plus
+// only removes that term from index selection; for an INTEGER column holding
+// 0/1 the comparison is unchanged. The probe then seeks the primary key
+// (rowid > watermark), pinned by scripts/test-core-invariants-build-gate-pure.cjs.
+const GATE_FLAG_SQL = `
+  SELECT value AS flag,
+    CASE WHEN json_valid(value) THEN
+      CASE WHEN json_extract(value, '$.status') = 'verified'
+             AND json_extract(value, '$.build') = @build
+             AND json_extract(value, '$.at') > @freshAfter
+             AND json_type(value, '$.watermark') = 'integer'
+      THEN EXISTS(SELECT 1 FROM products p
+        WHERE p.id > json_extract(system_flags.value, '$.watermark')
+          AND +p.is_active = 1 AND p.id NOT IN (SELECT product_id FROM branch_stock))
+      END
+    END AS newUncovered
+  FROM system_flags WHERE key = @key`
+
+// Conditional upsert: takes the lease unless THIS build is already verified
+// and fresh, or another isolate holds an unexpired lease for it. A row from
+// another build, an expired lease or malformed JSON is simply replaced.
+const GATE_LEASE_SQL = `
+  INSERT INTO system_flags (key, value, updated_at) VALUES (@key, @value, CURRENT_TIMESTAMP)
+  ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+  WHERE CASE WHEN json_valid(system_flags.value) THEN NOT (
+    json_extract(system_flags.value, '$.build') = @build AND (
+      (json_extract(system_flags.value, '$.status') = 'verified' AND json_extract(system_flags.value, '$.at') > @freshAfter)
+      OR (json_extract(system_flags.value, '$.status') = 'checking' AND json_extract(system_flags.value, '$.until') > @now)
+    )) ELSE 1 END`
+
+const GATE_OWNS_LEASE_SQL = `key = @key AND CASE WHEN json_valid(value) THEN json_extract(value, '$.token') = @token ELSE 0 END`
+
+export async function ensureCoreDataInvariantsForBuild(env: Env, options: CoreInvariantsGateOptions): Promise<CoreInvariantsGateOutcome> {
+  const clock = options.now ?? Date.now
+  const now = clock()
+  const build = options.buildKey
+  const freshAfter = now - options.reverifyAfterMs
+  const key = CORE_INVARIANTS_BUILD_FLAG_KEY
+  const db = getDb(env)
+  const { orgName, orgSlug, publicId } = configuredOrganizationIdentity(env)
+
+  let identity: CoreDataInvariants | null
+  let gate: GateFlagRow | null | undefined
+  try {
+    ;[identity, gate] = await Promise.all([
+      tryFastPath(db, orgName, orgSlug, publicId, { checkStockCoverage: false }),
+      db.prepare(GATE_FLAG_SQL).get<GateFlagRow>({ key, build, freshAfter }),
+    ])
+  } catch (error) {
+    console.warn('[core-invariants] build gate read failed; running the full check', error)
+    await runCoreDataInvariants(env)
+    return 'fallback'
+  }
+  // Same contract as before for identity: anything missing is repaired now.
+  if (!identity) {
+    await runCoreDataInvariants(env)
+    return 'repaired'
+  }
+
+  const flag = parseCoreInvariantsBuildFlag(gate?.flag ?? null)
+  if (flag?.status === 'verified' && flag.build === build && flag.at > freshAfter && gate?.newUncovered != null) {
+    if (!Number(gate.newUncovered)) return 'verified'
+    // A product created since the scan has no branch_stock row: heal exactly
+    // as the per-isolate check did. The flag stays; its watermark is still true
+    // for every product the scan saw.
+    await runCoreDataInvariants(env)
+    return 'repaired'
+  }
+  if (flag?.status === 'checking' && flag.build === build && flag.until > now) return 'deferred'
+
+  const token = (options.newToken ?? (() => crypto.randomUUID()))()
+  let acquired: boolean
+  try {
+    const lease = JSON.stringify({ status: 'checking', build, until: now + (options.leaseMs ?? CORE_INVARIANTS_LEASE_MS), token })
+    const result = await db.prepare(GATE_LEASE_SQL).run({ key, value: lease, build, freshAfter, now })
+    acquired = result.changes === 1
+  } catch (error) {
+    console.warn('[core-invariants] could not take the build-check lease; running the full check', error)
+    await runCoreDataInvariants(env)
+    return 'fallback'
+  }
+  if (!acquired) return 'deferred'
+
+  let run: CoreDataInvariantsRun
+  try {
+    // Read the watermark BEFORE the scan: every product at or below it already
+    // existed when the scan started, so the scan saw it.
+    const top = await db.prepare('SELECT COALESCE(MAX(id), 0) AS watermark FROM products').get<{ watermark: number }>()
+    const watermark = Math.max(0, Math.trunc(Number(top?.watermark || 0)))
+    run = await runCoreDataInvariants(env)
+    if (run.certifiedHealthy) {
+      try {
+        await db.prepare(`UPDATE system_flags SET value = @value, updated_at = CURRENT_TIMESTAMP WHERE ${GATE_OWNS_LEASE_SQL}`)
+          .run({ key, token, value: JSON.stringify({ status: 'verified', build, at: now, watermark }) })
+      } catch (error) {
+        // Fail safe: an unrecorded result only means another isolate scans again.
+        console.warn('[core-invariants] could not record the build verification', error)
+      }
+      return 'checked'
+    }
+  } catch (error) {
+    await db.prepare(`DELETE FROM system_flags WHERE ${GATE_OWNS_LEASE_SQL}`).run({ key, token }).catch(() => {})
+    throw error
+  }
+  // The repair path ran, so nothing is certified: drop the lease so the next
+  // cold isolate checks again immediately, exactly as before this gate existed.
+  await db.prepare(`DELETE FROM system_flags WHERE ${GATE_OWNS_LEASE_SQL}`).run({ key, token }).catch(() => {})
+  return 'repaired'
+}
+
+// Per-isolate memo, as ensureCoreDataInvariantsOnce: a settled outcome is
+// kept for the isolate's lifetime; 'deferred' is retried once the other
+// isolate's lease could have expired; a rejection is never cached.
+let buildGateEntry: { buildKey: string; retryAt: number; promise: Promise<CoreInvariantsGateOutcome> } | null = null
+
+export function ensureCoreDataInvariantsForBuildOnce(env: Env, options: CoreInvariantsGateOptions): Promise<CoreInvariantsGateOutcome> {
+  const clock = options.now ?? Date.now
+  const current = buildGateEntry
+  if (current && current.buildKey === options.buildKey && clock() < current.retryAt) return current.promise
+  const entry: { buildKey: string; retryAt: number; promise: Promise<CoreInvariantsGateOutcome> } = {
+    buildKey: options.buildKey,
+    retryAt: Number.POSITIVE_INFINITY,
+    promise: Promise.resolve('deferred' as CoreInvariantsGateOutcome),
+  }
+  entry.promise = ensureCoreDataInvariantsForBuild(env, options).then((outcome) => {
+    if (outcome === 'deferred') entry.retryAt = clock() + (options.leaseMs ?? CORE_INVARIANTS_LEASE_MS)
+    return outcome
+  }, (error) => {
+    if (buildGateEntry === entry) buildGateEntry = null
+    throw error
+  })
+  buildGateEntry = entry
+  return entry.promise
 }
 
 // Every table with real rows in migrations/0001_init.sql + 0002_promotions.sql,
