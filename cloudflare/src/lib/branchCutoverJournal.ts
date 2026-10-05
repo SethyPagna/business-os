@@ -108,11 +108,44 @@ function flagFor(input: BranchCutoverBegin, intentDigest: string): Record<string
     organizationId: input.organizationId, controlIncarnation: input.controlIncarnation, beginRequestId: input.beginRequestId, intentDigest }
 }
 function terminal(row: BranchCutoverJournalRow): boolean { return row.phase === 'completed' || row.phase === 'aborted' }
+const quantityText = /^(0|[1-9][0-9]{0,30})(\.[0-9]{1,12})?$/
+const exactKeys = (value: unknown, keys: string): boolean => Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+  && Object.keys(value as object).sort().join(',') === keys
+/** Registry v3 manifest (G12 design §1.4 step 3): history classification, family marks, ledger baseline. */
+function validateManifestV3(row: BranchCutoverJournalRow, value: Record<string, unknown>): void {
+  const coverage = value.coverage as Record<string, unknown>
+  requireState(exactKeys(coverage, 'historicalReplayCertified,kind,registryDigest,scalarReferences,schemaDigest')
+    && coverage.kind === 'registry-v3-capture' && coverage.scalarReferences === 32 && coverage.historicalReplayCertified === true
+    && digestPattern.test(String(coverage.registryDigest)) && digestPattern.test(String(coverage.schemaDigest)))
+  const history = value.history as Record<string, unknown>
+  requireState(exactKeys(history, 'byApplier,close,digest,leave,maxId,open') && [history.open, history.leave, history.close, history.maxId].every(n => integer(n))
+    && history.open === Number(history.leave) + Number(history.close) && /^([0-9a-f]{64})?$/.test(String(history.digest)))
+  const byApplier = history.byApplier as Record<string, unknown>
+  requireState(byApplier && typeof byApplier === 'object' && !Array.isArray(byApplier) && Object.keys(byApplier).length <= 64)
+  let leave = 0, close = 0
+  for (const [applier, counts] of Object.entries(byApplier)) {
+    requireState(/^[a-z][a-z0-9_.]{0,79}$/.test(applier) && Array.isArray(counts) && counts.length === 2 && counts.every(n => integer(n)))
+    leave += (counts as number[])[0]; close += (counts as number[])[1]
+  }
+  requireState(leave === history.leave && close === history.close)
+  const families = value.families as Record<string, unknown>
+  requireState(exactKeys(families, 'actionHistoryMax,pendingOpen,pending_actions,stock_session_operations,undo_snapshots')
+    && families.pendingOpen === 0 && integer(families.actionHistoryMax) && Number(families.actionHistoryMax) >= Number(history.maxId)
+    && ['undo_snapshots', 'stock_session_operations', 'pending_actions'].every(key => /^\d+:\d+$/.test(String(families[key]))))
+  const baseline = value.baseline as Record<string, unknown>
+  requireState(exactKeys(baseline, 'lotHash,stockHash,targetLotQuantityText,targetQuantityText')
+    && quantityText.test(String(baseline.targetQuantityText)) && quantityText.test(String(baseline.targetLotQuantityText))
+    && /^[0-9a-f]{1,32}$/.test(String(baseline.stockHash)) && /^[0-9a-f]{1,32}$/.test(String(baseline.lotHash)))
+  const intent = JSON.parse(row.intent_json)
+  requireState(intent.parentVersion === 2 && intent.registryDigest === coverage.registryDigest && intent.schemaDigest === coverage.schemaDigest)
+}
 function validateManifest(row: BranchCutoverJournalRow, text: string): Record<string, unknown> {
   const value = objectJson(text, 16384)
-  const keys = ['version', 'sourceBranchId', 'targetBranchId', 'capturedRecords', 'movingProducts', 'sourceQuantityText', 'sourceLotQuantityText', 'anomalies', 'captureDigest', ...(value.version === 2 ? ['coverage'] : [])]
+  const keys = ['version', 'sourceBranchId', 'targetBranchId', 'capturedRecords', 'movingProducts', 'sourceQuantityText', 'sourceLotQuantityText', 'anomalies', 'captureDigest',
+    ...(value.version === 2 || value.version === 3 ? ['coverage'] : []), ...(value.version === 3 ? ['history', 'families', 'baseline'] : [])]
   requireState(Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key)))
-  requireState((value.version === 1 || value.version === 2) && value.sourceBranchId === row.source_branch_id && value.targetBranchId === row.target_branch_id)
+  requireState((value.version === 1 || value.version === 2 || value.version === 3) && value.sourceBranchId === row.source_branch_id && value.targetBranchId === row.target_branch_id)
+  if (value.version === 3) validateManifestV3(row, value)
   if (value.version === 2) {
     const coverage = value.coverage as Record<string, unknown>
     requireState(coverage && Object.keys(coverage).sort().join(',') === 'historicalReplayCertified,kind,registryDigest,scalarReferences,schemaDigest,unclassifiedFamilies'
@@ -260,6 +293,33 @@ export async function sealBranchCutoverChild(db: D1Compat, proof: BranchCutoverO
   requireState(requestPattern.test(plannedChildKey))
   return commitJournalOnly(db, row, 'planned_child_json=@plannedChildJson,planned_child_key=@plannedChildKey,planned_child_digest=@plannedChildDigest',
     { plannedChildJson, plannedChildKey, plannedChildDigest: await hash(plannedChildJson) })
+}
+/** moving -> verifying once no child is planned. The parent composes the "source empty in both ledgers" guards around it. */
+export async function finishBranchCutoverMoving(db: D1Compat, proof: BranchCutoverOwnership, revision: number): Promise<BranchCutoverJournalRow> {
+  const row = await ownedRow(db, proof, revision)
+  requireState(row.phase === 'moving' && row.planned_child_json === null && row.manifest_json !== null)
+  requireState(validateManifest(row, row.manifest_json).version === 3)
+  return commitJournalOnly(db, row, "phase='verifying'", {})
+}
+/** verifying -> ready once the verification cursor says every sub-stage is done. */
+export async function markBranchCutoverReady(db: D1Compat, proof: BranchCutoverOwnership, revision: number): Promise<BranchCutoverJournalRow> {
+  const row = await ownedRow(db, proof, revision)
+  requireState(row.phase === 'verifying' && row.manifest_json !== null && validateManifest(row, row.manifest_json).version === 3)
+  requireState(objectJson(row.verification_cursor_json, 4096).stage === 'done')
+  return commitJournalOnly(db, row, "phase='ready'", {})
+}
+/**
+ * ready -> completed with self-contained terminal evidence; releases the owned
+ * maintenance flag in the same batch (after the phase change, so the 0224 flag
+ * triggers see no unfinished cutover). The finalize writes are composed around it.
+ */
+export async function completeBranchCutoverJournal(db: D1Compat, proof: BranchCutoverOwnership, revision: number, terminalJson: string): Promise<BranchCutoverJournalRow> {
+  const row = await ownedRow(db, proof, revision)
+  requireState(row.phase === 'ready' && row.manifest_json !== null && validateManifest(row, row.manifest_json).version === 3 && row.planned_child_json === null)
+  const evidence = objectJson(terminalJson, 32768)
+  requireState(evidence.version === 1 && evidence.kind === 'completed' && evidence.operationId === row.operation_id
+    && evidence.committedChildren === row.committed_children && evidence.manifestDigest === row.manifest_digest)
+  return commitJournalOnly(db, row, "phase='completed',terminal_json=@terminalJson", { terminalJson }, true)
 }
 export async function abortEffectFreeBranchCutoverJournal(db: D1Compat, proof: BranchCutoverOwnership, revision: number, reason: string): Promise<BranchCutoverJournalRow> {
   requireState(typeof reason === 'string' && reason.trim().length > 0 && encoder.encode(reason).length <= 1024)

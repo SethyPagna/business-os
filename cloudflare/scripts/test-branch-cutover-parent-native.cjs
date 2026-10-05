@@ -103,10 +103,11 @@ function installLossyCaptureCost(w) {
 const actor = { id: 7, organization_id: 1, is_active: 1 }
 const budget = { tier: 'paid', alreadyUsed: 0, remainingReads: 0, retryQueries: 0, completionQueries: 0, safetyQueries: 0, extraAtomicStatements: 0 }
 const identity = { sourceBranchId: 2, targetBranchId: 1 }
+const names = { retiredName: 'Old Shop', successorName: 'LC Store' }
 async function inspect(w) { return w.parent.inspectBranchCutover(w.db, actor, 1, identity, budget) }
 async function begin(w, requestId = 'parent_request_001') {
   const plan = await inspect(w)
-  return w.parent.beginBranchCutover(w.db, actor, 1, { ...identity, requestId, controlIncarnation: '00000000-0000-4000-8000-000000000099', expectedSourceJson: plan.sourcePreimageJson, expectedTargetJson: plan.targetPreimageJson, expectedSchemaDigest: plan.schemaDigest }, budget)
+  return w.parent.beginBranchCutover(w.db, actor, 1, { ...identity, ...names, requestId, controlIncarnation: '00000000-0000-4000-8000-000000000099', expectedSourceJson: plan.sourcePreimageJson, expectedTargetJson: plan.targetPreimageJson, expectedSchemaDigest: plan.schemaDigest }, budget)
 }
 async function step(w, row, pageSize = 8) { return w.parent.continueBranchCutover(w.db, actor, 1, { operationId: row.operation_id, expectedRevision: row.revision, pageSize }, budget) }
 async function main() {
@@ -116,7 +117,7 @@ async function main() {
     const w = world()
     w.raw.exec("INSERT INTO products(id,name,stock_quantity) VALUES(10,'Item',1); INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(10,2,1); INSERT INTO product_batches(id,variant_product_id,batch_key,received_branch_id,unit_cost_usd) VALUES(101,10,'lot101',2,3); INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(101,2,1)")
     let { row } = await begin(w)
-    const tables = [...new Set([...w.capture.BRANCH_SCALAR_REFERENCES.map(v => v[0]), 'products', ...w.capture.UNCLASSIFIED_JSON_FAMILIES])].sort().filter(t => t !== 'branch_cutovers' && !w.capture.UNCLASSIFIED_JSON_FAMILIES.includes(t))
+    const tables = w.capture.CAPTURE_STREAMS.filter(t => t !== 'history_open')
     while (w.capture.parseCaptureCursor(row.capture_cursor_json).index !== tables.indexOf('product_batches')) row = (await step(w, row)).row
     w.raw.prepare('UPDATE product_batches SET unit_cost_usd=? WHERE id=101').run(3.5702545241480925e141)
     const before = w.raw.prepare('SELECT * FROM branch_cutovers').get(), batches = w.stats.batches
@@ -169,7 +170,8 @@ async function main() {
     const w = world(); let { row } = await begin(w); let turns = 0
     while (row.phase !== 'verifying' && turns++ < 150) row = (await step(w, row, 2)).row
     assert.equal(row.phase, 'verifying'); assert.equal(row.next_sequence, 0); assert.equal(row.verification_records, 0); assert.equal(w.raw.prepare('SELECT count(*) n FROM transfer_operation_receipts').get().n, 0)
-    assert.equal(JSON.parse(row.manifest_json).version, 2); assert.equal(JSON.parse(row.manifest_json).coverage.kind, 'scalar-reference-capture'); w.raw.close()
+    assert.equal(JSON.parse(row.manifest_json).version, 3); assert.equal(JSON.parse(row.manifest_json).coverage.kind, 'registry-v3-capture')
+    assert.equal(JSON.parse(row.manifest_json).coverage.historicalReplayCertified, true); w.raw.close()
   })
   await check('unclassified new scalar schema and unsupported stock refuse before admission', async () => {
     for (const mutation of ["CREATE TABLE future_reference(id INTEGER PRIMARY KEY,branch_id INTEGER)",
@@ -197,13 +199,17 @@ async function main() {
     await assert.rejects(w.parent.inspectBranchCutover(w.db, actor, 1, identity, { ...budget, alreadyUsed: 999 }), /budget/)
     assert.equal(w.stats.batches, batches); w.raw.close()
   })
-  await check('v2 manifest rejects invented coverage and malformed families before write', async () => {
+  await check('v3 manifest rejects invented coverage, history, families and baseline before write', async () => {
     const w = world(); let { row } = await begin(w)
     while (row.phase === 'capturing') row = (await step(w, row)).row
     const ownership = { operationId: row.operation_id, actorId: 7, organizationId: '1', controlIncarnation: row.control_incarnation, token: row.maintenance_token }
     const manifest = JSON.parse(row.manifest_json)
-    for (const patch of [{ historicalReplayCertified: true }, { schemaDigest: '0'.repeat(64) }, { extra: 1 }, { unclassifiedFamilies: [{ family: 'invented', rows: 1, support: 'unclassified' }] }]) {
-      const text = JSON.stringify({ ...manifest, coverage: { ...manifest.coverage, ...patch } })
+    const variants = [{ coverage: { ...manifest.coverage, historicalReplayCertified: false } }, { coverage: { ...manifest.coverage, schemaDigest: '0'.repeat(64) } },
+      { coverage: { ...manifest.coverage, extra: 1 } }, { history: { ...manifest.history, close: manifest.history.close + 1 } },
+      { history: { ...manifest.history, byApplier: { 'sale.add_items': [0, 1] } } }, { families: { ...manifest.families, pendingOpen: 1 } },
+      { families: { ...manifest.families, actionHistoryMax: -1 } }, { baseline: { ...manifest.baseline, stockHash: 'xyz' } }, { baseline: { ...manifest.baseline, extra: 1 } }, { version: 2 }]
+    for (const patch of variants) {
+      const text = JSON.stringify({ ...manifest, ...patch })
       const db = new Proxy(w.db, { get(target, key, receiver) {
         if (key === 'prepare') return sql => ({ get: async params => {
           const value = await target.prepare(sql).get(params)
@@ -216,7 +222,7 @@ async function main() {
     w.raw.close()
   })
   await check('one actual READ retry and lost acknowledgement fit explicit budget; one-less budget stops before batch', async () => {
-    const w = world(); const p = await inspect(w); const input = { ...identity, requestId: 'budget_request_001', controlIncarnation: '00000000-0000-4000-8000-000000000099',
+    const w = world(); const p = await inspect(w); const input = { ...identity, ...names, requestId: 'budget_request_001', controlIncarnation: '00000000-0000-4000-8000-000000000099',
       expectedSourceJson: p.sourcePreimageJson, expectedTargetJson: p.targetPreimageJson, expectedSchemaDigest: p.schemaDigest }
     const beforeReads = w.stats.reads; w.stats.retryReads = true; w.stats.after = () => { throw Error('lost acknowledgement') }
     const result = await w.parent.beginBranchCutover(w.db, actor, 1, input, { ...budget, alreadyUsed: 965 })
@@ -230,5 +236,5 @@ async function main() {
   assert.ok(checks > 0, 'test filter must select a group')
   console.log(`${checks} branch cutover parent native groups passed`)
 }
-module.exports = { world, actor, budget, identity, inspect, begin, step, installLossyCaptureCost }
+module.exports = { world, actor, budget, identity, names, inspect, begin, step, installLossyCaptureCost }
 if (require.main === module) main().catch(e => { console.error(e); process.exitCode = 1 })
