@@ -1297,7 +1297,7 @@ export default function Settings() {
           <label className="flex items-center justify-between rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 dark:border-gray-700 dark:bg-gray-800/70">
             <div className="pr-3">
               <div className="text-sm font-medium text-gray-800 dark:text-gray-100">{t('pos_show_item_discount') || 'Show Discount in Cart'}</div>
-              <div className="text-xs text-gray-500 dark:text-gray-400">{t('pos_show_item_discount_desc') || 'Show the original price and savings for each item in the cart when a special price or discount applies. The price can still be changed in the cart either way.'}</div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">{t('pos_show_item_discount_desc') || 'Show the original price and savings for each item in the cart when a wholesale price or discount applies. The price can still be changed in the cart either way.'}</div>
             </div>
             <input
               type="checkbox"
