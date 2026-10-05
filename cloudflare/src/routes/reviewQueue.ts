@@ -51,6 +51,14 @@ import type { BranchIdentitySnapshot } from '../lib/canonicalBranchIdentity'
 // routes/returns.ts's restock not being atomic with its return-items
 // insert) rather than a new, worse gap introduced here.
 
+// Coded refusals (EN text is the direct-API fallback; the Review page maps the
+// codes to the translated sentences review_self_approval / review_section_full_required).
+const REVIEW_SELF_APPROVAL_CODE = 'review_self_approval'
+const REVIEW_SELF_APPROVAL_MESSAGE = 'You cannot approve your own request. Another reviewer must approve it.'
+const REVIEW_SECTION_FULL_CODE = 'review_section_full_required'
+const reviewSectionFullMessage = (section: string): string =>
+  `Approving this request needs Full access to ${section}. Ask a reviewer who has it.`
+
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 app.use('*', requireAuth)
 app.use('*', acquisitionCostResponses)
@@ -198,6 +206,18 @@ app.post('/:id/approve', async (c) => {
 
   const row = await getPendingAction(c.env, id)
   if (!row) return c.json({ error: 'Not found' }, 404)
+  // N12: the queue exists so a second person checks a write. Nobody approves
+  // their own request, whatever their grants (a reviewer who also holds a
+  // Review Required tier elsewhere could otherwise queue and approve the same
+  // change), and an approval replays a write in the row's section with the
+  // reviewer's authority, so the reviewer needs Full access to that section.
+  // Reject is deliberately not blocked: a requester withdrawing their own request is harmless.
+  if (row.requested_by != null && Number(row.requested_by) === Number(user.id)) {
+    return c.json({ error: REVIEW_SELF_APPROVAL_MESSAGE, code: REVIEW_SELF_APPROVAL_CODE }, 403)
+  }
+  if (getPermissionTier(user, row.section) !== 'full') {
+    return c.json({ error: reviewSectionFullMessage(row.section), code: REVIEW_SECTION_FULL_CODE, section: row.section }, 403)
+  }
   const productRemoveApproval = productRemovePendingPointer(row) != null
   if (productRemoveApproval && getActionTier(user, 'products', 'delete') !== 'full') {
     return c.json({ error: 'Full product removal permission is required to approve this request.' }, 403)

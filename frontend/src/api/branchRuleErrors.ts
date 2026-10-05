@@ -159,3 +159,22 @@ export function localizeBranchReviewError(row: BranchReviewIdentity, error: unkn
   }
   return localizeBranchRefusalError(error, t)
 }
+
+/**
+ * N12: POST /review/:id/approve refuses a requester approving their own request
+ * (`review_self_approval`) and a reviewer without Full access to the request's
+ * section (`review_section_full_required`). Returns the translated sentence for
+ * either code, or null for any other error so the caller falls through to its
+ * normal localisation.
+ */
+export function reviewApprovalRefusalText(code: unknown, section: unknown, t: (key: string) => string | undefined): string | null {
+  if (code === 'review_self_approval') {
+    return t('review_self_approval') || 'You cannot approve your own request. Another reviewer must approve it.'
+  }
+  if (code === 'review_section_full_required') {
+    const name = String(section ?? '')
+    return (t('review_section_full_required') || 'Approving this request needs Full access to {section}. Ask a reviewer who has it.')
+      .replace('{section}', t(name) || name)
+  }
+  return null
+}

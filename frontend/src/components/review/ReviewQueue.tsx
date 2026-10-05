@@ -12,7 +12,7 @@ import {
   withLoaderTimeout,
 } from '../../utils/loaders.ts'
 import { beginKeyedAction, finishKeyedAction } from '../../utils/actionGuards.ts'
-import { isBranchReviewUpdate, localizeBranchReviewError } from '../../api/branchRuleErrors.ts'
+import { isBranchReviewUpdate, localizeBranchReviewError, reviewApprovalRefusalText } from '../../api/branchRuleErrors.ts'
 import { cacheInvalidate } from '../../api/http.ts'
 import { captureActorReadScope, isActorReadScopeCurrent } from '../../api/actorReadScope.ts'
 import { isConfirmedProductCreateApproval, isProductCreateReviewState } from '../../utils/productCreateOutcome.ts'
@@ -49,6 +49,7 @@ interface ReviewAppContextValue {
   t: TranslateFn
   notify: NotifyFn
   getPermissionTier: (key: string) => string
+  user?: { id?: number | string | null } | null
 }
 
 interface ReviewSyncContextValue {
@@ -91,7 +92,7 @@ function statusBadgeClass(status: PendingActionStatus): string {
 }
 
 export default function ReviewQueue() {
-  const { t, notify, getPermissionTier } = useApp()
+  const { t, notify, getPermissionTier, user } = useApp()
   // Part 557 slice 5: 'review' is a view-tier section. A View-only grant reads
   // the pending queue but Approve/Reject are hidden here and refused by the
   // backend (both re-check strict hasPermission('review')). Full only.
@@ -158,6 +159,17 @@ export default function ReviewQueue() {
     productReviewEpochRef.current++
   }, [])
 
+  // N12: the server (POST /review/:id/approve) refuses self-approval and a reviewer
+  // without Full access to the request's section, with these codes. Mirrored here so the
+  // Approve button is not offered where the answer is known, and so a refusal that does
+  // arrive is explained in the user's language instead of surfacing as a bare 403.
+  const refusalText = (code: unknown, section: string): string | null => reviewApprovalRefusalText(code, section, (key) => tr(key, ''))
+  const approveRefusalCode = (row: PendingActionRow): string | null => {
+    if (row.requested_by != null && user?.id != null && Number(row.requested_by) === Number(user.id)) return 'review_self_approval'
+    if (getPermissionTier(row.section) !== 'full') return 'review_section_full_required'
+    return null
+  }
+
   const sectionOptions = useMemo(() => {
     const set = new Set<string>()
     rows.forEach((row) => { if (row.section) set.add(row.section) })
@@ -189,7 +201,8 @@ export default function ReviewQueue() {
         if (isProductCreateReviewState(pendingId, response?.data, 'approved')) await publish('approved')
         else if (isProductCreateReviewState(pendingId, response?.data, 'rejected')) await publish('rejected')
         else {
-          notify((failure as { code?: string } | undefined)?.code === 'receiving_branch_inactive'
+          const refusal = reviewApprovalRefusalText((failure as { code?: string } | undefined)?.code, row.section, (key) => tr(key, ''))
+          notify(refusal ? refusal : (failure as { code?: string } | undefined)?.code === 'receiving_branch_inactive'
             ? tr('receiving_branch_inactive', 'This branch is inactive. Choose an active branch for new stock. Previously submitted lines keep their original branch.')
             : unconfirmed(), 'error')
           await load(true)
@@ -240,7 +253,7 @@ export default function ReviewQueue() {
       notify(tr('pending_action_approved', 'Approved -- the change has been applied'), 'success')
       await load(true)
     } catch (error) {
-      notify(localizeBranchReviewError(row, error, (key) => tr(key, '')), 'error')
+      notify(reviewApprovalRefusalText((error as { code?: unknown } | null)?.code, row.section, (key) => tr(key, '')) ?? localizeBranchReviewError(row, error, (key) => tr(key, '')), 'error')
     } finally {
       finishKeyedAction(actionRef, row.id)
       setBusyId(null)
@@ -324,6 +337,7 @@ export default function ReviewQueue() {
           {rows.map((row) => {
             const expanded = expandedId === row.id
             const isBusy = busyId === row.id
+            const approveRefusal = row.status === 'open' ? approveRefusalCode(row) : null
             return (
               <div key={row.id} className="rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
                 <div className="flex flex-wrap items-start justify-between gap-2 p-3">
@@ -364,6 +378,9 @@ export default function ReviewQueue() {
                   </div>
                   {row.status === 'open' && canReview ? (
                     <div className="flex shrink-0 items-center gap-1">
+                      {approveRefusal ? (
+                        <span className="max-w-[16rem] text-xs text-slate-400">{refusalText(approveRefusal, row.section)}</span>
+                      ) : (
                       <button
                         type="button"
                         onClick={() => handleApprove(row)}
@@ -375,6 +392,7 @@ export default function ReviewQueue() {
                         <CheckCircle2 className="h-3.5 w-3.5" />
                         {tr('approve', 'Approve')}
                       </button>
+                      )}
                       <button
                         type="button"
                         onClick={() => handleReject(row)}

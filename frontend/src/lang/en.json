@@ -3732,6 +3732,8 @@
   "server_reviewed_sales_count": "Reviewed sales in this account",
   "server_clear_reviewed_sales": "Clear reviewed sales",
   "pending_action_approved": "Approved -- the change has been applied",
+  "review_self_approval": "You cannot approve your own request. Another reviewer must approve it.",
+  "review_section_full_required": "Approving this request needs Full access to {section}. Ask a reviewer who has it.",
   "pending_action_rejected": "Rejected",
   "pending_devices": "Pending devices",
   "perPage": "per page",
