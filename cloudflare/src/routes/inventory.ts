@@ -577,7 +577,7 @@ async function searchProductsPayload(env: Env, query: Record<string, string>) {
            p.out_of_stock_threshold, p.image_path, p.is_active, p.supplier, p.parent_id,
            p.is_group, p.expiry_date, p.expiry_alert_days, p.created_at, p.updated_at,
            COALESCE((
-             SELECT json_group_array(json_object('branch_id', bs2.branch_id, 'branch_name', b2.name, 'quantity', bs2.quantity))
+             SELECT json_group_array(json_object('branch_id', bs2.branch_id, 'branch_name', b2.name, 'quantity', bs2.quantity, 'branch_role', b2.role, 'branch_active', b2.is_active))
              FROM branch_stock bs2
              JOIN branches b2 ON b2.id = bs2.branch_id
              WHERE bs2.product_id = p.id
@@ -769,7 +769,7 @@ app.get('/summary', async (c) => {
       -- join right below, which already aggregates before joining).
       LEFT JOIN (
         SELECT bs2.product_id,
-               json_group_array(json_object('branch_id', bs2.branch_id, 'branch_name', b2.name, 'quantity', bs2.quantity)) AS branch_stock_json
+               json_group_array(json_object('branch_id', bs2.branch_id, 'branch_name', b2.name, 'quantity', bs2.quantity, 'branch_role', b2.role, 'branch_active', b2.is_active)) AS branch_stock_json
         FROM branch_stock bs2
         JOIN branches b2 ON b2.id = bs2.branch_id
         GROUP BY bs2.product_id
@@ -821,7 +821,7 @@ app.get('/summary', async (c) => {
     -- branchId-scoped path above for why.
     LEFT JOIN (
       SELECT bs2.product_id,
-             json_group_array(json_object('branch_id', bs2.branch_id, 'branch_name', b2.name, 'quantity', bs2.quantity)) AS branch_stock_json
+             json_group_array(json_object('branch_id', bs2.branch_id, 'branch_name', b2.name, 'quantity', bs2.quantity, 'branch_role', b2.role, 'branch_active', b2.is_active)) AS branch_stock_json
       FROM branch_stock bs2
       JOIN branches b2 ON b2.id = bs2.branch_id
       GROUP BY bs2.product_id
