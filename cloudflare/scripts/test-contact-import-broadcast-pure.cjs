@@ -13,6 +13,17 @@
 //    BroadcastChannel union) and nothing ever broadcasts one, so that
 //    effect was dead code.
 //
+// G39 item 7 (5e35a39c3) then changed HOW the Dashboard's second effect hears
+// about a finished import, without bringing the dead gate back: it no longer
+// re-reads import jobs on every products/inventory/sales/customers/... event
+// (that cost one read per sale at a till). It now listens for the Worker's
+// { action: 'import' } push (the broadcast guarded in 1) -- through the same
+// subscription as the first effect -- and, as a catch-up for a push missed
+// during a socket gap, for the CLIENT-dispatched 'dashboard' resume event
+// whose reason is FOREGROUND_RESUME_GAP_REASON. That gate is live, not dead:
+// syncRuntime.ts dispatches 'dashboard' on every resume and web-api.ts tags it
+// with that reason. The checks below pin all of this.
+//
 // This is a static source check, not a live D1/queue harness -- fast and
 // deterministic, and enough to catch a regression where either of these
 // two fixes gets silently reverted or drifts out of sync with the other.
@@ -57,23 +68,45 @@ check(
 const dashboardPath = path.join(__dirname, '..', '..', 'frontend', 'src', 'components', 'dashboard', 'Dashboard.tsx')
 const dashboardSrc = fs.readFileSync(dashboardPath, 'utf8')
 
+const stripLineComments = (src) => src.replace(/\/\/.*$/gm, '')
+const dashboardCode = stripLineComments(dashboardSrc)
+const syncRuntimeSrc = fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 'src', 'api', 'syncRuntime.ts'), 'utf8')
+const webApiSrc = fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 'src', 'web-api.ts'), 'utf8')
+const importJobRefreshSrc = fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 'src', 'utils', 'importJobRefresh.ts'), 'utf8')
+
+// The gate on the 'dashboard' channel must be one that something really sends.
+// Bare `channel !== 'dashboard'` (the old dead gate) is only acceptable when it
+// is paired with the resume-gap reason, and that pair must be dispatched.
+const dashboardGate = dashboardCode.match(/syncChannel\?\.channel !== 'dashboard' \|\| syncChannel\.reason !== FOREGROUND_RESUME_GAP_REASON\) return\s*\n\s*let cancelled = false/)
+const resumeChannels = (syncRuntimeSrc.match(/FOREGROUND_RESUME_SYNC_UPDATE_CHANNELS = \[([\s\S]*?)\] as const/) || [])[1] || ''
 check(
-  "Dashboard.tsx no longer gates its refresh effect on the non-existent 'dashboard' channel",
-  // Only fail on a live comparison against 'dashboard', not on the
-  // explanatory code comment above it that documents the old bug in
-  // prose (that comment itself contains this exact substring).
-  !/^(?!\s*\/\/).*channel\s*!==\s*'dashboard'/m.test(
-    dashboardSrc.replace(/\/\/.*$/gm, '')
-  ),
+  "Dashboard.tsx gates its resume catch-up refresh on 'dashboard' only together with the resume-gap reason",
+  !!dashboardGate
+  && (dashboardCode.match(/channel\s*!==\s*'dashboard'/g) || []).length === 1,
 )
 check(
-  'Dashboard.tsx listens for the real import-related channels instead',
-  /IMPORT_RELATED_SYNC_CHANNELS\s*=\s*new Set\(\[('products'|"products"),/.test(dashboardSrc)
-  && /'customers'/.test(dashboardSrc) && /'suppliers'/.test(dashboardSrc) && /'deliveryContacts'/.test(dashboardSrc),
+  "that 'dashboard' + resume-gap gate is reachable: the resume dispatch includes 'dashboard' and web-api tags it with the gap reason",
+  /'dashboard'/.test(resumeChannels)
+  && /dispatchSyncUpdates\(\s*FOREGROUND_RESUME_SYNC_UPDATE_CHANNELS,\s*socketStayedOpen \? FOREGROUND_RESUME_REASON : FOREGROUND_RESUME_GAP_REASON/.test(webApiSrc),
+)
+check(
+  "Dashboard.tsx hears a finished import through the Worker's { action: 'import' } push, for every import type",
+  /const stopPush = onImportJobPush\(onActivity\)/.test(dashboardCode)
+  && /payload\.action === 'import'/.test(importJobRefreshSrc),
+)
+check(
+  'Dashboard.tsx no longer re-reads import jobs on every products/inventory/sales/contacts sync event (one read per sale at a till)',
+  !/IMPORT_RELATED_SYNC_CHANNELS/.test(dashboardCode)
+  // Exactly two readers remain: the mount/push/activity effect and the
+  // resume-gap catch-up. A third, gated on any other channel, would be the
+  // old per-sale read coming back under a different name.
+  && (dashboardCode.match(/listImportJobs\(/g) || []).length === 2,
 )
 check(
   'Dashboard.tsx guards the sync-triggered refresh against a stale response landing after a newer one',
-  /IMPORT_RELATED_SYNC_CHANNELS\.has\(syncChannel\.channel\)\) return\s*\n\s*let cancelled = false/.test(dashboardSrc),
+  !!dashboardGate
+  && /syncChannel\.reason !== FOREGROUND_RESUME_GAP_REASON\) return\s*\n\s*let cancelled = false\s*\n\s*listImportJobs\([^)]*\)\s*\n\s*\.then\(\(result\) => \{\s*\n\s*if \(cancelled\) return/.test(dashboardCode)
+  && /return \(\) => \{ cancelled = true \}/.test(dashboardCode),
 )
 
 const broadcastHubPath = path.join(__dirname, '..', 'src', 'durable-objects', 'broadcastHub.ts')
