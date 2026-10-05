@@ -437,19 +437,17 @@ async function promotionsRoute() {
   let response = await put(base)
   assert.equal(response.status, 200, await response.text())
   let rows = auditRowsFor(db, 'promotion_rule')
-  check('promotions PUT CONTROL: resaving the same rule records no before/after', () => {
-    assert.equal(rows.length, 1)
-    assert.equal(rows[0].old_value, null)
-    assert.deepEqual(renderer.buildAuditFieldDiff(rows[0].old_value, rows[0].new_value), [])
+  check('promotions PUT CONTROL: resaving the same rule writes no audit row at all (it used to write one with an empty diff)', () => {
+    assert.equal(rows.length, 0)
   })
 
   response = await put(Object.assign({}, base, { title: 'Buy 3 save $2', save_usd: 2, is_active: 0 }))
   assert.equal(response.status, 200, await response.text())
   rows = auditRowsFor(db, 'promotion_rule')
   check('promotions PUT: the row names the rule fields that moved', () => {
-    assert.equal(rows.length, 2)
-    const before = JSON.parse(rows[1].old_value)
-    const after = JSON.parse(rows[1].new_value)
+    assert.equal(rows.length, 1)
+    const before = JSON.parse(rows[0].old_value)
+    const after = JSON.parse(rows[0].new_value)
     assert.deepEqual(Object.keys(before).sort(), ['is_active', 'save_usd', 'title'])
     assert.deepEqual([before.title, after.title], ['Buy 3 save $1', 'Buy 3 save $2'])
     assert.deepEqual([before.save_usd, after.save_usd], [1, 2])
