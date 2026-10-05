@@ -135,6 +135,7 @@ import {
   returnedLotsByItem,
   type CancelReason,
   type SaleItemAllocation,
+  addImportedReturnedQuantities,
 } from '../lib/saleTransitions'
 import { buildLikeAliasClause, tokenizeSearchTermGroups, normalizeSearchText } from '../lib/searchMatch'
 import { computeSaleTotals, round2, newSaleMoney4, assertCanonicalSaleChildren } from '../lib/saleTotals'
@@ -2209,7 +2210,7 @@ app.patch('/:id/status', async (c) => {
     cancelFeeNote = String(body.cancel_fee_note || '').trim() || null
   }
 
-  const items = await db.prepare('SELECT id, product_id, product_name, quantity, cost_price_usd, cost_price_khr, branch_id, batch_id, damaged_lot_id FROM sale_items WHERE sale_id = ?').all<SaleItemRow & { damaged_lot_id: number | null }>([id])
+  const items = await db.prepare('SELECT id, product_id, product_name, quantity, cost_price_usd, cost_price_khr, branch_id, batch_id, damaged_lot_id, returned_quantity FROM sale_items WHERE sale_id = ?').all<SaleItemRow & { damaged_lot_id: number | null; returned_quantity: number | null }>([id])
 
   // How much of each line already came back through real returns
   // (non-cancelled, customer scope; return_to_stock does NOT matter here:
@@ -2233,6 +2234,9 @@ app.patch('/:id/status', async (c) => {
     if (row.sale_item_id) itemLevelReturned.set(Number(row.sale_item_id), (itemLevelReturned.get(Number(row.sale_item_id)) || 0) + qty)
     else if (row.product_id) productLevelReturned.set(Number(row.product_id), (productLevelReturned.get(Number(row.product_id)) || 0) + qty)
   }
+  // RET-B F4: units an imported return-status row brought back (restocked at
+  // import, no return_items row) are no longer out with the sale either.
+  addImportedReturnedQuantities(itemLevelReturned, items)
   const returnedByItem = allocateReturnedQuantities(items, itemLevelReturned, productLevelReturned)
 
   const movementReason = saleStatus === 'cancelled'

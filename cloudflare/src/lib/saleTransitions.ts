@@ -180,6 +180,65 @@ export function allocationReturnedShares(allocations: SaleItemAllocation[], retu
   return shares
 }
 
+// RET-B F4 / LH-2b (5 Oct 2026): returns that arrived WITH an imported sale.
+//
+// A sales-import row in a return status (partial_return / returned) carries
+// the CSV's returned quantity on sale_items.returned_quantity (migration
+// 0059), and lib/salesImportCommit.ts restocks exactly that quantity when it
+// commits -- but it writes no returns / return_items rows. No other writer
+// sets the column: the returns flow records its own rows instead. So every
+// "how much of this line already came back" read must add the column to the
+// return_items it sums, or the units count as still out with the sale:
+//
+//   held()            cancel would restock them again, un-cancel take them
+//                     again (routes/sales.ts PATCH /:id/status and
+//                     lib/saleBulkStatus.ts);
+//   return capacity   a new return could restock them a second time
+//                     (routes/returns.ts, lib/customerReturnEntitlement.ts --
+//                     lane RET-A wires those through importedReturnLines()).
+//
+// Every imported sale is also stock_skipped (salesImportCommit.ts, migration
+// 0235), so its transitions move nothing; held() still counts the column so
+// the arithmetic is right for an import the backfill cannot link to its job.
+
+export type ImportedReturnLine = { id: number; product_id?: number | null; returned_quantity?: unknown }
+
+export function importedReturnedQuantity(line: { returned_quantity?: unknown } | null | undefined): number {
+  const value = Number(line?.returned_quantity)
+  return Number.isFinite(value) && value > 0 ? value : 0
+}
+
+// Adds each line's imported returned quantity to the item-level map that
+// allocateReturnedQuantities() reads. Mutates and returns the map.
+export function addImportedReturnedQuantities(
+  itemLevelReturned: Map<number, number>,
+  lines: ImportedReturnLine[],
+): Map<number, number> {
+  for (const line of lines) {
+    const quantity = importedReturnedQuantity(line)
+    if (!quantity) continue
+    const id = Number(line.id)
+    itemLevelReturned.set(id, (itemLevelReturned.get(id) || 0) + quantity)
+  }
+  return itemLevelReturned
+}
+
+// The same quantities in the committed-return-line shape that
+// assertReturnCreateCapacity() (lib/returnCreateAction.ts) consumes, so a
+// capacity check counts them exactly like a recorded return of that line.
+export function importedReturnLines(lines: ImportedReturnLine[]): Array<{ sale_item_id: number; product_id: number | null; quantity: number }> {
+  return lines.flatMap((line) => {
+    const quantity = importedReturnedQuantity(line)
+    return quantity ? [{ sale_item_id: Number(line.id), product_id: line.product_id == null ? null : Number(line.product_id), quantity }] : []
+  })
+}
+
+// SQL twin for in-batch capacity guards: add to a SUM over return_items for
+// the sale line aliased `alias`.
+export function importedReturnedQuantitySql(alias: string): string {
+  return `MAX(COALESCE(${alias}.returned_quantity, 0), 0)`
+}
+
 export type TransitionGuardResult = { ok: true } | { ok: false; error: string }
 
 // Which old->new pairs this route may perform at all. partial_return and

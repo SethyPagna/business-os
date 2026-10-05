@@ -3,7 +3,7 @@ import { normalizeClientReceiptNumber, uniqueBusinessDateTimeNumber } from './re
 import { RETURN_STATUSES } from './salesStatus'
 import { branchCanSell } from './branchRoles'
 import { WAREHOUSE_NOT_SELLABLE_ERROR } from './branchRoleGuards'
-import type { ActorLike } from './actorSnapshot'
+import { actorSnapshot, type ActorLike } from './actorSnapshot'
 import { buildSaleCreationSnapshot } from './saleCreationSnapshot'
 import { isAnonymousCustomer } from './anonymousCustomer'
 
@@ -354,7 +354,8 @@ export async function applyHistoricalSaleImport(
             delivery_contact_address, delivery_fee_usd, delivery_fee_khr, delivery_fee_paid_by,
             delivery_actual_cost_usd, delivery_actual_cost_khr,
             loyalty_accrual, sale_status, items, created_at, client_request_id,
-            legacy_receipt_number, creation_snapshot_json
+            legacy_receipt_number, creation_snapshot_json,
+            stock_skipped, stock_skipped_at, stock_skipped_by_name
           )
           SELECT
             @receipt_number, @cashier_id, @cashier_name, @branch_id, @branch_name,
@@ -367,8 +368,16 @@ export async function applyHistoricalSaleImport(
             @delivery_contact_address, @delivery_fee_usd, @delivery_fee_khr, @delivery_fee_paid_by,
             @delivery_actual_cost_usd, @delivery_actual_cost_khr,
             @loyalty_accrual, @sale_status, @items_json, @created_at, @client_request_id,
-            @legacy_receipt_number, @creation_snapshot_json
+            @legacy_receipt_number, @creation_snapshot_json,
+            1, @stock_skipped_at, @stock_skipped_by_name
           WHERE ${writeGuard}`,
+    // RET-B F4 / LH-2 (5 Oct 2026): an imported sale never took units off the
+    // shelf (the real-world sale did, long before the file existed, and the
+    // stock count already reflects it -- see importEngine.ts). It is born
+    // outside the stock ledger with S4-2's sticky stock_skipped flag, so a
+    // later cancel, un-cancel or amendment moves zero instead of handing
+    // back units that were never deducted. The return-status restock below
+    // is a separate, real event (goods came back) and is unaffected.
     // Imported sales default to NOT earning loyalty points -- the balance is
     // computed by summing sales, so migrated old-system receipts would
     // otherwise inflate every matched customer's balance (migration 0061).
@@ -392,6 +401,8 @@ export async function applyHistoricalSaleImport(
       items_json: JSON.stringify(normalizedItems),
       created_at: createdAt,
       creation_snapshot_json: creationSnapshotJson,
+      stock_skipped_at: input.nowIso,
+      stock_skipped_by_name: actorSnapshot(input.actor),
     },
   }]
   const saleInsertParams = statements[1].params

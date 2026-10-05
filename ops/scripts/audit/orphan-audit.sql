@@ -67,6 +67,7 @@ SELECT 'import_auto_merges.product_id->products' AS relation, COUNT(*) AS orphan
 SELECT 'import_job_errors.batch_id->product_batches' AS relation, COUNT(*) AS orphan_count FROM import_job_errors c LEFT JOIN product_batches p ON p.id = c.batch_id WHERE c.batch_id IS NOT NULL AND p.id IS NULL;
 SELECT 'import_job_files.file_asset_id->file_assets' AS relation, COUNT(*) AS orphan_count FROM import_job_files c LEFT JOIN file_assets p ON p.id = c.file_asset_id WHERE c.file_asset_id IS NOT NULL AND p.id IS NULL;
 SELECT 'import_jobs.created_by_id->users' AS relation, COUNT(*) AS orphan_count FROM import_jobs c LEFT JOIN users p ON p.id = c.created_by_id WHERE c.created_by_id IS NOT NULL AND p.id IS NULL;
+SELECT 'imported_sale_stock_skip_0235.sale_id->sales' AS relation, COUNT(*) AS orphan_count FROM imported_sale_stock_skip_0235 c LEFT JOIN sales p ON p.id = c.sale_id WHERE c.sale_id IS NOT NULL AND p.id IS NULL;
 SELECT 'inventory_movements.batch_id->product_batches' AS relation, COUNT(*) AS orphan_count FROM inventory_movements c LEFT JOIN product_batches p ON p.id = c.batch_id WHERE c.batch_id IS NOT NULL AND p.id IS NULL;
 SELECT 'inventory_movements.branch_id->branches' AS relation, COUNT(*) AS orphan_count FROM inventory_movements c LEFT JOIN branches p ON p.id = c.branch_id WHERE c.branch_id IS NOT NULL AND p.id IS NULL;
 SELECT 'inventory_movements.product_id->products' AS relation, COUNT(*) AS orphan_count FROM inventory_movements c LEFT JOIN products p ON p.id = c.product_id WHERE c.product_id IS NOT NULL AND p.id IS NULL;

@@ -24,6 +24,8 @@
 //   customer_return_refund_exceeds_paid 409  POST /: cash beyond what a Not Paid sale's customer paid (F1)
 //   customer_return_owed_unreadable  409  POST /, PATCH /:id: the sale's payment cannot be read (F1)
 //   return_restore_owed_changed      409  POST /bulk: the debt a return lowered was paid since (F1)
+//   return_stock_skipped_sale        409  POST /api/returns/bulk cancelling or restoring a return
+//                                         on a sale recorded without stock changes (RET-B E1)
 export const RETURN_REFUSAL_ERRORS: Readonly<Record<string, string>> = {
   'return_edit_cancelled': 'This return is cancelled. Restore it before editing.',
   'return_restore_over_capacity': 'Cannot restore: more units would count as returned than the sale sold. Nothing was changed.',
@@ -39,6 +41,7 @@ export const RETURN_REFUSAL_ERRORS: Readonly<Record<string, string>> = {
   'customer_return_refund_exceeds_paid': 'This return would refund more cash than the customer paid on this Not Paid sale. Review the return.',
   'customer_return_owed_unreadable': "This sale's payment cannot be read, so the refund cannot be split. Review the sale first.",
   'return_restore_owed_changed': 'This return lowered what the customer owed, and the sale has been paid since. Record a new return instead of restoring it.',
+  'return_stock_skipped_sale': 'This sale never took stock off the shelf (e.g. an import), so nothing was changed.',
 }
 
 // A refusal whose sentence names values the Worker sends as `params`

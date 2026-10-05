@@ -404,6 +404,120 @@ const mixedAdditiveUnread = (text, repairText) => {
   return columns.size > 0 && indexes > 0 && guards > 0
 }
 
+// ---- RET-B 0235 rule (begin) ------------------------------------------------
+// Self-contained; the LA cutover lane adds its own rule elsewhere in this file.
+//
+// Tables the repair itself writes, read from its executed SQL.
+const repairWrites = (repairText) => [...new Set([...sqlCode(repairText).matchAll(/\b(?:UPDATE|INSERT\s+(?:OR\s+\w+\s+)?INTO)\s+(\w+)/gi)]
+  .map((match) => match[1].toLowerCase()))]
+
+// The only (table, column) pairs a mark-only file may set: explicit, non-key,
+// and never named by the repair (checked again below). Nothing else -- in
+// particular no rowid alias (rowid, oid, _rowid_) and no id/key column, whose
+// change would break the repair's JOIN sales s ON s.id = si.sale_id
+// (RET-B-VERIFY B2).
+const FLAG_ONLY_COLUMNS = Object.freeze({ sales: Object.freeze(['stock_skipped', 'stock_skipped_at', 'stock_skipped_by_name']) })
+const ROWID_OR_KEY = /^(rowid|oid|_rowid_|id|.*_id)$/i
+
+// Top-level comma split of a SET clause (parentheses and quoted literals kept whole).
+const setAssignments = (clause) => {
+  const parts = []
+  let depth = 0, quote = '', current = ''
+  for (const ch of clause) {
+    if (quote) { current += ch; if (ch === quote) quote = ''; continue }
+    if (ch === "'" || ch === '"') { quote = ch; current += ch; continue }
+    if (ch === '(') depth++
+    if (ch === ')') depth--
+    if (ch === ',' && depth === 0) { parts.push(current.trim()); current = ''; continue }
+    current += ch
+  }
+  parts.push(current.trim())
+  return parts
+}
+
+// A file that only MARKS rows (0235 stock_skipped backfill): its own work and
+// guard tables (names the repair never uses), plus UPDATEs of an existing
+// table that set only allowlisted columns, and not one mention of a table the
+// repair writes. Its writes cannot change anything the repair reads, and the
+// repair's writes cannot change anything it reads, so the two orders agree;
+// assertPopulatedOrders then proves it on seeded imported sales.
+// Statement split on ';' outside quoted literals (0235 compares keys against 'sales-import;').
+const splitStatements = (code) => {
+  const out = []
+  let quote = '', current = ''
+  for (const ch of code) {
+    if (quote) { current += ch; if (ch === quote) quote = ''; continue }
+    if (ch === "'" || ch === '"') { quote = ch; current += ch; continue }
+    if (ch === ';') { out.push(current); current = ''; continue }
+    current += ch
+  }
+  out.push(current)
+  return out
+}
+
+// B2b (RET-B-VERIFY round 2): CREATE TABLE IF NOT EXISTS on a table that
+// already exists is a no-op, and the INSERT after it fires that table's
+// triggers (legacy_inventory_effects -> products, branch_stock, lots,
+// inventory_movements). So a helper counts only when its name did NOT exist
+// before this file ran (`priorTables`, from applying the chain file by file).
+// And a table the repair writes INDIRECTLY -- through triggers on what it
+// writes, to a fixed point (sale_items -> sale_write_revisions, 0120) -- is
+// treated like a table it writes: naming one, even in a WHERE, makes the
+// file's own result depend on the order. No context -> not independent.
+const KEYWORD_TARGETS = new Set(['on', 'of', 'or', 'set']) // trigger headers, OR-clauses, DO UPDATE SET
+function flagOnlyContext(chain, chainText, repairText) {
+  const probe = openDb([]).db
+  const names = () => new Set(probe.prepare("SELECT name FROM sqlite_master WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite_%'").all()
+    .map((row) => row.name.toLowerCase()))
+  const priorTables = new Map()
+  for (const file of chain) { priorTables.set(file, names()); probe.exec(chainText(file)) }
+  const indirectWrites = new Set(repairWrites(repairText))
+  const triggers = probe.prepare("SELECT lower(tbl_name) AS tbl, sql FROM sqlite_master WHERE type = 'trigger'").all()
+    .map((row) => ({ tbl: row.tbl, writes: repairWrites(String(row.sql).slice(Math.max(0, String(row.sql).search(/\bBEGIN\b/i)))).filter((t) => !KEYWORD_TARGETS.has(t)) }))
+  for (let grew = true; grew;) {
+    grew = false
+    for (const trigger of triggers) {
+      if (!indirectWrites.has(trigger.tbl)) continue
+      for (const table of trigger.writes) if (!indirectWrites.has(table)) { indirectWrites.add(table); grew = true }
+    }
+  }
+  return { priorTables, indirectWrites, finalTables: names() }
+}
+
+const flagColumnsUnread = (text, repairText, context) => {
+  if (!(context?.priorTables instanceof Set) || !(context?.indirectWrites instanceof Set)) return false
+  const statements = splitStatements(sqlCode(text)).map((s) => s.replace(/\s+/g, ' ').trim()).filter(Boolean)
+  if (!statements.length) return false
+  const named = namedIn(repairText)
+  if ([...context.indirectWrites].some((table) => namedIn(text)(table))) return false
+  const own = new Set()
+  let flagged = 0
+  for (const statement of statements) {
+    let match
+    if ((match = /^CREATE TABLE IF NOT EXISTS (\w+) \(/i.exec(statement))) {
+      const name = match[1].toLowerCase()
+      if (named(name) || context.priorTables.has(name) || own.has(name)) return false
+      own.add(name)
+    } else if ((match = /^(?:INSERT (?:OR IGNORE )?INTO|DELETE FROM) (\w+)\b/i.exec(statement))) {
+      if (!own.has(match[1].toLowerCase())) return false
+    } else if ((match = /^UPDATE (\w+) SET (.+?) WHERE /i.exec(statement))) {
+      const table = match[1].toLowerCase()
+      if (own.has(table)) continue
+      const allowed = FLAG_ONLY_COLUMNS[table]
+      if (!allowed) return false
+      for (const assignment of setAssignments(match[2])) {
+        const target = /^(\w+)\s*=/.exec(assignment)
+        if (!target) return false
+        const column = target[1].toLowerCase()
+        if (ROWID_OR_KEY.test(column) || !allowed.includes(column) || named(column)) return false
+      }
+      flagged++
+    } else return false
+  }
+  return flagged > 0
+}
+// ---- RET-B 0235 rule (end) --------------------------------------------------
+
 function completeState(raw) {
   const quote = name => `"${name.replaceAll('"', '""')}"`
   const schema = raw.prepare('SELECT type,name,tbl_name,sql FROM sqlite_master ORDER BY type,name').all()
@@ -427,6 +541,11 @@ function assertPopulatedOrders(chain, chainText, mixed) {
     const heldNumber = Number(heldName.slice(0, 4))
     for (const file of chain.filter(file => Number(file.slice(0, 4)) > 195 && Number(file.slice(0, 4)) < heldNumber)) raw.exec(chainText(file))
     raw.exec("INSERT INTO pending_actions(section,action_type,entity_type,entity_id,payload_json,status) VALUES('branches','update','branch',1,'{}','open')")
+    // ---- RET-B 0235 seed (begin): two imported sales, so 0235 marks rows in
+    // both orders -- one the repair also repairs (s1), one outside its window.
+    raw.exec(`UPDATE sales SET client_request_id = 'sales-import:J:1' WHERE id = ${ids.s1.saleId}`)
+    raw.exec("INSERT INTO sales(receipt_number, client_request_id, created_at, subtotal_usd, total_usd, sale_status, branch_id) VALUES ('IMP2', 'sales-import:J:2', '2026-08-01 09:00:00', 0, 0, 'completed', 1)")
+    // ---- RET-B 0235 seed (end)
     const later = chain.filter(file => Number(file.slice(0, 4)) > heldNumber)
     const run = (before, override = new Map(), repeat = true) => {
       raw.exec('SAVEPOINT held_order_probe')
@@ -447,6 +566,13 @@ function assertPopulatedOrders(chain, chainText, mixed) {
     }
     const before = run(true), after = run(false)
     assert.deepEqual(before, after, 'populated full-chain orders preserve schema, all rows, audit, repair and recovery outcomes')
+    // ---- RET-B 0235 (begin): the proof above really exercised 0235.
+    if (later.includes('0235_imported_sales_stock_skipped.sql')) {
+      const marked = before.state.tables.find((t) => t.name === 'sales').rows
+        .filter((row) => row.stock_skipped_by_name === "'migration:0235_imported_sales_stock_skipped'").length
+      assert.equal(marked, 2, '0235 marked both seeded imported sales in the order proof')
+    }
+    // ---- RET-B 0235 (end)
     assert.deepEqual(before.repaired.map(row => row.new_cost_price_usd), [12.0769, 12.4, 12.4444, 7, 8])
     assert.deepEqual(before.returned.map(row => row.new_cost_price_usd), [12.4])
     for (const file of mixed) {
@@ -483,7 +609,11 @@ check('held: outside deploy chain, after dependencies including0195; independent
   const tables = fresh.prepare("SELECT name FROM sqlite_master WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite_%'").all().map((r) => r.name)
   const touched = tables.filter(namedIn(migrationText))
   const mixed = chain.filter(file => mixedAdditiveUnread(chainText(file), migrationText))
-  const dependencies = chain.filter((f) => !indexOnly(chainText(f)) && !additiveUnread(chainText(f), migrationText) && !mixed.includes(f) && touched.some(namedIn(chainText(f))))
+  // ---- RET-B 0235 call (begin) ----
+  const flagContext = flagOnlyContext(chain, chainText, migrationText)
+  const flagOnly = chain.filter(file => flagColumnsUnread(chainText(file), migrationText, { priorTables: flagContext.priorTables.get(file), indirectWrites: flagContext.indirectWrites }))
+  // ---- RET-B 0235 call (end) ----
+  const dependencies = chain.filter((f) => !indexOnly(chainText(f)) && !additiveUnread(chainText(f), migrationText) && !mixed.includes(f) && !flagOnly.includes(f) && touched.some(namedIn(chainText(f))))
   assert.ok(['sale_items', 'return_items', 'catalog_cost_repair_0195_backup'].every((t) => touched.includes(t)), 'control: the scan sees the two tables it writes and the 0195 backup it reads')
   assert.ok(dependencies.includes('0195_catalog_cost_on_hand.sql'), 'control: the scan finds 0195')
   assert.ok(indexOnly('-- x\nCREATE INDEX IF NOT EXISTS i ON sale_items(id);\nCREATE UNIQUE INDEX j ON sale_items(id);'), 'control: an index-only file is skipped')
@@ -494,6 +624,49 @@ check('held: outside deploy chain, after dependencies including0195; independent
   assert.ok(!indexOnly("CREATE INDEX i ON sale_items(id) WHERE '--' <> ''; UPDATE sale_items SET cost_price_usd = 0;")
     && !additiveUnread("ALTER TABLE sale_items ADD COLUMN zzz_unread TEXT DEFAULT '/*'; UPDATE sale_items SET cost_price_usd = 0; -- */", migrationText), 'control: a comment marker inside a string literal cannot hide the statement after it')
   assert.ok(mixed.length > 0, 'control: the mixed additive scan proves at least one later file independent')
+  // ---- RET-B 0235 rule controls (begin) ----
+  assert.deepEqual(repairWrites(migrationText).filter((t) => ['sale_items', 'return_items'].includes(t)).sort(), ['return_items', 'sale_items'], 'control: the repair writes sale_items and return_items')
+  const flagFile = 'CREATE TABLE IF NOT EXISTS zz_mark (id INTEGER PRIMARY KEY);\nINSERT OR IGNORE INTO zz_mark (id) SELECT id FROM sales;\nUPDATE sales SET stock_skipped = 1, stock_skipped_by_name = \'m\' WHERE id IN (SELECT id FROM zz_mark);'
+  const atEnd = { priorTables: flagContext.finalTables, indirectWrites: flagContext.indirectWrites }
+  assert.ok(flagColumnsUnread(flagFile, migrationText, atEnd), 'control: a mark-only file on allowlisted columns is independent')
+  assert.equal(flagColumnsUnread(flagFile, migrationText), false, 'control: without the chain context nothing is independent (fail closed)')
+  assert.ok(flagContext.indirectWrites.has('sale_write_revisions'), 'control: the repair writes sale_write_revisions through the 0120 trigger')
+  assert.ok(!flagContext.priorTables.get('0235_imported_sales_stock_skipped.sql').has('imported_sale_stock_skip_0235'), 'control: 0235 creates its work table fresh')
+  // B2b: an "own" helper that already exists fires its triggers. The same
+  // file with no prior tables would pass, so the rejection is the new check.
+  const existingHelper = "CREATE TABLE IF NOT EXISTS legacy_inventory_effects (source_key TEXT PRIMARY KEY, product_id INTEGER NOT NULL, branch_id INTEGER NOT NULL, batch_id INTEGER, quantity_delta REAL NOT NULL DEFAULT 0, movement_quantity REAL NOT NULL, movement_type TEXT NOT NULL, reason TEXT, reference_id INTEGER, occurred_at TEXT NOT NULL);\nINSERT INTO legacy_inventory_effects (source_key, product_id, branch_id, quantity_delta, movement_quantity, movement_type, occurred_at) VALUES ('b2b', 10, 1, 5, 5, 'adjustment', '2026-10-06');\nUPDATE sales SET stock_skipped = 1 WHERE id = 1;"
+  assert.ok(flagContext.finalTables.has('legacy_inventory_effects'), 'control: legacy_inventory_effects exists in the chain')
+  assert.ok(flagColumnsUnread(existingHelper, migrationText, { priorTables: new Set(), indirectWrites: flagContext.indirectWrites }), 'control: only the prior-table check stands between this file and acceptance')
+  assert.equal(flagColumnsUnread(existingHelper, migrationText, atEnd), false, 'B2b: CREATE IF NOT EXISTS on an existing trigger-bearing table is not a helper')
+  const revisionRead = 'UPDATE sales SET stock_skipped = 1 WHERE id IN (SELECT sale_id FROM sale_write_revisions WHERE revision > 1);'
+  assert.ok(flagColumnsUnread(revisionRead, migrationText, { priorTables: flagContext.finalTables, indirectWrites: new Set(repairWrites(migrationText)) }), 'control: only the indirect-write check rejects the revision read')
+  assert.equal(flagColumnsUnread(revisionRead, migrationText, atEnd), false, 'B2b: a WHERE reading a table the repair writes through a trigger is order-dependent')
+  assert.ok(flagOnly.includes('0235_imported_sales_stock_skipped.sql'), 'the 0235 stock_skipped backfill is admitted by this rule, then proven by assertPopulatedOrders')
+  const markOnly = (table, set) => `CREATE TABLE IF NOT EXISTS zz_mark (id INTEGER PRIMARY KEY);\nINSERT OR IGNORE INTO zz_mark (id) SELECT id FROM ${table};\nUPDATE ${table} SET ${set} WHERE id IN (SELECT id FROM zz_mark);`
+  for (const wrong of [
+    flagFile.replace('stock_skipped = 1', 'created_at = 1'),
+    `${flagFile}\nUPDATE sale_items SET quantity = 1 WHERE id = 1;`,
+    `${flagFile}\nINSERT INTO audit_logs (action) VALUES ('x');`,
+    flagFile.replace('SELECT id FROM sales', 'SELECT sale_id FROM sale_items'),
+    `${flagFile}\nCREATE TRIGGER t AFTER UPDATE ON sales BEGIN SELECT 1; END;`,
+    flagFile.replace(/UPDATE sales[^;]*;/, ''),
+    // RET-B-VERIFY B2: rowid aliases and keys renumber what the repair joins on.
+    markOnly('sales', 'rowid = rowid + 1000000'),
+    markOnly('sales', 'oid = -oid'),
+    markOnly('sales', '_rowid_ = _rowid_ + 1'),
+    markOnly('sales', 'id = id + 1'),
+    markOnly('sales', 'branch_id = 2'),
+    markOnly('product_batches', 'rowid = rowid + 1000000'),
+    markOnly('sales', 'stock_skipped = 1, rowid = rowid + 1000000'),
+    markOnly('sales', 'stock_skipped = 1, (rowid) = (rowid + 1000000)'),
+    markOnly('sales', '(stock_skipped, rowid) = (1, rowid + 1000000)'),
+    markOnly('sales', "notes = 'x'"),
+    markOnly('sales', 'stock_skipped = 1').replace('UPDATE sales', 'UPDATE OR REPLACE sales'),
+    // RET-B-VERIFY round 2 (B2b)
+    'CREATE TABLE IF NOT EXISTS sale_write_revisions (sale_id INTEGER PRIMARY KEY, revision INTEGER);\nUPDATE sale_write_revisions SET revision = 0 WHERE sale_id > 0;\nUPDATE sales SET stock_skipped = 1 WHERE id = 1;',
+    'CREATE TABLE IF NOT EXISTS zz_mark (id INTEGER PRIMARY KEY);\nCREATE TABLE IF NOT EXISTS zz_mark (id INTEGER PRIMARY KEY);\nUPDATE sales SET stock_skipped = 1 WHERE id IN (SELECT id FROM zz_mark);',
+  ]) assert.equal(flagColumnsUnread(wrong, migrationText, atEnd), false, `control: still a dependency: ${wrong.split('\n').pop()}`)
+  // ---- RET-B 0235 rule controls (end) ----
   for (const file of mixed) {
     assert.ok(mixedAdditiveUnread(`-- header: UPDATE sale_items SET cost_price_usd = 1;\n/* DROP TABLE sale_items; */\n${chainText(file)}`, migrationText), `control: a comment header leaves ${file} independent`)
     assert.ok(!mixedAdditiveUnread(`${chainText(file)}\n-- trailing note\nUPDATE sale_items SET cost_price_usd = 1;`, migrationText), `control: a real statement after a comment in ${file} is still a dependency`)

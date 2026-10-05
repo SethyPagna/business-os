@@ -301,8 +301,10 @@ runTest('nothing invents a receipt cost any more', () => {
   // The only exemption is explicit and auditable: a correction restores a
   // figure the ledger already held. It must be spelled on the wire, never
   // inferred from a reason string.
+  // F2 (5 Oct 2026): the Products-page snapshot restore, its last client
+  // caller, no longer writes stock at all -- so it sends no correction either.
   const products = source('components/products/Products.tsx')
-  assert.match(products, /attribution: 'correction'/, 'the snapshot-restore path must declare itself a correction')
+  assert.doesNotMatch(products, /attribution: 'correction'/, 'no Products-page Undo may post a stock correction')
   // (Inventory.tsx's adjust undo, the other correction, went with its adjust half.)
 })
 

@@ -2139,6 +2139,11 @@ app.put('/:id', async (c) => {
   if (getActionTier(user, 'products', 'edit') === 'none' && !isImageOnlyEdit) {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
+  // RET-B F2: an edit never writes stock (lib/productWrites.ts
+  // omitProductUpdateStock, which updateRow also applies). Dropped here, after
+  // the permission check, so neither the audit diff, the edit-fold nor the
+  // review queue ever sees the form's stale figure.
+  delete body.stock_quantity
 
   // Optimistic-concurrency guard, the same one every other editable entity
   // enforces (contacts/sales/branches/notes/... via conflictControl). The

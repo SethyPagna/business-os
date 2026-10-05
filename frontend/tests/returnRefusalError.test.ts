@@ -33,9 +33,11 @@ const CODES = ['return_edit_cancelled', 'return_restore_over_capacity', 'return_
   'return_sale_required', 'manual_return_items_locked', 'return_lot_not_sold', 'return_line_product_mismatch', 'return_line_not_on_sale',
   'return_sale_item_required', 'customer_return_refund_exceeds_paid', 'customer_return_owed_unreadable', 'return_restore_owed_changed',
   // N1 (loophole review, 6 Oct 2026): the named sale does not exist.
-  'return_sale_not_found']
+  'return_sale_not_found',
+  // RET-B E1 (5 Oct 2026): a return on a sale recorded without stock changes.
+  'return_stock_skipped_sale']
 
-runTest('the mapping covers exactly the FX-returns and RET-A refusal codes', () => {
+runTest('the mapping covers exactly the FX-returns, RET-A and RET-B refusal codes', () => {
   assert.deepEqual(Object.keys(RETURN_REFUSAL_ERRORS).sort(), [...CODES].sort())
 })
 
@@ -108,6 +110,9 @@ runTest('every mapped code is one the Worker actually sends, and the route forwa
     'the API error carries the refusal\'s params to the helper')
   assert.ok(kernel.includes("throw new RefundSaleLineError('return_refund_price_ambiguous',"), 'the kernel refuses an ambiguous product price')
   assert.ok(route.includes("throw new RefundSaleLineError('return_refund_sale_line_required',"), 'PATCH /:id refuses a line naming neither sale item nor product')
+  // RET-B E1: the bulk status change on a stock-skipped sale's return says why.
+  assert.match(bulk, /Number\(linkedSale\.stock_skipped\) === 1\) fail\(`[^`]*would move stock that never moved[^`]*`, 409, 'return_stock_skipped_sale'\)/,
+    'the stock-skipped refusal fails with return_stock_skipped_sale and says why')
   assert.equal(route.split('if (error instanceof RefundSaleLineError) return c.json({ error: error.message, code: error.code }, 400)').length - 1, 2,
     'POST / and PATCH /:id both forward the refund-price refusal code')
   // RET-A: each new code is one the Worker sends.

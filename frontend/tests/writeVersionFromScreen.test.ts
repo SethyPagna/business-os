@@ -135,8 +135,11 @@ for (const [file, single, bulk] of [
   ok(/const snapshotById = new Map\(snapshots\.map\(\(row\) => \[Number\(row\.id\), row\]\)\)/.test(read(file)), `${path.basename(file)}: bulk versions come from the pre-delete snapshots`)
 }
 const products = read('src/components/products/Products.tsx')
-ok(/payload\.expectedUpdatedAt = currentProduct\.updated_at \|\| undefined\s*\n\s*await runProductWriteMutation\(\(\) => productApi\.updateProduct\(productId, payload\), 'Restore product'\)/.test(products),
+// RET-B F2: the field-only restore lives in productWriteHelpers; Products.tsx wires it.
+ok(/payload\.expectedUpdatedAt = current\.updated_at \|\| undefined\s*\n\s*await deps\.updateProduct\(productId, payload\)/.test(read('src/components/products/helpers/productWriteHelpers.ts')),
   'undo/redo restore writes over the version it just re-read')
+ok(/updateProduct: \(productId, payload\) => runProductWriteMutation\(\(\) => productApi\.updateProduct\(productId, payload\), 'Restore product'\)/.test(products),
+  'and Products.tsx routes that write through the bounded product mutation')
 ok(/const latestById = buildProductIdMap\(await fetchProductsByIds\(idsToDelete\)\)[\s\S]{0,200}productApi\.deleteProduct\(id, reason, latestById\.get\(Number\(id\)\)\?\.updated_at\)/.test(products),
   'bulk delete redo re-reads the rows and passes their versions')
 ok(/const \[latest\] = await fetchProductsByIds\(\[targetId\]\)\s*\n\s*const result = await runProductDeleteMutation\(\(\) => productApi\.deleteProduct\(targetId, reason, latest\?\.updated_at\)/.test(products),

@@ -603,7 +603,11 @@ async function buildMembers(db: D1Compat, request: BulkRequest): Promise<{ membe
       const linkedSale = member.saleId ? linkedSales.find((sale) => Number(sale.id) === member.saleId) : null
       member.saleRevision = linkedSale ? Number(linkedSale.write_revision) || 0 : null
       if (linkedSale) guards.push(guard("EXISTS(SELECT 1 FROM sales WHERE id=@saleId) AND COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=@saleId),0)=@saleRevision", { saleId: linkedSale.id, saleRevision: linkedSale.write_revision }))
-      if (linkedSale && Number(linkedSale.stock_skipped) === 1) fail(`Return ${expected.id} belongs to a stock-skipped sale. Its stock provenance must be resolved before changing the return status.`, 409)
+      // RET-B E1 (owner default D1, 5 Oct 2026): a sale recorded without stock
+      // changes (stock_skipped -- every sales import since F4) never took its
+      // units off the shelf, so cancelling or restoring its return cannot infer
+      // which way stock should move. Refused with a code the till translates.
+      if (linkedSale && Number(linkedSale.stock_skipped) === 1) fail(`Return ${expected.id} belongs to a stock-skipped sale (recorded without stock changes, such as an imported sale). Cancelling or restoring it would move stock that never moved, so nothing was changed.`, 409, 'return_stock_skipped_sale')
       const parentCancelled = normalize(linkedSale?.sale_status) === 'cancelled'
       if (linkedSale && parentCancelled) {
         fail(`Return ${expected.id} belongs to a cancelled sale. Restore the sale before changing this return status.`, 409)
