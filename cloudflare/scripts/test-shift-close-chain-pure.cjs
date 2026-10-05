@@ -84,6 +84,8 @@ sqlite.exec(fs.readFileSync(path.join(root, 'migrations', '0119_shift_restore_gu
 sqlite.exec(fs.readFileSync(path.join(root, 'migrations', '0123_shift_reopen_segments.sql'), 'utf8'))
 sqlite.exec(fs.readFileSync(path.join(root, 'migrations', '0132_shift_opening_count_presence.sql'), 'utf8'))
 sqlite.exec(fs.readFileSync(path.join(root, 'migrations', '0147_shift_additional_cash.sql'), 'utf8'))
+// N4: the close writes the figures it was made on in the same batch.
+sqlite.exec(fs.readFileSync(path.join(root, 'migrations', '0237_shift_close_figures.sql'), 'utf8'))
 
 // The money tables the reconciliation reads. Column shapes copied from the
 // production schema the kernel queries, not invented for this test.

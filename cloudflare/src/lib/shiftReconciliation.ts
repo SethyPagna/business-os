@@ -666,3 +666,259 @@ export async function loadShiftFigures(
     courier,
   })
 }
+
+// ---- the figures a shift CLOSED on (N4) -------------------------------------
+//
+// LOOPHOLE-REVIEW-20261006 N4: everything above is recomputed on every read
+// from sale rows that stay mutable, and tender belongs to sales.created_at. A
+// bulk payment-method relabel (lib/saleBulkUpdate.ts), a cancel, a settled
+// Not Paid sale or a shift amendment therefore moved a CLOSED shift's expected
+// drawer with no trace: close $50 short, relabel $50 of Cash sales as ABA,
+// and the closed shift balanced.
+//
+// So the close now stores the reconciliation it was closed on (migration
+// 0237, table shift_close_figures, written in the close batch), and the report
+// shows THOSE figures. A later difference is not hidden and not absorbed: it
+// is a separate "changed after close" block -- which components moved, and
+// which sales, found by comparing a per-sale tender fingerprint taken at the
+// close with the same fingerprint now.
+//
+// The stored reconciliation is the output of loadShiftReconciliation itself,
+// so the stored and the computed figures can never come from two formulas.
+
+/** [sale id, cash USD, cash KHR, other-tender USD, other-tender KHR]. A
+ *  cancelled sale contributes zeros, exactly as tenderWhere excludes it. */
+export type ShiftSaleTender = [number, number, number, number, number]
+/** Past this many sales in one window the per-sale fingerprint is not stored
+ *  (sales: null); the component comparison still runs. */
+export const SHIFT_CLOSE_SALE_CAP = 2000
+/** How many drifted sales one response names. The total is always given. */
+export const SHIFT_CLOSE_DRIFT_SALE_LIMIT = 20
+
+export type ShiftCloseFigures = {
+  v: 1
+  taken_at: string
+  window: { opened_at: string; closed_at: string | null }
+  reconciliation: ShiftReconciliation
+  /** Every non-cash tender in the window, per currency; null past the cap. */
+  other_tenders: ShiftMoney | null
+  sales: ShiftSaleTender[] | null
+}
+
+export type ShiftCloseDriftComponent = { key: string; stored: ShiftCount; current: ShiftCount }
+export type ShiftSaleDrift = {
+  sale_id: number
+  change: 'added' | 'removed' | 'changed'
+  /** [cash USD, cash KHR, other USD, other KHR] at the close / now; null when absent. */
+  before: [number, number, number, number] | null
+  after: [number, number, number, number] | null
+  receipt_number?: string | null
+  created_at?: string | null
+  sale_status?: string | null
+}
+export type ShiftCloseDrift = {
+  components: ShiftCloseDriftComponent[]
+  sales: ShiftSaleDrift[]
+  sales_total: number
+  /** The close or the current read passed SHIFT_CLOSE_SALE_CAP: no per-sale list. */
+  sales_unavailable: boolean
+  /** Today's computed figures -- what the report would have shown without N4. */
+  current: ShiftReconciliation
+}
+
+const isCancelledSale = (status: unknown) => (status == null || status === '' ? 'completed' : String(status)) === 'cancelled'
+
+/** One sale's tender contribution, through the same summarizeShiftCashDetail as the drawer. */
+export function shiftSaleTenderEntry(row: ShiftTenderRow & { id?: unknown }, options: ShiftCashOptions = {}): ShiftSaleTender {
+  const id = Number(row.id)
+  if (isCancelledSale(row.sale_status)) return [id, 0, 0, 0, 0]
+  const cash = summarizeShiftCashDetail([row], options)
+  return [id, cash.usd, cash.khr, cash.digital.usd, cash.digital.khr]
+}
+
+/** The per-sale fingerprint of the window, cancelled sales included (as zeros). */
+export async function shiftSaleTenders(
+  env: Env,
+  shift: ShiftReconciliationSession,
+  nowMs: number,
+  options?: ShiftCashOptions,
+): Promise<ShiftSaleTender[] | null> {
+  const { clauses, params } = shiftWindowWhere('sales', shiftFilters(shift, nowMs))
+  if (shift.branch_id) { clauses.push('sales.branch_id = @branchId'); params.branchId = shift.branch_id }
+  const rows = await getDb(env).prepare(`SELECT id, payment_method, payment_details, amount_paid_usd, amount_paid_khr,
+      change_usd, change_khr, change_is_actual, change_exchange_rate, sale_status, total_usd, exchange_rate
+    FROM sales WHERE ${clauses.join(' AND ')} ORDER BY id LIMIT ${SHIFT_CLOSE_SALE_CAP + 1}`)
+    .all<ShiftTenderRow & { id: number }>(params)
+  if (rows.length > SHIFT_CLOSE_SALE_CAP) return null
+  const config = options ?? await readCashConfig(env)
+  return rows.map((row) => shiftSaleTenderEntry(row, config))
+}
+
+function sumOtherTenders(sales: ShiftSaleTender[] | null): ShiftMoney | null {
+  if (!sales) return null
+  return {
+    usd: round2(sales.reduce((n, entry) => n + entry[3], 0)),
+    khr: roundKhr(sales.reduce((n, entry) => n + entry[4], 0)),
+  }
+}
+
+/** The stored object, pure. */
+export function buildShiftCloseFigures(input: {
+  takenAt: string; openedAt: string; closedAt: string | null
+  reconciliation: ShiftReconciliation; sales: ShiftSaleTender[] | null
+}): ShiftCloseFigures {
+  return {
+    v: 1,
+    taken_at: input.takenAt,
+    window: { opened_at: input.openedAt, closed_at: input.closedAt },
+    reconciliation: input.reconciliation,
+    other_tenders: sumOtherTenders(input.sales),
+    sales: input.sales,
+  }
+}
+
+/** The figures to store at the close, read from D1 for the shift as it is being closed. */
+export async function loadShiftCloseFigures(
+  env: Env,
+  shift: ShiftReconciliationSession,
+  nowMs: number = Date.now(),
+): Promise<ShiftCloseFigures> {
+  const config = await readCashConfig(env)
+  const [reconciliation, sales] = await Promise.all([
+    loadShiftReconciliation(env, shift, nowMs),
+    shiftSaleTenders(env, shift, nowMs, config),
+  ])
+  return buildShiftCloseFigures({ takenAt: new Date(nowMs).toISOString(), openedAt: shift.opened_at,
+    closedAt: shift.closed_at, reconciliation, sales })
+}
+
+const countValue = (value: unknown): number | null => (value == null || !Number.isFinite(Number(value)) ? null : Number(value))
+const countPair = (value: unknown): ShiftCount => {
+  const pair = (value ?? {}) as { usd?: unknown; khr?: unknown }
+  return { usd: countValue(pair.usd), khr: countValue(pair.khr) }
+}
+const moneyPair = (value: unknown): ShiftMoney => {
+  const pair = countPair(value)
+  return { usd: pair.usd ?? 0, khr: pair.khr ?? 0 }
+}
+
+/**
+ * A stored row read back, tolerant of shape: a field this version does not
+ * know is ignored, a field an older row lacks reads as zero (money) or unknown
+ * (counts), and anything that is not a v1 object answers null -- the reader
+ * then falls back to the computed figures, labelled as such, rather than
+ * printing a half-parsed drawer.
+ */
+export function parseShiftCloseFigures(json: unknown): ShiftCloseFigures | null {
+  let value: unknown
+  try { value = typeof json === 'string' ? JSON.parse(json) : json } catch { return null }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const raw = value as Record<string, unknown>
+  if (raw.v !== 1 || !raw.reconciliation || typeof raw.reconciliation !== 'object') return null
+  const r = raw.reconciliation as Record<string, unknown>
+  const codes = Array.isArray(r.review_codes) ? r.review_codes.map(String) : []
+  const reconciliation: ShiftReconciliation = {
+    opening: countPair(r.opening),
+    additional_cash: moneyPair(r.additional_cash),
+    cash_sales: moneyPair(r.cash_sales),
+    refunds: moneyPair(r.refunds),
+    expenses: moneyPair(r.expenses),
+    courier: moneyPair(r.courier),
+    expected: countPair(r.expected),
+    counted: countPair(r.counted),
+    difference: countPair(r.difference),
+    needs_review: r.needs_review === true || codes.length > 0,
+    review_codes: codes,
+  }
+  const sales = Array.isArray(raw.sales)
+    ? raw.sales.filter((entry): entry is unknown[] => Array.isArray(entry) && entry.length >= 5 && Number.isInteger(Number(entry[0])))
+      .map((entry) => [Number(entry[0]), ...[1, 2, 3, 4].map((i) => Number(entry[i]) || 0)] as ShiftSaleTender)
+    : null
+  const window = (raw.window ?? {}) as Record<string, unknown>
+  return {
+    v: 1,
+    taken_at: String(raw.taken_at ?? ''),
+    window: { opened_at: String(window.opened_at ?? ''), closed_at: window.closed_at == null ? null : String(window.closed_at) },
+    reconciliation,
+    other_tenders: raw.other_tenders == null ? sumOtherTenders(sales) : moneyPair(raw.other_tenders),
+    sales,
+  }
+}
+
+const sameCount = (a: number | null, b: number | null, khr: boolean) =>
+  a == null || b == null ? a === b : Math.abs(a - b) < (khr ? 0.5 : 0.005)
+
+/** Which drawer lines differ between the close and now, pure. */
+export function compareShiftCloseFigures(
+  stored: ShiftCloseFigures,
+  current: ShiftReconciliation,
+  currentOtherTenders: ShiftMoney | null,
+): ShiftCloseDriftComponent[] {
+  const s = stored.reconciliation
+  const pairs: Array<[string, ShiftCount, ShiftCount]> = [
+    ['opening', s.opening, current.opening],
+    ['additional_cash', s.additional_cash, current.additional_cash],
+    ['cash_sales', s.cash_sales, current.cash_sales],
+    ['refunds', s.refunds, current.refunds],
+    ['expenses', s.expenses, current.expenses],
+    ['courier', s.courier, current.courier],
+    ['expected', s.expected, current.expected],
+    ['counted', s.counted, current.counted],
+  ]
+  if (stored.other_tenders && currentOtherTenders) pairs.push(['other_tenders', stored.other_tenders, currentOtherTenders])
+  return pairs
+    .filter(([, a, b]) => !sameCount(a.usd, b.usd, false) || !sameCount(a.khr, b.khr, true))
+    .map(([key, a, b]) => ({ key, stored: { usd: a.usd, khr: a.khr }, current: { usd: b.usd, khr: b.khr } }))
+}
+
+/** Which sales were added to, removed from, or changed inside the window since the close, pure. */
+export function diffShiftSaleTenders(stored: ShiftSaleTender[], current: ShiftSaleTender[]): ShiftSaleDrift[] {
+  const before = new Map(stored.map((entry) => [entry[0], entry]))
+  const after = new Map(current.map((entry) => [entry[0], entry]))
+  const tail = (entry: ShiftSaleTender | undefined) => (entry ? [entry[1], entry[2], entry[3], entry[4]] as [number, number, number, number] : null)
+  const out: ShiftSaleDrift[] = []
+  for (const id of [...new Set([...before.keys(), ...after.keys()])].sort((a, b) => a - b)) {
+    const a = before.get(id); const b = after.get(id)
+    if (a && b) {
+      if (sameCount(a[1], b[1], false) && sameCount(a[2], b[2], true) && sameCount(a[3], b[3], false) && sameCount(a[4], b[4], true)) continue
+      out.push({ sale_id: id, change: 'changed', before: tail(a), after: tail(b) })
+    } else out.push({ sale_id: id, change: a ? 'removed' : 'added', before: tail(a), after: tail(b) })
+  }
+  return out
+}
+
+/**
+ * The drift of one closed shift: today's computed figures against the stored
+ * ones. Null when nothing moved. Sale ids are labelled with their receipt
+ * number for the links; at most SHIFT_CLOSE_DRIFT_SALE_LIMIT are named and
+ * `sales_total` says how many there are.
+ */
+export async function loadShiftCloseDrift(
+  env: Env,
+  shift: ShiftReconciliationSession,
+  stored: ShiftCloseFigures,
+  current: ShiftReconciliation,
+  nowMs: number = Date.now(),
+): Promise<ShiftCloseDrift | null> {
+  const currentSales = await shiftSaleTenders(env, shift, nowMs)
+  const components = compareShiftCloseFigures(stored, current, sumOtherTenders(currentSales))
+  const salesUnavailable = !stored.sales || !currentSales
+  const drifted = salesUnavailable ? [] : diffShiftSaleTenders(stored.sales!, currentSales!)
+  if (!components.length && !drifted.length) return null
+  const named = drifted.slice(0, SHIFT_CLOSE_DRIFT_SALE_LIMIT)
+  if (named.length) {
+    // sql-bound-params: bounded by SHIFT_CLOSE_DRIFT_SALE_LIMIT (20).
+    const params = Object.fromEntries(named.map((entry, index) => [`s${index}`, entry.sale_id]))
+    const labels = await getDb(env).prepare(`SELECT id, receipt_number, created_at, sale_status FROM sales
+      WHERE id IN (${named.map((_entry, index) => `@s${index}`).join(',')})`)
+      .all<{ id: number; receipt_number: string | null; created_at: string | null; sale_status: string | null }>(params)
+    const byId = new Map(labels.map((row) => [Number(row.id), row]))
+    for (const entry of named) {
+      const label = byId.get(entry.sale_id)
+      entry.receipt_number = label?.receipt_number ?? null
+      entry.created_at = label?.created_at ?? null
+      entry.sale_status = label?.sale_status ?? null
+    }
+  }
+  return { components, sales: named, sales_total: drifted.length, sales_unavailable: salesUnavailable, current }
+}

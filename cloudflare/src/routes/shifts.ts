@@ -8,7 +8,8 @@ import { hasAnyPermission, isAdminControlUser } from '../lib/permissions'
 import { scheduleTelegramShiftOverview, sendTelegramShiftReport } from '../lib/telegram'
 import { firstCharacters } from '../lib/telegramLang'
 import {
-  loadShiftFigures, loadShiftReconciliation, type ShiftFigures, type ShiftReconciliation,
+  loadShiftCloseDrift, loadShiftCloseFigures, loadShiftFigures, loadShiftReconciliation, parseShiftCloseFigures,
+  type ShiftCloseDrift, type ShiftCloseFigures, type ShiftFigures, type ShiftReconciliation,
 } from '../lib/shiftReconciliation'
 import type { Env } from '../index'
 
@@ -692,6 +693,69 @@ async function reconciliationFor(env: Env, user: SessionUser, shift: ShiftRow): 
   try { return await loadShiftReconciliation(env, shift, Date.now()) } catch { return null }
 }
 /**
+ * ---- A closed shift's drawer is the one it closed on (N4) ----------------
+ *
+ * `reconciliation` on a CLOSED shift is the stored close figures (migration
+ * 0237, written in the close batch by writeClose), labelled
+ * reconciliation_source='stored'. Anything that moved since -- a tender
+ * relabel, a cancel, a settled Not Paid sale, an amended count or window --
+ * is `close_drift`: the components that differ and the sales that changed,
+ * with today's computed figures beside them. Nothing is hidden and nothing is
+ * absorbed.
+ *
+ * A shift closed before 0237 has no stored row: `reconciliation` is today's
+ * computed figures, labelled 'computed', exactly what every read showed
+ * before. An OPEN shift is always computed (it has no close yet).
+ *
+ * Same reviewer gate and same null-on-failure rule as reconciliationFor; the
+ * drift (one extra windowed sale read) is attached only where a report is
+ * opened -- not to the /current banner.
+ */
+type ShiftDrawer = {
+  reconciliation: ShiftReconciliation | null
+  reconciliation_source: 'stored' | 'computed' | null
+  close_figures_taken_at: string | null
+  close_drift: ShiftCloseDrift | null
+}
+async function storedCloseFigures(env: Env, shiftId: number): Promise<ShiftCloseFigures | null> {
+  try {
+    const row = await getDb(env).prepare('SELECT figures_json FROM shift_close_figures WHERE shift_session_id = @id')
+      .get<{ figures_json: string }>({ id: shiftId })
+    return row ? parseShiftCloseFigures(row.figures_json) : null
+  } catch { return null }
+}
+async function drawerFor(env: Env, user: SessionUser, shift: ShiftRow, options: { drift: boolean }): Promise<ShiftDrawer> {
+  const none: ShiftDrawer = { reconciliation: null, reconciliation_source: null, close_figures_taken_at: null, close_drift: null }
+  if (!canManageShifts(user)) return none
+  const nowMs = Date.now()
+  const [computed, stored] = await Promise.all([
+    reconciliationFor(env, user, shift),
+    shift.closed_at ? storedCloseFigures(env, shift.id) : Promise.resolve(null),
+  ])
+  if (!stored) return { ...none, reconciliation: computed, reconciliation_source: computed ? 'computed' : null }
+  let drift: ShiftCloseDrift | null = null
+  if (options.drift && computed) {
+    try { drift = await loadShiftCloseDrift(env, shift, stored, computed, nowMs) } catch { drift = null }
+  }
+  return { reconciliation: stored.reconciliation, reconciliation_source: 'stored',
+    close_figures_taken_at: stored.taken_at || null, close_drift: drift }
+}
+/**
+ * The figures to store with a close, as JSON, for the shift AS IT IS BEING
+ * CLOSED (its new closed_at, counts and additional cash). Null when they
+ * cannot be computed: the close must never fail for the report's sake, and a
+ * close without stored figures reads exactly like a pre-0237 one ("computed").
+ */
+async function closeFiguresFor(env: Env, closing: ShiftRow): Promise<string | null> {
+  try {
+    const figures = await loadShiftCloseFigures(env, closing, Date.now())
+    if (!figures || typeof figures !== 'object') return null
+    const json = JSON.stringify(figures)
+    // D1 rows stay well under its size limit: past ~512 KB keep the drawer and drop the fingerprint.
+    return json.length <= 512_000 ? json : JSON.stringify({ ...figures, sales: null })
+  } catch { return null }
+}
+/**
  * The shift REPORT figures -- sales, COGS, profit, delivery and the expense
  * split, from lib/shiftReconciliation.ts.
  *
@@ -713,17 +777,16 @@ async function figuresFor(env: Env, user: SessionUser, shift: ShiftRow): Promise
   if (!canManageShifts(user)) return null
   try { return await loadShiftFigures(env, shift, Date.now()) } catch { return null }
 }
-type ReconciledShift = ShiftPresentedRow & {
-  reconciliation: ShiftReconciliation | null
+type ReconciledShift = ShiftPresentedRow & ShiftDrawer & {
   figures?: ShiftFigures | null
 }
 async function reconciledShift(env: Env, user: SessionUser, row: ShiftDbRow): Promise<ReconciledShift> {
   const shift = await presentShift(getDb(env), user, row)
-  const [reconciliation, figures] = await Promise.all([
-    reconciliationFor(env, user, shift),
+  const [drawer, figures] = await Promise.all([
+    drawerFor(env, user, shift, { drift: true }),
     figuresFor(env, user, shift),
   ])
-  return { ...shift, reconciliation, figures }
+  return { ...shift, ...drawer, figures }
 }
 
 function currentResponse(user: SessionUser, shift: ShiftDbRow | undefined, policy: ShiftPolicy, exempt: boolean) {
@@ -762,7 +825,9 @@ app.get('/current', async (c) => {
   const body = currentResponse(user, shift, policy, exempt)
   // Admin comparison may include an open shift. Staff retain only registered
   // counts; no report calculation is needed to enter or close their drawer.
-  const presented = body.shift ? { ...body.shift, reconciliation: await reconciliationFor(c.env, user, body.shift) } : null
+  // A closed current shift shows the drawer it closed on (N4); the drift is
+  // left to the report reads -- this is a polled banner.
+  const presented = body.shift ? { ...body.shift, ...(await drawerFor(c.env, user, body.shift, { drift: false })) } : null
   return c.json({ ...body, shift: presented,
     previous_open_shift: carryOver ? responseShift(user, carryOver) : null,
     previous_open_close_before: closeBefore?.opened_at ?? null })
@@ -981,6 +1046,8 @@ async function writeClose(db: D1Compat, user: SessionUser, row: ShiftDbRow, inpu
   additionalUsd: number; additionalKhr: number
   note: string | null; deviceName: string | null; reason: string
   request?: ReturnType<typeof mutationRequest>
+  /** closeFiguresFor's JSON, or null when the figures could not be computed. */
+  figuresJson: string | null
 }): Promise<{ changed: boolean; shift: ShiftDbRow | undefined }> {
   const shift = storedShift(row)
   const after = { ...shift, closed_at: input.closedAt, closing_counted_usd: input.countedUsd,
@@ -1006,6 +1073,16 @@ async function writeClose(db: D1Compat, user: SessionUser, row: ShiftDbRow, inpu
     { sql: transitionAuditSql(), params: { actorId: user.id, actorName, action: 'shift.close', shiftId: shift.id,
         details: JSON.stringify({ reason: input.reason, revision: after.revision, request: input.request }), oldValue: JSON.stringify(shift),
         newValue: JSON.stringify(after), deviceName: input.deviceName } },
+    // N4: the drawer this close was made on, in the same batch, so a committed
+    // close always carries the figures it computed. Guarded by the row's new
+    // state rather than changes(), which the two inserts above already chain:
+    // a close that lost its revision race writes nothing here.
+    ...(input.figuresJson == null ? [] : [{ sql: `INSERT INTO shift_close_figures (shift_session_id, closed_at, figures_json, created_at)
+        SELECT id, closed_at, @figuresJson, @createdAt FROM shift_sessions
+        WHERE id=@id AND revision=@newRevision AND closed_at=@closedAt AND closed_by_user_id=@closerId
+          AND NOT EXISTS (SELECT 1 FROM shift_close_figures WHERE shift_session_id=@id)`,
+      params: { id: shift.id, newRevision: after.revision, closedAt: input.closedAt, closerId: user.id,
+        figuresJson: input.figuresJson, createdAt: input.recordedAt } }]),
   ])
   const changed = batchChanges(results[0]) === 1
   return { changed, shift: await readShiftById(db, shift.id) }
@@ -1052,10 +1129,13 @@ app.post('/close', async (c) => {
   const closedAt = new Date().toISOString()
   const overlap = await intervalError(db, storedShift(shift), shift.opened_at, closedAt)
   if (overlap) return c.json({ error: overlap }, 409)
+  const figuresJson = await closeFiguresFor(c.env, { ...storedShift(shift), closed_at: closedAt,
+    closing_counted_usd: countedUsd.value, closing_counted_khr: countedKhr.value,
+    additional_cash_usd: additionalUsd.value, additional_cash_khr: additionalKhr.value })
   const result = await writeClose(db, user, shift, { closedAt, recordedAt: closedAt,
     countedUsd: countedUsd.value, countedKhr: countedKhr.value,
     additionalUsd: additionalUsd.value, additionalKhr: additionalKhr.value,
-    note: optionalText(body.closing_note), deviceName: c.req.header('X-Device-Name') || null, reason: 'Manual shift close', request: mutationRequest(body, shift.id) })
+    note: optionalText(body.closing_note), deviceName: c.req.header('X-Device-Name') || null, reason: 'Manual shift close', request: mutationRequest(body, shift.id), figuresJson })
   if (result.changed) {
     const report = sendTelegramShiftReport(c.env, shift.id)
     try { c.executionCtx.waitUntil(report) } catch { void report }
@@ -1093,10 +1173,13 @@ app.post('/:id/close', async (c) => {
   if (closedAtMs < utcMs(shift.opened_at)) return c.json({ error: 'Closing time cannot be before opening time.' }, 400)
   const overlap = await intervalError(db, storedShift(shift), shift.opened_at, closedAt)
   if (overlap) return c.json({ error: overlap }, 409)
+  const figuresJson = await closeFiguresFor(c.env, { ...storedShift(shift), closed_at: closedAt,
+    closing_counted_usd: countedUsd.value, closing_counted_khr: countedKhr.value,
+    additional_cash_usd: additionalUsd.value, additional_cash_khr: additionalKhr.value })
   const result = await writeClose(db, user, shift, { closedAt, recordedAt: new Date().toISOString(),
     countedUsd: countedUsd.value, countedKhr: countedKhr.value,
     additionalUsd: additionalUsd.value, additionalKhr: additionalKhr.value,
-    note: optionalText(body.closing_note), deviceName: c.req.header('X-Device-Name') || null, reason: 'Historic manual close', request: mutationRequest(body, id) })
+    note: optionalText(body.closing_note), deviceName: c.req.header('X-Device-Name') || null, reason: 'Historic manual close', request: mutationRequest(body, id), figuresJson })
   if (!result.changed || !result.shift) return c.json({ error: 'Shift changed concurrently. Reload and try again.' }, 409)
   const report = sendTelegramShiftReport(c.env, shift.id)
   try { c.executionCtx.waitUntil(report) } catch { void report }
