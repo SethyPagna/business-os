@@ -527,7 +527,7 @@ async function buildPortalSection(env: Env): Promise<NotificationSection | null>
 
   return {
     id: 'portal',
-    label: 'Customer portal',
+    label: 'Website Editor',
     pageId: 'catalog',
     count: rows.length,
     summary: `${rows.length} pending customer submission${rows.length === 1 ? '' : 's'}`,
