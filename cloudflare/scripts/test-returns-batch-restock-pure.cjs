@@ -186,6 +186,7 @@ const saleRecordEventsKernel = loadReal('lib/saleRecordEvents.ts', { './saleReco
 const returnCreateActionKernel = loadReal('lib/returnCreateAction.ts', {
   './saleRecordEvents': saleRecordEventsKernel, './moneyPrecision': moneyPrecisionKernel,
   './customerReturnEntitlement': customerReturnEntitlementKernel,
+  './refundTender': loadReal('lib/refundTender.ts'),
 })
 const saleBulkStatusKernel = {
   bulkAssertion: (predicate, params = {}) => ({ sql: `INSERT INTO sale_bulk_guards(guard_value) SELECT CASE WHEN (${predicate}) THEN 1 ELSE 0 END`, params }),
@@ -199,6 +200,13 @@ const saleBulkStatusKernel = {
   }),
 }
 const returnsRoute = loadReal('routes/returns.ts', {
+  // RET-A F1: the Not Paid debt split (migration 0234) and its money helpers.
+  '../lib/moneyPrecision': moneyPrecisionKernel,
+  '../lib/returnRefundSplit': loadReal('lib/returnRefundSplit.ts', {
+    './moneyPrecision': moneyPrecisionKernel,
+    './saleStatusResolution': loadReal('lib/saleStatusResolution.ts', { './financialPrecision': loadReal('lib/financialPrecision.ts') }),
+    './salesStatus': loadReal('lib/salesStatus.ts'),
+  }),
   '../lib/acquisitionCostAccess': acquisitionCostAccess,
   '../lib/returnCostAccess': loadReal('lib/returnCostAccess.ts'),
   '../lib/branchRoleGuards': loadReal('lib/branchRoleGuards.ts', { './branchRoles': branchRolesKernel }),

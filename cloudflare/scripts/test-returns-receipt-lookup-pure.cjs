@@ -110,8 +110,16 @@ const returnCreateActionKernel = loadReal('lib/returnCreateAction.ts', {
   './saleRecordEvents': { assertSaleRecordBatchBounds: () => {} },
   './moneyPrecision': moneyPrecision,
   './customerReturnEntitlement': customerReturnEntitlement,
+  './refundTender': loadReal('lib/refundTender.ts'),
 })
 const returnsRoute = loadReal('routes/returns.ts', {
+  // RET-A F1: the Not Paid debt split (migration 0234) and its money helpers.
+  '../lib/moneyPrecision': moneyPrecision,
+  '../lib/returnRefundSplit': loadReal('lib/returnRefundSplit.ts', {
+    './moneyPrecision': moneyPrecision,
+    './saleStatusResolution': loadReal('lib/saleStatusResolution.ts', { './financialPrecision': loadReal('lib/financialPrecision.ts') }),
+    './salesStatus': loadReal('lib/salesStatus.ts'),
+  }),
   '../lib/acquisitionCostAccess': acquisitionCostAccess,
   '../lib/returnCostAccess': loadReal('lib/returnCostAccess.ts'),
   '../lib/branchRoles': branchRolesKernel,

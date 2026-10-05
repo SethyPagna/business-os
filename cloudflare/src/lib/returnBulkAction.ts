@@ -10,6 +10,9 @@ import { validateCustomerReturnRestorationCohortV1, validateCustomerReturnRestor
   type CustomerReturnRestorationV1 } from './customerReturnEntitlement'
 import { subtractDecimalSum } from './moneyPrecision'
 import { assertReturnCreateCapacity, ReturnCapacityError, type ReturnCapacityParams } from './returnCreateAction'
+import { roundMoney2, sumMoney4 } from './moneyPrecision'
+import { recordedSaleOutstandingUsd } from './saleStatusResolution'
+import { ReturnRefundSplitError, saleStatusWithReturns, type ReturnDebtSale } from './returnRefundSplit'
 
 export const RETURN_BULK_ACTION_KIND = 'return.fields.bulk'
 export const RETURN_BULK_LIMIT = 25
@@ -299,9 +302,9 @@ function assertBounded(statements: Statement[], snapshot: Snapshot, eventsBytes 
   }
 }
 
-async function saleStatusSnapshots(db: D1Compat, members: Member[]): Promise<SaleStatusSnapshot[]> {
+async function saleStatusSnapshots(db: D1Compat, members: Member[], target: 'before' | 'after' = 'after'): Promise<SaleStatusSnapshot[]> {
   const overrides = members.filter((member) => member.changed && member.updateSale && member.saleId && member.scope === 'customer')
-    .map((member) => ({ id: member.id, status: member.after.status }))
+    .map((member) => ({ id: member.id, status: member[target].status }))
   const saleIds = [...new Set(members.filter((member) => member.changed && member.updateSale && member.saleId).map((member) => member.saleId!))]
   if (!saleIds.length) return []
   const effective = `(COALESCE((SELECT json_extract(o.value,'$.status') FROM json_each(@overrides) o
@@ -325,6 +328,55 @@ async function saleStatusSnapshots(db: D1Compat, members: Member[]): Promise<Sal
     overrides: JSON.stringify(overrides), saleIds: JSON.stringify(saleIds),
   })
   return rows.map((row) => ({ saleId: Number(row.saleId), before: String(row.beforeStatus), after: String(row.afterStatus) }))
+}
+
+/**
+ * Owner rule 29 Sep 2026: a sale whose returns lowered its debt is Not Paid
+ * while it still owes once the group is applied, so cancelling such a return
+ * puts the debt back. Restoring one needs that debt still open: a sale paid
+ * since the cancel owes nothing for the return to lower.
+ */
+async function debtAwareSaleStatuses(db: D1Compat, members: Member[], target: 'before' | 'after', quantityStatuses: SaleStatusSnapshot[]): Promise<SaleStatusSnapshot[]> {
+  const saleIds = quantityStatuses.map((status) => status.saleId)
+  if (!saleIds.length) return quantityStatuses
+  const sales = await db.prepare(`SELECT id,total_usd,amount_paid_usd,amount_paid_khr,exchange_rate,money_precision_version,
+      calculated_total_usd,sale_status,status_before_return FROM sales
+    WHERE EXISTS(SELECT 1 FROM json_each(@saleIds) ids WHERE CAST(ids.value AS INTEGER)=sales.id)`)
+    .all<ReturnDebtSale & { id: number }>({ saleIds: JSON.stringify(saleIds) })
+  const returns = await db.prepare(`SELECT id,sale_id,status,owed_reduction_usd FROM returns
+    WHERE COALESCE(return_scope,'customer')='customer'
+      AND EXISTS(SELECT 1 FROM json_each(@saleIds) ids WHERE CAST(ids.value AS INTEGER)=returns.sale_id)`)
+    .all<{ id: number; sale_id: number; status: string | null; owed_reduction_usd: number | null }>({ saleIds: JSON.stringify(saleIds) })
+  const projected = new Map(members.filter((member) => member.changed).map((member) => [member.id, member[target].status]))
+  return quantityStatuses.map((status) => {
+    const sale = sales.find((row) => Number(row.id) === status.saleId)
+    if (!sale) return status
+    const own = returns.filter((row) => Number(row.sale_id) === status.saleId)
+    const isActive = (row: typeof own[number], changed: boolean) =>
+      (changed ? projected.get(Number(row.id)) ?? normalize(row.status, 'completed') : normalize(row.status, 'completed')) !== 'cancelled'
+    const reductionOf = (rows: typeof own) => sumMoney4(rows.map((row) => Number(row.owed_reduction_usd) || 0))
+    const restored = own.filter((row) => !isActive(row, false) && isActive(row, true))
+    const restoredReduction = reductionOf(restored)
+    try {
+      if (restoredReduction > 0) {
+        const stillActive = own.filter((row) => isActive(row, false) && isActive(row, true))
+        const owedNow = recordedSaleOutstandingUsd({ ...sale, return_owed_reduction_usd: reductionOf(stillActive) })
+        if (roundMoney2(owedNow) < restoredReduction) {
+          fail('This return lowered what the customer owed, and the sale has been paid since. Record a new return instead of restoring it.', 409, 'return_restore_owed_changed')
+        }
+      }
+      const after = saleStatusWithReturns({
+        sale,
+        activeOwedReductionUsd: reductionOf(own.filter((row) => isActive(row, true))),
+        loweredDebt: own.some((row) => Number(row.owed_reduction_usd) > 0),
+        quantityStatus: status.after,
+      })
+      return { ...status, after }
+    } catch (error) {
+      if (error instanceof ReturnRefundSplitError) fail('The sale payment cannot be read. Review the sale before changing its returns.', 409)
+      throw error
+    }
+  })
 }
 
 function returnSaleRecordEvents(snapshot: Snapshot, generation: number, via: 'apply' | 'undo' | 'redo', user: SessionUser, stamp: string) {
@@ -652,9 +704,11 @@ export async function applyReturnBulkActionOutcome(env: Env, user: SessionUser, 
   const operationId = crypto.randomUUID()
   const stamp = new Date().toISOString()
   const ordinarySaleStatuses = request.field === 'status' ? await saleStatusSnapshots(db, members) : []
-  const exactBySale = new Map(entitlement.saleStatuses.map(status => [status.saleId, status]))
-  const snapshot: Snapshot = { version: 1, operationId, field: request.field, members,
-    saleStatuses: ordinarySaleStatuses.map(status => exactBySale.get(status.saleId) || status) }
+  const exactQuantity = new Map(entitlement.saleStatuses.map(status => [status.saleId, status]))
+  const saleStatuses = await debtAwareSaleStatuses(db, members, 'after',
+    ordinarySaleStatuses.map(status => exactQuantity.get(status.saleId) || status))
+  const exactBySale = new Map(saleStatuses.map(status => [status.saleId, status]))
+  const snapshot: Snapshot = { version: 1, operationId, field: request.field, members, saleStatuses }
   const changedIds = members.filter((member) => member.changed).map((member) => member.id)
   const unchangedIds = members.filter((member) => !member.changed).map((member) => member.id)
   const receipt = {
@@ -738,7 +792,11 @@ export async function replayReturnBulkAction(env: Env, user: SessionUser, direct
     statements.push(guard(`EXISTS(SELECT 1 FROM returns r JOIN return_bulk_members m ON m.return_id=r.id WHERE m.operation_id=@operation AND r.id=@id AND m.revision=COALESCE((SELECT revision FROM return_write_revisions WHERE return_id=r.id),0) AND m.stock_fingerprint=${movementFingerprint('r.id')} AND (m.sale_id IS NULL OR (EXISTS(SELECT 1 FROM sales WHERE id=m.sale_id) AND m.sale_revision=COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=m.sale_id),0))))`, { operation: operation.id, id: member.id }))
   }
   for (const member of snapshot.members) statements.push(...memberStatements(member, directionSign, user, stamp))
-  const replayExact = new Map(replayEntitlement.saleStatuses.map(status => [status.saleId, status]))
+  const replayTarget = direction === 'undo' ? 'before' : 'after'
+  const replayQuantity = new Map(replayEntitlement.saleStatuses.map(status => [status.saleId, status]))
+  const replayOrdinary = snapshot.field === 'status' ? await saleStatusSnapshots(db, snapshot.members, replayTarget) : []
+  const replayExact = new Map((await debtAwareSaleStatuses(db, snapshot.members, replayTarget,
+    replayOrdinary.map(status => replayQuantity.get(status.saleId) || status))).map(status => [status.saleId, status]))
   for (const saleId of [...new Set(snapshot.members.filter((member) => member.changed && member.updateSale && member.saleId).map((member) => member.saleId!))]) {
     statements.push(saleStatusStatement(saleId, stamp, replayExact.get(saleId)?.after))
   }

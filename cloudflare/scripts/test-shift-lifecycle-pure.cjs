@@ -62,7 +62,8 @@ function database() {
     );
     CREATE TABLE returns (
       id INTEGER PRIMARY KEY, sale_id INTEGER, created_at TEXT, cashier_id INTEGER, branch_id INTEGER,
-      status TEXT, return_scope TEXT, total_refund_usd REAL, total_refund_khr REAL
+      status TEXT, return_scope TEXT, total_refund_usd REAL, total_refund_khr REAL,
+      refund_currency TEXT, owed_reduction_usd REAL NOT NULL DEFAULT 0
     );
     CREATE TABLE return_items (
       id INTEGER PRIMARY KEY, return_id INTEGER, quantity REAL, cost_price_usd REAL,

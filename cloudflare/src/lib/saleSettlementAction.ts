@@ -20,6 +20,13 @@ export const SALE_SETTLEMENT_ACTION_KIND = 'sale.settlement'
 export function samePrecisionCompatibleState(current: object, expected: object): boolean {
   if (JSON.stringify(current)===JSON.stringify(expected)) return true
   const present = (row: object, key: string) => Object.prototype.hasOwnProperty.call(row,key)
+  // A settlement snapshot written before status_before_return was recorded
+  // (RET-A) never changed it, so it is not part of what the replay compares.
+  if (!present(expected,'status_before_return') && present(current,'status_before_return')) {
+    const rest = { ...(current as Record<string,unknown>) }
+    delete rest.status_before_return
+    return samePrecisionCompatibleState(rest, expected)
+  }
   const keys = ['money_precision_version','calculated_total_usd','rounding_adjustment_usd']
   const value = current as Record<string,unknown>
   if (keys.every(key => !present(expected,key))) {
@@ -47,6 +54,8 @@ export type SaleSettlementState = {
   calculated_total_usd?: number | null
   rounding_adjustment_usd?: number
   sale_status: string | null
+  /** Absent in snapshots written before RET-A; a replay then leaves the column alone. */
+  status_before_return?: string | null
   exchange_rate: number | null
   subtotal_khr: number | null
   discount_khr: number | null
@@ -153,7 +162,7 @@ function nullableNumber(value: unknown): number | null {
 
 export async function readSaleSettlementState(db: D1Compat, saleId: number): Promise<SaleSettlementState | null> {
   const sale = await db.prepare(`
-    SELECT sale_status,exchange_rate,subtotal_khr,discount_khr,tax_khr,total_khr,
+    SELECT sale_status,status_before_return,exchange_rate,subtotal_khr,discount_khr,tax_khr,total_khr,
            delivery_fee_khr,membership_discount_khr,payment_method,payment_details,
            payment_currency,amount_paid_usd,amount_paid_khr,change_usd,change_khr,
            change_is_actual,change_exchange_rate,search_normalized,
@@ -171,6 +180,7 @@ export async function readSaleSettlementState(db: D1Compat, saleId: number): Pro
     calculated_total_usd: nullableNumber(sale.calculated_total_usd),
     rounding_adjustment_usd: nullableNumber(sale.rounding_adjustment_usd) ?? 0,
     sale_status: sale.sale_status == null ? null : String(sale.sale_status),
+    status_before_return: sale.status_before_return == null ? null : String(sale.status_before_return),
     exchange_rate: nullableNumber(sale.exchange_rate),
     subtotal_khr: nullableNumber(sale.subtotal_khr),
     discount_khr: nullableNumber(sale.discount_khr),
@@ -217,6 +227,7 @@ export function buildSaleSettlementAfterState(
       rounding_adjustment_usd: before.rounding_adjustment_usd,
     }),
     sale_status: targetStatus,
+    ...(before.status_before_return === undefined ? {} : { status_before_return: before.status_before_return }),
     exchange_rate: before.exchange_rate,
     subtotal_khr: before.subtotal_khr,
     discount_khr: before.discount_khr,
@@ -247,7 +258,7 @@ export function buildSaleSettlementAfterState(
 
 export function saleSettlementStateStatements(saleId: number, state: SaleSettlementState, stamp: string): Statement[] {
   return [{
-    sql: `UPDATE sales SET sale_status=@sale_status,exchange_rate=@exchange_rate,
+    sql: `UPDATE sales SET sale_status=@sale_status,${state.status_before_return === undefined ? '' : 'status_before_return=@status_before_return,'}exchange_rate=@exchange_rate,
           subtotal_khr=@subtotal_khr,discount_khr=@discount_khr,tax_khr=@tax_khr,
           total_khr=@total_khr,delivery_fee_khr=@delivery_fee_khr,
           membership_discount_khr=@membership_discount_khr,payment_method=@payment_method,

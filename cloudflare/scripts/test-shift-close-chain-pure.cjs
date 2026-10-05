@@ -96,7 +96,8 @@ CREATE TABLE fees(id INTEGER PRIMARY KEY, created_at TEXT, branch_id INTEGER, sa
   label TEXT, amount_usd REAL DEFAULT 0, amount_khr REAL DEFAULT 0, created_by INTEGER);
 CREATE TABLE returns(id INTEGER PRIMARY KEY, created_at TEXT, branch_id INTEGER, cashier_id INTEGER,
   status TEXT DEFAULT 'completed', return_scope TEXT DEFAULT 'customer',
-  total_refund_usd REAL DEFAULT 0, total_refund_khr REAL DEFAULT 0)`)
+  total_refund_usd REAL DEFAULT 0, total_refund_khr REAL DEFAULT 0,
+  refund_currency TEXT, owed_reduction_usd REAL NOT NULL DEFAULT 0, sale_id INTEGER)`)
 sqlite.prepare('INSERT INTO branches(id,name,is_active) VALUES (1,?,1)').run('Canonical Shop')
 sqlite.prepare("INSERT INTO settings(key,value) VALUES ('pos_payment_methods',?)").run('["Cash USD","ABA"]')
 

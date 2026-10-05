@@ -28,11 +28,9 @@
  * Owner rulings encoded here (Sep 6 2026), each one a decision rather than a
  * fact the schema could supply:
  *
- *   * REFUNDS are subtracted. There is no refund-tender column anywhere in the
- *     schema -- `returns` carries total_refund_usd/khr and nothing about how
- *     the money went back -- so a refund issued in the window is treated as
- *     cash out of this drawer, once, in dollars: total_refund_khr is the same
- *     refund's riel equivalent, not a second payout (see shiftRefunds).
+ *   * REFUNDS are subtracted from the drawer of the currency they were paid in
+ *     (returns.refund_currency, owner ruling 29 Sep 2026), once. The part of a
+ *     refund that lowered a Not Paid sale's debt left no drawer (see shiftRefunds).
  *   * COURIER payouts are subtracted, for the same reason: what a courier was
  *     actually paid (sales.delivery_actual_cost_usd/khr, migration 0068) is a
  *     payout with no tender column. The double-count guard is NOT re-invented
@@ -65,6 +63,19 @@ import {
   PAYMENT_METHOD_KINDS_SETTING, type PaymentMethodKindMap,
 } from './paymentMethodRegistry'
 import type { Env } from '../index'
+
+// How a customer refund left the shop (owner rulings 29 Sep 2026, migration
+// 0234): returns.refund_currency is the currency it was paid in (NULL =
+// recorded before the column, read as dollars) and returns.owed_reduction_usd
+// the part that lowered a Not Paid sale's debt instead of leaving a drawer.
+// Defined here rather than imported so every test that loads this module keeps
+// its module map; lib/refundTender.ts refundTender() is the JS reading of it.
+const REFUND_CASH_USD = '(COALESCE(returns.total_refund_usd, 0) - COALESCE(returns.owed_reduction_usd, 0))'
+/** Dollars a refund took from the dollar drawer (alias `returns`). */
+export const REFUND_DRAWER_USD_SQL = `CASE WHEN returns.refund_currency = 'KHR' THEN 0 ELSE ${REFUND_CASH_USD} END`
+/** Riel a refund took from the riel drawer (alias `returns`): its cash share of the return's riel figure (the sale's booked rate). */
+export const REFUND_DRAWER_KHR_SQL = `CASE WHEN returns.refund_currency = 'KHR' AND COALESCE(returns.total_refund_usd, 0) > 0
+    THEN ROUND(COALESCE(returns.total_refund_khr, 0) * ${REFUND_CASH_USD} / returns.total_refund_usd) ELSE 0 END`
 
 const round2 = (value: number) => Math.round(value * 100) / 100
 const roundKhr = (value: number) => Math.round(value)
@@ -413,20 +424,28 @@ export async function tenderWhere(
  * is attributed for revenue (there it belongs to the sale's window). Both are
  * right for their own question; this one is about the cash box.
  *
- * Dollars only. total_refund_khr is the riel equivalent of the same refund
- * (customerReturnEntitlement: multiplyMoney4(usd, rate); the legacy path sums
- * the sale lines' riel twins), not a second payout, so subtracting it as well
- * took every refund out of the drawer twice (SCAN1 M2).
+ * Each refund leaves ONE drawer: riel refunds the riel drawer, every other
+ * refund (a return recorded before the currency was asked included) the dollar
+ * drawer. Subtracting total_refund_khr beside the dollars took every refund out
+ * twice (SCAN1 M2); it is the same refund at the return's rate. The part of a
+ * refund that lowered a Not Paid sale's debt (owed_reduction_usd) left no
+ * drawer, and a refund on a sale later cancelled goes out with that sale.
  */
 export async function shiftRefunds(env: Env, shift: ShiftReconciliationSession, nowMs: number): Promise<ShiftMoney> {
   const { clauses, params } = shiftWindowWhere('returns', shiftFilters(shift, nowMs))
   if (shift.branch_id) { clauses.push('returns.branch_id = @branchId'); params.branchId = shift.branch_id }
   clauses.push("COALESCE(returns.status, 'completed') <> 'cancelled'")
   clauses.push("COALESCE(returns.return_scope, 'customer') = 'customer'")
-  const row = await getDb(env).prepare(`SELECT COALESCE(SUM(total_refund_usd), 0) AS usd
+  // A refund on a sale that was later cancelled is not drawer cash: the
+  // cancelled sale's tender already left the drawer total (shiftTender), so
+  // subtracting its refund as well put the drawer short by the refund (LH-4).
+  clauses.push(`NOT EXISTS(SELECT 1 FROM sales refund_sale WHERE refund_sale.id = returns.sale_id
+    AND COALESCE(NULLIF(refund_sale.sale_status, ''), 'completed') = 'cancelled')`)
+  const row = await getDb(env).prepare(`SELECT COALESCE(SUM(${REFUND_DRAWER_USD_SQL}), 0) AS usd,
+      COALESCE(SUM(${REFUND_DRAWER_KHR_SQL}), 0) AS khr
       FROM returns WHERE ${clauses.join(' AND ')}`)
-    .get<{ usd: number }>(params)
-  return { usd: round2(Number(row?.usd || 0)), khr: 0 }
+    .get<{ usd: number; khr: number }>(params)
+  return { usd: round2(Number(row?.usd || 0)), khr: roundKhr(Number(row?.khr || 0)) }
 }
 
 /**

@@ -74,7 +74,8 @@ CREATE TABLE fees(id INTEGER PRIMARY KEY, created_at TEXT, fee_date TEXT, branch
  label TEXT, amount_usd REAL DEFAULT 0, amount_khr REAL DEFAULT 0, created_by INTEGER);
 CREATE TABLE returns(id INTEGER PRIMARY KEY, created_at TEXT, branch_id INTEGER, cashier_id INTEGER,
  status TEXT DEFAULT 'completed', return_scope TEXT DEFAULT 'customer',
- total_refund_usd REAL DEFAULT 0, total_refund_khr REAL DEFAULT 0);
+ total_refund_usd REAL DEFAULT 0, total_refund_khr REAL DEFAULT 0,
+ refund_currency TEXT, owed_reduction_usd REAL NOT NULL DEFAULT 0, sale_id INTEGER);
 CREATE TABLE inventory_movements(id INTEGER PRIMARY KEY, movement_type TEXT, quantity REAL, reference_id TEXT, created_at TEXT);
 
 INSERT INTO settings VALUES('pos_payment_methods','["Cash","ABA"]');

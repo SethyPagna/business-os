@@ -9,7 +9,9 @@ const root = path.join(__dirname, '..')
 const cache = new Map()
 const actual = new Set(['saleStatusResolution','actorSnapshot','movementBranchName','db', 'permissions', 'saleRecords', 'saleRecordEvents',
   'moneyPrecision', 'saleMoneyPrecision', 'refundMoneyPrecision', 'promotionRules', 'saleItemPricing',
-  'customerReturnEntitlement', 'returnBulkAction', 'returnCreateAction'])
+  'customerReturnEntitlement', 'returnBulkAction', 'returnCreateAction',
+  // RET-A F1: the refund currency and the Not Paid debt split (migration 0234).
+  'refundTender', 'returnRefundSplit', 'salesStatus'])
 
 function load(rel) {
   if (cache.has(rel)) return cache.get(rel).exports

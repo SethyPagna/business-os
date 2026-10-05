@@ -48,6 +48,12 @@ import {
   type CustomerReturnPrior, type CustomerReturnQuoteV1, type CustomerReturnSaleLine,
 } from '../lib/customerReturnEntitlement'
 import { canonicalMoney4, SaleMoneyContractError } from '../lib/saleMoneyPrecision'
+import { sumMoney4 } from '../lib/moneyPrecision'
+import {
+  PRIOR_RETURN_MONEY_SQL, priorReturnMoney, ReturnRefundSplitError, saleStatusWithReturns, splitReturnRefund,
+  type PriorReturnMoney, type PriorReturnMoneyRow, type ReturnDebtSale, type ReturnRefundSplit,
+} from '../lib/returnRefundSplit'
+import type { RefundCurrency } from '../lib/refundTender'
 import { ProductMergeLineageError, resolveProductMergeLineage } from '../lib/productMergeLineage'
 import { TAGGED_DISPOSAL_MOVEMENT_TYPE } from '../lib/stockCondition'
 
@@ -242,6 +248,35 @@ export function publicCustomerReturnQuote(quote: CustomerReturnQuoteV1) {
     items: quote.items.map(({ refund_snapshot_json: _snapshot, ...line }) => line),
   }
 }
+
+type ReturnDebtState = { sale: ReturnDebtSale; prior: PriorReturnMoney; activeCount: number }
+
+async function readReturnDebtState(db: ReturnType<typeof getDb>, saleId: number, excludeReturnId: number | null = null): Promise<ReturnDebtState | null> {
+  const sale = await db.prepare(`SELECT total_usd,amount_paid_usd,amount_paid_khr,exchange_rate,money_precision_version,
+    calculated_total_usd,sale_status,status_before_return FROM sales WHERE id=?`).get<ReturnDebtSale>([saleId])
+  if (!sale) return null
+  const row = await db.prepare(PRIOR_RETURN_MONEY_SQL).get<PriorReturnMoneyRow>({ saleId, excludeReturnId })
+  return { sale, prior: priorReturnMoney(row), activeCount: Number(row?.active_count) || 0 }
+}
+
+const RETURN_SPLIT_REFUSALS: Record<ReturnRefundSplitError['code'], string> = {
+  customer_return_refund_exceeds_paid: 'This return would refund more cash than the customer paid on this Not Paid sale. Review the return.',
+  customer_return_owed_unreadable: 'This sale\'s payment cannot be read, so the refund cannot be split. Review the sale first.',
+}
+
+function returnSplitRefusal(error: ReturnRefundSplitError) {
+  return { error: RETURN_SPLIT_REFUSALS[error.code], code: error.code, action: 'review_required' as const }
+}
+
+// Guards the prior returns the refund split was measured against (count, refunds, debt lowered).
+const RETURN_DEBT_GUARD = `(json_type(@guardJson,'$.sale')='null' OR EXISTS(SELECT 1 FROM (
+      SELECT COUNT(CASE WHEN COALESCE(returns.status,'completed')<>'cancelled' THEN 1 END) AS active_count,
+        ROUND(COALESCE(SUM(CASE WHEN COALESCE(returns.status,'completed')<>'cancelled' THEN total_refund_usd ELSE 0 END),0),4) AS refund_usd,
+        ROUND(COALESCE(SUM(CASE WHEN COALESCE(returns.status,'completed')<>'cancelled' THEN owed_reduction_usd ELSE 0 END),0),4) AS owed_reduction_usd
+      FROM returns WHERE returns.sale_id=json_extract(@guardJson,'$.sale.id') AND COALESCE(returns.return_scope,'customer')='customer') money
+      WHERE money.active_count=json_extract(@guardJson,'$.sale.returns_money.count')
+        AND money.refund_usd=json_extract(@guardJson,'$.sale.returns_money.refund_usd')
+        AND money.owed_reduction_usd=json_extract(@guardJson,'$.sale.returns_money.owed_reduction_usd')))`
 
 function customerReturnAuthorityPredicate(param = '@customerReturnAuthorityJson'): string {
   return `
@@ -1314,9 +1349,20 @@ app.post('/quote', async (c) => {
   }
   c.header('Cache-Control', 'no-store')
   try {
-    return c.json({ ...publicCustomerReturnQuote(await customerReturnQuoteFromDb(getDb(c.env), saleId, requested)),
+    const db = getDb(c.env)
+    const quote = await customerReturnQuoteFromDb(db, saleId, requested)
+    // Opt-in: a till built before the split validates this response's exact keys.
+    let refundSplit: { refund_split: { owed_reduction_usd: number; cash_refund_usd: number } } | null = null
+    if (c.req.query('split') === '1') {
+      const debtState = await readReturnDebtState(db, saleId)
+      if (!debtState) throw new SaleMoneyContractError('customer_return_sale_not_found')
+      const split = splitReturnRefund({ sale: debtState.sale, prior: debtState.prior, refundUsd: quote.total_refund_usd })
+      refundSplit = { refund_split: { owed_reduction_usd: split.owedReductionUsd, cash_refund_usd: split.cashUsd } }
+    }
+    return c.json({ ...publicCustomerReturnQuote(quote), ...refundSplit,
       customer_return_create_version: 1, customer_return_edit_version: 0 })
   } catch (error) {
+    if (error instanceof ReturnRefundSplitError) return c.json(returnSplitRefusal(error), 409)
     if (error instanceof SaleMoneyContractError) {
       const conflict = /legacy|cohort|sale_invalid|not_found|cap|lineage/.test(error.message)
       return c.json({ error: error.message, code: error.message, action: conflict ? 'review_required' : 'fix_request' }, conflict ? 409 : 400)
@@ -1607,6 +1653,25 @@ app.post('/', async (c) => {
     ?? Number(returnItems.reduce((sum, item, index) => sum + refundPrices[index].unitUsd * Number(item.quantity), 0).toFixed(2))
   const totalRefundKhr = customerReturnV1Plan?.quote.total_refund_khr
     ?? Math.round(returnItems.reduce((sum, item, index) => sum + refundPrices[index].unitKhr * Number(item.quantity), 0))
+  const refundCurrency: RefundCurrency = canonicalIntent.refund_currency === 'KHR' ? 'KHR' : 'USD'
+  let refundSplit: ReturnRefundSplit = { owedReductionUsd: 0, cashUsd: totalRefundUsd }
+  let debtState: ReturnDebtState | null = null
+  if (saleMeta) {
+    debtState = await readReturnDebtState(db, requestedSaleId!)
+    if (!debtState) return c.json({ error: 'Original sale not found' }, 400)
+    try {
+      refundSplit = splitReturnRefund({ sale: debtState.sale, prior: debtState.prior, refundUsd: totalRefundUsd })
+      projectedStatus = saleStatusWithReturns({
+        sale: debtState.sale,
+        activeOwedReductionUsd: sumMoney4([debtState.prior.owedReductionUsd, refundSplit.owedReductionUsd]),
+        loweredDebt: debtState.prior.loweredDebt || refundSplit.owedReductionUsd > 0,
+        quantityStatus: projectedStatus!,
+      })
+    } catch (error) {
+      if (error instanceof ReturnRefundSplitError) return c.json(returnSplitRefusal(error), 409)
+      throw error
+    }
+  }
 
   const returnLotPlans: Array<{ splits: Array<{ batchId: number; quantity: number }>; plainQuantity: number }> = []
   for (const item of returnItems) {
@@ -1815,7 +1880,8 @@ app.post('/', async (c) => {
   }
 
   const guardState = {
-    sale: saleMeta ? { id: requestedSaleId, revision: saleMeta.write_revision, status: beforeSaleStatus, status_before_return: saleMeta.status_before_return || '' } : null,
+    sale: saleMeta ? { id: requestedSaleId, revision: saleMeta.write_revision, status: beforeSaleStatus, status_before_return: saleMeta.status_before_return || '',
+      returns_money: { count: debtState!.activeCount, refund_usd: debtState!.prior.refundUsd, owed_reduction_usd: debtState!.prior.owedReductionUsd } } : null,
     branch: branch ? { id: branch.id, name: branch.name || '', is_active: Number(branch.is_active || 0) } : null,
     products: productIds.map((id) => {
       const product = productMap.get(id)
@@ -1851,6 +1917,7 @@ app.post('/', async (c) => {
         AND COALESCE(s.sale_status,'completed')=json_extract(@guardJson,'$.sale.status')
         AND COALESCE(s.status_before_return,'')=json_extract(@guardJson,'$.sale.status_before_return')
     ))
+    AND ${RETURN_DEBT_GUARD}
     AND (json_type(@guardJson,'$.branch')='null' OR EXISTS(
       SELECT 1 FROM branches b WHERE b.id=json_extract(@guardJson,'$.branch.id')
         AND COALESCE(b.name,'')=json_extract(@guardJson,'$.branch.name')
@@ -1900,12 +1967,12 @@ app.post('/', async (c) => {
       return_number,client_request_id,sale_id,receipt_number,cashier_id,cashier_name,
       customer_id,customer_name,branch_id,branch_name,return_scope,reason,return_type,
       notes,total_refund_usd,total_refund_khr,exchange_rate,status,search_normalized,
-      money_precision_version,calculated_refund_usd,rounding_adjustment_usd
+      money_precision_version,calculated_refund_usd,rounding_adjustment_usd,refund_currency,owed_reduction_usd
     ) VALUES(
       @return_number,@returnClientRequestId,@sale_id,@receipt_number,@cashier_id,@cashier_name,
       @customer_id,@customer_name,@branch_id,@branch_name,'customer',@reason,@return_type,
       @notes,@total_refund_usd,@total_refund_khr,@exchange_rate,'completed',@search_normalized,
-      @money_precision_version,@calculated_refund_usd,@rounding_adjustment_usd
+      @money_precision_version,@calculated_refund_usd,@rounding_adjustment_usd,@refund_currency,@owed_reduction_usd
     )`,
     params: {
       return_number: returnNumber, returnClientRequestId: clientRequestId, sale_id: requestedSaleId,
@@ -1922,6 +1989,7 @@ app.post('/', async (c) => {
       money_precision_version: isMoneyV1 ? 1 : 0,
       calculated_refund_usd: customerReturnV1Plan?.quote.calculated_refund_usd ?? null,
       rounding_adjustment_usd: customerReturnV1Plan?.quote.rounding_adjustment_usd ?? 0,
+      refund_currency: refundCurrency, owed_reduction_usd: refundSplit.owedReductionUsd,
       search_normalized: normalizeSearchText([
         returnNumber, body.receipt_number || saleMeta?.receipt_number, actorSnapshot(user),
         body.customer_name || saleMeta?.customer_name, branchName, reason, canonicalIntent.return_type, canonicalIntent.notes,
@@ -2160,12 +2228,17 @@ app.post('/', async (c) => {
     }])!
     statements.push(event.statement)
     eventBytes = event.eventsBytes
+  } else if (saleMeta && refundSplit.owedReductionUsd > 0) {
+    // What the sale owes changed without its status: move its revision so a
+    // settlement read before this return cannot commit against the old debt.
+    statements.push({ sql: 'UPDATE sales SET updated_at=@occurredAt WHERE id=@saleId', params: { occurredAt, saleId: requestedSaleId } })
   }
   const auditDetails = JSON.stringify({
     source_kind: 'return_create', source_id: receiptId, generation: 0,
     sale_id: requestedSaleId, return_number: returnNumber,
     return_items: returnItems.length, replacement_items: replacementLines.length,
     event_recorded: eventBytes > 0,
+    refund_currency: refundCurrency, owed_reduction_usd: refundSplit.owedReductionUsd, cash_refund_usd: refundSplit.cashUsd,
   })
   statements.push({
     sql: `INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details,table_name,record_id,new_value)
@@ -2193,6 +2266,7 @@ app.post('/', async (c) => {
     replacement_items: replacementLines.length, sale_allocations: saleAllocationCount,
     movements: movementCount, event: eventBytes > 0 ? 1 : 0,
     status: projectedStatus, branch_stock: branchSnapshots, batch_stock: batchSnapshots,
+    tender: { currency: refundCurrency, owed_reduction_usd: refundSplit.owedReductionUsd },
     v1_header: customerReturnV1Plan ? {
       money_precision_version: 1,
       calculated_refund_usd: customerReturnV1Plan.quote.calculated_refund_usd,
@@ -2219,6 +2293,9 @@ app.post('/', async (c) => {
     AND (SELECT COUNT(*) FROM sale_record_events WHERE source_kind='return_create' AND source_id=@receiptId
       AND generation=0)=json_extract(@expectedJson,'$.event')
     AND EXISTS(SELECT 1 FROM audit_logs WHERE entity='return_create' AND entity_id=@receiptId)
+    AND EXISTS(SELECT 1 FROM returns r WHERE r.id=${returnIdExpression}
+      AND r.refund_currency=json_extract(@expectedJson,'$.tender.currency')
+      AND r.owed_reduction_usd=json_extract(@expectedJson,'$.tender.owed_reduction_usd'))
     AND (json_type(@expectedJson,'$.v1_header')='null' OR EXISTS(SELECT 1 FROM returns r
       WHERE r.id=${returnIdExpression}
         AND r.money_precision_version=json_extract(@expectedJson,'$.v1_header.money_precision_version')
@@ -3154,6 +3231,22 @@ app.patch('/:id', async (c) => {
     })
   }
 
+  const editedRefundUsd = Number(totalRefundUsd.toFixed(2))
+  let editSplit: ReturnRefundSplit = { owedReductionUsd: 0, cashUsd: editedRefundUsd }
+  let editDebtState: ReturnDebtState | null = null
+  if (linkedSale) {
+    editDebtState = await readReturnDebtState(db, linkedSale.id, returnId)
+    if (!editDebtState) throw new Error('Original sale not found')
+    const prior = { ...editDebtState.prior, loweredDebt: editDebtState.prior.loweredDebt || Number(existing.owed_reduction_usd) > 0 }
+    editSplit = splitReturnRefund({ sale: editDebtState.sale, prior, refundUsd: editedRefundUsd })
+    projectedSaleStatus = saleStatusWithReturns({
+      sale: editDebtState.sale,
+      activeOwedReductionUsd: sumMoney4([prior.owedReductionUsd, editSplit.owedReductionUsd]),
+      loweredDebt: prior.loweredDebt || editSplit.owedReductionUsd > 0,
+      quantityStatus: projectedSaleStatus!,
+    })
+  }
+
   // Named so the audit row below records the values this statement actually
   // wrote -- a recomputed copy would be a second source of truth that can
   // drift from the UPDATE it claims to describe.
@@ -3164,14 +3257,15 @@ app.patch('/:id', async (c) => {
     // The refund is derived from the sale lines, not accepted from the
     // client: a posted total is exactly the "restate what was paid" the
     // line-level resolution above exists to prevent.
-    total_refund_usd: Number(totalRefundUsd.toFixed(2)),
+    total_refund_usd: editedRefundUsd,
     total_refund_khr: Math.round(totalRefundKhr),
+    owed_reduction_usd: editSplit.owedReductionUsd,
     branch_id: body.branch_id || existing.branch_id,
     branch_name: branchName,
   }
   statements.push({
     sql: `UPDATE returns SET reason=@reason, return_type=@return_type, notes=@notes,
-          total_refund_usd=@total_refund_usd, total_refund_khr=@total_refund_khr,
+          total_refund_usd=@total_refund_usd, total_refund_khr=@total_refund_khr, owed_reduction_usd=@owed_reduction_usd,
           branch_id=@branch_id, branch_name=@branch_name, updated_at=@updated_at WHERE id=@id`,
     params: {
       ...returnUpdateValues,
@@ -3201,10 +3295,17 @@ app.patch('/:id', async (c) => {
       bulkAssertion(`
         COALESCE((SELECT sale_status FROM sales WHERE id=@sale),'completed')=@status
         AND COALESCE((SELECT status_before_return FROM sales WHERE id=@sale),'')=@beforeReturn
+        AND EXISTS(SELECT 1 FROM (${PRIOR_RETURN_MONEY_SQL.replace('@saleId', '@sale')}) money
+          WHERE money.active_count=@activeCount AND ROUND(money.refund_usd,4)=@priorRefundUsd
+            AND ROUND(money.owed_reduction_usd,4)=@priorOwedReductionUsd)
       `, {
         sale: linkedSale.id,
         status: String(linkedSale.sale_status || 'completed'),
         beforeReturn: String(linkedSale.status_before_return || ''),
+        excludeReturnId: returnId,
+        activeCount: editDebtState!.activeCount,
+        priorRefundUsd: editDebtState!.prior.refundUsd,
+        priorOwedReductionUsd: editDebtState!.prior.owedReductionUsd,
       }),
     )
     const beforeStatus = String(linkedSale.sale_status || 'completed')
@@ -3230,6 +3331,8 @@ app.patch('/:id', async (c) => {
       eventBytes = event.eventsBytes
       statements.push(event.statement)
       saleEventProvenance = { source_kind: 'return_edit', source_id: receiptId, generation: 0, sale_id: linkedSale.id }
+    } else if (editSplit.owedReductionUsd !== Number(existing.owed_reduction_usd || 0)) {
+      statements.push({ sql: 'UPDATE sales SET updated_at=@updatedAt WHERE id=@sale', params: { updatedAt: mutationStamp, sale: linkedSale.id } })
     }
   }
   statements.push(
@@ -3265,6 +3368,7 @@ app.patch('/:id', async (c) => {
     if (error instanceof SaleRecordEventError) {
       return c.json({ error: error.message, code: 'return_edit_too_large' }, 400)
     }
+    if (error instanceof ReturnRefundSplitError) return c.json(returnSplitRefusal(error), 409)
     if (/return_bulk_guards|sale_bulk_guards|CHECK constraint failed: guard_value/i.test((error as Error).message)) {
       return c.json({ error: 'Return or linked sale changed. Refresh before retrying.', code: 'write_conflict', conflict: true }, 409)
     }

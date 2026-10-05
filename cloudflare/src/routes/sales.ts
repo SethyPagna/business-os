@@ -121,7 +121,7 @@ import {
   type SaleRecordChange,
 } from '../lib/saleRecords'
 import { CREATABLE_SALE_STATUSES, VALID_SALE_STATUSES, STOCK_DEDUCTED_STATUSES } from '../lib/salesStatus'
-import { paymentCoversSaleTotal, recordedSaleOutstandingUsd, resolvePaidSaleStatus, statusChangeNeedsPayment, type RecordedSaleMoney } from '../lib/saleStatusResolution'
+import { paymentCoversSaleTotal, recordedSaleOutstandingUsd, recordedSaleOwedTotalUsd, resolvePaidSaleStatus, statusChangeNeedsPayment, type RecordedSaleMoney } from '../lib/saleStatusResolution'
 import { DAMAGE_OUT_MOVEMENT, DAMAGE_IN_MOVEMENT } from '../lib/returnsStock'
 import {
   CANCEL_REASONS,
@@ -2386,6 +2386,21 @@ app.patch('/:id/status', async (c) => {
     if (reviewedRate !== latestRate) {
       return c.json({ error: 'The exchange rate changed. Review the payment again.', code: 'exchange_rate_changed', current_exchange_rate: latestRate, current: { exchange_rate: latestRate } }, 409)
     }
+    // RET-A F1 (owner rule 29 Sep, confirmed 5 Oct): what the sale's returns
+    // took off its debt (returns.owed_reduction_usd) is no longer owed, so the
+    // payment is measured against the total less that. A return inserted
+    // after this read moves the sale revision, and the guard below refuses.
+    // Same reading as lib/returnRefundSplit.ts returnOwedReductionSql, inline so
+    // this route keeps its module graph.
+    const debtLowered = await db.prepare(`SELECT COALESCE(SUM(owed_reduction_usd), 0) AS return_owed_reduction_usd FROM returns
+      WHERE sale_id=@id AND COALESCE(status,'completed')<>'cancelled' AND COALESCE(return_scope,'customer')='customer'`)
+      .get<{ return_owed_reduction_usd: number | null }>({ id: Number(id) })
+    let payableUsd: unknown = sale.total_usd
+    try {
+      payableUsd = recordedSaleOwedTotalUsd({ ...sale, return_owed_reduction_usd: debtLowered?.return_owed_reduction_usd ?? 0 })
+    } catch {
+      // An unreadable total stays as stored; planSaleSettlement refuses it.
+    }
     let settlementPlan
     try {
       settlementPlan = planSaleSettlement({
@@ -2396,7 +2411,7 @@ app.patch('/:id/status', async (c) => {
         existingPaidKhr: paymentCorrection ? 0 : sale.amount_paid_khr,
         existingPaymentDetailsRaw: paymentCorrection ? null : sale.payment_details,
         existingPaymentMethodRaw: paymentCorrection ? null : sale.payment_method,
-        totalUsd: sale.total_usd,
+        totalUsd: payableUsd,
         exchangeRate: latestRate,
         changeExchangeRateRaw: settingMap.change_exchange_rate,
       })
@@ -2407,6 +2422,20 @@ app.patch('/:id/status', async (c) => {
     const before = await readSaleSettlementState(db, Number(id))
     if (!before) return c.json({ error: 'Sale not found' }, 404)
     const after = buildSaleSettlementAfterState(before, sale, saleStatus, settlementPlan)
+    // A Not Paid sale keeps its status while a return only lowered its debt;
+    // once paid it takes the status its returned quantities give, as a paid
+    // sale with the same returns would, remembering the paid status reached.
+    // Stock is unchanged: every one of these statuses holds quantity - returned.
+    // returnedByItem is the per-line reading above (allocateReturnedQuantities),
+    // the same rule projectedSaleStatusForReturnCreate applies on the returns side.
+    const anyReturned = items.some((item) => (returnedByItem.get(item.id) || 0) > 0)
+    const allReturned = anyReturned && items.every((item) => (returnedByItem.get(item.id) || 0) >= Number(item.quantity))
+    const landedStatus = allReturned ? 'returned' : anyReturned ? 'partial_return' : saleStatus
+    if (landedStatus !== saleStatus) {
+      after.sale_status = landedStatus
+      after.status_before_return = saleStatus
+      updates.push('status_before_return = @status_before_return')
+    }
     updates.push(
       'exchange_rate = @exchange_rate',
       'subtotal_khr = @subtotal_khr',
@@ -2432,7 +2461,7 @@ app.patch('/:id/status', async (c) => {
     settlementSnapshot = { version: 1, operationId: settlementOperationId, saleId: Number(id), receiptNumber: sale.receipt_number == null ? null : String(sale.receipt_number), before, after }
     settlementResponse = {
       id: Number(id),
-      sale_status: saleStatus,
+      sale_status: after.sale_status,
       updated_at: mutationStamp,
       exchange_rate: after.exchange_rate,
       payment_method: after.payment_method,
@@ -5715,17 +5744,22 @@ app.get('/', async (c) => {
           ? 'money_precision_version' : '0 AS money_precision_version'
         // Read recorded operands, never SQLite binary-money SUM. A bounded page
         // must refuse excessive linked history rather than silently omit refunds.
+        // RET-A F1: the part of the refunds that lowered a Not Paid debt
+        // (migration 0234), for the sale's "debt lowered" tag and what it owes.
+        const owedReduction = await hasColumn(db, 'returns', 'owed_reduction_usd')
+          ? 'owed_reduction_usd' : '0 AS owed_reduction_usd'
         const refundRows = await selectInChunks(saleIds, 0, (chunk) => db.prepare(`
-      SELECT id,sale_id,total_refund_usd,total_refund_khr,${returnVersion}
+      SELECT id,sale_id,total_refund_usd,total_refund_khr,${owedReduction},${returnVersion}
       FROM returns
       WHERE sale_id IN (${chunk.map(() => '?').join(',')}) AND COALESCE(status, 'completed') != 'cancelled' AND COALESCE(return_scope, 'customer') = 'customer'
       ORDER BY id LIMIT ${REPORT_MONEY_MAX_ROWS+1}
     `).all<Record<string,unknown>>(chunk))
         if(refundRows.length>REPORT_MONEY_MAX_ROWS)throw new ReportMoneyPrecisionError('too_many_rows')
-        const map=new Map<number,{count:number;usd:ReportExactDecimal;khr:ReportExactDecimal}>()
+        const map=new Map<number,{count:number;usd:ReportExactDecimal;khr:ReportExactDecimal;owedReduction:ReportExactDecimal}>()
         for(const row of refundRows){
-          const id=Number(row.sale_id),group=map.get(id)??{count:0,usd:ReportExactDecimal.zero(),khr:ReportExactDecimal.zero()}
+          const id=Number(row.sale_id),group=map.get(id)??{count:0,usd:ReportExactDecimal.zero(),khr:ReportExactDecimal.zero(),owedReduction:ReportExactDecimal.zero()}
           group.count++;group.usd=group.usd.add(stripMoney(row,'total_refund_usd'));group.khr=group.khr.add(stripMoney(row,'total_refund_khr'))
+          group.owedReduction=group.owedReduction.add(stripMoney(row,'owed_reduction_usd'))
           map.set(id,group)
         }
         return map
@@ -5785,6 +5819,7 @@ app.get('/', async (c) => {
         refund_usd: refundUsd.toNumber(4),
         refund_khr: refundKhr.toNumber(4),
         return_count: refund?.count || 0,
+        return_owed_reduction_usd: (refund?.owedReduction??ReportExactDecimal.zero()).toNumber(4),
         // Never 0: a sale always has at least the fact that it happened, and
         // that is the record every later one is relative to.
         records_count: (recordsBySale.get(sale.id) || 0) + SALE_RECORDS_SELF_COUNT,

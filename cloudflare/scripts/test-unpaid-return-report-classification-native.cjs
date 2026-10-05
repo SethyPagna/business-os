@@ -69,7 +69,10 @@ async function replay(f, receipt, direction) {
   await bulk.replayReturnBulkAction({ DB: f.route }, owner, direction, receipt.actionHistoryId, payload.generation, payload)
 }
 
-async function assertUnpaidConsumers(f, rawStatus, label) {
+// RET-A F1 (owner rule 29 Sep, confirmed 5 Oct): a return on a Not Paid sale lowers the
+// debt and the sale stays Not Paid while it still owes, so the raw status no longer
+// says how many units are still out; each step names its remaining units itself.
+async function assertUnpaidConsumers(f, rawStatus, remaining, label) {
   const env = { DB: f.route }
   const snapshot = await analytics.readSalesReportSnapshot(env, filters)
   const totals = analytics.salesTotalsFromSnapshot(snapshot)
@@ -78,7 +81,6 @@ async function assertUnpaidConsumers(f, rawStatus, label) {
   const row = analytics.businessSummarySalesRowsFromSnapshot(snapshot)[0]
   assert.equal(row.collected_total_usd, 0, `${label}: export row collected`)
   assert.equal(row.status, rawStatus, `${label}: raw export status is retained`)
-  const remaining = rawStatus === 'returned' ? 0 : rawStatus === 'partial_return' ? 1 : 2
   assert.equal(totals.pending_revenue_usd, remaining * 9.5, `${label}: pending revenue reverses the same merchandise recognition as revenue`)
   assert.equal(row.pending_revenue_usd, totals.pending_revenue_usd, `${label}: aggregate pending and export row agree`)
   assert.equal(totals.pending_cost_usd, remaining * 4, `${label}: pending COGS reverses only restocked cost`)
@@ -128,32 +130,32 @@ function sqlEligibility(f, id, retained = 'sales.status_before_return') {
     const firstReturn = await createReturn(f, sale, 'unpaid-report-partial')
     f.raw.prepare("UPDATE returns SET created_at='2026-10-01 01:00:00' WHERE id=?").run([firstReturn.id])
     const saved = f.raw.prepare('SELECT sale_status,status_before_return FROM sales WHERE id=?').get([sale.id])
-    assert.equal(saved.sale_status, 'partial_return')
-    assert.equal(saved.status_before_return, 'awaiting_payment')
+    assert.equal(saved.sale_status, 'awaiting_payment', 'the sale still owes, so it stays Not Paid (owner rule 29 Sep / 5 Oct)')
+    assert.equal(saved.status_before_return, null)
     const totals = await analytics.getSalesTotals({ DB: f.route }, filters)
     assert.equal(totals.collected_total_usd, 0, 'a partial return must not turn an unpaid sale into collected money')
     assert.equal(totals.pending_tx_count, 1, 'the retained unpaid lifecycle must remain pending')
     assert.equal(rawCustomerBeforeReturn.collected_usd, 0, 'raw unpaid customer totals must share existing collected eligibility')
     console.log('PASS actual unpaid sale/create-return routes preserve pending reporting authority')
     assert.deepEqual({ ...sqlEligibility(f, sale.id) }, { awaiting: 1, collected: 0 })
-    const partial = await assertUnpaidConsumers(f, 'partial_return', 'partial')
+    const partial = await assertUnpaidConsumers(f, 'awaiting_payment', 1, 'partial')
     assert.equal(partial.totals.revenue_usd, 9.5, 'recognized revenue/refund basis is unchanged')
     const secondReturn = await createReturn(f, sale, 'unpaid-report-full')
     assert.equal(f.raw.prepare('SELECT status_before_return FROM sales WHERE id=?').get([sale.id]).status_before_return, 'awaiting_payment')
-    const full = await assertUnpaidConsumers(f, 'returned', 'full')
+    const full = await assertUnpaidConsumers(f, 'returned', 0, 'full')
     assert.equal(full.totals.revenue_usd, 0)
     const cancelled = await status(f, secondReturn.id, 'cancelled', 'cancel-second')
-    await assertUnpaidConsumers(f, 'partial_return', 'cancel second')
+    await assertUnpaidConsumers(f, 'awaiting_payment', 1, 'cancel second')
     await replay(f, cancelled, 'undo')
-    await assertUnpaidConsumers(f, 'returned', 'undo cancellation')
+    await assertUnpaidConsumers(f, 'returned', 0, 'undo cancellation')
     await replay(f, cancelled, 'redo')
-    await assertUnpaidConsumers(f, 'partial_return', 'redo cancellation')
+    await assertUnpaidConsumers(f, 'awaiting_payment', 1, 'redo cancellation')
     await status(f, firstReturn.id, 'cancelled', 'cancel-first')
-    await assertUnpaidConsumers(f, 'awaiting_payment', 'cancel final')
+    await assertUnpaidConsumers(f, 'awaiting_payment', 2, 'cancel final')
     await status(f, firstReturn.id, 'completed', 'restore-first')
-    await assertUnpaidConsumers(f, 'partial_return', 'restore first')
+    await assertUnpaidConsumers(f, 'awaiting_payment', 1, 'restore first')
     await status(f, secondReturn.id, 'completed', 'restore-second')
-    await assertUnpaidConsumers(f, 'returned', 'restore full')
+    await assertUnpaidConsumers(f, 'returned', 0, 'restore full')
     assert.equal(f.raw.prepare('SELECT COUNT(*) n FROM return_create_receipts').get().n, 2)
     assert.equal(f.raw.prepare('SELECT amount_paid_usd FROM sales WHERE id=?').get([sale.id]).amount_paid_usd, 0,
       'reporting must not manufacture a payment')
