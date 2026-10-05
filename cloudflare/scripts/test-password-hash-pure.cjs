@@ -174,6 +174,24 @@ async function main() {
   }
   assert.ok(!/UPDATE[^']*updated_at/.test(source), 'no upgrade statement writes updated_at')
 
+  // Every writer and verifier goes through this module: no other Worker
+  // source imports bcryptjs or calls its hash/compare (a new writer that
+  // did would write cost-10 bcrypt rows the Free plan cannot check).
+  const srcRoot = path.join(__dirname, '..', 'src')
+  const offenders = []
+  const walk = (dir) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name)
+      if (entry.isDirectory()) walk(full)
+      else if (/\.(ts|js|mjs|cjs)$/.test(entry.name) && full !== SOURCE) {
+        const text = fs.readFileSync(full, 'utf8')
+        if (/from ['"]bcryptjs['"]|require\(['"]bcryptjs['"]\)|\b(hashSync|compareSync|genSaltSync)\(/.test(text)) offenders.push(path.relative(srcRoot, full))
+      }
+    }
+  }
+  walk(srcRoot)
+  assert.deepEqual(offenders, [], `bcryptjs used outside lib/passwordHash.ts: ${offenders.join(', ')}`)
+
   // No plan-tier gate anywhere in the module.
   assert.ok(!/PLAN_TIER|planTier|getPlanLimits|env\b/.test(source.replace(/\/\/.*$/gm, '')), 'the module reads no env and no plan tier')
 

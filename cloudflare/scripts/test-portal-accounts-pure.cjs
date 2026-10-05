@@ -10,6 +10,7 @@
 const fs = require('fs')
 const path = require('path')
 const ts = require('typescript')
+const { loadRealPasswordHash } = require('./harness/password_hash_stub.cjs')
 const assert = require('assert')
 const Module = require('module')
 const { openDb } = require('./harness/d1compat.cjs')
@@ -90,6 +91,7 @@ const { signupPortalAccount, signinPortalAccount, PORTAL_CONSENT_VERSION } = loa
   './passwordPolicy': passwordPolicy,
   './contactDuplicates': contactDuplicates,
   './anonymousCustomer': anonymousCustomer,
+  './passwordHash': loadRealPasswordHash(),
 })
 
 const env = {}
@@ -137,6 +139,7 @@ function makeIsolatedPortal(membershipOverride = membershipNumber, hooks = {}) {
     './passwordPolicy': passwordPolicy,
     './contactDuplicates': contactDuplicates,
     './anonymousCustomer': anonymousCustomer,
+    './passwordHash': loadRealPasswordHash(),
   })
   return {
     signup: signup2,

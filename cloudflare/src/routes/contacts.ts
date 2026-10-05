@@ -36,7 +36,7 @@ import { contactDisplayAddress, type ContactOptionMode } from '../lib/contactOpt
 import { canonicalizePhone } from '../lib/phone'
 import { normalizeMembershipNumber, withMintedMembershipNumber } from '../lib/membershipNumber'
 import { revokePortalSessionsForAccount } from '../lib/portalSession'
-import bcrypt from 'bcryptjs'
+import { hashPassword } from '../lib/passwordHash'
 import { buildContactMatchClause } from '../lib/contactSearch'
 import { buildSalesCustomerMatchClause } from '../lib/salesCustomerSearch'
 import { buildContactIdClause, parseContactIdFilter, CONTACT_ID_FILTER_MAX } from '../lib/contactIds'
@@ -1723,7 +1723,7 @@ function registerContactRoutes(config: ContactConfig) {
         SET password_hash = @h, updated_at = CURRENT_TIMESTAMP
         WHERE id = @aid AND contact_id = @customerId
           AND EXISTS (SELECT 1 FROM customers WHERE id = @customerId AND ${customerIsProfileSql()})`)
-        .run({ h: bcrypt.hashSync(tempPassword, 10), aid: account.id, customerId: id })
+        .run({ h: await hashPassword(tempPassword), aid: account.id, customerId: id })
       if (Number(update.changes || 0) !== 1) return anonymousCustomerMutationResponse(c)
       await revokePortalSessionsForAccount(c.env, account.id)
       await audit(c.env, user?.id ?? null, actorSnapshot(user), 'portal_reset', config.entity, id, {})

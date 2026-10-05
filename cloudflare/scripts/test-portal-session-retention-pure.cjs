@@ -31,6 +31,7 @@
 const fs = require('fs')
 const path = require('path')
 const ts = require('typescript')
+const { loadRealPasswordHash } = require('./harness/password_hash_stub.cjs')
 const assert = require('assert')
 const Module = require('module')
 const { openDb } = require('./harness/d1compat.cjs')
@@ -112,6 +113,7 @@ const session = loadReal('lib/portalSession.ts', {
     './passwordPolicy': {},
     './contactDuplicates': {},
     './anonymousCustomer': loadReal('lib/anonymousCustomer.ts'),
+    './passwordHash': loadRealPasswordHash(),
   }),
   './anonymousCustomer': loadReal('lib/anonymousCustomer.ts'),
   'hono/cookie': cookieStub,
