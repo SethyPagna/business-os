@@ -50,7 +50,11 @@ assert.match(dashboard, /getDashboard\(query\)/, 'summary refresh must receive t
 assert.match(dashboard, /getAnalytics\(query\)/, 'analytics refresh must receive the same canonical range')
 assert.match(transport, /appendQuery\('\/api\/dashboard', query\)/, 'dashboard summary transport must forward range parameters')
 assert.match(compat, /startDate: String\(query\.startDate \|\| today\)/, 'the dashboard API fallback range must be today as well')
-assert.match(compat, /async function dashboardSummary\(env: Env, query: Record<string, string>\)/, 'dashboard summary must accept the selected range')
+// G39 item 1 added a third parameter: the cache context the shared stock
+// overview needs (request origin + waitUntil). The selected range is still the
+// second, and the route still forwards the request's own query.
+assert.match(compat, /async function dashboardSummary\(env: Env, query: Record<string, string>, overviewCtx: DashboardStockOverviewContext\)/, 'dashboard summary must accept the selected range')
+assert.match(compat, /dashboardSummary\(c\.env, c\.req\.query\(\), dashboardOverviewContext\(c\)\)/, 'dashboard summary routes must forward the selected range query')
 // The selected range scopes the sales/returns tiles and the recent-sales
 // feed. It must NOT scope the inventory alert cards: a product that is out of
 // stock cannot sell, so restricting them to "products sold in the range"
@@ -58,7 +62,15 @@ assert.match(compat, /async function dashboardSummary\(env: Env, query: Record<s
 // cloudflare/scripts/test-compat-dashboard-daterange-pure.cjs for the
 // behavioral proof against real sqlite.
 assert.doesNotMatch(compat, /productInRangeClause/, 'inventory alert cards must not be scoped to products sold in the selected range')
-assert.match(compat, /whereSql: 'WHERE p\.is_active = 1',/, 'dashboard stock stats must stay catalog-wide so the card badges match their lists')
+// The stock block now comes from the shared overview, handed no range, branch
+// or params; the overview itself reads the plain active catalog.
+assert.match(compat, /loadDashboardStockOverview\(env, overviewCtx\)/, 'dashboard stock block must come from the shared catalog-wide overview with no range argument')
+const stockOverview = fs.readFileSync(new URL('../../cloudflare/src/lib/dashboardStockOverview.ts', import.meta.url), 'utf8')
+const familyStockStats = fs.readFileSync(new URL('../../cloudflare/src/lib/familyStockStats.ts', import.meta.url), 'utf8')
+const overviewFn = familyStockStats.slice(familyStockStats.indexOf('export async function getFamilyStockOverview'))
+assert.match(overviewFn, /FROM products p\s+LEFT JOIN products parent ON parent\.id = p\.parent_id\s+WHERE p\.is_active = 1\s+\)/, 'dashboard stock stats must stay catalog-wide so the card badges match their lists')
+assert.doesNotMatch(overviewFn, /@startDate|@endDate|@branchId|sale_items/, 'dashboard stock stats must not be scoped by the selected range, branch or sales')
+assert.match(stockOverview, /DASHBOARD_EXPIRY_WHERE_SQL = `p\.is_active = 1 AND /, 'dashboard expiry alerts must stay catalog-wide')
 assert.match(dashboard, /getDashboardSaleItemCount/, 'dashboard sale details should expose a total item count')
 assert.match(dashboard, /t\('cashier'\)[\s\S]{0,220}getDashboardSaleItemCount\(recentSaleDetail\)/, 'dashboard sale details should include Cashier and Items')
 assert.match(dashboard, /modal-scroll grid grid-cols-2 gap-2 p-4/, 'dashboard sale details should use compact two-per-row facts')
