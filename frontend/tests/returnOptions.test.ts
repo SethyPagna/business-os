@@ -233,10 +233,13 @@ runTest('the refund is the ORIGINAL sale line price, resolved on the server', ()
   const v1 = pricing.post({ v1QuoteBySaleItem: new Map([[1, { applied_price_usd: 9.5, applied_price_khr: 38000 }]]),
     saleMeta: { id: 1 }, saleItemBatchInfo, soldLines })
   assert.deepEqual(price(v1({ sale_item_id: 1, product_id: 1, ...posted })), [9.5, 38000], 'the v1 quote line prices a v1 return')
-  // A return with no sale: a named sale line's price, else the posted price.
+  // RET-A F6 / N1 (6 Oct 2026): every return has a sale, and the posted price
+  // never stands alone -- a line that matches no line of the sale is refused,
+  // whatever it posts (POST / refuses a sale-less body before pricing).
   const unlinked = pricing.post({ v1QuoteBySaleItem: new Map(), saleMeta: null, saleItemBatchInfo, soldLines: [] })
-  assert.deepEqual(price(unlinked({ sale_item_id: 1, product_id: 1, ...posted })), [10.01, 40040])
-  assert.deepEqual(price(unlinked({ product_id: 9, applied_price_usd: 7, applied_price_khr: 28000 })), [7, 28000])
+  refused(() => unlinked({ sale_item_id: 1, product_id: 1, ...posted }), 'return_refund_sale_line_required')
+  refused(() => unlinked({ product_id: 9, applied_price_usd: 7, applied_price_khr: 28000 }), 'return_refund_sale_line_required')
+  refused(() => legacy({ product_id: 9, applied_price_usd: 7, applied_price_khr: 28000 }), 'return_refund_sale_line_required')
 
   // PATCH /api/returns/:id re-prices the edited lines by the same rule.
   const edit = pricing.patch({ existing: { sale_id: 1 }, body: { items: [] }, saleItemBatchInfoForEdit: saleItemBatchInfo, editSalePriceLines: soldLines })
