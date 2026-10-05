@@ -189,7 +189,7 @@ runTest('while both branches are active every successor answer is the identity',
 
 runTest('a retired branch resolves to its active successor; broken chains answer null', () => {
   const rows = [LC_STORE, OLD_SHOP]
-  const cases: Array<[string, unknown[], unknown, unknown]> = [
+  const cases: Array<[string, Array<Record<string, unknown>>, unknown, unknown]> = [
     ['retired -> successor', rows, 2, { effectBranchId: 1, addressedBranchId: 2, viaSuccessor: true }],
     ['active successor is itself', rows, 1, { effectBranchId: 1, addressedBranchId: 1, viaSuccessor: false }],
     ['two hops', [LC_STORE, { id: 2, is_active: 0, successor_branch_id: 3 }, { id: 3, is_active: 0, successor_branch_id: 1 }], 2, { effectBranchId: 1, addressedBranchId: 2, viaSuccessor: true }],
