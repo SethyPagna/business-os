@@ -300,7 +300,7 @@ export default function ProductDetailFlyout({ view, copy, onClose, shopName, con
                   aria-label={imageLabel(index)}
                   className="h-28 w-28 shrink-0 snap-start overflow-hidden rounded-xl bg-slate-100 ring-1 ring-slate-200 transition hover:ring-slate-400 sm:h-32 sm:w-32 dark:bg-neutral-800 dark:ring-neutral-700"
                 >
-                  <CatalogProductImage src={image} alt={index === 0 ? galleryImageAlt : ''} className="h-full w-full object-cover" />
+                  <CatalogProductImage thumbnail src={image} alt={index === 0 ? galleryImageAlt : ''} className="h-full w-full object-cover" />
                 </button>
               ))}
             </div>

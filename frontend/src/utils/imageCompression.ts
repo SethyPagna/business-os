@@ -15,6 +15,8 @@
 // person would never notice" (huge dimensions, PNG-for-a-photo, no
 // re-encode at all), not aggressive lossy shrinking.
 
+import { computeVariantDimensions, THUMBNAIL_VARIANT_WIDTH, THUMBNAIL_VARIANT_WIDTH_2X } from './imageVariantUrl.ts'
+
 export type CompressImageOptions = {
   /** Longest edge, in pixels, after resizing. Photos rarely need more than this for POS/product/portal use. */
   maxDimension?: number
@@ -239,6 +241,69 @@ async function loadBitmap(file: File): Promise<{ width: number; height: number; 
 
 function canvasToBlob(canvas: HTMLCanvasElement, mime: string, quality: number): Promise<Blob | null> {
   return new Promise((resolve) => canvas.toBlob((blob) => resolve(blob), mime, quality))
+}
+
+/** Multipart field the Worker reads a thumbnail from (cloudflare/src/lib/imageVariantStore.ts clientVariantField). */
+export function thumbnailFieldName(width: number): string {
+  return `variant_w${width}`
+}
+
+/** WebP quality for a thumbnail: visually clean at tile size, 10-80 KB. */
+const THUMBNAIL_WEBP_QUALITY = 0.8
+
+export type ImageThumbnail = { width: number; blob: Blob }
+
+/**
+ * Small WebP copies of an image for the Worker to store beside the original
+ * (see cloudflare/src/lib/imageVariantStore.ts): a 320 px one for lists and
+ * small tiles and a 640 px one for dense displays, ~20 KB and ~60 KB against
+ * the ~0.84 MB original. Never enlarges (a smaller source gets its own size).
+ *
+ * Best effort by contract: returns [] (never throws) when the browser cannot
+ * decode the file, has no Canvas, or cannot encode WebP (older Safari answers
+ * toBlob('image/webp') with a PNG -- refused here by the blob's type). The
+ * upload then simply carries no thumbnail and the variant URL serves the
+ * original until one exists.
+ */
+export async function createImageThumbnails(
+  file: Blob & { name?: string },
+  widths: readonly number[] = [THUMBNAIL_VARIANT_WIDTH, THUMBNAIL_VARIANT_WIDTH_2X],
+): Promise<ImageThumbnail[]> {
+  if (!supportsCanvasCompression()) return []
+  const asFile = file instanceof File ? file : new File([file], file.name || 'image', { type: file.type })
+  if (!isCompressibleImageFile(asFile) || /^image\/(?:gif|svg)/i.test(asFile.type)) return []
+  let loaded: Awaited<ReturnType<typeof loadBitmap>> | null = null
+  const out: ImageThumbnail[] = []
+  try {
+    loaded = await loadBitmap(asFile)
+    for (const width of widths) {
+      const target = computeVariantDimensions(loaded.width, loaded.height, width)
+      const canvas = document.createElement('canvas')
+      canvas.width = target.width
+      canvas.height = target.height
+      try {
+        const ctx = canvas.getContext('2d')
+        if (!ctx) continue
+        drawDownscaled(ctx, loaded.source as CanvasImageSource, loaded.width, loaded.height, target.width, target.height)
+        const blob = await canvasToBlob(canvas, 'image/webp', THUMBNAIL_WEBP_QUALITY)
+        if (blob && blob.type === 'image/webp' && blob.size > 0) out.push({ width, blob })
+      } finally {
+        // Same backing-store release as compressImageFile: iOS Safari has a hard canvas-memory budget.
+        canvas.width = 0
+        canvas.height = 0
+      }
+    }
+  } catch {
+    return out
+  } finally {
+    if (loaded && 'close' in loaded.source && typeof (loaded.source as ImageBitmap).close === 'function') (loaded.source as ImageBitmap).close()
+  }
+  return out
+}
+
+/** Appends the thumbnails to an upload form under the fields the Worker reads. */
+export function appendImageThumbnails(form: FormData, thumbnails: readonly ImageThumbnail[]): void {
+  for (const thumbnail of thumbnails) form.append(thumbnailFieldName(thumbnail.width), thumbnail.blob, `w${thumbnail.width}.webp`)
 }
 
 /**

@@ -9,7 +9,7 @@ import {
   route,
 } from './http.ts'
 import { buildMultipartHeaders } from './multipartHeaders.ts'
-import { compressImageFile, isCompressibleImageFile, type CompressImageOptions } from '../utils/imageCompression.ts'
+import { appendImageThumbnails, compressImageFile, createImageThumbnails, isCompressibleImageFile, type CompressImageOptions } from '../utils/imageCompression.ts'
 import { compressVideoFile, isCompressibleVideoFile } from '../utils/videoCompression.ts'
 
 type FileListResponse = {
@@ -249,6 +249,9 @@ export async function uploadFileAsset(payload: FileUploadPayload = {}): Promise<
   const base = getSyncServerUrl().replace(/\/$/, '')
   const form = new FormData()
   form.append('file', uploadFile, uploadFile.name)
+  // Library images get small WebP copies stored beside them (best effort; the
+  // Worker only reads them for images and ignores them otherwise).
+  if (isCompressibleImageFile(uploadFile)) appendImageThumbnails(form, await createImageThumbnails(uploadFile))
   appendUserAndDeviceFields(form, payload)
 
   return new Promise((resolve, reject) => {

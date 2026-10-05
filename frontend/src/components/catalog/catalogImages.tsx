@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { MouseEventHandler } from 'react'
 import { resolveCatalogAssetUrl } from './catalogAssetUrls'
+import { imageVariantSrcSet, toImageVariantPath } from '../../utils/imageVariantUrl.ts'
 
 const BROKEN_CATALOG_IMAGE_RETRY_MS = 5 * 60 * 1000
 const brokenCatalogImageUrls = new Map<string, number>()
@@ -14,6 +15,19 @@ type CatalogProductImageProps = {
   alt?: string
   className?: string
   onClick?: MouseEventHandler<HTMLImageElement>
+  /**
+   * A grid / strip tile, not a viewer: request the small persisted variant
+   * (/uploads/_v/w320/...) instead of the ~0.84 MB original. A variant that
+   * fails to load falls back to the original once. Leave it off wherever the
+   * photo is shown large (lightbox, hero).
+   */
+  thumbnail?: boolean
+  /**
+   * With `thumbnail`: the tile's rendered width (an <img sizes> value) so a
+   * dense display can take the 640 px variant. Without it only the 320 px one
+   * is used.
+   */
+  sizes?: string
 }
 
 function getImageApi(): ImageApi | undefined {
@@ -33,11 +47,14 @@ function markBrokenCatalogImage(src: string): void {
   brokenCatalogImageUrls.set(src, Date.now())
 }
 
-export default function CatalogProductImage({ src, alt = '', className, onClick }: CatalogProductImageProps) {
+export default function CatalogProductImage({ src, alt = '', className, onClick, thumbnail = false, sizes }: CatalogProductImageProps) {
   const [url, setUrl] = useState<string | null>(null)
   const [failed, setFailed] = useState(false)
+  const [variantFailedFor, setVariantFailedFor] = useState('')
   const imageRequestRef = useRef(0)
   const safeSrc = String(src || '').trim()
+  const variantPath = thumbnail && variantFailedFor !== safeSrc && safeSrc.startsWith('/uploads/') ? toImageVariantPath(safeSrc) : null
+  const srcSet = variantPath && sizes ? imageVariantSrcSet(safeSrc, (path) => resolveCatalogAssetUrl(path)) : ''
 
   useEffect(() => {
     const requestId = imageRequestRef.current + 1
@@ -67,7 +84,7 @@ export default function CatalogProductImage({ src, alt = '', className, onClick 
     }
 
     if (safeSrc.startsWith('/uploads/')) {
-      setUrl(resolveCatalogAssetUrl(safeSrc))
+      setUrl(resolveCatalogAssetUrl(variantPath || safeSrc))
       return () => {
         imageRequestRef.current = requestId + 1
       }
@@ -93,7 +110,7 @@ export default function CatalogProductImage({ src, alt = '', className, onClick 
     return () => {
       imageRequestRef.current = requestId + 1
     }
-  }, [safeSrc])
+  }, [safeSrc, variantPath])
 
   if (!url || failed) {
     return (
@@ -107,6 +124,8 @@ export default function CatalogProductImage({ src, alt = '', className, onClick 
   return (
     <img
       src={url}
+      srcSet={srcSet || undefined}
+      sizes={srcSet ? sizes : undefined}
       alt={alt}
       // An empty alt is the caller saying "this image carries nothing the
       // surrounding markup does not already say" (the flyout thumbnail
@@ -121,6 +140,7 @@ export default function CatalogProductImage({ src, alt = '', className, onClick 
       onDragStart={(event) => event.preventDefault()}
       onClick={onClick}
       onError={() => {
+        if (variantPath) { setVariantFailedFor(safeSrc); return }
         markBrokenCatalogImage(safeSrc)
         setFailed(true)
       }}

@@ -951,7 +951,7 @@ export default function CatalogProductsSection(props: CatalogProductsSectionProp
                     in the card and the control names only itself. */}
                 <div className="relative aspect-square overflow-hidden rounded-2xl bg-slate-100 dark:bg-neutral-800">
                 {primaryImage ? (
-                  <CatalogProductImage src={primaryImage} alt={[product.name, product.brand].filter(Boolean).join(' - ')} className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.03]" />
+                  <CatalogProductImage thumbnail sizes="(min-width: 1024px) 240px, 96px" src={primaryImage} alt={[product.name, product.brand].filter(Boolean).join(' - ')} className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.03]" />
                 ) : (
                   <div className="flex h-full items-center justify-center text-slate-300" aria-hidden="true">
                     <ShoppingBag className="h-10 w-10" />

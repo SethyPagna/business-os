@@ -1,5 +1,5 @@
 import { getSyncServerUrl, requireLiveServerWrite } from './http.ts'
-import { compressImageFile } from '../utils/imageCompression.ts'
+import { appendImageThumbnails, compressImageFile, createImageThumbnails } from '../utils/imageCompression.ts'
 import { canonicalizePersistedMediaPath } from '../utils/mediaUpload.ts'
 import { assertActorSessionDispatchAllowed, assertActorReadScope, captureActorReadScope } from './actorReadScope.ts'
 
@@ -101,6 +101,8 @@ export async function uploadProductImage({
     // uploading all of it only for the Worker to refuse it.
     if (/^(?:video|audio)\//i.test(String(compressed.type || ''))) throw await productImageTypeRefusal()
     form.append('image', compressed, compressed.name || fileName || 'product.jpg')
+    // Small WebP copies for lists and grids, stored beside the original (best effort).
+    appendImageThumbnails(form, await createImageThumbnails(compressed))
   } else if (filePath?.startsWith('data:')) {
     // Real bug fixed this session: this branch used to upload the raw
     // data-URL blob completely uncompressed -- Products.tsx's
@@ -116,6 +118,7 @@ export async function uploadProductImage({
     const compressed = await compressImageFile(sourceFile, { renameTo: productName })
     if (/^(?:video|audio)\//i.test(String(compressed.type || ''))) throw await productImageTypeRefusal()
     form.append('image', compressed, compressed.name || fileName || 'product.jpg')
+    appendImageThumbnails(form, await createImageThumbnails(compressed))
   } else if (filePath) {
     throw new Error('Native file path upload not supported in browser mode')
   } else {
