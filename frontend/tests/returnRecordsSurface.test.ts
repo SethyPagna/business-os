@@ -31,7 +31,8 @@ test('Records is a READ on the return detail, not gated on the edit permission',
   assert.match(modal, /data-return-records-action=""/)
   assert.match(modal, /onClick=\{onOpenRecords\}/)
   // The count is the owner's "total records", not a bare link.
-  assert.match(modal, /\{recordsCount \?\? '—'\}/)
+  assert.match(modal, /count=\{recordsCount\}/)
+  assert.match(read('../src/components/shared/RecordsEntryButton.tsx'), /\{count \?\? '—'\}/, 'an unknown count renders a placeholder, never 0')
   assert.doesNotMatch(modal, /onEdit && onOpenRecords|canEdit[\s\S]{0,40}onOpenRecords/, 'the trail must not hide behind the write permission')
 
   const page = read('../src/components/returns/Returns.tsx')

@@ -321,7 +321,6 @@ const DELIBERATELY_UNGUARDED: Record<string, string> = {
   'components/products/surfaces/ProductDetailModal.tsx': 'read-only viewer',
   'components/products/surfaces/ProductDetailReport.tsx': 'read-only report',
   'components/receipt-settings/ReceiptSettings.tsx': 'the overlay is the phone-sized PREVIEW of the settings; the settings form itself is the page',
-  'components/returns/ReturnDetailModal.tsx': 'read-only viewer',
   'components/returns/NewReturnModal.tsx': 'the only hand-rolled overlays left are the two blockers (session changed, earlier return unconfirmed) -- no fields; the form itself is a guarded Modal',
   'components/shared/ImageGalleryLightbox.tsx': 'an image lightbox',
   'components/shared/kit/Fold.tsx': 'a layout primitive',

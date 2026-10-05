@@ -509,13 +509,12 @@ runTest('the sale detail shows what a receipt shows, and stops there', () => {
   )
 })
 
-runTest('both record details put their actions at the end, not beside the close button', () => {
-  // The two modals must agree. Fixing only the sale would leave a shopkeeper
-  // reaching for Edit in a different place depending on which record is open,
-  // which is the same disagreement the Sep-3 row rhythm was written to end.
+runTest('the sale detail puts its actions at the end, not beside the close button', () => {
+  // The Sep-3 ruling still stands for the sale. The return detail moved its
+  // actions into the header icon cluster (SALES-UI C2, next test); the sale
+  // follows when its own lane lands B11/B12, and this loop then goes with it.
   for (const [name, source, action] of [
     ['sale detail', saleDetail, 'onPrint(sale)'],
-    ['return detail', returnDetail, 'onClick={onEdit}'],
   ] as Array<[string, string, string]>) {
     const closeAt = source.indexOf("aria-label={tr('close'") >= 0
       ? source.indexOf("aria-label={tr('close'")
@@ -525,6 +524,17 @@ runTest('both record details put their actions at the end, not beside the close 
     assert.ok(actionAt >= 0, `${name} lost its action`)
     assert.ok(actionAt > closeAt, `${name} still renders its action beside the close button`)
   }
+})
+
+runTest('the return detail keeps Records and Edit as header icons on the shared Modal, with no footer', () => {
+  assert.match(returnDetail, /<Modal\b[\s\S]*?unsavedChanges="read-only"[\s\S]*?headerExtra=\{/, 'the return detail is the shared Modal, read-only')
+  const headerAt = returnDetail.indexOf('headerExtra={')
+  const bodyAt = returnDetail.indexOf('<DetailRowGroup>')
+  assert.ok(headerAt > 0 && bodyAt > headerAt, 'the header comes before the body')
+  const header = returnDetail.slice(headerAt, bodyAt)
+  assert.ok(header.includes('<RecordsEntryButton') && header.includes('onClick={onEdit}') && header.includes('<MinimizeButton'), 'Records, Edit and Minimize all sit in the header')
+  assert.ok(header.indexOf('<RecordsEntryButton') < header.indexOf('onClick={onEdit}') && header.indexOf('onClick={onEdit}') < header.indexOf('<MinimizeButton'), 'header order: Records, Edit, Minimize, then the Modal close')
+  assert.doesNotMatch(returnDetail, /btn-secondary/, 'the old text Edit button is gone')
 })
 
 if (failed > 0) process.exitCode = 1
