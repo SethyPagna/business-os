@@ -51,7 +51,9 @@ function load(file: string): any {
     if (name.includes('reportsTransport')) return { getBusinessSummarySalesPage: async (query: unknown) => { calls.push(query); return transport(query) } }
     if (name.endsWith('/csv.ts')) return { downloadCSV: (_file: string, rows: unknown[]) => downloads.push(rows) }
     if (name.endsWith('/exportOptions.ts')) return { openPrintExport: (input: unknown, current: () => boolean) => { assert.ok(current()); prints.push({ input, current }); return true } }
-    if (name.includes('shared/kit')) return { Button: 'Button', Fold: 'Fold', OverflowMenu: 'OverflowMenu' }
+    if (name.includes('shared/kit')) return { Button: 'Button', Fold: 'Fold', OverflowMenu: 'OverflowMenu', Skeleton: 'Skeleton' }
+    if (name.endsWith('shared/Modal.tsx') || name.endsWith('shared/InfoHint.tsx')) return { __esModule: true, default: name.includes('Modal') ? 'Modal' : 'InfoHint' }
+    if (name.endsWith('toolbarButtonStyles.ts')) return { toolbarIconButtonClassName: 'icon-button' }
     if (name.includes('lucide-react')) return { default: 'Icon' }
     if (name === './usePagedReport.ts') return { usePagedReport: () => ({ rows: [row(2)], hasMore: true, loading: false, error: null, reload: () => {}, loadMore: () => {} }) }
     if (['./ReportFrame.tsx', './ReportTable.tsx', './ReceiptSheet.tsx'].includes(name)) return { __esModule: true, default: name.slice(2, -4) }
@@ -70,11 +72,11 @@ let props: any = { view: getReportView('sales'), filters: { startDate: '2026-09-
   canExport: () => allowed }
 let tree: any
 function render() { hookIndex = 0; tree = SalesListReport(props); return tree }
-function nodes(node = tree): any[] { return !node ? [] : Array.isArray(node) ? node.flatMap(item => nodes(item)) : typeof node === 'object' ? [node, ...nodes(node.props?.children ?? null)] : [] }
-function preview() { return nodes().find(node => node.type === 'section' && node.props['aria-label'] === 'Export preview') }
+function nodes(node = tree): any[] { return !node ? [] : Array.isArray(node) ? node.flatMap(item => nodes(item)) : typeof node === 'object' ? [node, ...nodes(node.props?.children ?? null), ...nodes(node.props?.headerExtra ?? null)] : [] }
+function preview() { return nodes().find(node => node.type === 'Modal' && String(node.props.title).startsWith('Export preview')) }
 function menu(label: string) { return tree.props.menuAction.props.items.find((item: any) => item.label === label).onSelect() }
 function button(label: string) {
-  const result = nodes(preview()).find(node => node.type === 'Button' && node.props.children === label)
+  const result = nodes(preview()).find(node => node.type === 'button' && node.props['aria-label'] === label)
   assert.ok(result, `preview ${label} button exists`)
   return result.props.onClick()
 }
@@ -111,7 +113,7 @@ assert.equal(outputCount(), before); assert.equal(preview(), undefined); assert.
 allowed = true
 transport = async query => query.verifyOnly ? verified : envelope([row(2), row(1)])
 await prepare()
-const oldCsv = nodes(preview()).find(node => node.type === 'Button' && node.props.children === 'Export CSV').props.onClick
+const oldCsv = nodes(preview()).find(node => node.type === 'button' && node.props['aria-label'] === 'Export CSV').props.onClick
 props = { ...props, exportScopeKey: 'new raw text' }; render()
 assert.equal(preview(), undefined, 'raw search edit invalidates before the250ms debounce changes query')
 oldCsv(); await settled(); assert.equal(outputCount(), before)
@@ -136,7 +138,7 @@ assert.equal(outputCount(), before)
 for (const mutation of [() => { actor++ }, () => { props = { ...props, filters: { ...props.filters, branchId: '2' } } },
   () => { context = { ...context, language: 'km', exchangeRate: 4000 } }]) {
   await prepare()
-  const stale = nodes(preview()).find(node => node.type === 'Button' && node.props.children === 'Export CSV').props.onClick
+  const stale = nodes(preview()).find(node => node.type === 'button' && node.props['aria-label'] === 'Export CSV').props.onClick
   mutation(); render(); stale(); await settled()
   assert.equal(outputCount(), before)
   assert.equal(preview(), undefined)

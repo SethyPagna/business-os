@@ -116,17 +116,22 @@
   border-top: 1px solid var(--ui-warn-line);
 }
 
-[data-reports-hub] table {
+[data-reports-hub] table,
+[data-reports-fold] table {
   font-variant-numeric: tabular-nums;
 }
 
 [data-reports-hub] th,
-[data-reports-hub] td {
+[data-reports-hub] td,
+[data-reports-fold] th,
+[data-reports-fold] td {
   border-bottom-color: var(--ui-line);
 }
 
 [data-reports-hub] td:not(:first-child),
-[data-reports-hub] th:not(:first-child) {
+[data-reports-hub] th:not(:first-child),
+[data-reports-fold] td:not(:first-child),
+[data-reports-fold] th:not(:first-child) {
   text-align: right;
   white-space: nowrap;
 }

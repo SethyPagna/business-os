@@ -7,12 +7,16 @@
 // pages.
 import { useMemo, useRef, useState } from 'react'
 import Download from 'lucide-react/dist/esm/icons/download.js'
+import FileSpreadsheet from 'lucide-react/dist/esm/icons/file-spreadsheet.js'
 import Printer from 'lucide-react/dist/esm/icons/printer.js'
 import { useApp } from '../../../AppContext.tsx'
 import { captureActorReadScope } from '../../../api/actorReadScope.ts'
 import { getBusinessSummarySalesPage } from '../../../api/reportsTransport.ts'
 import { fmtDateTime24 } from '../../../utils/formatters.ts'
-import { Button, Fold, OverflowMenu } from '../../shared/kit'
+import InfoHint from '../../shared/InfoHint.tsx'
+import Modal from '../../shared/Modal.tsx'
+import { toolbarIconButtonClassName } from '../../shared/toolbarButtonStyles.ts'
+import { Button, Fold, OverflowMenu, Skeleton } from '../../shared/kit'
 import { getStatusLabel } from '../StatusBadge.tsx'
 import ReceiptSheet from './ReceiptSheet.tsx'
 import ReportFrame from './ReportFrame.tsx'
@@ -246,21 +250,26 @@ export default function SalesListReport(p: ReportViewProps) {
       onRetry={exporter.error ? () => { void exporter.prepare() } : paged.reload}
       retryLabel={tr('retry', 'Retry')}
     >
-      {exporter.busy ? <p role="status" className="p-2 text-sm">{tr('rpt_export_preparing', 'Preparing the complete report…')}</p> : null}
-      {completed ? <section aria-label={tr('rpt_export_preview', 'Export preview')} className="mb-3 rounded border p-2">
-        <div className="mb-2 flex flex-wrap items-center gap-2">
-          <span className="text-sm">{tr('rpt_export_preview', 'Export preview')} · {countLabel(completed.rowCount, REPORT_NOUNS.sale, tr)}</span>
-          <Button size="sm" className="min-h-11 min-w-11" onClick={exporter.csv}>{tr('export_csv', 'Export CSV')}</Button>
-          <Button size="sm" className="min-h-11 min-w-11" onClick={() => { void exporter.excel() }}>{tr('rpt_export_excel', 'Export Excel')}</Button>
-          <Button size="sm" className="min-h-11 min-w-11" onClick={exporter.print}>{tr('print', 'Print')}</Button>
-          <Button size="sm" className="min-h-11 min-w-11" variant="secondary" onClick={exporter.close}>{tr('close', 'Close')}</Button>
+      {exporter.busy ? <div aria-busy="true" aria-label={tr('rpt_export_preparing', 'Preparing the complete report…')}><Skeleton rows={4} /></div> : null}
+      {completed ? <Modal
+        title={`${tr('rpt_export_preview', 'Export preview')} · ${countLabel(completed.rowCount, REPORT_NOUNS.sale, tr)}`}
+        onClose={exporter.close}
+        size="xl"
+        unsavedChanges="read-only"
+        headerExtra={<span className="flex shrink-0 items-center">
+          <InfoHint label={tr('rpt_export_preview', 'Export preview')} text={tr('rpt_export_money_note', 'Excel amounts are in USD. Preview and print use the selected currency.')} />
+          <button type="button" className={toolbarIconButtonClassName} aria-label={tr('export_csv', 'Export CSV')} title={tr('export_csv', 'Export CSV')} onClick={exporter.csv}><Download className="h-4 w-4" aria-hidden="true" /></button>
+          <button type="button" className={toolbarIconButtonClassName} aria-label={tr('rpt_export_excel', 'Export Excel')} title={tr('rpt_export_excel', 'Export Excel')} onClick={() => { void exporter.excel() }}><FileSpreadsheet className="h-4 w-4" aria-hidden="true" /></button>
+          <button type="button" className={toolbarIconButtonClassName} aria-label={tr('print', 'Print')} title={tr('print', 'Print')} onClick={exporter.print}><Printer className="h-4 w-4" aria-hidden="true" /></button>
+        </span>}
+      >
+        <div data-reports-fold className="min-w-0">
+          <p className="mb-2 text-xs">{[completed.subtitle, ...completed.metadata].join(' · ')}</p>
+          <ReportTable surfaceKey={`reports-sales-export-${options.basis}`} columns={completed.columns} rows={completed.rows.slice(0, previewLimit)}
+            rowKey={r => String(r.id)} style="excel" fmtMoney={completed.fmtMoney} labels={labels} totalsRow={completed.totals} maxHeight="calc(50 * var(--app-vh))"
+            footer={completed.rowCount > previewLimit ? <Button size="sm" className="min-h-11 min-w-11" variant="secondary" onClick={() => setPreviewLimit(n => n + 250)}>{tr('load_more', 'Load more')} ({fmtInt(Math.min(previewLimit, completed.rowCount))}/{fmtInt(completed.rowCount)})</Button> : null} />
         </div>
-        <p className="mb-2 text-xs">{completed.subtitle} · {tr('rpt_export_money_note', 'Excel amounts are in USD. Preview and print use the selected currency.')}</p>
-        <p className="mb-2 text-xs">{completed.metadata.join(' · ')}</p>
-        <ReportTable surfaceKey={`reports-sales-export-${options.basis}`} columns={completed.columns} rows={completed.rows.slice(0, previewLimit)}
-          rowKey={r => String(r.id)} style="excel" fmtMoney={completed.fmtMoney} labels={labels} totalsRow={completed.totals} maxHeight="calc(50 * var(--app-vh))"
-          footer={completed.rowCount > previewLimit ? <Button size="sm" className="min-h-11 min-w-11" variant="secondary" onClick={() => setPreviewLimit(n => n + 250)}>{tr('load_more', 'Load more')} ({fmtInt(Math.min(previewLimit, completed.rowCount))}/{fmtInt(completed.rowCount)})</Button> : null} />
-      </section> : null}
+      </Modal> : null}
       <ReportTable
         surfaceKey={`reports-sales-${options.basis}`}
         columns={columns}
