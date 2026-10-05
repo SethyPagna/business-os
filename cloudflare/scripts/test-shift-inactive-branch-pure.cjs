@@ -55,6 +55,9 @@ function d1(sqlite) {
   return {
     prepare: statement,
     async batch(items) {
+      // A one-shot hook that lands a concurrent write between the route's
+      // reads and its commit.
+      if (sqlite.beforeBatch) { const land = sqlite.beforeBatch; sqlite.beforeBatch = null; land() }
       return sqlite.transaction(() => items.map(({ sql, params }) => {
         const q = translate(sql, params); const info = sqlite.prepare(q.sql).run(...q.values)
         return { meta: { changes: info.changes } }
@@ -260,6 +263,46 @@ async function main() {
     const current = await route(fx.db, ROUTE_SOURCE, () => CASHIER)('GET', '/current?branch_id=1')
     assert.equal(current.status, 200)
     assert.equal(current.body.branch_inactive.successor_branch_id, null)
+  })
+
+  await check('open racing a retirement: the branch must still be active at commit, or nothing is written', async () => {
+    const fx = database()
+    const call = route(fx.db, ROUTE_SOURCE, () => CASHIER)
+    const rows = () => fx.db.prepare('SELECT COUNT(*) n FROM shift_sessions WHERE branch_id=2').get().n
+    const before = rows()
+    fx.db.beforeBatch = () => fx.db.prepare('UPDATE branches SET is_active=0 WHERE id=2').run()
+    const raced = await call('POST', '/open', { branch_id: 2, opening_float_usd: 5, opening_float_khr: 0 })
+    assert.equal(raced.status, 400, JSON.stringify(raced.body))
+    assert.equal(raced.body.code, 'shift_branch_inactive')
+    assert.equal(rows(), before, 'no drawer was opened on the branch that retired mid-request')
+    // CONTROL: without the commit-time guard the same race opens a drawer there.
+    const unguarded = ROUTE_SOURCE.replace("      { sql: OPEN_BRANCH_ACTIVE_GUARD_SQL, params: { branchId: row.branchId } },\n", '')
+    assert.notEqual(unguarded, ROUTE_SOURCE, 'control anchor present: open guard')
+    const fx2 = database()
+    fx2.db.beforeBatch = () => fx2.db.prepare('UPDATE branches SET is_active=0 WHERE id=2').run()
+    const opened = await route(fx2.db, unguarded, () => CASHIER)('POST', '/open', { branch_id: 2, opening_float_usd: 5, opening_float_khr: 0 })
+    assert.equal(opened.status, 201, 'control: the unguarded open commits on a retired branch')
+  })
+
+  await check('plain deactivation is refused by the branch API itself (canonical lock), so it cannot strand an open drawer', () => {
+    // N7 follow-up, exception 2. Every writer of branches.is_active outside the
+    // cutover goes through branchUpdateStatements -> prepareCanonicalBranchUpdate
+    // (PUT /branches/:id, review approval, undo/redo replay), and that refuses
+    // ANY is_active change (409 canonical_branch_identity_locked, pinned in
+    // test-canonical-branch-route-pure.cjs). The cutover is the only retire
+    // path and its admission refuses while any shift is open. If this lock is
+    // ever lifted, this check fails first: the open-shift refusal must ship
+    // with it.
+    const identity = loadReal('lib/canonicalBranchIdentity.ts', {
+      './db': { toDbBool: (v, fallback = 1) => (v == null || v === '' ? fallback : (v === true || Number(v) === 1 || String(v).toLowerCase() === 'true') ? 1 : 0) },
+      './branchRoles': loadReal('lib/branchRoles.ts'),
+    })
+    const shop = { id: 1, name: 'Shop', is_active: 1, is_default: 1 }
+    assert.throws(() => identity.prepareCanonicalBranchUpdate(shop, { is_active: 0 }), (error) => error instanceof identity.CanonicalBranchIdentityError)
+    assert.equal(identity.prepareCanonicalBranchUpdate(shop, { notes: 'x' }).is_active, 1, 'an ordinary edit keeps the branch active')
+    const cutover = fs.readFileSync(path.join(root, 'src', 'lib', 'branchCutoverParent.ts'), 'utf8')
+    assert.ok(cutover.includes('AND NOT EXISTS(SELECT 1 FROM shift_sessions WHERE closed_at IS NULL AND cancelled_at IS NULL)'),
+      'the cutover admission still refuses while any drawer is open')
   })
 
   await check('legacy POST /close naming the retired branch still closes', async () => {

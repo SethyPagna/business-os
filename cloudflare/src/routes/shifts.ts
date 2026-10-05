@@ -174,6 +174,13 @@ const AMENDMENT_COUNT_SQL = `(SELECT COUNT(*) FROM shift_session_amendments amen
  */
 const BRANCH_ACTIVE_SQL = `CASE WHEN shift_sessions.branch_id IS NULL OR EXISTS (SELECT 1 FROM branches active_branch
     WHERE active_branch.id = shift_sessions.branch_id AND active_branch.is_active = 1) THEN 1 ELSE 0 END`
+/** Aborts the open batch (SQLite reports the bad JSON path verbatim) unless
+ * the branch is still active at commit. A NULL branch is a single-branch till. */
+const OPEN_BRANCH_ACTIVE_GUARD_SQL = `SELECT CASE WHEN @branchId IS NULL OR EXISTS (SELECT 1 FROM branches
+    WHERE id = @branchId AND is_active = 1) THEN 1 ELSE json_extract('[1]', '$[shift_open_branch_inactive]') END`
+function isOpenBranchInactiveError(error: unknown): boolean {
+  return /bad JSON path: ['"]\$\[shift_open_branch_inactive\]['"]/i.test(error instanceof Error ? error.message : String(error))
+}
 /** The refusal for AMEND/REOPEN on a retired branch: why, and where the record still is. */
 function inactiveBranchRefusal(shift: ShiftRow) {
   const branch = shift.branch_name || `#${shift.branch_id}`
@@ -1069,9 +1076,15 @@ app.post('/open', async (c) => {
           opening_float_usd: row.floatUsd, opening_float_khr: row.floatKhr }), oldValue: null,
         newValue: JSON.stringify({ shift_code: row.shiftCode, opened_at: row.openedAt,
           opening_float_usd: row.floatUsd, opening_float_khr: row.floatKhr }), deviceName: row.deviceName } },
+      // N7: the branch must STILL be active when the row commits. The read
+      // above can race a retirement (the cutover only checks that no shift is
+      // open at its own commit), and a drawer opened on a branch that retired
+      // a moment earlier is exactly the trap this lane removes.
+      { sql: OPEN_BRANCH_ACTIVE_GUARD_SQL, params: { branchId: row.branchId } },
     ])
     if (batchChanges(results[0]) !== 1) throw new Error('Shift open did not write a row.')
   } catch (error) {
+    if (isOpenBranchInactiveError(error)) return c.json({ error: 'Branch not found or inactive.', code: 'shift_branch_inactive' }, 400)
     const raced = await readCurrent(db, policy, user.id, branchId)
     if (raced) return c.json({ ...currentResponse(user, raced, policy, false), already_registered: true }, 200)
     throw error
