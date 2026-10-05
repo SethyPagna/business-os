@@ -136,10 +136,10 @@ const actual = new Set([
   'telegramLang', 'schemaProbe', 'removalLosses', 'moneyPrecision', 'reportMoneyPrecision', 'saleMoneyPrecision',
   'refundMoneyPrecision', 'customerReturnEntitlement', 'saleItemPricing', 'promotionRules', 'saleTotals', 'financialPrecision',
 ])
-function load(rel) {
-  if (cache.has(rel)) return cache.get(rel).exports
-  const mod = { exports: {} }; cache.set(rel, mod)
-  const source = fs.readFileSync(path.join(root, 'src', rel), 'utf8')
+function load(rel, sourceText = null, cacheKey = rel) {
+  if (cache.has(cacheKey)) return cache.get(cacheKey).exports
+  const mod = { exports: {} }; cache.set(cacheKey, mod)
+  const source = sourceText ?? fs.readFileSync(path.join(root, 'src', rel), 'utf8')
   const output = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
   const req = (name) => {
     if (name === 'hono') return require(name)
@@ -161,6 +161,7 @@ function load(rel) {
 }
 
 function fixture() {
+  const fx = { batches: 0, beforeBatch: null }
   const sql = new Database(':memory:')
   sql.pragma('foreign_keys = OFF')
   for (const file of chain) sql.exec(fs.readFileSync(path.join(migrationsDir, file), 'utf8'))
@@ -179,6 +180,10 @@ function fixture() {
       } }
     },
     async batch(statements) {
+      // A write landing between the route's reads and its commit (the hook
+      // decides whether it fires once or every time).
+      fx.batches += 1
+      if (fx.beforeBatch) fx.beforeBatch()
       return sql.transaction(() => statements.map((s) => { const r = sqliteD1Call(sql.prepare(s.text), 'run', s.params); return { meta: { changes: r.changes, last_row_id: Number(r.lastInsertRowid) } } }))()
     },
   } }
@@ -189,7 +194,7 @@ function fixture() {
     let json; try { json = JSON.parse(text) } catch { json = text }
     return { status: response.status, body: json }
   }
-  return { sql, env, call }
+  return Object.assign(fx, { sql, env, call })
 }
 
 const ADMIN = { id: 1, name: 'Admin', username: 'admin', role_code: 'admin', permissions: { all: true } }
@@ -331,8 +336,190 @@ async function routeChecks() {
   })
 }
 
+// ---- 3. the gaps the verifier's mutants survived, and the commit race --------
+//
+// SEC-SHIFT-MISC-VERIFY: M4d (figures taken on the still-open row), M4h (riel
+// ignored in the drift), M4i (figures insert without its revision guard) all
+// survived, and exception 3: figures computed before the batch were stored
+// stale when a write landed in between. Each check below runs the real route
+// AND a mutant of it, and the mutant must fail the same assertion.
+const ROUTE_TEXT = fs.readFileSync(path.join(root, 'src', 'routes', 'shifts.ts'), 'utf8').replace(/\r\n/g, '\n')
+let mutantSerial = 0
+function shiftsRoute(mutate) {
+  if (!mutate) return load('routes/shifts.ts')
+  const text = mutate(ROUTE_TEXT)
+  assert.notEqual(text, ROUTE_TEXT, 'the mutant actually changed the route')
+  mutantSerial += 1
+  return load('routes/shifts.ts', text, `routes/shifts.mutant-${mutantSerial}.ts`)
+}
+const routeOf = (mod) => mod.default || mod
+
+/** Open a cashier shift backdated an hour, with sales at the given minutes. */
+async function dayWithSales(shifts, sales, opening = { usd: 10, khr: 0 }) {
+  const f = fixture()
+  user = CASHIER
+  const opened = await f.call(shifts, '/open', { branch_id: 1, opening_float_usd: opening.usd, opening_float_khr: opening.khr })
+  assert.equal(opened.status, 201, JSON.stringify(opened.body))
+  const id = opened.body.shift.id
+  f.sql.prepare("UPDATE shift_sessions SET opened_at = datetime('now','-60 minutes'), business_date = date(datetime('now','-60 minutes'), '+7 hours') WHERE id=?").run(id)
+  const openedAt = f.sql.prepare('SELECT opened_at FROM shift_sessions WHERE id=?').get(id).opened_at
+  const at = (minutes) => f.sql.prepare("SELECT datetime(?, '+' || ? || ' minutes') v").get(openedAt, minutes).v
+  const insert = f.sql.prepare(`INSERT INTO sales(id,receipt_number,sale_status,branch_id,branch_name,cashier_id,cashier_name,payment_method,payment_details,
+      payment_currency,exchange_rate,amount_paid_usd,amount_paid_khr,change_usd,change_khr,total_usd,created_at,updated_at)
+    VALUES (?,?,'completed',1,'Shop',7,'cashier',?,?,'USD',4100,?,?,0,0,?,?,'v1')`)
+  for (const s of sales) {
+    insert.run(s.id, s.receipt, s.method, JSON.stringify([{ method: s.method, amount_usd: s.usd ?? 0, amount_khr: s.khr ?? 0 }]),
+      s.usd ?? 0, s.khr ?? 0, s.total ?? s.usd ?? 0, at(s.minute))
+  }
+  return { f, id, at, revision: opened.body.shift.revision }
+}
+const storedFigures = (f, id) => {
+  const row = f.sql.prepare('SELECT figures_json FROM shift_close_figures WHERE shift_session_id=?').get(id)
+  return row ? JSON.parse(row.figures_json) : null
+}
+const relabelToAba = (f, saleId, usd, khr = 0) => f.sql.prepare("UPDATE sales SET payment_method='ABA', payment_details=? WHERE id=?")
+  .run(JSON.stringify([{ method: 'ABA', amount_usd: usd, amount_khr: khr }]), saleId)
+const SALES = [
+  { id: 1, receipt: 'R-CASH-50', method: 'Cash', usd: 50, minute: 5 },
+  { id: 2, receipt: 'R-CASH-30', method: 'Cash', usd: 30, minute: 10 },
+  { id: 3, receipt: 'R-ABA-20', method: 'ABA', usd: 20, minute: 15 },
+]
+
+async function gapChecks() {
+  await check('RACE (exception 3): a relabel landing between the figures read and the commit is caught; the stored figures are the committed state', async () => {
+    const shifts = routeOf(shiftsRoute())
+    const { f, id, revision } = await dayWithSales(shifts, SALES)
+    let fired = false
+    f.beforeBatch = () => { if (!fired) { fired = true; relabelToAba(f, 1, 50) } }
+    const before = f.batches
+    const close = await f.call(shifts, `/${id}/close`, { expected_revision: revision, closing_counted_usd: 40, closing_counted_khr: 0 })
+    assert.equal(close.status, 200, JSON.stringify(close.body))
+    assert.equal(f.batches - before, 2, 'the first commit was refused and the close retried once')
+    const figures = storedFigures(f, id)
+    assert.deepEqual([figures.reconciliation.cash_sales.usd, figures.reconciliation.expected.usd, figures.reconciliation.difference.usd], [30, 40, 0],
+      'stored = what the close actually committed against')
+    user = ADMIN
+    const history = await f.call(shifts, `/${id}/history`)
+    assert.equal(history.body.shift.reconciliation_source, 'stored')
+    assert.equal(history.body.shift.close_drift, null, 'a write before the close is not "changed after close"')
+  })
+
+  await check('RACE CONTROL: without the commit-time inputs guard the same race stores stale figures and misreports drift', async () => {
+    const shifts = routeOf(shiftsRoute((text) => text.replace('OR (${input.figures.digest.expr}) = @closeInputsDigest', 'OR 1 = 1')))
+    const { f, id, revision } = await dayWithSales(shifts, SALES)
+    let fired = false
+    f.beforeBatch = () => { if (!fired) { fired = true; relabelToAba(f, 1, 50) } }
+    const close = await f.call(shifts, `/${id}/close`, { expected_revision: revision, closing_counted_usd: 40, closing_counted_khr: 0 })
+    assert.equal(close.status, 200)
+    assert.equal(storedFigures(f, id).reconciliation.expected.usd, 90, 'control: stale -- the relabel is missing from the stored drawer')
+    user = ADMIN
+    assert.ok((await f.call(shifts, `/${id}/history`)).body.shift.close_drift, 'control: and it is reported as drift after close')
+  })
+
+  const withExpense = async (edit) => {
+    const shifts = routeOf(shiftsRoute())
+    const { f, id, at, revision } = await dayWithSales(shifts, SALES)
+    f.sql.prepare("INSERT INTO fees(id, created_at, fee_date, branch_id, fee_type, label, amount_usd, amount_khr, created_by) VALUES (9900, ?, date(?), 1, 'other', 'Ice', 5, 0, ?)")
+      .run(at(20), at(20), CASHIER.id)
+    let fired = false
+    f.beforeBatch = () => { if (!fired) { fired = true; f.sql.prepare(edit).run() } }
+    const before = f.batches
+    const close = await f.call(shifts, `/${id}/close`, { expected_revision: revision, closing_counted_usd: 82, closing_counted_khr: 0 })
+    assert.equal(close.status, 200, JSON.stringify(close.body))
+    return { batches: f.batches - before, figures: storedFigures(f, id) }
+  }
+  await check('RACE, expense: an expense amount edited mid-close is caught; a label-only edit (not in the stored drawer) is not a retry', async () => {
+    const moved = await withExpense("UPDATE fees SET amount_usd=8 WHERE id=9900")
+    assert.equal(moved.batches, 2, 'the amount moved: recomputed once')
+    assert.deepEqual([moved.figures.reconciliation.expenses.usd, moved.figures.reconciliation.expected.usd], [8, 82], 'stored = the committed $8, not the stale $5')
+    const renamed = await withExpense("UPDATE fees SET label='Water' WHERE id=9900")
+    assert.equal(renamed.batches, 1, 'control: the stored drawer keeps totals only, so a rename commits first time')
+    assert.equal(renamed.figures.reconciliation.expenses.usd, 5)
+  })
+
+  await check('RACE, persistent: inputs that keep moving never block the close; it commits without frozen figures and reads "computed"', async () => {
+    const shifts = routeOf(shiftsRoute())
+    const { f, id, revision } = await dayWithSales(shifts, SALES)
+    let n = 0
+    f.beforeBatch = () => { n += 1; f.sql.prepare('UPDATE sales SET notes=? WHERE id=2').run(`churn ${n}`) }
+    const before = f.batches
+    const close = await f.call(shifts, `/${id}/close`, { expected_revision: revision, closing_counted_usd: 40, closing_counted_khr: 0 })
+    assert.equal(close.status, 200, 'the drawer is ended regardless (no trapping flow)')
+    assert.equal(f.batches - before, 4, 'three guarded attempts, then one close without stored figures')
+    assert.equal(storedFigures(f, id), null)
+    f.beforeBatch = null
+    user = ADMIN
+    assert.equal((await f.call(shifts, `/${id}/history`)).body.shift.reconciliation_source, 'computed', 'labelled, not silently frozen')
+  })
+
+  await check('M4d: the figures are taken for the CLOSED window -- a historic close excludes a sale rung after its closing time', async () => {
+    const late = [...SALES, { id: 4, receipt: 'R-LATE', method: 'Cash', usd: 7, minute: 40 }]
+    const run = async (mutate) => {
+      const shifts = routeOf(shiftsRoute(mutate))
+      const { f, id, at, revision } = await dayWithSales(shifts, late)
+      const closedAt = new Date(Date.parse(at(25).replace(' ', 'T') + 'Z')).toISOString()
+      const close = await f.call(shifts, `/${id}/close`, { expected_revision: revision, closed_at: closedAt, closing_counted_usd: 40, closing_counted_khr: 0 })
+      assert.equal(close.status, 200, JSON.stringify(close.body))
+      return storedFigures(f, id)
+    }
+    const real = await run()
+    assert.equal(real.reconciliation.cash_sales.usd, 80, 'the 40-minute sale is after the close and not in the stored drawer')
+    assert.ok(!real.sales.some((entry) => entry[0] === 4), 'nor in the fingerprint')
+    const mutant = await run((text) => text.split('const closing = { ...storedShift(shift), closed_at: closedAt,').join('const closing = { ...storedShift(shift), closed_at: null,'))
+    assert.equal(mutant.reconciliation.cash_sales.usd, 87, 'control: figures taken on the still-open row include the later sale')
+  })
+
+  await check('M4h: a riel-only relabel after close is drift in riel -- cash, expected, other tenders and the sale', async () => {
+    const shifts = routeOf(shiftsRoute())
+    const { f, id, revision } = await dayWithSales(shifts, [{ id: 1, receipt: 'R-KHR', method: 'Cash', khr: 20000, total: 4.88, minute: 5 }], { usd: 10, khr: 20000 })
+    const close = await f.call(shifts, `/${id}/close`, { expected_revision: revision, closing_counted_usd: 10, closing_counted_khr: 40000 })
+    assert.equal(close.status, 200, JSON.stringify(close.body))
+    user = ADMIN
+    const relabel = await f.call(load('routes/sales.ts').default, '/bulk-update', { client_request_id: 'relabel-riel-after-close',
+      items: [{ id: 1, expected_updated_at: 'v1' }], action: { kind: 'payment_method', source: 'Cash', target: 'ABA' } })
+    assert.equal(relabel.status, 200, JSON.stringify(relabel.body))
+    const shift = (await f.call(shifts, `/${id}/history`)).body.shift
+    assert.deepEqual([shift.reconciliation.expected.khr, shift.reconciliation.difference.khr], [40000, 0], 'stored riel drawer unchanged')
+    const byKey = Object.fromEntries(shift.close_drift.components.map((c) => [c.key, c]))
+    assert.deepEqual([byKey.cash_sales.stored.khr, byKey.cash_sales.current.khr], [20000, 0])
+    assert.deepEqual([byKey.expected.stored.khr, byKey.expected.current.khr], [40000, 20000])
+    assert.deepEqual([byKey.other_tenders.stored.khr, byKey.other_tenders.current.khr], [0, 20000])
+    assert.deepEqual(byKey.cash_sales.stored.usd, byKey.cash_sales.current.usd, 'the dollars did not move')
+    assert.deepEqual(shift.close_drift.sales.map((s) => [s.sale_id, s.change, s.before, s.after]), [[1, 'changed', [0, 20000, 0, 0], [0, 0, 0, 20000]]])
+    // CONTROL: a comparison that ignores riel sees nothing.
+    const reconciliation = load('lib/shiftReconciliation.ts')
+    const stored = reconciliation.parseShiftCloseFigures(storedFigures(f, id))
+    const usdOnly = (pair) => ({ usd: pair.usd, khr: 0 })
+    const strip = (r) => Object.fromEntries(Object.entries(r).map(([k, v]) => [k, v && typeof v === 'object' && 'usd' in v ? usdOnly(v) : v]))
+    assert.deepEqual(reconciliation.compareShiftCloseFigures({ ...stored, reconciliation: strip(stored.reconciliation), other_tenders: usdOnly(stored.other_tenders) },
+      strip(shift.close_drift.current), { usd: 0, khr: 0 }), [], 'control: dollars alone show no drift -- riel is what caught it')
+    assert.deepEqual(reconciliation.diffShiftSaleTenders(stored.sales.map(([sid, u, , o]) => [sid, u, 0, o, 0]), [[1, 0, 0, 0, 0]]), [],
+      'control: nor in the per-sale fingerprint')
+  })
+
+  await check('M4i: a close that lost to a concurrent close writes no figures for the winner\'s row', async () => {
+    const run = async (mutate) => {
+      const shifts = routeOf(shiftsRoute(mutate))
+      const { f, id, revision } = await dayWithSales(shifts, SALES)
+      let fired = false
+      // The winner: another device closes this shift (with no stored figures,
+      // as a pre-0237 Worker or a figure-less close would) just before ours commits.
+      f.beforeBatch = () => { if (!fired) { fired = true; f.sql.prepare("UPDATE shift_sessions SET closed_at=?, closing_counted_usd=1, closed_by_user_id=99, revision=revision+1 WHERE id=?").run(new Date().toISOString(), id) } }
+      const close = await f.call(shifts, `/${id}/close`, { expected_revision: revision, closing_counted_usd: 40, closing_counted_khr: 0 })
+      return { status: close.status, figures: storedFigures(f, id) }
+    }
+    const real = await run()
+    assert.equal(real.status, 409, 'the loser is told the shift changed')
+    assert.equal(real.figures, null, "the loser's figures are not filed under the winner's close")
+    const mutant = await run((text) => text.replace('WHERE id=@id AND revision=@newRevision AND closed_at=@closedAt AND closed_by_user_id=@closerId\n', 'WHERE id=@id\n'))
+    assert.equal(mutant.status, 409)
+    assert.ok(mutant.figures, 'control: without the revision guard the loser files its figures under the winner')
+  })
+}
+
 ;(async () => {
   await migrationChecks()
   await routeChecks()
+  await gapChecks()
   console.log(`OK ${passed} checks: a closed shift's figures are stored at close and later drift is shown, not absorbed (N4)`)
 })().catch((error) => { console.error(error); process.exit(1) })
