@@ -32,6 +32,15 @@ const neutralChunks: ReadonlyArray<readonly [string, string]> = [
   // left to the shared catch-all it lands in app-shared and closes a static
   // shared-modal -> app-shared -> shared-modal chunk cycle.
   ['/src/components/shared/useDialogKeyboard.ts', 'shared-modal'],
+  // G37 client search index (admin pickers only: POS, Products, Inventory,
+  // Branches, Transfer, Stock-in, Promotions, Bulk import, Duplicates). Left
+  // to the '/src/api/' fallback, the index transport and the shared search
+  // core (~680 lines) rode app-api-methods, which the storefront loads at
+  // boot, and pushed the catalog-products closure past its budget
+  // (tests/performanceBudgets.test.ts). No storefront module imports them.
+  ['/src/api/productSearchIndex.ts', 'product-search-index'],
+  ['/src/utils/searchCore.ts', 'product-search-index'],
+  ['/src/utils/rowSearch.ts', 'product-search-index'],
   ['/src/components/shared/InfoHint.tsx', 'shared-ui'],
   ['/src/components/shared/TruncatedText.tsx', 'shared-ui'],
   ['/src/components/shared/textAffordances.ts', 'shared-ui'],
