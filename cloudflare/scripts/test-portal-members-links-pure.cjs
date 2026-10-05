@@ -24,8 +24,14 @@
 //   E2 a closed member cannot be reverted (route check AND batch guard);
 //   E3 a revert that re-creates a link needs link evidence, recorded on the
 //      revert event; a revert that only removes a link needs none;
-//   E6 a password reset on "called the number on file" is admin-only and
+//   E6 (owner default, round 2) EVERY staff password reset is admin-only and
 //      needs a note, which reaches the audit log;
+//   E1 (owner ruling, round 2) a links-only user (no Contacts view) never sees
+//      a customer's name, LC or phone, nor whether a customer exists: list,
+//      detail, history, link requests and every write response are redacted;
+//      LC search and filter=conflicts are off; /link and a relinking revert
+//      are refused before any customer lookup. A links + Contacts user sees
+//      everything (control);
 //   E8 filter=legacy_claims lists links the old sign-up made to an existing
 //      customer that no staff action has replaced since.
 //
@@ -344,6 +350,127 @@ async function main() {
     assert.equal((await t.call('GET', '/', undefined, USERS.linksOnly)).status, 200, 'the member list stays open to the link permission')
   })
 
+  await check('E1.1-E1.9: a links-only user never sees a customer or learns one exists; links + Contacts sees all', async () => {
+    const t = harness()
+    const SECRET = ['Secret Linked Name', 'LC-00100', '012 100 100', 'Unlinked Stranger', 'LC-00101', 'Phone Holder', 'LC-00102']
+    const leaks = (body) => SECRET.filter((s) => JSON.stringify(body).includes(s))
+    t.customer(100, 'Secret Linked Name', '012 100 100', { lc: 'LC-00100' })
+    t.customer(101, 'Unlinked Stranger', '012 101 101', { lc: 'LC-00101' })
+    t.customer(102, 'Phone Holder', '012 102 102', { lc: 'LC-00102' })
+    const one = t.member('Member One', '012000101')
+    await link(t, one, 100)
+    const holder = t.member('Holder', '012000102')
+    await link(t, holder, 102)
+    const clash = t.member('Same Phone', '012102102') // phone_customer_taken: customer 102's phone, held by another member
+    t.raw.prepare("UPDATE portal_accounts SET membership_id = 'LC-00100' WHERE id = @id").run({ id: clash })
+    t.raw.prepare("INSERT INTO portal_member_link_requests (account_id, note) VALUES (@a, 'please link')").run({ a: clash })
+    const L = USERS.linksOnly
+    const hidden = (member) => {
+      assert.equal(member.customer, null)
+      assert.equal(member.legacyMembershipId, null)
+      assert.deepEqual(member.conflicts, [])
+      assert.equal(member.customerVisible, false)
+    }
+
+    // E1.1 list
+    const list = await t.call('GET', '/?filter=all', undefined, L)
+    assert.equal(list.status, 200)
+    assert.deepEqual(leaks(list.body), [], 'E1.1 list')
+    list.body.items.forEach(hidden)
+    assert.equal(list.body.items.find((m) => m.id === one).chip, 'linked', 'the member\'s own link state stays visible')
+    // E1.2 detail
+    const detail = await t.call('GET', `/${one}`, undefined, L)
+    assert.deepEqual(leaks(detail.body), [], 'E1.2 detail')
+    hidden(detail.body.member)
+    // E1.3 history
+    const history = await t.call('GET', `/${one}/history`, undefined, L)
+    assert.deepEqual(leaks(history.body), [], 'E1.3 history')
+    assert.equal(history.body.customerVisible, false)
+    assert.deepEqual(history.body.events.map((e) => [e.fromCustomer, e.toCustomer]), [[null, null]])
+    // E1.4 link requests
+    const requests = await t.call('GET', '/link-requests', undefined, L)
+    assert.equal(requests.status, 200)
+    assert.deepEqual(leaks(requests.body), [], 'E1.4 link requests')
+    hidden(requests.body.requests[0].member)
+    // E1.5 search by LC: neither the linked customer's LC nor a legacy LC matches
+    assert.deepEqual((await t.call('GET', '/?q=LC-00100', undefined, L)).body.items, [], 'E1.5 LC search is off')
+    assert.deepEqual((await t.call('GET', '/?q=lc-00102', undefined, L)).body.items, [])
+    // E1.6 conflicts
+    const conflicts = await t.call('GET', '/?filter=conflicts', undefined, L)
+    assert.equal(conflicts.status, 403)
+    assert.equal(conflicts.body.code, 'contacts_view_required')
+    // E1.7 search and suggestions (round 1)
+    assert.equal((await t.call('GET', '/customer-search?q=Secret', undefined, L)).status, 403)
+    assert.equal((await t.call('GET', `/${clash}/suggestions`, undefined, L)).status, 403)
+    // E1.8 /link: no existence oracle -- an existing held id, an existing free id
+    // and a missing id all answer the same 403, and nothing is written.
+    const eventsBefore = t.q('SELECT COUNT(*) AS n FROM portal_member_link_events')[0].n
+    const answers = []
+    for (const customerId of [100, 101, 99999]) {
+      const res = await t.call('POST', `/${clash}/link`, { customerId, expectedLinkVersion: 0, evidence: 'in_person', move: true }, L)
+      answers.push([res.status, JSON.stringify(res.body)])
+    }
+    assert.equal(answers[0][0], 403)
+    assert.deepEqual(answers.map((a) => a.join(' ')), Array(3).fill(answers[0].join(' ')), 'E1.8 identical refusal for every id')
+    assert.ok(answers[0][1].includes('contacts_view_required'))
+    // E1.9 the refused link wrote nothing and returned no customer
+    assert.deepEqual(leaks(answers), [], 'E1.9')
+    assert.equal(t.q('SELECT COUNT(*) AS n FROM portal_member_link_events')[0].n, eventsBefore)
+    assert.equal(t.account(clash).contact_id, null)
+    // Write responses links-only users may still make are redacted.
+    const unlink = await t.call('POST', `/${one}/unlink`, { expectedLinkVersion: t.account(one).link_version, reasonCode: 'duplicate' }, L)
+    assert.equal(unlink.status, 200, JSON.stringify(unlink.body))
+    assert.deepEqual(leaks(unlink.body), [])
+    hidden(unlink.body.member)
+    // ... a revert that would relink is a link (refused); its history row says so.
+    const unlinkEvent = t.events(one).at(-1)
+    const linksOnlyHistory = await t.call('GET', `/${one}/history`, undefined, L)
+    assert.equal(linksOnlyHistory.body.events[0].revertible, false, 'no revert icon for a relink the user cannot do')
+    const relink = await t.call('POST', `/${one}/revert`, { eventId: unlinkEvent.id, evidence: 'in_person' }, L)
+    assert.equal(relink.status, 403)
+    assert.equal(relink.body.code, 'contacts_view_required')
+    assert.equal(t.account(one).contact_id, null)
+    for (const [path, body] of [[`/${holder}/suspend`, {}], [`/${holder}/reactivate`, {}]]) {
+      const res = await t.call('POST', path, body, L)
+      assert.equal(res.status, 200, path)
+      assert.deepEqual(leaks(res.body), [], path)
+      hidden(res.body.member)
+    }
+    // A revert that only removes a link stays open to links-only, redacted.
+    const holderLink = t.events(holder).find((e) => e.action === 'link')
+    const unlinkOnly = await t.call('POST', `/${holder}/revert`, { eventId: holderLink.id }, L)
+    assert.equal(unlinkOnly.status, 200, JSON.stringify(unlinkOnly.body))
+    assert.deepEqual(leaks(unlinkOnly.body), [])
+
+    // Control: links + Contacts view sees everything the redaction removed.
+    const t2 = harness()
+    t2.customer(100, 'Secret Linked Name', '012 100 100', { lc: 'LC-00100' })
+    t2.customer(101, 'Unlinked Stranger', '012 101 101', { lc: 'LC-00101' })
+    const m2 = t2.member('Member One', '012000101')
+    await link(t2, m2, 100)
+    const full = await t2.call('GET', `/${m2}`)
+    assert.deepEqual(full.body.member.customer, { id: 100, name: 'Secret Linked Name', membershipNumber: 'LC-00100', available: true })
+    assert.equal(full.body.member.customerVisible, true)
+    assert.deepEqual((await t2.call('GET', '/?q=LC-00100')).body.items.map((m) => m.id), [m2])
+    assert.equal((await t2.call('GET', '/?filter=conflicts')).status, 200)
+    assert.deepEqual((await t2.call('GET', `/${m2}/history`)).body.events[0].toCustomer, { id: 100, name: 'Secret Linked Name', membershipNumber: 'LC-00100' })
+    const m3 = t2.member('Another', '012000103')
+    const linked = await link(t2, m3, 101)
+    assert.equal(linked.status, 200)
+    assert.equal(linked.body.member.customer.name, 'Unlinked Stranger')
+  })
+
+  await check('E2: history never offers Revert on a closed member', async () => {
+    const t = harness()
+    const m = t.member('Closing', '012000087')
+    t.customer(587, 'Closing Customer', '012 000 587')
+    await link(t, m, 587)
+    await t.call('POST', `/${m}/unlink`, { expectedLinkVersion: t.account(m).link_version, reasonCode: 'duplicate' })
+    assert.equal((await t.call('GET', `/${m}/history`)).body.events[0].revertible, true, 'control: open member')
+    t.raw.prepare("UPDATE portal_accounts SET status = 'closed' WHERE id = @id").run({ id: m })
+    assert.deepEqual((await t.call('GET', `/${m}/history`)).body.events.map((e) => e.revertible), [false, false])
+  })
+
   await check('E2: a closed member cannot be reverted -- refused up front and by the batch guard under a race', async () => {
     const t = harness()
     const m = t.member('Closer', '012000088')
@@ -517,16 +644,23 @@ async function main() {
   await check('staff password reset: identity evidence required, temp password once, every session revoked', async () => {
     const t = harness()
     const m = t.member('Forgetful', '012999991')
-    assert.equal((await t.call('POST', `/${m}/reset-password`, {})).body.code, 'member_link_evidence_required')
+    assert.equal((await t.call('POST', `/${m}/reset-password`, { note: 'x' }, USERS.owner)).body.code, 'member_link_evidence_required')
     const before = t.account(m).password_hash
-    // E6: no code proves a phone call for a member who cannot sign in, so it
-    // is an admin's word, with a note.
-    const notAdmin = await t.call('POST', `/${m}/reset-password`, { evidence: 'called_number_on_file', note: 'called 012 999 991' })
-    assert.equal(notAdmin.status, 403)
-    assert.equal(notAdmin.body.code, 'member_reset_call_admin_only')
-    const noNote = await t.call('POST', `/${m}/reset-password`, { evidence: 'called_number_on_file' }, USERS.owner)
-    assert.equal(noNote.status, 400)
-    assert.equal(noNote.body.code, 'member_link_note_required')
+    // E6 (owner default): no path lets the member prove identity from a
+    // signed-in account, so every reset is an admin's word, with a note.
+    for (const evidence of ['in_person', 'called_number_on_file', 'owner_override']) {
+      const notAdmin = await t.call('POST', `/${m}/reset-password`, { evidence, note: 'seen at the till' })
+      assert.equal(notAdmin.status, 403, evidence)
+      assert.equal(notAdmin.body.code, 'member_reset_admin_only', evidence)
+      const noNote = await t.call('POST', `/${m}/reset-password`, { evidence }, USERS.owner)
+      assert.equal(noNote.status, 400, evidence)
+      assert.equal(noNote.body.code, 'member_link_note_required', evidence)
+    }
+    assert.equal((await t.call('POST', `/${m}/reset-password`, { note: 'x' }, USERS.owner)).body.code, 'member_link_evidence_required')
+    const inPerson = t.member('In Person Reset', '012999992')
+    const ip = await t.call('POST', `/${inPerson}/reset-password`, { evidence: 'in_person', note: 'member at the till with ID card' }, USERS.owner)
+    assert.equal(ip.status, 200, 'an admin with a note can reset in person')
+    assert.deepEqual(t.state.auditDetails.at(-1), { evidence: 'in_person', note: 'member at the till with ID card' })
     assert.equal(t.account(m).password_hash, before, 'refused resets change nothing')
     assert.equal(t.liveSessions(m), 1)
     const res = await t.call('POST', `/${m}/reset-password`, { evidence: 'called_number_on_file', note: 'called 012 999 991, member confirmed name' }, USERS.owner)
@@ -537,7 +671,7 @@ async function main() {
     assert.equal(t.liveSessions(m), 0)
     assert.deepEqual(t.state.audits.at(-1), ['portal_reset', 'portal_member', m])
     const noPhone = Number(t.raw.prepare("INSERT INTO portal_accounts (name, phone) VALUES ('Email Only', NULL)").run({}).meta.last_row_id)
-    assert.equal((await t.call('POST', `/${noPhone}/reset-password`, { evidence: 'in_person' })).body.code, 'member_reset_unavailable')
+    assert.equal((await t.call('POST', `/${noPhone}/reset-password`, { evidence: 'in_person', note: 'x' }, USERS.owner)).body.code, 'member_reset_unavailable')
   })
 
   await check('suggestions: phone+name Strong, phone-only Possible, email Possible, name-only none; nothing pre-selected', async () => {
