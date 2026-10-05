@@ -1685,7 +1685,7 @@ app.post('/auth/signup', async (c) => {
 export const PORTAL_SIGNIN_PHONE_WIDE_MAX = 50
 export const PORTAL_SIGNIN_PHONE_WIDE_WINDOW_MS = 30 * 60 * 1000
 
-function portalSigninLocked(c: Context<{ Bindings: Env }>, retryAfterSeconds: number) {
+function portalSigninLocked(c: Context<{ Bindings: Env; Variables: { user: SessionUser } }>, retryAfterSeconds: number) {
   c.header('Retry-After', String(retryAfterSeconds))
   return c.json({ error: `Too many sign-in attempts. Please wait ${Math.ceil(retryAfterSeconds / 60)} minutes, or contact us.`, code: 'locked' }, 429)
 }
