@@ -2,7 +2,7 @@ import { Hono, type Context } from 'hono'
 import { getDb } from '../lib/db'
 import { buildInClause, inlineIntegerIds, selectInChunks } from '../lib/sqlBinding'
 import { cachedJsonResponse, getVersionWithFallback } from '../lib/cache'
-import { admitRequestBody, SMALL_BODY_BYTES, PORTAL_SCREENSHOT_BODY_BYTES } from '../lib/requestBodyGuard'
+import { admitRequestBody, SMALL_BODY_BYTES, PORTAL_SCREENSHOT_BODY_BYTES, requireJsonSameOriginCredentialPost } from '../lib/requestBodyGuard'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { hasPermission } from '../lib/permissions'
 import { audit } from '../lib/audit'
@@ -1692,6 +1692,13 @@ function sanitizePortalBucketItems(raw: unknown, max: number, withQty: boolean):
   }
   return out
 }
+
+// G38 E5 (login CSRF): every write under /auth/* -- sign-up, sign-in,
+// sign-out -- and the member's own link request must be a same-origin JSON
+// request (lib/requestBodyGuard credentialPostRefusal). Registered before the
+// handlers so Hono runs it first; GET /auth/me and GET link-request pass.
+app.use('/auth/*', requireJsonSameOriginCredentialPost)
+app.use('/account/link-request', requireJsonSameOriginCredentialPost)
 
 app.post('/auth/signup', async (c) => {
   const ip = getClientNetworkKey(c.req.raw)
