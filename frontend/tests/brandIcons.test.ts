@@ -175,7 +175,7 @@ assert.ok(adminHostGuard > 0, 'the storefront identity swap must stop on an admi
 for (const swapped of ['link[rel="icon"]', 'link[rel="manifest"]', 'link[rel="apple-touch-icon"]', 'meta[name="apple-mobile-web-app-title"]']) {
   assert.ok(brandEffect.indexOf(swapped) > adminHostGuard, `${swapped} is swapped before the admin-host guard`)
 }
-assert.match(publicCatalog, /import \{ isAdminHostname \} from '\.\.\/\.\.\/app\/pathRouting\.ts'/, 'the guard uses the one shared host predicate')
+assert.match(publicCatalog, /import \{ isAdminHostname(?:, \w+)* \} from '\.\.\/\.\.\/app\/pathRouting\.ts'/, 'the guard uses the one shared host predicate')
 assert.match(publicCatalog, /const STOREFRONT_HOME_SCREEN_NAME = 'Leang'/, 'the iPhone home-screen label is the owner\'s short name')
 assert.match(brandEffect, /appleTitle\.setAttribute\('content', STOREFRONT_HOME_SCREEN_NAME\)/)
 assert.match(publicCatalog, /const STOREFRONT_NAME = 'Leang Cosmetics'/)
