@@ -189,16 +189,7 @@ export function buildProductWritePayload(snapshot: ProductRecord = {}, user: Use
 // only through ledgered stock actions, each reversed from its own record.
 export const PRODUCT_RESTORE_STOCK_KEYS = Object.freeze(['stock_quantity', 'branch_stock', 'branch_batch_stock', 'rfid_confirmed_qty'] as const)
 
-export const PRODUCT_UNDO_STOCK_REFUSED = 'product_undo_stock_refused'
-
-// True when a snapshot carries stock on hand in any branch (or, for an older
-// row without branch detail, in its rollup). Restoring such a product from the
-// Products page would have to invent that stock, so it is refused instead.
-export function snapshotHoldsStock(snapshot: ProductRecord = {}): boolean {
-  const branches = Array.isArray(snapshot?.branch_stock) ? snapshot.branch_stock : []
-  if (branches.some((entry) => toFiniteNumber(entry?.quantity, 0) !== 0)) return true
-  return !branches.length && toFiniteNumber(snapshot?.stock_quantity, 0) !== 0
-}
+export { snapshotHoldsStock } from './productSnapshotStock.ts'
 
 export function stripProductStockFields<T extends Record<string, unknown>>(payload: T): T {
   const next = { ...payload }

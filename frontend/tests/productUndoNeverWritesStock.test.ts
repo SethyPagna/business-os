@@ -158,14 +158,26 @@ await runTest('Products.tsx: no Undo path writes stock; stock-moving actions ref
   assert.match(refusal, /setActiveProductSection\('stock_changes'\)/, 'WHERE is a way there, not only a sentence')
   assert.match(refusal, /navigateTo\('branches'\)/)
   const deleted = src.slice(src.indexOf('const restoreDeletedProducts = useCallback('), src.indexOf('const pushCreatedProductHistory = useCallback('))
-  assert.ok(deleted.indexOf('snapshotHoldsStock(') > 0 && deleted.indexOf('snapshotHoldsStock(') < deleted.indexOf('productApi.createProduct('), 'a removed product with stock is refused before anything is written')
   assert.doesNotMatch(deleted, /adjustStock/)
+  // E2: a product removed with stock is refused by a flag set when the entry
+  // is pushed (never a thrown error that marks the server row failed), for both
+  // legacy delete Undos and the create Redo.
+  assert.equal((src.match(/undoRefused: removedWithStock,\s*undo: removedWithStock \? \(\) => refuseStockUndo\('removed_with_stock'\)/g) || []).length, 2, 'bulk and single legacy delete Undo')
+  assert.match(src, /redoRefused: snapshotHoldsStock\(baseSnapshot\),\s*redo: snapshotHoldsStock\(baseSnapshot\) \? \(\) => refuseStockUndo\('removed_with_stock'\)/, 'create Redo')
+  assert.doesNotMatch(deleted, /throw Object\.assign/, 'no thrown refusal')
+  assert.match(refusal, /product_undo_refused_removed_with_stock[\s\S]*product_undo_where_remove_history/, 'why and where')
 })
 
-await runTest('actionHistory: a refused Undo never touches the server row', () => {
+await runTest('E2: the removed-with-stock refusal is as short as its siblings', () => {
+  const pack = JSON.parse(readFileSync(new URL('../src/lang/en.json', import.meta.url), 'utf8')) as Record<string, string>
+  const sibling = Math.max(pack.product_undo_refused_stock_removed.length, pack.product_undo_refused_stock_moved.length)
+  assert.ok(pack.product_undo_refused_removed_with_stock.length <= sibling, `${pack.product_undo_refused_removed_with_stock.length} > ${sibling}`)
+})
+
+await runTest('actionHistory: a refused Undo or Redo never touches the server row', () => {
   const src = readFileSync(new URL('../src/utils/actionHistory.ts', import.meta.url), 'utf8')
   const run = src.slice(src.indexOf('const runEntry = useCallback('))
-  const refused = run.indexOf("if (direction === 'undo' && entry.undoRefused)")
+  const refused = run.indexOf("if ((direction === 'undo' && entry.undoRefused) || (direction === 'redo' && entry.redoRefused))")
   const server = run.indexOf('api.undoActionHistory(entry.serverId)')
   assert.ok(refused > 0 && server > refused, 'the refusal returns before the server transition')
   assert.match(run.slice(refused, server), /return false/)
@@ -174,7 +186,7 @@ await runTest('actionHistory: a refused Undo never touches the server row', () =
 for (const lang of ['en', 'km']) {
   await runTest(`${lang}.json carries every F2 refusal key`, () => {
     const pack = JSON.parse(readFileSync(new URL(`../src/lang/${lang}.json`, import.meta.url), 'utf8')) as Record<string, string>
-    for (const key of ['product_undo_refused_title', 'product_undo_where_label', 'product_undo_refused_stock_removed', 'product_undo_refused_stock_moved', 'product_undo_where_stock_changes', 'product_undo_where_branch_history', 'product_undo_refused_removed_with_stock']) {
+    for (const key of ['product_undo_refused_title', 'product_undo_where_label', 'product_undo_refused_stock_removed', 'product_undo_refused_stock_moved', 'product_undo_where_stock_changes', 'product_undo_where_branch_history', 'product_undo_refused_removed_with_stock', 'product_undo_where_remove_history']) {
       assert.ok(String(pack[key] || '').trim(), `${lang}.json ${key}`)
     }
   })

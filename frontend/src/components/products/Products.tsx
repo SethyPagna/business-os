@@ -136,6 +136,7 @@ import {
   toggleProductCategoryValues,
 } from './helpers/productMenuHelpers.ts'
 import { buildProductSupplierOptions } from './helpers/productSupplierOptions.ts'
+import { snapshotHoldsStock } from './helpers/productSnapshotStock.ts'
 import { buildHierarchicalCategoryFilterOptions } from '../shared/CategoryFilterOptions.tsx'
 import { buildAvailabilityFilterSection } from '../shared/AvailabilityFilterOptions.tsx'
 import { buildSearchModeFilterSection } from '../shared/SearchModeFilterOptions.tsx'
@@ -2632,9 +2633,12 @@ function ProductsFullEditor() {
       const deletedSnapshots = snapshots.filter((snapshot) => legacyDeletedIds.includes(Number(snapshot?.id || 0)))
       if (deletedSnapshots.length) {
         let restoredEntries: RestoredProductEntry[] = []
+        // F2: a product removed with stock on hand is never re-created here.
+        const removedWithStock = deletedSnapshots.some((snapshot) => snapshotHoldsStock(snapshot))
         actionHistory.pushAction({
           label: `Delete ${deletedSnapshots.length} product${deletedSnapshots.length === 1 ? '' : 's'}`,
-          undo: async () => {
+          undoRefused: removedWithStock,
+          undo: removedWithStock ? () => refuseStockUndo('removed_with_stock') : async () => {
             restoredEntries = await restoreDeletedProducts(deletedSnapshots)
           },
           redo: async () => {
@@ -2833,9 +2837,12 @@ function ProductsFullEditor() {
         return
       }
       let restoredEntries: RestoredProductEntry[] = []
+      // F2: a product removed with stock on hand is never re-created here.
+      const removedWithStock = snapshotHoldsStock(snapshot)
       actionHistory.pushAction({
         label: `Delete product ${snapshot.name || ''}`.trim(),
-        undo: async () => {
+        undoRefused: removedWithStock,
+        undo: removedWithStock ? () => refuseStockUndo('removed_with_stock') : async () => {
           restoredEntries = await restoreDeletedProducts([snapshot])
         },
         redo: async () => {
@@ -3994,7 +4001,13 @@ function ProductsFullEditor() {
   // The owner's refusal pattern (5 Oct 2026): say WHY Undo is not allowed and
   // WHERE to reverse it instead, with the way there built in. Shown instead of
   // writing anything; the history entry stays as it was.
-  const refuseStockUndo = useCallback(async (kind: 'out_of_stock' | 'branch_move') => {
+  const refuseStockUndo = useCallback(async (kind: 'out_of_stock' | 'branch_move' | 'removed_with_stock') => {
+    if (kind === 'removed_with_stock') {
+      // The way back is "Remove product" in the History menu the user is in,
+      // which restores the product with its real stock; no other page to open.
+      notify(`${tr('product_undo_refused_removed_with_stock', 'This product was removed with stock on hand. Restoring it here would bring back an old stock figure, so nothing was changed.', 'ផលិតផលនេះត្រូវបានដកចេញ ខណៈមានស្តុកនៅសល់។ ការស្ដារនៅទីនេះនឹងនាំតួលេខស្តុកចាស់មកវិញ ដូច្នេះគ្មានអ្វីត្រូវបានផ្លាស់ប្ដូរទេ។')} ${tr('product_undo_where_remove_history', 'Undo "Remove product" in History.', 'ត្រឡប់ "ដកផលិតផល" វិញក្នុង ប្រវត្តិ។')}`, 'warning')
+      return
+    }
     const outOfStock = kind === 'out_of_stock'
     const why = outOfStock
       ? tr('product_undo_refused_stock_removed', 'This action removed stock. Undo here would put back an old stock figure over newer sales and receipts, so nothing was changed.', 'សកម្មភាពនេះបានដកស្តុកចេញ។ ការត្រឡប់វិញនៅទីនេះនឹងដាក់តួលេខស្តុកចាស់មកវិញ ពីលើការលក់ និងការទទួលថ្មីៗ ដូច្នេះគ្មានអ្វីត្រូវបានផ្លាស់ប្ដូរទេ។')
@@ -4026,20 +4039,9 @@ function ProductsFullEditor() {
       getDefaultProductRestoreBranchId,
       getPreferredProductRestoreBranchId,
       resolveRestoredProductParentId,
-      snapshotHoldsStock,
-      PRODUCT_UNDO_STOCK_REFUSED,
     } = await loadProductWriteHelpers()
-    // F2: the product was removed with stock on hand, and that stock left
-    // through the removal's own write-off. Re-creating it here could only put
-    // back the old figure, so refuse before writing anything and name the
-    // record that brings the product back with its real stock.
-    if (snapshots.some((snapshot) => snapshotHoldsStock(snapshot))) {
-      throw Object.assign(new Error(tr(
-        'product_undo_refused_removed_with_stock',
-        'Cannot restore here: this product was removed with stock on hand, and restoring it here would put back an old stock figure. Nothing was changed. Undo "Remove product" in History instead; it brings the product back with its real stock.',
-        'មិនអាចស្ដារនៅទីនេះបានទេ៖ ផលិតផលនេះត្រូវបានដកចេញ ខណៈមានស្តុកនៅសល់ ហើយការស្ដារនៅទីនេះនឹងដាក់តួលេខស្តុកចាស់មកវិញ។ គ្មានអ្វីត្រូវបានផ្លាស់ប្ដូរទេ។ សូមត្រឡប់ "ដកផលិតផល" វិញក្នុង ប្រវត្តិ ជំនួសវិញ ដែលនឹងនាំផលិតផលមកវិញជាមួយស្តុកពិតរបស់វា។',
-      )), { code: PRODUCT_UNDO_STOCK_REFUSED })
-    }
+    // F2: never writes stock. A snapshot that held stock never reaches here --
+    // its history entry is pushed with undoRefused/redoRefused (E2).
     const defaultBranchId = getDefaultProductRestoreBranchId(branches)
     const restored: RestoredProductEntry[] = []
     const orderedSnapshots = orderProductRestoreSnapshots(snapshots)
@@ -4067,7 +4069,7 @@ function ProductsFullEditor() {
     }
     await load(true)
     return restored
-  }, [branches, buildProductWritePayload, load, runProductWriteMutation, tr])
+  }, [branches, buildProductWritePayload, load, runProductWriteMutation])
 
   const pushCreatedProductHistory = useCallback((snapshot: ProductRecord, label = '') => {
     const baseSnapshot = cloneHistorySnapshot(snapshot)
@@ -4081,13 +4083,16 @@ function ProductsFullEditor() {
         if (result?.success === false) throw new Error(result.error || 'Failed to undo product creation')
         await load(true)
       },
-      redo: async () => {
+      // F2: a product created with stock is removed with stock by its Undo;
+      // Redo would re-create it with that old figure, so it is refused.
+      redoRefused: snapshotHoldsStock(baseSnapshot),
+      redo: snapshotHoldsStock(baseSnapshot) ? () => refuseStockUndo('removed_with_stock') : async () => {
         restoredEntries = await restoreDeletedProducts([baseSnapshot])
         activeCreatedProductId = Number(restoredEntries[0]?.restoredId || activeCreatedProductId)
       },
     })
     return true
-  }, [actionHistory, load, restoreDeletedProducts, runProductDeleteMutation])
+  }, [actionHistory, load, refuseStockUndo, restoreDeletedProducts, runProductDeleteMutation])
 
   const handleVariantDone = useCallback(async (payload: { createdProductId?: EntityId; snapshot?: ProductRecord } = {}) => {
     setVariantModal(null)
