@@ -157,9 +157,47 @@ function filterProducts(query) {
   })
 }
 
+// View + sort (PUBLIC-FILTER-MENU), the same allowlists and the same ORDER the
+// Worker applies (routes/portal.ts parsePortalBrowse / buildPortalBrowseOrder):
+// an unknown value falls back to the default, the group key puts blank last,
+// and an explicit sort orders INSIDE each group. Fixture names are unique, so
+// one row is one family. Plain `<` comparison matches SQLite's binary order.
+const BROWSE_VIEWS = ['brand', 'category', 'all']
+const BROWSE_SORTS = ['featured', 'name_asc', 'name_desc', 'price_asc', 'price_desc']
+
+function parseBrowse(query) {
+  const view = String(query.get('view') || '').trim().toLowerCase()
+  const sort = String(query.get('sort') || '').trim().toLowerCase()
+  const priceVisible = PORTAL_CONFIG.showPrices !== false
+  const knownSort = BROWSE_SORTS.includes(sort) ? sort : 'featured'
+  return {
+    view: BROWSE_VIEWS.includes(view) ? view : 'brand',
+    sort: !priceVisible && knownSort.startsWith('price_') ? 'featured' : knownSort,
+  }
+}
+
+function orderProducts(rows, { view, sort }) {
+  const groupKey = (product) => {
+    if (view === 'all') return ''
+    const value = String((view === 'category' ? product.category : product.brand) || '').trim().toLowerCase()
+    return (value ? '0' : '1') + value
+  }
+  const compare = (left, right) => (left < right ? -1 : left > right ? 1 : 0)
+  const byName = (left, right) => compare(String(left.name).trim().toLowerCase(), String(right.name).trim().toLowerCase())
+  const price = (product) => Number(product.selling_price_usd || 0)
+  return [...rows].sort((left, right) => {
+    const group = compare(groupKey(left), groupKey(right))
+    if (group) return group
+    if (sort === 'price_asc') return price(left) - price(right) || byName(left, right)
+    if (sort === 'price_desc') return price(right) - price(left) || byName(left, right)
+    return sort === 'name_desc' ? byName(right, left) : byName(left, right)
+  })
+}
+
 function buildCatalogPayload(query) {
   const { page, pageSize } = parsePaging(query)
-  const rows = filterProducts(query)
+  const browse = parseBrowse(query)
+  const rows = orderProducts(filterProducts(query), browse)
   const total = rows.length
   const start = (page - 1) * pageSize
   return {
@@ -169,6 +207,7 @@ function buildCatalogPayload(query) {
     pageSize,
     totalPages: Math.max(1, Math.ceil(total / pageSize)),
     initials: buildInitials(rows),
+    browse,
     promotion_rules: [],
   }
 }
