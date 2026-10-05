@@ -14,15 +14,16 @@ function runTest(name: string, fn: () => void) {
 }
 const src = (...parts: string[]) => fs.readFileSync(new URL(`../src/${parts.join('/')}`, import.meta.url), 'utf8')
 
-const LEGACY = [
+type Row = { id: number; name: string; role: string | null; is_active: number }
+const LEGACY: Row[] = [
   { id: 1, name: 'Warehouse', role: null, is_active: 1 },
   { id: 2, name: 'Shop', role: null, is_active: 1 },
 ]
-const BACKFILLED = [
+const BACKFILLED: Row[] = [
   { id: 1, name: 'Warehouse', role: 'warehouse', is_active: 1 },
   { id: 2, name: 'Shop', role: 'shop', is_active: 1 },
 ]
-const FINAL = [
+const FINAL: Row[] = [
   { id: 1, name: 'LC Store', role: 'shop', is_active: 1 },
   { id: 2, name: 'Old Shop', role: 'shop', is_active: 0 },
 ]
