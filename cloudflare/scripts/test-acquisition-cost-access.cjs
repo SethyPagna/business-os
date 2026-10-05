@@ -146,8 +146,12 @@ fixture.get('/cached', c => c.json(cached, 201, { 'X-Fixture': 'preserved' }))
 fixture.get('/supplier', c => c.json(supplier))
 fixture.get('/sale-conflict', c => c.json(saleConflict, 409, { 'X-Fixture': 'preserved' }))
 app.route('/fixture', fixture)
+// N13: POST /adjust requires a client_request_id; unless a case sets its own (to test a retry), give each call a fresh one.
+let adjustProbeSeq = 0
+const withAdjustId = (body) => (body && !('client_request_id' in body) && !('clientRequestId' in body) ? { client_request_id: 'fixture_probe_' + (++adjustProbeSeq) + '_abcdefgh', ...body } : body)
 async function request(url, actor, method = 'GET', body) {
   user = actor; dbOpens = 0
+  if (url.endsWith('/inventory/adjust')) body = withAdjustId(body)
   return app.request(`http://test${url}`, { method, ...(body ? { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) } : {}) }, {})
 }
 async function main() {

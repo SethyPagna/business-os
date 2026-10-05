@@ -164,7 +164,10 @@ const stockInCommitMod = loadReal('routes/stockInCommit.ts', {
   './batches': batchesMod,
 })
 const { runStockInCommit } = stockInCommitMod
-const { runAdjustAction } = inventoryMod
+// N13: POST /adjust requires a client_request_id; unless a case sets its own (to test a retry), give each call a fresh one.
+const { runAdjustAction: runAdjustActionKernelEntry } = inventoryMod
+let adjustProbeSeq = 0
+const runAdjustAction = (c, body) => runAdjustActionKernelEntry(c, body && !body.client_request_id ? { client_request_id: 'fixture_probe_' + (++adjustProbeSeq) + '_abcdefgh', ...body } : body)
 assert.equal(typeof runStockInCommit, 'function', 'routes/stockInCommit.ts exports runStockInCommit')
 assert.equal(typeof runAdjustAction, 'function', 'routes/inventory.ts exports runAdjustAction (P4-B extraction)')
 assert.equal(typeof batchesMod.runReceiveBatchAction, 'function', 'routes/batches.ts exports runReceiveBatchAction (P4-B extraction)')
@@ -308,11 +311,11 @@ async function run() {
     const db=freshDb(), c=makeContext(db,ADMIN_USER)
     db.raw.exec('UPDATE branches SET is_active=0 WHERE id=1')
     const before=snapshot(db)
-    const results=await runStockInCommit(c,[{key:'r',wire:'receive',body:receiveBody},{key:'a',wire:'adjust',body:adjustBody}])
+    const results=await runStockInCommit(c,[{key:'r',wire:'receive',body:receiveBody},{key:'a',wire:'adjust',body:{...adjustBody,client_request_id:'commit_line_a_00001'}}])
     assert.deepEqual(results.map(x=>[x.ok,x.code]),[[false,'receiving_branch_inactive'],[false,'receiving_branch_inactive']])
     assert.deepEqual(snapshot(db),before)
     db.raw.exec('UPDATE branches SET is_active=1 WHERE id=1')
-    const good=await runStockInCommit(c,[{key:'r',wire:'receive',body:receiveBody},{key:'a',wire:'adjust',body:adjustBody}])
+    const good=await runStockInCommit(c,[{key:'r',wire:'receive',body:receiveBody},{key:'a',wire:'adjust',body:{...adjustBody,client_request_id:'commit_line_a_00001'}}])
     assert.ok(good.every(x=>x.ok),JSON.stringify(good))
     assert.equal(branchStock(db,1),10)
   }

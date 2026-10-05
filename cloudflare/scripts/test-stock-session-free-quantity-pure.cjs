@@ -137,7 +137,9 @@ function ctx(db, user = ADMIN) {
   }
 }
 const call = async (fn, db, body) => { const res = await fn(ctx(db), body); return { status: res.status, json: await res.json() } }
-const adjust = (db, body) => call(inventoryMod.runAdjustAction, db, { productId: 1, branchId: 1, type: 'add', reason: 'New arrival', supplierName: 'Bong Long', paymentStatus: 'paid', ...body })
+// N13: the adjust kernel requires a client_request_id; each call gets a fresh one.
+let adjustProbeSeq = 0
+const adjust = (db, body) => call(inventoryMod.runAdjustAction, db, { client_request_id: 'fixture_probe_' + (++adjustProbeSeq) + '_abcdefgh', productId: 1, branchId: 1, type: 'add', reason: 'New arrival', supplierName: 'Bong Long', paymentStatus: 'paid', ...body })
 const receive = (db, body) => call(batchesMod.runReceiveBatchAction, db, { product_id: 1, branch_id: 1, reason: 'New arrival', supplier_name: 'Bong Long', payment_status: 'paid', ...body })
 const stock = (db) => db.prepare('SELECT quantity FROM branch_stock WHERE product_id = 1 AND branch_id = 1').get().quantity
 const lots = (db) => db.prepare('SELECT unit_cost_usd, received_quantity, received_cost_usd FROM product_batches WHERE variant_product_id = 1 ORDER BY id').all()

@@ -26,7 +26,7 @@ import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit, changedFields } from '../lib/audit'
 import { getPermissionTier, getActionTier } from '../lib/permissions'
 import { STOCK_REASON_MAX_LENGTH, stockReasonTooLong } from '../lib/stockReason'
-import { withStockMutationReceipt, type StockMutationAtomicMark } from '../lib/stockMutationReceipt'
+import { stockMutationRequestIdMissing, STOCK_MUTATION_REQUEST_ID_REQUIRED, withStockMutationReceipt, type StockMutationAtomicMark } from '../lib/stockMutationReceipt'
 import { maybeQueueForReview } from '../lib/reviewGate'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from '../lib/cache'
@@ -1496,6 +1496,14 @@ async function applyStockDelta(env: Env, productId: number, branchId: number, de
 // client_request_id, or a database where 0192 is not applied yet, takes the
 // pre-0192 path byte for byte (lib/stockMutationReceipt.ts).
 export async function runAdjustAction(c: InventoryContext, body: Record<string, unknown>): Promise<Response> {
+  // Refusals that need no database run BEFORE the receipt claim, so a denied or
+  // malformed request never opens a connection (the claim is a D1 round trip).
+  // N13: the request id was optional, so a retry of a lost answer applied the
+  // delta twice for any caller that sent none. Required now, after the
+  // permission checks so a denied user still gets the denial.
+  const denied = adjustPermissionRefusal(c, body)
+  if (denied) return denied
+  if (stockMutationRequestIdMissing(body)) return c.json(STOCK_MUTATION_REQUEST_ID_REQUIRED, 400)
   return withStockMutationReceipt(
     () => getDb(c.env),
     c.get('user')?.id ?? null,
@@ -1512,16 +1520,7 @@ export async function runAdjustAction(c: InventoryContext, body: Record<string, 
   )
 }
 
-// `markWritten` is the receipt guard's write barrier (lib/stockMutationReceipt.ts).
-// It is called ONCE, immediately before the first statement in this kernel that
-// can move stock, and it is what tells a retry apart from a re-apply: every
-// refusal above that line released the claim and may be retried with the same
-// id, every failure below it is reported as partially applied instead.
-// `atomicMark` is the same barrier as a statement, for the one path whose whole
-// stock write is a single db.batch (the auto-routed removal): the mark commits
-// with the stock or not at all. Optional so a caller that stubs the wrapper
-// with a one-argument run() still drives the kernel.
-async function runAdjustActionKernel(c: InventoryContext, body: Record<string, unknown>, markWritten: () => Promise<void>, atomicMark?: StockMutationAtomicMark): Promise<Response> {
+function adjustPermissionRefusal(c: InventoryContext, body: Record<string, unknown>): Response | null {
   const user = c.get('user')
   if (hasAcquisitionCostInput(body, user)) {
     return c.json({ error: 'Cost-entry permission is required to enter receipt costs.', code: 'product_cost_edit_required' }, 403)
@@ -1535,6 +1534,23 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
   if (getActionTier(user, 'inventory', 'adjust') !== 'full') {
     return c.json({ error: 'Stock adjustments require Full Access to Inventory -- Partial Access support for this action is not built yet.' }, 403)
   }
+  return null
+}
+
+// `markWritten` is the receipt guard's write barrier (lib/stockMutationReceipt.ts).
+// It is called ONCE, immediately before the first statement in this kernel that
+// can move stock, and it is what tells a retry apart from a re-apply: every
+// refusal above that line released the claim and may be retried with the same
+// id, every failure below it is reported as partially applied instead.
+// `atomicMark` is the same barrier as a statement, for the one path whose whole
+// stock write is a single db.batch (the auto-routed removal): the mark commits
+// with the stock or not at all. Optional so a caller that stubs the wrapper
+// with a one-argument run() still drives the kernel.
+async function runAdjustActionKernel(c: InventoryContext, body: Record<string, unknown>, markWritten: () => Promise<void>, atomicMark?: StockMutationAtomicMark): Promise<Response> {
+  const user = c.get('user')
+  // The same two permission checks, kept in the kernel as defence in depth for any caller that reaches it directly.
+  const denied = adjustPermissionRefusal(c, body)
+  if (denied) return denied
   const productId = Number.parseInt(String(body.productId ?? ''), 10)
   let type = String(body.type || '')
   let quantity = Number(body.quantity)
@@ -2982,6 +2998,8 @@ async function runTaggedLotAction(c: InventoryContext, action: 'dispose' | 'rest
     return c.json({ error: 'Changing tagged stock requires Full Access to Inventory.' }, 403)
   }
   const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
+  // N13: same rule as POST /adjust -- the frontend always mints one (damagedLotsTransport).
+  if (stockMutationRequestIdMissing(body)) return c.json(STOCK_MUTATION_REQUEST_ID_REQUIRED, 400)
   return withStockMutationReceipt(
     () => getDb(c.env),
     user?.id ?? null,

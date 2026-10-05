@@ -166,8 +166,8 @@ const nothingWritten = (db, label) => {
 // 10 at $3.50 + 2 free and 6 at $12.09 (paid, free units excluded) = $107.54.
 const sessionLines = (paymentStatus = 'paid') => [
   { key: 'a', wire: 'receive', body: { product_id: 1, branch_id: 1, quantity: 10, free_quantity: 2, unit_cost_usd: 3.5, supplier_name: 'Bong Long', payment_status: paymentStatus, credit_due_date: '2026-10-15', reason: 'New arrival' } },
-  { key: 'b', wire: 'adjust', body: { productId: 1, branchId: 1, type: 'add', quantity: 6, unitCostUsd: 12.09, supplierName: 'Bong Long', paymentStatus: 'paid', reason: 'New arrival' } },
-  { key: 'c', wire: 'adjust', body: { productId: 1, branchId: 1, type: 'remove', quantity: 1, reason: 'Damaged' } },
+  { key: 'b', wire: 'adjust', body: { client_request_id: 'sessline_b_00000001', productId: 1, branchId: 1, type: 'add', quantity: 6, unitCostUsd: 12.09, supplierName: 'Bong Long', paymentStatus: 'paid', reason: 'New arrival' } },
+  { key: 'c', wire: 'adjust', body: { client_request_id: 'sessline_c_00000001', productId: 1, branchId: 1, type: 'remove', quantity: 1, reason: 'Damaged' } },
 ]
 
 async function run() {

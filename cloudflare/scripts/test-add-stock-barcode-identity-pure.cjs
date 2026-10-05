@@ -279,11 +279,14 @@ const inventoryRoute = loadReal('routes/inventory.ts', {
 const app = inventoryRoute.default
 const fakeExecutionCtx = { waitUntil: (p) => { p?.catch?.(() => {}) }, passThroughOnException: () => {} }
 
+// N13: POST /adjust requires a client_request_id; unless a case sets its own (to test a retry), give each call a fresh one.
+let adjustProbeSeq = 0
+const withAdjustId = (body) => (body && !('client_request_id' in body) && !('clientRequestId' in body) ? { client_request_id: 'fixture_probe_' + (++adjustProbeSeq) + '_abcdefgh', ...body } : body)
 async function req(body) {
   const res = await app.request('/adjust', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
+    body: JSON.stringify(withAdjustId(body)),
   }, fakeEnv, fakeExecutionCtx)
   return { status: res.status, json: await res.json().catch(() => null) }
 }

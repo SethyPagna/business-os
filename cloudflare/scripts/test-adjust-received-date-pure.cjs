@@ -349,7 +349,11 @@ function seed() {
 
 const fakeExecutionCtx = { waitUntil: (p) => { p?.catch?.(() => {}) }, passThroughOnException: () => {} }
 
+// N13: POST /adjust requires a client_request_id; unless a case sets its own (to test a retry), give each call a fresh one.
+let adjustProbeSeq = 0
+const withAdjustId = (body) => (body && !('client_request_id' in body) && !('clientRequestId' in body) ? { client_request_id: 'fixture_probe_' + (++adjustProbeSeq) + '_abcdefgh', ...body } : body)
 async function req(method, url, body, targetApp = app) {
+  if (url === '/adjust') body = withAdjustId(body)
   const res = await targetApp.request(url, {
     method,
     headers: { 'Content-Type': 'application/json' },

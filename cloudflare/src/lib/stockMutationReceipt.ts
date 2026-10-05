@@ -124,6 +124,23 @@ function normalizeStockMutationRequestId(value: unknown): string | null {
 }
 
 /**
+ * N13: a stock write that moves quantity must carry a usable id. The wrapper
+ * below still accepts a missing one (the receive kernel and pre-0192 callers
+ * rely on that), so the adjust-class routes call this after their permission
+ * checks and refuse, instead of silently running without a duplicate guard.
+ */
+export function stockMutationRequestIdMissing(body: Record<string, unknown>): boolean {
+  // Supplied-but-malformed is not "missing": the wrapper answers that with its
+  // own invalid_client_request_id, which says what is actually wrong.
+  return !requestIdWasSupplied(body.client_request_id ?? body.clientRequestId)
+}
+
+export const STOCK_MUTATION_REQUEST_ID_REQUIRED = {
+  error: 'client_request_id is required when changing stock. Refresh the app and try again.',
+  code: 'client_request_id_required',
+} as const
+
+/**
  * Did the caller mean to send an id at all? Absent / null / '' means "no id,
  * pre-0192 path". Anything else was an ATTEMPT, and an attempt that does not
  * normalize must be refused rather than silently run unprotected -- a client

@@ -106,7 +106,9 @@ async function main() {
   // actually reached, so the accepted cases are not vacuous.
   const f = fixture()
   const inventory = httpDriver('routes/inventory.ts', f)
-  const adjust = (reason) => inventory('/adjust', 'POST', { productId: 1, branchId: 1, type: 'remove', quantity: 1, reason })
+  // N13: POST /adjust requires a client_request_id; the length guard under test sits behind it.
+  let adjustSeq = 0
+  const adjust = (reason) => inventory('/adjust', 'POST', { client_request_id: 'fixture_probe_' + (++adjustSeq) + '_abcdefgh', productId: 1, branchId: 1, type: 'remove', quantity: 1, reason })
   const editReason = (reason) => inventory('/movements/1/reason', 'PATCH', { reason })
 
   await check('POST /adjust: Khmer 501 bytes, a reason at the cap and the undo of a full 500-character reason all pass the length guard', async () => {

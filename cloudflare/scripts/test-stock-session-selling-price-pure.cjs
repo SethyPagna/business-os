@@ -134,7 +134,9 @@ function ctx(db, user = ADMIN) {
   }
 }
 const call = async (fn, db, body) => { const res = await fn(ctx(db), body); return { status: res.status, json: await res.json() } }
-const adjust = (db, body) => call(inventoryMod.runAdjustAction, db, { productId: 1, branchId: 1, type: 'add', reason: 'New arrival', supplierName: 'Bong Long', paymentStatus: 'paid', ...body })
+// N13: the adjust kernel requires a client_request_id; each call gets a fresh one.
+let adjustProbeSeq = 0
+const adjust = (db, body) => call(inventoryMod.runAdjustAction, db, { client_request_id: 'fixture_probe_' + (++adjustProbeSeq) + '_abcdefgh', productId: 1, branchId: 1, type: 'add', reason: 'New arrival', supplierName: 'Bong Long', paymentStatus: 'paid', ...body })
 const receive = (db, body) => call(batchesMod.runReceiveBatchAction, db, { product_id: 1, branch_id: 1, reason: 'New arrival', supplier_name: 'Bong Long', payment_status: 'paid', ...body })
 const stock = (db) => db.prepare('SELECT quantity FROM branch_stock WHERE product_id = 1 AND branch_id = 1').get().quantity
 const lots = (db) => db.prepare('SELECT unit_cost_usd, received_quantity, received_cost_usd FROM product_batches WHERE variant_product_id = 1 ORDER BY id').all()
@@ -183,7 +185,7 @@ async function run() {
   {
     const db = freshDb()
     auditCalls = []
-    const { status, json } = await callAs(inventoryMod.runAdjustAction, db, STOCK_CLERK, { productId: 1, branchId: 1, type: 'add', reason: 'New arrival', supplierName: 'Bong Long', paymentStatus: 'paid', quantity: 2, unitCostUsd: 3.5, sellingPriceUsd: 5 })
+    const { status, json } = await callAs(inventoryMod.runAdjustAction, db, STOCK_CLERK, { client_request_id: 'fixture_clerk_00000001', productId: 1, branchId: 1, type: 'add', reason: 'New arrival', supplierName: 'Bong Long', paymentStatus: 'paid', quantity: 2, unitCostUsd: 3.5, sellingPriceUsd: 5 })
     assert.equal(status, 200, JSON.stringify(json))
     assert.equal(json.sellingPriceUsd, null)
     assert.equal(priceAudits().length, 0, 'no price audit for an unchanged price')
@@ -192,7 +194,7 @@ async function run() {
 
   // 4. A change without the Products edit grant is refused before anything moves.
   for (const [label, fn, body] of [
-    ['adjust', inventoryMod.runAdjustAction, { productId: 1, branchId: 1, type: 'add', reason: 'New arrival', supplierName: 'Bong Long', paymentStatus: 'paid', quantity: 2, unitCostUsd: 3.5, sellingPriceUsd: 6 }],
+    ['adjust', inventoryMod.runAdjustAction, { client_request_id: 'fixture_denied_000001', productId: 1, branchId: 1, type: 'add', reason: 'New arrival', supplierName: 'Bong Long', paymentStatus: 'paid', quantity: 2, unitCostUsd: 3.5, sellingPriceUsd: 6 }],
     ['receive', batchesMod.runReceiveBatchAction, { product_id: 1, branch_id: 1, reason: 'New arrival', supplier_name: 'Bong Long', payment_status: 'paid', quantity: 2, unit_cost_usd: 3.5, selling_price_usd: 6 }],
   ]) {
     const db = freshDb()

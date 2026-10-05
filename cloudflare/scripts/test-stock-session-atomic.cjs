@@ -27,8 +27,10 @@ function loadStockSession(entry = 'lib/stockSession.ts', actor = user) {
       }
       // Migration 0192: the per-line receipt guard is REAL here, because the
       // reason-cap wires driven through this harness must reach the kernel
-      // exactly as an unidentified production request does.
-      if (normalized === 'routes/inventory.ts' && name.startsWith('../') && !['../lib/continuousReadWindow', '../lib/acquisitionCostAccess', '../lib/stockSession', '../lib/permissions', '../lib/stockReason', '../lib/stockCondition', '../lib/stockMutationReceipt'].includes(name)) return {}
+      // exactly as a production request does. N13: every adjust now carries a
+      // client_request_id, so the guard CLAIMS it first -- which needs the real
+      // getDb over the fixture's SQLite-backed env.DB (lib/db.ts).
+      if (normalized === 'routes/inventory.ts' && name.startsWith('../') && !['../lib/continuousReadWindow', '../lib/acquisitionCostAccess', '../lib/stockSession', '../lib/permissions', '../lib/stockReason', '../lib/stockCondition', '../lib/stockMutationReceipt', '../lib/db'].includes(name)) return {}
       if (name === './cache' || name === '../lib/cache') return { bumpVersion: async () => {} }
       if (name === '../durable-objects/broadcastHub') return { broadcast: async () => {} }
       if (name.startsWith('./')) return load(`lib/${name.slice(2)}.ts`)

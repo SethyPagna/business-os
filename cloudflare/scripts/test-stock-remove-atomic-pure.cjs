@@ -408,9 +408,12 @@ function clearMovementFailure() {
   rawDb.exec('DROP TRIGGER IF EXISTS temp.inject_movement_failure')
 }
 
-const REMOVE = (extra) => ({ productId: 1, type: 'remove', quantity: 1, reason: 'count fix', branchId: 1, ...extra })
+// N13: POST /adjust requires a client_request_id; each fixture call gets a fresh one.
+let adjustProbeSeq = 0
+const probeId = () => ({ client_request_id: 'fixture_probe_' + (++adjustProbeSeq) + '_abcdefgh' })
+const REMOVE = (extra) => ({ ...probeId(), productId: 1, type: 'remove', quantity: 1, reason: 'count fix', branchId: 1, ...extra })
 const MOVE = (extra) => ({ sourceProductId: 1, destinationProductId: 2, quantity: 1, branchId: 1, reason: 'relabel', ...extra })
-const TAGGED = (extra) => ({ productId: 1, branchId: 1, conditionTag: 'opened', quantity: 5, reason: 'checked', ...extra })
+const TAGGED = (extra) => ({ ...probeId(), productId: 1, branchId: 1, conditionTag: 'opened', quantity: 5, reason: 'checked', ...extra })
 const hold = async (tag, quantity) => {
   const res = await req('POST', '/adjust', REMOVE({ quantity, reason: 'shelf damage', conditionTag: tag }))
   assert.equal(res.status, 200, `hold ${quantity} as ${tag}: ${JSON.stringify(res.json)}`)
@@ -431,7 +434,7 @@ const hold = async (tag, quantity) => {
 
   await check('STK-C: "Set stock to 3" on unlotted 5 posts one remove of 2', async () => {
     seedStock({ unlotted: 5 })
-    const res = await req('POST', '/adjust', { productId: 1, type: 'set', quantity: 3, reason: 'count', branchId: 1 })
+    const res = await req('POST', '/adjust', { ...probeId(), productId: 1, type: 'set', quantity: 3, reason: 'count', branchId: 1 })
     assert.equal(res.status, 200, JSON.stringify(res.json))
     assert.deepEqual(stateOf(1), { branch: 3, product: 3, lots: 0 })
     const removed = moves(1, 'remove')
