@@ -24,7 +24,7 @@ test('the cart branch selector shows Warehouse but disables every non-selling br
 
 test('the branch handler rejects non-selling targets even if invoked outside the selector', () => {
   assert.match(pos, /const targetBranch = nextBranchId == null \? null : branchesById\.get\(nextBranchId\)/)
-  assert.match(pos, /if \(!targetBranch \|\| !branchCanSellNow\(targetBranch\)\) \{[^]*?pos_warehouse_not_sellable[^]*?return\n    \}/)
+  assert.match(pos, /if \(!targetBranch \|\| !branchCanSellNow\(targetBranch\)\) \{[^]*?branch_not_sellable[^]*?return\n    \}/)
 })
 
 test('a batch-tracked line revalidates the same batch by product and target branch before changing', () => {

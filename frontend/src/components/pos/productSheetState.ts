@@ -430,7 +430,7 @@ export function deriveProductSheetState(input: ProductSheetStateInput): ProductS
       groupQuantity: branchGroupTotals.get(id) || 0,
       role,
       selectable: sellable,
-      blockedMessageKey: sellable ? null : 'pos_warehouse_not_sellable',
+      blockedMessageKey: sellable ? null : 'branch_not_sellable',
     }
   })
 

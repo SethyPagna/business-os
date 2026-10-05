@@ -422,7 +422,7 @@ export default function ProductDetailSheet({
   const candidatePool = sheetState.candidatePool as ProductRecord[]
   const effectiveVariant = sheetState.effectiveVariant as ProductRecord | null
   const effectiveVariantStock = sheetState.effectiveVariantStock
-  const warehouseBlockedMessage = t('pos_warehouse_not_sellable') || 'Only allow Shop sale. Please transfer to Shop first.'
+  const warehouseBlockedMessage = t('branch_not_sellable') || 'Sales can only be recorded at a selling branch.'
 
   const branchPageCount = Math.max(1, Math.ceil(branchOptions.length / BRANCH_CHOICES_PAGE_SIZE))
   const clampedBranchPage = Math.min(branchPage, branchPageCount - 1)

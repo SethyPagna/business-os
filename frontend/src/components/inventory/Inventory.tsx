@@ -1393,11 +1393,11 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
       return
     }
     if (!branchCanTransferBetween(fromBranch, toBranch)) {
-      notify(tr('transfer_canonical_pair_only', 'Transfers move stock only between Shop and Warehouse.'), 'error')
+      notify(tr('transfer_branches_pair_only', 'Transfers move stock only between the two operating branches.'), 'error')
       return
     }
     if (branches.filter((branch) => branchCanBeTransferSource(branch)).length !== 2) {
-      notify(tr('transfer_canonical_pair_only', 'Transfers move stock only between Shop and Warehouse.'), 'error')
+      notify(tr('transfer_branches_pair_only', 'Transfers move stock only between the two operating branches.'), 'error')
       return
     }
     const confirmation = tr(

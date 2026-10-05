@@ -2671,7 +2671,7 @@ export default function POS() {
       ? { branchId: overrideBranchId, blocked: false }
       : resolveSaleBranch(product as never, { activeBranchFilterId: primaryBranchFilterId, defaultBranchId })
     if (saleBranch.blocked) {
-      notify(t('pos_warehouse_not_sellable') || 'Only allow Shop sale. Please transfer to Shop first.', 'error')
+      notify(t('branch_not_sellable') || 'Sales can only be recorded at a selling branch.', 'error')
       setDetailProduct(product)
       return
     }
@@ -2928,7 +2928,7 @@ export default function POS() {
     if (!item || !product) return
     const targetBranch = nextBranchId == null ? null : branchesById.get(nextBranchId)
     if (!targetBranch || !branchCanSellNow(targetBranch)) {
-      notify(t('pos_warehouse_not_sellable') || 'Only allow Shop sale. Please transfer to Shop first.', 'error')
+      notify(t('branch_not_sellable') || 'Sales can only be recorded at a selling branch.', 'error')
       return
     }
     const targetBranchId = Number(targetBranch.id)
