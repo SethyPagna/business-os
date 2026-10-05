@@ -23,7 +23,7 @@ type CatalogProductImageProps = {
    */
   thumbnail?: boolean
   /**
-   * With `thumbnail`: the tile's rendered width (an <img sizes> value) so a
+   * With `thumbnail`: the tile's rendered width (an image sizes value) so a
    * dense display can take the 640 px variant. Without it only the 320 px one
    * is used.
    */

@@ -85,6 +85,7 @@ for (const phase of ['compression', 'response', 'cache-refresh']) {
   const upload = compile(functionSource('api/productImageUploadTransport.ts', 'uploadProductImage'), {
     ...a, assertActorSessionDispatchAllowed: () => {}, requireLiveServerWrite: () => {},
     compressImageFile: async (file: File) => { if (phase !== 'response') await wait.promise; return file },
+    createImageThumbnails: async () => [], appendImageThumbnails: () => {},
     getSyncServerUrl: () => 'https://fixture.invalid', normalizeStoredImageResponse: (v: unknown) => v,
     fetch: async () => { writes++; return { ok: true, text: async () => { if (phase === 'response') await wait.promise; return '{"path":"uploads/a.png"}' } } },
   }, 'uploadProductImage')
