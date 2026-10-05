@@ -31,7 +31,7 @@ import { compareCosts, normalizeProductGroupName, resolveMergedCostDetail } from
 import type { CostVerdict, MergedCostOutlier } from '../lib/productDetailRule'
 import { buildAtomicMergeHistoryStatements, closeStockSessionsStatements, readOpenStockSessions, finalizeAtomicMergeHistory, mergeStateFingerprint, PRODUCT_MERGE_GROUP_ACTION_KIND, PRODUCT_MERGE_GROUP_CHILD_KIND, productMergeGroupPrefixFingerprint, registerMergeFold, registerProductMergeGroupRedo, recordSupplierBackfillSnapshot, MERGE_REPARENT_TABLES, type AtomicMergeKnownIds, type AtomicMergeStatement, type MergeReversal, type MergeStockDisposition, type ProductMergeKeeperChoice } from '../lib/undoAppliers'
 import { INVALID_RESOLVE_CHOICES_CODE, KEEPER_CHOICE_BEFORE_SQL, MERGE_APPLIED_PROBE_SQL, ProductResolveChoiceError, RESOLVE_EDIT_PERMISSION_CODE, keeperChoiceBefore, keeperChoiceStatements, mergeFailedBody, parseProductResolveChoices, resolveChoicesTypeValues, resolveChoiceValues, type ProductResolveChoices, type ResolveChoiceValues } from '../lib/productResolveChoices'
-import { createProductMergeClusterPlan, MERGE_COST_FIELDS, MERGE_PRICE_FIELDS, parseProductMergeClusterPlan, productMergeCaseKey, productMergeCasAssertion, productMergeNumericError, productMergeSourceUnmovedAssertion, MERGE_CONFLICT_RETRY, productMergePlanKeeperMatches, productMergePlanSourceMemberMatches, resolveProductMergeClusterPlanEconomics, resolveProductMergeEconomics, type ProductMergeClusterPlan, type ProductMergeEconomics, type ProductMergeNumericIssue } from '../lib/productMerge'
+import { createProductMergeClusterPlan, isMergePriceEditError, MERGE_COST_FIELDS, MERGE_PRICE_EDIT_CODE, MERGE_PRICE_EDIT_MESSAGE, MERGE_PRICE_FIELDS, mergePriceCopyChanges, mergePriceEditError, parseProductMergeClusterPlan, productMergeCaseKey, productMergeCasAssertion, productMergeNumericError, productMergeSourceUnmovedAssertion, MERGE_CONFLICT_RETRY, productMergePlanKeeperMatches, productMergePlanSourceMemberMatches, resolveProductMergeClusterPlanEconomics, resolveProductMergeEconomics, type ProductMergeClusterPlan, type ProductMergeEconomics, type ProductMergeNumericIssue } from '../lib/productMerge'
 import { CATALOG_COST_DERIVE_SQL, catalogCostRecomputeIfChangedSql, costEntryActorParams, typedCostEntriesBeforeWriteSql, typedCostEntryBeforeWriteStatement } from '../lib/catalogCostRecompute'
 import { PRODUCT_MERGE_READ_BATCH_MAX_STATEMENTS, productMergeSourceExtent, readProductMergeCaseSnapshot, readProductMergeDependentLotSnapshots, planProductMergeCaseSnapshot, planProductMergeDependentLotSnapshots, runProductMergeReadBatch, type ProductMergeReadPlan } from '../lib/productMergeSnapshot'
 import type { ProductMergeCaseSnapshot, ProductMergeLotSnapshot } from '../lib/productMergeSnapshot'
@@ -3588,6 +3588,19 @@ export async function foldDuplicateProductInto(
   ] as Array<[string, number]>)
     .map(([field, to]) => ({ field, from: Number((canonicalBefore as Record<string, number | null> | null)?.[field]) || 0, to: Number(to) || 0 }))
     .filter((change) => roundMoney4(change.from) !== roundMoney4(change.to))
+  // Owner, 5 Oct 2026: a merge that leaves the keeper with a price it does not
+  // already have (the group maximum, or a Resolve choice taken from another
+  // record) is a product edit. Decided from the same final columns the UPDATE and
+  // the choice statements write, and BEFORE any statement is built or run, so a
+  // refusal writes nothing. Admin-control users pass through getActionTier.
+  const finalPriceColumns: Record<string, unknown> = {}
+  for (const field of MERGE_PRICE_FIELDS) {
+    finalPriceColumns[field] = choiceFields && Object.prototype.hasOwnProperty.call(choiceFields, field)
+      ? (choiceFields as Record<string, unknown>)[field]
+      : mergedPricing[field] ?? canonicalBefore?.[field] ?? 0
+  }
+  const copiedPrices = mergePriceCopyChanges(canonicalBefore, finalPriceColumns)
+  if (copiedPrices.length && getActionTier(user, 'products', 'edit') !== 'full') throw mergePriceEditError()
   const dupBatchRows = snapshot.duplicateBatchRows
   // Images were the one thing this merge silently threw away: branch_stock,
   // inventory_movements and product_batches were all carried over, but the
@@ -4044,6 +4057,8 @@ BEGIN SELECT RAISE(ABORT,'lot has immutable transfer provenance'); END`,
     ...(displacedBarcode !== null ? { dupBarcodeBefore: dupPricing.barcode ?? null } : {}),
     ...(keeperChoice ? { keeperChoice } : {}),
     ...choiceBefore,
+    // Replay (undo or redo) of a merge that copied a price needs the same product-edit grant.
+    ...(copiedPrices.length ? { copiedPrice: true } : {}),
     ...(keeperChoice?.economics ? { fullBatchMetadataFingerprint: true } : {}),
     ...(atomicHistory?.reviewedCatalogBefore ? { keeperCatalogBefore: atomicHistory.reviewedCatalogBefore } : {}),
     keeperPricingBefore: {
@@ -5387,13 +5402,16 @@ app.post('/merge-duplicates', async (c) => {
         const conflict = /merge_state_conflict|merge_identity_conflict|merge_cluster_plan_conflict/.test(String(error))
         const exceedsBudget = MERGE_BUDGET_ERROR.test(String(error))
         const retry = String(error).includes(MERGE_CONFLICT_RETRY)
+        const priceNeedsEdit = isMergePriceEditError(error)
         refusals.push({
           caseKey: productMergeCaseKey(canonicalId, dup.id),
           keeperId: canonicalId,
           mergedId: dup.id,
           mergedName: dup.name,
-          code: retry ? MERGE_CONFLICT_RETRY : conflict ? 'merge_state_conflict' : exceedsBudget ? 'merge_case_exceeds_safe_limit' : 'merge_failed',
-          error: retry
+          code: priceNeedsEdit ? MERGE_PRICE_EDIT_CODE : retry ? MERGE_CONFLICT_RETRY : conflict ? 'merge_state_conflict' : exceedsBudget ? 'merge_case_exceeds_safe_limit' : 'merge_failed',
+          error: priceNeedsEdit
+            ? MERGE_PRICE_EDIT_MESSAGE
+            : retry
             ? MERGE_CONFLICT_RETRY_MESSAGE
             : conflict
               ? 'The product changed during this case; refresh and resume.'
@@ -7965,6 +7983,7 @@ async function applyProductConflictActionReview(c: any, raw: unknown, user: Sess
         snapshotContext: { review_id: review.id, group_key: group.group_key, authority: plan.authority },
       })
   } catch (error) {
+    if (isMergePriceEditError(error)) throw new ProductConflictActionApplyStop(MERGE_PRICE_EDIT_CODE, MERGE_PRICE_EDIT_MESSAGE, 403)
     const conflict = /merge_state_conflict|merge_identity_conflict|merge_cluster_plan_conflict|merge_conflict_retry/.test(String(error))
     const infrastructure = isProductMergeInfrastructureError(error)
     throw new ProductConflictActionApplyStop(conflict ? 'merge_state_conflict' : infrastructure ? 'merge_infrastructure_interrupted' : 'merge_failed',
@@ -8394,11 +8413,12 @@ app.post('/possible-duplicates/merge-batch', async (c) => {
         }
         const conflict = /merge_state_conflict|merge_identity_conflict|merge_conflict_retry|selected_conflict.*guard|malformed JSON/i.test(String(error))
         const exceeds = MERGE_BUDGET_ERROR.test(String(error))
+        const priceNeedsEdit = isMergePriceEditError(error)
         await db.prepare(`UPDATE product_conflict_merge_run_cases SET status='refused',refusal_code=@code,error=@error,updated_at=CURRENT_TIMESTAMP
           WHERE run_id=@runId AND ordinal=@ordinal AND status='planned'`)
           .run({
-            code: conflict ? 'merge_state_conflict' : exceeds ? 'merge_case_exceeds_safe_limit' : 'merge_failed',
-            error: conflict ? 'This pair changed during execution and remains unchanged.' : exceeds ? 'This pair exceeds the safe atomic limit and remains unchanged.' : String(error),
+            code: priceNeedsEdit ? MERGE_PRICE_EDIT_CODE : conflict ? 'merge_state_conflict' : exceeds ? 'merge_case_exceeds_safe_limit' : 'merge_failed',
+            error: priceNeedsEdit ? MERGE_PRICE_EDIT_MESSAGE : conflict ? 'This pair changed during execution and remains unchanged.' : exceeds ? 'This pair exceeds the safe atomic limit and remains unchanged.' : String(error),
             runId: run.id, ordinal: item.ordinal,
           })
         interruptionCode = conflict ? 'merge_state_conflict' : null
@@ -8817,6 +8837,7 @@ app.post('/possible-duplicates/merge', async (c) => {
     if (/merge_state_conflict|merge_identity_conflict/.test(String(error))) {
       return c.json({ success: false, code: 'merge_state_conflict', error: 'One of these products changed while the merge was being prepared. Refresh and try again.' }, 409)
     }
+    if (isMergePriceEditError(error)) return c.json({ success: false, code: MERGE_PRICE_EDIT_CODE, error: MERGE_PRICE_EDIT_MESSAGE }, 403)
     const refusal = mergeFoldRefusal(error)
     if (refusal) return c.json({ success: false, ...refusal }, 409)
     if (/merge_numeric_invalid:/.test(String(error))) {

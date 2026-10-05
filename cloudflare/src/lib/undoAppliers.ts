@@ -207,6 +207,12 @@ export interface MergeReversal {
   keeperNameNormalizedBefore?: string | null
   /** The Resolve grid's keeper choice (N1/N4); a redo passes it back to the fold. */
   keeperChoice?: ProductMergeKeeperChoice
+  /**
+   * True when this fold moved another record's selling or wholesale price onto the
+   * keeper (owner, 5 Oct 2026: that is a product edit). Snapshots written before
+   * the rule lack it and replay as they always did.
+   */
+  copiedPrice?: boolean
   /** Optional exact keeper catalog before-image for reviewed v2 merges. */
   keeperCatalogBefore?: {
     category: string | null
@@ -300,6 +306,7 @@ export const PRODUCT_MERGE_GROUP_CHILD_KIND = 'product.merge.group.child'
 const PRODUCT_MERGE_APPLIER_KINDS = new Set(['product.merge', 'product.merge.bulk', PRODUCT_MERGE_GROUP_ACTION_KIND])
 
 function mergeChoicePermissionError(reversal: MergeReversal, user: SessionUser | null | undefined): string | null {
+  if (reversal.copiedPrice === true && (!user || getActionTier(user, 'products', 'edit') !== 'full')) return 'product_edit_permission_required'
   const choice = reversal.keeperChoice
   if (!choice) return null
   const needsProductEdit = choice.requiresProductEdit === true

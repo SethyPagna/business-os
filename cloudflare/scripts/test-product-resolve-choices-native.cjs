@@ -325,11 +325,12 @@ async function main() {
     assert.equal(dump(), before)
   })
 
-  await check('ROUTE: the same user may pick among the reviewed records\' values, and a user with Edit product may type', async () => {
+  // Owner, 5 Oct 2026: another record's PRICE is the one pick that needs Edit product (test-merge-price-copy-needs-edit-native.cjs).
+  await check('ROUTE: the same user may pick among the reviewed records\' values (prices stay the survivor\'s own), and a user with Edit product may type', async () => {
     fresh()
     state.user = MERGER
     const picks = { name: { source_id: M1 }, barcode: { source_id: M1 }, brand: { source_id: M1 }, category: { source_id: M2 }, unit: { source_id: M2 },
-      selling_price_usd: { source_id: M1 }, wholesale_price_usd: { source_id: M2 } }
+      selling_price_usd: { source_id: KEEP }, wholesale_price_usd: { source_id: KEEP } }
     const group = await reviewGroup('picks-only', picks)
     const done = await merge(group.body(M1))
     assert.equal(done.status, 200, JSON.stringify(done.body))

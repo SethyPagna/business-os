@@ -8,6 +8,39 @@ export const MERGE_PRICE_FIELDS = [
   'wholesale_price_khr',
 ] as const
 
+// Owner, 5 Oct 2026: copying another product's selling or wholesale price onto
+// the kept product during a merge is a product edit. Merge permission alone moves
+// no price. The fold computes the keeper's FINAL price columns (the group maximum,
+// or the Resolve grid's chosen Final) and refuses when any differs from the
+// keeper's own today and the actor cannot edit products (full tier).
+export const MERGE_PRICE_EDIT_CODE = 'product_edit_permission_required'
+export const MERGE_PRICE_EDIT_MESSAGE = 'Copying a price from another product during a merge needs the permission to edit products. Nothing was changed.'
+
+export type MergePriceCopyChange = { field: typeof MERGE_PRICE_FIELDS[number]; from: number; to: number }
+
+/** The price columns whose final value differs from the keeper's current one (4 decimal places, as every merge comparison). */
+export function mergePriceCopyChanges(
+  before: Record<string, unknown> | null | undefined,
+  final: Partial<Record<typeof MERGE_PRICE_FIELDS[number], unknown>>,
+): MergePriceCopyChange[] {
+  const out: MergePriceCopyChange[] = []
+  for (const field of MERGE_PRICE_FIELDS) {
+    const from = Number(before?.[field]) || 0
+    const to = Number(final[field]) || 0
+    if (roundMoney4(from) !== roundMoney4(to)) out.push({ field, from, to })
+  }
+  return out
+}
+
+export function mergePriceEditError(): Error & { code: string; status: number } {
+  return Object.assign(new Error(MERGE_PRICE_EDIT_MESSAGE), { code: MERGE_PRICE_EDIT_CODE, status: 403 })
+}
+
+export function isMergePriceEditError(error: unknown): boolean {
+  const candidate = error as { code?: unknown; status?: unknown } | null
+  return candidate?.code === MERGE_PRICE_EDIT_CODE && candidate?.status === 403
+}
+
 export type MergeMoneyField = typeof MERGE_COST_FIELDS[number] | typeof MERGE_PRICE_FIELDS[number]
 
 export type ProductMergeNumericIssue = {
