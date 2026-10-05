@@ -922,3 +922,58 @@ export async function loadShiftCloseDrift(
   }
   return { components, sales: named, sales_total: drifted.length, sales_unavailable: salesUnavailable, current }
 }
+
+// ---- the close's inputs, re-checked at commit (N4 follow-up) ----------------
+//
+// The stored figures are computed in JS before the close batch, so a write
+// landing between that read and the commit (a tender relabel, a cancel, an
+// expense edit) would be stored as if the shift had closed on it -- and then
+// reported as "changed after close", which it was not. The figures cannot be
+// computed in SQL inside the batch, so the close instead reads a DIGEST of
+// every input first, computes the figures, and the batch re-evaluates the same
+// digest and aborts (bad-JSON-path sentinel) if it moved. The route retries.
+//
+// What the digest covers is what the drawer reads:
+//   * sales in the window (incl. cancelled): count, ids, and the sum of their
+//     sale_write_revisions -- trigger-maintained on EVERY insert/update/delete
+//     of a sale or its lines (migration 0120), so any sale writer moves it;
+//   * delivery-typed fees linked to those sales (they zero the courier payout);
+//   * the window's fees row by row (id and both amounts, so two offsetting
+//     edits still move it; the stored drawer keeps expense totals only, so a
+//     label edit is deliberately not a change), and its refunds: count, ids
+//     and the refunded dollars summed (the drawer reads dollars only);
+//   * the payment-method settings that decide which tender is cash.
+// The shift row's own opening/additional/counted values are guarded by the
+// close's revision already.
+
+export const SHIFT_CLOSE_INPUTS_CHANGED = 'shift_close_inputs_changed'
+
+export type ShiftCloseInputsDigest = { expr: string; params: Record<string, unknown> }
+
+export function shiftCloseInputsDigestSql(shift: ShiftReconciliationSession, nowMs: number): ShiftCloseInputsDigest {
+  const sales = shiftWindowWhere('sales', shiftFilters(shift, nowMs))
+  if (shift.branch_id) { sales.clauses.push('sales.branch_id = @branchId'); sales.params.branchId = shift.branch_id }
+  const fees = shiftFeeWhere(shift, nowMs)
+  const refunds = shiftWindowWhere('returns', shiftFilters(shift, nowMs))
+  if (shift.branch_id) { refunds.clauses.push('returns.branch_id = @branchId'); refunds.params.branchId = shift.branch_id }
+  refunds.clauses.push("COALESCE(returns.status, 'completed') <> 'cancelled'", "COALESCE(returns.return_scope, 'customer') = 'customer'")
+  const salesWhere = sales.clauses.join(' AND ')
+  const expr = `json_array(
+    (SELECT json_array(COUNT(*), TOTAL(sales.id), TOTAL(COALESCE(close_rev.revision, 0))) FROM sales
+      LEFT JOIN sale_write_revisions close_rev ON close_rev.sale_id = sales.id WHERE ${salesWhere}),
+    (SELECT COUNT(*) FROM fees WHERE COALESCE(fees.fee_type, '') = 'delivery'
+      AND fees.sale_id IN (SELECT sales.id FROM sales WHERE ${salesWhere})),
+    (SELECT json_group_array(json_array(fees.id, fees.amount_usd, fees.amount_khr)) FROM (
+      SELECT fees.id, fees.amount_usd, fees.amount_khr FROM fees
+      WHERE ${fees.clauses.join(' AND ')} ORDER BY fees.id) fees),
+    (SELECT json_array(COUNT(*), TOTAL(returns.id), TOTAL(returns.total_refund_usd)) FROM returns WHERE ${refunds.clauses.join(' AND ')}),
+    (SELECT json_group_array(json_array(key, value)) FROM (SELECT key, value FROM settings
+      WHERE key IN ('pos_payment_methods', '${PAYMENT_METHOD_KINDS_SETTING}') ORDER BY key)))`
+  return { expr, params: { ...sales.params, ...fees.params, ...refunds.params } }
+}
+
+/** The digest's value now -- read BEFORE the figures, so anything that moves after is caught at commit. */
+export async function readShiftCloseInputsDigest(env: Env, digest: ShiftCloseInputsDigest): Promise<string> {
+  const row = await getDb(env).prepare(`SELECT ${digest.expr} AS digest`).get<{ digest: string }>(digest.params)
+  return String(row?.digest ?? '')
+}

@@ -56,6 +56,8 @@ function database() {
       delivery_actual_cost_khr REAL, is_delivery INTEGER, source_return_id INTEGER,
       customer_id INTEGER, delivery_contact_id INTEGER, delivery_contact_name TEXT
     );
+    -- 0120's trigger-maintained per-sale revision: the close's input digest reads it.
+    CREATE TABLE sale_write_revisions (sale_id INTEGER PRIMARY KEY, revision INTEGER NOT NULL DEFAULT 0);
     CREATE TABLE sale_items (
       id INTEGER PRIMARY KEY, sale_id INTEGER, quantity REAL, cost_price_usd REAL,
       product_discount_usd REAL, manual_discount_usd REAL

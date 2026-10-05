@@ -9,7 +9,8 @@ import { scheduleTelegramShiftOverview, sendTelegramShiftReport } from '../lib/t
 import { firstCharacters } from '../lib/telegramLang'
 import {
   loadShiftCloseDrift, loadShiftCloseFigures, loadShiftFigures, loadShiftReconciliation, parseShiftCloseFigures,
-  type ShiftCloseDrift, type ShiftCloseFigures, type ShiftFigures, type ShiftReconciliation,
+  readShiftCloseInputsDigest, shiftCloseInputsDigestSql,
+  type ShiftCloseDrift, type ShiftCloseFigures, type ShiftCloseInputsDigest, type ShiftFigures, type ShiftReconciliation,
 } from '../lib/shiftReconciliation'
 import type { Env } from '../index'
 
@@ -785,14 +786,23 @@ async function drawerFor(env: Env, user: SessionUser, shift: ShiftRow, options: 
  * cannot be computed: the close must never fail for the report's sake, and a
  * close without stored figures reads exactly like a pre-0237 one ("computed").
  */
-async function closeFiguresFor(env: Env, closing: ShiftRow): Promise<string | null> {
+type CloseFigures = { json: string; digest: ShiftCloseInputsDigest; digestValue: string }
+async function closeFiguresFor(env: Env, closing: ShiftRow): Promise<CloseFigures | null> {
   try {
-    const figures = await loadShiftCloseFigures(env, closing, Date.now())
-    if (!figures || typeof figures !== 'object') return null
+    const nowMs = Date.now()
+    // The digest FIRST: whatever moves after this read is caught at commit
+    // (writeClose's inputs guard), including a write landing mid-computation.
+    const digest = shiftCloseInputsDigestSql(closing, nowMs)
+    const digestValue = await readShiftCloseInputsDigest(env, digest)
+    const figures = await loadShiftCloseFigures(env, closing, nowMs)
+    if (!figures || typeof figures !== 'object' || !digestValue) return null
     const json = JSON.stringify(figures)
     // D1 rows stay well under its size limit: past ~512 KB keep the drawer and drop the fingerprint.
-    return json.length <= 512_000 ? json : JSON.stringify({ ...figures, sales: null })
+    return { json: json.length <= 512_000 ? json : JSON.stringify({ ...figures, sales: null }), digest, digestValue }
   } catch { return null }
+}
+function isCloseInputsChangedError(error: unknown): boolean {
+  return /bad JSON path: ['"]\$\[shift_close_inputs_changed\]['"]/i.test(error instanceof Error ? error.message : String(error))
 }
 /**
  * The shift REPORT figures -- sales, COGS, profit, delivery and the expense
@@ -1101,8 +1111,8 @@ async function writeClose(db: D1Compat, user: SessionUser, row: ShiftDbRow, inpu
   additionalUsd: number; additionalKhr: number
   note: string | null; deviceName: string | null; reason: string
   request?: ReturnType<typeof mutationRequest>
-  /** closeFiguresFor's JSON, or null when the figures could not be computed. */
-  figuresJson: string | null
+  /** closeFiguresFor's figures and input digest, or null when they could not be computed. */
+  figures: CloseFigures | null
 }): Promise<{ changed: boolean; shift: ShiftDbRow | undefined }> {
   const shift = storedShift(row)
   const after = { ...shift, closed_at: input.closedAt, closing_counted_usd: input.countedUsd,
@@ -1132,15 +1142,45 @@ async function writeClose(db: D1Compat, user: SessionUser, row: ShiftDbRow, inpu
     // close always carries the figures it computed. Guarded by the row's new
     // state rather than changes(), which the two inserts above already chain:
     // a close that lost its revision race writes nothing here.
-    ...(input.figuresJson == null ? [] : [{ sql: `INSERT INTO shift_close_figures (shift_session_id, closed_at, figures_json, created_at)
+    ...(input.figures == null ? [] : [{ sql: `INSERT INTO shift_close_figures (shift_session_id, closed_at, figures_json, created_at)
         SELECT id, closed_at, @figuresJson, @createdAt FROM shift_sessions
         WHERE id=@id AND revision=@newRevision AND closed_at=@closedAt AND closed_by_user_id=@closerId
           AND NOT EXISTS (SELECT 1 FROM shift_close_figures WHERE shift_session_id=@id)`,
       params: { id: shift.id, newRevision: after.revision, closedAt: input.closedAt, closerId: user.id,
-        figuresJson: input.figuresJson, createdAt: input.recordedAt } }]),
+        figuresJson: input.figures.json, createdAt: input.recordedAt } },
+      // ...and the inputs those figures were computed from are still the
+      // inputs now. A write that landed in between aborts the whole batch
+      // (close included); closeWithFigures recomputes and retries. Evaluated
+      // only when this close won, so a lost race still answers its 409.
+      { sql: `SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM shift_sessions WHERE id=@closeGuardId AND revision=@closeGuardRevision
+            AND closed_at=@closeGuardClosedAt AND closed_by_user_id=@closeGuardCloserId)
+          OR (${input.figures.digest.expr}) = @closeInputsDigest
+        THEN 1 ELSE json_extract('[1]', '$[shift_close_inputs_changed]') END`,
+        params: { ...input.figures.digest.params, closeGuardId: shift.id, closeGuardRevision: after.revision,
+          closeGuardClosedAt: input.closedAt, closeGuardCloserId: user.id, closeInputsDigest: input.figures.digestValue } }]),
   ])
   const changed = batchChanges(results[0]) === 1
   return { changed, shift: await readShiftById(db, shift.id) }
+}
+/**
+ * The close, with the figures it is made on (N4). The figures are computed
+ * in JS, so they are re-verified at commit (writeClose's inputs guard): a
+ * write that lands between the read and the commit aborts the batch and the
+ * figures are recomputed -- at most CLOSE_FIGURE_ATTEMPTS times. If the inputs
+ * keep moving, the close still commits, without stored figures, and that shift
+ * reads "computed": ending a drawer is never refused for the report's sake
+ * (owner: no trapping flows), and the label says the figures were not frozen.
+ */
+const CLOSE_FIGURE_ATTEMPTS = 3
+async function closeWithFigures(env: Env, db: D1Compat, user: SessionUser, row: ShiftDbRow, closing: ShiftRow,
+  input: Omit<Parameters<typeof writeClose>[3], 'figures'>) {
+  for (let attempt = 0; attempt < CLOSE_FIGURE_ATTEMPTS; attempt += 1) {
+    const figures = await closeFiguresFor(env, closing)
+    try { return await writeClose(db, user, row, { ...input, figures }) } catch (error) {
+      if (!figures || !isCloseInputsChangedError(error)) throw error
+    }
+  }
+  return writeClose(db, user, row, { ...input, figures: null })
 }
 
 /**
@@ -1184,13 +1224,13 @@ app.post('/close', async (c) => {
   const closedAt = new Date().toISOString()
   const overlap = await intervalError(db, storedShift(shift), shift.opened_at, closedAt)
   if (overlap) return c.json({ error: overlap }, 409)
-  const figuresJson = await closeFiguresFor(c.env, { ...storedShift(shift), closed_at: closedAt,
+  const closing = { ...storedShift(shift), closed_at: closedAt,
     closing_counted_usd: countedUsd.value, closing_counted_khr: countedKhr.value,
-    additional_cash_usd: additionalUsd.value, additional_cash_khr: additionalKhr.value })
-  const result = await writeClose(db, user, shift, { closedAt, recordedAt: closedAt,
+    additional_cash_usd: additionalUsd.value, additional_cash_khr: additionalKhr.value }
+  const result = await closeWithFigures(c.env, db, user, shift, closing, { closedAt, recordedAt: closedAt,
     countedUsd: countedUsd.value, countedKhr: countedKhr.value,
     additionalUsd: additionalUsd.value, additionalKhr: additionalKhr.value,
-    note: optionalText(body.closing_note), deviceName: c.req.header('X-Device-Name') || null, reason: 'Manual shift close', request: mutationRequest(body, shift.id), figuresJson })
+    note: optionalText(body.closing_note), deviceName: c.req.header('X-Device-Name') || null, reason: 'Manual shift close', request: mutationRequest(body, shift.id) })
   if (result.changed) {
     const report = sendTelegramShiftReport(c.env, shift.id)
     try { c.executionCtx.waitUntil(report) } catch { void report }
@@ -1228,13 +1268,13 @@ app.post('/:id/close', async (c) => {
   if (closedAtMs < utcMs(shift.opened_at)) return c.json({ error: 'Closing time cannot be before opening time.' }, 400)
   const overlap = await intervalError(db, storedShift(shift), shift.opened_at, closedAt)
   if (overlap) return c.json({ error: overlap }, 409)
-  const figuresJson = await closeFiguresFor(c.env, { ...storedShift(shift), closed_at: closedAt,
+  const closing = { ...storedShift(shift), closed_at: closedAt,
     closing_counted_usd: countedUsd.value, closing_counted_khr: countedKhr.value,
-    additional_cash_usd: additionalUsd.value, additional_cash_khr: additionalKhr.value })
-  const result = await writeClose(db, user, shift, { closedAt, recordedAt: new Date().toISOString(),
+    additional_cash_usd: additionalUsd.value, additional_cash_khr: additionalKhr.value }
+  const result = await closeWithFigures(c.env, db, user, shift, closing, { closedAt, recordedAt: new Date().toISOString(),
     countedUsd: countedUsd.value, countedKhr: countedKhr.value,
     additionalUsd: additionalUsd.value, additionalKhr: additionalKhr.value,
-    note: optionalText(body.closing_note), deviceName: c.req.header('X-Device-Name') || null, reason: 'Historic manual close', request: mutationRequest(body, id), figuresJson })
+    note: optionalText(body.closing_note), deviceName: c.req.header('X-Device-Name') || null, reason: 'Historic manual close', request: mutationRequest(body, id) })
   if (!result.changed || !result.shift) return c.json({ error: 'Shift changed concurrently. Reload and try again.' }, 409)
   const report = sendTelegramShiftReport(c.env, shift.id)
   try { c.executionCtx.waitUntil(report) } catch { void report }

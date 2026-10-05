@@ -94,6 +94,7 @@ sqlite.exec(`CREATE TABLE sales(id INTEGER PRIMARY KEY, created_at TEXT, sale_st
   amount_paid_khr REAL DEFAULT 0, change_usd REAL, change_khr REAL, change_is_actual INTEGER,
   change_exchange_rate REAL, total_usd REAL DEFAULT 0, exchange_rate REAL DEFAULT 4100,
   delivery_actual_cost_usd REAL, delivery_actual_cost_khr REAL);
+CREATE TABLE sale_write_revisions(sale_id INTEGER PRIMARY KEY, revision INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE fees(id INTEGER PRIMARY KEY, created_at TEXT, branch_id INTEGER, sale_id INTEGER, fee_type TEXT,
   label TEXT, amount_usd REAL DEFAULT 0, amount_khr REAL DEFAULT 0, created_by INTEGER);
 CREATE TABLE returns(id INTEGER PRIMARY KEY, created_at TEXT, branch_id INTEGER, cashier_id INTEGER,
