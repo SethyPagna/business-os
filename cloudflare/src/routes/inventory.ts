@@ -2786,6 +2786,12 @@ app.post('/move-row', async (c) => {
   const branchId = requestedBranchId || (await defaultBranchId(c.env))
   if (!branchId) return c.json({ error: 'An active branch is required before stock can be moved' }, 400)
   const branch = await db.prepare('SELECT id, name FROM branches WHERE id = @id').get<{ id: number; name: string }>({ id: branchId })
+  // The moved units arrive as a fresh lot at this branch, so it must be active:
+  // a stale tab naming a retired branch is refused here and again inside the batch.
+  try { await requireReceivingBranch(db, branchId) } catch (error) {
+    if (isReceivingBranchError(error)) return c.json(RECEIVING_BRANCH_INACTIVE, 409)
+    throw error
+  }
 
   const available = await branchStockQty(c.env, sourceProductId, branchId)
   if (quantity > available) return c.json({ error: `Cannot move ${quantity} - only ${available} available in ${branch?.name || 'this branch'}` }, 400)
@@ -2822,6 +2828,7 @@ app.post('/move-row', async (c) => {
   }
   try {
     await db.batch([
+      receivingBranchAssertion(branchId),
       ...removal.statements,
       ...receipt.statements,
       { sql: 'DELETE FROM stock_session_guards', params: {} },
@@ -2841,6 +2848,7 @@ app.post('/move-row', async (c) => {
       },
     ])
   } catch (err) {
+    if (isReceivingBranchError(err)) return c.json(RECEIVING_BRANCH_INACTIVE, 409)
     if (isStockRemovalConflict(err)) {
       return c.json({ ...STOCK_REMOVAL_CONFLICT, error: 'The stock changed while it was being moved. Nothing was moved; refresh and try again.' }, 409)
     }
