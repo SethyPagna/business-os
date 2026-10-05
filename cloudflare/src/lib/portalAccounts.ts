@@ -1,4 +1,4 @@
-import bcrypt from 'bcryptjs'
+import { hashPassword, spendDummyPasswordVerify, upgradePasswordHash, verifyPassword } from './passwordHash'
 import { mintMembershipNumber, isMembershipCollision } from './membershipNumber'
 import { getDb } from './db'
 import { canonicalizePhone } from './phone'
@@ -20,11 +20,11 @@ import type { Env } from '../index'
 // customers) cannot self-signup — they register with their membership id + a
 // MATCHING phone, which staff issue from Contacts.
 
-const BCRYPT_COST = 10
-// A real, fixed bcrypt hash of a throwaway value. Compared against when no
-// account matches so signin does the same work (and takes ~the same time)
-// whether or not the phone exists — no timing/enumeration oracle.
-const DUMMY_HASH = '$2b$10$bcwRkHdyVgPIxFMLWdK9sOKBez3Uv06DFpLaUR/Mq0c6w595bHNFq'
+// Passwords are hashed and checked by lib/passwordHash.ts (PBKDF2-SHA256 via
+// WebCrypto; legacy bcrypt rows still verify and are rewritten on the next
+// successful sign-in). When no account matches, signin spends the same work
+// as a real current-format check (spendDummyPasswordVerify), so the answer
+// time does not reveal whether the phone exists.
 
 // The storefront asks a visitor to agree to the Terms and the Privacy Policy
 // before creating an account, and we record WHICH version they agreed to --
@@ -176,7 +176,7 @@ export async function signupPortalAccount(env: Env, input: SignupInput): Promise
   if (passwordTooShort(password)) {
     return { ok: false, status: 400, error: passwordMinLengthError(), code: 'password_weak', abuse: false }
   }
-  const passwordHash = bcrypt.hashSync(password, BCRYPT_COST)
+  const passwordHash = await hashPassword(password, env)
 
   if (membershipId) {
     // Existing-customer path: the id must resolve to a customer whose phone
@@ -352,15 +352,16 @@ export async function signinPortalAccount(env: Env, input: SigninInput): Promise
   }>({ p: canonical })
 
   if (!account) {
-    // No account for this phone — still spend a bcrypt compare so timing does
-    // not reveal whether the phone exists.
-    bcrypt.compareSync(password, DUMMY_HASH)
+    // No account for this phone — still spend one password check so timing
+    // does not reveal whether the phone exists.
+    await spendDummyPasswordVerify(password, env)
     return genericFail
   }
 
   const idLower = identifier.toLowerCase()
   const identifierMatches = idLower === account.name.trim().toLowerCase() || idLower === account.membership_id.trim().toLowerCase()
-  const passwordMatches = bcrypt.compareSync(password, account.password_hash)
+  const passwordCheck = await verifyPassword(password, account.password_hash, env)
+  const passwordMatches = passwordCheck.ok
   const contactEligible = account.contact_id == null || (account.contact_exists != null && !isAnonymousCustomer(account))
   if (!identifierMatches || !passwordMatches || !contactEligible) return genericFail
 
@@ -377,6 +378,10 @@ export async function signinPortalAccount(env: Env, input: SigninInput): Promise
     id: account.id,
   })
   if (Number(consentUpdate.changes || 0) !== 1) return genericFail
+
+  // E6: a successful sign-in on a legacy bcrypt (or other-count) hash rewrites
+  // it once in the current format; compare-and-set, never fails the sign-in.
+  if (passwordCheck.needsRehash) await upgradePasswordHash(db, 'portal_accounts', account.id, password, account.password_hash, env)
 
   return { ok: true, accountId: account.id }
 }

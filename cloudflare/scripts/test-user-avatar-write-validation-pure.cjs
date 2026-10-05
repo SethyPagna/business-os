@@ -59,6 +59,7 @@ const app = load('routes/users.ts', {
   hono: require('hono'),
   bcryptjs: { hashSync: (v) => `hash:${v}`, compareSync: (plain, hash) => hash === `hash:${plain}` },
   '../lib/imageAudit': { enqueueImageNormalization: noop },
+  '../lib/passwordHash': load('lib/passwordHash.ts', { bcryptjs: { hashSync: (v) => `hash:${v}`, compareSync: (plain, hash) => hash === `hash:${plain}` } }),
   '../lib/db': { getDb: (env) => env.DB },
   '../lib/userIdentity': { buildUserRenameStatements: () => [] },
   // The last-administrator guard is proven by test-last-admin-guard-pure.cjs; this fixture has no admin rows.

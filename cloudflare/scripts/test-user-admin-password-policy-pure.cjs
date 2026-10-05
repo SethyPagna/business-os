@@ -27,7 +27,8 @@ check('self change-password route is self-only and requires the current password
   // test-current-password-rate-limit-pure.cjs. Here: the chain still reaches it.
   assert.match(source, /async function refuseWrongCurrentPassword[\s\S]*?verifyCurrentPassword\(c, \{[^}]*\}, currentPassword, passwordHash\)[\s\S]*?if \(verdict\.ok\) return null/)
   const guard = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'currentPasswordGuard.ts'), 'utf8')
-  assert.match(guard, /export async function verifyCurrentPassword[\s\S]*?bcrypt\.compareSync\(String\(candidate \|\| ''\), String\(passwordHash \|\| ''\)\)/)
+  // E6: the compare is lib/passwordHash.ts verifyPassword (PBKDF2, legacy bcrypt).
+  assert.match(guard, /export async function verifyCurrentPassword[\s\S]*?\(await verifyPassword\(String\(candidate \|\| ''\), String\(passwordHash \|\| ''\), env\)\)\.ok/)
   assert.doesNotMatch(handler, /body\.adminOverride/)
 })
 

@@ -79,7 +79,7 @@ const core = loadReal('lib/coreDataInvariants.ts', {
   './sqlBinding': loadReal('lib/sqlBinding.ts'),
 
   '../index': {},
-  bcryptjs: { __esModule: true, default: { hashSync: (password) => { hashed.push(password); return `hash:${password.length}` } } },
+  './passwordHash': { hashPassword: async (password) => { hashed.push(password); return `hash:${password.length}` } },
 })
 
 const baseEnv = { BUSINESS_OS_ORGANIZATION_NAME: 'Test OS', BUSINESS_OS_ORGANIZATION_SLUG: 'test-os' }

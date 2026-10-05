@@ -1,8 +1,8 @@
 import type { Context } from 'hono'
 import { getCookie } from 'hono/cookie'
-import bcrypt from 'bcryptjs'
 import { checkRateLimit, releaseRateLimitSlot } from './rateLimit'
 import { currentSessionLimitFamily } from './auth'
+import { verifyPassword } from './passwordHash'
 import type { Env } from '../index'
 
 // The ONE current-password re-check (U-profile3, 27 Sep 2026): change
@@ -12,7 +12,7 @@ import type { Env } from '../index'
 // recorded a miss -- three separate awaits, so 40 parallel wrong guesses all
 // passed a peek that still read 0. Now every attempt RESERVES a slot with
 // checkRateLimit (one conditional INSERT, so a burst can never take more
-// than the allowance) before bcrypt runs, and a correct password gives its
+// than the allowance) before the hash check runs, and a correct password gives its
 // slot back with releaseRateLimitSlot. What stays counted is failures only,
 // so someone who saves their profile often is never locked out.
 //
@@ -85,7 +85,7 @@ export async function verifyCurrentPassword(
   const key = await currentPasswordLimitKey(c, who.actorId, who.targetId)
   const reservation = await checkRateLimit(env, CURRENT_PASSWORD_LIMIT_BUCKET, key, CURRENT_PASSWORD_LIMIT_MAX, CURRENT_PASSWORD_LIMIT_WINDOW_MS)
   if (!reservation.allowed) return { ok: false, rateLimited: true, retryAfterSeconds: reservation.retryAfterSeconds }
-  if (bcrypt.compareSync(String(candidate || ''), String(passwordHash || ''))) {
+  if ((await verifyPassword(String(candidate || ''), String(passwordHash || ''), env)).ok) {
     await releaseRateLimitSlot(env, CURRENT_PASSWORD_LIMIT_BUCKET, key, reservation.slot)
     return { ok: true }
   }

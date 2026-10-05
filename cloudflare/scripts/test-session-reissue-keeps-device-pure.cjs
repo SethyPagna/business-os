@@ -27,6 +27,7 @@ const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
 const ts = require('typescript')
+const { passwordHashStub } = require('./harness/password_hash_stub.cjs')
 const { openDb } = require('./harness/d1compat.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')
 
@@ -63,12 +64,11 @@ const libDb = { getDb: (env) => adapt(env.DB) }
 const cookie = require('hono/cookie')
 const rateLimit = load('lib/rateLimit.ts', { './db': libDb, '../index': {} })
 const authLib = load('lib/auth.ts', { './db': libDb, 'hono/cookie': cookie, '../index': {} })
-const bcryptStub = { hashSync: (v) => `hash:${v}`, compareSync: (plain, hash) => hash === `hash:${plain}` }
 const isAdminControlUser = (u) => Number(u?.id) === 1
 
 const authRoute = load('routes/auth.ts', {
   hono: require('hono'),
-  bcryptjs: bcryptStub,
+  '../lib/passwordHash': passwordHashStub,
   '../lib/db': libDb,
   '../lib/auth': authLib,
   '../lib/verification': {

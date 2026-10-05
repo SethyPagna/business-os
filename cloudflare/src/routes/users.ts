@@ -1,6 +1,6 @@
 import { Hono, type Context } from 'hono'
 import { enqueueImageNormalization } from '../lib/imageAudit'
-import bcrypt from 'bcryptjs'
+import { currentPasswordHashPrefix, describePasswordHash, hashPassword, isCurrentPasswordHash, passwordPepperStatus, PASSWORD_HASH_ALGORITHM, PASSWORD_HASH_ITERATIONS } from '../lib/passwordHash'
 import { getDb } from '../lib/db'
 import { buildUserRenameStatements } from '../lib/userIdentity'
 import { requireAuth, revokeUserSessions, type SessionUser } from '../lib/auth'
@@ -572,7 +572,7 @@ app.post('/users', async (c) => {
 
   try {
     const { orgId, groupId } = await resolveDefaultOrg(c, actor)
-    const hash = bcrypt.hashSync(password, 10)
+    const hash = await hashPassword(password, c.env)
     const db = getDb(c.env)
     const role = await db.prepare('SELECT id FROM roles WHERE id = @id LIMIT 1').get<{ id: number }>({ id: roleId })
     if (!role) return c.json({ success: false, error: 'Selected role no longer exists' }, 400)
@@ -859,7 +859,7 @@ async function handlePasswordChange(c: Ctx, options: { requireCurrent: boolean; 
     if (refused) return refused
   }
 
-  const hash = bcrypt.hashSync(newPassword, 10)
+  const hash = await hashPassword(newPassword, c.env)
   await db.prepare('UPDATE users SET password = @password, updated_at = CURRENT_TIMESTAMP WHERE id = @id').run({ password: hash, id: targetId })
   // A new password that is not publicly known ends a forced change.
   await setPasswordMustChange(db, targetId, false)
@@ -939,6 +939,65 @@ app.post('/users/password-reset-requests/:requestId/dismiss', async (c) => {
   if (!changed) return c.json({ success: false, error: 'Request not found' }, 404)
   await audit(c.env, actor?.id ?? null, actor?.name ?? null, 'password_reset_admin_request_dismissed', 'user', request.user_id, { requestId })
   return c.json({ success: true })
+})
+
+// E6 (5 Oct 2026): the Workers Free readiness check for password hashes.
+// Before the plan move every ACTIVE staff account should hold a current
+// PBKDF2 hash: a legacy bcrypt check costs far more CPU than Free allows, and
+// a staff sign-in rewrites the hash the first time it succeeds. The scheme is
+// read from each stored hash's own prefix (no version column). With the
+// PASSWORD_PEPPER secret set, "current" also means peppered with the current
+// pepper version, and pepperConfigured says whether it is set (never its
+// value). Administrators only; answers counts and the names of staff still
+// to sign in -- never a hash, never a customer.
+app.get('/users/password-hash-status', async (c) => {
+  const actor = c.get('user')
+  if (!isAdminControlUser(actor)) return c.json({ success: false, error: 'No permission' }, 403)
+  const db = getDb(c.env)
+  const rows = await db.prepare('SELECT id, username, name, is_active, password FROM users WHERE deleted_at IS NULL ORDER BY id')
+    .all<{ id: number; username: string; name: string | null; is_active: number; password: string | null }>()
+  const pepper = passwordPepperStatus(c.env)
+  const staff = { total: 0, current: 0, legacyBcrypt: 0, otherPbkdf2: 0, unknown: 0, activeLegacyBcrypt: 0, unpeppered: 0 }
+  const pending: Array<{ id: number; username: string; name: string | null; isActive: boolean; scheme: string }> = []
+  for (const row of rows) {
+    staff.total += 1
+    const hash = describePasswordHash(row.password)
+    if (hash.scheme === 'pbkdf2-sha256' && hash.pepperVersion === 0) staff.unpeppered += 1
+    if (isCurrentPasswordHash(row.password, c.env)) { staff.current += 1; continue }
+    const scheme = hash.scheme
+    if (scheme === 'bcrypt') {
+      staff.legacyBcrypt += 1
+      if (row.is_active) staff.activeLegacyBcrypt += 1
+    } else if (scheme === 'pbkdf2-sha256') staff.otherPbkdf2 += 1
+    else staff.unknown += 1
+    pending.push({ id: row.id, username: row.username, name: row.name, isActive: Boolean(row.is_active), scheme })
+  }
+  // Storefront accounts: counts only, one aggregate row. Null before the
+  // portal_accounts migration has run.
+  // The unpeppered current prefix is also the start of a peppered hash at the
+  // same count, so "current" excludes '$p=' when no pepper is configured.
+  let portal: { total: number; current: number; legacy_bcrypt: number; unpeppered: number } | null = null
+  try {
+    portal = await db.prepare(`
+      SELECT COUNT(*) AS total,
+             COALESCE(SUM(CASE WHEN substr(password_hash, 1, length(@currentPrefix)) = @currentPrefix
+                                AND (@peppered = 1 OR instr(password_hash, '$p=') = 0) THEN 1 ELSE 0 END), 0) AS current,
+             COALESCE(SUM(CASE WHEN substr(password_hash, 1, 4) IN ('$2a$', '$2b$', '$2y$') THEN 1 ELSE 0 END), 0) AS legacy_bcrypt,
+             COALESCE(SUM(CASE WHEN substr(password_hash, 1, 15) = '$pbkdf2-sha256$' AND instr(password_hash, '$p=') = 0 THEN 1 ELSE 0 END), 0) AS unpeppered
+      FROM portal_accounts
+    `).get<{ total: number; current: number; legacy_bcrypt: number; unpeppered: number }>({ currentPrefix: currentPasswordHashPrefix(c.env), peppered: pepper.configured ? 1 : 0 }) ?? null
+  } catch (error) {
+    if (!/no such table/i.test(String((error as Error)?.message || error))) throw error
+  }
+  return c.json({
+    success: true,
+    target: { algorithm: PASSWORD_HASH_ALGORITHM, iterations: PASSWORD_HASH_ITERATIONS, pepperVersion: pepper.version },
+    pepperConfigured: pepper.configured,
+    staff: { ...staff, readyForFree: staff.activeLegacyBcrypt === 0, pending },
+    portal: portal
+      ? { total: Number(portal.total || 0), current: Number(portal.current || 0), legacyBcrypt: Number(portal.legacy_bcrypt || 0), unpeppered: Number(portal.unpeppered || 0) }
+      : null,
+  })
 })
 
 // -- Role CRUD (admin control) ---------------------------------------------

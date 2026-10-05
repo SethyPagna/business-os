@@ -21,6 +21,7 @@ const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
 const ts = require('typescript')
+const { passwordHashStub } = require('./harness/password_hash_stub.cjs')
 const { openDb } = require('./harness/d1compat.cjs')
 
 function load(rel, overrides = {}) {
@@ -74,7 +75,6 @@ const rateLimitDb = (raw) => ({
   },
 })
 const rateLimit = load('lib/rateLimit.ts', { './db': { getDb: (env) => rateLimitDb(env.DB) }, '../index': {} })
-const bcryptStub = { hashSync: (v) => `hash:${v}`, compareSync: (plain, hash) => hash === `hash:${plain}` }
 const guardPath = path.join(__dirname, '..', 'src', 'lib', 'currentPasswordGuard.ts')
 // The cookies here are bare strings with no user_sessions row, so the sign-in
 // family lookup finds nothing and the guard keys per cookie -- each cookie
@@ -82,14 +82,14 @@ const guardPath = path.join(__dirname, '..', 'src', 'lib', 'currentPasswordGuard
 // test-migration-0201-session-limit-family-pure.cjs against the real lib/auth.ts.
 const authLibStub = { currentSessionLimitFamily: async () => null }
 const guard = fs.existsSync(guardPath)
-  ? load('lib/currentPasswordGuard.ts', { './rateLimit': rateLimit, './auth': authLibStub, bcryptjs: bcryptStub, 'hono/cookie': require('hono/cookie'), '../index': {} })
+  ? load('lib/currentPasswordGuard.ts', { './rateLimit': rateLimit, './auth': authLibStub, './passwordHash': passwordHashStub, 'hono/cookie': require('hono/cookie'), '../index': {} })
   : {}
 
 let db
 let actor
 const usersRoute = load('routes/users.ts', {
   hono: require('hono'),
-  bcryptjs: bcryptStub,
+  '../lib/passwordHash': passwordHashStub,
   '../lib/imageAudit': { enqueueImageNormalization: noop },
   '../lib/db': { getDb: (env) => env.DB },
   '../lib/userIdentity': { buildUserRenameStatements: () => [] },
@@ -113,7 +113,7 @@ const usersRoute = load('routes/users.ts', {
 
 const authRoute = load('routes/auth.ts', {
   hono: require('hono'),
-  bcryptjs: bcryptStub,
+  '../lib/passwordHash': passwordHashStub,
   '../lib/db': { getDb: (env) => env.DB },
   '../lib/auth': {
     createSession: async () => ({ token: 't', expiresAt: new Date(Date.now() + 1e6).toISOString() }),

@@ -6,6 +6,7 @@ const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
 const ts = require('typescript')
+const { passwordHashStub } = require('./harness/password_hash_stub.cjs')
 const { openDb } = require('./harness/d1compat.cjs')
 
 const SCHEMA = `
@@ -79,7 +80,7 @@ const conflictControl = load('lib/conflictControl.ts')
 const realAudit = load('lib/audit.ts', { './db': { getDb: () => { throw new Error('unselected') } } })
 const usersRoute = load('routes/users.ts', {
   hono: require('hono'),
-  bcryptjs: { hashSync: () => 'hash', compareSync: () => true },
+  '../lib/passwordHash': { ...passwordHashStub, hashPassword: async () => 'hash', verifyPassword: async () => ({ ok: true, needsRehash: false, scheme: 'pbkdf2-sha256' }) },
   '../lib/imageAudit': { enqueueImageNormalization: async () => {} },
   '../lib/db': { getDb: (env) => env.DB },
   '../lib/userIdentity': { buildUserRenameStatements: () => [] },

@@ -141,6 +141,13 @@ export type Env = {
   // reads keep working: without it lib/secretCrypto.ts refuses every write
   // of a new secret (legacy plaintext values still read).
   APP_ENCRYPTION_KEY?: string
+  // Secret (wrangler secret put PASSWORD_PEPPER; 64 random hex characters)
+  // keying the HMAC that lib/passwordHash.ts applies before PBKDF2. Optional:
+  // unset, hashes are written unpeppered and nobody is locked out. Once set
+  // it must never change or be lost -- every peppered hash needs it. Kept out
+  // of scripts/sync-secrets.cjs on purpose so a local .dev.vars value can
+  // never overwrite it.
+  PASSWORD_PEPPER?: string
   // Optional secret + var (wrangler secret put RESEND_API_KEY / a
   // RESEND_FROM_EMAIL var in wrangler.toml) used by lib/verification.ts to
   // email password-reset codes via Resend. Without both set, reset codes

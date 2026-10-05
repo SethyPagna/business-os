@@ -14,10 +14,14 @@
 // Run: node scripts/test-password-reset-otp-hardening-pure.cjs
 
 const assert = require('node:assert/strict')
-const bcrypt = require('bcryptjs')
+const { loadRealPasswordHash } = require('./harness/password_hash_stub.cjs')
 const { createAuthHarness } = require('./harness/load_auth_route.cjs')
 
 const SECRET = 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ'
+// Rows are legacy bcrypt (harness addUser) or PBKDF2 (a reset); the real
+// lib/passwordHash.ts reads both.
+const { verifyPassword } = loadRealPasswordHash()
+const passwordIs = async (plain, stored) => (await verifyPassword(plain, stored)).ok
 let passed = 0
 const failures = []
 let ipCounter = 0
@@ -74,7 +78,7 @@ async function main() {
     const good = await h.codeAt(SECRET)
     const res = await h.request('/password-reset/otp', 'POST', { identifier: 'dara@shop.test', otp: good, newPassword: 'new-password-1' }, { ip: freshIp() })
     assert.equal(res.status, 429)
-    assert.ok(bcrypt.compareSync('old-password', h.userRow(701).password), 'the password did not change')
+    assert.ok(await passwordIs('old-password', h.userRow(701).password), 'the password did not change')
   })
 
   await check('a per-IP ceiling holds across many accounts', async () => {
@@ -106,12 +110,12 @@ async function main() {
     const first = await h.request('/password-reset/otp', 'POST', { identifier: 'dara', otp: good, newPassword: 'new-password-1' }, { ip: freshIp() })
     assert.equal(first.status, 200)
     assert.equal(first.body.success, true)
-    assert.ok(bcrypt.compareSync('new-password-1', h.userRow(701).password))
+    assert.ok(await passwordIs('new-password-1', h.userRow(701).password))
 
     const replay = await h.request('/password-reset/otp', 'POST', { identifier: 'dara@shop.test', otp: good, newPassword: 'attacker-password' }, { ip: freshIp() })
     assert.equal(replay.status, 401, 'the replayed code is refused')
     assert.equal(replay.body.error, (await h.request('/password-reset/otp', 'POST', { identifier: 'ghost', otp: good, newPassword: 'x-password-1' }, { ip: freshIp() })).body.error)
-    assert.ok(bcrypt.compareSync('new-password-1', h.userRow(701).password), 'the replay did not change the password')
+    assert.ok(await passwordIs('new-password-1', h.userRow(701).password), 'the replay did not change the password')
 
     // Same guard across endpoints: a code used to sign in cannot then reset.
     const h2 = seeded()
