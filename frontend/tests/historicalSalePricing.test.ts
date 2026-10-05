@@ -7,7 +7,7 @@ import * as frontend from '../src/utils/historicalSalePricing.ts'
 
 const backendFile = process.env.HISTORICAL_SALE_PRICING_BACKEND_SOURCE || fileURLToPath(new URL('../../cloudflare/src/lib/historicalSalePricing.ts', import.meta.url))
 const source = fs.readFileSync(new URL('../src/utils/historicalSalePricing.ts', import.meta.url), 'utf8')
-const normalize = (text: string) => text.replace(/\r/g, '').replace("from './moneyPrecision.ts'", "from './moneyPrecision'").trim()
+const normalize = (text: string) => text.replace(/\r/g, '').replace(/from '\.\/(moneyPrecision|saleItemPricing)\.ts'/g, "from './$1'").trim()
 assert.equal(normalize(source), normalize(fs.readFileSync(backendFile, 'utf8')), 'only import suffix may differ from the pinned server pure core')
 const module = { exports: {} as typeof frontend }
 new Function('module', 'exports', buildSync({ entryPoints: [path.resolve(backendFile)], bundle: true, platform: 'node', format: 'cjs', write: false }).outputFiles[0].text)(module, module.exports)

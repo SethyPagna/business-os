@@ -2796,6 +2796,16 @@ export default function POS() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active.cart, wholesaleAutoRule, exchangeRate])
 
+  // The pack sentence for a discount refusal (code from posCore / the Worker), naming the cart
+  // line it is about when the pricing pool says which one; anything else is the generic notice.
+  const pricingRefusalText = (error: unknown): string => {
+    const text = saleSubmitRefusalText(error, t)
+    if (!text) return t('money_precision_unavailable')
+    const lineKey = (error as { lineKey?: string | null } | null)?.lineKey
+    const line = lineKey ? active.cart.find((item) => getCartLineId(item) === lineKey) : null
+    return line?.name ? `${line.name}: ${text}` : text
+  }
+
   const updatePrice = (cartLineId: string | number, field: 'usd' | 'khr', rawValue: string) => {
     if (moneyVersion === 1) {
       try { if (!rawValue.trim()) throw new Error('invalid_money_input'); parsePosInternalAmount(rawValue) }
@@ -2803,8 +2813,8 @@ export default function POS() {
     }
     const num = moneyVersion === 1 ? Number(rawValue || 0) : normalizePriceValue(rawValue, 0)
     if (!Number.isFinite(num) || num < 0) return
-    patchActive({
-      cart: active.cart.map((item) => {
+    let refusal: unknown = null
+    const nextCart = active.cart.map((item) => {
         if (getCartLineId(item) !== cartLineId) return item
         // Z2 (user, Aug 29): the price input is the line's SELLING/base price
         // and editing it SETS that base -- any manual discount stays a
@@ -2817,7 +2827,10 @@ export default function POS() {
           : field === 'usd' ? num : normalizePriceValue(CURRENCY.khrToUsd(num, exchangeRate), 0)
         const newBaseUsd = moneyVersion === 1 ? sellingPriceCeilCent(sellingInputUsd) : sellingInputUsd
         const newBaseKhr = moneyVersion === 1 ? multiplyMoney4(newBaseUsd, exchangeRate) : field === 'khr' ? num : normalizePriceValue(CURRENCY.usdToKhr(num, exchangeRate), 0)
-        const result = applyManualDiscount(newBaseUsd, newBaseKhr, exchangeRate, item.manual_discount_type || null, item.manual_discount_value || 0, moneyVersion)
+        // A price that drops under the line's standing fixed discount is refused, not clamped.
+        let result: ReturnType<typeof applyManualDiscount>
+        try { result = applyManualDiscount(newBaseUsd, newBaseKhr, exchangeRate, item.manual_discount_type || null, item.manual_discount_value || 0, moneyVersion) }
+        catch (error) { refusal = error; return item }
         return {
           ...item,
           ...(moneyVersion === 1 ? { selling_price_input_usd: sellingInputUsd, price_mode: 'selling', wholesale_auto_optout: true, product_discount_usd: 0, product_discount_khr: 0, product_discount_label: '' } : {}),
@@ -2830,8 +2843,9 @@ export default function POS() {
           manual_discount_usd: result.manual_discount_usd,
           manual_discount_khr: result.manual_discount_khr,
         }
-      }),
     })
+    if (refusal) { notify(pricingRefusalText(refusal), 'error'); return }
+    patchActive({ cart: nextCart })
   }
 
   // Per-item manual discount editor (Tier 2 #1): applies a % or fixed-USD
@@ -2863,8 +2877,8 @@ export default function POS() {
       value = moneyVersion === 1 ? type === 'percent' ? Number(rawValue || 0) : roundMoney4(rawValue.trim() || '0') : normalizePriceValue(rawValue, 0)
     } catch { notify(t('money_precision_unavailable'), 'error'); return }
     if (!Number.isFinite(value) || value < 0) return
-    patchActive({
-      cart: active.cart.map((item) => {
+    let refusal: unknown = null
+    const nextCart = active.cart.map((item) => {
         if (getCartLineId(item) !== cartLineId) return item
         const money = moneyVersion === 1 ? (value: unknown) => roundMoney4(Number(value ?? 0)) : normalizePriceValue
         const baseUsd = money(item.base_price_usd ?? item.applied_price_usd)
@@ -2872,7 +2886,10 @@ export default function POS() {
         const baseKhr = baseUsd > 0 && exchangeRate > 0
           ? moneyVersion === 1 ? multiplyMoney4(baseUsd, exchangeRate) : normalizePriceValue(baseUsd * exchangeRate, 0)
           : suppliedBaseKhr
-        const result = applyManualDiscount(baseUsd, baseKhr, exchangeRate, type, value, moneyVersion)
+        // A fixed discount larger than the price is refused with a prompt, never clamped to a $0 line.
+        let result: ReturnType<typeof applyManualDiscount>
+        try { result = applyManualDiscount(baseUsd, baseKhr, exchangeRate, type, value, moneyVersion) }
+        catch (error) { refusal = error; return item }
         return {
           ...item,
           // Preserve the resolved canonical base alongside the applied price.
@@ -2887,8 +2904,9 @@ export default function POS() {
           manual_discount_usd: result.manual_discount_usd,
           manual_discount_khr: result.manual_discount_khr,
         }
-      }),
     })
+    if (refusal) { notify(pricingRefusalText(refusal), 'error'); return }
+    patchActive({ cart: nextCart })
   }
 
   // The wholesale tier chip in the cart is a MARKER toggle (user): it flips
@@ -3016,7 +3034,7 @@ export default function POS() {
         if (!pendingPreview) throw new SaleCheckoutRecoveryRequiredError()
         return { totals: pendingPreview.totals, error: null }
       }
-      if (pricedCart.error || !pricedCart.quotes) throw new Error('money_precision_unavailable')
+      if (pricedCart.error || !pricedCart.quotes) throw pricedCart.error ?? new Error('money_precision_unavailable')
       return { totals: posV1BasketTotals({ lines: [...pricedCart.quotes.values()], exchangeRate,
         discountType: active.discountType, discountPercent: active.discountPercent, discountUsd: active.discountUsd, discountKhr: active.discountKhr,
         membershipUsd: active.membershipDiscountUsd, membershipKhr: active.membershipDiscountKhr,
@@ -3271,7 +3289,7 @@ export default function POS() {
       return
     }
     if (moneyVersion !== 1) return notify(t('money_precision_unavailable'), 'error')
-    if (v1Basket.error || !v1Basket.totals) return notify(t('money_precision_unavailable'), 'error')
+    if (v1Basket.error || !v1Basket.totals) return notify(pricingRefusalText(v1Basket.error), 'error')
     if (!newNativeTender) return notify(t('money_precision_unavailable'), 'error')
     if (!computedNativeChange) return notify(t('money_precision_unavailable'), 'error')
     try { moneyCapability.assertReady() } catch { moneyCapability.retry(); return notify(t('money_precision_unavailable'), 'error') }
@@ -4255,7 +4273,7 @@ export default function POS() {
             <div className="border-t border-gray-200 dark:border-gray-700 px-3 pt-3 pb-2 space-y-3">
               {/* Order summary */}
               <div className="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-2.5 space-y-1 text-xs">
-                {moneyVersion === 1 && v1Basket.error && active.cart.length > 0 ? <div role="alert" className="text-red-600">{t('money_precision_unavailable')}</div> : null}
+                {moneyVersion === 1 && v1Basket.error && active.cart.length > 0 ? <div role="alert" className="text-red-600">{pricingRefusalText(v1Basket.error)}</div> : null}
                 <div className="flex justify-between text-gray-500"><span>{t('subtotal')}</span><span>{fmtUSD(subtotalUsd)}</span></div>
                 {discUsd > 0 && <div className="flex justify-between text-red-500"><span>{t('discount')}</span><span>-{fmtUSD(discUsd)}</span></div>}
                 {membershipDiscUsd > 0 && <div className="flex justify-between text-emerald-600"><span>{posCopy('Membership discount', 'បញ្ចុះតម្លៃសមាជិក')}</span><span>-{fmtUSD(membershipDiscUsd)}</span></div>}

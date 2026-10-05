@@ -62,8 +62,26 @@ export function capturePricingProduct(row: Record<string,unknown>): Record<strin
 }
 
 export class SaleItemPricingError extends Error {
-  readonly code='sale_item_pricing_invalid'
-  constructor() { super('Captured item pricing needs review.'); this.name='SaleItemPricingError' }
+  readonly code: string='sale_item_pricing_invalid'
+  constructor(message='Captured item pricing needs review.') { super(message); this.name='SaleItemPricingError' }
+}
+/** A discount larger than the money it discounts is refused, never silently capped
+ * to a $0 line (owner, 5 Oct 2026). Stable codes; the till restates them from the
+ * language pack (api/saleSubmitErrors.ts). Subclasses SaleItemPricingError so every
+ * existing catch keeps answering {error, code}. */
+export type SaleDiscountRefusalCode = 'sale_discount_exceeds_price' | 'sale_discount_exceeds_subtotal'
+export class SaleDiscountRefusedError extends SaleItemPricingError {
+  readonly code: SaleDiscountRefusalCode
+  /** The pool line a price refusal is about, so a till can name the cart line. */
+  readonly lineKey: string | null
+  constructor(code: SaleDiscountRefusalCode, lineKey: string | null = null) {
+    super(code === 'sale_discount_exceeds_price'
+      ? 'A fixed discount cannot be larger than the item price.'
+      : 'The sale discount cannot be larger than the subtotal.')
+    this.code = code
+    this.lineKey = lineKey
+    this.name = 'SaleDiscountRefusedError'
+  }
 }
 function invalid(): never { throw new SaleItemPricingError() }
 function key(value: unknown): asserts value is string {
@@ -100,8 +118,17 @@ function canonicalUsdProduct(line: CapturedPricingLine, rate: number): Record<st
 
 /** Quantities are not money-rounded. Work is bounded before the promotion
  * evaluator expands whole units for next-item allocation. Stable key sorting
- * makes equal-price allocation independent of request/DB row ordering. */
-export function evaluateCapturedPricingPool(pool: CapturedPricingPool, quantities: Record<string, number>): Map<string, ExactLinePricing> {
+ * makes equal-price allocation independent of request/DB row ordering.
+ *
+ * A fixed manual discount larger than the line (after any promotion) is refused
+ * with SaleDiscountRefusedError for the lines named by `refuseOversizedFixed`
+ * (true = every line). Left off it still clamps to a $0 line, and that is
+ * deliberate: this function also replays RECORDED snapshots (parseSaleItemPricing,
+ * validateCapturedSaleBasket, repricing the untouched lines of a pool), and a sale
+ * saved before the rule existed must keep reading, returning and undoing. Every
+ * path that accepts a NEW or CHANGED discount passes the option. */
+export function evaluateCapturedPricingPool(pool: CapturedPricingPool, quantities: Record<string, number>,
+  options: { refuseOversizedFixed?: boolean | ReadonlySet<string> } = {}): Map<string, ExactLinePricing> {
   if (new TextEncoder().encode(JSON.stringify({pool,quantities})).length > MAX_PRICING_SNAPSHOT_BYTES) invalid()
   if (!pool || pool.version !== 1 || !Array.isArray(pool.lines) || !Array.isArray(pool.rules)
     || pool.lines.length < 1 || pool.lines.length > MAX_PRICING_LINES || pool.rules.length > MAX_PRICING_RULES) invalid()
@@ -149,8 +176,12 @@ export function evaluateCapturedPricingPool(pool: CapturedPricingPool, quantitie
     const productDiscount = Math.min(gross,canonical(promo?.line_discount_usd ?? 0))
     const afterProduct = subtractMoney4(gross,productDiscount)
     const manual = lines[i].manual
-    const manualDiscount = Math.min(afterProduct, manual.type === 'fixed'
-      ? multiplyMoney4(manual.value,line.quantity) : manual.type === 'percent' ? percentageMoney4(afterProduct,manual.value) : 0)
+    const requestedManual = manual.type === 'fixed'
+      ? multiplyMoney4(manual.value,line.quantity) : manual.type === 'percent' ? percentageMoney4(afterProduct,manual.value) : 0
+    const refuse = options.refuseOversizedFixed === true
+      || (options.refuseOversizedFixed instanceof Set && options.refuseOversizedFixed.has(line.line_id))
+    if (refuse && manual.type === 'fixed' && requestedManual > afterProduct) throw new SaleDiscountRefusedError('sale_discount_exceeds_price', line.line_id)
+    const manualDiscount = Math.min(afterProduct, requestedManual)
     const total = subtractMoney4(afterProduct,manualDiscount)
     const base = divideMoney4(afterProduct,line.quantity), applied = divideMoney4(total,line.quantity)
     result.set(line.line_id,{ gross_usd:gross, product_discount_usd:productDiscount, manual_discount_usd:manualDiscount,
@@ -213,7 +244,7 @@ export function allocateReceiptLines(context: ReceiptAllocationContext): Map<str
   if (!context || context.version!==1 || !Array.isArray(context.lines)) invalid()
   const original=sumMoney4(context.lines.map(line=>canonical(line.amount)))
   const discount=canonical(context.discount_usd), member=canonical(context.membership_discount_usd), tax=canonical(context.tax_usd)
-  if (discount>original) invalid()
+  if (discount>original) throw new SaleDiscountRefusedError('sale_discount_exceeds_subtotal')
   const discounts=allocateLineMoney4(discount,context.lines)
   const afterStore=context.lines.map(line=>({line_key:line.line_key,amount:subtractMoney4(line.amount,discounts.get(line.line_key)!)}))
   if (member>sumMoney4(afterStore.map(line=>line.amount))) invalid()

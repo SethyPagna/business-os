@@ -234,6 +234,12 @@ export const PERMISSION_ACTIONS: Record<string, PermissionAction[]> = {
   // meaningful here (reads allowed, writes blocked), and Full roles may be
   // narrowed with an explicit per-action switch.
   sales: [
+    // GET /sales and every sales read, plus Reports and the POS catalog, ride
+    // getActionTier(user, 'sales', 'view') in the Worker. Stored as
+    // 'sales:view': false, one-way like every override: an absent key leaves
+    // the tier's answer standing, so a role saved before this row existed
+    // still sees Sales. review:'allow' keeps the View tier reading.
+    { key: 'view', tKey: 'perm_act_sales_view', label: 'View sales and reports', review: 'allow' },
     { key: 'export', tKey: 'perm_act_sales_export', label: 'Export sales', review: 'allow' },
     { key: 'import', tKey: 'perm_act_sales_import', label: 'Import sales', review: 'block' },
     { key: 'status', tKey: 'perm_act_sales_status', label: 'Change or cancel sale status', review: 'block' },
