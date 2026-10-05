@@ -14,7 +14,7 @@ const source = fs.readFileSync(new URL('../src/components/shared/HubSectionNav.t
 const compiled = transformSync(source, { loader: 'tsx', format: 'cjs', jsx: 'automatic' }).code
 const module = { exports: {} as { default?: (props: unknown) => any } }
 const load = (id: string) => {
-  if (id === 'react') return { ...React, useEffect: () => {} }
+  if (id === 'react') return { ...React, useEffect: () => {}, useRef: (current: unknown) => ({ current }) }
   if (id === 'react/jsx-runtime') return require(id)
   if (id.includes('AppContextCore')) return { useApp: () => ({ settings: {}, page: 'sales' }) }
   // useLayeredSectionNav is the shared "the compact home sheet owns section
@@ -23,6 +23,8 @@ const load = (id: string) => {
   // hubSectionNav.test.ts, here the two inputs are driven directly.
   if (id.includes('sectionNavPreference')) return { useMobileSectionNavMode: () => mode, useLayeredSectionNav: () => compact && mode === 'pages' }
   if (id.includes('hubNavigation')) return { sealRootHubSection: () => {} }
+  // Scrolls the open chip into view inside an effect; effects are inert in this render.
+  if (id.includes('useActivePillScroll')) return { useActivePillScroll: () => {} }
   // Vite resolves a component's `import './x.css'` to a side-effect module
   // with no exports; it contributes nothing to the tree this test measures,
   // so it stays inert here instead of reading as an unexpected dependency.

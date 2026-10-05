@@ -127,7 +127,7 @@ await runTest('mobile body has no intermediate picker or extra history, legacy p
   const navSource = fs.readFileSync(new URL('../src/components/shared/HubSectionNav.tsx', import.meta.url), 'utf8')
   assert.doesNotMatch(navSource, /pushState|history.back|hub-section-grid|HUB_HISTORY_MARKER/)
   assert.match(navSource, /if \(layered \|\| visible.length <= 1\) return <>{content}<\/>/)
-  assert.match(navSource, /hub-section-pills[^"']*flex-wrap/)
+  assert.match(navSource, /hub-section-pills[^"']*flex-nowrap[^"']*overflow-x-auto/)
   assert.match(navSource, /hub-section-pill[^"']*min-h-11/)
   assert.match(navSource, /aria-pressed=\{isActive\}/)
   // "The compact home sheet owns section switching" is ONE decision shared

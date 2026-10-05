@@ -13,6 +13,7 @@ import ImagePlus from 'lucide-react/dist/esm/icons/image-plus.js'
 import Boxes from 'lucide-react/dist/esm/icons/boxes.js'
 import { isBrokenLocalizedString, useApp, useLowStockConfig, useSync } from '../../AppContext'
 import { getHubDestinations, useHubSection } from '../shared/hubNavigation.ts'
+import { useActivePillScroll } from '../shared/useActivePillScroll.ts'
 import { useLayeredSectionNav } from '../../utils/sectionNavPreference.ts'
 import AlphaIndexRail from '../shared/AlphaIndexRail'
 import FilterMenu from '../shared/FilterMenu'
@@ -1477,6 +1478,8 @@ function ProductsFullEditor() {
   )
   const productSectionIds = useMemo(() => productSectionTabs.map((section) => section.id), [productSectionTabs])
   const [activeProductSection, setActiveProductSection] = useHubSection<'products' | 'stock_changes' | 'stock_in_sessions' | 'duplicates'>('products', 'products', productSectionIds, navigateTo)
+  const sectionPillsRef = useRef<HTMLDivElement>(null)
+  useActivePillScroll(sectionPillsRef, activeProductSection)
   // The compact home sheet owns section switching in "pages" mode, so the
   // page must not draw a second row there -- the same rule HubSectionNav
   // applies for the six hubs that delegate their row to it.
@@ -4736,17 +4739,16 @@ function ProductsFullEditor() {
             phones (user, Aug 31: "product page still use title page in addition
             to the section ... remove that"). */}
         {/* Y15: section switcher (Products | Stock Changes | Stock-in
-            Sessions | Duplicates), now the shared hub pill row. It WRAPS
-            instead of scrolling sideways -- the four labels are ~440px wide
-            against 296px (320) / 351px (375) of usable width, so half of
-            them used to sit off-screen behind a horizontal swipe (N7) -- and
-            it steps aside in compact "pages" mode, where the home sheet owns
+            Sessions | Duplicates), now the shared hub pill row. Owner choice
+            (5 Oct 2026): one row that scrolls sideways instead of wrapping
+            to two (the open chip scrolls into view, so it is never the one
+            off-screen) -- and it steps aside in compact "pages" mode, where the home sheet owns
             section switching for every hub page. The list itself comes from
             getHubDestinations('products'), so this row and that sheet can
             never offer different sections. */}
         {layeredSectionNav || productSectionTabs.length <= 1 ? null : (
           <div className="w-full min-w-0 max-w-full sm:w-auto sm:flex-1" role="group" aria-label={tr('product_sections', 'Product sections')}>
-            <div className="bos-nav-chrome hub-section-pills flex max-w-full flex-wrap gap-1 rounded-xl p-1 md:inline-flex">
+            <div ref={sectionPillsRef} className="bos-nav-chrome hub-section-pills flex max-w-full flex-nowrap gap-1 overflow-x-auto overscroll-x-contain rounded-xl p-1 [scrollbar-width:none] md:inline-flex">
               {productSectionTabs.map((section) => {
                 const isActive = activeProductSection === section.id
                 return (
@@ -4755,7 +4757,7 @@ function ProductsFullEditor() {
                     type="button"
                     onClick={() => setActiveProductSection(section.id as typeof activeProductSection)}
                     aria-pressed={isActive}
-                    className="hub-section-pill inline-flex min-h-11 min-w-0 flex-1 basis-[calc(50%_-_0.25rem)] items-center justify-center break-words rounded-lg px-2.5 py-2 text-center text-[13px] font-semibold leading-snug transition-colors md:h-8 md:min-h-0 md:flex-none md:basis-auto md:whitespace-nowrap md:py-0"
+                    className="hub-section-pill inline-flex min-h-11 shrink-0 items-center justify-center whitespace-nowrap rounded-lg px-3 py-2 text-center text-[13px] font-semibold leading-relaxed transition-colors md:h-8 md:min-h-0 md:py-0"
                   >
                     {tr(section.key, section.label)}
                   </button>
