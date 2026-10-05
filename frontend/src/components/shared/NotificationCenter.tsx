@@ -195,7 +195,7 @@ const SECTION_LABEL_KEYS: Record<string, LabelTuple> = {
   inventory: ['notification_inventory', 'Inventory', 'ស្តុកទំនិញ'],
   sales: ['sales', 'Sales', 'ការលក់'],
   loyalty: ['loyalty_points', 'Loyalty', 'ពិន្ទុស្មោះត្រង់'],
-  portal: ['customer_portal', 'Customer portal', 'ផតថលអតិថិជន'],
+  portal: ['customer_portal', 'Website Editor', 'កម្មវិធីកែសម្រួលគេហទំព័រ'],
   system: ['system', 'System', 'ប្រព័ន្ធ'],
   imports: ['notification_imports', 'Imports', 'ការនាំចូល'],
 }

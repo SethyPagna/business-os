@@ -118,12 +118,12 @@ const COPY: Record<'en' | 'km', LocaleCopy> = {
     redeemPoints: 'Minimum redemption points',
     redeemValueUsd: 'Value per redemption unit (USD)',
     redeemValueKhr: 'Value per redemption unit (KHR)',
-    showPointValue: 'Show point value on customer portal',
+    showPointValue: 'Show point value on the website',
     membershipPointsEnabled: 'Membership points',
     membershipPointsEnabledHint: 'Default points earning for each new order; the POS switch overrides it for that order only. When off, redemption stays disabled. Existing points are kept.',
     membershipPointsOff: 'Default earning is off',
     infoText: 'Customer-facing membership note',
-    infoTextHint: 'This note appears in the customer portal membership panel under the point summary and redemption rules.',
+    infoTextHint: 'This note appears in the website membership panel under the point summary and redemption rules.',
     submissionRewardPoints: 'Default reward points per approved share',
     validationUsd: 'USD redemption value uses whole numbers only.',
     validationKhr: 'KHR redemption value uses whole 1000 riel units and cannot be below 1000 when enabled.',
@@ -180,7 +180,7 @@ const COPY: Record<'en' | 'km', LocaleCopy> = {
     redeemPoints: 'ពិន្ទុអប្បបរមាសម្រាប់ប្តូរ',
     redeemValueUsd: 'តម្លៃក្នុងមួយឯកតាប្តូរ (USD)',
     redeemValueKhr: 'តម្លៃក្នុងមួយឯកតាប្តូរ (KHR)',
-    showPointValue: 'បង្ហាញតម្លៃពិន្ទុនៅ Customer Portal',
+    showPointValue: 'បង្ហាញតម្លៃពិន្ទុនៅលើគេហទំព័រ',
     membershipPointsEnabled: 'ពិន្ទុសមាជិក',
     membershipPointsEnabledHint: 'កំណត់លំនាំដើមនៃការគិតពិន្ទុសម្រាប់ការលក់ថ្មី។ អ្នកអាចប្តូរបានសម្រាប់ការបញ្ជាទិញនីមួយៗនៅ POS។ ពេលបិទ មិនអាចប្តូរពិន្ទុបានទេ។ ពិន្ទុចាស់ត្រូវបានរក្សាទុក។',
     membershipPointsOff: 'ការគិតពិន្ទុតាមលំនាំដើមត្រូវបានបិទ',
@@ -780,7 +780,7 @@ export default function LoyaltyPointsPage() {
 
               <label htmlFor="show-point-value" className="mt-4 flex items-center justify-between rounded-2xl border border-gray-200 px-4 py-3 dark:border-gray-700">
                 <div>
-                  <div className="text-sm font-medium text-gray-700 dark:text-gray-300">{copy('showPointValue', 'Show point value on customer portal')}</div>
+                  <div className="text-sm font-medium text-gray-700 dark:text-gray-300">{copy('showPointValue', 'Show point value on the website')}</div>
                   <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">{copy('wholeUnitsOnly', 'Customers can view balances with decimals, but staff redeem points only in whole units.')}</div>
                 </div>
                 <input
@@ -802,7 +802,7 @@ export default function LoyaltyPointsPage() {
                   value={form.customer_portal_membership_info_text || ''}
                   onChange={(event: ChangeEvent<HTMLTextAreaElement>) => setValue('customer_portal_membership_info_text', event.target.value)}
                 />
-                <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">{copy('infoTextHint', 'This note appears in the customer portal membership panel under the point summary and redemption rules.')}</p>
+                <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">{copy('infoTextHint', 'This note appears in the website membership panel under the point summary and redemption rules.')}</p>
               </div>
             </section>
             ) : null}
@@ -840,7 +840,7 @@ export default function LoyaltyPointsPage() {
                   <div className="mt-3 space-y-2 text-sm text-gray-600 dark:text-gray-300">
                     <div>{policySummary}</div>
                     <div>{copy('unitLabel', '1 redemption unit')}: {redeemPoints} pts = {fmtUSD(redeemValueUsd)} / {fmtKHR(redeemValueKhr)}</div>
-                    <div>{copy('showPointValue', 'Show point value on customer portal')}: {form.customer_portal_show_point_value ? 'ON' : 'OFF'}</div>
+                    <div>{copy('showPointValue', 'Show point value on the website')}: {form.customer_portal_show_point_value ? 'ON' : 'OFF'}</div>
                     <div>{copy('submissionRewardPoints', 'Default reward points per approved share')}: {rewardPoints}</div>
                   </div>
                 </div>

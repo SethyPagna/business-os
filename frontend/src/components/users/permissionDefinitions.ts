@@ -147,8 +147,8 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
   {
     key: 'customer_portal',
     tKey: 'perm_section_customer_portal',
-    label: 'Customer Portal',
-    description: 'The storefront editor, broken into per-area grants (Part 557) so a role can be given exactly the content it should manage. Reading the public portal needs no grant; each grant below opens the Customer Portal page and unlocks only its own area. Holding full Settings is a superset of all four.',
+    label: 'Website Editor',
+    description: 'The storefront editor, broken into per-area grants (Part 557) so a role can be given exactly the content it should manage. Reading the public website needs no grant; each grant below opens the Website Editor page and unlocks only its own area. Holding full Settings is a superset of all four.',
     permissions: [
       // Per-area write grants -- mirror cloudflare/src/routes/settings.ts's
       // PORTAL_*_KEYS buckets. Each is plain Full/None (no tier): the editor
