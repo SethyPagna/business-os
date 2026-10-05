@@ -16,7 +16,8 @@ import { readAuditLogPage } from '../lib/auditLogPage'
 import { putObject, getObject, deleteObject } from '../lib/r2'
 import { getGoogleLoginPublicConfig } from '../lib/googleOauth'
 import { CUSTOMER_REFUND_JOIN, getSalesTotals, getSalesTotalsAndPeriodSeries, identifiedCustomerExpr, reportCustomerNameExpr, netRefundExpr, netSaleExpr, previousPeriodFilters, recognizedExpr, shiftWindowBound, shiftWindowWhere } from '../lib/salesAnalytics'
-import { getFamilyStockAlertPage, getFamilyStockStats, type FamilyStockAlertState } from '../lib/familyStockStats'
+import { getFamilyStockAlertPage, type FamilyStockAlertState } from '../lib/familyStockStats'
+import { loadDashboardStockOverview, type DashboardStockOverviewContext } from '../lib/dashboardStockOverview'
 import { loadLowStockConfig } from '../lib/lowStockSettings'
 import { localRangeClockError, isLocalRangeClock, businessToday, localDateAtOrAfter, localDateAtOrBefore, localDateRangeClause, localHourExpr, localTimeRangeClause } from '../lib/businessDateWindow'
 import { continuousReadWindowSql, parseContinuousReadWindow } from '../lib/continuousReadWindow'
@@ -193,14 +194,14 @@ function emptySummary() {
   }
 }
 
-async function dashboardSummary(env: Env, query: Record<string, string>) {
+async function dashboardSummary(env: Env, query: Record<string, string>, overviewCtx: DashboardStockOverviewContext) {
   const range = dateRange(query)
   const db = getDb(env)
-  // The owner's low-stock switch/amount/scope, read once and used by BOTH the
-  // badge counts (getFamilyStockStats) and the card's list below them -- the
-  // two are rendered together on Dashboard.tsx, so they must be built from
-  // the same number or the card contradicts its own heading.
-  const lowStockConfig = await loadLowStockConfig(env)
+  // The owner's low-stock switch/amount/scope is read once inside
+  // loadDashboardStockOverview and used by BOTH the badge counts and the
+  // card's lists below them -- the two are rendered together on
+  // Dashboard.tsx, so they must be built from the same number or the card
+  // contradicts its own heading. One statement builds both (G39 item 1).
   const branchId = query.branchId || null
   const params = dashboardRangeParams(range, branchId)
   const saleBranchClause = (alias: string) => branchId ? ` AND ${alias}.branch_id = @branchId` : ''
@@ -233,7 +234,12 @@ async function dashboardSummary(env: Env, query: Record<string, string>) {
   // scoped two different windows, kept for API back-compat. Previously two
   // separate queries recomputed the identical SUM twice; one query with a
   // COUNT now backs both.
-  const [salesTotals, todayReturns, inventory, lowStockPage, outOfStockPage, expiring, expiringCount, recentSales] = await Promise.all([
+  // The stock/alert block (stats, low/out previews, expiring list + count) is
+  // the catalog-wide, range- and branch-independent half of this response:
+  // lib/dashboardStockOverview.ts computes it in one family pass plus two
+  // index-served expiry statements, shared and cached under the 'products' +
+  // 'stock' cache versions, so a stock write is visible on the next load.
+  const [salesTotals, todayReturns, stockOverview, recentSales] = await Promise.all([
     db.prepare(`
       SELECT COUNT(*) AS count, COALESCE(SUM(total_usd), 0) AS total_usd, COALESCE(SUM(total_khr), 0) AS total_khr
       FROM sales
@@ -256,28 +262,7 @@ async function dashboardSummary(env: Env, query: Record<string, string>) {
         AND COALESCE(return_scope, 'customer') = 'customer'
         AND COALESCE(status, 'completed') <> 'cancelled'${saleBranchClause('returns')}
     `).get(params),
-    getFamilyStockStats({
-      db,
-      lowStock: lowStockConfig,
-      joinSql: '',
-      whereSql: 'WHERE p.is_active = 1',
-      params,
-      qtyExpr: 'COALESCE(p.stock_quantity, 0)',
-    }),
-    getFamilyStockAlertPage({ db, lowStock: lowStockConfig, state: 'low', page: 1, pageSize: DASHBOARD_STOCK_ALERT_PAGE_SIZE }),
-    getFamilyStockAlertPage({ db, lowStock: lowStockConfig, state: 'out', page: 1, pageSize: DASHBOARD_STOCK_ALERT_PAGE_SIZE }),
-    db.prepare(`
-      SELECT id, name, category, unit, expiry_date, CAST(julianday(expiry_date) - julianday('now') AS INTEGER) AS days_until_expiry
-      FROM products p
-      WHERE p.is_active = 1 AND expiry_date IS NOT NULL AND date(expiry_date) <= date('now', '+' || COALESCE(expiry_alert_days, 30) || ' day')
-      ORDER BY date(expiry_date) ASC
-      LIMIT 10
-    `).all(params),
-    db.prepare(`
-      SELECT COUNT(*) AS count
-      FROM products p
-      WHERE p.is_active = 1 AND expiry_date IS NOT NULL AND date(expiry_date) <= date('now', '+' || COALESCE(expiry_alert_days, 30) || ' day')
-    `).get(params),
+    loadDashboardStockOverview(env, overviewCtx),
     db.prepare(`
       SELECT id, receipt_number, created_at, sale_status, branch_name, ${reportCustomerNameExpr('sales.')} AS customer_name, cashier_name, total_usd, total_khr,
         (SELECT COALESCE(SUM(quantity), 0) FROM sale_items WHERE sale_id = sales.id) AS item_count
@@ -297,20 +282,20 @@ async function dashboardSummary(env: Env, query: Record<string, string>) {
     today_return_usd: num((todayReturns as Record<string, unknown>)?.total_usd),
     all_total: num((salesTotals as Record<string, unknown>)?.total_usd),
     all_total_khr: num((salesTotals as Record<string, unknown>)?.total_khr),
-    product_count: inventory.total_products,
-    in_stock_count: inventory.in_stock,
-    low_stock_count: inventory.low_stock,
-    out_of_stock_count: inventory.out_of_stock,
-    stock_value_usd: inventory.stock_value_usd,
-    stock_value_khr: inventory.stock_value_khr,
-    low_stock: lowStockPage.items,
-    out_of_stock: outOfStockPage.items,
-    low_stock_preview_limit: DASHBOARD_STOCK_ALERT_PAGE_SIZE,
-    out_of_stock_preview_limit: DASHBOARD_STOCK_ALERT_PAGE_SIZE,
-    low_stock_preview_truncated: lowStockPage.hasMore,
-    out_of_stock_preview_truncated: outOfStockPage.hasMore,
-    expiring_products: expiring || [],
-    expiring_count: num((expiringCount as Record<string, unknown>)?.count),
+    product_count: stockOverview.inventory.total_products,
+    in_stock_count: stockOverview.inventory.in_stock,
+    low_stock_count: stockOverview.inventory.low_stock,
+    out_of_stock_count: stockOverview.inventory.out_of_stock,
+    stock_value_usd: stockOverview.inventory.stock_value_usd,
+    stock_value_khr: stockOverview.inventory.stock_value_khr,
+    low_stock: stockOverview.low.items,
+    out_of_stock: stockOverview.out.items,
+    low_stock_preview_limit: stockOverview.low.pageSize,
+    out_of_stock_preview_limit: stockOverview.out.pageSize,
+    low_stock_preview_truncated: stockOverview.low.hasMore,
+    out_of_stock_preview_truncated: stockOverview.out.hasMore,
+    expiring_products: stockOverview.expiring || [],
+    expiring_count: num(stockOverview.expiringCount),
     recent_sales: (recentSales || []).map((sale) => ({
       ...sale,
       // The relational sale_items table is canonical.  Do not derive this
@@ -579,6 +564,18 @@ async function dashboardInsightList(env: Env, query: Record<string, string>, kin
   return { items: rows || [], truncated: (rows || []).length >= DASHBOARD_INSIGHT_LIST_LIMIT }
 }
 
+// The shared stock overview's cache key lives on this request's origin, and
+// its cache write runs after the response (waitUntil). A context without an
+// execution context (a pure test calling app.request) simply skips the wait.
+function dashboardOverviewContext(c: { req: { url: string }; executionCtx: { waitUntil(promise: Promise<unknown>): void } }): DashboardStockOverviewContext {
+  return {
+    requestUrl: c.req.url,
+    waitUntil(promise) {
+      try { c.executionCtx.waitUntil(promise) } catch { void promise.catch(() => {}) }
+    },
+  }
+}
+
 // NOTE: /users and /roles routes moved to routes/users.ts (proper admin-
 // control/self-service permission model, primary-admin guardrails, and
 // duplicate-identity checks that this file's old generic
@@ -589,7 +586,7 @@ app.get('/dashboard', async (c) => {
   if (denied) return denied
   const rangeError = dashboardRangeError(c.req.query())
   if (rangeError) return c.json({ error: rangeError }, 400)
-  return c.json(await dashboardSummary(c.env, c.req.query()))
+  return c.json(await dashboardSummary(c.env, c.req.query(), dashboardOverviewContext(c)))
 })
 app.get('/dashboard/stock-alerts', async (c) => {
   const denied = denyUnless(c, 'dashboard')
@@ -637,7 +634,7 @@ app.get('/dashboard/startup', async (c) => {
   const rangeError = dashboardRangeError(c.req.query())
   if (rangeError) return c.json({ error: rangeError }, 400)
   const [summary, analytics] = await Promise.all([
-    dashboardSummary(c.env, c.req.query()),
+    dashboardSummary(c.env, c.req.query(), dashboardOverviewContext(c)),
     dashboardAnalytics(c.env, c.req.query(), isAdminControlUser(c.get('user')), canViewAcquisitionCosts(c.get('user'))),
   ])
   return c.json({ summary, analytics })

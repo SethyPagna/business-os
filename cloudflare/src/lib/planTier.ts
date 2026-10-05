@@ -207,6 +207,14 @@ export type PlanLimits = {
   // Paid 6 h, Free 24 h.
   coreInvariantsReverifySeconds: number
 
+  // lib/dashboardStockOverview.ts: lifetime of the shared Dashboard stock /
+  // expiry overview. Freshness comes from the 'products' + 'stock' cache
+  // versions in its key (every sale and stock write bumps one), so this is
+  // only the ceiling for a writer that does not bump and for the expiry
+  // window's clock. Paid 30 s (the order of the 20 s product-search cache),
+  // Free 300 s.
+  dashboardStockOverviewCacheSeconds: number
+
   // ---- Documented platform facts (no behavioural reader) -----------------
   //
   // These four are REPORTED, not enforced: the tier readout on
@@ -264,6 +272,7 @@ const PAID_LIMITS: PlanLimits = {
   catalogIntegrityMaxProducts: 50_000,
   stockInLinesPerRequest: 28,
   coreInvariantsReverifySeconds: 6 * 60 * 60,
+  dashboardStockOverviewCacheSeconds: 30,
   d1DailyRowsRead: 833_000_000,
   d1DailyRowsWritten: 1_666_000,
   d1MaxDatabaseBytes: 10 * 1024 * 1024 * 1024,
@@ -287,6 +296,7 @@ const FREE_LIMITS: PlanLimits = {
   catalogIntegrityMaxProducts: 2000,
   stockInLinesPerRequest: 1,
   coreInvariantsReverifySeconds: 24 * 60 * 60,
+  dashboardStockOverviewCacheSeconds: 300,
   d1DailyRowsRead: 5_000_000,
   d1DailyRowsWritten: 100_000,
   d1MaxDatabaseBytes: 500 * 1024 * 1024,

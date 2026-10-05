@@ -465,6 +465,15 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
       try {
         outcome = await applier.run(payload, { env: c.env, user, direction, historyId: existing.id, generation: body.expected_generation })
         applied = true
+        // Server-applied undo/redo rewrites product and stock rows, but the
+        // appliers only BROADCAST; none bumps a cache version. Every reader
+        // keyed on the 'stock' version (the Dashboard stock overview,
+        // stock-filtered product search pages, the storefront) would keep
+        // serving the pre-undo numbers until its TTL. One 'stock' bump here
+        // covers every applier. Lazy and fully swallowed: a cache fault must
+        // never turn an applied undo into an error.
+        const stockBump = import('../lib/cache').then(({ bumpVersion }) => bumpVersion(c.env, 'stock')).catch(() => {})
+        try { c.executionCtx.waitUntil(stockBump) } catch { void stockBump }
       } catch (error) {
         if (!serverManagedReplay) await db.prepare('UPDATE action_history SET last_error = @last_error, updated_at = CURRENT_TIMESTAMP WHERE id = @id')
           .run({ last_error: (error as Error)?.message || `Failed to ${direction}`, id: existing.id })

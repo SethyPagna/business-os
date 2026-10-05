@@ -139,6 +139,7 @@ const PAID = {
   catalogIntegrityMaxProducts: 50000,
   stockInLinesPerRequest: 28,
   coreInvariantsReverifySeconds: 21600,
+  dashboardStockOverviewCacheSeconds: 30,
   d1DailyRowsRead: 833000000,
   d1DailyRowsWritten: 1666000,
   d1MaxDatabaseBytes: 10 * 1024 * 1024 * 1024,
@@ -161,6 +162,7 @@ const FREE = {
   catalogIntegrityMaxProducts: 2000,
   stockInLinesPerRequest: 1,
   coreInvariantsReverifySeconds: 86400,
+  dashboardStockOverviewCacheSeconds: 300,
   d1DailyRowsRead: 5000000,
   d1DailyRowsWritten: 100000,
   d1MaxDatabaseBytes: 500 * 1024 * 1024,
@@ -185,7 +187,7 @@ check('both tables carry exactly the same field set, with no extras', async () =
 // Read-cost LIFETIMES (planTier.ts "Read-cost lifetimes"): a longer lifetime
 // reads fewer D1 rows, so on these Free is deliberately the LARGER number.
 // Listed by name so a ceiling can never slip into this exemption unnoticed.
-const FREE_IS_LONGER = ['coreInvariantsReverifySeconds']
+const FREE_IS_LONGER = ['coreInvariantsReverifySeconds', 'dashboardStockOverviewCacheSeconds']
 
 // ---- POSITIVE CONTROL -----------------------------------------------------
 //
