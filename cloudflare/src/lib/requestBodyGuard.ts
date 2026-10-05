@@ -12,6 +12,7 @@ const PUBLIC_SMALL_POSTS = new Set([
   '/api/auth/password-reset/complete', '/api/auth/password-reset/otp', '/api/auth/password-reset/admin-request',
   '/api/auth/otp/verify', '/api/auth/oauth/start', '/api/auth/oauth/complete',
   '/api/portal/auth/signup', '/api/portal/auth/signin', '/api/portal/auth/signout',
+  '/api/portal/auth/telegram/start', '/api/portal/auth/telegram/poll', '/api/portal/telegram/webhook',
 ])
 const STAFF_SMALL_POSTS = new Set([
   '/api/auth/session-duration', '/api/auth/otp/setup', '/api/auth/otp/confirm',

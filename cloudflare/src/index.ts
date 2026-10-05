@@ -4,6 +4,7 @@ import productsRoute from './routes/products'
 import productCostRoute from './routes/productCost'
 import portalRoute from './routes/portal'
 import portalMembersRoute from './routes/portalMembers'
+import portalTelegramRoute from './routes/portalTelegram'
 import salesRoute from './routes/sales'
 import authRoute from './routes/auth'
 import filesRoute from './routes/files'
@@ -160,6 +161,16 @@ export type Env = {
   // setting: chat IDs may be configured by an admin, but a bot token grants
   // control of the bot and must never be returned to the browser.
   TELEGRAM_BOT_TOKEN?: string
+  // The CUSTOMER bot (@LeangCosmeticsBot), separate from the staff alerts
+  // bot above (lib/portalTelegram.ts). Its token is only used to refuse a
+  // webhook secret derived from it; the Worker never calls Telegram with it.
+  // PORTAL_TELEGRAM_WEBHOOK_SECRET is a random value of its own (32-256 of
+  // A-Z a-z 0-9 _ -) given to Telegram at setWebhook; setting it turns
+  // Telegram sign-in on. Both are secrets (wrangler secret put / dashboard).
+  // PORTAL_TELEGRAM_BOT_USERNAME is optional (default LeangCosmeticsBot).
+  PORTAL_TELEGRAM_BOT_TOKEN?: string
+  PORTAL_TELEGRAM_WEBHOOK_SECRET?: string
+  PORTAL_TELEGRAM_BOT_USERNAME?: string
   // Google identity login (Sign in with Google) -- see lib/googleOauth.ts.
   // CLIENT_ID/REDIRECT_URI are plain vars (not secret); CLIENT_SECRET should
   // be set with `wrangler secret put GOOGLE_LOGIN_CLIENT_SECRET` in
@@ -550,6 +561,10 @@ app.get('/uploads/*', async (c) => {
 app.route('/api/settings', settingsRoute)
 app.route('/api/products', productsRoute)
 app.route('/api/products', productCostRoute)
+// G38 Telegram: member sign-in through the customer bot, and that bot's
+// webhook. Under /api/portal/ so the storefront host reaches it; the staff
+// bot's webhook stays at /api/telegram/webhook with its own secret.
+app.route('/api/portal', portalTelegramRoute)
 app.route('/api/portal', portalRoute)
 // Staff-only (G38): outside /api/portal/, so the storefront host gate 404s it.
 app.route('/api/portal-members', portalMembersRoute)
