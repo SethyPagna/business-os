@@ -104,10 +104,10 @@ check("lib/permissions.ts declares VIEW_TIER_KEYS (settings + sales) + handles '
 })
 check("routes/sales.ts reads stay view-aware while writes use action-specific Full gates", () => {
   const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'sales.ts'), 'utf8')
-  assert.match(src, /function canReadSales\([\s\S]*getPermissionTier\(user, 'sales'\) !== 'none'/)
+  assert.match(src, /function canReadSales\([^)]*\)[^{]*\{\s*return getActionTier\(user, 'sales', 'view'\) !== 'none'/)
   assert.match(src, /getActionTier\(user, 'sales', 'status'\) !== 'full'/)
   assert.match(src, /getActionTier\(user, 'sales', 'customer'\) !== 'full'/)
-  assert.match(src, /getActionTier\(c\.get\('user'\), 'sales', 'export'\) === 'none'/)
+  assert.match(src, /!canReadSales\(c\.get\('user'\)\) \|\| getActionTier\(c\.get\('user'\), 'sales', 'export'\) === 'none'/)
 })
 
 // --- Promotions view-tier (Part 557 slice 4): read rule list, no manage -----

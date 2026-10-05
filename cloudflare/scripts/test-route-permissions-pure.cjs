@@ -186,7 +186,11 @@ const { hasPermission, hasAnyPermission, isAdminControlUser, getActionTier, getP
   // action-off switches. Assert both exact capabilities are wired.
   assert.match(salesSrc, /getActionTier\(user, 'sales', 'status'\) !== 'full'/, 'PATCH /:id/status must require sales.status at Full')
   assert.match(salesSrc, /getActionTier\(user, 'sales', 'customer'\) !== 'full'/, 'PATCH /:id/customer must require sales.customer at Full')
-  assert.match(salesSrc, /function canReadSales\(user: SessionUser\): boolean \{\s*return getPermissionTier\(user, 'sales'\) !== 'none'/, 'sales.ts must define the tier-aware read gate canReadSales(getPermissionTier !== none)')
+  // ff4bee06e moved the other sales readers (reports, batches, products) to the
+  // action-aware view tier so an explicit 'sales:view': false hides sales on
+  // every read surface; canReadSales follows, and the export needs it too.
+  assert.match(salesSrc, /function canReadSales\(user: SessionUser\): boolean \{\s*return getActionTier\(user, 'sales', 'view'\) !== 'none'/, 'sales.ts must define the action-aware read gate canReadSales(getActionTier view !== none)')
+  assert.match(salesSrc, /if \(!canReadSales\(c\.get\('user'\)\) \|\| getActionTier\(c\.get\('user'\), 'sales', 'export'\) === 'none'\)/, 'GET /export must require the sales read grant as well as its export switch')
   const salesReadChecks = salesSrc.match(/canReadSales\(/g) || []
   assert.ok(salesReadChecks.length >= 6, `expected sales.ts reads gated by canReadSales() at multiple sites, found ${salesReadChecks.length}`)
   console.log('PASS routes/sales.ts gates create (pos-or-sales), writes (action-specific Full), and reads (tier-aware canReadSales)')
