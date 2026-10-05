@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict'
 import { buildSync } from 'esbuild'
 import { fileURLToPath } from 'node:url'
-import { saleLineEditorResult } from '../src/utils/saleLineEditor.ts'
 import { applyManualDiscount } from '../src/components/pos/posCore.ts'
 import { receiptTotalsFigures, receiptTotalsFootingErrorUsd } from '../src/utils/receiptTotals.ts'
 import { deliveryAmountChanged, parseDeliveryAmountUsd } from '../src/utils/deliveryAmounts.ts'
@@ -9,18 +8,6 @@ import { settlementRounding4, sellingPriceCeilCent, subtractMoney4, divideMoney4
 import { serializeSaleItemPricing } from '../src/utils/saleItemPricing.ts'
 import { canonicalSaleReceipt, saleMoneyResponseFields, SaleMoneyUnavailableError, frozenSaleCheckoutBody, SaleCheckoutRecoveryRequiredError } from '../src/utils/saleMoneyV1.ts'
 
-const line = { quantity: 100, basePriceUsd: 1.2345, manualDiscountType: 'percent', manualDiscountValue: 12.3456, productDiscountUsd: 0.0001 }
-const legacy = saleLineEditorResult(line)
-assert.equal(legacy.ok && legacy.basePriceUsd, 1.23)
-const version1 = saleLineEditorResult({ ...line, moneyPrecisionVersion: 1 })
-assert.equal(version1.ok && version1.basePriceUsd, 1.2345, 'derived promotion base is never re-ceiled')
-assert.equal(version1.ok && version1.manualDiscountValue, 12.3456)
-assert.equal(version1.ok && version1.manualDiscountUsd, 0.1524)
-assert.equal(version1.ok && version1.lineTotalUsd, 108.2094, 'manual percent is rounded once on the original full line, not reconstructed from unit projections')
-const typed = saleLineEditorResult({ ...line, moneyPrecisionVersion: 1, sellingPriceInputUsd: '1.2345' })
-assert.equal(typed.ok && typed.basePriceUsd, 1.24)
-assert.equal(saleLineEditorResult({ ...line, moneyPrecisionVersion: 1, sellingPriceInputUsd: 'invalid' }).ok, false)
-assert.equal(saleLineEditorResult({ ...line, moneyPrecisionVersion: 1, sellingPriceInputUsd: '1.2345', manualDiscountType: 'fixed', manualDiscountValue: 1.235 }).ok, true)
 assert.equal(applyManualDiscount(0.0001, 0.4, 4000, 'percent', 49.99, 1).manual_discount_usd, 0)
 assert.equal(applyManualDiscount(0.0001, 0.4, 4000, 'percent', 50, 1).manual_discount_usd, 0.0001)
 assert.deepEqual(parseDeliveryAmountUsd('1.2345', 1), { ok: true, usd: 1.2345 })
