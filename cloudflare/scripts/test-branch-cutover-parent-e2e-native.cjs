@@ -9,7 +9,8 @@
 // both stock ledgers agree. The end state is checked unit by unit against a baseline read before begin.
 // Discriminating controls (source mutations) must turn the run RED: name-keyed admission, name-keyed
 // finalize, unweighted (mean) cost, a CAS-less parent under duplicate delivery, a missing history close
-// stage and a missing classification rule.
+// stage and a missing classification rule, and one per owner lot rule: the UTC date instead of the Cambodia
+// business day (E4), an unrounded blend (E5), a supplier-blind merge (E6) and $0 weighted as a real cost.
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
@@ -26,8 +27,14 @@ const CONTROLS = {
   'name-finalize': [['lib/branchCutoverParent.ts', [
     ["WHERE id=@source AND canonical_key='shop' AND is_active=1`", "WHERE lower(trim(name))='shop'`"],
     ["WHERE id=@target AND canonical_key='warehouse' AND is_active=1`", "WHERE lower(trim(name))='warehouse'`"]]]],
-  mean: [['lib/branchCutoverParent.ts', [['costAfter = quantity > 0 ? value / quantity : survivor.lot.cost',
-    'costAfter = members.reduce((sum, fact) => sum + Number(fact.lot.cost), 0) / members.length']]]],
+  mean: [['lib/branchCutoverParent.ts', [[`weightedMeanMoney4(priced.map(fact => ({ amount: fact.lot.cost as number, factor: decimalText(fact.quantity) })),
+            decimalText(priced.reduce((sum, fact) => sum + fact.quantity, 0n)))`, 'priced.reduce((s, fact) => s + Number(fact.lot.cost), 0) / priced.length']]]],
+  'utc-slice': [['lib/branchCutoverParent.ts', [['  return localDateOf(text) || null', '  return text.slice(0, 10)']]]],
+  'no-round': [['lib/branchCutoverParent.ts', [[`weightedMeanMoney4(priced.map(fact => ({ amount: fact.lot.cost as number, factor: decimalText(fact.quantity) })),
+            decimalText(priced.reduce((sum, fact) => sum + fact.quantity, 0n)))`,
+    'priced.reduce((s, fact) => s + Number(fact.lot.cost) * Number(decimalText(fact.quantity)), 0) / priced.reduce((s, fact) => s + Number(decimalText(fact.quantity)), 0)']]]],
+  'supplier-blind': [['lib/branchCutoverParent.ts', [["  if (typeof lot.supplierId === 'number' && Number.isSafeInteger(lot.supplierId)) return 'id:' + lot.supplierId", "  if (lot) return ''"]]]],
+  'zero-weighted': [['lib/branchCutoverParent.ts', [["const priced = members.filter(fact => fact.costClass === 'recorded')", "const priced = members.filter(fact => fact.costClass !== 'unknown')"]]]],
   double: [['lib/branchCutoverParent.ts', [['const results = await target.batchOnce([...before, ...statements, ...after])',
     "const strip = (list: CutoverStatement[]) => list.filter(s => !s.sql.startsWith('SELECT CASE WHEN')); const results = await target.batchOnce([...strip(before), ...statements, ...strip(after)])"],
     ['return results.slice(before.length, before.length + statements.length)', "return results.slice(before.filter(s => !s.sql.startsWith('SELECT CASE WHEN')).length)"]]],
@@ -66,27 +73,36 @@ const IDS = { sourceBranchId: 2, targetBranchId: 1 }
 const NAMES = { retiredName: 'Old Shop', successorName: 'LC Store' }
 const INCARNATION = '00000000-0000-4000-8000-000000000099'
 
-// lot: [id, product, received_at, expiry, cost, { 2: shopQty, 1: warehouseQty }]
+// lot: [id, product, received_at, expiry, cost, { 2: shopQty, 1: warehouseQty }, supplier_id]
 const NAMED = {
   products: [
     // id, name, shop bs, warehouse bs
     [1, 'Shop only two dates', 5, null], [2, 'Shared batch', 4, 6], [3, 'Same date, WH pre-existing, cost differs', 1, 3],
-    [4, 'Shop two same-date lots', 4, null], [5, 'Same date different expiry', 2, 2], [6, 'Same date mixed unrecorded cost', 2, 2],
+    [4, 'Shop two same-date lots', 4, null], [5, 'Same date different expiry', 2, 2], [6, 'Same date real, unknown and free cost', 3, 2],
     [7, 'No received date', 2, 1], [8, 'Untracked at Shop', 5, 1], [9, 'Fractional', 2.5, 1.25], [10, 'Zero source row', 0, 3],
     [11, 'Warehouse only', null, 4], [12, 'Shared + pre-existing + arrival same date', 3, 3],
+    [13, 'Business day: 18:00 UTC is the next day in Cambodia', 1, 1], [14, 'Business day: 20:00 UTC is not the same day', 1, 1],
+    [15, 'Same date free and unknown cost, no real cost', 1, 1], [16, 'Same date two suppliers', 2, 1],
+    [17, 'Same date, the warehouse lot has no supplier', 1, 1], [18, 'Same date, blend needs rounding', 2, 1],
   ],
   lots: [
     [101, 1, '2026-09-01', '2027-09-01', 2, { 2: 3 }], [102, 1, '2026-09-05', '2027-09-05', 2.5, { 2: 2 }],
     [201, 2, '2026-08-01', '2027-08-01', 1.2, { 2: 4, 1: 6 }],
-    [301, 3, '2026-09-10', '2027-09-10', 2, { 1: 3 }], [302, 3, '2026-09-10 08:00:00', '2027-09-10', 6, { 2: 1 }],
-    [401, 4, '2026-09-12', null, 1, { 2: 1 }], [402, 4, '2026-09-12T23:30:00Z', null, 4, { 2: 3 }],
+    [301, 3, '2026-09-10', '2027-09-10', 2, { 1: 3 }, 5], [302, 3, '2026-09-10 08:00:00', '2027-09-10', 6, { 2: 1 }, 5],
+    [401, 4, '2026-09-12', null, 1, { 2: 1 }], [402, 4, '2026-09-12T10:30:00Z', null, 4, { 2: 3 }],
     [501, 5, '2026-09-15', '2027-01-01', 2, { 1: 2 }], [502, 5, '2026-09-15', '2027-06-01', 3, { 2: 2 }],
-    [601, 6, '2026-09-20', null, null, { 1: 2 }], [602, 6, '2026-09-20', null, 5, { 2: 2 }],
+    [601, 6, '2026-09-20', null, null, { 1: 2 }], [602, 6, '2026-09-20', null, 5, { 2: 2 }], [603, 6, '2026-09-20', null, 0, { 2: 1 }],
     [701, 7, null, null, 1, { 2: 2 }], [702, 7, null, null, 1, { 1: 1 }],
     [801, 8, '2026-09-02', null, 3, { 2: 3 }], [802, 8, '2026-09-02', null, 3, { 1: 1 }],
     [901, 9, '2026-09-01', null, 1.1, { 2: 2.5 }], [902, 9, '2026-09-01', null, 3.3, { 1: 1.25 }],
     [1001, 10, '2026-07-07', null, 1, { 1: 3 }], [1101, 11, '2026-07-08', null, 1, { 1: 4 }],
     [1201, 12, '2026-09-03', null, 2, { 2: 1, 1: 1 }], [1202, 12, '2026-09-03', null, 2, { 1: 2 }], [1203, 12, '2026-09-03', null, 4, { 2: 2 }],
+    [1301, 13, '2026-09-13', null, 2, { 1: 1 }], [1302, 13, '2026-09-12T18:00:00Z', null, 2, { 2: 1 }],
+    [1401, 14, '2026-09-12', null, 3, { 1: 1 }], [1402, 14, '2026-09-12T20:00:00Z', null, 3, { 2: 1 }],
+    [1501, 15, '2026-09-21', null, 0, { 1: 1 }], [1502, 15, '2026-09-21', null, null, { 2: 1 }],
+    [1601, 16, '2026-09-22', null, 1, { 1: 1 }, 11], [1602, 16, '2026-09-22', null, 3, { 2: 2 }, 12],
+    [1701, 17, '2026-09-23', null, 2, { 1: 1 }], [1702, 17, '2026-09-23', null, 2, { 2: 1 }, 11],
+    [1801, 18, '2026-09-24', null, 1.0001, { 1: 1 }], [1802, 18, '2026-09-24', null, 1.0002, { 2: 2 }],
   ],
 }
 function generated(count, seed = 7) {
@@ -127,9 +143,9 @@ function world({ control, generatedProducts = 28, duplicate = false } = {}) {
     if (shop !== null) raw.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(?,2,?)').run(id, shop)
     if (wh !== null) raw.prepare('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(?,1,?)').run(id, wh)
   }
-  for (const [id, product, received, expiry, cost, at] of lots) {
+  for (const [id, product, received, expiry, cost, at, supplier = null] of lots) {
     raw.prepare(`INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at,expiry_date,unit_cost_usd,received_branch_id,received_quantity,supplier_id,is_active,batch_number,created_at,updated_at)
-      VALUES(?,?,?,?,?,?,?,?,?,?,1,?,'2026-01-01','2026-01-01')`).run(id, product, 'lot-' + id, 'L' + id, received, expiry, cost, at[2] ? 2 : 1, Object.values(at).reduce((a, b) => a + b, 0), id % 3 || null, id)
+      VALUES(?,?,?,?,?,?,?,?,?,?,1,?,'2026-01-01','2026-01-01')`).run(id, product, 'lot-' + id, 'L' + id, received, expiry, cost, at[2] ? 2 : 1, Object.values(at).reduce((a, b) => a + b, 0), supplier, id)
     for (const [branch, quantity] of Object.entries(at)) raw.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity,created_at,updated_at) VALUES(?,?,?,?,?)').run(id, Number(branch), quantity, '2026-01-01', '2026-01-01')
   }
   // historical rows whose labels are blank (the snapshot pass fills them with the event-time names)
@@ -174,7 +190,14 @@ function world({ control, generatedProducts = 28, duplicate = false } = {}) {
 }
 
 // ---- independent state reads (test side, never the implementation's helpers) ----
-const dateKey = (value) => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}/.test(value) ? value.slice(0, 10) : 'none:'
+// Cambodia business day, written independently of businessDateWindow: date-only as stored, a timestamp (UTC unless zoned) + 7 h.
+const dateKey = (value) => {
+  const text = typeof value === 'string' ? value.trim() : ''
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text
+  if (!/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/.test(text)) return 'none:'
+  const iso = text.replace(' ', 'T'); const ms = Date.parse(/(Z|[+-]\d{2}:?\d{2})$/.test(iso) ? iso : iso + 'Z')
+  return Number.isNaN(ms) ? 'none:' : new Date(ms + 7 * 3600000).toISOString().slice(0, 10)
+}
 const near = (a, b) => Math.abs(a - b) <= 1e-9
 function snapshot(raw) {
   const product = new Map(), group = new Map(), lotRows = new Map(), untracked = new Map(), value = new Map()
@@ -285,22 +308,48 @@ function verifyEndState({ w, base, before, final }) {
     assert.ok(near(at(1), q), 'LC Store product ' + p); assert.equal(at(2), 0, 'Old Shop product ' + p)
   }
   assert.equal(raw.prepare('SELECT count(*) n FROM branch_batch_stock WHERE branch_id=2 AND quantity<>0').get().n, 0)
-  for (const [p, v] of base.value) assert.ok(Math.abs((after.value.get(p) || 0) - v) <= 1e-9 * Math.max(1, v), 'stock value of product ' + p)
+  // ---- every fold's cost, from the pre-run lot costs (independent of the implementation): the weighted average of the
+  //      REAL costs only, rounded to 4 decimals when it blends; stock value moves only by that rounding and by the
+  //      unknown/free units taking the real cost (owner 6 Oct)
+  const folds = raw.prepare("SELECT details FROM audit_logs WHERE action='branch_cutover_lot_fold'").all().map(r => JSON.parse(r.details))
+  const costOf = new Map(before.batches.map(b => [b.id, b.unit_cost_usd]))
+  const expectedValue = new Map(base.value)
+  for (const fold of folds) {
+    const total = fold.after.reduce((s, [, q]) => s + q, 0)
+    const priced = fold.before.filter(([id]) => costOf.get(id) > 0)
+    const costs = new Set(priced.map(([id]) => costOf.get(id)))
+    if (!priced.length) assert.equal(fold.unitCostUsdAfter, fold.unitCostUsdBefore, 'unpriced fold keeps its class ' + fold.survivorBatchId)
+    else if (costs.size === 1) assert.equal(fold.unitCostUsdAfter, [...costs][0], 'one real cost ' + fold.survivorBatchId)
+    else {
+      const exact = priced.reduce((s, [id, q]) => s + q * costOf.get(id), 0) / priced.reduce((s, [, q]) => s + q, 0)
+      assert.ok(Math.abs(fold.unitCostUsdAfter - exact) <= 0.00005 + 1e-12, 'weighted average of the real costs ' + fold.survivorBatchId + ': ' + fold.unitCostUsdAfter + ' vs ' + exact)
+      assert.ok(Math.abs(fold.unitCostUsdAfter * 1e4 - Math.round(fold.unitCostUsdAfter * 1e4)) < 1e-6, '4 decimals ' + fold.unitCostUsdAfter)
+    }
+    const valueBefore = fold.before.reduce((s, [id, q]) => s + (costOf.get(id) > 0 ? q * costOf.get(id) : 0), 0)
+    expectedValue.set(fold.productId, (expectedValue.get(fold.productId) || 0) - valueBefore + (fold.unitCostUsdAfter > 0 ? total * fold.unitCostUsdAfter : 0))
+  }
+  for (const [p, v] of expectedValue) assert.ok(Math.abs((after.value.get(p) || 0) - v) <= 1e-9 * Math.max(1, v), 'stock value of product ' + p)
+  for (const [p] of after.value) assert.ok(expectedValue.has(p), 'value appeared on product ' + p)
   // ---- date-only merge with the weighted average cost
   const lot = (id, b = 1) => raw.prepare('SELECT s.quantity q,b.unit_cost_usd c FROM product_batches b LEFT JOIN branch_batch_stock s ON s.batch_id=b.id AND s.branch_id=? WHERE b.id=?').get(b, id)
   assert.deepEqual({ ...lot(301) }, { q: 4, c: 3 }); assert.equal(lot(302).q, 0)                       // (3x2 + 1x6) / 4
   assert.deepEqual({ ...lot(401) }, { q: 4, c: 3.25 }); assert.equal(lot(402).q, 0)                    // (1x1 + 3x4) / 4, survivor = lowest arriving id
   assert.deepEqual({ ...lot(501) }, { q: 2, c: 2 }); assert.deepEqual({ ...lot(502) }, { q: 2, c: 3 }) // different expiry: kept apart
-  assert.deepEqual({ ...lot(601) }, { q: 2, c: null }); assert.deepEqual({ ...lot(602) }, { q: 2, c: 5 }) // unknown and recorded cost: kept apart (value)
+  assert.deepEqual({ ...lot(601) }, { q: 5, c: 5 }); assert.equal(lot(602).q, 0); assert.equal(lot(603).q, 0) // real + unknown + free: every unit takes the real cost
   assert.deepEqual({ ...lot(701) }, { q: 2, c: 1 }); assert.deepEqual({ ...lot(702) }, { q: 1, c: 1 }) // no received date: never merged
-  assert.equal(lot(902).q, 3.75); assert.ok(near(lot(902).c, (1.25 * 3.3 + 2.5 * 1.1) / 3.75)); assert.equal(lot(901).q, 0)
+  assert.deepEqual({ ...lot(902) }, { q: 3.75, c: 1.8333 }); assert.equal(lot(901).q, 0)               // 6.875 / 3.75 at 4 decimals
+  assert.deepEqual({ ...lot(1301) }, { q: 2, c: 2 }); assert.equal(lot(1302).q, 0)                     // 18:00 UTC 12 Sep = 13 Sep in Cambodia
+  assert.deepEqual({ ...lot(1401) }, { q: 1, c: 3 }); assert.deepEqual({ ...lot(1402) }, { q: 1, c: 3 }) // 20:00 UTC 12 Sep is 13 Sep: kept apart
+  assert.deepEqual({ ...lot(1501) }, { q: 1, c: 0 }); assert.deepEqual({ ...lot(1502) }, { q: 1, c: null }) // free and unknown, no real cost: kept apart
+  assert.deepEqual({ ...lot(1601) }, { q: 1, c: 1 }); assert.deepEqual({ ...lot(1602) }, { q: 2, c: 3 }) // two suppliers: kept apart
+  assert.deepEqual({ ...lot(1702) }, { q: 2, c: 2 }); assert.equal(lot(1701).q, 0)                     // no supplier folds into the supplier's lot
+  assert.deepEqual({ ...lot(1801) }, { q: 3, c: 1.0002 }); assert.equal(lot(1802).q, 0)               // 3.0005 / 3 at 4 decimals
   assert.deepEqual({ ...lot(201) }, { q: 10, c: 1.2 })                                                  // shared batch keeps its identity
   assert.deepEqual({ ...lot(1201) }, { q: 4, c: 3 }); assert.deepEqual({ ...lot(1202) }, { q: 2, c: 2 }); assert.equal(lot(1203).q, 0)
   assert.deepEqual({ ...lot(802) }, { q: 4, c: 3 }); assert.equal(lot(801).q, 0)                       // survivor = the lot already at the warehouse
   // ---- lot identity: every batch row survives; only the label, survivor costs and their updated_at may move
   const batches = raw.prepare('SELECT * FROM product_batches ORDER BY id').all()
   assert.equal(batches.length, before.batches.length)
-  const folds = raw.prepare("SELECT details FROM audit_logs WHERE action='branch_cutover_lot_fold'").all().map(r => JSON.parse(r.details))
   const costChanged = new Set(folds.filter(f => f.unitCostUsdAfter !== f.unitCostUsdBefore).map(f => f.survivorBatchId))
   for (const [i, row] of batches.entries()) {
     const prior = before.batches[i]
@@ -351,7 +400,9 @@ function verifyEndState({ w, base, before, final }) {
   assert.equal(final.phase, 'completed'); assert.equal(raw.prepare("SELECT count(*) n FROM system_flags WHERE key='maintenance'").get().n, 0)
   const terminal = JSON.parse(final.terminal_json)
   assert.equal(terminal.committedChildren, before.movingProducts); assert.equal(terminal.movedQuantityText, String(round(before.sourceUnits)))
-  assert.equal(terminal.folds.groups, folds.length); assert.equal(terminal.folds.expirySplit, 1); assert.equal(terminal.folds.costSplit, 1)
+  assert.equal(terminal.folds.groups, folds.length)
+  assert.deepEqual([terminal.folds.expirySplit, terminal.folds.supplierSplit, terminal.folds.costSplit, terminal.folds.uncostedMerges, terminal.folds.emptySupplierMerges], [1, 1, 1, 1, 1])
+  assert.equal(folds.filter(f => f.uncostedBatchIds.length).length, 1); assert.equal(folds.filter(f => f.emptySupplierBatchIds.length).length, 1)
   assert.equal(raw.prepare("SELECT count(*) n FROM branch_cutovers WHERE phase='aborted'").get().n, 1)
   // every fold row is self-describing and conserves its quantity and value
   for (const fold of folds) {
@@ -390,7 +441,8 @@ async function main() {
     clean.w.raw.close(); faulted.w.raw.close()
   })
   // ---- discriminating controls: each plausible wrong implementation must fail this test
-  for (const [control, expectation] of [['name-admission', 'refuses'], ['name-finalize', 'red'], ['mean', 'red'], ['double', 'red'], ['no-close', 'refuses'], ['no-rule', 'red']]) {
+  for (const [control, expectation] of [['name-admission', 'refuses'], ['name-finalize', 'red'], ['mean', 'red'], ['double', 'red'], ['no-close', 'refuses'], ['no-rule', 'red'],
+    ['utc-slice', 'red'], ['no-round', 'red'], ['supplier-blind', 'red'], ['zero-weighted', 'red']]) {
     await check('control RED: ' + control, async () => {
       let red = false, message = ''
       try {
