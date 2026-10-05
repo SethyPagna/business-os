@@ -90,6 +90,13 @@ const RULES: Rule[] = [
     packs: ['en'], code: true, worker: true,
   },
   {
+    // Bare វគ្គ stays where it is a generic session inside an already
+    // qualified phrase (បញ្ចប់វគ្គ = the Complete Session button).
+    id: 'R2b stock-in session (Khmer)', owner: '5 Oct: "Stock-in session" = វគ្គបញ្ចូលស្តុក everywhere',
+    old: /ការទទួលស្តុក|វគ្គស្តុកចូល/, sampleOld: 'រកមិនឃើញការទទួលស្តុកទេ', sampleNew: 'រកមិនឃើញវគ្គបញ្ចូលស្តុកទេ',
+    packs: ['km'], code: true, worker: true,
+  },
+  {
     id: 'R3 Not Paid', owner: '7-24 Sep: Not Paid / ប្រាក់ជំពាក់',
     old: /awaiting[- ]payment|កំពុងរង់ចាំបង់ប្រាក់|រង់ចាំការទូទាត់|រង់ចាំបង់ប្រាក់/i, sampleOld: 'Review the fixed awaiting-payment receipts', sampleNew: 'Review the fixed Not Paid receipts',
     packs: ['en', 'km'], code: true, worker: true,
@@ -213,6 +220,8 @@ assert.deepEqual(stale, [], `these allowances match nothing any more; delete the
 const CANONICAL: Array<[key: string, english: string, khmer: string]> = [
   ['received_date', 'Received date', 'ថ្ងៃចូល'],
   ['inventory_batch_session', 'Receive session', 'វគ្គទទួលស្តុក'],
+  ['stock_in_session', 'Stock-in session', 'វគ្គបញ្ចូលស្តុក'],
+  ['stock_in_sessions', 'Stock-in sessions', 'វគ្គបញ្ចូលស្តុក'],
   ['credit_awaiting_payment', 'Not Paid', 'ប្រាក់ជំពាក់'],
   ['on_credit', 'Not Yet Paid', 'មិនទាន់បង់'],
   ['cost_in_purchase', 'Cost price', 'ថ្លៃដើម'],
@@ -235,6 +244,13 @@ for (const [key, english, khmer] of CANONICAL) {
   assert.equal(en[key], english, `en.json "${key}" must stay ${english}`)
   assert.equal(km[key], khmer, `km.json "${key}" must stay ${khmer}`)
 }
+
+// Owner, 5 Oct: wherever the English names a stock-in session, the Khmer says
+// វគ្គបញ្ចូលស្តុក -- a bare វគ្គ or ការទទួលស្តុក there reads as "a session" or
+// "receiving stock", not the record staff open from the Stock-in Sessions list.
+const stockInSessionKhmer = Object.keys(en)
+  .filter((key) => /stock-in sessions?/i.test(en[key]) && !km[key]?.includes('វគ្គបញ្ចូលស្តុក'))
+assert.deepEqual(stockInSessionKhmer, [], `stock-in session not rendered as វគ្គបញ្ចូលស្តុក: ${stockInSessionKhmer.join(', ')}`)
 
 // "Original price" is the price before a discount. ថ្លៃដើម is the owner's word
 // for COST price, so a Khmer hint that renders "original price" with it tells
