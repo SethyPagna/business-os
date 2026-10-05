@@ -21,7 +21,8 @@
 //      sale, a cancelled return, a Completed sale, a supplier return. A return
 //      written by 0234's code caps the replay.
 //   5. Double apply writes nothing; the header's recovery restores every
-//      rewritten column exactly; shift_close_figures-style tables are untouched.
+//      rewritten column of a sale nobody wrote since (sale revision snapshot)
+//      and leaves a later-settled, -edited or -returned sale exactly as it is.
 //   6. Sizing: the pre-0234 file's counts equal what the migration writes.
 //   7. Fuzz: 400 random sales against splitReturnRefund / saleStatusWithReturns.
 //
@@ -227,21 +228,37 @@ async function main() {
       cancelled_returns_left: 1, mixed_sales: 1, backfill_returns: 2 })
   })
 
-  await check('recovery: the header statements restore every rewritten column exactly; a later edit is left alone', () => {
+  await check('recovery: restores every column of a sale nobody touched since; a sale settled, edited or returned against later is left exactly as it is', () => {
     const { raw, sale, ret } = world()
+    // 1: untouched since -> restored. 5: Not Paid cleared to Partial return, untouched -> restored.
     sale(1, { total: 10, status: 'partial_return', before: 'awaiting_payment' }); ret(1, 4)
+    sale(5, { total: 10, status: 'awaiting_payment' }); ret(5, 10)
+    // 2: one of its returns edited later. 3: settled later. 4: a new return later.
     sale(2, { total: 20, paidUsd: 5, status: 'returned', before: 'awaiting_payment' }); ret(2, 10); const edited = ret(2, 10)
+    sale(3, { total: 10, status: 'partial_return', before: 'awaiting_payment' }); ret(3, 4)
+    sale(4, { total: 10, status: 'partial_return', before: 'awaiting_payment' }); ret(4, 4)
     const before = snapshot(raw)
     apply(raw)
-    assert.notEqual(snapshot(raw), before)
+    assert.equal(saleStatus(raw, 5), 'partial_return', 'control: sale 5 left Not Paid')
+    const revisions = raw.prepare('SELECT COUNT(*) AS n FROM return_owed_backfill_0238 WHERE sale_revision IS NULL').get().n
+    assert.equal(revisions, 0, 'the last statement records every backed-up sale\'s revision')
     raw.prepare('UPDATE returns SET owed_reduction_usd = 2 WHERE id = ?').run(edited)
+    raw.prepare('UPDATE sales SET amount_paid_usd = 6 WHERE id = 3').run()
+    ret(4, 1, { currency: 'USD', lowered: 1 })
+    const afterBackfillAndLater = JSON.parse(snapshot(raw))
     const recovery = migrationText.split('\n-- Statements:\n')[1].split('\n-- End of recovery.')[0]
       .split('\n').map((line) => line.replace(/^--\s{3}/, '')).join('\n')
     raw.exec(recovery)
-    const after = JSON.parse(snapshot(raw)); const expected = JSON.parse(before)
-    expected.returns.find((row) => row.id === edited).owed_reduction_usd = 2
-    expected.returns.find((row) => row.id === edited).refund_currency = 'USD'
-    assert.deepEqual(after, expected, 'every untouched-since row is back; the row edited after the backfill keeps its edit')
+    const after = JSON.parse(snapshot(raw)); const original = JSON.parse(before)
+    const pick = (world, saleId) => ({ sale: world.sales.find((row) => row.id === saleId),
+      returns: world.returns.filter((row) => raw.prepare('SELECT sale_id FROM returns WHERE id = ?').get(row.id).sale_id === saleId) })
+    for (const id of [1, 5]) assert.deepEqual(pick(after, id), pick(original, id), `sale ${id}: every rewritten column is back, status_before_return too`)
+    for (const id of [2, 3, 4]) assert.deepEqual(pick(after, id), pick(afterBackfillAndLater, id), `sale ${id}: written after the backfill, so recovery leaves it exactly as it is`)
+    assert.deepEqual(raw.prepare('SELECT sale_id FROM return_owed_backfill_0238 WHERE recover_ok = 0 GROUP BY sale_id ORDER BY sale_id').all().map((row) => row.sale_id), [2, 3, 4],
+      'the backup names the sales left for review')
+    const once = snapshot(raw)
+    raw.exec(recovery)
+    assert.equal(snapshot(raw), once, 'a second recovery run changes nothing')
   })
 
   await check('sizing: the pre-0234 file counts exactly what the migration then writes, the live file agrees, then reads zero', () => {

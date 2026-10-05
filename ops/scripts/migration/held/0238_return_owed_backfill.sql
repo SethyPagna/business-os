@@ -72,16 +72,24 @@
 -- IDEMPOTENT: a second run finds no pending row (refund_currency is set) and
 -- writes nothing; return_owed_backfill_0238 keeps the first run's rows.
 --
--- RECOVERY (undoes only rows nobody changed since; the backup table stays):
+-- RECOVERY (verifier P5: undoes a sale only when nothing on it was written
+-- since the backfill -- sale_revision is the sale_write_revisions revision the
+-- last statement below records, and the 0120 triggers bump it on every write
+-- to the sale, its lines, its returns and their lines: a later settlement, a
+-- return edit or a new return all leave that sale exactly as it is. The
+-- backup table stays.)
 -- Statements:
+--   UPDATE return_owed_backfill_0238 SET recover_ok = CASE WHEN NOT EXISTS (
+--       SELECT 1 FROM return_owed_backfill_0238 o WHERE o.sale_id = return_owed_backfill_0238.sale_id
+--         AND (o.sale_revision IS NULL OR o.sale_revision <> COALESCE((SELECT w.revision FROM sale_write_revisions w WHERE w.sale_id = o.sale_id), 0)))
+--     THEN 1 ELSE 0 END;
+--   UPDATE returns SET owed_reduction_usd = 0, refund_currency = NULL
+--     WHERE id IN (SELECT return_id FROM return_owed_backfill_0238 WHERE recover_ok = 1);
 --   UPDATE sales SET sale_status = (SELECT b.prior_sale_status FROM return_owed_backfill_0238 b WHERE b.sale_id = sales.id ORDER BY b.return_id LIMIT 1),
 --       status_before_return = (SELECT b.prior_status_before_return FROM return_owed_backfill_0238 b WHERE b.sale_id = sales.id ORDER BY b.return_id LIMIT 1)
---     WHERE id IN (SELECT sale_id FROM return_owed_backfill_0238 WHERE new_sale_status IS NOT prior_sale_status)
---       AND sale_status IS (SELECT b.new_sale_status FROM return_owed_backfill_0238 b WHERE b.sale_id = sales.id ORDER BY b.return_id LIMIT 1);
---   UPDATE returns SET owed_reduction_usd = 0, refund_currency = NULL
---     WHERE id IN (SELECT return_id FROM return_owed_backfill_0238)
---       AND refund_currency = 'USD'
---       AND owed_reduction_usd = (SELECT b.owed_reduction_usd FROM return_owed_backfill_0238 b WHERE b.return_id = returns.id);
+--     WHERE id IN (SELECT sale_id FROM return_owed_backfill_0238 WHERE recover_ok = 1
+--       AND (new_sale_status IS NOT prior_sale_status OR new_status_before_return IS NOT prior_status_before_return));
+--   SELECT COUNT(DISTINCT sale_id) FROM return_owed_backfill_0238 WHERE recover_ok = 0;   -- sales left as they are: review by hand
 -- End of recovery.
 --
 -- Proof: cloudflare/scripts/test-held-0238-return-owed-backfill-pure.cjs
@@ -97,6 +105,8 @@ CREATE TABLE IF NOT EXISTS return_owed_backfill_0238 (
   new_sale_status TEXT,
   prior_status_before_return TEXT,
   new_status_before_return TEXT,
+  sale_revision INTEGER,
+  recover_ok INTEGER,
   recorded_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -267,3 +277,7 @@ UPDATE returns
 SET owed_reduction_usd = (SELECT b.owed_reduction_usd FROM return_owed_backfill_0238 b WHERE b.return_id = returns.id),
   refund_currency = 'USD'
 WHERE refund_currency IS NULL AND id IN (SELECT return_id FROM return_owed_backfill_0238);
+
+UPDATE return_owed_backfill_0238
+SET sale_revision = COALESCE((SELECT w.revision FROM sale_write_revisions w WHERE w.sale_id = return_owed_backfill_0238.sale_id), 0)
+WHERE sale_revision IS NULL;
