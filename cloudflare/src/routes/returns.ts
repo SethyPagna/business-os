@@ -2629,7 +2629,7 @@ app.patch('/:id', async (c) => {
   // left open now that the router-wide gate above admits review-tier
   // users at all.
   if (getPermissionTier(user, 'returns') === 'review') {
-    return c.json({ error: 'Editing a return requires Full Access to Returns -- Review Required support for this action is not built yet.' }, 403)
+    return c.json({ error: 'Editing a return requires Full Access to Returns -- Partial Access support for this action is not built yet.' }, 403)
   }
   // Per-action override (Part 546): 'returns:edit' switched off.
   if (getActionTier(user, 'returns', 'edit') === 'none') {

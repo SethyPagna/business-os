@@ -233,7 +233,7 @@ app.post('/stock-integrity/repair', async (c) => {
     return c.json({ success: false, error: 'No permission', code: 'forbidden', permission: 'branches' }, 403)
   }
   if (tier === 'review') {
-    return c.json({ success: false, error: 'Repairing stock integrity requires Full Access to Branches -- Review Required support for this action is not built.', code: 'forbidden', permission: 'branches' }, 403)
+    return c.json({ success: false, error: 'Repairing stock integrity requires Full Access to Branches -- Partial Access support for this action is not built.', code: 'forbidden', permission: 'branches' }, 403)
   }
 
   const db = getDb(c.env)
@@ -364,7 +364,7 @@ app.post('/transfer', async (c) => {
   // Same live-quantity-movement reasoning as stock-integrity/repair above
   // -- deliberately blocked, not queued, for Review Required.
   if (transferTier === 'review') {
-    return c.json({ error: 'Transferring stock requires Full Access to Branches -- Review Required support for this action is not built.' }, 403)
+    return c.json({ error: 'Transferring stock requires Full Access to Branches -- Partial Access support for this action is not built.' }, 403)
   }
   const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>))
   if (body.transfer_provenance_version !== 1) return c.json({ error: 'Refresh the app before transferring stock.', code: 'client_upgrade_required' }, 409)
@@ -556,7 +556,7 @@ app.post('/transfer-bulk', async (c) => {
   // Same live-quantity-movement reasoning as stock-integrity/repair and
   // /transfer above -- deliberately blocked, not queued, for Review Required.
   if (bulkTransferTier === 'review') {
-    return c.json({ error: 'Transferring stock requires Full Access to Branches -- Review Required support for this action is not built.' }, 403)
+    return c.json({ error: 'Transferring stock requires Full Access to Branches -- Partial Access support for this action is not built.' }, 403)
   }
   const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>))
   if (body.transfer_provenance_version !== 1) return c.json({ error: 'Refresh the app before transferring stock.', code: 'client_upgrade_required' }, 409)

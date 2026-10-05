@@ -84,7 +84,7 @@ test('only an allowlisted post-receipt refusal is definitive; everything else is
   const unknown = [
     // Answered BEFORE the receipt lookup: says nothing about an earlier send.
     httpError(403, 'You do not have permission to perform this action'),
-    httpError(403, 'Transferring stock requires Full Access to Branches -- Review Required support for this action is not built.'),
+    httpError(403, 'Transferring stock requires Full Access to Branches -- Partial Access support for this action is not built.'),
     httpError(400, 'Could not read request body.', { code: 'request_body_unreadable' }),
     httpError(409, 'Refresh the app before transferring stock.', { code: 'client_upgrade_required' }),
     httpError(400, 'Missing required fields'),
