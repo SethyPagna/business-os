@@ -128,11 +128,17 @@ export function foldDiacritics(value: string): string {
 // digits survive; punctuation/symbols in any script still get folded to a
 // space exactly as before. Requires the `u` (unicode) regex flag for
 // `\p{...}` property escapes to be recognized.
+//
+// G37: the same pipeline as lib/searchCore.ts normalize() (the shared core;
+// test-search-core-parity-pure.cjs asserts equal output): NFKC first,
+// zero-width/format characters removed, and \p{M} kept. Without \p{M} every
+// Khmer vowel sign and coeng was deleted, so "សេរ៉ូម" became three
+// one-letter tokens and "ឡេ" matched "ក្រឡ".
 export function normalizeSearchText(value: unknown): string {
-  const base = foldDiacritics(String(value ?? ''))
+  const base = foldDiacritics(String(value ?? '').normalize('NFKC').replace(/[​-‍⁠﻿­]/g, ''))
     .toLowerCase()
-    .replace(/[&+/_.-]/g, ' ')
-    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .replace(/[&+/_.\-’']/g, ' ')
+    .replace(/[^\p{L}\p{M}\p{N}\s]/gu, ' ')
     .replace(/\s+/g, ' ')
     .trim()
   if (!base) return base
@@ -345,7 +351,10 @@ function typoBudgetForLength(length: number): number {
 function wordsFuzzyMatch(queryWord: string, haystackWord: string): boolean {
   if (!queryWord || !haystackWord) return false
   if (queryWord === haystackWord) return true
-  if (haystackWord.includes(queryWord) || queryWord.includes(haystackWord)) return true
+  // No reverse containment (a typed word CONTAINING a stored one): it made
+  // "lipstik" match every "lip" and "pallet" match "all" (G37 defect 4).
+  // "lipsticks" still reaches "lipstick" through the edit distance below.
+  if (haystackWord.includes(queryWord)) return true
   const budget = Math.min(typoBudgetForLength(queryWord.length), typoBudgetForLength(haystackWord.length))
   if (budget <= 0) return false
   return boundedLevenshtein(queryWord, haystackWord, budget) <= budget
