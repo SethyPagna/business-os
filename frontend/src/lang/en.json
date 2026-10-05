@@ -5049,6 +5049,7 @@
   "set_primary": "Set primary",
   "settings": "Settings",
   "settings_conflict": "Settings changed on another device. Reload and try again.",
+  "settings_no_changes": "No changes to save",
   "settings_saved": "Settings saved",
   "settings_section_all_hint": "Show every settings section.",
   "settings_section_appearance_hint": "Theme, colors, fonts, typography, and navigation layout.",

@@ -1087,7 +1087,7 @@ assert.match(
 )
 assert.match(
   appContext,
-  /withLoaderTimeout\(\s*\(\) => api\.saveSettings\?\.\(serverUpdates, normalizedOptions\),\s*'Save settings',\s*APP_SETTINGS_SAVE_TIMEOUT_MS,\s*\)/,
+  /withLoaderTimeout\(\s*\(\) => api\.saveSettings\?\.\(changed, sendOptions\),\s*'Save settings',\s*APP_SETTINGS_SAVE_TIMEOUT_MS,\s*\)/,
   'settings writes should timeout slow server saves',
 )
 assert.match(

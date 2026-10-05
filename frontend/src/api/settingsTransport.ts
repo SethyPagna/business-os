@@ -4,6 +4,7 @@ import { buildAttemptedSettings } from './conflicts.ts'
 import { apiFetch, cacheInvalidate, isWriteConflictError, route } from './http.ts'
 import { localGetSettings, localSaveSettings } from './localDb.ts'
 import { routeMirrored } from './localMirrors.ts'
+import { rememberOwnSettingsWrite } from '../utils/settingsSave.ts'
 
 type SettingsPayload = Record<string, unknown>
 type SettingsOptions = {
@@ -25,6 +26,12 @@ type SettingsOptions = {
   serverOnly?: boolean
   source?: string
   skipExpectedUpdatedAt?: boolean
+  // The caller merges the saved values (and the Worker's normalised text) into
+  // its own state from this answer (AppContext.saveSettings does), so this tab
+  // need not re-read the settings table after the write or after its own
+  // broadcast echo. A caller that does not adopt the answer leaves this off and
+  // keeps the old behaviour: the 'settings' dispatch and the echo reload.
+  answerAdopted?: boolean
 }
 type SettingsConflictError = Error & {
   actualUpdatedAt?: unknown
@@ -79,6 +86,22 @@ function asSettingsConflictError(error: unknown): SettingsConflictError {
 
 async function saveSettingsLocally(updates: SettingsPayload): Promise<void> {
   await localSaveSettings(updates).catch(() => {})
+}
+
+// The Worker names the keys it actually wrote. An empty list means every value
+// already matched what it stored, so nothing changed anywhere and no page needs
+// to be told. An older Worker's answer (keys = everything sent) is never empty.
+function workerWroteSomething(result: SettingsPayload): boolean {
+  return !(Array.isArray(result.keys) && result.keys.length === 0)
+}
+
+// The Worker answers with the text it stored for any key it normalised (a
+// trimmed link, a defaulted language, ...). Adopting those, and remembering the
+// write id so this tab ignores its own broadcast echo, is what lets a save end
+// without re-reading the settings table.
+function adoptWorkerAnswer(updates: SettingsPayload, result: SettingsPayload, options: SettingsOptions): SettingsPayload {
+  if (options.answerAdopted) rememberOwnSettingsWrite(result.writeId)
+  return { ...updates, ...asSettingsPayload(result.saved) }
 }
 
 // Real, confirmed bug (traced from a live report of "Portal settings
@@ -173,6 +196,9 @@ async function saveSettingsOnce(updates: SettingsPayload, options: SettingsOptio
   const refreshDetail = {
     reason: String(options.reason || 'settings-saved').trim() || 'settings-saved',
     source: String(options.source || 'settings:save').trim() || 'settings:save',
+    // This tab just wrote the values and adopts the answer: its own 'settings'
+    // dispatch must not trigger a re-read of the table it already holds.
+    ownSettingsWrite: options.answerAdopted === true,
   }
   // Request metadata the Worker never stores; the conflict retry below sends
   // it again, since a 409 answer does not echo it back.
@@ -185,8 +211,8 @@ async function saveSettingsOnce(updates: SettingsPayload, options: SettingsOptio
   }
   try {
     const result = asSettingsPayload(await route('settings:save', () => apiFetch('POST', '/api/settings', payload), null, true))
-    await saveSettingsLocally(updates)
-    refreshAppData(refreshChannels, refreshDetail)
+    await saveSettingsLocally(adoptWorkerAnswer(updates, result, options))
+    if (workerWroteSomething(result)) refreshAppData(refreshChannels, refreshDetail)
     return result
   } catch (rawError) {
     let error = asSettingsConflictError(rawError)
@@ -208,8 +234,8 @@ async function saveSettingsOnce(updates: SettingsPayload, options: SettingsOptio
         const retryPayload = { ...attemptedSettings, ...clearPayload, expectedUpdatedAt: nextExpectedUpdatedAt }
         try {
           const retryResult = asSettingsPayload(await route('settings:save', () => apiFetch('POST', '/api/settings', retryPayload), null, true))
-          await saveSettingsLocally(attemptedSettings)
-          refreshAppData(refreshChannels, refreshDetail)
+          await saveSettingsLocally(adoptWorkerAnswer(attemptedSettings, retryResult, options))
+          if (workerWroteSomething(retryResult)) refreshAppData(refreshChannels, refreshDetail)
           return retryResult
         } catch (retryError) {
           error = asSettingsConflictError(retryError)
