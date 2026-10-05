@@ -92,7 +92,7 @@ import { buildProductBrandOptions } from '../products/helpers/productDisplayHelp
 import { buildProductSupplierOptions } from '../products/helpers/productSupplierOptions.ts'
 import { getProductBatches, getTrackedBatchProductIds } from '../../api/batchesTransport.ts'
 import { resolveSaleBranch } from './productSheetState.ts'
-import { branchCanSell } from '../../utils/branchRoles.ts'
+import { branchCanSellNow } from '../../utils/branchRoles.ts'
 import { localizeBranchRuleError } from '../../api/branchRuleErrors.ts'
 import { saleSubmitRefusalText } from '../../api/saleSubmitErrors.ts'
 import { contactDisplayAddress } from '../contacts/contactOptionUtils.ts'
@@ -215,6 +215,8 @@ type BranchRecord = {
   is_active?: boolean
   is_default?: boolean
   name: string
+  // Explicit operational role (NULL before the identity backfill: the name decides).
+  role?: string | null
 }
 
 type CategoryRecord = {
@@ -2684,7 +2686,7 @@ export default function POS() {
       ? { branchId: overrideBranchId, blocked: false }
       : resolveSaleBranch(product as never, { activeBranchFilterId: primaryBranchFilterId, defaultBranchId })
     if (saleBranch.blocked) {
-      notify(t('pos_warehouse_not_sellable') || 'Only allow Shop sale. Please transfer to Shop first.', 'error')
+      notify(t('branch_not_sellable') || 'Sales can only be recorded at a selling branch.', 'error')
       setDetailProduct(product)
       return
     }
@@ -2958,8 +2960,8 @@ export default function POS() {
     const product = productsById.get(Number(item?.id))
     if (!item || !product) return
     const targetBranch = nextBranchId == null ? null : branchesById.get(nextBranchId)
-    if (!targetBranch || !branchCanSell(targetBranch.name)) {
-      notify(t('pos_warehouse_not_sellable') || 'Only allow Shop sale. Please transfer to Shop first.', 'error')
+    if (!targetBranch || !branchCanSellNow(targetBranch)) {
+      notify(t('branch_not_sellable') || 'Sales can only be recorded at a selling branch.', 'error')
       return
     }
     const targetBranchId = Number(targetBranch.id)

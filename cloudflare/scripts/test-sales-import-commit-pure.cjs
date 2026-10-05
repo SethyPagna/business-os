@@ -280,7 +280,7 @@ function customerMatch(overrides = {}) {
     const rejected = setup()
     await assert.rejects(
       () => subject.applyHistoricalSaleImport(rejected.db, { jobId: `job-rejected-${index}`, rowNumber: 3, data, nowIso: input.nowIso, actor }),
-      /Only allow Shop sale/,
+      /Sales can only be recorded at a selling branch/,
     )
     assert.equal(rejected.sqlite.prepare('SELECT COUNT(*) n FROM sales').get().n, 0)
     assert.equal(rejected.sqlite.prepare('SELECT COUNT(*) n FROM import_sales_commits').get().n, 0)
@@ -290,7 +290,7 @@ function customerMatch(overrides = {}) {
   duplicateShop.sqlite.prepare(`INSERT INTO branches (id, name, is_active) VALUES (3, ' shop ', 1)`).run()
   await assert.rejects(
     () => subject.applyHistoricalSaleImport(duplicateShop.db, { jobId: 'job-duplicate-shop', rowNumber: 3, data: saleData(), nowIso: input.nowIso, actor }),
-    /Only allow Shop sale/,
+    /Sales can only be recorded at a selling branch/,
   )
   assert.equal(duplicateShop.sqlite.prepare('SELECT COUNT(*) n FROM sales').get().n, 0)
   assert.equal(duplicateShop.sqlite.prepare('SELECT COUNT(*) n FROM import_sales_commits').get().n, 0)

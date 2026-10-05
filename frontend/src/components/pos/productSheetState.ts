@@ -12,11 +12,16 @@
 // which cannot tell you that a flat product's stock reads 0 while its
 // branch_stock says 28.
 import { sortBatchesForPicker } from './posCore.ts'
-import { branchRoleFromName, branchCanSell, type BranchRole } from '../../utils/branchRoles.ts'
+import { branchRole, branchCanSellNow, type BranchRole } from '../../utils/branchRoles.ts'
 
 export type BranchStockRow = {
   branch_id?: string | number | null
   branch_name?: string
+  // The branch's explicit operational role and activity, shipped next to the
+  // name by the Worker (branches.role / branches.is_active). NULL/absent role
+  // means "not backfilled yet": the name decides, exactly as it always did.
+  branch_role?: string | null
+  branch_active?: string | number | boolean | null
   quantity?: string | number
 }
 
@@ -166,18 +171,39 @@ function toNumber(value: unknown): number {
 
 /**
  * The branch NAME this product's own branch_stock payload carries for an id,
- * or null when the payload does not mention that branch.
- *
- * The name is the only discriminator the two canonical roles have in this
- * lineage (utils/branchRoles.ts), and every product row already ships one per
- * active branch -- so nothing has to be looked up to know whether an id is
- * the warehouse.
+ * or null when the payload does not mention that branch. Display only: it
+ * says nothing about what the branch may do -- use branchIdentityFromProduct
+ * for that.
  */
 export function branchNameFromProduct(product: SheetProductLike | null | undefined, branchId: unknown): string | null {
   const key = branchId == null ? '' : String(branchId)
   if (!key) return null
   for (const entry of Array.isArray(product?.branch_stock) ? product.branch_stock : []) {
     if (String(entry?.branch_id) === key) return String(entry?.branch_name ?? '')
+  }
+  return null
+}
+
+/**
+ * The branch row this product's own branch_stock payload carries for an id --
+ * { name, role, is_active } in the shape utils/branchRoles.ts reads -- or null
+ * when the payload does not mention that branch.
+ *
+ * The role and activity travel with every entry (the Worker ships them beside
+ * the name), so nothing has to be looked up to know whether an id may sell:
+ * after the Warehouse is renamed "LC Store" its entry still says role "shop",
+ * while the name alone would say nothing.
+ */
+export function branchIdentityFromProduct(
+  product: { branch_stock?: BranchStockRow[] } | null | undefined,
+  branchId: unknown,
+): { name: string; role: string | null; is_active: unknown } | null {
+  const key = branchId == null ? '' : String(branchId)
+  if (!key) return null
+  for (const entry of Array.isArray(product?.branch_stock) ? product.branch_stock : []) {
+    if (String(entry?.branch_id) === key) {
+      return { name: String(entry?.branch_name ?? ''), role: entry?.branch_role ?? null, is_active: entry?.branch_active }
+    }
   }
   return null
 }
@@ -192,14 +218,17 @@ export function branchNameFromProduct(product: SheetProductLike | null | undefin
  * 400 the cashier could do nothing about. The branch is decided here now, on
  * the same predicate the sheet greys the pill with and the Worker rejects on.
  *
- * A branch the payload does not name is refused. Sales are Shop-only, and an
- * absent name is not evidence that the selected id is the canonical Shop.
- * This matches branchCanSell's fail-closed rule and the Worker's authoritative
- * branch lookup instead of letting a stale or partial product payload guess.
+ * The decision is the branch's ROLE, from the entry's own data (name only as
+ * the fallback while the role is NULL, i.e. before the identity backfill), and
+ * it must be active -- the same rule as the Worker's sellingBranchConditionSql.
+ * A branch the payload does not name is refused. Sales are Shop-role-only, and
+ * an absent entry is not evidence that the selected id may sell: this matches
+ * the Worker's authoritative branch lookup instead of letting a stale or
+ * partial product payload guess.
  */
 export function branchAllowsSale(product: SheetProductLike | null | undefined, branchId: unknown): boolean {
-  const name = branchNameFromProduct(product, branchId)
-  return name != null && branchCanSell(name)
+  const identity = branchIdentityFromProduct(product, branchId)
+  return identity != null && branchCanSellNow(identity)
 }
 
 // `blocked` means: there is stock, but only where a sale may not be rung.
@@ -324,6 +353,9 @@ export function deriveProductSheetState(input: ProductSheetStateInput): ProductS
       : trackedBatchProductIdsInput
 
   const branchNames = new Map<string, string>()
+  // Role and activity per branch id, first row that states them wins: the
+  // identity is a property of the BRANCH, so every row of a group agrees.
+  const branchIdentities = new Map<string, { role: string | null; is_active: unknown }>()
   const branchGroupTotals = new Map<string, number>()
   for (const row of rowPool) {
     for (const entry of Array.isArray(row?.branch_stock) ? row.branch_stock : []) {
@@ -331,6 +363,10 @@ export function deriveProductSheetState(input: ProductSheetStateInput): ProductS
       if (id == null) continue
       const key = String(id)
       if (!branchNames.has(key)) branchNames.set(key, String(entry.branch_name || key))
+      const identity = branchIdentities.get(key) ?? { role: null, is_active: undefined }
+      if (identity.role == null && entry?.branch_role != null) identity.role = entry.branch_role
+      if (identity.is_active === undefined && entry?.branch_active !== undefined) identity.is_active = entry.branch_active
+      branchIdentities.set(key, identity)
       branchGroupTotals.set(key, (branchGroupTotals.get(key) || 0) + toNumber(entry?.quantity))
     }
   }
@@ -377,8 +413,11 @@ export function deriveProductSheetState(input: ProductSheetStateInput): ProductS
 
   const branchOptions: SheetBranchOption[] = branchIds.map((id) => {
     const name = String(branchNames.get(id) ?? id)
-    const role = branchRoleFromName(name)
-    const sellable = intent !== 'sell' || branchCanSell(name)
+    // The row the role reader understands: the explicit role wins, a NULL
+    // role falls back to the name (pre-backfill behaviour, unchanged).
+    const identity = { name, role: branchIdentities.get(id)?.role ?? null, is_active: branchIdentities.get(id)?.is_active }
+    const role = branchRole(identity)
+    const sellable = intent !== 'sell' || branchCanSellNow(identity)
     return {
       id,
       name,
@@ -391,7 +430,7 @@ export function deriveProductSheetState(input: ProductSheetStateInput): ProductS
       groupQuantity: branchGroupTotals.get(id) || 0,
       role,
       selectable: sellable,
-      blockedMessageKey: sellable ? null : 'pos_warehouse_not_sellable',
+      blockedMessageKey: sellable ? null : 'branch_not_sellable',
     }
   })
 
