@@ -424,6 +424,10 @@ function CarryOverIntro({ shift, closeBefore }: { shift: Shift; closeBefore?: st
       </p>
       <ShiftFactStrip facts={[
         !!shift.shift_code && { label: t('shift_code'), value: shift.shift_code },
+        // N7: a drawer left open on a branch that has since been retired is
+        // offered from whichever branch this till now runs, so name the
+        // branch it belongs to (the label stored at open).
+        shift.branch_active === false && { label: t('branch'), value: `${shift.branch_name || '—'} · ${t('shift_branch_inactive')}` },
         { label: t('shift_opened_at'), value: fmtDateTime24(shift.opened_at) },
         !!shift.user_name && { label: t('shift_opened_by'), value: shift.user_name },
         { label: t('shift_opened_with'), value: shiftCountedPairText(shift.opening_float_usd, shift.opening_float_khr, fmtUSD, fmtKHR) },

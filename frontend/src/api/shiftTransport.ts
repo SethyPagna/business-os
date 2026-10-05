@@ -231,6 +231,14 @@ export type Shift = {
    * absent value must read as "the server did not say", never as "edited".
    */
   amendment_count?: number
+  /**
+   * False when the branch this shift was opened on no longer trades (N7: Shop
+   * after the cutover). The record stays readable, labelled with the
+   * `branch_name` stored at open; the server withholds edit and reopen, and a
+   * drawer still open there can only be closed or cancelled. Absent means the
+   * server did not say (an older Worker) and reads as active.
+   */
+  branch_active?: boolean
   // Present on the close response and on the shift reads. Absent on rows that
   // come back from a list (the server does not price a whole page of shifts).
   reconciliation?: ShiftReconciliation | null

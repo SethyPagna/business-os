@@ -6504,6 +6504,8 @@
   "shift_save_amendment": "Save amendment",
   "shift_amendments": "Amendment record",
   "shift_edited": "Edited",
+  "shift_branch_inactive": "Branch inactive",
+  "shift_branch_inactive_hint": "This branch no longer trades. The shift stays here as a read-only record; a shift still open there can only be closed.",
   "shift_segments": "Shift segments",
   "shift_amend_saved": "Shift amendment saved with an audit record.",
   "shift_amend_failed": "Could not amend shift.",

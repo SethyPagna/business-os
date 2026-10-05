@@ -53,7 +53,19 @@ export default function ShiftSummary({ shift: receivedShift, detail = false, cla
             <span className="text-sm font-semibold text-gray-900 dark:text-white">{fmtDateOnly(shift.business_date)}</span>
             <span className="dense-id text-[10px] text-gray-400 dark:text-gray-500">{shift.shift_code}</span>
           </div>
-          <div className="mt-0.5 break-words text-xs leading-relaxed text-gray-500 dark:text-gray-400">{cashier} · {branch}</div>
+          <div className="mt-0.5 break-words text-xs leading-relaxed text-gray-500 dark:text-gray-400">
+            {cashier} · {branch}
+            {/* N7: the stored branch label stays; this says the branch has
+                since been retired, which is why edit/reopen are absent. */}
+            {shift.branch_active === false ? (
+              <span
+                className="ml-1.5 inline-flex rounded-full bg-gray-100 px-1.5 py-0.5 align-middle text-[10px] font-semibold text-gray-600 dark:bg-zinc-800 dark:text-gray-300"
+                title={tr('shift_branch_inactive_hint', 'This branch no longer trades. The shift stays here as a read-only record; a shift still open there can only be closed.')}
+              >
+                {tr('shift_branch_inactive', 'Branch inactive')}
+              </span>
+            ) : null}
+          </div>
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
           {/* EDITED, the same fact a sale row carries: this record was
