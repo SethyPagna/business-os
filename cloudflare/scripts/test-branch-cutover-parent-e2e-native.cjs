@@ -66,7 +66,8 @@ function modules(control) {
     }, module, module.exports)
     return module.exports
   }
-  const result = { parent: load('lib/branchCutoverParent'), child: load('lib/branchCutoverChild'), journal: load('lib/branchCutoverJournal'), D1Compat: load('lib/db').D1Compat }
+  const result = { parent: load('lib/branchCutoverParent'), child: load('lib/branchCutoverChild'), journal: load('lib/branchCutoverJournal'), D1Compat: load('lib/db').D1Compat,
+    costs: load('lib/acquisitionCostAccess') }
   for (const list of mutations.values()) for (const [from] of list) assert.ok(used.has(from), 'control mutation unused: ' + from.slice(0, 60))
   return result
 }
@@ -435,6 +436,24 @@ async function main() {
     const { folds } = verifyEndState(run)
     assert.ok(run.w.stats.duplicatesRefused > 50); assert.equal(run.w.stats.duplicatesCommitted, 0)
     assert.ok(folds.length >= 6); assert.ok(run.w.stats.maxBinds <= 100)
+    // E10: fold and completion audit rows carry lot costs. The one general audit reader, GET /system/audit-logs, runs the
+    // acquisition-cost projection, which strips them for a user without product_cost_view and keeps the quantities.
+    assert.match(fs.readFileSync(path.join(root, 'src/routes/compat.ts'), 'utf8'), /app\.use\('\/system\/audit-logs', acquisitionCostResponses\)/)
+    const logs = run.w.raw.prepare("SELECT action,details FROM audit_logs WHERE action IN ('branch_cutover_lot_fold','branch_cutover_completed') ORDER BY id").all().map(r => ({ ...r }))
+    const clerk = { id: 9, username: 'clerk', role_code: 'manager', permissions: JSON.stringify({ audit_log: 'full', products: true, inventory: true }), role_permissions: '{}' }
+    const viewer = { ...clerk, permissions: JSON.stringify({ audit_log: 'full', products: true, inventory: true, product_cost_view: true }) }
+    assert.deepEqual(run.w.m.costs.projectAcquisitionCosts({ logs }, viewer), { logs })
+    const hidden = run.w.m.costs.projectAcquisitionCosts({ logs }, clerk).logs
+    assert.equal(hidden.length, logs.length); assert.ok(logs.some(r => JSON.parse(r.details).unitCostUsdAfter > 0))
+    for (const [i, row] of hidden.entries()) {
+      const shown = JSON.parse(row.details), original = JSON.parse(logs[i].details)
+      assert.doesNotMatch(row.details, /unitCostUsd|costClass|costChanged/, row.action)
+      if (row.action === 'branch_cutover_lot_fold') assert.deepEqual([shown.survivorBatchId, shown.foldedBatchIds, shown.before, shown.after, shown.uncostedBatchIds, shown.supplierKey],
+        [original.survivorBatchId, original.foldedBatchIds, original.before, original.after, original.uncostedBatchIds, original.supplierKey])
+      else assert.equal(shown.folds.groups, original.folds.groups)
+    }
+    // the projection is key-based: a cost under a key it does not recognise would leak (why the fold keys say 'cost')
+    assert.deepEqual(JSON.parse(run.w.m.costs.projectAcquisitionCosts({ logs: [{ details: JSON.stringify({ priceBefore: 3, unitCostUsdAfter: 3 }) }] }, clerk).logs[0].details), { priceBefore: 3 })
     console.log('E2E METRICS ' + JSON.stringify({ products: run.w.products.length, lots: run.w.lots.length, children: run.final.committed_children, folds: folds.length,
       duplicatesRefused: run.w.stats.duplicatesRefused, revision: run.final.revision }))
     run.w.raw.close()
