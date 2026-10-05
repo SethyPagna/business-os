@@ -26,7 +26,7 @@ import { renameSalePaymentMethod } from '../lib/paymentSettlement'
 // the SAME validator the Settings form runs -- twin modules whose shared block
 // is byte-identical and pinned by a test -- so frontend validation and backend
 // enforcement cannot drift apart.
-import { MAX_LOW_STOCK_THRESHOLD, validateLowStockSettingsWrite } from '../lib/lowStockSettings'
+import { invalidateLowStockConfigMemo, MAX_LOW_STOCK_THRESHOLD, validateLowStockSettingsWrite } from '../lib/lowStockSettings'
 import { isTelegramSwitchValue, isTelegramTopicSettingValue, TELEGRAM_SUMMARY_SWITCHES, TELEGRAM_TOPIC_KEYS } from '../lib/telegram'
 import { normalizedHaystackSql } from '../lib/searchMatch'
 import type { Env } from '../index'
@@ -1237,6 +1237,9 @@ app.post('/', async (c) => {
   // "stale cache of embedded sites" -- served the OLD value until the TTL
   // died (~60s). Settings writes now carry their own version; the portal
   // cache key composes it (see portalCacheVersion).
+  // This isolate's memoised low-stock config (lib/lowStockSettings.ts) must not outlive the save that
+  // just changed it; other isolates re-confirm against the `settings` version bumped below.
+  invalidateLowStockConfigMemo()
   c.executionCtx.waitUntil(bumpVersion(c.env, 'settings'))
   c.executionCtx.waitUntil(broadcast(c.env, 'settings', { action: 'update', keys: attemptedKeys }))
   return c.json({ updatedAt, keys: attemptedKeys })

@@ -19,6 +19,15 @@ function buildNotificationSummaryFallback(): unknown {
   })
 }
 
+// The summary carries only a preview of a long section (inventory: first 50 rows, exact count);
+// this is the explicit "load more" that fetches the whole list for one section.
+export async function getNotificationSectionItems(sectionId: string): Promise<unknown> {
+  return route('notifications:section-items', () => apiFetch(
+    'GET',
+    `/api/notifications/summary/items?section=${encodeURIComponent(sectionId)}`,
+  ))
+}
+
 export async function getNotificationSummary(): Promise<unknown> {
   return route('notifications:summary', async () => {
     const missingUntil = readNotificationSummaryMissingUntil()

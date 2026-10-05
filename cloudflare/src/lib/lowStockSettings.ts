@@ -157,12 +157,8 @@ export const LOW_STOCK_SETTING_KEYS = [
   LOW_STOCK_THRESHOLD_KEY,
 ]
 
-/**
- * The three settings rows, read once per request by every route that counts,
- * lists or filters low stock. Same `key IN (...)` shape as
- * routes/notifications.ts's loadPreferences.
- */
-export async function loadLowStockConfig(env: Env): Promise<LowStockConfig> {
+/** The three settings rows, straight from D1. Same `key IN (...)` shape as routes/notifications.ts's loadPreferences. */
+async function readLowStockConfigFromDb(env: Env): Promise<LowStockConfig> {
   const db = getDb(env)
   // sql-bound-params: bounded by construction -- this fixed three-key enum is
   // the whole list; it cannot grow with data, so there is nothing to chunk.
@@ -172,6 +168,109 @@ export async function loadLowStockConfig(env: Env): Promise<LowStockConfig> {
   const map: Record<string, unknown> = {}
   for (const row of rows || []) map[row.key] = row.value
   return resolveLowStockConfig(map)
+}
+
+// The config only changes when someone saves Settings, yet ~17 call sites
+// (Dashboard, Inventory x4, product search, Telegram x3, Branches x3, the bell)
+// each paid a D1 round trip for it on every request. It is memoised per
+// isolate, keyed by the `settings` cache version every settings writer already
+// bumps (lib/cache.ts bumpVersion):
+//
+//   * younger than FRESH_MS      -> served with no I/O at all (one request's
+//                                   several readers, and bursts, cost nothing);
+//   * older, same settings token -> still valid, one KV read re-confirms it;
+//   * token changed, or older than MAX_AGE_MS, or the token cannot be read
+//                                -> re-read from D1.
+//
+// MAX_AGE_MS is the backstop for a writer that does not bump the version
+// (a backup restore, a manual D1 edit). The Settings POST also calls
+// invalidateLowStockConfigMemo() so the isolate that served the save sees its
+// own change at once instead of after FRESH_MS. With no CACHE binding there is
+// nothing to validate against, so nothing is memoised.
+export const LOW_STOCK_CONFIG_MEMO_FRESH_MS = 5_000
+export const LOW_STOCK_CONFIG_MEMO_MAX_AGE_MS = 60_000
+
+type LowStockMemoEntry = {
+  config: LowStockConfig
+  token: string
+  /** When the config was read from D1 -- bounds how long a non-bumped write can hide. */
+  readAt: number
+  /** When the settings token was last confirmed -- bounds how often we look. */
+  checkedAt: number
+  generation: number
+}
+const lowStockMemo = new WeakMap<object, LowStockMemoEntry>()
+const lowStockInflight = new WeakMap<object, { generation: number; promise: Promise<LowStockConfig> }>()
+let lowStockMemoGeneration = 0
+
+/** Forget every memoised config in this isolate. Call after writing the three keys. */
+export function invalidateLowStockConfigMemo(): void {
+  lowStockMemoGeneration += 1
+}
+
+// The KV key lib/cache.ts's bumpVersion('settings') writes (its CACHE_VERSION_KEY_PREFIX
+// + namespace). Read directly rather than imported so this module keeps a single
+// './db' dependency (the pure tests load it with only that stubbed);
+// scripts/test-low-stock-config-memo-pure.cjs pins the two spellings together.
+// A missing key (KV never bumped, or the namespace handed off to D1 under quota
+// pressure) or a failed read yields null: nothing to validate against, so the
+// caller reads D1 instead of trusting a memo it cannot confirm.
+export const SETTINGS_VERSION_KV_KEY = 'v2:settings'
+
+async function readSettingsToken(env: Env): Promise<string | null> {
+  try {
+    const value = await env.CACHE.get(SETTINGS_VERSION_KV_KEY)
+    return value == null ? null : String(value)
+  } catch {
+    return null
+  }
+}
+
+/**
+ * The three settings rows for every route that counts, lists or filters low
+ * stock -- memoised per isolate (see above), so most calls cost no D1 read.
+ */
+export async function loadLowStockConfig(env: Env): Promise<LowStockConfig> {
+  if (!env || !(env as { CACHE?: unknown }).CACHE) return readLowStockConfigFromDb(env)
+  const key = env as unknown as object
+  const generation = lowStockMemoGeneration
+  const memo = lowStockMemo.get(key)
+  const usable = memo && memo.generation === generation ? memo : null
+
+  if (usable) {
+    const at = Date.now()
+    const sinceCheck = at - usable.checkedAt
+    const sinceRead = at - usable.readAt
+    // Both clocks: a recent confirmation never stretches the backstop past MAX_AGE.
+    if (sinceCheck >= 0 && sinceCheck < LOW_STOCK_CONFIG_MEMO_FRESH_MS && sinceRead >= 0 && sinceRead < LOW_STOCK_CONFIG_MEMO_MAX_AGE_MS) return usable.config
+  }
+
+  const pending = lowStockInflight.get(key)
+  if (pending && pending.generation === generation) return pending.promise
+
+  const promise = (async () => {
+    const token = await readSettingsToken(env)
+    const now = Date.now()
+    if (usable && token !== null && usable.token === token && now - usable.readAt >= 0 && now - usable.readAt < LOW_STOCK_CONFIG_MEMO_MAX_AGE_MS) {
+      if (generation === lowStockMemoGeneration) lowStockMemo.set(key, { ...usable, checkedAt: now })
+      return usable.config
+    }
+    const config = await readLowStockConfigFromDb(env)
+    // An invalidation that landed while this read was in flight must not be
+    // overwritten by a result that may predate the write.
+    if (token !== null && generation === lowStockMemoGeneration) {
+      const stamped = Date.now()
+      lowStockMemo.set(key, { config, token, readAt: stamped, checkedAt: stamped, generation })
+    }
+    return config
+  })()
+  lowStockInflight.set(key, { generation, promise })
+  try {
+    return await promise
+  } finally {
+    const current = lowStockInflight.get(key)
+    if (current && current.promise === promise) lowStockInflight.delete(key)
+  }
 }
 
 /**
