@@ -15,6 +15,7 @@ import { checkRateLimit, getClientIp, peekRateLimit, recordRateLimitEvent, relea
 import { newPasswordProblem, newPasswordProblemError, passwordKnownLeaked, setPasswordMustChange, KNOWN_LEAKED_PASSWORD_CODE, KNOWN_LEAKED_PASSWORD_ERROR } from '../lib/passwordPolicy'
 import { CURRENT_PASSWORD_RATE_LIMITED_ERROR, verifyCurrentPassword } from '../lib/currentPasswordGuard'
 import { stripSensitiveSettings } from '../lib/settingsSensitive'
+import { requireJsonSameOriginCredentialPost } from '../lib/requestBodyGuard'
 // The OTP login-challenge binding -- see lib/otpChallenge.ts's comment for
 // the Part-77 finding it closes.
 import { issueOtpChallenge, isLiveOtpChallenge, consumeOtpChallenge } from '../lib/otpChallenge'
@@ -182,6 +183,22 @@ function requiresSelfOtpDisablePassword(actor: SessionUser | null | undefined, t
   if (!actorId || !targetId || actorId !== targetId) return false
   return !String(password || '').trim()
 }
+
+// Login CSRF (the staff twin of G38 E5). The global originGuard (F4) lets a
+// write through when it carries NEITHER Origin nor Sec-Fetch-Site, and these
+// handlers read c.req.json(), which parses a text/plain body. A cross-site
+// form or no-preflight text/plain fetch could therefore sign a victim's
+// browser into an attacker's staff account, or drive a reset, wherever a
+// browser omits those headers. Every unauthenticated credential write must be
+// a same-origin JSON request (lib/requestBodyGuard credentialPostRefusal):
+// 415 credential_json_required / 403 credential_origin_refused. The admin app
+// sends every call through apiFetch (frontend/src/api/http.ts) with
+// Content-Type application/json from its own origin, so it passes.
+// Registered before the handlers so Hono runs it first.
+app.use('/login', requireJsonSameOriginCredentialPost)
+app.use('/otp/verify', requireJsonSameOriginCredentialPost)
+app.use('/password-reset/*', requireJsonSameOriginCredentialPost)
+app.use('/oauth/start', requireJsonSameOriginCredentialPost)
 
 app.post('/login', async (c) => {
   const body = await c.req.json<{ username: string; password: string; sessionDuration?: string; deviceName?: string; deviceId?: string; deviceTz?: string }>()

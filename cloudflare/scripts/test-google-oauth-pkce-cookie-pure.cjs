@@ -24,6 +24,7 @@ const fs = require('node:fs')
 const path = require('node:path')
 const ts = require('typescript')
 const { passwordHashStub, failedSignInCostStub } = require('./harness/password_hash_stub.cjs')
+const { credentialGuardPassThrough } = require('./harness/credential_guard_stub.cjs')
 const { openDb } = require('./harness/d1compat.cjs')
 
 function load(rel, overrides = {}) {
@@ -70,6 +71,7 @@ const authRoute = load('routes/auth.ts', {
   hono: require('hono'),
   '../lib/passwordHash': passwordHashStub,
   '../lib/failedSignInCost': failedSignInCostStub,
+  '../lib/requestBodyGuard': credentialGuardPassThrough,
   '../lib/db': { getDb: (env) => env.DB },
   '../lib/auth': {
     createSession: async (_env, userId) => { sessionsCreated.push(userId); return { token: 't', expiresAt: new Date(Date.now() + 1e6).toISOString() } },

@@ -130,12 +130,21 @@ function createAuthHarness(options = {}) {
     return raw.prepare('SELECT * FROM users WHERE id = @id').get({ id })
   }
 
-  async function request(pathname, method = 'POST', body, { ip = '203.0.113.9', actorId = null } = {}) {
+  // Requests look like the admin app's own page by default (Sec-Fetch-Site:
+  // same-origin, JSON body), as routes/auth.ts's credential guard requires;
+  // pass headers to override either, with a value of null to drop a header.
+  // rawBody sends a string as-is. Same shape as load_portal_auth_route.cjs.
+  async function request(pathname, method = 'POST', body, { ip = '203.0.113.9', actorId = null, headers: extraHeaders = {}, rawBody } = {}) {
     sessionUserId = actorId
-    const headers = { 'CF-Connecting-IP': ip }
-    if (body !== undefined) headers['Content-Type'] = 'application/json'
+    const headers = {
+      'CF-Connecting-IP': ip,
+      'Sec-Fetch-Site': 'same-origin',
+      ...(body !== undefined || rawBody !== undefined ? { 'Content-Type': 'application/json' } : {}),
+      ...extraHeaders,
+    }
+    for (const key of Object.keys(headers)) if (headers[key] == null) delete headers[key]
     const response = await app.request(pathname, {
-      method, headers, body: body === undefined ? undefined : JSON.stringify(body),
+      method, headers, body: rawBody !== undefined ? rawBody : body === undefined ? undefined : JSON.stringify(body),
     }, env, { waitUntil() {}, passThroughOnException() {} })
     let json = null
     try { json = await response.json() } catch (_) {}

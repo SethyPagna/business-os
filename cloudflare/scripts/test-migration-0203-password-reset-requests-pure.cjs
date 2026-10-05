@@ -23,6 +23,7 @@ const fs = require('node:fs')
 const path = require('node:path')
 const ts = require('typescript')
 const { passwordHashStub, failedSignInCostStub } = require('./harness/password_hash_stub.cjs')
+const { credentialGuardPassThrough } = require('./harness/credential_guard_stub.cjs')
 const { openDb } = require('./harness/d1compat.cjs')
 
 function load(rel, overrides = {}) {
@@ -107,6 +108,7 @@ const usersRoute = load('routes/users.ts', {
   hono: require('hono'),
   '../lib/passwordHash': passwordHashStub,
   '../lib/failedSignInCost': failedSignInCostStub,
+  '../lib/requestBodyGuard': credentialGuardPassThrough,
   '../lib/imageAudit': { enqueueImageNormalization: noop },
   '../lib/db': { getDb: (env) => env.DB },
   '../lib/userIdentity': { buildUserRenameStatements: () => [] },
@@ -130,6 +132,7 @@ const authRoute = load('routes/auth.ts', {
   hono: require('hono'),
   '../lib/passwordHash': passwordHashStub,
   '../lib/failedSignInCost': failedSignInCostStub,
+  '../lib/requestBodyGuard': credentialGuardPassThrough,
   '../lib/db': { getDb: (env) => env.DB },
   '../lib/auth': authLib,
   '../lib/verification': {

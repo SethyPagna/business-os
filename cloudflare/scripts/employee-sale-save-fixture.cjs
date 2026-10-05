@@ -70,7 +70,8 @@ async function main() {
   }
   await run("INSERT INTO settings(key,value) VALUES('exchange_rate','4000') ON CONFLICT(key) DO UPDATE SET value=excluded.value")
   async function dispatch(url, method, body, cookie) {
-    const response = await mf.dispatchFetch(origin + url, { method, headers: { 'content-type': 'application/json', ...(cookie ? { cookie } : {}) }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) })
+    // Stands in for the admin page: same-origin JSON, as routes/auth.ts's credential guard requires of /login.
+    const response = await mf.dispatchFetch(origin + url, { method, headers: { 'content-type': 'application/json', 'sec-fetch-site': 'same-origin', ...(cookie ? { cookie } : {}) }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) })
     return { status: response.status, body: await response.json(), cookie: response.headers.get('set-cookie') }
   }
   const login = await dispatch('/api/auth/login', 'POST', { username: 'e2e_admin', password, organizationId: org.id }, undefined)
