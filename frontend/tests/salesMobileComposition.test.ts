@@ -53,15 +53,16 @@ assert.match(customerCard, /<DetailRow label=\{t\('membership'\)[\s\S]*?value=\{
 assert.doesNotMatch(sales, /onAttachMembership=/, 'the standalone membership mutation is no longer mounted from Sales')
 assert.match(sales, /onCustomerAction=\{canChangeSaleCustomer \? \(sale\) => \{ void openSaleCustomerEdit/, 'the one Edit customer entry remains gated by the sales customer grant')
 
-// Three ordinary destination statuses share one row at 375px. Review keeps
-// Back and Update together instead of parking the secondary action above it.
-assert.match(workflow, /data-sale-status-destinations="" className="grid grid-cols-3 gap-2"/)
+// The destination statuses are one horizontally scrolling row from first paint (no
+// 'Status' opener). Review keeps the Back icon and Apply together on one row.
+assert.match(workflow, /data-sale-status-destinations="" className="flex flex-nowrap gap-2 overflow-x-auto/)
+assert.match(workflow, /shrink-0 whitespace-nowrap[^"]*leading-relaxed/, 'destination chips keep their width and a Khmer-safe line height')
 assert.doesNotMatch(workflow, /Choose destination status/)
 assert.match(workflow, /\.filter\(\(status\) => !\['partial_return', 'returned', currentStatus\]\.includes\(status\)\)/)
 const reviewActions = workflow.slice(workflow.indexOf('data-sale-status-review-actions=""'))
 assert.match(reviewActions, /className="flex items-stretch gap-2"/)
-assert.match(reviewActions, /step === 'review' \? \(t\('back'\) \|\| 'Back'\) : \(t\('cancel'\) \|\| 'Cancel'\)/)
-assert.match(reviewActions, /step === 'review'[\s\S]*?t\('update'\) \|\| 'Update'/)
+assert.match(reviewActions, /aria-label=\{backLabel\} title=\{backLabel\}/, 'Back is an icon-only button that names itself')
+assert.match(reviewActions, /t\('apply'\) \|\| 'Apply'/, 'the one main action is Check + Apply')
 assert.match(reviewActions, /disabled=\{saving \|\| confirmDisabled \|\| selectedStatus === currentStatus\}/, 'existing status safety gates remain on Update')
 
 // Records is the final body action immediately above the footer. The footer is
