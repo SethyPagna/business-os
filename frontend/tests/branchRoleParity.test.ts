@@ -224,15 +224,19 @@ runTest('a selling successor must itself be able to sell', () => {
 runTest('the surfaces that enforce the rule reach it through this helper', () => {
   const transfer = read('../src/components/branches/TransferModal.tsx')
   assert.match(transfer, /from '\.\.\/\.\.\/utils\/branchRoles\.ts'/)
-  assert.match(transfer, /disabled: !branchCanBeTransferSource\(branch\.name\)/)
-  assert.match(transfer, /disabled: !branchCanBeTransferDestination\(branch\.name\)/)
-  assert.match(transfer, /!branchCanTransferBetween\(selectedSourceBranch\?\.name, branch\.name\)/)
+  assert.match(transfer, /disabled: !branchCanBeTransferSource\(branch\)/)
+  assert.match(transfer, /disabled: !branchCanBeTransferDestination\(branch\)/)
+  assert.match(transfer, /!branchCanTransferBetween\(selectedSourceBranch, branch\)/)
   assert.match(transfer, /requireCanonicalTransferDirection/)
   const inventory = read('../src/components/inventory/Inventory.tsx')
-  assert.match(inventory, /branchCanTransferBetween\(sourceBranch\?\.name, candidate\?\.name\)/)
-  assert.match(inventory, /disabled: !branchCanBeTransferSource\(branch\.name\)/)
-  assert.match(inventory, /disabled: !branchCanTransferBetween\(selectedSource\?\.name, branch\.name\)/)
-  assert.match(inventory, /if \(!branchCanTransferBetween\(fromBranch\.name, toBranch\.name\)\)/)
+  assert.match(inventory, /branchCanTransferBetween\(sourceBranch, candidate\)/)
+  assert.match(inventory, /disabled: !branchCanBeTransferSource\(branch\)/)
+  assert.match(inventory, /disabled: !branchCanTransferBetween\(selectedSource, branch\)/)
+  assert.match(inventory, /if \(!branchCanTransferBetween\(fromBranch, toBranch\)\)/)
+  // Rows, never names: a renamed branch keeps its role only on the row.
+  for (const source of [transfer, inventory]) {
+    assert.doesNotMatch(source, /branchCan(?:BeTransfer(?:Source|Destination)|TransferBetween)\([^)]*\.name/)
+  }
   assert.doesNotMatch(inventory, /runInventoryTransferIntent\('(?:undo|redo)'/, 'Inventory must never approximate provenance replay with a reverse transfer')
   assert.match(inventory, /transferHistoryRef.current.refreshServerItems\(\)/, 'forward transfers consume the server-owned history')
   const history = read('../src/utils/actionHistory.ts')

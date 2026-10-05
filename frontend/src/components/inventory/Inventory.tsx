@@ -79,6 +79,7 @@ import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.
 import { isApiVersionMismatchError } from '../../api/http.ts'
 import { localizeBranchRuleError } from '../../api/branchRuleErrors.ts'
 import { branchCanBeTransferSource, branchCanTransferBetween } from '../../utils/branchRoles.ts'
+import { hasTransferPair } from '../../utils/branchCollapse.ts'
 import type { QueryParams } from '../../api/query.ts'
 import type { PendingInventoryTransfer } from '../../api/inventoryWriteTransport.ts'
 import { inventoryTransferEditForm, isRefusedTransferRun, localizeTransferError, localizeTransferRefusal } from '../../api/transferRunRefusal.ts'
@@ -108,6 +109,8 @@ type InventoryProduct = LegacyInventoryRecord & {
 type InventoryBranch = LegacyInventoryRecord & {
   id?: InventoryId
   name?: string
+  // Explicit operational role (NULL before the identity backfill: the name decides).
+  role?: string | null
   is_default?: boolean
 }
 
@@ -643,15 +646,17 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
   const branchesById = useMemo(() => new Map(
     (Array.isArray(branches) ? branches : []).map((branch) => [String(branch?.id), branch]),
   ), [branches])
+  // `branches` holds the active branches only; derived from data, never a flag.
+  const transferPairAvailable = useMemo(() => hasTransferPair(branches), [branches])
   const defaultBranch = useMemo(() => (
     branches.find((branch) => branch.is_default) || branches[0] || null
   ), [branches])
   const defaultTransferDestinationBySourceId = useMemo(() => {
     const eligibleBranches = (Array.isArray(branches) ? branches : [])
-      .filter((branch) => branchCanBeTransferSource(branch?.name))
+      .filter((branch) => branchCanBeTransferSource(branch))
     return new Map(eligibleBranches.map((sourceBranch) => {
       const destination = eligibleBranches.find((candidate) => (
-        branchCanTransferBetween(sourceBranch?.name, candidate?.name)
+        branchCanTransferBetween(sourceBranch, candidate)
       ))
       return [String(sourceBranch?.id || ''), String(destination?.id || '')]
     }))
@@ -1033,7 +1038,7 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
       return {
         value: String(branch.id),
         label: `${branch.name || branch.id} (${branchQty})`,
-        disabled: !branchCanBeTransferSource(branch.name),
+        disabled: !branchCanBeTransferSource(branch),
       }
     }),
   ], [branches, sourceBranchLabel, transferModal])
@@ -1044,7 +1049,7 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
       ...branches.map((branch) => ({
         value: String(branch.id),
         label: branch.name || String(branch.id),
-        disabled: !branchCanTransferBetween(selectedSource?.name, branch.name),
+        disabled: !branchCanTransferBetween(selectedSource, branch),
       })),
     ]
   }, [branches, branchesById, destinationBranchLabel, transferForm.from_branch_id])
@@ -1087,10 +1092,10 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
     const requestedSource = branchesById.get(requestedSourceId)
     const firstCanonicalStockBranchId = branchStock.find((item: LegacyInventoryRecord) => {
       const branch = branchesById.get(String(item?.branch_id))
-      return Number(item?.quantity || 0) > 0 && branchCanBeTransferSource(branch?.name)
+      return Number(item?.quantity || 0) > 0 && branchCanBeTransferSource(branch)
     })?.branch_id
-    const fallbackCanonicalBranch = branches.find((branch) => branchCanBeTransferSource(branch.name))
-    const defaultSourceId = branchCanBeTransferSource(requestedSource?.name)
+    const fallbackCanonicalBranch = branches.find((branch) => branchCanBeTransferSource(branch))
+    const defaultSourceId = branchCanBeTransferSource(requestedSource)
       ? requestedSourceId
       : String(firstCanonicalStockBranchId || fallbackCanonicalBranch?.id || '')
     const defaultDestinationId = String(
@@ -1387,11 +1392,11 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
       notify(tr('select_transfer_branches', 'Choose both source and destination branches.'), 'error')
       return
     }
-    if (!branchCanTransferBetween(fromBranch.name, toBranch.name)) {
+    if (!branchCanTransferBetween(fromBranch, toBranch)) {
       notify(tr('transfer_canonical_pair_only', 'Transfers move stock only between Shop and Warehouse.'), 'error')
       return
     }
-    if (branches.filter((branch) => branchCanBeTransferSource(branch.name)).length !== 2) {
+    if (branches.filter((branch) => branchCanBeTransferSource(branch)).length !== 2) {
       notify(tr('transfer_canonical_pair_only', 'Transfers move stock only between Shop and Warehouse.'), 'error')
       return
     }
@@ -2618,7 +2623,8 @@ ${inventoryFeesFormulaText}`,
             product={detailProduct}
             onClose={() => setDetailProduct(null)}
             onAdjust={canAdjustStock ? openAdjust : undefined}
-            onTransfer={canTransferStock ? openTransfer : undefined}
+            // with one active branch (or no shop/warehouse pair) there is nothing to transfer: no entry point
+            onTransfer={canTransferStock && transferPairAvailable ? openTransfer : undefined}
             onViewHistory={fetchProductHistoryPreview}
             onManageBatches={openManageBatches}
             fmtUSD={fmtUSD}

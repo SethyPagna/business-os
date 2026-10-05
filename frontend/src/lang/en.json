@@ -953,6 +953,7 @@
   "stock_without_received_date": "Units are at this branch but carry no received date.",
   "transfer_source_warehouse_only": "Transfers move stock from Warehouse to Shop.",
   "transfer_canonical_pair_only": "Transfers move stock only between Shop and Warehouse.",
+  "transfer_single_branch": "Only one active branch, so there is nothing to transfer.",
   "canonical_branch_configuration_invalid": "Stock transfer is unavailable because the branch setup must contain exactly one active Shop and one active Warehouse. Ask an administrator to repair the branch records before trying again.",
   "transfer_stock_changed": "The products or stock in this transfer changed while it was being saved. Nothing was moved. Refresh and try again.",
   "transfer_selected_lot_short": "The selected received date no longer has enough stock.",

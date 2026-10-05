@@ -36,7 +36,8 @@ import { buildProductGroups } from '../../utils/productGrouping.ts'
 import { batchDisplayLabel } from '../../utils/batchLabel.ts'
 import ScanSearchButton from '../shared/ScanSearchButton.tsx'
 import ProductOptionSheet from '../shared/ProductOptionSheet.tsx'
-import { branchCanBeTransferDestination, branchCanBeTransferSource, branchCanTransferBetween, branchRoleFromName } from '../../utils/branchRoles.ts'
+import { branchCanBeTransferDestination, branchCanBeTransferSource, branchCanTransferBetween } from '../../utils/branchRoles.ts'
+import { hasTransferPair, soleActiveBranch } from '../../utils/branchCollapse.ts'
 import { localizeBranchRuleError } from '../../api/branchRuleErrors.ts'
 import ConfirmDialog, { type ConfirmReviewItem } from '../shared/ConfirmDialog.tsx'
 import { useConfirmDialog } from '../shared/useConfirmDialog.tsx'
@@ -121,6 +122,8 @@ type NotifyFunction = (message: string, type?: string) => void
 type BranchOption = {
   id: string | number
   name: string
+  // Explicit operational role (NULL before the identity backfill: the name decides).
+  role?: string | null
   is_active?: boolean | number
 }
 
@@ -497,11 +500,11 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
   // Stock can move in either direction between the one canonical Shop and
   // Warehouse. Other and same-role destinations stay visible but inert so a
   // stale or ambiguous branch list cannot create a stock-action identity.
-  const hasCanonicalTransferPair = useMemo(
-    () => branches.filter((branch) => branchRoleFromName(branch.name) === 'shop').length === 1
-      && branches.filter((branch) => branchRoleFromName(branch.name) === 'warehouse').length === 1,
-    [branches],
-  )
+  // Decided from the branch ROWS (role, active) -- a renamed branch keeps its
+  // role, and a retired one is not a candidate. With a single active branch
+  // there is nothing to transfer and the modal says so instead of offering it.
+  const hasCanonicalTransferPair = useMemo(() => hasTransferPair(branches), [branches])
+  const onlyOneActiveBranch = useMemo(() => soleActiveBranch(branches) != null, [branches])
 
   const selectedSourceBranch = useMemo(
     () => branches.find((branch) => String(branch.id) === String(fromBranch)) || null,
@@ -513,7 +516,7 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
     ...branches.map((branch) => ({
       value: branch.id,
       label: branch.name,
-      disabled: !branchCanBeTransferSource(branch.name) || branch.is_active === false || branch.is_active === 0 || !hasCanonicalTransferPair,
+      disabled: !branchCanBeTransferSource(branch) || branch.is_active === false || branch.is_active === 0 || !hasCanonicalTransferPair,
     })),
   ], [branches, hasCanonicalTransferPair, t])
 
@@ -524,8 +527,8 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
       .map((branch) => ({
         value: branch.id,
         label: branch.name,
-        disabled: !branchCanBeTransferDestination(branch.name) || branch.is_active === false || branch.is_active === 0
-          || !branchCanTransferBetween(selectedSourceBranch?.name, branch.name),
+        disabled: !branchCanBeTransferDestination(branch) || branch.is_active === false || branch.is_active === 0
+          || !branchCanTransferBetween(selectedSourceBranch, branch),
       })),
   ], [branches, fromBranch, selectedSourceBranch, t])
 
@@ -533,7 +536,7 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
     setFromBranch(nextSource)
     const nextSourceBranch = branches.find((branch) => String(branch.id) === String(nextSource))
     const currentDestinationBranch = branches.find((branch) => String(branch.id) === String(toBranch))
-    if (!branchCanTransferBetween(nextSourceBranch?.name, currentDestinationBranch?.name)) setToBranch('')
+    if (!branchCanTransferBetween(nextSourceBranch, currentDestinationBranch)) setToBranch('')
   }, [branches, toBranch])
 
   const requireCanonicalTransferDirection = useCallback((): boolean => {
@@ -541,7 +544,7 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
     const destinationBranch = branches.find((branch) => String(branch.id) === String(toBranch))
     if (hasCanonicalTransferPair && selectedSourceBranch?.is_active !== false && selectedSourceBranch?.is_active !== 0
       && destinationBranch?.is_active !== false && destinationBranch?.is_active !== 0
-      && branchCanTransferBetween(selectedSourceBranch?.name, destinationBranch?.name)) return true
+      && branchCanTransferBetween(selectedSourceBranch, destinationBranch)) return true
     notify(t('transfer_canonical_pair_only') || 'Transfers move stock only between Shop and Warehouse.', 'error')
     return false
   }, [branches, canTransferStock, hasCanonicalTransferPair, notify, selectedSourceBranch, t, toBranch])
@@ -1421,7 +1424,9 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
                 onChange={setTransferSource}
                 ariaLabel={t('from_branch') || 'From Branch'}
               />
-              {hasCanonicalTransferPair ? (
+              {onlyOneActiveBranch ? (
+                <p role="status" className="mt-1 text-[11px] font-medium text-amber-700 dark:text-amber-400">{t('transfer_single_branch') || 'Only one active branch, so there is nothing to transfer.'}</p>
+              ) : hasCanonicalTransferPair ? (
                 <p className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">{t('transfer_canonical_pair_only') || 'Transfers move stock only between Shop and Warehouse.'}</p>
               ) : null}
             </div>
