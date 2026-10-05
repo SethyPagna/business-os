@@ -509,7 +509,6 @@ export default function SaleDetailModal({
   const settlementRequestIdRef = useRef(createSettlementRequestId())
   const addRequestIdRef = useRef(createSettlementRequestId())
   const amendRequestIdRef = useRef(createSettlementRequestId())
-  const [mutationExchangeRate, setMutationExchangeRate] = useState(savedExchangeRate)
   const settlementFrozenRef = useRef(false)
   settlementFrozenRef.current = statusSaving || pendingStatus
   const [addMutationError, setAddMutationError] = useState('')
@@ -720,7 +719,6 @@ export default function SaleDetailModal({
     setAddReview(null)
     setAddConfirmOpen(false)
     setAmendConfirm(null)
-    setMutationExchangeRate(Number(sale?.exchange_rate))
     setAddMutationError('')
     setAmendMutationError('')
     setActualCostEditing(false)
