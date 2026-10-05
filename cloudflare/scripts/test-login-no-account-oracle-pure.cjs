@@ -13,7 +13,9 @@
 //
 // E6 (5 Oct 2026): the check is now PBKDF2-SHA256 through WebCrypto
 // (lib/passwordHash.ts), so the work is counted as WebCrypto derivations and
-// their iteration count; bcrypt runs only for a legacy bcrypt row.
+// their iteration count. Since RELEASE-20261006-VERIFY Exception 3 every
+// failure is padded to the failed-sign-in floor (test-failed-sign-in-cost-pure.cjs
+// covers the floor in every state); this fixture is the bcrypt-remains state.
 //
 // Drives the REAL routes/auth.ts (real lib/loginLockout.ts, lib/rateLimit.ts,
 // lib/passwordHash.ts) over the full migrated schema
@@ -95,31 +97,40 @@ async function check(name, fn) {
     assert.equal(res.body.failedAttempts, 2)
   })
 
-  await check('unknown, ambiguous and inactive identifiers each spend one current-count derivation, like a wrong password', async () => {
+  // RELEASE-20261006-VERIFY Exception 3: this fixture still holds active bcrypt
+  // rows (addUser seeds bcrypt; 705 is cost 10), so on Paid every failure is
+  // padded to the bcrypt floor: one PBKDF2 derivation at the current count
+  // plus one cost-10 bcrypt compare, whichever of them the real check spent.
+  // The signature records the bcrypt COST of each compare (what decides its
+  // time), not which hash it was.
+  const signature = () => ({ derived: [...derived], bcryptCosts: compared.map((hash) => hash.slice(4, 6)) })
+  const FLOOR = { derived: [CURRENT_ITERATIONS], bcryptCosts: ['10'] }
+
+  await check('unknown, ambiguous and inactive identifiers spend the bcrypt floor while bcrypt rows remain', async () => {
     const h = harness()
     for (const username of ['nobody-here', 'Twin Name', 'gone', '099888777']) {
       compared.length = 0
       derived.length = 0
       const res = await h.request('/login', 'POST', { username, password: 'wrong' }, { ip: freshIp() })
       assert.equal(res.status, 401, `${username}: ${JSON.stringify(res.body)}`)
-      assert.deepEqual(derived, [CURRENT_ITERATIONS], `${username}: one PBKDF2 derivation at the current count, as for a real account`)
-      assert.equal(compared.length, 0, `${username}: no bcrypt on the no-account path`)
+      assert.deepEqual(signature(), FLOOR, `${username}: one current-count derivation and one bcrypt-10 compare`)
     }
-    compared.length = 0
-    derived.length = 0
-    const real = await h.request('/login', 'POST', { username: 'dara', password: 'wrong' }, { ip: freshIp() })
-    assert.equal(real.status, 401)
-    assert.deepEqual(derived, [CURRENT_ITERATIONS])
-    assert.equal(compared.length, 0)
   })
 
-  await check('transition gap, pinned so it is visible: a legacy bcrypt row costs one cost-10 compare and no derivation', async () => {
+  await check('a wrong password on a current PBKDF2 row is padded with the dummy bcrypt compare', async () => {
     const h = harness()
+    const res = await h.request('/login', 'POST', { username: 'dara', password: 'wrong' }, { ip: freshIp() })
+    assert.equal(res.status, 401)
+    assert.deepEqual(signature(), FLOOR)
+  })
+
+  await check('a wrong password on a legacy bcrypt-10 row is padded with the dummy derivation (the transition gap is closed)', async () => {
+    const h = harness()
+    const own = h.userRow(705).password
     const res = await h.request('/login', 'POST', { username: 'legacy', password: 'wrong' }, { ip: freshIp() })
     assert.equal(res.status, 401)
-    assert.equal(compared.length, 1)
-    assert.match(compared[0], /^\$2[aby]\$10\$/)
-    assert.deepEqual(derived, [])
+    assert.deepEqual(signature(), FLOOR)
+    assert.deepEqual(compared, [own], 'the one bcrypt compare is the row itself; no second, dummy compare')
   })
 
   await check('wall clock: an unknown identifier takes at least half as long as a wrong password', async () => {
