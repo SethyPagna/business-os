@@ -1254,25 +1254,19 @@ assert.match(
   /const ACTION_HISTORY_USERS_TIMEOUT_MS = 8000/,
   'action history should use an explicit admin user-options timeout',
 )
+// G39 item 7: no passive action-history reads at all. The recorded list and
+// the admin user filter load when the History control is hovered, focused or
+// opened (actionHistoryLazyLoad.test.ts counts the requests).
+assert.doesNotMatch(actionHistory, /scheduleActionHistoryRead|ACTION_HISTORY_INITIAL_READ_DELAY_MS/, 'action history must not read on page activation')
 assert.match(
   actionHistory,
-  /const ACTION_HISTORY_INITIAL_READ_DELAY_MS = 2500/,
-  'passive action-history reads should wait until after primary route paint',
+  /if \(!enabled \|\| !serverItemsRequested \|\| actorScopeRef\.current !== actorScope/,
+  'server history reads wait for the history UI to ask',
 )
 assert.match(
   actionHistory,
-  /requestIdleCallback\(task,\s*\{\s*timeout:\s*ACTION_HISTORY_IDLE_TIMEOUT_MS\s*\}/,
-  'passive action-history reads should use idle scheduling instead of competing with first paint',
-)
-assert.match(
-  actionHistory,
-  /scheduleActionHistoryRead\(\(\) => \{[\s\S]*refreshServerItems\(\)/,
-  'initial server history refresh should use the post-paint scheduler',
-)
-assert.match(
-  actionHistory,
-  /scheduleActionHistoryRead\(\(\) => \{[\s\S]*getActionHistoryUsers/,
-  'initial action-history user lookup should use the post-paint scheduler',
+  /if \(!enabled \|\| !serverItemsRequested\) return\s+if \(!isAdmin\) return[\s\S]*getActionHistoryUsers/,
+  'the admin user lookup waits for the history UI to ask',
 )
 assert.match(
   actionHistory,

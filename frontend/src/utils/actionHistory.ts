@@ -144,31 +144,11 @@ declare global {
 
 const ACTION_HISTORY_LOAD_TIMEOUT_MS = 10000
 const ACTION_HISTORY_USERS_TIMEOUT_MS = 8000
-const ACTION_HISTORY_INITIAL_READ_DELAY_MS = 2500
-const ACTION_HISTORY_IDLE_TIMEOUT_MS = 5000
 let actionHistoryTransportPromise: Promise<ActionHistoryTransportModule> | null = null
 
 function loadActionHistoryTransport(): Promise<ActionHistoryTransportModule> {
   if (!actionHistoryTransportPromise) actionHistoryTransportPromise = import('../api/actionHistoryTransport.ts')
   return actionHistoryTransportPromise
-}
-
-function scheduleActionHistoryRead(task: () => void): () => void {
-  if (typeof window === 'undefined') return () => {}
-  let idleId: number | null = null
-  const timerId = window.setTimeout(() => {
-    if (typeof window.requestIdleCallback === 'function') {
-      idleId = window.requestIdleCallback(task, { timeout: ACTION_HISTORY_IDLE_TIMEOUT_MS })
-      return
-    }
-    task()
-  }, ACTION_HISTORY_INITIAL_READ_DELAY_MS)
-  return () => {
-    window.clearTimeout(timerId)
-    if (idleId != null && typeof window.cancelIdleCallback === 'function') {
-      window.cancelIdleCallback(idleId)
-    }
-  }
 }
 
 function normalizeActionHistoryId(value: unknown): ActionHistoryId | null {
@@ -206,12 +186,11 @@ function getErrorMessage(error: unknown, fallback: string): string {
 // What *is* fixable, and was the actual visible symptom: `serverItems`
 // (the read-only recorded-actions list) only exists in React state, which
 // starts empty on every mount, and `refreshServerItems` doesn't resolve
-// until after ACTION_HISTORY_INITIAL_READ_DELAY_MS plus a network
-// round-trip -- so every refresh showed "No recent actions" for a couple
-// of seconds even though the server has the real list the whole time.
-// Caching the last-seen list per scope in sessionStorage and hydrating
-// synchronously on mount closes that gap; the background fetch still runs
-// exactly as before and overwrites the cache with the authoritative data.
+// until a network round-trip after the history is first opened -- so the
+// panel showed "No recent actions" for a moment even though the server has
+// the real list the whole time. Caching the last-seen list per scope in
+// sessionStorage and hydrating synchronously on mount closes that gap; the
+// read still runs and overwrites the cache with the authoritative data.
 const ACTION_HISTORY_CACHE_PREFIX = 'actionHistory:cache:'
 
 function cacheKeyFor(scope: string, authority: ActorReadScope): string {
@@ -257,9 +236,15 @@ export function useActionHistory({ limit = 10, notify, scope = 'global', enabled
   const historyRequestRef = useRef(0)
   const usersRequestRef = useRef(0)
   const isAdmin = useMemo(() => effectivePermissions(user).isAdmin, [user])
+  // G39 item 7: nothing on a page shows the recorded list until the History
+  // control is hovered, focused or opened, so the two reads
+  // (/api/action-history, and /users for an admin) wait for that instead of
+  // running 2.5 s after every page activation.
+  const [serverItemsRequested, setServerItemsRequested] = useState(false)
+  const requestServerItems = useCallback(() => { setServerItemsRequested(true) }, [])
 
   const refreshServerItems = useCallback((): Promise<void> => {
-    if (!enabled || actorScopeRef.current !== actorScope || !isActorReadScopeCurrent(readScope)) return Promise.resolve()
+    if (!enabled || !serverItemsRequested || actorScopeRef.current !== actorScope || !isActorReadScopeCurrent(readScope)) return Promise.resolve()
     const requestScope = actorScope
     const authority = readScope
     const requestId = beginTrackedRequest(historyRequestRef)
@@ -292,7 +277,7 @@ export function useActionHistory({ limit = 10, notify, scope = 'global', enabled
           writeCachedServerItems(actorScope, [], authority)
         }
       })
-  }, [actorScope, enabled, isAdmin, limit, scope, userFilter])
+  }, [actorScope, enabled, isAdmin, limit, scope, serverItemsRequested, userFilter])
 
   // Re-hydrate from the new scope's cache immediately when `scope` changes
   // -- the useState initializer above only runs on first mount, so without
@@ -306,44 +291,40 @@ export function useActionHistory({ limit = 10, notify, scope = 'global', enabled
     setServerItems(enabled ? readCachedServerItems(actorScope, readScope) : [])
     setUserOptions([])
     setUserFilter('all')
+    setServerItemsRequested(false)
   }, [actorScope, scope])
 
   useEffect(() => {
-    if (!enabled) return
-    return scheduleActionHistoryRead(() => {
-      refreshServerItems()
-    })
-  }, [enabled, refreshServerItems])
+    if (!enabled || !serverItemsRequested) return
+    void refreshServerItems()
+  }, [enabled, refreshServerItems, serverItemsRequested])
 
   useEffect(() => {
-    if (!enabled) return
+    if (!enabled || !serverItemsRequested) return
     if (!isAdmin) return
-    const cancelScheduledRead = scheduleActionHistoryRead(() => {
-      const authority = readScope
-      if (actorScopeRef.current !== actorScope || !isActorReadScopeCurrent(authority)) return
-      const requestId = beginTrackedRequest(usersRequestRef)
-      withLoaderTimeout(
-        async () => {
-          const api = await loadActionHistoryTransport()
-          assertActorReadScope(authority)
-          return api.getActionHistoryUsers()
-        },
-        'Action history users',
-        ACTION_HISTORY_USERS_TIMEOUT_MS,
-      )
-        .then((rows) => {
-          if (actorScopeRef.current !== actorScope || !isActorReadScopeCurrent(authority) || !isTrackedRequestCurrent(usersRequestRef, requestId)) return
-          setUserOptions(Array.isArray(rows) ? rows : [])
-        })
-        .catch((error: unknown) => {
-          if (isActorReadScopeCurrent(authority) && isTrackedRequestCurrent(usersRequestRef, requestId) && [401, 403].includes(Number((error as { status?: unknown })?.status))) setUserOptions([])
-        })
-    })
+    const authority = readScope
+    if (actorScopeRef.current !== actorScope || !isActorReadScopeCurrent(authority)) return
+    const requestId = beginTrackedRequest(usersRequestRef)
+    withLoaderTimeout(
+      async () => {
+        const api = await loadActionHistoryTransport()
+        assertActorReadScope(authority)
+        return api.getActionHistoryUsers()
+      },
+      'Action history users',
+      ACTION_HISTORY_USERS_TIMEOUT_MS,
+    )
+      .then((rows) => {
+        if (actorScopeRef.current !== actorScope || !isActorReadScopeCurrent(authority) || !isTrackedRequestCurrent(usersRequestRef, requestId)) return
+        setUserOptions(Array.isArray(rows) ? rows : [])
+      })
+      .catch((error: unknown) => {
+        if (isActorReadScopeCurrent(authority) && isTrackedRequestCurrent(usersRequestRef, requestId) && [401, 403].includes(Number((error as { status?: unknown })?.status))) setUserOptions([])
+      })
     return () => {
-      cancelScheduledRead()
       invalidateTrackedRequest(usersRequestRef)
     }
-  }, [actorScope, enabled, isAdmin])
+  }, [actorScope, enabled, isAdmin, serverItemsRequested])
 
   useEffect(() => () => {
     invalidateTrackedRequest(historyRequestRef)
@@ -492,10 +473,11 @@ export function useActionHistory({ limit = 10, notify, scope = 'global', enabled
     setUserFilter,
     userOptions: enabled && isAdmin && cachedScopeRef.current === actorScope && isActorReadScopeCurrent(readScope) ? userOptions : [],
     refreshServerItems,
+    requestServerItems,
     pushAction,
     undo,
     redo,
     undoServer,
     redoServer,
-  }), [actorScope, enabled, busy, isAdmin, pushAction, redo, redoServer, redoStack, refreshServerItems, serverItems, undo, undoServer, undoStack, userFilter, userOptions])
+  }), [actorScope, enabled, busy, isAdmin, pushAction, redo, redoServer, redoStack, refreshServerItems, requestServerItems, serverItems, undo, undoServer, undoStack, userFilter, userOptions])
 }
