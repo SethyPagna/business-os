@@ -285,6 +285,18 @@ async function main() {
     assert.equal(section(stockOnly, 'security'), undefined)
   })
 
+  await check('the sales section follows the sales READ rule: view-only sees it, a full user with sales:view off does not', async () => {
+    raw.db.prepare("INSERT INTO sales (receipt_number, total_usd, sale_status) VALUES ('R-1', 12.5, 'awaiting_payment')").run()
+    const viewOnly = { id: 4, username: 'viewer', name: 'Viewer', role_code: 'staff', permissions: JSON.stringify({ sales: 'view' }) }
+    const fullButHidden = { id: 5, username: 'hidden', name: 'Hidden', role_code: 'staff', permissions: JSON.stringify({ sales: true, 'sales:view': false }) }
+    const full = { id: 6, username: 'full', name: 'Full', role_code: 'staff', permissions: JSON.stringify({ sales: true }) }
+    assert.equal(section(await summary(ADMIN), 'sales').count, 1, 'control: an administrator sees the row')
+    assert.equal(section(await summary(full), 'sales').count, 1, 'a full sales user sees it')
+    assert.equal(section(await summary(viewOnly), 'sales').count, 1, 'a view-only user sees it (hasPermission would have hidden it)')
+    assert.equal(section(await summary(fullButHidden), 'sales'), undefined, 'sales:view switched off hides it (hasPermission would have shown it)')
+    assert.equal(JSON.stringify(await summary(fullButHidden)).includes('R-1'), false, 'and the receipt number is nowhere in the body')
+  })
+
   await check('GET /summary/items returns the whole inventory list for "show all", gated like the section', async () => {
     const all = await call('GET', '/summary/items?section=inventory', ADMIN)
     assert.equal(all.status, 200)

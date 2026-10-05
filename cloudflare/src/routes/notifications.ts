@@ -5,7 +5,7 @@ import { chunkForBinding } from '../lib/sqlBinding'
 import { loadLowStockConfig, lowStockThresholdSql, type LowStockConfig } from '../lib/lowStockSettings'
 import { cachedJsonResponse, getVersionWithFallback } from '../lib/cache'
 import { requireAuth, type SessionUser } from '../lib/auth'
-import { hasPermission, hasAnyPermission, isAdminControlUser } from '../lib/permissions'
+import { getActionTier, hasPermission, hasAnyPermission, isAdminControlUser } from '../lib/permissions'
 
 // Ported from backend/src/routes/notifications.ts. Note what this actually
 // is: there is no persisted "notifications" table with read/unread state --
@@ -742,7 +742,9 @@ app.get('/summary', async (c) => {
     tasks.push(cachedSection('expiry', ['products', 'settings'], String(preferences.expiryDays),
       () => buildExpirySection(c.env, preferences.expiryDays)))
   }
-  if (preferences.salesEnabled && hasPermission(user, 'sales')) tasks.push(buildSalesSection(c.env))
+  // The section lists receipt numbers and totals, so it follows the sales READ rule (reports.ts, sales.ts canReadSales):
+  // a view-only user sees it, a full user whose sales:view was switched off does not.
+  if (preferences.salesEnabled && getActionTier(user, 'sales', 'view') !== 'none') tasks.push(buildSalesSection(c.env))
   if (preferences.loyaltyEnabled && hasPermission(user, 'contacts')) {
     tasks.push(cachedSection('loyalty', ['sales', 'returns', 'customers', 'settings'], `${preferences.loyaltyThreshold}:${loyaltyPointsEnabled ? 1 : 0}`,
       () => buildLoyaltySection(c.env, preferences.loyaltyThreshold)))
