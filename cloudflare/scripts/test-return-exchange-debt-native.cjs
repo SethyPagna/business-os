@@ -118,6 +118,8 @@ async function main() {
     await sale(8, { status: 'completed', paidUsd: 10 })
     await sale(9, { status: 'completed', paidUsd: 10, serumKhr: 0 })
     await sale(10, { status: 'completed', paidUsd: 10 })
+    await sale(11, { status: 'awaiting_payment' })
+    await sale(12, { status: 'awaiting_payment', paidUsd: 7 })
     const headers = { 'content-type': 'application/json' }
     const post = async (body) => {
       const response = await mf.dispatchFetch('http://local/api/returns', { method: 'POST', headers, body: JSON.stringify(body) })
@@ -193,6 +195,32 @@ async function main() {
     assert.deepEqual([Math.round((after.usd - before.usd) * 100) / 100, after.khr - before.khr], [0, -16000],
       'a product-matched line posting 0 riel: the riel still comes out of the riel drawer')
     console.log('PASS a riel refund with no riel figure takes its riel from the dollars at the sale rate')
+
+    // -- The Return screen's preview is the same arithmetic POST records ---------------
+    const preview = async (body) => {
+      const response = await mf.dispatchFetch('http://local/api/returns/split-preview', { method: 'POST', headers, body: JSON.stringify(body) })
+      return { status: response.status, body: await response.json() }
+    }
+    const owner = await preview({ sale_id: 111, refund_usd: 4, refund_khr: 16000, refund_currency: 'KHR' })
+    assert.equal(owner.status, 200, JSON.stringify(owner.body))
+    assert.deepEqual([owner.body.owed_reduction_usd, owner.body.payout_usd, owner.body.payout_khr], [4, 0, 0],
+      'owner example: the screen says lowers debt $4, pay out nothing -- not 16,000 riel')
+    const part = await preview({ sale_id: 112, refund_usd: 4, refund_khr: 16000, refund_currency: 'KHR' })
+    assert.deepEqual([part.body.owed_reduction_usd, part.body.cash_refund_usd, part.body.payout_usd, part.body.payout_khr], [3, 1, 1, 4000])
+    const noRiel = await preview({ sale_id: 112, refund_usd: 4, refund_khr: 0, refund_currency: 'KHR', any_line_without_riel: true })
+    assert.equal(noRiel.body.payout_khr, 4000, 'no riel price: the riel paid out comes from the dollars, as POST records it')
+    const swap = await preview({ sale_id: 112, refund_usd: 4, refund_khr: 16000, refund_currency: 'USD', replacement_usd: 4 })
+    assert.deepEqual([swap.body.replacement_follows_debt, swap.body.replacement_paid_from_refund_usd, swap.body.replacement_owed_usd, swap.body.payout_usd],
+      [true, 1, 3, 0])
+    assert.equal((await preview({ sale_id: true, refund_usd: 4 })).status, 400)
+    const beforePart = await drawer()
+    const recorded = await post({ client_request_id: 'x-12', sale_id: 112, reason: 'riel', refund_currency: 'KHR',
+      items: [{ sale_item_id: 1121, product_id: 1, quantity: 1, stock_action: 'restock', branch_id: 1 }] })
+    assert.equal(recorded.status, 200, JSON.stringify(recorded.body))
+    const afterPart = await drawer()
+    assert.equal((await db.prepare("SELECT owed_reduction_usd FROM returns WHERE client_request_id='x-12'").first()).owed_reduction_usd, part.body.owed_reduction_usd)
+    assert.equal(beforePart.khr - afterPart.khr, part.body.payout_khr, 'the drawer pays out exactly the riel the screen showed')
+    console.log('PASS the Return screen preview shows debt lowered and the real payout, and POST records exactly that')
   } finally {
     await mf.dispose()
   }

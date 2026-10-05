@@ -114,6 +114,28 @@ export async function getReturnQuoteV1(saleId: number, items: Array<{ sale_item_
   if (quote.sale_id !== saleId || JSON.stringify(quote.items.map(({ sale_item_id, quantity }) => ({ sale_item_id, quantity }))) !== JSON.stringify(items)) throw returnV1Error('return_v1_review_required')
   return quote
 }
+// RET-A verifier P2: what the till hands out on this return -- the debt it
+// lowers, the cash paid out (and its riel), and how a replacement is paid --
+// computed by the Worker's own split (POST /api/returns/split-preview). A read.
+export type ReturnSplitPreview = {
+  owed_reduction_usd: number; cash_refund_usd: number
+  replacement_follows_debt: boolean; replacement_paid_from_refund_usd: number; replacement_owed_usd: number
+  payout_usd: number; payout_khr: number; refund_currency: 'USD' | 'KHR'
+}
+export async function previewReturnSplit(input: { sale_id: number; refund_usd: number; refund_khr: number; refund_currency: 'USD' | 'KHR';
+  any_line_without_riel: boolean; replacement_usd: number }): Promise<ReturnSplitPreview> {
+  const scope = captureActorReadScope('returns')
+  assertActorReadScope(scope)
+  const result = await apiFetch('POST', '/api/returns/split-preview', input) as Record<string, unknown>
+  assertActorReadScope(scope)
+  const money = (key: string) => { const value = Number(result[key]); if (!Number.isFinite(value) || value < 0) throw new Error('split_preview_invalid'); return value }
+  return {
+    owed_reduction_usd: money('owed_reduction_usd'), cash_refund_usd: money('cash_refund_usd'),
+    replacement_follows_debt: result.replacement_follows_debt === true,
+    replacement_paid_from_refund_usd: money('replacement_paid_from_refund_usd'), replacement_owed_usd: money('replacement_owed_usd'),
+    payout_usd: money('payout_usd'), payout_khr: money('payout_khr'), refund_currency: result.refund_currency === 'KHR' ? 'KHR' : 'USD',
+  }
+}
 function returnPendingScope(actorId: unknown): { actor: string; origin: string; session: string; key: string } {
   assertActorReadScope(captureActorReadScope(), false)
   const actor = String(actorId ?? '').trim()

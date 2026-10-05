@@ -54,7 +54,7 @@ import {
   PRIOR_RETURN_MONEY_SQL, priorReturnMoney, ReturnRefundSplitError, saleCarriesDebt, saleRowOwedUsd, saleStatusWithReturns, splitReplacementPayment, splitReturnRefund,
   type PriorReturnMoney, type PriorReturnMoneyRow, type ReplacementPaymentSplit, type ReturnDebtSale, type ReturnRefundSplit,
 } from '../lib/returnRefundSplit'
-import { refundCashKhr, refundRielFigure, type RefundCurrency } from '../lib/refundTender'
+import { parseRefundCurrency, refundCashKhr, refundRielFigure, type RefundCurrency } from '../lib/refundTender'
 import { ProductMergeLineageError, resolveProductMergeLineage } from '../lib/productMergeLineage'
 import { TAGGED_DISPOSAL_MOVEMENT_TYPE } from '../lib/stockCondition'
 
@@ -1332,6 +1332,54 @@ app.post('/bulk', async (c) => {
     // A coded refusal's params (return_restore_over_capacity's product and
     // counts) go with it, so the till's restated sentence keeps them.
     if (error instanceof ReturnBulkError) return c.json({ error: error.message, code: error.code || (error.statusCode === 409 ? 'write_conflict' : 'invalid_bulk_action'), ...(error.params ? { params: error.params } : {}) }, error.statusCode)
+    throw error
+  }
+})
+
+// RET-A verifier P2 (Return screen): what the till hands out. The review step
+// shows "Lowers debt $X · Pay out $Y / riel" from this answer, computed by the
+// same kernels POST / records with (splitReturnRefund, refundRielFigure,
+// splitReplacementPayment), for legacy and v1 sales alike. A read: nothing is
+// written, and POST / recomputes everything from the sale lines anyway.
+app.post('/split-preview', async (c) => {
+  const user = c.get('user')
+  if (getActionTier(user, 'returns', 'add') === 'none' || getActionTier(user, 'returns', 'view') === 'none') {
+    return c.json({ error: 'You do not have permission to perform this action' }, 403)
+  }
+  const body = await c.req.json<Record<string, unknown>>().catch(() => null)
+  const number = (value: unknown) => typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null
+  const saleId = body?.sale_id
+  const refundUsd = number(body?.refund_usd), refundKhr = number(body?.refund_khr ?? 0), replacementUsd = number(body?.replacement_usd ?? 0)
+  if (!body || typeof saleId !== 'number' || !Number.isSafeInteger(saleId) || saleId <= 0 || refundUsd == null || refundKhr == null || replacementUsd == null
+    || (body.any_line_without_riel != null && typeof body.any_line_without_riel !== 'boolean')) {
+    return c.json({ error: 'Choose a sale and a refund amount.', code: 'return_split_preview_invalid' }, 400)
+  }
+  let currency: RefundCurrency
+  try { currency = parseRefundCurrency(body.refund_currency) } catch (error) {
+    return c.json({ error: (error as Error).message, code: 'return_split_preview_invalid' }, 400)
+  }
+  c.header('Cache-Control', 'no-store')
+  const db = getDb(c.env)
+  const debtState = await readReturnDebtState(db, saleId)
+  if (!debtState) return c.json({ error: 'The sale this return names was not found. Find the sale this item came from.', code: 'return_sale_not_found' }, 404)
+  try {
+    const split = splitReturnRefund({ sale: debtState.sale, prior: debtState.prior, refundUsd })
+    const riel = refundRielFigure({ currency, refundUsd, refundKhr, exchangeRate: positiveRate(debtState.sale.exchange_rate) ?? SCHEMA_DEFAULT_EXCHANGE_RATE,
+      anyLineWithoutRiel: body.any_line_without_riel === true })
+    if (riel == null) return c.json({ ...RETURN_REFUND_KHR_UNAVAILABLE }, 400)
+    const replacement = splitReplacementPayment({ carriesDebt: saleCarriesDebt(debtState.sale, debtState.prior.loweredDebt),
+      cashUsd: split.cashUsd, replacementUsd })
+    // Without a debt the replacement is paid at the counter; the refund's cash goes out in full.
+    const payoutUsd = replacement.payoutUsd
+    return c.json({
+      owed_reduction_usd: split.owedReductionUsd, cash_refund_usd: split.cashUsd,
+      replacement_follows_debt: replacement.followsDebt,
+      replacement_paid_from_refund_usd: replacement.paidFromRefundUsd, replacement_owed_usd: replacement.owedUsd,
+      payout_usd: payoutUsd, payout_khr: currency === 'KHR' ? refundCashKhr(riel, payoutUsd, refundUsd) : 0,
+      refund_currency: currency,
+    })
+  } catch (error) {
+    if (error instanceof ReturnRefundSplitError) return c.json(returnSplitRefusal(error), 409)
     throw error
   }
 })

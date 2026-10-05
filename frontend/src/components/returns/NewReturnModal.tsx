@@ -34,7 +34,7 @@ import { useReturnReasonPresets } from './helpers/useReturnReasonPresets.ts'
 import { useCloseGuard } from '../../utils/useCloseGuard.ts'
 import UnsavedChangesPrompt from '../shared/UnsavedChangesPrompt.tsx'
 import { captureActorReadScope, isActorReadScopeCurrent } from '../../api/actorReadScope.ts'
-import type { PendingReturnCreateV1, ReturnQuoteV1 } from '../../api/returnsTransport.ts'
+import type { PendingReturnCreateV1, ReturnQuoteV1, ReturnSplitPreview } from '../../api/returnsTransport.ts'
 import { subtractDecimalSum } from '../../utils/moneyPrecision.ts'
 import { getSaleReturnNote } from '../../utils/saleReturnGuard.ts'
 
@@ -790,6 +790,25 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
   quoteIntentRef.current = quoteIntent
   const reviewedIntentRef = useRef<string | null>(null)
   useEffect(() => { setQuote(null); reviewedIntentRef.current = null }, [quoteIntent])
+
+  // RET-A verifier P2: the review step shows the Worker's own split of this
+  // refund -- the debt it lowers and the cash the till hands out (with its
+  // riel) -- never the full refund as if it all left the drawer.
+  const [refundPreview, setRefundPreview] = useState<ReturnSplitPreview | null>(null)
+  const anyLineWithoutRiel = !isV1Sale && activeItems.some((it) => toNumber(it.applied_price_usd) > 0 && !(toNumber(it.applied_price_khr) > 0))
+  useEffect(() => {
+    setRefundPreview(null)
+    const saleId = Number(foundSale?.id)
+    if (step !== 'confirm' || !(saleId > 0) || !(totalRefund > 0)) return
+    let live = true
+    void loadReturnsTransport()
+      .then((transport) => transport.previewReturnSplit({ sale_id: saleId, refund_usd: Number(totalRefund.toFixed(4)),
+        refund_khr: Math.round(totalRefundKhr), refund_currency: refundCurrency, any_line_without_riel: anyLineWithoutRiel,
+        replacement_usd: Number(replacementTotalUsd.toFixed(4)) }))
+      .then((preview) => { if (live) setRefundPreview(preview) })
+      .catch(() => { if (live) setRefundPreview(null) })
+    return () => { live = false }
+  }, [step, foundSale?.id, totalRefund, totalRefundKhr, refundCurrency, anyLineWithoutRiel, replacementTotalUsd])
 
   // Every line that still owes an answer about WHICH lot. Restock is the only
   // action that puts units back on a shelf, so it is the only one that needs
@@ -1630,9 +1649,6 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
                 <div data-refund-currency="" className="flex items-center justify-between gap-2 pt-1 text-xs text-gray-600 dark:text-gray-300">
                   <span>{T('return_refund_paid_in', 'Refund paid in')}</span>
                   <span className="flex items-center gap-2">
-                    {refundCurrency === 'KHR' && totalRefundKhr > 0 ? (
-                      <span className="font-medium text-gray-900 dark:text-white">{Math.round(totalRefundKhr).toLocaleString()}៛</span>
-                    ) : null}
                     <span role="group" aria-label={T('return_refund_paid_in', 'Refund paid in')} className="inline-flex rounded-lg bg-gray-200 p-0.5 dark:bg-gray-700">
                       {REFUND_CURRENCY_CHOICES.map((choice) => (
                         <button
@@ -1650,6 +1666,20 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
                     </span>
                   </span>
                 </div>
+                {refundPreview ? (
+                  <div data-refund-split="" className="pt-1 text-xs font-medium text-gray-700 dark:text-gray-200">
+                    {[
+                      refundPreview.owed_reduction_usd > 0 ? `${T('return_split_lowers_debt', 'Lowers debt')} ${fmtUSD(refundPreview.owed_reduction_usd)}` : null,
+                      `${T('return_split_pay_out', 'Pay out')} ${fmtUSD(refundPreview.payout_usd)}${refundPreview.refund_currency === 'KHR' && refundPreview.payout_khr > 0 ? ` / ${refundPreview.payout_khr.toLocaleString()}៛` : ''}`,
+                    ].filter(Boolean).join(' · ')}
+                    {refundPreview.replacement_follows_debt && replacementTotalUsd > 0 ? (
+                      <div data-refund-split-replacement="" className="font-normal text-gray-500 dark:text-gray-400">
+                        {T('return_split_replacement_from_refund', 'Replacement paid from the refund')} {fmtUSD(refundPreview.replacement_paid_from_refund_usd)}
+                        {' · '}{T('return_split_replacement_owed', 'added to what is owed')} {fmtUSD(refundPreview.replacement_owed_usd)}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
               </div>
 
               {replacements.length > 0 && (

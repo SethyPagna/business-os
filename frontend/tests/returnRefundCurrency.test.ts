@@ -38,6 +38,20 @@ const control = modal.slice(modal.indexOf('data-refund-currency=""'), modal.inde
 assert.ok(control.includes('role="group"') && control.includes('aria-pressed={refundCurrency === choice.value}'), 'a two-state group with pressed state')
 assert.ok(control.includes('title={T(choice.labelKey, choice.labelEn)}') && control.includes('aria-label={T(choice.labelKey, choice.labelEn)}'),
   'symbol buttons carry a translated tooltip and label (button policy: icon-only with tooltip)')
-assert.ok(control.includes("refundCurrency === 'KHR' && totalRefundKhr > 0"), 'riel shows the riel amount being paid out')
+// RET-A verifier P2: the screen shows what the till hands out, never the full
+// refund total as riel (the owner example lowers the debt and pays out nothing).
+assert.ok(!modal.includes('Math.round(totalRefundKhr).toLocaleString()') && !modal.includes("refundCurrency === 'KHR' && totalRefundKhr > 0"),
+  'the full refund total is never shown as the riel paid out')
+const split = modal.slice(modal.indexOf('data-refund-split=""'), modal.indexOf('data-refund-split=""') + 1600)
+assert.ok(modal.includes('transport.previewReturnSplit(') && split.length > 0, 'the review step reads the Worker split')
+assert.ok(split.includes("T('return_split_lowers_debt', 'Lowers debt')") && split.includes('refundPreview.owed_reduction_usd'), 'it names the debt lowered')
+assert.ok(split.includes("T('return_split_pay_out', 'Pay out')") && split.includes('refundPreview.payout_usd') && split.includes('refundPreview.payout_khr'),
+  'it names the cash paid out and, for riel, the riel paid out')
+assert.ok(split.includes('refundPreview.replacement_follows_debt'), 'an exchange on a debt sale says how the replacement is paid')
+for (const key of ['return_split_lowers_debt', 'return_split_pay_out', 'return_split_replacement_from_refund', 'return_split_replacement_owed']) {
+  assert.ok(en[key] && km[key] && en[key] !== km[key], `${key} is in both packs, translated`)
+}
+const transport = read('src/api/returnsTransport.ts')
+assert.ok(transport.includes("apiFetch('POST', '/api/returns/split-preview', input)"), 'the transport calls the Worker split')
 assert.ok(modal.indexOf('data-refund-currency=""') > modal.indexOf("{T('total_refunded','Total Refund')}"), 'it sits under the refund total on the review step')
-console.log('PASS the review step offers $ / riel under the refund total, $ by default')
+console.log('PASS the review step offers $ / riel under the refund total, $ by default, and shows debt lowered and the real payout')
