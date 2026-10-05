@@ -1042,7 +1042,7 @@ console.log('PASS 14 -- the detail summary describes the sale, not a moment in i
   // ends at the quantity-increase section.
   const lineUpdateBlock = routes.slice(routes.indexOf("const isLineUpdate=kind==='line_updated'"), routes.indexOf('// --- increase /'))
   assert.ok(lineUpdateBlock.length > 0, 'the line_updated block must exist between isLineUpdate and the increase section')
-  assert.ok(lineUpdateBlock.includes('evaluateCapturedPricingPool(pool,quantities)'), 'line_updated must recompute a captured basket through its immutable pricing pool, not a fresh catalog read')
+  assert.ok(lineUpdateBlock.includes('evaluateCapturedPricingPool(pool,quantities,{refuseOversizedFixed:discountOrPriceChanged?new Set([target.line_key]):false})'), 'line_updated must recompute a captured basket through its immutable pricing pool, not a fresh catalog read, refusing an oversized fixed discount only on a changed price or discount')
   assert.ok(lineUpdateBlock.includes("code:'sale_pricing_quote_conflict'"), 'line_updated must refuse a line quote the client did not review')
   assert.ok(lineUpdateBlock.includes('planHistoricalSaleLine(original,body,nextQuantity,exchangeRate)'), 'line_updated on a historical basket must go through the historical pricing kernel at the recorded rate')
   assert.ok(lineUpdateBlock.includes("target.manual.type=body.manual_discount_type===null?'none':body.manual_discount_type"), 'a discount-only edit must be applied to the captured line even when the applied price stays unchanged')
