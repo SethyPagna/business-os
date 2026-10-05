@@ -404,6 +404,40 @@ const mixedAdditiveUnread = (text, repairText) => {
   return columns.size > 0 && indexes > 0 && guards > 0
 }
 
+// Tables the repair itself writes, read from its executed SQL.
+const repairWrites = (repairText) => [...new Set([...sqlCode(repairText).matchAll(/\b(?:UPDATE|INSERT\s+(?:OR\s+\w+\s+)?INTO)\s+(\w+)/gi)]
+  .map((match) => match[1].toLowerCase()))]
+
+// A file that only MARKS rows (0235 stock_skipped backfill): its own work and
+// guard tables (names the repair never uses), plus UPDATEs of an existing
+// table that set only columns the repair never names, and not one mention of
+// a table the repair writes. Its writes cannot change anything the repair
+// reads, and the repair's writes cannot change anything it reads, so the two
+// orders agree; assertPopulatedOrders then proves it on the seeded chain.
+const flagColumnsUnread = (text, repairText) => {
+  const statements = sqlCode(text).split(';').map((s) => s.replace(/\s+/g, ' ').trim()).filter(Boolean)
+  if (!statements.length) return false
+  const named = namedIn(repairText)
+  if (repairWrites(repairText).some((table) => namedIn(text)(table))) return false
+  const own = new Set()
+  let flagged = 0
+  for (const statement of statements) {
+    let match
+    if ((match = /^CREATE TABLE IF NOT EXISTS (\w+) \(/i.exec(statement))) {
+      if (named(match[1])) return false
+      own.add(match[1].toLowerCase())
+    } else if ((match = /^(?:INSERT (?:OR IGNORE )?INTO|DELETE FROM) (\w+)\b/i.exec(statement))) {
+      if (!own.has(match[1].toLowerCase())) return false
+    } else if ((match = /^UPDATE (\w+) SET (.+?) WHERE /i.exec(statement))) {
+      if (own.has(match[1].toLowerCase())) continue
+      const columns = [...` ${match[2]}`.matchAll(/(?:^|,)\s*(\w+)\s*=/g)].map((m) => m[1])
+      if (!columns.length || columns.some((column) => named(column))) return false
+      flagged++
+    } else return false
+  }
+  return flagged > 0
+}
+
 function completeState(raw) {
   const quote = name => `"${name.replaceAll('"', '""')}"`
   const schema = raw.prepare('SELECT type,name,tbl_name,sql FROM sqlite_master ORDER BY type,name').all()
@@ -483,7 +517,8 @@ check('held: outside deploy chain, after dependencies including0195; independent
   const tables = fresh.prepare("SELECT name FROM sqlite_master WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite_%'").all().map((r) => r.name)
   const touched = tables.filter(namedIn(migrationText))
   const mixed = chain.filter(file => mixedAdditiveUnread(chainText(file), migrationText))
-  const dependencies = chain.filter((f) => !indexOnly(chainText(f)) && !additiveUnread(chainText(f), migrationText) && !mixed.includes(f) && touched.some(namedIn(chainText(f))))
+  const flagOnly = chain.filter(file => flagColumnsUnread(chainText(file), migrationText))
+  const dependencies = chain.filter((f) => !indexOnly(chainText(f)) && !additiveUnread(chainText(f), migrationText) && !mixed.includes(f) && !flagOnly.includes(f) && touched.some(namedIn(chainText(f))))
   assert.ok(['sale_items', 'return_items', 'catalog_cost_repair_0195_backup'].every((t) => touched.includes(t)), 'control: the scan sees the two tables it writes and the 0195 backup it reads')
   assert.ok(dependencies.includes('0195_catalog_cost_on_hand.sql'), 'control: the scan finds 0195')
   assert.ok(indexOnly('-- x\nCREATE INDEX IF NOT EXISTS i ON sale_items(id);\nCREATE UNIQUE INDEX j ON sale_items(id);'), 'control: an index-only file is skipped')
@@ -494,6 +529,18 @@ check('held: outside deploy chain, after dependencies including0195; independent
   assert.ok(!indexOnly("CREATE INDEX i ON sale_items(id) WHERE '--' <> ''; UPDATE sale_items SET cost_price_usd = 0;")
     && !additiveUnread("ALTER TABLE sale_items ADD COLUMN zzz_unread TEXT DEFAULT '/*'; UPDATE sale_items SET cost_price_usd = 0; -- */", migrationText), 'control: a comment marker inside a string literal cannot hide the statement after it')
   assert.ok(mixed.length > 0, 'control: the mixed additive scan proves at least one later file independent')
+  assert.deepEqual(repairWrites(migrationText).filter((t) => ['sale_items', 'return_items'].includes(t)).sort(), ['return_items', 'sale_items'], 'control: the repair writes sale_items and return_items')
+  const flagFile = 'CREATE TABLE IF NOT EXISTS zz_mark (id INTEGER PRIMARY KEY);\nINSERT OR IGNORE INTO zz_mark (id) SELECT id FROM sales;\nUPDATE sales SET stock_skipped = 1, stock_skipped_by_name = \'m\' WHERE id IN (SELECT id FROM zz_mark);'
+  assert.ok(flagColumnsUnread(flagFile, migrationText), 'control: a mark-only file on unread columns is independent')
+  assert.ok(flagOnly.includes('0235_imported_sales_stock_skipped.sql'), 'the 0235 stock_skipped backfill is admitted by this rule, then proven by assertPopulatedOrders')
+  for (const wrong of [
+    flagFile.replace('stock_skipped = 1', 'created_at = 1'),
+    `${flagFile}\nUPDATE sale_items SET quantity = 1 WHERE id = 1;`,
+    `${flagFile}\nINSERT INTO audit_logs (action) VALUES ('x');`,
+    flagFile.replace('SELECT id FROM sales', 'SELECT sale_id FROM sale_items'),
+    `${flagFile}\nCREATE TRIGGER t AFTER UPDATE ON sales BEGIN SELECT 1; END;`,
+    flagFile.replace(/UPDATE sales[^;]*;/, ''),
+  ]) assert.equal(flagColumnsUnread(wrong, migrationText), false, `control: still a dependency: ${wrong.split('\n').pop()}`)
   for (const file of mixed) {
     assert.ok(mixedAdditiveUnread(`-- header: UPDATE sale_items SET cost_price_usd = 1;\n/* DROP TABLE sale_items; */\n${chainText(file)}`, migrationText), `control: a comment header leaves ${file} independent`)
     assert.ok(!mixedAdditiveUnread(`${chainText(file)}\n-- trailing note\nUPDATE sale_items SET cost_price_usd = 1;`, migrationText), `control: a real statement after a comment in ${file} is still a dependency`)
