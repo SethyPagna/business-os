@@ -14,6 +14,8 @@ const stubHash = (password) => `hash:${password}`
 const passwordHashStub = {
   PASSWORD_HASH_ALGORITHM: 'pbkdf2-sha256',
   PASSWORD_HASH_ITERATIONS: 10000,
+  CURRENT_PASSWORD_HASH_PREFIX: '$pbkdf2-sha256$i=10000$',
+  isCurrentPasswordHash: (stored) => String(stored ?? '').startsWith('hash:'),
   passwordHashScheme: (stored) => (String(stored ?? '').startsWith('hash:') ? 'pbkdf2-sha256' : 'unknown'),
   hashPassword: async (password) => stubHash(String(password ?? '')),
   verifyPassword: async (password, stored) => ({ ok: String(stored ?? '') === stubHash(String(password ?? '')), needsRehash: false, scheme: 'pbkdf2-sha256' }),

@@ -1,6 +1,6 @@
 import { Hono, type Context } from 'hono'
 import { enqueueImageNormalization } from '../lib/imageAudit'
-import { hashPassword } from '../lib/passwordHash'
+import { CURRENT_PASSWORD_HASH_PREFIX, hashPassword, isCurrentPasswordHash, passwordHashScheme, PASSWORD_HASH_ALGORITHM, PASSWORD_HASH_ITERATIONS } from '../lib/passwordHash'
 import { getDb } from '../lib/db'
 import { buildUserRenameStatements } from '../lib/userIdentity'
 import { requireAuth, revokeUserSessions, type SessionUser } from '../lib/auth'
@@ -927,6 +927,55 @@ app.post('/users/password-reset-requests/:requestId/dismiss', async (c) => {
   if (!changed) return c.json({ success: false, error: 'Request not found' }, 404)
   await audit(c.env, actor?.id ?? null, actor?.name ?? null, 'password_reset_admin_request_dismissed', 'user', request.user_id, { requestId })
   return c.json({ success: true })
+})
+
+// E6 (5 Oct 2026): the Workers Free readiness check for password hashes.
+// Before the plan move every ACTIVE staff account should hold a current
+// PBKDF2 hash: a legacy bcrypt check costs far more CPU than Free allows, and
+// a staff sign-in rewrites the hash the first time it succeeds. The scheme is
+// read from each stored hash's own prefix (no version column). Administrators
+// only; answers counts and the names of staff still to sign in -- never a
+// hash, never a customer.
+app.get('/users/password-hash-status', async (c) => {
+  const actor = c.get('user')
+  if (!isAdminControlUser(actor)) return c.json({ success: false, error: 'No permission' }, 403)
+  const db = getDb(c.env)
+  const rows = await db.prepare('SELECT id, username, name, is_active, password FROM users WHERE deleted_at IS NULL ORDER BY id')
+    .all<{ id: number; username: string; name: string | null; is_active: number; password: string | null }>()
+  const staff = { total: 0, current: 0, legacyBcrypt: 0, otherPbkdf2: 0, unknown: 0, activeLegacyBcrypt: 0 }
+  const pending: Array<{ id: number; username: string; name: string | null; isActive: boolean; scheme: string }> = []
+  for (const row of rows) {
+    staff.total += 1
+    if (isCurrentPasswordHash(row.password)) { staff.current += 1; continue }
+    const scheme = passwordHashScheme(row.password)
+    if (scheme === 'bcrypt') {
+      staff.legacyBcrypt += 1
+      if (row.is_active) staff.activeLegacyBcrypt += 1
+    } else if (scheme === 'pbkdf2-sha256') staff.otherPbkdf2 += 1
+    else staff.unknown += 1
+    pending.push({ id: row.id, username: row.username, name: row.name, isActive: Boolean(row.is_active), scheme })
+  }
+  // Storefront accounts: counts only, one aggregate row. Null before the
+  // portal_accounts migration has run.
+  let portal: { total: number; current: number; legacy_bcrypt: number } | null = null
+  try {
+    portal = await db.prepare(`
+      SELECT COUNT(*) AS total,
+             COALESCE(SUM(CASE WHEN substr(password_hash, 1, length(@currentPrefix)) = @currentPrefix THEN 1 ELSE 0 END), 0) AS current,
+             COALESCE(SUM(CASE WHEN substr(password_hash, 1, 4) IN ('$2a$', '$2b$', '$2y$') THEN 1 ELSE 0 END), 0) AS legacy_bcrypt
+      FROM portal_accounts
+    `).get<{ total: number; current: number; legacy_bcrypt: number }>({ currentPrefix: CURRENT_PASSWORD_HASH_PREFIX }) ?? null
+  } catch (error) {
+    if (!/no such table/i.test(String((error as Error)?.message || error))) throw error
+  }
+  return c.json({
+    success: true,
+    target: { algorithm: PASSWORD_HASH_ALGORITHM, iterations: PASSWORD_HASH_ITERATIONS },
+    staff: { ...staff, readyForFree: staff.activeLegacyBcrypt === 0, pending },
+    portal: portal
+      ? { total: Number(portal.total || 0), current: Number(portal.current || 0), legacyBcrypt: Number(portal.legacy_bcrypt || 0) }
+      : null,
+  })
 })
 
 // -- Role CRUD (admin control) ---------------------------------------------

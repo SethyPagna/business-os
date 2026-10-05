@@ -50,6 +50,14 @@ export type PasswordVerdict = {
   scheme: PasswordHashScheme
 }
 
+// The exact prefix of a hash written at the current count, and the check
+// the readiness report (GET /api/users/password-hash-status) counts with.
+export const CURRENT_PASSWORD_HASH_PREFIX = `${PREFIX}i=${PASSWORD_HASH_ITERATIONS}$`
+export function isCurrentPasswordHash(stored: unknown): boolean {
+  const match = PBKDF2_PATTERN.exec(String(stored ?? ''))
+  return Boolean(match) && Number(match?.[1]) === PASSWORD_HASH_ITERATIONS
+}
+
 export function passwordHashScheme(stored: unknown): PasswordHashScheme {
   const value = String(stored ?? '')
   if (PBKDF2_PATTERN.test(value)) return 'pbkdf2-sha256'

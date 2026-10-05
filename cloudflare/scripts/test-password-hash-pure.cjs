@@ -77,6 +77,11 @@ async function main() {
   assert.equal(m[3], b64(expected), 'the stored key is PBKDF2-HMAC-SHA256(password, salt, count, 32)')
   assert.notEqual(await ph.hashPassword(pw), stored, 'a fresh random salt every time')
   assert.equal(ph.passwordHashScheme(stored), 'pbkdf2-sha256')
+  assert.ok(stored.startsWith(ph.CURRENT_PASSWORD_HASH_PREFIX), 'the readiness prefix matches what hashPassword writes')
+  assert.equal(ph.isCurrentPasswordHash(stored), true)
+  assert.equal(ph.isCurrentPasswordHash(pbkdf2Row(pw, 20000)), false, 'another count is not current')
+  assert.equal(ph.isCurrentPasswordHash(bcrypt.hashSync(pw, 4)), false)
+  assert.equal(ph.isCurrentPasswordHash(`${ph.CURRENT_PASSWORD_HASH_PREFIX}garbage`), false, 'a prefix alone is not a hash')
 
   // New format.
   assert.deepEqual(await ph.verifyPassword(pw, stored), { ok: true, needsRehash: false, scheme: 'pbkdf2-sha256' })
