@@ -4,7 +4,7 @@ import { getDb } from '../lib/db'
 import { getImportFencedDb, isImportMaintenanceFenceError } from '../lib/importMaintenanceFence'
 import { applyCustomerGenderRestoration, previewCustomerGenderRestoration, customerGenderRestorationStatus, notifyCustomerGenderRestoration, canRestoreCustomerGender, GENDER_RESTORATION_MAX_BYTES } from '../lib/customerGenderRestoration'
 import { loyaltyAffectingSaleSql, LOYALTY_REASSIGNMENT_CODE, LOYALTY_REASSIGNMENT_MESSAGE } from '../lib/saleCustomerAssignmentGuard'
-import { recognizedExpr } from '../lib/salesAnalytics'
+import { netSaleExpr, recognizedExpr } from '../lib/salesAnalytics'
 import { chunkForBinding } from '../lib/sqlBinding'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit, buildAuditStatement, changedFields } from '../lib/audit'
@@ -2919,7 +2919,7 @@ app.get('/customers/link-conflicts', async (c) => {
              MAX(trim(s.customer_phone)) AS sale_phone, ${salePhone} AS phone_key,
              MAX(trim(COALESCE(s.customer_name,''))) AS sale_name,
              COUNT(*) AS sale_count, MIN(s.created_at) AS first_at, MAX(s.created_at) AS last_at,
-             ROUND(COALESCE(SUM(CASE WHEN ${recognizedExpr('s.')} THEN s.total_usd ELSE 0 END),0),2) AS total_usd
+             ROUND(COALESCE(SUM(CASE WHEN ${recognizedExpr('s.')} THEN ${netSaleExpr('s.')} ELSE 0 END),0),2) AS total_usd
       FROM sales s JOIN customers c ON c.id = s.customer_id
       WHERE ${salePhone} <> '' AND ${salePhone} <> ${custPhone}
       GROUP BY s.customer_id, ${salePhone}
@@ -2955,7 +2955,7 @@ app.get('/customers/link-conflicts', async (c) => {
              MAX(trim(COALESCE(s.customer_phone,''))) AS phone,
              ${salePhone} AS phone_key,
              COUNT(*) AS sale_count, MIN(s.created_at) AS first_at, MAX(s.created_at) AS last_at,
-             ROUND(COALESCE(SUM(CASE WHEN ${recognizedExpr('s.')} THEN s.total_usd ELSE 0 END),0),2) AS total_usd
+             ROUND(COALESCE(SUM(CASE WHEN ${recognizedExpr('s.')} THEN ${netSaleExpr('s.')} ELSE 0 END),0),2) AS total_usd
       FROM sales s
       WHERE s.customer_id IS NULL
         AND (trim(COALESCE(s.customer_name,'')) <> '' OR trim(COALESCE(s.customer_phone,'')) <> '')

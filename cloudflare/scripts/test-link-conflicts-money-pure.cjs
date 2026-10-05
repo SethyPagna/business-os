@@ -82,7 +82,8 @@ function seed() {
   rawDb.exec('DELETE FROM sales; DELETE FROM customers; DELETE FROM contact_duplicate_dismissals;')
   rawDb.prepare("INSERT INTO customers (id, name, phone) VALUES (1, 'Dara', '0111')").run()
   const sale = (customerId, name, phone, total, status, at) => rawDb.prepare(
-    'INSERT INTO sales (customer_id, customer_name, customer_phone, total_usd, sale_status, created_at) VALUES (@customerId,@name,@phone,@total,@status,@at)',
+    // subtotal_usd = total_usd: no tax, delivery or discount, so net sales == total unless a case says otherwise.
+    'INSERT INTO sales (customer_id, customer_name, customer_phone, subtotal_usd, total_usd, sale_status, created_at) VALUES (@customerId,@name,@phone,@total,@total,@status,@at)',
   ).run({ customerId, name, phone, total, status, at })
   sale(1, 'Dara', '0222', 10, 'completed', '2026-09-01 10:00:00')
   sale(1, 'Dara', '0222', 90, 'cancelled', '2026-09-02 10:00:00')
@@ -109,6 +110,22 @@ async function main() {
     assert.equal(json.missing.length, 1)
     assert.equal(json.missing[0].total_usd, 20)
     assert.equal(json.missing[0].sale_count, 2)
+  })
+
+  await check('N11: the total is NET sales (subtotal less discounts), not gross -- tax and delivery are not revenue', async () => {
+    seed()
+    // A $10 sale carrying $1 tax and a $2 customer-paid delivery fee (gross total 13), and a $20 sale with a $4 discount (total 16).
+    rawDb.prepare("UPDATE sales SET subtotal_usd = 10, tax_usd = 1, delivery_fee_usd = 2, total_usd = 13 WHERE total_usd = 10").run()
+    rawDb.prepare("UPDATE sales SET subtotal_usd = 20, discount_usd = 4, total_usd = 16 WHERE total_usd = 20").run()
+    const { json } = await get(withSpend)
+    assert.equal(json.mismatches[0].total_usd, 15, 'net 10 + awaiting 5 -- old gross sum read 18')
+    assert.equal(json.missing[0].total_usd, 16, 'subtotal 20 less the 4 discount')
+    // A membership discount comes off too (gross total_usd is left at 16, so only the net rule reads 13), and a discount larger than the subtotal floors at 0 per sale (never negative revenue).
+    rawDb.prepare("UPDATE sales SET membership_discount_usd = 3 WHERE subtotal_usd = 20").run()
+    assert.equal((await get(withSpend)).json.missing[0].total_usd, 13)
+    rawDb.prepare("UPDATE sales SET discount_usd = 50 WHERE subtotal_usd = 20").run()
+    assert.equal((await get(withSpend)).json.missing[0].total_usd, 0)
+    seed()
   })
 
   await check('N11: a blank status is treated as completed, exactly as every revenue surface does', async () => {
