@@ -34,6 +34,7 @@ import { REPLACE_COLUMN_GROUPS } from './productReplaceColumnGroups.ts'
 import { MAX_PRODUCT_GALLERY_IMAGES } from '../helpers/productGalleryHelpers.ts'
 import ProductImportModeTabs, { ProductImportOptionCard, type ProductImportTopMode } from './ProductImportModeTabs'
 import ProductServerImportReviewScreen from './ProductServerImportReviewScreen'
+import { productSearchRequest, useProductSearchIndex } from '../../../api/productSearchIndex.ts'
 
 type NotifyFn = (message: string, tone?: 'info' | 'success' | 'warning' | 'error') => void
 const useApp = useAppHook as () => { notify: NotifyFn; hasPermission: (key: string) => boolean; can: (permissionKey: string, actionKey: string) => boolean }
@@ -868,6 +869,9 @@ function ExistingProductSearchPicker({
   const [results, setResults] = useState<Array<{ id: number; name: string }>>([])
   const [loading, setLoading] = useState(false)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // G37: matched on this device by the shared search core (typos, SK-II/sk2,
+  // Khmer), hydrated by ranked ids; the text search answers until it is ready.
+  useProductSearchIndex()
 
   const runSearch = (text: string) => {
     if (debounceRef.current) clearTimeout(debounceRef.current)
@@ -879,7 +883,7 @@ function ExistingProductSearchPicker({
     debounceRef.current = setTimeout(async () => {
       setLoading(true)
       try {
-        const payload = await getProductImportApi().searchProducts?.({ query: needle, pageSize: 8 })
+        const payload = await getProductImportApi().searchProducts?.({ ...productSearchRequest(needle).params, pageSize: 8 })
         const items = (payload as { items?: Array<{ id: number; name: string }> } | null)?.items
         setResults(Array.isArray(items) ? items : [])
       } catch {
