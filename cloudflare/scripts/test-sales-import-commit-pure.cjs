@@ -319,7 +319,7 @@ function customerMatch(overrides = {}) {
     mutate(invalidBatch.sqlite)
     await assert.rejects(
       () => subject.applyHistoricalSaleImport(invalidBatch.db, { jobId: `job-invalid-batch-${index}`, rowNumber: 4, data, nowIso: input.nowIso, actor }),
-      /batch\/lot/,
+      /received[ -]date/,
     )
     assert.equal(invalidBatch.sqlite.prepare('SELECT COUNT(*) n FROM sales').get().n, 0)
     assert.equal(invalidBatch.sqlite.prepare('SELECT COUNT(*) n FROM sale_items').get().n, 0)
@@ -381,7 +381,7 @@ function customerMatch(overrides = {}) {
         nowIso: input.nowIso,
         actor,
       }),
-      /Shop branch or batch\/lot reference changed before the atomic write/,
+      /Shop branch or received-date reference changed before the atomic write/,
     )
     assert.equal(racedBranch.sqlite.prepare('SELECT COUNT(*) n FROM sales').get().n, 0, `${label}: sale must not persist`)
     assert.equal(racedBranch.sqlite.prepare('SELECT COUNT(*) n FROM sale_items').get().n, 0, `${label}: items must not persist`)
