@@ -27,9 +27,17 @@
 --     (the currency the drawer already took them in; NULL read as USD);
 --   * returns written by 0234's code on the same sale count first, so the debt
 --     lowered never exceeds the debt;
---   * a Returned / Partial return sale that still owes after that goes back to
---     Not Paid (lib/returnRefundSplit.ts saleStatusWithReturns);
---     status_before_return is left as it is (the return-edit path does the same).
+--   * the sale's status is then what lib/returnRefundSplit.ts
+--     saleStatusWithReturns gives: a Returned / Partial return sale that still
+--     owes goes back to Not Paid (status_before_return left as it is, as the
+--     return-edit path does); a Not Paid sale whose debt the returns clear
+--     takes its quantity status by the create route's own rule -- Returned when
+--     every sale line has come back in full (its own return lines, plus what
+--     the sales import recorded, plus same-product return lines tied to no
+--     line of the sale), else Partial return -- with status_before_return
+--     'awaiting_payment', as the create path writes it.
+--     (Verifier P4: a pre-0234 return, then one written by 0234's code, can
+--     clear the debt only once this file runs.)
 -- Stock moves by 0 (status changes between held statuses only). Revenue moves
 -- by 0 (recognizedExpr is "<> 'cancelled'"). customer_receivables is not
 -- touched: returns have never written it, so no ledger split is created.
@@ -51,12 +59,13 @@
 -- PRE (run first; numbers to write down):
 --   ops/queries/ret-a-notpaid-returns-backfill-sizing-live.sql (0234 applied)
 --   -> backfill_returns = N, backfill_sales = M, sales_to_not_paid = K,
---      moves_to_debt_usd = X, refused_returns = F
+--      not_paid_cleared_sales = C, moves_to_debt_usd = X, refused_returns = F
 -- POST:
 --   SELECT COUNT(*) AS n, COUNT(DISTINCT sale_id) AS m,
 --     ROUND(SUM(owed_reduction_usd), 4) AS x,
---     COUNT(DISTINCT CASE WHEN new_sale_status IS NOT prior_sale_status THEN sale_id END) AS k
---   FROM return_owed_backfill_0238                         -- expect N, M, X, K
+--     COUNT(DISTINCT CASE WHEN new_sale_status = 'awaiting_payment' AND prior_sale_status IS NOT 'awaiting_payment' THEN sale_id END) AS k,
+--     COUNT(DISTINCT CASE WHEN prior_sale_status = 'awaiting_payment' AND new_sale_status IS NOT 'awaiting_payment' THEN sale_id END) AS c
+--   FROM return_owed_backfill_0238                         -- expect N, M, X, K, C
 --   SELECT COUNT(*) FROM returns r JOIN return_owed_backfill_0238 b ON b.return_id = r.id
 --   WHERE r.refund_currency = 'USD' AND r.owed_reduction_usd = b.owed_reduction_usd   -- expect N
 --   the -live sizing query again -> backfill_returns 0, refused_returns F (unchanged)
@@ -65,7 +74,8 @@
 --
 -- RECOVERY (undoes only rows nobody changed since; the backup table stays):
 -- Statements:
---   UPDATE sales SET sale_status = (SELECT b.prior_sale_status FROM return_owed_backfill_0238 b WHERE b.sale_id = sales.id ORDER BY b.return_id LIMIT 1)
+--   UPDATE sales SET sale_status = (SELECT b.prior_sale_status FROM return_owed_backfill_0238 b WHERE b.sale_id = sales.id ORDER BY b.return_id LIMIT 1),
+--       status_before_return = (SELECT b.prior_status_before_return FROM return_owed_backfill_0238 b WHERE b.sale_id = sales.id ORDER BY b.return_id LIMIT 1)
 --     WHERE id IN (SELECT sale_id FROM return_owed_backfill_0238 WHERE new_sale_status IS NOT prior_sale_status)
 --       AND sale_status IS (SELECT b.new_sale_status FROM return_owed_backfill_0238 b WHERE b.sale_id = sales.id ORDER BY b.return_id LIMIT 1);
 --   UPDATE returns SET owed_reduction_usd = 0, refund_currency = NULL
@@ -85,6 +95,8 @@ CREATE TABLE IF NOT EXISTS return_owed_backfill_0238 (
   owed_reduction_usd REAL NOT NULL CHECK (owed_reduction_usd >= 0),
   prior_sale_status TEXT,
   new_sale_status TEXT,
+  prior_status_before_return TEXT,
+  new_status_before_return TEXT,
   recorded_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -127,7 +139,7 @@ pending AS (
   WHERE refund_currency IS NULL AND COALESCE(status, 'completed') <> 'cancelled' AND sale_id IS NOT NULL
 ),
 debt_sale AS (
-  SELECT s.id AS sale_id, s.sale_status AS prior_sale_status, s.legacy_receipt_number,
+  SELECT s.id AS sale_id, s.sale_status AS prior_sale_status, s.status_before_return AS prior_status_before_return, s.legacy_receipt_number,
     lower(trim(COALESCE(NULLIF(s.sale_status, ''), 'completed'))) AS status_word,
     CASE WHEN typeof(s.total_usd) IN ('integer', 'real') AND typeof(s.exchange_rate) IN ('integer', 'real')
       AND typeof(COALESCE(s.amount_paid_usd, 0)) IN ('integer', 'real')
@@ -162,7 +174,7 @@ candidate AS (
   FROM pending p JOIN debt_sale d ON d.sale_id = p.sale_id
 ),
 sale_verdict AS (
-  SELECT d.sale_id, d.prior_sale_status, d.status_word, d.legacy_receipt_number, d.tu, d.pu, d.pk, d.rn,
+  SELECT d.sale_id, d.prior_sale_status, d.prior_status_before_return, d.status_word, d.legacy_receipt_number, d.tu, d.pu, d.pk, d.rn,
     COALESCE(o.s0, 0) AS s0, COALESCE(o.post_cash_u, 0) AS post_cash_u, COALESCE(o.post_count, 0) AS post_count,
     CASE WHEN d.money_readable = 0 THEN 'money_unreadable'
       WHEN d.row_ok = 0 OR a.rows_ok = 0 THEN 'row_locked'
@@ -191,7 +203,7 @@ walk (id, sale_id, n, refund_u, tu, pu, pk, rn, before_u, red_u) AS (
   FROM walk w JOIN seq q ON q.sale_id = w.sale_id AND q.n = w.n + 1
 ),
 plan AS (
-  SELECT v.sale_id, v.prior_sale_status, v.status_word, v.legacy_receipt_number, v.post_count,
+  SELECT v.sale_id, v.prior_sale_status, v.prior_status_before_return, v.status_word, v.legacy_receipt_number, v.post_count,
     t.lowered_u, t.cash_u,
     CASE WHEN (v.tu - t.lowered_u - v.pu) * v.rn - v.pk * 10000 <= 50 * v.rn THEN 0 ELSE 1 END AS owes_after,
     CASE WHEN (t.cash_u + v.post_cash_u - v.pu) * v.rn - v.pk * 10000 > 50 * v.rn THEN 1 ELSE 0 END AS cash_beyond_paid
@@ -199,25 +211,53 @@ plan AS (
   JOIN (SELECT sale_id, MAX(before_u + red_u) AS lowered_u, SUM(refund_u - red_u) AS cash_u FROM walk GROUP BY sale_id) t
     ON t.sale_id = v.sale_id
 ),
-plan_status AS (
-  SELECT p.*,
-    CASE WHEN p.status_word IN ('returned', 'partial_return') AND p.owes_after = 1 THEN 'awaiting_payment'
-      ELSE p.prior_sale_status END AS new_sale_status
+rline AS (
+  SELECT x.sale_id, ri.sale_item_id, ri.product_id, CAST(ROUND(ri.quantity * 10000) AS INTEGER) AS q_u,
+    EXISTS (SELECT 1 FROM sale_items z WHERE z.id = ri.sale_item_id AND z.sale_id = x.sale_id) AS on_line
+  FROM return_items ri JOIN cust x ON x.id = ri.return_id
+  WHERE x.sale_id IN (SELECT sale_id FROM plan) AND COALESCE(x.status, 'completed') <> 'cancelled' AND ri.quantity > 0
+),
+short AS (
+  SELECT si.sale_id, si.product_id,
+    SUM(MAX(CAST(ROUND(si.quantity * 10000) AS INTEGER) - CAST(ROUND(MAX(COALESCE(si.returned_quantity, 0), 0) * 10000) AS INTEGER)
+      - COALESCE((SELECT SUM(r.q_u) FROM rline r WHERE r.sale_id = si.sale_id AND r.sale_item_id = si.id), 0), 0)) AS short_u
+  FROM sale_items si WHERE si.sale_id IN (SELECT sale_id FROM plan)
+  GROUP BY si.sale_id, si.product_id
+),
+quantity AS (
+  SELECT p.sale_id,
+    CASE WHEN (EXISTS (SELECT 1 FROM rline r WHERE r.sale_id = p.sale_id)
+        OR EXISTS (SELECT 1 FROM sale_items si WHERE si.sale_id = p.sale_id AND si.returned_quantity > 0))
+      AND NOT EXISTS (SELECT 1 FROM short h WHERE h.sale_id = p.sale_id AND h.short_u > CASE WHEN h.product_id IS NULL THEN 0
+        ELSE COALESCE((SELECT SUM(r.q_u) FROM rline r WHERE r.sale_id = h.sale_id AND r.on_line = 0 AND r.product_id = h.product_id), 0) END)
+      THEN 'returned' ELSE 'partial_return' END AS quantity_status
   FROM plan p
+),
+plan_status AS (
+  SELECT p.*, q.quantity_status,
+    CASE WHEN p.status_word IN ('returned', 'partial_return') AND p.owes_after = 1 THEN 'awaiting_payment'
+      WHEN p.status_word = 'awaiting_payment' AND p.owes_after = 0 THEN q.quantity_status
+      ELSE p.prior_sale_status END AS new_sale_status,
+    CASE WHEN p.status_word = 'awaiting_payment' AND p.owes_after = 0 THEN 'awaiting_payment'
+      ELSE p.prior_status_before_return END AS new_status_before_return
+  FROM plan p JOIN quantity q ON q.sale_id = p.sale_id
 )
 -- plan:end
 ,
 backfill AS (
   SELECT w.id AS return_id, w.sale_id, c.total_refund_usd AS refund_usd,
     MIN(w.red_u / 10000.0, c.total_refund_usd) AS owed_reduction_usd,
-    p.prior_sale_status, p.new_sale_status
+    p.prior_sale_status, p.new_sale_status, p.prior_status_before_return, p.new_status_before_return
   FROM walk w JOIN candidate c ON c.id = w.id JOIN plan_status p ON p.sale_id = w.sale_id
 )
-INSERT OR IGNORE INTO return_owed_backfill_0238 (return_id, sale_id, refund_usd, owed_reduction_usd, prior_sale_status, new_sale_status)
-SELECT return_id, sale_id, refund_usd, owed_reduction_usd, prior_sale_status, new_sale_status FROM backfill ORDER BY return_id;
+INSERT OR IGNORE INTO return_owed_backfill_0238 (return_id, sale_id, refund_usd, owed_reduction_usd, prior_sale_status, new_sale_status,
+  prior_status_before_return, new_status_before_return)
+SELECT return_id, sale_id, refund_usd, owed_reduction_usd, prior_sale_status, new_sale_status,
+  prior_status_before_return, new_status_before_return FROM backfill ORDER BY return_id;
 
 UPDATE sales
-SET sale_status = (SELECT b.new_sale_status FROM return_owed_backfill_0238 b WHERE b.sale_id = sales.id ORDER BY b.return_id LIMIT 1)
+SET sale_status = (SELECT b.new_sale_status FROM return_owed_backfill_0238 b WHERE b.sale_id = sales.id ORDER BY b.return_id LIMIT 1),
+  status_before_return = (SELECT b.new_status_before_return FROM return_owed_backfill_0238 b WHERE b.sale_id = sales.id ORDER BY b.return_id LIMIT 1)
 WHERE id IN (
   SELECT b.sale_id FROM return_owed_backfill_0238 b JOIN returns r ON r.id = b.return_id
   WHERE r.refund_currency IS NULL

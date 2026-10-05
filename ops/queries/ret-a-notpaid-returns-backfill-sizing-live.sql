@@ -23,7 +23,8 @@
 --   stays_cash_usd              the part above the debt, still a cash refund
 --   returns_with_reduction      backfill returns whose owed_reduction_usd becomes > 0
 --   sales_to_not_paid           Returned / Partial return -> Not Paid (they still owe)
---   not_paid_cleared_sales      already Not Paid, the returns now clear the debt (status left; owes $0)
+--   not_paid_cleared_sales      Not Paid sales whose debt the returns clear -> their quantity status
+--                               (Returned / Partial return), status_before_return Not Paid
 --   cash_beyond_paid_sales      cash part exceeds what the customer paid (0234 would have refused;
 --                               written anyway, debt cannot go below zero) -- review by hand
 --   mixed_sales                 sales that also hold a return written by 0234's code (capped by it)
@@ -82,7 +83,7 @@ pending AS (
   WHERE refund_currency IS NULL AND COALESCE(status, 'completed') <> 'cancelled' AND sale_id IS NOT NULL
 ),
 debt_sale AS (
-  SELECT s.id AS sale_id, s.sale_status AS prior_sale_status, s.legacy_receipt_number,
+  SELECT s.id AS sale_id, s.sale_status AS prior_sale_status, s.status_before_return AS prior_status_before_return, s.legacy_receipt_number,
     lower(trim(COALESCE(NULLIF(s.sale_status, ''), 'completed'))) AS status_word,
     CASE WHEN typeof(s.total_usd) IN ('integer', 'real') AND typeof(s.exchange_rate) IN ('integer', 'real')
       AND typeof(COALESCE(s.amount_paid_usd, 0)) IN ('integer', 'real')
@@ -117,7 +118,7 @@ candidate AS (
   FROM pending p JOIN debt_sale d ON d.sale_id = p.sale_id
 ),
 sale_verdict AS (
-  SELECT d.sale_id, d.prior_sale_status, d.status_word, d.legacy_receipt_number, d.tu, d.pu, d.pk, d.rn,
+  SELECT d.sale_id, d.prior_sale_status, d.prior_status_before_return, d.status_word, d.legacy_receipt_number, d.tu, d.pu, d.pk, d.rn,
     COALESCE(o.s0, 0) AS s0, COALESCE(o.post_cash_u, 0) AS post_cash_u, COALESCE(o.post_count, 0) AS post_count,
     CASE WHEN d.money_readable = 0 THEN 'money_unreadable'
       WHEN d.row_ok = 0 OR a.rows_ok = 0 THEN 'row_locked'
@@ -146,7 +147,7 @@ walk (id, sale_id, n, refund_u, tu, pu, pk, rn, before_u, red_u) AS (
   FROM walk w JOIN seq q ON q.sale_id = w.sale_id AND q.n = w.n + 1
 ),
 plan AS (
-  SELECT v.sale_id, v.prior_sale_status, v.status_word, v.legacy_receipt_number, v.post_count,
+  SELECT v.sale_id, v.prior_sale_status, v.prior_status_before_return, v.status_word, v.legacy_receipt_number, v.post_count,
     t.lowered_u, t.cash_u,
     CASE WHEN (v.tu - t.lowered_u - v.pu) * v.rn - v.pk * 10000 <= 50 * v.rn THEN 0 ELSE 1 END AS owes_after,
     CASE WHEN (t.cash_u + v.post_cash_u - v.pu) * v.rn - v.pk * 10000 > 50 * v.rn THEN 1 ELSE 0 END AS cash_beyond_paid
@@ -154,11 +155,36 @@ plan AS (
   JOIN (SELECT sale_id, MAX(before_u + red_u) AS lowered_u, SUM(refund_u - red_u) AS cash_u FROM walk GROUP BY sale_id) t
     ON t.sale_id = v.sale_id
 ),
-plan_status AS (
-  SELECT p.*,
-    CASE WHEN p.status_word IN ('returned', 'partial_return') AND p.owes_after = 1 THEN 'awaiting_payment'
-      ELSE p.prior_sale_status END AS new_sale_status
+rline AS (
+  SELECT x.sale_id, ri.sale_item_id, ri.product_id, CAST(ROUND(ri.quantity * 10000) AS INTEGER) AS q_u,
+    EXISTS (SELECT 1 FROM sale_items z WHERE z.id = ri.sale_item_id AND z.sale_id = x.sale_id) AS on_line
+  FROM return_items ri JOIN cust x ON x.id = ri.return_id
+  WHERE x.sale_id IN (SELECT sale_id FROM plan) AND COALESCE(x.status, 'completed') <> 'cancelled' AND ri.quantity > 0
+),
+short AS (
+  SELECT si.sale_id, si.product_id,
+    SUM(MAX(CAST(ROUND(si.quantity * 10000) AS INTEGER) - CAST(ROUND(MAX(COALESCE(si.returned_quantity, 0), 0) * 10000) AS INTEGER)
+      - COALESCE((SELECT SUM(r.q_u) FROM rline r WHERE r.sale_id = si.sale_id AND r.sale_item_id = si.id), 0), 0)) AS short_u
+  FROM sale_items si WHERE si.sale_id IN (SELECT sale_id FROM plan)
+  GROUP BY si.sale_id, si.product_id
+),
+quantity AS (
+  SELECT p.sale_id,
+    CASE WHEN (EXISTS (SELECT 1 FROM rline r WHERE r.sale_id = p.sale_id)
+        OR EXISTS (SELECT 1 FROM sale_items si WHERE si.sale_id = p.sale_id AND si.returned_quantity > 0))
+      AND NOT EXISTS (SELECT 1 FROM short h WHERE h.sale_id = p.sale_id AND h.short_u > CASE WHEN h.product_id IS NULL THEN 0
+        ELSE COALESCE((SELECT SUM(r.q_u) FROM rline r WHERE r.sale_id = h.sale_id AND r.on_line = 0 AND r.product_id = h.product_id), 0) END)
+      THEN 'returned' ELSE 'partial_return' END AS quantity_status
   FROM plan p
+),
+plan_status AS (
+  SELECT p.*, q.quantity_status,
+    CASE WHEN p.status_word IN ('returned', 'partial_return') AND p.owes_after = 1 THEN 'awaiting_payment'
+      WHEN p.status_word = 'awaiting_payment' AND p.owes_after = 0 THEN q.quantity_status
+      ELSE p.prior_sale_status END AS new_sale_status,
+    CASE WHEN p.status_word = 'awaiting_payment' AND p.owes_after = 0 THEN 'awaiting_payment'
+      ELSE p.prior_status_before_return END AS new_status_before_return
+  FROM plan p JOIN quantity q ON q.sale_id = p.sale_id
 )
 -- plan:end
 ,
@@ -187,7 +213,7 @@ SELECT
   (SELECT ROUND(COALESCE(SUM(red_u), 0) / 10000.0, 4) FROM walk) AS moves_to_debt_usd,
   (SELECT ROUND(COALESCE(SUM(refund_u - red_u), 0) / 10000.0, 4) FROM walk) AS stays_cash_usd,
   (SELECT COUNT(*) FROM walk WHERE red_u > 0) AS returns_with_reduction,
-  (SELECT COUNT(*) FROM plan_status WHERE new_sale_status IS NOT prior_sale_status) AS sales_to_not_paid,
+  (SELECT COUNT(*) FROM plan_status WHERE new_sale_status = 'awaiting_payment' AND status_word <> 'awaiting_payment') AS sales_to_not_paid,
   (SELECT COUNT(*) FROM plan_status WHERE status_word = 'awaiting_payment' AND owes_after = 0) AS not_paid_cleared_sales,
   (SELECT COUNT(*) FROM plan_status WHERE cash_beyond_paid = 1) AS cash_beyond_paid_sales,
   (SELECT COUNT(*) FROM plan_status WHERE post_count > 0) AS mixed_sales,

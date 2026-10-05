@@ -265,7 +265,8 @@ async function main() {
     assert.equal(pre.backfill_returns, backup.length)
     assert.equal(pre.backfill_sales, new Set(backup.map((row) => row.sale_id)).size)
     assert.equal(pre.moves_to_debt_usd, Math.round(backup.reduce((sum, row) => sum + row.owed_reduction_usd, 0) * 10000) / 10000)
-    assert.equal(pre.sales_to_not_paid, new Set(backup.filter((row) => row.new_sale_status !== row.prior_sale_status).map((row) => row.sale_id)).size)
+    assert.equal(pre.sales_to_not_paid, new Set(backup.filter((row) => row.new_sale_status === 'awaiting_payment' && row.prior_sale_status !== 'awaiting_payment').map((row) => row.sale_id)).size)
+    assert.equal(pre.not_paid_cleared_sales, new Set(backup.filter((row) => row.prior_sale_status === 'awaiting_payment' && row.new_sale_status !== 'awaiting_payment').map((row) => row.sale_id)).size)
     assert.deepEqual({
       refund_usd_counted_as_cash: pre.refund_usd_counted_as_cash, moves_to_debt_usd: pre.moves_to_debt_usd, stays_cash_usd: pre.stays_cash_usd,
       returns_with_reduction: pre.returns_with_reduction, sales_to_not_paid: pre.sales_to_not_paid, not_paid_cleared_sales: pre.not_paid_cleared_sales,
@@ -296,21 +297,36 @@ async function main() {
       const tender = pick(['none', 'usd', 'khr', 'both'])
       const paidUsd = tender === 'usd' || tender === 'both' ? Math.round(rand() * total * 100) / 100 : 0
       const paidKhr = tender === 'khr' || tender === 'both' ? Math.round(rand() * (total - paidUsd) * rate / 100) * 100 : 0
-      const status = pick(['awaiting_payment', 'partial_return', 'returned'])
-      sale(id, { total, paidUsd, paidKhr, rate, status, before: status === 'awaiting_payment' ? null : 'awaiting_payment' })
+      // The quantity status is computed HERE from the lines, independently of the
+      // sale's current status (verifier: passing the current status in as the
+      // quantity status could never catch a wrong mapping).
       const count = 1 + Math.floor(rand() * 4)
+      const sold = count + (rand() < 0.5 ? 1 : 0)
+      const notPaid = rand() < 0.45
+      sale(id, { total, paidUsd, paidKhr, rate, status: 'awaiting_payment', before: null })
+      raw.prepare(`INSERT INTO sale_items(id,sale_id,product_id,product_name,quantity,branch_id,applied_price_usd,total_usd)
+        VALUES(?,?,NULL,'Fuzz',?,1,1,?)`).run(id, id, sold, total)
       let left = total
       const refunds = []
       for (let k = 0; k < count && left > 0.01; k++) {
         const refund = Math.round(rand() * left * 100) / 100
         if (!(refund > 0)) continue
         left = Math.round((left - refund) * 100) / 100
-        refunds.push({ id: ret(id, refund), refund })
+        const rid = ret(id, refund)
+        raw.prepare(`INSERT INTO return_items(return_id,sale_item_id,product_name,quantity,applied_price_usd,total_usd,return_to_stock,stock_action,branch_id)
+          VALUES(?,?,'Fuzz',1,?,?,0,'none',1)`).run(rid, id, refund, refund)
+        refunds.push({ id: rid, refund })
       }
-      if (refunds.length) cases.push({ id, total, paidUsd, paidKhr, rate, status, refunds })
+      const quantityStatus = refunds.length >= sold ? 'returned' : 'partial_return'
+      // Before 0234 a return moved the sale to its quantity status (Not Paid kept
+      // as status_before_return); a later payment reopen can leave it Not Paid.
+      const status = notPaid ? 'awaiting_payment' : quantityStatus
+      raw.prepare('UPDATE sales SET sale_status = ?, status_before_return = ? WHERE id = ?').run(status, notPaid ? null : 'awaiting_payment', id)
+      if (refunds.length) cases.push({ id, total, paidUsd, paidKhr, rate, status, quantityStatus, refunds })
     }
     apply(raw)
     let reductions = 0
+    let clearedNotPaid = 0
     for (const c of cases) {
       const row = { total_usd: c.total, amount_paid_usd: c.paidUsd, amount_paid_khr: c.paidKhr, exchange_rate: c.rate,
         money_precision_version: 0, calculated_total_usd: null, sale_status: c.status, status_before_return: c.status === 'awaiting_payment' ? null : 'awaiting_payment' }
@@ -322,10 +338,16 @@ async function main() {
         prior.refundUsd += r.refund; prior.owedReductionUsd = Math.round((prior.owedReductionUsd + want.owedReductionUsd) * 10000) / 10000
         prior.loweredDebt = prior.loweredDebt || want.owedReductionUsd > 0
       }
-      const wantStatus = split.saleStatusWithReturns({ sale: row, activeOwedReductionUsd: prior.owedReductionUsd, loweredDebt: prior.loweredDebt, quantityStatus: c.status })
-      assert.equal(saleStatus(raw, c.id), wantStatus, `sale ${c.id} status`)
+      const wantStatus = split.saleStatusWithReturns({ sale: row, activeOwedReductionUsd: prior.owedReductionUsd, loweredDebt: prior.loweredDebt, quantityStatus: c.quantityStatus })
+      assert.equal(saleStatus(raw, c.id), wantStatus, `sale ${c.id} status (was ${c.status}, quantity ${c.quantityStatus})`)
+      if (c.status === 'awaiting_payment' && wantStatus !== 'awaiting_payment') {
+        clearedNotPaid++
+        assert.equal(raw.prepare('SELECT status_before_return AS b FROM sales WHERE id = ?').get(c.id).b, 'awaiting_payment',
+          'a Not Paid sale that leaves Not Paid keeps it as status_before_return, as the create path writes it')
+      }
     }
     assert.ok(cases.length > 350 && reductions > 300, `control: the fuzz exercised the split (${cases.length} sales, ${reductions} reductions)`)
+    assert.ok(clearedNotPaid > 20, `control: the fuzz cleared Not Paid debts and moved them to a quantity status (${clearedNotPaid})`)
   })
 
   console.log(`\n${checks} check(s) passed${failed ? `, ${failed} failed` : '.'}`)
