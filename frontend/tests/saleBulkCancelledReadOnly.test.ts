@@ -29,6 +29,7 @@ import { createRequire } from 'node:module'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { transformSync } from 'esbuild'
+import { bulkDialogDependency, NOT_BULK_DIALOG_DEPENDENCY } from './bulkFieldChangeDialogShim.ts'
 
 const nodeRequire = createRequire(import.meta.url)
 const React = nodeRequire('react')
@@ -104,6 +105,8 @@ function renderModal(cancelledCount: number): string {
     if (id === 'react-dom') return { createPortal: (node: unknown) => node }
     if (id.includes('lucide-react')) return { __esModule: true, default: () => null }
     if (id.includes('AppSelect')) return { __esModule: true, default: ({ ariaLabel }: AnyProps) => React.createElement('span', { 'data-select': ariaLabel }) }
+    const dialogDependency = bulkDialogDependency(id, shim)
+    if (dialogDependency !== NOT_BULK_DIALOG_DEPENDENCY) return dialogDependency
     return nodeRequire(id)
   }
   new Function('require', 'module', 'exports', compiled)(shim, mod, mod.exports)
