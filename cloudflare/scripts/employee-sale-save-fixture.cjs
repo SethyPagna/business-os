@@ -69,6 +69,7 @@ async function main() {
     await run('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(?,1,100)', p.id + 500)
   }
   await run("INSERT INTO settings(key,value) VALUES('exchange_rate','4000') ON CONFLICT(key) DO UPDATE SET value=excluded.value")
+  await run("INSERT INTO settings(key,value) VALUES('pos_payment_methods','[\"Cash\"]') ON CONFLICT(key) DO UPDATE SET value=excluded.value")
   async function dispatch(url, method, body, cookie) {
     const response = await mf.dispatchFetch(origin + url, { method, headers: { 'content-type': 'application/json', ...(cookie ? { cookie } : {}) }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) })
     return { status: response.status, body: await response.json(), cookie: response.headers.get('set-cookie') }
