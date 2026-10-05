@@ -404,6 +404,37 @@ const mixedAdditiveUnread = (text, repairText) => {
   return columns.size > 0 && indexes > 0 && guards > 0
 }
 
+// A bounded identity backfill (0229): helper tables it creates, fills and drops
+// in the same file, plus UPDATEs that assign only quoted literals to columns the
+// repair never names. It reads anything but leaves no table, trigger, index or
+// view behind, and writes no value the repair reads; an UPDATE's own triggers
+// are covered by the populated both-orders run, not by this static shape.
+const identityBackfillUnread = (text, repairText, schemaTables) => {
+  const statements = sqlCode(text).split(';').map((s) => s.replace(/\s+/g, ' ').trim()).filter(Boolean)
+  const helpers = new Set(), dropped = new Set()
+  let updates = 0
+  for (const statement of statements) {
+    let match
+    if ((match = /^CREATE TABLE (\w+) \(/i.exec(statement))) {
+      const name = match[1].toLowerCase()
+      if (schemaTables.has(name) || helpers.has(name) || namedIn(repairText)(name)) return false
+      helpers.add(name)
+    } else if ((match = /^INSERT INTO (\w+) /i.exec(statement))) {
+      const name = match[1].toLowerCase()
+      if (!helpers.has(name) || dropped.has(name)) return false
+    } else if ((match = /^UPDATE \w+ SET (\w+ = '[a-z0-9_]+'(?:, \w+ = '[a-z0-9_]+')*) WHERE /i.exec(statement))) {
+      const columns = match[1].split(', ').map((pair) => pair.split(' = ')[0])
+      if (columns.some((column) => namedIn(repairText)(column))) return false
+      updates++
+    } else if ((match = /^DROP TABLE (\w+)$/i.exec(statement))) {
+      const name = match[1].toLowerCase()
+      if (!helpers.has(name) || dropped.has(name)) return false
+      dropped.add(name)
+    } else return false
+  }
+  return updates > 0 && dropped.size === helpers.size
+}
+
 function completeState(raw) {
   const quote = name => `"${name.replaceAll('"', '""')}"`
   const schema = raw.prepare('SELECT type,name,tbl_name,sql FROM sqlite_master ORDER BY type,name').all()
@@ -419,7 +450,7 @@ function completeState(raw) {
   return { schema, tables }
 }
 
-function assertPopulatedOrders(chain, chainText, mixed) {
+function assertPopulatedOrders(chain, chainText, mixed, backfills = []) {
   const { raw, ids } = seed()
   raw.limits.exprDepth = 100
   raw.function('current_timestamp', () => '2026-10-03 10:00:00')
@@ -462,6 +493,15 @@ function assertPopulatedOrders(chain, chainText, mixed) {
       assert.throws(() => run(true, new Map([[file, ignore]])), /Missing expected exception/, 'INSERT-ignore control must lose the sentinel')
       assert.throws(() => run(false, new Map([[file, oldField]])), /wrong_old_field/, 'old-field update guard must affect the repair')
     }
+    for (const file of backfills) {
+      const original = chainText(file)
+      const dml = `${original}\nUPDATE sale_items SET cost_price_usd=123 WHERE id=${ids.s0.lineId};`
+      const ignore = `${original}\nCREATE TRIGGER wrong_ignore BEFORE INSERT ON branches WHEN NEW.name IS NULL BEGIN SELECT RAISE(IGNORE); END;`
+      const oldField = `${original}\nCREATE TRIGGER wrong_old_field BEFORE UPDATE OF cost_price_usd ON sale_items WHEN OLD.cost_price_usd IS NOT NULL AND NEW.cost_price_usd IS NOT OLD.cost_price_usd BEGIN SELECT RAISE(ABORT, 'wrong_old_field'); END;`
+      assert.notDeepEqual(run(true, new Map([[file, dml]]), false).state, run(false, new Map([[file, dml]]), false).state, `${file}: later data mutation is order-dependent`)
+      assert.throws(() => run(true, new Map([[file, ignore]])), /Missing expected exception/, `${file}: INSERT-ignore control must lose the sentinel`)
+      assert.throws(() => run(false, new Map([[file, oldField]])), /wrong_old_field/, `${file}: old-field update guard must affect the repair`)
+    }
   } finally { raw.close() }
 }
 
@@ -483,7 +523,9 @@ check('held: outside deploy chain, after dependencies including0195; independent
   const tables = fresh.prepare("SELECT name FROM sqlite_master WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite_%'").all().map((r) => r.name)
   const touched = tables.filter(namedIn(migrationText))
   const mixed = chain.filter(file => mixedAdditiveUnread(chainText(file), migrationText))
-  const dependencies = chain.filter((f) => !indexOnly(chainText(f)) && !additiveUnread(chainText(f), migrationText) && !mixed.includes(f) && touched.some(namedIn(chainText(f))))
+  const schemaTables = new Set(tables.map((t) => t.toLowerCase()))
+  const backfills = chain.filter(file => identityBackfillUnread(chainText(file), migrationText, schemaTables))
+  const dependencies = chain.filter((f) => !indexOnly(chainText(f)) && !additiveUnread(chainText(f), migrationText) && !mixed.includes(f) && !backfills.includes(f) && touched.some(namedIn(chainText(f))))
   assert.ok(['sale_items', 'return_items', 'catalog_cost_repair_0195_backup'].every((t) => touched.includes(t)), 'control: the scan sees the two tables it writes and the 0195 backup it reads')
   assert.ok(dependencies.includes('0195_catalog_cost_on_hand.sql'), 'control: the scan finds 0195')
   assert.ok(indexOnly('-- x\nCREATE INDEX IF NOT EXISTS i ON sale_items(id);\nCREATE UNIQUE INDEX j ON sale_items(id);'), 'control: an index-only file is skipped')
@@ -497,6 +539,22 @@ check('held: outside deploy chain, after dependencies including0195; independent
   for (const file of mixed) {
     assert.ok(mixedAdditiveUnread(`-- header: UPDATE sale_items SET cost_price_usd = 1;\n/* DROP TABLE sale_items; */\n${chainText(file)}`, migrationText), `control: a comment header leaves ${file} independent`)
     assert.ok(!mixedAdditiveUnread(`${chainText(file)}\n-- trailing note\nUPDATE sale_items SET cost_price_usd = 1;`, migrationText), `control: a real statement after a comment in ${file} is still a dependency`)
+  }
+  assert.ok(identityBackfillUnread('UPDATE branches SET role = \'shop\' WHERE id = 1;', migrationText, schemaTables), 'control: a literal update of an unread column alone is a bounded backfill')
+  assert.ok(backfills.length > 0, 'control: the bounded-backfill scan proves at least one later file independent')
+  assert.ok(!identityBackfillUnread('UPDATE sale_items SET cost_price_usd = \'1\' WHERE id = 1;', migrationText, schemaTables), 'control: a literal update of a column the repair names is still a dependency')
+  assert.ok(!identityBackfillUnread('UPDATE branches SET role = name WHERE id = 1;', migrationText, schemaTables), 'control: a non-literal assignment is still a dependency')
+  for (const file of backfills) {
+    const original = chainText(file)
+    for (const wrong of [
+      `${original}\nUPDATE sale_items SET cost_price_usd=123 WHERE id=1;`,
+      `${original}\nUPDATE branches SET name = 'x' WHERE id = 1;`,
+      `${original}\nCREATE TRIGGER wrong_ignore BEFORE INSERT ON branches WHEN NEW.name IS NULL BEGIN SELECT RAISE(IGNORE); END;`,
+      `${original}\nCREATE TABLE zz_kept_helper (v);`,
+      `${original}\nINSERT INTO sale_items (id) SELECT 1 WHERE 0;`,
+      `${original}\nCREATE INDEX zz_index ON branches(role);`,
+    ]) assert.equal(identityBackfillUnread(wrong, migrationText, schemaTables), false, `control: unsafe SQL appended to ${file} remains a dependency`)
+    assert.ok(identityBackfillUnread(`-- header: UPDATE sale_items SET cost_price_usd = 1;\n${original}`, migrationText, schemaTables), `control: a comment header leaves ${file} a bounded backfill`)
   }
   const later = chain.filter((f) => movedIn.indexOf(f) > movedIn.indexOf(heldName))
   assert.deepEqual(later.filter((f) => dependencies.includes(f)), [],
@@ -513,7 +571,7 @@ check('held: outside deploy chain, after dependencies including0195; independent
   const schema = (db) => db.prepare('SELECT type, name, tbl_name, sql FROM sqlite_master ORDER BY type, name').all()
   assert.deepEqual(schema(byNumber), schema(fresh), `before or after ${later.join(', ') || 'no later file'}: the same schema`)
   assert.throws(() => openDb(loadAll({ through: 194 })).db.exec(migrationText), /catalog_cost_repair_0195_backup/, 'without 0195 it refuses to run')
-  assertPopulatedOrders(chain, chainText, mixed)
+  assertPopulatedOrders(chain, chainText, mixed, backfills)
 })
 
 check('owner-run audit: every header command is --command (never --file); the cut statements are the audit verbatim and run', () => {
