@@ -139,9 +139,10 @@ await check('source lock: the frontend sends the challenge and the persistent de
   assert.ok(verifyAt > -1 && /getOrCreatePersistentDeviceId\(\)/.test(transport.slice(verifyAt, verifyAt + 400)), 'otpVerify must carry the persistent deviceId for the re-run device gate')
 })
 
-await check('source lock: new OTP enrollment uses the Leang Beauty authenticator label', () => {
+await check('source lock: new OTP enrollment uses the Leang Cosmetics Admin authenticator label', () => {
   const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'auth.ts'), 'utf8')
-  assert.ok(/generateTotpSecret\(target\.username, 'Leang Beauty'\)/.test(src))
+  assert.ok(/const ADMIN_APP_NAME = 'Leang Cosmetics Admin'/.test(src))
+  assert.ok(/generateTotpSecret\(target\.username, ADMIN_APP_NAME\)/.test(src))
 })
 
 await check('source lock: peer-admin 2FA recovery requires a password-confirmed, audited break-glass action', () => {

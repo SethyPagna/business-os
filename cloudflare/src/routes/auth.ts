@@ -909,9 +909,9 @@ app.post('/otp/setup', requireAuth, async (c) => {
   if (reauthFailure) return c.json({ error: reauthFailure.error, code: reauthFailure.code }, reauthFailure.status)
 
   // The issuer is only an authenticator-app label; it does not affect the
-  // generated codes. Use the public product name for newly enrolled devices
-  // so people do not select an old, similarly named BusinessOS entry.
-  const { base32, otpauthUrl } = generateTotpSecret(target.username, 'Leang Beauty')
+  // generated codes. Use the staff app name for newly enrolled devices so
+  // people do not select an old BusinessOS or Leang Beauty entry.
+  const { base32, otpauthUrl } = generateTotpSecret(target.username, ADMIN_APP_NAME)
   // Without a usable APP_ENCRYPTION_KEY the TOTP secret is refused rather
   // than stored in plaintext; nothing is written and enrollment does not start.
   let encrypted: string
