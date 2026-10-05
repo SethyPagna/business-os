@@ -640,6 +640,40 @@ async function main() {
     }
   })
 
+  // N12b: self-approval is matched on the ACCOUNT ID, never on a display or user name. Names change
+  // (renames) and can repeat (two staff called the same), ids do not.
+  await check('N12b: a requester who has since been renamed (same id) is still refused; a different account with the same name approves', async () => {
+    const feeId = seedFee()
+    const original = { id: 41, username: 'dara', name: 'Dara', permissions: JSON.stringify({ fees: 'review', review: true }) }
+    const queued = await req(feesApp, original, 'DELETE', `/${feeId}`)
+    assert.strictEqual(queued.status, 202, JSON.stringify(queued.json))
+    const pendingId = queued.json.pendingActionId
+    assert.strictEqual(db.prepare('SELECT requested_by FROM pending_actions WHERE id=@id').get({ id: pendingId }).requested_by, 41)
+
+    // Same account (id 41), renamed to something unrelated, now Full in fees.
+    const renamed = { id: 41, username: 'dara.renamed', name: 'Completely Different Name', permissions: JSON.stringify({ fees: true, review: true }) }
+    const refused = await req(reviewApp, renamed, 'POST', `/${pendingId}/approve`)
+    assert.strictEqual(refused.status, 403, JSON.stringify(refused.json))
+    assert.strictEqual(refused.json.code, 'review_self_approval')
+    assert.strictEqual(db.prepare('SELECT status FROM pending_actions WHERE id=@id').get({ id: pendingId }).status, 'open')
+
+    // A different account (id 42) that happens to carry the requester's username and name.
+    const namesake = { id: 42, username: 'dara', name: 'Dara', permissions: JSON.stringify({ fees: true, review: true }) }
+    const allowed = await req(reviewApp, namesake, 'POST', `/${pendingId}/approve`)
+    assert.strictEqual(allowed.status, 200, JSON.stringify(allowed.json))
+    assert.strictEqual(allowed.json.data.reviewed_by, 42)
+    assert.strictEqual(await db.prepare('SELECT id FROM fees WHERE id=@id').get({ id: feeId }), undefined)
+  })
+
+  await check('N12b: the id comparison is numeric, so a string id from a session row still matches', async () => {
+    const feeId = seedFee()
+    const queued = await req(feesApp, { id: 43, username: 'x', name: 'X', permissions: JSON.stringify({ fees: 'review', review: true }) }, 'DELETE', `/${feeId}`)
+    const asString = { id: '43', username: 'other', name: 'Other', permissions: JSON.stringify({ fees: true, review: true }) }
+    const refused = await req(reviewApp, asString, 'POST', `/${queued.json.pendingActionId}/approve`)
+    assert.strictEqual(refused.status, 403)
+    assert.strictEqual(refused.json.code, 'review_self_approval')
+  })
+
   console.log(`\n${passed} check(s) passed.`)
 }
 
