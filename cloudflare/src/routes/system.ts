@@ -6,6 +6,7 @@ import { getDb } from '../lib/db'
 import { audit } from '../lib/audit'
 import { runDataIntegrityCheck } from '../lib/dataIntegrity'
 import { listObjects, deleteObject, deleteObjectsBulk } from '../lib/r2'
+import { variantKeysForUploadKeys } from '../lib/imageVariantStore'
 import { cleanOrphanImportStaging } from '../lib/importRetention'
 import { sanitizeMediaList } from '../lib/media'
 import { ensureCoreDataInvariants, dropAllCustomTables, FACTORY_RESET_TABLES, PRODUCTS_RESET_TABLES, presentResetTables, resolveSeedAdminPassword } from '../lib/coreDataInvariants'
@@ -386,6 +387,12 @@ app.post('/reset-data', async (c) => {
         }
       }
 
+      // Thumbnails of the originals just deleted (one bulk delete, never throws).
+      if (includeImages && imageKeysToDelete.length) {
+        const variantKeys = variantKeysForUploadKeys(imageKeysToDelete.slice(0, imageDeleteCap))
+        if (variantKeys.length) await deleteObjectsBulk(c.env.ASSETS, variantKeys)
+      }
+
       const productResetLabelParts = ['products, batches, and branch/batch stock deleted']
       if (includeMovements) productResetLabelParts.push('movement/audit history deleted')
       if (includeSales) productResetLabelParts.push('sales and returns deleted')
@@ -576,7 +583,9 @@ app.post('/reset-data', async (c) => {
       // ceiling AFTER the D1 wipe above had already committed. Still
       // non-fatal (orphaned R2 objects don't affect app correctness), but
       // failures are now counted in the audit record instead of vanishing.
-      for (const prefix of ['uploads/', 'imports/']) {
+      // variants/ = thumbnails derived from uploads/ (lib/imageVariantStore.ts); leaving them
+      // behind would keep the wiped photos reachable at /uploads/_v/...
+      for (const prefix of ['uploads/', 'variants/', 'imports/']) {
         try {
           const objects = await listObjects(c.env.ASSETS, prefix)
           const result = await deleteObjectsBulk(c.env.ASSETS, objects.map((o) => o.key))
@@ -1276,7 +1285,9 @@ app.post('/factory-reset', async (c) => {
     // (one subrequest per 1,000 keys; the old per-object Promise.all was
     // unbounded). deletedObjectCount now counts actual successes, not the
     // listing size.
-    for (const prefix of ['uploads/', 'imports/']) {
+    // variants/ = thumbnails derived from uploads/ (lib/imageVariantStore.ts); leaving them
+    // behind would keep the wiped photos reachable at /uploads/_v/...
+    for (const prefix of ['uploads/', 'variants/', 'imports/']) {
       try {
         const objects = await listObjects(c.env.ASSETS, prefix)
         const result = await deleteObjectsBulk(c.env.ASSETS, objects.map((o) => o.key))

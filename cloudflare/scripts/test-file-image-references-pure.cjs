@@ -99,6 +99,7 @@ const route = loadTs('routes/files.ts', {
   '../lib/libraryLogicalAssets': { logicalLibraryName: (name) => name },
   '../lib/uploadSecurity': { validateUploadedBuffer: () => ({ ok: true }) },
   '../lib/imageAudit': { enqueueImageNormalization: async () => {} },
+  '../lib/imageVariantStore': { persistClientImageVariants: async () => ({}), deleteImageVariants: async () => {}, variantKeysForUploadKeys: () => [] },
   '../lib/imagePipeline': { optimizeImage: async () => ({}), IMAGE_MAX_BYTES: 1024 },
   '../lib/rateLimit': { checkRateLimit: async () => ({ allowed: true }), getClientIp: () => '127.0.0.1' },
   '../lib/audit': { audit: async () => {} },

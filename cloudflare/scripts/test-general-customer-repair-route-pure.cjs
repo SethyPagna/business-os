@@ -108,6 +108,9 @@ const systemRoute = loadReal('routes/system.ts', {
   // image-delete cap the reset path now reads -- real, not an inert stub,
   // which would make that cap undefined and slice(0, undefined) empty.
   '../lib/planTier': loadReal('lib/planTier.ts'),
+  // routes/system.ts imports the pure variant-key helper for the products-reset image sweep (line ~392);
+  // this suite does not assert on variant keys, so an empty-key stub is enough (the real helper is covered by test-image-variant-store-pure).
+  '../lib/imageVariantStore': { variantKeysForUploadKeys: () => [] },
   '../lib/auth': auth,
   '../lib/permissions': permissions,
   '../lib/db': dbKernel,

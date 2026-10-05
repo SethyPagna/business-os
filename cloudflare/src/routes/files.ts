@@ -12,6 +12,7 @@ import { findUploadReferences } from '../lib/uploadReferences'
 import { UPLOAD_CONTENT_SECURITY_POLICY } from '../lib/r2'
 import { chunkForBinding } from '../lib/sqlBinding'
 import { classifyUploadedBuffer, extensionForImageMime, type DetectedUploadFormat } from '../lib/uploadSecurity'
+import { deleteImageVariants, persistClientImageVariants } from '../lib/imageVariantStore'
 import { audit } from '../lib/audit'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from '../lib/cache'
@@ -432,6 +433,9 @@ app.post('/upload', async (c) => {
   // chance asynchronously. Do not reject the user's photo merely because a
   // browser codec/provider was unavailable at this moment.
   if (mediaType === 'image' && !normalizedInline) await enqueueImageNormalization(c.env, objectKey)
+  // The browser's 320 px and 640 px WebP thumbnails ride in the same request (lib/imageVariantStore.ts):
+  // best effort, never fails the upload, and a missing one falls back to the original.
+  if (mediaType === 'image') await persistClientImageVariants(c.env, storedName, form)
 
   const publicPath = `/uploads/${storedName}`
   const db = getDb(c.env)
@@ -710,6 +714,8 @@ app.delete('/:id', async (c) => {
   }
 
   await c.env.ASSETS.delete(`uploads/${asset.stored_name}`)
+  // Its persisted thumbnails go with it, so a deleted photo cannot keep answering from variants/.
+  await deleteImageVariants(c.env, String(asset.stored_name), new URL(c.req.url).origin)
   await db.prepare('DELETE FROM file_assets WHERE id = ?').run([id])
 
   // `forced` records that the user typed the CONFIRM DELETE override past a

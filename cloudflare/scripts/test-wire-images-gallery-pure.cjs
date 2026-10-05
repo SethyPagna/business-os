@@ -181,6 +181,7 @@ const productsRoute = loadReal('routes/products.ts', {
   // K3 Part 417: products.ts enqueues on-upload image normalization;
   // this test asserts gallery wiring, so a no-op stub is honest.
   '../lib/imageAudit': { enqueueImageNormalization: async () => {} },
+  '../lib/imageVariantStore': { persistClientImageVariants: async () => ({}), deleteImageVariants: async () => {}, variantKeysForUploadKeys: () => [] },
   // D1 Part 415 (a7's unit): products.ts gained the stock-ledger read;
   // this test asserts gallery wiring and never hits that route, so inert
   // stubs are honest. (Added by 6e while landing the Part-registry fix --

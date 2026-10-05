@@ -44,6 +44,7 @@ const OWNER = { id: 1, username: 'owner', name: 'Owner', role_code: 'admin', per
 
 const filesRoute = load('routes/files.ts', {
   '../lib/imageAudit': { enqueueImageNormalization: noop },
+  '../lib/imageVariantStore': { persistClientImageVariants: async () => ({}), deleteImageVariants: async () => {}, variantKeysForUploadKeys: () => [] },
   '../lib/imagePipeline': { optimizeImage: async () => null, IMAGE_MAX_BYTES: 8 * 1024 * 1024 },
   '../lib/db': { getDb: (env) => env.DB },
   '../lib/auth': { requireAuth: async (c, next) => { c.set('user', OWNER); return next() } },

@@ -201,7 +201,9 @@ async function main() {
     // index.ts's public route must pass ctx through; portal.ts's staff-only
     // screenshot route must not.
     const indexSource = readSrc('index.ts')
-    assert.match(indexSource, /serveObject\(c\.env\.ASSETS, key, c\.req\.raw, c\.executionCtx\)/,
+    // serveUpload (lib/imageVariants.ts) hands ctx on to serveObject for every
+    // non-variant path, so the shared-cache behaviour pinned above is unchanged.
+    assert.match(indexSource, /serveUpload\(c\.env, c\.req\.path, c\.req\.raw, c\.executionCtx\)/,
       'the public /uploads/* route must pass executionCtx so responses are shared-cached')
     const portalSource = readSrc('routes/portal.ts')
     assert.match(portalSource, /serveObject\(c\.env\.ASSETS, key, c\.req\.raw\)\s*$/m,

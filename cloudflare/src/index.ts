@@ -39,7 +39,7 @@ import { admitRequestBody, SMALL_BODY_BYTES, MIGRATION_FINALIZE_BODY_BYTES, smal
 import { ensureCoreDataInvariantsForRequest } from './lib/coreInvariantsGate'
 import { getMaintenance, isMaintenanceGatedRequest } from './lib/maintenance'
 import { reportError } from './lib/errorReporting'
-import { serveObject } from './lib/r2'
+import { serveUpload } from './lib/imageVariants'
 import { handleImportQueue, handleImportDeadLetterQueue, handleMediaQueue, handleBackupQueue } from './queue'
 import { deliverTelegramShiftOverview, drainDueTelegramShiftOverviews, isShiftOverviewQueueMessage } from './lib/telegram'
 import { maybeRunScheduledBackup } from './lib/backup'
@@ -537,9 +537,13 @@ app.get('/ws', async (c) => {
 // public (uploaded product/promotion images need to load on the public
 // portal without a login). Access control happens at upload/delete time
 // (files.ts requires auth), not at read time.
+//
+// serveUpload (lib/imageVariants.ts) is the variant-aware entry point: a plain
+// path is served exactly as serveObject always did, and `/uploads/_v/w<W>/<name>`
+// is the persisted w<W> thumbnail of `<name>`, falling back to the original
+// (short max-age) while no variant exists -- never a 404 for a real image.
 app.get('/uploads/*', async (c) => {
-  const key = `uploads/${c.req.path.replace(/^\/uploads\//, '')}`
-  return serveObject(c.env.ASSETS, key, c.req.raw, c.executionCtx)
+  return serveUpload(c.env, c.req.path, c.req.raw, c.executionCtx)
 })
 
 app.route('/api/settings', settingsRoute)

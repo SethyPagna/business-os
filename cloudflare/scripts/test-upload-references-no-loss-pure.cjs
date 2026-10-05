@@ -72,6 +72,7 @@ const uploadReferences = load('lib/uploadReferences.ts')
 const common = {
   '../lib/imageAudit': { enqueueImageNormalization: noop },
   '../lib/passwordHash': load('lib/passwordHash.ts'),
+  '../lib/imageVariantStore': { persistClientImageVariants: async () => ({}), deleteImageVariants: async () => {}, variantKeysForUploadKeys: () => [] },
   '../lib/db': dbMod,
   '../lib/auth': { requireAuth: async (c, next) => { c.set('user', actor); return next() }, revokeUserSessions: noop },
   '../lib/audit': {

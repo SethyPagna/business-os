@@ -141,6 +141,12 @@ const media = loadReal('lib/media.ts')
 
 // N13: the shared actor / branch kernels these routes now import.
 const actorSnapshotKernel = loadReal('lib/actorSnapshot.ts')
+// The REAL thumbnail-key helper: an includeImages reset must delete the variants of the originals it deletes.
+const imageVariantStore = loadReal('lib/imageVariantStore.ts', {
+  '../index': {},
+  './uploadSecurity': {},
+  './imageVariants': loadReal('lib/imageVariants.ts', { './quotaGuard': {}, './r2': {}, '../index': {} }),
+})
 const planTier = loadReal('lib/planTier.ts')
 
 const systemRoute = loadReal('routes/system.ts', {
@@ -149,6 +155,7 @@ const systemRoute = loadReal('routes/system.ts', {
   // which would make that cap undefined and slice(0, undefined) empty.
   '../lib/planTier': planTier,
   '../lib/actorSnapshot': actorSnapshotKernel,
+  '../lib/imageVariantStore': imageVariantStore,
   '../lib/db': { getDb: () => db },
   '../lib/auth': { requireAuth: async (c, next) => { c.set('user', sessionUser); return next() } },
   // The REAL current-password guard and the real lib/passwordHash.ts (a
@@ -468,10 +475,18 @@ async function main() {
 
     // 3 real image paths were seeded: products.image_path + 2 product_images
     // rows, one already-slashed and one bare (both sanitizeMediaPath forms).
-    assert.strictEqual(deletedObjectKeys.length, 3, `expected exactly the 3 seeded image keys, got: ${JSON.stringify(deletedObjectKeys)}`)
+    // ...and their thumbnails (variants/w160|w320|w640/<name>.webp), nothing else:
+    // never a blanket prefix, only the keys these rows pointed to.
+    const originals = deletedObjectKeys.filter((key) => key.startsWith('uploads/'))
+    const variants = deletedObjectKeys.filter((key) => key.startsWith('variants/'))
+    assert.strictEqual(originals.length, 3, `expected exactly the 3 seeded image keys, got: ${JSON.stringify(deletedObjectKeys)}`)
+    assert.strictEqual(deletedObjectKeys.length, 3 + 9, `3 originals + 3 widths each, got: ${JSON.stringify(deletedObjectKeys)}`)
     assert.ok(deletedObjectKeys.includes('uploads/product-1-main.jpg'), JSON.stringify(deletedObjectKeys))
     assert.ok(deletedObjectKeys.includes('uploads/product-1-gallery-a.jpg'), JSON.stringify(deletedObjectKeys))
     assert.ok(deletedObjectKeys.includes('uploads/product-1-gallery-b.jpg'), JSON.stringify(deletedObjectKeys))
+    for (const name of ['product-1-main.jpg', 'product-1-gallery-a.jpg', 'product-1-gallery-b.jpg']) {
+      for (const width of [160, 320, 640]) assert.ok(variants.includes(`variants/w${width}/${name}.webp`), `missing w${width} variant of ${name}`)
+    }
   })
 
   await check('mode=products with includeImages=true is REFUSED on the free plan instead of deleting part of the files', async () => {

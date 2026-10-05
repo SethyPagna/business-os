@@ -104,7 +104,7 @@ const STUBS: Record<string, unknown> = {
     route: async () => { throw new Error('route is not part of an upload') },
   },
   '/actorReadScope.ts': { captureActorReadScope: () => ({}), assertActorReadScope() {}, assertActorSessionDispatchAllowed() {} },
-  '/imageCompression.ts': { compressImageFile: async (file: File) => file, isCompressibleImageFile: () => false },
+  '/imageCompression.ts': { compressImageFile: async (file: File) => file, isCompressibleImageFile: () => false, createImageThumbnails: async () => [], appendImageThumbnails: () => {} },
   '/videoCompression.ts': { compressVideoFile: async (file: File) => file, isCompressibleVideoFile: () => false },
   '/mediaUpload.ts': { canonicalizePersistedMediaPath: (value: unknown) => String(value || '') },
   '/multipartHeaders.ts': { buildMultipartHeaders: () => ({}) },

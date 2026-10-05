@@ -9,9 +9,11 @@
 //   - hit serves the persisted variant without transforming or metering;
 //   - miss meters exactly once, transforms at the requested width as WebP,
 //     persists under variants/w<width>/<name>.webp, and the next request hits;
-//   - binding missing / quota exhausted / reserve exhausted / transform error
-//     serve the ORIGINAL bytes with a short max-age, never a 500 and never a
-//     persisted or edge-cached variant;
+//   - binding missing / quota exhausted / reserve exhausted / quota not 'ok' /
+//     transform error answer a 302 to the ORIGINAL (`/uploads/<name>`) with a
+//     short max-age -- never a 500, never a persisted or edge-cached variant,
+//     and never the original's bytes under the variant URL (that would
+//     re-download ~0.84 MB every five minutes; the original URL is immutable);
 //   - If-None-Match handles W/ and lists (the old strict-equality check did not).
 //
 // Run: node scripts/test-image-variants-pure.cjs
@@ -241,11 +243,11 @@ check('miss: meter once, transform at width as WebP q80 scale-down, persist, ser
 })
 
 async function assertOriginalFallback(res, label) {
-  assert.strictEqual(res.status, 200, label)
-  assert.strictEqual(await res.text(), 'ORIGINAL', `${label}: original bytes`)
+  assert.strictEqual(res.status, 302, label)
+  assert.strictEqual(res.headers.get('location'), `/uploads/${encodeURIComponent(NAME)}`, `${label}: points at the original upload`)
+  assert.strictEqual(await res.text(), '', `${label}: no body (the original's bytes are not served under the variant URL)`)
   assert.strictEqual(res.headers.get('cache-control'), IMAGE_VARIANT_FALLBACK_CACHE_CONTROL, `${label}: short max-age`)
   assert.strictEqual(IMAGE_VARIANT_FALLBACK_CACHE_CONTROL, 'public, max-age=300')
-  assert.strictEqual(res.headers.get('content-type'), 'image/jpeg', `${label}: original's type`)
 }
 
 check('quota exhausted -> original, no transform, nothing persisted or edge-cached', async () => {
@@ -258,6 +260,38 @@ check('quota exhausted -> original, no transform, nothing persisted or edge-cach
   assert.strictEqual(images.calls.length, 0)
   assert.deepStrictEqual(env.ASSETS.log.puts, [])
   assert.strictEqual(globalThis.caches.default.store.size, 0)
+})
+
+check('quota past the safe zone (warn / critical) -> original: a variant is the first thing to give way', async () => {
+  for (const zone of ['warn', 'critical']) {
+    const images = makeImages()
+    const env = freshEnv({ images })
+    quota.next = { allowed: true, zone, reservedZone: zone }
+    await assertOriginalFallback(await serveUpload(env, `/uploads/_v/w320/${NAME}`, req(`/uploads/_v/w320/${NAME}`), makeCtx()), zone)
+    assert.strictEqual(images.calls.length, 0, `${zone}: no transform`)
+  }
+})
+
+check('the redirect target is one validated segment: encoded, never a variant path, never a backup', async () => {
+  const names = ['Nivea Cream 100ml-1758844800000-ab12cd34.jpg', 'ក្រែម-1758844800000-ab12cd34.jpg']
+  for (const name of names) {
+    const env = freshEnv({ images: null, extraSeed: { [`uploads/${name}`]: { body: 'O', contentType: 'image/jpeg' } } })
+    const res = await serveUpload(env, `/uploads/_v/w320/${name}`, req(`/uploads/_v/w320/${encodeURIComponent(name)}`), makeCtx())
+    assert.strictEqual(res.status, 302)
+    const location = res.headers.get('location')
+    assert.strictEqual(location, `/uploads/${encodeURIComponent(name)}`)
+    assert.ok(!location.includes('_v/') && !location.includes('..') && !location.includes('backups'), location)
+    assert.strictEqual(decodeURIComponent(location.slice('/uploads/'.length)), name, 'round-trips to the same stored name')
+  }
+})
+
+check('the common miss probes the original with a ranged read and never streams the whole file', async () => {
+  const env = freshEnv({ images: null })
+  const gets = []
+  const realGet = env.ASSETS.get.bind(env.ASSETS)
+  env.ASSETS.get = async (key, options) => { gets.push([key, options && options.range]); return realGet(key, options) }
+  await serveUpload(env, `/uploads/_v/w320/${NAME}`, req(`/uploads/_v/w320/${NAME}`), makeCtx())
+  assert.deepStrictEqual(gets.filter(([key]) => key === `uploads/${NAME}`), [[`uploads/${NAME}`, { offset: 0, length: 1 }]])
 })
 
 check('video reserve exhausted (allowed but reservedZone exhausted) -> original', async () => {
@@ -275,7 +309,7 @@ check('binding missing -> original, and no quota spent', async () => {
   assert.deepStrictEqual(env.ASSETS.log.puts, [])
 })
 
-check('transform error (9422) -> original re-read, never a 500', async () => {
+check('transform error (9422) -> redirect to the original, never a 500', async () => {
   const images = makeImages({ fail: 'IMAGES_TRANSFORM_ERROR 9422: monthly limit' })
   const env = freshEnv({ images })
   const ctx = makeCtx()

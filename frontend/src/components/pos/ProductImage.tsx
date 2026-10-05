@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { resolvePublicAssetUrl } from '../../utils/publicAssetUrls.ts'
+import { toImageVariantPath } from '../../utils/imageVariantUrl.ts'
 
 const BROKEN_PRODUCT_IMAGE_RETRY_MS = 5 * 60 * 1000
 const brokenProductImageUrls = new Map<string, number>()
@@ -34,8 +35,12 @@ function markBrokenProductImage(src: string): void {
 export default function ProductImage({ src, alt, className }: ProductImageProps) {
   const [url, setUrl] = useState<string | null>(null)
   const [failed, setFailed] = useState(false)
+  // The thumbnail variant (/uploads/_v/w320/...) is tried first; if it fails to
+  // load, the ORIGINAL is shown once before the image is treated as broken.
+  const [variantFailedFor, setVariantFailedFor] = useState('')
   const imageRequestRef = useRef(0)
   const safeSrc = String(src || '').trim()
+  const variantPath = variantFailedFor === safeSrc || !safeSrc.startsWith('/uploads/') ? null : toImageVariantPath(safeSrc)
 
   useEffect(() => {
     const requestId = imageRequestRef.current + 1
@@ -61,7 +66,7 @@ export default function ProductImage({ src, alt, className }: ProductImageProps)
       }
     }
     if (safeSrc.startsWith('/uploads/')) {
-      setUrl(resolvePublicAssetUrl(safeSrc))
+      setUrl(variantPath ? resolvePublicAssetUrl(variantPath, { unversioned: true }) : resolvePublicAssetUrl(safeSrc))
       return () => {
         imageRequestRef.current = requestId + 1
       }
@@ -86,7 +91,7 @@ export default function ProductImage({ src, alt, className }: ProductImageProps)
     return () => {
       imageRequestRef.current = requestId + 1
     }
-  }, [safeSrc])
+  }, [safeSrc, variantPath])
 
   if (!url || failed) {
     return (
@@ -102,6 +107,7 @@ export default function ProductImage({ src, alt, className }: ProductImageProps)
       alt={alt || ''}
       className={className}
       onError={() => {
+        if (variantPath) { setVariantFailedFor(safeSrc); return }
         markBrokenProductImage(safeSrc)
         setFailed(true)
       }}

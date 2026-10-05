@@ -4,6 +4,12 @@ type PublicAssetOptions = {
   publicAssetBaseUrl?: unknown
   fallbackBaseUrl?: unknown
   assetVersion?: unknown
+  /**
+   * Skip the `?v=<build hash>` stamp. For URLs whose content never changes
+   * under the same name (image variants, utils/imageVariantUrl.ts), so a
+   * deploy does not re-key every thumbnail in every cache.
+   */
+  unversioned?: boolean
 }
 
 const PUBLIC_ASSET_BASE_URL_STORAGE_KEY = 'businessos_public_asset_base_url'
@@ -75,5 +81,6 @@ export function resolvePublicAssetUrl(value: unknown, options: PublicAssetOption
   const fallbackBase = trimBaseUrl(options.fallbackBaseUrl || getSafeCurrentOrigin())
   const base = configuredBase || fallbackBase
   const assetUrl = base ? `${base}${normalized}` : normalized
+  if (options.unversioned) return assetUrl
   return appendAssetVersion(assetUrl, options.assetVersion || FRONTEND_BUILD_INFO.hash || '')
 }

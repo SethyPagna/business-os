@@ -3,6 +3,7 @@ import type { MouseEventHandler, TouchEventHandler } from 'react'
 import AlertTriangle from 'lucide-react/dist/esm/icons/alert-triangle.js'
 import ImageOff from 'lucide-react/dist/esm/icons/image-off.js'
 import { resolvePublicAssetUrl } from '../../../utils/publicAssetUrls.ts'
+import { toImageVariantPath } from '../../../utils/imageVariantUrl.ts'
 
 const BROKEN_PRODUCT_IMAGE_RETRY_MS = 5 * 60 * 1000
 const brokenProductImageUrls = new Map<string, number>()
@@ -91,8 +92,12 @@ function parseNumericInput(value: unknown, fallback = 0): number {
 function ProductImg({ src, alt = '', className, onClick, onMouseDown, onTouchStart }: ProductImgProps) {
   const [url, setUrl] = useState<string | null>(null)
   const [failed, setFailed] = useState(false)
+  // The thumbnail variant (/uploads/_v/w320/...) is tried first; if it fails to
+  // load, the ORIGINAL is shown once before the image is treated as broken.
+  const [variantFailedFor, setVariantFailedFor] = useState('')
   const imageRequestRef = useRef(0)
   const safeSrc = String(src || '').trim()
+  const variantPath = variantFailedFor === safeSrc || !safeSrc.startsWith('/uploads/') ? null : toImageVariantPath(safeSrc)
 
   useEffect(() => {
     const requestId = imageRequestRef.current + 1
@@ -124,7 +129,7 @@ function ProductImg({ src, alt = '', className, onClick, onMouseDown, onTouchSta
       }
     }
     if (safeSrc.startsWith('/uploads/')) {
-      setUrl(resolvePublicAssetUrl(safeSrc))
+      setUrl(variantPath ? resolvePublicAssetUrl(variantPath, { unversioned: true }) : resolvePublicAssetUrl(safeSrc))
       return () => {
         imageRequestRef.current = requestId + 1
       }
@@ -149,7 +154,7 @@ function ProductImg({ src, alt = '', className, onClick, onMouseDown, onTouchSta
     return () => {
       imageRequestRef.current = requestId + 1
     }
-  }, [safeSrc])
+  }, [safeSrc, variantPath])
 
   if (!url || failed) {
     return (
@@ -168,6 +173,7 @@ function ProductImg({ src, alt = '', className, onClick, onMouseDown, onTouchSta
       onMouseDown={onMouseDown}
       onTouchStart={onTouchStart}
       onError={() => {
+        if (variantPath) { setVariantFailedFor(safeSrc); return }
         markBrokenProductImage(safeSrc)
         setFailed(true)
       }}
