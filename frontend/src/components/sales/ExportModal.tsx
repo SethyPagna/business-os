@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
+import Download from 'lucide-react/dist/esm/icons/download.js'
 import Eye from 'lucide-react/dist/esm/icons/eye.js'
-import FileSpreadsheet from 'lucide-react/dist/esm/icons/file-spreadsheet.js'
-import Upload from 'lucide-react/dist/esm/icons/upload.js'
+import Loader2 from 'lucide-react/dist/esm/icons/loader-2.js'
+import InfoHint from '../shared/InfoHint.tsx'
 import Modal from '../shared/Modal'
 import DateTimeRangePicker, { todayDateTimeRange, type DateTimeRange } from '../shared/DateTimeRangePicker.tsx'
 import StatusBadge from './StatusBadge'
@@ -9,6 +10,7 @@ import { withLoaderTimeout } from '../../utils/loaders.ts'
 import { fmtDateOnly } from '../../utils/formatters.ts'
 import { SALES_IMPORT_COLUMNS } from '../../utils/salesImportContract.ts'
 import { useApp, type AppContextCoreValue } from '../../app/AppContextCore.tsx'
+import { primaryToolbarButtonClassName, toolbarIconButtonClassName } from '../shared/toolbarButtonStyles.ts'
 
 const SALES_EXPORT_PREVIEW_TIMEOUT_MS = 20000
 const SALES_EXPORT_CSV_TIMEOUT_MS = 30000
@@ -93,7 +95,7 @@ export default function ExportModal({ onClose, t, fmtUSD }: ExportModalProps) {
   const [range, setRange] = useState<DateTimeRange>(todayDateTimeRange)
   const [loading, setLoading] = useState(false)
   const [previewResult, setPreview] = useState<{ owner: string; data: SalesExportData } | null>(null)
-  const { user, getPermissions } = useApp() as AppContextCoreValue
+  const { user, getPermissions, notify } = useApp() as AppContextCoreValue
   const owner = JSON.stringify([user, getPermissions()])
   const ownerRef = useRef(owner)
   ownerRef.current = owner
@@ -196,7 +198,7 @@ export default function ExportModal({ onClose, t, fmtUSD }: ExportModalProps) {
       if (typeof data === 'string') throw new Error(tr('error_loading_export', 'Error loading export'))
       if (isCurrent()) setPreview({ owner, data })
     } catch (error) {
-      if (isCurrent()) alert(getErrorMessage(error, tr('error_loading_export', 'Error loading export')))
+      if (isCurrent()) notify(getErrorMessage(error, tr('error_loading_export', 'Error loading export')), 'error')
     } finally {
       if (isCurrent()) {
         pendingPreviewRef.current = null
@@ -238,7 +240,7 @@ export default function ExportModal({ onClose, t, fmtUSD }: ExportModalProps) {
       const csvText = buildCsvFallback({ ...first, sales: rows })
       downloadCsvBlob(csvText, dates)
     } catch (error) {
-      alert(getErrorMessage(error, tr('export_error', 'Export error')))
+      notify(getErrorMessage(error, tr('export_error', 'Export error')), 'error')
     } finally {
       setLoading(false)
     }
@@ -247,31 +249,18 @@ export default function ExportModal({ onClose, t, fmtUSD }: ExportModalProps) {
   return (
     <Modal title={tr('export_sales_report', 'Export Sales Report')} onClose={closeModal} wide unsavedChanges="read-only">
       <div className="space-y-5">
-        <div className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800/60">
-          <div className="rounded-2xl bg-blue-100 p-3 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
-            <FileSpreadsheet className="h-5 w-5" />
-          </div>
-          <div>
-            <div className="text-sm font-semibold text-slate-900 dark:text-white">{tr('export_sales_report', 'Export Sales Report')}</div>
-            <div className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-              {tr('export_sales_hint', 'Preview the accounting summary first, then export the detailed CSV for the selected date range.')}
-            </div>
-          </div>
-        </div>
-
-        <fieldset className="min-w-0" disabled={loading}>
-          <legend className="mb-2 block text-sm font-semibold text-gray-700 dark:text-gray-300">{tr('report_period', 'Report Period')}</legend>
-          <DateTimeRangePicker value={range} onChange={changeRange} t={(key) => tr(key, key)} showTime continuous={false} className="w-full" triggerClassName="flex w-full items-center justify-between gap-2 px-3 py-2 text-sm" />
-        </fieldset>
-
-        <div className="flex flex-col gap-2 sm:flex-row">
-          <button type="button" onClick={handlePreview} disabled={loading} className="btn-secondary flex-1 text-sm disabled:opacity-50">
-            <Eye className="mr-2 inline h-4 w-4" />
-            {loading ? tr('loading', 'Loading...') : tr('preview_summary', 'Preview Summary')}
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <InfoHint align="left" label={tr('export_sales_report', 'Export Sales Report')} text={tr('export_sales_hint', 'Preview the accounting summary first, then export the detailed CSV for the selected date range.')} />
+          <fieldset className="min-w-[10.5rem] flex-1" disabled={loading}>
+            <legend className="sr-only">{tr('report_period', 'Report Period')}</legend>
+            <DateTimeRangePicker value={range} onChange={changeRange} t={(key) => tr(key, key)} showTime continuous={false} className="w-full" triggerClassName="flex w-full items-center justify-between gap-2 px-3 py-2 text-sm" />
+          </fieldset>
+          <button type="button" onClick={handlePreview} disabled={loading} className={`${toolbarIconButtonClassName} disabled:opacity-50`} aria-label={tr('preview_summary', 'Preview Summary')} title={tr('preview_summary', 'Preview Summary')}>
+            {loading ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Eye className="h-4 w-4" aria-hidden="true" />}
           </button>
-          <button type="button" onClick={handleExportCSV} disabled={loading} className="btn-primary flex-1 text-sm disabled:opacity-50">
-            <Upload className="mr-2 inline h-4 w-4" />
-            {loading ? tr('loading', 'Loading...') : tr('export_csv_btn', 'Export CSV')}
+          <button type="button" onClick={handleExportCSV} disabled={loading} className={`${primaryToolbarButtonClassName} !flex-none disabled:opacity-50`}>
+            <Download className="h-4 w-4" aria-hidden="true" />
+            {tr('export', 'Export')}
           </button>
         </div>
 

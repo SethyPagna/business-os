@@ -51,7 +51,7 @@ await browser.run('PASS Sales export shared picker, recurring hours and every re
       await screenshot(`sales-export-picker-${width}-${language}`)
       await browser.mouseClick('[data-date-time-range-panel] button[aria-label=' + JSON.stringify(pack.close) + ']')
       await screenshot(`sales-export-range-${width}-${language}`)
-      await browser.evaluate(`(() => { for (const [label,marker] of [[${JSON.stringify(pack.preview_summary)},'data-export-preview'],[${JSON.stringify(pack.export_csv_btn)},'data-export-csv']]) { [...document.querySelectorAll('button')].find(button => button.textContent.trim()===label).setAttribute(marker,'true') } })()`)
+      await browser.evaluate(`(() => { document.querySelector('button[aria-label='+${JSON.stringify(JSON.stringify(pack.preview_summary))}+']').setAttribute('data-export-preview','true'); [...document.querySelectorAll('button')].find(button => button.textContent.trim()===${JSON.stringify(pack.export)}).setAttribute('data-export-csv','true') })()`)
       await browser.mouseClick('[data-export-preview]')
       await browser.waitFor('preview request resolves',async () => await browser.evaluate('window.__calls.length===1') ? true : null)
       await browser.waitFor('preview loading clears',async () => await browser.evaluate(`!document.querySelector('[data-export-csv]').disabled`) ? true : null)

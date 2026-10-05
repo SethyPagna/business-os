@@ -33,7 +33,7 @@ function mount(api: (params: any) => Promise<any>, timeout = 1000) {
       useEffect(fn: () => any, deps: any[]) { const i = cursor++; const old = effects[i]; if (!old || deps.some((value, index) => !Object.is(value, old.deps[index]))) queued.push(() => { old?.cleanup?.(); effects[i] = { deps, cleanup: fn() } }) },
     },
     'react/jsx-runtime': { jsx: (type: any, props: any) => ({ type, props }), jsxs: (type: any, props: any) => ({ type, props }) },
-    '../../app/AppContextCore.tsx': { useApp: () => ({ user, getPermissions: () => permissions }) },
+    '../../app/AppContextCore.tsx': { useApp: () => ({ user, getPermissions: () => permissions, notify: (message: string) => notices.push(message) }) },
     '../shared/Modal': { __esModule: true, default: 'Modal' },
     '../shared/DateTimeRangePicker.tsx': { __esModule: true, default: 'Picker', todayDateTimeRange: () => ({ ...fullDay }) },
     '../../utils/loaders.ts': { withLoaderTimeout: (fn: () => Promise<any>, label: string) => loaders.withLoaderTimeout(fn, label, timeout) },
@@ -41,9 +41,9 @@ function mount(api: (params: any) => Promise<any>, timeout = 1000) {
     '../../utils/salesImportContract.ts': { SALES_IMPORT_COLUMNS: ['receipt_number', 'sale_date', 'name'] },
   })
   const prior = { window: globalThis.window, alert: globalThis.alert, document: globalThis.document, URL: globalThis.URL }
-  Object.assign(globalThis, { window: { api: { getSalesExport: api } }, alert: (message: string) => notices.push(message), document: { createElement: () => ({ click() {} }) }, URL: { createObjectURL: (blob: Blob) => { downloads.push(blob); return 'blob:test' }, revokeObjectURL() {} } })
+  Object.assign(globalThis, { window: { api: { getSalesExport: api } }, alert: () => { throw new Error('native alert() must not be used; errors go through notify') }, document: { createElement: () => ({ click() {} }) }, URL: { createObjectURL: (blob: Blob) => { downloads.push(blob); return 'blob:test' }, revokeObjectURL() {} } })
   const render = (flush = true) => { cursor = 0; const tree = component.default({ t: (key: string) => key, fmtUSD: (amount: number) => '$' + amount, onClose: () => closed++ }); if (flush) queued.splice(0).forEach(fn => fn()); return tree }
-  const button = (label: string) => nodes(render()).find(node => node.type === 'button' && node.props.children?.includes?.(label)).props.onClick
+  const button = (label: string) => nodes(render()).find(node => node.type === 'button' && (node.props['aria-label'] === label || node.props.children?.includes?.(label))).props.onClick
   const change = (range: typeof fullDay) => nodes(render()).find(node => node.type === 'Picker').props.onChange(range)
   const text = (node: any): string => Array.isArray(node) ? node.map(text).join('|') : node?.props ? text(node.props.children) : typeof node === 'string' || typeof node === 'number' ? String(node) : ''
   render()
@@ -103,7 +103,7 @@ for (const change of ['actor', 'permissions']) await check(change + ' invalidate
 })
 await check('CSV remains frozen across portal selection changes and all pages', async () => {
   const first = deferred(); const calls: any[] = []; const m = mount(query => { calls.push(query); return calls.length === 1 ? first.promise : Promise.resolve({ sales: [{ receipt_number: 'NEXT' }], has_more: false }) })
-  try { const work = m.button('Export CSV')(); m.change(narrow); assert.equal(m.loading(), true); first.resolve({ sales: [{ receipt_number: 'FIRST' }], has_more: true, snapshot_max_id: 91, next_cursor: { created_at: '2026-09-08 01:00:00', id: 4 } }); await work; assert.equal(calls.length, 2); for (const q of calls) assert.deepEqual([q.startTime, q.endTime], ['00:00', '23:59']); assert.equal(calls[1].snapshotMaxId, '91'); assert.equal(m.downloads.length, 1); assert.equal(m.loading(), false) } finally { m.cleanup() }
+  try { const work = m.button('Export')(); m.change(narrow); assert.equal(m.loading(), true); first.resolve({ sales: [{ receipt_number: 'FIRST' }], has_more: true, snapshot_max_id: 91, next_cursor: { created_at: '2026-09-08 01:00:00', id: 4 } }); await work; assert.equal(calls.length, 2); for (const q of calls) assert.deepEqual([q.startTime, q.endTime], ['00:00', '23:59']); assert.equal(calls[1].snapshotMaxId, '91'); assert.equal(m.downloads.length, 1); assert.equal(m.loading(), false) } finally { m.cleanup() }
 })
 await check('missing dates refuse without transport or uncaught errors', async () => {
   const m = mount(async () => { throw Error('must not request') }); try { m.change({ ...narrow, startDate: '', endDate: '' }); await m.button('Preview Summary')(); assert.deepEqual(m.notices, ['Please select start and end dates']); assert.equal(m.loading(), false) } finally { m.cleanup() }
