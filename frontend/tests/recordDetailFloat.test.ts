@@ -105,6 +105,15 @@ check('only what changed: the unchanged column is absent, the changed one reads 
   assert.ok(html.includes('08/09/2026 12:00'), 'the time comes through the business-zone formatter')
 })
 
+check('a field with no recorded old side shows its value alone in the float, and explicitly in the table', () => {
+  const html = detail(EDIT, { canViewCosts: true })
+  assert.ok(!html.includes(en.historical_details_unavailable), 'no arrow from "details unavailable"')
+  assert.equal(html.split('data-record-before').length - 1, 2, 'price and cost have an old side; the typed reason does not')
+  assert.equal(html.split('data-record-after').length - 1, 3)
+  const table = renderToStaticMarkup(React.createElement(RecordRow, { record: EDIT, adapter: ENTITY_RECORDS_ADAPTER, open: true, onToggle: () => {}, canViewCosts: true, t: tEn, ...fmt }))
+  assert.ok(table.includes(en.historical_details_unavailable), 'the inline table keeps its three columns and says so')
+})
+
 check('cost: hidden without permission, shown with it, and the default is fail-closed', () => {
   const denied = detail(EDIT, { canViewCosts: false })
   const byDefault = detail(EDIT)

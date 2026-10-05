@@ -57,6 +57,10 @@ export default function RecordDetailFloat({ record: source, adapter, canViewCost
   const record = recordForViewer(source, canViewCosts)
   const kind = adapter.kindLabel(adapter.normalizeKind(record.kind), ctx)
   const rows = adapter.fieldRows(record, ctx)
+  // A field whose old side was never recorded (the typed reason, a legacy
+  // row) has nothing to compare: it shows the value alone, not an arrow from
+  // "details unavailable". The inline table keeps its explicit three columns.
+  const noOldSide = new Set((Array.isArray(record.changes) ? record.changes : []).filter((change) => change.before.state === 'unknown').map((change) => change.field))
   const via = record.via === 'undo' ? label('undo', 'Undo')
     : record.via === 'redo' ? label('redo', 'Redo')
       : null
@@ -94,8 +98,10 @@ export default function RecordDetailFloat({ record: source, adapter, canViewCost
                 <li key={row.key} data-record-change="" className="px-3 py-2">
                   <div className="leading-relaxed text-gray-400">{row.label}</div>
                   <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-sm leading-relaxed">
-                    <span data-record-before="" className="min-w-0 break-words text-gray-500 dark:text-gray-400">{row.before}</span>
-                    <ArrowRight className="h-3.5 w-3.5 shrink-0 text-gray-400" aria-hidden="true" />
+                    {noOldSide.has(row.key) ? null : <>
+                      <span data-record-before="" className="min-w-0 break-words text-gray-500 dark:text-gray-400">{row.before}</span>
+                      <ArrowRight className="h-3.5 w-3.5 shrink-0 text-gray-400" aria-hidden="true" />
+                    </>}
                     <span data-record-after="" className="min-w-0 break-words font-semibold text-gray-900 dark:text-gray-50">{row.after}</span>
                   </div>
                 </li>
