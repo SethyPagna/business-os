@@ -264,15 +264,20 @@ runTest('the refund is the ORIGINAL sale line price, resolved on the server', ()
 runTest('a replacement is recorded as an ordinary sale, not a settlement', () => {
   const routeSource = readFileSync(new URL('../../cloudflare/src/routes/returns.ts', import.meta.url), 'utf8')
   // the atomic planner tenders the whole sale through the ordinary totals kernel...
-  assert.match(routeSource, /rawAmountPaidUsd: subtotalUsd, rawAmountPaidKhr: 0,/)
-  assert.match(routeSource, /const paymentDetails = subtotalUsd > 0 \? \[\{ method: replacementPaymentMethod, amount_usd: subtotalUsd, amount_khr: 0 \}\] : \[\]/)
+  // On a sale with no debt the customer pays it in full at the counter...
+  assert.match(routeSource, /rawAmountPaidUsd: fromRefund \? paidFromRefundUsd : subtotalUsd, rawAmountPaidKhr: paidFromRefundKhr,/)
+  assert.match(routeSource, /details: subtotalUsd > 0 \? \[\{ method: replacementPaymentMethod, amount_usd: subtotalUsd, amount_khr: 0 \}\] : \[\] \}/)
+  // ...and on a sale that carries a debt it follows that sale (RET-A verifier P1):
+  // paid only from the refund's cash, the rest owed (test-return-exchange-debt-native).
+  assert.match(routeSource, /splitReplacementPayment\(\{ carriesDebt: replacementFollowsDebt, cashUsd: refundSplit\.cashUsd, replacementUsd: subtotalUsd \}\)/)
   assert.match(routeSource, /amount_paid_usd: replacementTotals\.amountPaidUsd, amount_paid_khr: replacementTotals\.amountPaidKhr,/)
   // ...on a real payment method, defaulting to a real one
   assert.match(routeSource, /const DEFAULT_REPLACEMENT_PAYMENT_METHOD = 'Cash'/)
   assert.doesNotMatch(routeSource, /'Return Exchange'/)
   // ...and it earns loyalty exactly as any other sale does
   assert.match(routeSource, /loyalty_accrual,sale_status,notes,items,search_normalized/)
-  assert.match(routeSource, /0,0,0,0,0,0,1,'completed',@notes,@items,@search_normalized,/)
+  assert.match(routeSource, /0,0,0,0,0,0,1,@sale_status,@notes,@items,@search_normalized,/)
+  assert.match(routeSource, /replacementTender = \{ status: owes \? 'awaiting_payment' : 'completed', method,/)
   // the modal offers the shop's own methods
   assert.match(newReturnSource, /PAYMENT_METHODS\.map\(\(method\) => \(\{ value: method, label: method \}\)\)/)
   assert.match(newReturnSource, /replacement_payment_method: replacementPaymentMethod,/)
