@@ -1,4 +1,5 @@
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useDebouncedValue } from '../../utils/useDebouncedValue.ts'
 import type { Dispatch, RefObject, SetStateAction } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import { usePullToRefresh } from '../shared/usePullToRefresh.ts'
@@ -449,7 +450,10 @@ export default function PublicCatalogPage() {
   // tab if About is turned off in config.
   const [activeTab, setActiveTab] = useState(() => resolvePortalActiveTab({ ...DEFAULT_PUBLIC_CONFIG, ...paintConfigRef.current } as PortalConfig, (_key, fallback = '') => fallback, 'about'))
   const [search, setSearch] = useState('')
-  const deferredSearch = useMemo(() => search.trim(), [search])
+  // G37: the storefront search asked the server on every keystroke; 250 ms
+  // of quiet first (the input itself still updates immediately).
+  const debouncedSearch = useDebouncedValue(search, 250)
+  const deferredSearch = useMemo(() => debouncedSearch.trim(), [debouncedSearch])
   const [categoryFilter, setCategoryFilter] = useState<string[]>([])
   const [brandFilter, setBrandFilter] = useState<string[]>([])
   const [branchFilter, setBranchFilter] = useState<string[]>([])

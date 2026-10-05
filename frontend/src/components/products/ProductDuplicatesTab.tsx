@@ -10,6 +10,7 @@ import { ConflictIcon, CONFLICT_ICON_CLASS } from '../shared/ConflictIcon.ts'
 import AppSelect from '../shared/AppSelect.tsx'
 import ConfirmDialog from '../shared/ConfirmDialog.tsx'
 import ScanSearchButton from '../shared/ScanSearchButton.tsx'
+import { createRowSearch } from '../../utils/rowSearch.ts'
 import { toolbarIconButtonClassName } from '../shared/toolbarButtonStyles.ts'
 import { ProductImg } from './shared/primitives.tsx'
 import {
@@ -729,14 +730,24 @@ export default function ProductDuplicatesTab({ t, notify, canRemoveProduct, onMe
     await executeSelectedGroupApply(groupApplyBody)
   }
 
-  const normalizedSearch = search.trim().toLowerCase()
+  // G37: the shared search core over every member (word order, typos,
+  // SK-II/sk2, Khmer, exact barcode) instead of one contiguous substring.
+  const normalizedSearch = search.trim()
+  const clusterSearch = useMemo(() => createRowSearch(
+    clusters.flatMap((cluster) => [
+      { cluster, name: cluster.value, barcode: cluster.value },
+      ...cluster.products.map((p) => ({ cluster, name: p.name, barcode: p.barcode })),
+    ]),
+    (row) => ({ name: row.name, barcode: row.barcode }),
+  ), [clusters])
+  const matchedClusters = useMemo(
+    () => (normalizedSearch ? new Set(clusterSearch(normalizedSearch).map((row) => row.cluster)) : null),
+    [clusterSearch, normalizedSearch],
+  )
   const visibleClusters = useMemo(() => clusters.filter((cluster) => {
     if (severityFilter !== 'all' && cluster.severity !== severityFilter) return false
-    if (!normalizedSearch) return true
-    const haystack = [cluster.value, ...cluster.products.flatMap((p) => [p.name, p.barcode])]
-      .filter(Boolean).join(' ').toLowerCase()
-    return haystack.includes(normalizedSearch)
-  }), [clusters, normalizedSearch, severityFilter])
+    return !matchedClusters || matchedClusters.has(cluster)
+  }), [clusters, matchedClusters, severityFilter])
 
   const counts = useMemo(() => {
     const result: Record<Severity, number> = { leading_zero: 0, same_barcode: 0, same_name: 0, similar_name: 0 }
