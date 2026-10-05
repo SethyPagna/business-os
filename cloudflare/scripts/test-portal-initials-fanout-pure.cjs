@@ -95,7 +95,7 @@ const portalRoute = loadReal('routes/portal.ts', {
   '../lib/audit': { audit: async () => {} },
   '../lib/imageAudit': { enqueueImageNormalization: async () => {} },
   '../lib/promotionRulesSql': { loadActivePromotionRules: async () => [], productPromotedSql: () => '0', productDiscountActiveSql: () => '0', anyRuleAppliesSql: () => '0', singleRuleAppliesSql: () => '0' },
-  '../lib/rateLimit': { checkRateLimit: async () => ({ allowed: true }), getClientIp: () => '127.0.0.1' },
+  '../lib/rateLimit': { checkRateLimit: async () => ({ allowed: true }), getClientIp: () => '127.0.0.1', getClientNetworkKey: () => '127.0.0.1', peekRateLimit: async () => ({ allowed: true, retryAfterSeconds: 0 }), recordRateLimitEvent: async () => {} },
   '../lib/portalAbuseKey': loadReal('lib/portalAbuseKey.ts'),
   '../lib/safeLinkUrl': loadReal('lib/safeLinkUrl.ts'),
   '../lib/portalText': loadReal('lib/portalText.ts'),

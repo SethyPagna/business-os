@@ -1,4 +1,4 @@
-import { Hono } from 'hono'
+import { Hono, type Context } from 'hono'
 import { getDb } from '../lib/db'
 import { buildInClause, inlineIntegerIds, selectInChunks } from '../lib/sqlBinding'
 import { cachedJsonResponse, getVersionWithFallback } from '../lib/cache'
@@ -6,7 +6,7 @@ import { admitRequestBody, SMALL_BODY_BYTES, PORTAL_SCREENSHOT_BODY_BYTES } from
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { hasPermission } from '../lib/permissions'
 import { audit } from '../lib/audit'
-import { checkRateLimit, getClientIp } from '../lib/rateLimit'
+import { checkRateLimit, getClientNetworkKey, peekRateLimit, recordRateLimitEvent } from '../lib/rateLimit'
 import { portalAbuseKey } from '../lib/portalAbuseKey'
 import { normalizePortalUploadPath, normalizeSafeLinkUrl } from '../lib/safeLinkUrl'
 import { AUTOMATIC_PORTAL_LANGUAGE, capPortalText, normalizePortalImageAlt, plainText, portalLanguageCode } from '../lib/portalText'
@@ -1159,7 +1159,7 @@ function hasAiProfilePreference(profile: Record<string, unknown> = {}): boolean 
 // only -- not used for auth or logging identity. Ported from backend/src/
 // routes/portal.ts's getVisitorFingerprint (req.ip -> Workers' CF-Connecting-IP).
 async function getVisitorFingerprint(env: Env, request: Request): Promise<string | null> {
-  return portalAbuseKey(env, 'portal:ai:visitor', getClientIp(request).slice(0, 120))
+  return portalAbuseKey(env, 'portal:ai:visitor', getClientNetworkKey(request).slice(0, 120))
 }
 
 function collectRecommendationCitations(recommendations: Array<{ citations?: unknown[] }> = []) {
@@ -1244,7 +1244,7 @@ async function loadPortalAiCatalog(env: Env, showOutOfStockProducts: boolean) {
 // instead of an in-memory Map).
 app.post('/ai/chat', async (c) => {
   try {
-    const clientKey = await portalAbuseKey(c.env, 'portal:ai_chat:ip', getClientIp(c.req.raw))
+    const clientKey = await portalAbuseKey(c.env, 'portal:ai_chat:ip', getClientNetworkKey(c.req.raw))
     const visitorFingerprint = await getVisitorFingerprint(c.env, c.req.raw)
     if (!clientKey || !visitorFingerprint) {
       return c.json({ error: 'Portal privacy protection is not configured.', code: 'portal_privacy_unavailable' }, 503)
@@ -1644,7 +1644,7 @@ async function loadAccountProfile(env: Env, accountId: number): Promise<{ member
 }
 
 app.post('/auth/signup', async (c) => {
-  const ip = getClientIp(c.req.raw)
+  const ip = getClientNetworkKey(c.req.raw)
   const ipKey = await portalAbuseKey(c.env, 'portal:signup:ip', ip)
   if (!ipKey) return c.json({ error: 'Portal privacy protection is not configured.', code: 'portal_privacy_unavailable' }, 503)
   const ipWindow = await checkRateLimit(c.env, 'portal:signup:ip', ipKey, 30, 15 * 60 * 1000)
@@ -1675,36 +1675,51 @@ app.post('/auth/signup', async (c) => {
   return c.json({ ok: true, account: { membershipId: result.membershipId, name: result.name, email: null } })
 })
 
+// G38 P0: the 10-fail sign-in lockout is keyed on phone + network. Keyed on
+// the phone alone, anyone who knew a customer's number could fail it ten
+// times and lock the real customer out for 30 minutes. Now the failing
+// network waits and the customer's does not. Guessing spread across
+// networks is still bounded by a phone-wide failure ceiling: one network
+// adds at most 10 failures per 30 minutes, so filling it takes five.
+// Successes never spend it.
+export const PORTAL_SIGNIN_PHONE_WIDE_MAX = 50
+export const PORTAL_SIGNIN_PHONE_WIDE_WINDOW_MS = 30 * 60 * 1000
+
+function portalSigninLocked(c: Context<{ Bindings: Env }>, retryAfterSeconds: number) {
+  c.header('Retry-After', String(retryAfterSeconds))
+  return c.json({ error: `Too many sign-in attempts. Please wait ${Math.ceil(retryAfterSeconds / 60)} minutes, or contact us.`, code: 'locked' }, 429)
+}
+
 app.post('/auth/signin', async (c) => {
-  const ip = getClientIp(c.req.raw)
+  const network = getClientNetworkKey(c.req.raw)
   const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>))
-  const ipKey = await portalAbuseKey(c.env, 'portal:signin:ip', ip)
+  const ipKey = await portalAbuseKey(c.env, 'portal:signin:ip', network)
   if (!ipKey) return c.json({ error: 'Portal privacy protection is not configured.', code: 'portal_privacy_unavailable' }, 503)
   const ipWindow = await checkRateLimit(c.env, 'portal:signin:ip', ipKey, 40, 15 * 60 * 1000)
   if (!ipWindow.allowed) {
     c.header('Retry-After', String(ipWindow.retryAfterSeconds))
     return c.json({ error: `Too many attempts. Try again in ${ipWindow.retryAfterSeconds} seconds.`, code: 'rate_limited' }, 429)
   }
-  // Flat 10-fail cap keyed on the canonical phone (so one targeted account
-  // can't be hammered from rotating IPs), falling back to IP when no phone is
-  // supplied at all.
   const canonicalPhone = canonicalizePhone(body.phone)
-  const phoneKey = canonicalPhone
-    ? await portalAbuseKey(c.env, 'portal:signin:phone', canonicalPhone)
+  const lockKey = canonicalPhone
+    ? await portalAbuseKey(c.env, 'portal:signin:phone-network', `${canonicalPhone}\u0000${network}`)
     : ipKey
-  if (!phoneKey) return c.json({ error: 'Portal privacy protection is not configured.', code: 'portal_privacy_unavailable' }, 503)
-  const lock = await getPortalLockoutState(c.env, 'signin', phoneKey)
-  if (lock.locked) {
-    c.header('Retry-After', String(lock.retryAfterSeconds))
-    return c.json({ error: `Too many sign-in attempts. Please wait about ${Math.ceil(lock.retryAfterSeconds / 60)} minutes, or reset your password.`, code: 'locked' }, 429)
+  const phoneWideKey = canonicalPhone ? await portalAbuseKey(c.env, 'portal:signin:phone', canonicalPhone) : null
+  if (!lockKey || (canonicalPhone && !phoneWideKey)) return c.json({ error: 'Portal privacy protection is not configured.', code: 'portal_privacy_unavailable' }, 503)
+  const lock = await getPortalLockoutState(c.env, 'signin', lockKey)
+  if (lock.locked) return portalSigninLocked(c, lock.retryAfterSeconds)
+  if (phoneWideKey) {
+    const phoneWide = await peekRateLimit(c.env, 'portal:signin:phone-wide', phoneWideKey, PORTAL_SIGNIN_PHONE_WIDE_MAX, PORTAL_SIGNIN_PHONE_WIDE_WINDOW_MS)
+    if (!phoneWide.allowed) return portalSigninLocked(c, phoneWide.retryAfterSeconds)
   }
 
   const result = await signinPortalAccount(c.env, { identifier: body.identifier, phone: body.phone, password: body.password, consent: body.consent, consentLocale: body.consentLocale })
   if (!result.ok) {
-    await recordPortalFailure(c.env, 'signin', phoneKey)
+    await recordPortalFailure(c.env, 'signin', lockKey)
+    if (phoneWideKey) await recordRateLimitEvent(c.env, 'portal:signin:phone-wide', phoneWideKey)
     return c.json({ error: result.error, code: result.code }, result.status as 401 | 428 | 503)
   }
-  await clearPortalLockout(c.env, 'signin', phoneKey)
+  await clearPortalLockout(c.env, 'signin', lockKey)
   const session = await createPortalSession(c.env, result.accountId)
   setPortalCookie(c, session.token, session.expiresAt)
   const profile = await loadAccountProfile(c.env, result.accountId)
@@ -1832,7 +1847,7 @@ app.post('/submissions', async (c) => {
   // between the open internet and an image-hosting write was counting. It
   // now needs a real session, and the customer comes from that session's
   // account, never from the body (N45).
-  const submissionKey = await portalAbuseKey(c.env, 'portal:submissions:ip', getClientIp(c.req.raw))
+  const submissionKey = await portalAbuseKey(c.env, 'portal:submissions:ip', getClientNetworkKey(c.req.raw))
   if (!submissionKey) return c.json({ error: 'Portal privacy protection is not configured.', code: 'portal_privacy_unavailable' }, 503)
   const rate = await checkRateLimit(c.env, 'portal:submissions', submissionKey, 12, 15 * 60 * 1000)
   if (!rate.allowed) {

@@ -148,7 +148,7 @@ async function main() {
       setPortalCookie: () => {}, clearPortalCookie: () => {}, revokePortalSession: async () => {},
       getPortalAccountState: async () => ({ status: 'unauthenticated', account: null }),
     },
-    '../lib/rateLimit': { getClientIp: () => 'unit', checkRateLimit: async () => { calls.rate++; return { allowed, retryAfterSeconds: 1 } } },
+    '../lib/rateLimit': { getClientIp: () => 'unit', getClientNetworkKey: () => 'unit', checkRateLimit: async () => { calls.rate++; return { allowed, retryAfterSeconds: 1 } } },
     '../lib/db': { getDb: () => ({ prepare: (sql) => {
       assert.match(sql, /^SELECT key, value FROM settings$/)
       calls.settings++
