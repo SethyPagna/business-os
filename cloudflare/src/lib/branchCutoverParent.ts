@@ -30,6 +30,13 @@ const CLOSURE_PAGE_ROWS = 64
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
 const actorSql = `SELECT u.id,u.username,u.name,u.organization_id,u.role_id,u.permissions,u.is_active,r.code AS role_code,r.permissions AS role_permissions
   FROM users u LEFT JOIN roles r ON r.id=u.role_id WHERE u.id=@actor AND u.deleted_at IS NULL`
+// Quantities are REAL. The certified child adds the source quantity to the target row in SQLite, so a pair such
+// as 0.2 + 0.1 becomes 0.30000000000000004, which the exact-decimal ledger proofs refuse after the point of no
+// return (verifier E3). 'inexact' refuses BEFORE anything moves (begin, and every boundary): any quantity at either
+// branch, or any source + target sum of one product or one lot, that is not exactly a decimal of at most 12 places.
+// Lots-versus-stock comparisons of REAL sums carry the same 1e-9 tolerance as the reconcile and the child, since
+// sum(0.1, 0.2) > 0.3 in REAL arithmetic although the decimals are equal.
+const inexactSql = (value: string) => `CAST(printf('%.12f',${value}) AS REAL)<>${value}`
 const unsupportedStockSql = `SELECT
   EXISTS(SELECT 1 FROM damaged_stock_lots WHERE branch_id=@source AND quantity_remaining<>0) AS damaged,
   EXISTS(SELECT 1 FROM rfid_tags WHERE branch_id=@source AND status='active') AS rfid,
@@ -38,7 +45,13 @@ const unsupportedStockSql = `SELECT
   EXISTS(SELECT 1 FROM branch_batch_stock s LEFT JOIN product_batches b ON b.id=s.batch_id LEFT JOIN products p ON p.id=b.variant_product_id
     WHERE s.branch_id IN (@source,@target) AND (s.quantity IS NULL OR s.quantity<0 OR s.quantity<>0 AND (b.id IS NULL OR b.is_active IS NOT 1 OR p.id IS NULL OR p.is_active IS NOT 1))) AS lots,
   EXISTS(SELECT 1 FROM branch_batch_stock s JOIN product_batches b ON b.id=s.batch_id WHERE s.branch_id IN (@source,@target)
-    GROUP BY s.branch_id,b.variant_product_id HAVING sum(s.quantity)>coalesce((SELECT quantity FROM branch_stock WHERE branch_id=s.branch_id AND product_id=b.variant_product_id),0)) AS lotExcess`
+    GROUP BY s.branch_id,b.variant_product_id HAVING sum(s.quantity)>coalesce((SELECT quantity FROM branch_stock WHERE branch_id=s.branch_id AND product_id=b.variant_product_id),0)+1e-9) AS lotExcess,
+  EXISTS(SELECT 1 FROM branch_stock WHERE branch_id IN (@source,@target) AND quantity IS NOT NULL AND ${inexactSql('quantity')})
+    OR EXISTS(SELECT 1 FROM branch_batch_stock WHERE branch_id IN (@source,@target) AND quantity IS NOT NULL AND ${inexactSql('quantity')})
+    OR EXISTS(SELECT 1 FROM branch_stock s JOIN branch_stock t ON t.product_id=s.product_id AND t.branch_id=@target
+      WHERE s.branch_id=@source AND s.quantity>0 AND ${inexactSql('(s.quantity+t.quantity)')})
+    OR EXISTS(SELECT 1 FROM branch_batch_stock s JOIN branch_batch_stock t ON t.batch_id=s.batch_id AND t.branch_id=@target
+      WHERE s.branch_id=@source AND s.quantity>0 AND ${inexactSql('(s.quantity+t.quantity)')}) AS inexact`
 async function stockCapabilities(db: D1Compat, identity: CutoverIdentity) {
   const counts = await db.prepare(unsupportedStockSql).get<Record<string, number>>({ source: identity.sourceBranchId, target: identity.targetBranchId })
   requireParent(counts)
@@ -49,7 +62,7 @@ async function stockCapabilities(db: D1Compat, identity: CutoverIdentity) {
 // the fence blocks every writer in between, and the per-product proofs and the
 // final ledger reconciliation catch any drift (design §5 plan B, Free reads).
 function stockGuard(identity: CutoverIdentity): CutoverStatement {
-  return cutoverAssert(`EXISTS(SELECT 1 FROM (${unsupportedStockSql}) WHERE damaged=0 AND rfid=0 AND stock=0 AND lots=0 AND lotExcess=0)`,
+  return cutoverAssert(`EXISTS(SELECT 1 FROM (${unsupportedStockSql}) WHERE damaged=0 AND rfid=0 AND stock=0 AND lots=0 AND lotExcess=0 AND inexact=0)`,
     { source: identity.sourceBranchId, target: identity.targetBranchId })
 }
 const sourceEmptySql = `NOT EXISTS(SELECT 1 FROM branch_stock WHERE branch_id=@source AND quantity<>0)
@@ -321,7 +334,7 @@ const receiptByKey = `SELECT r.id,r.status,r.request_json,r.operation_id,CAST(js
 const drainedSql = `COALESCE((SELECT quantity FROM branch_stock WHERE product_id=@last AND branch_id=@source),0)=0
   AND NOT EXISTS(SELECT 1 FROM branch_batch_stock s JOIN product_batches b ON b.id=s.batch_id WHERE b.variant_product_id=@last AND s.branch_id=@source AND s.quantity<>0)
   AND COALESCE((SELECT sum(s.quantity) FROM branch_batch_stock s JOIN product_batches b ON b.id=s.batch_id WHERE b.variant_product_id=@last AND s.branch_id=@target),0)
-    <=COALESCE((SELECT quantity FROM branch_stock WHERE product_id=@last AND branch_id=@target),0)`
+    <=COALESCE((SELECT quantity FROM branch_stock WHERE product_id=@last AND branch_id=@target),0)+1e-9`
 // The unary plus keeps the planner on the (product_id, branch_id) unique index
 // range after @last, so each child plan reads a handful of rows, not every source row.
 export const NEXT_SOURCE_PRODUCT_SQL = `SELECT product_id,quantity FROM branch_stock WHERE product_id>@last AND +branch_id=@source AND +quantity>0 ORDER BY product_id LIMIT 1`
@@ -567,7 +580,7 @@ async function verifyStep(db: D1Compat, current: SessionUser, row: BranchCutover
             WHERE s.quantity IS NOT json_extract(q.value,'$[1]'))
           AND NOT EXISTS(SELECT 1 FROM json_each(@costs) c JOIN product_batches b ON b.id=CAST(json_extract(c.value,'$[0]') AS INTEGER) WHERE b.unit_cost_usd IS NOT json_extract(c.value,'$[1]'))
           AND NOT EXISTS(SELECT 1 FROM json_each(@products) p WHERE COALESCE((SELECT sum(s.quantity) FROM branch_batch_stock s JOIN product_batches b ON b.id=s.batch_id
-            WHERE b.variant_product_id=CAST(p.value AS INTEGER) AND s.branch_id=@target),0)>COALESCE((SELECT quantity FROM branch_stock WHERE product_id=CAST(p.value AS INTEGER) AND branch_id=@target),0))`,
+            WHERE b.variant_product_id=CAST(p.value AS INTEGER) AND s.branch_id=@target),0)>COALESCE((SELECT quantity FROM branch_stock WHERE product_id=CAST(p.value AS INTEGER) AND branch_id=@target),0)+1e-9)`,
         { quantities, costs, products: productIds, target: intent.targetBranchId }))
     }
     return checkpoint(next, keys.length)

@@ -10,7 +10,8 @@
 // Discriminating controls (source mutations) must turn the run RED: name-keyed admission, name-keyed
 // finalize, unweighted (mean) cost, a CAS-less parent under duplicate delivery, a missing history close
 // stage and a missing classification rule, and one per owner lot rule: the UTC date instead of the Cambodia
-// business day (E4), an unrounded blend (E5), a supplier-blind merge (E6) and $0 weighted as a real cost.
+// business day (E4), an unrounded blend (E5), a supplier-blind merge (E6), $0 weighted as a real cost, and
+// strict REAL lots-versus-stock comparisons that stop the run on exact decimals (E3).
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
@@ -35,6 +36,8 @@ const CONTROLS = {
     'priced.reduce((s, fact) => s + Number(fact.lot.cost) * Number(decimalText(fact.quantity)), 0) / priced.reduce((s, fact) => s + Number(decimalText(fact.quantity)), 0)']]]],
   'supplier-blind': [['lib/branchCutoverParent.ts', [["  if (typeof lot.supplierId === 'number' && Number.isSafeInteger(lot.supplierId)) return 'id:' + lot.supplierId", "  if (lot) return ''"]]]],
   'zero-weighted': [['lib/branchCutoverParent.ts', [["const priced = members.filter(fact => fact.costClass === 'recorded')", "const priced = members.filter(fact => fact.costClass !== 'unknown')"]]]],
+  'strict-real-sums': [['lib/branchCutoverParent.ts', [['product_id=b.variant_product_id),0)+1e-9) AS lotExcess', 'product_id=b.variant_product_id),0)) AS lotExcess'],
+    ['product_id=@last AND branch_id=@target),0)+1e-9`', 'product_id=@last AND branch_id=@target),0)`'], ['AND branch_id=@target),0)+1e-9)`,', 'AND branch_id=@target),0))`,']]]],
   double: [['lib/branchCutoverParent.ts', [['const results = await target.batchOnce([...before, ...statements, ...after])',
     "const strip = (list: CutoverStatement[]) => list.filter(s => !s.sql.startsWith('SELECT CASE WHEN')); const results = await target.batchOnce([...strip(before), ...statements, ...strip(after)])"],
     ['return results.slice(before.length, before.length + statements.length)', "return results.slice(before.filter(s => !s.sql.startsWith('SELECT CASE WHEN')).length)"]]],
@@ -84,6 +87,8 @@ const NAMED = {
     [13, 'Business day: 18:00 UTC is the next day in Cambodia', 1, 1], [14, 'Business day: 20:00 UTC is not the same day', 1, 1],
     [15, 'Same date free and unknown cost, no real cost', 1, 1], [16, 'Same date two suppliers', 2, 1],
     [17, 'Same date, the warehouse lot has no supplier', 1, 1], [18, 'Same date, blend needs rounding', 2, 1],
+    // E3: exact decimals whose REAL lot sum at LC Store is 0.30000000000000004 > 0.3 (sum(0.05, 0.05, 0.2) in SQLite)
+    [19, 'Fractional lots whose REAL sum ties above the stock', 0.05, 0.25],
   ],
   lots: [
     [101, 1, '2026-09-01', '2027-09-01', 2, { 2: 3 }], [102, 1, '2026-09-05', '2027-09-05', 2.5, { 2: 2 }],
@@ -103,6 +108,7 @@ const NAMED = {
     [1601, 16, '2026-09-22', null, 1, { 1: 1 }, 11], [1602, 16, '2026-09-22', null, 3, { 2: 2 }, 12],
     [1701, 17, '2026-09-23', null, 2, { 1: 1 }], [1702, 17, '2026-09-23', null, 2, { 2: 1 }, 11],
     [1801, 18, '2026-09-24', null, 1.0001, { 1: 1 }], [1802, 18, '2026-09-24', null, 1.0002, { 2: 2 }],
+    [1901, 19, '2026-09-25', null, 1, { 1: 0.05 }], [1902, 19, '2026-09-25', null, 1, { 2: 0.05 }], [1903, 19, '2026-09-26', null, 1, { 1: 0.2 }],
   ],
 }
 function generated(count, seed = 7) {
@@ -344,6 +350,7 @@ function verifyEndState({ w, base, before, final }) {
   assert.deepEqual({ ...lot(1601) }, { q: 1, c: 1 }); assert.deepEqual({ ...lot(1602) }, { q: 2, c: 3 }) // two suppliers: kept apart
   assert.deepEqual({ ...lot(1702) }, { q: 2, c: 2 }); assert.equal(lot(1701).q, 0)                     // no supplier folds into the supplier's lot
   assert.deepEqual({ ...lot(1801) }, { q: 3, c: 1.0002 }); assert.equal(lot(1802).q, 0)               // 3.0005 / 3 at 4 decimals
+  assert.deepEqual({ ...lot(1901) }, { q: 0.1, c: 1 }); assert.equal(lot(1902).q, 0); assert.equal(lot(1903).q, 0.2) // REAL tie tolerated, exact values kept
   assert.deepEqual({ ...lot(201) }, { q: 10, c: 1.2 })                                                  // shared batch keeps its identity
   assert.deepEqual({ ...lot(1201) }, { q: 4, c: 3 }); assert.deepEqual({ ...lot(1202) }, { q: 2, c: 2 }); assert.equal(lot(1203).q, 0)
   assert.deepEqual({ ...lot(802) }, { q: 4, c: 3 }); assert.equal(lot(801).q, 0)                       // survivor = the lot already at the warehouse
@@ -440,9 +447,45 @@ async function main() {
     assert.deepEqual(state(faulted.w.raw), state(clean.w.raw))
     clean.w.raw.close(); faulted.w.raw.close()
   })
+  await check('E3 a fractional pair whose REAL sum is not an exact decimal refuses at begin, before anything moves (verifier P1)', async () => {
+    for (const [label, setup] of [
+      ['shared lot 0.2 + 0.1', (raw) => {
+        raw.exec(`INSERT INTO products(id,name,sku,is_active,stock_quantity,cost_price_usd) VALUES(60,'P1 fractional shared lot','SKU60',1,0.3,1);
+          INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(60,2,0.2),(60,1,0.1);
+          INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at,unit_cost_usd,received_branch_id,received_quantity,is_active,batch_number)
+            VALUES(6001,60,'lot-6001','L6001','2026-09-01',1,2,0.3,1,6001);
+          INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(6001,2,0.2),(6001,1,0.1);`)
+      }],
+      ['product only, untracked 0.7 + 0.1', (raw) => raw.exec(`INSERT INTO products(id,name,sku,is_active,stock_quantity,cost_price_usd) VALUES(61,'untracked fractional','SKU61',1,0.8,1);
+          INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(61,2,0.7),(61,1,0.1);`)],
+      ['a stored value that is not a 12-place decimal', (raw) => raw.exec(`INSERT INTO products(id,name,sku,is_active,stock_quantity,cost_price_usd) VALUES(62,'stored 0.1+0.2','SKU62',1,1,1);
+          INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(62,1,0.1+0.2);`)],
+    ]) {
+      const w = world({ generatedProducts: 0 }); setup(w.raw)
+      const stock = () => w.raw.prepare('SELECT product_id,branch_id,quantity FROM branch_stock ORDER BY product_id,branch_id').all()
+      const lots = () => w.raw.prepare('SELECT batch_id,branch_id,quantity FROM branch_batch_stock ORDER BY batch_id,branch_id').all()
+      const before = [stock(), lots()]
+      const plan = await w.m.parent.inspectBranchCutover(w.db, ACTOR, 1, IDS, PARENT_BUDGET)
+      assert.deepEqual(plan.capabilities, [{ code: 'unsupported_stock_state', detail: 'inexact' }], label)
+      assert.equal(plan.activationReady, false)
+      await assert.rejects(w.m.parent.beginBranchCutover(w.db, ACTOR, 1, { ...IDS, ...NAMES, requestId: 'cutover_night_e3', controlIncarnation: INCARNATION,
+        expectedSourceJson: plan.sourcePreimageJson, expectedTargetJson: plan.targetPreimageJson, expectedSchemaDigest: plan.schemaDigest }, PARENT_BUDGET),
+      error => error.capability === 'unsupported_stock_state:inexact', label)
+      assert.equal(w.raw.prepare('SELECT count(*) n FROM branch_cutovers').get().n, 0, label)
+      assert.equal(w.raw.prepare("SELECT count(*) n FROM system_flags WHERE key='maintenance'").get().n, 0, label)
+      assert.deepEqual([stock(), lots()], before, label + ': nothing moved')
+      w.raw.close()
+    }
+    // the same fixture with an exactly representable pair (0.25 + 0.5) is admitted
+    const w = world({ generatedProducts: 0 })
+    w.raw.exec(`INSERT INTO products(id,name,sku,is_active,stock_quantity,cost_price_usd) VALUES(60,'binary exact','SKU60',1,0.75,1);
+      INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(60,2,0.25),(60,1,0.5);`)
+    assert.deepEqual((await w.m.parent.inspectBranchCutover(w.db, ACTOR, 1, IDS, PARENT_BUDGET)).capabilities, [])
+    w.raw.close()
+  })
   // ---- discriminating controls: each plausible wrong implementation must fail this test
   for (const [control, expectation] of [['name-admission', 'refuses'], ['name-finalize', 'red'], ['mean', 'red'], ['double', 'red'], ['no-close', 'refuses'], ['no-rule', 'red'],
-    ['utc-slice', 'red'], ['no-round', 'red'], ['supplier-blind', 'red'], ['zero-weighted', 'red']]) {
+    ['utc-slice', 'red'], ['no-round', 'red'], ['supplier-blind', 'red'], ['zero-weighted', 'red'], ['strict-real-sums', 'refuses']]) {
     await check('control RED: ' + control, async () => {
       let red = false, message = ''
       try {
