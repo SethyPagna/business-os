@@ -755,6 +755,19 @@ async function saleMoneyPrecisionVersion(db: ReturnType<typeof getDb>, saleId: u
 // (sold minus already-returned), mirroring assertReturnableItems in the
 // original. `excludeReturnId` lets an update re-validate without double
 // counting the return being edited against itself.
+// LH-2b (RET-B handoff, 5 Oct 2026): sale_items.returned_quantity is written
+// only by the sales import -- a return-status row restocks it at import and
+// records no return_items. Every "already returned" read on this route adds
+// it, or a new return restocks the same units a second time. (RET-B's
+// saleTransitions helpers carry the same rule for the sale-status paths.)
+const IMPORTED_RETURNED_QUANTITY_SQL = 'MAX(COALESCE(returned_quantity, 0), 0)'
+
+function importedReturnedLines(lines: Array<{ id: number; product_id: number | null; imported_returned_quantity?: number | null }>) {
+  return lines
+    .filter((line) => Number(line.imported_returned_quantity) > 0)
+    .map((line) => ({ sale_item_id: Number(line.id), product_id: line.product_id, quantity: Number(line.imported_returned_quantity) }))
+}
+
 async function assertReturnableItems(
   db: ReturnType<typeof getDb>,
   saleId: number | null,
@@ -786,7 +799,8 @@ async function assertReturnableItems(
     const qty = Number(item.quantity) || 0
 
     if (item.sale_item_id) {
-      const saleItem = await db.prepare('SELECT id, quantity, product_name FROM sale_items WHERE id = ? AND sale_id = ?').get<{ id: number; quantity: number; product_name: string | null }>([item.sale_item_id, saleId])
+      const saleItem = await db.prepare(`SELECT id, quantity, product_name, ${IMPORTED_RETURNED_QUANTITY_SQL} AS imported_returned_quantity
+        FROM sale_items WHERE id = ? AND sale_id = ?`).get<{ id: number; quantity: number; product_name: string | null; imported_returned_quantity: number | null }>([item.sale_item_id, saleId])
       if (!saleItem) throw new Error('Sale item not found for this return')
 
       const returnedRow = excludeReturnId
@@ -807,14 +821,16 @@ async function assertReturnableItems(
               AND COALESCE(r.status, 'completed') != 'cancelled'
               AND COALESCE(r.return_scope, 'customer') = 'customer'
           `).get<{ qty: number }>([saleId, item.sale_item_id])
-      const returned = returnedRow?.qty || 0
+      const returned = (returnedRow?.qty || 0) + (Number(saleItem.imported_returned_quantity) || 0)
       const remaining = Math.max(0, (saleItem.quantity || 0) - returned)
       if (qty > remaining) throw new Error(`Cannot return ${qty} of ${saleItem.product_name || 'this item'} — only ${remaining} remaining`)
       continue
     }
 
     if (item.product_id) {
-      const soldRow = await db.prepare('SELECT COALESCE(SUM(quantity), 0) AS qty FROM sale_items WHERE sale_id = ? AND product_id = ?').get<{ qty: number }>([saleId, item.product_id])
+      // Sold minus what the sales import already brought back on those lines.
+      const soldRow = await db.prepare(`SELECT COALESCE(SUM(quantity), 0) - COALESCE(SUM(${IMPORTED_RETURNED_QUANTITY_SQL}), 0) AS qty
+        FROM sale_items WHERE sale_id = ? AND product_id = ?`).get<{ qty: number }>([saleId, item.product_id])
       const returnedRow = excludeReturnId
         ? await db.prepare(`
             SELECT COALESCE(SUM(ri.quantity), 0) AS qty
@@ -1561,6 +1577,7 @@ app.post('/', async (c) => {
     id: number; product_id: number | null; product_name: string | null; quantity: number
     branch_id: number | null; cost_price_usd: number | null; cost_price_khr: number | null
     applied_price_usd: number | null; applied_price_khr: number | null
+    imported_returned_quantity: number | null
   }> = []
   let committedReturnLines: Array<{ sale_item_id: number | null; product_id: number | null; quantity: number }> = []
   if (requestedSaleId) {
@@ -1583,7 +1600,8 @@ app.post('/', async (c) => {
     if (!isMoneyV1 && Number(saleMeta.sale_money_precision_version) === 1) {
       return c.json({ ...MONEY_PRECISION_REVIEW_NEEDED }, 409)
     }
-    soldLines = await db.prepare('SELECT id,product_id,product_name,quantity,branch_id,cost_price_usd,cost_price_khr,applied_price_usd,applied_price_khr FROM sale_items WHERE sale_id=? ORDER BY id')
+    soldLines = await db.prepare(`SELECT id,product_id,product_name,quantity,branch_id,cost_price_usd,cost_price_khr,applied_price_usd,applied_price_khr,
+      ${IMPORTED_RETURNED_QUANTITY_SQL} AS imported_returned_quantity FROM sale_items WHERE sale_id=? ORDER BY id`)
       .all<typeof soldLines[number]>([requestedSaleId])
     const soldById = new Map(soldLines.map((line) => [Number(line.id), line]))
     // RET-A F11: product and branch come from the sale line, never the body.
@@ -1609,6 +1627,7 @@ app.post('/', async (c) => {
       WHERE r.sale_id=? AND COALESCE(r.status,'completed')!='cancelled'
         AND COALESCE(r.return_scope,'customer')='customer' ORDER BY r.id,ri.id`)
       .all<{ sale_item_id: number | null; product_id: number | null; quantity: number }>([requestedSaleId])
+    committedReturnLines = [...committedReturnLines, ...importedReturnedLines(soldLines)]
     if (!isMoneyV1) {
       try {
         assertReturnCreateCapacity(soldLines, committedReturnLines, returnItems)
@@ -3051,14 +3070,16 @@ app.patch('/:id', async (c) => {
 
   let projectedSaleStatus: string | null = null
   if (linkedSale) {
-    const soldLines = await db.prepare('SELECT id,product_id,quantity FROM sale_items WHERE sale_id=? ORDER BY id')
-      .all<{ id: number; product_id: number | null; quantity: number }>([existing.sale_id])
-    const siblingLines = await db.prepare(`SELECT ri.sale_item_id,ri.product_id,ri.quantity
+    const soldLines = await db.prepare(`SELECT id,product_id,quantity,${IMPORTED_RETURNED_QUANTITY_SQL} AS imported_returned_quantity
+      FROM sale_items WHERE sale_id=? ORDER BY id`)
+      .all<{ id: number; product_id: number | null; quantity: number; imported_returned_quantity: number | null }>([existing.sale_id])
+    const siblingLines = [...await db.prepare(`SELECT ri.sale_item_id,ri.product_id,ri.quantity
       FROM return_items ri JOIN returns r ON r.id=ri.return_id
       WHERE r.sale_id=@sale AND r.id<>@return
         AND COALESCE(r.status,'completed')!='cancelled'
         AND COALESCE(r.return_scope,'customer')='customer'
-      ORDER BY r.id,ri.id`).all<{ sale_item_id: number | null; product_id: number | null; quantity: number }>({ sale: existing.sale_id, return: returnId })
+      ORDER BY r.id,ri.id`).all<{ sale_item_id: number | null; product_id: number | null; quantity: number }>({ sale: existing.sale_id, return: returnId }),
+    ...importedReturnedLines(soldLines)]
     const proposedLines = String(existing.status || 'completed') === 'cancelled' ? [] : newItems.map((item) => ({
       sale_item_id: item.sale_item_id ?? null,
       product_id: item.product_id ?? null,
