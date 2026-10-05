@@ -109,12 +109,40 @@ export async function recordRateLimitEvent(env: Env, bucket: string, clientKey: 
   `).run({ bucket, clientKey, createdAt: sqliteUtcTimestamp(Date.now()) })
 }
 
-// Best-effort IP extraction -- Cloudflare sets CF-Connecting-IP on every
-// request at the edge, more reliable than X-Forwarded-For (which a client
-// could try to spoof before CF overwrites it, but CF-Connecting-IP is the
-// edge's own determination).
+// CF-Connecting-IP only: Cloudflare's edge sets it on every request, and a
+// client cannot. X-Forwarded-For is whatever the caller typed, so falling
+// back to it let one script choose a fresh rate-limit key per request
+// (G38 P0, WEB-threat P1-11). Without the edge header every caller shares
+// 'unknown-ip', which fails toward MORE limiting, never less.
 export function getClientIp(request: Request): string {
-  return request.headers.get('CF-Connecting-IP')
-    || request.headers.get('X-Forwarded-For')?.split(',')[0]?.trim()
-    || 'unknown-ip'
+  return request.headers.get('CF-Connecting-IP')?.trim() || 'unknown-ip'
+}
+
+// The key a public abuse limiter should count by. One IPv6 subscriber holds
+// a whole /64 and can rotate through it freely, so a per-address IPv6 key is
+// no limit at all; the /64 prefix is the "one network" unit. IPv4 (and an
+// IPv4-mapped IPv6 address) stays the exact address.
+export function clientNetworkKey(ip: string): string {
+  const value = String(ip || '').trim().toLowerCase()
+  if (!value.includes(':')) return value || 'unknown-ip'
+  const mapped = /^(?:::|(?:0{1,4}:){5})ffff:(\d{1,3}(?:\.\d{1,3}){3})$/.exec(value)
+  if (mapped) return mapped[1]
+  const hextets = expandIpv6(value.split('%')[0])
+  if (!hextets) return value
+  return `${hextets.slice(0, 4).map((part) => part.replace(/^0+(?=.)/, '')).join(':')}::/64`
+}
+
+export function getClientNetworkKey(request: Request): string {
+  return clientNetworkKey(getClientIp(request))
+}
+
+function expandIpv6(value: string): string[] | null {
+  const halves = value.split('::')
+  if (halves.length > 2) return null
+  const head = halves[0] ? halves[0].split(':') : []
+  const tail = halves.length === 2 && halves[1] ? halves[1].split(':') : []
+  const missing = 8 - head.length - tail.length
+  if (halves.length === 1 ? missing !== 0 : missing < 1) return null
+  const parts = [...head, ...Array(halves.length === 2 ? missing : 0).fill('0'), ...tail]
+  return parts.every((part) => /^[0-9a-f]{1,4}$/.test(part)) ? parts : null
 }
