@@ -266,6 +266,18 @@ function parseJsonSafe(value: unknown): Record<string, unknown> {
   }
 }
 
+// Order-independent text of a permission map. Unlike the audit diff's
+// canonical form it keeps `true` and `1` apart: a strict permission check
+// treats them differently.
+function sortedJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(sortedJson).join(',')}]`
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>
+    return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${sortedJson(record[key])}`).join(',')}}`
+  }
+  return JSON.stringify(value) ?? 'null'
+}
+
 async function resolveDefaultOrg(c: Ctx, actor: SessionUser) {
   const db = getDb(c.env)
   const actorRow = await db.prepare('SELECT organization_id, organization_group_id FROM users WHERE id = @id').get<{
@@ -966,8 +978,8 @@ app.put('/roles/:id', async (c) => {
   const id = c.req.param('id')
   const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
   const db = getDb(c.env)
-  const existingRole = await db.prepare('SELECT id, name, code, is_system, permissions, updated_at FROM roles WHERE id = @id').get<{
-    id: number; name: string; code: string | null; is_system: number; permissions: string | null; updated_at: string | null
+  const existingRole = await db.prepare('SELECT id, name, code, is_system, permissions, created_at, updated_at FROM roles WHERE id = @id').get<{
+    id: number; name: string; code: string | null; is_system: number; permissions: string | null; created_at: string | null; updated_at: string | null
   }>({ id })
   if (!existingRole) return c.json({ success: false, error: 'Role not found' }, 404)
   const expectedUpdatedAt = getExpectedUpdatedAt(body)
@@ -986,6 +998,15 @@ app.put('/roles/:id', async (c) => {
   if (normalizeLookup(name) === 'admin') return c.json({ success: false, error: 'Admin role is reserved' }, 400)
   try {
     const permissions = JSON.stringify(body.permissions || {})
+    // Nothing to save: the same name and the same grants (key order is not a
+    // difference; `true` and `1` ARE, since permission checks are strict).
+    // Writing anyway moved updated_at -- so another admin's open editor then
+    // reported a conflict -- added an audit row with an empty diff, and the
+    // `roles` broadcast makes every other tab refetch its session and
+    // permissions.
+    if (name === existingRole.name && sortedJson(parseJsonSafe(existingRole.permissions)) === sortedJson(parseJsonSafe(permissions))) {
+      return c.json({ success: true, unchanged: true, ...existingRole })
+    }
     // A custom role with `all` makes its holders administrators (FX-sec2).
     const adminGuard = await planAdminControlWrite(db, { role: { id, permissions } })
     if ('refusal' in adminGuard) return c.json(adminGuard.refusal, 409)
@@ -994,7 +1015,7 @@ app.put('/roles/:id', async (c) => {
     // A role IS its permission set, so the row has to carry the permissions
     // that moved, not just the role's name. Built here (not after the batch)
     // so the before/after is committed atomically with the UPDATE it describes.
-    const roleChange = auditChangeColumns(changedFields(
+    const roleChangeColumns = auditChangeColumns(changedFields(
       { name: existingRole.name, permissions: parseJsonSafe(existingRole.permissions) },
       { name, permissions: parseJsonSafe(permissions) },
     ))
@@ -1029,7 +1050,7 @@ app.put('/roles/:id', async (c) => {
               (SELECT device_name FROM user_sessions WHERE user_id = @user_id AND revoked_at IS NULL ORDER BY last_seen_at DESC, id DESC LIMIT 1),
               (SELECT device_tz FROM user_sessions WHERE user_id = @user_id AND revoked_at IS NULL ORDER BY last_seen_at DESC, id DESC LIMIT 1)
             WHERE changes() = 1`,
-      params: { user_id: actor?.id ?? null, user_name: actorSnapshot(actor), id, details, ...roleChange },
+      params: { user_id: actor?.id ?? null, user_name: actorSnapshot(actor), id, details, ...roleChangeColumns },
     }, adminGuard.guard])
     const firstResult = results[0] as { changes?: number; meta?: { changes?: number } } | undefined
     const updatedRows = Number(firstResult?.meta?.changes ?? firstResult?.changes ?? 0)

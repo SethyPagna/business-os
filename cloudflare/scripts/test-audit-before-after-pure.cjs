@@ -483,7 +483,7 @@ check('every route in scope still threads a before/after into its audit write', 
   const expectations = [
     ['routes/users.ts', /'update', 'user', id, null, changedFields\(/, 'admin user edit'],
     ['routes/users.ts', /'update', 'user', targetId, \{ mode: 'profile' \}, changedFields\(/, 'self-service profile edit'],
-    ['routes/users.ts', /roleChange = auditChangeColumns\(changedFields\(/, 'role edit (in its own batch)'],
+    ['routes/users.ts', /roleChangeColumns = auditChangeColumns\(changedFields\(/, 'role edit (in its own batch)'],
     ['routes/products.ts', /'update', 'product', id, null, productFieldChange/, 'product plain field edit'],
     ['routes/contacts.ts', /changedFields\(current, payload, \{ keys: contactDiffKeys \}\)/, 'contact edit'],
     ['routes/promotions.ts', /'update', 'promotion_rule', id,[\s\S]{0,200}?changedFields\(/, 'promotion rule edit'],
