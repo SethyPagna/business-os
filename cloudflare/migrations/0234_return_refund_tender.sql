@@ -1,0 +1,21 @@
+-- 0234 return refund tender (lane RET-A, renumbered from the held 0204 of claude/returns-money-20260929).
+-- Owner rulings 29 Sep 2026, re-confirmed 5 Oct: a refund records the currency it was paid in, and the part of
+-- it that lowered a Not Paid sale's debt instead of leaving a drawer. Rows before this read as a dollar refund
+-- (refund_currency NULL) that lowered no debt (owed_reduction_usd 0).
+--
+-- Two ADD COLUMN statements and nothing else: the rules ride on column CHECKs rather than triggers, so the file
+-- adds two values no other migration or repair reads (test-held-0200-sale-cost-repair-pure classifies it
+-- structurally independent). SQLite tests both CHECKs against every existing row when the column is added.
+--
+-- PRE (read-only, before apply):
+--   SELECT COUNT(*) AS n, ROUND(SUM(total_refund_usd),4) AS usd, SUM(total_refund_khr) AS khr FROM returns;
+-- POST (after apply):
+--   the PRE SELECT returns identical values;
+--   SELECT COUNT(*) FROM returns WHERE refund_currency IS NOT NULL OR owed_reduction_usd <> 0;  -- 0 right after apply
+-- DEPLOY ORDER: the migration runs before the Worker. The previous Worker keeps working on the new schema: its
+--   inserts leave the columns NULL/0, and its edits keep owed_reduction_usd 0, which both CHECKs accept.
+-- RECOVERY (append-only, never edit this file): NULL/0 is the pre-0234 reading everywhere, so a Worker rollback
+--   needs no schema change. The CHECKs refuse only values no Worker writes; lifting one needs a returns table
+--   rebuild in a later migration that copies every column and omits the CHECK.
+ALTER TABLE returns ADD COLUMN refund_currency TEXT CHECK (refund_currency IS NULL OR refund_currency IN ('USD', 'KHR'));
+ALTER TABLE returns ADD COLUMN owed_reduction_usd REAL NOT NULL DEFAULT 0 CHECK (typeof(owed_reduction_usd) IN ('integer', 'real') AND owed_reduction_usd >= 0 AND (owed_reduction_usd = 0 OR owed_reduction_usd <= total_refund_usd));
