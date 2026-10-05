@@ -2353,13 +2353,13 @@ app.patch('/:id/status', async (c) => {
     const isDeferredPaymentSettle = oldStatus === 'awaiting_payment'
       && (saleStatus === 'completed' || saleStatus === 'awaiting_delivery')
     if (!isDeferredPaymentSettle) {
-      return c.json({ error: 'Payment can only be recorded when completing an awaiting-payment sale.' }, 400)
+      return c.json({ error: 'Payment can only be recorded when completing a Not Paid sale.' }, 400)
     }
     const paymentCorrectionRequested = body.replace_existing_payment === true
     if (paymentCorrectionRequested) {
       paymentCorrection = await saleAllowsPaymentCorrection(db, Number(id))
       if (!paymentCorrection) {
-        return c.json({ error: 'Recorded payment can only be replaced after a completed sale is moved back to Awaiting payment.', code: 'payment_correction_not_allowed' }, 409)
+        return c.json({ error: 'Recorded payment can only be replaced after a completed sale is moved back to Not Paid.', code: 'payment_correction_not_allowed' }, 409)
       }
     }
     if ((body.notes !== undefined && !emptySettlementNote) || skipStockRequested) {
