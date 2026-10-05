@@ -4,7 +4,7 @@ import type { SessionUser } from './auth';
 import { getActionTier, isAdminControlUser } from './permissions';
 import { D1_MAX_BOUND_PARAMS } from './sqlBinding';
 import { VALID_SALE_STATUSES } from './salesStatus';
-import { allocateReturnedQuantities, guardSaleStatusTransition, heldQuantity, normalizeCancelReason, planSaleStockTransition, type TransitionItem, type StockStatement } from './saleTransitions';
+import { addImportedReturnedQuantities, allocateReturnedQuantities, guardSaleStatusTransition, heldQuantity, normalizeCancelReason, planSaleStockTransition, type TransitionItem, type StockStatement } from './saleTransitions';
 import { bumpVersion } from './cache';
 import { broadcast } from '../durable-objects/broadcastHub';
 import { actorSnapshot } from './actorSnapshot';
@@ -400,6 +400,8 @@ export async function applySaleBulkStatus(env: Env, user: SessionUser, raw: Row)
             const key = Number(r.sale_item_id || r.product_id);
             map.set(key, (map.get(key) || 0) + r.quantity);
         }
+        // RET-B F4: imported return-status lines (sale_items.returned_quantity), as the single route.
+        addImportedReturnedQuantities(itemReturned, own as Array<Item & { returned_quantity?: unknown }>);
         const returned = allocateReturnedQuantities(own, itemReturned, productReturned);
         for (const item of own) {
             item.allocations = allocations.filter(a => a.sale_item_id === item.id);
