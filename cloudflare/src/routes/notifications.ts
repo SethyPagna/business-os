@@ -2,7 +2,8 @@ import { Hono } from 'hono'
 import type { Env } from '../index'
 import { getDb } from '../lib/db'
 import { chunkForBinding } from '../lib/sqlBinding'
-import { loadLowStockConfig, lowStockThresholdSql } from '../lib/lowStockSettings'
+import { loadLowStockConfig, lowStockThresholdSql, type LowStockConfig } from '../lib/lowStockSettings'
+import { cachedJsonResponse, getVersionWithFallback } from '../lib/cache'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { hasPermission, hasAnyPermission, isAdminControlUser } from '../lib/permissions'
 
@@ -46,6 +47,9 @@ const NOTIFICATION_SETTING_KEYS = [
   'notifications_supplier_credit_enabled',
   'notifications_supplier_credit_days',
   'drive_sync_enabled',
+  // Read only to key the loyalty cache entry (buildLoyaltySection still reads the
+  // switch itself); never returned to the client.
+  'loyalty_points_enabled',
   // Presence-only read: loadPreferences reduces this to a boolean and the
   // token value never leaves that function.
   'drive_sync_refresh_token',
@@ -114,6 +118,11 @@ type NotificationSection = {
   summaryKey?: string
   summaryParams?: Record<string, unknown>
   items: NotificationItem[]
+  // Set only when `items` is a preview: the section's true size and a flag the
+  // panel uses to offer "show all" (GET /summary/items?section=<id>). `count`
+  // is always the true size, so the bell badge and headline are unaffected.
+  itemsTotal?: number
+  truncated?: boolean
   // Settings key this section's on/off switch reads and writes (see
   // Settings.tsx's Notifications block and NotificationCenter.tsx's
   // toggleSectionPreference). Sections that can't actually be muted --
@@ -148,32 +157,92 @@ async function loadPreferences(env: Env) {
     realertMinutes: Math.max(1, Math.min(1440, Math.floor(toNumber(map.notifications_realert_minutes, 10)))),
     driveSyncEnabled: normalizeBoolean(map.drive_sync_enabled, false),
     driveSyncConnected: Boolean(String(map.drive_sync_refresh_token || '').trim()),
+    loyaltyPointsEnabled: normalizeBoolean(map.loyalty_points_enabled, true),
   }
 }
 
-async function buildInventorySection(env: Env): Promise<NotificationSection | null> {
+// The three sections that cost real reads on every call -- inventory and expiry
+// each walk every active product, loyalty groups every sale ever made -- are
+// answered from the Workers Cache API for a short while, keyed by the data
+// versions their inputs live in. Every writer of those inputs already bumps
+// the same versions the product/sales/contacts caches use: stock moves bump
+// 'products' or 'stock', sales 'sales' (+ 'stock'), returns 'returns', customer
+// edits and merges 'customers', settings 'settings'. A bump makes the old entry
+// unreachable at once; the TTL is only the backstop for the inputs that have no
+// bump (a portal Share & Reward review, the date rolling over for expiry).
+// The per-user parts of the summary (which sections this person may see, the
+// imports they can open, the security rows) are NOT cached, so nothing here can
+// leak across users: the cached value is the same for everyone who is allowed
+// to ask for it.
+export const NOTIFICATION_SECTION_CACHE_TTL_SECONDS = 45
+// Rows the summary carries per inventory section. The panel pages client-side
+// and reaches the rest through GET /summary/items; the headline count is exact
+// either way.
+export const INVENTORY_PREVIEW_ITEMS = 50
+// What the full list was capped at before the preview existed.
+export const INVENTORY_FULL_ITEMS = 5000
+
+type NotificationContext = { env: Env; req: { url: string; raw: Request }; executionCtx: { waitUntil(promise: Promise<unknown>): void } }
+
+type SectionCache = <T>(name: string, namespaces: string[], inputs: string, producer: () => Promise<T>) => Promise<T>
+
+// One per request: each data version is read once however many sections key on it
+// (products, settings and the rest are shared by two or three of them).
+function sectionCacheFor(c: NotificationContext): SectionCache {
+  const versionReads = new Map<string, Promise<string>>()
+  const versionOf = (namespace: string) => {
+    let read = versionReads.get(namespace)
+    if (!read) {
+      read = getVersionWithFallback(c.env, namespace)
+      versionReads.set(namespace, read)
+    }
+    return read
+  }
+  return async (name, namespaces, inputs, producer) => {
+    // No Cache API (a unit-test harness): behave exactly as the uncached route did.
+    if (typeof caches === 'undefined') return producer()
+    const versions = await Promise.all(namespaces.map(versionOf))
+    const version = namespaces.map((namespace, index) => `${namespace}:${versions[index]}`).join('|')
+    const request = new Request(`${new URL(c.req.url).origin}/api/notifications/_section/${name}?k=${encodeURIComponent(inputs)}`)
+    return cachedJsonResponse(request, c.executionCtx, version, NOTIFICATION_SECTION_CACHE_TTL_SECONDS, producer)
+  }
+}
+
+function lowStockCacheInput(config: LowStockConfig): string {
+  return `${config.enabled ? 1 : 0}:${config.mode}:${config.threshold}`
+}
+
+// `itemLimit` is how many rows come back (the section's `count` is always the
+// exact size). The totals ride on the same single pass as window aggregates, so
+// asking for 50 rows reads the catalog once, exactly as asking for 5,000 did --
+// it just stops shipping 4,950 rows nobody scrolled to.
+async function buildInventorySection(env: Env, config: LowStockConfig, itemLimit: number): Promise<NotificationSection | null> {
   const db = getDb(env)
-  const lowThresholdSql = lowStockThresholdSql(await loadLowStockConfig(env), 'low_stock_threshold')
+  const lowThresholdSql = lowStockThresholdSql(config, 'low_stock_threshold')
   // The OR is what keeps OUT-OF-STOCK alive when the owner switches the
   // low-quantity alert off. With the alert off the low fragment is -1, and
   // this one query fetches BOTH tiers -- so a single `qty <= low` filter
   // would have silently taken the out-of-stock rows down with the low ones,
   // which is not what a low-QUANTITY switch means.
+  // Out-of-stock rows list first (then fewest-in-stock first), the same order
+  // the two-array split of the old ORDER BY stock_quantity produced.
   const rows = await db.prepare(`
     SELECT id, name, stock_quantity,
-      COALESCE(out_of_stock_threshold, 0) AS out_threshold,
-      ${lowThresholdSql} AS low_threshold
+      CASE WHEN COALESCE(stock_quantity, 0) <= COALESCE(out_of_stock_threshold, 0) THEN 1 ELSE 0 END AS is_out,
+      SUM(CASE WHEN COALESCE(stock_quantity, 0) <= COALESCE(out_of_stock_threshold, 0) THEN 1 ELSE 0 END) OVER () AS out_total,
+      COUNT(*) OVER () AS flagged_total
     FROM products
     WHERE is_active = 1
       AND (COALESCE(stock_quantity, 0) <= ${lowThresholdSql}
            OR COALESCE(stock_quantity, 0) <= COALESCE(out_of_stock_threshold, 0))
-    ORDER BY stock_quantity ASC
-    LIMIT 5000
-  `).all<{ id: number; name: string; stock_quantity: number; out_threshold: number; low_threshold: number }>()
-
-  const outOfStock = rows.filter((row) => Number(row.stock_quantity || 0) <= Number(row.out_threshold || 0))
-  const lowStock = rows.filter((row) => Number(row.stock_quantity || 0) > Number(row.out_threshold || 0))
+    ORDER BY is_out DESC, stock_quantity ASC, name ASC, id ASC
+    LIMIT @itemLimit
+  `).all<{ id: number; name: string; stock_quantity: number; is_out: number; out_total: number; flagged_total: number }>({ itemLimit })
   if (!rows.length) return null
+
+  const outCount = Number(rows[0].out_total || 0)
+  const lowCount = Math.max(0, Number(rows[0].flagged_total || 0) - outCount)
+  const count = outCount + lowCount
 
   // anchor: 'product-<id>' -- lets Inventory.tsx scroll to and briefly
   // highlight this exact row once it lands on the page, instead of just
@@ -181,37 +250,37 @@ async function buildInventorySection(env: Env): Promise<NotificationSection | nu
   // Inventory.tsx's `#product-` hash handling). pageId stays 'inventory'
   // either way so a click still works even if the row can't be located
   // (e.g. it was restocked between the notification firing and the click).
-  const items: NotificationItem[] = [
-    ...outOfStock.slice(0, 5000).map((product) => ({
-      id: `out-${product.id}`,
-      tone: 'danger' as const,
-      label: product.name,
-      meta: 'Out of stock',
-      kind: 'inventory_out_of_stock',
-      pageId: 'inventory',
-      anchor: `product-${product.id}`,
-    })),
-    ...lowStock.slice(0, 5000).map((product) => ({
-      id: `low-${product.id}`,
-      tone: 'warning' as const,
-      label: product.name,
-      meta: `Low stock (${Number(product.stock_quantity || 0)})`,
-      kind: 'inventory_low_stock',
-      pageId: 'inventory',
-      anchor: `product-${product.id}`,
-    })),
-  ]
+  const items: NotificationItem[] = rows.map((product) => (Number(product.is_out) === 1
+    ? {
+        id: `out-${product.id}`,
+        tone: 'danger' as const,
+        label: product.name,
+        meta: 'Out of stock',
+        kind: 'inventory_out_of_stock',
+        pageId: 'inventory',
+        anchor: `product-${product.id}`,
+      }
+    : {
+        id: `low-${product.id}`,
+        tone: 'warning' as const,
+        label: product.name,
+        meta: `Low stock (${Number(product.stock_quantity || 0)})`,
+        kind: 'inventory_low_stock',
+        pageId: 'inventory',
+        anchor: `product-${product.id}`,
+      }))
 
   return {
     id: 'inventory',
     label: 'Inventory',
     pageId: 'inventory',
-    count: outOfStock.length + lowStock.length,
+    count,
     summary: joinSummary([
-      outOfStock.length ? `${outOfStock.length} out of stock` : null,
-      lowStock.length ? `${lowStock.length} low stock` : null,
+      outCount ? `${outCount} out of stock` : null,
+      lowCount ? `${lowCount} low stock` : null,
     ]),
     items,
+    ...(items.length < count ? { itemsTotal: count, truncated: true } : {}),
     enabledKey: 'notifications_inventory_enabled',
   }
 }
@@ -658,14 +727,26 @@ async function buildDeviceApprovalSection(env: Env): Promise<NotificationSection
 
 app.get('/summary', async (c) => {
   const user = c.get('user')
-  const preferences = await loadPreferences(c.env)
+  // The loyalty switch is a cache-key input only; it is not part of the public preferences object.
+  const { loyaltyPointsEnabled, ...preferences } = await loadPreferences(c.env)
   const sections: NotificationSection[] = []
+  const cachedSection = sectionCacheFor(c)
 
   const tasks: Array<Promise<NotificationSection | null>> = []
-  if (preferences.inventoryEnabled && hasPermission(user, 'inventory')) tasks.push(buildInventorySection(c.env))
-  if (preferences.expiryEnabled && hasPermission(user, 'products')) tasks.push(buildExpirySection(c.env, preferences.expiryDays))
+  if (preferences.inventoryEnabled && hasPermission(user, 'inventory')) {
+    const lowStockConfig = await loadLowStockConfig(c.env)
+    tasks.push(cachedSection('inventory', ['products', 'stock', 'settings'], lowStockCacheInput(lowStockConfig),
+      () => buildInventorySection(c.env, lowStockConfig, INVENTORY_PREVIEW_ITEMS)))
+  }
+  if (preferences.expiryEnabled && hasPermission(user, 'products')) {
+    tasks.push(cachedSection('expiry', ['products', 'settings'], String(preferences.expiryDays),
+      () => buildExpirySection(c.env, preferences.expiryDays)))
+  }
   if (preferences.salesEnabled && hasPermission(user, 'sales')) tasks.push(buildSalesSection(c.env))
-  if (preferences.loyaltyEnabled && hasPermission(user, 'contacts')) tasks.push(buildLoyaltySection(c.env, preferences.loyaltyThreshold))
+  if (preferences.loyaltyEnabled && hasPermission(user, 'contacts')) {
+    tasks.push(cachedSection('loyalty', ['sales', 'returns', 'customers', 'settings'], `${preferences.loyaltyThreshold}:${loyaltyPointsEnabled ? 1 : 0}`,
+      () => buildLoyaltySection(c.env, preferences.loyaltyThreshold)))
+  }
   // Pending Share & Reward submissions are an approve/reject queue (an
   // admin decision awards or denies real loyalty points), not an
   // informational notice -- so, like the security/device section below,
@@ -712,6 +793,21 @@ app.get('/summary', async (c) => {
     preferences,
     sections,
   })
+})
+
+// The full inventory list behind the panel's "show all". Not part of /summary so
+// the poll that runs on every sync broadcast and tab focus stays small; the panel
+// asks for this once, on request, and keeps re-asking only while it stays expanded.
+app.get('/summary/items', async (c) => {
+  const user = c.get('user')
+  if (String(c.req.query('section') || '') !== 'inventory') return c.json({ error: 'Unknown notification section' }, 404)
+  if (!hasPermission(user, 'inventory')) return c.json({ error: 'Forbidden' }, 403)
+  const { inventoryEnabled } = await loadPreferences(c.env)
+  if (!inventoryEnabled) return c.json({ id: 'inventory', count: 0, items: [] })
+  const lowStockConfig = await loadLowStockConfig(c.env)
+  const section = await sectionCacheFor(c)('inventory-full', ['products', 'stock', 'settings'], lowStockCacheInput(lowStockConfig),
+    () => buildInventorySection(c.env, lowStockConfig, INVENTORY_FULL_ITEMS))
+  return c.json({ id: 'inventory', count: section?.count ?? 0, items: section?.items ?? [] })
 })
 
 export default app
