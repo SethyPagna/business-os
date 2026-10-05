@@ -2874,9 +2874,10 @@ app.get('/customers/link-conflicts', async (c) => {
   // N5: spend per customer/phone is the same data contacts:financial_history
   // exists to hide from cashiers (see /customers/reports/ar-invoices). A user
   // without it still gets the list -- they may hold resolve_conflicts and need
-  // to see which links to fix -- but total_usd and sale_count (purchase
-  // frequency) are omitted from every row, and the order no longer ranks by
-  // sale count. Refusing the whole list would leave link conflicts unresolvable
+  // to see which links to fix -- but total_usd, sale_count (purchase frequency)
+  // and first_at / last_at (buying recency) are omitted from every row, and the
+  // order no longer ranks by either: it is by customer / name instead.
+  // Refusing the whole list would leave link conflicts unresolvable
   // for exactly the staff the Conflicts tab is for.
   const canSeeSpend = getActionTier(c.get('user'), 'contacts', 'financial_history') === 'full'
   const db = getDb(c.env)
@@ -2929,7 +2930,7 @@ app.get('/customers/link-conflicts', async (c) => {
       WHERE d.contact_table = 'customers' AND d.cluster_type = 'link_mismatch'
         AND d.cluster_value = g.customer_id || '|' || g.phone_key
     )`}
-    ORDER BY g.last_at DESC
+    ORDER BY ${canSeeSpend ? 'g.last_at DESC' : 'g.customer_id ASC, g.phone_key ASC'}
     LIMIT @limit OFFSET @offset
   `).all<MismatchRow>({ limit: pageSize, offset: mismatchOffset })
 
@@ -2966,7 +2967,7 @@ app.get('/customers/link-conflicts', async (c) => {
       WHERE d.contact_table = 'customers' AND d.cluster_type = 'link_missing'
         AND d.cluster_value = lower(g.name) || '|' || g.phone_key
     )`}
-    ORDER BY ${canSeeSpend ? 'g.sale_count DESC, ' : ''}g.last_at DESC
+    ORDER BY ${canSeeSpend ? 'g.sale_count DESC, g.last_at DESC' : 'lower(g.name) ASC, g.phone_key ASC'}
     LIMIT @limit OFFSET @offset
   `).all<MissingRow>({ limit: pageSize, offset: missingOffset })
 
@@ -2999,8 +3000,8 @@ app.get('/customers/link-conflicts', async (c) => {
       )`}
     `).get<{ total: number }>(),
   ])
-  const withoutSpend = <T extends { sale_count?: number; total_usd?: number }>(row: T): Omit<T, 'sale_count' | 'total_usd'> => {
-    const { sale_count: _saleCount, total_usd: _totalUsd, ...rest } = row
+  const withoutSpend = <T extends { sale_count?: number; total_usd?: number; first_at?: string; last_at?: string }>(row: T): Omit<T, 'sale_count' | 'total_usd' | 'first_at' | 'last_at'> => {
+    const { sale_count: _saleCount, total_usd: _totalUsd, first_at: _firstAt, last_at: _lastAt, ...rest } = row
     return rest
   }
   const mismatchTotal = Number(mismatchCountRow?.total) || 0

@@ -184,9 +184,30 @@ async function main() {
     seed()
     // Group B: one very recent sale; group A (Stranger) has two older ones.
     rawDb.prepare("INSERT INTO sales (customer_id, customer_name, customer_phone, total_usd, sale_status, created_at) VALUES (NULL,'Newer','0444',1,'completed','2026-09-30 10:00:00')").run()
+    // A third group: one old-ish sale. Busiest-first is Stranger, Newer, Alpha (count then recency);
+    // most-recent-first would be Newer, Alpha, Stranger; by name it is Alpha, Newer, Stranger.
+    rawDb.prepare("INSERT INTO sales (customer_id, customer_name, customer_phone, total_usd, sale_status, created_at) VALUES (NULL,'Alpha','0555',1,'completed','2026-09-10 10:00:00')").run()
     const names = async (user) => (await get(user)).json.missing.map((row) => row.name)
-    assert.deepEqual(await names(withSpend), ['Stranger', 'Newer'], 'spend holders keep the busiest-first order')
-    assert.deepEqual(await names(cashier), ['Newer', 'Stranger'], 'others get most-recent-first')
+    assert.deepEqual(await names(withSpend), ['Stranger', 'Newer', 'Alpha'], 'spend holders keep the busiest-first order')
+    assert.deepEqual(await names(cashier), ['Alpha', 'Newer', 'Stranger'], 'others get a neutral order (by name), ranking neither by frequency nor by recency')
+  })
+
+  await check('N5: without financial_history no row carries first_at or last_at (buying recency), and the mismatch order is neutral too', async () => {
+    seed()
+    // A second mismatch customer whose last sale is MORE recent but whose id is higher.
+    rawDb.prepare("INSERT INTO customers (id, name, phone) VALUES (2, 'Bora', '0999')").run()
+    rawDb.prepare("INSERT INTO sales (customer_id, customer_name, customer_phone, subtotal_usd, total_usd, sale_status, created_at) VALUES (2,'Bora','0888',1,1,'completed','2026-09-30 10:00:00')").run()
+    for (const user of [cashier, resolver]) {
+      const { json } = await get(user)
+      for (const row of [...json.mismatches, ...json.missing]) {
+        assert.ok(!('first_at' in row) && !('last_at' in row), 'no dates: ' + JSON.stringify(row))
+      }
+      assert.deepEqual(json.mismatches.map((row) => row.customer_id), [1, 2], 'ordered by customer, not by recency (recency would put 2 first)')
+    }
+    const spend = (await get(withSpend)).json
+    assert.ok(spend.mismatches.every((row) => row.first_at && row.last_at), 'financial_history holders still see the dates')
+    assert.deepEqual(spend.mismatches.map((row) => row.customer_id), [2, 1], 'and keep most-recent-first')
+    seed()
   })
 
   await check('N5: a user with no Contacts access still gets no list at all', async () => {

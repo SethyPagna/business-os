@@ -168,7 +168,9 @@ export default function SaleLinkConflictsSection({ t, notify }: { t: TranslateFn
   const mismatches = data?.mismatches || []
   const missing = data?.missing || []
 
-  const groupMeta = (row: { sale_count?: number; total_usd?: number; first_at: string; last_at: string }): string => {
+  const groupMeta = (row: { sale_count?: number; total_usd?: number; first_at?: string; last_at?: string }): string => {
+    // Without financial history the server sends no dates either (buying recency), so there is nothing to show.
+    if (!row.first_at || !row.last_at) return ''
     const range = row.first_at === row.last_at ? fmtDate(row.first_at) : `${fmtDate(row.first_at)} – ${fmtDate(row.last_at)}`
     if (!canViewFinancialHistory || row.sale_count == null || row.total_usd == null) return range
     return `${row.sale_count} × ${money(row.total_usd)} · ${range}`

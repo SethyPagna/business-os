@@ -456,8 +456,9 @@ export type SaleLinkMismatch = {
   sale_name: string | null
   // Omitted by the server for a user without contacts:financial_history.
   sale_count?: number
-  first_at: string
-  last_at: string
+  // Omitted (with sale_count / total_usd) for a user without contacts:financial_history: they show buying recency.
+  first_at?: string
+  last_at?: string
   total_usd?: number
   phone_owner_count: number
   suggested_id: number | null
@@ -474,8 +475,9 @@ export type SaleLinkMissing = {
   phone_key: string
   // Omitted by the server for a user without contacts:financial_history.
   sale_count?: number
-  first_at: string
-  last_at: string
+  // Omitted (with sale_count / total_usd) for a user without contacts:financial_history: they show buying recency.
+  first_at?: string
+  last_at?: string
   total_usd?: number
   phone_owner_count: number
   suggested_id: number | null
