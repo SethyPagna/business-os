@@ -13,7 +13,7 @@
 // D1 applies a migration file as one unit; node:sqlite does not, so a failing
 // file is run inside BEGIN ... ROLLBACK here to model that.
 //
-// Run: node scripts/test-portal-members-migrations-pure.cjs
+// Run: node scripts/test-migration-0230-0231-portal-members-pure.cjs
 'use strict'
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
@@ -57,6 +57,9 @@ function preG38() {
       (6, 'LC-00060', 'Removed Later', '012600600', '$pbkdf2-sha256$f', NULL, NULL, NULL, NULL,
         '2026-09-06 10:00:00', '2026-09-06 10:00:00', NULL, NULL, NULL);
     DELETE FROM portal_accounts WHERE id = 6;
+    INSERT INTO portal_sessions (account_id, token_hash, expires_at, created_at, last_seen_at) VALUES
+      (3, 'old-session', '2027-01-01T00:00:00.000Z', '2026-09-20 08:00:00', '2026-10-01 12:00:00'),
+      (3, 'older-session', '2027-01-01T00:00:00.000Z', '2026-09-10 08:00:00', NULL);
   `)
   return raw
 }
@@ -89,14 +92,32 @@ check('0230: same rows, ids and old column values; new columns at their defaults
   const fresh = raw.prepare("INSERT INTO portal_accounts (name) VALUES ('After')").run()
   assert.equal(Number(fresh.lastInsertRowid), 7, 'a removed id (6) is never issued again')
   const added = raw.prepare('SELECT id, member_code, status, link_version, created_contact_id, last_seen_at, closed_at FROM portal_accounts WHERE id <= 5 ORDER BY id').all()
+  // last_seen_at is the latest evidence of activity: a session's last visit
+  // when there is one (account 3), else the latest of consent/update/creation.
   assert.deepEqual(added.map((r) => ({ ...r })), [
-    { id: 1, member_code: null, status: 'active', link_version: 0, created_contact_id: 10, last_seen_at: null, closed_at: null },
-    { id: 2, member_code: null, status: 'active', link_version: 0, created_contact_id: null, last_seen_at: null, closed_at: null },
-    { id: 3, member_code: null, status: 'active', link_version: 0, created_contact_id: null, last_seen_at: null, closed_at: null },
-    { id: 5, member_code: null, status: 'active', link_version: 0, created_contact_id: null, last_seen_at: null, closed_at: null },
+    { id: 1, member_code: null, status: 'active', link_version: 0, created_contact_id: 10, last_seen_at: '2026-09-02 09:00:00', closed_at: null },
+    { id: 2, member_code: null, status: 'active', link_version: 0, created_contact_id: null, last_seen_at: '2026-09-03 10:00:00', closed_at: null },
+    { id: 3, member_code: null, status: 'active', link_version: 0, created_contact_id: null, last_seen_at: '2026-10-01 12:00:00', closed_at: null },
+    { id: 5, member_code: null, status: 'active', link_version: 0, created_contact_id: null, last_seen_at: '2026-09-05 10:00:00', closed_at: null },
   ])
   const objects = raw.prepare("SELECT name FROM sqlite_master WHERE name LIKE 'portal_accounts%' OR name LIKE 'idx_portal_accounts%' OR name LIKE 'portal_members_guard%' ORDER BY name").all().map((r) => r.name)
   assert.deepEqual(objects, ['idx_portal_accounts_contact', 'idx_portal_accounts_member_code', 'idx_portal_accounts_membership', 'idx_portal_accounts_phone', 'idx_portal_accounts_status_seen', 'portal_accounts'])
+})
+
+check('0230: every LIKE/GLOB pattern in the rebuilt table is within native D1\'s 50-byte limit', () => {
+    const raw = preG38()
+    applyAtomically(raw, M1)
+    applyAtomically(raw, M2)
+    const objects = raw.prepare("SELECT name, sql FROM sqlite_master WHERE sql IS NOT NULL AND (tbl_name LIKE 'portal_%')").all()
+    for (const object of objects) {
+      for (const match of object.sql.matchAll(/(?:LIKE|GLOB)\s+'([^']*)'/gi)) {
+        assert.ok(Buffer.byteLength(match[1]) <= 50, `${object.name}: ${Buffer.byteLength(match[1])}-byte pattern`)
+      }
+    }
+    // The shape CHECK still refuses what the one long GLOB refused.
+    const bad = ['W-0000-000I', 'W-0000-000', 'w-0000-0000', 'W-0000_0000', 'X-0000-0000', 'W-0000-00000', 'W-00O0-0000', 'W-0000-0U00']
+    for (const value of bad) assert.throws(() => raw.prepare("INSERT INTO portal_accounts (name, member_code) VALUES ('x', @c)").run({ c: value }), /CHECK/, value)
+    raw.prepare("INSERT INTO portal_accounts (name, member_code) VALUES ('ok', 'W-7KQ4-M9XD')").run()
 })
 
 check('0230 afterwards: one member per customer, NULL phone/password allowed, phone and LC id still unique', () => {
