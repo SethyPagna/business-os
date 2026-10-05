@@ -1723,7 +1723,7 @@ function registerContactRoutes(config: ContactConfig) {
         SET password_hash = @h, updated_at = CURRENT_TIMESTAMP
         WHERE id = @aid AND contact_id = @customerId
           AND EXISTS (SELECT 1 FROM customers WHERE id = @customerId AND ${customerIsProfileSql()})`)
-        .run({ h: await hashPassword(tempPassword), aid: account.id, customerId: id })
+        .run({ h: await hashPassword(tempPassword, c.env), aid: account.id, customerId: id })
       if (Number(update.changes || 0) !== 1) return anonymousCustomerMutationResponse(c)
       await revokePortalSessionsForAccount(c.env, account.id)
       await audit(c.env, user?.id ?? null, actorSnapshot(user), 'portal_reset', config.entity, id, {})

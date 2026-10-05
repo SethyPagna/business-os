@@ -14,7 +14,9 @@
 //   - an unknown phone spends exactly one derivation at the current count and
 //     no bcrypt -- the same work as a real current-format check;
 //   - the staff "reset storefront password" action (routes/contacts.ts)
-//     writes through hashPassword.
+//     writes through hashPassword with the Worker env (the pepper);
+//   - with PASSWORD_PEPPER set, a sign-in on an unpeppered row rewrites it
+//     peppered exactly once; a wrong pepper cannot sign it in.
 //
 // Run: node scripts/test-portal-password-hash-upgrade-pure.cjs
 
@@ -97,7 +99,8 @@ function isCurrentRowFor(row, password) {
   return key.toString('base64').replace(/=+$/, '') === m[3]
 }
 const rowOf = (id) => rawDb.prepare('SELECT password_hash FROM portal_accounts WHERE id = ?').get([id]).password_hash
-const signin = (identifier, phoneNumber, password) => signinPortalAccount({}, { identifier, phone: phoneNumber, password, consent: true })
+const signin = (identifier, phoneNumber, password, env = {}) => signinPortalAccount(env, { identifier, phone: phoneNumber, password, consent: true })
+const PEPPER_ENV = { PASSWORD_PEPPER: '5eed'.repeat(16) }
 
 let passed = 0
 async function check(name, fn) { resetCounts(); await fn(); passed += 1; console.log(`PASS ${name}`) }
@@ -151,9 +154,22 @@ async function run() {
   await check('the staff storefront-password reset writes through hashPassword', async () => {
     const contacts = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'contacts.ts'), 'utf8')
     assert.ok(!/bcrypt/.test(contacts), 'routes/contacts.ts no longer touches bcrypt')
-    assert.ok(contacts.includes(".run({ h: await hashPassword(tempPassword), aid: account.id, customerId: id })"))
+    assert.ok(contacts.includes(".run({ h: await hashPassword(tempPassword, c.env), aid: account.id, customerId: id })"))
     const portalAccounts = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'portalAccounts.ts'), 'utf8')
     assert.ok(!/bcrypt\./.test(portalAccounts), 'lib/portalAccounts.ts never calls bcrypt directly')
+  })
+
+  await check('with PASSWORD_PEPPER set, an unpeppered row is rewritten peppered exactly once', async () => {
+    const unpeppered = await passwordHash.hashPassword('portal-pass-1', {})
+    rawDb.prepare('UPDATE portal_accounts SET password_hash = ? WHERE id = ?').run([unpeppered, accountId])
+    assert.strictEqual((await signin('Sophea', '097111222', 'portal-pass-1', PEPPER_ENV)).ok, true)
+    const peppered = rowOf(accountId)
+    assert.match(peppered, /^\$pbkdf2-sha256\$i=10000\$p=1\$/)
+    resetCounts()
+    assert.strictEqual((await signin('Sophea', '097111222', 'portal-pass-1', PEPPER_ENV)).ok, true)
+    assert.strictEqual(rowOf(accountId), peppered, 'no second rewrite')
+    assert.strictEqual((await signin('Sophea', '097111222', 'portal-pass-1', { PASSWORD_PEPPER: 'f00d'.repeat(16) })).ok, false, 'a wrong pepper cannot sign in')
+    assert.strictEqual(rowOf(accountId), peppered)
   })
 
   console.log(`\n${passed} checks passed`)

@@ -18,7 +18,10 @@
 //     the release, the owner included;
 //   - parallel sign-ins on one legacy row leave one valid current row;
 //   - password reset by OTP writes the current format, and self-service
-//     OTP disable checks the password through the same module.
+//     OTP disable checks the password through the same module;
+//   - with PASSWORD_PEPPER set, a legacy bcrypt row and an unpeppered PBKDF2
+//     row are each rewritten peppered exactly once (recomputed here with
+//     node:crypto HMAC + PBKDF2); without it they keep signing in.
 //
 // Run: node scripts/test-login-password-hash-upgrade-pure.cjs
 
@@ -145,6 +148,38 @@ async function check(name, fn) {
     assert.equal(wrong.body.code, 'incorrect_password')
     const right = await h.request('/otp/disable', 'POST', { userId: 805, password: 'self-pass-1' }, { actorId: 805 })
     assert.equal(right.status, 200, JSON.stringify(right.body))
+  })
+
+  await check('with PASSWORD_PEPPER set, bcrypt and unpeppered rows upgrade to peppered exactly once', async () => {
+    const PEPPER = '9a1b'.repeat(16)
+    const isPepperedRowFor = (row, password) => {
+      const m = /^\$pbkdf2-sha256\$i=10000\$p=1\$([A-Za-z0-9+/]{22})\$([A-Za-z0-9+/]{43})$/.exec(String(row))
+      if (!m) return false
+      const material = nodeCrypto.createHmac('sha256', Buffer.from(PEPPER, 'utf8')).update(Buffer.from(password, 'utf8')).digest()
+      return nodeCrypto.pbkdf2Sync(material, Buffer.from(m[1], 'base64'), 10000, 32, 'sha256').toString('base64').replace(/=+$/, '') === m[2]
+    }
+    const h = harness({ planTier: 'free' })
+    h.addUser({ id: 806, username: 'plain', name: 'Plain Row', password: 'plain-pass-1' })
+    // No pepper yet: the bcrypt row upgrades to the unpeppered format.
+    assert.equal((await login(h, 'plain', 'plain-pass-1')).status, 200)
+    assert.ok(isCurrentRowFor(h.userRow(806).password, 'plain-pass-1'), 'without a pepper: unpeppered current row')
+    h.env.PASSWORD_PEPPER = PEPPER
+    for (const [username, password, id] of [['owner', 'owner-pass-1', 801], ['plain', 'plain-pass-1', 806]]) {
+      assert.equal((await login(h, username, password)).status, 200, username)
+      const upgraded = h.userRow(id).password
+      assert.ok(isPepperedRowFor(upgraded, password), `${username}: peppered row ${upgraded.slice(0, 26)}`)
+      compared.length = 0
+      derived.length = 0
+      assert.equal((await login(h, username, password)).status, 200)
+      assert.equal(h.userRow(id).password, upgraded, `${username}: rewritten exactly once`)
+      assert.deepEqual(derived, [CURRENT_ITERATIONS], 'one derivation, no rewrite')
+      assert.equal(compared.length, 0)
+    }
+    assert.equal(h.userRow(801).updated_at, STAMP)
+    // The pepper removed: peppered rows cannot sign in (the secret must never
+    // be lost), unpeppered rows still can.
+    delete h.env.PASSWORD_PEPPER
+    assert.equal((await login(h, 'owner', 'owner-pass-1')).status, 401)
   })
 
   if (failures) { console.error(`${failures} failing`); process.exit(1) }

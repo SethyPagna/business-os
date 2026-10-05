@@ -158,7 +158,7 @@ async function selfOtpReauthFailure(
   if (!limit.allowed) return { status: 429, error: 'Too many attempts. Please try again later.', code: 'otp_reauth_rate_limited' }
   const password = String(body.password ?? '')
   if (!password.trim()) return { status: 400, error: 'Current password is required', code: 'current_password_required' }
-  if (!(await verifyPassword(password, target.password)).ok) return { status: 400, error: 'Incorrect password', code: 'incorrect_password' }
+  if (!(await verifyPassword(password, target.password, env)).ok) return { status: 400, error: 'Incorrect password', code: 'incorrect_password' }
   if (options.requireCurrentCode && target.otp_enabled && target.otp_secret) {
     const activeSecret = await decryptSecret(target.otp_secret, env.APP_ENCRYPTION_KEY)
     const step = activeSecret ? await verifyTotpStep(activeSecret, String(body.currentToken ?? '')) : null
@@ -337,16 +337,16 @@ app.post('/login', async (c) => {
   }
 
   if (!user || !user.is_active) {
-    await spendDummyPasswordVerify(body.password)
+    await spendDummyPasswordVerify(body.password, c.env)
     return invalidCredentials()
   }
-  const passwordCheck = await verifyPassword(body.password, user.password)
+  const passwordCheck = await verifyPassword(body.password, user.password, c.env)
   if (!passwordCheck.ok) return invalidCredentials()
   // E6: a right password on a legacy bcrypt (or other-count) hash is
   // rewritten once in the current format, so every later sign-in costs one
   // PBKDF2 check -- what keeps sign-in inside the Workers Free CPU limit.
   // Compare-and-set; a failed rewrite never fails the sign-in.
-  if (passwordCheck.needsRehash) await upgradePasswordHash(db, 'users', user.id, body.password, user.password)
+  if (passwordCheck.needsRehash) await upgradePasswordHash(db, 'users', user.id, body.password, user.password, c.env)
 
   // S-auth4b: a right password that is publicly known (in git history) still
   // signs in -- refusing it would lock the owner out -- but the account is
@@ -670,7 +670,7 @@ app.post('/password-reset/complete', async (c) => {
   const user = await db.prepare('SELECT id, username, name FROM users WHERE id = ? AND deleted_at IS NULL AND is_active = 1').get<{ id: number; username: string; name: string }>([result.userId])
   if (!user) return c.json({ success: false, error: 'Account no longer available' }, 400)
 
-  const passwordHash = await hashPassword(newPassword)
+  const passwordHash = await hashPassword(newPassword, c.env)
   await db.prepare('UPDATE users SET password = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run([passwordHash, user.id])
   await setPasswordMustChange(db, user.id, false)
   // Reset means "I may have lost control of this account" -- every
@@ -984,7 +984,7 @@ app.post('/otp/disable', requireAuth, async (c) => {
     // a 401 on an authenticated path signs the frontend out.
     const limit = await checkRateLimit(c.env, 'auth:otp_self_reauth', `uid:${target.id}`, OTP_SELF_REAUTH_LIMIT_MAX, OTP_SELF_REAUTH_LIMIT_WINDOW_MS)
     if (!limit.allowed) return c.json({ error: 'Too many attempts. Please try again later.', code: 'otp_reauth_rate_limited' }, 429)
-    if (!(await verifyPassword(String(body.password || ''), target.password)).ok) {
+    if (!(await verifyPassword(String(body.password || ''), target.password, c.env)).ok) {
       return c.json({ error: 'Incorrect password', code: 'incorrect_password' }, 400)
     }
   }
@@ -1018,7 +1018,7 @@ app.post('/otp/recover', requireAuth, async (c) => {
   if (!recoveryLimit.allowed) return c.json({ error: 'Too many 2FA recovery attempts. Please try again later.' }, 429)
 
   const actorRecord = await getOtpTargetUser(c.env, actor.id)
-  if (!actorRecord || !(await verifyPassword(String(body.password || ''), actorRecord.password)).ok) {
+  if (!actorRecord || !(await verifyPassword(String(body.password || ''), actorRecord.password, c.env)).ok) {
     return c.json({ error: 'Your current password is incorrect.', code: 'incorrect_password' }, 400)
   }
   const target = await getOtpTargetUser(c.env, targetId)
@@ -1117,7 +1117,7 @@ app.post('/password-reset/otp', async (c) => {
   // code sees it as used as early as possible.
   await markOtpStepUsed(c.env, user.id, matchedStep)
 
-  const passwordHash = await hashPassword(newPassword)
+  const passwordHash = await hashPassword(newPassword, c.env)
   await db.prepare('UPDATE users SET password = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run([passwordHash, user.id])
   await setPasswordMustChange(db, user.id, false)
   await revokeUserSessions(c.env, user.id)

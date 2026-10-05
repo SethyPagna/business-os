@@ -365,7 +365,7 @@ export async function ensureCoreDataInvariants(env: Env): Promise<CoreDataInvari
     console.warn('[core-invariants] No active admin-role user exists and BUSINESS_OS_ADMIN_PASSWORD is not set, so no admin was seeded. Set it (wrangler secret put BUSINESS_OS_ADMIN_PASSWORD) and the next cold start seeds the admin.')
   } else if (!activeAdmin?.id && seedPassword) {
     adminPassword = seedPassword
-    const passwordHash = await hashPassword(adminPassword)
+    const passwordHash = await hashPassword(adminPassword, env)
     const inserted = await db.prepare(`
       INSERT INTO users (
         username, name, password, role_id, permissions, is_active,

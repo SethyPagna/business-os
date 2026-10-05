@@ -155,7 +155,7 @@ await check('source lock: peer-admin 2FA recovery requires a password-confirmed,
   const body = auth.slice(routeAt, auth.indexOf("app.post('", routeAt + 20))
   assert.ok(body.includes('requireAuth'), 'recovery must require an existing administrator session')
   assert.ok(body.includes("String(body.confirmation || '').trim().toUpperCase() !== 'RESET 2FA'"), 'recovery needs an explicit confirmation phrase')
-  assert.ok(body.includes('!(await verifyPassword(String(body.password || \'\'), actorRecord.password)).ok'), 'recovery must verify the acting administrator password')
+  assert.ok(body.includes('!(await verifyPassword(String(body.password || \'\'), actorRecord.password, c.env)).ok'), 'recovery must verify the acting administrator password')
   assert.ok(body.includes('revokeUserSessions(c.env, target.id)'), 'recovery must revoke the affected account sessions')
   assert.ok(body.includes("'otp_recovery_reset'"), 'recovery must be audited')
   assert.ok(/otpRecoveryReset/.test(modal), 'the shared OTP dialog must call the recovery transport')

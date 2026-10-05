@@ -85,7 +85,7 @@ export async function verifyCurrentPassword(
   const key = await currentPasswordLimitKey(c, who.actorId, who.targetId)
   const reservation = await checkRateLimit(env, CURRENT_PASSWORD_LIMIT_BUCKET, key, CURRENT_PASSWORD_LIMIT_MAX, CURRENT_PASSWORD_LIMIT_WINDOW_MS)
   if (!reservation.allowed) return { ok: false, rateLimited: true, retryAfterSeconds: reservation.retryAfterSeconds }
-  if ((await verifyPassword(String(candidate || ''), String(passwordHash || ''))).ok) {
+  if ((await verifyPassword(String(candidate || ''), String(passwordHash || ''), env)).ok) {
     await releaseRateLimitSlot(env, CURRENT_PASSWORD_LIMIT_BUCKET, key, reservation.slot)
     return { ok: true }
   }

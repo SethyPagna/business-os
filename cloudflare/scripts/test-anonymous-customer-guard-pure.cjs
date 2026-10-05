@@ -87,7 +87,7 @@ async function main() {
     const merge = route.slice(route.indexOf('app.post(`${config.path}/merge`'), route.indexOf('app.post(config.path'))
     ordered(merge, 'isAnonymousCustomer(keeper)', 'buildContactMergePlan(', 'await db.batch(plan.statements)')
     const reset = route.slice(route.indexOf('app.post(`${config.path}/:id/portal-reset`'), route.indexOf('app.put(`${config.path}/:id`'))
-    ordered(reset, 'isAnonymousCustomer(customer)', 'UPDATE portal_accounts', 'customerIsProfileSql()', '.run({ h: await hashPassword(tempPassword)')
+    ordered(reset, 'isAnonymousCustomer(customer)', 'UPDATE portal_accounts', 'customerIsProfileSql()', '.run({ h: await hashPassword(tempPassword, c.env)')
     const points = route.slice(route.indexOf("app.post('/customers/:id/points'"), route.indexOf("app.get('/customers/points-summary'"))
     ordered(points, 'isAnonymousCustomer(customer)', 'INSERT INTO loyalty_point_adjustments')
   })

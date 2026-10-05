@@ -12,7 +12,11 @@
 //     once only inactive ones are (they cannot sign in);
 //   - pending names the accounts still to upgrade and never carries a hash;
 //   - storefront accounts are counts only;
-//   - a real hashPassword row counts as current (prefix and module agree).
+//   - a real hashPassword row counts as current (prefix and module agree);
+//   - pepper: pepperConfigured reports whether PASSWORD_PEPPER is set (never
+//     its value); once set, unpeppered rows stop counting as current until a
+//     sign-in rewrites them, and the storefront SQL tells peppered from
+//     unpeppered rows that share a prefix.
 //
 // Run: node scripts/test-password-hash-status-route-pure.cjs
 
@@ -80,8 +84,9 @@ const app = load('routes/users.ts', {
   '../lib/actorSnapshot': { actorSnapshot: (u) => u?.username || null },
 }).default
 
-async function get(actor) {
-  const res = await app.request('/users/password-hash-status', { method: 'GET', headers: { 'x-actor': String(actor) } }, { DB: db }, ctx)
+const PEPPER = 'c0de'.repeat(16)
+async function get(actor, extraEnv = {}) {
+  const res = await app.request('/users/password-hash-status', { method: 'GET', headers: { 'x-actor': String(actor) } }, { DB: db, ...extraEnv }, ctx)
   return { status: res.status, body: await res.json() }
 }
 
@@ -109,15 +114,16 @@ async function main() {
 
   const res = await get(1)
   assert.equal(res.status, 200, JSON.stringify(res.body))
-  assert.deepEqual(res.body.target, { algorithm: 'pbkdf2-sha256', iterations: 10000 })
+  assert.deepEqual(res.body.target, { algorithm: 'pbkdf2-sha256', iterations: 10000, pepperVersion: null })
+  assert.equal(res.body.pepperConfigured, false, 'no PASSWORD_PEPPER: reported, nobody locked out')
   const { pending, ...counts } = res.body.staff
-  assert.deepEqual(counts, { total: 5, current: 1, legacyBcrypt: 2, otherPbkdf2: 1, unknown: 1, activeLegacyBcrypt: 1, readyForFree: false })
+  assert.deepEqual(counts, { total: 5, current: 1, legacyBcrypt: 2, otherPbkdf2: 1, unknown: 1, activeLegacyBcrypt: 1, unpeppered: 2, readyForFree: false })
   assert.deepEqual(pending.map((p) => [p.username, p.isActive, p.scheme]), [
     ['cashier', true, 'bcrypt'], ['retired', false, 'bcrypt'], ['tuned', true, 'pbkdf2-sha256'], ['odd', true, 'unknown'],
   ])
   const text = JSON.stringify(res.body)
   assert.ok(!text.includes('$2') && !text.includes('$pbkdf2-sha256$i='), 'no hash material in the answer')
-  assert.deepEqual(res.body.portal, { total: 3, current: 1, legacyBcrypt: 2 })
+  assert.deepEqual(res.body.portal, { total: 3, current: 1, legacyBcrypt: 2, unpeppered: 1 })
 
   // The cashier signs in (the login upgrade); only an inactive legacy row is left.
   db.prepare('UPDATE users SET password = @p WHERE id = 2').run({ p: await passwordHash.hashPassword('pw') })
@@ -125,6 +131,28 @@ async function main() {
   assert.equal(after.body.staff.activeLegacyBcrypt, 0)
   assert.equal(after.body.staff.readyForFree, true, 'an inactive legacy account does not block the move')
   assert.equal(after.body.staff.current, 2)
+
+  // A peppered storefront row shares the unpeppered current prefix; without a
+  // pepper it must not count as current.
+  const pepperEnv = { PASSWORD_PEPPER: PEPPER }
+  portal.run({ m: 'LC-4', n: 'D', ph: '011000004', h: await passwordHash.hashPassword('y-pass-1', pepperEnv) })
+  assert.deepEqual((await get(1)).body.portal, { total: 4, current: 1, legacyBcrypt: 2, unpeppered: 1 })
+
+  // PASSWORD_PEPPER set: reported, and unpeppered rows are no longer current.
+  const peppered = await get(1, pepperEnv)
+  assert.equal(peppered.body.pepperConfigured, true)
+  assert.equal(peppered.body.target.pepperVersion, 1)
+  assert.ok(!JSON.stringify(peppered.body).includes(PEPPER), 'the pepper value never appears')
+  assert.equal(peppered.body.staff.current, 0, 'unpeppered staff rows wait for their next sign-in')
+  assert.equal(peppered.body.staff.unpeppered, 3)
+  assert.equal(peppered.body.staff.readyForFree, true, 'the Free check is about bcrypt only')
+  assert.deepEqual(peppered.body.portal, { total: 4, current: 1, legacyBcrypt: 2, unpeppered: 1 })
+  // The owner signs in: the upgrade writes a peppered row.
+  const ownerRow = db.prepare('SELECT password FROM users WHERE id = 1').get().password
+  assert.equal(await passwordHash.upgradePasswordHash({ prepare: (sql) => ({ run: async (p) => ({ changes: Number(db.prepare(sql).run(p).meta?.changes ?? 0) }) }) }, 'users', 1, 'owner-pass-1', ownerRow, pepperEnv), true)
+  const afterOwner = await get(1, pepperEnv)
+  assert.equal(afterOwner.body.staff.current, 1)
+  assert.equal(afterOwner.body.staff.unpeppered, 2)
 
   console.log('test-password-hash-status-route-pure: all assertions passed')
 }

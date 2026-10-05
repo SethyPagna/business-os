@@ -176,7 +176,7 @@ export async function signupPortalAccount(env: Env, input: SignupInput): Promise
   if (passwordTooShort(password)) {
     return { ok: false, status: 400, error: passwordMinLengthError(), code: 'password_weak', abuse: false }
   }
-  const passwordHash = await hashPassword(password)
+  const passwordHash = await hashPassword(password, env)
 
   if (membershipId) {
     // Existing-customer path: the id must resolve to a customer whose phone
@@ -354,13 +354,13 @@ export async function signinPortalAccount(env: Env, input: SigninInput): Promise
   if (!account) {
     // No account for this phone — still spend one password check so timing
     // does not reveal whether the phone exists.
-    await spendDummyPasswordVerify(password)
+    await spendDummyPasswordVerify(password, env)
     return genericFail
   }
 
   const idLower = identifier.toLowerCase()
   const identifierMatches = idLower === account.name.trim().toLowerCase() || idLower === account.membership_id.trim().toLowerCase()
-  const passwordCheck = await verifyPassword(password, account.password_hash)
+  const passwordCheck = await verifyPassword(password, account.password_hash, env)
   const passwordMatches = passwordCheck.ok
   const contactEligible = account.contact_id == null || (account.contact_exists != null && !isAnonymousCustomer(account))
   if (!identifierMatches || !passwordMatches || !contactEligible) return genericFail
@@ -381,7 +381,7 @@ export async function signinPortalAccount(env: Env, input: SigninInput): Promise
 
   // E6: a successful sign-in on a legacy bcrypt (or other-count) hash rewrites
   // it once in the current format; compare-and-set, never fails the sign-in.
-  if (passwordCheck.needsRehash) await upgradePasswordHash(db, 'portal_accounts', account.id, password, account.password_hash)
+  if (passwordCheck.needsRehash) await upgradePasswordHash(db, 'portal_accounts', account.id, password, account.password_hash, env)
 
   return { ok: true, accountId: account.id }
 }
