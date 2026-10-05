@@ -1783,7 +1783,7 @@ function registerContactRoutes(config: ContactConfig) {
         const collision = await db.prepare(`SELECT id, name FROM ${config.table} WHERE id != @id AND lower(trim(name)) = lower(trim(@name)) LIMIT 1`).get<{ id: number; name: string }>({ id, name })
         if (collision) {
           return c.json({
-            error: `"${name}" already exists. Open Possible Duplicates and explicitly choose which record to keep, or cancel this rename.`,
+            error: `"${name}" already exists. Open Conflicts and explicitly choose which record to keep, or cancel this rename.`,
             code: 'merge_required',
             duplicate: collision,
           }, 409)
