@@ -267,6 +267,8 @@ function rawSalesCallback(name: string, env: Record<string, unknown>) {
 }
 function actualSalesCallback(name: string, input: Record<string, unknown>) {
   const env: Record<string, any> = { ...input, mutationVersionAtLeast }
+  const provesStart = salesSource.indexOf('export function saleLineRefusalProvesNoCommit'), provesEnd = salesSource.indexOf('\n}\n', provesStart) + 3
+  env.saleLineRefusalProvesNoCommit = new Function(`${transformSync(salesSource.slice(provesStart + 'export '.length, provesEnd), { loader: 'ts' }).code}; return saleLineRefusalProvesNoCommit`)()
   env.setLineRefreshGate = (value: any) => { env.lineRefreshGate = typeof value === 'function' ? value(env.lineRefreshGate) : value }
   env.readAuthoritativeSale = async (id: number, accept: (row: any) => boolean) => {
     const row = { id, updated_at: '2026-10-04T00:00:01.000Z', items: [] }

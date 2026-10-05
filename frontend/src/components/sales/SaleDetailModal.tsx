@@ -276,7 +276,7 @@ function deliveryContactRows(payload: unknown): DeliveryContactOption[] {
 }
 
 type SaleMutationReview = { client_request_id: string; expected_exchange_rate: number; expected_updated_at?: string; money_precision_version?: 1; expected_header_quote?: SaleMutationHeaderQuote }
-type SaleMutationUiResult = boolean | { exchangeRateChanged: number } | { mutationError: string; code?: string; header_quote?: unknown; proven_uncommitted?: boolean } | { committed: true; response: unknown }
+type SaleMutationUiResult = boolean | { exchangeRateChanged: number; proven_uncommitted?: boolean } | { mutationError: string; code?: string; header_quote?: unknown; proven_uncommitted?: boolean } | { committed: true; response: unknown }
 
 // Nothing here draws a product card. Both product searches on this screen --
 // adding items, and replacing a line -- mount components/pos/ProductCard.tsx,
@@ -966,6 +966,10 @@ export default function SaleDetailModal({
           return onAddItems ? await onAddItems(sale.id, frozenItems as Parameters<NonNullable<typeof onAddItems>>[1], review as SaleMutationReview) : false
         },
         isCommitted: result => result === true || (!!result && typeof result === 'object' && 'committed' in result && result.committed === true),
+        // A header conflict that carries the new quote keeps its request for
+        // the explicit "Review the updated total" replacement instead.
+        isProvenUncommitted: result => !!result && typeof result === 'object' && 'proven_uncommitted' in result && result.proven_uncommitted === true
+          && !('header_quote' in result && result.code === 'sale_header_quote_conflict' && result.header_quote),
         onPending: frozen => { if (current()) setPendingLineMutation({ actor: lineMutationActor, kind, body: frozen }) },
       })
       if (!current()) return false
@@ -976,6 +980,15 @@ export default function SaleDetailModal({
         setLineReviewConfirm(null)
         window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'sales' } }))
         return { committed: true, response: outcome.response ?? (outcome.result && typeof outcome.result === 'object' && 'response' in outcome.result ? outcome.result.response : outcome.result) }
+      }
+      if (outcome.released) {
+        setPendingLineMutation(null)
+        setLineRecoveryError('')
+        setLineHeaderConflict(null)
+        setLineReviewConfirm(null)
+        setAmendConfirm(null)
+        setAddConfirmOpen(false)
+        return outcome.result ?? false
       }
       if (outcome.result && typeof outcome.result === 'object' && 'code' in outcome.result
         && outcome.result.code === 'sale_header_quote_conflict' && outcome.result.proven_uncommitted === true) {
@@ -1055,7 +1068,7 @@ export default function SaleDetailModal({
   const lineDraftCurrent = (draft: SaleLineDraft | null): draft is SaleLineDraft => lineDraftOwned(draft)
     && draft.expectedUpdatedAt === sale?.updated_at && draft.exchangeRate === savedExchangeRate
 
-  const lineDraftConflict = () => t('write_conflict_older_version').replace('{entityLower}', t('sale') || 'sale')
+  const lineDraftConflict = () => `${t('write_conflict_older_version').replace('{entityLower}', t('sale') || 'sale')} ${t('sale_edit_redo_latest')}`
 
   const stageAmendReview = (review: { request: SaleAmendmentRequest; title: string; summary: string }, draft = amendDraftRef.current): void => {
     if (!lineDraftCurrent(draft)) { setAmendMutationError(lineDraftConflict()); return }
@@ -1567,7 +1580,11 @@ export default function SaleDetailModal({
   const stageAddReview = (): void => {
     if (!onAddItems || !addLines.length || addHasStockError) return
     const draft = addDraftRef.current
-    if (!lineDraftCurrent(draft)) { setAddMutationError(lineDraftConflict()); return }
+    if (!lineDraftCurrent(draft)) {
+      addDraftRef.current = captureLineDraft()
+      setAddMutationError(lineDraftConflict())
+      return
+    }
     if (!addHeaderQuote) { setAddMutationError(t('money_precision_unavailable')); return }
     addRequestIdRef.current = createSettlementRequestId()
     setAddMutationError('')
@@ -1811,7 +1828,7 @@ export default function SaleDetailModal({
           <span>{t('sale_amended')}</span>
           <button type="button" className="ml-2 underline" onClick={() => { void onRefreshLineReview?.() }}>{t('write_conflict_reload_latest')}</button>
         </div> : null}
-        <div inert={pendingLineMutation?.actor === lineMutationActor || !!lineRecoveryError} className="modal-scroll space-y-4 p-4">
+        <div inert={pendingLineMutation?.actor === lineMutationActor || !!lineRecoveryError || lineRefreshRequired} className="modal-scroll space-y-4 p-4">
           <div className="grid gap-4 md:grid-cols-2">
             <SectionCard title={t('sale') || 'Sale'}>
               <DetailRowGroup>
@@ -2726,6 +2743,7 @@ export default function SaleDetailModal({
                   >
                     {addSaving ? (t('loading') || 'Saving') : (translateOr('add_items_submit', 'Add to sale', 'បន្ថែមទៅការលក់'))}
                   </button>
+                  {addMutationError && !addConfirmOpen ? <p role="alert" className="mt-1 text-[11px] font-medium text-red-600 dark:text-red-400">{addMutationError}</p> : null}
                 </>
               )}
             </section>
