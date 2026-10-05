@@ -54,7 +54,7 @@ import {
   PRIOR_RETURN_MONEY_SQL, priorReturnMoney, ReturnRefundSplitError, saleStatusWithReturns, splitReturnRefund,
   type PriorReturnMoney, type PriorReturnMoneyRow, type ReturnDebtSale, type ReturnRefundSplit,
 } from '../lib/returnRefundSplit'
-import type { RefundCurrency } from '../lib/refundTender'
+import { refundRielFigure, type RefundCurrency } from '../lib/refundTender'
 import { ProductMergeLineageError, resolveProductMergeLineage } from '../lib/productMergeLineage'
 import { TAGGED_DISPOSAL_MOVEMENT_TYPE } from '../lib/stockCondition'
 
@@ -1443,6 +1443,10 @@ app.post('/quote', async (c) => {
 })
 
 // RET-A F6 / N1: every customer return is linked to a sale (owner, 5 Oct 2026).
+// RET-A P2: a riel refund needs a riel figure; none can be derived without a rate.
+const RETURN_REFUND_KHR_UNAVAILABLE = { error: 'This riel refund has no riel amount and no exchange rate to work it out. Refund in dollars or fix the sale rate.',
+  code: 'return_refund_khr_unavailable', action: 'fix_request' } as const
+
 const RETURN_SALE_REQUIRED = { error: 'Every return must be linked to a sale. Find the sale this item came from.',
   code: 'return_sale_required', action: 'fix_request' } as const
 
@@ -1752,9 +1756,16 @@ app.post('/', async (c) => {
   }
   const totalRefundUsd = customerReturnV1Plan?.quote.total_refund_usd
     ?? Number(returnItems.reduce((sum, item, index) => sum + refundPrices[index].unitUsd * Number(item.quantity), 0).toFixed(2))
-  const totalRefundKhr = customerReturnV1Plan?.quote.total_refund_khr
+  const recordedRefundKhr = customerReturnV1Plan?.quote.total_refund_khr
     ?? Math.round(returnItems.reduce((sum, item, index) => sum + refundPrices[index].unitKhr * Number(item.quantity), 0))
   const refundCurrency: RefundCurrency = canonicalIntent.refund_currency === 'KHR' ? 'KHR' : 'USD'
+  // RET-A P2: a riel refund always records the riel it hands back.
+  const derivedRefundKhr = refundRielFigure({
+    currency: refundCurrency, refundUsd: totalRefundUsd, refundKhr: recordedRefundKhr, exchangeRate: returnExchangeRate,
+    anyLineWithoutRiel: !customerReturnV1Plan && refundPrices.some((price) => price.unitUsd > 0 && !(price.unitKhr > 0)),
+  })
+  if (derivedRefundKhr == null) return c.json({ ...RETURN_REFUND_KHR_UNAVAILABLE }, 400)
+  const totalRefundKhr = derivedRefundKhr
   let refundSplit: ReturnRefundSplit = { owedReductionUsd: 0, cashUsd: totalRefundUsd }
   let debtState: ReturnDebtState | null = null
   if (saleMeta) {
@@ -3370,6 +3381,13 @@ app.patch('/:id', async (c) => {
   }
 
   const editedRefundUsd = Number(totalRefundUsd.toFixed(2))
+  // RET-A P2: an edit keeps a riel refund's riel figure real, exactly as create does.
+  const editedRefundKhr = refundRielFigure({
+    currency: existing.refund_currency === 'KHR' ? 'KHR' : 'USD', refundUsd: editedRefundUsd, refundKhr: Math.round(totalRefundKhr),
+    exchangeRate: existing.exchange_rate,
+    anyLineWithoutRiel: editRefundPrices.some((price, index) => price.unitUsd > 0 && !(price.unitKhr > 0) && Number(newItems[index]?.quantity) > 0),
+  })
+  if (editedRefundKhr == null) return c.json({ ...RETURN_REFUND_KHR_UNAVAILABLE }, 400)
   let editSplit: ReturnRefundSplit = { owedReductionUsd: 0, cashUsd: editedRefundUsd }
   let editDebtState: ReturnDebtState | null = null
   if (linkedSale) {
@@ -3396,7 +3414,7 @@ app.patch('/:id', async (c) => {
     // client: a posted total is exactly the "restate what was paid" the
     // line-level resolution above exists to prevent.
     total_refund_usd: editedRefundUsd,
-    total_refund_khr: Math.round(totalRefundKhr),
+    total_refund_khr: editedRefundKhr,
     owed_reduction_usd: editSplit.owedReductionUsd,
     branch_id: editBranchId,
     branch_name: branchName,

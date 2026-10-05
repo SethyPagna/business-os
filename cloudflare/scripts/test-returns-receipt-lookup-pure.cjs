@@ -120,6 +120,8 @@ const returnsRoute = loadReal('routes/returns.ts', {
     './saleStatusResolution': loadReal('lib/saleStatusResolution.ts', { './financialPrecision': loadReal('lib/financialPrecision.ts') }),
     './salesStatus': loadReal('lib/salesStatus.ts'),
   }),
+  // RET-A P1/P2: the riel a refund records and the riel its cash part hands back.
+  '../lib/refundTender': loadReal('lib/refundTender.ts'),
   '../lib/acquisitionCostAccess': acquisitionCostAccess,
   '../lib/returnCostAccess': loadReal('lib/returnCostAccess.ts'),
   '../lib/branchRoles': branchRolesKernel,

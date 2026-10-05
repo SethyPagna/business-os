@@ -46,3 +46,22 @@ export function refundTender(row: RefundTenderRow): RefundTender {
   const rielRefunded = currency === 'KHR' && totalUsd > 0 ? Math.round(finite(row.total_refund_khr) * cashUsd / totalUsd) : 0
   return { currency, owedReductionUsd, cashUsd, rielRefunded }
 }
+
+/**
+ * RET-A P2 (verifier N6/N7): the riel figure a refund is recorded with.
+ * A riel refund whose lines carry no riel price (a legacy line, or a
+ * product-matched line that posted 0) would otherwise record 0 riel and leave
+ * BOTH drawers untouched; its riel is taken from the dollars at the return's
+ * own rate (the sale's booked rate). Null when that is impossible (no
+ * positive rate): the caller refuses with return_refund_khr_unavailable.
+ * A dollar refund keeps its recorded riel twin unchanged.
+ */
+export function refundRielFigure(input: {
+  currency: RefundCurrency; refundUsd: number; refundKhr: number; anyLineWithoutRiel: boolean; exchangeRate: unknown
+}): number | null {
+  if (input.currency !== 'KHR' || !(input.refundUsd > 0)) return input.refundKhr
+  if (input.refundKhr > 0 && !input.anyLineWithoutRiel) return input.refundKhr
+  const rate = Number(input.exchangeRate)
+  if (!(Number.isFinite(rate) && rate > 0)) return null
+  return Math.round(input.refundUsd * rate)
+}
