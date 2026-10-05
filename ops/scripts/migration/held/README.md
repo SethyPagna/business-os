@@ -46,6 +46,19 @@ migration, at that time -- a peer session or another agent asking for it is not 
   the same commit as the owner-approved move). Moving it in keeps the name 0200.
   Not sorting last is fine: wrangler applies unapplied files by number, and 0201-0203 (auth only) touch none of its tables (the test checks that).
 
+- **0238_return_owed_backfill.sql** (parked 6 Oct 2026, lane RET-A Q1) -- rewrites customer returns
+  recorded on a Not Paid sale before 0234 to 0234's model: the refund first lowers what the
+  customer owes (`returns.owed_reduction_usd`, `refund_currency` 'USD'), only the rest stays drawer
+  cash, and a Returned / Partial return sale that still owes goes back to Not Paid. Owner ruling
+  6 Oct 2026 (relayed by the lead): rewrite them; closed shift drawers change. Writes existing rows
+  of `returns` and `sales`, plus its own backup table `return_owed_backfill_0238` (the recovery
+  reads it). Held for two reasons: moving it in is a production data write that needs the owner's
+  go, and the held 0200 repair names both tables, so `test-held-0200-sale-cost-repair-pure.cjs`
+  counts 0238 as an ordering dependency (0200 reads neither `owed_reduction_usd`,
+  `refund_currency` nor `sale_status`; the lead decides how that guard should admit it). Apply only
+  with 0234 and RET-A's Worker code live. Sizing: `ops/queries/ret-a-notpaid-returns-backfill-sizing.sql`
+  (before 0234) and `...-sizing-live.sql` (after). Proof: `cloudflare/scripts/test-held-0238-return-owed-backfill-pure.cjs`.
+
 None of the five transfer-run files is imported by any Worker route or by the frontend; the whole transfer-run /
 dataset-operation lifecycle chain is unwired in production.
 
