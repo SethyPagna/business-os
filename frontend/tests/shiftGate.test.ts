@@ -208,7 +208,7 @@ ok(/export function publishShift\(/.test(gate), 'and a single publish path for w
 ok(/export function shiftCacheKey\(/.test(gate), 'the shared state has an explicit composite cache key')
 ok(/userId[\s\S]{0,200}branchId[\s\S]{0,200}scopeMode/.test(gate), 'the cache key includes user, branch, and policy mode')
 ok(/const sharedShifts = new Map<string, ShiftState \| null>/.test(gate), 'shift states are partitioned instead of one process-global row')
-ok(/ShiftGate\(\{ children, branchId = null, branchName = null \}/.test(gate), 'the POS gate accepts the active branch identity')
+ok(/ShiftGate\(\{ children, branchId = null, branchName = null(?:, onSwitchBranch)? \}/.test(gate), 'the POS gate accepts the active branch identity')
 ok(/EndShiftButton\(\{ onEnded, branchId = null \}/.test(gate), 'the close control accepts the same active branch identity')
 
 {

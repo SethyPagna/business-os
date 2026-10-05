@@ -266,6 +266,38 @@ async function resolveBranch(db: D1Compat, branchId: number | null): Promise<{ i
   if (branchId == null) return null
   return (await db.prepare('SELECT id, name FROM branches WHERE id=@id AND is_active=1').get<{ id: number; name: string }>({ id: branchId })) ?? null
 }
+type BranchState = { id: number; name: string; is_active: number }
+/** One branch, retired or not. */
+async function readBranchState(db: D1Compat, branchId: number): Promise<BranchState | null> {
+  return (await db.prepare('SELECT id, name, is_active FROM branches WHERE id=@id').get<BranchState>({ id: branchId })) ?? null
+}
+export type RetiredBranch = { branch_id: number; branch_name: string; successor_branch_id: number | null; successor_branch_name: string | null }
+/**
+ * What /current tells a till still pointed at a retired branch: the branch, and
+ * the ACTIVE branch that took over from it (branches.successor_branch_id,
+ * migration 0223), so the POS can offer "switch to LC Store". No successor (or
+ * a successor that is itself retired) answers null and the POS offers a reload.
+ * The successor read is guarded: a schema without 0223 simply has none.
+ */
+async function retiredBranchFor(db: D1Compat, branch: BranchState): Promise<RetiredBranch> {
+  let successor: { id: number; name: string } | undefined
+  try {
+    successor = await db.prepare(`SELECT successor.id, successor.name FROM branches retired
+      JOIN branches successor ON successor.id = retired.successor_branch_id AND successor.is_active = 1
+      WHERE retired.id = @id`).get<{ id: number; name: string }>({ id: branch.id })
+  } catch { successor = undefined }
+  return { branch_id: branch.id, branch_name: branch.name, successor_branch_id: successor?.id ?? null, successor_branch_name: successor?.name ?? null }
+}
+/** The caller's OWN drawer still open on a branch, any business day (the last
+ * segment of its lineage) -- what /current offers on a retired branch so it
+ * can be closed. */
+async function readOwnOpenOnBranch(db: D1Compat, userId: number, branchId: number) {
+  return db.prepare(`SELECT ${SHIFT_COLUMNS} FROM shift_sessions
+    WHERE user_id = @userId AND branch_id = @branchId
+      AND closed_at IS NULL AND cancelled_at IS NULL
+      AND NOT EXISTS (SELECT 1 FROM shift_sessions later WHERE later.parent_shift_id = shift_sessions.id)
+    ORDER BY opened_at DESC, id DESC LIMIT 1`).get<ShiftDbRow>({ userId, branchId })
+}
 /** Any branch, retired or not -- for READ filters and for naming the till a
  * close request came from. See BRANCH_ACTIVE_SQL. */
 async function branchExists(db: D1Compat, branchId: number): Promise<boolean> {
@@ -802,10 +834,15 @@ app.get('/current', async (c) => {
   const db = getDb(c.env); const requestedBranchId = branchIdFrom(c)
   const rawBranchId = c.req.query('branch_id') ?? c.req.header('X-Branch-Id')
   if (rawBranchId != null && String(rawBranchId).trim() !== '' && requestedBranchId == null) return c.json({ error: 'Invalid branch id.' }, 400)
-  if (requestedBranchId != null && !(await resolveBranch(db, requestedBranchId))) return c.json({ error: 'Branch not found or inactive.' }, 400)
+  // N7: a RETIRED branch is answered, not refused -- a long-lived till tab
+  // still pointed at it used to get a 400 it swallowed, and showed no prompt,
+  // no End Shift and no reason. See retiredBranchFor.
+  const branchState = requestedBranchId == null ? null : await readBranchState(db, requestedBranchId)
+  if (requestedBranchId != null && !branchState) return c.json({ error: 'Branch not found.' }, 400)
+  const retired = branchState && !branchState.is_active ? await retiredBranchFor(db, branchState) : null
   const policy = await readShiftPolicy(db)
   const exempt = policy.admin_exempt && isAdminControlUser(user)
-  const shift = exempt ? undefined : await readCurrent(db, policy, user.id, requestedBranchId)
+  const shift = exempt ? undefined : retired ? await readOwnOpenOnBranch(db, user.id, retired.branch_id) : await readCurrent(db, policy, user.id, requestedBranchId)
   // The carry-over is a BANNER, not a report: no reconciliation and no figures
   // on it, for the same reason /current carries none (see figuresFor).
   //
@@ -828,9 +865,14 @@ app.get('/current', async (c) => {
   // A closed current shift shows the drawer it closed on (N4); the drift is
   // left to the report reads -- this is a polled banner.
   const presented = body.shift ? { ...body.shift, ...(await drawerFor(c.env, user, body.shift, { drift: false })) } : null
+  // On a retired branch nothing is registered (open needs an active branch),
+  // the caller's own drawer still open there is `shift` so End Shift can close
+  // it, and the till is told why and where to go instead.
+  const offered = carryOver && !(retired && body.shift && carryOver.id === body.shift.id) ? carryOver : null
   return c.json({ ...body, shift: presented,
-    previous_open_shift: carryOver ? responseShift(user, carryOver) : null,
-    previous_open_close_before: closeBefore?.opened_at ?? null })
+    ...(retired ? { needs_registration: false, code: 'branch_inactive', branch_inactive: retired } : { branch_inactive: null }),
+    previous_open_shift: offered ? responseShift(user, offered) : null,
+    previous_open_close_before: offered ? closeBefore?.opened_at ?? null : null })
 })
 
 app.get('/', async (c) => {

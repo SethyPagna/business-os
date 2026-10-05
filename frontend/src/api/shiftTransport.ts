@@ -353,6 +353,22 @@ export type ShiftState = {
    * clock bounds the close. `undefined` is "the server did not say".
    */
   previous_open_close_before?: string | null
+  /**
+   * N7: the till asked about a branch that no longer trades (Shop after the
+   * cutover). GET /current answers 200 instead of refusing: `shift` is the
+   * caller's own drawer still open there (so End Shift can close it), nothing
+   * can be registered, and this names the active branch that took over, when
+   * there is one. Null on an active branch; absent from an older Worker.
+   */
+  code?: string
+  branch_inactive?: ShiftBranchInactive | null
+}
+
+export type ShiftBranchInactive = {
+  branch_id: number
+  branch_name: string
+  successor_branch_id: number | null
+  successor_branch_name: string | null
 }
 
 export type ShiftAmendment = {

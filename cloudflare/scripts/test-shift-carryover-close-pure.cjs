@@ -230,7 +230,9 @@ assert.match(currentHandlerSource, /const carryOver = await readPreviousOpen\(db
   'the carry-over is read for EVERY caller, exempt administrators included')
 assert.ok(!/carryOver = exempt \?/.test(currentHandlerSource),
   'the exempt short-circuit that hid a foreign shop-wide stale row from the only account able to close it is gone')
-assert.match(currentHandlerSource, /const shift = exempt \? undefined : await readCurrent\(/,
+// N7: on a retired branch the caller's own open drawer there is read instead;
+// the exemption gates both reads.
+assert.match(currentHandlerSource, /const shift = exempt \? undefined : (?:retired \? await readOwnOpenOnBranch\([^)]*\) : )?await readCurrent\(/,
   'while the DAILY PROMPT read stays exempt-gated -- that is what the exemption is for')
 
 // The SQL, lifted from the source, for the discriminating negatives below.

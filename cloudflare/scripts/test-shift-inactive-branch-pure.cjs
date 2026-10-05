@@ -68,7 +68,7 @@ function database() {
   const migration = (file) => db.exec(fs.readFileSync(path.join(root, 'migrations', file), 'utf8'))
   migration('0116_shift_sessions.sql')
   db.exec(`CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT, updated_at TEXT);
-    CREATE TABLE branches (id INTEGER PRIMARY KEY, name TEXT NOT NULL, is_active INTEGER DEFAULT 1);
+    CREATE TABLE branches (id INTEGER PRIMARY KEY, name TEXT NOT NULL, is_active INTEGER DEFAULT 1, successor_branch_id INTEGER);
     CREATE TABLE audit_logs (id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER,user_name TEXT,action TEXT,
       entity TEXT,entity_id TEXT,details TEXT,table_name TEXT,record_id TEXT,old_value TEXT,new_value TEXT,
       device_name TEXT,device_tz TEXT,client_time TEXT,created_at TEXT DEFAULT CURRENT_TIMESTAMP)`)
@@ -84,7 +84,7 @@ function database() {
   insert('S-SHOP-OPEN', 7, 'cashier', 1, false)
   insert('S-SHOP-OTHER', 8, 'other', 1, false)
   // The cutover: Shop is renamed and retired. Nothing touches shift_sessions.
-  db.prepare("UPDATE branches SET name='Old Shop', is_active=0 WHERE id=1").run()
+  db.prepare("UPDATE branches SET name='Old Shop', is_active=0, successor_branch_id=2 WHERE id=1").run()
   const id = (code) => db.prepare('SELECT id FROM shift_sessions WHERE shift_code=?').get(code).id
   return { db, closedId: id('S-SHOP-CLOSED'), openId: id('S-SHOP-OPEN'), otherId: id('S-SHOP-OTHER') }
 }
@@ -133,6 +133,9 @@ function controlSource() {
     "  if (shift.branch_id != null && !(await resolveBranch(db, shift.branch_id))) return c.json({ error: 'Shift not found.' }, 404)\n",
     'close 404')
   swap('\n        OR (user_id = @userId AND branch_id IS NOT NULL AND (${BRANCH_ACTIVE_SQL}) = 0))', ')', 'carry-over arm')
+  swap("  if (requestedBranchId != null && !branchState) return c.json({ error: 'Branch not found.' }, 400)\n",
+    "  if (requestedBranchId != null && !(await resolveBranch(db, requestedBranchId))) return c.json({ error: 'Branch not found or inactive.' }, 400)\n",
+    '/current refusal')
   return text
 }
 
@@ -153,6 +156,7 @@ async function main() {
     user = CASHIER
     const current = await call('GET', '/current?branch_id=2')
     assert.equal(current.body.previous_open_shift, null, 'control: the stale Shop drawer is never offered at LC Store')
+    assert.equal((await call('GET', '/current?branch_id=1')).status, 400, 'control: a till still on the retired branch gets a bare 400')
     const close = await call('POST', `/${fx.openId}/close`, { expected_revision: 0, closed_at: new Date().toISOString() })
     assert.equal(close.status, 404, 'control: the drawer left open on the retired branch cannot be closed')
   })
@@ -208,7 +212,6 @@ async function main() {
     assert.equal(current.body.previous_open_shift?.id, fx.openId, 'the stale retired-branch drawer is the carry-over at LC Store')
     assert.equal(current.body.previous_open_shift.capabilities.can_close, true)
     assert.equal(current.body.previous_open_shift.branch_name, 'Shop')
-    assert.equal((await call('GET', '/current?branch_id=1')).status, 400, 'the POS still cannot run on the retired branch')
     const closed = await call('POST', `/${fx.openId}/close`, { expected_revision: 0, closed_at: new Date().toISOString(), closing_counted_usd: 9, client_request_id: 'inactive-close-000001' })
     assert.equal(closed.status, 200, 'closing a drawer on a retired branch is allowed')
     assert.ok(fx.db.prepare('SELECT closed_at FROM shift_sessions WHERE id=?').get(fx.openId).closed_at)
@@ -219,6 +222,44 @@ async function main() {
     assert.equal(after.body.previous_open_shift, null, 'once closed it is no longer offered')
     // Another cashier's stale drawer there is NOT offered to this one.
     assert.notEqual(current.body.previous_open_shift.id, fx.otherId)
+  })
+
+  await check('/current on the retired branch: the own open drawer to close, never a bare 400, and the successor to switch to', async () => {
+    const fx = database()
+    const call = route(fx.db, ROUTE_SOURCE, () => CASHIER)
+    const current = await call('GET', '/current?branch_id=1')
+    assert.equal(current.status, 200, 'answered, not refused')
+    assert.equal(current.body.code, 'branch_inactive')
+    assert.deepEqual(current.body.branch_inactive, { branch_id: 1, branch_name: 'Old Shop', successor_branch_id: 2, successor_branch_name: 'LC Store' })
+    assert.equal(current.body.shift?.id, fx.openId, "the caller's own drawer still open there")
+    assert.equal(current.body.is_open, true)
+    assert.equal(current.body.can_end, true, 'End Shift is offered')
+    assert.equal(current.body.needs_registration, false, 'nothing can be registered on a retired branch')
+    assert.equal(current.body.previous_open_shift, null, 'the same drawer is not offered twice')
+    const closed = await call('POST', `/${fx.openId}/close`, { expected_revision: 0, closing_counted_usd: 9 })
+    assert.equal(closed.status, 200)
+    const after = await call('GET', '/current?branch_id=1')
+    assert.equal(after.status, 200)
+    assert.deepEqual([after.body.shift, after.body.is_open, after.body.needs_registration, after.body.code], [null, false, false, 'branch_inactive'],
+      'with nothing left to close, the till is told the branch is closed')
+    assert.equal(after.body.branch_inactive.successor_branch_name, 'LC Store')
+    // A successor that is itself retired is not offered; nor is a missing one.
+    fx.db.prepare('UPDATE branches SET is_active=0 WHERE id=2').run()
+    assert.equal((await call('GET', '/current?branch_id=1')).body.branch_inactive.successor_branch_id, null)
+    fx.db.prepare('UPDATE branches SET successor_branch_id=NULL WHERE id=1').run()
+    assert.equal((await call('GET', '/current?branch_id=1')).body.branch_inactive.successor_branch_name, null)
+    assert.equal((await call('GET', '/current?branch_id=999')).status, 400, 'an unknown branch is still refused')
+    // An active branch carries an explicit null notice.
+    fx.db.prepare('UPDATE branches SET is_active=1 WHERE id=2').run()
+    assert.equal((await call('GET', '/current?branch_id=2')).body.branch_inactive, null)
+  })
+
+  await check('/current on a retired branch without 0223 (no successor column) still answers', async () => {
+    const fx = database()
+    fx.db.exec('ALTER TABLE branches DROP COLUMN successor_branch_id')
+    const current = await route(fx.db, ROUTE_SOURCE, () => CASHIER)('GET', '/current?branch_id=1')
+    assert.equal(current.status, 200)
+    assert.equal(current.body.branch_inactive.successor_branch_id, null)
   })
 
   await check('legacy POST /close naming the retired branch still closes', async () => {

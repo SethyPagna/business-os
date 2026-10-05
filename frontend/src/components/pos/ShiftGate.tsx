@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
+import ArrowRightLeft from 'lucide-react/dist/esm/icons/arrow-right-left.js'
+import RotateCw from 'lucide-react/dist/esm/icons/rotate-cw.js'
 import Modal from '../shared/Modal'
 import { actorReadStorageKey, captureActorReadScope, isActorReadScopeCurrent, type ActorReadScope } from '../../api/actorReadScope.ts'
 import { useApp } from '../../AppContext'
@@ -9,6 +11,7 @@ import { DateTimeEntryInput } from '../shared/DateEntryInput.tsx'
 import ShiftCashBreakdown from '../shifts/ShiftCashBreakdown.tsx'
 import ShiftCountPair, { ShiftSubmitRow, shiftCountBlockerKey } from '../shifts/ShiftCountFields.tsx'
 import { shiftAdditionalCash, shiftCountedPairText, shiftExpectedWithTypedAdditional } from '../shifts/shiftReportModel.ts'
+import { retiredBranchNotice } from '../shifts/retiredBranchNotice.ts'
 
 function closingCountInvalid(value: string): boolean {
   return value.trim() !== '' && shiftClosingCounts(value, null).usd == null
@@ -504,7 +507,11 @@ function CarryOverCloseFields({ form, secondary }: { form: CarryOverCloseForm; s
   )
 }
 
-export default function ShiftGate({ children, branchId = null, branchName = null }: { children?: React.ReactNode; branchId?: number | null; branchName?: string | null }) {
+export default function ShiftGate({ children, branchId = null, branchName = null, onSwitchBranch }: {
+  children?: React.ReactNode; branchId?: number | null; branchName?: string | null
+  /** N7: move the till to another branch (the retired branch's successor). */
+  onSwitchBranch?: (branchId: number) => void
+}) {
   // Branch identity is supplied by the till. Until the POS owner wires that
   // existing active-branch value into this prop, null retains the route's
   // legacy unscoped behavior without inventing a branch from unrelated state.
@@ -584,10 +591,47 @@ export default function ShiftGate({ children, branchId = null, branchName = null
 
   const needsRegistration = state?.needs_registration === true
   const now = useWallClock(needsRegistration)
+  // N7: a till still pointed at a retired branch is told so, and how to go on.
+  const [retiredDismissed, setRetiredDismissed] = useState<string | null>(null)
+  const retired = retiredBranchNotice(state, { canSwitch: !!onSwitchBranch, dismissedKey: retiredDismissed })
+  const fill = (key: string) => t(key).replace('{branch}', retired?.branch ?? '').replace('{successor}', retired?.successor ?? '')
 
   return (
     <>
       {children}
+      {retired && (
+        <Modal
+          title={t('shift_branch_closed_title')}
+          size="sm"
+          // Settable aside only while the cashier still has a drawer to end
+          // there; otherwise the till cannot sell, so it stays until they act.
+          onClose={() => { if (retired.mode === 'open_shift') setRetiredDismissed(retired.key) }}
+          closeAffordance={retired.mode === 'open_shift' ? 'visible' : 'omitted'}
+          unsavedChanges={{ dirty: false }}
+        >
+          <div className="space-y-3">
+            <p role="status" className="text-xs leading-relaxed text-zinc-600 dark:text-zinc-300">
+              {fill(retired.mode === 'open_shift' ? 'shift_branch_closed_open_shift'
+                : retired.mode === 'switch' ? 'shift_branch_closed_switch_hint' : 'shift_branch_closed_reload_hint')}
+            </p>
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              {retired.mode === 'open_shift' ? (
+                <button type="button" className={DENSE_BUTTON} onClick={() => setRetiredDismissed(retired.key)}>{t('dismiss')}</button>
+              ) : null}
+              {retired.mode === 'switch' && retired.successorId != null ? (
+                <button type="button" className={DENSE_BUTTON} onClick={() => onSwitchBranch?.(retired.successorId as number)}>
+                  <ArrowRightLeft className="mr-1 inline h-3.5 w-3.5" aria-hidden="true" />{fill('shift_branch_switch')}
+                </button>
+              ) : null}
+              {retired.mode !== 'open_shift' ? (
+                <button type="button" className={retired.mode === 'reload' ? DENSE_BUTTON : DENSE_STEP_BUTTON} onClick={() => window.location.reload()}>
+                  <RotateCw className="mr-1 inline h-3.5 w-3.5" aria-hidden="true" />{t('shift_branch_reload')}
+                </button>
+              ) : null}
+            </div>
+          </div>
+        </Modal>
+      )}
       {needsRegistration && (
         <Modal
           title={registerStep === 'carry_over' ? t('shift_previous_open_title') : t('shift_register_title')}
