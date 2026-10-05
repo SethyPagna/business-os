@@ -154,6 +154,7 @@ import { getPossiblySameProducts, dismissProductDuplicateCluster } from '../../a
 import { useMergeStockChoice } from './useMergeStockChoice.tsx'
 import { buildExactDuplicateIndex, extractDuplicateClusters, findRowDuplicateInfo, type ExactDuplicateInfo } from '../../utils/exactDuplicateProducts.ts'
 import DuplicateResolverControl from './DuplicateResolverControl.tsx'
+import { productSearchRequest, useProductSearchIndex } from '../../api/productSearchIndex.ts'
 // The section chips below are the same chrome HubSectionNav renders, styled
 // from the same stylesheet (see the row's `bos-nav-chrome` class).
 import '../navigation/nav-chrome.css'
@@ -1437,6 +1438,10 @@ function ProductsFullEditor() {
     return isKhmer ? cleanFallback(fallbackEn, fallbackKm) : fallbackEn
   }, [cleanFallback, isKhmer, t])
   const [products,     setProducts]     = useState<ProductRecord[]>([])
+  // True when the loaded page answered ranked ids from the shared search
+  // index (G37): the server returned exactly the match set, typos included,
+  // so the page re-filter must not re-match it with the older rules.
+  const [productsRanked, setProductsRanked] = useState(false)
   const [categories,   setCategories]   = useState<LookupRecord[]>([])
   const [units,        setUnits]        = useState<LookupRecord[]>([])
   const [branches,     setBranches]     = useState<BranchRecord[]>([])
@@ -1856,6 +1861,12 @@ function ProductsFullEditor() {
   // the client-side re-filter below.
   const parsedSearch = useMemo(() => parseProductSearchStockToken(debouncedSearch), [debouncedSearch])
   const cleanedSearchQuery = parsedSearch.cleanedQuery
+  const searchIndexGeneration = useProductSearchIndex(isActive)
+  const productSearchParamsKey = useMemo(
+    () => JSON.stringify(productSearchRequest(cleanedSearchQuery, { mode: searchMode }).params),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [cleanedSearchQuery, searchMode, searchIndexGeneration],
+  )
   const effectiveStockState = stockFilter !== 'all' ? stockFilter : (parsedSearch.hasZeroStockToken ? 'out' : 'all')
   const runProductWriteMutation = useCallback(<T,>(loader: Loader<T>, label: string, timeoutMs = PRODUCT_WRITE_MUTATION_TIMEOUT_MS): Promise<T> => (
     withLoaderTimeout(loader, label, timeoutMs)
@@ -1894,7 +1905,7 @@ function ProductsFullEditor() {
         const productQuery = {
           page: productPage,
           pageSize: productPageSize,
-          query: cleanedSearchQuery,
+          ...(JSON.parse(productSearchParamsKey) as Record<string, string>),
           searchMode,
           // No searchFields override here (was hard-coded to 'name', which
           // forced the server into a name-only LIKE clause and silently
@@ -1960,6 +1971,7 @@ function ProductsFullEditor() {
           setLoadError(getErrorMessage(versionMismatchError, 'Product API version mismatch'))
           throw versionMismatchError
         }
+        setProductsRanked(Boolean((productQuery as Record<string, unknown>).rankIds))
         if (Array.isArray(prods)) {
           // Re-insert any pinned just-edited products the fresh server
           // page no longer contains (see pinnedEditedProductsRef's own
@@ -2051,7 +2063,7 @@ function ProductsFullEditor() {
     })
     loadPromiseRef.current = wrappedPromise
     return wrappedPromise
-  }, [branchFilter, brandFilter, catFilter, cleanedSearchQuery, effectiveStockState, groupFilter, initialFilter, issueFilter, mergedFilter, notify, productPage, productPageSize, productSortDirection, promoFilter, searchMode, supplierFilter, t, tr, unitFilter])
+  }, [branchFilter, brandFilter, catFilter, productSearchParamsKey, effectiveStockState, groupFilter, initialFilter, issueFilter, mergedFilter, notify, productPage, productPageSize, productSortDirection, promoFilter, searchMode, supplierFilter, t, tr, unitFilter])
 
   useEffect(() => {
     latestLoadRef.current = load
@@ -3556,11 +3568,11 @@ function ProductsFullEditor() {
     issueFilter,
     parentProductIds,
     searchMode,
-    searchTerms,
+    searchTerms: productsRanked ? [] : searchTerms,
     stockFilter: effectiveStockState,
     supplierFilter,
     lowStock: lowStockConfig,
-  }), [brandFilter, branchFilter, catFilter, effectiveStockState, groupFilter, issueFilter, lowStockConfig, parentProductIds, products, searchMode, searchTerms, supplierFilter])
+  }), [brandFilter, branchFilter, catFilter, effectiveStockState, groupFilter, issueFilter, lowStockConfig, parentProductIds, products, productsRanked, searchMode, searchTerms, supplierFilter])
 
   // Name kept as "...Csv" for now (it's an internal identifier, not shown
   // to users -- see productMenuHelpers.ts's menu item labels, none of which

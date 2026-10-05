@@ -3,6 +3,7 @@ import Search from 'lucide-react/dist/esm/icons/search.js'
 import CalendarDays from 'lucide-react/dist/esm/icons/calendar-days.js'
 import CalendarClock from 'lucide-react/dist/esm/icons/calendar-clock.js'
 import Plus from 'lucide-react/dist/esm/icons/plus.js'
+import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
 // Not message-square: the public catalog imports that icon (chunk cycle, 30 Sep).
 import MessageSquareText from 'lucide-react/dist/esm/icons/message-square-text.js'
@@ -34,6 +35,11 @@ type LineEntryProps = {
   query: string
   onQuery: (text: string) => void
   groups: CandidateGroupRow[]
+  /** Every match the search found (families), shown under the list. */
+  total?: number
+  /** Loads the next page of matches; null when every match is listed. */
+  onMore?: (() => void) | null
+  moreBusy?: boolean
   onOpenGroup: (key: string) => void
   /** Add + products.add: the typed text a "+ Create" row would create, else null. */
   createText: string | null
@@ -78,7 +84,7 @@ type LineEntryProps = {
 /** Rows E1-E4 of the Items step (spec 3.4). */
 export default function StockSessionLineEntry(props: LineEntryProps) {
   const {
-    tr, packLookup, mode, busy, searchInputRef, query, onQuery, groups, onOpenGroup, createText, onCreate, onScan,
+    tr, packLookup, mode, busy, searchInputRef, query, onQuery, groups, total = 0, onMore = null, moreBusy = false, onOpenGroup, createText, onCreate, onScan,
     picked, pickedStock, pickedIsNew, onClearPick, quantity, onQuantity,
     unitCost, onUnitCost, canViewCosts, canEditCosts, canReceive, sellingPrice, onSellingPrice, canEditPrice,
     expiryDate, onExpiryDate, lotOptions, lotValue, onLot, conditionTag, onConditionTag, tagDisabled,
@@ -150,6 +156,24 @@ export default function StockSessionLineEntry(props: LineEntryProps) {
                     <span className="shrink-0 text-[11px] tabular-nums text-gray-400">{group.options > 1 ? `${group.options} · ` : ''}{group.stock}</span>
                   </button>
                 ))}
+                {groups.length > 0 ? (
+                  <div className="flex min-h-9 items-center justify-between gap-2 border-t border-gray-100 px-3 py-1 text-[11px] tabular-nums text-gray-500 dark:border-gray-700 dark:text-gray-400" data-stock-session-search-total={total}>
+                    <span>{tr('search_results_shown', '{shown} of {total}').replace('{shown}', String(groups.length)).replace('{total}', String(Math.max(total, groups.length)))}</span>
+                    {onMore ? (
+                      <button
+                        type="button"
+                        onClick={onMore}
+                        disabled={moreBusy}
+                        aria-label={tr('show_more', 'Show more')}
+                        title={tr('show_more', 'Show more')}
+                        data-stock-session-search-more=""
+                        className="flex h-8 w-8 items-center justify-center rounded-md text-blue-600 hover:bg-blue-50 disabled:opacity-50 dark:text-blue-300 dark:hover:bg-blue-900/20"
+                      >
+                        <ChevronDown className="h-4 w-4" />
+                      </button>
+                    ) : null}
+                  </div>
+                ) : null}
                 {createText != null ? (
                   <button type="button" role="option" aria-selected={false} onClick={onCreate} className="flex min-h-10 w-full items-center gap-2 border-t border-gray-100 px-3 py-2 text-left text-sm font-medium text-emerald-700 hover:bg-emerald-50 dark:border-gray-700 dark:text-emerald-300 dark:hover:bg-emerald-900/20">
                     <Plus className="h-4 w-4 shrink-0" aria-hidden="true" />

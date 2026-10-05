@@ -215,6 +215,12 @@ export async function paginateProductFamilies<T = Record<string, unknown>>(
 ): Promise<FamilyPaginationResult<T>> {
   const { db, params, page, pageSize, familyOrderSql, intraFamilyOrderSql, familyMemberBaseWhereSql } = opts
   const ctes = buildCtes(opts)
+  // The COUNT only needs the families, not their ordering keys. SQLite does
+  // not drop unused aggregates from the grouped CTE, so leaving the rank,
+  // tier and promotion expressions in made the count evaluate a correlated
+  // lookup per matched row for nothing (G37: 1,500 ranked ids rescanned
+  // their own id list per row there, while the page statement indexed it).
+  const countCtes = buildCtes({ ...opts, matchRankSql: undefined, matchTierSql: undefined, promotedRankSql: undefined, familySortValueSql: undefined })
   const offset = (page - 1) * pageSize
   // See familyMemberBaseWhereSql's own comment: opted-in callers get every
   // active row of a qualifying family (not just the ones that individually
@@ -244,7 +250,7 @@ export async function paginateProductFamilies<T = Record<string, unknown>>(
   // productMergeSnapshot.ts's runProductMergeReadBatch.
   const pageParams = { ...params, __familyOffset: offset, __familyOffsetEnd: offset + pageSize }
   const [countResult, pageResult] = await db.batch([
-    { sql: `${ctes} SELECT COUNT(*) AS count FROM families`, params },
+    { sql: `${countCtes} SELECT COUNT(*) AS count FROM families`, params },
     {
       sql: `
         ${ctes},

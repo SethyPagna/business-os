@@ -21,8 +21,8 @@ test('product search has an independent tracked lifecycle and branch-scoped quer
   // N10: the params object moved into the pure buildInventoryProductsSearchParams
   // helper (tested behaviourally below) so the date mapping is provable; the
   // call site now hands it branch/query/page/pageSize AND the shared range.
-  assert.match(inventory, /searchInventoryProducts\(buildInventoryProductsSearchParams\(\{[\s\S]{0,400}branchFilter,[\s\S]{0,300}query: deferredSearch,[\s\S]{0,200}page: productsPage,[\s\S]{0,120}pageSize: productsPageSize,[\s\S]{0,120}range: stripRange/)
-  assert.match(inventory, /\[branchFilter, deferredSearch, isActive, needsProductsData, productsPage, productsPageSize, productsScope, searchMode, stripRange\.endDate, stripRange\.startDate, stripRange\.endTime, stripRange\.startTime, tr\]/)
+  assert.match(inventory, /searchInventoryProducts\(\{\s*\.\.\.buildInventoryProductsSearchParams\(\{[\s\S]{0,400}branchFilter,[\s\S]{0,300}query: deferredSearch,[\s\S]{0,200}page: productsPage,[\s\S]{0,120}pageSize: productsPageSize,[\s\S]{0,120}range: stripRange,[\s\S]{0,40}\}\),\s*\.\.\.rankedSearchOverride\(productSearchParamsKey\)/)
+  assert.match(inventory, /\[branchFilter, deferredSearch, isActive, needsProductsData, productSearchParamsKey, productsPage, productsPageSize, productsScope, searchMode, stripRange\.endDate, stripRange\.startDate, stripRange\.endTime, stripRange\.startTime, tr\]/)
   assert.doesNotMatch(inventory, /settleLoaderMap\([\s\S]{0,700}searchInventoryProducts/)
 })
 
@@ -193,7 +193,9 @@ test('the products table matches the sibling dense-list header weight, column ti
 test('product stats lifecycle uses existing filtered server endpoint and scope tags hide stale results', () => {
   assert.match(inventory, /needsStatsData = .*inventorySection === 'products'/)
   assert.match(inventory, /getInventoryStats\(statsQuery\)/)
-  assert.match(inventory, /const inventoryStatsScope = JSON.stringify\(\[branchFilter, deferredSearch, searchMode\]\)/)
+  // G37: the ranked-id key joins the scope, so a result for the text search
+  // and one for the index's ranked ids never share a cached page.
+  assert.match(inventory, /const inventoryStatsScope = JSON.stringify\(\[branchFilter, deferredSearch, searchMode, productSearchParamsKey\]\)/)
   assert.match(inventory, /serverStats=\{stockStatsScope === inventoryStatsScope \? stockStats : null\}/)
   assert.match(inventory, /items=\{productsResultScope === productsScope \? productsItems : \[\]\}/)
   assert.match(inventory, /onAdjust=\{canAdjustStock \? openAdjust : undefined\}/)

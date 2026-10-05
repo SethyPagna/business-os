@@ -32,7 +32,7 @@ import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from '../lib/cache'
 import { findIdentityMatch, identityBarcodeKey, type ProductIdentityRow } from '../lib/productIdentity'
 import { buildIssueStateClauses, buildLikeAliasClause, tokenizeSearchWords } from '../lib/searchMatch'
-import { buildFamilyRelevanceOrderSql, buildProductSearchQuery } from '../lib/productSearchQuery'
+import { buildFamilyRelevanceOrderSql, buildProductSearchQuery, parseRankedIds } from '../lib/productSearchQuery'
 import { fifoRemovalAllocations, isStockRemovalConflict, listBatchesForProduct, parseReceiptSellingPrice, planBranchStockRemoval, planReceiptSellingPrice, planReceiveBatchStock, planRemoveStockAcrossBatches, prepareReceiptLotTarget, receiveBatchStock, restoreBatchStockStatements, removeStockFromBatch, InsufficientBatchStockError, type ReceiptCostPreimage, type ReceiptLotTarget, type ReceiptSellingPriceRow, type StockWriteStatement } from '../lib/productBatches'
 import { applyMovementRevert, type RevertMovementRow } from '../lib/stockRevert'
 import { normalizeTypedDate } from '../lib/batchCode'
@@ -360,9 +360,11 @@ function appendInventoryProductFilters(query: InventoryFilterQuery, lowStock: Lo
   const searchQuery = buildProductSearchQuery(rawSearchText, params, {
     mode: query.searchMode || query.search_mode,
     titleOnly: ['name', 'title'].includes(String(query.searchFields || query.search_fields || '').toLowerCase()),
+    rankedIds: parseRankedIds(query.rankIds, query.rankTiers),
   })
   const { matchRankSql, rankCteSql, matchTierSql, titleOnly } = searchQuery
   const searchWhereClause = searchQuery.whereClause
+  if (searchQuery.activeWhereSql) where[0] = searchQuery.activeWhereSql
 
   // Same multi-brand membership check as products.ts's buildSearchFilters
   // (see migrations/0033_product_multi_category_brand.sql and

@@ -17,6 +17,7 @@ import ProductNameRail from '../shared/ProductNameRail'
 // fields this role can't see or touch.
 
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useDebouncedValue } from '../../utils/useDebouncedValue.ts'
 import Upload from 'lucide-react/dist/esm/icons/upload.js'
 import Camera from 'lucide-react/dist/esm/icons/camera.js'
 import FolderOpen from 'lucide-react/dist/esm/icons/folder-open.js'
@@ -306,6 +307,9 @@ export default function ProductsImageOnlyView() {
     return sections
   }, [showCategory, showBrand, filterOptions, categoryFilter, brandFilter, t])
 
+  // G37: one request per settled query (was one per keystroke); the shared
+  // products:search abort group drops a superseded one in flight.
+  const debouncedSearch = useDebouncedValue(search, 250)
   const load = useCallback(async () => {
     const requestId = requestIdRef.current + 1
     requestIdRef.current = requestId

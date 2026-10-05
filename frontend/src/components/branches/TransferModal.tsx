@@ -30,7 +30,8 @@ import {
 import { getProductBatches, getTrackedBatchProductIds } from '../../api/batchesTransport.ts'
 import type { ProductBatch } from '../../api/batchesTransport.ts'
 import { useDebouncedValue } from '../products/helpers/productPageHelpers.ts'
-import { fuzzyTextMatches, sortBySearchRelevance } from '../../utils/searchMatch.ts'
+import { createRowSearch } from '../../utils/rowSearch.ts'
+import { productSearchRequest, rankedSearchOverride, useProductSearchIndex } from '../../api/productSearchIndex.ts'
 import AppSelect, { type AppSelectOption } from '../shared/AppSelect.tsx'
 import { buildProductGroups } from '../../utils/productGrouping.ts'
 import { batchDisplayLabel } from '../../utils/batchLabel.ts'
@@ -342,6 +343,15 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
   // the same bulk endpoint. Keeping one mode removes the two diverging search
   // and loading paths that repeatedly fell out of sync.
   const [mode] = useState<TransferMode>('multiple')
+  // G37: single mode matches on this device with the shared search core and
+  // asks the branch-stock endpoint for the ranked ids (the text search
+  // answers until the index is ready).
+  const searchIndexGeneration = useProductSearchIndex(mode === 'single')
+  const stockSearchKey = useMemo(
+    () => JSON.stringify(productSearchRequest(debouncedSearch).params),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [debouncedSearch, searchIndexGeneration],
+  )
   const [multiProducts, setMultiProducts] = useState<TransferProduct[]>([])
   const [loadingMultiProducts, setLoadingMultiProducts] = useState(false)
   const [showAllProducts, setShowAllProducts] = useState(initialDraft?.showAllProducts || false)
@@ -589,7 +599,7 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
             page: 1,
             pageSize: TRANSFER_STOCK_PAGE_SIZE,
             stockState: 'positive',
-            ...(debouncedSearch.trim() ? { query: debouncedSearch.trim() } : {}),
+            ...(debouncedSearch.trim() ? { ...{ query: debouncedSearch.trim() }, ...rankedSearchOverride(stockSearchKey) } : {}),
           }),
           'Branch stock for transfer',
           TRANSFER_STOCK_LOAD_TIMEOUT_MS,
@@ -613,7 +623,7 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
     return () => {
       invalidateTrackedRequest(stockRequestRef)
     }
-  }, [fromBranch, mode, debouncedSearch])
+  }, [fromBranch, mode, debouncedSearch, stockSearchKey])
 
   const loadMoreSingleProducts = async () => {
     if (!fromBranch || loadingProducts || loadingMoreProducts || singleStockPage >= singleStockTotalPages) return
@@ -626,7 +636,7 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
           page: nextPage,
           pageSize: TRANSFER_STOCK_PAGE_SIZE,
           stockState: 'positive',
-          ...(debouncedSearch.trim() ? { query: debouncedSearch.trim() } : {}),
+          ...(debouncedSearch.trim() ? { ...{ query: debouncedSearch.trim() }, ...rankedSearchOverride(stockSearchKey) } : {}),
         }),
         'More branch stock for transfer',
         TRANSFER_STOCK_LOAD_TIMEOUT_MS,
@@ -840,6 +850,13 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
    * so leaving barcode out of this client-side path was the last place
    * this modal's two search paths disagreed on what "fully scoped" means.
    */
+  // G37: the in-memory list is matched and ranked by the shared search core,
+  // the same rules as every catalog picker (typos, SK-II/sk2, Khmer marks,
+  // exact barcode first), instead of fuzzyTextMatches + sortBySearchRelevance.
+  const multiSearch = useMemo(
+    () => createRowSearch(multiProducts, (product) => ({ name: product.name, sku: product.sku, barcode: product.barcode })),
+    [multiProducts],
+  )
   const filteredMulti = useMemo(() => {
     const query = debouncedSearch.trim()
     let inStock = multiProducts.filter((product) => Number(product.branch_quantity || 0) > 0)
@@ -853,11 +870,9 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
     // bottom". sortBySearchRelevance is the client mirror of the server
     // ordering contract (utils/searchMatch.ts), so this picker and the
     // single-mode server-backed one above now agree on what comes first.
-    return sortBySearchRelevance(
-      inStock.filter((product) => fuzzyTextMatches([product.name, product.sku, product.barcode].join(' '), query)),
-      query,
-    )
-  }, [multiProducts, debouncedSearch, showAllProducts, showSelectedOnly, selectedQuantities])
+    const eligible = new Set(inStock)
+    return multiSearch(query).filter((product) => eligible.has(product))
+  }, [multiProducts, multiSearch, debouncedSearch, showAllProducts, showSelectedOnly, selectedQuantities])
 
   // Same name/cost/barcode grouping every other list surface in the
   // app applies (Products/Inventory/POS/Branches' own stock grid, via

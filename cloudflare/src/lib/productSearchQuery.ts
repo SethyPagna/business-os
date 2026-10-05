@@ -80,6 +80,87 @@ export interface ProductSearchQueryOptions {
   // are byte-identical to the ones the four inline copies bound -- a route
   // that also binds its own params cannot collide by adopting this.
   paramPrefix?: string
+  // G37: matches the client's shared-core index already chose, in rank
+  // order (see parseRankedIds). When present the typed text is not matched
+  // again here; these ids become the match set and their order the rank.
+  rankedIds?: RankedIds
+}
+
+// ---- ranked ids (G37 phase 1) ------------------------------------------
+//
+// The admin pickers match on the client, over the term index built by the
+// shared core (lib/searchCore.ts), and send the ranked ids here with the
+// filters only the server can evaluate (branch stock, promotions, issues,
+// brand/category). Paging, family grouping, promotions, prices and stock
+// stay server-side; the WHERE becomes one json_each IN-list instead of the
+// FTS/trigram/LIKE disjunction, so the expression depth is constant (no
+// growth with the number of ids or words) and the rows read are PK
+// lookups of the listed ids.
+//
+// The rank is the id's character position in one ",id,id," string
+// (instr), and the tier is that position against the tier boundaries.
+// Deliberately no CTE lookup: SQLite's planner chose to rescan a
+// materialized id list once per matched row in some statements (1,500 x
+// 1,500 rows), which an instr over a bound string can never do.
+//
+// Wire format: rankIds=12,45,9 (positive integers, best first) and
+// rankTiers=013 (one digit 0-4 per id, the core's tier; missing digits read
+// as 3). At most RANKED_ID_LIMIT ids are used.
+export const RANKED_ID_LIMIT = 1500
+
+export interface RankedIds {
+  ids: number[]
+  tiers: number[]
+}
+
+export function parseRankedIds(rawIds: unknown, rawTiers?: unknown): RankedIds | undefined {
+  if (rawIds == null || String(rawIds).trim() === '') return undefined
+  const seen = new Set<number>()
+  const ids: number[] = []
+  const tiers: number[] = []
+  const tierText = String(rawTiers ?? '')
+  String(rawIds).split(',').forEach((raw, position) => {
+    const text = raw.trim()
+    if (!/^\d{1,15}$/.test(text) || ids.length >= RANKED_ID_LIMIT) return
+    const id = Number(text)
+    if (!Number.isSafeInteger(id) || id <= 0 || seen.has(id)) return
+    seen.add(id)
+    ids.push(id)
+    const tier = Number(tierText[position])
+    tiers.push(Number.isInteger(tier) && tier >= 0 && tier <= 4 ? tier : MATCH_TIER_OTHER)
+  })
+  return { ids, tiers }
+}
+
+function buildRankedIdSearchQuery(ranked: RankedIds, params: Record<string, unknown>, prefix: string, titleOnly: boolean): ProductSearchQuery {
+  // Present but unusable resolves to no rows, never to the whole catalog.
+  if (!ranked.ids.length) return { hasSearchTerm: true, titleOnly, whereClause: '1 = 0' }
+  // Tier first (stable), so each tier is one contiguous run of the string.
+  const order = ranked.ids.map((id, index) => ({ id, tier: ranked.tiers[index] ?? MATCH_TIER_OTHER, index }))
+    .sort((a, b) => (a.tier - b.tier) || (a.index - b.index))
+  params[`${prefix}rankIdList`] = JSON.stringify(order.map((entry) => entry.id))
+  let csv = ','
+  const cuts = [0, 0, 0, 0, 0]
+  for (const entry of order) {
+    for (let tier = entry.tier + 1; tier <= 4; tier += 1) if (!cuts[tier]) cuts[tier] = csv.length
+    csv += `${entry.id},`
+  }
+  for (let tier = 1; tier <= 4; tier += 1) {
+    if (!cuts[tier]) cuts[tier] = csv.length + 1
+    params[`${prefix}rankTierCut${tier}`] = cuts[tier]
+  }
+  params[`${prefix}rankCsv`] = csv
+  const position = `instr(@${prefix}rankCsv, ',' || p.id || ',')`
+  const listed = `(SELECT CAST(value AS INTEGER) FROM json_each(@${prefix}rankIdList))`
+  return {
+    hasSearchTerm: true,
+    titleOnly,
+    whereClause: `p.id IN ${listed}`,
+    activeWhereSql: '+p.is_active = 1',
+    familyMemberWhereSql: `+p.is_active = 1 AND (p.id IN ${listed} OR p.parent_id IN ${listed} OR p.id IN (SELECT listed.parent_id FROM products listed WHERE listed.id IN ${listed}))`,
+    matchRankSql: position,
+    matchTierSql: `(CASE WHEN ${position} < @${prefix}rankTierCut1 THEN 0 WHEN ${position} < @${prefix}rankTierCut2 THEN 1 WHEN ${position} < @${prefix}rankTierCut3 THEN 2 WHEN ${position} < @${prefix}rankTierCut4 THEN 3 ELSE 4 END)`,
+  }
 }
 
 export interface ProductSearchQuery {
@@ -102,6 +183,16 @@ export interface ProductSearchQuery {
   // when nothing was typed.
   matchTierSql?: string
   titleOnly: boolean
+  // Ranked-id path only. The caller's own "p.is_active = 1" term, spelled
+  // so it cannot drive an index: without it SQLite (no ANALYZE stats)
+  // walks every active row of idx_products_active_grouped_pg and tests the
+  // id list per row, instead of looking the listed ids up by primary key.
+  activeWhereSql?: string
+  // Ranked-id path only. The family-member predicate for
+  // familyPagination's familyMemberBaseWhereSql: the listed rows and their
+  // parent/child links, instead of every active product (a full scan per
+  // page). Same-name siblings still arrive through the name_key expansion.
+  familyMemberWhereSql?: string
 }
 
 // Relevance tier constants, exported so tests can assert the contract by
@@ -199,6 +290,7 @@ export function buildProductSearchQuery(
   const nameColumn = options.nameColumn || 'p.name'
   const barcodeColumn = options.barcodeColumn || 'p.barcode'
   const titleOnly = Boolean(options.titleOnly)
+  if (options.rankedIds) return buildRankedIdSearchQuery(options.rankedIds, params, prefix, titleOnly)
   const mode = String(options.mode || 'AND').toUpperCase() === 'OR' ? 'OR' : 'AND'
   const termGroups = tokenizeSearchTermGroups(rawSearchText, 6, 8)
   if (!termGroups.length) return { hasSearchTerm: false, titleOnly }

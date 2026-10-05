@@ -85,6 +85,7 @@ import {
 } from '../products/helpers/productGalleryHelpers.ts'
 import { buildProductSearchTerms } from '../../utils/searchTerms.ts'
 import { matchesSearchTermGroups } from '../../utils/searchMatch.ts'
+import { productSearchRequest, useProductSearchIndex } from '../../api/productSearchIndex.ts'
 import { cartTotalQuantity } from '../../utils/addressPresets.ts'
 import { toggleMultiValue, toggleMultiValues, matchesMulti, parseMultiValues } from '../../utils/multiSelect.ts'
 import { buildProductBrandOptions } from '../products/helpers/productDisplayHelpers.ts'
@@ -756,6 +757,10 @@ export default function POS() {
 
 // Remote data shared across all orders
   const [products,         setProducts]         = useState<ProductRecord[]>([])
+  // True when the loaded page answered ranked ids from the shared search
+  // index: the server returned exactly the match set, typos included, so
+  // the page re-filter below must not re-match it with the older rules.
+  const [catalogRanked,    setCatalogRanked]    = useState(false)
   // G1: active promotion rules, refreshed with every catalog payload (the
   // search/bootstrap responses carry them) -- POS offline inherits the
   // last cached payload's rules the same way it inherits its products.
@@ -1324,6 +1329,14 @@ export default function POS() {
   // back to the main rate until an admin sets change_exchange_rate in Settings.
   const changeExchangeRate = resolveChangeExchangeRate(settings.change_exchange_rate, exchangeRate)
   const debouncedProductSearch = useDebouncedValue(search, 180)
+  // G37: the typed text is matched on this device by the shared search core
+  // and sent as ranked ids; the server text search stays the fallback.
+  const searchIndexGeneration = useProductSearchIndex(isActive)
+  const productSearchParamsKey = useMemo(
+    () => JSON.stringify(productSearchRequest(debouncedProductSearch, { mode: searchMode }).params),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [debouncedProductSearch, searchMode, searchIndexGeneration],
+  )
   const hasProductDiscoveryQuery = useMemo(
     () => String(debouncedProductSearch || '').trim().length > 0 || initialFilter !== 'all',
     [debouncedProductSearch, initialFilter],
@@ -1460,7 +1473,7 @@ export default function POS() {
         const productQuery = {
           page: productPage,
           pageSize: productPageSize,
-          query: debouncedProductSearch,
+          ...(JSON.parse(productSearchParamsKey) as Record<string, string>),
           searchMode,
           category: categoryFilter === 'all' ? '' : categoryFilter,
           brand: brandFilter === 'all' ? '' : brandFilter,
@@ -1508,6 +1521,7 @@ export default function POS() {
         const prods = Array.isArray(payloadRecord.items)
           ? payloadRecord.items as ProductRecord[]
           : (Array.isArray(productPayload) ? productPayload : [])
+        setCatalogRanked(Boolean((productQuery as Record<string, unknown>).rankIds))
         applyCatalogProducts(prods)
         if (Array.isArray(payloadRecord.promotion_rules)) {
           setPromotionRules(payloadRecord.promotion_rules as PromotionRule[])
@@ -1552,7 +1566,7 @@ export default function POS() {
     })
     catalogLoadPromiseRef.current = wrappedPromise
     return wrappedPromise
-  }, [applyBranchMetadata, applyCatalogProducts, applyProductFilterMeta, branchFilter, brandFilter, categoryFilter, debouncedProductSearch, groupFilter, initialFilter, productPage, productPageSize, searchMode, stockFilter, supplierFilter, catalogMoneyVersion])
+  }, [applyBranchMetadata, applyCatalogProducts, applyProductFilterMeta, branchFilter, brandFilter, categoryFilter, productSearchParamsKey, groupFilter, initialFilter, productPage, productPageSize, searchMode, stockFilter, supplierFilter, catalogMoneyVersion])
 
   useEffect(() => {
     latestLoadCatalogRef.current = loadCatalogData
@@ -2387,7 +2401,7 @@ export default function POS() {
       // brand/category/supplier/description/unit set per an explicit
       // request -- see PRODUCT_SEARCH_COLUMNS's own comment in
       // cloudflare/src/lib/searchMatch.ts for the full reasoning.
-      if (searchTerms.length > 0) {
+      if (searchTerms.length > 0 && !catalogRanked) {
         // tag_label (P4) joins the haystack: the whole point of the tag is
         // typing YOUR word for a product and finding it.
         const hay = [p.name, p.sku, p.barcode, p.tag_label]
@@ -2453,6 +2467,7 @@ export default function POS() {
   }, [
     branchFilterIds,
     brandFilter,
+    catalogRanked,
     categoryFilter,
     hasProductDiscoveryQuery,
     products,

@@ -97,7 +97,7 @@ import {
   compactSearchText,
   normalizeSearchText,
 } from '../lib/searchMatch'
-import { buildFamilyRelevanceOrderSql, buildProductSearchQuery } from '../lib/productSearchQuery'
+import { buildFamilyRelevanceOrderSql, buildProductSearchQuery, parseRankedIds } from '../lib/productSearchQuery'
 import { omitUnchangedProductImageFields, productImageFieldsChanged, productImageFieldsChangedResolved, resolveProductImageFields, ProductImageAssetError } from '../lib/productImagePermission'
 import type { Env } from '../index'
 
@@ -793,7 +793,7 @@ async function searchProductsPayload(env: Env, query: Record<string, string>, op
       : loadActivePromotionRules(db),
   ])
   const filters = buildSearchFilters(query, lowStockConfig, options)
-  const { where, joins, params, matchRankSql, rankCteSql, matchTierSql, hasSearchTerm } = filters
+  const { where, joins, params, matchRankSql, rankCteSql, matchTierSql, hasSearchTerm, familyMemberWhereSql } = filters
   const promotedRankSql = `CASE WHEN ${productPromotedSql(promotionRules, params)} THEN 1 ELSE 0 END`
   const promoFilter = String(query.promo || '').trim().toLowerCase()
   if (promoFilter === 'promoted') {
@@ -875,7 +875,7 @@ async function searchProductsPayload(env: Env, query: Record<string, string>, op
     // its sibling variants vanished from the response" bug. Plain
     // browsing (category/brand/branch/stock filters, no typed search)
     // keeps the prior per-row-filtered behavior; nothing reported there.
-    familyMemberBaseWhereSql: hasSearchTerm ? 'p.is_active = 1' : undefined,
+    familyMemberBaseWhereSql: hasSearchTerm ? (familyMemberWhereSql || 'p.is_active = 1') : undefined,
   })
 
   // Name-duplicate half of the same fix (see expandSearchResultsToNameSiblings's
@@ -1039,9 +1039,11 @@ function buildSearchFilters(query: Record<string, string>, lowStock: LowStockCon
     mode: query.searchMode,
     titleOnly: ['name', 'title'].includes(String(query.searchFields || query.search_fields || '').toLowerCase()),
     useSearchIndex: options.useSearchIndex !== false,
+    rankedIds: parseRankedIds(query.rankIds, query.rankTiers),
   })
-  const { matchRankSql, rankCteSql, matchTierSql, titleOnly, hasSearchTerm } = searchQuery
+  const { matchRankSql, rankCteSql, matchTierSql, titleOnly, hasSearchTerm, familyMemberWhereSql } = searchQuery
   const searchWhereClause = searchQuery.whereClause
+  if (searchQuery.activeWhereSql) where[0] = searchQuery.activeWhereSql
 
   // brand/category can now carry more than one value per product (see
   // migrations/0033_product_multi_category_brand.sql) -- a filter for
@@ -1136,7 +1138,7 @@ function buildSearchFilters(query: Record<string, string>, lowStock: LowStockCon
 
   if (searchWhereClause) where.push(searchWhereClause)
 
-  return { where, joins, params, stockExpr, matchRankSql, rankCteSql, matchTierSql, titleOnly, hasSearchTerm }
+  return { where, joins, params, stockExpr, matchRankSql, rankCteSql, matchTierSql, titleOnly, hasSearchTerm, familyMemberWhereSql }
 }
 
 function isProductSearchIndexUnavailable(error: unknown): boolean {
@@ -1173,6 +1175,84 @@ app.get('/search', async (c) => {
     : { ...cachedPayload, items: await refreshCachedProductRows(c.env, cachedPayload.items as Array<Record<string, unknown>>) }
 
   return c.json(isImageOnlyRead(user, surface) ? restrictListPayloadForImageOnly(payload as { items?: unknown }, user) : payload)
+})
+
+// ---- G37: the client search index ------------------------------------
+//
+// The admin pickers match on the client with the shared core
+// (lib/searchCore.ts) over these pages, then hydrate the ranked ids through
+// /search?rankIds=. Each page covers a FIXED id range, so an edit changes
+// one page and a client that already holds the others gets a tiny
+// "unchanged" answer for them (it sends the page hash it holds as ?have=).
+// Every answer lists the occupied pages (`buckets`): the live catalog's ids
+// run 1-12k and then 46k-47k, so walking every range would waste requests.
+// Pages are built once per products cache version per colo (Cache API), so
+// D1 reads each active row once per catalog change, not once per search.
+// Only search fields are shipped: no cost, price or stock.
+export const SEARCH_INDEX_FORMAT = 1
+export const SEARCH_INDEX_PAGE_IDS = 2000
+
+// Every surface that may run a product search may hold the index, except a
+// Products-only reader restricted to image fields.
+export function productSearchIndexDenialReason(user: SessionUser): string | null {
+  if (productSurfaceDenialReason(user, 'pos') === null || productSurfaceDenialReason(user, 'inventory') === null) return null
+  if (productSurfaceDenialReason(user, 'products') === null && !isImageOnlyRead(user, 'products')) return null
+  return 'You do not have permission to view the product catalog'
+}
+
+function fnv1aHex(text: string): string {
+  let hash = 0x811c9dc5
+  for (let i = 0; i < text.length; i += 1) {
+    hash ^= text.charCodeAt(i)
+    hash = Math.imul(hash, 0x01000193) >>> 0
+  }
+  return hash.toString(16).padStart(8, '0')
+}
+
+export async function buildProductSearchIndexPage(env: Env, page: number, version: string) {
+  const db = getDb(env)
+  const lo = page * SEARCH_INDEX_PAGE_IDS
+  const hi = lo + SEARCH_INDEX_PAGE_IDS
+  // Occupied ranges by a primary-key skip walk: one MIN(id) probe per
+  // occupied range, never a scan.
+  const [bucketRows, rows] = await Promise.all([
+    db.prepare(`WITH RECURSIVE bucket(n) AS (
+        SELECT CAST((SELECT MIN(id) FROM products WHERE id >= 0) / @size AS INTEGER)
+        UNION ALL
+        SELECT CAST((SELECT MIN(id) FROM products WHERE id >= (n + 1) * @size) / @size AS INTEGER) FROM bucket WHERE n IS NOT NULL LIMIT 10000
+      ) SELECT n FROM bucket WHERE n IS NOT NULL`).all<{ n: number }>({ size: SEARCH_INDEX_PAGE_IDS }),
+    db.prepare(`SELECT id, name, brand, category, barcode, sku FROM products
+      WHERE id >= @lo AND id < @hi AND is_active = 1 ORDER BY id`).all<Record<string, unknown>>({ lo, hi }),
+  ])
+  const text = (value: unknown): string => (value == null ? '' : String(value))
+  const packed = rows.map((row) => [Number(row.id), text(row.name), text(row.brand), text(row.category), text(row.barcode), text(row.sku)])
+  const body = JSON.stringify(packed)
+  return {
+    format: SEARCH_INDEX_FORMAT,
+    version,
+    page,
+    buckets: bucketRows.map((row) => Number(row.n)),
+    pageIds: SEARCH_INDEX_PAGE_IDS,
+    hash: fnv1aHex(`${SEARCH_INDEX_FORMAT}:${page}:${body}`),
+    rows: packed,
+  }
+}
+
+app.get('/search-index', async (c) => {
+  const denial = productSearchIndexDenialReason(c.get('user'))
+  if (denial) return c.json({ error: denial }, 403)
+  const page = clampInt(c.req.query('page'), 0, 0, 10000)
+  const have = String(c.req.query('have') || '')
+  const version = await getVersionWithFallback(c.env, 'products')
+  const cacheUrl = new URL(c.req.url)
+  cacheUrl.search = `?page=${page}&format=${SEARCH_INDEX_FORMAT}`
+  const payload = await cachedJsonResponse(new Request(cacheUrl.toString(), { method: 'GET' }), c.executionCtx, version, 3600,
+    () => buildProductSearchIndexPage(c.env, page, version))
+  c.header('Cache-Control', 'private, no-store')
+  if (have && have === payload.hash) {
+    return c.json({ format: payload.format, version: payload.version, page: payload.page, buckets: payload.buckets, pageIds: payload.pageIds, hash: payload.hash, unchanged: true })
+  }
+  return c.json(payload)
 })
 
 app.get('/', async (c) => {

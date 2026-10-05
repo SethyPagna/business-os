@@ -5146,6 +5146,7 @@
   "show_footer": "Show Footer",
   "show_less": "Show less",
   "show_more": "Show more",
+  "search_results_shown": "{shown} of {total}",
   "show_logo": "Show Logo",
   "show_password": "Show password",
   "show_payment": "Show Payment",

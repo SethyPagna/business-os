@@ -14,7 +14,8 @@ function test(name: string, fn: () => void): void {
 
 test('single-product branch transfer searches D1 and exposes later pages', () => {
   const src = frontend('src/components/branches/TransferModal.tsx')
-  assert.match(src, /debouncedSearch\.trim\(\) \? \{ query: debouncedSearch\.trim\(\) \} : \{\}/, 'single search must be sent to the branch-stock endpoint')
+  // G37: the text goes as `query`, swapped for the shared-core ranked ids once the index is ready.
+  assert.match(src, /debouncedSearch\.trim\(\) \? \{ \.\.\.\{ query: debouncedSearch\.trim\(\) \}, \.\.\.rankedSearchOverride\(stockSearchKey\) \} : \{\}/, 'single search must be sent to the branch-stock endpoint')
   assert.ok(src.includes('singleStockPage < singleStockTotalPages'), 'single transfer must expose later branch-stock pages')
   assert.ok(src.includes('loadMoreSingleProducts'), 'single transfer has an explicit load-more path')
   assert.doesNotMatch(src, /const filtered = useMemo\(\(\) => \{[\s\S]{0,500}name\.includes\(query\)/, 'server search must not be hidden again by a narrower client-only search')

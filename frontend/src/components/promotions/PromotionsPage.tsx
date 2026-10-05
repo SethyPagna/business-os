@@ -33,6 +33,7 @@ import {
   type PromotionRuleWrite,
 } from '../../api/promotionsTransport.ts'
 import { searchProducts, getProductFilters, updateProduct } from '../../api/methods.ts'
+import { productSearchRequest, useProductSearchIndex } from '../../api/productSearchIndex.ts'
 import { promotionAutoLabel, normalizePromotionRule } from '../../utils/promotionRules.ts'
 import { calculateProductDiscount, isProductDiscountActive } from '../../utils/pricing.ts'
 
@@ -262,14 +263,16 @@ export default function PromotionsPage() {
   }, [loadRules, loadDiscounted])
 
   // Debounced product search, shared by the rule scope picker and the
-  // per-product discount search box (whichever is open).
+  // per-product discount search box (whichever is open). G37: matched on
+  // this device by the shared search core, hydrated by ranked ids.
+  const searchIndexGeneration = useProductSearchIndex()
   useEffect(() => {
     const query = draft ? pickerQuery : productQuery
     if (!query.trim()) { setPickerResults([]); setProductResults([]); return }
     const seq = ++searchSeq.current
     const timer = window.setTimeout(async () => {
       try {
-        const payload = await searchProducts({ query: query.trim(), pageSize: 12 }) as { items?: ProductLite[] }
+        const payload = await searchProducts({ ...productSearchRequest(query.trim()).params, pageSize: 12 }) as { items?: ProductLite[] }
         if (seq !== searchSeq.current) return
         const items = Array.isArray(payload?.items) ? payload.items : []
         if (draft) setPickerResults(items)
@@ -277,7 +280,7 @@ export default function PromotionsPage() {
       } catch { /* stale/failed search -- keep previous list */ }
     }, 300)
     return () => window.clearTimeout(timer)
-  }, [pickerQuery, productQuery, draft])
+  }, [pickerQuery, productQuery, draft, searchIndexGeneration])
 
   const openNewRule = () => {
     if (!canManagePromotions) return

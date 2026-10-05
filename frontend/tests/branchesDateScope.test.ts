@@ -38,7 +38,12 @@ test('the hub owns ONE range for Overview, Products and Transfers', () => {
   // when the stats strip is not already drawing that one control.
   assert.match(inventorySource, /showProductsSection && !showInventoryStats \? \([\s\S]{0,400}<StatsRangeRow/)
   // Stock cards stay unscoped: the stats key never grows date dimensions.
-  assert.match(inventorySource, /const inventoryStatsScope = JSON\.stringify\(\[branchFilter, deferredSearch, searchMode\]\)/)
+  // G37 added the ranked-search request key (the search text/ranked ids the
+  // shared index produced) to that scope, which is search-only: still no
+  // range, date or time dimension may enter it.
+  const statsScope = inventorySource.match(/const inventoryStatsScope = JSON\.stringify\((\[[^\]]*\])\)/)?.[1] || ''
+  assert.equal(statsScope, '[branchFilter, deferredSearch, searchMode, productSearchParamsKey]')
+  assert.doesNotMatch(statsScope, /range|Range|date|Date|time|Time/)
 })
 
 // N10 sibling parity: SKU left the Products tab, so the Overview per-branch

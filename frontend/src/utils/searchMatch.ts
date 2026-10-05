@@ -86,11 +86,17 @@ export function foldDiacritics(value: string): string {
 // digits survive; punctuation/symbols in any script still get folded to a
 // space exactly as before. Requires the `u` (unicode) regex flag for
 // `\p{...}` property escapes to be recognized.
+//
+// G37: the same pipeline as utils/searchCore.ts normalize() (the shared core;
+// tests/searchCoreParity.test.ts asserts equal output): NFKC first,
+// zero-width/format characters removed, and \p{M} kept. Without \p{M} every
+// Khmer vowel sign and coeng was deleted, so "សេរ៉ូម" became three
+// one-letter tokens and "ឡេ" matched "ក្រឡ".
 export function normalizeSearchText(value: unknown): string {
-  const base = foldDiacritics(String(value ?? ''))
+  const base = foldDiacritics(String(value ?? '').normalize('NFKC').replace(/[​-‍⁠﻿­]/g, ''))
     .toLowerCase()
-    .replace(/[&+/_.-]/g, ' ')
-    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .replace(/[&+/_.\-’']/g, ' ')
+    .replace(/[^\p{L}\p{M}\p{N}\s]/gu, ' ')
     .replace(/\s+/g, ' ')
     .trim()
   if (!base) return base
@@ -214,26 +220,16 @@ function typoBudgetForLength(length: number): number {
 // an exact match, a prefix/substring either direction (covers partial
 // typing and simple pluralization), or a small bounded edit distance
 // (covers genuine typos/transpositions).
-// The reverse-containment branch below (a typed word CONTAINING a stored
-// one) exists for the "typed more than is stored" case -- "lipsticks"
-// finding "lipstick", "9piece" finding "piece". It must not fire on a
-// stored word so short that it appears inside almost anything: a scanned
-// 13-digit barcode contains "1", so every product whose name holds a lone
-// digit or letter -- "Anessa Sunscreen Compact SPF 50+(1)", "Benefit Brow
-// Gel 4" -- came back as a match. Measured live in the Transfer bulk
-// picker on the production snapshot: scanning 3348901486385 returned the
-// ENTIRE loaded catalogue (101 rows) instead of the one product, so the
-// scan widened the list rather than narrowing it. Three characters is the
-// shortest stored token that still carries meaning here (a "9ml"/"75g"
-// size, a "sku" fragment); anything shorter is noise on this side of the
-// comparison and is left to the compact-substring and Levenshtein checks.
-const MIN_REVERSE_CONTAINMENT_LENGTH = 3
-
+// There is no reverse containment (a typed word CONTAINING a stored one).
+// Even with a 3-character floor it made "lipstik" match every "lip" and
+// "pallet" match "all" (G37 defect 4), and a scanned barcode containing "1"
+// matched every name with a lone digit before that floor existed.
+// "lipsticks" still reaches "lipstick" through the edit distance below, and
+// "9piece" reaches "9 piece" through the compact-text check.
 function wordsFuzzyMatch(queryWord: string, haystackWord: string): boolean {
   if (!queryWord || !haystackWord) return false
   if (queryWord === haystackWord) return true
   if (haystackWord.includes(queryWord)) return true
-  if (haystackWord.length >= MIN_REVERSE_CONTAINMENT_LENGTH && queryWord.includes(haystackWord)) return true
   const budget = Math.min(typoBudgetForLength(queryWord.length), typoBudgetForLength(haystackWord.length))
   if (budget <= 0) return false
   return boundedLevenshtein(queryWord, haystackWord, budget) <= budget
