@@ -219,4 +219,24 @@ for (const [file, source] of [
   assert.doesNotMatch(source, /'Awaiting [Pp]ayment'/, `${file} still ships a retired Awaiting Payment fallback`)
 }
 
+// 5 Oct 2026 rename sweep. The retired wording also survived inside longer
+// fallback sentences (Settings sales alerts, the Loyalty page's own EN and KM
+// copy, the stock-recovery description) and as the hyphenated adjective
+// "an awaiting-payment sale" in two Worker refusals, which the pattern above
+// does not spell. Only comments may keep it.
+const RETIRED_HYPHENATED = /awaiting-payment/i
+assert.match('completing an awaiting-payment sale', RETIRED_HYPHENATED)
+assert.doesNotMatch("status === 'awaiting_payment'", RETIRED_HYPHENATED, 'the enum value is not copy')
+const codeOnly = (source: string): string => code(source.replace(/\/\*[\s\S]*?\*\//g, ''))
+for (const [file, source] of [
+  ['Settings.tsx', read('../src/components/utils-settings/Settings.tsx')],
+  ['LoyaltyPointsPage.tsx', read('../src/components/loyalty-points/LoyaltyPointsPage.tsx')],
+  ['SaleNotPaidStockRecovery.tsx', read('../src/components/utils-settings/SaleNotPaidStockRecovery.tsx')],
+  ['routes/sales.ts', salesRoute],
+] as const) {
+  assert.doesNotMatch(codeOnly(source), RETIRED_STATUS_WORDING, `${file} ships the retired status wording`)
+  assert.doesNotMatch(codeOnly(source), RETIRED_HYPHENATED, `${file} ships the hyphenated retired wording`)
+}
+assert.match(read('../src/components/loyalty-points/LoyaltyPointsPage.tsx'), new RegExp(`behavior3: '${km.behavior3}'`), 'the Loyalty page Khmer copy equals the pack')
+
 console.log('PASS Not Paid terminology preserves sale accounting and distinct credit concepts')

@@ -122,9 +122,21 @@ const GLOSSARY: GlossaryRule[] = [
   {
     concept: 'batch / lot / received date',
     canonical: 'ថ្ងៃចូល',
-    forbidden: [/(?<!ចាំ)បាច់/, /(?<!អាប់)ឡូត/, 'ឡុត'],
+    // ថ្ងៃទទួល / កាលបរិច្ឆេទទទួល ("date received") are the later rival
+    // spellings the 5 Oct rename sweep found in stock-in errors and the CSV
+    // hint; ថ្ងៃទទួលប្រាក់ (a payment-received date) is a different concept.
+    forbidden: [/(?<!ចាំ)បាច់/, /(?<!អាប់)ឡូត/, 'ឡុត', /ថ្ងៃទទួល(?!ប្រាក់)/, 'កាលបរិច្ឆេទទទួល'],
     except: ['reason_defective_batch'],
   },
+  // Part 347: the middle permission tier is Partial Access. The old
+  // "Review Required" Khmer and a third rendering survived in descriptions.
+  { concept: 'Partial Access tier', canonical: 'សិទ្ធិមួយផ្នែក', forbidden: ['តម្រូវការត្រួតពិនិត្យ', 'សិទ្ធិមានកម្រិត', '«ត្រូវការពិនិត្យ»', 'ឬត្រូវការពិនិត្យ)'] },
+  // 4-5 Sep (S4-28): the VIP price IS the wholesale price.
+  { concept: 'wholesale price (VIP retired)', canonical: 'តម្លៃបោះដុំ', forbidden: ['តម្លៃពិសេស', 'តម្លៃ VIP'] },
+  // 31 Aug: the Fees section is Expenses.
+  { concept: 'Expenses section', canonical: 'ចំណាយ', forbidden: ['កម្រៃថ្លៃសេវា'] },
+  // 31 Aug: the duplicates sections are Conflicts.
+  { concept: 'Conflicts section', canonical: 'ទំនាស់ទិន្នន័យ', forbidden: ['ស្ទួនដែលអាចមាន'] },
   { concept: 'customer', canonical: 'អតិថិជន', forbidden: ['អ្នកទិញ'], except: ['fee_by_customer', 'pos_customer_pays', 'customer_pays'] },
   { concept: 'cost', canonical: 'ថ្លៃដើម', forbidden: ['តម្លៃដើម'] },
   { concept: 'variant', canonical: 'ជម្រើស', forbidden: ['វ៉ារ្យ៉ង់', 'វ៉ារីយ៉ង់'] },
@@ -135,7 +147,9 @@ const GLOSSARY: GlossaryRule[] = [
   { concept: 'margin', canonical: 'អត្រាចំណេញ', forbidden: ['ម៉ាសែន'] },
   { concept: 'thermal paper', canonical: 'ក្រដាសកម្ដៅ', forbidden: ['សាំងចង្ចាំ'] },
   { concept: 'print', canonical: 'បោះពុម្ព', forbidden: ['ព្រីន'] },
-  { concept: 'portal', canonical: 'គេហទំព័រ', forbidden: ['ផតថល'] },
+  // 24 Sep: "Website Editor instead of customer portal"; the English name
+  // must not sit inside a Khmer sentence either.
+  { concept: 'portal', canonical: 'គេហទំព័រ', forbidden: ['ផតថល', /customer portal/i] },
   { concept: 'settle', canonical: 'ដោះស្រាយ', forbidden: ['សម្រះ'] },
   { concept: 'barcode', canonical: 'បាកូដ', forbidden: ['បារកូដ'] },
   { concept: 'reason', canonical: 'មូលហេតុ', forbidden: ['ហេតុផល'] },
