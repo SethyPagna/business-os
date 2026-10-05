@@ -17,7 +17,8 @@
 import type { ReactNode, RefObject } from 'react'
 import Receipt from 'lucide-react/dist/esm/icons/receipt.js'
 import Table2 from 'lucide-react/dist/esm/icons/table-2.js'
-import { Button, Chip, Fold } from '../../shared/kit'
+import RotateCcw from 'lucide-react/dist/esm/icons/rotate-ccw.js'
+import { Chip, Fold, IconButton } from '../../shared/kit'
 import { DEFAULT_REPORT_OPTIONS, type ReportCurrency, type ReportOptions, type ReportStyle } from './reportModel.ts'
 import type { Tr } from './reportTypes.ts'
 
@@ -63,9 +64,7 @@ export default function ReportOptionsFold({ open, onClose, anchorRef, options, o
       className="reports-fold-panel reports-filter-fold"
       title={tr('filters', 'Filters')}
       actions={
-        <Button size="sm" variant="ghost" onClick={onReset} disabled={isDefault}>
-          {tr('reset', 'Reset')}
-        </Button>
+        <IconButton label={tr('reset', 'Reset')} variant="ghost" className="!h-8 !w-8" icon={<RotateCcw className="h-3.5 w-3.5" />} onClick={onReset} disabled={isDefault} />
       }
     >
       <div className="reports-filter-grid" data-reports-fold="" data-reports-filter="">

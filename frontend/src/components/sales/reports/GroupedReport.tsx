@@ -12,7 +12,7 @@ import Printer from 'lucide-react/dist/esm/icons/printer.js'
 import { getReportGrouped } from '../../../api/reportsTransport.ts'
 import { downloadCSV } from '../../../utils/csv.ts'
 import { openPrintExport } from '../../../utils/exportOptions.ts'
-import { Button, Fold, OverflowMenu } from '../../shared/kit'
+import { Fold, IconButton, OverflowMenu } from '../../shared/kit'
 import ReceiptSheet, { type ReceiptLine } from './ReceiptSheet.tsx'
 import ReportFrame, { useReportData } from './ReportFrame.tsx'
 import ReportTable, { csvColumnsFor, type ReportColumn } from './ReportTable.tsx'
@@ -451,9 +451,7 @@ export default function GroupedReport(p: ReportViewProps) {
         title={open ? groupRowLabel(by, open, tr) : ''}
         actions={
           drill ? (
-            <Button size="sm" variant="secondary" icon={<ExternalLink className="h-3.5 w-3.5" />} onClick={() => p.onDrill(drill)}>
-              {tr('rpt_view_sales', 'View sales')}
-            </Button>
+            <IconButton label={tr('rpt_view_sales', 'View sales')} variant="secondary" className="!h-8 !w-8" icon={<ExternalLink className="h-3.5 w-3.5" />} onClick={() => p.onDrill(drill)} />
           ) : null
         }
       >

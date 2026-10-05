@@ -1220,6 +1220,21 @@ await asyncTest('usePagedReport: load-more failure preserves rows/cursor, retry 
   h.unmount()
 })
 
+test('the fold header actions are icon-only with a translated name and their own 32px', () => {
+  // --ui-control-h is not defined inside the portalled Fold, so each states its size.
+  for (const [file, label] of [
+    ['PeriodReport.tsx', "tr('rpt_view_sales', 'View sales')"],
+    ['GroupedReport.tsx', "tr('rpt_view_sales', 'View sales')"],
+    ['ReportOptionsFold.tsx', "tr('reset', 'Reset')"],
+  ]) {
+    const source = read('src/components/sales/reports/' + file)
+    const at = source.indexOf(`<IconButton label={${label}}`)
+    assert.ok(at >= 0, `${file} header action is an IconButton named by its translation`)
+    assert.ok(source.slice(at, source.indexOf('\n', at)).includes('!h-8 !w-8'), `${file} header action states its own 32px`)
+    assert.doesNotMatch(source, /<Button\b/, file + ' keeps no text button in the fold header')
+  }
+})
+
 if (failed) {
   console.error(`\n${failed} test(s) failed`)
   process.exit(1)
