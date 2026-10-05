@@ -49,6 +49,8 @@ import {
 } from '../../utils/lowStockSettings.ts'
 import { useMobileSectionNavMode, writeMobileSectionNavMode, MOBILE_SECTION_NAV_SETTINGS_KEY, type MobileSectionNavMode } from '../../utils/sectionNavPreference.ts'
 import { withLoaderTimeout } from '../../utils/loaders.ts'
+import { startVisibleInterval } from '../../utils/visibilityPolling.ts'
+import { useIsPageActive } from '../shared/pageActivity'
 import { beginKeyedAction, beginSingleAction, finishKeyedAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import { buildSettingsConflictState, diffSettingsConflictFields } from './settingsConflict.ts'
 import type { SettingsConflictState } from './settingsConflict.ts'
@@ -273,6 +275,22 @@ const SETTINGS_SECTION_OPTIONS: Array<{ value: SettingsSectionId; labelKey: stri
 ]
 
 const SETTINGS_SECTION_IDS = new Set<SettingsSectionId>(SETTINGS_SECTION_OPTIONS.map((option) => option.value))
+
+// The device-time preview under Appearance > Timezone. Its 1 s tick used to
+// live on the whole Settings component and re-render it every second, also
+// while another page or section was on screen (G39 5.1). Now it is mounted
+// with that section only and ticks only while Settings is the page and the
+// tab is visible.
+function DevicePreviewClock({ format }: { format: (value: Date) => string }) {
+  const pageActive = useIsPageActive('settings')
+  const [now, setNow] = useState(() => new Date())
+  useEffect(() => {
+    if (!pageActive) return undefined
+    setNow(new Date())
+    return startVisibleInterval(() => setNow(new Date()), 1000)
+  }, [pageActive])
+  return <>{format(now)}</>
+}
 
 function isSettingsSectionId(value: string): value is SettingsSectionId {
   return SETTINGS_SECTION_IDS.has(value as SettingsSectionId)
@@ -526,7 +544,6 @@ export default function Settings() {
   const [pmBackfilling, setPmBackfilling] = useState(false)
   const [form, setForm] = useState<SettingsRecord>({})
   const mobileSectionNavMode = useMobileSectionNavMode(form.ui_mobile_section_nav)
-  const [previewNow, setPreviewNow] = useState(() => new Date())
   const [dragPinnedId, setDragPinnedId] = useState<string | null>(null)
   const [dragNavId, setDragNavId] = useState<string | null>(null)
   const [settingsSection, setSettingsSection] = useState<SettingsSectionId>('all')
@@ -627,11 +644,6 @@ export default function Settings() {
     setForm({ ...nextSettings })
     formHydratedRef.current = true
   }, [settings])
-
-  useEffect(() => {
-    const timer = window.setInterval(() => setPreviewNow(new Date()), 1000)
-    return () => window.clearInterval(timer)
-  }, [])
 
   const isAdmin = isAdminControlUser(user)
 
@@ -1724,7 +1736,7 @@ export default function Settings() {
 
             <div className="bg-primary-50 dark:bg-primary-900/20 rounded-xl p-3 text-xs">
               <p className="font-semibold text-primary-700 dark:text-primary-300 mb-1">{t('current_device_time')}</p>
-              <p className="font-mono text-primary-600 dark:text-primary-400">{formatPreviewDateTime(previewNow)}</p>
+              <p className="font-mono text-primary-600 dark:text-primary-400"><DevicePreviewClock format={formatPreviewDateTime} /></p>
               <p className="text-gray-500 mt-1">{t('display_timezone')}: <strong>{selectedDisplayTimezone}</strong></p>
               <p className="text-gray-500 mt-1">{t('device_timezone')}: <strong>{fmtTimezoneLabel(deviceTimezone)}</strong></p>
               <p className="text-gray-400 mt-1">{t('timezone_display_note')}</p>

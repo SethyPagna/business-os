@@ -30,6 +30,7 @@ import PaginationControls, { PAGE_SIZE_OPTIONS } from '../shared/PaginationContr
 import Modal from '../shared/Modal'
 import { ProductImg, ProductImagePlaceholder } from './shared/primitives'
 import { lazyRetry } from '../../utils/lazyImport.ts'
+import { useDebouncedValue } from '../../utils/useDebouncedValue.ts'
 import { fmtDateOnly } from '../../utils/formatters'
 import { batchDisplayLabel } from '../../utils/batchLabel.ts'
 
@@ -175,7 +176,17 @@ export default function ProductsImageOnlyView() {
   const [items, setItems] = useState<ImageOnlyProduct[]>([])
   const [total, setTotal] = useState(0)
   const [search, setSearch] = useState('')
+  // Same 180 ms the full Products editor waits before searching; every
+  // keystroke used to send its own request (G39 5.1).
+  const debouncedSearch = useDebouncedValue(search, 180)
   const [page, setPage] = useState(1)
+  // Back to page 1 in the same render the new term arrives, so the narrowed
+  // search is one request rather than one for the old page and one for page 1.
+  const [pageSearch, setPageSearch] = useState(debouncedSearch)
+  if (pageSearch !== debouncedSearch) {
+    setPageSearch(debouncedSearch)
+    setPage(1)
+  }
   const [pageSize, setPageSize] = useState(PAGE_SIZE_OPTIONS[0])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -303,7 +314,7 @@ export default function ProductsImageOnlyView() {
     try {
       const module = await loadReadModule()
       const payload = await module.searchProducts({
-        q: search,
+        q: debouncedSearch,
         page,
         pageSize,
         category: categoryFilter === 'all' ? '' : categoryFilter,
@@ -319,14 +330,9 @@ export default function ProductsImageOnlyView() {
     } finally {
       if (requestIdRef.current === requestId) setLoading(false)
     }
-  }, [search, page, pageSize, categoryFilter, brandFilter, t])
+  }, [debouncedSearch, page, pageSize, categoryFilter, brandFilter, t])
 
   useEffect(() => { load() }, [load])
-
-  // Reset to page 1 whenever the search text changes, same as the full
-  // editor -- otherwise a narrowed search could land on a page past the
-  // end of its own (smaller) result set.
-  useEffect(() => { setPage(1) }, [search])
 
   // Shared by all three upload paths (choose file / take photo / pick from
   // library) -- each just needs to arrive at a public path, then this does

@@ -662,9 +662,9 @@ export const createImportJob = async payload => {
   pokeImportTracker()
   return result
 }
-export const listImportJobs = async (params = {}) => {
+export const listImportJobs = async (params = {}, options = {}) => {
   const module = await loadImportJobsTransport()
-  return module.listImportJobs(params)
+  return module.listImportJobs(params, options)
 }
 export const getImportJob = async id => {
   const module = await loadImportJobsTransport()

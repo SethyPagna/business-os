@@ -123,6 +123,8 @@ type ActionHistory = {
   redo: (id?: string | number) => void
   undoServer?: (serverId: string | number, label?: string) => void
   redoServer?: (serverId: string | number, label?: string) => void
+  // Starts the recorded-history read; the hook makes none until asked.
+  requestServerItems?: () => void
 }
 
 type ActionHistoryBarProps = {
@@ -244,7 +246,7 @@ export default function ActionHistoryBar({
     <div className={`relative flex ${className}`.trim()}>
       <LazyPortalMenu
         align={align === 'right' ? 'right' : 'auto'}
-        onOpenChange={(isOpen) => { setOpen(isOpen); if (isOpen) setPreviewOpen(false) }}
+        onOpenChange={(isOpen) => { setOpen(isOpen); if (isOpen) { setPreviewOpen(false); history.requestServerItems?.() } }}
         menuClassName="w-[min(18rem,calc(100vw-1rem))] max-w-[calc(100vw-1rem)] max-h-[min(28rem,calc(70*var(--app-vh)))] overflow-auto rounded-2xl border border-slate-200 bg-white p-2 text-xs shadow-xl dark:border-slate-700 dark:bg-slate-900"
         trigger={(
           <button
@@ -263,9 +265,9 @@ export default function ActionHistoryBar({
                 ? `btn-secondary inline-flex h-8 ${dense ? 'min-h-8 ' : ''}w-full shrink-0 items-center justify-center gap-1.5 px-2.5 text-xs font-semibold`
                 : `btn-secondary inline-flex h-8 ${dense ? 'min-h-8 ' : ''}w-full min-w-8 items-center justify-center gap-1.5 px-1.5`
             }
-            onMouseEnter={() => { clearPreviewTimer(); if (!open) setPreviewOpen(true) }}
+            onMouseEnter={() => { clearPreviewTimer(); history.requestServerItems?.(); if (!open) setPreviewOpen(true) }}
             onMouseLeave={() => { previewTimerRef.current = setTimeout(() => setPreviewOpen(false), 150) }}
-            onFocus={() => { if (!open) setPreviewOpen(true) }}
+            onFocus={() => { history.requestServerItems?.(); if (!open) setPreviewOpen(true) }}
             onBlur={() => setPreviewOpen(false)}
             title={T('history', 'History')}
             aria-label={T('history', 'History')}

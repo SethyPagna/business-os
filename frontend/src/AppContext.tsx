@@ -34,8 +34,11 @@ import type { SettingsWriteOptions } from './types/settingsContracts.ts'
 import {
   beginPermissionRefresh,
   createPermissionRefreshAccumulator,
+  escalatePermissionRefresh,
   finishPermissionRefresh,
+  FOREGROUND_RESUME_REASON,
   notePermissionRefreshIntent,
+  permissionSnapshotKey,
 } from './utils/permissionRefreshAccumulator.ts'
 import {
   AppContext,
@@ -1159,6 +1162,19 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
       const accumulator = permissionRefreshRef.current
       if (!beginPermissionRefresh(accumulator)) return
       try {
+        if (accumulator.activeVerifyOnly) {
+          // A tab resumed after its socket dropped: a users/roles push may
+          // have been missed. One bootstrap read settles it; the full reset
+          // (and the other tabs' quarantine it causes) runs only on a change.
+          const current = await readAppBootstrap('Runtime bootstrap')
+          if (disposed) return
+          if (current?.unauthorized) {
+            await handleUnauthorizedSession(current.authError || 'Please sign in again to continue.')
+          } else if (current?.user && !current.offline && permissionSnapshotKey(current.user) !== permissionSnapshotKey(user)) {
+            escalatePermissionRefresh(accumulator)
+          }
+          return
+        }
         await clearLocalBusinessState({
           clearAuth: false,
           preserveSyncServer: true,
@@ -1207,7 +1223,8 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
       debounceRef.current[channel] = window.setTimeout(async () => {
         delete debounceRef.current[channel]
         // Settings changes from other devices apply immediately; no reload needed.
-        if (channel === 'settings') loadSettings().catch(() => {})
+        // A resume with the socket open throughout missed no settings push.
+        if (channel === 'settings' && detail.reason !== FOREGROUND_RESUME_REASON) loadSettings().catch(() => {})
         setSyncChannel({
           channel,
           ts: Date.now(),

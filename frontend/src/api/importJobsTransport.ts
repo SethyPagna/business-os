@@ -108,7 +108,7 @@ export function createImportJob(payload: ImportJobPayload = {}): Promise<unknown
   )
 }
 
-export function listImportJobs(params: QueryParams = {}): Promise<unknown> {
+export function listImportJobs(params: QueryParams = {}, options: { fresh?: boolean } = {}): Promise<unknown> {
   const scope = captureActorReadScope('importJobs')
   let permissionFailure: unknown = null
   const query = buildQueryString(params)
@@ -131,6 +131,7 @@ export function listImportJobs(params: QueryParams = {}): Promise<unknown> {
       const cached = lastImportJobsByQuery.get(query)
       return cached && isActorReadScopeCurrent(cached.scope) ? cached.data : { jobs: [], unavailable: true, transient: true }
     },
+    { bypassCache: options.fresh === true },
   )
 }
 

@@ -144,6 +144,9 @@ await runTest('web-api recovery listeners load no offline snapshot and run no se
     Date: browser.Date,
     hasStoredUserSession: () => true,
     resumeWS: () => { counts.resumeWS += 1 },
+    isWSConnected: () => true,
+    FOREGROUND_RESUME_REASON: 'foreground-resume',
+    FOREGROUND_RESUME_GAP_REASON: 'foreground-resume-gap',
     startHealthCheck: () => {},
     pingServerHealth: async () => { counts.healthPings += 1 },
     dispatchSyncUpdates: () => { counts.screenRefreshes += 1 },
@@ -162,7 +165,7 @@ await runTest('web-api recovery listeners load no offline snapshot and run no se
     INITIAL_OFFLINE_MAINTENANCE_IDLE_TIMEOUT_MS: 60_000,
     SERVICE_WORKER_UPDATE_INTERVAL_MS: 15 * 60_000,
   }
-  const state = 'let sessionRecoveryListenersRegistered = false, lastForegroundRecoveryAt = 0, deferredForegroundRecoveryTimer = 0, backgroundedAt = 0, offlineMaintenanceStarted = false, initialOfflineMaintenanceScheduled = false, lastServiceWorkerUpdateAt = 0, offlineSnapshotTimer = 0, offlineSnapshotIdleId = 0;'
+  const state = 'let sessionRecoveryListenersRegistered = false, lastForegroundRecoveryAt = 0, deferredForegroundRecoveryTimer = 0, backgroundedAt = 0, syncSocketDroppedAt = 0, offlineMaintenanceStarted = false, initialOfflineMaintenanceScheduled = false, lastServiceWorkerUpdateAt = 0, offlineSnapshotTimer = 0, offlineSnapshotIdleId = 0;'
   const compiled = transpile(`${state}\n${functions}\nreturn { ensureSessionRecoveryListeners };`)
   const runtime = new Function(...Object.keys(dependencies), compiled)(...Object.values(dependencies))
 

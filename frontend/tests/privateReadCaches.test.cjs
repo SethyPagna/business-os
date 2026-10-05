@@ -95,16 +95,18 @@ async function main() {
   actor('admin'); assert.equal(history.readCachedServerItems('global', scope.captureActorReadScope('actionHistory')).length, 0)
   window.sessionStorage.setItem('actionHistory:cache:global', JSON.stringify([{ id: 'legacy secret' }]))
   assert.equal(history.readCachedServerItems('global', scope.captureActorReadScope('actionHistory')).length, 0)
-  hooks = harness(); const user = { role: 'admin' }; const render = () => { hooks.reset(); return history.useActionHistory({ user }) }
-  let view = render(); historyReply = async () => ({ items: [{ id: 'current' }] }); await view.refreshServerItems(); view = render(); assert.equal(view.serverItems[0].id, 'current')
+  // Fresh state on the hooks object actionHistory.ts captured at load, so state
+  // persists across renders as in React (the lazy read flag must survive one).
+  Object.assign(hooks, harness()); const user = { role: 'admin' }; const render = () => { hooks.reset(); return history.useActionHistory({ user }) }
+  // History reads start when the History control asks (G39 item 7).
+  let view = render(); view.requestServerItems(); view = render(); historyReply = async () => ({ items: [{ id: 'current' }] }); await view.refreshServerItems(); view = render(); assert.equal(view.serverItems[0].id, 'current')
   historyReply = async () => { throw Object.assign(new Error('denied'), { status: 403 }) }; await view.refreshServerItems(); view = render(); assert.equal(view.serverItems.length, 0)
   historyReply = async () => ({ items: [{ id: 'current again' }] }); await view.refreshServerItems(); view = render()
   historyReply = async () => { throw Object.assign(new Error('expired login'), { status: 401 }) }; await view.refreshServerItems(); view = render(); assert.equal(view.serverItems.length, 0)
   const pendingHistory = deferred(); historyReply = () => pendingHistory.promise; const historyLoad = view.refreshServerItems(); await tick(); actor('employee'); pendingHistory.resolve({ items: [{ id: 'late admin' }] }); await historyLoad; view = render(); assert.equal(view.serverItems.length, 0)
-  const tasks = []; window.setTimeout = fn => { tasks.push(fn); return tasks.length }
-  actor('admin'); hooks = harness(); hooks.reset(); history.useActionHistory({ user }); hooks.effects()
-  const lateUsers = deferred(); usersReply = () => lateUsers.promise; historyReply = async () => ({ items: [] })
-  tasks.splice(0).forEach(task => task()); await tick(); actor('employee'); lateUsers.resolve([{ id: 'admin directory secret' }]); await tick()
+  actor('admin'); Object.assign(hooks, harness()); hooks.reset(); history.useActionHistory({ user }).requestServerItems()
+  const lateUsers = deferred(); let usersReads = 0; usersReply = () => { usersReads += 1; return lateUsers.promise }; historyReply = async () => ({ items: [] })
+  hooks.reset(); history.useActionHistory({ user }); hooks.effects(); await tick(); assert.equal(usersReads, 1, 'the admin user list is read once History asks'); actor('employee'); lateUsers.resolve([{ id: 'admin directory secret' }]); await tick()
   hooks.reset(); assert.equal(history.useActionHistory({ user: { role: 'employee' } }).userOptions.length, 0)
   console.log('private read caches: executable supplier, shift, and history isolation/late-response/denial checks passed')
 }

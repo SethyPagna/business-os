@@ -871,7 +871,7 @@ assert.match(webApi, /scheduleBootstrapStorageMaintenance\(\(\) => \{[\s\S]*loca
 assert.match(webApi, /if \(!skipOfflineBootstrapDb\) \{[\s\S]*const db = await getOfflineDb\(\)[\s\S]*const stored = await db\.settings\.bulkGet\(\['sync_server_url'\]\)/, 'Vite dev IndexedDB sync URL fallback should stay available outside public portal startup')
 assert.doesNotMatch(webApi, /module\.syncPendingSalesQueue\(/, 'startup, idle and reconnect must not automatically replay retained business sales')
 assert.doesNotMatch(webApi, /getLazyApiMethod\('(?:retryPendingSyncNow|refreshOfflineDeviceSnapshot)'\)/, 'idle offline maintenance should call focused transports instead of the broad API registry')
-assert.match(webApi, /function ensureSessionRecoveryListeners\(\): void \{[\s\S]*sessionRecoveryListenersRegistered[\s\S]*const recoverForegroundSession = \(reason: string, force = false, refreshData = false\): boolean => \{[\s\S]*resumeWS\(\)[\s\S]*pingServerHealth\(force\)\.catch[\s\S]*window\.addEventListener\('online'[\s\S]*recoverForegroundSession\('network-online', true, false\)[\s\S]*window\.addEventListener\('focus'[\s\S]*recoverAfterBackground\('window-focus'\)[\s\S]*document\.addEventListener\('visibilitychange'[\s\S]*recoverAfterBackground\('visibility-resume'\)/, 'online/focus/visibility recovery listeners should delegate to the centralized throttled foreground-recovery path')
+assert.match(webApi, /function ensureSessionRecoveryListeners\(\): void \{[\s\S]*sessionRecoveryListenersRegistered[\s\S]*const recoverForegroundSession = \(reason: string, force = false, refreshData = false, hiddenSince = 0\): boolean => \{[\s\S]*resumeWS\(\)[\s\S]*pingServerHealth\(force\)\.catch[\s\S]*window\.addEventListener\('online'[\s\S]*recoverForegroundSession\('network-online', true, false\)[\s\S]*window\.addEventListener\('focus'[\s\S]*recoverAfterBackground\('window-focus'\)[\s\S]*document\.addEventListener\('visibilitychange'[\s\S]*recoverAfterBackground\('visibility-resume'\)/, 'online/focus/visibility recovery listeners should delegate to the centralized throttled foreground-recovery path')
 assert.doesNotMatch(webApi, /if \(typeof window !== 'undefined'\) \{[\s\S]{0,500}window\.addEventListener\('online'/, 'signed-out startup should not register session recovery listeners at module load')
 assert.match(webApi, /const previousSyncServerUrl = getSyncServerUrl\(\)[\s\S]*const syncServerChanged = previousSyncServerUrl !== clean[\s\S]*scheduleBootstrapOfflineDbWrite\(\(db\) => db\.settings\.put\(\{ key: 'sync_server_url', value: clean \}\)\)[\s\S]*cacheClearAll\(\)[\s\S]*if \(hasStoredUserSession\(\)\) \{[\s\S]*ensureSessionRecoveryListeners\(\)[\s\S]*scheduleConnectWS\(\)[\s\S]*startHealthCheck\(\)/, 'setSyncServerUrl should avoid duplicate cache clears and start recovery loops only for stored sessions while deferring the first websocket connect')
 assert.doesNotMatch(webApi, /setSyncServerUrl\(url: unknown\)[\s\S]{0,900}getOfflineDb\(\)\.then/, 'setSyncServerUrl should not load IndexedDB during startup')
@@ -1156,7 +1156,7 @@ for (const [name, source] of [
 
 assert.match(
   backgroundImportTracker,
-  /const api = getImportTrackerApi\(\)[\s\S]*withLoaderTimeout\(\s*\(\) => api\.listImportJobs\?\.\(\{ limit: 8 \}\),\s*'Import tracker',\s*IMPORT_TRACKER_LOAD_TIMEOUT_MS,\s*\)/,
+  /const api = getImportTrackerApi\(\)[\s\S]*withLoaderTimeout\(\s*\(\) => api\.listImportJobs\?\.\(\{ limit: IMPORT_JOBS_SHARED_LIMIT \}, \{ fresh \}\),\s*'Import tracker',\s*IMPORT_TRACKER_LOAD_TIMEOUT_MS,\s*\)/,
   'background import tracker should timeout slow poll reads',
 )
 assert.doesNotMatch(catalogPage, /from '..\/..\/lang\/(?:en|km)\.json'/, 'Catalog route should not import full app language JSON packs')
@@ -1254,25 +1254,19 @@ assert.match(
   /const ACTION_HISTORY_USERS_TIMEOUT_MS = 8000/,
   'action history should use an explicit admin user-options timeout',
 )
+// G39 item 7: no passive action-history reads at all. The recorded list and
+// the admin user filter load when the History control is hovered, focused or
+// opened (actionHistoryLazyLoad.test.ts counts the requests).
+assert.doesNotMatch(actionHistory, /scheduleActionHistoryRead|ACTION_HISTORY_INITIAL_READ_DELAY_MS/, 'action history must not read on page activation')
 assert.match(
   actionHistory,
-  /const ACTION_HISTORY_INITIAL_READ_DELAY_MS = 2500/,
-  'passive action-history reads should wait until after primary route paint',
+  /if \(!enabled \|\| !serverItemsRequested \|\| actorScopeRef\.current !== actorScope/,
+  'server history reads wait for the history UI to ask',
 )
 assert.match(
   actionHistory,
-  /requestIdleCallback\(task,\s*\{\s*timeout:\s*ACTION_HISTORY_IDLE_TIMEOUT_MS\s*\}/,
-  'passive action-history reads should use idle scheduling instead of competing with first paint',
-)
-assert.match(
-  actionHistory,
-  /scheduleActionHistoryRead\(\(\) => \{[\s\S]*refreshServerItems\(\)/,
-  'initial server history refresh should use the post-paint scheduler',
-)
-assert.match(
-  actionHistory,
-  /scheduleActionHistoryRead\(\(\) => \{[\s\S]*getActionHistoryUsers/,
-  'initial action-history user lookup should use the post-paint scheduler',
+  /if \(!enabled \|\| !serverItemsRequested\) return\s+if \(!isAdmin\) return[\s\S]*getActionHistoryUsers/,
+  'the admin user lookup waits for the history UI to ask',
 )
 assert.match(
   actionHistory,

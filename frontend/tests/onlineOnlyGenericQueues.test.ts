@@ -30,10 +30,10 @@ const dependencies = {
   // update; what they still do is resume the socket and ping health. The
   // reconnect -> app-shell update check this test used to count moved to
   // index.tsx's watchForNewAppShell (singleAppUpdateChecker.test.ts runs it).
-  resumeWS: () => { reads++ }, startHealthCheck() {}, pingServerHealth: async () => ({}), dispatchSyncUpdates() {},
+  resumeWS: () => { reads++ }, isWSConnected: () => true, FOREGROUND_RESUME_REASON: 'foreground-resume', FOREGROUND_RESUME_GAP_REASON: 'foreground-resume-gap', startHealthCheck() {}, pingServerHealth: async () => ({}), dispatchSyncUpdates() {},
   FOREGROUND_RECOVERY_THROTTLE_MS: 0, FOREGROUND_REFRESH_AFTER_MS: 45000, FOREGROUND_RESUME_SYNC_UPDATE_CHANNELS: [],
 }
-const compiled = ts.transpileModule(`let sessionRecoveryListenersRegistered = false, lastForegroundRecoveryAt = 0, deferredForegroundRecoveryTimer = 0, backgroundedAt = 0;\n${functions}\nreturn { ensureSessionRecoveryListeners };`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
+const compiled = ts.transpileModule(`let sessionRecoveryListenersRegistered = false, lastForegroundRecoveryAt = 0, deferredForegroundRecoveryTimer = 0, backgroundedAt = 0, syncSocketDroppedAt = 0;\n${functions}\nreturn { ensureSessionRecoveryListeners };`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
 const runtime = new Function(...Object.keys(dependencies), compiled)(...Object.values(dependencies))
 actor = 'A'
 runtime.ensureSessionRecoveryListeners()
