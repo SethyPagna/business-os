@@ -301,7 +301,7 @@ export function buildContactMergePlan(input: ContactMergeInput): ContactMergePla
       if (!keeperOnly) {
         statements.push(
           { sql: 'UPDATE loyalty_point_adjustments SET customer_id = @keepId WHERE customer_id = @mergeId', params: { keepId, mergeId } },
-          { sql: 'UPDATE portal_accounts SET contact_id = @keepId, updated_at = CURRENT_TIMESTAMP WHERE contact_id = @mergeId', params: { keepId, mergeId } },
+          { sql: 'UPDATE portal_accounts SET contact_id = @keepId, link_version = link_version + 1, updated_at = CURRENT_TIMESTAMP WHERE contact_id = @mergeId', params: { keepId, mergeId } },
         )
       }
       if (input.hasCustomerReceivables) {
@@ -337,6 +337,34 @@ export function buildContactMergePlan(input: ContactMergeInput): ContactMergePla
     ...members.flatMap((member) => repoint(Number(member.id), String(member.name || ''), false)),
   ]
 
+  // G38: every change to a member's link appends to portal_member_link_events
+  // in this same batch (design §4.5), so a merge never leaves a member moved
+  // or orphaned without a record. Each event row is written BEFORE its UPDATE
+  // so it can read the account's current customer; link_version moves with
+  // it, which makes any earlier staff link event stale for Revert. An
+  // unlinked member also loses every session (design S6).
+  const linkEvent = (action: 'merge_unlink' | 'merge_repoint', accountIds: number[], prefix: string): ContactMergeStatement => {
+    const params: Record<string, unknown> = {
+      groupId: audit.operationId,
+      actorId: audit.userId,
+      actorName: audit.userName,
+      ...(action === 'merge_repoint' ? { keepId } : {}),
+    }
+    const ids = accountIds.map((id, index) => {
+      params[`${prefix}${index}`] = id
+      return `@${prefix}${index}`
+    }).join(', ')
+    return {
+      sql: `INSERT INTO portal_member_link_events (
+          account_id, action, from_customer_id, to_customer_id, evidence, reason_code,
+          group_id, link_version_after, actor_user_id, actor_name
+        )
+        SELECT id, '${action}', contact_id, ${action === 'merge_repoint' ? '@keepId' : 'NULL'}, 'system', 'contact_merge',
+          @groupId, link_version + 1, @actorId, @actorName
+        FROM portal_accounts WHERE id IN (${ids}) ORDER BY id`,
+      params,
+    }
+  }
   const unlink: ContactMergeStatement[] = []
   if (unlinkedPortalAccountIds.length) {
     const params: Record<string, unknown> = {}
@@ -344,8 +372,19 @@ export function buildContactMergePlan(input: ContactMergeInput): ContactMergePla
       params[`u${index}`] = id
       return `@u${index}`
     }).join(', ')
-    unlink.push({ sql: `UPDATE portal_accounts SET contact_id = NULL, updated_at = CURRENT_TIMESTAMP WHERE id IN (${ids})`, params })
+    unlink.push(
+      linkEvent('merge_unlink', unlinkedPortalAccountIds, 'ue'),
+      { sql: `UPDATE portal_accounts SET contact_id = NULL, link_version = link_version + 1, updated_at = CURRENT_TIMESTAMP WHERE id IN (${ids})`, params },
+      { sql: `UPDATE portal_sessions SET revoked_at = CURRENT_TIMESTAMP WHERE account_id IN (${ids}) AND revoked_at IS NULL`, params },
+    )
   }
+  // Members that follow their customer onto the kept record.
+  const repointedPortalAccountIds = accounts
+    .filter((account) => !unlinkedPortalAccountIds.includes(Number(account.id)) && mergedIds.includes(Number(account.contact_id)))
+    .map((account) => Number(account.id))
+  const repointEvents: ContactMergeStatement[] = repointedPortalAccountIds.length
+    ? [linkEvent('merge_repoint', repointedPortalAccountIds, 're')]
+    : []
 
   const keeperUpdate: ContactMergeStatement[] = []
   const backfilled = Object.keys(backfill)
@@ -434,6 +473,7 @@ export function buildContactMergePlan(input: ContactMergeInput): ContactMergePla
     ...(table === 'customers' ? [portalSnapshotGuard(recordIds, accounts)] : []),
     auditInsert,
     ...unlink,
+    ...repointEvents,
     ...moves,
     ...mergedIds.map((id) => ({ sql: `DELETE FROM ${table} WHERE id = @id`, params: { id } })),
     ...keeperUpdate,

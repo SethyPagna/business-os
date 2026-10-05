@@ -36,7 +36,9 @@ const CUSTOMER_REPOINTS = [
   `UPDATE returns SET customer_id = @keepId, customer_name = @keeperName WHERE customer_id = @mergeId`,
   `UPDATE customer_share_submissions SET customer_id = @keepId, customer_name = @keeperName WHERE customer_id = @mergeId`,
   `UPDATE loyalty_point_adjustments SET customer_id = @keepId WHERE customer_id = @mergeId`,
-  `UPDATE portal_accounts SET contact_id = @keepId, updated_at = CURRENT_TIMESTAMP WHERE contact_id = @mergeId`,
+  // G38: a merge that moves a website member also moves its link_version, so a
+  // staff Revert of an earlier link goes stale (lib/portalMemberLinks.ts).
+  `UPDATE portal_accounts SET contact_id = @keepId, link_version = link_version + 1, updated_at = CURRENT_TIMESTAMP WHERE contact_id = @mergeId`,
   `UPDATE customer_receivables SET customer_id = @keepId, customer_name = @keeperName WHERE customer_id = @mergeId`,
   `UPDATE customer_receivables SET customer_name = @keeperName WHERE customer_id IS NULL AND lower(trim(customer_name)) = @mergedNameLower`,
 ]
