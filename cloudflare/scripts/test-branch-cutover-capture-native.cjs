@@ -1,5 +1,5 @@
 const assert = require('node:assert/strict')
-const { world, begin, step } = require('./test-branch-cutover-parent-native.cjs')
+const { world, begin, step, installLossyCaptureCost } = require('./test-branch-cutover-parent-native.cjs')
 const hash = value => require('node:crypto').createHash('sha256').update(JSON.stringify(value)).digest('hex')
 async function until(w, row, phase, size = 8) {
   for (let turns = 0; row.phase !== phase && turns < 150; turns++) row = (await step(w, row, size)).row
@@ -59,14 +59,18 @@ async function main() {
     for (const value of [3.5702545241480925e141, -3.5702545241480925e141]) {
       const w = world(); stock(w)
       w.raw.prepare('UPDATE product_batches SET unit_cost_usd=? WHERE id=101').run(value)
-      const native = w.raw.prepare("SELECT unit_cost_usd raw,printf('%!.17g',unit_cost_usd) encoded FROM product_batches WHERE id=101").get()
-      assert.equal(native.raw, value); assert.notEqual(Number(native.encoded), native.raw)
-      const schema = await w.capture.readCutoverCaptureSchema(w.db)
-      const tables = [...new Set([...w.capture.BRANCH_SCALAR_REFERENCES.map(v => v[0]), 'products', ...w.capture.UNCLASSIFIED_JSON_FAMILIES])].sort().filter(t => t !== 'branch_cutovers' && !w.capture.UNCLASSIFIED_JSON_FAMILIES.includes(t))
-      const cursor = { ...w.capture.initialCaptureCursor(), index: tables.indexOf('product_batches') }, batches = w.stats.batches
-      await assert.rejects(w.capture.readCutoverCapturePage(w.db, schema, { sourceBranchId: 2, targetBranchId: 1 }, cursor, '0'.repeat(64), 1, { 1: 'Warehouse', 2: 'Shop' }, false), e => e.code === 'branch_cutover_parent_capability')
-      assert.equal(w.stats.batches, batches)
-      assert.equal(w.raw.prepare('SELECT unit_cost_usd FROM product_batches WHERE id=101').get().unit_cost_usd, value)
+      const prepare = w.db.prepare, lossy = installLossyCaptureCost(w)
+      try {
+        const { native } = lossy
+        assert.equal(native.raw, value); assert.notEqual(Number(native.encoded), native.raw)
+        const schema = await w.capture.readCutoverCaptureSchema(w.db)
+        const tables = [...new Set([...w.capture.BRANCH_SCALAR_REFERENCES.map(v => v[0]), 'products', ...w.capture.UNCLASSIFIED_JSON_FAMILIES])].sort().filter(t => t !== 'branch_cutovers' && !w.capture.UNCLASSIFIED_JSON_FAMILIES.includes(t))
+        const cursor = { ...w.capture.initialCaptureCursor(), index: tables.indexOf('product_batches') }, batches = w.stats.batches
+        await assert.rejects(w.capture.readCutoverCapturePage(w.db, schema, { sourceBranchId: 2, targetBranchId: 1 }, cursor, '0'.repeat(64), 1, { 1: 'Warehouse', 2: 'Shop' }, false), e => e.code === 'branch_cutover_parent_capability')
+        assert.equal(lossy.calls(), 1)
+        assert.equal(w.stats.batches, batches)
+        assert.equal(w.raw.prepare('SELECT unit_cost_usd FROM product_batches WHERE id=101').get().unit_cost_usd, value)
+      } finally { lossy.restore(); assert.equal(w.db.prepare, prepare) }
       w.raw.close()
     }
   })
