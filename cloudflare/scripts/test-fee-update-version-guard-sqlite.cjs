@@ -305,6 +305,39 @@ async function main() {
     assert.equal(broadcasts.length, 0)
   })
 
+  // The legacy row (updated_at NULL, edited by stating null) has no stamp for the predicate to
+  // compare against, so `updated_at IS NULL` is the whole guard. Pin that it still lets exactly
+  // one of two edits through.
+  const legacyRow = () => sqlite.exec(`DROP TABLE fees; CREATE TABLE fees (id INTEGER PRIMARY KEY, fee_type TEXT NOT NULL, label TEXT, amount_usd REAL NOT NULL, amount_khr REAL NOT NULL, fee_date TEXT NOT NULL, sale_id INTEGER, branch_id INTEGER, delivery_contact_id INTEGER, notes TEXT, created_by INTEGER, created_by_name TEXT, created_at TEXT NOT NULL, updated_at TEXT);
+    INSERT INTO fees (id, fee_type, label, amount_usd, amount_khr, fee_date, branch_id, created_at, updated_at) VALUES (1, 'expense', 'legacy', 10, 0, '2026-09-08', 2, '2026-09-01T00:00:00.000Z', NULL);`)
+
+  await check('N13: two concurrent edits of a NULL-version legacy row -- exactly one wins, the other is refused', async () => {
+    legacyRow()
+    const [a, b] = await Promise.all([
+      update({ label: 'edit A', expectedUpdatedAt: null }),
+      update({ label: 'edit B', expectedUpdatedAt: null }),
+    ])
+    const statuses = [a.status, b.status].sort()
+    assert.deepEqual(statuses, [200, 409], JSON.stringify([a.body, b.body]))
+    const loser = a.status === 409 ? a : b
+    assert.equal(loser.body.code, 'write_conflict')
+    assert.equal(row().label, a.status === 200 ? 'edit A' : 'edit B', 'the winner\'s edit is what is stored')
+    assert.ok(row().updated_at, 'the winning edit stamped a version')
+    assert.equal(audits.length, 1, 'one audit row, for the winner only')
+    assert.equal(broadcasts.length, 1)
+  })
+
+  await check('N13: a NULL-version legacy row stamped by a competing writer after the pre-read refuses the late edit with no side effects', async () => {
+    legacyRow()
+    beforeFeeUpdate = (db) => db.prepare("UPDATE fees SET label = 'concurrent winner', updated_at = '2026-09-08T00:00:01.000Z' WHERE id = 1").run()
+    const result = await update({ label: 'late edit', expectedUpdatedAt: null })
+    assert.equal(result.status, 409, JSON.stringify(result.body))
+    assert.equal(result.body.code, 'write_conflict')
+    assert.equal(row().label, 'concurrent winner')
+    assert.equal(audits.length, 0)
+    assert.equal(broadcasts.length, 0)
+  })
+
   console.log(`\n${passed} fee update version-guard checks passed.`)
 }
 
