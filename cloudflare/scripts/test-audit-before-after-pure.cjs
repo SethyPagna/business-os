@@ -431,8 +431,14 @@ async function promotionsRoute() {
     '../index': {},
   }).default
   const ctx = { waitUntil: (p) => p, passThroughOnException() {} }
+  // N13: promotions writes carry a request id and the version they read.
+  let requestSeq = 0
+  const identity = () => ({
+    client_request_id: 'audit_probe_' + (++requestSeq) + '_abcdefgh',
+    expected_updated_at: (db.prepare('SELECT updated_at FROM promotion_rules WHERE id = 1').get() || {}).updated_at,
+  })
   const put = (body) => route.request('/rules/1', {
-    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(Object.assign(identity(), body)),
   }, {}, ctx)
 
   const base = { title: 'Buy 3 save $1', show_title: 1, rule_type: 'quantity_save', min_quantity: 3, save_usd: 1, save_khr: 0, scope_type: 'category', category: 'Drinks', badge_color: '#e11d48', is_active: 1 }
@@ -457,7 +463,7 @@ async function promotionsRoute() {
     assert.ok(!('updated_at' in before), 'the row describes the edit, not its own timestamp')
   })
 
-  response = await route.request('/rules/1', { method: 'DELETE' }, {}, ctx)
+  response = await route.request('/rules/1', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(identity()) }, {}, ctx)
   assert.equal(response.status, 200, await response.text())
   rows = auditRowsFor(db, 'promotion_rule')
   check('promotions DELETE: the removed rule is preserved as the before image', () => {
@@ -486,8 +492,10 @@ check('every route in scope still threads a before/after into its audit write', 
     ['routes/users.ts', /roleChangeColumns = auditChangeColumns\(changedFields\(/, 'role edit (in its own batch)'],
     ['routes/products.ts', /'update', 'product', id, null, productFieldChange/, 'product plain field edit'],
     ['routes/contacts.ts', /changedFields\(current, payload, \{ keys: contactDiffKeys \}\)/, 'contact edit'],
-    ['routes/promotions.ts', /'update', 'promotion_rule', id,[\s\S]{0,200}?changedFields\(/, 'promotion rule edit'],
-    ['routes/promotions.ts', /'update', 'promotion', id, \{ title: input\.title \},[\s\S]{0,40}?changedFields\(/, 'announcement edit'],
+    // N13: promotions writes commit their audit row (the idempotency receipt) in the same batch,
+    // through receiptAuditStatement, whose `change` is the changedFields() before/after diff.
+    ['routes/promotions.ts', /action: 'update', entity: 'promotion_rule'[\s\S]{0,1800}?const change = changedFields\(current, input as Record<string, unknown>[\s\S]{0,1800}?receiptAuditStatement\(\{[\s\S]{0,200}?canonical: receipt\.canonical, change,/, 'promotion rule edit'],
+    ['routes/promotions.ts', /action: 'update', entity: 'promotion', requestId[\s\S]{0,1800}?const change = changedFields\(current, input as Record<string, unknown>[\s\S]{0,1800}?receiptAuditStatement\(\{[\s\S]{0,200}?canonical: receipt\.canonical, change,/, 'announcement edit'],
     ['routes/settings.ts', /paymentMethodChange = auditChangeColumns\(changedFields\(/, 'payment-method rename'],
     ['routes/settings.ts', /'update', 'settings', null, \{ keys: changedKeys \},[\s\S]{0,200}?changedFields\(/, 'settings save'],
     ['routes/fees.ts', /'update', 'fee', id, \{[\s\S]{0,200}?\}, changedFields\(/, 'expense edit'],

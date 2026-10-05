@@ -96,7 +96,7 @@ assert.equal(ids(cards), '1,2,3,4', 'moveCard never mutates the list on screen')
 //    to move the card to the front and a new card landed among the first.
 const handleSave = declaration('handleSave')
 assert.match(handleSave, /await createPromotion\(\{ \.\.\.payload, sort_order: endOfStrip\(promotions\) \}\)/, 'a new card is created at the end of the strip')
-assert.match(handleSave, /const place = promotions\.find\(\(p\) => p\.id === editingId\)\?\.sort_order \?\? 0\s*\n\s*await updatePromotion\(editingId, \{ \.\.\.payload, sort_order: place \}\)/, 'an edit sends the card its own place back')
+assert.match(handleSave, /const editing = promotions\.find\(\(p\) => p\.id === editingId\)\s*\r?\n\s*const place = editing\?\.sort_order \?\? 0\s*\r?\n\s*await updatePromotion\(editingId, \{ \.\.\.payload, sort_order: place \}, editing\?\.updated_at \?\? null\)/, 'an edit sends the card its own place back, and the version it read (N13)')
 assert.match(declaration('handleToggleActive'), /updatePromotion\(promo\.id, \{ \.\.\.promo, /, 'Active/Hidden sends the whole stored card, place included')
 assert.equal((source.match(/\b(?:createPromotion|updatePromotion)\(/g) || []).length, 3, 'no other write path sends a card without its place')
 

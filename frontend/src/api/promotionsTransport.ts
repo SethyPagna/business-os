@@ -1,4 +1,5 @@
 import { apiFetch } from './http.ts'
+import { ensureClientRequestId } from './requestIds.ts'
 import type { PromotionRule } from '../utils/promotionRules.ts'
 
 export type Promotion = {
@@ -23,20 +24,26 @@ export function getPromotions(): Promise<Promotion[]> {
   return apiFetch('GET', '/api/promotions')
 }
 
+// N13: every promotions write carries a client_request_id (minted here once per call,
+// so the transport's own retries reuse it) and every edit/delete of one row states the
+// updated_at it read (`expectedUpdatedAt`, mandatory in the type; null only for a row
+// that has none). The Worker refuses a write without them: a double POST used to
+// create the card twice and a stale form used to overwrite a newer edit.
 export function createPromotion(payload: Partial<Promotion>): Promise<Promotion> {
-  return apiFetch('POST', '/api/promotions', payload)
+  return apiFetch('POST', '/api/promotions', ensureClientRequestId(payload, 'promo'))
 }
 
-export function updatePromotion(id: number | string, payload: Partial<Promotion>): Promise<Promotion> {
-  return apiFetch('PUT', `/api/promotions/${id}`, payload)
+export function updatePromotion(id: number | string, payload: Partial<Promotion>, expectedUpdatedAt: string | null): Promise<Promotion> {
+  return apiFetch('PUT', `/api/promotions/${id}`, ensureClientRequestId({ ...payload, expected_updated_at: expectedUpdatedAt ?? null }, 'promo'))
 }
 
-export function deletePromotion(id: number | string): Promise<{ deleted: boolean }> {
-  return apiFetch('DELETE', `/api/promotions/${id}`)
+export function deletePromotion(id: number | string, expectedUpdatedAt: string | null): Promise<{ deleted: boolean }> {
+  return apiFetch('DELETE', `/api/promotions/${id}`, ensureClientRequestId({ expected_updated_at: expectedUpdatedAt ?? null }, 'promo'))
 }
 
+// A reorder states an absolute order for the whole list, so it carries a receipt but no row version.
 export function reorderPromotions(order: Array<number | string>): Promise<Promotion[]> {
-  return apiFetch('PUT', '/api/promotions/reorder/all', { order })
+  return apiFetch('PUT', '/api/promotions/reorder/all', ensureClientRequestId({ order }, 'promo'))
 }
 
 // ---------------------------------------------------------------------------
@@ -79,13 +86,13 @@ export function getActivePromotionRules(): Promise<{ rules: PromotionRule[]; now
 }
 
 export function createPromotionRule(payload: PromotionRuleWrite): Promise<Record<string, unknown>> {
-  return apiFetch('POST', '/api/promotions/rules', payload)
+  return apiFetch('POST', '/api/promotions/rules', ensureClientRequestId(payload, 'promorule'))
 }
 
-export function updatePromotionRule(id: number | string, payload: PromotionRuleWrite): Promise<Record<string, unknown>> {
-  return apiFetch('PUT', `/api/promotions/rules/${id}`, payload)
+export function updatePromotionRule(id: number | string, payload: PromotionRuleWrite, expectedUpdatedAt: string | null): Promise<Record<string, unknown>> {
+  return apiFetch('PUT', `/api/promotions/rules/${id}`, ensureClientRequestId({ ...payload, expected_updated_at: expectedUpdatedAt ?? null }, 'promorule'))
 }
 
-export function deletePromotionRule(id: number | string): Promise<{ deleted: boolean }> {
-  return apiFetch('DELETE', `/api/promotions/rules/${id}`)
+export function deletePromotionRule(id: number | string, expectedUpdatedAt: string | null): Promise<{ deleted: boolean }> {
+  return apiFetch('DELETE', `/api/promotions/rules/${id}`, ensureClientRequestId({ expected_updated_at: expectedUpdatedAt ?? null }, 'promorule'))
 }

@@ -238,8 +238,9 @@ export default function ManagePromotionsModal({ onClose, productOptions = [] }: 
         await createPromotion({ ...payload, sort_order: endOfStrip(promotions) })
         notify(copy('promotionCreated', 'Promotion created'), 'success')
       } else if (editingId != null) {
-        const place = promotions.find((p) => p.id === editingId)?.sort_order ?? 0
-        await updatePromotion(editingId, { ...payload, sort_order: place })
+        const editing = promotions.find((p) => p.id === editingId)
+        const place = editing?.sort_order ?? 0
+        await updatePromotion(editingId, { ...payload, sort_order: place }, editing?.updated_at ?? null)
         notify(copy('promotionUpdated', 'Promotion updated'), 'success')
       }
       cancelEdit()
@@ -275,7 +276,7 @@ export default function ManagePromotionsModal({ onClose, productOptions = [] }: 
     if (!promo || deleting) return
     setDeleting(true)
     try {
-      await deletePromotion(promo.id)
+      await deletePromotion(promo.id, promo.updated_at ?? null)
       notify(copy('promotionDeleted', 'Promotion deleted'), 'success')
       if (aliveRef.current) setPendingDelete(null)
       await loadPromotions()
@@ -288,7 +289,7 @@ export default function ManagePromotionsModal({ onClose, productOptions = [] }: 
 
   const handleToggleActive = async (promo: Promotion) => {
     try {
-      await updatePromotion(promo.id, { ...promo, is_active: promo.is_active ? 0 : 1 })
+      await updatePromotion(promo.id, { ...promo, is_active: promo.is_active ? 0 : 1 }, promo.updated_at ?? null)
       await loadPromotions()
     } catch (error) {
       notify(getErrorMessage(error, copy('updatePromotionFailed', 'Failed to update promotion')), 'error')

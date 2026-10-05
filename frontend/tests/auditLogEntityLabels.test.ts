@@ -104,6 +104,9 @@ const BEFORE_AFTER: Array<{
   { entity: 'user', writtenBy: 'users.ts', before: { is_active: 1 }, after: { is_active: 0 }, expects: en.active },
   { entity: 'role', writtenBy: 'users.ts', before: { name: 'Cashier' }, after: { name: 'Senior cashier' }, expects: en.name },
   { entity: 'promotion_rule', writtenBy: 'promotions.ts', before: { title: 'Songkran' }, after: { title: 'Songkran 2026' }, expects: en.title },
+  // N13: promotions writes commit their audit row (the idempotency receipt) through lib/auditWriteReceipt.ts, which owns the before/after columns.
+  { entity: 'promotion_rule', writtenBy: 'auditWriteReceipt.ts', dir: 'lib', before: { title: 'Songkran' }, after: { title: 'Songkran 2026' }, expects: en.title },
+  { entity: 'promotion', writtenBy: 'auditWriteReceipt.ts', dir: 'lib', before: { title: 'Songkran' }, after: { title: 'Songkran 2026' }, expects: en.title },
   { entity: 'settings', writtenBy: 'settings.ts', before: { exchange_rate: 4000 }, after: { exchange_rate: 4100 }, expects: en.exchange_rate },
   // A topic id set by /settopic, from nothing (General) to topic 12. The words
   // are the Settings screen's own, heading first: "Shift reports" alone would
