@@ -90,7 +90,8 @@ await runTest('field changes send only live sales; Status stays offered to un-ca
 
 await runTest('a cancelled refusal is a known outcome: retry dropped, list reloaded, message translated', () => {
   assert.match(salesPage, /const saleCancelledRefusal = \(error: unknown\) => \(error as \{ code\?: string \} \| null\)\?\.code === 'cancelled_sale_read_only'/)
-  assert.match(salesPage, /const cancelled = saleCancelledRefusal\(error\)\n\s+if \(cancelled\) \{\n\s+savePendingBulkFieldRequest\(null\)\n\s+void loadSales\(true\)\n\s+\}/)
+  // A cancelled refusal releases on its own, retry or not; a refused first send joins it.
+  assert.match(salesPage, /const cancelled = saleCancelledRefusal\(error\)\r?\n\s+if \(cancelled \|\| \(!retryRequest && directMutationRefusedBeforeWrite\(error\)\)\) \{\r?\n\s+savePendingBulkFieldRequest\(null\)\r?\n\s+setBulkChangePrompt\(null\)\r?\n\s+void loadSales\(true\)\r?\n\s+\}/)
   assert.match(salesPage, /notify\(cancelled \? cancelledRefusalMessage\(\) : getErrorMessage\(/)
   // The single-sale customer path (same endpoint) reads the refusal the same way.
   assert.match(salesPage, /: saleCancelledRefusal\(error\) \? cancelledRefusalMessage\(\) : getErrorMessage\(/)
