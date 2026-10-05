@@ -10,11 +10,13 @@ function loadBranchModule(): Promise<BranchModule> {
 import Pencil from 'lucide-react/dist/esm/icons/pencil.js'
 import Plus from 'lucide-react/dist/esm/icons/plus.js'
 import Receipt from 'lucide-react/dist/esm/icons/receipt.js'
+import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw.js'
 import History from 'lucide-react/dist/esm/icons/history.js'
 import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
 import Tags from 'lucide-react/dist/esm/icons/tags.js'
 import { useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.tsx'
 import Modal from '../shared/Modal'
+import { DetailRow, DetailRowGroup } from '../shared/DetailRows.tsx'
 import { useConfirmDialog } from '../shared/useConfirmDialog.tsx'
 import MinimizeButton from '../shared/MinimizeButton.tsx'
 import SearchInput from '../shared/SearchInput'
@@ -700,15 +702,18 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
         actions={canAddFee ? (
           // Fit-to-content, not the wide toolbar-width button ("the add
           // button for fees are too wide, can make fit") — and it shares
-          // the range row to save a row.
+          // the range row to save a row. The icon alone below sm; from sm up
+          // it is the screen's one main action, so it names itself like the
+          // Returns Add does.
           <button
             type="button"
-            className="inline-flex h-10 min-h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-blue-600 bg-blue-600 text-white hover:border-blue-700 hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-blue-500 dark:bg-blue-600 dark:text-white dark:hover:bg-blue-500"
+            className="inline-flex h-10 min-h-10 w-10 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-blue-600 bg-blue-600 text-white hover:border-blue-700 hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:border-blue-500 dark:bg-blue-600 dark:text-white dark:hover:bg-blue-500 sm:w-auto sm:px-3 sm:text-sm sm:font-semibold"
             onClick={openAdd}
             aria-label={tr('add_fee', 'Add Expense')}
             title={tr('add_fee', 'Add Expense')}
           >
-            <Plus className="h-5 w-5" />
+            <Plus className="h-5 w-5 sm:h-4 sm:w-4" />
+            <span className="hidden sm:inline">{tr('add', 'Add')}</span>
           </button>
         ) : null}
         range={stripRange}
@@ -787,8 +792,8 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
       {loadError ? (
         <div className="mb-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
           {loadError}
-          <button type="button" className="ml-2 font-medium underline" onClick={() => load()}>
-            {tr('try_again', 'Try again')}
+          <button type="button" className="ml-2 inline-flex h-8 w-8 items-center justify-center rounded-full align-middle hover:bg-red-100 dark:hover:bg-red-900/40" onClick={() => load()} aria-label={tr('try_again', 'Try again')} title={tr('try_again', 'Try again')}>
+            <RefreshCw className="h-4 w-4" aria-hidden="true" />
           </button>
         </div>
       ) : null}
@@ -803,14 +808,6 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
         <div className="flex flex-col items-center gap-2 py-16 text-center text-sm text-slate-400">
           <Receipt className="h-8 w-8 text-slate-300" />
           <span>{tr('no_fees', 'No expenses recorded yet.')}</span>
-          {canAddFee ? <button
-            type="button"
-            onClick={openAdd}
-            className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-100 dark:bg-blue-950 dark:text-blue-300"
-          >
-            <Plus className="h-3.5 w-3.5" />
-            {tr('add_fee', 'Add Expense')}
-          </button> : null}
         </div>
       ) : (
         <>
@@ -947,26 +944,18 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
               </div>
             </div>
 
-            <dl className="grid grid-cols-[minmax(0,7rem)_minmax(0,1fr)] gap-x-3 gap-y-2 text-sm">
-              <dt className="text-slate-500 dark:text-slate-400">{tr('cashier', 'Cashier')}</dt>
-              <dd className="min-w-0 break-words text-slate-800 dark:text-slate-100">{selected.created_by_name || '—'}</dd>
-              <dt className="text-slate-500 dark:text-slate-400">{tr('branch', 'Branch')}</dt>
-              <dd className="min-w-0 break-words text-slate-800 dark:text-slate-100">{selected.branch_name || '—'}</dd>
-              <dt className="text-slate-500 dark:text-slate-400">{tr('receipt', 'Receipt')}</dt>
-              <dd className="min-w-0 break-all font-mono text-slate-800 dark:text-slate-100">
-                {expenseSaleLabel(selected.sale_receipt_number, selected.sale_id, tr('sale', 'Sale')) || '—'}
-              </dd>
-              <dt className="text-slate-500 dark:text-slate-400">{tr('delivery', 'Delivery')}</dt>
-              <dd className="min-w-0 break-words text-slate-800 dark:text-slate-100">{selected.delivery_contact_name || '—'}</dd>
-              <dt className="text-slate-500 dark:text-slate-400">{tr('notes', 'Notes')}</dt>
-              <dd className="min-w-0 whitespace-pre-wrap break-words text-slate-800 dark:text-slate-100">{selected.notes || '—'}</dd>
-            </dl>
+            <DetailRowGroup>
+              <DetailRow label={tr('cashier', 'Cashier')} value={selected.created_by_name} />
+              <DetailRow label={tr('branch', 'Branch')} value={selected.branch_name} />
+              <DetailRow label={tr('receipt', 'Receipt')} mono valueClassName="break-all" value={expenseSaleLabel(selected.sale_receipt_number, selected.sale_id, tr('sale', 'Sale'))} />
+              <DetailRow label={tr('delivery', 'Delivery')} value={selected.delivery_contact_name} />
+              <DetailRow label={tr('notes', 'Notes')} valueClassName="whitespace-pre-wrap" value={selected.notes} />
+            </DetailRowGroup>
 
             <div data-expense-detail-actions="" className="flex items-stretch justify-end gap-2 border-t border-slate-200 pt-3 dark:border-slate-700">
               {canEditFee ? (
-                <button type="button" onClick={() => openEdit(selected)} disabled={deletingId === selected.id} className="btn-secondary inline-flex min-h-10 items-center justify-center gap-1.5 px-3 disabled:cursor-not-allowed disabled:opacity-50">
-                  <Pencil className="h-4 w-4" />
-                  <span>{tr('edit', 'Edit')}</span>
+                <button type="button" onClick={() => openEdit(selected)} disabled={deletingId === selected.id} className="btn-secondary inline-flex h-10 min-h-10 w-10 items-center justify-center px-0 disabled:cursor-not-allowed disabled:opacity-50" aria-label={tr('edit', 'Edit')} title={tr('edit', 'Edit')}>
+                  <Pencil className="h-4 w-4" aria-hidden="true" />
                 </button>
               ) : null}
               {canDeleteFee ? (
@@ -974,12 +963,11 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
                   type="button"
                   onClick={() => { void handleDelete(selected).then((accepted) => { if (accepted) closeModal() }) }}
                   disabled={deletingId === selected.id}
-                  className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-lg border border-red-200 px-3 text-sm font-medium text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-900 dark:text-red-300 dark:hover:bg-red-950/40"
+                  className="inline-flex h-10 min-h-10 w-10 items-center justify-center rounded-lg border border-red-200 text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-red-900 dark:text-red-300 dark:hover:bg-red-950/40"
                   aria-label={feesNeedsApproval ? tr('delete_needs_approval', 'Delete (needs approval)') : tr('delete', 'Delete')}
                   title={feesNeedsApproval ? tr('delete_needs_approval', 'Delete (needs approval)') : tr('delete', 'Delete')}
                 >
-                  <Trash2 className="h-4 w-4" />
-                  <span>{feesNeedsApproval ? tr('delete_needs_approval', 'Delete (needs approval)') : tr('delete', 'Delete')}</span>
+                  <Trash2 className="h-4 w-4" aria-hidden="true" />
                 </button>
               ) : null}
             </div>
