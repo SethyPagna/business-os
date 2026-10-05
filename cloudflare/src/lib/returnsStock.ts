@@ -173,6 +173,54 @@ export class ReturnLotRequiredError extends Error {
   }
 }
 
+// RET-A F11 (LH-11): a return against a sale never takes WHERE stock goes back
+// from the client. The sale line decides the product and the branch; a line
+// that is not on the sale, or names another product, is refused. A line named
+// only by product is pinned to that product's lines on the sale, and refused
+// when they sit in different branches (the operator must name the line).
+export type ReturnSaleLine = { id: number; product_id: number | null; branch_id: number | null }
+export type ReturnLinePinRefusal = {
+  code: 'return_line_not_on_sale' | 'return_line_product_mismatch' | 'return_sale_item_required'
+  error: string
+}
+export function pinReturnLineToSale<T extends { sale_item_id?: number | null; product_id?: number | null; branch_id?: number | null }>(
+  item: T,
+  lines: ReturnSaleLine[],
+  saleBranchId: number | null,
+): { ok: true; item: T } | ({ ok: false } & ReturnLinePinRefusal) {
+  const saleItemId = Number(item.sale_item_id) || 0
+  const productId = Number(item.product_id) || 0
+  if (saleItemId) {
+    const line = lines.find((row) => Number(row.id) === saleItemId)
+    if (!line) return { ok: false, code: 'return_line_not_on_sale', error: 'This item is not on the sale being returned.' }
+    if (productId && Number(line.product_id) !== productId) {
+      return { ok: false, code: 'return_line_product_mismatch', error: 'This return line names a different product than the sale line it returns.' }
+    }
+    return { ok: true, item: { ...item, sale_item_id: Number(line.id), product_id: line.product_id, branch_id: line.branch_id ?? saleBranchId } }
+  }
+  const candidates = lines.filter((row) => productId && Number(row.product_id) === productId)
+  if (!candidates.length) return { ok: false, code: 'return_line_not_on_sale', error: 'This item is not on the sale being returned.' }
+  const branches = new Set(candidates.map((row) => row.branch_id ?? saleBranchId))
+  if (branches.size > 1) {
+    return { ok: false, code: 'return_sale_item_required', error: 'This product was sold from more than one branch on this sale. Pick the exact sale item being returned.' }
+  }
+  return { ok: true, item: { ...item, branch_id: [...branches][0] ?? null } }
+}
+
+// RET-A F11: a lot the operator names is accepted only when the sale line drew
+// from it. A line with no recorded lot (an older sale) still takes any lot of
+// the product -- the existing same-product check covers that case.
+export function returnLotWasSold(operatorBatchId: number | null, drawnBatchIds: Array<number | null | undefined>): boolean {
+  if (operatorBatchId == null) return true
+  const drawn = drawnBatchIds.map((id) => Number(id)).filter((id) => id > 0)
+  return !drawn.length || drawn.includes(Number(operatorBatchId))
+}
+
+export const RETURN_LOT_NOT_SOLD = {
+  code: 'return_lot_not_sold',
+  error: 'This sale line was not sold from that received date. Units go back into the lot they were sold from.',
+} as const
+
 // Which lot(s) a returned line restocks into, decided BEFORE any write.
 //
 // An explicit operator pick is authoritative for the WHOLE line -- the person

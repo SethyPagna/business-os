@@ -19,6 +19,7 @@ import {
   reverseDamagedLots, planReplacementStock, listOpenDamagedLots,
   ConsumedDamagedStockError, DAMAGE_IN_MOVEMENT, DAMAGE_REVERSAL_MOVEMENT,
   REPLACEMENT_OUT_MOVEMENT, resolveDamagedReturnChoice, planDamagedReturnLine,
+  pinReturnLineToSale, returnLotWasSold, RETURN_LOT_NOT_SOLD,
 } from '../lib/returnsStock'
 import { uniqueBusinessDateTimeNumber } from '../lib/receiptNumber'
 import { computeSaleTotals } from '../lib/saleTotals'
@@ -1570,7 +1571,14 @@ app.post('/', async (c) => {
     soldLines = await db.prepare('SELECT id,product_id,product_name,quantity,branch_id,cost_price_usd,cost_price_khr,applied_price_usd,applied_price_khr FROM sale_items WHERE sale_id=? ORDER BY id')
       .all<typeof soldLines[number]>([requestedSaleId])
     const soldById = new Map(soldLines.map((line) => [Number(line.id), line]))
-    returnItems = body.items.map((item) => {
+    // RET-A F11: product and branch come from the sale line, never the body.
+    const pinnedItems: typeof body.items = []
+    for (const item of body.items) {
+      const pinned = pinReturnLineToSale(item, soldLines, saleMeta.branch_id)
+      if (!pinned.ok) return c.json({ error: pinned.error, code: pinned.code }, 400)
+      pinnedItems.push(pinned.item)
+    }
+    returnItems = pinnedItems.map((item) => {
       const sold = item.sale_item_id ? soldById.get(Number(item.sale_item_id)) : null
       return sold ? {
         ...item,
@@ -1739,10 +1747,16 @@ app.post('/', async (c) => {
       returnLotPlans.push({ splits: [], plainQuantity: 0 })
       continue
     }
+    const operatorBatchId = Number(item.batch_id) > 0 ? Number(item.batch_id) : null
+    // RET-A F11: a named lot must be one this sale line was sold from.
+    if (item.sale_item_id && !returnLotWasSold(operatorBatchId, [
+      ...(saleItemAllocations.get(Number(item.sale_item_id)) || []).map((row) => row.batch_id),
+      saleItemBatchInfo.get(Number(item.sale_item_id))?.batch_id,
+    ])) return c.json({ ...RETURN_LOT_NOT_SOLD, product_id: productId }, 400)
     const plan = planReturnLot({
       allocations: item.sale_item_id ? saleItemAllocations.get(Number(item.sale_item_id)) || [] : [],
       saleLineBatchId: item.sale_item_id ? saleItemBatchInfo.get(Number(item.sale_item_id))?.batch_id ?? null : null,
-      operatorBatchId: Number(item.batch_id) > 0 ? Number(item.batch_id) : null,
+      operatorBatchId,
       // Unattributed units receive their own dated return-event lot below.
       quantity, lotTracked: false,
     })
@@ -2880,6 +2894,19 @@ app.patch('/:id', async (c) => {
     const sourceRows = existing.sale_id
       ? await db.prepare('SELECT id,product_id,branch_id,cost_price_usd,cost_price_khr FROM sale_items WHERE sale_id=?').all<Record<string, unknown>>([existing.sale_id])
       : await selectInChunks([...new Set(newItems.map(item => Number(item.product_id)).filter(id => id > 0))], 0, chunk => db.prepare(`SELECT id,cost_price_usd,cost_price_khr FROM products WHERE id IN (${chunk.map(() => '?').join(',')})`).all<Record<string, unknown>>(chunk))
+    // RET-A F11: on a return against a sale, product, branch and line come
+    // from the sale line, never from the body (LH-11).
+    if (existing.sale_id) {
+      const saleLines = sourceRows.map((row) => ({ id: Number(row.id), product_id: row.product_id == null ? null : Number(row.product_id),
+        branch_id: row.branch_id == null ? null : Number(row.branch_id) }))
+      const pinnedItems: ReturnItemInput[] = []
+      for (const item of newItems) {
+        const pinned = pinReturnLineToSale(item, saleLines, existing.branch_id ?? null)
+        if (!pinned.ok) return c.json({ error: pinned.error, code: pinned.code }, 400)
+        pinnedItems.push(pinned.item)
+      }
+      newItems = pinnedItems
+    }
     try {
       newItems = newItems.map(item => {
         const previous = existingItems.filter(row => Number(row.product_id) === Number(item.product_id) && (item.branch_id == null || row.branch_id === item.branch_id))
@@ -2912,7 +2939,10 @@ app.patch('/:id', async (c) => {
     return c.json({ error: (error as Error).message }, 400)
   }
 
-  const branchName = body.branch_id
+  // RET-A F11: a return against a sale stays on that sale's branch; only a
+  // legacy manual return still takes the branch it is moved to.
+  const editBranchId = existing.sale_id ? existing.branch_id : (body.branch_id || existing.branch_id)
+  const branchName = !existing.sale_id && body.branch_id
     ? (await db.prepare('SELECT name FROM branches WHERE id = ?').get<{ name: string }>([body.branch_id]))?.name || null
     : existing.branch_name
 
@@ -2981,6 +3011,11 @@ app.patch('/:id', async (c) => {
       continue
     }
     const operatorBatchId = Number.isFinite(Number(item.batch_id)) && Number(item.batch_id) > 0 ? Number(item.batch_id) : null
+    // RET-A F11: a named lot must be one this sale line was sold from.
+    if (item.sale_item_id && !returnLotWasSold(operatorBatchId, [
+      ...(saleItemAllocationsForEdit.get(Number(item.sale_item_id)) || []).map((row) => row.batch_id),
+      saleItemBatchInfoForEdit.get(Number(item.sale_item_id))?.batch_id,
+    ])) return c.json({ ...RETURN_LOT_NOT_SOLD, product_id: productId }, 400)
     const plan = planReturnLot({
       allocations: item.sale_item_id ? (saleItemAllocationsForEdit.get(item.sale_item_id) || []) : [],
       saleLineBatchId: item.sale_item_id ? (saleItemBatchInfoForEdit.get(item.sale_item_id)?.batch_id ?? null) : null,
@@ -3326,7 +3361,7 @@ app.patch('/:id', async (c) => {
     total_refund_usd: editedRefundUsd,
     total_refund_khr: Math.round(totalRefundKhr),
     owed_reduction_usd: editSplit.owedReductionUsd,
-    branch_id: body.branch_id || existing.branch_id,
+    branch_id: editBranchId,
     branch_name: branchName,
   }
   statements.push({
