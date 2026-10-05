@@ -404,18 +404,59 @@ const mixedAdditiveUnread = (text, repairText) => {
   return columns.size > 0 && indexes > 0 && guards > 0
 }
 
+// ---- RET-B 0235 rule (begin) ------------------------------------------------
+// Self-contained; the LA cutover lane adds its own rule elsewhere in this file.
+//
 // Tables the repair itself writes, read from its executed SQL.
 const repairWrites = (repairText) => [...new Set([...sqlCode(repairText).matchAll(/\b(?:UPDATE|INSERT\s+(?:OR\s+\w+\s+)?INTO)\s+(\w+)/gi)]
   .map((match) => match[1].toLowerCase()))]
 
+// The only (table, column) pairs a mark-only file may set: explicit, non-key,
+// and never named by the repair (checked again below). Nothing else -- in
+// particular no rowid alias (rowid, oid, _rowid_) and no id/key column, whose
+// change would break the repair's JOIN sales s ON s.id = si.sale_id
+// (RET-B-VERIFY B2).
+const FLAG_ONLY_COLUMNS = Object.freeze({ sales: Object.freeze(['stock_skipped', 'stock_skipped_at', 'stock_skipped_by_name']) })
+const ROWID_OR_KEY = /^(rowid|oid|_rowid_|id|.*_id)$/i
+
+// Top-level comma split of a SET clause (parentheses and quoted literals kept whole).
+const setAssignments = (clause) => {
+  const parts = []
+  let depth = 0, quote = '', current = ''
+  for (const ch of clause) {
+    if (quote) { current += ch; if (ch === quote) quote = ''; continue }
+    if (ch === "'" || ch === '"') { quote = ch; current += ch; continue }
+    if (ch === '(') depth++
+    if (ch === ')') depth--
+    if (ch === ',' && depth === 0) { parts.push(current.trim()); current = ''; continue }
+    current += ch
+  }
+  parts.push(current.trim())
+  return parts
+}
+
 // A file that only MARKS rows (0235 stock_skipped backfill): its own work and
 // guard tables (names the repair never uses), plus UPDATEs of an existing
-// table that set only columns the repair never names, and not one mention of
-// a table the repair writes. Its writes cannot change anything the repair
-// reads, and the repair's writes cannot change anything it reads, so the two
-// orders agree; assertPopulatedOrders then proves it on the seeded chain.
+// table that set only allowlisted columns, and not one mention of a table the
+// repair writes. Its writes cannot change anything the repair reads, and the
+// repair's writes cannot change anything it reads, so the two orders agree;
+// assertPopulatedOrders then proves it on seeded imported sales.
+// Statement split on ';' outside quoted literals (0235 compares keys against 'sales-import;').
+const splitStatements = (code) => {
+  const out = []
+  let quote = '', current = ''
+  for (const ch of code) {
+    if (quote) { current += ch; if (ch === quote) quote = ''; continue }
+    if (ch === "'" || ch === '"') { quote = ch; current += ch; continue }
+    if (ch === ';') { out.push(current); current = ''; continue }
+    current += ch
+  }
+  out.push(current)
+  return out
+}
+
 const flagColumnsUnread = (text, repairText) => {
-  const statements = sqlCode(text).split(';').map((s) => s.replace(/\s+/g, ' ').trim()).filter(Boolean)
+  const statements = splitStatements(sqlCode(text)).map((s) => s.replace(/\s+/g, ' ').trim()).filter(Boolean)
   if (!statements.length) return false
   const named = namedIn(repairText)
   if (repairWrites(repairText).some((table) => namedIn(text)(table))) return false
@@ -429,14 +470,22 @@ const flagColumnsUnread = (text, repairText) => {
     } else if ((match = /^(?:INSERT (?:OR IGNORE )?INTO|DELETE FROM) (\w+)\b/i.exec(statement))) {
       if (!own.has(match[1].toLowerCase())) return false
     } else if ((match = /^UPDATE (\w+) SET (.+?) WHERE /i.exec(statement))) {
-      if (own.has(match[1].toLowerCase())) continue
-      const columns = [...` ${match[2]}`.matchAll(/(?:^|,)\s*(\w+)\s*=/g)].map((m) => m[1])
-      if (!columns.length || columns.some((column) => named(column))) return false
+      const table = match[1].toLowerCase()
+      if (own.has(table)) continue
+      const allowed = FLAG_ONLY_COLUMNS[table]
+      if (!allowed) return false
+      for (const assignment of setAssignments(match[2])) {
+        const target = /^(\w+)\s*=/.exec(assignment)
+        if (!target) return false
+        const column = target[1].toLowerCase()
+        if (ROWID_OR_KEY.test(column) || !allowed.includes(column) || named(column)) return false
+      }
       flagged++
     } else return false
   }
   return flagged > 0
 }
+// ---- RET-B 0235 rule (end) --------------------------------------------------
 
 function completeState(raw) {
   const quote = name => `"${name.replaceAll('"', '""')}"`
@@ -461,6 +510,11 @@ function assertPopulatedOrders(chain, chainText, mixed) {
     const heldNumber = Number(heldName.slice(0, 4))
     for (const file of chain.filter(file => Number(file.slice(0, 4)) > 195 && Number(file.slice(0, 4)) < heldNumber)) raw.exec(chainText(file))
     raw.exec("INSERT INTO pending_actions(section,action_type,entity_type,entity_id,payload_json,status) VALUES('branches','update','branch',1,'{}','open')")
+    // ---- RET-B 0235 seed (begin): two imported sales, so 0235 marks rows in
+    // both orders -- one the repair also repairs (s1), one outside its window.
+    raw.exec(`UPDATE sales SET client_request_id = 'sales-import:J:1' WHERE id = ${ids.s1.saleId}`)
+    raw.exec("INSERT INTO sales(receipt_number, client_request_id, created_at, subtotal_usd, total_usd, sale_status, branch_id) VALUES ('IMP2', 'sales-import:J:2', '2026-08-01 09:00:00', 0, 0, 'completed', 1)")
+    // ---- RET-B 0235 seed (end)
     const later = chain.filter(file => Number(file.slice(0, 4)) > heldNumber)
     const run = (before, override = new Map(), repeat = true) => {
       raw.exec('SAVEPOINT held_order_probe')
@@ -481,6 +535,13 @@ function assertPopulatedOrders(chain, chainText, mixed) {
     }
     const before = run(true), after = run(false)
     assert.deepEqual(before, after, 'populated full-chain orders preserve schema, all rows, audit, repair and recovery outcomes')
+    // ---- RET-B 0235 (begin): the proof above really exercised 0235.
+    if (later.includes('0235_imported_sales_stock_skipped.sql')) {
+      const marked = before.state.tables.find((t) => t.name === 'sales').rows
+        .filter((row) => row.stock_skipped_by_name === "'migration:0235_imported_sales_stock_skipped'").length
+      assert.equal(marked, 2, '0235 marked both seeded imported sales in the order proof')
+    }
+    // ---- RET-B 0235 (end)
     assert.deepEqual(before.repaired.map(row => row.new_cost_price_usd), [12.0769, 12.4, 12.4444, 7, 8])
     assert.deepEqual(before.returned.map(row => row.new_cost_price_usd), [12.4])
     for (const file of mixed) {
@@ -529,10 +590,12 @@ check('held: outside deploy chain, after dependencies including0195; independent
   assert.ok(!indexOnly("CREATE INDEX i ON sale_items(id) WHERE '--' <> ''; UPDATE sale_items SET cost_price_usd = 0;")
     && !additiveUnread("ALTER TABLE sale_items ADD COLUMN zzz_unread TEXT DEFAULT '/*'; UPDATE sale_items SET cost_price_usd = 0; -- */", migrationText), 'control: a comment marker inside a string literal cannot hide the statement after it')
   assert.ok(mixed.length > 0, 'control: the mixed additive scan proves at least one later file independent')
+  // ---- RET-B 0235 rule controls (begin) ----
   assert.deepEqual(repairWrites(migrationText).filter((t) => ['sale_items', 'return_items'].includes(t)).sort(), ['return_items', 'sale_items'], 'control: the repair writes sale_items and return_items')
   const flagFile = 'CREATE TABLE IF NOT EXISTS zz_mark (id INTEGER PRIMARY KEY);\nINSERT OR IGNORE INTO zz_mark (id) SELECT id FROM sales;\nUPDATE sales SET stock_skipped = 1, stock_skipped_by_name = \'m\' WHERE id IN (SELECT id FROM zz_mark);'
-  assert.ok(flagColumnsUnread(flagFile, migrationText), 'control: a mark-only file on unread columns is independent')
+  assert.ok(flagColumnsUnread(flagFile, migrationText), 'control: a mark-only file on allowlisted columns is independent')
   assert.ok(flagOnly.includes('0235_imported_sales_stock_skipped.sql'), 'the 0235 stock_skipped backfill is admitted by this rule, then proven by assertPopulatedOrders')
+  const markOnly = (table, set) => `CREATE TABLE IF NOT EXISTS zz_mark (id INTEGER PRIMARY KEY);\nINSERT OR IGNORE INTO zz_mark (id) SELECT id FROM ${table};\nUPDATE ${table} SET ${set} WHERE id IN (SELECT id FROM zz_mark);`
   for (const wrong of [
     flagFile.replace('stock_skipped = 1', 'created_at = 1'),
     `${flagFile}\nUPDATE sale_items SET quantity = 1 WHERE id = 1;`,
@@ -540,7 +603,20 @@ check('held: outside deploy chain, after dependencies including0195; independent
     flagFile.replace('SELECT id FROM sales', 'SELECT sale_id FROM sale_items'),
     `${flagFile}\nCREATE TRIGGER t AFTER UPDATE ON sales BEGIN SELECT 1; END;`,
     flagFile.replace(/UPDATE sales[^;]*;/, ''),
+    // RET-B-VERIFY B2: rowid aliases and keys renumber what the repair joins on.
+    markOnly('sales', 'rowid = rowid + 1000000'),
+    markOnly('sales', 'oid = -oid'),
+    markOnly('sales', '_rowid_ = _rowid_ + 1'),
+    markOnly('sales', 'id = id + 1'),
+    markOnly('sales', 'branch_id = 2'),
+    markOnly('product_batches', 'rowid = rowid + 1000000'),
+    markOnly('sales', 'stock_skipped = 1, rowid = rowid + 1000000'),
+    markOnly('sales', 'stock_skipped = 1, (rowid) = (rowid + 1000000)'),
+    markOnly('sales', '(stock_skipped, rowid) = (1, rowid + 1000000)'),
+    markOnly('sales', "notes = 'x'"),
+    markOnly('sales', 'stock_skipped = 1').replace('UPDATE sales', 'UPDATE OR REPLACE sales'),
   ]) assert.equal(flagColumnsUnread(wrong, migrationText), false, `control: still a dependency: ${wrong.split('\n').pop()}`)
+  // ---- RET-B 0235 rule controls (end) ----
   for (const file of mixed) {
     assert.ok(mixedAdditiveUnread(`-- header: UPDATE sale_items SET cost_price_usd = 1;\n/* DROP TABLE sale_items; */\n${chainText(file)}`, migrationText), `control: a comment header leaves ${file} independent`)
     assert.ok(!mixedAdditiveUnread(`${chainText(file)}\n-- trailing note\nUPDATE sale_items SET cost_price_usd = 1;`, migrationText), `control: a real statement after a comment in ${file} is still a dependency`)
