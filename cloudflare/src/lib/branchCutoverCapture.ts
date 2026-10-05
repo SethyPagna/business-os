@@ -310,7 +310,7 @@ async function readHistoryPage(db: D1Compat, identity: CutoverIdentity, cursor: 
   const next: CaptureCursor = { ...cursor }
   for (const [key, raw] of rows) {
     if (!Number.isSafeInteger(key) || key <= next.key || typeof raw !== 'string' || cutoverBytes(raw) > ROW_BYTES) throw new BranchCutoverCapabilityError('capture_row_invalid_or_oversize')
-    const { row, decision } = checkCutoverHistoryRow(raw)
+    const { row, decision } = checkCutoverHistoryRow(raw, { source: identity.sourceBranchId, target: identity.targetBranchId })
     if (row.id !== key) throw new BranchCutoverCapabilityError('capture_history_page_invalid')
     next.history = tallyCutoverHistory(next.history, row, decision)
     next.history.digest = await cutoverDigest(JSON.stringify([next.history.digest, row.id, row.applier, decision]))

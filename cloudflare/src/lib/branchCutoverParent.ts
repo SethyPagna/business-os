@@ -651,7 +651,7 @@ async function verifyStep(db: D1Compat, current: SessionUser, row: BranchCutover
   const closes: Array<{ id: number; marker: string; previousStatus: string; applier: string; updatedAt: string | null }> = []
   for (const entry of rows) {
     requireParent(cutoverBytes(entry.j) <= 65536)
-    const { row: history, decision } = checkCutoverHistoryRow(entry.j)
+    const { row: history, decision } = checkCutoverHistoryRow(entry.j, ids)
     requireParent(history.id === entry.k && history.id > next.after)
     if (history.id <= maxId) {
       next.historyDigest = await cutoverDigest(JSON.stringify([next.historyDigest, history.id, history.applier, decision]))

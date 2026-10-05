@@ -5,6 +5,8 @@
 //   rows of every family at the source, the target and neither, undoable and redoable, at SQLite depth 100
 // - leave appliers' replay modules never write stock (static pin, T1.4)
 // - the closure statements close exactly the planned rows, write one audit row each, and refuse a second apply
+// - E9: the touch bit is re-derived in JS from independently projected branch-id facts; a wrong JSON path in
+//   the SQL touch predicate (or in the facts query) refuses the page instead of being agreed by both sides
 // The fixture builder is exported for the end-to-end parent test.
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
@@ -13,8 +15,9 @@ const { DatabaseSync } = require('node:sqlite')
 const ts = require('typescript')
 const root = path.resolve(__dirname, '..')
 
-function load(name) {
-  const source = fs.readFileSync(path.join(root, 'src', name), 'utf8')
+function load(name, mutations = []) {
+  let source = fs.readFileSync(path.join(root, 'src', name), 'utf8').replace(/\r\n/g, '\n')
+  for (const [from, to] of mutations) { assert.ok(source.includes(from), from); source = source.replace(from, to) }
   const module = { exports: {} }
   const js = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
   new Function('require', 'module', 'exports', js)(() => ({}), module, module.exports)
@@ -143,14 +146,14 @@ async function main() {
     const ids = { source: 2, target: 1, other: 3 }
     const rows = seedHistoryFamilies(raw, ids)
     const page = raw.prepare(history.historyOpenPageSql()).all({ source: 2, target: 1, after: 0, limit: 1000 })
-    const seen = new Map(page.map(entry => [entry.k, history.checkCutoverHistoryRow(entry.j)]))
+    const seen = new Map(page.map(entry => [entry.k, history.checkCutoverHistoryRow(entry.j, { source: 2, target: 1 })]))
     for (const row of rows) {
       if (row.expected === 'absent') { assert.equal(seen.has(row.id), false, row.applier + ' ' + row.id); continue }
       assert.equal(seen.get(row.id)?.decision, row.expected, row.applier + ' ' + row.id)
     }
     assert.equal(seen.size, rows.filter(row => row.expected !== 'absent').length)
     // T1.2: the same Set at the warehouse leaves; swapping the cutover direction flips it
-    const swapped = raw.prepare(history.historyOpenPageSql()).all({ source: 1, target: 2, after: 0, limit: 1000 }).map(entry => history.checkCutoverHistoryRow(entry.j))
+    const swapped = raw.prepare(history.historyOpenPageSql()).all({ source: 1, target: 2, after: 0, limit: 1000 }).map(entry => history.checkCutoverHistoryRow(entry.j, { source: 1, target: 2 }))
     const qs = swapped.filter(entry => entry.row.applier === 'stock.quantity_set').map(entry => entry.decision).sort()
     assert.deepEqual(qs, ['close', 'leave', 'leave'])
     // paging in rowid order with a small limit returns the same rows
@@ -165,12 +168,24 @@ async function main() {
   })
 
   await check('a disagreeing projection or an ambiguous applier refuses the page', () => {
-    const base = { id: 5, entity: null, entity_id: null, status: 'undoable', reversible: 1, updated_at: null, last_error: null, applier: 'stock.session', other: 'stock.session', touch: 1, decision: 'close', undo: '{}', redo: '{}' }
-    assert.equal(history.checkCutoverHistoryRow(JSON.stringify(base)).decision, 'close')
-    assert.throws(() => history.checkCutoverHistoryRow(JSON.stringify({ ...base, decision: 'leave' })), /history_classification_disagrees/)
-    assert.throws(() => history.checkCutoverHistoryRow(JSON.stringify({ ...base, other: 'stock.transfer' })), /history_applier_ambiguous/)
-    assert.throws(() => history.checkCutoverHistoryRow(JSON.stringify({ ...base, applier: 'future.kind', other: null, decision: 'unclassified' })), /history_applier_unclassified/)
-    assert.throws(() => history.checkCutoverHistoryRow(JSON.stringify({ ...base, status: 'recorded' })), /history_row_invalid/)
+    const ids = { source: 2, target: 1 }
+    const base = { id: 5, entity: null, entity_id: null, status: 'undoable', reversible: 1, updated_at: null, last_error: null, applier: 'stock.session', other: 'stock.session', touch: 1, decision: 'close', facts: [1, 2], undo: '{}', redo: '{}' }
+    assert.equal(history.checkCutoverHistoryRow(JSON.stringify(base), ids).decision, 'close')
+    assert.throws(() => history.checkCutoverHistoryRow(JSON.stringify({ ...base, decision: 'leave' }), ids), /history_classification_disagrees/)
+    assert.throws(() => history.checkCutoverHistoryRow(JSON.stringify({ ...base, other: 'stock.transfer' }), ids), /history_applier_ambiguous/)
+    assert.throws(() => history.checkCutoverHistoryRow(JSON.stringify({ ...base, applier: 'future.kind', other: null, decision: 'unclassified' }), ids), /history_applier_unclassified/)
+    assert.throws(() => history.checkCutoverHistoryRow(JSON.stringify({ ...base, status: 'recorded' }), ids), /history_row_invalid/)
+    // E9: facts and touch must agree; complete appliers exactly, bulk appliers at least for a header at the source
+    assert.throws(() => history.checkCutoverHistoryRow(JSON.stringify({ ...base, facts: [1] }), ids), /history_facts_disagree/)
+    assert.throws(() => history.checkCutoverHistoryRow(JSON.stringify({ ...base, touch: 0, decision: 'leave' }), ids), /history_facts_disagree/)
+    for (const facts of [null, undefined, '[2]', [2.5], ['2']]) assert.throws(() => history.checkCutoverHistoryRow(JSON.stringify({ ...base, facts }), ids), /history_facts_invalid/, JSON.stringify(facts))
+    const bulk = { ...base, applier: 'sale.status.bulk', other: 'sale.status.bulk' }
+    assert.equal(history.checkCutoverHistoryRow(JSON.stringify({ ...bulk, facts: [1] }), ids).decision, 'close', 'a line at the source is not projected: the SQL bit stands')
+    assert.throws(() => history.checkCutoverHistoryRow(JSON.stringify({ ...bulk, facts: [2], touch: 0, decision: 'leave' }), ids), /history_facts_disagree/)
+    assert.throws(() => history.checkCutoverHistoryRow(JSON.stringify({ ...base, applier: 'product.merge', other: 'product.merge', facts: [2] }), ids), /history_facts_invalid/)
+    const update = { ...base, applier: 'branch.update', other: 'branch.update', touch: 2, decision: 'close', facts: [1] }
+    assert.equal(history.checkCutoverHistoryRow(JSON.stringify(update), ids).decision, 'close')
+    assert.throws(() => history.checkCutoverHistoryRow(JSON.stringify({ ...update, touch: 0, decision: 'leave' }), ids), /history_facts_disagree/)
   })
 
   await check('T1.4 leave appliers never write stock (static pin of their replay modules)', () => {
@@ -190,7 +205,7 @@ async function main() {
   await check('closure statements close exactly the planned rows with one audit each and refuse a second apply', () => {
     const raw = migrated()
     const rows = seedHistoryFamilies(raw, { source: 2, target: 1, other: 3 })
-    const page = raw.prepare(history.historyOpenPageSql()).all({ source: 2, target: 1, after: 0, limit: 1000 }).map(entry => history.checkCutoverHistoryRow(entry.j))
+    const page = raw.prepare(history.historyOpenPageSql()).all({ source: 2, target: 1, after: 0, limit: 1000 }).map(entry => history.checkCutoverHistoryRow(entry.j, { source: 2, target: 1 }))
     const closes = page.filter(entry => entry.decision === 'close').map(entry => ({ id: entry.row.id, marker: history.UNDO_CLOSED_BRANCH_RETIRED, previousStatus: entry.row.status, applier: entry.row.applier, updatedAt: entry.row.updated_at }))
     const leaveBefore = raw.prepare('SELECT * FROM action_history WHERE id IN (' + page.filter(e => e.decision === 'leave').map(e => e.row.id).join(',') + ') ORDER BY id').all()
     const statements = history.historyClosureStatements({ closes, operationId: '00000000-0000-4000-8000-000000000001', actorId: 7, actorName: 'operator', source: 2, target: 1 })
@@ -207,6 +222,36 @@ async function main() {
     assert.equal(rows.filter(r => r.expected === 'close').length, closes.length)
     assert.ok(history.isUndoClosedByBranchCutover(closed[0])); assert.equal(history.isUndoClosedByBranchCutover({ reversible: 1, last_error: history.UNDO_CLOSED_BRANCH_RETIRED }), false)
     raw.close()
+  })
+
+  await check('E9 a wrong JSON path in the SQL touch predicate, or in the facts query, refuses the page (it is not agreed by both sides)', () => {
+    const ids = { source: 2, target: 1 }
+    const pageOf = (module) => {
+      const raw = migrated(); seedHistoryFamilies(raw, { source: 2, target: 1, other: 3 })
+      try { return raw.prepare(module.historyOpenPageSql()).all({ ...ids, after: 0, limit: 1000 }).map(entry => module.checkCutoverHistoryRow(entry.j, ids)) } finally { raw.close() }
+    }
+    // the real module: every complete applier carries facts; product.* carry none
+    const rows = pageOf(history).map(entry => entry.row)
+    for (const row of rows) {
+      if (history.HISTORY_COMPLETE_FACT_APPLIERS.includes(row.applier) || history.HISTORY_HEADER_FACT_APPLIERS.includes(row.applier)) assert.ok(Array.isArray(row.facts), row.applier)
+      else assert.equal(row.facts, null, row.applier)
+    }
+    assert.ok(rows.some(row => row.applier === 'stock.quantity_set' && row.facts.includes(2)))
+    // plausible wrong implementations, each agreed by the decision table alone at ecc17dd14
+    const mutants = {
+      'touch path typo (quantity_set reads $.branch_id)': [["WHEN 'stock.quantity_set' THEN EXISTS(SELECT 1 FROM stock_lot_adjustment_operations o WHERE o.history_id=h.id AND @source IN (\n      CAST(json_extract(${valid('o.request_json')},'$.branchId')",
+        "WHEN 'stock.quantity_set' THEN EXISTS(SELECT 1 FROM stock_lot_adjustment_operations o WHERE o.history_id=h.id AND @source IN (\n      CAST(json_extract(${valid('o.request_json')},'$.branch_id')"]],
+      'touch join drops the snapshot lines (sale.add_items)': [["      OR EXISTS(SELECT 1 FROM json_each(u.payload_json,'$.lines') l WHERE json_type(l.value)='object' AND CAST(json_extract(l.value,'$.branchId') AS INTEGER)=@source)))",
+        "      OR 0))"], ["      EXISTS(SELECT 1 FROM sales s WHERE s.id=CAST(json_extract(u.payload_json,'$.saleId') AS INTEGER) AND s.branch_id=@source)\n      OR EXISTS(SELECT 1 FROM sale_items si",
+        "      0\n      OR EXISTS(SELECT 1 FROM sale_items si"], ["      OR EXISTS(SELECT 1 FROM sale_items si WHERE si.sale_id=CAST(json_extract(u.payload_json,'$.saleId') AS INTEGER) AND si.branch_id=@source)",
+        "      OR 0"]],
+      'touch reads the wrong session column': [['WHEN \'stock.session\' THEN EXISTS(SELECT 1 FROM stock_session_operations o JOIN stock_session_members m ON m.operation_id=o.id WHERE o.history_id=h.id AND m.branch_id=@source)',
+        'WHEN \'stock.session\' THEN EXISTS(SELECT 1 FROM stock_session_operations o JOIN stock_session_members m ON m.operation_id=o.id WHERE o.history_id=h.id AND m.product_id=@source)']],
+      'facts path typo': [["`SELECT CAST(json_extract(${asJson('o.' + column)},'$.branchId') AS INTEGER) AS b", "`SELECT CAST(json_extract(${asJson('o.' + column)},'$.branch_id') AS INTEGER) AS b"]],
+    }
+    for (const [name, mutations] of Object.entries(mutants)) {
+      assert.throws(() => pageOf(load('lib/branchCutoverHistory.ts', mutations)), /history_facts_disagree/, name)
+    }
   })
 
   console.log(`${checks} branch cutover history pure checks passed`)

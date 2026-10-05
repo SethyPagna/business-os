@@ -9,8 +9,11 @@
 // 'recorded', reversible=0, a marker in last_error, one audit row per row.
 //
 // Identity is the branch id the cutover was begun with; names never decide.
-// The SQL projection and the JS classifier derive the same decision from the
-// same facts and must agree, or the page refuses.
+// The SQL projection and the JS classifier derive the same decision and must
+// agree, or the page refuses. The touch bit itself is checked too (verifier
+// E9): each page also projects the raw branch ids the touch predicate reads,
+// through queries written apart from SOURCE_TOUCH_SQL, and JS re-derives the
+// bit from them. A wrong JSON path or join in either query then disagrees.
 
 export const UNDO_CLOSED_BRANCH_RETIRED = 'undo_closed:branch_retired'
 export const UNDO_CLOSED_BRANCH_CUTOVER_MOVE = 'undo_closed:branch_cutover_move'
@@ -128,10 +131,37 @@ const facts = `SELECT h.rowid AS k,h.id,h.entity,h.entity_id,h.status,h.reversib
       (CASE WHEN (${SOURCE_TOUCH_SQL}) THEN 1 ELSE 0 END)+(CASE WHEN (${TARGET_TOUCH_SQL}) THEN 2 ELSE 0 END) AS touch
     FROM action_history h WHERE ${HISTORY_OPEN_PREDICATE} AND h.rowid>@after`
 
+// ---- facts (E9): the raw branch ids behind the touch bit, written apart from SOURCE_TOUCH_SQL.
+// COMPLETE appliers project every id their predicate reads, so JS recomputes the bit exactly. The bulk
+// appliers project the header branch of each member sale/return (bounded by the member count); their
+// line-level branches are not projected (an unbounded fan-out over sale_items/return_items), so JS only
+// proves that a header at the source sets the bit. product.merge/.bulk/.remove walk whole undo snapshots
+// in SQL (json_tree); projecting those snapshots would put megabytes on a page, so they carry no facts and
+// rest on the SQL predicate plus the rehearsal count comparison on the production copy.
+export const HISTORY_COMPLETE_FACT_APPLIERS: readonly string[] = Object.freeze(['branch.update', 'stock.session', 'stock.quantity_set', 'stock.session_line_edit', 'sale.add_items'])
+export const HISTORY_HEADER_FACT_APPLIERS: readonly string[] = Object.freeze(['sale.status.bulk', 'return.fields.bulk'])
+const asJson = (column: string): string => `(CASE WHEN json_valid(${column}) THEN ${column} END)`
+const branchIds = (select: string): string => `(SELECT json_group_array(DISTINCT b) FROM (${select}) WHERE b IS NOT NULL)`
+const factSnapshotId = `CAST(COALESCE(json_extract(${asJson('hf.undo_payload')},'$.snapshot_id'),json_extract(${asJson('hf.redo_payload')},'$.snapshot_id')) AS INTEGER)`
+const adjustmentFacts = branchIds(['request_json', 'before_json', 'after_json', 'revision_json']
+  .map(column => `SELECT CAST(json_extract(${asJson('o.' + column)},'$.branchId') AS INTEGER) AS b FROM stock_lot_adjustment_operations o WHERE o.history_id=hf.id`).join(' UNION ALL '))
+const FACTS_SQL = `CASE hf.applier
+    WHEN 'branch.update' THEN ${branchIds(`SELECT CAST(json_extract(${asJson('hf.undo_payload')},'$.id') AS INTEGER) AS b UNION ALL SELECT CAST(json_extract(${asJson('hf.redo_payload')},'$.id') AS INTEGER)`)}
+    WHEN 'stock.session' THEN ${branchIds('SELECT m.branch_id AS b FROM stock_session_members m JOIN stock_session_operations o ON o.id=m.operation_id WHERE o.history_id=hf.id')}
+    WHEN 'stock.quantity_set' THEN ${adjustmentFacts}
+    WHEN 'stock.session_line_edit' THEN ${adjustmentFacts}
+    WHEN 'sale.add_items' THEN ${branchIds(`SELECT s.branch_id AS b FROM undo_snapshots u JOIN sales s ON s.id=CAST(json_extract(${asJson('u.payload_json')},'$.saleId') AS INTEGER) WHERE u.id=${factSnapshotId}
+      UNION ALL SELECT i.branch_id FROM undo_snapshots u JOIN sale_items i ON i.sale_id=CAST(json_extract(${asJson('u.payload_json')},'$.saleId') AS INTEGER) WHERE u.id=${factSnapshotId}
+      UNION ALL SELECT CAST(json_extract(l.value,'$.branchId') AS INTEGER) FROM undo_snapshots u, json_each(COALESCE(${asJson('u.payload_json')},'{}'),'$.lines') l
+        WHERE u.id=${factSnapshotId} AND l.type='object'`)}
+    WHEN 'sale.status.bulk' THEN ${branchIds('SELECT s.branch_id AS b FROM sale_bulk_members m JOIN sale_bulk_operations o ON o.id=m.operation_id JOIN sales s ON s.id=m.sale_id WHERE o.history_id=hf.id')}
+    WHEN 'return.fields.bulk' THEN ${branchIds('SELECT r.branch_id AS b FROM return_bulk_members m JOIN return_bulk_operations o ON o.id=m.operation_id JOIN returns r ON r.id=m.return_id WHERE o.history_id=hf.id')}
+    END`
+
 /** One page of open applier rows, projected with the facts the decision needs. Extra columns may read the row as hf.* */
 export function historyOpenPageSql(extraColumns = ''): string {
   return `SELECT k,json_object('id',id,'entity',entity,'entity_id',entity_id,'status',status,'reversible',reversible,'updated_at',updated_at,
-      'last_error',last_error,'applier',applier,'other',other,'touch',touch,'decision',${decisionSql()},'undo',undo_payload,'redo',redo_payload) AS j${extraColumns}
+      'last_error',last_error,'applier',applier,'other',other,'touch',touch,'decision',${decisionSql()},'facts',json(${FACTS_SQL}),'undo',undo_payload,'redo',redo_payload) AS j${extraColumns}
     FROM (${facts} ORDER BY h.rowid LIMIT @limit) AS hf ORDER BY k`
 }
 
@@ -143,11 +173,25 @@ export const HISTORY_DECISION_COUNTS_SQL = `SELECT applier,decision,count(*) AS 
 
 export type CutoverHistoryRow = {
   id: number; entity: string | null; entity_id: string | null; status: string; reversible: number; updated_at: string | null
-  last_error: string | null; applier: string; other: string | null; touch: number; decision: string; undo: string; redo: string
+  last_error: string | null; applier: string; other: string | null; touch: number; decision: string; facts?: unknown; undo: string; redo: string
 }
 
-/** Re-derives the decision in JS and refuses on any disagreement with the SQL projection. */
-export function checkCutoverHistoryRow(raw: string): { row: CutoverHistoryRow; decision: CutoverHistoryDecision } {
+/** Re-derives the touch bit from the projected facts (E9); refuses a disagreement with the SQL predicate. */
+function checkCutoverHistoryFacts(row: CutoverHistoryRow, branches: { source: number; target: number }): void {
+  const complete = HISTORY_COMPLETE_FACT_APPLIERS.includes(row.applier), header = HISTORY_HEADER_FACT_APPLIERS.includes(row.applier)
+  if (!complete && !header) {
+    if (row.facts !== null && row.facts !== undefined) throw new BranchCutoverHistoryError('history_facts_invalid:' + row.id)
+    return
+  }
+  const facts = row.facts
+  if (!Array.isArray(facts) || facts.length > 64 || !facts.every(value => Number.isSafeInteger(value))) throw new BranchCutoverHistoryError('history_facts_invalid:' + row.id)
+  const source = facts.includes(branches.source) ? 1 : 0
+  const target = row.applier === 'branch.update' && facts.includes(branches.target) ? 2 : 0
+  if (complete ? (source | target) !== row.touch : source && !(row.touch & 1)) throw new BranchCutoverHistoryError('history_facts_disagree:' + row.id)
+}
+
+/** Re-derives the decision (and, from the projected facts, the touch bit) in JS and refuses on any disagreement with the SQL projection. */
+export function checkCutoverHistoryRow(raw: string, branches: { source: number; target: number }): { row: CutoverHistoryRow; decision: CutoverHistoryDecision } {
   const row = JSON.parse(raw) as CutoverHistoryRow
   if (!row || typeof row !== 'object' || !Number.isSafeInteger(row.id) || row.id <= 0 || row.reversible !== 1
     || (row.status !== 'undoable' && row.status !== 'redoable') || typeof row.undo !== 'string' || typeof row.redo !== 'string') {
@@ -156,6 +200,7 @@ export function checkCutoverHistoryRow(raw: string): { row: CutoverHistoryRow; d
   if (row.other !== null && row.other !== row.applier) throw new BranchCutoverHistoryError('history_applier_ambiguous:' + row.id)
   const decision = classifyCutoverHistory(row)
   if (row.decision !== decision) throw new BranchCutoverHistoryError('history_classification_disagrees:' + row.id)
+  checkCutoverHistoryFacts(row, branches)
   return { row, decision }
 }
 
