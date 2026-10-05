@@ -765,10 +765,15 @@ async function assertReturnableItems(
     const qty = Number(item.quantity)
     if (!qty || qty <= 0) throw new Error('Return quantity must be greater than zero')
   }
+  // Only a reason-only edit of an old manual return reaches here without a
+  // sale: POST / refuses a return without one (F6, N1) and PATCH refuses new
+  // items on a manual return (manual_return_items_locked).
   if (!saleId) return
 
   const sale = await db.prepare('SELECT id, sale_status FROM sales WHERE id = ?').get<{ id: number; sale_status: string | null }>([saleId])
-  if (!sale) throw new Error('Original sale not found')
+  if (!sale) {
+    throw Object.assign(new Error('The sale this return names was not found. Find the sale this item came from.'), { code: 'return_sale_not_found' })
+  }
   // A cancelled sale's stock was already ADDED BACK by the cancellation
   // itself (routes/sales.ts PATCH /:id/status) -- recording a return on
   // top would restock the same units twice. Un-cancel first if the sale
@@ -1421,6 +1426,10 @@ app.post('/quote', async (c) => {
   }
 })
 
+// RET-A F6 / N1: every customer return is linked to a sale (owner, 5 Oct 2026).
+const RETURN_SALE_REQUIRED = { error: 'Every return must be linked to a sale. Find the sale this item came from.',
+  code: 'return_sale_required', action: 'fix_request' } as const
+
 app.post('/', async (c) => {
   const db = getDb(c.env)
   const user = c.get('user')
@@ -1478,6 +1487,11 @@ app.post('/', async (c) => {
   try {
     canonicalIntent = canonicalReturnCreateIntent(body as Record<string, unknown>)
   } catch (error) {
+    // RET-A N1: the v1 shape refuses a missing sale while canonicalising; it
+    // gets the same code as the v0 shape below. No stored receipt can match a
+    // body without a sale, so nothing replayable is skipped.
+    const postedSaleId = Number((body as { sale_id?: unknown }).sale_id)
+    if (!(Number.isSafeInteger(postedSaleId) && postedSaleId > 0)) return c.json(RETURN_SALE_REQUIRED, 400)
     return c.json({ error: (error as Error).message }, 400)
   }
   const requestJson = JSON.stringify(canonicalIntent)
@@ -1493,10 +1507,7 @@ app.post('/', async (c) => {
   // linked to a sale -- a return with no sale had no quantity or refund cap
   // and counted as drawer cash. A replay of one recorded before this rule
   // still answers above; returns to a supplier are POST /supplier.
-  if (!requestedSaleId) {
-    return c.json({ error: 'Every return must be linked to a sale. Find the sale this item came from.',
-      code: 'return_sale_required', action: 'fix_request' }, 400)
-  }
+  if (!requestedSaleId) return c.json(RETURN_SALE_REQUIRED, 400)
   const occupiedRequest = await db.prepare("SELECT id FROM returns WHERE client_request_id=? AND client_request_id<>'' LIMIT 1")
     .get<{ id: number }>([clientRequestId])
   if (occupiedRequest) {
@@ -1530,7 +1541,8 @@ app.post('/', async (c) => {
     try {
       await assertReturnableItems(db, requestedSaleId, body.items)
     } catch (error) {
-      return c.json({ error: (error as Error).message }, 400)
+      const code = (error as { code?: unknown }).code
+      return c.json({ error: (error as Error).message, ...(typeof code === 'string' ? { code } : {}) }, 400)
     }
   }
 
@@ -1558,7 +1570,10 @@ app.post('/', async (c) => {
       COALESCE(v.revision,0) AS write_revision
       FROM sales s LEFT JOIN sale_write_revisions v ON v.sale_id=s.id WHERE s.id=?`)
       .get<SaleMeta>([requestedSaleId]) || null
-    if (!saleMeta) return c.json({ error: 'Original sale not found' }, 400)
+    if (!saleMeta) {
+      return c.json({ error: 'The sale this return names was not found. Find the sale this item came from.',
+        code: 'return_sale_not_found', action: 'fix_request' }, 400)
+    }
     if (String(saleMeta.sale_status || 'completed') === 'cancelled') {
       return c.json({ error: 'This sale is cancelled -- un-cancel it before recording a return.' }, 400)
     }
@@ -1632,7 +1647,12 @@ app.post('/', async (c) => {
   }
   const beforeSaleStatus = saleMeta ? String(saleMeta.sale_status || 'completed') : null
 
-  const branchId = Number(body.branch_id || saleMeta?.branch_id || replacementInputs[0]?.branch_id) || null
+  // RET-A N1: the return belongs to its sale's branch, never the body's. A
+  // sale row with no branch (older data) takes the one branch its lines were
+  // sold from; with none or several, the return has no header branch and each
+  // line restocks into its own sale line's branch (pinned above).
+  const soldBranchIds = [...new Set(soldLines.map((line) => Number(line.branch_id) || 0).filter((id) => id > 0))]
+  const branchId = Number(saleMeta?.branch_id) || (soldBranchIds.length === 1 ? soldBranchIds[0] : null)
   let branch: { id: number; name: string | null; is_active: number | null } | null = null
   if (branchId) {
     branch = await db.prepare('SELECT id,name,is_active FROM branches WHERE id=? LIMIT 1')
@@ -1689,21 +1709,18 @@ app.post('/', async (c) => {
   const saleItemBatchInfo = await fetchSaleItemBatchInfo(db, returnSaleItemIds)
   const saleItemAllocations = await fetchSaleItemAllocations(db, returnSaleItemIds)
   const v1QuoteBySaleItem = new Map(customerReturnV1Plan?.quote.items.map(item => [item.sale_item_id, item]) || [])
-  // A return against a sale is priced from that sale's own lines, matched the
-  // same way the quantity cap matched them: by sale_item_id, else by product_id.
-  // Only a return with no sale at all falls back to the posted price.
+  // A return is priced from its sale's own lines, matched the same way the
+  // quantity cap matched them: by sale_item_id, else by product_id. RET-A N1:
+  // every return has a sale (F6), and a line that matches none is refused --
+  // the posted price never stands alone. A product-matched line may only
+  // lower the recorded price, never raise it.
   let refundPrices: Array<{ unitUsd: number; unitKhr: number }>
   try {
     refundPrices = returnItems.map((item) => {
       const exact = v1QuoteBySaleItem.get(Number(item.sale_item_id))
       if (exact) return { unitUsd: exact.applied_price_usd, unitKhr: exact.applied_price_khr }
-      if (!saleMeta) {
-        return resolveRefundUnitPrice({
-          saleLine: item.sale_item_id ? saleItemBatchInfo.get(Number(item.sale_item_id)) || null : null,
-          postedUsd: toNumber(item.applied_price_usd), postedKhr: toNumber(item.applied_price_khr),
-        })
-      }
       const match = matchRefundSaleLine(soldLines, item)
+      if (!match) throw new RefundSaleLineError('return_refund_sale_line_required', 'Each return line needs a sale item or a product from this sale.')
       return resolveRefundUnitPrice({
         saleLine: match?.line ?? null, matchedBy: match?.matchedBy,
         postedUsd: item.applied_price_usd == null ? null : toNumber(item.applied_price_usd),
@@ -2939,12 +2956,11 @@ app.patch('/:id', async (c) => {
     return c.json({ error: (error as Error).message }, 400)
   }
 
-  // RET-A F11: a return against a sale stays on that sale's branch; only a
-  // legacy manual return still takes the branch it is moved to.
-  const editBranchId = existing.sale_id ? existing.branch_id : (body.branch_id || existing.branch_id)
-  const branchName = !existing.sale_id && body.branch_id
-    ? (await db.prepare('SELECT name FROM branches WHERE id = ?').get<{ name: string }>([body.branch_id]))?.name || null
-    : existing.branch_name
+  // RET-A F11 / N1: an edit never moves a return to another branch. A return
+  // against a sale stays on that sale's branch, and an old manual return
+  // (whose items are locked, F6) keeps the branch it was recorded in.
+  const editBranchId = existing.branch_id
+  const branchName = existing.branch_name
 
   // No settlement gate any more: a return is only a return and a replacement
   // is only a sale, so editing the returned side cannot "break an exchange".

@@ -62,6 +62,8 @@ async function main() {
     await db.batch([
       "INSERT INTO branches(id,name,is_active,is_default) VALUES(1,'Shop',1,1)",
       "INSERT INTO branches(id,name,is_active,is_default) VALUES(2,'Warehouse',1,0)",
+      "INSERT INTO branches(id,name,is_active,is_default) VALUES(3,'Old Kiosk',0,0)",
+      'INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(2,3,0)',
       "INSERT INTO products(id,name,is_active,stock_quantity,cost_price_usd,selling_price_usd) VALUES(1,'Serum',1,0,2,10)",
       "INSERT INTO products(id,name,is_active,stock_quantity,cost_price_usd,selling_price_usd) VALUES(2,'Toner',1,0,1,5)",
       'INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(1,1,0)',
@@ -114,6 +116,41 @@ async function main() {
     assert.equal(manualEdit.body.code, 'manual_return_items_locked')
     assert.equal(Number((await one('SELECT quantity q FROM return_items WHERE return_id=90')).q), 1, 'the old manual return is unchanged')
     console.log('PASS a return without a sale is refused and an old manual return\'s items cannot be changed')
+
+    // -- N1 (loophole review 6 Oct): every create shape refuses, nothing written --
+    const footprint = async () => JSON.stringify(await db.prepare(`SELECT
+      (SELECT COUNT(*) FROM returns) r, (SELECT COUNT(*) FROM return_items) ri,
+      (SELECT COALESCE(SUM(quantity),0) FROM branch_stock) bs,
+      (SELECT COALESCE(SUM(quantity),0) FROM branch_batch_stock) bbs`).first())
+    const fixed = await footprint()
+    const abuse = { reason: 'walk-in', branch_id: 3, items: [
+      { product_id: 2, quantity: 100, applied_price_usd: 50, applied_price_khr: 200000, stock_action: 'restock', branch_id: 3 }] }
+    for (const [label, saleId] of [['absent', undefined], ['zero', 0], ['negative', -5], ['fraction', 1.5], ['text', 'abc'], ['null', null]]) {
+      const refused = await send('POST', '/api/returns', { ...abuse, client_request_id: `n1-v0-${label}`, sale_id: saleId })
+      assert.equal(refused.status, 400, `${label}: ${JSON.stringify(refused.body)}`)
+      assert.equal(refused.body.code, 'return_sale_required', label)
+      const refusedV1 = await send('POST', '/api/returns', { client_request_id: `n1-v1-${label}`, money_precision_version: 1, sale_id: saleId,
+        reason: 'walk-in', items: [{ sale_item_id: 2, quantity: 1, stock_action: 'restock' }],
+        expected_quote: { sale_id: saleId, items: [{ sale_item_id: 2, quantity: 1 }] } })
+      assert.equal(refusedV1.status, 400, `v1 ${label}: ${JSON.stringify(refusedV1.body)}`)
+      assert.equal(refusedV1.body.code, 'return_sale_required', `v1 ${label}`)
+    }
+    const ghost = await send('POST', '/api/returns', { ...abuse, client_request_id: 'n1-ghost', sale_id: 999 })
+    assert.equal(ghost.status, 400, JSON.stringify(ghost.body))
+    assert.equal(ghost.body.code, 'return_sale_not_found')
+    assert.equal(await footprint(), fixed, 'no return, line or stock row was written by any refused shape')
+    console.log('PASS N1: absent, zero, negative, fractional, text, null and unknown sale ids are refused (v0 and v1) with a code and write nothing')
+
+    // The same abusive body WITH a valid sale: the sale decides branch and price.
+    const linked = await send('POST', '/api/returns', { ...abuse, client_request_id: 'n1-linked', sale_id: 1,
+      items: [{ ...abuse.items[0], sale_item_id: 2, quantity: 1 }] })
+    assert.ok(linked.status >= 200 && linked.status < 300, JSON.stringify(linked.body))
+    const row = await one("SELECT id,branch_id,total_refund_usd FROM returns WHERE client_request_id='n1-linked'")
+    assert.equal(Number(row.branch_id), 1, 'the return belongs to the sale\'s branch, not the body\'s inactive branch')
+    assert.equal(Number(row.total_refund_usd), 5, 'the refund is the sale line\'s price ($5), not the posted $50')
+    assert.equal(await stock(2, 1), 1, 'the unit went back to the branch it was sold from')
+    assert.equal(await stock(2, 3), 0, 'nothing landed in the inactive branch the body named')
+    console.log('PASS N1: with a valid sale the same body records 1 unit at $5 into the sale\'s branch')
 
   } finally {
     await mf.dispose()

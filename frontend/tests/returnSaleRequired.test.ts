@@ -27,4 +27,8 @@ const refusal = Object.assign(new Error('Every return must be linked to a sale.'
 assert.equal(returnRefusalText(refusal, (key, fallback) => km[key] ?? fallback), km.return_sale_required)
 assert.match(km.return_sale_required, /ការលក់/, 'the Khmer refusal speaks of the sale')
 assert.equal(returnRefusalText(refusal, (key, fallback) => en[key] ?? fallback), en.return_sale_required)
+// N1 (6 Oct): a sale id that names no sale has its own code in both packs.
+const notFound = Object.assign(new Error('The sale this return names was not found.'), { status: 400, code: 'return_sale_not_found' })
+assert.equal(returnRefusalText(notFound, (key, fallback) => km[key] ?? fallback), km.return_sale_not_found)
+assert.ok(km.return_sale_not_found && km.return_sale_not_found !== en.return_sale_not_found, 'the Khmer text is translated')
 console.log('PASS the Worker refusal is shown in the operator\'s language')

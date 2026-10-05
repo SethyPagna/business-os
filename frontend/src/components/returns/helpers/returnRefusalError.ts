@@ -15,6 +15,7 @@
 //
 // RET-A (5 Oct 2026):
 //   return_sale_required             400  POST /: every return is linked to a sale (F6)
+//   return_sale_not_found            400  POST /: the named sale does not exist (N1)
 //   manual_return_items_locked       400  PATCH /:id: the items of an old manual return (F6)
 //   return_lot_not_sold              400  POST / and PATCH /:id: a lot the sale line was not sold from (F11)
 //   return_line_product_mismatch     400  POST / and PATCH /:id: another product than the sale line (F11)
@@ -29,6 +30,7 @@ export const RETURN_REFUSAL_ERRORS: Readonly<Record<string, string>> = {
   'return_refund_price_ambiguous': 'This product was sold at different prices on this sale. Pick the exact sale item being returned.',
   'return_refund_sale_line_required': 'Each return line needs a sale item or a product.',
   'return_sale_required': 'Every return must be linked to a sale. Find the sale this item came from.',
+  'return_sale_not_found': 'The sale this return names was not found. Find the sale this item came from.',
   'manual_return_items_locked': 'This return is not linked to a sale, so its items cannot be changed. Cancel it and record the return against the sale.',
   'return_lot_not_sold': 'This sale line was not sold from that received date. Units go back into the received date they were sold from.',
   'return_line_product_mismatch': 'This return line names a different product than the sale item it returns.',

@@ -31,7 +31,9 @@ const trFrom = (pack: Record<string, string>) => (key: string, fallback: string)
 const CODES = ['return_edit_cancelled', 'return_restore_over_capacity', 'return_refund_price_ambiguous', 'return_refund_sale_line_required',
   // RET-A (5 Oct 2026): F6 sale link, F11 sale-line identity, F1 Not Paid debt.
   'return_sale_required', 'manual_return_items_locked', 'return_lot_not_sold', 'return_line_product_mismatch', 'return_line_not_on_sale',
-  'return_sale_item_required', 'customer_return_refund_exceeds_paid', 'customer_return_owed_unreadable', 'return_restore_owed_changed']
+  'return_sale_item_required', 'customer_return_refund_exceeds_paid', 'customer_return_owed_unreadable', 'return_restore_owed_changed',
+  // N1 (loophole review, 6 Oct 2026): the named sale does not exist.
+  'return_sale_not_found']
 
 runTest('the mapping covers exactly the FX-returns and RET-A refusal codes', () => {
   assert.deepEqual(Object.keys(RETURN_REFUSAL_ERRORS).sort(), [...CODES].sort())
@@ -109,7 +111,10 @@ runTest('every mapped code is one the Worker actually sends, and the route forwa
   assert.equal(route.split('if (error instanceof RefundSaleLineError) return c.json({ error: error.message, code: error.code }, 400)').length - 1, 2,
     'POST / and PATCH /:id both forward the refund-price refusal code')
   // RET-A: each new code is one the Worker sends.
-  assert.ok(route.includes("code: 'return_sale_required', action: 'fix_request' }, 400)"), 'POST / refuses a return with no sale')
+  assert.ok(route.includes("code: 'return_sale_required', action: 'fix_request' } as const"), 'POST / names the no-sale refusal')
+  assert.equal(route.split('return c.json(RETURN_SALE_REQUIRED, 400)').length - 1, 2, 'POST / refuses a return with no sale in the v0 and v1 shapes')
+  assert.ok(route.includes("code: 'return_sale_not_found', action: 'fix_request' }, 400)"), 'POST / refuses a sale id that names no sale')
+  assert.ok(route.includes("{ code: 'return_sale_not_found' })"), 'the v0 capacity check names the missing sale')
   assert.ok(route.includes("code: 'manual_return_items_locked', action: 'fix_request' }, 400)"), 'PATCH /:id locks the items of an old manual return')
   assert.equal(route.split('return c.json({ ...RETURN_LOT_NOT_SOLD, product_id: productId }, 400)').length - 1, 2, 'POST / and PATCH /:id refuse a lot the line was not sold from')
   assert.ok(kernel.includes("code: 'return_lot_not_sold',"), 'the kernel names return_lot_not_sold')
