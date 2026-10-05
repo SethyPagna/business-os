@@ -38,7 +38,8 @@
 --                               A closed shift's expected cash rises; with SEC-SHIFT's stored close
 --                               figures it shows as "changed after close" -- expected.
 --   legacy_sales / legacy_sales_with_receivable   imported legacy sales among backfill_sales, and
---                               those with a customer_receivables row (that ledger is never written:
+--                               those with a customer_receivables row on the composite key
+--                               invoice_no || '@' || invoice date (that ledger is never written:
 --                               returns have never touched it; report any non-zero to the lead)
 --   first_return_date, last_return_date
 -- ops:min-rows 1
@@ -232,7 +233,8 @@ SELECT
   (SELECT COUNT(*) FROM shift_hit WHERE closed_at IS NULL AND cancelled_at IS NOT NULL) AS shifts_cancelled,
   (SELECT COUNT(*) FROM plan_status WHERE legacy_receipt_number IS NOT NULL AND legacy_receipt_number <> '') AS legacy_sales,
   (SELECT COUNT(*) FROM plan_status p WHERE p.legacy_receipt_number IS NOT NULL AND p.legacy_receipt_number <> ''
-    AND EXISTS (SELECT 1 FROM customer_receivables cr WHERE cr.invoice_no = CASE WHEN instr(p.legacy_receipt_number, '@') > 0
-      THEN substr(p.legacy_receipt_number, 1, instr(p.legacy_receipt_number, '@') - 1) ELSE p.legacy_receipt_number END)) AS legacy_sales_with_receivable,
+    AND EXISTS (SELECT 1 FROM customer_receivables cr
+      WHERE cr.invoice_no = substr(p.legacy_receipt_number, 1, instr(p.legacy_receipt_number, '@') - 1)
+        AND p.legacy_receipt_number = cr.invoice_no || '@' || substr(cr.invoice_date, 1, 10))) AS legacy_sales_with_receivable,
   (SELECT MIN(date(c.created_at)) FROM walk w JOIN candidate c ON c.id = w.id) AS first_return_date,
   (SELECT MAX(date(c.created_at)) FROM walk w JOIN candidate c ON c.id = w.id) AS last_return_date;

@@ -302,6 +302,27 @@ async function main() {
     assert.equal(afterLive.refused_returns, live.refused_returns)
   })
 
+  await check('sizing: a legacy sale matches its receivable on the composite key (invoice number AND date), never the number alone', () => {
+    const { raw, sale, ret } = world()
+    const receivable = (id, invoiceNo, invoiceDate) => raw.prepare(`INSERT INTO customer_receivables(id, legacy_id, customer_name, invoice_no, invoice_date, status,
+      source_file, source_row) VALUES (?, ?, 'Fixture', ?, ?, 'open', 'fixture.xls', ?)`).run(id, id, invoiceNo, invoiceDate, id)
+    // The old system reuses invoice numbers across days: INV-7 on 1 Sep and on 2 Sep are two invoices.
+    sale(1, { total: 10, status: 'partial_return', before: 'awaiting_payment' }); ret(1, 4)
+    sale(2, { total: 10, status: 'partial_return', before: 'awaiting_payment' }); ret(2, 4)
+    sale(3, { total: 10, status: 'partial_return', before: 'awaiting_payment' }); ret(3, 4)
+    raw.prepare("UPDATE sales SET legacy_receipt_number = 'INV-7@2026-09-01' WHERE id = 1").run()
+    raw.prepare("UPDATE sales SET legacy_receipt_number = 'INV-7@2026-09-03' WHERE id = 2").run()
+    raw.prepare("UPDATE sales SET legacy_receipt_number = 'INV-9@2026-09-01' WHERE id = 3").run()
+    receivable(1, 'INV-7', '2026-09-01 00:00:00')
+    receivable(2, 'INV-7', '2026-09-02')
+    receivable(3, 'INV-9', '2026-09-04')
+    for (const name of ['ret-a-notpaid-returns-backfill-sizing', 'ret-a-notpaid-returns-backfill-sizing-live']) {
+      const row = sizing(raw, name)
+      assert.deepEqual([row.legacy_sales, row.legacy_sales_with_receivable], [3, 1],
+        `${name}: only INV-7 of 1 Sep has its receivable; the same number on another day is a different invoice`)
+    }
+  })
+
   await check('fuzz: 400 random debt sales match splitReturnRefund and saleStatusWithReturns exactly', () => {
     const { raw, sale, ret } = world()
     let seed = 20261006
