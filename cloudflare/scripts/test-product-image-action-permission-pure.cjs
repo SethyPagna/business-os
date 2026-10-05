@@ -178,6 +178,14 @@ function loadProductsRoute(state) {
     '../lib/productImagePermission': imagePermission,
     '../lib/productMerge': productMerge,
     '../lib/productWrites': productWrites,
+    // Product edit / merge alerts (owner, 5 Oct 2026): the transport is a no-op, and an image-only edit by a non-admin is
+    // announced as "images" (an Employee keeps image upload; the alert never blocks the write).
+    '../lib/telegram': { sendTelegramEvent: async () => false },
+    '../lib/productEditAlert': {
+      PRODUCT_EDIT_ALERT_HEADING: 'edit', PRODUCT_MERGE_ALERT_HEADING: 'merge',
+      productEditAlertFields: (_columns, images) => (images ? ['images'] : []),
+      formatProductEditAlertLines: () => [], formatProductMergeAlertLines: () => [],
+    },
     '../lib/reviewGate': {
       maybeQueueForReview: async (_env, user, _section, request) => {
         if (permissions.getPermissionTier(user, 'products') !== 'review') return null

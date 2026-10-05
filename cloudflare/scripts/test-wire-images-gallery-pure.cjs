@@ -176,8 +176,12 @@ const productsRoute = loadReal('routes/products.ts', {
     getPermissionTier: () => 'full',
     getActionTier: () => 'full',
     getMergedPermissions: () => ({}),
+    isAdminControlUser: () => true,
   },
   '../lib/audit': { audit: async () => {} },
+  // Product edit / merge alerts (owner, 5 Oct 2026): the Telegram transport is a no-op here, the formatter is real.
+  '../lib/telegram': { sendTelegramEvent: async () => false },
+  '../lib/productEditAlert': loadReal('lib/productEditAlert.ts'),
   // K3 Part 417: products.ts enqueues on-upload image normalization;
   // this test asserts gallery wiring, so a no-op stub is honest.
   '../lib/imageAudit': { enqueueImageNormalization: async () => {} },
