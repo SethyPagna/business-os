@@ -140,7 +140,7 @@ async function main() {
 async function verifyWholeChainWithinPatternLimit() {
   const db = new Database(':memory:')
   const files = fs.readdirSync(migrations).filter(f => f.endsWith('.sql')).sort()
-  for (const name of ['0230_portal_members_separation.sql', '0231_portal_member_links.sql']) assert.ok(files.includes(name), `${name} is in the chain`)
+  for (const name of ['0230_portal_members_separation.sql', '0231_portal_member_links.sql', '0232_portal_telegram_identities.sql']) assert.ok(files.includes(name), `${name} is in the chain`)
   for (const file of files) db.exec(fs.readFileSync(path.join(migrations, file), 'utf8'))
   const objects = db.prepare('SELECT name,tbl_name,type,sql FROM sqlite_master WHERE sql IS NOT NULL').all()
   db.close()
@@ -159,8 +159,21 @@ async function verifyWholeChainWithinPatternLimit() {
     for (const bad of ['W-7KQ4-M9XI', 'w-7kq4-m9xd', 'W-7KQ4M9XD', 'W-7KQ4-M9XDD']) {
       await assert.rejects(d1.prepare("INSERT INTO portal_accounts (name, member_code) VALUES ('bad', ?)").bind(bad).run(), /CHECK constraint/, bad)
     }
+    // G38 Telegram (0232): the real file on workerd D1. Every CHECK and UNIQUE
+    // the Worker relies on fires there too, and a second run is a no-op.
+    const telegram = fs.readFileSync(path.join(migrations, '0232_portal_telegram_identities.sql'), 'utf8')
+    for (let run = 0; run < 2; run += 1) await d1.batch(split(telegram).map(sql => d1.prepare(sql)))
+    const identity = (account, subject) => d1.prepare("INSERT INTO portal_login_identities (account_id, provider, subject_key, verified_at) VALUES (?, 'telegram', ?, CURRENT_TIMESTAMP)").bind(account, subject).run()
+    await identity(1, '111')
+    await assert.rejects(identity(2, '111'), /UNIQUE constraint/, 'one member per Telegram account')
+    await assert.rejects(identity(1, '222'), /UNIQUE constraint/, 'one Telegram account per member')
+    const challenge = (nonce, purpose, account) => d1.prepare("INSERT INTO portal_telegram_challenges (nonce_hash, browser_hash, purpose, account_id, expires_at) VALUES (?, ?, ?, ?, '2999-01-01 00:00:00.000')").bind(nonce, 'b'.repeat(64), purpose, account).run()
+    await challenge('a'.repeat(64), 'signin', null)
+    await assert.rejects(challenge('c'.repeat(64), 'attach', null), /CHECK constraint/, 'an attach names its account')
+    await assert.rejects(challenge('raw-nonce', 'signin', null), /CHECK constraint/, 'only a 64-hex hash fits')
+    await assert.rejects(challenge('a'.repeat(64), 'signin', null), /UNIQUE constraint/, 'a nonce hash is used once')
   } finally { await mf.dispose() }
-  console.log('PASS whole chain (incl. 0230/0231) keeps every active LIKE/GLOB within 50 bytes; on workerd the first-draft member_code CHECK aborts and the shipped one commits')
+  console.log('PASS whole chain (incl. 0230/0231/0232) keeps every active LIKE/GLOB within 50 bytes; on workerd the first-draft member_code CHECK aborts and the shipped one commits; 0232 CHECK and UNIQUE rules fire on workerd and a re-run is a no-op')
 }
 
 async function verifyWranglerMigration(migration) {

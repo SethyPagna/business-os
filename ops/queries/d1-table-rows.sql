@@ -174,4 +174,8 @@ SELECT
   json_object(
     'portal_member_link_events', (SELECT COUNT(*) FROM portal_member_link_events),
     'portal_member_link_requests', (SELECT COUNT(*) FROM portal_member_link_requests)
-  ) AS rows_10;
+  ) AS rows_10,
+  json_object(
+    'portal_login_identities', (SELECT COUNT(*) FROM portal_login_identities),
+    'portal_telegram_challenges', (SELECT COUNT(*) FROM portal_telegram_challenges)
+  ) AS rows_11;

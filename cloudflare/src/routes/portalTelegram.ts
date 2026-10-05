@@ -3,6 +3,7 @@ import { getCookie, setCookie } from 'hono/cookie'
 import type { SessionUser } from '../lib/auth'
 import { checkRateLimit, getClientNetworkKey } from '../lib/rateLimit'
 import { portalAbuseKey } from '../lib/portalAbuseKey'
+import { requireJsonSameOriginCredentialPost } from '../lib/requestBodyGuard'
 import { consentGiven, loadPortalMemberView, PORTAL_CONSENT_VERSION } from '../lib/portalAccounts'
 import { createPortalSession, getPortalAccountState, setPortalCookie } from '../lib/portalSession'
 import {
@@ -70,6 +71,13 @@ app.post('/telegram/webhook', async (c) => {
 
 // Whether to show "Continue with Telegram": on once the owner has set
 // PORTAL_TELEGRAM_WEBHOOK_SECRET. Env only, no D1; the browser may keep it a minute.
+// G38 E5 (login CSRF): start and poll sign a browser in, so they are
+// same-origin JSON only (415 credential_json_required, 403
+// credential_origin_refused), exactly like the portal's own /auth/* writes.
+// Registered before the handlers; GETs pass. The webhook above is not under
+// /auth: Telegram sends neither header, and its secret is its authentication.
+app.use('/auth/*', requireJsonSameOriginCredentialPost)
+
 app.get('/auth/telegram/status', (c) => {
   c.header('Cache-Control', 'public, max-age=60')
   return c.json({ available: portalTelegramEnabled(c.env) })

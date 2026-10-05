@@ -57,8 +57,10 @@ function makeHarness({ mutant = null, env = ENV, settings = {}, overrides = {} }
   app.route('/', h.load('routes/portalTelegram.ts').default)
   app.route('/', h.app)
   h.request = async (pathname, method = 'POST', body, { ip = '203.0.113.9', headers = {} } = {}) => {
-    const all = { ...(ip ? { 'CF-Connecting-IP': ip } : {}), ...headers }
-    if (body !== undefined) all['Content-Type'] = 'application/json'
+    // A browser on the shop's own page sends Sec-Fetch-Site: same-origin (the
+    // portal's credential guard needs it); Telegram sends none (null drops it).
+    const all = { ...(ip ? { 'CF-Connecting-IP': ip } : {}), 'Sec-Fetch-Site': 'same-origin', ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}), ...headers }
+    for (const key of Object.keys(all)) if (all[key] === null) delete all[key]
     const response = await app.request(pathname, { method, headers: all, body: body === undefined ? undefined : JSON.stringify(body) }, h.env, { waitUntil() {}, passThroughOnException() {} })
     let json = null
     try { json = await response.json() } catch (_) {}
@@ -82,7 +84,7 @@ function makeHarness({ mutant = null, env = ENV, settings = {}, overrides = {} }
     return { jar, ip, send, start: (body = {}) => send('/auth/telegram/start', 'POST', { consent: true, consentLocale: 'km', locale: 'km', ...body }), poll: (nonce) => send('/auth/telegram/poll', 'POST', { nonce }) }
   }
   h.bot = (message, secret = SECRET) => h.request('/telegram/webhook', 'POST', { update_id: Math.floor(Math.random() * 1e9), message },
-    { ip: null, headers: secret === null ? {} : { 'X-Telegram-Bot-Api-Secret-Token': secret } })
+    { ip: null, headers: { 'Sec-Fetch-Site': null, ...(secret === null ? {} : { 'X-Telegram-Bot-Api-Secret-Token': secret }) } })
   h.count = (table, where = '1 = 1') => Number(h.raw.prepare(`SELECT COUNT(*) AS n FROM ${table} WHERE ${where}`).get({}).n)
   h.one = (sql, params = {}) => h.raw.prepare(sql).get(params)
   return h
@@ -560,6 +562,35 @@ function createStaffApp(h) {
     return { status: response.status, body: await response.json().catch(() => null) }
   }
 }
+
+// ---- 12b. login CSRF ---------------------------------------------------------------------
+scenario('start and poll are same-origin JSON only (415 / 403), like the portal /auth/* writes; the webhook is exempt',
+  { label: 'the Telegram routes skip the credential guard', edits: [['routes/portalTelegram.ts', "app.use('/auth/*', requireJsonSameOriginCredentialPost)", '']] },
+  async () => {
+    const h = makeHarness()
+    const body = { consent: true, consentLocale: 'km', locale: 'km' }
+    const send = (pathname, payload, headers) => h.request(pathname, 'POST', payload, { ip: '198.51.100.200', headers })
+    const textPlain = await send('/auth/telegram/start', body, { 'Content-Type': 'text/plain' })
+    assert.equal(textPlain.status, 415)
+    assert.equal(textPlain.body.code, 'credential_json_required')
+    for (const headers of [{ 'Sec-Fetch-Site': 'cross-site' }, { 'Sec-Fetch-Site': 'same-site' }, { 'Sec-Fetch-Site': null }, { 'Sec-Fetch-Site': null, Origin: 'https://evil.example' }]) {
+      const res = await send('/auth/telegram/start', body, headers)
+      assert.equal(res.status, 403, JSON.stringify(headers))
+      assert.equal(res.body.code, 'credential_origin_refused')
+    }
+    assert.equal((await send('/auth/telegram/poll', { nonce: 'A'.repeat(32) }, { 'Content-Type': 'text/plain' })).status, 415)
+    assert.equal((await send('/auth/telegram/poll', { nonce: 'A'.repeat(32) }, { 'Sec-Fetch-Site': 'cross-site' })).status, 403)
+    assert.equal(h.count('portal_telegram_challenges'), 0, 'a refused start writes nothing')
+    assert.equal(h.count('rate_limit_events'), 0, 'refused before the rate limiter')
+    // Safari before 16.4 sends no Sec-Fetch-Site but a same-origin Origin: allowed.
+    const safari = await h.request('http://localhost/auth/telegram/start', 'POST', body, { ip: '198.51.100.201', headers: { 'Sec-Fetch-Site': null, Origin: 'http://localhost' } })
+    assert.equal(safari.status, 200, JSON.stringify(safari.body))
+    // Positive control and the exemption: a browser start works, and the bot's
+    // webhook (no browser headers at all) is still answered.
+    const ok = await send('/auth/telegram/start', body, {})
+    assert.equal(ok.status, 200)
+    assert.equal((await h.bot(startMsg(5550140, ok.body.nonce))).body.reply_markup.keyboard[0][0].request_contact, true)
+  })
 
 // ---- 13. retention -----------------------------------------------------------------------
 // The 0232 schema itself (header assertions, idempotence, constraints) is
