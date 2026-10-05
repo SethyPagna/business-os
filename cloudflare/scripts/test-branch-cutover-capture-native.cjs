@@ -231,9 +231,9 @@ async function main() {
     const w = world(); stock(w)
     w.raw.prepare('UPDATE branch_stock SET quantity=? WHERE branch_id=2').run(1e-13)
     w.raw.prepare('UPDATE branch_batch_stock SET quantity=? WHERE branch_id=2').run(1e-13)
-    const row = (await begin(w)).row
-    await assert.rejects(until(w, row, 'snapshots'), e => e.code === 'branch_cutover_parent_capability')
-    assert.equal(w.raw.prepare('SELECT phase FROM branch_cutovers').get().phase, 'capturing'); w.raw.close()
+    // below the twelfth place: refused at begin since E3 (it used to refuse only during capture), so no journal row exists
+    await assert.rejects(begin(w), e => e.code === 'branch_cutover_parent_capability' && e.capability === 'unsupported_stock_state:inexact')
+    assert.equal(w.raw.prepare('SELECT count(*) n FROM branch_cutovers').get().n, 0); w.raw.close()
   })
   await check('canonical capture digest independent of page size with exact fractional lot metadata', async () => {
     const roots = []
