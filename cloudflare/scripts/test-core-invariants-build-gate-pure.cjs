@@ -51,6 +51,8 @@ const identity = { BUSINESS_OS_ORGANIZATION_NAME: 'Test OS', BUSINESS_OS_ORGANIZ
 function world() {
   const raw = new DatabaseSync(':memory:')
   for (const sql of migrations) raw.exec(sql)
+  // D1 parses with expression depth 100 (harness/d1compat.cjs); so does this fixture.
+  raw.limits.exprDepth = 100
   const log = []
   const control = { failOn: null, gate: null }
   const DB = { prepare(sql) {
