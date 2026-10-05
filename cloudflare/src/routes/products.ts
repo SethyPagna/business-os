@@ -32,6 +32,8 @@ import type { CostVerdict, MergedCostOutlier } from '../lib/productDetailRule'
 import { buildAtomicMergeHistoryStatements, closeStockSessionsStatements, readOpenStockSessions, finalizeAtomicMergeHistory, mergeStateFingerprint, PRODUCT_MERGE_GROUP_ACTION_KIND, PRODUCT_MERGE_GROUP_CHILD_KIND, productMergeGroupPrefixFingerprint, registerMergeFold, registerProductMergeGroupRedo, recordSupplierBackfillSnapshot, MERGE_REPARENT_TABLES, type AtomicMergeKnownIds, type AtomicMergeStatement, type MergeReversal, type MergeStockDisposition, type ProductMergeKeeperChoice } from '../lib/undoAppliers'
 import { INVALID_RESOLVE_CHOICES_CODE, KEEPER_CHOICE_BEFORE_SQL, MERGE_APPLIED_PROBE_SQL, ProductResolveChoiceError, RESOLVE_EDIT_PERMISSION_CODE, keeperChoiceBefore, keeperChoiceStatements, mergeFailedBody, parseProductResolveChoices, resolveChoicesTypeValues, resolveChoiceValues, type ProductResolveChoices, type ResolveChoiceValues } from '../lib/productResolveChoices'
 import { createProductMergeClusterPlan, isMergePriceEditError, MERGE_COST_FIELDS, MERGE_PRICE_EDIT_CODE, MERGE_PRICE_EDIT_MESSAGE, MERGE_PRICE_FIELDS, mergePriceEditError, mergePriceOverrides, parseProductMergeClusterPlan, productMergeCaseKey, productMergeCasAssertion, productMergeNumericError, productMergeSourceUnmovedAssertion, MERGE_CONFLICT_RETRY, productMergePlanKeeperMatches, productMergePlanSourceMemberMatches, resolveProductMergeClusterPlanEconomics, resolveProductMergeEconomics, type ProductMergeClusterPlan, type ProductMergeEconomics, type ProductMergeNumericIssue } from '../lib/productMerge'
+import { sendTelegramEvent } from '../lib/telegram'
+import { PRODUCT_EDIT_ALERT_HEADING, formatProductEditAlertLines, productEditAlertFields } from '../lib/productEditAlert'
 import { CATALOG_COST_DERIVE_SQL, catalogCostRecomputeIfChangedSql, costEntryActorParams, typedCostEntriesBeforeWriteSql, typedCostEntryBeforeWriteStatement } from '../lib/catalogCostRecompute'
 import { PRODUCT_MERGE_READ_BATCH_MAX_STATEMENTS, productMergeSourceExtent, readProductMergeCaseSnapshot, readProductMergeDependentLotSnapshots, planProductMergeCaseSnapshot, planProductMergeDependentLotSnapshots, runProductMergeReadBatch, type ProductMergeReadPlan } from '../lib/productMergeSnapshot'
 import type { ProductMergeCaseSnapshot, ProductMergeLotSnapshot } from '../lib/productMergeSnapshot'
@@ -2200,10 +2202,12 @@ app.put('/:id', async (c) => {
   }
   const submittedImageFields = Object.prototype.hasOwnProperty.call(body, 'image_path')
     || Object.prototype.hasOwnProperty.call(body, 'image_gallery')
+  let productImagesChanged = false
   if (submittedImageFields) {
     const currentImageState = await loadProductImageState(c.env, id)
     if (!currentImageState) return c.json({ error: 'Product not found' }, 404)
     const changesImages = await productImageFieldsChangedResolved(getDb(c.env), body, currentImageState)
+    productImagesChanged = changesImages
     if (imagePermissionDenied(user, changesImages, isImageOnlyEdit)) {
       return c.json({ error: 'You do not have permission to perform this action' }, 403)
     }
@@ -2457,6 +2461,18 @@ app.put('/:id', async (c) => {
   })
   if (productFieldChange) {
     await audit(c.env, user?.id ?? null, actorSnapshot(user), 'update', 'product', id, null, productFieldChange)
+  }
+  // Owner, 5 Oct 2026: every product edit by someone who is not an administrator leaves the Record above AND
+  // sends this alert (bilingual, Alerts topic). The alert never blocks or fails the edit.
+  if (!isAdminControlUser(user) && (productFieldChange || productImagesChanged)) {
+    const alertFields = productEditAlertFields(Object.keys(productFieldChange?.after || {}), productImagesChanged)
+    if (alertFields.length) {
+      c.executionCtx.waitUntil(Promise.resolve(sendTelegramEvent(c.env, {
+        type: 'products',
+        heading: PRODUCT_EDIT_ALERT_HEADING,
+        lines: formatProductEditAlertLines({ product: String((item as Record<string, unknown>).name || ''), changed: alertFields, by: actorSnapshot(user) }),
+      })).catch((error) => console.error('[telegram] product edit alert failed', error)))
+    }
   }
   if (renamedProductName && renamedProductIds.length) {
     await syncLinkedProductNameSnapshots(c.env, renamedProductIds, renamedProductName)
