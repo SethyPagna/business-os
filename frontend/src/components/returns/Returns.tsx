@@ -627,7 +627,10 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
       }
     }
     setDetailRet(refreshOpen)
-    setEditRet(refreshOpen)
+    // The editor keeps the version its fields were loaded from: a newer row
+    // must come back as a conflict the operator sees, never as a silent
+    // overwrite of another person's change by the next Save.
+    setEditRet((current) => current ? { ...(refreshOpen(current) as ReturnRow), updated_at: current.updated_at } : current)
   }, [rows])
 
   // The foldable stats strip (shared StatsStrip, app-wide stats pattern):
@@ -1707,7 +1710,9 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
       {editRet ? (
         <Suspense fallback={null}>
           <EditReturnModal
+            key={`${editRet.id}:${editRet.updated_at ?? ''}`}
             ret={editRet}
+            onReloadLatest={() => { void handleOpenEdit(editRet) }}
             onClose={() => setEditRet(null)}
             onSuccess={(result) => handleReturnMutationSuccess({
               kind: 'edit',

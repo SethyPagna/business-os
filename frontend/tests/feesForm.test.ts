@@ -59,7 +59,7 @@ assert.match(formSource, /if \(!pendingCreate \|\| savingRef\.current \|\| !acto
 assert.match(pageSource, /closeDisabled=\{feeFormLocked\}/, 'modal close is disabled while saving or unresolved')
 assert.match(pageSource, /canMinimizeFeeForm && !feeFormLocked/, 'minimize cannot park an in-flight or unresolved request')
 assert.match(pageSource, /disabled=\{feeFormLocked\}/, 'visible minimize control reflects its disabled state')
-assert.match(pageSource, /key=\{`\$\{selected\?\.id \?\? 'new'\}:\$\{user\?\.id \?\? 'anonymous'\}`\}/, 'account changes remount the actor-scoped recovery form')
+assert.match(pageSource, /key=\{`\$\{selected\?\.id \?\? 'new'\}:\$\{selected\?\.updated_at \?\? ''\}:\$\{user\?\.id \?\? 'anonymous'\}`\}/, 'account changes and an explicit conflict reload remount the actor-scoped recovery form')
 assert.doesNotMatch(pageSource, /withLoaderTimeout\(\s*\(\) => createFeeRequest/, 'create is not detached from its outcome by an outer UI timeout')
 
 const feeFormMoney = new Function('nativeChangeAmounts', 'roundMoney2', `${extractFunction(formSource, 'feeFormMoney')}; return feeFormMoney`)(nativeChangeAmounts, roundMoney2)

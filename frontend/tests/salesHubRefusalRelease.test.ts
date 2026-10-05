@@ -88,12 +88,41 @@ function actual(file: string, name: string, env: Record<string, unknown>) {
 
 const sales = fs.readFileSync(new URL('../src/components/sales/Sales.tsx', import.meta.url), 'utf8')
 assert.match(sales, /unpaid \|\| \(!retryRequest && directMutationRefusedBeforeWrite\(error\)\)\) \{\s*savePendingBulkRequest\(null\)\s*void loadSales\(true\)/, 'bulk status releases a refused first send and reloads the rows it was built from')
-assert.match(sales, /cancelled \|\| \(!retryRequest && directMutationRefusedBeforeWrite\(error\)\)\) \{\s*savePendingBulkFieldRequest\(null\)\s*void loadSales\(true\)/, 'driver, customer and payment-method group changes release a refused first send')
+assert.match(sales, /cancelled \|\| \(!retryRequest && directMutationRefusedBeforeWrite\(error\)\)\) \{\s*savePendingBulkFieldRequest\(null\)\s*setBulkChangePrompt\(null\)\s*void loadSales\(true\)/, 'driver, customer and payment-method group changes release a refused first send and close the stale group dialog')
 const modal = fs.readFileSync(new URL('../src/components/sales/SaleDetailModal.tsx', import.meta.url), 'utf8')
 assert.match(modal, /if \(settlementVersionRef\.current === version \|\| paymentEntryOpen \|\| statusSaving \|\| pendingStatus\) return/, 'an opened, saving or pending payment keeps its reviewed version')
 assert.match(modal, /setSettlementSession\(\(current\) => \(\{ \.\.\.next, configuredMethods: current\.configuredMethods, exchangeRate: current\.exchangeRate \}\)\)/, 'an unopened payment starts from the committed row')
 const editReturn = fs.readFileSync(new URL('../src/components/returns/EditReturnModal.tsx', import.meta.url), 'utf8')
 assert.doesNotMatch(editReturn, /isWriteConflict\(error\)\) \{\s*clearPendingRequest\(\)\s*onSuccess\?\.\(\)/, 'a refused return edit must not record an Undo entry for an edit that never happened')
 const fees = fs.readFileSync(new URL('../src/components/fees/FeesPage.tsx', import.meta.url), 'utf8')
-assert.match(fees, /const fresh = fees\.find\(\(row\) => Number\(row\.id\) === Number\(selected\.id\)\)\s*if \(fresh && fresh\.updated_at !== selected\.updated_at\) setSelected\(fresh\)/, 'the open expense form follows the reloaded version')
+assert.doesNotMatch(fees, /fresh\.updated_at !== selected\.updated_at\) setSelected\(fresh\)/, 'a reloaded list never silently rebases the open expense form')
+assert.match(fees, /key=\{`\$\{selected\?\.id \?\? 'new'\}:\$\{selected\?\.updated_at \?\? ''\}/, 'an explicit reload reopens the form on the latest row')
+const returns = fs.readFileSync(new URL('../src/components/returns/Returns.tsx', import.meta.url), 'utf8')
+assert.match(returns, /setEditRet\(\(current\) => current \? \{ \.\.\.\(refreshOpen\(current\) as ReturnRow\), updated_at: current\.updated_at \} : current\)/, 'the return editor keeps the version its fields came from')
+assert.match(editReturn, /clearPendingRequest\(\)\s*setConflicted\(true\)/)
+assert.match(editReturn, /data-return-edit-conflict=""[\s\S]{0,700}onClick=\{onReloadLatest\}/, 'a refused return edit is shown with a Reload latest action')
+const app = fs.readFileSync(new URL('../src/AppContext.tsx', import.meta.url), 'utf8')
+assert.match(app, /if \(\['sales:amend', 'sales:addItems'\]\.includes\(String\(detail\.channel \|\| ''\)\)\) return/, 'the sale detail states its own line-edit conflict without a covering dialog')
 console.log('PASS Sales bulk, payment review, return edit and expense edit wiring')
+
+{
+  const conflict = Object.assign(new Error('This fee changed.'), { status: 409, code: 'write_conflict', conflict: true })
+  const marks: unknown[] = [], drafts: string[] = []
+  let selected: Record<string, unknown> | null = { id: 5, updated_at: 'v0' }
+  const env: Record<string, unknown> = {
+    get selected() { return selected }, user: { id: 7 }, withLoaderTimeout: (run: () => unknown) => run(), FEES_MUTATION_TIMEOUT_MS: 1,
+    updateFeeRequest: async () => { throw conflict }, createFeeRequest: async () => ({}), notify: () => {}, tr: (_key: string, english: string) => english,
+    load: async () => {}, isWriteConflictError: (error: { conflict?: boolean }) => !!error.conflict, setFeeConflictId: (id: unknown) => marks.push(id),
+    getFeeRequest: async () => ({ fee: { id: 5, updated_at: 'v1', label: 'Peer change' } }), clearWorkDraft: (key: string) => drafts.push(key),
+    scopedWorkDraftKey: (key: string) => 'scoped:' + key, feeFormDraftBaseKey: (id: unknown) => 'fee_' + id,
+    setSelected: (update: (row: Record<string, unknown> | null) => Record<string, unknown> | null) => { selected = update(selected) },
+  }
+  await assert.rejects(actual('../src/components/fees/FeesPage.tsx', 'handleSave', env)({ fee_type: 'expense' }))
+  assert.deepEqual(marks, [5], 'a refused edit is marked as a conflict on its form')
+  assert.equal(selected?.updated_at, 'v0', 'the form keeps the version its fields came from')
+  await actual('../src/components/fees/FeesPage.tsx', 'reloadConflictedFee', env)()
+  assert.equal(selected?.updated_at, 'v1')
+  assert.deepEqual(drafts, ['scoped:fee_5'], 'Reload drops the typed draft so it cannot be re-applied over the peer change')
+  assert.deepEqual(marks, [5, null])
+  console.log('PASS actual expense edit shows a refused save as a conflict and reloads only on request')
+}
