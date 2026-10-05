@@ -131,6 +131,8 @@ import {
   guardSaleStatusTransition,
   normalizeCancelReason,
   planSaleStockTransition,
+  activeReturnLotsBySaleSql,
+  returnedLotsByItem,
   type CancelReason,
   type SaleItemAllocation,
 } from '../lib/saleTransitions'
@@ -2265,6 +2267,12 @@ app.patch('/:id/status', async (c) => {
       if (list && list.length) (item as SaleItemRow & { allocations?: SaleItemAllocation[] }).allocations = list
     }
   }
+  // RET-A F3: the units active returns already restocked into each lot, so a
+  // cancel restores only what is still out of each lot (saleTransitions.ts).
+  const returnedLots = regularItemIds.length
+    ? returnedLotsByItem(await db.prepare(activeReturnLotsBySaleSql('?'))
+      .all<{ sale_item_id: number; batch_id: number; quantity: number }>([id]))
+    : new Map<number, Map<number, number>>()
   const damagedTransitionOps: Array<{ lotId: number; productId: number; productName: string | null; branchId: number | null; delta: number }> = []
   let skippedDamagedUnits = 0
   for (const item of items) {
@@ -2288,6 +2296,7 @@ app.patch('/:id/status', async (c) => {
     newStatus: saleStatus,
     items: regularItems,
     returnedByItem,
+    returnedLotsByItem: returnedLots,
     reason: movementReason,
     userId: user?.id ?? null,
     userName: actorSnapshot(user),

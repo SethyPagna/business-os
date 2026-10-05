@@ -628,9 +628,23 @@ async function fetchSaleItemBatchInfo(
 // sale_items.batch_id is NULL (no single lot), so a return of it must split
 // the restock across these -- reverse order (last-drawn first), matching the
 // cancel path in saleTransitions.ts. Empty for old sales / legacy-stock lines.
+//
+// RET-A F3 (LH-3): released_quantity only counts what the sale's own cancel
+// gave back, so the units still out of a lot are also net of what ACTIVE
+// returns already restocked into it (return_item_batch_allocations). Without
+// that, a second return of a multi-lot line refilled the lot the first return
+// had refilled and shorted another. `excludeReturnId` leaves out the return a
+// PATCH is about to reverse. The assignment is lib/saleTransitions.ts
+// allocationReturnedShares (reverse walk, capped per row), restated here so
+// this route keeps its module graph.
+//
+// Every drawn lot is listed, even one with nothing left out (outstanding 0):
+// it is still a lot this line was sold from, which is what F11's lot check
+// asks; planReturnLot never gives a row with 0 outstanding any units.
 async function fetchSaleItemAllocations(
   db: ReturnType<typeof getDb>,
   saleItemIds: number[],
+  excludeReturnId: number | null = null,
 ): Promise<Map<number, Array<{ batch_id: number; outstanding: number }>>> {
   const map = new Map<number, Array<{ batch_id: number; outstanding: number }>>()
   const ids = [...new Set(saleItemIds)].filter((id) => Number.isFinite(id) && id > 0)
@@ -638,14 +652,49 @@ async function fetchSaleItemAllocations(
   const rows = await selectInChunks(ids, 0, (chunk) => db
     .prepare(`SELECT sale_item_id, batch_id, quantity, released_quantity FROM sale_item_batch_allocations WHERE sale_item_id IN (${chunk.map(() => '?').join(',')}) ORDER BY id ASC`)
     .all<{ sale_item_id: number; batch_id: number; quantity: number; released_quantity: number }>(chunk))
-  for (const row of rows) {
-    const outstanding = Math.max(0, (Number(row.quantity) || 0) - (Number(row.released_quantity) || 0))
-    if (outstanding <= 0) continue
-    const list = map.get(Number(row.sale_item_id)) || []
-    list.push({ batch_id: Number(row.batch_id), outstanding })
-    map.set(Number(row.sale_item_id), list)
+  const returnedRows = await selectInChunks(ids, 1, (chunk) => db
+    .prepare(`SELECT a.sale_item_id AS sale_item_id, a.batch_id AS batch_id, SUM(a.quantity) AS quantity
+      FROM return_item_batch_allocations a
+      JOIN return_items ri ON ri.id = a.return_item_id
+      JOIN returns r ON r.id = ri.return_id
+      WHERE a.sale_item_id IN (${chunk.map(() => '?').join(',')}) AND a.reversed_at IS NULL
+        AND COALESCE(r.status, 'completed') <> 'cancelled' AND COALESCE(r.return_scope, 'customer') = 'customer'
+        AND r.id <> ?
+      GROUP BY a.sale_item_id, a.batch_id`)
+    .all<{ sale_item_id: number; batch_id: number; quantity: number }>([...chunk, excludeReturnId ?? -1]))
+  const returnedLeft = new Map<string, number>()
+  for (const row of returnedRows) returnedLeft.set(`${Number(row.sale_item_id)}:${Number(row.batch_id)}`, Math.max(0, Number(row.quantity) || 0))
+  const byItem = new Map<number, typeof rows>()
+  for (const row of rows) byItem.set(Number(row.sale_item_id), [...(byItem.get(Number(row.sale_item_id)) || []), row])
+  for (const [saleItemId, list] of byItem) {
+    const outstanding = list.map((row) => Math.max(0, (Number(row.quantity) || 0) - (Number(row.released_quantity) || 0)))
+    for (let index = list.length - 1; index >= 0; index -= 1) {
+      const key = `${saleItemId}:${Number(list[index].batch_id)}`
+      const share = Math.min(outstanding[index], returnedLeft.get(key) || 0)
+      if (share <= 0) continue
+      outstanding[index] -= share
+      returnedLeft.set(key, (returnedLeft.get(key) || 0) - share)
+    }
+    map.set(saleItemId, list.map((row, index) => ({ batch_id: Number(row.batch_id), outstanding: outstanding[index] })))
   }
   return map
+}
+
+// Two lines of one request naming the same sale item must not both plan
+// against the same units still out: what one line planned is taken off the
+// shared allocation list before the next line plans (last drawn first).
+function consumePlannedSplits(allocations: Array<{ batch_id: number; outstanding: number }> | undefined,
+  splits: Array<{ batchId: number; quantity: number }>): void {
+  if (!allocations) return
+  for (const split of splits) {
+    let left = split.quantity
+    for (let index = allocations.length - 1; index >= 0 && left > 0; index -= 1) {
+      if (allocations[index].batch_id !== split.batchId) continue
+      const take = Math.min(allocations[index].outstanding, left)
+      allocations[index].outstanding -= take
+      left -= take
+    }
+  }
 }
 
 // The lot(s) a sellable restock actually put stock into, per return_item.
@@ -1693,6 +1742,7 @@ app.post('/', async (c) => {
       const error = new ReturnLotRequiredError(item.product_name?.trim() || productMap.get(productId)?.name || `product #${productId}`, quantity)
       return c.json({ error: error.message, code: error.code, product_id: productId }, 400)
     }
+    if (item.sale_item_id) consumePlannedSplits(saleItemAllocations.get(Number(item.sale_item_id)), plan.splits)
     returnLotPlans.push({ splits: plan.splits, plainQuantity: plan.plainQuantity })
   }
 
@@ -2867,7 +2917,7 @@ app.patch('/:id', async (c) => {
   // gate used to hold this slot for.
   const editSaleItemIds = newItems.map((i) => i.sale_item_id).filter((sid): sid is number => Number.isFinite(sid) && Number(sid) > 0)
   const saleItemBatchInfoForEdit = await fetchSaleItemBatchInfo(db, editSaleItemIds)
-  const saleItemAllocationsForEdit = await fetchSaleItemAllocations(db, editSaleItemIds)
+  const saleItemAllocationsForEdit = await fetchSaleItemAllocations(db, editSaleItemIds, returnId)
 
   // The refund per line: the ORIGINAL sale line's price, always -- an edit is
   // not a chance to restate what the customer paid. A manual return (no sale
@@ -2929,6 +2979,7 @@ app.patch('/:id', async (c) => {
       const error = new ReturnLotRequiredError(name, quantity)
       return c.json({ error: error.message, code: error.code, product_id: productId }, 400)
     }
+    if (item.sale_item_id) consumePlannedSplits(saleItemAllocationsForEdit.get(Number(item.sale_item_id)), plan.splits)
     editLotPlans.push({ splits: plan.splits, plainQuantity: plan.plainQuantity })
   }
 

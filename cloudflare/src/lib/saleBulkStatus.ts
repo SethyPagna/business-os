@@ -4,7 +4,7 @@ import type { SessionUser } from './auth';
 import { getActionTier, isAdminControlUser } from './permissions';
 import { D1_MAX_BOUND_PARAMS } from './sqlBinding';
 import { VALID_SALE_STATUSES } from './salesStatus';
-import { allocateReturnedQuantities, guardSaleStatusTransition, heldQuantity, normalizeCancelReason, planSaleStockTransition, type TransitionItem, type StockStatement } from './saleTransitions';
+import { activeReturnLotsBySaleSql, allocateReturnedQuantities, guardSaleStatusTransition, heldQuantity, normalizeCancelReason, planSaleStockTransition, returnedLotsByItem, type TransitionItem, type StockStatement } from './saleTransitions';
 import { bumpVersion } from './cache';
 import { broadcast } from '../durable-objects/broadcastHub';
 import { actorSnapshot } from './actorSnapshot';
@@ -347,6 +347,9 @@ export async function applySaleBulkStatus(env: Env, user: SessionUser, raw: Row)
     const allocations = await rowsIn<Allocation>(db, sourceMatchedIds, m => `SELECT a.* FROM sale_item_batch_allocations a JOIN sale_items si ON si.id=a.sale_item_id WHERE si.sale_id IN (${m}) ORDER BY a.id LIMIT 301`);
     if (allocations.length > 300)
         throw new SaleBulkError('Select fewer batch allocations (maximum 300).', 400);
+    // RET-A F3: units active returns already restocked into each lot, so a
+    // cancel restores only what is still out of each lot (saleTransitions.ts).
+    const returnedLots = returnedLotsByItem(await rowsIn<{ sale_item_id: number; batch_id: number; quantity: number }>(db, sourceMatchedIds, m => activeReturnLotsBySaleSql(m)));
     const returns = await rowsIn<{
         sale_id: number;
         sale_item_id: number | null;
@@ -437,7 +440,7 @@ export async function applySaleBulkStatus(env: Env, user: SessionUser, raw: Row)
             if (!member.fee)
                 fail('Linked cancellation fee is missing.');
         }
-        const plan = planSaleStockTransition({ saleId: expected.id, oldStatus: old, newStatus: request.target_status, items: own.filter(i => !i.damaged_lot_id), returnedByItem: returned, reason: 'Grouped sale status', userId: user.id, userName: actorSnapshot(user), skipStock: skipped });
+        const plan = planSaleStockTransition({ saleId: expected.id, oldStatus: old, newStatus: request.target_status, items: own.filter(i => !i.damaged_lot_id), returnedByItem: returned, returnedLotsByItem: returnedLots, reason: 'Grouped sale status', userId: user.id, userName: actorSnapshot(user), skipStock: skipped });
         // The existing transition kernel decides every regular movement and batch delta.
         // Persist typed deltas, never executable SQL, for an exact inverse after reload.
         for (const statement of plan.statements) {

@@ -126,6 +126,60 @@ export function allocateReturnedQuantities(
   return result
 }
 
+// RET-A F3 (LH-3): released_quantity counts only what the SALE's own
+// transitions gave back. A customer return restocks into the line's lots too
+// and records where in return_item_batch_allocations, so the units still OUT
+// in a lot are quantity - released_quantity - what active returns put back
+// into that lot. These read and assign that last term.
+//
+// Units ACTIVE customer returns restocked into each lot of each sale line,
+// for the sales whose ids fill `placeholders`.
+export function activeReturnLotsBySaleSql(placeholders: string): string {
+  return `SELECT a.sale_item_id AS sale_item_id, a.batch_id AS batch_id, SUM(a.quantity) AS quantity
+    FROM return_item_batch_allocations a
+    JOIN return_items ri ON ri.id = a.return_item_id
+    JOIN returns r ON r.id = ri.return_id
+    WHERE r.sale_id IN (${placeholders}) AND a.sale_item_id IS NOT NULL AND a.reversed_at IS NULL
+      AND COALESCE(r.status, 'completed') <> 'cancelled' AND COALESCE(r.return_scope, 'customer') = 'customer'
+    GROUP BY a.sale_item_id, a.batch_id`
+}
+
+/** sale_item_id -> batch_id -> units active returns restocked there. */
+export function returnedLotsByItem(rows: Array<{ sale_item_id: unknown; batch_id: unknown; quantity: unknown }>): Map<number, Map<number, number>> {
+  const result = new Map<number, Map<number, number>>()
+  for (const row of rows) {
+    const itemId = Number(row.sale_item_id), batchId = Number(row.batch_id), quantity = Math.max(0, Number(row.quantity) || 0)
+    if (!(itemId > 0) || !(batchId > 0) || !quantity) continue
+    const lots = result.get(itemId) || new Map<number, number>()
+    lots.set(batchId, (lots.get(batchId) || 0) + quantity)
+    result.set(itemId, lots)
+  }
+  return result
+}
+
+/**
+ * Per allocation (same order as given), the units of it that active returns
+ * already restocked into its lot. A return restocks last-drawn first, so a lot
+ * the line drew from twice is assigned in reverse, each row capped at what it
+ * still had out. routes/returns.ts fetchSaleItemAllocations applies the same
+ * walk when it plans a return's lots.
+ */
+export function allocationReturnedShares(allocations: SaleItemAllocation[], returnedLots: Map<number, number> | undefined): number[] {
+  const shares = allocations.map(() => 0)
+  if (!returnedLots || !returnedLots.size) return shares
+  const left = new Map(returnedLots)
+  for (let index = allocations.length - 1; index >= 0; index -= 1) {
+    const alloc = allocations[index]
+    const pending = left.get(Number(alloc.batch_id)) || 0
+    if (pending <= 0) continue
+    const out = Math.max(0, (Number(alloc.quantity) || 0) - (Number(alloc.released_quantity) || 0))
+    const share = Math.min(out, pending)
+    shares[index] = share
+    left.set(Number(alloc.batch_id), pending - share)
+  }
+  return shares
+}
+
 export type TransitionGuardResult = { ok: true } | { ok: false; error: string }
 
 // Which old->new pairs this route may perform at all. partial_return and
@@ -223,6 +277,9 @@ export function planSaleStockTransition(input: {
   newStatus: string
   items: TransitionItem[]
   returnedByItem: Map<number, number>
+  // RET-A F3: per line, the units active returns restocked into each lot
+  // (returnedLotsByItem over activeReturnLotsBySaleSql). Absent = none.
+  returnedLotsByItem?: Map<number, Map<number, number>>
   reason: string
   userId: number | string | null
   userName: string | null
@@ -349,12 +406,16 @@ export function planSaleStockTransition(input: {
       if (restoreAllocations.length) {
         // Z0: put the units back into the SAME lots the sale drew from --
         // reverse order (last-drawn units return first), each capped at the
-        // allocation's outstanding (quantity - released_quantity), so units
-        // a recorded return already restocked are never re-added.
+        // units still OUT of that lot: quantity - released_quantity (what
+        // this sale's own transitions gave back) - what active returns
+        // already restocked into it (RET-A F3). released_quantity alone does
+        // not see returns, so without the last term a cancel after a return
+        // re-filled the lot the return had refilled and shorted another.
+        const returnedShares = allocationReturnedShares(restoreAllocations, input.returnedLotsByItem?.get(item.id))
         let remaining = restore
         for (let index = restoreAllocations.length - 1; index >= 0 && remaining > 0; index -= 1) {
           const alloc = restoreAllocations[index]
-          const outstanding = Math.max(0, (Number(alloc.quantity) || 0) - (Number(alloc.released_quantity) || 0))
+          const outstanding = Math.max(0, (Number(alloc.quantity) || 0) - (Number(alloc.released_quantity) || 0) - returnedShares[index])
           const give = Math.min(outstanding, remaining)
           if (give <= 0) continue
           statements.push(...restoreBatchStockStatements(alloc.batch_id, item.branch_id, give))
