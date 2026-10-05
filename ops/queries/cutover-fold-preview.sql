@@ -11,13 +11,14 @@
 --   folded_lots            lots emptied into a survivor
 --   expiry_splits          arriving lots kept apart: different expiry
 --   supplier_splits        arriving lots kept apart: different suppliers
---   cost_splits            arriving lots kept apart: free vs unknown cost
---                          with no real cost in the group
+--   free_unknown_merges    folds of a $0 lot with an unknown-cost lot and no
+--                          real cost: the merged cost is UNKNOWN (owner 6 Oct)
 --   empty_supplier_merges  folds that merge a no-supplier lot into the lot
 --                          that has the supplier (owner 6 Oct)
---   unknown_cost_merges    folds where free/unknown-cost units take the real
+--   uncosted_merges        folds where free/unknown-cost units take the real
 --                          cost (owner 6 Oct)
 --   cost_blend_folds       folds whose surviving lot gets a new unit cost
+--                          (a blend, a real cost, or $0 becoming unknown)
 --   fractional_rows        stock rows at either branch with a fraction
 --   inexact_pairs          Shop + Warehouse sums that are not an exact
 --                          12-place decimal (the cutover refuses to begin)
@@ -28,8 +29,8 @@
 --                          Cambodia business day is the next date
 -- Business day = UTC+7; a date-only value is the day as stored; a timestamp
 -- without a zone is UTC. Supplier = supplier_id, else lower(trim(name)).
--- The fold stage also keeps apart a blend whose average rounds to $0.0000;
--- this preview does not model that case. Paired test:
+-- The fold stage also keeps apart a blend whose average rounds to $0.0000
+-- (terminal roundingSplit); this preview does not model that case. Paired test:
 -- cloudflare/scripts/test-branch-cutover-fold-preview-query-pure.cjs
 -- ops:min-rows 1
 -- ops:max-rows 1
@@ -66,7 +67,7 @@ WITH br AS (
   FROM l1 WHERE day IS NOT NULL
 ), l3 AS (
   SELECT l2.*,
-    CASE WHEN MAX(cc = 'recorded') OVER (PARTITION BY p, day, ek, ps) = 1 THEN 'recorded' ELSE cc END AS pc
+    CASE WHEN MAX(cc = 'recorded') OVER (PARTITION BY p, day, ek, ps) = 1 THEN 'recorded' ELSE 'none' END AS pc
   FROM l2
 ), l4 AS (
   SELECT l3.*,
@@ -75,8 +76,7 @@ WITH br AS (
     MAX(arrival) OVER (PARTITION BY p, day, ek, ps, pc) AS has_arrival,
     COUNT(*) OVER (PARTITION BY p, day) AS c_day,
     COUNT(*) OVER (PARTITION BY p, day, ek) AS c_e,
-    COUNT(*) OVER (PARTITION BY p, day, ek, ps) AS c_s,
-    COUNT(*) OVER (PARTITION BY p, day, ek, ps, pc) AS c_c
+    COUNT(*) OVER (PARTITION BY p, day, ek, ps) AS c_s
   FROM l3
 ), l5 AS (
   SELECT l4.*,
@@ -87,6 +87,8 @@ WITH br AS (
     SUM(member) OVER (PARTITION BY p, day, ek, ps, pc) AS n_member,
     SUM(CASE WHEN member = 1 AND sk = '' THEN 1 ELSE 0 END) OVER (PARTITION BY p, day, ek, ps, pc) AS n_empty,
     SUM(CASE WHEN member = 1 AND cc <> 'recorded' THEN 1 ELSE 0 END) OVER (PARTITION BY p, day, ek, ps, pc) AS n_uncosted,
+    SUM(CASE WHEN member = 1 AND cc = 'zero' THEN 1 ELSE 0 END) OVER (PARTITION BY p, day, ek, ps, pc) AS n_zero,
+    SUM(CASE WHEN member = 1 AND cc = 'unknown' THEN 1 ELSE 0 END) OVER (PARTITION BY p, day, ek, ps, pc) AS n_unknown,
     MIN(CASE WHEN member = 1 AND cc = 'recorded' THEN cost END) OVER (PARTITION BY p, day, ek, ps, pc) AS min_cost,
     MAX(CASE WHEN member = 1 AND cc = 'recorded' THEN cost END) OVER (PARTITION BY p, day, ek, ps, pc) AS max_cost
   FROM l5
@@ -104,10 +106,11 @@ SELECT
   (SELECT COUNT(*) FROM f WHERE folds = 1 AND member = 1 AND id <> survivor) AS folded_lots,
   (SELECT COUNT(*) FROM f WHERE arrival = 1 AND c_e < c_day) AS expiry_splits,
   (SELECT COUNT(*) FROM f WHERE arrival = 1 AND c_e = c_day AND c_s < c_e) AS supplier_splits,
-  (SELECT COUNT(*) FROM f WHERE arrival = 1 AND c_e = c_day AND c_s = c_e AND c_c < c_s) AS cost_splits,
   (SELECT COUNT(*) FROM f WHERE folds = 1 AND id = survivor AND ps <> '' AND n_empty > 0) AS empty_supplier_merges,
-  (SELECT COUNT(*) FROM f WHERE folds = 1 AND id = survivor AND pc = 'recorded' AND n_uncosted > 0) AS unknown_cost_merges,
-  (SELECT COUNT(*) FROM f WHERE folds = 1 AND id = survivor AND pc = 'recorded' AND (cc <> 'recorded' OR min_cost <> max_cost)) AS cost_blend_folds,
+  (SELECT COUNT(*) FROM f WHERE folds = 1 AND id = survivor AND pc = 'recorded' AND n_uncosted > 0) AS uncosted_merges,
+  (SELECT COUNT(*) FROM f WHERE folds = 1 AND id = survivor AND pc = 'none' AND n_zero > 0 AND n_unknown > 0) AS free_unknown_merges,
+  (SELECT COUNT(*) FROM f WHERE folds = 1 AND id = survivor AND ((pc = 'recorded' AND (cc <> 'recorded' OR min_cost <> max_cost))
+    OR (pc = 'none' AND cc = 'zero' AND n_unknown > 0))) AS cost_blend_folds,
   (SELECT COUNT(*) FROM branch_stock, br WHERE branch_id IN (br.src, br.tgt) AND quantity <> CAST(quantity AS INTEGER))
     + (SELECT COUNT(*) FROM branch_batch_stock, br WHERE branch_id IN (br.src, br.tgt) AND quantity <> CAST(quantity AS INTEGER)) AS fractional_rows,
   (SELECT COUNT(*) FROM branch_stock s JOIN br ON s.branch_id = br.src JOIN branch_stock t ON t.product_id = s.product_id AND t.branch_id = br.tgt

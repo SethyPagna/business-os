@@ -48,10 +48,11 @@ async function main() {
     assert.equal(preview.moving_products, terminal.committedChildren)
     assert.deepEqual({
       groups: preview.same_date_merges, foldedLots: preview.folded_lots, costChanged: preview.cost_blend_folds, expirySplit: preview.expiry_splits,
-      supplierSplit: preview.supplier_splits, costSplit: preview.cost_splits, uncostedMerges: preview.unknown_cost_merges, emptySupplierMerges: preview.empty_supplier_merges,
+      supplierSplit: preview.supplier_splits, roundingSplit: 0, uncostedMerges: preview.uncosted_merges, freeUnknownMerges: preview.free_unknown_merges,
+      emptySupplierMerges: preview.empty_supplier_merges,
     }, terminal.folds)
-    // the fixture exercises every class, so equality is not 0 = 0
-    for (const [key, value] of Object.entries(terminal.folds)) assert.ok(value > 0, key)
+    // the fixture exercises every class, so equality is not 0 = 0 (roundingSplit, a sub-$0.00005 blend, is not modelled by the preview)
+    for (const [key, value] of Object.entries(terminal.folds)) assert.ok(key === 'roundingSplit' || value > 0, key)
     const lots = w.raw.prepare("SELECT count(*) n FROM branch_batch_stock s JOIN product_batches b ON b.id=s.batch_id WHERE s.branch_id=1 AND s.quantity>0 GROUP BY b.variant_product_id ORDER BY n DESC LIMIT 1").get().n
     assert.ok(preview.max_lots_per_product >= lots)
     w.raw.close()

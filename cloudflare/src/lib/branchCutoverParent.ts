@@ -388,8 +388,9 @@ export type CutoverFoldLot = { id: number; product: number; receivedAt: string |
   supplierId: number | null; supplierName?: string | null }
 export type CutoverFold = { product: number; survivor: number; folded: number[]; dateKey: string; expiry: string | null
   costClass: CostClass; before: Array<[number, number]>; after: Array<[number, number]>; costBefore: number | null; costAfter: number | null
-  suppliers: Array<number | null>; supplierKey: string; uncosted: number[]; emptySupplier: number[] }
-export type CutoverFoldPlan = { folds: CutoverFold[]; expirySplit: number; supplierSplit: number; costSplit: number; uncostedMerges: number; emptySupplierMerges: number }
+  suppliers: Array<number | null>; supplierKey: string; uncosted: number[]; emptySupplier: number[]; freeToUnknown: number[] }
+export type CutoverFoldPlan = { folds: CutoverFold[]; expirySplit: number; supplierSplit: number; roundingSplit: number; uncostedMerges: number
+  freeUnknownMerges: number; emptySupplierMerges: number }
 type CostClass = 'recorded' | 'zero' | 'unknown'
 /**
  * The Cambodia business day (UTC+7, businessDateWindow) a lot was received on.
@@ -426,7 +427,10 @@ const costClassOf = (cost: number | null): CostClass => recorded(cost) ? 'record
  *     lot survives (emptySupplierMerges);
  *   - a recorded cost (> 0) and a free (0) or unknown (NULL) cost MERGE: every
  *     unit takes the quantity-weighted average of the recorded costs only
- *     (uncostedMerges); free and unknown with no recorded cost stay apart (costSplit).
+ *     (uncostedMerges);
+ *   - with no recorded cost, a free ($0) and an unknown (NULL) cost MERGE and
+ *     the merged lot's cost is UNKNOWN, never $0 (freeUnknownMerges);
+ *   - a blend that would round to $0.0000 keeps its lots apart (roundingSplit).
  * The survivor is the lowest-id lot already at the target (with the supplier,
  * when the group has one), else the lowest-id arriving lot. Arriving lots fold
  * into it, and so do target lots without a supplier when the survivor has one;
@@ -437,7 +441,7 @@ const costClassOf = (cost: number | null): CostClass => recorded(cost) ? 'record
  * it from another lot of its business day: expiry, then supplier, then cost.
  */
 export function planCutoverLotFolds(products: Array<{ productId: number; moved: Array<[number, number]>; lots: CutoverFoldLot[] }>): CutoverFoldPlan {
-  const plan: CutoverFoldPlan = { folds: [], expirySplit: 0, supplierSplit: 0, costSplit: 0, uncostedMerges: 0, emptySupplierMerges: 0 }
+  const plan: CutoverFoldPlan = { folds: [], expirySplit: 0, supplierSplit: 0, roundingSplit: 0, uncostedMerges: 0, freeUnknownMerges: 0, emptySupplierMerges: 0 }
   for (const { productId, moved, lots } of products) {
     const movedBy = new Map<number, bigint>()
     for (const [batch, quantity] of moved) movedBy.set(batch, (movedBy.get(batch) ?? 0n) + decimal(quantity))
@@ -458,7 +462,7 @@ export function planCutoverLotFolds(products: Array<{ productId: number; moved: 
     }
     for (const fact of dated) {
       const group = dated.filter(other => key(other, 3) === key(fact, 3))
-      fact.part += group.some(other => other.costClass === 'recorded') ? 'recorded' : fact.costClass
+      fact.part += group.some(other => other.costClass === 'recorded') ? 'recorded' : 'none'
     }
     const parts = new Map<string, typeof facts>()
     for (const fact of dated) parts.set(key(fact, 4), [...(parts.get(key(fact, 4)) ?? []), fact])
@@ -484,16 +488,19 @@ export function planCutoverLotFolds(products: Array<{ productId: number; moved: 
         } catch { costAfter = null }
         // A blend that rounds to free (sub-$0.00005 costs) or is out of money range: keep those lots apart, never stop the run.
         if (!recorded(costAfter)) { for (const fact of group) if (fact.arrival) blended.add(fact.lot.id); continue }
-      }
+      } else if (members.some(fact => fact.costClass === 'unknown')) costAfter = null // owner 6 Oct: $0 + unknown is unknown, never $0
+      const unknownCost = !priced.length && members.some(fact => fact.costClass === 'unknown')
+      const freeToUnknown = unknownCost ? members.filter(fact => fact.costClass === 'zero').map(fact => fact.lot.id) : []
+      if (freeToUnknown.length) plan.freeUnknownMerges++
       const uncosted = priced.length ? members.filter(fact => fact.costClass !== 'recorded').map(fact => fact.lot.id) : []
       const emptySupplier = supplierKey !== '' ? members.filter(fact => fact.supplier === '').map(fact => fact.lot.id) : []
       if (uncosted.length) plan.uncostedMerges++
       if (emptySupplier.length) plan.emptySupplierMerges++
       plan.folds.push({ product: productId, survivor: survivor.lot.id, folded: folded.map(fact => fact.lot.id), dateKey: survivor.day!,
-        expiry: survivor.lot.expiry ?? null, costClass: priced.length ? 'recorded' : survivor.costClass,
+        expiry: survivor.lot.expiry ?? null, costClass: priced.length ? 'recorded' : unknownCost ? 'unknown' : 'zero',
         before: members.map(fact => [fact.lot.id, Number(decimalText(fact.quantity))]),
         after: [[survivor.lot.id, Number(decimalText(total))], ...folded.map(fact => [fact.lot.id, 0] as [number, number])],
-        costBefore: survivor.lot.cost, costAfter, suppliers: members.map(fact => fact.lot.supplierId), supplierKey, uncosted, emptySupplier })
+        costBefore: survivor.lot.cost, costAfter, suppliers: members.map(fact => fact.lot.supplierId), supplierKey, uncosted, emptySupplier, freeToUnknown })
     }
     // Every arriving lot kept apart from another lot of its business day, counted once by the first separating reason.
     for (const fact of dated) {
@@ -501,7 +508,7 @@ export function planCutoverLotFolds(products: Array<{ productId: number; moved: 
       const day = dated.filter(other => other !== fact && other.day === fact.day)
       if (day.some(other => other.expiry !== fact.expiry)) plan.expirySplit++
       else if (day.some(other => key(other, 3) !== key(fact, 3))) plan.supplierSplit++
-      else if (day.some(other => key(other, 4) !== key(fact, 4)) || blended.has(fact.lot.id)) plan.costSplit++
+      else if (blended.has(fact.lot.id)) plan.roundingSplit++
     }
   }
   return plan
@@ -509,14 +516,14 @@ export function planCutoverLotFolds(products: Array<{ productId: number; moved: 
 
 type VerifyCursor = {
   stage: 'fold' | 'reconcile' | 'closures' | 'done'; after: number
-  folds: number; foldedLots: number; costChanged: number; expirySplit: number; supplierSplit: number; costSplit: number
-  uncostedMerges: number; emptySupplierMerges: number; foldHash: string
+  folds: number; foldedLots: number; costChanged: number; expirySplit: number; supplierSplit: number; roundingSplit: number
+  uncostedMerges: number; freeUnknownMerges: number; emptySupplierMerges: number; foldHash: string
   table: 'branch_stock' | 'branch_batch_stock'; stockHash: string; lotHash: string
   sourceText: string; targetText: string; sourceLotText: string; targetLotText: string
   closedRetired: number; closedChildren: number; leaveSeen: number; closeSeen: number; historyDigest: string
 }
-const initialVerify = (): VerifyCursor => ({ stage: 'fold', after: 0, folds: 0, foldedLots: 0, costChanged: 0, expirySplit: 0, supplierSplit: 0, costSplit: 0,
-  uncostedMerges: 0, emptySupplierMerges: 0, foldHash: '0',
+const initialVerify = (): VerifyCursor => ({ stage: 'fold', after: 0, folds: 0, foldedLots: 0, costChanged: 0, expirySplit: 0, supplierSplit: 0, roundingSplit: 0,
+  uncostedMerges: 0, freeUnknownMerges: 0, emptySupplierMerges: 0, foldHash: '0',
   table: 'branch_stock', stockHash: '0', lotHash: '0', sourceText: '0', targetText: '0', sourceLotText: '0', targetLotText: '0',
   closedRetired: 0, closedChildren: 0, leaveSeen: 0, closeSeen: 0, historyDigest: '' })
 function parseVerify(text: string): VerifyCursor {
@@ -563,8 +570,9 @@ async function verifyStep(db: D1Compat, current: SessionUser, row: BranchCutover
       .all<CutoverFoldLot>({ target: intent.targetBranchId, products: JSON.stringify(products.map(product => product.productId)) })
     const plan = planCutoverLotFolds(products.map(product => ({ ...product, lots })))
     const next: VerifyCursor = { ...cursor, after: end, folds: cursor.folds + plan.folds.length, expirySplit: cursor.expirySplit + plan.expirySplit,
-      supplierSplit: cursor.supplierSplit + plan.supplierSplit, costSplit: cursor.costSplit + plan.costSplit,
-      uncostedMerges: cursor.uncostedMerges + plan.uncostedMerges, emptySupplierMerges: cursor.emptySupplierMerges + plan.emptySupplierMerges,
+      supplierSplit: cursor.supplierSplit + plan.supplierSplit, roundingSplit: cursor.roundingSplit + plan.roundingSplit,
+      uncostedMerges: cursor.uncostedMerges + plan.uncostedMerges, freeUnknownMerges: cursor.freeUnknownMerges + plan.freeUnknownMerges,
+      emptySupplierMerges: cursor.emptySupplierMerges + plan.emptySupplierMerges,
       foldedLots: cursor.foldedLots + plan.folds.reduce((n, fold) => n + fold.folded.length, 0),
       costChanged: cursor.costChanged + plan.folds.filter(fold => fold.costAfter !== fold.costBefore).length }
     if (plan.folds.length) {
@@ -579,7 +587,7 @@ async function verifyStep(db: D1Compat, current: SessionUser, row: BranchCutover
       const costs = JSON.stringify(plan.folds.filter(fold => fold.costAfter !== fold.costBefore).map(fold => [fold.survivor, fold.costAfter]))
       const audits = JSON.stringify(plan.folds.map(fold => ({ operationId: row.operation_id, productId: fold.product, survivorBatchId: fold.survivor, foldedBatchIds: fold.folded,
         receivedDate: fold.dateKey, expiryDate: fold.expiry, before: fold.before, after: fold.after, unitCostUsdBefore: fold.costBefore, unitCostUsdAfter: fold.costAfter,
-        costClass: fold.costClass, supplierIds: fold.suppliers, supplierKey: fold.supplierKey, uncostedBatchIds: fold.uncosted,
+        costClass: fold.costClass, supplierIds: fold.suppliers, supplierKey: fold.supplierKey, uncostedBatchIds: fold.uncosted, freeToUnknownBatchIds: fold.freeToUnknown,
         emptySupplierBatchIds: fold.emptySupplier, branchId: intent.targetBranchId })))
       const productIds = JSON.stringify([...new Set(plan.folds.map(fold => fold.product))])
       before.push(cutoverAssert(`(${lotFingerprintSql})=@fingerprint`, { target: intent.targetBranchId, ids: JSON.stringify(touched), fingerprint: fingerprint.value }),
@@ -687,7 +695,8 @@ async function finalizeStep(db: D1Compat, current: SessionUser, row: BranchCutov
     sourceBranchId: ids.source, targetBranchId: ids.target, committedChildren: row.committed_children, movedQuantityText: units,
     movedLotQuantityText: manifest.sourceLotQuantityText, history: { leave: manifest.history.leave, closedRetired: verify.closedRetired, closedChildren: verify.closedChildren },
     folds: { groups: verify.folds, foldedLots: verify.foldedLots, costChanged: verify.costChanged, expirySplit: verify.expirySplit, supplierSplit: verify.supplierSplit,
-      costSplit: verify.costSplit, uncostedMerges: verify.uncostedMerges, emptySupplierMerges: verify.emptySupplierMerges },
+      roundingSplit: verify.roundingSplit, uncostedMerges: verify.uncostedMerges, freeUnknownMerges: verify.freeUnknownMerges,
+      emptySupplierMerges: verify.emptySupplierMerges },
     names: { retired: intent.retiredName, successor: intent.successorName, sourceBefore: sourceName, targetBefore: String(state.target.name).trim() },
     captureDigest: row.capture_digest, verificationDigest: row.verification_digest, completedAt: now }
   const terminalJson = JSON.stringify(terminal)

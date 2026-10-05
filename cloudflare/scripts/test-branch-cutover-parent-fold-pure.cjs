@@ -26,9 +26,9 @@ const parent = modules()
 const { planCutoverLotFolds } = parent
 const lot = (id, receivedAt, cost, quantity, expiry = null, product = 1, supplierId = null, supplierName = null) => ({ id, product, receivedAt, expiry, cost, quantity, supplierId, supplierName })
 const plan = (moved, lots, productId = 1) => planCutoverLotFolds([{ productId, moved, lots }])
-const counts = (result) => ({ folds: result.folds.length, expirySplit: result.expirySplit, supplierSplit: result.supplierSplit, costSplit: result.costSplit,
-  uncostedMerges: result.uncostedMerges, emptySupplierMerges: result.emptySupplierMerges })
-const none = { folds: 0, expirySplit: 0, supplierSplit: 0, costSplit: 0, uncostedMerges: 0, emptySupplierMerges: 0 }
+const counts = (result) => ({ folds: result.folds.length, expirySplit: result.expirySplit, supplierSplit: result.supplierSplit, roundingSplit: result.roundingSplit,
+  uncostedMerges: result.uncostedMerges, freeUnknownMerges: result.freeUnknownMerges, emptySupplierMerges: result.emptySupplierMerges })
+const none = { folds: 0, expirySplit: 0, supplierSplit: 0, roundingSplit: 0, uncostedMerges: 0, freeUnknownMerges: 0, emptySupplierMerges: 0 }
 let checks = 0
 const check = (name, fn) => { fn(); checks++; console.log('PASS ' + name) }
 
@@ -88,12 +88,28 @@ check('owner 6 Oct: a real cost with a $0 or unknown cost MERGES and every unit 
   // two real costs and one unknown: the average is over the real costs only
   const mixed = plan([[2, 1], [3, 4]], [lot(1, '2026-09-20', 2, 1), lot(2, '2026-09-20', 4, 1), lot(3, '2026-09-20', null, 4)]).folds[0]
   assert.deepEqual([mixed.survivor, mixed.folded, mixed.costAfter, mixed.uncosted], [1, [2, 3], 3, [3]])
-  // free and unknown with no real cost: no ruling, kept apart and counted
-  assert.deepEqual(counts(plan([[2, 2]], [lot(1, '2026-09-20', null, 2), lot(2, '2026-09-20', 0, 2)])), { ...none, costSplit: 1 })
   const unknown = plan([[2, 3]], [lot(1, '2026-09-20', null, 2), lot(2, '2026-09-20', null, 3)]).folds[0]
-  assert.deepEqual([unknown.costClass, unknown.costAfter, unknown.after, unknown.uncosted], ['unknown', null, [[1, 5], [2, 0]], []])
+  assert.deepEqual([unknown.costClass, unknown.costAfter, unknown.after, unknown.uncosted, unknown.freeToUnknown], ['unknown', null, [[1, 5], [2, 0]], [], []])
   const free = plan([[2, 3]], [lot(1, '2026-09-20', 0, 2), lot(2, '2026-09-20', 0, 3)]).folds[0]
   assert.deepEqual([free.costClass, free.costAfter], ['zero', 0])
+})
+check('owner 6 Oct (final): $0 + unknown with no real cost MERGE and the merged cost is UNKNOWN (NULL), never $0', () => {
+  for (const [a, b] of [[0, null], [null, 0]]) {
+    const result = plan([[2, 3]], [lot(1, '2026-09-21', a, 2), lot(2, '2026-09-21', b, 3)])
+    assert.deepEqual(counts(result), { ...none, folds: 1, freeUnknownMerges: 1 }, JSON.stringify([a, b]))
+    const fold = result.folds[0]
+    assert.deepEqual([fold.survivor, fold.folded, fold.after, fold.costClass, fold.uncosted, fold.freeToUnknown], [1, [2], [[1, 5], [2, 0]], 'unknown', [], [a === 0 ? 1 : 2]])
+    assert.ok(Object.is(fold.costAfter, null), 'never $0: ' + JSON.stringify([a, b]))
+    assert.equal(fold.costBefore, a)
+  }
+  // several free and unknown lots: one lot, unknown cost; with a real cost present the real cost still wins
+  const many = plan([[2, 1], [3, 1], [4, 1]], [lot(1, '2026-09-21', 0, 1), lot(2, '2026-09-21', null, 1), lot(3, '2026-09-21', 0, 1), lot(4, '2026-09-21', null, 1)]).folds[0]
+  assert.deepEqual([many.folded, many.costAfter, many.freeToUnknown], [[2, 3, 4], null, [1, 3]])
+  const real = plan([[2, 1], [3, 1]], [lot(1, '2026-09-21', 0, 1), lot(2, '2026-09-21', null, 1), lot(3, '2026-09-21', 4, 1)])
+  assert.deepEqual([counts(real), real.folds[0].costAfter], [{ ...none, folds: 1, uncostedMerges: 1 }, 4])
+  // the earlier rulings stand: a different expiry or two suppliers still keep a $0/unknown pair apart
+  assert.deepEqual(counts(plan([[2, 2]], [lot(1, '2026-09-21', 0, 2, '2027-01-01'), lot(2, '2026-09-21', null, 2, '2027-02-01')])), { ...none, expirySplit: 1 })
+  assert.deepEqual(counts(plan([[2, 2]], [lot(1, '2026-09-21', 0, 2, null, 1, 11), lot(2, '2026-09-21', null, 2, null, 1, 12)])), { ...none, supplierSplit: 1 })
 })
 check('owner 6 Oct: different suppliers stay apart; a lot with no supplier merges into the lot that has one', () => {
   // verifier P4: Supplier A at the warehouse, Supplier B arriving
@@ -133,7 +149,7 @@ check('inconsistent inputs refuse: moved more than the target holds, moved lot m
   assert.throws(() => plan([[1, 0.1 + 0.2]], [lot(1, '2026-01-01', 1, 1)]), /quantity_requires_exact/)
   assert.throws(() => plan([[9, 1]], [lot(1, '2026-01-01', 1, 2), lot(9, '2026-01-01', 1, 1, null, 2)]), /fold_moved_lot_missing/, 'a lot of another product is never folded in')
   // a blend that would round to free never stops the run: the lots stay apart and are counted
-  assert.deepEqual(counts(plan([[2, 1]], [lot(1, '2026-01-01', 0.00001, 1), lot(2, '2026-01-01', 0.00002, 1)])), { ...none, costSplit: 1 })
+  assert.deepEqual(counts(plan([[2, 1]], [lot(1, '2026-01-01', 0.00001, 1), lot(2, '2026-01-01', 0.00002, 1)])), { ...none, roundingSplit: 1 })
 })
 check('SQL twins: the business day and supplier key computed in SQLite equal the JS rule (fold preview, rehearsal queries)', () => {
   const raw = new DatabaseSync(':memory:')

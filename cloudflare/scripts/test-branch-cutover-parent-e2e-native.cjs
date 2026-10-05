@@ -35,6 +35,10 @@ const CONTROLS = {
             decimalText(priced.reduce((sum, fact) => sum + fact.quantity, 0n)))`,
     'priced.reduce((s, fact) => s + Number(fact.lot.cost) * Number(decimalText(fact.quantity)), 0) / priced.reduce((s, fact) => s + Number(decimalText(fact.quantity)), 0)']]]],
   'supplier-blind': [['lib/branchCutoverParent.ts', [["  if (typeof lot.supplierId === 'number' && Number.isSafeInteger(lot.supplierId)) return 'id:' + lot.supplierId", "  if (lot) return ''"]]]],
+  // owner 6 Oct (final): $0 + unknown merge to UNKNOWN. Keeping them apart, or giving the merged lot $0, must fail.
+  'free-unknown-apart': [['lib/branchCutoverParent.ts', [["? 'recorded' : 'none'", "? 'recorded' : fact.costClass"]]]],
+  'free-unknown-zero': [['lib/branchCutoverParent.ts', [["} else if (members.some(fact => fact.costClass === 'unknown')) costAfter = null",
+    "} else if (members.some(fact => fact.costClass === 'unknown')) costAfter = members.some(fact => fact.costClass === 'zero') ? 0 : null"]]]],
   'zero-weighted': [['lib/branchCutoverParent.ts', [["const priced = members.filter(fact => fact.costClass === 'recorded')", "const priced = members.filter(fact => fact.costClass !== 'unknown')"]]]],
   'strict-real-sums': [['lib/branchCutoverParent.ts', [['product_id=b.variant_product_id),0)+1e-9) AS lotExcess', 'product_id=b.variant_product_id),0)) AS lotExcess'],
     ['product_id=@last AND branch_id=@target),0)+1e-9`', 'product_id=@last AND branch_id=@target),0)`'], ['AND branch_id=@target),0)+1e-9)`,', 'AND branch_id=@target),0))`,']]]],
@@ -88,7 +92,7 @@ const NAMED = {
     [7, 'No received date', 2, 1], [8, 'Untracked at Shop', 5, 1], [9, 'Fractional', 2.5, 1.25], [10, 'Zero source row', 0, 3],
     [11, 'Warehouse only', null, 4], [12, 'Shared + pre-existing + arrival same date', 3, 3],
     [13, 'Business day: 18:00 UTC is the next day in Cambodia', 1, 1], [14, 'Business day: 20:00 UTC is not the same day', 1, 1],
-    [15, 'Same date free and unknown cost, no real cost', 1, 1], [16, 'Same date two suppliers', 2, 1],
+    [15, 'Same date free and unknown cost, no real cost: merge, cost unknown', 1, 1], [16, 'Same date two suppliers', 2, 1],
     [17, 'Same date, the warehouse lot has no supplier', 1, 1], [18, 'Same date, blend needs rounding', 2, 1],
     // E3: exact decimals whose REAL lot sum at LC Store is 0.30000000000000004 > 0.3 (sum(0.05, 0.05, 0.2) in SQLite)
     [19, 'Fractional lots whose REAL sum ties above the stock', 0.05, 0.25],
@@ -327,7 +331,7 @@ function verifyEndState({ w, base, before, final }) {
     const total = fold.after.reduce((s, [, q]) => s + q, 0)
     const priced = fold.before.filter(([id]) => costOf.get(id) > 0)
     const costs = new Set(priced.map(([id]) => costOf.get(id)))
-    if (!priced.length) assert.equal(fold.unitCostUsdAfter, fold.unitCostUsdBefore, 'unpriced fold keeps its class ' + fold.survivorBatchId)
+    if (!priced.length) assert.equal(fold.unitCostUsdAfter, fold.before.some(([id]) => costOf.get(id) !== 0) ? null : 0, 'no real cost: unknown if any unit is unknown, else $0 ' + fold.survivorBatchId)
     else if (costs.size === 1) assert.equal(fold.unitCostUsdAfter, [...costs][0], 'one real cost ' + fold.survivorBatchId)
     else {
       const exact = priced.reduce((s, [id, q]) => s + q * costOf.get(id), 0) / priced.reduce((s, [, q]) => s + q, 0)
@@ -349,7 +353,7 @@ function verifyEndState({ w, base, before, final }) {
   assert.deepEqual({ ...lot(902) }, { q: 3.75, c: 1.8333 }); assert.equal(lot(901).q, 0)               // 6.875 / 3.75 at 4 decimals
   assert.deepEqual({ ...lot(1301) }, { q: 2, c: 2 }); assert.equal(lot(1302).q, 0)                     // 18:00 UTC 12 Sep = 13 Sep in Cambodia
   assert.deepEqual({ ...lot(1401) }, { q: 1, c: 3 }); assert.deepEqual({ ...lot(1402) }, { q: 1, c: 3 }) // 20:00 UTC 12 Sep is 13 Sep: kept apart
-  assert.deepEqual({ ...lot(1501) }, { q: 1, c: 0 }); assert.deepEqual({ ...lot(1502) }, { q: 1, c: null }) // free and unknown, no real cost: kept apart
+  assert.deepEqual({ ...lot(1501) }, { q: 2, c: null }); assert.equal(lot(1502).q, 0)                  // $0 + unknown, no real cost: merged, cost UNKNOWN
   assert.deepEqual({ ...lot(1601) }, { q: 1, c: 1 }); assert.deepEqual({ ...lot(1602) }, { q: 2, c: 3 }) // two suppliers: kept apart
   assert.deepEqual({ ...lot(1702) }, { q: 2, c: 2 }); assert.equal(lot(1701).q, 0)                     // no supplier folds into the supplier's lot
   assert.deepEqual({ ...lot(1801) }, { q: 3, c: 1.0002 }); assert.equal(lot(1802).q, 0)               // 3.0005 / 3 at 4 decimals
@@ -411,7 +415,9 @@ function verifyEndState({ w, base, before, final }) {
   const terminal = JSON.parse(final.terminal_json)
   assert.equal(terminal.committedChildren, before.movingProducts); assert.equal(terminal.movedQuantityText, String(round(before.sourceUnits)))
   assert.equal(terminal.folds.groups, folds.length)
-  assert.deepEqual([terminal.folds.expirySplit, terminal.folds.supplierSplit, terminal.folds.costSplit, terminal.folds.uncostedMerges, terminal.folds.emptySupplierMerges], [1, 1, 1, 1, 1])
+  assert.deepEqual([terminal.folds.expirySplit, terminal.folds.supplierSplit, terminal.folds.roundingSplit, terminal.folds.uncostedMerges, terminal.folds.freeUnknownMerges,
+    terminal.folds.emptySupplierMerges], [1, 1, 0, 1, 1, 1])
+  assert.deepEqual(folds.filter(f => f.freeToUnknownBatchIds.length).map(f => [f.survivorBatchId, f.freeToUnknownBatchIds, f.unitCostUsdAfter]), [[1501, [1501], null]])
   assert.equal(folds.filter(f => f.uncostedBatchIds.length).length, 1); assert.equal(folds.filter(f => f.emptySupplierBatchIds.length).length, 1)
   assert.equal(raw.prepare("SELECT count(*) n FROM branch_cutovers WHERE phase='aborted'").get().n, 1)
   // every fold row is self-describing and conserves its quantity and value
@@ -543,7 +549,8 @@ async function main() {
   })
   // ---- discriminating controls: each plausible wrong implementation must fail this test
   for (const [control, expectation] of [['name-admission', 'refuses'], ['name-finalize', 'red'], ['mean', 'red'], ['double', 'red'], ['no-close', 'refuses'], ['no-rule', 'red'],
-    ['utc-slice', 'red'], ['no-round', 'red'], ['supplier-blind', 'red'], ['zero-weighted', 'red'], ['strict-real-sums', 'refuses']]) {
+    ['utc-slice', 'red'], ['no-round', 'red'], ['supplier-blind', 'red'], ['zero-weighted', 'red'], ['strict-real-sums', 'refuses'],
+    ['free-unknown-apart', 'red'], ['free-unknown-zero', 'red']]) {
     await check('control RED: ' + control, async () => {
       let red = false, message = ''
       try {
