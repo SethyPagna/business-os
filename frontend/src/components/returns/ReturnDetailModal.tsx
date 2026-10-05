@@ -10,6 +10,7 @@ import { DetailRow, DetailRowGroup, MoneyRow } from '../shared/DetailRows.tsx'
 import { getReturn as fetchReturnDetail, getReturnRecords as fetchReturnRecords } from '../../api/returnsReadTransport.ts'
 import History from 'lucide-react/dist/esm/icons/history.js'
 import { normalizeStockAction, stockActionOption } from './helpers/returnOptions.ts'
+import StockActionIcon from './StockActionIcon.tsx'
 
 import { customerDisplayName } from '../../utils/customerIdentity.ts'
 
@@ -290,13 +291,13 @@ export default function ReturnDetailModal({ ret, onClose, onMinimize, onEdit, on
                               title={tr('stock_action_damaged_hint', 'Tracked as damaged stock tied to this return — kept out of sellable stock.')}
                               className="inline-flex flex-shrink-0 items-center gap-1 rounded-full border border-orange-300 bg-orange-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-orange-700 dark:border-orange-700 dark:bg-orange-900/40 dark:text-orange-300"
                             >
-                              {stockActionOption('damaged').icon} {tr('stock_action_damaged', 'Damaged')}
+                              <StockActionIcon action="damaged" /> {tr('stock_action_damaged', 'Damaged')}
                             </span>
                           ) : null}
                         </div>
                         {!isSupplier ? (() => {
                           const option = stockActionOption(normalizeStockAction({ stock_action: item.stock_action, return_to_stock: item.return_to_stock !== 0 && item.return_to_stock !== false }))
-                          return <div className="text-[11px] text-gray-400">{option.icon} {tr(option.labelKey, option.labelEn)}</div>
+                          return <div className="flex items-center gap-1 text-[11px] text-gray-400"><StockActionIcon action={option.value} /> {tr(option.labelKey, option.labelEn)}</div>
                         })() : null}
                       </td>
                       <td className="whitespace-nowrap px-1.5 py-1.5 text-right align-top sm:px-2 tabular-nums text-gray-700 dark:text-gray-200">{item.quantity || 0}</td>

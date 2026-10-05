@@ -1,4 +1,10 @@
 // ── NewReturnModal ───────────────────────────────────────────────────────────
+import AlertTriangle from 'lucide-react/dist/esm/icons/alert-triangle.js'
+import Check from 'lucide-react/dist/esm/icons/check.js'
+import Loader2 from 'lucide-react/dist/esm/icons/loader-2.js'
+import Receipt from 'lucide-react/dist/esm/icons/receipt.js'
+import Repeat from 'lucide-react/dist/esm/icons/repeat.js'
+import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import { createPortal } from 'react-dom'
 import { useEffect, useRef, useState } from 'react'
@@ -35,6 +41,7 @@ import UnsavedChangesPrompt from '../shared/UnsavedChangesPrompt.tsx'
 import { captureActorReadScope, isActorReadScopeCurrent } from '../../api/actorReadScope.ts'
 import type { PendingReturnCreateV1, ReturnQuoteV1 } from '../../api/returnsTransport.ts'
 import { subtractDecimalSum } from '../../utils/moneyPrecision.ts'
+import StockActionIcon from './StockActionIcon.tsx'
 
 const RETURN_SALE_SEARCH_TIMEOUT_MS = 12000
 // Long enough that a fast typist does not fire a request per keystroke, short
@@ -1053,7 +1060,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
 
         {/* Header */}
         <div className="flex items-center justify-between gap-2 p-4 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
-          <h2 className="min-w-0 truncate text-lg font-bold text-gray-900 dark:text-white">↩️ {T('new_return','New Return')}</h2>
+          <h2 className="min-w-0 truncate text-lg font-bold text-gray-900 dark:text-white">{T('new_return','New Return')}</h2>
           <div className="flex shrink-0 items-center gap-2">
             <div className="hidden items-center gap-2 sm:flex">{STEPS.map((s, i) => (
               <div key={s} className="flex items-center gap-1">
@@ -1097,7 +1104,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
                     autoFocus />
                   <button onClick={() => void handleSearch()} disabled={searching || !searchQuery.trim()}
                     className="btn-primary px-4 disabled:opacity-50">
-                    {searching ? '⏳' : T('btn_search','🔍 Find')}
+                    {searching ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : T('btn_search','Search')}
                   </button>
                   {suggestOpen && suggestions.length > 0 && (
                     <ul
@@ -1159,7 +1166,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
             <div className="space-y-4">
               {foundSale ? (
                 <div className="bg-green-50 dark:bg-green-900/20 rounded-xl p-3">
-                  <div className="font-semibold text-green-700 dark:text-green-400 text-sm">✅ {foundSale.receipt_number}</div>
+                  <div className="flex items-center gap-1 font-semibold text-green-700 dark:text-green-400 text-sm"><Check className="h-4 w-4 shrink-0" aria-hidden="true" /> {foundSale.receipt_number}</div>
                   <div className="text-xs text-green-600 dark:text-green-400 mt-0.5">
                     {fmtTime(foundSale.created_at)} · {foundSale.customer_name || T('no_data','—')} · {fmtUSD(foundSale.total_usd || 0)}
                   </div>
@@ -1177,9 +1184,9 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
                 </label>
                 <div className="grid grid-cols-3 gap-2">
                   {([
-                    ['restock',  T('return_type_restock','↩️ Restock'),       T('return_type_restock_desc','Items back to inventory')],
-                    ['writeoff', T('return_type_writeoff','🗑 Write Off'),     T('return_type_writeoff_desc','Lost / damaged goods')],
-                    ['refund',   T('return_type_refund','💰 Refund Only'),     T('return_type_refund_desc','Refund with no stock change')],
+                    ['restock',  T('return_type_restock','Restock'),       T('return_type_restock_desc','Items back to inventory')],
+                    ['writeoff', T('return_type_writeoff','Write Off'),     T('return_type_writeoff_desc','Lost / damaged goods')],
+                    ['refund',   T('return_type_refund','Refund Only'),     T('return_type_refund_desc','Refund with no stock change')],
                   ] as Array<[ReturnType, string, string]>).map(([v, label, desc]) => (
                     <button key={v} onClick={() => handleReturnTypeChange(v)}
                       className={`p-2 rounded-xl border-2 text-left text-xs transition-colors ${returnType === v ? 'border-blue-600 bg-blue-50 dark:bg-blue-900/30' : 'border-gray-200 dark:border-gray-600 hover:border-gray-300'}`}>
@@ -1227,7 +1234,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
                                     ? 'bg-blue-600 border-blue-600 text-white'
                                     : 'border-gray-400 dark:border-gray-500 hover:border-blue-500'
                               }`}>
-                              {isIncluded && <span className="text-[10px] font-bold leading-none">✓</span>}
+                              {isIncluded && <Check className="h-3 w-3" aria-hidden="true" />}
                             </button>
                             <div className="flex-1 min-w-0">
                               {/* The name decides WHICH product is coming
@@ -1243,7 +1250,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
                                     title={T('stock_action_damaged_hint', 'Tracked as damaged stock tied to this return — kept out of sellable stock.')}
                                     className="inline-flex flex-shrink-0 items-center gap-1 rounded-full border border-orange-300 bg-orange-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-orange-700 dark:border-orange-700 dark:bg-orange-900/40 dark:text-orange-300"
                                   >
-                                    {stockActionOption('damaged').icon} {T('stock_action_damaged', 'Damaged')}
+                                    <StockActionIcon action="damaged" /> {T('stock_action_damaged', 'Damaged')}
                                   </span>
                                 ) : null}
                               </div>
@@ -1288,7 +1295,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
                                       className={`rounded-lg border px-2 py-1 text-[11px] transition-colors ${item.stock_action === option.value
                                         ? 'border-blue-500 bg-blue-100/70 font-semibold text-blue-700 dark:border-blue-500 dark:bg-blue-900/40 dark:text-blue-300'
                                         : 'border-gray-200 text-gray-500 hover:border-gray-300 dark:border-gray-600 dark:text-gray-400'}`}>
-                                      {option.icon} {T(option.labelKey, option.labelEn)}
+                                      <StockActionIcon action={option.value} className="mr-1 h-3 w-3 align-[-1px]" />{T(option.labelKey, option.labelEn)}
                                     </button>
                                   ))}
                                 </div>
@@ -1381,7 +1388,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
                   then drawn from an optional exact lot. */}
               <div data-section="replacement-sale" className="rounded-xl border border-emerald-200 p-3 dark:border-emerald-800">
                 <label className="mb-2 block text-sm font-semibold text-gray-700 dark:text-gray-300">
-                  🔁 {T('replacement_sale_items_label','Replacement sale items')}
+                  <Repeat className="mr-1 inline h-4 w-4 align-[-3px]" aria-hidden="true" />{T('replacement_sale_items_label','Replacement sale items')}
                 </label>
                 <div className="flex gap-2">
                   <input
@@ -1504,7 +1511,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
                       there is no difference to owe or settle. */}
                   <div data-section="replacement-sale-summary" className="mt-2 space-y-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800 dark:border-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-200">
                     <div className="flex items-center justify-between gap-2">
-                      <span>🧾 {T('replacement_sale_new', 'New sale for these items')}</span>
+                      <span className="flex items-center gap-1"><Receipt className="h-4 w-4 shrink-0" aria-hidden="true" />{T('replacement_sale_new', 'New sale for these items')}</span>
                       <span className="font-semibold">{fmtUSD(replacementTotalUsd)}</span>
                     </div>
                     <div className="flex items-center gap-2">
@@ -1563,28 +1570,28 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
           {step === 'confirm' && (
             <div className="space-y-4">
               <div className="bg-orange-50 dark:bg-orange-900/20 rounded-xl p-4 border border-orange-200 dark:border-orange-800">
-                <div className="text-sm font-semibold text-orange-800 dark:text-orange-300 mb-2">⚠️ {T('confirm','Confirm Return')}</div>
+                <div className="mb-2 flex items-center gap-1 text-sm font-semibold text-orange-800 dark:text-orange-300"><AlertTriangle className="h-4 w-4 shrink-0" aria-hidden="true" />{T('confirm','Confirm Return')}</div>
                 <div className="text-xs text-orange-700 dark:text-orange-400 space-y-1">
                   {foundSale && <div>{T('original_receipt','Original Sale')}: <span className="font-mono font-bold">{foundSale.receipt_number}</span></div>}
                   <div>{T('reason','Reason')}: <span className="font-medium">{finalReason}</span></div>
                   <div>{T('return_type_label','Handling')}: <span className="font-medium">
-                    {returnType === 'restock' ? T('return_type_restock','↩️ Restock') : returnType === 'writeoff' ? T('return_type_writeoff','🗑 Write Off') : T('return_type_refund','💰 Refund Only')}
+                    {returnType === 'restock' ? T('return_type_restock','Restock') : returnType === 'writeoff' ? T('return_type_writeoff','Write Off') : T('return_type_refund','Refund Only')}
                   </span></div>
                   <div>{T('returns','Returning')}: <span className="font-medium">{activeItems.length} {T('items','item type(s)')}</span></div>
                   {activeItems.filter(it => it.return_to_stock !== false).length > 0 && (
-                    <div>↩️ {activeItems.filter(it => it.return_to_stock !== false).length} {T('restocked','will be restocked')}</div>
+                    <div className="flex items-center gap-1"><StockActionIcon action="restock" />{activeItems.filter(it => it.return_to_stock !== false).length} {T('restocked','will be restocked')}</div>
                   )}
                   {activeItems.filter(it => it.stock_action === 'none').length > 0 && (
-                    <div>🚫 {activeItems.filter(it => it.stock_action === 'none').length} {T('written_off','will NOT restock')}</div>
+                    <div className="flex items-center gap-1"><StockActionIcon action="none" />{activeItems.filter(it => it.stock_action === 'none').length} {T('written_off','will NOT restock')}</div>
                   )}
                   {activeItems.filter(it => it.stock_action === 'damaged' && it.damaged_disposition !== 'remove').length > 0 && (
-                    <div>🟠 {activeItems.filter(it => it.stock_action === 'damaged' && it.damaged_disposition !== 'remove').length} {T('tracked_as_damaged','tracked as damaged stock')}</div>
+                    <div className="flex items-center gap-1"><StockActionIcon action="damaged" />{activeItems.filter(it => it.stock_action === 'damaged' && it.damaged_disposition !== 'remove').length} {T('tracked_as_damaged','tracked as damaged stock')}</div>
                   )}
                   {activeItems.filter(it => it.stock_action === 'damaged' && it.damaged_disposition === 'remove').length > 0 && (
-                    <div>🗑️ {activeItems.filter(it => it.stock_action === 'damaged' && it.damaged_disposition === 'remove').length} {T('stock_action_damaged_remove_hint_short','destroyed immediately (booked loss)')}</div>
+                    <div className="flex items-center gap-1"><Trash2 className="h-3 w-3 shrink-0" aria-hidden="true" />{activeItems.filter(it => it.stock_action === 'damaged' && it.damaged_disposition === 'remove').length} {T('stock_action_damaged_remove_hint_short','destroyed immediately (booked loss)')}</div>
                   )}
                   {replacements.length > 0 && (
-                    <div>🔁 {replacements.length} {T('replacement_sale_items_short','item(s) on the replacement sale receipt')} — {fmtUSD(replacementTotalUsd)} · {replacementPaymentMethod}</div>
+                    <div className="flex items-center gap-1"><Repeat className="h-3 w-3 shrink-0" aria-hidden="true" />{replacements.length} {T('replacement_sale_items_short','item(s) on the replacement sale receipt')} — {fmtUSD(replacementTotalUsd)} · {replacementPaymentMethod}</div>
                   )}
                 </div>
               </div>
@@ -1602,12 +1609,12 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
                             data-tag="damaged"
                             className="inline-flex flex-shrink-0 items-center gap-1 rounded-full border border-orange-300 bg-orange-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-orange-700 dark:border-orange-700 dark:bg-orange-900/40 dark:text-orange-300"
                           >
-                            {stockActionOption('damaged').icon} {T('stock_action_damaged', 'Damaged')}
+                            <StockActionIcon action="damaged" /> {T('stock_action_damaged', 'Damaged')}
                           </span>
                         ) : null}
                       </span>
                       <span className="block text-[10px] text-gray-400">
-                        {stockActionOption(it.stock_action).icon} {T(stockActionOption(it.stock_action).labelKey, stockActionOption(it.stock_action).labelEn)}
+                        <StockActionIcon action={it.stock_action} className="mr-0.5 h-3 w-3 align-[-2px]" />{T(stockActionOption(it.stock_action).labelKey, stockActionOption(it.stock_action).labelEn)}
                         {' · '}{T('quantity','qty')} {it.returnQty}
                       </span>
                     </div>
@@ -1626,7 +1633,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
                 <div className="space-y-1 rounded-xl border border-emerald-200 bg-emerald-50 p-3 dark:border-emerald-800 dark:bg-emerald-900/20">
                   {replacements.map((line) => (
                     <div key={line.key} className="flex justify-between py-1 text-sm">
-                      <span className="mr-2 min-w-0 break-words text-gray-700 dark:text-gray-300">🔁 {line.product_name} × {line.quantity}</span>
+                      <span className="mr-2 min-w-0 break-words text-gray-700 dark:text-gray-300"><Repeat className="mr-1 inline h-3.5 w-3.5 align-[-2px]" aria-hidden="true" />{line.product_name} × {line.quantity}</span>
                       <span className="flex-shrink-0 font-medium text-gray-900 dark:text-white">{fmtUSD(line.price_usd * line.quantity)}</span>
                     </div>
                   ))}
@@ -1664,7 +1671,9 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
             <button onClick={() => setStep('items')} className="btn-secondary text-sm flex-1">← {T('back','Back')}</button>
             <button onClick={handleSubmit} disabled={!pendingLoaded || !!pendingError || submitting || (isV1Sale && (!quote || reviewedIntentRef.current !== quoteIntent))}
               className="btn-primary text-sm flex-1 disabled:opacity-50">
-              {submitting ? `⏳ ${T('submitting','Processing…')}` : `✅ ${T('submit_return','Confirm Return')}`}
+              {submitting
+                ? <><Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> {T('submitting','Processing…')}</>
+                : <><Check className="h-4 w-4" aria-hidden="true" /> {T('submit_return','Confirm Return')}</>}
             </button>
           </div>
         ) : null}
