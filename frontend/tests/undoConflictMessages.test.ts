@@ -240,8 +240,15 @@ await runCase('an applied replay still resolves with the Worker response', async
 await runCase('the history hook shows the transport error message as is, for both the live and the server-row path', () => {
   const hook = fs.readFileSync(path.join(FRONTEND, 'src', 'utils', 'actionHistory.ts'), 'utf8')
   assert.match(hook, /function getErrorMessage\(error: unknown, fallback: string\): string \{\s*return error instanceof Error \? error\.message : String\(error \|\| fallback\)/)
-  assert.equal(hook.match(/notify\?\.\(getErrorMessage\(error, `Unable to \$\{direction\} that action right now\.`\), 'error'\)/g)?.length, 2,
-    'runEntry and runServerEntry both notify the transport error message')
+  // RET-B E2: runEntry has two catches -- the refused (explain-only) path and
+  // the live server path -- so the count is per handler, not file-wide.
+  const notifies = /notify\?\.\(getErrorMessage\(error, `Unable to \$\{direction\} that action right now\.`\), 'error'\)/g
+  const runEntry = hook.slice(hook.indexOf('const runEntry = useCallback('), hook.indexOf('const undo = useCallback('))
+  const runServerEntry = hook.slice(hook.indexOf('const runServerEntry = useCallback('), hook.indexOf('const undoServer = useCallback('))
+  assert.ok(runEntry.length > 0 && runServerEntry.length > 0, 'both handlers found')
+  assert.equal(runEntry.match(notifies)?.length, 2, 'runEntry notifies the error message as is on the refused and the live path')
+  assert.equal(runServerEntry.match(notifies)?.length, 1, 'runServerEntry notifies the transport error message as is')
+  assert.equal(hook.match(notifies)?.length, 3, 'no other site')
 })
 
 if (failures.length) {
