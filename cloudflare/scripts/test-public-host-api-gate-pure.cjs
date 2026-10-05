@@ -23,11 +23,24 @@ const root = path.resolve(__dirname, '..')
 const repo = path.resolve(root, '..')
 const GATE = 'src/lib/publicHostGate.ts'
 
+// Line endings depend on the checkout (core.autocrlf, the Windows runner), so
+// every source is compared as LF; the controls also run on a CRLF copy.
+const toLf = (text) => text.replace(/\r\n/g, '\n')
 function readAt(rel) {
-  if (!process.env.SECURITY_TEST_BASE) return fs.readFileSync(path.join(repo, rel), 'utf8')
+  if (!process.env.SECURITY_TEST_BASE) return toLf(fs.readFileSync(path.join(repo, rel), 'utf8'))
   try {
-    return execFileSync('git', ['show', `${process.env.SECURITY_TEST_BASE}:${rel}`], { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
+    return toLf(execFileSync('git', ['show', `${process.env.SECURITY_TEST_BASE}:${rel}`], { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }))
   } catch { return null }
+}
+
+// Exactly one occurrence, matched on LF text whatever the input's endings; the
+// result keeps the input's endings so the mutant is the same file, mutated.
+function inject(source, needle, replacement) {
+  const crlf = source.includes('\r\n')
+  const lf = toLf(source)
+  assert.equal(lf.split(needle).length, 2, `injection point found exactly once: ${JSON.stringify(needle.slice(0, 60))}`)
+  const out = lf.replace(needle, replacement)
+  return crlf ? out.replace(/\n/g, '\r\n') : out
 }
 
 function loadGate(source) {
@@ -87,14 +100,16 @@ check('parity: every /api path the storefront bundle calls is reachable on the s
   for (const p of paths) assert.equal(gate.isBlockedOnStorefrontHost(`https://leangbeauty.com${p.endsWith('/') ? `${p}LC-00001` : p}`), false, `storefront call ${p} must not be blocked`)
 })
 
-check('control: a host-blind gate and a deny-list gate both fail the suite', () => {
+check('control: a host-blind gate and a deny-list gate both fail the suite, from LF and CRLF checkouts', () => {
   assert.ok(gateSource, 'gate source loaded')
-  const hostBlind = gateSource.replace("  if (isStaffHostname(parsed.hostname)) return false\n", '')
-  assert.notEqual(hostBlind, gateSource, 'host-blind injection point found')
-  assert.throws(() => gateSuite(loadGate(hostBlind)), /unchanged on the staff host/)
-  const denyList = gateSource.replace("if (path === '/api' || path.startsWith('/api/')) return !isStorefrontApiPath(path)", "if (path.startsWith('/api/auth/')) return true")
-  assert.notEqual(denyList, gateSource, 'deny-list injection point found')
-  assert.throws(() => gateSuite(loadGate(denyList)), /must be 404 on the shop host/)
+  for (const [label, source] of [['LF', gateSource], ['CRLF', gateSource.replace(/\n/g, '\r\n')]]) {
+    assert.equal(source.includes('\r\n'), label === 'CRLF', `${label} copy really has ${label} endings`)
+    assert.doesNotThrow(() => gateSuite(loadGate(source)), `the unmutated ${label} gate passes`)
+    const hostBlind = inject(source, '  if (isStaffHostname(parsed.hostname)) return false\n', '')
+    assert.throws(() => gateSuite(loadGate(hostBlind)), /unchanged on the staff host/, `${label}: a host-blind gate must fail`)
+    const denyList = inject(source, "if (path === '/api' || path.startsWith('/api/')) return !isStorefrontApiPath(path)", "if (path.startsWith('/api/auth/')) return true")
+    assert.throws(() => gateSuite(loadGate(denyList)), /must be 404 on the shop host/, `${label}: a deny-list gate must fail`)
+  }
 })
 
 console.log(`\n${passed} passed${process.exitCode ? ', FAILURES above' : ''}`)
