@@ -279,8 +279,8 @@ test('a real concurrent edit refuses a staged employee edit once, releases it, a
     steps.push({ step: 'notices', redoHint: await page.getByText('Open the edit again to change the latest version.', { exact: false }).count(), conflictDialog: await page.getByText('Sale changed on another device', { exact: true }).count() })
     const dismiss = page.getByRole('button', { name: /^Dismiss$/ })
     if (await dismiss.count()) await dismiss.click()
-    const cancel = line.getByRole('button', { name: /^Cancel$/ })
-    if (await cancel.count()) await cancel.click()
+    await page.getByRole('button', { name: /^Cancel$/ }).first().click()
+    await expect(input).toHaveCount(0)
     await line.getByRole('button', { name: /^Edit$/ }).click()
     await expect(input, 'the redo starts from the competitor’s committed quantity').toHaveValue('2')
     await input.fill('4')
@@ -314,7 +314,8 @@ test('an employee edit with an unknown outcome stays frozen and Retry resends th
   await page.getByRole('button', { name: /^Apply$/ }).click()
   const path = `/api/sales/${sale.id}/amendments`
   const aborted: any[] = []
-  await page.route(url => url.pathname === path, route => { aborted.push(route.request().postDataJSON()); return route.abort('failed') })
+  const amendments = (url: URL) => url.pathname === path
+  await page.route(amendments, route => { aborted.push(route.request().postDataJSON()); return route.abort('failed') })
   await page.getByRole('button', { name: /^Apply change$/ }).click()
   await expect(page.getByText(/other changes remain paused/)).toBeVisible({ timeout: 30_000 })
   expect(aborted).toHaveLength(1)
@@ -323,7 +324,8 @@ test('an employee edit with an unknown outcome stays frozen and Retry resends th
   expect(JSON.parse(String(frozen[0][1])).body).toEqual(aborted[0])
   expect(await state(page, sale.id), 'nothing reached the Worker').toEqual(before)
   await page.screenshot({ path: info.outputPath('employee-unknown-outcome-frozen.png'), fullPage: true })
-  await page.unroute(url => url.pathname === path)
+  await page.unroute(amendments)
+  await page.getByRole('button', { name: /^Cancel$/ }).last().click()
   const retried = page.waitForResponse(r => new URL(r.url()).pathname === path && r.request().method() === 'POST')
   await page.getByRole('button', { name: /^Retry$/ }).click()
   const response = await retried, body = await response.json()
