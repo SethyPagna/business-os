@@ -7198,6 +7198,7 @@
   "branch_edit_outcome_unknown": "The result of this branch edit could not be confirmed. It may have been saved. Refresh Branches and check the details before making another edit.",
   "write_conflict_title": "{entity} changed on another device",
   "write_conflict_older_version": "Your screen was holding an older version of this {entityLower}.",
+  "sale_edit_redo_latest": "Open the edit again to change the latest version.",
   "write_conflict_background_refresh": "We already refreshed the latest data in the background so you can review what won before trying again.",
   "write_conflict_expected_version": "Your version expected",
   "write_conflict_latest_version": "Latest saved version",

@@ -239,7 +239,7 @@ interface SaleItemAddition {
 // it. A shape declared once cannot be updated in two places out of three.
 
 type SaleMutationReview = { client_request_id: string; expected_exchange_rate: number; expected_updated_at?: string; money_precision_version?: 1; expected_header_quote?: import('../../utils/saleMutationHeaderQuote.ts').SaleMutationHeaderQuote }
-type SaleMutationUiResult = boolean | { exchangeRateChanged: number } | { mutationError: string; code?: string; header_quote?: unknown; proven_uncommitted?: boolean } | { committed: true; response: unknown }
+type SaleMutationUiResult = boolean | { exchangeRateChanged: number; proven_uncommitted?: boolean } | { mutationError: string; code?: string; header_quote?: unknown; proven_uncommitted?: boolean } | { committed: true; response: unknown }
 type SaleStatusUiResult = boolean | { exchangeRateChanged: number } | { settlementError: string } | { statusUpdatedAt: string }
 
 function statusReplayExtra(request: PreparedSaleStatusRequest): Record<string, unknown> | null {
@@ -297,6 +297,14 @@ function isWriteConflict(error: unknown): boolean {
     (error as { conflict?: unknown }).conflict === true ||
     (error as { code?: unknown }).code === 'write_conflict'
   )
+}
+
+/** Refusals the sale add/amend routes return before any write, so the saved
+ * request can be released. Everything else (5xx, 429, timeouts, idempotency
+ * conflicts, money-contract errors) stays unproven. */
+export function saleLineRefusalProvesNoCommit(error: unknown): boolean {
+  const row = (error || {}) as { status?: unknown; code?: unknown }
+  return Number(row.status) === 403 || ['write_conflict', 'exchange_rate_changed', 'sale_header_quote_conflict'].includes(String(row.code || ''))
 }
 
 function normalizeFiniteIdsFrom<T = unknown>(items: T[] = [], getValue: (value: T) => unknown = (value) => value): number[] {
@@ -431,6 +439,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   // a legacy row carries no receipt number.
   const [returnForSale, setReturnForSale] = useState<SaleRecord | null>(null)
   const [detailSale, setDetailSale] = useState<SaleRecord | null>(null)
+  const [lineRefreshGate, setLineRefreshGate] = useState<{ saleId: number; version: string; security: string } | null>(null)
   const [saleCustomerProfile, setSaleCustomerProfile] = useState<{ sale: SaleRecord; mode: 'edit' | 'create' } | null>(null)
   const [saleCustomerPrompt, setSaleCustomerPrompt] = useState<{ sale: SaleRecord; choices: Array<{ id: number; name: string; phone?: string | null; membershipNumber?: string | null }>; loading?: boolean; error?: string; resultsQuery?: string } | null>(null)
   const [saleCustomerSaving, setSaleCustomerSaving] = useState(false)
@@ -1000,6 +1009,21 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
       }, accept, (attempt) => new Promise((resolve) => window.setTimeout(resolve, 250 * (attempt + 1))))
   }, [])
 
+  const refreshCommittedLineSale = async (saleId: number, committedVersion: unknown, security: string): Promise<void> => {
+    const isCurrent = () => aliveRef.current && statusSecurityRef.current === security
+    if (!isCurrent()) return
+    const version = typeof committedVersion === 'string' ? committedVersion : ''
+    setLineRefreshGate({ saleId, version, security })
+    const fresh = await readAuthoritativeSale(saleId, row => mutationVersionAtLeast(row.updated_at, version)).catch(() => null)
+    if (!isCurrent() || !fresh) return
+    const replace = (row: SaleRecord | null) => Number(row?.id) === saleId && mutationVersionAtLeast(fresh.updated_at, row?.updated_at) ? fresh : row
+    salesRef.current = salesRef.current.map(row => replace(row) || row)
+    setSales(salesRef.current)
+    setDetailSale(replace)
+    setSelectedSale(replace)
+    setLineRefreshGate(current => current?.saleId === saleId && current.version === version && current.security === security ? null : current)
+  }
+
   const resolveUnknownSaleWrite = useCallback(async (
     saleId: number,
     request: PreparedSaleStatusRequest | SaleAmendmentRequest,
@@ -1397,7 +1421,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
         () => getSalesApi().addSaleItems(saleId, items, '', review),
         'Add items to sale',
         SALES_ADD_ITEMS_MUTATION_TIMEOUT_MS,
-      ) as { addedLines?: number; stockMoved?: boolean } | null
+      ) as { addedLines?: number; stockMoved?: boolean; updated_at?: string } | null
       if (!isCurrent()) return false
       const added = Number(result?.addedLines || items.length)
       // The outcome names what actually happened to STOCK, because that is
@@ -1407,7 +1431,9 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
           ? (translateOr('sale_items_added_stock', 'Added {n} item(s) to the sale and took them out of stock.') || '').replace('{n}', String(added))
           : (translateOr('sale_items_added_no_stock', 'Added {n} item(s) to the sale. Stock moves when the sale is completed.') || '').replace('{n}', String(added)),
       )
-      await loadSales(true)
+      await refreshCommittedLineSale(numericId, result?.updated_at, requestSecurity)
+      if (!isCurrent()) return false
+      await loadSales(true).catch(() => {})
       if (!isCurrent()) return false
       void loadSalesStats()
       actionHistory.refreshServerItems()
@@ -1419,12 +1445,12 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
       if (!isCurrent()) return false
       if (error && typeof error === 'object' && (error as { code?: unknown }).code === 'sale_header_quote_conflict') {
         const conflict = error as { header_quote?: unknown; proven_uncommitted?: unknown }
-        return { mutationError: getErrorMessage(error, 'sale_header_quote_conflict'), code: 'sale_header_quote_conflict', header_quote: conflict.header_quote, proven_uncommitted: conflict.proven_uncommitted === true }
+        return { mutationError: getErrorMessage(error, 'sale_header_quote_conflict'), code: 'sale_header_quote_conflict', header_quote: conflict.header_quote, proven_uncommitted: saleLineRefusalProvesNoCommit(error) }
       }
       if (error && typeof error === 'object' && (error as { code?: unknown }).code === 'exchange_rate_changed') {
         const current = (error as { current?: unknown }).current
         const exchangeRateChanged = current && typeof current === 'object' ? Number((current as { exchange_rate?: unknown }).exchange_rate) : NaN
-        if (Number.isFinite(exchangeRateChanged) && exchangeRateChanged > 0) return { exchangeRateChanged }
+        if (Number.isFinite(exchangeRateChanged) && exchangeRateChanged > 0) return { exchangeRateChanged, proven_uncommitted: true }
       }
       if (directMutationOutcomeIsUnknown(error)) {
         const receipt = await reconcileDirectMutationReceipt(
@@ -1457,10 +1483,12 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
         }
       }
       if (isWriteConflict(error)) {
-        await loadSales()
-        return false
+        await refreshCommittedLineSale(numericId, (error as { actualUpdatedAt?: unknown }).actualUpdatedAt, requestSecurity)
+        if (!isCurrent()) return false
+        await loadSales().catch(() => {})
+        return { mutationError: `${(t('write_conflict_older_version') || '').replace('{entityLower}', t('sale') || 'sale')} ${t('sale_edit_redo_latest')}`, code: 'write_conflict', proven_uncommitted: true }
       }
-      return { mutationError: `${translateOr('sale_items_add_failed', 'Could not add the items')}: ${saleInvalidRateMessage(error) ?? getErrorMessage(error, String(error || 'Unknown error'))}` }
+      return { mutationError: `${translateOr('sale_items_add_failed', 'Could not add the items')}: ${saleInvalidRateMessage(error) ?? getErrorMessage(error, String(error || 'Unknown error'))}`, ...(saleLineRefusalProvesNoCommit(error) ? { proven_uncommitted: true } : {}) }
     }
   }
 
@@ -1483,7 +1511,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
         () => getSalesApi().amendSale(saleId, request),
         'Amend sale',
         SALES_ADD_ITEMS_MUTATION_TIMEOUT_MS,
-      ) as { stockMoved?: boolean; unitsMoved?: number; stockSkipped?: boolean } | null
+      ) as { stockMoved?: boolean; unitsMoved?: number; stockSkipped?: boolean; updated_at?: string } | null
       if (!isCurrent()) return false
       // The outcome names what actually happened to STOCK, because that is the
       // part a shopkeeper cannot see from the receipt -- and a stock-skipped
@@ -1496,7 +1524,9 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
             ? (translateOr('sale_amended_stock', 'Sale updated, and {n} unit(s) moved in stock.') || '').replace('{n}', String(units))
             : translateOr('sale_amended', 'Sale updated.'),
       )
-      await loadSales(true)
+      await refreshCommittedLineSale(numericId, result?.updated_at, requestSecurity)
+      if (!isCurrent()) return false
+      await loadSales(true).catch(() => {})
       if (!isCurrent()) return false
       void loadSalesStats()
       actionHistory.refreshServerItems()
@@ -1508,12 +1538,12 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
       if (!isCurrent()) return false
       if (error && typeof error === 'object' && (error as { code?: unknown }).code === 'sale_header_quote_conflict') {
         const conflict = error as { header_quote?: unknown; proven_uncommitted?: unknown }
-        return { mutationError: getErrorMessage(error, 'sale_header_quote_conflict'), code: 'sale_header_quote_conflict', header_quote: conflict.header_quote, proven_uncommitted: conflict.proven_uncommitted === true }
+        return { mutationError: getErrorMessage(error, 'sale_header_quote_conflict'), code: 'sale_header_quote_conflict', header_quote: conflict.header_quote, proven_uncommitted: saleLineRefusalProvesNoCommit(error) }
       }
       if (error && typeof error === 'object' && (error as { code?: unknown }).code === 'exchange_rate_changed') {
         const current = (error as { current?: unknown }).current
         const exchangeRateChanged = current && typeof current === 'object' ? Number((current as { exchange_rate?: unknown }).exchange_rate) : NaN
-        if (Number.isFinite(exchangeRateChanged) && exchangeRateChanged > 0) return { exchangeRateChanged }
+        if (Number.isFinite(exchangeRateChanged) && exchangeRateChanged > 0) return { exchangeRateChanged, proven_uncommitted: true }
       }
       if (directMutationOutcomeIsUnknown(error)) {
         const applied = await resolveUnknownSaleWrite(numericId, request, 'amendment', error)
@@ -1524,10 +1554,12 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
         }
       }
       if (isWriteConflict(error)) {
-        await loadSales()
-        return false
+        await refreshCommittedLineSale(numericId, (error as { actualUpdatedAt?: unknown }).actualUpdatedAt, requestSecurity)
+        if (!isCurrent()) return false
+        await loadSales().catch(() => {})
+        return { mutationError: `${(t('write_conflict_older_version') || '').replace('{entityLower}', t('sale') || 'sale')} ${t('sale_edit_redo_latest')}`, code: 'write_conflict', proven_uncommitted: true }
       }
-      return { mutationError: `${translateOr('sale_amend_failed', 'Could not update the sale')}: ${saleInvalidRateMessage(error) ?? getErrorMessage(error, String(error || 'Unknown error'))}` }
+      return { mutationError: `${translateOr('sale_amend_failed', 'Could not update the sale')}: ${saleInvalidRateMessage(error) ?? getErrorMessage(error, String(error || 'Unknown error'))}`, ...(saleLineRefusalProvesNoCommit(error) ? { proven_uncommitted: true } : {}) }
     }
   }
 
@@ -1670,7 +1702,8 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   useEffect(() => {
     const refreshOpen = (current: SaleRecord | null): SaleRecord | null => {
       if (!current) return current
-      return visibleSales.find((sale) => Number(sale.id) === Number(current.id)) || current
+      const candidate = visibleSales.find((sale) => Number(sale.id) === Number(current.id))
+      return candidate && mutationVersionAtLeast(candidate.updated_at, current.updated_at) ? candidate : current
     }
     setDetailSale(refreshOpen)
     setSelectedSale(refreshOpen)
@@ -2809,6 +2842,8 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
           <SaleDetailModal
             key={`${statusSecurityScope}:${detailSale.id}`}
             sale={detailSale}
+            lineRefreshRequired={lineRefreshGate?.security === statusSecurityScope && lineRefreshGate.saleId === Number(detailSale.id) && !mutationVersionAtLeast(detailSale.updated_at, lineRefreshGate.version)}
+            onRefreshLineReview={() => lineRefreshGate && refreshCommittedLineSale(lineRefreshGate.saleId, lineRefreshGate.version, lineRefreshGate.security)}
             pendingStatus={!directStatusSaving && activePendingDirectStatus?.entityId === String(detailSale.id)}
             statusRecoveryOwner={isActive && activePendingDirectStatus && pendingStatusProblemRef.current ? { actorId: activePendingDirectStatus.actorId, requestId: activePendingDirectStatus.body.client_request_id, problem: pendingStatusProblemRef.current } : null}
             onRetryStatus={canChangeSaleStatus ? retryPendingDirectStatusRequest : undefined}

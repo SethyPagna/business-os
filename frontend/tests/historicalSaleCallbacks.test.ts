@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url'
 import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { quoteSaleMutationHeader } from '../src/utils/saleMutationHeaderQuote.ts'
-import { sellingPriceCeilCent, sumMoney4 } from '../src/utils/moneyPrecision.ts'
+import { sellingPriceCeilCent, sumMoney4, multiplyMoney4 } from '../src/utils/moneyPrecision.ts'
 import { stagedLineFromSheetPick, stagedLinePricingIntent } from '../src/components/sales/saleAddLines.ts'
 import { parseDeliveryAmountUsd, deliveryAmountChanged, DELIVERY_AMOUNT_ERROR_KEYS } from '../src/utils/deliveryAmounts.ts'
 import { runSaleLineMutation, loadPendingDirectMutation } from '../src/utils/directMutationRequest.ts'
@@ -87,10 +87,33 @@ const auditExpression = transformSync(`const value = ${auditSource.slice(5, -1)}
 const renderDetailAudit = new Function('totals', 't', `${auditExpression}; return value`)
 assert.equal(renderDetailAudit({ calculatedTotalUsd: 3.7036, roundingAdjustmentUsd: -.0036 }, (key: string) => key), 'money_calculated_total: USD 3.7036 · money_rounding_adjustment: USD -0.0036')
 assert.match(renderDetailAudit({ calculatedTotalUsd: 3.6964, roundingAdjustmentUsd: .0036 }, (key: string) => key), /USD \+0\.0036$/)
-function callback(name: string, env: Record<string, unknown>) {
+function rawCallback(name: string, env: Record<string, unknown>) {
   const start = source.indexOf(`  const ${name} = `), end = source.indexOf('\n  }\n', start) + 4
   assert.ok(start > 0 && end > start)
   return new Function('env', `with(env) { ${transformSync(source.slice(start, end), { loader: 'tsx' }).code}; return ${name} }`)(env)
+}
+function callback(name: string, input: Record<string, unknown>) {
+  if (!['stageLineUpdate', 'stageRemoval', 'stageReplacement', 'stageDeliveryFeeAmendment', 'stageActualDeliveryCostAmendment', 'stageDeliveryAddition', 'submitAddItems'].includes(name)) return rawCallback(name, input)
+  const sale = input.sale as Record<string, unknown>
+  const env: Record<string, any> = {
+    ...input,
+    sale: { id: 17, updated_at: '2026-10-04T00:00:00.000Z', ...sale },
+    savedExchangeRate: input.savedExchangeRate ?? Number(sale.exchange_rate),
+    detailScope: input.detailScope || 'fixture-actor:sale17', lineMutationActor: 'fixture-actor', lineRefreshRequired: false,
+    captureActorReadScope: () => ({ actor: 'fixture-actor' }),
+  }
+  env.isActorReadScopeCurrent = (scope: { actor: string }) => scope.actor === env.lineMutationActor
+  for (const helper of ['captureLineDraft', 'lineDraftOwned', 'lineDraftCurrent', 'lineDraftConflict', 'stageAmendReview']) env[helper] = rawCallback(helper, env)
+  env.amendDraftRef = { current: env.captureLineDraft() }
+  if (name === 'submitAddItems') {
+    env.addDraftRef = { current: env.captureLineDraft() }
+    env.addHeaderQuote = input.addReviewedHeader
+    env.addedSubtotalUsd = sumMoney4(env.addLines.map((line: any) => multiplyMoney4(line.unitPriceUsd, line.quantity)))
+    env.createSettlementRequestId = () => (input.addRequestIdRef as { current: string }).current
+    env.setAddReview = (review: unknown) => { env.addReview = review }
+    rawCallback('stageAddReview', env)()
+  }
+  return rawCallback(name, env)
 }
 const staged: any[] = [], errors: string[] = []
 const header = { ...residualHeader, is_delivery: 1, delivery_fee_usd: 0, delivery_fee_paid_by: 'customer' }

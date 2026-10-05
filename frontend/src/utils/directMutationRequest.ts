@@ -26,6 +26,7 @@ type SessionStore = Pick<Storage, 'getItem' | 'setItem' | 'removeItem' | 'length
 export const DIRECT_MUTATION_MAX_PENDING = 24
 export const DIRECT_MUTATION_MAX_SERIALIZED_CHARS = 131072
 export const DIRECT_MUTATION_RECONCILE_AFTER_MS = 7 * 24 * 60 * 60 * 1000
+export const SALE_LINE_IN_FLIGHT_BOUND_MS = 10 * 60 * 1000
 
 const STORAGE_PREFIX = 'businessos_pending_'
 
@@ -331,6 +332,22 @@ export async function withSaleLineMutationLock<T>(actorId: unknown, entityId: un
   })
 }
 
+// When the frozen request was last sent, kept beside it so the frozen record
+// itself stays byte-identical across retries.
+const saleLineSentKey = (kind: SaleLineMutationKind, actorId: string, entityId: string) => `businessos_sale_line_sent_v1:${kind}:${actorId}:${entityId}`
+
+function lastSaleLineSend(kind: SaleLineMutationKind, actorId: string, entityId: string, requestId: unknown, storage: SessionStore): number | null {
+  try {
+    const row = JSON.parse(storage.getItem(saleLineSentKey(kind, actorId, entityId)) || 'null') as { request?: unknown; at?: unknown } | null
+    return row && row.request === requestId && Number.isFinite(row.at) ? Number(row.at) : null
+  } catch { return null }
+}
+
+function rememberSaleLineSend(kind: SaleLineMutationKind, actorId: string, entityId: string, requestId: unknown, at: number, storage: SessionStore): void {
+  try { storage.setItem(saleLineSentKey(kind, actorId, entityId), JSON.stringify({ request: requestId, at })) }
+  catch { throw new DirectMutationPersistenceError() }
+}
+
 /** Caller must hold the sale lock and have an explicit, receipt-first server
  * proof of no commit. This changes ONLY the reviewed header and request id;
  * the original line/manual/lot intent and expected row version stay exact. */
@@ -345,31 +362,38 @@ export function replaceReviewedSaleLineHeader(kind: SaleLineMutationKind, actorI
 }
 
 /** One exact-body path for a fresh submission, explicit retry or reopened
- * read-only recovery. Missing/denied receipt proof never changes the body. */
+ * read-only recovery. Missing/denied receipt proof never changes the body.
+ * A refusal the server proves happened before any write releases the saved
+ * request, unless an earlier send of it may still be in flight. */
 export async function runSaleLineMutation<T>(options: {
   kind: SaleLineMutationKind; actorId: string; entityId: string; storage: SessionStore;
   body?: Record<string, unknown>; readOnly?: boolean; isCurrent: () => boolean;
   readReceipt: (body: Record<string, unknown>) => Promise<{ committed: boolean; response?: Record<string, unknown> }>;
   send: (body: Record<string, unknown>) => Promise<T>; isCommitted: (result: T) => boolean;
+  isProvenUncommitted?: (result: T) => boolean;
   onPending?: (body: Record<string, unknown>) => void;
-}): Promise<{ committed: boolean; response?: Record<string, unknown>; result?: T; body: Record<string, unknown> }> {
+  now?: () => number;
+}): Promise<{ committed: boolean; released?: boolean; response?: Record<string, unknown>; result?: T; body: Record<string, unknown> }> {
   const { kind, actorId, entityId, storage } = options
+  const now = options.now || Date.now
   const admitted = await withSaleLineMutationLock(actorId, entityId, options.isCurrent, () => {
     const opposite: SaleLineMutationKind = kind === 'sale-add-items' ? 'sale-amendment' : 'sale-add-items'
     if (loadPendingDirectMutation(opposite, actorId, entityId, storage)) throw new DirectMutationPersistenceError('Another change to this sale is awaiting reconciliation.')
     const prior = loadPendingDirectMutation(kind, actorId, entityId, storage)
     if (prior) {
       if (options.body && JSON.stringify(freezeDirectMutationBody(options.body)) !== JSON.stringify(prior.body)) throw new DirectMutationPersistenceError('Review the existing pending sale request before starting a different change.')
-      return { body: prior.body, retry: true }
+      return { body: prior.body, retry: true, lastSentAt: lastSaleLineSend(kind, actorId, entityId, prior.body.client_request_id, storage) ?? prior.createdAt }
     }
     if (!options.body || options.readOnly) throw new DirectMutationPersistenceError('No prepared sale request is available for recovery.')
-    return { body: savePendingDirectMutation(kind, actorId, entityId, options.body, storage)!.body, retry: false }
+    return { body: savePendingDirectMutation(kind, actorId, entityId, options.body, storage)!.body, retry: false, lastSentAt: null as number | null }
   })
   const current = () => { if (!options.isCurrent()) throw new DirectMutationPersistenceError('The session changed; the saved request remains available to its original owner.') }
   current()
   options.onPending?.(freezeDirectMutationBody(admitted.body))
-  const release = () => withSaleLineMutationLock(actorId, entityId, options.isCurrent,
-    () => releasePendingSaleLineMutation(kind, actorId, entityId, admitted.body, storage))
+  const release = () => withSaleLineMutationLock(actorId, entityId, options.isCurrent, () => {
+    releasePendingSaleLineMutation(kind, actorId, entityId, admitted.body, storage)
+    try { storage.removeItem(saleLineSentKey(kind, actorId, entityId)) } catch { /* keyed to this request id, so a leftover is ignored */ }
+  })
   if (admitted.retry) {
     const receipt = await options.readReceipt(freezeDirectMutationBody(admitted.body))
     current()
@@ -381,10 +405,17 @@ export async function runSaleLineMutation<T>(options: {
     if (options.readOnly) return { committed: false, body: admitted.body }
   }
   current()
+  const sentAt = now()
+  rememberSaleLineSend(kind, actorId, entityId, admitted.body.client_request_id, sentAt, storage)
   const result = await options.send(freezeDirectMutationBody(admitted.body))
   current()
   const committed = options.isCommitted(result)
   if (committed) await release()
+  const noEarlierSendInFlight = admitted.lastSentAt === null || sentAt - admitted.lastSentAt >= SALE_LINE_IN_FLIGHT_BOUND_MS
+  if (!committed && noEarlierSendInFlight && options.isProvenUncommitted?.(result)) {
+    await release()
+    return { committed, released: true, result, body: admitted.body }
+  }
   return { committed, result, body: admitted.body }
 }
 

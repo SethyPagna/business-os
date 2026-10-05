@@ -12,7 +12,7 @@ import { normalizePromotionRule } from '../src/utils/promotionRules.ts'
 import { capturedSaleLineEdit, saleLineEditPreview, saleRemovalSubtotal } from '../src/utils/saleLineEditor.ts'
 import { quoteSaleMutationHeader } from '../src/utils/saleMutationHeaderQuote.ts'
 import { compareSaleHeaderQuote } from '../src/utils/saleMutationHeaderQuote.ts'
-import { runSaleLineMutation, loadPendingDirectMutation, withSaleLineMutationLock, replaceReviewedSaleLineHeader } from '../src/utils/directMutationRequest.ts'
+import { runSaleLineMutation, loadPendingDirectMutation, withSaleLineMutationLock, replaceReviewedSaleLineHeader, mutationVersionAtLeast } from '../src/utils/directMutationRequest.ts'
 import { stagedLineFromSheetPick, stagedLinePricingIntent, mergeStagedAddLine } from '../src/components/sales/saleAddLines.ts'
 import { nativeChangeAmounts, sumMoney4, multiplyMoney4, sellingPriceCeilCent, sellingPriceDivideCeilCent } from '../src/utils/moneyPrecision.ts'
 import { applyManualDiscount } from '../src/components/pos/posCore.ts'
@@ -158,12 +158,35 @@ for (const writeError of ['timeout', '403', 'lost acknowledgement']) {
 console.log('PASS actual POS checkout callback: receipt-first recovery, exact retry, canonical print and actor guard')
 
 const detailSource = fs.readFileSync(new URL('../src/components/sales/SaleDetailModal.tsx', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
-function actualDetailCallback(name: string, env: Record<string, unknown>) {
+function rawDetailCallback(name: string, env: Record<string, unknown>) {
   const start = detailSource.indexOf(`  const ${name} = `)
   const end = detailSource.indexOf('\n  }\n', start) + 4
   assert.ok(start > 0 && end > start)
   const code = transformSync(detailSource.slice(start, end), { loader: 'tsx' }).code
   return new Function('env', `with(env) { ${code}; return ${name} }`)(env)
+}
+function actualDetailCallback(name: string, input: Record<string, unknown>) {
+  if (!['stageLineUpdate', 'stageRemoval', 'stageReplacement', 'stageDeliveryFeeAmendment', 'stageActualDeliveryCostAmendment', 'stageDeliveryAddition', 'submitAddItems'].includes(name)) return rawDetailCallback(name, input)
+  const sale = input.sale as Record<string, unknown>
+  const env: Record<string, any> = {
+    ...input,
+    sale: { id: 17, updated_at: '2026-10-04T00:00:00.000Z', ...sale },
+    savedExchangeRate: input.savedExchangeRate ?? Number(sale.exchange_rate),
+    detailScope: input.detailScope || 'fixture-actor:sale17', lineMutationActor: 'fixture-actor', lineRefreshRequired: false,
+    captureActorReadScope: () => ({ actor: 'fixture-actor' }),
+  }
+  env.isActorReadScopeCurrent = (scope: { actor: string }) => scope.actor === env.lineMutationActor
+  for (const helper of ['captureLineDraft', 'lineDraftOwned', 'lineDraftCurrent', 'lineDraftConflict', 'stageAmendReview']) env[helper] = rawDetailCallback(helper, env)
+  env.amendDraftRef = { current: env.captureLineDraft() }
+  if (name === 'submitAddItems') {
+    env.addDraftRef = { current: env.captureLineDraft() }
+    env.addHeaderQuote = input.addReviewedHeader
+    env.addedSubtotalUsd = sumMoney4(env.addLines.map((line: any) => multiplyMoney4(line.unitPriceUsd, line.quantity)))
+    env.createSettlementRequestId = () => (input.addRequestIdRef as { current: string }).current
+    env.setAddReview = (review: unknown) => { env.addReview = review }
+    rawDetailCallback('stageAddReview', env)()
+  }
+  return rawDetailCallback(name, env)
 }
 const edits: any[] = [], editErrors: string[] = []
 const editEnv = {
@@ -237,16 +260,31 @@ console.log('PASS actual sale add/edit callbacks: original rule, saved FX, stabl
 // Execute the actual parent handlers to challenge late actor responses and
 // exact conflict forwarding, rather than asserting source spelling.
 const salesSource = fs.readFileSync(new URL('../src/components/sales/Sales.tsx', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
-function actualSalesCallback(name: string, env: Record<string, unknown>) {
+function rawSalesCallback(name: string, env: Record<string, unknown>) {
   const start = salesSource.indexOf(`  const ${name} = `), end = salesSource.indexOf('\n  }\n', start) + 4
   assert.ok(start > 0 && end > start)
   return new Function('env', `with(env) { ${transformSync(salesSource.slice(start, end), { loader: 'tsx' }).code}; return ${name} }`)(env)
+}
+function actualSalesCallback(name: string, input: Record<string, unknown>) {
+  const env: Record<string, any> = { ...input, mutationVersionAtLeast }
+  const provesStart = salesSource.indexOf('export function saleLineRefusalProvesNoCommit'), provesEnd = salesSource.indexOf('\n}\n', provesStart) + 3
+  env.saleLineRefusalProvesNoCommit = new Function(`${transformSync(salesSource.slice(provesStart + 'export '.length, provesEnd), { loader: 'ts' }).code}; return saleLineRefusalProvesNoCommit`)()
+  env.setLineRefreshGate = (value: any) => { env.lineRefreshGate = typeof value === 'function' ? value(env.lineRefreshGate) : value }
+  env.readAuthoritativeSale = async (id: number, accept: (row: any) => boolean) => {
+    const row = { id, updated_at: '2026-10-04T00:00:01.000Z', items: [] }
+    return accept(row) ? row : null
+  }
+  env.setSales = (rows: any[]) => { env.salesRef.current = rows }
+  env.setDetailSale = (update: (row: any) => any) => { env.detailSale = update(env.detailSale || null) }
+  env.setSelectedSale = (update: (row: any) => any) => { env.selectedSale = update(env.selectedSale || null) }
+  env.refreshCommittedLineSale = rawSalesCallback('refreshCommittedLineSale', env)
+  return rawSalesCallback(name, env)
 }
 for (const name of ['handleAddSaleItems', 'handleAmendSale']) {
   for (const mode of ['success', 'late', 'conflict']) {
     const notifications: unknown[] = [], refreshes: unknown[] = [], scope = { current: 'before' }
     const quote = editEnv.headerQuote(20)
-    const response = { subtotalUsd: 20, totalUsd: 20, moneyPrecisionVersion: 1, items: [] }
+    const response = { subtotalUsd: 20, totalUsd: 20, moneyPrecisionVersion: 1, items: [], updated_at: '2026-10-04T00:00:01.000Z' }
     const write = async () => { if (mode === 'late') scope.current = 'after'; if (mode === 'conflict') throw { code: 'sale_header_quote_conflict', header_quote: quote, proven_uncommitted: true }; return response }
     const result = await actualSalesCallback(name, {
       statusSecurityRef: scope, aliveRef: { current: true }, canAddSaleItems: true, canAmendSales: true,
