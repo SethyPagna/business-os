@@ -235,7 +235,7 @@ await runTest('legacy customer return: a timed-out or lost create keeps its id A
       'api/returnsTransport.ts': { createReturn: write.fn },
     },
   })
-  const confirmReturn = shown('submit_return', 'Confirm Return')
+  const confirmReturn = shown('confirm', 'Confirm')
   const onConfirmStep = (): boolean => page.findAll((node) => node.tagName === 'BUTTON' && accessibleText(node).includes(confirmReturn)).length > 0
   try {
     await page.waitFor(() => page.findAll((node) => node.getAttribute('role') === 'option' && node.textContent.includes(sale.receipt_number)).length > 0, 'the matching receipt')
@@ -246,7 +246,7 @@ await runTest('legacy customer return: a timed-out or lost create keeps its id A
         if (onConfirmStep()) await page.click(page.button(shown('back', 'Back')))
         await page.type(page.find((node) => node.tagName === 'INPUT' && node.getAttribute('type') === 'number', `the return quantity for ${serumLine.product_name}`), form.quantity)
         await page.type(page.find((node) => node.tagName === 'TEXTAREA', 'the return notes'), form.notes)
-        await page.click(page.button(new RegExp(`^${escapeRegExp(shown('confirm', 'Review'))} →`)))
+        await page.click(page.button(new RegExp(`^${escapeRegExp(shown('return_review', 'Review'))}`)))
         await page.click(page.button(confirmReturn), pressing(write))
       },
       write,
@@ -298,13 +298,13 @@ await runTest('supplier return: the id survives a timeout, a lost answer and a f
     },
   })
   try {
-    await page.waitFor(() => page.findAll((node) => node.tagName === 'TR' && node.textContent.includes(serum.name)).length > 0, 'the branch stock list')
+    await page.waitFor(() => page.findAll((node) => node.tagName === 'LI' && node.textContent.includes(serum.name)).length > 0, 'the branch stock list')
     await page.type(page.field('supplier-return-supplier'), 'Glow')
     await page.click(page.find((node) => node.getAttribute('role') === 'option' && node.textContent.includes('Glow Co'), 'supplier option Glow Co'))
     await proveOneIdentityPerMountedIntent({
       press: async () => {
         await page.type(page.field('supplier-return-reason'), form.reason)
-        await page.type(page.find((node) => node.tagName === 'INPUT' && !!node.closest('tr')?.textContent.includes(serum.name), `quantity for ${serum.name}`), '2')
+        await page.type(page.find((node) => node.tagName === 'INPUT' && !!node.closest('li')?.textContent.includes(serum.name), `quantity for ${serum.name}`), '2')
         await page.click(page.button(shown('save', 'Save')), pressing(write))
       },
       write,

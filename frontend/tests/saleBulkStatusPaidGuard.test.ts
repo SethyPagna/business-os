@@ -40,6 +40,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { transformSync } from 'esbuild'
 
 import * as uiRule from '../src/utils/saleStatusResolution.ts'
+import { bulkDialogDependency, NOT_BULK_DIALOG_DEPENDENCY } from './bulkFieldChangeDialogShim.ts'
 
 const nodeRequire = createRequire(import.meta.url)
 const React = nodeRequire('react')
@@ -162,6 +163,8 @@ function loadModal(targetKey: string): (props: AnyProps) => unknown {
     if (id === 'react-dom') return { createPortal: (node: unknown) => node }
     if (id.includes('lucide-react')) return { __esModule: true, default: () => null }
     if (id.includes('AppSelect')) return { __esModule: true, default: ({ ariaLabel, value }: AnyProps) => React.createElement('span', { 'data-select': ariaLabel, 'data-value': value }) }
+    const dialogDependency = bulkDialogDependency(id, shim)
+    if (dialogDependency !== NOT_BULK_DIALOG_DEPENDENCY) return dialogDependency
     return nodeRequire(id)
   }
   new Function('require', 'module', 'exports', compiled)(shim, mod, mod.exports)
@@ -197,7 +200,7 @@ function renderReview(targetKey: string, sales: typeof SALES): string {
   }
 }
 const confirmButton = (html: string): string => {
-  const match = html.match(/<button[^>]*class="btn-primary text-sm"[^>]*>Confirm<\/button>/)
+  const match = html.match(/<button[^>]*class="btn-primary[^"]*"[^>]*>Confirm<\/button>/)
   assert.ok(match, 'the review should render its Confirm button')
   return match[0]
 }

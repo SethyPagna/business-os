@@ -806,7 +806,7 @@ test('compact report filters match the stacked mobile control contract', () => {
   assert.match(css, /\.reports-mobile-range\s*\{[^}]*\bmin-height:\s*44px\s*;/, 'the combined date/calendar target is at least 44px, regardless of declaration order')
   assert.match(css, /\.reports-show-action\s*\{[^}]*min-height:\s*40px[^}]*height:\s*40px/, 'Show follows the compact action-height contract')
   assert.match(css, /\.reports-filter-trigger\s*\{[^}]*min-height:\s*40px[^}]*height:\s*40px/, 'Filters follows the shared Manage-aligned 40px control height')
-  assert.match(css, /@media \(max-width: 767px\)\s*\{\s*\.reports-filter-trigger\s*\{[^}]*width:\s*40px[^}]*min-width:\s*40px[^}]*max-width:\s*40px[^}]*flex:\s*0 0 40px/, 'compact Filters remains an explicit 40px square when the shared control-height token is absent')
+  assert.match(css, /\.reports-filter-trigger\s*\{[^}]*width:\s*40px[^}]*min-width:\s*40px[^}]*max-width:\s*40px[^}]*flex:\s*0 0 40px/, 'Filters is an explicit 40px icon square at every width when the shared control-height token is absent')
   assert.match(css, /\.reports-view-picker\s*\{[^}]*width:\s*clamp\(5\.5rem, 28vw, 14rem\)[^}]*flex:\s*0 0 clamp\(5\.5rem, 28vw, 14rem\)/, 'short and long report labels retain one responsive picker width with a phone-safe floor')
   assert.match(css, /\.reports-view-picker \[data-app-select-selected='true'\]\s*\{[^}]*overflow-x:\s*auto !important[^}]*text-overflow:\s*clip/, 'the complete selected report name is horizontally reachable without an ellipsis')
   assert.match(css, /body\.lang-km \[data-reports-hub\] \.reports-view-picker \[data-app-select-selected='true'\][^}]*overflow-x:\s*auto !important/, 'the report-name scroller outranks the global Khmer truncate clip rule')
@@ -1218,6 +1218,21 @@ await asyncTest('usePagedReport: load-more failure preserves rows/cursor, retry 
   state.reload(); render(); h.effects(); await settle()
   assert.deepEqual(pages[3], { snapshotMaxId: null, cursor: null }, 'refresh starts a new snapshot')
   h.unmount()
+})
+
+test('the fold header actions are icon-only with a translated name and their own 32px', () => {
+  // --ui-control-h is not defined inside the portalled Fold, so each states its size.
+  for (const [file, label] of [
+    ['PeriodReport.tsx', "tr('rpt_view_sales', 'View sales')"],
+    ['GroupedReport.tsx', "tr('rpt_view_sales', 'View sales')"],
+    ['ReportOptionsFold.tsx', "tr('reset', 'Reset')"],
+  ]) {
+    const source = read('src/components/sales/reports/' + file)
+    const at = source.indexOf(`<IconButton label={${label}}`)
+    assert.ok(at >= 0, `${file} header action is an IconButton named by its translation`)
+    assert.ok(source.slice(at, source.indexOf('\n', at)).includes('!h-8 !w-8'), `${file} header action states its own 32px`)
+    assert.doesNotMatch(source, /<Button\b/, file + ' keeps no text button in the fold header')
+  }
 })
 
 if (failed) {

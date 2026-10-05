@@ -311,7 +311,8 @@ assert.match(saleLineAdditionBackend, /if \(!line\.branchId \|\| line\.heldUnits
 assert.match(salesStatusBackend, /\['completed', 'awaiting_payment', 'awaiting_delivery'\]/)
 
 assert.match(detail, /<SaleStatusWorkflow/)
-assert.match(workflow, /'closed' \| 'destination' \| 'review'/)
+assert.match(workflow, /'destination' \| 'review'/)
+assert.doesNotMatch(workflow, /'closed'/, 'no opener step: the workflow opens on the destination chips')
 assert.doesNotMatch(workflow, /Choose destination status/)
 assert.match(workflow, /getStatusLabel\(currentStatus, t\)/)
 assert.match(workflow, /getStatusLabel\(selectedStatus, t\)/)

@@ -1,9 +1,22 @@
 // ── NewReturnModal ───────────────────────────────────────────────────────────
+import AlertTriangle from 'lucide-react/dist/esm/icons/alert-triangle.js'
+import Check from 'lucide-react/dist/esm/icons/check.js'
+import ChevronLeft from 'lucide-react/dist/esm/icons/chevron-left.js'
+import Eye from 'lucide-react/dist/esm/icons/eye.js'
+import ListChecks from 'lucide-react/dist/esm/icons/list-checks.js'
+import Loader2 from 'lucide-react/dist/esm/icons/loader-2.js'
+import Receipt from 'lucide-react/dist/esm/icons/receipt.js'
+import Repeat from 'lucide-react/dist/esm/icons/repeat.js'
+import Search from 'lucide-react/dist/esm/icons/search.js'
+import Trash2 from 'lucide-react/dist/esm/icons/trash-2.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import { createPortal } from 'react-dom'
 import { useEffect, useRef, useState } from 'react'
 import { useApp as useAppHook } from '../../AppContext.tsx'
 import AppSelect from '../shared/AppSelect.tsx'
+import InfoHint from '../shared/InfoHint.tsx'
+import Modal from '../shared/Modal.tsx'
+import SearchInput from '../shared/SearchInput.tsx'
 import ScanSearchButton from '../shared/ScanSearchButton.tsx'
 import ProductOptionSheet from '../shared/ProductOptionSheet.tsx'
 import { buildProductGroups } from '../../utils/productGrouping.ts'
@@ -30,11 +43,10 @@ import type { DamagedDisposition } from './helpers/returnOptions.ts'
 import { returnRefusalText } from './helpers/returnRefusalError.ts'
 import { normalizeReturnReasonList } from './helpers/returnReasonPresets.ts'
 import { useReturnReasonPresets } from './helpers/useReturnReasonPresets.ts'
-import { useCloseGuard } from '../../utils/useCloseGuard.ts'
-import UnsavedChangesPrompt from '../shared/UnsavedChangesPrompt.tsx'
 import { captureActorReadScope, isActorReadScopeCurrent } from '../../api/actorReadScope.ts'
 import type { PendingReturnCreateV1, ReturnQuoteV1 } from '../../api/returnsTransport.ts'
 import { subtractDecimalSum } from '../../utils/moneyPrecision.ts'
+import StockActionIcon from './StockActionIcon.tsx'
 
 const RETURN_SALE_SEARCH_TIMEOUT_MS = 12000
 // Long enough that a fast typist does not fire a request per keystroke, short
@@ -49,7 +61,8 @@ const RECEIPT_SUGGEST_MIN_CHARS = 2
 const RETURN_HISTORY_LOOKUP_TIMEOUT_MS = 10000
 const RETURN_CREATE_TIMEOUT_MS = 15000
 
-type ModalStep = 'search' | 'items' | 'confirm'
+// The flow opens on the items screen -- finding the sale is the top of it, not a step in front of it.
+type ModalStep = 'items' | 'confirm'
 type NoticeKind = 'success' | 'error' | 'info' | 'warning' | string
 type MoneyFormatter = (value: number | string) => string
 type ReturnType = 'restock' | 'writeoff' | 'refund'
@@ -310,7 +323,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
   const returnReasonPresets = useReturnReasonPresets(t)
   const RETURN_REASONS = normalizeReturnReasonList([...returnReasonPresets.customer, OTHER_LABEL])
 
-  const [step,          setStep]          = useState<ModalStep>('search')
+  const [step,          setStep]          = useState<ModalStep>('items')
   const [searchQuery,   setSearchQuery]   = useState(() => String(initialReceiptQuery || '').trim())
   const [foundSale,     setFoundSale]     = useState<SaleRow | null>(null)
   const [searching,     setSearching]     = useState(false)
@@ -396,7 +409,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
   // never overwrite the answer to a later, more specific one.
   useEffect(() => {
     const query = searchQuery.trim()
-    if (step !== 'search' || query.length < RECEIPT_SUGGEST_MIN_CHARS) {
+    if (foundSale || query.length < RECEIPT_SUGGEST_MIN_CHARS) {
       invalidateTrackedRequest(suggestRequestRef)
       setSuggestions([])
       setSuggestLoading(false)
@@ -434,7 +447,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
       window.clearTimeout(timer)
       invalidateTrackedRequest(suggestRequestRef)
     }
-  }, [searchQuery, step])
+  }, [searchQuery, foundSale])
 
   // A caller that already knows the receipt (the Return button on a sale
   // detail or a receipt view) seeds searchQuery above, and that seed flows
@@ -900,9 +913,6 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
     }
   }
 
-  const STEPS: ModalStep[] = ['search', 'items', 'confirm']
-  const stepIdx = STEPS.indexOf(step)
-
   // Backdrop/X close should not fire while a submit is in flight -- same
   // guard ReceiveBatchModal.tsx/ManageBatchesModal.tsx/InventoryBatchModal.tsx
   // already use for this exact reason (an outside click or the X button
@@ -920,12 +930,6 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
     || notes.trim().length > 0
     || customReason.trim().length > 0
   )
-  const closeGuard = useCloseGuard({ dirty: returnDirty }, onClose)
-
-  // Both the backdrop and the ✕ land here.
-  const closeIfIdle = () => {
-    if (!submitting) closeGuard.requestClose()
-  }
 
   const reviewReturn = async () => {
     if (!pendingLoaded || pendingError) return
@@ -1040,64 +1044,78 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
             await transport.clearPendingReturnCreateV1(user?.id, pendingV1, recovery)
             if (!lifecycle.current.alive || lifecycle.current.generation !== generation || !isActorReadScopeCurrent(scope, false)) return
             setPendingV1(null); setPendingQuoteRejected(false); setQuote(null); reviewedIntentRef.current = null
-            setStep(foundSale ? 'items' : 'search')
+            setStep('items')
           } catch (error) { if (lifecycle.current.alive && lifecycle.current.generation === generation && isActorReadScopeCurrent(scope, false)) notify(getLoaderErrorMessage(error), 'error') }
         }}>{T('return_v1_review_required', 'Review the current server refund before confirming.')}</button>}
       </div>
     </div>, document.body,
   )
 
-  return createPortal(
-    <div className="modal-viewport-safe pointer-events-auto fixed inset-0 z-[1050] flex items-end justify-center overflow-y-auto bg-black/50 sm:items-center sm:p-4" onClick={closeIfIdle}>
-      <div className="modal-panel-safe flex w-full flex-col rounded-t-2xl bg-white shadow-2xl dark:bg-gray-800 sm:max-w-2xl sm:rounded-2xl" onClick={e => e.stopPropagation()}>
+  const reasonLabel = T('return_reason', 'Return Reason')
+  const notesLabel = `${T('return_notes', 'Notes')} (${T('optional', 'optional')})`
+  const returnTypes = ([
+    ['restock', T('return_type_restock', 'Restock'), T('return_type_restock_desc', 'Items back to inventory')],
+    ['writeoff', T('return_type_writeoff', 'Write Off'), T('return_type_writeoff_desc', 'Lost / damaged goods')],
+    ['refund', T('return_type_refund', 'Refund Only'), T('return_type_refund_desc', 'Refund with no stock change')],
+  ] as Array<[ReturnType, string, string]>)
+  const iconActionClass = 'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-700 disabled:opacity-50 dark:text-gray-300 dark:hover:bg-gray-700'
 
-        {/* Header */}
-        <div className="flex items-center justify-between gap-2 p-4 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
-          <h2 className="min-w-0 truncate text-lg font-bold text-gray-900 dark:text-white">↩️ {T('new_return','New Return')}</h2>
-          <div className="flex shrink-0 items-center gap-2">
-            <div className="hidden items-center gap-2 sm:flex">{STEPS.map((s, i) => (
-              <div key={s} className="flex items-center gap-1">
-                <div className={`w-6 h-6 rounded-full text-xs flex items-center justify-center font-bold transition-colors
-                  ${i === stepIdx ? 'bg-blue-600 text-white' : i < stepIdx ? 'bg-green-500 text-white' : 'bg-gray-200 dark:bg-gray-700 text-gray-500'}`}>
-                  {i < stepIdx ? '✓' : i + 1}
+  return (
+    <Modal
+      title={T('new_return', 'New Return')}
+      onClose={onClose}
+      size="lg"
+      closeDisabled={submitting}
+      unsavedChanges={{ dirty: returnDirty }}
+    >
+      <div className="space-y-3">
+        {pendingError && <p role="alert" className="text-sm text-red-600">{T('return_v1_storage_failed', 'The original return request could not be saved safely. No new request was sent.')}</p>}
+
+        {/* The modal opens on real content: the receipt search, and under it
+            the items of whichever sale gets picked. Finding the sale is the
+            top of this one screen, not a separate step in front of it. */}
+        {step === 'items' && (
+          <div className="space-y-3">
+            {foundSale ? (
+              <div className="flex items-center gap-2 rounded-xl bg-green-50 py-2 pl-3 pr-1 dark:bg-green-900/20">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1 text-sm font-semibold text-green-700 dark:text-green-400"><Check className="h-4 w-4 shrink-0" aria-hidden="true" /> <span className="min-w-0 break-all">{foundSale.receipt_number}</span></div>
+                  <div className="mt-0.5 text-xs text-green-600 dark:text-green-400">
+                    {fmtTime(foundSale.created_at)} · {foundSale.customer_name || T('no_data', '—')} · {fmtUSD(foundSale.total_usd || 0)}
+                  </div>
                 </div>
-                {i < STEPS.length - 1 && <span className="text-gray-300 dark:text-gray-600 text-xs">→</span>}
+                <button
+                  type="button"
+                  className={iconActionClass}
+                  aria-label={T('change_sale', 'Change sale')}
+                  title={T('change_sale', 'Change sale')}
+                  disabled={submitting}
+                  onClick={() => { invalidateTrackedRequest(searchRequestRef); finishSingleAction(searchInFlightRef); setSearching(false); setFoundSale(null); setSelectedItems([]); setReplacements([]) }}
+                >
+                  <X className="h-4 w-4" aria-hidden="true" />
+                </button>
               </div>
-            ))}</div>
-            <button type="button" onClick={closeIfIdle} disabled={submitting} aria-label={T('close', 'Close')} className="text-gray-400 hover:text-gray-600 w-8 h-8 flex items-center justify-center ml-2 disabled:opacity-50"><X className="h-4 w-4" /></button>
-          </div>
-        </div>
-
-        <div className="modal-scroll p-4 space-y-4">
-          {pendingError && <p role="alert" className="text-sm text-red-600">{T('return_v1_storage_failed', 'The original return request could not be saved safely. No new request was sent.')}</p>}
-
-          {/* Step 1 — Find Sale */}
-          {step === 'search' && (
-            <div className="space-y-4">
-              <div className="bg-blue-50 dark:bg-blue-900/20 rounded-xl p-3 text-sm text-blue-700 dark:text-blue-400">
-                {T('search_receipt_hint','Enter a receipt number or sale ID. You can also skip and do a manual return.')}
-              </div>
-              <div>
-                <label className="text-sm font-medium text-gray-700 dark:text-gray-300 block mb-2">
-                  {T('search_receipt_or_id','Receipt Number or Sale ID')}
-                </label>
+            ) : (
+              <div className="space-y-2">
                 {/* The matching receipts appear as they are typed -- part of a
                     number is enough, and the date/customer/total on each row
                     is what tells two similar receipts apart. */}
-                <div className="relative flex gap-2">
-                  <input className="input flex-1" placeholder={T('search_receipt_or_id','e.g. 20260831-143000')}
+                <div className="relative flex items-center gap-2">
+                  <SearchInput
+                    id="return-receipt-search"
                     value={searchQuery}
-                    onChange={e => { setSearchQuery(e.target.value); setSuggestOpen(true) }}
+                    onChange={(value) => { setSearchQuery(value); setSuggestOpen(true) }}
+                    placeholder={T('search_receipt_or_id', 'Search by receipt number or sale ID')}
                     onFocus={() => { if (suggestions.length > 0) setSuggestOpen(true) }}
                     onKeyDown={handleSearchKeyDown}
                     role="combobox"
                     aria-expanded={suggestOpen && suggestions.length > 0}
                     aria-controls="return-receipt-suggestions"
                     aria-autocomplete="list"
-                    autoFocus />
-                  <button onClick={() => void handleSearch()} disabled={searching || !searchQuery.trim()}
-                    className="btn-primary px-4 disabled:opacity-50">
-                    {searching ? '⏳' : T('btn_search','🔍 Find')}
+                    autoFocus
+                  />
+                  <button type="button" className={iconActionClass} onClick={() => void handleSearch()} disabled={searching || !searchQuery.trim()} aria-label={T('btn_search', 'Search')} title={T('btn_search', 'Search')}>
+                    {searching ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Search className="h-4 w-4" aria-hidden="true" />}
                   </button>
                   {suggestOpen && suggestions.length > 0 && (
                     <ul
@@ -1139,68 +1157,42 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
                   )}
                 </div>
                 {suggestLoading && searchQuery.trim().length >= RECEIPT_SUGGEST_MIN_CHARS ? (
-                  <div className="mt-1 text-xs text-gray-400">{T('searching', 'Searching…')}</div>
+                  <div className="text-xs text-gray-400">{T('searching', 'Searching…')}</div>
                 ) : null}
                 {!suggestLoading && !searching && searchQuery.trim().length >= RECEIPT_SUGGEST_MIN_CHARS && suggestions.length === 0 ? (
-                  <div className="mt-1 text-xs text-amber-600 dark:text-amber-400">{T('no_receipts_found', 'No receipt matches that yet.')}</div>
+                  <div className="text-xs text-amber-600 dark:text-amber-400">{T('no_receipts_found', 'No receipt matches that yet.')}</div>
                 ) : null}
               </div>
-              <div className="border-t border-gray-200 dark:border-gray-700 pt-3">
-                <button onClick={() => { invalidateTrackedRequest(searchRequestRef); finishSingleAction(searchInFlightRef); setSearching(false); setFoundSale(null); setSelectedItems([]); setStep('items') }}
-                  className="text-sm text-blue-600 dark:text-blue-400 hover:underline">
-                  {T('btn_manual_return','→ Skip — manual return (no sale linked)')}
-                </button>
-              </div>
-            </div>
-          )}
+            )}
 
-          {/* Step 2 — Select Items */}
-          {step === 'items' && (
-            <div className="space-y-4">
-              {foundSale ? (
-                <div className="bg-green-50 dark:bg-green-900/20 rounded-xl p-3">
-                  <div className="font-semibold text-green-700 dark:text-green-400 text-sm">✅ {foundSale.receipt_number}</div>
-                  <div className="text-xs text-green-600 dark:text-green-400 mt-0.5">
-                    {fmtTime(foundSale.created_at)} · {foundSale.customer_name || T('no_data','—')} · {fmtUSD(foundSale.total_usd || 0)}
-                  </div>
-                </div>
-              ) : (
-                <div className="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-3 text-sm text-gray-500">
-                  {T('manual_return','Manual return')} — {T('no_data','not linked to a sale')}.
-                </div>
-              )}
-
-              {/* Return type */}
-              <div>
-                <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 block mb-2">
-                  {T('return_type_label','Handling Method')}
-                </label>
-                <div className="grid grid-cols-3 gap-2">
-                  {([
-                    ['restock',  T('return_type_restock','↩️ Restock'),       T('return_type_restock_desc','Items back to inventory')],
-                    ['writeoff', T('return_type_writeoff','🗑 Write Off'),     T('return_type_writeoff_desc','Lost / damaged goods')],
-                    ['refund',   T('return_type_refund','💰 Refund Only'),     T('return_type_refund_desc','Refund with no stock change')],
-                  ] as Array<[ReturnType, string, string]>).map(([v, label, desc]) => (
-                    <button key={v} onClick={() => handleReturnTypeChange(v)}
-                      className={`p-2 rounded-xl border-2 text-left text-xs transition-colors ${returnType === v ? 'border-blue-600 bg-blue-50 dark:bg-blue-900/30' : 'border-gray-200 dark:border-gray-600 hover:border-gray-300'}`}>
-                      <div className={`font-semibold ${returnType === v ? 'text-blue-700 dark:text-blue-300' : 'text-gray-700 dark:text-gray-300'}`}>{label}</div>
-                      <div className="text-gray-400 mt-0.5">{desc}</div>
-                    </button>
-                  ))}
-                </div>
+            {foundSale ? (<>
+              {/* Return type: three radios; what each does is its tooltip. */}
+              <div role="radiogroup" aria-label={T('return_type_label', 'Return type')} className="grid grid-cols-3 gap-2">
+                {returnTypes.map(([value, label, description]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    role="radio"
+                    aria-checked={returnType === value}
+                    title={description}
+                    onClick={() => handleReturnTypeChange(value)}
+                    className={`rounded-xl border-2 px-2 py-2 text-xs font-semibold leading-relaxed transition-colors ${returnType === value ? 'border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'border-gray-200 text-gray-700 hover:border-gray-300 dark:border-gray-600 dark:text-gray-300'}`}
+                  >
+                    {label}
+                  </button>
+                ))}
               </div>
 
               {/* Items list */}
               {selectedItems.length > 0 && (
                 <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <label className="text-sm font-semibold text-gray-700 dark:text-gray-300">
-                      {T('select_items_to_return','Select items to return')}
-                    </label>
-                    <div className="flex gap-2 text-xs">
-                      <button onClick={selectAll} className="text-blue-600 hover:underline">{T('select_all','Select All')}</button>
-                      <span className="text-gray-300 dark:text-gray-600">|</span>
-                      <button onClick={clearAll} className="text-red-500 hover:underline">{T('deselect_all','Clear')}</button>
+                  <div className="mb-2 flex items-center justify-between gap-2">
+                    <span className="text-sm font-semibold leading-relaxed text-gray-700 dark:text-gray-300">
+                      {T('select_items_to_return', 'Select items to return')}
+                    </span>
+                    <div className="flex shrink-0 items-center">
+                      <button type="button" onClick={selectAll} className={iconActionClass} aria-label={T('select_all', 'Select all')} title={T('select_all', 'Select all')}><ListChecks className="h-4 w-4" aria-hidden="true" /></button>
+                      <button type="button" onClick={clearAll} className={iconActionClass} aria-label={T('deselect_all', 'Clear')} title={T('deselect_all', 'Clear')}><X className="h-4 w-4" aria-hidden="true" /></button>
                     </div>
                   </div>
                   <div className="space-y-2">
@@ -1220,6 +1212,8 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
                             <button
                               disabled={isFullyReturned}
                               onClick={() => !isFullyReturned && toggleIncluded(idx)}
+                              aria-pressed={isIncluded}
+                              aria-label={String(item.product_name || item.name || '')}
                               className={`mt-0.5 w-5 h-5 rounded border-2 flex-shrink-0 flex items-center justify-center transition-colors ${
                                 isFullyReturned
                                   ? 'border-gray-300 dark:border-gray-600 cursor-not-allowed'
@@ -1227,7 +1221,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
                                     ? 'bg-blue-600 border-blue-600 text-white'
                                     : 'border-gray-400 dark:border-gray-500 hover:border-blue-500'
                               }`}>
-                              {isIncluded && <span className="text-[10px] font-bold leading-none">✓</span>}
+                              {isIncluded && <Check className="h-3 w-3" aria-hidden="true" />}
                             </button>
                             <div className="flex-1 min-w-0">
                               {/* The name decides WHICH product is coming
@@ -1243,33 +1237,36 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
                                     title={T('stock_action_damaged_hint', 'Tracked as damaged stock tied to this return — kept out of sellable stock.')}
                                     className="inline-flex flex-shrink-0 items-center gap-1 rounded-full border border-orange-300 bg-orange-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-orange-700 dark:border-orange-700 dark:bg-orange-900/40 dark:text-orange-300"
                                   >
-                                    {stockActionOption('damaged').icon} {T('stock_action_damaged', 'Damaged')}
+                                    <StockActionIcon action="damaged" /> {T('stock_action_damaged', 'Damaged')}
                                   </span>
                                 ) : null}
                               </div>
                               <div className="text-xs text-gray-400 flex flex-wrap gap-x-3 gap-y-0.5 mt-0.5">
-                                <span>{T('qty_sold','Sold')}: {toNumber(item.quantity)} × {fmtUSD(toNumber(item.applied_price_usd))}</span>
+                                <span>{T('qty_sold', 'Sold')}: {toNumber(item.quantity)} × {fmtUSD(toNumber(item.applied_price_usd))}</span>
                                 {(item.alreadyQty || 0) > 0 && (
-                                  <span className="text-orange-500 dark:text-orange-400">
-                                    ↩ {item.alreadyQty} {T('already_returned','already returned')}
+                                  <span className="inline-flex items-center gap-1 text-orange-500 dark:text-orange-400">
+                                    <StockActionIcon action="restock" /> {item.alreadyQty} {T('already_returned', 'already returned')}
                                   </span>
                                 )}
                                 {isFullyReturned && (
-                                  <span className="text-gray-400 font-medium">— {T('restocked','fully returned')}</span>
+                                  <span className="text-gray-400 font-medium">— {T('restocked', 'fully returned')}</span>
                                 )}
                               </div>
                             </div>
                             {!isFullyReturned && (
                               <div className="flex items-center gap-1 flex-shrink-0">
-                                <button onClick={() => updateItemQty(idx, Math.max(0, (item.returnQty||0) - 1))}
-                                  className="w-7 h-7 rounded-lg border border-gray-300 dark:border-gray-600 flex items-center justify-center text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 text-sm font-bold">−</button>
+                                <button onClick={() => updateItemQty(idx, Math.max(0, (item.returnQty || 0) - 1))}
+                                  aria-label={T('decreaseQty', 'Decrease quantity')}
+                                  className="w-9 h-9 rounded-lg border border-gray-300 dark:border-gray-600 flex items-center justify-center text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 text-sm font-bold">−</button>
                                 <input type="number" min="0" max={availableQuantity} step="1"
                                   className="input w-14 text-center text-sm py-1"
+                                  aria-label={T('quantity', 'Quantity')}
                                   value={item.returnQty || 0}
                                   onChange={e => updateItemQty(idx, e.target.value)} />
-                                <button onClick={() => updateItemQty(idx, Math.min(availableQuantity, (item.returnQty||0) + 1))}
-                                  className="w-7 h-7 rounded-lg border border-gray-300 dark:border-gray-600 flex items-center justify-center text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 text-sm font-bold">+</button>
-                                <span className="text-[10px] text-gray-400 ml-1 w-12 text-left">
+                                <button onClick={() => updateItemQty(idx, Math.min(availableQuantity, (item.returnQty || 0) + 1))}
+                                  aria-label={T('increaseQty', 'Increase quantity')}
+                                  className="w-9 h-9 rounded-lg border border-gray-300 dark:border-gray-600 flex items-center justify-center text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 text-sm font-bold">+</button>
+                                <span className="text-xs text-gray-400 ml-1 w-12 text-left">
                                   / {availableQuantity}
                                 </span>
                               </div>
@@ -1285,10 +1282,10 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
                                     <button key={option.value} type="button"
                                       onClick={() => updateItemAction(idx, option.value)}
                                       title={T(option.descKey, option.descEn)}
-                                      className={`rounded-lg border px-2 py-1 text-[11px] transition-colors ${item.stock_action === option.value
+                                      className={`rounded-lg border px-2 py-1 text-xs leading-relaxed transition-colors ${item.stock_action === option.value
                                         ? 'border-blue-500 bg-blue-100/70 font-semibold text-blue-700 dark:border-blue-500 dark:bg-blue-900/40 dark:text-blue-300'
                                         : 'border-gray-200 text-gray-500 hover:border-gray-300 dark:border-gray-600 dark:text-gray-400'}`}>
-                                      {option.icon} {T(option.labelKey, option.labelEn)}
+                                      <StockActionIcon action={option.value} className="mr-1 h-3 w-3 align-[-1px]" />{T(option.labelKey, option.labelEn)}
                                     </button>
                                   ))}
                                 </div>
@@ -1309,7 +1306,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
                                     tr={(key, fallback) => T(key, fallback ?? key)}
                                     id={`return-damaged-tag-${idx}`}
                                   />
-                                  <div className="text-[10px] text-orange-500 dark:text-orange-400">
+                                  <div className="text-xs leading-relaxed text-orange-500 dark:text-orange-400">
                                     {item.damaged_disposition === 'remove'
                                       ? T('stock_action_damaged_remove_hint', 'Destroyed immediately -- booked as a loss at cost.')
                                       : T('stock_action_damaged_hint', 'Tracked as damaged stock tied to this return — kept out of sellable stock.')}
@@ -1324,17 +1321,18 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
                                   nothing unspecified to fall back on. */}
                               {item.stock_action === 'restock' && (
                                 toNumber(item.batch_id) > 0 || toNumber(item.lot_allocation_count) > 0 ? (
-                                  <div data-lot="known" className="text-[10px] text-gray-400">
-                                    ↩ {T('return_lot_from_sale', 'Back into the received date this line was sold from')}
-                                    {item.batch_label ? `: ${item.batch_label}` : ''}
+                                  <div data-lot="known" className="flex items-center gap-1 text-xs leading-relaxed text-gray-400">
+                                    <StockActionIcon action="restock" />
+                                    <span>{T('return_lot_from_sale', 'Back into the received date this line was sold from')}
+                                    {item.batch_label ? `: ${item.batch_label}` : ''}</span>
                                   </div>
                                 ) : item.lotOptions.length > 0 ? (
                                   <div data-lot="pick" className="flex items-center gap-2">
-                                    <span className="flex-shrink-0 text-[10px] text-gray-400">{T('return_lot_pick', 'Back into received date')}</span>
                                     <AppSelect
                                       value={item.pickedBatchId != null ? String(item.pickedBatchId) : ''}
                                       onChange={(next) => updateItemLot(idx, next ? Number(next) : null)}
                                       ariaLabel={T('return_lot_pick', 'Back into received date')}
+                                      prefix={T('return_lot_pick', 'Back into received date')}
                                       className="min-w-0 flex-1"
                                       buttonClassName={`h-8 w-full text-xs ${item.pickedBatchId == null ? 'border-amber-400 dark:border-amber-600' : ''}`}
                                       optionClassName="text-xs"
@@ -1345,7 +1343,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
                                     />
                                   </div>
                                 ) : (
-                                  <div data-lot="untracked" className="text-[10px] text-gray-400">
+                                  <div data-lot="untracked" className="text-xs leading-relaxed text-gray-400">
                                     {T('lot_untracked', 'This product has no received dates — stock goes back to the branch count.')}
                                   </div>
                                 )
@@ -1358,20 +1356,20 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
                   </div>
                   {activeItems.length > 0 && (
                     <div className="mt-2 flex justify-between text-sm font-semibold text-gray-700 dark:text-gray-300 bg-blue-50 dark:bg-blue-900/20 rounded-lg px-3 py-2 border border-blue-200 dark:border-blue-800">
-                      <span>{activeItems.length} {T('items','item(s)')} {T('return_type_restock','to return')}
+                      <span>{activeItems.length} {T('items', 'item(s)')} {T('return_type_restock', 'to return')}
                         {activeItems.length < selectedItems.filter((it) => it.remaining > 0).length
-                          ? <span className="text-orange-500 ml-1 font-normal">({T('status_partial_return','partial')})</span>
+                          ? <span className="text-orange-500 ml-1 font-normal">({T('status_partial_return', 'partial')})</span>
                           : null}
                       </span>
-                      <span className="text-blue-700 dark:text-blue-300">{isV1Sale && !quote ? T('return_v1_review_required', 'Review the current server refund before confirming.') : <>{fmtUSD(totalRefund)} {T('refund','refund')}</>}</span>
+                      <span className="text-blue-700 dark:text-blue-300">{isV1Sale && !quote ? T('return_v1_review_required', 'Review the current server refund before confirming.') : <>{fmtUSD(totalRefund)} {T('refund', 'refund')}</>}</span>
                     </div>
                   )}
                 </div>
               )}
 
               {selectedItems.length === 0 && (
-                <div className="text-sm text-gray-400 bg-gray-50 dark:bg-gray-700/50 rounded-xl p-4 text-center">
-                  {T('manual_return','No sale items linked. This will be recorded as a manual return.')}
+                <div className="rounded-xl bg-gray-50 p-4 text-center text-sm text-gray-400 dark:bg-gray-700/50">
+                  {T('manual_return_no_items', 'This sale has no items to return.')}
                 </div>
               )}
 
@@ -1380,9 +1378,9 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
                   Any product can be found here by name, SKU or barcode and
                   then drawn from an optional exact lot. */}
               <div data-section="replacement-sale" className="rounded-xl border border-emerald-200 p-3 dark:border-emerald-800">
-                <label className="mb-2 block text-sm font-semibold text-gray-700 dark:text-gray-300">
-                  🔁 {T('replacement_sale_items_label','Replacement sale items')}
-                </label>
+                <div className="mb-2 flex items-center gap-1 text-sm font-semibold leading-relaxed text-gray-700 dark:text-gray-300">
+                  <Repeat className="h-4 w-4 shrink-0" aria-hidden="true" />{T('replacement_sale_items_label', 'Replacement sale items')}
+                </div>
                 <div className="flex gap-2">
                   <input
                     className="input h-9 min-w-0 flex-1 py-1 text-xs"
@@ -1394,11 +1392,13 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
                   />
                   <button
                     type="button"
-                    className="btn-secondary h-9 flex-shrink-0 px-3 py-1 text-xs"
+                    className={iconActionClass}
                     disabled={replacementSearching || !replacementQuery.trim()}
                     onClick={() => void searchReplacementCatalog()}
+                    aria-label={T('btn_search', 'Search')}
+                    title={T('btn_search', 'Search')}
                   >
-                    {replacementSearching ? '…' : T('btn_search', 'Search')}
+                    {replacementSearching ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Search className="h-4 w-4" aria-hidden="true" />}
                   </button>
                   <ScanSearchButton
                     onDetected={(value) => { void searchReplacementCatalog(value) }}
@@ -1420,7 +1420,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
                           >
                             <span className="min-w-0">
                               <span className="block break-words text-xs font-medium text-gray-800 dark:text-gray-200">{group.name}</span>
-                              <span className="block text-[10px] text-gray-400">
+                              <span className="block text-xs leading-relaxed text-gray-400">
                                 {rows.length > 1
                                   ? `${rows.length} ${T('options', 'options')}`
                                   : [lead?.sku, lead?.barcode].filter(Boolean).join(' · ')}
@@ -1454,13 +1454,13 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
                 {/* The straight swap, kept where a replacement is chosen. */}
                 {activeItems.length > 0 && (
                   <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                    <span className="text-[11px] text-gray-400">{T('replacement_same_item', 'Same item back out:')}</span>
+                    <span className="text-xs leading-relaxed text-gray-400">{T('replacement_same_item', 'Same item back out:')}</span>
                     {activeItems.filter((item) => item.product_id).map((item, index) => (
                       <button
                         key={`same_${item.id ?? item.product_id}_${index}`}
                         type="button"
                         onClick={() => addReplacementSameItem(item)}
-                        className="rounded-full border border-emerald-300 px-2 py-0.5 text-[11px] text-emerald-700 transition-colors hover:bg-emerald-50 dark:border-emerald-700 dark:text-emerald-300 dark:hover:bg-emerald-900/20"
+                        className="rounded-full border border-emerald-300 px-2 py-0.5 text-xs leading-relaxed text-emerald-700 transition-colors hover:bg-emerald-50 dark:border-emerald-700 dark:text-emerald-300 dark:hover:bg-emerald-900/20"
                       >
                         + {item.product_name || item.name}
                       </button>
@@ -1474,13 +1474,13 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
                       <div key={line.key} className="rounded-xl border border-emerald-200 bg-emerald-50/50 p-3 space-y-2 dark:border-emerald-800 dark:bg-emerald-900/10">
                         <div className="flex items-start justify-between gap-2">
                           <div className="min-w-0 break-words text-sm font-medium text-gray-800 dark:text-gray-200">{line.product_name}</div>
-                          <button type="button" onClick={() => removeReplacement(line.key)} className="flex-shrink-0 text-xs text-red-500 hover:underline">{T('remove','Remove')}</button>
+                          <button type="button" onClick={() => removeReplacement(line.key)} className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20" aria-label={T('remove', 'Remove')} title={T('remove', 'Remove')}><Trash2 className="h-4 w-4" aria-hidden="true" /></button>
                         </div>
                         <div className="flex items-center gap-2">
                           <AppSelect
                             value={line.batch_id != null ? String(line.batch_id) : ''}
                             onChange={(next) => updateReplacement(line.key, { batch_id: next ? Number(next) : null })}
-                            ariaLabel={T('batch','Received date')}
+                            ariaLabel={T('batch', 'Received date')}
                             className="flex-1 min-w-0"
                             optionClassName="text-xs"
                             buttonClassName={`h-9 w-full text-xs ${line.batches.length > 0 && line.batch_id == null ? 'border-amber-400 dark:border-amber-600' : ''}`}
@@ -1490,7 +1490,7 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
                               : [{ value: '', label: T('lot_untracked_out', 'No received dates — drawn from the branch count') }]}
                           />
                           <input type="number" min="1" step="1" className="input w-16 flex-shrink-0 py-1 text-center text-sm"
-                            aria-label={T('quantity','Quantity')}
+                            aria-label={T('quantity', 'Quantity')}
                             value={line.quantity}
                             onChange={(e) => updateReplacement(line.key, { quantity: Math.max(1, Math.floor(Number(e.target.value) || 1)) })} />
                           <span className="w-16 flex-shrink-0 text-right text-xs font-semibold text-emerald-700 dark:text-emerald-400">{fmtUSD(line.price_usd * line.quantity)}</span>
@@ -1504,23 +1504,21 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
                       there is no difference to owe or settle. */}
                   <div data-section="replacement-sale-summary" className="mt-2 space-y-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800 dark:border-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-200">
                     <div className="flex items-center justify-between gap-2">
-                      <span>🧾 {T('replacement_sale_new', 'New sale for these items')}</span>
+                      <span className="flex items-center gap-1"><Receipt className="h-4 w-4 shrink-0" aria-hidden="true" />{T('replacement_sale_new', 'New sale for these items')}</span>
                       <span className="font-semibold">{fmtUSD(replacementTotalUsd)}</span>
                     </div>
                     <div className="flex items-center gap-2">
-                      <span className="flex-shrink-0 text-xs">{T('payment_method', 'Payment method')}</span>
                       <AppSelect
                         value={replacementPaymentMethod}
                         onChange={(next) => setReplacementPaymentMethod(next)}
                         ariaLabel={T('payment_method', 'Payment method')}
+                        prefix={T('payment_method', 'Payment method')}
                         className="min-w-0 flex-1"
                         buttonClassName="h-8 w-full text-xs"
                         optionClassName="text-xs"
                         options={PAYMENT_METHODS.map((method) => ({ value: method, label: method }))}
                       />
-                    </div>
-                    <div className="text-[11px] opacity-80">
-                      {T('replacement_sale_hint', 'It gets its own receipt and is recorded in Sales like any other sale. The refund above is paid back separately.')}
+                      <InfoHint label={T('replacement_sale_new', 'New sale for these items')} text={T('replacement_sale_hint', 'It gets its own receipt and is recorded in Sales like any other sale. The refund above is paid back separately.')} />
                     </div>
                   </div>
                 </>
@@ -1528,149 +1526,135 @@ export default function NewReturnModal({ onClose, onSuccess, fmtUSD, notify, ini
               </div>
 
               {/* Reason */}
-              <div>
-                <label className="text-sm font-semibold text-gray-700 dark:text-gray-300 block mb-2">
-                  {T('return_reason','Return Reason')} *
-                </label>
+              <div className="space-y-2">
                 <AppSelect
                   value={reason}
                   onChange={(nextValue) => setReason(nextValue)}
-                  ariaLabel={T('return_reason','Return Reason')}
-                  className="mb-2 w-full"
+                  ariaLabel={reasonLabel}
+                  prefix={`${reasonLabel} *`}
+                  className="w-full"
                   buttonClassName="h-10 w-full text-sm"
                   menuClassName="min-w-[14rem]"
                   optionClassName="text-sm"
                   options={RETURN_REASONS.map((returnReason) => ({ value: returnReason, label: returnReason }))}
                 />
                 {reason === OTHER_LABEL && (
-                  <input className="input text-sm" placeholder={T('reason_placeholder','Describe the reason…')}
+                  <input className="input text-sm" placeholder={T('reason_placeholder', 'Describe the reason…')} aria-label={T('reason_placeholder', 'Describe the reason…')}
                     value={customReason} onChange={e => setCustomReason(e.target.value)} />
                 )}
-              </div>
-
-              <div>
-                <label className="text-sm font-medium text-gray-700 dark:text-gray-300 block mb-1">
-                  {T('return_notes','Notes')} ({T('optional','optional')})
-                </label>
-                <textarea className="input text-sm resize-none" rows={2} placeholder={T('reason_placeholder','Additional details…')}
+                <textarea className="input text-sm resize-none" rows={2} placeholder={notesLabel} aria-label={notesLabel}
                   value={notes} onChange={e => setNotes(e.target.value)} />
               </div>
+            </>) : null}
+          </div>
+        )}
 
-            </div>
-          )}
-
-          {/* Step 3 — Confirm */}
-          {step === 'confirm' && (
-            <div className="space-y-4">
-              <div className="bg-orange-50 dark:bg-orange-900/20 rounded-xl p-4 border border-orange-200 dark:border-orange-800">
-                <div className="text-sm font-semibold text-orange-800 dark:text-orange-300 mb-2">⚠️ {T('confirm','Confirm Return')}</div>
-                <div className="text-xs text-orange-700 dark:text-orange-400 space-y-1">
-                  {foundSale && <div>{T('original_receipt','Original Sale')}: <span className="font-mono font-bold">{foundSale.receipt_number}</span></div>}
-                  <div>{T('reason','Reason')}: <span className="font-medium">{finalReason}</span></div>
-                  <div>{T('return_type_label','Handling')}: <span className="font-medium">
-                    {returnType === 'restock' ? T('return_type_restock','↩️ Restock') : returnType === 'writeoff' ? T('return_type_writeoff','🗑 Write Off') : T('return_type_refund','💰 Refund Only')}
-                  </span></div>
-                  <div>{T('returns','Returning')}: <span className="font-medium">{activeItems.length} {T('items','item type(s)')}</span></div>
-                  {activeItems.filter(it => it.return_to_stock !== false).length > 0 && (
-                    <div>↩️ {activeItems.filter(it => it.return_to_stock !== false).length} {T('restocked','will be restocked')}</div>
-                  )}
-                  {activeItems.filter(it => it.stock_action === 'none').length > 0 && (
-                    <div>🚫 {activeItems.filter(it => it.stock_action === 'none').length} {T('written_off','will NOT restock')}</div>
-                  )}
-                  {activeItems.filter(it => it.stock_action === 'damaged' && it.damaged_disposition !== 'remove').length > 0 && (
-                    <div>🟠 {activeItems.filter(it => it.stock_action === 'damaged' && it.damaged_disposition !== 'remove').length} {T('tracked_as_damaged','tracked as damaged stock')}</div>
-                  )}
-                  {activeItems.filter(it => it.stock_action === 'damaged' && it.damaged_disposition === 'remove').length > 0 && (
-                    <div>🗑️ {activeItems.filter(it => it.stock_action === 'damaged' && it.damaged_disposition === 'remove').length} {T('stock_action_damaged_remove_hint_short','destroyed immediately (booked loss)')}</div>
-                  )}
-                  {replacements.length > 0 && (
-                    <div>🔁 {replacements.length} {T('replacement_sale_items_short','item(s) on the replacement sale receipt')} — {fmtUSD(replacementTotalUsd)} · {replacementPaymentMethod}</div>
-                  )}
-                </div>
+        {/* Step 2 — Confirm */}
+        {step === 'confirm' && (
+          <div className="space-y-4">
+            <div className="bg-orange-50 dark:bg-orange-900/20 rounded-xl p-4 border border-orange-200 dark:border-orange-800">
+              <div className="mb-2 flex items-center gap-1 text-sm font-semibold text-orange-800 dark:text-orange-300"><AlertTriangle className="h-4 w-4 shrink-0" aria-hidden="true" />{T('confirm', 'Confirm Return')}</div>
+              <div className="text-xs text-orange-700 dark:text-orange-400 space-y-1">
+                {foundSale && <div>{T('original_receipt', 'Original Sale')}: <span className="font-mono font-bold">{foundSale.receipt_number}</span></div>}
+                <div>{T('reason', 'Reason')}: <span className="font-medium">{finalReason}</span></div>
+                <div>{T('return_type_label', 'Handling')}: <span className="font-medium">
+                  {returnType === 'restock' ? T('return_type_restock', 'Restock') : returnType === 'writeoff' ? T('return_type_writeoff', 'Write Off') : T('return_type_refund', 'Refund Only')}
+                </span></div>
+                <div>{T('returns', 'Returning')}: <span className="font-medium">{activeItems.length} {T('items', 'item type(s)')}</span></div>
+                {activeItems.filter(it => it.return_to_stock !== false).length > 0 && (
+                  <div className="flex items-center gap-1"><StockActionIcon action="restock" />{activeItems.filter(it => it.return_to_stock !== false).length} {T('restocked', 'will be restocked')}</div>
+                )}
+                {activeItems.filter(it => it.stock_action === 'none').length > 0 && (
+                  <div className="flex items-center gap-1"><StockActionIcon action="none" />{activeItems.filter(it => it.stock_action === 'none').length} {T('written_off', 'will NOT restock')}</div>
+                )}
+                {activeItems.filter(it => it.stock_action === 'damaged' && it.damaged_disposition !== 'remove').length > 0 && (
+                  <div className="flex items-center gap-1"><StockActionIcon action="damaged" />{activeItems.filter(it => it.stock_action === 'damaged' && it.damaged_disposition !== 'remove').length} {T('tracked_as_damaged', 'tracked as damaged stock')}</div>
+                )}
+                {activeItems.filter(it => it.stock_action === 'damaged' && it.damaged_disposition === 'remove').length > 0 && (
+                  <div className="flex items-center gap-1"><Trash2 className="h-3 w-3 shrink-0" aria-hidden="true" />{activeItems.filter(it => it.stock_action === 'damaged' && it.damaged_disposition === 'remove').length} {T('stock_action_damaged_remove_hint_short', 'destroyed immediately (booked loss)')}</div>
+                )}
+                {replacements.length > 0 && (
+                  <div className="flex items-center gap-1"><Repeat className="h-3 w-3 shrink-0" aria-hidden="true" />{replacements.length} {T('replacement_sale_items_short', 'item(s) on the replacement sale receipt')} — {fmtUSD(replacementTotalUsd)} · {replacementPaymentMethod}</div>
+                )}
               </div>
+            </div>
 
-              <div className="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-3 space-y-1">
-                {activeItems.map((it, i) => (
-                  <div key={i} className="flex justify-between text-sm py-1 border-b border-gray-200 dark:border-gray-700 last:border-0">
-                    <div className="flex-1 min-w-0 mr-2">
-                      {/* Reviewed in full: the last screen before the write is
-                          the worst place to cut a product name short. */}
-                      <span className="flex flex-wrap items-center gap-1.5">
-                        <span className="break-words text-gray-700 dark:text-gray-300">{it.product_name || it.name}</span>
-                        {it.stock_action === 'damaged' ? (
-                          <span
-                            data-tag="damaged"
-                            className="inline-flex flex-shrink-0 items-center gap-1 rounded-full border border-orange-300 bg-orange-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-orange-700 dark:border-orange-700 dark:bg-orange-900/40 dark:text-orange-300"
-                          >
-                            {stockActionOption('damaged').icon} {T('stock_action_damaged', 'Damaged')}
-                          </span>
-                        ) : null}
-                      </span>
-                      <span className="block text-[10px] text-gray-400">
-                        {stockActionOption(it.stock_action).icon} {T(stockActionOption(it.stock_action).labelKey, stockActionOption(it.stock_action).labelEn)}
-                        {' · '}{T('quantity','qty')} {it.returnQty}
-                      </span>
-                    </div>
-                    <span className="font-medium text-gray-900 dark:text-white flex-shrink-0">
-                      {fmtUSD(isV1Sale ? (quote?.items.find(line => line.sale_item_id === Number(it.id))?.total_usd ?? 0) : toNumber(it.applied_price_usd) * it.returnQty)}
+            <div className="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-3 space-y-1">
+              {activeItems.map((it, i) => (
+                <div key={i} className="flex justify-between text-sm py-1 border-b border-gray-200 dark:border-gray-700 last:border-0">
+                  <div className="flex-1 min-w-0 mr-2">
+                    {/* Reviewed in full: the last screen before the write is
+                        the worst place to cut a product name short. */}
+                    <span className="flex flex-wrap items-center gap-1.5">
+                      <span className="break-words text-gray-700 dark:text-gray-300">{it.product_name || it.name}</span>
+                      {it.stock_action === 'damaged' ? (
+                        <span
+                          data-tag="damaged"
+                          className="inline-flex flex-shrink-0 items-center gap-1 rounded-full border border-orange-300 bg-orange-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-orange-700 dark:border-orange-700 dark:bg-orange-900/40 dark:text-orange-300"
+                        >
+                          <StockActionIcon action="damaged" /> {T('stock_action_damaged', 'Damaged')}
+                        </span>
+                      ) : null}
+                    </span>
+                    <span className="block text-xs leading-relaxed text-gray-400">
+                      <StockActionIcon action={it.stock_action} className="mr-0.5 h-3 w-3 align-[-2px]" />{T(stockActionOption(it.stock_action).labelKey, stockActionOption(it.stock_action).labelEn)}
+                      {' · '}{T('quantity', 'qty')} {it.returnQty}
                     </span>
                   </div>
+                  <span className="font-medium text-gray-900 dark:text-white flex-shrink-0">
+                    {fmtUSD(isV1Sale ? (quote?.items.find(line => line.sale_item_id === Number(it.id))?.total_usd ?? 0) : toNumber(it.applied_price_usd) * it.returnQty)}
+                  </span>
+                </div>
+              ))}
+              <div className="flex justify-between font-bold text-base text-gray-900 dark:text-white pt-2 mt-1 border-t border-gray-300 dark:border-gray-600">
+                <span>{T('total_refunded', 'Total Refund')}</span>
+                <span>{fmtUSD(totalRefund)}</span>
+              </div>
+            </div>
+
+            {replacements.length > 0 && (
+              <div className="space-y-1 rounded-xl border border-emerald-200 bg-emerald-50 p-3 dark:border-emerald-800 dark:bg-emerald-900/20">
+                {replacements.map((line) => (
+                  <div key={line.key} className="flex justify-between py-1 text-sm">
+                    <span className="mr-2 min-w-0 break-words text-gray-700 dark:text-gray-300"><Repeat className="mr-1 inline h-3.5 w-3.5 align-[-2px]" aria-hidden="true" />{line.product_name} × {line.quantity}</span>
+                    <span className="flex-shrink-0 font-medium text-gray-900 dark:text-white">{fmtUSD(line.price_usd * line.quantity)}</span>
+                  </div>
                 ))}
-                <div className="flex justify-between font-bold text-base text-gray-900 dark:text-white pt-2 mt-1 border-t border-gray-300 dark:border-gray-600">
-                  <span>{T('total_refunded','Total Refund')}</span>
-                  <span>{fmtUSD(totalRefund)}</span>
+                <div className="flex justify-between border-t border-emerald-200 pt-1 text-xs font-semibold text-emerald-700 dark:border-emerald-800 dark:text-emerald-300">
+                  <span>{T('replacement_sale_total', 'New sale total')} · {replacementPaymentMethod}</span>
+                  <span>{fmtUSD(replacementTotalUsd)}</span>
                 </div>
               </div>
+            )}
+          </div>
+        )}
 
-              {replacements.length > 0 && (
-                <div className="space-y-1 rounded-xl border border-emerald-200 bg-emerald-50 p-3 dark:border-emerald-800 dark:bg-emerald-900/20">
-                  {replacements.map((line) => (
-                    <div key={line.key} className="flex justify-between py-1 text-sm">
-                      <span className="mr-2 min-w-0 break-words text-gray-700 dark:text-gray-300">🔁 {line.product_name} × {line.quantity}</span>
-                      <span className="flex-shrink-0 font-medium text-gray-900 dark:text-white">{fmtUSD(line.price_usd * line.quantity)}</span>
-                    </div>
-                  ))}
-                  <div className="flex justify-between border-t border-emerald-200 pt-1 text-xs font-semibold text-emerald-700 dark:border-emerald-800 dark:text-emerald-300">
-                    <span>{T('replacement_sale_total', 'New sale total')} · {replacementPaymentMethod}</span>
-                    <span>{fmtUSD(replacementTotalUsd)}</span>
-                  </div>
-                </div>
-              )}
-
-            </div>
-          )}
-        </div>
-        {/* S4-20: one footer for the whole wizard, at the END of the panel
-            and outside .modal-scroll. Each step used to end with its own
-            Back/Next row buried at the bottom of the scrolling content, plus
-            a duplicate phone-only primary up beside the ✕ to make it
-            reachable. Now the step's action is always the last thing in the
-            panel and always on screen, so neither the scroll nor a mis-tap
-            next to Close is in the way. The search step has no action of its
-            own -- finding a sale advances by itself -- so it renders no
-            footer rather than a disabled one. */}
-        {step === 'items' ? (
-          <div className="flex flex-shrink-0 gap-2 border-t border-gray-200 p-4 dark:border-gray-700">
-            <button onClick={() => setStep('search')} className="btn-secondary text-sm flex-1">← {T('back','Back')}</button>
-            <button onClick={reviewReturn} disabled={!pendingLoaded || !!pendingError || quoteBusy || unsupportedMoneyVersion} className="btn-primary text-sm flex-1 disabled:opacity-50">
-              {quoteBusy ? T('return_v1_quote_loading', 'Checking the net refund…') : T('confirm','Review')} → {activeItems.length} {T('items','item(s)')}
-              {activeItems.length < selectedItems.filter((it) => (it.remaining ?? toNumber(it.quantity)) > 0).length
-                ? ` (${T('status_partial_return','partial')})` : ''}
+        {/* One footer for the whole flow, pinned to the end of the panel: the
+            step's one main action is always on screen, and the screen before
+            it is one icon away. */}
+        {foundSale && step === 'items' ? (
+          <div className="sticky bottom-0 -mx-3 -mb-3 flex border-t border-gray-200 bg-white px-3 pb-3 pt-3 dark:border-gray-700 dark:bg-gray-800 sm:-mx-4 sm:-mb-4 sm:px-4 sm:pb-4">
+            <button onClick={reviewReturn} disabled={!pendingLoaded || !!pendingError || quoteBusy || unsupportedMoneyVersion} className="btn-primary inline-flex flex-1 items-center justify-center gap-1.5 text-sm disabled:opacity-50">
+              {quoteBusy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Eye className="h-4 w-4" aria-hidden="true" />}
+              {quoteBusy ? T('return_v1_quote_loading', 'Checking the net refund…') : T('return_review', 'Review')}
+              {activeItems.length > 0 ? ` · ${activeItems.length}` : ''}
             </button>
           </div>
         ) : null}
         {step === 'confirm' ? (
-          <div className="flex flex-shrink-0 gap-2 border-t border-gray-200 p-4 dark:border-gray-700">
-            <button onClick={() => setStep('items')} className="btn-secondary text-sm flex-1">← {T('back','Back')}</button>
+          <div className="sticky bottom-0 -mx-3 -mb-3 flex gap-2 border-t border-gray-200 bg-white px-3 pb-3 pt-3 dark:border-gray-700 dark:bg-gray-800 sm:-mx-4 sm:-mb-4 sm:px-4 sm:pb-4">
+            <button onClick={() => setStep('items')} disabled={submitting} className="btn-secondary inline-flex w-11 shrink-0 items-center justify-center px-0 disabled:opacity-50" aria-label={T('back', 'Back')} title={T('back', 'Back')}>
+              <ChevronLeft className="h-4 w-4" aria-hidden="true" />
+            </button>
             <button onClick={handleSubmit} disabled={!pendingLoaded || !!pendingError || submitting || (isV1Sale && (!quote || reviewedIntentRef.current !== quoteIntent))}
-              className="btn-primary text-sm flex-1 disabled:opacity-50">
-              {submitting ? `⏳ ${T('submitting','Processing…')}` : `✅ ${T('submit_return','Confirm Return')}`}
+              className="btn-primary inline-flex flex-1 items-center justify-center gap-1.5 text-sm disabled:opacity-50">
+              {submitting
+                ? <><Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> {T('submitting', 'Processing…')}</>
+                : <><Check className="h-4 w-4" aria-hidden="true" /> {T('confirm', 'Confirm')}</>}
             </button>
           </div>
         ) : null}
       </div>
-      <UnsavedChangesPrompt guard={closeGuard} />
-    </div>,
-    document.body,
+    </Modal>
   )
 }

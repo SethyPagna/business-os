@@ -427,9 +427,9 @@ runTest('every hub reaches the chip row through the one shared component', () =>
   }
   // Two implementations of one row is the standing exception, and it is
   // styled by the same rules rather than forked: both carry the same classes.
-  assert.match(products, /bos-nav-chrome hub-section-pills flex max-w-full flex-wrap/,
+  assert.match(products, /bos-nav-chrome hub-section-pills flex max-w-full flex-nowrap/,
     'the Products copy is the same row, and a chrome surface')
-  assert.match(hubNav, /bos-nav-chrome hub-section-pills flex max-w-full flex-wrap/,
+  assert.match(hubNav, /bos-nav-chrome hub-section-pills flex max-w-full flex-nowrap/,
     'so is the shared one')
 })
 
@@ -506,12 +506,14 @@ runTest('the chip row is legible in both themes, resting and open', () => {
 
 runTest('the chip row stays compact and touch-safe on every screen it appears on', () => {
   for (const [label, source] of [['HubSectionNav', hubNav], ['Products', products]] as Array<[string, string]>) {
-    assert.match(source, /hub-section-pill inline-flex min-h-11/, `${label}: 44px touch target when it wraps`)
+    assert.match(source, /hub-section-pill inline-flex min-h-11/, `${label}: 44px touch target`)
     assert.match(source, /text-\[13px\] font-semibold/, `${label}: 13px compact type`)
     assert.match(source, /md:h-8 md:min-h-0/, `${label}: 32px compact row at md+`)
-    // No horizontal overflow at 375: the row wraps, it never scrolls.
-    assert.match(source, /hub-section-pills flex max-w-full flex-wrap/, `${label}: wraps inside the viewport`)
-    assert.doesNotMatch(source, /hub-section-pills[^"'`]*overflow-x-auto/, `${label}: never scrolls sideways`)
+    // Owner choice (5 Oct 2026): one row, scrolling inside its own box. The page never gains a
+    // horizontal scrollbar, and Khmer keeps a >=1.6 leading inside the clipped scroller.
+    assert.match(source, /hub-section-pills flex max-w-full flex-nowrap gap-1 overflow-x-auto/, `${label}: one row that scrolls inside the viewport`)
+    assert.match(source, /hub-section-pill inline-flex[^"'`]*shrink-0[^"'`]*leading-relaxed/, `${label}: chips keep their width and Khmer-safe leading`)
+    assert.doesNotMatch(source, /hub-section-pill inline-flex[^"'`]*leading-snug/, `${label}: no tight leading in a clipped scroller`)
   }
 })
 

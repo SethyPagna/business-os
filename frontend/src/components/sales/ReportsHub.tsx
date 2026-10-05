@@ -18,6 +18,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import BarChart3 from 'lucide-react/dist/esm/icons/bar-chart-3.js'
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
+import Eye from 'lucide-react/dist/esm/icons/eye.js'
 import Filter from 'lucide-react/dist/esm/icons/filter.js'
 import SearchIcon from 'lucide-react/dist/esm/icons/search.js'
 import { useApp as useAppHook } from '../../AppContext.tsx'
@@ -320,20 +321,17 @@ export default function ReportsHub(_props: { embedded?: boolean } = {}) {
   const menuCount = activeFilterCount + (optionsAreDefault ? 0 : 1) + (styleIsDefault ? 0 : 1)
   const filtersLabel = `${trh('filters', 'Filters')}${menuCount ? ` · ${menuCount}` : ''}`
   const filtersButton = (
-    <span ref={(el) => { optionsAnchor.current = el }}>
-      {compact ? (
-        <IconButton
-          label={filtersLabel}
-          icon={<Filter className="h-3.5 w-3.5" />}
-          variant="secondary"
-          className="reports-filter-trigger"
-          onClick={() => setOptionsOpen((o) => !o)}
-        />
-      ) : (
-        <Button size="sm" variant="secondary" className="reports-filter-trigger" icon={<Filter className="h-3.5 w-3.5" />} onClick={() => setOptionsOpen((o) => !o)}>
-          {filtersLabel}
-        </Button>
-      )}
+    <span ref={(el) => { optionsAnchor.current = el }} className="relative inline-flex shrink-0">
+      <IconButton
+        label={filtersLabel}
+        icon={<Filter className="h-3.5 w-3.5" />}
+        variant="secondary"
+        className="reports-filter-trigger"
+        onClick={() => setOptionsOpen((o) => !o)}
+      />
+      {menuCount ? (
+        <span aria-hidden="true" className="pointer-events-none absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-[var(--ui-ink)] px-1 text-[10px] font-semibold leading-none text-[var(--ui-ground)]">{menuCount}</span>
+      ) : null}
     </span>
   )
 
@@ -346,7 +344,7 @@ export default function ReportsHub(_props: { embedded?: boolean } = {}) {
     <span className="reports-title-actions">
       {viewPicker}
       {filtersButton}
-      <Button className="reports-show-action" onClick={showReports}>
+      <Button className="reports-show-action" icon={<Eye className="h-3.5 w-3.5" />} onClick={showReports}>
         {trh('show', 'Show')}
       </Button>
     </span>

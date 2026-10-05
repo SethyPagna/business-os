@@ -1,7 +1,8 @@
-import { Fragment, useEffect, type ComponentType, type ReactNode, type SVGProps } from 'react'
+import { Fragment, useEffect, useRef, type ComponentType, type ReactNode, type SVGProps } from 'react'
 import { useApp as useAppCore } from '../../app/AppContextCore.tsx'
 import { useLayeredSectionNav } from '../../utils/sectionNavPreference.ts'
 import { sealRootHubSection } from './hubNavigation.ts'
+import { useActivePillScroll } from './useActivePillScroll.ts'
 // The chip row below is chrome, and wears the same design language as the
 // compact top bar / pages layer -- one stylesheet, so a hub can never drift
 // away from the navigation it belongs to. Sidebar imports it too; Vite emits
@@ -80,6 +81,8 @@ export default function HubSectionNav({
   const { settings, page } = useAppCore() as { settings?: Record<string, unknown>; page: string }
   const layered = useLayeredSectionNav(settings?.ui_mobile_section_nav)
   const visible = sections.filter((section) => !section.hidden)
+  const rowRef = useRef<HTMLDivElement>(null)
+  useActivePillScroll(rowRef, active)
   useEffect(() => { writeStoredActive(storageKey, active) }, [storageKey, active])
   useEffect(() => {
     if (pageId && visible.some((section) => section.id === active)) sealRootHubSection(pageId, active, page)
@@ -109,7 +112,7 @@ export default function HubSectionNav({
             element, so the row carries the design language without any
             colour utility left on it to fight the stylesheet for
             specificity -- the same arrangement Sidebar's chrome uses. */}
-        <div className="bos-nav-chrome hub-section-pills flex max-w-full flex-wrap gap-1 rounded-xl p-1 md:inline-flex">
+        <div ref={rowRef} className="bos-nav-chrome hub-section-pills flex max-w-full flex-nowrap gap-1 overflow-x-auto overscroll-x-contain rounded-xl p-1 [scrollbar-width:none] md:inline-flex">
           {visible.map((section) => {
             const Icon = section.icon
             const isActive = active === section.id
@@ -119,7 +122,7 @@ export default function HubSectionNav({
                 type="button"
                 onClick={() => onChange(section.id)}
                 aria-pressed={isActive}
-                className="hub-section-pill inline-flex min-h-11 min-w-0 flex-1 basis-[calc(50%_-_0.25rem)] items-center justify-center gap-1.5 break-words rounded-lg px-2.5 py-2 text-center text-[13px] font-semibold leading-snug transition-colors md:h-8 md:min-h-0 md:flex-none md:basis-auto md:whitespace-nowrap md:py-0"
+                className="hub-section-pill inline-flex min-h-11 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-2 text-center text-[13px] font-semibold leading-relaxed transition-colors md:h-8 md:min-h-0 md:py-0"
               >
                 {Icon ? <Icon className="h-3.5 w-3.5 sm:h-4 sm:w-4" /> : null} {section.label}
                 {section.badge}

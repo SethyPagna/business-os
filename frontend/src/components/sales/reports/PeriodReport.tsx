@@ -10,7 +10,7 @@ import { getReportPeriods } from '../../../api/reportsTransport.ts'
 import { downloadCSV } from '../../../utils/csv.ts'
 import { openPrintExport } from '../../../utils/exportOptions.ts'
 import { fmtDateOnly } from '../../../utils/formatters.ts'
-import { Button, Chip, Fold, OverflowMenu } from '../../shared/kit'
+import { Chip, Fold, IconButton, OverflowMenu } from '../../shared/kit'
 import ReceiptSheet from './ReceiptSheet.tsx'
 import ReportFrame, { useReportData } from './ReportFrame.tsx'
 import ReportTable, { csvColumnsFor, type ReportColumn } from './ReportTable.tsx'
@@ -192,9 +192,7 @@ export default function PeriodReport(p: ReportViewProps) {
         title={openRow ? periodLabel(openRow, g, fmtDate) : ''}
         actions={
           openRow ? (
-            <Button size="sm" variant="secondary" icon={<ExternalLink className="h-3.5 w-3.5" />} onClick={() => p.onDrill({ startDate: openRow.date_from, endDate: openRow.date_to, view: 'sales' })}>
-              {tr('rpt_view_sales', 'View sales')}
-            </Button>
+            <IconButton label={tr('rpt_view_sales', 'View sales')} variant="secondary" className="!h-8 !w-8" icon={<ExternalLink className="h-3.5 w-3.5" />} onClick={() => p.onDrill({ startDate: openRow.date_from, endDate: openRow.date_to, view: 'sales' })} />
           ) : null
         }
       >

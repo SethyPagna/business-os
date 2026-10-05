@@ -116,17 +116,22 @@
   border-top: 1px solid var(--ui-warn-line);
 }
 
-[data-reports-hub] table {
+[data-reports-hub] table,
+[data-reports-fold] table {
   font-variant-numeric: tabular-nums;
 }
 
 [data-reports-hub] th,
-[data-reports-hub] td {
+[data-reports-hub] td,
+[data-reports-fold] th,
+[data-reports-fold] td {
   border-bottom-color: var(--ui-line);
 }
 
 [data-reports-hub] td:not(:first-child),
-[data-reports-hub] th:not(:first-child) {
+[data-reports-hub] th:not(:first-child),
+[data-reports-fold] td:not(:first-child),
+[data-reports-fold] th:not(:first-child) {
   text-align: right;
   white-space: nowrap;
 }
@@ -387,16 +392,14 @@
 
 /* IconButton normally takes both dimensions from --ui-control-h. Reports
    supply their own surface tokens and that shared token is intentionally not
-   one of them, so the compact Filter used to collapse to its 18px glyph
-   width. Give only the icon form the same explicit 40px square as Manage;
-   the labelled desktop button keeps its content-driven width. */
-@media (max-width: 767px) {
-  .reports-filter-trigger {
-    width: 40px;
-    min-width: 40px;
-    max-width: 40px;
-    flex: 0 0 40px;
-  }
+   one of them, so Filters used to collapse to its 18px glyph width. It is an
+   icon at every width (button policy), so it gets the same explicit 40px
+   square as Manage everywhere. */
+.reports-filter-trigger {
+  width: 40px;
+  min-width: 40px;
+  max-width: 40px;
+  flex: 0 0 40px;
 }
 
 /* One active report control for every view: the selected option is the

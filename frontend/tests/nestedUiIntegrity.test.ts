@@ -56,8 +56,7 @@ for (const file of ['components/branches/BranchesHubPage.tsx', 'components/revie
   const pageSource = read(file)
   const source = rowSource(pageSource)
   if (delegatesRow(pageSource)) {
-    assert.match(source, /hub-section-pills[^"']*max-w-full[^"']*flex-wrap/, `${file}: shared section row must be viewport bounded and wrap`)
-    assert.doesNotMatch(source, /hub-section-pills[^"']*overflow-x-auto/, `${file}: shared section row must not scroll horizontally`)
+    assert.match(source, /hub-section-pills[^"']*max-w-full[^"']*flex-nowrap[^"']*overflow-x-auto/, `${file}: shared section row must be viewport bounded and scroll inside its own box`)
   } else {
     assert.match(source, /max-w-full[^"']*overflow-x-auto|overflow-x-auto[^"']*max-w-full/, `${file}: legacy section row must remain viewport bounded`)
   }

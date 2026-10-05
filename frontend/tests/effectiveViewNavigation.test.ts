@@ -91,10 +91,13 @@ const labels = ['Sales body', 'Returns body', 'Fees body', 'Reports body']
 const compiled = transformSync(readFileSync(new URL('../src/components/sales/SalesHubPage.tsx', import.meta.url), 'utf8'), { loader: 'tsx', format: 'cjs', jsx: 'automatic' }).code
 const module = { exports: {} as any }
 new Function('require', 'module', 'exports', compiled)((id: string) => {
-  if (id === 'react') return { ...React, lazy: () => {
+  if (id === 'react') return React
+  // The hub's four sections load through lazyRetry (chunk-failure recovery); each stands in for its body here.
+  if (id.includes('lazyImport')) return { lazyRetry: () => {
     const label = labels[lazyIndex++]
     return () => { React.useEffect(() => { mounted.add(label); return () => { mounted.delete(label) } }, []); return React.createElement('p', null, label) }
   } }
+  if (id.includes('kit/Skeleton')) return { __esModule: true, default: () => null }
   if (id === 'react/jsx-runtime') return require(id)
   if (id.includes('AppContext')) return { useApp: context }
   if (id.includes('hubNavigation')) return navigation

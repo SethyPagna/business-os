@@ -29,11 +29,11 @@ const productRowParts = readFileSync(new URL('../src/components/products/surface
 // (nestedUiIntegrity.test.ts, sectionNavigation.test.ts). Products was also
 // the one hub-shaped page getHubDestinations() did not know about, so the
 // compact navigation could not reach these sections at all. The row is now
-// the shared wrapping hub pill row fed by that same table, and it stands
+// the shared hub pill row (one scrolling line) fed by that same table, and it stands
 // aside in compact "pages" mode where the home sheet owns section switching.
 assert.match(products, /getHubDestinations\('products'/, 'the section list must come from the shared hub table, not a second hand-rolled one')
 assert.match(products, /useHubSection<'products' \| 'stock_changes' \| 'stock_in_sessions' \| 'duplicates'>/, "the active section must ride the app's guarded section navigation like every other hub")
-assert.match(products, /hub-section-pills flex max-w-full flex-wrap/, 'the Products section switcher must wrap inside the viewport')
+assert.match(products, /hub-section-pills flex max-w-full flex-nowrap gap-1 overflow-x-auto/, 'the Products section switcher must scroll inside the viewport, never widen the page')
 assert.match(products, /hub-section-pill inline-flex min-h-11/, 'section chips must meet the 44px compact touch target')
 assert.match(products, /layeredSectionNav \|\| productSectionTabs\.length <= 1 \? null :/, 'the page must not draw a second section row when the compact home sheet owns it')
 assert.doesNotMatch(products, /overflow-x-auto pb-1 \[scrollbar-width:thin\]/, 'the hand-rolled section scroller must be gone')

@@ -58,7 +58,6 @@ const REMAINING: Record<string, number> = {
   'components/products/forms/ProductForm.tsx': 6,
   'components/receipt-settings/PrintSettings.tsx': 2,
   'components/receipt/Receipt.tsx': 1,
-  'components/sales/ExportModal.tsx': 2,
 }
 
 runTest('positive control: every native form is counted, comments and a local alert are not', () => {

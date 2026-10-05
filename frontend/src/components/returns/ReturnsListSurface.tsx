@@ -1,9 +1,8 @@
 import { Fragment, useEffect, useState, type CSSProperties, type ReactNode, type RefObject } from 'react'
 import { supplierDisplay } from '../../utils/supplierDisplay.ts'
-import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
-import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
 import { consumeLongPressClick, createLongPressHandlers, type LongPressState } from '../../utils/longPress.ts'
 import ColumnChooser from '../shared/ColumnChooser.tsx'
+import DayGroupHeader from '../shared/DayGroupHeader.tsx'
 import { customerDisplayName } from '../../utils/customerIdentity.ts'
 import CopyableId from '../shared/CopyableId.tsx'
 import { useColumnPreferences } from '../shared/useColumnPreferences.ts'
@@ -246,30 +245,19 @@ export default function ReturnsListSurface({
                   <Fragment key={section.id}>
                     <tr className="bg-slate-100/90 dark:bg-slate-800/80">
                       <td colSpan={columnCount} className="px-4 py-2">
-                        <div className="flex flex-wrap items-center justify-between gap-3 text-xs">
-                          <label className="inline-flex items-center gap-2 font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-                            {selectionModeActive ? (
-                            <input
-                              type="checkbox"
-                              className="h-4 w-4 rounded"
-                              checked={isSelectionScopeFullySelected(section.ids)}
-                              ref={(node) => {
-                                if (node) node.indeterminate = isSelectionScopePartiallySelected(section.ids)
-                              }}
-                              onChange={(event) => toggleSelectionScope(section.ids, event.target.checked)}
-                              aria-label={`${t('select')} ${section.label}`}
-                            />
-                            ) : null}
-                            <span>{section.label}</span>
-                          </label>
-                          <div className="flex items-center gap-3">
-                            <span className="text-slate-400">{countedCount}</span>
-                            <button type="button" className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-500 hover:bg-white/70 hover:text-slate-700 dark:text-slate-300 dark:hover:bg-slate-700/60 dark:hover:text-white" onClick={() => toggleReturnSection(section.id)}>
-                              {isCollapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
-                              {isCollapsed ? (t('expand') || 'Expand') : (t('collapse') || 'Collapse')}
-                            </button>
-                          </div>
-                        </div>
+                        <DayGroupHeader
+                          label={section.label}
+                          count={countedCount}
+                          collapsed={isCollapsed}
+                          onToggle={() => toggleReturnSection(section.id)}
+                          selection={selectionModeActive ? {
+                            checked: isSelectionScopeFullySelected(section.ids),
+                            indeterminate: isSelectionScopePartiallySelected(section.ids),
+                            onChange: (checked) => toggleSelectionScope(section.ids, checked),
+                            ariaLabel: `${t('select')} ${section.label}`,
+                          } : undefined}
+                          t={t}
+                        />
                       </td>
                     </tr>
                     {!isCollapsed ? section.groups.map((group) => (
@@ -418,29 +406,19 @@ export default function ReturnsListSurface({
           return (
             <div key={section.id} className="space-y-2">
               <div className="rounded-xl bg-slate-100 px-3 py-2 dark:bg-slate-800/70">
-                <div className="flex items-center justify-between gap-3">
-                  <label className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-                    {selectionModeActive ? (
-                    <input
-                      type="checkbox"
-                      className="h-4 w-4 rounded"
-                      checked={isSelectionScopeFullySelected(section.ids)}
-                      ref={(node) => {
-                        if (node) node.indeterminate = isSelectionScopePartiallySelected(section.ids)
-                      }}
-                      onChange={(event) => toggleSelectionScope(section.ids, event.target.checked)}
-                      aria-label={`${t('select')} ${section.label}`}
-                    />
-                    ) : null}
-                    <span>{section.label}</span>
-                    <span className="normal-case tracking-normal text-slate-400">{countedCount}</span>
-                  </label>
-                  <div className="flex items-center gap-1">
-                    <button type="button" className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium text-slate-500 hover:bg-white/70 hover:text-slate-700 dark:text-slate-300 dark:hover:bg-slate-700/60 dark:hover:text-white" onClick={() => toggleReturnSection(section.id)}>
-                      {isCollapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
-                    </button>
-                  </div>
-                </div>
+                <DayGroupHeader
+                  label={section.label}
+                  count={countedCount}
+                  collapsed={isCollapsed}
+                  onToggle={() => toggleReturnSection(section.id)}
+                  selection={selectionModeActive ? {
+                    checked: isSelectionScopeFullySelected(section.ids),
+                    indeterminate: isSelectionScopePartiallySelected(section.ids),
+                    onChange: (checked) => toggleSelectionScope(section.ids, checked),
+                    ariaLabel: `${t('select')} ${section.label}`,
+                  } : undefined}
+                  t={t}
+                />
               </div>
               {!isCollapsed ? section.groups.map((group) => (
                 <div key={group.id} className="space-y-2">
@@ -525,7 +503,7 @@ export default function ReturnsListSurface({
                           </div>
                         </div>
                         {ret.receipt_number ? (
-                          <div data-return-receipt-meta className="mt-1 flex min-w-0 flex-nowrap items-center overflow-x-auto overscroll-x-contain whitespace-nowrap text-[11px] leading-4 text-gray-500 dark:text-gray-400 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                          <div data-return-receipt-meta className="mt-1 flex min-w-0 flex-nowrap items-center overflow-x-auto overscroll-x-contain whitespace-nowrap text-xs text-gray-500 dark:text-gray-400 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                             <CopyableId
                               value={ret.receipt_number}
                               copyLabel={tr('copy_receipt_number', 'Copy receipt number')}
@@ -535,7 +513,7 @@ export default function ReturnsListSurface({
                             />
                           </div>
                         ) : null}
-                        <div data-return-secondary-meta className="mt-1 flex min-w-0 flex-nowrap items-center gap-1.5 overflow-x-auto overscroll-x-contain whitespace-nowrap text-[11px] leading-4 text-gray-500 dark:text-gray-400 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                        <div data-return-secondary-meta className="mt-1 flex min-w-0 flex-nowrap items-center gap-1.5 overflow-x-auto overscroll-x-contain whitespace-nowrap text-xs text-gray-500 dark:text-gray-400 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                           <span className="shrink-0" aria-label={`${tr('cashier', 'Cashier')}: ${ret.cashier_name || '-'}`}>{ret.cashier_name || '-'}</span>
                           <span aria-hidden="true" className="shrink-0">·</span>
                           <span className="shrink-0" aria-label={`${tr('branch', 'Branch')}: ${ret.branch_name || '-'}`}>{ret.branch_name || '-'}</span>

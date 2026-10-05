@@ -24,15 +24,18 @@ for (const label of labels(exportModal)) {
   assert.match(label, /\bhtmlFor=/, 'every remaining ExportModal label names its control')
 }
 
-const salesListLabels = labels(salesList)
-assert.equal(salesListLabels.length, 2, 'desktop and phone section headers each keep one checkbox label')
-for (const label of salesListLabels) {
-  assert.match(label, /<input\b/, 'a SalesListSurface label is rendered only with its nested selection checkbox')
-}
+// The day header is one shared component for the desktop row and the phone card:
+// its only label wraps the selection checkbox and exists only in select mode.
+assert.equal(labels(salesList).length, 0, 'the SalesListSurface has no hand-rolled day-header label left')
 assert.equal(
-  Array.from(salesList.matchAll(/\{selectionModeActive \? \(\s*<label\b/g)).length,
+  Array.from(salesList.matchAll(/<DayGroupHeader\b/g)).length,
   2,
-  'both responsive section headers conditionally render the label only in selection mode',
+  'desktop and phone section headers both render the shared day-group header',
 )
+const dayHeader = read('components/shared/DayGroupHeader.tsx')
+const dayHeaderLabels = labels(dayHeader)
+assert.equal(dayHeaderLabels.length, 1, 'the shared day header has one checkbox label')
+assert.match(dayHeaderLabels[0], /<input\b/, 'the day-header label is rendered only with its nested selection checkbox')
+assert.match(dayHeader, /selection \? \(\s*<label\b/, 'the label is conditional on selection mode')
 
 console.log('PASS sales shared export range and responsive section headers have associated labels')

@@ -23,13 +23,13 @@ window.__requests=[]
 window.__notices=[]
 window.api={getSalesExport(query){return new Promise((resolve,reject)=>window.__requests.push({query,resolve,reject}))}}
 window.__finish=(index,amount)=>{const request=window.__requests[index];request.resolve({period:{start:request.query.startDate,end:request.query.endDate},summary:{net_revenue_usd:amount}})}
-window.alert=message=>window.__notices.push(message)
+window.alert=()=>{throw new Error('native alert() must not be used')}
 function Fixture(){
  const [user,setUser]=useState({id:1,organization_id:7,role_code:'admin'})
  const [open,setOpen]=useState(true)
  window.__changeActor=()=>setUser({id:2,organization_id:9,role_code:'viewer'})
  window.__unmount=()=>setOpen(false)
- return <AppContext.Provider value={{...FALLBACK_APP_CONTEXT,t,language,user}}>{open?<ExportModal t={t} fmtUSD={amount=>'$'+amount} onClose={()=>setOpen(false)}/>:null}</AppContext.Provider>
+ return <AppContext.Provider value={{...FALLBACK_APP_CONTEXT,t,language,user,notify:message=>window.__notices.push(message)}}>{open?<ExportModal t={t} fmtUSD={amount=>'$'+amount} onClose={()=>setOpen(false)}/>:null}</AppContext.Provider>
 }
 createRoot(document.getElementById('root')).render(<Fixture/>);
 `
@@ -67,7 +67,7 @@ try {
       await trigger.click()
       await page.locator('[data-date-time-range-panel]').waitFor()
       await page.keyboard.press('Tab')
-      assert.equal((await page.evaluate(() => document.activeElement?.textContent))?.trim(), pack.preview_summary)
+      assert.equal(await page.evaluate(() => document.activeElement?.getAttribute('aria-label')), pack.preview_summary)
       await page.keyboard.press('Space')
       await page.waitForFunction(() => (window as any).__requests.length === 1)
       assert.equal(await page.locator('fieldset').evaluate(element => (element as HTMLFieldSetElement).disabled), true)

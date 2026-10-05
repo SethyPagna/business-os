@@ -537,10 +537,6 @@ const DELIBERATELY_CLIPPED: Record<string, Array<[string, Mechanism, string]>> =
   'components/products/surfaces/AttributeSupplierModal.tsx': [
     ["tr('attribute_supplier', 'Attribute supplier')", 'language-pack', 'The modal heading from the language pack; the lots it lists scroll.'],
   ],
-  'components/sales/SaleStatusConfirmModal.tsx': [
-    ['fromLabel', 'static-label', 'A sale status word from the language pack, shown before and after the change.'],
-    ['toLabel', 'static-label', 'The same status vocabulary for the after value.'],
-  ],
   'components/shared/NotesWidget.tsx': [
     ['label', 'static-label', 'The floating widget header caption; the notes it holds scroll.'],
   ],

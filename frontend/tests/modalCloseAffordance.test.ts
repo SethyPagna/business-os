@@ -132,6 +132,8 @@ new Function('require', 'module', 'exports', compiled)((name: string) => {
   // This harness has no useEffect and no CSSOM, so it is stubbed like every
   // other Modal dependency above; the hook has its own coverage.
   if (name.includes('useVisualViewportInset')) return { useVisualViewportInset: () => {} }
+  // Opt-in keyboard contract (Modal keyboard prop); it needs effects and a DOM, so it is stubbed here and has its own test.
+  if (name.includes('useDialogKeyboard')) return { useDialogKeyboard: () => {} }
   if (name.includes('modalCloseContext')) return { ModalCloseContext: { Provider: 'close-context-provider' } }
   if (name.includes('UnsavedChangesPrompt')) return { default: () => null }
   return {}

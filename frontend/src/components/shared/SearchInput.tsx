@@ -1,5 +1,10 @@
 import X from 'lucide-react/dist/esm/icons/x.js'
 import type { InputHTMLAttributes } from 'react'
+import { useApp as useAppHook } from '../../app/AppContextCore.tsx'
+
+// Same cast Modal.tsx uses next to this file: every admin search field sits
+// under the one AppProvider.
+const useApp = useAppHook as unknown as () => { t: (key: string) => string }
 
 type NativeInputProps = Omit<
   InputHTMLAttributes<HTMLInputElement>,
@@ -41,7 +46,9 @@ export default function SearchInput({
   autoComplete = 'off',
   ...rest
 }: SearchInputProps) {
+  const { t } = useApp()
   const label = ariaLabel || placeholder
+  const clearLabel = t('clear_search') || 'Clear search'
   return (
     <label htmlFor={id} className={`relative ${className}`.trim()}>
       <input
@@ -49,7 +56,7 @@ export default function SearchInput({
         name={name}
         type="text"
         autoComplete={autoComplete}
-        className={`input min-w-0 w-full ${showClear && value ? 'pr-8' : ''} ${inputClassName}`.trim()}
+        className={`input min-w-0 w-full ${showClear && value ? 'pr-10' : ''} ${inputClassName}`.trim()}
         placeholder={placeholder}
         aria-label={label}
         value={value}
@@ -60,8 +67,9 @@ export default function SearchInput({
         <button
           type="button"
           onClick={() => onChange('')}
-          className="absolute right-2 top-1/2 inline-flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-full text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700 dark:hover:text-gray-200"
-          aria-label="Clear search"
+          className="absolute right-1 top-1/2 inline-flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-gray-700 dark:hover:text-gray-200"
+          aria-label={clearLabel}
+          title={clearLabel}
           tabIndex={-1}
         >
           <X className="h-3.5 w-3.5" />
