@@ -35,8 +35,6 @@ import {
 import { contactDisplayAddress, type ContactOptionMode } from '../lib/contactOptions'
 import { canonicalizePhone } from '../lib/phone'
 import { normalizeMembershipNumber, withMintedMembershipNumber } from '../lib/membershipNumber'
-import { revokePortalSessionsForAccount } from '../lib/portalSession'
-import { hashPassword } from '../lib/passwordHash'
 import { buildContactMatchClause } from '../lib/contactSearch'
 import { buildSalesCustomerMatchClause } from '../lib/salesCustomerSearch'
 import { buildContactIdClause, parseContactIdFilter, CONTACT_ID_FILTER_MAX } from '../lib/contactIds'
@@ -871,11 +869,14 @@ app.get('/customers/membership/:membershipNumber', async (c) => {
   return c.json({ customer, points: { balance: points?.balance ?? 0, redeemableUnits: points?.redeemableUnits ?? 0 } })
 })
 
-// Which of these contacts have a storefront account (§2), keyed by contact_id.
-// Lets admin Contacts badge a contact that has signed up and show the
-// membership id it registered under. Chunked to stay within D1's bound-param
+// Which of these contacts are linked to a website member (§2, G38), keyed by
+// contact_id. Lets admin Contacts badge the customer ("Website member
+// W-...") with no other member detail: the Members tab (routes/
+// portalMembers.ts) is where the member itself is shown, and needs its own
+// permission. membershipId is the LC number an account from before G38 was
+// issued (null for newer members). Chunked to stay within D1's bound-param
 // limit, same as computeCustomerPointsMap.
-type PortalAccountFlag = { membershipId: string; createdAt: string | null }
+type PortalAccountFlag = { accountId: number; memberCode: string | null; membershipId: string | null; createdAt: string | null }
 async function computePortalAccountMap(env: Env, contactIds: number[]): Promise<Map<number, PortalAccountFlag>> {
   const result = new Map<number, PortalAccountFlag>()
   if (contactIds.length === 0) return result
@@ -883,11 +884,16 @@ async function computePortalAccountMap(env: Env, contactIds: number[]): Promise<
   for (const idChunk of chunkForBinding(contactIds)) {
     const placeholders = idChunk.map(() => '?').join(',')
     const rows = await db.prepare(
-      `SELECT contact_id, membership_id, created_at FROM portal_accounts WHERE contact_id IN (${placeholders})`,
-    ).all<{ contact_id: number; membership_id: string; created_at: string | null }>(idChunk)
+      `SELECT id, contact_id, member_code, membership_id, created_at FROM portal_accounts WHERE contact_id IN (${placeholders})`,
+    ).all<{ id: number; contact_id: number; member_code: string | null; membership_id: string | null; created_at: string | null }>(idChunk)
     for (const row of rows) {
       if (row.contact_id == null) continue
-      result.set(Number(row.contact_id), { membershipId: row.membership_id, createdAt: row.created_at ?? null })
+      result.set(Number(row.contact_id), {
+        accountId: Number(row.id),
+        memberCode: row.member_code ?? null,
+        membershipId: row.membership_id ?? null,
+        createdAt: row.created_at ?? null,
+      })
     }
   }
   return result
@@ -1696,40 +1702,11 @@ function registerContactRoutes(config: ContactConfig) {
     return c.json(item)
   })
 
-  // Staff-initiated storefront password reset (§2, the "contact us to reset"
-  // path — no SMS provider is wired for self-serve reset, and few customers
-  // have an email). Issues a fresh temporary password, returns it ONCE so
-  // staff can pass it to the customer, and kills every live session for that
-  // account. Customers only; full contacts tier only (review tier is limited).
-  if (config.table === 'customers') {
-    app.post(`${config.path}/:id/portal-reset`, async (c) => {
-      const user = c.get('user')
-      if (getPermissionTier(user, 'contacts') !== 'full') {
-        return c.json({ error: 'Resetting a storefront password needs full Contacts permission' }, 403)
-      }
-      const id = c.req.param('id')
-      const db = getDb(c.env)
-      const customer = await db.prepare('SELECT id, is_anonymous FROM customers WHERE id = @id').get<Record<string, unknown>>({ id })
-      if (!customer) return c.json({ error: 'customer not found' }, 404)
-      if (isAnonymousCustomer(customer)) return anonymousCustomerMutationResponse(c)
-      const account = await db.prepare('SELECT id FROM portal_accounts WHERE contact_id = @id LIMIT 1').get<{ id: number }>({ id })
-      if (!account) return c.json({ error: 'This contact has no storefront account' }, 404)
-      // A readable-but-random temporary password (no ambiguous chars).
-      const alphabet = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'
-      const bytes = new Uint8Array(10)
-      crypto.getRandomValues(bytes)
-      const tempPassword = [...bytes].map((b) => alphabet[b % alphabet.length]).join('')
-      const update = await db.prepare(`UPDATE portal_accounts
-        SET password_hash = @h, updated_at = CURRENT_TIMESTAMP
-        WHERE id = @aid AND contact_id = @customerId
-          AND EXISTS (SELECT 1 FROM customers WHERE id = @customerId AND ${customerIsProfileSql()})`)
-        .run({ h: await hashPassword(tempPassword, c.env), aid: account.id, customerId: id })
-      if (Number(update.changes || 0) !== 1) return anonymousCustomerMutationResponse(c)
-      await revokePortalSessionsForAccount(c.env, account.id)
-      await audit(c.env, user?.id ?? null, actorSnapshot(user), 'portal_reset', config.entity, id, {})
-      return c.json({ ok: true, temporaryPassword: tempPassword })
-    })
-  }
+  // The staff storefront password reset that lived here (POST
+  // /customers/:id/portal-reset) moved to Contacts > Members with an identity
+  // check: POST /api/portal-members/:id/reset-password (G38 Phase 1, design
+  // S5). It had no frontend caller, keyed the member by the customer, and
+  // asked for no evidence.
 
   app.put(`${config.path}/:id`, async (c) => {
     const user = c.get('user')

@@ -83,11 +83,16 @@ async function main() {
     ordered(bulk, 'anonymousCustomerIds(getDb(c.env), rawIds', 'createBulkDeleteJob(')
   })
 
-  await check('merge, portal reset, and points refuse a marked profile before any write', () => {
+  await check('merge and points refuse a marked profile before any write; the portal reset left contacts', () => {
     const merge = route.slice(route.indexOf('app.post(`${config.path}/merge`'), route.indexOf('app.post(config.path'))
     ordered(merge, 'isAnonymousCustomer(keeper)', 'buildContactMergePlan(', 'await db.batch(plan.statements)')
-    const reset = route.slice(route.indexOf('app.post(`${config.path}/:id/portal-reset`'), route.indexOf('app.put(`${config.path}/:id`'))
-    ordered(reset, 'isAnonymousCustomer(customer)', 'UPDATE portal_accounts', 'customerIsProfileSql()', '.run({ h: await hashPassword(tempPassword, c.env)')
+    // G38: the storefront password reset is a member action now (routes/
+    // portalMembers.ts, identity check required); no customer-keyed reset
+    // remains here to be aimed at a marked profile.
+    assert.equal(route.includes('app.post(`${config.path}/:id/portal-reset`'), false, 'the customer-keyed portal reset must not come back')
+    // Linking a member to a marked profile is refused in the batch itself.
+    const links = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'portalMemberLinks.ts'), 'utf8')
+    assert.match(links, /EXISTS \(SELECT 1 FROM customers WHERE id = @customerId AND \$\{customerIsProfileSql\(\)\}\)/)
     const points = route.slice(route.indexOf("app.post('/customers/:id/points'"), route.indexOf("app.get('/customers/points-summary'"))
     ordered(points, 'isAnonymousCustomer(customer)', 'INSERT INTO loyalty_point_adjustments')
   })

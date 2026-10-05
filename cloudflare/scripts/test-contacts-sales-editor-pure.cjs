@@ -294,7 +294,7 @@ async function test(name, fn) {
     for (const [method, url] of [
       ['POST', '/customers/duplicates/dismiss'], ['POST', '/customers/duplicates/undismiss'],
       ['POST', '/customers/link-conflicts/relink'], ['POST', '/customers/link-conflicts/resolve-missing'],
-      ['POST', '/customers/5/portal-reset'], ['POST', '/customers/gender-restoration/apply'],
+      ['POST', '/customers/gender-restoration/apply'],
       ['GET', '/customers/reports/ar-invoices'],
     ]) {
       assert.equal((await call(method, url, ROLES.employee, method === 'POST' ? {} : undefined)).status, 403, `${method} ${url}`)

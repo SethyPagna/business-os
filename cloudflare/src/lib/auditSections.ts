@@ -38,6 +38,8 @@ export const AUDIT_SECTION_ENTITIES: Record<AuditSectionId, readonly string[]> =
   ],
   contacts: [
     'customer', 'customers', 'supplier', 'suppliers', 'delivery_contact', 'delivery_contacts', 'supplier_cascade',
+    // G38: website members and their links to customers (routes/portalMembers.ts).
+    'portal_member',
   ],
   users: ['user', 'users', 'role', 'roles'],
   settings: [

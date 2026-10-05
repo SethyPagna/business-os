@@ -78,7 +78,7 @@ check('inventory.ts /adjust: trailing audit() is deferred into waitUntil with br
 // as the one sequential await it was.
 
 check('contacts.ts create: audit()/bumpVersion() deferred into waitUntil ahead of the response SELECT', () => {
-  const createBlock = sliceBetween(contactsSource, 'app.post(config.path, async (c) => {', "app.post(`${config.path}/:id/portal-reset`", 'contacts.ts create')
+  const createBlock = sliceBetween(contactsSource, 'app.post(config.path, async (c) => {', "app.put(`${config.path}/:id`", 'contacts.ts create')
   assert.match(
     createBlock,
     /c\.executionCtx\.waitUntil\(Promise\.all\(\[\s*(?:createAuditInBatch \? Promise\.resolve\(\) : )?audit\(c\.env, user\?\.id \?\? null, actorSnapshot\(user\), 'create', config\.entity, id/,

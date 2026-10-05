@@ -157,7 +157,11 @@ async function run() {
   await check('the staff storefront-password reset writes through hashPassword', async () => {
     const contacts = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'contacts.ts'), 'utf8')
     assert.ok(!/bcrypt/.test(contacts), 'routes/contacts.ts no longer touches bcrypt')
-    assert.ok(contacts.includes(".run({ h: await hashPassword(tempPassword, c.env), aid: account.id, customerId: id })"))
+    // G38: the reset moved to Contacts > Members (routes/portalMembers.ts).
+    const members = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'portalMembers.ts'), 'utf8')
+    assert.ok(!/bcrypt/.test(members), 'routes/portalMembers.ts never touches bcrypt')
+    assert.ok(members.includes('const passwordHash = await hashPassword(tempPassword, env)'))
+    assert.ok(members.includes("'UPDATE portal_accounts SET password_hash = @hash, updated_at = CURRENT_TIMESTAMP WHERE id = @id', params: { hash: passwordHash, id: accountId }"))
     const portalAccounts = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'portalAccounts.ts'), 'utf8')
     assert.ok(!/bcrypt\./.test(portalAccounts), 'lib/portalAccounts.ts never calls bcrypt directly')
   })

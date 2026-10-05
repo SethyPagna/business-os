@@ -3,6 +3,7 @@ import settingsRoute from './routes/settings'
 import productsRoute from './routes/products'
 import productCostRoute from './routes/productCost'
 import portalRoute from './routes/portal'
+import portalMembersRoute from './routes/portalMembers'
 import salesRoute from './routes/sales'
 import authRoute from './routes/auth'
 import filesRoute from './routes/files'
@@ -550,6 +551,8 @@ app.route('/api/settings', settingsRoute)
 app.route('/api/products', productsRoute)
 app.route('/api/products', productCostRoute)
 app.route('/api/portal', portalRoute)
+// Staff-only (G38): outside /api/portal/, so the storefront host gate 404s it.
+app.route('/api/portal-members', portalMembersRoute)
 app.route('/api/sales', salesRoute)
 app.route('/api/auth', authRoute)
 app.route('/api/auth/devices', devicesRoute)
