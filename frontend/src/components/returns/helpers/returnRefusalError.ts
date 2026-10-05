@@ -12,11 +12,14 @@
 //                                         prices and the line names no sale item
 //   return_refund_sale_line_required 400  PATCH /:id: a line on a sale names neither a sale
 //                                         item nor a product
+//   return_stock_skipped_sale        409  POST /api/returns/bulk cancelling or restoring a return
+//                                         on a sale recorded without stock changes (RET-B E1)
 export const RETURN_REFUSAL_ERRORS: Readonly<Record<string, string>> = {
   'return_edit_cancelled': 'This return is cancelled. Restore it before editing.',
   'return_restore_over_capacity': 'Cannot restore: more units would count as returned than the sale sold. Nothing was changed.',
   'return_refund_price_ambiguous': 'This product was sold at different prices on this sale. Pick the exact sale item being returned.',
   'return_refund_sale_line_required': 'Each return line needs a sale item or a product.',
+  'return_stock_skipped_sale': 'This return is on a sale recorded without stock changes (such as an imported sale). Cancelling or restoring it would move stock that never moved, so nothing was changed.',
 }
 
 // A refusal whose sentence names values the Worker sends as `params`

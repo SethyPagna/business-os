@@ -4633,6 +4633,7 @@
   "return_restore_over_capacity_detail": "Cannot restore: {returned} of {product} would count as returned, but the sale sold only {sold}. Nothing was changed.",
   "return_refund_price_ambiguous": "This product was sold at different prices on this sale. Pick the exact sale item being returned.",
   "return_refund_sale_line_required": "Each return line needs a sale item or a product.",
+  "return_stock_skipped_sale": "This return is on a sale recorded without stock changes (such as an imported sale). Cancelling or restoring it would move stock that never moved, so nothing was changed.",
   "return_search_hint": "Enter a receipt number or sale ID. You can also skip and do a manual return.",
   "return_status": "Status",
   "return_to_stock_label": "Return to stock",
