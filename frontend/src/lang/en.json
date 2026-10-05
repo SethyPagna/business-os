@@ -5497,6 +5497,8 @@
   "telegram_cat_status_desc": "Payment, delivery, completion, and cancellation changes",
   "telegram_cat_stock_in_desc": "Product, quantity, branch, reason, and received date",
   "telegram_cat_stock_out_desc": "Product, quantity, branch, and reason",
+  "telegram_cat_products": "Product edits and merges",
+  "telegram_cat_products_desc": "Product, what changed, and who did it, for edits and merges by staff who are not administrators",
   "telegram_reports_overview": "Reports overview",
   "telegram_reports_overview_desc": "One minute after a shift closes: that day's overview for the shift's branch",
   "telegram_summary_sections": "Overview extras",

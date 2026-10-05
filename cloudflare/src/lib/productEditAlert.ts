@@ -5,6 +5,8 @@
 // cannot change it.
 
 export const PRODUCT_EDIT_ALERT_HEADING = '✏️ Product edited'
+// A merge of duplicate products by a non-administrator (owner, 5 Oct 2026 evening: "alert merge edits too").
+export const PRODUCT_MERGE_ALERT_HEADING = '🔀 Products merged'
 
 // Column -> the short word the alert prints. Anything not listed prints its column name.
 const FIELD_WORDS: Record<string, string> = {
@@ -28,6 +30,15 @@ export function formatProductEditAlertLines(input: { product: string; changed: r
   return [
     `Product: ${input.product}`,
     input.changed.length ? `Changed: ${input.changed.join(', ')}` : '',
+    input.by ? `By: ${input.by}` : '',
+  ]
+}
+
+/** One pair merge names both products; a bulk or reviewed merge names only who ran it (its count is cumulative across continuations). */
+export function formatProductMergeAlertLines(input: { kept?: string | null; merged?: string | null; by?: string | null }): string[] {
+  return [
+    input.kept ? `Product: ${input.kept}` : '',
+    input.merged ? `Merged: ${input.merged}` : '',
     input.by ? `By: ${input.by}` : '',
   ]
 }

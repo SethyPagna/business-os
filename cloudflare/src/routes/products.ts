@@ -33,7 +33,7 @@ import { buildAtomicMergeHistoryStatements, closeStockSessionsStatements, readOp
 import { INVALID_RESOLVE_CHOICES_CODE, KEEPER_CHOICE_BEFORE_SQL, MERGE_APPLIED_PROBE_SQL, ProductResolveChoiceError, RESOLVE_EDIT_PERMISSION_CODE, keeperChoiceBefore, keeperChoiceStatements, mergeFailedBody, parseProductResolveChoices, resolveChoicesTypeValues, resolveChoiceValues, type ProductResolveChoices, type ResolveChoiceValues } from '../lib/productResolveChoices'
 import { createProductMergeClusterPlan, isMergePriceEditError, MERGE_COST_FIELDS, MERGE_PRICE_EDIT_CODE, MERGE_PRICE_EDIT_MESSAGE, MERGE_PRICE_FIELDS, mergePriceEditError, mergePriceOverrides, parseProductMergeClusterPlan, productMergeCaseKey, productMergeCasAssertion, productMergeNumericError, productMergeSourceUnmovedAssertion, MERGE_CONFLICT_RETRY, productMergePlanKeeperMatches, productMergePlanSourceMemberMatches, resolveProductMergeClusterPlanEconomics, resolveProductMergeEconomics, type ProductMergeClusterPlan, type ProductMergeEconomics, type ProductMergeNumericIssue } from '../lib/productMerge'
 import { sendTelegramEvent } from '../lib/telegram'
-import { PRODUCT_EDIT_ALERT_HEADING, formatProductEditAlertLines, productEditAlertFields } from '../lib/productEditAlert'
+import { PRODUCT_EDIT_ALERT_HEADING, PRODUCT_MERGE_ALERT_HEADING, formatProductEditAlertLines, formatProductMergeAlertLines, productEditAlertFields } from '../lib/productEditAlert'
 import { CATALOG_COST_DERIVE_SQL, catalogCostRecomputeIfChangedSql, costEntryActorParams, typedCostEntriesBeforeWriteSql, typedCostEntryBeforeWriteStatement } from '../lib/catalogCostRecompute'
 import { PRODUCT_MERGE_READ_BATCH_MAX_STATEMENTS, productMergeSourceExtent, readProductMergeCaseSnapshot, readProductMergeDependentLotSnapshots, planProductMergeCaseSnapshot, planProductMergeDependentLotSnapshots, runProductMergeReadBatch, type ProductMergeReadPlan } from '../lib/productMergeSnapshot'
 import type { ProductMergeCaseSnapshot, ProductMergeLotSnapshot } from '../lib/productMergeSnapshot'
@@ -149,8 +149,40 @@ app.use('*', acquisitionCostResponses)
 // not a lib middleware: the body is read here only for the two plain-JSON merge
 // POSTs. The bulk preview/finalize handlers meter the raw stream themselves
 // (admitRequestBody), which a body already consumed here would break.
+// Owner, 5 Oct 2026 (evening): a product edit or merge by someone who is not an administrator is announced on
+// Telegram (bilingual, Alerts topic, the telegram_products_enabled switch). Never blocks or fails the request.
+function announceProductAlert(c: { env: Env; executionCtx: { waitUntil(promise: Promise<unknown>): void } }, user: SessionUser | null | undefined, heading: string, lines: string[]): void {
+  if (!user || isAdminControlUser(user)) return
+  c.executionCtx.waitUntil(Promise.resolve(sendTelegramEvent(c.env, { type: 'products', heading, lines }))
+    .catch((error) => console.error('[telegram] product alert failed', error)))
+}
 const MERGE_ROUTE_PATH = /\/(?:merge-duplicates|possible-duplicates\/merge)(?:\/|$|-)/
 const MERGE_JSON_BODY_PATH = /\/(?:merge-duplicates|possible-duplicates\/merge)$/
+// The committing merge endpoints. Preview, review and finalize requests never reach it, a refused or replayed
+// request sends nothing, and a response that made no progress sends nothing.
+const MERGE_ALERT_PAIR_PATH = /\/possible-duplicates\/merge$/
+const MERGE_ALERT_BULK_PATH = /\/(?:merge-duplicates|possible-duplicates\/merge-batch)$/
+app.use('*', async (c, next) => {
+  await next()
+  const user = c.get('user')
+  if (c.req.method !== 'POST' || !user || isAdminControlUser(user) || c.res.status >= 300) return
+  const pair = MERGE_ALERT_PAIR_PATH.test(c.req.path)
+  if (!pair && !MERGE_ALERT_BULK_PATH.test(c.req.path)) return
+  try {
+    const body = await c.res.clone().json().catch(() => null) as Record<string, unknown> | null
+    if (!body || body.success === false || body.replayed === true || body.madeProgress === false) return
+    let kept: string | null = null
+    let merged: string | null = null
+    if (pair && Number.isSafeInteger(Number(body.keptId)) && Number.isSafeInteger(Number(body.mergedId))) {
+      const names = await getDb(c.env).prepare('SELECT id, name FROM products WHERE id IN (@a, @b)').all<{ id: number; name: string | null }>({ a: Number(body.keptId), b: Number(body.mergedId) })
+      kept = names.find((row) => Number(row.id) === Number(body.keptId))?.name ?? null
+      merged = names.find((row) => Number(row.id) === Number(body.mergedId))?.name ?? null
+    }
+    announceProductAlert(c, user, PRODUCT_MERGE_ALERT_HEADING, formatProductMergeAlertLines({ kept, merged, by: actorSnapshot(user) }))
+  } catch (error) {
+    console.error('[telegram] product merge alert failed', error)
+  }
+})
 app.use('*', async (c, next) => {
   const folds = c.req.method === 'PUT' && /\/\d+$/.test(c.req.path)
   const watched = MERGE_ROUTE_PATH.test(c.req.path) || folds
@@ -2341,6 +2373,8 @@ app.put('/:id', async (c) => {
           }
         }
         const item = await db.prepare('SELECT * FROM products WHERE id = @id').get({ id: duplicate.id })
+        // The edit renamed this row onto an existing identity and folded it in: that is a merge, announced as one.
+        announceProductAlert(c, user, PRODUCT_MERGE_ALERT_HEADING, formatProductMergeAlertLines({ kept: String(duplicate.name || ''), merged: String(dupRow.name || ''), by: actorSnapshot(user) }))
         c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
         c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update', id: duplicate.id }))
         return c.json({ item, product: item, id: duplicate.id, merged_into: duplicate.id, success: true, foldResult: { quantityMoved: foldResult.quantityMoved, batchesMoved: foldResult.batchesMoved } })
@@ -2472,11 +2506,7 @@ app.put('/:id', async (c) => {
   if (!isAdminControlUser(user) && (productFieldChange || productImagesChanged)) {
     const alertFields = productEditAlertFields(Object.keys(productFieldChange?.after || {}), productImagesChanged)
     if (alertFields.length) {
-      c.executionCtx.waitUntil(Promise.resolve(sendTelegramEvent(c.env, {
-        type: 'products',
-        heading: PRODUCT_EDIT_ALERT_HEADING,
-        lines: formatProductEditAlertLines({ product: String((item as Record<string, unknown>).name || ''), changed: alertFields, by: actorSnapshot(user) }),
-      })).catch((error) => console.error('[telegram] product edit alert failed', error)))
+      announceProductAlert(c, user, PRODUCT_EDIT_ALERT_HEADING, formatProductEditAlertLines({ product: String((item as Record<string, unknown>).name || ''), changed: alertFields, by: actorSnapshot(user) }))
     }
   }
   if (renamedProductName && renamedProductIds.length) {

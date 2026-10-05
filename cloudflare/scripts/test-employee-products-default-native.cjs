@@ -48,7 +48,8 @@ async function main() {
     const tier = (action) => permissions.getActionTier(EMPLOYEE_USER, 'products', action)
     for (const action of ['view', 'edit', 'image']) assert.equal(tier(action), 'full', action)
     assert.equal(SEED.employee['products:price'], false, 'the seed switches the default-price action off')
-    for (const action of ['add', 'delete', 'bulk_delete', 'variant', 'import', 'import_replace_all', 'export', 'merge_duplicates', 'zero_qty_cleanup', 'manage_lookups', 'price']) {
+    assert.equal(SEED.employee['products:history'], false, 'the seed switches the Products sub-pages off')
+    for (const action of ['add', 'delete', 'bulk_delete', 'variant', 'import', 'import_replace_all', 'export', 'merge_duplicates', 'zero_qty_cleanup', 'manage_lookups', 'price', 'history']) {
       assert.equal(tier(action), 'none', action)
     }
     assert.equal(acquisitionCostAccess.canViewAcquisitionCosts(EMPLOYEE_USER), false)
@@ -120,6 +121,75 @@ async function main() {
     const row = one('SELECT selling_price_usd, updated_at FROM products WHERE id = ?', KEEP)
     const narrowed = await request('PUT', '/api/products/' + KEEP, { selling_price_usd: row.selling_price_usd + 1, expected_updated_at: row.updated_at })
     assert.equal(narrowed.status, 403, JSON.stringify(narrowed.body))
+  })
+
+  await check('the Employee reaches ONLY the main Products page: every sub-page read is refused by the Worker, a Full Products role still gets through', async () => {
+    fresh()
+    state.user = EMPLOYEE_USER
+    const subPages = [
+      ['GET', '/api/products/stock-ledger'],
+      ['GET', '/api/products/stock-ledger/1/balance'],
+      ['GET', '/api/products/stock-in-sessions'],
+      ['GET', '/api/products/stock-in-session-lines?key=x'],
+      ['GET', '/api/products/' + KEEP + '/detail-report'],
+      ['GET', '/api/products/' + KEEP + '/sales-detail?mode=day&period=2026-10-01'],
+      ['GET', '/api/products/' + KEEP + '/supplier-purchases?supplierKey=x'],
+      ['GET', '/api/products/auto-merges/' + KEEP],
+      ['GET', '/api/products/lookups/usage'],
+      ['GET', '/api/products/possible-duplicates'],
+      ['GET', '/api/products/merge-duplicates/preview'],
+      ['GET', '/api/products/possible-duplicates/merge-preview?keepId=' + KEEP + '&mergeId=' + M1 + '&keep=1'],
+      ['GET', '/api/products/zero-quantity-candidates'],
+    ]
+    // Only the permission answer matters here; the harness database is not built for every report query, so a
+    // permitted read may answer 500, which is NOT the gate refusing (status is read without parsing the body).
+    const statusOf = async (method, url, body) => {
+      const init = { method, headers: { 'Content-Type': 'application/json' } }
+      if (body !== undefined) init.body = JSON.stringify(body)
+      planTier.__resetPlanTierCacheForTests()
+      return (await app.request(url, init, { DB: {}, PLAN_TIER: state.tier }, { waitUntil: () => {}, passThroughOnException: () => {} })).status
+    }
+    for (const [method, url, body] of subPages) {
+      assert.equal(await statusOf(method, url, body), 403, method + ' ' + url)
+    }
+    // (The main page itself -- list, search, filters, an information edit -- stays open: the edit checks above and below pass for this same user.)
+    // Discriminating: the same sub-page reads are not refused for a Full Products role, and an explicit history-off narrows one.
+    for (const [method, url, body] of subPages.slice(0, 9)) {
+      state.user = MANAGER_USER
+      assert.notEqual(await statusOf(method, url, body), 403, 'manager ' + method + ' ' + url)
+    }
+    state.user = asRole(28, 'manager', { products: true, 'products:history': false })
+    for (const url of ['/api/products/stock-ledger', '/api/products/stock-in-sessions', '/api/products/' + KEEP + '/detail-report']) {
+      assert.equal(await statusOf('GET', url), 403, 'history off narrows ' + url)
+    }
+  })
+
+  await check('a merge by a non-admin is Recorded and announced once; an administrator merge, a refused merge and a replay send nothing', async () => {
+    fresh()
+    TELEGRAM.length = 0
+    state.user = EMPLOYEE_USER
+    const refused = await request('POST', '/api/products/possible-duplicates/merge', { keepId: KEEP, mergeId: M1, keep: true })
+    assert.equal(refused.status, 403)
+    assert.equal(TELEGRAM.length, 0, 'a refused merge sends no alert')
+    state.user = MANAGER_USER
+    const done = await request('POST', '/api/products/possible-duplicates/merge', { keepId: KEEP, mergeId: M1, keep: true })
+    assert.equal(done.status, 200, JSON.stringify(done.body))
+    assert.equal(TELEGRAM.length, 1, 'one alert for one merge')
+    assert.equal(TELEGRAM[0].type, 'products')
+    assert.equal(TELEGRAM[0].heading, '🔀 Products merged')
+    const names = one('SELECT (SELECT name FROM products WHERE id = ?) AS kept, (SELECT name FROM products WHERE id = ?) AS merged', KEEP, M1)
+    const text = TELEGRAM[0].lines.join('|')
+    assert.ok(text.includes('Product: ' + names.kept), text)
+    assert.ok(text.includes('Merged: ' + names.merged), text)
+    assert.match(text, /By: manager/)
+    const replay = await request('POST', '/api/products/possible-duplicates/merge', { keepId: KEEP, mergeId: M1, keep: true })
+    assert.ok(replay.status >= 400 || replay.body.replayed === true, 'the second request is a replay or refusal')
+    assert.equal(TELEGRAM.length, 1, 'a replay or refusal sends nothing more')
+    fresh()
+    TELEGRAM.length = 0
+    state.user = ADMIN
+    assert.equal((await request('POST', '/api/products/possible-duplicates/merge', { keepId: KEEP, mergeId: M1, keep: true })).status, 200)
+    assert.equal(TELEGRAM.length, 0, 'administrator merges are not announced')
   })
 
   await check('every non-admin product edit leaves a Record AND one concise Telegram alert; administrators and refused edits send none', async () => {

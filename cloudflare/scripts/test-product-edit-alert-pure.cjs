@@ -52,11 +52,17 @@ const lines = alert.formatProductEditAlertLines({ product: 'Glow Serum', changed
 assert.deepEqual(lines, ['Product: Glow Serum', 'Changed: name, category', 'By: Sophea'])
 assert.equal(alert.formatProductEditAlertLines({ product: 'X', changed: [] }).filter(Boolean).length, 1, 'no change list and no actor print just the product')
 
+// merge alert ---------------------------------------------------------------------
+assert.equal(alert.PRODUCT_MERGE_ALERT_HEADING, '🔀 Products merged')
+assert.deepEqual(alert.formatProductMergeAlertLines({ kept: 'Glow Serum', merged: 'Glow Serum 30ml', by: 'Sophea' }), ['Product: Glow Serum', 'Merged: Glow Serum 30ml', 'By: Sophea'])
+assert.deepEqual(alert.formatProductMergeAlertLines({ by: 'Sophea' }).filter(Boolean), ['By: Sophea'], 'a bulk merge names only who ran it')
+
 // bilingual ------------------------------------------------------------------------
 assert.equal(alert.PRODUCT_EDIT_ALERT_HEADING, '✏️ Product edited')
 assert.ok(lang.TELEGRAM_HEADINGS[alert.PRODUCT_EDIT_ALERT_HEADING], 'the heading has a Khmer entry')
 assert.ok(KHMER.test(lang.TELEGRAM_HEADINGS[alert.PRODUCT_EDIT_ALERT_HEADING]))
-for (const key of ['product', 'changed', 'by']) {
+assert.ok(KHMER.test(lang.TELEGRAM_HEADINGS[alert.PRODUCT_MERGE_ALERT_HEADING]), 'the merge heading has a Khmer entry')
+for (const key of ['product', 'changed', 'merged', 'by']) {
   assert.ok(lang.TELEGRAM_LABELS[key] && KHMER.test(lang.TELEGRAM_LABELS[key].km) && !KHMER.test(lang.TELEGRAM_LABELS[key].en), 'label ' + key)
 }
 lang.setTelegramLanguage('both')
@@ -78,6 +84,9 @@ assert.match(telegram, /products: 'telegram_topic_alerts'/, 'goes to the Alerts 
 assert.match(telegram, /'telegram_products_enabled'/, 'the switch is a known settings key')
 const route = norm(fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'products.ts'), 'utf8'))
 assert.match(route, /!isAdminControlUser\(user\) && \(productFieldChange \|\| productImagesChanged\)/, 'only non-administrators are announced')
-assert.match(route, /type: 'products',\s+heading: PRODUCT_EDIT_ALERT_HEADING/)
+assert.match(route, /announceProductAlert\(c, user, PRODUCT_EDIT_ALERT_HEADING/, 'edits are announced through the one helper')
+assert.match(route, /announceProductAlert\(c, user, PRODUCT_MERGE_ALERT_HEADING/, 'merges are announced through the same helper')
+assert.match(route, /if \(!user \|\| isAdminControlUser\(user\)\) return\s+c\.executionCtx\.waitUntil/, 'the helper never announces an administrator')
+assert.match(route, /MERGE_ALERT_PAIR_PATH = \/\\\/possible-duplicates\\\/merge\$\//, 'only the committing pair endpoint, never a preview')
 
 console.log('ok')
