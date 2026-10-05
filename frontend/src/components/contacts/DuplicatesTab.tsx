@@ -288,7 +288,7 @@ export default function DuplicatesTab({ t, notify, active = true, includeSupplie
       setClusters(result)
       setLoaded(true)
     } catch {
-      notify(t('could_not_load_duplicates') || 'Could not load possible duplicates', 'error')
+      notify(t('could_not_load_duplicates') || 'Could not load conflicts', 'error')
     } finally {
       setLoading(false)
     }
@@ -652,7 +652,7 @@ export default function DuplicatesTab({ t, notify, active = true, includeSupplie
         <div className="py-8 text-center text-sm text-gray-400">{t('loading') || 'Loading...'}</div>
       ) : clusters.length === 0 ? (
         <div className="rounded-xl border border-dashed border-gray-200 px-4 py-8 text-center text-sm text-gray-400 dark:border-zinc-700">
-          {t('no_possible_duplicates_found') || 'No possible duplicates found.'}
+          {t('no_possible_duplicates_found') || 'No conflicts found.'}
         </div>
       ) : visibleClusters.length === 0 ? (
         <div className="rounded-xl border border-dashed border-gray-200 px-4 py-8 text-center text-sm text-gray-400 dark:border-zinc-700">
