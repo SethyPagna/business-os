@@ -19,6 +19,8 @@ import {
   withLoaderTimeout,
 } from '../../utils/loaders.ts'
 import { getNotificationSummary as getNotificationSummaryRequest } from '../../api/notificationSummary.ts'
+import { getNotificationSectionItems as getNotificationSectionItemsRequest } from '../../api/notificationSummary.ts'
+import { unseenTailCount, type SeenTail } from '../../utils/notificationTail.ts'
 import { listImportJobs as listImportJobsRequest } from '../../api/importJobsTransport.ts'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import { startVisibleInterval } from '../../utils/visibilityPolling.ts'
@@ -82,6 +84,9 @@ type NotificationSection = {
   summaryParams?: CopyParams
   items?: NotificationItem[]
   count?: number
+  // Set by the Worker when `items` is only a preview of `count` rows; "Load more" fetches the rest.
+  truncated?: boolean
+  itemsTotal?: number
   pageId?: string
   enabledKey?: string
 }
@@ -92,6 +97,8 @@ type EffectiveNotificationSection = Omit<NotificationSection, 'items'> & {
   items: DecoratedNotificationItem[]
   hiddenItemCount: number
   filteredItemCount: number
+  // Rows of a preview section that are not loaded yet (count minus what the panel holds).
+  unloadedCount: number
   page: number
   totalPages: number
   enabled: boolean
@@ -378,6 +385,34 @@ function writeSeenAlertTimes(times: Record<string, number>): void {
   }
 }
 
+// A section whose list is only a preview (inventory: first 50 of N) cannot stamp the rows it never
+// received, so the unlisted remainder is tracked as a block (rule and rationale: utils/notificationTail.ts).
+const SEEN_TAIL_KEY = 'notif_seen_tail_v1'
+
+function readSeenTails(): Record<string, SeenTail> {
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(SEEN_TAIL_KEY) || '{}')
+    if (!parsed || typeof parsed !== 'object') return {}
+    const result: Record<string, SeenTail> = {}
+    for (const [id, entry] of Object.entries(parsed as Record<string, any>)) {
+      const at = Number(entry?.at)
+      const count = Number(entry?.count)
+      if (Number.isFinite(at) && Number.isFinite(count)) result[id] = { at, count }
+    }
+    return result
+  } catch (_) {
+    return {}
+  }
+}
+
+function writeSeenTails(tails: Record<string, SeenTail>): void {
+  try {
+    window.localStorage.setItem(SEEN_TAIL_KEY, JSON.stringify(tails))
+  } catch (_) {
+    // localStorage unavailable -- the tail simply re-counts each session, same safe fallback as above.
+  }
+}
+
 function matchesVisibilityMode(mode: VisibilityMode): boolean {
   if (typeof window === 'undefined' || !window.matchMedia) return true
   if (mode === 'desktop') return window.matchMedia('(min-width: 768px)').matches
@@ -432,6 +467,14 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
   const [seenAlertTimes, setSeenAlertTimes] = useState<Record<string, number>>(() => (
     typeof window === 'undefined' ? {} : readSeenAlertTimes()
   ))
+  const [seenTails, setSeenTails] = useState<Record<string, SeenTail>>(() => (
+    typeof window === 'undefined' ? {} : readSeenTails()
+  ))
+  // "Load more" on a preview section: the whole list for that section, by id. A section stays in
+  // `expandedSectionsRef` (and is re-fetched after each summary refresh) until it stops being a preview.
+  const [fullSectionItems, setFullSectionItems] = useState<Record<string, NotificationItem[]>>({})
+  const [loadingMoreIds, setLoadingMoreIds] = useState<Record<string, boolean>>({})
+  const expandedSectionsRef = useRef<Set<string>>(new Set())
   // Recently finished import jobs, fetched independently of the server
   // notification summary and folded into `effectiveSections` below --
   // this is what makes a completed import's report reachable "whenever"
@@ -461,6 +504,25 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
     window.addEventListener('resize', syncVisibility)
     return () => window.removeEventListener('resize', syncVisibility)
   }, [visibility])
+
+  const loadMoreItemsRef = useRef<(sectionId: string, silent?: boolean) => Promise<void>>(async () => {})
+  loadMoreItemsRef.current = async (sectionId: string, silent = false) => {
+    expandedSectionsRef.current.add(sectionId)
+    if (!silent) setLoadingMoreIds((current) => ({ ...current, [sectionId]: true }))
+    try {
+      const result = await getNotificationSectionItemsRequest(sectionId) as { items?: NotificationItem[] } | null
+      if (!aliveRef.current || !expandedSectionsRef.current.has(sectionId)) return
+      const items = Array.isArray(result?.items) ? result.items : null
+      if (items) setFullSectionItems((current) => ({ ...current, [sectionId]: items }))
+    } catch (error) {
+      if (!silent) {
+        expandedSectionsRef.current.delete(sectionId)
+        notify(getErrorMessage(error) || tr('failed_to_load_data', 'Failed to load data', 'បរាជ័យក្នុងការផ្ទុកទិន្នន័យ'), 'error')
+      }
+    } finally {
+      if (!silent && aliveRef.current) setLoadingMoreIds((current) => ({ ...current, [sectionId]: false }))
+    }
+  }
 
   const scheduleRefresh = useCallback((delayMs: number) => {
     if (refreshTimerRef.current) window.clearTimeout(refreshTimerRef.current)
@@ -505,6 +567,22 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
           cooldownUntil: result?.cooldownUntil,
         }
       })
+      // A section the person expanded stays complete across refreshes; one that no longer needs a
+      // preview (it shrank under the cap) drops back to the summary's own, complete, items.
+      for (const sectionId of [...expandedSectionsRef.current]) {
+        const refreshed = nextSections.find((section) => section.id === sectionId)
+        if (!refreshed?.truncated) {
+          expandedSectionsRef.current.delete(sectionId)
+          setFullSectionItems((current) => {
+            if (!(sectionId in current)) return current
+            const next = { ...current }
+            delete next[sectionId]
+            return next
+          })
+          continue
+        }
+        void loadMoreItemsRef.current(sectionId, true)
+      }
       const unavailableDelay = Math.max(
         5 * 60 * 1000,
         Number(result?.cooldownUntil || 0) - Date.now(),
@@ -649,8 +727,9 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
       const displaySummary = section.summaryKey
         ? renderStructuredCopy(section.summaryKey, section.summaryParams, section.summary || '')
         : (section.summary || '')
-      const decoratedItems: DecoratedNotificationItem[] = Array.isArray(section.items)
-        ? section.items.map((item) => ({
+      const sectionItems = fullSectionItems[section.id] || section.items
+      const decoratedItems: DecoratedNotificationItem[] = Array.isArray(sectionItems)
+        ? sectionItems.map((item) => ({
           ...item,
           displayMeta: item.metaKey
             ? renderStructuredCopy(item.metaKey, item.metaParams, item.meta || '')
@@ -686,13 +765,14 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
         items: filteredItems.slice(startIndex, startIndex + itemLimit),
         hiddenItemCount: Math.max(0, filteredItems.length - (startIndex + itemLimit)),
         filteredItemCount: filteredItems.length,
+        unloadedCount: section.truncated ? Math.max(0, Number(section.count || 0) - decoratedItems.length) : 0,
         page,
         totalPages,
         enabled: preferenceValue(section.enabledKey, settings, true),
       }
     }).filter((section) => section.filteredItemCount > 0 || (toneFilter === 'all' && !normalizedNotificationSearch))
       .sort((a, b) => (a.id === 'security' ? -1 : b.id === 'security' ? 1 : 0))
-  ), [importJobsSection, itemLimit, normalizedNotificationSearch, renderStructuredCopy, sectionPages, settings, summary.sections, toneFilter, tr])
+  ), [fullSectionItems, importJobsSection, itemLimit, normalizedNotificationSearch, renderStructuredCopy, sectionPages, settings, summary.sections, toneFilter, tr])
 
   // Silent indicator: a pending device approve/reject/revoke request (or a
   // new-country sign-in on an already-approved device) that this admin's
@@ -725,6 +805,18 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
     setSectionPages({})
   }, [itemLimit, normalizedNotificationSearch, toneFilter])
 
+  // Searching or filtering by tone has to look at every row, as it did when the whole list was in the
+  // summary -- a preview of the first 50 would hide matches (low-stock rows sit behind the out-of-stock
+  // ones) -- so either one loads the rest of each preview section.
+  useEffect(() => {
+    if (!open || (!normalizedNotificationSearch && toneFilter === 'all')) return
+    for (const section of summary.sections || []) {
+      if (section.truncated && !fullSectionItems[section.id] && !expandedSectionsRef.current.has(section.id)) {
+        void loadMoreItemsRef.current(section.id)
+      }
+    }
+  }, [fullSectionItems, normalizedNotificationSearch, open, summary.sections, toneFilter])
+
   const toggleSectionPreference = useCallback(async (section: EffectiveNotificationSection) => {
     if (!section?.enabledKey || savingKey) return
     const nextValue = !preferenceValue(section.enabledKey, settings, true)
@@ -748,8 +840,16 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
   const allAlertItems = useMemo(() => (
     (summary.sections || [])
       .filter((section) => section.id !== 'security')
-      .flatMap((section) => section.items || [])
-  ), [summary.sections])
+      .flatMap((section) => fullSectionItems[section.id] || section.items || [])
+  ), [fullSectionItems, summary.sections])
+
+  // Rows a preview section did not send (count - listed), per section; zero once the full list is loaded.
+  const unlistedTails = useMemo(() => (
+    (summary.sections || [])
+      .filter((section) => section.id !== 'security' && section.truncated && !fullSectionItems[section.id])
+      .map((section) => ({ id: section.id, size: Math.max(0, Number(section.count || 0) - (section.items?.length || 0)) }))
+      .filter((tail) => tail.size > 0)
+  ), [fullSectionItems, summary.sections])
 
   const realertMinutes = Math.max(1, Number(summary.preferences?.realertMinutes) || 10)
 
@@ -801,7 +901,41 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
     return () => window.clearTimeout(timer)
   }, [open, allAlertItems, realertMinutes, seenAlertTimes])
 
-  const badgeCount = open ? 0 : badgeVisibleCount
+  // Opening the panel stamps the unlisted remainder of a preview section like every listed row.
+  useEffect(() => {
+    if (!open || !unlistedTails.length) return
+    const now = Date.now()
+    setSeenTails((current) => {
+      const next = { ...current }
+      for (const tail of unlistedTails) next[tail.id] = { at: now, count: tail.size }
+      writeSeenTails(next)
+      return next
+    })
+  }, [open, unlistedTails])
+
+  const tailBadgeCount = useMemo(() => {
+    void realertTick
+    const now = Date.now()
+    const realertMs = realertMinutes * 60000
+    return unlistedTails.reduce((total, tail) => total + unseenTailCount(tail.size, seenTails[tail.id], now, realertMs), 0)
+  }, [realertMinutes, realertTick, seenTails, unlistedTails])
+
+  // Same one-shot re-tick as the per-item timer above, for the unlisted remainder.
+  useEffect(() => {
+    if (open) return undefined
+    const now = Date.now()
+    const realertMs = realertMinutes * 60000
+    const delays = unlistedTails
+      .map((tail) => seenTails[tail.id])
+      .filter((seen): seen is SeenTail => !!seen)
+      .map((seen) => seen.at + realertMs - now)
+      .filter((delay) => delay > 0)
+    if (!delays.length) return undefined
+    const timer = window.setTimeout(() => setRealertTick((tick) => tick + 1), Math.min(...delays) + 250)
+    return () => window.clearTimeout(timer)
+  }, [open, realertMinutes, seenTails, unlistedTails])
+
+  const badgeCount = open ? 0 : badgeVisibleCount + tailBadgeCount
 
   useEffect(() => {
     if (!openRequestId || !visibilityActive) return
@@ -1023,6 +1157,18 @@ export default function NotificationCenter({ compact = false, openRequestId = 0,
                           ))}
                         </div>
                         <div className="mt-2 flex justify-center"><PaginationControls compact rangeAsPageSize page={section.page} pageSize={itemLimit} totalItems={section.filteredItemCount} label={tr('notifications', 'notifications', 'ការជូនដំណឹង')} t={(key) => tr(key, key, key)} onPageChange={(nextPage) => setSectionPages((current) => ({ ...current, [section.id]: nextPage }))} /></div>
+                        {section.truncated && !fullSectionItems[section.id] && section.unloadedCount > 0 ? (
+                          <div className="mt-2 flex justify-center">
+                            <button
+                              type="button"
+                              disabled={!!loadingMoreIds[section.id]}
+                              onClick={() => { void loadMoreItemsRef.current(section.id) }}
+                              className="inline-flex min-h-7 items-center gap-1 rounded-full border border-slate-200 px-3 py-1 text-[11px] font-semibold text-slate-600 transition hover:border-blue-300 hover:text-blue-700 disabled:opacity-60 dark:border-slate-700 dark:text-slate-200 dark:hover:border-blue-500 dark:hover:text-blue-300"
+                            >
+                              {tr('load_more', 'Load more', 'ផ្ទុកបន្ថែម')} ({section.unloadedCount})
+                            </button>
+                          </div>
+                        ) : null}
                       </div>
                     ) : null}
                   </section>
