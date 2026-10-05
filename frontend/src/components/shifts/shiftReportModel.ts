@@ -17,6 +17,86 @@ export function shiftComparisonRows(shift: Pick<Shift, 'reconciliation'>): Array
   ]
 }
 
+/**
+ * N4: the badge over a CLOSED shift's cash breakdown -- whether it shows the
+ * figures stored at the close or a recomputation (a shift closed before the
+ * figures were stored). Null on an open shift (it has no close to store) and
+ * when the server did not say.
+ */
+export function shiftDrawerSourceBadge(shift: Pick<Shift, 'reconciliation' | 'reconciliation_source' | 'closed_at'>):
+  { key: string; fallback: string; hintKey: string; source: 'stored' | 'computed' } | null {
+  if (!shift.reconciliation || !shift.closed_at) return null
+  if (shift.reconciliation_source === 'stored') return { key: 'shift_figures_stored', fallback: 'Stored at close', hintKey: 'shift_figures_stored_hint', source: 'stored' }
+  if (shift.reconciliation_source === 'computed') return { key: 'shift_figures_computed', fallback: 'Computed', hintKey: 'shift_figures_computed_hint', source: 'computed' }
+  return null
+}
+
+const DRIFT_COMPONENT_LABELS: Record<string, string> = {
+  opening: 'shift_recon_opening',
+  additional_cash: 'shift_recon_additional_cash',
+  cash_sales: 'shift_recon_cash_sales',
+  refunds: 'refunds',
+  expenses: 'fees',
+  courier: 'courier',
+  expected: 'shift_recon_expected',
+  counted: 'shift_recon_counted',
+  other_tenders: 'shift_recon_other_tenders',
+}
+type DriftPair = { usd: number | null; khr: number | null }
+export type ShiftDriftSaleView = {
+  saleId: number
+  receipt: string
+  change: 'added' | 'removed' | 'changed'
+  cancelled: boolean
+  cash: { before: DriftPair | null; after: DriftPair | null }
+  other: { before: DriftPair | null; after: DriftPair | null }
+}
+export type ShiftDriftView = {
+  components: Array<{ key: string; labelKey: string; stored: DriftPair; current: DriftPair }>
+  sales: ShiftDriftSaleView[]
+  /** Drifted sales the server did not name (it names at most 20). */
+  more: number
+  salesUnavailable: boolean
+}
+
+/**
+ * N4: the "changed after close" block, in display order, or null when nothing
+ * moved. Shown BESIDE the stored breakdown, never instead of it: the drawer a
+ * shift closed on does not change, and what changed since is listed here with
+ * the sale it came from.
+ */
+export function shiftCloseDriftView(shift: Pick<Shift, 'close_drift' | 'reconciliation_source'>): ShiftDriftView | null {
+  const drift = shift.close_drift
+  if (!drift || shift.reconciliation_source !== 'stored') return null
+  const pair = (values: [number, number, number, number] | null, offset: 0 | 2): DriftPair | null =>
+    values ? { usd: values[offset], khr: values[offset + 1] } : null
+  const components = drift.components
+    .filter((component) => DRIFT_COMPONENT_LABELS[component.key])
+    .map((component) => ({ key: component.key, labelKey: DRIFT_COMPONENT_LABELS[component.key], stored: component.stored, current: component.current }))
+  const sales = drift.sales.map((sale) => ({
+    saleId: sale.sale_id,
+    receipt: sale.receipt_number || `#${sale.sale_id}`,
+    change: sale.change,
+    cancelled: sale.sale_status === 'cancelled',
+    cash: { before: pair(sale.before, 0), after: pair(sale.after, 0) },
+    other: { before: pair(sale.before, 2), after: pair(sale.after, 2) },
+  }))
+  if (!components.length && !sales.length && !drift.sales_unavailable) return null
+  return { components, sales, more: Math.max(0, (drift.sales_total || 0) - sales.length), salesUnavailable: !!drift.sales_unavailable }
+}
+
+/** The export rows for the same block: today's value per moved line, and each sale's cash movement. */
+export function shiftCloseDriftRows(shift: Pick<Shift, 'close_drift' | 'reconciliation_source'>): Array<{ labelKey: string; label?: string; usd: number | null; khr: number | null }> {
+  const view = shiftCloseDriftView(shift)
+  if (!view) return []
+  const delta = (sale: ShiftDriftSaleView, currency: 'usd' | 'khr') =>
+    Math.round(((sale.cash.after?.[currency] ?? 0) - (sale.cash.before?.[currency] ?? 0)) * 100) / 100
+  return [
+    ...view.components.map((component) => ({ labelKey: component.labelKey, usd: component.current.usd, khr: component.current.khr })),
+    ...view.sales.map((sale) => ({ labelKey: 'shift_recon_cash_sales', label: sale.receipt, usd: delta(sale, 'usd'), khr: delta(sale, 'khr') })),
+  ]
+}
+
 export type ShiftCountPairValue = { usd: number | null; khr: number | null }
 
 export type ShiftFiguresShape = {

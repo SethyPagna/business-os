@@ -176,6 +176,24 @@ export type ShiftReconciliation = {
   review_codes: string[]
 }
 
+/** Mirrors cloudflare/src/lib/shiftReconciliation.ts ShiftCloseDrift. */
+export type ShiftCloseDrift = {
+  components: Array<{ key: string; stored: ShiftCountedMoney; current: ShiftCountedMoney }>
+  sales: Array<{
+    sale_id: number
+    change: 'added' | 'removed' | 'changed'
+    /** [cash USD, cash KHR, other USD, other KHR] at the close / now; null when absent. */
+    before: [number, number, number, number] | null
+    after: [number, number, number, number] | null
+    receipt_number?: string | null
+    created_at?: string | null
+    sale_status?: string | null
+  }>
+  sales_total: number
+  sales_unavailable: boolean
+  current: ShiftReconciliation
+}
+
 export type Shift = {
   id: number
   shift_code: string
@@ -242,6 +260,16 @@ export type Shift = {
   // Present on the close response and on the shift reads. Absent on rows that
   // come back from a list (the server does not price a whole page of shifts).
   reconciliation?: ShiftReconciliation | null
+  /**
+   * N4: where `reconciliation` came from. 'stored' = the figures written at
+   * the close (migration 0237) -- a closed shift's drawer never moves after
+   * it closes. 'computed' = recomputed now: every open shift, and a shift
+   * closed before figures were stored. Absent/null = the server did not say.
+   */
+  reconciliation_source?: 'stored' | 'computed' | null
+  close_figures_taken_at?: string | null
+  /** What moved after the close, beside -- never instead of -- the stored figures. */
+  close_drift?: ShiftCloseDrift | null
   // The admin report half. Null for a caller without the shift-review
   // capability, and absent from list rows and from /current -- see
   // `ShiftFigures`.

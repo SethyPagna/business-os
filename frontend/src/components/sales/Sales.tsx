@@ -31,7 +31,7 @@ import { customerRequestIsCurrent, saleCustomerMode } from '../../utils/saleCust
 import { getFeesReport } from '../../api/feesTransport.ts'
 import StatsStrip, { type StatCardDef } from '../shared/StatsStrip.tsx'
 import ShiftHistoryModal from '../shifts/ShiftHistoryModal.tsx'
-import { todayDateTimeRange, type DateTimeRange } from '../shared/DateTimeRangePicker.tsx'
+import { EMPTY_DATE_TIME_RANGE, todayDateTimeRange, type DateTimeRange } from '../shared/DateTimeRangePicker.tsx'
 import { getUsers as fetchUsers } from '../../api/userReadTransport.ts'
 import {
   beginTrackedRequest,
@@ -414,6 +414,31 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   // filter. Receipts initially show all time; quick ranges are chosen inside
   // the opened date/time picker rather than silently pre-filtering to Today.
   const [stripRange, setStripRange] = useState<DateTimeRange>(() => todayDateTimeRange())
+  // An EntityLink elsewhere (the shift report's "changed after close" sales)
+  // queues a receipt number: search for it across all time, since the sale
+  // may be from any day. Consumed once, the same handoff Contacts uses.
+  useEffect(() => {
+    if (!isActive || typeof window === 'undefined') return
+    const consumeFocus = () => {
+      let raw: string | null = null
+      try { raw = window.sessionStorage.getItem('bos:sales:focus') } catch { return }
+      if (!raw) return
+      try {
+        const search = String((JSON.parse(raw) as { search?: unknown })?.search || '').trim()
+        if (search) {
+          setSearch(search)
+          setStripRange({ ...EMPTY_DATE_TIME_RANGE })
+        }
+      } catch {
+        // A malformed handoff must not block the Sales page.
+      } finally {
+        try { window.sessionStorage.removeItem('bos:sales:focus') } catch { /* nothing to clear */ }
+      }
+    }
+    consumeFocus()
+    window.addEventListener('bos:entity-focus', consumeFocus)
+    return () => window.removeEventListener('bos:entity-focus', consumeFocus)
+  }, [isActive])
   const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set())
   // The by-day report moved out to its own top-level Reports hub section
   // (ReportsHub.tsx); Sales now shows only the receipts list.
