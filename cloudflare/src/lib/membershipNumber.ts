@@ -31,10 +31,11 @@
 // (which stays a hard reject — that path IS a real typo/duplicate signal).
 //
 // Two tables share this ONE sequence: customers.membership_number (the CRM)
-// and portal_accounts.membership_id (the storefront -- a signup mints from
-// here too, see portalAccounts.ts). mintMembershipNumber() reads both before
-// picking a gap, so a portal account with no matching customer row yet (e.g.
-// a signup whose contact fold failed) still reserves its slot.
+// and portal_accounts.membership_id (the LC number a storefront account was
+// issued before G38). Since G38 Phase 1 a new website member gets a random
+// W- code (lib/memberCode.ts) and no LC number, so membership_id is frozen;
+// mintMembershipNumber() still reads it before picking a gap, so an old
+// account's number is never handed to a new customer.
 //
 // Uniqueness has exactly one guarantee PER TABLE: the partial UNIQUE index
 // `idx_customers_membership_lower_pg` on lower(customers.membership_number)

@@ -8,10 +8,12 @@
 // row per probe (design S2) on demand; the full fix is Phase 1 (M1).
 //
 // Drives the REAL routes/portal.ts against the migrated schema. Positive
-// control: with the switch at its default the same two phones DO answer
-// differently (409 vs 200), so the "identical answer" check can see a
-// difference. SECURITY_TEST_BASE=<sha> loads that commit's portal.ts
-// (bb639041d must FAIL).
+// control: with the switch at its default sign-up is OPEN and writes an
+// account (200 + cookie), so the paused check can see a difference.
+// G38 Phase 1 removed the phone oracle itself (both phones now answer 200;
+// pinned by test-portal-members-signup-oracle-pure.cjs), so this control no
+// longer compares a known and an unknown phone. SECURITY_TEST_BASE=<sha> loads
+// that commit's portal.ts (bb639041d must FAIL).
 //
 // Run: node scripts/test-portal-signup-pause-setting-pure.cjs
 'use strict'
@@ -43,13 +45,13 @@ const count = (h, table) => Number(h.raw.prepare(`SELECT COUNT(*) AS n FROM ${ta
 const signup = (h, phone, ip) => h.request('/auth/signup', 'POST', { name: 'Visitor', phone, password: 'visitor-pass', consent: true, consentLocale: 'km' }, { ip })
 
 async function main() {
-  await check('positive control: at the default the two phones answer differently (sign-up open)', async () => {
+  await check('positive control: at the default sign-up is open, writes an account and sets a cookie', async () => {
     const h = setup(undefined)
-    const known = await signup(h, KNOWN_PHONE, '203.0.113.1')
+    const accountsBefore = count(h, 'portal_accounts')
     const fresh = await signup(h, NEW_PHONE, '203.0.113.2')
-    assert.equal(known.status, 409)
     assert.equal(fresh.status, 200, 'sign-up stays open by default (owner: allow until Phase 3)')
-    assert.notDeepEqual([known.status, known.body], [fresh.status, fresh.body])
+    assert.ok(fresh.headers.get('Set-Cookie'), 'an open sign-up sets the session cookie')
+    assert.equal(count(h, 'portal_accounts'), accountsBefore + 1)
   })
 
   await check('paused: one identical answer for a known and an unknown phone, nothing written, no cookie', async () => {

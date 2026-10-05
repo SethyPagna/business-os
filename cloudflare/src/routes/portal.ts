@@ -23,7 +23,16 @@ import { runFuzzyFallbackMatch, tokenizeSearchWords } from '../lib/searchMatch'
 import { buildFamilyRelevanceOrderSql, buildProductSearchQuery } from '../lib/productSearchQuery'
 import { loadActivePromotionRules, productPromotedSql, singleRuleAppliesSql } from '../lib/promotionRulesSql'
 import { paginateProductFamilies } from '../lib/familyPagination'
-import { PORTAL_CONSENT_VERSION, signupPortalAccount, signinPortalAccount } from '../lib/portalAccounts'
+import {
+  PORTAL_CONSENT_VERSION,
+  signupPortalAccount,
+  signinPortalAccount,
+  loadPortalMemberView,
+  portalLinkCheckCode,
+  getPendingPortalLinkRequest,
+  createPortalLinkRequest,
+  withdrawPortalLinkRequest,
+} from '../lib/portalAccounts'
 import { createPortalSession, setPortalCookie, clearPortalCookie, revokePortalSession, getPortalAccountState } from '../lib/portalSession'
 import { getPortalLockoutState, recordPortalFailure, clearPortalLockout } from '../lib/portalAuthLockout'
 import { canonicalizePhone } from '../lib/phone'
@@ -1548,20 +1557,6 @@ function normalizePortalSubmissionRows(rows: Array<Record<string, unknown>>): Su
   })
 }
 
-async function findCustomerByMembership(env: Env, membershipNumber: string) {
-  // `notes` is a STAFF-ONLY field (written only by the admin Contacts tab) and
-  // must never reach this anonymous customer surface -- the whole customer row
-  // is returned verbatim in the membership response, so the redaction has to
-  // live in the SELECT column list, not downstream.
-  return getDb(env).prepare(`
-    SELECT id, name, membership_number, phone, email, address, created_at
-    FROM customers
-    WHERE lower(trim(membership_number)) = lower(trim(@membershipNumber))
-      AND ${customerIsProfileSql()}
-    LIMIT 1
-  `).get<{ id: number; name: string; membership_number: string; phone: string }>({ membershipNumber })
-}
-
 // Only accept already-stored `/uploads/...` paths or inline base64 image
 // data URLs -- a simplified version of the legacy `isSafeExternalImageReference`,
 // which also allowed arbitrary remote image URLs behind an SSRF check
@@ -1697,12 +1692,6 @@ function sanitizePortalBucketItems(raw: unknown, max: number, withQty: boolean):
   return out
 }
 
-async function loadAccountProfile(env: Env, accountId: number): Promise<{ membershipId: string; name: string; email: string | null } | null> {
-  const row = await getDb(env).prepare('SELECT membership_id, name, email FROM portal_accounts WHERE id = ? LIMIT 1')
-    .get<{ membership_id: string; name: string; email: string | null }>([accountId])
-  return row ? { membershipId: row.membership_id, name: row.name, email: row.email ?? null } : null
-}
-
 app.post('/auth/signup', async (c) => {
   const ip = getClientNetworkKey(c.req.raw)
   const ipKey = await portalAbuseKey(c.env, 'portal:signup:ip', ip)
@@ -1727,9 +1716,12 @@ app.post('/auth/signup', async (c) => {
   // consent is the visitor's agreement to the Terms and the Privacy Policy.
   // The checkbox on the storefront is the prompt; this endpoint is public and
   // unauthenticated, so the rule itself lives in signupPortalAccount.
-  const result = await signupPortalAccount(c.env, { name: body.name, phone: body.phone, membershipId: body.membershipId, password: body.password, consent: body.consent, consentLocale: body.consentLocale })
+  // G38: sign-up never reads or writes customers, and a membershipId in the
+  // body is ignored (there is no claim path), so the answer is the same for a
+  // phone that is in the CRM and one that is not.
+  const result = await signupPortalAccount(c.env, { name: body.name, phone: body.phone, password: body.password, consent: body.consent, consentLocale: body.consentLocale })
   if (!result.ok) {
-    // Only phone/membership-id probing counts toward the 10-fail cap; a benign
+    // Only an account-phone collision counts toward the 10-fail cap; a benign
     // form error (missing field, short password) is retryable without locking.
     if (result.abuse) await recordPortalFailure(c.env, 'signup', ipKey)
     return c.json({ error: result.error, code: result.code }, result.status as 400 | 409 | 503)
@@ -1737,7 +1729,7 @@ app.post('/auth/signup', async (c) => {
   await clearPortalLockout(c.env, 'signup', ipKey)
   const session = await createPortalSession(c.env, result.accountId)
   setPortalCookie(c, session.token, session.expiresAt)
-  return c.json({ ok: true, account: { membershipId: result.membershipId, name: result.name, email: null } })
+  return c.json({ ok: true, account: result.account })
 })
 
 // G38 P0: the 10-fail sign-in lockout is keyed on phone + network. Keyed on
@@ -1782,12 +1774,12 @@ app.post('/auth/signin', async (c) => {
   if (!result.ok) {
     await recordPortalFailure(c.env, 'signin', lockKey)
     if (phoneWideKey) await recordRateLimitEvent(c.env, 'portal:signin:phone-wide', phoneWideKey)
-    return c.json({ error: result.error, code: result.code }, result.status as 401 | 428 | 503)
+    return c.json({ error: result.error, code: result.code }, result.status as 401 | 403 | 428 | 503)
   }
   await clearPortalLockout(c.env, 'signin', lockKey)
   const session = await createPortalSession(c.env, result.accountId)
   setPortalCookie(c, session.token, session.expiresAt)
-  const profile = await loadAccountProfile(c.env, result.accountId)
+  const profile = await loadPortalMemberView(c.env, result.accountId)
   return c.json({ ok: true, account: profile })
 })
 
@@ -1803,7 +1795,62 @@ app.get('/auth/me', async (c) => {
     return c.json({ account: null, error: 'Please agree to the current policies to continue.', code: 'portal_consent_required', consentVersion: PORTAL_CONSENT_VERSION }, 428)
   }
   if (!state.account) return c.json({ account: null })
-  return c.json({ account: { membershipId: state.account.membership_id, name: state.account.name, email: state.account.email } })
+  // The allowlisted member view only (lib/portalAccounts.ts portalMemberView):
+  // no customer id or name, no points, no sales, no phone.
+  return c.json({ account: await loadPortalMemberView(c.env, state.account.id) })
+})
+
+// G38 Phase 1: the member's own side of staff linking.
+//
+// GET /account/link-code: the six digits staff ask for when they call the
+// phone on the customer record (evidence called_number_on_file). Bound to the
+// member's current link_version and a ten-minute window.
+app.get('/account/link-code', async (c) => {
+  const state = await getPortalAccountState(c)
+  if (state.status === 'reconsent_required') return c.json({ error: 'Please agree to the current policies to continue.', code: 'portal_consent_required', consentVersion: PORTAL_CONSENT_VERSION }, 428)
+  const account = state.account
+  if (!account) return c.json({ error: 'Not signed in', code: 'portal_unauthenticated' }, 401)
+  const code = await portalLinkCheckCode(c.env, account.id, Number(account.link_version))
+  if (!code) return c.json({ error: 'Portal privacy protection is not configured.', code: 'portal_privacy_unavailable' }, 503)
+  c.header('Cache-Control', 'no-store')
+  return c.json(code)
+})
+
+// The "Request link" button (owner answer 6). One pending request per member;
+// the answer is always "In review" and never says whether any customer
+// matches. A member who is already linked has nothing to request.
+export const PORTAL_LINK_REQUEST_DAILY_MAX = 10
+
+app.get('/account/link-request', async (c) => {
+  const state = await getPortalAccountState(c)
+  if (state.status === 'reconsent_required') return c.json({ error: 'Please agree to the current policies to continue.', code: 'portal_consent_required', consentVersion: PORTAL_CONSENT_VERSION }, 428)
+  const account = state.account
+  if (!account) return c.json({ error: 'Not signed in', code: 'portal_unauthenticated' }, 401)
+  return c.json({ request: await getPendingPortalLinkRequest(c.env, account.id), linked: account.contact_id != null })
+})
+
+app.post('/account/link-request', async (c) => {
+  const state = await getPortalAccountState(c)
+  if (state.status === 'reconsent_required') return c.json({ error: 'Please agree to the current policies to continue.', code: 'portal_consent_required', consentVersion: PORTAL_CONSENT_VERSION }, 428)
+  const account = state.account
+  if (!account) return c.json({ error: 'Not signed in', code: 'portal_unauthenticated' }, 401)
+  if (account.contact_id != null) return c.json({ error: 'Your account is already connected to your in-store record.', code: 'member_already_linked' }, 409)
+  const rate = await checkRateLimit(c.env, 'portal:link-request', `account:${account.id}`, PORTAL_LINK_REQUEST_DAILY_MAX, 24 * 60 * 60 * 1000)
+  if (!rate.allowed) {
+    c.header('Retry-After', String(rate.retryAfterSeconds))
+    return c.json({ error: `Too many requests. Try again in ${rate.retryAfterSeconds} seconds.`, code: 'rate_limited' }, 429)
+  }
+  const body = await c.req.json<Record<string, unknown>>().catch(() => ({} as Record<string, unknown>))
+  return c.json({ ok: true, request: await createPortalLinkRequest(c.env, account.id, body.note) })
+})
+
+app.delete('/account/link-request', async (c) => {
+  const state = await getPortalAccountState(c)
+  if (state.status === 'reconsent_required') return c.json({ error: 'Please agree to the current policies to continue.', code: 'portal_consent_required', consentVersion: PORTAL_CONSENT_VERSION }, 428)
+  const account = state.account
+  if (!account) return c.json({ error: 'Not signed in', code: 'portal_unauthenticated' }, 401)
+  await withdrawPortalLinkRequest(c.env, account.id)
+  return c.json({ ok: true, request: null })
 })
 
 // Server-persisted cart + wishlist ("permanent memory"). Strictly scoped by
@@ -1854,10 +1901,7 @@ app.put('/account/wishlist', async (c) => {
 // public surface (the 2d68d2fb same-name leak was one symptom of that design).
 // The account system replaces it; the storefront shows a privacy message in
 // its place, and this endpoint refuses so the data path can't be reached
-// directly either. findCustomerByMembership is retained — /submissions still
-// resolves a SIGNED-IN account's own customer row through it (N45; the
-// membership number comes from the session, never from a request body) — but
-// nothing here returns customer rows anymore.
+// directly either. Nothing here returns customer rows.
 app.get('/membership/:membershipNumber', async (c) => {
   return c.json({
     error: 'This feature is not built into the account structure for privacy and security purposes.',
@@ -1889,19 +1933,17 @@ async function portalSubmissionConsentSchemaReady(env: Env): Promise<boolean> {
   }
 }
 
-// Resolve the CRM customer a signed-in portal account speaks for. The link
-// is the account row itself -- contact_id when the signup folded a contact,
-// otherwise the membership id the account was issued -- so the caller never
-// gets to name a customer.
-async function resolveSubmissionCustomer(env: Env, account: { contact_id: number | null; membership_id: string }) {
-  if (account.contact_id) {
-    const row = await getDb(env).prepare(
-      `SELECT id, name, membership_number FROM customers WHERE id = @id AND ${customerIsProfileSql()} LIMIT 1`,
-    ).get<{ id: number; name: string | null; membership_number: string | null }>({ id: account.contact_id })
-    if (row) return row
-  }
-  const byMembership = await findCustomerByMembership(env, account.membership_id || '')
-  return byMembership ? { id: byMembership.id, name: byMembership.name, membership_number: byMembership.membership_number } : null
+// Resolve the CRM customer a signed-in portal account speaks for: the staff
+// link (contact_id) and nothing else, so the caller never gets to name a
+// customer. G38: an account's own LC number no longer resolves a customer by
+// itself -- that was the claim path (a member unlinked by staff or a merge
+// would otherwise speak for the customer again through the number).
+async function resolveSubmissionCustomer(env: Env, account: { contact_id: number | null }) {
+  if (!account.contact_id) return null
+  const row = await getDb(env).prepare(
+    `SELECT id, name, membership_number FROM customers WHERE id = @id AND ${customerIsProfileSql()} LIMIT 1`,
+  ).get<{ id: number; name: string | null; membership_number: string | null }>({ id: account.contact_id })
+  return row ?? null
 }
 
 app.post('/submissions', async (c) => {

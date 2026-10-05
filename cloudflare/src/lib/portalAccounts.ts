@@ -1,24 +1,31 @@
 import { hashPassword, spendDummyPasswordVerify, upgradePasswordHash, verifyPassword } from './passwordHash'
-import { mintMembershipNumber, isMembershipCollision } from './membershipNumber'
 import { getDb } from './db'
 import { canonicalizePhone } from './phone'
-import { formatPhoneP8, collectContactPhones, contactDuplicateWriteGuardStatement } from './contactDuplicates'
 import { passwordMinLengthError, passwordTooShort } from './passwordPolicy'
-import { customerIsProfileSql, customerProfileMutationGuardSql, isAnonymousCustomer } from './anonymousCustomer'
+import { customerIsProfileSql, isAnonymousCustomer } from './anonymousCustomer'
+import { isMemberCodeCollision, mintMemberCode, normalizeMemberCode } from './memberCode'
 import type { Env } from '../index'
 
 // The account decision engine for the storefront. Route code (routes/portal.ts)
 // owns the lockout + rate-limit wrapping and the session cookie; this owns the
 // "who is this, and may they have an account" logic and the DB writes.
 //
-// Two identity stores, deliberately different:
-//   - customers (CRM): may hold duplicates, shared phones, space-formatted
-//     numbers. This is where 5,500+ imported customers already live.
-//   - portal_accounts: canonical, ONE account per phone, one per membership id.
-// A NEW customer (phone absent from customers) self-signs-up and gets an auto
-// membership id + a folded contact. An EXISTING customer (phone already in
-// customers) cannot self-signup — they register with their membership id + a
-// MATCHING phone, which staff issue from Contacts.
+// G38 Phase 1 (design §4.1): a website MEMBER (portal_accounts row) is its own
+// identity, separate from an in-store CUSTOMER (customers row).
+//   - Sign-up never reads or writes `customers`. It used to: a phone already
+//     in the CRM got a different answer (a phone-existence oracle), and every
+//     new phone wrote a CRM row (one per probe). Both are gone.
+//   - The claim path is gone too. Sign-up used to accept an LC-##### number
+//     plus a matching phone and attach the account to that customer; LC
+//     numbers are sequential and printed on receipts, so that was a takeover
+//     path. A member is connected to a customer only by a staff link
+//     (routes/portalMembers.ts), recorded in portal_member_link_events.
+//   - A new member gets a random W-XXXX-XXXX Member ID (lib/memberCode.ts).
+//     Accounts from before G38 keep their LC number in membership_id (frozen,
+//     still accepted at sign-in) and get a W- code lazily.
+//   - Owner, 5 Oct (answer 4): a LINKED member sees the store number
+//     (LC-#####) of the customer they are linked to; the W- code stays as a
+//     retired alias that still signs in.
 
 // Passwords are hashed and checked by lib/passwordHash.ts (PBKDF2-SHA256 via
 // WebCrypto; legacy bcrypt rows still verify and are rewritten on the next
@@ -78,77 +85,72 @@ async function portalAccountsHaveConsentColumns(db: ReturnType<typeof getDb>): P
   }
 }
 
+// What the storefront may know about the signed-in member, and nothing else
+// (design §6 Phase 1, "response-shape allowlist"). No customer id, no
+// customer name, no points, no sales, no phone. `membershipId` is the number
+// to show: the linked customer's store number when there is one, else the
+// member's own W- code.
+export type PortalMemberView = {
+  membershipId: string
+  memberCode: string | null
+  name: string
+  email: string | null
+  linked: boolean
+}
+
+export const PORTAL_MEMBER_VIEW_KEYS: readonly (keyof PortalMemberView)[] = ['membershipId', 'memberCode', 'name', 'email', 'linked']
+
+export type PortalMemberViewSource = {
+  member_code?: string | null
+  name?: string | null
+  email?: string | null
+  contact_id?: number | null
+  customer_membership_number?: string | null
+}
+
+export function portalMemberView(row: PortalMemberViewSource): PortalMemberView {
+  const linked = row.contact_id != null
+  const storeNumber = linked ? String(row.customer_membership_number ?? '').trim() : ''
+  const memberCode = row.member_code ? String(row.member_code) : null
+  return {
+    membershipId: storeNumber || memberCode || '',
+    memberCode,
+    name: String(row.name ?? ''),
+    email: row.email ? String(row.email) : null,
+    linked,
+  }
+}
+
 export type SignupInput = { name?: unknown; phone?: unknown; membershipId?: unknown; password?: unknown; consent?: unknown; consentLocale?: unknown }
 export type SigninInput = { identifier?: unknown; phone?: unknown; password?: unknown; consent?: unknown; consentLocale?: unknown }
 
 // `abuse` marks a failure that should count toward the 10-fail signup cap
-// (probing phones/membership ids) vs. a benign form error (missing field,
-// short password) that should not lock a fat-fingering real user out.
+// (probing phones) vs. a benign form error (missing field, short password)
+// that should not lock a fat-fingering real user out.
 export type SignupResult =
-  | { ok: true; accountId: number; membershipId: string; name: string }
+  | { ok: true; accountId: number; account: PortalMemberView }
   | { ok: false; status: number; error: string; code: string; abuse: boolean }
 
 export type SigninResult =
   | { ok: true; accountId: number }
   | { ok: false; status: number; error: string; code: string }
 
-// One deliberately non-committal message for every "we can't verify you as an
-// existing customer" branch (unknown id / phone mismatch / already claimed) so
-// none of them becomes an existence oracle for a membership id or phone.
-const EXISTING_REMINDER =
-  'If you have previously bought from Leang Cosmetics/Leang Beauty, please contact us for your membership ID — your phone number must match. Just a reminder.'
+// The one answer when the phone already has a website account. It names no
+// customer and is the same whether or not the phone is in the CRM.
+const SIGNUP_UNAVAILABLE =
+  'We could not create an account with these details. If you already have an account, please sign in.'
 
-function existingReject(): SignupResult {
-  return { ok: false, status: 409, error: EXISTING_REMINDER, code: 'verification_failed', abuse: true }
-}
-
-// One membership-number authority for the whole app: lib/membershipNumber.ts
-// mints the next gap-filling `LC-#####`. This file used to carry a THIRD
-// independent generator (random `LCMN-` + 6 crypto bytes). A storefront id is
-// an account NUMBER, not a credential -- signup already requires a phone that
-// matches the customer record and login requires phone AND password -- so a
-// sequential id costs nothing that the old entropy was buying.
-//
-// mintMembershipNumber() reads BOTH customers.membership_number and
-// portal_accounts.membership_id directly, so a stale/orphaned account row
-// from older data can never collide with a fresh mint here. Every id issued
-// here is mirrored into customers too
-// (claimAccount either claims an existing customer's number or creates the
-// customer row). The INSERT below is still the final arbiter for a lost race.
-async function generateMembershipId(env: Env): Promise<string> {
-  return mintMembershipNumber(getDb(env))
-}
-
-// Does any customer already carry this canonical phone (primary or a secondary
-// Contact Option phone)? Primary is exact against the backfilled
-// phone_normalized column; secondary is a best-effort LIKE prefilter confirmed
-// in JS (same shape as lib/contactDuplicates.ts::findContactDuplicates).
-async function findCustomerByCanonicalPhone(env: Env, canonical: string): Promise<{ id: number; name: string | null } | null> {
-  const db = getDb(env)
-  const primary = await db.prepare(
-    'SELECT id, name FROM customers WHERE phone_normalized = @p LIMIT 1',
-  ).get<{ id: number; name: string | null }>({ p: canonical })
-  if (primary) return primary
-  const candidates = await db.prepare(
-    'SELECT id, name, phone, address FROM customers WHERE address LIKE @like LIMIT 25',
-  ).all<{ id: number; name: string | null; phone: string | null; address: string | null }>({ like: `%${canonical.replace(/^0/, '')}%` })
-  for (const cand of candidates) {
-    if (collectContactPhones(cand).some((raw) => canonicalizePhone(raw) === canonical)) {
-      return { id: cand.id, name: cand.name }
-    }
-  }
-  return null
-}
+const MEMBER_CODE_MINT_ATTEMPTS = 5
 
 export async function signupPortalAccount(env: Env, input: SignupInput): Promise<SignupResult> {
   const name = String(input.name ?? '').trim()
   const password = String(input.password ?? '')
   const canonical = canonicalizePhone(input.phone)
-  const membershipId = String(input.membershipId ?? '').trim()
+  // input.membershipId is ignored on purpose: there is no claim path. A
+  // customer's record is connected only by staff (routes/portalMembers.ts).
 
-  // Checked before anything is looked up: refusing after the phone probe
-  // would let a caller use signup as a phone-existence oracle while never
-  // consenting. A missing box is a form error, so it never counts as abuse.
+  // Checked before anything else: a missing box is a form error, so it never
+  // counts as abuse.
   if (!consentGiven(input.consent)) {
     return {
       ok: false,
@@ -170,152 +172,84 @@ export async function signupPortalAccount(env: Env, input: SignupInput): Promise
   }
   if (!name) return { ok: false, status: 400, error: 'Your name is required.', code: 'name_required', abuse: false }
   if (!canonical) return { ok: false, status: 400, error: 'A valid phone number is required.', code: 'phone_required', abuse: false }
-  // Portal accounts get the stricter rule (lib/passwordPolicy.ts): the
-  // storefront privacy policy promises eight characters, and a phone number
-  // is both the login identifier here and the commonest password there is.
   if (passwordTooShort(password)) {
     return { ok: false, status: 400, error: passwordMinLengthError(), code: 'password_weak', abuse: false }
   }
   const passwordHash = await hashPassword(password, env)
+  const consentLocale = String(input.consentLocale || 'und').slice(0, 16)
 
-  if (membershipId) {
-    // Existing-customer path: the id must resolve to a customer whose phone
-    // matches. Every failure here returns the same reminder (no oracle).
-    const customer = await db.prepare(
-      'SELECT id, name, phone, address, is_anonymous FROM customers WHERE lower(trim(membership_number)) = lower(trim(@m)) LIMIT 1',
-    ).get<{ id: number; name: string | null; phone: string | null; address: string | null; is_anonymous: number }>({ m: membershipId })
-    if (!customer || isAnonymousCustomer(customer)) return existingReject()
-    const phoneMatches = collectContactPhones(customer).some((raw) => canonicalizePhone(raw) === canonical)
-    if (!phoneMatches) return existingReject()
-    return claimAccount(env, { membershipId, name, canonical, passwordHash, contactId: customer.id, consentLocale: String(input.consentLocale || 'und').slice(0, 16) })
+  let lastError: unknown = null
+  for (let attempt = 0; attempt < MEMBER_CODE_MINT_ATTEMPTS; attempt += 1) {
+    const memberCode = mintMemberCode()
+    try {
+      const result = await db.prepare(`
+        INSERT INTO portal_accounts (
+          name, phone, password_hash, member_code, status, link_version,
+          consent_version, consent_at, consent_locale, last_seen_at
+        ) VALUES (
+          @name, @phone, @password_hash, @member_code, 'active', 0,
+          @consent_version, CURRENT_TIMESTAMP, @consent_locale, CURRENT_TIMESTAMP
+        )
+      `).run({
+        name,
+        phone: canonical,
+        password_hash: passwordHash,
+        member_code: memberCode,
+        consent_version: PORTAL_CONSENT_VERSION,
+        consent_locale: consentLocale,
+      })
+      const accountId = Number(result.lastInsertRowid ?? 0)
+      if (!Number.isSafeInteger(accountId) || accountId <= 0) throw new Error('portal_account_insert_result_missing')
+      return {
+        ok: true,
+        accountId,
+        account: portalMemberView({ member_code: memberCode, name, email: null, contact_id: null }),
+      }
+    } catch (error) {
+      // A code collision is this function's own doing: mint again (bounded).
+      if (isMemberCodeCollision(error)) { lastError = error; continue }
+      if (/UNIQUE constraint failed/i.test(error instanceof Error ? error.message : String(error))) {
+        return { ok: false, status: 409, error: SIGNUP_UNAVAILABLE, code: 'signup_unavailable', abuse: true }
+      }
+      throw error
+    }
   }
-
-  // New-customer path: the phone must be absent from customers entirely — if
-  // it is already a customer, they are an existing buyer and must use the id.
-  const existing = await findCustomerByCanonicalPhone(env, canonical)
-  if (existing) return existingReject()
-
-  const newMembershipId = await generateMembershipId(env)
-  return claimAccount(env, { membershipId: newMembershipId, name, canonical, passwordHash, contactId: null, createContact: true, consentLocale: String(input.consentLocale || 'und').slice(0, 16) })
+  throw lastError instanceof Error ? lastError : new Error('Could not mint a unique member code')
 }
 
-// Race-safe creation: an existing customer claim only inserts the account.
-// A genuinely-new customer instead commits the canonical-phone guard, folded
-// contact, linked account and durable consent in ONE D1 batch. A staff-created
-// contact that wins after signup's advisory read therefore makes the guard
-// throw and rolls the account write back; an account constraint that fires
-// after the contact insert rolls the contact back too.
-//
-// Two UNIQUE indexes can fire here (migration 0087): idx_portal_accounts_phone
-// and idx_portal_accounts_membership. A phone collision (or a membership-id
-// collision on a USER-SUPPLIED id -- the existing-customer claim path, which
-// has no number of its own to change) is a genuine "you are not who you say
-// you are" case: existingReject(), no oracle. A membership-id collision on an
-// id WE minted (createContact === true, i.e. the new-customer auto-mint path)
-// is entirely this function's own doing -- two signups computed the same
-// gap-fill number because neither had written yet -- so it re-mints and
-// retries the INSERT, bounded, exactly like withMintedMembershipNumber does
-// for contacts.ts.
-async function claimAccount(
-  env: Env,
-  args: { membershipId: string; name: string; canonical: string; passwordHash: string; contactId: number | null; createContact?: boolean; consentLocale: string },
-): Promise<SignupResult> {
+// Accounts from before G38 have no W- code. Mint one on read, compare-and-set,
+// so two concurrent requests settle on one code. Returns the stored code.
+export async function ensurePortalMemberCode(env: Env, accountId: number): Promise<string | null> {
   const db = getDb(env)
-  let membershipId = args.membershipId
-  let accountId: number | null = null
-  let lastError: unknown = null
-  const maxAttempts = args.createContact ? 5 : 1
-  const columns = ['membership_id', 'name', 'phone', 'password_hash', 'contact_id', 'consent_version', 'consent_at', 'consent_locale']
-  const values = ['@membership_id', '@name', '@phone', '@password_hash', '@contact_id', '@consent_version', 'CURRENT_TIMESTAMP', '@consent_locale']
-  const sql = `INSERT INTO portal_accounts (${columns.join(', ')}) VALUES (${values.join(', ')})`
-
-  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-    const params: Record<string, unknown> = {
-      // Read from `membershipId`, never `args`: a retry has re-minted it.
-      membership_id: membershipId,
-      name: args.name,
-      phone: args.canonical,
-      password_hash: args.passwordHash,
-      contact_id: args.contactId,
-    }
-    params.consent_version = PORTAL_CONSENT_VERSION
-    params.consent_locale = args.consentLocale || 'und'
+  for (let attempt = 0; attempt < MEMBER_CODE_MINT_ATTEMPTS; attempt += 1) {
+    const row = await db.prepare('SELECT member_code FROM portal_accounts WHERE id = @id LIMIT 1')
+      .get<{ member_code: string | null }>({ id: accountId })
+    if (!row) return null
+    if (row.member_code) return row.member_code
     try {
-      if (args.createContact) {
-        const contactGuard = contactDuplicateWriteGuardStatement(
-          'customers',
-          { phones: [args.canonical] },
-        )
-        if (!contactGuard) throw new Error('portal_contact_guard_missing')
-
-        const batchResults = await db.batch([
-          contactGuard,
-          {
-            sql: 'INSERT INTO customers (name, phone, phone_normalized, membership_number) VALUES (@name, @phone, @phone_normalized, @membership_number)',
-            params: {
-              name: args.name,
-              phone: formatPhoneP8(args.canonical),
-              phone_normalized: args.canonical,
-              membership_number: membershipId,
-            },
-          },
-          {
-            sql: `INSERT INTO portal_accounts (
-              membership_id, name, phone, password_hash, contact_id,
-              consent_version, consent_at, consent_locale
-            ) VALUES (
-              @membership_id, @name, @phone, @password_hash,
-              COALESCE((
-                SELECT id FROM customers
-                WHERE lower(trim(membership_number)) = lower(trim(@membership_id))
-                  AND phone_normalized = @phone
-                LIMIT 1
-              ), json_extract('portal_contact_missing', '$')),
-              @consent_version, CURRENT_TIMESTAMP, @consent_locale
-            )`,
-            params,
-          },
-        ])
-        const insertedAccountId = Number(batchResults[2]?.meta?.last_row_id ?? 0)
-        if (!Number.isSafeInteger(insertedAccountId) || insertedAccountId <= 0) {
-          throw new Error('portal_account_insert_result_missing')
-        }
-        accountId = insertedAccountId
-      } else {
-        const results = await db.batch([
-          { sql: customerProfileMutationGuardSql('contactId'), params: { contactId: args.contactId } },
-          { sql, params },
-        ])
-        accountId = Number(results[1]?.meta?.last_row_id ?? 0) || null
-      }
-      break
+      await db.prepare(`UPDATE portal_accounts SET member_code = @code
+        WHERE id = @id AND member_code IS NULL`).run({ code: mintMemberCode(), id: accountId })
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      if (args.contactId != null) {
-        const guardedContact = await db.prepare('SELECT is_anonymous FROM customers WHERE id = @id LIMIT 1')
-          .get<{ is_anonymous: number | null }>({ id: args.contactId })
-        if (isAnonymousCustomer(guardedContact)) return existingReject()
-      }
-      if (!/UNIQUE constraint failed/i.test(message)) throw error
-      // Only a collision on an id WE minted (createContact === true) may
-      // retry -- deliberately NOT gated on remaining-attempts here, so the
-      // loop's own bound (maxAttempts) is what stops it, and an id supplied
-      // by the caller always falls through to existingReject() below on its
-      // very first (and only, maxAttempts === 1) failure.
-      if (!(args.createContact === true && isMembershipCollision(error))) return existingReject()
-      lastError = error
-      membershipId = await mintMembershipNumber(db)
+      if (!isMemberCodeCollision(error)) throw error
     }
   }
+  const final = await db.prepare('SELECT member_code FROM portal_accounts WHERE id = @id LIMIT 1')
+    .get<{ member_code: string | null }>({ id: accountId })
+  return final?.member_code ?? null
+}
 
-  if (accountId === null) {
-    // Exhausted every retry -- mirrors withMintedMembershipNumber's own
-    // exhaustion behaviour (throw); the global error handler turns this into
-    // a 500 rather than the misleading "verification_failed" reminder.
-    throw lastError instanceof Error ? lastError : new Error('Could not mint a unique membership id')
-  }
-
-  return { ok: true, accountId, membershipId, name: args.name }
+// The signed-in member's view, read fresh (the customer's store number can
+// change under a link at any time).
+export async function loadPortalMemberView(env: Env, accountId: number): Promise<PortalMemberView | null> {
+  await ensurePortalMemberCode(env, accountId)
+  const row = await getDb(env).prepare(`
+    SELECT a.member_code, a.name, a.email, a.contact_id, c.membership_number AS customer_membership_number
+    FROM portal_accounts a
+    LEFT JOIN customers c ON c.id = a.contact_id
+    WHERE a.id = @id
+    LIMIT 1
+  `).get<PortalMemberViewSource>({ id: accountId })
+  return row ? portalMemberView(row) : null
 }
 
 export async function signinPortalAccount(env: Env, input: SigninInput): Promise<SigninResult> {
@@ -334,8 +268,9 @@ export async function signinPortalAccount(env: Env, input: SigninInput): Promise
   }
 
   const account = await db.prepare(`
-    SELECT a.id, a.name, a.membership_id, a.password_hash, a.consent_version,
-           a.contact_id, c.id AS contact_exists, c.is_anonymous
+    SELECT a.id, a.name, a.membership_id, a.member_code, a.password_hash, a.status,
+           a.contact_id, c.id AS contact_exists, c.is_anonymous,
+           c.membership_number AS customer_membership_number
     FROM portal_accounts a
     LEFT JOIN customers c ON c.id = a.contact_id
     WHERE a.phone = @p
@@ -343,32 +278,50 @@ export async function signinPortalAccount(env: Env, input: SigninInput): Promise
   `).get<{
     id: number
     name: string
-    membership_id: string
-    password_hash: string
-    consent_version: string | null
+    membership_id: string | null
+    member_code: string | null
+    password_hash: string | null
+    status: string
     contact_id: number | null
     contact_exists: number | null
     is_anonymous: number | null
+    customer_membership_number: string | null
   }>({ p: canonical })
 
-  if (!account) {
+  if (!account || !account.password_hash) {
     // No account for this phone — still spend one password check so timing
     // does not reveal whether the phone exists.
     await spendDummyPasswordVerify(password, env)
     return genericFail
   }
 
+  // Any of the member's names for themselves: their name, their W- code (a
+  // retired alias once linked), the LC number an old account was issued, or
+  // the store number of the customer they are linked to. Phone + password are
+  // the credential; the identifier only has to be one the member knows.
   const idLower = identifier.toLowerCase()
-  const identifierMatches = idLower === account.name.trim().toLowerCase() || idLower === account.membership_id.trim().toLowerCase()
+  const memberCode = normalizeMemberCode(identifier)
+  const identifierMatches = idLower === String(account.name || '').trim().toLowerCase()
+    || (account.membership_id != null && idLower === account.membership_id.trim().toLowerCase())
+    || (memberCode != null && memberCode === account.member_code)
+    || (account.contact_id != null && account.customer_membership_number != null
+      && idLower === account.customer_membership_number.trim().toLowerCase())
   const passwordCheck = await verifyPassword(password, account.password_hash, env)
   const passwordMatches = passwordCheck.ok
   const contactEligible = account.contact_id == null || (account.contact_exists != null && !isAnonymousCustomer(account))
   if (!identifierMatches || !passwordMatches || !contactEligible) return genericFail
+  // Only someone holding the password learns that the account is paused.
+  if (account.status === 'suspended') {
+    return { ok: false, status: 403, error: 'This account is paused. Please contact us.', code: 'portal_account_suspended' }
+  }
+  if (account.status !== 'active') return genericFail
 
   const consentUpdate = await db.prepare(`
     UPDATE portal_accounts
-    SET consent_version = @version, consent_at = CURRENT_TIMESTAMP, consent_locale = @locale, updated_at = CURRENT_TIMESTAMP
+    SET consent_version = @version, consent_at = CURRENT_TIMESTAMP, consent_locale = @locale,
+        last_seen_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
     WHERE id = @id
+      AND status = 'active'
       AND (contact_id IS NULL OR EXISTS (
         SELECT 1 FROM customers WHERE id = portal_accounts.contact_id AND ${customerIsProfileSql()}
       ))
@@ -384,4 +337,105 @@ export async function signinPortalAccount(env: Env, input: SigninInput): Promise
   if (passwordCheck.needsRehash) await upgradePasswordHash(db, 'portal_accounts', account.id, password, account.password_hash, env)
 
   return { ok: true, accountId: account.id }
+}
+
+// ---------------------------------------------------------------------------
+// Identity check code (design §4.4, evidence `called_number_on_file`).
+//
+// Staff call the phone on the CUSTOMER record; the member reads back the six
+// digits their signed-in account shows. Stateless: an HMAC of the account id,
+// its link_version and a ten-minute window, under the portal secret with its
+// own label. Any link change moves link_version, so a code read before it is
+// dead; the previous window is accepted so a code read at 9:59 still works.
+// One HMAC, no D1 row, no subrequest: fits the Free plan's CPU budget.
+export const PORTAL_LINK_CHECK_WINDOW_MS = 10 * 60 * 1000
+const LINK_CHECK_LABEL = 'portal-member-link-check-v1'
+
+type PortalSecretEnv = { PORTAL_ABUSE_HMAC_SECRET?: string }
+
+async function linkCheckDigits(secret: string, accountId: number, linkVersion: number, windowIndex: number): Promise<string> {
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'])
+  const mac = new Uint8Array(await crypto.subtle.sign(
+    'HMAC',
+    key,
+    new TextEncoder().encode(`${LINK_CHECK_LABEL}\u0000${accountId}\u0000${linkVersion}\u0000${windowIndex}`),
+  ))
+  const value = ((mac[0] << 24) | (mac[1] << 16) | (mac[2] << 8) | mac[3]) >>> 0
+  return String(value % 1_000_000).padStart(6, '0')
+}
+
+function linkCheckSecret(env: unknown): string | null {
+  const secret = String((env as PortalSecretEnv)?.PORTAL_ABUSE_HMAC_SECRET || '')
+  return secret.length >= 32 ? secret : null
+}
+
+export async function portalLinkCheckCode(
+  env: unknown,
+  accountId: number,
+  linkVersion: number,
+  now: number = Date.now(),
+): Promise<{ code: string; expiresInSeconds: number } | null> {
+  const secret = linkCheckSecret(env)
+  if (!secret) return null
+  const windowIndex = Math.floor(now / PORTAL_LINK_CHECK_WINDOW_MS)
+  const code = await linkCheckDigits(secret, accountId, linkVersion, windowIndex)
+  // Accepted until the end of the NEXT window.
+  const expiresInSeconds = Math.ceil(((windowIndex + 2) * PORTAL_LINK_CHECK_WINDOW_MS - now) / 1000)
+  return { code, expiresInSeconds }
+}
+
+export async function verifyPortalLinkCheckCode(
+  env: unknown,
+  accountId: number,
+  linkVersion: number,
+  candidate: unknown,
+  now: number = Date.now(),
+): Promise<boolean> {
+  const secret = linkCheckSecret(env)
+  const text = String(candidate ?? '').replace(/\s/g, '')
+  if (!secret || !/^\d{6}$/.test(text)) return false
+  const windowIndex = Math.floor(now / PORTAL_LINK_CHECK_WINDOW_MS)
+  let match = false
+  for (const index of [windowIndex, windowIndex - 1]) {
+    // Compare both windows every time; no early exit on a hit.
+    const expected = await linkCheckDigits(secret, accountId, linkVersion, index)
+    let diff = 0
+    for (let i = 0; i < 6; i += 1) diff |= expected.charCodeAt(i) ^ text.charCodeAt(i)
+    if (diff === 0) match = true
+  }
+  return match
+}
+
+// ---------------------------------------------------------------------------
+// Member link requests (owner answer 6). The storefront button creates one
+// pending request; the member always sees "In review" until staff decide.
+// Whether a matching customer exists is never revealed.
+export const PORTAL_LINK_REQUEST_NOTE_MAX = 500
+
+export type PortalLinkRequestView = { status: 'in_review'; createdAt: string; note: string | null }
+
+export async function getPendingPortalLinkRequest(env: Env, accountId: number): Promise<PortalLinkRequestView | null> {
+  const row = await getDb(env).prepare(`SELECT note, created_at FROM portal_member_link_requests
+    WHERE account_id = @id AND status = 'pending' ORDER BY id DESC LIMIT 1`).get<{ note: string | null; created_at: string }>({ id: accountId })
+  return row ? { status: 'in_review', createdAt: row.created_at, note: row.note ?? null } : null
+}
+
+// Idempotent: a second press returns the request that is already pending.
+export async function createPortalLinkRequest(env: Env, accountId: number, note: unknown): Promise<PortalLinkRequestView> {
+  const text = String(note ?? '').trim().slice(0, PORTAL_LINK_REQUEST_NOTE_MAX)
+  try {
+    await getDb(env).prepare(`INSERT INTO portal_member_link_requests (account_id, note, status)
+      VALUES (@id, @note, 'pending')`).run({ id: accountId, note: text || null })
+  } catch (error) {
+    if (!/UNIQUE constraint failed/i.test(error instanceof Error ? error.message : String(error))) throw error
+  }
+  const pending = await getPendingPortalLinkRequest(env, accountId)
+  if (!pending) throw new Error('portal_link_request_missing')
+  return pending
+}
+
+export async function withdrawPortalLinkRequest(env: Env, accountId: number): Promise<void> {
+  await getDb(env).prepare(`UPDATE portal_member_link_requests
+    SET status = 'withdrawn', decided_at = CURRENT_TIMESTAMP
+    WHERE account_id = @id AND status = 'pending'`).run({ id: accountId })
 }

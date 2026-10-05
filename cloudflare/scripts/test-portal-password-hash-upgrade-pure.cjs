@@ -90,6 +90,8 @@ const { signupPortalAccount, signinPortalAccount } = loadReal('lib/portalAccount
   './contactDuplicates': loadReal('lib/contactDuplicates.ts', { './contactOptions': contactOptions, './phone': phone, './sqlBinding': sqlBinding }),
   './anonymousCustomer': loadReal('lib/anonymousCustomer.ts'),
   './passwordHash': passwordHash,
+  // G38: new members get W- codes from the pure lib/memberCode.ts.
+  './memberCode': loadReal('lib/memberCode.ts'),
 })
 
 function isCurrentRowFor(row, password) {
@@ -112,7 +114,8 @@ async function run() {
     const res = await signupPortalAccount({}, { name: 'Sophea', phone: '097 111 222', password: 'portal-pass-1', consent: true })
     assert.strictEqual(res.ok, true, JSON.stringify(res))
     accountId = res.accountId
-    membershipId = res.membershipId
+    // G38: the member's own id is the W- code; it signs in like the old LC id did.
+    membershipId = res.account.membershipId
     assert.ok(isCurrentRowFor(rowOf(accountId), 'portal-pass-1'), rowOf(accountId))
     assert.strictEqual(compared.length, 0)
   })

@@ -216,11 +216,21 @@ async function main() {
 
 // --- 4. one minter, not four ----------------------------------------------
 
+// G38 Phase 1: storefront sign-up no longer mints an LC number at all -- a
+// website member gets a random W- code (lib/memberCode.ts) and only a staff
+// link connects it to a customer's LC number. So lib/portalAccounts.ts left
+// this list, and must not start minting LC numbers again.
 const MINTING_SOURCES = [
   'routes/contacts.ts',
   'lib/importEngine.ts',
-  'lib/portalAccounts.ts',
 ]
+{
+  const portalAccounts = fs.readFileSync(path.join(SRC, 'lib/portalAccounts.ts'), 'utf8')
+  check(() => assert.doesNotMatch(portalAccounts, /from '.*membershipNumber'/,
+    'lib/portalAccounts.ts must not mint LC membership numbers (website members get W- codes)'))
+  check(() => assert.match(portalAccounts, /from '\.\/memberCode'/,
+    'lib/portalAccounts.ts takes member codes from lib/memberCode.ts'))
+}
 for (const relPath of MINTING_SOURCES) {
   const source = fs.readFileSync(path.join(SRC, relPath), 'utf8')
   // A minter is a line that BUILDS a number out of entropy. Comments

@@ -74,6 +74,8 @@ const accounts = loadReal('lib/portalAccounts.ts', {
   './contactDuplicates': loadReal('lib/contactDuplicates.ts', { './contactOptions': contactOptions, './phone': phone, './sqlBinding': sqlBinding }),
   './anonymousCustomer': anonymousCustomer,
   './passwordHash': loadRealPasswordHash(),
+  // G38: new members get W- codes from the pure lib/memberCode.ts.
+  './memberCode': loadReal('lib/memberCode.ts'),
 })
 
 const jar = { value: null }

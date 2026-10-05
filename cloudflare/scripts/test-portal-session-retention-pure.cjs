@@ -114,6 +114,8 @@ const session = loadReal('lib/portalSession.ts', {
     './contactDuplicates': {},
     './anonymousCustomer': loadReal('lib/anonymousCustomer.ts'),
     './passwordHash': loadRealPasswordHash(),
+    // G38: new members get W- codes from the pure lib/memberCode.ts.
+    './memberCode': loadReal('lib/memberCode.ts'),
   }),
   './anonymousCustomer': loadReal('lib/anonymousCustomer.ts'),
   'hono/cookie': cookieStub,
@@ -198,11 +200,14 @@ async function run() {
     await settle()
   })
 
-  await check('a new session expires within the cookie ceiling, not a decade out', async () => {
+  // G38 Phase 1 (design S6): 30 days idle, 90 days absolute, replacing the
+  // 399-day sliding lifetime. test-portal-members-session-lifetime-pure.cjs
+  // pins both limits; here the row's own deadline is the 30-day idle window.
+  await check('a new session expires at the 30-day idle deadline, not a decade out', async () => {
     const accountId = seedAccount()
     const { token, expiresAt } = await session.createPortalSession(ctx.env, accountId)
     const ttlDays = (asUtc(expiresAt) - Date.now()) / DAY_MS
-    assert.ok(ttlDays > 390, `a storefront session still has to be long-lived, got ${ttlDays.toFixed(1)} days`)
+    assert.ok(ttlDays > 29.9 && ttlDays <= 30.01, `a new storefront session lasts the 30-day idle window, got ${ttlDays.toFixed(1)} days`)
     assert.ok(
       ttlDays <= 400,
       `a session row must not outlive the cookie that reaches it, or the retention sweep can never collect it -- got ${ttlDays.toFixed(1)} days`,
@@ -266,10 +271,11 @@ async function run() {
     jar.value = token
     jar.lastOptions = null
 
-    // Wind the row back so it looks like an account created ~300 days ago and
-    // used today: past the halfway mark, so the slide is due.
-    const created = new Date(Date.now() - 300 * DAY_MS).toISOString()
-    const expires = new Date(Date.now() + 99 * DAY_MS).toISOString()
+    // Wind the row back so it looks like a session signed in 20 days ago and
+    // used today: less than half of the 30-day idle window is left, so the
+    // slide is due (and far from the 90-day absolute limit).
+    const created = new Date(Date.now() - 20 * DAY_MS).toISOString()
+    const expires = new Date(Date.now() + 10 * DAY_MS).toISOString()
     rawDb.prepare('UPDATE portal_sessions SET created_at = @c, expires_at = @e WHERE token_hash = @t')
       .run({ c: created, e: expires, t: tokenHash })
 
@@ -284,7 +290,7 @@ async function run() {
       'visiting must push the expiry out; with the old ten-year TTL the candidate expiry was always earlier than the stored one and the slide silently did nothing',
     )
     const slidDays = (slid - Date.now()) / DAY_MS
-    assert.ok(slidDays > 390 && slidDays <= 400, `the slide lands back at the ceiling, got ${slidDays.toFixed(1)} days`)
+    assert.ok(slidDays > 29.9 && slidDays <= 30.01, `the slide lands a full idle window out, got ${slidDays.toFixed(1)} days`)
     assert.ok(jar.lastOptions, 'the refreshed cookie has to be re-issued to the browser, or the row slides alone and the visitor is still signed out')
     assert.equal(jar.lastOptions.httpOnly, true)
     assert.equal(jar.lastOptions.secure, true)
@@ -308,7 +314,9 @@ async function run() {
     assert.match(retention, /portal_sessions/, 'portal sessions must still be swept')
     assert.match(retention, /expires_at < CURRENT_TIMESTAMP/, 'the sweep predicate this test relies on must still exist')
     const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'portalSession.ts'), 'utf8')
-    assert.match(source, /const PORTAL_SESSION_MS = MAX_COOKIE_AGE_MS/, 'the row TTL and the cookie ceiling must stay the same number')
+    assert.match(source, /export const PORTAL_SESSION_IDLE_DAYS = 30\r?\n/, 'the idle window is 30 days')
+    assert.match(source, /export const PORTAL_SESSION_ABSOLUTE_DAYS = 90\r?\n/, 'the absolute limit is 90 days')
+    assert.doesNotMatch(source, /PORTAL_SESSION_MS = MAX_COOKIE_AGE_MS/, 'the 399-day session lifetime must not come back')
     assert.doesNotMatch(source, /10 \* 365 \* 24/, 'the ten-year TTL must not come back')
   })
 

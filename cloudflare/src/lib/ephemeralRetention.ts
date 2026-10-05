@@ -69,6 +69,61 @@ const SUBMISSION_OBJECT_PREFIX = 'private/portal-submissions/'
 // invocation budget with every other step here.
 const SUBMISSION_ROW_BATCH = 200
 
+// Storefront sessions (G38 Phase 1, lib/portalSession.ts): a row is dead once
+// it is revoked, past expires_at, older than the 90-day absolute limit, or 30
+// days without a visit. The read already refuses all four; this deletes them.
+// Rows from before G38 carry a 399-day expires_at, so the age terms are what
+// actually collects them.
+export const PORTAL_SESSION_SWEEP_WHERE = `revoked_at IS NOT NULL
+  OR (expires_at IS NOT NULL AND expires_at < CURRENT_TIMESTAMP)
+  OR julianday(created_at) < julianday('now') - 90
+  OR julianday(COALESCE(last_seen_at, created_at)) < julianday('now') - 30`
+
+// "Temporary" website members (owner answer 5, 5 Oct 2026): a member who is
+// not linked to a customer, has never verified a sign-in method and has not
+// been seen for 180 days is closed and their personal fields are cleared. The
+// row itself stays (status 'closed') so its W- code is never issued again and
+// any link history still points at something. A member with a pending link
+// request is waiting on staff, so it is left alone.
+// "Never verified": Phase 1 has no verified sign-in methods, so every member
+// is unverified. Phase 2 adds portal_login_identities; once that table exists
+// a verified identity exempts the member here automatically.
+export const PORTAL_MEMBER_INACTIVE_PURGE_DAYS = 180
+const PORTAL_MEMBER_PURGE_BATCH = 200
+
+export function portalMemberPurgeWhere(hasIdentityTable: boolean): string {
+  return `a.status = 'active'
+    AND a.contact_id IS NULL
+    AND julianday(COALESCE(a.last_seen_at, a.created_at)) < julianday('now') - ${PORTAL_MEMBER_INACTIVE_PURGE_DAYS}
+    AND NOT EXISTS (SELECT 1 FROM portal_member_link_requests r WHERE r.account_id = a.id AND r.status = 'pending')${hasIdentityTable
+    ? `
+    AND NOT EXISTS (SELECT 1 FROM portal_login_identities i WHERE i.account_id = a.id AND i.verified_at IS NOT NULL)`
+    : ''}`
+}
+
+// One atomic batch per run: the sessions and request notes of the selected
+// members go first (while they still match), then the members themselves.
+// One bounded slice, four D1 queries: the Free plan allows 50 per invocation
+// and the other steps of this sweep share them. The sweep runs every ~5 hours,
+// so 200 a run is far above what this shop's sign-ups can accumulate.
+export async function purgeInactivePortalMembers(db: Db): Promise<number> {
+  const identityTable = await db.prepare(
+    "SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = 'portal_login_identities' LIMIT 1",
+  ).get<{ present: number }>()
+  const slice = `SELECT a.id FROM portal_accounts a WHERE ${portalMemberPurgeWhere(Boolean(identityTable))} ORDER BY a.id LIMIT ${PORTAL_MEMBER_PURGE_BATCH}`
+  const results = await db.batch([
+    { sql: `DELETE FROM portal_sessions WHERE account_id IN (${slice})` },
+    { sql: `UPDATE portal_member_link_requests SET note = NULL WHERE account_id IN (${slice})` },
+    {
+      sql: `UPDATE portal_accounts
+        SET status = 'closed', closed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP,
+            name = '', phone = NULL, password_hash = NULL, email = NULL, cart_json = NULL, wishlist_json = NULL
+        WHERE id IN (${slice})`,
+    },
+  ])
+  return Number(results[2]?.meta?.changes ?? 0)
+}
+
 // Per-statement row cap so one sweep never builds an unbounded D1 transaction
 // (D1 has its own per-statement CPU/row budget). D1 does not support
 // `DELETE ... LIMIT`, so we delete by a bounded sub-select of ids and loop.
@@ -219,7 +274,8 @@ export async function maybeRunScheduledEphemeralRetention(env: Env): Promise<Eph
 
   await step('rate_limit_events', () => batchDeleteById(env, db, 'rate_limit_events', 'created_at < @cutoff', { cutoff: daysAgo(RATE_LIMIT_TTL_DAYS) }))
   await step('user_sessions', () => batchDeleteById(env, db, 'user_sessions', "revoked_at IS NOT NULL OR (expires_at IS NOT NULL AND expires_at < CURRENT_TIMESTAMP)", {}))
-  await step('portal_sessions', () => batchDeleteById(env, db, 'portal_sessions', "revoked_at IS NOT NULL OR (expires_at IS NOT NULL AND expires_at < CURRENT_TIMESTAMP)", {}))
+  await step('portal_sessions', () => batchDeleteById(env, db, 'portal_sessions', PORTAL_SESSION_SWEEP_WHERE, {}))
+  await step('portal_members_inactive', () => purgeInactivePortalMembers(db))
   const verificationNow = Date.now()
   await step('verification_codes', () => batchDeleteById(env, db, 'verification_codes', `
     created_at <= @historyCutoff
