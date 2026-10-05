@@ -342,6 +342,10 @@ check('recovery: the header statements restore both cost columns byte-identical;
   assert.equal(again.raw.prepare('SELECT cost_price_usd c FROM sale_items WHERE id = ?').get(again.ids.s1.lineId).c, 11.8333, 'the rest is restored')
 })
 
+// SQL with every comment outside a string literal blanked. Literals are kept
+// whole, so a '--' inside a quoted value cannot hide the statement after it.
+const sqlCode = (text) => text.replace(/('(?:[^']|'')*')|--[^\n]*|\/\*[\s\S]*?\*\//g, (comment, literal) => literal ?? ' ')
+
 // The tables a migration names: its SQL with comments and string literals
 // blanked (a quoted name is data, e.g. the merge payload's '$.table' values).
 const namedIn = (text) => {
@@ -353,7 +357,7 @@ const namedIn = (text) => {
 // a row or a column, so its position relative to the repair cannot interact
 // with it (0196, 0207). Anything else that names a table still counts.
 const indexOnly = (text) => {
-  const statements = text.replace(/--[^\n]*|\/\*[\s\S]*?\*\//g, ' ').split(';').map((s) => s.trim()).filter(Boolean)
+  const statements = sqlCode(text).split(';').map((s) => s.trim()).filter(Boolean)
   return statements.length > 0 && statements.every((s) => /^CREATE\s+(UNIQUE\s+)?INDEX\b/i.test(s))
 }
 
@@ -362,7 +366,7 @@ const indexOnly = (text) => {
 // cannot interact with it in either order (0208 free_quantity). A column the
 // repair does name still counts.
 const additiveUnread = (text, repairText) => {
-  const statements = text.replace(/--[^\n]*|\/\*[\s\S]*?\*\//g, ' ').split(';').map((s) => s.trim()).filter(Boolean)
+  const statements = sqlCode(text).split(';').map((s) => s.trim()).filter(Boolean)
   if (!statements.length) return false
   const columns = []
   for (const statement of statements) {
@@ -374,8 +378,7 @@ const additiveUnread = (text, repairText) => {
 }
 
 const mixedAdditiveUnread = (text, repairText) => {
-  if (/--|\/\*/.test(text)) return false
-  let sql = text.replace(/\s+/g, ' ').trim()
+  let sql = sqlCode(text).replace(/\s+/g, ' ').trim()
   const columns = new Set()
   let indexes = 0, guards = 0
   while (sql) {
@@ -487,6 +490,14 @@ check('held: outside deploy chain, after dependencies including0195; independent
   assert.ok(!indexOnly('CREATE INDEX i ON sale_items(id); UPDATE sale_items SET cost_price_usd = 0;') && !indexOnly('ALTER TABLE sale_items ADD COLUMN z INTEGER;'), 'control: a file that also changes rows or columns is still a dependency')
   assert.ok(additiveUnread('ALTER TABLE sale_items ADD COLUMN zzz_unread INTEGER NOT NULL DEFAULT 0;', migrationText), 'control: a new column the repair never names is skipped')
   assert.ok(!additiveUnread('ALTER TABLE sale_items ADD COLUMN cost_price_usd REAL;', migrationText) && !additiveUnread('ALTER TABLE sale_items ADD COLUMN zzz INTEGER; UPDATE sale_items SET zzz = 1;', migrationText), 'control: a column the repair names, or any row change, is still a dependency')
+  assert.ok(indexOnly('-- UPDATE sale_items SET cost_price_usd = 0;\n/* DELETE FROM sale_items; */\nCREATE INDEX i ON sale_items(id);'), 'control: SQL inside a comment never executes, so it is not a statement')
+  assert.ok(!indexOnly("CREATE INDEX i ON sale_items(id) WHERE '--' <> ''; UPDATE sale_items SET cost_price_usd = 0;")
+    && !additiveUnread("ALTER TABLE sale_items ADD COLUMN zzz_unread TEXT DEFAULT '/*'; UPDATE sale_items SET cost_price_usd = 0; -- */", migrationText), 'control: a comment marker inside a string literal cannot hide the statement after it')
+  assert.ok(mixed.length > 0, 'control: the mixed additive scan proves at least one later file independent')
+  for (const file of mixed) {
+    assert.ok(mixedAdditiveUnread(`-- header: UPDATE sale_items SET cost_price_usd = 1;\n/* DROP TABLE sale_items; */\n${chainText(file)}`, migrationText), `control: a comment header leaves ${file} independent`)
+    assert.ok(!mixedAdditiveUnread(`${chainText(file)}\n-- trailing note\nUPDATE sale_items SET cost_price_usd = 1;`, migrationText), `control: a real statement after a comment in ${file} is still a dependency`)
+  }
   const later = chain.filter((f) => movedIn.indexOf(f) > movedIn.indexOf(heldName))
   assert.deepEqual(later.filter((f) => dependencies.includes(f)), [],
     `these chain files sort after ${heldName} yet touch a table it reads or writes (${touched.join(', ')}). ` +
