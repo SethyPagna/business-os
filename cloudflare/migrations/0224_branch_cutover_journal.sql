@@ -1,3 +1,38 @@
+-- BRANCH-CUTOVER: durable journal for the Shop -> Warehouse branch cutover.
+--
+-- Creates the new table branch_cutovers, its partial unique index
+-- branch_cutovers_one_active (at most one unfinished cutover), ten guard
+-- triggers on branch_cutovers (initial state, identity, terminal, no delete,
+-- transition, sealed manifest, child/capture/snapshot/verification progress)
+-- and three triggers on system_flags (branch_cutovers_flag_insert, _update,
+-- _delete) that refuse writes to the 'maintenance' and
+-- 'branch_cutover_control_incarnation' flags only while a cutover is
+-- unfinished. No data rewritten: the table starts empty, so the system_flags
+-- triggers are inert until a cutover begins.
+--
+-- Pre-assert:  SELECT COUNT(*) FROM sqlite_master WHERE name = 'branch_cutovers'
+--                                              -- expected 0
+--              SELECT COUNT(*) FROM sqlite_master WHERE type = 'trigger'
+--                AND name LIKE 'branch_cutovers_%'   -- expected 0
+--              SELECT COUNT(*) FROM system_flags (record it)
+-- Post-assert: the same two queries            -- expected 1, 13
+--              SELECT COUNT(*) FROM sqlite_master WHERE type = 'index'
+--                AND name = 'branch_cutovers_one_active'   -- expected 1
+--              SELECT COUNT(*) FROM branch_cutovers   -- expected 0
+--              SELECT COUNT(*) FROM system_flags      -- unchanged
+-- Deploy order: MIGRATION FIRST for the cutover routes, which read the table.
+--              The previous Worker never touches the table, and its flag
+--              writes are unaffected while the table is empty.
+-- Recovery:    only while SELECT COUNT(*) FROM branch_cutovers
+--                WHERE phase NOT IN ('completed','aborted') is 0, and after
+--              rolling the Worker back:
+--              DROP TRIGGER IF EXISTS branch_cutovers_flag_insert;
+--              DROP TRIGGER IF EXISTS branch_cutovers_flag_update;
+--              DROP TRIGGER IF EXISTS branch_cutovers_flag_delete;
+--              DROP TABLE IF EXISTS branch_cutovers;
+--              Dropping the table also drops its index, its ten triggers and
+--              the 0225 trigger. Loses only the cutover journal.
+
 CREATE TABLE branch_cutovers (
   operation_id TEXT PRIMARY KEY NOT NULL CHECK(length(operation_id) = 36),
   begin_request_id TEXT NOT NULL UNIQUE CHECK(length(begin_request_id) BETWEEN 8 AND 120),
