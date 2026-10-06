@@ -176,6 +176,9 @@ const scrub = (text) => text
   // A shift code carries the opening minute (S-<yyyymmdd>-<HHMM>-<cashier>); the oracle and the current run can
   // straddle a minute boundary, which is clock noise, not a behaviour change.
   .replace(/\bS-\d{8}-\d{4}-/g, 'S-<date>-<hhmm>-')
+  // stock-lot-0193 (not LR) reworded the dated Set movement reason after the eb5dd0ba3 oracle: "Set received date to 7"
+  // became "Set received 2026-09-01 from 10 to 7". Same row, same quantity; only the wording differs.
+  .replace(/Set received (?:date|\d{4}-\d{2}-\d{2}(?: from \d+)?) to (\d+)/g, 'Set received <lot> to $1')
 const normalised = (capture) => scrub(JSON.stringify(capture))
 
 // The redirect refusal for Old Shop (2) with LC Store (1) as its successor and only target.

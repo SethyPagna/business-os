@@ -11,7 +11,7 @@
 //   1. untouched product: Undo and Redo succeed after the whole post-cutover state is applied;
 //   2. an older snapshot that saved 'branch' revision entries (before this change) undoes the same way;
 //   3. a product the cutover moved is refused with the cutover's own code and message, never the generic one;
-//   4. a plain (non-cutover) change to the stock is still the generic refusal, so check 3 does not swallow it;
+//   4. a plain (non-cutover) change to the stock is still refused, now by name, so check 3 does not swallow it;
 //   5. a branch switched off after the session still refuses Undo (replay asserts is_active itself);
 //   6. a real change to the session's own stock still refuses after the cutover state;
 //   7. the marker restated in stockSession.ts equals lib/branchCutoverHistory.ts.
@@ -93,19 +93,29 @@ async function main() {
     assert.equal(qty(f), 5)
   })
 
-  await check('a product the cutover moved is refused with the cutover code, not the generic message', async () => {
+  // REVERT-SET (afe4fce07): Undo moves the session's own recorded change as a delta on today's rows, so the
+  // consolidation transfer that ADDED stock to the target no longer blocks it. The books stay exact: the session's
+  // 5 units leave, the transfer's 4 stay. The cutover refusal code still answers the constraint-failure path.
+  await check('a product the cutover moved into the target still undoes: the session delta leaves, the transfer stays', async () => {
     const f = fixture()
     const receipt = await recorded(f, api, 'e4-moved-001')
     cutoverTouchesBranchesAndLabels(f)
     cutoverMovesProduct(f)
-    const before = f.sql.prepare('SELECT quantity FROM branch_stock WHERE product_id=1 AND branch_id=1').get().quantity
+    assert.equal(qty(f), 9, 'session 5 + the consolidation transfer 4')
+    await undo(f, api, receipt)
+    assert.equal(qty(f), 4, 'only the session own 5 units left; the transferred 4 are untouched')
+    assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM stock_transfers').get().n, 1, 'the consolidation transfer row is untouched')
+  })
+
+  await check('a product the cutover moved OUT of the session branch refuses with the named insufficient-stock code', async () => {
+    const f = fixture()
+    const receipt = await recorded(f, api, 'e4-moved-out-001')
+    cutoverTouchesBranchesAndLabels(f)
+    f.sql.prepare('UPDATE branch_stock SET quantity = 1 WHERE product_id=1 AND branch_id=1').run()
     const error = await refusal(undo(f, api, receipt))
     assert.equal(error.statusCode, 409)
-    assert.equal(error.code, 'undo_closed_branch_cutover_product_moved')
-    assert.match(error.message, /branch consolidation/)
-    assert.doesNotMatch(error.message, /Stock, metadata, references, or revision changed/)
-    assert.equal(qty(f), before, 'nothing was written')
-    assert.equal(f.sql.prepare("SELECT status FROM action_history WHERE id=?").get(receipt.actionHistoryId).status, 'undoable', 'the row is still undoable-shaped; only this attempt is refused')
+    assert.equal(error.code, 'revert_insufficient_branch_stock')
+    assert.equal(qty(f), 1, 'nothing was written')
   })
 
   await check('a plain stock change (no cutover transfer) is still the generic refusal', async () => {
@@ -115,8 +125,9 @@ async function main() {
     f.sql.prepare('UPDATE branch_stock SET quantity = quantity - 1 WHERE product_id=1 AND branch_id=1').run()
     const error = await refusal(undo(f, api, receipt))
     assert.equal(error.statusCode, 409)
-    assert.equal(error.code, 'stock_session_rejected')
-    assert.match(error.message, /Stock, metadata, references, or revision changed/)
+    // REVERT-SET: a unit taken after the session leaves too few to reverse, which is now the named stock refusal.
+    assert.equal(error.code, 'revert_insufficient_branch_stock')
+    assert.match(error.message, /only 4 in stock/)
   })
 
   await check('a branch switched off after the session still refuses Undo', async () => {

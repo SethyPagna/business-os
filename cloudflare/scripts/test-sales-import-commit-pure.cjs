@@ -451,7 +451,7 @@ function customerMatch(overrides = {}) {
       world.setBeforeBatch(() => mutate(world.sqlite))
       const attempt = subject.applyHistoricalSaleImport(world.db, { jobId: 'job-cut-race', rowNumber: 4, data, nowIso: input.nowIso, actor })
       if (expectRejected) {
-        await assert.rejects(() => attempt, /Shop branch or batch\/lot reference changed before the atomic write/, label)
+        await assert.rejects(() => attempt, /Shop branch or received-date reference changed before the atomic write/, label)
         assert.equal(world.sqlite.prepare('SELECT COUNT(*) n FROM sales').get().n, 0, label + ': nothing persists')
       } else {
         await attempt

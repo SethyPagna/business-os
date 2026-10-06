@@ -12,8 +12,8 @@
 //      clause equal 0124's;
 //   2. session recorded -> label fill (the exact statement shape of the cutover
 //      capture pass) -> Undo succeeds, Redo succeeds, and no revision moved;
-//   3. control: with 0124's trigger put back, the same fill makes Undo refuse
-//      409 stale_state, so the fixture discriminates;
+//   3. control: with 0124's trigger put back, the same fill bumps the lot revisions
+//      (Undo no longer refuses on them since REVERT-SET), so the fixture discriminates;
 //   4. a real change to the lot still refuses Undo: cost, quantity, attribution
 //      (received_branch_id), is_active, and a label write that ALSO sets one of
 //      them;
@@ -82,19 +82,23 @@ async function main() {
     assert.equal(f.sql.prepare('SELECT quantity FROM branch_stock WHERE product_id=1 AND branch_id=1').get().quantity, 5)
   })
 
-  await check('control: with 0124 restored, the same fill makes Undo refuse stale', async () => {
+  await check('control: with 0124 restored, the same fill bumps the lot revisions', async () => {
     const f = fixture()
     const original = read('0124_stock_session_operations.sql')
     const originalTrigger = original.slice(original.indexOf('CREATE TRIGGER stock_revision_product_batches_update'), original.indexOf('CREATE TRIGGER stock_revision_product_batches_delete'))
     f.sql.exec('DROP TRIGGER stock_revision_product_batches_update;' + originalTrigger)
-    const receipt = await recorded(f, api, 'label-fill-control-001')
+    await recorded(f, api, 'label-fill-control-001')
+    const before = revisions(f)
     fillLabel(f)
-    await assert.rejects(undo(f, api, receipt), stale)
+    // REVERT-SET: a session Undo now replays the session's recorded change and no longer refuses on a bumped lot
+    // revision, so the discriminating signal is the trigger itself: 0124's version moves the revisions on a label fill.
+    assert.notDeepEqual(revisions(f), before, '0124 bumps the lot revisions on a label-only write')
   })
 
   const realChanges = [
     ['cost', 'unit_cost_usd = unit_cost_usd + 1'],
-    ['received quantity', 'received_quantity = received_quantity + 1'],
+    // received_quantity is not listed: since REVERT-SET (afe4fce07) Undo moves it by the session's own delta on today's
+    // figure, so a later change to it is carried, not refused.
     ['attribution', 'received_branch_id = NULL'],
     ['notes', "notes = 'edited'"],
     ['label together with cost', "received_branch_name = 'Shop', unit_cost_usd = unit_cost_usd + 1"],
