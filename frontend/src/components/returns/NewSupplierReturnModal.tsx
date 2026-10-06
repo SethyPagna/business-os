@@ -18,6 +18,7 @@ import ScanSearchButton from '../shared/ScanSearchButton.tsx'
 import ContactPicker from '../contacts/ContactPicker.tsx'
 import { useReturnReasonPresets } from './helpers/useReturnReasonPresets.ts'
 import { filterAndRankSupplierReturnProducts } from './supplierReturnSearch.ts'
+import { branchChoiceSettled } from '../../utils/branchScope.ts'
 import { useCloseGuard } from '../../utils/useCloseGuard.ts'
 import UnsavedChangesPrompt from '../shared/UnsavedChangesPrompt.tsx'
 
@@ -460,18 +461,20 @@ export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmt
         ) : (
           <div className="modal-scroll space-y-4 p-4">
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-              <div>
-                <label htmlFor="supplier-return-branch" className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">{tr('branch', 'Branch')}</label>
-                <AppSelect
-                  id="supplier-return-branch"
-                  className="w-full"
-                  buttonClassName="w-full text-sm"
-                  value={branchId}
-                  options={branchOptions}
-                  onChange={setBranchId}
-                  ariaLabel={tr('branch', 'Branch')}
-                />
-              </div>
+              {branchChoiceSettled(branches.map((item) => item.id), branchId) ? null : (
+                <div>
+                  <label htmlFor="supplier-return-branch" className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">{tr('branch', 'Branch')}</label>
+                  <AppSelect
+                    id="supplier-return-branch"
+                    className="w-full"
+                    buttonClassName="w-full text-sm"
+                    value={branchId}
+                    options={branchOptions}
+                    onChange={setBranchId}
+                    ariaLabel={tr('branch', 'Branch')}
+                  />
+                </div>
+              )}
               <div>
                 <label htmlFor="supplier-return-supplier" className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-300">{tr('supplier', 'Supplier')}</label>
                 <ContactPicker

@@ -12,6 +12,7 @@ import SuggestionTextInput from '../../shared/SuggestionTextInput.tsx'
 import { loadSupplierNames } from '../../shared/SupplierPickerField.tsx'
 import { suggestionEmptyState } from '../../../utils/suggestionMatching.ts'
 import { normalizeProductGroupName } from '../../../utils/productGrouping.ts'
+import { branchChoiceSettled } from '../../../utils/branchScope.ts'
 
 const PRODUCT_VARIANT_MUTATION_TIMEOUT_MS = 12000
 
@@ -208,6 +209,9 @@ export default function VariantFormModal({ parent, units, branches, user, onClos
   const nameDiffersFromParent = form.name.trim() !== ''
     && normalizeProductGroupName(form.name) !== normalizeProductGroupName(parent.name)
 
+  // An empty branch means "the default branch", which with a single branch is
+  // that branch: no picker to show. A stale draft naming another keeps it.
+  const branchSettled = branchChoiceSettled(branches.map((branch) => branch.id), form.branch_id || (branches.length === 1 ? branches[0].id : ''))
   const branchOptions = useMemo<AppSelectOption[]>(() => [
     { value: '', label: tr('default_branch_option', 'Default branch') },
     ...branches.map((branch) => ({
@@ -437,21 +441,23 @@ export default function VariantFormModal({ parent, units, branches, user, onClos
             />
           </div>
 
-          <div className="min-w-0">
-            <label htmlFor="variant-form-branch" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
-              {tr('assign_to_branch', 'Assign to Branch', 'កំណត់ទៅសាខា')}
-            </label>
-            <AppSelect
-              id="variant-form-branch"
-              name="variant_branch_id"
-              className="w-full min-w-0"
-              buttonClassName="min-h-11 w-full min-w-0"
-              value={form.branch_id || ''}
-              options={branchOptions}
-              onChange={(value) => setField('branch_id', value)}
-              ariaLabel={tr('assign_to_branch', 'Assign to Branch')}
-            />
-          </div>
+          {branchSettled ? null : (
+            <div className="min-w-0">
+              <label htmlFor="variant-form-branch" className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">
+                {tr('assign_to_branch', 'Assign to Branch', 'កំណត់ទៅសាខា')}
+              </label>
+              <AppSelect
+                id="variant-form-branch"
+                name="variant_branch_id"
+                className="w-full min-w-0"
+                buttonClassName="min-h-11 w-full min-w-0"
+                value={form.branch_id || ''}
+                options={branchOptions}
+                onChange={(value) => setField('branch_id', value)}
+                ariaLabel={tr('assign_to_branch', 'Assign to Branch')}
+              />
+            </div>
+          )}
         </div>
 
         {/* Sticky footer, same pattern as ProductForm.tsx/FeeForm.tsx/

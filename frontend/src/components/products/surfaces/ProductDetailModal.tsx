@@ -21,6 +21,7 @@ import { effectiveLowStockThreshold } from '../../../utils/lowStockSettings.ts'
 import EntityLink, { type EntityNavigate } from '../../shared/EntityLink.tsx'
 import { TOOLBAR_BUTTON_BASE, toolbarIconButtonClassName } from '../../shared/toolbarButtonStyles.ts'
 import CostCalculationFloat from '../../shared/CostCalculationFloat.tsx'
+import { branchStockLinesWorthShowing } from '../../../utils/branchScope.ts'
 import ScrollText from 'lucide-react/dist/esm/icons/scroll-text.js'
 
 // Loaded when the float is opened. The field history is a rare read behind a
@@ -52,6 +53,7 @@ type BrandColorLookup = Record<string, string | undefined>
 type BranchStockEntry = {
   branch_id?: string | number | null
   branch_name?: string
+  branch_active?: unknown
   quantity?: unknown
 }
 
@@ -156,6 +158,8 @@ export default function ProductDetailModal({
   // float: double-click on a pointer device, press-and-hold on touch.
   const copy = useCopyFloat(T)
   const productName = String(p.name || '')
+  // One active branch: its chip would only repeat the quantity above.
+  const branchStockLines = branchStockLinesWorthShowing(p.branch_stock || [])
   const purchaseUsd = Number(p.purchase_price_usd || p.cost_price_usd || 0)
   const purchaseKhr = Number(p.purchase_price_khr || p.cost_price_khr || 0)
   const sellingUsd = Number(p.selling_price_usd || 0)
@@ -309,10 +313,10 @@ export default function ProductDetailModal({
                   ) : null}
                 </div>
 
-                {(p.branch_stock || []).length > 0 ? (
+                {branchStockLines.length > 0 ? (
                   <Row label={T('branch', 'Branch')}>
                     <div className="scroll-x-clean flex min-w-0 flex-nowrap gap-1.5">
-                      {(p.branch_stock || []).map((bs) => {
+                      {branchStockLines.map((bs) => {
                         const branchQuantity = Number(bs.quantity || 0)
                         return (
                         <span
