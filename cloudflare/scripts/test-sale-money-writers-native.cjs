@@ -130,15 +130,10 @@ async function run() {
   assert.deepEqual(editedRetry.body,edited.body)
   assert.deepEqual(h.creationState(f.raw),editedState)
   console.log('PASS actual versioned edit, canonical transactional receipt and exact retry')
-  // N15 (SEC-SALES): a new sale's quoted rate must sit near the Settings rate,
-  // so this sale is rung while Settings says 4,000 and the rate then moves to
-  // 5,000 before it is settled -- the saved-rate case the settlement below proves.
-  f.raw.prepare("INSERT INTO settings(key,value) VALUES('exchange_rate','4000') ON CONFLICT(key) DO UPDATE SET value=excluded.value").run()
   const waiting = await h.postSale(f.route,{...h.request('waiting-precise'),money_precision_version:1,
     sale_status:'awaiting_payment',amount_paid_usd:0,amount_paid_khr:0,payment_details:[],
     items:[intent('waiting-line',1.24,1,.0055)]})
   assert.equal(waiting.status,200,JSON.stringify(waiting.body))
-  f.raw.prepare("INSERT INTO settings(key,value) VALUES('exchange_rate','5000') ON CONFLICT(key) DO UPDATE SET value=excluded.value").run()
   const waitingId = waiting.body.id
   const savedHeader = f.raw.prepare('SELECT * FROM sales WHERE id=@id').get({id:waitingId})
   const savedLines = f.raw.prepare('SELECT * FROM sale_items WHERE sale_id=@id').all({id:waitingId})

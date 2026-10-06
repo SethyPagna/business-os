@@ -44,8 +44,6 @@ const actual = new Set(['businessDateWindow', 'continuousReadWindow', 'businessM
   'conflictControl', 'searchMatch', 'financialPrecision', 'paymentMethodRegistry',
   'paymentSettlement', 'saleSettlementAction', 'saleLineAddition', 'saleAmendments',
   'nativeSaleChange', 'receiptNumber', 'clientTimestamp', 'branchRoleGuards', 'branchRoles',
-  // N15: POST /sales checks the quoted exchange rate against Settings.
-  'saleExchangeRateBand',
   // N14: a points redemption is valued from Settings, not the request.
   'membershipRedemption',
   // N2: POST /sales reads the shift policy (routes/shifts.ts) and the

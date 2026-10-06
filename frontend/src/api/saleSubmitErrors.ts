@@ -10,9 +10,6 @@ const SALE_SUBMIT_REFUSAL_KEYS: Readonly<Record<string, string>> = {
   // amendments, and by the till's own pricing before it ever asks.
   sale_discount_exceeds_price: 'sale_discount_exceeds_price',
   sale_discount_exceeds_subtotal: 'sale_discount_exceeds_subtotal',
-  // N15: the quoted exchange rate is outside the band around the Settings
-  // rate (cloudflare/src/lib/saleExchangeRateBand.ts); a stale till refreshes.
-  exchange_rate_out_of_range: 'exchange_rate_out_of_range',
   // N14: the points discount must be the configured value of the points
   // redeemed (cloudflare/src/lib/membershipRedemption.ts).
   membership_discount_mismatch: 'membership_discount_mismatch',

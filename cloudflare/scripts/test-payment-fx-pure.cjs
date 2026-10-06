@@ -16,8 +16,6 @@ const actual = new Set(['businessMaintenanceGuard','offlineSaleOwnership','acqui
   'moneyPrecision','saleMoneyPrecision','saleItemPricing','promotionRules','productMergeLineage','saleMutationHeaderQuote',
   'anonymousCustomer',
   'receiptNumber','clientTimestamp',
-  // N15: POST /sales checks the quoted exchange rate against Settings.
-  'saleExchangeRateBand',
   // N14: a points redemption is valued from Settings, not the request.
   'membershipRedemption',
   // N2: POST /sales reads the shift policy (routes/shifts.ts) and the

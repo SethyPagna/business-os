@@ -4221,7 +4221,6 @@
   "receipt_language_title": "Receipt Language",
   "receipt_number": "Receipt #",
   "receipt_number_conflict": "Another sale took this receipt number at the same moment. Nothing was recorded. Try the sale again.",
-  "exchange_rate_out_of_range": "The exchange rate on this sale is too far from the rate in Settings. Refresh the till and ring the sale again. Nothing was recorded.",
   "membership_discount_mismatch": "The membership discount does not match the points redeemed. Refresh the till and redeem the points again. Nothing was recorded.",
   "sale_shift_required": "Register today's opening cash before recording a sale. Nothing was recorded.",
   "sale_shift_closed": "Your shift has ended. Reopen it from Shift history before recording a sale. Nothing was recorded.",
