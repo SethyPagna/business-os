@@ -415,26 +415,55 @@ export type CutoverFold = { product: number; survivor: number; folded: number[];
 export type CutoverFoldPlan = { folds: CutoverFold[]; expirySplit: number; supplierSplit: number; roundingSplit: number; uncostedMerges: number
   freeUnknownMerges: number; emptySupplierMerges: number }
 type CostClass = 'recorded' | 'zero' | 'unknown'
+/** SQLite's trim(): spaces only (String.prototype.trim also strips tabs, newlines and NBSP, which the SQL twin keeps). */
+const sqlTrim = (text: string): string => text.replace(/^ +| +$/g, '')
+const isCalendarDay = (year: number, month: number, day: number): boolean =>
+  month >= 1 && month <= 12 && day >= 1 && day <= [31, year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0) ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1]
 /**
  * The Cambodia business day (UTC+7, businessDateWindow) a lot was received on.
  * A date-only value is already a business day and stays as stored; a timestamp
- * is converted (no zone = UTC, the house convention). Anything else never merges.
+ * is converted (no zone = UTC, the house convention). A slash date-only value
+ * M/D/YYYY (1-2 digit month and day) is read MONTH-FIRST: the only slash text
+ * ever stored in product_batches.received_at came from the Aug-28 catalog
+ * import's `batch(mm/dd/yyyy)` column, migration 0077_batch_received_iso.sql
+ * rewrote those rows month-first, and every writer since stores ISO
+ * (normalizeToIsoDate / normalizeTypedDate). It must be a real calendar day.
+ * Owner 6 Oct: the DATE decides, whatever text it was stored as, so
+ * 08/24/2026 and 2026-08-24 are the same day. Anything else never merges.
  * SQL twin: cutoverLotDaySql.
  */
 export function cutoverLotBusinessDay(value: string | null): string | null {
   if (typeof value !== 'string') return null
-  const text = value.trim()
-  if (!/^\d{4}-\d{2}-\d{2}/.test(text)) return null
+  const text = sqlTrim(value)
+  const slash = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(text)
+  if (slash) {
+    const [month, day, year] = [Number(slash[1]), Number(slash[2]), Number(slash[3])]
+    return isCalendarDay(year, month, day) ? `${slash[3]}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}` : null
+  }
   if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text
+  // A timestamp: 'T' or one space, then the time, with nothing SQLite's date() skips and V8 refuses
+  // (inner whitespace, control characters, a colon-less +HHMM zone), so both twins read the same set.
+  if (!/^\d{4}-\d{2}-\d{2}[T ]\d[!-~]*$/.test(text) || /[+-]\d{4}$/.test(text)) return null
   return localDateOf(text) || null
 }
-export const cutoverLotDaySql = (column: string): string =>
-  `CASE WHEN trim(${column}) GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]' THEN trim(${column})
-    WHEN trim(${column}) GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]*' THEN ${localDateExpr(`trim(${column})`)} END`
+/** M/D/YYYY -> YYYY-MM-DD by shape (the four shapes 0077 rewrote); NULL for any other text. Not yet calendar-checked. */
+const slashIsoSql = (t: string): string =>
+  `CASE WHEN ${t} GLOB '[0-9][0-9]/[0-9][0-9]/[0-9][0-9][0-9][0-9]' THEN substr(${t},7,4)||'-'||substr(${t},1,2)||'-'||substr(${t},4,2)
+    WHEN ${t} GLOB '[0-9]/[0-9][0-9]/[0-9][0-9][0-9][0-9]' THEN substr(${t},6,4)||'-0'||substr(${t},1,1)||'-'||substr(${t},3,2)
+    WHEN ${t} GLOB '[0-9][0-9]/[0-9]/[0-9][0-9][0-9][0-9]' THEN substr(${t},6,4)||'-'||substr(${t},1,2)||'-0'||substr(${t},4,1)
+    WHEN ${t} GLOB '[0-9]/[0-9]/[0-9][0-9][0-9][0-9]' THEN substr(${t},5,4)||'-0'||substr(${t},1,1)||'-0'||substr(${t},3,1) END`
+export const cutoverLotDaySql = (column: string): string => {
+  const t = `trim(${column})`
+  return `CASE WHEN ${t} GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]' THEN ${t}
+    WHEN substr(${t},1,10) GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]' AND substr(${t},11,2) GLOB '[T ][0-9]'
+      AND NOT substr(${t},13) GLOB '*[^!-~]*' THEN ${localDateExpr(t)}
+    WHEN date(${slashIsoSql(t)})=${slashIsoSql(t)} THEN ${slashIsoSql(t)} END`
+}
 /** Supplier identity of a lot: the supplier id, else the trimmed lower-case supplier name, else '' (no supplier). SQL twin: cutoverSupplierKeySql. */
 export function cutoverSupplierKey(lot: Pick<CutoverFoldLot, 'supplierId' | 'supplierName'>): string {
   if (typeof lot.supplierId === 'number' && Number.isSafeInteger(lot.supplierId)) return 'id:' + lot.supplierId
-  const name = typeof lot.supplierName === 'string' ? lot.supplierName.trim().toLowerCase() : ''
+  // SQLite's lower() folds ASCII only and its trim() strips spaces only: the twin must agree byte for byte
+  const name = typeof lot.supplierName === 'string' ? sqlTrim(lot.supplierName).replace(/[A-Z]+/g, upper => upper.toLowerCase()) : ''
   return name ? 'name:' + name : ''
 }
 export const cutoverSupplierKeySql = (id: string, name: string): string =>

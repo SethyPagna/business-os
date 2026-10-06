@@ -39,7 +39,9 @@ function rows({ scale = 1 } = {}) {
   for (let p = 1; p <= P; p++) t.products.push({ id: p, name: 'Product ' + p, sku: 'SKU' + p, is_active: 1, cost_price_usd: 1, created_at: '2026-01-01', updated_at: '2026-01-01' })
   // Shop lots (one per selling product; 116 with a second, same-date lot), some shared with the Warehouse
   for (let p = 1; p <= shopTo; p++) {
-    const received = p % 5 === 0 ? '08/24/2026' : p % 19 === 0 ? day(p) + 'T18:30:00Z' : day(p)
+    // slash dates as the Aug-28 import stored them (month-first, padded or not) merge with the ISO lot of that day; 24/08 is no date
+    const slash = (iso, pad) => { const [y, m, d] = iso.split('-'); return pad ? m + '/' + d + '/' + y : Number(m) + '/' + Number(d) + '/' + y }
+    const received = p % 95 === 0 ? '24/08/2026' : p % 5 === 0 ? slash(day(p), p % 10 === 0) : p % 19 === 0 ? day(p) + 'T18:30:00Z' : day(p)
     const cost = p % 13 === 0 ? null : p % 17 === 0 ? 0 : 1 + (p % 40) / 4
     const at = { [SHOP]: 1 + (p % 7) }
     if (p >= whFrom && p <= sharedTo) at[WAREHOUSE] = 1 + (p % 15)

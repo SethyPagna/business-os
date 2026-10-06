@@ -66,6 +66,22 @@ check('E4 the merge key is the Cambodia business day: verifier P2a merges, P2b s
   const moved = plan([[1, 1], [2, 3]], [lot(1, '2026-09-12', 1, 1), lot(2, '2026-09-12T10:30:00Z', 4, 3)]).folds
   assert.deepEqual([moved[0].survivor, moved[0].folded, moved[0].costAfter], [1, [2], 3.25])
 })
+check('owner 6 Oct: the DATE decides, whatever text stored it; slash dates are month-first (the Aug-28 batch(mm/dd/yyyy) column, 0077)', () => {
+  // an ISO and a slash date on the same day merge
+  const same = plan([[2, 1]], [lot(1, '2026-08-24', 2, 1), lot(2, '08/24/2026', 4, 1)])
+  assert.deepEqual(same.folds.map(f => [f.survivor, f.folded, f.dateKey, f.costAfter]), [[1, [2], '2026-08-24', 3]])
+  // the control: keyed as its own text ('08/24/2026' <> '2026-08-24') they would stay apart
+  assert.notEqual(parent.cutoverLotBusinessDay('08/24/2026'), '08/24/2026')
+  // an ambiguous value (both parts <= 12) follows the proven order: 4/8 is 8 April, never 4 August
+  const ambiguous = plan([[3, 1]], [lot(1, '2026-08-04', 5, 1), lot(2, '2026-04-08', 1, 1), lot(3, '4/8/2026', 3, 1)])
+  assert.deepEqual(ambiguous.folds.map(f => [f.survivor, f.folded, f.dateKey]), [[2, [3], '2026-04-08']])
+  // a value with no month-first reading is no date: it never merges, even where day-first would match
+  assert.deepEqual(counts(plan([[2, 1]], [lot(1, '2026-08-24', 1, 1), lot(2, '24/08/2026', 1, 1)])), none)
+  // the business day of a timestamp and of a slash date are one key; padding and outer spaces do not matter
+  assert.equal(plan([[2, 1]], [lot(1, '2026-09-12T18:00:00Z', 2, 1), lot(2, ' 9/13/2026 ', 2, 1)]).folds.length, 1)
+  assert.deepEqual(['08/24/2026', '8/24/2026', '08/4/2026', '8/4/2026', '02/29/2028', '02/29/2026', '13/01/2026', '00/10/2026', '08/24/26', '08/24/2026 10:00', '08-24-2026']
+    .map(parent.cutoverLotBusinessDay), ['2026-08-24', '2026-08-24', '2026-08-04', '2026-08-04', '2028-02-29', null, null, null, null, null, null])
+})
 check('survivor is the lowest-id pre-existing lot; a shared batch is pre-existing; other pre-existing same-date lots stay', () => {
   const { folds } = plan([[1, 1], [3, 2]], [lot(1, '2026-09-03', 2, 2), lot(2, '2026-09-03', 2, 2), lot(3, '2026-09-03', 4, 2)])
   assert.deepEqual([folds[0].survivor, folds[0].folded, folds[0].after, folds[0].costAfter], [1, [3], [[1, 4], [3, 0]], 3])
@@ -155,8 +171,29 @@ check('SQL twins: the business day and supplier key computed in SQLite equal the
   const raw = new DatabaseSync(':memory:')
   const days = ['2026-09-12', ' 2026-09-12 ', '2026-09-12T18:00:00Z', '2026-09-12T16:59:59Z', '2026-09-12 17:00:00', '2026-09-12T23:30:00+07:00',
     '2026-09-12T10:00:00.123Z', '2026-12-31 20:00:00', 'not a date', '', '2026-09-12garbage', null]
-  for (const value of days) assert.equal(raw.prepare(`SELECT ${parent.cutoverLotDaySql('?1')} AS d`).get(value).d, parent.cutoverLotBusinessDay(value), String(value))
-  for (const [id, name] of [[7, 'X'], [null, ' ACME '], [null, '  '], [null, null], [7, null]]) {
+  const day = raw.prepare(`SELECT ${parent.cutoverLotDaySql('?1')} AS d`)
+  for (const value of days) assert.equal(day.get(value).d, parent.cutoverLotBusinessDay(value), String(value))
+  // every month 0..13 x day 0..32 in four years (leap, common, century, 400-year), as M/D/YYYY, MM/DD/YYYY and ISO
+  let swept = 0
+  for (const year of ['2024', '2026', '2100', '2000']) for (let m = 0; m <= 13; m++) for (let d = 0; d <= 32; d++) {
+    const [mm, dd] = [String(m).padStart(2, '0'), String(d).padStart(2, '0')]
+    for (const value of [`${m}/${d}/${year}`, `${mm}/${dd}/${year}`, `${year}-${mm}-${dd}`]) { assert.equal(day.get(value).d, parent.cutoverLotBusinessDay(value), value); swept++ }
+  }
+  // what SQLite's trim() and date() tolerate and V8 does not (and back): both twins must refuse the same text
+  for (const value of ['\t2026-09-12', '2026-09-12\n', ' 08/24/2026', '08/24/2026\t', '2026-09-12 10:00:00\n', '2026-09-1210:00:00', '2026-09-12TT10:00',
+    '2026-09-12T23:30:00+0700', '2026-09-12T23:30:00 Z', '2026-09-12T23:30:00 +07:00', '2026-09-12  10:00', '2026-09-12T1:00Z', '１２/01/2026']) {
+    assert.equal(day.get(value).d, parent.cutoverLotBusinessDay(value), JSON.stringify(value))
+  }
+  // timestamp tails built from tokens: no text where the two twins disagree
+  const tokens = ['', '0', '1', '00', '9', '23', ':', '.', 'Z', 'z', 'T', ' ', '+', '-', '07', '0700', '07:00', '\n', '\t', 'x', '59', '60', '123']
+  let state = 1; const next = (n) => (state = (state * 1103515245 + 12345) % 2147483648) % n
+  for (let i = 0; i < 20000; i++) {
+    let value = '2026-09-12' + [' ', 'T', '', 'TT'][next(4)]
+    for (let k = 1 + next(7); k > 0; k--) value += tokens[next(tokens.length)]
+    assert.equal(day.get(value).d, parent.cutoverLotBusinessDay(value), JSON.stringify(value))
+  }
+  assert.equal(swept, 4 * 14 * 33 * 3)
+  for (const [id, name] of [[7, 'X'], [null, ' ACME '], [null, '  '], [null, null], [7, null], [null, 'ÉLAN'], [null, ' Élan '], [null, '\tAcme'], [null, 'Acme\n']]) {
     assert.equal(raw.prepare(`SELECT ${parent.cutoverSupplierKeySql('?1', '?2')} AS k`).get(id, name).k, parent.cutoverSupplierKey({ supplierId: id, supplierName: name }), JSON.stringify([id, name]))
   }
   raw.close()

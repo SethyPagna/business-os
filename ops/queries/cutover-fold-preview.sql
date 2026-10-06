@@ -23,13 +23,21 @@
 --   inexact_pairs          Shop + Warehouse sums that are not an exact
 --                          12-place decimal (the cutover refuses to begin)
 --   max_lots_per_product   most positive lots one moving product has
---   received_date_only / _utc_z / _zoned / _space_time / _other / _null
+--   received_date_only / _utc_z / _zoned / _space_time / _null
 --                          received_at formats of the positive lots
+--   received_slash         slash dates (M/D/YYYY, 1-2 digit parts) read MONTH-FIRST,
+--                          the order of the Aug-28 import's batch(mm/dd/yyyy) column
+--                          that 0077 rewrote: they merge with ISO lots of that day
+--   received_slash_ambiguous  of those, the ones a day-first reading would make
+--                          another real date (both parts <= 12, not equal);
+--                          ops/queries/received-date-format-census.sql shows them
+--   received_other         non-null values with no business day (unparseable,
+--                          not a real date): they never merge
 --   received_next_day_in_cambodia  timestamps at 17:00 UTC or later, whose
 --                          Cambodia business day is the next date
 -- D1 refuses a LIKE/GLOB pattern over 50 bytes ("pattern too complex"); every pattern here is shorter.
 -- Business day = UTC+7; a date-only value is the day as stored; a timestamp
--- without a zone is UTC. Supplier = supplier_id, else lower(trim(name)).
+-- without a zone is UTC; a slash date is month-first. Supplier = supplier_id, else lower(trim(name)).
 -- The fold stage also keeps apart a blend whose average rounds to $0.0000
 -- (terminal roundingSplit); this preview does not model that case. Paired test:
 -- cloudflare/scripts/test-branch-cutover-fold-preview-query-pure.cjs
@@ -53,8 +61,20 @@ WITH br AS MATERIALIZED (
   SELECT b.id, b.variant_product_id AS p, b.unit_cost_usd AS cost, b.received_at,
     CASE WHEN typeof(b.supplier_id) IN ('integer', 'real') AND b.supplier_id = CAST(b.supplier_id AS INTEGER) THEN 'id:' || CAST(b.supplier_id AS INTEGER)
       WHEN trim(COALESCE(b.supplier_name, '')) <> '' THEN 'name:' || lower(trim(b.supplier_name)) ELSE '' END AS sk,
+    -- the business day: branchCutoverParent.ts cutoverLotDaySql('b.received_at'), verbatim (the paired test pins it)
     CASE WHEN trim(b.received_at) GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]' THEN trim(b.received_at)
-      WHEN trim(b.received_at) GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]*' THEN date(trim(b.received_at), '+7 hours') END AS day,
+      WHEN substr(trim(b.received_at),1,10) GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]' AND substr(trim(b.received_at),11,2) GLOB '[T ][0-9]'
+        AND NOT substr(trim(b.received_at),13) GLOB '*[^!-~]*' THEN date(trim(b.received_at), '+7 hours')
+      WHEN date(CASE WHEN trim(b.received_at) GLOB '[0-9][0-9]/[0-9][0-9]/[0-9][0-9][0-9][0-9]' THEN substr(trim(b.received_at),7,4)||'-'||substr(trim(b.received_at),1,2)||'-'||substr(trim(b.received_at),4,2)
+        WHEN trim(b.received_at) GLOB '[0-9]/[0-9][0-9]/[0-9][0-9][0-9][0-9]' THEN substr(trim(b.received_at),6,4)||'-0'||substr(trim(b.received_at),1,1)||'-'||substr(trim(b.received_at),3,2)
+        WHEN trim(b.received_at) GLOB '[0-9][0-9]/[0-9]/[0-9][0-9][0-9][0-9]' THEN substr(trim(b.received_at),6,4)||'-'||substr(trim(b.received_at),1,2)||'-0'||substr(trim(b.received_at),4,1)
+        WHEN trim(b.received_at) GLOB '[0-9]/[0-9]/[0-9][0-9][0-9][0-9]' THEN substr(trim(b.received_at),5,4)||'-0'||substr(trim(b.received_at),1,1)||'-0'||substr(trim(b.received_at),3,1) END)=CASE WHEN trim(b.received_at) GLOB '[0-9][0-9]/[0-9][0-9]/[0-9][0-9][0-9][0-9]' THEN substr(trim(b.received_at),7,4)||'-'||substr(trim(b.received_at),1,2)||'-'||substr(trim(b.received_at),4,2)
+        WHEN trim(b.received_at) GLOB '[0-9]/[0-9][0-9]/[0-9][0-9][0-9][0-9]' THEN substr(trim(b.received_at),6,4)||'-0'||substr(trim(b.received_at),1,1)||'-'||substr(trim(b.received_at),3,2)
+        WHEN trim(b.received_at) GLOB '[0-9][0-9]/[0-9]/[0-9][0-9][0-9][0-9]' THEN substr(trim(b.received_at),6,4)||'-'||substr(trim(b.received_at),1,2)||'-0'||substr(trim(b.received_at),4,1)
+        WHEN trim(b.received_at) GLOB '[0-9]/[0-9]/[0-9][0-9][0-9][0-9]' THEN substr(trim(b.received_at),5,4)||'-0'||substr(trim(b.received_at),1,1)||'-0'||substr(trim(b.received_at),3,1) END THEN CASE WHEN trim(b.received_at) GLOB '[0-9][0-9]/[0-9][0-9]/[0-9][0-9][0-9][0-9]' THEN substr(trim(b.received_at),7,4)||'-'||substr(trim(b.received_at),1,2)||'-'||substr(trim(b.received_at),4,2)
+        WHEN trim(b.received_at) GLOB '[0-9]/[0-9][0-9]/[0-9][0-9][0-9][0-9]' THEN substr(trim(b.received_at),6,4)||'-0'||substr(trim(b.received_at),1,1)||'-'||substr(trim(b.received_at),3,2)
+        WHEN trim(b.received_at) GLOB '[0-9][0-9]/[0-9]/[0-9][0-9][0-9][0-9]' THEN substr(trim(b.received_at),6,4)||'-'||substr(trim(b.received_at),1,2)||'-0'||substr(trim(b.received_at),4,1)
+        WHEN trim(b.received_at) GLOB '[0-9]/[0-9]/[0-9][0-9][0-9][0-9]' THEN substr(trim(b.received_at),5,4)||'-0'||substr(trim(b.received_at),1,1)||'-0'||substr(trim(b.received_at),3,1) END END AS day,
     quote(b.expiry_date) AS ek,
     CASE WHEN typeof(b.unit_cost_usd) IN ('integer', 'real') AND b.unit_cost_usd > 0 THEN 'recorded' WHEN b.unit_cost_usd = 0 THEN 'zero' ELSE 'unknown' END AS cc,
     CASE WHEN qty.tq > 0 THEN 1 ELSE 0 END AS prior,
@@ -118,12 +138,10 @@ WITH br AS MATERIALIZED (
     COALESCE(SUM(CASE WHEN (substr(received_at, 1, 11) GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T' AND substr(received_at, -1) <> 'Z'
       AND (instr(substr(received_at, 12), '+') > 0 OR instr(substr(received_at, 12), '-') > 0)) THEN 1 ELSE 0 END), 0) AS received_zoned,
     COALESCE(SUM(CASE WHEN received_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] *' THEN 1 ELSE 0 END), 0) AS received_space_time,
-    COALESCE(SUM(CASE WHEN received_at IS NOT NULL
-      AND NOT trim(received_at) GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'
-      AND NOT received_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T*Z'
-      AND NOT (substr(received_at, 1, 11) GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T' AND substr(received_at, -1) <> 'Z'
-      AND (instr(substr(received_at, 12), '+') > 0 OR instr(substr(received_at, 12), '-') > 0))
-      AND NOT received_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9] *' THEN 1 ELSE 0 END), 0) AS received_other,
+    COALESCE(SUM(CASE WHEN day IS NOT NULL AND instr(received_at, '/') > 0 THEN 1 ELSE 0 END), 0) AS received_slash,
+    COALESCE(SUM(CASE WHEN day IS NOT NULL AND instr(received_at, '/') > 0 AND CAST(substr(day, 9, 2) AS INTEGER) <= 12
+      AND substr(day, 9, 2) <> substr(day, 6, 2) THEN 1 ELSE 0 END), 0) AS received_slash_ambiguous,
+    COALESCE(SUM(CASE WHEN received_at IS NOT NULL AND day IS NULL THEN 1 ELSE 0 END), 0) AS received_other,
     COALESCE(SUM(CASE WHEN received_at IS NULL THEN 1 ELSE 0 END), 0) AS received_null,
     COALESCE(SUM(CASE WHEN length(trim(received_at)) > 10
       AND date(trim(received_at), '+7 hours') <> substr(trim(received_at), 1, 10) THEN 1 ELSE 0 END), 0) AS received_next_day_in_cambodia
@@ -142,6 +160,7 @@ SELECT
     + (SELECT COUNT(*) FROM branch_batch_stock s JOIN branch_batch_stock t ON t.batch_id = s.batch_id AND t.branch_id = br.tgt
     WHERE s.branch_id = br.src AND s.quantity > 0 AND CAST(printf('%.12f', s.quantity + t.quantity) AS REAL) <> s.quantity + t.quantity) AS inexact_pairs,
   (SELECT COALESCE(MAX(n), 0) FROM (SELECT COUNT(*) AS n FROM l1 GROUP BY p)) AS max_lots_per_product,
-  la.received_date_only, la.received_utc_z, la.received_zoned, la.received_space_time, la.received_other, la.received_null,
+  la.received_date_only, la.received_utc_z, la.received_zoned, la.received_space_time, la.received_slash, la.received_slash_ambiguous,
+  la.received_other, la.received_null,
   la.received_next_day_in_cambodia
 FROM br, fa, la
