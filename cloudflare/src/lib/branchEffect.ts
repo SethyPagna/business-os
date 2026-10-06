@@ -111,6 +111,11 @@ export function branchEffectGuardPredicate(json: string): string {
  * give its units back to the SURVIVOR (same product, same received date) --
  * restocking the folded id would re-create the second same-date lot the merge
  * removed. Read from the consolidation's own audit rows; empty when none ran.
+ *
+ * A lot the consolidation never touched is also answered: one that was fully sold at the retired branch before the
+ * cutover (nothing to move, so it was not folded) and has no stock at `branchId` is given back to the lot of the SAME
+ * product, business day (UTC+7), expiry and supplier that holds stock there now -- restocking its own id would re-create
+ * the same-date split the merge removed. A lot that holds stock at `branchId` is never remapped.
  */
 export async function foldedLotSurvivors(db: D1Compat, branchId: number, batchIds: readonly number[]): Promise<Map<number, number>> {
   const survivors = new Map<number, number>()
@@ -126,6 +131,26 @@ export async function foldedLotSurvivors(db: D1Compat, branchId: number, batchId
     const folded = Number(row.folded)
     const survivor = Number(row.survivor)
     if (Number.isSafeInteger(folded) && Number.isSafeInteger(survivor) && survivor > 0) survivors.set(folded, survivor)
+  }
+  const unmapped = ids.filter((id) => !survivors.has(id))
+  if (unmapped.length) {
+    const supplierKey = (alias: string) => `CASE WHEN typeof(${alias}.supplier_id) IN ('integer','real') AND ${alias}.supplier_id=CAST(${alias}.supplier_id AS INTEGER) THEN 'id:'||CAST(${alias}.supplier_id AS INTEGER) WHEN trim(coalesce(${alias}.supplier_name,''))<>'' THEN 'name:'||lower(trim(${alias}.supplier_name)) ELSE '' END`
+    // Two reserved parameters (the branch id, twice); the lot ids are chunked under the D1 100-parameter limit.
+    const sameDay = await selectInChunks(unmapped, 2, (chunk) => db.prepare(`SELECT x.id AS lot, MIN(c.id) AS survivor
+      FROM product_batches x
+      JOIN product_batches c ON c.variant_product_id=x.variant_product_id AND c.id<>x.id
+      JOIN branch_batch_stock s ON s.batch_id=c.id AND s.branch_id=? AND s.quantity>0
+      WHERE x.id IN (${chunk.map(() => '?').join(',')})
+        AND NOT EXISTS(SELECT 1 FROM branch_batch_stock h WHERE h.batch_id=x.id AND h.branch_id=? AND h.quantity>0)
+        AND date(x.received_at,'+7 hours') IS NOT NULL AND date(c.received_at,'+7 hours')=date(x.received_at,'+7 hours')
+        AND COALESCE(x.expiry_date,'')=COALESCE(c.expiry_date,'')
+        AND ${supplierKey('x')}=${supplierKey('c')}
+      GROUP BY x.id`).all<{ lot: number; survivor: number }>([branchId, ...chunk, branchId]))
+    for (const row of sameDay) {
+      const lot = Number(row.lot)
+      const survivor = Number(row.survivor)
+      if (Number.isSafeInteger(lot) && Number.isSafeInteger(survivor) && survivor > 0) survivors.set(lot, survivor)
+    }
   }
   return survivors
 }

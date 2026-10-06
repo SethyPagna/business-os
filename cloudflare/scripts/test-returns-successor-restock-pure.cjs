@@ -691,6 +691,40 @@ const movementRows = () => rawDb.prepare('SELECT movement_type, branch_id, branc
 async function withRoute(appToUse, fn) { const previous = app; app = appToUse; try { return await fn() } finally { app = previous } }
 
 async function residualChecks() {
+  // E7: a lot fully sold at Shop before the cutover was never folded (nothing to move). A return of that sale lands in the
+  // lot of the same product, day, expiry and supplier that holds stock at LC Store, never in a second same-date lot.
+  await check('RETURN into a lot sold out at Shop before the cutover lands in the same-day lot at LC Store (no same-date split)', async () => {
+    const soldOutLot = (extra = '') => {
+      rawDb.prepare(`INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, received_at, is_active, batch_number${extra ? ', ' + extra.split('=')[0] : ''}) VALUES (4, 1, 'lot-d', 'lot-d', '2026-01-01', 1, 4${extra ? ', ' + extra.split('=')[1] : ''})`).run()
+      rawDb.prepare('UPDATE sale_items SET batch_id = 4 WHERE id = 1').run()
+      rawDb.prepare('UPDATE sale_item_batch_allocations SET batch_id = 4 WHERE sale_item_id = 1').run()
+    }
+    seedWorld('after'); seedLots('after', 1); soldOutLot()
+    const { status, json } = await req('POST', '/', returnBody({ client_request_id: 'sold-out-lot-1' }))
+    assert.strictEqual(status, 200, JSON.stringify(json))
+    assert.strictEqual(stockOf(1, 1), 13, 'the 3 units went into the same-day lot that holds stock at LC Store')
+    assert.strictEqual(stockOf(4, 1), null, 'no stock row was created for the sold-out lot: no second same-date lot')
+    assert.strictEqual(rawDb.prepare('SELECT batch_id FROM return_items WHERE return_id = ?').get([json.id]).batch_id, 1)
+    // Wrong implementations: a different expiry, a different supplier or a different day each keep the lot apart.
+    for (const extra of ["expiry_date='2027-01-01'", "supplier_name='Acme'", "received_at='2026-01-02'"]) {
+      seedWorld('after'); seedLots('after', 1)
+      const [column, value] = extra.split('=')
+      if (column === 'received_at') { soldOutLot(); rawDb.prepare('UPDATE product_batches SET received_at = ? WHERE id = 4').run([value.replace(/'/g, '')]) } else soldOutLot(extra)
+      const apart = await req('POST', '/', returnBody({ client_request_id: 'sold-out-apart-' + column }))
+      assert.strictEqual(apart.status, 200, JSON.stringify(apart.json))
+      assert.strictEqual(stockOf(4, 1), 3, `${column} differs: the lot keeps its own identity at LC Store`)
+      assert.strictEqual(stockOf(1, 1), 10)
+    }
+    // A lot that HOLDS stock at the landing branch is never remapped.
+    seedWorld('after'); seedLots('after', 1); soldOutLot()
+    rawDb.prepare('INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (4, 1, 2)').run()
+    rawDb.prepare('UPDATE branch_stock SET quantity = 12 WHERE product_id = 1 AND branch_id = 1').run()
+    const held = await req('POST', '/', returnBody({ client_request_id: 'held-lot-1' }))
+    assert.strictEqual(held.status, 200, JSON.stringify(held.json))
+    assert.strictEqual(stockOf(4, 1), 5, 'a lot with stock at LC Store takes its own units back')
+    assert.strictEqual(stockOf(1, 1), 10)
+  })
+
   await check('EDIT of a return made at Shop before the consolidation reverses and restocks at LC Store in the merged lot', async () => {
     const id = await preConsolidationReturn(returnsRoute.default)
     assert.deepStrictEqual(lotsSnapshot(), { lot1AtStore: null, lot3AtStore: null, lot1AtOld: 10, lot3AtOld: 7, store: null, old: 17 })
