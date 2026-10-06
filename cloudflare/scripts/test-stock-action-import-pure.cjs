@@ -40,7 +40,9 @@ const batchCode = loadCompiled('batchCode.ts', {})
 const importNumbers = loadCompiled('importNumbers.ts', {})
 const resolver = loadCompiled('stockActionResolver.ts', {})
 const branchRoles = loadCompiled('branchRoles.ts', {})
-const importBranchAuthority = loadCompiled('importBranchAuthority.ts', { './branchRoles': branchRoles })
+// CUTOVER-LR: the authority answers a retired branch through the branch-effect kernel.
+const branchEffect = loadCompiled('branchEffect.ts', { './branchRoles': branchRoles, './sqlBinding': loadCompiled('sqlBinding.ts', {}) })
+const importBranchAuthority = loadCompiled('importBranchAuthority.ts', { './branchRoles': branchRoles, './branchEffect': branchEffect })
 const subject = loadCompiled('stockActionImport.ts', {
   './importBranchAuthority': importBranchAuthority,
   './batchCode': batchCode,
@@ -187,6 +189,19 @@ assert.deepStrictEqual(afterAdd.plan.branchActions, [{ branchId: 1, direction: '
 assert.deepStrictEqual(afterAdd.branchRefs.map((ref) => [ref.slot, ref.branchId, ref.branchName, ref.addressedName || null, ref.pending]),
   [['shop', 1, 'LC Store', 'Shop', false], ['warehouse', 1, 'LC Store', null, false]], 'the shop column keeps its provenance label; nothing is pending')
 assert.deepStrictEqual(afterAdd.branchNotes, ['Shop 2 + Warehouse 3 -> LC Store 5'], 'the preview says what the columns became')
+// CUTOVER-LR: that shop column is a PREVIEW until the operator confirms its landing (the apply refuses a pending
+// column); confirmed, the same plan stands and the column carries the retired branch it addressed.
+assert.deepStrictEqual(afterAdd.branchRefs.map((ref) => [ref.slot, ref.addressedBranchId ?? null, ref.redirectPending ?? false]),
+  [['shop', 2, true], ['warehouse', null, false]], 'no confirmed target: the shop column is pending, addressed to Old Shop')
+const afterConfirmed = subject.resolveUnifiedStockImportRows([
+  { _rowNumber: 2, name: 'Serum', barcode: 'ABC', shop: '2', warehouse: '3', date: '08/27/2026', action: 'add' },
+], 'direct', products, lcAfter, lcStock, { redirectTarget: 1 })[0]
+assert.deepStrictEqual(afterConfirmed.plan.branchActions, [{ branchId: 1, direction: 'add', quantity: 5 }], 'the confirmed landing keeps the same plan')
+assert.deepStrictEqual(afterConfirmed.branchRefs.map((ref) => [ref.slot, ref.branchId, ref.addressedName || null, ref.addressedBranchId ?? null, ref.redirectPending ?? false]),
+  [['shop', 1, 'Shop', 2, false], ['warehouse', 1, null, null, false]], 'confirmed: addressed to Shop, nothing pending')
+assert.throws(() => subject.resolveUnifiedStockImportRows([
+  { _rowNumber: 2, name: 'Serum', barcode: 'ABC', shop: '2', date: '08/27/2026', action: 'add' },
+], 'direct', products, lcAfter, lcStock, { redirectTarget: 2 }), (error) => error.code === 'branch_redirect_target_invalid', 'the disabled branch is not a landing')
 const afterSet = subject.resolveUnifiedStockImportRows([
   { _rowNumber: 2, name: 'Serum', barcode: 'ABC', shop: '10', warehouse: '5', date: '2026-08-27', action: '' },
 ], 'reconcile', products, lcAfter, lcStock)[0]

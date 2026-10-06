@@ -5,7 +5,7 @@
 
 import type { D1Compat } from './db'
 import { buildInClause, chunkForBinding } from './sqlBinding'
-import { IMPORT_BRANCH_COLUMNS_SQL, indexCanonicalImportBranches, type CanonicalImportBranchRow } from './importBranchAuthority'
+import { IMPORT_BRANCH_COLUMNS_SQL, importBranchRedirectTarget, indexCanonicalImportBranches, type CanonicalImportBranchRow } from './importBranchAuthority'
 import { normalizeSearchText } from './searchMatch'
 import { identityBarcodeClassKey, identityBarcodeKeySql } from './productIdentity'
 import {
@@ -148,6 +148,9 @@ export async function classifyUnifiedStockActions(
     }
   }
 
-  return resolveUnifiedStockImportRows(rows, getUnifiedStockMode(policyJson), products, branches, currentStock)
+  // A column addressed to a retired branch lands only on the branch the operator confirmed when the job was
+  // approved (CUTOVER-LR); until then the successor is a preview and apply refuses the row.
+  return resolveUnifiedStockImportRows(rows, getUnifiedStockMode(policyJson), products, branches, currentStock,
+    { redirectTarget: importBranchRedirectTarget(policyJson) })
     .map(resultFromResolved)
 }

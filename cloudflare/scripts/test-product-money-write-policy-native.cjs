@@ -47,6 +47,8 @@ const real = new Set(['acquisitionCostAccess', 'productWrites', 'moneyPrecision'
 const unavailable = name => new Proxy(function () {}, { get: (_target, key) => unavailable(`${name}.${String(key)}`), apply: () => { throw new Error(`Unexpected fixture dependency: ${name}`) }, construct: () => { throw new Error(`Unexpected fixture dependency: ${name}`) } })
 class ProductImageAssetError extends Error {}
 const services = {
+  // CUTOVER-LR: the real disabled-branch redirect helper (with its branchEffect/branchRoles/sqlBinding deps).
+  branchRedirectWrite: require('./harness/branch_redirect_write.cjs'),
   undoAppliers: { registerMergeFold: () => {}, registerProductMergeGroupRedo: () => {}, MERGE_REPARENT_TABLES: [] },
   auth: { requireAuth: async (c, next) => { c.set('user', c.env.TEST_USER); await next() } },
   permissions: {

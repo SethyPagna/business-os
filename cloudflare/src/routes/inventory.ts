@@ -71,6 +71,7 @@ import {
   readOpenTaggedLots, readTaggedLotGroups, TAGGED_LOT_CONFLICT_CODE,
 } from '../lib/damagedLotActions'
 import { addMoney4, multiplyMoney4, roundMoney4 } from '../lib/moneyPrecision'
+import { addressedStatements, branchEffectRefusal, branchRedirectGuardRefusal, branchRedirectTarget, isBranchRedirectGuardError, landingLotId, requestBranchLanding } from '../lib/branchRedirectWrite'
 
 // Inventory routes, ported from backend/src/routes/inventory.ts.
 //
@@ -149,7 +150,7 @@ app.post('/sessions', async (c) => {
   const body = await c.req.json<unknown>().catch(() => null)
   const stockSession = await import('../lib/stockSession')
   try {
-    const receipt = await stockSession.commitStockSession(c.env, c.get('user'), body)
+    const receipt = await stockSession.commitStockSession(c.env, c.get('user'), body, () => branchRedirectTarget(c))
     if (!receipt.replayed) c.executionCtx.waitUntil(stockSession.notifyStockSession(c.env, receipt))
     return c.json(receipt)
   } catch (error) {
@@ -1504,6 +1505,9 @@ export async function runAdjustAction(c: InventoryContext, body: Record<string, 
       try { return await runAdjustActionKernel(c, body, markWritten, atomicMark) }
       catch (error) {
         if (isReceivingBranchError(error)) return c.json(RECEIVING_BRANCH_INACTIVE, 409)
+        const refusal = branchEffectRefusal(error)
+        if (refusal) return c.json(refusal, 409)
+        if (isBranchRedirectGuardError(error)) return c.json(await branchRedirectGuardRefusal(getDb(c.env), Number(body.branchId), () => branchRedirectTarget(c)), 409)
         throw error
       }
     },
@@ -1637,7 +1641,7 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
       setScope: body.setScope as 'lot' | 'branch', reason: reason || '', conditionTag,
       ...(expectedLotQuantity === undefined ? {} : { expectedLotQuantity }),
       ...(expectedBranchQuantity === undefined ? {} : { expectedBranchQuantity }),
-    }, markWritten)
+    }, markWritten, () => branchRedirectTarget(c))
     if (result.status === 200 && Number(result.body.quantity) > 0 && !result.body.replayed) {
       c.executionCtx.waitUntil(Promise.all([
         audit(c.env, user?.id ?? null, actorSnapshot(user), 'stock_set', 'product', productId, {
@@ -1690,15 +1694,18 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
   // instead of two sequential ones (`branchId` only needs `defaultBranchId`
   // when the request omitted it -- an explicit requestedBranchId already
   // skips that query, unchanged from before).
-  const [product, branchId] = await Promise.all([
+  const [product, addressedBranchId] = await Promise.all([
     unlockPricing
       ? db.prepare(`SELECT ${STOCK_ROW_COLUMNS} FROM products WHERE id = @id`).get<StockRowFields>({ id: productId })
       : db.prepare('SELECT id, name FROM products WHERE id = @id').get<{ id: number; name: string }>({ id: productId }),
     requestedBranchId ? Promise.resolve(requestedBranchId) : defaultBranchId(c.env),
   ])
   if (!product) return c.json({ error: 'Product not found' }, 404)
-  if (!branchId) return c.json({ error: 'An active branch is required before stock can be changed' }, 400)
-  const branch = await db.prepare('SELECT id, name FROM branches WHERE id = @id').get<{ id: number; name: string }>({ id: branchId })
+  if (!addressedBranchId) return c.json({ error: 'An active branch is required before stock can be changed' }, 400)
+  // One branches read gives both the landing (a disabled branch -> the confirmed active one) and its name.
+  const { landing, branch } = await requestBranchLanding(db, addressedBranchId, () => branchRedirectTarget(c))
+  const branchId = landing.effectBranchId
+  if (landing.redirected && body.batchId != null) body = { ...body, batchId: await landingLotId(db, landing, body.batchId) }
 
   // 'set' ("Set stock to X") is a UI convenience only -- it has never had
   // its own real movement semantics (no batch concept, see the old
@@ -1733,7 +1740,7 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
   // like the mandatory-reason check above, so no path can record goods with an
   // invented supplier or an invented cost.
   const isReceipt = type === 'add'
-  if (isReceipt) await requireReceivingBranch(db, body.branchId != null ? Number(body.branchId) : branchId)
+  if (isReceipt) await requireReceivingBranch(db, body.branchId != null && !landing.redirected ? Number(body.branchId) : branchId)
   // A top-up of an EXISTING lot inherits that lot's supplier -- first
   // attribution sticks server-side, so the pickers send no supplier for an
   // attributed lot and show the locked name instead. Read it rather than
@@ -2109,7 +2116,7 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
     // A physical count correction is not a new purchase. Preserve lot price,
     // supplier/payment, cumulative received money and the catalog override.
     // Both stock ledgers and the non-purchase movement share the lot guard.
-    await db.batch([
+    await db.batch(addressedStatements(landing, [
       receivingBranchAssertion(branchId),
       { sql: `INSERT INTO stock_session_guards(guard_value) SELECT CASE WHEN EXISTS(
           SELECT 1 FROM product_batches WHERE id=@batchId AND variant_product_id=@productId
@@ -2129,7 +2136,7 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
           quantity, ...addMovementCost, reason: setToNote ? `${reason} (${setToNote})` : reason,
           referenceId: sessionId, userId: user?.id ?? null, userName: actorSnapshot(user), batchId: correctionLot.id } },
       { sql: 'DELETE FROM stock_session_guards', params: {} },
-    ])
+    ]))
     resolvedBatchId = correctionLot.id
     batchNumber = correctionLot.batch_number
     lotCode = correctionLot.lot_code
@@ -2153,7 +2160,7 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
           receiptCostPreimage: receiptUnitCostUsd == null ? undefined : unlockedReceiptCostPreimage,
           receiptLotTarget: unlockedReceiptLotTarget,
         })
-        await db.batch([
+        await db.batch(addressedStatements(landing, [
           receivingBranchAssertion(branchId),
           ...plan.statements,
           mergedPricingStatement,
@@ -2180,7 +2187,7 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
             },
           },
           ...(receiptUnitCostUsd == null && !unlockedReceiptLotTarget ? [] : [{ sql: 'DELETE FROM stock_session_guards', params: {} }]),
-        ])
+        ]))
         const received = await db.prepare(
           'SELECT id,batch_number,lot_code FROM product_batches WHERE variant_product_id=@productId AND batch_key=@batchKey',
         ).get<{ id: number; batch_number: number | null; lot_code: string }>({ productId: targetProductId, batchKey: plan.batchKey })
@@ -2223,6 +2230,7 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
       }
     } catch (err) {
       if (isReceivingBranchError(err)) return c.json(RECEIVING_BRANCH_INACTIVE, 409)
+      if (isBranchRedirectGuardError(err)) throw err
       return c.json({ error: err instanceof Error ? err.message : 'Failed to receive stock' }, 400)
     }
     // P10-4 (owner ruling 2026-09-16): a receipt just wrote a new lot cost --
@@ -2279,13 +2287,14 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
         // it; a multi-lot spread or a legacy-aggregate remainder is not.
         resolvedBatchId = plan.batchIds.length === 1 && plan.remainder === 0 ? plan.batchIds[0] : null
         const mark = atomicMark?.statement() ?? null
-        await db.batch([
+        await db.batch(addressedStatements(landing, [
           ...(mark ? [mark] : []),
           ...plan.statements,
           ...(conditionTag ? holdRemovedStatements(conditionTag) : [movementRowStatement()]),
-        ])
+        ]))
       } catch (err) {
         if (err instanceof RangeError) return c.json({ error: 'Movement cost is out of range' }, 400)
+        if (isBranchRedirectGuardError(err)) throw err
         if (isStockRemovalConflict(err)) return c.json(STOCK_REMOVAL_CONFLICT, 409)
         return c.json({ error: err instanceof Error ? err.message : 'Failed to remove stock' }, 400)
       }
@@ -2305,13 +2314,14 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
   // at what they cost -- but as damage_out, which a loss report must not
   // count; the loss is booked once, when the held row is disposed of.
   if (conditionTag && type === 'remove' && delta !== 0 && !movementWrittenAtomically) {
-    await db.batch(holdRemovedStatements(conditionTag))
+    await db.batch(addressedStatements(landing, holdRemovedStatements(conditionTag)))
     movementWrittenAtomically = true
   }
 
   if (delta !== 0 && !movementWrittenAtomically) {
     const movement = movementRowStatement()
-    await db.prepare(movement.sql).run(movement.params)
+    if (landing.redirected) await db.batch(addressedStatements(landing, [movement]))
+    else await db.prepare(movement.sql).run(movement.params)
   }
 
   // P3-L6 HOLD (restock with a tag). The receipt above ran UNCHANGED: a real
@@ -2346,7 +2356,7 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
       if (isStockRemovalConflict(err)) return c.json(STOCK_REMOVAL_CONFLICT, 409)
       return c.json({ error: err instanceof Error ? err.message : 'Failed to hold received stock as tagged' }, 400)
     }
-    await db.batch(planHoldAsTagged({
+    await db.batch(addressedStatements(landing, planHoldAsTagged({
       productId: targetProductId,
       productName: targetProductName,
       branchId,
@@ -2364,7 +2374,7 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
       }),
       referenceId: sessionId,
       actor: { userId: user?.id ?? null, userName: actorSnapshot(user) },
-    }))
+    })))
   }
 
   // `type` is always 'add'/'remove' here (a 'set' request was converted
@@ -2783,15 +2793,22 @@ app.post('/move-row', async (c) => {
   if (!source) return c.json({ error: 'Source product not found' }, 404)
   if (!destination) return c.json({ error: 'Destination product not found' }, 404)
 
-  const branchId = requestedBranchId || (await defaultBranchId(c.env))
-  if (!branchId) return c.json({ error: 'An active branch is required before stock can be moved' }, 400)
-  const branch = await db.prepare('SELECT id, name FROM branches WHERE id = @id').get<{ id: number; name: string }>({ id: branchId })
-  // The moved units arrive as a fresh lot at this branch, so it must be active:
-  // a stale tab naming a retired branch is refused here and again inside the batch.
-  try { await requireReceivingBranch(db, branchId) } catch (error) {
+  const addressedBranchId = requestedBranchId || (await defaultBranchId(c.env))
+  if (!addressedBranchId) return c.json({ error: 'An active branch is required before stock can be moved' }, 400)
+  // The moved units arrive as a fresh lot at this branch, so it must be active: a branch that has been disabled
+  // asks for the confirmed active branch (and the move happens there), an unknown one is refused, and the batch
+  // re-proves both.
+  let landing, branch
+  try {
+    ;({ landing, branch } = await requestBranchLanding(db, addressedBranchId, () => branchRedirectTarget(c)))
+    await requireReceivingBranch(db, landing.effectBranchId)
+  } catch (error) {
     if (isReceivingBranchError(error)) return c.json(RECEIVING_BRANCH_INACTIVE, 409)
+    const refusal = branchEffectRefusal(error)
+    if (refusal) return c.json(refusal, 409)
     throw error
   }
+  const branchId = landing.effectBranchId
 
   const available = await branchStockQty(c.env, sourceProductId, branchId)
   if (quantity > available) return c.json({ error: `Cannot move ${quantity} - only ${available} available in ${branch?.name || 'this branch'}` }, 400)
@@ -2827,7 +2844,7 @@ app.post('/move-row', async (c) => {
     return c.json({ error: err instanceof Error ? err.message : 'Failed to move stock' }, 400)
   }
   try {
-    await db.batch([
+    await db.batch(addressedStatements(landing, [
       receivingBranchAssertion(branchId),
       ...removal.statements,
       ...receipt.statements,
@@ -2846,9 +2863,10 @@ app.post('/move-row', async (c) => {
                 (SELECT id FROM product_batches WHERE variant_product_id=@productId AND batch_key=@batchKey))`,
         params: { productId: destinationProductId, productName: destination.name, branchId, branchName: branch?.name || null, quantity, reason, userId: user?.id ?? null, userName: actorSnapshot(user), batchKey: receipt.batchKey },
       },
-    ])
+    ]))
   } catch (err) {
     if (isReceivingBranchError(err)) return c.json(RECEIVING_BRANCH_INACTIVE, 409)
+    if (isBranchRedirectGuardError(err)) return c.json(await branchRedirectGuardRefusal(db, addressedBranchId, () => branchRedirectTarget(c)), 409)
     if (isStockRemovalConflict(err)) {
       return c.json({ ...STOCK_REMOVAL_CONFLICT, error: 'The stock changed while it was being moved. Nothing was moved; refresh and try again.' }, 409)
     }
@@ -2884,7 +2902,15 @@ app.post('/movements/:id/revert', async (c) => {
     FROM inventory_movements WHERE id = @id
   `).get<RevertMovementRow>({ id })
   if (!mv) return c.json({ error: 'Stock movement not found', code: 'movement_not_found' }, 404)
-  const result = await applyMovementRevert(db, mv, { userId: user?.id ?? null, userName: actorSnapshot(user) })
+  let result: Awaited<ReturnType<typeof applyMovementRevert>>
+  try {
+    result = await applyMovementRevert(db, mv, { userId: user?.id ?? null, userName: actorSnapshot(user) }, () => branchRedirectTarget(c))
+  } catch (error) {
+    const refusal = branchEffectRefusal(error)
+    if (refusal) return c.json(refusal, 409)
+    if (isBranchRedirectGuardError(error)) return c.json(await branchRedirectGuardRefusal(db, Number(mv.branch_id), () => branchRedirectTarget(c)), 409)
+    throw error
+  }
   if (!result.ok) return c.json({ error: result.error, code: result.code, ...(result.params ? { params: result.params } : {}) }, result.status)
   const productId = Number(mv.product_id) || 0
   await audit(c.env, user?.id ?? null, actorSnapshot(user), 'stock_revert', 'product', productId || null, {
@@ -2906,7 +2932,7 @@ app.post('/stock-in-lines/:movementId/edit', async (c) => {
   const body = await c.req.json<Record<string, unknown>>().catch(() => null)
   if (!body || typeof body !== 'object' || Array.isArray(body)) return c.json({ error: 'A JSON body is required.', code: 'invalid_request' }, 400)
   const { applyStockInLineEdit, notifyStockInLineEdit } = await import('../lib/stockInLineEdit')
-  const result = await applyStockInLineEdit(getDb(c.env), c.get('user'), movementId, body)
+  const result = await applyStockInLineEdit(getDb(c.env), c.get('user'), movementId, body, () => branchRedirectTarget(c))
   if (result.status === 200 && !result.body.unchanged && !result.body.replayed) c.executionCtx.waitUntil(notifyStockInLineEdit(c.env))
   return c.json(result.body, result.status as 200)
 })
@@ -2986,7 +3012,13 @@ async function runTaggedLotAction(c: InventoryContext, action: 'dispose' | 'rest
     'adjust',
     { ...body, taggedLotAction: action },
     (value, status) => c.json(value as never, status as never),
-    (_markWritten, atomicMark) => runTaggedLotActionKernel(c, action, body, atomicMark),
+    async (_markWritten, atomicMark) => {
+      try { return await runTaggedLotActionKernel(c, action, body, atomicMark) } catch (error) {
+        const refusal = branchEffectRefusal(error)
+        if (refusal) return c.json(refusal, 409)
+        throw error
+      }
+    },
   )
 }
 
@@ -3010,7 +3042,9 @@ async function runTaggedLotActionKernel(c: InventoryContext, action: 'dispose' |
   const product = await db.prepare('SELECT id, name, cost_price_usd, cost_price_khr FROM products WHERE id = @id')
     .get<{ id: number; name: string; cost_price_usd: number | null; cost_price_khr: number | null }>({ id: productId })
   if (!product) return c.json({ error: 'Product not found' }, 404)
-  const branch = await db.prepare('SELECT id, name FROM branches WHERE id = @id').get<{ id: number; name: string }>({ id: branchId })
+  // The held lots stay the record of the branch they were held at; the units a Restore puts back on sale and the
+  // movement of either action land on the active branch the operator confirmed once that branch is disabled.
+  const { landing, branch } = await requestBranchLanding(db, branchId, () => branchRedirectTarget(c))
 
   const lots = await readOpenTaggedLots(db, { productId, branchId, tag: tagResult.tag })
   const { takes, uncovered } = allocateTaggedLots(lots, quantity)
@@ -3019,13 +3053,16 @@ async function runTaggedLotActionKernel(c: InventoryContext, action: 'dispose' |
     return c.json({ error: `Only ${held} ${tagResult.tag} unit(s) are held at ${branch?.name || 'this branch'}, ${quantity} requested.` }, 400)
   }
 
+  const landingTakes = landing.redirected && action === 'restore'
+    ? await Promise.all(takes.map(async (take) => ({ ...take, batchId: take.batchId == null ? null : Number(await landingLotId(db, landing, take.batchId)) })))
+    : takes
   const change = {
     productId,
     productName: product.name,
-    branchId,
+    branchId: landing.effectBranchId,
     branchName: branch?.name || null,
     tag: tagResult.tag,
-    takes,
+    takes: landingTakes,
     reason,
     fallbackUnitCostUsd: product.cost_price_usd ?? null,
     fallbackUnitCostKhr: product.cost_price_khr ?? null,
@@ -3033,12 +3070,13 @@ async function runTaggedLotActionKernel(c: InventoryContext, action: 'dispose' |
   }
   try {
     const mark = atomicMark.statement()
-    await ordinaryBusinessBatch(db, [
+    await ordinaryBusinessBatch(db, addressedStatements(landing, [
       ...(mark ? [mark] : []),
       ...(action === 'dispose' ? planDisposeTagged(change) : planRestoreTagged(change)),
-    ])
+    ]))
   } catch (error) {
     if (error instanceof RangeError) return c.json({ error: 'Movement cost is out of range' }, 400)
+    if (isBranchRedirectGuardError(error)) return c.json(await branchRedirectGuardRefusal(db, branchId, () => branchRedirectTarget(c)), 409)
     // The in-batch held-lot guard refused: a concurrent sale or action took
     // these units after they were read. Nothing was written.
     if (isTaggedLotConflict(error)) {
@@ -3049,12 +3087,13 @@ async function runTaggedLotActionKernel(c: InventoryContext, action: 'dispose' |
   atomicMark.committed()
 
   await audit(c.env, user?.id ?? null, actorSnapshot(user), action === 'dispose' ? 'stock_tagged_dispose' : 'stock_tagged_restore', 'product', productId, {
-    branchId, conditionTag: tagResult.tag, quantity, reason, lotIds: takes.map((take) => take.lotId),
+    branchId: landing.effectBranchId, conditionTag: tagResult.tag, quantity, reason, lotIds: takes.map((take) => take.lotId),
+    ...(landing.redirected ? { addressedBranchId: branchId } : {}),
   })
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'update', id: productId }))
   c.executionCtx.waitUntil(broadcast(c.env, 'inventory', { action: 'adjust', id: productId }))
   c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
-  return c.json({ success: true, productId, branchId, conditionTag: tagResult.tag, quantity })
+  return c.json({ success: true, productId, branchId: landing.effectBranchId, conditionTag: tagResult.tag, quantity })
 }
 
 app.post('/tagged-lots/dispose', (c) => runTaggedLotAction(c, 'dispose'))

@@ -197,6 +197,7 @@ import {
   normalizeMultiValue, validateProductImageGallery, validatePreservedProductImageGallery, ProductImageLimitError,
 } from '../lib/productWrites'
 import { actorSnapshot, actorId } from '../lib/actorSnapshot'
+import { branchRedirectTarget } from '../lib/branchRedirectWrite'
 import { createProductWithInitialStock, productCreateDestination, productCreateErrorResponse, prepareProductMoneyWrite, readProductMoneyPlan, ProductMoneyWriteError, PRODUCT_MONEY_PLAN, PRODUCT_MONEY_VERSION } from '../lib/productWrites'
 export {
   PRODUCT_SKIP_KEYS, nowIso, tableColumns, clampNegativeStockQuantity,
@@ -1945,7 +1946,7 @@ app.post('/', async (c) => {
   // merges such rows, so manual create must not mint a silent twin the
   // import path would never allow. Same name with a DIFFERENT REAL barcode
   // stays a legitimate child row and passes through untouched.
-  try { await productCreateDestination(c.env, body) } catch (error) {
+  try { await productCreateDestination(c.env, body, () => branchRedirectTarget(c)) } catch (error) {
     const response = productCreateErrorResponse(error)
     if (response) return c.json(response.body, response.status)
     throw error
@@ -2005,7 +2006,7 @@ app.post('/', async (c) => {
   if (normalizedBrands !== undefined) body.brands = normalizedBrands
 
   let created
-  try { created = await createProductWithInitialStock(c.env, body, { name, is_active: body.is_active == null ? 1 : body.is_active }, imageLimitForUser(user)) } catch (error) {
+  try { created = await createProductWithInitialStock(c.env, body, { name, is_active: body.is_active == null ? 1 : body.is_active }, imageLimitForUser(user), undefined, () => branchRedirectTarget(c)) } catch (error) {
     const response = productCreateErrorResponse(error)
     if (response) return c.json(response.body, response.status)
     throw error
@@ -2668,7 +2669,7 @@ app.post('/variant', async (c) => {
   }
   if (!changesImages) omitUnchangedProductImageFields(body)
   let created
-  try { created = await createProductWithInitialStock(c.env, body, { name, is_active: 1 }, imageLimitForUser(user)) } catch (error) {
+  try { created = await createProductWithInitialStock(c.env, body, { name, is_active: 1 }, imageLimitForUser(user), undefined, () => branchRedirectTarget(c)) } catch (error) {
     const response = productCreateErrorResponse(error)
     if (response) return c.json(response.body, response.status)
     throw error

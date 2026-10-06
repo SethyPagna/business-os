@@ -214,6 +214,7 @@ const inventoryRoute = loadReal('routes/inventory.ts', {
   '../lib/productSalesLedger': productSalesLedger,
   '../lib/productBatches': productBatches,
   '../lib/receivingBranch': receivingBranch,
+  '../lib/branchRedirectWrite': require('./harness/branch_redirect_write.cjs'),
   '../lib/batchCode': batchCode,
   '../lib/stockReceiptGate': stockReceiptGate,
   '../lib/stockSessionMath': loadReal('lib/stockSessionMath.ts', { './moneyPrecision': moneyPrecision }),

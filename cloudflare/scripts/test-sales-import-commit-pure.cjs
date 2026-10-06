@@ -26,6 +26,9 @@ function compileSubject() {
     if (request === './salesStatus') return { RETURN_STATUSES: new Set(['returned', 'partial_return']) }
     if (request === './branchRoles') return compileLib('branchRoles', localRequire)
     if (request === './branchRoleGuards') return compileLib('branchRoleGuards', localRequire)
+    // CUTOVER-LR: the coded redirect refusal and the in-batch redirect predicate come from the kernel.
+    if (request === './branchEffect') return compileLib('branchEffect', localRequire)
+    if (request === './sqlBinding') return compileLib('sqlBinding', localRequire)
     // The REAL receipt-number module, not a stub: an imported sale's receipt
     // id and its legacy-label routing are exactly what this test checks.
     if (request === './receiptNumber') return compileLib('receiptNumber', localRequire)
@@ -424,10 +427,16 @@ function customerMatch(overrides = {}) {
   assert.equal(lcStore.sqlite.prepare(`SELECT COUNT(*) n FROM import_sales_commits`).get().n, 1)
   const retiredShopSale = saleData({ branch_id: 2, items: [{ ...saleData().items[0], branch_id: 2, batch_id: null, batch_label: null }] })
   const stockRoom = consolidated((world) => world.sqlite.prepare(`UPDATE branches SET name = 'Stock room', role = 'warehouse', is_active = 1, successor_branch_id = NULL WHERE id = 2`).run())
-  for (const [label, world, data] of [['retired Old Shop', consolidated(), retiredShopSale], ['warehouse-role branch with a free name', stockRoom, retiredShopSale]]) {
+  // CUTOVER-LR pin change: a receipt that still names the DISABLED Old Shop is refused with the coded redirect
+  // (branch_redirect_required -- the import never records a sale there nor moves it unconfirmed); a warehouse-role
+  // branch keeps the role refusal.
+  for (const [label, world, data, refusal] of [
+    ['retired Old Shop', consolidated(), retiredShopSale, /addressed to a disabled branch/],
+    ['warehouse-role branch with a free name', stockRoom, retiredShopSale, /Sales can only be recorded at a selling branch/],
+  ]) {
     await assert.rejects(
       () => subject.applyHistoricalSaleImport(world.db, { jobId: 'job-cut-reject', rowNumber: 3, data, nowIso: input.nowIso, actor }),
-      /Sales can only be recorded at a selling branch/, label,
+      refusal, label,
     )
     assert.equal(world.sqlite.prepare('SELECT COUNT(*) n FROM sales').get().n, 0, label)
   }

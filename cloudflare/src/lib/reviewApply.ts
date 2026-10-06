@@ -23,6 +23,7 @@ import { audit, buildAuditStatement } from './audit'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from './cache'
 import { createProductWithInitialStock, updateRow, syncProductImageGallery, readProductMoneyPlan } from './productWrites'
+import type { RedirectTarget } from './branchRedirectWrite'
 import { branchUpdateStatements, assertBranchExpectedState, BranchEditConflictError, isBranchEditGuardError, BranchApprovalReceiptError } from './branchWrites'
 import { assertCanonicalBranchSetMutationAllowed, type BranchIdentitySnapshot } from './canonicalBranchIdentity'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt } from './conflictControl'
@@ -45,6 +46,9 @@ export class NoReviewApplierError extends Error {
 export interface ReviewerInfo {
   id: number | null
   name: string | null
+  // The active branch the approver confirmed for a request addressed to a branch that has since been disabled
+  // (X-Branch-Redirect on the approval).
+  redirectTarget?: RedirectTarget
 }
 
 export type ReviewApplyOutcome = { pendingActionMarkedAtomically: boolean; replayedBranchAction?: PendingActionRow }
@@ -177,7 +181,7 @@ registerApplier('products', 'create', 'product', async (env, row, reviewer, wait
   if (changesImages) await assertPendingProductImagePermission(env, row)
   else omitUnchangedProductImageFields(body)
   const { id } = await createProductWithInitialStock(env, body, { name, is_active: body.is_active == null ? 1 : body.is_active }, undefined,
-    { row, reviewer: { reviewedBy: reviewer.id, reviewedByName: reviewer.name } })
+    { row, reviewer: { reviewedBy: reviewer.id, reviewedByName: reviewer.name } }, reviewer.redirectTarget ?? null)
   await bumpVersion(env, 'products')
   await notify(env, waitUntil, 'products', { action: 'create', id })
   return { pendingActionMarkedAtomically: true }

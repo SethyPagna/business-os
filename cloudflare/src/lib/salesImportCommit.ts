@@ -6,6 +6,7 @@ import { WAREHOUSE_NOT_SELLABLE_ERROR, sellingBranchConditionSql } from './branc
 import type { ActorLike } from './actorSnapshot'
 import { buildSaleCreationSnapshot } from './saleCreationSnapshot'
 import { isAnonymousCustomer } from './anonymousCustomer'
+import { BRANCH_REDIRECT_REQUIRED_CODE, BRANCH_REDIRECT_REQUIRED_ERROR, branchEffectGuardPredicate } from './branchEffect'
 
 // 100, not 50, since Part 388: the real Aug-28 sales history holds three
 // genuine receipts of 86/58/55 lines (big wholesale orders) that the old
@@ -136,9 +137,20 @@ export async function applyHistoricalSaleImport(
        WHERE ${sellingBranchConditionSql('active_shop')}) AS active_shop_count
     FROM branches WHERE id = @branchId LIMIT 1
   `).get<{ id: number; name: string | null; role: string | null; is_active: number | null; active_shop_count: number }>({ branchId: saleHeaderBranchId })
+  // A receipt that still names a disabled branch (CUTOVER-LR): the import never records it there, and never moves it
+  // anywhere the operator did not confirm. Coded, so it reads as the redirect the operator must choose.
+  const disabledSaleBranch = !!saleBranch && Number(saleBranch.is_active ?? 0) !== 1
+  if (disabledSaleBranch || d.branch_redirect_pending) {
+    throw Object.assign(new Error(BRANCH_REDIRECT_REQUIRED_ERROR), { code: BRANCH_REDIRECT_REQUIRED_CODE })
+  }
   if (!saleBranch || Number(saleBranch.is_active ?? 0) !== 1 || !branchCanSell(saleBranch) || Number(saleBranch.active_shop_count) !== 1) {
     throw new Error(WAREHOUSE_NOT_SELLABLE_ERROR)
   }
+  // A receipt addressed to a retired branch ("Shop") that the operator confirmed onto this one: the pair is re-proved
+  // inside the batch and the restock movements keep the addressed label. Absent while every branch is active.
+  const redirectedFrom = Number(d.branch_redirect_addressed_id)
+  const redirected = Number.isSafeInteger(redirectedFrom) && redirectedFrom > 0
+  const addressedBranchName = redirected ? String(d.branch_addressed_name || '').trim() || null : null
   const normalizedItems: Array<Record<string, unknown>> = d.items.map((item) => ({ ...item, branch_id: saleHeaderBranchId }))
 
   // Classification is a preview and may be separated from queue apply by
@@ -302,6 +314,7 @@ export async function applyHistoricalSaleImport(
     customer_match_name_snapshot: d.customer_match_name_snapshot ?? null,
     customer_match_phone_snapshot: d.customer_match_phone_snapshot ?? null,
     customer_match_phone_normalized_snapshot: d.customer_match_phone_normalized_snapshot ?? null,
+    ...(redirected ? { branch_redirect_guards_json: JSON.stringify([{ addressed: redirectedFrom, effect: saleHeaderBranchId, sells: 1 }]) } : {}),
   }
   const currentCustomerReferenceGuard = effectiveImportedCustomerId == null
     ? '1=1'
@@ -324,7 +337,7 @@ export async function applyHistoricalSaleImport(
         )=1
         ELSE 0
       END`
-  const currentHistoricalReferencesGuard = `(${currentImportReferencesGuard}) AND (${currentCustomerReferenceGuard})`
+  const currentHistoricalReferencesGuard = `(${currentImportReferencesGuard}) AND (${currentCustomerReferenceGuard})${redirected ? ` AND (${branchEffectGuardPredicate('@branch_redirect_guards_json')})` : ''}`
   const writeGuard = `(${pendingGuard}) AND (${currentHistoricalReferencesGuard})`
   // In-transaction receipt uniqueness, on the FIRST statement so every
   // attempt evaluates it -- even over a pre-existing 'pending' row that the
@@ -431,6 +444,8 @@ export async function applyHistoricalSaleImport(
       updated_at: input.nowIso,
       reason: returnReasonFor(receiptNumber),
     }
+    // The same object the receipt-race retry rewrites the reason on, so the label rides on it rather than a copy.
+    if (redirected) stockParams.addressed_branch_name = addressedBranchName
     returnStockParams.push(stockParams)
     statements.push({
       sql: `UPDATE products SET stock_quantity = stock_quantity + @returned_quantity, updated_at = @updated_at
@@ -459,8 +474,8 @@ export async function applyHistoricalSaleImport(
       // 0084: the historical line's recorded lot (when it had one) is the
       // lot the restock above bumped -- stamp it; NULL otherwise.
       sql: `INSERT INTO inventory_movements
-              (product_id, product_name, branch_id, movement_type, quantity, reason, created_at, batch_id)
-            SELECT @product_id, @product_name, @branch_id, 'return', @returned_quantity, @reason, @updated_at, @batch_id
+              (product_id, product_name, branch_id${redirected ? ', addressed_branch_name' : ''}, movement_type, quantity, reason, created_at, batch_id)
+            SELECT @product_id, @product_name, @branch_id${redirected ? ', @addressed_branch_name' : ''}, 'return', @returned_quantity, @reason, @updated_at, @batch_id
             WHERE ${writeGuard}`,
       params: stockParams,
     })

@@ -169,6 +169,7 @@ const authStub = { requireAuth: async (c, next) => { await next() } }
 
 const inventoryMod = loadReal('routes/inventory.ts', {
   '../lib/receivingBranch': receivingBranchMod,
+  '../lib/branchRedirectWrite': require('./harness/branch_redirect_write.cjs'),
   '../lib/continuousReadWindow': loadReal('lib/continuousReadWindow.ts'),
   '../lib/db': dbOverride,
   '../lib/auth': authStub,
@@ -190,6 +191,7 @@ const inventoryMod = loadReal('routes/inventory.ts', {
 
 const batchesMod = loadReal('routes/batches.ts', {
   '../lib/receivingBranch': receivingBranchMod,
+  '../lib/branchRedirectWrite': require('./harness/branch_redirect_write.cjs'),
   '../lib/db': dbOverride,
   '../lib/auth': authStub,
   '../lib/audit': auditStub,

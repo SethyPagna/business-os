@@ -18,6 +18,10 @@ import type { Env } from '../index'
 import { roundMoney4, sellingPriceCeilCent, subtractDecimalSum } from './moneyPrecision'
 import { planManualCostEntry, catalogCostRecomputeStatement } from './catalogCostRecompute'
 import { requireReceivingBranch, receivingBranchAssertion, ReceivingBranchError, isReceivingBranchError, RECEIVING_BRANCH_INACTIVE } from './receivingBranch'
+import {
+  BRANCH_REDIRECT_TARGET_INVALID_CODE, BRANCH_REDIRECT_TARGET_INVALID_ERROR, addressedStatements, branchEffectRefusal, isBranchRedirectGuardError,
+  requestBranchEffect, type RedirectTarget,
+} from './branchRedirectWrite'
 import { ordinaryBusinessMaintenanceGuard } from './businessMaintenanceGuard'
 import { pendingActionApprovalStatements, type PendingActionRow, type ReviewPendingActionInput } from './pendingActions'
 import { buildAuditStatement } from './audit'
@@ -295,12 +299,16 @@ export class ProductCreateError extends Error {
 
 export function productCreateErrorResponse(error: unknown) {
   if (isReceivingBranchError(error)) return { body: RECEIVING_BRANCH_INACTIVE, status: 409 as const }
+  const refusal = branchEffectRefusal(error)
+  if (refusal) return { body: refusal, status: 409 as const }
   if (error instanceof ProductCreateError) return { body: { error: error.message, code: error.code,
     ...(error.code === 'product_create_outcome_unknown' ? { outcome: 'unknown', action: 'refresh_before_create' } : {}) }, status: error.status }
   return null
 }
 
-export async function productCreateDestination(env: Env, body: Record<string, unknown>) {
+// `redirectTarget` (X-Branch-Redirect): opening stock addressed to a branch that has since been disabled is received
+// at the active branch the operator confirmed; without it the create is refused branch_redirect_required.
+export async function productCreateDestination(env: Env, body: Record<string, unknown>, redirectTarget: RedirectTarget = null) {
   const rawQuantity = body.stock_quantity ?? 0
   if ((typeof rawQuantity !== 'string' && typeof rawQuantity !== 'number') || !Number.isFinite(Number(rawQuantity))) {
     throw new ProductCreateError('product_initial_quantity_invalid', 'Initial stock must be a finite number.', 400)
@@ -308,18 +316,23 @@ export async function productCreateDestination(env: Env, body: Record<string, un
   const quantity = Math.max(0, Number(rawQuantity))
   if (body.branch_id != null && typeof body.branch_id !== 'number' && typeof body.branch_id !== 'string') throw new ReceivingBranchError()
   const explicit = body.branch_id != null && String(body.branch_id).trim() !== ''
-  const branchId = explicit ? Number(body.branch_id) : await defaultBranchId(env)
-  if (branchId != null) await requireReceivingBranch(getDb(env), branchId)
-  else if (quantity > 0) throw new ReceivingBranchError()
-  return { branchId, quantity }
+  const addressedBranchId = explicit ? Number(body.branch_id) : await defaultBranchId(env)
+  if (addressedBranchId == null) {
+    if (quantity > 0) throw new ReceivingBranchError()
+    return { branchId: addressedBranchId, quantity, landing: null }
+  }
+  const landing = await requestBranchEffect(getDb(env), addressedBranchId, redirectTarget)
+  await requireReceivingBranch(getDb(env), landing.effectBranchId)
+  return { branchId: landing.effectBranchId, quantity, landing }
 }
 
 export async function createProductWithInitialStock(
   env: Env, body: Record<string, unknown>, required: Record<string, unknown>, maxImages = MAX_IMAGES_PER_PRODUCT,
   approval?: { row: PendingActionRow; reviewer: ReviewPendingActionInput },
+  redirectTarget: RedirectTarget = null,
 ) {
   const db = getDb(env)
-  const { branchId, quantity } = await productCreateDestination(env, body)
+  const { branchId, quantity, landing } = await productCreateDestination(env, body, redirectTarget)
   const gallery = 'image_gallery' in body ? validateProductImageGallery(body.image_gallery, maxImages) : null
   const key = `product-create:${crypto.randomUUID()}`
   const params = { key, branchId, quantity, lotCode: dateToBatchCode(new Date().toISOString().slice(0, 10)) }
@@ -348,8 +361,9 @@ export async function createProductWithInitialStock(
   if (branchId != null) statements.push(receivingBranchAssertion(branchId))
   statements.push(ordinaryBusinessMaintenanceGuard, { sql: 'SELECT * FROM products WHERE client_request_id=@key', params: { key } })
   let results
-  try { results = await db.batchOnce(statements) } catch (error) {
+  try { results = await db.batchOnce(addressedStatements(landing, statements)) } catch (error) {
     if (isReceivingBranchError(error)) throw new ReceivingBranchError()
+    if (isBranchRedirectGuardError(error)) throw new ProductCreateError(BRANCH_REDIRECT_TARGET_INVALID_CODE, BRANCH_REDIRECT_TARGET_INVALID_ERROR, 409)
     if (/bad JSON path: ['"]\$\[product_create_review_conflict\]['"]/i.test(error instanceof Error ? error.message : String(error))) {
       throw new ProductCreateError('product_create_review_conflict', 'This product request changed or was already reviewed. Refresh the review queue.', 409)
     }

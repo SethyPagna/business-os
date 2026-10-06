@@ -112,6 +112,7 @@ const ADMIN = { id: 9, name: 'Boss', username: 'boss', role_code: 'admin', permi
 function harness(sqlite, routeSource = source) {
   const state = { user: CASHIER }
   const route = compile(routeSource, routePath, {
+    '../lib/branchRedirectWrite': require('./harness/branch_redirect_write.cjs'), // CUTOVER-LR
     '../lib/continuousReadWindow': loadReal('lib/continuousReadWindow.ts'),
     '../lib/businessDateWindow': loadReal('lib/businessDateWindow.ts'),
     '../lib/clientTimestamp': loadReal('lib/clientTimestamp.ts'),

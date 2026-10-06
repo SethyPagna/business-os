@@ -95,12 +95,16 @@ const failures = []
 async function check(name, action) {
   try { await action(); console.log('PASS ' + name) } catch (error) { failures.push(name); console.error('FAIL ' + name, error) }
 }
+// CUTOVER-LR (owner ruling 6 Oct 2026): a Set addressed to a disabled branch never writes into it. Here the only
+// branch is disabled and no active branch could take the change, so every direction refuses
+// branch_retired_no_successor before the receipt barrier; with an active successor the Set asks for the confirmed
+// branch and lands there (scripts/test-cutover-lr-adjust-pure.cjs, test-cutover-lr-batches-pure.cjs).
 async function main() {
   for (const scope of ['lot','branch']) {
     await check(`inactive positive ${scope} refuses before receipt barrier or batch`, async () => {
       const f = world({ active: false }), before = snapshot(f)
       const result = await apply(f, request(scope))
-      assert.equal(result.status, 409, JSON.stringify(result.body)); assert.equal(result.body.code, 'receiving_branch_inactive')
+      assert.equal(result.status, 409, JSON.stringify(result.body)); assert.equal(result.body.code, 'branch_retired_no_successor')
       assert.equal(f.control.barrier, 0); assert.equal(f.control.batches, 0); assert.equal(snapshot(f), before)
     })
     await check(`active positive ${scope} commits exact quantities and metadata`, async () => {
@@ -118,12 +122,12 @@ async function main() {
       assert.equal(f.control.barrier, 1); assert.equal(snapshot(f), before)
       assert.equal(f.raw.prepare('SELECT is_active FROM branches WHERE id=1').get().is_active, 0)
     })
-    await check(`inactive ${scope} equal/decrease remains permitted`, async () => {
+    await check(`inactive ${scope} equal/decrease is refused too and writes nothing`, async () => {
       for (const delta of [0,-1]) {
         const f = world({ active: false }), before = snapshot(f)
         const result = await apply(f, request(scope, (scope === 'lot' ? 3 : 10) + delta))
-        assert.equal(result.status, 200, JSON.stringify(result.body)); assert.deepEqual(quantities(f), [3+delta,10+delta,10+delta])
-        if (!delta) { assert.equal(snapshot(f), before); assert.equal(f.control.barrier, 0) }
+        assert.equal(result.status, 409, JSON.stringify(result.body)); assert.equal(result.body.code, 'branch_retired_no_successor')
+        assert.deepEqual(quantities(f), [3,10,10]); assert.equal(snapshot(f), before); assert.equal(f.control.barrier, 0)
       }
     })
   }
@@ -138,14 +142,21 @@ async function main() {
     assert.equal(changed.status, 409); assert.equal(changed.body.code, 'idempotency_conflict')
     assert.equal(snapshot(f), before); assert.equal(f.control.barrier, barriers)
   })
-  await check('historical inverse increases inactive stock and redo preserves exact provenance', async () => {
+  // CUTOVER-LR: an Undo cannot carry a confirmed redirect, so the inverse of a Set at a branch that has since been
+  // disabled is refused with the cutover's coded closure instead of writing stock back into that branch.
+  await check('historical inverse at a since-disabled branch is closed (undo_closed_branch_retired) and writes nothing', async () => {
     const f = world(), result = await apply(f, request('lot',1))
     assert.equal(result.status, 200)
     f.raw.exec('UPDATE branches SET is_active=0 WHERE id=1')
     const id = result.body.action_history_id
     const payload = () => JSON.parse(f.raw.prepare('SELECT undo_payload FROM action_history WHERE id=?').get(id).undo_payload)
+    const before = snapshot(f)
+    await assert.rejects(lot.replayStockLotSet(f.env, actor, 'undo', id, 0, payload()),
+      (error) => error.statusCode === 409 && error.code === 'undo_closed_branch_retired')
+    assert.deepEqual(quantities(f), [1,8,8]); assert.equal(snapshot(f), before)
+    f.raw.exec('UPDATE branches SET is_active=1 WHERE id=1')
     await lot.replayStockLotSet(f.env, actor, 'undo', id, 0, payload())
-    assert.deepEqual(quantities(f), [3,10,10])
+    assert.deepEqual(quantities(f), [3,10,10], 'while the branch is active the exact inverse still applies')
     await lot.replayStockLotSet(f.env, actor, 'redo', id, 1, payload())
     assert.deepEqual(quantities(f), [1,8,8])
   })
@@ -172,7 +183,7 @@ async function main() {
     for (const [route,scope] of [['adjust','lot'],['adjust','branch'],['batch','lot']]) {
       const f = world({ active: false }), before = snapshot(f)
       const result = await http(f,route,scope)
-      assert.equal(result.status,409,JSON.stringify(result.body)); assert.equal(result.body.code,'receiving_branch_inactive')
+      assert.equal(result.status,409,JSON.stringify(result.body)); assert.equal(result.body.code,'branch_retired_no_successor')
       assert.equal(snapshot(f),before)
     }
   })

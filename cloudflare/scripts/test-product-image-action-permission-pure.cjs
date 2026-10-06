@@ -48,6 +48,7 @@ const moneyPrecision = loadTs('lib/moneyPrecision.ts')
 const productMerge = loadTs('lib/productMerge.ts', { './moneyPrecision': moneyPrecision })
 const loadProductWrites = db => loadTs('lib/productWrites.ts', {
   './receivingBranch': loadTs('lib/receivingBranch.ts'),
+  './branchRedirectWrite': require('./harness/branch_redirect_write.cjs'), // CUTOVER-LR
   './businessMaintenanceGuard': loadTs('lib/businessMaintenanceGuard.ts'),
   './pendingActions': loadTs('lib/pendingActions.ts', { './db': db }),
   './audit': loadTs('lib/audit.ts', { './db': db }),

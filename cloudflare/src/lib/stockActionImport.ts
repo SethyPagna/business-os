@@ -4,7 +4,7 @@
 
 import { dateToBatchCode, normalizeToIsoDate } from './batchCode'
 import { parseImportNumericValue, normalizeImportCost4, normalizeImportSellingPrice } from './importNumbers'
-import { indexCanonicalImportBranches, resolveImportBranchRequest, type CanonicalImportBranchRow } from './importBranchAuthority'
+import { indexCanonicalImportBranches, resolveImportBranchRequest, type CanonicalImportBranchRow, type ImportBranchRequestOptions } from './importBranchAuthority'
 // The ONE fold. Imported from the rule module both packages carry verbatim, so
 // this path cannot reach a different verdict from the create/edit guard, the
 // Conflicts sweep, the merge tool or the client's own sheet review.
@@ -82,7 +82,10 @@ export interface UnifiedStockResolvedRow {
   freeGoods: boolean
   branchRefs: Array<{ slot: 'shop' | 'warehouse' | 'store'; branchId: number; branchName: string; pending: boolean; value: number;
     /** The label the sheet addressed ("Shop") when its stock was routed to a successor branch. */
-    addressedName?: string }>
+    addressedName?: string
+    /** The retired branch that column addressed, and whether its landing still awaits the operator (CUTOVER-LR). */
+    addressedBranchId?: number
+    redirectPending?: boolean }>
   /** Preview lines for columns that landed on one branch ("Shop 5 + Warehouse 3 -> LC Store 8"). */
   branchNotes?: string[]
   /**
@@ -203,9 +206,11 @@ export function resolveUnifiedStockImportRows(
   products: UnifiedStockCatalogProduct[],
   branches: UnifiedStockBranch[],
   currentStock: UnifiedStockCurrent[],
+  // The landing branch the operator confirmed for a column addressed to a retired branch (CUTOVER-LR).
+  branchOptions: ImportBranchRequestOptions = {},
 ): UnifiedStockResolvedRow[] {
   const branchIndex = indexCanonicalImportBranches(branches)
-  const branchForSlot = (slot: 'shop' | 'warehouse' | 'store') => resolveImportBranchRequest(branchIndex, slot)
+  const branchForSlot = (slot: 'shop' | 'warehouse' | 'store') => resolveImportBranchRequest(branchIndex, slot, branchOptions)
   const stockRows: StockActionRow[] = []
   const provisional: UnifiedStockResolvedRow[] = []
   const newBatchIdentityByKey = new Map<string, string>()
@@ -288,6 +293,8 @@ export function resolveUnifiedStockImportRows(
         pending: !branch,
         value: parsed,
         ...(resolution?.addressedName ? { addressedName: resolution.addressedName } : {}),
+        ...(resolution?.addressedBranchId != null ? { addressedBranchId: resolution.addressedBranchId } : {}),
+        ...(resolution?.redirectPending ? { redirectPending: true } : {}),
       })
     })
     // Columns that land on ONE branch (after the consolidation every column does)

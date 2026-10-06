@@ -57,6 +57,8 @@ const stockActionCommit = compile('stockActionCommit.ts', {
   './searchMatch': searchMatch,
   './stockReceiptGate': stockReceiptGate,
   './branchRoleGuards': branchRoleGuards,
+  // CUTOVER-LR import sub-lane: stockActionCommit re-proves redirected rows with the real branchEffect module.
+  './branchEffect': compile('branchEffect.ts', { './branchRoles': branchRoles, './sqlBinding': sqlBinding }),
   './saleCreationSnapshot': saleCreationSnapshot,
   './moneyPrecision': moneyPrecision,
   // P10-4: REAL, not stubbed -- db is passed as a runtime argument to

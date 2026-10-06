@@ -34,6 +34,7 @@ function loadMoneyDependency(name) {
   const loaded = { exports: {} }
   const dependency = request => {
     if (request === './importImageMatch') return { MAX_IMAGES_PER_PRODUCT: 3 }
+    if (request === './branchRedirectWrite') return require('./harness/branch_redirect_write.cjs') // CUTOVER-LR: real disabled-branch redirect helper
     // lib/db.ts re-exports the import maintenance fence, which imports db back;
     // the money-policy graph never reaches it, so it is a throwing stand-in.
     if (request === './importMaintenanceFence') return {
@@ -57,6 +58,7 @@ function loadRoute(state) {
   const stubs = {
     '../lib/acquisitionCostAccess': loadMoneyDependency('acquisitionCostAccess'),
     '../lib/productWrites': productWrites,
+    '../lib/branchRedirectWrite': require('./harness/branch_redirect_write.cjs'), // CUTOVER-LR
     '../lib/db': loadMoneyDependency('db'),
     '../lib/branchWrites': loadMoneyDependency('branchWrites'),
     hono: { Hono },

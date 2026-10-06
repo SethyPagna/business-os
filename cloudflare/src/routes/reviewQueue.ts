@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import { acquisitionCostResponses, hasAcquisitionCostInput } from '../lib/acquisitionCostAccess'
 import { productCreateErrorResponse, hasProductMoneyPolicy, ProductMoneyWriteError } from '../lib/productWrites'
+import { branchRedirectTarget } from '../lib/branchRedirectWrite'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { hasPermission, getActionTier, getPermissionTier } from '../lib/permissions'
 import { audit } from '../lib/audit'
@@ -221,7 +222,7 @@ app.post('/:id/approve', async (c) => {
 
   let pendingActionMarkedAtomically = false
   try {
-    const outcome = await applyApprovedPendingAction(c.env, row, { id: user.id, name: actorSnapshot(user) }, user,
+    const outcome = await applyApprovedPendingAction(c.env, row, { id: user.id, name: actorSnapshot(user), redirectTarget: () => branchRedirectTarget(c) }, user,
       (promise) => c.executionCtx.waitUntil(promise))
     if (outcome.replayedBranchAction) return c.json({ success: true, data: outcome.replayedBranchAction, replayed: true })
     pendingActionMarkedAtomically = outcome.pendingActionMarkedAtomically
