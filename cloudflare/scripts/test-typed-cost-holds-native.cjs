@@ -69,7 +69,7 @@ const env = { DB }
 const real = new Set([
   'acquisitionCostAccess', 'productWrites', 'moneyPrecision', 'productMerge', 'productIdentity', 'productDetailRule', 'db',
   'sqlBinding', 'searchMatch', 'batchCode', 'actorSnapshot', 'pendingActions', 'reviewGate', 'reviewApply',
-  'conflictControl', 'renameCascade', 'schemaProbe', 'catalogCostRecompute', 'productBatches',
+  'conflictControl', 'renameCascade', 'schemaProbe', 'catalogCostRecompute', 'productBatches', 'productSearchDocColumns', 'searchCore',
 ])
 const noop = new Proxy(function () {}, { get: () => noop, apply: () => undefined, construct: () => ({}) })
 class ProductImageAssetError extends Error {}
@@ -184,13 +184,15 @@ new Function('require', 'module', 'exports', transpile(`
   import * as catalog from './catalogCostRecompute'
   import { multiplyMoney4 } from './moneyPrecision'
   import { normalizeSearchText, compactSearchText } from './searchMatch'
+  import { productSearchDocColumns } from './productSearchDocColumns'
   const { catalogCostRecomputeStatement } = catalog
   // Absent before the fix: the loop then simply never calls it.
   const typedCostEntryBeforeWriteStatement = (catalog as any).typedCostEntryBeforeWriteStatement
   function str(value: unknown): string { return value == null ? '' : String(value).trim() }
   export function composeProducts(ctx: any) {
     let { actionable, receiptCosts, autoMergeRecords, jobId, nowIso, productImportMode, productReplaceColumns,
-      appliedRowGuards, rowGuardStatement, receiptLots, receiptBaselines, nextBatchId, productSeedBranchIds, importCostActor } = ctx
+      appliedRowGuards, rowGuardStatement, receiptLots, receiptBaselines, nextBatchId, productSeedBranchIds, importCostActor,
+      hasSearchDocColumn, searchDocAssignments } = ctx
     const productStatementGroups: any[] = [], guardedGroups: any[] = [], statements: any[] = []
     ${productLoop}
     return [...productStatementGroups, ...statements.map((s: any) => [s]), ...guardedGroups]
@@ -210,7 +212,9 @@ const importCtx = (rows, extra = {}) => ({
   appliedRowGuards: new Set(), rowGuardStatement: () => ({ sql: 'SELECT 1', params: {} }),
   receiptLots: new Map(), receiptBaselines: new Map(),
   nextBatchId: Number(raw.prepare('SELECT COALESCE(MAX(id), 0) n FROM product_batches').get().n),
-  productSeedBranchIds: [], importCostActor: { id: 1, name: 'admin' }, INVENTORY_RECEIPT_PLAN_VERSION: 99, ...extra,
+  productSeedBranchIds: [], importCostActor: { id: 1, name: 'admin' }, INVENTORY_RECEIPT_PLAN_VERSION: 99,
+  // The schema under test has products.search_doc (every migration is applied), exactly as runImportApply probes it.
+  hasSearchDocColumn: true, searchDocAssignments: ', search_doc=@search_doc, search_doc_version=@search_doc_version', ...extra,
 })
 // A matched row as classifyProducts leaves it: the full product row, the
 // sheet's values over it, the resolved branch and received date, and the

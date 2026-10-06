@@ -348,7 +348,8 @@ async function serialMergeStateFingerprint(d1, reversals, reparentTables) {
   const products = [], branchStock = [], batches = [], movementHeads = []
   for (const ids of chunks(productIds)) {
     const placeholders = ids.map(() => '?').join(',')
-    products.push(...all(`SELECT * FROM products WHERE id IN (${placeholders})`, ids))
+    // G37 phase 2: products.search_doc/search_doc_version are derived (rewritten by the backfill and the repair), not merge state.
+    products.push(...all(`SELECT * FROM products WHERE id IN (${placeholders})`, ids).map(({ search_doc: _doc, search_doc_version: _version, ...row }) => row))
     branchStock.push(...all(`SELECT product_id, branch_id, quantity, rfid_confirmed_qty FROM branch_stock WHERE product_id IN (${placeholders})`, ids))
     batches.push(...all(`SELECT id, variant_product_id, batch_key, batch_number, is_active FROM product_batches WHERE variant_product_id IN (${placeholders})`, ids))
     movementHeads.push(...all(`SELECT product_id, MAX(id) AS max_id, COUNT(*) AS row_count FROM inventory_movements WHERE product_id IN (${placeholders}) GROUP BY product_id`, ids))

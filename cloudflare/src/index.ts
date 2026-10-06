@@ -42,6 +42,7 @@ import { reportError } from './lib/errorReporting'
 import { serveUpload } from './lib/imageVariants'
 import { handleImportQueue, handleImportDeadLetterQueue, handleMediaQueue, handleBackupQueue } from './queue'
 import { deliverTelegramShiftOverview, drainDueTelegramShiftOverviews, isShiftOverviewQueueMessage } from './lib/telegram'
+import { repairMissingSearchDocs } from './lib/productSearchDoc'
 import { maybeRunScheduledBackup } from './lib/backup'
 import { driveSyncScheduleDue, recordDriveSyncError } from './lib/googleDrive'
 import { checkDriveSyncAuthorizer } from './lib/driveSyncAuthority'
@@ -660,6 +661,9 @@ export default {
       // of the backup because it is a few indexed statements and the backup
       // is the step that runs out of budget.
       await runStep('telegram-shift-overview', () => drainDueTelegramShiftOverviews(env, Date.now(), { limit: 10, sweepStale: true }))
+      // G37: rewrite product search documents a writer left missing (one
+      // indexed probe when none are; at most a plan-sized chunk when some are).
+      await runStep('product-search-docs', () => repairMissingSearchDocs(env))
       await runStep('backup', () => maybeRunScheduledBackup(env))
       await runStep('drive-sync', async () => {
         const schedule = await driveSyncScheduleDue(env)

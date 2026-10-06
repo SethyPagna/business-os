@@ -60,6 +60,8 @@ const realProductWrites = loadTs('lib/productWrites.ts', {
   './media': media,
   './batchCode': loadTs('lib/batchCode.ts'),
   './searchMatch': loadTs('lib/searchMatch.ts'),
+
+  './productSearchDocColumns': { productSearchDocColumns: () => ({ search_doc: '', search_doc_version: 1 }) },
   './importImageMatch': { MAX_IMAGES_PER_PRODUCT: 3 },
   './schemaProbe': loadTs('lib/schemaProbe.ts'),
 })

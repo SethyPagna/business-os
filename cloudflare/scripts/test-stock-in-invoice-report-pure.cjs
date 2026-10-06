@@ -55,6 +55,10 @@ const stockActionCommit = compile('stockActionCommit.ts', {
   './db': {},
   './batchCode': batchCode,
   './searchMatch': searchMatch,
+
+  './productSearchDocColumns': { productSearchDocColumns: () => ({ search_doc: '', search_doc_version: 1 }) },
+
+  './schemaProbe': { tableColumnSet: async () => new Set() },
   './stockReceiptGate': stockReceiptGate,
   './branchRoleGuards': branchRoleGuards,
   './saleCreationSnapshot': saleCreationSnapshot,

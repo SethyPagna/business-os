@@ -42,7 +42,7 @@ function loadMoneyDependency(name) {
       isImportMaintenanceFenceError: () => false,
       ImportMaintenanceFenceError: class ImportMaintenanceFenceError extends Error {},
     }
-    const allowed = new Set(['./permissions', './moneyPrecision', './catalogCostRecompute', './db', './media', './batchCode', './searchMatch', './schemaProbe', './receivingBranch', './businessMaintenanceGuard', './pendingActions', './audit', './branchWrites', './canonicalBranchIdentity', './branchRoles'])
+    const allowed = new Set(['./permissions', './moneyPrecision', './catalogCostRecompute', './db', './media', './batchCode', './searchMatch', './productSearchDocColumns', './searchCore', './schemaProbe', './receivingBranch', './businessMaintenanceGuard', './pendingActions', './audit', './branchWrites', './canonicalBranchIdentity', './branchRoles'])
     if (allowed.has(request)) return loadMoneyDependency(request.slice(2))
     throw new Error(`Unmapped money-policy dependency: ${request}`)
   }

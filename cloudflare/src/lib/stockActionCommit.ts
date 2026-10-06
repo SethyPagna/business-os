@@ -2,6 +2,8 @@ import type { D1Compat } from './db'
 import { roundMoney4, multiplyMoney4, sellingPriceCeilCent } from './moneyPrecision'
 import { dateToBatchCode, normalizeToIsoDate } from './batchCode'
 import { normalizeSearchText } from './searchMatch'
+import { productSearchDocColumns } from './productSearchDocColumns'
+import { tableColumnSet } from './schemaProbe'
 import { appendReceiptNotes, FREE_GOODS_REASON_NOTE, stockReceiptGateCode, stockReceiptGateMessage, type StockReceiptGateInput } from './stockReceiptGate'
 import { firstUnsellableBranch, WAREHOUSE_NOT_SELLABLE_ERROR } from './branchRoleGuards'
 import type { ActorLike } from './actorSnapshot'
@@ -199,17 +201,23 @@ export async function ensureUnifiedStockProduct(db: D1Compat, input: UnifiedStoc
   `).get<{ id: number }>({ clientRequestId })
   let created = false
   if (!product) {
+    // A new product with no brand: its search document is just its name's
+    // terms (a database without products.search_doc keeps the old statement).
+    const hasSearchDoc = (await tableColumnSet(db, 'products')).has('search_doc')
+    const searchDoc = productSearchDocColumns(productName, null)
     const inserted = await db.prepare(`
       INSERT OR IGNORE INTO products (
         name, name_normalized, barcode, unit, selling_price_usd, wholesale_price_usd, cost_price_usd,
-        stock_quantity, is_active, client_request_id, created_at, updated_at
+        stock_quantity, is_active, client_request_id, created_at, updated_at${hasSearchDoc ? ', search_doc, search_doc_version' : ''}
       ) VALUES (
         @productName, @nameNormalized, @barcode, 'pcs', @sellingPriceUsd, @wholesalePriceUsd, @costPriceUsd,
-        0, 1, @clientRequestId, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+        0, 1, @clientRequestId, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP${hasSearchDoc ? ', @searchDoc, @searchDocVersion' : ''}
       )
     `).run({
       productName,
       nameNormalized: normalizeSearchText(productName),
+      searchDoc: searchDoc.search_doc,
+      searchDocVersion: searchDoc.search_doc_version,
       barcode: String(input.barcode || '').trim() || null,
       sellingPriceUsd: optionalMoney(input.sellingPriceUsd, true) ?? 0,
       wholesalePriceUsd: optionalMoney(input.wholesalePriceUsd, true) ?? 0,

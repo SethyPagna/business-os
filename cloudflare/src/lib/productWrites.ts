@@ -13,6 +13,7 @@ import { tableColumnSet } from './schemaProbe'
 import { sanitizeMediaList } from './media'
 import { dateToBatchCode } from './batchCode'
 import { normalizeSearchText, compactSearchText } from './searchMatch'
+import { productSearchDocColumns } from './productSearchDocColumns'
 import { MAX_IMAGES_PER_PRODUCT } from './importImageMatch'
 import type { Env } from '../index'
 import { roundMoney4, sellingPriceCeilCent, subtractDecimalSum } from './moneyPrecision'
@@ -172,6 +173,8 @@ export const PRODUCT_SKIP_KEYS = new Set([
   'id', 'expectedUpdatedAt', 'expected_updated_at', 'updatedAt', 'updated_at',
   'client_request_id', 'device_name', 'device_tz', 'client_time',
   PRODUCT_MONEY_VERSION, PRODUCT_MONEY_PLAN,
+  // Derived from name and brand (migration 0233); only the server writes them.
+  'search_doc', 'search_doc_version',
 ])
 
 export function nowIso() {
@@ -240,6 +243,14 @@ function applySearchNormalizedColumns(payload: Record<string, unknown>, body: Re
   }
   if (columns.has('brand_compact') && shouldSet('brand')) {
     payload.brand_compact = compactSearchText(payload.brand ?? body.brand)
+  }
+  // The stored search document needs BOTH name and brand, so a partial edit
+  // (only one of them sent) leaves it to the products_search_doc_stale trigger,
+  // which nulls it; the missing-document path and the scheduled repair then
+  // rewrite it from the row's own values. No read-then-write here, so a
+  // concurrent edit of the other field can never leave a wrong document behind.
+  if (columns.has('search_doc') && columns.has('search_doc_version') && (isInsert || ('name' in body && 'brand' in body))) {
+    Object.assign(payload, productSearchDocColumns(payload.name ?? body.name, payload.brand ?? body.brand))
   }
 }
 

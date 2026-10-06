@@ -191,6 +191,13 @@ export type PlanLimits = {
 
   stockInLinesPerRequest: number
 
+  // lib/productSearchDoc.ts repairMissingSearchDocs: product search documents
+  // rewritten per scheduled tick (each is a JS docTerms pass + one guarded
+  // UPDATE that re-indexes the row in products_search_fts). Paid 500. Free 60
+  // keeps one tick inside the 10 ms cron CPU budget; the repair continues on
+  // later ticks until nothing is missing.
+  searchDocRepairChunk: number
+
   // ---- Read-cost lifetimes (G39 efficiency) -------------------------------
   //
   // These are LIFETIMES, so unlike every ceiling above, Free's number is the
@@ -283,6 +290,7 @@ const PAID_LIMITS: PlanLimits = {
   ephemeralDeleteBatch: 5000,
   catalogIntegrityMaxProducts: 50_000,
   stockInLinesPerRequest: 28,
+  searchDocRepairChunk: 500,
   coreInvariantsReverifySeconds: 6 * 60 * 60,
   dashboardStockOverviewCacheSeconds: 30,
   d1DailyRowsRead: 833_000_000,
@@ -309,6 +317,7 @@ const FREE_LIMITS: PlanLimits = {
   ephemeralDeleteBatch: 1000,
   catalogIntegrityMaxProducts: 2000,
   stockInLinesPerRequest: 1,
+  searchDocRepairChunk: 60,
   coreInvariantsReverifySeconds: 24 * 60 * 60,
   dashboardStockOverviewCacheSeconds: 300,
   d1DailyRowsRead: 5_000_000,

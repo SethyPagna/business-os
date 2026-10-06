@@ -52,6 +52,8 @@ const REAL = new Set([
   'stockReceiptGate',
   'productDescriptionSections', 'productBatches', 'salesStatus', 'contactOptions',
   'importImageMatch', 'searchMatch',
+  // G37 phase 2: a created product carries its stored search document (the real builder, so the row is what production writes).
+  'productSearchDocColumns', 'searchCore', 'schemaProbe',
   'branchRoles', 'branchRoleGuards',
   'actorSnapshot', 'saleCreationSnapshot',
   'moneyPrecision', 'saleMoneyPrecision',
@@ -135,7 +137,7 @@ function makeDb() {
       selling_price_usd REAL DEFAULT 0, wholesale_price_usd REAL DEFAULT 0, cost_price_usd REAL DEFAULT 0,
       cost_price_khr REAL DEFAULT 0, purchase_price_usd REAL DEFAULT 0, purchase_price_khr REAL DEFAULT 0,
       stock_quantity REAL DEFAULT 0, is_active INTEGER DEFAULT 1, client_request_id TEXT,
-      created_at TEXT, updated_at TEXT);
+      created_at TEXT, updated_at TEXT, search_doc TEXT, search_doc_version INTEGER);
     CREATE UNIQUE INDEX ux_products_crid ON products(client_request_id) WHERE client_request_id IS NOT NULL;
     CREATE TABLE branches (id INTEGER PRIMARY KEY, name TEXT, is_active INTEGER DEFAULT 1);
     -- The supplier column on an add row is match-only (migration 0062): the
@@ -275,6 +277,9 @@ async function test(name, fn) {
     assert.strictEqual(product.stock_quantity, 7)
     assert.strictEqual(sqlite.prepare(`SELECT quantity FROM branch_stock WHERE product_id=? AND branch_id=1`).get(product.id).quantity, 7)
     assert.strictEqual(sqlite.prepare(`SELECT COUNT(*) n FROM product_batches WHERE variant_product_id=?`).get(product.id).n, 1)
+    // G37 phase 2: the created product carries its stored search document (the columns are in this schema), so it is searchable at once.
+    const doc = sqlite.prepare(`SELECT search_doc, search_doc_version FROM products WHERE id=?`).get(product.id)
+    assert.ok(/brand/.test(doc.search_doc) && /balm/.test(doc.search_doc) && doc.search_doc_version === 1, `search_doc ${doc.search_doc}`)
   })
 
   // 3) A sale group: one receipt, FIFO, idempotent on retry ----------------

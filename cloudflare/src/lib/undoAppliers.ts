@@ -787,6 +787,15 @@ export async function mergeStateFingerprint(
   for (const [index, ids] of chunk(allocationIds.returns, 80).entries()) reads.push({ key: `returnAllocations:${index}`, sql: `SELECT * FROM return_item_batch_allocations WHERE id IN (${ids.map(() => '?').join(',')})`, params: ids })
 
   const resultSets = await runMergeFingerprintReadBatch(db, reads)
+  // products.search_doc / search_doc_version (migration 0233) are derived from
+  // name and brand and are rewritten by the search backfill and repair, so they
+  // are not merge state: a fingerprint recorded before they existed (or before
+  // a backfill) must still equal the live one. They are the LAST columns, so
+  // dropping them leaves every earlier key order, and so every saved
+  // fingerprint, byte-identical.
+  for (const [key, rows] of resultSets) {
+    if (key.startsWith('products:')) resultSets.set(key, rows.map(({ search_doc: _doc, search_doc_version: _version, ...rest }) => rest))
+  }
   if (transactionGuards) {
     // Re-run the exact fingerprint projections inside the write transaction.
     // Count + exact row equality protects additions/removals as well as edits,

@@ -57,6 +57,8 @@ function loadProductWrites(db) {
     if (request === './batchCode') return { dateToBatchCode: () => '11092026' }
     if (request === './searchMatch') return { normalizeSearchText: String, compactSearchText: String }
     if (request === './importImageMatch') return { MAX_IMAGES_PER_PRODUCT: 3 }
+    // G37 phase 2: product writes set the stored search document; this file asserts nothing about it.
+    if (request === './productSearchDocColumns') return { productSearchDocColumns: () => ({ search_doc: '', search_doc_version: 1 }) }
     if (request === './schemaProbe') return {
       tableColumnSet: async (queryDb, table) => {
         const rows = await queryDb.prepare(`PRAGMA table_info("${table}")`).all()

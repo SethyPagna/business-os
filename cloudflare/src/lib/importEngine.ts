@@ -87,6 +87,8 @@ import { broadcast } from '../durable-objects/broadcastHub'
 import { VALID_SALE_STATUSES, RETURN_STATUSES, normalizeSaleStatus } from './salesStatus'
 import { dateToBatchCode, normalizeToIsoDate, readBatchDateCell } from './batchCode'
 import { normalizeSearchText, compactSearchText } from './searchMatch'
+import { productSearchDocColumns } from './productSearchDocColumns'
+import { tableColumnSet } from './schemaProbe'
 import { getActionTier, hasPermission, isActionBlocked } from './permissions'
 import type { SessionUser } from './auth'
 import { sanitizeMediaPath } from './media'
@@ -6031,6 +6033,13 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
       // this in-batch map only needs to catch duplicates within the
       // current ~150-row window, exactly like it always caught duplicates
       // within one batch pre-chunking.
+
+      // products.search_doc (migration 0233) is written with every statement that
+      // sets name and brand together, so an import never leaves a missing
+      // document behind; a database without the column (migration pending)
+      // keeps working with the statements as they were.
+      const hasSearchDocColumn = (await tableColumnSet(db, 'products')).has('search_doc')
+      const searchDocAssignments = hasSearchDocColumn ? ', search_doc=@search_doc, search_doc_version=@search_doc_version' : ''
       const createRows = actionable.filter((r) => !(r.action === 'update' && r.existingId))
       let nextProductId = 0
       if (createRows.length) {
@@ -6260,6 +6269,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
         d.name_normalized = normalizeSearchText(d.name)
         d.unit_normalized = normalizeSearchText(d.unit)
         d.brand_compact = compactSearchText(d.brand)
+        if (hasSearchDocColumn) Object.assign(d, productSearchDocColumns(d.name, d.brand))
         if (r.action === 'update' && r.existingId) {
           const mode = r.plannedMode
           if (productImportMode === 'fill_blank') {
@@ -6283,7 +6293,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
             // row.
             pushImportedCostEntry(Number(r.existingId), { usd: d.cost_price_usd, khr: d.cost_price_khr })
             rowWriteGroup.push({
-              sql: `UPDATE products SET name=@name, name_normalized=@name_normalized, sku=@sku, barcode=@barcode, category=@category, categories=@categories, unit=@unit, unit_normalized=@unit_normalized, description=@description, brand=@brand, brands=@brands, brand_compact=@brand_compact, supplier=@supplier, selling_price_usd=@selling_price_usd, selling_price_khr=@selling_price_khr, wholesale_price_usd=@wholesale_price_usd, wholesale_price_khr=@wholesale_price_khr, cost_price_usd=@cost_price_usd, cost_price_khr=@cost_price_khr, low_stock_threshold=@low_stock_threshold, out_of_stock_threshold=@out_of_stock_threshold, discount_enabled=@discount_enabled, discount_type=@discount_type, discount_percent=@discount_percent, discount_amount_usd=@discount_amount_usd, discount_amount_khr=@discount_amount_khr, discount_label=@discount_label, discount_badge_color=@discount_badge_color, discount_starts_at=@discount_starts_at, discount_ends_at=@discount_ends_at, expiry_date=@expiry_date, expiry_alert_days=@expiry_alert_days, is_active=@is_active, updated_at=@updated_at${d.image_path ? ', image_path=@image_path' : ''} WHERE id=@id`,
+              sql: `UPDATE products SET name=@name, name_normalized=@name_normalized, sku=@sku, barcode=@barcode, category=@category, categories=@categories, unit=@unit, unit_normalized=@unit_normalized, description=@description, brand=@brand, brands=@brands, brand_compact=@brand_compact, supplier=@supplier, selling_price_usd=@selling_price_usd, selling_price_khr=@selling_price_khr, wholesale_price_usd=@wholesale_price_usd, wholesale_price_khr=@wholesale_price_khr, cost_price_usd=@cost_price_usd, cost_price_khr=@cost_price_khr, low_stock_threshold=@low_stock_threshold, out_of_stock_threshold=@out_of_stock_threshold, discount_enabled=@discount_enabled, discount_type=@discount_type, discount_percent=@discount_percent, discount_amount_usd=@discount_amount_usd, discount_amount_khr=@discount_amount_khr, discount_label=@discount_label, discount_badge_color=@discount_badge_color, discount_starts_at=@discount_starts_at, discount_ends_at=@discount_ends_at, expiry_date=@expiry_date, expiry_alert_days=@expiry_alert_days, is_active=@is_active, updated_at=@updated_at${searchDocAssignments}${d.image_path ? ', image_path=@image_path' : ''} WHERE id=@id`,
               params: { ...d, id: r.existingId, updated_at: nowIso },
             })
             finishProductRowWriteGroup()
@@ -6313,6 +6323,10 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
                 const derived = derivedColumns[col]
                 if (derived && !allSetColumns.includes(derived)) allSetColumns.push(derived)
               }
+              // The document needs both texts; with only one selected the
+              // products_search_doc_stale trigger nulls it and the repair
+              // rewrites it from the row.
+              if (hasSearchDocColumn && setColumns.includes('name') && setColumns.includes('brand')) allSetColumns.push('search_doc', 'search_doc_version')
               const setClause = allSetColumns.map((col) => `${col}=@${col}`).join(', ')
               pushImportedCostEntry(Number(r.existingId), {
                 ...(allSetColumns.includes('cost_price_usd') ? { usd: d.cost_price_usd } : {}),
@@ -6352,7 +6366,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
             // the cost as typed.
             pushImportedCostEntry(Number(r.existingId), { usd: d.cost_price_usd, khr: d.cost_price_khr })
             rowWriteGroup.push({
-              sql: `UPDATE products SET name=@name, name_normalized=@name_normalized, sku=@sku, barcode=@barcode, category=@category, categories=@categories, unit=@unit, unit_normalized=@unit_normalized, description=@description, brand=@brand, brands=@brands, brand_compact=@brand_compact, supplier=@supplier, selling_price_usd=@selling_price_usd, selling_price_khr=@selling_price_khr, wholesale_price_usd=@wholesale_price_usd, wholesale_price_khr=@wholesale_price_khr, cost_price_usd=@cost_price_usd, cost_price_khr=@cost_price_khr, low_stock_threshold=@low_stock_threshold, out_of_stock_threshold=@out_of_stock_threshold, discount_enabled=@discount_enabled, discount_type=@discount_type, discount_percent=@discount_percent, discount_amount_usd=@discount_amount_usd, discount_amount_khr=@discount_amount_khr, discount_label=@discount_label, discount_badge_color=@discount_badge_color, discount_starts_at=@discount_starts_at, discount_ends_at=@discount_ends_at, expiry_date=@expiry_date, expiry_alert_days=@expiry_alert_days, is_active=@is_active, updated_at=@updated_at${d.image_path ? ', image_path=@image_path' : ''} WHERE id=@id`,
+              sql: `UPDATE products SET name=@name, name_normalized=@name_normalized, sku=@sku, barcode=@barcode, category=@category, categories=@categories, unit=@unit, unit_normalized=@unit_normalized, description=@description, brand=@brand, brands=@brands, brand_compact=@brand_compact, supplier=@supplier, selling_price_usd=@selling_price_usd, selling_price_khr=@selling_price_khr, wholesale_price_usd=@wholesale_price_usd, wholesale_price_khr=@wholesale_price_khr, cost_price_usd=@cost_price_usd, cost_price_khr=@cost_price_khr, low_stock_threshold=@low_stock_threshold, out_of_stock_threshold=@out_of_stock_threshold, discount_enabled=@discount_enabled, discount_type=@discount_type, discount_percent=@discount_percent, discount_amount_usd=@discount_amount_usd, discount_amount_khr=@discount_amount_khr, discount_label=@discount_label, discount_badge_color=@discount_badge_color, discount_starts_at=@discount_starts_at, discount_ends_at=@discount_ends_at, expiry_date=@expiry_date, expiry_alert_days=@expiry_alert_days, is_active=@is_active, updated_at=@updated_at${searchDocAssignments}${d.image_path ? ', image_path=@image_path' : ''} WHERE id=@id`,
               params: { ...d, id: r.existingId, updated_at: nowIso },
             })
           }
@@ -6546,7 +6560,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
           // '#e11d48'). normalizeProductImportRow pre-fills those three
           // with the same defaults for exactly this reason.
           rowWriteGroup.push({
-            sql: `INSERT INTO products (id, name, name_normalized, sku, barcode, category, categories, unit, unit_normalized, description, brand, brands, brand_compact, supplier, selling_price_usd, selling_price_khr, wholesale_price_usd, wholesale_price_khr, cost_price_usd, cost_price_khr, stock_quantity, low_stock_threshold, out_of_stock_threshold, discount_enabled, discount_type, discount_percent, discount_amount_usd, discount_amount_khr, discount_label, discount_badge_color, discount_starts_at, discount_ends_at, expiry_date, expiry_alert_days, is_active, image_path, created_at, updated_at) VALUES (@id, @name, @name_normalized, @sku, @barcode, @category, @categories, @unit, @unit_normalized, @description, @brand, @brands, @brand_compact, @supplier, @selling_price_usd, @selling_price_khr, @wholesale_price_usd, @wholesale_price_khr, @cost_price_usd, @cost_price_khr, @stock_quantity, @low_stock_threshold, @out_of_stock_threshold, @discount_enabled, @discount_type, @discount_percent, @discount_amount_usd, @discount_amount_khr, @discount_label, @discount_badge_color, @discount_starts_at, @discount_ends_at, @expiry_date, @expiry_alert_days, @is_active, @image_path, @created_at, @updated_at)`,
+            sql: `INSERT INTO products (id, name, name_normalized, sku, barcode, category, categories, unit, unit_normalized, description, brand, brands, brand_compact, supplier, selling_price_usd, selling_price_khr, wholesale_price_usd, wholesale_price_khr, cost_price_usd, cost_price_khr, stock_quantity, low_stock_threshold, out_of_stock_threshold, discount_enabled, discount_type, discount_percent, discount_amount_usd, discount_amount_khr, discount_label, discount_badge_color, discount_starts_at, discount_ends_at, expiry_date, expiry_alert_days, is_active, image_path, created_at, updated_at${hasSearchDocColumn ? ', search_doc, search_doc_version' : ''}) VALUES (@id, @name, @name_normalized, @sku, @barcode, @category, @categories, @unit, @unit_normalized, @description, @brand, @brands, @brand_compact, @supplier, @selling_price_usd, @selling_price_khr, @wholesale_price_usd, @wholesale_price_khr, @cost_price_usd, @cost_price_khr, @stock_quantity, @low_stock_threshold, @out_of_stock_threshold, @discount_enabled, @discount_type, @discount_percent, @discount_amount_usd, @discount_amount_khr, @discount_label, @discount_badge_color, @discount_starts_at, @discount_ends_at, @expiry_date, @expiry_alert_days, @is_active, @image_path, @created_at, @updated_at${hasSearchDocColumn ? ', @search_doc, @search_doc_version' : ''})`,
             params: { ...d, id: newId, image_path: d.image_path ?? null, created_at: nowIso, updated_at: nowIso },
           })
           // Every new product gets a branch_stock row -- explicit branch

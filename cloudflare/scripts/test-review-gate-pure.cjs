@@ -212,6 +212,8 @@ const productWrites = loadReal('lib/productWrites.ts', { './schemaProbe': schema
   './media': { sanitizeMediaList: (list) => (Array.isArray(list) ? list : []) },
   './batchCode': batchCode,
   './searchMatch': searchMatch,
+
+  './productSearchDocColumns': { productSearchDocColumns: () => ({ search_doc: '', search_doc_version: 1 }) },
   // importImageMatch.ts is pure (no D1/Env dependency) -- productWrites.ts's
   // syncProductImageGallery now derives its slice cap through it
   // (MAX_IMAGES_PER_PRODUCT), same treatment as batchCode.ts/searchMatch.ts

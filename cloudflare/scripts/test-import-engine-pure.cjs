@@ -402,6 +402,9 @@ Module._load = function patchedLoad(request, parent, isMain) {
     return sqlBindingModuleObj.exports // real module -- keeps IN(...) lookups inside D1's bound-parameter limit
   }
   if (request === './planTier') return planTierModule
+  // G37 phase 2: product writes set the stored search document and probe for its column; this file never reaches those statements.
+  if (request === './productSearchDocColumns') return { productSearchDocColumns: () => ({ search_doc: '', search_doc_version: 1 }) }
+  if (request === './schemaProbe') return { tableColumnSet: async () => new Set() }
   if (request === './actorSnapshot') return actorSnapshotModuleObj.exports
   if (request === './db') return { isImportMaintenanceFenceError: () => false }
   if (request === './queueDispatch') return queueDispatchModule

@@ -48,6 +48,7 @@ const productWrites = load('lib/productWrites.ts', {
   './media': media,
   './batchCode': { dateToBatchCode: () => '' },
   './searchMatch': { normalizeSearchText: String, compactSearchText: String },
+  './productSearchDocColumns': { productSearchDocColumns: () => ({ search_doc: '', search_doc_version: 1 }) },
   './importImageMatch': { MAX_IMAGES_PER_PRODUCT: 3 },
   '../index': {},
   './schemaProbe': load('lib/schemaProbe.ts'),
