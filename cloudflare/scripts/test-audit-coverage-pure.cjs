@@ -111,8 +111,13 @@ ok(/db\.batch\(\[[\s\S]*continuationAuditSql\(\)/.test(continuationWriter),
 ok(/writeContinuation\([\s\S]*auditAction: 'shift\.open_after_cancel'/.test(openRoute)
   && /db\.batch\(\[[\s\S]*openAuditSql\(\)/.test(openRoute),
   'shifts.ts opening paths use same-batch root and continuation audits')
+// N4: both close routes go through closeWithFigures, whose every path is
+// writeClose (the figures retry recomputes; it never writes on its own).
+const closeWithFiguresWriter = section('async function closeWithFigures', "app.post('/close'")
 ok(/db\.batch\(\[[\s\S]*transitionAuditSql\(\)/.test(closeWriter)
-  && currentCloseRoute.includes('writeClose(db') && historicCloseRoute.includes('writeClose(db'),
+  && currentCloseRoute.includes('closeWithFigures(c.env, db') && historicCloseRoute.includes('closeWithFigures(c.env, db')
+  && /return await writeClose\(db, /.test(closeWithFiguresWriter) && /return writeClose\(db, /.test(closeWithFiguresWriter)
+  && !/db\.(batch|prepare)\(/.test(closeWithFiguresWriter),
   'shifts.ts current and historic close share the atomic audited writer')
 ok(/db\.batch\(\[[\s\S]*transitionAuditSql\(\)/.test(cancelRoute),
   'shifts.ts cancellation writes audit in the same batch')

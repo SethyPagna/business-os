@@ -21,7 +21,7 @@ import { downloadCSV } from '../../../utils/csv.ts'
 import { openPrintExport } from '../../../utils/exportOptions.ts'
 import ShiftHistoryPanel from '../../shifts/ShiftHistoryPanel.tsx'
 import ShiftSummary from '../../shifts/ShiftSummary.tsx'
-import { shiftComparisonRows, shiftFigureRows, shiftFiguresOf, shiftRegisteredRows } from '../../shifts/shiftReportModel.ts'
+import { shiftCloseDriftRows, shiftComparisonRows, shiftFigureRows, shiftFiguresOf, shiftRegisteredRows } from '../../shifts/shiftReportModel.ts'
 import { Button, EmptyState, OverflowMenu, Skeleton } from '../../shared/kit'
 import ReportFrame, { useReportData } from './ReportFrame.tsx'
 import { reportFileName, reportQueryParams } from './reportModel.ts'
@@ -68,7 +68,7 @@ export default function ShiftReport(p: ReportViewProps) {
     return () => window.removeEventListener(SHIFT_STATE_CHANGED_EVENT, refresh)
   }, [listing.reload, state.reload])
   const shift = receivedShift && !isAdminControlUser(user)
-    ? { ...receivedShift, reconciliation: null, figures: null } : receivedShift
+    ? { ...receivedShift, reconciliation: null, figures: null, close_drift: null } : receivedShift
 
   const rows = useMemo(() => {
     if (!shift) return []
@@ -90,6 +90,15 @@ export default function ShiftReport(p: ReportViewProps) {
       ...shiftComparisonRows(shift).map((row) => ({
         Section: tr('shift_cash_breakdown', 'Cash breakdown'),
         Line: tr(row.key, row.key),
+        USD: row.usd ?? '',
+        KHR: row.khr ?? '',
+      })),
+      // N4: the breakdown above is the drawer as closed; what moved since is
+      // its own section -- today's value per moved line, and each sale's cash
+      // movement -- so an export never presents drift as the closed figure.
+      ...shiftCloseDriftRows(shift).map((row) => ({
+        Section: tr('shift_changed_after_close', 'Changed after close'),
+        Line: row.label ? `${row.label} · ${tr(row.labelKey, row.labelKey)}` : tr(row.labelKey, row.labelKey),
         USD: row.usd ?? '',
         KHR: row.khr ?? '',
       })),

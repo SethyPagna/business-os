@@ -230,15 +230,22 @@ assert.match(currentHandlerSource, /const carryOver = await readPreviousOpen\(db
   'the carry-over is read for EVERY caller, exempt administrators included')
 assert.ok(!/carryOver = exempt \?/.test(currentHandlerSource),
   'the exempt short-circuit that hid a foreign shop-wide stale row from the only account able to close it is gone')
-assert.match(currentHandlerSource, /const shift = exempt \? undefined : await readCurrent\(/,
+// N7: on a retired branch the caller's own open drawer there is read instead;
+// the exemption gates both reads.
+assert.match(currentHandlerSource, /const shift = exempt \? undefined : (?:retired \? await readOwnOpenOnBranch\([^)]*\) : )?await readCurrent\(/,
   'while the DAILY PROMPT read stays exempt-gated -- that is what the exemption is for')
 
 // The SQL, lifted from the source, for the discriminating negatives below.
 const sqlTemplate = readPreviousOpenSource.match(/db\.prepare\(`([\s\S]*?)`\)/)
 assert.ok(sqlTemplate, 'readPreviousOpen builds one SQL template')
+// N7: the retired-branch arm names the route's own branch-activity predicate,
+// lifted verbatim so the filled SQL runs the same expression the route does.
+const branchActiveSql = source.match(/const BRANCH_ACTIVE_SQL = `([\s\S]*?)`/)
+assert.ok(branchActiveSql, 'shifts.ts defines BRANCH_ACTIVE_SQL')
 const CARRY_SQL = sqlTemplate[1]
   .replace('${SHIFT_COLUMNS}', 'id, business_date, closed_at, cancelled_at, parent_shift_id')
   .replace('${accountClause}', 'AND user_id = @userId')
+  .replace('${BRANCH_ACTIVE_SQL}', branchActiveSql[1])
   .replace('${localTodayExpr()}', "date('now', '+7 hours')")
 assert.ok(!CARRY_SQL.includes('${'), `every template hole was filled: ${CARRY_SQL}`)
 const CLAUSES = {

@@ -8,6 +8,14 @@ export function queueEntitySearch(page: string, search: unknown, anchor?: string
       window.dispatchEvent(new CustomEvent('bos:entity-focus'))
       return
     }
+    if (page === 'sales') {
+      // A receipt number from another surface (the shift report's "changed
+      // after close" list). Sales.tsx seeds its search and widens the date
+      // range to all time, so the receipt is found whatever day it was rung.
+      window.sessionStorage.setItem('bos:sales:focus', JSON.stringify({ ...(focus || {}), ...(value ? { search: value } : {}) }))
+      window.dispatchEvent(new CustomEvent('bos:entity-focus'))
+      return
+    }
     if (page === 'contacts') {
       const section = String(anchor || '').split(':').pop() || 'customers'
       window.sessionStorage.setItem('bos:contacts:focus', JSON.stringify({ ...(focus || {}), tab: section, ...(value ? { search: value } : {}) }))

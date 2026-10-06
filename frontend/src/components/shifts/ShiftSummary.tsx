@@ -4,7 +4,9 @@ import { fmtClock24, fmtDateOnly, fmtDateTime24, parseServerTimestampMs } from '
 import type { Shift } from '../../api/shiftTransport.ts'
 import ShiftCashBreakdown from './ShiftCashBreakdown.tsx'
 import ShiftReportFigures from './ShiftReportFigures.tsx'
-import { shiftCountedPairText } from './shiftReportModel.ts'
+import ShiftCloseDriftNote from './ShiftCloseDriftNote.tsx'
+import InfoHint from '../shared/InfoHint.tsx'
+import { shiftCountedPairText, shiftDrawerSourceBadge } from './shiftReportModel.ts'
 import { isAdminControlUser, type PermissionUser } from '../../utils/permissions.ts'
 
 type Props = {
@@ -23,7 +25,7 @@ function duration(shift: Shift, t: (key: string) => string): string {
 
 export default function ShiftSummary({ shift: receivedShift, detail = false, className = '' }: Props) {
   const { user } = useApp() as { user: PermissionUser }
-  const shift = isAdminControlUser(user) ? receivedShift : { ...receivedShift, reconciliation: null, figures: null }
+  const shift = isAdminControlUser(user) ? receivedShift : { ...receivedShift, reconciliation: null, figures: null, close_drift: null }
   const { t, fmtUSD, fmtKHR } = useApp() as {
     t: (key: string) => string
     fmtUSD: (value: unknown) => string
@@ -44,6 +46,7 @@ export default function ShiftSummary({ shift: receivedShift, detail = false, cla
   // cashier actually wrote; now only the uncounted half is a dash, and a
   // wholly uncounted drawer is still one dash.
   const after = shiftCountedPairText(shift.closing_counted_usd, shift.closing_counted_khr, fmtUSD, fmtKHR)
+  const sourceBadge = shiftDrawerSourceBadge(shift)
 
   return (
     <section className={`min-w-0 rounded-xl border border-gray-200 bg-white p-3 dark:border-zinc-700 dark:bg-zinc-900 ${className}`}>
@@ -53,7 +56,19 @@ export default function ShiftSummary({ shift: receivedShift, detail = false, cla
             <span className="text-sm font-semibold text-gray-900 dark:text-white">{fmtDateOnly(shift.business_date)}</span>
             <span className="dense-id text-[10px] text-gray-400 dark:text-gray-500">{shift.shift_code}</span>
           </div>
-          <div className="mt-0.5 break-words text-xs leading-relaxed text-gray-500 dark:text-gray-400">{cashier} · {branch}</div>
+          <div className="mt-0.5 break-words text-xs leading-relaxed text-gray-500 dark:text-gray-400">
+            {cashier} · {branch}
+            {/* N7: the stored branch label stays; this says the branch has
+                since been retired, which is why edit/reopen are absent. */}
+            {shift.branch_active === false ? (
+              <span
+                className="ml-1.5 inline-flex rounded-full bg-gray-100 px-1.5 py-0.5 align-middle text-[10px] font-semibold text-gray-600 dark:bg-zinc-800 dark:text-gray-300"
+                title={tr('shift_branch_inactive_hint', 'This branch no longer trades. The shift stays here as a read-only record; a shift still open there can only be closed.')}
+              >
+                {tr('shift_branch_inactive', 'Branch inactive')}
+              </span>
+            ) : null}
+          </div>
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
           {/* EDITED, the same fact a sale row carries: this record was
@@ -94,7 +109,20 @@ export default function ShiftSummary({ shift: receivedShift, detail = false, cla
               in the till), and only an admin's response carries `figures`. */}
           <ShiftReportFigures shift={shift} />
           <div className="rounded-lg bg-slate-50 p-2.5 dark:bg-zinc-800/70">
-            <div className="flex items-center gap-2 text-xs font-semibold text-gray-800 dark:text-gray-100"><Clock3 className="h-3.5 w-3.5" aria-hidden="true" />{tr('shift_cash_breakdown', 'Cash breakdown')}</div>
+            <div className="flex items-center gap-2 text-xs font-semibold text-gray-800 dark:text-gray-100">
+              <Clock3 className="h-3.5 w-3.5" aria-hidden="true" />{tr('shift_cash_breakdown', 'Cash breakdown')}
+              {/* N4: a closed shift's drawer is the one it closed on (stored),
+                  or -- for a shift closed before figures were stored -- a
+                  recomputation, and the row says which. */}
+              {sourceBadge ? (
+                <span className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${sourceBadge.source === 'stored'
+                  ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-200'
+                  : 'bg-gray-100 text-gray-600 dark:bg-zinc-800 dark:text-gray-300'}`}>
+                  {tr(sourceBadge.key, sourceBadge.fallback)}
+                  <InfoHint text={t(sourceBadge.hintKey)} label={tr(sourceBadge.key, sourceBadge.fallback)} />
+                </span>
+              ) : null}
+            </div>
             {/* The eight drawer rows the server reconciled, and the same eight the
                 Telegram shift report prints. When the server sent no breakdown
                 (an old row, or a list read) the before/after pair still stands. */}
@@ -106,6 +134,7 @@ export default function ShiftSummary({ shift: receivedShift, detail = false, cla
                   <div><dt className="text-gray-500 dark:text-gray-400">{tr('shift_after', 'After')}</dt><dd className="font-medium">{after}</dd></div>
                 </dl>
               )}
+            <ShiftCloseDriftNote className="mt-2" shift={shift} />
           </div>
           {shift.opening_note || shift.closing_note ? (
             <dl className="grid gap-2 text-xs sm:grid-cols-2">

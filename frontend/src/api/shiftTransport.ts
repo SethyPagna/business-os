@@ -176,6 +176,24 @@ export type ShiftReconciliation = {
   review_codes: string[]
 }
 
+/** Mirrors cloudflare/src/lib/shiftReconciliation.ts ShiftCloseDrift. */
+export type ShiftCloseDrift = {
+  components: Array<{ key: string; stored: ShiftCountedMoney; current: ShiftCountedMoney }>
+  sales: Array<{
+    sale_id: number
+    change: 'added' | 'removed' | 'changed'
+    /** [cash USD, cash KHR, other USD, other KHR] at the close / now; null when absent. */
+    before: [number, number, number, number] | null
+    after: [number, number, number, number] | null
+    receipt_number?: string | null
+    created_at?: string | null
+    sale_status?: string | null
+  }>
+  sales_total: number
+  sales_unavailable: boolean
+  current: ShiftReconciliation
+}
+
 export type Shift = {
   id: number
   shift_code: string
@@ -231,9 +249,27 @@ export type Shift = {
    * absent value must read as "the server did not say", never as "edited".
    */
   amendment_count?: number
+  /**
+   * False when the branch this shift was opened on no longer trades (N7: Shop
+   * after the cutover). The record stays readable, labelled with the
+   * `branch_name` stored at open; the server withholds edit and reopen, and a
+   * drawer still open there can only be closed or cancelled. Absent means the
+   * server did not say (an older Worker) and reads as active.
+   */
+  branch_active?: boolean
   // Present on the close response and on the shift reads. Absent on rows that
   // come back from a list (the server does not price a whole page of shifts).
   reconciliation?: ShiftReconciliation | null
+  /**
+   * N4: where `reconciliation` came from. 'stored' = the figures written at
+   * the close (migration 0237) -- a closed shift's drawer never moves after
+   * it closes. 'computed' = recomputed now: every open shift, and a shift
+   * closed before figures were stored. Absent/null = the server did not say.
+   */
+  reconciliation_source?: 'stored' | 'computed' | null
+  close_figures_taken_at?: string | null
+  /** What moved after the close, beside -- never instead of -- the stored figures. */
+  close_drift?: ShiftCloseDrift | null
   // The admin report half. Null for a caller without the shift-review
   // capability, and absent from list rows and from /current -- see
   // `ShiftFigures`.
@@ -317,6 +353,22 @@ export type ShiftState = {
    * clock bounds the close. `undefined` is "the server did not say".
    */
   previous_open_close_before?: string | null
+  /**
+   * N7: the till asked about a branch that no longer trades (Shop after the
+   * cutover). GET /current answers 200 instead of refusing: `shift` is the
+   * caller's own drawer still open there (so End Shift can close it), nothing
+   * can be registered, and this names the active branch that took over, when
+   * there is one. Null on an active branch; absent from an older Worker.
+   */
+  code?: string
+  branch_inactive?: ShiftBranchInactive | null
+}
+
+export type ShiftBranchInactive = {
+  branch_id: number
+  branch_name: string
+  successor_branch_id: number | null
+  successor_branch_name: string | null
 }
 
 export type ShiftAmendment = {

@@ -8,7 +8,9 @@ import { hasAnyPermission, isAdminControlUser } from '../lib/permissions'
 import { scheduleTelegramShiftOverview, sendTelegramShiftReport } from '../lib/telegram'
 import { firstCharacters } from '../lib/telegramLang'
 import {
-  loadShiftFigures, loadShiftReconciliation, type ShiftFigures, type ShiftReconciliation,
+  loadShiftCloseDrift, loadShiftCloseFigures, loadShiftFigures, loadShiftReconciliation, parseShiftCloseFigures,
+  readShiftCloseInputsDigest, shiftCloseInputsDigestSql,
+  type ShiftCloseDrift, type ShiftCloseFigures, type ShiftCloseInputsDigest, type ShiftFigures, type ShiftReconciliation,
 } from '../lib/shiftReconciliation'
 import type { Env } from '../index'
 
@@ -48,7 +50,9 @@ app.use('*', async (c, next) => {
     : action === 'cancel' ? canManageShifts(user) && canMutateShift(user, target)
       : canMutateShift(user, target)
   if (!permitted) return c.json({ error: 'Shift permission is required.' }, 403)
-  if (target.branch_id != null && !(await resolveBranch(db, target.branch_id))) return c.json({ error: 'Shift not found.' }, 404)
+  // No branch-activity check here: a committed receipt replays even after its
+  // branch was retired, and each handler decides what an inactive branch
+  // allows (N7 -- close and cancel yes, amend and reopen no).
   const replay = async () => {
     const receipt = await db.prepare(`SELECT entity_id, details FROM audit_logs
       WHERE user_id=@actor AND action=@action AND json_valid(details)
@@ -98,9 +102,9 @@ export type ShiftRow = {
   cancelled_at: string | null; cancelled_by_user_id: number | null
   cancelled_by_user_name: string | null; cancel_reason: string | null
 }
-type ShiftDbRow = ShiftRow & { has_reopened_child: number; amendment_count: number }
+type ShiftDbRow = ShiftRow & { has_reopened_child: number; amendment_count: number; branch_active: number }
 export type ShiftCapabilities = { can_edit: boolean; can_close: boolean; can_reopen: boolean; can_cancel: boolean }
-export type ShiftResponseRow = ShiftRow & { capabilities: ShiftCapabilities; amendment_count: number }
+export type ShiftResponseRow = ShiftRow & { capabilities: ShiftCapabilities; amendment_count: number; branch_active: boolean }
 /** A presented row plus the close bound (`closeBoundFor` below): the opening of
  *  the segment that follows an OPEN row, null on a row that cannot be closed. */
 export type ShiftPresentedRow = ShiftResponseRow & { close_before: string | null }
@@ -142,6 +146,53 @@ const AMENDMENT_COUNT_SQL = `(SELECT COUNT(*) FROM shift_session_amendments amen
       AND NOT (json_extract(amend.before_json, '$.closed_at') IS NULL
         AND json_extract(amend.after_json, '$.closed_at') IS NOT NULL))`
 
+/**
+ * ---- A shift outlives its branch (N7, cutover blocker) --------------------
+ *
+ * The Shop -> LC Store cutover retires Shop as the inactive "Old Shop". Every
+ * read here used to require `branches.is_active = 1`, so that day all of
+ * Shop's shift history would have vanished from the list and answered 404 on
+ * its own detail. A shift is a record of a drawer that existed; whether the
+ * branch still trades decides only what may happen NEXT:
+ *
+ *   * reads (list, history, /current carry-over)        always;
+ *   * OPEN a new shift                                   active branch only;
+ *   * CLOSE / CANCEL a shift still open on it            allowed, so a drawer
+ *     left open when the branch was retired never traps its cashier or the
+ *     administrator who has to end it;
+ *   * AMEND / REOPEN a shift on a retired branch         refused with the why
+ *     (branch inactive) and the where (the record stays readable in Shift
+ *     history), because both rewrite or extend a branch that no longer trades.
+ *
+ * Identity is the branch id. The label is the `branch_name` the row stored at
+ * open (0116) -- never today's branches.name, which after the cutover reads
+ * "Old Shop" for shifts the staff knew as "Shop". The rename cascade
+ * (lib/branchWrites.ts branchNameSnapshotStatements) does not touch
+ * shift_sessions, so that stored label is never rewritten.
+ *
+ * Derived, like has_reopened_child: storedShift strips it, so it never enters
+ * an amendment snapshot. A NULL branch (single-branch till) is active.
+ */
+const BRANCH_ACTIVE_SQL = `CASE WHEN shift_sessions.branch_id IS NULL OR EXISTS (SELECT 1 FROM branches active_branch
+    WHERE active_branch.id = shift_sessions.branch_id AND active_branch.is_active = 1) THEN 1 ELSE 0 END`
+/** Aborts the open batch (SQLite reports the bad JSON path verbatim) unless
+ * the branch is still active at commit. A NULL branch is a single-branch till. */
+const OPEN_BRANCH_ACTIVE_GUARD_SQL = `SELECT CASE WHEN @branchId IS NULL OR EXISTS (SELECT 1 FROM branches
+    WHERE id = @branchId AND is_active = 1) THEN 1 ELSE json_extract('[1]', '$[shift_open_branch_inactive]') END`
+function isOpenBranchInactiveError(error: unknown): boolean {
+  return /bad JSON path: ['"]\$\[shift_open_branch_inactive\]['"]/i.test(error instanceof Error ? error.message : String(error))
+}
+/** The refusal for AMEND/REOPEN on a retired branch: why, and where the record still is. */
+function inactiveBranchRefusal(shift: ShiftRow) {
+  const branch = shift.branch_name || `#${shift.branch_id}`
+  return {
+    error: `Branch "${branch}" is no longer active, so this shift is read-only. It stays in Shift history; open a new shift at an active branch instead.`,
+    code: 'shift_branch_inactive',
+    branch_id: shift.branch_id,
+    branch_name: shift.branch_name,
+  }
+}
+
 const SHIFT_COLUMNS = `id, shift_code, scope_mode, user_id, user_name, branch_id, branch_name, business_date,
   opened_at,
   CASE WHEN opening_float_usd_registered=1 THEN opening_float_usd ELSE NULL END AS opening_float_usd,
@@ -152,7 +203,8 @@ const SHIFT_COLUMNS = `id, shift_code, scope_mode, user_id, user_name, branch_id
   parent_shift_id, reopen_reason, reopened_by_user_id, reopened_by_user_name,
   cancelled_at, cancelled_by_user_id, cancelled_by_user_name, cancel_reason,
   EXISTS (SELECT 1 FROM shift_sessions child WHERE child.parent_shift_id=shift_sessions.id) AS has_reopened_child,
-  ${AMENDMENT_COUNT_SQL} AS amendment_count`
+  ${AMENDMENT_COUNT_SQL} AS amendment_count,
+  ${BRANCH_ACTIVE_SQL} AS branch_active`
 
 function parseBranchId(value: unknown): number | null {
   if (value == null || String(value).trim() === '') return null
@@ -216,9 +268,48 @@ function canUseShifts(user: SessionUser): boolean { return hasAnyPermission(user
 function shiftPermissionError(c: { json: (body: object, status: 403) => Response }, user: SessionUser): Response | null {
   return canUseShifts(user) ? null : c.json({ error: 'You do not have permission to use shifts.' }, 403)
 }
+/** An ACTIVE branch -- the only kind a new shift may be opened on, and the only
+ * kind the POS /current prompt runs against. */
 async function resolveBranch(db: D1Compat, branchId: number | null): Promise<{ id: number; name: string } | null> {
   if (branchId == null) return null
   return (await db.prepare('SELECT id, name FROM branches WHERE id=@id AND is_active=1').get<{ id: number; name: string }>({ id: branchId })) ?? null
+}
+type BranchState = { id: number; name: string; is_active: number }
+/** One branch, retired or not. */
+async function readBranchState(db: D1Compat, branchId: number): Promise<BranchState | null> {
+  return (await db.prepare('SELECT id, name, is_active FROM branches WHERE id=@id').get<BranchState>({ id: branchId })) ?? null
+}
+export type RetiredBranch = { branch_id: number; branch_name: string; successor_branch_id: number | null; successor_branch_name: string | null }
+/**
+ * What /current tells a till still pointed at a retired branch: the branch, and
+ * the ACTIVE branch that took over from it (branches.successor_branch_id,
+ * migration 0223), so the POS can offer "switch to LC Store". No successor (or
+ * a successor that is itself retired) answers null and the POS offers a reload.
+ * The successor read is guarded: a schema without 0223 simply has none.
+ */
+async function retiredBranchFor(db: D1Compat, branch: BranchState): Promise<RetiredBranch> {
+  let successor: { id: number; name: string } | undefined
+  try {
+    successor = await db.prepare(`SELECT successor.id, successor.name FROM branches retired
+      JOIN branches successor ON successor.id = retired.successor_branch_id AND successor.is_active = 1
+      WHERE retired.id = @id`).get<{ id: number; name: string }>({ id: branch.id })
+  } catch { successor = undefined }
+  return { branch_id: branch.id, branch_name: branch.name, successor_branch_id: successor?.id ?? null, successor_branch_name: successor?.name ?? null }
+}
+/** The caller's OWN drawer still open on a branch, any business day (the last
+ * segment of its lineage) -- what /current offers on a retired branch so it
+ * can be closed. */
+async function readOwnOpenOnBranch(db: D1Compat, userId: number, branchId: number) {
+  return db.prepare(`SELECT ${SHIFT_COLUMNS} FROM shift_sessions
+    WHERE user_id = @userId AND branch_id = @branchId
+      AND closed_at IS NULL AND cancelled_at IS NULL
+      AND NOT EXISTS (SELECT 1 FROM shift_sessions later WHERE later.parent_shift_id = shift_sessions.id)
+    ORDER BY opened_at DESC, id DESC LIMIT 1`).get<ShiftDbRow>({ userId, branchId })
+}
+/** Any branch, retired or not -- for READ filters and for naming the till a
+ * close request came from. See BRANCH_ACTIVE_SQL. */
+async function branchExists(db: D1Compat, branchId: number): Promise<boolean> {
+  return !!(await db.prepare('SELECT id FROM branches WHERE id=@id').get<{ id: number }>({ id: branchId }))
 }
 /**
  * D1/SQLite datetime columns are written without a timezone suffix
@@ -355,7 +446,7 @@ function canSeeShift(user: SessionUser, policy: ShiftPolicy, shift: ShiftRow): b
  * and writing them into before_json/after_json would make every amendment
  * diff carry a count of itself. */
 function storedShift(shift: ShiftDbRow): ShiftRow {
-  const { has_reopened_child: _hasReopenedChild, amendment_count: _amendmentCount, ...stored } = shift
+  const { has_reopened_child: _hasReopenedChild, amendment_count: _amendmentCount, branch_active: _branchActive, ...stored } = shift
   return stored
 }
 function canMutateShift(user: SessionUser, shift: ShiftRow): boolean {
@@ -387,10 +478,13 @@ function canAmendShift(user: SessionUser, shift: ShiftRow): boolean {
 function responseShift(user: SessionUser, row: ShiftDbRow): ShiftResponseRow {
   const shift = storedShift(row)
   const cancelled = !!shift.cancelled_at; const canMutate = canMutateShift(user, shift) && !cancelled
-  return { ...shift, amendment_count: Number(row.amendment_count) || 0, capabilities: {
-    can_edit: canAmendShift(user, shift),
+  // Absent (a row read without SHIFT_COLUMNS) is treated as active, the
+  // behaviour every such caller had before N7.
+  const branchActive = row.branch_active == null || Number(row.branch_active) === 1
+  return { ...shift, amendment_count: Number(row.amendment_count) || 0, branch_active: branchActive, capabilities: {
+    can_edit: canAmendShift(user, shift) && branchActive,
     can_close: canMutate && !shift.closed_at,
-    can_reopen: canMutate && !!shift.closed_at && !row.has_reopened_child
+    can_reopen: canMutate && branchActive && !!shift.closed_at && !row.has_reopened_child
       && shift.business_date === businessDateFor(new Date().toISOString()),
     can_cancel: canManageShifts(user) && !cancelled && !row.has_reopened_child,
   } }
@@ -490,15 +584,21 @@ async function readCurrent(db: D1Compat, policy: ShiftPolicy, userId: number, br
  * a stale row another cashier left open. /current reports the row together
  * with the close bound the Worker itself will enforce (see the handler), so
  * the client never has to guess a closing time that comes back 409.
+ *
+ * N7: the caller's OWN stale row on a RETIRED branch is offered too, from
+ * whichever branch the till now runs. The POS can no longer select that
+ * branch (/current refuses an inactive one), so without this the only way to
+ * end the drawer would be an administrator finding it in Reports.
  */
 async function readPreviousOpen(db: D1Compat, policy: ShiftPolicy, userId: number, branchId: number | null) {
   const accountClause = policy.scope_mode === 'per_account' ? 'AND user_id = @userId' : ''
   return db.prepare(`SELECT ${SHIFT_COLUMNS} FROM shift_sessions
-    WHERE scope_mode = @scopeMode ${accountClause}
+    WHERE scope_mode = @scopeMode
       AND business_date < ${localTodayExpr()}
       AND closed_at IS NULL AND cancelled_at IS NULL
       AND NOT EXISTS (SELECT 1 FROM shift_sessions later WHERE later.parent_shift_id = shift_sessions.id)
-      AND ((@branchId IS NULL AND branch_id IS NULL) OR branch_id = @branchId)
+      AND ((((@branchId IS NULL AND branch_id IS NULL) OR branch_id = @branchId) ${accountClause})
+        OR (user_id = @userId AND branch_id IS NOT NULL AND (${BRANCH_ACTIVE_SQL}) = 0))
     ORDER BY business_date ASC, opened_at ASC, id ASC LIMIT 1`)
     .get<ShiftDbRow>({ scopeMode: policy.scope_mode, userId, branchId })
 }
@@ -633,6 +733,78 @@ async function reconciliationFor(env: Env, user: SessionUser, shift: ShiftRow): 
   try { return await loadShiftReconciliation(env, shift, Date.now()) } catch { return null }
 }
 /**
+ * ---- A closed shift's drawer is the one it closed on (N4) ----------------
+ *
+ * `reconciliation` on a CLOSED shift is the stored close figures (migration
+ * 0237, written in the close batch by writeClose), labelled
+ * reconciliation_source='stored'. Anything that moved since -- a tender
+ * relabel, a cancel, a settled Not Paid sale, an amended count or window --
+ * is `close_drift`: the components that differ and the sales that changed,
+ * with today's computed figures beside them. Nothing is hidden and nothing is
+ * absorbed.
+ *
+ * A shift closed before 0237 has no stored row: `reconciliation` is today's
+ * computed figures, labelled 'computed', exactly what every read showed
+ * before. An OPEN shift is always computed (it has no close yet).
+ *
+ * Same reviewer gate and same null-on-failure rule as reconciliationFor; the
+ * drift (one extra windowed sale read) is attached only where a report is
+ * opened -- not to the /current banner.
+ */
+type ShiftDrawer = {
+  reconciliation: ShiftReconciliation | null
+  reconciliation_source: 'stored' | 'computed' | null
+  close_figures_taken_at: string | null
+  close_drift: ShiftCloseDrift | null
+}
+async function storedCloseFigures(env: Env, shiftId: number): Promise<ShiftCloseFigures | null> {
+  try {
+    const row = await getDb(env).prepare('SELECT figures_json FROM shift_close_figures WHERE shift_session_id = @id')
+      .get<{ figures_json: string }>({ id: shiftId })
+    return row ? parseShiftCloseFigures(row.figures_json) : null
+  } catch { return null }
+}
+async function drawerFor(env: Env, user: SessionUser, shift: ShiftRow, options: { drift: boolean }): Promise<ShiftDrawer> {
+  const none: ShiftDrawer = { reconciliation: null, reconciliation_source: null, close_figures_taken_at: null, close_drift: null }
+  if (!canManageShifts(user)) return none
+  const nowMs = Date.now()
+  const [computed, stored] = await Promise.all([
+    reconciliationFor(env, user, shift),
+    shift.closed_at ? storedCloseFigures(env, shift.id) : Promise.resolve(null),
+  ])
+  if (!stored) return { ...none, reconciliation: computed, reconciliation_source: computed ? 'computed' : null }
+  let drift: ShiftCloseDrift | null = null
+  if (options.drift && computed) {
+    try { drift = await loadShiftCloseDrift(env, shift, stored, computed, nowMs) } catch { drift = null }
+  }
+  return { reconciliation: stored.reconciliation, reconciliation_source: 'stored',
+    close_figures_taken_at: stored.taken_at || null, close_drift: drift }
+}
+/**
+ * The figures to store with a close, as JSON, for the shift AS IT IS BEING
+ * CLOSED (its new closed_at, counts and additional cash). Null when they
+ * cannot be computed: the close must never fail for the report's sake, and a
+ * close without stored figures reads exactly like a pre-0237 one ("computed").
+ */
+type CloseFigures = { json: string; digest: ShiftCloseInputsDigest; digestValue: string }
+async function closeFiguresFor(env: Env, closing: ShiftRow): Promise<CloseFigures | null> {
+  try {
+    const nowMs = Date.now()
+    // The digest FIRST: whatever moves after this read is caught at commit
+    // (writeClose's inputs guard), including a write landing mid-computation.
+    const digest = shiftCloseInputsDigestSql(closing, nowMs)
+    const digestValue = await readShiftCloseInputsDigest(env, digest)
+    const figures = await loadShiftCloseFigures(env, closing, nowMs)
+    if (!figures || typeof figures !== 'object' || !digestValue) return null
+    const json = JSON.stringify(figures)
+    // D1 rows stay well under its size limit: past ~512 KB keep the drawer and drop the fingerprint.
+    return { json: json.length <= 512_000 ? json : JSON.stringify({ ...figures, sales: null }), digest, digestValue }
+  } catch { return null }
+}
+function isCloseInputsChangedError(error: unknown): boolean {
+  return /bad JSON path: ['"]\$\[shift_close_inputs_changed\]['"]/i.test(error instanceof Error ? error.message : String(error))
+}
+/**
  * The shift REPORT figures -- sales, COGS, profit, delivery and the expense
  * split, from lib/shiftReconciliation.ts.
  *
@@ -654,17 +826,16 @@ async function figuresFor(env: Env, user: SessionUser, shift: ShiftRow): Promise
   if (!canManageShifts(user)) return null
   try { return await loadShiftFigures(env, shift, Date.now()) } catch { return null }
 }
-type ReconciledShift = ShiftPresentedRow & {
-  reconciliation: ShiftReconciliation | null
+type ReconciledShift = ShiftPresentedRow & ShiftDrawer & {
   figures?: ShiftFigures | null
 }
 async function reconciledShift(env: Env, user: SessionUser, row: ShiftDbRow): Promise<ReconciledShift> {
   const shift = await presentShift(getDb(env), user, row)
-  const [reconciliation, figures] = await Promise.all([
-    reconciliationFor(env, user, shift),
+  const [drawer, figures] = await Promise.all([
+    drawerFor(env, user, shift, { drift: true }),
     figuresFor(env, user, shift),
   ])
-  return { ...shift, reconciliation, figures }
+  return { ...shift, ...drawer, figures }
 }
 
 function currentResponse(user: SessionUser, shift: ShiftDbRow | undefined, policy: ShiftPolicy, exempt: boolean) {
@@ -680,10 +851,15 @@ app.get('/current', async (c) => {
   const db = getDb(c.env); const requestedBranchId = branchIdFrom(c)
   const rawBranchId = c.req.query('branch_id') ?? c.req.header('X-Branch-Id')
   if (rawBranchId != null && String(rawBranchId).trim() !== '' && requestedBranchId == null) return c.json({ error: 'Invalid branch id.' }, 400)
-  if (requestedBranchId != null && !(await resolveBranch(db, requestedBranchId))) return c.json({ error: 'Branch not found or inactive.' }, 400)
+  // N7: a RETIRED branch is answered, not refused -- a long-lived till tab
+  // still pointed at it used to get a 400 it swallowed, and showed no prompt,
+  // no End Shift and no reason. See retiredBranchFor.
+  const branchState = requestedBranchId == null ? null : await readBranchState(db, requestedBranchId)
+  if (requestedBranchId != null && !branchState) return c.json({ error: 'Branch not found.' }, 400)
+  const retired = branchState && !branchState.is_active ? await retiredBranchFor(db, branchState) : null
   const policy = await readShiftPolicy(db)
   const exempt = policy.admin_exempt && isAdminControlUser(user)
-  const shift = exempt ? undefined : await readCurrent(db, policy, user.id, requestedBranchId)
+  const shift = exempt ? undefined : retired ? await readOwnOpenOnBranch(db, user.id, retired.branch_id) : await readCurrent(db, policy, user.id, requestedBranchId)
   // The carry-over is a BANNER, not a report: no reconciliation and no figures
   // on it, for the same reason /current carries none (see figuresFor).
   //
@@ -703,10 +879,17 @@ app.get('/current', async (c) => {
   const body = currentResponse(user, shift, policy, exempt)
   // Admin comparison may include an open shift. Staff retain only registered
   // counts; no report calculation is needed to enter or close their drawer.
-  const presented = body.shift ? { ...body.shift, reconciliation: await reconciliationFor(c.env, user, body.shift) } : null
+  // A closed current shift shows the drawer it closed on (N4); the drift is
+  // left to the report reads -- this is a polled banner.
+  const presented = body.shift ? { ...body.shift, ...(await drawerFor(c.env, user, body.shift, { drift: false })) } : null
+  // On a retired branch nothing is registered (open needs an active branch),
+  // the caller's own drawer still open there is `shift` so End Shift can close
+  // it, and the till is told why and where to go instead.
+  const offered = carryOver && !(retired && body.shift && carryOver.id === body.shift.id) ? carryOver : null
   return c.json({ ...body, shift: presented,
-    previous_open_shift: carryOver ? responseShift(user, carryOver) : null,
-    previous_open_close_before: closeBefore?.opened_at ?? null })
+    ...(retired ? { needs_registration: false, code: 'branch_inactive', branch_inactive: retired } : { branch_inactive: null }),
+    previous_open_shift: offered ? responseShift(user, offered) : null,
+    previous_open_close_before: offered ? closeBefore?.opened_at ?? null : null })
 })
 
 app.get('/', async (c) => {
@@ -714,7 +897,8 @@ app.get('/', async (c) => {
   const db = getDb(c.env); const branchId = branchIdFrom(c)
   const rawBranchId = c.req.query('branch_id') ?? c.req.header('X-Branch-Id')
   if (rawBranchId != null && String(rawBranchId).trim() !== '' && branchId == null) return c.json({ error: 'Invalid branch id.' }, 400)
-  if (branchId != null && !(await resolveBranch(db, branchId))) return c.json({ error: 'Branch not found or inactive.' }, 400)
+  // A retired branch is still a valid HISTORY filter (N7, see BRANCH_ACTIVE_SQL).
+  if (branchId != null && !(await branchExists(db, branchId))) return c.json({ error: 'Branch not found.' }, 400)
   const rawUserId = c.req.query('user_id')
   const parsedUserId = rawUserId == null || rawUserId.trim() === '' ? null : Number(rawUserId)
   if (parsedUserId != null && (!Number.isInteger(parsedUserId) || parsedUserId <= 0)) return c.json({ error: 'Invalid user id.' }, 400)
@@ -777,7 +961,6 @@ app.get('/', async (c) => {
       AND NOT EXISTS (SELECT 1 FROM shift_sessions later WHERE later.parent_shift_id = shift_sessions.id)
       AND (@requestedUserId IS NULL OR user_id = @requestedUserId)
       AND (@branchId IS NULL OR branch_id = @branchId)
-      AND (branch_id IS NULL OR EXISTS (SELECT 1 FROM branches b WHERE b.id=shift_sessions.branch_id AND b.is_active=1))
       AND (@from IS NULL OR business_date >= @from) AND (@to IS NULL OR business_date <= @to)
       ${openingWindow ? `AND ${continuousReadWindowSql('opened_at')}` : ''}
       AND (@search IS NULL OR user_name LIKE @search ESCAPE '\\' OR shift_sessions.id IN (
@@ -831,7 +1014,6 @@ app.get('/:id/history', async (c) => {
   if (!Number.isInteger(id) || id <= 0) return c.json({ error: 'Invalid shift id.' }, 400)
   const db = getDb(c.env); const shift = await readShiftById(db, id)
   if (!shift) return c.json({ error: 'Shift not found.' }, 404)
-  if (shift.branch_id != null && !(await resolveBranch(db, shift.branch_id))) return c.json({ error: 'Shift not found.' }, 404)
   // 404, not 403: a caller who may not see this shift must not learn that it
   // exists, which id probing would otherwise reveal one status code at a time.
   if (!canSeeShift(user, await readShiftPolicy(db), shift)) return c.json({ error: 'Shift not found.' }, 404)
@@ -904,9 +1086,15 @@ app.post('/open', async (c) => {
           opening_float_usd: row.floatUsd, opening_float_khr: row.floatKhr }), oldValue: null,
         newValue: JSON.stringify({ shift_code: row.shiftCode, opened_at: row.openedAt,
           opening_float_usd: row.floatUsd, opening_float_khr: row.floatKhr }), deviceName: row.deviceName } },
+      // N7: the branch must STILL be active when the row commits. The read
+      // above can race a retirement (the cutover only checks that no shift is
+      // open at its own commit), and a drawer opened on a branch that retired
+      // a moment earlier is exactly the trap this lane removes.
+      { sql: OPEN_BRANCH_ACTIVE_GUARD_SQL, params: { branchId: row.branchId } },
     ])
     if (batchChanges(results[0]) !== 1) throw new Error('Shift open did not write a row.')
   } catch (error) {
+    if (isOpenBranchInactiveError(error)) return c.json({ error: 'Branch not found or inactive.', code: 'shift_branch_inactive' }, 400)
     const raced = await readCurrent(db, policy, user.id, branchId)
     if (raced) return c.json({ ...currentResponse(user, raced, policy, false), already_registered: true }, 200)
     throw error
@@ -923,6 +1111,8 @@ async function writeClose(db: D1Compat, user: SessionUser, row: ShiftDbRow, inpu
   additionalUsd: number; additionalKhr: number
   note: string | null; deviceName: string | null; reason: string
   request?: ReturnType<typeof mutationRequest>
+  /** closeFiguresFor's figures and input digest, or null when they could not be computed. */
+  figures: CloseFigures | null
 }): Promise<{ changed: boolean; shift: ShiftDbRow | undefined }> {
   const shift = storedShift(row)
   const after = { ...shift, closed_at: input.closedAt, closing_counted_usd: input.countedUsd,
@@ -948,9 +1138,49 @@ async function writeClose(db: D1Compat, user: SessionUser, row: ShiftDbRow, inpu
     { sql: transitionAuditSql(), params: { actorId: user.id, actorName, action: 'shift.close', shiftId: shift.id,
         details: JSON.stringify({ reason: input.reason, revision: after.revision, request: input.request }), oldValue: JSON.stringify(shift),
         newValue: JSON.stringify(after), deviceName: input.deviceName } },
+    // N4: the drawer this close was made on, in the same batch, so a committed
+    // close always carries the figures it computed. Guarded by the row's new
+    // state rather than changes(), which the two inserts above already chain:
+    // a close that lost its revision race writes nothing here.
+    ...(input.figures == null ? [] : [{ sql: `INSERT INTO shift_close_figures (shift_session_id, closed_at, figures_json, created_at)
+        SELECT id, closed_at, @figuresJson, @createdAt FROM shift_sessions
+        WHERE id=@id AND revision=@newRevision AND closed_at=@closedAt AND closed_by_user_id=@closerId
+          AND NOT EXISTS (SELECT 1 FROM shift_close_figures WHERE shift_session_id=@id)`,
+      params: { id: shift.id, newRevision: after.revision, closedAt: input.closedAt, closerId: user.id,
+        figuresJson: input.figures.json, createdAt: input.recordedAt } },
+      // ...and the inputs those figures were computed from are still the
+      // inputs now. A write that landed in between aborts the whole batch
+      // (close included); closeWithFigures recomputes and retries. Evaluated
+      // only when this close won, so a lost race still answers its 409.
+      { sql: `SELECT CASE WHEN NOT EXISTS (SELECT 1 FROM shift_sessions WHERE id=@closeGuardId AND revision=@closeGuardRevision
+            AND closed_at=@closeGuardClosedAt AND closed_by_user_id=@closeGuardCloserId)
+          OR (${input.figures.digest.expr}) = @closeInputsDigest
+        THEN 1 ELSE json_extract('[1]', '$[shift_close_inputs_changed]') END`,
+        params: { ...input.figures.digest.params, closeGuardId: shift.id, closeGuardRevision: after.revision,
+          closeGuardClosedAt: input.closedAt, closeGuardCloserId: user.id, closeInputsDigest: input.figures.digestValue } }]),
   ])
   const changed = batchChanges(results[0]) === 1
   return { changed, shift: await readShiftById(db, shift.id) }
+}
+/**
+ * The close, with the figures it is made on (N4). The figures are computed
+ * in JS, so they are re-verified at commit (writeClose's inputs guard): a
+ * write that lands between the read and the commit aborts the batch and the
+ * figures are recomputed -- at most CLOSE_FIGURE_ATTEMPTS times. If the inputs
+ * keep moving, the close still commits, without stored figures, and that shift
+ * reads "computed": ending a drawer is never refused for the report's sake
+ * (owner: no trapping flows), and the label says the figures were not frozen.
+ */
+const CLOSE_FIGURE_ATTEMPTS = 3
+async function closeWithFigures(env: Env, db: D1Compat, user: SessionUser, row: ShiftDbRow, closing: ShiftRow,
+  input: Omit<Parameters<typeof writeClose>[3], 'figures'>) {
+  for (let attempt = 0; attempt < CLOSE_FIGURE_ATTEMPTS; attempt += 1) {
+    const figures = await closeFiguresFor(env, closing)
+    try { return await writeClose(db, user, row, { ...input, figures }) } catch (error) {
+      if (!figures || !isCloseInputsChangedError(error)) throw error
+    }
+  }
+  return writeClose(db, user, row, { ...input, figures: null })
 }
 
 /**
@@ -977,7 +1207,9 @@ app.post('/close', async (c) => {
   const branchId = bodyBranchId(body, branchIdFrom(c))
   if (body.branch_id != null && String(body.branch_id).trim() !== '' && branchId == null) return c.json({ error: 'Invalid branch id.' }, 400)
   const db = getDb(c.env)
-  if (branchId != null && !(await resolveBranch(db, branchId))) return c.json({ error: 'Branch not found or inactive.' }, 400)
+  // Ending a drawer never requires its branch to still trade (N7): a till
+  // whose branch was retired mid-shift must still be able to close.
+  if (branchId != null && !(await branchExists(db, branchId))) return c.json({ error: 'Branch not found.' }, 400)
   const shift = await readShiftById(db, Number(body.shift_id))
   if (!shift) return c.json({ error: 'Shift not found.' }, 404)
   if (body.branch_id != null && shift.branch_id !== branchId) return c.json({ error: 'Shift branch does not match the requested branch.' }, 400)
@@ -992,7 +1224,10 @@ app.post('/close', async (c) => {
   const closedAt = new Date().toISOString()
   const overlap = await intervalError(db, storedShift(shift), shift.opened_at, closedAt)
   if (overlap) return c.json({ error: overlap }, 409)
-  const result = await writeClose(db, user, shift, { closedAt, recordedAt: closedAt,
+  const closing = { ...storedShift(shift), closed_at: closedAt,
+    closing_counted_usd: countedUsd.value, closing_counted_khr: countedKhr.value,
+    additional_cash_usd: additionalUsd.value, additional_cash_khr: additionalKhr.value }
+  const result = await closeWithFigures(c.env, db, user, shift, closing, { closedAt, recordedAt: closedAt,
     countedUsd: countedUsd.value, countedKhr: countedKhr.value,
     additionalUsd: additionalUsd.value, additionalKhr: additionalKhr.value,
     note: optionalText(body.closing_note), deviceName: c.req.header('X-Device-Name') || null, reason: 'Manual shift close', request: mutationRequest(body, shift.id) })
@@ -1025,7 +1260,7 @@ app.post('/:id/close', async (c) => {
   if (!additionalUsd.ok || !additionalKhr.ok) return c.json({ error: 'Additional change used must be 0 or more, or left blank.' }, 400)
   const db = getDb(c.env); const shift = await readShiftById(db, id)
   if (!shift) return c.json({ error: 'Shift not found.' }, 404)
-  if (shift.branch_id != null && !(await resolveBranch(db, shift.branch_id))) return c.json({ error: 'Shift not found.' }, 404)
+  // No branch-activity check: closing is allowed on a retired branch (N7).
   if (!canMutateShift(user, shift)) return c.json({ error: 'Only the shift owner or an administrator can close this shift.' }, 403)
   if (shift.cancelled_at) return c.json({ error: 'A cancelled shift cannot be closed.' }, 409)
   if (shift.closed_at) return c.json({ error: 'Shift is already closed.' }, 409)
@@ -1033,7 +1268,10 @@ app.post('/:id/close', async (c) => {
   if (closedAtMs < utcMs(shift.opened_at)) return c.json({ error: 'Closing time cannot be before opening time.' }, 400)
   const overlap = await intervalError(db, storedShift(shift), shift.opened_at, closedAt)
   if (overlap) return c.json({ error: overlap }, 409)
-  const result = await writeClose(db, user, shift, { closedAt, recordedAt: new Date().toISOString(),
+  const closing = { ...storedShift(shift), closed_at: closedAt,
+    closing_counted_usd: countedUsd.value, closing_counted_khr: countedKhr.value,
+    additional_cash_usd: additionalUsd.value, additional_cash_khr: additionalKhr.value }
+  const result = await closeWithFigures(c.env, db, user, shift, closing, { closedAt, recordedAt: new Date().toISOString(),
     countedUsd: countedUsd.value, countedKhr: countedKhr.value,
     additionalUsd: additionalUsd.value, additionalKhr: additionalKhr.value,
     note: optionalText(body.closing_note), deviceName: c.req.header('X-Device-Name') || null, reason: 'Historic manual close', request: mutationRequest(body, id) })
@@ -1054,7 +1292,7 @@ app.post('/:id/cancel', async (c) => {
   if (!reason) return c.json({ error: 'A cancellation reason of 500 characters or fewer is required.' }, 400)
   const db = getDb(c.env); const before = await readShiftById(db, id)
   if (!before) return c.json({ error: 'Shift not found.' }, 404)
-  if (before.branch_id != null && !(await resolveBranch(db, before.branch_id))) return c.json({ error: 'Shift not found.' }, 404)
+  // No branch-activity check: cancelling is allowed on a retired branch (N7).
   if (before.cancelled_at) return c.json({ error: 'Shift is already cancelled.' }, 409)
   if (before.has_reopened_child) return c.json({ error: 'Only the latest shift segment can be cancelled.' }, 409)
   if (before.revision !== expectedRevision) return c.json({ error: 'Shift changed concurrently. Reload and try again.' }, 409)
@@ -1096,8 +1334,10 @@ app.post('/:id/reopen', async (c) => {
   const floatUsd = floatUsdParsed.value; const floatKhr = floatKhrParsed.value
   const db = getDb(c.env); const parent = await readShiftById(db, id)
   if (!parent) return c.json({ error: 'Shift not found.' }, 404)
-  if (parent.branch_id != null && !(await resolveBranch(db, parent.branch_id))) return c.json({ error: 'Shift not found.' }, 404)
   if (!canMutateShift(user, parent)) return c.json({ error: 'Only the shift owner or an administrator can reopen this shift.' }, 403)
+  // A reopen opens a new drawer segment on the parent's branch -- the same
+  // thing POST /open refuses on a retired branch.
+  if (Number(parent.branch_active) === 0) return c.json(inactiveBranchRefusal(parent), 409)
   if (parent.cancelled_at) return c.json({ error: 'A cancelled shift cannot be reopened.' }, 409)
   if (!parent.closed_at) return c.json({ error: 'Only a closed shift can be reopened.' }, 409)
   if (parent.revision !== expectedRevision) return c.json({ error: 'Shift changed concurrently. Reload and try again.' }, 409)
@@ -1126,9 +1366,11 @@ app.patch('/:id', async (c) => {
   if (!reason) return c.json({ error: 'A reason is required.' }, 400)
   const db = getDb(c.env); const before = await readShiftById(db, id)
   if (!before) return c.json({ error: 'Shift not found.' }, 404)
-  if (before.branch_id != null && !(await resolveBranch(db, before.branch_id))) return c.json({ error: 'Shift not found.' }, 404)
   if (before.cancelled_at) return c.json({ error: 'A cancelled shift cannot be amended.' }, 409)
   if (!canAmendShift(user, before)) return c.json({ error: 'Shift permission is required to amend this shift.' }, 403)
+  // A record on a retired branch is read-only (N7): amending it would rewrite
+  // the drawer of a branch that no longer trades, with nobody there to count.
+  if (Number(before.branch_active) === 0) return c.json(inactiveBranchRefusal(before), 409)
   if (before.revision !== expectedRevision) return c.json({ error: 'Shift changed concurrently. Reload and try again.' }, 409)
   const iso = (key: string, fallback: string | null) => {
     if (!(key in body)) return fallback

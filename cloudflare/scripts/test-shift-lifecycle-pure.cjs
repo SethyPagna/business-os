@@ -56,6 +56,8 @@ function database() {
       delivery_actual_cost_khr REAL, is_delivery INTEGER, source_return_id INTEGER,
       customer_id INTEGER, delivery_contact_id INTEGER, delivery_contact_name TEXT
     );
+    -- 0120's trigger-maintained per-sale revision: the close's input digest reads it.
+    CREATE TABLE sale_write_revisions (sale_id INTEGER PRIMARY KEY, revision INTEGER NOT NULL DEFAULT 0);
     CREATE TABLE sale_items (
       id INTEGER PRIMARY KEY, sale_id INTEGER, quantity REAL, cost_price_usd REAL,
       product_discount_usd REAL, manual_discount_usd REAL
@@ -84,6 +86,8 @@ function database() {
   db.exec(fs.readFileSync(path.join(root, 'migrations', '0123_shift_reopen_segments.sql'), 'utf8'))
   db.exec(fs.readFileSync(path.join(root, 'migrations', '0132_shift_opening_count_presence.sql'), 'utf8'))
   db.exec(fs.readFileSync(path.join(root, 'migrations', '0147_shift_additional_cash.sql'), 'utf8'))
+  // N4: the close writes the figures it was made on in the same batch.
+  db.exec(fs.readFileSync(path.join(root, 'migrations', '0237_shift_close_figures.sql'), 'utf8'))
   db.prepare('INSERT INTO branches(id,name,is_active) VALUES (1,?,1)').run('Shop')
   return db
 }
@@ -532,12 +536,20 @@ const schemaProbeReal = loadReal('lib/schemaProbe.ts')
     'dynamic SELECT-star backup includes appended lineage columns without a backup.ts write')
   const backedUpShifts = sqlite.prepare('SELECT * FROM shift_sessions ORDER BY id').all()
   const backedUpAmendments = sqlite.prepare('SELECT * FROM shift_session_amendments ORDER BY id').all()
+  // 0237's close figures are children of shift_sessions too; backup.ts lists
+  // them after the amendments, so its reverse-order delete removes them first.
+  const backedUpCloseFigures = sqlite.prepare('SELECT * FROM shift_close_figures ORDER BY shift_session_id').all()
+  assert.ok(backedUpCloseFigures.length > 0, 'the closes above stored their figures')
   sqlite.prepare("INSERT OR REPLACE INTO system_flags(key,value) VALUES ('maintenance',?)").run(JSON.stringify({ mode: 'restore' }))
+  sqlite.prepare('DELETE FROM shift_close_figures').run()
   sqlite.prepare('DELETE FROM shift_session_amendments').run()
   assert.doesNotThrow(() => sqlite.prepare('DELETE FROM shift_sessions').run(),
     'maintenance restore can delete a self-referenced root/child table with foreign keys enabled')
   restoreRows(sqlite, 'shift_sessions', backedUpShifts)
   restoreRows(sqlite, 'shift_session_amendments', backedUpAmendments)
+  restoreRows(sqlite, 'shift_close_figures', backedUpCloseFigures)
+  assert.deepEqual(sqlite.prepare('SELECT * FROM shift_close_figures ORDER BY shift_session_id').all(), backedUpCloseFigures,
+    'the close figures round-trip through the restore unchanged')
   assert.equal(sqlite.prepare('SELECT parent_shift_id FROM shift_sessions WHERE id=?').get(replacement.id).parent_shift_id, grandchild.id)
   assert.equal(sqlite.prepare('SELECT cancel_reason FROM shift_sessions WHERE id=?').get(grandchild.id).cancel_reason,
     'Opening was registered against the wrong drawer')

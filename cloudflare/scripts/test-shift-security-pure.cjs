@@ -142,14 +142,17 @@ async function main() {
   assert.equal(JSON.parse(foreignRecord.before_json).amendment_count, undefined, 'a derived count is never written into a snapshot')
   assert.equal(sqlite.prepare("SELECT COUNT(*) n FROM audit_logs WHERE action='shift.amend' AND user_id=7 AND entity_id=CAST(? AS TEXT)").get(foreignId).n, 1,
     'and the amendment is audited under the acting account')
-  // The branch scope is still a wall: a shift filed under a branch that is not
-  // active is not reachable at all, and says "not found" rather than naming it.
+  // A shift filed under a branch that is no longer active is READ-ONLY (N7):
+  // it stays visible as history, but an amendment is refused with the why
+  // (branch inactive) rather than a 404 that pretends the record is gone.
+  // test-shift-inactive-branch-pure.cjs covers the reads, close and cancel.
   sqlite.prepare(`INSERT INTO shift_sessions
     (shift_code,scope_mode,user_id,user_name,branch_id,branch_name,business_date,opened_at,opening_float_usd,opening_float_khr)
     VALUES ('S-OFFBRANCH','per_account',7,'Cashier',2,'Inactive',date(datetime('now','-1 hour'),'+7 hours'),datetime('now','-1 hour'),5,1000)`).run()
   const offBranchId = sqlite.prepare("SELECT id FROM shift_sessions WHERE shift_code='S-OFFBRANCH'").get().id
-  assert.equal((await call('PATCH', `/${offBranchId}`, { expected_revision: 0, reason: 'out of scope', opening_float_usd: 6 })).status, 404,
-    'a shift outside the caller branch scope cannot be amended')
+  const offBranchAmend = await call('PATCH', `/${offBranchId}`, { expected_revision: 0, reason: 'out of scope', opening_float_usd: 6 })
+  assert.equal(offBranchAmend.status, 409, 'a shift on an inactive branch cannot be amended')
+  assert.equal((await offBranchAmend.json()).code, 'shift_branch_inactive', 'and the refusal says why')
 
   // The shift-review capability (admin control user) is the exception the
   // owner asked for, and it is the SAME capability that already gates cancel.
