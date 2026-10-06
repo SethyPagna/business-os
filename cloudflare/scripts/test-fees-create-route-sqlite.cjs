@@ -50,6 +50,7 @@ raw.exec(`
     role TEXT,
     successor_branch_id INTEGER
   );
+  CREATE TABLE sale_bulk_guards (id INTEGER PRIMARY KEY, guard_value INTEGER NOT NULL CHECK(guard_value = 1));
   CREATE TABLE sales (
     id INTEGER PRIMARY KEY,
     branch_id INTEGER,
@@ -132,6 +133,7 @@ const route = loadReal('routes/fees.ts', {
   // The real role helpers: "selling" is a branch ROLE (name only as the pre-0229 fallback), so the cutover
   // scenarios below can rename and retire branches.
   '../lib/branchRoles': loadReal('lib/branchRoles.ts'),
+  '../lib/branchEffect': loadReal('lib/branchEffect.ts', { './branchRoles': loadReal('lib/branchRoles.ts'), './sqlBinding': loadReal('lib/sqlBinding.ts') }),
   '../lib/batchCode': { normalizeTypedDate: (value) => String(value || '').slice(0, 10) || null },
   '../lib/actorSnapshot': actorSnapshot,
   '../lib/feeOperationReceipt': feeOperationReceipt,
@@ -319,10 +321,26 @@ async function main() {
   const lcStoreFee = await create(feeBody('fee-cut-lc-store-0001', { branch_id: 2 }))
   assert.equal(lcStoreFee.status, 201, 'a selling branch named LC Store takes an expense (the old name test refused it): ' + JSON.stringify(lcStoreFee.body))
   const oldShopSaleFee = await create(feeBody('fee-cut-old-sale-0001', { sale_id: 11, branch_id: 3 }))
-  assert.equal(oldShopSaleFee.status, 201, 'an expense on an old Shop sale keeps that sale branch after the cutover: ' + JSON.stringify(oldShopSaleFee.body))
+  assert.equal(oldShopSaleFee.status, 201, 'an expense on an old Shop sale is accepted after the cutover: ' + JSON.stringify(oldShopSaleFee.body))
+  // The cash leaves the LC Store drawer and Old Shop has none: the expense is BOOKED to the active successor (the sale link
+  // keeps the Shop provenance). The reader's shift reconciliation filters fees by the shift's branch.
+  assert.deepEqual({ branch_id: oldShopSaleFee.body.fee.branch_id, sale_id: oldShopSaleFee.body.fee.sale_id },
+    { branch_id: 2, sale_id: 11 }, 'booked to LC Store, linked to the old Shop sale')
+  assert.equal(raw.prepare('SELECT branch_name FROM fees WHERE id=?').get(oldShopSaleFee.body.fee.id).branch_name, 'LC Store')
+  const successorSaleFee = await create(feeBody('fee-cut-old-sale-successor-0001', { sale_id: 11, branch_id: 2 }))
+  assert.equal(successorSaleFee.status, 201, 'a client that already names the successor is accepted too: ' + JSON.stringify(successorSaleFee.body))
+  assert.equal(successorSaleFee.body.fee.branch_id, 2)
+  const replayed = await create(feeBody('fee-cut-old-sale-0001', { sale_id: 11, branch_id: 3 }))
+  assert.deepEqual(replayed.body, oldShopSaleFee.body, 'the same request id replays the recorded expense')
+  assert.equal(raw.prepare("SELECT COUNT(*) n FROM fees WHERE label='fee-cut-old-sale-0001'").get().n, 1, 'and books it once')
+  const beforeUnlinked = raw.prepare('SELECT COUNT(*) n FROM fees').get().n
+  raw.exec("UPDATE branches SET successor_branch_id=NULL WHERE id=3")
+  assert.equal((await create(feeBody('fee-cut-old-sale-orphaned-0001', { sale_id: 11, branch_id: 3 }))).status, 400, 'once the retired branch has no selling successor the expense refuses')
+  assert.equal(raw.prepare('SELECT COUNT(*) n FROM fees').get().n, beforeUnlinked, 'and writes nothing')
+  raw.exec("UPDATE branches SET successor_branch_id=2 WHERE id=3")
   const oldShopDirect = await create(feeBody('fee-cut-old-direct-0001', { branch_id: 3 }))
   assert.equal(oldShopDirect.status, 400, 'a NEW expense cannot be recorded at the retired branch itself')
-  assert.equal((await create(feeBody('fee-cut-old-sale-mismatch-0001', { sale_id: 11, branch_id: 2 }))).status, 400, 'the sale branch and expense branch must still agree')
+  assert.equal((await create(feeBody('fee-cut-old-sale-mismatch-0001', { sale_id: 11, branch_id: 4 }))).status, 400, 'the sale branch (or its successor) and the expense branch must still agree')
   assert.equal((await create(feeBody('fee-cut-warehouse-0001', { branch_id: 4 }))).status, 400, 'a warehouse-role branch never takes an expense')
   assert.equal((await create(feeBody('fee-cut-warehouse-sale-0001', { sale_id: 13, branch_id: 4 }))).status, 400, 'nor through a sale at it')
   assert.equal((await create(feeBody('fee-cut-orphan-sale-0001', { sale_id: 12, branch_id: 5 }))).status, 400, 'a retired branch with no successor cannot carry one')

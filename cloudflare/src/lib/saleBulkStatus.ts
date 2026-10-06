@@ -389,6 +389,8 @@ export async function applySaleBulkStatus(env: Env, user: SessionUser, raw: Row)
         const itemCancel = expected.cancel;
         const createsCancellationFee = changed && request.target_status === 'cancelled' && !!itemCancel
             && (Number(itemCancel.fee_usd) > 0 || Number(itemCancel.fee_khr) > 0);
+        // Where the expense is booked: the sale's branch while it is active, its ACTIVE selling successor once retired.
+        let feeLanding: { id: number; name: string | null } | null = null;
         if (createsCancellationFee) {
             const branchId = Number(sale.branch_id);
             // The expense keeps the branch the sale was recorded at: a selling branch that is active, or one
@@ -398,6 +400,8 @@ export async function applySaleBulkStatus(env: Env, user: SessionUser, raw: Row)
             const feeSuccessor = feeBranch && !feeBranchActive ? resolveSellingSuccessor(resolver.directory, branchId) : null;
             if (!Number.isSafeInteger(branchId) || branchId <= 0 || !feeBranch || !branchCanSell(feeBranch) || (!feeBranchActive && !feeSuccessor))
                 throw new SaleBulkError('Cancellation expenses require a sale recorded at the active Shop.', 400);
+            if (feeSuccessor)
+                feeLanding = { id: feeSuccessor.effectBranchId, name: resolver.directory.find(row => Number(row.id) === feeSuccessor.effectBranchId)?.name ?? null };
             if (feeBranchActive)
                 guards.push(bulkAssertion("EXISTS(SELECT 1 FROM sales s JOIN branches b ON b.id=s.branch_id WHERE s.id=@id AND s.branch_id=@branch AND " + sellingBranchConditionSql('b') + ")", { id: expected.id, branch: branchId }));
             else
@@ -453,10 +457,9 @@ export async function applySaleBulkStatus(env: Env, user: SessionUser, raw: Row)
                 amount_khr: Math.max(0, Math.round(Number(itemCancel.fee_khr) || 0)),
                 fee_date: stamp.slice(0, 10),
                 sale_id: expected.id,
-                branch_id: sale.branch_id ?? null,
-                // The fee's own label, written once (fees.branch_name, 0236). The sale row's
-                // branch is active here (the selling guard below), so its name is the current one.
-                branch_name: sale.branch_name ?? null,
+                branch_id: feeLanding ? feeLanding.id : sale.branch_id ?? null,
+                // The fee's own label, written once (fees.branch_name, 0236): the name of the branch it is booked to.
+                branch_name: feeLanding ? feeLanding.name : sale.branch_name ?? null,
                 delivery_contact_id: null,
                 notes: String(itemCancel.fee_note || '').trim() || `Fee lost to cancellation (${cancelReason})`,
                 created_by: user.id,

@@ -3,7 +3,7 @@
 // undo and redo), amendments and add-items. The REAL routes/sales.ts, routes/actionHistory.ts and every kernel
 // they use run against an in-memory SQLite with every migration applied; sales come from the real checkout.
 //
-// An ORACLE is the same set of routes exactly as they were before this change (git b2b57f90b, files
+// An ORACLE is the same set of routes exactly as they were before this change (git 2651672da: LB + LD, files
 // routes/sales.ts, lib/saleBulkStatus.ts, lib/saleTransitions.ts, lib/saleAmendments.ts). It proves two things:
 //   * while both branches are active the new code writes byte-identical statements (inert), and
 //   * on the post-consolidation world the old code strands the units at the retired branch (the defect), so
@@ -20,12 +20,16 @@ const Database = require('better-sqlite3')
 const { sqliteD1Call } = require('./harness/sqlite_d1_bindings.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')
 
-const ORACLE_SHA = 'b2b57f90b344f26b708c5b5f44e4fde26199d29b'
+// Two oracles. OLD = the writers before ANY retired-branch handling (b2b57f90b): the controls, and the inertness of the stock
+// redirect. BEFORE_FEES = the merge of LC + LD (5e7a011a4: redirect in, expenses still booked at the sale's branch): the
+// inertness of booking the cancellation expense to the successor, which can only differ once the sale's branch is retired.
+const ORACLE_OLD = 'b2b57f90b344f26b708c5b5f44e4fde26199d29b'
+const ORACLE_BEFORE_FEES = '5e7a011a4'
 const ORACLE_FILES = new Set(['routes/sales.ts', 'lib/saleBulkStatus.ts', 'lib/saleTransitions.ts', 'lib/saleAmendments.ts'])
 const USER = { id: 71, username: 'owner', name: 'Owner', permissions: JSON.stringify({ all: true }) }
 const executionCtx = { waitUntil(promise) { promise?.catch?.(() => {}) }, passThroughOnException() {} }
 
-function makeWorld(oracle) {
+function makeWorld(oracleSha) {
   const cache = new Map()
   const overrides = {
     '../lib/auth': { requireAuth: async (c, next) => { c.set('user', USER); return next() } },
@@ -43,8 +47,8 @@ function makeWorld(oracle) {
   function load(rel) {
     if (cache.has(rel)) return cache.get(rel).exports
     const sourcePath = path.join(__dirname, '..', 'src', rel)
-    const text = oracle && ORACLE_FILES.has(rel)
-      ? execFileSync('git', ['show', `${ORACLE_SHA}:cloudflare/src/${rel}`], { cwd: path.join(__dirname, '..', '..'), encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
+    const text = oracleSha && ORACLE_FILES.has(rel)
+      ? execFileSync('git', ['show', `${oracleSha}:cloudflare/src/${rel}`], { cwd: path.join(__dirname, '..', '..'), encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
       : fs.readFileSync(sourcePath, 'utf8')
     const output = ts.transpileModule(text, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 }, fileName: sourcePath }).outputText
     const mod = { exports: {} }
@@ -60,8 +64,9 @@ function makeWorld(oracle) {
   }
   return { sales: load('routes/sales.ts').default, history: load('routes/actionHistory.ts').default }
 }
-const fresh = makeWorld(false)
-const old = makeWorld(true)
+const fresh = makeWorld(null)
+const old = makeWorld(ORACLE_OLD)
+const beforeFees = makeWorld(ORACLE_BEFORE_FEES)
 
 // The D1 binding the real lib/db.ts D1Compat wraps: prepare().bind().first()/all()/run() and batch() of bound
 // statements, over a real SQLite. Native D1 counts the revision-trigger row of an INSERT INTO sales too.
@@ -176,7 +181,7 @@ const plain = (value) => JSON.parse(JSON.stringify(value))
 const movementsOf = (db, type) => plain(db.prepare('SELECT branch_id, branch_name, addressed_branch_name, quantity, batch_id FROM inventory_movements WHERE movement_type=? ORDER BY id').all([type]))
 
 // Random fee ids are the only per-run noise besides timestamps, receipt numbers and uuids.
-const scrub = (text) => text.replace(/-\d{12,}/g, '<id>').replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g, '<uuid>').replace(/\d{8}[ -]\d{6}/g, '<receipt>').replace(/\d{4}-\d{2}-\d{2}[ T][\d:.Z]+/g, '<ts>')
+const scrub = (text) => text.replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g, '<uuid>').replace(/-\d{12,}/g, '<id>').replace(/\d{8}[ -]\d{6}/g, '<receipt>').replace(/\d{4}-\d{2}-\d{2}[ T][\d:.Z]+/g, '<ts>')
 
 function normalised(batches) {
   return scrub(JSON.stringify(batches))
@@ -263,8 +268,8 @@ async function amend(world, w, body) {
     const w = await build('after')
     const withFee = await setStatus(fresh.sales, w, cancelBody('cut-fee-1', { cancel_fee_usd: 1.5, cancel_fee_note: 'courier already paid' }))
     assert.equal(withFee.status, 200, JSON.stringify(withFee.body))
-    assert.deepEqual(plain(w.db.prepare("SELECT branch_id, sale_id, amount_usd FROM fees WHERE label LIKE 'Cancelled sale%'").all()), [{ branch_id: 1, sale_id: w.saleId, amount_usd: 1.5 }],
-      'the lost-fee expense keeps the branch the sale was made at (money, not stock)')
+    assert.deepEqual(plain(w.db.prepare("SELECT branch_id, branch_name, sale_id, amount_usd FROM fees WHERE label LIKE 'Cancelled sale%'").all()), [{ branch_id: 2, branch_name: 'LC Store', sale_id: w.saleId, amount_usd: 1.5 }],
+      'the lost-fee expense is booked to LC Store (Old Shop has no drawer) and stays linked to the old Shop sale')
     const o = await build('after')
     const oldFee = await setStatus(old.sales, o, cancelBody('cut-fee-old', { cancel_fee_usd: 1.5 }))
     assert.equal(oldFee.status, 400, 'CONTROL: the old code refuses the expense because the sale branch is inactive')
@@ -272,7 +277,7 @@ async function amend(world, w, body) {
     assert.equal(revived.status, 200, JSON.stringify(revived.body))
     assert.equal(w.db.prepare("SELECT COUNT(*) n FROM fees WHERE label LIKE 'Cancelled sale%'").get().n, 0, 'un-cancel removes the expense it created')
   }
-  console.log('PASS single status: the cancellation expense of an old Shop sale keeps the sale branch and is removed again by un-cancel')
+  console.log('PASS single status: the cancellation expense of an old Shop sale is booked to LC Store and removed again by un-cancel')
 
   // ---------------------------------------------------------------- bulk status: cancel, undo, redo, replay
   {
@@ -298,6 +303,20 @@ async function amend(world, w, body) {
     const oldApplied = await call(old.sales, o.route, 'POST', '/bulk-status', bulkBody(o, 'cancelled', 'cut-bulk-old'))
     assert.equal(oldApplied.status, 200, JSON.stringify(oldApplied.body))
     assert.equal(stockOf(o.db).shop, 2, 'CONTROL: the old bulk path strands the units at Old Shop')
+    // Grouped cancel with a cancellation expense: booked to LC Store, undone and redone with the status change.
+    const withFee = await build('after')
+    const feeReq = { ...bulkBody(withFee, 'cancelled', 'cut-bulk-fee'), cancel_reason: undefined,
+      items: withFee.db.prepare('SELECT id, sale_status expected_status, updated_at expected_updated_at FROM sales ORDER BY id').all().map((i) => ({ ...i, cancel: { reason: 'mistake', fee_usd: 1.5 } })) }
+    const feeApplied = await call(fresh.sales, withFee.route, 'POST', '/bulk-status', feeReq)
+    assert.equal(feeApplied.status, 200, JSON.stringify(feeApplied.body))
+    const feeRows = () => plain(withFee.db.prepare("SELECT branch_id, branch_name, sale_id, amount_usd FROM fees WHERE label LIKE 'Cancelled sale%'").all())
+    assert.deepEqual(feeRows(), [{ branch_id: 2, branch_name: 'LC Store', sale_id: withFee.saleId, amount_usd: 1.5 }], 'grouped cancel books the expense to LC Store too')
+    const feeUndone = await call(fresh.history, withFee.route, 'POST', `/${feeApplied.body.actionHistoryId}/undo`, { require_applied: true, expected_generation: 0 })
+    assert.equal(feeUndone.status, 200, JSON.stringify(feeUndone.body))
+    assert.deepEqual(feeRows(), [], 'undo removes the expense')
+    const feeRedone = await call(fresh.history, withFee.route, 'POST', `/${feeApplied.body.actionHistoryId}/redo`, { require_applied: true, expected_generation: 1 })
+    assert.equal(feeRedone.status, 200, JSON.stringify(feeRedone.body))
+    assert.deepEqual(feeRows(), [{ branch_id: 2, branch_name: 'LC Store', sale_id: withFee.saleId, amount_usd: 1.5 }], 'redo books it again, once')
     const orphan = await build('orphan')
     const orphanBefore = ledgerSnapshot(orphan.db)
     const refused = await call(fresh.sales, orphan.route, 'POST', '/bulk-status', bulkBody(orphan, 'cancelled', 'cut-bulk-orphan'))
@@ -351,7 +370,7 @@ async function amend(world, w, body) {
     for (const [name, run] of scenarios) {
       const newCapture = []; const oldCapture = []
       const a = await build('before', newCapture); const b = await build('before', oldCapture)
-      const x = await run(fresh.sales, a); const y = await run(old.sales, b)
+      const x = await run(fresh.sales, a); const y = await run(/expense/.test(name) ? beforeFees.sales : old.sales, b)
       assert.equal(x.status, y.status, `${name}: same status (${JSON.stringify(x.body)} vs ${JSON.stringify(y.body)})`)
       assert.equal(x.status, 200, `${name}: ${JSON.stringify(x.body)}`)
       const statementsA = normalised(newCapture); const statementsB = normalised(oldCapture)

@@ -2527,16 +2527,20 @@ app.patch('/:id/status', async (c) => {
     if (!Number.isSafeInteger(cancellationBranchId) || cancellationBranchId <= 0) {
       return c.json({ error: SHOP_ONLY_SALE_ERROR }, 400)
     }
-    // The expense is money, not stock: it keeps the branch the sale was recorded at. That branch sells and is
-    // active, or is retired (Old Shop) with an active selling successor.
+    // The expense is cash that leaves a drawer, and Old Shop has no drawer: it is booked to the branch the sale
+    // was recorded at while that branch is active, and to its ACTIVE selling successor once it is retired (the sale
+    // itself, linked by sale_id, keeps its own branch and label as the provenance).
     const cancellationBranch = branchResolver.directory.find((row) => Number(row.id) === cancellationBranchId)
     const cancellationBranchActive = !!cancellationBranch && Number(cancellationBranch.is_active ?? 1) === 1
     if (!cancellationBranch || !branchCanSell(cancellationBranch) || (!cancellationBranchActive && !resolveSellingSuccessor(branchResolver.directory, cancellationBranchId))) {
       return c.json({ error: SHOP_ONLY_SALE_ERROR }, 400)
     }
+    const cancellationFeeBranchId = cancellationBranchActive
+      ? cancellationBranchId
+      : resolveSellingSuccessor(branchResolver.directory, cancellationBranchId)!.effectBranchId
     if (cancellationBranchActive) statements.push(sellingBranchGuardStatement(cancellationBranchId))
     else {
-      const retiredFeeGuard = effectGuardStatement([{ addressed: cancellationBranchId, effect: resolveSellingSuccessor(branchResolver.directory, cancellationBranchId)!.effectBranchId, sells: 1 }])
+      const retiredFeeGuard = effectGuardStatement([{ addressed: cancellationBranchId, effect: cancellationFeeBranchId, sells: 1 }])
       if (retiredFeeGuard) statements.push(retiredFeeGuard)
     }
     statements.push({
@@ -2548,7 +2552,7 @@ app.patch('/:id/status', async (c) => {
         amount_usd: cancelFeeUsd,
         amount_khr: cancelFeeKhr,
         sale_id: Number(id),
-        branch_id: cancellationBranchId,
+        branch_id: cancellationFeeBranchId,
         notes: cancelFeeNote || `Fee lost to cancellation (${cancelReasonLabel(cancelReason!)})`,
         created_by: user?.id ?? null,
         created_by_name: actorSnapshot(user),
