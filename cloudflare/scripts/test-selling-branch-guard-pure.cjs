@@ -189,7 +189,7 @@ runTest('every path that writes a sale line asks the guard first', () => {
   assert.match(salesSource, /from '\.\.\/lib\/branchRoleGuards'/)
   assert.match(returnsSource, /WAREHOUSE_NOT_SELLABLE_ERROR \}, 400\)/)
   assert.match(returnsSource, /from '\.\.\/lib\/branchRoleGuards'/)
-  assert.match(returnsSource, /!branchCanSell\(branch\.name\)/)
+  assert.match(returnsSource, /!branchCanSell\(branchRow\)/, 'the role row, never the display name')
   assert.match(salesImportSource, /!branchCanSell\(saleBranch\)/, 'the role row, never the display name')
   assert.match(salesImportSource, /throw new Error\(WAREHOUSE_NOT_SELLABLE_ERROR\)/)
 })

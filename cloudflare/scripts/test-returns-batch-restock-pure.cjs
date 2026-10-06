@@ -203,6 +203,7 @@ const returnsRoute = loadReal('routes/returns.ts', {
   '../lib/returnCostAccess': loadReal('lib/returnCostAccess.ts'),
   '../lib/branchRoleGuards': loadReal('lib/branchRoleGuards.ts', { './branchRoles': branchRolesKernel }),
   '../lib/branchRoles': branchRolesKernel,
+  '../lib/branchEffect': loadReal('lib/branchEffect.ts', { './branchRoles': branchRolesKernel, './sqlBinding': loadReal('lib/sqlBinding.ts') }),
   '../lib/actorSnapshot': actorSnapshotKernel,
   '../lib/saleCreationSnapshot': saleCreationSnapshotKernel,
   // N21: the display-address kernel, REAL. A stub resolves every address to
