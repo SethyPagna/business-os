@@ -516,3 +516,120 @@ section('audit-b-set-and-session-undo: Set generations, Reverts of a Set, stock-
   const noApplier = await plant('open history of another family with no applier is info (client-side undo)', (w) => w.run("INSERT INTO action_history(scope,entity,entity_id,label,reversible,status,undo_payload,redo_payload) VALUES('sales','sale','1','Edit',1,'undoable','{}','{}')"), {})
   assert.deepEqual([noApplier.rows[0].open_history_without_applier, noApplier.rows[0].open_history_without_applier_by_entity], [1, '{"sale":1}'])
 })
+
+// ---------------------------------------------------------------------------------------------------------------------
+// 11. audit-b-catalog-cost
+// ---------------------------------------------------------------------------------------------------------------------
+section('audit-b-catalog-cost: the set-based formula agrees with the 0195 triggers (override, sold-out fallback, half-up) and each unrecomputed input change drifts', async () => {
+  const Q = 'audit-b-catalog-cost'
+  const plant = (label, mutate, expected) => planted(Q, label, mutate, expected, { base: activeWorld })
+  const w0 = activeWorld()
+  const clean = (await run(w0, Q)).rows[0]
+  // products 1-7 and 9 are priced by the formula (6 has no recorded cost: 0 and NULL lots); 8 is removed
+  assert.deepEqual([clean.active_products, clean.products_with_derivation, clean.manual_entries, clean.overridden_products], [8, 7, 1, 1])
+  assert.deepEqual([clean.cost_without_basis, clean.purchase_cost_differs, clean.drift_stored_zero], [0, 0, 0])
+  assert.equal(clean.examples, '[]')
+  // the triggers' own figures are the oracle: product 4 carries a manual override AND later lots, 5 is sold out (newest lot stands in)
+  assert.deepEqual(w0.all('SELECT id, cost_price_usd c FROM products WHERE id IN (1, 4, 5) ORDER BY id').map((r) => r.c), [2.2857, 8.4444, 6])
+  w0.raw.close()
+
+  // half away from zero at 4dp: 1.0001 and 1.0002, one unit each, average 1.00015 -> 1.0002 (the trigger and the query must agree)
+  await plant('a tie at the fifth decimal rounds up like the trigger', (w) => {
+    w.product(10, 'Product 10')
+    w.receive(10, SHOP, 1, { cost: 1.0001, received: '2026-08-01' })
+    w.receive(10, SHOP, 1, { cost: 1.0002, received: '2026-08-02' })
+    assert.equal(w.get('SELECT cost_price_usd c FROM products WHERE id=10').c, 1.0002)
+  }, {})
+  const drift = await plant('a stored cost of 9 where the lots say 3', (w) => w.run('UPDATE products SET cost_price_usd=9 WHERE id=2'), { catalog_cost_drift: 1 })
+  assert.deepEqual([drift.rows[0].drift_stored_higher, drift.rows[0].drift_stored_lower, drift.rows[0].drift_stored_zero, drift.rows[0].drift_abs_sum_usd], [1, 0, 0, 6])
+  assert.deepEqual(JSON.parse(drift.rows[0].examples), [[2, 9, 3, 30]])
+  const edited = await plant('a lot cost edited without a recompute (no trigger fires on unit_cost_usd)', (w) => w.run('UPDATE product_batches SET unit_cost_usd=10 WHERE id=?', w.named.L7), { catalog_cost_drift: 1 })
+  assert.equal(edited.rows[0].drift_stored_lower, 1)
+  await plant('a manual cost entry added without the route\'s recompute', (w) => w.costEntry(7, 8, w.get('SELECT MAX(id) m FROM product_batches WHERE variant_product_id=7').m), { catalog_cost_drift: 1 })
+  const zero = await plant('a catalog cost of 0 on costed stock', (w) => w.run('UPDATE products SET cost_price_usd=0 WHERE id=3'), { catalog_cost_drift: 1 })
+  assert.equal(zero.rows[0].drift_stored_zero, 1)
+  await plant('a lot activated or deactivated with nothing to derive from leaves the stored figure alone (sold-out product, lot inactive)', (w) => w.run('UPDATE product_batches SET is_active=0 WHERE id=?', w.named.L5), {})
+  const basis = await plant('a stored cost no lot and no entry explains is info', (w) => w.run('UPDATE products SET cost_price_usd=3 WHERE id=6'), {})
+  assert.equal(basis.rows[0].cost_without_basis, 1)
+  await plant('a removed product\'s frozen cost is not audited', (w) => w.run('UPDATE products SET cost_price_usd=99 WHERE id=8'), {})
+  const mirror = await plant('purchase_price_usd away from cost_price_usd is info', (w) => w.run('UPDATE products SET purchase_price_usd=77 WHERE id=2'), {})
+  assert.equal(mirror.rows[0].purchase_cost_differs, 1)
+  // a manual entry only re-prices the lots AT OR BELOW its baseline: lots received after it count at their own cost (product 4: 5 units at 8, 4 at 9)
+  await plant('a stored cost that ignores the override (the lots\' own 7 and 9 averaged)', (w) => w.run('UPDATE products SET cost_price_usd=8.0 WHERE id=4'), { catalog_cost_drift: 1 })
+})
+
+// ---------------------------------------------------------------------------------------------------------------------
+// 12. audit-b-lots-and-cost-gaps
+// ---------------------------------------------------------------------------------------------------------------------
+section('audit-b-lots-and-cost-gaps: a lot of an inactive product, a missing supplier, an orphan cost entry fire; unknown / free / untracked stock is sized, not flagged', async () => {
+  const Q = 'audit-b-lots-and-cost-gaps'
+  const plant = (label, mutate, expected) => planted(Q, label, mutate, expected, { base: activeWorld })
+  const w0 = activeWorld()
+  const clean = (await run(w0, Q)).rows[0]
+  assert.deepEqual([clean.stock_lots_unknown_cost, clean.stock_units_unknown_cost, clean.stock_lots_zero_cost, clean.products_stock_without_any_lot], [1, 2, 0, 0])
+  assert.deepEqual([clean.cost_entries, clean.cost_entries_not_positive, clean.overridden_lots_cost_differs, clean.lots_received_cost_drift], [1, 0, 1, 0], 'product 4: its first lot (cost 7) is re-priced to the entry\'s 8')
+  assert.equal(clean.examples_inactive_product_lots, '[]')
+  const base = clean
+  w0.raw.close()
+
+  const r1 = await plant('a product merged away (inactive) that still owns a lot with stock (the 0109 shape)', (w) => w.run('UPDATE products SET is_active=0 WHERE id=7'), { stock_lots_of_inactive_products: 1, inactive_products_with_stock: 1 })
+  assert.equal(r1.rows[0].examples_inactive_product_lots.startsWith('[['), true)
+  assert.deepEqual(JSON.parse(r1.rows[0].examples_inactive_product_lots).map((e) => e.slice(1)), [[7, 9]])
+  await plant('a lot whose supplier row was deleted', (w) => w.run('UPDATE product_batches SET supplier_id=999 WHERE id=?', w.named.L2), { lots_supplier_missing: 1 })
+  await plant('a manual cost entry of a deleted product', (w) => w.costEntry(999, 4, 0), { cost_entries_orphan_product: 1 })
+  // an inactive product with NO stock is simply removed history: not a finding
+  await plant('a removed product with no stock is fine', (w) => w.run('UPDATE products SET is_active=0 WHERE id=5'), {})
+  const untracked = await plant('an active product with stock and no lot at all (legacy untracked stock)', (w) => {
+    w.product(11, 'Product 11')
+    w.raw.exec('INSERT INTO branch_stock(product_id,branch_id,quantity) VALUES(11,2,4)')
+    w.run('UPDATE products SET stock_quantity=4 WHERE id=11')
+  }, {})
+  assert.deepEqual([untracked.rows[0].products_stock_without_any_lot, untracked.rows[0].units_stock_without_any_lot, untracked.rows[0].products_stock_without_costed_lot - base.products_stock_without_costed_lot,
+    untracked.rows[0].products_cost_zero_with_stock - base.products_cost_zero_with_stock], [1, 4, 1, 1])
+  const free = await plant('a lot with stock at $0', (w) => w.run('UPDATE product_batches SET unit_cost_usd=0 WHERE id=?', w.named.L7), {})
+  assert.deepEqual([free.rows[0].stock_lots_zero_cost, free.rows[0].stock_units_zero_cost], [1, 9])
+  const exceed = await plant('a lot holding more than it ever received (an upward count is not a purchase)', (w) => w.run('UPDATE product_batches SET received_quantity=1 WHERE id=?', w.named.L7), {})
+  assert.deepEqual([exceed.rows[0].lots_stock_exceeds_received, exceed.rows[0].units_stock_exceeds_received], [base.lots_stock_exceeds_received + 1, base.units_stock_exceeds_received + 8])
+  const drift = await plant('received cost off from unit x quantity', (w) => w.run('UPDATE product_batches SET received_cost_usd=999 WHERE id=?', w.named.L7), {})
+  assert.equal(drift.rows[0].lots_received_cost_drift, 1)
+  const zeroEntry = await plant('a manual cost entry of 0', (w) => w.costEntry(2, 0, 0), {})
+  assert.deepEqual([zeroEntry.rows[0].cost_entries, zeroEntry.rows[0].cost_entries_not_positive], [2, 1])
+})
+
+// ---------------------------------------------------------------------------------------------------------------------
+// 13. audit-b-lot-duplicates
+// ---------------------------------------------------------------------------------------------------------------------
+section('audit-b-lot-duplicates: the same business day written three ways, at one branch, with one expiry and one supplier, is a duplicate; a supplier or expiry split is not', async () => {
+  const Q = 'audit-b-lot-duplicates'
+  const plant = (label, mutate, expected) => planted(Q, label, mutate, expected, { base: activeWorld })
+  const two = (a, b) => (w) => {
+    w.product(10, 'Product 10')
+    w.receive(10, SHOP, 3, { received: a.received, expiry: a.expiry ?? null, cost: a.cost ?? 2, supplier: a.supplier ?? null, supplierName: a.supplierName ?? null })
+    w.receive(10, b.branch2 ?? SHOP, 4, { received: b.received, expiry: b.expiry ?? null, cost: b.cost ?? 2, supplier: b.supplier ?? null, supplierName: b.supplierName ?? null })
+  }
+  const w0 = activeWorld()
+  const clean = (await run(w0, Q)).rows[0]
+  assert.equal(clean.duplicate_lot_groups, 0)
+  assert.equal(clean.positive_lots > 5, true)
+  w0.raw.close()
+
+  const iso = await plant('ISO date and ISO timestamp of the same Cambodia day', two({ received: '2026-09-01' }, { received: '2026-09-01T03:00:00Z' }), { duplicate_lot_groups: 1 })
+  assert.deepEqual([iso.rows[0].duplicate_lots, iso.rows[0].duplicate_extra_lots, iso.rows[0].duplicate_units], [2, 1, 7])
+  await plant('a UTC evening instant is the NEXT Cambodia day (so it matches the next date)', two({ received: '2026-09-02' }, { received: '2026-09-01T20:00:00Z' }), { duplicate_lot_groups: 1 })
+  await plant('a UTC evening instant is not the same day as the UTC date', two({ received: '2026-09-01' }, { received: '2026-09-01T20:00:00Z' }), {})
+  await plant('a month-first slash date matches the ISO date', two({ received: '2026-09-02' }, { received: '09/02/2026' }), { duplicate_lot_groups: 1 })
+  await plant('different expiry dates keep lots apart', two({ received: '2026-09-01', expiry: '2027-01-01' }, { received: '2026-09-01T03:00:00Z', expiry: '2027-02-01' }), {})
+  await plant('two different suppliers keep lots apart (info only)', two({ received: '2026-09-01', supplier: 1, supplierName: 'Acme' }, { received: '2026-09-01T03:00:00Z', supplierName: 'Other' }), {})
+  const split = await run((() => { const w = activeWorld(); two({ received: '2026-09-01', supplier: 1, supplierName: 'Acme' }, { received: '2026-09-01T03:00:00Z', supplierName: 'Other' })(w); return w })(), Q)
+  assert.equal(split.rows[0].supplier_split_groups, 1)
+  const empty = await plant('a no-supplier lot beside a supplied one merges', two({ received: '2026-09-01', supplier: 1, supplierName: 'Acme' }, { received: '2026-09-01T03:00:00Z' }), { duplicate_lot_groups: 1 })
+  assert.equal(empty.rows[0].duplicate_groups_empty_supplier, 1)
+  await plant('the same day at two branches is the cutover fold, not a duplicate here', two({ received: '2026-09-01' }, { received: '2026-09-01T03:00:00Z', branch2: WAREHOUSE }), {})
+  const cost = await plant('differing costs are sized', two({ received: '2026-09-01', cost: 2 }, { received: '2026-09-01T03:00:00Z', cost: 3 }), { duplicate_lot_groups: 1 })
+  assert.equal(cost.rows[0].duplicate_groups_cost_differs, 1)
+  await plant('a duplicate lot with no stock is not counted', (w) => { two({ received: '2026-09-01' }, { received: '2026-09-01T03:00:00Z' })(w); w.run('UPDATE branch_batch_stock SET quantity=0 WHERE batch_id=(SELECT MAX(id) FROM product_batches)') }, {})
+  const ev = await plant('a return-created event lot beside the day lot', (w) => { two({ received: '2026-09-01' }, { received: '2026-09-01T03:00:00Z' })(w); w.run("UPDATE product_batches SET batch_key=' event:r1' WHERE id=(SELECT MAX(id) FROM product_batches)") }, { duplicate_lot_groups: 1 })
+  assert.equal(ev.rows[0].duplicate_groups_event_lot, 1)
+  await plant('a positive lot with no received date can never merge', (w) => { w.product(10, 'Product 10'); w.receive(10, SHOP, 3, { received: null }) }, { positive_lots_without_day: 1 })
+  await plant('a positive lot with garbage received_at', (w) => { w.product(10, 'Product 10'); w.receive(10, SHOP, 3, { received: 'yesterday' }) }, { positive_lots_without_day: 1 })
+})

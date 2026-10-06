@@ -112,7 +112,7 @@ class World {
       lotId = this.nextLot++
       this.lotRow(lotId, product, { received, expiry, cost, supplier, supplierName, receivedQty: quantity, receivedBranch: branch, receivedCost: cost == null ? null : Math.round(cost * quantity * 10000) / 10000 })
     } else {
-      this.run('UPDATE product_batches SET received_quantity=COALESCE(received_quantity,0)+? WHERE id=?', quantity, lotId)
+      this.run('UPDATE product_batches SET received_quantity=COALESCE(received_quantity,0)+?1, received_cost_usd=CASE WHEN unit_cost_usd IS NULL THEN received_cost_usd ELSE ROUND(COALESCE(received_cost_usd,0)+unit_cost_usd*?1,4) END WHERE id=?2', quantity, lotId)
     }
     this.bump({ product, branch, lot: lotId, delta: quantity })
     const movement = this.movement({ product, branch, type: 'add', quantity, reason: 'Stock in', batch: lotId, cost: cost ?? this.get('SELECT unit_cost_usd c FROM product_batches WHERE id=?', lotId).c })
@@ -290,6 +290,7 @@ class World {
     const out = { op, rowid, snapshot, history, lot, movement, undo: null }
     if (undone) {
       this.bump({ product, branch, lot, delta: -quantity })
+      this.unreceive(lot, quantity)
       out.undo = this.movement({ product, branch, type: 'remove', quantity: -quantity, reason: 'Stock session ' + op + ' undo generation 1', reference: rowid, batch: lot })
       this.run('UPDATE stock_session_operations SET generation=1 WHERE id=?', op)
       this.run("UPDATE undo_snapshots SET status='reversed' WHERE id=?", snapshot)
@@ -298,12 +299,18 @@ class World {
     return out
   }
 
+  /** planUnreceiveBatchStock: the lot loses the receipt's units and money. */
+  unreceive(lot, quantity) {
+    this.run('UPDATE product_batches SET received_quantity=received_quantity-?1, received_cost_usd=CASE WHEN unit_cost_usd IS NULL OR received_cost_usd IS NULL THEN received_cost_usd ELSE ROUND(received_cost_usd-unit_cost_usd*?1,4) END WHERE id=?2', quantity, lot)
+  }
+
   /** Revert a plain stock movement: counter movement with the same magnitude, opposite direction. */
   revert(movementId) {
     const m = this.get('SELECT * FROM inventory_movements WHERE id=?', movementId)
     const magnitude = Math.abs(m.quantity)
     const outward = OUT_TYPES.includes(m.movement_type)
     this.bump({ product: m.product_id, branch: m.branch_id, lot: m.batch_id, delta: outward ? magnitude : -magnitude })
+    if (m.movement_type === 'add' && m.batch_id != null) this.unreceive(m.batch_id, magnitude)
     return this.movement({ product: m.product_id, branch: m.branch_id, type: outward ? 'add' : 'remove', quantity: magnitude, reason: 'Revert of #' + movementId, reference: 'revert:' + movementId, batch: m.batch_id })
   }
 
@@ -319,6 +326,7 @@ class World {
  */
 function cleanWorld() {
   const w = new World()
+  w.run("INSERT INTO suppliers(id,name) VALUES(1,'Acme')")
   for (let id = 1; id <= 8; id++) w.product(id, 'Product ' + id)
   // 1: two lots at different dates at the Shop, stock also at the Warehouse; costs differ (weighted catalog cost)
   w.receive(1, SHOP, 10, { received: '2026-08-01', cost: 2 })
