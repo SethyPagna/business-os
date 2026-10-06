@@ -136,7 +136,7 @@ for (const viewport of VIEWPORTS) {
       await expect(page.getByRole('option', { name: 'Products', exact: true })).toBeVisible()
     })
 
-    test('Khmer: the retired branch is labelled in the pack's own word and the transfer reason is Khmer', async ({ page, context }) => {
+    test('Khmer: the retired branch is labelled in the Khmer pack word', async ({ page, context }) => {
       await arrange(context, AFTER, [])
       await signIn(page, E2E_ACCOUNTS.cashierA)
       await page.setViewportSize(viewport)
@@ -146,7 +146,8 @@ for (const viewport of VIEWPORTS) {
       await expect(page.locator('html')).toHaveAttribute('lang', 'km')
       // lang/km.json `inactive` and `branch`
       await page.getByRole('button', { name: /^តម្រង/ }).first().click()
-      await page.getByRole('button', { name: 'សាខា', exact: true }).click()
+      // the select, not the sidebar item that carries the same Khmer word
+      await page.locator('button[data-app-select-button][aria-label="សាខា"]').click()
       await expect(page.getByRole('option', { name: 'Old Shop (អសកម្ម)', exact: true })).toBeVisible()
       await shot(page, 'reports-filter-after-km', viewport.width)
     })
