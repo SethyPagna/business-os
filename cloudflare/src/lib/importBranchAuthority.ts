@@ -89,7 +89,11 @@ export function resolveImportBranchRequest(index: CanonicalImportBranchIndex, re
     return sellers.length === 1 ? { branch: sellers[0], addressedName: null } : null
   }
   if (word === 'shop' || word === 'warehouse') {
-    const keyed = index.rows.filter((row) => identityKey(row) === word)
+    // Once the directory carries stored identities (canonical_key, 0229), a row WITHOUT one is a legacy leftover and is
+    // never matched by its display name: a stray retired row that happens to be called "Shop" must not make the word
+    // ambiguous. Before any identity is stored (today's production) every row still matches by its legacy name.
+    const identified = index.rows.some((row) => row.canonical_key != null)
+    const keyed = index.rows.filter((row) => identityKey(row) === word && (!identified || row.canonical_key != null))
     const active = keyed.filter(isActiveRow)
     if (active.length > 1) return null
     if (active.length === 1) return branchRole(active[0]) === 'other' ? null : { branch: active[0], addressedName: null }

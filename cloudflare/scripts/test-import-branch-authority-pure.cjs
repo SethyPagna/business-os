@@ -171,6 +171,12 @@ async function main() {
   assert.strictEqual(ask(AFTER, 'Old Shop'), null, 'a retired branch is never named directly; it is reached through the shop word')
   // Refusals: ambiguity, a retired branch with no successor, and a retired chain that ends nowhere.
   assert.strictEqual(ask([...AFTER, { id: 3, name: 'Second', role: 'shop', canonical_key: 'warehouse', is_active: 1, is_default: 0 }], 'warehouse'), null, 'two active branches carrying one identity refuse')
+  // A stray retired legacy row called "Shop" (no identity, no successor) must not turn the shop word ambiguous once
+  // identities are stored; before they are stored the name still counts (the control below).
+  const stray = { id: 3, name: 'Shop', role: null, canonical_key: null, is_active: 0, is_default: 0, successor_branch_id: null }
+  assert.deepStrictEqual(ask([...AFTER, stray], 'shop'), { id: 1, addressed: 'Shop' }, 'a legacy row without a canonical_key is not an identity candidate')
+  assert.deepStrictEqual(ask([...AFTER, { ...stray, is_active: 1 }], 'shop'), { id: 1, addressed: 'Shop' }, 'nor is an ACTIVE one: identity, never the display name')
+  assert.strictEqual(ask([{ id: 1, name: 'Warehouse', is_active: 1, is_default: 1 }, stray], 'shop'), null, 'control: with no identity stored anywhere the legacy name rule is unchanged (a retired Shop with no successor still refuses)')
   assert.strictEqual(ask([AFTER[0], { ...AFTER[1], successor_branch_id: null }], 'shop'), null, 'a retired Shop with no successor cannot receive stock')
   assert.strictEqual(ask([{ ...AFTER[0], is_active: 0 }, AFTER[1]], 'shop'), null, 'a successor that is itself inactive refuses')
   // Wrong implementation: the name-literal lookup the engine used before. It cannot answer the post-cutover sheet,
