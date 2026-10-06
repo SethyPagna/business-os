@@ -77,7 +77,7 @@ export const ALLOWLIST: AllowEntry[] = [
   {
     file: 'components/products/Products.tsx',
     names: ['stockFilter'],
-    line: 3507,
+    line: 3576,
     reason:
       'False-positive class 3. `stockFilter:` here is an OBJECT KEY -- the value read is '
       + 'effectiveStockState, which IS in the deps. Nothing to fix. Re-verified and '
@@ -86,7 +86,9 @@ export const ALLOWLIST: AllowEntry[] = [
       + 'remains in the dependency array. RE-VERIFIED 2026-09-21 after 43f656d3 (product '
       + 'save actor fence) and 6324e286 (edit-history preservation) moved it to :3435; the '
       + 'object key and the effectiveStockState dependency are unchanged. RE-VERIFIED 2026-09-25 '
-      + 'after U-products-ui moved it to :3507; unchanged.',
+      + 'after U-products-ui moved it to :3507; unchanged. RE-VERIFIED 2026-10-06 in the '
+      + 'release-20261007 compose (RET-B 52f42250e + mergeperm 7239dc607 on 4ab47676e) moved it '
+      + 'to :3576; the object key and the effectiveStockState dependency are unchanged.',
   },
 ]
 
