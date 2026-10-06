@@ -419,6 +419,10 @@ app.get('/:id', async (c) => {
   return c.json({ member })
 })
 
+// A customer merge is a customer fact, so a links-only caller sees the
+// member-side effect only: re-pointed -> relink, unlinked -> unlink.
+const LINKS_ONLY_HISTORY_ACTION: Record<string, string> = { merge_repoint: 'relink', merge_unlink: 'unlink' }
+
 type EventRow = {
   id: number
   account_id: number
@@ -465,7 +469,7 @@ app.get('/:id/history', async (c) => {
     customerVisible: canSeeCustomers,
     events: rows.map((row) => ({
       id: Number(row.id),
-      action: row.action,
+      action: canSeeCustomers ? row.action : LINKS_ONLY_HISTORY_ACTION[row.action] ?? row.action,
       fromCustomer: customerRef(row.from_customer_id, row.from_name, row.from_membership_number),
       toCustomer: customerRef(row.to_customer_id, row.to_name, row.to_membership_number),
       evidence: row.evidence,

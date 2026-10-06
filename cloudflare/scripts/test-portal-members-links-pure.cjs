@@ -408,6 +408,17 @@ async function main() {
         assert.equal(e.reasonCode, null, 'reasonCode withheld')
       }
     }
+    // A customer merge is a customer fact: links-only sees relink / unlink.
+    const mergeEvent = (accountId, action, from, to) => t.raw.prepare(`INSERT INTO portal_member_link_events
+      (account_id, action, from_customer_id, to_customer_id, evidence, reason_code, link_version_after)
+      VALUES (@a, @action, @from, @to, 'system', 'merge', 0)`).run({ a: accountId, action, from, to })
+    mergeEvent(holder, 'merge_repoint', 102, 101)
+    mergeEvent(holder, 'merge_unlink', 101, null)
+    const mergedLinksOnly = (await t.call('GET', `/${holder}/history`, undefined, L)).body.events.map((e) => e.action)
+    assert.deepEqual(mergedLinksOnly.slice(0, 2), ['unlink', 'relink'], 'merge actions are shown as their member-side effect')
+    assert.equal(mergedLinksOnly.some((a) => a.startsWith('merge_')), false)
+    const mergedFull = (await t.call('GET', `/${holder}/history`)).body.events.map((e) => e.action)
+    assert.deepEqual(mergedFull.slice(0, 2), ['merge_unlink', 'merge_repoint'], 'control: Contacts view sees the real action')
     const legacyFilter = await t.call('GET', '/?filter=legacy_claims', undefined, L)
     assert.equal(legacyFilter.status, 403)
     assert.equal(legacyFilter.body.code, 'contacts_view_required')
