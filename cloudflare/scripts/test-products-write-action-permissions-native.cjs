@@ -52,7 +52,7 @@ const cancelFlag = (h) => Number(h.raw.prepare("SELECT cancel_requested AS v FRO
 const lookupCount = (h, table) => Number(h.raw.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get([]).n)
 
 const FULL = { products: true }
-const ADJUST = { direction: 'increase', amount: 1, fields: ['selling_price_usd'] }
+const ADJUST = { direction: 'increase', amount: 1, fields: ['selling_price_usd'], client_request_id: 'adjust_req_00000001' }
 const CTX = { waitUntil() {}, passThroughOnException() {} }
 
 function lookupCaller(h) {

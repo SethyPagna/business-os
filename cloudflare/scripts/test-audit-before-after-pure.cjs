@@ -674,7 +674,7 @@ async function productsRoute() {
   // Bulk price adjust: the scope never materializes ids, so the honest
   // before/after is the catalog total per adjusted field plus the row count.
   raw.prepare("INSERT INTO products(id, name, unit, is_active, selling_price_usd) VALUES (2, 'Pepsi 330ml', 'pcs', 1, 2.0)").run()
-  response = await request('POST', '/bulk-price-adjust', { direction: 'increase', amount: 0.5, fields: ['selling_price_usd'] })
+  response = await request('POST', '/bulk-price-adjust', { direction: 'increase', amount: 0.5, fields: ['selling_price_usd'], client_request_id: 'audit_adjust_0001' })
   assert.equal(response.status, 200, JSON.stringify(response.body))
   check('bulk price adjust reports the rows it actually changed', () => {
     // D1 reports a batch statement's row count in meta.changes; reading it at

@@ -23,7 +23,7 @@ import { localRangeClockError, localDateExpr, localMonthExpr } from '../lib/busi
 import { isPublicImageFormat, UNSUPPORTED_IMAGE_MESSAGE, validateUploadedBuffer, type DetectedUploadFormat } from '../lib/uploadSecurity'
 import { checkRateLimit, getClientIp } from '../lib/rateLimit'
 import { admitRequestBody } from '../lib/requestBodyGuard'
-import { audit, changedFields, isSecretShapedAuditKey } from '../lib/audit'
+import { audit, auditChangeColumns, buildAuditStatement, changedFields, isSecretShapedAuditKey } from '../lib/audit'
 import { getPlanLimits } from '../lib/planTier'
 import { absorbedBarcodes, keeperFollowsBarcode, productIdsInOneCluster } from '../lib/productIdentity'
 import { barcodeIdentityMatches, canonicalProductBarcode, findDuplicateProductGroups, findPossiblySameProductClusters, identityBarcodeKey, identityBarcodeLeadingZeroFoldSql, isRealBarcode, normalizeLeadingZeroBarcodeForCleanup, normalizeProductClusterKey, pickSameIdentityRow, productsShareExactIdentity, resolveProductIdentityEdit } from '../lib/productIdentity'
@@ -1788,6 +1788,27 @@ app.get('/stock-ledger/:id/balance', async (c) => {
 // column, so leaving it in this allow-list would have let a bulk price
 // adjustment write real money into a column nothing reads -- silently doing
 // nothing while reporting "changed N products".
+const BULK_PRICE_REQUEST_ID = /^[A-Za-z0-9_-]{8,120}$/
+type BulkPriceReceipt = { rowsTouched: number | null; request: string }
+async function findBulkPriceReceipt(db: ReturnType<typeof getDb>, actorId: number, requestId: string): Promise<BulkPriceReceipt | null> {
+  const row = await db.prepare(`SELECT details FROM audit_logs WHERE entity = 'product' AND entity_id = 'bulk-price-adjust' AND user_id = @actorId
+    AND CASE WHEN json_valid(details) THEN json_extract(details, '$.client_request_id') END = @requestId ORDER BY id LIMIT 1`)
+    .get<{ details: string | null }>({ actorId, requestId })
+  if (!row) return null
+  try {
+    const parsed = JSON.parse(String(row.details || '{}')) as { rowsTouched?: unknown; request?: unknown }
+    const touched = Number(parsed.rowsTouched)
+    return { rowsTouched: parsed.rowsTouched == null || !Number.isFinite(touched) ? null : touched, request: String(parsed.request ?? '') }
+  } catch (_) {
+    return { rowsTouched: null, request: '' }
+  }
+}
+function bulkPriceReceiptResponse(c: { json: (body: unknown, status?: 409) => Response }, receipt: BulkPriceReceipt, canonicalRequest: string): Response {
+  if (receipt.request !== canonicalRequest) {
+    return c.json({ error: 'client_request_id was already used with a different price adjustment.', code: 'idempotency_conflict' }, 409)
+  }
+  return c.json({ success: true, replayed: true, changed: receipt.rowsTouched })
+}
 const BULK_PRICE_FIELDS = new Set(['selling_price_usd', 'selling_price_khr', 'wholesale_price_usd', 'wholesale_price_khr', 'cost_price_usd', 'cost_price_khr'])
 app.post('/bulk-price-adjust', async (c) => {
   const user = c.get('user')
@@ -1803,6 +1824,7 @@ app.post('/bulk-price-adjust', async (c) => {
     fields?: string[]
     skip_zero?: boolean
     preview?: boolean
+    client_request_id?: string
   }>().catch(() => ({} as Record<string, never>))
   const direction = body.direction === 'decrease' ? 'decrease' : 'increase'
   const amount = Number(body.amount)
@@ -1815,6 +1837,23 @@ app.post('/bulk-price-adjust', async (c) => {
   const skipZero = Boolean(body.skip_zero)
   const delta = direction === 'decrease' ? -amount : amount
   const db = getDb(c.env)
+
+  // A relative change applied twice is a different catalog, so the apply is idempotent on a client request id
+  // (loophole review N6: a retried request after a lost response repriced everything again). The preview writes
+  // nothing and needs none. The receipt is the audit row this route already wrote: its details carry the id, the
+  // canonical request and the count, and it is claimed INSIDE the batch that changes the prices (see below), so the
+  // prices and their receipt commit together or not at all. Receipts live as long as the audit log (21 days by
+  // default), far longer than any network retry.
+  const requestId = typeof body.client_request_id === 'string' ? body.client_request_id.trim() : ''
+  if (!body.preview && !BULK_PRICE_REQUEST_ID.test(requestId)) {
+    return c.json({ error: 'client_request_id is required to apply a catalog price adjustment.', code: 'client_request_id_required' }, 400)
+  }
+  const canonicalRequest = JSON.stringify({ direction, amount, fields: [...new Set(fields)].sort(), skip_zero: skipZero })
+  const actorIdForReceipt = Number(user?.id ?? 0)
+  if (!body.preview) {
+    const prior = await findBulkPriceReceipt(db, actorIdForReceipt, requestId)
+    if (prior) return bulkPriceReceiptResponse(c, prior, canonicalRequest)
+  }
 
   // A row "changes" for a field when: decreasing -> the field is > 0 (a 0
   // price is never pushed negative, matching the selection flow's rule);
@@ -1830,10 +1869,15 @@ app.post('/bulk-price-adjust', async (c) => {
   }
 
   const nextValueSql = (field: string) => `MAX(0, ROUND(COALESCE(${field}, 0) + @delta, ${field.endsWith('_khr') ? 0 : 2}))`
+  // Every write below also requires THIS request's claim row to exist, so a request that lost the race to an equal
+  // one (its claim insert is skipped) changes nothing.
+  const claimNonce = crypto.randomUUID()
+  const ownClaim = `EXISTS (SELECT 1 FROM audit_logs al WHERE al.entity = 'product' AND al.entity_id = 'bulk-price-adjust'
+    AND CASE WHEN json_valid(al.details) THEN json_extract(al.details, '$.claim_nonce') END = @claimNonce)`
   const statements: Array<{ sql: string; params: Record<string, unknown> }> = fields.map((field) => ({
     sql: `UPDATE products SET ${field} = ${nextValueSql(field)}, updated_at = CURRENT_TIMESTAMP
-          WHERE is_active = 1 AND (${fieldCondition(field)})`,
-    params: { delta },
+          WHERE is_active = 1 AND (${fieldCondition(field)}) AND ${ownClaim}`,
+    params: { delta, claimNonce },
   }))
   // U-cost: the 0195 triggers re-derive cost_price_usd at every stock
   // movement and honour only a cost with a product_cost_entries row, so a
@@ -1844,8 +1888,8 @@ app.post('/bulk-price-adjust', async (c) => {
     ? `CASE WHEN ${fieldCondition(field)} THEN ${nextValueSql(field)} ELSE ${field} END` : null
   if (fields.includes('cost_price_usd') || fields.includes('cost_price_khr')) {
     statements.unshift({
-      sql: typedCostEntriesBeforeWriteSql({ nextUsdSql: costNext('cost_price_usd'), nextKhrSql: costNext('cost_price_khr'), whereSql: 'is_active = 1' }),
-      params: { delta, ...costEntryActorParams({ id: actorId(user), name: actorSnapshot(user) }) },
+      sql: typedCostEntriesBeforeWriteSql({ nextUsdSql: costNext('cost_price_usd'), nextKhrSql: costNext('cost_price_khr'), whereSql: `is_active = 1 AND ${ownClaim}` }),
+      params: { delta, claimNonce, ...costEntryActorParams({ id: actorId(user), name: actorSnapshot(user) }) },
     })
   }
   // This scope deliberately never materializes ids, so there is no per-row
@@ -1857,7 +1901,27 @@ app.post('/bulk-price-adjust', async (c) => {
   // renders in the same table.
   const totalsSql = `SELECT ${fields.map((field) => `ROUND(SUM(COALESCE(${field}, 0)), 2) AS "${field}"`).join(', ')} FROM products WHERE is_active = 1`
   const totalsBefore = await db.prepare(totalsSql).get<Record<string, unknown>>() || {}
+  // The claim goes FIRST: the audit row that will carry the receipt, inserted only when no row of the same actor and
+  // request id exists. D1 runs a batch as one transaction, so of two equal requests the second finds the first's claim
+  // and its writes (guarded above) all skip.
+  const claim = buildAuditStatement(user?.id ?? null, actorSnapshot(user), 'update', 'product', 'bulk-price-adjust', {
+    scope: 'all', direction, amount, fields, skipZero, rowsTouched: null,
+    client_request_id: requestId, request: canonicalRequest, claim_nonce: claimNonce,
+  })
+  claim.sql += `
+    WHERE NOT EXISTS (SELECT 1 FROM audit_logs prior WHERE prior.entity = 'product' AND prior.entity_id = 'bulk-price-adjust'
+      AND prior.user_id = @user_id AND CASE WHEN json_valid(prior.details) THEN json_extract(prior.details, '$.client_request_id') END = @priorRequestId)`
+  claim.params.priorRequestId = requestId
+  statements.unshift(claim)
   const results = await db.batch(statements)
+  const ownReceipt = await db.prepare(`SELECT id FROM audit_logs WHERE entity = 'product' AND entity_id = 'bulk-price-adjust'
+    AND CASE WHEN json_valid(details) THEN json_extract(details, '$.claim_nonce') END = @claimNonce`).get<{ id: number }>({ claimNonce })
+  if (!ownReceipt) {
+    // An equal request committed between our read and our batch: nothing of ours ran. Answer from its receipt.
+    const winner = await findBulkPriceReceipt(db, actorIdForReceipt, requestId)
+    if (winner) return bulkPriceReceiptResponse(c, winner, canonicalRequest)
+    throw new Error('bulk-price-adjust: the request claim is missing and no receipt exists')
+  }
   // D1 reports a batch statement's row count in meta.changes, never at the
   // top level, so the old read was always undefined -> 0: the response said
   // "changed: 0" for every adjustment and the toast quietly fell back to the
@@ -1866,13 +1930,26 @@ app.post('/bulk-price-adjust', async (c) => {
     (r as { meta?: { changes?: number } }).meta?.changes ?? (r as { changes?: number }).changes,
   ) || 0))
   const totalsAfter = await db.prepare(totalsSql).get<Record<string, unknown>>() || {}
-  await audit(c.env, user?.id ?? null, actorSnapshot(user), 'update', 'product', 'bulk-price-adjust', {
-    scope: 'all', direction, amount, fields, skipZero, rowsTouched: changed,
-  }, changedFields(
-    { ...totalsBefore, rows_touched: 0 },
-    { ...totalsAfter, rows_touched: changed },
-    { keys: [...fields, 'rows_touched'] },
-  ))
+  // Finish the receipt: the same row now carries the count and the catalog totals before and after. Best effort like
+  // every audit write; a replay of a claim that never got here answers with a null count.
+  try {
+    const columns = auditChangeColumns(changedFields(
+      { ...totalsBefore, rows_touched: 0 },
+      { ...totalsAfter, rows_touched: changed },
+      { keys: [...fields, 'rows_touched'] },
+    ))
+    await db.prepare('UPDATE audit_logs SET details = @details, old_value = @old, new_value = @new WHERE id = @id').run({
+      id: ownReceipt.id,
+      details: JSON.stringify({
+        scope: 'all', direction, amount, fields, skipZero, rowsTouched: changed,
+        client_request_id: requestId, request: canonicalRequest, claim_nonce: claimNonce,
+      }),
+      old: columns.old_value,
+      new: columns.new_value,
+    })
+  } catch (error) {
+    console.error('[products] bulk-price-adjust receipt update failed', error)
+  }
   c.executionCtx.waitUntil(bumpVersion(c.env, 'products'))
   c.executionCtx.waitUntil(broadcast(c.env, 'products', { action: 'bulk-price-adjust' }))
   return c.json({ success: true, changed })

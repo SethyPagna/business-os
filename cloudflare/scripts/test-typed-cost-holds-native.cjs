@@ -79,7 +79,7 @@ const services = {
     getPermissionTier: (u) => u.tier || 'full', getActionTier: (u) => u.tier || 'full',
     hasPermission: (u) => u.tier !== 'none', isActionBlocked: () => false, isAdminControlUser: () => true,
   },
-  audit: { audit: async () => {}, changedFields: () => null, auditChangeColumns: () => ({ old_value: null, new_value: null }), isSecretShapedAuditKey: () => false },
+  audit: { audit: async () => {}, changedFields: () => null, auditChangeColumns: () => ({ old_value: null, new_value: null }), buildAuditStatement: (...args) => load('lib/audit.ts').buildAuditStatement(...args), isSecretShapedAuditKey: () => false },
   cache: { bumpVersion: async () => {}, bumpVersions: async () => {} },
   broadcastHub: { broadcast: async () => {} },
   media: { sanitizeMediaList: () => [] },
@@ -288,7 +288,7 @@ async function main() {
     raw.prepare('UPDATE products SET cost_price_usd = 0 WHERE id = ?').run(zero.id)
     // Isolate from earlier checks' rows: only these two are active.
     raw.prepare('UPDATE products SET is_active = 0 WHERE id NOT IN (?, ?)').run(p.id, zero.id)
-    const adjusted = await request(products, 'POST', '/bulk-price-adjust', { direction: 'increase', amount: 5, fields: ['cost_price_usd'], skip_zero: true })
+    const adjusted = await request(products, 'POST', '/bulk-price-adjust', { direction: 'increase', amount: 5, fields: ['cost_price_usd'], skip_zero: true, client_request_id: 'typed_cost_adjust_0001' })
     assert.equal(adjusted.status, 200, JSON.stringify(adjusted))
     assert.equal(adjusted.body.changed, 1, 'changed still counts the products UPDATE, not the entry insert')
     assert.equal(cost(p.id), 9)
