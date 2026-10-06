@@ -160,7 +160,7 @@ import {
 import { validateRefundMoneySnapshot } from './refundMoneyPrecision'
 import { validateSaleMoneySnapshot } from './saleMoneyPrecision'
 import { recordedSaleOutstandingUsd } from './saleStatusResolution'
-import { refundOutcome, refundToReplacementSql } from './refundTender'
+import { refundDrawerKhrSql, refundOutcome, refundToReplacementSql } from './refundTender'
 // Re-exported for telegram.ts, which reads refunds only through this module.
 export { refundOutcome, refundToReplacementSql }
 import {
@@ -1153,13 +1153,12 @@ async function readSalesReportPass(
     FROM sale_items si NOT INDEXED CROSS JOIN sales s ON s.id=si.sale_id WHERE ${primary.sql}`)
   // RET-A LH-16: the debt each return lowered (0234); a pre-0234 database has none.
   // RET-A riel row: the riel a refund paid out -- its cash share of the riel
-  // figure when it was paid in riel -- the same arithmetic as the shift
-  // drawer's REFUND_DRAWER_KHR_SQL (lib/shiftReconciliation.ts, which imports
-  // this module, so it is restated here and held to it by a parity test).
+  // figure when it was paid in riel -- by the drawer's own expression
+  // (refundTender.ts refundDrawerKhrSql; shiftReconciliation.ts
+  // REFUND_DRAWER_KHR_SQL is held equal to it by test-return-replacement-tender-pure).
   const returnOwed = returnColumns.has('owed_reduction_usd')
     ? `,r.owed_reduction_usd${returnColumns.has('refund_currency') && returnColumns.has('total_refund_khr')
-      ? `,CASE WHEN r.refund_currency='KHR' AND COALESCE(r.total_refund_usd,0)>0
-        THEN ROUND(COALESCE(r.total_refund_khr,0)*(COALESCE(r.total_refund_usd,0)-COALESCE(r.owed_reduction_usd,0))/r.total_refund_usd) ELSE 0 END AS refund_paid_khr`
+      ? `,${refundDrawerKhrSql('r')} AS refund_paid_khr`
       : ''}`
     : ''
   // RET-A verify R2: the riel of that cash leg that paid the return's

@@ -108,11 +108,11 @@ async function main() {
       'INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(600,1,100)',
     ].map(sql => db.prepare(sql)))
     // Each case gets its own $10 sale: Serum $4 (the line returned) + Toner $6.
-    const sale = async (n, { status, paidUsd = 0, serumKhr = 16000 }) => { const id = 100 + n; return db.batch([
+    const sale = async (n, { status, paidUsd = 0, serumKhr = 16000, serumUsd = 4 }) => { const id = 100 + n; return db.batch([
       db.prepare(`INSERT INTO sales(id,receipt_number,branch_id,branch_name,exchange_rate,subtotal_usd,total_usd,amount_paid_usd,amount_paid_khr,
-        money_precision_version,sale_status,payment_method) VALUES(?,?,1,'Shop',4000,10,10,?,0,0,?,'Cash')`).bind(id, `X-${id}`, paidUsd, status),
+        money_precision_version,sale_status,payment_method) VALUES(?,?,1,'Shop',4000,?,?,?,0,0,?,'Cash')`).bind(id, `X-${id}`, serumUsd + 6, serumUsd + 6, paidUsd, status),
       db.prepare(`INSERT INTO sale_items(id,sale_id,product_id,product_name,quantity,branch_id,applied_price_usd,applied_price_khr,total_usd,total_khr,cost_price_usd)
-        VALUES(?,?,1,'Serum',1,1,4,?,4,?,1)`).bind(id * 10 + 1, id, serumKhr, serumKhr),
+        VALUES(?,?,1,'Serum',1,1,?,?,?,?,1)`).bind(id * 10 + 1, id, serumUsd, serumKhr, serumUsd, serumKhr),
       db.prepare(`INSERT INTO sale_items(id,sale_id,product_id,product_name,quantity,branch_id,applied_price_usd,applied_price_khr,total_usd,total_khr,cost_price_usd)
         VALUES(?,?,3,'Toner',1,1,6,24000,6,24000,1)`).bind(id * 10 + 2, id),
     ]) }
@@ -132,6 +132,11 @@ async function main() {
     await sale(12, { status: 'awaiting_payment', paidUsd: 7 })
     await sale(13, { status: 'awaiting_payment', paidUsd: 7, serumKhr: 15500 })
     await sale(14, { status: 'awaiting_payment', paidUsd: 7, serumKhr: 15500 })
+    // verify R3 E1, the verifier's D1 repro: $1.20 Serum at 4,700 riel, owes $0.99.
+    await sale(15, { status: 'awaiting_payment', paidUsd: 6.21, serumKhr: 4700, serumUsd: 1.2 })
+    // verify R3 edit guard: two Serum units ($8) + Toner ($6), $11 paid, owes $3.
+    await sale(16, { status: 'awaiting_payment', paidUsd: 11, serumUsd: 8, serumKhr: 32000 })
+    await db.prepare('UPDATE sale_items SET quantity=2, applied_price_usd=4, applied_price_khr=16000 WHERE id=1161').run()
     const headers = { 'content-type': 'application/json' }
     const post = async (body) => {
       const response = await mf.dispatchFetch('http://local/api/returns', { method: 'POST', headers, body: JSON.stringify(body) })
@@ -186,6 +191,9 @@ async function main() {
     assert.deepEqual([partRiel.drawerUsd, partRiel.drawerKhr, partRiel.originalOwes, partRiel.replacementOwes], [0, 0, 0, 3],
       'riel refund: the riel cash part pays the replacement in riel, both drawers net to 0')
     assert.deepEqual([partRiel.replacement.amount_paid_usd, partRiel.replacement.amount_paid_khr], [0, 4000])
+    // verify R3 E4: riel at USD x the rate -- the replacement keeps the shop's rate.
+    assert.equal((await db.prepare('SELECT exchange_rate FROM sales WHERE id=?').bind(partRiel.replacement.id).first()).exchange_rate, 4000,
+      'a riel-funded replacement whose riel is USD x the rate is recorded at the shop rate')
     console.log('PASS part-paid exchange: the refund\'s cash part pays the replacement first, in its own currency; the rest is owed or paid out')
 
     // -- Completed control: the counter rule is unchanged ------------------------------
@@ -256,7 +264,48 @@ async function main() {
       const shown = recordedRefundSplit(detail)
       assert.deepEqual([shown.payoutKhr, shown.toReplacementKhr > 0], [0 - done.drawerKhr, true], 'Paid out on the detail is the riel the drawer paid out; the rest is To replacement')
     }
+    // verify R3 E4: the legacy 15,500-riel line keeps the refund's riel basis
+    // (at the shop rate its riel would leave a cent owed); see the pure fuzz.
+    const legacyRate = (await db.prepare("SELECT s.exchange_rate FROM sales s JOIN returns r ON r.replacement_sale_id=s.id WHERE r.client_request_id='x-13'").first()).exchange_rate
+    assert.equal(legacyRate, 3875, 'the legacy riel line: 15,500 riel for $4 is 3,875 riel per dollar, not the shop rate')
     console.log('PASS a riel-funded replacement on a legacy riel price owes no phantom cents and the screen riel is the drawer riel')
+
+    // -- verify R3 E1: the verifier's D1 repro on the real routes ------------------------
+    // The drawer SQL reads 4700 * (1.2 - 0.99) / 1.2 = 822.4999... -> 822 riel out.
+    // The retired screen arithmetic rounded the dollars first and read 823.
+    {
+      const screen = await preview({ sale_id: 115, refund_usd: 1.2, refund_khr: 4700, refund_currency: 'KHR', replacement_usd: 0.21 })
+      assert.equal(screen.status, 200, JSON.stringify(screen.body))
+      assert.deepEqual([screen.body.owed_reduction_usd, screen.body.payout_khr, screen.body.replacement_owed_usd], [0.99, 0, 0], 'the screen: $0.99 lowered, nothing paid out, nothing owed')
+      const done = await exchange(15, 0.21, { refund_currency: 'KHR' })
+      assert.deepEqual([done.drawerUsd, done.drawerKhr], [0, 0], 'the drawer nets 0: 822 riel out on the refund leg, 822 in on the replacement')
+      assert.deepEqual([done.replacement.amount_paid_khr, done.replacementStatus, done.replacementOwes], [822, 'completed', 0])
+      const id = (await db.prepare("SELECT id FROM returns WHERE client_request_id='x-15'").first()).id
+      const shown = recordedRefundSplit(await (await mf.dispatchFetch(`http://local/api/returns/${id}`)).json())
+      assert.deepEqual([shown.payoutKhr, shown.toReplacementKhr], [0, 822], 'the detail: Paid out 0 riel, To replacement 822 riel')
+    }
+    console.log('PASS verify R3 E1: the screen, the detail and the drawer read the same riel to the riel')
+
+    // -- verify R3: an edit cannot take back refund cash its replacement was paid with --
+    {
+      const line = (quantity) => [{ sale_item_id: 1161, product_id: 1, quantity, stock_action: 'restock', branch_id: 1 }]
+      const created = await post({ client_request_id: 'x-16', sale_id: 116, reason: 'exchange', items: line(2),
+        replacement_items: [{ product_id: 2, quantity: 1, branch_id: 1, applied_price_usd: 5, applied_price_khr: 20000 }] })
+      assert.equal(created.status, 200, JSON.stringify(created.body))
+      const row = await db.prepare("SELECT id,updated_at,total_refund_usd,owed_reduction_usd FROM returns WHERE client_request_id='x-16'").first()
+      assert.deepEqual([row.total_refund_usd, row.owed_reduction_usd], [8, 3], '$8 back: $3 lowers the debt, $5 cash pays the $5 replacement')
+      const patch = async (body) => {
+        const response = await mf.dispatchFetch(`http://local/api/returns/${row.id}`, { method: 'PATCH', headers, body: JSON.stringify(body) })
+        return { status: response.status, body: await response.json() }
+      }
+      const shrink = await patch({ client_request_id: 'x-16-edit', expected_updated_at: row.updated_at, reason: 'one unit only', items: line(1) })
+      assert.deepEqual([shrink.status, shrink.body.code], [409, 'return_edit_replacement_funded'], JSON.stringify(shrink.body))
+      const after = await db.prepare('SELECT updated_at,total_refund_usd,owed_reduction_usd FROM returns WHERE id=?').bind(row.id).first()
+      assert.deepEqual(after, { updated_at: row.updated_at, total_refund_usd: 8, owed_reduction_usd: 3 }, 'the refused edit wrote nothing')
+      const keep = await patch({ client_request_id: 'x-16-keep', expected_updated_at: row.updated_at, reason: 'reason corrected', items: line(2) })
+      assert.equal(keep.status, 200, `CONTROL: an edit that keeps the cash the replacement used goes through: ${JSON.stringify(keep.body)}`)
+    }
+    console.log('PASS an edit that would take back refund cash the replacement was paid with is refused; one that keeps it goes through')
 
     // -- P3 (verifier N3, N4, N8): loose input is refused, with a code -----------------
     const countReturns = async () => (await db.prepare('SELECT COUNT(*) AS n FROM returns').first()).n

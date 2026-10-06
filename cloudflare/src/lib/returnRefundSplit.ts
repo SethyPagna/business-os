@@ -1,7 +1,7 @@
 import { roundMoney2, roundMoney4, subtractMoney4, sumMoney4 } from './moneyPrecision'
 import { NOT_PAID_STATUS, recordedSaleOutstandingUsd, type RecordedSaleMoney } from './saleStatusResolution'
 import { RETURN_STATUSES } from './salesStatus'
-import { refundCashKhr, type RefundCurrency } from './refundTender'
+import { refundCashKhr, refundDrawerKhr, type RefundCurrency } from './refundTender'
 
 export type ReturnRefundSplit = { owedReductionUsd: number; cashUsd: number }
 
@@ -123,12 +123,14 @@ export type ReplacementTender = ReplacementPaymentSplit & {
    */
   payoutKhr: number
   /**
-   * The rate the replacement's tender is recorded at. A riel-funded
-   * replacement is settled in the basis the riel was paid in -- the refund's
-   * own riel per dollar (its lines' riel prices) -- so the riel that funded
-   * paidFromRefundUsd covers exactly that many dollars and leaves no debt
-   * below the rounding unit (verify R2 X6-X8: legacy/v0 riel prices are not
-   * USD x the sale rate). Every other replacement keeps the sale's rate.
+   * The rate the replacement's tender is recorded at: the sale's (shop) rate
+   * whenever that leaves the replacement owing exactly what it would owe with
+   * the refund's riel valued at the refund's own dollars -- every exchange
+   * whose riel prices are USD x the rate. Only a refund whose riel prices are
+   * NOT USD x the rate (legacy/v0 lines, verify R2 X6-X8) is recorded at the
+   * refund's own riel per dollar: at the shop rate its riel would cover less
+   * (or more) than the dollars the screen credited, and an even swap would be
+   * left owing a cent (verify R3 E4).
    */
   replacementRate: number
 }
@@ -142,16 +144,29 @@ export type ReplacementTender = ReplacementPaymentSplit & {
 export function settleReplacementTender(input: {
   carriesDebt: boolean; cashUsd: number; replacementUsd: number
   currency: RefundCurrency; refundUsd: number; refundKhr: number; saleRate: number
+  /** The owed_reduction_usd the return row stores (with refundUsd / refundKhr: its total_refund_usd / _khr). */
+  owedReductionUsd: number
 }): ReplacementTender {
   const split = splitReplacementPayment(input)
   if (input.currency !== 'KHR') return { ...split, paidFromRefundKhr: 0, payoutKhr: 0, replacementRate: input.saleRate }
-  const cashKhr = refundCashKhr(input.refundKhr, roundMoney4(Math.max(0, input.cashUsd)), input.refundUsd)
+  // RET-A verify R3 (E1): the riel cash leg is the drawer's own figure over
+  // the values the return row stores -- one computation, not a twin.
+  const cashKhr = refundDrawerKhr({ total_refund_usd: input.refundUsd, total_refund_khr: input.refundKhr, owed_reduction_usd: input.owedReductionUsd })
   const paidFromRefundKhr = split.paidFromRefundUsd > 0 && !(split.payoutUsd > 0)
-    ? cashKhr : refundCashKhr(input.refundKhr, split.paidFromRefundUsd, input.refundUsd)
+    ? cashKhr : Math.min(cashKhr, refundCashKhr(input.refundKhr, split.paidFromRefundUsd, input.refundUsd))
   return {
     ...split, paidFromRefundKhr, payoutKhr: Math.max(0, cashKhr - paidFromRefundKhr),
-    replacementRate: paidFromRefundKhr > 0 && split.paidFromRefundUsd > 0 ? paidFromRefundKhr / split.paidFromRefundUsd : input.saleRate,
+    replacementRate: replacementRate(split, paidFromRefundKhr, input.replacementUsd, input.saleRate),
   }
+}
+
+// RET-A verify R3 (E4): the shop rate unless it changes what the replacement owes.
+function replacementRate(split: ReplacementPaymentSplit, paidFromRefundKhr: number, replacementUsd: number, saleRate: number): number {
+  if (!(paidFromRefundKhr > 0 && split.paidFromRefundUsd > 0)) return saleRate
+  const basis = paidFromRefundKhr / split.paidFromRefundUsd
+  const owedAt = (rate: number) => saleRowOwedUsd({ total_usd: roundMoney2(replacementUsd), amount_paid_usd: 0,
+    amount_paid_khr: paidFromRefundKhr, exchange_rate: rate, money_precision_version: 0 })
+  return owedAt(saleRate) === owedAt(basis) ? saleRate : basis
 }
 
 /**

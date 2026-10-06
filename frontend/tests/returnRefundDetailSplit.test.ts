@@ -1,15 +1,17 @@
 // RET-A (verifier, 6 Oct 2026): the return detail shows the currency the
 // refund was paid in and the part that lowered a Not Paid sale's debt, in both
 // packs. A refund recorded before 0234 (no currency) keeps its old rows.
-// The riel paid out is the Worker's own figure (refundTender.ts refundCashKhr,
-// the drawer's REFUND_DRAWER_KHR_SQL), held equal here on the same inputs.
+// The riel paid out is the drawer's own figure (Worker refundTender.ts
+// refundDrawerKhr, REFUND_DRAWER_KHR_SQL over the stored columns), held equal
+// here on the same inputs; test-return-replacement-tender-pure holds both to
+// the real SQL over 200,000 rows.
 //
 // Run: node tests/returnRefundDetailSplit.test.ts
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 
 import { recordedRefundSplit } from '../src/components/returns/helpers/refundCurrency.ts'
-import { refundCashKhr, refundOutcome } from '../../cloudflare/src/lib/refundTender.ts'
+import { refundCashKhr, refundDrawerKhr, refundOutcome } from '../../cloudflare/src/lib/refundTender.ts'
 
 const read = (rel: string): string => readFileSync(new URL(`../${rel}`, import.meta.url), 'utf8')
 const en = JSON.parse(read('src/lang/en.json')) as Record<string, string>
@@ -26,10 +28,16 @@ assert.deepEqual(recordedRefundSplit({ refund_currency: 'USD', total_refund_usd:
   { currency: 'USD', loweredUsd: 0, toReplacementUsd: 0, toReplacementKhr: 0, payoutUsd: 4.5, payoutKhr: 0 })
 assert.equal(recordedRefundSplit({ refund_currency: null, total_refund_usd: 4, total_refund_khr: 16000 }), null, 'recorded before 0234: no split')
 assert.equal(recordedRefundSplit({ refund_currency: 'khr', total_refund_usd: 4 }), null, 'only the stored codes')
-for (const [usd, khr, lowered] of [[4, 16000, 3], [9.99, 40959, 2.5], [1, 4100, 0], [3, 12000, 3]] as const) {
+for (const [usd, khr, lowered] of [[4, 16000, 3], [9.99, 40959, 2.5], [1, 4100, 0], [3, 12000, 3], [1.2, 4700, 0.99]] as const) {
   const split = recordedRefundSplit({ refund_currency: 'KHR', total_refund_usd: usd, total_refund_khr: khr, owed_reduction_usd: lowered })!
-  assert.equal(split.payoutKhr, refundCashKhr(khr, split.payoutUsd, usd), `riel paid out equals the Worker's (${usd}, ${khr}, ${lowered})`)
+  assert.equal(split.payoutKhr, refundDrawerKhr({ total_refund_usd: usd, total_refund_khr: khr, owed_reduction_usd: lowered }),
+    `riel paid out equals the drawer's (${usd}, ${khr}, ${lowered})`)
 }
+// RET-A verify R3 (E1): $1.20 at 4,700 riel with $0.99 lowered -- the drawer
+// SQL reads 822 (4700 * 0.20999999999999996 / 1.2); rounding the dollars
+// first read 823 and left the screen 1 riel off the till.
+assert.equal(recordedRefundSplit({ refund_currency: 'KHR', total_refund_usd: 1.2, total_refund_khr: 4700, owed_reduction_usd: 0.99 })!.payoutKhr, 822)
+assert.equal(refundCashKhr(4700, 0.21, 1.2), 823, 'CONTROL: the retired reading (dollars rounded first) reads 823')
 console.log('PASS the recorded split names the debt lowered and the cash paid out in its own currency, as the Worker reads it')
 
 // RET-A verify R2: an exchange whose refund cash paid the replacement. The
@@ -39,7 +47,7 @@ assert.deepEqual(recordedRefundSplit({ refund_currency: 'USD', total_refund_usd:
 const rielSwap = recordedRefundSplit({ refund_currency: 'KHR', total_refund_usd: 4, total_refund_khr: 15500, owed_reduction_usd: 3, to_replacement_usd: 0.5, to_replacement_khr: 1938 })!
 assert.deepEqual(rielSwap, { currency: 'KHR', loweredUsd: 3, toReplacementUsd: 0.5, toReplacementKhr: 1938, payoutUsd: 0.5, payoutKhr: 1937 },
   'riel: the 3,875-riel cash leg less the 1,938 riel that paid the replacement is the 1,937 the drawer paid out')
-assert.equal(rielSwap.payoutKhr + rielSwap.toReplacementKhr, refundCashKhr(15500, 1, 4), 'the two parts add up to the drawer\'s riel cash leg')
+assert.equal(rielSwap.payoutKhr + rielSwap.toReplacementKhr, refundDrawerKhr({ total_refund_usd: 4, total_refund_khr: 15500, owed_reduction_usd: 3 }),'the two parts add up to the drawer\'s riel cash leg')
 const worker = refundOutcome({ refund_currency: 'KHR', total_refund_usd: 4, total_refund_khr: 15500, owed_reduction_usd: 3, to_replacement_usd: 0.5, to_replacement_khr: 1938 })
 assert.deepEqual([worker.payoutUsd, worker.payoutKhr, worker.toReplacementUsd, worker.toReplacementKhr], [rielSwap.payoutUsd, rielSwap.payoutKhr, rielSwap.toReplacementUsd, rielSwap.toReplacementKhr],
   'the detail and the Worker (Telegram) read the same outcome')

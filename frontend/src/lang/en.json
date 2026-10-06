@@ -4640,6 +4640,7 @@
   "return_line_not_on_sale": "This item is not on the sale being returned.",
   "return_sale_item_required": "This product was sold from more than one branch on this sale. Pick the exact sale item being returned.",
   "customer_return_refund_exceeds_paid": "This return would refund more cash than the customer paid on this Not Paid sale. Review the return.",
+  "return_edit_replacement_funded": "This refund paid for the replacement sale. Keep at least what it paid, or correct the replacement in Sales first.",
   "customer_return_owed_unreadable": "This sale's payment cannot be read, so the refund cannot be split. Review the sale first.",
   "return_restore_owed_changed": "This return lowered what the customer owed, and the sale has been paid since. Record a new return instead of restoring it.",
   "return_pick_items": "Pick the items being returned from this sale.",

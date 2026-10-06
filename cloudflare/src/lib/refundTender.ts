@@ -74,21 +74,63 @@ const finite = (value: unknown): number => {
   return Number.isFinite(number) ? number : 0
 }
 
+/**
+ * SQLite's ROUND(x) with no digits, as D1 evaluates it: |x| + 0.5 truncated
+ * toward zero, sign restored (sqlite3 func.c roundFunc). Math.round differs
+ * at a negative half and where the float addition carries
+ * (0.49999999999999994 + 0.5 is 1 in doubles), so a JS twin of a SQL ROUND
+ * uses this.
+ */
+export function sqliteRound0(value: number): number {
+  if (!Number.isFinite(value)) return value
+  const magnitude = Math.abs(value)
+  if (!(magnitude < 9_223_372_036_854_775_806)) return value
+  const rounded = Math.trunc(magnitude + 0.5)
+  return value < 0 ? -rounded : rounded
+}
+
+/**
+ * RET-A verify R3 (E1): the riel a riel refund's cash leg takes from the
+ * drawer, as SQL. ONE expression for the shift drawer
+ * (shiftReconciliation.ts REFUND_DRAWER_KHR_SQL, which restates it to keep its
+ * module map and is held equal to this by test-return-replacement-tender-pure) and
+ * the report kernel. Stored REAL columns, one float subtraction, one
+ * multiplication, one division, SQLite's ROUND.
+ */
+export function refundDrawerKhrSql(alias: string): string {
+  return `CASE WHEN ${alias}.refund_currency = 'KHR' AND COALESCE(${alias}.total_refund_usd, 0) > 0
+    THEN ROUND(COALESCE(${alias}.total_refund_khr, 0) * (COALESCE(${alias}.total_refund_usd, 0) - COALESCE(${alias}.owed_reduction_usd, 0)) / ${alias}.total_refund_usd) ELSE 0 END`
+}
+
+/**
+ * refundDrawerKhrSql evaluated in JS over the values the return row stores:
+ * the same float operations in the same order and SQLite's rounding, so the
+ * screen, the replacement's riel tender and the drawer agree to the riel.
+ * (The retired reading rounded the dollar cash to 4 places first; a
+ * $1.20 / 4,700-riel line with $0.99 lowered then read 823 against the
+ * drawer's 822 -- verify R3 E1.) Currency is the caller's to check.
+ */
+export function refundDrawerKhr(row: { total_refund_usd?: unknown; total_refund_khr?: unknown; owed_reduction_usd?: unknown }): number {
+  const totalUsd = finite(row.total_refund_usd)
+  if (!(totalUsd > 0)) return 0
+  return sqliteRound0(finite(row.total_refund_khr) * (totalUsd - finite(row.owed_reduction_usd)) / totalUsd)
+}
+
 /** The JS reading of shiftReconciliation's drawer SQL, for one return row. */
 export function refundTender(row: RefundTenderRow): RefundTender {
   const totalUsd = finite(row.total_refund_usd)
   const owedReductionUsd = finite(row.owed_reduction_usd)
   const cashUsd = Math.round((totalUsd - owedReductionUsd) * 10_000) / 10_000
   const currency = row.refund_currency == null ? null : parseRefundCurrency(row.refund_currency)
-  const rielRefunded = currency === 'KHR' && totalUsd > 0 ? Math.round(finite(row.total_refund_khr) * cashUsd / totalUsd) : 0
+  const rielRefunded = currency === 'KHR' ? refundDrawerKhr(row) : 0
   return { currency, owedReductionUsd, cashUsd, rielRefunded }
 }
 
 /**
- * Riel handed back for the cash part of a riel refund: the refund's riel
- * figure in proportion to its cash share. The same arithmetic as
- * REFUND_DRAWER_KHR_SQL, so a screen, a replacement paid from the refund and
- * the drawer agree to the riel.
+ * The riel of a share of a riel refund: the refund's riel figure in
+ * proportion to that share. Used for the PART of the cash leg that pays a
+ * replacement; the whole cash leg is refundDrawerKhr (the drawer's own
+ * figure), never this.
  */
 export function refundCashKhr(refundKhr: number, cashUsd: number, refundUsd: number): number {
   if (!(refundUsd > 0) || !(cashUsd > 0)) return 0

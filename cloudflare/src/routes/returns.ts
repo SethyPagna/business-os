@@ -54,7 +54,7 @@ import {
   PRIOR_RETURN_MONEY_SQL, priorReturnMoney, ReturnRefundSplitError, saleCarriesDebt, saleRowOwedUsd, saleStatusWithReturns, settleReplacementTender, splitReturnRefund,
   type PriorReturnMoney, type PriorReturnMoneyRow, type ReplacementTender, type ReturnDebtSale, type ReturnRefundSplit,
 } from '../lib/returnRefundSplit'
-import { parseRefundCurrency, refundRielFigure, refundToReplacementSql, type RefundCurrency } from '../lib/refundTender'
+import { parseRefundCurrency, refundDrawerKhr, refundRielFigure, refundToReplacementSql, type RefundCurrency } from '../lib/refundTender'
 import { ProductMergeLineageError, resolveProductMergeLineage } from '../lib/productMergeLineage'
 import { TAGGED_DISPOSAL_MOVEMENT_TYPE } from '../lib/stockCondition'
 
@@ -1343,6 +1343,27 @@ app.post('/bulk', async (c) => {
 // same kernels POST / records with (splitReturnRefund, refundRielFigure,
 // splitReplacementPayment), for legacy and v1 sales alike. A read: nothing is
 // written, and POST / recomputes everything from the sale lines anyway.
+/**
+ * The replacement sale's money exactly as POST / records it: the tender
+ * (paid from the refund's cash in that cash's currency, or in full at the
+ * counter), computeSaleTotals at the settled rate, and what it then owes by
+ * the one owed helper. The Return screen preview reports this same owed
+ * figure, so the screen and the recorded sale cannot disagree (RET-A verify R3).
+ */
+function replacementMoney(tender: ReplacementTender, subtotalUsd: number, refundCurrency: RefundCurrency) {
+  const fromRefund = tender.followsDebt
+  const paidFromRefundKhr = fromRefund ? tender.paidFromRefundKhr : 0
+  const paidFromRefundUsd = fromRefund && refundCurrency !== 'KHR' ? tender.paidFromRefundUsd : 0
+  const totals = computeSaleTotals({
+    subtotalUsd, discountUsd: 0, membershipDiscountUsd: 0, taxUsd: 0, deliveryFeeUsd: 0,
+    deliveryFeePaidBy: 'customer', isDelivery: false, exchangeRate: tender.replacementRate,
+    rawAmountPaidUsd: fromRefund ? paidFromRefundUsd : subtotalUsd, rawAmountPaidKhr: paidFromRefundKhr,
+  })
+  const owedUsd = fromRefund ? saleRowOwedUsd({ total_usd: totals.totalUsd, amount_paid_usd: totals.amountPaidUsd,
+    amount_paid_khr: totals.amountPaidKhr, exchange_rate: tender.replacementRate, money_precision_version: 0 }) : 0
+  return { totals, owedUsd }
+}
+
 app.post('/split-preview', async (c) => {
   const user = c.get('user')
   if (getActionTier(user, 'returns', 'add') === 'none' || getActionTier(user, 'returns', 'view') === 'none') {
@@ -1372,14 +1393,17 @@ app.post('/split-preview', async (c) => {
     // The same settlement POST / records (settleReplacementTender): the riel
     // paid out is the drawer's net to the riel, never a separately rounded share.
     const replacement = settleReplacementTender({ carriesDebt: saleCarriesDebt(debtState.sale, debtState.prior.loweredDebt),
-      cashUsd: split.cashUsd, replacementUsd, currency, refundUsd, refundKhr: riel,
+      cashUsd: split.cashUsd, replacementUsd, currency, refundUsd, refundKhr: riel, owedReductionUsd: split.owedReductionUsd,
       saleRate: positiveRate(debtState.sale.exchange_rate) ?? SCHEMA_DEFAULT_EXCHANGE_RATE })
     // Without a debt the replacement is paid at the counter; the refund's cash goes out in full.
     const payoutUsd = replacement.payoutUsd
+    // RET-A verify R3: what the replacement will owe is what POST records
+    // (replacementMoney), never the split's own subtraction.
+    const recorded = replacementUsd > 0 ? replacementMoney(replacement, replacementUsd, currency) : null
     return c.json({
       owed_reduction_usd: split.owedReductionUsd, cash_refund_usd: split.cashUsd,
       replacement_follows_debt: replacement.followsDebt,
-      replacement_paid_from_refund_usd: replacement.paidFromRefundUsd, replacement_owed_usd: replacement.owedUsd,
+      replacement_paid_from_refund_usd: replacement.paidFromRefundUsd, replacement_owed_usd: recorded ? recorded.owedUsd : 0,
       payout_usd: payoutUsd, payout_khr: replacement.payoutKhr,
       refund_currency: currency,
     })
@@ -1498,6 +1522,7 @@ app.post('/quote', async (c) => {
 
 // RET-A F6 / N1: every customer return is linked to a sale (owner, 5 Oct 2026).
 // RET-A P2: a riel refund needs a riel figure; none can be derived without a rate.
+const RETURN_EDIT_REPLACEMENT_FUNDED = 'This refund paid for the replacement sale. Keep at least what it paid, or correct the replacement in Sales first.'
 const RETURN_REFUND_KHR_UNAVAILABLE = { error: 'This riel refund has no riel amount and no exchange rate to work it out. Refund in dollars or fix the sale rate.',
   code: 'return_refund_khr_unavailable', action: 'fix_request' } as const
 
@@ -1948,25 +1973,18 @@ app.post('/', async (c) => {
     replacementReceiptNumber = await uniqueBusinessDateTimeNumber('', async (candidate) => !!(await db.prepare('SELECT 1 FROM sales WHERE receipt_number=? LIMIT 1').get([candidate])))
     const subtotalUsd = Number(replacementLines.reduce((sum, line) => sum + line.totalUsd, 0).toFixed(2))
     replacementSplit = settleReplacementTender({ carriesDebt: replacementFollowsDebt, cashUsd: refundSplit.cashUsd, replacementUsd: subtotalUsd,
-      currency: refundCurrency, refundUsd: totalRefundUsd, refundKhr: totalRefundKhr, saleRate: returnExchangeRate })
-    // A riel-funded replacement is recorded at the refund's riel basis so its
-    // riel covers what it paid (verify R2 X6-X8); any other at the sale's rate.
+      currency: refundCurrency, refundUsd: totalRefundUsd, refundKhr: totalRefundKhr, owedReductionUsd: refundSplit.owedReductionUsd,
+      saleRate: returnExchangeRate })
+    // The sale's rate, except a riel-funded replacement whose refund riel is
+    // not USD x that rate (settleReplacementTender, verify R2 X6-X8 / R3 E4).
     replacementRate = replacementSplit.replacementRate
-    const exchangeRate = replacementRate
     const fromRefund = replacementSplit.followsDebt
-    // The refund's own cash, in the currency it would have left the drawer in.
-    const paidFromRefundKhr = fromRefund ? replacementSplit.paidFromRefundKhr : 0
-    const paidFromRefundUsd = fromRefund && refundCurrency !== 'KHR' ? replacementSplit.paidFromRefundUsd : 0
-    replacementTotals = computeSaleTotals({
-      subtotalUsd, discountUsd: 0, membershipDiscountUsd: 0, taxUsd: 0, deliveryFeeUsd: 0,
-      deliveryFeePaidBy: 'customer', isDelivery: false, exchangeRate,
-      rawAmountPaidUsd: fromRefund ? paidFromRefundUsd : subtotalUsd, rawAmountPaidKhr: paidFromRefundKhr,
-    })
+    const recordedMoney = replacementMoney(replacementSplit, subtotalUsd, refundCurrency)
+    replacementTotals = recordedMoney.totals
     if (fromRefund) {
       const paid = replacementTotals.amountPaidUsd > 0 || replacementTotals.amountPaidKhr > 0
       const method = paid ? DEFAULT_REPLACEMENT_PAYMENT_METHOD : replacementPaymentMethod
-      const owes = saleRowOwedUsd({ total_usd: replacementTotals.totalUsd, amount_paid_usd: replacementTotals.amountPaidUsd,
-        amount_paid_khr: replacementTotals.amountPaidKhr, exchange_rate: exchangeRate, money_precision_version: 0 }) > 0
+      const owes = recordedMoney.owedUsd > 0
       replacementTender = { status: owes ? 'awaiting_payment' : 'completed', method,
         details: paid ? [{ method, amount_usd: replacementTotals.amountPaidUsd, amount_khr: replacementTotals.amountPaidKhr }] : [] }
     } else {
@@ -2012,7 +2030,7 @@ app.post('/', async (c) => {
       status: replacementTender.status, createdAt: occurredAt, receiptNumber: replacementReceiptNumber,
       cashier: actorSnapshot(user), customer: replacementCustomerName, phone: replacementCustomerPhone,
       branch: branchName, items: replacementLines.map((line) => ({ name: line.productName, quantity: line.quantity, unitPriceUsd: line.priceUsd, basePriceUsd: null, lineTotalUsd: line.totalUsd })),
-      exchangeRate, isDelivery: false, deliveryFeeUsd: 0, deliveryPaidBy: null, driver: null,
+      exchangeRate: replacementRate, isDelivery: false, deliveryFeeUsd: 0, deliveryPaidBy: null, driver: null,
       subtotalUsd, discountUsd: 0, taxUsd: 0, totalUsd: replacementTotals.totalUsd,
       totalKhr: replacementTotals.totalKhr, paidUsd: replacementTotals.amountPaidUsd,
       paidKhr: replacementTotals.amountPaidKhr, changeUsd: 0, changeKhr: 0, paymentMethod: replacementTender.method,
@@ -3493,6 +3511,21 @@ app.patch('/:id', async (c) => {
       loweredDebt: prior.loweredDebt || editSplit.owedReductionUsd > 0,
       quantityStatus: projectedSaleStatus!,
     })
+  }
+  // RET-A verify R3: a refund that paid its replacement cannot be edited below
+  // what it paid. The replacement keeps its tender (a sale is corrected in
+  // Sales), so a smaller cash leg would leave the drawer expecting money the
+  // customer never handed over.
+  if (existing.replacement_sale_id != null) {
+    const funded = await db.prepare(`SELECT ${refundToReplacementSql('r', 'usd')} AS usd, ${refundToReplacementSql('r', 'khr')} AS khr FROM returns r WHERE r.id = ?`)
+      .get<{ usd: number | null; khr: number | null }>([returnId])
+    const fundedUsd = Number(funded?.usd) || 0
+    const fundedKhr = Number(funded?.khr) || 0
+    const riel = existing.refund_currency === 'KHR'
+    const cashKhr = riel ? refundDrawerKhr({ total_refund_usd: editedRefundUsd, total_refund_khr: editedRefundKhr, owed_reduction_usd: editSplit.owedReductionUsd }) : 0
+    if (fundedUsd > 0 && (riel ? cashKhr < fundedKhr : editSplit.cashUsd + 0.00005 < fundedUsd)) {
+      return c.json({ error: RETURN_EDIT_REPLACEMENT_FUNDED, code: 'return_edit_replacement_funded' }, 409)
+    }
   }
 
   // Named so the audit row below records the values this statement actually

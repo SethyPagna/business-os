@@ -35,7 +35,9 @@ const CODES = ['return_edit_cancelled', 'return_restore_over_capacity', 'return_
   // N1 (loophole review, 6 Oct 2026): the named sale does not exist.
   'return_sale_not_found',
   // RET-B E1 (5 Oct 2026): a return on a sale recorded without stock changes.
-  'return_stock_skipped_sale']
+  'return_stock_skipped_sale',
+  // RET-A verify R3 (7 Oct 2026): an edit below what the refund paid its replacement.
+  'return_edit_replacement_funded']
 
 runTest('the mapping covers exactly the FX-returns, RET-A and RET-B refusal codes', () => {
   assert.deepEqual(Object.keys(RETURN_REFUSAL_ERRORS).sort(), [...CODES].sort())
@@ -128,6 +130,7 @@ runTest('every mapped code is one the Worker actually sends, and the route forwa
   const split = readWorker('lib/returnRefundSplit.ts')
   for (const code of ['customer_return_refund_exceeds_paid', 'customer_return_owed_unreadable']) assert.ok(split.includes(`'${code}'`), `the split names ${code}`)
   assert.ok(bulk.includes("409, 'return_restore_owed_changed')"), 'POST /bulk refuses restoring a debt-lowering return after the sale was paid')
+  assert.ok(route.includes("return c.json({ error: RETURN_EDIT_REPLACEMENT_FUNDED, code: 'return_edit_replacement_funded' }, 409)"), 'PATCH /:id refuses an edit below what the refund paid its replacement')
 })
 
 // Each surface is sliced to the one handler that receives the refusal -- from
