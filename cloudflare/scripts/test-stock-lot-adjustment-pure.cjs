@@ -193,19 +193,152 @@ async function main() {
     assert.equal(JSON.parse(history(f, id).undo_payload).generation, 2)
   })
 
-  await check('undo is refused after an intervening sale and changes nothing', async () => {
+  // REVERT-SET (owner, 6 Oct 2026): undo moves the Set's recorded DELTA, so a
+  // later sale that left the Set's units alone no longer blocks it, and one
+  // that used them refuses it whole with the numbers.
+  await check('undo after an intervening sale takes back exactly the Set delta; a sale that used those units refuses it whole', async () => {
+    const sell = (f, lot, qty) => f.sql.exec(`UPDATE branch_batch_stock SET quantity=quantity-${qty} WHERE batch_id=${lot} AND branch_id=1;
+      UPDATE branch_stock SET quantity=quantity-${qty} WHERE product_id=1 AND branch_id=1;
+      UPDATE products SET stock_quantity=stock_quantity-${qty} WHERE id=1;
+      INSERT INTO inventory_movements(product_id,branch_id,movement_type,quantity,batch_id) VALUES(1,1,'sale',${qty},${lot});`)
     const f = seeded()
     const set = await send(f, 'POST', '/api/inventory/adjust', setLot('lot-undo-sale-01', 5))
-    f.sql.exec(`UPDATE branch_batch_stock SET quantity=quantity-1 WHERE batch_id=10 AND branch_id=1;
-      UPDATE branch_stock SET quantity=quantity-1 WHERE product_id=1 AND branch_id=1;
-      UPDATE products SET stock_quantity=stock_quantity-1 WHERE id=1;
-      INSERT INTO inventory_movements(product_id,branch_id,movement_type,quantity,batch_id) VALUES(1,1,'sale',1,10);`)
+    assert.deepEqual(stock(f), { lot10: 5, lot11: 7, branch: 12, product: 12, held: 0 })
+    sell(f, 10, 1)
+    sell(f, 11, 2)
+    const res = await undo(f, set.json.action_history_id, 0)
+    assert.equal(res.status, 200, JSON.stringify(res.json))
+    assert.deepEqual(stock(f), { lot10: 2, lot11: 5, branch: 7, product: 7, held: 0 }, 'only the +2 comes back off; both sales stay')
+    const counter = movements(f).at(-1)
+    assert.equal(counter.movement_type, 'remove'); assert.equal(counter.quantity, 2); assert.equal(counter.batch_id, 10)
+    assert.equal(history(f, set.json.action_history_id).status, 'redoable')
+
+    const g = seeded()
+    const set2 = await send(g, 'POST', '/api/inventory/adjust', setLot('lot-undo-sale-02', 5))
+    sell(g, 10, 4)
+    const before = stock(g)
+    const refused = await undo(g, set2.json.action_history_id, 0)
+    assert.equal(refused.status, 409, JSON.stringify(refused.json))
+    assert.equal(refused.json.code, 'revert_insufficient_lot_stock')
+    assert.deepEqual(refused.json.params, { available: 1, needed: 2 })
+    assert.deepEqual(stock(g), before, 'refused whole: nothing moved')
+    assert.equal(history(g, set2.json.action_history_id).status, 'undoable')
+  })
+
+  // The owner's report, 6 Oct 2026 (SK-II Gentle Cleanser 20g): a lot of 3
+  // received 02/09 and a delivery of 30 received 29/09, then "Set received
+  // date" on the 02/09 lot to 30 (+27, total 60). Lot costs differ (5 and 7)
+  // so the catalog cost tells the right end state from the wrong one.
+  function screenshotSeeded() {
+    resetProbes()
+    const f = fixture()
+    f.sql.exec(`
+      INSERT INTO branches(id, name, is_default, is_active) VALUES(2, 'Warehouse', 0, 1);
+      INSERT INTO suppliers(id, name) VALUES(19, 'Dane japan');
+      INSERT INTO product_batches(id, variant_product_id, batch_key, lot_code, received_at, batch_number, unit_cost_usd, is_active, received_quantity, received_cost_usd, received_branch_id)
+        VALUES(20, 1, 'ADJ', 'ADJ09/02/2026', '2026-09-02', 1, 5, 1, 3, 15, 1);
+      INSERT INTO product_batches(id, variant_product_id, batch_key, lot_code, received_at, batch_number, unit_cost_usd, is_active, received_quantity, received_cost_usd, received_branch_id, supplier_id, supplier_name, payment_status)
+        VALUES(21, 1, 'NEW', '09292026', '2026-09-29', 2, 7, 1, 30, 210, 1, 19, 'Dane japan', 'paid');
+      INSERT INTO branch_batch_stock(batch_id, branch_id, quantity) VALUES(20, 1, 3), (21, 1, 30);
+      UPDATE branch_stock SET quantity=33 WHERE product_id=1 AND branch_id=1;
+      UPDATE products SET stock_quantity=33 WHERE id=1;
+      INSERT INTO inventory_movements(id, product_id, product_name, branch_id, branch_name, movement_type, quantity, unit_cost_usd, total_cost_usd, reason, reference_id, batch_id, created_at)
+        VALUES(48026, 1, 'Serum', 1, 'Shop', 'add', 30, 7, 210, 'New arrival', 1790667050013, 21, '2026-09-29 07:33:05');
+    `)
+    return f
+  }
+  const lots = (f) => {
+    const q = (sql, ...a) => f.sql.prepare(sql).get(...a)
+    return {
+      old: Number(q('SELECT quantity q FROM branch_batch_stock WHERE batch_id=20 AND branch_id=1').q),
+      delivery: Number(q('SELECT quantity q FROM branch_batch_stock WHERE batch_id=21 AND branch_id=1').q),
+      branch: Number(q('SELECT quantity q FROM branch_stock WHERE product_id=1 AND branch_id=1').q),
+      product: Number(q('SELECT stock_quantity q FROM products WHERE id=1').q),
+      cost: Number(q('SELECT cost_price_usd q FROM products WHERE id=1').q),
+    }
+  }
+  const delivery = (f) => f.sql.prepare('SELECT received_quantity, received_cost_usd, is_active FROM product_batches WHERE id=21').get()
+  const setOld = (id) => setLot(id, 30, { batchId: 20, reason: 'wrong stock' })
+  const ledgerRevert = (f, id) => send(f, 'POST', `/api/inventory/movements/${id}/revert`)
+
+  await check('screenshot sequence: reverting the Set takes exactly 27 back off its own lot (33, both lots and the delivery intact)', async () => {
+    const f = screenshotSeeded()
+    assert.equal(lots(f).cost, 6.8182, 'weighted (3x5 + 30x7) / 33 before the Set')
+    const set = await send(f, 'POST', '/api/inventory/adjust', setOld('ss-set-0000001'))
+    assert.equal(set.status, 200, JSON.stringify(set.json))
+    assert.deepEqual(lots(f), { old: 30, delivery: 30, branch: 60, product: 60, cost: 6 })
+    const forward = movements(f).at(-1)
+    assert.equal(forward.movement_type, 'adjustment'); assert.equal(forward.quantity, 27); assert.equal(forward.batch_id, 20)
+    assert.equal(f.sql.prepare('SELECT reason FROM inventory_movements WHERE id=?').get(forward.id).reason,
+      'wrong stock (Set received 2026-09-02 from 3 to 30)', 'the row names the lot and both quantities')
+    // The Stock Changes Revert on the Set row resolves THIS Set, not the delivery.
+    const preview = await send(f, 'GET', `/api/action-history/movements/${forward.id}/revert-preview`)
+    assert.equal(preview.status, 200, JSON.stringify(preview.json))
+    assert.equal(preview.json.revert.kind, 'stock_set'); assert.equal(preview.json.revert.direction, 'undo')
+    assert.equal(preview.json.revert.historyId, set.json.action_history_id)
+    const res = await undo(f, set.json.action_history_id, 0)
+    assert.equal(res.status, 200, JSON.stringify(res.json))
+    assert.deepEqual(lots(f), { old: 3, delivery: 30, branch: 33, product: 33, cost: 6.8182 }, '33, not 30')
+    assert.deepEqual(delivery(f), { received_quantity: 30, received_cost_usd: 210, is_active: 1 }, 'the delivery stays a purchase')
+    const counter = movements(f).at(-1)
+    assert.equal(counter.movement_type, 'remove'); assert.equal(counter.quantity, 27); assert.equal(counter.batch_id, 20)
+    assert.equal(counter.reference_id, `revert:${forward.id}`)
+    // Double apply: the same generation again is a no-op; a stale one and a ledger Revert of either row are refused.
+    assert.equal((await undo(f, set.json.action_history_id, 0)).status, 200)
+    assert.equal((await undo(f, set.json.action_history_id, 1)).status, 409)
+    assert.equal((await ledgerRevert(f, forward.id)).status, 409)
+    assert.equal((await ledgerRevert(f, counter.id)).status, 409)
+    assert.deepEqual(lots(f), { old: 3, delivery: 30, branch: 33, product: 33, cost: 6.8182 }, 'nothing moved twice')
+    assert.equal(movements(f).length, 3)
+  })
+
+  await check('screenshot sequence: reverting the Add takes its own 30 and un-receives it; the Set stays and still undoes by exactly 27', async () => {
+    const f = screenshotSeeded()
+    const set = await send(f, 'POST', '/api/inventory/adjust', setOld('ss-set-0000002'))
+    const res = await ledgerRevert(f, 48026)
+    assert.equal(res.status, 200, JSON.stringify(res.json))
+    assert.deepEqual(lots(f), { old: 30, delivery: 0, branch: 30, product: 30, cost: 5 }, 'production state of 1 Oct')
+    assert.deepEqual(delivery(f), { received_quantity: 0, received_cost_usd: 0, is_active: 0 })
+    // Before the fix the Set's Undo was refused here for good (branch 30 is not the snapshot's 60).
+    const undone = await undo(f, set.json.action_history_id, 0)
+    assert.equal(undone.status, 200, JSON.stringify(undone.json))
+    assert.deepEqual(lots(f), { old: 3, delivery: 0, branch: 3, product: 3, cost: 5 })
+    assert.equal(movements(f).at(-1).quantity, 27)
+  })
+
+  await check('screenshot repair in the app: Revert the Revert, then Undo the Set -> 33 on the right lots, delivery a purchase again', async () => {
+    const f = screenshotSeeded()
+    const set = await send(f, 'POST', '/api/inventory/adjust', setOld('ss-set-0000003'))
+    await ledgerRevert(f, 48026)
+    const wrong = movements(f).at(-1)
+    assert.equal(wrong.reference_id, 'revert:48026')
+    const back = await ledgerRevert(f, wrong.id)
+    assert.equal(back.status, 200, JSON.stringify(back.json))
+    assert.deepEqual(lots(f), { old: 30, delivery: 30, branch: 60, product: 60, cost: 6 })
+    assert.deepEqual(delivery(f), { received_quantity: 30, received_cost_usd: 210, is_active: 1 })
+    assert.equal((await undo(f, set.json.action_history_id, 0)).status, 200)
+    assert.deepEqual(lots(f), { old: 3, delivery: 30, branch: 33, product: 33, cost: 6.8182 })
+    assert.deepEqual(delivery(f), { received_quantity: 30, received_cost_usd: 210, is_active: 1 })
+    const dated = f.sql.prepare('SELECT supplier_name, payment_status FROM product_batches WHERE id=21').get()
+    assert.deepEqual(dated, { supplier_name: 'Dane japan', payment_status: 'paid' }, 'supplier attribution kept through both')
+  })
+
+  await check('a Set whose forward row already has a Revert is never reversed a second time', async () => {
+    const f = seeded()
+    const set = await send(f, 'POST', '/api/inventory/adjust', setLot('lot-legacy-rev-1', 5))
+    const forward = movements(f)[0]
+    // What a ledger Revert of a Set row wrote before the ledger refused them.
+    f.sql.exec(`UPDATE branch_batch_stock SET quantity=quantity-2 WHERE batch_id=10 AND branch_id=1;
+      UPDATE branch_stock SET quantity=quantity-2 WHERE product_id=1 AND branch_id=1;
+      UPDATE products SET stock_quantity=stock_quantity-2 WHERE id=1;
+      INSERT INTO inventory_movements(product_id,branch_id,movement_type,quantity,batch_id,reference_id) VALUES(1,1,'remove',2,10,'revert:${forward.id}');`)
     const before = stock(f)
     const res = await undo(f, set.json.action_history_id, 0)
     assert.equal(res.status, 409, JSON.stringify(res.json))
+    assert.equal(res.json.code, 'already_reverted')
     assert.deepEqual(stock(f), before)
-    assert.equal(history(f, set.json.action_history_id).status, 'undoable')
   })
+
 
   await check('refused during maintenance: Set and undo change nothing', async () => {
     const f = seeded()

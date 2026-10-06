@@ -2972,9 +2972,9 @@ async function branchReplayExpectedFields(
 
 const APPLIERS: Record<string, UndoApplierDef> = {
   [CUSTOMER_GENDER_RESTORATION_KIND]: { permission: 'contacts', action: 'edit', run: replayCustomerGenderRestoration },
-  // Scoped Set (lib/stockLotAdjustment.ts): the server replays the exact lot
-  // and branch snapshots of one generation and refuses 409 when current stock
-  // no longer equals the snapshot it would reverse from.
+  // Scoped Set (lib/stockLotAdjustment.ts): the server moves exactly the
+  // recorded lot and branch delta of one generation and refuses 409 when the
+  // lot or branch can no longer cover it.
   'stock.quantity_set': {
     permission: 'inventory', action: 'adjust',
     run: async (payload, ctx) => {

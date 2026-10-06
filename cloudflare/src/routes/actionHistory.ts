@@ -488,7 +488,10 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
         // through, so the refusal can say WHY and link WHERE.
         const blocking = status === 409 ? (error as { refusal?: unknown })?.refusal : null
         const blockingFields = blocking && typeof blocking === 'object' && !Array.isArray(blocking) ? blocking as Record<string, unknown> : {}
-        return c.json({ success: false, error: (error as Error)?.message || `Failed to ${direction} this action`, ...blockingFields, ...(refusalCode ? { code: refusalCode } : {}), ...(saleCustomerReplay && isLoyaltyAssignmentError(error) ? { code: LOYALTY_REASSIGNMENT_CODE } : {}) }, status)
+        // The numbers a coded refusal's sentence names ("only 3 left, 27 needed").
+        const refusalParams = status === 409 ? (error as { params?: unknown })?.params : null
+        const paramFields = refusalParams && typeof refusalParams === 'object' && !Array.isArray(refusalParams) ? { params: refusalParams } : {}
+        return c.json({ success: false, error: (error as Error)?.message || `Failed to ${direction} this action`, ...blockingFields, ...paramFields, ...(refusalCode ? { code: refusalCode } : {}), ...(saleCustomerReplay && isLoyaltyAssignmentError(error) ? { code: LOYALTY_REASSIGNMENT_CODE } : {}) }, status)
       }
     }
 

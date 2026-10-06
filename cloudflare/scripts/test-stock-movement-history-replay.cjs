@@ -134,12 +134,19 @@ async function main() {
     assert.equal((await replay(s, redo)).status, 200)
     assert.deepEqual(state(s), afterRedo)
     assert.equal((await preview(s, movement)).status, 409)
+    // REVERT-SET (6 Oct 2026): a replay moves the recorded delta, so only a
+    // change that took the units it needs refuses it -- whole, with no write.
     const latest = s.sql.prepare('SELECT id FROM inventory_movements ORDER BY id DESC LIMIT 1').get().id
     const newer = (await preview(s, latest)).body.revert
+    assert.equal((await replay(s, newer)).status, 200)
+    assert.equal(s.sql.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id=? AND branch_id=1').get(batchId).quantity, 5)
+    const newest = s.sql.prepare('SELECT id FROM inventory_movements ORDER BY id DESC LIMIT 1').get().id
+    const again = (await preview(s, newest)).body.revert
+    assert.deepEqual([again.direction, again.expectedGeneration], ['redo', 3])
     s.sql.prepare('UPDATE branch_batch_stock SET quantity=1 WHERE batch_id=? AND branch_id=1').run(batchId)
     const changed = state(s)
-    assert.equal((await replay(s, newer)).status, 409)
-    assert.deepEqual(state(s), changed, 'intervening stock change keeps all history guards')
+    assert.equal((await replay(s, again)).status, 409)
+    assert.deepEqual(state(s), changed, 'a change that took the units the replay needs refuses it with no write')
     console.log('PASS Set forward/counter previews share History undo/redo and refuse stale or changed stock without writes')
   } finally { s.sql.close() }
 
