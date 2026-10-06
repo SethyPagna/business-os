@@ -72,6 +72,21 @@ export class BranchCutoverParentOutcomeUnknown extends Error {
   readonly outcome = 'unknown'
   constructor(cause: unknown) { super('Reconcile this same branch cutover operation before continuing.', { cause }) }
 }
+/**
+ * Whether the driver may simply call again with the same operation id and revision (the next invocation re-reads the
+ * journal; a committed step is recognised by its revision, an uncommitted one is redone). True for an unconfirmed
+ * batch (parent or child outcome unknown) and for D1 refusals that write nothing: a CPU-limit reset (code 7429, the
+ * whole batch rolls back), an overloaded or queued-too-long database, and transport failures. A capability refusal,
+ * a conflict or a SQL error is not retryable: the same call would fail the same way.
+ */
+const RETRYABLE_D1_ERROR = /exceeded its CPU time limit|\[code: 7429\]|D1 DB is overloaded|Requests queued for too long|network connection lost|fetch failed|ECONNRESET|timed out|internal error/i
+export function isBranchCutoverRetryable(error: unknown): boolean {
+  if (error instanceof BranchCutoverParentOutcomeUnknown || (error as { code?: unknown } | null)?.code === 'branch_cutover_child_outcome_unknown') return true
+  for (let current: unknown = error, depth = 0; current && depth < 4; current = (current as { cause?: unknown }).cause, depth++) {
+    if (RETRYABLE_D1_ERROR.test(String((current as { message?: unknown }).message ?? current))) return true
+  }
+  return false
+}
 function requireParent(condition: unknown): asserts condition { if (!condition) throw new Error('branch_cutover_parent_conflict') }
 function refuse(capability: string): never { throw new BranchCutoverCapabilityError(capability) }
 function checkStatement(sql: string, params?: Record<string, unknown> | unknown[]): void {

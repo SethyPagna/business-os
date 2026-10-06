@@ -76,6 +76,7 @@ function modules(control) {
   return result
 }
 
+const D1_CPU_RESET = 'D1_ERROR: D1 DB exceeded its CPU time limit and was reset. [code: 7429]'
 const ACTOR = { id: 7, username: 'operator', name: 'Operator', organization_id: 1, role_id: null, permissions: '{"branches":true,"backup_restore":true}', is_active: 1 }
 const PARENT_BUDGET = { tier: 'free', alreadyUsed: 0, remainingReads: 0, retryQueries: 0, completionQueries: 0, safetyQueries: 0, extraAtomicStatements: 0 }
 const CHILD_BUDGET = { ...PARENT_BUDGET, tier: 'paid' }
@@ -172,7 +173,7 @@ function world({ control, generatedProducts = 28, duplicate = false } = {}) {
     INSERT INTO stock_transfers(id,product_id,from_branch_id,to_branch_id,quantity) VALUES(900001,2,1,2,1);
     INSERT INTO pending_actions(section,action_type,entity_type,status) VALUES('inventory','adjust','product','rejected'),('inventory','adjust','product','approved');`)
   const history = seedHistoryFamilies(raw, { source: 2, target: 1, other: 3 }, 20000)
-  const stats = { reads: 0, batches: 0, statements: 0, maxBinds: 0, before: null, after: null, duplicate, duplicatesCommitted: 0, duplicatesRefused: 0, dbNs: 0n }
+  const stats = { reads: 0, batches: 0, statements: 0, maxBinds: 0, before: null, after: null, cpuRead: null, cpuBatch: false, duplicate, duplicatesCommitted: 0, duplicatesRefused: 0, dbNs: 0n }
   const timed = (fn) => { const t = process.hrtime.bigint(); try { return fn() } finally { stats.dbNs += process.hrtime.bigint() - t } }
   let m = modules(control)
   const prepared = (sql, values = []) => {
@@ -183,7 +184,9 @@ function world({ control, generatedProducts = 28, duplicate = false } = {}) {
       if (/^\s*(SELECT|WITH|PRAGMA)/i.test(sql)) return { success: true, results: statement.all(...args), meta: { changes: 0 } }
       const r = statement.run(...args); return { success: true, results: [], meta: { changes: Number(r.changes), last_row_id: Number(r.lastInsertRowid) } }
     }
-    return { bind: (...v) => prepared(sql, v), execute, all: async () => { stats.reads++; return timed(execute) }, run: async () => timed(execute) }
+    // A D1 CPU-limit reset (code 7429) on a read: the statement never returns and nothing is written.
+    const cpuReset = () => { if (stats.cpuRead !== null && stats.cpuRead-- === 0) { stats.cpuRead = null; throw Error(D1_CPU_RESET) } }
+    return { bind: (...v) => prepared(sql, v), execute, all: async () => { stats.reads++; cpuReset(); return timed(execute) }, run: async () => { cpuReset(); return timed(execute) } }
   }
   const transaction = (statements) => {
     raw.exec('BEGIN IMMEDIATE')
@@ -191,6 +194,8 @@ function world({ control, generatedProducts = 28, duplicate = false } = {}) {
   }
   const makeDb = () => new m.D1Compat({ prepare: prepared, batch: async statements => {
     stats.batches++; stats.statements = statements.length
+    // A 7429 on a batch: D1 resets the database mid-transaction, so the whole batch rolls back.
+    if (stats.cpuBatch) { stats.cpuBatch = false; throw Error(D1_CPU_RESET) }
     if (stats.before) { const before = stats.before; stats.before = null; before(raw) }
     const result = timed(() => transaction(statements))
     if (stats.duplicate) { try { transaction(statements); stats.duplicatesCommitted++ } catch { stats.duplicatesRefused++ } }
@@ -262,6 +267,8 @@ async function drive(w, { faults = {}, base, requestId = 'cutover_night_001', pa
     if (fault) (w.fired ||= []).push(label + '#' + seen[label] + ':' + fault)
     if (fault === 'before') w.stats.before = () => { throw Error('injected crash before commit') }
     if (fault === 'after') w.stats.after = () => { throw Error('injected lost acknowledgement') }
+    if (fault && fault.startsWith('cpu-read-')) w.stats.cpuRead = Number(fault.slice('cpu-read-'.length))
+    if (fault === 'cpu-batch') w.stats.cpuBatch = true
     const reads = w.stats.reads, batches = w.stats.batches, started = process.hrtime.bigint(), db0 = w.stats.dbNs, cpu0 = process.cpuUsage()
     try {
       if (!row) await w.m.parent.beginBranchCutover(w.db, ACTOR, 1, { ...IDS, ...NAMES, requestId, controlIncarnation: INCARNATION,
@@ -270,6 +277,13 @@ async function drive(w, { faults = {}, base, requestId = 'cutover_night_001', pa
       else await w.m.parent.continueBranchCutover(w.db, ACTOR, 1, { operationId: row.operation_id, expectedRevision: row.revision, pageSize }, PARENT_BUDGET)
     } catch (error) {
       if (!fault) throw error
+      // A 7429 surfaces once (D1Compat never replays a CPU-limit reset) and is retryable: a read throws it as is, a
+      // batch as BranchCutoverParentOutcomeUnknown (the parent cannot know the batch did not commit) or the child's own error.
+      if (fault.startsWith('cpu')) {
+        assert.ok(/code: 7429/.test(String(error.message) + ' ' + String(error.cause?.message)), label + ' ' + fault + ': ' + error.message)
+        assert.ok(w.m.parent.isBranchCutoverRetryable(error), label + ' ' + fault + ' is retryable')
+        assert.equal(w.stats.cpuRead, null, 'the injected 7429 fired'); assert.equal(w.stats.cpuBatch, false)
+      }
     } finally { w.stats.before = null; w.stats.after = null }
     if (timings) {
       const entry = timings[label] ||= { count: 0, ms: [], reads: 0, maxReads: 0, maxStatements: 0 }
@@ -546,6 +560,25 @@ async function main() {
     assert.equal(row.phase, 'completed')
     for (const [p, q] of base.product) assert.ok(near(w.raw.prepare('SELECT coalesce(sum(quantity),0) n FROM branch_stock WHERE product_id=? AND branch_id=1').get(p).n, q), 'LC Store product ' + p)
     w.raw.close()
+  })
+  await check('a D1 CPU-limit reset (7429) at every stage, on a read and on a batch, is retryable: nothing half-written, same operation, identical end state', async () => {
+    const cpuFaults = {
+      'begin#1': 'cpu-read-2', 'begin#2': 'cpu-batch', 'capture#1': 'cpu-read-0', 'capture#3': 'cpu-batch', 'snapshot#1': 'cpu-read-1', 'snapshot#2': 'cpu-batch',
+      'seal#1': 'cpu-read-1', 'seal#3': 'cpu-batch', 'child#1': 'cpu-read-2', 'child#2': 'cpu-batch', 'fold#1': 'cpu-read-1', 'fold#2': 'cpu-batch',
+      'reconcile#1': 'cpu-read-1', 'reconcile#2': 'cpu-batch', 'closures#1': 'cpu-read-1', 'closures#2': 'cpu-batch', 'done#1': 'cpu-batch', 'done#2': 'cpu-read-1',
+      'finalize#1': 'cpu-read-2', 'finalize#2': 'cpu-batch',
+    }
+    const clean = await scenario({})
+    const faulted = await scenario({ faults: cpuFaults })
+    verifyEndState(clean); verifyEndState(faulted)
+    const state = (raw) => ['branch_stock', 'branch_batch_stock'].map(t => raw.prepare(`SELECT * FROM ${t} ORDER BY rowid`).all().map(({ updated_at, created_at, ...r }) => r))
+      .concat([raw.prepare('SELECT id,unit_cost_usd,received_branch_name FROM product_batches ORDER BY id').all(), raw.prepare('SELECT id,name,is_active,is_default,role,successor_branch_id FROM branches ORDER BY id').all(),
+        raw.prepare('SELECT id,status,reversible,last_error FROM action_history WHERE id<20999 ORDER BY id').all()])
+    assert.deepEqual(state(faulted.w.raw), state(clean.w.raw))
+    // one operation carried the whole run (plus the rehearsal aborted before it)
+    assert.equal(faulted.w.raw.prepare("SELECT count(*) n FROM branch_cutovers WHERE phase<>'aborted'").get().n, 1)
+    assert.equal(faulted.w.raw.prepare("SELECT count(DISTINCT request_id) n FROM transfer_operation_receipts WHERE request_id LIKE 'bc\\_%' ESCAPE '\\'").get().n, faulted.final.committed_children)
+    clean.w.raw.close(); faulted.w.raw.close()
   })
   // ---- discriminating controls: each plausible wrong implementation must fail this test
   for (const [control, expectation] of [['name-admission', 'refuses'], ['name-finalize', 'red'], ['mean', 'red'], ['double', 'red'], ['no-close', 'refuses'], ['no-rule', 'red'],
