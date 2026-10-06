@@ -375,8 +375,8 @@ async function main() {
     }
     // Round 3: provenance and history detail. A carried-forward sign-up claim,
     // a link made with a Strong phone+name match, and a Move (shared group id).
-    t.raw.prepare(`INSERT INTO portal_member_link_events (account_id, action, to_customer_id, evidence, reason_code, link_version_after)
-      VALUES (@a, 'legacy_import', 100, 'system', 'signup_claimed_customer', 0)`).run({ a: one })
+    t.raw.prepare(`INSERT INTO portal_member_link_events (account_id, action, to_customer_id, evidence, reason_code, link_version_after, actor_name)
+      VALUES (@a, 'legacy_import', 100, 'system', 'signup_claimed_customer', 0, 'system')`).run({ a: one })
     const matched = t.member('Matched', '012000104')
     t.customer(103, 'Matched Customer', '012 000 104', { lc: 'LC-00103' })
     await link(t, matched, 103, { matchBasis: { strength: 'strong', basis: ['phone', 'name'] } })
@@ -409,16 +409,26 @@ async function main() {
       }
     }
     // A customer merge is a customer fact: links-only sees relink / unlink.
-    const mergeEvent = (accountId, action, from, to) => t.raw.prepare(`INSERT INTO portal_member_link_events
-      (account_id, action, from_customer_id, to_customer_id, evidence, reason_code, link_version_after)
-      VALUES (@a, @action, @from, @to, 'system', 'merge', 0)`).run({ a: accountId, action, from, to })
-    mergeEvent(holder, 'merge_repoint', 102, 101)
-    mergeEvent(holder, 'merge_unlink', 101, null)
-    const mergedLinksOnly = (await t.call('GET', `/${holder}/history`, undefined, L)).body.events.map((e) => e.action)
-    assert.deepEqual(mergedLinksOnly.slice(0, 2), ['unlink', 'relink'], 'merge actions are shown as their member-side effect')
-    assert.equal(mergedLinksOnly.some((a) => a.startsWith('merge_')), false)
-    const mergedFull = (await t.call('GET', `/${holder}/history`)).body.events.map((e) => e.action)
-    assert.deepEqual(mergedFull.slice(0, 2), ['merge_unlink', 'merge_repoint'], 'control: Contacts view sees the real action')
+    const mergeEvent = (accountId, action, from, to, actor) => t.raw.prepare(`INSERT INTO portal_member_link_events
+      (account_id, action, from_customer_id, to_customer_id, evidence, reason_code, link_version_after, actor_name)
+      VALUES (@a, @action, @from, @to, 'system', 'contact_merge', 0, @actor)`).run({ a: accountId, action, from, to, actor })
+    mergeEvent(holder, 'merge_repoint', 102, 101, 'Merging Clerk')
+    mergeEvent(holder, 'merge_unlink', 101, null, 'system')
+    const shape = (e) => [e.action, e.evidence, e.actorName]
+    const mergedLinksOnly = (await t.call('GET', `/${holder}/history`, undefined, L)).body.events
+    assert.deepEqual(mergedLinksOnly.slice(0, 2).map(shape), [['unlink', null, null], ['relink', null, 'Merging Clerk']],
+      'merge events: member-side action, no system evidence, no "system" actor (a real staff actor stays)')
+    assert.equal(mergedLinksOnly.some((e) => e.action.startsWith('merge_') || e.evidence === 'system'), false)
+    const mergedFull = (await t.call('GET', `/${holder}/history`)).body.events
+    assert.deepEqual(mergedFull.slice(0, 2).map(shape), [['merge_unlink', 'system', 'system'], ['merge_repoint', 'system', 'Merging Clerk']],
+      'control: Contacts view sees the real action, evidence and actor')
+    // The carried-forward sign-up link reads as a plain link.
+    const oneFull = (await t.call('GET', `/${one}/history`)).body.events
+    const legacyId = oneFull.find((e) => e.action === 'legacy_import').id
+    assert.deepEqual(shape(oneFull.find((e) => e.id === legacyId)), ['legacy_import', 'system', 'system'], 'control: legacy_import as recorded')
+    const oneLinksOnly = (await t.call('GET', `/${one}/history`, undefined, L)).body.events
+    assert.deepEqual(shape(oneLinksOnly.find((e) => e.id === legacyId)), ['link', null, null], 'legacy_import shows as a plain link')
+    assert.equal(oneLinksOnly.some((e) => e.action === 'legacy_import' || e.evidence === 'system' || e.actorName === 'system'), false)
     const legacyFilter = await t.call('GET', '/?filter=legacy_claims', undefined, L)
     assert.equal(legacyFilter.status, 403)
     assert.equal(legacyFilter.body.code, 'contacts_view_required')
