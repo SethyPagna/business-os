@@ -30,10 +30,6 @@ export function openCSVDialog(): Promise<CsvDialogResult | null> {
   })
 }
 
-export function openImageDialog(): Promise<null> {
-  return Promise.resolve(null)
-}
-
 export function getImageDataUrl(_path: string): Promise<null> {
   return Promise.resolve(null)
 }

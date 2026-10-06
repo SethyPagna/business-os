@@ -214,11 +214,6 @@ export async function openCSVDialog() {
   return openBrowserCSVDialog()
 }
 
-export async function openImageDialog() {
-  const { openImageDialog: openBrowserImageDialog } = await loadBrowserDialogsModule()
-  return openBrowserImageDialog()
-}
-
 export async function getImageDataUrl(path) {
   const { getImageDataUrl: getBrowserImageDataUrl } = await loadBrowserDialogsModule()
   return getBrowserImageDataUrl(path)
@@ -770,12 +765,6 @@ export const uploadUserAvatar = async payload => {
 /**
  * openCSVDialog — opens a file picker, reads the selected CSV, and returns
  * { content: string } — same shape as the Electron preload's openCSVDialog.
- */
-
-
-/**
- * openImageDialog — in browser mode always returns null so Products.tsx
- * falls through to its own file-input fallback.
  */
 
 

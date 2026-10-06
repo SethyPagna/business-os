@@ -37,7 +37,7 @@ import {
   setSyncToken,
 } from '../src/api/http.ts'
 import { appendActorQuery, getCurrentUserContext } from '../src/api/actorQuery.ts'
-import { getImageDataUrl, openImageDialog } from '../src/api/browserDialogs.ts'
+import { getImageDataUrl } from '../src/api/browserDialogs.ts'
 import { buildAttemptedReturnItems, buildAttemptedSettings } from '../src/api/conflicts.ts'
 import {
   clearDriveSyncStatusCooldown,
@@ -904,7 +904,6 @@ await runTest('sync runtime helpers emit compact window events with timestamps',
 })
 
 await runTest('browser dialog image fallbacks stay null for browser-hosted media', async () => {
-  assert.equal(await openImageDialog(), null)
   assert.equal(await getImageDataUrl('/uploads/product.jpg'), null)
 })
 
