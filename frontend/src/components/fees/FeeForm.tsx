@@ -179,6 +179,8 @@ type FeeFormProps = {
   }) => Promise<void> | void
   onClose: () => void
   onInteractionLockChange?: (locked: boolean) => void
+  conflicted?: boolean
+  onReloadLatest?: () => void
 }
 
 // S4-21: the registry key for this form's unsaved work, exported so the
@@ -228,7 +230,7 @@ export function feeFormInteractionLocked(saving: boolean, pending: PendingFeeCre
   return saving || pending != null
 }
 
-export default function FeeForm({ fee, actorId, labelSuggestions = [], onSave, onClose, onInteractionLockChange }: FeeFormProps) {
+export default function FeeForm({ fee, actorId, labelSuggestions = [], onSave, onClose, onInteractionLockChange, conflicted = false, onReloadLatest }: FeeFormProps) {
   const { t } = useApp()
   const { askToConfirm, confirmDialog } = useConfirmDialog(t)
   const draftKey = scopedWorkDraftKey(feeFormDraftBaseKey(fee?.id))
@@ -464,6 +466,12 @@ export default function FeeForm({ fee, actorId, labelSuggestions = [], onSave, o
         void handleSave()
       }}
     >
+      {conflicted ? (
+        <div role="alert" data-fee-edit-conflict="" className="flex items-start justify-between gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800 dark:border-red-800 dark:bg-red-900/20 dark:text-red-200">
+          <span>{(t('write_conflict_older_version') || 'Your screen was holding an older version of this {entityLower}.').replace('{entityLower}', (t('expense') || 'expense').toLowerCase())}</span>
+          {onReloadLatest ? <button type="button" disabled={saving} onClick={onReloadLatest} className="shrink-0 rounded border border-red-300 px-2 py-1 font-semibold dark:border-red-700">{t('write_conflict_reload_latest') || 'Reload latest'}</button> : null}
+        </div>
+      ) : null}
       {pendingCreate ? (
         <div role="alert" className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-100">
           <p className="font-semibold">{t('write_outcome_unknown_title') || 'Save outcome unknown'}</p>

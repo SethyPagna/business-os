@@ -65,7 +65,7 @@ import {
   reparkDeniedRestore,
   type MinimizedWorkEntry,
 } from '../../utils/minimizedWork.ts'
-import { flushPendingWorkDraft, scopedWorkDraftKey } from '../../utils/workDrafts.ts'
+import { clearWorkDraft, flushPendingWorkDraft, scopedWorkDraftKey } from '../../utils/workDrafts.ts'
 
 const ExportOptionsDialog = lazyRetry(() => import('../shared/ExportOptionsDialog'), 'fees-export-options')
 const ExpenseLabelManagerModal = lazyRetry(() => import('./ExpenseLabelManagerModal'), 'expense-label-manager-modal')
@@ -490,7 +490,7 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
   const openLabelManager = useCallback(() => {
     if (canEditFeeRef.current) setShowLabelManager(true)
   }, [])
-  const closeModal = () => { setFeeFormLocked(false); setModal(null); setSelected(null) }
+  const closeModal = () => { setFeeFormLocked(false); setModal(null); setSelected(null); setFeeConflictId(null) }
 
   const restoreFeeForm = useCallback(async (entry: MinimizedWorkEntry): Promise<boolean> => {
     const rawFeeId = entry.payload?.feeId
@@ -541,6 +541,23 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
     return () => window.removeEventListener(RESTORE_WORK_EVENT, onRestore)
   }, [restoreFeeForm])
 
+  // A refused edit keeps the version its fields came from and says so; only
+  // an explicit Reload reopens the form on the latest row, without the draft.
+  const [feeConflictId, setFeeConflictId] = useState<number | null>(null)
+  const reloadConflictedFee = async (): Promise<void> => {
+    if (!selected) return
+    const id = selected.id
+    try {
+      const result = await getFeeRequest(id)
+      if (!result?.fee) return
+      clearWorkDraft(scopedWorkDraftKey(feeFormDraftBaseKey(id)))
+      setFeeConflictId(null)
+      setSelected((current) => current && current.id === id ? result.fee : current)
+    } catch {
+      notify(tr('failed_to_load_data', 'Failed to load data'), 'warning')
+    }
+  }
+
   const handleSave = async (payload: FeePayload) => {
     try {
       if (selected) {
@@ -567,6 +584,7 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
       // latest server state, same pattern Sales.tsx/EditReturnModal.tsx
       // already use for this case.
       if (isWriteConflictError(error) || String((error as { code?: unknown } | null)?.code || '') === 'idempotency_conflict') {
+        if (selected && isWriteConflictError(error)) setFeeConflictId(selected.id)
         await load(true)
       } else {
         notify(error instanceof Error ? error.message : String(error || ''), 'error')
@@ -986,8 +1004,10 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
           unsavedChanges={{ workKey: feeFormWorkKey(selected?.id) }}
         >
           <FeeForm
-            key={`${selected?.id ?? 'new'}:${user?.id ?? 'anonymous'}`}
+            key={`${selected?.id ?? 'new'}:${selected?.updated_at ?? ''}:${user?.id ?? 'anonymous'}`}
             fee={selected}
+            conflicted={!!selected && feeConflictId === selected.id}
+            onReloadLatest={() => { void reloadConflictedFee() }}
             actorId={user?.id}
             labelSuggestions={[...new Set(fees.map((row) => String(row.label || '').trim()).filter(Boolean))].sort()}
             onSave={handleSave}

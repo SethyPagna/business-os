@@ -250,7 +250,7 @@ await runTest('a skipped sale is never sent, and a refusal still reads in the sh
   // so a payment refusal is a known outcome: clear the retry body (a kept one
   // blocks every later group change), reload the stale rows the review
   // trusted, and translate.
-  assert.match(salesPage, /const unpaid = \(error as \{ code\?: string \} \| null\)\?\.code === 'insufficient_payment_for_status'\s+if \(unpaid\) \{\s+savePendingBulkRequest\(null\)\s+void loadSales\(true\)\s+\}/)
+  assert.match(salesPage, /const unpaid = \(error as \{ code\?: string \} \| null\)\?\.code === 'insufficient_payment_for_status'\s+if \(unpaid \|\| \(!retryRequest && directMutationRefusedBeforeWrite\(error\)\)\) \{\s+savePendingBulkRequest\(null\)\s+void loadSales\(true\)\s+\}/)
   assert.match(salesPage, /translateOr\('sale_settlement_full_required', /)
 })
 

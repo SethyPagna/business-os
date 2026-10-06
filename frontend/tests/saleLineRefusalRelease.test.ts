@@ -165,3 +165,33 @@ const modal = fs.readFileSync(new URL('../src/components/sales/SaleDetailModal.t
   assert.deepEqual(sends.map(body => body.client_request_id), ['modal-stale', 'modal-redo', 'modal-header'])
   console.log('PASS actual detail executor leaves the paused state on a proven refusal and admits the redo')
 }
+
+{
+  const { apiFetch, __resetApiHealthForTests, __resetApiWriteDedupeForTests, getSyncServerUrl, setSyncServerUrl } = await import('../src/api/http.ts')
+  const rows = new MemoryStorage(), quote = { version: 1, subtotal_usd: 19, total_usd: 19, total_khr: 76000 }
+  const oldWindow = globalThis.window, oldFetch = globalThis.fetch, oldUrl = getSyncServerUrl()
+  const fixture = Object.assign(new EventTarget(), { sessionStorage: rows, localStorage: rows, location: { origin: 'https://sale-header.test', hostname: 'sale-header.test' }, setTimeout })
+  try {
+    Object.defineProperty(globalThis, 'window', { configurable: true, writable: true, value: fixture })
+    setSyncServerUrl('https://sale-header.test')
+    __resetApiHealthForTests(); __resetApiWriteDedupeForTests()
+    globalThis.fetch = async () => new Response(JSON.stringify({ error: 'Review the exact sale total before saving.', code: 'sale_header_quote_conflict', header_quote: quote, proven_uncommitted: true }), { status: 409, headers: { 'Content-Type': 'application/json' } })
+    const thrown = await apiFetch('POST', '/api/sales/41/amendments', amendment('header-http', 2)).then(() => null, (error: unknown) => error) as Record<string, unknown>
+    assert.equal(thrown.status, 409)
+    assert.deepEqual(thrown.header_quote, quote, 'the API error carries the quote the Worker would accept')
+    assert.equal(thrown.proven_uncommitted, true)
+    const env: Record<string, unknown> = {
+      statusSecurityRef: { current: 'scope' }, aliveRef: { current: true }, canAmendSales: true, notify: () => {}, translateOr: (_key: string, english: string) => english, t: (key: string) => key,
+      withLoaderTimeout: async (run: () => unknown) => run(), getSalesApi: () => ({ amendSale: async () => { throw thrown } }), saleLineRefusalProvesNoCommit: provesNoCommit,
+      directMutationOutcomeIsUnknown: () => false, isWriteConflict: () => false, getErrorMessage: (error: { message?: string }) => String(error.message), saleInvalidRateMessage: () => null, SALES_ADD_ITEMS_MUTATION_TIMEOUT_MS: 1,
+    }
+    const result = await actual(sales, 'handleAmendSale', env)(41, amendment('header-http', 2))
+    assert.deepEqual(result.header_quote, quote, 'the detail receives the quote for its "Review the updated total" step')
+    assert.equal(result.proven_uncommitted, true)
+  } finally {
+    globalThis.fetch = oldFetch
+    Object.defineProperty(globalThis, 'window', { configurable: true, writable: true, value: oldWindow })
+    setSyncServerUrl(oldUrl)
+  }
+  console.log('PASS a real API header-quote refusal reaches the sale detail with its quote and no-write proof')
+}

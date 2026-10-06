@@ -1,6 +1,7 @@
 import { apiFetch, route } from './http.ts'
 import { appendQuery, buildQueryString, type QueryParams } from './query.ts'
 import { dispatchResolvedSyncError } from '../utils/syncProblemLifecycle.ts'
+import { directMutationRefusedBeforeWrite } from '../utils/directMutationRequest.ts'
 import { MoneyPrecisionError, nativeChangeAmounts, type DecimalInput } from '../utils/moneyPrecision.ts'
 import { reportUtcBound } from '../utils/businessTimeBounds.ts'
 
@@ -533,6 +534,7 @@ export function getFeesReport(params: QueryParams = {}): Promise<unknown> {
 
 export async function createFee(payload: FeePayload, actorId: number | string | null | undefined): Promise<{ fee: FeeRecord }> {
   const storage = feeCreateStorage()
+  const firstSend = !getPendingFeeCreate(actorId, storage)
   const prepared = prepareFeeCreatePayload(payload, actorId, storage)
   const pending = getPendingFeeCreate(actorId, storage)
   if (!pending || pending.client_request_id !== prepared.client_request_id) throw new FeeCreatePersistenceError()
@@ -549,7 +551,8 @@ export async function createFee(payload: FeePayload, actorId: number | string | 
       true,
     ) as { fee: FeeRecord }
   } catch (error) {
-    rememberPendingFeeCreateProblem(pending, error, storage)
+    if (firstSend && directMutationRefusedBeforeWrite(error)) clearPendingFeeCreate(pending.actor_id, pending.client_request_id, storage)
+    else rememberPendingFeeCreateProblem(pending, error, storage)
     throw error
   }
   clearPendingFeeCreate(pending.actor_id, pending.client_request_id, storage)

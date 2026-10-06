@@ -4,6 +4,7 @@ import path from 'node:path'
 import ts from 'typescript'
 import { fileURLToPath } from 'node:url'
 import { captureActorReadScope, isActorReadScopeCurrent, invalidateActorReadChannel } from '../src/api/actorReadScope.ts'
+import { directMutationRefusedBeforeWrite } from '../src/utils/directMutationRequest.ts'
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)))
 const source = fs.readFileSync(path.join(root, 'src/components/sales/Sales.tsx'), 'utf8')
@@ -24,7 +25,7 @@ const context = {
   notify:(value:string)=>{notices.push(value)},getErrorMessage:(error:Error)=>error.message,
   sessionStorage:{getItem:(key:string)=>storage.get(key)||null,setItem:(key:string,value:string)=>storage.set(key,value),removeItem:(key:string)=>storage.delete(key)},
   window:{dispatchEvent:()=>{}},CustomEvent:class { constructor(_name:string,_payload:unknown){} },crypto:globalThis.crypto,
-  pendingBulkRequest:null as Record<string,unknown>|null,
+  pendingBulkRequest:null as Record<string,unknown>|null, directMutationRefusedBeforeWrite,
   savePendingBulkRequest:(request:Record<string,unknown>|null)=>{
     context.pendingBulkRequest=request
     if(request) storage.set('pending',JSON.stringify(request)); else storage.delete('pending')
@@ -67,6 +68,27 @@ selected.splice(25)
 await run('awaiting_delivery')
 assert.ok(statusPrompt);assert.equal(calls.length,0)
 console.log('PASS 50-row selection blocked before confirmation; 25 rows can confirm; no silent chunking')
+
+{
+  const refusal = Object.assign(Error('Sale 1 changed. Refresh before retrying.'), { status: 409 })
+  let refuse: unknown = refusal
+  context.updateSalesBulkStatus = async (payload: Record<string, unknown>) => { calls.push(payload); throw refuse }
+  calls = []; loads = 0
+  selected.splice(1)
+  await run('completed', { skip_stock: false }, true)
+  assert.equal(calls.length, 1)
+  assert.equal(context.pendingBulkRequest, null, 'a first send the Worker refused before writing does not lock bulk status')
+  assert.equal(loads, 1, 'the refused rows are reloaded so the next group starts from their current versions')
+  refuse = Error('lost')
+  await run('completed', { skip_stock: false }, true)
+  const frozenId = (context.pendingBulkRequest as Record<string, unknown> | null)?.client_request_id
+  assert.ok(frozenId, 'an unknown outcome stays frozen')
+  refuse = refusal
+  await run('completed', null, true, true)
+  assert.equal((context.pendingBulkRequest as Record<string, unknown> | null)?.client_request_id, frozenId, 'a refused Retry proves nothing about the earlier send')
+  context.savePendingBulkRequest(null)
+  console.log('PASS a refused first bulk send is released and reloaded; unknown and retried sends stay frozen')
+}
 
 const transport=fs.readFileSync(path.join(root,'src/api/salesTransport.ts'),'utf8')
 assert.match(transport,/navigator.onLine === false/)

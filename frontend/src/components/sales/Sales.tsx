@@ -70,6 +70,7 @@ import { useConfirmDialog } from '../shared/useConfirmDialog.tsx'
 import { createSingleUseResult, type SingleUseResult } from './saleStatusConfirmation.ts'
 import {
   directMutationOutcomeIsUnknown,
+  directMutationRefusedBeforeWrite,
   freezeDirectMutationBody,
   loadPendingDirectMutationSlot,
   pendingDirectMutationForScope,
@@ -304,7 +305,7 @@ function isWriteConflict(error: unknown): boolean {
  * conflicts, money-contract errors) stays unproven. */
 export function saleLineRefusalProvesNoCommit(error: unknown): boolean {
   const row = (error || {}) as { status?: unknown; code?: unknown }
-  return Number(row.status) === 403 || ['write_conflict', 'exchange_rate_changed', 'sale_header_quote_conflict'].includes(String(row.code || ''))
+  return Number(row.status) === 403 || ['write_conflict', 'exchange_rate_changed', 'sale_header_quote_conflict', 'sale_discount_exceeds_price', 'sale_discount_exceeds_subtotal'].includes(String(row.code || ''))
 }
 
 function normalizeFiniteIdsFrom<T = unknown>(items: T[] = [], getValue: (value: T) => unknown = (value) => value): number[] {
@@ -1488,7 +1489,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
         await loadSales().catch(() => {})
         return { mutationError: `${(t('write_conflict_older_version') || '').replace('{entityLower}', t('sale') || 'sale')} ${t('sale_edit_redo_latest')}`, code: 'write_conflict', proven_uncommitted: true }
       }
-      return { mutationError: `${translateOr('sale_items_add_failed', 'Could not add the items')}: ${saleInvalidRateMessage(error) ?? getErrorMessage(error, String(error || 'Unknown error'))}`, ...(saleLineRefusalProvesNoCommit(error) ? { proven_uncommitted: true } : {}) }
+      return { mutationError: `${translateOr('sale_items_add_failed', 'Could not add the items')}: ${saleInvalidRateMessage(error) ?? getErrorMessage(error, String(error || 'Unknown error'))}`, ...(typeof (error as { code?: unknown } | null)?.code === 'string' ? { code: (error as { code: string }).code } : {}), ...(saleLineRefusalProvesNoCommit(error) ? { proven_uncommitted: true } : {}) }
     }
   }
 
@@ -1559,7 +1560,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
         await loadSales().catch(() => {})
         return { mutationError: `${(t('write_conflict_older_version') || '').replace('{entityLower}', t('sale') || 'sale')} ${t('sale_edit_redo_latest')}`, code: 'write_conflict', proven_uncommitted: true }
       }
-      return { mutationError: `${translateOr('sale_amend_failed', 'Could not update the sale')}: ${saleInvalidRateMessage(error) ?? getErrorMessage(error, String(error || 'Unknown error'))}`, ...(saleLineRefusalProvesNoCommit(error) ? { proven_uncommitted: true } : {}) }
+      return { mutationError: `${translateOr('sale_amend_failed', 'Could not update the sale')}: ${saleInvalidRateMessage(error) ?? getErrorMessage(error, String(error || 'Unknown error'))}`, ...(typeof (error as { code?: unknown } | null)?.code === 'string' ? { code: (error as { code: string }).code } : {}), ...(saleLineRefusalProvesNoCommit(error) ? { proven_uncommitted: true } : {}) }
     }
   }
 
@@ -2276,7 +2277,7 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
       // The review saw that sale as paid, so this page's copy of it is stale:
       // reload, and the next review names it.
       const unpaid = (error as { code?: string } | null)?.code === 'insufficient_payment_for_status'
-      if (unpaid) {
+      if (unpaid || (!retryRequest && directMutationRefusedBeforeWrite(error))) {
         savePendingBulkRequest(null)
         void loadSales(true)
       }
@@ -2317,8 +2318,9 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
       // (a committed original would have been answered with its receipt), so
       // the retry body is dropped and the list reloaded to show the status.
       const cancelled = saleCancelledRefusal(error)
-      if (cancelled) {
+      if (cancelled || (!retryRequest && directMutationRefusedBeforeWrite(error))) {
         savePendingBulkFieldRequest(null)
+        setBulkChangePrompt(null)
         void loadSales(true)
       }
       notify(cancelled ? cancelledRefusalMessage() : getErrorMessage(error, translateOr('update_failed', 'Unable to update the selected sales.')), 'error')

@@ -102,6 +102,7 @@ interface EditReturnModalProps {
   ret: ExistingReturn
   onClose: () => void
   onSuccess?: (result?: unknown) => void | Promise<void>
+  onReloadLatest?: () => void
   fmtUSD: MoneyFormatter
   notify: NotifyFn
 }
@@ -151,7 +152,7 @@ function isWriteConflict(error: unknown): boolean {
   return !!candidate?.conflict || candidate?.code === 'write_conflict'
 }
 
-export default function EditReturnModal({ ret, onClose, onSuccess, fmtUSD, notify }: EditReturnModalProps) {
+export default function EditReturnModal({ ret, onClose, onSuccess, onReloadLatest, fmtUSD, notify }: EditReturnModalProps) {
   const { user, t } = useApp()
   const T = (key: string, fallback: string): string => {
     const value = typeof t === 'function' ? t(key) : undefined
@@ -172,6 +173,7 @@ export default function EditReturnModal({ ret, onClose, onSuccess, fmtUSD, notif
     existingItems.map((item) => ({ ...item, returnQty: toNumber(item.quantity), stock_action: normalizeStockAction(item as { stock_action?: unknown; return_to_stock?: unknown }) })),
   )
   const [submitting,   setSubmitting]   = useState(false)
+  const [conflicted,   setConflicted]   = useState(false)
   const [pendingRequest, setPendingRequest] = useState(() => loadPendingDirectMutation<PreparedReturnUpdateRequest>('return-edit', user?.id, ret.id))
   const activePendingRequest = pendingDirectMutationForScope(pendingRequest, user?.id, ret.id)
     || loadPendingDirectMutation<PreparedReturnUpdateRequest>('return-edit', user?.id, ret.id)
@@ -286,7 +288,8 @@ export default function EditReturnModal({ ret, onClose, onSuccess, fmtUSD, notif
     } catch (error) {
       if (isWriteConflict(error)) {
         clearPendingRequest()
-        onSuccess?.()
+        setConflicted(true)
+        window.dispatchEvent(new CustomEvent('sync:update', { detail: { channel: 'returns' } }))
         return
       }
       if (!directMutationOutcomeIsUnknown(error) && (error as { code?: unknown } | null)?.code !== 'pending_request_persistence_failed') clearPendingRequest()
@@ -352,6 +355,12 @@ export default function EditReturnModal({ ret, onClose, onSuccess, fmtUSD, notif
             {activePendingRequest.needsReconciliation
               ? T('sale_bulk_discard_warning', 'Discard this retry? The previous change may already have succeeded. Check sales and history before starting another request.')
               : T('sale_bulk_pending', 'A previous request has an unknown outcome. Retry the original request or discard it before starting another.')}
+          </div>
+        ) : null}
+        {conflicted ? (
+          <div role="alert" data-return-edit-conflict="" className="mx-4 mt-4 flex items-start justify-between gap-2 rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-800 dark:border-red-800 dark:bg-red-900/20 dark:text-red-200">
+            <span>{T('write_conflict_older_version', 'Your screen was holding an older version of this {entityLower}.').replace('{entityLower}', T('return', 'return').toLowerCase())}</span>
+            {onReloadLatest ? <button type="button" disabled={submitting} onClick={onReloadLatest} className="shrink-0 rounded border border-red-300 px-2 py-1 font-semibold dark:border-red-700">{T('write_conflict_reload_latest', 'Reload latest')}</button> : null}
           </div>
         ) : null}
         <fieldset disabled={submitting || !!activePendingRequest} className="contents">

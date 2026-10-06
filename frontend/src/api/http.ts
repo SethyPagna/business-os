@@ -430,6 +430,11 @@ function createApiError(status: number, parsed: LooseRecord | null, text: string
   // English sentence: which cost pair was too far apart to be one cost (409
   // cost_outlier_review).
   error.costOutlier = parsed?.costOutlier || null
+  // A sale edit refused for its total (409 sale_header_quote_conflict) names
+  // the exact quote the Worker would accept and that nothing was written, so
+  // the sale detail can offer "Review the updated total" for that request.
+  error.header_quote = parsed?.header_quote || null
+  error.proven_uncommitted = parsed?.proven_uncommitted === true
   // A Library delete refused as still in use (409 forceable) names what uses
   // the file, so the dialog can switch to its locked / unlock-anyway form.
   error.usage = parsed?.usage || null

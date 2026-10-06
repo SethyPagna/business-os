@@ -375,7 +375,7 @@ runTest('sale amendments use explicit gated Edit states inside the compact rows'
   }
   assert.match(saleDetail, /canAmendThisSale && lineId > 0 && !editingLine[\s\S]{0,250}startAmendLine/, 'a permitted line must be plain until its Edit button is pressed')
   assert.match(saleDetail, /editingLine \? <input id=\{`amend-qty-\$\{lineId\}`\}/, 'quantity input must exist only in the open editor')
-  const linePriceEditorAt = saleDetail.indexOf('editingLine ? <div data-sale-line-editor=""')
+  const linePriceEditorAt = saleDetail.indexOf('editingLine ? <><div data-sale-line-editor=""')
   const linePriceEditor = saleDetail.slice(linePriceEditorAt, saleDetail.indexOf('</td>', linePriceEditorAt))
   assert.ok(linePriceEditorAt >= 0, 'the price and discount editor must expose one compact row')
   assert.match(linePriceEditor, /inline-flex min-w-max flex-nowrap items-center/, 'price and discount controls must not stack on desktop')

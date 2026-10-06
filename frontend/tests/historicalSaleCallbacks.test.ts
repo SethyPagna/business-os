@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { canonicalSaleReceipt, saleMoneyResponseFields, frozenSaleCheckoutBody, saleUsesSavedExchangeRate } from '../src/utils/saleMoneyV1.ts'
 import { saleLineEditPreview, saleRemovalSubtotal } from '../src/utils/saleLineEditor.ts'
+import { saleSubmitRefusalText } from '../src/api/saleSubmitErrors.ts'
 import fs from 'node:fs'
 import { transformSync, buildSync } from 'esbuild'
 import { createRequire } from 'node:module'
@@ -119,7 +120,7 @@ const staged: any[] = [], errors: string[] = []
 const header = { ...residualHeader, is_delivery: 1, delivery_fee_usd: 0, delivery_fee_paid_by: 'customer' }
 const env = {
   sale: header, items: [recordedLine, unrelatedUnknown], amendQtyText: '3', amendPriceText: '1.23454', amendDiscountType: null, amendDiscountText: '0',
-  saleLineEditPreview, saleRemovalSubtotal, sellingPriceCeilCent, sumMoney4,
+  saleLineEditPreview, saleSubmitRefusalText, saleRemovalSubtotal, sellingPriceCeilCent, sumMoney4,
   headerQuote: (subtotal: number, overrides?: any) => quoteSaleMutationHeader(header, subtotal, { tax_enabled: '0', tax_rate: '0' }, overrides),
   setAmendConfirm: (value: unknown) => staged.push(value), setAmendMutationError: (value: string) => errors.push(value),
   amendRequestIdRef: { current: '' }, createSettlementRequestId: () => 'historical-reviewed-id',
@@ -150,6 +151,10 @@ for (const [mode, text] of [['fixed', '0.1234'], ['percent', '33.3333']] as cons
 const beforeInvalid = staged.length
 callback('stageLineUpdate', { ...env, amendPriceText: '-0.000001' })(70, 2, 1.23454, null, 0, 0, 0, 'Old item')
 assert.equal(staged.length, beforeInvalid)
+assert.equal(errors.at(-1), 'money_precision_unavailable', 'an invalid number keeps the generic refusal')
+callback('stageLineUpdate', { ...env, amendDiscountType: 'fixed', amendDiscountText: '5' })(70, 2, 1.23454, null, 0, 0, 0, 'Old item')
+assert.equal(staged.length, beforeInvalid, 'a fixed discount over the recorded price is not staged')
+assert.equal(errors.at(-1), 'sale_discount_exceeds_price', 'the actual kernel refusal reads as its pack sentence, not the generic precision error')
 callback('stageLineUpdate', { ...env, items: [nullTotalLine] })(70, 2, 1.23454, null, 0, 0, 0, 'Old item')
 assert.equal(staged.at(-1).request.expected_recorded_line_total_usd, 2.4691)
 assert.match(staged.at(-1).summary, /sale_recorded_unit_fallback/)

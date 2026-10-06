@@ -191,7 +191,7 @@ function actualDetailCallback(name: string, input: Record<string, unknown>) {
 const edits: any[] = [], editErrors: string[] = []
 const editEnv = {
   amendQtyText: '2', amendPriceText: '9.6667', amendDiscountType: null, amendDiscountText: '0',
-  items: [capturedRow], sale: capturedSale, saleLineEditPreview, sellingPriceCeilCent,
+  items: [capturedRow], sale: capturedSale, saleLineEditPreview, saleSubmitRefusalText, sellingPriceCeilCent,
   headerQuote: (subtotal: number) => quoteSaleMutationHeader(capturedSale, subtotal, { tax_enabled: '0', tax_rate: '0' }),
   amendRequestIdRef: { current: '' }, createSettlementRequestId: () => 'edit-request',
   setAmendMutationError: (value: string) => editErrors.push(value), setAmendConfirm: (value: unknown) => edits.push(value),
