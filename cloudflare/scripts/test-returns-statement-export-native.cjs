@@ -7,7 +7,11 @@ const root = path.join(__dirname, '..')
 const source = fs.readFileSync(path.join(root, 'src/lib/returnExportWindow.ts'), 'utf8')
 const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
 const loaded = { exports: {} }
-new Function('exports', 'module', compiled)(loaded.exports, loaded)
+// returnExportWindow shares the one calendar-day validator with the other windows, so give it the real module.
+const windowSource = ts.transpileModule(fs.readFileSync(path.join(root, 'src/lib/businessDateWindow.ts'), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
+const windowModule = { exports: {} }
+new Function('exports', 'module', windowSource)(windowModule.exports, windowModule)
+new Function('exports', 'module', 'require', compiled)(loaded.exports, loaded, id => { if (id === './businessDateWindow') return windowModule.exports; throw new Error('unexpected require ' + id) })
 const { returnExportWindow } = loaded.exports
 const { returnsStatementParams } = require('../../frontend/src/utils/returnsExportWindow.ts')
 

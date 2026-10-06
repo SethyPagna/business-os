@@ -46,10 +46,12 @@ function loadModule(relPath, requireShim) {
 }
 
 const batchCode = loadModule('lib/batchCode.ts', require)
+const businessDateWindow = loadModule('lib/businessDateWindow.ts', require)
 const sqlBinding = loadModule('lib/sqlBinding.ts', require)
 const moneyPrecision = loadModule('lib/moneyPrecision.ts', require)
 const productBatches = loadModule('lib/productBatches.ts', (id) => {
   if (id === './batchCode') return batchCode
+  if (id === './businessDateWindow') return businessDateWindow
   if (id === './sqlBinding') return sqlBinding
   if (id === './moneyPrecision') return moneyPrecision
   if (id === './receivingBranch') return loadModule('lib/receivingBranch.ts', require)

@@ -62,7 +62,10 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b)
   const parser = src.slice(src.indexOf('function dateRange('), src.indexOf('function emptySummary('))
   assert.ok(parser.includes('query.rangeScope'), 'actual Worker date parser is located')
   let day = '2026-09-11'
-  const parse = new Function('businessToday', `${transpile(parser)}; return dateRange`)(() => day)
+  // dateRange validates its dates with the shared isIsoCalendarDay (lib/businessDateWindow.ts) -- load the real one.
+  const realWindow = { exports: {} }
+  new Function('exports', 'module', transpile(fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'businessDateWindow.ts'), 'utf8')))(realWindow.exports, realWindow)
+  const parse = new Function('businessToday', 'isIsoCalendarDay', `${transpile(parser)}; return dateRange`)(() => day, realWindow.exports.isIsoCalendarDay)
   const defaultQueries = [{}, { startDate: '', endDate: '' }, { rangeScope: 'all' },
     { rangeScope: 'all', startDate: '' }, { rangeScope: 'all', endDate: '' },
     { rangeScope: '', startDate: '', endDate: '' }, { rangeScope: 'custom', startDate: '', endDate: '' }]
@@ -200,7 +203,7 @@ const NEW_TODAY = `date(created_at, '+7 hours') = date('now', '+7 hours') AND cr
 
   const OUT_OF_STOCK = `p.is_active = 1 AND COALESCE(stock_quantity, 0) <= COALESCE(out_of_stock_threshold, 0)`
   const LOW_STOCK = `p.is_active = 1 AND COALESCE(stock_quantity, 0) <= COALESCE(low_stock_threshold, 10) AND COALESCE(stock_quantity, 0) > COALESCE(out_of_stock_threshold, 0)`
-  const EXPIRING = `p.is_active = 1 AND expiry_date IS NOT NULL AND date(expiry_date) <= date('now', '+' || COALESCE(expiry_alert_days, 30) || ' day')`
+  const EXPIRING = `p.is_active = 1 AND expiry_date IS NOT NULL AND date(expiry_date) <= date('now', '+7 hours', '+' || COALESCE(expiry_alert_days, 30) || ' day')`
 
   check('alerts: out-of-stock list is catalog-wide -- a product with no sale in the range is STILL listed',
     same(pick(OUT_OF_STOCK), [1, 2]))

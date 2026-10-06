@@ -143,7 +143,7 @@ function loadReal(relPath, requireOverrides = {}) {
 const batchCode = loadReal('lib/batchCode.ts')
 
 // Real, pure -- no stubbing needed.
-const productBatches = loadReal('lib/productBatches.ts', { './receivingBranch': loadReal('lib/receivingBranch.ts'), './db': { getDb: () => db }, './batchCode': batchCode, './sqlBinding': loadReal('lib/sqlBinding.ts'), './moneyPrecision': loadReal('lib/moneyPrecision.ts') })
+const productBatches = loadReal('lib/productBatches.ts', { './receivingBranch': loadReal('lib/receivingBranch.ts'), './db': { getDb: () => db }, './batchCode': batchCode, './businessDateWindow': loadReal('lib/businessDateWindow.ts'), './sqlBinding': loadReal('lib/sqlBinding.ts'), './moneyPrecision': loadReal('lib/moneyPrecision.ts') })
 const permissions = loadReal('lib/permissions.ts')
 const acquisitionCostAccess = loadReal('lib/acquisitionCostAccess.ts', { './permissions': permissions })
 // P4-3: real, pure -- used by the new damaged-return-disposition tests below

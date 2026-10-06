@@ -98,6 +98,7 @@ const relMap = {
   './productBatches': () => loadReal('lib/productBatches.ts'),
   './productBatches.ts': () => loadReal('lib/productBatches.ts'),
   './batchCode': () => loadReal('lib/batchCode.ts'),
+  './businessDateWindow': () => loadReal('lib/businessDateWindow.ts'),
   './batchCode.ts': () => loadReal('lib/batchCode.ts'),
   // Real, not stubbed: its chunking is what keeps these statements inside
   // D1's 100-bound-parameter limit, so a stub would test the stub.

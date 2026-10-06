@@ -73,11 +73,12 @@ function loadReal(relPath, requireOverrides = {}) {
 }
 
 const batchCode = loadReal('lib/batchCode.ts')
+const businessDateWindow = loadReal('lib/businessDateWindow.ts')
 const moneyPrecision = loadReal('lib/moneyPrecision.ts')
 const sqlBinding = loadReal('lib/sqlBinding.ts')
 const productBatches = loadReal('lib/productBatches.ts', {
   './db': {},
-  './batchCode': batchCode,
+  './batchCode': batchCode, './businessDateWindow': businessDateWindow,
   './moneyPrecision': moneyPrecision,
   './sqlBinding': sqlBinding,
   './receivingBranch': loadReal('lib/receivingBranch.ts'),

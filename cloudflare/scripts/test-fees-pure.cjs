@@ -123,10 +123,16 @@ check('normalizeDate preserves ISO and day-first typed dates, and falls back to 
   assert.strictEqual(normalizeDate('03/09/2026'), '2026-09-03')
   assert.notStrictEqual(normalizeDate('12/25/2026'), '2026-12-25', 'month-first input must not be guessed')
   assert.strictEqual(normalizeDate('2026-08-31T17:30:00Z'), '2026-09-01', 'UTC evening maps to the next Cambodia calendar day')
-  const fallback = normalizeDate('not-a-date')
-  assert.ok(!Number.isNaN(Date.parse(fallback)), 'fallback should be a valid ISO date')
+  // An UNREADABLE typed date is refused (null -> the route answers 400), no longer replaced by today.
+  assert.strictEqual(normalizeDate('not-a-date'), null, 'a mistyped date must not silently become today')
+  assert.strictEqual(normalizeDate('13/13/2026'), null, 'month 13 is refused')
+  assert.strictEqual(normalizeDate('2026-13-45T10:00:00Z'), null, 'an impossible timestamp is refused')
+  assert.strictEqual(normalizeDate(20260906), null, 'a non-text value is refused')
+  assert.strictEqual(normalizeDate('25/12/2026'), '2026-12-25', 'a day past the 12th proves the day-first reading')
+  // An ABSENT or blank date still means "booked today" -- the business day.
   const fallbackEmpty = normalizeDate('')
   assert.ok(!Number.isNaN(Date.parse(fallbackEmpty)), 'empty input should fall back to a valid date')
+  assert.ok(!Number.isNaN(Date.parse(normalizeDate(undefined))), 'an absent date should fall back to a valid date')
 })
 
 check('normalizeFeeLabel trims, collapses whitespace, empties to null', () => {

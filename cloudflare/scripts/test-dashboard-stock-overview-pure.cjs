@@ -74,6 +74,7 @@ function modules(cdb, { planTier = load('lib/planTier.ts'), failCompute = null }
     './familyStockStats': failCompute ? { ...familyStockStats, getFamilyStockOverview: failCompute } : familyStockStats,
     './lowStockSettings': lowStockSettings,
     './planTier': planTier,
+    './businessDateWindow': load('lib/businessDateWindow.ts'),
   })
   return { familyStockStats, cache, overview, lowStockSettings }
 }
@@ -189,7 +190,8 @@ async function main() {
       INSERT INTO products (name, is_active, stock_quantity) SELECT 'bulk ' || value, 1, 5 FROM json_each('[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20]');`)
     seedExpiry(before)
     const { DASHBOARD_EXPIRY_WHERE_SQL } = modules(counting(before)).overview
-    const LIST = `SELECT id, name, category, unit, expiry_date, CAST(julianday(expiry_date) - julianday('now') AS INTEGER) AS days_until_expiry
+    const { DASHBOARD_DAYS_UNTIL_EXPIRY_SQL } = modules(counting(before)).overview
+    const LIST = `SELECT id, name, category, unit, expiry_date, ${DASHBOARD_DAYS_UNTIL_EXPIRY_SQL} AS days_until_expiry
       FROM products p WHERE ${DASHBOARD_EXPIRY_WHERE_SQL} ORDER BY date(expiry_date) ASC LIMIT 10`
     const COUNT = `SELECT COUNT(*) AS count FROM products p WHERE ${DASHBOARD_EXPIRY_WHERE_SQL}`
     const plan = (db, sql) => db.db.prepare(`EXPLAIN QUERY PLAN ${sql}`).all().map((row) => row.detail).join(' | ')
@@ -283,9 +285,10 @@ async function main() {
     assert.equal(other.inventory.in_stock, 0)
   })
 
-  await check('CACHE: a products bump, a low-stock config change and the UTC day each invalidate', async () => {
+  await check('CACHE: a products bump, a low-stock config change and the BUSINESS day each invalidate', async () => {
     const w = cacheWorld()
-    w.setClock(Date.UTC(2026, 9, 5, 23, 59, 45))
+    // 16:59:45 UTC is 23:59:45 on 5 Oct in Cambodia; 20 s later it is 6 Oct there.
+    w.setClock(Date.UTC(2026, 9, 5, 16, 59, 45))
     const mod = w.isolate()
     await mod.overview.loadDashboardStockOverview(w.env, w.ctx)
     w.cdb.log.length = 0
@@ -299,9 +302,16 @@ async function main() {
     w.cdb.log.length = 0
     await mod.overview.loadDashboardStockOverview(w.env, w.ctx)
     assert.equal(heavy(w.cdb), 0, 'CONTROL: same key, same day, inside the TTL = hit')
+    w.tick(20 * 1000) // crosses 00:00 Cambodia (17:00 UTC), still inside the 30 s TTL
+    await mod.overview.loadDashboardStockOverview(w.env, w.ctx)
+    assert.equal(heavy(w.cdb), 3, 'new BUSINESS day (the expiry window moves) even inside the TTL')
+    // Control: the UTC midnight is NOT a boundary any more -- the expiry window does not move there.
+    w.setClock(Date.UTC(2026, 9, 5, 23, 59, 45))
+    await mod.overview.loadDashboardStockOverview(w.env, w.ctx)
+    w.cdb.log.length = 0
     w.tick(20 * 1000) // crosses 00:00 UTC, still inside the 30 s TTL
     await mod.overview.loadDashboardStockOverview(w.env, w.ctx)
-    assert.equal(heavy(w.cdb), 3, 'new UTC day (the expiry window moves) even inside the TTL')
+    assert.equal(heavy(w.cdb), 0, 'crossing 00:00 UTC is a cache hit: the business day did not change')
   })
 
   await check('CACHE: TTL is plan-tiered -- Paid 30 s, Free 300 s (Free = fewer rows)', async () => {

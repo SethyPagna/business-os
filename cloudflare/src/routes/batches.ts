@@ -9,7 +9,8 @@ import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from '../lib/cache'
 import { getTrackedProductIds, listBatchesForProduct, parseReceiptSellingPrice, planReceiptSellingPrice, receiveBatchStock, type ReceiptSellingPriceRow } from '../lib/productBatches'
 import { listOpenDamagedLots } from '../lib/returnsStock'
-import { dateToBatchCode, normalizeTypedDate } from '../lib/batchCode'
+import { dateToBatchCode, readTypedDateField } from '../lib/batchCode'
+import { businessToday } from '../lib/businessDateWindow'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
 import { appendReceiptNotes, FREE_GOODS_REASON_NOTE, parseFreeQuantity, stockReceiptGateCode, stockReceiptGateMessage } from '../lib/stockReceiptGate'
 import { effectiveUnitCost } from '../lib/stockSessionMath'
@@ -235,6 +236,26 @@ export async function runReceiveBatchAction(c: BatchesContext, body: ReceiveBody
   )
 }
 
+// The one 400 for a typed date field that does not read as a date. `code` is the
+// stable machine key (the date field itself refuses the same input with its
+// translated date_entry_invalid text); `error` names the order for anyone
+// calling the API directly.
+function invalidDateResponse(c: BatchesContext, field: string): Response {
+  return c.json({ error: `${field} must be a valid date (dd/mm/yyyy)`, code: 'invalid_date', field }, 400)
+}
+
+// A PATCHed date field. A value that reads as a date is stored in ISO form. A value that does
+// NOT read but equals what the row already holds is passed through untouched: the
+// editor re-sends a row's present values, and a legacy row carrying text this reader
+// refuses (a year-only expiry such as '2029') must stay editable -- the only way to
+// fix it would otherwise be blocked by the very value that needs fixing.
+function readPatchDate(raw: unknown, stored: string | null | undefined): { ok: true; value: string | null } | { ok: false } {
+  const typed = readTypedDateField(raw)
+  if (!typed.invalid) return { ok: true, value: typed.value }
+  const unchanged = String(raw).trim() !== '' && String(raw).trim() === String(stored ?? '').trim()
+  return unchanged ? { ok: true, value: String(stored).trim() } : { ok: false }
+}
+
 // `markWritten` is the receipt guard's write barrier -- see the same argument
 // on runAdjustActionKernel and lib/stockMutationReceipt.ts's header.
 async function runReceiveBatchActionKernel(c: BatchesContext, body: ReceiveBody, markWritten: () => Promise<void>): Promise<Response> {
@@ -268,7 +289,16 @@ async function runReceiveBatchActionKernel(c: BatchesContext, body: ReceiveBody,
   // Paid vs on-credit (migration 0065). A credit purchase without a due
   // date has no reminder to fire, which defeats the point of recording it.
   const paymentStatus = body.payment_status === 'paid' || body.payment_status === 'credit' ? body.payment_status : null
-  const creditDueDate = String(body.credit_due_date || '').slice(0, 10) || null
+  // The three typed dates of a receipt are read day-first and refused when they do
+  // not read as a date. They used to be stored as sent (expiry, due date, sliced to
+  // 10 characters) or silently replaced by today (received date).
+  const creditDue = readTypedDateField(body.credit_due_date)
+  if (creditDue.invalid) return invalidDateResponse(c, 'credit_due_date')
+  const expiry = readTypedDateField(body.expiry_date)
+  if (expiry.invalid) return invalidDateResponse(c, 'expiry_date')
+  const receivedField = readTypedDateField(body.received_date)
+  if (receivedField.invalid) return invalidDateResponse(c, 'received_date')
+  const creditDueDate = creditDue.value
   if (paymentStatus === 'credit' && !creditDueDate) {
     return c.json({ error: 'A Not Yet Paid purchase needs its due date — that is what the admin reminder is built on.' }, 400)
   }
@@ -326,8 +356,8 @@ async function runReceiveBatchActionKernel(c: BatchesContext, body: ReceiveBody,
       productId,
       branchId,
       quantity,
-      expiryDate: body.expiry_date || null,
-      receivedDate: body.received_date || null,
+      expiryDate: expiry.value,
+      receivedDate: receivedField.value,
       batchId: explicitBatchId,
       notes: body.notes || null,
       supplierId: Number.isFinite(Number(body.supplier_id)) && Number(body.supplier_id) > 0 ? Number(body.supplier_id) : null,
@@ -411,7 +441,7 @@ async function runReceiveBatchActionKernel(c: BatchesContext, body: ReceiveBody,
       product_name: product.name,
       branch_id: branchId,
       quantity,
-      expiry_date: body.expiry_date || null,
+      expiry_date: expiry.value,
       lot_code: lotCode,
       reason,
       ...(freeQuantity > 0 ? { free_quantity: freeQuantity, paid_quantity: paidQuantity } : {}),
@@ -444,7 +474,8 @@ app.patch('/:id', async (c) => {
   if (!canEditAcquisitionCosts(user) && Object.prototype.hasOwnProperty.call(body, 'unit_cost_usd')) {
     return c.json({ error: 'Cost-entry permission is required to change stored receipt costs.', code: 'product_cost_edit_required' }, 403)
   }
-  const existing = await db.prepare('SELECT id, variant_product_id, updated_at FROM product_batches WHERE id = ?').get<{ id: number; variant_product_id: number; updated_at: string | null }>([id])
+  const existing = await db.prepare('SELECT id, variant_product_id, updated_at, received_at, expiry_date, credit_due_date FROM product_batches WHERE id = ?')
+    .get<{ id: number; variant_product_id: number; updated_at: string | null; received_at: string | null; expiry_date: string | null; credit_due_date: string | null }>([id])
   if (!existing) return c.json({ error: 'Received date not found' }, 404)
 
   // Optimistic-concurrency guard, the same one products/contacts/sales use.
@@ -462,20 +493,33 @@ app.patch('/:id', async (c) => {
 
   const updates: string[] = []
   const params: Record<string, unknown> = { id }
-  if (body.expiry_date !== undefined) { updates.push('expiry_date = @expiry_date'); params.expiry_date = body.expiry_date || null }
+  if (body.expiry_date !== undefined) {
+    const expiry = readPatchDate(body.expiry_date, existing.expiry_date)
+    if (!expiry.ok) return invalidDateResponse(c, 'expiry_date')
+    updates.push('expiry_date = @expiry_date'); params.expiry_date = expiry.value
+  }
   if (body.notes !== undefined) { updates.push('notes = @notes'); params.notes = body.notes || null }
   const deactivating = body.is_active !== undefined && !body.is_active
   if (body.is_active !== undefined) { updates.push('is_active = @is_active'); params.is_active = body.is_active ? 1 : 0 }
   // The displayed lot code follows its received date, but batch_key is a
   // durable receipt identity. Multiple prices can share a date; changing
   // display metadata must neither collapse those lots nor change replay keys.
-  if (body.received_at !== undefined) {
+  // A legacy row whose stored received_at is NOT the canonical ISO date (a slash
+  // string the pre-0077 importer wrote month-first) is re-sent verbatim by the
+  // editor. Read day-first, '03/04/2026' would silently flip to 3 April and rewrite
+  // the lot code, so an unchanged non-canonical value is left alone.
+  const storedReceived = String(existing.received_at ?? '').trim()
+  const sentReceived = String(body.received_at ?? '').trim()
+  const legacyReceivedUnchanged = sentReceived !== '' && !/^\d{4}-\d{2}-\d{2}/.test(storedReceived)
+    && (sentReceived === storedReceived || sentReceived === storedReceived.slice(0, 10))
+  if (body.received_at !== undefined && !legacyReceivedUnchanged) {
     // This value comes from the operator-facing editor, whose display/input
     // convention is day-first. Ambiguous 03/09/2026 must therefore remain
     // September 3, matching the frontend lineage date shown to the user.
-    const iso = normalizeTypedDate(body.received_at) || (body.received_at ? null : new Date().toISOString().slice(0, 10))
-    if (body.received_at && !iso) return c.json({ error: 'received_at is not a valid date (use dd/mm/yyyy)' }, 400)
-    const resolvedIso = iso || new Date().toISOString().slice(0, 10)
+    const typedReceived = readTypedDateField(body.received_at)
+    if (typedReceived.invalid) return c.json({ error: 'received_at is not a valid date (use dd/mm/yyyy)', code: 'invalid_date', field: 'received_at' }, 400)
+    // A blank received date means "received today" -- the BUSINESS day, not the UTC day.
+    const resolvedIso = typedReceived.value || businessToday()
     const code = dateToBatchCode(resolvedIso) as string
     updates.push('received_at = @received_at', 'lot_code = @lot_code')
     params.received_at = resolvedIso
@@ -487,14 +531,18 @@ app.patch('/:id', async (c) => {
   const bodyExtra = body as typeof body & { payment_status?: string | null; credit_due_date?: string | null; supplier_name?: string | null; supplier_id?: number | null; unit_cost_usd?: number | null }
   if (bodyExtra.payment_status !== undefined) {
     const nextStatus = bodyExtra.payment_status === 'paid' || bodyExtra.payment_status === 'credit' ? bodyExtra.payment_status : null
-    const nextDue = String(bodyExtra.credit_due_date || '').slice(0, 10) || null
+    const dueRead = readPatchDate(bodyExtra.credit_due_date, existing.credit_due_date)
+    if (!dueRead.ok) return invalidDateResponse(c, 'credit_due_date')
+    const nextDue = dueRead.value
     if (nextStatus === 'credit' && !nextDue) return c.json({ error: 'A Not Yet Paid purchase needs its due date.' }, 400)
     updates.push('payment_status = @payment_status', 'credit_due_date = @credit_due_date')
     params.payment_status = nextStatus
     params.credit_due_date = nextStatus === 'credit' ? nextDue : null
   } else if (bodyExtra.credit_due_date !== undefined) {
+    const dueRead = readPatchDate(bodyExtra.credit_due_date, existing.credit_due_date)
+    if (!dueRead.ok) return invalidDateResponse(c, 'credit_due_date')
     updates.push('credit_due_date = @credit_due_date')
-    params.credit_due_date = String(bodyExtra.credit_due_date || '').slice(0, 10) || null
+    params.credit_due_date = dueRead.value
   }
   if (bodyExtra.supplier_name !== undefined) {
     updates.push('supplier_name = @supplier_name', 'supplier_id = @supplier_id')

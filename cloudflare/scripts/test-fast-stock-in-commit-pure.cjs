@@ -169,7 +169,7 @@ const authStub = { requireAuth: async (c, next) => { await next() } }
 
 const inventoryMod = loadReal('routes/inventory.ts', {
   '../lib/receivingBranch': receivingBranchMod,
-  '../lib/continuousReadWindow': loadReal('lib/continuousReadWindow.ts'),
+  '../lib/continuousReadWindow': loadReal('lib/continuousReadWindow.ts', { './businessDateWindow': loadReal('lib/businessDateWindow.ts') }),
   '../lib/db': dbOverride,
   '../lib/auth': authStub,
   '../lib/audit': auditStub,

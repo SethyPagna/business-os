@@ -49,7 +49,7 @@ const inventory = loadTs('routes/inventory.ts', {
   hono: { Hono },
   '../lib/businessDateWindow': { localDateAtOrAfter, localDateAtOrBefore },
   '../lib/productSalesLedger': productSalesLedger,
-  '../lib/continuousReadWindow': fs.existsSync(path.join(srcRoot, 'lib/continuousReadWindow.ts')) ? loadTs('lib/continuousReadWindow.ts') : {},
+  '../lib/continuousReadWindow': fs.existsSync(path.join(srcRoot, 'lib/continuousReadWindow.ts')) ? loadTs('lib/continuousReadWindow.ts', { './businessDateWindow': loadTs('lib/businessDateWindow.ts') }) : {},
   '../index': {},
 })
 const familyPagination = loadTs('lib/familyPagination.ts')

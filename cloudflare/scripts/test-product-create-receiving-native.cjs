@@ -41,7 +41,7 @@ const DB = {
   },
 }
 const env = { DB }
-const real = new Set(['acquisitionCostAccess', 'productWrites', 'moneyPrecision', 'productMerge', 'productIdentity', 'productDetailRule', 'db', 'sqlBinding', 'searchMatch', 'batchCode', 'actorSnapshot', 'pendingActions', 'reviewGate', 'reviewApply', 'conflictControl', 'renameCascade', 'schemaProbe', 'receivingBranch', 'businessMaintenanceGuard', 'media', 'audit', 'permissions', 'productImagePermission', 'importImageMatch'])
+const real = new Set(['acquisitionCostAccess', 'productWrites', 'moneyPrecision', 'productMerge', 'productIdentity', 'productDetailRule', 'db', 'sqlBinding', 'searchMatch', 'batchCode', 'businessDateWindow', 'actorSnapshot', 'pendingActions', 'reviewGate', 'reviewApply', 'conflictControl', 'renameCascade', 'schemaProbe', 'receivingBranch', 'businessMaintenanceGuard', 'media', 'audit', 'permissions', 'productImagePermission', 'importImageMatch'])
 const unavailable = name => new Proxy(function () {}, { get: (_target, property) => unavailable(`${name}.${String(property)}`), apply: () => { throw new Error(`Unexpected fixture dependency: ${name}`) }, construct: () => { throw new Error(`Unexpected fixture dependency: ${name}`) } })
 const services = {
   undoAppliers: { registerMergeFold: () => {}, registerProductMergeGroupRedo: () => {}, MERGE_REPARENT_TABLES: [] },
@@ -91,13 +91,14 @@ async function run(){
   assert.equal(res.status,409,JSON.stringify(res));assert.equal(res.body.code,'receiving_branch_inactive');assert.equal(snapshot(),before)
  }
  pass('actual direct and variant handlers refuse inactive/malformed destinations without writes')
- const started=new Date().toISOString().slice(0,10)
+ // The default lot is received on the BUSINESS day (Cambodia, UTC+7), stored as a date-only ISO value.
+ const started=new Date(Date.now()+7*60*60*1000).toISOString().slice(0,10)
  let res=await request(products,'POST','/',{name:'Atomic direct',branch_id:2,stock_quantity:5,cost_price_usd:1.2345,client_request_id:'untrusted',id:9000,image_gallery:['https://example.invalid/a','https://example.invalid/b']})
  assert.equal(res.status,200,JSON.stringify(res));const id=res.body.id
  assert.notEqual(id,9000);assert.match(res.body.item.client_request_id,/^product-create:/);assert.notEqual(res.body.item.client_request_id,'untrusted')
  assert.deepEqual(raw.prepare('SELECT branch_id,quantity FROM branch_stock WHERE product_id=? ORDER BY branch_id').all(id).map(r=>({...r})),[{branch_id:2,quantity:5},{branch_id:3,quantity:0}])
  const lot=raw.prepare('SELECT * FROM product_batches WHERE variant_product_id=?').get(id)
- assert.equal(lot.batch_key,`initial:${id}`);assert.equal(lot.batch_number,1);assert.equal(lot.received_at.slice(0,10),started)
+ assert.equal(lot.batch_key,`initial:${id}`);assert.equal(lot.batch_number,1);assert.equal(lot.received_at,started);assert.equal(lot.lot_code,started.slice(5,7)+started.slice(8,10)+started.slice(0,4),'lot code derives from the same business day')
  assert.equal(lot.unit_cost_usd,null);assert.equal(lot.received_quantity,null);assert.equal(lot.received_cost_usd,null)
  assert.equal(raw.prepare('SELECT quantity FROM branch_batch_stock WHERE batch_id=?').get(lot.id).quantity,5)
  assert.equal(raw.prepare('SELECT COUNT(*) n FROM product_images WHERE product_id=?').get(id).n,2)

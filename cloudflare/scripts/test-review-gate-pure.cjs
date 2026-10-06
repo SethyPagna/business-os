@@ -210,7 +210,7 @@ const productWrites = loadReal('lib/productWrites.ts', { './schemaProbe': schema
   './moneyPrecision': loadReal('lib/moneyPrecision.ts'),
   ...dbStub,
   './media': { sanitizeMediaList: (list) => (Array.isArray(list) ? list : []) },
-  './batchCode': batchCode,
+  './batchCode': batchCode, './businessDateWindow': loadReal('lib/businessDateWindow.ts'),
   './searchMatch': searchMatch,
   // importImageMatch.ts is pure (no D1/Env dependency) -- productWrites.ts's
   // syncProductImageGallery now derives its slice cap through it

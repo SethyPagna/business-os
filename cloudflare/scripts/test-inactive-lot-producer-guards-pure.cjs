@@ -82,6 +82,7 @@ function seedLot(fixture, { active = 1, quantity = 0 } = {}) {
 
 let routeFixture
 const batchCode = loadReal('lib/batchCode.ts')
+const businessDateWindow = loadReal('lib/businessDateWindow.ts')
 const conflictControl = loadReal('lib/conflictControl.ts')
 const costPermissions = loadReal('lib/permissions.ts')
 const acquisitionCostAccess = loadReal('lib/acquisitionCostAccess.ts', { './permissions': costPermissions })
@@ -97,7 +98,7 @@ const batchRoute = loadReal('routes/batches.ts', {
   '../lib/cache': { bumpVersion: async () => {} },
   '../lib/productBatches': { getTrackedProductIds: async () => [], listBatchesForProduct: async () => [], receiveBatchStock: async () => { throw new Error('not used') } },
   '../lib/returnsStock': { listOpenDamagedLots: async () => [] },
-  '../lib/batchCode': batchCode,
+  '../lib/batchCode': batchCode, '../lib/businessDateWindow': businessDateWindow,
   '../lib/conflictControl': conflictControl,
   '../lib/stockReceiptGate': { appendReceiptNotes: (value) => value, FREE_GOODS_REASON_NOTE: '', stockReceiptGateCode: () => null, stockReceiptGateMessage: () => '' },
   '../lib/stockSessionMath': loadReal('lib/stockSessionMath.ts', { './moneyPrecision': moneyPrecision }),
@@ -159,13 +160,13 @@ const saleCreationSnapshot = loadReal('lib/saleCreationSnapshot.ts', {
 })
 const stockActionCommit = loadReal('lib/stockActionCommit.ts', {
   './db': {},
-  './batchCode': batchCode,
+  './batchCode': batchCode, './businessDateWindow': businessDateWindow,
   './searchMatch': searchMatch,
   './stockReceiptGate': stockReceiptGate,
   './branchRoleGuards': branchRoleGuards,
   './saleCreationSnapshot': saleCreationSnapshot,
   './productBatches': loadReal('lib/productBatches.ts', {
-    './batchCode': batchCode,
+    './batchCode': batchCode, './businessDateWindow': businessDateWindow,
     './receivingBranch': receivingBranch,
     './sqlBinding': loadReal('lib/sqlBinding.ts'),
   }),

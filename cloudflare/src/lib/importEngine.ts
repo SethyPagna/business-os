@@ -85,7 +85,7 @@ import { canonicalizePhone } from './phone'
 import { bumpVersion } from './cache'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { VALID_SALE_STATUSES, RETURN_STATUSES, normalizeSaleStatus } from './salesStatus'
-import { dateToBatchCode, normalizeToIsoDate, readBatchDateCell } from './batchCode'
+import { dateToBatchCode, normalizeToIsoDate, readBatchDateCell, readTypedDateField } from './batchCode'
 import { businessToday, localDateOf } from './businessDateWindow'
 import { normalizeSearchText, compactSearchText } from './searchMatch'
 import { getActionTier, hasPermission, isActionBlocked } from './permissions'
@@ -1731,9 +1731,24 @@ export async function classifyProducts(
     data.discount_amount_khr = importDiscountAmountKhr
     data.discount_label = str(row.discount_label) || null
     data.discount_badge_color = str(row.discount_badge_color) || '#e11d48'
-    data.discount_starts_at = str(row.discount_starts_at) || null
-    data.discount_ends_at = str(row.discount_ends_at) || null
-    data.expiry_date = str(row.expiry_date) || null
+    // The three product date columns are read like every import date (day-first slash,
+    // ISO always) and stored in ISO form. They used to be stored as the raw cell, so a
+    // "25/12/2026" expiry reached products.expiry_date as text no date() call can read and
+    // the product silently never appeared in the expiry alert. An unreadable cell is NOT
+    // stored (a bad date is worse than none) and is reported on the row.
+    const productDateWarnings: ImportRowWarning[] = []
+    const productDate = (field: 'discount_starts_at' | 'discount_ends_at' | 'expiry_date'): string | null => {
+      const raw = str(row[field])
+      const read = readTypedDateField(raw, { keepTime: field !== 'expiry_date' })
+      if (read.invalid) {
+        productDateWarnings.push({ kind: 'other', message: `${field} "${raw}" is not a readable dd/mm/yyyy or yyyy-mm-dd date; it was not imported.` })
+        return null
+      }
+      return read.value
+    }
+    data.discount_starts_at = productDate('discount_starts_at')
+    data.discount_ends_at = productDate('discount_ends_at')
+    data.expiry_date = productDate('expiry_date')
     // The batch/"Created" date a newly-imported product's initial stock
     // arrived -- separate from expiry_date (when it goes bad). Always
     // resolves to a real date: an explicit value from the CSV, or today's
@@ -1803,7 +1818,7 @@ export async function classifyProducts(
     // remains what's written -- this only makes the substitution visible.
     const rawStockValue = row.stock_quantity ?? row.quantity
     const stockWasNegative = str(rawStockValue) !== '' && parseImportNumericValue(rawStockValue, 0, { allowNegative: true, field: 'stock_quantity' }) < 0
-    const rowWarnings: ImportRowWarning[] = []
+    const rowWarnings: ImportRowWarning[] = [...productDateWarnings]
     if (stockWasNegative) {
       // Strip a leading apostrophe purely for display -- a common Excel
       // "force this cell to text" artifact (seen on real files as `'-2`)

@@ -17,7 +17,8 @@ new Function('exports', 'require', 'module', ts.transpileModule(
 ).outputText)(catalogCostModule.exports,
   request => request === './moneyPrecision' ? moneyPrecision : require(request), catalogCostModule)
 
-function compileNamedFunctions(source, names) {
+// `scope` names free variables the extracted functions use (their module imports were not extracted).
+function compileNamedFunctions(source, names, scope = {}) {
   const ast = ts.createSourceFile('source.ts', source, ts.ScriptTarget.Latest, true)
   const declarations = ast.statements.filter((node) => ts.isFunctionDeclaration(node) && names.includes(node.name?.text))
   assert.equal(declarations.length, names.length, `expected declarations: ${names.join(', ')}`)
@@ -25,7 +26,7 @@ function compileNamedFunctions(source, names) {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
   }).outputText
   const mod = { exports: {} }
-  new Function('exports', 'require', 'module', output)(mod.exports, require, mod)
+  new Function('exports', 'require', 'module', ...Object.keys(scope), output)(mod.exports, require, mod, ...Object.values(scope))
   return mod.exports
 }
 
@@ -55,6 +56,7 @@ function loadProductWrites(db) {
     if (request === './db') return { getDb: () => db }
     if (request === './media') return { sanitizeMediaList: (value) => Array.isArray(value) ? value : [] }
     if (request === './batchCode') return { dateToBatchCode: () => '11092026' }
+    if (request === './businessDateWindow') return { businessToday: () => '2026-11-09' } // the same day the stubbed lot code above names
     if (request === './searchMatch') return { normalizeSearchText: String, compactSearchText: String }
     if (request === './importImageMatch') return { MAX_IMAGES_PER_PRODUCT: 3 }
     if (request === './schemaProbe') return {
@@ -124,7 +126,10 @@ async function main() {
   assert.equal(findImportRestockBatch(index, 2, ''), null)
   assert.match(importSource, /SELECT id, variant_product_id, batch_key, received_at, unit_cost_usd\s+FROM product_batches WHERE variant_product_id IN/,
     'additive import lookup must include inactive rows rather than filtering is_active=1')
-  const { resolveReceiptLotTarget } = compileNamedFunctions(fs.readFileSync(path.join(libRoot, 'productBatches.ts'), 'utf8'), ['resolveReceiptLotTarget'])
+  // resolveReceiptLotTarget matches lots through lotReceivedDate, which reads stored shapes with the real kernel.
+  const kernel = { exports: {} }
+  new Function('exports', 'require', 'module', ts.transpileModule(fs.readFileSync(path.join(libRoot, 'batchCode.ts'), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText)(kernel.exports, require, kernel)
+  const { resolveReceiptLotTarget } = compileNamedFunctions(fs.readFileSync(path.join(libRoot, 'productBatches.ts'), 'utf8'), ['lotReceivedDate', 'resolveReceiptLotTarget'], { normalizeToIsoDate: kernel.exports.normalizeToIsoDate })
   const candidate = { id: 90, batch_key: 'LOT-1', received_at: '2025-01-02', unit_cost_usd: 7.5, is_active: 0 }
   assert.equal(resolveReceiptLotTarget([candidate], '2025-01-02', 7.5, 0).existingBatchId, 90, 'equal-price inactive lot is eligible for reactivation')
   assert.equal(resolveReceiptLotTarget([candidate], '2025-01-02', 99, 0).existingBatchId, null, 'different receipt price cannot be pooled into that inactive lot')

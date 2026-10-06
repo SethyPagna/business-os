@@ -156,6 +156,28 @@ export function normalizeTypedDate(value: string | null | undefined): string | n
   return normalizeToIsoDate(value, 'day-first')
 }
 
+/**
+ * A typed date FIELD read at an API boundary (a lot's expiry or credit due
+ * date, a discount window, a stock-in line): blank -> { value: null }, a
+ * readable date (day-first, like the field that typed it) -> its ISO form,
+ * anything else -> { invalid: true }. The caller answers 400 on `invalid`; it
+ * must never store the raw text and never fall back to "today" -- both of which
+ * the routes used to do, which is how a month-first slash string reached
+ * `received_at` and a year-only text reached `expiry_date`.
+ */
+export function readTypedDateField(value: unknown, options?: { keepTime?: boolean }): { value: string | null; invalid: boolean } {
+  if (value == null) return { value: null, invalid: false }
+  if (typeof value !== 'string' && typeof value !== 'number') return { value: null, invalid: true }
+  const text = String(value).trim()
+  if (!text) return { value: null, invalid: false }
+  const iso = normalizeTypedDate(text)
+  if (!iso) return { value: null, invalid: true }
+  // keepTime: a readable value that carries a time of day (an older writer's instant) keeps
+  // it verbatim -- the window columns are compared as instants, and cutting the value to its
+  // date would move the window's edge.
+  return { value: options?.keepTime && /[ T]\d{1,2}:\d{2}/.test(text) ? text : iso, invalid: false }
+}
+
 // MMDDYYYY -- e.g. "08282026" for the 28th of August 2026. Format history,
 // kept honest: originally all-numeric MMDDYYYY; switched to
 // month-abbreviation (AUG282026) per Aug 24 user direction; switched BACK to

@@ -108,7 +108,7 @@ const broadcastStub = { broadcast: async () => {} }
 const authStub = { requireAuth: async (c, next) => { await next() } }
 
 const inventoryMod = loadReal('routes/inventory.ts', {
-  '../lib/continuousReadWindow': loadReal('lib/continuousReadWindow.ts'),
+  '../lib/continuousReadWindow': loadReal('lib/continuousReadWindow.ts', { './businessDateWindow': loadReal('lib/businessDateWindow.ts') }),
   '../lib/receivingBranch': receivingBranchMod,
   '../lib/acquisitionCostAccess': acquisitionMod,
   '../lib/catalogCostRecompute': costMod,

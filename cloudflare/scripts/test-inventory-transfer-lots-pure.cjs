@@ -41,6 +41,7 @@ const sqlBinding = loadModule('lib/sqlBinding.ts', require)
 const moneyPrecision = loadModule('lib/moneyPrecision.ts', require)
 const productBatches = loadModule('lib/productBatches.ts', (id) => {
   if (id === './batchCode') return batchCode
+  if (id === './businessDateWindow') return loadModule('lib/businessDateWindow.ts', require)
   if (id === './sqlBinding') return sqlBinding
   if (id === './moneyPrecision') return moneyPrecision
   if (id === './receivingBranch') return loadModule('lib/receivingBranch.ts', require)
@@ -143,7 +144,7 @@ const inventoryRequire = (id) => {
   if (id === '../lib/telegram') return { formatStockChangeTelegramLines: noop,
     formatTransferTelegramLines: input => { telegramInputs.push(input); return [] }, sendTelegramEvent: asyncNoop }
   if (id === '../lib/businessDateWindow') return { localDateAtOrAfter: noop, localDateAtOrBefore: noop }
-  if (id === '../lib/continuousReadWindow') return loadModule('lib/continuousReadWindow.ts', require)
+  if (id === '../lib/continuousReadWindow') return loadModule('lib/continuousReadWindow.ts', (dep) => dep === './businessDateWindow' ? loadModule('lib/businessDateWindow.ts', require) : require(dep))
   if (id === '../lib/familyPagination') return { paginateProductFamilies: asyncNoop }
   if (id === '../lib/productSalesLedger') return { buildProductSalesLedgerSql: noop }
   if (id === '../lib/familyStockStats') return { getFamilyStockStats: asyncNoop }

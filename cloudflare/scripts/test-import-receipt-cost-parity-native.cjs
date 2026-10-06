@@ -18,7 +18,7 @@ function compile(source, dependencies = {}) {
 const read = name => fs.readFileSync(path.join(lib, name + '.ts'), 'utf8').replace(/\r\n/g, '\n')
 const money = compile(read('moneyPrecision'))
 const batches = compile(read('productBatches'), {
-  './batchCode': compile(read('batchCode')), './moneyPrecision': money,
+  './batchCode': compile(read('batchCode')), './businessDateWindow': compile(read('businessDateWindow')), './moneyPrecision': money,
   './sqlBinding': compile(read('sqlBinding')),
   './receivingBranch': compile(read('receivingBranch')),
 })

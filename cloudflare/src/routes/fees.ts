@@ -18,7 +18,7 @@ import { getPermissionTier, getActionTier } from '../lib/permissions'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
 import { maybeQueueForReview } from '../lib/reviewGate'
-import { businessToday } from '../lib/businessDateWindow'
+import { businessToday, isIsoCalendarDay } from '../lib/businessDateWindow'
 import { sendTelegramEvent, telegramMoney } from '../lib/telegram'
 import { branchCanSell } from '../lib/branchRoles'
 import { normalizeTypedDate } from '../lib/batchCode'
@@ -209,8 +209,15 @@ export function normalizeFeeLabel(value: unknown): string | null {
   return words.length > FEE_LABEL_MAX_CHARS ? words.slice(0, FEE_LABEL_MAX_CHARS).trim() : words
 }
 
-function normalizeDate(value: unknown): string {
-  const str = typeof value === 'string' ? value.trim() : ''
+// null means "the caller typed something that is not a date" -- the route answers 400. An
+// ABSENT or blank date is not an error: the expense is booked on the business day (Cambodia).
+// It used to be the same fallback for an unreadable value, so a mistyped date silently became
+// today and the expense landed on the wrong day's books.
+function normalizeDate(value: unknown): string | null {
+  if (value == null) return businessToday()
+  if (typeof value !== 'string') return null
+  const str = value.trim()
+  if (!str) return businessToday()
   // fee_date is a business CALENDAR date. Values typed in the app follow its
   // day-first convention, while an ISO timestamp from an older integration
   // still needs Cambodia's calendar-day conversion.
@@ -218,19 +225,19 @@ function normalizeDate(value: unknown): string {
   if (typed && !/^\d{4}-\d{1,2}-\d{1,2}[T ]\d{1,2}:/.test(str)) return typed
   if (/^\d{4}-\d{1,2}-\d{1,2}[T ]\d{1,2}:/.test(str)) {
     const parsed = new Date(str)
-    if (!Number.isNaN(parsed.getTime())) return businessToday(parsed.getTime())
+    if (typed && !Number.isNaN(parsed.getTime())) return businessToday(parsed.getTime())
   }
-  return businessToday()
+  return null
 }
+
+const INVALID_FEE_DATE = { error: 'fee_date must be a valid date (dd/mm/yyyy)', code: 'invalid_date', field: 'fee_date' }
 
 /** Full days use the booked business date. Exact moments use entry time,
  * matching Reports' expense cohort, with an exclusive UTC upper bound. */
 export function feeRangePredicate(query: Record<string, string>): { sql: string; params: Record<string, unknown> } {
   const startDate = String(query.from || query.startDate || '').trim()
   const endDate = String(query.to || query.endDate || '').trim()
-  const validDate = (value: string): boolean => /^\d{4}-\d{2}-\d{2}$/.test(value)
-    && Number.isFinite(Date.parse(`${value}T00:00:00Z`))
-    && new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) === value
+  const validDate = isIsoCalendarDay
   if ((startDate && !validDate(startDate)) || (endDate && !validDate(endDate))) throw new RangeError('Expense dates must use valid YYYY-MM-DD dates')
   if (startDate && endDate && startDate > endDate) throw new RangeError('Expense end date must not precede the start date')
   if (query.startTime || query.endTime) throw new RangeError('Use createdFrom and createdTo together for an exact expense time range')
@@ -532,6 +539,7 @@ app.post('/', async (c) => {
     return c.json({ error: 'Invalid expense money or policy version.', code: 'invalid_fee_money' }, 400)
   }
   const feeDate = normalizeDate(body.fee_date ?? body.feeDate)
+  if (feeDate === null) return c.json(INVALID_FEE_DATE, 400)
   const requestedSaleId = optionalPositiveId(body.sale_id)
   const requestedBranchId = optionalPositiveId(body.branch_id)
   // Preserve an explicit snake_case null from the normal frontend. Using
@@ -692,6 +700,7 @@ app.put('/:id', async (c) => {
     return c.json({ error: 'Invalid expense money or policy version.', code: 'invalid_fee_money' }, 400)
   }
   const feeDate = body.fee_date !== undefined || body.feeDate !== undefined ? normalizeDate(body.fee_date ?? body.feeDate) : existing.fee_date
+  if (feeDate === null) return c.json(INVALID_FEE_DATE, 400)
   let saleId: number | null
   let branchId: number
   try {

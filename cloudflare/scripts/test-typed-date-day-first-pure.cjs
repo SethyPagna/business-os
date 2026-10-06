@@ -207,7 +207,8 @@ const TYPED_DATE_SITES = [
 ]
 for (const [rel, what] of TYPED_DATE_SITES) {
   const text = read(rel)
-  assert.ok(text.includes('normalizeTypedDate'), rel + ' (' + what + ') must read a typed date day-first')
+  // readTypedDateField is the field-level wrapper over normalizeTypedDate (lib/batchCode.ts): blank -> null, readable -> ISO, unreadable -> refused.
+  assert.ok(/normalizeTypedDate|readTypedDateField/.test(text), rel + ' (' + what + ') must read a typed date day-first')
   assert.ok(
     callSites(text).every((site) => site.statesOrder),
     rel + ' must not also fall back to the spreadsheet default',

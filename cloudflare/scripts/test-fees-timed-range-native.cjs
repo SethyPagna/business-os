@@ -28,6 +28,8 @@ const moduleObj = { exports: {} }
 new Function('exports', 'require', 'module', compile(fs.readFileSync(path.join(root, 'routes/fees.ts'), 'utf8')))(moduleObj.exports, request => {
   if (request === 'hono') return require('hono')
   if (request === '../lib/db') return { getDb: () => db }
+  // GET /fees validates its from/to days with the shared isIsoCalendarDay -- the real module, not a stub.
+  if (request === '../lib/businessDateWindow') { const mod = { exports: {} }; new Function('exports', 'module', compile(fs.readFileSync(path.join(root, 'lib/businessDateWindow.ts'), 'utf8')))(mod.exports, mod); return mod.exports }
   if (request === '../lib/auth') return { requireAuth: async (c, next) => { c.set('user', { id: 1, role: 'admin' }); await next() } }
   if (request === '../lib/permissions') return { getPermissionTier: () => 'full', getActionTier: () => 'full' }
   return {} // Write-only integrations are not invoked by these real GET routes.

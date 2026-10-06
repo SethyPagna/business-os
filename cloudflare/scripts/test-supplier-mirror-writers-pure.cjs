@@ -101,7 +101,8 @@ const notificationsSource = readSource('routes/notifications.ts')
 const creditSection = notificationsSource.slice(notificationsSource.indexOf('async function buildSupplierCreditSection'))
 const creditMatch = creditSection.match(/db\.prepare\(`([\s\S]*?)`\)\.all</)
 assert.ok(creditMatch, 'notifications.ts still defines the supplier credit reminder query')
-const CREDIT_REMINDER_SQL = creditMatch[1]
+// The route interpolates localTodayExpr() (the Cambodia day) into the query text; expand it the way the module does.
+const CREDIT_REMINDER_SQL = creditMatch[1].split('${localTodayExpr()}').join("date('now', '+7 hours')")
 const batchesSource = readSource('routes/batches.ts')
 const deactivateMatch = batchesSource.match(/const deactivated = await db\.prepare\(`([\s\S]*?)`\)\.run/)
 assert.ok(deactivateMatch, 'batches.ts still defines the DELETE deactivation update')

@@ -113,7 +113,7 @@ const stockReceiptGate = loadReal('lib/stockReceiptGate.ts')
 const stockMutationReceipt = loadReal('lib/stockMutationReceipt.ts')
 const sqlBinding = loadReal('lib/sqlBinding.ts')
 const moneyPrecision = loadReal('lib/moneyPrecision.ts')
-const productBatches = loadReal('lib/productBatches.ts', { './receivingBranch': loadReal('lib/receivingBranch.ts'), './db': { getDb: () => db }, './batchCode': batchCode, './moneyPrecision': moneyPrecision, './sqlBinding': sqlBinding })
+const productBatches = loadReal('lib/productBatches.ts', { './receivingBranch': loadReal('lib/receivingBranch.ts'), './db': { getDb: () => db }, './batchCode': batchCode, './businessDateWindow': loadReal('lib/businessDateWindow.ts'), './moneyPrecision': moneyPrecision, './sqlBinding': sqlBinding })
 const productDetailRule = loadReal('lib/productDetailRule.ts', { './moneyPrecision': moneyPrecision })
 const permissions = loadReal('lib/permissions.ts')
 const acquisitionCostAccess = loadReal('lib/acquisitionCostAccess.ts', { './permissions': permissions })
@@ -214,7 +214,7 @@ const stockRevert = loadReal('lib/stockRevert.ts', {
 
 const inventoryRoute = loadReal('routes/inventory.ts', {
   '../lib/receivingBranch': loadReal('lib/receivingBranch.ts'),
-  '../lib/continuousReadWindow': loadReal('lib/continuousReadWindow.ts'),
+  '../lib/continuousReadWindow': loadReal('lib/continuousReadWindow.ts', { './businessDateWindow': loadReal('lib/businessDateWindow.ts') }),
   // p3/reasons: the one shared reason-length cap the route enforces.
   '../lib/stockReason': loadReal('lib/stockReason.ts'),
   '../lib/stockCondition': stockCondition,

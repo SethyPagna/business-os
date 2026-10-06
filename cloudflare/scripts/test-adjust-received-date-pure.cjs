@@ -98,7 +98,7 @@ const stockMutationReceipt = loadReal('lib/stockMutationReceipt.ts')
 const sqlBinding = loadReal('lib/sqlBinding.ts')
 const moneyPrecision = loadReal('lib/moneyPrecision.ts')
 const receivingBranch = loadReal('lib/receivingBranch.ts')
-const productBatches = loadReal('lib/productBatches.ts', { './db': { getDb: () => db }, './batchCode': batchCode, './moneyPrecision': moneyPrecision, './sqlBinding': sqlBinding, './receivingBranch': receivingBranch })
+const productBatches = loadReal('lib/productBatches.ts', { './db': { getDb: () => db }, './batchCode': batchCode, './businessDateWindow': loadReal('lib/businessDateWindow.ts'), './moneyPrecision': moneyPrecision, './sqlBinding': sqlBinding, './receivingBranch': receivingBranch })
 const productDetailRule = loadReal('lib/productDetailRule.ts', { './moneyPrecision': moneyPrecision })
 const permissions = loadReal('lib/permissions.ts')
 const acquisitionCostAccess = loadReal('lib/acquisitionCostAccess.ts', { './permissions': permissions })
@@ -183,7 +183,7 @@ const damagedLotActions = loadReal('lib/damagedLotActions.ts', {
   './sqlBinding': sqlBinding,
 })
 const inventoryRoute = loadReal('routes/inventory.ts', {
-  '../lib/continuousReadWindow': loadReal('lib/continuousReadWindow.ts'),
+  '../lib/continuousReadWindow': loadReal('lib/continuousReadWindow.ts', { './businessDateWindow': loadReal('lib/businessDateWindow.ts') }),
   '../lib/acquisitionCostAccess': acquisitionCostAccess,
   '../lib/stockCondition': stockCondition,
   '../lib/damagedLotActions': damagedLotActions,
@@ -214,6 +214,7 @@ const inventoryRoute = loadReal('routes/inventory.ts', {
   '../lib/productBatches': productBatches,
   '../lib/receivingBranch': receivingBranch,
   '../lib/batchCode': batchCode,
+  '../lib/businessDateWindow': businessDateWindow,
   '../lib/stockReceiptGate': stockReceiptGate,
   '../lib/stockSessionMath': loadReal('lib/stockSessionMath.ts', { './moneyPrecision': moneyPrecision }),
   '../lib/schemaProbe': loadReal('lib/schemaProbe.ts'),
@@ -309,6 +310,7 @@ const batchesRoute = loadReal('routes/batches.ts', {
   '../lib/productBatches': productBatches,
   '../lib/receivingBranch': receivingBranch,
   '../lib/batchCode': batchCode,
+  '../lib/businessDateWindow': businessDateWindow,
   '../lib/stockReceiptGate': stockReceiptGate,
   '../lib/stockSessionMath': loadReal('lib/stockSessionMath.ts', { './moneyPrecision': moneyPrecision }),
   '../lib/schemaProbe': loadReal('lib/schemaProbe.ts'),

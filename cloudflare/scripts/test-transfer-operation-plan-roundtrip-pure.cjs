@@ -71,6 +71,7 @@ const dbModule = loadReal('lib/db.ts', { './importMaintenanceFence': {
     ImportMaintenanceFenceError: class ImportMaintenanceFenceError extends Error {},
   } })
 const batchCode = loadReal('lib/batchCode.ts')
+const businessDateWindow = loadReal('lib/businessDateWindow.ts')
 const moneyPrecision = loadReal('lib/moneyPrecision.ts')
 const sqlBinding = loadReal('lib/sqlBinding.ts')
 const branchRoles = loadReal('lib/branchRoles.ts')
@@ -81,7 +82,7 @@ const transferOperationReceipt = loadReal('lib/transferOperationReceipt.ts', { '
 const movementCostSnapshot = loadReal('lib/movementCostSnapshot.ts', { './moneyPrecision': moneyPrecision })
 const productBatches = loadReal('lib/productBatches.ts', {
   './receivingBranch': loadReal('lib/receivingBranch.ts'),
-  './db': {}, './batchCode': batchCode, './moneyPrecision': moneyPrecision, './sqlBinding': sqlBinding,
+  './db': {}, './batchCode': batchCode, './businessDateWindow': businessDateWindow, './moneyPrecision': moneyPrecision, './sqlBinding': sqlBinding,
 })
 const transferOperation = loadReal('lib/transferOperation.ts', {
   './db': dbModule,

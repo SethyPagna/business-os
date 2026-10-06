@@ -93,7 +93,7 @@ const customerReturnEntitlement = loadReal('lib/customerReturnEntitlement.ts', {
   './saleMoneyPrecision': saleMoneyPrecision,
 })
 const productMergeLineage = loadReal('lib/productMergeLineage.ts')
-const productBatches = loadReal('lib/productBatches.ts', { './receivingBranch': loadReal('lib/receivingBranch.ts'), './db': { getDb: () => db }, './batchCode': batchCode, './sqlBinding': sqlBinding, './moneyPrecision': moneyPrecision })
+const productBatches = loadReal('lib/productBatches.ts', { './receivingBranch': loadReal('lib/receivingBranch.ts'), './db': { getDb: () => db }, './batchCode': batchCode, './businessDateWindow': loadReal('lib/businessDateWindow.ts'), './sqlBinding': sqlBinding, './moneyPrecision': moneyPrecision })
 const permissions = loadReal('lib/permissions.ts')
 const acquisitionCostAccess = loadReal('lib/acquisitionCostAccess.ts', { './permissions': permissions })
 const branchRolesKernel = loadReal('lib/branchRoles.ts')

@@ -47,6 +47,7 @@ const productWrites = load('lib/productWrites.ts', {
   './db': { getDb: () => { throw new Error('DB must not be touched by pure gallery validation') } },
   './media': media,
   './batchCode': { dateToBatchCode: () => '' },
+  './businessDateWindow': load('lib/businessDateWindow.ts'),
   './searchMatch': { normalizeSearchText: String, compactSearchText: String },
   './importImageMatch': { MAX_IMAGES_PER_PRODUCT: 3 },
   '../index': {},

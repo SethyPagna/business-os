@@ -35,7 +35,7 @@ import { buildIssueStateClauses, buildLikeAliasClause, tokenizeSearchWords } fro
 import { buildFamilyRelevanceOrderSql, buildProductSearchQuery, parseRankedIds } from '../lib/productSearchQuery'
 import { fifoRemovalAllocations, isStockRemovalConflict, listBatchesForProduct, parseReceiptSellingPrice, planBranchStockRemoval, planReceiptSellingPrice, planReceiveBatchStock, planRemoveStockAcrossBatches, prepareReceiptLotTarget, receiveBatchStock, restoreBatchStockStatements, removeStockFromBatch, InsufficientBatchStockError, type ReceiptCostPreimage, type ReceiptLotTarget, type ReceiptSellingPriceRow, type StockWriteStatement } from '../lib/productBatches'
 import { applyMovementRevert, type RevertMovementRow } from '../lib/stockRevert'
-import { normalizeTypedDate } from '../lib/batchCode'
+import { normalizeTypedDate, readTypedDateField } from '../lib/batchCode'
 import { appendReceiptNotes, FREE_GOODS_REASON_NOTE, FREE_QUANTITY_NOT_RECEIPT, parseFreeQuantity, stockReceiptGateCode, stockReceiptGateMessage } from '../lib/stockReceiptGate'
 import { effectiveUnitCost } from '../lib/stockSessionMath'
 import { hasColumn } from '../lib/schemaProbe'
@@ -1562,14 +1562,20 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
   // Fast stock-in can use this same endpoint when a changed cost should
   // resolve to a sibling variant. Preserve all receipt/session metadata so
   // choosing a variant does not make that line disappear from its session.
-  const expiryDate = body.expiryDate != null ? String(body.expiryDate).trim() || null : null
+  // The lot's expiry and credit due date are typed dates like the received date above:
+  // read day-first, refused when unreadable (they used to be stored as sent).
+  const expiryField = readTypedDateField(body.expiryDate)
+  if (expiryField.invalid) return c.json({ error: 'expiryDate must be a valid date (dd/mm/yyyy)', code: 'invalid_date', field: 'expiryDate' }, 400)
+  const expiryDate = expiryField.value
   let unitCostUsd: number | null = null
   if (body.unitCostUsd != null) {
     try { unitCostUsd = explicitReceiptMoney4(body.unitCostUsd, 'Unit cost') }
     catch (error) { return c.json({ error: error instanceof Error ? error.message : 'Invalid unit cost' }, 400) }
   }
   const paymentStatus = body.paymentStatus === 'paid' || body.paymentStatus === 'credit' ? body.paymentStatus : null
-  const creditDueDate = body.creditDueDate != null ? String(body.creditDueDate).trim() || null : null
+  const creditDueField = readTypedDateField(body.creditDueDate)
+  if (creditDueField.invalid) return c.json({ error: 'creditDueDate must be a valid date (dd/mm/yyyy)', code: 'invalid_date', field: 'creditDueDate' }, 400)
+  const creditDueDate = creditDueField.value
   const sessionId = Number.isSafeInteger(Number(body.sessionId)) && Number(body.sessionId) > 0 ? Number(body.sessionId) : null
   // N14-D. `freeGoods` is the operator's explicit declaration that a $0.00
   // receipt really was free; without it a zero cost is refused, because a

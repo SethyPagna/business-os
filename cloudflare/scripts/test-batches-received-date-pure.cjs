@@ -23,7 +23,7 @@ assert.equal(dateToBatchCode(normalizeTypedDate('03/09/2026')), '09032026')
 assert.equal(normalizeTypedDate('2026-09-03'), '2026-09-03', 'ISO input remains unambiguous')
 assert.match(
   route,
-  /normalizeTypedDate\(body\.received_at\)/,
+  /readTypedDateField\(body\.received_at\)/,
   'the operator-facing batch received-date editor must use the shared typed-date parser',
 )
 assert.doesNotMatch(

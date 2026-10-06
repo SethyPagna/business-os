@@ -11,7 +11,8 @@
 import { getDb } from './db'
 import { tableColumnSet } from './schemaProbe'
 import { sanitizeMediaList } from './media'
-import { dateToBatchCode } from './batchCode'
+import { dateToBatchCode, readTypedDateField } from './batchCode'
+import { businessToday } from './businessDateWindow'
 import { normalizeSearchText, compactSearchText } from './searchMatch'
 import { MAX_IMAGES_PER_PRODUCT } from './importImageMatch'
 import type { Env } from '../index'
@@ -40,6 +41,53 @@ function joinBalanced(terms: readonly string[]): string {
   if (terms.length === 1) return terms[0]
   const middle = Math.ceil(terms.length / 2)
   return `(${joinBalanced(terms.slice(0, middle))} AND ${joinBalanced(terms.slice(middle))})`
+}
+
+// The three typed date columns of a products write -- expiry_date and the
+// discount window (discount_starts_at / discount_ends_at).
+//
+// All three are typed into DateEntryInput (day-first) and every reader treats
+// them as dates: the dashboard expiry window `date(expiry_date)`, the expiry
+// notification `julianday(expiry_date)`, the promotion window
+// `datetime(discount_starts_at)`. A value those functions cannot read is not an
+// error to them -- date() answers NULL -- so the row silently drops out of the
+// alert or the promotion. The write is therefore where an unreadable value has
+// to be refused. (Found by the 6 Oct 2026 date sweep: POST/PUT /api/products
+// took these three fields as sent, and the CSV importer stores the raw cell.)
+
+export const PRODUCT_DATE_FIELDS = ['expiry_date', 'discount_starts_at', 'discount_ends_at'] as const
+export type ProductDateField = (typeof PRODUCT_DATE_FIELDS)[number]
+
+/**
+ * Normalizes, IN PLACE, every product date field present on `body` to a
+ * 'YYYY-MM-DD' string (blank -> null) and returns the first field that does not
+ * read as a date, or null when all do.
+ *
+ * `stored` is the row's present values on an edit (null on create). A value that
+ * does not read as a date but equals what the row already holds is left exactly
+ * as it is: the product form re-sends every field on any edit, and a legacy row
+ * carrying text this reader refuses (a year-only '2029') must stay editable --
+ * otherwise the only way to correct it would be blocked by the value that needs
+ * correcting.
+ */
+export function normalizeProductDateFields(
+  body: Record<string, unknown>,
+  stored: Partial<Record<ProductDateField, unknown>> | null,
+): ProductDateField | null {
+  for (const field of PRODUCT_DATE_FIELDS) {
+    if (!Object.prototype.hasOwnProperty.call(body, field)) continue
+    // keepTime: the discount window is compared with datetime(), so an older writer's
+    // instant keeps its time of day rather than moving the window's edge on an unrelated edit.
+    const typed = readTypedDateField(body[field], { keepTime: true })
+    if (!typed.invalid) {
+      body[field] = typed.value
+      continue
+    }
+    const sent = String(body[field]).trim()
+    if (stored && sent !== '' && sent === String(stored[field] ?? '').trim()) continue
+    return field
+  }
+  return null
 }
 
 function invalidMoneyPlan(): never {
@@ -322,14 +370,19 @@ export async function createProductWithInitialStock(
   const { branchId, quantity } = await productCreateDestination(env, body)
   const gallery = 'image_gallery' in body ? validateProductImageGallery(body.image_gallery, maxImages) : null
   const key = `product-create:${crypto.randomUUID()}`
-  const params = { key, branchId, quantity, lotCode: dateToBatchCode(new Date().toISOString().slice(0, 10)) }
+  // The default "day added" lot is received on the BUSINESS day (Cambodia, UTC+7),
+  // stored as the date-only ISO every typed receipt writes, and its lot code is
+  // derived from that SAME date. It used to store datetime('now') -- a UTC
+  // timestamp in a DATE column -- next to a code cut from the UTC day.
+  const receivedAt = businessToday()
+  const params = { key, branchId, quantity, receivedAt, lotCode: dateToBatchCode(receivedAt) }
   const statements: Array<{ sql: string; params?: import('./db').BindParams }> = [
     planInsertRow('products', body, await tableColumns(env, 'products'), { ...required, stock_quantity: quantity, client_request_id: key }),
     { sql: `INSERT INTO branch_stock(product_id,branch_id,quantity)
       SELECT p.id,b.id,CASE WHEN b.id=@branchId THEN @quantity ELSE 0 END
       FROM products p CROSS JOIN branches b WHERE p.client_request_id=@key AND b.is_active=1`, params },
     { sql: `INSERT INTO product_batches(variant_product_id,batch_key,lot_code,received_at,is_active,notes,batch_number)
-      SELECT id,'initial:'||id,@lotCode,datetime('now'),1,'Default received date created with product',1
+      SELECT id,'initial:'||id,@lotCode,@receivedAt,1,'Default received date created with product',1
       FROM products WHERE client_request_id=@key`, params },
   ]
   if (branchId != null) statements.push({ sql: `INSERT INTO branch_batch_stock(batch_id,branch_id,quantity)
@@ -584,7 +637,7 @@ export async function seedInitialBatchForNewProduct(
   const db = getDb(env)
   const id = Number(productId)
   if (!Number.isFinite(id) || id <= 0) return
-  const addedOn = new Date().toISOString().slice(0, 10)
+  const addedOn = businessToday()
   const batchKey = `initial:${id}`
   // batch_key stays `initial:<id>` (not the date code) so this insert
   // remains idempotent regardless of what day it's retried on. A retry may
@@ -599,13 +652,14 @@ export async function seedInitialBatchForNewProduct(
     productId: id,
     batchKey,
     lotCode: dateToBatchCode(addedOn),
+    receivedAt: addedOn,
     notes: 'Default received date created with product',
     branchId: chosenBranchId,
     quantity: Math.max(0, Number(chosenBranchQty) || 0),
   }
   const statements = [{
     sql: `INSERT INTO product_batches (variant_product_id, batch_key, lot_code, received_at, is_active, notes, batch_number)
-      VALUES (@productId, @batchKey, @lotCode, datetime('now'), 1, @notes, 1)
+      VALUES (@productId, @batchKey, @lotCode, @receivedAt, 1, @notes, 1)
       ON CONFLICT(variant_product_id, batch_key) DO UPDATE SET is_active = 1`,
     params,
   }]

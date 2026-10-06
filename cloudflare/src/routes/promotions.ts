@@ -6,7 +6,7 @@ import { audit, changedFields } from '../lib/audit'
 import { hasPermission, getPermissionTier, getActionTier } from '../lib/permissions'
 import { bumpVersion } from '../lib/cache'
 import { normalizePromotionRule, isRuleActive } from '../lib/promotionRules'
-import { normalizeTypedDate } from '../lib/batchCode'
+import { normalizeTypedDate, readTypedDateField } from '../lib/batchCode'
 import { broadcast } from '../durable-objects/broadcastHub'
 import type { Env } from '../index'
 import { actorSnapshot } from '../lib/actorSnapshot'
@@ -242,9 +242,29 @@ type PromotionInput = {
   ends_at?: unknown
 }
 
-function normalizePromotionInput(body: PromotionInput = {}) {
+// One bound of a banner's window. The portal compares it as TEXT against the ISO
+// "now" (routes/portal.ts), so what is stored must keep its meaning: a bound that
+// carries a time of day is an instant and is kept verbatim, a date-only bound is
+// stored as the ISO date a day-first field would write. A value that does not read
+// as a date is refused -- it used to be stored as sent, and a slash string compares
+// below every ISO "now", so the banner silently never showed. An UNCHANGED stored
+// value passes through so an old row stays editable.
+function readBannerBound(raw: unknown, stored: unknown): { value: string | null; invalid: boolean } {
+  const text = raw == null ? '' : String(raw).trim()
+  if (!text) return { value: null, invalid: false }
+  const typed = readTypedDateField(text, { keepTime: true })
+  if (typed.invalid) {
+    return text === String(stored ?? '').trim() ? { value: text, invalid: false } : { value: null, invalid: true }
+  }
+  return typed
+}
+
+function normalizePromotionInput(body: PromotionInput = {}, current: { starts_at?: unknown; ends_at?: unknown } = {}) {
   const linkType = LINK_TYPES.has(body.link_type as string) ? (body.link_type as string) : 'none'
+  const starts = readBannerBound(body.starts_at, current.starts_at)
+  const ends = readBannerBound(body.ends_at, current.ends_at)
   return {
+    date_error: starts.invalid ? 'starts_at' : ends.invalid ? 'ends_at' : null,
     title: normalizeText(body.title, 120),
     subtitle: normalizeText(body.subtitle, 240) || null,
     image_path: normalizeText(body.image_path, 500) || null,
@@ -257,10 +277,12 @@ function normalizePromotionInput(body: PromotionInput = {}) {
     // null when the caller sent no order: the route decides (keep the current
     // place on edit, go last on create) instead of silently jumping to 0.
     sort_order: body.sort_order == null || String(body.sort_order).trim() === '' || !Number.isFinite(Number(body.sort_order)) ? null : Number(body.sort_order),
-    starts_at: body.starts_at ? String(body.starts_at) : null,
-    ends_at: body.ends_at ? String(body.ends_at) : null,
+    starts_at: starts.value,
+    ends_at: ends.value,
   }
 }
+
+const BANNER_DATE_ERROR = (field: string) => ({ error: `${field} must be a valid date (dd/mm/yyyy)`, code: 'invalid_date', field })
 
 // Admin: list every promotion (active or not), for the editor.
 app.get('/', requireKey('products'), async (c) => {
@@ -274,6 +296,7 @@ app.post('/', requireKey('products'), async (c) => {
   const body = await c.req.json<PromotionInput>()
   const input = normalizePromotionInput(body)
   if (!input.title) return c.json({ error: 'Title required' }, 400)
+  if (input.date_error) return c.json(BANNER_DATE_ERROR(input.date_error), 400)
   if (input.link_type === 'product' && !input.link_product_id) return c.json({ error: 'Choose a product to link to' }, 400)
   if (input.link_type === 'url' && !input.link_url) return c.json({ error: 'Enter a link URL' }, 400)
   if (input.link_type === 'url' && !isSafeLinkUrl(body.link_url)) return c.json(UNSAFE_LINK_ERROR, 400)
@@ -311,8 +334,9 @@ app.put('/:id', requireKey('products'), async (c) => {
   if (!current) return c.json({ error: 'Promotion not found' }, 404)
 
   const body = await c.req.json<PromotionInput>()
-  const input = normalizePromotionInput(body)
+  const input = normalizePromotionInput(body, current as { starts_at?: unknown; ends_at?: unknown })
   if (!input.title) return c.json({ error: 'Title required' }, 400)
+  if (input.date_error) return c.json(BANNER_DATE_ERROR(input.date_error), 400)
   if (input.link_type === 'product' && !input.link_product_id) return c.json({ error: 'Choose a product to link to' }, 400)
   if (input.link_type === 'url' && !input.link_url) return c.json({ error: 'Enter a link URL' }, 400)
   if (input.link_type === 'url' && !isSafeLinkUrl(body.link_url)) return c.json(UNSAFE_LINK_ERROR, 400)

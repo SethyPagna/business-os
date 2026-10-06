@@ -58,7 +58,7 @@ const realProductWrites = loadTs('lib/productWrites.ts', {
   './audit': loadTs('lib/audit.ts', { './db': dbLib }),
   './moneyPrecision': loadTs('lib/moneyPrecision.ts'),
   './media': media,
-  './batchCode': loadTs('lib/batchCode.ts'),
+  './batchCode': loadTs('lib/batchCode.ts'), './businessDateWindow': loadTs('lib/businessDateWindow.ts'),
   './searchMatch': loadTs('lib/searchMatch.ts'),
   './importImageMatch': { MAX_IMAGES_PER_PRODUCT: 3 },
   './schemaProbe': loadTs('lib/schemaProbe.ts'),

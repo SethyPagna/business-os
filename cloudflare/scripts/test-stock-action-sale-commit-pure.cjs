@@ -16,6 +16,7 @@ function compile(file, stubs = {}) {
 }
 
 const batchCode = compile('batchCode.ts')
+const businessDateWindow = compile('businessDateWindow.ts')
 const searchMatch = compile('searchMatch.ts')
 const stockReceiptGate = compile('stockReceiptGate.ts')
 const branchRoles = compile('branchRoles.ts')
@@ -28,10 +29,10 @@ const saleCreationSnapshot = compile('saleCreationSnapshot.ts', {
   './saleMoneyPrecision': saleMoneyPrecision,
 })
 const subject = compile('stockActionCommit.ts', {
-  './productBatches': compile('productBatches.ts', { './receivingBranch': compile('receivingBranch.ts'), './batchCode': batchCode, './moneyPrecision': moneyPrecision, './sqlBinding': compile('sqlBinding.ts') }),
+  './productBatches': compile('productBatches.ts', { './receivingBranch': compile('receivingBranch.ts'), './batchCode': batchCode, './businessDateWindow': businessDateWindow, './moneyPrecision': moneyPrecision, './sqlBinding': compile('sqlBinding.ts') }),
   './moneyPrecision': moneyPrecision,
   './db': {},
-  './batchCode': batchCode,
+  './batchCode': batchCode, './businessDateWindow': businessDateWindow,
   './searchMatch': searchMatch,
   './stockReceiptGate': stockReceiptGate,
   './branchRoleGuards': branchRoleGuards,

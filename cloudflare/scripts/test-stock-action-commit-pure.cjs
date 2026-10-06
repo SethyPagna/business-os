@@ -16,6 +16,7 @@ function compile(file, stubs = {}) {
 }
 
 const batchCode = compile('batchCode.ts')
+const businessDateWindow = compile('businessDateWindow.ts')
 const searchMatch = compile('searchMatch.ts')
 // The REAL gate kernel, not a stub: the import writer must refuse exactly
 // what routes/inventory.ts, routes/batches.ts and lib/stockSession.ts refuse.
@@ -31,10 +32,10 @@ const saleCreationSnapshot = compile('saleCreationSnapshot.ts', {
 })
 const productDetailRule = compile('productDetailRule.ts', { './moneyPrecision': moneyPrecision })
 const subject = compile('stockActionCommit.ts', {
-  './productBatches': compile('productBatches.ts', { './receivingBranch': compile('receivingBranch.ts'), './batchCode': batchCode, './moneyPrecision': moneyPrecision, './sqlBinding': compile('sqlBinding.ts') }),
+  './productBatches': compile('productBatches.ts', { './receivingBranch': compile('receivingBranch.ts'), './batchCode': batchCode, './businessDateWindow': businessDateWindow, './moneyPrecision': moneyPrecision, './sqlBinding': compile('sqlBinding.ts') }),
   './moneyPrecision': moneyPrecision,
   './db': {},
-  './batchCode': batchCode,
+  './batchCode': batchCode, './businessDateWindow': businessDateWindow,
   './searchMatch': searchMatch,
   './stockReceiptGate': stockReceiptGate,
   './branchRoleGuards': branchRoleGuards,

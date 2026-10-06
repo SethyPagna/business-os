@@ -122,7 +122,7 @@ const productSalesLedger = loadTs('lib/productSalesLedger.ts', { './salesAnalyti
 const inventory = loadTs('routes/inventory.ts', {
   hono: { Hono },
   '../lib/businessDateWindow': businessDateWindow,
-  '../lib/continuousReadWindow': loadTs('lib/continuousReadWindow.ts'),
+  '../lib/continuousReadWindow': loadTs('lib/continuousReadWindow.ts', { './businessDateWindow': loadTs('lib/businessDateWindow.ts') }),
   '../lib/productSalesLedger': productSalesLedger,
 })
 const { attachInventoryProductMetrics } = inventory

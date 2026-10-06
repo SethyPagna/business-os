@@ -70,7 +70,7 @@ const saleItemPricing = compile('saleItemPricing.ts', {
 })
 const productBatches = compile('productBatches.ts', { './receivingBranch': compile('receivingBranch.ts'),
   './db': {},
-  './batchCode': compile('batchCode.ts'),
+  './batchCode': compile('batchCode.ts'), './businessDateWindow': compile('businessDateWindow.ts'),
   './sqlBinding': compile('sqlBinding.ts'),
   './moneyPrecision': moneyPrecision,
 })
@@ -102,6 +102,7 @@ const subject = compile('saleAmendments.ts', {
   './moneyPrecision': moneyPrecision,
 })
 const saleBulkStatus = compile('saleBulkStatus.ts', {
+  './businessDateWindow': compile('businessDateWindow.ts'),
   './db': {},
   '../index': {},
   './auth': {},

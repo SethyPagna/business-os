@@ -19,7 +19,7 @@ import { buildInClause, chunkForBinding, selectInChunks } from '../lib/sqlBindin
 import { attachBeforeQty, buildStockLedgerQuery, loadMovementStockBalances, movementBalanceFields, type MovementStockBalance, type StockLedgerView } from '../lib/stockLedgerQuery'
 import { buildStockInSessionListQuery, parseStockInSessionKey, stockInSessionLineParams, stockInSessionLinesSql, STOCK_RECEIPT_TYPE_SQL } from '../lib/stockInSessionsQuery'
 import { getProductSalesBreakdown } from '../lib/salesAnalytics'
-import { localRangeClockError, localDateExpr, localMonthExpr } from '../lib/businessDateWindow'
+import { localRangeClockError, localDateExpr, localMonthExpr, businessToday, isIsoCalendarDay } from '../lib/businessDateWindow'
 import { isPublicImageFormat, UNSUPPORTED_IMAGE_MESSAGE, validateUploadedBuffer, type DetectedUploadFormat } from '../lib/uploadSecurity'
 import { checkRateLimit, getClientIp } from '../lib/rateLimit'
 import { admitRequestBody } from '../lib/requestBodyGuard'
@@ -198,7 +198,7 @@ import {
   normalizeMultiValue, validateProductImageGallery, validatePreservedProductImageGallery, ProductImageLimitError,
 } from '../lib/productWrites'
 import { actorSnapshot, actorId } from '../lib/actorSnapshot'
-import { createProductWithInitialStock, productCreateDestination, productCreateErrorResponse, prepareProductMoneyWrite, readProductMoneyPlan, ProductMoneyWriteError, PRODUCT_MONEY_PLAN, PRODUCT_MONEY_VERSION } from '../lib/productWrites'
+import { createProductWithInitialStock, normalizeProductDateFields, PRODUCT_DATE_FIELDS, productCreateDestination, productCreateErrorResponse, prepareProductMoneyWrite, readProductMoneyPlan, ProductMoneyWriteError, PRODUCT_MONEY_PLAN, PRODUCT_MONEY_VERSION } from '../lib/productWrites'
 export {
   PRODUCT_SKIP_KEYS, nowIso, tableColumns, clampNegativeStockQuantity,
   cleanPayload, insertRow, updateRow, syncProductImageGallery, defaultBranchId,
@@ -1373,9 +1373,9 @@ app.get('/:id/detail-report', async (c) => {
   const productId = Number(c.req.param('id')) || 0
   if (!productId) return c.json({ error: 'Product not found' }, 404)
   const query = c.req.query()
-  const today = new Date().toISOString().slice(0, 10)
-  const startDate = /^\d{4}-\d{2}-\d{2}$/.test(String(query.startDate || '')) ? String(query.startDate) : '2000-01-01'
-  const endDate = /^\d{4}-\d{2}-\d{2}$/.test(String(query.endDate || '')) ? String(query.endDate) : today
+  const today = businessToday()
+  const startDate = isIsoCalendarDay(query.startDate) ? query.startDate : '2000-01-01'
+  const endDate = isIsoCalendarDay(query.endDate) ? query.endDate : today
 
   const db = getDb(c.env)
   // Distinct suppliers this product was bought from, with per-supplier lot
@@ -1999,6 +1999,13 @@ async function foldCreateIntoExisting(
   return { item, product: item, id: duplicate.id, folded_into: duplicate.id, success: true }
 }
 
+// The 400 for a product date column that does not read as a date. `code` is the stable
+// machine key; the date field that normally produces these values refuses the same
+// input with its translated date_entry_invalid text.
+function invalidProductDate(field: string) {
+  return { error: `${field} must be a valid date (dd/mm/yyyy)`, code: 'invalid_date', field }
+}
+
 app.post('/', async (c) => {
   const user = c.get('user')
   if (getActionTier(user, 'products', 'add') === 'none') {
@@ -2014,6 +2021,8 @@ app.post('/', async (c) => {
   }
   const name = String(body.name || '').trim()
   if (!name) return c.json({ error: 'Product name is required' }, 400)
+  const unreadableDate = normalizeProductDateFields(body, null)
+  if (unreadableDate) return c.json(invalidProductDate(unreadableDate), 400)
   const createBarcode = String(body.barcode ?? '').trim()
   if (SCIENTIFIC_NOTATION_BARCODE.test(createBarcode)) {
     return c.json(scientificBarcodeError(createBarcode), 400)
@@ -2255,6 +2264,15 @@ app.put('/:id', async (c) => {
     if (error instanceof ProductMoneyWriteError) return c.json({ error: error.message, code: error.code }, error.status as 400 | 409)
     throw error
   }
+  // The typed date columns are read day-first and refused when unreadable. The form re-sends
+  // every field on any edit, so a legacy value the row already holds passes through unchanged.
+  const sentDateFields = PRODUCT_DATE_FIELDS.filter((field) => Object.prototype.hasOwnProperty.call(body, field))
+  const storedDates = sentDateFields.length
+    ? await getDb(c.env).prepare('SELECT expiry_date, discount_starts_at, discount_ends_at FROM products WHERE id = @id')
+      .get<Record<string, unknown>>({ id })
+    : null
+  const unreadableDate = normalizeProductDateFields(body, storedDates ?? null)
+  if (unreadableDate) return c.json(invalidProductDate(unreadableDate), 400)
   const imageLimitError = await validateImageGalleryPayload(c.env, user, body, id)
   if (imageLimitError) {
     return c.json({
@@ -2737,6 +2755,8 @@ app.post('/variant', async (c) => {
   }
   const name = String(body.name || '').trim()
   if (!name) return c.json({ error: 'Product name is required' }, 400)
+  const unreadableDate = normalizeProductDateFields(body, null)
+  if (unreadableDate) return c.json(invalidProductDate(unreadableDate), 400)
   try {
     await resolveProductImageFields(getDb(c.env), body)
   } catch (error) {
