@@ -24,12 +24,19 @@
 -- from (display only: the classification is the catalog-wide rollup the
 -- Dashboard cards use). sale_id is the sale that caused the crossing.
 --
+-- Telegram (same owner ruling, 6 Oct): the Alerts topic gets one short message per
+-- crossing, sent AFTER the sale commits from these rows. telegram_sent_at is the
+-- claim: a drain sets it with one UPDATE ... RETURNING, so two overlapping sales
+-- never send the same crossing twice, and a failed send clears it so the next
+-- drain retries inside the two-hour window (lib/telegram.ts sendPendingStockAlerts).
+-- NULL = not yet announced.
+--
 -- Pre-assert:  SELECT COUNT(*) FROM sqlite_master WHERE type = 'table'
 --                AND name = 'stock_alert_events'          -- expected 0
 -- Post-assert: the same query                              -- expected 1
 --              SELECT COUNT(*) FROM stock_alert_events     -- expected 0
 --              SELECT COUNT(*) FROM sqlite_master WHERE type = 'index'
---                AND name LIKE 'idx_stock_alert_events_%'  -- expected 2
+--                AND name LIKE 'idx_stock_alert_events_%'  -- expected 3
 -- Deploy order: MIGRATION FIRST. The candidate Worker appends the INSERT to
 --              every sale batch and reads the table in /api/notifications/
 --              summary with no existence probe. The previous Worker never
@@ -48,7 +55,8 @@ CREATE TABLE IF NOT EXISTS stock_alert_events (
   alert_state TEXT NOT NULL CHECK (alert_state IN ('low', 'out')),
   quantity_after REAL NOT NULL DEFAULT 0,
   sale_id INTEGER,
-  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  telegram_sent_at TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_stock_alert_events_created
@@ -56,3 +64,9 @@ CREATE INDEX IF NOT EXISTS idx_stock_alert_events_created
 
 CREATE INDEX IF NOT EXISTS idx_stock_alert_events_family
   ON stock_alert_events (family_root_id, id DESC);
+
+-- The Telegram drain's only read: unannounced rows, newest window. Partial, so a
+-- sale that crossed nothing probes an empty index instead of the table.
+CREATE INDEX IF NOT EXISTS idx_stock_alert_events_unsent
+  ON stock_alert_events (created_at)
+  WHERE telegram_sent_at IS NULL;

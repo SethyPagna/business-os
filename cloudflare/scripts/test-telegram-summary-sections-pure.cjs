@@ -272,7 +272,7 @@ async function main() {
   clearSetting(shopA, SWITCH.sales)
 
   const alone = {
-    sales: ['=====Received====='], cashiers: ['=====Cashiers====='], products: ['=====Top products=====', '=====Low stock====='],
+    sales: ['=====Received====='], cashiers: ['=====Cashiers====='], products: ['=====Top products====='],
     returns: [], expenses: ['=====Each expense====='], compare: ['=====Compare====='],
   }
   const reads = {
@@ -294,6 +294,9 @@ async function main() {
     check(`${section} alone adds exactly its own section(s)`, JSON.stringify(added) === JSON.stringify(alone[section]), single[section])
     const read = Object.keys(reads).filter((name) => reads[name](preparedSql.slice(sqlFrom), kernelCalls))
     check(`${section} alone reads only its own figures`, JSON.stringify(read) === JSON.stringify([section]), read.join(', '))
+    // NOTIF-V2 (owner, 6 Oct 2026): the standing low / out-of-stock list is retired from every pushed message; crossings
+    // are announced one by one from stock_alert_events (test-telegram-stock-alert-pure.cjs). The Products switch is top products only.
+    if (section === 'products') check('products alone runs no low / out-of-stock query', !preparedSql.slice(sqlFrom).some((text) => /out_of_stock_threshold/.test(text)), preparedSql.slice(sqlFrom).join('\n'))
   }
 
   check('Received: dollars net of change, riel, bank; cancelled, other-branch and other-day sales out; the 00:30 local sale in',
@@ -323,9 +326,7 @@ async function main() {
   check('Top products: the kernel ranking, five rows, quantity and sales',
     JSON.stringify(rowsUnder(single.products, '=====Top products=====')) === JSON.stringify(['· Rose Serum: 9 · $180.00', '· Lip Tint: 7 · $84.00', '· Toner: 5 · $60.00', '· Soap Bar: 4 · $12.00', '· Sunscreen: 2 · $30.00']),
     single.products)
-  check('Low stock: only items sold or removed today on this branch that are now at or below their alert level, OUT first',
-    JSON.stringify(rowsUnder(single.products, '=====Low stock=====')) === JSON.stringify(['· OUT: Rose Serum: 0 (⚠ 5)', '· LOW: Soap Bar: 1 (⚠ 5)', '· LOW: Sunscreen: 2 (⚠ 5)', '· LOW: Lip Tint: 3 (⚠ 5)']),
-    rowsUnder(single.products, '=====Low stock=====').join('\n'))
+  check('Low stock: the standing list is not part of the Products section any more', !single.products.includes('=====Low stock=====') && !/\b(OUT|LOW): /.test(single.products), single.products)
 
   check('Returns: the refunds\' riel equivalent (not riel paid out) and the items returned, from the same returns as the count',
     JSON.stringify(rowsUnder(single.returns, '=====Returns=====')) === JSON.stringify(['· Total: 2 · $10.00', '· Riel equivalent: 41,000៛', '· Items returned: 3']),
@@ -358,7 +359,6 @@ async function main() {
     '=====Received=====', '· Dollars: $23.00', '· Riel: 81,000៛', '· Bank: $30.00',
     '=====Cashiers=====', '· Za: 12 · $300.00', '· Sok: 6 · $112.50',
     '=====Top products=====', '· Rose Serum: 9 · $180.00', '· Lip Tint: 7 · $84.00', '· Toner: 5 · $60.00', '· Soap Bar: 4 · $12.00', '· Sunscreen: 2 · $30.00',
-    '=====Low stock=====', '· OUT: Rose Serum: 0 (⚠ 5)', '· LOW: Soap Bar: 1 (⚠ 5)', '· LOW: Sunscreen: 2 (⚠ 5)', '· LOW: Lip Tint: 3 (⚠ 5)',
     '=====Expenses=====', '· Actual delivery cost: $3.00', '· Other expenses: $4.00 · 20,000៛', '· Total: $7.00 · 20,000៛', '· No branch (not in total): $2.00',
     '=====Each expense=====', '· Ice: $4.00', '· Moto: 20,000៛',
     '=====Returns=====', '· Total: 2 · $10.00', '· Riel equivalent: 41,000៛', '· Items returned: 3',
@@ -367,7 +367,7 @@ async function main() {
   check('every switch on: the whole message, line for line', true)
   check('every switch on: the sections in their fixed order', JSON.stringify(headersOf(full.text)) === JSON.stringify([
     '=====Sales=====', '=====Invoices=====', '=====Payment methods=====', '=====Received=====', '=====Cashiers=====',
-    '=====Top products=====', '=====Low stock=====', '=====Expenses=====', '=====Each expense=====', '=====Returns=====', '=====Compare=====',
+    '=====Top products=====', '=====Expenses=====', '=====Each expense=====', '=====Returns=====', '=====Compare=====',
   ]), full.text)
   check('every switch on: still one message into the Summary topic', full.message_thread_id === SUMMARY_TOPIC_A && full.text.length < 3900, `${full.text.length}`)
   const ranking = kernelCalls.find(([kind]) => kind === 'ranking')
@@ -402,7 +402,7 @@ async function main() {
   const both = await overview(envA)
   const previousMode = telegramLang.getTelegramLanguage()
   telegramLang.setTelegramLanguage('both')
-  const drawn = ['sales', 'invoices', 'paymentMethods', 'received', 'cashiers', 'topProducts', 'lowStock', 'expenses', 'eachExpense', 'returns', 'compare']
+  const drawn = ['sales', 'invoices', 'paymentMethods', 'received', 'cashiers', 'topProducts', 'expenses', 'eachExpense', 'returns', 'compare']
     .map((key) => telegram.sectionHeader(key, telegramLang.REPORT_SECTION_EDGE))
   telegramLang.setTelegramLanguage(previousMode)
   check('both: every section header is the shared one-row sectionHeader', JSON.stringify(headersOf(both.text)) === JSON.stringify(drawn) && drawn.includes('=====Received/បានទទួល====='), headersOf(both.text).join('\n'))
@@ -435,7 +435,7 @@ async function main() {
     today.text === await telegram.telegramCommandReply(envA, '/report', T0, 'en', undefined, allOn), today.text)
   check('Send today\'s summary: the switched-on sections come on top of the day summary, nothing of it disappears',
     JSON.stringify(headersOf(today.text)) === JSON.stringify(['=====Sales=====', '=====Invoices=====', '=====Received=====', '=====Expenses=====', '=====Each expense=====',
-      '=====Stock=====', '=====Cashiers=====', '=====Branches=====', '=====Top products=====', '=====Low stock=====', '=====Returns=====', '=====Compare====='])
+      '=====Stock=====', '=====Cashiers=====', '=====Branches=====', '=====Top products=====', '=====Returns=====', '=====Compare====='])
       && ['=====Invoices=====', '=====Expenses=====', '=====Stock=====', '=====Cashiers====='].every((header) => JSON.stringify(rowsUnder(today.text, header)) === JSON.stringify(rowsUnder(plain.text, header)))
       && JSON.stringify(rowsUnder(today.text, '=====Branches=====')) === JSON.stringify(['· Toul Kork: 15 · $362.50', '· Riverside: 3 · $50.00'])
       && rowsUnder(today.text, '=====Sales=====').includes('· Not Paid: 3 · $40.00') && rowsUnder(today.text, '=====Sales=====').includes('· Total discount: $37.50'),
@@ -456,8 +456,7 @@ async function main() {
     posts[webhookBefore] && posts[webhookBefore].text)
   check('Send today\'s summary: the kernel is asked for the whole shop', buttonCalls.length > 0 && buttonCalls.every(([, filters]) => filters.branchId == null), JSON.stringify(buttonCalls))
   check('Send today\'s summary: the whole shop\'s dollars include the other branch', rowsUnder(today.text, '=====Received=====')[0] === '· Dollars: $73.00', today.text)
-  check('Send today\'s summary: the whole shop\'s low stock includes items sold or moved out only on the other branch',
-    rowsUnder(today.text, '=====Low stock=====').includes('· LOW: Night Cream: 4 (⚠ 5)') && rowsUnder(today.text, '=====Low stock=====').includes('· LOW: Clay Mask: 1 (⚠ 5)'), today.text)
+  check('Send today\'s summary: no low / out-of-stock list either', !today.text.includes('=====Low stock====='), today.text)
 
   const shopB = openShop()
   seedShopB(shopB)
@@ -470,11 +469,7 @@ async function main() {
   check('two organizations: neither message carries the other\'s shop or products',
     fromB.text.includes('Synthetic Shop B') && !/Synthetic Shop A|Rose Serum|Lip Tint|Soap Bar|Sunscreen|Toul Kork|Za\b/.test(fromB.text) && !/Shop B|Dara/.test(fromA.text),
     fromB.text)
-  check('two organizations: shop B\'s low stock is its own, eight rows and the rest counted',
-    JSON.stringify(rowsUnder(fromB.text, '=====Low stock=====')) === JSON.stringify([
-      '· OUT: Shop B Balm 01: 0 (⚠ 5)', '· LOW: Shop B Balm 02: 1 (⚠ 5)', '· LOW: Shop B Balm 03: 2 (⚠ 5)', '· LOW: Shop B Balm 04: 3 (⚠ 5)',
-      '· LOW: Shop B Balm 05: 4 (⚠ 5)', '· LOW: Shop B Balm 06: 4 (⚠ 5)', '· LOW: Shop B Balm 07: 4 (⚠ 5)', '· LOW: Shop B Balm 08: 4 (⚠ 5)', '· + 2 more item(s)',
-    ]), rowsUnder(fromB.text, '=====Low stock=====').join('\n'))
+  check('two organizations: shop B\'s message has no low / out-of-stock list to leak', !fromB.text.includes('=====Low stock=====') && !fromA.text.includes('=====Low stock====='), fromB.text)
   check('each expense: eight rows, the rest folded into one Other row that keeps the total',
     JSON.stringify(rowsUnder(fromB.text, '=====Each expense=====')) === JSON.stringify([
       '· Fee 01: $10.00', '· Fee 02: $9.00', '· Fee 03: $8.00', '· Fee 04: $7.00', '· Fee 05: $6.00', '· Fee 06: $5.00', '· Fee 07: $4.00', '· Fee 08: $3.00', '· Other: $3.00',

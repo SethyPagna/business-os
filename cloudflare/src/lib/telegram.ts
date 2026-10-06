@@ -46,6 +46,8 @@ type TelegramConfig = {
    * shift report is on"); `enabled` above still gates both.
    */
   shiftOverview: boolean
+  /** NOTIF-V2: one short Alerts-topic message when a sale takes a product into low or out of stock. Unset means ON. */
+  stockAlerts: boolean
   /** The overview's optional sections; each is on only when its switch says 'true'. */
   summary: TelegramSummarySections
   /** Per-message-family forum topic (message_thread_id); undefined = General. */
@@ -98,7 +100,7 @@ export function isTelegramSwitchValue(raw: string): boolean {
 const SETTING_KEYS = [
   'telegram_automation_enabled', 'telegram_chat_id', 'telegram_language',
   'telegram_sales_enabled', 'telegram_status_enabled', 'telegram_returns_enabled', 'telegram_fees_enabled', 'telegram_stock_in_enabled', 'telegram_stock_out_enabled',
-  'telegram_shift_overview_enabled',
+  'telegram_shift_overview_enabled', 'telegram_stock_alert_enabled',
   ...Object.values(TELEGRAM_SUMMARY_SWITCHES),
   ...TELEGRAM_TOPIC_KEYS,
 ] as const
@@ -246,6 +248,7 @@ async function getTelegramConfig(env: Env): Promise<TelegramConfig> {
     token: String(env.TELEGRAM_BOT_TOKEN || '').trim(),
     language: normalizeTelegramLanguage(values.telegram_language),
     shiftOverview: isEnabled(values.telegram_shift_overview_enabled, true),
+    stockAlerts: isEnabled(values.telegram_stock_alert_enabled, true),
     summary: Object.fromEntries(Object.entries(TELEGRAM_SUMMARY_SWITCHES)
       .map(([section, key]) => [section, String(values[key] ?? '').trim() === 'true'])) as TelegramSummarySections,
     // Everything is live after the first setup; individual category switches
@@ -843,7 +846,6 @@ export function formatDaySummary(stats: DayStats, cashiers: CashierRow[], catego
   if (extra.cashiers?.branches) section('branches', extra.cashiers.branches.flatMap((row) => countedRowLines(row, 60)), showSales)
   if (extra.products) {
     section('topProducts', topProductRows(extra.products), showSales)
-    section('lowStock', lowStockSectionRows(extra.products), showSales)
   }
   if (extra.returns) section('returns', returnsRows(extra.returns.count, extra.returns.usd, extra.returns))
   if (extra.compare) section('compare', compareRows(Number(stats.sales?.usd) || 0, extra.compare), showSales)
@@ -997,18 +999,77 @@ const STOCK_IN_EDIT_ROW = "COALESCE(reference_id >= 'stock-in-edit:' AND referen
 export const stockDigestInWhere = (): string => `(movement_type IN ('add', 'stock_in', 'transfer_in', 'move_in') OR (${STOCK_IN_EDIT_ROW} AND quantity <> 0)) AND ${notARevert()}`
 export const stockDigestOutWhere = (): string => `${STOCK_OUT_MOVEMENT} AND NOT ${STOCK_IN_EDIT_ROW} AND ${notARevert()}`
 
-/** Items at or below their alert level now that were sold or taken out of stock on the scope's day and branch. */
-async function lowStockMovedOnDay(env: Env, filters: SalesFilters): Promise<{ rows: LowStockRow[]; more: number }> {
-  const lowThresholdSql = lowStockThresholdSql(await loadLowStockConfig(env), 'low_stock_threshold')
-  const sold = whereActiveSales('sales', filters)
-  const removed = [stockDigestOutWhere(), localDateRangeClause('inventory_movements.created_at')]
-  if (filters.branchId != null) removed.push('inventory_movements.branch_id = @branchId')
-  const rows = await getDb(env).prepare(`SELECT name, stock_quantity, ${lowThresholdSql} AS low_threshold, out_of_stock_threshold, COUNT(*) OVER () AS matched
-    FROM products WHERE is_active = 1 AND ${lowOrOutOfStockSql(lowThresholdSql)}
-      AND (id IN (SELECT sale_items.product_id FROM sale_items JOIN sales ON sales.id = sale_items.sale_id WHERE ${sold.sql})
-        OR id IN (SELECT inventory_movements.product_id FROM inventory_movements WHERE ${removed.join(' AND ')}))
-    ORDER BY COALESCE(stock_quantity, 0) ASC, name ASC LIMIT ${SUMMARY_ROWS}`).all<LowStockRow & { matched: number }>(sold.params)
-  return { rows, more: Math.max(0, (Number(rows[0]?.matched) || 0) - rows.length) }
+// ---- Stock alerts (NOTIF-V2, owner ruling 6 Oct 2026) ----------------------
+//
+// The bell and Telegram follow ONE rule: a message only when a SALE carries a
+// product into low or out of stock, once per crossing, never a standing list.
+// The rows are the bell's own (stock_alert_events, written inside the sale's
+// atomic batch by lib/saleStockAlerts.ts). They are announced HERE, after the
+// sale has committed, from a waitUntil the route hands this function -- never
+// inside the sale batch, so a Telegram outage cannot slow, fail or roll back a
+// sale. The `/stock`, `/lowstock` and `/inventory` commands remain: they are
+// answers to a person asking, not messages the shop pushes unprompted.
+
+/** A crossing still worth announcing; older unsent rows (a long outage, Telegram switched off) stay quiet. */
+const STOCK_ALERT_TELEGRAM_WINDOW_SQL = "datetime('now', '-2 hours')"
+const STOCK_ALERT_TELEGRAM_ROWS = 10
+// Hash anchors the Dashboard turns into its Low stock / Out of stock card
+// (frontend/src/utils/notificationTargets.ts); a cold load of `<admin>/#out-of-stock`
+// lands on the card, signing in first when it must.
+const STOCK_ALERT_LINK_ANCHOR = { out: 'out-of-stock', low: 'low-stock' } as const
+
+export type StockAlertTelegramRow = { id: number; product_name: string | null; alert_state: 'low' | 'out'; quantity_after: number }
+
+const stockAlertQuantity = (value: unknown): string => String(Math.round((Number(value) || 0) * 1000) / 1000)
+
+/** The one message for every crossing a sale (or a few close together) produced: OUT first, capped, with the card links. */
+export function formatStockAlertTelegramMessage(rows: StockAlertTelegramRow[], language: TelegramLanguage, adminUrl: string): string {
+  return withLanguage(language, () => {
+    const ordered = [...rows].sort((a, b) => (a.alert_state === b.alert_state ? a.id - b.id : a.alert_state === 'out' ? -1 : 1))
+    const shown = ordered.slice(0, STOCK_ALERT_TELEGRAM_ROWS)
+    const lines = [reportTitle('⚠️', 'Stock alert', 'ជូនដំណឹងស្តុក')]
+    for (const row of shown) {
+      const state = row.alert_state === 'out' ? bi('OUT', 'អស់ស្តុក') : bi('LOW', 'ស្តុកទាប')
+      lines.push(...telegramRowLines(`${ROW_BULLET}${state}: ${cleanLine(row.product_name || '', 120)}:`, [stockAlertQuantity(row.quantity_after)]))
+    }
+    if (ordered.length > shown.length) lines.push(`${ROW_BULLET}${moreItems(ordered.length - shown.length)}`)
+    const base = String(adminUrl || '').trim().replace(/\/$/, '')
+    if (base) {
+      for (const state of ['out', 'low'] as const) {
+        if (ordered.some((row) => row.alert_state === state)) lines.push(`🔗 ${base}/#${STOCK_ALERT_LINK_ANCHOR[state]}`)
+      }
+    }
+    return lines.join('\n')
+  })
+}
+
+/**
+ * Announce the crossings no one has been told about yet. Claims them with one
+ * UPDATE ... RETURNING (so overlapping sales never send the same crossing
+ * twice), sends one message to the Alerts topic, and clears the claim when the
+ * send fails so the next drain inside the window retries. Resolves to how many
+ * crossings were announced; throws only the Telegram error, which the caller
+ * (a waitUntil) logs and drops. Everything it reads is this deployment's own
+ * settings: no chat or topic id lives in code, so each organization announces
+ * only to its own chat.
+ */
+export async function sendPendingStockAlerts(env: Env): Promise<number> {
+  const config = await getTelegramConfig(env)
+  if (!config.enabled || !config.stockAlerts || configurationProblem(config)) return 0
+  const db = getDb(env)
+  const claimed = await db.prepare(`UPDATE stock_alert_events SET telegram_sent_at = CURRENT_TIMESTAMP
+    WHERE telegram_sent_at IS NULL AND created_at >= ${STOCK_ALERT_TELEGRAM_WINDOW_SQL}
+    RETURNING id, product_name, alert_state, quantity_after`).all<StockAlertTelegramRow>()
+  if (!claimed.length) return 0
+  try {
+    await postTelegram(config, formatStockAlertTelegramMessage(claimed, config.language, String(env.BUSINESS_OS_ADMIN_URL || '')), config.chatId, config.topics.telegram_topic_alerts, 'telegram_topic_alerts')
+  } catch (error) {
+    // json_each carries the ids as ONE bound parameter (D1 allows 100).
+    await db.prepare('UPDATE stock_alert_events SET telegram_sent_at = NULL WHERE id IN (SELECT value FROM json_each(@ids))')
+      .run({ ids: JSON.stringify(claimed.map((row) => row.id)) }).catch(() => undefined)
+    throw error
+  }
+  return claimed.length
 }
 
 async function inventoryReport(env: Env, language: TelegramLanguage): Promise<string> {
@@ -1737,7 +1798,7 @@ export type SummarySectionFigures = {
   sales?: { received: ShiftCashResult; notPaidCount: number; totalDiscountUsd: number }
   /** `cashiers` is null where the message lists them anyway (the day summary); `branches` is null on a branch's overview. */
   cashiers?: { cashiers: CountedMoney[] | null; branches: CountedMoney[] | null }
-  products?: { top: Array<{ name: string; qty: number; usd: number }>; low: LowStockRow[]; moreLow: number }
+  products?: { top: Array<{ name: string; qty: number; usd: number }> }
   /** Not the riel paid out: a refund does not record the currency it was paid in, so this is its riel equivalent. */
   returns?: { count: number; usd: number; rielEquivalent: number; items: number }
   expenses?: Array<{ label: string; usd: number; khr: number }>
@@ -1770,9 +1831,6 @@ const notPaidValue = (creditUsd: number, sales?: SummarySectionFigures['sales'])
 
 const topProductRows = (products: NonNullable<SummarySectionFigures['products']>): string[] =>
   products.top.flatMap((row) => countedRowLines({ name: row.name, count: row.qty, usd: row.usd }, 60))
-
-const lowStockSectionRows = (products: NonNullable<SummarySectionFigures['products']>): string[] =>
-  [...products.low.flatMap(lowStockRowLines), ...(products.moreLow ? [`${ROW_BULLET}${moreItems(products.moreLow)}`] : [])]
 
 const eachExpenseRows = (expenses: NonNullable<SummarySectionFigures['expenses']>): string[] =>
   expenses.flatMap((row) => telegramRowLines(`${ROW_BULLET}${cleanLine(row.label, 60)}:`, [money(row.usd, row.khr)]))
@@ -1845,7 +1903,6 @@ function overviewSections(figures: ShiftOverviewFigures, categories?: TelegramCa
   if (extra.cashiers?.branches) section('branches', extra.cashiers.branches.flatMap((row) => countedRowLines(row, 60)), showSales)
   if (extra.products) {
     section('topProducts', topProductRows(extra.products), showSales)
-    section('lowStock', lowStockSectionRows(extra.products), showSales)
   }
 
   // The day summary's split and rows, switches applied the same way.
@@ -1983,12 +2040,11 @@ async function summarySectionFigures(
     const sameMoment = scope.runningAtMs == null ? {} : { createdTo: new Date(scope.runningAtMs + offsetDays * DAY_MS).toISOString() }
     return { startDate: date, endDate: date, branchId: filters.branchId, ...sameMoment }
   }
-  const [received, cashiers, branches, top, low, returned, expenses, yesterday, lastWeek] = await Promise.all([
+  const [received, cashiers, branches, top, returned, expenses, yesterday, lastWeek] = await Promise.all([
     sections.sales ? tenderWhere(env, [sold.sql], sold.params) : null,
     sections.cashiers && !cashierListShown ? groupedBy('cashier') : null,
     sections.cashiers && filters.branchId == null ? groupedBy('branch') : null,
     sections.products ? getProductSalesRanking(env, filters, TOP_PRODUCTS) : null,
-    sections.products ? lowStockMovedOnDay(env, filters) : null,
     sections.returns
       ? getDb(env).prepare(`SELECT COUNT(*) AS count, ROUND(COALESCE(SUM(total_refund_usd), 0), 2) AS usd, COALESCE(SUM(total_refund_khr), 0) AS khr,
         COALESCE(SUM((SELECT SUM(return_items.quantity) FROM return_items WHERE return_items.return_id = returns.id)), 0) AS items
@@ -2002,7 +2058,7 @@ async function summarySectionFigures(
   return {
     ...(received && { sales: { received, notPaidCount: Number(notPaidCount) || 0, totalDiscountUsd: Number(totalDiscountUsd) || 0 } }),
     ...(sections.cashiers && { cashiers: { cashiers, branches } }),
-    ...(top && low && { products: { top: top.map((row) => ({ name: row.product_name, qty: row.qty, usd: row.line_sales_usd })), low: low.rows, moreLow: low.more } }),
+    ...(top && { products: { top: top.map((row) => ({ name: row.product_name, qty: row.qty, usd: row.line_sales_usd })) } }),
     ...(sections.returns && {
       returns: { count: Number(returned?.count) || 0, usd: Number(returned?.usd) || 0, rielEquivalent: Number(returned?.khr) || 0, items: Number(returned?.items) || 0 },
     }),

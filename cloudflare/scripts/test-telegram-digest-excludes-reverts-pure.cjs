@@ -43,9 +43,9 @@ try {
   insert.run('remove', 7, `Revert of #${gone}`, `revert:${gone}`, '2026-09-30 06:00:00')
   assert.deepEqual({ ...count(telegram.stockDigestInWhere(), '2026-09-22') }, { count: 1, quantity: 6 }, 'a receipt whose Revert was reverted counts again')
   assert.deepEqual({ ...count(telegram.stockDigestInWhere(), '2026-09-23') }, { count: 0, quantity: 0 }, 'a receipt reverted once does not')
-  // The low-stock list reads the same fragment through a qualified, unaliased subselect.
+  // The fragment still works through a qualified, unaliased subselect (the day summary's low-stock list that used it was retired by NOTIF-V2).
   const moved = f.sql.prepare(`SELECT inventory_movements.product_id FROM inventory_movements WHERE ${telegram.stockDigestOutWhere()} AND substr(inventory_movements.created_at, 1, 10) = '2026-09-21'`).all()
-  assert.equal(moved.length, 0, 'a reverted removal does not put its product on the low-stock-moved list')
+  assert.equal(moved.length, 0, 'a reverted removal is not counted as stock out through a qualified subselect')
   console.log('PASS past days drop reverted originals and keep restored ones')
 
   // RET-D (owner, 5 Oct 2026): a stock-in line lowered from 10 to 7 is a

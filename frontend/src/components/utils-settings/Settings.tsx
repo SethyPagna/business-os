@@ -2246,6 +2246,8 @@ export default function Settings() {
                 ['telegram_fees_enabled', t('fees') || 'Expenses', t('telegram_cat_fees_desc') || 'New expense: type, amount, date, label, and note'],
                 ['telegram_stock_in_enabled', t('stock_in') || 'Stock in', t('telegram_cat_stock_in_desc') || 'Product, quantity, branch, reason, and received date'],
                 ['telegram_stock_out_enabled', t('stock_out') || 'Stock out', t('telegram_cat_stock_out_desc') || 'Product, quantity, branch, and reason'],
+                // NOTIF-V2: the Worker reads this key (lib/telegram.ts getTelegramConfig), unset means on, like the rest.
+                ['telegram_stock_alert_enabled', t('telegram_cat_stock_alert') || 'Low and out-of-stock alerts', t('telegram_cat_stock_alert_desc') || 'When a sale takes a product to low or out of stock: product, quantity left and a link to the Dashboard card'],
                 // T10: the Worker reads this key (lib/telegram.ts getTelegramConfig)
                 // with the same unset-means-on default as the switches above.
                 ['telegram_shift_overview_enabled', t('telegram_reports_overview') || 'Reports overview', t('telegram_reports_overview_desc') || "One minute after a shift closes: that day's overview for the shift's branch"],
