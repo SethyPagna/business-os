@@ -54,8 +54,8 @@ for (const lang of ['en', 'km']) {
 // The Transfer History toggle: icon-only with a translated tooltip, it re-queries with includeCutover, resets paging,
 // is part of the filter count and Clear, and the export uses the same scope.
 const branches = readFileSync(new URL('../src/components/branches/Branches.tsx', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
-assert.match(branches, /includeCutover: showConsolidationTransfers \? '1' : undefined,\n\s+page: transferPage,/, 'list request')
-assert.match(branches, /includeCutover: showConsolidationTransfers \? '1' : undefined,\n\s+page: exportPage,/, 'export request')
+assert.match(branches, /\.\.\.\(showConsolidationTransfers \? \{ includeCutover: '1' \} : \{\}\),\n\s+page: transferPage,/, 'list request')
+assert.match(branches, /\.\.\.\(showConsolidationTransfers \? \{ includeCutover: '1' \} : \{\}\),\n\s+page: exportPage,/, 'export request')
 assert.match(branches, /\[requestedMode, \.\.\.\(requestedMode === 'transfers' \? \[branchDateRange, transferFromFilter, transferToFilter, showConsolidationTransfers,/, 'load key')
 assert.match(branches, /setShowConsolidationTransfers\(\(value\) => !value\); setTransferPage\(1\)/, 'toggle resets paging')
 assert.match(branches, /setShowConsolidationTransfers\(false\)\n\s+setTransferPage\(1\)/, 'Clear resets it')

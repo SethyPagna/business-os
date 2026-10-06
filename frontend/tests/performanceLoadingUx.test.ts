@@ -1519,7 +1519,7 @@ assert.match(
   /loadPromiseRef\.current && loadPromiseKeyRef\.current === requestedKey/,
   'branches should reuse only an identical in-flight request',
 )
-assert.match(branches, /JSON\.stringify\(\[requestedMode, \.\.\.\(requestedMode === 'transfers' \? \[branchDateRange, transferFromFilter, transferToFilter, transferPage, transferPageSize\] : \[\]\)\]\)/)
+assert.match(branches, /JSON\.stringify\(\[requestedMode, \.\.\.\(requestedMode === 'transfers' \? \[branchDateRange, transferFromFilter, transferToFilter, showConsolidationTransfers, transferPage, transferPageSize\] : \[\]\)\]\)/)
 assert.match(
   branches,
   /withLoaderTimeout\(\s*\(\) => branchApi\.getBranchStock\(branchId, \{ page: 1, pageSize: 20, stockState: 'positive' \}\),\s*'Branch stock',\s*12000,\s*\)/,
