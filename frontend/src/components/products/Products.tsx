@@ -1,5 +1,6 @@
 import ProductNameRail from '../shared/ProductNameRail'
 import { canViewAcquisitionCosts, canEditAcquisitionCosts, omitUnauthorizedCatalogCosts } from '../../utils/acquisitionCostAccess.ts'
+import { canAddProductVariant, canAdjustAllProductPrices } from '../../utils/productActionAccess.ts'
 // Products
 // Main Products page; all sub-modals are imported from sibling files.
 
@@ -1400,6 +1401,10 @@ function ProductsFullEditor() {
   // every control's rule is visible in one place. See
   // utils/permissionActions.ts for what each action maps to server-side.
   const canAddProduct = can('products', 'add')
+  // Add variant creates a product row (Add variant AND Add product, Full tier) and the catalog-wide price adjustment
+  // reprices every product (Full tier AND Edit product); the Worker refuses both otherwise (loophole N6 / N8).
+  const canAddVariant = canAddProductVariant(user)
+  const canAdjustAllPrices = canAdjustAllProductPrices(user)
   const canImportProducts = can('products', 'import')
   const canExportProducts = can('products', 'export')
   const canManageLookups = can('products', 'manage_lookups')
@@ -4665,13 +4670,13 @@ function ProductsFullEditor() {
         triggerWrapperClassName="shrink-0"
         trigger={<button type="button" className="flex h-8 w-8 items-center justify-center rounded-full text-slate-400 hover:bg-white hover:text-slate-600 dark:hover:bg-slate-700 dark:hover:text-slate-200" aria-label={tr('more_actions', 'More actions')}><MoreVertical className="h-4 w-4" /></button>}
         items={[
-          { label: tr('add_variant', 'Add variant'), icon: <Plus className="h-3.5 w-3.5" />, onClick: () => setVariantModal(lead) },
+          ...(canAddVariant ? [{ label: tr('add_variant', 'Add variant'), icon: <Plus className="h-3.5 w-3.5" />, onClick: () => setVariantModal(lead) }] : []),
           { label: tr('add_image', 'Add image'), icon: <ImagePlus className="h-3.5 w-3.5" />, onClick: () => openProductFormTab(lead, 'basic') },
         ]}
       />
       </>
     )
-  }, [openProductFormTab, tr])
+  }, [canAddVariant, openProductFormTab, tr])
 
   // P3-L6. Held rows are keyed off the group's FULL id list, not its display
   // rows: mergeSameDetailRows collapses branch-only duplicates into one
@@ -5211,13 +5216,15 @@ function ProductsFullEditor() {
                   UPDATEs with a true preview count; never materializes the
                   catalog's ids in the client, and has NO undo (stated in
                   the confirm). */}
-              <button
-                disabled={bulkActionBusy}
-                className="rounded-lg border border-amber-300 px-4 py-1.5 text-xs font-medium text-amber-700 hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-amber-600/50 dark:text-amber-300 dark:hover:bg-amber-900/20"
-                onClick={runBulkPriceAdjustAllProducts}
-              >
-                {tr('bulk_price_apply_all', 'Apply to ALL products in the system…')}
-              </button>
+              {canAdjustAllPrices ? (
+                <button
+                  disabled={bulkActionBusy}
+                  className="rounded-lg border border-amber-300 px-4 py-1.5 text-xs font-medium text-amber-700 hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-amber-600/50 dark:text-amber-300 dark:hover:bg-amber-900/20"
+                  onClick={runBulkPriceAdjustAllProducts}
+                >
+                  {tr('bulk_price_apply_all', 'Apply to ALL products in the system…')}
+                </button>
+              ) : null}
             </div>
           </div>
         </div>
@@ -5451,7 +5458,7 @@ function ProductsFullEditor() {
             fmtKHR={fmtKHR}
             t={t}
             onEdit={()=>{setDetailProduct(null);openProductFormTab(detailProduct, 'basic')}}
-            onAddVariant={canAddProduct ? () => { setVariantModal(detailProduct); setDetailProduct(null) } : undefined}
+            onAddVariant={canAddVariant ? () => { setVariantModal(detailProduct); setDetailProduct(null) } : undefined}
             onAdjustStock={canAdjustInventoryStock ? () => { setDetailProduct(null); setStockSession({ mode: 'add', product: detailProduct }) } : undefined}
             onClose={()=>setDetailProduct(null)}
             onImageClick={(src, gallery, startIndex = 0) => {

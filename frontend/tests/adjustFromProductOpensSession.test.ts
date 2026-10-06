@@ -77,7 +77,8 @@ function gatesDetailActions(source: string): boolean {
   const detail = jsxBlock(source, 'ProductDetailModal')
   return /const canAddProduct = can\('products', 'add'\)/.test(source)
     && /const canAdjustInventoryStock = can\('inventory', 'adjust'\)/.test(source)
-    && /onAddVariant=\{canAddProduct \? \(\) => \{/.test(detail)
+    && /const canAddVariant = canAddProductVariant\(user\)/.test(source)
+    && /onAddVariant=\{canAddVariant \? \(\) => \{/.test(detail)
     && /onAdjustStock=\{canAdjustInventoryStock \? /.test(detail)
 }
 

@@ -1791,7 +1791,10 @@ app.get('/stock-ledger/:id/balance', async (c) => {
 const BULK_PRICE_FIELDS = new Set(['selling_price_usd', 'selling_price_khr', 'wholesale_price_usd', 'wholesale_price_khr', 'cost_price_usd', 'cost_price_khr'])
 app.post('/bulk-price-adjust', async (c) => {
   const user = c.get('user')
-  if (getPermissionTier(user, 'products') !== 'full') {
+  // A catalog-wide price change is a product edit. The tier alone used to decide it, so a role saved as
+  // Products Full with the Edit product switch off still repriced every product (loophole N6). The action tier
+  // honours that override and equals the tier when none is set.
+  if (getPermissionTier(user, 'products') !== 'full' || getActionTier(user, 'products', 'edit') !== 'full') {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
   const body = await c.req.json<{
@@ -2724,7 +2727,11 @@ app.post('/bulk-delete-jobs/:id/cancel', async (c) => {
 
 app.post('/variant', async (c) => {
   const user = c.get('user')
-  if (!hasPermission(user, 'products')) {
+  // Add variant creates a product row, so it needs BOTH switches: the Add variant action and Add product (loophole
+  // N8). The old check read the section grant alone, so a role with either switch off still created products here.
+  // Each action tier honours its override and equals the section tier when none is set; Full only (variant is not a
+  // review-queued action).
+  if (getActionTier(user, 'products', 'variant') !== 'full' || getActionTier(user, 'products', 'add') !== 'full') {
     return c.json({ error: 'You do not have permission to perform this action' }, 403)
   }
   const body = (await c.req.json<Record<string, unknown>>().catch(() => ({}))) as Record<string, unknown>
