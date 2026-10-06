@@ -291,9 +291,18 @@ async function main() {
     assert.equal(preview.json.revert.historyId, set.json.action_history_id)
     assert.deepEqual([preview.json.effect.quantity, preview.json.effect.batchId, preview.json.effect.branchBefore, preview.json.effect.branchAfter],
       [-27, 20, 60, 33], 'the Set row previews -27 on its own lot')
+    // The History Undo confirm states the same recorded change, by received date and branch.
+    const effect = await send(f, 'GET', `/api/action-history/${set.json.action_history_id}/effect`)
+    assert.equal(effect.status, 200, JSON.stringify(effect.json))
+    assert.equal(effect.json.effect.direction, 'undo')
+    assert.deepEqual(effect.json.effect.lines.map((l) => [l.change, l.batchId, l.receivedAt, l.branchName]), [[-27, 20, '2026-09-02', 'Shop']])
+    assert.deepEqual(effect.json.effect.branches.map((b) => [b.branchName, b.before, b.after]), [['Shop', 60, 33]])
     const res = await undo(f, set.json.action_history_id, 0)
     assert.equal(res.status, 200, JSON.stringify(res.json))
     assert.deepEqual(lots(f), { old: 3, delivery: 30, branch: 33, product: 33, cost: 6.8182 }, '33, not 30')
+    const redoEffect = (await send(f, 'GET', `/api/action-history/${set.json.action_history_id}/effect`)).json.effect
+    assert.equal(redoEffect.direction, 'redo', 'an undone record previews its Redo')
+    assert.deepEqual([redoEffect.lines.map((l) => l.change), redoEffect.branches.map((b) => [b.before, b.after])], [[27], [[33, 60]]])
     assert.deepEqual((await send(f, 'GET', '/api/action-history/movements/48026/revert-preview')).json.laterSets, [], 'an undone Set no longer warns')
     assert.deepEqual(delivery(f), { received_quantity: 30, received_cost_usd: 210, is_active: 1 }, 'the delivery stays a purchase')
     const counter = movements(f).at(-1)
@@ -529,6 +538,10 @@ async function main() {
     assert.equal(moved.status, 200, JSON.stringify(moved.json))
     assert.equal(stock(f).lot10, 3, 'the older lot is not drawn FIFO')
     assert.equal(stock(f).lot11, 5)
+    const effect = (await send(f, 'GET', `/api/action-history/${moved.json.action_history_id}/effect`)).json.effect
+    assert.ok(effect, 'the transfer History entry has an effect')
+    assert.deepEqual(effect.lines.map((l) => [l.branchId, l.change, l.receivedAt === null]).sort(), [[1, 2, false], [2, -2, false]], 'Undo puts 2 back on the source lot and takes 2 from the destination, both dated')
+    assert.deepEqual(effect.branches.map((b) => [b.branchId, b.after - b.before]).sort(), [[1, 2], [2, -2]])
     const replay = await send(f, 'POST', '/api/inventory/transfer', body)
     assert.equal(replay.json.replayed, true)
     assert.equal(stock(f).lot11, 5)

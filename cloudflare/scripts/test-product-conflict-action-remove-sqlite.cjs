@@ -66,6 +66,14 @@ async function main() {
     assert.equal(removed.status,200,JSON.stringify(removed.body))
     const history=fixture.d1.db.prepare('SELECT id,undo_payload FROM action_history WHERE id=?').get(removed.body.action_history_id)
     const payload=JSON.parse(history.undo_payload)
+    // REVERT-SET: the History Undo confirm states what the restore puts back, per branch and received date.
+    const { historyStockEffect } = loadTs('lib/stockRevertEffect.ts', { './db': {}, './stockLedgerQuery': { LEDGER_OUT_TYPES: [] } })
+    const effect = await historyStockEffect(fixture.db, fixture.d1.db.prepare('SELECT id,status,undo_payload,redo_payload FROM action_history WHERE id=?').get(history.id))
+    assert.equal(effect.direction,'undo')
+    assert.deepEqual(effect.lines.filter(l=>l.batchId===99001).map(l=>[l.branchId,l.change,l.receivedAt]).sort(),[[1,2,'2026-08-17'],[2,3,'2026-08-17']],'the lot comes back with its 2 at branch 1 and its 3 at branch 2')
+    assert.ok(effect.lines.every(l=>l.change>0),'an Undo of a removal only adds')
+    assert.ok(effect.branches.every(b=>b.before===0&&b.after>0),'every branch goes from 0 to its saved quantity')
+    assert.equal(effect.branches.reduce((t,b)=>t+b.after,0),5,'5 units in all, as saved')
     const applier=fixture.undo.resolveUndoApplier(payload)
     const graphBeforeFailure=productGraph(fixture.d1)
     const ledgerTables=['product_remove_operations','undo_snapshots','action_history','inventory_movements','audit_logs']

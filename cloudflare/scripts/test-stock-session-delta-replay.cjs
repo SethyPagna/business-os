@@ -51,6 +51,8 @@ const load = loader()
 const api = load('lib/stockSession.ts')
 const ledger = load('lib/stockRevert.ts')
 const { getDb } = load('lib/db.ts')
+const { historyStockEffect } = load('lib/stockRevertEffect.ts')
+const effect = (f, r) => historyStockEffect(getDb(f.env), q(f, 'SELECT id, status, undo_payload, redo_payload FROM action_history WHERE id=?', r.actionHistoryId))
 
 const payload = (f, r) => JSON.parse(f.sql.prepare('SELECT undo_payload FROM action_history WHERE id=?').get(r.actionHistoryId).undo_payload)
 const replay = (f, r, direction, generation) => api.replayStockSession(f.env, user, direction, r.actionHistoryId, generation, payload(f, r))
@@ -104,9 +106,15 @@ async function main() {
     const later = await session(f, 'delta-later-0001', 4)
     const lotId = r.items[0].batchId
     assert.equal(later.items[0].batchId, lotId, 'same date and cost: the same lot')
+    // The confirm states the session's own 10, not the lot's 14 and not today's total.
+    const undoEffect = await effect(f, r)
+    assert.deepEqual([undoEffect.direction, undoEffect.lines.map((l) => [l.batchId, l.change]), undoEffect.branches.map((b) => [b.before, b.after])],
+      ['undo', [[lotId, -10]], [[14, 4]]])
     await replay(f, r, 'undo', 0)
     assert.deepEqual([lotQty(f, lotId), branch(f), product(f)], [4, 4, 4])
     assert.deepEqual(lot(f, lotId), { received_quantity: 4, received_cost_usd: 8, supplier_name: 'Fixture Supplier', unit_cost_usd: 2, is_active: 1 })
+    const redoEffect = await effect(f, r)
+    assert.deepEqual([redoEffect.direction, redoEffect.lines.map((l) => l.change), redoEffect.branches.map((b) => [b.before, b.after])], ['redo', [10], [[4, 14]]])
     await replay(f, r, 'redo', 1)
     assert.deepEqual([lotQty(f, lotId), branch(f), product(f)], [14, 14, 14])
     assert.deepEqual(lot(f, lotId), { received_quantity: 14, received_cost_usd: 28, supplier_name: 'Fixture Supplier', unit_cost_usd: 2, is_active: 1 })

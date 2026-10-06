@@ -254,6 +254,21 @@ app.get('/movements/:id/revert-preview', async (c) => {
   }
 })
 
+// REVERT-SET (lead, 6 Oct 2026): what a History Undo/Redo of a stock record
+// will add or remove, by received date and branch, read from the record
+// itself -- the History confirm states it before the operator presses Undo.
+app.get('/:id/effect', async (c) => {
+  const user = c.get('user'), db = getDb(c.env)
+  const row = await db.prepare('SELECT * FROM action_history WHERE id=?').get<ActionHistoryRow>([Number(c.req.param('id'))])
+  if (!row || !canOperateHistoryRow(user, row)) return c.json({ error: 'Action not found.' }, 404)
+  if (!canUseNamedAppliers(user, [parseJson(row.undo_payload), parseJson(row.redo_payload)])) return c.json({ error: 'No permission.' }, 403)
+  const requested = c.req.query('direction')
+  const direction = requested === 'undo' || requested === 'redo' ? requested : undefined
+  const { historyStockEffect } = await import('../lib/stockRevertEffect')
+  const effect = await historyStockEffect(db, { id: Number(row.id), status: row.status == null ? null : String(row.status), undo_payload: row.undo_payload ?? null, redo_payload: row.redo_payload ?? null }, direction)
+  return c.json({ success: true, effect })
+})
+
 app.get('/:id/details', async (c) => {
   const user = c.get('user'), db = getDb(c.env)
   const row = await db.prepare('SELECT * FROM action_history WHERE id=?').get<ActionHistoryRow>([Number(c.req.param('id'))])

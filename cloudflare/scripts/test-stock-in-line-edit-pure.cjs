@@ -140,6 +140,7 @@ function sessionLines(f, movementId) {
 }
 const editRows = (f, movementId) => f.sql.prepare("SELECT movement_type,quantity,total_cost_usd,batch_id,reference_id FROM inventory_movements WHERE reference_id LIKE ? ORDER BY id").all(`stock-in-edit:${movementId}:%`)
 const historyOf = (f, operationId) => f.sql.prepare('SELECT h.id,h.status,h.undo_payload FROM stock_lot_adjustment_operations o JOIN action_history h ON h.id=o.history_id WHERE o.id=?').get(operationId)
+const effectOf = async (f, id) => (await send(f, 'GET', `/api/action-history/${id}/effect`)).json.effect
 const undo = (f, id, generation) => send(f, 'POST', `/api/action-history/${id}/undo`, { expected_generation: generation, require_applied: true })
 const redo = (f, id, generation) => send(f, 'POST', `/api/action-history/${id}/redo`, { expected_generation: generation, require_applied: true })
 // "Sell" units out of a lot the way a sale's stock effect lands: lot, branch and product together.
@@ -407,6 +408,10 @@ async function main() {
     assert.equal(sessionLines(f, second.movementId)[0].batch_id, A, 'the other receipt stays on its lot')
     assert.equal(sessionList(f).length, 2, 'an edit row never becomes a session of its own')
     const history = historyOf(f, res.json.operation_id)
+    // The Undo confirm names both lots by received date; the branch total does not move.
+    const moveEffect = await effectOf(f, history.id)
+    assert.deepEqual(moveEffect.lines.map((l) => [l.batchId, l.change, l.receivedAt]).sort((x, y) => x[0] - y[0]), [[A, 10, '2026-09-05'], [T, -10, '2026-09-07']].sort((x, y) => x[0] - y[0]))
+    assert.deepEqual(moveEffect.branches, [], 'a date move changes no branch total')
     assert.equal((await undo(f, history.id, 0)).status, 200)
     a = lot(f, A); t = lot(f, T)
     assert.deepEqual([a.stock, a.received_quantity, a.received_cost_usd], [15, 15, 30])
@@ -577,6 +582,9 @@ async function main() {
     saleRow(f, batchId, 5)
     assert.deepEqual(totals(f), { branch: 7, product: 7, lots: 7 })
     const history = historyOf(f, res.json.operation_id)
+    const undoEffect = await effectOf(f, history.id)
+    assert.deepEqual([undoEffect.direction, undoEffect.lines.map((l) => [l.batchId, l.change]), undoEffect.branches.map((b) => [b.before, b.after])],
+      ['undo', [[batchId, -2]], [[7, 5]]], 'the confirm states the edit own -2, not the line total 12')
     const undone = await undo(f, history.id, 0)
     assert.equal(undone.status, 200, JSON.stringify(undone.json))
     assert.deepEqual(totals(f), { branch: 5, product: 5, lots: 5 }, 'the sale stays; the edit is gone')
