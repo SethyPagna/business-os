@@ -1122,6 +1122,24 @@ const REPLAY_MUTATION_ORDER = {
   redo: ['products', 'batches', 'branchStock', 'branchBatchStock'],
 } as const
 
+// Revision families replay does NOT compare. A branch's revision (0124 trigger stock_revision_branches_update)
+// moves on ANY edit of the branches row: the 0229 role/canonical_key backfill, a rename, an owner editing the
+// phone number. None of those changes what Undo of a stock session writes (products, lots, branch and lot stock
+// and movements, all compared on their own), so a compared 'branch' revision turned every earlier session at
+// that branch into an Undo that could only fail with the generic "Stock changed". What a branch change CAN
+// invalidate is the branch being switched off: replay asserts that directly (is_active) instead. Older
+// snapshots carry 'branch' entries; they are filtered out of the saved state below so those sessions compare
+// on the same footing as new ones. The commit path's own same-request branch guard is unchanged.
+const REPLAY_UNCOMPARED_REVISION_TYPES = ['branch'] as const
+const REPLAY_UNCOMPARED_REVISION_SQL = REPLAY_UNCOMPARED_REVISION_TYPES.map(type => `'${type}'`).join(',')
+
+// The saved `expected` state without the uncompared revision families. json_each keeps array order and number
+// text, so a snapshot that never had such entries compares byte-for-byte as before.
+const REPLAY_EXPECTED_SQL = `(SELECT json_set(json_extract(payload_json,'$.expected'),'$.revisions',
+  json((SELECT json_group_array(json(rev.value)) FROM json_each(json_extract(payload_json,'$.expected'),'$.revisions') rev
+    WHERE json_extract(rev.value,'$.entity_type') NOT IN (${REPLAY_UNCOMPARED_REVISION_SQL}))))
+  FROM undo_snapshots WHERE id=@snapshotId)`
+
 async function stockReplayStateSql(env: Env, memberBranchNamesCaptured = true): Promise<string> {
   const fields: string[] = []
   for (const [key, [table, where]] of Object.entries(REPLAY_TABLES)) {
@@ -1155,6 +1173,7 @@ async function stockReplayStateSql(env: Env, memberBranchNamesCaptured = true): 
       FROM revision_sources sources
       JOIN json_each(sources.groups_json) source
       JOIN json_each(source.value) item
+      WHERE json_extract(item.value,'$.entity_type') NOT IN (${REPLAY_UNCOMPARED_REVISION_SQL})
     ) SELECT json_object(${fields.join(',')},
       'revisions',json((SELECT json_group_array(json_object('entity_type',entity_type,'entity_key',entity_key,'revision',revision)) FROM
         (SELECT w.entity_type,w.entity_key,COALESCE(r.revision,0) revision FROM wanted w LEFT JOIN stock_session_revisions r
@@ -1224,7 +1243,8 @@ export async function replayStockSession(env: Env, user: SessionUser, direction:
     assertion(`EXISTS(SELECT 1 FROM stock_session_operations o JOIN action_history h ON h.id=o.history_id
       JOIN undo_snapshots s ON s.id=o.snapshot_id WHERE o.id=@id AND o.history_id=@history AND o.generation=@generation
       AND h.status=@status AND s.payload_json=@snapshot)`, { id: op.id, history: historyId, generation, status: expectedStatus, snapshot: op.payload_json }),
-    assertion(`${stateSql}=(SELECT json_extract(payload_json,'$.expected') FROM undo_snapshots WHERE id=@snapshotId)`, { id: op.id, snapshotId: op.snapshot_id }),
+    assertion(`NOT EXISTS(SELECT 1 FROM stock_session_members m WHERE m.operation_id=@id AND NOT EXISTS(SELECT 1 FROM branches b WHERE b.id=m.branch_id AND b.is_active=1))`, { id: op.id }),
+    assertion(`${stateSql}=${REPLAY_EXPECTED_SQL}`, { id: op.id, snapshotId: op.snapshot_id }),
   ]
   for (const key of REPLAY_MUTATION_ORDER[direction]) {
     const [table] = REPLAY_TABLES[key]
