@@ -691,6 +691,8 @@ function manualChunks(id: string): string | undefined {
       // http.ts imports it to restate a branch-rule refusal in the UI language. Left to the /src/api/ catch-all it lands in
       // app-api-methods, which imports http.ts back: a static chunk cycle (chunkBoundaryPolicy.test.ts).
       || normalized.endsWith('/src/api/branchRefusalLanguage.ts')
+      // Same reason: http.ts hands a disabled-branch refusal to it (the redirect float's registry and request shape).
+      || normalized.endsWith('/src/api/branchRedirect.ts')
     ) {
       return 'api-http-core'
     }
