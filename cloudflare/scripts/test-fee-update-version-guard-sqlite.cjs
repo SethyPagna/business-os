@@ -105,7 +105,7 @@ const feeRoute = loadReal('routes/fees.ts', {
   '../lib/reviewGate': { maybeQueueForReview: async () => null },
   '../lib/businessDateWindow': { businessToday: () => '2026-09-08' },
   '../lib/telegram': { sendTelegramEvent: async () => {}, telegramMoney: () => '' },
-  '../lib/branchRoles': { branchCanSell: () => true },
+  '../lib/branchRoles': loadReal('lib/branchRoles.ts'),
   '../lib/batchCode': { normalizeTypedDate: (value) => String(value || '').slice(0, 10) || null },
   '../index': {},
 })
@@ -133,7 +133,9 @@ function reset() {
     CREATE TABLE branches (
       id INTEGER PRIMARY KEY,
       name TEXT NOT NULL,
-      is_active INTEGER NOT NULL
+      is_active INTEGER NOT NULL,
+      role TEXT,
+      successor_branch_id INTEGER
     );
     INSERT INTO branches (id, name, is_active) VALUES (2, 'Shop', 1);
     INSERT INTO fees (

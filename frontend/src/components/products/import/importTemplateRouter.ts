@@ -115,8 +115,8 @@ export function classifyImportHeader(headerCells: string[]): ImportTemplateDetec
   }
   // §12 unified stock: an `action` column plus the per-branch quantity
   // columns. (The products template has neither.)
-  if (has('action') && (has('shop') || has('warehouse'))) {
-    return { type: 'stock_actions', header, signals: pick('action', 'shop', 'warehouse', 'cost_price') }
+  if (has('action') && (has('shop') || has('warehouse') || has('store'))) {
+    return { type: 'stock_actions', header, signals: pick('action', 'shop', 'warehouse', 'store', 'cost_price') }
   }
   // Products: pricing/stock/batch/image columns straight from the template.
   // BOTH batch headers are signals. The downloaded template ships

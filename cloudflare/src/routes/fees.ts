@@ -20,7 +20,7 @@ import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, Writ
 import { maybeQueueForReview } from '../lib/reviewGate'
 import { businessToday } from '../lib/businessDateWindow'
 import { sendTelegramEvent, telegramMoney } from '../lib/telegram'
-import { branchCanSell } from '../lib/branchRoles'
+import { branchCanSell, branchCanSellNow, resolveSellingSuccessor } from '../lib/branchRoles'
 import { normalizeTypedDate } from '../lib/batchCode'
 import { actorSnapshot } from '../lib/actorSnapshot'
 import { nativeChangeAmounts, type DecimalInput } from '../lib/moneyPrecision'
@@ -171,15 +171,27 @@ async function resolveFeeLink(
     throw new Error('INVALID_BRANCH')
   }
 
+  // Selling is a branch ROLE, never the display name: after the branch
+  // consolidation the only selling branch is called "LC Store".
+  const branchRows = () => db.prepare('SELECT id,name,role,is_active,successor_branch_id FROM branches')
+    .all<{ id: number; name: string | null; role: string | null; is_active: number | null; successor_branch_id: number | null }>()
+
   if (saleId != null) {
     const sale = await db.prepare(`
-      SELECT s.id, s.branch_id, b.name AS branch_name, b.is_active AS branch_active
-      FROM sales s LEFT JOIN branches b ON b.id=s.branch_id
+      SELECT s.id, s.branch_id
+      FROM sales s
       WHERE s.id=@saleId
-    `).get<{ id: number; branch_id: number | null; branch_name: string | null; branch_active: number | null }>({ saleId })
+    `).get<{ id: number; branch_id: number | null }>({ saleId })
     const saleBranchId = Number(sale?.branch_id)
-    if (!sale || !Number.isSafeInteger(saleBranchId) || saleBranchId <= 0
-      || Number(sale.branch_active ?? 0) !== 1 || !branchCanSell(sale.branch_name)) {
+    if (!sale || !Number.isSafeInteger(saleBranchId) || saleBranchId <= 0) throw new Error('INVALID_SALE')
+    // An expense is money, not stock: it keeps the branch the sale was
+    // recorded at. That branch must be a selling branch that is active, or a
+    // retired one (Old Shop) whose active successor sells -- so an old Shop
+    // sale can still carry an expense after the cutover. While both branches
+    // are active this is exactly the old "active Shop" test.
+    const rows = await branchRows()
+    const saleBranch = rows.find((row) => Number(row.id) === saleBranchId)
+    if (!saleBranch || !branchCanSell(saleBranch) || !resolveSellingSuccessor(rows, saleBranchId)) {
       throw new Error('INVALID_SALE')
     }
     if (requestedBranchId != null && requestedBranchId !== saleBranchId) throw new Error('SALE_BRANCH_MISMATCH')
@@ -187,9 +199,9 @@ async function resolveFeeLink(
   }
 
   if (requestedBranchId == null) throw new Error('BRANCH_REQUIRED')
-  const branch = await db.prepare('SELECT id,name,is_active FROM branches WHERE id=@id')
-    .get<{ id: number; name: string | null; is_active: number | null }>({ id: requestedBranchId })
-  if (!branch || Number(branch.is_active ?? 0) !== 1 || !branchCanSell(branch.name)) throw new Error('INVALID_BRANCH')
+  const branch = await db.prepare('SELECT id,name,role,is_active FROM branches WHERE id=@id')
+    .get<{ id: number; name: string | null; role: string | null; is_active: number | null }>({ id: requestedBranchId })
+  if (!branch || !branchCanSellNow(branch)) throw new Error('INVALID_BRANCH')
   return { saleId: null, branchId: requestedBranchId }
 }
 

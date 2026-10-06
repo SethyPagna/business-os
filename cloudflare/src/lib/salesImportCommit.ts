@@ -2,7 +2,7 @@ import type { D1Compat } from './db'
 import { normalizeClientReceiptNumber, uniqueBusinessDateTimeNumber } from './receiptNumber'
 import { RETURN_STATUSES } from './salesStatus'
 import { branchCanSell } from './branchRoles'
-import { WAREHOUSE_NOT_SELLABLE_ERROR } from './branchRoleGuards'
+import { WAREHOUSE_NOT_SELLABLE_ERROR, sellingBranchConditionSql } from './branchRoleGuards'
 import type { ActorLike } from './actorSnapshot'
 import { buildSaleCreationSnapshot } from './saleCreationSnapshot'
 import { isAnonymousCustomer } from './anonymousCustomer'
@@ -51,20 +51,21 @@ const currentBatchReferencesGuard = `NOT EXISTS (
 )`
 
 // The classifier and writer pre-read are previews. Keep the selected branch
-// and the global Shop identity inside the same D1 transaction as every sale,
-// stock, movement, and idempotency-ledger write. This also protects receipts
-// with no batch/lot reference, where currentBatchReferencesGuard is vacuous.
+// and the global selling-branch identity inside the same D1 transaction as
+// every sale, stock, movement, and idempotency-ledger write. This also
+// protects receipts with no batch/lot reference, where currentBatchReferencesGuard
+// is vacuous. "Selling" is the branch ROLE (sellingBranchConditionSql, the one
+// definition POS and every sale write use), never the display name: after the
+// branch consolidation the only active selling branch is called LC Store.
 const currentSaleBranchGuard = `EXISTS (
   SELECT 1
   FROM branches selected_shop
   WHERE selected_shop.id = @branch_id
-    AND selected_shop.is_active = 1
-    AND lower(trim(selected_shop.name)) = 'shop'
+    AND ${sellingBranchConditionSql('selected_shop')}
 ) AND (
   SELECT COUNT(*)
   FROM branches active_shop
-  WHERE active_shop.is_active = 1
-    AND lower(trim(active_shop.name)) = 'shop'
+  WHERE ${sellingBranchConditionSql('active_shop')}
 ) = 1`
 
 const currentImportReferencesGuard = `(${currentSaleBranchGuard}) AND (${currentBatchReferencesGuard})`
@@ -130,12 +131,12 @@ export async function applyHistoricalSaleImport(
     throw new Error(WAREHOUSE_NOT_SELLABLE_ERROR)
   }
   const saleBranch = await db.prepare(`
-    SELECT id, name, is_active,
+    SELECT id, name, role, is_active,
       (SELECT COUNT(*) FROM branches active_shop
-       WHERE active_shop.is_active = 1 AND lower(trim(active_shop.name)) = 'shop') AS active_shop_count
+       WHERE ${sellingBranchConditionSql('active_shop')}) AS active_shop_count
     FROM branches WHERE id = @branchId LIMIT 1
-  `).get<{ id: number; name: string | null; is_active: number | null; active_shop_count: number }>({ branchId: saleHeaderBranchId })
-  if (!saleBranch || Number(saleBranch.is_active ?? 0) !== 1 || !branchCanSell(saleBranch.name) || Number(saleBranch.active_shop_count) !== 1) {
+  `).get<{ id: number; name: string | null; role: string | null; is_active: number | null; active_shop_count: number }>({ branchId: saleHeaderBranchId })
+  if (!saleBranch || Number(saleBranch.is_active ?? 0) !== 1 || !branchCanSell(saleBranch) || Number(saleBranch.active_shop_count) !== 1) {
     throw new Error(WAREHOUSE_NOT_SELLABLE_ERROR)
   }
   const normalizedItems: Array<Record<string, unknown>> = d.items.map((item) => ({ ...item, branch_id: saleHeaderBranchId }))

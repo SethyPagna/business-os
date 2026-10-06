@@ -9,6 +9,7 @@ import { bumpVersion } from './cache';
 import { broadcast } from '../durable-objects/broadcastHub';
 import { actorSnapshot } from './actorSnapshot';
 import { branchCanSell } from './branchRoles';
+import { sellingBranchConditionSql } from './branchRoleGuards';
 import { assertSaleRecordBatchBounds, buildSaleRecordEventsInsert } from './saleRecordEvents';
 import type { SaleRecordChange, SaleRecordValueState } from './saleRecords';
 import { statusChangeNeedsPayment } from './saleStatusResolution';
@@ -322,7 +323,7 @@ export async function applySaleBulkStatus(env: Env, user: SessionUser, raw: Row)
     // The money columns feed only the S4-41 check below; the revision guard
     // every changed member carries makes the batch refuse if they move before
     // it commits.
-    const sales = await rowsIn<Row>(db, ids, m => `SELECT s.id,s.receipt_number,s.branch_id,b.name AS branch_name,b.is_active AS branch_active,s.sale_status,s.updated_at,s.stock_skipped,s.notes,s.cancel_reason,s.cancel_note,s.cancelled_at,s.cancelled_by_name,s.status_before_cancel,s.cancel_fee_id,s.total_usd,s.amount_paid_usd,s.amount_paid_khr,s.exchange_rate,s.money_precision_version,s.calculated_total_usd,COALESCE(v.revision,0) AS write_revision,${saleMovementFingerprint('s.id')} AS movement_fingerprint FROM sales s LEFT JOIN branches b ON b.id=s.branch_id LEFT JOIN sale_write_revisions v ON v.sale_id=s.id WHERE s.id IN (${m})`);
+    const sales = await rowsIn<Row>(db, ids, m => `SELECT s.id,s.receipt_number,s.branch_id,b.name AS branch_name,b.role AS branch_role,b.is_active AS branch_active,s.sale_status,s.updated_at,s.stock_skipped,s.notes,s.cancel_reason,s.cancel_note,s.cancelled_at,s.cancelled_by_name,s.status_before_cancel,s.cancel_fee_id,s.total_usd,s.amount_paid_usd,s.amount_paid_khr,s.exchange_rate,s.money_precision_version,s.calculated_total_usd,COALESCE(v.revision,0) AS write_revision,${saleMovementFingerprint('s.id')} AS movement_fingerprint FROM sales s LEFT JOIN branches b ON b.id=s.branch_id LEFT JOIN sale_write_revisions v ON v.sale_id=s.id WHERE s.id IN (${m})`);
     const sourceMatchedIds: number[] = [], unpaid: Row[] = [];
     for (const expected of request.items) {
         const sale = sales.find(s => s.id === expected.id);
@@ -381,9 +382,9 @@ export async function applySaleBulkStatus(env: Env, user: SessionUser, raw: Row)
             && (Number(itemCancel.fee_usd) > 0 || Number(itemCancel.fee_khr) > 0);
         if (createsCancellationFee) {
             const branchId = Number(sale.branch_id);
-            if (!Number.isSafeInteger(branchId) || branchId <= 0 || Number(sale.branch_active ?? 0) !== 1 || !branchCanSell(sale.branch_name))
+            if (!Number.isSafeInteger(branchId) || branchId <= 0 || Number(sale.branch_active ?? 0) !== 1 || !branchCanSell({ name: sale.branch_name, role: sale.branch_role }))
                 throw new SaleBulkError('Cancellation expenses require a sale recorded at the active Shop.', 400);
-            guards.push(bulkAssertion("EXISTS(SELECT 1 FROM sales s JOIN branches b ON b.id=s.branch_id WHERE s.id=@id AND s.branch_id=@branch AND b.is_active=1 AND lower(trim(b.name))='shop')", { id: expected.id, branch: branchId }));
+            guards.push(bulkAssertion("EXISTS(SELECT 1 FROM sales s JOIN branches b ON b.id=s.branch_id WHERE s.id=@id AND s.branch_id=@branch AND " + sellingBranchConditionSql('b') + ")", { id: expected.id, branch: branchId }));
         }
         const cancelReason = itemCancel?.reason || request.cancel_reason;
         const cancelNote = itemCancel?.note || request.cancel_note;

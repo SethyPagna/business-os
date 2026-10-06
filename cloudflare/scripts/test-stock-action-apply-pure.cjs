@@ -52,7 +52,7 @@ const REAL = new Set([
   'stockReceiptGate',
   'productDescriptionSections', 'productBatches', 'salesStatus', 'contactOptions',
   'importImageMatch', 'searchMatch',
-  'branchRoles', 'branchRoleGuards',
+  'branchRoles', 'branchRoleGuards', 'importBranchAuthority', 'branchEffect',
   'actorSnapshot', 'saleCreationSnapshot',
   'moneyPrecision', 'saleMoneyPrecision',
   // planTier carries the per-tier unit/row/concurrency ceilings the apply
@@ -137,7 +137,8 @@ function makeDb() {
       stock_quantity REAL DEFAULT 0, is_active INTEGER DEFAULT 1, client_request_id TEXT,
       created_at TEXT, updated_at TEXT);
     CREATE UNIQUE INDEX ux_products_crid ON products(client_request_id) WHERE client_request_id IS NOT NULL;
-    CREATE TABLE branches (id INTEGER PRIMARY KEY, name TEXT, is_active INTEGER DEFAULT 1);
+    CREATE TABLE branches (id INTEGER PRIMARY KEY, name TEXT, is_active INTEGER DEFAULT 1, role TEXT, canonical_key TEXT,
+      successor_branch_id INTEGER, is_default INTEGER DEFAULT 0);
     -- The supplier column on an add row is match-only (migration 0062): the
     -- engine looks the as-entered name up here and keeps the text with a NULL
     -- id when it matches nothing. Every add row carries a supplier now that the

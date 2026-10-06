@@ -203,6 +203,7 @@ const returnsRoute = loadReal('routes/returns.ts', {
   '../lib/returnCostAccess': loadReal('lib/returnCostAccess.ts'),
   '../lib/branchRoleGuards': loadReal('lib/branchRoleGuards.ts', { './branchRoles': branchRolesKernel }),
   '../lib/branchRoles': branchRolesKernel,
+  '../lib/branchEffect': loadReal('lib/branchEffect.ts', { './branchRoles': branchRolesKernel, './sqlBinding': loadReal('lib/sqlBinding.ts') }),
   '../lib/actorSnapshot': actorSnapshotKernel,
   '../lib/saleCreationSnapshot': saleCreationSnapshotKernel,
   // N21: the display-address kernel, REAL. A stub resolves every address to
@@ -1294,7 +1295,7 @@ async function main() {
         reason: 'Rejected replacement branch',
       })
       assert.strictEqual(status, 400, JSON.stringify(json))
-      assert.match(String(json?.error || ''), /Only allow Shop sale/)
+      assert.match(String(json?.error || ''), /Sales can only be recorded at a selling branch/)
       assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM sales').get().n, beforeSales)
       assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM returns').get().n, 0)
     }

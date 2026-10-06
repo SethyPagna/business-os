@@ -146,12 +146,17 @@ const en = JSON.parse(readRepo('frontend/src/lang/en.json'))
 const km = JSON.parse(readRepo('frontend/src/lang/km.json'))
 
 runTest('both rejections carry the exact English of a translated pack key', () => {
-  assert.equal(guards.WAREHOUSE_NOT_SELLABLE_ERROR, en.pos_warehouse_not_sellable)
-  assert.equal(guards.TRANSFER_DIRECTION_ERROR, en.transfer_canonical_pair_only)
-  assert.ok(km.pos_warehouse_not_sellable, 'the Khmer pack carries the refusal too')
-  assert.ok(km.transfer_canonical_pair_only)
-  assert.notEqual(km.pos_warehouse_not_sellable, en.pos_warehouse_not_sellable, 'the Khmer entry is a translation, not a copy')
-  assert.notEqual(km.transfer_canonical_pair_only, en.transfer_canonical_pair_only)
+  assert.equal(guards.WAREHOUSE_NOT_SELLABLE_ERROR, en.branch_not_sellable)
+  assert.equal(guards.BRANCH_NOT_SELLABLE_ERROR, guards.WAREHOUSE_NOT_SELLABLE_ERROR, 'legacy export name = neutral sentence')
+  assert.equal(guards.TRANSFER_DIRECTION_ERROR, en.transfer_branches_pair_only)
+  assert.ok(km.branch_not_sellable, 'the Khmer pack carries the refusal too')
+  assert.ok(km.transfer_branches_pair_only)
+  assert.notEqual(km.branch_not_sellable, en.branch_not_sellable, 'the Khmer entry is a translation, not a copy')
+  assert.notEqual(km.transfer_branches_pair_only, en.transfer_branches_pair_only)
+  // role-neutral: no sentence the Worker sends names Shop or Warehouse as the branches
+  for (const sentence of [guards.WAREHOUSE_NOT_SELLABLE_ERROR, guards.TRANSFER_DIRECTION_ERROR]) assert.doesNotMatch(sentence, /\b(?:Shop|Warehouse)\b/)
+  assert.equal(guards.BRANCH_NOT_SELLABLE_CODE, 'branch_not_sellable')
+  assert.equal(guards.TRANSFER_DIRECTION_CODE, 'transfer_direction_invalid')
 })
 
 // ---------------------------------------------------------------------------
@@ -184,8 +189,8 @@ runTest('every path that writes a sale line asks the guard first', () => {
   assert.match(salesSource, /from '\.\.\/lib\/branchRoleGuards'/)
   assert.match(returnsSource, /WAREHOUSE_NOT_SELLABLE_ERROR \}, 400\)/)
   assert.match(returnsSource, /from '\.\.\/lib\/branchRoleGuards'/)
-  assert.match(returnsSource, /!branchCanSell\(branch\.name\)/)
-  assert.match(salesImportSource, /!branchCanSell\(saleBranch\.name\)/)
+  assert.match(returnsSource, /!branchCanSell\(branchRow\)/, 'the role row, never the display name')
+  assert.match(salesImportSource, /!branchCanSell\(saleBranch\)/, 'the role row, never the display name')
   assert.match(salesImportSource, /throw new Error\(WAREHOUSE_NOT_SELLABLE_ERROR\)/)
 })
 
