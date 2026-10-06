@@ -5541,6 +5541,9 @@ app.get('/', async (c) => {
   if (query.startDate) { where.push(localDateAtOrAfter('s.created_at')); params.startDate = query.startDate }
   if (query.endDate) { where.push(localDateAtOrBefore('s.created_at')); params.endDate = query.endDate }
   appendLocalTimeRange(query, where, params, 's.created_at')
+  // N16: a cashier filter is one administrator question whether it names the
+  // cashier by id (userId, below) or by name -- the name form used to slip past it.
+  if (query.cashier && !isAdminControlUser(user)) return c.json({ error: 'Administrator access required for cashier user filters.' }, 403)
   if (query.cashier) { where.push('s.cashier_name LIKE @cashier'); params.cashier = `%${query.cashier}%` }
   // Exact-id lookup -- there's still no separate GET /:id route (see this
   // file's own comment above), but a caller that already has a specific
@@ -5848,6 +5851,9 @@ app.get('/stats', async (c) => {
   if (query.startDate) { where.push(localDateAtOrAfter('s.created_at')); params.startDate = query.startDate }
   if (query.endDate) { where.push(localDateAtOrBefore('s.created_at')); params.endDate = query.endDate }
   appendLocalTimeRange(query, where, params, 's.created_at')
+  // N16: a cashier filter is one administrator question whether it names the
+  // cashier by id (userId, below) or by name -- the name form used to slip past it.
+  if (query.cashier && !isAdminControlUser(user)) return c.json({ error: 'Administrator access required for cashier user filters.' }, 403)
   if (query.cashier) { where.push('s.cashier_name LIKE @cashier'); params.cashier = `%${query.cashier}%` }
   if (query.userId) {
     const isAdmin = isAdminControlUser(user)
