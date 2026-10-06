@@ -67,6 +67,10 @@ const NAMED_COMPANIONS = {
   // chain without and with it, pins both plans, identical rows, idempotency,
   // the documented recovery and LF-only.
   228: 'test-dashboard-stock-overview-pure.cjs',
+  // 0239 creates stock_alert_events (NOTIF-V2: the sale-driven bell / Telegram events). Its companions apply the real
+  // chain: the crossing test drives the in-batch INSERT, the feed and the number's single claim; the cost test measures
+  // rows read; test-telegram-stock-alert-pure.cjs drives the telegram_sent_at claim and its partial index.
+  239: 'test-sale-stock-alert-crossing-pure.cjs',
 }
 
 function listMigrationNumbers() {
