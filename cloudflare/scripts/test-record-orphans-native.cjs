@@ -328,7 +328,7 @@ async function workerBundle() {
           cache: `export const bumpVersion=async()=>{};export const bumpVersions=async()=>{};export const getVersionWithFallback=async()=>0;
             export const cachedJsonResponse=async(_e,_k,_t,fn)=>fn()`,
           broadcastHub: 'export const broadcast=async()=>{}',
-          telegram: `export const sendReturnTelegramEvent=async()=>{};export const sendReturnStatusTelegramEvents=async()=>{};export const sendTelegramEvent=async()=>{};
+          telegram: `export const sendReturnTelegramEvent=async()=>{};export const sendReturnStatusTelegramEvents=async()=>{};export const sendTelegramEvent=async()=>{};export const sendPendingStockAlerts=async()=>0;
             export const sendSaleTelegramEvent=async()=>{};export const formatSaleTelegramLines=()=>[];export const formatSaleStatusTelegramLines=()=>[];
             export const telegramMoney=()=>''`,
         }
