@@ -28,7 +28,7 @@ const cache = new Map()
 const actual = new Set([
   'acquisitionCostAccess',
   'saleCustomerAssignmentGuard',
-  'actorSnapshot', 'movementBranchName', 'db', 'permissions', 'saleBulkStatus', 'saleBulkUpdate',
+  'actorSnapshot', 'movementBranchName', 'db', 'permissions', 'saleBulkStatus','cancelFeeRules', 'saleBulkUpdate',
   'saleRecordEvents', 'saleTransitions', 'sqlBinding', 'productBatches', 'batchCode', 'salesStatus', 'saleStatusResolution',
   'undoAppliers', 'branchWrites', 'conflictControl', 'searchMatch', 'paymentMethodRegistry', 'contactOptions', 'anonymousCustomer',
   'businessMaintenanceGuard',

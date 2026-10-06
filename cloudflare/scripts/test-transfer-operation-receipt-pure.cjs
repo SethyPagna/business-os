@@ -43,7 +43,7 @@ function load(relative) {
     if (realLibraries.has(name)) return load(`lib/${name}.ts`)
     if (name === 'productIdentity') return { findIdentityMatch: async () => mergeTarget, findIdentityMatches: async () => new Map() }
     if (name === 'saleBulkUpdate') return { SALE_BULK_UPDATE_KINDS: new Set(['sale.fields.bulk']), BULK_UPDATE_KIND: 'sale.fields.bulk', BULK_CUSTOMER_UPDATE_KIND: 'sale.customer.bulk', MULTI_CUSTOMER_UPDATE_KIND: 'sale.customer.v2.bulk', SINGLE_CUSTOMER_UPDATE_KIND: 'sale.customer.single' }
-    if (name === 'saleBulkStatus') return { BULK_STATUS_KIND: 'sale.status.bulk' }
+    if (name === 'saleBulkStatus','cancelFeeRules') return { BULK_STATUS_KIND: 'sale.status.bulk' }
     if (name === 'returnBulkAction') return { RETURN_BULK_ACTION_KIND: 'return.fields.bulk' }
     if (name === 'stockSession') return { STOCK_SESSION_KIND: 'stock.session' }
     if (name === 'saleSettlementAction') return { SALE_SETTLEMENT_ACTION_KIND: 'sale.settlement' }

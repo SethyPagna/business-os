@@ -63,6 +63,7 @@ import { buildSalesImportRows, SALES_IMPORT_COLUMNS } from '../../utils/salesImp
 import { exportColumnLabel } from '../../utils/exportOptions.ts'
 import BulkSaleChangeModal, { type BulkSaleChangeRow, type BulkSaleChoice, type BulkSaleField } from './BulkSaleChangeModal.tsx'
 import BulkSaleCancelModal, { type BulkSaleCancelDraft } from './BulkSaleCancelModal.tsx'
+import { cancelFeeRefusalKey } from '../../utils/cancelFeeRules.ts'
 import SectionExportAction from '../shared/SectionExportAction.tsx'
 import PagerActionRow from '../shared/PagerActionRow.tsx'
 import InfoHint from '../shared/InfoHint.tsx'
@@ -392,6 +393,11 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   const canViewSales = can('sales', 'view')
   const canUseShifts = getPermissionTier('pos') === 'full' || getPermissionTier('sales') === 'full'
   const canViewFees = can('fees', 'view')
+  // N9: a cancellation's lost fee is an expense row (utils/cancelFeeRules.ts):
+  // recording it needs Expenses -> Add; un-cancelling deletes it, which needs
+  // Expenses -> Delete at Full (a Review-tier delete would only be queued).
+  const canRecordCancelFee = can('fees', 'add')
+  const canRemoveCancelFee = getPermissionTier('fees') === 'full' && can('fees', 'delete')
   // Returning straight from the receipt is still a RETURNS write, so it is
   // gated on the returns section's own create action -- the same
   // `returns:add` grant behind the Returns page's Add Return button and the
@@ -500,7 +506,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   // routes -- 'single' feeds handleStatusChange with the collected
   // reason/fee payload, 'bulk' feeds handleBulkStatusUpdate.
   const [cancelPrompt, setCancelPrompt] = useState<
-    | { mode: 'single'; saleId: number; notes: string; recordHistory: boolean; label: string }
+    | { mode: 'single'; saleId: number; notes: string; recordHistory: boolean; label: string; sale: { total_usd?: unknown; exchange_rate?: unknown } }
     | { mode: 'bulk'; sales: SaleRecord[]; requestSales: SaleRecord[]; sourceStatus: string }
     | null
   >(null)
@@ -1167,6 +1173,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
         notes,
         recordHistory,
         label: String(previousSale?.receipt_number || `#${numericId}`),
+        sale: { total_usd: previousSale?.total_usd, exchange_rate: previousSale?.exchange_rate },
       })
       return false
     }
@@ -1329,8 +1336,10 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
       // S4-41: the Worker will not give a Not Paid sale that still owes money a
       // paid status without a payment. The payment form always sends one, so this
       // is an Undo or Redo (or its retry) asking for it: say why, in the shop's language.
+      const feeRefusal = cancelFeeRefusalKey(problem.code)
       notify(problem.code === 'insufficient_payment_for_status'
         ? translateOr('sale_settlement_full_required', 'The full sale balance must be covered before completing it.')
+        : feeRefusal ? t(feeRefusal)
         : `Failed to update status: ${getErrorMessage(error, String(error || 'Unknown error'))}`, 'error')
       return false
     } finally {
@@ -2199,6 +2208,13 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
       notify(translateOr('sale_bulk_limit', 'Select at most 25 sales for one status change.'), 'error')
       return
     }
+    // N9: un-cancelling deletes each sale's lost-fee expense. A source-status
+    // filter that excludes cancelled sales leaves them untouched.
+    if (!retryRequest && nextStatus !== 'cancelled' && !canRemoveCancelFee && (!sourceStatus || sourceStatus === 'cancelled')
+      && scopeSales.some((sale) => String(sale.sale_status || '') === 'cancelled' && Number(sale.cancel_fee_id || 0) > 0)) {
+      notify(t('uncancel_requires_expense_delete'), 'error')
+      return
+    }
     if ((!retryRequest && !selectedSales.length) || !beginSingleAction(bulkStatusInFlightRef, { blocked: !!bulkStatusSaving })) return
     if (!retryRequest && !scopeSales.length) {
       finishSingleAction(bulkStatusInFlightRef)
@@ -2280,8 +2296,10 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
         savePendingBulkRequest(null)
         void loadSales(true)
       }
+      const feeRefusal = cancelFeeRefusalKey((error as { code?: string } | null)?.code)
       notify(unpaid
         ? translateOr('sale_settlement_full_required', 'The full sale balance must be covered before completing it.')
+        : feeRefusal ? t(feeRefusal)
         : getErrorMessage(error, translateOr('update_failed', 'Unable to update the selected sales.')), 'error')
     } finally {
       finishSingleAction(bulkStatusInFlightRef)
@@ -3097,6 +3115,8 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
           {cancelPrompt.mode === 'single' ? (
             <CancelSaleModal
               label={cancelPrompt.label}
+              feeAllowed={canRecordCancelFee}
+              sale={cancelPrompt.sale}
               saving={cancelSaving}
               onClose={() => { if (!cancelSaving) setCancelPrompt(null) }}
               onConfirm={async (payload) => {
@@ -3108,7 +3128,8 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
             />
           ) : (
             <BulkSaleCancelModal
-              sales={cancelPrompt.sales.map((sale) => ({ id: Number(sale.id), receipt: String(sale.receipt_number || `#${sale.id}`) }))}
+              sales={cancelPrompt.sales.map((sale) => ({ id: Number(sale.id), receipt: String(sale.receipt_number || `#${sale.id}`), total_usd: sale.total_usd, exchange_rate: sale.exchange_rate }))}
+              feeAllowed={canRecordCancelFee}
               saving={cancelSaving}
               onClose={() => { if (!cancelSaving) setCancelPrompt(null) }}
               onConfirm={async (drafts) => {

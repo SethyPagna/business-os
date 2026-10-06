@@ -437,7 +437,10 @@ export default function SaleDetailModal({
     if (!pendingStatus || !statusRecoveryOwner) return
     return claimSyncProblemPresentation(statusRecoveryOwner)
   }, [pendingStatus, statusRecoveryOwner?.actorId, statusRecoveryOwner?.requestId, statusRecoveryOwner?.problem.errorId, statusRecoveryOwner?.problem.channel, statusRecoveryOwner?.problem.code])
-  const { navigateTo, user, authReady } = useApp() as { navigateTo?: (page: string, anchor?: string) => void; user?: SaleSecurityUser | null; authReady: boolean }
+  const { navigateTo, user, authReady, can, getPermissionTier } = useApp() as { navigateTo?: (page: string, anchor?: string) => void; user?: SaleSecurityUser | null; authReady: boolean; can: (permissionKey: string, actionKey: string) => boolean; getPermissionTier: (key: string) => string }
+  // N9: un-cancelling deletes this sale's lost-fee expense, which needs
+  // Expenses -> Delete at Full (utils/cancelFeeRules.ts mirrors the Worker).
+  const uncancelBlockedByFee = toNumber(sale?.cancel_fee_id) > 0 && !(getPermissionTier('fees') === 'full' && can('fees', 'delete'))
   const securityFingerprint = saleSecurityFingerprint(user, authReady)
   const moneyCapability = useSaleMoneyCapability(Boolean(sale && user && authReady), securityFingerprint, sale?.money_precision_version !== 1)
   const savedMoneyVersion = sale?.money_precision_version === 1 ? 1 : 0
@@ -2898,7 +2901,7 @@ export default function SaleDetailModal({
                 <button
                   type="button"
                   className="btn-secondary mt-3 w-full text-xs"
-                  disabled={statusSaving}
+                  disabled={statusSaving || uncancelBlockedByFee}
                   onClick={async () => {
                     // Un-cancel: the backend only accepts the status the
                     // sale was in when cancelled (it re-deducts the
@@ -2917,6 +2920,9 @@ export default function SaleDetailModal({
                     ? (t('loading') || 'Saving')
                     : `${t('uncancel_sale') || 'Un-cancel'} (${getStatusLabel(String(sale.status_before_cancel || 'completed'), t)})`}
                 </button>
+              ) : null}
+              {onStatusChange && uncancelBlockedByFee ? (
+                <p className="mt-1 text-xs leading-relaxed text-amber-700 dark:text-amber-300">{t('uncancel_requires_expense_delete') || 'Un-cancelling removes this sale\'s lost-fee expense, and your role cannot delete expenses. Ask an administrator.'}</p>
               ) : null}
             </section>
           ) : null}

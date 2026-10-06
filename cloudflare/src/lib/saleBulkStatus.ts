@@ -2,6 +2,7 @@ import { getDb, type D1Compat } from './db';
 import type { Env } from '../index';
 import type { SessionUser } from './auth';
 import { getActionTier, isAdminControlUser } from './permissions';
+import { CANCEL_FEE_ADD_DENIED_CODE, CANCEL_FEE_DELETE_DENIED_CODE, CANCEL_FEE_EXCEEDS_SALE_CODE, CANCEL_FEE_MESSAGES, canRecordCancelFee, canRemoveCancelFee, cancelFeeWithinSaleTotal } from './cancelFeeRules';
 import { D1_MAX_BOUND_PARAMS } from './sqlBinding';
 import { VALID_SALE_STATUSES } from './salesStatus';
 import { allocateReturnedQuantities, guardSaleStatusTransition, heldQuantity, normalizeCancelReason, planSaleStockTransition, type TransitionItem, type StockStatement } from './saleTransitions';
@@ -114,6 +115,14 @@ export function saleMovementFingerprint(idSql: string) {
     return `(SELECT CASE WHEN COUNT(*)>${BULK_STATUS_MOVEMENT_LIMIT} THEN NULL ELSE json_group_array(json_array(id,product_id,branch_id,batch_id,movement_type,quantity,unit_cost_usd,unit_cost_khr)) END FROM (SELECT id,product_id,branch_id,batch_id,movement_type,quantity,unit_cost_usd,unit_cost_khr FROM inventory_movements WHERE reference_id=${idSql} AND movement_type IN ('sale','return','damage_in','damage_out') ORDER BY id LIMIT ${BULK_STATUS_MOVEMENT_LIMIT + 1}))`;
 }
 function fail(message: string): never { throw new SaleBulkError(message); }
+// N9: a member that records or deletes a lost-fee expense needs the Expenses
+// action for it (lib/cancelFeeRules.ts) -- on apply, undo and redo alike.
+function assertCancelFeePermission(user: SessionUser, saleId: number, recordsFee: boolean, removesFee: boolean) {
+    if (recordsFee && !canRecordCancelFee(user))
+        throw new SaleBulkError(CANCEL_FEE_MESSAGES[CANCEL_FEE_ADD_DENIED_CODE], 403, { code: CANCEL_FEE_ADD_DENIED_CODE, sale_id: saleId });
+    if (removesFee && !canRemoveCancelFee(user))
+        throw new SaleBulkError(CANCEL_FEE_MESSAGES[CANCEL_FEE_DELETE_DENIED_CODE], 403, { code: CANCEL_FEE_DELETE_DENIED_CODE, sale_id: saleId });
+}
 function permission(user: SessionUser) { if (getActionTier(user, 'sales', 'bulk') !== 'full' || getActionTier(user, 'sales', 'status') !== 'full')
     throw new SaleBulkError('No permission to change multiple sales.', 403); }
 export function bulkAssertion(predicate: string, params: Row = {}): StockStatement {
@@ -380,10 +389,13 @@ export async function applySaleBulkStatus(env: Env, user: SessionUser, raw: Row)
         const createsCancellationFee = changed && request.target_status === 'cancelled' && !!itemCancel
             && (Number(itemCancel.fee_usd) > 0 || Number(itemCancel.fee_khr) > 0);
         if (createsCancellationFee) {
+            assertCancelFeePermission(user, expected.id, true, false);
             const branchId = Number(sale.branch_id);
             if (!Number.isSafeInteger(branchId) || branchId <= 0 || Number(sale.branch_active ?? 0) !== 1 || !branchCanSell(sale.branch_name))
                 throw new SaleBulkError('Cancellation expenses require a sale recorded at the active Shop.', 400);
             guards.push(bulkAssertion("EXISTS(SELECT 1 FROM sales s JOIN branches b ON b.id=s.branch_id WHERE s.id=@id AND s.branch_id=@branch AND b.is_active=1 AND lower(trim(b.name))='shop')", { id: expected.id, branch: branchId }));
+            if (!cancelFeeWithinSaleTotal({ feeUsd: Math.round(Math.max(0, Number(itemCancel!.fee_usd) || 0) * 100) / 100, feeKhr: Math.max(0, Math.round(Number(itemCancel!.fee_khr) || 0)), saleTotalUsd: Number(sale.total_usd), exchangeRate: Number(sale.exchange_rate) }))
+                throw new SaleBulkError(CANCEL_FEE_MESSAGES[CANCEL_FEE_EXCEEDS_SALE_CODE], 400, { code: CANCEL_FEE_EXCEEDS_SALE_CODE, sale_id: expected.id });
         }
         const cancelReason = itemCancel?.reason || request.cancel_reason;
         const cancelNote = itemCancel?.note || request.cancel_note;
@@ -433,6 +445,7 @@ export async function applySaleBulkStatus(env: Env, user: SessionUser, raw: Row)
             after.cancel_fee_id = feeId;
         }
         if (changed && old === 'cancelled' && sale.cancel_fee_id) {
+            assertCancelFeePermission(user, expected.id, false, true);
             member.fee = fees.find(f => f.id === sale.cancel_fee_id) || null;
             if (!member.fee)
                 fail('Linked cancellation fee is missing.');
@@ -519,6 +532,9 @@ export async function replaySaleBulkStatus(env: Env, user: SessionUser, directio
     if (snapshot.version !== 1 || snapshot.operationId !== op.id || snapshot.members.length > BULK_STATUS_LIMIT)
         fail('Unsupported bulk snapshot.');
     const sign = direction === 'undo' ? -1 : 1, expected = direction === 'undo' ? 'undoable' : 'redoable', next = direction === 'undo' ? 'redoable' : 'undoable', stamp = new Date().toISOString();
+    // Undo deletes a fee the group created and restores one it removed; redo the reverse.
+    for (const m of snapshot.members.filter(member => member.changed))
+        assertCancelFeePermission(user, m.id, sign > 0 ? !!m.createdFee : !!m.fee, sign > 0 ? !!m.fee : !!m.createdFee);
     // S4-41: undo and redo move statuses too. A redo can re-apply a group
     // recorded before the payment check existed, and undoing a group reopen
     // puts each sale back to a paid status; either is refused for a sale its

@@ -9,7 +9,7 @@ const root = path.join(__dirname, '..')
 const user = { id: 1, name: 'Admin', username: 'admin', role_code: 'admin', permissions: { all: true } }
 const cache = new Map()
 const actual = new Set(['businessMaintenanceGuard','offlineSaleOwnership','acquisitionCostAccess','actorSnapshot','movementBranchName',
-  'db','permissions','saleBulkStatus','saleBulkUpdate','saleTransitions','saleTotals','sqlBinding',
+  'db','permissions','saleBulkStatus','cancelFeeRules','saleBulkUpdate','saleTransitions','saleTotals','sqlBinding',
   'productBatches','batchCode','salesStatus','saleStatusResolution','conflictControl','searchMatch','financialPrecision',
   'paymentMethodRegistry','paymentSettlement','saleSettlementAction','saleLineAddition','saleAmendments',
   'nativeSaleChange','deliveryAmounts','saleRecords','saleRecordEvents','saleCreationSnapshot',

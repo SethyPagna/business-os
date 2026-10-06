@@ -149,6 +149,7 @@ import { EXCHANGE_RATE_OUT_OF_RANGE_CODE, EXCHANGE_RATE_OUT_OF_RANGE_MESSAGE, sa
 import { MEMBERSHIP_DISCOUNT_MISMATCH_CODE, MEMBERSHIP_DISCOUNT_MISMATCH_MESSAGE, membershipRedemptionDiscount } from '../lib/membershipRedemption'
 import { SALE_SHIFT_MESSAGES, readSaleShiftBlock, saleShiftGuardStatement, type SaleShiftScope } from '../lib/saleShiftRequirement'
 import { readShiftPolicy } from './shifts'
+import { CANCEL_FEE_ADD_DENIED_CODE, CANCEL_FEE_DELETE_DENIED_CODE, CANCEL_FEE_EXCEEDS_SALE_CODE, CANCEL_FEE_MESSAGES, canRecordCancelFee, canRemoveCancelFee, cancelFeeWithinSaleTotal } from '../lib/cancelFeeRules'
 import { localRangeClockError, isLocalRangeClock, businessToday, localDateAtOrAfter, localDateAtOrBefore, localDateRangeClause, localTimeRangeClause } from '../lib/businessDateWindow'
 import { continuousReadWindowSql, parseContinuousReadWindow } from '../lib/continuousReadWindow'
 import { formatSaleStatusTelegramLines, formatSaleTelegramLines, sendTelegramEvent } from '../lib/telegram'
@@ -2242,6 +2243,17 @@ app.patch('/:id/status', async (c) => {
     cancelFeeUsd = round2(Math.max(0, Number(body.cancel_fee_usd) || 0))
     cancelFeeKhr = Math.max(0, Math.round(Number(body.cancel_fee_khr) || 0))
     cancelFeeNote = String(body.cancel_fee_note || '').trim() || null
+    // N9: a lost fee is an expense, capped at the sale (lib/cancelFeeRules.ts).
+    if ((cancelFeeUsd > 0 || cancelFeeKhr > 0) && !canRecordCancelFee(user)) {
+      return c.json({ error: CANCEL_FEE_MESSAGES[CANCEL_FEE_ADD_DENIED_CODE], code: CANCEL_FEE_ADD_DENIED_CODE }, 403)
+    }
+    if (!cancelFeeWithinSaleTotal({ feeUsd: cancelFeeUsd, feeKhr: cancelFeeKhr, saleTotalUsd: Number(sale.total_usd), exchangeRate: Number(sale.exchange_rate) })) {
+      return c.json({ error: CANCEL_FEE_MESSAGES[CANCEL_FEE_EXCEEDS_SALE_CODE], code: CANCEL_FEE_EXCEEDS_SALE_CODE }, 400)
+    }
+  }
+  // N9: un-cancelling deletes the linked lost-fee expense below.
+  if (oldStatus === 'cancelled' && saleStatus !== 'cancelled' && sale.cancel_fee_id && !canRemoveCancelFee(user)) {
+    return c.json({ error: CANCEL_FEE_MESSAGES[CANCEL_FEE_DELETE_DENIED_CODE], code: CANCEL_FEE_DELETE_DENIED_CODE }, 403)
   }
 
   const items = await db.prepare('SELECT id, product_id, product_name, quantity, cost_price_usd, cost_price_khr, branch_id, batch_id, damaged_lot_id FROM sale_items WHERE sale_id = ?').all<SaleItemRow & { damaged_lot_id: number | null }>([id])
