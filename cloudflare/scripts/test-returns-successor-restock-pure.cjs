@@ -270,6 +270,9 @@ const returnsRoute = loadReturnsRoute()
 // The route as it was before this lane.
 const oracleRoute = loadReturnsRoute(require('child_process').execFileSync('git', ['show', '93057c781:cloudflare/src/routes/returns.ts'], { cwd: path.join(__dirname, '..', '..'), encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }))
 
+// The route as it stood before the residual-gap lane (edit / supplier redirect): the oracle for those writers.
+const oracleBeforeResidualRoute = loadReturnsRoute(require('child_process').execFileSync('git', ['show', 'b2b57f90b:cloudflare/src/routes/returns.ts'], { cwd: path.join(__dirname, '..', '..'), encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }))
+
 let app = returnsRoute.default
 
 let passed = 0
@@ -643,4 +646,165 @@ async function successorChecks() {
   })
 }
 
-successorChecks().then(() => { console.log(`${passed} returns successor restock checks passed`) }).catch((error) => { console.error(error); process.exitCode = 1 })
+// ---------------------------------------------------------------------------
+// CUTOVER-LC residual gaps: editing a return recorded at a retired branch, and a supplier return addressed to one.
+// ---------------------------------------------------------------------------
+// The consolidation, applied to the 'before' world: Old Shop (2) hands everything to LC Store (1) and lot 3 is folded
+// into lot 1. Returns made at Shop before it keep branch 2 and their lines.
+function consolidate() {
+  const triggers = rawDb.prepare("SELECT name, sql FROM sqlite_master WHERE type = 'trigger' AND tbl_name = 'branches'").all()
+  for (const trigger of triggers) rawDb.exec(`DROP TRIGGER "${trigger.name}"`)
+  try {
+    const lot1 = stockOf(1, 2) ?? 0; const lot3 = stockOf(3, 2) ?? 0
+    rawDb.exec('DELETE FROM branch_batch_stock; DELETE FROM branch_stock; DELETE FROM branches')
+    rawDb.prepare("INSERT INTO branches (id, name, role, canonical_key, is_active, is_default) VALUES (1, 'LC Store', 'shop', 'warehouse', 1, 1)").run()
+    rawDb.prepare("INSERT INTO branches (id, name, role, canonical_key, is_active, is_default, successor_branch_id) VALUES (2, 'Old Shop', 'shop', 'shop', 0, 0, 1)").run()
+    rawDb.prepare('INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (1, 1, ?), (3, 1, 0), (1, 2, 0), (3, 2, 0)').run([lot1 + lot3])
+    rawDb.prepare('INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (1, 1, ?), (1, 2, 0)').run([lot1 + lot3])
+    rawDb.prepare("INSERT INTO audit_logs (user_name, action, entity, entity_id, details) VALUES ('op', 'branch_cutover_lot_fold', 'product_batch', '1', ?)")
+      .run([JSON.stringify({ operationId: 'op-1', productId: 1, survivorBatchId: 1, foldedBatchIds: [3], branchId: 1 })])
+  } finally { for (const trigger of triggers) rawDb.exec(trigger.sql) }
+}
+
+// A customer return made at Shop (3 units back into lot 3) BEFORE the consolidation.
+async function preConsolidationReturn(appToUse) {
+  seedWorld('before'); seedLots('before', 3)
+  const previous = app
+  app = appToUse
+  try {
+    const made = await req('POST', '/', { client_request_id: 'pre-cutover-1', ...returnBody() })
+    assert.strictEqual(made.status, 200, JSON.stringify(made.json))
+    return made.json.id
+  } finally { app = previous }
+}
+const editBody = (id, extra = {}) => ({
+  client_request_id: 'edit-1',
+  expected_updated_at: rawDb.prepare('SELECT updated_at FROM returns WHERE id = ?').get([id]).updated_at,
+  items: [{ sale_item_id: 1, product_id: 1, quantity: 1, return_to_stock: true, applied_price_usd: 10 }],
+  reason: 'Edited down',
+  ...extra,
+})
+// Row ids and the revision counters keep growing across fixtures; the statements are otherwise compared byte for byte.
+const normalisedRun = (batches) => normalised(batches).replace(/\b(id|revision|return_id|reference_id|returnId)(\\*)":\d+/g, '$1$2":<n>').replace(/[0-9a-f]{64}/g, '<digest>').replace(/"(\d{1,6})"/g, '"<n>"')
+const lotsSnapshot = () => ({ lot1AtStore: stockOf(1, 1), lot3AtStore: stockOf(3, 1), lot1AtOld: stockOf(1, 2), lot3AtOld: stockOf(3, 2), store: branchStockOf(1), old: branchStockOf(2) })
+const movementRows = () => rawDb.prepare('SELECT movement_type, branch_id, branch_name, addressed_branch_name, quantity, batch_id FROM inventory_movements ORDER BY id').all().map((row) => ({ ...row }))
+async function withRoute(appToUse, fn) { const previous = app; app = appToUse; try { return await fn() } finally { app = previous } }
+
+async function residualChecks() {
+  await check('EDIT of a return made at Shop before the consolidation reverses and restocks at LC Store in the merged lot', async () => {
+    const id = await preConsolidationReturn(returnsRoute.default)
+    assert.deepStrictEqual(lotsSnapshot(), { lot1AtStore: null, lot3AtStore: null, lot1AtOld: 10, lot3AtOld: 7, store: null, old: 17 })
+    consolidate()
+    assert.deepStrictEqual(lotsSnapshot(), { lot1AtStore: 17, lot3AtStore: 0, lot1AtOld: 0, lot3AtOld: 0, store: 17, old: 0 })
+    const body = editBody(id)
+    const edited = await reqExact('PATCH', `/${id}`, body)
+    assert.strictEqual(edited.status, 200, JSON.stringify(edited.json))
+    assert.deepStrictEqual(lotsSnapshot(), { lot1AtStore: 15, lot3AtStore: 0, lot1AtOld: 0, lot3AtOld: 0, store: 15, old: 0 }, '3 taken back out of LC Store lot 1, 1 restocked into it; nothing at Old Shop')
+    const moves = movementRows().filter((row) => row.movement_type === 'return_reversal' || row.addressed_branch_name)
+    assert.deepStrictEqual(moves, [
+      { movement_type: 'return_reversal', branch_id: 1, branch_name: 'LC Store', addressed_branch_name: 'Shop', quantity: -3, batch_id: 1 },
+      { movement_type: 'return', branch_id: 1, branch_name: 'LC Store', addressed_branch_name: 'Shop', quantity: 1, batch_id: 1 },
+    ])
+    assert.deepStrictEqual({ ...rawDb.prepare('SELECT branch_id, branch_name FROM returns WHERE id = ?').get([id]) }, { branch_id: 2, branch_name: 'Shop' }, 'the return keeps its own branch and label')
+    assert.strictEqual(rawDb.prepare('SELECT COALESCE(SUM(quantity),0) n FROM branch_batch_stock WHERE branch_id = 1').get().n, branchStockOf(1), 'lot ledger and branch ledger agree')
+    // Double apply: the same edit request again moves nothing.
+    const settled = JSON.stringify([lotsSnapshot(), movementRows()])
+    const again = await reqExact('PATCH', `/${id}`, body)
+    assert.strictEqual(again.status, 200, JSON.stringify(again.json))
+    assert.strictEqual(JSON.stringify([lotsSnapshot(), movementRows()]), settled, 'a replayed edit moves nothing')
+    // CONTROL: the code before this lane cannot edit it (the reversal asks the empty retired branch).
+    const oldId = await preConsolidationReturn(oracleBeforeResidualRoute.default)
+    consolidate()
+    const before = JSON.stringify(lotsSnapshot())
+    const refused = await withRoute(oracleBeforeResidualRoute.default, () => reqExact('PATCH', `/${oldId}`, editBody(oldId)))
+    assert.notStrictEqual(refused.status, 200, 'CONTROL: the old edit path refuses or fails against the consolidated branches')
+    assert.strictEqual(JSON.stringify(lotsSnapshot()), before, 'and writes nothing')
+  })
+
+  await check('EDIT with no usable successor refuses 409 with nothing written', async () => {
+    const id = await preConsolidationReturn(returnsRoute.default)
+    consolidate()
+    const triggers = rawDb.prepare("SELECT name, sql FROM sqlite_master WHERE type = 'trigger' AND tbl_name = 'branches'").all()
+    for (const trigger of triggers) rawDb.exec(`DROP TRIGGER "${trigger.name}"`)
+    rawDb.prepare('UPDATE branches SET successor_branch_id = NULL WHERE id = 2').run()
+    for (const trigger of triggers) rawDb.exec(trigger.sql)
+    const before = JSON.stringify([lotsSnapshot(), movementRows()])
+    const refused = await reqExact('PATCH', `/${id}`, editBody(id))
+    assert.strictEqual(refused.status, 409, JSON.stringify(refused.json))
+    assert.strictEqual(refused.json.code, 'branch_retired_no_successor')
+    assert.strictEqual(JSON.stringify([lotsSnapshot(), movementRows()]), before)
+  })
+
+  await check('INERT while both branches are active: an edit writes the exact statements the code before this lane wrote', async () => {
+    const run = async (appToUse) => {
+      const id = await preConsolidationReturn(appToUse)
+      captured = []
+      try {
+        const edited = await withRoute(appToUse, () => reqExact('PATCH', `/${id}`, editBody(id)))
+        assert.strictEqual(edited.status, 200, JSON.stringify(edited.json))
+        return { text: normalisedRun(captured), stock: JSON.stringify([lotsSnapshot(), movementRows()]) }
+      } finally { captured = null }
+    }
+    const fresh = await run(returnsRoute.default)
+    const old = await run(oracleBeforeResidualRoute.default)
+    let at = 0
+    while (at < fresh.text.length && fresh.text[at] === old.text[at]) at += 1
+    assert.strictEqual(fresh.text, old.text, `edit statements differ while both branches are active, first difference at ${at}: ${JSON.stringify(fresh.text.slice(Math.max(0, at - 120), at + 160))} / ${JSON.stringify(old.text.slice(Math.max(0, at - 120), at + 160))}`)
+    assert.strictEqual(fresh.stock, old.stock)
+    assert.deepStrictEqual(lotsSnapshot().lot3AtOld, 5, 'both branches active: reversal and restock stay at Shop in its own lot (7 - 3 + 1)')
+    assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM inventory_movements WHERE addressed_branch_name IS NOT NULL').get().n, 0)
+  })
+
+  const supplierBody = (extra = {}) => ({
+    client_request_id: 'supplier-1', items: [{ product_id: 1, quantity: 4, branch_id: 2, cost_price_usd: 2 }], branch_id: 2,
+    reason: 'Defective lot returned', settlement: 'refund', supplier_name: 'Acme', ...extra,
+  })
+  await check('SUPPLIER return addressed to Old Shop takes its units out of LC Store and records both branches', async () => {
+    seedWorld('before'); seedLots('before', 3)
+    consolidate()
+    const made = await reqExact('POST', '/supplier', supplierBody())
+    assert.strictEqual(made.status, 200, JSON.stringify(made.json))
+    assert.deepStrictEqual(lotsSnapshot(), { lot1AtStore: 10, lot3AtStore: 0, lot1AtOld: 0, lot3AtOld: 0, store: 10, old: 0 }, 'the 4 of the 14 units left LC Store lot 1; Old Shop stays empty and is never driven negative')
+    const header = rawDb.prepare('SELECT branch_id, branch_name, addressed_branch_name FROM returns WHERE return_type = ?').get(['supplier_return'])
+    assert.deepStrictEqual({ ...header }, { branch_id: 1, branch_name: 'LC Store', addressed_branch_name: 'Old Shop' })
+    assert.deepStrictEqual(movementRows().filter((row) => row.movement_type === 'supplier_return'), [{ movement_type: 'supplier_return', branch_id: 1, branch_name: 'LC Store', addressed_branch_name: 'Old Shop', quantity: -4, batch_id: 1 }])
+    const settled = JSON.stringify([lotsSnapshot(), movementRows()])
+    const again = await reqExact('POST', '/supplier', supplierBody())
+    assert.strictEqual(again.status, 200, JSON.stringify(again.json))
+    assert.strictEqual(JSON.stringify([lotsSnapshot(), movementRows()]), settled, 'the same request id moves the stock once')
+    assert.strictEqual(rawDb.prepare("SELECT COUNT(*) n FROM returns WHERE return_type = 'supplier_return'").get().n, 1)
+    // CONTROL: the code before this lane refuses the empty retired branch.
+    seedWorld('before'); seedLots('before', 3)
+    consolidate()
+    const stranded = await withRoute(oracleBeforeResidualRoute.default, () => reqExact('POST', '/supplier', supplierBody({ client_request_id: 'supplier-old' })))
+    assert.notStrictEqual(stranded.status, 200, 'CONTROL: the old supplier path cannot take stock out of the emptied retired branch')
+  })
+
+  await check('SUPPLIER return to a retired branch with no successor refuses 409; both branches active is byte-identical to the old route', async () => {
+    seedWorld('before'); seedLots('before', 3)
+    consolidate()
+    const triggers = rawDb.prepare("SELECT name, sql FROM sqlite_master WHERE type = 'trigger' AND tbl_name = 'branches'").all()
+    for (const trigger of triggers) rawDb.exec(`DROP TRIGGER "${trigger.name}"`)
+    rawDb.prepare('UPDATE branches SET successor_branch_id = NULL WHERE id = 2').run()
+    for (const trigger of triggers) rawDb.exec(trigger.sql)
+    const before = JSON.stringify([lotsSnapshot(), movementRows()])
+    const refused = await reqExact('POST', '/supplier', supplierBody({ client_request_id: 'supplier-orphan' }))
+    assert.strictEqual(refused.status, 409, JSON.stringify(refused.json))
+    assert.strictEqual(refused.json.code, 'branch_retired_no_successor')
+    assert.strictEqual(JSON.stringify([lotsSnapshot(), movementRows()]), before)
+    const run = async (appToUse) => {
+      seedWorld('before'); seedLots('before', 3)
+      captured = []
+      try {
+        const made = await withRoute(appToUse, () => reqExact('POST', '/supplier', supplierBody({ client_request_id: 'supplier-inert' })))
+        assert.strictEqual(made.status, 200, JSON.stringify(made.json))
+        return normalisedRun(captured)
+      } finally { captured = null }
+    }
+    const fresh = await run(returnsRoute.default)
+    const old = await run(oracleBeforeResidualRoute.default)
+    assert.strictEqual(fresh, old, 'both branches active: the supplier return writes the same statements as before')
+  })
+}
+
+successorChecks().then(residualChecks).then(() => { console.log(`${passed} returns successor restock checks passed`) }).catch((error) => { console.error(error); process.exitCode = 1 })
