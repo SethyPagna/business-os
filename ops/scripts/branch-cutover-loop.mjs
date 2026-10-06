@@ -20,6 +20,9 @@ export const MAX_ATTEMPTS = 25
 export const BEGIN_ATTEMPTS = 4
 export const OPERATION_PHASES = Object.freeze(['none', 'capturing', 'snapshots', 'moving', 'verifying', 'ready', 'completed', 'aborted'])
 export const NEXT_STATES = Object.freeze(['none', 'continue', 'child', 'ready', 'completed', 'aborted'])
+// Every capability code the library can report (cloudflare/src/lib/branchCutoverCapture.ts and branchCutoverParent.ts); anything else prints as 'other'.
+export const CAPABILITY_CODES = Object.freeze(['capture_reference_required', 'capture_shadowed_rowid', 'capture_table_required', 'historical_label_schema_required',
+  'history_applier_unclassified', 'pending_actions_open', 'unclassified_scalar_reference', 'unsupported_stock_state'])
 const REFUSAL = /^[a-z][a-z0-9_]{2,63}$/
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
 
@@ -27,9 +30,12 @@ export const stepRequestId = (operationId, revision) => `bcr_${operationId}_${re
 
 const backoffMs = (attempt) => Math.min(15000, 500 * 2 ** Math.min(attempt - 1, 10))
 
-export function refusalCode(json) {
-  const code = json && typeof json.refusal === 'string' && REFUSAL.test(json.refusal) ? json.refusal : 'refused'
-  return new OpsError(`refused-${code.replaceAll('_', '-')}`.slice(0, 64), `The endpoint refused: ${code}`, { detail: json && json.detail })
+// The refusal code comes from the endpoint but is printed only after it matches a plain lower-case word pattern.
+export class CutoverRefusal extends OpsError {
+  constructor(json) {
+    const code = json && typeof json.refusal === 'string' && REFUSAL.test(json.refusal) ? json.refusal : 'refused'
+    super(`refused-${code.replaceAll('_', '-')}`.slice(0, 64), `The endpoint refused: ${code}`, { detail: json && json.detail })
+  }
 }
 
 export function createClient({ send, sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)), maxAttempts = MAX_ATTEMPTS }) {
@@ -56,12 +62,11 @@ export function createClient({ send, sleep = (ms) => new Promise((resolve) => se
         if (response.status === 404) throw new OpsError('endpoint-disabled', 'The endpoint is not enabled on this Worker.')
         if (json.code === 'retryable') transient = 'retryable'
         else if (response.status === 429 || response.status >= 500) transient = 'serverBusy'
-        else throw refusalCode(json)
+        else throw new CutoverRefusal(json)
       }
       stats[transient] += 1
-      if (attempt >= (action === 'begin' ? Math.min(BEGIN_ATTEMPTS, maxAttempts) : maxAttempts)) {
-        throw new OpsError(action === 'begin' ? 'begin-not-confirmed' : 'retries-exhausted', `The call ${action} did not settle after ${attempt} attempts.`)
-      }
+      if (action === 'begin' && attempt >= Math.min(BEGIN_ATTEMPTS, maxAttempts)) throw new OpsError('begin-not-confirmed', 'The begin call did not settle.')
+      if (attempt >= maxAttempts) throw new OpsError('retries-exhausted', `The call ${action} did not settle after ${attempt} attempts.`)
       stats.retries += 1
       await sleep(backoffMs(attempt))
     }
@@ -85,7 +90,7 @@ export async function readStatus(client, operationId) {
 
 export function inspectVerdict(inspect) {
   const capabilities = Array.isArray(inspect && inspect.capabilities) ? inspect.capabilities : []
-  const codes = [...new Set(capabilities.map((entry) => (entry && typeof entry.code === 'string' && REFUSAL.test(entry.code) ? entry.code : 'other')))].sort()
+  const codes = [...new Set(capabilities.map((entry) => (entry && CAPABILITY_CODES.includes(entry.code) ? entry.code : 'other')))].sort()
   return { ready: Boolean(inspect && inspect.activationReady === true && capabilities.length === 0), capabilityCodes: codes }
 }
 
