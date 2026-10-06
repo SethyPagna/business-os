@@ -120,7 +120,7 @@ await runTest('http.ts restates before it throws, so every surface that shows er
   const http = read(FRONTEND, 'src', 'api', 'http.ts')
   // Loaded on the refusal path only (dynamic import) so the storefront catalog closure does not carry it.
   assert.ok(http.includes("import('./branchRefusalLanguage.ts')"), 'loaded lazily')
-  assert.ok(!/^import .* from './branchRefusalLanguage.ts'/m.test(http), 'never a static import')
+  assert.ok(!http.split(String.fromCharCode(10)).some((line) => line.startsWith('import ') && line.includes('branchRefusalLanguage')), 'never a static import')
   const call = http.indexOf('.restateBranchRefusal(apiError)')
   assert.ok(call > http.indexOf('const apiError = createApiError(res.status, parsed, text)'), 'after the error is built')
   assert.ok(call < http.indexOf('throw apiError || new Error('), 'and before it is thrown')
