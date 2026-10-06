@@ -37,7 +37,8 @@ import { getSessionUser } from './lib/auth'
 import { hasPermission, isAdminControlUser } from './lib/permissions'
 import { admitRequestBody, SMALL_BODY_BYTES, MIGRATION_FINALIZE_BODY_BYTES, smallBodyAccess } from './lib/requestBodyGuard'
 import { ensureCoreDataInvariantsForRequest } from './lib/coreInvariantsGate'
-import { getMaintenance, isMaintenanceGatedRequest } from './lib/maintenance'
+import { getMaintenance, isBranchCutoverOperatorPath, isMaintenanceGatedRequest } from './lib/maintenance'
+import branchCutoverOperatorRoute from './routes/branchCutoverOperator'
 import { reportError } from './lib/errorReporting'
 import { serveUpload } from './lib/imageVariants'
 import { handleImportQueue, handleImportDeadLetterQueue, handleMediaQueue, handleBackupQueue } from './queue'
@@ -118,6 +119,9 @@ export type Env = {
   SYNC_UPLOADS: DurableObjectNamespace
   BROADCAST_HUB: DurableObjectNamespace
   BUSINESS_OS_PUBLIC_URL: string
+  // Secret (wrangler secret put BRANCH_CUTOVER_OPERATOR_TOKEN, 32+ characters) that switches on the branch-cutover
+  // operator endpoints (routes/branchCutoverOperator.ts). Absent or shorter: the endpoints answer 404.
+  BRANCH_CUTOVER_OPERATOR_TOKEN?: string
   BUSINESS_OS_ADMIN_URL: string
   // Which Workers plan this deployment runs on: 'paid' (wrangler.toml) or
   // 'free' (wrangler.free.toml). Read ONLY by lib/planTier.ts, which turns
@@ -446,7 +450,8 @@ app.use('/api/*', async (c, next) => {
 app.use('/api/*', async (c, next) => {
   if (isMaintenanceGatedRequest(c.req.method, c.req.path, 'branch-cutover')) {
     const maintenance = await getMaintenance(c.env)
-    if (maintenance && isMaintenanceGatedRequest(c.req.method, c.req.path, maintenance.mode)) {
+    const operatorStep = maintenance?.mode === 'branch-cutover' && isBranchCutoverOperatorPath(c.req.path)
+    if (maintenance && !operatorStep && isMaintenanceGatedRequest(c.req.method, c.req.path, maintenance.mode)) {
       return c.json({
         error: maintenance.mode === 'restore'
           ? 'A backup restore is in progress. The system is read-only until it finishes.'
@@ -546,6 +551,7 @@ app.get('/uploads/*', async (c) => {
   return serveUpload(c.env, c.req.path, c.req.raw, c.executionCtx)
 })
 
+app.route('/api/internal/branch-cutover', branchCutoverOperatorRoute)
 app.route('/api/settings', settingsRoute)
 app.route('/api/products', productsRoute)
 app.route('/api/products', productCostRoute)

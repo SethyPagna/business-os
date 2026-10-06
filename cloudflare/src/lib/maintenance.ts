@@ -220,6 +220,14 @@ export function isMaintenanceGatedRequest(method: string, path: string, mode: Ma
   return true
 }
 
+/**
+ * The branch-cutover operator endpoints (routes/branchCutoverOperator.ts). During a branch-cutover run the fence lets exactly
+ * these paths through; each one still demands the operator token, and every other write stays refused.
+ */
+export function isBranchCutoverOperatorPath(path: string): boolean {
+  return /^\/api\/internal\/branch-cutover\/(?:inspect|begin|resume|status|abort|finalize)$/.test(path)
+}
+
 export function maintenanceStatus(state: MaintenanceState | null): Record<string, unknown> | null {
   if (!state) return null
   if (state.mode === 'branch-cutover') return { mode: state.mode, operationId: state.operationId, revision: state.revision }
