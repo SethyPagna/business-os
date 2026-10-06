@@ -756,10 +756,10 @@ body:has([data-page-bg])      { background-color: var(--ui-page-bg) !important; 
      Chrome measures the viewport WITH the address bar included, not the
      actually-visible area, so on a short/landscape phone screen the video
      block could measure taller than what's really visible, pushing the
-     modal's total height past what Modal.tsx's own `max-h-modal-92` (which
+     modal's total height past what the `max-h-modal-*` scale (which
      already correctly falls back to `dvh`) expected -- the two rules were
      computing against different viewport definitions. This class uses the
-     same vh-then-dvh-override pattern as `.max-h-modal-92` so both agree,
+     same vh-then-dvh-override pattern as `.max-h-modal-90` so both agree,
      and caps against a lower ceiling (46vh vs the old 50vh) with a smaller
      floor (200px vs 240px) so there's more slack for the header/manual-
      entry section to still fit above the fold on short screens. */
@@ -998,10 +998,8 @@ body:has([data-page-bg])      { background-color: var(--ui-page-bg) !important; 
    on an engine without dvh, because the var() makes the second declaration
    invalid at computed-value time instead of at parse time. */
 .max-h-modal-90 { max-height: calc(90 * var(--app-vh) - var(--kb-inset, 0px)); }
-.max-h-modal-92 { max-height: calc(92 * var(--app-vh) - var(--kb-inset, 0px)); }
 .max-h-modal-80 { max-height: calc(80 * var(--app-vh) - var(--kb-inset, 0px)); }
 .max-h-modal-85 { max-height: calc(85 * var(--app-vh) - var(--kb-inset, 0px)); }
-.max-h-modal-88 { max-height: calc(88 * var(--app-vh) - var(--kb-inset, 0px)); }
 
 /* POS product grid. Denser on phones (user, Aug 31: "pos products section is
    showing one whole product display for small screens ... should be minimized

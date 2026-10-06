@@ -182,10 +182,9 @@ function setup() {
       quantity REAL, applied_price_usd REAL, applied_price_khr REAL, cost_price_usd REAL, cost_price_khr REAL,
       total_usd REAL, total_khr REAL, branch_id INTEGER, price_mode TEXT,
       base_price_usd REAL, base_price_khr REAL, batch_id INTEGER, batch_label TEXT, batch_expiry_date TEXT);
-    -- stock_skipped is S4-2's sticky flag (migration 0114, a lane that has not
-    -- merged into this one's base). It is present HERE so this test can pin
-    -- that the kernel honours it the moment 0114 lands; case 7b drives the
-    -- pre-merge shape, where the column simply is not there.
+    -- stock_skipped is S4-2's sticky flag (migration 0114_sales_stock_skipped.sql).
+    -- It is present HERE so this test pins that the kernel honours it; case 7b
+    -- drives the shape without the column.
     CREATE TABLE sales (id INTEGER PRIMARY KEY, receipt_number TEXT, sale_status TEXT, branch_id INTEGER,
       exchange_rate REAL DEFAULT 4100, subtotal_usd REAL, subtotal_khr REAL, discount_usd REAL DEFAULT 0,
       membership_discount_usd REAL DEFAULT 0, tax_usd REAL DEFAULT 0, is_delivery INTEGER DEFAULT 0,

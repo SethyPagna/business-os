@@ -130,11 +130,6 @@ body[data-public-portal='true'] .portal-cover-image[data-loaded='true'] {
   box-shadow: none !important;
 }
 
-[data-portal-root='true'].dark .portal-logo-frame,
-.dark [data-portal-root='true'] .portal-logo-frame {
-  box-shadow: none !important;
-}
-
 [data-portal-root='true'].dark .portal-nav-track,
 .dark [data-portal-root='true'] .portal-nav-track {
   background-color: rgba(20, 20, 20, 0.97) !important;

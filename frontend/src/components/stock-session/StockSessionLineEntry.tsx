@@ -19,7 +19,7 @@ import { IconField, InsetNumberField, INVALID_RING } from './StockSessionSharedD
 
 type Translate = (key: string, fallbackEn?: string, fallbackKm?: string) => string
 
-// StockReasonField's limit: every reason wire takes 512, and the headroom lets
+// The reason box limit: every reason wire takes 512, and the headroom lets
 // undo prepend 'Undo: ' to a maximum-length reason.
 const REASON_MAX_LENGTH = 500
 

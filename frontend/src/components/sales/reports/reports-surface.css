@@ -595,16 +595,6 @@
   color: #fff;
 }
 
-.reports-mobile-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-}
-
-.reports-mobile-actions > span,
-.reports-mobile-actions > span > button { width: 44px; min-width: 44px; height: 44px; }
-.reports-mobile-show { width: auto; min-width: 5.5rem; min-height: 44px; padding-inline: 16px; }
-
 .reports-desktop-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .reports-desktop-primary { flex-direction: row; flex-wrap: wrap; max-width: 100%; }
 .reports-desktop-primary > :first-child { flex: 0 1 auto; }

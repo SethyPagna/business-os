@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { getInventoryReasons } from '../api/methods.ts'
 
 // The saved-reason catalog (settings.inventory_saved_reasons, GET
-// /api/inventory/reasons) as StockReasonField wants it: one type's chips,
+// /api/inventory/reasons) as the stock reason controls want it: one type's chips,
 // already shaped { id, label }.
 //
 // Every stock-write surface that offers the chips used to inline the same

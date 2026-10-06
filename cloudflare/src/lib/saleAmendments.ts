@@ -292,11 +292,10 @@ function formatWindow(minutes: number): string {
 //     sticky precisely so every later transition keeps skipping, and an
 //     amendment is a later transition.
 //
-// The flag is read tolerantly on purpose. S4-2's column (migration 0114) is
-// not in this lane's base; until it merges, `SELECT *` simply does not return
-// the field, `Number(undefined) || 0` is 0, and stock moves exactly as it does
-// today. The moment the column lands, the flag is honoured with no further
-// change here -- and the pure test pins that by driving both shapes.
+// The flag is read tolerantly on purpose. S4-2's column is migration
+// 0114_sales_stock_skipped.sql; a row shape without it (a pure-test fixture)
+// gives `Number(undefined) || 0` = 0 and stock moves as it always did. The
+// pure test pins both shapes.
 // ---------------------------------------------------------------------------
 export type AmendableSaleRow = SaleMoneyRow & {
   sale_status?: unknown
