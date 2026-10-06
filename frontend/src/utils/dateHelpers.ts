@@ -10,7 +10,7 @@ import { BUSINESS_TIME_ZONE } from '../constants.ts'
 // current wall-clock date in BUSINESS_TIME_ZONE. Re-parsing a
 // timeZone-formatted string is the standard zero-dependency way to read a
 // fixed IANA zone's wall-clock fields in JS.
-function businessNow(): Date {
+export function businessNow(): Date {
   return new Date(new Date().toLocaleString('en-US', { timeZone: BUSINESS_TIME_ZONE }))
 }
 
@@ -36,4 +36,22 @@ export function businessYear(): number {
 
 export function businessMonth(): number {
   return businessNow().getMonth() + 1
+}
+
+/**
+ * Whole calendar days from today (business timezone) to a stored yyyy-mm-dd
+ * date: 0 = today, negative = already past. null for anything that is not a
+ * stored ISO date. Both ends are calendar days, so the device's own timezone
+ * and the time of day cannot move the answer -- the product expiry badge used
+ * to compare the device-local midnight of the expiry with Date.now().
+ */
+export function daysUntilBusinessDate(isoDate: unknown, today: string = todayStr()): number | null {
+  const toUtcDay = (value: string): number | null => {
+    const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(value.trim())
+    return match ? Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])) : null
+  }
+  const target = toUtcDay(String(isoDate ?? ''))
+  const origin = toUtcDay(today)
+  if (target === null || origin === null) return null
+  return Math.round((target - origin) / 86400000)
 }

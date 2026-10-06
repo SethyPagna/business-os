@@ -162,7 +162,8 @@ await runTest('no surface reaches past the shared formatter to a month-first loc
   for (const [path, what] of sources) {
     const text = read(path)
     assert.equal(MONTH_FIRST_CALL.test(text), false, `${what} must not hand the date order to a locale`)
-    assert.ok(text.includes('fmtDayFirst'), `${what} must use the shared day-first formatter`)
+    // Settings keeps the option-driven fmtDayFirst (its zone is pinned); the other three moved to the one instant shape.
+    assert.ok(text.includes('fmtDayFirst') || text.includes('fmtDateTime24'), `${what} must use a shared day-first formatter`)
   }
   // Positive control: the pattern above must actually FIRE on the shape it
   // claims to catch, or all four verdicts are worthless.
@@ -250,13 +251,14 @@ await runTest('IDENTIFIER: lot ORDERING is decoded from the code, never from the
   assert.equal(lotCodeAsDate('08242026'), `${d}/${m}/${y}`)
 })
 
-await runTest("IDENTIFIER: migration 0108's ADJ lot codes render verbatim", () => {
+await runTest("IDENTIFIER: migration 0108's ADJ lot codes are stored month-first, DISPLAYED day-first", () => {
   // 0108 wrote literal 'ADJ' + mm/dd/yyyy strings into lot_code. They are
-  // stored DATA, not a format this code produces, so they must keep printing
-  // exactly as stored -- lotCodeAsDate must refuse them (not a pure 8-digit
-  // code) and batchDisplayLabel must pass them straight through.
+  // stored DATA, not a format this code produces -- lotCodeAsDate must still
+  // refuse them (not a pure 8-digit code). Owner, 6 Oct 2026: they DISPLAY as
+  // "ADJ 02/09/2026" so no screen shows a month-first date beside day-first
+  // ones; the stored string is never rewritten (see dateDisplayConsistency).
   assert.equal(lotCodeAsDate('ADJ09/02/2026'), null)
-  assert.equal(batchDisplayLabel({ id: 7, lot_code: 'ADJ09/02/2026' }), 'ADJ09/02/2026')
+  assert.equal(batchDisplayLabel({ id: 7, lot_code: 'ADJ09/02/2026' }), 'ADJ 02/09/2026')
   assert.equal(batchDisplayLabel({ id: 7, lot_code: 'ADJ09/02/2026', received_at: '2026-09-02' }), '02/09/2026', 'a valid stored received date outranks the synthetic code')
 })
 

@@ -16,6 +16,13 @@ function normalizeTimestampInput(raw: TimestampInput): string {
   }
   const value = String(raw).trim()
   if (!value) return ''
+  // Every stored stamp starts yyyy-mm-dd. Anything else (a leftover slash
+  // value such as "03/04/2026") is NOT handed to Date: V8 reads a slash string
+  // month-first, so it used to come out of fmtDateTime24 as "04/03/2026 07:00"
+  // -- a real-looking day-first stamp for the OTHER day, with an invented clock.
+  // Unreadable input is reported as unreadable (callers show a dash or the raw
+  // text) instead of being guessed into a date.
+  if (!/^\d{4}-\d{2}-\d{2}/.test(value)) return ''
   const normalizedBase = value.includes('T') ? value : value.replace(' ', 'T')
   // Check DATE-ONLY before offset suffixes. A valid date such as 2026-09-01
   // also ends in "-01", which otherwise looks like a short timezone
@@ -46,45 +53,17 @@ export function parseServerTimestampMs(raw: TimestampInput): number {
 }
 
 /**
- * Format a UTC timestamp from the database into a human-readable local date+time string.
- * @param {string|Date} raw - Raw timestamp from DB
- * @returns {string}
+ * The historical name of the instant formatter. There is ONE instant shape in
+ * the app -- "dd/mm/yyyy HH:mm", 24-hour, business time -- and it lives in
+ * fmtDateTime24. This used to be a second body that wrote
+ * "dd/mm/yyyy, HH:mm" (a comma), so one stored instant read two ways
+ * depending on which helper the screen happened to call (DATE-CONSISTENCY
+ * sweep D23, owner rule 6 Oct 2026: "we can't have different logics").
+ * Kept as a thin alias because ~23 call sites and several source-shape tests
+ * name it; new code should call fmtDateTime24 directly.
  */
 export function fmtTime(raw: TimestampInput): string {
-  const normalized = normalizeTimestampInput(raw)
-  if (!normalized) return '—'
-  try {
-    const date = new Date(normalized)
-    if (Number.isNaN(date.getTime())) return '—'
-    // dd/mm/yyyy, not "Aug 22, 2026". The whole app uses one numeric date
-    // format by request (Aug 25 2026: "all date format uses mm/dd/yyyy
-    // throughout app"; day-first since Sep 4 2026 -- "change the whole app
-    // to dd-mm-yyy, just receipt id stays yyyy-mm-dd"), so a short-month
-    // form here would be the odd one out wherever it sits next to a date
-    // rendered by fmtDate/fmtDateTime24.
-    //
-    // The parts are assembled by hand rather than left to a locale. No
-    // `Intl` locale is BOTH day-first AND 24-hour AND slash-separated
-    // reliably across engines, and picking one that happens to be today
-    // (en-GB) would silently follow that locale's future CLDR changes --
-    // exactly the "swap day and month without failing" bug the old comment
-    // here warned about, just from the other direction. `en-US` is still
-    // the formatter locale because only its FIELD VALUES are read; the
-    // order is ours.
-    const parts = new Intl.DateTimeFormat('en-US', {
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      hourCycle: 'h23',
-      timeZone: BUSINESS_TIME_ZONE,
-    }).formatToParts(date)
-    const get = (type: string) => parts.find((p) => p.type === type)?.value || ''
-    return `${get('day')}/${get('month')}/${get('year')}, ${get('hour')}:${get('minute')}`
-  } catch {
-    return String(raw || '')
-  }
+  return fmtDateTime24(raw)
 }
 
 /**
@@ -102,10 +81,20 @@ export function fmtTime(raw: TimestampInput): string {
  * (Aug 25 2026 numeric-everywhere, day-first since Sep 4 2026).
  */
 export function fmtDateOnly(raw: unknown): string {
-  const match = String(raw ?? '').match(/^(\d{4})-(\d{2})-(\d{2})/)
-  if (!match) return String(raw ?? '') || '—'
-  return `${match[3]}/${match[2]}/${match[1]}`
+  const text = String(raw ?? '').trim()
+  const match = text.match(/^(\d{4})-(\d{2})-(\d{2})/)
+  if (match) return `${match[3]}/${match[2]}/${match[1]}`
+  if (!text) return '—'
+  // Not a stored ISO date. Showing it bare would let a leftover month-first
+  // value such as "03/04/2026" pass for a day-first date that the reader then
+  // takes as 3 April (DATE-CONSISTENCY sweep 3b). It still has to be shown --
+  // hiding a stored value is its own lie -- so it carries a warning mark that
+  // no real date ever has.
+  return `${UNREADABLE_DATE_MARK} ${text}`
 }
+
+/** Prefix fmtDateOnly puts on a stored value it cannot read as yyyy-mm-dd. */
+export const UNREADABLE_DATE_MARK = '⚠'
 
 export function fmtDate(raw: TimestampInput): string {
   const normalized = normalizeTimestampInput(raw)
@@ -129,16 +118,16 @@ export function fmtDate(raw: TimestampInput): string {
 }
 
 /**
- * Format a UTC timestamp as dd/mm/yyyy HH:mm in 24-hour time (e.g.
- * "22/08/2026 20:00"). Used where a numeric, sortable-looking date +
- * time is wanted (contacts' Added/Created column) rather than fmtTime's
- * "Aug 22, 2026, 20:00" long form. Uses `hourCycle: 'h23'` rather than
+ * THE instant formatter: dd/mm/yyyy HH:mm in 24-hour BUSINESS time (e.g.
+ * "22/08/2026 20:00"), whatever shape the stored stamp has (a stamp with no
+ * zone marker -- SQLite's "YYYY-MM-DD HH:MM:SS" -- is read as UTC). fmtTime
+ * delegates here, so there is one instant shape in the app. Uses `hourCycle: 'h23'` rather than
  * `hour12: false` -- some JS engines render hour12:false's midnight as
  * "24:00" instead of "00:00", h23 avoids that.
  * @param {string|Date} raw - Raw timestamp from DB
  * @returns {string}
  */
-export function fmtDateTime24(raw: TimestampInput): string {
+export function fmtDateTime24(raw: TimestampInput, options: { seconds?: boolean } = {}): string {
   const normalized = normalizeTimestampInput(raw)
   if (!normalized) return '—'
   try {
@@ -150,14 +139,32 @@ export function fmtDateTime24(raw: TimestampInput): string {
       day: '2-digit',
       hour: '2-digit',
       minute: '2-digit',
+      second: options.seconds ? '2-digit' : undefined,
       hourCycle: 'h23',
       timeZone: BUSINESS_TIME_ZONE,
     }).formatToParts(date)
     const get = (type: string) => parts.find((p) => p.type === type)?.value || ''
-    return `${get('day')}/${get('month')}/${get('year')} ${get('hour')}:${get('minute')}`
+    // `seconds` is the SAME shape plus ":ss", never a different one. Only two
+    // surfaces ask for it, both because seconds are the point of the screen:
+    // the audit log (which of two actions in one minute came first) and the
+    // Server page clock probe (client-vs-server drift).
+    const clock = `${get('hour')}:${get('minute')}${options.seconds ? `:${get('second')}` : ''}`
+    return `${get('day')}/${get('month')}/${get('year')} ${clock}`
   } catch {
     return String(raw || '')
   }
+}
+
+/**
+ * fmtDateTime24 for a stored value that may not be a timestamp at all (a log
+ * row, a sync status, a portal review): the same canonical shape, but a value
+ * it cannot read is shown AS STORED rather than collapsing to a dash, so a bad
+ * row stays visible instead of looking empty. Blank input gives `empty`.
+ */
+export function fmtDateTime24OrRaw(raw: TimestampInput, options: { seconds?: boolean; empty?: string } = {}): string {
+  if (raw === null || raw === undefined || String(raw).trim() === '') return options.empty ?? '—'
+  const shown = fmtDateTime24(raw, { seconds: options.seconds })
+  return shown === '—' ? String(raw) : shown
 }
 
 /**
@@ -246,10 +253,11 @@ export function fmtClock24(raw: TimestampInput): string {
  * weekday, time-only) is handed straight to Intl: there is no day/month order
  * to fix when the fields are not interchangeable digits.
  *
- * fmtDate/fmtTime/fmtDateTime24 keep their own bodies on purpose -- each pins
- * one exact separator ("dd/mm/yyyy, HH:mm" vs "dd/mm/yyyy HH:mm") that their
- * callers and tests depend on, and routing them through a general assembler
- * would put those apart-by-a-comma shapes at the mercy of one shared branch.
+ * fmtDate/fmtDateTime24 keep their own bodies on purpose -- each pins one
+ * exact shape ("dd/mm/yyyy" / "dd/mm/yyyy HH:mm") that their callers and tests
+ * depend on, and routing them through a general assembler would put those
+ * shapes at the mercy of one shared branch. This helper's "dd/mm/yyyy,
+ * HH:mm" comma form is for the option-driven escape-hatch callers only.
  */
 export function fmtDayFirst(value: Date, options: Intl.DateTimeFormatOptions = {}): string {
   // hour12:false renders midnight as "24:00" on some engines; h23 does not.

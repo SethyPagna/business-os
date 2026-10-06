@@ -12,7 +12,7 @@
 // it never invents or recomputes a number on its own.
 
 import { BUSINESS_TIME_ZONE } from '../constants.ts'
-import { fmtDayFirst } from './formatters.ts'
+import { fmtDateOnly, fmtDayFirst } from './formatters.ts'
 
 export type BatchLike = {
   id: number | string
@@ -43,6 +43,11 @@ export function formatBatchReceivedDate(receivedAt: string | null | undefined): 
     if (candidate.getUTCFullYear() !== yyyy || candidate.getUTCMonth() + 1 !== mm || candidate.getUTCDate() !== dd) return null
     return `${dateOnly[3]}/${dateOnly[2]}/${dateOnly[1]}`
   }
+  // Anything else must at least START as yyyy-mm-dd. A leftover slash value
+  // ("03/04/2026") is NOT handed to Date: V8 reads it month-first, so it used
+  // to come out here as "04/03/2026" -- a silent flip that looks like a real
+  // day-first date. Unreadable stays null; batchReceivedDateText marks it.
+  if (!/^\d{4}-\d{2}-\d{2}/.test(raw)) return null
   const isoish = raw.includes('T') ? raw : `${raw.replace(' ', 'T')}Z`
   const date = new Date(isoish)
   if (Number.isNaN(date.getTime())) return null
@@ -111,6 +116,66 @@ export function lotCodeToIsoDate(lotCode: string | null | undefined): string | n
   return `${yyyy}-${String(mm).padStart(2, '0')}-${String(dd).padStart(2, '0')}`
 }
 
+/**
+ * The business-day yyyy-mm-dd a stored received_at stands for, or null when it
+ * is not a readable stored date (a leftover slash string, junk, an impossible
+ * day). Date-only values are literal; timestamps are read in business time.
+ * This is what an editor may seed a date field with or drill into -- never a
+ * bare slice(0, 10), which took the UTC day of a timestamp and let a slash
+ * value through as if it were a date.
+ */
+export function batchReceivedDayIso(receivedAt: string | null | undefined): string | null {
+  const shown = formatBatchReceivedDate(receivedAt)
+  const match = shown ? /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(shown) : null
+  return match ? `${match[3]}-${match[2]}-${match[1]}` : null
+}
+
+/**
+ * A stored received_at, ready to print: the day-first date (date-only values
+ * literal, timestamps in business time) or, for a value that is neither -- a
+ * leftover month-first slash string -- the shared unreadable-date marker with
+ * the raw text, never a bare string that could pass for a day-first date.
+ * Empty gives the usual dash.
+ */
+export function batchReceivedDateText(receivedAt: string | null | undefined): string {
+  const raw = String(receivedAt ?? '').trim()
+  if (!raw) return fmtDateOnly('')
+  return formatBatchReceivedDate(raw) ?? fmtDateOnly(raw)
+}
+
+// Migration 0108 wrote synthetic adjustment lot codes as the literal text
+// 'ADJ' + a MONTH-first slash date ("ADJ09/02/2026" = 2 September), built from
+// strftime('%m/%d/%Y'). Printed verbatim next to the day-first dates everywhere
+// else, that reads as 9 February -- and the digits cannot be rewritten in
+// place, because the stored lot_code is an identifier other rows were matched
+// against. So only the DISPLAY is corrected: "ADJ 02/09/2026". A group that
+// cannot be a month-first date (first group over 12) is not 0108's output and
+// is shown as stored.
+const ADJUSTMENT_LOT_CODE = /^ADJ\s*(\d{1,2})\/(\d{1,2})\/(\d{4})$/i
+
+export function adjustmentLotCodeAsDisplay(lotCode: string | null | undefined): string | null {
+  const match = ADJUSTMENT_LOT_CODE.exec(String(lotCode || '').trim())
+  if (!match) return null
+  const month = Number(match[1])
+  const day = Number(match[2])
+  const year = Number(match[3])
+  if (month < 1 || month > 12 || day < 1 || day > new Date(Date.UTC(year, month, 0)).getUTCDate()) return null
+  return `ADJ ${String(day).padStart(2, '0')}/${String(month).padStart(2, '0')}/${year}`
+}
+
+/**
+ * How a stored lot code reads on screen -- the one place every surface that
+ * prints a lot_code (not a received date) should go through: a pure MMDDYYYY
+ * code decodes to dd/mm/yyyy (Z1a), a 0108 'ADJ' code gets its date re-ordered
+ * day-first, and any genuine custom code is shown as typed. Display only; the
+ * stored code is never rewritten.
+ */
+export function lotCodeDisplay(lotCode: string | null | undefined): string {
+  const raw = String(lotCode ?? '').trim()
+  if (!raw) return ''
+  return lotCodeAsDate(raw) || adjustmentLotCodeAsDisplay(raw) || raw
+}
+
 // Full fallback chain for displaying one batch. Z1a display rule: a batch
 // reads as its received DATE (dd/mm/yyyy) everywhere -- the stored
 // received_at wins (authoritative), falling back to decoding a date-derived
@@ -126,7 +191,7 @@ export function batchDisplayLabel(batch: BatchLike, batchWord = 'Received date')
   const dateLabel = formatBatchReceivedDate(batch.received_at)
   if (dateLabel) return dateLabel
   if (codeAsDate) return codeAsDate
-  if (batch.lot_code) return batch.lot_code
+  if (batch.lot_code) return lotCodeDisplay(batch.lot_code)
   const defaultLabel = formatDefaultBatchLabel(batch.batch_number, batch.received_at)
   if (defaultLabel) return `${batchWord} ${defaultLabel}`
   return `${batchWord} #${batch.id}`
