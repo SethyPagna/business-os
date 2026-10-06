@@ -1,0 +1,166 @@
+#!/usr/bin/env node
+// branch-cutover job of .github/workflows/ops.yml: the production operator for the Shop -> LC Store consolidation.
+// It drives the Worker's token-gated endpoint (cloudflare/src/routes/branchCutoverOperator.ts) with the shared loop in
+// ops/scripts/branch-cutover-loop.mjs, one durable step per request, and never touches D1 directly. Only `bookmark`
+// (and `start`, which captures one first) call wrangler: `wrangler d1 time-travel info`, which reads and changes nothing.
+//
+//   OPS_CUTOVER_MODE  inspect | bookmark | start | resume-until-ready | status | abort | finalize
+//   OPS_OPERATION_ID  the operation to continue (blank: the one unfinished operation, found by `status`)
+//   OPS_ACTOR_USER_ID the administrator the run acts as (inspect, start); every later step uses the journal's actor
+//   OPS_OUT_DIR       where branch-cutover-<mode>-<run>.enc.json is written
+//   BRANCH_CUTOVER_OPERATOR_TOKEN  the shared secret the Worker also holds
+//   OPS_CUTOVER_BUDGET_MINUTES     resume-until-ready stops cleanly after this long (default 300); re-run to resume
+//   CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID  (wrangler, bookmark and start only)
+//
+// Public log: the mode, the operation id, phase names, revision numbers, step counts, PASS/FAIL and fixed refusal codes.
+// Everything the Worker returned (inspect's preimages and digests, refusal details) is only in the encrypted report.
+
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import {
+  CLOUDFLARE_DIR, OpsError, codesText, cloudflareErrorCodes, commitId, errorRecord, isMain, publicToken, requireEnv, runId, runMain, runWrangler,
+  say, summary, truncate, writeEncryptedReport,
+} from './ops-common.mjs'
+import { abortCutover, createClient, finalizeCutover, inspectCutover, readStatus, resumeUntilReady, startCutover } from './branch-cutover-loop.mjs'
+
+export const MODES = Object.freeze(['inspect', 'bookmark', 'start', 'resume-until-ready', 'status', 'abort', 'finalize'])
+export const DEFAULT_BASE_URL = 'https://admin.leangbeauty.com'
+export const ALLOWED_HOSTS = Object.freeze(['admin.leangbeauty.com', 'leangbeauty.com'])
+export const DATABASE = 'business-os'
+const REQUEST_TIMEOUT_MS = 60000
+const BOOKMARK = /\b[0-9a-f]{8}-[0-9a-f]{8}-[0-9a-f]{8}-[0-9a-f]{32}\b/
+
+export function baseUrl(raw) {
+  const text = String(raw || DEFAULT_BASE_URL).trim().replace(/\/+$/, '')
+  let url
+  try { url = new URL(text) } catch { throw new OpsError('bad-base-url', 'The base URL is not a URL.') }
+  if (url.protocol !== 'https:' || !ALLOWED_HOSTS.includes(url.hostname) || url.port || url.pathname !== '/' || url.search || url.hash || url.username) {
+    throw new OpsError('bad-base-url', 'The base URL must be the plain https origin of a production host.')
+  }
+  return url.origin
+}
+
+// The deterministic begin request id: one per workflow run, shared by its retries and by a re-run of the same run.
+export const beginRequestId = (run) => `cutover_begin_${/^\d{1,20}$/.test(String(run)) ? run : 'local'}`
+
+export function makeSend({ origin, token, fetchImpl = fetch, timeoutMs = REQUEST_TIMEOUT_MS }) {
+  return async (action, text) => {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), timeoutMs)
+    try {
+      const response = await fetchImpl(`${origin}/api/internal/branch-cutover/${action}`, {
+        method: 'POST', redirect: 'error', signal: controller.signal, body: text,
+        headers: { 'content-type': 'application/json', 'x-cutover-operator-token': token, 'user-agent': 'business-os-ops' },
+      })
+      let json = null
+      try { json = JSON.parse(await response.text()) } catch { /* a proxy page: the status decides */ }
+      return { status: response.status, json }
+    } finally { clearTimeout(timer) }
+  }
+}
+
+export async function captureBookmark() {
+  const result = await runWrangler(['d1', 'time-travel', 'info', DATABASE, '--json'], {
+    cwd: CLOUDFLARE_DIR, timeoutMs: 3 * 60 * 1000,
+    env: { WRANGLER_WRITE_LOGS: 'false', WRANGLER_LOG_PATH: path.join(os.tmpdir(), `ops-cutover-wrangler-${process.pid}`) },
+  })
+  fs.rmSync(path.join(os.tmpdir(), `ops-cutover-wrangler-${process.pid}`), { recursive: true, force: true })
+  const errorCodes = cloudflareErrorCodes(`${result.stdout}\n${result.stderr}`)
+  const match = result.code === 0 && !result.timedOut ? BOOKMARK.exec(result.stdout) : null
+  if (!match) throw new OpsError('bookmark-not-captured', 'Time Travel returned no bookmark.', { exitCode: result.code, timedOut: result.timedOut, errorCodes, stdout: truncate(result.stdout, 4000), stderr: truncate(result.stderr, 4000) })
+  return { bookmark: match[0], capturedAt: new Date().toISOString(), info: truncate(result.stdout, 4000) }
+}
+
+const phaseToken = (state) => publicToken(state.phase)
+
+function progressPrinter() {
+  let lastPhase = null
+  return ({ steps, state }) => {
+    if (state.phase !== lastPhase || steps % 500 === 0) {
+      say('step {steps}: phase {phase}, revision {revision}', { steps, phase: phaseToken(state), revision: state.revision })
+      lastPhase = state.phase
+    }
+  }
+}
+
+export async function executeMode(mode, { client, env, now = Date.now, bookmark = captureBookmark, run = runId() }) {
+  const operationId = String(env.OPS_OPERATION_ID || '').trim()
+  const actorUserId = Number(env.OPS_ACTOR_USER_ID)
+  const needActor = () => {
+    if (!Number.isSafeInteger(actorUserId) || actorUserId < 1) throw new OpsError('actor-user-missing', 'OPS_ACTOR_USER_ID must be a user id.')
+  }
+  const out = { mode }
+  if (mode === 'inspect') {
+    needActor()
+    const { inspect, verdict } = await inspectCutover(client, { actorUserId })
+    out.inspect = inspect
+    out.ready = verdict.ready
+    say('inspect: {result}, blocking capability codes: {codes}', { result: verdict.ready ? 'PASS' : 'FAIL', codes: publicToken(codesText(verdict.capabilityCodes.slice(0, 8)).replaceAll('_', '-').slice(0, 60)) })
+    if (!verdict.ready) throw Object.assign(new OpsError('inspect-not-ready', 'Inspect reports capabilities that block a cutover.'), { detail: { capabilities: inspect.capabilities }, partial: out })
+  } else if (mode === 'bookmark') {
+    out.bookmark = await bookmark()
+    say('time travel bookmark: {result} (in the encrypted file)', { result: 'PASS' })
+  } else if (mode === 'start') {
+    needActor()
+    out.bookmark = await bookmark()
+    say('time travel bookmark: {result} (in the encrypted file)', { result: 'PASS' })
+    const started = await startCutover(client, { actorUserId, requestId: beginRequestId(run) })
+    out.inspect = started.inspect
+    out.state = started.state
+    say('operation {operation}: phase {phase}, revision {revision}, replayed {replayed}', { operation: publicToken(started.state.operationId), phase: phaseToken(started.state), revision: started.state.revision, replayed: started.state.replayed === true })
+  } else if (mode === 'resume-until-ready') {
+    const minutes = Number(env.OPS_CUTOVER_BUDGET_MINUTES || 300)
+    if (!Number.isFinite(minutes) || minutes < 1 || minutes > 330) throw new OpsError('bad-time-budget', 'The time budget is 1 to 330 minutes.')
+    const begun = now()
+    const result = await resumeUntilReady(client, { operationId, now, deadline: begun + minutes * 60000, onStep: progressPrinter() })
+    out.state = result.state
+    out.steps = result.steps
+    say('operation {operation}: phase {phase}, revision {revision}, steps this run {steps}', { operation: publicToken(result.state.operationId), phase: phaseToken(result.state), revision: result.state.revision, steps: result.steps })
+  } else if (mode === 'status') {
+    out.state = await readStatus(client, operationId || undefined)
+    say('operation {operation}: phase {phase}, revision {revision}, next {next}', { operation: publicToken(out.state.operationId), phase: phaseToken(out.state), revision: out.state.revision, next: publicToken(out.state.next) })
+  } else if (mode === 'finalize') {
+    const done = await finalizeCutover(client, { operationId })
+    out.state = done.state
+    say('operation {operation}: phase {phase}, revision {revision}, replayed {replayed}', { operation: publicToken(done.state.operationId), phase: phaseToken(done.state), revision: done.state.revision, replayed: done.replayed })
+  } else if (mode === 'abort') {
+    const done = await abortCutover(client, { operationId })
+    out.state = done.state
+    say('operation {operation}: phase {phase}, revision {revision}, replayed {replayed}', { operation: publicToken(done.state.operationId), phase: phaseToken(done.state), revision: done.state.revision, replayed: done.replayed })
+  } else {
+    throw new OpsError('unknown-mode', 'Unknown mode.')
+  }
+  return out
+}
+
+async function main() {
+  if (process.env.GITHUB_REF !== 'refs/heads/main') throw new OpsError('not-main', 'Runs only from refs/heads/main.')
+  const mode = requireEnv('OPS_CUTOVER_MODE').trim()
+  if (!MODES.includes(mode)) throw new OpsError('unknown-mode', 'Unknown mode.')
+  const outDir = requireEnv('OPS_OUT_DIR')
+  if (mode === 'bookmark' || mode === 'start') { requireEnv('CLOUDFLARE_API_TOKEN'); requireEnv('CLOUDFLARE_ACCOUNT_ID') }
+  const operatorToken = mode === 'bookmark' ? null : requireEnv('BRANCH_CUTOVER_OPERATOR_TOKEN')
+  const origin = mode === 'bookmark' ? null : baseUrl(process.env.OPS_CUTOVER_BASE_URL)
+  const startedAt = new Date().toISOString()
+  const run = runId()
+  const client = createClient({ send: origin ? makeSend({ origin, token: operatorToken }) : async () => { throw new Error('no endpoint in this mode') } })
+  let result = null
+  let failure = null
+  try {
+    result = await executeMode(mode, { client, env: process.env })
+  } catch (err) {
+    failure = err
+    result = err && err.partial ? err.partial : { mode }
+  }
+  const payload = { kind: 'branch-cutover', mode, commit: commitId(), runId: run, startedAt, finishedAt: new Date().toISOString(), ok: !failure,
+    stop: failure ? errorRecord(failure) : null, stats: client.stats, result }
+  const report = writeEncryptedReport(outDir, `branch-cutover-${mode}-${run}`, payload, { kind: 'branch-cutover', name: mode, commit: commitId(), runId: run, createdAt: payload.finishedAt })
+  const lines = [['calls {calls}, attempts {attempts}, retries {retries}, replayed {replayed}', client.stats]]
+  if (failure) lines.push(['stopped: {code}', { code: failure instanceof OpsError ? failure : new OpsError('internal-error') }])
+  lines.push(['encrypted file: {bytes} bytes', { bytes: report.bytes }], ['branch-cutover {mode} verdict: {verdict}', { mode: publicToken(mode), verdict: failure ? 'FAIL' : 'PASS' }])
+  for (const [template, values] of lines) { say(template, values); summary(template, values) }
+  return failure ? 1 : 0
+}
+
+if (isMain(import.meta.url)) runMain(main)

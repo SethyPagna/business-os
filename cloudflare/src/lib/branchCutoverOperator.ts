@@ -127,12 +127,33 @@ async function runInspect(db: D1Compat, body: Record<string, unknown>): Promise<
   return reply(200, { ok: true, inspect })
 }
 
+/**
+ * Why begin would be refused, in the operator's words. The library's own admission guard stays authoritative (it re-checks inside
+ * the begin batch); this read only turns an indistinguishable "batch failed" into a named cause, so the runner stops at once.
+ */
+const ADMISSION_BLOCKERS = [
+  ['import_job_active', "SELECT EXISTS(SELECT 1 FROM import_jobs WHERE status IN ('pending','queued','running','analyzing','approved','applying','cancelling') OR julianday(lease_expires_at)>julianday('now')) AS blocked"],
+  ['bulk_delete_active', "SELECT EXISTS(SELECT 1 FROM bulk_delete_jobs WHERE status IN ('pending','processing')) AS blocked"],
+  ['open_shift_exists', 'SELECT EXISTS(SELECT 1 FROM shift_sessions WHERE closed_at IS NULL AND cancelled_at IS NULL) AS blocked'],
+  ['pending_actions_open', "SELECT EXISTS(SELECT 1 FROM pending_actions WHERE status='open') AS blocked"],
+  ['active_branch_count', 'SELECT (SELECT count(*) FROM branches WHERE is_active=1)<>2 AS blocked'],
+  ['maintenance_already_held', "SELECT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance') AS blocked"],
+] as const
+async function admissionBlockers(db: D1Compat): Promise<string[]> {
+  const blockers: string[] = []
+  for (const [code, sql] of ADMISSION_BLOCKERS) if ((await db.prepare(sql).get<{ blocked: number }>())?.blocked) blockers.push(code)
+  return blockers
+}
+
 async function runBegin(db: D1Compat, body: Record<string, unknown>): Promise<OperatorOutcome> {
   const identity = identityOf(body), actor = await loadActor(db, body.actorUserId)
   if (!identity || !actor) return refused('actor_not_permitted')
   const { requestId, expectedSourceJson, expectedTargetJson, expectedSchemaDigest } = body
   if (typeof requestId !== 'string' || !requestIdPattern.test(requestId) || typeof expectedSourceJson !== 'string' || typeof expectedTargetJson !== 'string'
     || typeof expectedSchemaDigest !== 'string' || !digestPattern.test(expectedSchemaDigest)) return refused('bad_request')
+  const existing = await db.prepare('SELECT operation_id FROM branch_cutovers WHERE begin_request_id=@requestId').get({ requestId })
+  const blockers = existing ? [] : await admissionBlockers(db)
+  if (blockers.length) return refused(blockers[0], blockers.join(','))
   const controlIncarnation = await ensureIncarnation(db)
   const begun = await beginBranchCutover(db, actor, actor.organization_id as number, { ...identity, ...BRANCH_CUTOVER_FINAL_NAMES, requestId, controlIncarnation,
     expectedSourceJson, expectedTargetJson, expectedSchemaDigest }, PARENT_BUDGET)
