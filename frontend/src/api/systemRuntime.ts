@@ -1,8 +1,6 @@
 import { apiFetch, route } from './http.ts'
 import { SYNC } from '../constants'
 
-type SystemPayload = Record<string, unknown>
-
 const LONG_SYSTEM_ACTION_TIMEOUT_MS = 10 * 60 * 1000
 
 export function getSystemConfig(): Promise<unknown> {
@@ -40,8 +38,8 @@ export function getIntegrationDoctor(options: { deep?: boolean; write?: boolean 
 // error, but the Worker kept running server-side to completion regardless,
 // so the delete really happened, the app just never found out and never
 // called refreshAppData(). Given the LONG_SYSTEM_ACTION_TIMEOUT_MS this
-// file already uses for other slow one-shot system actions (pick-folder,
-// scale-migration, data-path), these two get the same treatment now.
+// file already uses for its other slow one-shot system actions, these two
+// get the same treatment now.
 export async function resetData(mode = 'sales', options: { includeMovements?: boolean; includeSales?: boolean; includeImages?: boolean } = {}): Promise<unknown> {
   return route(
     'data:reset',
@@ -92,14 +90,6 @@ export async function finalizeMigration(step: 'zero_stock' | 'park_lots'): Promi
   )
 }
 
-export async function openPath(targetPath: string): Promise<unknown> {
-  try {
-    return await apiFetch('POST', '/api/system/open-path', { path: targetPath })
-  } catch (error) {
-    return { success: false, error: (error as { message?: string })?.message || 'Failed to open path' }
-  }
-}
-
 export async function testSyncServer(url: string): Promise<unknown> {
   try {
     const clean = String(url || '').trim().replace(/\/$/, '')
@@ -116,64 +106,4 @@ export async function testSyncServer(url: string): Promise<unknown> {
   } catch (error) {
     return { ok: false, message: (error as { message?: string })?.message || 'Connection failed' }
   }
-}
-
-export async function openFolderDialog(initialPath = ''): Promise<unknown> {
-  const result = await route(
-    'system:pickFolder',
-    () => apiFetch('POST', '/api/system/pick-folder', { initialPath }, LONG_SYSTEM_ACTION_TIMEOUT_MS),
-    () => ({ selectedPath: null, cancelled: true }),
-  )
-  if ((result as { success?: boolean; error?: string } | null)?.success === false) {
-    throw new Error((result as { error?: string })?.error || 'Failed to open folder picker')
-  }
-  return (result as { selectedPath?: string | null } | null)?.selectedPath || null
-}
-
-export function getDataPath(): Promise<unknown> {
-  return route('system:dataPath', () => apiFetch('GET', '/api/system/data-path'), () => ({}))
-}
-
-export function getScaleMigrationStatus(): Promise<unknown> {
-  return route('system:scaleMigrationStatus', () => apiFetch('GET', '/api/system/scale-migration/status'), () => ({ item: null }))
-}
-
-export function prepareScaleMigration(): Promise<unknown> {
-  return route(
-    'system:scaleMigrationPrepare',
-    () => apiFetch('POST', '/api/system/scale-migration/prepare', {}, LONG_SYSTEM_ACTION_TIMEOUT_MS),
-    null,
-    true,
-  )
-}
-
-export function runScaleMigration(payload: SystemPayload = {}): Promise<unknown> {
-  return route(
-    'system:scaleMigrationRun',
-    () => apiFetch('POST', '/api/system/scale-migration/run', payload, LONG_SYSTEM_ACTION_TIMEOUT_MS),
-    null,
-    true,
-  )
-}
-
-export async function setDataPath(dir: string): Promise<unknown> {
-  return route(
-    'system:setDataPath',
-    () => apiFetch('POST', '/api/system/data-path', { dataDir: dir }, LONG_SYSTEM_ACTION_TIMEOUT_MS),
-    null,
-    true,
-  )
-}
-
-export async function resetDataPath(): Promise<unknown> {
-  return route(
-    'system:resetDataPath',
-    () => apiFetch('DELETE', '/api/system/data-path', undefined, LONG_SYSTEM_ACTION_TIMEOUT_MS),
-    null,
-    true,
-  )
-}
-
-export function browseDir(dir: string): Promise<unknown> {
-  return route('system:browseDir', () => apiFetch('POST', '/api/system/browse-dir', { dir }), () => ({ dirs: [] }))
 }

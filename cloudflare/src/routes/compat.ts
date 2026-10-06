@@ -13,7 +13,6 @@ import { readAllQuotas } from '../lib/quotaGuard'
 import { audit, buildAuditLogRetentionDeleteSql } from '../lib/audit'
 import { decodeAuditCursor } from '../lib/auditLogQuery'
 import { readAuditLogPage } from '../lib/auditLogPage'
-import { putObject, getObject, deleteObject } from '../lib/r2'
 import { getGoogleLoginPublicConfig } from '../lib/googleOauth'
 import { CUSTOMER_REFUND_JOIN, getSalesTotals, getSalesTotalsAndPeriodSeries, identifiedCustomerExpr, reportCustomerNameExpr, netRefundExpr, netSaleExpr, previousPeriodFilters, recognizedExpr, shiftWindowBound, shiftWindowWhere } from '../lib/salesAnalytics'
 import { getFamilyStockAlertPage, type FamilyStockAlertState } from '../lib/familyStockStats'
@@ -959,90 +958,6 @@ app.get('/system/integration-doctor', requireAuth, async (c) => {
   return c.json({ item: { checks, runtime }, checks, ok })
 })
 
-// Ported from backend's testObjectStore(): write, read-back, delete a probe
-// key against the same bucket production uploads go to (R2's ASSETS
-// binding), confirming credentials/bucket config actually work end-to-end
-// rather than just "the binding exists". Both legacy routes hit the same
-// underlying check; kept as two routes to match existing frontend call
-// sites (`GET .../doctor` for passive display, `POST .../test-write` for
-// an explicit user-triggered "Test connection" button).
-async function testObjectStore(env: Env) {
-  const key = `system/doctor/object-store-${Date.now()}-${Math.random().toString(16).slice(2)}.txt`
-  const probeBody = new Uint8Array(new TextEncoder().encode('business-os-object-store-test')).buffer as ArrayBuffer
-  await putObject(env.ASSETS, key, probeBody, 'text/plain; charset=utf-8')
-  const object = await getObject(env.ASSETS, key)
-  if (!object) throw new Error('Object store test read returned no body')
-  await deleteObject(env.ASSETS, key)
-  return { ok: true, driver: 'cloudflare-r2', bucket: 'ASSETS' }
-}
-app.get('/system/object-storage/doctor', requireAuth, async (c) => {
-  const denied = denyUnless(c, 'backup', 'settings')
-  if (denied) return denied
-  try {
-    return c.json({ item: await testObjectStore(c.env) })
-  } catch (error) {
-    return c.json({ error: error instanceof Error ? error.message : 'Object storage doctor failed' }, 503)
-  }
-})
-app.post('/system/object-storage/test-write', requireAuth, async (c) => {
-  const denied = denyUnless(c, 'backup', 'settings')
-  if (denied) return denied
-  try {
-    return c.json({ item: await testObjectStore(c.env) })
-  } catch (error) {
-    return c.json({ error: error instanceof Error ? error.message : 'Object storage test failed' }, 503)
-  }
-})
-
-// Ported from backend's `/backups/versions`(+`/list` alias)/`/backups/:id` --
-// these were missing entirely on Cloudflare even though `routes/backups.ts`
-// (mounted at /api/backups) covers create/list/restore; this compat.ts
-// `/system/backups/*` path is the one the Settings > Backups panel's
-// version-history view and per-job status poll actually call.
-async function sendBackupVersions(c: any) {
-  const limit = Math.min(200, Math.max(1, Number.parseInt(c.req.query('limit') || '50', 10) || 50))
-  const denied = denyUnless(c, 'backup')
-  if (denied) return denied
-  try {
-    const items = (await listCloudflareBackups(c.env)).slice(0, limit)
-    return c.json({ items })
-  } catch (error) {
-    return c.json({ error: error instanceof Error ? error.message : 'Failed to list backup versions' }, 500)
-  }
-}
-app.get('/system/backups/versions', requireAuth, sendBackupVersions)
-app.get('/system/backups/versions/list', requireAuth, sendBackupVersions)
-app.get('/system/backups/:id', requireAuth, async (c) => {
-  const denied = denyUnless(c, 'backup')
-  if (denied) return denied
-  const item = await getSystemJob(c.env, c.req.param('id') || '')
-  if (!item) return c.json({ error: 'Backup job not found' }, 404)
-  return c.json({ item })
-})
-
-// -----------------------------------------------------------------------
-// Filesystem / Postgres-only diagnostics from the Docker-era backend.
-// These have no meaningful Cloudflare equivalent: Workers have no local
-// disk to browse/pick a folder on, and this deployment is D1 (SQLite),
-// not Postgres, so there is no "scale migration" to prepare/run. Rather
-// than leaving these to silently 404 (which the frontend could mistake
-// for a network error), they respond honestly so Settings can show
-// "Not applicable in Cloudflare mode" instead of a spinner or blank error.
-// See frontend/src/components/settings/DataStorageSettings.tsx, which now
-// hides the corresponding buttons entirely in Workers mode.
-// -----------------------------------------------------------------------
-const NOT_APPLICABLE_CLOUD = { error: 'Not applicable when running fully on Cloudflare -- there is no local filesystem or Postgres instance to manage.', code: 'not_applicable_cloud_mode' }
-app.post('/system/data-path', requireAuth, (c) => c.json(NOT_APPLICABLE_CLOUD, 410))
-app.delete('/system/data-path', requireAuth, (c) => c.json(NOT_APPLICABLE_CLOUD, 410))
-app.get('/system/storage-mode', requireAuth, (c) => c.json({ mode: 'cloudflare', driver: 'd1+r2', migratable: false }))
-app.post('/system/scale-migration/prepare', requireAuth, (c) => c.json(NOT_APPLICABLE_CLOUD, 410))
-app.post('/system/scale-migration/run', requireAuth, (c) => c.json(NOT_APPLICABLE_CLOUD, 410))
-app.post('/system/browse-dir', requireAuth, (c) => c.json(NOT_APPLICABLE_CLOUD, 410))
-app.post('/system/open-path', requireAuth, (c) => c.json(NOT_APPLICABLE_CLOUD, 410))
-app.post('/system/pick-folder', requireAuth, (c) => c.json(NOT_APPLICABLE_CLOUD, 410))
-
-app.get('/system/data-path', (c) => c.json({ runtime: 'cloudflare-workers', dataPath: 'Cloudflare D1/R2' }))
-app.get('/system/scale-migration/status', (c) => c.json({ item: null }))
 // Real Google Drive OAuth + one-way backup push -- see lib/googleDrive.ts
 // for exactly what's implemented (connect/disconnect/status + pushing the
 // existing R2 backup snapshot into Drive) vs. what's explicitly still out
@@ -1192,27 +1107,6 @@ app.post('/system/jobs/:id/cancel', requireAuth, async (c) => {
   const reason = typeof body.reason === 'string' && body.reason.trim() ? body.reason.trim() : 'Cancelled'
   const job = await storeSystemJob(c.env, { ...(existing || {}), id: jobId, status: 'cancelled', progress: 100, message: reason })
   return c.json({ item: job })
-})
-
-app.get('/import-jobs', async (c) => {
-  const page = clampInt(c.req.query('page'), 1, 1, 100000)
-  const pageSize = clampInt(c.req.query('pageSize'), 20, 1, 100)
-  const offset = (page - 1) * pageSize
-  const db = getDb(c.env)
-  const total = await db.prepare('SELECT COUNT(*) AS count FROM import_jobs').get<{ count: number }>({})
-  const items = await db.prepare('SELECT * FROM import_jobs ORDER BY created_at DESC LIMIT @pageSize OFFSET @offset').all({ pageSize, offset })
-  return c.json({ items, total: total?.count || 0, page, pageSize, totalPages: Math.max(1, Math.ceil((total?.count || 0) / pageSize)) })
-})
-app.get('/import-jobs/queue/status', (c) => c.json({ import: { waiting: 0, active: 0 }, media: { waiting: 0, active: 0 } }))
-app.get('/import-jobs/:id', async (c) => {
-  const item = await getDb(c.env).prepare('SELECT * FROM import_jobs WHERE id = @id LIMIT 1').get({ id: c.req.param('id') })
-  return item ? c.json({ item }) : c.json({ error: 'Import job not found' }, 404)
-})
-app.get('/import-jobs/:id/review', async (c) => {
-  const db = getDb(c.env)
-  const errors = await db.prepare('SELECT * FROM import_job_errors WHERE job_id = @id ORDER BY row_number ASC, id ASC LIMIT 500').all({ id: c.req.param('id') })
-  const files = await db.prepare('SELECT * FROM import_job_files WHERE job_id = @id ORDER BY created_at ASC').all({ id: c.req.param('id') })
-  return c.json({ items: files || [], conflicts: [], errors: errors || [], warnings: [] })
 })
 
 // Permission gate on top of the requireAuth middleware above: this returns

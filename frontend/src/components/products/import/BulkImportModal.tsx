@@ -236,7 +236,6 @@ type FileAsset = {
   public_path?: string
 }
 type ProductImportApi = {
-  openFolderDialog?: () => Promise<string | null | undefined>
   openCSVDialog: () => Promise<CsvData | null | undefined>
   getImportJob?: (jobId: EntityId | null | undefined) => Promise<ImportRecord | ImportJob | undefined>
   cancelImportJob: (jobId: EntityId, options?: ImportRecord) => Promise<ImportRecord | ImportJob | undefined>
@@ -1479,11 +1478,6 @@ export default function BulkImportModal({ onClose, onDone, t, topMode = 'general
   }
 
   const pickImageDirectory = async () => {
-    const folder = await getProductImportApi().openFolderDialog?.()
-    if (folder) {
-      setImageDir(folder)
-      return
-    }
     const input = document.createElement('input')
     input.type = 'file'
     input.webkitdirectory = true

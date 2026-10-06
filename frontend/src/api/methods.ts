@@ -1350,10 +1350,6 @@ export function downloadImportTemplate(type) {
   })
 }
 
-// ─── No-ops for API compatibility ────────────────────────────────────────────
-export const openPath = (targetPath) =>
-  callSystemRuntimeMethod('openPath', targetPath)
-
 // ─── Returns ──────────────────────────────────────────────────────────────────
 export const getReturns = async (params) => {
   const { getReturns: getReturnsRequest } = await loadReturnsTransport()
@@ -1434,30 +1430,3 @@ export const submitReturnUpdateRequest = async (id, body) => {
 // Used by ServerPage to validate a URL before saving it.
 export const testSyncServer = (url) =>
   callSystemRuntimeMethod('testSyncServer', url)
-
-// ─── Folder dialog (optional — only available in Electron/Tauri contexts) ─────
-// In web mode this is a no-op; callers use optional chaining (?.) defensively.
-export const openFolderDialog = (initialPath = '') =>
-  callSystemRuntimeMethod('openFolderDialog', initialPath)
-
-// ─── Data folder location ─────────────────────────────────────────────────────
-export const getDataPath = () =>
-  callSystemRuntimeMethod('getDataPath')
-export const getScaleMigrationStatus = () =>
-  callSystemRuntimeMethod('getScaleMigrationStatus')
-export const prepareScaleMigration = () =>
-  callSystemRuntimeMethod('prepareScaleMigration')
-export const runScaleMigration = (payload = {}) =>
-  callSystemRuntimeMethod('runScaleMigration', payload)
-export async function setDataPath(dir) {
-  const result = await callSystemRuntimeMethod('setDataPath', dir)
-  await invalidateClientRuntimeState('data-path-update')
-  return result
-}
-export async function resetDataPath() {
-  const result = await callSystemRuntimeMethod('resetDataPath')
-  await invalidateClientRuntimeState('data-path-reset')
-  return result
-}
-export const browseDir = (dir) =>
-  callSystemRuntimeMethod('browseDir', dir)

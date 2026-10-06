@@ -388,9 +388,6 @@ app.get('/users/:id/auth-methods', async (c) => {
 // re-check, own account only); there is no other provider to disconnect.
 app.post('/users/:id/provider-disconnect', (c) => c.json({ success: false, error: 'Use Disconnect Google in My Profile. No other sign-in provider is supported.' }, 400))
 
-app.post('/users/:id/contact-verification/request', (c) => c.json({ success: false, error: 'Email verification is disabled in this build. Use password sign-in instead.' }, 410))
-app.post('/users/:id/contact-verification/confirm', (c) => c.json({ success: false, error: 'Email verification is disabled in this build. Use password sign-in instead.' }, 410))
-
 // Same reasoning as routes/files.ts: no `sharp` in a Worker isolate, so the
 // frontend compresses/resizes with Canvas before sending (see
 // frontend/src/utils/imageCompression.ts), targeting 180KB. This is a

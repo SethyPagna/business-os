@@ -1349,7 +1349,7 @@ await runTest('actor query and query cache cleanup avoid chained entry/filter al
   assert.match(systemRuntimeSource, /export function getIntegrationDoctor/)
   assert.match(systemRuntimeSource, /export async function resetData/)
   assert.match(systemRuntimeSource, /export async function testSyncServer/)
-  assert.match(systemRuntimeSource, /export function browseDir/)
+  assert.doesNotMatch(systemRuntimeSource, /browseDir|openFolderDialog|scale-migration|data-path/, 'Docker-era folder, data-path and scale-migration wrappers stay gone (their Worker routes were 410 stubs)')
   assert.doesNotMatch(systemRuntimeSource, /resetClientRuntimeState/)
   assert.doesNotMatch(systemRuntimeSource, /function invalidateClientRuntimeState/)
   assert.match(driveSyncSource, /let driveSyncStatusRequestPromise/)
