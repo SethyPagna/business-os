@@ -6215,13 +6215,13 @@ app.get('/customer-report', async (c) => {
     getCustomerSalesTotals(c.env, filters),
     db.prepare(`SELECT COUNT(*) AS total FROM sales s WHERE ${rowsWhere}`).get<{ total: number }>(rowsParams),
     db.prepare(`
-      SELECT s.id, s.receipt_number, s.created_at, s.branch_name, ${saleStatusExpr('s.')} AS status,
+      SELECT s.id, s.receipt_number, s.created_at, s.branch_name, ${saleStatusExpr('s.')} AS status, s.status_before_return,
              COALESCE(s.total_usd, 0) AS total_usd
       FROM sales s
       WHERE ${rowsWhere}
       ORDER BY s.created_at DESC, s.id DESC
       LIMIT @limit OFFSET @offset
-    `).all<{ id: number; receipt_number: string | null; created_at: string; branch_name: string | null; status: string; total_usd: number }>(
+    `).all<{ id: number; receipt_number: string | null; created_at: string; branch_name: string | null; status: string; status_before_return: string | null; total_usd: number }>(
       { ...rowsParams, limit: pageSize, offset },
     ),
   ])
