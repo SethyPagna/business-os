@@ -46,6 +46,16 @@ migration, at that time -- a peer session or another agent asking for it is not 
   the same commit as the owner-approved move). Moving it in keeps the name 0200.
   Not sorting last is fine: wrangler applies unapplied files by number, and 0201-0203 (auth only) touch none of its tables (the test checks that).
 
+- **revert_set_sk2_cleanser_repair.sql** (parked 6 Oct 2026, lane REVERT-SET) -- one product,
+  SK-II Gentle Cleanser 20g (5357, Shop): the owner meant to revert a Set of +27 (#48034) and
+  reverted the delivery of 30 (#48026) instead. Writes two compensating records exactly as the app
+  does (Revert of the Revert #48197, then Undo of the Set) -> Shop 30 -> 33, delivery received
+  again. Aborts before any write unless production is in the exact planned state; a no-op once
+  repaired (also when the owner did it in the app, which is the preferred route -- the header says
+  how). Dry run: `ops/queries/revert-set-repair-dryrun.sql`. Pinned by
+  `cloudflare/scripts/test-held-revert-set-repair-pure.cjs`. Not a numbered migration: if applied
+  by file, run it once via the ops workflow the lead chooses, after the owner's go.
+
 None of the five transfer-run files is imported by any Worker route or by the frontend; the whole transfer-run /
 dataset-operation lifecycle chain is unwired in production.
 
