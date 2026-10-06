@@ -2,7 +2,7 @@ import { getDb, type D1Compat } from './db'
 import type { Env } from '../index'
 import type { SessionUser } from './auth'
 import { getActionTier, isAdminControlUser } from './permissions'
-import { productDiscountChanged } from './productDiscountGate'
+import { normalizeDiscountType, productDiscountChanged } from './productDiscountGate'
 import { hasAcquisitionCostInput } from './acquisitionCostAccess'
 import { dateToBatchCode, normalizeTypedDate } from './batchCode'
 import { identityBarcodeKey, barcodeIdentityMatches, isRealBarcode, normalizeLeadingZeroBarcodeForCleanup, normalizeProductGroupName } from './productDetailRule'
@@ -146,7 +146,14 @@ export function canReplayStockSessionPayload(user: SessionUser, payload: Record<
   if (payload.requires_inventory_adjust !== 0 && getActionTier(user, 'inventory', 'adjust') !== 'full') return false
   if (Number(payload.requires_product_add) === 1 && getActionTier(user, 'products', 'add') !== 'full') return false
   if (Number(payload.requires_product_image) === 1 && getActionTier(user, 'products', 'image') !== 'full') return false
+  if (Number(payload.requires_product_price) === 1 && getActionTier(user, 'products', 'price') === 'none') return false
   return true
+}
+
+// A create_receive line that carries a discount is a price: it needs the price action to commit AND to be redone (or undone) by
+// someone else. Judged from the request itself, so a session recorded before the history flag existed is still refused.
+function stockSessionAddsProductDiscount(request: StockSessionRequest): boolean {
+  return request.items.some((line) => line.kind === 'create_receive' && line.product && productDiscountChanged(null, line.product as unknown as Row))
 }
 
 function stockSessionChangesProductImages(request: StockSessionRequest): boolean {
@@ -231,10 +238,15 @@ function canonicalProduct(raw: unknown, defaults: Row, openingQuantity: number, 
       }
     } else if (field === 'branch_id') {
       out.branch_id = integer(value, 'product.branch_id')
+    } else if (field === 'discount_type') {
+      // Exactly 'percent' or 'fixed': the price gate and every reader must see the stored value the same way.
+      const kind = normalizeDiscountType(value)
+      if (kind === null) fail('discount_type must be percent or fixed.', 400, 'invalid_request')
+      out.discount_type = kind
     } else if (field === 'is_active' || field === 'discount_enabled') {
       if (typeof value !== 'boolean' && value !== 0 && value !== 1) fail(`${field} must be boolean.`, 400, 'invalid_request')
       out[field] = value === true || value === 1 ? 1 : 0
-    } else if (field.includes('price') || field.includes('threshold') || field.startsWith('discount_') && field !== 'discount_type' && field !== 'discount_label' && field !== 'discount_badge_color' && field !== 'discount_starts_at' && field !== 'discount_ends_at' || field === 'expiry_alert_days' || field === 'stock_quantity') {
+    } else if (field.includes('price') || field.includes('threshold') || field.startsWith('discount_') && field !== 'discount_label' && field !== 'discount_badge_color' && field !== 'discount_starts_at' && field !== 'discount_ends_at' || field === 'expiry_alert_days' || field === 'stock_quantity') {
       out[field] = finite(value, field, false)
     } else if (field === 'expiry_date') {
       out.expiry_date = date(value, 'product.expiry_date')
@@ -572,8 +584,7 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
     fail('create_receive requires full product-add permission.', 403, 'permission_denied')
   }
   // Owner, 6 Oct 2026: a discount on a new product is a price, so it needs the price action (lib/productDiscountGate.ts).
-  if (getActionTier(user, 'products', 'price') === 'none'
-    && request.items.some((line) => line.kind === 'create_receive' && line.product && productDiscountChanged(null, line.product as unknown as Row))) {
+  if (getActionTier(user, 'products', 'price') === 'none' && stockSessionAddsProductDiscount(request)) {
     fail('A product discount needs the product price permission.', 403, 'product_price_edit_required')
   }
   if (requiresProductImage && getActionTier(user, 'products', 'image') !== 'full') {
@@ -967,8 +978,8 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
   statements.push({ sql: 'INSERT INTO undo_snapshots(kind,payload_json,created_by_id,created_by_name) VALUES(@kind,@payload,@actor,@name)', params: { kind: STOCK_SESSION_KIND, payload: JSON.stringify(snapshot), actor: user.id, name: actorSnapshot(user) } })
   statements.push({ sql: 'UPDATE stock_session_operations SET snapshot_id=last_insert_rowid() WHERE id=@id', params: { id: operationId } })
   statements.push({ sql: `INSERT INTO action_history(scope,entity,entity_id,label,reversible,status,undo_payload,redo_payload,created_by_id,created_by_name)
-    SELECT 'global','stock_session',id,@label,1,'undoable',json_object('applier',@kind,'snapshot_id',snapshot_id,'operation_id',id,'generation',0,'requires_product_add',@creates,'requires_product_image',@images,'requires_inventory_adjust',@adjusts,'snapshot_version',2),json_object('applier',@kind,'snapshot_id',snapshot_id,'operation_id',id,'generation',0,'requires_product_add',@creates,'requires_product_image',@images,'requires_inventory_adjust',@adjusts,'snapshot_version',2),@actor,@name
-    FROM stock_session_operations WHERE id=@id`, params: { id: operationId, label: `${request.items.length} stock-in line${request.items.length === 1 ? '' : 's'}`, kind: STOCK_SESSION_KIND, actor: user.id, name: actorSnapshot(user), creates: createLines.length ? 1 : 0, images: requiresProductImage ? 1 : 0, adjusts: requiresInventoryAdjust ? 1 : 0 } })
+    SELECT 'global','stock_session',id,@label,1,'undoable',json_object('applier',@kind,'snapshot_id',snapshot_id,'operation_id',id,'generation',0,'requires_product_add',@creates,'requires_product_image',@images,'requires_product_price',@prices,'requires_inventory_adjust',@adjusts,'snapshot_version',2),json_object('applier',@kind,'snapshot_id',snapshot_id,'operation_id',id,'generation',0,'requires_product_add',@creates,'requires_product_image',@images,'requires_product_price',@prices,'requires_inventory_adjust',@adjusts,'snapshot_version',2),@actor,@name
+    FROM stock_session_operations WHERE id=@id`, params: { id: operationId, label: `${request.items.length} stock-in line${request.items.length === 1 ? '' : 's'}`, kind: STOCK_SESSION_KIND, actor: user.id, name: actorSnapshot(user), creates: createLines.length ? 1 : 0, images: requiresProductImage ? 1 : 0, prices: stockSessionAddsProductDiscount(request) ? 1 : 0, adjusts: requiresInventoryAdjust ? 1 : 0 } })
   statements.push({ sql: 'UPDATE stock_session_operations SET history_id=last_insert_rowid() WHERE id=@id', params: { id: operationId } })
 
   for (const line of request.items) {
@@ -1204,6 +1215,7 @@ export async function replayStockSession(env: Env, user: SessionUser, direction:
   if (request.items.some(line => line.quantity > 0) && getActionTier(user, 'inventory', 'adjust') !== 'full') fail('Inventory adjust permission is required.', 403)
   if (request.items.some(line => line.kind === 'create_receive') && getActionTier(user, 'products', 'add') !== 'full') fail('Product add permission is required to reverse this session.', 403)
   if (stockSessionChangesProductImages(request) && getActionTier(user, 'products', 'image') !== 'full') fail('Product image permission is required to reverse this session.', 403)
+  if (getActionTier(user, 'products', 'price') === 'none' && stockSessionAddsProductDiscount(request)) fail('Product price permission is required to reverse a session that set a product discount.', 403, 'product_price_edit_required')
   const targetStatus = direction === 'undo' ? 'redoable' : 'undoable'
   const expectedStatus = direction === 'undo' ? 'undoable' : 'redoable'
   if (Number(op.generation) === generation + 1 && op.status === targetStatus) return

@@ -397,7 +397,7 @@ async function main() {
     assert.deepEqual(f.sql.prepare('SELECT batch_id,movement_id,quantity FROM stock_session_members').get(), { batch_id: null, movement_id: null, quantity: 0 })
     const history = f.sql.prepare('SELECT undo_payload FROM action_history').get()
     assert.deepEqual(Object.fromEntries(Object.entries(JSON.parse(history.undo_payload)).filter(([key]) => key.startsWith('requires_'))), {
-      requires_product_add: 1, requires_product_image: 0, requires_inventory_adjust: 0,
+      requires_product_add: 1, requires_product_image: 0, requires_product_price: 0, requires_inventory_adjust: 0,
     })
 
     for (const [label, actor] of [

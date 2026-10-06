@@ -62,7 +62,8 @@ export function normalizeDiscountPercent(value: unknown): number {
 }
 
 export function normalizeDiscountType(value: unknown): DiscountType {
-  return String(value || '').toLowerCase() === 'fixed' ? 'fixed' : 'percent'
+  // Trimmed like every other reader (server rules, SQL, portal) and the write boundary (cloudflare/src/lib/productDiscountGate.ts).
+  return String(value || '').trim().toLowerCase() === 'fixed' ? 'fixed' : 'percent'
 }
 
 export function isProductDiscountActive(product: ProductDiscountInput = {}, now: Date | string | number = new Date()): boolean {

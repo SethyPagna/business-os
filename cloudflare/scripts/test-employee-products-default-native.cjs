@@ -25,7 +25,7 @@ const harnessBase = fs.readFileSync(path.join(__dirname, 'test-product-resolve-c
 // records instead of sending. changedFields is a plain key diff (the audit library is not under test here).
 const harness = harnessBase
   .replace("  '../lib/cache':", "  '../lib/reviewGate': { maybeQueueForReview: async () => null },\n  '../lib/conflictControl': { getExpectedUpdatedAt: () => null, assertUpdatedAtMatch: () => {}, writeConflictResponse: () => null, WriteConflictError: class extends Error {} },\n  '../lib/telegram': { sendTelegramEvent: async (_env, event) => { TELEGRAM.push(event) } },\n  '../lib/productEditAlert': load('lib/productEditAlert.ts'),\n  '../lib/productWrites': { ...load('lib/productWrites.ts', { './db': { getDb: () => adapter }, './moneyPrecision': moneyPrecision, './catalogCostRecompute': catalogCost }), updateRow: updateRowStub },\n  '../lib/cache':")
-  .replace("const noAudit = { audit: async () => {} }", "const TELEGRAM = []\nconst AUDITS = []\nconst UPDATABLE = ['name', 'category', 'brand', 'unit', 'barcode', 'selling_price_usd', 'selling_price_khr', 'wholesale_price_usd', 'wholesale_price_khr', 'cost_price_usd', 'cost_price_khr']\nasync function updateRowStub(_env, _table, id, body) { const keys = UPDATABLE.filter((key) => Object.hasOwn(body, key)); if (!keys.length) return 0; const params = { id: Number(id), updated_at: new Date().toISOString() }; for (const key of keys) params[key] = body[key]; return adapter.prepare('UPDATE products SET ' + keys.map((key) => key + ' = @' + key).join(', ') + ', updated_at = @updated_at WHERE id = @id').run(params).changes }\nconst plainDiff = (before, after) => { const b = {}; const a = {}; for (const key of new Set([...Object.keys(before || {}), ...Object.keys(after || {})])) { if (['updated_at', 'id'].includes(key) || JSON.stringify((before || {})[key]) === JSON.stringify((after || {})[key])) continue; b[key] = (before || {})[key]; a[key] = (after || {})[key] } return Object.keys(a).length ? { before: b, after: a } : null }\nconst noAudit = { audit: async (...args) => { AUDITS.push(args) }, changedFields: plainDiff, isSecretShapedAuditKey: (key) => /token|secret|password/i.test(key) }")
+  .replace("const noAudit = { audit: async () => {} }", "const TELEGRAM = []\nconst AUDITS = []\nconst UPDATES = []\nconst UPDATABLE = ['name', 'category', 'brand', 'unit', 'barcode', 'selling_price_usd', 'selling_price_khr', 'wholesale_price_usd', 'wholesale_price_khr', 'cost_price_usd', 'cost_price_khr']\nasync function updateRowStub(_env, _table, id, body) { UPDATES.push({ id: Number(id), body: { ...body } }); const keys = UPDATABLE.filter((key) => Object.hasOwn(body, key)); if (!keys.length) return 0; const params = { id: Number(id), updated_at: new Date().toISOString() }; for (const key of keys) params[key] = body[key]; return adapter.prepare('UPDATE products SET ' + keys.map((key) => key + ' = @' + key).join(', ') + ', updated_at = @updated_at WHERE id = @id').run(params).changes }\nconst plainDiff = (before, after) => { const b = {}; const a = {}; for (const key of new Set([...Object.keys(before || {}), ...Object.keys(after || {})])) { if (['updated_at', 'id'].includes(key) || JSON.stringify((before || {})[key]) === JSON.stringify((after || {})[key])) continue; b[key] = (before || {})[key]; a[key] = (after || {})[key] } return Object.keys(a).length ? { before: b, after: a } : null }\nconst noAudit = { audit: async (...args) => { AUDITS.push(args) }, changedFields: plainDiff, isSecretShapedAuditKey: (key) => /token|secret|password/i.test(key) }")
 if (!harness.includes('maybeQueueForReview') || !harness.includes('plainDiff') || !harness.includes('productEditAlert')) throw new Error('the harness override anchors moved')
 const checks = `
 async function main() {
@@ -174,6 +174,91 @@ async function main() {
         .catch((error) => ({ status: Number(String(error.message).split(' ')[2].replace(':', '')), body: null }))
       assert.ok(plain.status > 0 && plain.status !== 403, url + ' a zero discount is not a price change: ' + plain.status)
     }
+  })
+
+  await check('delta review: the discount switch and kind are normalised at the write boundary, so no spelling the gate calls unchanged can be stored as something else', async () => {
+    fresh()
+    const stored = one('SELECT updated_at FROM products WHERE id = ?', KEEP)
+    // (1) discount_enabled: only true/false/1/0/'1'/'0'/'true'/'false' (and blank) are spellings of on/off; everything a reader would
+    // have treated as truthy ('1.0', '01', 2, -1, 1.5, 'yes') is a 400 for EVERY role, and nothing is written.
+    for (const who of [EMPLOYEE_USER, MANAGER_USER, ADMIN]) {
+      state.user = who
+      const before = dump()
+      for (const value of ['1.0', '01', 2, -1, 1.5, 'yes', 'on', [], {}]) {
+        const res = await request('PUT', '/api/products/' + KEEP, { name: 'Glow Serum 30ml', discount_enabled: value, expected_updated_at: stored.updated_at })
+        assert.equal(res.status, 400, who.username + ' ' + JSON.stringify(value) + ' ' + JSON.stringify(res.body))
+        assert.equal(res.body.code, 'invalid_discount_enabled')
+      }
+      assert.equal(dump(), before, who.username + ': a refused spelling writes nothing')
+    }
+    // The accepted spellings reach the writer as exactly 0 or 1.
+    state.user = MANAGER_USER
+    for (const [value, expected] of [[true, 1], [1, 1], ['1', 1], ['true', 1], [' TRUE ', 1], [false, 0], [0, 0], ['0', 0], ['false', 0], ['', 0], [null, 0]]) {
+      UPDATES.length = 0
+      const row = one('SELECT updated_at FROM products WHERE id = ?', KEEP)
+      const res = await request('PUT', '/api/products/' + KEEP, { discount_enabled: value, expected_updated_at: row.updated_at })
+      assert.equal(res.status, 200, JSON.stringify(value) + ' ' + JSON.stringify(res.body))
+      assert.strictEqual(UPDATES.at(-1).body.discount_enabled, expected, JSON.stringify(value) + ' is written as the exact number')
+    }
+    // (2) discount_type: trimmed, case-folded to the exact enum, or a 400. 'fixed ' can no longer be "unchanged" for a role without
+    // the price action and then stored with the trailing space (the POS reads the exact string).
+    state.user = EMPLOYEE_USER
+    const row = one('SELECT updated_at FROM products WHERE id = ?', KEEP)
+    for (const kind of ['fixed ', ' FIXED', 'Fixed']) {
+      const res = await request('PUT', '/api/products/' + KEEP, { discount_type: kind, expected_updated_at: row.updated_at })
+      assert.equal(res.status, 403, JSON.stringify(kind) + ' is a change from the stored percent: ' + JSON.stringify(res.body))
+      assert.equal(res.body.code, 'product_price_edit_required')
+    }
+    for (const kind of ['bogus', 'fixed;', 5, true, ['fixed']]) {
+      const res = await request('PUT', '/api/products/' + KEEP, { discount_type: kind, expected_updated_at: row.updated_at })
+      assert.equal(res.status, 400, JSON.stringify(kind))
+      assert.equal(res.body.code, 'invalid_discount_type')
+    }
+    for (const kind of ['percent', ' Percent ', '', null]) {
+      UPDATES.length = 0
+      const res = await request('PUT', '/api/products/' + KEEP, { name: 'Glow Serum 30ml', discount_type: kind, expected_updated_at: row.updated_at })
+      assert.equal(res.status, 200, JSON.stringify(kind) + ' is the stored percent: ' + JSON.stringify(res.body))
+      assert.strictEqual(UPDATES.at(-1).body.discount_type, 'percent', 'written exactly')
+    }
+    state.user = ADMIN
+    UPDATES.length = 0
+    const row2 = one('SELECT updated_at FROM products WHERE id = ?', KEEP)
+    assert.equal((await request('PUT', '/api/products/' + KEEP, { discount_type: ' FIXED ', expected_updated_at: row2.updated_at })).status, 200)
+    assert.strictEqual(UPDATES.at(-1).body.discount_type, 'fixed', 'an administrator writes the exact enum too')
+    // The same normalisation on both create routes.
+    const noPrice = asRole(27, 'manager', { products: true, 'products:price': false, 'products:add': true, 'products:variant': true })
+    state.user = noPrice
+    for (const url of ['/api/products', '/api/products/variant']) {
+      for (const [field, value, code] of [['discount_enabled', 'yes', 'invalid_discount_enabled'], ['discount_enabled', '1.0', 'invalid_discount_enabled'], ['discount_type', 'bogus', 'invalid_discount_type']]) {
+        const res = await request('POST', url, { name: 'Spelled newcomer', selling_price_usd: 4, [field]: value })
+        assert.equal(res.status, 400, url + ' ' + field + '=' + value)
+        assert.equal(res.body.code, code)
+      }
+    }
+  })
+
+  await check('delta review: a RESTORE keeps the stored discount as unchanged data; a fresh discount on a new product is still a price', async () => {
+    fresh()
+    // A removed product that carried a 15 percent discount (what Undo of a removal re-creates from its snapshot).
+    state.native.prepare("UPDATE products SET is_active = 0, discount_enabled = 1, discount_type = 'percent', discount_percent = 15, name = 'Rose Toner', barcode = '8850000009999', name_key = 'rose toner' WHERE id = ?").run([M1])
+    const addNoPrice = asRole(31, 'manager', { products: true, 'products:price': false, 'products:add': true, 'products:variant': true })
+    const gateStatus = async (url, body) => {
+      state.user = addNoPrice
+      try { const res = await request('POST', url, body); globalThis.__lastBody = JSON.stringify(res.body); return res.status } catch (error) { return Number(String(error.message).split(' ')[2].replace(':', '')) }
+    }
+    const restored = { name: 'Rose Toner', barcode: '8850000009999', selling_price_usd: 6, discount_enabled: 1, discount_type: 'percent', discount_percent: 15, discount_amount_usd: 0, discount_amount_khr: 0, discount_starts_at: null, discount_ends_at: null }
+    for (const url of ['/api/products', '/api/products/variant']) {
+      assert.notEqual(await gateStatus(url, restored), 403, url + ' the saved discount comes back unchanged ' + globalThis.__lastBody)
+      // Same removed row, but a BIGGER discount than it ever had: a price change.
+      assert.equal(await gateStatus(url, { ...restored, discount_percent: 90 }), 403, url + ' a different discount is a price')
+      // A brand-new product with the same discount but no removed twin.
+      assert.equal(await gateStatus(url, { ...restored, name: 'Brand New Toner', barcode: '8850000008888' }), 403, url + ' no removed twin: still a price')
+      // The same name with another barcode is not the removed product.
+      assert.equal(await gateStatus(url, { ...restored, barcode: '8850000007777' }), 403, url + ' another barcode is not a restore')
+    }
+    // A product that is still ACTIVE is not a restore source.
+    state.native.prepare('UPDATE products SET is_active = 1 WHERE id = ?').run([M1])
+    assert.equal(await gateStatus('/api/products', restored), 403, 'an active product is not a removed one')
   })
 
   await check('the Employee reaches ONLY the main Products page: every sub-page read is refused by the Worker, a Full Products role still gets through', async () => {

@@ -265,7 +265,7 @@ export function capturedPricingMetadata(pool:CapturedPricingPool,lineKey:string,
   if (capture.source!=='promotion') invalid()
   const rule=amounts.rule_id===null?null:pool.rules.find(rule=>rule.id===amounts.rule_id)
   if (amounts.rule_id!==null && !rule) invalid()
-  const type=rule?.rule_type ?? (String(capture.product.discount_type||'percent').toLowerCase()==='fixed'?'fixed':'percent')
+  const type=rule?.rule_type ?? (String(capture.product.discount_type||'percent').trim().toLowerCase()==='fixed'?'fixed':'percent')
   const label=String(rule?.title ?? capture.product.discount_label ?? '').trim() || null
   return {price_mode:capture.source,product_discount_type:type,product_discount_label:label}
 }

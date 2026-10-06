@@ -34,8 +34,8 @@ export function productDiscountActiveSql(params: Record<string, unknown>, now: D
   return `(
     p.discount_enabled = 1
     AND (
-      (lower(COALESCE(p.discount_type, 'percent')) <> 'fixed' AND COALESCE(p.discount_percent, 0) > 0)
-      OR (lower(COALESCE(p.discount_type, 'percent')) = 'fixed' AND (COALESCE(p.discount_amount_usd, 0) > 0 OR COALESCE(p.discount_amount_khr, 0) > 0))
+      (lower(trim(COALESCE(p.discount_type, 'percent'))) <> 'fixed' AND COALESCE(p.discount_percent, 0) > 0)
+      OR (lower(trim(COALESCE(p.discount_type, 'percent'))) = 'fixed' AND (COALESCE(p.discount_amount_usd, 0) > 0 OR COALESCE(p.discount_amount_khr, 0) > 0))
     )
     AND (COALESCE(trim(p.discount_starts_at), '') = '' OR datetime(p.discount_starts_at) <= datetime(@promoNow))
     AND (COALESCE(trim(p.discount_ends_at), '') = '' OR datetime(p.discount_ends_at) >= datetime(@promoNow))

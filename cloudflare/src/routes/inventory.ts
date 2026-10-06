@@ -1300,6 +1300,27 @@ const STOCK_ROW_COLUMNS = `id, name, sku, barcode, category, brand, unit, descri
   purchase_price_usd, purchase_price_khr, cost_price_usd, cost_price_khr,
   low_stock_threshold, out_of_stock_threshold`
 
+// The unlocked-pricing block's discount switch and kind, read EXACTLY the way lib/productDiscountGate.ts normalizeDiscountEnabled /
+// normalizeDiscountType read them (inlined, not imported: many harnesses load this route and resolve only the libs they name;
+// test-product-discount-gate-pure.cjs runs this text against the lib over a table of spellings). null = unrecognised, refused.
+function discountEnabledFlag(value: unknown): boolean | null {
+  if (value === undefined || value === null || value === false || value === 0) return false
+  if (value === true || value === 1) return true
+  if (typeof value === 'string') {
+    const text = value.trim().toLowerCase()
+    if (text === '' || text === '0' || text === 'false') return false
+    if (text === '1' || text === 'true') return true
+  }
+  return null
+}
+function discountKind(value: unknown): 'percent' | 'fixed' | null {
+  if (value === undefined || value === null) return 'percent'
+  if (typeof value !== 'string') return null
+  const text = value.trim().toLowerCase()
+  if (text === '' || text === 'percent') return 'percent'
+  return text === 'fixed' ? 'fixed' : null
+}
+
 // Sets purchase_price_* and cost_price_* to the same value -- the single
 // "Cost" input the frontend now sends. Kept as its own function (rather
 // than inlined at each write site) so every write path that used to ask
@@ -1829,13 +1850,17 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
     // its edit to the tier is dropped, which is the safe half of the trade,
     // and its stock adjustment still lands. Do not "fix" this by adding the
     // alias without re-reading migration 0111's header first.
+    const pricedEnabled = discountEnabledFlag(pricing.discount_enabled)
+    const pricedKind = discountKind(pricing.discount_type)
+    if (pricedEnabled === null) return c.json({ error: 'discount_enabled must be true, false, 1 or 0.', code: 'invalid_discount_enabled' }, 400)
+    if (pricedKind === null) return c.json({ error: 'discount_type must be "percent" or "fixed".', code: 'invalid_discount_type' }, 400)
     const overrides = {
       sellingUsd: pricing.selling_price_usd != null ? Number(pricing.selling_price_usd) || 0 : Number(source.selling_price_usd) || 0,
       sellingKhr: pricing.selling_price_khr != null ? Number(pricing.selling_price_khr) || 0 : Number(source.selling_price_khr) || 0,
       wholesaleUsd: pricing.wholesale_price_usd != null ? Number(pricing.wholesale_price_usd) || 0 : Number(source.wholesale_price_usd) || 0,
       wholesaleKhr: pricing.wholesale_price_khr != null ? Number(pricing.wholesale_price_khr) || 0 : Number(source.wholesale_price_khr) || 0,
-      discountEnabled: pricing.discount_enabled != null ? Boolean(pricing.discount_enabled) : Boolean(source.discount_enabled),
-      discountType: pricing.discount_type != null ? String(pricing.discount_type) : String(source.discount_type || 'percent'),
+      discountEnabled: pricing.discount_enabled != null ? pricedEnabled : Boolean(source.discount_enabled),
+      discountType: pricing.discount_type != null ? pricedKind : (discountKind(source.discount_type) ?? 'percent'),
       discountPercent: pricing.discount_percent != null ? Number(pricing.discount_percent) || 0 : Number(source.discount_percent) || 0,
       discountAmountUsd: pricing.discount_amount_usd != null ? Number(pricing.discount_amount_usd) || 0 : Number(source.discount_amount_usd) || 0,
       discountAmountKhr: pricing.discount_amount_khr != null ? Number(pricing.discount_amount_khr) || 0 : Number(source.discount_amount_khr) || 0,
@@ -1854,7 +1879,7 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
         // The same comparison as lib/productDiscountGate.ts productDiscountChanged (enabled, kind, percent, USD and KHR amount),
         // inlined because this route is loaded by many harnesses that resolve only the libs they name.
         || overrides.discountEnabled !== Boolean(source.discount_enabled)
-        || (String(overrides.discountType).trim().toLowerCase() === 'fixed') !== (String(source.discount_type ?? '').trim().toLowerCase() === 'fixed')
+        || overrides.discountType !== (discountKind(source.discount_type) ?? 'percent')
         || moneyDiffers(overrides.discountPercent, source.discount_percent)
         || moneyDiffers(overrides.discountAmountUsd, source.discount_amount_usd) || moneyDiffers(overrides.discountAmountKhr, source.discount_amount_khr)
       if (priceChanged) return c.json({ error: 'Price edit permission is required to change the selling price', code: 'price_edit_required' }, 403)
@@ -2544,6 +2569,15 @@ app.post('/dated-stock-count/resolve/apply-decisions', async (c) => {
   const decisionsIn = Array.isArray(body.decisions) ? body.decisions : []
   if (!resolvedIn || !unresolvedIn) return c.json({ success: false, error: 'resolved and unresolved (from a prior /resolve call) are both required' }, 400)
 
+  // A price-conflict decision of apply_new (the default when the row suggests it) rewrites the product's selling price from the
+  // submitted import: the same default-price edit as everywhere else, so it needs Edit product and the price action.
+  const decidedRows = new Map<number, Record<string, unknown>>()
+  for (const decision of decisionsIn) if (decision && typeof decision === 'object') decidedRows.set(Number((decision as Record<string, unknown>).rowNumber), decision as Record<string, unknown>)
+  const rewritesPrice = (resolvedIn as Array<Record<string, any>>).some((row) => row?.priceConflict
+    && (decidedRows.get(Number(row.rowNumber))?.priceResolution ?? row.priceConflict.suggestedResolution) === 'apply_new')
+  if (rewritesPrice && (getActionTier(user, 'products', 'edit') !== 'full' || getActionTier(user, 'products', 'price') === 'none')) {
+    return c.json({ error: 'Price edit permission is required to apply imported selling prices', code: 'price_edit_required' }, 403)
+  }
   const db = getDb(c.env)
   const result = await applyDatedStockCountDecisions(db, resolvedIn as any, unresolvedIn as any, decisionsIn as DatedCountDecision[])
 

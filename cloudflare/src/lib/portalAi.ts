@@ -46,7 +46,7 @@ function deriveStockStatus(product: AnyRow): StockStatus {
 // across the frontend/Worker boundary.
 function isDiscountActive(product: AnyRow, nowMs: number): boolean {
   if (!product.discount_enabled) return false
-  const type = String(product.discount_type || 'percent').toLowerCase()
+  const type = String(product.discount_type || 'percent').trim().toLowerCase()
   if (type === 'fixed') {
     if (toNumber(product.discount_amount_usd) <= 0 && toNumber(product.discount_amount_khr) <= 0) return false
   } else if (toNumber(product.discount_percent) <= 0) {

@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 import { acquisitionCostResponses, canEditAcquisitionCosts, hasCatalogCostWrite } from '../lib/acquisitionCostAccess'
 import { roundMoney4 } from '../lib/moneyPrecision'
-import { PRODUCT_DISCOUNT_PRICE_FIELDS, PRODUCT_DISCOUNT_PRICE_REFUSAL, PRODUCT_DISCOUNT_SELECT, productDiscountChanged } from '../lib/productDiscountGate'
+import { PRODUCT_DISCOUNT_PRICE_FIELDS, PRODUCT_DISCOUNT_PRICE_REFUSAL, PRODUCT_DISCOUNT_SELECT, normalizeProductDiscountBody, productDiscountChanged } from '../lib/productDiscountGate'
 import { enqueueImageNormalization } from '../lib/imageAudit'
 import { getDb } from '../lib/db'
 import { collectMergeProductIds, describeMergeFailure } from '../lib/mergeRouteLog'
@@ -2053,6 +2053,18 @@ async function foldCreateIntoExisting(
   return { item, product: item, id: duplicate.id, folded_into: duplicate.id, success: true }
 }
 
+// A restore (Undo of a removal, Redo of a creation) re-creates the removed product from its saved row. Its discount is the
+// stored data it already carried, not a new price: it passes when an INACTIVE product with the same name and barcode holds
+// exactly this discount block. A fresh discount on a new product matches no removed row and stays a price change.
+async function discountMatchesRemovedProduct(env: Env, body: Record<string, unknown>): Promise<boolean> {
+  const nameKey = normalizeProductGroupName(body.name)
+  if (!nameKey) return false
+  const barcode = String(body.barcode ?? '').trim()
+  const removed = await getDb(env).prepare(`SELECT barcode, ${PRODUCT_DISCOUNT_SELECT} FROM products WHERE is_active = 0 AND name_key = @nameKey LIMIT 100`)
+    .all<Record<string, unknown>>({ nameKey })
+  return removed.some((row) => String(row.barcode ?? '').trim() === barcode && !productDiscountChanged(row, body))
+}
+
 app.post('/', async (c) => {
   const user = c.get('user')
   if (getActionTier(user, 'products', 'add') === 'none') {
@@ -2062,12 +2074,16 @@ app.post('/', async (c) => {
   if (hasCatalogCostWrite(body, user)) {
     return c.json({ error: 'Cost-entry permission is required to set catalog costs.', code: 'product_cost_edit_required' }, 403)
   }
+  const invalidDiscount = normalizeProductDiscountBody(body)
+  if (invalidDiscount) return c.json(invalidDiscount, 400)
   try { await prepareProductMoneyWrite(c.env, body, null) } catch (error) {
     if (error instanceof ProductMoneyWriteError) return c.json({ error: error.message, code: error.code }, error.status as 400 | 409)
     throw error
   }
-  // Owner, 6 Oct 2026: a discount on a NEW product is a price too; a role without the price action creates it with none.
-  if (getActionTier(user, 'products', 'price') === 'none' && productDiscountChanged(null, body)) return c.json(PRODUCT_DISCOUNT_PRICE_REFUSAL, 403)
+  // Owner, 6 Oct 2026: a discount on a NEW product is a price too; a role without the price action creates it with none --
+  // except a RESTORE, which re-creates a removed product with the discount it already had (see discountMatchesRemovedProduct).
+  if (getActionTier(user, 'products', 'price') === 'none' && productDiscountChanged(null, body)
+    && !(await discountMatchesRemovedProduct(c.env, body))) return c.json(PRODUCT_DISCOUNT_PRICE_REFUSAL, 403)
   const name = String(body.name || '').trim()
   if (!name) return c.json({ error: 'Product name is required' }, 400)
   const createBarcode = String(body.barcode ?? '').trim()
@@ -2267,6 +2283,8 @@ app.put('/:id', async (c) => {
   if (hasCatalogCostWrite(body, user)) {
     return c.json({ error: 'Cost-entry permission is required to change catalog costs. Omit cost fields when editing other product details.', code: 'product_cost_edit_required' }, 403)
   }
+  const invalidDiscount = normalizeProductDiscountBody(body)
+  if (invalidDiscount) return c.json(invalidDiscount, 400)
   const id = c.req.param('id')
   // Image-only restricted role: normally blocked by the tier==='none' check
   // below (they have no real `products` grant), but let through here ONLY
@@ -2821,12 +2839,16 @@ app.post('/variant', async (c) => {
   if (hasCatalogCostWrite(body, user)) {
     return c.json({ error: 'Cost-entry permission is required to set catalog costs.', code: 'product_cost_edit_required' }, 403)
   }
+  const invalidDiscount = normalizeProductDiscountBody(body)
+  if (invalidDiscount) return c.json(invalidDiscount, 400)
   try { await prepareProductMoneyWrite(c.env, body, null) } catch (error) {
     if (error instanceof ProductMoneyWriteError) return c.json({ error: error.message, code: error.code }, error.status as 400 | 409)
     throw error
   }
-  // Owner, 6 Oct 2026: a discount on a NEW product is a price too; a role without the price action creates it with none.
-  if (getActionTier(user, 'products', 'price') === 'none' && productDiscountChanged(null, body)) return c.json(PRODUCT_DISCOUNT_PRICE_REFUSAL, 403)
+  // Owner, 6 Oct 2026: a discount on a NEW product is a price too; a role without the price action creates it with none --
+  // except a RESTORE, which re-creates a removed product with the discount it already had (see discountMatchesRemovedProduct).
+  if (getActionTier(user, 'products', 'price') === 'none' && productDiscountChanged(null, body)
+    && !(await discountMatchesRemovedProduct(c.env, body))) return c.json(PRODUCT_DISCOUNT_PRICE_REFUSAL, 403)
   const name = String(body.name || '').trim()
   if (!name) return c.json({ error: 'Product name is required' }, 400)
   try {

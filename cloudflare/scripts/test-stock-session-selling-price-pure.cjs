@@ -86,7 +86,7 @@ const auditStub = { audit: async (...args) => { auditCalls.push(args) }, changed
 const shared = {
   '../lib/receivingBranch': loadReal('lib/receivingBranch.ts'),
   '../lib/db': dbOverride,
-  '../lib/auth': { requireAuth: async (_c, next) => { await next() } },
+  '../lib/auth': { requireAuth: async (c, next) => { if (globalThis.__routeUser) c.set('user', globalThis.__routeUser); await next() } },
   '../lib/audit': auditStub,
   '../lib/permissions': permissionsMod,
   '../lib/cache': { bumpVersion: async () => {} },
@@ -102,7 +102,12 @@ const shared = {
   '../lib/schemaProbe': schemaProbeMod,
   '../lib/catalogCostRecompute': catalogCostMod,
 }
+const datedCalls = []
+const datedStub = { applyDatedStockCountDecisions: async (...args) => { datedCalls.push(args); return { resolved: [], skipped: [], errors: [], productsCreated: [] } } }
 const inventoryMod = loadReal('routes/inventory.ts', {
+  '../lib/datedStockCountDecisions': datedStub,
+  // Every other export stays the auto-stub the kernels were always driven with; only the response middleware must pass through for a route call.
+  '../lib/acquisitionCostAccess': new Proxy({}, { get(_t, prop) { if (prop === '__esModule') return true; if (typeof prop === 'symbol') return undefined; if (prop === 'acquisitionCostResponses') return async (_c, next) => { await next() }; return () => undefined } }),
   '../lib/continuousReadWindow': loadReal('lib/continuousReadWindow.ts'),
   ...shared,
   '../lib/productIdentity': productIdentityMod,
@@ -275,4 +280,73 @@ async function unlockedPricing() {
   console.log('PASS the unlocked pricing block needs the price action for a changed price or discount, and nothing extra when unchanged')
 }
 
-run().then(unlockedPricing).catch((error) => { console.error(error); process.exit(1) })
+async function normalisedAndDatedCount() {
+  // 7. Delta review, 6 Oct 2026: the unlocked block's discount switch and kind are read EXACTLY (an unrecognised spelling is a 400 for
+  // everyone), the kind is written as the exact enum, and "fixed " (trailing space) can no longer pass as an unchanged value.
+  const STORED = { selling_price_usd: 5, selling_price_khr: 0, wholesale_price_usd: 0, wholesale_price_khr: 0, discount_enabled: 0, discount_type: 'percent', discount_percent: 0, discount_amount_usd: 0, discount_amount_khr: 0 }
+  const body = (pricing) => ({ client_request_id: 'fixture_norm_' + (++adjustProbeSeq) + '_abcdefgh', productId: 1, branchId: 1, type: 'add', reason: 'New arrival', supplierName: 'Bong Long', paymentStatus: 'paid', quantity: 2, unitCostUsd: 3.5, unlockPricing: true, pricing: { ...STORED, ...pricing } })
+  const NO_PRICE = { id: 4, username: 'nop', name: 'NoPrice', permissions: JSON.stringify({ inventory: true, products: true, 'products:price': false, product_cost_edit: true }) }
+  const db = freshDb()
+  for (const [label, pricing, code] of [
+    ['yes', { discount_enabled: 'yes' }, 'invalid_discount_enabled'], ['1.0', { discount_enabled: '1.0' }, 'invalid_discount_enabled'], ['2', { discount_enabled: 2 }, 'invalid_discount_enabled'],
+    ['-1', { discount_enabled: -1 }, 'invalid_discount_enabled'], ['01', { discount_enabled: '01' }, 'invalid_discount_enabled'],
+    ['bogus kind', { discount_type: 'bogus' }, 'invalid_discount_type'], ['numeric kind', { discount_type: 5 }, 'invalid_discount_type'],
+  ]) {
+    for (const [who, user] of [['admin', ADMIN], ['no-price role', NO_PRICE]]) {
+      const { status, json } = await callAs(inventoryMod.runAdjustAction, db, user, body(pricing))
+      assert.equal(status, 400, who + ' / ' + label + ': ' + JSON.stringify(json))
+      assert.equal(json.code, code, who + ' / ' + label)
+    }
+  }
+  assert.equal(stock(db), 0, 'a refused spelling moved no stock')
+  // 'fixed ' is the FIXED kind: a change from the stored percent for a no-price role (not "unchanged"), refused.
+  for (const kind of ['fixed ', ' FIXED', 'Fixed']) {
+    const { status, json } = await callAs(inventoryMod.runAdjustAction, db, NO_PRICE, body({ discount_type: kind }))
+    assert.equal(status, 403, JSON.stringify(kind) + ' ' + JSON.stringify(json))
+    assert.equal(json.code, 'price_edit_required')
+  }
+  assert.equal(stock(db), 0)
+  // An administrator may set it, and what lands is the exact enum, never the spelling that was typed.
+  const admin = await callAs(inventoryMod.runAdjustAction, db, ADMIN, body({ barcode: 'SK-NEW-2', discount_enabled: ' TRUE ', discount_type: ' FIXED ', discount_amount_usd: 1 }))
+  assert.equal(admin.status, 200, JSON.stringify(admin.json))
+  const kinds = db.prepare('SELECT discount_type, discount_enabled FROM products WHERE discount_enabled <> 0 OR discount_type <> ?').all('percent')
+  assert.ok(kinds.length > 0, 'the discount was stored on the row the receipt created')
+  for (const row of kinds) { assert.strictEqual(row.discount_type, 'fixed'); assert.strictEqual(row.discount_enabled, 1) }
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM products WHERE discount_type <> lower(trim(discount_type)) OR discount_enabled NOT IN (0, 1)").get().n, 0, 'no product carries a spelling that a reader could split on')
+  console.log('PASS the unlocked block reads the discount switch and kind exactly and stores the exact enum')
+
+  // 8. The dated stock-count decisions writer rewrites the selling price from the submitted import (default resolution apply_new): it is a
+  // default-price edit, so it needs Edit product and the price action. Resolving to keep the current price needs neither.
+  const decide = async (user, resolved, decisions = []) => {
+    globalThis.__routeUser = user
+    datedCalls.length = 0
+    currentDb = freshDb()
+    const res = await inventoryMod.default.request('/dated-stock-count/resolve/apply-decisions', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ resolved, unresolved: [], decisions }),
+    }, { DB: {} }, { waitUntil() {}, passThroughOnException() {} })
+    globalThis.__routeUser = undefined
+    return { status: res.status, body: await res.json().catch(() => null), applied: datedCalls.length }
+  }
+  const COUNTER = { id: 5, username: 'counter', name: 'Counter', permissions: JSON.stringify({ inventory: true, 'inventory:stock_count': true }) }
+  const COUNTER_NO_PRICE = { id: 6, username: 'counter2', name: 'Counter2', permissions: JSON.stringify({ inventory: true, products: true, 'products:price': false }) }
+  const COUNTER_PRICE = { id: 9, username: 'counter3', name: 'Counter3', permissions: JSON.stringify({ inventory: true, products: true }) }
+  const row = (n, resolution) => ({ rowNumber: n, productId: 1, branchId: 1, priceConflict: { currentUsd: 5, currentKhr: 0, importedUsd: 9, importedKhr: 0, suggestedResolution: resolution } })
+  for (const [label, user] of [['inventory-only counter', COUNTER], ['Products edit with the price action off', COUNTER_NO_PRICE]]) {
+    let r = await decide(user, [row(1, 'apply_new')])
+    assert.equal(r.status, 403, label + ' default apply_new: ' + JSON.stringify(r.body))
+    assert.equal(r.body.code, 'price_edit_required'); assert.equal(r.applied, 0, label + ': nothing was applied')
+    r = await decide(user, [row(1, 'keep_current')], [{ rowNumber: 1, action: 'link_existing', priceResolution: 'apply_new' }])
+    assert.equal(r.status, 403, label + ' an explicit apply_new decision: ' + JSON.stringify(r.body))
+    r = await decide(user, [row(1, 'apply_new')], [{ rowNumber: 1, action: 'link_existing', priceResolution: 'keep_current' }])
+    assert.equal(r.status, 200, label + ' the decision keeps the current price, so nothing price-bearing is written: ' + JSON.stringify(r.body))
+    assert.equal(r.applied, 1)
+    r = await decide(user, [{ rowNumber: 1, productId: 1, branchId: 1 }])
+    assert.equal(r.status, 200, label + ' no price conflict at all')
+  }
+  const allowed = await decide(COUNTER_PRICE, [row(1, 'apply_new')])
+  assert.equal(allowed.status, 200, 'the price action holder may apply imported prices: ' + JSON.stringify(allowed.body))
+  assert.equal((await decide(ADMIN, [row(1, 'apply_new')])).status, 200)
+  console.log('PASS dated stock-count apply_new price decisions need Edit product and the price action')
+}
+
+run().then(unlockedPricing).then(normalisedAndDatedCount).catch((error) => { console.error(error); process.exit(1) })

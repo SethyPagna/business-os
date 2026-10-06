@@ -36,7 +36,7 @@ test('WORKER: the four strip writes use the Website Editor guard; the read keeps
   for (const route of ["app.post('/'", "app.put('/:id'", "app.put('/reorder/all'", "app.delete('/:id'"]) {
     assert.ok(worker.includes(`${route}, requireWebsiteEditor,`), route + ' is guarded by requireWebsiteEditor')
   }
-  assert.ok(worker.includes("app.get('/', requireKey('products'),"), 'reads keep the products gate')
+  assert.ok(worker.includes("app.get('/', requireStripRead,"), 'the list uses the products-or-Website-Editor read gate, so a pure Website Editor role can load its Manage modal')
   assert.deepEqual([...workerKeys].sort(), ['customer_portal', 'portal_posts', 'settings'])
 })
 

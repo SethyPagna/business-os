@@ -156,10 +156,16 @@ async function main() {
     })
   }
 
-  await check('reads keep the products gate: the Employee (Products) can list the cards, a role without Products cannot', async () => {
+  await check('the list: the Employee (Products) and every Website Editor holder can read the cards (a pure Website Editor role needs it for its Manage modal); a role with neither cannot', async () => {
     seedCards()
     assert.equal((await send(as('employee', EMPLOYEE_AFTER_5), 'GET', '/')).status, 200)
-    assert.equal((await send(as('manager', { customer_portal: true }), 'GET', '/')).status, 403)
+    for (const [label, user] of [['portal_posts only', as('employee', {}, { portal_posts: true })], ['customer_portal only', as('manager', { customer_portal: true })], ['Settings only', as('manager', {}, { settings: true })], ['admin', USERS.allowed.admin]]) {
+      const res = await send(user, 'GET', '/')
+      assert.equal(res.status, 200, label + ' ' + JSON.stringify(res.body))
+    }
+    for (const [label, user] of [['no grants at all', as('employee', {})], ['FAQ only', as('employee', {}, { portal_faq: true })], ['About only', as('employee', {}, { portal_about: true })]]) {
+      assert.equal((await send(user, 'GET', '/')).status, 403, label)
+    }
   })
 
   console.log(`${passed} checks passed`)

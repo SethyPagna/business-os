@@ -36,12 +36,18 @@ const requireKey = (key: string): MiddlewareHandler<{ Bindings: Env; Variables: 
 // not the right gate (the Employee seed holds it): they need a Website Editor grant -- the
 // posts & promos area, or portal config -- or full Settings, the same "bucket OR settings"
 // superset routes/settings.ts applies to the customer_portal_* keys. Admin passes inside
-// hasPermission. Reads (GET /) keep the products gate. Mirrored in the UI by
+// hasPermission. The list (GET /) admits the same Website Editor holders as well as the products section: their Manage modal
+// loads it, and a role that may write the cards must be able to see them. Mirrored in the UI by
 // CatalogEditorSurface's canEditConfig || canEditPosts.
 const WEBSITE_EDITOR_STRIP_KEYS = ['portal_posts', 'customer_portal', 'settings'] as const
 const requireWebsiteEditor: MiddlewareHandler<{ Bindings: Env; Variables: { user: SessionUser } }> = async (c, next) => {
   const user = c.get('user')
   if (!WEBSITE_EDITOR_STRIP_KEYS.some((key) => hasPermission(user, key))) return c.json({ error: 'You do not have permission to perform this action' }, 403)
+  return next()
+}
+const requireStripRead: MiddlewareHandler<{ Bindings: Env; Variables: { user: SessionUser } }> = async (c, next) => {
+  const user = c.get('user')
+  if (!hasPermission(user, 'products') && !WEBSITE_EDITOR_STRIP_KEYS.some((key) => hasPermission(user, key))) return c.json({ error: 'You do not have permission to perform this action' }, 403)
   return next()
 }
 // 'promotions' is a VIEW_TIER section (Part 557 slice 4): a 'view' grant can
@@ -424,7 +430,7 @@ function normalizePromotionInput(body: PromotionInput = {}) {
 }
 
 // Admin: list every promotion (active or not), for the editor.
-app.get('/', requireKey('products'), async (c) => {
+app.get('/', requireStripRead, async (c) => {
   const db = getDb(c.env)
   const rows = await db.prepare('SELECT * FROM promotions ORDER BY sort_order ASC, id ASC').all()
   return c.json(rows)

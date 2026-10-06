@@ -75,7 +75,10 @@ check('WRITERS: the PUT, create, variant and stock-session create_receive writer
   const gated = (products.match(/getActionTier\(user, 'products', 'price'\) === 'none'\s*&&\s*(?:\n\s*)?(?:productDiscountChanged\(null, body\)|PRODUCT_DISCOUNT_PRICE_FIELDS)/g) || []).length
   assert.equal(gated, 3, 'PUT /:id, POST / and POST /variant')
   assert.match(products, /productDiscountChanged\(storedDiscount, body\)/, 'the PUT compares against the stored row')
-  assert.match(stockSession, /getActionTier\(user, 'products', 'price'\) === 'none'\s*&&\s*request\.items\.some\(\(line\) => line\.kind === 'create_receive' && line\.product && productDiscountChanged\(null, line\.product/, 'create_receive')
+  const priceNone = "getActionTier(user, 'products', 'price') === 'none' && stockSessionAddsProductDiscount(request)"
+  assert.equal(stockSession.split(priceNone).length - 1, 2, 'create_receive commit AND replay (undo and redo) both check it')
+  assert.ok(stockSession.includes("line.kind === 'create_receive' && line.product && productDiscountChanged(null, line.product"), 'the helper judges the create lines')
+  assert.ok(stockSession.includes(priceNone + ') fail(\'Product price permission is required to reverse'), 'replayStockSession refuses undo and redo')
 })
 
 check('WRITERS left alone on purpose: they carry no products:price gate for the selling price either', () => {
@@ -85,6 +88,90 @@ check('WRITERS left alone on purpose: they carry no products:price gate for the 
   for (const [rel, needle] of [['lib/importEngine.ts', "getActionTier(user, 'products', 'price')"], ['routes/importJobs.ts', "'products', 'price'"]]) {
     assert.equal(read(rel).includes(needle), false, `${rel} gained a price gate: gate its discount columns the same way`)
   }
+})
+
+// ---- Delta review, 6 Oct 2026: the gate and the stored column must see the same value ----
+const { normalizeDiscountEnabled, normalizeDiscountType, normalizeProductDiscountBody } = mod.exports
+
+check('discount_enabled: only real on/off spellings normalise; every other value a reader would call truthy is refused', () => {
+  for (const [value, expected] of [[true, 1], [1, 1], ['1', 1], ['true', 1], [' TRUE ', 1], [' 1 ', 1], [false, 0], [0, 0], ['0', 0], ['false', 0], ['', 0], [null, 0], [undefined, 0]]) {
+    assert.strictEqual(normalizeDiscountEnabled(value), expected, JSON.stringify(value))
+  }
+  // The bypass spellings from the delta verifier: each activated a stored discount while the gate saw "unchanged".
+  for (const value of ['1.0', '01', 2, -1, 1.5, 'yes', 'on', 'y', 'enabled', [], {}, NaN, '0.0', 'null']) {
+    assert.strictEqual(normalizeDiscountEnabled(value), null, JSON.stringify(value))
+  }
+})
+
+check('discount_type: trimmed and case-folded to the exact enum, blank is percent, anything else is refused', () => {
+  for (const [value, expected] of [['percent', 'percent'], ['fixed', 'fixed'], ['fixed ', 'fixed'], [' FIXED', 'fixed'], ['Percent ', 'percent'], ['', 'percent'], ['  ', 'percent'], [null, 'percent'], [undefined, 'percent']]) {
+    assert.strictEqual(normalizeDiscountType(value), expected, JSON.stringify(value))
+  }
+  for (const value of ['bogus', 'fixed;', 'fix ed', 5, true, ['fixed'], {}]) assert.strictEqual(normalizeDiscountType(value), null, JSON.stringify(value))
+})
+
+check('normalizeProductDiscountBody rewrites the body in place to the exact stored forms and returns the refusal for the rest', () => {
+  const body = { name: 'x', discount_enabled: ' true ', discount_type: ' FIXED ', discount_percent: 5 }
+  assert.equal(normalizeProductDiscountBody(body), null)
+  assert.deepEqual(body, { name: 'x', discount_enabled: 1, discount_type: 'fixed', discount_percent: 5 })
+  assert.strictEqual(normalizeProductDiscountBody({ name: 'only the name' }), null, 'a body without the keys is untouched')
+  const bad = { discount_enabled: 'yes' }
+  assert.equal(normalizeProductDiscountBody(bad).code, 'invalid_discount_enabled')
+  assert.equal(normalizeProductDiscountBody({ discount_type: 'bogus' }).code, 'invalid_discount_type')
+})
+
+check('a spelling that is not a recognised on/off reads as a CHANGE (fail closed), even against a stored on', () => {
+  for (const value of ['1.0', '01', 2, -1, 1.5, 'yes']) {
+    assert.equal(productDiscountChanged(LIVE, { discount_enabled: value }), true, 'LIVE ' + JSON.stringify(value))
+    assert.equal(productDiscountChanged(NONE, { discount_enabled: value }), true, 'NONE ' + JSON.stringify(value))
+  }
+  assert.equal(productDiscountChanged(NONE, { discount_type: 'fixed ' }), true, "'fixed ' is the fixed kind, a change from percent")
+  assert.equal(productDiscountChanged(LIVE, { discount_type: 'fixed ' }), false, "'fixed ' is the stored fixed once normalised, and is WRITTEN as 'fixed'")
+  assert.equal(productDiscountChanged(NONE, { discount_type: 'bogus' }), true)
+})
+
+check('the inlined readers in routes/inventory.ts (unlocked pricing) give the SAME answers as the lib over every spelling', () => {
+  const inventory = read('routes/inventory.ts')
+  const take = (name) => {
+    const start = inventory.indexOf(`function ${name}(`)
+    assert.ok(start > 0, `${name} exists in routes/inventory.ts`)
+    return inventory.slice(start, inventory.indexOf('\n}\n', start) + 3)
+  }
+  const out = ts.transpileModule(`${take('discountEnabledFlag')}\n${take('discountKind')}\nreturn { discountEnabledFlag, discountKind }`, { compilerOptions: { module: ts.ModuleKind.None, target: ts.ScriptTarget.ES2022 } }).outputText
+  const inline = new Function(out.replace(/^return/m, 'return'))()
+  const spellings = [true, false, 0, 1, '0', '1', 'true', 'false', ' TRUE ', '', '  ', null, undefined, '1.0', '01', 2, -1, 1.5, 'yes', 'on', [], {}, NaN]
+  for (const value of spellings) {
+    const lib = normalizeDiscountEnabled(value)
+    assert.strictEqual(inline.discountEnabledFlag(value), lib === null ? null : lib === 1, 'enabled ' + JSON.stringify(value))
+  }
+  for (const value of ['percent', 'fixed', 'fixed ', ' FIXED', 'Percent ', '', '  ', null, undefined, 'bogus', 'fixed;', 5, true, ['fixed'], {}]) {
+    assert.strictEqual(inline.discountKind(value), normalizeDiscountType(value), 'kind ' + JSON.stringify(value))
+  }
+})
+
+check('READERS: POS, rules, SQL and portal read discount_type identically (trim + case-fold), so no stored spelling splits them', () => {
+  const frontendPricing = fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 'src', 'utils', 'pricing.ts'), 'utf8')
+  assert.match(frontendPricing, /String\(value \|\| ''\)\.trim\(\)\.toLowerCase\(\) === 'fixed'/, 'POS pricing.ts trims')
+  for (const rel of ['lib/saleItemPricing.ts', '../../frontend/src/utils/saleItemPricing.ts']) {
+    assert.match(read(rel), /String\(capture\.product\.discount_type\|\|'percent'\)\.trim\(\)\.toLowerCase\(\)==='fixed'/, rel + ' trims')
+  }
+  assert.match(read('lib/portalAi.ts'), /String\(product\.discount_type \|\| 'percent'\)\.trim\(\)\.toLowerCase\(\)/, 'portalAi trims')
+  assert.equal((read('lib/promotionRulesSql.ts').match(/lower\(trim\(COALESCE\(p\.discount_type, 'percent'\)\)\)/g) || []).length, 2, 'the SQL reader trims in both branches')
+})
+
+check('WRITERS: every body that reaches a products write is normalised first, before the price gate', () => {
+  const products = read('routes/products.ts')
+  assert.equal((products.match(/normalizeProductDiscountBody\(body\)/g) || []).length, 3, 'PUT /:id, POST / and POST /variant')
+  for (const route of ["app.put('/:id'", "app.post('/'", "app.post('/variant'"]) {
+    const start = products.indexOf(route + ', async')
+    assert.ok(start > 0, route)
+    const handler = products.slice(start, products.indexOf('\napp.', start + 10))
+    assert.ok(handler.indexOf('normalizeProductDiscountBody(body)') > 0, route + ' normalises')
+    assert.ok(handler.indexOf('normalizeProductDiscountBody(body)') < handler.indexOf('productDiscountChanged('), route + ' normalises BEFORE the gate compares')
+  }
+  assert.match(read('lib/stockSession.ts'), /normalizeDiscountType\(value\)/, 'stock-session lines normalise the kind (the switch is already strictly 0/1/boolean there)')
+  assert.match(read('lib/importEngine.ts'), /data\.discount_enabled = toBool01\(/, 'import maps the switch to 0/1')
+  assert.match(read('lib/importEngine.ts'), /data\.discount_type = str\(row\.discount_type\)\.toLowerCase\(\) === 'fixed'/, 'import maps the kind to the exact enum')
 })
 
 console.log(`${passed} checks passed`)
