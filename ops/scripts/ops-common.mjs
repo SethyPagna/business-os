@@ -13,6 +13,7 @@
 
 import crypto from 'node:crypto'
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
@@ -152,11 +153,32 @@ export function runId() {
 // Runs wrangler from the repository's own install with every byte of output
 // captured, never inherited: wrangler prints URLs, ids and SQL errors that do
 // not belong in a public log.
+// wrangler 4.x writes every command's output, query result pages included, to a debug log file under its
+// config directory. On a runner that would leave production rows in the clear on disk, so logging to disk is
+// switched off and the (unused) log directory is pointed at a scratch folder that is deleted after each call.
+export const WRANGLER_LOG_DIR = path.join(os.tmpdir(), `ops-wrangler-logs-${process.pid}`)
+
+export function wranglerEnv(extra = {}) {
+  return {
+    ...process.env,
+    WRANGLER_SEND_METRICS: 'false',
+    NO_COLOR: '1',
+    FORCE_COLOR: '0',
+    ...extra,
+    WRANGLER_WRITE_LOGS: 'false',
+    WRANGLER_LOG_PATH: WRANGLER_LOG_DIR,
+  }
+}
+
 export function runWrangler(args, { cwd, input, timeoutMs = 10 * 60 * 1000, env = {} } = {}) {
   return new Promise((resolve) => {
+    const finish = (result) => {
+      fs.rmSync(WRANGLER_LOG_DIR, { recursive: true, force: true })
+      resolve(result)
+    }
     const child = spawn(process.execPath, [WRANGLER_JS, ...args], {
       cwd,
-      env: { ...process.env, WRANGLER_SEND_METRICS: 'false', NO_COLOR: '1', FORCE_COLOR: '0', ...env },
+      env: wranglerEnv(env),
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true,
     })
@@ -171,11 +193,11 @@ export function runWrangler(args, { cwd, input, timeoutMs = 10 * 60 * 1000, env 
     child.stderr.on('data', (chunk) => { stderr += chunk.toString('utf8') })
     child.on('error', (err) => {
       clearTimeout(timer)
-      resolve({ code: 1, stdout, stderr: `${stderr}\n${err.message}`, timedOut })
+      finish({ code: 1, stdout, stderr: `${stderr}\n${err.message}`, timedOut })
     })
     child.on('close', (code) => {
       clearTimeout(timer)
-      resolve({ code: code == null ? 1 : code, stdout, stderr, timedOut })
+      finish({ code: code == null ? 1 : code, stdout, stderr, timedOut })
     })
     child.stdin.on('error', () => { /* child exited before reading stdin */ })
     child.stdin.end(input === undefined ? '' : input)
@@ -275,7 +297,9 @@ export function sleep(ms) {
 export function writeEncryptedReport(outDir, baseName, payload, meta) {
   if (!/^[a-z0-9][a-z0-9.-]{0,120}$/.test(baseName)) throw new OpsError('bad-report-name', 'Report names are plain kebab-case.')
   const pem = fs.readFileSync(PUBLIC_KEY_PATH, 'utf8')
-  const envelope = encryptEnvelope(JSON.stringify(payload, null, 1), pem, meta)
+  // A string or Buffer payload (a JSONL chunk) is encrypted byte for byte; anything else is written as JSON.
+  const plaintext = typeof payload === 'string' || Buffer.isBuffer(payload) ? payload : JSON.stringify(payload, null, 1)
+  const envelope = encryptEnvelope(plaintext, pem, meta)
   fs.mkdirSync(outDir, { recursive: true })
   const file = path.join(outDir, `${baseName}.enc.json`)
   fs.writeFileSync(file, `${JSON.stringify(envelope)}\n`)
