@@ -16,7 +16,9 @@ import { branchRole, resolveActiveSuccessor } from './branchRoles'
 import { selectInChunks } from './sqlBinding'
 
 export const BRANCH_RETIRED_NO_SUCCESSOR_CODE = 'branch_retired_no_successor'
-export const BRANCH_RETIRED_NO_SUCCESSOR_ERROR = 'This record belongs to a retired branch with no active successor. Nothing was changed.'
+// The English of the packs' branch_retired_no_successor key (the key is named after the code; pinned by
+// scripts/test-cutover-li-pack-parity-pure.cjs). Role-neutral: no branch name.
+export const BRANCH_RETIRED_NO_SUCCESSOR_ERROR = 'This record belongs to an inactive branch, and no active branch has taken its place. Nothing was changed.'
 
 export class BranchRetiredNoSuccessorError extends Error {
   readonly code = BRANCH_RETIRED_NO_SUCCESSOR_CODE

@@ -688,6 +688,9 @@ function manualChunks(id: string): string | undefined {
       normalized.endsWith('/src/api/http.ts')
       || normalized.endsWith('/src/api/query.ts')
       || normalized.endsWith('/src/api/actorQuery.ts')
+      // http.ts imports it to restate a branch-rule refusal in the UI language. Left to the /src/api/ catch-all it lands in
+      // app-api-methods, which imports http.ts back: a static chunk cycle (chunkBoundaryPolicy.test.ts).
+      || normalized.endsWith('/src/api/branchRefusalLanguage.ts')
     ) {
       return 'api-http-core'
     }

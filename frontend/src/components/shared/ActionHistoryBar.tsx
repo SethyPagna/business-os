@@ -177,7 +177,7 @@ function formatServerStatus(item: HistoryItem, T: Translate, isActionable: boole
     return T('history_undo_closed_merged', 'Undo closed: products were merged')
   }
   if (item?.status === 'recorded' && item.last_error === UNDO_CLOSED_BRANCH_RETIRED_MARKER) {
-    return T('history_undo_closed_branch_retired', 'Undo closed: done at the old branch before the merge')
+    return T('history_undo_closed_branch_retired', 'Undo closed: done at the old branch before the branch consolidation')
   }
   if (item?.status === 'recorded' && item.last_error === UNDO_CLOSED_BRANCH_CUTOVER_MOVE_MARKER) {
     return T('history_undo_closed_branch_cutover_move', 'Undo closed: branch consolidation')

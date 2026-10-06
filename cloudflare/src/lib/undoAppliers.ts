@@ -567,11 +567,11 @@ export const isUndoClosedByMerge = (row: { reversible?: unknown; last_error?: un
 const BRANCH_CUTOVER_CLOSURES: Readonly<Record<string, { code: string; message: string }>> = {
   'undo_closed:branch_retired': {
     code: 'undo_closed_branch_retired',
-    message: 'Undo closed: this was done at Shop before it was merged into LC Store. Make a new change instead.',
+    message: 'Undo closed: this was done at the old branch before the branch consolidation. Make a new change instead. Nothing was changed.',
   },
   'undo_closed:branch_cutover_move': {
     code: 'undo_closed_branch_cutover_move',
-    message: 'Undo closed: part of the branch consolidation (Shop → LC Store).',
+    message: 'Undo closed: this is part of the branch consolidation. Nothing was changed.',
   },
 }
 export function branchCutoverClosureRefusal(row: { reversible?: unknown; last_error?: unknown } | null | undefined): { code: string; message: string } | null {

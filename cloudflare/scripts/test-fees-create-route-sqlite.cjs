@@ -248,7 +248,10 @@ async function main() {
     branch_id: 2,
   })
   assert.equal(mismatch.status, 400, JSON.stringify(mismatch.body))
-  assert.match(mismatch.body.error, /same Shop branch/)
+  // Role-neutral since the cutover ("same branch": the branches are Old Shop and LC Store then) and coded, so the client
+  // restates it from the pack key fee_sale_branch_mismatch.
+  assert.match(mismatch.body.error, /same branch/)
+  assert.equal(mismatch.body.code, 'fee_sale_branch_mismatch')
   assert.deepEqual(counts(), { fees: 1, receipts: 1, audits: 1 })
 
   const legacyBody = {

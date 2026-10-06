@@ -1381,7 +1381,9 @@ export async function replayStockSession(env: Env, user: SessionUser, direction:
 // Undo that succeeds.
 const BRANCH_CUTOVER_MOVE_MARKER = 'undo_closed:branch_cutover_move'
 export const BRANCH_CUTOVER_PRODUCT_MOVED_CODE = 'undo_closed_branch_cutover_product_moved'
-export const BRANCH_CUTOVER_PRODUCT_MOVED_MESSAGE = 'Undo closed: this product\'s stock was merged into LC Store by the branch consolidation after it was recorded. Make a new change instead. Nothing was changed.'
+// The English of the packs' undo_refused_closed_branch_cutover_product_moved key, word for word (pinned by
+// scripts/test-cutover-li-pack-parity-pure.cjs). Name-free: the branch names are data, and "consolidation" is the one word for the event.
+export const BRANCH_CUTOVER_PRODUCT_MOVED_MESSAGE = "Undo closed: this product's stock was moved to the active branch by the branch consolidation after this was recorded. Make a new change instead. Nothing was changed."
 async function movedByBranchCutover(db: D1Compat, operationId: string): Promise<boolean> {
   const row = await db.prepare(`SELECT 1 AS moved FROM stock_session_members m
     JOIN stock_transfers st ON st.product_id = m.product_id

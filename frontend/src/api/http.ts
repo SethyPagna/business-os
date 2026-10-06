@@ -20,6 +20,7 @@ import {
   getSyncServerUrl,
   getSyncToken,
 } from './httpState.ts'
+import { restateBranchRefusal } from './branchRefusalLanguage.ts'
 
 export {
   getSyncServerUrl,
@@ -976,6 +977,8 @@ export async function apiFetch(method: unknown, path: string, body?: unknown, ti
       if (res.status === 403 && parsed?.code === PASSWORD_CHANGE_REQUIRED_CODE && !recoveryRead && isActorReadScopeCurrent(sideEffectScope, false)) {
         dispatchPasswordChangeRequired(path, requestSequence)
       }
+      // A branch-rule refusal is restated in the UI language by its code (api/branchRefusalLanguage.ts).
+      if (apiError) await restateBranchRefusal(apiError)
       throw apiError || new Error(msg || `HTTP ${res.status}`)
     }
     const result = await res.json()

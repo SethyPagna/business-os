@@ -195,7 +195,9 @@ async function loadImportApplyActor(db: D1Compat, actorId: number): Promise<Sess
 // silently dropping it from the summary.
 export type ImportWarningKind = 'negative_stock' | 'unreadable_batch_date' | 'barcode_collision' | 'sku_collision' | 'name_match' | 'membership_mismatch' | 'membership_phone_conflict' | 'duplicate_row_match' | 'stock_action_conflict' | 'cost_outlier' | 'other'
 
-export type ImportRowWarning = { kind: ImportWarningKind; message: string }
+// `code` + `params` are optional: a warning that carries them is restated in the UI language by the review screen
+// from the packs (frontend components/imports/importRowText.ts); `message` stays the English fallback.
+export type ImportRowWarning = { kind: ImportWarningKind; message: string; code?: string; params?: Record<string, string | number> }
 
 // The sentence a REFUSED cost average shows the operator (see
 // resolveMergedCostDetail's similarity guard). Written once here because two

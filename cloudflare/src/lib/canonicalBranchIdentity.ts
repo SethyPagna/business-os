@@ -49,7 +49,7 @@ export const CANONICAL_BRANCH_IDENTITY_ERROR =
   'Branches are fixed to Shop and Warehouse. You can edit their details, but you cannot add, rename, deactivate, or delete a branch.'
 export const CANONICAL_BRANCH_CONFIGURATION_CODE = 'canonical_branch_configuration_invalid'
 export const CANONICAL_BRANCH_CONFIGURATION_ERROR =
-  'Stock transfer is unavailable because the branch setup must contain exactly one active Shop and one active Warehouse. Ask an administrator to repair the branch records before trying again.'
+  'Stock transfer is unavailable because the branch setup does not have a selling branch and a storage branch that are both active. Ask an administrator to check the branch records before trying again.'
 
 // The operational role of a branch row in SQL: the explicit role, else the name
 // (the JS twin is branchRole() in branchRoles.ts). While role is NULL on every

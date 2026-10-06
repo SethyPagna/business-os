@@ -14,12 +14,16 @@
 //                                         item nor a product
 //   return_stock_skipped_sale        409  POST /api/returns/bulk cancelling or restoring a return
 //                                         on a sale recorded without stock changes (RET-B E1)
+//   branch_retired_no_successor      409  POST /: the sale's branch is inactive and no active branch
+//                                         has taken its place (lib/branchEffect.ts); the English is
+//                                         pinned to the pack by scripts/test-cutover-li-pack-parity-pure.cjs
 export const RETURN_REFUSAL_ERRORS: Readonly<Record<string, string>> = {
   'return_edit_cancelled': 'This return is cancelled. Restore it before editing.',
   'return_restore_over_capacity': 'Cannot restore: more units would count as returned than the sale sold. Nothing was changed.',
   'return_refund_price_ambiguous': 'This product was sold at different prices on this sale. Pick the exact sale item being returned.',
   'return_refund_sale_line_required': 'Each return line needs a sale item or a product.',
   'return_stock_skipped_sale': 'This sale never took stock off the shelf (e.g. an import), so nothing was changed.',
+  'branch_retired_no_successor': 'This record belongs to an inactive branch, and no active branch has taken its place. Nothing was changed.',
 }
 
 // A refusal whose sentence names values the Worker sends as `params`

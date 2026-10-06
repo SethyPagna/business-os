@@ -85,6 +85,11 @@ export interface UnifiedStockResolvedRow {
     addressedName?: string }>
   /** Preview lines for columns that landed on one branch ("Shop 5 + Warehouse 3 -> LC Store 8"). */
   branchNotes?: string[]
+  /**
+   * The same notes as a code and values, index for index with branchNotes, so the review screen can say them in the
+   * UI language from the packs' stock_import_branch_routing key. branchNotes stays the English fallback.
+   */
+  branchNoteDetails?: Array<{ code: 'stock_import_branch_routing'; params: { columns: string; branch: string; total: number } }>
   plan: StockActionPlan | null
   conflicts: string[]
   errors: string[]
@@ -295,8 +300,14 @@ export function resolveUnifiedStockImportRows(
       const entry = perBranch.get(ref.branchId)
       if (entry) { entry.value += ref.value; entry.refs.push(ref) } else perBranch.set(ref.branchId, { branchId: ref.branchId, value: ref.value, refs: [ref] })
     }
-    const branchNotes = [...perBranch.values()].filter((entry) => entry.refs.length > 1 && !entry.refs[0].pending)
+    const combined = [...perBranch.values()].filter((entry) => entry.refs.length > 1 && !entry.refs[0].pending)
+    const branchNotes = combined
       .map((entry) => `${entry.refs.map((ref) => `${slotLabel[ref.slot]} ${ref.value}`).join(' + ')} -> ${entry.refs[0].branchName} ${entry.value}`)
+    // The sheet's own column names (shop / warehouse / store) as the file spelled them, and the branch name as data.
+    const branchNoteDetails = combined.map((entry) => ({
+      code: 'stock_import_branch_routing' as const,
+      params: { columns: entry.refs.map((ref) => `${ref.slot} ${ref.value}`).join(' + '), branch: entry.refs[0].branchName, total: entry.value },
+    }))
 
     const resolved: UnifiedStockResolvedRow = {
       rowNumber,
@@ -315,7 +326,7 @@ export function resolveUnifiedStockImportRows(
       supplier: text(raw.supplier).replace(/\s{2,}/g, ' ').slice(0, 120),
       freeGoods: parseFreeGoodsFlag(raw.free_goods),
       branchRefs,
-      ...(branchNotes.length ? { branchNotes } : {}),
+      ...(branchNotes.length ? { branchNotes, branchNoteDetails } : {}),
       plan: null,
       conflicts,
       errors,
