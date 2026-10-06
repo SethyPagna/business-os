@@ -23,8 +23,6 @@ import ContactPicker from '../contacts/ContactPicker.tsx'
 import { useReturnReasonPresets } from './helpers/useReturnReasonPresets.ts'
 import { filterAndRankSupplierReturnProducts } from './supplierReturnSearch.ts'
 import { branchChoiceSettled } from '../../utils/branchScope.ts'
-import { useCloseGuard } from '../../utils/useCloseGuard.ts'
-import UnsavedChangesPrompt from '../shared/UnsavedChangesPrompt.tsx'
 
 const SUPPLIER_RETURN_SETUP_TIMEOUT_MS = 12000
 const SUPPLIER_RETURN_SETUP_WATCHDOG_MS = SUPPLIER_RETURN_SETUP_TIMEOUT_MS + 1500

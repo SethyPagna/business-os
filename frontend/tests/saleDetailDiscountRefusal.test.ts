@@ -66,7 +66,7 @@ assert.ok(priceSentence && km.sale_discount_exceeds_price && km.sale_discount_ex
   const result = { mutationError: 'Could not update the sale: A fixed discount cannot be larger than the item price.', code: 'sale_discount_exceeds_price', proven_uncommitted: true }
   const env: Record<string, unknown> = {
     onAmend: true, sale: { id: 41 }, amendConfirm: null, lineDraftOwned: () => true, detailScope: 'd', detailScopeRef: { current: 'd' }, detailAliveRef: { current: true },
-    setAmendSaving: () => {}, moneyCapability: { assertReady() {} }, executeLineMutation: async () => result, saleSubmitRefusalText, t,
+    setAmendSaving: () => {}, moneyCapability: { assertReady() {} }, executeLineMutation: async () => result, saleSubmitRefusalText, t, stockRedirectFields: () => ({}),
     translateOr: (_key: string, english: string) => english, localizeBranchRuleError: (message: string) => message, setAmendMutationError: (value: string) => errors.push(value),
   }
   await actual(modal, 'submitAmendment', env)({ request: {}, draft: {} })

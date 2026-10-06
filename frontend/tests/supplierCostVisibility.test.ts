@@ -59,6 +59,9 @@ function load(name: string, state: Record<string, unknown> = {}): any {
     if (id.includes('dateHelpers')) return { todayStr: () => '2026-09-20' }
     if (id.includes('batchLabel')) return { batchDisplayLabel: () => 'Received date' }
     if (id.includes('supplierDisplay')) return { supplierDisplay: (name: string) => name }
+    if (id.includes('apInvoiceBranches')) return { apInvoiceBranchOptions: () => [], apInvoiceRecordedBranchLabel: (value: unknown) => String(value ?? '') }
+    if (id.includes('useBranchRows')) return { useBranchRows: () => [] }
+    if (id.includes('stockInInvoiceBranches')) return { stockInInvoiceBranchNames: () => 'Shop', stockInReportBranchOptions: () => [] }
     if (id.includes('PaginationControls')) return { default: Pass, DEFAULT_PAGE_SIZE: 25, clampPage: (page: number) => page }
     return { default: Pass }
   }
