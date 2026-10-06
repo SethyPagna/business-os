@@ -19,6 +19,7 @@ import CostCalculationFloat from '../shared/CostCalculationFloat.tsx'
 import ScrollText from 'lucide-react/dist/esm/icons/scroll-text.js'
 import { Fragment, Suspense, useState, type ReactNode } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
+import { branchStockLinesWorthShowing } from '../../utils/branchScope.ts'
 
 // Loaded when the float is opened. The field history is a rare read behind a
 // permission tier; imported statically it joins this page's startup closure
@@ -33,6 +34,7 @@ type ProductAction = (product: InventoryProduct) => void
 interface BranchStockEntry {
   branch_id?: string | number
   branch_name?: string
+  branch_active?: unknown
   quantity?: number
 }
 
@@ -148,8 +150,12 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
   const stockValueUsd = Math.max(0, stockQuantity) * costPriceUsd
   const marginUsd = Math.max(0, activePriceUsd - costPriceUsd)
   const marginPct = costPriceUsd > 0 ? ((marginUsd / costPriceUsd) * 100) : 0
-  const branchStock = Array.isArray(p.branch_stock) ? p.branch_stock : []
+  // One active branch: its chip and the Branches tile would only repeat the
+  // product quantity, so they go (branchScope.ts).
+  const allBranchStock = Array.isArray(p.branch_stock) ? p.branch_stock : []
+  const branchStock = branchStockLinesWorthShowing(allBranchStock)
   const branchCount = branchStock.length
+  const branchesCollapsed = allBranchStock.length > 0 && branchCount === 0
   const promotion = calculateProductDiscount(p)
   // includeEmpty: true -- same "day added" default-batch reasoning as the
   // Products surface detail modal (see utils/productBatches.ts): the full
@@ -289,7 +295,7 @@ export default function ProductDetailModal({ product: p, onClose, onAdjust, onTr
                 ...(canViewCosts ? [{ label: T('stock_val', 'Stock Value'), value: fmtUSD(stockValueUsd), tone: 'text-slate-700 dark:text-slate-200', bg: 'bg-slate-50 dark:bg-slate-700/40' }] : []),
                 { label: T('active_price', 'Active Price'), value: fmtUSD(activePriceUsd), tone: 'text-blue-700 dark:text-blue-300', bg: 'bg-blue-50 dark:bg-blue-900/20' },
                 ...(canViewCosts ? [{ label: T('margin', 'Margin'), value: `${fmtUSD(marginUsd)}${costPriceUsd > 0 ? ` - ${Math.round(marginPct)}%` : ''}`, tone: 'text-emerald-700 dark:text-emerald-300', bg: 'bg-emerald-50 dark:bg-emerald-900/20' }] : []),
-                { label: T('branches', 'Branches'), value: String(branchCount || 0), tone: 'text-violet-700 dark:text-violet-300', bg: 'bg-violet-50 dark:bg-violet-900/20' },
+                ...(branchesCollapsed ? [] : [{ label: T('branches', 'Branches'), value: String(branchCount || 0), tone: 'text-violet-700 dark:text-violet-300', bg: 'bg-violet-50 dark:bg-violet-900/20' }]),
               ].map((item) => (
                 <div key={item.label} className={`${item.bg} rounded-xl px-2.5 py-2`}>
                   <div className={`text-xs font-bold ${item.tone}`}>{item.value}</div>

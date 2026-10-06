@@ -620,7 +620,7 @@ test('ReportsHub reads effective view authority and synchronously resolves revok
     assert.ok(hub.includes(`const can${section[0].toUpperCase()}${section.slice(1)} = can('${section}', 'view')`), `${section} visibility uses its explicit view switch`)
   }
   assert.match(hub, /const canShift = getPermissionTier\('sales'\) === 'full' \|\| getPermissionTier\('pos'\) === 'full'/)
-  assert.match(hub, /const resolvedViewId = resolveReportView\(viewId, perms\)[\s\S]*const view = resolvedViewId \? getReportView\(resolvedViewId\) : null/, 'revocation is resolved during render, before the Shift child can issue a request')
+  assert.match(hub, /const resolvedViewId = resolveReportView\(viewId, perms, reportScope\)[\s\S]*const view = resolvedViewId \? getReportView\(resolvedViewId\) : null/, 'revocation is resolved during render, before the Shift child can issue a request')
 })
 
 test('options / style persistence is tolerant of garbage and round-trips through storage', () => {

@@ -22,6 +22,9 @@ import { Skeleton } from '../shared/kit'
 import ContactPicker from '../contacts/ContactPicker.tsx'
 import { useReturnReasonPresets } from './helpers/useReturnReasonPresets.ts'
 import { filterAndRankSupplierReturnProducts } from './supplierReturnSearch.ts'
+import { branchChoiceSettled } from '../../utils/branchScope.ts'
+import { useCloseGuard } from '../../utils/useCloseGuard.ts'
+import UnsavedChangesPrompt from '../shared/UnsavedChangesPrompt.tsx'
 
 const SUPPLIER_RETURN_SETUP_TIMEOUT_MS = 12000
 const SUPPLIER_RETURN_SETUP_WATCHDOG_MS = SUPPLIER_RETURN_SETUP_TIMEOUT_MS + 1500
@@ -449,16 +452,18 @@ export default function NewSupplierReturnModal({ onClose, onSuccess, notify, fmt
           for the setup read, and the fields are inert until it lands. */}
       <fieldset disabled={loading} className="min-w-0 space-y-3 border-0 p-0">
         <div className="grid grid-cols-2 gap-2">
-          <AppSelect
-            id="supplier-return-branch"
-            className="min-w-0"
-            buttonClassName="h-10 w-full text-sm"
-            value={branchId}
-            options={branchOptions}
-            onChange={setBranchId}
-            ariaLabel={tr('branch', 'Branch')}
-            prefix={tr('branch', 'Branch')}
-          />
+          {branchChoiceSettled(branches.map((item) => item.id), branchId) ? null : (
+            <AppSelect
+              id="supplier-return-branch"
+              className="min-w-0"
+              buttonClassName="h-10 w-full text-sm"
+              value={branchId}
+              options={branchOptions}
+              onChange={setBranchId}
+              ariaLabel={tr('branch', 'Branch')}
+              prefix={tr('branch', 'Branch')}
+            />
+          )}
           <ContactPicker
             id="supplier-return-supplier"
             className="min-w-0"

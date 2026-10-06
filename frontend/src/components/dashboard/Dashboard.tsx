@@ -32,6 +32,8 @@ import FileText from 'lucide-react/dist/esm/icons/file-text.js'
 import { getDashboardSaleStatusLabel, getDashboardSaleStatusTone } from './dashboardSaleStatus.ts'
 import { finishDashboardStockAlertRequest, invalidateDashboardStockAlertRequest } from './dashboardStockAlertRequests.ts'
 import { dashboardRangeQuery, dashboardRangeLabel, type DashboardRangeQuery } from './dashboardRange.ts'
+import { showsBranchComparison } from '../../utils/branchScope.ts'
+import { useBranchRows } from '../../utils/useBranchRows.ts'
 
 const ImportReportModal = lazyRetry(() => import('../shared/ImportReportModal'), 'ImportReportModal')
 const ExportChoiceDialog = lazyRetry(() => import('../shared/ExportChoiceDialog'), 'dashboard-export-choices')
@@ -847,6 +849,11 @@ export default function Dashboard() {
   // or exported figures while a new interval is loading.
   const summary = summarySnapshot?.scope === dashboardScope ? summarySnapshot.data : null
   const analytics = analyticsSnapshot?.scope === dashboardScope ? analyticsSnapshot.data : null
+  // One active branch makes a branch comparison noise; a range that really
+  // holds sales from two branches (the retired one included) keeps it. Decided
+  // from the branch rows and the data, never from a name or a flag.
+  const branchRows = useBranchRows()
+  const showBranchPerformance = showsBranchComparison(branchRows, analytics?.byBranch?.length ?? 0)
   const [activeChart, setActiveChart] = useState<DashboardChartMode>('revenue')
   const [topMode, setTopMode]         = useState<DashboardTopMode>('revenue')
   const [customerDetail, setCustomerDetail]     = useState<DashboardCustomer | null>(null)
@@ -1943,10 +1950,10 @@ ${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} 
           const { exportDashboardPaymentMethods } = await loadDashboardExportModule()
           exportDashboardPaymentMethods(buildDashboardExportContext())
         } },
-        { id: 'branches', label: t('export_branch_performance'), hint: 'Excel', onClick: async () => {
+        ...(showBranchPerformance ? [{ id: 'branches', label: t('export_branch_performance'), hint: 'Excel', onClick: async () => {
           const { exportDashboardBranches } = await loadDashboardExportModule()
           exportDashboardBranches(buildDashboardExportContext())
-        } },
+        } }] : []),
       ],
     },
   ], [
@@ -1955,6 +1962,7 @@ ${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} 
     exportDashboardPackage,
     exportDashboardStats,
     loadDashboardExportModule,
+    showBranchPerformance,
     t,
     translateOr,
   ])
@@ -2416,17 +2424,19 @@ ${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} 
         </div>
 
         {/* Expiring Products */}
-        <BranchPerformanceCard
-          analytics={analytics}
-          analyticsPending={analyticsPending}
-          analyticsUnavailable={analyticsUnavailable}
-          analyticsError={analyticsError}
-          t={t}
-          translateOr={translateOr}
-          fmtUSD={fmtUSD}
-          onOpen={openBranchDetail}
-          onViewMore={() => setBranchPerformanceListOpen(true)}
-        />
+        {showBranchPerformance ? (
+          <BranchPerformanceCard
+            analytics={analytics}
+            analyticsPending={analyticsPending}
+            analyticsUnavailable={analyticsUnavailable}
+            analyticsError={analyticsError}
+            t={t}
+            translateOr={translateOr}
+            fmtUSD={fmtUSD}
+            onOpen={openBranchDetail}
+            onViewMore={() => setBranchPerformanceListOpen(true)}
+          />
+        ) : null}
 
         {/* Recent imports -- a general list of the last few imported files
             (any type, any outcome), so it's discoverable and clickable the

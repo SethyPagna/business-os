@@ -44,6 +44,8 @@ import { runConcurrentTasks } from '../../utils/bulkOps.ts'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import { buildProductGroups } from '../../utils/productGrouping.ts'
 import { branchRoleFromName } from '../../utils/branchRoles.ts'
+import { hasTransferPair } from '../../utils/branchCollapse.ts'
+import { branchHistoryLabel, showsBranchHistoryFilter } from '../../utils/branchScope.ts'
 import {
   FAST_STOCK_IN_RESTORE_HOST,
   RESTORE_WORK_EVENT,
@@ -741,6 +743,22 @@ export default function Branches({ embedded = false, view, showSectionNavigation
     () => activeBranches.map((branch) => ({ id: branch.id, name: branch.name || `Branch ${branch.id}`, role: branch.role ?? null, is_active: branch.is_active ?? undefined })),
     [activeBranches],
   )
+  // Transfer HISTORY keeps every branch selectable, the retired one included
+  // (labelled): old transfers still name it. The modal's options above stay
+  // active-only because a NEW transfer can only use an active branch.
+  const transferHistoryBranchOptions = useMemo(
+    () => branches.map((branch) => ({ id: branch.id, name: branchHistoryLabel({ name: branch.name || `Branch ${branch.id}`, is_active: branch.is_active ?? undefined }, tr('inactive', 'Inactive')) })),
+    [branches, tr],
+  )
+  // Branch filters (status on the list, From/To on the history) only tell
+  // something apart while more than one branch exists in total.
+  const hasBranchFilters = showsBranchHistoryFilter(branches)
+  // A transfer needs two active branches of the canonical pair. Before the
+  // list loads there is nothing to judge, so nothing is blocked yet.
+  const transferBlocked = branches.length > 0 && !hasTransferPair(branches)
+  const transferBlockedReason = tr('transfer_single_branch', 'Only one active branch, so there is nothing to transfer.')
+  // The overview's "Branches" count tile: only worth a tile while it can say more than one.
+  const showBranchCountTile = branchSummary?.branch_count == null || Number(branchSummary.branch_count) > 1
   // The Stock Session's AppSelect option shape ({value,label}), distinct
   // from TransferModal's ({id,name}) above.
   const receiveBranchSelectOptions = useMemo(
@@ -748,8 +766,8 @@ export default function Branches({ embedded = false, view, showSectionNavigation
     [activeBranches],
   )
   const visibleBranches = useMemo(() => branches.filter((branch) => (
-    branchStatusFilter === 'all' ? true : branchStatusFilter === 'active' ? Boolean(branch.is_active) : !branch.is_active
-  )), [branches, branchStatusFilter])
+    !hasBranchFilters || branchStatusFilter === 'all' ? true : branchStatusFilter === 'active' ? Boolean(branch.is_active) : !branch.is_active
+  )), [branches, branchStatusFilter, hasBranchFilters])
   // Transfer filters are applied in D1 before pagination. Do not re-filter
   // the returned page in the browser: besides hiding valid rows from a page,
   // slicing the raw UTC timestamp here would disagree with the backend's
@@ -764,7 +782,9 @@ export default function Branches({ embedded = false, view, showSectionNavigation
     ? (branchStatusFilter !== 'all' ? 1 : 0)
     : (transferFromFilter !== 'all' ? 1 : 0) + (transferToFilter !== 'all' ? 1 : 0) + (showConsolidationTransfers ? 1 : 0)
   const branchFilterSections = useMemo(() => (
-    tab === 'branches'
+    !hasBranchFilters
+      ? []
+      : tab === 'branches'
       ? [{
           id: 'status',
           label: tr('status', 'Status'),
@@ -781,7 +801,7 @@ export default function Branches({ embedded = false, view, showSectionNavigation
             searchable: true,
             options: [
               { id: 'all', label: tr('all', 'All'), active: transferFromFilter === 'all', onClick: () => { setTransferFromFilter('all'); setTransferPage(1) } },
-              ...transferBranchOptions.map((branch) => ({
+              ...transferHistoryBranchOptions.map((branch) => ({
                 id: branch.id,
                 label: branch.name,
                 active: transferFromFilter === String(branch.id),
@@ -795,7 +815,7 @@ export default function Branches({ embedded = false, view, showSectionNavigation
             searchable: true,
             options: [
               { id: 'all', label: tr('all', 'All'), active: transferToFilter === 'all', onClick: () => { setTransferToFilter('all'); setTransferPage(1) } },
-              ...transferBranchOptions.map((branch) => ({
+              ...transferHistoryBranchOptions.map((branch) => ({
                 id: branch.id,
                 label: branch.name,
                 active: transferToFilter === String(branch.id),
@@ -804,7 +824,7 @@ export default function Branches({ embedded = false, view, showSectionNavigation
             ],
           },
         ]
-  ), [tab, branchStatusFilter, transferFromFilter, transferToFilter, transferBranchOptions, tr])
+  ), [hasBranchFilters, tab, branchStatusFilter, transferFromFilter, transferToFilter, transferHistoryBranchOptions, tr])
   const clearBranchFilters = useCallback(() => {
     setBranchStatusFilter('all')
     setTransferFromFilter('all')
@@ -1276,37 +1296,45 @@ export default function Branches({ embedded = false, view, showSectionNavigation
             ))}
           </div> : null}
           {canTransferStock ? (
-            <button
-              className="inline-flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700 shadow-sm transition-colors hover:border-blue-400 hover:bg-blue-50/60 hover:text-blue-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-blue-500 dark:hover:bg-slate-700/80 dark:hover:text-blue-300"
-              onClick={() => setModal('transfer')}
-              title={tr('transfer', 'Transfer')}
-              aria-label={tr('transfer', 'Transfer')}
-            >
-              <ArrowRightLeft className="h-4 w-4 shrink-0" />
-              <span>{tr('transfer', 'Transfer')}</span>
-            </button>
-          ) : null}
-          <div className="mb-1 ml-auto flex shrink-0 items-center gap-1">
-            {tab === 'transfers' ? (
+            // A disabled button swallows hover, so the reason sits on the wrapper.
+            <span className="inline-flex shrink-0" title={transferBlocked ? transferBlockedReason : undefined}>
               <button
-                type="button"
-                aria-pressed={showConsolidationTransfers}
-                title={showConsolidationTransfers ? tr('transfers_hide_consolidation', 'Hide branch consolidation transfers') : tr('transfers_show_consolidation', 'Show branch consolidation transfers')}
-                aria-label={showConsolidationTransfers ? tr('transfers_hide_consolidation', 'Hide branch consolidation transfers') : tr('transfers_show_consolidation', 'Show branch consolidation transfers')}
-                onClick={() => { setShowConsolidationTransfers((value) => !value); setTransferPage(1) }}
-                className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${showConsolidationTransfers ? 'bg-slate-800 text-white dark:bg-slate-200 dark:text-slate-900' : 'bg-gray-100 text-gray-600 dark:bg-zinc-800 dark:text-gray-300'}`}
+                className="inline-flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700 shadow-sm transition-colors hover:border-blue-400 hover:bg-blue-50/60 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-slate-300 disabled:hover:bg-white disabled:hover:text-slate-700 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-blue-500 dark:hover:bg-slate-700/80 dark:hover:text-blue-300"
+                onClick={() => setModal('transfer')}
+                disabled={transferBlocked}
+                title={transferBlocked ? transferBlockedReason : tr('transfer', 'Transfer')}
+                aria-label={tr('transfer', 'Transfer')}
               >
-                <GitMerge className="h-4 w-4" aria-hidden="true" />
+                <ArrowRightLeft className="h-4 w-4 shrink-0" />
+                <span>{tr('transfer', 'Transfer')}</span>
               </button>
-            ) : null}
-            <FilterMenu
-              label={tr('filters', 'Filters')}
-              activeCount={branchFilterActiveCount}
-              sections={branchFilterSections}
-              onClear={branchFilterActiveCount > 0 ? clearBranchFilters : null}
-              compact
-            />
-          </div>
+            </span>
+          ) : null}
+          {tab === 'transfers' || branchFilterSections.length > 0 ? (
+            <div className="mb-1 ml-auto flex shrink-0 items-center gap-1">
+              {tab === 'transfers' ? (
+                <button
+                  type="button"
+                  aria-pressed={showConsolidationTransfers}
+                  title={showConsolidationTransfers ? tr('transfers_hide_consolidation', 'Hide branch consolidation transfers') : tr('transfers_show_consolidation', 'Show branch consolidation transfers')}
+                  aria-label={showConsolidationTransfers ? tr('transfers_hide_consolidation', 'Hide branch consolidation transfers') : tr('transfers_show_consolidation', 'Show branch consolidation transfers')}
+                  onClick={() => { setShowConsolidationTransfers((value) => !value); setTransferPage(1) }}
+                  className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${showConsolidationTransfers ? 'bg-slate-800 text-white dark:bg-slate-200 dark:text-slate-900' : 'bg-gray-100 text-gray-600 dark:bg-zinc-800 dark:text-gray-300'}`}
+                >
+                  <GitMerge className="h-4 w-4" aria-hidden="true" />
+                </button>
+              ) : null}
+              {branchFilterSections.length > 0 ? (
+                <FilterMenu
+                  label={tr('filters', 'Filters')}
+                  activeCount={branchFilterActiveCount}
+                  sections={branchFilterSections}
+                  onClear={branchFilterActiveCount > 0 ? clearBranchFilters : null}
+                  compact
+                />
+              ) : null}
+            </div>
+          ) : null}
         </div>
       </div>
 
@@ -1316,8 +1344,9 @@ export default function Branches({ embedded = false, view, showSectionNavigation
           {statsLoading ? <p role="status">{tr('loading', 'Loading')}…</p> : statsError ? (
             <div role="status"><p>{statsError}</p><button type="button" className="btn-secondary h-10" onClick={() => setStatsRefresh((value) => value + 1)}>{tr('retry', 'Retry')}</button></div>
           ) : branchSummary ? (
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-              <BranchStatTile label={tr('branches', 'Branches')} value={branchSummary.branch_count ?? 0} />
+            // A count of one active branch says nothing, so the tile goes with it.
+            <div className={`grid grid-cols-2 gap-2 ${showBranchCountTile ? 'sm:grid-cols-3' : ''}`}>
+              {showBranchCountTile ? <BranchStatTile label={tr('branches', 'Branches')} value={branchSummary.branch_count ?? 0} /> : null}
               <BranchStatTile label={tr('products', 'Products')} value={branchSummary.total_products ?? 0} />
               <BranchStatTile label={tr('stock_value', 'Stock Value')} value={fmtUSD(branchSummary.stock_value_usd ?? 0)} />
             </div>
@@ -1470,9 +1499,9 @@ export default function Branches({ embedded = false, view, showSectionNavigation
                               {' | '}
                               {tr('branch_stock_value', 'Value')}: <span className="text-blue-600">{fmtUSD(totalValue)}</span>
                             </span>
-                            <button onClick={() => setModal('transfer')} disabled={!canTransferStock} className="text-xs text-blue-500 hover:underline disabled:cursor-not-allowed disabled:text-slate-400 disabled:no-underline dark:disabled:text-slate-500">
+                            {transferBlocked ? null : <button onClick={() => setModal('transfer')} disabled={!canTransferStock} className="text-xs text-blue-500 hover:underline disabled:cursor-not-allowed disabled:text-slate-400 disabled:no-underline dark:disabled:text-slate-500">
                               {tr('transfer_stock_link', 'Transfer stock')}
-                            </button>
+                            </button>}
                           </div>
 
                           {/* Per-branch product search (user, Aug 30: "search
@@ -1800,7 +1829,7 @@ export default function Branches({ embedded = false, view, showSectionNavigation
             <p className="text-xs text-slate-500 dark:text-slate-400">{tr('transfer_immutable_hint', 'Posted transfers stay unchanged for stock and audit accuracy. Use a new transfer to correct the movement.')}</p>
             <div className="flex justify-end gap-2">
               <button type="button" className="btn-secondary px-3 py-1.5 text-sm" onClick={() => setTransferDetail(null)}>{tr('close', 'Close')}</button>
-              {canTransferStock ? <button type="button" className="btn-primary px-3 py-1.5 text-sm" onClick={() => { setTransferDetail(null); setModal('transfer') }}><ArrowRightLeft className="mr-1 inline h-4 w-4" />{tr('new_transfer', 'New transfer')}</button> : null}
+              {canTransferStock ? <span title={transferBlocked ? transferBlockedReason : undefined}><button type="button" className="btn-primary px-3 py-1.5 text-sm disabled:cursor-not-allowed disabled:opacity-50" disabled={transferBlocked} onClick={() => { setTransferDetail(null); setModal('transfer') }}><ArrowRightLeft className="mr-1 inline h-4 w-4" />{tr('new_transfer', 'New transfer')}</button></span> : null}
             </div>
           </div>
         </Modal>

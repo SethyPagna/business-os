@@ -18,6 +18,7 @@ import { isDepletedLot, orderLotsOnHandFirst } from '../../utils/productBatches.
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
 import DateEntryInput from '../shared/DateEntryInput.tsx'
 import TruncatedText from '../shared/TruncatedText.tsx'
+import { branchChoiceSettled } from '../../utils/branchScope.ts'
 import { buildHistoryRowModel, formatHistoryReference } from '../../utils/historyRowModel.ts'
 
 type DayMovement = {
@@ -291,21 +292,23 @@ export default function ManageBatchesModal({
           </button>
         </div>
 
-        <div className="border-b border-gray-200 p-4 dark:border-gray-700">
-          <label className="block">
-            <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{t('branch') || 'Branch'}</span>
-            <AppSelect
-              value={branchId}
-              onChange={setBranchId}
-              ariaLabel={t('branch') || 'Branch'}
-              className="w-full"
-              buttonClassName="h-10 w-full text-sm"
-              menuClassName="min-w-[13rem]"
-              optionClassName="text-sm"
-              options={branchSelectOptions}
-            />
-          </label>
-        </div>
+        {branchChoiceSettled(branchSelectOptions.map((option) => option.value), branchId) ? null : (
+          <div className="border-b border-gray-200 p-4 dark:border-gray-700">
+            <label className="block">
+              <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">{t('branch') || 'Branch'}</span>
+              <AppSelect
+                value={branchId}
+                onChange={setBranchId}
+                ariaLabel={t('branch') || 'Branch'}
+                className="w-full"
+                buttonClassName="h-10 w-full text-sm"
+                menuClassName="min-w-[13rem]"
+                optionClassName="text-sm"
+                options={branchSelectOptions}
+              />
+            </label>
+          </div>
+        )}
 
         <div className="modal-scroll space-y-2 p-4">
           {dayDetail ? (

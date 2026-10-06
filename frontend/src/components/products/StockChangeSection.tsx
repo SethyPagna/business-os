@@ -57,6 +57,7 @@ import { scopedWorkDraftKey } from '../../utils/workDrafts.ts'
 import { stockSessionHasItems } from '../../utils/stockSessionBusy.ts'
 import { fmtDate, fmtClock24, fmtDateTime24 } from '../../utils/formatters'
 import { batchDisplayLabel } from '../../utils/batchLabel.ts'
+import { branchHistoryLabel } from '../../utils/branchScope.ts'
 import { buildHistoryRowModel, formatHistoryReference, historyExportField } from '../../utils/historyRowModel.ts'
 import {
   isRevertibleStockMovement,
@@ -734,7 +735,8 @@ export default function StockChangeSection({ t, onRegisterActions }: StockChange
         label: tr(t, 'branch', 'Branch'),
         options: [
           { id: '', label: tr(t, 'all', 'All'), active: !branchId, onClick: () => setBranchId(0) },
-          ...branches.map((branch) => ({ id: branch.id, label: branch.name, active: branchId === branch.id, onClick: () => setBranchId(branch.id) })),
+          // History filter: the retired branch stays selectable, labelled.
+          ...branches.map((branch) => ({ id: branch.id, label: branchHistoryLabel({ name: branch.name, is_active: branch.isActive }, tr(t, 'inactive', 'Inactive')), active: branchId === branch.id, onClick: () => setBranchId(branch.id) })),
         ],
       })
     }
