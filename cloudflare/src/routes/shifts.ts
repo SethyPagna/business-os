@@ -221,6 +221,15 @@ async function resolveBranch(db: D1Compat, branchId: number | null): Promise<{ i
   return (await db.prepare('SELECT id, name FROM branches WHERE id=@id AND is_active=1').get<{ id: number; name: string }>({ id: branchId })) ?? null
 }
 /**
+ * The branch for a READ. A retired branch (Old Shop after the branch consolidation) is still a branch whose
+ * shifts happened: its history stays listable and openable, and a till tab still holding its id answers the
+ * usual shift state instead of an error. Every WRITE keeps resolveBranch, which refuses an inactive branch.
+ */
+async function resolveBranchForRead(db: D1Compat, branchId: number | null): Promise<{ id: number; name: string; is_active: number | null } | null> {
+  if (branchId == null) return null
+  return (await db.prepare('SELECT id, name, is_active FROM branches WHERE id=@id').get<{ id: number; name: string; is_active: number | null }>({ id: branchId })) ?? null
+}
+/**
  * D1/SQLite datetime columns are written without a timezone suffix
  * ("YYYY-MM-DD HH:MM:SS", always UTC by SQLite's own convention -- see
  * lib/auth.ts's asUtc and the same idiom in lib/salesAnalytics.ts). Passing
@@ -680,7 +689,10 @@ app.get('/current', async (c) => {
   const db = getDb(c.env); const requestedBranchId = branchIdFrom(c)
   const rawBranchId = c.req.query('branch_id') ?? c.req.header('X-Branch-Id')
   if (rawBranchId != null && String(rawBranchId).trim() !== '' && requestedBranchId == null) return c.json({ error: 'Invalid branch id.' }, 400)
-  if (requestedBranchId != null && !(await resolveBranch(db, requestedBranchId))) return c.json({ error: 'Branch not found or inactive.' }, 400)
+  const requestedBranch = await resolveBranchForRead(db, requestedBranchId)
+  if (requestedBranchId != null && !requestedBranch) return c.json({ error: 'Branch not found or inactive.' }, 400)
+  // A retired branch takes no new shift (POST /open refuses it), so nothing may ask the till to register one.
+  const branchRetired = !!requestedBranch && Number(requestedBranch.is_active ?? 1) !== 1
   const policy = await readShiftPolicy(db)
   const exempt = policy.admin_exempt && isAdminControlUser(user)
   const shift = exempt ? undefined : await readCurrent(db, policy, user.id, requestedBranchId)
@@ -705,6 +717,7 @@ app.get('/current', async (c) => {
   // counts; no report calculation is needed to enter or close their drawer.
   const presented = body.shift ? { ...body.shift, reconciliation: await reconciliationFor(c.env, user, body.shift) } : null
   return c.json({ ...body, shift: presented,
+    ...(branchRetired ? { needs_registration: false, branch_retired: true } : {}),
     previous_open_shift: carryOver ? responseShift(user, carryOver) : null,
     previous_open_close_before: closeBefore?.opened_at ?? null })
 })
@@ -714,7 +727,7 @@ app.get('/', async (c) => {
   const db = getDb(c.env); const branchId = branchIdFrom(c)
   const rawBranchId = c.req.query('branch_id') ?? c.req.header('X-Branch-Id')
   if (rawBranchId != null && String(rawBranchId).trim() !== '' && branchId == null) return c.json({ error: 'Invalid branch id.' }, 400)
-  if (branchId != null && !(await resolveBranch(db, branchId))) return c.json({ error: 'Branch not found or inactive.' }, 400)
+  if (branchId != null && !(await resolveBranchForRead(db, branchId))) return c.json({ error: 'Branch not found or inactive.' }, 400)
   const rawUserId = c.req.query('user_id')
   const parsedUserId = rawUserId == null || rawUserId.trim() === '' ? null : Number(rawUserId)
   if (parsedUserId != null && (!Number.isInteger(parsedUserId) || parsedUserId <= 0)) return c.json({ error: 'Invalid user id.' }, 400)
@@ -777,7 +790,7 @@ app.get('/', async (c) => {
       AND NOT EXISTS (SELECT 1 FROM shift_sessions later WHERE later.parent_shift_id = shift_sessions.id)
       AND (@requestedUserId IS NULL OR user_id = @requestedUserId)
       AND (@branchId IS NULL OR branch_id = @branchId)
-      AND (branch_id IS NULL OR EXISTS (SELECT 1 FROM branches b WHERE b.id=shift_sessions.branch_id AND b.is_active=1))
+      AND (branch_id IS NULL OR EXISTS (SELECT 1 FROM branches b WHERE b.id=shift_sessions.branch_id))
       AND (@from IS NULL OR business_date >= @from) AND (@to IS NULL OR business_date <= @to)
       ${openingWindow ? `AND ${continuousReadWindowSql('opened_at')}` : ''}
       AND (@search IS NULL OR user_name LIKE @search ESCAPE '\\' OR shift_sessions.id IN (
@@ -831,7 +844,7 @@ app.get('/:id/history', async (c) => {
   if (!Number.isInteger(id) || id <= 0) return c.json({ error: 'Invalid shift id.' }, 400)
   const db = getDb(c.env); const shift = await readShiftById(db, id)
   if (!shift) return c.json({ error: 'Shift not found.' }, 404)
-  if (shift.branch_id != null && !(await resolveBranch(db, shift.branch_id))) return c.json({ error: 'Shift not found.' }, 404)
+  if (shift.branch_id != null && !(await resolveBranchForRead(db, shift.branch_id))) return c.json({ error: 'Shift not found.' }, 404)
   // 404, not 403: a caller who may not see this shift must not learn that it
   // exists, which id probing would otherwise reveal one status code at a time.
   if (!canSeeShift(user, await readShiftPolicy(db), shift)) return c.json({ error: 'Shift not found.' }, 404)
