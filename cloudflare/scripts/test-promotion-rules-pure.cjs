@@ -140,11 +140,15 @@ const pass = (msg) => { checks++; console.log('PASS ' + msg) }
   ]) assert.match(promoSrc, pin, `rules endpoint must use the intended promotions read/manage gate: ${pin}`)
   for (const pin of [
     /app\.get\('\/', requireKey\('products'\)/,
-    /app\.post\('\/', requireKey\('products'\)/,
-    /app\.put\('\/:id', requireKey\('products'\)/,
-    /app\.put\('\/reorder\/all', requireKey\('products'\)/,
-    /app\.delete\('\/:id', requireKey\('products'\)/,
-  ]) assert.match(promoSrc, pin, `legacy strip endpoint must keep the products gate: ${pin}`)
+  ]) assert.match(promoSrc, pin, `legacy strip endpoint must keep the products read gate: ${pin}`)
+  // Owner, 6 Oct 2026 (release review P2-1): the strip WRITES are public storefront content, so they need a Website Editor
+  // grant (portal_posts, customer_portal or Settings), not the products section -- see test-promotions-strip-write-gate-pure.cjs.
+  for (const pin of [
+    /app\.post\('\/', requireWebsiteEditor,/,
+    /app\.put\('\/:id', requireWebsiteEditor,/,
+    /app\.put\('\/reorder\/all', requireWebsiteEditor,/,
+    /app\.delete\('\/:id', requireWebsiteEditor,/,
+  ]) assert.match(promoSrc, pin, `legacy strip writes must use the Website Editor gate: ${pin}`)
   const rulesBlock = promoSrc.indexOf("app.get('/rules/active'")
   const legacyBlock = promoSrc.indexOf("app.get('/', requireKey('products')")
   assert.ok(rulesBlock > -1 && legacyBlock > rulesBlock, '/rules* routes must register BEFORE the legacy /:id patterns')
