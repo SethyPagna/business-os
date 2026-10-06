@@ -199,6 +199,7 @@ const LABELS = {
   type: { en: 'Type', km: 'ប្រភេទ', localizeValue: true },
   settlement: { en: 'Settlement', km: 'វិធីដោះស្រាយ', localizeValue: true },
   refund: { en: 'Refund', km: 'សងប្រាក់', localizeValue: true },
+  debtLowered: { en: 'Debt lowered', km: 'បន្ថយប្រាក់ជំពាក់' },          // km.json sale_tag_debt_lowered
   supplierPays: { en: 'Supplier pays', km: 'អ្នកផ្គត់ផ្គង់សង' },
   loss: { en: 'Loss', km: 'ខាតបង់' },
 
@@ -335,7 +336,7 @@ const LABELS = {
   received: { en: 'Received', km: 'បានទទួល' },                       // km.json received
   dollars: { en: 'Dollars', km: 'ដុល្លារ' },                          // km.json shift_float_usd (ដុល្លារ)
   riel: { en: 'Riel', km: 'រៀល' },                                    // km.json riel
-  rielEquivalent: { en: 'Riel equivalent', km: 'ចំនួនស្មើជារៀល' },    // km.json rfd_total_khr (ចំនួនស្មើ) + riel
+  rielPaidOut: { en: 'Paid out in riel', km: 'សងប្រាក់វិញជារៀល' },  // km.json return_refund_paid_in + riel
   bank: { en: 'Bank', km: 'ធនាគារ' },
   totalDiscount: { en: 'Total discount', km: 'បញ្ចុះតម្លៃសរុប' },      // km.json total_discount
   branches: { en: 'Branches', km: 'សាខា' },                           // km.json branches

@@ -563,6 +563,28 @@ const swap = telegram.formatReturnTelegramLines({ kind: 'customer', returnNumber
 assert.ok(!swap.some((line) => line.startsWith('Refund:')), swap.join('\n'))
 assert.ok(!swap.some((line) => /^(INV|Customer|Branch|Reason|Type|Settlement|Loss|By):/.test(line)))
 
+// --- RET-A (verifier 6 Oct 2026): what the refund did with the money --------
+// A return that only lowered a Not Paid sale's debt pays out nothing: it says
+// "Debt lowered", never "Refund". The cash part is printed in the currency it
+// was paid in -- riel as its cash share of the riel figure, never a converted
+// equivalent beside the dollars.
+const moneyLines = (extra) => telegram.formatReturnTelegramLines({ kind: 'customer', returnNumber: 'RET-9', items: [{ product: 'A', quantity: 1 }],
+  refundUsd: 4, refundKhr: 16000, ...extra }).filter((line) => /^(Refund|Debt lowered):/.test(line))
+assert.deepEqual(moneyLines({ owedReductionUsd: 4, refundCurrency: 'USD' }), ['Debt lowered: $4.00'], 'owner example: $4 back on $10 Not Paid')
+assert.deepEqual(moneyLines({ owedReductionUsd: 4, refundCurrency: 'KHR' }), ['Debt lowered: $4.00'], 'riel chosen, but nothing paid out')
+assert.deepEqual(moneyLines({ owedReductionUsd: 3, refundCurrency: 'KHR' }), ['Debt lowered: $3.00', 'Refund: 4,000៛'], '$3 lowered, $1 paid out in riel')
+assert.deepEqual(moneyLines({ owedReductionUsd: 0, refundCurrency: 'USD' }), ['Refund: $4.00'], 'a dollar refund prints dollars only')
+assert.deepEqual(moneyLines({ owedReductionUsd: 0, refundCurrency: 'KHR' }), ['Refund: 16,000៛'], 'a riel refund prints riel only')
+assert.deepEqual(moneyLines({}), ['Refund: $4.00 · 16,000៛'], 'a caller that does not know the currency keeps the old line')
+const statusMoney = (rows) => telegram.formatReturnStatusTelegramLines({ kind: 'customer', nowMs: Date.parse('2026-10-06T03:00:00.000Z'), returns: rows })
+assert.ok(statusMoney([{ returnNumber: 'RET-9', refundUsd: 4, refundKhr: 16000, owedReductionUsd: 4, refundCurrency: 'USD' }]).includes('Debt lowered: $4.00'))
+assert.ok(!statusMoney([{ returnNumber: 'RET-9', refundUsd: 4, refundKhr: 16000, owedReductionUsd: 4, refundCurrency: 'USD' }]).some((line) => line.startsWith('Refund:')),
+  'a restored or cancelled debt-lowering return says Debt lowered, not Refund')
+const groupText = statusMoney([{ returnNumber: 'RET-8', refundUsd: 4, refundKhr: 16000, owedReductionUsd: 0, refundCurrency: 'USD' },
+  { returnNumber: 'RET-9', refundUsd: 4, refundKhr: 16000, owedReductionUsd: 3, refundCurrency: 'KHR' }]).join(' ').replace(/\s+/g, ' ')
+assert.ok(groupText.includes('• RET-8 $4.00 • RET-9 Debt lowered/បន្ថយប្រាក់ជំពាក់ $3.00 4,000៛'),
+  `a group row names the debt lowered and the riel paid out: ${groupText}`)
+
 // --- supplier return: stock out + settlement money, loss only when there is one ---
 assert.deepEqual(telegram.formatReturnTelegramLines({
   kind: 'supplier', createdAt: '2026-09-03T03:04:05.000Z', returnNumber: 'SRET-20260903-100405', party: 'ABC Trading', branch: 'Warehouse',

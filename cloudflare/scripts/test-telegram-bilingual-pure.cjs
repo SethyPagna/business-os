@@ -447,6 +447,13 @@ const returnLines = assertAllBilingual(telegram.formatReturnTelegramLines({
   refundUsd: 7.25, refundKhr: 0, by: 'Sethy',
 }), 'customer return')
 assert.ok(returnLines.includes('· Settlement/វិធីដោះស្រាយ: refund/សងប្រាក់'), 'the settlement enum is translated')
+// RET-A: a debt-lowering return's own line, and its cash part in riel.
+const debtLines = assertAllBilingual(telegram.formatReturnTelegramLines({
+  kind: 'customer', createdAt: '2026-10-06T03:04:05.000Z', returnNumber: 'RET-2', items: [{ product: 'Rice 5kg', quantity: 1 }],
+  refundUsd: 4, refundKhr: 16000, owedReductionUsd: 3, refundCurrency: 'KHR', by: 'Sethy',
+}), 'customer return lowering a debt')
+assert.ok(debtLines.includes('· Debt lowered/បន្ថយប្រាក់ជំពាក់: $3.00'), debtLines.join('\n'))
+assert.ok(debtLines.includes('· Refund/សងប្រាក់: 4,000៛'), debtLines.join('\n'))
 
 assertAllBilingual(telegram.formatReturnTelegramLines({
   kind: 'supplier', createdAt: '2026-09-03T03:04:05.000Z', returnNumber: 'SRET-1', party: 'Acme',

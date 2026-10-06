@@ -5514,7 +5514,7 @@
   "telegram_summary_products": "Products",
   "telegram_summary_products_desc": "Top 5 products, and items sold or moved out that day that are now low or out of stock",
   "telegram_summary_returns": "Returns",
-  "telegram_summary_returns_desc": "The refunds' riel equivalent and the items returned",
+  "telegram_summary_returns_desc": "Paid out in riel for refunds, and the items returned",
   "telegram_summary_expenses": "Expenses",
   "telegram_summary_expenses_desc": "Each expense by name",
   "telegram_summary_compare": "Compare",

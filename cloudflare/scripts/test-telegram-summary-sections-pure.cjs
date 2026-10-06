@@ -121,9 +121,11 @@ function seedShopA(db) {
     for (const quantity of items) insert(db, 'return_items', { return_id: id, quantity })
   }
   ret(1, { created_at: '2026-09-22 17:30:00', total_refund_usd: 7.5, total_refund_khr: 30750 }, [2])
-  ret(2, { return_scope: null, total_refund_usd: 2.5, total_refund_khr: 10250 }, [1])
+  // RET-A: return 2 was paid out in riel; return 4 in riel too, $20 of its $60
+  // lowered a debt, so only $40 of it (164,000៛) left the riel drawer.
+  ret(2, { return_scope: null, total_refund_usd: 2.5, total_refund_khr: 10250, refund_currency: 'KHR' }, [1])
   ret(3, { status: 'cancelled', total_refund_usd: 40, total_refund_khr: 164000 }, [5])
-  ret(4, { branch_id: 2, total_refund_usd: 60, total_refund_khr: 246000 }, [4])
+  ret(4, { branch_id: 2, total_refund_usd: 60, total_refund_khr: 246000, refund_currency: 'KHR', owed_reduction_usd: 20 }, [4])
   ret(5, { return_scope: 'supplier', total_refund_usd: 9, total_refund_khr: 36900 }, [7])
   ret(6, { created_at: '2026-09-22 09:00:00', total_refund_usd: 1, total_refund_khr: 4100 }, [6])
   const fee = (extra) => insert(db, 'fees', { branch_id: 1, fee_date: DAY, fee_type: 'expense', amount_usd: 0, amount_khr: 0, created_at: '2026-09-23 05:00:00', ...extra })
@@ -327,8 +329,8 @@ async function main() {
     JSON.stringify(rowsUnder(single.products, '=====Low stock=====')) === JSON.stringify(['· OUT: Rose Serum: 0 (⚠ 5)', '· LOW: Soap Bar: 1 (⚠ 5)', '· LOW: Sunscreen: 2 (⚠ 5)', '· LOW: Lip Tint: 3 (⚠ 5)']),
     rowsUnder(single.products, '=====Low stock=====').join('\n'))
 
-  check('Returns: the refunds\' riel equivalent (not riel paid out) and the items returned, from the same returns as the count',
-    JSON.stringify(rowsUnder(single.returns, '=====Returns=====')) === JSON.stringify(['· Total: 2 · $10.00', '· Riel equivalent: 41,000៛', '· Items returned: 3']),
+  check('Returns: the riel the refunds actually paid out (RET-A: not a converted equivalent) and the items returned, from the same returns as the count',
+    JSON.stringify(rowsUnder(single.returns, '=====Returns=====')) === JSON.stringify(['· Total: 2 · $10.00', '· Paid out in riel: 10,250៛', '· Items returned: 3']),
     rowsUnder(single.returns, '=====Returns=====').join('\n'))
   check('without the switch Returns is the one total row', JSON.stringify(rowsUnder(quiet.text, '=====Returns=====')) === JSON.stringify(['· Total: 2 · $10.00']))
 
@@ -361,7 +363,7 @@ async function main() {
     '=====Low stock=====', '· OUT: Rose Serum: 0 (⚠ 5)', '· LOW: Soap Bar: 1 (⚠ 5)', '· LOW: Sunscreen: 2 (⚠ 5)', '· LOW: Lip Tint: 3 (⚠ 5)',
     '=====Expenses=====', '· Actual delivery cost: $3.00', '· Other expenses: $4.00 · 20,000៛', '· Total: $7.00 · 20,000៛', '· No branch (not in total): $2.00',
     '=====Each expense=====', '· Ice: $4.00', '· Moto: 20,000៛',
-    '=====Returns=====', '· Total: 2 · $10.00', '· Riel equivalent: 41,000៛', '· Items returned: 3',
+    '=====Returns=====', '· Total: 2 · $10.00', '· Paid out in riel: 10,250៛', '· Items returned: 3',
     '=====Compare=====', '· Each day up to: 18:31', '· Yesterday: $375.00 · +10%', '· Same day last week: $450.00 · −8%',
   ])
   check('every switch on: the whole message, line for line', true)
@@ -388,12 +390,12 @@ async function main() {
   const khmer = await overview(envA)
   check('Khmer: the new section titles and labels come out in Khmer',
     ['=====បានទទួល=====', '=====ទំនិញលក់ដាច់=====', '=====ប្រៀបធៀប=====', '· ដុល្លារ: $23.00', '· រៀល: 81,000៛', '· ធនាគារ: $30.00', '· ម្សិលមិញ: $375.00 · +10%',
-      '· ចំនួនស្មើជារៀល: 41,000៛', '· ថ្ងៃនីមួយៗរហូតដល់: 18:31'].every((line) => khmer.text.split('\n').includes(line)) && !khmer.text.split('\n').includes('· រៀល: 41,000៛'),
+      '· សងប្រាក់វិញជារៀល: 10,250៛', '· ថ្ងៃនីមួយៗរហូតដល់: 18:31'].every((line) => khmer.text.split('\n').includes(line)) && !khmer.text.split('\n').includes('· រៀល: 10,250៛'),
     khmer.text)
   const packs = Object.fromEntries(['en', 'km'].map((pack) => [pack, JSON.parse(fs.readFileSync(path.join(root, '..', 'frontend', 'src', 'lang', `${pack}.json`), 'utf8'))]))
-  check('the Returns switch\'s Settings tooltip names the riel equivalent in the chat\'s own words, in both languages',
-    packs.en.telegram_summary_returns_desc.toLowerCase().includes(telegramLang.TELEGRAM_LABELS.rielEquivalent.en.toLowerCase())
-      && packs.km.telegram_summary_returns_desc.includes(telegramLang.TELEGRAM_LABELS.rielEquivalent.km),
+  check('the Returns switch\'s Settings tooltip names the riel paid out in the chat\'s own words, in both languages',
+    packs.en.telegram_summary_returns_desc.toLowerCase().includes(telegramLang.TELEGRAM_LABELS.rielPaidOut.en.toLowerCase())
+      && packs.km.telegram_summary_returns_desc.includes(telegramLang.TELEGRAM_LABELS.rielPaidOut.km),
     `${packs.en.telegram_summary_returns_desc} | ${packs.km.telegram_summary_returns_desc}`)
   check('the switches\' Settings hint names every message they extend, in both languages',
     ['/report', 'Send today'].every((name) => packs.en.telegram_summary_sections_hint.includes(name)) && packs.km.telegram_summary_sections_hint.includes('/report'),
@@ -442,7 +444,7 @@ async function main() {
     today.text)
   check('Send today\'s summary: the cashier list is read once, the day summary\'s own', JSON.stringify(buttonCalls.filter(([kind, , by]) => kind === 'grouped' && by === 'cashier').map(([, , , limit]) => limit)) === '[12]', JSON.stringify(buttonCalls))
   check('Send today\'s summary: returns and the same-time comparison for the whole shop',
-    JSON.stringify(rowsUnder(today.text, '=====Returns=====')) === JSON.stringify(['· Total: 3 · $70.00', '· Riel equivalent: 287,000៛', '· Items returned: 7'])
+    JSON.stringify(rowsUnder(today.text, '=====Returns=====')) === JSON.stringify(['· Total: 3 · $70.00', '· Paid out in riel: 174,250៛', '· Items returned: 7'])
       && rowsUnder(today.text, '=====Compare=====')[0] === '· Each day up to: 18:30',
     today.text)
   const pastDay = await telegram.telegramCommandReply(envA, `/report 23/09/2026`, Date.parse('2026-09-25T05:00:00.000Z'), 'en', undefined, allOn)

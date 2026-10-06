@@ -115,6 +115,9 @@ function makeDb(settings) {
     INSERT INTO products VALUES (1, 9);
     INSERT INTO branch_stock VALUES (1, 1, 1, 9);
     INSERT INTO return_items VALUES (1, 6, 1, 1, NULL, 'Face cream', 1, 4, 'restock');
+    -- 0234: the refund currency and the debt a return lowered (RET-A).
+    ALTER TABLE returns ADD COLUMN refund_currency TEXT;
+    ALTER TABLE returns ADD COLUMN owed_reduction_usd REAL NOT NULL DEFAULT 0;
   `)
   const put = sql.prepare('INSERT INTO settings (key, value) VALUES (?, ?)')
   for (const [key, value] of Object.entries(settings)) put.run(key, value)

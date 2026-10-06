@@ -2565,6 +2565,7 @@ app.post('/', async (c) => {
     kind: 'customer', returnNumber, receiptNumber: body.receipt_number || saleMeta?.receipt_number || null,
     party: body.customer_name || saleMeta?.customer_name || null, branch: branchName, reason,
     returnType: String(canonicalIntent.return_type), refundUsd: totalRefundUsd, refundKhr: totalRefundKhr,
+    owedReductionUsd: refundSplit.owedReductionUsd, refundCurrency,
     by: actorSnapshot(user),
   }).catch((error) => console.error('[telegram] return notification failed', error)))
   if (replacementNotice) c.executionCtx.waitUntil(sendTelegramEvent(c.env, {
