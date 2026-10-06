@@ -110,13 +110,14 @@ type Snapshot = { version: 1; operationId: string; field: ReturnField; members: 
 // names (the product and counts of return_restore_over_capacity), forwarded
 // so the restated sentence keeps them.
 export class ReturnBulkError extends Error {
-  constructor(message: string, readonly statusCode: 400 | 403 | 409 = 409, readonly code?: string, readonly params?: ReturnCapacityParams) {
+  // `extra` rides next to error/code in the route's JSON (the redirect a client must confirm).
+  constructor(message: string, readonly statusCode: 400 | 403 | 409 = 409, readonly code?: string, readonly params?: ReturnCapacityParams, readonly extra?: Record<string, unknown>) {
     super(message)
   }
 }
 
-function fail(message: string, status: 400 | 403 | 409 = 409, code?: string, params?: ReturnCapacityParams): never {
-  throw new ReturnBulkError(message, status, code, params)
+function fail(message: string, status: 400 | 403 | 409 = 409, code?: string, params?: ReturnCapacityParams, extra?: Record<string, unknown>): never {
+  throw new ReturnBulkError(message, status, code, params, extra)
 }
 
 function normalize(value: unknown, fallback = ''): string {
@@ -492,7 +493,7 @@ async function v1EntitlementGuards(db: D1Compat, members: Member[], target: 'bef
     saleStatuses: exactStatuses }
 }
 
-async function buildMembers(db: D1Compat, request: BulkRequest): Promise<{ members: Member[]; guards: Statement[] }> {
+async function buildMembers(db: D1Compat, request: BulkRequest, redirectTarget: number | null = null): Promise<{ members: Member[]; guards: Statement[] }> {
   const ids = request.items.map((item) => item.id)
   const returns = await rowsForIds<Row>(db, ids, (marks) => `SELECT r.*,COALESCE(v.revision,0) AS write_revision,${movementFingerprint('r.id')} AS movement_fingerprint FROM returns r LEFT JOIN return_write_revisions v ON v.return_id=r.id WHERE r.id IN (${marks})`)
   const matchingIds = request.items.flatMap((expected) => {
@@ -522,9 +523,10 @@ async function buildMembers(db: D1Compat, request: BulkRequest): Promise<{ membe
   const members: Member[] = []
   const guards: Statement[] = []
   // A line recorded at a branch that has since been retired (Old Shop -> LC Store) moves its stock at the active
-  // successor, in the lot that exists there now; the return keeps its own branch and label. While every branch is
-  // active nothing is redirected and nothing below changes.
-  const resolver = new BranchEffectResolver(await readBranchDirectory(db))
+  // branch the operator confirmed (X-Branch-Redirect; branch_redirect_required until then), in the lot that exists
+  // there now; the return keeps its own branch and label. While every branch is active nothing is redirected and
+  // nothing below changes.
+  const resolver = new BranchEffectResolver(await readBranchDirectory(db), redirectTarget)
   for (const expected of request.items) {
     const row = returns.find((candidate) => Number(candidate.id) === expected.id)
     if (!row) {
@@ -588,7 +590,7 @@ async function buildMembers(db: D1Compat, request: BulkRequest): Promise<{ membe
         if (scope === 'customer' && stockAction === 'none') continue
         let landing: ReturnType<BranchEffectResolver['effect']> = null
         try { landing = resolver.effect(recordedBranchId) } catch (error) {
-          if (error instanceof BranchRetiredNoSuccessorError) fail(error.message, 409, error.code)
+          if (error instanceof BranchRetiredNoSuccessorError) fail(error.message, 409, error.code, undefined, error.redirect ? { redirect: error.redirect } : undefined)
           throw error
         }
         // The branch the stock moves at; `recordedBranchId` stays the one the rows were written under.
@@ -660,8 +662,8 @@ export async function notifyReturnBulkAction(env: Env): Promise<void> {
   ])
 }
 
-export async function applyReturnBulkAction(env: Env, user: SessionUser, raw: Row): Promise<Row> {
-  return (await applyReturnBulkActionOutcome(env, user, raw)).receipt
+export async function applyReturnBulkAction(env: Env, user: SessionUser, raw: Row, redirectTarget: number | null = null): Promise<Row> {
+  return (await applyReturnBulkActionOutcome(env, user, raw, redirectTarget)).receipt
 }
 
 /**
@@ -676,7 +678,7 @@ export async function applyReturnBulkAction(env: Env, user: SessionUser, raw: Ro
  */
 export type ReturnBulkOutcome = { receipt: Row; wrote: boolean }
 
-export async function applyReturnBulkActionOutcome(env: Env, user: SessionUser, raw: Row): Promise<ReturnBulkOutcome> {
+export async function applyReturnBulkActionOutcome(env: Env, user: SessionUser, raw: Row, redirectTarget: number | null = null): Promise<ReturnBulkOutcome> {
   permission(user)
   const request = parseRequest(raw)
   const db = getDb(env)
@@ -686,7 +688,7 @@ export async function applyReturnBulkActionOutcome(env: Env, user: SessionUser, 
     if (previous.request_json !== canonical) fail('Request id was already used with different data.')
     return { receipt: JSON.parse(String(previous.receipt_json)) as Row, wrote: false }
   }
-  const { members, guards } = await buildMembers(db, request)
+  const { members, guards } = await buildMembers(db, request, redirectTarget)
   const entitlement = await v1EntitlementGuards(db, members, 'after')
   guards.push(...entitlement.guards)
   const operationId = crypto.randomUUID()

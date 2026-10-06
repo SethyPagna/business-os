@@ -201,7 +201,9 @@ async function main() {
     assert.equal(sqlite.prepare('SELECT branch_name FROM fees WHERE id=1').get().branch_name, 'LC Store', 'a different branch: stamped with that branch\'s name now')
     // History edits stay allowed, but nothing may be MOVED onto the retired branch.
     result = await update({ label: 'back to the retired branch', branch_id: 2, expectedUpdatedAt: row().updated_at })
-    assert.equal(result.status, 400, 'moving an expense onto Old Shop is a new booking, so it refuses')
+    assert.equal(result.status, 409, 'moving an expense onto Old Shop is a new booking addressed to a disabled branch, so it asks for the redirect (CUTOVER-LR)')
+    assert.equal(result.body.code, 'branch_redirect_required')
+    assert.equal(result.body.redirect.successor_branch_id, 3)
     assert.equal(sqlite.prepare('SELECT branch_id FROM fees WHERE id=1').get().branch_id, 3, 'and changes nothing')
   })
   await check('v1 malformed supplied money and unknown versions produce no writes', async () => {

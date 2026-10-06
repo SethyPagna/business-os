@@ -333,10 +333,13 @@ async function req(method, url, body) {
   return reqExact(method, url, requestBody)
 }
 
+// CUTOVER-LR: the X-Branch-Redirect header every request carries (the branch the operator confirmed for a change addressed
+// to a retired branch). LC Store is id 1 here; null sends none.
+let redirectTo = 1
 async function reqExact(method, url, body) {
   const res = await app.request(url, {
     method,
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...(redirectTo == null ? {} : { 'X-Branch-Redirect': String(redirectTo) }) },
     body: body != null ? JSON.stringify(body) : undefined,
   }, fakeEnv, fakeExecutionCtx)
   const json = await res.json().catch(() => null)
@@ -457,6 +460,26 @@ async function successorChecks() {
     assert.strictEqual(stockOf(1, 1), 10)
   })
 
+  await check('CUTOVER-LR: a return of an old Shop sale is refused until the redirect is confirmed, and an invalid target is refused, with nothing written', async () => {
+    seedWorld('after'); seedLots('after', 1)
+    const before = JSON.stringify([rawDb.prepare('SELECT * FROM branch_stock').all(), rawDb.prepare('SELECT * FROM branch_batch_stock').all()])
+    try {
+      redirectTo = null
+      const asked = await req('POST', '/', returnBody({ client_request_id: 'ask-1' }))
+      assert.strictEqual(asked.status, 409, JSON.stringify(asked.json))
+      assert.strictEqual(asked.json.code, 'branch_redirect_required')
+      assert.deepStrictEqual(asked.json.redirect, { addressed_branch_id: 2, addressed_branch_name: 'Old Shop', successor_branch_id: 1, successor_branch_name: 'LC Store', targets: [{ id: 1, name: 'LC Store' }], requested_target_id: null })
+      redirectTo = 2
+      const invalid = await req('POST', '/', returnBody({ client_request_id: 'ask-1' }))
+      assert.strictEqual(invalid.json.code, 'branch_redirect_target_invalid', 'the disabled branch cannot be its own redirect')
+      redirectTo = null
+      const refundOnly = await req('POST', '/', returnBody({ client_request_id: 'ask-2', items: [{ sale_item_id: 1, product_id: 1, quantity: 2, stock_action: 'none', applied_price_usd: 10 }] }))
+      assert.strictEqual(refundOnly.json.code, 'branch_redirect_required', 'a refund-only return still asks: its cash leaves an active drawer')
+    } finally { redirectTo = 1 }
+    assert.strictEqual(rawDb.prepare('SELECT COUNT(*) n FROM returns').get().n, 0, 'no return is recorded')
+    assert.strictEqual(JSON.stringify([rawDb.prepare('SELECT * FROM branch_stock').all(), rawDb.prepare('SELECT * FROM branch_batch_stock').all()]), before, 'and no stock moves')
+  })
+
   await check('return of an old Shop sale lands in LC Store, same lot; the sale keeps Shop and the return records the real target', async () => {
     const { response } = await runWith(returnsRoute.default, returnBody(), 'after', 1)
     assert.strictEqual(response.status, 200, JSON.stringify(response.json))
@@ -520,10 +543,10 @@ async function successorChecks() {
     assert.strictEqual(branchStockOf(2), 0)
   })
 
-  await check('a retired branch with NO usable successor refuses 409 before any write', async () => {
+  await check('a retired branch with NO active branch to take the return refuses 409 before any write, even with a target', async () => {
     for (const mutate of [
-      (db) => db.prepare('UPDATE branches SET successor_branch_id = NULL WHERE id = 2').run(),
       (db) => db.prepare('UPDATE branches SET is_active = 0 WHERE id = 1').run(),
+      (db) => db.prepare('UPDATE branches SET successor_branch_id = NULL, is_active = 0 WHERE id IN (1, 2)').run(),
     ]) {
       seedWorld('after'); seedLots('after', 1)
       // Triggers forbid some of these states; drop them for the fixture only.
@@ -540,14 +563,22 @@ async function successorChecks() {
     }
   })
 
-  await check('a return that moves no stock still records against a retired branch with no successor', async () => {
+  await check('a retired branch with no successor still asks (no default) and takes the active branch the operator chose', async () => {
     seedWorld('after'); seedLots('after', 1)
     const triggers = rawDb.prepare("SELECT name, sql FROM sqlite_master WHERE type = 'trigger' AND tbl_name = 'branches'").all()
     for (const trigger of triggers) rawDb.exec(`DROP TRIGGER "${trigger.name}"`)
     rawDb.prepare('UPDATE branches SET successor_branch_id = NULL WHERE id = 2').run()
     for (const trigger of triggers) rawDb.exec(trigger.sql)
+    try {
+      redirectTo = null
+      const asked = await req('POST', '/', returnBody({ client_request_id: 'money-only-1', items: [{ sale_item_id: 1, product_id: 1, quantity: 2, stock_action: 'none', applied_price_usd: 10 }] }))
+      assert.strictEqual(asked.json.code, 'branch_redirect_required')
+      assert.strictEqual(asked.json.redirect.successor_branch_id, null)
+      assert.deepStrictEqual(asked.json.redirect.targets, [{ id: 1, name: 'LC Store' }])
+    } finally { redirectTo = 1 }
     const { status, json } = await req('POST', '/', returnBody({ client_request_id: 'money-only-1', items: [{ sale_item_id: 1, product_id: 1, quantity: 2, stock_action: 'none', applied_price_usd: 10 }] }))
     assert.strictEqual(status, 200, JSON.stringify(json))
+    assert.strictEqual(rawDb.prepare('SELECT branch_id FROM returns WHERE id = ?').get([json.id]).branch_id, 1, 'the refund is recorded at the chosen active branch')
     assert.strictEqual(stockOf(1, 2), 0)
     assert.strictEqual(stockOf(1, 1), 10)
   })
@@ -627,7 +658,7 @@ async function successorChecks() {
     assert.strictEqual(holds(pair), 0, 'the addressed branch was reactivated: nothing may be redirected away from it')
     seedWorld('after')
     withoutTriggers(() => rawDb.prepare('UPDATE branches SET successor_branch_id = NULL WHERE id = 2').run())
-    assert.strictEqual(holds(pair), 0, 'the addressed branch no longer points at the landing branch')
+    assert.strictEqual(holds(pair), 1, 'CUTOVER-LR: the landing branch is the one the operator confirmed, so the successor pointer is not required')
     seedWorld('after')
     withoutTriggers(() => rawDb.prepare('UPDATE branches SET is_active = 0 WHERE id = 1').run())
     assert.strictEqual(holds(pair), 0, 'the landing branch is no longer active')
@@ -763,14 +794,24 @@ async function residualChecks() {
     assert.strictEqual(JSON.stringify(lotsSnapshot()), before, 'and writes nothing')
   })
 
-  await check('EDIT with no usable successor refuses 409 with nothing written', async () => {
+  await check('EDIT asks before it moves anything, refuses an invalid target, and with no active branch at all refuses 409, all with nothing written', async () => {
     const id = await preConsolidationReturn(returnsRoute.default)
     consolidate()
+    const before = JSON.stringify([lotsSnapshot(), movementRows()])
+    try {
+      redirectTo = null
+      const asked = await reqExact('PATCH', `/${id}`, editBody(id))
+      assert.strictEqual(asked.status, 409, JSON.stringify(asked.json))
+      assert.strictEqual(asked.json.code, 'branch_redirect_required')
+      assert.strictEqual(asked.json.redirect.successor_branch_name, 'LC Store')
+      redirectTo = 2
+      assert.strictEqual((await reqExact('PATCH', `/${id}`, editBody(id))).json.code, 'branch_redirect_target_invalid')
+    } finally { redirectTo = 1 }
+    assert.strictEqual(JSON.stringify([lotsSnapshot(), movementRows()]), before)
     const triggers = rawDb.prepare("SELECT name, sql FROM sqlite_master WHERE type = 'trigger' AND tbl_name = 'branches'").all()
     for (const trigger of triggers) rawDb.exec(`DROP TRIGGER "${trigger.name}"`)
-    rawDb.prepare('UPDATE branches SET successor_branch_id = NULL WHERE id = 2').run()
+    rawDb.prepare('UPDATE branches SET successor_branch_id = NULL, is_active = 0 WHERE id IN (1, 2)').run()
     for (const trigger of triggers) rawDb.exec(trigger.sql)
-    const before = JSON.stringify([lotsSnapshot(), movementRows()])
     const refused = await reqExact('PATCH', `/${id}`, editBody(id))
     assert.strictEqual(refused.status, 409, JSON.stringify(refused.json))
     assert.strictEqual(refused.json.code, 'branch_retired_no_successor')
@@ -804,6 +845,12 @@ async function residualChecks() {
   await check('SUPPLIER return addressed to Old Shop takes its units out of LC Store and records both branches', async () => {
     seedWorld('before'); seedLots('before', 3)
     consolidate()
+    try {
+      redirectTo = null
+      const asked = await reqExact('POST', '/supplier', supplierBody())
+      assert.strictEqual(asked.status, 409, JSON.stringify(asked.json))
+      assert.strictEqual(asked.json.code, 'branch_redirect_required', 'a supplier return addressed to Old Shop asks first')
+    } finally { redirectTo = 1 }
     const made = await reqExact('POST', '/supplier', supplierBody())
     assert.strictEqual(made.status, 200, JSON.stringify(made.json))
     assert.deepStrictEqual(lotsSnapshot(), { lot1AtStore: 10, lot3AtStore: 0, lot1AtOld: 0, lot3AtOld: 0, store: 10, old: 0 }, 'the 4 of the 14 units left LC Store lot 1; Old Shop stays empty and is never driven negative')
@@ -827,7 +874,7 @@ async function residualChecks() {
     consolidate()
     const triggers = rawDb.prepare("SELECT name, sql FROM sqlite_master WHERE type = 'trigger' AND tbl_name = 'branches'").all()
     for (const trigger of triggers) rawDb.exec(`DROP TRIGGER "${trigger.name}"`)
-    rawDb.prepare('UPDATE branches SET successor_branch_id = NULL WHERE id = 2').run()
+    rawDb.prepare('UPDATE branches SET successor_branch_id = NULL, is_active = 0 WHERE id IN (1, 2)').run()
     for (const trigger of triggers) rawDb.exec(trigger.sql)
     const before = JSON.stringify([lotsSnapshot(), movementRows()])
     const refused = await reqExact('POST', '/supplier', supplierBody({ client_request_id: 'supplier-orphan' }))

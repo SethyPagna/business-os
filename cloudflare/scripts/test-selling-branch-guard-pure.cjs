@@ -203,9 +203,11 @@ runTest('sale writers require one real active Shop header and identical line bra
   assert.match(salesSource, /addedBranchRows\.length !== addedBranchIds\.length/)
   assert.match(salesSource, /Number\(line\.branch_id\) !== saleHeaderBranchId/)
   assert.match(salesSource, /branchId !== saleHeaderBranchId/)
-  // An amendment header must be active, or retired with an ACTIVE selling successor (never merely inactive).
+  // An amendment header must be active, or retired with the stock effect landing on the active selling branch the
+  // operator confirmed (CUTOVER-LR: X-Branch-Redirect, never a silent successor).
   assert.match(salesSource, /Number\(amendmentBranch\.is_active \?\? 1\) !== 1/)
-  assert.match(salesSource, /resolveSellingSuccessor\(branchResolver\.directory, cancellationBranchId\)/)
+  assert.match(salesSource, /branchResolver\.effect\(cancellationBranchId, \{ sells: true \}\)/)
+  assert.doesNotMatch(salesSource, /resolveSellingSuccessor\(/, 'no sale writer redirects to the successor without the confirmed branch')
   assert.match(salesSource, /firstUnsellableBranch\(\[amendmentBranch\]\)/)
   assert.match(salesSource, /branchCanSell\(cancellationBranch\)/, 'automatic cancellation expenses inherit a verified Shop sale link')
   assert.match(returnsSource, /replacementInputs\.some\(\(line\) => Number\(line\.branch_id \|\| branchId\) !== branchId\)/)

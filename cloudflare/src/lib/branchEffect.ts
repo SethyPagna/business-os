@@ -11,22 +11,92 @@
 //
 // While every branch is active this is the identity function and callers add no
 // statement, parameter or column (the golden statement lists stay byte-equal).
+//
+// The redirect is never silent (owner ruling 6 Oct 2026, CUTOVER-LR): a write
+// that reaches a retired branch is refused with `branch_redirect_required`
+// (409, carrying the successor and the active branches it may go to) until the
+// request names the branch the operator confirmed, in the X-Branch-Redirect
+// header. Only then does the effect land there, with the retired branch kept as
+// the "addressed to" label.
 import type { D1Compat } from './db'
-import { branchRole, resolveActiveSuccessor } from './branchRoles'
+import { branchRole } from './branchRoles'
 import { selectInChunks } from './sqlBinding'
 
 export const BRANCH_RETIRED_NO_SUCCESSOR_CODE = 'branch_retired_no_successor'
 // The English of the packs' branch_retired_no_successor key (the key is named after the code; pinned by
 // scripts/test-cutover-li-pack-parity-pure.cjs). Role-neutral: no branch name.
 export const BRANCH_RETIRED_NO_SUCCESSOR_ERROR = 'This record belongs to an inactive branch, and no active branch has taken its place. Nothing was changed.'
+export const BRANCH_REDIRECT_REQUIRED_CODE = 'branch_redirect_required'
+export const BRANCH_REDIRECT_REQUIRED_ERROR = 'This change is addressed to a disabled branch. Choose the active branch it should go to. Nothing was changed.'
+export const BRANCH_REDIRECT_TARGET_INVALID_CODE = 'branch_redirect_target_invalid'
+export const BRANCH_REDIRECT_TARGET_INVALID_ERROR = 'The branch chosen for the redirect is not active or cannot take this change. Choose another branch. Nothing was changed.'
+// The request header carrying the branch the operator confirmed. A header, not a body field, so one client retry
+// covers every writer (JSON, multipart, replay) without touching its payload, idempotency key or dedupe key.
+export const BRANCH_REDIRECT_HEADER = 'x-branch-redirect'
+
+export type BranchRedirectOption = { id: number; name: string | null }
+// What the client needs to ask the operator: the disabled branch, its successor (the default choice) and every
+// active branch the change may go to instead.
+export type BranchRedirectDetail = {
+  addressed_branch_id: number
+  addressed_branch_name: string | null
+  successor_branch_id: number | null
+  successor_branch_name: string | null
+  targets: BranchRedirectOption[]
+  requested_target_id: number | null
+}
 
 export class BranchRetiredNoSuccessorError extends Error {
-  readonly code = BRANCH_RETIRED_NO_SUCCESSOR_CODE
+  readonly code: string = BRANCH_RETIRED_NO_SUCCESSOR_CODE
   readonly statusCode = 409
-  constructor() {
-    super(BRANCH_RETIRED_NO_SUCCESSOR_ERROR)
+  readonly redirect: BranchRedirectDetail | null
+  constructor(message = BRANCH_RETIRED_NO_SUCCESSOR_ERROR, redirect: BranchRedirectDetail | null = null) {
+    super(message)
     this.name = 'BranchRetiredNoSuccessorError'
+    this.redirect = redirect
   }
+  /** The 409 body: the message, the code and (for a redirect) what the client shows in its picker. */
+  get body(): { error: string; code: string; redirect?: BranchRedirectDetail } {
+    return this.redirect ? { error: this.message, code: this.code, redirect: this.redirect } : { error: this.message, code: this.code }
+  }
+}
+
+/** A write reached a retired branch and the request did not name where to redirect it. Nothing is written. */
+export class BranchRedirectRequiredError extends BranchRetiredNoSuccessorError {
+  readonly code: string = BRANCH_REDIRECT_REQUIRED_CODE
+  constructor(redirect: BranchRedirectDetail) {
+    super(BRANCH_REDIRECT_REQUIRED_ERROR, redirect)
+    this.name = 'BranchRedirectRequiredError'
+  }
+}
+
+/** The named redirect branch is not an active branch that can take this change. Nothing is written. */
+export class BranchRedirectTargetInvalidError extends BranchRetiredNoSuccessorError {
+  readonly code: string = BRANCH_REDIRECT_TARGET_INVALID_CODE
+  constructor(redirect: BranchRedirectDetail) {
+    super(BRANCH_REDIRECT_TARGET_INVALID_ERROR, redirect)
+    this.name = 'BranchRedirectTargetInvalidError'
+  }
+}
+
+/** The redirect branch a request names (X-Branch-Redirect), or null. Anything but a positive integer is null. */
+export function branchRedirectTarget(c: { req: { header(name: string): string | undefined } }): number | null {
+  const raw = String(c.req.header(BRANCH_REDIRECT_HEADER) ?? '').trim()
+  if (!/^\d{1,15}$/.test(raw)) return null
+  const id = Number(raw)
+  return Number.isSafeInteger(id) && id > 0 ? id : null
+}
+
+/** True only for "a retired branch and no active branch could take the change" (not for a redirect still to confirm). */
+export function branchHasNoActiveTarget(error: unknown): boolean {
+  return error instanceof BranchRetiredNoSuccessorError && error.code === BRANCH_RETIRED_NO_SUCCESSOR_CODE
+}
+
+/** The 409 body for any branch-effect refusal (redirect required, invalid target, no successor, damaged stock). */
+export function branchEffectRefusal(error: unknown): { error: string; code: string; redirect?: BranchRedirectDetail } | null {
+  if (error instanceof BranchRetiredNoSuccessorError) return error.body
+  if (error instanceof BranchRetiredDamagedError) return { error: error.message, code: error.code }
+  return null
 }
 
 export type BranchEffectRow = {
@@ -54,16 +124,47 @@ const unchanged = (id: number, name: string | null): BranchEffect => ({
   addressedBranchId: id, addressedName: name, effectBranchId: id, effectName: name, redirected: false,
 })
 
+// A branch a redirect may land on: active, never itself retired into another (an active row carries no successor),
+// and able to carry a sale line when the change is one.
+function redirectTargetOk(row: BranchEffectRow | undefined, sells: boolean): row is BranchEffectRow {
+  return !!row && Number(row.is_active ?? 1) === 1 && row.successor_branch_id == null && (!sells || branchRole(row) === 'shop')
+}
+
+/**
+ * What the client shows when a write reaches a retired branch: the branch, its successor when that is a valid
+ * target (the default choice), and every valid target, the successor first. Null when no active branch can take it.
+ */
+export function branchRedirectDetail(rows: readonly BranchEffectRow[], addressedBranchId: number, options: { sells?: boolean; requestedTargetId?: number | null } = {}): BranchRedirectDetail | null {
+  const sells = !!options.sells
+  const addressed = rows.find((row) => Number(row.id) === addressedBranchId)
+  const targets = rows.filter((row) => redirectTargetOk(row, sells))
+  if (!targets.length) return null
+  const successorId = addressed?.successor_branch_id == null ? null : Number(addressed.successor_branch_id)
+  const successor = successorId == null ? undefined : targets.find((row) => Number(row.id) === successorId)
+  const ordered = [...targets].sort((a, b) => (Number(b.id) === successorId ? 1 : 0) - (Number(a.id) === successorId ? 1 : 0)
+    || String(a.name ?? '').localeCompare(String(b.name ?? '')) || Number(a.id) - Number(b.id))
+  return {
+    addressed_branch_id: addressedBranchId,
+    addressed_branch_name: addressed?.name ?? null,
+    successor_branch_id: successor ? Number(successor.id) : null,
+    successor_branch_name: successor ? successor.name ?? null : null,
+    targets: ordered.map((row) => ({ id: Number(row.id), name: row.name ?? null })),
+    requested_target_id: options.requestedTargetId ?? null,
+  }
+}
+
 /**
  * The branch a stock effect recorded against `recordedBranchId` must land on.
- * An active branch answers itself. A retired branch answers its active
- * successor; one that has none (a missing row, a cycle, an inactive or
- * ambiguous successor) throws BranchRetiredNoSuccessorError so the caller
- * refuses before writing anything. `sells` also requires the landing branch to
- * be able to carry a sale line (a replacement hand-out is a sale): a retired
- * branch whose successor cannot sell refuses.
+ * An active branch answers itself, and `target` is never read for it (so while
+ * every branch is active nothing changes). A retired branch lands on `target`,
+ * the branch the operator confirmed: with no target it throws
+ * BranchRedirectRequiredError (carrying the successor and the valid targets),
+ * with a target that is not an active branch able to take the change it throws
+ * BranchRedirectTargetInvalidError, and when no active branch could take it at
+ * all it throws BranchRetiredNoSuccessorError. `sells` requires the landing
+ * branch to carry a sale line (a replacement hand-out is a sale).
  */
-export function resolveBranchEffect(rows: readonly BranchEffectRow[], recordedBranchId: unknown, options: { sells?: boolean } = {}): BranchEffect {
+export function resolveBranchEffect(rows: readonly BranchEffectRow[], recordedBranchId: unknown, options: { sells?: boolean; target?: number | null } = {}): BranchEffect {
   const id = Number(recordedBranchId)
   const recorded = Number.isSafeInteger(id) && id > 0 ? rows.find((row) => Number(row.id) === id) : undefined
   if (!recorded) return unchanged(id, null)
@@ -71,10 +172,13 @@ export function resolveBranchEffect(rows: readonly BranchEffectRow[], recordedBr
   // An active branch is its own effect branch. Whether it may carry a sale line is the caller's existing
   // refusal (WAREHOUSE_NOT_SELLABLE); only a RETIRED branch is redirected here.
   if (Number(recorded.is_active ?? 1) === 1) return unchanged(id, name)
-  const resolved = resolveActiveSuccessor(rows, id)
-  const landing = resolved ? rows.find((row) => Number(row.id) === resolved.effectBranchId) : undefined
-  if (!resolved || !landing || (options.sells && branchRole(landing) !== 'shop')) throw new BranchRetiredNoSuccessorError()
-  return { addressedBranchId: id, addressedName: name, effectBranchId: resolved.effectBranchId, effectName: landing.name ?? null, redirected: resolved.viaSuccessor }
+  const target = options.target ?? null
+  const detail = branchRedirectDetail(rows, id, { sells: options.sells, requestedTargetId: target })
+  if (!detail) throw new BranchRetiredNoSuccessorError()
+  if (target == null) throw new BranchRedirectRequiredError(detail)
+  const landing = rows.find((row) => Number(row.id) === target)
+  if (!redirectTargetOk(landing, !!options.sells)) throw new BranchRedirectTargetInvalidError(detail)
+  return { addressedBranchId: id, addressedName: name, effectBranchId: Number(landing.id), effectName: landing.name ?? null, redirected: true }
 }
 
 export type BranchEffectGuard = { addressed: number; effect: number; sells: 0 | 1 }
@@ -92,9 +196,9 @@ export function branchEffectGuards(effects: readonly BranchEffect[], sells: bool
 
 /**
  * The in-batch twin of resolveBranchEffect for every redirected pair: the
- * landing branch is still active with no successor of its own (and still sells
- * when the pair says so), and the addressed branch is still retired and still
- * points at it. The chain cannot change between planning and the commit.
+ * confirmed landing branch is still active with no successor of its own (and
+ * still sells when the pair says so), and the addressed branch is still
+ * retired. Neither can change between planning and the commit.
  * `json` is the SQL expression holding the JSON array of BranchEffectGuard.
  */
 export function branchEffectGuardPredicate(json: string): string {
@@ -102,8 +206,7 @@ export function branchEffectGuardPredicate(json: string): string {
     EXISTS(SELECT 1 FROM branches e WHERE e.id=json_extract(j.value,'$.effect')
       AND COALESCE(e.is_active,1)=1 AND e.successor_branch_id IS NULL
       AND (json_extract(j.value,'$.sells')=0 OR lower(trim(COALESCE(e.role,e.name)))='shop'))
-    AND EXISTS(SELECT 1 FROM branches a WHERE a.id=json_extract(j.value,'$.addressed')
-      AND a.is_active=0 AND a.successor_branch_id=json_extract(j.value,'$.effect'))))`
+    AND EXISTS(SELECT 1 FROM branches a WHERE a.id=json_extract(j.value,'$.addressed') AND a.is_active=0)))`
 }
 
 // The business day (UTC+7) a lot was received: a plain date as stored, a timestamp without a zone read as UTC, a slash date
@@ -201,15 +304,16 @@ export async function readBranchDirectory(db: D1Compat): Promise<BranchEffectRow
  */
 export class BranchEffectResolver {
   private readonly seen = new Map<string, BranchEffect>()
-  constructor(readonly directory: readonly BranchEffectRow[]) {}
+  // `target` is the redirect branch the request named (branchRedirectTarget); only a retired branch ever reads it.
+  constructor(readonly directory: readonly BranchEffectRow[], readonly target: number | null = null) {}
 
-  /** The effect of a recorded branch id (null in, null out). Throws BranchRetiredNoSuccessorError when none. */
+  /** The effect of a recorded branch id (null in, null out). Throws a BranchRetiredNoSuccessorError (or subclass). */
   effect(recordedBranchId: unknown, options: { sells?: boolean } = {}): BranchEffect | null {
     const id = Number(recordedBranchId)
     if (!Number.isSafeInteger(id) || id <= 0) return null
     const key = `${id}:${options.sells ? 1 : 0}`
     let found = this.seen.get(key)
-    if (!found) { found = resolveBranchEffect(this.directory, id, options); this.seen.set(key, found) }
+    if (!found) { found = resolveBranchEffect(this.directory, id, { ...options, target: this.target }); this.seen.set(key, found) }
     return found
   }
 
@@ -272,7 +376,7 @@ export type RedirectableStockItem = {
 
 /**
  * Points the stock-moving lines of a sale at the branch their effect lands on, in memory, before a planner
- * reads them: a line recorded at a retired branch (Old Shop) gets the active successor as its branch, its lots
+ * reads them: a line recorded at a retired branch (Old Shop) gets the active branch the operator confirmed, its lots
  * become the lots that exist there now (a lot the consolidation folded is its survivor), and `effect` carries
  * the label the movement rows must name. Lines whose branch is active are not touched, so while every branch is
  * active this changes nothing at all. The sale itself and its stored lines keep their own branch.
@@ -317,9 +421,6 @@ export async function redirectStockItems<T extends RedirectableStockItem>(
     item.effect = { branchName: effect.effectName, addressedName: label ?? null }
   }
 }
-
-export const BRANCH_RETIRED_ADDITION_CODE = 'branch_retired_sale_addition'
-export const BRANCH_RETIRED_ADDITION_ERROR = 'This sale was made at a branch that has since been retired, so items cannot be added to it. Record a new sale instead. Nothing was changed.'
 
 /**
  * One line of a sale at a retired branch, plus its allocation rows: the same redirect as `redirectStockItems`

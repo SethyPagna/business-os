@@ -31,7 +31,7 @@ import { loadReturnRecords } from '../lib/returnRecords'
 import { WAREHOUSE_NOT_SELLABLE_ERROR } from '../lib/branchRoleGuards'
 import { branchCanSell } from '../lib/branchRoles'
 import {
-  BRANCH_EFFECT_COLUMNS_SQL, BranchEffectResolver, BranchRetiredNoSuccessorError, branchEffectGuardPredicate, branchEffectGuards,
+  BRANCH_EFFECT_COLUMNS_SQL, BranchEffectResolver, BranchRetiredNoSuccessorError, branchEffectGuardPredicate, branchEffectGuards, branchEffectRefusal, branchHasNoActiveTarget, branchRedirectTarget,
   effectGuardStatement, foldedLotSurvivors, readBranchDirectory, resolveBranchEffect, type BranchEffect, type BranchEffectRow,
 } from '../lib/branchEffect'
 import type { Env } from '../index'
@@ -1216,7 +1216,7 @@ app.post('/bulk', async (c) => {
     // slow original, or that original itself -- gets the stored receipt with
     // wrote=false, so one write is announced once (R-telegram E1). A read made
     // here before the write could not tell; see applyReturnBulkActionOutcome.
-    const { receipt: result, wrote } = await applyReturnBulkActionOutcome(c.env, user, body)
+    const { receipt: result, wrote } = await applyReturnBulkActionOutcome(c.env, user, body, branchRedirectTarget(c))
     c.executionCtx.waitUntil(notifyReturnBulkAction(c.env))
     // Telegram: a return cancelled or restored (owner, 27 Sep 2026). Only the
     // status field, only the rows that actually moved.
@@ -1229,7 +1229,7 @@ app.post('/bulk', async (c) => {
   } catch (error) {
     // A coded refusal's params (return_restore_over_capacity's product and
     // counts) go with it, so the till's restated sentence keeps them.
-    if (error instanceof ReturnBulkError) return c.json({ error: error.message, code: error.code || (error.statusCode === 409 ? 'write_conflict' : 'invalid_bulk_action'), ...(error.params ? { params: error.params } : {}) }, error.statusCode)
+    if (error instanceof ReturnBulkError) return c.json({ error: error.message, code: error.code || (error.statusCode === 409 ? 'write_conflict' : 'invalid_bulk_action'), ...(error.params ? { params: error.params } : {}), ...(error.extra || {}) }, error.statusCode)
     throw error
   }
 })
@@ -1525,27 +1525,31 @@ app.post('/', async (c) => {
   }
   const beforeSaleStatus = saleMeta ? String(saleMeta.sale_status || 'completed') : null
 
-  // Where the stock of this return lands. A sale recorded at a branch that has
-  // since been retired (Old Shop, successor LC Store) keeps its branch id and its
-  // label, but the units go back to the ACTIVE successor and every new row says
-  // so; while every branch is active this is the identity (nothing below changes).
+  // Where the stock (and the refund) of this return lands. A sale recorded at a
+  // branch that has since been retired (Old Shop) keeps its branch id and its
+  // label, but the units and the refund go to the ACTIVE branch the operator
+  // confirmed (X-Branch-Redirect; refused with branch_redirect_required until
+  // then) and every new row says so; while every branch is active this is the
+  // identity (nothing below changes).
   const recordedBranchId = Number(body.branch_id || saleMeta?.branch_id || replacementInputsRaw[0]?.branch_id) || null
   const branchDirectory = await db.prepare(`SELECT ${BRANCH_EFFECT_COLUMNS_SQL} FROM branches`).all<BranchEffectRow>()
+  const redirectTarget = branchRedirectTarget(c)
   let headerEffect: BranchEffect | null = null
   const itemEffects: Array<BranchEffect | null> = []
   let replacementInputs = replacementInputsRaw
   const movesStock = replacementInputsRaw.length > 0 || returnItems.some((item) => normalizeStockAction(item) !== 'none')
   try {
     try {
-      headerEffect = recordedBranchId ? resolveBranchEffect(branchDirectory, recordedBranchId, { sells: replacementInputsRaw.length > 0 }) : null
+      headerEffect = recordedBranchId ? resolveBranchEffect(branchDirectory, recordedBranchId, { sells: replacementInputsRaw.length > 0, target: redirectTarget }) : null
     } catch (error) {
-      // A return that moves no stock has nothing to strand on a retired branch with no successor.
-      if (!(error instanceof BranchRetiredNoSuccessorError) || movesStock) throw error
+      // A return that moves no stock has nothing to strand on a retired branch no active branch could take. One that
+      // pays a refund still asks where the cash leaves (branch_redirect_required) while an active branch exists.
+      if (!branchHasNoActiveTarget(error) || movesStock) throw error
     }
     for (const item of returnItems) {
       const recordedItemBranch = Number(item.branch_id || recordedBranchId) || null
       try {
-        itemEffects.push(recordedItemBranch ? resolveBranchEffect(branchDirectory, recordedItemBranch) : null)
+        itemEffects.push(recordedItemBranch ? resolveBranchEffect(branchDirectory, recordedItemBranch, { target: redirectTarget }) : null)
       } catch (error) {
         // A line that moves no stock (stock_action none) has nothing to strand, so it never blocks.
         if (!(error instanceof BranchRetiredNoSuccessorError) || normalizeStockAction(item) !== 'none') throw error
@@ -1554,12 +1558,13 @@ app.post('/', async (c) => {
     }
     if (replacementInputsRaw.length) {
       replacementInputs = replacementInputsRaw.map((line) => {
-        const effect = resolveBranchEffect(branchDirectory, line.branch_id || recordedBranchId, { sells: true })
+        const effect = resolveBranchEffect(branchDirectory, line.branch_id || recordedBranchId, { sells: true, target: redirectTarget })
         return effect.redirected ? { ...line, branch_id: effect.effectBranchId } : line
       })
     }
   } catch (error) {
-    if (error instanceof BranchRetiredNoSuccessorError) return c.json({ error: error.message, code: error.code }, 409)
+    const refusal = branchEffectRefusal(error)
+    if (refusal) return c.json(refusal, 409)
     throw error
   }
   returnItems = returnItems.map((item, index) => itemEffects[index]?.redirected ? { ...item, branch_id: itemEffects[index]!.effectBranchId } : item)
@@ -2430,10 +2435,10 @@ app.post('/supplier', async (c) => {
     : 'refund'
 
   // A supplier return addressed to a branch that has since been retired (Old Shop -> LC Store, a till or a
-  // client that still holds the old id) takes its units out of the ACTIVE successor and records both the branch
-  // the stock really left and the label it was addressed to. While every branch is active nothing is redirected
-  // and nothing below changes.
-  const supplierResolver = new BranchEffectResolver(await readBranchDirectory(db))
+  // client that still holds the old id) takes its units out of the ACTIVE branch the operator confirmed
+  // (X-Branch-Redirect; branch_redirect_required until then) and records both the branch the stock really left
+  // and the label it was addressed to. While every branch is active nothing is redirected and nothing changes.
+  const supplierResolver = new BranchEffectResolver(await readBranchDirectory(db), branchRedirectTarget(c))
   const supplierLandingEffects = new Map<number, BranchEffect>()
   let supplierAddressedName: string | null = null
   try {
@@ -2447,7 +2452,8 @@ app.post('/supplier', async (c) => {
       return { ...item, branch_id: effect.effectBranchId }
     })
   } catch (error) {
-    if (error instanceof BranchRetiredNoSuccessorError) return c.json({ error: error.message, code: error.code }, 409)
+    const refusal = branchEffectRefusal(error)
+    if (refusal) return c.json(refusal, 409)
     throw error
   }
 
@@ -2881,11 +2887,13 @@ app.patch('/:id', async (c) => {
   }
 
   // A return recorded at a branch that has since been retired (Old Shop -> LC Store) is edited at the ACTIVE
-  // successor: its previous restock is reversed there, in the lot that exists there now, and the edited lines
-  // are restocked there. The return keeps its own branch and label; its rewritten lines and the movement rows
-  // name where the stock really moved. While every branch is active nothing is redirected and nothing changes.
-  const editResolver = new BranchEffectResolver(await readBranchDirectory(db))
+  // branch the operator confirmed (X-Branch-Redirect; branch_redirect_required until then): its previous restock
+  // is reversed there, in the lot that exists there now, and the edited lines are restocked there. The return
+  // keeps its own branch and label; its rewritten lines and the movement rows name where the stock really moved.
+  // While every branch is active nothing is redirected and nothing changes.
+  const editResolver = new BranchEffectResolver(await readBranchDirectory(db), branchRedirectTarget(c))
   const existingLineEffects: Array<BranchEffect | null> = []
+  const editEffectByBranch = new Map<number, BranchEffect>()
   try {
     for (const item of existingItems) {
       existingLineEffects.push(item.return_to_stock && item.product_id && item.branch_id ? editResolver.effect(item.branch_id) : null)
@@ -2895,18 +2903,18 @@ app.patch('/:id', async (c) => {
       const effect = recorded ? editResolver.effect(recorded) : null
       return effect?.redirected ? { ...item, branch_id: effect.effectBranchId } : item
     })
+    for (const effect of existingLineEffects) if (effect?.redirected) editEffectByBranch.set(effect.effectBranchId, effect)
+    for (const recorded of [existing.branch_id, ...existingItems.map((item) => item.branch_id)]) {
+      const effect = recorded ? editResolver.effect(recorded) : null
+      if (effect?.redirected) editEffectByBranch.set(effect.effectBranchId, effect)
+    }
   } catch (error) {
-    if (error instanceof BranchRetiredNoSuccessorError) return c.json({ error: error.message, code: error.code }, 409)
+    const refusal = branchEffectRefusal(error)
+    if (refusal) return c.json(refusal, 409)
     throw error
   }
   const editAddressedLabel = (effect: BranchEffect): string | null =>
     (Number(existing.branch_id) === effect.addressedBranchId && existing.branch_name) || effect.addressedName
-  const editEffectByBranch = new Map<number, BranchEffect>()
-  for (const effect of existingLineEffects) if (effect?.redirected) editEffectByBranch.set(effect.effectBranchId, effect)
-  for (const recorded of [existing.branch_id, ...existingItems.map((item) => item.branch_id)]) {
-    const effect = recorded ? editResolver.effect(recorded) : null
-    if (effect?.redirected) editEffectByBranch.set(effect.effectBranchId, effect)
-  }
   // newItems already carry the landing branch id; the label is that of the branch the return was made under.
   const editLabelFor = (landingBranchId: number | null): { branchName: string | null; addressedName: string | null } | null => {
     const effect = landingBranchId ? editEffectByBranch.get(landingBranchId) : null

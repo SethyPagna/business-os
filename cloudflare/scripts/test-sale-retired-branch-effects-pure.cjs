@@ -25,7 +25,8 @@ const { loadAll } = require('./harness/load_migrations.cjs')
 // inertness of booking the cancellation expense to the successor, which can only differ once the sale's branch is retired.
 const ORACLE_OLD = 'b2b57f90b344f26b708c5b5f44e4fde26199d29b'
 const ORACLE_BEFORE_FEES = '5e7a011a4'
-const ORACLE_FILES = new Set(['routes/sales.ts', 'lib/saleBulkStatus.ts', 'lib/saleTransitions.ts', 'lib/saleAmendments.ts'])
+// CUTOVER-LR adds lib/saleLineAddition.ts (the per-line effect branch of an addition) so its inertness is proved too.
+const ORACLE_FILES = new Set(['routes/sales.ts', 'lib/saleBulkStatus.ts', 'lib/saleTransitions.ts', 'lib/saleAmendments.ts', 'lib/saleLineAddition.ts'])
 const USER = { id: 71, username: 'owner', name: 'Owner', permissions: JSON.stringify({ all: true }) }
 const executionCtx = { waitUntil(promise) { promise?.catch?.(() => {}) }, passThroughOnException() {} }
 
@@ -95,8 +96,10 @@ function routeDb(sql, capture) {
   }
 }
 
-const call = async (world, route, method, url, body) => {
-  const response = await world.request(url, { method, headers: { 'content-type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) }, { DB: route }, executionCtx)
+// CUTOVER-LR: `redirect` is the X-Branch-Redirect header, the active branch the operator confirmed for a change addressed to a
+// retired branch. Without it every such change is refused with branch_redirect_required.
+const call = async (world, route, method, url, body, redirect = null) => {
+  const response = await world.request(url, { method, headers: { 'content-type': 'application/json', ...(redirect == null ? {} : { 'x-branch-redirect': String(redirect) }) }, body: body === undefined ? undefined : JSON.stringify(body) }, { DB: route }, executionCtx)
   const text = await response.text()
   let json; try { json = JSON.parse(text) } catch { json = { error: text } }
   return { status: response.status, body: json }
@@ -188,7 +191,7 @@ function normalised(batches) {
     .replace(/"stamp":"[^"]*"/g, '"stamp":"<ts>"')
 }
 
-const setStatus = (world, w, body, saleId = w.saleId) => call(world, w.route, 'PATCH', `/${saleId}/status`, { expected_exchange_rate: 4000, ...body })
+const setStatus = (world, w, body, saleId = w.saleId, redirect = null) => call(world, w.route, 'PATCH', `/${saleId}/status`, { expected_exchange_rate: 4000, ...body }, redirect)
 const cancelBody = (id, extra = {}) => ({ client_request_id: id, sale_status: 'cancelled', cancel_reason: 'mistake', ...extra })
 const reviveBody = (id) => ({ client_request_id: id, sale_status: 'completed' })
 const bulkBody = (w, target, key, extra = {}) => ({
@@ -199,11 +202,36 @@ const decreaseBody = (w, key) => ({
   kind: 'line_quantity_decreased', money_precision_version: 1, client_request_id: key, expected_exchange_rate: 4000, sale_item_id: w.lineId, quantity: 1,
   pricing_quote: { gross_usd: 9.5, product_discount_usd: 0, manual_discount_usd: 0, total_usd: 9.5, total_khr: 38000 },
 })
-async function amend(world, w, body) {
-  const first = await call(world, w.route, 'POST', `/${w.saleId}/amendments`, body)
+// Retries with each authoritative quote the route hands back (header quote, line pricing quote), like the app does.
+async function amendQuoted(world, w, body, redirect = null) {
+  let sent = body
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const result = await call(world, w.route, 'POST', `/${w.saleId}/amendments`, sent, redirect)
+    if (result.status === 409 && result.body.code === 'sale_header_quote_conflict') { sent = { ...sent, expected_header_quote: result.body.header_quote }; continue }
+    if (result.status === 409 && result.body.code === 'sale_pricing_quote_conflict' && result.body.pricing_quote) { sent = { ...sent, pricing_quote: result.body.pricing_quote }; continue }
+    w.sent = sent
+    return result
+  }
+  throw new Error('amendment quotes did not settle')
+}
+async function addQuoted(world, w, body, redirect = null) {
+  let sent = body
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const result = await call(world, w.route, 'POST', `/${w.saleId}/items`, sent, redirect)
+    if (result.status === 409 && result.body.code === 'sale_header_quote_conflict') { sent = { ...sent, expected_header_quote: result.body.header_quote }; continue }
+    if (result.status === 409 && result.body.code === 'sale_pricing_quote_conflict' && Array.isArray(result.body.pricing_quotes)) {
+      sent = { ...sent, items: sent.items.map((item) => { const q = result.body.pricing_quotes.find((x) => x.client_line_key === item.client_line_key); return q ? { ...item, pricing_quote: { gross_usd: q.gross_usd, product_discount_usd: q.product_discount_usd, manual_discount_usd: q.manual_discount_usd, total_usd: q.total_usd, total_khr: q.total_khr } } : item }) }
+      continue
+    }
+    return result
+  }
+  throw new Error('add-items quotes did not settle')
+}
+async function amend(world, w, body, redirect = null) {
+  const first = await call(world, w.route, 'POST', `/${w.saleId}/amendments`, body, redirect)
   if (first.status !== 409 || first.body.code !== 'sale_header_quote_conflict') return first
   const sent = { ...body, expected_header_quote: first.body.header_quote }
-  const second = await call(world, w.route, 'POST', `/${w.saleId}/amendments`, sent)
+  const second = await call(world, w.route, 'POST', `/${w.saleId}/amendments`, sent, redirect)
   w.sent = sent
   return second
 }
@@ -214,7 +242,18 @@ async function amend(world, w, body) {
     const w = await build('after')
     const before = stockOf(w.db)
     assert.deepEqual(before, { shop: 0, store: 13, lot500AtOld: 0, lot500AtStore: null, lot600AtStore: 13, product: 13 + 0 + 2 - 2 })
-    const cancelled = await setStatus(fresh.sales, w, cancelBody('cut-cancel-1'))
+    // CUTOVER-LR: never silent. Without the confirmed branch the cancel is refused with the redirect to ask about.
+    const untouched = ledgerSnapshot(w.db)
+    const asked = await setStatus(fresh.sales, w, cancelBody('cut-cancel-1'))
+    assert.equal(asked.status, 409, JSON.stringify(asked.body))
+    assert.equal(asked.body.code, 'branch_redirect_required')
+    assert.deepEqual(asked.body.redirect, { addressed_branch_id: 1, addressed_branch_name: 'Old Shop', successor_branch_id: 2, successor_branch_name: 'LC Store', targets: [{ id: 2, name: 'LC Store' }], requested_target_id: null })
+    assert.equal(ledgerSnapshot(w.db), untouched, 'the refused cancel writes nothing')
+    const invalid = await setStatus(fresh.sales, w, cancelBody('cut-cancel-1'), w.saleId, 1)
+    assert.equal(invalid.body.code, 'branch_redirect_target_invalid', 'the disabled branch cannot be its own redirect')
+    assert.equal(invalid.body.redirect.requested_target_id, 1)
+    assert.equal(ledgerSnapshot(w.db), untouched, 'nor does an invalid target write anything')
+    const cancelled = await setStatus(fresh.sales, w, cancelBody('cut-cancel-1'), w.saleId, 2)
     assert.equal(cancelled.status, 200, JSON.stringify(cancelled.body))
     assert.deepEqual(plain(stockOf(w.db)), { shop: 0, store: 15, lot500AtOld: 0, lot500AtStore: null, lot600AtStore: 15, product: 15 },
       'the 2 units come back to LC Store, into the lot that exists there now (600 absorbed 500); nothing lands at Old Shop')
@@ -224,11 +263,12 @@ async function amend(world, w, body) {
     assert.equal(w.db.prepare('SELECT released_quantity FROM sale_item_batch_allocations WHERE sale_item_id=?').get([w.lineId]).released_quantity, 2)
     // Double apply: the same request id replays; the stock moves once.
     const settled = ledgerSnapshot(w.db)
-    const replayed = await setStatus(fresh.sales, w, cancelBody('cut-cancel-1'))
+    const replayed = await setStatus(fresh.sales, w, cancelBody('cut-cancel-1'), w.saleId, 2)
     assert.equal(replayed.status, 200, JSON.stringify(replayed.body))
     assert.equal(ledgerSnapshot(w.db), settled, 'a replayed request writes nothing')
-    // Reversal: un-cancel takes the same 2 units out of the same lot at the successor.
-    const revived = await setStatus(fresh.sales, w, reviveBody('cut-revive-1'))
+    // Reversal: un-cancel takes the same 2 units out of the same lot at the confirmed branch.
+    assert.equal((await setStatus(fresh.sales, w, reviveBody('cut-revive-1'))).body.code, 'branch_redirect_required', 'un-cancel asks too')
+    const revived = await setStatus(fresh.sales, w, reviveBody('cut-revive-1'), w.saleId, 2)
     assert.equal(revived.status, 200, JSON.stringify(revived.body))
     assert.deepEqual(stockOf(w.db), before, 'un-cancel puts every stock figure back exactly where it was')
     assert.deepEqual(movementsOf(w.db, 'sale').slice(-1), [{ branch_id: 2, branch_name: 'LC Store', addressed_branch_name: 'Shop', quantity: -2, batch_id: 600 }])
@@ -246,13 +286,24 @@ async function amend(world, w, body) {
   {
     const w = await build('orphan')
     const before = ledgerSnapshot(w.db)
-    const refused = await setStatus(fresh.sales, w, cancelBody('cut-orphan-1'))
-    assert.equal(refused.status, 409, JSON.stringify(refused.body))
-    assert.equal(refused.body.code, 'branch_retired_no_successor')
-    assert.equal(ledgerSnapshot(w.db), before, 'nothing is written when the retired branch has no active successor')
+    // No successor: the operator is still asked, with no default, and any active selling branch may take it.
+    const askedNoSuccessor = await setStatus(fresh.sales, w, cancelBody('cut-orphan-1'))
+    assert.equal(askedNoSuccessor.status, 409, JSON.stringify(askedNoSuccessor.body))
+    assert.equal(askedNoSuccessor.body.code, 'branch_redirect_required')
+    assert.equal(askedNoSuccessor.body.redirect.successor_branch_id, null)
+    assert.deepEqual(askedNoSuccessor.body.redirect.targets, [{ id: 2, name: 'LC Store' }])
+    assert.equal(ledgerSnapshot(w.db), before, 'nothing is written while the redirect is unconfirmed')
+    // No active branch that can take it at all: refused outright, even with a named target.
+    w.db.exec("UPDATE branches SET role='warehouse' WHERE id=2")
+    for (const redirect of [null, 2]) {
+      const refused = await setStatus(fresh.sales, w, cancelBody('cut-orphan-1'), w.saleId, redirect)
+      assert.equal(refused.status, 409, JSON.stringify(refused.body))
+      assert.equal(refused.body.code, 'branch_retired_no_successor')
+    }
+    assert.equal(ledgerSnapshot(w.db), before, 'nothing is written when no active selling branch exists')
     const d = await build('after')
     d.db.prepare('UPDATE sale_items SET damaged_lot_id = (SELECT 1) WHERE id = ?').run([d.lineId])
-    const damaged = await setStatus(fresh.sales, d, cancelBody('cut-damaged-1'))
+    const damaged = await setStatus(fresh.sales, d, cancelBody('cut-damaged-1'), d.saleId, 2)
     assert.equal(damaged.status, 409, JSON.stringify(damaged.body))
     assert.equal(damaged.body.code, 'branch_retired_damaged_stock')
     // A transition that moves no stock never blocks on the retired branch.
@@ -260,20 +311,23 @@ async function amend(world, w, body) {
     orphanPaid.db.prepare("UPDATE sales SET sale_status='awaiting_payment', amount_paid_usd=19, amount_paid_khr=0 WHERE id=?").run([orphanPaid.saleId])
     const noMove = await setStatus(fresh.sales, orphanPaid, { client_request_id: 'cut-nomove-1', sale_status: 'completed' })
     assert.notEqual(noMove.body.code, 'branch_retired_no_successor', 'awaiting_payment -> completed moves no stock, so it is not refused for the missing successor')
+    assert.notEqual(noMove.body.code, 'branch_redirect_required', 'nor asked for a redirect')
   }
   console.log('PASS single status: a retired branch with no successor refuses before any write, a damaged line refuses, a no-stock transition is not blocked')
 
   // ---------------------------------------------------------------- single status: cancellation expense
   {
     const w = await build('after')
-    const withFee = await setStatus(fresh.sales, w, cancelBody('cut-fee-1', { cancel_fee_usd: 1.5, cancel_fee_note: 'courier already paid' }))
+    assert.equal((await setStatus(fresh.sales, w, cancelBody('cut-fee-1', { cancel_fee_usd: 1.5, cancel_fee_note: 'courier already paid' }))).body.code, 'branch_redirect_required')
+    assert.equal(w.db.prepare("SELECT COUNT(*) n FROM fees WHERE label LIKE 'Cancelled sale%'").get().n, 0, 'the unconfirmed cancel books no expense')
+    const withFee = await setStatus(fresh.sales, w, cancelBody('cut-fee-1', { cancel_fee_usd: 1.5, cancel_fee_note: 'courier already paid' }), w.saleId, 2)
     assert.equal(withFee.status, 200, JSON.stringify(withFee.body))
     assert.deepEqual(plain(w.db.prepare("SELECT branch_id, branch_name, sale_id, amount_usd FROM fees WHERE label LIKE 'Cancelled sale%'").all()), [{ branch_id: 2, branch_name: 'LC Store', sale_id: w.saleId, amount_usd: 1.5 }],
       'the lost-fee expense is booked to LC Store (Old Shop has no drawer) and stays linked to the old Shop sale')
     const o = await build('after')
     const oldFee = await setStatus(old.sales, o, cancelBody('cut-fee-old', { cancel_fee_usd: 1.5 }))
     assert.equal(oldFee.status, 400, 'CONTROL: the old code refuses the expense because the sale branch is inactive')
-    const revived = await setStatus(fresh.sales, w, reviveBody('cut-fee-revive'))
+    const revived = await setStatus(fresh.sales, w, reviveBody('cut-fee-revive'), w.saleId, 2)
     assert.equal(revived.status, 200, JSON.stringify(revived.body))
     assert.equal(w.db.prepare("SELECT COUNT(*) n FROM fees WHERE label LIKE 'Cancelled sale%'").get().n, 0, 'un-cancel removes the expense it created')
   }
@@ -284,13 +338,20 @@ async function amend(world, w, body) {
     const w = await build('after')
     const before = stockOf(w.db)
     const req = bulkBody(w, 'cancelled', 'cut-bulk-1')
-    const applied = await call(fresh.sales, w.route, 'POST', '/bulk-status', req)
+    const untouched = ledgerSnapshot(w.db)
+    const asked = await call(fresh.sales, w.route, 'POST', '/bulk-status', req)
+    assert.equal(asked.status, 409, JSON.stringify(asked.body))
+    assert.equal(asked.body.code, 'branch_redirect_required', 'the group is refused until the redirect is confirmed')
+    assert.equal(asked.body.redirect.successor_branch_id, 2)
+    assert.deepEqual(asked.body.sale_ids, [w.saleId], 'and names the sale that needs it')
+    assert.equal(ledgerSnapshot(w.db), untouched, 'the refused group writes nothing')
+    const applied = await call(fresh.sales, w.route, 'POST', '/bulk-status', req, 2)
     assert.equal(applied.status, 200, JSON.stringify(applied.body))
     const after = { shop: 0, store: 15, lot500AtOld: 0, lot500AtStore: null, lot600AtStore: 15, product: 15 }
     assert.deepEqual(stockOf(w.db), after, 'bulk cancel lands at LC Store in the merged lot')
     assert.deepEqual(movementsOf(w.db, 'return'), [{ branch_id: 2, branch_name: 'LC Store', addressed_branch_name: 'Shop', quantity: 2, batch_id: 600 }])
     const settled = ledgerSnapshot(w.db)
-    const again = await call(fresh.sales, w.route, 'POST', '/bulk-status', req)
+    const again = await call(fresh.sales, w.route, 'POST', '/bulk-status', req, 2)
     assert.equal(again.status, 200)
     assert.equal(ledgerSnapshot(w.db), settled, 'the same bulk request id replays and writes nothing')
     const undone = await call(fresh.history, w.route, 'POST', `/${applied.body.actionHistoryId}/undo`, { require_applied: true, expected_generation: 0 })
@@ -307,7 +368,7 @@ async function amend(world, w, body) {
     const withFee = await build('after')
     const feeReq = { ...bulkBody(withFee, 'cancelled', 'cut-bulk-fee'), cancel_reason: undefined,
       items: withFee.db.prepare('SELECT id, sale_status expected_status, updated_at expected_updated_at FROM sales ORDER BY id').all().map((i) => ({ ...i, cancel: { reason: 'mistake', fee_usd: 1.5 } })) }
-    const feeApplied = await call(fresh.sales, withFee.route, 'POST', '/bulk-status', feeReq)
+    const feeApplied = await call(fresh.sales, withFee.route, 'POST', '/bulk-status', feeReq, 2)
     assert.equal(feeApplied.status, 200, JSON.stringify(feeApplied.body))
     const feeRows = () => plain(withFee.db.prepare("SELECT branch_id, branch_name, sale_id, amount_usd FROM fees WHERE label LIKE 'Cancelled sale%'").all())
     assert.deepEqual(feeRows(), [{ branch_id: 2, branch_name: 'LC Store', sale_id: withFee.saleId, amount_usd: 1.5 }], 'grouped cancel books the expense to LC Store too')
@@ -319,7 +380,8 @@ async function amend(world, w, body) {
     assert.deepEqual(feeRows(), [{ branch_id: 2, branch_name: 'LC Store', sale_id: withFee.saleId, amount_usd: 1.5 }], 'redo books it again, once')
     const orphan = await build('orphan')
     const orphanBefore = ledgerSnapshot(orphan.db)
-    const refused = await call(fresh.sales, orphan.route, 'POST', '/bulk-status', bulkBody(orphan, 'cancelled', 'cut-bulk-orphan'))
+    orphan.db.exec("UPDATE branches SET role='warehouse' WHERE id=2")
+    const refused = await call(fresh.sales, orphan.route, 'POST', '/bulk-status', bulkBody(orphan, 'cancelled', 'cut-bulk-orphan'), 2)
     assert.equal(refused.status, 409, JSON.stringify(refused.body))
     assert.equal(refused.body.code, 'branch_retired_no_successor')
     assert.equal(ledgerSnapshot(orphan.db), orphanBefore, 'a retired branch with no successor writes nothing')
@@ -330,7 +392,9 @@ async function amend(world, w, body) {
   {
     const w = await build('after')
     const before = stockOf(w.db)
-    const decreased = await amend(fresh.sales, w, decreaseBody(w, 'cut-amend-dec'))
+    const decAsked = await amend(fresh.sales, w, decreaseBody(w, 'cut-amend-dec'))
+    assert.equal(decAsked.body.code, 'branch_redirect_required', 'a decrease asks where the unit goes back')
+    const decreased = await amend(fresh.sales, w, decreaseBody(w, 'cut-amend-dec'), 2)
     assert.equal(decreased.status, 200, JSON.stringify(decreased.body))
     assert.deepEqual(stockOf(w.db), { ...before, store: before.store + 1, lot600AtStore: before.lot600AtStore + 1, product: before.product + 1 },
       'the unit taken off the sale returns to LC Store, in the merged lot')
@@ -338,34 +402,82 @@ async function amend(world, w, body) {
     assert.equal(w.db.prepare('SELECT quantity FROM sale_items WHERE id=?').get([w.lineId]).quantity, 1)
     assert.equal(w.db.prepare('SELECT branch_id FROM sale_items WHERE id=?').get([w.lineId]).branch_id, 1, 'the stored line keeps its own branch')
     const settled = ledgerSnapshot(w.db)
-    const replayed = await call(fresh.sales, w.route, 'POST', `/${w.saleId}/amendments`, w.sent)
+    const replayed = await call(fresh.sales, w.route, 'POST', `/${w.saleId}/amendments`, w.sent, 2)
     assert.equal(replayed.status, 200, JSON.stringify(replayed.body))
     assert.equal(ledgerSnapshot(w.db), settled, 'a replayed amendment writes nothing')
     const o = await build('after')
     const oldDecreased = await amend(old.sales, o, decreaseBody(o, 'cut-amend-old'))
     assert.equal(oldDecreased.status, 400, 'CONTROL: the old code refuses every amendment of a sale at a retired branch')
 
+    // CUTOVER-LR: an increase on an old Shop sale takes its unit at the confirmed branch; the stored line keeps the sale's branch.
     const add = await build('after')
     const addBefore = ledgerSnapshot(add.db)
-    const increase = await call(fresh.sales, add.route, 'POST', `/${add.saleId}/amendments`, { ...decreaseBody(add, 'cut-amend-inc'), kind: 'line_quantity_increased' })
-    assert.equal(increase.status, 409, JSON.stringify(increase.body))
-    assert.equal(increase.body.code, 'branch_retired_sale_addition')
-    const addItems = await call(fresh.sales, add.route, 'POST', `/${add.saleId}/items`, { client_request_id: 'cut-add-1', money_precision_version: 1, expected_exchange_rate: 4000, items: [{ product_id: 10, quantity: 1, branch_id: 1 }] })
-    assert.equal(addItems.status, 409, JSON.stringify(addItems.body))
-    assert.equal(addItems.body.code, 'branch_retired_sale_addition')
-    assert.equal(ledgerSnapshot(add.db), addBefore, 'goods cannot be added to a sale at a retired branch, and nothing is written')
+    const increaseBody = { ...decreaseBody(add, 'cut-amend-inc'), kind: 'line_quantity_increased',
+      pricing_quote: { gross_usd: 28.5, product_discount_usd: 0, manual_discount_usd: 0, total_usd: 28.5, total_khr: 114000 } }
+    const increaseAsked = await amend(fresh.sales, add, increaseBody)
+    assert.equal(increaseAsked.status, 409, JSON.stringify(increaseAsked.body))
+    assert.equal(increaseAsked.body.code, 'branch_redirect_required')
+    assert.equal(ledgerSnapshot(add.db), addBefore, 'the unconfirmed increase writes nothing')
+    const stockBeforeIncrease = stockOf(add.db)
+    const increased = await amendQuoted(fresh.sales, add, increaseBody, 2)
+    assert.equal(increased.status, 200, JSON.stringify(increased.body))
+    assert.deepEqual(stockOf(add.db), { ...stockBeforeIncrease, store: stockBeforeIncrease.store - 1, lot600AtStore: stockBeforeIncrease.lot600AtStore - 1, product: stockBeforeIncrease.product - 1 },
+      'the added unit comes off LC Store, from the lot that exists there now; Old Shop is untouched')
+    assert.deepEqual(movementsOf(add.db, 'sale').slice(-1), [{ branch_id: 2, branch_name: 'LC Store', addressed_branch_name: 'Shop', quantity: -1, batch_id: 600 }],
+      'the movement names where the unit really came from and the branch the sale was made under')
+    assert.deepEqual(plain(add.db.prepare('SELECT branch_id, quantity FROM sale_items WHERE id=?').get([add.lineId])), { branch_id: 1, quantity: 3 }, 'the line keeps the sale branch')
+    assert.deepEqual(plain(add.db.prepare('SELECT batch_id, branch_id, quantity FROM sale_item_batch_allocations WHERE sale_item_id=? ORDER BY id').all([add.lineId])),
+      [{ batch_id: 500, branch_id: 1, quantity: 2 }, { batch_id: 600, branch_id: 2, quantity: 1 }], 'the new take is its own allocation row at the confirmed branch; the Shop take keeps its provenance')
+    assert.deepEqual(plain(add.db.prepare('SELECT branch_id, branch_name FROM sales WHERE id=?').get([add.saleId])), { branch_id: 1, branch_name: 'Shop' }, 'the sale is never moved')
+
+    // Add items to an old Shop sale: same rule, a new line under the sale's branch, stock at the confirmed branch.
+    const addLine = await build('after')
+    const addLineBefore = ledgerSnapshot(addLine.db)
+    const addBody = { client_request_id: 'cut-add-1', money_precision_version: 1, expected_exchange_rate: 4000,
+      items: [{ product_id: 10, quantity: 1, branch_id: 1, client_line_key: 'cut-add-line-1', pricing_source: 'selling',
+        pricing_quote: { gross_usd: 9.5, product_discount_usd: 0, manual_discount_usd: 0, total_usd: 9.5, total_khr: 38000 } }] }
+    const addAsked = await call(fresh.sales, addLine.route, 'POST', `/${addLine.saleId}/items`, addBody)
+    assert.equal(addAsked.status, 409, JSON.stringify(addAsked.body))
+    assert.equal(addAsked.body.code, 'branch_redirect_required')
+    assert.equal(ledgerSnapshot(addLine.db), addLineBefore, 'the unconfirmed addition writes nothing')
+    const addInvalid = await call(fresh.sales, addLine.route, 'POST', `/${addLine.saleId}/items`, addBody, 99)
+    assert.equal(addInvalid.body.code, 'branch_redirect_target_invalid')
+    const addStockBefore = stockOf(addLine.db)
+    const added = await addQuoted(fresh.sales, addLine, addBody, 2)
+    assert.equal(added.status, 200, JSON.stringify(added.body))
+    assert.deepEqual(stockOf(addLine.db), { ...addStockBefore, store: addStockBefore.store - 1, lot600AtStore: addStockBefore.lot600AtStore - 1, product: addStockBefore.product - 1 })
+    const newLine = plain(addLine.db.prepare('SELECT id, branch_id, quantity FROM sale_items WHERE sale_id=? AND id<>? ORDER BY id').all([addLine.saleId, addLine.lineId]))
+    assert.equal(newLine.length, 1)
+    assert.deepEqual({ branch_id: newLine[0].branch_id, quantity: newLine[0].quantity }, { branch_id: 1, quantity: 1 }, 'the new line is recorded under the sale branch')
+    assert.deepEqual(plain(addLine.db.prepare('SELECT batch_id, branch_id, quantity FROM sale_item_batch_allocations WHERE sale_item_id=?').all([newLine[0].id])), [{ batch_id: 600, branch_id: 2, quantity: 1 }])
+    assert.deepEqual(movementsOf(addLine.db, 'sale').slice(-1), [{ branch_id: 2, branch_name: 'LC Store', addressed_branch_name: 'Shop', quantity: -1, batch_id: 600 }])
+    // Its Undo hands the unit back where it was taken (the reversal snapshot holds the confirmed branch), asking nothing.
+    const historyId = addLine.db.prepare("SELECT id FROM action_history ORDER BY id DESC LIMIT 1").get().id
+    const addUndone = await call(fresh.history, addLine.route, 'POST', `/${historyId}/undo`, { require_applied: true, expected_generation: 0 })
+    assert.equal(addUndone.status, 200, JSON.stringify(addUndone.body))
+    assert.deepEqual(stockOf(addLine.db), addStockBefore, 'undo of the redirected addition restores LC Store exactly')
   }
-  console.log('PASS amendments: a decrease of an old Shop sale returns the unit to LC Store in the merged lot, additions refuse typed, old code refused everything')
+  console.log('PASS amendments and add-items: every change to an old Shop sale asks first; a confirmed decrease, increase and new line move stock at LC Store with Shop provenance; the sale and its lines keep their branch')
 
   // ---------------------------------------------------------------- inert while both branches are active
   {
     const scenarios = [
       ['single cancel', async (world, w) => setStatus(world, w, cancelBody('inert-cancel'))],
+      // A stray X-Branch-Redirect while every branch is active is never read: same statements as the code before it existed.
+      ['single cancel with a redirect header', async (world, w) => setStatus(world, w, cancelBody('inert-cancel-hdr'), w.saleId, 2)],
+      ['add items with a redirect header', async (world, w) => addQuoted(world, w, { client_request_id: 'inert-add-hdr', money_precision_version: 1, expected_exchange_rate: 4000,
+        items: [{ product_id: 10, quantity: 1, branch_id: 1, client_line_key: 'inert-add-line-hdr', pricing_source: 'selling',
+          pricing_quote: { gross_usd: 9.5, product_discount_usd: 0, manual_discount_usd: 0, total_usd: 9.5, total_khr: 38000 } }] }, 2)],
       ['single cancel with expense', async (world, w) => setStatus(world, w, cancelBody('inert-cancel-fee', { cancel_fee_usd: 1 }))],
       ['bulk cancel', async (world, w) => call(world, w.route, 'POST', '/bulk-status', bulkBody(w, 'cancelled', 'inert-bulk'))],
       ['bulk cancel with expense', async (world, w) => call(world, w.route, 'POST', '/bulk-status', {
         ...bulkBody(w, 'cancelled', 'inert-bulk-fee'), items: w.db.prepare('SELECT id, sale_status expected_status, updated_at expected_updated_at FROM sales ORDER BY id').all().map((i) => ({ ...i, cancel: { reason: 'mistake', fee_usd: 1 } })), cancel_reason: undefined })],
       ['amend decrease', async (world, w) => amend(world, w, decreaseBody(w, 'inert-amend'))],
+      ['amend increase', async (world, w) => amendQuoted(world, w, { ...decreaseBody(w, 'inert-amend-inc'), kind: 'line_quantity_increased',
+        pricing_quote: { gross_usd: 28.5, product_discount_usd: 0, manual_discount_usd: 0, total_usd: 28.5, total_khr: 114000 } })],
+      ['add items', async (world, w) => addQuoted(world, w, { client_request_id: 'inert-add', money_precision_version: 1, expected_exchange_rate: 4000,
+        items: [{ product_id: 10, quantity: 1, branch_id: 1, client_line_key: 'inert-add-line', pricing_source: 'selling',
+          pricing_quote: { gross_usd: 9.5, product_discount_usd: 0, manual_discount_usd: 0, total_usd: 9.5, total_khr: 38000 } }] })],
     ]
     for (const [name, run] of scenarios) {
       const newCapture = []; const oldCapture = []

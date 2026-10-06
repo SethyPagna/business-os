@@ -149,6 +149,13 @@ export type NewSaleLineInput = {
   batchLabel?: string | null
   batchExpiryDate?: string | null
   unlottedStock?: boolean
+  /**
+   * Set only when the sale was made at a branch that has since been retired and the operator confirmed where its
+   * stock effect lands (CUTOVER-LR): the stored line keeps the sale's branch (`recordedBranchId`) while `branchId`
+   * is the active branch the units come off, and `effect` names both on the movement.
+   */
+  recordedBranchId?: number | null
+  effect?: { branchName: string | null; addressedName: string | null }
 }
 
 export type ExplicitBatchResolution =
@@ -382,7 +389,7 @@ export function planSaleLineAddition(input: {
         cost_price_khr: line.costPriceKhr,
         total_usd: line.lineTotalUsd,
         total_khr: convertedKhr(line.lineTotalUsd, exchangeRate,line.moneyPrecisionVersion),
-        branch_id: line.branchId,
+        branch_id: line.recordedBranchId ?? line.branchId,
         price_mode: captured?.source ?? 'selling',
         // Same "no manual discount" default POST / uses: base = applied.
         base_price_usd: pricing?.amounts.base_price_usd ?? line.unitPriceUsd,
@@ -421,12 +428,13 @@ export function planSaleLineAddition(input: {
       params: { product_id: line.productId, quantity: line.heldUnits },
     })
     statements.push({
-      sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_usd, unit_cost_khr, reason, reference_id, user_id, user_name, batch_id)
-            VALUES (@product_id, @product_name, @branch_id, 'sale', @quantity, @unit_cost_usd, @unit_cost_khr, @reason, @reference_id, @user_id, @user_name, @batch_id)`,
+      sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id${line.effect ? ', branch_name, addressed_branch_name' : ''}, movement_type, quantity, unit_cost_usd, unit_cost_khr, reason, reference_id, user_id, user_name, batch_id)
+            VALUES (@product_id, @product_name, @branch_id${line.effect ? ', @branch_name, @addressed_branch_name' : ''}, 'sale', @quantity, @unit_cost_usd, @unit_cost_khr, @reason, @reference_id, @user_id, @user_name, @batch_id)`,
       params: {
         product_id: line.productId,
         product_name: line.productName,
         branch_id: line.branchId,
+        ...(line.effect ? { branch_name: line.effect.branchName, addressed_branch_name: line.effect.addressedName } : {}),
         quantity: -line.heldUnits,
         unit_cost_usd: line.costPriceUsd,
         unit_cost_khr: line.costPriceKhr,
