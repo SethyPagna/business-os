@@ -757,7 +757,12 @@ await runTest('product page save and delete actions use shared guards and bounde
   assert.match(source, /runProductWriteMutation\(\(\) => productApi\.createProduct\(createPayload\), 'Restore deleted product'\)/)
   assert.match(source, /runProductWriteMutation\([\s\S]*\(\) => productApi\.updateProduct\([\s\S]*'Bulk update product'/)
   assert.match(source, /runProductWriteMutation\([\s\S]*\(\) => productApi\.updateProduct\([\s\S]*'Redo product bulk update'/)
-  assert.doesNotMatch(source, /'Restore product branch stock'/, 'RET-B F2: no Undo writes stock back from a snapshot')
+  // REVERT-SET: stock goes back only by replaying the action's RECORDED removal, never from a snapshot figure.
+  {
+    const outside = source.replace(/const replayRecordedRemovals = useCallback[sS]*?
+  }, [load, runProductStockMutation/, '')
+    assert.doesNotMatch(outside, /'Restore product branch stock'/, 'RET-B F2: no Undo writes stock back from a snapshot')
+  }
   assert.match(source, /runProductStockMutation\([\s\S]*\(\) => productApi\.adjustStock\([\s\S]*'Clear product stock'/)
   // The select-mode stock panel queues Items in the Stock Session; the page's
   // own bulk add (and its client-side redo) retired with BulkAddStockModal.
