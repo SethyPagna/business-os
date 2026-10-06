@@ -52,7 +52,7 @@ assert.match(hub, /import \{[^}]*rangeSubtitle[^}]*\} from '\.\/reports\/reportT
 
 const reportControl = hub.slice(hub.indexOf('const reportControlRow'), hub.indexOf('const viewProps'))
 const viewPicker = hub.slice(hub.indexOf('const viewPicker'), hub.indexOf('const searchSlot'))
-assert.match(hub, /const views = useMemo\(\(\) => visibleReportViews\(perms\), \[perms\]\)/, 'report views remain derived from effective permissions')
+assert.match(hub, /const views = useMemo\(\(\) => visibleReportViews\(perms, reportScope\), \[perms, reportScope\]\)/, 'report views remain derived from effective permissions (and the branch rows, for the Branches report)')
 assert.match(hub, /const viewOptions = views\.map\(\(v\) => \(\{ value: v\.id, label: trh\(v\.labelKey, v\.fallback\) \}\)\)/, 'picker options preserve every permission-scoped view and its translated label')
 assert.match(viewPicker, /options=\{viewOptions\}/, 'the title picker receives the permission-scoped report options')
 assert.match(viewPicker, /style=\{\{ width: 'auto', flex: '1 1 0%' \}\}/, 'the title picker consumes all header space left by the fixed actions')

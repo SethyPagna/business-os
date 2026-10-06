@@ -61,10 +61,13 @@ import {
   type ReportOptions,
   type ReportExportPermissions,
   type ReportPermissions,
+  type ReportScope,
   type ReportStyle,
   type ReportViewId,
 } from './reports/reportModel.ts'
 import type { DrillPatch, ReportViewProps } from './reports/reportTypes.ts'
+import { branchHistoryLabel, showsBranchHistoryFilter } from '../../utils/branchScope.ts'
+import { useBranchRows } from '../../utils/useBranchRows.ts'
 
 type ReportsHubAppContext = {
   t: (key: string) => string | undefined
@@ -78,7 +81,6 @@ type ReportsHubAppContext = {
 }
 const useApp = useAppHook as unknown as () => ReportsHubAppContext
 
-interface BranchOption { id: string; name: string }
 // Retired methods still exist on old sales; they stay OUT of the filter list
 // (same rule the old daily report applied).
 const RETIRED_PAYMENT_METHODS = new Set(['pi pay', 'transfer'])
@@ -139,16 +141,23 @@ export default function ReportsHub(_props: { embedded?: boolean } = {}) {
   const exportPermissionsRef = useRef(exportPermissions)
   permsRef.current = perms
   exportPermissionsRef.current = exportPermissions
-  const views = useMemo(() => visibleReportViews(perms), [perms])
+  // The branch rows decide whether a branch filter / Branches report is worth
+  // offering at all (utils/branchScope.ts). Not loaded yet = today's behaviour.
+  const branchRows = useBranchRows()
+  const reportScope = useMemo<ReportScope>(
+    () => ({ branchComparison: branchRows === null || showsBranchHistoryFilter(branchRows) }),
+    [branchRows],
+  )
+  const views = useMemo(() => visibleReportViews(perms, reportScope), [perms, reportScope])
 
   // ---- persisted choices (view, style, calculation options) ----
   const storage = typeof window !== 'undefined' ? window.localStorage : null
-  const [viewId, setViewId] = useState<ReportViewId | null>(() => resolveReportView(readStoredJson(storage, REPORT_STORAGE_KEYS.view, (raw) => raw), perms))
+  const [viewId, setViewId] = useState<ReportViewId | null>(() => resolveReportView(readStoredJson(storage, REPORT_STORAGE_KEYS.view, (raw) => raw), perms, reportScope))
   const [styleChoice, setStyleChoice] = useState<ReportStyle | null>(() => readStoredJson(storage, REPORT_STORAGE_KEYS.style, normalizeReportStyle))
   const [options, setOptions] = useState<ReportOptions>(() => readStoredJson(storage, REPORT_STORAGE_KEYS.options, normalizeReportOptions))
   const style: ReportStyle = styleChoice ?? defaultReportStyle(compact)
-  const resolvedViewId = resolveReportView(viewId, perms)
-  useEffect(() => { setViewId((cur) => resolveReportView(cur, perms)) }, [perms])
+  const resolvedViewId = resolveReportView(viewId, perms, reportScope)
+  useEffect(() => { setViewId((cur) => resolveReportView(cur, perms, reportScope)) }, [perms, reportScope])
   useEffect(() => { if (resolvedViewId) writeStoredJson(storage, REPORT_STORAGE_KEYS.view, resolvedViewId) }, [resolvedViewId, storage])
   useEffect(() => { persistReportStyleChoice(storage, styleChoice) }, [styleChoice, storage])
   useEffect(() => { writeStoredJson(storage, REPORT_STORAGE_KEYS.options, options) }, [options, storage])
@@ -173,7 +182,6 @@ export default function ReportsHub(_props: { embedded?: boolean } = {}) {
   const [paymentFilter, setPaymentFilter] = useState('')
   const [searchText, setSearchText] = useState('')
   const [search, setSearch] = useState('')
-  const [branches, setBranches] = useState<BranchOption[]>([])
   useEffect(() => {
     const handle = window.setTimeout(() => setSearch(searchText.trim()), SEARCH_DEBOUNCE_MS)
     return () => window.clearTimeout(handle)
@@ -189,29 +197,12 @@ export default function ReportsHub(_props: { embedded?: boolean } = {}) {
       : { ...current, startTime: '00:00', endTime: '23:59' })
   }, [supportsTime])
 
-  useEffect(() => {
-    let cancelled = false
-    import('../../api/branchTransport.ts')
-      .then((mod) => mod.getBranches())
-      .then((res) => {
-        if (cancelled) return
-        const raw = Array.isArray(res) ? res : (res as { branches?: unknown[] } | null)?.branches
-        const list = (Array.isArray(raw) ? raw : []).reduce<BranchOption[]>((acc, entry) => {
-          const rec = entry as { id?: unknown; name?: unknown; branch_name?: unknown }
-          const id = rec.id == null ? '' : String(rec.id)
-          if (id) acc.push({ id, name: String(rec.name || rec.branch_name || id) })
-          return acc
-        }, [])
-        setBranches(list)
-      })
-      .catch(() => {})
-    return () => { cancelled = true }
-  }, [])
-
+  // A filter over HISTORY: a retired branch stays selectable (labelled), since
+  // its sales still belong to it.
   const branchOptions = useMemo<AppSelectOption[]>(() => [
     { value: '', label: trh('all_branches', 'All Branches') },
-    ...branches.map((branch) => ({ value: branch.id, label: branch.name })),
-  ], [branches, trh])
+    ...(branchRows ?? []).map((branch) => ({ value: branch.id, label: branchHistoryLabel(branch, trh('inactive', 'Inactive')) })),
+  ], [branchRows, trh])
   const statusOptions = useMemo<AppSelectOption[]>(() => [
     { value: '', label: trh('all_statuses', 'All statuses') },
     ...ALL_STATUSES.map((status) => ({ value: status, label: getStatusLabel(status, tStr) })),
@@ -307,12 +298,12 @@ export default function ReportsHub(_props: { embedded?: boolean } = {}) {
 
   const filterSelects = (
     <>
-      {branches.length ? <AppSelect value={branchFilter} options={branchOptions} onChange={setBranchFilter} ariaLabel={trh('branch', 'Branch')} buttonClassName="h-9 w-full py-0 px-2 text-[12px]" showChevron /> : null}
+      {showsBranchHistoryFilter(branchRows) ? <AppSelect value={branchFilter} options={branchOptions} onChange={setBranchFilter} ariaLabel={trh('branch', 'Branch')} buttonClassName="h-9 w-full py-0 px-2 text-[12px]" showChevron /> : null}
       {supportsSaleFilters ? <AppSelect value={statusFilter} options={statusOptions} onChange={setStatusFilter} ariaLabel={trh('status', 'Status')} buttonClassName="h-9 w-full py-0 px-2 text-[12px]" showChevron /> : null}
       {supportsSaleFilters ? <AppSelect value={paymentFilter} options={paymentOptions} onChange={setPaymentFilter} ariaLabel={trh('payment_method', 'Payment method')} buttonClassName="h-9 w-full py-0 px-2 text-[12px]" showChevron /> : null}
     </>
   )
-  const hasFilterControls = branches.length > 0 || supportsSaleFilters
+  const hasFilterControls = showsBranchHistoryFilter(branchRows) || supportsSaleFilters
   const optionsAreDefault = options.currency === DEFAULT_REPORT_OPTIONS.currency
   const styleIsDefault = styleChoice == null
   // The badge counts everything the menu now owns, so a person can see at a
