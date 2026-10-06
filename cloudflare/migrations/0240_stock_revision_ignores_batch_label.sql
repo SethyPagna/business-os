@@ -27,9 +27,12 @@
 --                WHERE type = 'trigger' AND tbl_name = 'product_batches'
 --                                      -- expected unchanged (13)
 --              no table row count changes
--- Deploy order: EITHER. The Worker never depends on the trigger's column list;
---              it only reads revisions. Deploy before the cutover snapshot
---              pass so the fill is revision-neutral.
+-- Deploy order: 0236 first, then this file, then the Worker. The Worker of this
+--              release writes and reads the four 0236 label columns (fees, lots,
+--              movements, returns, the stock-in report, History); a Worker
+--              deployed before 0236 fails on the missing columns. This file
+--              itself changes no column and no row. Apply it before the cutover
+--              snapshot pass so the label fill is revision-neutral.
 -- Recovery:    DROP TRIGGER stock_revision_product_batches_update; then
 --              recreate it from 0124_stock_session_operations.sql (AFTER UPDATE
 --              ON product_batches, same WHEN and body). Revisions already bumped
