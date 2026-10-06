@@ -41,10 +41,11 @@ export const ROLE_PRESETS: RolePreset[] = [
     labelKey: 'role_preset_employee',
     label: 'Employee',
     descriptionKey: 'role_preset_employee_desc',
-    description: 'Day-to-day front-line access: POS and individual Sales and Returns actions, plus the dashboard and Website Editor. Products: view, edit product information and upload images, with costs hidden. Inventory and contact changes use Partial Access. Bulk changes, imports, exports, contact financial history, supplier records, and administrative areas stay unavailable.',
+    description: 'Day-to-day front-line access: POS and individual Sales and Returns actions, plus the dashboard. Products: view, edit product information and upload images, with costs hidden. Inventory and contact changes use Partial Access. Bulk changes, imports, exports, contact financial history, supplier records, and administrative areas stay unavailable.',
     permissions: {
       dashboard: true,
-      customer_portal: true,
+      // No customer_portal: the live Employee row (MERGEPERM-REPORT section 5) has no Website Editor grant, and the
+      // storefront announcement strip and posts are public content (release review P2-1). An admin can add one per user.
       pos: true,
       sales: true,
       'sales:status': true,

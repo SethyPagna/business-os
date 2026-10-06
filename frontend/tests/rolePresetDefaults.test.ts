@@ -87,6 +87,14 @@ for (const key of Object.keys(employee.permissions).filter((name) => name === 'p
 for (const unrelated of ['dashboard:', 'customer_portal:', 'inventory:']) {
   assert.doesNotMatch(seededEmployee, new RegExp(unrelated.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), `fresh runtime Employee seed must not add unrelated ${unrelated}`)
 }
+// Release review P2-1 (6 Oct 2026): the live Employee row has no Website Editor grant, so a preset-created Employee must
+// not have one either -- the storefront announcement strip and posts are public content (routes/promotions.ts requireWebsiteEditor).
+for (const grant of ['customer_portal', 'portal_posts', 'portal_faq', 'portal_about', 'settings']) {
+  assert.equal(Object.hasOwn(employee.permissions, grant), false, 'the Employee preset must not carry ' + grant)
+}
+const stripKeys = ['portal_posts', 'customer_portal', 'settings'] // the Worker's WEBSITE_EDITOR_STRIP_KEYS
+assert.equal(stripKeys.some((key) => (employee.permissions as Record<string, unknown>)[key] === true), false, 'a preset-created Employee cannot manage announcement strip cards')
+assert.doesNotMatch(employee.description, /Website Editor/, 'the description no longer promises it')
 assert.match(invariants, /if \(code === 'admin'\)/, 'only Admin may be force-reset by core invariants')
 
 console.log('PASS Employee defaults grant individual Sales/Returns work and keep bulk, export, import, and contact finance denied')
