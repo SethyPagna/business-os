@@ -60,6 +60,7 @@ runTest('the UI helpers agree with the Worker for every role shape (hidden = ref
 })
 
 const productsRoute = readFileSync(new URL('../../cloudflare/src/routes/products.ts', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
+const lookupsRoute = readFileSync(new URL('../../cloudflare/src/routes/lookups.ts', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 const productsPage = readFileSync(new URL('../src/components/products/Products.tsx', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 
 function routeBlock(source: string, start: string): string {
@@ -75,6 +76,8 @@ runTest('the Worker routes carry the exact gates the helpers mirror', () => {
   assert.match(variant, /getActionTier\(user, 'products', 'variant'\) !== 'full' \|\| getActionTier\(user, 'products', 'add'\) !== 'full'/)
   assert.doesNotMatch(variant, /hasPermission\(user, 'products'\)/, 'the section grant alone no longer decides /variant')
   assert.match(routeBlock(productsRoute, "app.post('/bulk-delete-jobs/:id/cancel'"), /getActionTier\(user, 'products', 'bulk_delete'\) !== 'full'/)
+  assert.match(lookupsRoute, /getActionTier\(c\.get\('user'\), 'products', 'manage_lookups'\) !== 'full'/)
+  assert.doesNotMatch(lookupsRoute, /hasPermission/, 'every lookup write goes through the action check')
 })
 
 runTest('the Products page gates Add variant and Apply to ALL on the helpers, everywhere they appear', () => {

@@ -4,7 +4,7 @@ import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit } from '../lib/audit'
 import { buildLiveLookupMutationPlan } from '../lib/renameCascade'
 import { assertUpdatedAtMatch, getExpectedUpdatedAt, writeConflictResponse, WriteConflictError } from '../lib/conflictControl'
-import { hasPermission } from '../lib/permissions'
+import { getActionTier } from '../lib/permissions'
 import { assertCatalogTextIntegrity, normalizeCatalogText } from '../lib/catalogText'
 import { mergeLookupSuggestionRows, usedLookupValuesSql, type UsedLookupValue } from '../lib/lookupSuggestions'
 import { broadcast } from '../durable-objects/broadcastHub'
@@ -64,7 +64,11 @@ for (const prefix of ['/categories', '/units']) {
 // table. GET stays open to any authenticated user (requireAuth above);
 // every mutating verb gets its own `requireProductsPermission` check.
 function requireProductsPermission(c: Context<{ Bindings: Env; Variables: { user: SessionUser } }>): Response | null {
-  if (!hasPermission(c.get('user'), 'products')) {
+  // Create, rename, recolor and delete a category or unit are the Manage categories / units modals, which the Products page
+  // shows only with the Manage brands, categories, units action; /rename-brand and /lookups/replace already check it. The
+  // section grant alone let a role with that switch off write here. The action tier equals the section tier when no
+  // override is set, so every other role is unchanged.
+  if (getActionTier(c.get('user'), 'products', 'manage_lookups') !== 'full') {
     return c.json({ success: false, error: 'No permission', code: 'forbidden', permission: 'products' }, 403)
   }
   return null

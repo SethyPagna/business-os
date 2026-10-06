@@ -139,6 +139,27 @@ async function main() {
     }
   })
 
+  // ---- sweep: category and unit writes ---------------------------------------------------------
+  await check('sweep: Manage brands, categories, units OFF cannot write categories or units; reads stay open', async () => {
+    for (const table of ['categories', 'units']) {
+      const denied = fixture(role({ ...FULL, 'products:manage_lookups': false }))
+      const call = lookupCaller(denied)
+      const before = lookupCount(denied, table)
+      assert.equal((await call('POST', `/${table}`, { name: 'Probe' })).status, 403)
+      assert.equal((await call('PUT', `/${table}/1`, { name: 'Probe' })).status, 403)
+      assert.equal((await call('PATCH', `/${table}/1`, { name: 'Probe' })).status, 403)
+      assert.equal((await call('DELETE', `/${table}/1`)).status, 403)
+      assert.equal(lookupCount(denied, table), before, `${table} untouched`)
+      assert.equal((await call('GET', `/${table}`)).status, 200, 'the plain list is read by every signed-in user')
+      for (const user of [role(FULL), ADMIN]) {
+        const allowed = fixture(user)
+        const created = await lookupCaller(allowed)('POST', `/${table}`, { name: 'Probe' })
+        assert.equal(created.status < 300, true, `${table} create by a permitted user -> ${created.status}`)
+        assert.equal(lookupCount(allowed, table), 1)
+      }
+    }
+  })
+
   if (failed) { console.log(`${failed} FAILED`); process.exit(1) }
   console.log('products write action permissions OK')
 }
