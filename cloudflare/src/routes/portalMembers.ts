@@ -60,14 +60,28 @@ app.use('*', async (c, next) => {
   await next()
 })
 
-// Reads that return customer records (the Link float's customer search and
-// the suggestions) also need Contacts view: "Approve member links" alone does
-// not open the customer directory (verifier E1).
-function canViewCustomers(user: SessionUser): boolean {
+// Owner ruling (G38 E1, final): a user holding "Approve member links" WITHOUT
+// Contacts view never sees a customer's name, LC number or phone, nor whether
+// a customer exists. One gate, used everywhere in this file:
+//   - customer search, suggestions, filter=conflicts and every link-type
+//     write (link, relink, move, a revert that relinks) need it outright, and
+//     /link checks it before any customer lookup, so neither a 404 vs 409 nor
+//     a holder can leak;
+//   - every member object, list row, link request and history row a
+//     links-only user receives goes through redactStaffMember (history: its
+//     customerRef): customer -> null (customerVisible: false), legacy LC id ->
+//     null, conflicts -> [] (both conflicts describe a customer);
+//   - list search matches neither LC numbers (the member's legacy LC or the
+//     linked customer's) for them.
+// Unlink, suspend, reactivate and request reject stay links-only, redacted.
+export function canViewCustomers(user: SessionUser): boolean {
   return getActionTier(user, 'contacts', 'view') !== 'none'
 }
 function contactsViewRequired(c: Ctx) {
-  return c.json({ error: 'You need Contacts view access to search customers.', code: 'contacts_view_required' }, 403)
+  return c.json({ error: 'You need Contacts view access to see or link customers.', code: 'contacts_view_required' }, 403)
+}
+function viewerCanSeeCustomers(c: Ctx): boolean {
+  return canViewCustomers(c.get('user'))
 }
 
 // A link carried forward by 0231 from the old sign-up, which attached the
@@ -154,6 +168,9 @@ export type StaffMemberView = {
   // Linked by the old sign-up to a customer it did not create, never checked
   // by staff since (filter=legacy_claims).
   legacyClaim: boolean
+  // false when the caller lacks Contacts view: customer, legacyMembershipId
+  // and conflicts were withheld (they may exist), see redactStaffMember.
+  customerVisible: boolean
 }
 
 export function staffMemberView(row: MemberRow): StaffMemberView {
@@ -185,12 +202,23 @@ export function staffMemberView(row: MemberRow): StaffMemberView {
     pendingRequest: row.request_id == null ? null : { id: Number(row.request_id), note: row.request_note ?? null, createdAt: row.request_created_at ?? null },
     conflicts,
     legacyClaim: Number(row.legacy_claim) === 1,
+    customerVisible: true,
   }
 }
 
-async function loadMember(env: Env, accountId: number): Promise<StaffMemberView | null> {
-  const row = await getDb(env).prepare(`${MEMBER_SELECT} WHERE a.id = @id LIMIT 1`).get<MemberRow>({ id: accountId })
-  return row ? staffMemberView(row) : null
+export function redactStaffMember(view: StaffMemberView, canSeeCustomers: boolean): StaffMemberView {
+  if (canSeeCustomers) return view
+  return { ...view, legacyMembershipId: null, customer: null, conflicts: [], customerVisible: false }
+}
+
+function memberViewFor(c: Ctx, row: MemberRow): StaffMemberView {
+  return redactStaffMember(staffMemberView(row), viewerCanSeeCustomers(c))
+}
+
+// Every member object a route returns comes from here, redacted for the caller.
+async function loadMember(c: Ctx, accountId: number): Promise<StaffMemberView | null> {
+  const row = await getDb(c.env).prepare(`${MEMBER_SELECT} WHERE a.id = @id LIMIT 1`).get<MemberRow>({ id: accountId })
+  return row ? memberViewFor(c, row) : null
 }
 
 function positiveInt(value: unknown): number | null {
@@ -262,6 +290,9 @@ app.get('/', async (c) => {
   const filter = String(c.req.query('filter') || 'all')
   const where = LIST_FILTERS[filter]
   if (!where) return c.json({ error: 'Unknown filter.', code: 'invalid_filter' }, 400)
+  const canSeeCustomers = viewerCanSeeCustomers(c)
+  // Both conflicts describe a customer (removed, or holding this phone).
+  if (filter === 'conflicts' && !canSeeCustomers) return contactsViewRequired(c)
   const limit = Math.min(LIST_MAX_LIMIT, positiveInt(c.req.query('limit')) ?? LIST_DEFAULT_LIMIT)
   const offset = nonNegativeInt(c.req.query('offset')) ?? 0
   const q = String(c.req.query('q') || '').trim().slice(0, 80)
@@ -277,9 +308,9 @@ app.get('/', async (c) => {
       (@code IS NOT NULL AND a.member_code = @code)
       OR (@phone IS NOT NULL AND a.phone = @phone)
       OR instr(lower(a.name), @lower) > 0
-      OR instr(lower(COALESCE(a.email, '')), @lower) > 0
+      OR instr(lower(COALESCE(a.email, '')), @lower) > 0${canSeeCustomers ? `
       OR lower(trim(COALESCE(a.membership_id, ''))) = @lower
-      OR EXISTS (SELECT 1 FROM customers cs WHERE cs.id = a.contact_id AND lower(trim(COALESCE(cs.membership_number, ''))) = @lower)
+      OR EXISTS (SELECT 1 FROM customers cs WHERE cs.id = a.contact_id AND lower(trim(COALESCE(cs.membership_number, ''))) = @lower)` : ''}
     )`)
   }
   const whereSql = clauses.join(' AND ')
@@ -288,7 +319,7 @@ app.get('/', async (c) => {
     { sql: `${MEMBER_SELECT} WHERE ${whereSql} ORDER BY a.id DESC LIMIT @limit OFFSET @offset`, params },
   ])
   const total = Number((countResult?.results?.[0] as { n?: number } | undefined)?.n ?? 0)
-  const items = ((pageResult?.results ?? []) as MemberRow[]).map(staffMemberView)
+  const items = ((pageResult?.results ?? []) as MemberRow[]).map((row) => memberViewFor(c, row))
   return c.json({ items, total, limit, offset, filter })
 })
 
@@ -320,7 +351,7 @@ app.get('/link-requests', async (c) => {
       decidedAt: (row.q_decided_at as string | null) ?? null,
       decidedEventId: row.q_decided_event_id == null ? null : Number(row.q_decided_event_id),
       decidedNote: (row.q_decided_note as string | null) ?? null,
-      member: staffMemberView(row),
+      member: memberViewFor(c, row),
     })),
   })
 })
@@ -380,7 +411,7 @@ app.get('/customer-search', async (c) => {
 // One member.
 app.get('/:id', async (c) => {
   const accountId = positiveInt(c.req.param('id'))
-  const member = accountId ? await loadMember(c.env, accountId) : null
+  const member = accountId ? await loadMember(c, accountId) : null
   if (!member) return c.json({ error: 'Member not found.', code: 'member_not_found' }, 404)
   return c.json({ member })
 })
@@ -407,9 +438,10 @@ app.get('/:id/history', async (c) => {
   const accountId = positiveInt(c.req.param('id'))
   if (!accountId) return c.json({ error: 'Member not found.', code: 'member_not_found' }, 404)
   const db = getDb(c.env)
-  const account = await db.prepare('SELECT id, link_version FROM portal_accounts WHERE id = @id LIMIT 1')
-    .get<{ id: number; link_version: number }>({ id: accountId })
+  const account = await db.prepare('SELECT id, link_version, status FROM portal_accounts WHERE id = @id LIMIT 1')
+    .get<{ id: number; link_version: number; status: string }>({ id: accountId })
   if (!account) return c.json({ error: 'Member not found.', code: 'member_not_found' }, 404)
+  const canSeeCustomers = viewerCanSeeCustomers(c)
   const rows = await db.prepare(`
     SELECT e.id, e.account_id, e.action, e.from_customer_id, e.to_customer_id, e.evidence, e.reason_code, e.note,
            e.match_basis, e.group_id, e.reverts_event_id, e.link_request_id, e.link_version_after, e.actor_name, e.created_at,
@@ -423,9 +455,11 @@ app.get('/:id/history', async (c) => {
     ORDER BY e.id DESC
     LIMIT ${HISTORY_LIMIT}
   `).all<EventRow & { from_name: string | null; from_membership_number: string | null; to_name: string | null; to_membership_number: string | null; reverted: number }>({ id: accountId })
-  const customerRef = (id: number | null, name: string | null, number: string | null) => (id == null ? null : { id: Number(id), name, membershipNumber: number })
+  const customerRef = (id: number | null, name: string | null, number: string | null) => (
+    id == null || !canSeeCustomers ? null : { id: Number(id), name, membershipNumber: number })
   return c.json({
     linkVersion: Number(account.link_version),
+    customerVisible: canSeeCustomers,
     events: rows.map((row) => ({
       id: Number(row.id),
       action: row.action,
@@ -442,9 +476,13 @@ app.get('/:id/history', async (c) => {
       actorName: row.actor_name,
       createdAt: row.created_at,
       // The server checks again on Revert; this only decides whether to show the icon.
+      // A closed member is never reverted (E2), and a links-only user cannot
+      // revert an event that would put the member back on a customer.
       revertible: MEMBER_REVERTIBLE_ACTIONS.includes(row.action)
+        && account.status !== 'closed'
         && Number(row.reverted) === 0
-        && Number(row.link_version_after) === Number(account.link_version),
+        && Number(row.link_version_after) === Number(account.link_version)
+        && (canSeeCustomers || row.from_customer_id == null),
     })),
   })
 })
@@ -504,7 +542,7 @@ async function loadAccountState(env: Env, accountId: number): Promise<AccountSta
 }
 
 async function staleResponse(c: Ctx, accountId: number) {
-  return conflict(c, 'member_link_stale', 'This member changed since you opened it. Refresh and try again.', { member: await loadMember(c.env, accountId) })
+  return conflict(c, 'member_link_stale', 'This member changed since you opened it. Refresh and try again.', { member: await loadMember(c, accountId) })
 }
 
 function isUniqueContactViolation(error: unknown): boolean {
@@ -522,6 +560,9 @@ async function runBatch(env: Env, statements: MemberLinkStatement[]): Promise<un
 }
 
 app.post('/:id/link', async (c) => {
+  // Before ANY lookup: a links-only user must not learn whether a customer id
+  // exists, who holds it, or its name and LC (E1.8, E1.9).
+  if (!viewerCanSeeCustomers(c)) return contactsViewRequired(c)
   const accountId = positiveInt(c.req.param('id'))
   if (!accountId) return c.json({ error: 'Member not found.', code: 'member_not_found' }, 404)
   const body = await readBody(c)
@@ -533,7 +574,7 @@ app.post('/:id/link', async (c) => {
   const account = await loadAccountState(env, accountId)
   if (!account) return c.json({ error: 'Member not found.', code: 'member_not_found' }, 404)
   // A double-submitted dialog: the first one already landed.
-  if (await replayedEvent(env, accountId, clientRequestId)) return c.json({ ok: true, replayed: true, member: await loadMember(env, accountId) })
+  if (await replayedEvent(env, accountId, clientRequestId)) return c.json({ ok: true, replayed: true, member: await loadMember(c, accountId) })
   if (account.status === 'closed') return conflict(c, 'member_closed', 'This member closed their account.')
   const expectedLinkVersion = nonNegativeInt(body.expectedLinkVersion)
   if (expectedLinkVersion == null) return c.json({ error: 'expectedLinkVersion is required.', code: 'member_link_version_required' }, 400)
@@ -590,7 +631,7 @@ app.post('/:id/link', async (c) => {
   })
   const failure = await runBatch(env, statements)
   if (failure) {
-    if (await replayedEvent(env, accountId, clientRequestId)) return c.json({ ok: true, replayed: true, member: await loadMember(env, accountId) })
+    if (await replayedEvent(env, accountId, clientRequestId)) return c.json({ ok: true, replayed: true, member: await loadMember(c, accountId) })
     const now = await loadAccountState(env, accountId)
     if (!now || Number(now.link_version) !== expectedLinkVersion || now.contact_id !== account.contact_id) return staleResponse(c, accountId)
     if (isUniqueContactViolation(failure)) return conflict(c, 'member_link_customer_taken', 'This customer was just linked to another member. Refresh and try again.')
@@ -614,7 +655,7 @@ app.post('/:id/link', async (c) => {
     movedFromAccountId: move?.holderAccountId ?? null,
     linkRequestId,
   })
-  return c.json({ ok: true, member: await loadMember(env, accountId) })
+  return c.json({ ok: true, member: await loadMember(c, accountId) })
 })
 
 app.post('/:id/unlink', async (c) => {
@@ -625,7 +666,7 @@ app.post('/:id/unlink', async (c) => {
   const clientRequestId = clientRequestIdOf(body.clientRequestId)
   const account = await loadAccountState(env, accountId)
   if (!account) return c.json({ error: 'Member not found.', code: 'member_not_found' }, 404)
-  if (await replayedEvent(env, accountId, clientRequestId)) return c.json({ ok: true, replayed: true, member: await loadMember(env, accountId) })
+  if (await replayedEvent(env, accountId, clientRequestId)) return c.json({ ok: true, replayed: true, member: await loadMember(c, accountId) })
   const expectedLinkVersion = nonNegativeInt(body.expectedLinkVersion)
   if (expectedLinkVersion == null) return c.json({ error: 'expectedLinkVersion is required.', code: 'member_link_version_required' }, 400)
   const reasonCode = String(body.reasonCode ?? '') as MemberUnlinkReason
@@ -640,13 +681,13 @@ app.post('/:id/unlink', async (c) => {
     accountId, expectedLinkVersion, fromCustomerId: account.contact_id, reasonCode, note, clientRequestId, actor,
   }))
   if (failure) {
-    if (await replayedEvent(env, accountId, clientRequestId)) return c.json({ ok: true, replayed: true, member: await loadMember(env, accountId) })
+    if (await replayedEvent(env, accountId, clientRequestId)) return c.json({ ok: true, replayed: true, member: await loadMember(c, accountId) })
     const now = await loadAccountState(env, accountId)
     if (!now || Number(now.link_version) !== expectedLinkVersion || now.contact_id !== account.contact_id) return staleResponse(c, accountId)
     throw failure
   }
   await audit(env, actor.userId, actor.userName, 'member_unlink', 'portal_member', accountId, { fromCustomerId: account.contact_id, reasonCode })
-  return c.json({ ok: true, member: await loadMember(env, accountId) })
+  return c.json({ ok: true, member: await loadMember(c, accountId) })
 })
 
 app.post('/:id/revert', async (c) => {
@@ -660,7 +701,7 @@ app.post('/:id/revert', async (c) => {
   if (!eventId) return c.json({ error: 'Choose an event to revert.', code: 'member_link_event_not_found' }, 404)
   const event = await db.prepare('SELECT * FROM portal_member_link_events WHERE id = @id AND account_id = @aid LIMIT 1').get<EventRow>({ id: eventId, aid: accountId })
   if (!event) return c.json({ error: 'Event not found.', code: 'member_link_event_not_found' }, 404)
-  if (await replayedEvent(env, accountId, clientRequestId)) return c.json({ ok: true, replayed: true, member: await loadMember(env, accountId) })
+  if (await replayedEvent(env, accountId, clientRequestId)) return c.json({ ok: true, replayed: true, member: await loadMember(c, accountId) })
   // As /link: a closed member is never relinked or otherwise changed (E2).
   const urlAccount = await loadAccountState(env, accountId)
   if (!urlAccount) return c.json({ error: 'Member not found.', code: 'member_not_found' }, 404)
@@ -695,6 +736,8 @@ app.post('/:id/revert', async (c) => {
   // against that member's current link version and rate-limited as on /link.
   const user = c.get('user')
   const relinked = targets.filter((target) => target.restoreCustomerId != null)
+  // Relinking is a link: the linker must see who they link to (E1).
+  if (relinked.length && !viewerCanSeeCustomers(c)) return contactsViewRequired(c)
   let evidence: { evidence: MemberLinkEvidence; note: string | null } | null = null
   if (relinked.length) {
     let checkCodeValid: boolean | null = null
@@ -725,7 +768,7 @@ app.post('/:id/revert', async (c) => {
     evidence: evidence?.evidence ?? null,
   }))
   if (failure) {
-    if (await replayedEvent(env, accountId, clientRequestId)) return c.json({ ok: true, replayed: true, member: await loadMember(env, accountId) })
+    if (await replayedEvent(env, accountId, clientRequestId)) return c.json({ ok: true, replayed: true, member: await loadMember(c, accountId) })
     const again = await db.prepare(revertedSql).get<{ hit: number }>([])
     if (again) return conflict(c, 'member_link_already_reverted', 'This entry was already reverted.')
     for (const target of targets) {
@@ -744,7 +787,7 @@ app.post('/:id/revert', async (c) => {
     accountIds: targets.map((target) => target.accountId),
     evidence: evidence?.evidence ?? null,
   })
-  return c.json({ ok: true, member: await loadMember(env, accountId) })
+  return c.json({ ok: true, member: await loadMember(c, accountId) })
 })
 
 // Suspend: the member cannot sign in and loses every session (design S6).
@@ -754,7 +797,7 @@ async function setStatus(c: Ctx, from: 'active' | 'suspended', to: 'active' | 's
   const env = c.env
   const account = await loadAccountState(env, accountId)
   if (!account) return c.json({ error: 'Member not found.', code: 'member_not_found' }, 404)
-  if (account.status !== from) return conflict(c, 'member_status_conflict', `This member is not ${from}.`, { member: await loadMember(env, accountId) })
+  if (account.status !== from) return conflict(c, 'member_status_conflict', `This member is not ${from}.`, { member: await loadMember(c, accountId) })
   const body = await readBody(c)
   const statements: MemberLinkStatement[] = [
     {
@@ -767,10 +810,10 @@ async function setStatus(c: Ctx, from: 'active' | 'suspended', to: 'active' | 's
     const revoke = revokePortalSessionsStatement([accountId])
     if (revoke) statements.push(revoke)
   }
-  if (await runBatch(env, statements)) return conflict(c, 'member_status_conflict', `This member is not ${from}.`, { member: await loadMember(env, accountId) })
+  if (await runBatch(env, statements)) return conflict(c, 'member_status_conflict', `This member is not ${from}.`, { member: await loadMember(c, accountId) })
   const actor = actorOf(c.get('user'))
   await audit(env, actor.userId, actor.userName, action, 'portal_member', accountId, { note: noteOf(body.note) })
-  return c.json({ ok: true, member: await loadMember(env, accountId) })
+  return c.json({ ok: true, member: await loadMember(c, accountId) })
 }
 
 app.post('/:id/suspend', (c) => setStatus(c, 'active', 'suspended', 'member_suspend'))
@@ -780,29 +823,27 @@ app.post('/:id/reactivate', (c) => setStatus(c, 'suspended', 'active', 'member_r
 // the old POST /api/customers/:id/portal-reset, which had no caller and no
 // identity check). The member cannot sign in to show a code, so
 // called_number_on_file here means staff called the phone on the account (or
-// on the linked customer) and spoke to the member. Because no code proves
-// that call, it is ADMIN-ONLY here and needs a note saying which number was
-// called and what the member confirmed (verifier E6); the note goes to the
-// audit log. owner_override still needs an admin and a note; in_person is
-// open to any linker. Returns the temporary password once.
+// on the linked customer) and spoke to the member. The member cannot prove
+// who they are from a signed-in account on ANY path here, so every staff
+// reset -- in_person included -- carries the same trust: owner default
+// (G38 E6) is ADMIN-ONLY with a note saying how the member was identified;
+// the note goes to the audit log. Returns the temporary password once.
 app.post('/:id/reset-password', async (c) => {
   const accountId = positiveInt(c.req.param('id'))
   if (!accountId) return c.json({ error: 'Member not found.', code: 'member_not_found' }, 404)
   const body = await readBody(c)
   const user = c.get('user')
   const env = c.env
+  const isAdmin = isAdminControlUser(user)
+  if (!isAdmin) return c.json({ error: 'Only an administrator can reset a member\'s password.', code: 'member_reset_admin_only' }, 403)
   const account = await loadAccountState(env, accountId)
   if (!account) return c.json({ error: 'Member not found.', code: 'member_not_found' }, 404)
   if (account.status !== 'active' || !account.phone) {
     return conflict(c, 'member_reset_unavailable', 'Only an active phone + password account can be reset here.')
   }
-  const isAdmin = isAdminControlUser(user)
-  if (body.evidence === 'called_number_on_file') {
-    if (!isAdmin) return c.json({ error: 'Only an administrator can reset a password after a phone call.', code: 'member_reset_call_admin_only' }, 403)
-    if (!noteOf(body.note)) return c.json({ error: 'Add a note: which number you called and what the member confirmed.', code: 'member_link_note_required' }, 400)
-  }
-  // No code exists for a member who cannot sign in, so the call is taken on
-  // the admin's word (above) rather than verified.
+  if (!noteOf(body.note)) return c.json({ error: 'Add a note: how you identified the member (who, where, which number).', code: 'member_link_note_required' }, 400)
+  // No code exists for a member who cannot sign in, so identity is taken on
+  // the admin's word, recorded in the note, rather than verified.
   const evidence = checkMemberLinkEvidence({ evidence: body.evidence, note: body.note, isAdmin, checkCodeValid: true })
   if (!evidence.ok) return c.json({ error: evidence.error, code: evidence.code }, evidence.status)
   // A readable-but-random temporary password (no ambiguous characters).
