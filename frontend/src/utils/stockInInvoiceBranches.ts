@@ -22,3 +22,19 @@ export function stockInInvoiceBranchNames(
   const ids = String(group.branch_ids || '').split(',').map((id) => id.trim()).filter(Boolean)
   return ids.map((id) => labelled.get(id) || liveBranchNameById.get(id) || `#${id}`).join(', ')
 }
+
+export type StockInReportBranch = { id: number; name?: string | null; is_active?: number | boolean | null }
+
+// The report's Branch filter. Retired branches stay selectable -- old lots name them, and a filter that dropped them
+// could not reach those invoices -- but are tagged so nobody mistakes "Old Shop" for a live till. An older Worker
+// that sends no is_active flag is treated as all-active.
+export function stockInReportBranchOptions(
+  branches: readonly StockInReportBranch[],
+  retiredTag: string,
+): Array<{ value: string; label: string }> {
+  const retired = (branch: StockInReportBranch) => branch.is_active != null && !Number(branch.is_active)
+  return branches.map((branch) => {
+    const name = String(branch.name || `#${branch.id}`)
+    return { value: String(branch.id), label: retired(branch) ? `${name} (${retiredTag})` : name }
+  })
+}

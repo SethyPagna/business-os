@@ -109,6 +109,13 @@ async function main() {
     assert.equal(groups.invoices.length, 1)
     assert.deepEqual(groups.invoices[0].branch_labels, [{ id: 1, name: 'Shop' }], 'historical: the name at the time')
     assert.equal(groups.invoices[0].branch_ids, '1')
+    // The Branch filter still lists the retired branch (flagged), so the old invoice stays reachable through it.
+    const retired = groups.meta.branches.find((b) => b.id === 1)
+    assert.ok(retired, 'the retired branch is a filter option')
+    assert.equal(Number(retired.is_active), 0)
+    assert.deepEqual(groups.meta.branches.map((b) => Number(b.is_active)), [...groups.meta.branches.map((b) => Number(b.is_active))].sort((a, b) => b - a), 'live branches first')
+    const filtered = await json(app, '/suppliers/reports/stock-in-invoices?branch_id=1', f.env)
+    assert.equal(filtered.invoices.length, 1, 'filtering by the retired branch finds its invoice')
     assert.equal(Object.hasOwn(groups.invoices[0], 'branch_labels'), true)
     const lines = await json(app, `/suppliers/reports/stock-in-invoice-lines?supplier_key=${encodeURIComponent(groups.invoices[0].supplier_key)}&day=2026-09-05`, f.env)
     assert.equal(lines.lines.length, 1)

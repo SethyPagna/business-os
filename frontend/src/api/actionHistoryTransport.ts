@@ -88,6 +88,7 @@ const REPLAY_REFUSAL_KEYS: Readonly<Record<string, { undo: string; redo: string 
   undo_closed_products_merged: { undo: 'undo_refused_closed_by_merge', redo: 'redo_refused_closed_by_merge' },
   undo_closed_branch_retired: { undo: 'undo_refused_closed_branch_retired', redo: 'redo_refused_closed_branch_retired' },
   undo_closed_branch_cutover_move: { undo: 'undo_refused_closed_branch_cutover_move', redo: 'redo_refused_closed_branch_cutover_move' },
+  undo_closed_branch_cutover_product_moved: { undo: 'undo_refused_closed_branch_cutover_product_moved', redo: 'redo_refused_closed_branch_cutover_product_moved' },
   merge_conflict_retry: { undo: 'undo_refused_merge_conflict_retry', redo: 'redo_refused_merge_conflict_retry' },
   undo_refused: { undo: 'undo_refused_generic', redo: 'redo_refused_generic' },
 }

@@ -1122,6 +1122,22 @@ const REPLAY_DISPLAY_ONLY_COLUMNS: Readonly<Record<string, readonly string[]>> =
   movements: ['addressed_branch_name'],
 }
 
+// Revision families replay does NOT compare. A branch's revision moves on ANY edit of the branches row: the 0229
+// role backfill, the cutover's rename/role/default update, an owner editing the phone number. None of those
+// changes what Undo of a stock session writes (stock, lots and movements, all compared on their own), so a
+// compared 'branch' revision turned every earlier session at that branch into an Undo that can only fail with a
+// generic "Stock changed". What a branch change CAN invalidate is the branch being switched off: replay asserts
+// that directly (is_active) instead. Older snapshots carry 'branch' entries; they are filtered out of the saved
+// state below so those sessions compare on the same footing as new ones.
+const REPLAY_UNCOMPARED_REVISION_TYPES = ['branch'] as const
+
+// The saved `expected` state without the uncompared revision families. json_each keeps array order and number
+// text, so a snapshot that never had such entries compares byte-for-byte as before.
+const REPLAY_EXPECTED_SQL = `(SELECT json_set(json_extract(payload_json,'$.expected'),'$.revisions',
+  json((SELECT json_group_array(json(rev.value)) FROM json_each(json_extract(payload_json,'$.expected'),'$.revisions') rev
+    WHERE json_extract(rev.value,'$.entity_type') NOT IN (${REPLAY_UNCOMPARED_REVISION_TYPES.map(type => `'${type}'`).join(',')}))))
+  FROM undo_snapshots WHERE id=@snapshotId)`
+
 async function stockReplayStateSql(env: Env, memberBranchNamesCaptured = true): Promise<string> {
   const fields: string[] = []
   for (const [key, [table, where]] of Object.entries(REPLAY_TABLES)) {
@@ -1157,6 +1173,7 @@ async function stockReplayStateSql(env: Env, memberBranchNamesCaptured = true): 
       FROM revision_sources sources
       JOIN json_each(sources.groups_json) source
       JOIN json_each(source.value) item
+      WHERE json_extract(item.value,'$.entity_type') NOT IN (${REPLAY_UNCOMPARED_REVISION_TYPES.map(type => `'${type}'`).join(',')})
     ) SELECT json_object(${fields.join(',')},
       'revisions',json((SELECT json_group_array(json_object('entity_type',entity_type,'entity_key',entity_key,'revision',revision)) FROM
         (SELECT w.entity_type,w.entity_key,COALESCE(r.revision,0) revision FROM wanted w LEFT JOIN stock_session_revisions r
@@ -1226,7 +1243,8 @@ export async function replayStockSession(env: Env, user: SessionUser, direction:
     assertion(`EXISTS(SELECT 1 FROM stock_session_operations o JOIN action_history h ON h.id=o.history_id
       JOIN undo_snapshots s ON s.id=o.snapshot_id WHERE o.id=@id AND o.history_id=@history AND o.generation=@generation
       AND h.status=@status AND s.payload_json=@snapshot)`, { id: op.id, history: historyId, generation, status: expectedStatus, snapshot: op.payload_json }),
-    assertion(`${stateSql}=(SELECT json_extract(payload_json,'$.expected') FROM undo_snapshots WHERE id=@snapshotId)`, { id: op.id, snapshotId: op.snapshot_id }),
+    assertion(`NOT EXISTS(SELECT 1 FROM stock_session_members m WHERE m.operation_id=@id AND NOT EXISTS(SELECT 1 FROM branches b WHERE b.id=m.branch_id AND b.is_active=1))`, { id: op.id }),
+    assertion(`${stateSql}=${REPLAY_EXPECTED_SQL}`, { id: op.id, snapshotId: op.snapshot_id }),
   ]
   for (const key of REPLAY_MUTATION_ORDER[direction]) {
     const [table] = REPLAY_TABLES[key]
@@ -1323,7 +1341,29 @@ export async function replayStockSession(env: Env, user: SessionUser, direction:
   try { await db.batch(statements) } catch (error) {
     const saved = await db.prepare('SELECT o.generation,h.status FROM stock_session_operations o JOIN action_history h ON h.id=o.history_id WHERE o.id=@id').get<Row>({ id: op.id })
     if (saved?.generation === generation + 1 && saved.status === targetStatus) return
-    if (/constraint/i.test(String(error))) fail('Stock, metadata, references, or revision changed. Nothing was reversed; refresh history.')
+    if (/constraint/i.test(String(error))) {
+      if (await movedByBranchCutover(db, String(op.id))) fail(BRANCH_CUTOVER_PRODUCT_MOVED_MESSAGE, 409, BRANCH_CUTOVER_PRODUCT_MOVED_CODE)
+      fail('Stock, metadata, references, or revision changed. Nothing was reversed; refresh history.')
+    }
     throw error
   }
+}
+
+// The branch consolidation merged Shop's stock into LC Store with one official transfer per product. A session
+// that received or counted one of those products no longer owns the balances it wrote: Undo would take its
+// quantity out of a merged total. That Undo stays refused, but with the cutover's own code (the client restates it
+// in the operator's language), never the generic "Stock changed". The marker is lib/branchCutoverHistory.ts's
+// UNDO_CLOSED_BRANCH_CUTOVER_MOVE, restated because this module's harnesses wire imports by name (the
+// cutover test pins it equal). Read only on the refusal path: no index serves it, and it never runs for an
+// Undo that succeeds.
+const BRANCH_CUTOVER_MOVE_MARKER = 'undo_closed:branch_cutover_move'
+export const BRANCH_CUTOVER_PRODUCT_MOVED_CODE = 'undo_closed_branch_cutover_product_moved'
+export const BRANCH_CUTOVER_PRODUCT_MOVED_MESSAGE = 'Undo closed: this product\'s stock was merged into LC Store by the branch consolidation after it was recorded. Make a new change instead. Nothing was changed.'
+async function movedByBranchCutover(db: D1Compat, operationId: string): Promise<boolean> {
+  const row = await db.prepare(`SELECT 1 AS moved FROM stock_session_members m
+    JOIN stock_transfers st ON st.product_id = m.product_id
+    JOIN transfer_operation_receipts r ON r.id = st.receipt_id
+    JOIN action_history h ON h.id = r.action_history_id
+    WHERE m.operation_id = @id AND h.last_error = @marker LIMIT 1`).get<Row>({ id: operationId, marker: BRANCH_CUTOVER_MOVE_MARKER })
+  return Boolean(row)
 }

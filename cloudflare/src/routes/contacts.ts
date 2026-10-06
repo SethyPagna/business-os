@@ -2518,7 +2518,9 @@ app.get('/suppliers/reports/stock-in-invoices', async (c) => {
   }
 
   const [branches, supplierOptions] = await Promise.all([
-    db.prepare('SELECT id, name FROM branches WHERE is_active = 1 ORDER BY id ASC').all<{ id: number; name: string | null }>(),
+    // Retired branches stay in the filter, flagged is_active = 0: old lots name them, and a filter that dropped
+    // them could not reach those invoices (the branches table is a handful of rows, no scan).
+    db.prepare('SELECT id, name, is_active FROM branches ORDER BY is_active DESC, id ASC').all<{ id: number; name: string | null; is_active: number | null }>(),
     db.prepare(`
       SELECT t.supplier_key AS key, MAX(t.supplier_display) AS name
       FROM (${STOCK_IN_REPORT_SOURCE}) t
