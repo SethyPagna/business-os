@@ -124,7 +124,6 @@ const inventoryRequire = (id) => {
   if (id === '../lib/branchRoleGuards') return branchGuards
   if (id === '../lib/canonicalBranchIdentity') return canonicalIdentity
   if (id === '../lib/actorSnapshot') return { actorSnapshot: (user) => user?.name || null }
-  if (id === '../lib/operationWriteReadiness') return loadModule('lib/operationWriteReadiness.ts', require)
   if (id === '../lib/movementCostSnapshot') return movementCostSnapshot
   if (id === '../lib/transferOperation') return loadModule('lib/transferOperation.ts', (dep) => {
     if (dep === './movementCostSnapshot') return movementCostSnapshot

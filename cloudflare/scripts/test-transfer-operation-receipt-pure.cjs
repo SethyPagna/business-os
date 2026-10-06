@@ -24,7 +24,7 @@ function wrapDb() {
     },
   }
 }
-const realLibraries = new Set(['continuousReadWindow', 'movementCostSnapshot', 'operationWriteReadiness', 'db', 'sqlBinding', 'batchCode', 'productBatches', 'branchRoles', 'branchRoleGuards', 'canonicalBranchIdentity', 'transferOperationReceipt', 'transferOperation', 'permissions', 'actorSnapshot', 'undoAppliers'])
+const realLibraries = new Set(['continuousReadWindow', 'movementCostSnapshot', 'db', 'sqlBinding', 'batchCode', 'productBatches', 'branchRoles', 'branchRoleGuards', 'canonicalBranchIdentity', 'transferOperationReceipt', 'transferOperation', 'permissions', 'actorSnapshot', 'undoAppliers'])
 realLibraries.add('moneyPrecision')
 realLibraries.add('acquisitionCostAccess')
 realLibraries.add('businessMaintenanceGuard')

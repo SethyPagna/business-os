@@ -28,7 +28,7 @@ const admin = ['AdminRoot', 'vendor-react', 'app-routing', 'app-shell', 'app-sha
   'shared-ui', 'api-http-core', 'api-http-state', 'app-api', 'app-auth', 'app-bootstrap']
 const login = ['AdminRoot', 'app-shared', 'auth-login', 'app-auth', 'app-bootstrap']
 const publicChunks = ['PublicCatalogRoot', 'app-shell', 'app-shared', 'catalog-public-core', 'catalog-public-utils',
-  'catalog-public', 'catalog-icons', 'catalog-products', 'route-sync-utils', 'app-portal', 'portal-tools']
+  'catalog-public', 'catalog-icons', 'catalog-products', 'route-sync-utils', 'app-portal']
 const productShared = ['product-read-api', 'product-shared', 'productDisplayHelpers',
   'route-sync-utils', 'settings-refresh', 'app-api', 'shared-ui']
 const otherRoutes: Record<string, string[]> = {

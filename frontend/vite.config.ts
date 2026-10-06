@@ -244,7 +244,6 @@ const routePreloadChunkNames = {
     'catalog-products',
     'route-sync-utils',
     'app-portal',
-    'portal-tools',
   ],
   products: [
     'Products',
@@ -938,12 +937,6 @@ function manualChunks(id: string): string | undefined {
     }
     if (normalized.includes('/src/components/catalog/portalContentI18n.ts')) {
       return 'portal-content-i18n'
-    }
-    if (
-      normalized.includes('/src/components/catalog/portalSubmissionHelpers.ts')
-      || normalized.includes('/src/components/catalog/portalAssistantHelpers.ts')
-    ) {
-      return 'portal-tools'
     }
     if (normalized.includes('/src/components/catalog/')) return 'catalog'
     if (normalized.includes('/src/components/utils-settings/ResetData.tsx')) return 'backup-reset-tools'
