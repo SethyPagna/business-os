@@ -108,6 +108,24 @@ export function revertedByMovementIdSql(movement: string): string {
   return `(SELECT MIN(rv.id) FROM inventory_movements rv WHERE rv.reference_id = 'revert:' || CAST(${movement}.id AS TEXT))`
 }
 
+/**
+ * REVERT-SET (owner, 6 Oct 2026: "I don't see the revert in stock changes"):
+ * 1 when a stock-in session's History Undo or Redo wrote this row
+ * (lib/stockSession.ts replay). Such a row reads as a plain Remove/Add whose
+ * only hint is an editable reason, so the ledger names it from immutable
+ * facts instead -- the same ones stockMovementReplay.ts resolves it by: its
+ * reference is a replayed session's rowid, and it is written after, and is
+ * not one of, that session's own receipt lines (a sale id that happens to
+ * equal a small rowid fails both).
+ */
+export function sessionReplaySql(movement: string): string {
+  return `CASE WHEN ${movement}.movement_type IN ('add', 'remove') AND EXISTS (
+      SELECT 1 FROM stock_session_operations so
+      WHERE so.rowid = ${movement}.reference_id AND so.generation > 0
+        AND ${movement}.id > (SELECT MAX(sm.movement_id) FROM stock_session_members sm WHERE sm.operation_id = so.id))
+    AND NOT EXISTS (SELECT 1 FROM stock_session_members sm WHERE sm.movement_id = ${movement}.id) THEN 1 ELSE 0 END`
+}
+
 /** A movement's quantity with the direction its type implies (see LEDGER_OUT_TYPES). */
 export function movementSignedQuantitySql(movement: string): string {
   return `CASE WHEN ${movement}.movement_type IN (${OUT_LIST}) THEN -ABS(COALESCE(${movement}.quantity, 0)) ELSE ABS(COALESCE(${movement}.quantity, 0)) END`
@@ -474,7 +492,7 @@ export function buildStockLedgerQuery(filters: StockLedgerFilters = {}): StockLe
       m.unit_cost_usd, m.unit_cost_khr, m.total_cost_usd, m.total_cost_khr,
       m.reason, m.reference_id, ${movementActorNameSql('m')} AS user_name, m.created_at,
       ${revertsMovementIdSql('m')} AS reverts_movement_id, ${revertedByMovementIdSql('m')} AS reverted_by_movement_id,
-      ${revertChainOpenSql('m')} AS reverted_now,
+      ${revertChainOpenSql('m')} AS reverted_now, ${sessionReplaySql('m')} AS session_replay,
       ${movementReferenceSelectSql('m')},
       m.batch_id, b.lot_code AS batch_lot_code, b.received_at AS batch_received_at,
       b.supplier_id AS batch_supplier_id, b.supplier_name AS batch_supplier_name,

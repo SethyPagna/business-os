@@ -15,8 +15,31 @@ export type StockMovementRevertPreview = {
   lineCount: number
 }
 
+// REVERT-SET (Worker lib/stockRevertEffect.ts): the exact change a confirmed
+// Revert makes, and the Sets still applied after the row that it leaves alone.
+export type StockRevertEffect = {
+  quantity: number
+  batchId: number | null
+  receivedAt: string | null
+  lotCode: string | null
+  branchId: number
+  branchName: string | null
+  branchBefore: number
+  branchAfter: number
+}
+
+export type LaterOpenSet = {
+  movementId: number
+  quantity: number
+  batchId: number | null
+  receivedAt: string | null
+  createdAt: string | null
+}
+
 // Confirmation must use a fresh server decision, never a cached generation.
-export function getStockMovementRevertPreview(id: number): Promise<{ success: true; revert: StockMovementRevertPreview }> {
+export function getStockMovementRevertPreview(id: number): Promise<{
+  success: true; revert: StockMovementRevertPreview; effect?: StockRevertEffect | null; laterSets?: LaterOpenSet[]
+}> {
   return apiFetch('GET', `/api/action-history/movements/${id}/revert-preview`)
     .catch((error: unknown) => localizeReplayRefusal(error, 'undo'))
 }
