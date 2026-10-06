@@ -159,7 +159,8 @@ export type StaffMemberView = {
   methods: { password: boolean; telegram: boolean }
   linkVersion: number
   customer: { id: number; name: string | null; membershipNumber: string | null; available: boolean } | null
-  createdFromSignup: boolean
+  // null when withheld from a links-only caller (customerVisible: false).
+  createdFromSignup: boolean | null
   createdAt: string | null
   lastSeenAt: string | null
   closedAt: string | null
@@ -167,7 +168,7 @@ export type StaffMemberView = {
   conflicts: MemberConflict[]
   // Linked by the old sign-up to a customer it did not create, never checked
   // by staff since (filter=legacy_claims).
-  legacyClaim: boolean
+  legacyClaim: boolean | null
   // false when the caller lacks Contacts view: customer, legacyMembershipId
   // and conflicts were withheld (they may exist), see redactStaffMember.
   customerVisible: boolean
@@ -208,7 +209,17 @@ export function staffMemberView(row: MemberRow): StaffMemberView {
 
 export function redactStaffMember(view: StaffMemberView, canSeeCustomers: boolean): StaffMemberView {
   if (canSeeCustomers) return view
-  return { ...view, legacyMembershipId: null, customer: null, conflicts: [], customerVisible: false }
+  // Provenance (createdFromSignup, legacyClaim) says how the member came to a
+  // customer -- and so that one exists -- and is withheld too (round 3).
+  return {
+    ...view,
+    legacyMembershipId: null,
+    customer: null,
+    conflicts: [],
+    createdFromSignup: null,
+    legacyClaim: null,
+    customerVisible: false,
+  }
 }
 
 function memberViewFor(c: Ctx, row: MemberRow): StaffMemberView {
@@ -292,7 +303,8 @@ app.get('/', async (c) => {
   if (!where) return c.json({ error: 'Unknown filter.', code: 'invalid_filter' }, 400)
   const canSeeCustomers = viewerCanSeeCustomers(c)
   // Both conflicts describe a customer (removed, or holding this phone).
-  if (filter === 'conflicts' && !canSeeCustomers) return contactsViewRequired(c)
+  // legacy_claims selects on the old sign-up's claim of a customer.
+  if ((filter === 'conflicts' || filter === 'legacy_claims') && !canSeeCustomers) return contactsViewRequired(c)
   const limit = Math.min(LIST_MAX_LIMIT, positiveInt(c.req.query('limit')) ?? LIST_DEFAULT_LIMIT)
   const offset = nonNegativeInt(c.req.query('offset')) ?? 0
   const q = String(c.req.query('q') || '').trim().slice(0, 80)
@@ -416,6 +428,12 @@ app.get('/:id', async (c) => {
   return c.json({ member })
 })
 
+// A customer merge, and the pre-G38 sign-up's link, are customer facts, so a
+// links-only caller sees the member-side effect only: re-pointed -> relink,
+// unlinked -> unlink, carried forward -> link. A relabelled event also drops
+// its system evidence and a "system" actor, which would give it away.
+const LINKS_ONLY_HISTORY_ACTION: Record<string, string> = { merge_repoint: 'relink', merge_unlink: 'unlink', legacy_import: 'link' }
+
 type EventRow = {
   id: number
   account_id: number
@@ -460,30 +478,39 @@ app.get('/:id/history', async (c) => {
   return c.json({
     linkVersion: Number(account.link_version),
     customerVisible: canSeeCustomers,
-    events: rows.map((row) => ({
-      id: Number(row.id),
-      action: row.action,
-      fromCustomer: customerRef(row.from_customer_id, row.from_name, row.from_membership_number),
-      toCustomer: customerRef(row.to_customer_id, row.to_name, row.to_membership_number),
-      evidence: row.evidence,
-      reasonCode: row.reason_code,
-      note: row.note,
-      matchBasis: row.match_basis ? JSON.parse(row.match_basis) : null,
-      groupId: row.group_id,
-      revertsEventId: row.reverts_event_id == null ? null : Number(row.reverts_event_id),
-      linkRequestId: row.link_request_id == null ? null : Number(row.link_request_id),
-      linkVersionAfter: Number(row.link_version_after),
-      actorName: row.actor_name,
-      createdAt: row.created_at,
-      // The server checks again on Revert; this only decides whether to show the icon.
-      // A closed member is never reverted (E2), and a links-only user cannot
-      // revert an event that would put the member back on a customer.
-      revertible: MEMBER_REVERTIBLE_ACTIONS.includes(row.action)
-        && account.status !== 'closed'
-        && Number(row.reverted) === 0
-        && Number(row.link_version_after) === Number(account.link_version)
-        && (canSeeCustomers || row.from_customer_id == null),
-    })),
+    events: rows.map((row) => {
+      const relabelled = !canSeeCustomers && Object.prototype.hasOwnProperty.call(LINKS_ONLY_HISTORY_ACTION, row.action)
+      return {
+        id: Number(row.id),
+        action: relabelled ? LINKS_ONLY_HISTORY_ACTION[row.action] : row.action,
+        fromCustomer: customerRef(row.from_customer_id, row.from_name, row.from_membership_number),
+        toCustomer: customerRef(row.to_customer_id, row.to_name, row.to_membership_number),
+        evidence: relabelled ? null : row.evidence,
+        // For a links-only caller, every field that could describe the customer
+        // side is withheld: the reason (signup_claimed_customer, moved ...), the
+        // match basis (phone/name of the customer) and the group id (a Move's
+        // two members share it, i.e. one customer).
+        reasonCode: canSeeCustomers ? row.reason_code : null,
+        note: row.note,
+        matchBasis: canSeeCustomers && row.match_basis ? JSON.parse(row.match_basis) : null,
+        groupId: canSeeCustomers ? row.group_id : null,
+        revertsEventId: row.reverts_event_id == null ? null : Number(row.reverts_event_id),
+        linkRequestId: row.link_request_id == null ? null : Number(row.link_request_id),
+        linkVersionAfter: Number(row.link_version_after),
+        actorName: relabelled && (row.action === 'legacy_import' || !row.actor_name || row.actor_name.trim().toLowerCase() === 'system')
+          ? null
+          : row.actor_name,
+        createdAt: row.created_at,
+        // The server checks again on Revert; this only decides whether to show the icon.
+        // A closed member is never reverted (E2), and a links-only user cannot
+        // revert an event that would put the member back on a customer.
+        revertible: MEMBER_REVERTIBLE_ACTIONS.includes(row.action)
+          && account.status !== 'closed'
+          && Number(row.reverted) === 0
+          && Number(row.link_version_after) === Number(account.link_version)
+          && (canSeeCustomers || row.from_customer_id == null),
+      }
+    }),
   })
 })
 
