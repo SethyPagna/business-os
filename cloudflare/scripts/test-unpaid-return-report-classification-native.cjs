@@ -72,12 +72,18 @@ async function replay(f, receipt, direction) {
 // RET-A F1 (owner rule 29 Sep, confirmed 5 Oct): a return on a Not Paid sale lowers the
 // debt and the sale stays Not Paid while it still owes, so the raw status no longer
 // says how many units are still out; each step names its remaining units itself.
+// RET-A LH-16 (verifier M3, 6 Oct 2026): nothing is paid on this sale, so it
+// owes exactly the value still out. With every unit back its debt is cleared:
+// the returns code moved it to Returned and it is a settled sale like any
+// other -- out of the Not Paid detail, a paid transaction, and the customer
+// drill's recorded payable basis (no refund subtraction there, as for any sale).
 async function assertUnpaidConsumers(f, rawStatus, remaining, label) {
+  const owes = remaining > 0
   const env = { DB: f.route }
   const snapshot = await analytics.readSalesReportSnapshot(env, filters)
   const totals = analytics.salesTotalsFromSnapshot(snapshot)
   assert.equal(totals.collected_total_usd, 0, `${label}: collected`)
-  assert.equal(totals.pending_tx_count, 1, `${label}: pending count`)
+  assert.equal(totals.pending_tx_count, owes ? 1 : 0, `${label}: pending count`)
   const row = analytics.businessSummarySalesRowsFromSnapshot(snapshot)[0]
   assert.equal(row.collected_total_usd, 0, `${label}: export row collected`)
   assert.equal(row.status, rawStatus, `${label}: raw export status is retained`)
@@ -92,12 +98,12 @@ async function assertUnpaidConsumers(f, rawStatus, remaining, label) {
   assert.equal(day.totals.pending_revenue_usd, totals.pending_revenue_usd, `${label}: day pending amount`)
   assert.equal(day.sales[0].collected_usd, 0, `${label}: day row collected`)
   const cashier = (await analytics.getSalesGroupedTotals(env, filters, 'cashier'))[0]
-  assert.equal(cashier.paid_tx_count, 0, `${label}: live SQL cashier paid counter`)
+  assert.equal(cashier.paid_tx_count, owes ? 0 : 1, `${label}: live SQL cashier paid counter`)
   assert.equal(cashier.pending_revenue_usd, totals.pending_revenue_usd, `${label}: cashier pending amount`)
   assert.equal(cashier.pending_cost_usd, totals.pending_cost_usd, `${label}: cashier pending COGS`)
   assert.equal(cashier.pending_profit_usd, totals.pending_profit_usd, `${label}: cashier pending profit`)
   const customer = await analytics.getCustomerSalesTotals(env, { ...filters, customerId: 7 })
-  assert.equal(customer.collected_usd, 0, `${label}: direct SQL customer eligibility`)
+  assert.equal(customer.collected_usd, owes ? 0 : 19, `${label}: direct SQL customer eligibility`)
   const exported = await send(reports, f, 'GET', `/business-summary/sales?intent=export&startDate=${date}&endDate=${date}`)
   assert.equal(exported.totals.collected_total_usd, 0, `${label}: actual export route total`)
   assert.equal(exported.totals.pending_revenue_usd, row.pending_revenue_usd, `${label}: actual export pending amount`)
@@ -163,9 +169,14 @@ function sqlEligibility(f, id, retained = 'sales.status_before_return') {
     assert.equal(rawFilter.tx_count, 0, 'raw status filter semantics remain unchanged')
     console.log('PASS partial/full/successive returns, cancel-final, restore and server Undo/Redo; JS/SQL, export, day, payment, cashier, customer, Telegram and shift classification')
 
+    // The retained status decides only where no return lowered the debt (a
+    // return recorded before 0234): put the returns in that shape first.
+    f.raw.prepare('UPDATE returns SET owed_reduction_usd=0, refund_currency=NULL WHERE sale_id=?').run([sale.id])
+    const retainedOnly = await send(reports, f, 'GET', `/business-summary/sales?intent=export&startDate=${date}&endDate=${date}`)
+    assert.equal(retainedOnly.totals.pending_revenue_usd, 0)
     f.raw.prepare("UPDATE sales SET status_before_return='completed' WHERE id=?").run([sale.id])
     const changed = await send(reports, f, 'GET', `/business-summary/sales?intent=export&startDate=${date}&endDate=${date}`)
-    assert.notEqual(changed.export_token, full.exported.export_token, 'retained classification belongs to export identity')
+    assert.notEqual(changed.export_token, retainedOnly.export_token, 'retained classification belongs to export identity')
     f.raw.prepare("UPDATE sales SET status_before_return='awaiting_payment' WHERE id=?").run([sale.id])
     const originalPrepare = f.route.prepare.bind(f.route)
     let passes = 0
@@ -248,9 +259,11 @@ function sqlEligibility(f, id, retained = 'sales.status_before_return') {
     assert.equal(totals.pending_profit_usd, 1.5)
     await createReturn(disposition, sale, 'unpaid-none-full', 1, 'none')
     const full = await analytics.getSalesTotals({ DB: disposition.route }, filters)
-    assert.equal(full.pending_revenue_usd, 0)
-    assert.equal(full.pending_cost_usd, 8)
-    assert.equal(full.pending_profit_usd, -8, 'a real recognized loss is not clamped at the pending display')
+    // RET-A LH-16: both units back clears the debt (nothing was paid), so the
+    // sale leaves the Not Paid detail; the loss stays recognized, unclamped.
+    assert.equal(full.pending_tx_count, 0, 'a debt-cleared sale is not Not Paid')
+    assert.deepEqual([full.pending_revenue_usd, full.pending_cost_usd, full.pending_profit_usd], [0, 0, 0])
+    assert.equal(full.profit_usd, -8, 'a real recognized loss is not clamped')
     console.log('PASS actual non-restock partial/full returns preserve COGS and unfloored pending loss')
   } finally { disposition.raw.db.close() }
   const floor = h.fixture()

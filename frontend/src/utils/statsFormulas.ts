@@ -235,7 +235,11 @@ export function saleListRevenueUsd(rows: readonly SaleRevenueRow[]): number {
  */
 export function isCreditSale(sale: SaleRevenueRow): boolean {
   const status = saleStatus(sale)
-  return status === 'awaiting_payment' || (['partial_return', 'returned'].includes(status) && sale.status_before_return === 'awaiting_payment')
+  if (status === 'awaiting_payment') return true
+  if (!(['partial_return', 'returned'].includes(status) && sale.status_before_return === 'awaiting_payment')) return false
+  // RET-A LH-16, the kernel's reportAwaiting: a return status whose returns
+  // lowered the debt was set by the returns code because the sale owes nothing.
+  return !(num(sale.return_owed_reduction_usd) > 0)
 }
 
 /**

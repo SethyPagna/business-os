@@ -490,6 +490,19 @@ export function recognizedExpr(p: string): string { return `${saleStatusExpr(p)}
 export function reportingSaleStatusExpr(p: string, retainedStatusExpr = 'NULL'): string {
   return `CASE WHEN ${saleStatusExpr(p)} IN ('partial_return', 'returned') AND ${retainedStatusExpr} = 'awaiting_payment' THEN 'awaiting_payment' ELSE ${saleStatusExpr(p)} END`
 }
+/**
+ * The retained-status argument of reportingSaleStatusExpr for `sales`: the
+ * sale's status_before_return, except where an active customer return lowered
+ * its debt -- RET-A LH-16, the SQL twin of reportAwaiting: the returns code put
+ * such a sale in a return status because it owes nothing.
+ */
+async function retainedNotPaidExpr(db: ReturnType<typeof getDb>): Promise<string> {
+  if (!(await reportTableColumns(db, 'sales')).has('status_before_return')) return 'NULL'
+  if (!(await reportTableColumns(db, 'returns')).has('owed_reduction_usd')) return 'sales.status_before_return'
+  return `(CASE WHEN EXISTS(SELECT 1 FROM returns lowered WHERE lowered.sale_id=sales.id AND lowered.owed_reduction_usd>0
+    AND COALESCE(lowered.status,'completed')<>'cancelled' AND COALESCE(lowered.return_scope,'customer')='customer')
+    THEN NULL ELSE sales.status_before_return END)`
+}
 export function awaitingExpr(p: string, retainedStatusExpr = 'NULL'): string { return `(${reportingSaleStatusExpr(p, retainedStatusExpr)}) = 'awaiting_payment'` }
 export function collectedSaleExpr(p: string, retainedStatusExpr = 'NULL'): string { return `(${reportingSaleStatusExpr(p, retainedStatusExpr)}) NOT IN ('cancelled', 'awaiting_payment')` }
 // Net sale value (subtotal minus both discounts) -- tax and delivery excluded.
@@ -1133,7 +1146,9 @@ async function readSalesReportPass(
   const items = await readReportSaleItems(db, f, primary, rowBudget, `SELECT si.id,si.sale_id,${itemColumn('product_id','NULL')},${itemColumn('product_name',"''")},si.quantity,
       ${itemColumn('total_usd','0')},si.cost_price_usd,${itemColumn('product_discount_usd','0')},${itemColumn('manual_discount_usd','0')}
     FROM sale_items si NOT INDEXED CROSS JOIN sales s ON s.id=si.sale_id WHERE ${primary.sql}`)
-  const returns = await reportKeysetRows(db, `SELECT r.id,r.sale_id,r.total_refund_usd,r.status,r.return_scope${returnPrecision}
+  // RET-A LH-16: the debt each return lowered (0234); a pre-0234 database has none.
+  const returnOwed = returnColumns.has('owed_reduction_usd') ? ',r.owed_reduction_usd' : ''
+  const returns = await reportKeysetRows(db, `SELECT r.id,r.sale_id,r.total_refund_usd,r.status,r.return_scope${returnPrecision}${returnOwed}
     FROM returns r CROSS JOIN sales s ON s.id=r.sale_id WHERE r.sale_id IS NOT NULL
       AND COALESCE(r.status,'completed')<>'cancelled' AND COALESCE(r.return_scope,'customer')='customer'
       AND (${primary.sql})`, 'r.id', primary.params, rowBudget)
@@ -1252,9 +1267,26 @@ function reportMoney(row: ReportScalarRow, key: string, version: 0 | 1, nullable
   return ReportExactDecimal.money(value, version)
 }
 function reportStatus(row: ReportScalarRow): string { return String(row.sale_status || 'completed') }
-function reportAwaiting(row: ReportScalarRow): boolean {
+/**
+ * The Not Paid (credit) cohort: the Not Paid status, and a sale sold Not Paid
+ * that a return moved to a return status -- but only while it still owes.
+ *
+ * RET-A LH-16 (verifier M3: $10 sold Not Paid, $7 paid, $4 back -> $3 lowered
+ * the debt, owes $0, Partial return). Since 0234 the returns code decides this
+ * itself: a return on a debt sale lowers the debt first, and the sale stays
+ * (or goes back to) Not Paid while it still owes, else takes its return status
+ * (returnRefundSplit.ts saleStatusWithReturns, on every create, edit, cancel
+ * and restore). So a sale in a return status whose active returns lowered any
+ * debt was found to owe nothing; it is a collected sale like any other. A
+ * return status with no debt lowered is a return recorded before 0234 (cash
+ * only): it still reads as owing, as the Sales page reads it, until the held
+ * 0238 backfill splits it.
+ */
+function reportAwaiting(row: ReportScalarRow, saleReturns: readonly ReportScalarRow[] = []): boolean {
   const status = reportStatus(row)
-  return status === 'awaiting_payment' || (['partial_return', 'returned'].includes(status) && row.status_before_return === 'awaiting_payment')
+  if (status === 'awaiting_payment') return true
+  if (!(['partial_return', 'returned'].includes(status) && row.status_before_return === 'awaiting_payment')) return false
+  return !saleReturns.some((returned) => Number(returned.owed_reduction_usd) > 0)
 }
 function reportHeaderAdjustment(row: ReportScalarRow, version: 0 | 1): ReportExactDecimal {
   const owns = (key: string) => Object.prototype.hasOwnProperty.call(row, key)
@@ -1361,7 +1393,7 @@ function reportSaleFacts(snapshot: SalesReportSnapshot): ReportSaleFacts[] {
     const net = rawNet.max(ReportExactDecimal.zero())
     const valued = subtotal.isPositive() && !rawNet.isNegative()
     const recognized = reportStatus(sale) !== 'cancelled'
-    const awaiting = reportAwaiting(sale)
+    const awaiting = reportAwaiting(sale, returns.get(Number(sale.id)) || [])
     const adjustment = reportHeaderAdjustment(sale, version)
     let refundPaid = ReportExactDecimal.zero()
     let legacyRefundPaid = ReportExactDecimal.zero()
@@ -2120,6 +2152,11 @@ function deliveryContactTotalsFromSnapshot(
     return group
   }
   const requestedContact = f.contactId == null || f.contactId === '' ? null : Number(f.contactId)
+  const returnsBySale = new Map<number, ReportScalarRow[]>()
+  for (const returned of snapshot.returns) {
+    const list = returnsBySale.get(Number(returned.sale_id)) || []
+    list.push(returned); returnsBySale.set(Number(returned.sale_id), list)
+  }
   for (const sale of snapshot.sales) {
     if (Number(sale.is_delivery) !== 1) continue
     const id = sale.delivery_contact_id == null ? null : Number(sale.delivery_contact_id)
@@ -2132,7 +2169,7 @@ function deliveryContactTotalsFromSnapshot(
     group.deliveries += 1
     group.charged = group.charged.add(customerFee)
     if (String(sale.delivery_fee_paid_by || 'customer') === 'store') group.absorbed = group.absorbed.add(fee)
-    if (reportAwaiting(sale)) group.receivable = group.receivable.add(customerFee)
+    if (reportAwaiting(sale, returnsBySale.get(Number(sale.id)) || [])) group.receivable = group.receivable.add(customerFee)
     else if (reportStatus(sale) !== 'cancelled') {
       group.paid = group.paid.add(customerFee)
       const method = String(sale.payment_method || '').trim() || 'Unknown'
@@ -2393,7 +2430,7 @@ export async function getCustomerSalesTotals(
   f: SalesFilters & { customerId: number | string },
 ): Promise<CustomerSalesTotalsRow> {
   const db = getDb(env)
-  const retainedStatusExpr = (await reportTableColumns(db, 'sales')).has('status_before_return') ? 'sales.status_before_return' : 'NULL'
+  const retainedStatusExpr = await retainedNotPaidExpr(db)
   const { sql: whereSql, params } = whereActiveSales('sales', f)
   params.customerId = f.customerId
   const row = await db.prepare(`
@@ -2656,7 +2693,7 @@ interface CohortCounts { new_customer_count: number; return_customer_count: numb
 
 async function cohortCountsByGroup(env: Env, f: SalesFilters, keyExpr: string): Promise<Map<string, CohortCounts>> {
   const db = getDb(env)
-  const retainedStatusExpr = (await reportTableColumns(db, 'sales')).has('status_before_return') ? 'sales.status_before_return' : 'NULL'
+  const retainedStatusExpr = await retainedNotPaidExpr(db)
   const { sql: whereSql, params } = whereActiveSales('sales', f)
   const rows = await db.prepare(`
     ${FIRST_SALE_CTE}
