@@ -145,13 +145,13 @@ await runTest('snapshotHoldsStock reads branches first, the rollup only without 
 await runTest('Products.tsx: no Undo path writes stock; stock-moving actions refuse with WHY + WHERE', () => {
   const src = readFileSync(new URL('../src/components/products/Products.tsx', import.meta.url), 'utf8')
   assert.doesNotMatch(src, /restoreProductBranchStock|buildProductBranchStockAdjustments/, 'the snapshot stock restore is gone')
-  const restore = src.slice(src.indexOf('const restoreProductSnapshots = useCallback('), src.indexOf('const refuseStockUndo = useCallback('))
+  const restore = src.slice(src.indexOf('const restoreProductSnapshots = useCallback('), src.indexOf('const replayRecordedRemovals = useCallback('))
   assert.ok(restore.length > 0)
   assert.match(restore, /restoreProductSnapshotFields\(/)
   assert.doesNotMatch(restore, /adjustStock|transferStock/, 'the field restore never reaches a stock route')
-  for (const kind of ['out_of_stock', 'branch_move']) {
-    assert.match(src, new RegExp(`undoRefused: true,\\s*undo: \\(\\) => refuseStockUndo\\('${kind}'\\)`), `${kind} Undo explains instead of writing`)
-  }
+  // REVERT-SET: out-of-stock and branch-move Undo replay the RECORDED effect, not a snapshot figure.
+  assert.ok(src.includes("undo: () => replayRecordedRemovals(recorded, 'undo'"), 'out_of_stock Undo replays the recorded removal')
+  assert.ok(src.includes("undo: () => replayRecordedTransfers(transfers, 'undo'"), 'branch_move Undo replays the recorded transfer')
   const refusal = src.slice(src.indexOf('const refuseStockUndo = useCallback('), src.indexOf('const restoreDeletedProducts = useCallback('))
   assert.match(refusal, /product_undo_where_stock_changes/)
   assert.match(refusal, /product_undo_where_branch_history/)

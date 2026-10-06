@@ -3997,25 +3997,19 @@ function ProductsFullEditor() {
     (await loadProductWriteHelpers()).buildProductWritePayload(snapshot, { id: user?.id, name: user?.name })
   ), [user?.id, user?.name])
 
-  // Undo/Redo of a product edit, bulk update or price adjustment: the FIELDS
-  // only. None of those actions moves stock (the write payload carries none),
-  // so their Undo must not either. REVERT-SET: this used to also put every
-  // branch back to the snapshot's figure (snapshot - current), which re-added
-  // every unit sold since the edit and removed every unit received since.
-  const restoreProductSnapshots = useCallback(async (snapshots: ProductRecord[] = [], _reason = 'Restore products') => {
+  // F2 / RV-1 (5 Oct 2026): Undo/Redo here restores product FIELDS only. The
+  // old path also posted an /adjust "correction" of snapshot minus current per
+  // branch, writing an old stock figure over every sale, receipt and transfer
+  // since the snapshot. Stock is reversed only from its own ledgered record.
+  const restoreProductSnapshots = useCallback(async (snapshots: ProductRecord[] = []) => {
     if (!snapshots.length) return
-    const latestProducts = await fetchProductsByIds(normalizePositiveProductIds(snapshots, (snapshot) => snapshot?.id))
-    const latestMap = new Map((latestProducts || []).map((product) => [Number(product?.id || 0), product]))
-    const restoreRun = await runConcurrentTasks<ProductRecord, void>(snapshots, async (snapshot: ProductRecord) => {
-      const productId = Number(snapshot?.id || 0)
-      const currentProduct = latestMap.get(productId)
-      if (!currentProduct) return
-      const payload = await buildProductWritePayload(snapshot) as Record<string, unknown>
-      // Undo/redo writes over whatever is current: the version is the fresh read above.
-      payload.expectedUpdatedAt = currentProduct.updated_at || undefined
-      await runProductWriteMutation(() => productApi.updateProduct(productId, payload), 'Restore product')
+    const { restoreProductSnapshotFields } = await loadProductWriteHelpers()
+    await restoreProductSnapshotFields(snapshots, {
+      fetchProductsByIds: (ids) => fetchProductsByIds(ids),
+      buildPayload: (snapshot) => buildProductWritePayload(snapshot as ProductRecord) as Promise<Record<string, unknown>>,
+      // Undo/redo writes the snapshot's fields over the version just read.
+      updateProduct: (productId, payload) => runProductWriteMutation(() => productApi.updateProduct(productId, payload), 'Restore product'),
     })
-    if (restoreRun.failures.length) throw (restoreRun.failures[0]?.error || new Error('Failed to restore products'))
     await load(true)
   }, [buildProductWritePayload, fetchProductsByIds, load, runProductWriteMutation])
 
