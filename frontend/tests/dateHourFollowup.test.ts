@@ -75,7 +75,7 @@ test('actual Branch loader dispatches changed endpoints while pending and preven
   const state = { rows: [{ id: 7 }, { id: 8 }] }
   const shared = {
     useCallback: (fn: unknown) => fn, continuousRangeParams, loadedOnceRef: { current: true }, loadPromiseRef: { current: null }, loadPromiseModeRef: { current: '' }, loadPromiseKeyRef: { current: '' }, loadRequestRef: { current: 0 }, loadWatchdogRef: { current: null },
-    tab: 'transfers', transferFromFilter: 'all', transferToFilter: 'all', transferPage: 1, transferPageSize: 20, BRANCHES_LIST_TIMEOUT_MS: 1000, BRANCH_TRANSFERS_TIMEOUT_MS: 1000,
+    tab: 'transfers', transferFromFilter: 'all', transferToFilter: 'all', showConsolidationTransfers: false, transferPage: 1, transferPageSize: 20, BRANCHES_LIST_TIMEOUT_MS: 1000, BRANCH_TRANSFERS_TIMEOUT_MS: 1000,
     window: { clearTimeout() {}, setTimeout() { return 1 } }, tr: (_: string, fallback: string) => fallback, notify() {}, setLoading() {}, setLoadError() {}, setBranches() {}, setTransfers: (rows: any[]) => { state.rows = rows }, setTransferTotal() {}, isBranchRecord: () => true, isTransferRecord: () => true,
     beginTrackedRequest: (ref: any) => ++ref.current, isTrackedRequestCurrent: (ref: any, id: number) => ref.current === id, withLoaderTimeout: (fn: () => unknown) => fn(), getFirstLoaderError: () => '', getErrorMessage: String,
     settleLoaderMap: async (tasks: Record<string, () => unknown>) => ({ values: Object.fromEntries(await Promise.all(Object.entries(tasks).map(async ([key, fn]) => [key, await fn()]))), hasAnySuccess: true, errors: [] }),

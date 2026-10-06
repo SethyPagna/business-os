@@ -31,10 +31,11 @@ const EN = readPack('en')
 const KM = readPack('km')
 
 // The Worker's codes, read from its source rather than restated here.
-const workerSource = fs.readFileSync(path.join(WORKER, 'src', 'lib', 'undoAppliers.ts'), 'utf8')
+const workerSource = ['undoAppliers.ts', 'branchCutoverHistory.ts', 'stockSession.ts']
+  .map((file) => fs.readFileSync(path.join(WORKER, 'src', 'lib', file), 'utf8')).join('\n')
 function workerCode(name: string): string {
   const match = workerSource.match(new RegExp(`export const ${name} = '([a-z_]+)'`))
-  assert.ok(match, `cloudflare/src/lib/undoAppliers.ts no longer exports ${name}`)
+  assert.ok(match, `cloudflare/src/lib/undoAppliers.ts, branchCutoverHistory.ts and stockSession.ts no longer export ${name}`)
   return match[1]
 }
 
@@ -48,6 +49,11 @@ const KEYS = {
   needsOriginalTab: { undo: 'undo_refused_needs_original_tab', redo: 'redo_refused_needs_original_tab' },
   // A merge closed the stock-in session's Undo for good.
   closedByMerge: { undo: 'undo_refused_closed_by_merge', redo: 'redo_refused_closed_by_merge' },
+  // The branch consolidation closed this entry's Undo (done at the retired branch, or one of its own moves).
+  closedBranchRetired: { undo: 'undo_refused_closed_branch_retired', redo: 'redo_refused_closed_branch_retired' },
+  closedBranchCutoverMove: { undo: 'undo_refused_closed_branch_cutover_move', redo: 'redo_refused_closed_branch_cutover_move' },
+  // A stock session that received a product the consolidation merged into LC Store: still open, refused with this code.
+  closedBranchCutoverProductMoved: { undo: 'undo_refused_closed_branch_cutover_product_moved', redo: 'redo_refused_closed_branch_cutover_product_moved' },
   // Stock moved on a product while a merge redo was being saved; nothing was written.
   mergeConflictRetry: { undo: 'undo_refused_merge_conflict_retry', redo: 'redo_refused_merge_conflict_retry' },
   generic: { undo: 'undo_refused_generic', redo: 'redo_refused_generic' },
@@ -61,6 +67,9 @@ const CODE_KEYS = [
   ['UNDO_HISTORY_UNUSABLE_CODE', KEYS.historyUnusable],
   ['UNDO_NEEDS_ORIGINAL_TAB_CODE', KEYS.needsOriginalTab],
   ['UNDO_CLOSED_BY_MERGE_CODE', KEYS.closedByMerge],
+  ['UNDO_CLOSED_BRANCH_RETIRED_CODE', KEYS.closedBranchRetired],
+  ['UNDO_CLOSED_BRANCH_CUTOVER_MOVE_CODE', KEYS.closedBranchCutoverMove],
+  ['BRANCH_CUTOVER_PRODUCT_MOVED_CODE', KEYS.closedBranchCutoverProductMoved],
   ['UNDO_MERGE_CONFLICT_RETRY_CODE', KEYS.mergeConflictRetry],
   ['UNDO_REFUSED_CODE', KEYS.generic],
 ] as const
@@ -186,7 +195,7 @@ for (const language of ['en', 'km'] as const) {
 }
 
 await runCase('every new refusal names what was refused and that nothing changed, in both packs', () => {
-  for (const pair of [KEYS.historyStale, KEYS.alreadyDone, KEYS.historyUnusable, KEYS.needsOriginalTab, KEYS.closedByMerge, KEYS.mergeConflictRetry, KEYS.generic]) {
+  for (const pair of [KEYS.historyStale, KEYS.alreadyDone, KEYS.historyUnusable, KEYS.needsOriginalTab, KEYS.closedByMerge, KEYS.closedBranchRetired, KEYS.closedBranchCutoverMove, KEYS.mergeConflictRetry, KEYS.generic]) {
     for (const direction of ['undo', 'redo'] as const) {
       const english = String(EN[pair[direction]])
       assert.match(english, direction === 'undo' ? /\b[Uu]ndo(ne)?\b/ : /\b[Rr]edo(ne)?\b/, `en ${pair[direction]} names ${direction}`)

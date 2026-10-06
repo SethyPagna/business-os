@@ -36,6 +36,12 @@ import {
 } from '../lib/feeOperationReceipt'
 import type { Env } from '../index'
 
+// Historical label (owner rule: old records are never relabelled): the row's own branch-name snapshot
+// when it has a non-blank one, else the live directory name. The SAME expression as
+// branchHistoryNameSql in lib/stockInSessionsQuery.ts; test-cutover-ld-historical-readers-native.cjs pins every copy.
+const branchHistoryNameSql = (snapshot: string, fallback: string): string =>
+  `CASE WHEN trim(COALESCE(${snapshot},''),char(9,10,11,12,13,32,160,5760,8192,8193,8194,8195,8196,8197,8198,8199,8200,8201,8202,8232,8233,8239,8287,12288,65279))<>'' THEN ${snapshot} ELSE ${fallback} END`
+
 // Standalone Fees page (migrations/0018_fees.sql) -- manual-entry fee
 // records (tax, delivery, change, other) that can optionally be matched to
 // an existing sale but survive independently of it. This is distinct from
@@ -51,6 +57,10 @@ import type { Env } from '../index'
 // NOT silently fall back to any other permission.
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
+
+// A fee shows the branch name it was recorded under (fees.branch_name, 0236),
+// not today's directory name; the live name only fills a blank snapshot.
+const FEE_BRANCH_NAME_SQL = branchHistoryNameSql('f.branch_name', 'b.name')
 
 // The editable surface of an expense -- what a before/after row should show.
 // created_by/created_by_name and the id/timestamps are bookkeeping, not an
@@ -301,7 +311,7 @@ app.get('/', async (c) => {
   const offset = Math.max(toNumber(offsetParam, 0), 0)
 
   const rows = await db.prepare(`
-    SELECT f.*, s.receipt_number AS sale_receipt_number, b.name AS branch_name,
+    SELECT f.*, s.receipt_number AS sale_receipt_number, ${FEE_BRANCH_NAME_SQL} AS branch_name,
       dc.name AS delivery_contact_name
     FROM fees f
     LEFT JOIN sales s ON s.id = f.sale_id
@@ -486,7 +496,7 @@ app.get('/:id', async (c) => {
   const id = Number(c.req.param('id'))
   if (!Number.isFinite(id)) return c.json({ error: 'Invalid fee id' }, 400)
   const fee = await db.prepare(`
-    SELECT f.*, s.receipt_number AS sale_receipt_number, b.name AS branch_name,
+    SELECT f.*, s.receipt_number AS sale_receipt_number, ${FEE_BRANCH_NAME_SQL} AS branch_name,
       dc.name AS delivery_contact_name
     FROM fees f
     LEFT JOIN sales s ON s.id = f.sale_id
@@ -598,8 +608,8 @@ app.post('/', async (c) => {
   try {
     await db.batch([
       {
-        sql: `INSERT INTO fees (fee_type, label, amount_usd, amount_khr, fee_date, sale_id, branch_id, delivery_contact_id, notes, created_by, created_by_name, created_at, updated_at)
-          VALUES (@feeType, @label, @amountUsd, @amountKhr, @feeDate, @saleId, @branchId, @deliveryContactId, @notes, @createdBy, @createdByName, @now, @now)`,
+        sql: `INSERT INTO fees (fee_type, label, amount_usd, amount_khr, fee_date, sale_id, branch_id, branch_name, delivery_contact_id, notes, created_by, created_by_name, created_at, updated_at)
+          VALUES (@feeType, @label, @amountUsd, @amountKhr, @feeDate, @saleId, @branchId, (SELECT name FROM branches WHERE id = @branchId), @deliveryContactId, @notes, @createdBy, @createdByName, @now, @now)`,
         params: {
           feeType, label, amountUsd, amountKhr, feeDate, saleId, branchId,
           deliveryContactId, notes, createdBy: user.id, createdByName: actorName, now,
@@ -724,6 +734,7 @@ app.put('/:id', async (c) => {
   const updateResult = await db.prepare(`
     UPDATE fees SET fee_type = @feeType, label = @label, amount_usd = @amountUsd, amount_khr = @amountKhr,
       fee_date = @feeDate, sale_id = @saleId, branch_id = @branchId,
+      branch_name = CASE WHEN branch_id IS @branchId THEN branch_name ELSE (SELECT name FROM branches WHERE id = @branchId) END,
       delivery_contact_id = @deliveryContactId, notes = @notes, updated_at = @now
     WHERE id = @id AND updated_at IS @expectedUpdatedAt
   `).run({ feeType, label, amountUsd, amountKhr, feeDate, saleId, branchId, deliveryContactId, notes, now, id, expectedUpdatedAt })

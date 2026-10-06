@@ -42,6 +42,8 @@ INSERT INTO fees VALUES(1,'2026-09-04 03:00:00','2026-09-04',2,NULL,'expense','L
  (2,'2026-09-04T03:00:00.000Z','2026-09-04',2,NULL,'delivery','Grab','',0,14000),
  (3,'2026-09-04 04:00:00','2026-09-04',3,NULL,'expense','Other branch','',0,400);
 `)
+// fees.branch_name (0236) is the last column the real table gained; added after the positional seed rows.
+sql.exec('ALTER TABLE fees ADD COLUMN branch_name TEXT')
 const db = { prepare(query) {
   reads++
   const bind = (params = {}) => {

@@ -37,6 +37,12 @@ import { ReportMoneyPrecisionError, reportMoneyHttpError } from '../lib/reportMo
 import { localRangeClockError, isLocalRangeClock, localDateAtOrAfter, localDateAtOrBefore, localDateExpr } from '../lib/businessDateWindow'
 import type { Env } from '../index'
 
+// Historical label (owner rule: old records are never relabelled): the row's own branch-name snapshot
+// when it has a non-blank one, else the live directory name. The SAME expression as
+// branchHistoryNameSql in lib/stockInSessionsQuery.ts; test-cutover-ld-historical-readers-native.cjs pins every copy.
+const branchHistoryNameSql = (snapshot: string, fallback: string): string =>
+  `CASE WHEN trim(COALESCE(${snapshot},''),char(9,10,11,12,13,32,160,5760,8192,8193,8194,8195,8196,8197,8198,8199,8200,8201,8202,8232,8233,8239,8287,12288,65279))<>'' THEN ${snapshot} ELSE ${fallback} END`
+
 // Section 5 (Sep 2, 2026 RC): the "Business summary" Excel workbook the
 // Sales hub's Reports area can export -- Summary (per business day),
 // Reconciliation (net revenue - expenses), and per-row Sales/Returns detail,
@@ -738,7 +744,7 @@ for (const kind of ['sales', 'returns', 'expenses'] as const) {
         r.return_type AS type, r.reason, r.status, r.total_refund_usd AS refund_usd, r.total_refund_khr AS refund_khr`
     } else {
       select = `f.id, f.created_at AS cursor_at, f.created_at, f.fee_date AS date, f.fee_type AS type, f.label,
-        b.name AS branch, s.receipt_number AS linked_sale_receipt_number, f.notes, f.amount_usd, f.amount_khr`
+        ${branchHistoryNameSql('f.branch_name', 'b.name')} AS branch, s.receipt_number AS linked_sale_receipt_number, f.notes, f.amount_usd, f.amount_khr`
       joins = 'LEFT JOIN branches b ON b.id=f.branch_id LEFT JOIN sales s ON s.id=f.sale_id'
     }
     const rows = await db.prepare(`SELECT ${select} FROM ${table} ${alias} ${joins} WHERE ${clauses.join(' AND ')}

@@ -663,9 +663,9 @@ async function applyInner(db: D1Compat, user: SessionUser, movementId: number, b
       VALUES(@operation,@actor,@requestId,@requestJson,@digest,@response,@before,@after,@revision)`, params: opParams },
     ...(created ? [{
       sql: `INSERT INTO product_batches(variant_product_id,batch_key,lot_code,received_at,is_active,batch_number,supplier_id,supplier_name,
-          unit_cost_usd,payment_status,credit_due_date,received_quantity,received_branch_id,received_cost_usd,expiry_date)
+          unit_cost_usd,payment_status,credit_due_date,received_quantity,received_branch_id,received_branch_name,received_cost_usd,expiry_date)
         VALUES(@product,@key,@lotCode,@receivedAt,0,(SELECT COALESCE(MAX(batch_number),0)+1 FROM product_batches WHERE variant_product_id=@product),
-          NULL,NULL,NULL,@paymentStatus,@creditDueDate,0,@branch,NULL,@expiry)`,
+          NULL,NULL,NULL,@paymentStatus,@creditDueDate,0,@branch,(SELECT name FROM branches WHERE id=@branch),NULL,@expiry)`,
       params: {
         product: productId, key: created.batchKey, lotCode: created.lotCode, receivedAt: created.receivedAt, branch: branchId,
         paymentStatus: sourceLot.payment_status ?? null, creditDueDate: sourceLot.credit_due_date ?? null, expiry: sourceLot.expiry_date ?? null,

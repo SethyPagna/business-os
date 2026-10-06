@@ -264,7 +264,11 @@ const LOT_ATTRIBUTION_SET_SQL = `
           unit_cost_usd = CASE WHEN received_quantity = 0 AND is_active = 0 THEN @unitCostUsd ELSE COALESCE(unit_cost_usd, @unitCostUsd) END,
           credit_due_date = CASE WHEN payment_status IS NULL OR (received_quantity = 0 AND is_active = 0) THEN @creditDueDate ELSE credit_due_date END,
           payment_status = CASE WHEN received_quantity = 0 AND is_active = 0 THEN @paymentStatus ELSE COALESCE(payment_status, @paymentStatus) END,
-          received_branch_id = CASE WHEN received_quantity = 0 AND is_active = 0 THEN @receivedBranchId ELSE COALESCE(received_branch_id, @receivedBranchId) END`
+          received_branch_id = CASE WHEN received_quantity = 0 AND is_active = 0 THEN @receivedBranchId ELSE COALESCE(received_branch_id, @receivedBranchId) END,
+          -- The label is written exactly when the id is (first attribution sticks), so a lot keeps
+          -- naming the branch it was received at after that branch is renamed or retired.
+          received_branch_name = CASE WHEN (received_quantity = 0 AND is_active = 0) OR received_branch_id IS NULL
+            THEN (SELECT name FROM branches WHERE id = @receivedBranchId) ELSE received_branch_name END`
 
 // Side-effect-free receipt planner. Stock-session commands use this inside
 // their one operation batch; the legacy helper below uses the same plan so
@@ -352,13 +356,13 @@ export function planReceiveBatchStock(input: ReceiveBatchPlanInput): ReceiveBatc
           ${reservedBatchId !== undefined ? 'id,' : ''}
           variant_product_id, batch_key, lot_code, expiry_date, received_at, is_active, notes,
           batch_number, supplier_id, supplier_name, unit_cost_usd, payment_status, credit_due_date,
-          received_quantity, received_branch_id, received_cost_usd
+          received_quantity, received_branch_id, received_branch_name, received_cost_usd
         ) VALUES (
           ${reservedBatchId !== undefined ? '@reservedBatchId,' : ''}
           ${productIdSql}, @batchKey, @lotCode, @expiryDate, @receivedAt, 1, @notes,
           (SELECT COALESCE(MAX(batch_number), 0) + 1 FROM product_batches WHERE variant_product_id = ${productIdSql}),
           @supplierId, @supplierName, @unitCostUsd, @paymentStatus, @creditDueDate,
-          @quantity, @receivedBranchId, @receivedCostUsd
+          @quantity, @receivedBranchId, (SELECT name FROM branches WHERE id = @receivedBranchId), @receivedCostUsd
         ) ON CONFLICT(variant_product_id, batch_key) DO UPDATE SET
           is_active = 1,
           expiry_date = CASE WHEN @expiryProvided = 1 THEN @expiryDate ELSE expiry_date END,
@@ -462,9 +466,9 @@ export function planReconcileBranchSnapshot(input: {
       SELECT 1 FROM product_batches WHERE variant_product_id=@productId AND batch_key=@batchKey
     ) THEN @batchKey||':active:'||(SELECT COALESCE(MAX(id),0)+1 FROM product_batches) ELSE @batchKey END)`
   return [
-    { sql: `INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at,is_active,notes,batch_number,received_branch_id)
+    { sql: `INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,received_at,is_active,notes,batch_number,received_branch_id,received_branch_name)
       SELECT @batchId,@productId,${snapshotKey},@lotCode,@receivedAt,1,'Stock reconciled from product import snapshot',
-        (SELECT COALESCE(MAX(batch_number),0)+1 FROM product_batches WHERE variant_product_id=@productId),@branchId
+        (SELECT COALESCE(MAX(batch_number),0)+1 FROM product_batches WHERE variant_product_id=@productId),@branchId,(SELECT name FROM branches WHERE id=@branchId)
       WHERE @quantity > ${available}
       ON CONFLICT(variant_product_id,batch_key) DO NOTHING`, params },
     { sql: `INSERT INTO branch_batch_stock(batch_id,branch_id,quantity)

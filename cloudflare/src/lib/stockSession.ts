@@ -1122,6 +1122,16 @@ const REPLAY_MUTATION_ORDER = {
   redo: ['products', 'batches', 'branchStock', 'branchBatchStock'],
 } as const
 
+// Display-only branch labels (0236) that replay neither compares nor restores. A column that arrives
+// after a postimage was captured must not change the postimage's meaning, or every older session
+// refuses Undo with "stock changed" (the same trap members.branch_name hit in 0226). A label is never
+// stock, so replay leaves it out of the compared state and never writes it: the retained lot below keeps
+// its label through Undo and Redo (a later receipt that reuses the lot writes both id and label again).
+const REPLAY_DISPLAY_ONLY_COLUMNS: Readonly<Record<string, readonly string[]>> = {
+  batches: ['received_branch_name'],
+  movements: ['addressed_branch_name'],
+}
+
 // Revision families replay does NOT compare. A branch's revision (0124 trigger stock_revision_branches_update)
 // moves on ANY edit of the branches row: the 0229 role/canonical_key backfill, a rename, an owner editing the
 // phone number. None of those changes what Undo of a stock session writes (products, lots, branch and lot stock
@@ -1143,8 +1153,10 @@ const REPLAY_EXPECTED_SQL = `(SELECT json_set(json_extract(payload_json,'$.expec
 async function stockReplayStateSql(env: Env, memberBranchNamesCaptured = true): Promise<string> {
   const fields: string[] = []
   for (const [key, [table, where]] of Object.entries(REPLAY_TABLES)) {
+    const displayOnly = REPLAY_DISPLAY_ONLY_COLUMNS[key] ?? []
     const columns = [...await tableColumns(env, table)]
-      .filter(column => memberBranchNamesCaptured || key !== 'members' || column !== 'branch_name').sort()
+      .filter(column => memberBranchNamesCaptured || key !== 'members' || column !== 'branch_name')
+      .filter(column => !displayOnly.includes(column)).sort()
     // Keep each json_object below SQLite's older function-argument ceiling.
     let row = "json('{}')"
     for (let i = 0; i < columns.length; i += 40) row = `json_set(${row},${columns.slice(i, i + 40).map(c => `'$.${c}',t."${c}"`).join(',')})`
@@ -1342,6 +1354,7 @@ export async function replayStockSession(env: Env, user: SessionUser, direction:
     const saved = await db.prepare('SELECT o.generation,h.status FROM stock_session_operations o JOIN action_history h ON h.id=o.history_id WHERE o.id=@id').get<Row>({ id: op.id })
     if (saved?.generation === generation + 1 && saved.status === targetStatus) return
     if (/constraint/i.test(String(error))) {
+      if (await movedByBranchCutover(db, String(op.id))) fail(BRANCH_CUTOVER_PRODUCT_MOVED_MESSAGE, 409, BRANCH_CUTOVER_PRODUCT_MOVED_CODE)
       // RET-D: name the newest stock change on one of the session's product +
       // branch pairs since the session's own rows (its receipts and every
       // undo/redo generation, all stamped with its rowid). A metadata-only
@@ -1357,4 +1370,23 @@ export async function replayStockSession(env: Env, user: SessionUser, direction:
     }
     throw error
   }
+}
+
+// The branch consolidation merged Shop's stock into LC Store with one official transfer per product. A session
+// that received or counted one of those products no longer owns the balances it wrote: Undo would take its
+// quantity out of a merged total. That Undo stays refused, but with the cutover's own code (the client restates it
+// in the operator's language), never the generic "Stock changed". The marker is lib/branchCutoverHistory.ts's
+// UNDO_CLOSED_BRANCH_CUTOVER_MOVE, restated because this module's harnesses wire imports by name (the
+// cutover test pins it equal). Read only on the refusal path: no index serves it, and it never runs for an
+// Undo that succeeds.
+const BRANCH_CUTOVER_MOVE_MARKER = 'undo_closed:branch_cutover_move'
+export const BRANCH_CUTOVER_PRODUCT_MOVED_CODE = 'undo_closed_branch_cutover_product_moved'
+export const BRANCH_CUTOVER_PRODUCT_MOVED_MESSAGE = 'Undo closed: this product\'s stock was merged into LC Store by the branch consolidation after it was recorded. Make a new change instead. Nothing was changed.'
+async function movedByBranchCutover(db: D1Compat, operationId: string): Promise<boolean> {
+  const row = await db.prepare(`SELECT 1 AS moved FROM stock_session_members m
+    JOIN stock_transfers st ON st.product_id = m.product_id
+    JOIN transfer_operation_receipts r ON r.id = st.receipt_id
+    JOIN action_history h ON h.id = r.action_history_id
+    WHERE m.operation_id = @id AND h.last_error = @marker LIMIT 1`).get<Row>({ id: operationId, marker: BRANCH_CUTOVER_MOVE_MARKER })
+  return Boolean(row)
 }

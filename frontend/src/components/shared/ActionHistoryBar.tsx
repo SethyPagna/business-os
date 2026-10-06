@@ -167,10 +167,20 @@ function formatHistoryList(items: HistoryItem[] = []) {
 // Calling that "Recorded" is the honest word. The hint explains the actual
 // constraint rather than implying the entry decayed.
 const UNDO_CLOSED_BY_MERGE_MARKER = 'undo_closed:products_merged'
+// The branch consolidation closes Undo the same way (cloudflare/src/lib/branchCutoverHistory.ts markers): an entry
+// that was done at the retired branch, and the consolidation's own moves.
+const UNDO_CLOSED_BRANCH_RETIRED_MARKER = 'undo_closed:branch_retired'
+const UNDO_CLOSED_BRANCH_CUTOVER_MOVE_MARKER = 'undo_closed:branch_cutover_move'
 
 function formatServerStatus(item: HistoryItem, T: Translate, isActionable: boolean) {
   if (item?.status === 'recorded' && item.last_error === UNDO_CLOSED_BY_MERGE_MARKER) {
     return T('history_undo_closed_merged', 'Undo closed: products were merged')
+  }
+  if (item?.status === 'recorded' && item.last_error === UNDO_CLOSED_BRANCH_RETIRED_MARKER) {
+    return T('history_undo_closed_branch_retired', 'Undo closed: done at the old branch before the merge')
+  }
+  if (item?.status === 'recorded' && item.last_error === UNDO_CLOSED_BRANCH_CUTOVER_MOVE_MARKER) {
+    return T('history_undo_closed_branch_cutover_move', 'Undo closed: branch consolidation')
   }
   if (item?.status === 'undoable') {
     return isActionable ? T('undo_available', 'Undo available') : T('history_recorded_only', 'Recorded')

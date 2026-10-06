@@ -155,6 +155,12 @@ import type { Env } from '../index'
 import { actorId, actorSnapshot } from '../lib/actorSnapshot'
 import { ANONYMOUS_CUSTOMER_ERROR_CODE, ANONYMOUS_CUSTOMER_MUTATION_ERROR, isAnonymousCustomer } from '../lib/anonymousCustomer'
 
+// Historical label (owner rule: old records are never relabelled): the row's own branch-name snapshot
+// when it has a non-blank one, else the live directory name. The SAME expression as
+// branchHistoryNameSql in lib/stockInSessionsQuery.ts; test-cutover-ld-historical-readers-native.cjs pins every copy.
+const branchHistoryNameSql = (snapshot: string, fallback: string): string =>
+  `CASE WHEN trim(COALESCE(${snapshot},''),char(9,10,11,12,13,32,160,5760,8192,8193,8194,8195,8196,8197,8198,8199,8200,8201,8202,8232,8233,8239,8287,12288,65279))<>'' THEN ${snapshot} ELSE ${fallback} END`
+
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 const SHOP_ONLY_SALE_ERROR = 'Sales can only be recorded at the Shop. Transfer Warehouse stock to the Shop first.'
 // POST / re-mints a receipt number this many times after losing an in-batch
@@ -2515,8 +2521,8 @@ app.patch('/:id/status', async (c) => {
     }
     statements.push(sellingBranchGuardStatement(cancellationBranchId))
     statements.push({
-      sql: `INSERT INTO fees (fee_type, label, amount_usd, amount_khr, fee_date, sale_id, branch_id, notes, created_by, created_by_name)
-            VALUES ('expense', @label, @amount_usd, @amount_khr, @fee_date, @sale_id, @branch_id, @notes, @created_by, @created_by_name)`,
+      sql: `INSERT INTO fees (fee_type, label, amount_usd, amount_khr, fee_date, sale_id, branch_id, branch_name, notes, created_by, created_by_name)
+            VALUES ('expense', @label, @amount_usd, @amount_khr, @fee_date, @sale_id, @branch_id, (SELECT name FROM branches WHERE id = @branch_id), @notes, @created_by, @created_by_name)`,
       params: {
         label: `Cancelled sale ${sale.receipt_number || id} -- lost fee`,
         fee_date: businessToday(Date.parse(mutationStamp)),
@@ -5675,7 +5681,7 @@ app.get('/', async (c) => {
     const [itemsBySale, refundsBySale, recordsBySale] = await Promise.all([
       (async () => {
         const itemRows = await selectInChunks(saleIds, 0, (chunk) => db.prepare(`
-      SELECT si.*, b.name AS branch_name, p.barcode AS barcode, p.category AS category,
+      SELECT si.*, ${branchHistoryNameSql('CASE WHEN si.branch_id IS ss.branch_id THEN ss.branch_name END', 'b.name')} AS branch_name, p.barcode AS barcode, p.category AS category,
         p.unit AS unit, p.supplier AS supplier,
         -- A single received date is factual only for an explicit lot or a
         -- fully allocated single-lot line. Keep multi-lot lines unsummarized;
@@ -5705,6 +5711,7 @@ app.get('/', async (c) => {
         (SELECT COUNT(*) FROM sale_item_batch_allocations sia
           WHERE sia.sale_item_id = si.id AND sia.quantity > COALESCE(sia.released_quantity, 0)) AS lot_allocation_count
       FROM sale_items si
+      LEFT JOIN sales ss ON ss.id = si.sale_id
       LEFT JOIN branches b ON b.id = si.branch_id
       LEFT JOIN products p ON p.id = si.product_id
       LEFT JOIN product_batches pb ON pb.id = si.batch_id AND pb.variant_product_id = si.product_id
