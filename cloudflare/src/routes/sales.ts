@@ -31,7 +31,11 @@ import { planSaleSettlement, SettlementValidationError } from '../lib/paymentSet
 // Sales are Shop-only. The same predicate runs in the UI and here where an
 // offline replay, direct API caller, or stale client cannot bypass it.
 import { firstUnsellableBranch, sellingBranchConditionSql, sellingBranchGuardStatement } from '../lib/branchRoleGuards'
-import { branchCanSell } from '../lib/branchRoles'
+import { branchCanSell, resolveSellingSuccessor } from '../lib/branchRoles'
+import {
+  BRANCH_RETIRED_ADDITION_CODE, BRANCH_RETIRED_ADDITION_ERROR,
+  BranchEffectResolver, BranchRetiredDamagedError, BranchRetiredNoSuccessorError, effectGuardStatement, readBranchDirectory, redirectSaleLine, redirectStockItems,
+} from '../lib/branchEffect'
 import {
   SALE_SETTLEMENT_ACTION_KIND,
   buildSaleSettlementAfterState,
@@ -2265,6 +2269,24 @@ app.patch('/:id/status', async (c) => {
       if (list && list.length) (item as SaleItemRow & { allocations?: SaleItemAllocation[] }).allocations = list
     }
   }
+  // A line recorded at a branch that has since been retired (Old Shop -> LC Store) moves its stock at the
+  // ACTIVE successor, in the lot that exists there now; the sale and its lines keep their own branch. While
+  // every branch is active nothing is redirected and nothing below changes.
+  const branchResolver = new BranchEffectResolver(await readBranchDirectory(db))
+  try {
+    await redirectStockItems(db, branchResolver, items as Array<SaleItemRow & { allocations?: SaleItemAllocation[]; effect?: { branchName: string | null; addressedName: string | null } }>, {
+      moves: (item) => {
+        if (skipStock || !item.product_id || !item.branch_id) return false
+        const returned = Math.max(0, Number(returnedByItem.get(item.id)) || 0)
+        return heldQuantity(saleStatus, item.quantity, returned) !== heldQuantity(oldStatus, item.quantity, returned)
+      },
+      saleBranchId: Number(sale.branch_id) || null,
+      saleLabel: typeof sale.branch_name === 'string' ? sale.branch_name : null,
+    })
+  } catch (error) {
+    if (error instanceof BranchRetiredNoSuccessorError || error instanceof BranchRetiredDamagedError) return c.json({ error: error.message, code: error.code }, 409)
+    throw error
+  }
   const damagedTransitionOps: Array<{ lotId: number; productId: number; productName: string | null; branchId: number | null; delta: number }> = []
   let skippedDamagedUnits = 0
   for (const item of items) {
@@ -2499,13 +2521,18 @@ app.patch('/:id/status', async (c) => {
     if (!Number.isSafeInteger(cancellationBranchId) || cancellationBranchId <= 0) {
       return c.json({ error: SHOP_ONLY_SALE_ERROR }, 400)
     }
-    const cancellationBranch = await db.prepare(
-      'SELECT id,name,role FROM branches WHERE id=@id AND COALESCE(is_active,1)=1 LIMIT 1',
-    ).get<{ id: number; name: string | null; role: unknown }>({ id: cancellationBranchId })
-    if (!cancellationBranch || !branchCanSell(cancellationBranch)) {
+    // The expense is money, not stock: it keeps the branch the sale was recorded at. That branch sells and is
+    // active, or is retired (Old Shop) with an active selling successor.
+    const cancellationBranch = branchResolver.directory.find((row) => Number(row.id) === cancellationBranchId)
+    const cancellationBranchActive = !!cancellationBranch && Number(cancellationBranch.is_active ?? 1) === 1
+    if (!cancellationBranch || !branchCanSell(cancellationBranch) || (!cancellationBranchActive && !resolveSellingSuccessor(branchResolver.directory, cancellationBranchId))) {
       return c.json({ error: SHOP_ONLY_SALE_ERROR }, 400)
     }
-    statements.push(sellingBranchGuardStatement(cancellationBranchId))
+    if (cancellationBranchActive) statements.push(sellingBranchGuardStatement(cancellationBranchId))
+    else {
+      const retiredFeeGuard = effectGuardStatement([{ addressed: cancellationBranchId, effect: resolveSellingSuccessor(branchResolver.directory, cancellationBranchId)!.effectBranchId, sells: 1 }])
+      if (retiredFeeGuard) statements.push(retiredFeeGuard)
+    }
     statements.push({
       sql: `INSERT INTO fees (fee_type, label, amount_usd, amount_khr, fee_date, sale_id, branch_id, notes, created_by, created_by_name)
             VALUES ('expense', @label, @amount_usd, @amount_khr, @fee_date, @sale_id, @branch_id, @notes, @created_by, @created_by_name)`,
@@ -2583,6 +2610,8 @@ app.patch('/:id/status', async (c) => {
     })
   }
   statements.push(...settlementLineStatements)
+  const effectGuard = effectGuardStatement(branchResolver.guards())
+  if (effectGuard) statements.push(effectGuard)
   statements.push(...plan.statements)
 
   // A provisional restore can be spent by another request before a status
@@ -3278,6 +3307,12 @@ app.post('/:id/items', async (c) => {
   if (addedBranchRows.length !== addedBranchIds.length
     || addedBranchRows.some((branch) => Number(branch.is_active ?? 1) !== 1)
     || firstUnsellableBranch(addedBranchRows)) {
+    // A sale made at a branch that has since been retired (Old Shop -> LC Store) cannot take new goods: say so,
+    // rather than blaming the branch role. Nothing is written.
+    if (addedBranchRows.length === addedBranchIds.length && !firstUnsellableBranch(addedBranchRows)
+      && resolveSellingSuccessor(await readBranchDirectory(db), saleHeaderBranchId)) {
+      return c.json({ error: BRANCH_RETIRED_ADDITION_ERROR, code: BRANCH_RETIRED_ADDITION_CODE }, 409)
+    }
     return c.json({ error: SHOP_ONLY_SALE_ERROR }, 400)
   }
 
@@ -4022,13 +4057,24 @@ app.post('/:id/amendments', async (c) => {
   if (!Number.isSafeInteger(saleHeaderBranchId) || saleHeaderBranchId <= 0) {
     return c.json({ error: SHOP_ONLY_SALE_ERROR }, 400)
   }
-  const amendmentBranch = await db.prepare('SELECT id, name, role, is_active FROM branches WHERE id = ?')
-    .get<{ id: number; name: string | null; role: unknown; is_active: number | null }>([saleHeaderBranchId])
-  if (!amendmentBranch
-    || Number(amendmentBranch.is_active ?? 1) !== 1
-    || firstUnsellableBranch([amendmentBranch])) {
+  // A sale made at a branch that has since been retired (Old Shop -> LC Store) can still be corrected: its
+  // stock effects land at the ACTIVE successor and its money amendments are unchanged. A branch that is active
+  // behaves exactly as before; one retired with no selling successor still refuses.
+  const branchResolver = new BranchEffectResolver(await readBranchDirectory(db))
+  const amendmentBranch = branchResolver.directory.find((row) => Number(row.id) === saleHeaderBranchId)
+  if (!amendmentBranch || firstUnsellableBranch([amendmentBranch])) {
     return c.json({ error: SHOP_ONLY_SALE_ERROR }, 400)
   }
+  let headerRetired = false
+  if (Number(amendmentBranch.is_active ?? 1) !== 1) {
+    try { headerRetired = !!branchResolver.effect(saleHeaderBranchId, { sells: true })?.redirected } catch (error) {
+      if (!(error instanceof BranchRetiredNoSuccessorError)) throw error
+    }
+    if (!headerRetired) return c.json({ error: SHOP_ONLY_SALE_ERROR }, 400)
+  }
+  // The header's in-batch guard: the selling branch is active, or the retired one still points at an active
+  // selling successor (re-proved inside the commit).
+  const headerBranchGuard = headerRetired ? effectGuardStatement(branchResolver.guards())! : sellingBranchGuardStatement(saleHeaderBranchId)
 
   try {
     assertUpdatedAtMatch('sale', sale, getExpectedUpdatedAt(body))
@@ -4204,7 +4250,7 @@ app.post('/:id/amendments', async (c) => {
       await db.batch([
         { sql: 'DELETE FROM sale_mutation_guards', params: {} },
         { sql: 'DELETE FROM sale_bulk_guards', params: {} },
-        sellingBranchGuardStatement(saleHeaderBranchId),
+        headerBranchGuard,
         amendmentSettingsGuard(moneySettings),
         contactReferenceGuard,
         saleRevisionGuard(saleId, Number(sale.write_revision)),
@@ -4315,7 +4361,7 @@ app.post('/:id/amendments', async (c) => {
       await db.batch([
         { sql: 'DELETE FROM sale_mutation_guards', params: {} },
         { sql: 'DELETE FROM sale_bulk_guards', params: {} },
-        sellingBranchGuardStatement(saleHeaderBranchId),
+        headerBranchGuard,
         amendmentSettingsGuard(moneySettings),
         saleRevisionGuard(saleId, Number(sale.write_revision)),
         ...(precisionBasket?[precisionBasket.guard]:[]),
@@ -4446,7 +4492,7 @@ app.post('/:id/amendments', async (c) => {
       await db.batch([
         { sql: 'DELETE FROM sale_mutation_guards', params: {} },
         { sql: 'DELETE FROM sale_bulk_guards', params: {} },
-        sellingBranchGuardStatement(saleHeaderBranchId),
+        headerBranchGuard,
         amendmentSettingsGuard(moneySettings),
         saleRevisionGuard(saleId, Number(sale.write_revision)),
         precisionBasket!.guard,
@@ -4527,6 +4573,17 @@ app.post('/:id/amendments', async (c) => {
     SELECT id, batch_id, branch_id, quantity, released_quantity
     FROM sale_item_batch_allocations WHERE sale_item_id = ? ORDER BY id ASC
   `).all<LineAllocation>([lineId])
+  // A sale at a retired branch: units that COME BACK go to the active successor, in the lot that exists there
+  // now. Units that would be taken are a new sale of goods and cannot be recorded at a retired branch.
+  if (headerRetired) {
+    const addsUnits = kind === 'line_quantity_increased' || kind === 'line_replaced'
+      || (kind === 'line_updated' && body.quantity !== undefined && Number(body.quantity) > Number(line.quantity))
+    if (addsUnits) return c.json({ error: BRANCH_RETIRED_ADDITION_ERROR, code: BRANCH_RETIRED_ADDITION_CODE }, 409)
+    const saleBranchLabel = (sale as Record<string, unknown>).branch_name
+    await redirectSaleLine(db, branchResolver, line as Parameters<typeof redirectSaleLine>[2], allocations, {
+      saleBranchId: saleHeaderBranchId, saleLabel: typeof saleBranchLabel === 'string' ? saleBranchLabel : null,
+    })
+  }
 
   const statements: StatementList = []
   const ledgerEntries: Array<Parameters<typeof amendmentEntryStatement>[0]> = []
@@ -4932,7 +4989,7 @@ app.post('/:id/amendments', async (c) => {
     await db.batch([
       { sql: 'DELETE FROM sale_mutation_guards', params: {} },
       { sql: 'DELETE FROM sale_bulk_guards', params: {} },
-      sellingBranchGuardStatement(saleHeaderBranchId),
+      headerBranchGuard,
       amendmentSettingsGuard(moneySettings),
       saleRevisionGuard(saleId, Number(sale.write_revision)),
       precisionBasket!.guard,

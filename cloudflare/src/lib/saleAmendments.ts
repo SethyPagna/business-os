@@ -354,6 +354,10 @@ export type ExistingSaleLine = {
   cost_price_usd: number
   cost_price_khr: number
   branch_id: number | null
+  // Set only when the line was made at a branch that has since been retired and its stock effect was redirected
+  // to the active successor (branch_id is then the successor): the movement rows name where the stock really
+  // moved and the label the sale was made under.
+  effect?: { branchName: string | null; addressedName: string | null }
 }
 
 /** One `sale_item_batch_allocations` row, in draw order (id ASC). */
@@ -739,12 +743,13 @@ function saleMovementStatement(input: {
   batchId: number | null
 }): StockStatement {
   return {
-    sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, movement_type, quantity, unit_cost_usd, unit_cost_khr, reason, reference_id, user_id, user_name, batch_id)
-          VALUES (@product_id, @product_name, @branch_id, @movement_type, @quantity, @unit_cost_usd, @unit_cost_khr, @reason, @reference_id, @user_id, @user_name, @batch_id)`,
+    sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id${input.line.effect ? ', branch_name, addressed_branch_name' : ''}, movement_type, quantity, unit_cost_usd, unit_cost_khr, reason, reference_id, user_id, user_name, batch_id)
+          VALUES (@product_id, @product_name, @branch_id${input.line.effect ? ', @branch_name, @addressed_branch_name' : ''}, @movement_type, @quantity, @unit_cost_usd, @unit_cost_khr, @reason, @reference_id, @user_id, @user_name, @batch_id)`,
     params: {
       product_id: input.line.product_id,
       product_name: input.line.product_name,
       branch_id: input.line.branch_id,
+      ...(input.line.effect ? { branch_name: input.line.effect.branchName, addressed_branch_name: input.line.effect.addressedName } : {}),
       movement_type: input.movementType,
       quantity: input.quantity,
       unit_cost_usd: Number(input.line.cost_price_usd) || 0,

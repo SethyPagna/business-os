@@ -9,7 +9,7 @@ const root = path.join(__dirname, '..')
 const recordContract = JSON.parse(fs.readFileSync(path.join(root, '..', 'outputs', 'takeover-20260908', 'f74-sales-records-backend-contract.json'), 'utf8'))
 let user = { id: 1, name: 'Admin', username: 'admin', role_code: 'admin', permissions: { all: true } }
 const cache = new Map()
-const actual = new Set(['acquisitionCostAccess','actorSnapshot','businessDateWindow','businessMaintenanceGuard','movementBranchName','db','permissions','saleBulkStatus','saleBulkUpdate','saleRecordEvents','saleTransitions','saleTotals','sqlBinding','productBatches','batchCode','salesStatus','saleStatusResolution','financialPrecision','undoAppliers','branchWrites','branchRoles','branchRoleGuards','conflictControl','searchMatch'])
+const actual = new Set(['acquisitionCostAccess','actorSnapshot','businessDateWindow','businessMaintenanceGuard','movementBranchName','db','permissions','saleBulkStatus','saleBulkUpdate','saleRecordEvents','saleTransitions','saleTotals','sqlBinding','productBatches','batchCode','salesStatus','saleStatusResolution','financialPrecision','undoAppliers','branchWrites','branchRoles','branchRoleGuards','branchEffect','conflictControl','searchMatch'])
 function load(rel) {
   if (cache.has(rel)) return cache.get(rel).exports
   const mod = { exports: {} }; cache.set(rel,mod)
