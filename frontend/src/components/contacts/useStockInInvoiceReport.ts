@@ -34,7 +34,7 @@ export type ReportPayload = {
   page_size?: number
   total_invoices?: number
   meta?: {
-    branches?: Array<{ id: number; name?: string | null }>
+    branches?: Array<{ id: number; name?: string | null; is_active?: number | boolean | null }>
     suppliers?: Array<{ key: string; name?: string | null }>
   }
 }

@@ -13,7 +13,7 @@ import InvoiceLedgerSummary from './InvoiceLedgerSummary.tsx'
 import InvoiceDetailFloat from './InvoiceDetailFloat.tsx'
 import CopyableId from '../shared/CopyableId.tsx'
 import { batchDisplayLabel } from '../../utils/batchLabel.ts'
-import { stockInInvoiceBranchNames } from '../../utils/stockInInvoiceBranches.ts'
+import { stockInInvoiceBranchNames, stockInReportBranchOptions } from '../../utils/stockInInvoiceBranches.ts'
 
 type TranslateFn = (key: string) => string | undefined
 
@@ -128,7 +128,7 @@ export default function StockInInvoicesSection({ t }: StockInInvoicesSectionProp
           className="min-w-[9rem]"
           options={[
             { value: 'all', label: tr('all_branches', 'All Branches') },
-            ...branches.map((branch) => ({ value: String(branch.id), label: String(branch.name || `#${branch.id}`) })),
+            ...stockInReportBranchOptions(branches, tr('branch_retired_tag', 'retired')),
           ]}
         />
         <SuggestionTextInput
