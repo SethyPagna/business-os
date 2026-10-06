@@ -68,6 +68,7 @@ async function checkEnvelopeRoutes(api) {
     '../lib/auth': { requireAuth: async (c, next) => { if (!user) return c.json({ error: 'Unauthorized' }, 401); c.set('user', user); return next() } },
     '../lib/audit': { audit: async () => { auditWrites++ } }, '../durable-objects/broadcastHub': { broadcast: async () => { broadcasts++ } },
     '../lib/productWrites': { hasProductMoneyPolicy: unused },
+    '../lib/branchRedirectWrite': { branchRedirectTarget: () => null },
     '../lib/reviewApply': { productRemovePendingPointer: () => false, applyApprovedPendingAction: unused },
     '../lib/productImagePermission': {}, '../lib/productDelete': { PRODUCT_REMOVE_ACTION_KIND: 'product.remove' },
     '../lib/undoAppliers': { SALE_ADD_ITEMS_ACTION_KIND: 'sale.items.add', PRODUCT_MERGE_GROUP_ACTION_KIND: 'product.merge.group', branchCutoverClosureRefusal: () => null, ...undoModule.exports },

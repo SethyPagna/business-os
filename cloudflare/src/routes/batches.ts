@@ -20,6 +20,7 @@ import type { Env } from '../index'
 import { actorSnapshot } from '../lib/actorSnapshot'
 import { nullableMoney4, multiplyMoney4 } from '../lib/moneyPrecision'
 import { recomputeCatalogCost, catalogCostRecomputeStatement } from '../lib/catalogCostRecompute'
+import { addressedStatements, branchEffectRefusal, branchRedirectGuardRefusal, branchRedirectTarget, isBranchRedirectGuardError, landingLotId, requestBranchLanding } from '../lib/branchRedirectWrite'
 
 // Batch / expiry-date tracking -- schema notes and design rationale live in
 // lib/productBatches.ts. Gated behind the same 'inventory' permission as
@@ -229,6 +230,9 @@ export async function runReceiveBatchAction(c: BatchesContext, body: ReceiveBody
       try { return await runReceiveBatchActionKernel(c, body, markWritten) }
       catch (error) {
         if (isReceivingBranchError(error)) return c.json(RECEIVING_BRANCH_INACTIVE, 409)
+        const refusal = branchEffectRefusal(error)
+        if (refusal) return c.json(refusal, 409)
+        if (isBranchRedirectGuardError(error)) return c.json(await branchRedirectGuardRefusal(getDb(c.env), Number(body.branch_id), () => branchRedirectTarget(c)), 409)
         throw error
       }
     },
@@ -243,14 +247,14 @@ async function runReceiveBatchActionKernel(c: BatchesContext, body: ReceiveBody,
   const db = getDb(c.env)
 
   const productId = Number(body.product_id)
-  const branchId = Number(body.branch_id)
+  const addressedBranchId = Number(body.branch_id)
   const paidQuantity = Number(body.quantity)
   // A body without free units or a selling price takes the path it always took.
   const freeQuantity = body.free_quantity == null ? 0 : parseFreeQuantity(body.free_quantity)
   if (freeQuantity == null) return c.json({ error: 'Free units must be a whole number from 0', code: 'invalid_free_quantity' }, 400)
   const sellingPrice = body.selling_price_usd == null && body.selling_price_khr == null ? undefined : parseReceiptSellingPrice(body.selling_price_usd, body.selling_price_khr)
   if (sellingPrice === null) return c.json({ error: 'The selling price is not a valid amount', code: 'invalid_selling_price' }, 400)
-  if (!productId || !branchId) return c.json({ error: 'product_id and branch_id are required' }, 400)
+  if (!productId || !addressedBranchId) return c.json({ error: 'product_id and branch_id are required' }, 400)
   // A fully free receipt pays for nothing: 0 paid units plus its free units.
   if (!Number.isFinite(paidQuantity) || (freeQuantity > 0 ? paidQuantity < 0 : paidQuantity <= 0)) return c.json({ error: 'quantity must be a positive number' }, 400)
   // Stock in = paid + free units at the effective cost; the supplier is owed for the paid units.
@@ -312,10 +316,12 @@ async function runReceiveBatchActionKernel(c: BatchesContext, body: ReceiveBody,
     return c.json({ error: 'Price edit permission is required to change the selling price', code: 'price_edit_required' }, 403)
   }
   const movementFreeColumn = freeQuantity > 0 && await hasColumn(db, 'inventory_movements', 'free_quantity')
+  // One branches read gives both the landing (a disabled branch -> the confirmed active one) and its name.
+  const { landing, branch } = await requestBranchLanding(db, addressedBranchId, () => branchRedirectTarget(c))
+  const branchId = landing.effectBranchId
   await requireReceivingBranch(db, branchId)
-  const branch = await db.prepare('SELECT id, name FROM branches WHERE id = ?').get<{ id: number; name: string }>([branchId])
 
-  const explicitBatchId = Number.isFinite(Number(body.batch_id)) && Number(body.batch_id) > 0 ? Number(body.batch_id) : null
+  const explicitBatchId = Number.isFinite(Number(body.batch_id)) && Number(body.batch_id) > 0 ? Number(await landingLotId(db, landing, Number(body.batch_id))) : null
   const sessionId = Number.isSafeInteger(Number(body.session_id)) && Number(body.session_id) > 0 ? Number(body.session_id) : null
   let received: { batchId: number; batchNumber: number | null; lotCode: string }
   // Everything above this line is reads and validation; receiveBatchStock below
@@ -346,7 +352,7 @@ async function runReceiveBatchActionKernel(c: BatchesContext, body: ReceiveBody,
       // P4-4a: folded into receiveBatchStock's own db.batch call (via the
       // resolved-batch-id subquery it hands back) instead of a second,
       // separate INSERT round trip after receiveBatchStock returns.
-      buildBatchStatements: ({ batchKey, lotCode: planLotCode, resolvedBatchIdSql }) => [...(sellingPricePlan ? [sellingPricePlan.statement] : []), {
+      buildBatchStatements: ({ batchKey, lotCode: planLotCode, resolvedBatchIdSql }) => addressedStatements(landing, [...(sellingPricePlan ? [sellingPricePlan.statement] : []), {
         sql: `
           INSERT INTO inventory_movements (
             product_id, product_name, branch_id, branch_name, movement_type, quantity,
@@ -388,13 +394,14 @@ async function runReceiveBatchActionKernel(c: BatchesContext, body: ReceiveBody,
           batchKey,
           ...(movementFreeColumn ? { freeQuantity } : {}),
         },
-      }],
+      }]),
     })
   } catch (err) {
     // The explicit-lot pick can fail validation ("Selected batch does not
     // belong to this product") -- a caller mistake, not a server fault, so
     // it answers 400 exactly as /inventory/adjust's batch path does.
     if (isReceivingBranchError(err)) return c.json(RECEIVING_BRANCH_INACTIVE, 409)
+    if (isBranchRedirectGuardError(err)) throw err
     return c.json({ error: err instanceof Error ? err.message : 'Failed to receive stock' }, 400)
   }
   const { batchId, batchNumber, lotCode } = received
@@ -580,7 +587,7 @@ app.patch('/:id/branches/:branchId', async (c) => {
     // The lot figure the editor showed: a count that moved since refuses 409.
     ...(typeof body.expectedLotQuantity === 'number' && Number.isFinite(body.expectedLotQuantity) && body.expectedLotQuantity >= 0
       ? { expectedLotQuantity: body.expectedLotQuantity } : {}),
-  })
+  }, undefined, () => branchRedirectTarget(c))
   if (result.status !== 200) return c.json(result.body as never, result.status as never)
 
   if (Number(result.body.quantity) > 0 && !result.body.replayed) {

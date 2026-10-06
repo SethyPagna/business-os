@@ -233,9 +233,11 @@ const stockRevert = loadReal('lib/stockRevert.ts', {
   './stockRefusalBlocker': loadReal('lib/stockRefusalBlocker.ts', {
     './stockLedgerQuery': stockLedgerQuery, './movementReference': movementReferenceKernel, './stockInSessionsQuery': stockInSessionsQuery,
   }),
+  './branchRedirectWrite': require('./harness/branch_redirect_write.cjs'), // CUTOVER-LR
 })
 
 const inventoryRoute = loadReal('routes/inventory.ts', {
+  '../lib/branchRedirectWrite': require('./harness/branch_redirect_write.cjs'), // CUTOVER-LR
   '../lib/receivingBranch': loadReal('lib/receivingBranch.ts'),
   '../lib/continuousReadWindow': loadReal('lib/continuousReadWindow.ts'),
   // p3/reasons: the one shared reason-length cap the route enforces.

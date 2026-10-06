@@ -66,6 +66,10 @@ import { STOCK_REASON_MAX_LENGTH, stockReasonTooLong } from './stockReason'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { bumpVersion } from './cache'
 import { findLaterChangeBlocker, type StockRefusalDetails } from './stockRefusalBlocker'
+import {
+  UNDO_CLOSED_BRANCH_RETIRED_CODE, UNDO_CLOSED_BRANCH_RETIRED_MESSAGE, addressedStatements, branchEffectRefusal, branchRedirectGuardRefusal,
+  isBranchRedirectGuardError, landingLotId, requestBranchEffect, type BranchEffect, type RedirectTarget,
+} from './branchRedirectWrite'
 
 export const STOCK_LOT_SET_KIND = 'stock.quantity_set'
 export const STOCK_SET_REFERENCE_PREFIX = 'stock-set:'
@@ -290,6 +294,9 @@ export async function applyStockLotSet(
   requestId: string | null,
   request: StockLotSetRequest,
   markWritten: () => Promise<void> = async () => {},
+  // X-Branch-Redirect: a Set addressed to a branch that has since been disabled is applied at the active branch the
+  // operator confirmed (on the lot as it exists there); without it the Set is refused branch_redirect_required.
+  redirectTarget: RedirectTarget = null,
 ): Promise<StockLotSetResult> {
   if (getActionTier(user, 'inventory', 'adjust') !== 'full') {
     return { status: 403, body: { error: 'Stock adjustments require Full Access to Inventory.' } }
@@ -314,6 +321,15 @@ export async function applyStockLotSet(
     const existing = await previous()
     if (existing) return replay(existing)
   }
+  let landing: BranchEffect
+  try {
+    landing = await requestBranchEffect(db, request.branchId, redirectTarget)
+  } catch (error) {
+    const refusal = branchEffectRefusal(error)
+    if (refusal) return { status: 409, body: refusal }
+    throw error
+  }
+  if (landing.redirected) request = { ...request, branchId: landing.effectBranchId, batchId: Number(await landingLotId(db, landing, request.batchId)) }
 
   const facts = await db.prepare(`SELECT
       (SELECT name FROM products WHERE id=@product) AS product_name,
@@ -393,7 +409,7 @@ export async function applyStockLotSet(
   ]
   await markWritten()
   try {
-    await ordinaryBusinessBatch(db, statements)
+    await ordinaryBusinessBatch(db, addressedStatements(landing, statements))
   } catch (error) {
     if (recordOperation && requestId) {
       const concurrent = await previous()
@@ -401,6 +417,7 @@ export async function applyStockLotSet(
     }
     if (isMaintenanceError(error)) return MAINTENANCE_RESPONSE
     if (isReceivingBranchError(error)) return { status: 409, body: RECEIVING_BRANCH_INACTIVE }
+    if (isBranchRedirectGuardError(error)) return { status: 409, body: await branchRedirectGuardRefusal(db, landing.addressedBranchId, redirectTarget) }
     return conflict('Stock changed while saving. No correction was applied; refresh and try again.')
   }
   if (!recordOperation) return { status: 200, body: response }
@@ -420,10 +437,13 @@ export class StockLotSetReplayError extends Error {
   readonly statusCode: number
   // RET-D: the blocking record, passed through by the History route.
   readonly refusal: StockRefusalDetails | null
-  constructor(message: string, statusCode = 409, refusal: StockRefusalDetails | null = null) {
+  // CUTOVER-LR: the coded refusal of a branch-effect failure (a string third argument).
+  readonly code: string | undefined
+  constructor(message: string, statusCode = 409, refusalOrCode: StockRefusalDetails | string | null = null) {
     super(message)
     this.statusCode = statusCode
-    this.refusal = refusal
+    this.refusal = typeof refusalOrCode === 'object' ? refusalOrCode : null
+    this.code = typeof refusalOrCode === 'string' ? refusalOrCode : undefined
   }
 }
 
@@ -459,8 +479,10 @@ export async function replayStockLotSet(
   const from = direction === 'undo' ? after : before
   const to = direction === 'undo' ? before : after
   const facts = await db.prepare(`SELECT (SELECT name FROM products WHERE id=@product) AS product_name,
-      (SELECT name FROM branches WHERE id=@branch) AS branch_name`)
-    .get<{ product_name: string | null; branch_name: string | null }>({ product: before.productId, branch: before.branchId })
+      (SELECT name FROM branches WHERE id=@branch) AS branch_name, (SELECT is_active FROM branches WHERE id=@branch) AS branch_active`)
+    .get<{ product_name: string | null; branch_name: string | null; branch_active: number | null }>({ product: before.productId, branch: before.branchId })
+  // An Undo cannot carry a confirmed redirect: a Set at a branch that has since been disabled stays closed.
+  if (Number(facts?.branch_active ?? 1) !== 1) throw new StockLotSetReplayError(UNDO_CLOSED_BRANCH_RETIRED_MESSAGE, 409, UNDO_CLOSED_BRANCH_RETIRED_CODE)
   const lotDelta = after.lotQuantity - before.lotQuantity
   const tagged = lotDelta < 0 && !!request.conditionTag
   const effect: Effect = {

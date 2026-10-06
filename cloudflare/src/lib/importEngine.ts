@@ -97,16 +97,25 @@ import { applyUnifiedStockAdd, applyUnifiedStockSale, batchIdentity, ensureUnifi
 import { parseStockAction, saleGroupKeyFor } from './stockActionResolver'
 import { applyHistoricalSaleImport, MAX_HISTORICAL_SALE_LINES } from './salesImportCommit'
 import { getUnifiedStockMode, type UnifiedStockResolvedRow } from './stockActionImport'
-import { branchCanSell } from './branchRoles'
+import { branchCanSell, branchRole } from './branchRoles'
 import { WAREHOUSE_NOT_SELLABLE_ERROR } from './branchRoleGuards'
 import {
   IMPORT_BRANCH_COLUMNS_SQL,
+  importBranchRedirectGuards,
+  importBranchRedirectRequired,
+  importBranchRedirectTarget,
   indexCanonicalImportBranches,
   resolveImportBranchRequest,
   validateCanonicalImportBranchIds,
   withCanonicalImportBranchWriteGuard,
   type CanonicalImportBranchRow,
+  type ImportBranchRequestOptions,
+  type ImportBranchResolution,
 } from './importBranchAuthority'
+import {
+  BranchRedirectTargetInvalidError, branchEffectRefusal, branchRedirectDetail, readBranchDirectory, resolveBranchEffect,
+  type BranchEffectGuard, type BranchRedirectDetail,
+} from './branchEffect'
 import {
   normalizeImageMatchKey,
   matchImagesToProducts,
@@ -1824,7 +1833,7 @@ export async function classifyProducts(
       if (resolvedImage) data.image_path = resolvedImage
     }
     const importBranchName = str(row.branch_name || row.branch)
-    const importBranchResolution = resolveImportBranchRequest(canonicalImportBranches, importBranchName)
+    const importBranchResolution = resolveImportBranchRequest(canonicalImportBranches, importBranchName, { redirectTarget: importBranchRedirectTarget(policyJson) })
     const importBranch = importBranchResolution?.branch ?? null
     if (!importBranch) {
       results.push({
@@ -1844,6 +1853,7 @@ export async function classifyProducts(
     data.branch_id_explicit = importBranchName ? 1 : 0
     // A sheet addressed to a retired branch ("Shop") lands on its successor; the label it used is kept.
     if (importBranchResolution?.addressedName) data.branch_addressed_name = importBranchResolution.addressedName
+    markImportBranchRedirect(data, importBranchResolution)
 
     const skuMatch = sku ? bySku.get(lower(sku)) || null : null
     const barcodeCandidates = !skuMatch && barcode ? byBarcode.get(identityBarcodeKey(barcode)) || null : null
@@ -2824,7 +2834,7 @@ export async function planInventoryImportReceiptGroups(
     else lots.push({ id: reservedBatchId!, batch_key: target.batchKey, received_at: receivedDate,
       unit_cost_usd: cost, received_cost_usd: plan.params.receivedCostAfter as number | null })
     lotsByProduct.set(productId, lots)
-    return group
+    return labelAddressedMovements(group, data)
   })
 }
 
@@ -2844,7 +2854,7 @@ function pickIdentityClusterWinner<T extends { barcode?: unknown; id?: unknown; 
   return rankBarcodeIdentityWinner(real.length ? real : cluster)
 }
 
-export async function classifyInventory(db: D1Compat, rows: ParsedCsvRow[], inventoryAction?: InventoryImportAction | null): Promise<ImportRowResult[]> {
+export async function classifyInventory(db: D1Compat, rows: ParsedCsvRow[], inventoryAction?: InventoryImportAction | null, branchOptions: ImportBranchRequestOptions | null = {}): Promise<ImportRowResult[]> {
   const products = await db
     .prepare(`SELECT id, sku, barcode, name, stock_quantity, cost_price_usd, cost_price_khr FROM products`)
     .all<{ id: number; sku: string | null; barcode: string | null; name: string | null; stock_quantity: number; cost_price_usd: number | null; cost_price_khr: number | null }>()
@@ -2992,7 +3002,7 @@ export async function classifyInventory(db: D1Compat, rows: ParsedCsvRow[], inve
     }
 
     const branchName = str(row.branch_name || row.branch)
-    const matchedBranchResolution = resolveImportBranchRequest(canonicalImportBranches, branchName)
+    const matchedBranchResolution = resolveImportBranchRequest(canonicalImportBranches, branchName, branchOptions)
     const matchedBranch = matchedBranchResolution?.branch ?? null
     if (!matchedBranch) {
       results.push({
@@ -3035,6 +3045,7 @@ export async function classifyInventory(db: D1Compat, rows: ParsedCsvRow[], inve
       created_at: movementDate,
     }
     if (matchedBranchResolution?.addressedName) data.branch_addressed_name = matchedBranchResolution.addressedName
+    markImportBranchRedirect(data, matchedBranchResolution)
     const normalizedExplicitCost = (value: unknown): number => {
       const parsed = normalizeImportCost4(parseImportNumericValue(value, 0, { strict: true, field: 'unit cost' }))
       return Object.is(parsed, -0) ? 0 : parsed
@@ -3185,7 +3196,7 @@ export function parseSalesImportDateTime(value: unknown): string | null {
   return new Date(Date.UTC(year, month - 1, day, hour - 7, minute, second)).toISOString()
 }
 
-export async function classifySales(db: D1Compat, rows: ParsedCsvRow[]): Promise<ImportRowResult[]> {
+export async function classifySales(db: D1Compat, rows: ParsedCsvRow[], branchOptions: ImportBranchRequestOptions | null = {}): Promise<ImportRowResult[]> {
   const products = await db
     .prepare(`SELECT id, sku, barcode, name, stock_quantity, selling_price_usd, selling_price_khr, cost_price_usd, cost_price_khr FROM products`)
     .all<{ id: number; sku: string | null; barcode: string | null; name: string | null; stock_quantity: number; selling_price_usd: number; selling_price_khr: number; cost_price_usd: number | null; cost_price_khr: number | null }>()
@@ -3388,7 +3399,7 @@ export async function classifySales(db: D1Compat, rows: ParsedCsvRow[]): Promise
     // A legacy file may omit the branch column entirely. It can safely use
     // the one active canonical Shop; any explicit value is authoritative and
     // must match that same Shop rather than being guessed or auto-created.
-    const branchResolution = branchName ? resolveImportBranchRequest(salesBranchIndex, branchName) : null
+    const branchResolution = branchName ? resolveImportBranchRequest(salesBranchIndex, branchName, branchOptions) : null
     const matchedBranch = branchName
       ? branchResolution?.branch ?? null
       : activeShopBranches.length === 1 ? activeShopBranches[0] : null
@@ -3729,6 +3740,7 @@ export async function classifySales(db: D1Compat, rows: ParsedCsvRow[]): Promise
       created_at: createdAt,
       items,
     }
+    markImportBranchRedirect(data, branchResolution)
     results.push({ rowNumber: first._rowNumber, action: 'create', identifier, existingId: null, message, changes: {}, data })
   }
   return results
@@ -3882,9 +3894,9 @@ async function classifyRows(db: D1Compat, type: ImportType, rows: ParsedCsvRow[]
   if (type === 'customers') return classifyContacts(db, 'customers', rows, policyJson)
   if (type === 'suppliers') return classifyContacts(db, 'suppliers', rows, policyJson)
   if (type === 'delivery_contacts') return classifyContacts(db, 'delivery_contacts', rows, policyJson)
-  if (type === 'inventory') return classifyInventory(db, rows, getInventoryImportAction(policyJson))
+  if (type === 'inventory') return classifyInventory(db, rows, getInventoryImportAction(policyJson), { redirectTarget: importBranchRedirectTarget(policyJson) })
   if (type === 'stock_actions') return classifyUnifiedStockActions(db, rows, policyJson)
-  return classifySales(db, rows)
+  return classifySales(db, rows, { redirectTarget: importBranchRedirectTarget(policyJson) })
 }
 
 // Plain-JSON-safe shape of the image match summary, for storage in
@@ -4686,16 +4698,118 @@ export async function runImportAnalyze(env: Env, jobId: string, queueLatencyMs?:
 // matching the original's own per-row-group commit shape rather than one
 // giant single-table lock across types).
 
+// CUTOVER-LR (owner ruling 6 Oct 2026): a row whose branch cell addressed a RETIRED branch ("shop" after the
+// consolidation) carries the retired id, and -- until the operator confirms a landing branch -- a pending flag
+// every writer refuses. Never set while every branch is active, so a row's data is then exactly what it was.
+function markImportBranchRedirect(data: Record<string, unknown>, resolution: ImportBranchResolution | null | undefined): void {
+  if (resolution?.addressedBranchId == null) return
+  data.branch_redirect_addressed_id = resolution.addressedBranchId
+  if (resolution.redirectPending) data.branch_redirect_pending = 1
+}
+
+export type ImportBranchRedirectGate =
+  | { refusal: { error: string; code: string; redirect?: BranchRedirectDetail } }
+  | { target: number | null; addressedBranchId: number | null }
+
+const BRANCH_IMPORT_TYPES = new Set(['products', 'inventory', 'sales', 'stock_actions'])
+
+/**
+ * The operator's confirmation point for an import job (CUTOVER-LR): POST /:id/approve, and /:id/retry when it
+ * re-applies. Analysis is a preview and writes no business row, so this is the first request that would move
+ * anything. When the reviewed rows address a disabled branch -- a sheet's "shop" after the consolidation, or a
+ * row analysed before the cutover whose branch has since been disabled -- the request must name the active branch
+ * they go to (X-Branch-Redirect). Without it, or with a branch that cannot take them, the answer is the 409 refusal
+ * and nothing is queued. Several disabled branches in one job: the detail names the lowest id and the one confirmed
+ * target applies to all of them (each is checked against it). While every branch is active this reads the
+ * directory once and answers { target: null } without looking at the requested target.
+ */
+export async function importBranchRedirectGate(db: D1Compat, job: { id: string; type: string }, requestedTarget: number | null): Promise<ImportBranchRedirectGate> {
+  const none = { target: null, addressedBranchId: null }
+  if (!BRANCH_IMPORT_TYPES.has(String(job.type || ''))) return none
+  const directory = await readBranchDirectory(db)
+  const retired = new Set(directory.filter((row) => Number(row.is_active ?? 1) !== 1).map((row) => Number(row.id)))
+  if (!retired.size) return none
+  // Every branch the reviewed, actionable rows name: the branch a row resolved to and, for a redirected row, the
+  // retired branch it addressed. Staging only (import_job_rows), one DISTINCT read.
+  const referenced = job.type === 'stock_actions'
+    ? await db.staging.prepare(`SELECT DISTINCT CAST(json_extract(ref.value, '$.branchId') AS INTEGER) AS branch_id,
+          CAST(json_extract(ref.value, '$.addressedBranchId') AS INTEGER) AS addressed_id
+        FROM import_job_rows row, json_each(row.result_json, '$.data.branchRefs') ref
+        WHERE row.job_id = @id AND row.phase = 'analyze' AND row.action IN ('create', 'update')`)
+      .all<{ branch_id: number | null; addressed_id: number | null }>({ id: job.id })
+    : await db.staging.prepare(`SELECT DISTINCT CAST(json_extract(result_json, '$.data.branch_id') AS INTEGER) AS branch_id,
+          CAST(json_extract(result_json, '$.data.branch_redirect_addressed_id') AS INTEGER) AS addressed_id
+        FROM import_job_rows
+        WHERE job_id = @id AND phase = 'analyze' AND action IN ('create', 'update')`)
+      .all<{ branch_id: number | null; addressed_id: number | null }>({ id: job.id })
+  const addressed = [...new Set(referenced.flatMap((row) => [Number(row.addressed_id), Number(row.branch_id)]).filter((id) => retired.has(id)))]
+    .sort((a, b) => a - b)
+  if (!addressed.length) return none
+  const sells = job.type === 'sales'
+  try {
+    for (const id of addressed) {
+      const effect = resolveBranchEffect(directory, id, { target: requestedTarget, sells })
+      // Stock imports land only on a canonical stock branch (shop / warehouse role).
+      const landing = directory.find((row) => Number(row.id) === effect.effectBranchId)
+      if (!landing || branchRole(landing) === 'other') {
+        const detail = branchRedirectDetail(directory, id, { sells, requestedTargetId: requestedTarget })
+        if (detail) throw new BranchRedirectTargetInvalidError(detail)
+      }
+    }
+  } catch (error) {
+    const refusal = branchEffectRefusal(error)
+    if (refusal) return { refusal }
+    throw error
+  }
+  return { target: requestedTarget, addressedBranchId: addressed[0] }
+}
+
+const MOVEMENT_INSERT_HEAD = /^(\s*INSERT\s+INTO\s+inventory_movements\s*\()([^()]*)(\)\s*(?:VALUES\s*\(|SELECT\s))/i
+
+/**
+ * A row redirected from a disabled branch: every inventory_movements INSERT in its write group also records the
+ * branch the sheet addressed (addressed_branch_name, the kernel's provenance column). The column and its value lead
+ * the lists; a movement INSERT of any other shape throws, so no redirected movement is written without its label.
+ * Any other row's group is returned as it is (always, while every branch is active).
+ */
+function labelAddressedMovements<T extends { sql: string; params: Record<string, unknown> }>(group: T[], data: Record<string, unknown>): T[] {
+  if (data.branch_redirect_addressed_id == null) return group
+  const label = String(data.branch_addressed_name ?? '').trim() || null
+  return group.map((statement) => {
+    if (!/^\s*INSERT\s+INTO\s+inventory_movements\b/i.test(statement.sql)) return statement
+    if (!MOVEMENT_INSERT_HEAD.test(statement.sql) || /\baddressed_branch_name\b/i.test(statement.sql)) {
+      throw new Error('A redirected stock movement must name the branch it was addressed to')
+    }
+    return {
+      ...statement,
+      sql: statement.sql.replace(MOVEMENT_INSERT_HEAD, '$1addressed_branch_name, $2$3@importAddressedBranchName, '),
+      params: { ...statement.params, importAddressedBranchName: label },
+    }
+  })
+}
+
+/** The in-batch guards for every actionable row redirected onto a confirmed landing (empty while all are active). */
+export function importRowRedirectGuards(actionable: ImportRowResult[], sells = false): BranchEffectGuard[] {
+  return importBranchRedirectGuards(actionable.flatMap((result) => {
+    const data = result.data as Record<string, unknown>
+    return data.branch_redirect_addressed_id == null || data.branch_redirect_pending
+      ? [] : [{ addressed: data.branch_redirect_addressed_id, effect: data.branch_id, sells }]
+  }))
+}
+
 // Analyze resolves only existing active canonical branches. Revalidate the
 // selected ids immediately before apply so an imported row can never create
 // a branch, fall back to a synthetic Main Branch, or write after its branch
 // identity was deactivated/renamed/duplicated during review.
-export async function validateResolvedImportBranches(db: D1Compat, actionable: ImportRowResult[]): Promise<void> {
+export async function validateResolvedImportBranches(db: D1Compat, actionable: ImportRowResult[], options: { sells?: boolean } = {}): Promise<void> {
   if (!actionable.length) return
   const branchIds: number[] = []
   for (const result of actionable) {
     const data = result.data as Record<string, unknown>
     if (data.branch_name_pending != null) throw new Error('Import contains an unresolved branch; review it before applying.')
+    // CUTOVER-LR: a row addressed to a retired branch whose landing the operator never confirmed. Nothing is written;
+    // the job fails with branch_redirect_required and a Retry asks for the landing branch.
+    if (data.branch_redirect_pending) throw importBranchRedirectRequired(await readBranchDirectory(db), Number(data.branch_redirect_addressed_id), options)
     const branchId = Number(data.branch_id)
     branchIds.push(branchId)
   }
@@ -5084,6 +5198,7 @@ async function dispatchStockActionSingle(
   if (plan.kind === 'noop') { r.action = 'skip'; return }
   const branchNameById = new Map(resolved.branchRefs.map((ref) => [ref.branchId, ref.branchName]))
   const addressedById = new Map(resolved.branchRefs.filter((ref) => ref.addressedName).map((ref) => [ref.branchId, ref.addressedName ?? null]))
+  const addressedIdById = stockRedirectedBranches(resolved)
   const supplierName = String(resolved.supplier || '').trim() || null
   // applyUnifiedStockAdd is the wire and runs the gate for every add; this
   // asks the SAME question early for one case only -- a CREATE that also
@@ -5131,6 +5246,7 @@ async function dispatchStockActionSingle(
       branchId: add.branchId,
       branchName: branchNameById.get(add.branchId) || '',
       addressedBranchName: addressedById.get(add.branchId) ?? null,
+      ...(addressedIdById.has(add.branchId) ? { addressedBranchId: addressedIdById.get(add.branchId) } : {}),
       quantity: add.quantity,
       date: resolved.date,
       batchLabel: resolved.batchLabel,
@@ -5161,6 +5277,7 @@ async function dispatchStockActionSaleGroup(
     const resolved = r.data as unknown as UnifiedStockResolvedRow
     const branchNameById = new Map(resolved.branchRefs.map((ref) => [ref.branchId, ref.branchName]))
     const addressedById = new Map(resolved.branchRefs.filter((ref) => ref.addressedName).map((ref) => [ref.branchId, ref.addressedName ?? null]))
+    const addressedIdById = stockRedirectedBranches(resolved)
     // A single sheet row may sell from both branches; each becomes its own
     // sale line so the writer's FIFO/oversell guard runs per branch.
     for (const sale of resolved.plan!.branchActions) {
@@ -5172,6 +5289,7 @@ async function dispatchStockActionSaleGroup(
         branchId: sale.branchId,
         branchName: branchNameById.get(sale.branchId) || '',
         addressedBranchName: addressedById.get(sale.branchId) ?? null,
+        ...(addressedIdById.has(sale.branchId) ? { addressedBranchId: addressedIdById.get(sale.branchId) } : {}),
         quantity: sale.quantity,
         sellingPriceUsd: Number(resolved.sellingPriceUsd ?? 0),
         costPriceUsd: resolved.costPriceUsd,
@@ -5182,6 +5300,26 @@ async function dispatchStockActionSaleGroup(
   if (!lines.length) return 'skipped'
   await applyUnifiedStockSale(db, { jobId, saleGroupKey, date: first.date, lines, actor, recordedAt: new Date().toISOString() })
   return 'applied'
+}
+
+// CUTOVER-LR: the landing branch -> the retired branch its column addressed, for the columns the operator confirmed.
+// A pending column never reaches a writer (refuseUnconfirmedStockRedirect below); empty while every branch is active.
+function stockRedirectedBranches(resolved: UnifiedStockResolvedRow): Map<number, number> {
+  const redirected = new Map<number, number>()
+  for (const ref of resolved.branchRefs || []) {
+    if (ref.addressedBranchId != null && !ref.redirectPending && !redirected.has(ref.branchId)) redirected.set(ref.branchId, ref.addressedBranchId)
+  }
+  return redirected
+}
+
+// A stock-action column addressed to a retired branch whose landing the operator never confirmed: nothing is
+// dispatched and the job fails with branch_redirect_required (a Retry asks for the landing branch).
+async function refuseUnconfirmedStockRedirect(db: D1Compat, results: StockActionImportResult[]): Promise<void> {
+  for (const r of results) {
+    if (r.action === 'error') continue
+    const ref = ((r.data as unknown as UnifiedStockResolvedRow).branchRefs || []).find((candidate) => candidate.redirectPending && candidate.addressedBranchId != null)
+    if (ref) throw importBranchRedirectRequired(await readBranchDirectory(db), Number(ref.addressedBranchId))
+  }
 }
 
 const STOCK_POISON_MESSAGE = 'This sale group has a line that could not be resolved; a receipt is never imported partially — fix or remove that line, then re-import.'
@@ -5276,6 +5414,7 @@ async function applyStockActionsSinglePass(
 
   const results = (await classifyRows(db, 'stock_actions', rows, jobId, policyJson)) as StockActionImportResult[]
   sw.lap('classifyChunkMs')
+  await refuseUnconfirmedStockRedirect(db, results)
   const resolvedOf = (r: StockActionImportResult) => r.data as unknown as UnifiedStockResolvedRow
 
   // A sale receipt is all-or-nothing. A blocked line (bad data / unresolved
@@ -5421,6 +5560,8 @@ async function applyStockActionsContinuation(
     const windowRows = await readMaterializedWindow(db, jobId, cursor, STOCK_ACTION_CLASSIFY_WINDOW, decisions)
     const results = (await classifyRows(db, 'stock_actions', windowRows, jobId, policyJson)) as StockActionImportResult[]
     sw.lap('classifyChunkMs')
+    // Classification runs to the end before any dispatch, so a refusal here leaves every business table untouched.
+    await refuseUnconfirmedStockRedirect(db, results)
 
     // This window's sale-group keys: planned rows need a stable group_index,
     // blocked rows poison their would-be group. Both live in
@@ -5964,10 +6105,13 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
 
     const actionable = results.filter((r) => r.action === 'create' || r.action === 'update')
     let importWriteDb = db
+    // CUTOVER-LR: rows addressed to a retired branch and landed on the branch the operator confirmed re-prove that
+    // pair in every write batch. Empty while every branch is active (the guarded batches are then unchanged).
+    const branchRedirects = importRowRedirectGuards(actionable, job.type === 'sales')
     if (job.type === 'products' || job.type === 'inventory' || job.type === 'sales') {
-      await validateResolvedImportBranches(db, actionable)
+      await validateResolvedImportBranches(db, actionable, { sells: job.type === 'sales' })
       if ((job.type === 'products' || job.type === 'inventory') && actionable.length) {
-        importWriteDb = withCanonicalImportBranchWriteGuard(db, actionable.map((result) => Number((result.data as Record<string, unknown>).branch_id)))
+        importWriteDb = withCanonicalImportBranchWriteGuard(db, actionable.map((result) => Number((result.data as Record<string, unknown>).branch_id)), branchRedirects)
       }
       // Sales line items are nested one level deeper (data.items[]), each
       // carrying its own copy of the same validated order-level branch_id.
@@ -6255,6 +6399,8 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
               params: { count: mergeRecords.length, id: mergeRecords[0].productId },
             })
           }
+          // A row redirected from a disabled branch labels its movements (CUTOVER-LR); any other row is untouched.
+          rowWriteGroup = labelAddressedMovements(rowWriteGroup, d)
           if (rowWriteGroup.length) productStatementGroups.push(rowWriteGroup)
         }
         // Populates the same name_normalized/unit_normalized/brand_compact
@@ -6753,7 +6899,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
             params: { usd: d.cost_price_usd, khr: d.cost_price_khr, id: d.product_id, updated_at: nowIso },
           })
         }
-        guardedGroups.push(group)
+        guardedGroups.push(labelAddressedMovements(group, d))
       }
     }
 
@@ -6761,7 +6907,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
       importWriteDb = withCanonicalImportBranchWriteGuard(db, [
         ...actionable.map((result) => Number((result.data as Record<string, unknown>).branch_id)),
         ...productSeedBranchIds,
-      ])
+      ], branchRedirects)
     }
     if (productStatementGroups.length) await runD1BatchGroupsInChunks(importWriteDb, productStatementGroups)
     if (statements.length) await runD1BatchInChunks(importWriteDb, statements)

@@ -92,6 +92,7 @@ const shared = {
   '../durable-objects/broadcastHub': { broadcast: async () => {} },
   '../lib/productBatches': productBatchesMod,
   '../lib/receivingBranch': receivingBranchMod,
+  '../lib/branchRedirectWrite': require('./harness/branch_redirect_write.cjs'), // CUTOVER-LR
   '../lib/batchCode': batchCodeMod,
   '../lib/stockReceiptGate': gateMod,
   '../lib/stockReason': stockReasonMod,

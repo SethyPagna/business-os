@@ -30,6 +30,9 @@ export interface DatedCountEntry {
   count: number // the physical count as of `date` -- an ABSOLUTE
   // quantity, same convention as the existing "Set stock to X" UI field,
   // not a delta.
+  // CUTOVER-LR: the disabled branch this count was addressed to, when the operator confirmed `branchId` as its
+  // landing. Absent while every branch is active.
+  addressedBranchName?: string | null
 }
 
 // A movement this SAME import mechanism created on a previous run,
@@ -74,6 +77,8 @@ export interface StockCountPlanMovement {
   quantity: number // always positive -- the magnitude; movementType carries direction
   movementType: 'add' | 'remove'
   reason: string
+  // CUTOVER-LR: the disabled branch the count was addressed to (inventory_movements.addressed_branch_name).
+  addressedBranchName?: string | null
   // This movement's own lot effects, from the same FIFO simulation that
   // produced batchTopUps/batchCreates/batchDrains (signed: + received into
   // the lot, - drained from it). `batchId` null means the lot this same run
@@ -186,6 +191,9 @@ export interface StockCountPlan {
   // charged to the group's other lots so the lot ledger lands on the same
   // total as branch_stock (computeBatchPlanForGroup's settlement).
   batchRebalances: PlannedLotRebalance[]
+  // CUTOVER-LR: every (disabled branch -> confirmed landing) pair the entries were redirected along; the apply batch
+  // re-proves each. Absent while every branch is active.
+  branchRedirects?: Array<{ addressed: number; effect: number; sells: 0 | 1 }>
 }
 
 export const DATED_STOCK_COUNT_REASON = 'Dated stock count import'
@@ -490,6 +498,7 @@ export function computeDatedStockCountPlan(
           movementType: delta > 0 ? 'add' : 'remove',
           reason: DATED_STOCK_COUNT_REASON,
           batchActions: [],
+          ...(entry.addressedBranchName ? { addressedBranchName: entry.addressedBranchName } : {}),
         }
         movementsToCreate.push(movement)
         groupMovements.push({ deltaIndex: deltas.length, movement })

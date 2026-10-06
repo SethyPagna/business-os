@@ -81,6 +81,8 @@ const relMap = {
   './productDetailRule': () => loadReal('lib/productDetailRule.ts'),
   './productDetailRule.ts': () => loadReal('lib/productDetailRule.ts'),
   './branchRoles': () => loadReal('lib/branchRoles.ts'),
+  // CUTOVER-LR: the import authority answers a disabled branch through the branch-effect kernel.
+  './branchEffect': () => loadReal('lib/branchEffect.ts'),
   './branchRoles.ts': () => loadReal('lib/branchRoles.ts'),
   './importBranchAuthority': () => loadReal('lib/importBranchAuthority.ts'),
   './importBranchAuthority.ts': () => loadReal('lib/importBranchAuthority.ts'),
@@ -476,15 +478,26 @@ async function main() {
     const { rawDb, db } = freshDb()
     seedConsolidated(rawDb)
     seedProduct(rawDb, { id: 60, name: 'Widget' })
+    // CUTOVER-LR pin change: the Shop row addresses the disabled Old Shop, so the request must carry the landing the
+    // operator confirmed (X-Branch-Redirect -> redirectTarget). Without it nothing resolves: the coded refusal.
+    await assert.rejects(() => resolveDatedStockCountRows(db, [
+      row({ rowNumber: 1, branchName: 'Shop', count: 5 }),
+      row({ rowNumber: 2, branchName: 'Warehouse', count: 3 }),
+    ]), (error) => error.code === 'branch_redirect_required' && error.redirect.addressed_branch_id === 2 && error.redirect.successor_branch_id === 1)
     const { resolved, unresolved } = await resolveDatedStockCountRows(db, [
       row({ rowNumber: 1, branchName: 'Shop', count: 5 }),
       row({ rowNumber: 2, branchName: 'Warehouse', count: 3 }),
-    ])
+    ], { redirectTarget: 1 })
     assert.deepStrictEqual(unresolved, [])
     assert.strictEqual(resolved.length, 1, 'two columns of one branch are one row; two absolute counts of one branch would overwrite each other')
     assert.strictEqual(resolved[0].branchId, 1)
     assert.strictEqual(resolved[0].count, 8, 'Set = shop 5 + warehouse 3 (last-wins would say 3, first-wins 5)')
     assert.deepStrictEqual(resolved[0].mergedRowNumbers, [2], 'the folded sheet row is named, never silently dropped')
+    assert.deepStrictEqual([resolved[0].addressedBranchId, resolved[0].addressedBranchName], [2, 'Shop'], 'the folded count keeps what the Shop column addressed')
+    await assert.rejects(() => resolveDatedStockCountRows(db, [row({ rowNumber: 1, branchName: 'Shop', count: 5 })], { redirectTarget: 2 }),
+      (error) => error.code === 'branch_redirect_target_invalid', 'the disabled branch itself is not a landing')
+    const direct = await resolveDatedStockCountRows(db, [row({ rowNumber: 1, branchName: 'Warehouse', count: 3 })])
+    assert.deepStrictEqual(direct.resolved.map((r) => [r.branchId, r.addressedBranchId]), [[1, undefined]], 'a row that reaches LC Store directly needs no confirmation')
   })
 
   await testAsync('after the consolidation: the same column twice is a genuine duplicate and is NOT folded; other dates are not folded', async () => {
@@ -495,7 +508,7 @@ async function main() {
       row({ rowNumber: 1, branchName: 'Shop', count: 5 }),
       row({ rowNumber: 2, branchName: 'Shop', count: 7 }),
       row({ rowNumber: 3, branchName: 'Warehouse', count: 2, date: '2026-08-11' }),
-    ])
+    ], { redirectTarget: 1 })
     assert.deepStrictEqual(resolved.map((r) => [r.rowNumber, r.branchId, r.count, r.mergedRowNumbers]), [
       [1, 1, 5, undefined], [2, 1, 7, undefined], [3, 1, 2, undefined],
     ])

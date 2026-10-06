@@ -21,6 +21,10 @@ import { STOCK_REASON_MAX_LENGTH, stockReasonTooLong } from './stockReason'
 import { multiplyMoney4, roundMoney4, sumMoney4 } from './moneyPrecision'
 import { catalogCostRecomputeIfChangedStatement, catalogCostRecomputeStatement } from './catalogCostRecompute'
 import { findLaterChangeBlocker } from './stockRefusalBlocker'
+import {
+  addressedMovement, branchEffectRefusal, branchRedirectGuard, branchRedirectGuardRefusal, directoryBranchEffect, isBranchRedirectGuardError, landingLotId,
+  readBranchDirectory, type BranchEffect, type RedirectTarget,
+} from './branchRedirectWrite'
 
 export const STOCK_SESSION_KIND = 'stock.session'
 export const STOCK_SESSION_MAX_LINES = 25
@@ -556,7 +560,27 @@ function parseStoredReceipt(row: Row, replayed: boolean): StockSessionReceipt {
   return { ...receipt, replayed }
 }
 
-export async function commitStockSession(env: Env, user: SessionUser, raw: unknown): Promise<StockSessionReceipt> {
+/**
+ * The landing of every line addressed to a disabled branch, by line id (the confirmed active branch,
+ * X-Branch-Redirect). Throws the 409 refusal when a line needs a confirmation the request does not carry.
+ */
+async function sessionLandings(db: D1Compat, request: StockSessionRequest, redirectTarget: RedirectTarget): Promise<Map<string, BranchEffect>> {
+  const directory = await readBranchDirectory(db)
+  const landings = new Map<string, BranchEffect>()
+  try {
+    for (const line of request.items) {
+      const effect = directoryBranchEffect(directory, line.branch_id, redirectTarget)
+      if (effect.redirected) landings.set(line.line_id, effect)
+    }
+  } catch (error) {
+    const refusal = branchEffectRefusal(error)
+    if (refusal) fail(refusal.error, 409, refusal.code, refusal.redirect ? { redirect: refusal.redirect } : undefined)
+    throw error
+  }
+  return landings
+}
+
+export async function commitStockSession(env: Env, user: SessionUser, raw: unknown, redirectTarget: RedirectTarget = null): Promise<StockSessionReceipt> {
   if (hasAcquisitionCostInput(raw, user)) fail('Cost-entry permission is required to enter receipt costs.', 403, 'product_cost_edit_required')
   let request = parseRequest(raw, isAdminControlUser(user) ? ADMIN_MAX_IMAGES_PER_PRODUCT : MAX_IMAGES_PER_PRODUCT)
   const requiresInventoryAdjust = request.items.some((line) => line.quantity > 0)
@@ -653,6 +677,19 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
   // still needs the SAME active-row check, revision-pair and product
   // postimage coverage every other touched product gets, to guard the
   // barcode-cleanup UPDATE queued for it further down.
+  // A line addressed to a disabled branch is received at the confirmed active branch (its lot as it exists
+  // there); the stored request keeps the branch it was addressed to.
+  const landings = await sessionLandings(db, request, redirectTarget)
+  if (landings.size) {
+    request = {
+      ...request,
+      items: await Promise.all(request.items.map(async (line) => {
+        const landing = landings.get(line.line_id)
+        if (!landing) return line
+        return { ...line, branch_id: landing.effectBranchId, batch_id: line.batch_id == null ? line.batch_id : Number(await landingLotId(db, landing, line.batch_id)) }
+      })),
+    }
+  }
   const receiveIds = request.items.flatMap((line) => line.product_id == null ? [] : [line.product_id])
     .concat([...createFolds.values()].map((fold) => fold.id))
   const branchIds = request.items.map((line) => line.branch_id)
@@ -867,6 +904,9 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
   const statements: StockWriteStatement[] = [
     assertion("NOT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance')"),
   ]
+  for (const landing of new Map([...landings.values()].map((effect) => [`${effect.addressedBranchId}>${effect.effectBranchId}`, effect])).values()) {
+    statements.push(branchRedirectGuard(landing))
+  }
   const receiptTotalCostUsd = sumMoney4(request.items.flatMap((line) =>
     line.unit_cost_usd == null || line.quantity <= 0 ? [] : [multiplyMoney4(line.unit_cost_usd, line.quantity)]))
   for (const row of products) statements.push(revisionAssertion('product', String(row.id), 'EXISTS(SELECT 1 FROM products WHERE id=@id AND is_active=1)', { id: row.id }, rev('product', row.id)))
@@ -1033,10 +1073,12 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
     // 0128 normalises them.
     // P3-L2: the line's own reason (as typed) is the movement reason; a line
     // without one keeps the generated session label.
-    statements.push({ sql: `INSERT INTO inventory_movements(product_id,product_name,branch_id,branch_name,movement_type,quantity,unit_cost_usd,unit_cost_khr,total_cost_usd,total_cost_khr,reason,reference_id,user_id,user_name,batch_id)
+    const movement: StockWriteStatement = { sql: `INSERT INTO inventory_movements(product_id,product_name,branch_id,branch_name,movement_type,quantity,unit_cost_usd,unit_cost_khr,total_cost_usd,total_cost_khr,reason,reference_id,user_id,user_name,batch_id)
       SELECT m.product_id,p.name,m.branch_id,b.name,'add',m.quantity,m.unit_cost_usd,0,CASE WHEN m.unit_cost_usd IS NULL THEN NULL ELSE @totalCostUsd END,0,@reason,o.rowid,@actor,@actorName,m.batch_id
       FROM stock_session_members m JOIN products p ON p.id=m.product_id JOIN branches b ON b.id=m.branch_id JOIN stock_session_operations o ON o.id=m.operation_id
-      WHERE m.operation_id=@operationId AND m.line_id=@lineId`, params: { reason: line.reason || `Stock-in session ${operationId}`, actor: user.id, actorName: actorSnapshot(user), operationId, lineId: line.line_id, totalCostUsd: plan.params.receivedCostUsd } })
+      WHERE m.operation_id=@operationId AND m.line_id=@lineId`, params: { reason: line.reason || `Stock-in session ${operationId}`, actor: user.id, actorName: actorSnapshot(user), operationId, lineId: line.line_id, totalCostUsd: plan.params.receivedCostUsd } }
+    const lineLanding = landings.get(line.line_id)
+    statements.push(lineLanding ? addressedMovement(movement, lineLanding.addressedName) : movement)
     statements.push({ sql: 'UPDATE stock_session_members SET movement_id=last_insert_rowid() WHERE operation_id=@operationId AND line_id=@lineId', params: { operationId, lineId: line.line_id } })
   }
   // P10-4 (owner ruling 2026-09-16): every 'receive' line just wrote/topped a
@@ -1084,6 +1126,11 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
       return parseStoredReceipt(retry, true)
     }
     if (/constraint/i.test(String(error))) fail('Product, branch, received date, stock, or asset state changed. Nothing was applied; refresh and retry.', 409, 'stale_state')
+    const landing = landings.values().next().value
+    if (landing && isBranchRedirectGuardError(error)) {
+      const refusal = await branchRedirectGuardRefusal(db, landing.addressedBranchId, redirectTarget)
+      fail(refusal.error, 409, refusal.code, refusal.redirect ? { redirect: refusal.redirect } : undefined)
+    }
     throw error
   }
   const saved = await db.prepare('SELECT receipt_json FROM stock_session_operations WHERE id=@id').get<Row>({ id: operationId })

@@ -29,6 +29,9 @@ const relMap = {
   './db.ts': () => ({}),
   './branchRoles': () => loadReal('lib/branchRoles.ts'),
   './branchRoles.ts': () => loadReal('lib/branchRoles.ts'),
+  // CUTOVER-LR: the import authority answers a retired branch through the branch-effect kernel.
+  './branchEffect': () => loadReal('lib/branchEffect.ts'),
+  './sqlBinding': () => loadReal('lib/sqlBinding.ts'),
 }
 const originalCompile = Module.prototype._compile
 Module.prototype._compile = function (content, filename) {
@@ -169,6 +172,20 @@ async function main() {
   assert.deepStrictEqual(ask(AFTER, 'LC Store'), { id: 1, addressed: null }, 'an exact active name still resolves')
   assert.deepStrictEqual(ask(AFTER, ''), { id: 1, addressed: null })
   assert.strictEqual(ask(AFTER, 'Old Shop'), null, 'a retired branch is never named directly; it is reached through the shop word')
+  // CUTOVER-LR (owner ruling 6 Oct 2026): that successor is only the PREVIEW until the operator confirms where a row
+  // addressed to the disabled Shop goes. The pending flag is what every writer refuses; a confirmed target is where
+  // the row lands (still addressed to Shop); a target that cannot take it is the coded refusal.
+  const full = (rows, word, options) => resolveImportBranchRequest(indexCanonicalImportBranches(rows), word, options)
+  const preview = full(AFTER, 'shop')
+  assert.deepStrictEqual([preview.branch.id, preview.addressedBranchId, preview.redirectPending], [1, 2, true], 'no target: the successor is a pending preview addressed to Old Shop')
+  const confirmed = full(AFTER, 'shop', { redirectTarget: 1 })
+  assert.deepStrictEqual([confirmed.branch.id, confirmed.addressedName, confirmed.addressedBranchId, confirmed.redirectPending], [1, 'Shop', 2, undefined], 'a confirmed target lands the row there, addressed to Shop')
+  assert.throws(() => full(AFTER, 'shop', { redirectTarget: 2 }), (error) => error.code === 'branch_redirect_target_invalid' && error.redirect.successor_branch_id === 1, 'the disabled branch itself is not a target')
+  assert.throws(() => full(AFTER, 'shop', { redirectTarget: 99 }), (error) => error.code === 'branch_redirect_target_invalid', 'an unknown branch is not a target')
+  for (const word of ['warehouse', 'store', 'LC Store', '']) {
+    assert.deepStrictEqual(Object.keys(full(AFTER, word, { redirectTarget: 99 })).sort(), ['addressedName', 'branch'], `${word || 'blank'} reaches an active branch: the target is never read and nothing is marked`)
+  }
+  assert.deepStrictEqual(Object.keys(full(BEFORE, 'shop', { redirectTarget: 99 })).sort(), ['addressedName', 'branch'], 'before the cutover the answer has exactly its old shape, whatever the request names')
   // Refusals: ambiguity, a retired branch with no successor, and a retired chain that ends nowhere.
   assert.strictEqual(ask([...AFTER, { id: 3, name: 'Second', role: 'shop', canonical_key: 'warehouse', is_active: 1, is_default: 0 }], 'warehouse'), null, 'two active branches carrying one identity refuse')
   // A stray retired legacy row called "Shop" (no identity, no successor) must not turn the shop word ambiguous once

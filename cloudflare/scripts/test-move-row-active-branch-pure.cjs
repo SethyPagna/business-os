@@ -4,6 +4,11 @@
 // no active check (design G12 section 3.1, "request-chosen" row).
 //
 // Active branch: behaviour unchanged (the assertion is a no-op SELECT).
+//
+// CUTOVER-LR (owner ruling 6 Oct 2026): a DISABLED branch is no longer a flat refusal -- the move asks for the
+// active branch the operator confirms (branch_redirect_required) and happens there; that contract is proven on the
+// real route in test-cutover-lr-batches-pure.cjs. What stays pinned here: the LANDING branch is checked active
+// before the write and again first in the batch, and an unknown branch is still receiving_branch_inactive.
 const assert = require('assert')
 const fs = require('fs')
 const path = require('path')
@@ -26,14 +31,15 @@ const moveRow = block.slice(0, block.indexOf("\napp.", 20))
 let passed = 0
 function check(name, fn) { fn(); passed += 1; console.log(`PASS ${name}`) }
 
-check('move-row pre-checks the branch is active and maps the refusal to 409 receiving_branch_inactive', () => {
-  assert.match(moveRow, /await requireReceivingBranch\(db, branchId\)/)
+check('move-row pre-checks the landing branch is active and maps the refusal to 409 receiving_branch_inactive', () => {
+  assert.match(moveRow, /\(\{ landing, branch \} = await requestBranchLanding\(db, addressedBranchId, \(\) => branchRedirectTarget\(c\)\)\)\s*await requireReceivingBranch\(db, landing\.effectBranchId\)/)
+  assert.match(moveRow, /const branchId = landing\.effectBranchId/)
   assert.match(moveRow, /if \(isReceivingBranchError\(error\)\) return c\.json\(RECEIVING_BRANCH_INACTIVE, 409\)/)
 })
 
 check('the same assertion rides FIRST in the write batch, so a branch retired after the pre-read aborts every write', () => {
-  const batch = moveRow.slice(moveRow.indexOf('await db.batch(['))
-  assert.match(batch, /await db\.batch\(\[\s*receivingBranchAssertion\(branchId\),\s*\.\.\.removal\.statements/)
+  const batch = moveRow.slice(moveRow.indexOf('await db.batch(addressedStatements(landing, ['))
+  assert.match(batch, /await db\.batch\(addressedStatements\(landing, \[\s*receivingBranchAssertion\(branchId\),\s*\.\.\.removal\.statements/)
   assert.match(moveRow, /if \(isReceivingBranchError\(err\)\) return c\.json\(RECEIVING_BRANCH_INACTIVE, 409\)/)
 })
 

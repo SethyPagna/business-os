@@ -35,6 +35,8 @@ const subject = compile('stockActionCommit.ts', {
   './searchMatch': searchMatch,
   './stockReceiptGate': stockReceiptGate,
   './branchRoleGuards': branchRoleGuards,
+  // CUTOVER-LR: the add/sale writers re-prove a confirmed branch redirect in-batch with the kernel's predicate.
+  './branchEffect': compile('branchEffect.ts', { './branchRoles': branchRoles, './sqlBinding': compile('sqlBinding.ts'), './db': {} }),
   './saleCreationSnapshot': saleCreationSnapshot,
   // P10-4: not exercised (this file only drives applyUnifiedStockSale), but
   // the module-level import must still resolve.

@@ -136,7 +136,9 @@ export async function applyDatedStockCountPlan(
   ])]
   const branchAuthorityError = await validateCanonicalImportBranchIds(db, branchIds)
   if (branchAuthorityError) throw new Error(branchAuthorityError)
-  const guardedDb = withCanonicalImportBranchWriteGuard(db, branchIds)
+  // CUTOVER-LR: entries redirected from a disabled branch re-prove that pair in the same batch (none while every
+  // branch is active, and the guarded batch is then exactly what it was).
+  const guardedDb = withCanonicalImportBranchWriteGuard(db, branchIds, plan.branchRedirects ?? [])
 
   const statements: StockWriteStatement[] = []
   let usesSessionGuards = false
@@ -336,9 +338,12 @@ export async function applyDatedStockCountPlan(
     // 0084: stamp the movement's batch_id when exactly ONE lot covered its
     // whole quantity; a multi-lot spread or a shortfall stays NULL.
     const batchIdSql = single ? lotIdSql(refFor(movement, single), 'lot', params) : 'NULL'
+    // A count redirected from a disabled branch also names it (CUTOVER-LR); absent while every branch is active.
+    const addressed = movement.addressedBranchName != null
+    if (addressed) params.addressedBranchName = movement.addressedBranchName
     statements.push({
-      sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_id, user_name, created_at, batch_id)
-            VALUES (@productId, @productName, @branchId, @branchName, @movementType, @quantity, @reason, @userId, @userName, @createdAt, ${batchIdSql})`,
+      sql: `INSERT INTO inventory_movements (product_id, product_name, branch_id, branch_name${addressed ? ', addressed_branch_name' : ''}, movement_type, quantity, reason, user_id, user_name, created_at, batch_id)
+            VALUES (@productId, @productName, @branchId, @branchName${addressed ? ', @addressedBranchName' : ''}, @movementType, @quantity, @reason, @userId, @userName, @createdAt, ${batchIdSql})`,
       params,
     })
     movement.batchActions.forEach((action, index) => {

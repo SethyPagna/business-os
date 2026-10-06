@@ -78,6 +78,10 @@ import { broadcast } from '../durable-objects/broadcastHub'
 import { isUndoClosedByMerge } from './undoAppliers'
 import { findConsumingBlocker, findLaterChangeBlocker, type StockRefusalDetails } from './stockRefusalBlocker'
 import { bumpVersion } from './cache'
+import {
+  UNDO_CLOSED_BRANCH_RETIRED_CODE, UNDO_CLOSED_BRANCH_RETIRED_MESSAGE, addressedStatements, branchEffectRefusal, branchRedirectGuardRefusal,
+  isBranchRedirectGuardError, requestBranchEffect, type BranchEffect, type RedirectTarget,
+} from './branchRedirectWrite'
 
 export const STOCK_IN_LINE_EDIT_KIND = 'stock.session_line_edit'
 const REQUEST_ID = /^[A-Za-z0-9_-]{8,120}$/
@@ -365,18 +369,23 @@ function isMaintenanceError(error: unknown): boolean {
  * every stock-in writer uses) and, for a cost, the cost-entry permission that
  * stock-in creation demands (lib/acquisitionCostAccess.ts).
  */
+// `redirectTarget` (X-Branch-Redirect): an edit that changes the quantity or received date of a line received at a
+// branch that has since been disabled moves the stock at the active branch the operator confirmed; without it the
+// edit is refused branch_redirect_required. A cost or supplier edit moves no stock and asks nothing.
 export async function applyStockInLineEdit(
-  db: D1Compat, user: SessionUser, movementId: number, body: Row,
+  db: D1Compat, user: SessionUser, movementId: number, body: Row, redirectTarget: RedirectTarget = null,
 ): Promise<StockInLineEditResult> {
   try {
-    return await applyInner(db, user, movementId, body)
+    return await applyInner(db, user, movementId, body, redirectTarget)
   } catch (error) {
     if (error instanceof EditRefusal) return { status: error.status, body: { error: error.message, code: error.code, ...error.details } }
+    const refusal = branchEffectRefusal(error)
+    if (refusal) return { status: 409, body: refusal }
     throw error
   }
 }
 
-async function applyInner(db: D1Compat, user: SessionUser, movementId: number, body: Row): Promise<StockInLineEditResult> {
+async function applyInner(db: D1Compat, user: SessionUser, movementId: number, body: Row, redirectTarget: RedirectTarget): Promise<StockInLineEditResult> {
   const tier = getActionTier(user, 'inventory', 'adjust')
   if (tier !== 'full') refuse(403, 'Editing a stock-in line requires Full Access to adjust inventory.', 'permission_denied')
   const request = parseStockInLineEditRequest(movementId, body)
@@ -421,11 +430,13 @@ async function applyInner(db: D1Compat, user: SessionUser, movementId: number, b
     }
   }
   const productId = Number(root.product_id)
-  const branchId = Number(root.branch_id)
   const range = stockInEditRange(movementId)
   const edits = await db.prepare(`SELECT id, quantity, total_cost_usd, batch_id FROM inventory_movements
       WHERE reference_id >= @lo AND reference_id < @hi ORDER BY id`).all<Row>(range)
   const q0 = Math.abs(Number(root.quantity)) + edits.reduce((sum, row) => sum + (Number(row.quantity) || 0), 0)
+  const landing: BranchEffect | null = request.quantity !== q0 || request.receivedDate != null
+    ? await requestBranchEffect(db, Number(root.branch_id), redirectTarget) : null
+  const branchId = landing ? landing.effectBranchId : Number(root.branch_id)
   const lastIn = [...edits].reverse().find((row) => Number(row.quantity) > 0)
   const sourceId = Number(lastIn?.batch_id ?? root.batch_id)
   const costRows = edits.filter((row) => row.total_cost_usd != null)
@@ -691,11 +702,12 @@ async function applyInner(db: D1Compat, user: SessionUser, movementId: number, b
     } },
   ]
   try {
-    await ordinaryBusinessBatch(db, statements)
+    await ordinaryBusinessBatch(db, addressedStatements(landing, statements))
   } catch (error) {
     const concurrent = await previous()
     if (concurrent) return replay(concurrent)
     if (isMaintenanceError(error)) return { status: 503, body: { error: 'Maintenance is in progress. Nothing was changed; try again shortly.', code: 'maintenance_active' } }
+    if (landing && isBranchRedirectGuardError(error)) return { status: 409, body: await branchRedirectGuardRefusal(db, landing.addressedBranchId, redirectTarget) }
     if (/constraint/i.test(String(error))) return { status: 409, body: { error: 'Stock changed while saving. Nothing was changed; reopen the session and try again.', code: 'stale_state' } }
     throw error
   }
@@ -712,8 +724,13 @@ export async function notifyStockInLineEdit(env: Env): Promise<void> {
 }
 
 export class StockInLineEditReplayError extends Error {
-  // `refusal` (RET-D): the blocking record, passed through by the History route.
-  constructor(message: string, readonly statusCode = 409, readonly refusal: StockRefusalDetails | null = null) { super(message) }
+  readonly refusal: StockRefusalDetails | null
+  readonly code: string | undefined
+  constructor(message: string, readonly statusCode = 409, refusalOrCode: StockRefusalDetails | string | null = null) {
+    super(message)
+    this.refusal = typeof refusalOrCode === 'object' ? refusalOrCode : null
+    this.code = typeof refusalOrCode === 'string' ? refusalOrCode : undefined
+  }
 }
 
 /** Server-side undo/redo of one line-edit generation. */
@@ -755,8 +772,11 @@ export async function replayStockInLineEdit(
   const plans = direction === 'undo' ? counterPlans(revision.movements) : revision.movements
   const costFrom = direction === 'undo' ? revision.productCostAfter : revision.productCostBefore
   const costTo = direction === 'undo' ? revision.productCostBefore : revision.productCostAfter
-  const facts = await db.prepare(`SELECT (SELECT name FROM products WHERE id=@product) AS product_name, (SELECT name FROM branches WHERE id=@branch) AS branch_name`)
+  const facts = await db.prepare(`SELECT (SELECT name FROM products WHERE id=@product) AS product_name, (SELECT name FROM branches WHERE id=@branch) AS branch_name,
+      (SELECT is_active FROM branches WHERE id=@branch) AS branch_active`)
     .get<Row>({ product: revision.productId, branch: revision.branchId })
+  // An Undo cannot carry a confirmed redirect: an edit at a branch that has since been disabled stays closed.
+  if (Number(facts?.branch_active ?? 1) !== 1) throw new StockInLineEditReplayError(UNDO_CLOSED_BRANCH_RETIRED_MESSAGE, 409, UNDO_CLOSED_BRANCH_RETIRED_CODE)
   const source = forwardBefore.lots.find((lot) => lot.role === 'source') as LotState
   const lotIds = {
     source: { id: source.id, key: source.batchKey },

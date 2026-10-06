@@ -13,6 +13,7 @@ import {
   type ShiftCloseDrift, type ShiftCloseFigures, type ShiftCloseInputsDigest, type ShiftFigures, type ShiftReconciliation,
 } from '../lib/shiftReconciliation'
 import type { Env } from '../index'
+import { branchEffectRefusal, branchRedirectGuard, branchRedirectGuardRefusal, branchRedirectTarget, isBranchRedirectGuardError, requestBranchEffect } from '../lib/branchRedirectWrite'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 app.use('*', requireAuth)
@@ -1042,9 +1043,18 @@ app.get('/:id/history', async (c) => {
 app.post('/open', async (c) => {
   const user = c.get('user'); const body = await c.req.json().catch(() => ({})) as Record<string, unknown>
   const denied = shiftPermissionError(c, user); if (denied) return denied
-  const branchId = bodyBranchId(body, branchIdFrom(c))
-  if (body.branch_id != null && String(body.branch_id).trim() !== '' && branchId == null) return c.json({ error: 'Invalid branch id.' }, 400)
-  const db = getDb(c.env); const branch = await resolveBranch(db, branchId)
+  const addressedBranchId = bodyBranchId(body, branchIdFrom(c))
+  if (body.branch_id != null && String(body.branch_id).trim() !== '' && addressedBranchId == null) return c.json({ error: 'Invalid branch id.' }, 400)
+  const db = getDb(c.env)
+  // A shift opened at a branch that has since been disabled opens at the active branch the operator confirmed.
+  let landing
+  try { landing = addressedBranchId == null ? null : await requestBranchEffect(db, addressedBranchId, () => branchRedirectTarget(c)) } catch (error) {
+    const refusal = branchEffectRefusal(error)
+    if (refusal) return c.json(refusal, 409)
+    throw error
+  }
+  const branchId = landing ? landing.effectBranchId : addressedBranchId
+  const branch = await resolveBranch(db, branchId)
   if (branchId != null && !branch) return c.json({ error: 'Branch not found or inactive.' }, 400)
   const policy = await readShiftPolicy(db)
   if (policy.admin_exempt && isAdminControlUser(user)) return c.json({ error: 'This account is exempt from shifts.', exempt: true }, 403)
@@ -1083,7 +1093,8 @@ app.post('/open', async (c) => {
       @openedAt,@storedFloatUsd,@storedFloatKhr,@floatUsdRegistered,@floatKhrRegistered,@note,@deviceName)`, params: row },
       { sql: openAuditSql(), params: { actorId: user.id, actorName: row.userName, shiftCode: row.shiftCode,
         details: JSON.stringify({ shift_code: row.shiftCode, scope_mode: row.scopeMode, branch_id: row.branchId,
-          opening_float_usd: row.floatUsd, opening_float_khr: row.floatKhr }), oldValue: null,
+          opening_float_usd: row.floatUsd, opening_float_khr: row.floatKhr,
+          ...(landing?.redirected ? { addressed_branch_id: landing.addressedBranchId, addressed_branch_name: landing.addressedName } : {}) }), oldValue: null,
         newValue: JSON.stringify({ shift_code: row.shiftCode, opened_at: row.openedAt,
           opening_float_usd: row.floatUsd, opening_float_khr: row.floatKhr }), deviceName: row.deviceName } },
       // N7: the branch must STILL be active when the row commits. The read
@@ -1091,12 +1102,14 @@ app.post('/open', async (c) => {
       // open at its own commit), and a drawer opened on a branch that retired
       // a moment earlier is exactly the trap this lane removes.
       { sql: OPEN_BRANCH_ACTIVE_GUARD_SQL, params: { branchId: row.branchId } },
+      ...(landing?.redirected ? [branchRedirectGuard(landing)] : []),
     ])
     if (batchChanges(results[0]) !== 1) throw new Error('Shift open did not write a row.')
   } catch (error) {
     if (isOpenBranchInactiveError(error)) return c.json({ error: 'Branch not found or inactive.', code: 'shift_branch_inactive' }, 400)
     const raced = await readCurrent(db, policy, user.id, branchId)
     if (raced) return c.json({ ...currentResponse(user, raced, policy, false), already_registered: true }, 200)
+    if (landing?.redirected && isBranchRedirectGuardError(error)) return c.json(await branchRedirectGuardRefusal(db, landing.addressedBranchId, () => branchRedirectTarget(c)), 409)
     throw error
   }
   const shift = await readCurrent(db, policy, user.id, branchId)

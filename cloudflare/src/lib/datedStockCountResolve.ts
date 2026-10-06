@@ -34,7 +34,10 @@ import type { D1Compat } from './db'
 import { buildInClause, selectInChunks } from './sqlBinding'
 import { normalizeToIsoDate } from './batchCode'
 import { identityBarcodeClassKey, identityBarcodeKeySql } from './productIdentity'
-import { IMPORT_BRANCH_COLUMNS_SQL, indexCanonicalImportBranches, resolveCanonicalImportBranch, type CanonicalImportBranchRow } from './importBranchAuthority'
+import {
+  IMPORT_BRANCH_COLUMNS_SQL, importBranchRedirectRequired, indexCanonicalImportBranches, resolveImportBranchRequest,
+  type CanonicalImportBranchRow, type ImportBranchRequestOptions,
+} from './importBranchAuthority'
 
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 
@@ -72,6 +75,11 @@ export interface ResolvedDatedCountRow {
   // columns of one product and date both land on one branch after the branch
   // consolidation, and an absolute count of that branch is their SUM.
   mergedRowNumbers?: number[]
+  // CUTOVER-LR: present only when the row's branch cell addressed a disabled branch ("shop" after the cutover) and
+  // the request named the active branch it goes to (X-Branch-Redirect): `branchId` is that confirmed branch and
+  // these keep what the sheet addressed. A preview/apply entry may echo addressedBranchId as provenance.
+  addressedBranchId?: number
+  addressedBranchName?: string
   // Present only when the row carried a price AND it differs from the
   // matched product's stored price. Purely informational -- this
   // function never picks a side. 'merge' (keep the existing price, only
@@ -132,9 +140,15 @@ function lower(value: unknown): string {
   return String(value ?? '').trim().toLowerCase()
 }
 
+// A row whose branch cell addresses a disabled branch is never silently resolved to its successor (owner ruling
+// 6 Oct 2026, CUTOVER-LR): without `options.redirectTarget` (the request's X-Branch-Redirect) this throws the
+// branch_redirect_required refusal (a BranchRetiredNoSuccessorError the route answers with 409) and resolves
+// nothing; with a valid target the row resolves to it, still addressed to the sheet's branch. An invalid target
+// throws branch_redirect_target_invalid. While every branch is active the target is never read.
 export async function resolveDatedStockCountRows(
   db: D1Compat,
   rows: RawDatedCountRow[],
+  options: ImportBranchRequestOptions = {},
 ): Promise<{ resolved: ResolvedDatedCountRow[]; unresolved: UnresolvedDatedCountRow[]; branchesCreated: { id: number; name: string }[] }> {
   const unresolved: UnresolvedDatedCountRow[] = []
 
@@ -215,10 +229,13 @@ export async function resolveDatedStockCountRows(
     }
   }
 
-  const matched: { row: RawDatedCountRow & { normalizedDate: string }; branchId: number; productId: number; requested: string }[] = []
+  const matched: { row: RawDatedCountRow & { normalizedDate: string }; branchId: number; productId: number; requested: string; addressed?: { id: number; name: string } }[] = []
   for (const row of candidates) {
     const requestedBranchName = lower(row.branchName)
-    const branch = resolveCanonicalImportBranch(canonicalBranches, requestedBranchName)
+    const resolution = resolveImportBranchRequest(canonicalBranches, requestedBranchName, options)
+    if (resolution?.redirectPending && resolution.addressedBranchId != null) throw importBranchRedirectRequired(branches, resolution.addressedBranchId)
+    const branch = resolution?.branch ?? null
+    const addressed = resolution?.addressedBranchId != null ? { id: resolution.addressedBranchId, name: resolution.addressedName ?? '' } : undefined
     if (!branch) {
       unresolved.push({
         rowNumber: row.rowNumber,
@@ -268,7 +285,7 @@ export async function resolveDatedStockCountRows(
 
     if (productId == null) { unresolved.push({ rowNumber: row.rowNumber, reason: 'product_not_found', raw: row, branchId, suggestedActions: ['create_new'] }); continue }
 
-    matched.push({ row, branchId, productId, requested: requestedBranchName })
+    matched.push({ row, branchId, productId, requested: requestedBranchName, ...(addressed ? { addressed } : {}) })
   }
 
   // ---- Price-conflict detection (informational only, see
@@ -286,9 +303,10 @@ export async function resolveDatedStockCountRows(
 
   const resolved: ResolvedDatedCountRow[] = []
   const requestedByRow = new Map<number, string>()
-  for (const { row, branchId, productId, requested } of matched) {
+  for (const { row, branchId, productId, requested, addressed } of matched) {
     requestedByRow.set(row.rowNumber, requested)
     const out: ResolvedDatedCountRow = { rowNumber: row.rowNumber, date: row.normalizedDate, productId, branchId, count: row.count }
+    if (addressed) { out.addressedBranchId = addressed.id; out.addressedBranchName = addressed.name }
 
     const hasImportedPrice = row.sellingPriceUsd != null || row.sellingPriceKhr != null
     if (hasImportedPrice) {
@@ -339,7 +357,12 @@ function foldColumnsOnOneBranch(rows: ResolvedDatedCountRow[], requestedByRow: M
     if (done.has(key)) continue
     done.add(key)
     const count = group.reduce((sum, member) => sum + member.count, 0)
-    folded.push({ ...group[0], count: Math.round(count * 1e9) / 1e9, mergedRowNumbers: group.slice(1).map((member) => member.rowNumber) })
+    // The folded count keeps the redirect provenance of any member that addressed a disabled branch.
+    const addressedMember = group.find((member) => member.addressedBranchId != null)
+    folded.push({
+      ...group[0], count: Math.round(count * 1e9) / 1e9, mergedRowNumbers: group.slice(1).map((member) => member.rowNumber),
+      ...(addressedMember ? { addressedBranchId: addressedMember.addressedBranchId, addressedBranchName: addressedMember.addressedBranchName } : {}),
+    })
   }
   return folded
 }
