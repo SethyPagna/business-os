@@ -1580,10 +1580,14 @@ export default function Branches({ embedded = false, view, showSectionNavigation
                                       {canReceiveStock ? (
                                         <button
                                           type="button"
-                                          className="ml-auto flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full text-gray-400 transition-colors hover:bg-blue-100 hover:text-blue-600 dark:hover:bg-blue-900/40 dark:hover:text-blue-300"
-                                          title={tr('receive_batch', 'Receive Stock')}
+                                          className="ml-auto flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full text-gray-400 transition-colors hover:bg-blue-100 hover:text-blue-600 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-gray-400 dark:hover:bg-blue-900/40 dark:hover:text-blue-300"
+                                          // CUTOVER-LR: a disabled branch (Old Shop after the consolidation) is never a new
+                                          // stock target; its card keeps the button greyed rather than opening a session there.
+                                          disabled={!branch.is_active}
+                                          data-branch-receive-disabled={branch.is_active ? undefined : 'true'}
+                                          title={branch.is_active ? tr('receive_batch', 'Receive Stock') : tr('branch_redirect_title', '{branch} is disabled').split('{branch}').join(branch.name || '')}
                                           aria-label={`${tr('receive_batch', 'Receive Stock')} — ${product.name || ''}`}
-                                          onClick={() => setReceiveTarget({ product, branchId: String(branch.id) })}
+                                          onClick={() => { if (branch.is_active) setReceiveTarget({ product, branchId: String(branch.id) }) }}
                                         >
                                           <Plus className="h-3.5 w-3.5" />
                                         </button>

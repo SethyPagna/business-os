@@ -98,6 +98,8 @@ function callback(name: string, input: Record<string, unknown>) {
   const env: Record<string, any> = {
     ...input,
     sale: { id: 17, updated_at: '2026-10-04T00:00:00.000Z', ...sale },
+    // CUTOVER-LR: the sale's branch is active here, so nothing is redirected.
+    saleBranchDisabled: false, stockRedirectFields: () => ({}),
     savedExchangeRate: input.savedExchangeRate ?? Number(sale.exchange_rate),
     detailScope: input.detailScope || 'fixture-actor:sale17', lineMutationActor: 'fixture-actor', lineRefreshRequired: false,
     captureActorReadScope: () => ({ actor: 'fixture-actor' }),

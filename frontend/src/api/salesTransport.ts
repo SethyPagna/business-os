@@ -247,8 +247,11 @@ export async function addSaleItems(
   id: number | string,
   items: SaleItemAddition[] = [],
   notes = '',
-  review: { client_request_id: string; expected_exchange_rate: number; expected_updated_at?: string; money_precision_version?: 1; expected_header_quote?: SaleMutationHeaderQuote },
+  review: { client_request_id: string; expected_exchange_rate: number; expected_updated_at?: string; money_precision_version?: 1; expected_header_quote?: SaleMutationHeaderQuote; branch_redirect_id?: number },
 ): Promise<unknown> {
+  // branch_redirect_id: the active branch the operator already confirmed for a sale at a disabled branch. It rides in
+  // the saved request (a recovery replay keeps it) and is sent as the X-Branch-Redirect header; it is never in the body.
+  const branchRedirect = review?.branch_redirect_id
   if (!String(review?.client_request_id || '').trim()) {
     throw new Error("addSaleItems needs the caller's stable client_request_id; it must never be generated per request.")
   }
@@ -258,10 +261,11 @@ export async function addSaleItems(
     notes,
     ...review,
   }
+  delete (body as { branch_redirect_id?: number }).branch_redirect_id
   try {
     const result = await route(
       'sales:addItems',
-      () => apiFetch('POST', `/api/sales/${encodeId(id)}/items`, body),
+      () => apiFetch('POST', `/api/sales/${encodeId(id)}/items`, body, undefined, branchRedirect ? { branchRedirect } : {}),
       null,
       true,
     ) as ResultRecord
@@ -277,6 +281,8 @@ export async function addSaleItems(
 }
 
 export interface SaleAmendmentRequest {
+  /** Sent as X-Branch-Redirect, never in the body (see addSaleItems). */
+  branch_redirect_id?: number
   expected_recorded_line_total_usd?: number
   expected_header_quote?: SaleMutationHeaderQuote
   pricing_quote?: { gross_usd: number; product_discount_usd: number; manual_discount_usd: number; total_usd: number; total_khr: number }
@@ -317,7 +323,8 @@ export interface SaleAmendmentRequest {
  * reason: POST /amendments refuses a body without one (routes/sales.ts), and
  * the id must be the caller's stable per-action id, never a per-request mint.
  */
-export async function amendSale(id: number | string, request: SaleAmendmentRequest): Promise<unknown> {
+export async function amendSale(id: number | string, requestWithRedirect: SaleAmendmentRequest): Promise<unknown> {
+  const { branch_redirect_id: branchRedirect, ...request } = requestWithRedirect
   if (!String(request?.client_request_id || '').trim()) {
     throw new Error("amendSale needs the caller's stable client_request_id; it must never be generated per request.")
   }
@@ -328,7 +335,7 @@ export async function amendSale(id: number | string, request: SaleAmendmentReque
   try {
     const result = await route(
       'sales:amend',
-      () => apiFetch('POST', `/api/sales/${encodeId(id)}/amendments`, body),
+      () => apiFetch('POST', `/api/sales/${encodeId(id)}/amendments`, body, undefined, branchRedirect ? { branchRedirect } : {}),
       null,
       true,
     ) as ResultRecord

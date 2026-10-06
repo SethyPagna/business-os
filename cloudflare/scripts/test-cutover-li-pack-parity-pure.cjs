@@ -72,6 +72,19 @@ runTest('the retired-branch refusal: the Worker English is the pack English and 
   assert.ok(km[code] && /[ក-៿]/.test(km[code]) && km[code] !== en[code], 'and the Khmer pack has it')
 })
 
+runTest('CUTOVER-LR: the disabled-branch redirect refusals and the damaged-stock refusal: Worker English = pack English, code = pack key', () => {
+  for (const [codeName, errorName] of [
+    ['BRANCH_REDIRECT_REQUIRED_CODE', 'BRANCH_REDIRECT_REQUIRED_ERROR'],
+    ['BRANCH_REDIRECT_TARGET_INVALID_CODE', 'BRANCH_REDIRECT_TARGET_INVALID_ERROR'],
+    ['BRANCH_RETIRED_DAMAGED_CODE', 'BRANCH_RETIRED_DAMAGED_ERROR'],
+  ]) {
+    const code = constant('lib/branchEffect.ts', codeName)
+    assert.equal(constant('lib/branchEffect.ts', errorName), en[code], `${code}: the Worker sentence is the pack text`)
+    assert.ok(km[code] && /[ក-៿]/.test(km[code]) && km[code] !== en[code], `${code}: and the Khmer pack has it`)
+    assert.doesNotMatch(en[code], NAMES, `${code}: role-neutral, no branch name`)
+  }
+})
+
 runTest('the identity-lock refusal: the code is the pack key, the pack text names no branch, the Worker sentence is the one the frontend maps', () => {
   const code = constant('lib/canonicalBranchIdentity.ts', 'CANONICAL_BRANCH_IDENTITY_CODE')
   assert.equal(code, 'canonical_branch_identity_locked')

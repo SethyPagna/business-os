@@ -818,6 +818,39 @@ async function residualChecks() {
     assert.strictEqual(JSON.stringify([lotsSnapshot(), movementRows()]), before)
   })
 
+  await check('CUTOVER-LR: an edit cannot move a return header ONTO the disabled branch: asked first, then the confirmed active branch is recorded', async () => {
+    const relabel = async (appToUse) => {
+      const id = await preConsolidationReturn(appToUse)
+      consolidate()
+      // A return made at LC Store after the consolidation: header and lines at the active branch.
+      rawDb.prepare("UPDATE returns SET branch_id = 1, branch_name = 'LC Store' WHERE id = ?").run([id])
+      rawDb.prepare('UPDATE return_items SET branch_id = 1 WHERE return_id = ?').run([id])
+      // Its restocked units sit in their own lot at LC Store, as a return made there would have left them.
+      rawDb.prepare('UPDATE branch_batch_stock SET quantity = quantity + 3 WHERE batch_id = 3 AND branch_id = 1').run()
+      rawDb.prepare('UPDATE branch_stock SET quantity = quantity + 3 WHERE product_id = 1 AND branch_id = 1').run()
+      return id
+    }
+    const id = await relabel(returnsRoute.default)
+    const before = JSON.stringify([lotsSnapshot(), movementRows(), { ...rawDb.prepare('SELECT branch_id, branch_name FROM returns WHERE id = ?').get([id]) }])
+    try {
+      redirectTo = null
+      const asked = await reqExact('PATCH', `/${id}`, editBody(id, { branch_id: 2 }))
+      assert.strictEqual(asked.status, 409, JSON.stringify(asked.json))
+      assert.strictEqual(asked.json.code, 'branch_redirect_required')
+      assert.strictEqual(asked.json.redirect.addressed_branch_name, 'Old Shop')
+      assert.strictEqual(JSON.stringify([lotsSnapshot(), movementRows(), { ...rawDb.prepare('SELECT branch_id, branch_name FROM returns WHERE id = ?').get([id]) }]), before, 'nothing written')
+    } finally { redirectTo = 1 }
+    const edited = await reqExact('PATCH', `/${id}`, editBody(id, { branch_id: 2 }))
+    assert.strictEqual(edited.status, 200, JSON.stringify(edited.json))
+    assert.deepStrictEqual({ ...rawDb.prepare('SELECT branch_id, branch_name FROM returns WHERE id = ?').get([id]) }, { branch_id: 1, branch_name: 'LC Store' }, 'the confirmed active branch is the header')
+    assert.strictEqual(rawDb.prepare('SELECT COALESCE(SUM(quantity),0) n FROM branch_batch_stock WHERE branch_id = 1').get().n, branchStockOf(1), 'lot ledger and branch ledger agree')
+    // CONTROL: the code before this lane relabels the return onto the disabled branch.
+    const oldId = await relabel(oracleBeforeResidualRoute.default)
+    const old = await withRoute(oracleBeforeResidualRoute.default, () => reqExact('PATCH', `/${oldId}`, editBody(oldId, { branch_id: 2 })))
+    assert.strictEqual(old.status, 200, JSON.stringify(old.json))
+    assert.strictEqual(rawDb.prepare('SELECT branch_id FROM returns WHERE id = ?').get([oldId]).branch_id, 2, 'CONTROL: the old edit wrote the disabled branch as the new header')
+  })
+
   await check('INERT while both branches are active: an edit writes the exact statements the code before this lane wrote', async () => {
     const run = async (appToUse) => {
       const id = await preConsolidationReturn(appToUse)

@@ -11,6 +11,9 @@ import { captureActorReadScope, isActorReadScopeCurrent } from '../../api/actorR
 import { getSyncServerUrl } from '../../api/httpState.ts'
 import { loadPendingDirectMutation, runSaleLineMutation, replaceReviewedSaleLineHeader, withSaleLineMutationLock, type SaleLineMutationKind } from '../../utils/directMutationRequest.ts'
 import { localizeBranchRuleError } from '../../api/branchRuleErrors.ts'
+import { BRANCH_REDIRECT_REQUIRED_CODE, askBranchRedirect, clientBranchRedirectDetail } from '../../api/branchRedirect.ts'
+import { useBranchRows } from '../../utils/useBranchRows.ts'
+import { branchIsActive } from '../../utils/branchRoles.ts'
 import ConfirmDialog, { type ConfirmReviewItem } from '../shared/ConfirmDialog.tsx'
 import { fmtDateOnly, fmtDateTime24, fmtTime } from '../../utils/formatters.ts'
 import { getSaleReturnBlockReason } from '../../utils/saleReturnGuard.ts'
@@ -584,9 +587,33 @@ export default function SaleDetailModal({
    * over a sale the Worker will only let take 2. That cap is
    * branchStockQuantity, so this is branchStockQuantity too.
    */
+  // A sale made at a branch that has since been disabled (an old Shop sale after the branch consolidation) sells its
+  // added and replacement goods from the active branch the operator confirms first (the shared redirect float and
+  // confirm, api/branchRedirect.ts). The sale and its lines keep their own branch; the Worker takes the stock at the
+  // confirmed branch (X-Branch-Redirect). While the sale's branch is active nothing here changes.
+  const branchRows = useBranchRows()
+  const saleBranchRow = branchRows?.find((row) => String(row.id) === String(sale?.branch_id ?? '')) ?? null
+  const saleBranchDisabled = !!saleBranchRow && !branchIsActive(saleBranchRow)
+  const [stockRedirect, setStockRedirect] = useState<number | null>(null)
+  useEffect(() => { setStockRedirect(null) }, [detailScope, sale?.id])
+  const stockBranchId: number | string | null = saleBranchDisabled ? stockRedirect : (sale?.branch_id ?? null)
+  const confirmStockRedirect = async (): Promise<boolean> => {
+    if (!saleBranchDisabled) return true
+    if (stockRedirect !== null) return true
+    const detail = clientBranchRedirectDetail(branchRows || [], sale?.branch_id, { sells: true })
+    if (!detail) {
+      setAddMutationError(translateOr('branch_redirect_no_target', 'No active branch can take this change. Nothing was changed.'))
+      return false
+    }
+    const target = await askBranchRedirect({ code: BRANCH_REDIRECT_REQUIRED_CODE, detail })
+    if (target === null || !detailAliveRef.current) return false
+    setStockRedirect(target)
+    return true
+  }
+  const stockRedirectFields = (): { branch_redirect_id?: number } => (saleBranchDisabled && stockRedirect !== null ? { branch_redirect_id: stockRedirect } : {})
   const cardStock = useCallback(
-    (row: AddProductCandidate): number => branchStockQuantity(row, sale?.branch_id ?? null) ?? toNumber(row.stock_quantity),
-    [sale?.branch_id],
+    (row: AddProductCandidate): number => branchStockQuantity(row, stockBranchId) ?? toNumber(row.stock_quantity),
+    [stockBranchId],
   )
   const addCandidateGroups = useMemo(() => buildProductGroups(addCandidates, new Map(), { preserveInputOrder: true }).map((group) => {
     const choices = (group.sellableItems.length ? group.sellableItems : [group.leadProduct]) as AddProductCandidate[]
@@ -789,7 +816,7 @@ export default function SaleDetailModal({
     let cancelled = false
     setTrackedBatchLookupState('loading')
     setTrackedBatchLookupError('')
-    getTrackedBatchProductIds(sale?.branch_id ?? null)
+    getTrackedBatchProductIds(stockBranchId)
       .then((res) => {
         if (cancelled) return
         setTrackedBatchProductIds(new Set((res?.productIds || []).map((id) => Number(id))))
@@ -802,7 +829,7 @@ export default function SaleDetailModal({
         setTrackedBatchLookupError(error instanceof Error && error.message ? error.message : 'Could not verify received-date tracking.')
       })
     return () => { cancelled = true }
-  }, [canLoadSaleProducts, detailScope, sale?.branch_id, trackedBatchReloadKey])
+  }, [canLoadSaleProducts, detailScope, stockBranchId, trackedBatchReloadKey])
 
   const loadAddProductSearchPage = async (text: string, page: number, append: boolean): Promise<void> => {
     const query = text.trim()
@@ -822,7 +849,7 @@ export default function SaleDetailModal({
         query,
         page,
         pageSize: SALE_DETAIL_PRODUCT_PAGE_SIZE,
-        branchId: sale?.branch_id ?? undefined,
+        branchId: stockBranchId ?? undefined,
         surface: 'pos',
       })
       if (!detailAliveRef.current || detailScopeRef.current !== requestScope || seq !== addSearchSeqRef.current) return
@@ -861,7 +888,7 @@ export default function SaleDetailModal({
     // The request function deliberately belongs to this effect's render. Its
     // scope/query are captured and independently checked before publication.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [addQuery, canLoadSaleProducts, detailScope, sale?.branch_id])
+  }, [addQuery, canLoadSaleProducts, detailScope, stockBranchId])
 
   // What makes two staged lines the SAME line, and how a pick folds into
   // what is already staged, both live in saleAddLines.ts -- one rule, tested
@@ -1084,7 +1111,7 @@ export default function SaleDetailModal({
     setAmendSaving(true)
     try {
       moneyCapability.assertReady()
-      const result = await executeLineMutation('sale-amendment', { ...review.request })
+      const result = await executeLineMutation('sale-amendment', { ...review.request, ...stockRedirectFields() })
       if (!detailAliveRef.current || detailScopeRef.current !== requestScope) return
       const changedRate = result && typeof result === 'object' ? Number((result as { exchangeRateChanged?: unknown }).exchangeRateChanged) : NaN
       const mutationError = result && typeof result === 'object' ? String((result as { mutationError?: unknown }).mutationError || '') : ''
@@ -1212,7 +1239,7 @@ export default function SaleDetailModal({
           product_id: productId,
           quantity,
           ...replacementIntent,
-          ...(replacementBranchId != null ? { branch_id: replacementBranchId } : {}),
+          ...(saleBranchDisabled ? { branch_id: Number(sale?.branch_id) } : replacementBranchId != null ? { branch_id: replacementBranchId } : {}),
         },
       },
       title: translateOr('amend_replace_title', 'Replace this product?', 'ជំនួសផលិតផលនេះ?'),
@@ -1596,7 +1623,8 @@ export default function SaleDetailModal({
         // The shelf the sheet resolved. Without it the Worker inherited the
         // sale's own branch, which is not necessarily the branch whose
         // quantity -- and whose lots -- the operator was reading.
-        ...(line.branchId != null ? { branch_id: line.branchId } : {}),
+        // A sale at a disabled branch keeps its own branch on every line; the shelf is the confirmed one.
+        ...(saleBranchDisabled ? { branch_id: Number(sale.branch_id) } : line.branchId != null ? { branch_id: line.branchId } : {}),
         ...(line.batchId != null ? { batch_id: line.batchId } : {}),
         ...(line.batchLabel ? { batch_label: line.batchLabel } : {}),
         ...(line.batchExpiryDate ? { batch_expiry_date: line.batchExpiryDate } : {}),
@@ -1607,6 +1635,7 @@ export default function SaleDetailModal({
         client_request_id: addRequestIdRef.current,
         expected_exchange_rate: draft.exchangeRate,
         expected_updated_at: draft.expectedUpdatedAt,
+        ...stockRedirectFields(),
       }
       setAddReview({ draft, body: structuredClone(body), lines: structuredClone(addLines), subtotalUsd: addedSubtotalUsd })
       setAddConfirmOpen(true)
@@ -2241,7 +2270,10 @@ export default function SaleDetailModal({
                               <button
                                 type="button"
                                 disabled={amendSaving}
-                                onClick={() => { setReplaceLineId(replaceLineId === lineId ? null : lineId); setAddQuery(''); setAddCandidates([]) }}
+                                onClick={() => {
+                                  if (replaceLineId === lineId) { setReplaceLineId(null); return }
+                                  void confirmStockRedirect().then((ready) => { if (ready) { setReplaceLineId(lineId); setAddQuery(''); setAddCandidates([]) } })
+                                }}
                                 className="rounded border border-gray-300 px-2.5 py-1 text-[11px] font-semibold text-gray-700 disabled:opacity-50 dark:border-gray-600 dark:text-gray-200"
                               >
                                 {translateOr('amend_replace', 'Replace', 'ជំនួស')}
@@ -2295,7 +2327,7 @@ export default function SaleDetailModal({
                                     // shows its count and refuses the pick,
                                     // exactly as it does in the POS.
                                     intent="sell"
-                                    activeBranchId={sale.branch_id ?? null}
+                                    activeBranchId={stockBranchId}
                                     // POST /sales/:id/amendments plans a
                                     // replacement with batchId null and draws
                                     // it by FIFO, so a received date picked
@@ -2559,10 +2591,21 @@ export default function SaleDetailModal({
                 ref={addSearchInputRef}
                 className="input h-10 text-sm"
                 value={addQuery}
-                onChange={(event) => changeAddQuery(event.target.value)}
+                onFocus={(event) => {
+                  if (!saleBranchDisabled || stockRedirect !== null) return
+                  const input = event.currentTarget
+                  input.blur()
+                  void confirmStockRedirect().then((ready) => { if (ready) input.focus() })
+                }}
+                onChange={(event) => { if (!saleBranchDisabled || stockRedirect !== null) changeAddQuery(event.target.value) }}
                 placeholder={translateOr('add_items_search_placeholder', 'Search by name or barcode', 'ស្វែងរកតាមឈ្មោះ ឬបាកូដ')}
                 autoComplete="off"
               />
+              {saleBranchDisabled && stockRedirect !== null ? (
+                <p data-sale-stock-redirect="" className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
+                  {translateOr('branch_redirect_to', 'Redirect to')}: <span className="font-semibold text-gray-700 dark:text-gray-200">{branchRows?.find((row) => Number(row.id) === stockRedirect)?.name || `#${stockRedirect}`}</span>
+                </p>
+              ) : null}
               {trackedBatchLookupState === 'loading' ? (
                 <p role="status" aria-live="polite" aria-atomic="true" className="sr-only">
                   {translateOr('loading', 'Checking received dates…', 'កំពុងពិនិត្យថ្ងៃចូល…')}
@@ -2625,7 +2668,7 @@ export default function SaleDetailModal({
                   // An added line is sold, so the warehouse shows its count
                   // and refuses the pick, exactly as it does in the POS.
                   intent="sell"
-                  activeBranchId={sale.branch_id ?? null}
+                  activeBranchId={stockBranchId}
                   // The lot question belongs to THIS sheet -- the POS's own
                   // received-date step -- not to a second modal of our own.
                   trackedBatchProductIds={trackedIdsForAddSheet}

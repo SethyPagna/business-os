@@ -45,10 +45,12 @@ function loadModule(): { restateBranchRefusal: (error: Error & { code?: unknown 
 }
 const lang = loadModule()
 
-const CODES = ['branch_not_sellable', 'sale_branch_mismatch', 'sale_identity_conflict', 'unrecorded_stock_line_invalid', 'fee_branch_invalid', 'fee_sale_invalid', 'fee_sale_branch_mismatch']
+// CUTOVER-LR adds the disabled-branch family (lib/branchEffect.ts), restated the same way when no redirect float answers.
+const REDIRECT_CODES = ['branch_redirect_required', 'branch_redirect_target_invalid', 'branch_retired_no_successor', 'branch_retired_damaged_stock']
+const CODES = ['branch_not_sellable', 'sale_branch_mismatch', 'sale_identity_conflict', 'unrecorded_stock_line_invalid', 'fee_branch_invalid', 'fee_sale_invalid', 'fee_sale_branch_mismatch', ...REDIRECT_CODES]
 const refusal = (code: unknown, message = 'Worker English', status = 400) => Object.assign(new Error(message), { status, code })
 
-await runTest('the restated codes are exactly the seven the Worker sends, and each is the pack key named after it', () => {
+await runTest('the restated codes are exactly the eleven the Worker sends, and each is the pack key named after it', () => {
   assert.deepEqual(Object.keys(lang.RESTATED_REFUSAL_KEYS).sort(), [...CODES].sort())
   for (const code of CODES) {
     assert.equal(lang.RESTATED_REFUSAL_KEYS[code], code)
@@ -69,6 +71,13 @@ await runTest('every code is one the Worker really sends, with the pack English 
     assert.ok(fees.includes(`error: '${EN[code]}'`), `fees.ts sends the pack English for ${code}`)
   }
   assert.equal((sales.match(/NOT_SELLING_BRANCH_BODY, 400\)/g) || []).length, 8, 'every sale refusal of a non-selling branch is the coded body')
+  const effect = read(WORKER, 'lib', 'branchEffect.ts')
+  for (const code of REDIRECT_CODES) {
+    const constant = new RegExp(`export const (BRANCH_[A-Z_]+)_CODE = '${code}'`).exec(effect)
+    assert.ok(constant, `${code} is a branchEffect.ts code`)
+    const english = new RegExp(`export const ${constant[1]}_ERROR = '([^']+)'`).exec(effect)
+    assert.equal(english?.[1], EN[code], `branchEffect.ts sends the pack English for ${code}`)
+  }
   assert.equal((sales.match(/SALE_BRANCH_MISMATCH_BODY, 400\)/g) || []).length, 4, 'every header/line branch disagreement is the coded body')
 })
 
@@ -109,7 +118,7 @@ await runTest('a pack without the key, or one that cannot load, keeps the Worker
 
 await runTest('http.ts restates before it throws, so every surface that shows error.message is covered', () => {
   const http = read(FRONTEND, 'src', 'api', 'http.ts')
-  assert.match(http, /import \{ restateBranchRefusal \} from '\.\/branchRefusalLanguage\.ts'/)
+  assert.match(http, /import \{ restateBranchRefusal, restateRedirectDeclined \} from '\.\/branchRefusalLanguage\.ts'/)
   assert.ok(http.indexOf('await restateBranchRefusal(apiError)') > http.indexOf('const apiError = createApiError(res.status, parsed, text)'), 'after the error is built')
   assert.ok(http.indexOf('await restateBranchRefusal(apiError)') < http.indexOf('throw apiError || new Error('), 'and before it is thrown')
 })

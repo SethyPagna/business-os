@@ -169,7 +169,10 @@ assert.match(productCard, /\{expiryInfo\.status === 'expired' \? \(t\('expired'\
 // with. A card showing the cross-branch total over a shop-only sale is the
 // exact mismatch round 2 removed from the staged line.
 assert.match(detail, /import \{ branchStockQuantity[^\r\n]*\} from '\.\.\/pos\/productSheetState\.ts'/)
-assert.match(detail, /branchStockQuantity\(row, sale\?\.branch_id \?\? null\) \?\? toNumber\(row\.stock_quantity\)/)
+assert.match(detail, /branchStockQuantity\(row, stockBranchId\) \?\? toNumber\(row\.stock_quantity\)/)
+// CUTOVER-LR: that shelf is the sale's own branch while it is active, and the branch the operator confirmed once the
+// sale's branch is disabled (the redirect float) -- never the disabled branch itself.
+assert.match(detail, /const stockBranchId: number \| string \| null = saleBranchDisabled \? stockRedirect : \(sale\?\.branch_id \?\? null\)/)
 // A card click still only OPENS the sheet; nothing on the card commits a pick.
 assert.match(detail, /onOpen=\{\(\) => setAddSheetGroup\(candidate\)\}/)
 assert.match(detail, /onOpen=\{\(\) => setReplacePicking\(candidate\)\}/)
@@ -201,8 +204,8 @@ for (const file of fs.readdirSync(salesDir)) {
 //    them that step could never appear -- which is exactly why a second modal
 //    had to ask the lot question.
 assert.match(detail, /<ProductOptionSheet[\s\S]{0,900}intent="sell"[\s\S]{0,500}trackedBatchProductIds=\{trackedIdsForAddSheet\}/)
-assert.match(detail, /activeBranchId=\{sale\.branch_id \?\? null\}/)
-assert.match(detail, /getTrackedBatchProductIds\(sale\?\.branch_id \?\? null\)/)
+assert.equal((detail.match(/activeBranchId=\{stockBranchId\}/g) || []).length, 2, 'add and replace sheets both read the stock shelf')
+assert.match(detail, /getTrackedBatchProductIds\(stockBranchId\)/)
 // A FAILED lookup must not collapse into "nothing is batch-tracked" -- that
 // would drop the step from an addition that needs one and move stock with no
 // lot recorded. Same rule POS.tsx and TransferModal.tsx follow.

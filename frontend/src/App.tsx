@@ -18,6 +18,7 @@ import { NAV_ITEMS } from './components/shared/navigationConfig.ts'
 import { ensureTextAffordances } from './components/shared/textAffordances.ts'
 import InfoHint from './components/shared/InfoHint.tsx'
 import IosInstallHint from './components/shared/IosInstallHint.tsx'
+import { useBranchRedirectQueue } from './components/shared/useBranchRedirectQueue.ts'
 import PullToRefreshIndicator from './components/shared/PullToRefreshIndicator.tsx'
 import { usePullToRefresh } from './components/shared/usePullToRefresh.ts'
 import { STORAGE_KEYS } from './constants.ts'
@@ -546,6 +547,7 @@ const NotificationCenter = lazyWithRetry(asPageModule(() => import('./components
 const BackgroundImportTracker = lazyWithRetry(asPageModule(() => import('./components/shared/BackgroundImportTracker')), 'background-import-tracker')
 const NotesWidget = lazyWithRetry(asPageModule(() => import('./components/shared/NotesWidget')), 'notes-widget')
 const WriteConflictModal = lazyWithRetry(asPageModule(() => import('./components/shared/WriteConflictModal')), 'write-conflict-modal')
+const BranchRedirectHost = lazyWithRetry(asPageModule(() => import('./components/shared/BranchRedirectHost')), 'branch-redirect-host')
 const Sidebar = lazyWithRetry(asPageModule(() => import('./components/navigation/Sidebar')), 'sidebar')
 const PAGE_COMPONENTS: Record<AdminPageId, ReturnType<typeof lazyWithRetry>> = {
   dashboard: Dashboard,
@@ -1898,6 +1900,8 @@ export default function App() {
     t,
     storagePersisted,
   } = useApp()
+  // A write addressed to a disabled branch waits here for the operator's redirect answer (api/branchRedirect.ts).
+  const branchRedirect = useBranchRedirectQueue()
   const offlineNoticeRef = useRef({ queued: '', synced: '' })
   const {
     syncError,
@@ -2294,6 +2298,11 @@ export default function App() {
         <IosInstallHint />
       </div>
       <GlobalScrollControls mobileBottomNavVisible={!inlineMobileNavigation} />
+      {branchRedirect ? (
+        <Suspense fallback={null}>
+          <BranchRedirectHost key={JSON.stringify(branchRedirect.request)} request={branchRedirect.request} onAnswer={branchRedirect.answer} />
+        </Suspense>
+      ) : null}
       {writeConflict ? (
         <Suspense fallback={null}>
           <WriteConflictModal

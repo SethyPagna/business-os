@@ -26,7 +26,7 @@ import {
   type PendingFeeCreate,
 } from '../../api/feesTransport.ts'
 import { todayStr } from '../../utils/dateHelpers.ts'
-import { branchCanSell, branchCanSellNow, resolveSellingSuccessor } from '../../utils/branchRoles.ts'
+import { branchCanSell, branchCanSellNow, branchIsActive, resolveSellingSuccessor } from '../../utils/branchRoles.ts'
 
 // Add/edit form for a single fee record.
 //
@@ -292,6 +292,7 @@ export default function FeeForm({ fee, actorId, labelSuggestions = [], onSave, o
   const [branches, setBranches] = useState<FeeBranchOption[]>([])
   // Every branch the directory returned, retired ones included (a sale at Old Shop still links).
   const allBranchesRef = useRef<FeeBranchOption[]>([])
+  const [directory, setDirectory] = useState<FeeBranchOption[]>([])
   // Saved labels from the server (every distinct label ever used, with its
   // dominant fee type) -- the page-derived `labelSuggestions` prop stays as
   // the instant seed / offline fallback until this arrives.
@@ -390,6 +391,7 @@ export default function FeeForm({ fee, actorId, labelSuggestions = [], onSave, o
         const directory = (rows || []) as FeeBranchOption[]
         const shops = directory.filter((row) => branchCanSellNow(row))
         allBranchesRef.current = directory
+        setDirectory(directory)
         setBranches(shops)
         if (!fee && shops.length === 1) {
           setForm((current) => current.branch_id ? current : { ...current, branch_id: String(shops[0].id) })
@@ -416,7 +418,15 @@ export default function FeeForm({ fee, actorId, labelSuggestions = [], onSave, o
   const dateInvalid = !form.fee_date.trim()
 
   const branchOptions = (() => {
-    const options = branches.map((b) => ({ value: String(b.id), label: b.name || String(b.id) }))
+    const options: Array<{ value: string; label: string; disabled?: boolean }> = branches.map((b) => ({ value: String(b.id), label: b.name || String(b.id) }))
+    // CUTOVER-LR: an expense of an old Shop sale (or an expense recorded there) shows its disabled branch greyed, never
+    // as a choice; saving asks where it goes instead (the redirect float, api/branchRedirect.ts).
+    const current = form.branch_id && !branches.some((b) => String(b.id) === form.branch_id)
+      ? directory.find((b) => String(b.id) === form.branch_id) : undefined
+    if (current && !branchIsActive(current)) {
+      const name = current.name || String(current.id)
+      options.push({ value: String(current.id), label: (t('branch_redirect_disabled_option') || '{branch} (disabled)').split('{branch}').join(name), disabled: true })
+    }
     return [{ value: '', label: t('select_branch') || 'Select Shop' }, ...options]
   })()
 

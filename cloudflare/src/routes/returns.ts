@@ -2908,6 +2908,14 @@ app.patch('/:id', async (c) => {
       const effect = recorded ? editResolver.effect(recorded) : null
       if (effect?.redirected) editEffectByBranch.set(effect.effectBranchId, effect)
     }
+    // CUTOVER-LR: an edit may name a NEW header branch (body.branch_id). A disabled branch is never a new target: it
+    // is redirected like every other write (branch_redirect_required until the operator confirms an active branch),
+    // and the confirmed branch is what the header records. Keeping the return's own branch is not a new target.
+    const requestedHeader = Number(body.branch_id) || null
+    if (requestedHeader && requestedHeader !== Number(existing.branch_id)) {
+      const headerEffect = editResolver.effect(requestedHeader)
+      if (headerEffect?.redirected) body.branch_id = headerEffect.effectBranchId
+    }
   } catch (error) {
     const refusal = branchEffectRefusal(error)
     if (refusal) return c.json(refusal, 409)

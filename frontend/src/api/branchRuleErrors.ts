@@ -79,6 +79,10 @@ export const BRANCH_RULE_CODE_KEYS: Readonly<Record<string, string>> = {
   fee_branch_invalid: 'fee_branch_invalid',
   fee_sale_invalid: 'fee_sale_invalid',
   fee_sale_branch_mismatch: 'fee_sale_branch_mismatch',
+  branch_redirect_required: 'branch_redirect_required',
+  branch_redirect_target_invalid: 'branch_redirect_target_invalid',
+  branch_retired_no_successor: 'branch_retired_no_successor',
+  branch_retired_damaged_stock: 'branch_retired_damaged_stock',
 }
 
 type BranchRuleErrorLike = {
