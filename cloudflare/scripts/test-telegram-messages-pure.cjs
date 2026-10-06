@@ -582,7 +582,7 @@ assert.ok(!statusMoney([{ returnNumber: 'RET-9', refundUsd: 4, refundKhr: 16000,
   'a restored or cancelled debt-lowering return says Debt lowered, not Refund')
 const groupText = statusMoney([{ returnNumber: 'RET-8', refundUsd: 4, refundKhr: 16000, owedReductionUsd: 0, refundCurrency: 'USD' },
   { returnNumber: 'RET-9', refundUsd: 4, refundKhr: 16000, owedReductionUsd: 3, refundCurrency: 'KHR' }]).join(' ').replace(/\s+/g, ' ')
-assert.ok(groupText.includes('• RET-8 $4.00 • RET-9 Debt lowered/បន្ថយប្រាក់ជំពាក់ $3.00 4,000៛'),
+assert.ok(groupText.includes('• RET-8 $4.00 • RET-9 Debt lowered/បានបន្ថយប្រាក់ជំពាក់ $3.00 4,000៛'),
   `a group row names the debt lowered and the riel paid out: ${groupText}`)
 
 // --- supplier return: stock out + settlement money, loss only when there is one ---
