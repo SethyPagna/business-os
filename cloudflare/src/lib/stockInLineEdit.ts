@@ -78,6 +78,7 @@ import { broadcast } from '../durable-objects/broadcastHub'
 import { isUndoClosedByMerge } from './undoAppliers'
 import { findConsumingBlocker, findLaterChangeBlocker, type StockRefusalDetails } from './stockRefusalBlocker'
 import { bumpVersion } from './cache'
+import { branchEffectRefusal, effectGuardStatement, foldedLotSurvivors, readBranchDirectory, resolveBranchEffect } from './branchEffect'
 
 export const STOCK_IN_LINE_EDIT_KIND = 'stock.session_line_edit'
 const REQUEST_ID = /^[A-Za-z0-9_-]{8,120}$/
@@ -322,19 +323,20 @@ function stateWrites(to: EditState, productDelta: number): Statement[] {
 
 function movementStatements(input: {
   plans: MovementPlan[]; state: EditState; lotIds: Record<'source' | 'target', { id: number | null; key: string }>
-  reference: string; reason: string; user: SessionUser; productName: string; branchName: string | null
+  reference: string; reason: string; user: SessionUser; productName: string; branchName: string | null; addressedName?: string | null
 }): Statement[] {
   return input.plans.map((plan) => {
     const lot = input.lotIds[plan.role]
     return {
       sql: `INSERT INTO inventory_movements(product_id,product_name,branch_id,branch_name,movement_type,quantity,
-          unit_cost_usd,unit_cost_khr,total_cost_usd,total_cost_khr,reason,reference_id,user_id,user_name,created_at,batch_id)
+          unit_cost_usd,unit_cost_khr,total_cost_usd,total_cost_khr,reason,reference_id,user_id,user_name,created_at,batch_id${input.addressedName ? ',addressed_branch_name' : ''})
         VALUES(@product,@productName,@branch,@branchName,@type,@quantity,@unit,0,@total,CASE WHEN @total IS NULL THEN NULL ELSE 0 END,
-          @reason,@reference,@userId,@userName,CURRENT_TIMESTAMP,${lotIdSql('lot')})`,
+          @reason,@reference,@userId,@userName,CURRENT_TIMESTAMP,${lotIdSql('lot')}${input.addressedName ? ',@addressedName' : ''})`,
       params: {
         product: input.state.productId, productName: input.productName, branch: input.state.branchId, branchName: input.branchName,
         type: plan.type, quantity: plan.quantity, unit: plan.unitCostUsd, total: plan.totalCostUsd, reason: input.reason,
         reference: input.reference, userId: input.user.id ?? null, userName: actorSnapshot(input.user), lotId: lot.id, lotKey: lot.key,
+        ...(input.addressedName ? { addressedName: input.addressedName } : {}),
       },
     }
   })
@@ -366,17 +368,19 @@ function isMaintenanceError(error: unknown): boolean {
  * stock-in creation demands (lib/acquisitionCostAccess.ts).
  */
 export async function applyStockInLineEdit(
-  db: D1Compat, user: SessionUser, movementId: number, body: Row,
+  db: D1Compat, user: SessionUser, movementId: number, body: Row, options: { redirectTarget?: number | null } = {},
 ): Promise<StockInLineEditResult> {
   try {
-    return await applyInner(db, user, movementId, body)
+    return await applyInner(db, user, movementId, body, options)
   } catch (error) {
     if (error instanceof EditRefusal) return { status: error.status, body: { error: error.message, code: error.code, ...error.details } }
+    const branchRefusal = branchEffectRefusal(error)
+    if (branchRefusal) return { status: 409, body: branchRefusal }
     throw error
   }
 }
 
-async function applyInner(db: D1Compat, user: SessionUser, movementId: number, body: Row): Promise<StockInLineEditResult> {
+async function applyInner(db: D1Compat, user: SessionUser, movementId: number, body: Row, options: { redirectTarget?: number | null } = {}): Promise<StockInLineEditResult> {
   const tier = getActionTier(user, 'inventory', 'adjust')
   if (tier !== 'full') refuse(403, 'Editing a stock-in line requires Full Access to adjust inventory.', 'permission_denied')
   const request = parseStockInLineEditRequest(movementId, body)
@@ -421,13 +425,18 @@ async function applyInner(db: D1Compat, user: SessionUser, movementId: number, b
     }
   }
   const productId = Number(root.product_id)
-  const branchId = Number(root.branch_id)
+  // A line received at a disabled branch (Old Shop after the consolidation) is edited where its units are now: at the
+  // active branch the operator confirmed, on the lot the consolidation folded into, and the rows it writes name both
+  // branches. Without the confirmed branch this throws the coded redirect refusal before anything is read or written.
+  const effect = resolveBranchEffect(await readBranchDirectory(db), Number(root.branch_id), { target: options.redirectTarget ?? null })
+  const branchId = effect.effectBranchId
   const range = stockInEditRange(movementId)
   const edits = await db.prepare(`SELECT id, quantity, total_cost_usd, batch_id FROM inventory_movements
       WHERE reference_id >= @lo AND reference_id < @hi ORDER BY id`).all<Row>(range)
   const q0 = Math.abs(Number(root.quantity)) + edits.reduce((sum, row) => sum + (Number(row.quantity) || 0), 0)
   const lastIn = [...edits].reverse().find((row) => Number(row.quantity) > 0)
-  const sourceId = Number(lastIn?.batch_id ?? root.batch_id)
+  const clientLotId = Number(lastIn?.batch_id ?? root.batch_id)
+  let sourceId = clientLotId
   const costRows = edits.filter((row) => row.total_cost_usd != null)
   const t0 = root.total_cost_usd == null && costRows.length === 0
     ? null
@@ -435,6 +444,17 @@ async function applyInner(db: D1Compat, user: SessionUser, movementId: number, b
   if ((request.expectedQuantity != null && Math.abs(request.expectedQuantity - q0) > 1e-9)
     || (request.expectedBatchId != null && request.expectedBatchId !== sourceId)) {
     refuse(409, 'This line changed since it was opened. Reopen the session and try again.', 'stale_line')
+  }
+  // The client reviewed the line's own lot; a redirected edit works on the lot that holds the units at the confirmed
+  // branch now, so the review is proved against the lot the client named and the in-batch guard against the survivor.
+  let expectedRevision = request.expectedBatchRevision
+  if (effect.redirected) {
+    const reviewed = await db.prepare(`SELECT COALESCE((SELECT revision FROM stock_session_revisions
+      WHERE entity_type='batch' AND entity_key=CAST(@lot AS TEXT)),0) AS revision`).get<Row>({ lot: clientLotId })
+    if (Number(reviewed?.revision) !== request.expectedBatchRevision) refuse(409, 'This line changed since it was opened. Reopen the session and try again.', 'stale_line')
+    sourceId = (await foldedLotSurvivors(db, branchId, [clientLotId])).get(clientLotId) ?? clientLotId
+    expectedRevision = Number((await db.prepare(`SELECT COALESCE((SELECT revision FROM stock_session_revisions
+      WHERE entity_type='batch' AND entity_key=CAST(@lot AS TEXT)),0) AS revision`).get<Row>({ lot: sourceId }))?.revision) || 0
   }
 
   const [facts, sourceLot, lots, baseline, receiptsElsewhere] = await Promise.all([
@@ -459,7 +479,7 @@ async function applyInner(db: D1Compat, user: SessionUser, movementId: number, b
   ])
   if (!facts?.product_name) refuse(404, 'Product not found.', 'product_not_found')
   if (!sourceLot || Number(sourceLot.variant_product_id) !== productId) refuse(409, 'The received date of this line no longer belongs to its product.', 'batch_mismatch')
-  if (sourceLot.batch_revision !== request.expectedBatchRevision) {
+  if (sourceLot.batch_revision !== expectedRevision) {
     refuse(409, 'This line changed since it was opened. Reopen the session and try again.', 'stale_line')
   }
   const sourceStock = await db.prepare(`SELECT COALESCE((SELECT quantity FROM branch_batch_stock WHERE batch_id=@lot AND branch_id=@branch),0) AS qty,
@@ -657,7 +677,8 @@ async function applyInner(db: D1Compat, user: SessionUser, movementId: number, b
     // just the newer snapshot we happened to read while planning this write.
     guard(`COALESCE((SELECT revision FROM stock_session_revisions
       WHERE entity_type='batch' AND entity_key=@batchKey),0)=@revision`,
-    { batchKey: String(sourceId), revision: request.expectedBatchRevision }),
+    { batchKey: String(sourceId), revision: expectedRevision }),
+    ...(effect.redirected ? [effectGuardStatement([{ addressed: effect.addressedBranchId, effect: branchId, sells: 0 }])!, { sql: 'DELETE FROM sale_bulk_guards', params: {} }] : []),
     ...stateGuard(before, targetCreated),
     { sql: `INSERT INTO stock_lot_adjustment_operations(id,actor_id,request_id,request_json,request_digest,response_json,before_json,after_json,revision_json)
       VALUES(@operation,@actor,@requestId,@requestJson,@digest,@response,@before,@after,@revision)`, params: opParams },
@@ -678,7 +699,7 @@ async function applyInner(db: D1Compat, user: SessionUser, movementId: number, b
     catalogCostRecomputeStatement(productId),
     { sql: `UPDATE stock_lot_adjustment_operations SET revision_json=json_set(revision_json,'$.productCostAfter',
         json_object('cost',(SELECT cost_price_usd FROM products WHERE id=@product),'purchase',(SELECT purchase_price_usd FROM products WHERE id=@product))) WHERE id=@operation`, params: opParams },
-    ...movementStatements({ plans, state: after, lotIds, reference: stockInEditReference(movementId, operationId, 0), reason: reasonText, user, productName: String(facts.product_name), branchName: facts.branch_name == null ? null : String(facts.branch_name) }),
+    ...movementStatements({ plans, state: after, lotIds, reference: stockInEditReference(movementId, operationId, 0), reason: reasonText, user, productName: String(facts.product_name), branchName: facts.branch_name == null ? null : String(facts.branch_name), addressedName: effect.redirected ? effect.addressedName : null }),
     { sql: `INSERT INTO action_history(scope,entity,entity_id,label,reversible,status,undo_payload,redo_payload,created_by_id,created_by_name)
       VALUES('inventory','stock_in_line_edit',@product,@label,1,'undoable',@payload,@payload,@actor,@actorName)`, params: opParams },
     { sql: `UPDATE stock_lot_adjustment_operations SET history_id=last_insert_rowid(),

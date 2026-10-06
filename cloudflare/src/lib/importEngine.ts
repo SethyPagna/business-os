@@ -106,6 +106,7 @@ import {
   validateCanonicalImportBranchIds,
   withCanonicalImportBranchWriteGuard,
   type CanonicalImportBranchRow,
+  importBranchRedirect,
 } from './importBranchAuthority'
 import {
   normalizeImageMatchKey,
@@ -1572,7 +1573,7 @@ export async function classifyProducts(
   // classifyInventory's lookup below) so runImportApply always has one to
   // write, instead of leaving new products branchless the way this used to.
   const branchRows = await db.prepare(`SELECT ${IMPORT_BRANCH_COLUMNS_SQL} FROM branches`).all<CanonicalImportBranchRow>()
-  const canonicalImportBranches = indexCanonicalImportBranches(branchRows)
+  const canonicalImportBranches = indexCanonicalImportBranches(branchRows, importBranchRedirect(policyJson, false))
 
   const results: ImportRowResult[] = []
   for (const row of rows) {
@@ -2844,7 +2845,7 @@ function pickIdentityClusterWinner<T extends { barcode?: unknown; id?: unknown; 
   return rankBarcodeIdentityWinner(real.length ? real : cluster)
 }
 
-export async function classifyInventory(db: D1Compat, rows: ParsedCsvRow[], inventoryAction?: InventoryImportAction | null): Promise<ImportRowResult[]> {
+export async function classifyInventory(db: D1Compat, rows: ParsedCsvRow[], inventoryAction?: InventoryImportAction | null, policyJson?: string | null): Promise<ImportRowResult[]> {
   const products = await db
     .prepare(`SELECT id, sku, barcode, name, stock_quantity, cost_price_usd, cost_price_khr FROM products`)
     .all<{ id: number; sku: string | null; barcode: string | null; name: string | null; stock_quantity: number; cost_price_usd: number | null; cost_price_khr: number | null }>()
@@ -2868,7 +2869,7 @@ export async function classifyInventory(db: D1Compat, rows: ParsedCsvRow[], inve
     const nameKey = normalizeProductGroupName(product.name)
     if (nameKey) { const list = byNameAll.get(nameKey) || []; list.push(product); byNameAll.set(nameKey, list) }
   }
-  const canonicalImportBranches = indexCanonicalImportBranches(branches)
+  const canonicalImportBranches = indexCanonicalImportBranches(branches, importBranchRedirect(policyJson, false))
 
   const pickCompatible = (candidates: (typeof products)[number][] | undefined, rowName: string): { product: (typeof products)[number] | null; message: string | null } => {
     if (!candidates?.length) return { product: null, message: null }
@@ -3185,7 +3186,7 @@ export function parseSalesImportDateTime(value: unknown): string | null {
   return new Date(Date.UTC(year, month - 1, day, hour - 7, minute, second)).toISOString()
 }
 
-export async function classifySales(db: D1Compat, rows: ParsedCsvRow[]): Promise<ImportRowResult[]> {
+export async function classifySales(db: D1Compat, rows: ParsedCsvRow[], policyJson?: string | null): Promise<ImportRowResult[]> {
   const products = await db
     .prepare(`SELECT id, sku, barcode, name, stock_quantity, selling_price_usd, selling_price_khr, cost_price_usd, cost_price_khr FROM products`)
     .all<{ id: number; sku: string | null; barcode: string | null; name: string | null; stock_quantity: number; selling_price_usd: number; selling_price_khr: number; cost_price_usd: number | null; cost_price_khr: number | null }>()
@@ -3229,7 +3230,7 @@ export async function classifySales(db: D1Compat, rows: ParsedCsvRow[]): Promise
   // retired Shop routes to its successor), and a branch may carry a sale line
   // only by ROLE -- so "LC Store" sells and an unrenamed Warehouse still cannot.
   const branches = await db.prepare(`SELECT ${IMPORT_BRANCH_COLUMNS_SQL} FROM branches`).all<CanonicalImportBranchRow>()
-  const salesBranchIndex = indexCanonicalImportBranches(branches)
+  const salesBranchIndex = indexCanonicalImportBranches(branches, importBranchRedirect(policyJson, true))
   const activeShopBranches = branches.filter((branch) => Number(branch.is_active ?? 1) === 1 && branchCanSell(branch))
 
   // Track F parity: routes/sales.ts POST / (manual checkout) resolves and
@@ -3882,9 +3883,9 @@ async function classifyRows(db: D1Compat, type: ImportType, rows: ParsedCsvRow[]
   if (type === 'customers') return classifyContacts(db, 'customers', rows, policyJson)
   if (type === 'suppliers') return classifyContacts(db, 'suppliers', rows, policyJson)
   if (type === 'delivery_contacts') return classifyContacts(db, 'delivery_contacts', rows, policyJson)
-  if (type === 'inventory') return classifyInventory(db, rows, getInventoryImportAction(policyJson))
+  if (type === 'inventory') return classifyInventory(db, rows, getInventoryImportAction(policyJson), policyJson)
   if (type === 'stock_actions') return classifyUnifiedStockActions(db, rows, policyJson)
-  return classifySales(db, rows)
+  return classifySales(db, rows, policyJson)
 }
 
 // Plain-JSON-safe shape of the image match summary, for storage in

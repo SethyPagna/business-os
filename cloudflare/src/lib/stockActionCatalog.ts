@@ -5,7 +5,7 @@
 
 import type { D1Compat } from './db'
 import { buildInClause, chunkForBinding } from './sqlBinding'
-import { IMPORT_BRANCH_COLUMNS_SQL, indexCanonicalImportBranches, type CanonicalImportBranchRow } from './importBranchAuthority'
+import { IMPORT_BRANCH_COLUMNS_SQL, importBranchRedirect, indexCanonicalImportBranches, type CanonicalImportBranchRow } from './importBranchAuthority'
 import { normalizeSearchText } from './searchMatch'
 import { identityBarcodeClassKey, identityBarcodeKeySql } from './productIdentity'
 import {
@@ -148,6 +148,6 @@ export async function classifyUnifiedStockActions(
     }
   }
 
-  return resolveUnifiedStockImportRows(rows, getUnifiedStockMode(policyJson), products, branches, currentStock)
+  return resolveUnifiedStockImportRows(rows, getUnifiedStockMode(policyJson), products, branches, currentStock, importBranchRedirect(policyJson, false))
     .map(resultFromResolved)
 }
