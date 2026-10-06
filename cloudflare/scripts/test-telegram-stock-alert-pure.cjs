@@ -103,8 +103,8 @@ function shop(chat, topic, extra = {}) {
 let nextProduct = 100
 const event = (env, state, name, quantity, extra = {}) => {
   nextProduct += 1
-  return Number(env.DB.raw.prepare(`INSERT INTO stock_alert_events (family_root_id, product_id, product_name, branch_id, alert_state, quantity_after, sale_id, created_at, telegram_sent_at)
-    VALUES (?, ?, ?, 1, ?, ?, ?, ${extra.createdAt ? '?' : "CURRENT_TIMESTAMP"}, ?)`)
+  return Number(env.DB.raw.prepare(`INSERT INTO stock_alert_events (family_root_id, product_id, product_name, branch_name, alert_state, quantity_after, sale_id, created_at, telegram_sent_at)
+    VALUES (?, ?, ?, 'Main', ?, ?, ?, ${extra.createdAt ? '?' : "CURRENT_TIMESTAMP"}, ?)`)
     .run(...[`key-${nextProduct}`, nextProduct, name, state, quantity, 900 + nextProduct, ...(extra.createdAt ? [extra.createdAt] : []), extra.sentAt ?? null]).lastInsertRowid)
 }
 const unsent = (env) => env.DB.raw.prepare('SELECT COUNT(*) AS n FROM stock_alert_events WHERE telegram_sent_at IS NULL').get().n

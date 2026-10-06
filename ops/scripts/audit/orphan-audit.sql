@@ -215,7 +215,6 @@ SELECT 'shift_sessions.closed_by_user_id->users' AS relation, COUNT(*) AS orphan
 SELECT 'shift_sessions.parent_shift_id->shift_sessions' AS relation, COUNT(*) AS orphan_count FROM shift_sessions c LEFT JOIN shift_sessions p ON p.id = c.parent_shift_id WHERE c.parent_shift_id IS NOT NULL AND p.id IS NULL;
 SELECT 'shift_sessions.reopened_by_user_id->users' AS relation, COUNT(*) AS orphan_count FROM shift_sessions c LEFT JOIN users p ON p.id = c.reopened_by_user_id WHERE c.reopened_by_user_id IS NOT NULL AND p.id IS NULL;
 SELECT 'shift_sessions.user_id->users' AS relation, COUNT(*) AS orphan_count FROM shift_sessions c LEFT JOIN users p ON p.id = c.user_id WHERE c.user_id IS NOT NULL AND p.id IS NULL;
-SELECT 'stock_alert_events.branch_id->branches' AS relation, COUNT(*) AS orphan_count FROM stock_alert_events c LEFT JOIN branches p ON p.id = c.branch_id WHERE c.branch_id IS NOT NULL AND p.id IS NULL;
 SELECT 'stock_alert_events.product_id->products' AS relation, COUNT(*) AS orphan_count FROM stock_alert_events c LEFT JOIN products p ON p.id = c.product_id WHERE c.product_id IS NOT NULL AND p.id IS NULL;
 SELECT 'stock_alert_events.sale_id->sales' AS relation, COUNT(*) AS orphan_count FROM stock_alert_events c LEFT JOIN sales p ON p.id = c.sale_id WHERE c.sale_id IS NOT NULL AND p.id IS NULL;
 SELECT 'stock_lot_adjustment_operations.actor_id->users' AS relation, COUNT(*) AS orphan_count FROM stock_lot_adjustment_operations c LEFT JOIN users p ON p.id = c.actor_id WHERE c.actor_id IS NOT NULL AND p.id IS NULL;

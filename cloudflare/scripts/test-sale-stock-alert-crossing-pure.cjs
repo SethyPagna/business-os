@@ -93,7 +93,14 @@ check('above -> low notifies once, with the family quantity left', async () => {
   assert.equal(created[0].product_id, a)
   assert.equal(created[0].quantity_after, 9)
   assert.equal(created[0].sale_id, 1)
-  assert.equal(created[0].branch_id, 1)
+  assert.equal(created[0].branch_name, null, 'this fixture has no branches row to name')
+})
+
+check('the table carries NO branch id column: the branch cutover refuses unclassified *_branch_id columns', () => {
+  fresh()
+  const columns = rawDb.prepare('PRAGMA table_info(stock_alert_events)').all().map((column) => column.name)
+  assert.deepEqual(columns.filter((name) => name === 'branch_id' || name.endsWith('_branch_id')), [], columns.join(','))
+  assert.ok(columns.includes('branch_name'), 'the branch is a name snapshot')
 })
 
 check('the threshold itself is low (qty <= threshold), one unit above is not', async () => {
@@ -316,6 +323,8 @@ check('feed: the window hides old events and carries receipt and branch names', 
   const [row] = feed()
   assert.equal(row.receipt_number, 'R-1')
   assert.equal(row.branch_name, 'Main Store')
+  rawDb.prepare("UPDATE branches SET name = 'Renamed Later' WHERE id = 1").run()
+  assert.equal(feed()[0].branch_name, 'Main Store', 'the label is the snapshot taken at the sale, not a live join')
   assert.equal(row.total_now, 8)
   assert.deepEqual(feed(DEFAULT_CONFIG, '2999-01-01 00:00:00'), [], 'since is a hard lower bound')
 })
@@ -376,8 +385,10 @@ check('only the sale routes write stock alerts, and migration 0239 is the single
     }
   }
   walk(SRC)
-  assert.deepEqual(callers.sort(), ['lib/saleBulkStatus.ts', 'routes/sales.ts'].sort(),
-    'stock adjustments, transfers, imports and returns must not write alerts')
+  // The sale writers (the full classification of every stock writer lives in test-sale-stock-alert-writers-pure.cjs): POS
+  // create / status / add-items / amendments, bulk status and its replay, the redo of added items, and a return exchange's replacement sale.
+  assert.deepEqual(callers.sort(), ['lib/saleBulkStatus.ts', 'lib/undoAppliers.ts', 'routes/returns.ts', 'routes/sales.ts'].sort(),
+    'stock adjustments, transfers and imports must not write alerts; only sale writers do')
   const migrations = fs.readdirSync(path.join(__dirname, '../migrations')).filter((f) => f.startsWith('0239'))
   assert.deepEqual(migrations, ['0239_stock_alert_events.sql'])
   assert.ok(!fs.readFileSync(path.join(__dirname, '../migrations/0239_stock_alert_events.sql'), 'utf8').includes('\r'), '0239 is LF-only')

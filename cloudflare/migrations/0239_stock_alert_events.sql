@@ -20,9 +20,12 @@
 --
 -- family_root_id is the Dashboard's FAMILY_ROOT_KEY_SQL value (the name key,
 -- or 'id:<n>' for a nameless row). product_id is the sold row that stands for
--- the family in the notification; branch_id is the branch the sale deducted
--- from (display only: the classification is the catalog-wide rollup the
--- Dashboard cards use). sale_id is the sale that caused the crossing.
+-- the family in the notification; branch_name is the NAME of the branch the sale
+-- deducted from, a display snapshot (the classification is the catalog-wide
+-- rollup the Dashboard cards use). There is deliberately NO branch_id column: the
+-- branch cutover registry (lib/branchCutoverCapture.ts) refuses a database that
+-- has an unclassified *_branch_id column, and a 3-day notification label is not
+-- worth rewriting rows in a cutover. sale_id is the sale that caused the crossing.
 --
 -- Telegram (same owner ruling, 6 Oct): the Alerts topic gets one short message per
 -- crossing, sent AFTER the sale commits from these rows. telegram_sent_at is the
@@ -51,7 +54,7 @@ CREATE TABLE IF NOT EXISTS stock_alert_events (
   family_root_id TEXT NOT NULL,
   product_id INTEGER NOT NULL,
   product_name TEXT,
-  branch_id INTEGER,
+  branch_name TEXT,
   alert_state TEXT NOT NULL CHECK (alert_state IN ('low', 'out')),
   quantity_after REAL NOT NULL DEFAULT 0,
   sale_id INTEGER,

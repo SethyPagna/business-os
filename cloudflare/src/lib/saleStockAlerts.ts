@@ -176,8 +176,8 @@ export function planSaleStockAlertStatement(input: {
     representative AS (
       SELECT family_root_id, MIN(product_id) AS product_id, branch_id FROM sold GROUP BY family_root_id
     )
-    INSERT INTO stock_alert_events (family_root_id, product_id, product_name, branch_id, alert_state, quantity_after, sale_id)
-    SELECT f.family_root_id, rep.product_id, p.name, rep.branch_id,
+    INSERT INTO stock_alert_events (family_root_id, product_id, product_name, branch_name, alert_state, quantity_after, sale_id)
+    SELECT f.family_root_id, rep.product_id, p.name, (SELECT name FROM branches WHERE id = rep.branch_id),
            CASE f.rank_after WHEN 0 THEN 'out' ELSE 'low' END,
            f.total_after, ${saleIdSql}
     FROM families f
@@ -202,7 +202,6 @@ export type StockAlertFeedRow = {
   id: number
   product_id: number
   product_name: string | null
-  branch_id: number | null
   branch_name: string | null
   alert_state: 'low' | 'out'
   quantity_after: number
@@ -226,7 +225,7 @@ export type StockAlertFeedRow = {
 export function stockAlertFeedSql(lowStock: LowStockConfig): string {
   return `
     WITH recent AS (
-      SELECT id, family_root_id, product_id, product_name, branch_id, alert_state, quantity_after, sale_id, created_at,
+      SELECT id, family_root_id, product_id, product_name, branch_name, alert_state, quantity_after, sale_id, created_at,
              ROW_NUMBER() OVER (PARTITION BY family_root_id ORDER BY id DESC) AS recency
       FROM stock_alert_events
       WHERE created_at >= @since
@@ -242,14 +241,13 @@ export function stockAlertFeedSql(lowStock: LowStockConfig): string {
       FROM members
       GROUP BY family_root_id
     )
-    SELECT l.id, l.product_id, l.product_name, l.branch_id, b.name AS branch_name, l.alert_state,
+    SELECT l.id, l.product_id, l.product_name, l.branch_name, l.alert_state,
            l.quantity_after, f.total_now, l.sale_id, s.receipt_number, l.created_at,
            SUM(CASE WHEN l.alert_state = 'out' THEN 1 ELSE 0 END) OVER () AS out_total,
            COUNT(*) OVER () AS matched_total
     FROM latest l
     JOIN families f ON f.family_root_id = l.family_root_id
     LEFT JOIN sales s ON s.id = l.sale_id
-    LEFT JOIN branches b ON b.id = l.branch_id
     WHERE (l.alert_state = 'out' AND f.has_healthy = 0 AND f.has_low = 0)
        OR (l.alert_state = 'low' AND f.has_healthy = 0 AND f.has_low = 1)
     ORDER BY CASE l.alert_state WHEN 'out' THEN 0 ELSE 1 END, l.id DESC
