@@ -58,9 +58,12 @@ export async function cutoverDigest(text: string): Promise<string> {
 export const cutoverAssert = (condition: string, params: Record<string, unknown> = {}): CutoverStatement => ({
   sql: `SELECT CASE WHEN (${condition}) THEN 1 ELSE json_extract('[1]','$[branch_cutover_parent_conflict]') END`, params,
 })
+// D1 refuses pragma_table_info on its internal _cf_* tables (SQLITE_AUTH, found on local workerd D1): they are skipped
+// before the join, and so are SQLite's own sqlite_* tables. Neither can hold a branch reference.
 const schemaSql = `SELECT json_group_array(json_array(name,cid,column_name,type,pk,definition)) AS value FROM (
   SELECT m.name,p.cid,p.name AS column_name,p.type,p.pk,CASE WHEN p.cid=0 THEN m.sql END AS definition FROM sqlite_master m JOIN pragma_table_info(m.name) p
-  WHERE m.type='table' AND (m.name IN (SELECT value FROM json_each(@tables)) OR p.name='branch_id' OR p.name GLOB '*_branch_id') ORDER BY m.name,p.cid)`
+  WHERE m.type='table' AND m.name NOT LIKE '!_cf!_%' ESCAPE '!' AND m.name NOT LIKE 'sqlite!_%' ESCAPE '!'
+    AND (m.name IN (SELECT value FROM json_each(@tables)) OR p.name='branch_id' OR p.name GLOB '*_branch_id') ORDER BY m.name,p.cid)`
 export type CaptureSchema = { value: string; digest: string; columns: Record<string, string[]>; capabilities: Array<{ code: string; detail: string }> }
 export async function readCutoverCaptureSchema(db: D1Compat): Promise<CaptureSchema> {
   const result = await db.prepare(schemaSql).get<{ value: string }>({ tables: JSON.stringify(tables) })
