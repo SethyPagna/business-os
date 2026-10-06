@@ -246,12 +246,17 @@ app.get('/movements/:id/revert-preview', async (c) => {
   if (!Number.isSafeInteger(id) || id <= 0) return c.json({ success: false, error: 'Invalid movement id.' }, 400)
   const { StockMovementReplayError, stockMovementRevertPreview } = await import('../lib/stockMovementReplay')
   try {
-    const { revert, history } = await stockMovementRevertPreview(getDb(c.env), id)
+    const db = getDb(c.env)
+    const { revert, history } = await stockMovementRevertPreview(db, id)
     if (history && (!canOperateHistoryRow(user, history)
       || !canUseNamedAppliers(user, [parseJson(history.undo_payload), parseJson(history.redo_payload)]))) {
       return c.json({ success: false, error: 'You do not have permission to perform this action.' }, 403)
     }
-    return c.json({ success: true, revert })
+    // REVERT-SET: what the confirm must say -- the exact change, and any later
+    // Set on the same product and branch that this Revert leaves applied.
+    const { laterOpenSets, revertEffect } = await import('../lib/stockRevertEffect')
+    const [effect, later] = await Promise.all([revertEffect(db, id, revert), laterOpenSets(db, [id])])
+    return c.json({ success: true, revert, effect, laterSets: later.get(id) ?? [] })
   } catch (error) {
     const status = error instanceof StockMovementReplayError ? error.status : 500
     return c.json({ success: false, error: error instanceof Error ? error.message : 'Unable to preview this stock action.',
@@ -500,7 +505,10 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
         // through, so the refusal can say WHY and link WHERE.
         const blocking = status === 409 ? (error as { refusal?: unknown })?.refusal : null
         const blockingFields = blocking && typeof blocking === 'object' && !Array.isArray(blocking) ? blocking as Record<string, unknown> : {}
-        return c.json({ success: false, error: (error as Error)?.message || `Failed to ${direction} this action`, ...blockingFields, ...(refusalCode ? { code: refusalCode } : {}), ...(saleCustomerReplay && isLoyaltyAssignmentError(error) ? { code: LOYALTY_REASSIGNMENT_CODE } : {}) }, status)
+        // The numbers a coded refusal's sentence names ("only 3 left, 27 needed").
+        const refusalParams = status === 409 ? (error as { params?: unknown })?.params : null
+        const paramFields = refusalParams && typeof refusalParams === 'object' && !Array.isArray(refusalParams) ? { params: refusalParams } : {}
+        return c.json({ success: false, error: (error as Error)?.message || `Failed to ${direction} this action`, ...blockingFields, ...paramFields, ...(refusalCode ? { code: refusalCode } : {}), ...(saleCustomerReplay && isLoyaltyAssignmentError(error) ? { code: LOYALTY_REASSIGNMENT_CODE } : {}) }, status)
       }
     }
 

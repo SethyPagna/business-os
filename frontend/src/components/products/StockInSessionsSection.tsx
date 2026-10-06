@@ -10,6 +10,8 @@ import MessageSquare from 'lucide-react/dist/esm/icons/message-square.js'
 import { getStockInSessionLines, getStockInSessions, getStockLedger } from '../../api/productReadTransport.ts'
 import { editStockInLine, revertStockMovement } from '../../api/inventoryWriteTransport.ts'
 import { stockRevertErrorText } from '../../utils/stockRevertError.ts'
+import { laterSetsWarning } from '../../utils/stockRevertPreview.ts'
+import type { LaterOpenSet } from '../../api/actionHistoryTransport.ts'
 import { STOCK_IN_LINE_FOCUS_EVENT, stockInSessionKeyForReceipt, stockRefusalInfo, takeStockInLineFocus, type StockRefusalInfo } from '../../utils/stockRefusal.ts'
 import StockRefusalLine from '../shared/StockRefusalLine.tsx'
 import {
@@ -123,6 +125,9 @@ type Row = {
   received_quantity?: number | null
   received_unit_cost_usd?: number | null
   received_total_cost_usd?: number | null
+  // REVERT-SET: Sets still applied after this line on its product and branch,
+  // which its Revert leaves in place (null = the Worker could not check).
+  later_open_sets?: LaterOpenSet[] | null
 }
 type Session = {
   key: string; rows: Row[]; supplier: SupplierChoice; receivedDate: string; branchId: string
@@ -573,12 +578,20 @@ export default function StockInSessionsSection({ t, notify, branches, onChanged 
     }
     const rows = current.kind === 'line' ? [current.row] : revertibleRows
     const units = rows.reduce((sum, row) => sum + Math.abs(Number(row.quantity) || 0), 0)
+    // REVERT-SET: a Set made after these lines stays applied -- say so before
+    // the operator confirms (owner report, 6 Oct 2026).
+    const laterSets = [...new Map(rows.flatMap((row) => row.later_open_sets ?? []).map((set) => [set.movementId, set])).values()]
+    const warning = laterSetsWarning(laterSets, tr, fmtDate)
     return [
       current.kind === 'line'
         ? { label: tr('product', 'Product'), value: current.row.product_name }
         : { label: tr('lines', 'Lines'), value: String(rows.length) },
+      ...(current.kind === 'line' && current.row.batch_received_at
+        ? [{ label: receivedDateLabel, value: fmtDate(current.row.batch_received_at) }]
+        : []),
       // The line's own quantity, before -> after the reversal.
       { label: tr('quantity', 'Quantity'), value: change(`+${units}`, '0') },
+      ...(warning ? [{ label: tr('movement_type_stock_set', 'Set stock'), value: warning }] : []),
     ]
   }
 

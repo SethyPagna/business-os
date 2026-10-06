@@ -3002,9 +3002,9 @@ async function branchReplayExpectedFields(
 
 const APPLIERS: Record<string, UndoApplierDef> = {
   [CUSTOMER_GENDER_RESTORATION_KIND]: { permission: 'contacts', action: 'edit', run: replayCustomerGenderRestoration },
-  // Scoped Set (lib/stockLotAdjustment.ts): the server replays the exact lot
-  // and branch snapshots of one generation and refuses 409 when current stock
-  // no longer equals the snapshot it would reverse from.
+  // Scoped Set (lib/stockLotAdjustment.ts): the server moves exactly the
+  // recorded lot and branch delta of one generation and refuses 409 when the
+  // lot or branch can no longer cover it.
   'stock.quantity_set': {
     permission: 'inventory', action: 'adjust',
     run: async (payload, ctx) => {
@@ -3013,9 +3013,10 @@ const APPLIERS: Record<string, UndoApplierDef> = {
       await replayStockLotSet(ctx.env, ctx.user, ctx.direction, ctx.historyId, ctx.generation, payload)
     },
   },
-  // N6 stock-in line edit (lib/stockInLineEdit.ts): same exact-snapshot
-  // replay contract as the scoped Set above; a cost edit also needs the
-  // cost-entry permission, checked inside the replay.
+  // N6 stock-in line edit (lib/stockInLineEdit.ts): same delta replay
+  // contract as the scoped Set above (the recorded change, refused only when
+  // the units it needs are gone); a cost edit also needs the cost-entry
+  // permission, checked inside the replay.
   'stock.session_line_edit': {
     permission: 'inventory', action: 'adjust',
     run: async (payload, ctx) => {

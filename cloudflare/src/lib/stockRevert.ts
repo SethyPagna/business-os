@@ -437,7 +437,7 @@ export async function applyMovementRevert(db: D1Compat, m: RevertMovementRow, ac
   if (revertType === 'remove') {
     const current = await branchQty(db, productId, branchId)
     if (magnitude > current) {
-      return refuse(400, 'revert_insufficient_branch_stock', `Cannot revert: only ${current} in stock at ${branchLabel || 'this branch'}, ${magnitude} needed.`, { available: current, needed: magnitude, branch: branchLabel || '' })
+      return withBlocker(db, refuse(400, 'revert_insufficient_branch_stock', `Cannot revert: only ${current} in stock at ${branchLabel || 'this branch'}, ${magnitude} needed.`, { available: current, needed: magnitude, branch: branchLabel || '' }), { productId, branchId, batchId: null, afterMovementId: Number(m.id) })
     }
     if (batchId != null) {
       // Strict (unclamped) lot + branch decrement in the same batch as the

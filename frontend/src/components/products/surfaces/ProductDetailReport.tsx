@@ -16,6 +16,7 @@ import { batchDisplayLabel } from '../../../utils/batchLabel.ts'
 // does. It printed "Sale #742" -- the raw sales.id, which identifies nothing
 // to a person and is not the receipt they would search for.
 import { formatHistoryReference, historyReference } from '../../../utils/historyRowModel.ts'
+import { isStockSetMovement, revertsMovementId } from '../../../utils/stockMovementDetail.ts'
 import { useApp } from '../../../AppContext'
 import { canViewAcquisitionCosts } from '../../../utils/acquisitionCostAccess.ts'
 import type { PermissionUser } from '../../../utils/permissions.ts'
@@ -86,7 +87,13 @@ type LedgerRow = {
   created_at: string
   before_qty: number
   after_qty: number
-  reference_id?: number | null
+  reference_id?: number | string | null
+  // REVERT-SET: the ledger's own links (Worker stockLedgerQuery.ts) -- the row
+  // a Revert reverts, the Revert that reverted this row, and whether it is
+  // reverted now -- so this float shows both ends like Stock Changes does.
+  reverts_movement_id?: number | null
+  reverted_by_movement_id?: number | null
+  reverted_now?: number | null
   // N13: resolved server-side (cloudflare/src/lib/movementReference.ts).
   reference_kind?: 'sale' | 'return' | null
   reference_label?: string | null
@@ -319,6 +326,17 @@ export default function ProductDetailReport({ productId, barcode, t, fmtUSD, lea
               sale: tr('sale', 'Sale'),
               return: tr('return', 'Return'),
             })
+            const revertsId = revertsMovementId(row)
+            const revertedById = Number(row.reverted_by_movement_id) > 0 ? Number(row.reverted_by_movement_id) : null
+            // A Revert and a Set name no record a person recognises: their link
+            // (or nothing) replaces the raw "revert:48026" / "stock-set:..." token.
+            const namesNoRecord = revertsId != null || isStockSetMovement(row.reference_id) || row.reference_id == null
+            const source = namesNoRecord ? receipt : receipt || `${typeLabel} #${row.reference_id}`
+            const linkTo = (id: number, text: string) => {
+              return (movements ?? []).some((other) => other.id === id)
+                ? <button type="button" className="font-semibold text-blue-700 underline-offset-2 hover:underline dark:text-blue-300" onClick={() => setOpenMovementId(id)}>{text}</button>
+                : <span className="font-semibold">{text}</span>
+            }
             const batchLabel = row.batch_id
               // batchWord is the fallback prefix for a pre-redesign row that has
               // neither a received_at nor a date-shaped lot code; omitting it
@@ -337,8 +355,9 @@ export default function ProductDetailReport({ productId, barcode, t, fmtUSD, lea
                 >
                   <span className="w-[84px] shrink-0 whitespace-nowrap text-gray-400">{fmtDateTime24(row.created_at)}</span>
                   <span className={`shrink-0 rounded px-1 py-0.5 font-semibold ${movementColorClass(row.movement_type, row.signed_quantity)}`}>
-                    {signed(row)} {typeLabel}
+                    {signed(row)} {typeLabel}{revertsId != null ? <span className="font-normal opacity-80"> #{revertsId}</span> : null}
                   </span>
+                  {Number(row.reverted_now) ? <span data-revert-tag="reverted" className="shrink-0 rounded bg-gray-200 px-1 text-[10px] font-semibold text-gray-600 dark:bg-gray-700 dark:text-gray-300">{tr('movement_reverted_chip', 'Reverted')}</span> : null}
                   <span className="shrink-0 tabular-nums text-gray-500">{row.before_qty}→{row.after_qty}</span>
                   {/* The receipt leads, the free text follows -- the same
                       order the Stock Change ledger's Reason cell uses. */}
@@ -355,7 +374,9 @@ export default function ProductDetailReport({ productId, barcode, t, fmtUSD, lea
                       <dt className="text-gray-400">{tr('before_after', 'Before → After')}</dt>
                       <dd className="tabular-nums text-gray-700 dark:text-gray-200">{row.before_qty} → {row.after_qty}</dd>
                       {batchLabel ? (<><dt className="text-gray-400">{tr('batch', 'Received date')}</dt><dd className="text-amber-700 dark:text-amber-300">{batchLabel}</dd></>) : null}
-                      {receipt || row.reference_id ? (<><dt className="text-gray-400">{tr('source', 'Source')}</dt><dd className="text-gray-700 dark:text-gray-200">{receipt || `${typeLabel} #${row.reference_id}`}</dd></>) : null}
+                      {source ? (<><dt className="text-gray-400">{tr('source', 'Source')}</dt><dd className="text-gray-700 dark:text-gray-200">{source}</dd></>) : null}
+                      {revertsId != null ? (<><dt className="text-gray-400">{tr('revert', 'Revert')}</dt><dd data-revert-links="true">{linkTo(revertsId, tr('movement_reverts_link', 'Reverts #{id}').replace('{id}', String(revertsId)))}</dd></>) : null}
+                      {revertedById != null ? (<><dt className="text-gray-400">{tr('movement_reverted_chip', 'Reverted')}</dt><dd data-revert-links="true">{linkTo(revertedById, tr('movement_reverted_by_link', 'Reverted by #{id}').replace('{id}', String(revertedById)))}</dd></>) : null}
                       {row.reason ? (<><dt className="text-gray-400">{tr('reason', 'Reason')}</dt><dd className="text-gray-700 dark:text-gray-200">{row.reason}</dd></>) : null}
                     </dl>
                   </div>

@@ -558,6 +558,100 @@ async function main() {
     assert.equal(loss(f).removal_loss_qty, 0)
   })
 
+  // REVERT-SET (owner, 6 Oct 2026: "Revert should fully revert, never leaves a
+  // stock effect behind"): Undo/Redo of a line edit moves exactly the change
+  // the edit recorded. Unrelated stock since then never refuses it; only a
+  // shortage of the units the inverse must take back, a later edit of the same
+  // line, or a delivery that joined the received date whose cost it restores.
+  const saleRow = (f, batchId, quantity) => {
+    sell(f, batchId, quantity)
+    return Number(f.sql.prepare("INSERT INTO inventory_movements(product_id,product_name,branch_id,branch_name,movement_type,quantity,batch_id,reference_id) VALUES(1,'Serum',1,'Shop','sale',?,?,NULL)")
+      .run(quantity, batchId).lastInsertRowid)
+  }
+
+  await check('REVERT-SET: undo after a sale that left the units it needs takes back exactly the +2 (12, sell 5, undo -> 5); repeat is a no-op; redo -> 7', async () => {
+    const f = fresh()
+    const { movementId, batchId } = await receive(f, { requestId: 'session-rs-00001', quantity: 10 })
+    const res = await edit(f, movementId, { quantity: 12, expected_quantity: 10, expected_batch_id: batchId })
+    assert.equal(res.status, 200, JSON.stringify(res.json))
+    saleRow(f, batchId, 5)
+    assert.deepEqual(totals(f), { branch: 7, product: 7, lots: 7 })
+    const history = historyOf(f, res.json.operation_id)
+    const undone = await undo(f, history.id, 0)
+    assert.equal(undone.status, 200, JSON.stringify(undone.json))
+    assert.deepEqual(totals(f), { branch: 5, product: 5, lots: 5 }, 'the sale stays; the edit is gone')
+    assert.deepEqual([lot(f, batchId).received_quantity, lot(f, batchId).received_cost_usd], [10, 20])
+    assert.equal(sessionLines(f, movementId)[0].quantity, 10)
+    assert.equal((await undo(f, history.id, 0)).status, 200, 'the same generation again')
+    assert.deepEqual(totals(f), { branch: 5, product: 5, lots: 5 }, 'is not applied twice')
+    assert.equal((await undo(f, history.id, 1)).status, 409, 'a stale generation is refused')
+    assert.equal((await redo(f, history.id, 1)).status, 200)
+    assert.deepEqual(totals(f), { branch: 7, product: 7, lots: 7 })
+    assert.deepEqual([lot(f, batchId).received_quantity, lot(f, batchId).received_cost_usd], [12, 24])
+    assert.equal(loss(f).removal_loss_qty, 0, 'no undo or redo of an edit is a loss')
+  })
+
+  await check('REVERT-SET: undo refused only when a sale took the units it needs -- coded, numbers and the sale named; nothing moves', async () => {
+    const f = fresh()
+    const { movementId, batchId } = await receive(f, { requestId: 'session-rs-00002', quantity: 10 })
+    const res = await edit(f, movementId, { quantity: 12, expected_quantity: 10, expected_batch_id: batchId })
+    const sale = saleRow(f, batchId, 11)
+    const before = writeSnapshot(f)
+    const refused = await undo(f, historyOf(f, res.json.operation_id).id, 0)
+    assert.equal(refused.status, 409, JSON.stringify(refused.json))
+    assert.equal(refused.json.code, 'revert_insufficient_lot_stock')
+    assert.deepEqual(refused.json.params, { available: 1, needed: 2 })
+    assert.equal(refused.json.blocker.movement_id, sale)
+    const after = JSON.parse(writeSnapshot(f)); const was = JSON.parse(before)
+    assert.deepEqual(after.slice(0, 7), was.slice(0, 7), 'stock, lots, movements, revisions, operation unchanged')
+  })
+
+  await check('REVERT-SET: a later edit of the same line blocks the earlier edit until it is undone; then both undo exactly', async () => {
+    const f = fresh()
+    const { movementId, batchId } = await receive(f, { requestId: 'session-rs-00003', quantity: 10 })
+    const first = await edit(f, movementId, { quantity: 12, expected_quantity: 10, expected_batch_id: batchId })
+    const second = await edit(f, movementId, { quantity: 15, expected_quantity: 12, expected_batch_id: batchId })
+    assert.equal(second.status, 200, JSON.stringify(second.json))
+    const refused = await undo(f, historyOf(f, first.json.operation_id).id, 0)
+    assert.equal(refused.status, 409); assert.equal(refused.json.code, 'revert_stock_in_line_edited')
+    assert.deepEqual(totals(f), { branch: 15, product: 15, lots: 15 })
+    assert.equal((await undo(f, historyOf(f, second.json.operation_id).id, 0)).status, 200)
+    assert.equal((await undo(f, historyOf(f, first.json.operation_id).id, 0)).status, 200)
+    assert.deepEqual(totals(f), { branch: 10, product: 10, lots: 10 })
+    assert.equal(sessionLines(f, movementId)[0].quantity, 10)
+  })
+
+  await check('REVERT-SET: a cost change is not restored once another delivery joined its received date; nothing moves', async () => {
+    const f = fresh()
+    const { movementId, batchId } = await receive(f, { requestId: 'session-rs-00004', quantity: 10 })
+    const res = await edit(f, movementId, { quantity: 10, unit_cost_usd: 3, expected_quantity: 10, expected_batch_id: batchId })
+    assert.equal(res.status, 200, JSON.stringify(res.json))
+    // A later delivery at the same date and cost lands on the same lot.
+    f.sql.exec(`UPDATE branch_batch_stock SET quantity=quantity+5 WHERE batch_id=${batchId} AND branch_id=1;
+      UPDATE branch_stock SET quantity=quantity+5 WHERE product_id=1 AND branch_id=1; UPDATE products SET stock_quantity=stock_quantity+5 WHERE id=1;
+      UPDATE product_batches SET received_quantity=received_quantity+5, received_cost_usd=received_cost_usd+15 WHERE id=${batchId};
+      INSERT INTO inventory_movements(product_id,branch_id,movement_type,quantity,unit_cost_usd,total_cost_usd,batch_id,reference_id) VALUES(1,1,'add',5,3,15,${batchId},'later-delivery');`)
+    const before = writeSnapshot(f)
+    const refused = await undo(f, historyOf(f, res.json.operation_id).id, 0)
+    assert.equal(refused.status, 409, JSON.stringify(refused.json))
+    assert.equal(refused.json.code, 'stock_changed')
+    assert.equal(lot(f, batchId).unit_cost_usd, 3, 'the later delivery keeps its cost')
+    assert.deepEqual(JSON.parse(writeSnapshot(f)).slice(0, 5), JSON.parse(before).slice(0, 5))
+  })
+
+  await check('REVERT-SET: an edit is not redone into a session that was undone', async () => {
+    const f = fresh()
+    const { movementId, batchId } = await receive(f, { requestId: 'session-rs-00005', quantity: 10 })
+    const res = await edit(f, movementId, { quantity: 12, expected_quantity: 10, expected_batch_id: batchId })
+    const history = historyOf(f, res.json.operation_id)
+    assert.equal((await undo(f, history.id, 0)).status, 200)
+    // The session's own Undo after that (its generation goes odd).
+    f.sql.exec('UPDATE stock_session_operations SET generation=1')
+    const refused = await redo(f, history.id, 1)
+    assert.equal(refused.status, 409, JSON.stringify(refused.json)); assert.equal(refused.json.code, 'revert_session_undone')
+    assert.deepEqual(totals(f), { branch: 10, product: 10, lots: 10 })
+  })
+
   if (failures.length) {
     console.error(`\n${failures.length} failing: ${failures.join('; ')}`)
     process.exit(1)

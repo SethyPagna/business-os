@@ -20,7 +20,8 @@ import { actorSnapshot } from './actorSnapshot'
 import { STOCK_REASON_MAX_LENGTH, stockReasonTooLong } from './stockReason'
 import { multiplyMoney4, roundMoney4, sumMoney4 } from './moneyPrecision'
 import { catalogCostRecomputeIfChangedStatement, catalogCostRecomputeStatement } from './catalogCostRecompute'
-import { findLaterChangeBlocker } from './stockRefusalBlocker'
+import { findConsumingBlocker, findLaterChangeBlocker } from './stockRefusalBlocker'
+import { revertChainOpenSql } from './stockInSessionsQuery'
 import {
   addressedMovement, branchEffectRefusal, branchRedirectGuard, branchRedirectGuardRefusal, directoryBranchEffect, isBranchRedirectGuardError, landingLotId,
   readBranchDirectory, type BranchEffect, type RedirectTarget,
@@ -140,6 +141,8 @@ export class StockSessionError extends Error {
 
   // RET-D: the blocking record a replay refusal names (routes/actionHistory.ts reads it).
   get refusal(): unknown { return this.details?.refusal ?? null }
+  // REVERT-SET: the numbers a coded refusal's sentence names (frontend utils/stockRevertError.ts).
+  get params(): unknown { return this.details?.params ?? undefined }
 }
 
 // Action history must use the same permission union as the authoritative
@@ -1269,6 +1272,56 @@ function captureReplayState(id: string, stateSql: string, initial = false): Stoc
   ]
 }
 
+// ---- REVERT-SET: what a session Undo/Redo pins, and what it moves by delta.
+type ReplayKey = keyof typeof REPLAY_TABLES
+
+// Quantities move by the session's recorded change; derived figures are
+// re-derived; neither is compared. updated_at moves with every sale.
+const REPLAY_UNPINNED_COLUMNS: Record<'products' | 'batches', ReadonlySet<string>> = {
+  products: new Set(['id', 'stock_quantity', 'rfid_confirmed_qty', 'updated_at', 'cost_price_usd', 'cost_price_khr', 'purchase_price_usd', 'purchase_price_khr']),
+  batches: new Set(['id', 'received_quantity', 'received_cost_usd', 'updated_at', 'is_active']),
+}
+const PRODUCT_DERIVED_COST_COLUMNS = ['cost_price_usd', 'cost_price_khr', 'purchase_price_usd', 'purchase_price_khr'] as const
+// The attribution a lot the session created loses once nothing received remains on it.
+const BATCH_ATTRIBUTION_COLUMNS = ['supplier_id', 'supplier_name', 'unit_cost_usd', 'payment_status', 'credit_due_date', 'received_branch_id', 'expiry_date', 'notes'] as const
+// Revisions of the images and files of the products the session created. The
+// product / lot / batch_identity / branch-stock / branch / supplier revisions
+// move with every sale, delivery or rename (0124's batch_identity trigger fires
+// on ANY lot update) and are not the session's; a lot moved to another product
+// is refused by MEMBER_LOT_MOVED_SQL, and a lot the session created has its
+// batch_key pinned with its other written columns.
+const REPLAY_PINNED_REVISION_TYPES = ['product_image', 'asset'] as const
+
+function sameReplayValue(a: unknown, b: unknown): boolean {
+  if (a == null || b == null) return a == null && b == null
+  if (typeof a === 'number' && typeof b === 'number') return Math.abs(a - b) < 1e-9
+  return JSON.stringify(a) === JSON.stringify(b)
+}
+
+/** The columns of a product/lot row that the session itself wrote (all of them on a row it created). */
+function sessionWrittenColumns(key: 'products' | 'batches', row: Row, original: Row | undefined): string[] {
+  return Object.keys(row).filter(c => !REPLAY_UNPINNED_COLUMNS[key].has(c) && (!original || !sameReplayValue(original[c], row[c])))
+}
+
+/** The part of a replay-state JSON that must be exactly as the session left it. */
+function pinnedReplayState(x: string): string {
+  return `json_object('images',json_extract(${x},'$.images'),'members',json_extract(${x},'$.members'),'movements',json_extract(${x},'$.movements'),
+    'revisions',(SELECT json_group_array(json(rv.value)) FROM json_each(${x},'$.revisions') rv
+      WHERE json_extract(rv.value,'$.entity_type') IN (${REPLAY_PINNED_REVISION_TYPES.map(t => `'${t}'`).join(',')})))`
+}
+
+// A member line reverted on its own in Stock Changes (an open revert chain):
+// its units are already out, and stockRevert.ts refuses the opposite order.
+const MEMBER_REVERTED_SQL = `EXISTS(SELECT 1 FROM stock_session_members sm JOIN inventory_movements mv ON mv.id=sm.movement_id
+  WHERE sm.operation_id=@id AND ${revertChainOpenSql('mv')})`
+// A member line with an applied edit (lib/stockInLineEdit.ts) holds more or
+// less than it received; undo the edit first.
+const MEMBER_EDITED_SQL = `EXISTS(SELECT 1 FROM stock_lot_adjustment_operations e JOIN stock_session_members sm
+  ON sm.movement_id=json_extract(e.request_json,'$.movementId') WHERE sm.operation_id=@id AND e.state='applied'
+  AND json_extract(e.request_json,'$.kind')='stock_in_line_edit')`
+const MEMBER_LOT_MOVED_SQL = `EXISTS(SELECT 1 FROM stock_session_members sm JOIN product_batches b ON b.id=sm.batch_id
+  WHERE sm.operation_id=@id AND b.variant_product_id<>sm.product_id)`
+
 export async function replayStockSession(env: Env, user: SessionUser, direction: 'undo' | 'redo', historyId: number,
   generation: unknown, payload: Row): Promise<void> {
   if (typeof generation !== 'number' || !Number.isSafeInteger(generation) || generation < 0) fail('expected_generation must be a nonnegative JSON integer.', 400)
@@ -1297,79 +1350,188 @@ export async function replayStockSession(env: Env, user: SessionUser, direction:
   if (memberBranchNamesCaptured && expectedMembers.some(row => !Object.prototype.hasOwnProperty.call(row, 'branch_name'))) fail('Stock session member postimages have inconsistent branch labels.')
   // Pre-0226 postimages omit this display field; replay never rewrites member labels.
   const stateSql = await stockReplayStateSql(env, memberBranchNamesCaptured)
+  // REVERT-SET (owner, 6 Oct 2026: "Revert should fully revert, never leaves a
+  // stock effect behind"; lead: an Undo is refused only when later movements
+  // took the units it needs, never by exact quantity). The session's recorded
+  // change is its own postimage minus its preimage: every lot, branch-stock row,
+  // product total and received figure moves by exactly that, on today's rows. A
+  // sale, transfer or delivery since then no longer refuses it. What stays
+  // pinned to the state the session (or its last replay) left: the columns the
+  // session itself wrote on products and lots, its member and movement rows,
+  // the images of products it created, and the lots' identity.
+  const expectedImage = snapshot.expected as Record<string, Row[]>
+  const sign = direction === 'undo' ? -1 : 1
+  const num = (value: unknown) => Number(value) || 0
+  const originalOf = (key: ReplayKey, row: Row) => (before[key] || []).find(r => r.id === row.id)
+  const expectedOf = (key: ReplayKey, row: Row) => (expectedImage[key] || []).find(r => r.id === row.id)
+  const editsTable = await db.prepare("SELECT 1 AS ok FROM sqlite_master WHERE type='table' AND name='stock_lot_adjustment_operations'").get<{ ok: number }>()
+  const memberState = await db.prepare(`SELECT ${MEMBER_REVERTED_SQL} AS reverted, ${editsTable ? MEMBER_EDITED_SQL : '0'} AS edited, ${MEMBER_LOT_MOVED_SQL} AS moved`)
+    .get<{ reverted: number; edited: number; moved: number }>({ id: op.id })
+  if (Number(memberState?.reverted)) fail('A line of this stock-in session was reverted on its own in Stock Changes, so the session cannot be undone or redone as a whole. Revert that Revert first, or revert the other lines one by one. Nothing was changed.', 409, 'revert_session_line_reverted')
+  if (Number(memberState?.edited)) fail('A line of this stock-in session was edited after it was saved. Undo that edit first. Nothing was changed.', 409, 'revert_stock_in_line_edited')
+  if (Number(memberState?.moved)) fail('A received date of this session now belongs to another product (the products were merged), so it cannot be reversed here. Nothing was changed.', 409, 'revert_lot_moved')
+
+  // The stock rows the session moved, and by how much this replay moves them back or again.
+  type StockChange = { key: 'branchStock' | 'branchBatchStock'; row: Row; original: Row | undefined; change: number }
+  const stockChanges: StockChange[] = []
+  // Lots first, so a shortage names the received date before the branch total.
+  for (const key of ['branchBatchStock', 'branchStock'] as const) {
+    for (const row of after[key] || []) {
+      const original = originalOf(key, row)
+      const delta = num(row.quantity) - num(original?.quantity)
+      if (Math.abs(delta) < 1e-9 && original) continue
+      stockChanges.push({ key, row, original, change: sign * delta })
+    }
+  }
+  const ownLast = await db.prepare(`SELECT MAX(COALESCE((SELECT MAX(id) FROM inventory_movements WHERE reference_id = o.rowid AND movement_type IN ('add', 'remove')
+      AND reason LIKE 'Stock session ' || o.id || ' %'), 0), COALESCE((SELECT MAX(movement_id) FROM stock_session_members WHERE operation_id = o.id), 0)) AS last_id
+    FROM stock_session_operations o WHERE o.id = @id`).get<{ last_id: number }>({ id: op.id }).catch(() => null)
+  const afterMovementId = Number(ownLast?.last_id) || 0
+  // Read first for a clean, named answer; the assertions below are what enforce it.
+  for (const item of stockChanges) {
+    if (item.change >= 0) continue
+    const lot = item.key === 'branchBatchStock'
+    const current = await db.prepare(lot
+      ? 'SELECT COALESCE((SELECT quantity FROM branch_batch_stock WHERE batch_id=@a AND branch_id=@b),0) AS qty, (SELECT name FROM branches WHERE id=@b) AS branch'
+      : 'SELECT COALESCE((SELECT quantity FROM branch_stock WHERE product_id=@a AND branch_id=@b),0) AS qty, (SELECT name FROM branches WHERE id=@b) AS branch')
+      .get<{ qty: number; branch: string | null }>({ a: lot ? item.row.batch_id : item.row.product_id, b: item.row.branch_id })
+    const available = num(current?.qty)
+    if (available + item.change < -1e-9) {
+      const productId = lot
+        ? num(members.find(m => Number(m.batch_id) === Number(item.row.batch_id))?.product_id)
+        : num(item.row.product_id)
+      const refusal = await findConsumingBlocker(db, { productId, branchId: num(item.row.branch_id), batchId: lot ? num(item.row.batch_id) : null, afterMovementId })
+      fail(lot
+        ? `Cannot ${direction}: only ${available} left under this received date at ${current?.branch || 'this branch'}, ${-item.change} needed. Nothing was changed.`
+        : `Cannot ${direction}: only ${available} in stock at ${current?.branch || 'this branch'}, ${-item.change} needed. Nothing was changed.`,
+      409, lot ? 'revert_insufficient_lot_stock' : 'revert_insufficient_branch_stock', {
+        ...(refusal ? { refusal } : {}),
+        params: lot ? { available, needed: -item.change } : { available, needed: -item.change, branch: String(current?.branch ?? '') },
+      })
+    }
+  }
+
   const statements: StockWriteStatement[] = [
     assertion("NOT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance')"),
     assertion(`EXISTS(SELECT 1 FROM stock_session_operations o JOIN action_history h ON h.id=o.history_id
       JOIN undo_snapshots s ON s.id=o.snapshot_id WHERE o.id=@id AND o.history_id=@history AND o.generation=@generation
       AND h.status=@status AND s.payload_json=@snapshot)`, { id: op.id, history: historyId, generation, status: expectedStatus, snapshot: op.payload_json }),
     assertion(`NOT EXISTS(SELECT 1 FROM stock_session_members m WHERE m.operation_id=@id AND NOT EXISTS(SELECT 1 FROM branches b WHERE b.id=m.branch_id AND b.is_active=1))`, { id: op.id }),
-    assertion(`${stateSql}=${REPLAY_EXPECTED_SQL}`, { id: op.id, snapshotId: op.snapshot_id }),
+    assertion(`NOT ${MEMBER_REVERTED_SQL}`, { id: op.id }),
+    ...(editsTable ? [assertion(`NOT ${MEMBER_EDITED_SQL}`, { id: op.id })] : []),
+    assertion(`NOT ${MEMBER_LOT_MOVED_SQL}`, { id: op.id }),
+    // The session's own rows (members, receipt movements, images of the
+    // products it created) and its lots' identity are exactly as it left them.
+    assertion(`(WITH cur(x) AS (SELECT ${stateSql}) SELECT ${pinnedReplayState('cur.x')} FROM cur)
+      = (SELECT ${pinnedReplayState("json_extract(payload_json,'$.expected')")} FROM undo_snapshots WHERE id=@snapshotId)`, { id: op.id, snapshotId: op.snapshot_id }),
   ]
+  // The columns the session itself wrote on a product or lot are pinned to
+  // the value it (or its last replay) left, and moved to the other side.
+  const pinColumns = (table: string, key: 'products' | 'batches', row: Row, columns: string[]) => {
+    const pinned = expectedOf(key, row)
+    if (!pinned) return
+    for (let i = 0; i < columns.length; i += 40) {
+      const slice = columns.slice(i, i + 40)
+      statements.push(assertion(`EXISTS(SELECT 1 FROM ${table} WHERE id=@rowId AND ${slice.map((c, j) => `"${c}" IS @p${j}`).join(' AND ')})`,
+        { rowId: row.id, ...Object.fromEntries(slice.map((c, j) => [`p${j}`, pinned[c] ?? null])) }))
+    }
+  }
   for (const key of REPLAY_MUTATION_ORDER[direction]) {
     const [table] = REPLAY_TABLES[key]
-    for (const row of after[key]) {
-      const original = (before[key] || []).find(r => r.id === row.id)
-      const created = members.some(m => m.product_created === 1 && m.product_id === (key === 'products' ? row.id : row.product_id))
-      if (key === 'products' && created && direction === 'redo') {
-        // Redoing a create must not resurrect a row that is now a duplicate.
-        // Same folded, cost-free identity as the create-time guard: a redo
-        // blocked on a cost the operator has since corrected, or waved
-        // through because someone retyped the barcode with a leading zero,
-        // are both the same bug in opposite directions.
-        const barcodeMatch = identityBarcodeMatchSql('barcode', row.barcode)
-        statements.push(assertion(`NOT EXISTS(SELECT 1 FROM products WHERE id<>@product AND is_active=1
-          ${barcodeMatch ? `AND ${barcodeMatch.sql}` : ''}
-          AND LOWER(TRIM(REPLACE(REPLACE(REPLACE(name,'  ',' '),'  ',' '),'  ',' ')))=@nameKey)`, {
-          ...(barcodeMatch?.params || {}), product: row.id, nameKey: normalizeProductGroupName(row.name),
-        }))
-      }
-      if (key === 'branchStock' && !created && !members.some(m => m.product_id === row.product_id && m.branch_id === row.branch_id)) continue
-      if (key === 'branchBatchStock' && !members.some(m => m.batch_id === row.batch_id && m.branch_id === row.branch_id)) continue
-      let target: Row | null = direction === 'redo' ? row : original || null
-      // barcode/cost_price_* are included alongside stock_quantity because a
-      // 'receive' line's catalogCostRecomputeStatement (P10-4) re-derives
-      // cost_price_* on the touched product, and a folded create_receive
-      // (P10-5, Sep 16 2026 owner ruling) cleans the survivor's barcode --
-      // both write products INSIDE this same operation, so both have to
-      // come back on undo/redo or the fold/cost-recompute becomes permanent
-      // even after the operator undoes the receipt that caused it. Harmless
-      // no-op for every plain receive line that never touched them.
-      if (key === 'products') target = direction === 'redo'
-        ? { stock_quantity: row.stock_quantity, is_active: row.is_active, updated_at: row.updated_at, barcode: row.barcode, cost_price_usd: row.cost_price_usd, cost_price_khr: row.cost_price_khr }
-        : original ? { stock_quantity: original.stock_quantity, updated_at: original.updated_at, barcode: original.barcode, cost_price_usd: original.cost_price_usd, cost_price_khr: original.cost_price_khr }
-          : { stock_quantity: 0, is_active: 0 }
-      if (key === 'products' && target) {
-        const costSource = direction === 'redo' ? row : original
-        // Catalog recomputation also writes the purchase-price mirror. Restore
-        // it from the same durable snapshot. Older snapshots without a mirror
-        // remain untouched. The derived figure is then re-applied after the
-        // loop (U-cost), so this restore only survives where the formula
-        // yields nothing (no eligible lot).
-        for (const field of ['purchase_price_usd', 'purchase_price_khr']) {
-          if (costSource && Object.prototype.hasOwnProperty.call(costSource, field)) target[field] = costSource[field]
+    if (key === 'products' || key === 'batches') {
+      for (const row of after[key]) {
+        const original = originalOf(key, row)
+        const created = !original
+        if (key === 'products' && created && direction === 'redo') {
+          // Redoing a create must not resurrect a row that is now a duplicate.
+          // Same folded, cost-free identity as the create-time guard: a redo
+          // blocked on a cost the operator has since corrected, or waved
+          // through because someone retyped the barcode with a leading zero,
+          // are both the same bug in opposite directions.
+          const barcodeMatch = identityBarcodeMatchSql('barcode', row.barcode)
+          statements.push(assertion(`NOT EXISTS(SELECT 1 FROM products WHERE id<>@product AND is_active=1
+            ${barcodeMatch ? `AND ${barcodeMatch.sql}` : ''}
+            AND LOWER(TRIM(REPLACE(REPLACE(REPLACE(name,'  ',' '),'  ',' '),'  ',' ')))=@nameKey)`, {
+            ...(barcodeMatch?.params || {}), product: row.id, nameKey: normalizeProductGroupName(row.name),
+          }))
+        }
+        const written = sessionWrittenColumns(key, row, original)
+        pinColumns(table, key, row, written)
+        const sets: string[] = []
+        const params: Row = { rowId: row.id }
+        // Undo restores the session's own columns on rows it found; a row it
+        // created keeps them (identity, retained for its movements) -- only its
+        // attribution is cleared once nothing received remains on it, below.
+        const restore = direction === 'redo' ? row : original
+        if (restore) written.forEach((c, i) => { sets.push(`"${c}"=@v${i}`); params[`v${i}`] = restore[c] ?? null })
+        // Catalog cost columns are derived (re-derived after the loop, U-cost);
+        // put back only what the session itself changed, as before.
+        if (key === 'products' && original) {
+          for (const c of PRODUCT_DERIVED_COST_COLUMNS) {
+            if (Object.prototype.hasOwnProperty.call(row, c) && !sameReplayValue(original[c], row[c])) {
+              sets.push(`"${c}"=@${c}`); params[c] = (direction === 'redo' ? row : original)[c] ?? null
+            }
+          }
+        }
+        if (key === 'products') {
+          const change = sign * (num(row.stock_quantity) - num(original?.stock_quantity))
+          if (Math.abs(change) > 1e-9) { sets.push('stock_quantity=COALESCE(stock_quantity,0)+@change'); params.change = change }
+        } else {
+          const rq = sign * (num(row.received_quantity) - num(original?.received_quantity))
+          const rc = sign * (num(row.received_cost_usd) - num(original?.received_cost_usd))
+          if (Math.abs(rq) > 1e-9) { sets.push('received_quantity=MAX(0,COALESCE(received_quantity,0)+@rq)'); params.rq = rq }
+          if (Math.abs(rc) > 0.00005) { sets.push('received_cost_usd=MAX(0,ROUND(COALESCE(received_cost_usd,0)+@rc,4))'); params.rc = roundMoney4(rc) }
+          // Migration 0154: activate before the redo puts stock back on the lot.
+          if (direction === 'redo' && num(row.is_active) === 1) sets.push('is_active=1')
+        }
+        // The row's stamp comes back too when nothing else wrote the row since
+        // the session (or its last replay) left it -- an exact round trip; a
+        // row a sale or an edit touched in between is stamped now instead, so
+        // an optimistic-concurrency token never moves backwards.
+        params.expStamp = expectedOf(key, row)?.updated_at ?? null
+        params.restoreStamp = (direction === 'redo' ? row : original)?.updated_at ?? null
+        if (sets.length) statements.push({ sql: `UPDATE ${table} SET ${sets.join(',')},
+          updated_at=CASE WHEN updated_at IS @expStamp THEN COALESCE(@restoreStamp,updated_at) ELSE CURRENT_TIMESTAMP END WHERE id=@rowId`, params })
+        if (direction === 'undo' && key === 'products' && created) {
+          // A product the session created goes inactive once it holds nothing;
+          // one that has received other stock since stays (with that stock).
+          statements.push({ sql: 'UPDATE products SET is_active=CASE WHEN COALESCE(stock_quantity,0)<=0 THEN 0 ELSE is_active END WHERE id=@rowId', params: { rowId: row.id } })
+        }
+        if (direction === 'undo' && key === 'batches') {
+          // Retain the lot identity for immutable members/receipts and exact
+          // redo, but once nothing received remains on a lot this session
+          // created, remove the attribution that belonged to it alone: a later
+          // same-date unknown-cost receipt can reuse the row and fill NULL
+          // fields, and retaining A/credit would charge B's paid receipt to A.
+          if (created) {
+            const cleared = BATCH_ATTRIBUTION_COLUMNS.filter(c => Object.prototype.hasOwnProperty.call(row, c))
+            if (cleared.length) statements.push({ sql: `UPDATE product_batches SET ${cleared.map(c => `"${c}"=CASE WHEN COALESCE(received_quantity,0)<=0 THEN NULL ELSE "${c}" END`).join(',')} WHERE id=@rowId`, params: { rowId: row.id } })
+          }
+          if (num(row.is_active) === 1 && num(original?.is_active) !== 1) {
+            statements.push({ sql: `UPDATE product_batches SET is_active=0 WHERE id=@rowId AND COALESCE(received_quantity,0)<=0
+              AND NOT EXISTS(SELECT 1 FROM branch_batch_stock WHERE batch_id=@rowId AND quantity>0)`, params: { rowId: row.id } })
+          }
         }
       }
-      if (key === 'batches' && !target) {
-        // Retain the lot identity for immutable members/receipts and exact
-        // redo, but remove attribution belonging solely to this undone
-        // receipt. A later same-date unknown-cost receipt can reuse the row
-        // and fill NULL fields; retaining A/credit would charge B's paid
-        // receipt to A. The saved after postimage still restores A on redo,
-        // unless reuse has advanced the retained revision guard.
-        target = {
-          is_active: 0, received_quantity: 0, received_cost_usd: 0,
-          supplier_id: null, supplier_name: null, unit_cost_usd: null,
-          payment_status: null, credit_due_date: null, received_branch_id: null,
-          expiry_date: null, notes: null,
-        }
+      continue
+    }
+    const lot = key === 'branchBatchStock'
+    const natural = lot ? 'batch_id=@a AND branch_id=@b' : 'product_id=@a AND branch_id=@b'
+    for (const item of stockChanges.filter(change => change.key === key)) {
+      const keys = { a: lot ? item.row.batch_id : item.row.product_id, b: item.row.branch_id, change: item.change }
+      if (item.change < 0) {
+        statements.push(assertion(`COALESCE((SELECT quantity FROM ${table} WHERE ${natural}),0)+@change>=-0.000000001`, keys))
+        statements.push({ sql: `UPDATE ${table} SET quantity=quantity+@change WHERE ${natural}`, params: keys })
+      } else if (item.change > 0 || !item.original) {
+        statements.push({ sql: `UPDATE ${table} SET quantity=quantity+@change WHERE ${natural}`, params: keys })
+        // A row the session created comes back with its saved id (stable IDs for redo).
+        const columns = Object.keys(item.row)
+        statements.push({ sql: `INSERT INTO ${table}(${columns.map(c => `"${c}"`).join(',')}) SELECT ${columns.map((c, i) => c === 'quantity' ? '@change' : `@v${i}`).join(',')}
+          WHERE NOT EXISTS(SELECT 1 FROM ${table} WHERE ${natural})`, params: { ...keys, ...Object.fromEntries(columns.map((c, i) => [`v${i}`, item.row[c]])) } })
       }
-      if (!target) statements.push({ sql: `DELETE FROM ${table} WHERE id=@rowId`, params: { rowId: row.id } })
-      else if ((key === 'branchStock' || key === 'branchBatchStock') && direction === 'redo' && !original) {
-        const columns = Object.keys(row)
-        statements.push({ sql: `INSERT INTO ${table}(${columns.map(c => `"${c}"`).join(',')}) VALUES(${columns.map((_, i) => `@v${i}`).join(',')})`, params: Object.fromEntries(columns.map((c, i) => [`v${i}`, row[c]])) })
-      } else {
-        const columns = Object.keys(target).filter(c => c !== 'id')
-        statements.push({ sql: `UPDATE ${table} SET ${columns.map((c, i) => `"${c}"=@v${i}`).join(',')} WHERE id=@rowId`, params: { rowId: row.id, ...Object.fromEntries(columns.map((c, i) => [`v${i}`, target![c]])) } })
+      // A row the session created and its undo emptied goes away, as before.
+      if (direction === 'undo' && !item.original) {
+        statements.push({ sql: `DELETE FROM ${table} WHERE ${natural} AND ABS(quantity)<0.000000001`, params: keys })
       }
     }
   }

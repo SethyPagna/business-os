@@ -225,6 +225,31 @@ export async function restoreProductSnapshotFields(snapshots: ProductRecord[] = 
   return results.reduce((sum, result) => sum + (result.status === 'fulfilled' ? result.value : 0), 0)
 }
 
+// REVERT-SET (owner, 6 Oct 2026: "Revert should fully revert, never leaves a
+// stock effect behind"). A History Undo/Redo of a stock action moves exactly
+// the quantities that action recorded -- never "back to the snapshot", which
+// re-added every unit sold in between (snapshot - current) and zeroed every
+// delivery received in between. These are the recorded effects and their
+// exact inverses; the Worker refuses a removal the branch can no longer cover.
+export type RecordedStockRemoval = { productId: number; branchId: number; quantity: number }
+export type RecordedStockTransfer = { productId: number; fromBranchId: number; toBranchId: number; quantity: number }
+
+/** The stock writes that undo (put back) or redo (take again) recorded removals. */
+export function recordedRemovalReplay(removals: readonly RecordedStockRemoval[], direction: 'undo' | 'redo') {
+  return removals
+    .filter((entry) => entry.productId > 0 && entry.branchId > 0 && entry.quantity > 0)
+    .map((entry) => ({ ...entry, type: direction === 'undo' ? 'add' as const : 'remove' as const }))
+}
+
+/** The transfers that undo (move back) or redo (move again) recorded transfers. */
+export function recordedTransferReplay(transfers: readonly RecordedStockTransfer[], direction: 'undo' | 'redo'): RecordedStockTransfer[] {
+  return transfers
+    .filter((entry) => entry.productId > 0 && entry.fromBranchId > 0 && entry.toBranchId > 0 && entry.quantity > 0)
+    .map((entry) => direction === 'undo'
+      ? { productId: entry.productId, fromBranchId: entry.toBranchId, toBranchId: entry.fromBranchId, quantity: entry.quantity }
+      : { ...entry })
+}
+
 export function buildProductClearStockAdjustments(product: ProductRecord = {}): ClearStockAdjustment[] {
   const unitCostUsd = product?.purchase_price_usd || product?.cost_price_usd || 0
   const unitCostKhr = product?.purchase_price_khr || product?.cost_price_khr || 0

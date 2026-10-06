@@ -196,6 +196,9 @@ const productsRoute = loadReal('routes/products.ts', {
   // Stock-in Sessions has its own real-SQL suite; this gallery-only route
   // harness needs the newly imported query kernel to stay inert.
   '../lib/stockInSessionsQuery': { buildStockInSessionListQuery: () => ({ groupedSql: 'SELECT 1', params: {} }), stockInSessionLinesSql: 'SELECT 1' },
+  // REVERT-SET: the session lines' later-Set lookup -- inert here; its real-SQL
+  // checks live in test-stock-lot-adjustment-pure.cjs.
+  '../lib/stockRevertEffect': { laterOpenSets: async () => new Map() },
   // D3 (Part 422, a7): detail-report's sales breakdown -- inert here; the
   // kernel has its own real-SQL coverage via test-sales-day-report-pure.
   '../lib/salesAnalytics': { getProductSalesBreakdown: async () => ({ by_day: [], by_month: [] }) },
