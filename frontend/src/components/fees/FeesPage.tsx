@@ -55,6 +55,7 @@ import { fmtClock24 } from '../../utils/formatters.ts'
 import { columnsFromRows } from '../../utils/exportOptions.ts'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import { toolbarIconButtonClassName } from '../shared/toolbarButtonStyles.ts'
+import { branchHistoryLabel, showsBranchHistoryFilter } from '../../utils/branchScope.ts'
 import {
   RESTORE_WORK_EVENT,
   consumePendingRestore,
@@ -335,7 +336,7 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
       .then((mod) => mod.getBranches())
       .then((rows) => {
         if (cancelled) return
-        setBranches(((rows || []) as FeeBranchOption[]).filter((row) => row.is_active !== false))
+        setBranches((rows || []) as FeeBranchOption[])
       })
       .catch(() => { if (!cancelled) setBranches([]) })
     return () => { cancelled = true }
@@ -651,19 +652,21 @@ export default function FeesPage({ embedded = false }: { embedded?: boolean }) {
     // The date filter is gone from this menu: the Start→End range row above
     // the search bar (stripRange) is the single date scope now and drives the
     // list directly, so a second date control here would only disagree with it.
-    {
+    // A branch filter over history: worth showing while two or more branches
+    // exist at all (the retired one included, labelled), gone with just one.
+    ...(showsBranchHistoryFilter(branches) ? [{
       id: 'branch',
       label: tr('branch', 'Branch'),
       options: [
         { id: '', label: tr('all_branches', 'All Branches'), active: branchFilter === '', onClick: () => setBranchFilter('') },
         ...branches.map((branch): FilterOption => ({
           id: String(branch.id),
-          label: branch.name || String(branch.id),
+          label: branchHistoryLabel({ name: branch.name || String(branch.id), is_active: branch.is_active }, tr('inactive', 'Inactive')),
           active: branchFilter === String(branch.id),
           onClick: () => setBranchFilter(String(branch.id)),
         })),
       ],
-    },
+    }] : []),
   ]), [tr, t, typeFilter, branchFilter, branches])
 
   return (
