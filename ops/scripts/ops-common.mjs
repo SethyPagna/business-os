@@ -275,7 +275,9 @@ export function sleep(ms) {
 export function writeEncryptedReport(outDir, baseName, payload, meta) {
   if (!/^[a-z0-9][a-z0-9.-]{0,120}$/.test(baseName)) throw new OpsError('bad-report-name', 'Report names are plain kebab-case.')
   const pem = fs.readFileSync(PUBLIC_KEY_PATH, 'utf8')
-  const envelope = encryptEnvelope(JSON.stringify(payload, null, 1), pem, meta)
+  // A string or Buffer payload (a JSONL chunk) is encrypted byte for byte; anything else is written as JSON.
+  const plaintext = typeof payload === 'string' || Buffer.isBuffer(payload) ? payload : JSON.stringify(payload, null, 1)
+  const envelope = encryptEnvelope(plaintext, pem, meta)
   fs.mkdirSync(outDir, { recursive: true })
   const file = path.join(outDir, `${baseName}.enc.json`)
   fs.writeFileSync(file, `${JSON.stringify(envelope)}\n`)

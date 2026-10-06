@@ -219,3 +219,25 @@ db.prepare('SELECT COUNT(*) AS c FROM products').get()
 
 Recompute and diff `SHA256SUMS` to confirm the on-disk files were not altered
 after capture.
+
+## `load-d1-physical-export.mjs` — rebuild a local database from the Ops task `d1-physical-export`
+
+The snapshot tool above needs the owner's terminal and pages with `OFFSET`. The GitHub Ops task
+`d1-physical-export` (`.github/workflows/ops.yml`, same Production approval and encryption as `d1-export`)
+reads EVERY physical table (`d1_migrations` included; FTS5 virtual tables, their shadow tables, `sqlite_*` and
+`_cf_*` left out) by rowid keyset, one guarded SELECT per page, and uploads encrypted per-table JSONL chunks plus an
+encrypted manifest (kept ONE day). Nothing but verdict, file and byte counts reaches the public log.
+
+```
+gh workflow run ops.yml --ref <branch> -f task=d1-physical-export -f confirm=d1-physical-export
+gh run download <run-id> -n ops-d1-physical-export -D <input-folder>
+node ops/scripts/latest-data/load-d1-physical-export.mjs --input <input-folder> --private-key <private-key-file> --out <database.sqlite>
+```
+
+`--schema export` (default) rebuilds production's own schema from the DDL in the manifest, then
+`wrangler d1 migrations apply --local` applies only the migrations production has not seen; `--schema migrations
+--migrations cloudflare/migrations` builds the schema from the migration files and loads the rows into it. The
+output must be outside the repository (it holds personal data). The loader verifies every chunk (decrypt, run,
+sequence, sha256, row count), then after the load each table's `COUNT(*)` and a re-hash of the table in rowid order
+against the manifest. Tests: `cloudflare/scripts/test-ops-d1-physical-export-pure.cjs` and
+`test-ops-d1-physical-export-scale-workerd.cjs` (`CUTOVER_SCALE=1` for the production-size numbers).

@@ -240,7 +240,7 @@ function strings(node, at = [], out = []) {
 
 // ------------------------------------------------------ what ops.yml must be
 
-const TASKS = ['d1-export', 'r2-apac-copy', 'secret-names', 'settings-upsert']
+const TASKS = ['d1-export', 'r2-apac-copy', 'secret-names', 'settings-upsert', 'd1-physical-export']
 const OUT_DIR = '${{ runner.temp }}/ops-out'
 const UPLOAD_PATH = '${{ runner.temp }}/ops-out/*.enc.json'
 const AFTER_CHECKOUT = "always() && steps.checkout.outcome == 'success'"
@@ -299,15 +299,24 @@ const TASK_STEPS = {
     scriptStep('node ops/scripts/ops-settings-upsert.mjs', { OPS_APPLY: '${{ inputs.apply }}' }),
     { kind: 'upload' },
   ],
+  // Personal data in the artifact: the only job whose upload is kept one day, not three. The export step stops
+  // 30 minutes before the job (stepTimeout) so the upload still runs after a timeout.
+  'd1-physical-export': [
+    ...PRELUDE,
+    scriptStep('node ops/scripts/ops-d1-physical-export.mjs', {}, { stepTimeout: true }),
+    { kind: 'upload', retention: '1' },
+  ],
 }
 
 // The scripts the workflow runs, and everything they import.
-const ENTRY_SCRIPTS = ['ops/scripts/ops-d1-export.mjs', 'ops/scripts/ops-r2.mjs', 'ops/scripts/ops-secret-names.mjs', 'ops/scripts/ops-settings-upsert.mjs']
+const ENTRY_SCRIPTS = ['ops/scripts/ops-d1-export.mjs', 'ops/scripts/ops-r2.mjs', 'ops/scripts/ops-secret-names.mjs', 'ops/scripts/ops-settings-upsert.mjs', 'ops/scripts/ops-d1-physical-export.mjs']
 const RUNNER_SCRIPTS = [
   'ops/scripts/ops-common.mjs',
   'ops/scripts/ops-crypto.mjs',
   'ops/scripts/ops-sql-guard.mjs',
   'ops/scripts/ops-d1-export.mjs',
+  'ops/scripts/ops-d1-physical-export.mjs',
+  'ops/scripts/ops-d1-physical-lib.mjs',
   'ops/scripts/ops-r2.mjs',
   'ops/scripts/ops-r2-lib.mjs',
   'ops/scripts/ops-secret-names.mjs',
@@ -353,9 +362,9 @@ function checkStep(task, job, step, spec, where) {
     assert.deepStrictEqual(step.with, {
       name: `ops-${task}`,
       path: UPLOAD_PATH,
-      'retention-days': '3',
+      'retention-days': spec.retention || '3',
       'if-no-files-found': 'ignore',
-    }, `${where}: only the encrypted files, kept 3 days`)
+    }, `${where}: only the encrypted files, kept ${spec.retention || '3'} day(s)`)
   } else {
     throw new Error(`unknown step kind ${spec.kind}`)
   }
@@ -759,6 +768,7 @@ async function main() {
       'ops/scripts/ops-common.mjs: value',
       'ops/scripts/ops-d1-export.mjs: codesText(errorCodes)',
       'ops/scripts/ops-d1-export.mjs: name',
+      'ops/scripts/ops-d1-physical-export.mjs: codesText(errorCodes)',
     ], 'publicToken() only for the query FILE name and Cloudflare error-code numbers')
     // secret-names prints counts only: no secret's name, not even an expected one.
     const sn = code['ops/scripts/ops-secret-names.mjs']
@@ -809,6 +819,7 @@ async function main() {
     assert.strictEqual(count(code['ops/scripts/ops-common.mjs'], /export function runWrangler\(args, /g), 1)
     assert.deepStrictEqual(calls.sort(), [
       'ops/scripts/ops-d1-export.mjs: wranglerArgs(query.sql)',
+      'ops/scripts/ops-d1-physical-export.mjs: wranglerArgs(canonical)',
       "ops/scripts/ops-r2.mjs: ['deploy', ...config]",
       "ops/scripts/ops-r2.mjs: ['r2', 'bucket', 'create', DEST_BUCKET, '--location', DEST_LOCATION]",
       "ops/scripts/ops-r2.mjs: ['secret', 'put', 'COPY_TOKEN', ...config]",
