@@ -423,6 +423,9 @@ export async function applySaleBulkStatus(env: Env, user: SessionUser, raw: Row)
                 fee_date: stamp.slice(0, 10),
                 sale_id: expected.id,
                 branch_id: sale.branch_id ?? null,
+                // The fee's own label, written once (fees.branch_name, 0236). The sale row's
+                // branch is active here (the selling guard below), so its name is the current one.
+                branch_name: sale.branch_name ?? null,
                 delivery_contact_id: null,
                 notes: String(itemCancel.fee_note || '').trim() || `Fee lost to cancellation (${cancelReason})`,
                 created_by: user.id,
