@@ -707,6 +707,9 @@ function manualChunks(id: string): string | undefined {
     if (normalized.endsWith('/src/api/contactReadTransport.ts')) return 'contact-read-api'
     if (normalized.endsWith('/src/api/contactWriteTransport.ts')) return 'contact-write-api'
     if (normalized.endsWith('/src/api/contactsTransport.ts')) return 'contacts-api'
+    // Contacts > Members (G38): admin-only. Left to the '/src/api/' catch-all it would ride
+    // app-api-methods, which the public storefront loads at boot (catalog closure budget).
+    if (normalized.endsWith('/src/api/portalMembersTransport.ts')) return 'portal-members-api'
     if (normalized.endsWith('/src/api/auditLogTransport.ts')) return 'audit-log-api'
     if (
       normalized.endsWith('/src/api/fileTransport.ts')

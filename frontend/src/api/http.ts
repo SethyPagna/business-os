@@ -449,6 +449,11 @@ function createApiError(status: number, parsed: LooseRecord | null, text: string
   // sentence keeps them -- see returns/helpers/returnRefusalError.ts.
   error.params = parsed?.params && typeof parsed.params === 'object' && !Array.isArray(parsed.params) ? parsed.params : null
   error.current = parsed?.current || null
+  // Contacts > Members (routes/portalMembers.ts): a stale-version or status
+  // refusal carries the member as it is NOW, so the dialog can refresh from it;
+  // a taken customer carries the member that holds it, so staff can choose Move.
+  error.member = parsed?.member && typeof parsed.member === 'object' && !Array.isArray(parsed.member) ? parsed.member : null
+  error.holder = parsed?.holder && typeof parsed.holder === 'object' && !Array.isArray(parsed.holder) ? parsed.holder : null
   // Older Workers only returned the generic `current` record for a settings
   // conflict. Prefer the newer, intentionally field-scoped payload, but
   // retain that compatibility fallback so an in-flight older deployment
