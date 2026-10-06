@@ -31,6 +31,14 @@
 //     the header and its offline fallback can never show two different credits.
 //   * The /stats prose must not contradict the /stats SQL.
 //
+// OWNER RULING 6 Oct 2026 (final): the CREDIT a person reads is the BALANCE
+// DUE -- "a $10 Not Paid sale with $3 paid shows Credit $7" -- read by the one
+// owed helper (saleStatusResolution recordedSaleOutstandingUsd) on every
+// surface. The credit sale here is $190 with $40 paid and a $30 return that
+// lowered the debt, so it OWES 120. Its sale value on the revenue basis (153,
+// pending_revenue_usd, the pending-profit footing) and its total (190) are the
+// controls: a surface printing either fails the parity below.
+//
 // Runs the SHIPPED code: salesAnalytics.ts and frontend/src/utils/
 // statsFormulas.ts are transpiled and executed, and the header SELECT is
 // extracted from routes/sales.ts with its ${...} holes intact and evaluated
@@ -67,21 +75,22 @@ const kernelDependencies = [
   // salesAnalytics.ts's reportTableColumns now delegates to this shared,
   // per-isolate-memoized PRAGMA table_info() probe (schemaProbe.ts).
   'schemaProbe.ts',
+  // A credit sale's balance due: the one owed helper and its only dependency.
+  'saleStatusResolution.ts', 'financialPrecision.ts',
 ]
 for (const file of kernelDependencies) {
   fs.writeFileSync(path.join(tmpDir, file), fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', file), 'utf8'))
 }
-fs.writeFileSync(path.join(tmpDir, 'statsFormulas.ts'), '// @ts-nocheck\n'
-  + fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 'src', 'utils', 'statsFormulas.ts'), 'utf8'))
 execSync([
   `node ${tscBin} --module commonjs --target es2020 --outDir ${tmpDir}`,
   path.join(tmpDir, 'salesAnalytics.ts'),
   path.join(tmpDir, 'businessDateWindow.ts'),
   ...kernelDependencies.map((file) => path.join(tmpDir, file)),
-  path.join(tmpDir, 'statsFormulas.ts'),
 ].join(' '), { cwd: tmpDir, stdio: 'inherit' })
 const lib = require(path.join(tmpDir, 'salesAnalytics.js'))
-const front = require(path.join(tmpDir, 'statsFormulas.js'))
+// The shipped frontend module, loaded as itself (Node 24 strips the types): its
+// own './saleStatusResolution.ts' import is the frontend mirror, not a copy.
+const front = require(path.join(__dirname, '..', '..', 'frontend', 'src', 'utils', 'statsFormulas.ts'))
 
 // ---- 2. One mixed window with exactly one credit sale in it -----------------
 const db = new Database(':memory:')
@@ -94,7 +103,7 @@ db.exec(`
     delivery_actual_cost_usd REAL, delivery_contact_id INTEGER, delivery_contact_name TEXT,
     branch_id INTEGER, branch_name TEXT, cashier_id INTEGER, cashier_name TEXT,
     customer_id INTEGER, customer_name TEXT, customer_phone TEXT, payment_method TEXT,
-    receipt_number TEXT, amount_paid_usd REAL, source_return_id INTEGER
+    receipt_number TEXT, amount_paid_usd REAL, amount_paid_khr REAL, exchange_rate REAL, source_return_id INTEGER
   );
   CREATE TABLE sale_items (
     id INTEGER PRIMARY KEY, sale_id INTEGER, quantity REAL, cost_price_usd REAL,
@@ -103,7 +112,7 @@ db.exec(`
   );
   CREATE TABLE returns (
     id INTEGER PRIMARY KEY, sale_id INTEGER, total_refund_usd REAL, status TEXT,
-    return_scope TEXT, created_at TEXT, branch_id INTEGER
+    return_scope TEXT, created_at TEXT, branch_id INTEGER, owed_reduction_usd REAL DEFAULT 0
   );
   CREATE TABLE return_items (
     id INTEGER PRIMARY KEY, return_id INTEGER, quantity REAL, cost_price_usd REAL,
@@ -121,13 +130,16 @@ db.exec(`
 const AT = (day) => `2026-08-${String(day).padStart(2, '0')} 05:00:00` // local 12:00 (UTC+7)
 const insSale = db.prepare(`INSERT INTO sales
   (id, created_at, sale_status, subtotal_usd, discount_usd, membership_discount_usd, tax_usd, total_usd,
-   delivery_fee_usd, delivery_fee_paid_by, is_delivery, delivery_actual_cost_usd, branch_id, customer_id, payment_method, receipt_number)
+   delivery_fee_usd, delivery_fee_paid_by, is_delivery, delivery_actual_cost_usd, branch_id, customer_id, payment_method, receipt_number,
+   amount_paid_usd, amount_paid_khr, exchange_rate)
   VALUES (@id,@created_at,@sale_status,@subtotal_usd,@discount_usd,@membership_discount_usd,@tax_usd,@total_usd,
-   @delivery_fee_usd,@delivery_fee_paid_by,@is_delivery,@delivery_actual_cost_usd,@branch_id,@customer_id,@payment_method,@receipt_number)`)
+   @delivery_fee_usd,@delivery_fee_paid_by,@is_delivery,@delivery_actual_cost_usd,@branch_id,@customer_id,@payment_method,@receipt_number,
+   @amount_paid_usd,@amount_paid_khr,@exchange_rate)`)
 const sale = (o) => insSale.run({
   delivery_fee_usd: 0, delivery_fee_paid_by: 'customer', is_delivery: 0,
   delivery_actual_cost_usd: null, branch_id: 1, customer_id: null,
-  payment_method: 'cash', receipt_number: String(o.id), ...o,
+  payment_method: 'cash', receipt_number: String(o.id), amount_paid_khr: 0, exchange_rate: 4000,
+  amount_paid_usd: o.total_usd, ...o,
 })
 
 // Saved payable includes the customer-paid delivery fee: 100 - 10 - 5 + 8 + 6 = 99.
@@ -135,7 +147,8 @@ sale({ id: 1, created_at: AT(10), sale_status: 'completed', subtotal_usd: 100, d
 sale({ id: 2, created_at: AT(11), sale_status: '',           subtotal_usd: 50,  discount_usd: 0,  membership_discount_usd: 0,  tax_usd: 4, total_usd: 54 })
 sale({ id: 3, created_at: AT(12), sale_status: null,         subtotal_usd: 40,  discount_usd: 5,  membership_discount_usd: 0,  tax_usd: 0, total_usd: 35, delivery_fee_usd: 3, delivery_fee_paid_by: 'store', is_delivery: 1 })
 // THE CREDIT SALE. Net 200-20 = 180; goods worth 50 at cost already gone.
-sale({ id: 4, created_at: AT(13), sale_status: 'awaiting_payment', subtotal_usd: 200, discount_usd: 20, membership_discount_usd: 0, tax_usd: 10, total_usd: 190 })
+// $40 of its $190 paid; return 6 below lowered the debt by $30: it OWES 120.
+sale({ id: 4, created_at: AT(13), sale_status: 'awaiting_payment', subtotal_usd: 200, discount_usd: 20, membership_discount_usd: 0, tax_usd: 10, total_usd: 190, amount_paid_usd: 40 })
 sale({ id: 5, created_at: AT(14), sale_status: 'cancelled',  subtotal_usd: 999, discount_usd: 0,  membership_discount_usd: 0,  tax_usd: 50, total_usd: 1049 })
 sale({ id: 6, created_at: AT(15), sale_status: 'completed',  subtotal_usd: 80,  discount_usd: 0,  membership_discount_usd: 20, tax_usd: 0, total_usd: 60 })
 
@@ -154,6 +167,8 @@ insRet.run(3, 6, 5,  'completed', 'customer', AT(16), 1)
 insRet.run(4, 2, 100, 'completed', 'supplier', AT(16), 1)
 insRet.run(5, 1, 999, 'cancelled', 'customer', AT(16), 1)
 insRet.run(6, 4, 30, 'completed', 'customer', AT(16), 1)
+// The $30 back on the credit sale lowered its debt (since 0234), no cash out.
+db.prepare('UPDATE returns SET owed_reduction_usd = 30 WHERE id = 6').run()
 const insRetItem = db.prepare('INSERT INTO return_items (id, return_id, quantity, cost_price_usd, return_to_stock, stock_action) VALUES (?,?,?,?,?,?)')
 insRetItem.run(1, 1, 1, 12, 1, 'restock')
 insRetItem.run(2, 2, 1, 9, 1, 'damaged')
@@ -167,6 +182,11 @@ insRetItem.run(4, 4, 1, 40, 1, 'restock')
 //   profit  = 351 - 98 + (6-4)               = 255
 //   credit  = 180 - 27 net refund            = 153 (net recognized subset)
 const IN = { revenue: 351, cogs: 98, profit: 255, credit: 153 }
+// THE CREDIT A PERSON READS (owner ruling 6 Oct 2026): what S4 still owes.
+//   owed    = 190 total - 30 debt lowered - 40 paid = 120
+// Controls it must not be: the revenue-basis value (153) and the total (190).
+const OWED = 120
+const OWED_CONTROLS = [IN.credit, 190]
 // CREDIT OUT (the pre-Sep-6 rule, what must NOT ship): drop S4 from every sum.
 //   revenue = (85+50+35+60) - (17+15) = 230 - 32 = 198
 //   COGS    = (30+10+8+12) - 12       = 48
@@ -182,6 +202,8 @@ check('the two implementations really disagree on this fixture (351/98/255 vs 19
   IN.revenue !== OUT.revenue && IN.cogs !== OUT.cogs && IN.profit !== OUT.profit)
 check('the whole disagreement is exactly the one credit sale',
   IN.revenue - OUT.revenue === 180 - 27 && IN.cogs - OUT.cogs === 50)
+check('the balance due really differs from the sale value and the total on this fixture (120 vs 153 / 190)',
+  OWED_CONTROLS.every((control) => control !== OWED))
 
 ;(async () => {
 const filters = { startDate: '2026-08-01', endDate: '2026-08-31', branchId: null }
@@ -204,6 +226,10 @@ check('the credit is a SUBSET of revenue, not a complement (revenue > credit, an
   kernel.revenue_usd > kernel.pending_revenue_usd && kernel.revenue_usd !== IN.revenue + IN.credit)
 check('the net credit partitions recognized revenue without replacing its inclusive headline',
   kernel.revenue_usd - kernel.pending_revenue_usd === OUT.revenue)
+check(`kernel pending_owed_usd is the BALANCE DUE (${OWED}), not the sale value (${IN.credit}) or the total (190)`,
+  kernel.pending_owed_usd === OWED && !OWED_CONTROLS.includes(kernel.pending_owed_usd))
+check('the balance due leaves revenue exactly where it was (the one revenue definition)',
+  kernel.revenue_usd === IN.revenue)
 check('collected cash is the ONE figure the credit stays out of',
   kernel.collected_total_usd === 208 && kernel.collected_total_usd < kernel.revenue_usd + 12 + 6)
 
@@ -219,7 +245,7 @@ const statsSnapshot = await lib.readSalesReportSnapshot({ __db: db }, {}, false,
 }))
 const statsTotals = lib.salesTotalsFromSnapshot(statsSnapshot)
 const statsRevenue = statsTotals.revenue_usd
-const statsCredit = statsTotals.pending_revenue_usd
+const statsCredit = statsTotals.pending_owed_usd
 const statsBlock = salesTs.slice(salesTs.indexOf("app.get('/stats'"), salesTs.indexOf("app.get('/stats-strip'"))
 
 check(`/stats revenue_usd includes the credit sale (${statsRevenue} == ${IN.revenue}, not ${OUT.revenue})`,
@@ -232,17 +258,23 @@ check('/stats delegates money to the exact snapshot/reducer without a local aggr
   && statsBlock.includes('revenue_count: snapshot.sales.length')
   && statsBlock.includes('revenue_usd: totals.revenue_usd')
   && statsBlock.includes('pending_revenue_usd: totals.pending_revenue_usd')
+  && statsBlock.includes('pending_owed_usd: totals.pending_owed_usd')
   && !/db\.prepare\([\s\S]*?(revenue_usd|pending_revenue_usd)/.test(statsBlock))
-check(`PARITY: the header's credit (${statsCredit}) == the kernel's credit (${kernel.pending_revenue_usd})`,
-  statsCredit === kernel.pending_revenue_usd)
+check(`PARITY: the header's credit (${statsCredit}) == the kernel's balance due (${kernel.pending_owed_usd})`,
+  statsCredit === kernel.pending_owed_usd && statsCredit === OWED)
 check(`PARITY: the header's revenue (${statsRevenue}) == the kernel's revenue (${kernel.revenue_usd})`,
   statsRevenue === kernel.revenue_usd)
 
 // ---- 7. The frontend's own fallback shows the SAME credit -------------------
 // The Sales header prefers /stats and falls back to reducing over the rows it
 // already has. Both paths must produce one credit, or the same page shows two.
+// The list row carries return_owed_reduction_usd exactly as GET /api/sales
+// attaches it (returnRefundSplit.ts returnOwedReductionSql: active customer returns).
 const listRows = db.prepare(`
   SELECT s.*, COALESCE(rf.refund_usd, 0) AS refund_usd,
+    (SELECT COALESCE(SUM(owed_reduction_usd), 0) FROM returns
+      WHERE returns.sale_id=s.id AND COALESCE(returns.status,'completed')<>'cancelled'
+        AND COALESCE(returns.return_scope,'customer')='customer') AS return_owed_reduction_usd,
     COALESCE(s.total_usd, 0) - COALESCE(rf.refund_usd, 0) AS net_total_usd
   FROM sales s ${lib.CUSTOMER_REFUND_JOIN}s.id
   WHERE date(s.created_at, '+7 hours') BETWEEN '2026-08-01' AND '2026-08-31'
@@ -250,12 +282,21 @@ const listRows = db.prepare(`
 check('the fallback sees every row of the window (6)', listRows.length === 6)
 check('isCreditSale picks exactly the awaiting_payment row',
   listRows.filter(front.isCreditSale).map((r) => r.id).join(',') === '4')
-check(`THREE-WAY PARITY: frontend saleListCreditUsd (${front.saleListCreditUsd(listRows)}) == header (${statsCredit}) == kernel (${kernel.pending_revenue_usd})`,
-  front.saleListCreditUsd(listRows) === statsCredit && statsCredit === kernel.pending_revenue_usd)
+check(`THREE-WAY PARITY: frontend saleListCreditUsd (${front.saleListCreditUsd(listRows)}) == header (${statsCredit}) == kernel (${kernel.pending_owed_usd}) == ${OWED}`,
+  front.saleListCreditUsd(listRows) === statsCredit && statsCredit === kernel.pending_owed_usd && statsCredit === OWED)
+// The control the ruling retired: the old fallback summed each credit row's
+// net sales less its net refund -- the sale value. On this fixture it says
+// 153, so a fallback that drifted back to it fails the parity above.
+const saleValueControl = listRows.filter(front.isCreditSale)
+  .reduce((sum, row) => sum + front.saleNetSalesUsd(row) - front.saleNetRefundUsd(row), 0)
+check(`CONTROL: the retired sale-value reading says ${saleValueControl}, which the shipped credit is not`,
+  saleValueControl === IN.credit && front.saleListCreditUsd(listRows) !== saleValueControl)
 check(`the frontend fallback's revenue includes the credit too (${front.saleListRevenueUsd(listRows)} == ${IN.revenue})`,
   front.saleListRevenueUsd(listRows) === IN.revenue)
-check('the frontend never produces a negative credit, however the row is shaped',
-  front.saleListCreditUsd([{ sale_status: 'awaiting_payment', subtotal_usd: 10, discount_usd: 99, membership_discount_usd: 0 }]) === 0)
+check('the frontend never produces a negative credit: an over-paid credit row owes 0',
+  front.saleListCreditUsd([{ sale_status: 'awaiting_payment', total_usd: 10, amount_paid_usd: 25, amount_paid_khr: 0, exchange_rate: 4000 }]) === 0)
+check('a credit row whose money cannot be read makes the fallback unavailable, never a figure that left it out',
+  front.saleListCreditUsd([...listRows, { sale_status: 'awaiting_payment', total_usd: 'x', exchange_rate: 4000 }]) === null)
 
 // ---- 8. The prose must not contradict the SQL ------------------------------
 // The stale comment is the actual failure mode here: a reader who trusts
@@ -271,5 +312,5 @@ check('the /stats handler delegates without maintaining another revenue/refund f
 check('the sweep can see the sentence it forbids (positive control)',
   /never folded into revenue/i.test('reported separately as pending, never folded into revenue.'))
 
-console.log(`\nALL ${passed} CHECKS PASSED -- credit is inside revenue (${IN.revenue}), COGS (${IN.cogs}) and profit (${IN.profit}), and is reported once, positive, as ${IN.credit}`)
+console.log(`\nALL ${passed} CHECKS PASSED -- credit is inside revenue (${IN.revenue}), COGS (${IN.cogs}) and profit (${IN.profit}), and is reported once, positive, as what it still owes (${OWED})`)
 })().catch((e) => { console.error(e); process.exit(1) })

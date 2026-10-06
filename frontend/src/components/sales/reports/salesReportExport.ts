@@ -4,7 +4,7 @@ import type { ReportColumn } from './ReportTable.tsx'
 import type { TypedWorksheetInput } from '../../../utils/xlsxExport.ts'
 import { fmtDateOnly, fmtDateTime24 } from '../../../utils/formatters.ts'
 
-const MONEY = ['gross_sales_usd', 'store_discount_usd', 'membership_discount_usd', 'tax_usd', 'delivery_usd', 'refund_usd', 'net_revenue_usd', 'pending_revenue_usd', 'collected_total_usd'] as const
+const MONEY = ['gross_sales_usd', 'store_discount_usd', 'membership_discount_usd', 'tax_usd', 'delivery_usd', 'refund_usd', 'net_revenue_usd', 'pending_owed_usd', 'collected_total_usd'] as const
 const TEXT = ['receipt_number', 'date', 'business_date', 'branch', 'cashier', 'customer', 'customer_phone', 'payment_method', 'status'] as const
 const COST = ['cost_usd', 'cost_before_floor_usd', 'gross_profit_usd', 'cost_missing_snapshot_lines'] as const
 const QUERY_KEYS = ['startDate', 'endDate', 'branchId', 'createdFrom', 'createdTo', 'startTime', 'endTime', 'status', 'paymentMethod', 'q']

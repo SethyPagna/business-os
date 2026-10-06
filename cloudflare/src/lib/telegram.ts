@@ -524,7 +524,7 @@ async function dayStats(env: Env, date: string, salesTotals: Promise<SalesTotals
       // above, printed on its own line as a POSITIVE "Credit" figure and
       // never subtracted from anything (the owner: "just use credit ...
       // instead of $-n ... just $n").
-      creditUsd: totals.pending_revenue_usd,
+      creditUsd: totals.pending_owed_usd,
       // The courier half of the delivery cost, off the SAME query the shift
       // report's delivery cost reads (courierPayoutsWhere), over this day's
       // sales -- not the kernel's raw delivery_actual_cost_usd, which counts
@@ -1511,8 +1511,9 @@ async function shiftFigures(env: Env, shift: ShiftReportSession, nowMs: number, 
     refundUsd: totals.refund_usd,
     // Not Paid, on the same net basis. Included in business revenue/profit,
     // but never in collected cash. Always printed as a positive "Credit"
-    // figure -- see the owner's ruling in the header comment.
-    creditUsd: totals.pending_revenue_usd,
+    // figure -- see the owner's ruling in the header comment. Owner ruling
+    // 6 Oct 2026: the balance due, not the sale value.
+    creditUsd: totals.pending_owed_usd,
     // The owner's two discount rows, straight off the kernel: the per-item
     // cuts, and the store + membership cuts taken on the receipt.
     itemDiscountUsd: totals.item_discount_usd,
@@ -1925,7 +1926,7 @@ export async function shiftOverviewFigures(
   return {
     revenueUsd: totals.revenue_usd, profitUsd: totals.profit_usd, grossSalesUsd: totals.gross_sales_usd,
     itemDiscountUsd: totals.item_discount_usd, invoiceDiscountUsd: totals.discount_usd,
-    deliveryFeeUsd: totals.delivery_usd, creditUsd: totals.pending_revenue_usd, refundUsd: totals.refund_usd,
+    deliveryFeeUsd: totals.delivery_usd, creditUsd: totals.pending_owed_usd, refundUsd: totals.refund_usd,
     invoices: totals.tx_count, cancelled: totals.cancelled_tx_count,
     paymentMethods: foldRows(
       payments.map((row) => ({ method: row.label || row.key || 'Unknown', count: row.tx_count, usd: row.revenue_usd })),

@@ -40,7 +40,9 @@ const tsPath = path.join(tmpDir, 'salesAnalytics.ts')
 fs.writeFileSync(tsPath, stripped)
 const winPath = path.join(tmpDir, 'businessDateWindow.ts')
 fs.writeFileSync(winPath, fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'businessDateWindow.ts'), 'utf8'))
-const analyticsDeps = ['moneyPrecision.ts', 'reportMoneyPrecision.ts', 'customerReturnEntitlement.ts', 'refundMoneyPrecision.ts', 'saleItemPricing.ts', 'saleMoneyPrecision.ts', 'promotionRules.ts', 'removalLosses.ts', 'schemaProbe.ts']
+const analyticsDeps = ['moneyPrecision.ts', 'reportMoneyPrecision.ts', 'customerReturnEntitlement.ts', 'refundMoneyPrecision.ts', 'saleItemPricing.ts', 'saleMoneyPrecision.ts', 'promotionRules.ts', 'removalLosses.ts', 'schemaProbe.ts',
+  // salesAnalytics reads a credit sale's balance due through the one owed helper.
+  'saleStatusResolution.ts', 'financialPrecision.ts']
 for (const file of analyticsDeps) fs.writeFileSync(path.join(tmpDir, file), fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', file), 'utf8'))
 const tscBin = path.join(__dirname, '..', 'node_modules', 'typescript', 'bin', 'tsc')
 execSync(`node ${tscBin} --module commonjs --target es2020 --outDir ${tmpDir} ${tsPath} ${winPath} ${analyticsDeps.join(' ')}`, {
@@ -309,10 +311,9 @@ check(`CONVERGENCE: the shared snapshot's refund is apportioned too -- the charg
 // mirrors the kernel's fragments, and this runs the SHIPPED frontend module
 // over the rows GET /api/sales would have returned for the same window.
 const frontendSrc = path.join(__dirname, '..', '..', 'frontend', 'src', 'utils', 'statsFormulas.ts')
-const frontendTs = path.join(tmpDir, 'statsFormulas.ts')
-fs.writeFileSync(frontendTs, '// @ts-nocheck\n' + fs.readFileSync(frontendSrc, 'utf8'))
-execSync(`node ${tscBin} --module commonjs --target es2020 --outDir ${tmpDir} ${frontendTs}`, { cwd: tmpDir, stdio: 'inherit' })
-const front = require(path.join(tmpDir, 'statsFormulas.js'))
+// Loaded as itself (Node 24 strips the types), so its own
+// './saleStatusResolution.ts' import is the frontend mirror the page ships.
+const front = require(frontendSrc)
 
 // Exactly the columns routes/sales.ts's list handler returns: the sale row
 // itself plus the refund_usd it attaches from non-cancelled CUSTOMER returns.

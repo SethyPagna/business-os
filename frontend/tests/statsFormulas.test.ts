@@ -19,7 +19,7 @@ import { dirname, join } from 'node:path'
 import ts from 'typescript'
 import {
   revenueTerms, profitTerms, equationResidual, equationCloses, buildEquation,
-  isRevenueCountedSale, saleListRevenueUsd, isCreditSale, saleListCreditUsd,
+  isRevenueCountedSale, saleListRevenueUsd, isCreditSale, saleListCreditUsd, saleNetSalesUsd, saleNetRefundUsd,
   type FormulaTerm, type StatsFormulaTotals,
 } from '../src/utils/statsFormulas.ts'
 
@@ -253,7 +253,10 @@ const LIST_ROWS: Array<Record<string, unknown>> = [
   // NULL status means completed -> 35
   { id: 3, sale_status: null, subtotal_usd: 40, discount_usd: 5, membership_discount_usd: 0, tax_usd: 0, total_usd: 35, refund_usd: 0, net_total_usd: 35 },
   // awaiting_payment: INSIDE revenue. net 180, refund 30 -> 30 * 180/200 = 27 -> 153
-  { id: 4, sale_status: 'awaiting_payment', subtotal_usd: 200, discount_usd: 20, membership_discount_usd: 0, tax_usd: 10, total_usd: 190, refund_usd: 30, net_total_usd: 160 },
+  // (the sale value). $40 paid and the $30 back lowered the debt: it OWES
+  // 190 - 30 - 40 = 120, the Credit (owner ruling 6 Oct 2026).
+  { id: 4, sale_status: 'awaiting_payment', subtotal_usd: 200, discount_usd: 20, membership_discount_usd: 0, tax_usd: 10, total_usd: 190, refund_usd: 30, net_total_usd: 160,
+    amount_paid_usd: 40, amount_paid_khr: 0, exchange_rate: 4000, return_owed_reduction_usd: 30 },
   // cancelled: 0 on both sides
   { id: 5, sale_status: 'cancelled', subtotal_usd: 999, discount_usd: 0, membership_discount_usd: 0, tax_usd: 50, total_usd: 1049, refund_usd: 0, net_total_usd: 1049 },
   // two customer returns summing to 20 on a sale that netted 60 -> 15 -> 45
@@ -285,35 +288,53 @@ test('footer count: only cancelled is excluded, matching /stats revenue_count', 
   assert.equal(LIST_ROWS.filter(isRevenueCountedSale).length, 5)
 })
 
-test('Credit is a positive awaiting-payment subset of recognized revenue', () => {
+// Owner ruling 6 Oct 2026 (final): Credit is the BALANCE DUE, read by the one
+// owed helper (saleStatusResolution recordedSaleOutstandingUsd).
+const money = (o: Record<string, unknown>) => ({ amount_paid_usd: 0, amount_paid_khr: 0, exchange_rate: 4000, ...o })
+
+test('Credit is what the awaiting-payment rows still owe, not their sale value', () => {
   assert.deepEqual(LIST_ROWS.filter(isCreditSale).map((sale) => sale.id), [4])
-  assert.equal(saleListCreditUsd(LIST_ROWS), 153, 'credit uses the same net recognized basis after the capped refund as the server pending figure')
+  assert.equal(saleListCreditUsd(LIST_ROWS), 120, 'credit is the balance due: 190 total - 30 debt lowered - 40 paid')
+  // CONTROL: the retired reading (net recognized after the capped refund) says 153 here.
+  const saleValue = LIST_ROWS.filter(isCreditSale).reduce((sum, row) => sum + saleNetSalesUsd(row) - saleNetRefundUsd(row), 0)
+  assert.equal(saleValue, 153)
+  assert.notEqual(saleListCreditUsd(LIST_ROWS), saleValue)
+  assert.equal(saleListCreditUsd([money({ sale_status: 'awaiting_payment', subtotal_usd: 10, total_usd: 10, amount_paid_usd: 3 })]), 7,
+    'a $10 Not Paid sale with $3 paid shows Credit $7')
   assert.equal(saleListCreditUsd([
-    { sale_status: 'awaiting_payment', subtotal_usd: 10, discount_usd: 30, refund_usd: 0 },
-    { sale_status: 'cancelled', subtotal_usd: 50, discount_usd: 0, refund_usd: 0 },
-  ]), 0, 'bad net inputs and cancelled rows cannot print negative credit')
+    money({ sale_status: 'awaiting_payment', total_usd: 10, amount_paid_usd: 25 }),
+    money({ sale_status: 'cancelled', total_usd: 50 }),
+  ]), 0, 'an over-paid credit row owes 0 and cancelled rows are out: never a negative credit')
+  assert.equal(saleListCreditUsd([money({ sale_status: 'awaiting_payment', total_usd: 10, amount_paid_khr: 12300, exchange_rate: 4100 })]), 7,
+    'riel paid counts at the sale\'s own rate (12,300 riel at 4,100 = $3)')
 })
 
 test('Credit preserves explicit retained unpaid authority only while return status is current', () => {
   const rows = [
-    { sale_status: 'partial_return', status_before_return: 'awaiting_payment', subtotal_usd: 19, refund_usd: 9.5 },
-    { sale_status: 'returned', status_before_return: 'awaiting_payment', subtotal_usd: 19, refund_usd: 19 },
-    { sale_status: 'completed', status_before_return: 'awaiting_payment', subtotal_usd: 19 },
-    { sale_status: 'cancelled', status_before_return: 'awaiting_payment', subtotal_usd: 19 },
-    { sale_status: 'partial_return', subtotal_usd: 19 },
-    { sale_status: 'returned', status_before_return: ' awaiting_payment', subtotal_usd: 19 },
+    // Recorded before 0234 (cash refunds, no debt lowered): still owes its $19.
+    money({ sale_status: 'partial_return', status_before_return: 'awaiting_payment', subtotal_usd: 19, total_usd: 19, refund_usd: 9.5 }),
+    money({ sale_status: 'returned', status_before_return: 'awaiting_payment', subtotal_usd: 19, total_usd: 19, refund_usd: 19 }),
+    money({ sale_status: 'completed', status_before_return: 'awaiting_payment', subtotal_usd: 19, total_usd: 19 }),
+    money({ sale_status: 'cancelled', status_before_return: 'awaiting_payment', subtotal_usd: 19, total_usd: 19 }),
+    money({ sale_status: 'partial_return', subtotal_usd: 19, total_usd: 19 }),
+    money({ sale_status: 'returned', status_before_return: ' awaiting_payment', subtotal_usd: 19, total_usd: 19 }),
+    // RET-A LH-16: $10 sold Not Paid, $7 paid, $4 back ($3 lowered the debt): owes 0.
+    money({ sale_status: 'partial_return', status_before_return: 'awaiting_payment', subtotal_usd: 10, total_usd: 10, amount_paid_usd: 7, return_owed_reduction_usd: 3 }),
   ]
-  assert.deepEqual(rows.map(isCreditSale), [true, true, false, false, false, false])
-  assert.equal(saleListCreditUsd(rows), 9.5)
+  assert.deepEqual(rows.map(isCreditSale), [true, true, false, false, false, false, false])
+  assert.equal(saleListCreditUsd(rows), 38, 'each retained legacy row owes its $19; the debt-cleared sale adds $0')
+  assert.equal(saleListCreditUsd(rows.slice(6)), 0, 'LH-16: a sale cleared by returns shows $0')
 })
 
-test('Credit fallback refuses V1 authority rather than interpreting payout as a legacy reversal', () => {
-  const legacy = { sale_status: 'awaiting_payment', subtotal_usd: 19, refund_usd: 9.5 }
-  const precise = { sale_status: 'partial_return', status_before_return: 'awaiting_payment', money_precision_version: 1, subtotal_usd: 19, refund_usd: 9.5 }
-  assert.equal(saleListCreditUsd([precise]), null)
-  assert.equal(saleListCreditUsd([legacy, precise]), null, 'an unsupported row makes the complete credit cohort unavailable')
-  assert.equal(saleListCreditUsd([{ ...precise, sale_status: 'awaiting_payment', refund_usd: 0 }]), null, 'a zero payout still lacks V1 adjustment authority')
-  assert.equal(saleListCreditUsd([legacy, { ...precise, sale_status: 'completed' }]), 9.5, 'a V1 non-credit row does not erase computable legacy credit')
+test('Credit fallback reads V1 rows through the owed helper and refuses unreadable money', () => {
+  const legacy = money({ sale_status: 'awaiting_payment', subtotal_usd: 19, total_usd: 19, amount_paid_usd: 9.5 })
+  const precise = money({ sale_status: 'awaiting_payment', money_precision_version: 1, subtotal_usd: 19, total_usd: '19.0000',
+    calculated_total_usd: '19.0000', amount_paid_usd: '4.2500' })
+  assert.equal(saleListCreditUsd([precise]), 14.75)
+  assert.equal(saleListCreditUsd([legacy, precise]), 24.25)
+  const unreadable = { sale_status: 'awaiting_payment', subtotal_usd: 19, total_usd: 19 }
+  assert.equal(saleListCreditUsd([legacy, unreadable]), null, 'a credit row with no readable rate makes the cohort unavailable')
+  assert.equal(saleListCreditUsd([legacy, { ...unreadable, sale_status: 'completed' }]), 9.5, 'an unreadable non-credit row does not erase computable credit')
   assert.equal(saleListCreditUsd([]), 0)
 })
 

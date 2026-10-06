@@ -30,6 +30,8 @@ type TranslateFn = (key: string) => string | undefined
 interface CustomerSalesTotals {
   tx_count: number
   collected_usd: number
+  /** Owner ruling 6 Oct 2026: what this customer's Not Paid sales still owe (null: unavailable). */
+  credit_usd?: number | null
   discount_usd: number
   membership_discount_usd: number
   points_redeemed: number
@@ -157,10 +159,16 @@ export default function CustomerPurchasesReportModal({ customerId, customerName,
                 sideways on a phone only if all four cells genuinely can't
                 fit, matching the house density style (SupplierPurchasesModal
                 went 4-across at sm+ for the same reason). */}
-            <div className="grid shrink-0 grid-cols-2 gap-2 sm:grid-cols-4">
+            {/* Owner ruling 6 Oct 2026: the Not Paid cell is the balance still
+                owed, the same figure every other Credit prints; shown only
+                when there is one (or when the server could not read it). */}
+            <div className={`grid shrink-0 grid-cols-2 gap-2 sm:grid-cols-4${totals.credit_usd !== 0 && totals.credit_usd !== undefined ? ' md:grid-cols-5' : ''}`}>
               {[
                 [tr(t, 'customer_purchases', 'Purchases'), String(totals.tx_count)],
                 [tr(t, 'collected_total', 'Collected total'), money(totals.collected_usd)],
+                ...(totals.credit_usd !== 0 && totals.credit_usd !== undefined
+                  ? [[tr(t, 'rpt_pending_credit', 'Not Paid'), totals.credit_usd === null ? '—' : money(totals.credit_usd)]]
+                  : []),
                 [tr(t, 'store_discount', 'Store discounts'), money(totals.discount_usd)],
                 [
                   tr(t, 'membership_discount', 'Membership'),

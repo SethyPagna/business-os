@@ -799,7 +799,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   // `sales` above is capped at the list endpoint's page limit, so the
   // header figures below read from this instead of reducing over `sales`
   // directly once a filtered range has more matching rows than that cap.
-  const [salesStats, setSalesStats] = useState<{ revenue_usd: number; pending_revenue_usd: number; total_count: number; revenue_count: number; truncated_in_list: boolean } | null>(null)
+  const [salesStats, setSalesStats] = useState<{ revenue_usd: number; pending_owed_usd: number; total_count: number; revenue_count: number; truncated_in_list: boolean } | null>(null)
 
   // Z3a: the summary aggregate must refresh whenever a sale's status changes,
   // not only when a filter changes. Extracted into a callable so the sync
@@ -823,7 +823,9 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
       const row = (result || {}) as Record<string, unknown>
       setSalesStats({
         revenue_usd: Number(row.revenue_usd) || 0,
-        pending_revenue_usd: Number(row.pending_revenue_usd) || 0,
+        // Owner ruling 6 Oct 2026: the header's Credit is the balance due.
+        // A Worker from before pending_owed_usd keeps its old figure.
+        pending_owed_usd: Number(row.pending_owed_usd ?? row.pending_revenue_usd) || 0,
         total_count: Number(row.total_count) || 0,
         revenue_count: Number(row.revenue_count) || 0,
         truncated_in_list: Boolean(row.truncated_in_list),
@@ -1966,11 +1968,12 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
   const revenueCount = salesStats?.revenue_count
     ?? filtered.filter(isCountedSale).length
 
-  // Credit is already inside revenue; this positive figure simply identifies
-  // how much of the net recognized revenue is unpaid; absent V1 authority
-  // keeps the fallback unavailable until authoritative server stats arrive.
+  // Credit sales are already inside revenue at their full value; this
+  // positive figure is what they still OWE (owner ruling 6 Oct 2026), the
+  // kernel's pending_owed_usd, or the list's own recordedSaleOutstandingUsd
+  // sum until the server stats arrive (unavailable when a row is unreadable).
   const creditUsd: number | null = salesStats
-    ? salesStats.pending_revenue_usd
+    ? salesStats.pending_owed_usd
     : saleListCreditUsd(filtered)
 
   const toggleSelected = (saleId: number | string) => {

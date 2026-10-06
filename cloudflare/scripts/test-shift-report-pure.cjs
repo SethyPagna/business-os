@@ -98,9 +98,11 @@ const reportMoneyPrecision = loadReal('lib/reportMoneyPrecision.ts', { './moneyP
 const promotionRules = loadReal('lib/promotionRules.ts', { './moneyPrecision': moneyPrecision })
 const saleItemPricing = loadReal('lib/saleItemPricing.ts', { './moneyPrecision': moneyPrecision, './promotionRules': promotionRules })
 const saleMoneyPrecision = loadReal('lib/saleMoneyPrecision.ts', { './moneyPrecision': moneyPrecision })
+// salesAnalytics reads a credit sale's balance due through the one owed helper.
+const saleStatusResolutionForAnalytics = loadReal('lib/saleStatusResolution.ts', { './financialPrecision': loadReal('lib/financialPrecision.ts') })
 const refundMoneyPrecision = loadReal('lib/refundMoneyPrecision.ts', { './moneyPrecision': moneyPrecision, './saleMoneyPrecision': saleMoneyPrecision })
 const customerReturnEntitlement = loadReal('lib/customerReturnEntitlement.ts', { './moneyPrecision': moneyPrecision, './refundMoneyPrecision': refundMoneyPrecision, './saleItemPricing': saleItemPricing, './saleMoneyPrecision': saleMoneyPrecision })
-const analyticsPrecision = { './saleMoneyPrecision': saleMoneyPrecision, './reportMoneyPrecision': reportMoneyPrecision, './customerReturnEntitlement': customerReturnEntitlement, './refundMoneyPrecision': refundMoneyPrecision }
+const analyticsPrecision = { './saleStatusResolution': saleStatusResolutionForAnalytics, './saleMoneyPrecision': saleMoneyPrecision, './reportMoneyPrecision': reportMoneyPrecision, './customerReturnEntitlement': customerReturnEntitlement, './refundMoneyPrecision': refundMoneyPrecision }
 const saleTotals = loadReal('lib/saleTotals.ts', { './moneyPrecision': moneyPrecision, './saleMoneyPrecision': saleMoneyPrecision })
 const financialPrecision = loadReal('lib/financialPrecision.ts')
 const nativeSaleChange = loadReal('lib/nativeSaleChange.ts', {
@@ -833,6 +835,9 @@ wired.telegramCommandReply({}, '/shift 04/09/2026', NOW).then((reply) => {
     delivery_sale_count: 2,
     recognized_net_usd: 222,
     pending_revenue_usd: 18,
+    // Owner ruling 6 Oct 2026: the balance the credit sales still owe, apart
+    // from their value (18) so a message printing the value fails.
+    pending_owed_usd: 13,
     recognized_tax_usd: 7,
     recognized_delivery_usd: 6,
     recognized_store_delivery_usd: 0,
@@ -927,7 +932,7 @@ wired.telegramCommandReply({}, '/shift 04/09/2026', NOW).then((reply) => {
   // here would show up as a different number.
   assert.equal(mappedValue('Profit'), '$92.50', 'profit is the kernel definition, not one computed in the message')
   assert.equal(mappedBulletValue('Example expense'), '$4.00', 'the per-expense bullet comes from the grouped query, by its own label')
-  assert.equal(mappedValue('Not Paid'), '$18.00', 'credit must read pending_revenue_usd, not the refund')
+  assert.equal(mappedValue('Not Paid'), '$13.00', 'credit must read the balance due (pending_owed_usd), not the sale value or the refund')
   assert.equal(mappedValue('Delivery fee'), '$6.00', 'the customer-paid delivery fee')
   assert.equal(mappedBulletValue(lang.label('deliveryCost')), '$3.50', 'the courier money actually paid out')
   // 4.00 other + 3.50 courier, the two bullets above it.

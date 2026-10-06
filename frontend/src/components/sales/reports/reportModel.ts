@@ -391,6 +391,13 @@ export interface ReportTotals {
    */
   net_sales_usd?: number
   pending_revenue_usd: number
+  /**
+   * Owner ruling 6 Oct 2026: what the credit sales still OWE -- the kernel's
+   * pending_owed_usd, the one owed reading (saleStatusResolution
+   * recordedSaleOutstandingUsd). Every printed Credit / Not Paid reads this;
+   * pending_revenue_usd stays the revenue-basis footing of the pending profit.
+   */
+  pending_owed_usd: number
   collected_total_usd: number
   avg_order_usd: number
   // ---- the awaiting-payment cohort (S4R3-6) --------------------------------
@@ -440,7 +447,7 @@ const TOTAL_KEYS: Array<keyof ReportTotals> = [
   'tx_count', 'gross_sales_usd', 'store_discount_usd', 'membership_discount_usd', 'discount_usd', 'item_discount_usd', 'total_discount_usd', 'tax_usd', 'delivery_usd',
   'store_delivery_usd', 'delivery_actual_cost_usd', 'delivery_actual_cost_count', 'delivery_sale_count', 'delivery_margin_usd',
   'delivery_net_usd', 'recognized_delivery_usd', 'recognized_delivery_cost_usd',
-  'refund_usd', 'revenue_usd', 'pending_revenue_usd', 'collected_total_usd', 'avg_order_usd',
+  'refund_usd', 'revenue_usd', 'pending_revenue_usd', 'pending_owed_usd', 'collected_total_usd', 'avg_order_usd',
   'pending_tx_count', 'pending_gross_sales_usd', 'pending_store_discount_usd', 'pending_membership_discount_usd',
   'pending_delivery_usd', 'pending_delivery_cost_usd', 'cancelled_tx_count',
 ]
@@ -455,6 +462,8 @@ export function normalizeTotals(raw: unknown): ReportTotals | null {
   const r = raw as Record<string, unknown>
   const out = {} as ReportTotals
   for (const k of TOTAL_KEYS) (out as unknown as Record<string, number>)[k] = num(r[k])
+  // A Worker from before pending_owed_usd keeps printing its old credit figure.
+  if (typeof r.pending_owed_usd !== 'number') out.pending_owed_usd = out.pending_revenue_usd
   // Presence-signalled, exactly like the admin keys below: a Worker older than
   // the Sep 6 kernel does not send net_sales_usd, and a 0 there would be read
   // as "this window sold nothing net" rather than "the server did not say".
@@ -681,7 +690,7 @@ function statementFigures(t: ReportTotals): Record<string, number> {
     // the discount lines and the net-sales total. Rendered only when non-zero,
     // like profit_rounding.
     net_sales_floor: round2(netSales - headerNet),
-    pending_credit: t.pending_revenue_usd,
+    pending_credit: t.pending_owed_usd,
     refunds: t.refund_usd,
     revenue: t.revenue_usd,
     // net sales and refunds are round2'd on their own, so the step to REVENUE
@@ -704,6 +713,8 @@ function statementFigures(t: ReportTotals): Record<string, number> {
     // netSaleExpr), so the two lines above are the bridge TO it and are never
     // subtracted from it a second time.
     pending_revenue: t.pending_revenue_usd,
+    // The balance the credit sales still owe: the printed Not Paid line.
+    pending_owed: t.pending_owed_usd,
     pending_delivery_collected: t.pending_delivery_usd,
     pending_delivery_paid: t.pending_delivery_cost_usd,
   }
@@ -922,13 +933,14 @@ function deliveryReconciliationLines(t: ReportTotals, line: LineFactory): Statem
 }
 
 /**
- * Credit is already included in sales, revenue, COGS and profit. This single
- * positive memo reports the outstanding subset once without subtracting it
- * again or repeating the retired debt label.
+ * Credit sales are already included in sales, revenue, COGS and profit at
+ * their full value. This single positive memo reports what they still OWE
+ * (owner ruling 6 Oct 2026: a $10 Not Paid sale with $3 paid is $7) once,
+ * without subtracting it again or repeating the retired debt label.
  */
 function pendingLines(t: ReportTotals, line: LineFactory): StatementLine[] {
-  if (num(t.pending_tx_count) <= 0 && t.pending_revenue_usd === 0) return []
-  return [line('pending_revenue', 'rpt_pending_credit', 'Not Paid', 'memo', 'pending', ['rpt_hint_pending', 'Included in sales, revenue, and profit, but excluded from collected cash.'])]
+  if (num(t.pending_tx_count) <= 0 && t.pending_owed_usd === 0) return []
+  return [line('pending_owed', 'rpt_pending_credit', 'Not Paid', 'memo', 'pending', ['rpt_hint_pending', 'What Not Paid sales still owe. Their full value is already in sales, revenue and profit.'])]
 }
 
 /**

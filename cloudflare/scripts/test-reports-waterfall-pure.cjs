@@ -61,8 +61,14 @@ export function prorateCustomerReturnMoney4(): never { throw new Error('reader_n
 fs.writeFileSync(refundMoneyPath, `
 export function validateRefundMoneySnapshot(): never { throw new Error('reader_not_available_in_formula_harness') }
 `)
+// salesAnalytics reads a credit sale's balance due through the one owed helper
+// (saleStatusResolution, which depends only on financialPrecision): the real files.
+const saleStatusPath = path.join(tmpDir, 'saleStatusResolution.ts')
+const financialPath = path.join(tmpDir, 'financialPrecision.ts')
+fs.writeFileSync(saleStatusPath, fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'saleStatusResolution.ts'), 'utf8'))
+fs.writeFileSync(financialPath, fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'financialPrecision.ts'), 'utf8'))
 const tscBin = path.join(__dirname, '..', 'node_modules', 'typescript', 'bin', 'tsc')
-execSync(`node ${tscBin} --module commonjs --target es2020 --outDir ${tmpDir} ${tsPath} ${path.join(tmpDir, 'businessDateWindow.ts')} ${schemaProbePath} ${moneyPath} ${reportMoneyPath} ${customerReturnPath} ${refundMoneyPath} ${saleMoneyPath}`, {
+execSync(`node ${tscBin} --module commonjs --target es2020 --outDir ${tmpDir} ${tsPath} ${path.join(tmpDir, 'businessDateWindow.ts')} ${schemaProbePath} ${moneyPath} ${reportMoneyPath} ${customerReturnPath} ${refundMoneyPath} ${saleMoneyPath} ${saleStatusPath} ${financialPath}`, {
   cwd: tmpDir,
   stdio: 'inherit',
 })

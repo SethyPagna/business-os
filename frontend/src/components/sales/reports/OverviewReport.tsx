@@ -48,7 +48,7 @@ import { exportMenuItems, rangeSubtitle, tableLabels, type ReportViewProps } fro
 
 interface ReturnsTotals { count: number; refund_usd: number }
 interface ExpenseTotals { count: number; amount_usd: number; amount_khr: number }
-interface PaymentRow { key: string; payment_method: string; tx_count: number; revenue_usd: number; pending_revenue_usd: number; collected_usd: number }
+interface PaymentRow { key: string; payment_method: string; tx_count: number; revenue_usd: number; pending_owed_usd: number; collected_usd: number }
 interface CourierRow {
   delivery_contact_id: number | null
   delivery_contact_name: string
@@ -153,7 +153,7 @@ export default function OverviewReport(p: ReportViewProps) {
     { key: 'payment_method', label: tr('payment_method', 'Payment method'), primary: true, value: (r) => r.payment_method || tr('unknown', 'Unknown') },
     { key: 'tx_count', label: tr('sales', 'Sales'), kind: 'int', value: (r) => r.tx_count },
     { key: 'revenue_usd', label: tr('revenue', 'Revenue'), kind: 'money', value: (r) => r.revenue_usd, emphasis: true },
-    { key: 'pending_revenue_usd', label: tr('rpt_pending_credit', 'Not Paid'), kind: 'money', value: (r) => r.pending_revenue_usd, defaultVisible: false },
+    { key: 'pending_owed_usd', label: tr('rpt_pending_credit', 'Not Paid'), kind: 'money', value: (r) => r.pending_owed_usd, defaultVisible: false },
     { key: 'collected_usd', label: tr('collected_total', 'Collected total'), kind: 'money', value: (r) => r.collected_usd },
     { key: 'share', label: tr('rpt_share', 'Share'), kind: 'pct', value: (r) => pct(r.revenue_usd, payments.reduce((s, p) => s + p.revenue_usd, 0)), defaultVisible: false },
   ]

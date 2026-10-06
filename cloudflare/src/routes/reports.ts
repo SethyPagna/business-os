@@ -440,6 +440,7 @@ app.get('/overview', async (c) => {
         tx_count: r.tx_count,
         revenue_usd: r.revenue_usd,
         pending_revenue_usd: r.pending_revenue_usd,
+        pending_owed_usd: r.pending_owed_usd,
         collected_usd: r.collected_total_usd,
       })),
       couriers: couriers.map((row) => gateCourierRow(row as unknown as Record<string, unknown>, isAdmin)),

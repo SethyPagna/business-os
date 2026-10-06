@@ -89,6 +89,9 @@ async function assertUnpaidConsumers(f, rawStatus, remaining, label) {
   assert.equal(row.status, rawStatus, `${label}: raw export status is retained`)
   assert.equal(totals.pending_revenue_usd, remaining * 9.5, `${label}: pending revenue reverses the same merchandise recognition as revenue`)
   assert.equal(row.pending_revenue_usd, totals.pending_revenue_usd, `${label}: aggregate pending and export row agree`)
+  // Owner ruling 6 Oct 2026: the printed Credit is the balance due (the one owed helper).
+  assert.equal(totals.pending_owed_usd, remaining * 9.5, `${label}: the Credit is what the sale still owes`)
+  assert.equal(row.pending_owed_usd, totals.pending_owed_usd, `${label}: aggregate Credit and export row agree`)
   assert.equal(totals.pending_cost_usd, remaining * 4, `${label}: pending COGS reverses only restocked cost`)
   assert.equal(totals.pending_profit_usd, remaining * 5.5, `${label}: pending profit is the same recognized unpaid subset`)
   const payment = analytics.paymentMethodBreakdownFromSnapshot(snapshot)[0]
@@ -96,27 +99,33 @@ async function assertUnpaidConsumers(f, rawStatus, remaining, label) {
   const day = await analytics.getSalesDayReport(env, date)
   assert.equal(day.totals.collected_total_usd, 0, `${label}: day collected`)
   assert.equal(day.totals.pending_revenue_usd, totals.pending_revenue_usd, `${label}: day pending amount`)
+  assert.equal(day.totals.pending_owed_usd, totals.pending_owed_usd, `${label}: day Credit`)
   assert.equal(day.sales[0].collected_usd, 0, `${label}: day row collected`)
   const cashier = (await analytics.getSalesGroupedTotals(env, filters, 'cashier'))[0]
   assert.equal(cashier.paid_tx_count, owes ? 0 : 1, `${label}: live SQL cashier paid counter`)
   assert.equal(cashier.pending_revenue_usd, totals.pending_revenue_usd, `${label}: cashier pending amount`)
+  assert.equal(cashier.pending_owed_usd, totals.pending_owed_usd, `${label}: cashier Credit`)
   assert.equal(cashier.pending_cost_usd, totals.pending_cost_usd, `${label}: cashier pending COGS`)
   assert.equal(cashier.pending_profit_usd, totals.pending_profit_usd, `${label}: cashier pending profit`)
   const customer = await analytics.getCustomerSalesTotals(env, { ...filters, customerId: 7 })
   assert.equal(customer.collected_usd, owes ? 0 : 19, `${label}: direct SQL customer eligibility`)
+  assert.equal(customer.credit_usd, totals.pending_owed_usd, `${label}: customer drill Credit`)
   const exported = await send(reports, f, 'GET', `/business-summary/sales?intent=export&startDate=${date}&endDate=${date}`)
   assert.equal(exported.totals.collected_total_usd, 0, `${label}: actual export route total`)
   assert.equal(exported.totals.pending_revenue_usd, row.pending_revenue_usd, `${label}: actual export pending amount`)
+  assert.equal(exported.totals.pending_owed_usd, row.pending_owed_usd, `${label}: actual export Credit total`)
+  assert.equal(exported.rows[0].pending_owed_usd, row.pending_owed_usd, `${label}: actual export Credit row`)
   assert.equal(exported.rows[0].collected_total_usd, 0, `${label}: actual export route row`)
   const strip = await send(h.app, f, 'GET', `/stats-strip?startDate=${date}&endDate=${date}`)
   assert.equal(strip.totals.collected_total_usd, 0, `${label}: actual stats route`)
   assert.equal(strip.totals.pending_revenue_usd, totals.pending_revenue_usd, `${label}: actual stats pending amount`)
+  assert.equal(strip.totals.pending_owed_usd, totals.pending_owed_usd, `${label}: actual stats Credit`)
   const overview = await telegram.shiftOverviewFigures(env, { business_date: date, branch_id: 1 })
-  assert.equal(overview.creditUsd, totals.pending_revenue_usd, `${label}: actual Telegram overview input`)
+  assert.equal(overview.creditUsd, totals.pending_owed_usd, `${label}: actual Telegram overview input (the balance due)`)
   assert.equal(overview.revenueUsd, totals.revenue_usd, `${label}: Telegram recognized basis unchanged`)
   const shift = await shiftKernel.loadShiftFigures(env, { scope_mode: 'shop_wide', user_id: owner.id, branch_id: 1,
     opened_at: '2026-09-13 00:00:00', closed_at: '2026-09-13 02:00:00', opening_float_usd: 0, opening_float_khr: 0 })
-  assert.equal(shift.credit_usd, totals.pending_revenue_usd, `${label}: actual shift input`)
+  assert.equal(shift.credit_usd, totals.pending_owed_usd, `${label}: actual shift input (the balance due)`)
   return { totals, exported }
 }
 

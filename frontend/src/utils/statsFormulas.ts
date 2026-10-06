@@ -33,6 +33,8 @@
  * have to import the other's.
  */
 
+import { recordedSaleOutstandingUsd } from './saleStatusResolution.ts'
+
 /** One signed term of a printed equation. */
 export interface FormulaTerm {
   /** Language-pack key for the term's label. */
@@ -243,30 +245,34 @@ export function isCreditSale(sale: SaleRevenueRow): boolean {
 }
 
 /**
- * The credit annotation beside the footer's revenue: `SUM over credit rows of
- * netSaleExpr minus the capped net refund`, the client mirror of the kernel's `pending_revenue_usd`
- * (cloudflare/src/lib/salesAnalytics.ts).
+ * The Credit beside the footer's revenue: what the credit rows still OWE --
+ * owner ruling 6 Oct 2026, "a $10 Not Paid sale with $3 paid shows Credit $7".
+ * Each row is read by recordedSaleOutstandingUsd (saleStatusResolution.ts),
+ * the one owed reading the receipt, the sale detail and the Worker kernel's
+ * `pending_owed_usd` (cloudflare/src/lib/salesAnalytics.ts) all share: total
+ * less the debt its returns lowered, less what was paid, half-cent tolerance.
+ * Nothing here restates that formula.
  *
- * Two properties it must keep, both of them owner rules:
+ * Properties it must keep:
  *
- *  * POSITIVE, ALWAYS. netSaleExpr floors each row at 0, so the sum cannot go
- *    negative and the surface has nothing to clamp. "instead of $-n... just
- *    $n" is enforced here rather than at every place that formats it.
- *  * A SUBSET, NOT A COMPLEMENT. These same rows are already inside
- *    `saleListRevenueUsd` (isRevenueCountedSale excludes only cancelled).
- *    Nothing may add this to a revenue or subtract it from one; it says how
- *    much of the net revenue already shown belongs to credit rows.
- *
- * V1 list rows lack the immutable refund reversal and header-adjustment
- * authority needed by the exact report kernel. A cohort containing one
- * V1 credit row is unavailable until authoritative server stats arrive.
+ *  * POSITIVE, ALWAYS. A row owes nothing or a positive amount, so the sum
+ *    cannot go negative and the surface has nothing to clamp.
+ *  * NOT A REVENUE TERM. The credit rows are already inside
+ *    `saleListRevenueUsd` at their full value (the one revenue definition is
+ *    unchanged); nothing may add this to a revenue or subtract it from one.
+ *  * HONEST WHEN UNREADABLE. A credit row whose money cannot be read makes
+ *    the fallback unavailable (null) until the server stats arrive, rather
+ *    than printing a figure that silently left it out.
  */
 export function saleListCreditUsd(rows: readonly SaleRevenueRow[]): number | null {
-  let total = 0
+  let units = 0
   for (const sale of rows || []) {
     if (!isCreditSale(sale)) continue
-    if (Number(sale.money_precision_version) === 1) return null
-    total += saleNetSalesUsd(sale) - saleNetRefundUsd(sale)
+    try {
+      units += Math.round(recordedSaleOutstandingUsd(sale) * 10_000)
+    } catch {
+      return null
+    }
   }
-  return round2(total)
+  return round2(units / 10_000)
 }

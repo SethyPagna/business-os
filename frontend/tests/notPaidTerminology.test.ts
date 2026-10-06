@@ -88,7 +88,8 @@ assert.match(telegramLang, /'awaiting payment': \{ en: 'Not Paid', km: 'ប្�
 assert.match(telegram, /labeled\('credit'/, 'the internal Telegram key remains credit')
 
 const reportModel = read('../src/components/sales/reports/reportModel.ts')
-assert.match(reportModel, /line\('pending_revenue', 'rpt_pending_credit', 'Not Paid'/)
+// Owner ruling 6 Oct 2026: the printed Not Paid line is the balance due.
+assert.match(reportModel, /line\('pending_owed', 'rpt_pending_credit', 'Not Paid'/)
 assert.match(reportModel, /pending_revenue_usd/, 'the accounting field remains unchanged')
 
 const saleDetail = read('../src/components/sales/SaleDetailModal.tsx')

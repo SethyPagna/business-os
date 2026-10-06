@@ -7,13 +7,13 @@ import type { QueryParams } from '../src/api/query.ts'
 
 const token = 'a'.repeat(64)
 const totals = { gross_sales_usd: .01, store_discount_usd: 0, membership_discount_usd: 0, tax_usd: 0, delivery_usd: 0,
-  refund_usd: 0, revenue_usd: .01, pending_revenue_usd: 0, collected_total_usd: .01 }
+  refund_usd: 0, revenue_usd: .01, pending_revenue_usd: 0, pending_owed_usd: 0, collected_total_usd: .01 }
 function row(id: number) {
   return { id, cursor_at: `2026-09-24T${id === 2 ? '17:30' : '16:30'}:00.000Z`, date: `2026-09-24T${id === 2 ? '17:30' : '16:30'}:00.000Z`,
     business_date: id === 2 ? '2026-09-25' : '2026-09-24', receipt_number: '000123', customer_phone: '000123', customer: 'សុខា',
     branch: 'Shop', cashier: 'Cashier', payment_method: 'Cash', status: 'completed', gross_sales_usd: 0,
     store_discount_usd: 0, membership_discount_usd: 0, tax_usd: 0, delivery_usd: 0, refund_usd: 0,
-    net_revenue_usd: 0, pending_revenue_usd: 0, collected_total_usd: 0 }
+    net_revenue_usd: 0, pending_owed_usd: 0, collected_total_usd: 0 }
 }
 function page(rows: unknown[], has_more = false, row_count = 2) {
   const tail = rows[rows.length - 1] as ReturnType<typeof row>

@@ -21,7 +21,7 @@ const react = {
 }
 const token = 'a'.repeat(64)
 const money = { gross_sales_usd: 0, store_discount_usd: 0, membership_discount_usd: 0, tax_usd: 0, delivery_usd: 0, refund_usd: 0,
-  net_revenue_usd: 0, pending_revenue_usd: 0, collected_total_usd: 0 }
+  net_revenue_usd: 0, pending_owed_usd: 0, collected_total_usd: 0 }
 const row = (id: number) => ({ ...money, id, date: `2026-09-24T0${id}:00:00Z`, cursor_at: `2026-09-24T0${id}:00:00Z`, business_date: '2026-09-24',
   receipt_number: `00000${id}`, customer_phone: '000123', customer: 'សុខា', branch: 'Shop', cashier: 'A', payment_method: 'Cash', status: 'completed' })
 const total = { ...money, revenue_usd: .01 }

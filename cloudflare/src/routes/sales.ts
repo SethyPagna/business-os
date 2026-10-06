@@ -5942,6 +5942,8 @@ app.get('/stats', async (c) => {
       revenue_count: snapshot.sales.length,
       revenue_usd: totals.revenue_usd,
       pending_revenue_usd: totals.pending_revenue_usd,
+      // Owner ruling 6 Oct 2026: the header's Credit is the balance due.
+      pending_owed_usd: totals.pending_owed_usd,
       // This now means "more pages exist", not "the data was discarded".
       truncated_in_list: totalCount > listLimit,
     }

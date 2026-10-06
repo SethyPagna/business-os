@@ -159,6 +159,7 @@ import {
 } from './customerReturnEntitlement'
 import { validateRefundMoneySnapshot } from './refundMoneyPrecision'
 import { validateSaleMoneySnapshot } from './saleMoneyPrecision'
+import { recordedSaleOutstandingUsd } from './saleStatusResolution'
 import {
   EMPTY_REMOVAL_LOSS,
   REMOVAL_LOSS_FROM,
@@ -393,6 +394,13 @@ export interface SalesTotals {
   // INSIDE revenue_usd (clause 4 of the scoping rule) and isolated here so the
   // unpaid part is visible; never add the two together.
   pending_revenue_usd: number
+  // Owner ruling 6 Oct 2026 (final): "Credit" is the BALANCE DUE everywhere --
+  // a $10 Not Paid sale with $3 paid is Credit $7, the Sales page's own figure
+  // (saleStatusResolution recordedSaleOutstandingUsd: total less the debt its
+  // returns lowered, less what was paid, half-cent tolerance). Every Credit /
+  // Not Paid figure a person reads prints this; pending_revenue_usd stays the
+  // revenue-basis footing of the pending profit block. Revenue is unchanged.
+  pending_owed_usd: number
   // RET-A (owner 29 Sep: reports add a riel row): the riel the window's
   // refunds actually paid out, never a converted equivalent. A memo beside
   // refund_usd (which already counts them in dollars), never added to it.
@@ -455,7 +463,7 @@ export function emptySalesTotals(): SalesTotals {
     returned_cost_usd: 0, returned_cost_shortfall_usd: 0,
     unvalued_tx_count: 0, unvalued_cost_usd: 0, net_sales_usd: 0,
     refund_usd: 0, refund_charged_usd: 0, refund_excess_usd: 0,
-    revenue_usd: 0, pending_revenue_usd: 0, refund_paid_khr: 0, collected_total_usd: 0, cost_usd: 0, profit_usd: 0, avg_order_usd: 0,
+    revenue_usd: 0, pending_revenue_usd: 0, pending_owed_usd: 0, refund_paid_khr: 0, collected_total_usd: 0, cost_usd: 0, profit_usd: 0, avg_order_usd: 0,
   }
 }
 
@@ -1139,7 +1147,7 @@ async function readSalesReportPass(
       ${customerAnonymous} AS customer_is_anonymous,
       s.subtotal_usd,s.discount_usd,s.membership_discount_usd,s.tax_usd,s.total_usd,
       s.delivery_fee_usd,s.delivery_fee_paid_by,s.delivery_actual_cost_usd,s.is_delivery,
-      s.source_return_id,s.amount_paid_usd${salePrecision},
+      s.source_return_id,s.amount_paid_usd,${saleColumn('amount_paid_khr','0')},${saleColumn('exchange_rate','NULL')}${salePrecision},
       ${saleColumn('delivery_contact_id','NULL')},${saleColumn('delivery_contact_name',"''")},
       ${linkedDeliveryFee} AS delivery_has_linked_fee
     FROM sales s WHERE ${primary.sql}`, 's.id', primary.params, rowBudget, options.maxReceipts)
@@ -1248,7 +1256,7 @@ const REPORT_EXACT_KEYS = [
   'recognizedNet','pendingRevenue','recognizedTax','recognizedDelivery','recognizedStoreDelivery','recognizedDeliveryCost',
   'collected','refund','refundPaid','refundCharged','refundExcess','pendingGross','pendingStoreDiscount',
   'pendingMembershipDiscount','pendingDelivery','pendingDeliveryCost','cost','pendingCost','returnedCost','pendingReturnedCost',
-  'itemDiscount','pendingItemDiscount','unvaluedCost',
+  'itemDiscount','pendingItemDiscount','unvaluedCost','pendingOwed',
 ] as const
 type ReportExactKey = typeof REPORT_EXACT_KEYS[number]
 type ReportExactBucket = {
@@ -1280,6 +1288,20 @@ function reportMoney(row: ReportScalarRow, key: string, version: 0 | 1, nullable
   return ReportExactDecimal.money(value, version)
 }
 function reportStatus(row: ReportScalarRow): string { return String(row.sale_status || 'completed') }
+/**
+ * What a credit sale still owes -- the ONE owed reading the Sales page uses
+ * (recordedSaleOutstandingUsd over the row and its active returns' debt
+ * reductions). null when the money cannot be read; the caller then keeps the
+ * sale's revenue-basis figure so a broken row stays visible as credit.
+ */
+function reportOwedUsd(row: ReportScalarRow, saleReturns: readonly ReportScalarRow[]): number | null {
+  try {
+    const reduction = saleReturns.reduce((sum, returned) => (returned.owed_reduction_usd == null
+      ? sum : sum.add(ReportExactDecimal.recorded(returned.owed_reduction_usd as string | number))), ReportExactDecimal.zero())
+    return recordedSaleOutstandingUsd({ ...row, return_owed_reduction_usd: reduction.toText(4) })
+  } catch { return null }
+}
+
 /**
  * The Not Paid (credit) cohort: the Not Paid status, and a sale sold Not Paid
  * that a return moved to a return status -- but only while it still owes.
@@ -1330,6 +1352,8 @@ type ReportSaleFacts = {
   itemDiscount: ReportExactDecimal; unvaluedCost: ReportExactDecimal; missingCostLines: number
   /** RET-A: riel the sale's active refunds paid out (snapshot refund_paid_khr). */
   refundPaidKhr: number
+  /** Owner ruling 6 Oct: the balance a credit sale still owes; null when not credit or unreadable. */
+  owed: number | null
 }
 
 type V1RefundLine = { row: ReportScalarRow; snapshot: CustomerReturnRefundSnapshotV1 }
@@ -1409,6 +1433,7 @@ function reportSaleFacts(snapshot: SalesReportSnapshot): ReportSaleFacts[] {
     const valued = subtotal.isPositive() && !rawNet.isNegative()
     const recognized = reportStatus(sale) !== 'cancelled'
     const awaiting = reportAwaiting(sale, returns.get(Number(sale.id)) || [])
+    const owed = awaiting ? reportOwedUsd(sale, returns.get(Number(sale.id)) || []) : null
     const adjustment = reportHeaderAdjustment(sale, version)
     let refundPaid = ReportExactDecimal.zero()
     let refundPaidKhr = 0
@@ -1464,7 +1489,7 @@ function reportSaleFacts(snapshot: SalesReportSnapshot): ReportSaleFacts[] {
     const deliveryActual = Number(sale.delivery_has_linked_fee) !== 0
       ? ReportExactDecimal.zero() : reportMoney(sale, 'delivery_actual_cost_usd', version)
     return { sale, version, recognized, awaiting, valued, net, adjustment, refund, refundPaid, refundExcess, delivery, deliveryActual,
-      cost, returnedCost, itemDiscount, unvaluedCost, missingCostLines, refundPaidKhr }
+      cost, returnedCost, itemDiscount, unvaluedCost, missingCostLines, refundPaidKhr, owed }
   })
 }
 
@@ -1482,6 +1507,12 @@ export function reportMoneyDiagnostic(value: object): ReportMoneyReadDiagnostic 
 function attachReportDiagnostic<T extends object>(value: T, diagnostic: ReportMoneyReadDiagnostic): T {
   Object.defineProperty(value, REPORT_MONEY_DIAGNOSTIC, { value: diagnostic, enumerable: false })
   return value
+}
+
+/** A credit sale's balance due; an unreadable one keeps its revenue-basis figure. */
+function reportPendingOwed(fact: ReportSaleFacts): ReportExactDecimal {
+  if (fact.owed != null) return ReportExactDecimal.recorded(fact.owed)
+  return fact.recognized ? fact.net.add(fact.adjustment).subtract(fact.refund) : ReportExactDecimal.zero()
 }
 
 function aggregateReportSnapshot(
@@ -1529,6 +1560,7 @@ function aggregateReportSnapshot(
     if (fact.awaiting) {
       bucket.pendingTx += 1
       reportAdd(bucket, 'pendingRevenue', recognizedNet.subtract(fact.refund)); reportAdd(bucket, 'pendingGross', subtotal)
+      reportAdd(bucket, 'pendingOwed', reportPendingOwed(fact))
       reportAdd(bucket, 'pendingStoreDiscount', storeDiscount); reportAdd(bucket, 'pendingMembershipDiscount', membershipDiscount)
       reportAdd(bucket, 'pendingDelivery', fact.delivery); reportAdd(bucket, 'pendingDeliveryCost', fact.deliveryActual)
       reportAdd(bucket, 'pendingCost', fact.cost)
@@ -1596,6 +1628,7 @@ function exactReportTotals(bucket: ReportExactBucket, snapshot: SalesReportSnaps
     refund_excess_usd: m.refundExcess.toNumber(),
     revenue_usd: revenue.toNumber(),
     pending_revenue_usd: m.pendingRevenue.toNumber(),
+    pending_owed_usd: m.pendingOwed.toNumber(),
     refund_paid_khr: bucket.refundPaidKhr,
     collected_total_usd: m.collected.toNumber(),
     cost_usd: netCost.toNumber(),
@@ -1640,7 +1673,8 @@ export function businessSummarySalesRowsFromSnapshot(snapshot: SalesReportSnapsh
       membership_discount_usd: reportMoney(sale, 'membership_discount_usd', version).toNumber(),
       tax_usd: reportMoney(sale, 'tax_usd', version).toNumber(), delivery_usd: fact.delivery.toNumber(),
       refund_usd: fact.refund.toNumber(), net_revenue_usd: revenue.toNumber(),
-      pending_revenue_usd: fact.awaiting ? revenue.toNumber() : 0, collected_total_usd: collected.toNumber(),
+      pending_revenue_usd: fact.awaiting ? revenue.toNumber() : 0,
+      pending_owed_usd: fact.awaiting ? reportPendingOwed(fact).toNumber() : 0, collected_total_usd: collected.toNumber(),
       cost_usd: cost.toNumber(), cost_before_floor_usd: rawCost.toNumber(), cost_missing_snapshot_lines: fact.missingCostLines,
       gross_profit_usd: revenue.add(delivery).subtract(deliveryActual).subtract(cost).toNumber(),
     }
@@ -1930,6 +1964,9 @@ export function deriveTotals(level: Record<string, number>, costUsd: number, ret
     refund_excess_usd: round2(num(level.refund_excess_usd)),
     revenue_usd: round2(revenueUsd),
     pending_revenue_usd: round2(pendingRevenueUsd),
+    // The SQL levels read no per-sale balance; unreachable behind the snapshot
+    // kernel today, and the revenue basis if it is ever reached.
+    pending_owed_usd: round2(level.pending_owed_usd !== undefined ? num(level.pending_owed_usd) : pendingRevenueUsd),
     refund_paid_khr: Math.round(num(level.refund_paid_khr)),
     collected_total_usd: round2(collectedTotalUsd),
     cost_usd: round2(netCostUsd),
@@ -2438,6 +2475,8 @@ export async function getDeliveryContactTotals(
 export interface CustomerSalesTotalsRow {
   tx_count: number
   collected_usd: number
+  /** Owner ruling 6 Oct: the balance this customer's credit sales still owe; null when unreadable. */
+  credit_usd: number | null
   discount_usd: number
   membership_discount_usd: number
   points_redeemed: number
@@ -2450,6 +2489,21 @@ export async function getCustomerSalesTotals(
   f: SalesFilters & { customerId: number | string },
 ): Promise<CustomerSalesTotalsRow> {
   const db = getDb(env)
+  // Owner ruling 6 Oct: the drill's Credit is the same balance due as every
+  // other Credit -- the shared kernel over this customer's sales. A snapshot
+  // that cannot be read leaves the figure unavailable (null) rather than
+  // failing the whole drill or printing a number that left a sale out.
+  const customerId = Number(f.customerId)
+  let credit: number | null = 0
+  if (Number.isSafeInteger(customerId) && customerId > 0) {
+    try {
+      credit = salesTotalsFromSnapshot(await readSalesReportSnapshot(env, f, false,
+        (alias) => ({ sql: `${alias}.customer_id = @reportScope_customerId`, params: { reportScope_customerId: customerId } }))).pending_owed_usd
+    } catch (error) {
+      if (!(error instanceof ReportMoneyPrecisionError)) throw error
+      credit = null
+    }
+  }
   const retainedStatusExpr = await retainedNotPaidExpr(db)
   const { sql: whereSql, params } = whereActiveSales('sales', f)
   params.customerId = f.customerId
@@ -2467,6 +2521,7 @@ export async function getCustomerSalesTotals(
   return {
     tx_count: num(row?.tx_count),
     collected_usd: round2(num(row?.collected_usd)),
+    credit_usd: credit == null ? null : round2(credit),
     discount_usd: round2(num(row?.discount_usd)),
     membership_discount_usd: round2(num(row?.membership_discount_usd)),
     points_redeemed: round2(num(row?.points_redeemed)),

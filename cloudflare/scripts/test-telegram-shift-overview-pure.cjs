@@ -123,9 +123,11 @@ const reportMoneyPrecision = loadReal('lib/reportMoneyPrecision.ts', { './moneyP
 const promotionRules = loadReal('lib/promotionRules.ts', { './moneyPrecision': moneyPrecision })
 const saleItemPricing = loadReal('lib/saleItemPricing.ts', { './moneyPrecision': moneyPrecision, './promotionRules': promotionRules })
 const saleMoneyPrecision = loadReal('lib/saleMoneyPrecision.ts', { './moneyPrecision': moneyPrecision })
+// salesAnalytics reads a credit sale's balance due through the one owed helper.
+const saleStatusResolutionForAnalytics = loadReal('lib/saleStatusResolution.ts', { './financialPrecision': loadReal('lib/financialPrecision.ts') })
 const refundMoneyPrecision = loadReal('lib/refundMoneyPrecision.ts', { './moneyPrecision': moneyPrecision, './saleMoneyPrecision': saleMoneyPrecision })
 const customerReturnEntitlement = loadReal('lib/customerReturnEntitlement.ts', { './moneyPrecision': moneyPrecision, './refundMoneyPrecision': refundMoneyPrecision, './saleItemPricing': saleItemPricing, './saleMoneyPrecision': saleMoneyPrecision })
-const analyticsPrecision = { './saleMoneyPrecision': saleMoneyPrecision, './reportMoneyPrecision': reportMoneyPrecision, './customerReturnEntitlement': customerReturnEntitlement, './refundMoneyPrecision': refundMoneyPrecision }
+const analyticsPrecision = { './saleStatusResolution': saleStatusResolutionForAnalytics, './saleMoneyPrecision': saleMoneyPrecision, './reportMoneyPrecision': reportMoneyPrecision, './customerReturnEntitlement': customerReturnEntitlement, './refundMoneyPrecision': refundMoneyPrecision }
 const saleTotals = loadReal('lib/saleTotals.ts', { './moneyPrecision': moneyPrecision, './saleMoneyPrecision': saleMoneyPrecision })
 const financialPrecision = loadReal('lib/financialPrecision.ts')
 const nativeSaleChange = loadReal('lib/nativeSaleChange.ts', { './financialPrecision': financialPrecision, './saleTotals': saleTotals })
@@ -136,7 +138,7 @@ const salesAnalyticsReal = loadReal('lib/salesAnalytics.ts', { './schemaProbe': 
 // can say which filters it was asked with.
 const KERNEL_TOTALS = {
   revenue_usd: 412.5, profit_usd: 150.25, gross_sales_usd: 450, item_discount_usd: 12.5, discount_usd: 25,
-  delivery_usd: 6, pending_revenue_usd: 40, refund_usd: 10, tx_count: 18, cancelled_tx_count: 1,
+  delivery_usd: 6, pending_revenue_usd: 40, pending_owed_usd: 31, refund_usd: 10, tx_count: 18, cancelled_tx_count: 1,
   delivery_actual_cost_usd: 4.5, delivery_actual_cost_count: 2,
 }
 const KERNEL_PAYMENTS = [
@@ -231,7 +233,7 @@ async function main() {
     '· Gross sales: $450.00',
     '· Profit: $150.25',
     '· Delivery fee: $6.00',
-    '· Not Paid: $40.00',
+    '· Not Paid: $31.00',
     '· Refunds: $10.00',
     '=====Invoices=====',
     '· Total: 18 · Cancelled: 1',
@@ -262,7 +264,7 @@ async function main() {
     '· ការលក់សរុប: $450.00',
     '· ចំណេញ: $150.25',
     '· ថ្លៃដឹក: $6.00',
-    '· ប្រាក់ជំពាក់: $40.00',
+    '· ប្រាក់ជំពាក់: $31.00',
     '· ការសងប្រាក់: $10.00',
     '=====វិក្កយបត្រ=====',
     '· សរុប: 18 · បានបោះបង់: 1',

@@ -6329,7 +6329,7 @@
   "rpt_each_return": "Each return",
   "rpt_each_expense": "Each expense",
   "rpt_hint_gross_sales": "Item subtotals of every non-cancelled sale, before discounts.",
-  "rpt_hint_pending": "Included in sales, revenue, and profit, but excluded from collected cash.",
+  "rpt_hint_pending": "What Not Paid sales still owe. Their full value is already in sales, revenue and profit.",
   "rpt_hint_revenue": "Revenue = recognized net sales − customer refunds. Tax and delivery fees are excluded.",
   "rpt_hint_collected": "Sales counted as collected, plus their tax and delivery fees, less paid refunds. Not Paid sales are excluded — this is the one figure they stay out of. This is not a payment-event cash-flow ledger.",
   "rpt_hint_cogs": "Cost snapshots of the items sold, less the cost of goods a return put back on the sellable shelf. Lines without a snapshot count as 0 and are flagged.",

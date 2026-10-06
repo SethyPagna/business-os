@@ -159,13 +159,15 @@ const reportMoneyPrecision = loadReal('lib/reportMoneyPrecision.ts', { './moneyP
 const promotionRules = loadReal('lib/promotionRules.ts', { './moneyPrecision': moneyPrecision })
 const saleItemPricing = loadReal('lib/saleItemPricing.ts', { './moneyPrecision': moneyPrecision, './promotionRules': promotionRules })
 const saleMoneyPrecision = loadReal('lib/saleMoneyPrecision.ts', { './moneyPrecision': moneyPrecision })
+// salesAnalytics reads a credit sale's balance due through the one owed helper.
+const saleStatusResolutionForAnalytics = loadReal('lib/saleStatusResolution.ts', { './financialPrecision': loadReal('lib/financialPrecision.ts') })
 const refundMoneyPrecision = loadReal('lib/refundMoneyPrecision.ts', { './moneyPrecision': moneyPrecision, './saleMoneyPrecision': saleMoneyPrecision })
 const customerReturnEntitlement = loadReal('lib/customerReturnEntitlement.ts', { './moneyPrecision': moneyPrecision, './refundMoneyPrecision': refundMoneyPrecision, './saleItemPricing': saleItemPricing, './saleMoneyPrecision': saleMoneyPrecision })
 const saleTotals = loadReal('lib/saleTotals.ts', { './moneyPrecision': moneyPrecision, './saleMoneyPrecision': saleMoneyPrecision })
 const financialPrecision = loadReal('lib/financialPrecision.ts')
 const nativeSaleChange = loadReal('lib/nativeSaleChange.ts', { './financialPrecision': financialPrecision, './saleTotals': saleTotals })
 const dbModule = { getDb: (env) => env.DB }
-const salesAnalyticsReal = loadReal('lib/salesAnalytics.ts', {
+const salesAnalyticsReal = loadReal('lib/salesAnalytics.ts', { './saleStatusResolution': saleStatusResolutionForAnalytics,
   './schemaProbe': loadReal('lib/schemaProbe.ts'), './db': dbModule, './removalLosses': loadReal('lib/removalLosses.ts'), './businessDateWindow': businessDateWindow,
   './saleMoneyPrecision': saleMoneyPrecision, './reportMoneyPrecision': reportMoneyPrecision, './customerReturnEntitlement': customerReturnEntitlement, './refundMoneyPrecision': refundMoneyPrecision,
 })
@@ -174,7 +176,7 @@ const kernelCalls = []
 const totalsFor = (kernel, filters) => ({
   ...salesAnalyticsReal.emptySalesTotals(),
   revenue_usd: kernel.revenueByDay[filters.startDate] ?? 0, profit_usd: 150.25, gross_sales_usd: 450, item_discount_usd: 12.5, discount_usd: 25, total_discount_usd: 37.5,
-  delivery_usd: 6, pending_revenue_usd: 40, pending_tx_count: 3, refund_usd: 10, tx_count: 18, cancelled_tx_count: 1,
+  delivery_usd: 6, pending_revenue_usd: 40, pending_owed_usd: 31, pending_tx_count: 3, refund_usd: 10, tx_count: 18, cancelled_tx_count: 1,
 })
 const KERNEL_A = {
   revenueByDay: { [DAY]: 412.5, [YESTERDAY]: 375, [LAST_WEEK]: 450 },
@@ -303,10 +305,10 @@ async function main() {
     rowsUnder(single.sales, '=====Received=====').join('\n'))
   const salesRows = rowsUnder(single.sales, '=====Sales=====')
   check('sales & payments: Not Paid carries its receipt count, and the total discount sits under its two parts',
-    salesRows.includes('· Not Paid: 3 · $40.00') && salesRows.indexOf('· Total discount: $37.50') === salesRows.indexOf('· Discount on invoices: $25.00') + 1,
+    salesRows.includes('· Not Paid: 3 · $31.00') && salesRows.indexOf('· Total discount: $37.50') === salesRows.indexOf('· Discount on invoices: $25.00') + 1,
     salesRows.join('\n'))
   check('without the switch Not Paid is the amount alone and there is no total discount row',
-    rowsUnder(quiet.text, '=====Sales=====').includes('· Not Paid: $40.00') && !quiet.text.includes('Total discount'))
+    rowsUnder(quiet.text, '=====Sales=====').includes('· Not Paid: $31.00') && !quiet.text.includes('Total discount'))
   telegramLang.setTelegramLanguage('en')
   const oneCut = telegram.formatShiftOverview('Synthetic Shop A', {
     business_date: DAY, branch_id: null, branch_name: null, user_name: 'Za', shift_code: 'S-20260923-0807-Za', opened_at: '2026-09-23T01:07:00.000Z', closed_at: CLOSED_AT,
@@ -354,7 +356,7 @@ async function main() {
   assert.deepStrictEqual(full.text.split('\n').slice(5), [
     '· Open: 23/09/2026 08:07', '· Close: 23/09/2026 18:30',
     '=====Sales=====', '· Revenue: $412.50', '· Discount on items: $12.50', '· Discount on invoices: $25.00', '· Total discount: $37.50', '· Gross sales: $450.00',
-    '· Profit: $150.25', '· Delivery fee: $6.00', '· Not Paid: 3 · $40.00', '· Refunds: $10.00',
+    '· Profit: $150.25', '· Delivery fee: $6.00', '· Not Paid: 3 · $31.00', '· Refunds: $10.00',
     '=====Invoices=====', '· Total: 18 · Cancelled: 1',
     '=====Payment methods=====', '· Cash: 12 · $300.00', '· ABA Pay: 6 · $112.50',
     '=====Received=====', '· Dollars: $23.00', '· Riel: 81,000៛', '· Bank: $30.00',
@@ -440,7 +442,7 @@ async function main() {
       '=====Stock=====', '=====Cashiers=====', '=====Branches=====', '=====Top products=====', '=====Low stock=====', '=====Returns=====', '=====Compare====='])
       && ['=====Invoices=====', '=====Expenses=====', '=====Stock=====', '=====Cashiers====='].every((header) => JSON.stringify(rowsUnder(today.text, header)) === JSON.stringify(rowsUnder(plain.text, header)))
       && JSON.stringify(rowsUnder(today.text, '=====Branches=====')) === JSON.stringify(['· Toul Kork: 15 · $362.50', '· Riverside: 3 · $50.00'])
-      && rowsUnder(today.text, '=====Sales=====').includes('· Not Paid: 3 · $40.00') && rowsUnder(today.text, '=====Sales=====').includes('· Total discount: $37.50'),
+      && rowsUnder(today.text, '=====Sales=====').includes('· Not Paid: 3 · $31.00') && rowsUnder(today.text, '=====Sales=====').includes('· Total discount: $37.50'),
     today.text)
   check('Send today\'s summary: the cashier list is read once, the day summary\'s own', JSON.stringify(buttonCalls.filter(([kind, , by]) => kind === 'grouped' && by === 'cashier').map(([, , , limit]) => limit)) === '[12]', JSON.stringify(buttonCalls))
   check('Send today\'s summary: returns and the same-time comparison for the whole shop',

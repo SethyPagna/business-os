@@ -591,7 +591,7 @@ export type ShiftFiguresInput = {
   counted: Partial<ShiftCount> | null | undefined
   totals: {
     revenue_usd?: unknown; cost_usd?: unknown; profit_usd?: unknown
-    delivery_usd?: unknown; pending_revenue_usd?: unknown; refund_usd?: unknown
+    delivery_usd?: unknown; pending_revenue_usd?: unknown; pending_owed_usd?: unknown; refund_usd?: unknown
     removal_loss_usd?: unknown
     revenue_after_losses_usd?: unknown; profit_after_losses_usd?: unknown
     removal_loss_unvalued_rows?: unknown
@@ -620,7 +620,10 @@ export function composeShiftFigures(input: ShiftFiguresInput): ShiftFigures {
     delivery_fee_usd: round2(finite(totals.delivery_usd)),
     // Never negative: an amount owed cannot be less than nothing, and a
     // negative here would be a data defect printed as a business fact.
-    credit_usd: Math.max(0, round2(finite(totals.pending_revenue_usd))),
+    // Owner ruling 6 Oct 2026: the balance the credit sales still owe (a $10
+    // Not Paid sale with $3 paid is $7). Totals from before that figure existed
+    // print the revenue-basis credit they always did.
+    credit_usd: Math.max(0, round2(finite(totals.pending_owed_usd ?? totals.pending_revenue_usd))),
     refunds_usd: round2(finite(totals.refund_usd)),
     // Present only when the kernel sent the block. Never floored at 0 on the
     // profit side: "including the losses" is allowed to be negative.

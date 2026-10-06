@@ -60,10 +60,12 @@ const reportMoneyPrecision = loadReal('lib/reportMoneyPrecision.ts', { './moneyP
 const promotionRules = loadReal('lib/promotionRules.ts', { './moneyPrecision': moneyPrecision })
 const saleItemPricing = loadReal('lib/saleItemPricing.ts', { './moneyPrecision': moneyPrecision, './promotionRules': promotionRules })
 const saleMoneyPrecision = loadReal('lib/saleMoneyPrecision.ts', { './moneyPrecision': moneyPrecision })
+// salesAnalytics reads a credit sale's balance due through the one owed helper.
+const saleStatusResolutionForAnalytics = loadReal('lib/saleStatusResolution.ts', { './financialPrecision': loadReal('lib/financialPrecision.ts') })
 const refundMoneyPrecision = loadReal('lib/refundMoneyPrecision.ts', { './moneyPrecision': moneyPrecision, './saleMoneyPrecision': saleMoneyPrecision })
 const customerReturnEntitlement = loadReal('lib/customerReturnEntitlement.ts', { './moneyPrecision': moneyPrecision, './refundMoneyPrecision': refundMoneyPrecision, './saleItemPricing': saleItemPricing, './saleMoneyPrecision': saleMoneyPrecision })
 const schemaProbeReal = loadReal('lib/schemaProbe.ts')
-const analytics = loadReal('lib/salesAnalytics.ts', { './schemaProbe': schemaProbeReal,
+const analytics = loadReal('lib/salesAnalytics.ts', { './saleStatusResolution': saleStatusResolutionForAnalytics, './schemaProbe': schemaProbeReal,
   './db': { getDb: () => fakeDb },
   './removalLosses': loadReal('lib/removalLosses.ts'), './businessDateWindow': loadReal('lib/businessDateWindow.ts'),
   './reportMoneyPrecision': reportMoneyPrecision,

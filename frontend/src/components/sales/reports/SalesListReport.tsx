@@ -41,7 +41,8 @@ export interface SaleRow {
   delivery_usd: number
   refund_usd: number
   net_revenue_usd: number
-  pending_revenue_usd: number
+  /** Owner ruling 6 Oct 2026: what this receipt still owes (the kernel's balance due), 0 unless credit. */
+  pending_owed_usd: number
   collected_total_usd: number
   cost_usd?: number
   cost_before_floor_usd?: number
@@ -50,7 +51,7 @@ export interface SaleRow {
 }
 
 const MONEY_KEYS: Array<keyof SaleRow> = [
-  'gross_sales_usd', 'store_discount_usd', 'membership_discount_usd', 'tax_usd', 'delivery_usd', 'refund_usd', 'net_revenue_usd', 'pending_revenue_usd', 'collected_total_usd',
+  'gross_sales_usd', 'store_discount_usd', 'membership_discount_usd', 'tax_usd', 'delivery_usd', 'refund_usd', 'net_revenue_usd', 'pending_owed_usd', 'collected_total_usd',
 ]
 
 export function mapSaleRow(raw: unknown, index: number): SaleRow {
@@ -66,7 +67,7 @@ export function mapSaleRow(raw: unknown, index: number): SaleRow {
     customer_phone: String(r.customer_phone || ''),
     payment_method: String(r.payment_method || ''),
     status: String(r.status || ''),
-    gross_sales_usd: 0, store_discount_usd: 0, membership_discount_usd: 0, tax_usd: 0, delivery_usd: 0, refund_usd: 0, net_revenue_usd: 0, pending_revenue_usd: 0, collected_total_usd: 0,
+    gross_sales_usd: 0, store_discount_usd: 0, membership_discount_usd: 0, tax_usd: 0, delivery_usd: 0, refund_usd: 0, net_revenue_usd: 0, pending_owed_usd: 0, collected_total_usd: 0,
   }
   for (const k of MONEY_KEYS) (row as unknown as Record<string, number>)[k] = num(r[k])
   // Admin-only keys: copied ONLY when present (never assigned as 0).
@@ -152,7 +153,7 @@ export default function SalesListReport(p: ReportViewProps) {
       { key: 'delivery_usd', label: tr('delivery', 'Delivery'), kind: 'money', value: (r) => r.delivery_usd, defaultVisible: false },
       { key: 'refund_usd', label: tr('refunds', 'Refunds'), kind: 'money', value: (r) => r.refund_usd },
       { key: 'net_revenue_usd', label: tr('revenue', 'Revenue'), kind: 'money', value: (r) => r.net_revenue_usd, emphasis: options.basis === 'revenue' },
-      { key: 'pending_revenue_usd', label: tr('rpt_pending_credit', 'Not Paid'), kind: 'money', value: (r) => r.pending_revenue_usd, defaultVisible: false },
+      { key: 'pending_owed_usd', label: tr('rpt_pending_credit', 'Not Paid'), kind: 'money', value: (r) => r.pending_owed_usd, defaultVisible: false },
       { key: 'collected_total_usd', label: tr('collected_total', 'Collected total'), kind: 'money', value: (r) => r.collected_total_usd, defaultVisible: options.basis === 'collected', emphasis: options.basis === 'collected' },
       profitVisible ? { key: 'cost_usd', label: tr('cost', 'Cost'), kind: 'money', value: (r) => r.cost_usd ?? null, defaultVisible: false } : null,
       profitVisible ? { key: 'gross_profit_usd', label: tr('rpt_gross_profit', 'Gross profit'), kind: 'money', value: (r) => r.gross_profit_usd ?? null } : null,
@@ -173,7 +174,7 @@ export default function SalesListReport(p: ReportViewProps) {
         countLabel(rows.length, REPORT_NOUNS.sale, tr, paged.hasMore),
         `${basisLabel} ${fmtMoney(basisOf(totals))}`,
         totals.refund_usd ? `${tr('refunds', 'Refunds')} ${fmtMoney(totals.refund_usd)}` : null,
-        totals.pending_revenue_usd ? `${tr('rpt_pending_credit', 'Not Paid')} ${fmtMoney(totals.pending_revenue_usd)}` : null,
+        totals.pending_owed_usd ? `${tr('rpt_pending_credit', 'Not Paid')} ${fmtMoney(totals.pending_owed_usd)}` : null,
         showProfit ? `${tr('rpt_gross_profit', 'Gross profit')} ${fmtMoney(num(totals.gross_profit_usd))} (${fmtPct(pct(num(totals.gross_profit_usd), basisOf(totals)))})` : null,
       ])
     : ''
@@ -220,7 +221,7 @@ export default function SalesListReport(p: ReportViewProps) {
       { key: 'member_disc', label: tr('rpt_membership_discounts', 'Membership discounts'), value: fmtMoney(r.membership_discount_usd), kind: 'sub' as const },
       { key: 'refund', label: tr('refunds', 'Refunds'), value: fmtMoney(r.refund_usd), kind: 'sub' as const },
       { key: 'revenue', label: tr('revenue', 'Revenue'), value: fmtMoney(r.net_revenue_usd), kind: 'total' as const },
-      ...(r.pending_revenue_usd ? [{ key: 'pending', label: tr('rpt_pending_credit', 'Not Paid'), value: fmtMoney(r.pending_revenue_usd), kind: 'info' as const }] : []),
+      ...(r.pending_owed_usd ? [{ key: 'pending', label: tr('rpt_pending_credit', 'Not Paid'), value: fmtMoney(r.pending_owed_usd), kind: 'info' as const }] : []),
       { key: 'tax', label: tr('tax', 'Tax'), value: fmtMoney(r.tax_usd), kind: 'add' as const },
       { key: 'delivery', label: tr('rpt_delivery_charged', 'Delivery fee charged'), value: fmtMoney(r.delivery_usd), kind: 'add' as const },
       { key: 'collected', label: tr('collected_total', 'Collected total'), value: fmtMoney(r.collected_total_usd), kind: 'total' as const },

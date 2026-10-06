@@ -424,7 +424,7 @@ export function getSalesStats(params: QueryParams = {}): Promise<unknown> {
     // all-history count and revenue until the cache expired.
     `sales:stats:${query}`,
     () => apiFetch('GET', appendQuery('/api/sales/stats', query)),
-    () => ({ total_count: 0, revenue_usd: 0, pending_revenue_usd: 0, truncated_in_list: false }),
+    () => ({ total_count: 0, revenue_usd: 0, pending_revenue_usd: 0, pending_owed_usd: 0, truncated_in_list: false }),
   )
 }
 

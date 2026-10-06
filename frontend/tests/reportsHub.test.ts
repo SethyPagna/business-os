@@ -96,6 +96,9 @@ const adminTotals = {
   refund_usd: 15,
   revenue_usd: 255,
   pending_revenue_usd: 40,
+  // Owner ruling 6 Oct 2026: the balance the credit sales still owe, apart
+  // from their value (40) so a Not Paid line printing the value fails.
+  pending_owed_usd: 31,
   collected_total_usd: 233,
   avg_order_usd: 35.83,
   // The awaiting-payment cohort: unpaid gross 55 - unpaid discounts (9 + 6)
@@ -154,8 +157,9 @@ test('buildIncomeStatement: revenue and collected groups close arithmetically on
   // them. Only the cost-derived lines inside them drop away.
   assert.equal(m.delivery_charged.usd, 10)
   assert.equal(m.delivery_charged.kind, 'memo', 'the memo lines carry no operator')
-  assert.equal(m.pending_revenue.usd, 40)
-  assert.equal(m.pending_revenue.kind, 'memo')
+  assert.equal(m.pending_owed.usd, 31, 'Not Paid is the balance due, not the sale value 40')
+  assert.equal(m.pending_owed.kind, 'memo')
+  assert.ok(!('pending_revenue' in m), 'the sale value is not a printed line')
 })
 
 test('buildIncomeStatement: the profit bridge names every term and never uses the residual', () => {
@@ -332,7 +336,7 @@ test('buildIncomeStatement: the waterfall foots to the cent, and says so when co
     'revenue - cogs + delivery collected - delivery paid = gross profit',
   )
   assert.equal(m.gross_profit.usd - m.expenses.usd, m.net_result.usd, 'gross profit - expenses = total profit')
-  assert.equal(m.pending_revenue.usd, 40, 'Not Paid is one consolidated memo row')
+  assert.equal(m.pending_owed.usd, 31, 'Not Paid is one consolidated memo row: the balance due')
 
   // A cent of rounding is CARRIED on its own line, never absorbed into a
   // labelled one.
@@ -461,9 +465,9 @@ test('buildIncomeStatement: Not Paid is one positive memo below business totals'
   for (const key of ['net_sales', 'revenue', 'collected_total', 'revenue_carried', 'cogs', 'delivery_collected', 'delivery_paid', 'gross_profit', 'net_result']) {
     assert.equal(m[key].usd, base[key].usd, `${key} is untouched by the unpaid cohort`)
   }
-  assert.equal(base.pending_revenue.kind, 'memo')
-  assert.equal(base.pending_revenue.fallback, 'Not Paid')
-  assert.equal(base.pending_revenue.usd, 40)
+  assert.equal(base.pending_owed.kind, 'memo')
+  assert.equal(base.pending_owed.fallback, 'Not Paid')
+  assert.equal(base.pending_owed.usd, 31)
   assert.equal(base.net_sales.usd - base.refunds.usd, base.revenue.usd)
 
   // The block is last, is its own group, and no realised line sits inside it.
@@ -554,6 +558,9 @@ test('sumTotals sums additive figures, recomputes the average, and keeps profit 
   // silently reports a $0.00 unpaid block while its parts are non-zero.
   assert.equal(both.pending_gross_sales_usd, 110)
   assert.equal(both.pending_revenue_usd, 80)
+  assert.equal(both.pending_owed_usd, 62, 'the balance due accumulates too')
+  const olderWorker = normalizeTotals({ ...adminTotals, pending_owed_usd: undefined }) as ReportTotals
+  assert.equal(olderWorker.pending_owed_usd, 40, 'a Worker from before pending_owed_usd keeps printing its old credit figure')
   assert.equal(both.pending_delivery_cost_usd, 6)
   assert.equal(both.pending_cost_usd, 36)
   assert.equal(both.pending_profit_usd, 46)

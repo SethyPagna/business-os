@@ -1396,10 +1396,12 @@ export default function Dashboard() {
   const aDeliveryActualCount = analytics?.totals?.delivery_actual_cost_count || 0
   const aDeliverySales = analytics?.totals?.delivery_sale_count || 0
   const aDeliveryMargin = analytics?.totals?.delivery_margin_usd ?? (aDelivery - aDeliveryActual)
-  // Positive annotation: this amount is already included in revenue and
-  // profit by the server kernel. Showing it here must never add or subtract
-  // it from either headline.
-  const aCredit = analytics?.totals?.pending_revenue_usd || 0
+  // Positive annotation: the credit sales are already included in revenue and
+  // profit by the server kernel at their full value; this prints what they
+  // still OWE (owner ruling 6 Oct 2026: "a $10 Not Paid sale with $3 paid shows
+  // Credit $7"), the kernel's pending_owed_usd. Never added to or subtracted
+  // from either headline.
+  const aCredit = analytics?.totals?.pending_owed_usd ?? analytics?.totals?.pending_revenue_usd ?? 0
   // Stock removed entirely, priced at cost (owner, Sep 14 2026: "i want in
   // stat a break down of revenue/profit excluding the losses caused by this.
   // and including caused by this"). PRESENCE-signalled, never defaulted to 0:
