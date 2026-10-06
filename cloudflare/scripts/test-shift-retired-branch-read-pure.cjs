@@ -119,7 +119,7 @@ async function scenario({ retired, mutate }) {
   assert.equal(after.historyStatus, 200, 'the history of a shift at the retired branch stays readable')
   assert.equal(after.unknownBranchStatus, 400, 'an unknown branch id is still refused')
   assert.equal(after.openStatus, 400, 'opening a shift at a retired branch is still refused')
-  assert.equal(after.patchStatus, 404, 'amending a retired branch shift is still refused')
+  assert.equal(after.patchStatus, 409, 'amending a retired branch shift is still refused (N7 inactiveBranchRefusal)')
   assert.equal(after.patchWrote, false, 'the refused amend wrote nothing')
 
   // BEFORE the cutover (both active, NULL roles): nothing about the answers changes.
@@ -135,9 +135,9 @@ async function scenario({ retired, mutate }) {
   // Wrong implementation: the read lookup still requires an active branch (the N7 defect).
   const wrong = await scenario({
     retired: true,
-    mutate: (s) => s.replace("SELECT id, name, is_active FROM branches WHERE id=@id'", "SELECT id, name, is_active FROM branches WHERE id=@id AND is_active=1'"),
+    mutate: (s) => s.split("FROM branches WHERE id=@id'").join("FROM branches WHERE id=@id AND is_active=1'"),
   })
   assert.equal(wrong.currentStatus, 400, 'control: an active-only read lookup reproduces the N7 400, so the fixture discriminates')
-  assert.equal(wrong.historyStatus, 404, 'control: and hides the retired branch history')
+  assert.equal(wrong.listStatus, 400, 'control: and refuses the retired branch history list')
   console.log('PASS shifts read a retired branch (history, list, current) and still refuse every write to it, before and after the cutover')
 })().catch((error) => { console.error(error); process.exit(1) })
