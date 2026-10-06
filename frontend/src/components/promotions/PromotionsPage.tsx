@@ -93,6 +93,8 @@ type RuleDraft = {
   starts_at: string
   ends_at: string
   is_active: boolean
+  /** The stored row's updated_at when editing (null for a new rule); sent as the version the edit started from. */
+  updated_at: string | null
 }
 
 const EMPTY_RULE: RuleDraft = {
@@ -100,7 +102,7 @@ const EMPTY_RULE: RuleDraft = {
   min_quantity: '', save_usd: '', save_khr: '', percent_off: '',
   min_spend_usd: '', min_spend_khr: '', label_style: 'save',
   scope_type: 'products', products: [], category: '', brand: '',
-  badge_color: '#e11d48', starts_at: '', ends_at: '', is_active: true,
+  badge_color: '#e11d48', starts_at: '', ends_at: '', is_active: true, updated_at: null,
 }
 
 type DiscountDraft = {
@@ -313,6 +315,8 @@ export default function PromotionsPage() {
       starts_at: dateInputValue(rule.starts_at),
       ends_at: dateInputValue(rule.ends_at),
       is_active: rule.is_active,
+      // N13: the version this edit started from; the Worker refuses a save over a newer one.
+      updated_at: typeof row.updated_at === 'string' ? row.updated_at : null,
     })
     // Resolve the picked products' real names for the chips (ids alone are
     // honest but unreadable). Best-effort; chips show #id until it lands.
@@ -354,7 +358,7 @@ export default function PromotionsPage() {
     }
     setSavingRule(true)
     try {
-      if (draft.id) await updatePromotionRule(draft.id, payload)
+      if (draft.id) await updatePromotionRule(draft.id, payload, draft.updated_at ?? null)
       else await createPromotionRule(payload)
       notify(t('promo_rule_saved') || 'Promotion saved.')
       setDraft(null)
@@ -377,7 +381,7 @@ export default function PromotionsPage() {
       danger: true,
     }))) return
     try {
-      await deletePromotionRule(row.id)
+      await deletePromotionRule(row.id, typeof row.updated_at === 'string' ? row.updated_at : null)
       notify(t('promo_rule_deleted') || 'Promotion deleted.')
       await loadRules()
     } catch (error) {

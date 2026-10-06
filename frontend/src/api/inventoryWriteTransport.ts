@@ -113,10 +113,22 @@ function getDevicePayload(): InventoryPayload {
   return { ...getClientDeviceInfo() }
 }
 
+// N13: the Worker refuses an adjust without a client_request_id (a retry of a lost
+// answer would otherwise apply the delta twice). A caller that owns a stable id (a
+// stock-session line) passes it and it goes on the wire unchanged, including the
+// camelCase spelling the Worker also accepts; every other caller gets one minted
+// HERE, once per call and before the request closure, so the transport's own
+// retries of this call reuse it.
 export function adjustStock(payload: InventoryPayload = {}): Promise<unknown> {
+  const supplied = payload || {}
+  const camel = typeof supplied.clientRequestId === 'string' ? supplied.clientRequestId.trim() : ''
+  const body = ensureClientRequestId(
+    { ...getDevicePayload(), ...supplied, ...(!supplied.client_request_id && camel ? { client_request_id: camel } : {}) },
+    'adjust',
+  )
   return route(
     'products:adjustStock',
-    () => apiFetch('POST', '/api/inventory/adjust', { ...getDevicePayload(), ...(payload || {}) }),
+    () => apiFetch('POST', '/api/inventory/adjust', body),
     null,
     true,
   )

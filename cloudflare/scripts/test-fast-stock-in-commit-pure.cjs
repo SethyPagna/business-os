@@ -277,15 +277,16 @@ async function run() {
       { key: 'a', wire: 'receive', body: {
         product_id: 1, branch_id: 1, quantity: 5, unit_cost_usd: 2, supplier_name: 'Acme', payment_status: 'paid',
       } },
+      // N13: an adjust-wire line carries a client_request_id (the stock session always mints one per line).
       { key: 'b', wire: 'adjust', body: {
-        productId: 2, type: 'add', quantity: 4, branchId: 1, reason: 'stock in',
+        client_request_id: 'fastline_b_00000001', productId: 2, type: 'add', quantity: 4, branchId: 1, reason: 'stock in',
         supplierName: 'Acme', unitCostUsd: 3, paymentStatus: 'paid',
       } },
       { key: 'c', wire: 'adjust', body: {
-        productId: 1, type: 'remove', quantity: 2, branchId: 1, reason: 'damaged',
+        client_request_id: 'fastline_c_00000001', productId: 1, type: 'remove', quantity: 2, branchId: 1, reason: 'damaged',
       } },
       { key: 'd', wire: 'adjust', body: {
-        productId: 2, type: 'set', quantity: 10, branchId: 1, reason: 'recount',
+        client_request_id: 'fastline_d_00000001', productId: 2, type: 'set', quantity: 10, branchId: 1, reason: 'recount',
         supplierName: 'Acme', unitCostUsd: 3, paymentStatus: 'paid',
       } },
     ]
@@ -331,7 +332,7 @@ async function run() {
   {
     const dbSingle = freshDb()
     const dbBatched = freshDb()
-    const body = { productId: 1, type: 'remove', quantity: 1, branchId: 1, reason: 'parity check' }
+    const body = { client_request_id: 'fastline_parity_0001', productId: 1, type: 'remove', quantity: 1, branchId: 1, reason: 'parity check' }
     await runAdjustAction(makeContext(dbSingle, ADMIN_USER), body)
     await runStockInCommit(makeContext(dbBatched, ADMIN_USER), [{ key: 'x', wire: 'adjust', body }])
     assert.equal(branchStock(dbSingle, 1), branchStock(dbBatched, 1), 'branch_stock matches between the two call paths')

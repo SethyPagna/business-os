@@ -40,6 +40,27 @@ export function getExpectedUpdatedAt(payload: Record<string, unknown> = {}): str
   )
 }
 
+// N13: the strict form. A write that must not overwrite someone else's edit
+// cannot treat a missing version as "no check" -- that made the guard opt-in, and
+// a client that forgot (or an old one) silently got last-writer-wins. The caller
+// must STATE the version it read: the field has to be present, and a null/blank
+// value is only valid against a row whose own updated_at is NULL (legacy rows).
+const EXPECTED_UPDATED_AT_KEYS = ['expectedUpdatedAt', 'expected_updated_at', 'updated_at', 'updatedAt']
+export const EXPECTED_UPDATED_AT_REQUIRED = {
+  error: 'This change needs the version you are editing (expected_updated_at). Refresh and try again.',
+  code: 'expected_updated_at_required',
+} as const
+
+export function hasExpectedUpdatedAtField(payload: Record<string, unknown> | null | undefined): boolean {
+  return !!payload && typeof payload === 'object' && EXPECTED_UPDATED_AT_KEYS.some((key) => Object.prototype.hasOwnProperty.call(payload, key) && (payload as Record<string, unknown>)[key] !== undefined)
+}
+
+export function assertRequiredUpdatedAtMatch(entity: string, currentRecord: Record<string, unknown> | null | undefined, expectedUpdatedAt: unknown): void {
+  const expected = normalizeUpdatedAt(expectedUpdatedAt)
+  if (!currentRecord) throw new WriteConflictError(entity, null, expected, 'deleted')
+  if (normalizeUpdatedAt(currentRecord.updated_at) !== expected) throw new WriteConflictError(entity, currentRecord, expected, 'updated')
+}
+
 export function assertUpdatedAtMatch(entity: string, currentRecord: Record<string, unknown> | null | undefined, expectedUpdatedAt: unknown): void {
   const expected = normalizeUpdatedAt(expectedUpdatedAt)
   if (!expected) return

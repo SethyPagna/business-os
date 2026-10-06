@@ -296,7 +296,7 @@ const fakeExecutionCtx = { waitUntil: (p) => { p?.catch?.(() => {}) }, passThrou
 let CURRENT_USER = null
 const FULL_USER = { id: 1, username: 'full', name: 'Full Access', permissions: JSON.stringify({ fees: true, review: true }) }
 const REVIEW_TIER_USER = { id: 2, username: 'reviewtier', name: 'Review Tier', permissions: JSON.stringify({ fees: 'review' }) }
-const REVIEWER_USER = { id: 3, username: 'reviewer', name: 'Reviewer', permissions: JSON.stringify({ review: true }) }
+const REVIEWER_USER = { id: 3, username: 'reviewer', name: 'Reviewer', permissions: JSON.stringify({ review: true, fees: true, products: true, inventory: true, branches: true }) }
 
 async function req(app, user, method, url, body) {
   CURRENT_USER = user
@@ -567,6 +567,113 @@ async function main() {
     assert.deepStrictEqual(db.prepare('SELECT * FROM pending_actions WHERE id=@id').get({ id: pending.id }), pending)
     assert.deepStrictEqual(db.prepare('SELECT * FROM branches WHERE id=@id').get({ id: shop.id }), shop)
   })
+
+  // ---- N12: no self-approval; the reviewer needs Full in the approved section ----
+  await check('N12: a requester who also holds review cannot approve their own queued request (403, row stays open, fee untouched)', async () => {
+    const feeId = seedFee()
+    const self = { id: 21, username: 'selfie', name: 'Self', permissions: JSON.stringify({ fees: 'review', review: true }) }
+    const queued = await req(feesApp, self, 'DELETE', `/${feeId}`)
+    assert.strictEqual(queued.status, 202, JSON.stringify(queued.json))
+    // Even holding Full in the section, the requester is still the requester.
+    const selfFull = { ...self, permissions: JSON.stringify({ fees: true, review: true }) }
+    const refused = await req(reviewApp, selfFull, 'POST', `/${queued.json.pendingActionId}/approve`)
+    assert.strictEqual(refused.status, 403, JSON.stringify(refused.json))
+    assert.strictEqual(refused.json.code, 'review_self_approval')
+    assert.ok(/own request/i.test(refused.json.error))
+    assert.strictEqual(db.prepare('SELECT status FROM pending_actions WHERE id=@id').get({ id: queued.json.pendingActionId }).status, 'open')
+    assert.ok(await db.prepare('SELECT id FROM fees WHERE id=@id').get({ id: feeId }), 'the write must not have been replayed')
+    // A different reviewer still approves the same row.
+    const approved = await req(reviewApp, REVIEWER_USER, 'POST', `/${queued.json.pendingActionId}/approve`)
+    assert.strictEqual(approved.status, 200, JSON.stringify(approved.json))
+    assert.strictEqual(await db.prepare('SELECT id FROM fees WHERE id=@id').get({ id: feeId }), undefined)
+  })
+
+  await check('N12: the requester can still reject (withdraw) their own request', async () => {
+    const feeId = seedFee()
+    const self = { id: 22, username: 'selfie2', name: 'Self2', permissions: JSON.stringify({ fees: 'review', review: true }) }
+    const queued = await req(feesApp, self, 'DELETE', `/${feeId}`)
+    const rejected = await req(reviewApp, self, 'POST', `/${queued.json.pendingActionId}/reject`, { reason: 'withdrawn' })
+    assert.strictEqual(rejected.status, 200, JSON.stringify(rejected.json))
+  })
+
+  await check('N12: a reviewer without Full in the request\'s section is refused with a coded reason, nothing applied', async () => {
+    const feeId = seedFee()
+    const queued = await req(feesApp, REVIEW_TIER_USER, 'DELETE', `/${feeId}`)
+    const pendingId = queued.json.pendingActionId
+    for (const permissions of [
+      { review: true },                       // no rights in Fees at all
+      { review: true, fees: 'review' },       // Review Required is not Full
+    ]) {
+      const reviewer = { id: 23, username: 'thin', name: 'Thin', permissions: JSON.stringify(permissions) }
+      const refused = await req(reviewApp, reviewer, 'POST', `/${pendingId}/approve`)
+      assert.strictEqual(refused.status, 403, JSON.stringify(refused.json))
+      assert.strictEqual(refused.json.code, 'review_section_full_required')
+      assert.strictEqual(refused.json.section, 'fees')
+      assert.strictEqual(db.prepare('SELECT status FROM pending_actions WHERE id=@id').get({ id: pendingId }).status, 'open')
+      assert.ok(await db.prepare('SELECT id FROM fees WHERE id=@id').get({ id: feeId }), 'fee must still exist')
+    }
+    // Full in another section is not Full in this one.
+    const wrongSection = { id: 24, username: 'wrong', name: 'Wrong', permissions: JSON.stringify({ review: true, products: true }) }
+    assert.strictEqual((await req(reviewApp, wrongSection, 'POST', `/${pendingId}/approve`)).json.code, 'review_section_full_required')
+    // And the allowed path: Full in Fees + review.
+    const ok = await req(reviewApp, { id: 25, username: 'ok', name: 'Ok', permissions: JSON.stringify({ review: true, fees: true }) }, 'POST', `/${pendingId}/approve`)
+    assert.strictEqual(ok.status, 200, JSON.stringify(ok.json))
+  })
+
+  await check('N12: an admin (Full everywhere) approves another person\'s request', async () => {
+    const feeId = seedFee()
+    const queued = await req(feesApp, REVIEW_TIER_USER, 'DELETE', `/${feeId}`)
+    const admin = { id: 26, username: 'boss', name: 'Boss', role_code: 'admin', permissions: '{}' }
+    const ok = await req(reviewApp, admin, 'POST', `/${queued.json.pendingActionId}/approve`)
+    assert.strictEqual(ok.status, 200, JSON.stringify(ok.json))
+  })
+
+  await check('N12 UI parity: the Review page mirrors both refusals and ships EN + KM text for the codes', async () => {
+    const ui = fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 'src', 'components', 'review', 'ReviewQueue.tsx'), 'utf8')
+    assert.match(ui, /review_self_approval/)
+    assert.match(ui, /review_section_full_required/)
+    assert.match(ui, /getPermissionTier\(row\.section\) !== 'full'/)
+    for (const pack of ['en', 'km']) {
+      const strings = JSON.parse(fs.readFileSync(path.join(__dirname, '..', '..', 'frontend', 'src', 'lang', pack + '.json'), 'utf8'))
+      assert.ok(strings.review_self_approval, pack + ' self-approval text')
+      assert.ok(/\{section\}/.test(strings.review_section_full_required || ''), pack + ' section text keeps its {section} placeholder')
+    }
+  })
+
+  // N12b: self-approval is matched on the ACCOUNT ID, never on a display or user name. Names change
+  // (renames) and can repeat (two staff called the same), ids do not.
+  await check('N12b: a requester who has since been renamed (same id) is still refused; a different account with the same name approves', async () => {
+    const feeId = seedFee()
+    const original = { id: 41, username: 'dara', name: 'Dara', permissions: JSON.stringify({ fees: 'review', review: true }) }
+    const queued = await req(feesApp, original, 'DELETE', `/${feeId}`)
+    assert.strictEqual(queued.status, 202, JSON.stringify(queued.json))
+    const pendingId = queued.json.pendingActionId
+    assert.strictEqual(db.prepare('SELECT requested_by FROM pending_actions WHERE id=@id').get({ id: pendingId }).requested_by, 41)
+
+    // Same account (id 41), renamed to something unrelated, now Full in fees.
+    const renamed = { id: 41, username: 'dara.renamed', name: 'Completely Different Name', permissions: JSON.stringify({ fees: true, review: true }) }
+    const refused = await req(reviewApp, renamed, 'POST', `/${pendingId}/approve`)
+    assert.strictEqual(refused.status, 403, JSON.stringify(refused.json))
+    assert.strictEqual(refused.json.code, 'review_self_approval')
+    assert.strictEqual(db.prepare('SELECT status FROM pending_actions WHERE id=@id').get({ id: pendingId }).status, 'open')
+
+    // A different account (id 42) that happens to carry the requester's username and name.
+    const namesake = { id: 42, username: 'dara', name: 'Dara', permissions: JSON.stringify({ fees: true, review: true }) }
+    const allowed = await req(reviewApp, namesake, 'POST', `/${pendingId}/approve`)
+    assert.strictEqual(allowed.status, 200, JSON.stringify(allowed.json))
+    assert.strictEqual(allowed.json.data.reviewed_by, 42)
+    assert.strictEqual(await db.prepare('SELECT id FROM fees WHERE id=@id').get({ id: feeId }), undefined)
+  })
+
+  await check('N12b: the id comparison is numeric, so a string id from a session row still matches', async () => {
+    const feeId = seedFee()
+    const queued = await req(feesApp, { id: 43, username: 'x', name: 'X', permissions: JSON.stringify({ fees: 'review', review: true }) }, 'DELETE', `/${feeId}`)
+    const asString = { id: '43', username: 'other', name: 'Other', permissions: JSON.stringify({ fees: true, review: true }) }
+    const refused = await req(reviewApp, asString, 'POST', `/${queued.json.pendingActionId}/approve`)
+    assert.strictEqual(refused.status, 403)
+    assert.strictEqual(refused.json.code, 'review_self_approval')
+  })
+
   console.log(`\n${passed} check(s) passed.`)
 }
 

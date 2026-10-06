@@ -36,6 +36,8 @@ const routeDb = {
       },
     }
   },
+  // N13: promotions writes commit the write and its audit receipt in one batch.
+  async batch(items) { return db.batch(items) },
 }
 const overrides = {
   '../lib/db': { getDb: () => routeDb },
@@ -68,8 +70,13 @@ function load(rel) {
 
 const app = load('routes/promotions.ts').default
 const ctx = { waitUntil() {}, passThroughOnException() {} }
+// N13: promotions writes carry a request id and, for one row, the version they read.
+let requestSeq = 0
 async function send(method, url, body) {
-  const res = await app.request(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, { DB: db }, ctx)
+  const payload = { client_request_id: `link_probe_${++requestSeq}_abcdefgh`, ...body }
+  const card = /^\/(\d+)$/.exec(url)
+  if (method === 'PUT' && card) payload.expected_updated_at = db.prepare('SELECT updated_at FROM promotions WHERE id = ?').get([Number(card[1])]).updated_at
+  const res = await app.request(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }, { DB: db }, ctx)
   return { status: res.status, body: await res.json() }
 }
 const stripCount = () => db.prepare('SELECT COUNT(*) AS n FROM promotions').get().n

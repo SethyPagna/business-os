@@ -62,7 +62,7 @@ for (const file of files) {
 // POS has the same stronger same-batch contract for its sole mutation and is
 // likewise checked by an exact route-specific contract below.
 for (const { file, src } of withMutations) {
-  if (file === 'shifts.ts' || file === 'pos.ts') continue
+  if (file === 'shifts.ts' || file === 'pos.ts' || file === 'promotions.ts') continue
   ok(src.includes('audit('), `${file} registers mutations and calls audit(`)
 }
 
@@ -125,6 +125,23 @@ ok(/writeContinuation\([\s\S]*auditAction: 'shift\.reopen'/.test(reopenRoute),
   'shifts.ts reopen uses the atomic audited continuation writer')
 ok(/db\.batch\(\[[\s\S]*transitionAuditSql\(\)/.test(amendRoute),
   'shifts.ts amendment writes audit in the same batch')
+
+// Promotions (N13) is the third stronger-contract file: every one of its seven
+// writes carries a client_request_id and commits its audit row -- which IS the
+// idempotency receipt -- in the same db.batch as the write, through
+// lib/auditWriteReceipt.ts (guarded by `WHERE changes() = 1`). Checked per route
+// so a new, un-receipted promotions write cannot slip in under a generic exemption.
+const promotions = fs.readFileSync(path.join(routesDir, 'promotions.ts'), 'utf8')
+const promoWrites = [...promotions.matchAll(/^app\.(post|put|delete)\(('[^']*')/gm)].map((m) => m[1] + ' ' + m[2])
+ok(promoWrites.length === 7, 'promotions.ts registers exactly the seven covered writes: ' + promoWrites.join(', '))
+const promoBlocks = promotions.split(/^app\.(?=post|put|delete)/m).slice(1)
+for (const block of promoBlocks) {
+  const name = block.slice(0, block.indexOf(','))
+  ok(/db\.batch\(\[[\s\S]*receiptAuditStatement\(/.test(block), 'promotions.ts ' + name + ' commits its audit receipt in the same batch as the write')
+  ok(/readWriteRequestId\(body\)/.test(block), 'promotions.ts ' + name + ' requires a client_request_id')
+}
+const receiptLib = fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'auditWriteReceipt.ts'), 'utf8')
+ok(/INSERT INTO audit_logs[\s\S]*WHERE changes\(\) = 1/.test(receiptLib), 'auditWriteReceipt.ts writes the receipt only when the guarded write changed a row')
 
 // Rule 2 -- the read-only four are actually read-only (no mutation handlers
 // AND no direct writes). If one of these grows a write path, this fails and

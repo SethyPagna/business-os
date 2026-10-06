@@ -52,6 +52,12 @@ const routeDb = {
   },
   async batch(items) {
     log.batches.push(items.map((item) => ({ sql: item.sql, params: item.params })))
+    // N13: a promotions write and its audit row (the idempotency receipt) now commit in
+    // one batch, so count them here exactly as run()/audit() were counted before.
+    for (const item of items) {
+      if (/INSERT INTO audit_logs/.test(item.sql)) log.audits += 1
+      else log.writes.push(item.sql)
+    }
     return base.batch(items)
   },
 }
@@ -89,9 +95,24 @@ function load(rel) {
 
 const app = load('routes/promotions.ts').default
 const ctx = { waitUntil() {}, passThroughOnException() {} }
+// N13: every promotions write carries a request id, and an edit/delete of one row the
+// version it read. This helper supplies both (from the stored row) unless the case sets
+// them, so each case still exercises the behaviour it is about.
+let requestSeq = 0
+function withIdentity(method, url, body) {
+  const out = { client_request_id: `save_probe_${++requestSeq}_abcdefgh`, ...(body || {}) }
+  const rule = /^\/rules\/(\d+)$/.exec(url)
+  const card = /^\/(\d+)$/.exec(url)
+  if ((method === 'PUT' || method === 'DELETE') && (rule || card) && !('expected_updated_at' in out)) {
+    const stored = base.prepare(`SELECT updated_at FROM ${rule ? 'promotion_rules' : 'promotions'} WHERE id = ?`).get([Number((rule || card)[1])])
+    out.expected_updated_at = stored ? stored.updated_at : null
+  }
+  return out
+}
 async function send(method, url, body) {
+  const payload = withIdentity(method, url, body)
   reset()
-  const res = await app.request(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, { DB: routeDb }, ctx)
+  const res = await app.request(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }, { DB: routeDb }, ctx)
   return { status: res.status, body: await res.json() }
 }
 const orderOf = () => base.prepare('SELECT id FROM promotions ORDER BY sort_order ASC, id ASC').all().map((row) => row.id)
@@ -112,8 +133,9 @@ async function main() {
     assert.equal(res.status, 200, JSON.stringify(res.body))
     assert.deepEqual(orderOf(), [ids[4], ids[0], ids[1], ids[2], ids[3]])
     // Every card's place changes when one jumps from last to first, so five rows
-    // move; the discriminating case is the swap below.
-    assert.equal(log.batches[0].length, 5)
+    // move (+ the one receipt statement); the discriminating case is the swap below.
+    assert.equal(log.batches[0].length, 6)
+    assert.equal(log.batches[0].filter((item) => /^\s*UPDATE promotions/.test(item.sql)).length, 5)
   })
 
   await check('swapping two neighbours writes exactly two rows and leaves the other three alone', async () => {
@@ -123,7 +145,8 @@ async function main() {
     const res = await send('PUT', '/reorder/all', { order: next })
     assert.equal(res.status, 200)
     assert.deepEqual(orderOf(), next)
-    assert.equal(log.batches[0].length, 2, 'two UPDATEs (the old route sent five)')
+    assert.equal(log.batches[0].filter((item) => /^\s*UPDATE promotions/.test(item.sql)).length, 2, 'two UPDATEs (the old route sent five)')
+    assert.equal(log.batches[0].length, 3, 'the two moves plus the receipt row')
     const untouched = base.prepare("SELECT COUNT(*) AS n FROM promotions WHERE updated_at = '2020-01-01 00:00:00'").get().n
     assert.equal(untouched, 3)
     assert.equal(log.audits, 1)

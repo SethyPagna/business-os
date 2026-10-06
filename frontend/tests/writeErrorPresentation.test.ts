@@ -20,6 +20,12 @@ assert.doesNotMatch(timeoutKhmer.detail, /Request timed out after/)
 const stale = presentWriteError({ code: 'client_request_id_required' }, translate(en))
 assert.equal(stale.detail, en.write_failed_app_out_of_date)
 assert.equal(stale.unknownOutcome, false)
+// N13: a write without its version (expense / promotion edit) is the same out-of-date-app case, in both packs.
+for (const pack of [en, km]) {
+  const noVersion = presentWriteError({ code: 'expected_updated_at_required' }, translate(pack))
+  assert.equal(noVersion.detail, pack.write_failed_app_out_of_date)
+  assert.equal(noVersion.title, pack.write_failed_title)
+}
 
 const rejectedKhmer = presentWriteError({ code: 'validation_failed' }, translate(km))
 assert.equal(rejectedKhmer.detail, km.write_rejected_details)

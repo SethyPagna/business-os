@@ -364,7 +364,11 @@ async function check(name, fn) {
 
 const fakeExecutionCtx = { waitUntil: (p) => { p?.catch?.(() => {}) }, passThroughOnException: () => {} }
 
+// N13: POST /adjust requires a client_request_id; unless a case sets its own (to test a retry), give each call a fresh one.
+let adjustProbeSeq = 0
+const withAdjustId = (body) => (body && !('client_request_id' in body) && !('clientRequestId' in body) ? { client_request_id: 'fixture_probe_' + (++adjustProbeSeq) + '_abcdefgh', ...body } : body)
 async function req(method, url, body, targetApp = app) {
+  if (url === '/adjust' || (method === 'POST' && url.startsWith('/tagged-lots/'))) body = withAdjustId(body)
   const res = await targetApp.request(url, {
     method,
     headers: { 'Content-Type': 'application/json' },
@@ -911,6 +915,28 @@ const ADD = (extra) => ({
     // it would be worse -- undo could never put it back.
     assert.deepEqual(sellable(), { product: 0, branch: 0 })
     assert.equal(Number(heldLots()[0].quantity_remaining), 4)
+  })
+
+  // N13: Restore / Dispose is the other 'adjust'-class stock writer; like POST /adjust it refuses a
+  // request with no client_request_id (this file's req() mints one unless the body names its own).
+  await check('N13: a tagged-lot Restore or Dispose without a usable request id is refused and moves nothing', async () => {
+    seed()
+    assert.equal((await req('POST', '/adjust', ADD())).status, 200)
+    assert.equal((await req('POST', '/adjust', { productId: 1, type: 'remove', quantity: 2, reason: 'cracked', branchId: 1, conditionTag: 'expired' })).status, 200)
+    const before = movements().length
+    for (const action of ['dispose', 'restore']) {
+      const body = { productId: 1, branchId: 1, conditionTag: 'expired', quantity: 1, reason: 'checked' }
+      const missing = await req('POST', `/tagged-lots/${action}`, { ...body, client_request_id: '' })
+      assert.equal(missing.status, 400, JSON.stringify(missing.json))
+      assert.equal(missing.json.code, 'client_request_id_required', `${action} without an id`)
+      const malformed = await req('POST', `/tagged-lots/${action}`, { ...body, client_request_id: 'abc' })
+      assert.equal(malformed.status, 400)
+      assert.equal(malformed.json.code, 'invalid_client_request_id', `${action} with a malformed id keeps the specific code`)
+    }
+    assert.equal(movements().length, before, 'nothing was written')
+    assert.equal(Number(heldLots('expired')[0].quantity_remaining), 2, 'the held row is untouched')
+    // The allowed path: a usable id still works.
+    assert.equal((await req('POST', '/tagged-lots/dispose', { productId: 1, branchId: 1, conditionTag: 'expired', quantity: 1, reason: 'binned' })).status, 200)
   })
 
   console.log(`\n${passed} checks passed`)

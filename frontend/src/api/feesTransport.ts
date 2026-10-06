@@ -560,10 +560,15 @@ export async function createFee(payload: FeePayload, actorId: number | string | 
   return response
 }
 
-export function updateFee(id: number, payload: FeePayload): Promise<{ fee: FeeRecord }> {
+// N13: the Worker refuses an expense edit that does not state the version it read
+// (expected_updated_at), so a stale form can no longer overwrite a newer edit. The
+// type makes the field mandatory for every caller; null is only for a legacy row
+// that has no version.
+export function updateFee(id: number, payload: FeePayload & { expectedUpdatedAt: string | null }): Promise<{ fee: FeeRecord }> {
+  const body = { ...payload, expectedUpdatedAt: payload.expectedUpdatedAt ?? null }
   return route(
     'fees:update',
-    () => apiFetch('PUT', `/api/fees/${encodeURIComponent(String(id))}`, payload),
+    () => apiFetch('PUT', `/api/fees/${encodeURIComponent(String(id))}`, body),
     null,
     true,
   ) as Promise<{ fee: FeeRecord }>

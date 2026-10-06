@@ -80,7 +80,10 @@ function fresh() {
   user = { id: 7, name: 'Operator', permissions: JSON.stringify({ inventory: true, product_cost_edit: true, product_cost_view: true }) }
 }
 
+// N13: POST /adjust requires a client_request_id; unless a case sets its own (to test a retry), give each call a fresh one.
+let adjustProbeSeq = 0
 async function request(body) {
+  if (body && !body.client_request_id) body = { client_request_id: 'fixture_probe_' + (++adjustProbeSeq) + '_abcdefgh', ...body }
   const response = await inventory.request('/adjust', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, {}, {
     waitUntil: (promise) => { waits.push(Promise.resolve(promise)) }, passThroughOnException: () => {},
   })

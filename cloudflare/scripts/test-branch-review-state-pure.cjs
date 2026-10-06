@@ -496,7 +496,7 @@ function reviewRoute(route, overrides = {}, reviewOverrides = {}) {
   }, 'handler')
 }
 const directUser = { id: 7, name: 'Requester', permissions: '{"branches":true}' }
-const reviewUser = { id: 8, name: 'Reviewer', permissions: '{"review":true}' }
+const reviewUser = { id: 8, name: 'Reviewer', permissions: '{"review":true,"branches":true}' }
 const requestUser = { id: 7, name: 'Requester', permissions: '{"branches":"review"}' }
 function ctx(w, body = {}, user = directUser, id = 1) {
   return { env: w.env, req: { param: () => String(id), json: async () => body, query: () => undefined }, get: () => user,

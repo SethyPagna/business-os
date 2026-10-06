@@ -324,19 +324,51 @@ async function run() {
     console.log('PASS a different id still writes (control)')
   }
 
-  // 3) CONTROL. No id at all is exactly the pre-0192 behaviour -- the double
-  //    apply this lane exists to stop. Pinned so nobody "fixes" the absent-id
-  //    path into a silent refusal.
+  // 3) N13: NO id at all is refused. This used to be pinned as the pre-0192
+  //    CONTROL (an unidentified line applied twice when its answer was lost) --
+  //    that double apply is the defect, so POST /adjust now requires the id.
+  //    Both spellings the wrapper reads count; a refused line moves no stock
+  //    and writes no receipt.
   {
     const db = freshDb()
     const c = makeContext(db)
     const bodyWithoutId = addBody('stockline_cccccccc-3333')
     delete bodyWithoutId.client_request_id
-    await runAdjustAction(c, bodyWithoutId)
-    await runAdjustAction(c, bodyWithoutId)
-    assert.equal(branchStock(db), 10, 'CONTROL: an unidentified line still applies twice')
-    assert.equal(receiptCount(db), 0, 'an unidentified line writes no receipt')
-    console.log('PASS an unidentified line keeps the pre-0192 behaviour (control)')
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const refused = await runAdjustAction(c, bodyWithoutId)
+      assert.equal(refused.status, 400, 'an unidentified line is refused')
+      assert.equal((await jsonOf(refused)).code, 'client_request_id_required', 'and says why')
+    }
+    assert.equal(branchStock(db), 0, 'an unidentified line moves no stock, however often it is sent')
+    assert.equal(movementCount(db), 0)
+    assert.equal(receiptCount(db), 0, 'and writes no receipt')
+    const camel = await runAdjustAction(c, { ...bodyWithoutId, clientRequestId: 'stockline_cccccccc-camel' })
+    assert.equal(camel.status, 200, 'the camelCase spelling is an id too')
+    console.log('PASS an unidentified line is refused, never silently unprotected (N13)')
+  }
+
+  // 3b) N13 ordering: the request-id requirement comes AFTER the permission
+  //     checks (a user who may not adjust stock is told that, not "send an id")
+  //     and BEFORE any database access (a refusal costs no round trip). The
+  //     tagged-lot Restore/Dispose route is covered in test-stock-condition-tag-pure.cjs.
+  {
+    const db = freshDb()
+    const denied = makeContext(db, { id: 9, username: 'clerk', name: 'Clerk', permissions: JSON.stringify({ inventory: 'view' }) })
+    const noId = addBody('x'); delete noId.client_request_id
+    const refused = await runAdjustAction(denied, noId)
+    assert.equal(refused.status, 403, 'a user without Full Inventory gets the permission refusal, not the id one')
+    assert.notEqual((await jsonOf(refused)).code, 'client_request_id_required')
+
+    let opened = 0
+    const guarded = makeContext(db)
+    const realEnv = guarded.env
+    Object.defineProperty(guarded, 'env', { get() { opened += 1; return realEnv } })
+    const missing = await runAdjustAction(guarded, noId)
+    assert.equal(missing.status, 400)
+    assert.equal(opened, 0, 'the id refusal never touches the environment/database')
+
+    assert.equal(receiptCount(db), 0)
+    console.log('PASS N13: the id requirement follows permission and precedes any database access')
   }
 
   // 4) REVERSAL / retry after a refusal. A rejected line moved no stock, so
@@ -470,8 +502,9 @@ async function run() {
     assert.equal(branchStock(db), 0, 'no stock moved')
     assert.equal(receiptCount(db), 0, 'and no receipt was written')
     const empty = await runAdjustAction(c, { ...addBody('ignored'), client_request_id: '' })
-    assert.equal(empty.status, 200, 'CONTROL: an EMPTY id means "no id", the pre-0192 path')
-    assert.equal(branchStock(db), 5, 'CONTROL: and writes')
+    assert.equal(empty.status, 400, 'an EMPTY id is "no id", which POST /adjust now refuses (N13)')
+    assert.equal((await jsonOf(empty)).code, 'client_request_id_required')
+    assert.equal(branchStock(db), 0, 'and nothing was written')
     console.log('PASS an unusable client_request_id is a 400, never silently unprotected')
   }
 

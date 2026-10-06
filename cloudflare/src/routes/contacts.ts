@@ -4,6 +4,7 @@ import { getDb } from '../lib/db'
 import { getImportFencedDb, isImportMaintenanceFenceError } from '../lib/importMaintenanceFence'
 import { applyCustomerGenderRestoration, previewCustomerGenderRestoration, customerGenderRestorationStatus, notifyCustomerGenderRestoration, canRestoreCustomerGender, GENDER_RESTORATION_MAX_BYTES } from '../lib/customerGenderRestoration'
 import { loyaltyAffectingSaleSql, LOYALTY_REASSIGNMENT_CODE, LOYALTY_REASSIGNMENT_MESSAGE } from '../lib/saleCustomerAssignmentGuard'
+import { netSaleExpr, recognizedExpr } from '../lib/salesAnalytics'
 import { chunkForBinding } from '../lib/sqlBinding'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit, buildAuditStatement, changedFields } from '../lib/audit'
@@ -2870,6 +2871,15 @@ const PHONE_KEY_SQL = (column: string): string =>
   `ltrim(replace(replace(replace(replace(trim(COALESCE(${column},'')),' ',''),'-',''),'(',''),')',''),'0')`
 
 app.get('/customers/link-conflicts', async (c) => {
+  // N5: spend per customer/phone is the same data contacts:financial_history
+  // exists to hide from cashiers (see /customers/reports/ar-invoices). A user
+  // without it still gets the list -- they may hold resolve_conflicts and need
+  // to see which links to fix -- but total_usd, sale_count (purchase frequency)
+  // and first_at / last_at (buying recency) are omitted from every row, and the
+  // order no longer ranks by either: it is by customer / name instead.
+  // Refusing the whole list would leave link conflicts unresolvable
+  // for exactly the staff the Conflicts tab is for.
+  const canSeeSpend = getActionTier(c.get('user'), 'contacts', 'financial_history') === 'full'
   const db = getDb(c.env)
   const salePhone = PHONE_KEY_SQL('s.customer_phone')
   const custPhone = PHONE_KEY_SQL('c.phone')
@@ -2910,7 +2920,7 @@ app.get('/customers/link-conflicts', async (c) => {
              MAX(trim(s.customer_phone)) AS sale_phone, ${salePhone} AS phone_key,
              MAX(trim(COALESCE(s.customer_name,''))) AS sale_name,
              COUNT(*) AS sale_count, MIN(s.created_at) AS first_at, MAX(s.created_at) AS last_at,
-             ROUND(COALESCE(SUM(s.total_usd),0),2) AS total_usd
+             ROUND(COALESCE(SUM(CASE WHEN ${recognizedExpr('s.')} THEN ${netSaleExpr('s.')} ELSE 0 END),0),2) AS total_usd
       FROM sales s JOIN customers c ON c.id = s.customer_id
       WHERE ${salePhone} <> '' AND ${salePhone} <> ${custPhone}
       GROUP BY s.customer_id, ${salePhone}
@@ -2920,7 +2930,7 @@ app.get('/customers/link-conflicts', async (c) => {
       WHERE d.contact_table = 'customers' AND d.cluster_type = 'link_mismatch'
         AND d.cluster_value = g.customer_id || '|' || g.phone_key
     )`}
-    ORDER BY g.last_at DESC
+    ORDER BY ${canSeeSpend ? 'g.last_at DESC' : 'g.customer_id ASC, g.phone_key ASC'}
     LIMIT @limit OFFSET @offset
   `).all<MismatchRow>({ limit: pageSize, offset: mismatchOffset })
 
@@ -2946,7 +2956,7 @@ app.get('/customers/link-conflicts', async (c) => {
              MAX(trim(COALESCE(s.customer_phone,''))) AS phone,
              ${salePhone} AS phone_key,
              COUNT(*) AS sale_count, MIN(s.created_at) AS first_at, MAX(s.created_at) AS last_at,
-             ROUND(COALESCE(SUM(s.total_usd),0),2) AS total_usd
+             ROUND(COALESCE(SUM(CASE WHEN ${recognizedExpr('s.')} THEN ${netSaleExpr('s.')} ELSE 0 END),0),2) AS total_usd
       FROM sales s
       WHERE s.customer_id IS NULL
         AND (trim(COALESCE(s.customer_name,'')) <> '' OR trim(COALESCE(s.customer_phone,'')) <> '')
@@ -2957,7 +2967,7 @@ app.get('/customers/link-conflicts', async (c) => {
       WHERE d.contact_table = 'customers' AND d.cluster_type = 'link_missing'
         AND d.cluster_value = lower(g.name) || '|' || g.phone_key
     )`}
-    ORDER BY g.sale_count DESC, g.last_at DESC
+    ORDER BY ${canSeeSpend ? 'g.sale_count DESC, g.last_at DESC' : 'lower(g.name) ASC, g.phone_key ASC'}
     LIMIT @limit OFFSET @offset
   `).all<MissingRow>({ limit: pageSize, offset: missingOffset })
 
@@ -2990,11 +3000,15 @@ app.get('/customers/link-conflicts', async (c) => {
       )`}
     `).get<{ total: number }>(),
   ])
+  const withoutSpend = <T extends { sale_count?: number; total_usd?: number; first_at?: string; last_at?: string }>(row: T): Omit<T, 'sale_count' | 'total_usd' | 'first_at' | 'last_at'> => {
+    const { sale_count: _saleCount, total_usd: _totalUsd, first_at: _firstAt, last_at: _lastAt, ...rest } = row
+    return rest
+  }
   const mismatchTotal = Number(mismatchCountRow?.total) || 0
   const missingTotal = Number(missingCountRow?.total) || 0
   return c.json({
-    mismatches,
-    missing,
+    mismatches: canSeeSpend ? mismatches : mismatches.map(withoutSpend),
+    missing: canSeeSpend ? missing : missing.map(withoutSpend),
     pagination: {
       pageSize,
       mismatches: { page: mismatchPage, total: mismatchTotal, totalPages: Math.max(1, Math.ceil(mismatchTotal / pageSize)) },
