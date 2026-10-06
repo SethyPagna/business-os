@@ -577,7 +577,7 @@ async function searchProductsPayload(env: Env, query: Record<string, string>) {
            p.out_of_stock_threshold, p.image_path, p.is_active, p.supplier, p.parent_id,
            p.is_group, p.expiry_date, p.expiry_alert_days, p.created_at, p.updated_at,
            COALESCE((
-             SELECT json_group_array(json_object('branch_id', bs2.branch_id, 'branch_name', b2.name, 'quantity', bs2.quantity))
+             SELECT json_group_array(json_object('branch_id', bs2.branch_id, 'branch_name', b2.name, 'quantity', bs2.quantity, 'branch_role', b2.role, 'branch_active', b2.is_active))
              FROM branch_stock bs2
              JOIN branches b2 ON b2.id = bs2.branch_id
              WHERE bs2.product_id = p.id
@@ -769,7 +769,7 @@ app.get('/summary', async (c) => {
       -- join right below, which already aggregates before joining).
       LEFT JOIN (
         SELECT bs2.product_id,
-               json_group_array(json_object('branch_id', bs2.branch_id, 'branch_name', b2.name, 'quantity', bs2.quantity)) AS branch_stock_json
+               json_group_array(json_object('branch_id', bs2.branch_id, 'branch_name', b2.name, 'quantity', bs2.quantity, 'branch_role', b2.role, 'branch_active', b2.is_active)) AS branch_stock_json
         FROM branch_stock bs2
         JOIN branches b2 ON b2.id = bs2.branch_id
         GROUP BY bs2.product_id
@@ -821,7 +821,7 @@ app.get('/summary', async (c) => {
     -- branchId-scoped path above for why.
     LEFT JOIN (
       SELECT bs2.product_id,
-             json_group_array(json_object('branch_id', bs2.branch_id, 'branch_name', b2.name, 'quantity', bs2.quantity)) AS branch_stock_json
+             json_group_array(json_object('branch_id', bs2.branch_id, 'branch_name', b2.name, 'quantity', bs2.quantity, 'branch_role', b2.role, 'branch_active', b2.is_active)) AS branch_stock_json
       FROM branch_stock bs2
       JOIN branches b2 ON b2.id = bs2.branch_id
       GROUP BY bs2.product_id
@@ -2636,8 +2636,8 @@ app.post('/transfer', async (c) => {
   if (quantity > available) return c.json({ error: 'Insufficient stock in source branch', code: 'transfer_insufficient_stock' }, 400)
 
   const [fromBranch, toBranch, canonicalTransferRows] = await Promise.all([
-    db.prepare('SELECT id, name FROM branches WHERE id = @id').get<{ id: number; name: string }>({ id: fromBranchId }),
-    db.prepare('SELECT id, name FROM branches WHERE id = @id').get<{ id: number; name: string }>({ id: toBranchId }),
+    db.prepare('SELECT id, name, role FROM branches WHERE id = @id').get<{ id: number; name: string; role: string | null }>({ id: fromBranchId }),
+    db.prepare('SELECT id, name, role FROM branches WHERE id = @id').get<{ id: number; name: string; role: string | null }>({ id: toBranchId }),
     db.prepare(CANONICAL_TRANSFER_BRANCHES_SQL).all<CanonicalTransferBranchRow>(),
   ])
 
@@ -2658,7 +2658,7 @@ app.post('/transfer', async (c) => {
   // db.batch below, i.e. before any stock moves. The selected rows and the
   // complete canonical-role set are read separately so duplicate active
   // identities cannot be hidden by an id lookup.
-  const directionError = transferDirectionError(fromBranch?.name, toBranch?.name)
+  const directionError = transferDirectionError(fromBranch, toBranch)
     || (!isCanonicalTransferSelection(canonicalTransferPair, fromBranchId, toBranchId)
       ? TRANSFER_DIRECTION_ERROR
       : null)
@@ -2786,6 +2786,12 @@ app.post('/move-row', async (c) => {
   const branchId = requestedBranchId || (await defaultBranchId(c.env))
   if (!branchId) return c.json({ error: 'An active branch is required before stock can be moved' }, 400)
   const branch = await db.prepare('SELECT id, name FROM branches WHERE id = @id').get<{ id: number; name: string }>({ id: branchId })
+  // The moved units arrive as a fresh lot at this branch, so it must be active:
+  // a stale tab naming a retired branch is refused here and again inside the batch.
+  try { await requireReceivingBranch(db, branchId) } catch (error) {
+    if (isReceivingBranchError(error)) return c.json(RECEIVING_BRANCH_INACTIVE, 409)
+    throw error
+  }
 
   const available = await branchStockQty(c.env, sourceProductId, branchId)
   if (quantity > available) return c.json({ error: `Cannot move ${quantity} - only ${available} available in ${branch?.name || 'this branch'}` }, 400)
@@ -2822,6 +2828,7 @@ app.post('/move-row', async (c) => {
   }
   try {
     await db.batch([
+      receivingBranchAssertion(branchId),
       ...removal.statements,
       ...receipt.statements,
       { sql: 'DELETE FROM stock_session_guards', params: {} },
@@ -2841,6 +2848,7 @@ app.post('/move-row', async (c) => {
       },
     ])
   } catch (err) {
+    if (isReceivingBranchError(err)) return c.json(RECEIVING_BRANCH_INACTIVE, 409)
     if (isStockRemovalConflict(err)) {
       return c.json({ ...STOCK_REMOVAL_CONFLICT, error: 'The stock changed while it was being moved. Nothing was moved; refresh and try again.' }, 409)
     }

@@ -480,8 +480,8 @@ async function attachBranchStock(env: Env, products: Array<Record<string, unknow
   // chunk: `branches` is a handful of rows and repeating them per chunk
   // would multiply reads for no gain.
   const branches = await db.prepare(`
-    SELECT id, name FROM branches WHERE is_active = 1 ORDER BY is_default DESC, id ASC
-  `).all<{ id: number; name: string }>()
+    SELECT id, name, role, is_active FROM branches WHERE is_active = 1 ORDER BY is_default DESC, id ASC
+  `).all<{ id: number; name: string; role: string | null; is_active: number }>()
   const stockRows = await selectInChunks(ids, 0, (chunk) => {
     const { sql, params } = buildInClause('id', chunk)
     return db.prepare(`
@@ -511,6 +511,11 @@ async function attachBranchStock(env: Env, products: Array<Record<string, unknow
       branch_stock: branches.map((branch) => ({
         branch_id: branch.id,
         branch_name: branch.name,
+        // The till decides "can sell" from the role carried here, never from the
+        // name (a renamed Warehouse is still the selling branch). NULL until the
+        // identity backfill; consumers then fall back to the name as before.
+        branch_role: branch.role ?? null,
+        branch_active: branch.is_active,
         quantity: quantityByProductBranch.get(`${productId}:${branch.id}`) || 0,
       })),
     }

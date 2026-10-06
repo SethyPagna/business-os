@@ -4,7 +4,7 @@ import { getKhmerTextProps } from '../../utils/scriptTypography.ts'
 import { computeCartLineSavings } from './posCore.ts'
 import AppSelect from '../shared/AppSelect'
 import ProductNameRail from '../shared/ProductNameRail.tsx'
-import { branchCanSell } from '../../utils/branchRoles.ts'
+import { branchCanSellNow } from '../../utils/branchRoles.ts'
 import { promotionLabelText } from '../../utils/saleItemNameLayout.ts'
 
 type Translate = (key: string) => string | undefined
@@ -57,6 +57,9 @@ interface BranchOption {
   id: string | number
   name: string
   is_default?: boolean
+  // Explicit operational role; NULL before the identity backfill (the name decides).
+  role?: string | null
+  is_active?: boolean | number | null
 }
 
 interface CartItemProps {
@@ -244,7 +247,7 @@ export default function CartItem({
                 ...branches.map((branch) => ({
                   value: branch.id,
                   label: `${branch.name}${branch.is_default ? ' *' : ''}`,
-                  disabled: !branchCanSell(branch.name),
+                  disabled: !branchCanSellNow(branch),
                 })),
               ]}
             />
