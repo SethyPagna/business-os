@@ -67,14 +67,16 @@ function product(fields) {
 const events = () => rawDb.prepare('SELECT * FROM stock_alert_events ORDER BY id').all()
 const stock = (id) => rawDb.prepare('SELECT stock_quantity FROM products WHERE id = ?').get(id).stock_quantity
 
-// One sale batch, shaped like the routes: deductions first, then the alert INSERT.
+// One sale batch, shaped like the routes: the alert INSERT goes in AHEAD of the first stock statement (insertStockAlertStatement),
+// the deductions clamp the rollup at 0 exactly as routes/sales.ts does for units taken.
 async function sell(lines, { config = DEFAULT_CONFIG, sale = { saleId: 1 }, failAfter = false } = {}) {
   const statements = lines.map((line) => ({
-    sql: 'UPDATE products SET stock_quantity = stock_quantity - @quantity WHERE id = @id',
+    sql: line.quantity > 0
+      ? 'UPDATE products SET stock_quantity = MAX(0, stock_quantity - @quantity) WHERE id = @id'
+      : 'UPDATE products SET stock_quantity = stock_quantity - @quantity WHERE id = @id',
     params: { id: line.product_id, quantity: line.quantity },
   }))
-  const alert = alerts.planSaleStockAlertStatement({ lines, lowStock: config, sale })
-  if (alert) statements.push(alert)
+  alerts.insertStockAlertStatement(statements, 0, alerts.planSaleStockAlertStatement({ lines, lowStock: config, sale }))
   if (failAfter) statements.push({ sql: 'INSERT INTO no_such_table VALUES (1)', params: {} })
   const before = events().length
   await db.batch(statements)
@@ -216,6 +218,36 @@ check('a rolled-back sale leaves no event', async () => {
   assert.equal(stock(a), 11, 'the deduction rolled back with it')
 })
 
+check('a rollup the clamp held at 0 is not a crossing: it was already out and stays out', async () => {
+  fresh()
+  // products.stock_quantity drifted to 0 while a branch still holds units; the sale of 3 is clamped at 0.
+  const a = product({ name: 'Drifted', stock_quantity: 0 })
+  const created = await sell([L(a, 3)])
+  assert.deepEqual(created, [], 'already out (rollup 0) -> still out: nothing happened to the card, nothing is announced')
+  assert.equal(stock(a), 0)
+  const b = product({ name: 'Short Rollup', stock_quantity: 2 })
+  const crossed = await sell([L(b, 5)])
+  assert.equal(crossed.length, 1, 'rollup 2 (low) taken to 0 by a larger sale is a real low -> out crossing')
+  assert.equal(crossed[0].alert_state, 'out')
+})
+
+check('a replace that gives one product back and takes another nets per product', async () => {
+  fresh()
+  const give = product({ name: 'Given Back', stock_quantity: 4 })
+  const take = product({ name: 'Taken', stock_quantity: 12 })
+  const created = await sell([L(give, -6), L(take, 3)])
+  assert.deepEqual(created.map((row) => [row.product_name, row.alert_state]), [['Taken', 'low']])
+  assert.equal(stock(give), 10)
+})
+
+check('insertStockAlertStatement puts the alert ahead of the stock block and leaves earlier statements where they were', () => {
+  const list = [{ sql: 'a', params: {} }, { sql: 'b', params: {} }, { sql: 'stock', params: {} }]
+  alerts.insertStockAlertStatement(list, 2, { sql: 'alert', params: {} })
+  assert.deepEqual(list.map((statement) => statement.sql), ['a', 'b', 'alert', 'stock'])
+  alerts.insertStockAlertStatement(list, 0, null)
+  assert.equal(list.length, 4, 'no alert, no change')
+})
+
 check('no sold lines, no statement', () => {
   assert.equal(alerts.planSaleStockAlertStatement({ lines: [], lowStock: DEFAULT_CONFIG, sale: { saleId: 1 } }), null)
   assert.equal(alerts.planSaleStockAlertStatement({ lines: [{ product_id: 5, branch_id: 1, quantity: 0 }], lowStock: DEFAULT_CONFIG, sale: { saleId: 1 } }), null)
@@ -235,8 +267,13 @@ check('the statement reaches the families through indexes, never a scan of produ
   const a = product({ name: 'Serum', stock_quantity: 12 })
   const statement = alerts.planSaleStockAlertStatement({ lines: [L(a, 3)], lowStock: DEFAULT_CONFIG, sale: { saleId: 1 } })
   const plan = rawDb.prepare(`EXPLAIN QUERY PLAN ${statement.sql}`).all({ alert_lines: statement.params.alert_lines, alert_sale_id: 1 }).map((row) => row.detail)
-  const scans = plan.filter((detail) => /^SCAN (products|p|c|par)\b/.test(detail))
-  assert.deepEqual(scans, [], `no full scan of products; plan was:\n${plan.join('\n')}`)
+  // Every touch of a products alias must be a key probe: the primary key, name_key or parent_id. A SCAN, or a SEARCH through
+  // any other index (idx_products_active_grouped_pg walked every active product before the CROSS JOIN pin), reads the catalog.
+  const productTouches = plan.filter((detail) => /^(SCAN|SEARCH) (products|p|c|par|parent)\b/.test(detail))
+  assert.ok(productTouches.length >= 4, `the plan names the products probes:\n${plan.join('\n')}`)
+  const wide = productTouches.filter((detail) => /^SCAN\b/.test(detail) || !/\((rowid|name_key|parent_id)=\?\)/.test(detail))
+  assert.deepEqual(wide, [], `no product is reached except by key; plan was:\n${plan.join('\n')}`)
+  assert.ok(!plan.some((detail) => /AUTOMATIC .*INDEX \(id=\?\)/.test(detail)), 'no automatic index is built over the candidate list')
 })
 
 // ---- the bell's feed ---------------------------------------------------------------------------------

@@ -459,5 +459,21 @@ async function run() {
   assert.equal(snapshot(f),before)
   console.log('PASS movement fingerprint overflow rejects reads, final writes, replay and concurrent append atomically')
   }
+  // NOTIF-V2: an un-cancel that takes stock out crosses a product into low stock exactly like a sale does -- and so does
+  // its REDO. The undo gives the units back (no event); the redo takes them again from a healthy family: a new crossing.
+  {
+    const f=fixture();seed(f,1)
+    f.sql.exec("UPDATE sales SET sale_status='cancelled',status_before_cancel='completed' WHERE id=1; UPDATE products SET stock_quantity=11,low_stock_threshold=10,out_of_stock_threshold=0 WHERE id=1")
+    const events=()=>f.sql.prepare('SELECT alert_state,quantity_after,sale_id FROM stock_alert_events ORDER BY id').all().map(row=>({...row}))
+    const applied=await f.call(sales,'/bulk-status',request(f,'completed','alert-apply-0001'))
+    assert.equal(applied.status,200,JSON.stringify(applied))
+    assert.deepEqual(events(),[{alert_state:'low',quantity_after:9,sale_id:1}],'the group that un-cancels the sale records the crossing, naming the one sale')
+    assert.equal((await replay(f,applied.body.actionHistoryId)).status,200)
+    assert.equal(f.sql.prepare('SELECT stock_quantity FROM products WHERE id=1').get().stock_quantity,11,'the undo gave the units back')
+    assert.equal(events().length,1,'giving units back is never a crossing')
+    assert.equal((await replay(f,applied.body.actionHistoryId,'redo',1)).status,200)
+    assert.deepEqual(events().slice(1),[{alert_state:'low',quantity_after:9,sale_id:1}],'the redo takes the units again from a healthy family: one new crossing')
+    console.log('PASS bulk un-cancel and its redo record a stock alert; the undo records none')
+  }
 }
 run().catch(error=>{console.error(error);process.exitCode=1})

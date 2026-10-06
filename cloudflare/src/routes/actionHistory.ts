@@ -12,7 +12,7 @@ import { BULK_STATUS_KIND, notifyBulkStatus } from '../lib/saleBulkStatus'
 import { notifySaleBulkUpdate, SALE_BULK_UPDATE_KINDS } from '../lib/saleBulkUpdate'
 import { isLoyaltyAssignmentError, LOYALTY_REASSIGNMENT_CODE } from '../lib/saleCustomerAssignmentGuard'
 import { notifyReturnBulkAction, RETURN_BULK_ACTION_KIND } from '../lib/returnBulkAction'
-import { sendReturnStatusTelegramEvents } from '../lib/telegram'
+import { sendPendingStockAlerts, sendReturnStatusTelegramEvents } from '../lib/telegram'
 import { notifySaleSettlementAction, SALE_SETTLEMENT_ACTION_KIND } from '../lib/saleSettlementAction'
 import { STOCK_SESSION_KIND, canReplayStockSessionPayload, notifyStockSession } from '../lib/stockSession'
 import { actorSnapshot } from '../lib/actorSnapshot'
@@ -39,6 +39,17 @@ const SERVER_BULK_KINDS = new Set([...SERVER_SALE_BULK_KINDS, RETURN_BULK_ACTION
 // (where no in-memory closure exists). A payload that names no applier behaves
 // exactly as before -- flip status, return the payload for the client to
 // replay -- so nothing that has not opted in is affected.
+
+// NOTIF-V2: a redo (or undo) of a grouped status change that takes stock out can cross a product into low / out of
+// stock; its stock_alert_events row is announced on Telegram after the replay committed, like the original group.
+// Never rejects: nothing about Telegram may fail an already-committed replay.
+async function announceStockAlerts(env: Env): Promise<void> {
+  try {
+    await sendPendingStockAlerts(env)
+  } catch (error) {
+    console.warn('Stock alert Telegram message was not sent:', (error as Error)?.message || error)
+  }
+}
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 app.use('*', requireAuth)
@@ -508,7 +519,7 @@ async function completeServerHistoryTransition(c: Context<{ Bindings: Env; Varia
           : applier.name === RETURN_BULK_ACTION_KIND
             ? notifyReturnBulkAction(c.env)
             : applier.name === BULK_STATUS_KIND
-              ? notifyBulkStatus(c.env)
+              ? Promise.all([notifyBulkStatus(c.env), announceStockAlerts(c.env)])
               : notifySaleBulkUpdate(c.env, String(payload.action || '')))
       // Telegram (owner, 27 Sep 2026): undoing or redoing a grouped return
       // STATUS change cancels or restores those returns, so it is announced

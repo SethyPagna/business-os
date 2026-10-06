@@ -756,11 +756,11 @@ async function buildDeviceApprovalSection(env: Env): Promise<NotificationSection
   }
 }
 
-// Stock rows tell the shop what is running out: anyone who can see stock
-// numbers somewhere (the Dashboard's Low stock / Out of stock cards, or the
-// Branches products list the panel falls back to) may have them.
+// Stock rows name products and quantities, so they keep the audience the bell has always had: inventory
+// access. A Dashboard-only user is NOT widened into them (the Dashboard cards show counts, not this list); the
+// panel's link for a person without the Dashboard falls back to the Branches products list.
 function canSeeStockAlerts(user: SessionUser): boolean {
-  return hasPermission(user, 'dashboard') || hasPermission(user, 'inventory')
+  return hasPermission(user, 'inventory')
 }
 
 // The sales READ rule (reports.ts, sales.ts canReadSales): a view-only user

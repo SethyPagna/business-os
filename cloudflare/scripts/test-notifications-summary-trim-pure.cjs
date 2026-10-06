@@ -123,6 +123,7 @@ async function call(method, pathname, user) {
 }
 const ADMIN = { id: 1, username: 'owner', name: 'Owner', role_code: 'admin', permissions: '{}' }
 const CASHIER = { id: 2, username: 'cashier', name: 'Cashier', role_code: 'staff', permissions: JSON.stringify({ sales: true }) }
+const DASHBOARD_ONLY = { id: 4, username: 'dash', name: 'Dash', role_code: 'staff', permissions: JSON.stringify({ dashboard: true }) }
 const STOCK_ONLY = { id: 3, username: 'stock', name: 'Stock', role_code: 'staff', permissions: JSON.stringify({ inventory: true }) }
 const summary = (user = ADMIN) => call('GET', '/summary', user)
 const section = (body, id) => (body.json.sections || []).find((entry) => entry.id === id)
@@ -156,13 +157,13 @@ function baselineInventory(config) {
   return { rows: rows.length, outCount: out.length, lowCount: rows.length - out.length }
 }
 
-// One sale batch exactly as the routes build it: the deduction, then the real alert statement.
+// One sale batch exactly as the routes build it: the real alert statement FIRST (it reads the pre-sale rollup), then the deduction.
 let lowStockConfig
 async function sell(productName, quantity, saleId = 1) {
   const product = raw.db.prepare('SELECT id FROM products WHERE name = ?').get(productName)
   await raw.batch([
-    { sql: 'UPDATE products SET stock_quantity = stock_quantity - @quantity WHERE id = @id', params: { id: product.id, quantity } },
     alerts.planSaleStockAlertStatement({ lines: [{ product_id: product.id, branch_id: 1, quantity }], lowStock: lowStockConfig, sale: { saleId } }),
+    { sql: 'UPDATE products SET stock_quantity = MAX(0, stock_quantity - @quantity) WHERE id = @id', params: { id: product.id, quantity } },
   ])
 }
 
@@ -316,7 +317,10 @@ async function main() {
   await check("users never see each other's sections through the shared cache", async () => {
     await summary(ADMIN) // warm every cached section as an administrator
     const cashier = await summary(CASHIER)
-    assert.equal(section(cashier, 'inventory'), undefined, 'a cashier with neither dashboard nor inventory access gets no stock section')
+    assert.equal(section(cashier, 'inventory'), undefined, 'a cashier without inventory access gets no stock section')
+    // NOTIF-V2 audience rule: the bell's stock rows keep the live audience (inventory access). A Dashboard-only user is not widened into
+    // product names and quantities they could not see in the bell before.
+    assert.equal(section(await summary(DASHBOARD_ONLY), 'inventory'), undefined, 'a Dashboard-only user gets no stock section')
     assert.equal(section(cashier, 'expiry'), undefined)
     assert.equal(section(cashier, 'loyalty'), undefined)
     const stockOnly = await summary(STOCK_ONLY)
@@ -360,6 +364,7 @@ async function main() {
     assert.equal(all.json.items.length, 28, 'nothing is lost: every event is reachable')
     assert.deepEqual(all.json.items.slice(0, 10).map((item) => item.id), section(await summary(ADMIN), 'inventory').items.map((item) => item.id), 'the preview is the head of the full list')
     assert.equal((await call('GET', '/summary/items?section=inventory', CASHIER)).status, 403)
+    assert.equal((await call('GET', '/summary/items?section=inventory', DASHBOARD_ONLY)).status, 403, 'items follow the same audience as the section')
     assert.equal((await call('GET', '/summary/items?section=sales', ADMIN)).status, 404)
     const cached = await call('GET', '/summary/items?section=inventory', ADMIN)
     assert.equal(statements('inventory'), 0, 'the expanded list is cached too')

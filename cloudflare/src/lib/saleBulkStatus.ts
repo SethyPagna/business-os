@@ -308,6 +308,16 @@ function auditStatement(user: SessionUser, operationId: string, direction: strin
 export async function notifyBulkStatus(env: Env) {
     await Promise.allSettled([bumpVersion(env, 'sales'), bumpVersion(env, 'stock'), ...(['sales', 'products', 'inventory', 'returns', 'fees'] as const).map(channel => broadcast(env, channel, { action: 'update' }))]);
 }
+// Units a group takes out of regular (non-lot) stock: a stock row's quantity is the signed change when applied
+// forwards (negative = taken), so the taken amount is minus that, flipped again when replaying backwards.
+// Damaged-lot draws never touch the product rollup the low / out classification reads.
+async function planStockAlert(env: Env, members: Member[], sign: number) {
+    const changed = members.filter(m => m.changed);
+    const lines = changed.flatMap(m => m.stock.filter(s => !s.lot).map(s => ({ product_id: s.product, branch_id: s.branch, quantity: -s.quantity * sign })));
+    if (!lines.some(line => line.quantity > 0))
+        return null;
+    return planSaleStockAlertStatement({ lines, lowStock: await loadLowStockConfig(env), sale: { saleId: changed.length === 1 ? changed[0].id : null } });
+}
 export async function applySaleBulkStatus(env: Env, user: SessionUser, raw: Row) {
     permission(user);
     const request = parseRequest(raw);
@@ -482,21 +492,16 @@ export async function applySaleBulkStatus(env: Env, user: SessionUser, raw: Row)
     const changedIds = members.filter(m => m.changed).map(m => m.id), unchangedIds = members.filter(m => !m.changed).map(m => m.id);
     const receipt = { operationId, changedIds, unchangedIds, changedCount: changedIds.length, unchangedCount: unchangedIds.length, currentReplayGeneration: 0, items: members.map(m => ({ id: m.id, receipt_number: m.receipt, before: m.before.sale_status, after: m.after.sale_status, changed: m.changed, reason: m.changed ? 'changed' : (request.source_status !== undefined && m.before.sale_status !== request.source_status ? 'source_mismatch' : 'already_target'), stock_skipped: m.skipped })) };
     const statements: StockStatement[] = [...guards, { sql: 'INSERT INTO sale_bulk_operations(id,actor_id,request_id,request_json,receipt_json) VALUES(@id,@actor,@request,@canonical,@receipt)', params: { id: operationId, actor: user.id, request: request.client_request_id, canonical, receipt: JSON.stringify(receipt) } }];
-    for (const m of members)
-        statements.push(...memberStatements(m, 1, user, stamp));
     // Un-cancelling sales takes stock back out; a group that carries a product
     // family into low / out of stock writes the same bell notification a
-    // single sale does, in this same atomic batch. A restore-only group has no
-    // positive net line, so it costs nothing (movement quantity is negative
-    // for units taken; lot-less lines only: damaged-lot draws never touch the
-    // product rollup the classification reads).
-    const takenLines = members.filter(m => m.changed).flatMap(m => m.stock.filter(s => !s.lot).map(s => ({ product_id: s.product, branch_id: s.branch, quantity: -s.quantity })));
-    if (takenLines.some(line => line.quantity > 0)) {
-        const changedMembers = members.filter(m => m.changed);
-        const stockAlert = planSaleStockAlertStatement({ lines: takenLines, lowStock: await loadLowStockConfig(env), sale: { saleId: changedMembers.length === 1 ? changedMembers[0].id : null } });
-        if (stockAlert)
-            statements.push(stockAlert);
-    }
+    // single sale does, in this same atomic batch, AHEAD of the members' stock
+    // statements so it reads the pre-group rollup (lib/saleStockAlerts.ts).
+    // A restore-only group has no positive net line, so it costs nothing.
+    const stockAlert = await planStockAlert(env, members, 1);
+    if (stockAlert)
+        statements.push(stockAlert);
+    for (const m of members)
+        statements.push(...memberStatements(m, 1, user, stamp));
     const recordEvents = statusRecordEvents(members, operationId, 0, 'apply', user, stamp);
     if (recordEvents)
         statements.push(recordEvents.statement);
@@ -552,6 +557,11 @@ export async function replaySaleBulkStatus(env: Env, user: SessionUser, directio
     const statements: StockStatement[] = [bulkAssertion("NOT EXISTS(SELECT 1 FROM system_flags WHERE key='maintenance') AND EXISTS(SELECT 1 FROM sale_bulk_operations o JOIN action_history h ON h.id=o.history_id JOIN undo_snapshots s ON s.id=o.snapshot_id WHERE o.id=@op AND o.generation=@generation AND h.id=@history AND h.status=@expected AND s.kind=@kind AND s.status=@snap AND s.payload_json=@payload)", { op: op.id, generation, history: historyId, expected, kind: BULK_STATUS_KIND, snap: direction === 'undo' ? 'applied' : 'reversed', payload: op.payload_json })];
     for (const m of moved)
         statements.push(bulkAssertion(`EXISTS(SELECT 1 FROM sales s JOIN sale_bulk_members m ON m.sale_id=s.id WHERE m.operation_id=@op AND s.id=@id AND m.revision=COALESCE((SELECT revision FROM sale_write_revisions WHERE sale_id=s.id),0) AND m.movement_fingerprint=${saleMovementFingerprint('s.id')})`, { op: op.id, id: m.id }));
+    // A redo of an un-cancel (or the undo of a cancel) takes stock out again, so it can cross into low / out
+    // exactly as the original group did; one event per crossing, same rule, same batch, ahead of the stock statements.
+    const replayAlert = await planStockAlert(env, snapshot.members, sign);
+    if (replayAlert)
+        statements.push(replayAlert);
     for (const m of snapshot.members)
         statements.push(...memberStatements(m, sign, user, stamp));
     const nextGeneration = Number(generation) + 1;

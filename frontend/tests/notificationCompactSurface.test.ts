@@ -54,7 +54,8 @@ assert.doesNotMatch(panel, /setImportJobsSection\(\{\s*id: 'imports'/)
 assert.doesNotMatch(worker, /buildInventorySection|INVENTORY_PREVIEW_ITEMS|INVENTORY_FULL_ITEMS/, 'the old always-on listing path is removed')
 assert.doesNotMatch(worker, /FROM products\s+WHERE is_active = 1\s+AND \(COALESCE\(stock_quantity, 0\) <=/, 'no product-under-threshold query remains in the bell')
 assert.match(worker, /stockAlertFeedSql\(config\)/)
-assert.match(worker, /function canSeeStockAlerts\(user: SessionUser\): boolean \{\s*return hasPermission\(user, 'dashboard'\) \|\| hasPermission\(user, 'inventory'\)/)
+// The stock rows keep the audience the bell has always had (inventory access): no silent widening to Dashboard-only users.
+assert.match(worker, /function canSeeStockAlerts\(user: SessionUser\): boolean \{\s*return hasPermission\(user, 'inventory'\)\s*\}/)
 assert.match(worker, /includeSale/, 'receipt numbers follow the sales read rule')
 // the old per-row copy for rows the Worker never labelled is gone too
 assert.doesNotMatch(panel, /notification_inventory_out_of_stock|notification_inventory_low_stock/)

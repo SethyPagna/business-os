@@ -138,7 +138,7 @@ import {
   type SaleItemAllocation,
 } from '../lib/saleTransitions'
 import { loadLowStockConfig } from '../lib/lowStockSettings'
-import { planSaleStockAlertStatement, type SaleStockAlertLine } from '../lib/saleStockAlerts'
+import { insertStockAlertStatement, planSaleStockAlertStatement, type SaleStockAlertLine } from '../lib/saleStockAlerts'
 import { buildLikeAliasClause, tokenizeSearchTermGroups, normalizeSearchText } from '../lib/searchMatch'
 import { computeSaleTotals, round2, newSaleMoney4, assertCanonicalSaleChildren } from '../lib/saleTotals'
 import { multiplyMoney4, divideMoney4, sumMoney4, subtractMoney4, subtractDecimalSum, sellingPriceCeilCent, MoneyPrecisionError } from '../lib/moneyPrecision'
@@ -149,7 +149,7 @@ import { normalizeClientReceiptNumber, uniqueBusinessDateTimeNumber } from '../l
 import { sanitizeClientCreatedAt } from '../lib/clientTimestamp'
 import { localRangeClockError, isLocalRangeClock, businessToday, localDateAtOrAfter, localDateAtOrBefore, localDateRangeClause, localTimeRangeClause } from '../lib/businessDateWindow'
 import { continuousReadWindowSql, parseContinuousReadWindow } from '../lib/continuousReadWindow'
-import { formatSaleStatusTelegramLines, formatSaleTelegramLines, sendTelegramEvent } from '../lib/telegram'
+import { formatSaleStatusTelegramLines, formatSaleTelegramLines, sendPendingStockAlerts, sendTelegramEvent } from '../lib/telegram'
 import { contactDisplayAddress } from '../lib/contactOptions'
 import { buildSaleCreationSnapshot, SaleCreationSnapshotError } from '../lib/saleCreationSnapshot'
 import type { Env } from '../index'
@@ -1473,9 +1473,12 @@ app.post('/', async (c) => {
     }
     const allocationReleasedAt = shouldDeductStock ? null : new Date().toISOString()
     // The units this batch takes out of branch stock, collected at the one
-    // place that deducts them, so the stock-alert statement below is told
-    // exactly what moved (lib/saleStockAlerts.ts).
+    // place that deducts them, so the stock-alert statement is told exactly
+    // what moved (lib/saleStockAlerts.ts). That statement is spliced in at
+    // `stockAlertStart`, ahead of the first stock statement, so it reads the
+    // pre-sale rollup; the sale header it names by write key is already queued.
     const stockAlertLines: SaleStockAlertLine[] = []
+    const stockAlertStart = statements.length
     for (const [itemIndex, item] of priced.entries()) {
       statements.push({
         sql: `WITH current_batch AS (
@@ -1699,15 +1702,14 @@ app.post('/', async (c) => {
         })
       }
     }
-    // After every deduction, inside the same atomic batch: a sale that carries
-    // a product family into low or out-of-stock writes its bell notification
-    // here, and a rolled-back sale writes none.
-    const stockAlertStatement = planSaleStockAlertStatement({
+    // Inside the same atomic batch: a sale that carries a product family into
+    // low or out-of-stock writes its bell notification, and a rolled-back sale
+    // writes none.
+    insertStockAlertStatement(statements, stockAlertStart, planSaleStockAlertStatement({
       lines: stockAlertLines,
       lowStock: await loadLowStockConfig(c.env),
       sale: { saleWriteKey },
-    })
-    if (stockAlertStatement) statements.push(stockAlertStatement)
+    }))
     statements.push(
       {sql:'DELETE FROM sale_mutation_guards',params:{}},
       canonicalSaleChildrenGuard(saleWriteKey),
@@ -1822,6 +1824,7 @@ app.post('/', async (c) => {
   c.executionCtx.waitUntil(Promise.all([
     bumpVersion(c.env, 'stock'),
     bumpVersion(c.env, 'sales'),
+    announceStockAlerts(c.env),
   ]))
   if (recoveredCommittedCreate) {
     return c.json({ id: saleId, receiptNumber: resolvedReceiptNumber, duplicate: true, offline_owner: offlineOwner, client_request_id: clientRequestId, sale: await authoritativeSaleSnapshot(db,saleId) })
@@ -1925,10 +1928,25 @@ type SaleItemRow = {
   batch_id: number | null
 }
 
+/**
+ * NOTIF-V2: announce the stock crossings a committed sale just recorded
+ * (stock_alert_events) on Telegram. Always called from a waitUntil AFTER the
+ * write batch has committed, never inside it, and never rejects: a Telegram
+ * outage, an unconfigured bot or a deployment that has not applied migration
+ * 0239 yet must cost the sale nothing.
+ */
+async function announceStockAlerts(env: Env): Promise<void> {
+  try {
+    await sendPendingStockAlerts(env)
+  } catch (error) {
+    console.warn('Stock alert Telegram message was not sent:', (error as Error)?.message || error)
+  }
+}
+
 app.post('/bulk-status', async (c) => {
   try {
     const result = await applySaleBulkStatus(c.env, c.get('user'), await c.req.json())
-    c.executionCtx.waitUntil(notifyBulkStatus(c.env))
+    c.executionCtx.waitUntil(Promise.all([notifyBulkStatus(c.env), announceStockAlerts(c.env)]))
     return c.json(result)
   } catch (error) {
     return c.json({ error: (error as Error).message, ...(error instanceof SaleBulkError ? error.details : {}) }, error instanceof SaleBulkError ? error.statusCode : error instanceof SyntaxError ? 400 : 500)
@@ -2603,9 +2621,9 @@ app.patch('/:id/status', async (c) => {
     })
   }
   statements.push(...settlementLineStatements)
-  statements.push(...plan.statements)
   // Only a transition that TAKES stock back out (un-cancelling a sale) can push
   // a family into low / out of stock; every other transition restores or holds.
+  // The alert goes in AHEAD of the stock statements so it reads the pre-change rollup.
   if (plan.deductions.length) {
     const stockAlert = planSaleStockAlertStatement({
       lines: plan.deductions,
@@ -2614,6 +2632,7 @@ app.patch('/:id/status', async (c) => {
     })
     if (stockAlert) statements.push(stockAlert)
   }
+  statements.push(...plan.statements)
 
   // A provisional restore can be spent by another request before a status
   // conflict is discovered. Keep damaged stock and its ledger in the SAME
@@ -2806,6 +2825,7 @@ app.patch('/:id/status', async (c) => {
     // I2-1: a sale moves stock only -- 'stock', not the catalog version.
     bumpVersion(c.env, 'stock'),
     bumpVersion(c.env, 'sales'),
+    ...(plan.deductions.length ? [announceStockAlerts(c.env)] : []),
     ...((sale.cancel_fee_id || (saleStatus === 'cancelled' && (cancelFeeUsd > 0 || cancelFeeKhr > 0)))
       ? [broadcast(c.env, 'fees', { action: 'update' })]
       : []),
@@ -3583,14 +3603,15 @@ app.post('/:id/items', async (c) => {
   }
   // Items added to a sale that holds stock can carry a family into low / out
   // of stock; the notification rides this same atomic batch (plan.deductions
-  // is empty for a sale that holds nothing, so this costs nothing then).
+  // is empty for a sale that holds nothing, so this costs nothing then). It leads
+  // the plan's statements so it reads the pre-change rollup.
   if (plan.deductions.length) {
     const addItemsStockAlert = planSaleStockAlertStatement({
       lines: plan.deductions,
       lowStock: await loadLowStockConfig(c.env),
       sale: { saleId },
     })
-    if (addItemsStockAlert) statementsForPlan.push(addItemsStockAlert)
+    if (addItemsStockAlert) statementsForPlan.unshift(addItemsStockAlert)
   }
   let snapshotExpression = '@payload'
   for (let ordinal = 0; ordinal < plan.lines.length; ordinal += 1) {
@@ -3704,6 +3725,7 @@ app.post('/:id/items', async (c) => {
     // I2-1: a sale moves stock only -- 'stock', not the catalog version.
     bumpVersion(c.env, 'stock'),
     bumpVersion(c.env, 'sales'),
+    announceStockAlerts(c.env),
   ]))
 
   const committed = await db.prepare('SELECT response_json FROM sale_mutation_receipts WHERE id=?')
@@ -4571,12 +4593,17 @@ app.post('/:id/amendments', async (c) => {
 
   const statements: StatementList = []
   // Net units this amendment batch takes out of (positive) or gives back to
-  // (negative) branch stock, per product -- fed to the stock-alert statement
-  // after the last stock statement so its before/after is exact even when a
-  // replace restores one line and deducts another in the same batch.
+  // (negative) branch stock, per product -- fed to the stock-alert statement,
+  // which is spliced in ahead of the FIRST stock block (`stockAlertStart`) so it
+  // reads the pre-amendment rollup, and nets a replace that restores one line
+  // while it deducts another.
   const stockAlertLines: SaleStockAlertLine[] = []
-  const noteAmendmentStock = (productId: unknown, branchId: unknown, unitsMoved: number) => {
-    if (branchId && unitsMoved) stockAlertLines.push({ product_id: Number(productId), branch_id: Number(branchId), quantity: -unitsMoved })
+  let stockAlertStart = Number.POSITIVE_INFINITY
+  const noteAmendmentStock = (productId: unknown, branchId: unknown, unitsMoved: number, blockStart: number) => {
+    if (branchId && unitsMoved) {
+      stockAlertLines.push({ product_id: Number(productId), branch_id: Number(branchId), quantity: -unitsMoved })
+      stockAlertStart = Math.min(stockAlertStart, blockStart)
+    }
   }
   const ledgerEntries: Array<Parameters<typeof amendmentEntryStatement>[0]> = []
   const groupId = crypto.randomUUID()
@@ -4613,7 +4640,7 @@ app.post('/:id/amendments', async (c) => {
         :planLineQuantityDecrease({moneyPrecisionVersion:1,saleId,sale,line:workingLine,removedQuantity:-delta,allocations,exchangeRate,
           reason:`Quantity changed on sale #${saleId}`,userId:user?.id??null,userName:actorSnapshot(user)})
       statements.push(...quantityPlan.statements);unitsMoved+=quantityPlan.unitsMoved
-      noteAmendmentStock(line.product_id, line.branch_id, quantityPlan.unitsMoved)
+      noteAmendmentStock(line.product_id, line.branch_id, quantityPlan.unitsMoved, statements.length - quantityPlan.statements.length)
     }
     const changedFields=Object.keys(historical.row).filter(key=>historical.row[key]!==original[key])
     if(changedFields.some(key=>!['quantity','total_usd','total_khr','base_price_usd','base_price_khr','manual_discount_type','manual_discount_value','manual_discount_usd','manual_discount_khr','applied_price_usd','applied_price_khr'].includes(key)))throw new Error('Unexpected historical price column')
@@ -4701,7 +4728,7 @@ app.post('/:id/amendments', async (c) => {
       }
       statements.push(...quantityPlan.statements)
       unitsMoved += quantityPlan.unitsMoved
-      noteAmendmentStock(line.product_id, line.branch_id, quantityPlan.unitsMoved)
+      noteAmendmentStock(line.product_id, line.branch_id, quantityPlan.unitsMoved, statements.length - quantityPlan.statements.length)
     }
 
 
@@ -4751,7 +4778,7 @@ app.post('/:id/amendments', async (c) => {
     statements.push(...plan.statements)
     subtotalDeltaUsd = sumMoney4([subtotalDeltaUsd,plan.subtotalDeltaUsd])
     unitsMoved += plan.unitsMoved
-    noteAmendmentStock(line.product_id, line.branch_id, plan.unitsMoved)
+    noteAmendmentStock(line.product_id, line.branch_id, plan.unitsMoved, statements.length - plan.statements.length)
     ledgerEntries.push({
       saleId, kind: 'line_quantity_increased', groupId,
       saleItemId: line.id, productId: line.product_id, productName: line.product_name,
@@ -4779,7 +4806,7 @@ app.post('/:id/amendments', async (c) => {
     statements.push(...plan.statements)
     subtotalDeltaUsd = sumMoney4([subtotalDeltaUsd,plan.subtotalDeltaUsd])
     unitsMoved += plan.unitsMoved
-    noteAmendmentStock(line.product_id, line.branch_id, plan.unitsMoved)
+    noteAmendmentStock(line.product_id, line.branch_id, plan.unitsMoved, statements.length - plan.statements.length)
     ledgerEntries.push({
       saleId,
       kind: plan.quantityAfter <= 0 ? 'line_removed' : 'line_quantity_decreased',
@@ -4957,6 +4984,7 @@ app.post('/:id/amendments', async (c) => {
     if (replacementLines) {
       replacementLines[0].pricingSnapshotJson=String(pricingRowsAfter.find(row=>Number(row.id)===0)!.pricing_snapshot_json)
       const finalPlan=planSaleLineAddition({saleId,saleStatus,lines:replacementLines,exchangeRate,userId:user?.id??null,userName:actorSnapshot(user)})
+      const finalPlanStart = statements.length
       statements.push(...planUnlottedSaleLineGuards(finalPlan.lines))
       for (const [index,statement] of finalPlan.statements.entries()) {
         statements.push(statement)
@@ -4964,18 +4992,17 @@ app.post('/:id/amendments', async (c) => {
         if (ordinal>=0) statements.push({sql:`INSERT INTO sale_mutation_members(operation_id,entity_kind,entity_id,ordinal) VALUES(@operation,'sale_item',last_insert_rowid(),@ordinal)`,params:{operation:mutationOperationId,ordinal}})
       }
       statements.push(...buildOperationAllocationStatements(finalPlan.lines,mutationOperationId,mutationStamp))
-      for (const deduction of finalPlan.deductions) noteAmendmentStock(deduction.product_id, deduction.branch_id, -deduction.quantity)
+      for (const deduction of finalPlan.deductions) noteAmendmentStock(deduction.product_id, deduction.branch_id, -deduction.quantity, finalPlanStart)
     }
     lineMoneyAfterAtLatestRate=captureSaleLineKhrSnapshot(pricingRowsAfter)
   }
-  // Last stock statement is queued: one alert statement for the whole act.
+  // Every stock block is queued: one alert statement for the whole act, ahead of the first of them.
   if (stockAlertLines.length) {
-    const amendmentStockAlert = planSaleStockAlertStatement({
+    insertStockAlertStatement(statements, stockAlertStart, planSaleStockAlertStatement({
       lines: stockAlertLines,
       lowStock: await loadLowStockConfig(c.env),
       sale: { saleId },
-    })
-    if (amendmentStockAlert) statements.push(amendmentStockAlert)
+    }))
   }
 
   // Every ledger entry in this act ends at the sale's real new total; the
@@ -5375,6 +5402,7 @@ async function auditAmendment(
     // I2-1: a sale moves stock only -- 'stock', not the catalog version.
     bumpVersion(c.env, 'stock'),
     bumpVersion(c.env, 'sales'),
+    announceStockAlerts(c.env),
   ]))
 }
 

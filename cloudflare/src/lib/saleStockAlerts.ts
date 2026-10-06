@@ -16,16 +16,24 @@
 // the same fragments the Dashboard SQL uses, so the card and the bell agree.
 //
 // WHERE IT RUNS. planSaleStockAlertStatement() is ONE INSERT ... SELECT that the
-// sale routes append to the SAME atomic D1 batch that deducts the stock, after
-// the deductions. Inside that batch products.stock_quantity is already the
-// "after" figure and "before" is "after + the units this batch sold", so the
-// rank comparison is exact even when two sales race (D1 serialises batches) --
-// computing it after the commit from a second read could not promise that. A
-// rolled-back sale leaves no event; a committed sale always has its event.
-// Manual adjustments, transfers, imports and returns never call it.
+// sale routes put in the SAME atomic D1 batch as the stock deductions, BEFORE
+// the first of them. Placed there it reads the true pre-sale rollup
+// (products.stock_quantity, the figure the Dashboard classifies) and derives the
+// post-sale figure the way the deduction statements do: `MAX(0, stock - units)`
+// for units taken, `stock + units` for units given back. That is exact even when
+// two sales race (D1 serialises batches), and it does not misreport a rollup the
+// clamp held at 0: a rollup that was already 0 while a branch still held units
+// stays 0, so no crossing happened and none is written. (Working backwards from
+// the post-sale rollup, "after + units", cannot tell a clamped deduction from a
+// whole one.) A rolled-back sale leaves no event; a committed sale always has
+// its event. Manual adjustments, transfers, imports and returns never call it.
 //
 // COST. The statement touches only the sold products' families: an indexed
-// name_key / parent_id probe per family, never the whole catalog.
+// name_key / parent_id probe per family, then a primary-key lookup per member.
+// `candidates CROSS JOIN products` pins that order: left to itself SQLite
+// scanned every active product (idx_products_active_grouped_pg) and built an
+// automatic index over the candidates, so a sale paid for the whole catalog.
+// test-sale-stock-alert-cost-native.cjs pins the plan and the rows read.
 import type { LowStockConfig } from './lowStockSettings'
 import { lowStockThresholdSql } from './lowStockSettings'
 import { FAMILY_ROOT_KEY_SQL } from './familyPagination'
@@ -56,33 +64,34 @@ const MEMBER_ELIGIBLE_SQL = `p.is_active = 1 AND NOT (COALESCE(p.is_group, 0) = 
  * then applies the exact FAMILY_ROOT_KEY_SQL equality, so the family is the
  * Dashboard's family and the index probes are only a way to reach it cheaply.
  *
- * `qtyBeforeSql` is the member's quantity before the batch's deduction; the
- * read side has no deduction and passes the current quantity.
+ * `qty.before` / `qty.after` are the member's quantity before and after the
+ * batch's deduction (SQL over `p`); the read side has no deduction and passes
+ * the current quantity for both.
  */
-function familyMembersCtes(lowStock: LowStockConfig, qtyBeforeSql: string): string {
+function familyMembersCtes(lowStock: LowStockConfig, qty: { before: string; after: string }): string {
   return `
     candidates AS (
       SELECT p.id AS id, r.family_root_id AS family_root_id
-        FROM roots r JOIN products p ON p.name_key = r.family_root_id
+        FROM roots r CROSS JOIN products p ON p.name_key = r.family_root_id
       UNION
       SELECT c.id, r.family_root_id
-        FROM roots r JOIN products par ON par.name_key = r.family_root_id
-        JOIN products c ON c.parent_id = par.id
+        FROM roots r CROSS JOIN products par ON par.name_key = r.family_root_id
+        CROSS JOIN products c ON c.parent_id = par.id
       UNION
       SELECT p.id, r.family_root_id
-        FROM roots r JOIN products p ON r.family_root_id LIKE 'id:%' AND p.id = CAST(substr(r.family_root_id, 4) AS INTEGER)
+        FROM roots r CROSS JOIN products p ON r.family_root_id LIKE 'id:%' AND p.id = CAST(substr(r.family_root_id, 4) AS INTEGER)
       UNION
       SELECT p.id, r.family_root_id
-        FROM roots r JOIN products p ON r.family_root_id LIKE 'id:%' AND p.parent_id = CAST(substr(r.family_root_id, 4) AS INTEGER)
+        FROM roots r CROSS JOIN products p ON r.family_root_id LIKE 'id:%' AND p.parent_id = CAST(substr(r.family_root_id, 4) AS INTEGER)
     ),
     members AS (
       SELECT cand.family_root_id,
-             COALESCE(p.stock_quantity, 0) AS qty_after,
-             ${qtyBeforeSql} AS qty_before,
+             ${qty.after} AS qty_after,
+             ${qty.before} AS qty_before,
              COALESCE(p.out_of_stock_threshold, 0) AS out_threshold,
              ${lowStockThresholdSql(lowStock, 'p.low_stock_threshold')} AS low_threshold
       FROM candidates cand
-      JOIN products p ON p.id = cand.id
+      CROSS JOIN products p ON p.id = cand.id
       LEFT JOIN products parent ON parent.id = p.parent_id
       WHERE ${MEMBER_ELIGIBLE_SQL}
         AND ${FAMILY_ROOT_KEY_SQL} = cand.family_root_id
@@ -107,10 +116,11 @@ export function aggregateSaleStockAlertLines(lines: SaleStockAlertLine[]): SaleS
 
 /**
  * The crossing INSERT for one sale batch, or null when no line took stock out.
- * Must be pushed AFTER the batch's branch_stock / products.stock_quantity
- * deductions and inside the same db.batch. `lines` must be exactly the units
- * the batch deducted (the callers pass the same list they built the deduction
- * statements from, so the two cannot disagree).
+ * Must sit in the same db.batch BEFORE its first branch_stock /
+ * products.stock_quantity statement (see `insertStockAlertStatement`): it reads
+ * the pre-sale rollup. `lines` must be exactly the units the batch moves (the
+ * callers pass the same list they built the stock statements from, so the two
+ * cannot disagree).
  */
 export function planSaleStockAlertStatement(input: {
   lines: SaleStockAlertLine[]
@@ -144,7 +154,13 @@ export function planSaleStockAlertStatement(input: {
       GROUP BY l.product_id
     ),
     roots AS (SELECT DISTINCT family_root_id FROM sold),
-    ${familyMembersCtes(input.lowStock, `COALESCE(p.stock_quantity, 0) + COALESCE((SELECT SUM(l.qty) FROM lines l WHERE l.product_id = p.id), 0)`)},
+    ${familyMembersCtes(input.lowStock, {
+      before: 'COALESCE(p.stock_quantity, 0)',
+      // Units taken clamp at 0 exactly like the deduction statements; units given back add.
+      after: `CASE WHEN COALESCE((SELECT SUM(l.qty) FROM lines l WHERE l.product_id = p.id), 0) > 0
+                   THEN MAX(0, COALESCE(p.stock_quantity, 0) - (SELECT SUM(l.qty) FROM lines l WHERE l.product_id = p.id))
+                   ELSE COALESCE(p.stock_quantity, 0) - COALESCE((SELECT SUM(l.qty) FROM lines l WHERE l.product_id = p.id), 0) END`,
+    })},
     families AS (
       SELECT family_root_id,
              SUM(qty_after) AS total_after,
@@ -170,6 +186,16 @@ export function planSaleStockAlertStatement(input: {
     WHERE f.rank_after < f.rank_before`,
     params,
   }
+}
+
+/**
+ * Put the alert statement into a batch's statement list ahead of the first stock
+ * statement (`stockStart` is the list length before that statement was pushed).
+ * Only statements already queued before `stockStart` keep their position, so a
+ * caller that remembers an index of a LATER statement must read it after this.
+ */
+export function insertStockAlertStatement(statements: Statement[], stockStart: number, alert: Statement | null): void {
+  if (alert) statements.splice(Math.min(Math.max(0, stockStart), statements.length), 0, alert)
 }
 
 export type StockAlertFeedRow = {
@@ -207,7 +233,7 @@ export function stockAlertFeedSql(lowStock: LowStockConfig): string {
     ),
     latest AS (SELECT * FROM recent WHERE recency = 1),
     roots AS (SELECT family_root_id FROM latest),
-    ${familyMembersCtes(lowStock, 'COALESCE(p.stock_quantity, 0)')},
+    ${familyMembersCtes(lowStock, { before: 'COALESCE(p.stock_quantity, 0)', after: 'COALESCE(p.stock_quantity, 0)' })},
     families AS (
       SELECT family_root_id,
              SUM(qty_after) AS total_now,
