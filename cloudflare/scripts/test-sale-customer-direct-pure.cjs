@@ -14,7 +14,7 @@ const actual = new Set([
   'acquisitionCostAccess',
   'saleCustomerAssignmentGuard',
   'actorSnapshot', 'movementBranchName', 'db', 'permissions', 'saleBulkStatus','cancelFeeRules', 'saleBulkUpdate',
-  'saleRecordEvents', 'saleTransitions', 'sqlBinding', 'productBatches', 'batchCode', 'salesStatus','saleStatusResolution',
+  'saleRecordEvents', 'saleTransitions', 'sqlBinding', 'productBatches', 'batchCode', 'salesStatus','saleStatusResolution','saleLineChangeStatus',
   'undoAppliers', 'branchWrites', 'conflictControl', 'searchMatch', 'paymentMethodRegistry', 'contactOptions', 'anonymousCustomer',
   'businessMaintenanceGuard',
 ])

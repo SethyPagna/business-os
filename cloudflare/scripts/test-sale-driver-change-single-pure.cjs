@@ -29,7 +29,7 @@ const recordContract = JSON.parse(fs.readFileSync(path.join(root, '..', 'outputs
 const ADMIN = { id: 1, name: 'Admin', username: 'admin', role_code: 'admin', permissions: { all: true } }
 let user = ADMIN
 const cache = new Map()
-const actual = new Set(['businessMaintenanceGuard', 'acquisitionCostAccess', 'saleCustomerAssignmentGuard', 'actorSnapshot', 'anonymousCustomer', 'movementBranchName', 'db', 'permissions', 'saleBulkStatus','cancelFeeRules', 'saleBulkUpdate', 'saleRecordEvents', 'saleTransitions', 'sqlBinding', 'productBatches', 'batchCode', 'salesStatus', 'saleStatusResolution', 'undoAppliers', 'branchWrites', 'conflictControl', 'searchMatch', 'paymentMethodRegistry', 'contactOptions'])
+const actual = new Set(['businessMaintenanceGuard', 'acquisitionCostAccess', 'saleCustomerAssignmentGuard', 'actorSnapshot', 'anonymousCustomer', 'movementBranchName', 'db', 'permissions', 'saleBulkStatus','cancelFeeRules', 'saleBulkUpdate', 'saleRecordEvents', 'saleTransitions', 'sqlBinding', 'productBatches', 'batchCode', 'salesStatus', 'saleStatusResolution','saleLineChangeStatus', 'undoAppliers', 'branchWrites', 'conflictControl', 'searchMatch', 'paymentMethodRegistry', 'contactOptions'])
 function load(rel) {
   if (cache.has(rel)) return cache.get(rel).exports
   const mod = { exports: {} }

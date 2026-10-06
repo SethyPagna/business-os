@@ -63,6 +63,7 @@ import {
   saleLineKhrSnapshotStatement,
   resolveExplicitSaleLineBatches,
   saleMoneyUpdateStatement,
+  saleStatusChangeStatements,
   saleStatusDeductsStock,
 } from '../lib/saleLineAddition'
 // S4-30: amending a recorded sale, as an append-only ledger. Same discipline
@@ -148,6 +149,7 @@ import { sanitizeClientCreatedAt } from '../lib/clientTimestamp'
 import { MEMBERSHIP_DISCOUNT_MISMATCH_CODE, MEMBERSHIP_DISCOUNT_MISMATCH_MESSAGE, membershipRedemptionDiscount } from '../lib/membershipRedemption'
 import { SALE_SHIFT_MESSAGES, readSaleShiftBlock, saleShiftGuardStatement, type SaleShiftScope } from '../lib/saleShiftRequirement'
 import { readShiftPolicy } from './shifts'
+import { saleStatusAfterLineChange } from '../lib/saleLineChangeStatus'
 import { CANCEL_FEE_ADD_DENIED_CODE, CANCEL_FEE_DELETE_DENIED_CODE, CANCEL_FEE_EXCEEDS_SALE_CODE, CANCEL_FEE_MESSAGES, canRecordCancelFee, canRemoveCancelFee, cancelFeeWithinSaleTotal } from '../lib/cancelFeeRules'
 import { localRangeClockError, isLocalRangeClock, businessToday, localDateAtOrAfter, localDateAtOrBefore, localDateRangeClause, localTimeRangeClause } from '../lib/businessDateWindow'
 import { continuousReadWindowSql, parseContinuousReadWindow } from '../lib/continuousReadWindow'
@@ -3537,10 +3539,12 @@ app.post('/:id/items', async (c) => {
     })
   })
 
+  // A paid sale this leaves owing becomes Not Paid -- one rule with the amendments (lib/saleLineChangeStatus.ts).
+  const saleStatusAfter = saleStatusAfterLineChange(saleStatus, { ...sale, total_usd: moneyAfter.total_usd, exchange_rate: exchangeRate })
   const baseResponse: Record<string, unknown> = {
     id: saleId,
     receiptNumber: sale.receipt_number || null,
-    saleStatus,
+    saleStatus: saleStatusAfter,
     addedLines: plan.lines.length,
     unitsDeducted: plan.deductedUnits,
     stockMoved: deductsStock,
@@ -3559,6 +3563,7 @@ app.post('/:id/items', async (c) => {
     saleId,
     receiptNumber: sale.receipt_number || null,
     saleStatus,
+    saleStatusAfter,
     exchangeRate,
     moneyBefore,
     moneyAfter,
@@ -3604,7 +3609,7 @@ app.post('/:id/items', async (c) => {
   const lineCount = plan.lines.length
   const auditDetails = JSON.stringify({
     action: 'add_items', operation_id: addItemsOperationId,
-    receipt_number: sale.receipt_number || null, sale_status: saleStatus,
+    receipt_number: sale.receipt_number || null, sale_status: saleStatus, sale_status_after: saleStatusAfter,
     lines: lineCount, units_deducted: plan.deductedUnits,
     subtotal_before: moneyBefore.subtotal_usd, subtotal_after: moneyAfter.subtotal_usd,
     total_before: moneyBefore.total_usd, total_after: moneyAfter.total_usd,
@@ -3641,6 +3646,7 @@ app.post('/:id/items', async (c) => {
       saleLineKhrSnapshotStatement(saleId,lineMoneyAfter),
       canonicalSaleChildrenGuard(saleId,Number((sale as Record<string,unknown>).money_precision_version)),
       saleMoneyUpdateStatement(saleId, moneyAfter),
+      ...saleStatusChangeStatements(saleId, saleStatus, saleStatusAfter),
       ...ledgerStatements,
       {
         sql: `INSERT INTO undo_snapshots(kind,status,payload_json,created_by_id,created_by_name)
@@ -4216,10 +4222,12 @@ app.post('/:id/amendments', async (c) => {
       total_usd: money.totalUsd,
       total_khr: money.totalKhr,
     }
+    // A paid sale this leaves owing becomes Not Paid -- one rule with add-items (lib/saleLineChangeStatus.ts).
+    const amendedStatus = saleStatusAfterLineChange(sale.sale_status, { ...sale, total_usd: money.totalUsd, exchange_rate: exchangeRate })
     const response = {
       ...buildAmendmentResponsePayload({
         saleId, sale, money, exchangeRate, stockMoved: false, unitsMoved: 0,
-        stockSkipped, tax: taxPlan.outcome,
+        stockSkipped, tax: taxPlan.outcome, saleStatus: amendedStatus,
       }, mutationStamp),
       isDelivery: 1,
       deliveryContactId: contactRow.id,
@@ -4257,6 +4265,7 @@ app.post('/:id/amendments', async (c) => {
         ...taxPlan.statements,
         canonicalSaleChildrenGuard(saleId,Number((sale as Record<string,unknown>).money_precision_version)),
         saleMoneyUpdateStatement(saleId, moneyAfterSnapshot),
+        ...saleStatusChangeStatements(saleId, String(sale.sale_status || 'completed'), amendedStatus),
         amendmentEntryStatement({
           moneyPrecisionVersion: 1,
           saleId,
@@ -4301,6 +4310,7 @@ app.post('/:id/amendments', async (c) => {
     }
     await auditAmendment(c, user, saleId, sale, {
       kind,
+      sale_status_after: amendedStatus,
       before: recordBefore,
       after: recordAfter,
       outside_window: guard.outsideWindow,
@@ -4478,9 +4488,11 @@ app.post('/:id/amendments', async (c) => {
     // the row's old payer in its local copy, so a delivery just switched to
     // customer-paid would still read as free -- struck-through driver and all
     // -- until something else forced a refetch.
+    // A paid sale this leaves owing becomes Not Paid -- one rule with add-items (lib/saleLineChangeStatus.ts).
+    const amendedStatus = saleStatusAfterLineChange(sale.sale_status, { ...sale, total_usd: money.totalUsd, exchange_rate: exchangeRate })
     const response = {
       ...buildAmendmentResponsePayload({
-        saleId, sale, money, exchangeRate, stockMoved: false, unitsMoved: 0, stockSkipped, tax: feeTaxPlan.outcome,
+        saleId, sale, money, exchangeRate, stockMoved: false, unitsMoved: 0, stockSkipped, tax: feeTaxPlan.outcome, saleStatus: amendedStatus,
       }, mutationStamp),
       deliveryFeeUsd: feePlan.feeAfterUsd,
       deliveryFeeKhr: receiptKhrFromUsd(feePlan.feeAfterUsd, exchangeRate),
@@ -4498,6 +4510,7 @@ app.post('/:id/amendments', async (c) => {
         ...feeTaxPlan.statements,
         canonicalSaleChildrenGuard(saleId,Number((sale as Record<string,unknown>).money_precision_version)),
         saleMoneyUpdateStatement(saleId, moneyAfterSnapshot),
+        ...saleStatusChangeStatements(saleId, String(sale.sale_status || 'completed'), amendedStatus),
         amendmentEntryStatement({
           moneyPrecisionVersion: 1,
           saleId,
@@ -4540,7 +4553,7 @@ app.post('/:id/amendments', async (c) => {
       return c.json({ error: `Failed to amend the delivery fee: ${(error as Error).message || ''}` }, 500)
     }
     await auditAmendment(c, user, saleId, sale, {
-      kind, fee_before: feePlan.feeBeforeUsd, fee_after: feePlan.feeAfterUsd,
+      kind, fee_before: feePlan.feeBeforeUsd, fee_after: feePlan.feeAfterUsd, sale_status_after: amendedStatus,
       fee_paid_by_before: feePlan.payerBefore, fee_paid_by_after: feePlan.payerAfter,
       total_before: totalBeforeUsd, total_after: money.totalUsd,
       exchange_rate_before: sale.exchange_rate ?? null, exchange_rate_after: exchangeRate,
@@ -4967,8 +4980,10 @@ app.post('/:id/amendments', async (c) => {
     entry.after = {...entry.after,...precisionRecordMoney(moneyAfterSnapshot)}
   }
 
+  // A paid sale this leaves owing becomes Not Paid -- one rule with add-items (lib/saleLineChangeStatus.ts).
+  const amendedStatus = saleStatusAfterLineChange(sale.sale_status, { ...sale, total_usd: money.totalUsd, exchange_rate: exchangeRate })
   const response = buildAmendmentResponsePayload({
-    saleId, sale, money, exchangeRate, stockMoved: movesStock, unitsMoved, stockSkipped, tax: taxPlan.outcome,
+    saleId, sale, money, exchangeRate, stockMoved: movesStock, unitsMoved, stockSkipped, tax: taxPlan.outcome, saleStatus: amendedStatus,
   }, mutationStamp)
 
   // ---- One atomic batch: the line change, its stock, the sale's money, and
@@ -5002,6 +5017,7 @@ app.post('/:id/amendments', async (c) => {
       ...taxPlan.statements,
       canonicalSaleChildrenGuard(saleId,Number((sale as Record<string,unknown>).money_precision_version)),
       saleMoneyUpdateStatement(saleId, moneyAfterSnapshot),
+      ...saleStatusChangeStatements(saleId, String(sale.sale_status || 'completed'), amendedStatus),
       ...ledgerEntries.map(amendmentEntryStatement),
       {
         sql: `UPDATE sale_mutation_receipts SET
@@ -5031,6 +5047,7 @@ app.post('/:id/amendments', async (c) => {
 
   await auditAmendment(c, user, saleId, sale, {
     kind,
+    sale_status_after: amendedStatus,
     sale_item_id: lineId,
     product_id: line.product_id,
     entries: ledgerEntries.map((entry) => entry.kind),
@@ -5383,6 +5400,8 @@ function buildAmendmentResponsePayload(
     unitsMoved: number
     stockSkipped: boolean
     tax: AmendedTaxResult
+    /** The status the write leaves the sale in (lib/saleLineChangeStatus.ts); default: unchanged. */
+    saleStatus?: string
   },
   updatedAt: string | null,
 ): Record<string, unknown> {
@@ -5392,6 +5411,7 @@ function buildAmendmentResponsePayload(
     // reprint is a reprint -- settled by the owner on 2026-09-04. One sale,
     // one number, so no revenue report can count it twice.
     receiptNumber: input.sale.receipt_number ?? null,
+    saleStatus: input.saleStatus ?? String(input.sale.sale_status || 'completed'),
     subtotalUsd: input.money.subtotalUsd,
     totalUsd: input.money.totalUsd,
     totalKhr: input.money.totalKhr,

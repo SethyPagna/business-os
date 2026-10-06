@@ -563,6 +563,13 @@ export type SaleAddItemsReversal = {
   saleId: number
   receiptNumber: string | null
   saleStatus: string
+  /**
+   * The status the addition left the sale in, when it moved it: a paid sale
+   * the addition left owing became Not Paid (lib/saleLineChangeStatus.ts).
+   * Undo puts `saleStatus` back, redo `saleStatusAfter`. Absent on snapshots
+   * recorded before that rule, which replay with the status unchanged.
+   */
+  saleStatusAfter?: string
   exchangeRate: number
   /**
    * The sale's money columns exactly as they were BEFORE and AFTER the
@@ -577,6 +584,19 @@ export type SaleAddItemsReversal = {
   lineMoneyBefore?: SaleLineKhrSnapshot[]
   lineMoneyAfter?: SaleLineKhrSnapshot[]
   lines: AddedSaleLineRecord[]
+}
+
+/**
+ * The status write that travels with a line change's money write: none when
+ * the status stays. Conditional on the status still being `from`; the
+ * callers' revision guards already prove nothing moved since the read.
+ */
+export function saleStatusChangeStatements(saleId: number | string, from: string, to: string): StockStatement[] {
+  if (from === to) return []
+  return [{
+    sql: `UPDATE sales SET sale_status=@to WHERE id=@saleId AND COALESCE(sale_status,'completed')=@from`,
+    params: { saleId, from, to },
+  }]
 }
 
 /** The one UPDATE that writes a money snapshot back onto the sale row. */

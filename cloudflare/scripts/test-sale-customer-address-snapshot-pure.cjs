@@ -40,7 +40,7 @@ const actual = new Set(['businessDateWindow', 'continuousReadWindow', 'businessM
   'acquisitionCostAccess',
   'saleCustomerAssignmentGuard',
   'actorSnapshot', 'movementBranchName', 'db', 'permissions', 'saleBulkStatus','cancelFeeRules', 'saleBulkUpdate',
-  'saleTransitions', 'saleTotals', 'sqlBinding', 'productBatches', 'batchCode', 'salesStatus','saleStatusResolution',
+  'saleTransitions', 'saleTotals', 'sqlBinding', 'productBatches', 'batchCode', 'salesStatus','saleStatusResolution','saleLineChangeStatus',
   'conflictControl', 'searchMatch', 'financialPrecision', 'paymentMethodRegistry',
   'paymentSettlement', 'saleSettlementAction', 'saleLineAddition', 'saleAmendments',
   'nativeSaleChange', 'receiptNumber', 'clientTimestamp', 'branchRoleGuards', 'branchRoles',

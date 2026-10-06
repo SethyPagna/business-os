@@ -29,6 +29,7 @@ import {
   plannedLineFromRecord,
   saleLineKhrSnapshotStatement,
   saleMoneyUpdateStatement,
+  saleStatusChangeStatements,
   type SaleAddItemsReversal,
 } from './saleLineAddition'
 // S4-30: an undo/redo of an addition appends a compensating entry to the sale's
@@ -1229,6 +1230,19 @@ export function sameSaleStateFingerprint(currentJson: string, expectedJson: stri
 //         lines this redo adds back.
 // A snapshot too incomplete to derive that from is refused, never guessed.
 const LEGACY_ADD_ITEMS_REQUIRED_MONEY = ['subtotal_usd', 'subtotal_khr', 'total_usd', 'total_khr', 'change_usd', 'change_khr']
+// The status an add-items replay finds the sale in: undo finds the status the
+// addition left (saleStatusAfter -- Not Paid when it left a paid sale owing,
+// lib/saleLineChangeStatus.ts), redo the status before it. Snapshots recorded
+// before that rule have no saleStatusAfter: the addition never moved the status.
+function addItemsStatusBeforeReplay(reversal: SaleAddItemsReversal, direction: 'undo' | 'redo'): string {
+  const before = String(reversal.saleStatus)
+  return direction === 'undo' ? String(reversal.saleStatusAfter ?? before) : before
+}
+function addItemsStatusReplay(saleId: number, reversal: SaleAddItemsReversal, direction: 'undo' | 'redo') {
+  const before = String(reversal.saleStatus), after = String(reversal.saleStatusAfter ?? before)
+  if (before === after) return []
+  return direction === 'undo' ? saleStatusChangeStatements(saleId, after, before) : saleStatusChangeStatements(saleId, before, after)
+}
 // Optional keys saleMoneyUpdateStatement also writes when a snapshot has them.
 const LEGACY_ADD_ITEMS_OPTIONAL_MONEY = ['exchange_rate', 'money_precision_version', 'calculated_total_usd', 'rounding_adjustment_usd',
   'change_is_actual', 'change_exchange_rate', 'discount_khr', 'tax_khr', 'delivery_fee_khr', 'membership_discount_khr']
@@ -1431,7 +1445,7 @@ async function replayAtomicSaleAddItems(
     snapshot: snapshotId,
     snapshotStatus: ctx.direction === 'undo' ? 'applied' : 'reversed',
     historyStatus: ctx.direction === 'undo' ? 'undoable' : 'redoable',
-    saleStatus: reversal.saleStatus,
+    saleStatus: addItemsStatusBeforeReplay(reversal, ctx.direction),
     replaySale:currentHeaderJson,replayLines:currentLinesJson,...lineage.params,
   }
   const memberGuards: string[] = []
@@ -1490,6 +1504,7 @@ async function replayAtomicSaleAddItems(
     statements.push(
       ...removal.statements,
       saleMoneyUpdateStatement(saleId, reversal.moneyBefore),
+      ...addItemsStatusReplay(saleId, reversal, 'undo'),
       ...(reversal.lineMoneyBefore ? [saleLineKhrSnapshotStatement(saleId, reversal.lineMoneyBefore)] : []),
       ...lines.map((line) => amendmentEntryStatement({
         ...(hasRecordedSaleMoneyPrecision(reversal.moneyAfter) ? {moneyPrecisionVersion:1 as const,
@@ -1528,6 +1543,7 @@ async function replayAtomicSaleAddItems(
     statements.push(
       ...buildOperationAllocationStatements(plan.lines, operationId, stamp),
       saleMoneyUpdateStatement(saleId, reversal.moneyAfter),
+      ...addItemsStatusReplay(saleId, reversal, 'redo'),
       ...(reversal.lineMoneyAfter ? [saleLineKhrSnapshotStatement(saleId, reversal.lineMoneyAfter)] : []),
       ...plan.lines.map((line) => amendmentEntryStatement({
         ...(hasRecordedSaleMoneyPrecision(reversal.moneyAfter) ? {moneyPrecisionVersion:1 as const,
@@ -3098,7 +3114,7 @@ const APPLIERS: Record<string, UndoApplierDef> = {
       // status the sale was in when the line was added -- a sale that has
       // since been cancelled has already had these units restored by the
       // cancellation, and undoing here would add them a second time.
-      if (String(sale.sale_status || 'completed') !== String(reversal.saleStatus)) {
+      if (String(sale.sale_status || 'completed') !== addItemsStatusBeforeReplay(reversal, ctx.direction)) {
         throw new UndoConflictError("This sale's status changed after the items were added, so this can no longer be undone safely. Adjust the sale directly instead.", UNDO_RECORD_CHANGED_CODE)
       }
 
