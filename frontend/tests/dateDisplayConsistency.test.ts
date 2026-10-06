@@ -18,6 +18,7 @@ import {
   monthShortName,
   monthYearLabel,
 } from '../src/utils/dateLabels.ts'
+import { daysUntilBusinessDate } from '../src/utils/dateHelpers.ts'
 import { adjustmentLotCodeAsDisplay, batchDisplayLabel, batchReceivedDateText, formatBatchReceivedDate, lotCodeDisplay } from '../src/utils/batchLabel.ts'
 
 let failed = 0
@@ -174,6 +175,28 @@ await runTest("migration 0108's month-first ADJ lot code DISPLAYS day-first; the
   const stored = 'ADJ09/02/2026'
   lotCodeDisplay(stored)
   assert.equal(stored, 'ADJ09/02/2026')
+})
+
+await runTest('expiry days-left counts calendar days from the business date, never device time', () => {
+  // The old badge compared new Date('<expiry>T00:00:00') (device-local) with Date.now(),
+  // so the answer moved with the device zone and the time of day.
+  assert.equal(daysUntilBusinessDate('2026-10-06', '2026-10-05'), 1)
+  assert.equal(daysUntilBusinessDate('2026-10-05', '2026-10-05'), 0)
+  assert.equal(daysUntilBusinessDate('2026-10-04', '2026-10-05'), -1)
+  assert.equal(daysUntilBusinessDate('2027-01-01', '2026-12-31'), 1, 'across a year end')
+  assert.equal(daysUntilBusinessDate('2026-03-01', '2026-02-28'), 1, 'across a non-leap February')
+  assert.equal(daysUntilBusinessDate('2026-10-06 18:30:00', '2026-10-05'), 1, 'a stamp reads by its date part')
+  assert.equal(daysUntilBusinessDate('03/04/2026', '2026-10-05'), null, 'a slash value has no day count')
+  assert.equal(daysUntilBusinessDate('2029', '2026-10-05'), null)
+  assert.equal(daysUntilBusinessDate(null, '2026-10-05'), null)
+})
+
+await runTest('the Dashboard busy-hours card no longer prints AM/PM', async () => {
+  const { readFileSync } = await import('node:fs')
+  const source = readFileSync(new URL('../src/components/dashboard/Dashboard.tsx', import.meta.url), 'utf8')
+  assert.doesNotMatch(source, /\$\{[^}]*\} (AM|PM)|'12 (AM|PM)'/, 'no "${hour} AM" template and no literal 12 AM / 12 PM')
+  assert.doesNotMatch(source, /hour < 12 \?/, 'the 12-hour branch is gone')
+  assert.match(source, /formatDashboardHourLabel = formatHourOfDay/)
 })
 
 if (failed > 0) process.exitCode = 1
