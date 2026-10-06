@@ -324,6 +324,41 @@ await runTest('History is view-only; Revert shows where it may and asks for the 
   } finally { await hidden.page.unmount() }
 })
 
+await runTest('A links-only viewer reads a relabelled merge/legacy event as a plain link or unlink, with no actor, no identity check and no customer', async () => {
+  // What the Worker sends a caller without Contacts view for legacy_import and merge_unlink (bb080bbbf):
+  // action link / unlink, evidence null, actorName null, both customers null.
+  const relabelled = (id: number, action: string) => ({
+    id, action, fromCustomer: null, toCustomer: null, evidence: null, reasonCode: null, note: null, matchBasis: null,
+    groupId: null, revertsEventId: null, linkRequestId: null, linkVersionAfter: id, actorName: null, createdAt: '2026-10-01 03:00:00', revertible: false,
+  })
+  const history = { linkVersion: 2, customerVisible: false, events: [relabelled(2, 'unlink'), relabelled(1, 'link')] }
+  const { page, pack } = await mountTab({ who: LINKS_ONLY, members: [hide({ ...dara, chip: 'unverified' })], history })
+  try {
+    await openDetail(page, 8)
+    await page.click(page.find((node) => node.tagName === 'BUTTON' && node.getAttribute('data-member-action') === 'history', 'History'))
+    await page.waitFor(() => exists(page, attr('data-member-event')), 'the history rows')
+    const rows = page.findAll(attr('data-member-event'))
+    assert.deepEqual(rows.map((row) => row.getAttribute('data-member-event')), ['unlink', 'link'])
+    assert.ok(rows[0].textContent.includes(pack.pm_hist_unlink) && rows[1].textContent.includes(pack.pm_hist_link), 'the plain Linked / Unlinked wording')
+    const openRow = async (action: string) => {
+      await page.click(page.findAll(attr('data-records-row'))[action === 'unlink' ? 0 : 1])
+      return page.findAll(attr('data-member-event', action))[0].textContent
+    }
+    // The unlink ends at nothing and the link starts from nothing; the other side stays hidden.
+    const unlinkRow = await openRow('unlink')
+    assert.ok(unlinkRow.includes(pack.pm_customer_hidden) && unlinkRow.includes(pack.pm_not_linked), 'unlink: Customer hidden before, Not linked after')
+    const unlinkFloat = page.find(attr('data-member-history'), 'history').textContent
+    assert.ok(!unlinkFloat.includes(pack.pm_evidence), 'no Identity check row when evidence is null')
+    assert.ok(!unlinkFloat.includes(pack.pm_ev_system), 'the system evidence never shows')
+    assert.ok(unlinkFloat.includes(pack.unknown), 'a null actor reads Unknown, not a blank or "null"')
+    const linkRow = await openRow('link')
+    assert.ok(linkRow.includes(pack.pm_customer_hidden) && linkRow.includes(pack.pm_not_linked), 'link: Not linked before, Customer hidden after')
+    const float = page.find(attr('data-member-history'), 'history').textContent
+    assert.ok(!float.includes('null') && !float.includes('undefined'))
+    assert.equal(exists(page, (node) => node.getAttribute('data-member-action') === 'revert'), false, 'revertible:false from the server hides Revert')
+  } finally { await page.unmount() }
+})
+
 await runTest('Unlink takes a reason and shows before and after; Reset password takes evidence plus a note, and shows the password once', async () => {
   const { page, rec, pack } = await mountTab({ who: ADMIN, members: [dara] })
   try {

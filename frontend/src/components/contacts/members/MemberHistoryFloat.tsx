@@ -42,8 +42,15 @@ const REASON_TEXT: Record<string, [string, string]> = {
 
 type MemberRecord = RecordItem & { event: MemberHistoryEvent }
 
-function customerSide(customer: MemberCustomerRef | null, hidden: boolean, t: MemberT): string {
-  if (hidden) return memberText(t, 'pm_customer_hidden', 'Customer hidden')
+// Without Contacts view the Worker withholds both customers, but the action itself says what
+// one side was: a link starts from nothing and an unlink ends at nothing (a customer merge's
+// relabelled events arrive as plain link / unlink). Those sides read "Not linked"; the other
+// stays "Customer hidden".
+const STARTS_UNLINKED = new Set(['link', 'legacy_import'])
+const ENDS_UNLINKED = new Set(['unlink', 'merge_unlink'])
+
+function customerSide(customer: MemberCustomerRef | null, hidden: boolean, t: MemberT, knownNone = false): string {
+  if (hidden && !knownNone) return memberText(t, 'pm_customer_hidden', 'Customer hidden')
   return customer ? customerLabel(customer) : memberText(t, 'pm_not_linked', 'Not linked')
 }
 
@@ -61,8 +68,8 @@ export function historyAdapter(t: MemberT, customerVisible: boolean): RecordsAda
       const rows = [{
         key: 'customer',
         label: memberText(t, 'pm_field_customer', 'Linked customer'),
-        before: customerSide(event.fromCustomer, !customerVisible, t),
-        after: customerSide(event.toCustomer, !customerVisible, t),
+        before: customerSide(event.fromCustomer, !customerVisible, t, STARTS_UNLINKED.has(event.action)),
+        after: customerSide(event.toCustomer, !customerVisible, t, ENDS_UNLINKED.has(event.action)),
       }]
       if (event.evidence) {
         rows.push({
