@@ -223,6 +223,7 @@ const productsRoute = loadReal('routes/products.ts', {
   '../durable-objects/broadcastHub': { broadcast: async () => {} },
   '../lib/bulkDeleteEngine': { createBulkDeleteJob: async () => ({}), getBulkDeleteJob: async () => null, reapStalledBulkDeleteJobs: async () => {} },
   '../lib/importImageMatch': importImageMatch,
+  '../lib/productDiscountGate': loadReal('lib/productDiscountGate.ts'),
   '../lib/media': media,
   '../lib/sqlBinding': sqlBinding,
   '../lib/productImagePermission': productImagePermission,
