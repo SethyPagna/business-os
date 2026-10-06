@@ -69,9 +69,15 @@ function assertAck(result, requestId, expectedOwner = owner()) {
   assert.equal(result.body.client_request_id, requestId)
   assert.deepEqual(result.body.offline_owner, expectedOwner)
 }
+// N2 (SEC-SALES): a sale is rung inside the cashier's open shift for today.
+function openShift(raw, user) {
+  raw.prepare(`INSERT INTO shift_sessions(shift_code,scope_mode,user_id,user_name,branch_id,branch_name,business_date,opened_at)
+    VALUES('OWNER-${Number(user.id)}', 'per_account', ${Number(user.id)}, 'cashier', 1, 'Shop', date('now','+7 hours'), datetime('now','-1 hour'))`).run()
+}
 async function run() {
   h.setUser(userA)
   const f = h.fixture()
+  openShift(f.raw, userA)
   const empty = h.creationState(f.raw)
   // Run this first: the old implementation actually creates a sale and fails
   // this assertion, proving the regression is not just a missing new endpoint.
@@ -125,6 +131,7 @@ async function run() {
   assertDenied(await sale(racedDb, body('original', userB)), 'offline_owner_mismatch', state, f)
   h.setUser(userA)
   const lost = h.fixture({ afterBatchThrow: true })
+  openShift(lost.raw, userA)
   const recovered = await sale(lost.route, body('lost-response'))
   assertAck(recovered, 'lost-response')
   assert.equal(recovered.body.duplicate, true)

@@ -103,6 +103,8 @@ function fixture(hooks = {}) {
   db.prepare(`INSERT INTO product_batches(id,variant_product_id,batch_key,lot_code,expiry_date,received_at,is_active,batch_number)
               VALUES(500,10,'powder-lot','POWDER-LOT','2027-06-01','2026-09-01',1,1)`).run()
   db.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(500,1,10)').run()
+  // N2 (SEC-SALES): a sale is rung inside the cashier's open shift for today.
+  db.prepare(`INSERT INTO shift_sessions(shift_code,scope_mode,user_id,user_name,branch_id,branch_name,business_date,opened_at) VALUES('FIXTURE-SHIFT','per_account',${USER.id},'cashier',1,'Shop',date('now','+7 hours'),datetime('now','-1 hour'))`).run()
   return { raw: db, route: routeDb(db, hooks) }
 }
 

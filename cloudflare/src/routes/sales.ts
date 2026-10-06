@@ -147,6 +147,8 @@ import { normalizeClientReceiptNumber, uniqueBusinessDateTimeNumber } from '../l
 import { sanitizeClientCreatedAt } from '../lib/clientTimestamp'
 import { EXCHANGE_RATE_OUT_OF_RANGE_CODE, EXCHANGE_RATE_OUT_OF_RANGE_MESSAGE, saleExchangeRateWithinBand } from '../lib/saleExchangeRateBand'
 import { MEMBERSHIP_DISCOUNT_MISMATCH_CODE, MEMBERSHIP_DISCOUNT_MISMATCH_MESSAGE, membershipRedemptionDiscount } from '../lib/membershipRedemption'
+import { SALE_SHIFT_MESSAGES, readSaleShiftBlock, saleShiftGuardStatement, type SaleShiftScope } from '../lib/saleShiftRequirement'
+import { readShiftPolicy } from './shifts'
 import { localRangeClockError, isLocalRangeClock, businessToday, localDateAtOrAfter, localDateAtOrBefore, localDateRangeClause, localTimeRangeClause } from '../lib/businessDateWindow'
 import { continuousReadWindowSql, parseContinuousReadWindow } from '../lib/continuousReadWindow'
 import { formatSaleStatusTelegramLines, formatSaleTelegramLines, sendTelegramEvent } from '../lib/telegram'
@@ -620,6 +622,13 @@ app.post('/', async (c) => {
     || firstUnsellableBranch(saleBranchRows)) {
     return c.json({ error: SHOP_ONLY_SALE_ERROR }, 400)
   }
+
+  // ---- 1c. N2: inside the cashier's open shift (lib/saleShiftRequirement.ts) ----
+  const shiftPolicy = await readShiftPolicy(db)
+  const saleShiftScope: SaleShiftScope | null = shiftPolicy.admin_exempt && isAdminControlUser(user) ? null
+    : { scopeMode: shiftPolicy.scope_mode, userId: Number(user.id), branchId: saleHeaderBranchId }
+  const saleShiftBlock = saleShiftScope ? await readSaleShiftBlock(db, saleShiftScope) : null
+  if (saleShiftBlock) return c.json({ error: SALE_SHIFT_MESSAGES[saleShiftBlock], code: saleShiftBlock }, 409)
 
   // ---- 2. Read current prices + stock (plain reads, before any writes) ----
   // Chunked for D1's 100-bound-parameter ceiling. A POS cart rarely has
@@ -1426,6 +1435,7 @@ app.post('/', async (c) => {
     const statements: Array<{ sql: string; params: Record<string, unknown> }> = [
       capturedSourceGuard,
       receiptNumberGuard,
+      ...(saleShiftScope ? [saleShiftGuardStatement(saleShiftScope)] : []),
       ...(redemptionGuard ? [redemptionGuard] : []),
       saleInsertStatement,
       {
@@ -1786,6 +1796,9 @@ app.post('/', async (c) => {
           code: 'receipt_number_conflict',
         }, 409)
       }
+      // N2: an End Shift that landed between the preflight and this batch.
+      const raceShiftBlock = saleShiftScope && /malformed JSON/i.test(message) ? await readSaleShiftBlock(db, saleShiftScope) : null
+      if (raceShiftBlock) return c.json({ error: SALE_SHIFT_MESSAGES[raceShiftBlock], code: raceShiftBlock }, 409)
       if (/malformed JSON/i.test(message)) {
         try { await db.prepare(capturedSourceGuard.sql).get(capturedSourceGuard.params) }
         catch { return c.json({error:'Pricing changed before the sale was saved. Review the current quote.',code:'sale_pricing_quote_conflict'},409) }

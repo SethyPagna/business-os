@@ -242,6 +242,8 @@ async function migrate(db) {
                         VALUES(?,?,?,?,'2027-06-01','2026-09-01',1,1)`).bind(lotOf(id), id, `powder-lot-${id}`, `POWDER-LOT-${id}`),
         native.prepare('INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(?,1,10)').bind(lotOf(id)),
       ]),
+      // N2 (SEC-SALES): a sale is rung inside the cashier's open shift for today.
+      native.prepare(`INSERT INTO shift_sessions(shift_code,scope_mode,user_id,user_name,branch_id,branch_name,business_date,opened_at) VALUES('FIXTURE-SHIFT','per_account',${USER.id},'cashier',1,'Shop',date('now','+7 hours'),datetime('now','-1 hour'))`),
     ])
 
     const tills = gate(native)

@@ -36,7 +36,8 @@ import { createPosTrackingOwner, needsPosTrackingSheet, posTrackingFingerprint, 
 import { readFreshPickerLots } from '../../utils/pickerLotFreshness.ts'
 import CartItem     from './CartItem'
 import ShiftGate, { EndShiftButton } from './ShiftGate'
-import { SHIFT_BRANCH_CHANGED_EVENT } from './ShiftGate'
+import { SHIFT_BRANCH_CHANGED_EVENT, useSharedShift } from './ShiftGate'
+import { saleShiftBlock } from '../../utils/saleShiftRequirement.ts'
 import ShiftHistoryPanel from '../shifts/ShiftHistoryPanel.tsx'
 import PaginationControls, { POS_DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
 import ScanSearchButton from '../shared/ScanSearchButton'
@@ -2223,6 +2224,11 @@ export default function POS() {
   const primaryBranchName = primaryBranchFilterId == null
     ? null
     : (branches.find((branch) => Number(branch?.id) === Number(primaryBranchFilterId))?.name || null)
+  // N2: the same shift row ShiftGate prompts for. A sale is rung inside the
+  // cashier's open shift; the Worker refuses one outside it, and checkout
+  // says why up front instead of after the cashier has collected the money.
+  const { state: saleShiftState } = useSharedShift(primaryBranchFilterId, user?.id, settings?.shift_scope_mode)
+  const saleShiftRefusal = saleShiftBlock(saleShiftState)
 
   // Which products currently carry active batch/expiry tracking, scoped to
   // the branch filter -- refetched whenever it changes.
@@ -3233,8 +3239,9 @@ export default function POS() {
 // Checkout
   const openStatusPicker = useCallback(() => {
     if (loading || checkoutInFlightRef.current || active.cart.length === 0) return
+    if (saleShiftRefusal) { notify(t(saleShiftRefusal), 'error'); return }
     setShowStatusPicker(true)
-  }, [active.cart.length, loading])
+  }, [active.cart.length, loading, saleShiftRefusal, notify, t])
 
   const closeStatusPicker = useCallback(() => {
     if (loading || checkoutInFlightRef.current) return

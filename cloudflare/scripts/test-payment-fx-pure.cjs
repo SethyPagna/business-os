@@ -20,6 +20,9 @@ const actual = new Set(['businessMaintenanceGuard','offlineSaleOwnership','acqui
   'saleExchangeRateBand',
   // N14: a points redemption is valued from Settings, not the request.
   'membershipRedemption',
+  // N2: POST /sales reads the shift policy (routes/shifts.ts) and the
+  // cashier's open shift; administrators are exempt by default.
+  'shifts', 'saleShiftRequirement', 'businessDateWindow',
   // N21: routes/sales.ts resolves the display address through this kernel on
   // every write. A stub makes contactDisplayAddress undefined and the route
   // 500s, so it is loaded for real -- it has no imports of its own.

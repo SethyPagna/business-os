@@ -48,6 +48,9 @@ const actual = new Set(['businessDateWindow', 'continuousReadWindow', 'businessM
   'saleExchangeRateBand',
   // N14: a points redemption is valued from Settings, not the request.
   'membershipRedemption',
+  // N2: POST /sales reads the shift policy (routes/shifts.ts) and the
+  // cashier's open shift; administrators are exempt by default.
+  'shifts', 'saleShiftRequirement',
   'contactOptions', 'saleCreationSnapshot', 'saleRecordEvents', 'saleRecords', 'anonymousCustomer',
   'moneyPrecision', 'saleMoneyPrecision', 'saleItemPricing', 'promotionRules',
   'productMergeLineage', 'saleMutationHeaderQuote', 'reportMoneyPrecision',

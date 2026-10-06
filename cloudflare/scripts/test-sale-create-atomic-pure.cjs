@@ -141,7 +141,21 @@ function request(clientRequestId) {
   }
 }
 
+// N2 (SEC-SALES): a sale is rung inside the cashier's open shift for today
+// (lib/saleShiftRequirement.ts). Positive-path admission registers one for the
+// current user, exactly as POST /api/shifts/open would, unless a suite that is
+// ABOUT shifts turns this off and manages them itself.
+let autoShift = true
+async function ensureOpenShift(db, branchId) {
+  await db.prepare(`INSERT INTO shift_sessions(shift_code,scope_mode,user_id,user_name,branch_id,branch_name,business_date,opened_at)
+    SELECT 'FIXTURE-' || @user || '-' || date('now','+7 hours'), 'per_account', @user, @name, @branch, 'Shop',
+      date('now','+7 hours'), datetime('now','-1 hour')
+    WHERE NOT EXISTS (SELECT 1 FROM shift_sessions WHERE user_id = @user AND business_date = date('now','+7 hours'))`)
+    .run({ user: Number(currentUser.id), name: String(currentUser.username || 'cashier'), branch: Number(branchId) || 1 })
+}
+
 async function postSale(db, body) {
+  if (autoShift) await ensureOpenShift(db, body.branch_id)
   // Positive-path fixture admission: every new sale request now names its
   // authenticated owner, even when online. Preserve explicit malformed/null
   // ownership. The owner regression suite calls the route directly to test

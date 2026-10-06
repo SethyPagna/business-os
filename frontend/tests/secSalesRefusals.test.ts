@@ -36,6 +36,8 @@ const { saleSubmitRefusalText } = loadModule('api/saleSubmitErrors.ts')
 const REFUSALS: Array<{ code: string; workerFile: string }> = [
   { code: 'exchange_rate_out_of_range', workerFile: 'lib/saleExchangeRateBand.ts' },
   { code: 'membership_discount_mismatch', workerFile: 'lib/membershipRedemption.ts' },
+  { code: 'sale_shift_required', workerFile: 'lib/saleShiftRequirement.ts' },
+  { code: 'sale_shift_closed', workerFile: 'lib/saleShiftRequirement.ts' },
 ]
 
 const failures: string[] = []

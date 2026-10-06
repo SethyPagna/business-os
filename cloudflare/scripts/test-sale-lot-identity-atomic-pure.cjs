@@ -178,6 +178,8 @@ function fixture({ legacyThrough0153 = false } = {}) {
   run(db, `INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(500,1,2)`)
   run(db, `INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(502,1,5)`)
   run(db, `INSERT INTO branch_batch_stock(batch_id,branch_id,quantity) VALUES(501,1,10)`)
+  // N2 (SEC-SALES): a sale is rung inside the cashier's open shift for today.
+  run(db, `INSERT INTO shift_sessions(shift_code,scope_mode,user_id,user_name,branch_id,branch_name,business_date,opened_at) VALUES('FIXTURE-SHIFT','per_account',${USER.id},'cashier',1,'Shop',date('now','+7 hours'),datetime('now','-1 hour'))`)
   return db
 }
 

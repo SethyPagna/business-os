@@ -37,8 +37,12 @@ harness._compile(atomicSource.slice(0, boundary)
   .replace("fs.readFileSync(sourcePath, 'utf8')", 'globalThis.__secSalesSource(sourcePath)')
   // Library modules reach D1 through './db' too (report reads, shift policy).
   .replace('const overrides = {', "const overrides = { './db': { getDb: (env) => env.DB },")
-  + '\nmodule.exports={fixture,request,postSale,creationState,app,executionCtx,USER,load,setUser(value){currentUser=value}};', atomicFile)
+  + '\nmodule.exports={fixture,request,postSale,creationState,app,executionCtx,USER,load,setUser(value){currentUser=value},setAutoShift(value){autoShift=value}};', atomicFile)
 const h = harness.exports
+// The atomic preamble's positive-path admission opens a shift before every
+// sale; SEC-SALES suites register (or withhold) shifts explicitly with
+// openShift below.
+h.setAutoShift(false)
 
 const baseline = process.env.SEC_SALES_BASELINE === '1'
 
@@ -58,9 +62,9 @@ async function call(db, method, route, body) {
 function openShift(raw, user, { branchId = 1, closed = false, cancelled = false, scopeMode = 'per_account', businessDate } = {}) {
   const date = businessDate || raw.prepare("SELECT date('now','+7 hours') AS d").get().d
   raw.prepare(`INSERT INTO shift_sessions (shift_code, scope_mode, user_id, user_name, branch_id, branch_name, business_date,
-      opened_at, opening_float_usd, opening_float_khr, closed_at, cancelled_at)
+      opened_at, opening_float_usd, opening_float_khr, closed_at, cancelled_at, cancelled_by_user_id, cancel_reason)
     VALUES (@code, @scope, @user, @name, @branch, 'Shop', @date, datetime('now','-1 hour'), 0, 0,
-      ${closed ? "datetime('now','-1 minute')" : 'NULL'}, ${cancelled ? "datetime('now','-1 minute')" : 'NULL'})`)
+      ${closed ? "datetime('now','-1 minute')" : 'NULL'}, ${cancelled ? "datetime('now','-1 minute'), 1, 'Cancelled by administrator'" : 'NULL, NULL, NULL'})`)
     .run({ code: `T-${user.id}-${date}-${Math.random().toString(36).slice(2, 8)}`, scope: scopeMode, user: user.id, name: user.username, branch: branchId, date })
 }
 

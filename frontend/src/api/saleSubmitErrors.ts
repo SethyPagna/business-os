@@ -16,6 +16,11 @@ const SALE_SUBMIT_REFUSAL_KEYS: Readonly<Record<string, string>> = {
   // N14: the points discount must be the configured value of the points
   // redeemed (cloudflare/src/lib/membershipRedemption.ts).
   membership_discount_mismatch: 'membership_discount_mismatch',
+  // N2: a sale is rung inside the cashier's open shift for today
+  // (cloudflare/src/lib/saleShiftRequirement.ts; the till's own check is
+  // utils/saleShiftRequirement.ts).
+  sale_shift_required: 'sale_shift_required',
+  sale_shift_closed: 'sale_shift_closed',
 }
 
 /**
