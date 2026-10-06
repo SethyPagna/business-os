@@ -160,6 +160,9 @@ import {
 import { validateRefundMoneySnapshot } from './refundMoneyPrecision'
 import { validateSaleMoneySnapshot } from './saleMoneyPrecision'
 import { recordedSaleOutstandingUsd } from './saleStatusResolution'
+import { refundOutcome, refundToReplacementSql } from './refundTender'
+// Re-exported for telegram.ts, which reads refunds only through this module.
+export { refundOutcome, refundToReplacementSql }
 import {
   EMPTY_REMOVAL_LOSS,
   REMOVAL_LOSS_FROM,
@@ -405,6 +408,9 @@ export interface SalesTotals {
   // refunds actually paid out, never a converted equivalent. A memo beside
   // refund_usd (which already counts them in dollars), never added to it.
   refund_paid_khr: number
+  // RET-A verify R2: riel of the refunds above that paid their replacements
+  // instead of leaving the till. A memo beside refund_paid_khr, never added.
+  refund_replacement_khr: number
   // Secondary cash figure: collected sale value, tax, and customer-paid
   // delivery, less refunds paid out. Awaiting-payment credit stays out even
   // though it is inside revenue/profit. Never the headline.
@@ -463,7 +469,7 @@ export function emptySalesTotals(): SalesTotals {
     returned_cost_usd: 0, returned_cost_shortfall_usd: 0,
     unvalued_tx_count: 0, unvalued_cost_usd: 0, net_sales_usd: 0,
     refund_usd: 0, refund_charged_usd: 0, refund_excess_usd: 0,
-    revenue_usd: 0, pending_revenue_usd: 0, pending_owed_usd: 0, refund_paid_khr: 0, collected_total_usd: 0, cost_usd: 0, profit_usd: 0, avg_order_usd: 0,
+    revenue_usd: 0, pending_revenue_usd: 0, pending_owed_usd: 0, refund_paid_khr: 0, refund_replacement_khr: 0, collected_total_usd: 0, cost_usd: 0, profit_usd: 0, avg_order_usd: 0,
   }
 }
 
@@ -1156,7 +1162,12 @@ async function readSalesReportPass(
         THEN ROUND(COALESCE(r.total_refund_khr,0)*(COALESCE(r.total_refund_usd,0)-COALESCE(r.owed_reduction_usd,0))/r.total_refund_usd) ELSE 0 END AS refund_paid_khr`
       : ''}`
     : ''
-  const returns = await reportKeysetRows(db, `SELECT r.id,r.sale_id,r.total_refund_usd,r.status,r.return_scope${returnPrecision}${returnOwed}
+  // RET-A verify R2: the riel of that cash leg that paid the return's
+  // replacement instead of leaving the till (refundTender refundToReplacementSql).
+  const returnToReplacement = returnOwed && returnColumns.has('refund_currency') && returnColumns.has('replacement_sale_id')
+    && salesColumns.has('creation_snapshot_json') && salesColumns.has('source_return_id')
+    ? `,CASE WHEN r.refund_currency='KHR' THEN ${refundToReplacementSql('r', 'khr')} ELSE 0 END AS refund_replacement_khr` : ''
+  const returns = await reportKeysetRows(db, `SELECT r.id,r.sale_id,r.total_refund_usd,r.status,r.return_scope${returnPrecision}${returnOwed}${returnToReplacement}
     FROM returns r CROSS JOIN sales s ON s.id=r.sale_id WHERE r.sale_id IS NOT NULL
       AND COALESCE(r.status,'completed')<>'cancelled' AND COALESCE(r.return_scope,'customer')='customer'
       AND (${primary.sql})`, 'r.id', primary.params, rowBudget)
@@ -1249,7 +1260,7 @@ type ReportExactKey = typeof REPORT_EXACT_KEYS[number]
 type ReportExactBucket = {
   money: Record<ReportExactKey, ReportExactDecimal>
   tx: number; pendingTx: number; deliveryActualCount: number; deliverySaleCount: number
-  cancelledTx: number; unvaluedTx: number; missingCostLines: number; refundPaidKhr: number
+  cancelledTx: number; unvaluedTx: number; missingCostLines: number; refundPaidKhr: number; refundReplacementKhr: number
   /** Recognized sales outside the Not Paid cohort: the cashier view's paid transactions. */
   collectedTx: number
 }
@@ -1257,7 +1268,7 @@ type ReportExactBucket = {
 function reportBucket(): ReportExactBucket {
   return {
     money: Object.fromEntries(REPORT_EXACT_KEYS.map((key) => [key, ReportExactDecimal.zero()])) as Record<ReportExactKey, ReportExactDecimal>,
-    tx: 0, pendingTx: 0, deliveryActualCount: 0, deliverySaleCount: 0, cancelledTx: 0, unvaluedTx: 0, missingCostLines: 0, refundPaidKhr: 0,
+    tx: 0, pendingTx: 0, deliveryActualCount: 0, deliverySaleCount: 0, cancelledTx: 0, unvaluedTx: 0, missingCostLines: 0, refundPaidKhr: 0, refundReplacementKhr: 0,
     collectedTx: 0,
   }
 }
@@ -1344,8 +1355,10 @@ type ReportSaleFacts = {
   refundExcess: ReportExactDecimal
   delivery: ReportExactDecimal; deliveryActual: ReportExactDecimal; cost: ReportExactDecimal; returnedCost: ReportExactDecimal
   itemDiscount: ReportExactDecimal; unvaluedCost: ReportExactDecimal; missingCostLines: number
-  /** RET-A: riel the sale's active refunds paid out (snapshot refund_paid_khr). */
+  /** RET-A: riel the sale's active refunds paid out of the till (snapshot refund_paid_khr less what paid a replacement). */
   refundPaidKhr: number
+  /** RET-A verify R2: riel of those refunds that paid their replacements instead. */
+  refundReplacementKhr: number
   /** Owner ruling 6 Oct: the balance a credit sale still owes; null when not credit or unreadable. */
   owed: number | null
 }
@@ -1431,6 +1444,7 @@ function reportSaleFacts(snapshot: SalesReportSnapshot): ReportSaleFacts[] {
     const adjustment = reportHeaderAdjustment(sale, version)
     let refundPaid = ReportExactDecimal.zero()
     let refundPaidKhr = 0
+    let refundReplacementKhr = 0
     let legacyRefundPaid = ReportExactDecimal.zero()
     let returnedCost = ReportExactDecimal.zero()
     let missingCostLines = 0
@@ -1449,7 +1463,9 @@ function reportSaleFacts(snapshot: SalesReportSnapshot): ReportSaleFacts[] {
         reportMoney(returned, 'rounding_adjustment_usd', returnVersion, false)
       }
       refundPaid = refundPaid.add(payout)
-      refundPaidKhr += Number(returned.refund_paid_khr) || 0
+      const toReplacementKhr = Math.max(0, Math.round(Number(returned.refund_replacement_khr) || 0))
+      refundPaidKhr += Math.max(0, (Number(returned.refund_paid_khr) || 0) - toReplacementKhr)
+      refundReplacementKhr += toReplacementKhr
       if (returnVersion === 0) legacyRefundPaid = legacyRefundPaid.add(payout)
       for (const line of returnItems.get(Number(returned.id)) || []) {
         const quantity = ReportExactDecimal.quantity(line.quantity as string | number)
@@ -1483,7 +1499,7 @@ function reportSaleFacts(snapshot: SalesReportSnapshot): ReportSaleFacts[] {
     const deliveryActual = Number(sale.delivery_has_linked_fee) !== 0
       ? ReportExactDecimal.zero() : reportMoney(sale, 'delivery_actual_cost_usd', version)
     return { sale, version, recognized, awaiting, valued, net, adjustment, refund, refundPaid, refundExcess, delivery, deliveryActual,
-      cost, returnedCost, itemDiscount, unvaluedCost, missingCostLines, refundPaidKhr, owed }
+      cost, returnedCost, itemDiscount, unvaluedCost, missingCostLines, refundPaidKhr, refundReplacementKhr, owed }
   })
 }
 
@@ -1547,6 +1563,7 @@ function aggregateReportSnapshot(
     reportAdd(bucket, 'refund', fact.refund); reportAdd(bucket, 'refundCharged', fact.refundPaid)
     reportAdd(bucket, 'refundExcess', fact.refundExcess); reportAdd(bucket, 'cost', fact.cost)
     bucket.refundPaidKhr += fact.refundPaidKhr
+    bucket.refundReplacementKhr += fact.refundReplacementKhr
     reportAdd(bucket, 'returnedCost', fact.valued ? fact.returnedCost : ReportExactDecimal.zero())
     reportAdd(bucket, 'itemDiscount', fact.itemDiscount); reportAdd(bucket, 'unvaluedCost', fact.unvaluedCost)
     if (!fact.valued) bucket.unvaluedTx += 1
@@ -1630,6 +1647,7 @@ function exactReportTotals(bucket: ReportExactBucket, snapshot: SalesReportSnaps
     pending_revenue_usd: m.pendingRevenue.toNumber(),
     pending_owed_usd: m.pendingOwed.toNumber(),
     refund_paid_khr: bucket.refundPaidKhr,
+    refund_replacement_khr: bucket.refundReplacementKhr,
     collected_total_usd: m.collected.toNumber(),
     cost_usd: netCost.toNumber(),
     profit_usd: profit.toNumber(),
@@ -1968,6 +1986,7 @@ export function deriveTotals(level: Record<string, number>, costUsd: number, ret
     // kernel today, and the revenue basis if it is ever reached.
     pending_owed_usd: round2(level.pending_owed_usd !== undefined ? num(level.pending_owed_usd) : pendingRevenueUsd),
     refund_paid_khr: Math.round(num(level.refund_paid_khr)),
+    refund_replacement_khr: Math.round(num(level.refund_replacement_khr)),
     collected_total_usd: round2(collectedTotalUsd),
     cost_usd: round2(netCostUsd),
     profit_usd: round2(profitUsd),

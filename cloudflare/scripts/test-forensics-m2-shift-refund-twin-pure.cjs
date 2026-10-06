@@ -98,11 +98,12 @@ const saleItemPricing = load('lib/saleItemPricing.ts', { './moneyPrecision': mon
 const saleMoneyPrecision = load('lib/saleMoneyPrecision.ts', { './moneyPrecision': moneyPrecision })
 // salesAnalytics reads a credit sale's balance due through the one owed helper.
 const saleStatusResolutionForAnalytics = load('lib/saleStatusResolution.ts', { './financialPrecision': load('lib/financialPrecision.ts') })
+const refundTenderForAnalytics = load('lib/refundTender.ts')
 const refundMoneyPrecision = load('lib/refundMoneyPrecision.ts', { './moneyPrecision': moneyPrecision, './saleMoneyPrecision': saleMoneyPrecision })
 const customerReturnEntitlement = load('lib/customerReturnEntitlement.ts', { './moneyPrecision': moneyPrecision, './refundMoneyPrecision': refundMoneyPrecision, './saleItemPricing': saleItemPricing, './saleMoneyPrecision': saleMoneyPrecision })
 const saleTotals = load('lib/saleTotals.ts', { './moneyPrecision': moneyPrecision, './saleMoneyPrecision': saleMoneyPrecision })
 const nativeSaleChange = load('lib/nativeSaleChange.ts', { './financialPrecision': load('lib/financialPrecision.ts'), './saleTotals': saleTotals })
-const salesAnalytics = load('lib/salesAnalytics.ts', { './saleStatusResolution': saleStatusResolutionForAnalytics, './db': { getDb: () => db }, './removalLosses': load('lib/removalLosses.ts'), './schemaProbe': load('lib/schemaProbe.ts'), './businessDateWindow': businessDateWindow,
+const salesAnalytics = load('lib/salesAnalytics.ts', { './saleStatusResolution': saleStatusResolutionForAnalytics, './refundTender': refundTenderForAnalytics, './db': { getDb: () => db }, './removalLosses': load('lib/removalLosses.ts'), './schemaProbe': load('lib/schemaProbe.ts'), './businessDateWindow': businessDateWindow,
   './saleMoneyPrecision': saleMoneyPrecision, './reportMoneyPrecision': reportMoneyPrecision, './customerReturnEntitlement': customerReturnEntitlement, './refundMoneyPrecision': refundMoneyPrecision })
 const recon = load('lib/shiftReconciliation.ts', {
   './db': { getDb: () => db }, './nativeSaleChange': nativeSaleChange, './salesAnalytics': salesAnalytics,

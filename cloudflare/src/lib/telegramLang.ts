@@ -200,6 +200,7 @@ const LABELS = {
   settlement: { en: 'Settlement', km: 'វិធីដោះស្រាយ', localizeValue: true },
   refund: { en: 'Refund', km: 'សងប្រាក់', localizeValue: true },
   debtLowered: { en: 'Debt lowered', km: 'បានបន្ថយប្រាក់ជំពាក់' },        // km.json return_debt_lowered
+  toReplacement: { en: 'To replacement', km: 'ទៅទំនិញប្តូរ' },             // km.json return_refund_to_replacement
   supplierPays: { en: 'Supplier pays', km: 'អ្នកផ្គត់ផ្គង់សង' },
   loss: { en: 'Loss', km: 'ខាតបង់' },
 

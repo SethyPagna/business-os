@@ -15,6 +15,21 @@ export function parseRefundCurrency(value: unknown): RefundCurrency {
   return currency as RefundCurrency
 }
 
+/**
+ * RET-A verify R2: the part of a return's refund that paid its replacement
+ * sale instead of leaving the till (the replacement's creation snapshot
+ * `paid_from_refund`, written only for a replacement that follows the sale's
+ * debt). Counted only while that replacement stands. The drawer is unchanged
+ * -- it already takes the refund's cash leg out and the replacement's tender
+ * in -- these say how much of the cash leg never reached the customer.
+ */
+export function refundToReplacementSql(returnAlias: string, currency: 'usd' | 'khr'): string {
+  return `COALESCE((SELECT CASE WHEN json_valid(rs.creation_snapshot_json)
+      THEN json_extract(rs.creation_snapshot_json, '$.paid_from_refund.${currency}') END
+    FROM sales rs WHERE rs.id = ${returnAlias}.replacement_sale_id AND rs.source_return_id = ${returnAlias}.id
+      AND COALESCE(rs.sale_status, 'completed') <> 'cancelled'), 0)`
+}
+
 // The drawer SQL that reads these columns lives in shiftReconciliation.ts
 // (REFUND_DRAWER_USD_SQL / REFUND_DRAWER_KHR_SQL); refundTender() below is its JS reading.
 
@@ -23,6 +38,26 @@ export type RefundTenderRow = {
   total_refund_khr?: unknown
   owed_reduction_usd?: unknown
   refund_currency?: unknown
+}
+
+/**
+ * What one recorded customer refund did with the money: the debt it lowered,
+ * the part that paid its replacement, and the cash that actually left the
+ * till -- in dollars, and in riel for a riel refund (the riel cash leg less the
+ * riel that paid the replacement: the drawer's own net). Shared by the
+ * Telegram return lines; the frontend detail mirrors it (refundCurrency.ts).
+ */
+export function refundOutcome(row: RefundTenderRow & { to_replacement_usd?: unknown; to_replacement_khr?: unknown }): {
+  currency: RefundCurrency | null; loweredUsd: number; toReplacementUsd: number; toReplacementKhr: number; payoutUsd: number; payoutKhr: number
+} {
+  const tender = refundTender(row)
+  const toReplacementUsd = Math.min(tender.cashUsd, Math.max(0, finite(row.to_replacement_usd)))
+  const toReplacementKhr = tender.currency === 'KHR' ? Math.min(tender.rielRefunded, Math.max(0, Math.round(finite(row.to_replacement_khr)))) : 0
+  return {
+    currency: tender.currency, loweredUsd: tender.owedReductionUsd, toReplacementUsd, toReplacementKhr,
+    payoutUsd: Math.round((tender.cashUsd - toReplacementUsd) * 10_000) / 10_000,
+    payoutKhr: tender.currency === 'KHR' ? tender.rielRefunded - toReplacementKhr : 0,
+  }
 }
 
 export type RefundTender = {

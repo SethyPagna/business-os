@@ -76,7 +76,7 @@ const kernelDependencies = [
   // per-isolate-memoized PRAGMA table_info() probe (schemaProbe.ts).
   'schemaProbe.ts',
   // A credit sale's balance due: the one owed helper and its only dependency.
-  'saleStatusResolution.ts', 'financialPrecision.ts',
+  'saleStatusResolution.ts', 'financialPrecision.ts', 'refundTender.ts',
 ]
 for (const file of kernelDependencies) {
   fs.writeFileSync(path.join(tmpDir, file), fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', file), 'utf8'))

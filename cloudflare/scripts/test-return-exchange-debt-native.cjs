@@ -36,6 +36,8 @@ const { Miniflare, Log, LogLevel } = require('miniflare')
 const { unstable_splitSqlQuery: split } = require('wrangler')
 
 const root = path.resolve(__dirname, '..')
+// The return detail's own reading of a recorded refund (shipped frontend module).
+const { recordedRefundSplit } = require(path.join(root, '..', 'frontend', 'src', 'components', 'returns', 'helpers', 'refundCurrency.ts'))
 
 async function kernels() {
   const bundle = await build({ stdin: { contents: `export { recordedSaleOutstandingUsd } from './src/lib/saleStatusResolution'
@@ -242,6 +244,17 @@ async function main() {
       assert.equal(done.replacementStatus, owesAfter > 0 ? 'awaiting_payment' : 'completed', 'a replacement the refund paid in full is Completed')
       assert.deepEqual([done.drawerUsd, 0 - done.drawerKhr], [0, screen.body.payout_khr], 'the drawer pays out exactly the riel the screen showed')
       assert.equal(done.originalOwes + done.replacementOwes, owesAfter, 'the original owes nothing more; only the replacement remainder is owed')
+      // Verify R2 item 3: the recorded return names the part that paid the
+      // replacement, and the detail's "Paid out" is what the drawer paid.
+      const id = (await db.prepare('SELECT id FROM returns WHERE client_request_id=?').bind(`x-${n}`).first()).id
+      const detail = await (await mf.dispatchFetch(`http://local/api/returns/${id}`)).json()
+      assert.equal(detail.to_replacement_usd, screen.body.replacement_paid_from_refund_usd, 'the detail names what the refund paid toward the replacement')
+      const listed = await (await mf.dispatchFetch('http://local/api/returns?limit=50')).json()
+      const row = (Array.isArray(listed) ? listed : listed.returns || []).find((r) => Number(r.id) === Number(id))
+      assert.ok(row, 'the Returns list carries the return')
+      assert.deepEqual([row.to_replacement_usd, row.to_replacement_khr], [detail.to_replacement_usd, detail.to_replacement_khr], 'the list row the detail opens from carries the same figures')
+      const shown = recordedRefundSplit(detail)
+      assert.deepEqual([shown.payoutKhr, shown.toReplacementKhr > 0], [0 - done.drawerKhr, true], 'Paid out on the detail is the riel the drawer paid out; the rest is To replacement')
     }
     console.log('PASS a riel-funded replacement on a legacy riel price owes no phantom cents and the screen riel is the drawer riel')
 

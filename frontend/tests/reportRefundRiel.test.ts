@@ -35,3 +35,14 @@ console.log('PASS no note without riel paid out, and none invented for an older 
 assert.equal(sumTotals([withRiel, normalizeTotals({ ...base, refund_paid_khr: 4000 })!]).refund_paid_khr, 24000, 'rows sum')
 assert.equal(sumTotals([withRiel, normalizeTotals(base)!]).refund_paid_khr, undefined, 'one row without it: the sum is not claimed')
 console.log('PASS summed rows keep the riel paid out only when every row carries it')
+
+// RET-A verify R2: riel a refund spent on its replacement never left the till.
+// The note names it apart from the riel paid out; it is never folded in.
+const swap = refundsLine(normalizeTotals({ ...base, refund_paid_khr: 22000, refund_replacement_khr: 2000 })!)
+assert.equal(statementNoteText(swap.note!, tr(en)), 'paid out in riel: 22,000៛ · to replacement: 2,000៛')
+assert.equal(statementNoteText(swap.note!, tr(km)), 'សងប្រាក់វិញជារៀល: 22,000៛ · ទៅទំនិញប្តូរ: 2,000៛')
+assert.ok(en.rpt_note_refund_riel_replacement && km.rpt_note_refund_riel_replacement && en.rpt_note_refund_riel_replacement !== km.rpt_note_refund_riel_replacement)
+assert.equal(statementNoteText(refundsLine(normalizeTotals({ ...base, refund_paid_khr: 22000, refund_replacement_khr: 0 })!).note!, tr(en)), 'paid out in riel: 22,000៛',
+  'CONTROL: without a replacement the note is the plain riel paid out')
+assert.equal(sumTotals([normalizeTotals({ ...base, refund_paid_khr: 1, refund_replacement_khr: 2000 })!, normalizeTotals({ ...base, refund_paid_khr: 1, refund_replacement_khr: 500 })!]).refund_replacement_khr, 2500)
+console.log('PASS the Refunds note names riel that paid a replacement apart from riel paid out, in EN and KM')

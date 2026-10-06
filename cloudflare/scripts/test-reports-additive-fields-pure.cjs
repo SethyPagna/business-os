@@ -46,7 +46,7 @@ fs.writeFileSync(path.join(tmpDir, 'salesAnalytics.ts'), stripped)
 fs.writeFileSync(path.join(tmpDir, 'businessDateWindow.ts'), fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'businessDateWindow.ts'), 'utf8'))
 const analyticsDeps = ['moneyPrecision.ts', 'reportMoneyPrecision.ts', 'customerReturnEntitlement.ts', 'refundMoneyPrecision.ts', 'saleItemPricing.ts', 'saleMoneyPrecision.ts', 'promotionRules.ts', 'removalLosses.ts', 'schemaProbe.ts',
   // salesAnalytics reads a credit sale's balance due through the one owed helper.
-  'saleStatusResolution.ts', 'financialPrecision.ts']
+  'saleStatusResolution.ts', 'financialPrecision.ts', 'refundTender.ts']
 for (const file of analyticsDeps) fs.writeFileSync(path.join(tmpDir, file), fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', file), 'utf8'))
 const tscBin = path.join(__dirname, '..', 'node_modules', 'typescript', 'bin', 'tsc')
 execSync(`node ${tscBin} --module commonjs --target es2020 --outDir ${tmpDir} ${path.join(tmpDir, 'salesAnalytics.ts')} ${path.join(tmpDir, 'businessDateWindow.ts')} ${analyticsDeps.map((file) => path.join(tmpDir, file)).join(' ')}`, { stdio: 'inherit' })

@@ -45,7 +45,7 @@ fs.writeFileSync(path.join(tmpDir, 'moneyPrecision.ts'), fs.readFileSync(path.jo
 fs.writeFileSync(path.join(tmpDir, 'reportMoneyPrecision.ts'), fs.readFileSync(path.join(cloudflareRoot, 'src', 'lib', 'reportMoneyPrecision.ts'), 'utf8'))
 const readerDependencies = ['customerReturnEntitlement.ts', 'refundMoneyPrecision.ts', 'saleItemPricing.ts', 'saleMoneyPrecision.ts', 'promotionRules.ts', 'removalLosses.ts', 'schemaProbe.ts',
   // salesAnalytics reads a credit sale's balance due through the one owed helper.
-  'saleStatusResolution.ts', 'financialPrecision.ts']
+  'saleStatusResolution.ts', 'financialPrecision.ts', 'refundTender.ts']
 for (const file of readerDependencies) {
   fs.writeFileSync(path.join(tmpDir, file), fs.readFileSync(path.join(cloudflareRoot, 'src', 'lib', file), 'utf8'))
 }

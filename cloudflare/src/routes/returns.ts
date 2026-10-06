@@ -54,7 +54,7 @@ import {
   PRIOR_RETURN_MONEY_SQL, priorReturnMoney, ReturnRefundSplitError, saleCarriesDebt, saleRowOwedUsd, saleStatusWithReturns, settleReplacementTender, splitReturnRefund,
   type PriorReturnMoney, type PriorReturnMoneyRow, type ReplacementTender, type ReturnDebtSale, type ReturnRefundSplit,
 } from '../lib/returnRefundSplit'
-import { parseRefundCurrency, refundCashKhr, refundRielFigure, type RefundCurrency } from '../lib/refundTender'
+import { parseRefundCurrency, refundRielFigure, refundToReplacementSql, type RefundCurrency } from '../lib/refundTender'
 import { ProductMergeLineageError, resolveProductMergeLineage } from '../lib/productMergeLineage'
 import { TAGGED_DISPOSAL_MOVEMENT_TYPE } from '../lib/stockCondition'
 
@@ -998,6 +998,7 @@ app.get('/', async (c) => {
 
   const returns = await db.prepare(`
     SELECT r.*, EXISTS (SELECT 1 FROM customers ic WHERE ic.id=r.customer_id AND ic.is_anonymous=1) AS customer_is_anonymous, replacement_sale.receipt_number AS replacement_receipt_number,
+      ${refundToReplacementSql('r', 'usd')} AS to_replacement_usd, ${refundToReplacementSql('r', 'khr')} AS to_replacement_khr,
       ${DAMAGED_ITEM_COUNT_SQL}
     FROM returns r
     LEFT JOIN sales replacement_sale ON replacement_sale.id = r.replacement_sale_id
@@ -1402,6 +1403,7 @@ app.get('/:id', async (c) => {
   const id = c.req.param('id')
   const row = await db.prepare(`
     SELECT r.*, EXISTS (SELECT 1 FROM customers ic WHERE ic.id=r.customer_id AND ic.is_anonymous=1) AS customer_is_anonymous, replacement_sale.receipt_number AS replacement_receipt_number,
+      ${refundToReplacementSql('r', 'usd')} AS to_replacement_usd, ${refundToReplacementSql('r', 'khr')} AS to_replacement_khr,
       ${DAMAGED_ITEM_COUNT_SQL}
     FROM returns r
     LEFT JOIN sales replacement_sale ON replacement_sale.id = r.replacement_sale_id
@@ -1996,6 +1998,11 @@ app.post('/', async (c) => {
       cashierName: actorSnapshot(user), saleStatus: replacementTender.status,
       items: replacementLines.map((line) => ({ product_id: line.productId, product_name: line.productName, quantity: line.quantity, applied_price_usd: line.priceUsd, total_usd: line.totalUsd })),
       totalUsd: replacementTotals.totalUsd, paymentMethod: replacementTender.method, paymentDetails,
+      // RET-A verify R2: what the refund paid toward this replacement, so the
+      // return's detail, its Telegram lines and the report's riel row can say
+      // it apart from the cash that left the till.
+      paidFromRefund: replacementSplit?.followsDebt && replacementSplit.paidFromRefundUsd > 0
+        ? { usd: replacementSplit.paidFromRefundUsd, khr: replacementSplit.paidFromRefundKhr } : null,
       amountPaidUsd: replacementTotals.amountPaidUsd, amountPaidKhr: replacementTotals.amountPaidKhr,
       changeUsd: 0, changeKhr: 0, isDelivery: false, deliveryFeeUsd: 0,
       customerSnapshot: replacementCustomerId || String(replacementCustomerName || '').trim() ? { id: replacementCustomerId, name: replacementCustomerName } : null,
@@ -2573,6 +2580,8 @@ app.post('/', async (c) => {
     party: body.customer_name || saleMeta?.customer_name || null, branch: branchName, reason,
     returnType: String(canonicalIntent.return_type), refundUsd: totalRefundUsd, refundKhr: totalRefundKhr,
     owedReductionUsd: refundSplit.owedReductionUsd, refundCurrency,
+    toReplacementUsd: replacementSplit?.followsDebt ? replacementSplit.paidFromRefundUsd : 0,
+    toReplacementKhr: replacementSplit?.followsDebt ? replacementSplit.paidFromRefundKhr : 0,
     by: actorSnapshot(user),
   }).catch((error) => console.error('[telegram] return notification failed', error)))
   if (replacementNotice) c.executionCtx.waitUntil(sendTelegramEvent(c.env, {

@@ -10,7 +10,7 @@ import {
 import type { TelegramLabelKey, TelegramLanguage, TelegramTopicFamily } from './telegramLang'
 import {
   getDeliveryContactTotals, getPaymentMethodBreakdown, getProductSalesRanking, getSalesGroupedTotals, getSalesTotals,
-  recognizedExpr, shiftWindowWhere, whereActiveSales, type SalesFilters, type SalesTotals,
+  recognizedExpr, refundOutcome, refundToReplacementSql, shiftWindowWhere, whereActiveSales, type SalesFilters, type SalesTotals,
 } from './salesAnalytics'
 // The drawer arithmetic is NOT defined here any more. lib/shiftReconciliation.ts
 // owns it, and the close routes, the current/history reads and this message all
@@ -1732,7 +1732,7 @@ export type SummarySectionFigures = {
   cashiers?: { cashiers: CountedMoney[] | null; branches: CountedMoney[] | null }
   products?: { top: Array<{ name: string; qty: number; usd: number }>; low: LowStockRow[]; moreLow: number }
   /** RET-A (owner 29 Sep: reports add a riel row): the riel the refunds actually paid out (0234's refund currency), never a converted equivalent. */
-  returns?: { count: number; usd: number; rielPaidOut: number; items: number }
+  returns?: { count: number; usd: number; rielPaidOut: number; rielToReplacement?: number; items: number }
   expenses?: Array<{ label: string; usd: number; khr: number }>
   /** `until` is the local time all three days are cut at while the day is still running; null compares whole days. */
   compare?: { yesterdayUsd: number; lastWeekUsd: number; until: string | null }
@@ -1776,6 +1776,7 @@ function returnsRows(count: number, refundUsd: number, extra?: SummarySectionFig
   const rows = [labeled('total', `${count} · ${usd(refundUsd)}`)]
   if (extra) {
     if (extra.rielPaidOut > 0) rows.push(labeled('rielPaidOut', riel(extra.rielPaidOut)))
+    if ((extra.rielToReplacement ?? 0) > 0) rows.push(labeled('toReplacement', riel(extra.rielToReplacement ?? 0)))
     rows.push(labeled('itemsReturned', extra.items))
   }
   return rows
@@ -1987,8 +1988,9 @@ async function summarySectionFigures(
     sections.products ? lowStockMovedOnDay(env, filters) : null,
     sections.returns
       ? getDb(env).prepare(`SELECT COUNT(*) AS count, ROUND(COALESCE(SUM(total_refund_usd), 0), 2) AS usd, COALESCE(SUM(${REFUND_DRAWER_KHR_SQL}), 0) AS khr,
+        COALESCE(SUM(CASE WHEN returns.refund_currency = 'KHR' THEN ${refundToReplacementSql('returns', 'khr')} ELSE 0 END), 0) AS to_replacement_khr,
         COALESCE(SUM((SELECT SUM(return_items.quantity) FROM return_items WHERE return_items.return_id = returns.id)), 0) AS items
-        FROM returns WHERE ${scope.returnsWhere}`).get<{ count: number; usd: number; khr: number; items: number }>(scope.params)
+        FROM returns WHERE ${scope.returnsWhere}`).get<{ count: number; usd: number; khr: number; to_replacement_khr: number; items: number }>(scope.params)
       : null,
     sections.expenses ? expenseRowsWhere(env, [scope.feeWhere], scope.params, { excludeDeliveryFees: true, overflowLabel: otherLabel }) : null,
     sections.compare ? getSalesTotals(env, onDay(-1)) : null,
@@ -2000,7 +2002,11 @@ async function summarySectionFigures(
     ...(sections.cashiers && { cashiers: { cashiers, branches } }),
     ...(top && low && { products: { top: top.map((row) => ({ name: row.product_name, qty: row.qty, usd: row.line_sales_usd })), low: low.rows, moreLow: low.more } }),
     ...(sections.returns && {
-      returns: { count: Number(returned?.count) || 0, usd: Number(returned?.usd) || 0, rielPaidOut: Number(returned?.khr) || 0, items: Number(returned?.items) || 0 },
+      // RET-A verify R2: the riel that left the till is the drawer's refund
+      // leg less the riel that paid replacements; that part has its own row.
+      returns: { count: Number(returned?.count) || 0, usd: Number(returned?.usd) || 0,
+        rielPaidOut: Math.max(0, (Number(returned?.khr) || 0) - (Number(returned?.to_replacement_khr) || 0)),
+        rielToReplacement: Number(returned?.to_replacement_khr) || 0, items: Number(returned?.items) || 0 },
     }),
     ...(expenses && { expenses: expenses.details }),
     ...(yesterday && lastWeek && {
@@ -2841,6 +2847,8 @@ export type TelegramReturnSummary = {
   items: TelegramReturnLine[]; refundUsd?: number | null; refundKhr?: number | null
   /** RET-A: the part of the refund that lowered a Not Paid sale's debt, and the currency the rest was paid in. Absent: the old Refund line. */
   owedReductionUsd?: number | null; refundCurrency?: 'USD' | 'KHR' | null
+  /** RET-A verify R2: the part of the refund's cash that paid the replacement, never handed over. */
+  toReplacementUsd?: number | null; toReplacementKhr?: number | null
   compensationUsd?: number | null; compensationKhr?: number | null; lossUsd?: number | null; lossKhr?: number | null
   replacements?: Array<{ product: string; quantity: number }>; by?: string | null
 }
@@ -2901,15 +2909,24 @@ export function formatTransferTelegramLines(transfer: TelegramTransferSummary): 
  * says "Debt lowered", never "Refund". Without a currency (a caller that does
  * not know it) the old one-line refund figure stands.
  */
-export function customerRefundParts(ret: { refundUsd?: unknown; refundKhr?: unknown; owedReductionUsd?: unknown; refundCurrency?: 'USD' | 'KHR' | null }): { lowered: string; refund: string } {
+export function customerRefundParts(ret: {
+  refundUsd?: unknown; refundKhr?: unknown; owedReductionUsd?: unknown; refundCurrency?: 'USD' | 'KHR' | null
+  toReplacementUsd?: unknown; toReplacementKhr?: unknown
+}): { lowered: string; toReplacement: string; refund: string } {
   const refundUsd = Number(ret.refundUsd) || 0
   const refundKhr = Number(ret.refundKhr) || 0
-  if (ret.refundCurrency == null) return { lowered: '', refund: refundUsd !== 0 || refundKhr !== 0 ? money(refundUsd, refundKhr) : '' }
-  const lowered = Math.max(0, Math.min(refundUsd, Number(ret.owedReductionUsd) || 0))
-  const cashUsd = Math.round((refundUsd - lowered) * 10000) / 10000
-  const refund = !(cashUsd > 0) ? ''
-    : ret.refundCurrency === 'KHR' ? riel(refundUsd > 0 ? Math.round(refundKhr * cashUsd / refundUsd) : 0) : usd(cashUsd)
-  return { lowered: lowered > 0 ? usd(lowered) : '', refund }
+  if (ret.refundCurrency == null) return { lowered: '', toReplacement: '', refund: refundUsd !== 0 || refundKhr !== 0 ? money(refundUsd, refundKhr) : '' }
+  // RET-A verify R2: one reading (refundTender.ts refundOutcome) -- the cash
+  // that paid the replacement is named apart, and "Refund" is only what the
+  // till actually handed back.
+  const outcome = refundOutcome({ total_refund_usd: refundUsd, total_refund_khr: refundKhr, owed_reduction_usd: ret.owedReductionUsd,
+    refund_currency: ret.refundCurrency, to_replacement_usd: ret.toReplacementUsd, to_replacement_khr: ret.toReplacementKhr })
+  const khr = ret.refundCurrency === 'KHR'
+  return {
+    lowered: outcome.loweredUsd > 0 ? usd(Math.min(refundUsd, outcome.loweredUsd)) : '',
+    toReplacement: outcome.toReplacementUsd > 0 ? (khr ? riel(outcome.toReplacementKhr) : usd(outcome.toReplacementUsd)) : '',
+    refund: !(outcome.payoutUsd > 0) ? '' : khr ? riel(outcome.payoutKhr) : usd(outcome.payoutUsd),
+  }
 }
 
 export function formatReturnTelegramLines(ret: TelegramReturnSummary): string[] {
@@ -2944,6 +2961,7 @@ export function formatReturnTelegramLines(ret: TelegramReturnSummary): string[] 
       // (a replacement, a write-off) already says so on its own Settlement
       // line, so "Refund: none" was a line that stated nothing.
       : (refundParts.lowered ? `Debt lowered: ${refundParts.lowered}` : ''),
+    ret.kind === 'customer' && refundParts.toReplacement ? `To replacement: ${refundParts.toReplacement}` : '',
     ret.kind === 'customer' && refundParts.refund ? `Refund: ${refundParts.refund}` : '',
     ret.kind === 'supplier' && ((ret.lossUsd || 0) > 0 || (ret.lossKhr || 0) > 0) ? `Loss: ${money(ret.lossUsd, ret.lossKhr)}` : '',
     ret.by ? `By: ${ret.by}` : '',
@@ -2997,6 +3015,7 @@ export type TelegramReturnStatusRow = {
   returnNumber: string; receiptNumber?: string | null; party?: string | null; branch?: string | null
   refundUsd?: number | null; refundKhr?: number | null
   owedReductionUsd?: number | null; refundCurrency?: 'USD' | 'KHR' | null
+  toReplacementUsd?: number | null; toReplacementKhr?: number | null
 }
 
 /**
@@ -3017,6 +3036,7 @@ export function formatReturnStatusTelegramLines(input: { kind: 'customer' | 'sup
       ret.party ? `${partyLabel}: ${ret.party}` : '',
       ret.branch ? `Branch: ${ret.branch}` : '',
       input.kind === 'customer' && parts.lowered ? `Debt lowered: ${parts.lowered}` : '',
+      input.kind === 'customer' && parts.toReplacement ? `To replacement: ${parts.toReplacement}` : '',
       input.kind === 'customer' && parts.refund ? `Refund: ${parts.refund}` : '',
     )
   } else {
@@ -3028,6 +3048,7 @@ export function formatReturnStatusTelegramLines(input: { kind: 'customer' | 'sup
         ret.receiptNumber ? cleanLine(ret.receiptNumber, 40) : '',
         ret.party ? cleanLine(ret.party, 60) : '',
         input.kind === 'customer' && parts.lowered ? `${label('debtLowered')} ${parts.lowered}` : '',
+        input.kind === 'customer' && parts.toReplacement ? `${label('toReplacement')} ${parts.toReplacement}` : '',
         input.kind === 'customer' ? parts.refund : '',
       ].filter(Boolean)))
     }
@@ -3046,6 +3067,7 @@ type ReturnStatusDbRow = {
   receipt_number: string | null; customer_name: string | null; supplier_name: string | null
   branch_name: string | null; total_refund_usd: number | null; total_refund_khr: number | null
   owed_reduction_usd: number | null; refund_currency: string | null
+  to_replacement_usd: number | null; to_replacement_khr: number | null
 }
 
 /**
@@ -3059,7 +3081,8 @@ export async function sendReturnStatusTelegramEvents(env: Env, returnIds: readon
   if (!ids.length) return
   const rows = await getDb(env).prepare(`
     SELECT r.id, r.return_number, r.status, r.return_scope, r.receipt_number, r.customer_name, r.supplier_name,
-      b.name AS branch_name, r.total_refund_usd, r.total_refund_khr, r.owed_reduction_usd, r.refund_currency
+      b.name AS branch_name, r.total_refund_usd, r.total_refund_khr, r.owed_reduction_usd, r.refund_currency,
+      ${refundToReplacementSql('r', 'usd')} AS to_replacement_usd, ${refundToReplacementSql('r', 'khr')} AS to_replacement_khr
     FROM returns r LEFT JOIN branches b ON b.id = r.branch_id
     WHERE r.id IN (SELECT value FROM json_each(@ids)) ORDER BY r.id
   `).all<ReturnStatusDbRow>({ ids: JSON.stringify(ids) })
@@ -3077,6 +3100,7 @@ export async function sendReturnStatusTelegramEvents(env: Env, returnIds: readon
       refundUsd: row.total_refund_usd, refundKhr: row.total_refund_khr,
       // NULL is a refund recorded before 0234: dollars, as the drawer reads it.
       owedReductionUsd: row.owed_reduction_usd, refundCurrency: row.refund_currency === 'KHR' ? 'KHR' : 'USD',
+      toReplacementUsd: row.to_replacement_usd, toReplacementKhr: row.to_replacement_khr,
     })
     groups.set(key, group)
   }

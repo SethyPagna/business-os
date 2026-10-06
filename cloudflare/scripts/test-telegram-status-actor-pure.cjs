@@ -55,6 +55,7 @@ const moneyPrecision = loadReal('lib/moneyPrecision.ts')
 const saleMoneyPrecision = loadReal('lib/saleMoneyPrecision.ts', { './moneyPrecision': moneyPrecision })
 // salesAnalytics reads a credit sale's balance due through the one owed helper.
 const saleStatusResolutionForAnalytics = loadReal('lib/saleStatusResolution.ts', { './financialPrecision': loadReal('lib/financialPrecision.ts') })
+const refundTenderForAnalytics = loadReal('lib/refundTender.ts')
 const reportMoneyPrecision = loadReal('lib/reportMoneyPrecision.ts', { './moneyPrecision': moneyPrecision })
 const promotionRules = loadReal('lib/promotionRules.ts', { './moneyPrecision': moneyPrecision })
 const saleItemPricing = loadReal('lib/saleItemPricing.ts', { './moneyPrecision': moneyPrecision, './promotionRules': promotionRules })
@@ -63,7 +64,7 @@ const customerReturnEntitlement = loadReal('lib/customerReturnEntitlement.ts', {
 const saleTotals = loadReal('lib/saleTotals.ts', { './moneyPrecision': moneyPrecision, './saleMoneyPrecision': saleMoneyPrecision })
 const financialPrecision = loadReal('lib/financialPrecision.ts')
 const nativeSaleChange = loadReal('lib/nativeSaleChange.ts', { './financialPrecision': financialPrecision, './saleTotals': saleTotals })
-const salesAnalytics = loadReal('lib/salesAnalytics.ts', { './saleStatusResolution': saleStatusResolutionForAnalytics,
+const salesAnalytics = loadReal('lib/salesAnalytics.ts', { './saleStatusResolution': saleStatusResolutionForAnalytics, './refundTender': refundTenderForAnalytics,
   './schemaProbe': loadReal('lib/schemaProbe.ts'), './db': noDb, './removalLosses': loadReal('lib/removalLosses.ts'),
   './businessDateWindow': businessDateWindow, './saleMoneyPrecision': saleMoneyPrecision,
   './reportMoneyPrecision': reportMoneyPrecision, './customerReturnEntitlement': customerReturnEntitlement,

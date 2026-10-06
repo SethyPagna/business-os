@@ -46,9 +46,10 @@ const saleItemPricing = loadReal('lib/saleItemPricing.ts', { './moneyPrecision':
 const saleMoneyPrecision = loadReal('lib/saleMoneyPrecision.ts', { './moneyPrecision': moneyPrecision })
 // salesAnalytics reads a credit sale's balance due through the one owed helper.
 const saleStatusResolutionForAnalytics = loadReal('lib/saleStatusResolution.ts', { './financialPrecision': loadReal('lib/financialPrecision.ts') })
+const refundTenderForAnalytics = loadReal('lib/refundTender.ts')
 const refundMoneyPrecision = loadReal('lib/refundMoneyPrecision.ts', { './moneyPrecision': moneyPrecision, './saleMoneyPrecision': saleMoneyPrecision })
 const customerReturnEntitlement = loadReal('lib/customerReturnEntitlement.ts', { './moneyPrecision': moneyPrecision, './refundMoneyPrecision': refundMoneyPrecision, './saleItemPricing': saleItemPricing, './saleMoneyPrecision': saleMoneyPrecision })
-const analyticsPrecision = { './saleStatusResolution': saleStatusResolutionForAnalytics, './saleMoneyPrecision': saleMoneyPrecision, './reportMoneyPrecision': reportMoneyPrecision, './customerReturnEntitlement': customerReturnEntitlement, './refundMoneyPrecision': refundMoneyPrecision }
+const analyticsPrecision = { './saleStatusResolution': saleStatusResolutionForAnalytics, './refundTender': refundTenderForAnalytics, './saleMoneyPrecision': saleMoneyPrecision, './reportMoneyPrecision': reportMoneyPrecision, './customerReturnEntitlement': customerReturnEntitlement, './refundMoneyPrecision': refundMoneyPrecision }
 // lib/telegram.ts reads the sales kernel for the shift report (S4-7).
 // The delivery-payer rule the sale summary uses comes from the module that
 // WROTE total_usd, so the alert cannot foot differently from the stored row.
@@ -586,6 +587,18 @@ const groupText = statusMoney([{ returnNumber: 'RET-8', refundUsd: 4, refundKhr:
   { returnNumber: 'RET-9', refundUsd: 4, refundKhr: 16000, owedReductionUsd: 3, refundCurrency: 'KHR' }]).join(' ').replace(/\s+/g, ' ')
 assert.ok(groupText.includes('• RET-8 $4.00 • RET-9 Debt lowered/បានបន្ថយប្រាក់ជំពាក់ $3.00 4,000៛'),
   `a group row names the debt lowered and the riel paid out: ${groupText}`)
+
+// RET-A verify R2: cash a refund spent on its replacement never left the till.
+// It is named apart; "Refund" is only what was handed back.
+const swapLines = (extra) => telegram.formatReturnTelegramLines({ kind: 'customer', returnNumber: 'RET-7', items: [{ product: 'A', quantity: 1 }],
+  refundUsd: 4, refundKhr: 16000, owedReductionUsd: 3, ...extra }).filter((line) => /^(Refund|Debt lowered|To replacement):/.test(line))
+assert.deepEqual(swapLines({ refundCurrency: 'USD', toReplacementUsd: 1, toReplacementKhr: 0 }), ['Debt lowered: $3.00', 'To replacement: $1.00'],
+  'X4: the $1 cash paid the replacement; the till paid out $0, so there is no Refund line')
+assert.deepEqual(swapLines({ refundCurrency: 'KHR', toReplacementUsd: 0.5, toReplacementKhr: 2000 }), ['Debt lowered: $3.00', 'To replacement: 2,000៛', 'Refund: 2,000៛'],
+  'riel: half the 4,000 riel paid the replacement, half was handed back')
+assert.deepEqual(swapLines({ refundCurrency: 'KHR' }), ['Debt lowered: $3.00', 'Refund: 4,000៛'], 'CONTROL: the same refund without a replacement pays out 4,000 riel')
+const swapStatus = statusMoney([{ returnNumber: 'RET-7', refundUsd: 4, refundKhr: 16000, owedReductionUsd: 3, refundCurrency: 'USD', toReplacementUsd: 1 }])
+assert.ok(swapStatus.includes('To replacement: $1.00') && !swapStatus.some((line) => line.startsWith('Refund:')), swapStatus.join('\n'))
 
 // --- supplier return: stock out + settlement money, loss only when there is one ---
 assert.deepEqual(telegram.formatReturnTelegramLines({

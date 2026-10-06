@@ -23,13 +23,24 @@ export function refundCurrencyField(currency: RefundCurrency): { refund_currency
  * figure, the Worker's refundCashKhr / REFUND_DRAWER_KHR_SQL. null for a
  * refund recorded before 0234 (no currency): the detail keeps its old rows.
  */
-export function recordedRefundSplit(ret: { refund_currency?: unknown; total_refund_usd?: unknown; total_refund_khr?: unknown; owed_reduction_usd?: unknown }):
-  { currency: RefundCurrency; loweredUsd: number; payoutUsd: number; payoutKhr: number } | null {
+export function recordedRefundSplit(ret: {
+  refund_currency?: unknown; total_refund_usd?: unknown; total_refund_khr?: unknown; owed_reduction_usd?: unknown
+  /** GET /api/returns/:id: what the refund paid toward the replacement (verify R2), 0 when it paid none. */
+  to_replacement_usd?: unknown; to_replacement_khr?: unknown
+}): { currency: RefundCurrency; loweredUsd: number; toReplacementUsd: number; toReplacementKhr: number; payoutUsd: number; payoutKhr: number } | null {
   if (ret.refund_currency !== 'USD' && ret.refund_currency !== 'KHR') return null
   const refundUsd = Math.max(0, Number(ret.total_refund_usd) || 0)
   const loweredUsd = Math.min(refundUsd, Math.max(0, Number(ret.owed_reduction_usd) || 0))
-  const payoutUsd = Math.round((refundUsd - loweredUsd) * 10000) / 10000
-  const payoutKhr = ret.refund_currency === 'KHR' && refundUsd > 0 && payoutUsd > 0
-    ? Math.round((Number(ret.total_refund_khr) || 0) * payoutUsd / refundUsd) : 0
-  return { currency: ret.refund_currency, loweredUsd, payoutUsd, payoutKhr }
+  const cashUsd = Math.round((refundUsd - loweredUsd) * 10000) / 10000
+  // The riel cash leg, the drawer's REFUND_DRAWER_KHR_SQL.
+  const cashKhr = ret.refund_currency === 'KHR' && refundUsd > 0 && cashUsd > 0
+    ? Math.round((Number(ret.total_refund_khr) || 0) * cashUsd / refundUsd) : 0
+  // RET-A verify R2: the part of that cash that paid the replacement never
+  // left the till; "Paid out" is only the rest (Worker refundTender refundOutcome).
+  const toReplacementUsd = Math.min(cashUsd, Math.max(0, Number(ret.to_replacement_usd) || 0))
+  const toReplacementKhr = ret.refund_currency === 'KHR' ? Math.min(cashKhr, Math.max(0, Math.round(Number(ret.to_replacement_khr) || 0))) : 0
+  return {
+    currency: ret.refund_currency, loweredUsd, toReplacementUsd, toReplacementKhr,
+    payoutUsd: Math.round((cashUsd - toReplacementUsd) * 10000) / 10000, payoutKhr: cashKhr - toReplacementKhr,
+  }
 }

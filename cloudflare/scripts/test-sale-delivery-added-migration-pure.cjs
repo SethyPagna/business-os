@@ -73,6 +73,7 @@ const analytics = compile('salesAnalytics.ts', {
   './schemaProbe': compile('schemaProbe.ts'),
   // A credit sale's balance due: the one owed helper.
   './saleStatusResolution': compile('saleStatusResolution.ts', { './financialPrecision': compile('financialPrecision.ts') }),
+  './refundTender': compile('refundTender.ts'),
 })
 
 const migration = (name) => fs.readFileSync(path.join(__dirname, '..', 'migrations', name), 'utf8')

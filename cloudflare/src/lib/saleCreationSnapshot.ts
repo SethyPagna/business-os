@@ -44,6 +44,8 @@ export interface SaleCreationSnapshotInput {
   totalUsd?: unknown
   paymentMethod?: unknown
   paymentDetails?: unknown
+  /** RET-A verify R2: a return's replacement paid from that return's refund (the refund's dollars, and riel for a riel refund). */
+  paidFromRefund?: { usd: unknown; khr: unknown } | null
   amountPaidUsd?: unknown
   amountPaidKhr?: unknown
   changeUsd?: unknown
@@ -85,6 +87,8 @@ export interface SaleCreationSnapshotV1 {
     line_total_usd: number | null
   }>
   total_usd: number | null
+  /** RET-A verify R2: present only on a replacement the return's refund paid; read by refundTender.ts refundToReplacementSql. */
+  paid_from_refund?: { usd: number | null; khr: number | null }
   payment_method: string | null
   payment_details: unknown[] | null
   amount_paid_usd: number | null
@@ -190,6 +194,7 @@ export function buildSaleCreationSnapshot(input: SaleCreationSnapshotInput): str
       line_total_usd: finite(item.total_usd ?? item.lineTotalUsd),
     })),
     total_usd: finite(input.totalUsd),
+    ...(input.paidFromRefund ? { paid_from_refund: { usd: finite(input.paidFromRefund.usd), khr: finite(input.paidFromRefund.khr) } } : {}),
     payment_method: text(input.paymentMethod),
     payment_details: paymentDetails(input.paymentDetails),
     amount_paid_usd: finite(input.amountPaidUsd),

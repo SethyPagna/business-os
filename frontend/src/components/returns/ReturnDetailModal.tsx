@@ -348,6 +348,11 @@ export default function ReturnDetailModal({ ret, onClose, onMinimize, onEdit, on
                           <MoneyRow labelSpan={2} tone="credit" marker="data-return-debt-lowered"
                             label={tr('return_debt_lowered', 'Debt lowered')} amount={fmtUSD(split.loweredUsd)} />
                         ) : null}
+                        {split && split.toReplacementUsd > 0 ? (
+                          <MoneyRow labelSpan={2} marker="data-return-to-replacement"
+                            label={tr('return_refund_to_replacement', 'To replacement')}
+                            amount={split.currency === 'KHR' ? fmtKHR(split.toReplacementKhr) : fmtUSD(split.toReplacementUsd)} />
+                        ) : null}
                         {split ? (
                           <MoneyRow labelSpan={2} marker="data-return-paid-out"
                             label={tr('return_paid_out', 'Paid out')}

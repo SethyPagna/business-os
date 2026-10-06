@@ -60,9 +60,10 @@ const saleItemPricing = load('lib/saleItemPricing.ts', { './moneyPrecision': mon
 const saleMoneyPrecision = load('lib/saleMoneyPrecision.ts', { './moneyPrecision': moneyPrecision })
 // salesAnalytics reads a credit sale's balance due through the one owed helper.
 const saleStatusResolutionForAnalytics = load('lib/saleStatusResolution.ts', { './financialPrecision': load('lib/financialPrecision.ts') })
+const refundTenderForAnalytics = load('lib/refundTender.ts')
 const refundMoneyPrecision = load('lib/refundMoneyPrecision.ts', { './moneyPrecision': moneyPrecision, './saleMoneyPrecision': saleMoneyPrecision })
 const customerReturnEntitlement = load('lib/customerReturnEntitlement.ts', { './moneyPrecision': moneyPrecision, './refundMoneyPrecision': refundMoneyPrecision, './saleItemPricing': saleItemPricing, './saleMoneyPrecision': saleMoneyPrecision })
-const analyticsPrecision = { './saleStatusResolution': saleStatusResolutionForAnalytics, './saleMoneyPrecision': saleMoneyPrecision, './reportMoneyPrecision': reportMoneyPrecision, './customerReturnEntitlement': customerReturnEntitlement, './refundMoneyPrecision': refundMoneyPrecision }
+const analyticsPrecision = { './saleStatusResolution': saleStatusResolutionForAnalytics, './refundTender': refundTenderForAnalytics, './saleMoneyPrecision': saleMoneyPrecision, './reportMoneyPrecision': reportMoneyPrecision, './customerReturnEntitlement': customerReturnEntitlement, './refundMoneyPrecision': refundMoneyPrecision }
 const saleTotals = load('lib/saleTotals.ts', { './moneyPrecision': moneyPrecision, './saleMoneyPrecision': saleMoneyPrecision })
 const financialPrecision = load('lib/financialPrecision.ts')
 const nativeSaleChange = load('lib/nativeSaleChange.ts', { './financialPrecision': financialPrecision, './saleTotals': saleTotals })
@@ -120,6 +121,10 @@ function makeDb(settings) {
     -- 0234: the refund currency and the debt a return lowered (RET-A).
     ALTER TABLE returns ADD COLUMN refund_currency TEXT;
     ALTER TABLE returns ADD COLUMN owed_reduction_usd REAL NOT NULL DEFAULT 0;
+    -- 0106 + the sale creation snapshot: the status alert reads what a
+    -- return's refund paid toward its replacement (RET-A verify R2).
+    ALTER TABLE returns ADD COLUMN replacement_sale_id INTEGER;
+    CREATE TABLE sales (id INTEGER PRIMARY KEY, source_return_id INTEGER, sale_status TEXT, creation_snapshot_json TEXT);
   `)
   const put = sql.prepare('INSERT INTO settings (key, value) VALUES (?, ?)')
   for (const [key, value] of Object.entries(settings)) put.run(key, value)

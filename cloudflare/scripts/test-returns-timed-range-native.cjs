@@ -19,7 +19,7 @@ raw.exec(`CREATE TABLE returns(id INTEGER PRIMARY KEY,created_at TEXT,return_sco
   total_refund_usd REAL DEFAULT 0,total_refund_khr REAL DEFAULT 0,supplier_compensation_usd REAL DEFAULT 0,
   supplier_compensation_khr REAL DEFAULT 0,supplier_loss_usd REAL DEFAULT 0,supplier_loss_khr REAL DEFAULT 0,
   reason TEXT,return_type TEXT,customer_id INTEGER,replacement_sale_id INTEGER,sale_id INTEGER);
-  CREATE TABLE sales(id INTEGER PRIMARY KEY,receipt_number TEXT);
+  CREATE TABLE sales(id INTEGER PRIMARY KEY,receipt_number TEXT,source_return_id INTEGER,sale_status TEXT,creation_snapshot_json TEXT);
   CREATE TABLE customers(id INTEGER PRIMARY KEY,is_anonymous INTEGER);
   CREATE TABLE return_items(id INTEGER PRIMARY KEY,return_id INTEGER,stock_action TEXT);
   INSERT INTO returns(id,created_at,return_scope,status,branch_id,total_refund_usd,reason,return_type) VALUES
@@ -47,6 +47,7 @@ new Function('exports', 'require', 'module', compile(fs.readFileSync(path.join(r
   if (name === '../lib/acquisitionCostAccess') return access
   if (name === '../lib/businessDateWindow') return dates
   if (name === '../lib/searchMatch') return load('lib/searchMatch.ts')
+  if (name === '../lib/refundTender') return load('lib/refundTender.ts') // the list reads what each refund paid its replacement
   return {} // No write-only integration is invoked by these GET handlers.
 }, routeModule)
 const app = routeModule.exports.default

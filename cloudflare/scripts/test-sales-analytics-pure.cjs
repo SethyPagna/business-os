@@ -65,10 +65,12 @@ export function validateRefundMoneySnapshot(): never { throw new Error('reader_n
 // (saleStatusResolution, which depends only on financialPrecision): the real files.
 const saleStatusPath = path.join(tmpDir, 'saleStatusResolution.ts')
 const financialPath = path.join(tmpDir, 'financialPrecision.ts')
+const refundTenderPath = path.join(tmpDir, 'refundTender.ts')
+fs.writeFileSync(refundTenderPath, fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'refundTender.ts'), 'utf8'))
 fs.writeFileSync(saleStatusPath, fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'saleStatusResolution.ts'), 'utf8'))
 fs.writeFileSync(financialPath, fs.readFileSync(path.join(__dirname, '..', 'src', 'lib', 'financialPrecision.ts'), 'utf8'))
 const tscBin = path.join(__dirname, '..', 'node_modules', 'typescript', 'bin', 'tsc')
-execSync(`node ${tscBin} --module commonjs --target es2020 --outDir ${tmpDir} ${tsPath} ${winPath} ${schemaProbePath} ${moneyPath} ${reportMoneyPath} ${customerReturnPath} ${refundPrecisionPath} ${saleMoneyPath} ${saleStatusPath} ${financialPath}`, {
+execSync(`node ${tscBin} --module commonjs --target es2020 --outDir ${tmpDir} ${tsPath} ${winPath} ${schemaProbePath} ${moneyPath} ${reportMoneyPath} ${customerReturnPath} ${refundPrecisionPath} ${saleMoneyPath} ${saleStatusPath} ${financialPath} ${refundTenderPath}`, {
   cwd: tmpDir,
   stdio: 'inherit',
 })
