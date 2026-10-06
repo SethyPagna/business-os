@@ -47,6 +47,8 @@ export interface RecordItem {
   via?: string | null
   subject?: string | null
   provenance_unknown?: boolean
+  /** The source row's own number (an audit entry id), for the details float. */
+  entry?: string | number | null
   changes?: RecordChange[] | null
 }
 
@@ -200,10 +202,36 @@ export function auditRowsToRecords(rows: AuditRecordRow[] | null | undefined): R
         kind: action,
         via: action === 'action_undo' ? 'undo' : action === 'action_redo' ? 'redo' : null,
         subject: null,
+        entry: row.id ?? null,
         changes,
       }
     })
     .sort((left, right) => epoch(left.at) - epoch(right.at))
+}
+
+/**
+ * A product's created date lives in ITS OWN Records (owner, 5 Oct: the
+ * product list has no created-date filter). Audit rows only say "created" for
+ * a product made through the app after that action was audited, so a product
+ * whose creation was never audited (an import, a legacy row) would otherwise
+ * have no creation line at all. The product's own created_at fills exactly
+ * that gap and never doubles a real create row. No actor is claimed: the
+ * column does not say who.
+ */
+export function withCreatedRecord(records: RecordItem[], createdAt: string | null | undefined, entityKey: string): RecordItem[] {
+  const stamp = String(createdAt || '').trim()
+  if (!stamp || records.some((record) => String(record.kind || '').toLowerCase() === 'create')) return records
+  const created: RecordItem = {
+    id: `created:${entityKey}`,
+    at: stamp,
+    actor_username: null,
+    branch_name: null,
+    kind: 'create',
+    via: null,
+    subject: null,
+    changes: [],
+  }
+  return [created, ...records]
 }
 
 /**
@@ -233,8 +261,8 @@ export const ENTITY_RECORDS_ADAPTER: RecordsAdapter = {
   fieldRows: (record, ctx) => (Array.isArray(record.changes) ? record.changes : []).map((change) => ({
     key: change.field,
     label: entityFieldLabel(change.field, ctx.label),
-    before: renderEntityValue(change.before, ctx),
-    after: renderEntityValue(change.after, ctx),
+    before: renderEntityValue(change.before, ctx, change.field),
+    after: renderEntityValue(change.after, ctx, change.field),
   })),
 }
 
@@ -329,6 +357,33 @@ export const RETURN_RECORDS_ADAPTER: RecordsAdapter = {
   fieldRows: (record, ctx) => ENTITY_RECORDS_ADAPTER.fieldRows(record, ctx),
 }
 
+/**
+ * Is this record field an acquisition cost? The same key rule the Worker's
+ * projectAcquisitionCosts applies to every response (cloudflare/src/lib/
+ * acquisitionCostAccess.ts isAcquisitionCostKey) -- the Worker already strips
+ * these from what a viewer without product_cost_view receives, and this is
+ * the second lock: a Records float never prints one for such a viewer even if
+ * a route forgets to project it. A dotted field is a nested key; any segment
+ * that is a cost makes the whole field one.
+ */
+export function isAcquisitionCostField(field: string): boolean {
+  return String(field || '').split('.').some((segment) => {
+    const normalized = segment.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase()
+    if (/(^|_)(delivery|courier)(_|$)/.test(normalized)) return false
+    if (['actual_cost_usd', 'actual_cost_khr', 'actual_cost_count', 'actual_cost_before', 'actual_cost_after'].includes(normalized)) return false
+    return /(^|_)(cost|costs|cogs|profit|margin|purchase_price|stock_value|removal_loss)(_|$)/.test(normalized)
+      || normalized === 'revenue_after_losses_usd' || normalized === 'credit_open_usd'
+      || /^(supplier_)?(compensation|loss)_(usd|khr)$/.test(normalized)
+  })
+}
+
+/** The record without its cost lines, unless the viewer may see costs. */
+export function recordForViewer(record: RecordItem, canViewCosts: boolean): RecordItem {
+  if (canViewCosts || !Array.isArray(record.changes)) return record
+  const changes = record.changes.filter((change) => !isAcquisitionCostField(change.field))
+  return changes.length === record.changes.length ? record : { ...record, changes }
+}
+
 export function entityFieldLabel(field: string, label: LabelFn): string {
   const topic = TELEGRAM_TOPIC_FIELD_LABEL_KEYS[field]
   if (topic) return `${label('telegram_topics_title', 'Forum topics')} - ${label(topic[0], topic[1])}`
@@ -336,11 +391,19 @@ export function entityFieldLabel(field: string, label: LabelFn): string {
   return entry ? label(entry[0], entry[1]) : formatAuditFieldLabel(field)
 }
 
-function renderEntityValue(value: RecordValue, ctx: RecordRenderContext): string {
+function renderEntityValue(value: RecordValue, ctx: RecordRenderContext, field = ''): string {
   if (value.state === 'unknown') return ctx.label('historical_details_unavailable', 'Historical details unavailable')
   if (value.state === 'known_none') return ctx.label('none', 'None')
   const raw = value.value
   if (typeof raw === 'boolean') return raw ? ctx.label('yes', 'Yes') : ctx.label('no', 'No')
   if (raw === null || raw === undefined || raw === '') return ctx.label('none', 'None')
+  // A money column reads through the app's own formatters (house rounding and
+  // the configured symbol), not as a bare number: "4.5" for a price is how a
+  // reader loses a zero. Only a plain number is formatted; anything else
+  // (a text a route wrote into the column) is shown exactly as recorded.
+  const column = field.split('.').pop() || ''
+  if ((column.endsWith('_usd') || column.endsWith('_khr')) && raw !== '' && Number.isFinite(Number(raw))) {
+    return column.endsWith('_khr') ? ctx.fmtKHR(Number(raw)) : ctx.fmtUSD(Number(raw))
+  }
   return String(raw)
 }

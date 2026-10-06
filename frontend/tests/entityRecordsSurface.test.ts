@@ -109,7 +109,12 @@ test('the float is never on a page\'s startup path: lazy at the consumer AND its
   const ownChunk = config.indexOf("normalized.includes('/src/components/shared/RecordsFloat.tsx')")
   const catchAll = config.indexOf("if (normalized.includes('/src/components/shared/')) return 'app-shared'")
   assert.ok(ownChunk > 0, 'RecordsFloat has no chunk rule, so it falls into app-shared')
-  assert.match(config.slice(ownChunk, ownChunk + 400), /EntityRecordsFloat\.tsx'\)\s*\n\s*\) \{\s*\n\s*return 'records-float'/)
+  const rule = config.slice(ownChunk, config.indexOf("return 'records-float'", ownChunk))
+  assert.match(rule, /EntityRecordsFloat\.tsx'\)/)
+  // The view-only details float is imported only by RecordsFloat; it must ride
+  // the same chunk or it lands in app-shared and grows the public catalog
+  // closure past tests/performanceBudgets.test.ts.
+  assert.match(rule, /RecordDetailFloat\.tsx'\)\s*\) \{\s*$/)
   // POSITIVE CONTROL: rule order is the whole point -- the same rule written
   // below the catch-all is dead code, and this comparison is what catches it.
   assert.ok(catchAll > 0, 'the app-shared catch-all moved; this ordering check is measuring nothing')

@@ -81,6 +81,7 @@ import {
 import { dispatchResolvedSyncError } from '../../utils/syncProblemLifecycle.ts'
 import { getAuthoritativeSale, getSaleStatusReceipt, getSaleLineReceipt } from '../../api/salesTransport.ts'
 import { mutationVersionAtLeast, reconcileDirectMutationReceipt, readCommittedMutationState } from '../../utils/directMutationRequest.ts'
+import { canViewAcquisitionCosts } from '../../utils/acquisitionCostAccess.ts'
 import { isAdminControlUser, saleAmendmentWindowAllows } from '../../utils/permissions.ts'
 import { advanceSaleSecurityScope, saleSecurityFingerprint } from './saleSettlementConfig.ts'
 import { recoverSaleStatus, type SaleStatusRecoveryResult } from '../../utils/saleStatusRecovery.ts'
@@ -2995,6 +2996,7 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
         <Suspense fallback={null}>
           <SaleRecordsFloat
               sale={recordsSale}
+              canViewCosts={canViewAcquisitionCosts(user)}
               onClose={() => {
                 const sale = recordsSale
                 setRecordsSale(null)

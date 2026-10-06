@@ -1017,6 +1017,10 @@ function manualChunks(id: string): string | undefined {
     if (
       normalized.includes('/src/components/shared/RecordsFloat.tsx')
       || normalized.includes('/src/components/shared/EntityRecordsFloat.tsx')
+      // The view-only details float is imported ONLY by RecordsFloat; left to
+      // the catch-all it lands in 'app-shared' (~3 KB on the public catalog
+      // closure, past tests/performanceBudgets.test.ts).
+      || normalized.includes('/src/components/shared/RecordDetailFloat.tsx')
     ) {
       return 'records-float'
     }

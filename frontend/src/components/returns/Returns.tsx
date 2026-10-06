@@ -1699,6 +1699,7 @@ export default function Returns({ embedded = false }: { embedded?: boolean }) {
             recordKey={`return:${recordsRet.id}`}
             load={() => fetchReturnRecords(recordsRet.id as number | string)}
             adapter={RETURN_RECORDS_ADAPTER}
+            canViewCosts={canViewAcquisitionCosts(user)}
             onClose={() => setRecordsRet(null)}
             t={t}
             fmtUSD={fmtUSD}
