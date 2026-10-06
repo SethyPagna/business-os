@@ -46,6 +46,8 @@ const actual = new Set(['businessDateWindow', 'continuousReadWindow', 'businessM
   'nativeSaleChange', 'receiptNumber', 'clientTimestamp', 'branchRoleGuards', 'branchRoles',
   // N15: POST /sales checks the quoted exchange rate against Settings.
   'saleExchangeRateBand',
+  // N14: a points redemption is valued from Settings, not the request.
+  'membershipRedemption',
   'contactOptions', 'saleCreationSnapshot', 'saleRecordEvents', 'saleRecords', 'anonymousCustomer',
   'moneyPrecision', 'saleMoneyPrecision', 'saleItemPricing', 'promotionRules',
   'productMergeLineage', 'saleMutationHeaderQuote', 'reportMoneyPrecision',

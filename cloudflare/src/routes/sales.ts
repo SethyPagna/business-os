@@ -146,6 +146,7 @@ import { planNativeSaleChange, NativeSaleChangeValidationError } from '../lib/na
 import { normalizeClientReceiptNumber, uniqueBusinessDateTimeNumber } from '../lib/receiptNumber'
 import { sanitizeClientCreatedAt } from '../lib/clientTimestamp'
 import { EXCHANGE_RATE_OUT_OF_RANGE_CODE, EXCHANGE_RATE_OUT_OF_RANGE_MESSAGE, saleExchangeRateWithinBand } from '../lib/saleExchangeRateBand'
+import { MEMBERSHIP_DISCOUNT_MISMATCH_CODE, MEMBERSHIP_DISCOUNT_MISMATCH_MESSAGE, membershipRedemptionDiscount } from '../lib/membershipRedemption'
 import { localRangeClockError, isLocalRangeClock, businessToday, localDateAtOrAfter, localDateAtOrBefore, localDateRangeClause, localTimeRangeClause } from '../lib/businessDateWindow'
 import { continuousReadWindowSql, parseContinuousReadWindow } from '../lib/continuousReadWindow'
 import { formatSaleStatusTelegramLines, formatSaleTelegramLines, sendTelegramEvent } from '../lib/telegram'
@@ -896,6 +897,18 @@ app.post('/', async (c) => {
     if (!loyaltyPointsEnabled) {
       return c.json({ error: 'Membership points are turned off in Settings, so points cannot be redeemed.' }, 400)
     }
+    // N14: the discount is the points' configured value (lib/membershipRedemption.ts), not the request's figure.
+    const redeemSettingRows = await db.prepare(
+      `SELECT key,value FROM settings WHERE key IN ('customer_portal_redeem_points','customer_portal_redeem_value_usd')`,
+    ).all<{ key: string; value: string }>()
+    const redeemSettings = Object.fromEntries(redeemSettingRows.map((row) => [row.key, row.value]))
+    const redemption = membershipRedemptionDiscount({
+      pointsRedeemed: membershipPointsRedeemed, claimedDiscountUsd: membershipDiscountUsd, exchangeRate,
+      redeemPointsSetting: redeemSettings.customer_portal_redeem_points, redeemValueUsdSetting: redeemSettings.customer_portal_redeem_value_usd,
+    })
+    if (!redemption) return c.json({ error: MEMBERSHIP_DISCOUNT_MISMATCH_MESSAGE, code: MEMBERSHIP_DISCOUNT_MISMATCH_CODE }, 409)
+    membershipDiscountUsd = redemption.discountUsd
+    membershipDiscountKhr = redemption.discountKhr
     try {
       redemptionGuard = await preparePointsRedemption(db, customer.id, membershipPointsRedeemed)
     } catch (error) {
