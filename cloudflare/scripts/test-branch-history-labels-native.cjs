@@ -148,10 +148,13 @@ async function main() {
     await session.replayStockSession(f.env, actor, 'undo', result.actionHistoryId, 2, { ...JSON.parse(history.undo_payload), generation: 2 })
     await session.replayStockSession(f.env, actor, 'redo', result.actionHistoryId, 3, { ...JSON.parse(history.redo_payload), generation: 3 })
     assert.equal(f.sql.prepare('SELECT branch_name FROM stock_session_members').get().branch_name, materialized)
+    // HOTFIX-BRANCH-REV: a branch rename no longer refuses Undo (replay stopped comparing the 'branch'
+    // revision, which 0124 bumps on any branches edit incl. the 0229 backfill). The label pin stays: Undo
+    // never rewrites the member's captured branch_name.
     f.sql.exec("UPDATE branches SET name='LC Store' WHERE id=1")
-    await assert.rejects(() => session.replayStockSession(f.env, actor, 'undo', result.actionHistoryId, 4, { ...JSON.parse(history.undo_payload), generation: 4 }))
+    await session.replayStockSession(f.env, actor, 'undo', result.actionHistoryId, 4, { ...JSON.parse(history.undo_payload), generation: 4 })
     assert.equal(f.sql.prepare('SELECT branch_name FROM stock_session_members').get().branch_name, materialized)
-    assert.equal(f.sql.prepare('SELECT quantity FROM branch_stock WHERE product_id=1 AND branch_id=1').get().quantity, 5)
+    assert.equal(f.sql.prepare('SELECT quantity FROM branch_stock WHERE product_id=1 AND branch_id=1').get().quantity, 0)
     f.sql.close()
   })
   await check('new session postimages still reject changed captured labels', async () => {

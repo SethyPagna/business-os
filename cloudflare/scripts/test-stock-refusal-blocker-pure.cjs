@@ -278,7 +278,9 @@ async function main() {
     const ledger = ledgers(f, batchId)
     const refused = await send(f, 'POST', `/api/action-history/${historyId}/undo`, { expected_generation: 0, require_applied: true })
     assert.equal(refused.status, 409, JSON.stringify(refused.json))
-    assert.equal(refused.json.code, 'stock_session_rejected')
+    // REVERT-SET: coded like the Revert of the same row -- the received date
+    // holds 8 of the 10 the Undo takes back.
+    assert.deepEqual([refused.json.code, refused.json.params], ['revert_insufficient_lot_stock', { available: 8, needed: 10 }])
     assert.equal(refused.json.blocker.kind, 'sale'); assert.equal(refused.json.blocker.label, '20261004-140000')
     assert.deepEqual(refused.json.destination, { kind: 'movement', movement_id: sold.movement })
     assert.deepEqual(ledgers(f, batchId), ledger)

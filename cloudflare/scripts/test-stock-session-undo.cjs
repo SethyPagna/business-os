@@ -149,13 +149,20 @@ async function main() {
     const aRetry = await api.commitStockSession(f.env, user, aRequest)
     assert.deepEqual(aRetry, { ...a, replayed: true })
     assert.deepEqual(state(f), beforeReplay, 'original immutable receipt replay never reapplies stock')
-    await assert.rejects(replay(f, a, 'redo', 3), e => e.statusCode === 409)
-    assert.deepEqual(state(f), beforeReplay)
+    // REVERT-SET (owner, 6 Oct 2026): A's Redo is A's own recorded change on
+    // A's own lot. B (a new lot at a new price) took nothing A needs, so A
+    // comes back exactly and B stays -- the old exact-state rule refused it.
+    // A lot that B REUSED is the real ABA case: test-stock-session-delta-replay.cjs.
+    const attribution = (row) => ['supplier_id', 'supplier_name', 'unit_cost_usd', 'payment_status', 'credit_due_date', 'received_branch_id', 'expiry_date', 'notes', 'received_quantity', 'received_cost_usd', 'is_active'].map((c) => row[c])
+    await replay(f, a, 'redo', 3)
+    assert.deepEqual(attribution(f.sql.prepare('SELECT * FROM product_batches WHERE id=?').get(a.items[0].batchId)), attribution(aPostimage), 'A restored exactly')
+    assert.equal(ap(1).credit_open_usd, 10)
+    assert.equal(ap(2).cost_usd, 15, 'B untouched')
+    await replay(f, a, 'undo', 4)
+    assert.equal(ap(1).credit_open_usd, 0)
+    assert.equal(ap(2).cost_usd, 15)
     await replay(f, b, 'undo', 0)
     assert.equal(ap(2).credit_open_usd, 0)
-    const undoneB = state(f)
-    await assert.rejects(replay(f, a, 'redo', 3), e => e.statusCode === 409)
-    assert.deepEqual(state(f), undoneB, 'A stays stale even after B returns the lot to neutral state (ABA)')
     await replay(f, b, 'redo', 1)
     assert.deepEqual(f.sql.prepare('SELECT * FROM product_batches WHERE id=?').get(b.items[0].batchId), bPostimage)
     assert.equal(ap(2).credit_open_usd, payment === 'credit' ? 15 : 0)
@@ -229,28 +236,55 @@ async function main() {
     assert.equal(f.sql.prepare('SELECT stock_quantity FROM products').get().stock_quantity, 4)
     console.log('PASS existing receipt metadata restored exactly without losing baseline stock')
   }
+  // REVERT-SET (owner, 6 Oct 2026): a session Undo takes back exactly what the
+  // session recorded. What the session did not write (a rename of a product it
+  // only received into), a net-zero stock change, a metadata change undone
+  // again, and a later sale that left the units the Undo needs no longer
+  // refuse it; its own receipt rows changing still does.
   for (const [name, mutation] of [
     ['rename', "UPDATE products SET name='Changed' WHERE id=1"],
     ['stock ABA', 'UPDATE branch_stock SET quantity=quantity+1 WHERE product_id=1; UPDATE branch_stock SET quantity=quantity-1 WHERE product_id=1'],
     ['lot metadata ABA', "UPDATE product_batches SET notes='later'; UPDATE product_batches SET notes=NULL"],
-    ['original movement edited', 'UPDATE inventory_movements SET quantity=quantity+1 WHERE id=1'],
-    ['later sale-like stock consumption', 'UPDATE products SET stock_quantity=stock_quantity-1 WHERE id=1; UPDATE branch_stock SET quantity=quantity-1 WHERE product_id=1'],
   ]) {
     const f = fixture()
     const r = await api.commitStockSession(f.env, user, createRequest())
+    const received = f.sql.prepare("SELECT SUM(quantity) q FROM stock_session_members WHERE product_id=1").get().q
     f.sql.exec(mutation)
+    const branchBefore = f.sql.prepare('SELECT SUM(quantity) q FROM branch_stock WHERE product_id=1').get().q
+    await replay(f, r, 'undo', 0)
+    assert.equal(f.sql.prepare('SELECT SUM(quantity) q FROM branch_stock WHERE product_id=1').get().q, branchBefore - received, `${name}: exactly the session's units come back off`)
+    assert.equal(f.sql.prepare('SELECT status FROM action_history').get().status, 'redoable')
+    console.log(`PASS ${name} no longer refuses the session Undo; it takes back exactly its own units`)
+  }
+  {
+    const f = fixture()
+    const r = await api.commitStockSession(f.env, user, createRequest())
+    f.sql.exec('UPDATE inventory_movements SET quantity=quantity+1 WHERE id=1')
     const before = state(f)
     await assert.rejects(replay(f, r, 'undo', 0), e => e.statusCode === 409)
     assert.deepEqual(state(f), before)
-    console.log(`PASS ${name} refuses whole mixed session without history/audit writes`)
+    console.log('PASS original movement edited refuses whole mixed session without history/audit writes')
+  }
+  {
+    // The product held nothing before the session: a later sale of 1 took
+    // units the Undo needs (2.5 left, 3.5 to take back) -- refused, coded.
+    const f = fixture()
+    const r = await api.commitStockSession(f.env, user, createRequest())
+    f.sql.exec('UPDATE products SET stock_quantity=stock_quantity-1 WHERE id=1; UPDATE branch_stock SET quantity=quantity-1 WHERE product_id=1')
+    const before = state(f)
+    await assert.rejects(replay(f, r, 'undo', 0), e => e.statusCode === 409 && e.code === 'revert_insufficient_branch_stock'
+      && JSON.stringify(e.params) === JSON.stringify({ available: 2.5, needed: 3.5, branch: 'Shop' }))
+    assert.deepEqual(state(f), before)
+    console.log('PASS later sale-like stock consumption of the units the Undo needs refuses it, coded with the numbers')
   }
   {
     const f = fixture()
     const r = await api.commitStockSession(f.env, user, receiveRequest())
-    f.beforeCommit(sql => sql.exec('UPDATE products SET stock_quantity=stock_quantity+1 WHERE id=1; UPDATE products SET stock_quantity=stock_quantity-1 WHERE id=1'))
+    // Races in after the replay's reads: a sale that takes every unit the Undo needs.
+    f.beforeCommit(sql => sql.exec('UPDATE branch_batch_stock SET quantity=0; UPDATE branch_stock SET quantity=0; UPDATE products SET stock_quantity=0'))
     await assert.rejects(replay(f, r, 'undo', 0), e => e.statusCode === 409)
     assert.equal(f.sql.prepare('SELECT status FROM action_history').get().status, 'undoable')
-    console.log('PASS race after replay reads fails commit guard')
+    console.log('PASS race after replay reads (the units taken) fails the commit guard')
   }
   {
     const f = fixture()
