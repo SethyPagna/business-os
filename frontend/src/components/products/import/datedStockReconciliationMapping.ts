@@ -32,6 +32,17 @@ export const TARGET_FIELDS: { key: string; label: string; required: boolean; hin
 // Loose fuzzy match so a header like "Branch Name" or "branch_name" still
 // auto-suggests onto the `branchName` target without the person having to
 // map every column by hand.
+// A resolved count row the server folded other sheet rows into: after the branch consolidation the old sheet's shop and
+// warehouse rows of one product and date land on one branch and their absolute counts are SUMMED. The review screen names
+// every sheet row involved, in sheet order, so a folded row is never silently dropped from what the operator reads.
+export interface CombinedCountRow { rowNumber: number; count: number; mergedRowNumbers?: number[] }
+export function combinedCountRows<T extends CombinedCountRow>(rows: T[]): T[] {
+  return rows.filter((row) => Array.isArray(row.mergedRowNumbers) && row.mergedRowNumbers.length > 0)
+}
+export function combinedRowsLabel(row: CombinedCountRow): string {
+  return [row.rowNumber, ...(row.mergedRowNumbers || [])].sort((a, b) => a - b).join(' + ')
+}
+
 export function normalizeHeaderForMatch(value: string): string {
   return String(value || '').toLowerCase().replace(/[^a-z0-9]/g, '')
 }

@@ -550,6 +550,8 @@
   "dated_count_reading": "Reading file...",
   "dated_count_resolve_failed": "Could not analyze this file.",
   "dated_count_row": "Row",
+  "dated_count_rows_combined": "Rows counted together",
+  "dated_count_rows_combined_line": "Rows {rows} are added into one count of {count} for the same branch.",
   "dated_count_rows_detected": "{n} rows detected",
   "dated_count_rows_needing_a_decision": "Rows needing a decision",
   "dated_count_rows_skipped_as_errors": "{n} row(s) could not be applied and were skipped as errors.",
