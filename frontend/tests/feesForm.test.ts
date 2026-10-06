@@ -35,12 +35,34 @@ assert.equal(formHelpers.feeFormInteractionLocked(false, { client_request_id: 'p
 
 assert.match(formSource, /mod\.getSales\(\{ search: query, limit: 8 \}\)/, 'linked sales use the existing searchable sales endpoint')
 assert.match(formSource, /receipt, customer, phone, product, SKU or barcode/, 'the picker tells staff which real sale fields are searchable')
-assert.match(formSource, /rows\.filter\(\(sale\) => sale\.branch_id != null && branchCanSell\(sale\.branch_name\)\)/, 'only real Shop sales appear as link candidates')
+assert.match(formSource, /rows\.filter\(\(sale\) => feeSaleBranchCanCarryExpense\(allBranchesRef\.current, sale\.branch_id\)\)/, 'only sales at a selling branch (by role, not by name) appear as link candidates')
+assert.doesNotMatch(formSource, /branchCanSell\(sale\.branch_name\)/, 'a sale snapshot name never decides whether it can carry an expense')
 assert.match(formSource, /set\('sale_id', String\(sale\.id\)\)[\s\S]*set\('branch_id', String\(sale\.branch_id\)\)/, 'choosing a sale carries its exact id and branch together')
 assert.match(formSource, /Sale ID #\{selectedSale\.id\}/, 'the selected sale keeps its database id visible')
 assert.match(formSource, /role="listbox"[\s\S]*role="option"/, 'the search results expose listbox semantics')
 assert.doesNotMatch(formSource, /id="fee-sale-id"/, 'staff are not asked to type an unverified numeric sale id')
-assert.match(formSource, /filter\(\(row\) => row\.is_active !== false && branchCanSell\(row\.name\)\)/, 'manual expenses offer only active exact Shop branches')
+assert.match(formSource, /directory\.filter\(\(row\) => branchCanSellNow\(row\)\)/, 'manual expenses offer only active branches that sell by role')
+assert.doesNotMatch(formSource, /branchCanSell\(row\.name\)/, 'the branch display name never decides which branch takes an expense')
+
+// Behaviour: the branch rows decide, not the names (CUTOVER-LC G-G).
+const branchRules = await import('../src/utils/branchRoles.ts')
+const carries = new Function('branchCanSell', 'resolveSellingSuccessor', `${extractFunction(formSource, 'feeSaleBranchCanCarryExpense')}; return feeSaleBranchCanCarryExpense`)(branchRules.branchCanSell, branchRules.resolveSellingSuccessor) as
+  (rows: Array<Record<string, unknown>>, branchId: unknown) => boolean
+const preCutover = [{ id: 1, name: 'Warehouse', role: null, is_active: true }, { id: 2, name: 'Shop', role: null, is_active: true }]
+assert.equal(carries(preCutover, 2), true, 'before the cutover a Shop sale carries an expense')
+assert.equal(carries(preCutover, 1), false, 'before the cutover a Warehouse record cannot')
+const postCutover = [
+  { id: 1, name: 'LC Store', role: 'shop', is_active: true, successor_branch_id: null },
+  { id: 2, name: 'Old Shop', role: 'shop', is_active: false, successor_branch_id: 1 },
+]
+assert.equal(carries(postCutover, 1), true, 'a sale at LC Store (name is not Shop) carries an expense')
+assert.equal(carries(postCutover, 2), true, 'a sale recorded at Old Shop still carries an expense through its active successor')
+assert.equal(carries([{ ...postCutover[0], role: 'warehouse' }, postCutover[1]], 2), false, 'a successor that does not sell cannot take the expense')
+assert.equal(carries([postCutover[0], { ...postCutover[1], successor_branch_id: null }], 2), false, 'a retired branch with no successor cannot')
+assert.equal(carries([], 2), true, 'a failed branch lookup filters nothing; the Worker refuses')
+assert.equal(carries(postCutover, null), false)
+assert.equal(branchRules.branchCanSellNow(postCutover[0]), true)
+assert.equal(branchRules.branchCanSellNow(postCutover[1]), false, 'Old Shop is never offered as the branch of a new expense')
 assert.match(formSource, /return \[\{ value: '', label: t\('select_branch'\) \|\| 'Select Shop' \}, \.\.\.options\]/, 'manual expenses cannot save an unassigned branch from the picker')
 assert.match(formSource, /if \(!pendingCreate && \(amountsInvalid \|\| dateInvalid \|\| !form\.branch_id\.trim\(\)\)\) return/, 'new edits validate amounts/date/Shop; frozen retries are not rebuilt by new input policy')
 

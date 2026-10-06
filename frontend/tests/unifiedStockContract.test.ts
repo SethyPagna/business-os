@@ -18,12 +18,12 @@ import {
 // $0.00 cost as free rather than an invented zero. Ten-column files must
 // keep importing unchanged.
 assert.deepEqual(UNIFIED_STOCK_HEADERS, [
-  'name', 'barcode', 'shop', 'warehouse', 'date', 'action',
+  'name', 'barcode', 'shop', 'warehouse', 'store', 'date', 'action',
   'selling_price', 'wholesale_price', 'cost_price', 'batch', 'supplier', 'free_goods',
 ])
 assert.equal(buildUnifiedStockTemplateCsv(), `﻿${UNIFIED_STOCK_HEADERS.join(',')}\r\n`)
 assert.deepEqual(mapUnifiedStockHeaders(['Product Name', 'UPC', 'Shop Qty', 'Warehouse', 'Sale Date', 'Movement', 'Price USD', 'Special Price', 'Unit Cost', 'Lot Code', 'Vendor Name', 'Free']), {
-  name: 'Product Name', barcode: 'UPC', shop: 'Shop Qty', warehouse: 'Warehouse', date: 'Sale Date', action: 'Movement',
+  name: 'Product Name', barcode: 'UPC', shop: 'Shop Qty', warehouse: 'Warehouse', store: null, date: 'Sale Date', action: 'Movement',
   selling_price: 'Price USD', wholesale_price: 'Special Price', cost_price: 'Unit Cost', batch: 'Lot Code', supplier: 'Vendor Name', free_goods: 'Free',
 })
 // A ten-column file (no supplier or free_goods header) still maps cleanly —
@@ -31,6 +31,17 @@ assert.deepEqual(mapUnifiedStockHeaders(['Product Name', 'UPC', 'Shop Qty', 'War
 const tenColumnMap = mapUnifiedStockHeaders(['name', 'barcode', 'shop', 'warehouse', 'date', 'action', 'selling_price', 'wholesale_price', 'cost_price', 'batch'])
 assert.equal(tenColumnMap.supplier, null)
 assert.equal(tenColumnMap.free_goods, null)
+// CUTOVER-LC: 'store' is its own column (the branch that sells), no longer an alias of 'shop'.
+assert.equal(tenColumnMap.store, null, 'an old sheet has no store column')
+assert.equal(mapUnifiedStockHeaders(['name', 'Store', 'Shop']).store, 'Store')
+assert.equal(mapUnifiedStockHeaders(['name', 'Store', 'Shop']).shop, 'Shop', 'a store header never shadows the shop column')
+assert.equal(mapUnifiedStockHeaders(['name', 'Store Qty']).shop, null, 'a bare store header is not the shop slot any more')
+const storeOnly = parseUnifiedStockRows([{ name: 'A', barcode: '1', store: '4', date: '08/27/2026', action: 'add', cost_price: '5', supplier: 'Bong Long' }])
+assert.deepEqual(storeOnly.issues, [], 'a store-only sheet is a complete quantity row')
+assert.equal(storeOnly.rows[0].store, 4)
+assert.equal(storeOnly.rows[0].shop, null)
+assert.equal(parseUnifiedStockRows([{ name: 'A', barcode: '1', store: '-1', date: '08/27/2026' }]).issues.some((issue) => issue.code === 'invalid_quantity'), true)
+assert.equal(parseUnifiedStockRows([{ name: 'A', barcode: '1', date: '08/27/2026' }]).issues.some((issue) => issue.code === 'missing_quantity'), true)
 assert.equal(normalizeUnifiedStockDate('08/27/2026'), '2026-08-27')
 assert.equal(normalizeUnifiedStockDate('2026-02-29'), null)
 

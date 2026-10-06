@@ -107,7 +107,7 @@ function freshDb() {
       is_active INTEGER DEFAULT 1, notes TEXT
     );
     CREATE TABLE branches (
-      id INTEGER PRIMARY KEY, name TEXT NOT NULL, is_active INTEGER NOT NULL DEFAULT 1
+      id INTEGER PRIMARY KEY, name TEXT NOT NULL, role TEXT, is_active INTEGER NOT NULL DEFAULT 1
     );
     CREATE TABLE branch_batch_stock (
       id INTEGER PRIMARY KEY, batch_id INTEGER NOT NULL, branch_id INTEGER NOT NULL,

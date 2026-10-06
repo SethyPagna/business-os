@@ -435,8 +435,8 @@ app.post('/transfer', async (c) => {
   }
 
   const [fromBranch, toBranch, canonicalTransferRows, mergeTarget] = await Promise.all([
-    db.prepare('SELECT id, name FROM branches WHERE id = @id').get<{ id: number; name: string }>({ id: fromBranchId }),
-    db.prepare('SELECT id, name FROM branches WHERE id = @id').get<{ id: number; name: string }>({ id: toBranchId }),
+    db.prepare('SELECT id, name, role FROM branches WHERE id = @id').get<{ id: number; name: string; role: string | null }>({ id: fromBranchId }),
+    db.prepare('SELECT id, name, role FROM branches WHERE id = @id').get<{ id: number; name: string; role: string | null }>({ id: toBranchId }),
     db.prepare(CANONICAL_TRANSFER_BRANCHES_SQL).all<CanonicalTransferBranchRow>(),
     findIdentityMatch(db, product),
   ])
@@ -453,7 +453,7 @@ app.post('/transfer', async (c) => {
   // grey out with (lib/branchRoles.ts). Same-branch is rejected above; this
   // is the other half of the rule: endpoints must have opposite canonical
   // Shop/Warehouse roles in either order.
-  const directionError = transferDirectionError(fromBranch?.name, toBranch?.name)
+  const directionError = transferDirectionError(fromBranch, toBranch)
     || (!isCanonicalTransferSelection(canonicalTransferPair, fromBranchId, toBranchId)
       ? TRANSFER_DIRECTION_ERROR
       : null)
@@ -639,8 +639,8 @@ app.post('/transfer-bulk', async (c) => {
       const { sql, params } = buildInClause('id', chunk)
       return db.prepare(`SELECT product_id, quantity FROM branch_stock WHERE branch_id = @branchId AND product_id IN (${sql})`).all<{ product_id: number; quantity: number }>({ ...params, branchId: fromBranchId })
     }),
-    db.prepare('SELECT id, name FROM branches WHERE id = @id').get<{ id: number; name: string }>({ id: fromBranchId }),
-    db.prepare('SELECT id, name FROM branches WHERE id = @id').get<{ id: number; name: string }>({ id: toBranchId }),
+    db.prepare('SELECT id, name, role FROM branches WHERE id = @id').get<{ id: number; name: string; role: string | null }>({ id: fromBranchId }),
+    db.prepare('SELECT id, name, role FROM branches WHERE id = @id').get<{ id: number; name: string; role: string | null }>({ id: toBranchId }),
     db.prepare(CANONICAL_TRANSFER_BRANCHES_SQL).all<CanonicalTransferBranchRow>(),
   ])
 
@@ -654,7 +654,7 @@ app.post('/transfer-bulk', async (c) => {
     throw error
   }
 
-  const bulkDirectionError = transferDirectionError(fromBranch?.name, toBranch?.name)
+  const bulkDirectionError = transferDirectionError(fromBranch, toBranch)
     || (!isCanonicalTransferSelection(canonicalTransferPair, fromBranchId, toBranchId)
       ? TRANSFER_DIRECTION_ERROR
       : null)

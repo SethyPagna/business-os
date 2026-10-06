@@ -724,7 +724,8 @@ export default function Branches({ embedded = false, view, showSectionNavigation
    */
   const activeBranches = useMemo(() => branches.filter((branch) => branch.is_active), [branches])
   const transferBranchOptions = useMemo(
-    () => activeBranches.map((branch) => ({ id: branch.id, name: branch.name || `Branch ${branch.id}` })),
+    // role travels with the row: the transfer modal decides endpoints by role, not by the (renamable) name
+    () => activeBranches.map((branch) => ({ id: branch.id, name: branch.name || `Branch ${branch.id}`, role: branch.role ?? null, is_active: branch.is_active ?? undefined })),
     [activeBranches],
   )
   // The Stock Session's AppSelect option shape ({value,label}), distinct

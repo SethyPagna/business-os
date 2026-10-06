@@ -19,8 +19,8 @@
 export const BRANCH_RULE_MESSAGE_KEYS: ReadonlyArray<readonly [string, string]> = [
   ['This branch edit can no longer be verified. Refresh Branches and submit a new edit.', 'branch_edit_conflict'],
   ['Branch review is not ready. Refresh after the update and try again.', 'branch_review_schema_required'],
-  ['Only allow Shop sale. Please transfer to Shop first.', 'pos_warehouse_not_sellable'],
-  ['Transfers move stock only between Shop and Warehouse.', 'transfer_canonical_pair_only'],
+  ['Sales can only be recorded at a selling branch.', 'branch_not_sellable'],
+  ['Transfers move stock only between the two operating branches.', 'transfer_branches_pair_only'],
   // Keep the previous one-way response localized while an older cached
   // Worker or queued offline response is still in flight.
   ['Transfers move stock from Warehouse to Shop.', 'transfer_source_warehouse_only'],
@@ -36,10 +36,20 @@ export const BRANCH_RULE_MESSAGE_KEYS: ReadonlyArray<readonly [string, string]> 
   ['Maintenance is in progress. No stock was transferred; try again shortly.', 'transfer_maintenance_active'],
 ]
 
+// The pre-rename sentences, which name Shop and Warehouse. A Worker still in
+// flight (or a queued response) sends these; they map onto the neutral keys so
+// the operator reads the same role-neutral text in either language.
+export const LEGACY_BRANCH_RULE_MESSAGE_KEYS: ReadonlyArray<readonly [string, string]> = [
+  ['Only allow Shop sale. Please transfer to Shop first.', 'branch_not_sellable'],
+  ['Transfers move stock only between Shop and Warehouse.', 'transfer_branches_pair_only'],
+]
+
 export const BRANCH_RULE_CODE_KEYS: Readonly<Record<string, string>> = {
   branch_edit_conflict: 'branch_edit_conflict',
   branch_review_schema_required: 'branch_review_schema_required',
   canonical_branch_configuration_invalid: 'canonical_branch_configuration_invalid',
+  branch_not_sellable: 'branch_not_sellable',
+  transfer_direction_invalid: 'transfer_branches_pair_only',
   transfer_stock_changed: 'transfer_stock_changed',
   transfer_selected_lot_short: 'transfer_selected_lot_short',
   transfer_too_many_lots: 'transfer_too_many_lots',
@@ -74,7 +84,7 @@ function branchRuleErrorText(value: unknown): string {
 export function branchRuleMessageKey(message: unknown): string | null {
   const text = branchRuleErrorText(message).trim()
   if (!text) return null
-  for (const [english, key] of BRANCH_RULE_MESSAGE_KEYS) {
+  for (const [english, key] of [...BRANCH_RULE_MESSAGE_KEYS, ...LEGACY_BRANCH_RULE_MESSAGE_KEYS]) {
     if (text === english || text.includes(english)) return key
   }
   return null

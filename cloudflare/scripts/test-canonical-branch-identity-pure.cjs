@@ -44,7 +44,7 @@ function freshDb() {
     CREATE TABLE branches (
       id INTEGER PRIMARY KEY, name TEXT NOT NULL, location TEXT, phone TEXT,
       manager TEXT, notes TEXT, is_default INTEGER NOT NULL DEFAULT 0,
-      is_active INTEGER NOT NULL DEFAULT 1, updated_at TEXT
+      is_active INTEGER NOT NULL DEFAULT 1, updated_at TEXT, role TEXT
     );
     CREATE TABLE sales (branch_id INTEGER, branch_name TEXT, updated_at TEXT);
     CREATE TABLE inventory_movements (branch_id INTEGER, branch_name TEXT);

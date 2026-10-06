@@ -110,8 +110,18 @@ export interface ProductGroupRow extends ProductRecord {
 // quantity is exactly what is SUPPOSED to differ between the merged rows,
 // and it is combined into the merged row's branch_stock/stock_quantity
 // below rather than compared.
-function mergeBranchStockEntries(items: ProductRecord[]): Array<{ branch_id: unknown; branch_name: unknown; quantity: number }> {
-  const byBranch = new Map<string, { branch_id: unknown; branch_name: unknown; quantity: number }>()
+type MergedBranchStockEntry = {
+  branch_id: unknown
+  branch_name: unknown
+  quantity: number
+  // Carried through so the till still decides can-sell from the branch's role
+  // after rows are grouped. Present only when a source entry carried them.
+  branch_role?: unknown
+  branch_active?: unknown
+}
+
+function mergeBranchStockEntries(items: ProductRecord[]): MergedBranchStockEntry[] {
+  const byBranch = new Map<string, MergedBranchStockEntry>()
   for (const item of items) {
     const branchStock = Array.isArray(item?.branch_stock) ? item.branch_stock as Array<Record<string, unknown>> : []
     for (const entry of branchStock) {
@@ -120,12 +130,12 @@ function mergeBranchStockEntries(items: ProductRecord[]): Array<{ branch_id: unk
       const key = String(branchId)
       const qty = Number(entry?.quantity || 0)
       const existing = byBranch.get(key)
-      if (existing) {
-        existing.quantity += qty
-        if (!existing.branch_name && entry?.branch_name) existing.branch_name = entry.branch_name
-      } else {
-        byBranch.set(key, { branch_id: branchId, branch_name: entry?.branch_name, quantity: qty })
-      }
+      const target = existing ?? { branch_id: branchId, branch_name: entry?.branch_name, quantity: 0 }
+      target.quantity += qty
+      if (existing && !existing.branch_name && entry?.branch_name) existing.branch_name = entry.branch_name
+      if (target.branch_role == null && entry?.branch_role != null) target.branch_role = entry.branch_role
+      if (target.branch_active === undefined && entry?.branch_active !== undefined) target.branch_active = entry.branch_active
+      if (!existing) byBranch.set(key, target)
     }
   }
   return [...byBranch.values()]

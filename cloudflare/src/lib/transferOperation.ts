@@ -269,7 +269,7 @@ export function transferRefusal(error: unknown): TransferRefusal | null {
   return null
 }
 
-function transferEffectStatements(operation: string, reverse: boolean, generation: number, user: SessionUser, reason: string): Statement[] {
+export function transferEffectStatements(operation: string, reverse: boolean, generation: number, user: SessionUser, reason: string): Statement[] {
   const from = reverse ? 'destination' : 'source'
   const to = reverse ? 'source' : 'destination'
   const members = `SELECT m.*,m.${from}_product_id AS from_product,m.${to}_product_id AS to_product,
@@ -300,8 +300,8 @@ function transferEffectStatements(operation: string, reverse: boolean, generatio
     // destination whose lots already claim all of its stock.
     assert(`NOT EXISTS(SELECT 1 FROM (${sources}) m WHERE m.untracked>${QUANTITY_EPSILON}
       AND MAX(COALESCE((SELECT quantity FROM branch_stock WHERE product_id=m.from_product AND branch_id=m.from_branch),0)
-        -COALESCE((SELECT SUM(bs.quantity) FROM branch_batch_stock bs JOIN product_batches b ON b.id=bs.batch_id
-          WHERE b.variant_product_id=m.from_product AND bs.branch_id=m.from_branch),0),0)<m.untracked-${QUANTITY_EPSILON})`, params),
+        -COALESCE((SELECT SUM(bs.quantity) FROM product_batches b CROSS JOIN branch_batch_stock bs ON bs.batch_id=b.id AND bs.branch_id=m.from_branch
+          WHERE b.variant_product_id=m.from_product),0),0)<m.untracked-${QUANTITY_EPSILON})`, params),
     assert(`NOT EXISTS(SELECT 1 FROM (${sourceLots}) m WHERE NOT EXISTS(
       SELECT 1 FROM branch_batch_stock bs JOIN product_batches b ON b.id=bs.batch_id
       WHERE bs.batch_id=m.from_batch AND bs.branch_id=m.from_branch AND b.variant_product_id=m.from_product AND b.is_active=1 AND bs.quantity>=m.quantity))
@@ -310,7 +310,7 @@ function transferEffectStatements(operation: string, reverse: boolean, generatio
         OR COALESCE((SELECT ${lotSnapshotSql} FROM product_batches WHERE id=a.to_batch AND is_active=1)=a.to_lot_snapshot,0)=0)`, params),
     { sql: `UPDATE branch_batch_stock SET quantity=quantity-(SELECT quantity FROM (${sourceLots}) a
       WHERE a.from_batch=branch_batch_stock.batch_id AND a.from_branch=branch_batch_stock.branch_id),updated_at=CURRENT_TIMESTAMP
-      WHERE EXISTS(SELECT 1 FROM (${sourceLots}) a WHERE a.from_batch=branch_batch_stock.batch_id AND a.from_branch=branch_batch_stock.branch_id)`, params },
+      WHERE (batch_id,branch_id) IN (SELECT from_batch,from_branch FROM (${sourceLots}))`, params },
     { sql: `INSERT INTO branch_batch_stock(batch_id,branch_id,quantity)
       SELECT to_batch,to_branch,SUM(take_quantity) FROM (${allocations}) GROUP BY to_batch,to_branch
       ON CONFLICT(batch_id,branch_id) DO UPDATE SET quantity=quantity+excluded.quantity,updated_at=CURRENT_TIMESTAMP`, params },
