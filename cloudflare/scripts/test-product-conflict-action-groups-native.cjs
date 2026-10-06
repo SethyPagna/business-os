@@ -129,7 +129,7 @@ async function main() {
         wholesale_price_usd REAL,wholesale_price_khr REAL);
       CREATE TABLE branch_stock(product_id INTEGER,branch_id INTEGER,quantity REAL,rfid_confirmed_qty REAL,PRIMARY KEY(product_id,branch_id));
       CREATE TABLE product_batches(id INTEGER PRIMARY KEY,variant_product_id INTEGER,batch_key TEXT,lot_code TEXT,expiry_date TEXT,received_at TEXT,is_active INTEGER,notes TEXT,
-        synthetic INTEGER,created_at TEXT,updated_at TEXT,batch_number TEXT,unit_cost_usd REAL,received_quantity REAL,received_branch_id INTEGER,
+        synthetic INTEGER,created_at TEXT,updated_at TEXT,batch_number TEXT,unit_cost_usd REAL,received_quantity REAL,received_branch_id INTEGER, received_branch_name TEXT,
         received_cost_usd REAL,supplier_id INTEGER,supplier_name TEXT,payment_status TEXT,credit_due_date TEXT);
       CREATE TABLE branch_batch_stock(id INTEGER PRIMARY KEY,batch_id INTEGER,branch_id INTEGER,quantity REAL,created_at TEXT,updated_at TEXT,UNIQUE(batch_id,branch_id));
     `)

@@ -7,18 +7,18 @@ const root = path.join(__dirname, '../src')
 const compile = source => ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
 const raw = new DatabaseSync(':memory:')
 raw.exec(`
-  CREATE TABLE fees(id INTEGER PRIMARY KEY,fee_type TEXT,label TEXT,notes TEXT,amount_usd REAL,amount_khr REAL,fee_date TEXT,created_at TEXT,sale_id INTEGER,branch_id INTEGER,delivery_contact_id INTEGER);
+  CREATE TABLE fees(id INTEGER PRIMARY KEY,fee_type TEXT,label TEXT,notes TEXT,amount_usd REAL,amount_khr REAL,fee_date TEXT,created_at TEXT,sale_id INTEGER,branch_id INTEGER,delivery_contact_id INTEGER,branch_name TEXT);
   CREATE TABLE sales(id INTEGER PRIMARY KEY,receipt_number TEXT);
   CREATE TABLE branches(id INTEGER PRIMARY KEY,name TEXT);
   CREATE TABLE delivery_contacts(id INTEGER PRIMARY KEY,name TEXT);
   INSERT INTO branches VALUES(1,'Shop'),(2,'Warehouse');
   INSERT INTO fees VALUES
-    (1,'expense','A','',1,0,'2026-09-20','2026-09-19T16:59:59Z',NULL,1,NULL),
-    (2,'expense','B','',2,0,'2026-09-18','2026-09-19 17:00:00',NULL,1,NULL),
-    (3,'expense','C','',3,0,'2026-09-20','2026-09-19T17:00:59.999Z',NULL,2,NULL),
-    (4,'expense','D','',4,0,'2026-09-20','2026-09-19T17:01:00Z',NULL,1,NULL),
-    (5,'expense','E','',5,0,'2026-09-21','2026-09-20T18:30:00Z',NULL,1,NULL),
-    (6,'expense','F','',6,0,'2026-09-20','2026-09-20 15:00:00',NULL,1,NULL);
+    (1,'expense','A','',1,0,'2026-09-20','2026-09-19T16:59:59Z',NULL,1,NULL,NULL),
+    (2,'expense','B','',2,0,'2026-09-18','2026-09-19 17:00:00',NULL,1,NULL,NULL),
+    (3,'expense','C','',3,0,'2026-09-20','2026-09-19T17:00:59.999Z',NULL,2,NULL,NULL),
+    (4,'expense','D','',4,0,'2026-09-20','2026-09-19T17:01:00Z',NULL,1,NULL,NULL),
+    (5,'expense','E','',5,0,'2026-09-21','2026-09-20T18:30:00Z',NULL,1,NULL,NULL),
+    (6,'expense','F','',6,0,'2026-09-20','2026-09-20 15:00:00',NULL,1,NULL,NULL);
 `)
 const db = { prepare(sql) { return {
   async all(params = {}) { return raw.prepare(sql).all(params) },

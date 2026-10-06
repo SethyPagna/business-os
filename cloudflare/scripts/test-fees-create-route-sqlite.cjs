@@ -68,6 +68,7 @@ raw.exec(`
     fee_date TEXT NOT NULL,
     sale_id INTEGER,
     branch_id INTEGER,
+    branch_name TEXT,
     delivery_contact_id INTEGER,
     notes TEXT,
     created_by INTEGER,
@@ -199,6 +200,20 @@ async function main() {
   assert.equal(created.status, 201, JSON.stringify(created.body))
   assert.equal(created.body.fee.delivery_contact_id, null)
   assert.deepEqual(counts(), { fees: 1, receipts: 1, audits: 1 })
+
+  // CUTOVER-LD: a fee carries the branch name it was recorded under; retiring/renaming the branch later (Shop ->
+  // "Old Shop") must not relabel it. The live directory name is only the fallback for a blank snapshot.
+  assert.equal(raw.prepare('SELECT branch_name FROM fees').get().branch_name, 'Shop')
+  raw.exec("UPDATE branches SET name='Old Shop', is_active=0 WHERE id=2")
+  const detail = await (await route.request(`/${created.body.fee.id}`, {}, {}, executionCtx)).json()
+  assert.equal(detail.fee.branch_name, 'Shop', 'a historical fee still says Shop after the rename')
+  const listed = await (await route.request('/', {}, {}, executionCtx)).json()
+  assert.equal(listed.fees[0].branch_name, 'Shop')
+  raw.prepare('UPDATE fees SET branch_name=NULL').run()
+  const blank = await (await route.request(`/${created.body.fee.id}`, {}, {}, executionCtx)).json()
+  assert.equal(blank.fee.branch_name, 'Old Shop', 'blank snapshot: the live name fills in')
+  raw.exec("UPDATE branches SET name='Shop', is_active=1 WHERE id=2")
+  raw.prepare("UPDATE fees SET branch_name='Shop'").run()
 
   const replay = await create(normalBody)
   assert.equal(replay.status, 200, JSON.stringify(replay.body))
