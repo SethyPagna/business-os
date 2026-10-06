@@ -28,9 +28,11 @@ function runTest(name: string, fn: () => void): void {
 
 const packs = { en: JSON.parse(read('src/lang/en.json')), km: JSON.parse(read('src/lang/km.json')) } as Record<string, Record<string, string>>
 const trFrom = (pack: Record<string, string>) => (key: string, fallback: string) => pack[key] ?? fallback
-const CODES = ['return_edit_cancelled', 'return_restore_over_capacity', 'return_refund_price_ambiguous', 'return_refund_sale_line_required']
+// The four FX-returns refusals, plus the branch cutover's: a return of a sale whose branch is inactive with no
+// active successor (cloudflare/src/lib/branchEffect.ts, 409 on POST /).
+const CODES = ['return_edit_cancelled', 'return_restore_over_capacity', 'return_refund_price_ambiguous', 'return_refund_sale_line_required', 'branch_retired_no_successor']
 
-runTest('the mapping covers exactly the four FX-returns refusal codes', () => {
+runTest('the mapping covers exactly the FX-returns refusal codes and the retired-branch one', () => {
   assert.deepEqual(Object.keys(RETURN_REFUSAL_ERRORS).sort(), [...CODES].sort())
 })
 
@@ -105,6 +107,8 @@ runTest('every mapped code is one the Worker actually sends, and the route forwa
   assert.ok(route.includes("throw new RefundSaleLineError('return_refund_sale_line_required',"), 'PATCH /:id refuses a line naming neither sale item nor product')
   assert.equal(route.split('if (error instanceof RefundSaleLineError) return c.json({ error: error.message, code: error.code }, 400)').length - 1, 2,
     'POST / and PATCH /:id both forward the refund-price refusal code')
+  assert.ok(route.includes('if (error instanceof BranchRetiredNoSuccessorError) return c.json({ error: error.message, code: error.code }, 409)'), 'POST / forwards the retired-branch refusal with its code')
+  assert.ok(readWorker('lib/branchEffect.ts').includes("export const BRANCH_RETIRED_NO_SUCCESSOR_CODE = 'branch_retired_no_successor'"), 'the code is the one the Worker defines')
 })
 
 // Each surface is sliced to the one handler that receives the refusal -- from

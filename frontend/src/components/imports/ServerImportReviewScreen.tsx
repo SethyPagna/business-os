@@ -8,6 +8,7 @@ import { approveImportJob, getImportJob, getImportJobReview } from '../../api/im
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards'
 import { importPollDelayMs } from '../../utils/importPoll'
 import { visibleTimeout } from '../../utils/visibilityPolling.ts'
+import { importRowDetailText, type ImportReviewWarning } from './importRowText.ts'
 
 type TranslateFn = (key: string) => string | undefined
 type NotifyFn = (message: string, tone?: string) => void
@@ -17,7 +18,7 @@ type ReviewRow = {
   action: string
   identifier?: string | null
   message?: string | null
-  warnings?: Array<{ kind?: string; message?: string }>
+  warnings?: ImportReviewWarning[]
   data?: Record<string, unknown>
 }
 
@@ -243,7 +244,7 @@ export default function ServerImportReviewScreen({ jobId, label, source, t, noti
         {loadingRows ? <div className="flex justify-center p-8"><Loader2 className="h-5 w-5 animate-spin" /></div> : rows.length ? (
           <table className="w-full min-w-[38rem] text-left text-xs">
             <thead className="sticky top-0 bg-slate-50 dark:bg-slate-800"><tr><th className="px-3 py-2">#</th><th className="px-3 py-2">{tr('item', 'Item')}</th><th className="px-3 py-2">{tr('action', 'Action')}</th><th className="px-3 py-2">{tr('details', 'Details')}</th></tr></thead>
-            <tbody>{rows.map((row) => <tr key={row.rowNumber} className="border-t border-slate-100 dark:border-slate-800"><td className="px-3 py-2">{row.rowNumber}</td><td className="px-3 py-2 font-medium">{row.identifier || String(row.data?.name || '—')}</td><td className="px-3 py-2">{row.action}</td><td className="max-w-md px-3 py-2 text-slate-500 dark:text-slate-400">{row.message || (row.warnings || []).map((warning) => warning.message).filter(Boolean).join(' · ') || '—'}</td></tr>)}</tbody>
+            <tbody>{rows.map((row) => <tr key={row.rowNumber} className="border-t border-slate-100 dark:border-slate-800"><td className="px-3 py-2">{row.rowNumber}</td><td className="px-3 py-2 font-medium">{row.identifier || String(row.data?.name || '—')}</td><td className="px-3 py-2">{row.action}</td><td className="max-w-md px-3 py-2 text-slate-500 dark:text-slate-400">{importRowDetailText(row, tr)}</td></tr>)}</tbody>
           </table>
         ) : <div className="p-8 text-center text-sm text-slate-500">{tr('no_matching_rows', 'No matching rows.')}</div>}
       </div>

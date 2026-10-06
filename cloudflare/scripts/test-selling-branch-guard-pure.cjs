@@ -185,7 +185,10 @@ runTest('every path that writes a sale line asks the guard first', () => {
   // writer being added later without one.
   assert.equal((salesSource.match(/firstUnsellableBranch\(/g) || []).length, 4)
   assert.equal((returnsSource.match(/branchCanSell\(/g) || []).length, 1)
-  assert.match(salesSource, /SHOP_ONLY_SALE_ERROR \}, 400\)/)
+  // The refusal is one coded body (error + branch_not_sellable), not a "Shop only" sentence: the sentence named Shop and
+  // Warehouse, wrong after the cutover and unmapped in the packs. The English is the pack key's (asserted below).
+  assert.match(salesSource, /NOT_SELLING_BRANCH_BODY, 400\)/)
+  assert.doesNotMatch(salesSource, /SHOP_ONLY_SALE_ERROR/)
   assert.match(salesSource, /from '\.\.\/lib\/branchRoleGuards'/)
   assert.match(returnsSource, /WAREHOUSE_NOT_SELLABLE_ERROR \}, 400\)/)
   assert.match(returnsSource, /from '\.\.\/lib\/branchRoleGuards'/)

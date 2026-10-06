@@ -107,7 +107,8 @@ function resultFromResolved(row: UnifiedStockResolvedRow): StockActionImportResu
       ...row.conflicts.map((message) => ({ kind: 'stock_action_conflict' as const, message })),
       // Columns that landed on one branch, shown before anything is saved
       // (informational: kind 'other' is not one of the serious kinds).
-      ...(row.branchNotes || []).map((message) => ({ kind: 'other' as const, message })),
+      // code + params let the review screen restate the note in the UI language; message is the English fallback.
+      ...(row.branchNotes || []).map((message, index) => ({ kind: 'other' as const, message, ...(row.branchNoteDetails?.[index] ?? {}) })),
     ],
     changes: {},
     data: row as unknown as Record<string, unknown>,
