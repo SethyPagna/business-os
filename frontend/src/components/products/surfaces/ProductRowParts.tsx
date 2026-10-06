@@ -4,6 +4,7 @@ import { calculateProductDiscount } from '../../../utils/pricing.ts'
 import { buildBatchPreview } from '../../../utils/productBatches.ts'
 import { batchDisplayLabel } from '../../../utils/batchLabel.ts'
 import EntityLink, { type EntityNavigate } from '../../shared/EntityLink.tsx'
+import { branchStockLinesWorthShowing } from '../../../utils/branchScope.ts'
 
 type BranchId = string | number
 type Translate = (key: string, fallback?: string, khmerFallback?: string) => string
@@ -24,7 +25,7 @@ type ProductLike = {
   discount_ends_at?: unknown
   selling_price_usd?: unknown
   selling_price_khr?: unknown
-  branch_stock?: Array<{ branch_id?: unknown; branch_name?: unknown; quantity?: unknown }>
+  branch_stock?: Array<{ branch_id?: unknown; branch_name?: unknown; branch_active?: unknown; quantity?: unknown }>
 }
 
 type ProductPromotion = {
@@ -152,7 +153,7 @@ export function ProductDetailsCell({
   const branchRows = selectedBranchName
     ? [String(selectedBranchName)]
     : Array.isArray(product.branch_stock) && product.branch_stock.length
-      ? product.branch_stock.map((entry) => `${String(entry.branch_name || entry.branch_id || 'Branch')}: ${Number(entry.quantity || 0)}`)
+      ? branchStockLinesWorthShowing(product.branch_stock).map((entry) => `${String(entry.branch_name || entry.branch_id || 'Branch')}: ${Number(entry.quantity || 0)}`)
       : branchLabel ? [String(branchLabel)] : []
   if (product.sku) {
     detailPills.push({ key: 'sku', label: product.sku, className: 'bg-indigo-50 font-mono text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-200' })
