@@ -35,7 +35,6 @@ import { buildIssueStateClauses, buildLikeAliasClause, tokenizeSearchWords } fro
 import { buildFamilyRelevanceOrderSql, buildProductSearchQuery, parseRankedIds } from '../lib/productSearchQuery'
 import { fifoRemovalAllocations, isStockRemovalConflict, listBatchesForProduct, parseReceiptSellingPrice, planBranchStockRemoval, planReceiptSellingPrice, planReceiveBatchStock, planRemoveStockAcrossBatches, prepareReceiptLotTarget, receiveBatchStock, restoreBatchStockStatements, removeStockFromBatch, InsufficientBatchStockError, type ReceiptCostPreimage, type ReceiptLotTarget, type ReceiptSellingPriceRow, type StockWriteStatement } from '../lib/productBatches'
 import { applyMovementRevert, type RevertMovementRow } from '../lib/stockRevert'
-import { BRANCH_RETIRED_DAMAGED_CODE, BRANCH_RETIRED_DAMAGED_ERROR, branchEffectRefusal, branchRedirectTarget } from '../lib/branchEffect'
 import { normalizeTypedDate } from '../lib/batchCode'
 import { appendReceiptNotes, FREE_GOODS_REASON_NOTE, FREE_QUANTITY_NOT_RECEIPT, parseFreeQuantity, stockReceiptGateCode, stockReceiptGateMessage } from '../lib/stockReceiptGate'
 import { effectiveUnitCost } from '../lib/stockSessionMath'
@@ -2920,14 +2919,7 @@ app.post('/movements/:id/revert', async (c) => {
     FROM inventory_movements WHERE id = @id
   `).get<RevertMovementRow>({ id })
   if (!mv) return c.json({ error: 'Stock movement not found', code: 'movement_not_found' }, 404)
-  let result: Awaited<ReturnType<typeof applyMovementRevert>>
-  try {
-    result = await applyMovementRevert(db, mv, { userId: user?.id ?? null, userName: actorSnapshot(user) }, { redirectTarget: branchRedirectTarget(c) })
-  } catch (error) {
-    const refusal = branchEffectRefusal(error)
-    if (refusal) return c.json(refusal, 409)
-    throw error
-  }
+  const result = await applyMovementRevert(db, mv, { userId: user?.id ?? null, userName: actorSnapshot(user) })
   if (!result.ok) return c.json({ error: result.error, code: result.code, ...(result.params ? { params: result.params } : {}), ...(result.refusal ?? {}) }, result.status)
   const productId = Number(mv.product_id) || 0
   await audit(c.env, user?.id ?? null, actorSnapshot(user), 'stock_revert', 'product', productId || null, {
@@ -2949,7 +2941,7 @@ app.post('/stock-in-lines/:movementId/edit', async (c) => {
   const body = await c.req.json<Record<string, unknown>>().catch(() => null)
   if (!body || typeof body !== 'object' || Array.isArray(body)) return c.json({ error: 'A JSON body is required.', code: 'invalid_request' }, 400)
   const { applyStockInLineEdit, notifyStockInLineEdit } = await import('../lib/stockInLineEdit')
-  const result = await applyStockInLineEdit(getDb(c.env), c.get('user'), movementId, body, { redirectTarget: branchRedirectTarget(c) })
+  const result = await applyStockInLineEdit(getDb(c.env), c.get('user'), movementId, body)
   if (result.status === 200 && !result.body.unchanged && !result.body.replayed) c.executionCtx.waitUntil(notifyStockInLineEdit(c.env))
   return c.json(result.body, result.status as 200)
 })
@@ -3055,14 +3047,7 @@ async function runTaggedLotActionKernel(c: InventoryContext, action: 'dispose' |
   const product = await db.prepare('SELECT id, name, cost_price_usd, cost_price_khr FROM products WHERE id = @id')
     .get<{ id: number; name: string; cost_price_usd: number | null; cost_price_khr: number | null }>({ id: productId })
   if (!product) return c.json({ error: 'Product not found' }, 404)
-  const branch = await db.prepare('SELECT id, name, is_active FROM branches WHERE id = @id').get<{ id: number; name: string; is_active: number | null }>({ id: branchId })
-  // Held (damaged) units belong to the branch they were created at and a consolidation never moves them. Putting
-  // them back on sale at a disabled branch would recreate sellable stock where nothing can sell it, so a Restore
-  // there is refused with the same coded refusal the sale and return writers use. Disposing removes held units
-  // and creates no sellable stock, so it stays allowed.
-  if (action === 'restore' && branch && Number(branch.is_active ?? 1) !== 1) {
-    return c.json({ error: BRANCH_RETIRED_DAMAGED_ERROR, code: BRANCH_RETIRED_DAMAGED_CODE }, 409)
-  }
+  const branch = await db.prepare('SELECT id, name FROM branches WHERE id = @id').get<{ id: number; name: string }>({ id: branchId })
 
   const lots = await readOpenTaggedLots(db, { productId, branchId, tag: tagResult.tag })
   const { takes, uncovered } = allocateTaggedLots(lots, quantity)

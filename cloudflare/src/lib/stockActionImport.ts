@@ -4,7 +4,7 @@
 
 import { dateToBatchCode, normalizeToIsoDate } from './batchCode'
 import { parseImportNumericValue, normalizeImportCost4, normalizeImportSellingPrice } from './importNumbers'
-import { indexCanonicalImportBranches, resolveImportBranchRequest, type CanonicalImportBranchRow, type ImportBranchRedirect } from './importBranchAuthority'
+import { indexCanonicalImportBranches, resolveImportBranchRequest, type CanonicalImportBranchRow } from './importBranchAuthority'
 // The ONE fold. Imported from the rule module both packages carry verbatim, so
 // this path cannot reach a different verdict from the create/edit guard, the
 // Conflicts sweep, the merge tool or the client's own sheet review.
@@ -203,9 +203,8 @@ export function resolveUnifiedStockImportRows(
   products: UnifiedStockCatalogProduct[],
   branches: UnifiedStockBranch[],
   currentStock: UnifiedStockCurrent[],
-  redirect: ImportBranchRedirect | null = null,
 ): UnifiedStockResolvedRow[] {
-  const branchIndex = indexCanonicalImportBranches(branches, redirect)
+  const branchIndex = indexCanonicalImportBranches(branches)
   const branchForSlot = (slot: 'shop' | 'warehouse' | 'store') => resolveImportBranchRequest(branchIndex, slot)
   const stockRows: StockActionRow[] = []
   const provisional: UnifiedStockResolvedRow[] = []

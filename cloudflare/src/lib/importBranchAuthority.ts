@@ -1,6 +1,5 @@
 import type { BindParams, D1Compat } from './db'
 import { branchRole, resolveActiveSuccessor, type BranchRole } from './branchRoles'
-import { resolveBranchEffect, type BranchEffectRow } from './branchEffect'
 
 // Import branch authority, by IDENTITY and never by the display name.
 //
@@ -14,12 +13,7 @@ import { resolveBranchEffect, type BranchEffectRow } from './branchEffect'
 //                    "warehouse" is LC Store itself, and "shop" is the retired Old
 //                    Shop, so it follows successor_branch_id to LC Store and the
 //                    result remembers it was ADDRESSED to "Shop" (old sheets keep
-//                    working; the provenance is kept, never relabelled). A caller that
-//                    passes `redirect` (every job-driven import, the dated count) is
-//                    never routed silently: the sheet is refused with the coded
-//                    branch_redirect_required (lib/branchEffect.ts) until the operator
-//                    names the active branch it should go to, and then that branch
-//                    (not necessarily the successor) takes it;
+//                    working; the provenance is kept, never relabelled);
 //   - "store"        the one active branch that sells (role shop);
 //   - anything else  an active branch with exactly that name (e.g. "LC Store").
 // Anything ambiguous or unresolvable answers null and the caller refuses.
@@ -37,37 +31,12 @@ export type CanonicalImportBranchRow = {
 /** The columns every import caller must read for `resolveImportBranchRequest`. */
 export const IMPORT_BRANCH_COLUMNS_SQL = 'id, name, role, canonical_key, successor_branch_id, is_default, is_active'
 
-/**
- * Opt-in for the disabled-branch redirect (CUTOVER-LR). `target` is the active branch the operator confirmed
- * (null: none yet, so a sheet addressed to a disabled branch is refused with the redirect question); `sells` is
- * true when the rows carry sale lines. An index built without it keeps the silent successor routing (every
- * caller that has no operator in the loop, and every test written before the ruling).
- */
-export type ImportBranchRedirect = { target: number | null; sells?: boolean }
-
-/** The policy key that carries the active branch the operator confirmed for a sheet addressed to a disabled branch. */
-export const IMPORT_BRANCH_REDIRECT_POLICY_KEY = 'branch_redirect_id'
-
-/**
- * The redirect an import's branch resolution runs under. A job always has a policy (possibly without the key), so the
- * disabled-branch question is asked for every job-driven import; only a call with no policy at all (a direct caller
- * with no operator in the loop) keeps the silent successor routing.
- */
-export function importBranchRedirect(policyJson: string | null | undefined, sells: boolean): ImportBranchRedirect | null {
-  if (policyJson === undefined) return null
-  let parsed: unknown = null
-  try { parsed = policyJson ? JSON.parse(policyJson) : null } catch { parsed = null }
-  const raw = Number(parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>)[IMPORT_BRANCH_REDIRECT_POLICY_KEY] : NaN)
-  return { target: Number.isSafeInteger(raw) && raw > 0 ? raw : null, sells }
-}
-
 export type CanonicalImportBranchIndex = {
   // ACTIVE branches by their operational role (role, else name).
   byRole: Map<Exclude<BranchRole, 'other'>, CanonicalImportBranchRow[]>
   uniqueDefault: CanonicalImportBranchRow | null
   // Every branch row read, retired ones included (successor lookups).
   rows: CanonicalImportBranchRow[]
-  redirect: ImportBranchRedirect | null
 }
 
 export type ImportBranchResolution = {
@@ -91,7 +60,7 @@ function identityKey(row: CanonicalImportBranchRow): string {
   return lowered(row.name)
 }
 
-export function indexCanonicalImportBranches(rows: CanonicalImportBranchRow[], redirect: ImportBranchRedirect | null = null): CanonicalImportBranchIndex {
+export function indexCanonicalImportBranches(rows: CanonicalImportBranchRow[]): CanonicalImportBranchIndex {
   const byRole = new Map<Exclude<BranchRole, 'other'>, CanonicalImportBranchRow[]>([['shop', []], ['warehouse', []]])
   const defaults: CanonicalImportBranchRow[] = []
   for (const row of rows) {
@@ -106,7 +75,7 @@ export function indexCanonicalImportBranches(rows: CanonicalImportBranchRow[], r
   const uniqueDefault = defaultCandidate && defaultRole !== 'other' && byRole.get(defaultRole)!.length === 1
     ? defaultCandidate
     : null
-  return { byRole, uniqueDefault, rows, redirect }
+  return { byRole, uniqueDefault, rows }
 }
 
 const ADDRESSED_LABEL: Record<string, string> = { shop: 'Shop', warehouse: 'Warehouse' }
@@ -128,13 +97,6 @@ export function resolveImportBranchRequest(index: CanonicalImportBranchIndex, re
     const active = keyed.filter(isActiveRow)
     if (active.length > 1) return null
     if (active.length === 1) return branchRole(active[0]) === 'other' ? null : { branch: active[0], addressedName: null }
-    if (index.redirect && keyed.length > 0) {
-      // The disabled branch is never routed silently: the operator's confirmed branch takes it, or the coded refusal asks.
-      if (keyed.length !== 1) return null
-      const effect = resolveBranchEffect(index.rows as BranchEffectRow[], keyed[0].id, { sells: !!index.redirect.sells, target: index.redirect.target })
-      const landing = index.rows.find((candidate) => Number(candidate.id) === effect.effectBranchId)
-      return landing && branchRole(landing) !== 'other' ? { branch: landing, addressedName: ADDRESSED_LABEL[word] } : null
-    }
     // Nothing active carries this identity: a retired branch routes to its
     // active successor, provided every retired candidate agrees on ONE target.
     const targets = new Map<number, CanonicalImportBranchRow>()
