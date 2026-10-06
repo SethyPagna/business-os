@@ -50,6 +50,8 @@ const actual = new Set(['businessDateWindow', 'continuousReadWindow', 'businessM
   // Shared per-isolate PRAGMA table_info() memoization saleMoneySchemaReady
   // now delegates to; no imports of its own, so it is loaded for real.
   'schemaProbe',
+  // NOTIF-V2: every stock-deducting sale write plans one stock_alert_events statement through these.
+  'lowStockSettings', 'saleStockAlerts', 'familyPagination',
 ])
 function load(rel) {
   if (cache.has(rel)) return cache.get(rel).exports

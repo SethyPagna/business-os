@@ -28,6 +28,12 @@ const USER = {
 
 const overrides = {
   '../lib/db': { getDb: (env) => env.DB },
+  // NOTIF-V2: the stock-crossing alert reads the shared low-stock rule. This harness's D1 stand-in has no
+  // prepare().bind(), so the rule is the real module with its settings read replaced by the defaults.
+  get '../lib/lowStockSettings'() {
+    const real = load('lib/lowStockSettings.ts')
+    return { ...real, loadLowStockConfig: async () => real.DEFAULT_LOW_STOCK_CONFIG }
+  },
   '../lib/auth': {
     requireAuth: async (c, next) => {
       c.set('user', USER)

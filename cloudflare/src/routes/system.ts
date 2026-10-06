@@ -475,6 +475,9 @@ app.post('/reset-data', async (c) => {
       { sql: 'UPDATE branch_stock SET quantity = 0, rfid_confirmed_qty = 0' },
       { sql: 'UPDATE branch_batch_stock SET quantity = 0' },
     ]
+    // Bell notifications about sales that no longer exist. Gated like every reset table whose
+    // migration may not be applied where this Worker runs (presentResetTables).
+    statements.push(...(await presentResetTables(db, ['stock_alert_events'])).map((table) => ({ sql: `DELETE FROM "${table}"` })))
 
     if (mode === 'all') {
       statements.push(

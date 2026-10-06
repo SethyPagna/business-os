@@ -28,6 +28,8 @@ const actual = new Set(['businessMaintenanceGuard','offlineSaleOwnership','acqui
   // saleMoneySchemaReady/readStripMoneyRows now delegate to; no imports of
   // its own, so it is loaded for real rather than stubbed.
   'schemaProbe',
+  // NOTIF-V2: every stock-deducting sale write plans one stock_alert_events statement through these.
+  'lowStockSettings','saleStockAlerts','familyPagination',
 ])
 function load(rel) {
   if (cache.has(rel)) return cache.get(rel).exports

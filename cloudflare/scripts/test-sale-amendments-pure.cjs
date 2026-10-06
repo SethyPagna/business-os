@@ -101,7 +101,15 @@ const subject = compile('saleAmendments.ts', {
   './saleLineAddition': saleLineAddition,
   './moneyPrecision': moneyPrecision,
 })
+// NOTIF-V2: a stock-deducting status change plans one stock_alert_events statement.
+const lowStockSettings = compile('lowStockSettings.ts', { './db': {} })
+const saleStockAlerts = compile('saleStockAlerts.ts', {
+  './lowStockSettings': lowStockSettings,
+  './familyPagination': compile('familyPagination.ts'),
+})
 const saleBulkStatus = compile('saleBulkStatus.ts', {
+  './lowStockSettings': lowStockSettings,
+  './saleStockAlerts': saleStockAlerts,
   './db': {},
   '../index': {},
   './auth': {},

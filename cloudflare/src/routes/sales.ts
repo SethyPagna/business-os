@@ -137,6 +137,8 @@ import {
   type CancelReason,
   type SaleItemAllocation,
 } from '../lib/saleTransitions'
+import { loadLowStockConfig } from '../lib/lowStockSettings'
+import { planSaleStockAlertStatement, type SaleStockAlertLine } from '../lib/saleStockAlerts'
 import { buildLikeAliasClause, tokenizeSearchTermGroups, normalizeSearchText } from '../lib/searchMatch'
 import { computeSaleTotals, round2, newSaleMoney4, assertCanonicalSaleChildren } from '../lib/saleTotals'
 import { multiplyMoney4, divideMoney4, sumMoney4, subtractMoney4, subtractDecimalSum, sellingPriceCeilCent, MoneyPrecisionError } from '../lib/moneyPrecision'
@@ -1470,6 +1472,10 @@ app.post('/', async (c) => {
       }
     }
     const allocationReleasedAt = shouldDeductStock ? null : new Date().toISOString()
+    // The units this batch takes out of branch stock, collected at the one
+    // place that deducts them, so the stock-alert statement below is told
+    // exactly what moved (lib/saleStockAlerts.ts).
+    const stockAlertLines: SaleStockAlertLine[] = []
     for (const [itemIndex, item] of priced.entries()) {
       statements.push({
         sql: `WITH current_batch AS (
@@ -1656,6 +1662,7 @@ app.post('/', async (c) => {
                 ON CONFLICT(product_id, branch_id) DO UPDATE SET quantity = branch_stock.quantity - @quantity`,
           params: { product_id: item.product_id, branch_id: item.branch_id, quantity: item.quantity },
         })
+        stockAlertLines.push({ product_id: item.product_id, branch_id: item.branch_id, quantity: item.quantity })
         // 0084: an explicit lot pick stamps the movement; a no-pick line
         // stamps its single auto-allocated lot only when that lot covered
         // the WHOLE quantity (a partial draw with a legacy-aggregate
@@ -1692,6 +1699,15 @@ app.post('/', async (c) => {
         })
       }
     }
+    // After every deduction, inside the same atomic batch: a sale that carries
+    // a product family into low or out-of-stock writes its bell notification
+    // here, and a rolled-back sale writes none.
+    const stockAlertStatement = planSaleStockAlertStatement({
+      lines: stockAlertLines,
+      lowStock: await loadLowStockConfig(c.env),
+      sale: { saleWriteKey },
+    })
+    if (stockAlertStatement) statements.push(stockAlertStatement)
     statements.push(
       {sql:'DELETE FROM sale_mutation_guards',params:{}},
       canonicalSaleChildrenGuard(saleWriteKey),
@@ -2588,6 +2604,16 @@ app.patch('/:id/status', async (c) => {
   }
   statements.push(...settlementLineStatements)
   statements.push(...plan.statements)
+  // Only a transition that TAKES stock back out (un-cancelling a sale) can push
+  // a family into low / out of stock; every other transition restores or holds.
+  if (plan.deductions.length) {
+    const stockAlert = planSaleStockAlertStatement({
+      lines: plan.deductions,
+      lowStock: await loadLowStockConfig(c.env),
+      sale: { saleId: Number(id) },
+    })
+    if (stockAlert) statements.push(stockAlert)
+  }
 
   // A provisional restore can be spent by another request before a status
   // conflict is discovered. Keep damaged stock and its ledger in the SAME
@@ -3554,6 +3580,17 @@ app.post('/:id/items', async (c) => {
         params: { operation: addItemsOperationId, ordinal },
       })
     }
+  }
+  // Items added to a sale that holds stock can carry a family into low / out
+  // of stock; the notification rides this same atomic batch (plan.deductions
+  // is empty for a sale that holds nothing, so this costs nothing then).
+  if (plan.deductions.length) {
+    const addItemsStockAlert = planSaleStockAlertStatement({
+      lines: plan.deductions,
+      lowStock: await loadLowStockConfig(c.env),
+      sale: { saleId },
+    })
+    if (addItemsStockAlert) statementsForPlan.push(addItemsStockAlert)
   }
   let snapshotExpression = '@payload'
   for (let ordinal = 0; ordinal < plan.lines.length; ordinal += 1) {
@@ -4533,6 +4570,14 @@ app.post('/:id/amendments', async (c) => {
   `).all<LineAllocation>([lineId])
 
   const statements: StatementList = []
+  // Net units this amendment batch takes out of (positive) or gives back to
+  // (negative) branch stock, per product -- fed to the stock-alert statement
+  // after the last stock statement so its before/after is exact even when a
+  // replace restores one line and deducts another in the same batch.
+  const stockAlertLines: SaleStockAlertLine[] = []
+  const noteAmendmentStock = (productId: unknown, branchId: unknown, unitsMoved: number) => {
+    if (branchId && unitsMoved) stockAlertLines.push({ product_id: Number(productId), branch_id: Number(branchId), quantity: -unitsMoved })
+  }
   const ledgerEntries: Array<Parameters<typeof amendmentEntryStatement>[0]> = []
   const groupId = crypto.randomUUID()
   let subtotalDeltaUsd = 0
@@ -4568,6 +4613,7 @@ app.post('/:id/amendments', async (c) => {
         :planLineQuantityDecrease({moneyPrecisionVersion:1,saleId,sale,line:workingLine,removedQuantity:-delta,allocations,exchangeRate,
           reason:`Quantity changed on sale #${saleId}`,userId:user?.id??null,userName:actorSnapshot(user)})
       statements.push(...quantityPlan.statements);unitsMoved+=quantityPlan.unitsMoved
+      noteAmendmentStock(line.product_id, line.branch_id, quantityPlan.unitsMoved)
     }
     const changedFields=Object.keys(historical.row).filter(key=>historical.row[key]!==original[key])
     if(changedFields.some(key=>!['quantity','total_usd','total_khr','base_price_usd','base_price_khr','manual_discount_type','manual_discount_value','manual_discount_usd','manual_discount_khr','applied_price_usd','applied_price_khr'].includes(key)))throw new Error('Unexpected historical price column')
@@ -4655,6 +4701,7 @@ app.post('/:id/amendments', async (c) => {
       }
       statements.push(...quantityPlan.statements)
       unitsMoved += quantityPlan.unitsMoved
+      noteAmendmentStock(line.product_id, line.branch_id, quantityPlan.unitsMoved)
     }
 
 
@@ -4704,6 +4751,7 @@ app.post('/:id/amendments', async (c) => {
     statements.push(...plan.statements)
     subtotalDeltaUsd = sumMoney4([subtotalDeltaUsd,plan.subtotalDeltaUsd])
     unitsMoved += plan.unitsMoved
+    noteAmendmentStock(line.product_id, line.branch_id, plan.unitsMoved)
     ledgerEntries.push({
       saleId, kind: 'line_quantity_increased', groupId,
       saleItemId: line.id, productId: line.product_id, productName: line.product_name,
@@ -4731,6 +4779,7 @@ app.post('/:id/amendments', async (c) => {
     statements.push(...plan.statements)
     subtotalDeltaUsd = sumMoney4([subtotalDeltaUsd,plan.subtotalDeltaUsd])
     unitsMoved += plan.unitsMoved
+    noteAmendmentStock(line.product_id, line.branch_id, plan.unitsMoved)
     ledgerEntries.push({
       saleId,
       kind: plan.quantityAfter <= 0 ? 'line_removed' : 'line_quantity_decreased',
@@ -4915,8 +4964,18 @@ app.post('/:id/amendments', async (c) => {
         if (ordinal>=0) statements.push({sql:`INSERT INTO sale_mutation_members(operation_id,entity_kind,entity_id,ordinal) VALUES(@operation,'sale_item',last_insert_rowid(),@ordinal)`,params:{operation:mutationOperationId,ordinal}})
       }
       statements.push(...buildOperationAllocationStatements(finalPlan.lines,mutationOperationId,mutationStamp))
+      for (const deduction of finalPlan.deductions) noteAmendmentStock(deduction.product_id, deduction.branch_id, -deduction.quantity)
     }
     lineMoneyAfterAtLatestRate=captureSaleLineKhrSnapshot(pricingRowsAfter)
+  }
+  // Last stock statement is queued: one alert statement for the whole act.
+  if (stockAlertLines.length) {
+    const amendmentStockAlert = planSaleStockAlertStatement({
+      lines: stockAlertLines,
+      lowStock: await loadLowStockConfig(c.env),
+      sale: { saleId },
+    })
+    if (amendmentStockAlert) statements.push(amendmentStockAlert)
   }
 
   // Every ledger entry in this act ends at the sale's real new total; the

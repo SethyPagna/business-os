@@ -12,6 +12,8 @@ import { branchCanSell } from './branchRoles';
 import { assertSaleRecordBatchBounds, buildSaleRecordEventsInsert } from './saleRecordEvents';
 import type { SaleRecordChange, SaleRecordValueState } from './saleRecords';
 import { statusChangeNeedsPayment } from './saleStatusResolution';
+import { loadLowStockConfig } from './lowStockSettings';
+import { planSaleStockAlertStatement } from './saleStockAlerts';
 export const BULK_STATUS_KIND = 'sale.status.bulk';
 export const BULK_STATUS_LIMIT = 25;
 export const BULK_STATUS_MOVEMENT_LIMIT = 256;
@@ -482,6 +484,19 @@ export async function applySaleBulkStatus(env: Env, user: SessionUser, raw: Row)
     const statements: StockStatement[] = [...guards, { sql: 'INSERT INTO sale_bulk_operations(id,actor_id,request_id,request_json,receipt_json) VALUES(@id,@actor,@request,@canonical,@receipt)', params: { id: operationId, actor: user.id, request: request.client_request_id, canonical, receipt: JSON.stringify(receipt) } }];
     for (const m of members)
         statements.push(...memberStatements(m, 1, user, stamp));
+    // Un-cancelling sales takes stock back out; a group that carries a product
+    // family into low / out of stock writes the same bell notification a
+    // single sale does, in this same atomic batch. A restore-only group has no
+    // positive net line, so it costs nothing (movement quantity is negative
+    // for units taken; lot-less lines only: damaged-lot draws never touch the
+    // product rollup the classification reads).
+    const takenLines = members.filter(m => m.changed).flatMap(m => m.stock.filter(s => !s.lot).map(s => ({ product_id: s.product, branch_id: s.branch, quantity: -s.quantity })));
+    if (takenLines.some(line => line.quantity > 0)) {
+        const changedMembers = members.filter(m => m.changed);
+        const stockAlert = planSaleStockAlertStatement({ lines: takenLines, lowStock: await loadLowStockConfig(env), sale: { saleId: changedMembers.length === 1 ? changedMembers[0].id : null } });
+        if (stockAlert)
+            statements.push(stockAlert);
+    }
     const recordEvents = statusRecordEvents(members, operationId, 0, 'apply', user, stamp);
     if (recordEvents)
         statements.push(recordEvents.statement);

@@ -758,6 +758,7 @@ export const FACTORY_RESET_TABLES = [
   'rfid_scan_sessions',
   'rfid_tags',
   'inventory_movements',
+  'stock_alert_events',
   'stock_row_moves',
   'stock_transfers',
   'branch_batch_stock',
@@ -838,6 +839,8 @@ export const PRODUCTS_RESET_TABLES = [
   'stock_session_guards',
   // Scoped Set operations snapshot product/lot identities (0193).
   'stock_lot_adjustment_operations',
+  // Bell notifications name a product and the sale that took it low (0239).
+  'stock_alert_events',
   'product_images',
   'rfid_tags',
   'branch_batch_stock',
@@ -853,7 +856,7 @@ export const PRODUCTS_RESET_TABLES = [
  * dropped from the list when absent -- there is nothing in them to clear.
  * Every other reset table stays mandatory: a missing one is a real defect.
  */
-export const MIGRATION_GATED_RESET_TABLES: readonly string[] = ['stock_lot_adjustment_operations']
+export const MIGRATION_GATED_RESET_TABLES: readonly string[] = ['stock_lot_adjustment_operations', 'stock_alert_events']
 
 export async function presentResetTables(
   db: { prepare(sql: string): { all<T>(params?: Record<string, unknown>): Promise<T[]> } },

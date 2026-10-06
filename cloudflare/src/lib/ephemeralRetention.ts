@@ -27,6 +27,7 @@ import { getDb } from './db'
 import { getPlanLimits } from './planTier'
 import { sqliteUtcTimestamp } from './rateLimit'
 import { deleteObjectsBulk } from './r2'
+import { STOCK_ALERT_RETENTION_DAYS } from './saleStockAlerts'
 import type { Env } from '../index'
 
 const LAST_RUN_KEY = 'ephemeral_retention_last_run'
@@ -231,6 +232,8 @@ export async function maybeRunScheduledEphemeralRetention(env: Env): Promise<Eph
   await step('trusted_devices', () => batchDeleteById(env, db, 'trusted_devices', 'revoked_at IS NOT NULL AND revoked_at < @cutoff', { cutoff: daysAgo(TRUSTED_DEVICE_TTL_DAYS) }))
   await step('ai_response_logs', () => batchDeleteById(env, db, 'ai_response_logs', 'created_at < @cutoff', { cutoff: daysAgo(AI_LOG_TTL_DAYS) }))
   await step('action_history', () => batchDeleteById(env, db, 'action_history', 'created_at < @cutoff', { cutoff: daysAgo(ACTION_HISTORY_TTL_DAYS) }))
+  // The bell reads only the last STOCK_ALERT_WINDOW_DAYS of these; the rest is notification history.
+  await step('stock_alert_events', () => batchDeleteById(env, db, 'stock_alert_events', 'created_at < @cutoff', { cutoff: daysAgo(STOCK_ALERT_RETENTION_DAYS) }))
   await step('share_submission_images', () => pruneSubmissionImages(env, db))
   await step('share_submissions_unreviewed', () => pruneUnreviewedSubmissions(env, db))
   await step('login_lockouts', () => directDelete(db, 'login_lockouts', '(locked_until IS NULL OR locked_until < CURRENT_TIMESTAMP) AND updated_at < @cutoff', { cutoff: daysAgo(LOCKOUT_TTL_DAYS) }))
