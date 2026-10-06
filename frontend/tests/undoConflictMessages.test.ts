@@ -240,8 +240,9 @@ await runCase('an applied replay still resolves with the Worker response', async
 await runCase('the history hook shows the transport error message as is, for both the live and the server-row path', () => {
   const hook = fs.readFileSync(path.join(FRONTEND, 'src', 'utils', 'actionHistory.ts'), 'utf8')
   assert.match(hook, /function getErrorMessage\(error: unknown, fallback: string\): string \{\s*return error instanceof Error \? error\.message : String\(error \|\| fallback\)/)
-  assert.equal(hook.match(/notify\?\.\(getErrorMessage\(error, `Unable to \$\{direction\} that action right now\.`\), 'error'\)/g)?.length, 2,
-    'runEntry and runServerEntry both notify the transport error message')
+  assert.equal(hook.match(/notify\?\.\(getErrorMessage\(error, `Unable to \$\{direction\} that action right now\.`\), 'error'\)/g)?.length, 3,
+    // RET-B F2 (5638cd64d) added the third site: a refused Undo/Redo shows its own closure's message as is.
+    'runEntry (refusal and live paths) and runServerEntry all notify the error message as is')
 })
 
 if (failures.length) {
