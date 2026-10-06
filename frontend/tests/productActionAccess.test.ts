@@ -74,6 +74,7 @@ runTest('the Worker routes carry the exact gates the helpers mirror', () => {
   const variant = routeBlock(productsRoute, "app.post('/variant'")
   assert.match(variant, /getActionTier\(user, 'products', 'variant'\) !== 'full' \|\| getActionTier\(user, 'products', 'add'\) !== 'full'/)
   assert.doesNotMatch(variant, /hasPermission\(user, 'products'\)/, 'the section grant alone no longer decides /variant')
+  assert.match(routeBlock(productsRoute, "app.post('/bulk-delete-jobs/:id/cancel'"), /getActionTier\(user, 'products', 'bulk_delete'\) !== 'full'/)
 })
 
 runTest('the Products page gates Add variant and Apply to ALL on the helpers, everywhere they appear', () => {

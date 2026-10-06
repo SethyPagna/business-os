@@ -2715,7 +2715,9 @@ app.get('/bulk-delete-jobs/:id', async (c) => {
 // cancellation.
 app.post('/bulk-delete-jobs/:id/cancel', async (c) => {
   const user = c.get('user')
-  if (getPermissionTier(user, 'products') === 'none') return c.json({ error: 'You do not have permission to perform this action' }, 403)
+  // Stopping a bulk delete is a write on the job the Bulk delete action started: the same action, Full only, as the
+  // route that creates it. Module access alone let any Products reader cancel an administrator's job.
+  if (getActionTier(user, 'products', 'bulk_delete') !== 'full') return c.json({ error: 'You do not have permission to perform this action' }, 403)
   try {
     await (await getImportFencedDb(c.env)).prepare(`UPDATE bulk_delete_jobs SET cancel_requested = 1, updated_at = CURRENT_TIMESTAMP WHERE id = @id AND status IN ('pending', 'processing')`).run({ id: c.req.param('id') })
   } catch (error) {

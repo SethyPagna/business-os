@@ -123,6 +123,22 @@ async function main() {
     }
   })
 
+  // ---- sweep: cancel a bulk delete -------------------------------------------------------------
+  await check('sweep: Bulk delete OFF cannot cancel a bulk delete job; Bulk delete on can', async () => {
+    for (const grants of [{ ...FULL, 'products:bulk_delete': false }, { products: 'review' }, {}]) {
+      const h = fixture(role(grants))
+      const response = await h.request('POST', '/bulk-delete-jobs/job-1/cancel')
+      assert.equal(response.status, 403, JSON.stringify(grants))
+      assert.equal(cancelFlag(h), 0, 'the job was left running')
+    }
+    for (const user of [role(FULL), ADMIN]) {
+      const h = fixture(user)
+      const response = await h.request('POST', '/bulk-delete-jobs/job-1/cancel')
+      assert.equal(response.status, 200, JSON.stringify(response.json))
+      assert.equal(cancelFlag(h), 1)
+    }
+  })
+
   if (failed) { console.log(`${failed} FAILED`); process.exit(1) }
   console.log('products write action permissions OK')
 }
