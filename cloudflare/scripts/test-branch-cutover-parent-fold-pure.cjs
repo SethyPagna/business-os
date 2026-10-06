@@ -180,7 +180,7 @@ check('SQL twins: the business day and supplier key computed in SQLite equal the
     for (const value of [`${m}/${d}/${year}`, `${mm}/${dd}/${year}`, `${year}-${mm}-${dd}`]) { assert.equal(day.get(value).d, parent.cutoverLotBusinessDay(value), value); swept++ }
   }
   // what SQLite's trim() and date() tolerate and V8 does not (and back): both twins must refuse the same text
-  for (const value of ['\t2026-09-12', '2026-09-12\n', ' 08/24/2026', '08/24/2026\t', '2026-09-12 10:00:00\n', '2026-09-1210:00:00', '2026-09-12TT10:00',
+  for (const value of ['\t2026-09-12', '2026-09-12\n', '\u00a008/24/2026', '08/24/2026\t', '2026-09-12 10:00:00\n', '2026-09-1210:00:00', '2026-09-12TT10:00',
     '2026-09-12T23:30:00+0700', '2026-09-12T23:30:00 Z', '2026-09-12T23:30:00 +07:00', '2026-09-12  10:00', '2026-09-12T1:00Z', '１２/01/2026']) {
     assert.equal(day.get(value).d, parent.cutoverLotBusinessDay(value), JSON.stringify(value))
   }
