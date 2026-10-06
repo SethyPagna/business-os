@@ -106,6 +106,8 @@ const saleBulkStatus = compile('saleBulkStatus.ts', {
   '../index': {},
   './auth': {},
   './permissions': { getActionTier: () => 'full', isAdminControlUser: () => true },
+  // N9 (SEC-SALES): lost-fee Expenses rule; only saleRevisionGuard is used here.
+  './cancelFeeRules': {},
   './sqlBinding': { D1_MAX_BOUND_PARAMS: 100 },
   './salesStatus': salesStatus,
   './saleTransitions': saleTransitions,
