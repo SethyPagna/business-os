@@ -75,6 +75,8 @@ const NAMED_COMPANIONS = {
   // idempotency, immutability outside restore and the documented recovery,
   // then drives the close/report routes that write and read it.
   237: 'test-shift-close-figures-pure.cjs',
+  // 0240 recreates the product_batches update trigger so a label-only write (received_branch_name) is revision-neutral.
+  240: 'test-stock-revision-ignores-batch-label-native.cjs',
 }
 
 function listMigrationNumbers() {

@@ -149,7 +149,7 @@ runTest('no refusal literal in the sale or expense routes names the Shop or the 
     assert.deepEqual(named, [], `${rel} has refusal sentences that name a branch`)
   }
   const sales = src('routes/sales.ts')
-  assert.equal((sales.match(/NOT_SELLING_BRANCH_BODY, 400\)/g) || []).length, 8)
+  assert.equal((sales.match(/NOT_SELLING_BRANCH_BODY, 400\)/g) || []).length, 9) // LI's eight plus the retired-sale-header-with-no-selling-successor refusal LC added to the amend path
   assert.equal((sales.match(/SALE_BRANCH_MISMATCH_BODY, 400\)/g) || []).length, 4)
   assert.doesNotMatch(sales, /SHOP_ONLY_SALE_ERROR/)
 })
