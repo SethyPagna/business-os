@@ -19,18 +19,3 @@ This folder contains the React SPA used by Business OS.
 2. Components should call `api/methods.ts` rather than custom fetch calls; `methods.ts` remains the large domain registry while transport, websocket, local cache, and browser bootstrap code migrate to TypeScript.
 3. User-facing strings should use translation keys in both `en.json` and `km.json`.
 4. New pages should include permission-aware UI, loading/error states, and responsive layouts.
-
-## Documentation Output
-
-Generated references live in `ops/docs/reference/`:
-
-- `FRONTEND-FUNCTION-REFERENCE.md`
-- `ALL-FUNCTION-REFERENCE.md`
-- `PERFORMANCE-SCAN.md`
-
-Regenerate them with:
-
-```bash
-node ops/scripts/docs/generate-doc-reference.ts
-npm --prefix ops run phase29:audit:repeat
-```
