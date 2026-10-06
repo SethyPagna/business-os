@@ -151,6 +151,7 @@ const inventoryRequire = (id) => {
   if (id === '../lib/productIdentity') return { findIdentityMatch: asyncNoop, identityBarcodeKey: noop }
   if (id === '../lib/searchMatch') return { buildIssueStateClauses: noop, buildLikeAliasClause: noop, runFuzzyFallbackMatch: asyncNoop, tokenizeSearchTermGroups: noop, tokenizeSearchWords: noop }
   if (id === '../lib/productSearchQuery') return { buildFamilyRelevanceOrderSql: noop, buildProductSearchQuery: noop }
+  if (id === '../lib/productSearchDocQuery') return { prepareProductSearchDocFromQuery: async () => undefined }
   if (id === '../lib/stockRevert') return { applyMovementRevert: asyncNoop }
   if (id === '../lib/movementCostSnapshot') return movementCostSnapshot
   if (id === '../lib/batchCode') return { ...batchCode, normalizeTypedDate: noop }

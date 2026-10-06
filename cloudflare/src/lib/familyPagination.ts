@@ -154,6 +154,16 @@ export interface FamilyPaginationOptions {
   // search/filter match" (that's still `whereSql`'s job, for deciding
   // which *families* qualify and how they're paged/ranked).
   familyMemberBaseWhereSql?: string
+  // Evaluate `matched` once (a MATERIALIZED CTE) instead of letting SQLite
+  // inline it into every statement part that names it. For a search whose match
+  // set is already bounded by an index (lib/productSearchQuery.ts: the ranked ids
+  // and the stored search document) that is the difference between reading the
+  // matches once and re-running the index lookup and the row probes for each
+  // reference, or, for a caller that joins branch_stock, scanning the whole
+  // branch to join the ranking back. Left off for plain browsing, where
+  // `matched` is the whole catalog and every select column would be computed
+  // for all of it.
+  materializeMatched?: boolean
 }
 
 export interface FamilyPaginationResult<T> {
@@ -164,7 +174,7 @@ export interface FamilyPaginationResult<T> {
   totalPages: number
 }
 
-function buildCtes(opts: Pick<FamilyPaginationOptions, 'selectColumns' | 'joinSql' | 'whereSql' | 'matchRankSql' | 'rankCteSql' | 'matchTierSql' | 'familyMemberBaseWhereSql' | 'promotedRankSql' | 'familySortValueSql'>) {
+function buildCtes(opts: Pick<FamilyPaginationOptions, 'selectColumns' | 'joinSql' | 'whereSql' | 'matchRankSql' | 'rankCteSql' | 'matchTierSql' | 'familyMemberBaseWhereSql' | 'promotedRankSql' | 'familySortValueSql' | 'materializeMatched'>) {
   const matchRankSelect = opts.matchRankSql ? `, (${opts.matchRankSql}) AS __match_rank` : ''
   const matchRankAgg = opts.matchRankSql ? ', MIN(__match_rank) AS match_rank' : ''
   const matchTierSelect = opts.matchTierSql ? `, (${opts.matchTierSql}) AS __match_tier` : ''
@@ -190,7 +200,7 @@ function buildCtes(opts: Pick<FamilyPaginationOptions, 'selectColumns' | 'joinSq
     : ''
   return `
     WITH ${opts.rankCteSql ? `${opts.rankCteSql},` : ''}
-    matched AS (
+    matched AS ${opts.materializeMatched ? 'MATERIALIZED ' : ''}(
       SELECT ${opts.selectColumns},
              ${FAMILY_ROOT_KEY_SQL} AS __family_root_id,
              lower(trim(COALESCE(parent.name, p.name))) AS __family_name,

@@ -133,6 +133,7 @@ const productWrites = loadReal('lib/productWrites.ts', { './schemaProbe': schema
   './importImageMatch': importImageMatch,
   './batchCode': batchCode,
   './searchMatch': searchMatch,
+  './productSearchDocColumns': { productSearchDocColumns: () => ({ search_doc: '', search_doc_version: 1 }) },
 })
 
 const FAKE_USER = { id: 1, username: 'tester', name: 'Test User', permissions: JSON.stringify({ products: true }) }
@@ -240,6 +241,7 @@ const productsRoute = loadReal('routes/products.ts', {
   // from -- loaded for real (it is pure SQL-string assembly over searchMatch,
   // which is itself loaded for real here).
   '../lib/productSearchQuery': loadReal('lib/productSearchQuery.ts', { './searchMatch': searchMatch }),
+  '../lib/productSearchDocQuery': { prepareProductSearchDocFromQuery: async () => undefined },
   '../lib/familyPagination': loadReal('lib/familyPagination.ts'),
   '../lib/fileAssets': { getMediaType: () => 'image', buildUniqueStoredName: (n) => n, sanitizeOriginalFileName: (n) => n },
   '../lib/catalogText': { normalizeCatalogText: (v) => v, hasSuspiciousCatalogText: () => false },

@@ -155,6 +155,7 @@ const branchRoute = loadModule('routes/branches.ts', (id) => {
   if (id === '../lib/canonicalBranchIdentity') return identity
   if (id === '../lib/branchRoleGuards') return branchGuards
   if (id === '../lib/productSearchQuery') return { buildFamilyRelevanceOrderSql: noop, buildProductSearchQuery: noop }
+  if (id === '../lib/productSearchDocQuery') return { prepareProductSearchDocFromQuery: async () => undefined }
   if (id === '../lib/actorSnapshot') return { actorSnapshot: (user) => user?.name || null }
   if (id === '../index') return {}
   // REAL guard statement: it is appended to every branch write batch and its

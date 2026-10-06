@@ -33,6 +33,7 @@ import { bumpVersion } from '../lib/cache'
 import { findIdentityMatch, identityBarcodeKey, type ProductIdentityRow } from '../lib/productIdentity'
 import { buildIssueStateClauses, buildLikeAliasClause, tokenizeSearchWords } from '../lib/searchMatch'
 import { buildFamilyRelevanceOrderSql, buildProductSearchQuery, parseRankedIds } from '../lib/productSearchQuery'
+import { prepareProductSearchDocFromQuery, type ProductSearchDocPlan } from '../lib/productSearchDocQuery'
 import { fifoRemovalAllocations, isStockRemovalConflict, listBatchesForProduct, parseReceiptSellingPrice, planBranchStockRemoval, planReceiptSellingPrice, planReceiveBatchStock, planRemoveStockAcrossBatches, prepareReceiptLotTarget, receiveBatchStock, restoreBatchStockStatements, removeStockFromBatch, InsufficientBatchStockError, type ReceiptCostPreimage, type ReceiptLotTarget, type ReceiptSellingPriceRow, type StockWriteStatement } from '../lib/productBatches'
 import { applyMovementRevert, type RevertMovementRow } from '../lib/stockRevert'
 import { normalizeTypedDate } from '../lib/batchCode'
@@ -335,7 +336,7 @@ export async function attachInventoryProductMetrics(
   }
 }
 
-function appendInventoryProductFilters(query: InventoryFilterQuery, lowStock: LowStockConfig) {
+function appendInventoryProductFilters(query: InventoryFilterQuery, lowStock: LowStockConfig, searchDoc?: ProductSearchDocPlan) {
   const where = ['p.is_active = 1']
   const params: Record<string, unknown> = {}
   const joins: string[] = []
@@ -361,8 +362,9 @@ function appendInventoryProductFilters(query: InventoryFilterQuery, lowStock: Lo
     mode: query.searchMode || query.search_mode,
     titleOnly: ['name', 'title'].includes(String(query.searchFields || query.search_fields || '').toLowerCase()),
     rankedIds: parseRankedIds(query.rankIds, query.rankTiers),
+    searchDoc,
   })
-  const { matchRankSql, rankCteSql, matchTierSql, titleOnly } = searchQuery
+  const { matchRankSql, rankCteSql, matchTierSql, titleOnly, materializeMatched } = searchQuery
   const searchWhereClause = searchQuery.whereClause
   if (searchQuery.activeWhereSql) where[0] = searchQuery.activeWhereSql
 
@@ -462,7 +464,7 @@ function appendInventoryProductFilters(query: InventoryFilterQuery, lowStock: Lo
 
   if (searchWhereClause) where.push(searchWhereClause)
 
-  return { where, joins, params, stockExpr, matchRankSql, rankCteSql, matchTierSql, titleOnly }
+  return { where, joins, params, stockExpr, matchRankSql, rankCteSql, matchTierSql, titleOnly, materializeMatched }
 }
 
 async function getInventoryProductMetadata(env: Env, query: InventoryFilterQuery) {
@@ -558,8 +560,8 @@ async function searchProductsPayload(env: Env, query: Record<string, string>) {
   const includeMetadata = String(query.metadata ?? '1') !== '0'
   const metadataOnly = ['1', 'true', 'yes'].includes(String(query.metadataOnly ?? query.metadata_only ?? '').trim().toLowerCase())
   const db = getDb(env)
-  const filters = appendInventoryProductFilters(query, await loadLowStockConfig(env))
-  const { where, joins, params, matchRankSql, rankCteSql, matchTierSql } = filters
+  const filters = appendInventoryProductFilters(query, await loadLowStockConfig(env), await prepareProductSearchDocFromQuery(env, query))
+  const { where, joins, params, matchRankSql, rankCteSql, matchTierSql, materializeMatched } = filters
   const joinSql = joins.join('\n')
   const whereSql = `WHERE ${where.join(' AND ')}`
 
@@ -603,6 +605,7 @@ async function searchProductsPayload(env: Env, query: Record<string, string>) {
       joinSql,
       whereSql,
       params,
+      materializeMatched,
       page,
       pageSize,
       familyOrderSql: effectiveFamilyOrderSql,
@@ -879,7 +882,7 @@ function buildInventoryFinancialJoinSql(branchScoped: boolean): string {
 app.get('/stats', async (c) => {
   const query = c.req.query() as InventoryFilterQuery
   const lowStock = await loadLowStockConfig(c.env)
-  const { where, joins, params, stockExpr } = appendInventoryProductFilters(query, lowStock)
+  const { where, joins, params, stockExpr } = appendInventoryProductFilters(query, lowStock, await prepareProductSearchDocFromQuery(c.env, query))
   const joinSql = joins.join('\n')
   const whereSql = `WHERE ${where.join(' AND ')}`
   const branchScoped = Number.isFinite(Number(params.branchId))

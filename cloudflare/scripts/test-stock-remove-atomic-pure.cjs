@@ -277,6 +277,7 @@ const inventoryRoute = loadReal('routes/inventory.ts', {
     buildProductSearchQuery: () => ({ hasSearchTerm: false, titleOnly: false }),
     buildFamilyRelevanceOrderSql: (tail) => tail,
   },
+  '../lib/productSearchDocQuery': { prepareProductSearchDocFromQuery: async () => undefined },
   '../lib/searchMatch': {
     buildFtsMatchExpression: () => "''",
     buildHybridMatchClause: () => '1=1',

@@ -99,6 +99,7 @@ import {
   normalizeSearchText,
 } from '../lib/searchMatch'
 import { buildFamilyRelevanceOrderSql, buildProductSearchQuery, parseRankedIds } from '../lib/productSearchQuery'
+import { prepareProductSearchDocFromQuery, type ProductSearchDocPlan } from '../lib/productSearchDocQuery'
 import { omitUnchangedProductImageFields, productImageFieldsChanged, productImageFieldsChangedResolved, resolveProductImageFields, ProductImageAssetError } from '../lib/productImagePermission'
 import type { Env } from '../index'
 
@@ -570,7 +571,7 @@ async function attachImageGallery(env: Env, products: Array<Record<string, unkno
   })
 }
 
-type ProductSearchOptions = { useSearchIndex?: boolean }
+type ProductSearchOptions = { useSearchIndex?: boolean; searchDoc?: ProductSearchDocPlan }
 
 // The other half of the "group search hides sibling child rows" fix (see
 // familyMemberBaseWhereSql in familyPagination.ts for the parent_id-linked
@@ -798,8 +799,9 @@ async function searchProductsPayload(env: Env, query: Record<string, string>, op
         .then(rows => rows.map(row=>normalizePromotionRule(row,1)).filter((rule):rule is PromotionRule=>Boolean(rule && isRuleActive(rule))))
       : loadActivePromotionRules(db),
   ])
-  const filters = buildSearchFilters(query, lowStockConfig, options)
-  const { where, joins, params, matchRankSql, rankCteSql, matchTierSql, hasSearchTerm, familyMemberWhereSql } = filters
+  const searchDoc = options.useSearchIndex === false ? undefined : await prepareProductSearchDocFromQuery(env, query)
+  const filters = buildSearchFilters(query, lowStockConfig, { ...options, searchDoc })
+  const { where, joins, params, matchRankSql, rankCteSql, matchTierSql, hasSearchTerm, familyMemberWhereSql, materializeMatched } = filters
   const promotedRankSql = `CASE WHEN ${productPromotedSql(promotionRules, params)} THEN 1 ELSE 0 END`
   const promoFilter = String(query.promo || '').trim().toLowerCase()
   if (promoFilter === 'promoted') {
@@ -867,6 +869,7 @@ async function searchProductsPayload(env: Env, query: Record<string, string>, op
     joinSql,
     whereSql,
     params,
+    materializeMatched,
     page,
     pageSize,
     familyOrderSql: effectiveFamilyOrderSql,
@@ -1046,8 +1049,9 @@ function buildSearchFilters(query: Record<string, string>, lowStock: LowStockCon
     titleOnly: ['name', 'title'].includes(String(query.searchFields || query.search_fields || '').toLowerCase()),
     useSearchIndex: options.useSearchIndex !== false,
     rankedIds: parseRankedIds(query.rankIds, query.rankTiers),
+    searchDoc: options.searchDoc,
   })
-  const { matchRankSql, rankCteSql, matchTierSql, titleOnly, hasSearchTerm, familyMemberWhereSql } = searchQuery
+  const { matchRankSql, rankCteSql, matchTierSql, titleOnly, hasSearchTerm, familyMemberWhereSql, materializeMatched } = searchQuery
   const searchWhereClause = searchQuery.whereClause
   if (searchQuery.activeWhereSql) where[0] = searchQuery.activeWhereSql
 
@@ -1144,12 +1148,12 @@ function buildSearchFilters(query: Record<string, string>, lowStock: LowStockCon
 
   if (searchWhereClause) where.push(searchWhereClause)
 
-  return { where, joins, params, stockExpr, matchRankSql, rankCteSql, matchTierSql, titleOnly, hasSearchTerm, familyMemberWhereSql }
+  return { where, joins, params, stockExpr, matchRankSql, rankCteSql, matchTierSql, titleOnly, hasSearchTerm, familyMemberWhereSql, materializeMatched }
 }
 
 function isProductSearchIndexUnavailable(error: unknown): boolean {
   const message = String((error as Error)?.message || error || '').toLowerCase()
-  return /no such table: products_fts|no such table: products_fts_code|no such table: products_fts_name_trigram|no such module: fts5|unable to use function match/.test(message)
+  return /no such table: products_fts|no such table: products_fts_code|no such table: products_fts_name_trigram|no such table: products_search_fts|no such module: fts5|unable to use function match/.test(message)
 }
 
 async function searchProductsWithIndexFallback(env: Env, query: Record<string, string>) {
@@ -2201,7 +2205,7 @@ app.post('/rename-brand', async (c) => {
 // Secret-shaped column names are dropped by changedFields itself.
 const PRODUCT_AUDIT_EXCLUDED_COLUMNS = new Set([
   'cost_price_usd', 'cost_price_khr',
-  'name_key', 'name_normalized', 'unit_normalized', 'brand_compact',
+  'name_key', 'name_normalized', 'unit_normalized', 'brand_compact', 'search_doc', 'search_doc_version',
   'categories', 'brands', 'is_grouped_cached',
 ])
 

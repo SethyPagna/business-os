@@ -49,6 +49,7 @@ import {
 // restated at each call site.
 import { TRANSFER_DIRECTION_ERROR, transferDirectionError } from '../lib/branchRoleGuards'
 import { buildFamilyRelevanceOrderSql, buildProductSearchQuery, parseRankedIds } from '../lib/productSearchQuery'
+import { prepareProductSearchDocFromQuery, type ProductSearchDocPlan } from '../lib/productSearchDocQuery'
 import type { Env } from '../index'
 import { actorSnapshot } from '../lib/actorSnapshot'
 import { planTransferOperation, transferRefusal } from '../lib/transferOperation'
@@ -829,7 +830,7 @@ function normalizePositiveInt(value: unknown, fallback: number, { min = 1, max =
 // dropped brand/category as free-text dims (see that constant's own
 // comment -- both are already reachable via this page's own filter
 // dropdowns, and stay out of the same-shaped noise problem here too).
-function buildBranchStockWhere(c: any, branchId: number, lowStock: LowStockConfig, { includeStockState = true } = {}) {
+function buildBranchStockWhere(c: any, branchId: number, lowStock: LowStockConfig, { includeStockState = true, searchDoc }: { includeStockState?: boolean; searchDoc?: ProductSearchDocPlan } = {}) {
   const where = ['p.is_active = 1']
   const params: Record<string, unknown> = { branchId }
   // `search` accepted as a third alias alongside query/q, same as
@@ -849,12 +850,13 @@ function buildBranchStockWhere(c: any, branchId: number, lowStock: LowStockConfi
   // (lib/productSearchQuery.ts), so it gains bm25 plus the exact-barcode/
   // exact-name/name-prefix tier, and a future picker cannot be built
   // without them.
-  const searchQuery = buildProductSearchQuery(rawQuery, params, { rankedIds: parseRankedIds(c.req.query('rankIds'), c.req.query('rankTiers')) })
+  const searchQuery = buildProductSearchQuery(rawQuery, params, { rankedIds: parseRankedIds(c.req.query('rankIds'), c.req.query('rankTiers')), searchDoc })
   if (searchQuery.whereClause) where.push(searchQuery.whereClause)
   if (searchQuery.activeWhereSql) where[0] = searchQuery.activeWhereSql
   const matchRankSql = searchQuery.matchRankSql
   const rankCteSql = searchQuery.rankCteSql
   const matchTierSql = searchQuery.matchTierSql
+  const materializeMatched = searchQuery.materializeMatched
   const stockState = String(c.req.query('stockState') || c.req.query('stock_state') || 'positive').toLowerCase()
   if (includeStockState) {
     if (stockState === 'positive' || stockState === 'in_stock') where.push('COALESCE(bs.quantity, 0) > COALESCE(p.out_of_stock_threshold, 0)')
@@ -868,7 +870,7 @@ function buildBranchStockWhere(c: any, branchId: number, lowStock: LowStockConfi
     if (stockState === 'low') where.push(`COALESCE(bs.quantity, 0) > COALESCE(p.out_of_stock_threshold, 0) AND COALESCE(bs.quantity, 0) <= ${lowStockThresholdSql(lowStock, 'p.low_stock_threshold')}`)
     if (stockState === 'out' || stockState === 'out_of_stock') where.push('COALESCE(bs.quantity, 0) <= COALESCE(p.out_of_stock_threshold, 0)')
   }
-  return { where, params, stockState, matchRankSql, rankCteSql, matchTierSql }
+  return { where, params, stockState, matchRankSql, rankCteSql, matchTierSql, materializeMatched }
 }
 
 app.get('/:id/stock', async (c) => {
@@ -910,9 +912,10 @@ app.get('/:id/stock', async (c) => {
   const page = normalizePositiveInt(c.req.query('page'), 1, { min: 1, max: 100000 })
   const pageSize = normalizePositiveInt(c.req.query('pageSize') || c.req.query('page_size'), 20, { min: 1, max: 100 })
   const lowStock = await loadLowStockConfig(c.env)
-  const { where, params, stockState, matchRankSql, rankCteSql, matchTierSql } = buildBranchStockWhere(c, branchId, lowStock)
+  const searchDoc = await prepareProductSearchDocFromQuery(c.env, c.req.query())
+  const { where, params, stockState, matchRankSql, rankCteSql, matchTierSql, materializeMatched } = buildBranchStockWhere(c, branchId, lowStock, { searchDoc })
   const whereSql = `WHERE ${where.join(' AND ')}`
-  const summaryWhere = buildBranchStockWhere(c, branchId, lowStock, { includeStockState: false })
+  const summaryWhere = buildBranchStockWhere(c, branchId, lowStock, { includeStockState: false, searchDoc })
   const summaryWhereSql = `WHERE ${summaryWhere.where.join(' AND ')}`
   // INNER JOIN, not LEFT: a product only "belongs" to this branch's stats/
   // listing once it actually has a branch_stock row here (created by a
@@ -922,7 +925,14 @@ app.get('/:id/stock', async (c) => {
   // brand-new branch with genuinely zero products showed total=out=(every
   // active product in the whole catalog) instead of 0 -- reported as
   // "Branch 2 has no products inside but shows the total of all branches".
-  const branchStockJoinSql = 'JOIN branch_stock bs ON bs.product_id = p.id AND bs.branch_id = @branchId'
+  // A bounded search (ranked ids, stored search document) already names the few
+  // products it wants: the unary plus keeps the planner from walking every
+  // branch_stock row of the branch (the branch_id index) to find them, and
+  // leaves the (product_id, branch_id) probe per matched product. Plain
+  // browsing keeps the branch_id walk, which is the right plan there.
+  const branchStockJoinSql = materializeMatched
+    ? 'JOIN branch_stock bs ON bs.product_id = p.id AND +bs.branch_id = @branchId'
+    : 'JOIN branch_stock bs ON bs.product_id = p.id AND bs.branch_id = @branchId'
 
   // total_products/in_stock/low_stock/out_of_stock/total_value_usd are
   // family-aware (see familyStockStats.ts) so they agree with `total`
@@ -972,6 +982,7 @@ app.get('/:id/stock', async (c) => {
     joinSql: branchStockJoinSql,
     whereSql,
     params,
+    materializeMatched,
     page,
     pageSize,
     // Relevance first (exact barcode, then exact/prefix name, then bm25),

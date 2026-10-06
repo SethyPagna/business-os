@@ -57,6 +57,7 @@ import {
   searchTermBarcodeKeys,
   tokenizeSearchTermGroups,
 } from './searchMatch'
+import type { ProductSearchDocPlan } from './productSearchDocQuery'
 
 export interface ProductSearchQueryOptions {
   // Search mode from the AND/OR toggle. Anything but 'OR' means AND.
@@ -84,6 +85,12 @@ export interface ProductSearchQueryOptions {
   // order (see parseRankedIds). When present the typed text is not matched
   // again here; these ids become the match set and their order the rank.
   rankedIds?: RankedIds
+  // G37 phase 2: the text rewritten for products_search_fts by
+  // lib/productSearchDocQuery.ts prepareProductSearchDoc (async, so the route
+  // prepares it before this synchronous builder runs). When present it
+  // replaces the whole FTS/trigram/LIKE disjunction below; undefined keeps
+  // the legacy clause (storefront, titles-only, no migration/backfill yet).
+  searchDoc?: ProductSearchDocPlan
 }
 
 // ---- ranked ids (G37 phase 1) ------------------------------------------
@@ -157,6 +164,7 @@ function buildRankedIdSearchQuery(ranked: RankedIds, params: Record<string, unkn
     titleOnly,
     whereClause: `p.id IN ${listed}`,
     activeWhereSql: '+p.is_active = 1',
+    materializeMatched: true,
     familyMemberWhereSql: `+p.is_active = 1 AND (p.id IN ${listed} OR p.parent_id IN ${listed} OR p.id IN (SELECT listed.parent_id FROM products listed WHERE listed.id IN ${listed}))`,
     matchRankSql: position,
     matchTierSql: `(CASE WHEN ${position} < @${prefix}rankTierCut1 THEN 0 WHEN ${position} < @${prefix}rankTierCut2 THEN 1 WHEN ${position} < @${prefix}rankTierCut3 THEN 2 WHEN ${position} < @${prefix}rankTierCut4 THEN 3 ELSE 4 END)`,
@@ -193,6 +201,10 @@ export interface ProductSearchQuery {
   // parent/child links, instead of every active product (a full scan per
   // page). Same-name siblings still arrive through the name_key expansion.
   familyMemberWhereSql?: string
+  // The match set is already bounded by an index lookup (ranked ids, stored
+  // search document): pass it to paginateProductFamilies so `matched` is
+  // evaluated once (see FamilyPaginationOptions.materializeMatched).
+  materializeMatched?: boolean
 }
 
 // Relevance tier constants, exported so tests can assert the contract by
@@ -201,6 +213,8 @@ export const MATCH_TIER_EXACT_BARCODE = 0
 export const MATCH_TIER_EXACT_NAME = 1
 export const MATCH_TIER_NAME_PREFIX = 2
 export const MATCH_TIER_OTHER = 3
+// A row that matched only through a typo variant (searchCore SEARCH_TIER_FUZZY).
+export const MATCH_TIER_FUZZY = 4
 
 // The per-statement FTS rank table. bm25() only scores rows the FTS5 table
 // itself matched and must be evaluated inside a query carrying that table's
@@ -240,6 +254,9 @@ function buildMatchTierSql(
     nameColumn: string
     barcodeColumn: string
     includeBarcodeTier: boolean
+    // SQL condition for tier 4 (matched only through a typo variant), tested
+    // after the exact and prefix tiers.
+    fuzzyCondition?: string
   },
 ): string | undefined {
   const nameKey = normalizeSearchText(rawSearchText)
@@ -266,8 +283,82 @@ function buildMatchTierSql(
     // normalizeSearchText has already removed LIKE metacharacters.
     branches.push(`WHEN instr(${normalizedName}, @${opts.prefix}nameExactKey) = 1 THEN ${MATCH_TIER_NAME_PREFIX}`)
   }
+  if (opts.fuzzyCondition) branches.push(`WHEN ${opts.fuzzyCondition} THEN ${MATCH_TIER_FUZZY}`)
   if (!branches.length) return undefined
   return `(CASE ${branches.join(' ')} ELSE ${MATCH_TIER_OTHER} END)`
+}
+
+// ---- stored search document path (G37 phase 2) ---------------------------
+//
+// WHERE: the FTS match, plus (each only when it applies) the barcode/sku
+// trigram probe for a lone 5+ digit fragment, the few active rows whose
+// document is still missing (matched in code with the same core), and the
+// exact-barcode clause for a token that carries a digit. Three to four
+// disjuncts, each a rowid IN-list, and no LIMIT-scan fallbacks: the rows read
+// are the FTS postings plus the returned rows, not the catalog.
+//
+// Rank: bm25 over the one document column, computed once per statement in the
+// materialized __fts_rank (same contract as the legacy path). Tier 4 is a row
+// in __fts_rank but not in __fts_strict (the same expression without typo
+// variants), i.e. one that only a typo variant reached.
+export const PRODUCTS_SEARCH_FTS_BM25_SQL = 'bm25(products_search_fts)'
+const FTS_STRICT_CTE_NAME = '__fts_strict'
+
+function buildSearchDocQuery(
+  plan: ProductSearchDocPlan,
+  rawSearchText: string,
+  params: Record<string, unknown>,
+  opts: { prefix: string; nameNormalizedColumn: string; nameColumn: string; barcodeColumn: string },
+): ProductSearchQuery {
+  const { prefix } = opts
+  const clauses: string[] = []
+  params[`${prefix}sdMatch`] = plan.match
+  clauses.push(`p.id IN (SELECT rowid FROM products_search_fts WHERE products_search_fts MATCH @${prefix}sdMatch)`)
+  if (plan.codeDigits) {
+    params[`${prefix}sdCode`] = `"${plan.codeDigits}"`
+    clauses.push(`p.id IN (SELECT rowid FROM products_fts_code WHERE products_fts_code MATCH @${prefix}sdCode)`)
+  }
+  if (plan.missingIds.length) {
+    params[`${prefix}sdMissing`] = JSON.stringify(plan.missingIds)
+    clauses.push(`p.id IN (SELECT CAST(value AS INTEGER) FROM json_each(@${prefix}sdMissing))`)
+  }
+  const exactBarcodeMatch = plan.barcodeLookup
+    ? buildExactBarcodeMatchClause(rawSearchText, params, `${prefix}barcodeKey`, opts.barcodeColumn)
+    : undefined
+  if (exactBarcodeMatch) clauses.unshift(exactBarcodeMatch)
+
+  let rankCteSql = `${FTS_RANK_CTE_NAME} AS MATERIALIZED (SELECT rowid AS id, ${PRODUCTS_SEARCH_FTS_BM25_SQL} AS bm25_rank FROM products_search_fts WHERE products_search_fts MATCH @${prefix}sdMatch)`
+  let fuzzyCondition: string | undefined
+  if (plan.strictMatch) {
+    params[`${prefix}sdStrict`] = plan.strictMatch
+    rankCteSql += `, ${FTS_STRICT_CTE_NAME} AS MATERIALIZED (SELECT rowid AS id FROM products_search_fts WHERE products_search_fts MATCH @${prefix}sdStrict)`
+    fuzzyCondition = `p.id IN (SELECT id FROM ${FTS_RANK_CTE_NAME}) AND p.id NOT IN (SELECT id FROM ${FTS_STRICT_CTE_NAME})`
+  }
+  let matchRankSql = `COALESCE((SELECT ${FTS_RANK_CTE_NAME}.bm25_rank FROM ${FTS_RANK_CTE_NAME} WHERE ${FTS_RANK_CTE_NAME}.id = p.id), 0)`
+  if (exactBarcodeMatch) matchRankSql = `(${buildExactBarcodeRankSql(`${prefix}barcodeKey`, opts.barcodeColumn)} + ${matchRankSql})`
+
+  // family_members (products.ts) would otherwise be every active row: list the
+  // matched rows and their parent/child links, the same narrowing the ranked
+  // path uses. Same-name siblings still arrive through the name_key expansion.
+  const matchedIds = '(SELECT id FROM matched)'
+  return {
+    hasSearchTerm: true,
+    titleOnly: false,
+    whereClause: clauses.length > 1 ? `(${clauses.join(' OR ')})` : clauses[0],
+    activeWhereSql: '+p.is_active = 1',
+    materializeMatched: true,
+    familyMemberWhereSql: `+p.is_active = 1 AND (p.id IN ${matchedIds} OR p.parent_id IN ${matchedIds} OR p.id IN (SELECT listed.parent_id FROM products listed WHERE listed.id IN ${matchedIds}))`,
+    matchRankSql,
+    rankCteSql,
+    matchTierSql: buildMatchTierSql(rawSearchText, params, {
+      prefix,
+      nameNormalizedColumn: opts.nameNormalizedColumn,
+      nameColumn: opts.nameColumn,
+      barcodeColumn: opts.barcodeColumn,
+      includeBarcodeTier: plan.barcodeLookup,
+      fuzzyCondition,
+    }),
+  }
 }
 
 // Builds the product-search WHERE disjunction and both ordering
@@ -294,6 +385,9 @@ export function buildProductSearchQuery(
   const mode = String(options.mode || 'AND').toUpperCase() === 'OR' ? 'OR' : 'AND'
   const termGroups = tokenizeSearchTermGroups(rawSearchText, 6, 8)
   if (!termGroups.length) return { hasSearchTerm: false, titleOnly }
+  if (options.searchDoc && options.useSearchIndex !== false && !titleOnly) {
+    return buildSearchDocQuery(options.searchDoc, rawSearchText, params, { prefix, nameNormalizedColumn, nameColumn, barcodeColumn })
+  }
 
   // A checked UPC-E/UPC-A query is an exact scanner lookup. Letting it also
   // enter FTS/trigram matching would re-admit an unrelated seven-digit
