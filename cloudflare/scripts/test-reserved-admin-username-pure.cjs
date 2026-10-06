@@ -14,8 +14,9 @@
 // over in-memory SQLite: "admin" (after lower(trim())) is refused as a new or
 // changed username on every writer, except the row already holding it may
 // keep it.
-// Part C: the two sales.ts cashier-filter gates that re-implemented the old
-// username rule inline now delegate to isAdminControlUser.
+// Part C: the sales.ts cashier-filter gates that re-implemented the old
+// username rule inline now delegate to isAdminControlUser -- the id filter and,
+// since N16 (SEC-SALES), the name filter, on both the list and the stats route.
 //
 // Run: node scripts/test-reserved-admin-username-pure.cjs
 
@@ -196,7 +197,7 @@ const RESERVED_SPELLINGS = ['admin', 'Admin', ' ADMIN ', 'aDmIn']
     const salesSrc = fs.readFileSync(path.join(__dirname, '..', 'src', 'routes', 'sales.ts'), 'utf8')
     assert.equal(/username\s*===\s*'admin'/.test(salesSrc), false, "no inline username === 'admin' admin check may remain")
     const gates = salesSrc.split('Administrator access required for cashier user filters.').length - 1
-    assert.equal(gates, 2, 'both cashier-filter gates still exist')
+    assert.equal(gates, 4, 'the id and name cashier-filter gates exist on both the list and stats routes')
     for (const at of [...salesSrc.matchAll(/Administrator access required for cashier user filters\./g)].map((m) => m.index)) {
       assert.match(salesSrc.slice(at - 300, at), /isAdminControlUser\(user\)/)
     }
