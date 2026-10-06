@@ -106,6 +106,10 @@ export function portalMemberPurgeWhere(hasIdentityTable: boolean): string {
 // One bounded slice, four D1 queries: the Free plan allows 50 per invocation
 // and the other steps of this sweep share them. The sweep runs every ~5 hours,
 // so 200 a run is far above what this shop's sign-ups can accumulate.
+// The close also drops each member's sign-in identities and open Telegram
+// handshakes: migration 0232's trigger portal_accounts_close_drops_identities
+// runs inside the UPDATE below (owner ruling, 6 Oct 2026), so it costs no
+// extra query and no close path, this one or a later one, can skip it.
 export async function purgeInactivePortalMembers(db: Db): Promise<number> {
   const identityTable = await db.prepare(
     "SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = 'portal_login_identities' LIMIT 1",

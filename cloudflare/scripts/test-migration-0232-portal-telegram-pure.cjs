@@ -11,11 +11,14 @@
 //     only 64-hex hashes fit, provider and status are closed sets);
 //   - no LIKE/GLOB pattern over 50 bytes (native D1's limit) and no statement
 //     with more than 100 bound parameters (D1's limit; the file binds none);
+//   - closing a member (status -> 'closed') deletes its identities and open
+//     challenges in the same statement, and a failed close keeps them;
 //   - the documented RECOVERY statements drop exactly what 0232 created.
-// Mutant control: the same file without the partial UNIQUE index lets a
-// member hold two Telegram accounts, and the constraint check catches it.
+// Mutant controls: the same file without the partial UNIQUE index lets a
+// member hold two Telegram accounts; without the close trigger a closed
+// member keeps its Telegram link. Both are caught.
 // The Worker flows on these tables are test-portal-telegram-signin-pure.cjs
-// (node SQLite, 19 scenarios with mutants) and test-portal-telegram-native.cjs
+// (node SQLite, scenarios with mutants) and test-portal-telegram-native.cjs
 // (workerd D1).
 //
 // Run (from cloudflare/): node scripts/test-migration-0232-portal-telegram-pure.cjs
@@ -30,6 +33,7 @@ const dir = path.join(__dirname, '..', 'migrations')
 const NAME = '0232_portal_telegram_identities.sql'
 const SQL = fs.readFileSync(path.join(dir, NAME), 'utf8')
 const TABLES = ['portal_login_identities', 'portal_telegram_challenges']
+const TRIGGER = 'portal_accounts_close_drops_identities'
 const INDEXES = ['idx_portal_login_identities_account', 'idx_portal_login_identities_one_telegram',
   'idx_portal_telegram_challenges_user', 'idx_portal_telegram_challenges_expires']
 
@@ -73,12 +77,13 @@ check('the header PRE-ASSERTIONS hold on the chain through 0231', () => {
   for (const { sql, expected } of headerAssertions('PRE-ASSERTIONS')) assert.equal(Number(scalar(db, sql)), expected, sql)
 })
 
-check('apply: both tables and all four indexes; the header POST-ASSERTIONS hold; no row written', () => {
+check('apply: both tables, all four indexes and the close trigger; the header POST-ASSERTIONS hold; no row written', () => {
   const db = before0232()
   db.exec(SQL)
   for (const { sql, expected } of headerAssertions('POST-ASSERTIONS')) assert.equal(Number(scalar(db, sql)), expected, sql)
   const names = db.prepare("SELECT name FROM sqlite_master WHERE tbl_name IN ('portal_login_identities', 'portal_telegram_challenges') AND name NOT LIKE 'sqlite_%' ORDER BY name").all({}).map((r) => r.name)
   assert.deepEqual(names, [...INDEXES, ...TABLES].sort())
+  assert.deepEqual(db.prepare("SELECT name, tbl_name FROM sqlite_master WHERE type = 'trigger' AND name = @n").all({ n: TRIGGER }).map((r) => ({ ...r })), [{ name: TRIGGER, tbl_name: 'portal_accounts' }])
 })
 
 check('idempotent: a second run changes nothing and raises nothing', () => {
@@ -122,10 +127,58 @@ check('mutant control: without the partial UNIQUE index a member could hold two 
   assert.throws(() => constraintsHold(db), /one Telegram account per member/)
 })
 
+// A member, its Telegram link, an attach challenge, a sign-in its Telegram
+// user started, and a bystander whose rows must survive.
+function seedClose(db) {
+  const account = (id, status) => db.prepare(`INSERT INTO portal_accounts (id, name, phone, password_hash, status, member_code)
+    VALUES (@id, 'M', @phone, NULL, @status, @code)`).run({ id, status, phone: `0121000${id}`, code: `W-AB${id}-CD${id}` })
+  account(41, 'active'); account(42, 'active')
+  const identity = (a, provider, subject) => db.prepare('INSERT INTO portal_login_identities (account_id, provider, subject_key, verified_at) VALUES (@a, @p, @s, CURRENT_TIMESTAMP)').run({ a, p: provider, s: subject })
+  identity(41, 'telegram', '700041'); identity(41, 'email', 'k41'); identity(42, 'telegram', '700042')
+  let n = 0
+  const challenge = (purpose, account, tg) => db.prepare(`INSERT INTO portal_telegram_challenges (nonce_hash, browser_hash, purpose, account_id, status, telegram_user_id, expires_at)
+    VALUES (@n, @b, @purpose, @account, 'started', @tg, '2999-01-01 00:00:00.000')`).run({ n: String(++n).padStart(64, 'a'), b: 'b'.repeat(64), purpose, account, tg })
+  challenge('attach', 41, null); challenge('signin', null, '700041'); challenge('attach', 42, '700042'); challenge('signin', null, '700099')
+}
+const rowsOf = (db) => ({
+  identities: db.prepare('SELECT account_id, provider FROM portal_login_identities ORDER BY account_id, provider').all({}).map((r) => `${r.account_id}:${r.provider}`),
+  challenges: db.prepare('SELECT COALESCE(account_id, telegram_user_id) AS k FROM portal_telegram_challenges ORDER BY id').all({}).map((r) => String(r.k)),
+})
+
+function closeDropsIdentities(sql) {
+  const db = before0232()
+  db.exec(sql)
+  seedClose(db)
+  // A close that fails part-way (a later statement in the same batch throws)
+  // keeps everything: the deletes ride inside the close.
+  assert.throws(() => db.exec("BEGIN; UPDATE portal_accounts SET status = 'closed', phone = NULL WHERE id = 41; SELECT RAISE(ABORT, 'later statement failed'); COMMIT;"))
+  try { db.exec('ROLLBACK') } catch { /* already rolled back */ }
+  assert.deepEqual(rowsOf(db), { identities: ['41:email', '41:telegram', '42:telegram'], challenges: ['41', '700041', '42', '700099'] })
+  // Suspend is not a close: nothing is dropped.
+  db.exec("UPDATE portal_accounts SET status = 'suspended' WHERE id = 41")
+  assert.equal(rowsOf(db).identities.length, 3, 'a suspension keeps the link')
+  // The close, as lib/ephemeralRetention.ts writes it.
+  db.exec("UPDATE portal_accounts SET status = 'closed', phone = NULL WHERE id IN (41)")
+  assert.deepEqual(rowsOf(db), { identities: ['42:telegram'], challenges: ['42', '700099'] }, 'the closed member lost its link and handshakes; the bystander kept its own')
+  // Re-closing or editing a closed row is harmless.
+  db.exec("UPDATE portal_accounts SET status = 'closed' WHERE id = 41")
+  assert.deepEqual(rowsOf(db).identities, ['42:telegram'])
+}
+
+check('close: a closed member loses its identities and open challenges in the same statement; a failed close keeps them', () => {
+  closeDropsIdentities(SQL)
+})
+
+check('mutant control: without the close trigger a closed member keeps its Telegram link', () => {
+  const mutant = SQL.replace(/CREATE TRIGGER IF NOT EXISTS portal_accounts_close_drops_identities[\s\S]*?\nEND;\n/, '')
+  assert.notEqual(mutant, SQL, 'the mutant edit applied')
+  assert.throws(() => closeDropsIdentities(mutant), /the closed member lost its link/)
+})
+
 check('native D1 limits: no LIKE/GLOB pattern over 50 bytes, no bound parameter at all', () => {
   const db = before0232()
   db.exec(SQL)
-  for (const row of db.prepare("SELECT name, sql FROM sqlite_master WHERE tbl_name IN ('portal_login_identities', 'portal_telegram_challenges') AND sql IS NOT NULL").all({})) {
+  for (const row of db.prepare("SELECT name, sql FROM sqlite_master WHERE (tbl_name IN ('portal_login_identities', 'portal_telegram_challenges') OR name = @t) AND sql IS NOT NULL").all({ t: TRIGGER })) {
     for (const match of row.sql.matchAll(/\b(?:LIKE|GLOB)\s+'([^']*)'/gi)) assert.ok(Buffer.byteLength(match[1]) <= 50, `${row.name}: ${match[1]}`)
   }
   const statements = SQL.split('\n').filter((line) => !line.startsWith('--')).join('\n')
@@ -137,8 +190,8 @@ check('RECOVERY: the documented drops remove exactly what 0232 created', () => {
   const objects = () => db.prepare("SELECT name FROM sqlite_master ORDER BY name").all({}).map((r) => r.name)
   const pre = objects()
   db.exec(SQL)
-  const drops = [...SQL.matchAll(/^--\s+(DROP TABLE IF EXISTS \w+;)/gm)].map((m) => m[1])
-  assert.equal(drops.length, 2)
+  const drops = [...SQL.matchAll(/^--\s+(DROP (?:TABLE|TRIGGER) IF EXISTS \w+;)/gm)].map((m) => m[1])
+  assert.equal(drops.length, 3)
   for (const drop of drops) db.exec(drop)
   assert.deepEqual(objects(), pre)
 })

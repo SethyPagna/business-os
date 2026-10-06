@@ -24,6 +24,14 @@
 --   Neither table is in BACKUP_TABLES or FACTORY_RESET_TABLES, matching
 --   portal_accounts (G38 P1 open question 3).
 --
+--   portal_accounts_close_drops_identities (owner ruling, 6 Oct 2026): when a
+--   member is closed -- by the 180-day purge today, by any later self-close or
+--   staff path -- its sign-in identities (the Telegram link) and any open
+--   handshake (its attach challenges, and sign-ins started by its Telegram
+--   user) are deleted INSIDE the same UPDATE, so no close path can forget it
+--   and a failed close keeps them. The freed Telegram account may then join as
+--   a NEW member; the closed row can never be signed into or attached to again.
+--
 -- PRE-ASSERTIONS (read-only)
 --   SELECT COUNT(*) FROM sqlite_master
 --     WHERE name IN ('portal_login_identities', 'portal_telegram_challenges');  -- 0
@@ -36,6 +44,8 @@
 --   SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name IN (
 --     'idx_portal_login_identities_account', 'idx_portal_login_identities_one_telegram',
 --     'idx_portal_telegram_challenges_user', 'idx_portal_telegram_challenges_expires');  -- 4
+--   SELECT COUNT(*) FROM sqlite_master WHERE type = 'trigger'
+--     AND name = 'portal_accounts_close_drops_identities';  -- 1
 --
 -- IDEMPOTENCE: every object is IF NOT EXISTS and the file writes no rows, so
 -- re-running it changes nothing.
@@ -44,6 +54,7 @@
 --   Roll the Worker back first: the new Worker reads both tables on every
 --   Telegram sign-in, and the staff Members list reads portal_login_identities
 --   for the Verified chip. Then, as a forward migration if the tables must go:
+--     DROP TRIGGER IF EXISTS portal_accounts_close_drops_identities;
 --     DROP TABLE IF EXISTS portal_telegram_challenges;
 --     DROP TABLE IF EXISTS portal_login_identities;
 --   Dropping portal_telegram_challenges loses nothing (10-minute rows).
@@ -89,3 +100,14 @@ CREATE INDEX IF NOT EXISTS idx_portal_telegram_challenges_user
   ON portal_telegram_challenges (telegram_user_id, status) WHERE telegram_user_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_portal_telegram_challenges_expires
   ON portal_telegram_challenges (expires_at);
+
+CREATE TRIGGER IF NOT EXISTS portal_accounts_close_drops_identities
+AFTER UPDATE OF status ON portal_accounts
+WHEN NEW.status = 'closed' AND OLD.status <> 'closed'
+BEGIN
+  DELETE FROM portal_telegram_challenges
+    WHERE account_id = NEW.id
+       OR telegram_user_id IN (
+         SELECT subject_key FROM portal_login_identities WHERE account_id = NEW.id AND provider = 'telegram');
+  DELETE FROM portal_login_identities WHERE account_id = NEW.id;
+END;
