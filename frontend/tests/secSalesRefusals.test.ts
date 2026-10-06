@@ -30,7 +30,7 @@ function loadModule(rel: string): Record<string, any> {
   new Function('module', 'exports', 'require', code)(mod, mod.exports, (request: string) => { throw new Error(`unexpected import ${request}`) })
   return mod.exports
 }
-const { saleSubmitRefusalText } = loadModule('api/saleSubmitErrors.ts')
+const { saleSubmitRefusalText, saleSubmitNeedsBasketReview, saleSubmitShiftRefusal } = loadModule('api/saleSubmitErrors.ts')
 
 // code -> the Worker file that defines the refusal (where the literal lives).
 const REFUSALS: Array<{ code: string; workerFile: string }> = [
@@ -43,6 +43,20 @@ const failures: string[] = []
 function runCase(name: string, body: () => void) {
   try { body(); console.log(`PASS ${name}`) } catch (error) { failures.push(name); console.log(`FAIL ${name}\n  ${String((error as Error)?.message || error)}`) }
 }
+
+// A refused checkout never stays stuck: a refusal the frozen body would meet
+// again releases the cart for review; a shift refusal keeps it for the retry.
+runCase('each refusal says how the till gets the cart moving again', () => {
+  assert.equal(saleSubmitNeedsBasketReview({ code: 'membership_discount_mismatch' }), true)
+  assert.equal(saleSubmitNeedsBasketReview({ code: 'sale_pricing_quote_conflict' }), true)
+  for (const code of ['sale_shift_required', 'sale_shift_closed']) {
+    assert.equal(saleSubmitNeedsBasketReview({ code }), false)
+    assert.equal(saleSubmitShiftRefusal({ code }), code)
+  }
+  assert.equal(saleSubmitShiftRefusal({ code: 'membership_discount_mismatch' }), null)
+  assert.equal(saleSubmitShiftRefusal(null), null)
+  assert.equal(saleSubmitNeedsBasketReview('membership_discount_mismatch'), false)
+})
 
 for (const { code, workerFile } of REFUSALS) {
   runCase(`${code}: the Worker answers it`, () => {

@@ -98,7 +98,7 @@ await runCase('any other error is left to the path\'s own localizing (null)', ()
 
 await runCase('both POS checkout paths restate the refusal before their own fallback', () => {
   const pos = fs.readFileSync(path.join(FRONTEND, 'src', 'components', 'pos', 'POS.tsx'), 'utf8')
-  assert.match(pos, /import \{ saleSubmitRefusalText \} from '\.\.\/\.\.\/api\/saleSubmitErrors\.ts'/)
+  assert.match(pos, /import \{ [^}]*\bsaleSubmitRefusalText\b[^}]* \} from '\.\.\/\.\.\/api\/saleSubmitErrors\.ts'/)
   // Pending-retry path (a saved checkout request retried).
   assert.match(pos, /notify\(saleSubmitRefusalText\(error, t\) \?\? \(getErrorMessage\(error\) === 'money_checkout_recovery_required'/)
   // Fresh submit path: the code is read from the error, not from its message.

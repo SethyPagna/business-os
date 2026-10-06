@@ -119,7 +119,7 @@ setSyncServerUrl('https://shop.test')
 setActor(userA)
 const money = await import('../src/utils/saleMoneyV1.ts')
 // POS.tsx imports it; the extracted callback below runs with the real one.
-const { saleSubmitRefusalText } = await import('../src/api/saleSubmitErrors.ts')
+const { saleSubmitNeedsBasketReview, saleSubmitRefusalText, saleSubmitShiftRefusal } = await import('../src/api/saleSubmitErrors.ts')
 const { assertPosCheckoutOwner } = evaluate(extract(posSource, 'assertPosCheckoutOwner'), ['assertPosCheckoutOwner'], ownership)
 const input = { client_request_id: 'unchanged-request', money_precision_version: 1, items: [{ quantity: 1, applied_price_usd: 2 }], subtotal_usd: 2, total_usd: 2, amount_paid_usd: 2, amount_paid_khr: 0, exchange_rate: 4000, sale_status: 'completed' }
 const frozen = money.frozenSaleCheckoutBody('unchanged-request', undefined, () => ownership.stampOfflineSaleOwner(input))
@@ -152,7 +152,7 @@ async function retry(payload: Record<string, unknown> | undefined, failure: Erro
     createPosSale: async (value: unknown) => { dispatched++; assert.equal(JSON.stringify(value), original); throw failure },
     withLoaderTimeout: (fn: () => unknown) => fn(), POS_CHECKOUT_TIMEOUT_MS: 45000,
     setLoading: () => {}, notify: (message: string) => notifications.push(message), t: (key: string) => key,
-    getErrorMessage: (error: Error) => error.message, saleSubmitRefusalText,
+    getErrorMessage: (error: Error) => error.message, saleSubmitRefusalText, saleSubmitNeedsBasketReview, saleSubmitShiftRefusal,
     closeOrder: () => assert.fail('failed checkout must remain open'),
     setOrders: () => assert.fail('failed checkout must not reset the saved request'),
   })

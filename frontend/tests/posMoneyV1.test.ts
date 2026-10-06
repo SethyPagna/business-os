@@ -17,7 +17,7 @@ import { stagedLineFromSheetPick, stagedLinePricingIntent, mergeStagedAddLine } 
 import { nativeChangeAmounts, sumMoney4, multiplyMoney4, sellingPriceCeilCent, sellingPriceDivideCeilCent } from '../src/utils/moneyPrecision.ts'
 import { applyManualDiscount } from '../src/components/pos/posCore.ts'
 import { normalizeOfflineSaleOwner, offlineSaleOwnersMatch, OFFLINE_OWNER_REVIEW_MESSAGE } from '../src/api/offlineQueueOwnership.ts'
-import { saleSubmitRefusalText } from '../src/api/saleSubmitErrors.ts'
+import { saleSubmitNeedsBasketReview, saleSubmitRefusalText, saleSubmitShiftRefusal } from '../src/api/saleSubmitErrors.ts'
 
 const saved = { id: 17, subtotal_usd: 1.2345, discount_usd: 0, membership_discount_usd: 0, tax_usd: 0, exchange_rate: 4000, amount_paid_usd: 1.23, amount_paid_khr: 0, items: [{ quantity: 1, applied_price_usd: 1.2345, total_usd: 1.2345 }], money_precision_version: 1, calculated_total_usd: 1.2345, rounding_adjustment_usd: -0.0045, total_usd: 1.23, subtotal_khr: 4938, discount_khr: 0, membership_discount_khr: 0, tax_khr: 0, total_khr: 4920, delivery_fee_usd: 0, delivery_fee_khr: 0, change_usd: 0, change_khr: 0 }
 const pricingJson = serializeSaleItemPricing({ version: 1, pool_key: 'callback-pool', evaluation_time: '2026-09-13T00:00:00.000Z', exchange_rate: 4000, rules: [], lines: [{ line_key: 'callback-line', source: 'manual', product: { id: 7, selling_price_usd: 1.24 }, selling_price_input_usd: 1.24, manual: { type: 'fixed', value: 0.0055 } }] }, { 'callback-line': 1 }, 'callback-line', { version: 1, lines: [{ line_key: 'callback-line', amount: 1.2345 }], discount_usd: 0, membership_discount_usd: 0, tax_usd: 0 })
@@ -109,7 +109,7 @@ const pendingBasket = new Function('env', `with(env) { ${transformSync(posSource
 })
 assert.equal(pendingBasket.totals.totalUsd, 29, 'actual pending basket memo never recalculates against current FX/tax/rules')
 async function checkoutProbe(options: { body?: Record<string, unknown>; proof?: unknown; lookupError?: boolean; switchActor?: boolean; writeError?: string }) {
-  const sent: unknown[] = [], printed: unknown[] = [], notices: string[] = [], closed: unknown[] = []
+  const sent: unknown[] = [], printed: unknown[] = [], notices: string[] = [], closed: unknown[] = [], events: string[] = []
   let generation = 1
   const env: any = {
     user: { id: 71, organization_id: null }, assertPosCheckoutOwner,
@@ -124,15 +124,16 @@ async function checkoutProbe(options: { body?: Record<string, unknown>; proof?: 
     canonicalSaleReceipt, frozenSaleCheckoutBody, SaleCheckoutRecoveryRequiredError, isSaleRecorded,
     withLoaderTimeout: (run: () => unknown) => run(), POS_CHECKOUT_TIMEOUT_MS: 100,
     setLoading: () => {}, setReceiptQueue: (update: any) => printed.push(...update([])), closeOrder: (...args: unknown[]) => closed.push(args),
-    loadCatalogData: async () => {}, window: { dispatchEvent: () => {} }, CustomEvent: class {},
+    loadCatalogData: async () => {}, window: { dispatchEvent: (event: { type?: string }) => { events.push(String(event?.type)) } }, CustomEvent: class {},
+    Event: class { type: string; constructor(type: string) { this.type = type } }, SHIFT_STATE_CHANGED_EVENT: 'shift-state-changed',
     t: (key: string) => key, notify: (message: string) => notices.push(message),
     getErrorMessage: (error: Error) => error.message, localizeBranchRuleError: (error: unknown) => error,
     // POS.tsx imports it; the extracted callback runs with the real one.
-    saleSubmitRefusalText,
+    saleSubmitRefusalText, saleSubmitNeedsBasketReview, saleSubmitShiftRefusal,
   }
   const callback = new Function('env', `with(env) { ${callbackCode}; return handleCheckout }`)(env)
   await callback()
-  return { sent, printed, notices, closed, env }
+  return { sent, printed, notices, closed, events, env }
 }
 const idOnly = await checkoutProbe({})
 assert.equal(idOnly.sent.length, 0); assert.deepEqual(idOnly.notices, [OFFLINE_OWNER_REVIEW_MESSAGE])
@@ -150,6 +151,18 @@ const conflict = await checkoutProbe({ body: frozen, writeError: 'sale_pricing_q
 assert.equal(conflict.sent.length, 1)
 assert.equal(conflict.env.reviewState[0].checkoutReviewRequestId, 'request-1')
 assert.deepEqual(conflict.env.reviewState[0].checkoutPayload, frozen)
+// A refused checkout never stays stuck (SEC-SALES verifier, 6 Oct): a basket
+// refusal the same frozen body would meet again releases the cart for review;
+// a shift refusal keeps the cart and re-reads the shift so the prompt comes up.
+const pointsMismatch = await checkoutProbe({ body: frozen, writeError: 'membership_discount_mismatch' })
+assert.equal(pointsMismatch.env.reviewState[0].checkoutReviewRequestId, 'request-1')
+assert.deepEqual(pointsMismatch.events, [])
+for (const writeError of ['sale_shift_required', 'sale_shift_closed']) {
+  const shift = await checkoutProbe({ body: frozen, writeError })
+  assert.equal(shift.env.reviewState, undefined, `${writeError}: the same sale goes through once the shift is open`)
+  assert.deepEqual(shift.events, ['shift-state-changed'], `${writeError}: the till re-reads the shift at once`)
+  assert.equal(shift.closed.length, 0)
+}
 for (const writeError of ['timeout', '403', 'lost acknowledgement']) {
   const unresolved = await checkoutProbe({ body: frozen, writeError })
   assert.equal(unresolved.sent.length, 1)

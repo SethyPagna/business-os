@@ -21,6 +21,42 @@ const SALE_SUBMIT_REFUSAL_KEYS: Readonly<Record<string, string>> = {
 }
 
 /**
+ * Refusals whose fix is the basket itself. The till freezes the checkout body
+ * before sending it, so a retry sends the same body and meets the same
+ * refusal: the cart has to be released for review (POS "Review prices", which
+ * first proves nothing was recorded) or it stays stuck on that sale for good.
+ */
+const SALE_SUBMIT_BASKET_REVIEW_CODES: ReadonlySet<string> = new Set([
+  'sale_pricing_quote_conflict',
+  // N14: the points discount the basket claims is not the configured value.
+  'membership_discount_mismatch',
+])
+
+/**
+ * Refusals answered by the shift, not the basket (N2): the same frozen sale
+ * goes through once today's shift is registered or reopened, so the till
+ * re-reads the shift (bringing up the registration prompt) and keeps the cart.
+ */
+const SALE_SUBMIT_SHIFT_CODES: ReadonlySet<string> = new Set(['sale_shift_required', 'sale_shift_closed'])
+
+function refusalCode(error: unknown): string | null {
+  const code = error && typeof error === 'object' ? (error as { code?: unknown }).code : null
+  return typeof code === 'string' ? code : null
+}
+
+/** True when a refused checkout must be released for review rather than retried as it is. */
+export function saleSubmitNeedsBasketReview(error: unknown): boolean {
+  const code = refusalCode(error)
+  return code !== null && SALE_SUBMIT_BASKET_REVIEW_CODES.has(code)
+}
+
+/** The shift refusal a checkout met, or null. */
+export function saleSubmitShiftRefusal(error: unknown): 'sale_shift_required' | 'sale_shift_closed' | null {
+  const code = refusalCode(error)
+  return code !== null && SALE_SUBMIT_SHIFT_CODES.has(code) ? code as 'sale_shift_required' | 'sale_shift_closed' : null
+}
+
+/**
  * The pack sentence for a coded sale-submit refusal (a thrown API error or a
  * result carrying `code`), or null for anything else, so each checkout path
  * keeps its own localizing for every other error.

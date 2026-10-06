@@ -36,7 +36,8 @@ import { createPosTrackingOwner, needsPosTrackingSheet, posTrackingFingerprint, 
 import { readFreshPickerLots } from '../../utils/pickerLotFreshness.ts'
 import CartItem     from './CartItem'
 import ShiftGate, { EndShiftButton } from './ShiftGate'
-import { SHIFT_BRANCH_CHANGED_EVENT, useSharedShift } from './ShiftGate'
+import { SHIFT_BRANCH_CHANGED_EVENT, SHIFT_STATE_CHANGED_EVENT, useSharedShift } from './ShiftGate'
+import ShiftHistoryModal from '../shifts/ShiftHistoryModal.tsx'
 import { saleShiftBlock } from '../../utils/saleShiftRequirement.ts'
 import ShiftHistoryPanel from '../shifts/ShiftHistoryPanel.tsx'
 import PaginationControls, { POS_DEFAULT_PAGE_SIZE } from '../shared/PaginationControls'
@@ -95,7 +96,7 @@ import { getProductBatches, getTrackedBatchProductIds } from '../../api/batchesT
 import { resolveSaleBranch } from './productSheetState.ts'
 import { branchCanSellNow } from '../../utils/branchRoles.ts'
 import { localizeBranchRuleError } from '../../api/branchRuleErrors.ts'
-import { saleSubmitRefusalText } from '../../api/saleSubmitErrors.ts'
+import { saleSubmitNeedsBasketReview, saleSubmitRefusalText, saleSubmitShiftRefusal } from '../../api/saleSubmitErrors.ts'
 import { contactDisplayAddress } from '../contacts/contactOptionUtils.ts'
 import { filterSelectableCustomerRows, isAnonymousCustomerIdentity, isSelectableCustomerIdentity, resolveSelectableCustomerById } from '../../utils/customerIdentity.ts'
 import type { BatchSelection } from '../../api/batchesTransport.ts'
@@ -2224,11 +2225,6 @@ export default function POS() {
   const primaryBranchName = primaryBranchFilterId == null
     ? null
     : (branches.find((branch) => Number(branch?.id) === Number(primaryBranchFilterId))?.name || null)
-  // N2: the same shift row ShiftGate prompts for. A sale is rung inside the
-  // cashier's open shift; the Worker refuses one outside it, and checkout
-  // says why up front instead of after the cashier has collected the money.
-  const { state: saleShiftState } = useSharedShift(primaryBranchFilterId, user?.id, settings?.shift_scope_mode)
-  const saleShiftRefusal = saleShiftBlock(saleShiftState)
 
   // Which products currently carry active batch/expiry tracking, scoped to
   // the branch filter -- refetched whenever it changes.
@@ -3085,6 +3081,19 @@ export default function POS() {
     }
   }, [active.cart, moneyVersion, v1Basket])
 
+  // N2: a sale is rung inside the cashier's open shift; the Worker refuses one
+  // outside it, and checkout says why up front instead of after the cashier
+  // has collected the money. The Worker asks about the SALE's branch -- the
+  // body's branch_id, which is the cart's one branch (handleCheckout) -- so
+  // the till asks about the same one: the frozen checkout's branch while a
+  // sale is pending, otherwise the cart's, and the till's own branch for an
+  // empty or mixed cart (which the Worker refuses on its own).
+  const pendingSaleBranchId = Number(active.checkoutPayload?.branch_id)
+  const saleShiftBranchId = Number.isSafeInteger(pendingSaleBranchId) && pendingSaleBranchId > 0 ? pendingSaleBranchId
+    : cartTotals.branchIds.length === 1 ? cartTotals.branchIds[0] : primaryBranchFilterId
+  const { state: saleShiftState } = useSharedShift(saleShiftBranchId, user?.id, settings?.shift_scope_mode)
+  const saleShiftRefusal = saleShiftBlock(saleShiftState)
+
   const subtotalUsd = cartTotals.subtotalUsd
   const subtotalKhr = cartTotals.subtotalKhr
 
@@ -3239,7 +3248,9 @@ export default function POS() {
 // Checkout
   const openStatusPicker = useCallback(() => {
     if (loading || checkoutInFlightRef.current || active.cart.length === 0) return
-    if (saleShiftRefusal) { notify(t(saleShiftRefusal), 'error'); return }
+    // Re-read the shift on the refusal: a day that rolled over brings up the
+    // registration prompt at once, and a stale answer clears itself.
+    if (saleShiftRefusal) { window.dispatchEvent(new Event(SHIFT_STATE_CHANGED_EVENT)); notify(t(saleShiftRefusal), 'error'); return }
     setShowStatusPicker(true)
   }, [active.cart.length, loading, saleShiftRefusal, notify, t])
 
@@ -3303,10 +3314,18 @@ export default function POS() {
         const result = await withLoaderTimeout(() => createPosSale(frozen, checkoutScope), 'Retry POS sale', POS_CHECKOUT_TIMEOUT_MS)
         if (!isActorReadScopeCurrent(checkoutScope)) return
         if (isSaleRecorded(result)) finishRecorded(result)
-        else notify(saleSubmitRefusalText(result, t) ?? (localizeBranchRuleError(result.error, t) || t('error')), 'error')
+        else {
+          if (saleSubmitNeedsBasketReview(result)) setOrders(previous => previous.map(order => order.id === resolvedActiveId && order.checkoutRequestId === pendingId ? { ...order, checkoutReviewRequestId: pendingId } : order))
+          if (saleSubmitShiftRefusal(result)) window.dispatchEvent(new Event(SHIFT_STATE_CHANGED_EVENT))
+          notify(saleSubmitRefusalText(result, t) ?? (localizeBranchRuleError(result.error, t) || t('error')), 'error')
+        }
       } catch (error) {
         if (isActorReadScopeCurrent(checkoutScope)) {
-          if ((error as { code?: string })?.code === 'sale_pricing_quote_conflict') setOrders(previous => previous.map(order => order.id === resolvedActiveId && order.checkoutRequestId === pendingId ? { ...order, checkoutReviewRequestId: pendingId } : order))
+          // A refusal never leaves the cart stuck: a basket refusal releases it
+          // for review; a shift refusal re-reads the shift (the prompt comes up)
+          // and the same sale goes through once the shift is open.
+          if (saleSubmitNeedsBasketReview(error)) setOrders(previous => previous.map(order => order.id === resolvedActiveId && order.checkoutRequestId === pendingId ? { ...order, checkoutReviewRequestId: pendingId } : order))
+          if (saleSubmitShiftRefusal(error)) window.dispatchEvent(new Event(SHIFT_STATE_CHANGED_EVENT))
           notify(saleSubmitRefusalText(error, t) ?? (getErrorMessage(error) === 'money_checkout_recovery_required' ? t('money_checkout_recovery_required') : getErrorMessage(error, t('error'))), 'error')
         }
       } finally { checkoutInFlightRef.current = false; setLoading(false) }
@@ -3528,11 +3547,14 @@ export default function POS() {
         // sentence the sheet's greyed pill shows, not as the server's
         // English -- this is the path an offline sale replayed later, or a
         // stale tab, actually arrives on.
+        if (submittedRequestId && saleSubmitNeedsBasketReview(result)) setOrders(previous => previous.map(order => order.id === resolvedActiveId && order.checkoutRequestId === submittedRequestId ? { ...order, checkoutReviewRequestId: submittedRequestId! } : order))
+        if (saleSubmitShiftRefusal(result)) window.dispatchEvent(new Event(SHIFT_STATE_CHANGED_EVENT))
         notify(saleSubmitRefusalText(result, t) ?? (localizeBranchRuleError(result.error, t) || t('error')), 'error')
       }
     } catch (e) {
       if (!isActorReadScopeCurrent(checkoutScope)) return
-      if (submittedRequestId && (e as { code?: string })?.code === 'sale_pricing_quote_conflict') setOrders(previous => previous.map(order => order.id === resolvedActiveId && order.checkoutRequestId === submittedRequestId ? { ...order, checkoutReviewRequestId: submittedRequestId! } : order))
+      if (submittedRequestId && saleSubmitNeedsBasketReview(e)) setOrders(previous => previous.map(order => order.id === resolvedActiveId && order.checkoutRequestId === submittedRequestId ? { ...order, checkoutReviewRequestId: submittedRequestId! } : order))
+      if (saleSubmitShiftRefusal(e)) window.dispatchEvent(new Event(SHIFT_STATE_CHANGED_EVENT))
       // Y2: a timeout is NOT a confirmed failure -- the request keeps
       // running server-side and may commit. Say so, and say that retrying
       // is safe (the stable client_request_id makes the retry return the
@@ -3956,6 +3978,7 @@ export default function POS() {
                 </div>
               ) : (
                 <>
+                  {saleShiftRefusal === 'sale_shift_closed' ? <div role="status" className="px-3 py-2 text-xs text-amber-800 dark:text-amber-300"><p>{t('sale_shift_closed')}</p><div className="mt-2"><ShiftHistoryModal branchId={saleShiftBranchId} label={t('shift_action_reopen')} /></div></div> : null}
                   {active.checkoutRequestId ? <div role="status" className="px-3 py-2 text-xs text-amber-800 dark:text-amber-300"><p>{t('money_checkout_recovery_required')}</p>{active.checkoutReviewRequestId === active.checkoutRequestId ? <button type="button" className="btn-secondary mt-2" disabled={loading} onClick={reviewCheckoutPrices}>{posCopy('Review prices', 'ពិនិត្យតម្លៃ')}</button> : null}</div> : null}
                   <div className="flex items-center justify-between px-3 pt-2 pb-1">
                     <span className="text-xs text-gray-400 font-medium">

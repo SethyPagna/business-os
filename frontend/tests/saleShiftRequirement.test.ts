@@ -46,7 +46,33 @@ runCase('the Worker defines the same two codes', () => {
 runCase('POS checkout stops on the refusal with the pack sentence before the status picker opens', () => {
   const pos = read('frontend/src/components/pos/POS.tsx')
   assert.match(pos, /const saleShiftRefusal = saleShiftBlock\(saleShiftState\)/)
-  assert.match(pos, /if \(saleShiftRefusal\) \{ notify\(t\(saleShiftRefusal\), 'error'\); return \}\s+setShowStatusPicker\(true\)/)
+  assert.match(pos, /if \(saleShiftRefusal\) \{ window\.dispatchEvent\(new Event\(SHIFT_STATE_CHANGED_EVENT\)\); notify\(t\(saleShiftRefusal\), 'error'\); return \}\s+setShowStatusPicker\(true\)/)
+})
+
+// The Worker checks the shift for the SALE's branch (body.branch_id, the
+// `saleHeaderBranchId` handed to lib/saleShiftRequirement.ts); the till sends
+// the cart's one branch as branch_id, so it must ask about that branch too --
+// not the till's browsing filter.
+runCase('the till asks about the shift of the branch the sale is sent with, as the Worker does', () => {
+  const pos = read('frontend/src/components/pos/POS.tsx')
+  assert.match(pos, /const saleBranchId = cartTotals\.branchIds\.length === 1 \? cartTotals\.branchIds\[0\] : null/)
+  assert.match(pos, /branch_id: saleBranchId,/)
+  assert.match(pos, /const pendingSaleBranchId = Number\(active\.checkoutPayload\?\.branch_id\)/)
+  assert.match(pos, /: cartTotals\.branchIds\.length === 1 \? cartTotals\.branchIds\[0\] : primaryBranchFilterId/)
+  assert.match(pos, /useSharedShift\(saleShiftBranchId, user\?\.id, settings\?\.shift_scope_mode\)/)
+  const routes = read('cloudflare/src/routes/sales.ts')
+  assert.match(routes, /const saleHeaderBranchId = Number\(body\.branch_id\)/)
+  assert.match(routes, /\{ scopeMode: shiftPolicy\.scope_mode, userId: Number\(user\.id\), branchId: saleHeaderBranchId \}/)
+})
+
+runCase('a shift refusal from the Worker re-reads the shift, and a closed shift is reopened in the till', () => {
+  const pos = read('frontend/src/components/pos/POS.tsx')
+  assert.equal((pos.match(/if \(saleSubmitShiftRefusal\((?:error|e|result)\)\) window\.dispatchEvent\(new Event\(SHIFT_STATE_CHANGED_EVENT\)\)/g) || []).length, 4)
+  assert.match(pos, /saleShiftRefusal === 'sale_shift_closed' \? <div role="status"[^\n]*<ShiftHistoryModal branchId=\{saleShiftBranchId\} label=\{t\('shift_action_reopen'\)\} \/>/)
+  // ShiftGate prompts whenever a re-read says registration is needed, and the
+  // reopen in Shift history announces itself, so both answers reach the till.
+  assert.match(read('frontend/src/components/pos/ShiftGate.tsx'), /window\.addEventListener\(SHIFT_STATE_CHANGED_EVENT, refreshChangedShift\)/)
+  assert.match(read('frontend/src/components/shifts/ShiftHistoryModal.tsx'), /const refreshMountedShiftState = \(\) => window\.dispatchEvent\(new Event\(SHIFT_STATE_CHANGED_EVENT\)\)/)
 })
 
 if (failures.length) {
