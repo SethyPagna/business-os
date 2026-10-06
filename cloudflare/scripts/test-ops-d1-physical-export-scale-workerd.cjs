@@ -37,7 +37,7 @@ async function main() {
   const publicPem = publicKey.export({ type: 'spki', format: 'pem' })
   const key = crypto.createPrivateKey(privateKey.export({ type: 'pkcs8', format: 'pem' }))
   const write = (outDir, base, payload, meta) => {
-    const text = typeof payload === 'string' ? payload : JSON.stringify(payload)
+    const text = typeof payload === 'string' || Buffer.isBuffer(payload) ? payload : JSON.stringify(payload)
     fs.mkdirSync(outDir, { recursive: true })
     const file = path.join(outDir, `${base}.enc.json`)
     fs.writeFileSync(file, `${JSON.stringify(crypt.encryptEnvelope(text, publicPem, meta))}\n`)
@@ -83,7 +83,7 @@ async function main() {
       const physical = await call({ op: 'query', sql: "SELECT name FROM sqlite_master WHERE type = 'table'" })
       const names = physical.rows.map((r) => r.name).filter((n) => !n.startsWith('sqlite_') && !n.startsWith('_cf_'))
       const exported = new Set(manifest.tables.map((t) => t.name))
-      const left = names.filter((n) => !exported.has(n) && !manifest.excluded.some((e) => e.name === n))
+      const left = names.filter((n) => !exported.has(n) && !manifest.excluded.some((e) => e.name === n) && !manifest.omitted.some((o) => o.name === n))
       assert.deepEqual(left, [], 'every physical table is exported or deliberately excluded')
       for (const t of manifest.tables) {
         const count = (await call({ op: 'query', sql: `SELECT COUNT(*) AS n FROM "${t.name}"` })).rows[0].n
@@ -119,16 +119,16 @@ async function main() {
       console.log(`LOAD ${JSON.stringify({ tables: result.checks.tables.length, seconds: +((Date.now() - started) / 1000).toFixed(1), fkViolations: result.checks.foreignKeyViolations, warnings: result.warnings.length })}`)
     })
 
-    await check('a 7429 reset on a heavy page halves it and the export finishes with identical hashes', async () => {
+    await check('two 7429 resets on heavy pages halve them and the export finishes with identical hashes', async () => {
       let fired = 0
       const inject = (sql) => {
-        if (/FROM "(sale_items|inventory_movements)" WHERE/.test(sql) && / LIMIT (\d{3,4})$/.test(sql) && fired < 3) { fired += 1; return { ok: false, retryable: true, errorCodes: [7429] } }
+        if (/FROM "(sale_items|inventory_movements)" WHERE/.test(sql) && / LIMIT (\d{3,4})$/.test(sql) && fired < 2) { fired += 1; return { ok: false, retryable: true, errorCodes: [7429] } }
         return null
       }
       const again = await job.exportToDir({ outDir: path.join(tmp, 'b'), run: '1002', commit: 'abcdef1', query: bridge(inject), write, concurrency: 3, pause: async () => {} })
-      assert.equal(fired, 3)
+      assert.equal(fired, 2)
       assert.equal(again.verdict.ok, true)
-      assert.ok(again.manifest.totals.retries >= 3)
+      assert.ok(again.manifest.totals.retries >= 2 && again.manifest.totals.cpuResets === 2)
       assert.deepEqual(again.manifest.tables.map((t) => [t.name, t.rows, t.sha256]), first.manifest.tables.map((t) => [t.name, t.rows, t.sha256]))
     })
   } finally {

@@ -35,6 +35,12 @@ async function check(name, fn) {
 
 // ------------------------------------------------------------------ fixtures
 
+const SENTINELS = {
+  password: 'SENTINEL-PASSWORD-HASH-aaaa', otp: 'SENTINEL-OTP-SECRET-bbbb', otpPending: 'SENTINEL-OTP-PENDING-cccc', portal: 'SENTINEL-PORTAL-HASH-dddd',
+  apiKey: 'SENTINEL-API-KEY-eeee', refresh: 'SENTINEL-REFRESH-TOKEN-ffff', resend: 'SENTINEL-RESEND-gggg', secret: 'SENTINEL-SECRET-hhhh', bot: 'SENTINEL-BOT-iiii',
+  maintenance: 'SENTINEL-MAINT-jjjj', session: 'SENTINEL-SESSION-kkkk', code: 'SENTINEL-CODE-llll',
+}
+
 function fixtureDatabase() {
   const db = new DatabaseSync(':memory:')
   db.exec(`
@@ -48,6 +54,15 @@ function fixtureDatabase() {
     CREATE TABLE d1_migrations (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE, applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP);
     CREATE TABLE _cf_KV (key TEXT PRIMARY KEY, value BLOB);
     CREATE TABLE docs (id INTEGER PRIMARY KEY, body TEXT);
+    CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT, name TEXT, password TEXT NOT NULL, otp_enabled INTEGER, otp_secret TEXT, otp_pending_secret TEXT);
+    CREATE TABLE portal_accounts (id INTEGER PRIMARY KEY, phone TEXT, password_hash TEXT NOT NULL);
+    CREATE TABLE ai_provider_configs (id INTEGER PRIMARY KEY, provider TEXT, api_key_encrypted TEXT);
+    CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT, updated_at TEXT);
+    CREATE TABLE system_flags (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT);
+    CREATE TABLE user_sessions (id INTEGER PRIMARY KEY, token_hash TEXT);
+    CREATE TABLE verification_codes (id INTEGER PRIMARY KEY, code_hash TEXT);
+    CREATE TABLE login_lockouts (k TEXT PRIMARY KEY, n INTEGER);
+    CREATE TABLE telegram_scheduled_sends (id INTEGER PRIMARY KEY, status TEXT);
     CREATE VIRTUAL TABLE docs_fts USING fts5(body, content='docs', content_rowid='id');
     CREATE INDEX idx_plain_name ON plain_pk(name);
     CREATE UNIQUE INDEX idx_text_pk_v ON text_pk(v);
@@ -70,6 +85,19 @@ function fixtureDatabase() {
   db.exec('INSERT INTO no_pk(rowid, a) VALUES (-5, \'neg rowid\'), (0, \'zero rowid\'), (9007199254740993, \'beyond 2^53\')')
   db.exec('INSERT INTO auto_seq(x) VALUES (\'a\'), (\'b\'), (\'c\'), (\'d\'); DELETE FROM auto_seq WHERE id > 2;')
   db.exec("INSERT INTO shadowed(\"rowid\", \"from\") VALUES ('r1', 1), ('r2', 2)")
+  db.exec(`
+    INSERT INTO users(username, name, password, otp_enabled, otp_secret, otp_pending_secret) VALUES ('owner', 'Owner', '${SENTINELS.password}', 1, '${SENTINELS.otp}', '${SENTINELS.otpPending}'), ('cashier', 'Cashier', 'pbkdf2-${SENTINELS.password}2', 0, NULL, NULL);
+    INSERT INTO portal_accounts(phone, password_hash) VALUES ('012345678', '${SENTINELS.portal}');
+    INSERT INTO ai_provider_configs(provider, api_key_encrypted) VALUES ('openai', '${SENTINELS.apiKey}'), ('none', '');
+    INSERT INTO settings(key, value, updated_at) VALUES ('shop_name', 'LC Cosmetics', 't'), ('currency', 'USD', 't'), ('telegram_chat_id', '-1001234', 't'), ('telegram_topic_sales', '12', 't'),
+      ('telegram_automation_enabled', 'true', 't'), ('drive_sync_refresh_token', '${SENTINELS.refresh}', 't'), ('drive_sync_access_token_expires_at', '2026-10-06', 't'), ('Resend_API_KEY', '${SENTINELS.resend}', 't'),
+      ('MY_Secret', '${SENTINELS.secret}', 't'), ('bot_token', '${SENTINELS.bot}', 't'), ('pos_address_presets_v1', '[]', 't'), ('empty_token', NULL, 't');
+    INSERT INTO system_flags(key, value, updated_at) VALUES ('maintenance', '{"token":"${SENTINELS.maintenance}"}', 't'), ('branch_cutover_control_incarnation', 'inc-1', 't');
+    INSERT INTO user_sessions(token_hash) VALUES ('${SENTINELS.session}'), ('${SENTINELS.session}2'), ('${SENTINELS.session}3');
+    INSERT INTO verification_codes(code_hash) VALUES ('${SENTINELS.code}');
+    INSERT INTO login_lockouts(k, n) VALUES ('1.2.3.4', 5), ('5.6.7.8', 1);
+    INSERT INTO telegram_scheduled_sends(status) VALUES ('pending'), ('sending'), ('sent'), ('failed');
+  `)
   db.exec("INSERT INTO d1_migrations(name) VALUES ('0001_a.sql'), ('0002_b.sql')")
   db.exec("INSERT INTO docs(body) VALUES ('hello world'), ('khmer ខ្មែរ'); INSERT INTO docs_fts(docs_fts) VALUES ('rebuild')")
   return db
@@ -95,7 +123,8 @@ function fakeD1(db, { behave } = {}) {
 
 function testKeys() {
   const { publicKey, privateKey } = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 })
-  return { publicPem: publicKey.export({ type: 'spki', format: 'pem' }), privateKey: crypto.createPrivateKey(privateKey.export({ type: 'pkcs8', format: 'pem' })) }
+  const privateKeyPem = privateKey.export({ type: 'pkcs8', format: 'pem' })
+  return { publicPem: publicKey.export({ type: 'spki', format: 'pem' }), privateKeyPem, privateKey: crypto.createPrivateKey(privateKeyPem) }
 }
 
 function tmpdir(label) {
@@ -119,7 +148,7 @@ async function main() {
   const keys = testKeys()
 
   const write = (outDir, base, payload, meta) => {
-    const text = typeof payload === 'string' ? payload : JSON.stringify(payload)
+    const text = typeof payload === 'string' || Buffer.isBuffer(payload) ? payload : JSON.stringify(payload)
     const envelope = crypt.encryptEnvelope(text, keys.publicPem, meta)
     fs.mkdirSync(outDir, { recursive: true })
     const file = path.join(outDir, `${base}.enc.json`)
@@ -244,10 +273,12 @@ async function main() {
     const dir = tmpdir('engine')
     const { manifest, verdict } = await job.exportToDir({ outDir: dir, run: '777', commit: 'abcdef1', query: d1.query, write })
     assert.equal(verdict.ok, true, JSON.stringify(manifest.issues))
-    assert.deepEqual(manifest.tables.map((t) => t.name), ['audit', 'auto_seq', 'd1_migrations', 'docs', 'empty_t', 'no_pk', 'plain_pk', 'shadowed', 'text_pk'])
+    assert.deepEqual(manifest.tables.map((t) => t.name), ['ai_provider_configs', 'audit', 'auto_seq', 'd1_migrations', 'docs', 'empty_t', 'no_pk', 'plain_pk', 'portal_accounts', 'settings', 'shadowed', 'system_flags', 'telegram_scheduled_sends', 'text_pk', 'users'])
     assert.deepEqual(manifest.excluded.map((e) => `${e.name}:${e.reason}`).sort(), ['_cf_KV:cloudflare-internal', 'docs_fts:fts-virtual', 'docs_fts_config:fts-shadow', 'docs_fts_data:fts-shadow', 'docs_fts_docsize:fts-shadow', 'docs_fts_idx:fts-shadow'])
+    assert.deepEqual(manifest.omitted, [{ name: 'login_lockouts', rows: 2, reason: 'credentials-and-lockouts' }, { name: 'user_sessions', rows: 3, reason: 'credentials-and-lockouts' }, { name: 'verification_codes', rows: 1, reason: 'credentials-and-lockouts' }])
     const byName = Object.fromEntries(manifest.tables.map((t) => [t.name, t]))
     for (const [name, t] of Object.entries(byName)) assert.equal(t.rows, db.prepare(`SELECT COUNT(*) AS n FROM "${name}"`).get().n, `${name}: row count`)
+    assert.ok(manifest.omitted.every((o) => !byName[o.name]), 'omitted tables carry no rows and no chunks')
     assert.equal(byName.empty_t.rows, 0)
     assert.equal(byName.empty_t.sha256, lib.EMPTY_SHA256)
     assert.equal(byName.shadowed.ridColumn, '_rowid_', 'a column called rowid moves the keyset to _rowid_')
@@ -291,7 +322,8 @@ async function main() {
     assert.ok(heavy[heavy.length - 1] < heavy[0], `heavy pages shrink: ${heavy}`)
     const heavyChunks = manifest.tables.find((t) => t.name === 'heavy').chunks
     assert.ok(heavyChunks.length >= 3, 'a 20 MB table is split into several chunks')
-    for (const c of heavyChunks.slice(0, -1)) assert.ok(c.plainBytes >= lib.LIMITS.chunkBytes && c.plainBytes < lib.LIMITS.chunkBytes + lib.LIMITS.targetPageBytes * 2)
+    for (const c of heavyChunks.slice(0, -1)) assert.ok(c.plainBytes <= lib.LIMITS.chunkBytes && c.plainBytes > lib.LIMITS.chunkBytes - 60000, `chunk of ${c.plainBytes} bytes`)
+    assert.ok(heavyChunks.length >= 10, 'a 20 MB table is split into many 2 MiB chunks')
     assert.equal(heavyChunks.reduce((n, c) => n + c.rows, 0), 400)
     fs.rmSync(dir, { recursive: true, force: true })
   })
@@ -338,7 +370,7 @@ async function main() {
 
   await check('engine: a refusal that never clears, a non-retryable one, and a lost keyset are flagged with fixed codes, never hidden', async () => {
     const db = fixtureDatabase()
-    const stuck = fakeD1(db, { behave: (sql) => (/FROM "no_pk"/.test(sql) ? { ok: false, retryable: true, errorCodes: [7429] } : null) })
+    const stuck = fakeD1(db, { behave: (sql) => (/FROM "no_pk"/.test(sql) ? { ok: false, retryable: true, errorCodes: [] } : null) })
     const dir = tmpdir('stuck')
     const r1 = await job.exportToDir({ outDir: dir, run: '3', commit: 'abcdef1', query: stuck.query, write, pause: async () => {} })
     assert.equal(r1.verdict.ok, false)
@@ -401,6 +433,135 @@ async function main() {
     for (const dir of [dir1, dir3]) fs.rmSync(dir, { recursive: true, force: true })
   })
 
+  await check('engine: rows of credential tables are never read, and password / OTP / key / token columns are replaced in the SELECT itself', async () => {
+    const db = fixtureDatabase()
+    const d1 = fakeD1(db)
+    const dir = tmpdir('redact')
+    const { manifest, verdict } = await job.exportToDir({ outDir: dir, run: '20', commit: 'abcdef1', query: d1.query, write })
+    assert.equal(verdict.ok, true, JSON.stringify(manifest.issues))
+    // never selected: no statement reads the omitted tables' rows, nor selects a redacted column raw
+    for (const sql of d1.log) {
+      for (const table of lib.OMITTED_ROW_TABLES) assert.ok(!(sql.includes(`FROM "${table}"`) && !sql.startsWith('SELECT COUNT(*)')), `rows of ${table} were read: ${sql.slice(0, 80)}`)
+      for (const [table, columns] of Object.entries(lib.REDACTIONS)) {
+        if (!sql.includes(`FROM "${table}"`) || !sql.startsWith('SELECT CAST')) continue
+        for (const column of Object.keys(columns)) assert.ok(!new RegExp(`quote\\("${column}"\\)`).test(sql), `${table}.${column} is selected raw`)
+      }
+    }
+    assert.deepEqual(manifest.redactions.map((r) => `${r.table}.${r.column}:${r.kind}`), [
+      'ai_provider_configs.api_key_encrypted:literal', 'portal_accounts.password_hash:literal', 'settings.value:conditional', 'system_flags.value:conditional',
+      'users.otp_pending_secret:literal', 'users.otp_secret:literal', 'users.password:literal',
+    ])
+    // none of the fixture's secrets is in any chunk, decrypted
+    const all = fs.readdirSync(dir).filter((f) => /-f\d+\.enc\.json$/.test(f)).map((f) => crypt.decryptEnvelope(JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')), keys.privateKey).plaintext.toString('utf8')).join('')
+    const manifestText = crypt.decryptEnvelope(JSON.parse(fs.readFileSync(path.join(dir, 'd1phys-20-manifest.enc.json'), 'utf8')), keys.privateKey).plaintext.toString('utf8')
+    for (const [name, secret] of Object.entries(SENTINELS)) {
+      assert.ok(!all.includes(secret), `${name} appears in an export line`)
+      assert.ok(!manifestText.includes(secret), `${name} appears in the manifest`)
+    }
+    assert.ok(all.includes('LC Cosmetics') && all.includes("'USD'"), 'ordinary settings are exported')
+    assert.ok(all.includes('-1001234'), 'telegram settings are exported (the loader neutralises them after the check)')
+    fs.rmSync(dir, { recursive: true, force: true })
+  })
+
+  await check('the settings redaction matches isSensitiveSettingKey (parsed from the Worker source) for every key, and nothing secret-looking in the migrated schema escapes redaction', async () => {
+    const ts = require('typescript')
+    const source = fs.readFileSync(path.join(ROOT, 'cloudflare', 'src', 'lib', 'settingsSensitive.ts'), 'utf8')
+    const mod = { exports: {} }
+    new Function('module', 'exports', ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText)(mod, mod.exports)
+    const db = new DatabaseSync(':memory:')
+    db.exec('CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT)')
+    const keys2 = ['shop_name', 'currency', 'telegram_chat_id', 'drive_sync_refresh_token', 'drive_sync_access_token_expires_at', 'DRIVE_SYNC_ACCESS_TOKEN', 'x_secret', 'X_SECRET', '_secret', 'a_api_key', 'a_password', 'pos_address_presets_v1', 'a_token', 'token', 'secretary', 'my_tokens', 'api_key_x', 'receipt_footer_password_hint', 'Telegram_Bot_Token']
+    const ins = db.prepare('INSERT INTO settings(key, value) VALUES (?, ?)')
+    for (const k of keys2) ins.run(k, 'V')
+    const redacted = new Set(db.prepare(lib.pageSql({ table: 'settings', columns: ['key', 'value'], limit: 100 })).all().filter((r) => r.c1 === "''").map((r) => lib.parseQuoted(r.c0)))
+    for (const k of keys2) {
+      if (mod.exports.isSensitiveSettingKey(k)) assert.ok(redacted.has(k), `${k} is sensitive in the Worker but exported`)
+    }
+    assert.ok(redacted.has('a_token') && redacted.has('Telegram_Bot_Token') && !redacted.has('shop_name') && !redacted.has('secretary') && !redacted.has('my_tokens'))
+    // Drift guard: every column of the migrated schema that looks like a credential is redacted or in an omitted table.
+    const mdb = new DatabaseSync(':memory:')
+    mdb.exec('PRAGMA foreign_keys = OFF;')
+    for (const sql of loadAll()) mdb.exec(sql)
+    const cols = mdb.prepare("SELECT m.name AS t, x.name AS c FROM sqlite_master m, pragma_table_info(m.name) x WHERE m.type = 'table'").all()
+    const BENIGN = new Set(['ai_provider_configs.max_completion_tokens', 'business_os_migration_status.source_hash', 'users.otp_enabled', 'users.otp_pending_created_at', 'users.must_change_password'])
+    const looksSecret = /pass|secret|api_key|token|hash|otp|credential/i
+    const unhandled = cols.filter((r) => looksSecret.test(r.c) && !/digest|_fts/.test(r.t + r.c) && !BENIGN.has(`${r.t}.${r.c}`)
+      && !lib.OMITTED_ROW_TABLES.includes(r.t) && lib.redactionFor(r.t, r.c) === null && !(r.t.endsWith('_fts') || r.t.includes('_fts_')))
+    assert.deepEqual(unhandled.map((r) => `${r.t}.${r.c}`), [], 'a credential-looking column is exported raw: add it to REDACTIONS or OMITTED_ROW_TABLES')
+    for (const t of lib.OMITTED_ROW_TABLES) assert.ok(cols.some((c) => c.t === t), `${t} no longer exists`)
+    for (const [t, columns] of Object.entries(lib.REDACTIONS)) for (const c of Object.keys(columns)) assert.ok(cols.some((x) => x.t === t && x.c === c), `${t}.${c} no longer exists`)
+  })
+
+  await check('engine: three CPU resets abort the whole export; nothing is sent after the third', async () => {
+    const db = fixtureDatabase()
+    let sent = 0
+    let afterThird = 0
+    let resets = 0
+    const cpu = fakeD1(db, {
+      behave: (sql) => {
+        sent += 1
+        if (resets >= 3) afterThird += 1
+        if (/FROM "plain_pk" ORDER|FROM "plain_pk" WHERE/.test(sql) || /FROM "no_pk" ORDER/.test(sql) || /FROM "text_pk" ORDER/.test(sql)) {
+          resets += 1
+          return { ok: false, retryable: true, cpuReset: true, errorCodes: [7429] }
+        }
+        return null
+      },
+    })
+    const dir = tmpdir('abort')
+    const r = await job.exportToDir({ outDir: dir, run: '21', commit: 'abcdef1', query: cpu.query, write, pause: async () => {}, concurrency: 1 })
+    assert.equal(r.verdict.ok, false)
+    assert.equal(r.manifest.totals.cpuResets, 3)
+    assert.equal(resets, 3)
+    assert.equal(afterThird, 0, 'no statement is sent once the third reset was seen')
+    assert.ok(r.manifest.issues.some((i) => i.code === 'cpu-resets-exceeded'))
+    assert.ok(fs.existsSync(path.join(dir, 'd1phys-21-manifest.enc.json')), 'the manifest is still written')
+    // two resets are survivable
+    let two = 0
+    const some = fakeD1(db, { behave: (sql) => { if (/FROM "plain_pk" ORDER|FROM "plain_pk" WHERE rowid > 3 /.test(sql) && two < 2) { two += 1; return { ok: false, retryable: true, cpuReset: true, errorCodes: [7429] } } return null } })
+    const ok = await job.exportToDir({ outDir: dir, run: '22', commit: 'abcdef1', query: some.query, write, pause: async () => {}, concurrency: 1 })
+    assert.equal(ok.verdict.ok, true, JSON.stringify(ok.manifest.issues))
+    assert.equal(ok.manifest.totals.cpuResets, 2)
+    fs.rmSync(dir, { recursive: true, force: true })
+  })
+
+  await check('chunks: every chunk file has the same size and no timestamp; the text is followed only by NUL padding', async () => {
+    const db = fixtureDatabase()
+    const dir = tmpdir('pad')
+    const { manifest } = await job.exportToDir({ outDir: dir, run: '23', commit: 'abcdef1', query: fakeD1(db).query, write })
+    const files = fs.readdirSync(dir).filter((f) => /-f\d+\.enc\.json$/.test(f))
+    assert.ok(files.length >= 8)
+    assert.equal(new Set(files.map((f) => fs.statSync(path.join(dir, f)).size)).size, 1, 'one size for every chunk file')
+    assert.equal(manifest.chunkPaddedBytes, lib.LIMITS.chunkBytes)
+    for (const f of files) {
+      const env = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'))
+      const header = JSON.parse(env.header)
+      assert.deepEqual(Object.keys(header.meta).sort(), ['commit', 'kind', 'run', 'seq'])
+      assert.match(header.meta.seq, /^\d{6}$/)
+      const { plaintext } = crypt.decryptEnvelope(env, keys.privateKey)
+      assert.equal(plaintext.length, lib.LIMITS.chunkBytes)
+    }
+    const manifestEnv = JSON.parse(fs.readFileSync(path.join(dir, 'd1phys-23-manifest.enc.json'), 'utf8'))
+    assert.ok(!('createdAt' in JSON.parse(manifestEnv.header).meta))
+    assert.throws(() => job.paddedChunk('x'.repeat(lib.LIMITS.chunkBytes + 1)), (e) => e.code === 'row-too-large')
+    fs.rmSync(dir, { recursive: true, force: true })
+  })
+
+  await check('refs: the task runs only from refs/heads/main', () => {
+    assert.equal(job.isMainRef('refs/heads/main'), true)
+    for (const bad of ['refs/heads/claude/x', 'refs/heads/main2', 'refs/pull/1/merge', 'refs/tags/main', 'main', '', undefined, null, 'refs/heads/Main']) assert.equal(job.isMainRef(bad), false, String(bad))
+  })
+
+  await check('wrangler runs with disk logging off and its log folder in scratch space (plaintext result pages never reach a debug log)', () => {
+    const env = common.wranglerEnv({ WRANGLER_WRITE_LOGS: 'true', WRANGLER_LOG_PATH: 'C:/Users/x/.config/.wrangler/logs', EXTRA: '1' })
+    assert.equal(env.WRANGLER_WRITE_LOGS, 'false', 'a caller cannot switch logging back on')
+    assert.equal(env.WRANGLER_LOG_PATH, common.WRANGLER_LOG_DIR)
+    assert.ok(path.resolve(common.WRANGLER_LOG_DIR).startsWith(path.resolve(os.tmpdir())))
+    assert.equal(env.WRANGLER_SEND_METRICS, 'false')
+    assert.equal(env.EXTRA, '1')
+    assert.equal(common.wranglerEnv().WRANGLER_WRITE_LOGS, 'false')
+  })
+
   // ---------------------------------------------------------------- the round trip
 
   async function exportFixture(db, run = '99') {
@@ -421,7 +582,27 @@ async function main() {
     assert.deepEqual(result.warnings, [])
     assert.ok(result.checks.tables.length === manifest.tables.length && result.checks.tables.every((t) => t.ok))
     const rebuilt = new DatabaseSync(out)
-    for (const t of manifest.tables) assert.deepEqual(dump(rebuilt, t.name), dump(source, t.name), `${t.name}: rows differ`)
+    const REDACTED = new Set(['users', 'portal_accounts', 'ai_provider_configs', 'settings', 'system_flags', 'telegram_scheduled_sends'])
+    for (const t of manifest.tables.filter((x) => !REDACTED.has(x.name))) assert.deepEqual(dump(rebuilt, t.name), dump(source, t.name), `${t.name}: rows differ`)
+    // redacted tables hold the replacements, everything else in their rows is intact
+    assert.deepEqual(rebuilt.prepare('SELECT username, name, password, otp_enabled, otp_secret, otp_pending_secret FROM users ORDER BY id').all().map((r) => ({ ...r })), [
+      { username: 'owner', name: 'Owner', password: 'redacted', otp_enabled: 1, otp_secret: null, otp_pending_secret: null },
+      { username: 'cashier', name: 'Cashier', password: 'redacted', otp_enabled: 0, otp_secret: null, otp_pending_secret: null },
+    ])
+    assert.deepEqual(rebuilt.prepare('SELECT phone, password_hash FROM portal_accounts').all().map((r) => ({ ...r })), [{ phone: '012345678', password_hash: 'redacted' }])
+    assert.deepEqual(rebuilt.prepare('SELECT provider, api_key_encrypted FROM ai_provider_configs ORDER BY id').all().map((r) => ({ ...r })), [{ provider: 'openai', api_key_encrypted: '' }, { provider: 'none', api_key_encrypted: '' }])
+    const settings = Object.fromEntries(rebuilt.prepare('SELECT key, value FROM settings').all().map((r) => [r.key, r.value]))
+    assert.equal(settings.shop_name, 'LC Cosmetics')
+    assert.equal(settings.currency, 'USD')
+    for (const k of ['drive_sync_refresh_token', 'drive_sync_access_token_expires_at', 'MY_Secret', 'pos_address_presets_v1']) assert.equal(settings[k], '', k)
+    assert.ok(!('Resend_API_KEY' in settings) && !('bot_token' in settings), 'mail and bot keys are dropped by the loader')
+    assert.equal(settings.telegram_chat_id, '', 'neutralised')
+    assert.equal(settings.telegram_topic_sales, '', 'neutralised')
+    assert.equal(settings.telegram_automation_enabled, 'false', 'neutralised')
+    assert.deepEqual(rebuilt.prepare('SELECT key FROM system_flags').all().map((r) => r.key), ['branch_cutover_control_incarnation'], 'the maintenance flag is gone')
+    assert.deepEqual(rebuilt.prepare('SELECT status FROM telegram_scheduled_sends ORDER BY id').all().map((r) => r.status), ['skipped', 'skipped', 'sent', 'failed'], 'pending sends are skipped')
+    for (const t of ['user_sessions', 'verification_codes', 'login_lockouts']) assert.equal(rebuilt.prepare(`SELECT COUNT(*) AS n FROM ${t}`).get().n, 0, `${t} is empty but defined`)
+    assert.deepEqual({ ...result.checks.neutralised }, { telegramSettings: 3, scheduledSends: 2, keysDropped: 2, maintenanceFlags: 1 })
     // The trigger did not fire during the load (it would have doubled the audit rows) but exists afterwards.
     assert.equal(rebuilt.prepare('SELECT COUNT(*) AS n FROM audit').get().n, source.prepare('SELECT COUNT(*) AS n FROM audit').get().n)
     assert.equal(rebuilt.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'trigger' AND name = 'trg_plain_audit'").get().n, 1)
@@ -446,7 +627,7 @@ async function main() {
     for (const n of names.slice(0, -2)) mig.run(n)
     source.exec("INSERT INTO categories(name, color) VALUES ('Soap', '#fff'), ('Ünï 🧴', NULL); INSERT INTO system_flags(key, value) VALUES ('k', 'v'); INSERT INTO settings(key, value) VALUES ('s', NULL)")
     const { dir, manifest } = await exportFixture(source, '55')
-    assert.ok(manifest.tables.length > 140)
+    assert.ok(manifest.tables.length > 130 && manifest.omitted.length === 6)
     assert.ok(manifest.tables.some((t) => t.name === 'products') && !manifest.tables.some((t) => /products_fts/.test(t.name)))
     const out = path.join(tmpdir('mig'), 'rebuilt.sqlite')
     const result = loader.buildDatabase({
@@ -506,7 +687,7 @@ async function main() {
     const stranger = testKeys().privateKey
     assert.throws(() => loader.readManifest(dir, stranger), /encrypted for key/)
     // 6. production data may not be written into the repository
-    assert.throws(() => loader.buildDatabase({ manifest: parsed, inputDir: dir, privateKey: key, outPath: path.join(ROOT, 'ops', 'should-not-exist.sqlite') }), /inside this repository/)
+    assert.throws(() => loader.buildDatabase({ manifest: parsed, inputDir: dir, privateKey: key, outPath: path.join(ROOT, 'ops', 'should-not-exist.sqlite') }), /inside this repository or any folder under a \.git/)
     assert.ok(!fs.existsSync(path.join(ROOT, 'ops', 'should-not-exist.sqlite')))
     // 7. an existing output is not replaced without --force
     const out = path.join(tmpdir('force'), 'x.sqlite')
@@ -531,6 +712,91 @@ async function main() {
     for (const d of [dir, path.dirname(out)]) fs.rmSync(d, { recursive: true, force: true })
   })
 
+  await check('loader: refuses a forged manifest -- ATTACH, VACUUM INTO, a second statement, a trigger that closes early, a wrong kind -- and every real DDL of the 198 migrations passes', async () => {
+    const source = fixtureDatabase()
+    const { dir } = await exportFixture(source, '80')
+    const key = keys.privateKey
+    const good = loader.readManifest(dir, key)
+    const victim = path.join(tmpdir('victim'), 'attached.sqlite')
+    const forge = (entry) => {
+      const m = JSON.parse(JSON.stringify(good))
+      m.schema.push(entry)
+      return m
+    }
+    const build = (m) => loader.buildDatabase({ manifest: m, inputDir: dir, privateKey: key, outPath: path.join(tmpdir('forged'), 'x.sqlite') })
+    const evil = [
+      { type: 'table', name: 'a', tbl_name: 'a', sql: `CREATE TABLE a (x); ATTACH DATABASE '${victim.replace(/\\/g, '/')}' AS pwn` },
+      { type: 'table', name: 'a', tbl_name: 'a', sql: "CREATE TABLE a (x); VACUUM INTO 'C:/x/y.sqlite'" },
+      { type: 'table', name: 'a', tbl_name: 'a', sql: 'CREATE TABLE a (x); CREATE TABLE b (y)' },
+      { type: 'table', name: 'a', tbl_name: 'a', sql: 'CREATE TABLE a (x)\n;\nCREATE TABLE b (y)' },
+      { type: 'table', name: 'a', tbl_name: 'a', sql: "DROP TABLE users" },
+      { type: 'table', name: 'a', tbl_name: 'a', sql: "CREATE TEMP TABLE a (x)" },
+      { type: 'table', name: 'a', tbl_name: 'a', sql: "CREATE VIRTUAL TABLE a USING dbstat" },
+      { type: 'table', name: 'a', tbl_name: 'a', sql: "-- CREATE TABLE a\nATTACH 'x' AS y" },
+      { type: 'table', name: 'a', tbl_name: 'a', sql: "/* CREATE TABLE */ PRAGMA writable_schema = 1" },
+      { type: 'index', name: 'i', tbl_name: 'users', sql: 'CREATE TABLE i (x)' },
+      { type: 'view', name: 'v', tbl_name: 'v', sql: 'CREATE VIEW v AS SELECT 1; DELETE FROM users' },
+      { type: 'trigger', name: 't', tbl_name: 'users', sql: 'CREATE TRIGGER t AFTER INSERT ON users BEGIN SELECT 1; END; DELETE FROM users' },
+      { type: 'trigger', name: 't', tbl_name: 'users', sql: 'CREATE TRIGGER t AFTER INSERT ON users BEGIN SELECT 1; END; INSERT INTO settings VALUES (1,2,3); END' },
+      { type: 'trigger', name: 't', tbl_name: 'users', sql: "CREATE TRIGGER t AFTER INSERT ON users BEGIN ATTACH 'x' AS y; END" },
+      { type: 'trigger', name: 't', tbl_name: 'users', sql: 'CREATE TRIGGER t AFTER INSERT ON users BEGIN SELECT 1; END ; SELECT 2' },
+      { type: 'table', name: 'a', tbl_name: 'a', sql: '' },
+      { type: 'table', name: 'a', tbl_name: 'a', sql: 'CREATE TABLE "unterminated (x)' },
+      { type: 'pragma', name: 'a', tbl_name: 'a', sql: 'CREATE TABLE a (x)' },
+      { type: 'table', name: 'a', tbl_name: 'a' },
+    ]
+    for (const entry of evil) assert.throws(() => build(forge(entry)), /refused|malformed|unsupported|cannot be read/, JSON.stringify(entry).slice(0, 100))
+    assert.ok(!fs.existsSync(victim), 'nothing was attached or written')
+    // fine ones: quoted names, CASE inside a trigger, strings holding forbidden words
+    for (const entry of [
+      { type: 'table', name: 'ok1', tbl_name: 'ok1', sql: 'CREATE TABLE "ok1" (a TEXT DEFAULT \'ATTACH; DROP\', b)' },
+      { type: 'index', name: 'ok2', tbl_name: 'ok1', sql: 'CREATE UNIQUE INDEX ok2 ON ok1(a);' },
+      { type: 'view', name: 'ok3', tbl_name: 'ok3', sql: "CREATE VIEW ok3 AS SELECT 'a;b' AS c FROM ok1" },
+      { type: 'trigger', name: 'ok4', tbl_name: 'ok1', sql: "CREATE TRIGGER ok4 AFTER INSERT ON ok1 BEGIN UPDATE ok1 SET b = CASE WHEN a = 'x' THEN 1 ELSE 2 END WHERE rowid = NEW.rowid; DELETE FROM ok1 WHERE 0; END" },
+    ]) assert.doesNotThrow(() => loader.assertSingleCreate(entry), entry.name)
+    const every = new DatabaseSync(':memory:')
+    every.exec('PRAGMA foreign_keys = OFF;')
+    for (const sql of loadAll()) every.exec(sql)
+    const entries = every.prepare('SELECT type, name, tbl_name, sql FROM sqlite_master WHERE sql IS NOT NULL').all()
+    assert.ok(entries.length > 450)
+    for (const entry of entries) assert.doesNotThrow(() => loader.assertSingleCreate({ ...entry }), `${entry.type} ${entry.name}`)
+    fs.rmSync(dir, { recursive: true, force: true })
+  })
+
+  await check('loader CLI: --run must equal the manifest run; a manifest from another run is refused; output under any folder holding .git is refused', async () => {
+    const source = fixtureDatabase()
+    const a = await exportFixture(source, '81')
+    const keyFile = path.join(tmpdir('keyfile'), 'private-key-file')
+    fs.writeFileSync(keyFile, keys.privateKeyPem)
+    const out = path.join(tmpdir('cli'), 'x.sqlite')
+    const base = ['--input', a.dir, '--private-key', keyFile, '--out', out]
+    const quiet = (fn) => {
+      const original = process.stdout.write
+      const printed = []
+      process.stdout.write = (chunk) => { printed.push(String(chunk)); return true }
+      try {
+        return { value: fn(), printed: printed.join('') }
+      } finally {
+        process.stdout.write = original
+      }
+    }
+    assert.throws(() => quiet(() => loader.main(base)), /Usage/)
+    assert.throws(() => quiet(() => loader.main([...base, '--run', '82'])), /manifest is from run 81, not the run 82/)
+    assert.ok(!fs.existsSync(out))
+    // a repo-like scratch folder: any ancestor with a .git entry
+    const scratch = tmpdir('gitlike')
+    fs.mkdirSync(path.join(scratch, '.git'))
+    fs.mkdirSync(path.join(scratch, 'deep', 'er'), { recursive: true })
+    assert.throws(() => quiet(() => loader.main(['--input', a.dir, '--private-key', keyFile, '--out', path.join(scratch, 'deep', 'er', 'x.sqlite'), '--run', '81'])), /under a \.git/)
+    const worktreeLike = tmpdir('worktreelike')
+    fs.writeFileSync(path.join(worktreeLike, '.git'), 'gitdir: elsewhere')
+    assert.throws(() => quiet(() => loader.main(['--input', a.dir, '--private-key', keyFile, '--out', path.join(worktreeLike, 'x.sqlite'), '--run', '81'])), /under a \.git/)
+    const done = quiet(() => loader.main([...base, '--run', '81']))
+    assert.equal(done.value, 0, done.printed)
+    assert.ok(done.printed.includes('LOAD OK') && done.printed.includes('neutralised'))
+    for (const d of [a.dir, path.dirname(keyFile), path.dirname(out), scratch, worktreeLike]) fs.rmSync(d, { recursive: true, force: true })
+  })
+
   // ------------------------------------------------------------- the job's plumbing
 
   await check('interpretWranglerResult: rows only from a clean single read-only result set; a write, a bad shape or a timeout is not ok', () => {
@@ -545,10 +811,17 @@ async function main() {
     assert.equal(job.interpretWranglerResult({ code: 0, stdout: JSON.stringify([{ results: [1], success: true }]), stderr: '' }).ok, false)
     assert.equal(job.interpretWranglerResult({ code: 0, stdout: JSON.stringify([{ results: [], success: false }]), stderr: '' }).ok, false)
     assert.equal(job.interpretWranglerResult({ code: 0, stdout: 'not json', stderr: '' }).ok, false)
-    const cpu = job.interpretWranglerResult({ code: 1, stdout: '', stderr: 'D1_ERROR: D1 DB exceeded its CPU time limit and was reset. [code: 7429]' })
-    assert.deepEqual([cpu.ok, cpu.retryable, cpu.errorCodes], [false, true, [7429]])
+    const cpu = job.interpretWranglerResult({ code: 1, stdout: JSON.stringify({ error: { text: 'D1_ERROR: D1 DB exceeded its CPU time limit and was reset. [code: 7429]', code: 7429, notes: [{ text: 'row 12 Sok Dara' }] } }), stderr: '' })
+    assert.deepEqual([cpu.ok, cpu.retryable, cpu.cpuReset, cpu.errorCodes], [false, true, true, [7429]])
+    // codes come only from wrangler's parsed error object, never from numbers found in free text
+    const stderrOnly = job.interpretWranglerResult({ code: 1, stdout: '', stderr: 'D1_ERROR: exceeded its CPU time limit [code: 7429] "code": 123456 customer 0123456789' })
+    assert.deepEqual([stderrOnly.retryable, stderrOnly.cpuReset, stderrOnly.errorCodes], [true, true, []])
+    assert.deepEqual(job.interpretWranglerResult({ code: 1, stdout: JSON.stringify({ error: { text: 'x', code: 7500 } }), stderr: '' }).errorCodes, [7500])
+    assert.deepEqual(job.interpretWranglerResult({ code: 1, stdout: JSON.stringify({ error: { text: 'x', code: 'Sok' } }), stderr: '' }).errorCodes, [])
+    assert.deepEqual(job.interpretWranglerResult({ code: 1, stdout: JSON.stringify([{ results: [{ phone: '012345678', code: 424242 }], success: true }]), stderr: 'boom' }).errorCodes, [])
+    assert.deepEqual(job.interpretWranglerResult({ code: 0, stdout: JSON.stringify([{ results: [{ code: 7429 }], success: true, meta: {} }]), stderr: '' }).errorCodes, [])
     assert.equal(job.interpretWranglerResult({ code: 1, stdout: '', stderr: 'D1_ERROR: D1 DB is overloaded. Requests queued for too long.' }).retryable, true)
-    assert.equal(job.interpretWranglerResult({ code: 1, stdout: '', stderr: 'SQLITE_AUTH: not authorized [code: 7500]' }).retryable, false)
+    assert.equal(job.interpretWranglerResult({ code: 1, stdout: JSON.stringify({ error: { text: 'SQLITE_AUTH: not authorized', code: 7500 } }), stderr: '' }).retryable, false)
     assert.equal(job.interpretWranglerResult({ code: 1, stdout: '', stderr: 'no such table: nope' }).retryable, false)
     assert.equal(job.interpretWranglerResult({ code: 1, stdout: '', stderr: '', timedOut: true }).retryable, true)
   })

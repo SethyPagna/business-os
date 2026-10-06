@@ -47,8 +47,14 @@
 #                 ops/scripts/ops-d1-physical-lib.mjs and passed through the
 #                 same guard as d1-export. Writes encrypted per-table JSONL
 #                 chunks plus one encrypted manifest (table, rows, columns,
-#                 sha256 per table and chunk) and nothing else. The artifact
-#                 is kept ONE day: it holds personal data. Rebuild it with
+#                 sha256 per table and chunk) and nothing else. Runs only from
+#                 refs/heads/main (the job's if, and the script re-checks).
+#                 Credentials never leave D1: session, one-time-code and
+#                 lock-out tables are exported without rows, password / OTP /
+#                 API-key / token columns and sensitive settings values are
+#                 replaced in the SELECT itself (manifest.redactions). Chunk
+#                 files are padded to one fixed size. The artifact is kept ONE
+#                 day: it still holds personal data. Rebuild it with
 #                 ops/scripts/latest-data/load-d1-physical-export.mjs.
 #                 Not a point-in-time snapshot (D1 has none across statements):
 #                 run it with trading closed; tables that gained rows meanwhile
@@ -385,7 +391,7 @@ jobs:
   d1-physical-export:
     name: d1-physical-export
     needs: gate
-    if: inputs.task == 'd1-physical-export'
+    if: inputs.task == 'd1-physical-export' && github.ref == 'refs/heads/main'
     runs-on: windows-latest
     environment: production
     timeout-minutes: 150

@@ -13,31 +13,44 @@
 // Cloudflare error codes -- never a table name, a row count or a row; those are in the encrypted manifest.
 
 import {
-  CLOUDFLARE_DIR, OpsError, cloudflareErrorCodes, codesText, commitId, isMain, publicToken,
+  CLOUDFLARE_DIR, OpsError, codesText, commitId, isMain, publicToken,
   requireEnv, runId, runMain, runWrangler, say, summary, writeEncryptedReport,
 } from './ops-common.mjs'
 import { guardSql } from './ops-sql-guard.mjs'
 import { parseJsonOutput, wranglerArgs } from './ops-d1-export.mjs'
-import { CHUNK_KIND, MANIFEST_KIND, exportAll, manifestVerdict } from './ops-d1-physical-lib.mjs'
+import { CHUNK_KIND, LIMITS, MANIFEST_KIND, exportAll, manifestVerdict } from './ops-d1-physical-lib.mjs'
 
+const CPU_RESET = /exceeded its CPU time limit|\[code: 7429\]/i
 const RETRYABLE = /exceeded its CPU time limit|\[code: 7429\]|D1 DB is overloaded|Requests queued for too long|network connection lost|fetch failed|ECONNRESET|ETIMEDOUT|timed out|internal error/i
 
-// Pure: what wrangler printed -> { ok, rows, meta, retryable, errorCodes }. Row text never leaves this value.
+// Cloudflare error codes are numbers and safe to print, but only the ones in wrangler's own parsed error object are
+// trusted: scanning raw output text could pick up a number out of a row. Anything else yields no code.
+export function parsedErrorCodes(parsed) {
+  const error = parsed && !Array.isArray(parsed) && typeof parsed === 'object' ? parsed.error : null
+  if (!error || typeof error !== 'object') return []
+  const codes = new Set()
+  if (Number.isInteger(error.code) && error.code >= 100 && error.code <= 999999) codes.add(error.code)
+  const inText = typeof error.text === 'string' ? /\[code: (\d{3,6})\]/.exec(error.text) : null
+  if (inText) codes.add(Number(inText[1]))
+  return [...codes].slice(0, 5)
+}
+
+// Pure: what wrangler printed -> { ok, rows, meta, retryable, cpuReset, errorCodes }. Row text never leaves this value.
 export function interpretWranglerResult(result) {
   const text = `${result.stdout || ''}\n${result.stderr || ''}`
-  const errorCodes = cloudflareErrorCodes(text)
-  if (result.timedOut) return { ok: false, retryable: true, errorCodes }
-  if (result.code !== 0) return { ok: false, retryable: RETRYABLE.test(text), errorCodes }
   const parsed = parseJsonOutput(result.stdout)
-  if (!Array.isArray(parsed) || parsed.length !== 1) return { ok: false, retryable: false, errorCodes }
+  const errorCodes = result.code !== 0 || result.timedOut ? parsedErrorCodes(parsed) : []
+  const cpuReset = errorCodes.includes(7429) || CPU_RESET.test(text)
+  if (result.timedOut) return { ok: false, retryable: true, cpuReset: false, errorCodes }
+  if (result.code !== 0) return { ok: false, retryable: cpuReset || RETRYABLE.test(text), cpuReset, errorCodes }
+  const fail = (extra = {}) => ({ ok: false, retryable: false, cpuReset: false, errorCodes: [], ...extra })
+  if (!Array.isArray(parsed) || parsed.length !== 1) return fail()
   const set = parsed[0]
-  if (!set || !Array.isArray(set.results) || set.success === false) return { ok: false, retryable: false, errorCodes }
+  if (!set || !Array.isArray(set.results) || set.success === false) return fail()
   const meta = set.meta && typeof set.meta === 'object' ? set.meta : {}
-  if (Number(meta.rows_written || 0) !== 0 || Number(meta.changes || 0) !== 0 || meta.changed_db === true) {
-    return { ok: false, retryable: false, errorCodes, wrote: true }
-  }
-  if (set.results.some((row) => !row || typeof row !== 'object' || Array.isArray(row))) return { ok: false, retryable: false, errorCodes }
-  return { ok: true, rows: set.results, meta, retryable: false, errorCodes }
+  if (Number(meta.rows_written || 0) !== 0 || Number(meta.changes || 0) !== 0 || meta.changed_db === true) return fail({ wrote: true })
+  if (set.results.some((row) => !row || typeof row !== 'object' || Array.isArray(row))) return fail()
+  return { ok: true, rows: set.results, meta, retryable: false, cpuReset: false, errorCodes: [] }
 }
 
 // The one place a statement reaches D1: guarded, canonical, read-only.
@@ -47,14 +60,29 @@ export async function runGuarded(sql, { timeoutMs = 3 * 60 * 1000 } = {}) {
   return interpretWranglerResult(result)
 }
 
+// No timestamp, and a fixed-width sequence: every chunk envelope has the same length.
 export function chunkMeta(run, commit, seq) {
-  return { kind: CHUNK_KIND, run, commit, seq, createdAt: new Date().toISOString() }
+  return { kind: CHUNK_KIND, run, commit, seq: String(seq).padStart(6, '0') }
+}
+
+// The chunk text, then NUL bytes up to LIMITS.chunkBytes: every chunk file is the same size, whatever the table.
+export function paddedChunk(text) {
+  const body = Buffer.from(text, 'utf8')
+  if (body.length > LIMITS.chunkBytes) throw new OpsError('row-too-large', 'A chunk is larger than the fixed size.')
+  return Buffer.concat([body, Buffer.alloc(LIMITS.chunkBytes - body.length)])
+}
+
+// The job only ever runs from the default branch: what is reviewed and merged is what touches production.
+export function isMainRef(ref) {
+  return ref === 'refs/heads/main'
 }
 
 // Pure: the only lines the public log may show.
 export function publicLines({ verdict, manifest, errorCodes = [] }) {
   const lines = [['d1-physical-export sql guard: {result} (every statement one read-only SELECT)', { result: 'PASS' }]]
   lines.push(['tables, rows and sizes: {tables} (in the encrypted manifest)', { tables: 'withheld' }])
+  lines.push(['tables with rows left out: {count}', { count: manifest.omitted.length }])
+  lines.push(['redacted columns: {count}', { count: manifest.redactions.length }])
   lines.push(['encrypted files: {files}', { files: manifest.totals.files }])
   lines.push(['encrypted bytes: {bytes}', { bytes: manifest.totals.encryptedBytes }])
   lines.push(['tables changed while exporting: {count}', { count: manifest.changedDuringExport.length }])
@@ -76,14 +104,14 @@ export async function exportToDir({ outDir, run, commit, query, write = writeEnc
     query,
     emit: async ({ seq, text }) => {
       const base = `d1phys-${run}-f${String(seq).padStart(4, '0')}`
-      const written = write(outDir, base, text, chunkMeta(run, commit, seq))
+      const written = write(outDir, base, paddedChunk(text), chunkMeta(run, commit, seq))
       return { file: `${base}.enc.json`, bytes: written.bytes }
     },
   })
   const verdict = manifestVerdict(manifest)
   // The manifest is written last, even after a failure: it says which tables are complete.
   const written = write(outDir, `d1phys-${run}-manifest`, { ...manifest, ok: verdict.ok }, {
-    kind: MANIFEST_KIND, run, commit, createdAt: manifest.finishedAt,
+    kind: MANIFEST_KIND, run, commit,
   })
   manifest.totals.files += 1
   manifest.totals.encryptedBytes += written.bytes
@@ -91,6 +119,7 @@ export async function exportToDir({ outDir, run, commit, query, write = writeEnc
 }
 
 async function main() {
+  if (!isMainRef(process.env.GITHUB_REF)) throw new OpsError('ref-not-main', 'This task runs only from refs/heads/main.')
   const outDir = requireEnv('OPS_OUT_DIR')
   requireEnv('CLOUDFLARE_API_TOKEN')
   requireEnv('CLOUDFLARE_ACCOUNT_ID')

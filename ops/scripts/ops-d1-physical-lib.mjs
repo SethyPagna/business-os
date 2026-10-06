@@ -31,8 +31,11 @@ export const LIMITS = Object.freeze({
   pageRowsMin: 1,
   targetPageBytes: 2 * 1024 * 1024,
   slowPageMs: 150,
-  chunkBytes: 6 * 1024 * 1024,
+  // Every chunk file holds exactly this many plaintext bytes (the text, then NUL padding), so file sizes say nothing
+  // about a table's size. A single row larger than this fails its table.
+  chunkBytes: 2 * 1024 * 1024,
   attempts: 5,
+  cpuResetsBeforeAbort: 3,
   schemaPageRows: 100,
 })
 
@@ -42,6 +45,45 @@ const ROWID_NAMES = ['rowid', '_rowid_', 'oid']
 const SHADOW_SUFFIXES = ['_data', '_idx', '_content', '_docsize', '_config']
 
 export const MASTER_COLUMNS = Object.freeze(['type', 'name', 'tbl_name', 'sql'])
+
+// ------------------------------------------------------------- what never leaves production
+
+// Definitions are exported, rows are not: live credentials, one-time codes and lock-out counters.
+export const OMITTED_ROW_TABLES = Object.freeze([
+  'user_sessions', 'portal_sessions', 'verification_codes', 'portal_password_resets', 'login_lockouts', 'portal_auth_lockouts',
+])
+
+// Settings keys the Worker never hands out (cloudflare/src/lib/settingsSensitive.ts isSensitiveSettingKey), plus every
+// *_token key (routes/settings.ts ADMIN_ONLY_SETTING_SUFFIXES). Matched in SQL with substr(), not LIKE.
+export const SENSITIVE_SETTING_SUFFIXES = Object.freeze(['_refresh_token', '_access_token', '_secret', '_api_key', '_password', '_token'])
+export const SENSITIVE_SETTING_KEYS = Object.freeze(['drive_sync_access_token_expires_at', 'pos_address_presets_v1'])
+
+const SETTING_SENSITIVE_SQL = `(lower("key") IN (${SENSITIVE_SETTING_KEYS.map((k) => `'${k}'`).join(', ')}) OR ${SENSITIVE_SETTING_SUFFIXES.map((x) => `substr(lower("key"), -${x.length}) = '${x}'`).join(' OR ')})`
+
+// A column's replacement expression, fixed here and never taken from input. The page statement writes
+// quote(<expression>) instead of quote(<column>), so the secret is never selected, never sent, never encrypted.
+// The loader's re-hash applies the same expression to the rebuilt table, which already holds the replacement.
+export const REDACTIONS = Object.freeze({
+  users: Object.freeze({ password: "'redacted'", otp_secret: 'NULL', otp_pending_secret: 'NULL' }),
+  portal_accounts: Object.freeze({ password_hash: "'redacted'" }),
+  ai_provider_configs: Object.freeze({ api_key_encrypted: "''" }),
+  branch_cutovers: Object.freeze({ maintenance_token: "'00000000-0000-4000-8000-000000000000'", maintenance_flag_json: "'{}'" }),
+  import_jobs: Object.freeze({ lease_token: 'NULL' }),
+  system_flags: Object.freeze({ value: `CASE WHEN "key" = 'maintenance' THEN '{}' ELSE "value" END` }),
+  settings: Object.freeze({ value: `CASE WHEN ${SETTING_SENSITIVE_SQL} THEN '' ELSE "value" END` }),
+})
+
+export function redactionFor(table, column) {
+  const forTable = Object.prototype.hasOwnProperty.call(REDACTIONS, table) ? REDACTIONS[table] : null
+  return forTable && Object.prototype.hasOwnProperty.call(forTable, column) ? forTable[column] : null
+}
+
+// What the manifest records: table, column and whether the replacement depends on the row.
+export function redactionsFor(table, columns) {
+  return columns.filter((c) => redactionFor(table, c) !== null).map((column) => ({
+    table, column, kind: /^(?:'[^']*'|NULL)$/.test(redactionFor(table, column)) ? 'literal' : 'conditional',
+  }))
+}
 
 // ------------------------------------------------------------------ SQL builders
 
@@ -61,13 +103,17 @@ export function pageSql({ table, columns, rid = 'rowid', afterRid = null, limit 
   if (!Number.isInteger(limit) || limit < LIMITS.pageRowsMin || limit > LIMITS.pageRowsMax) throw new OpsError('page-limit-invalid', 'The page size is out of range.')
   if (afterRid !== null && !RID.test(afterRid)) throw new OpsError('keyset-invalid', 'The keyset value is not an integer.')
   if (!Array.isArray(columns) || !columns.length) throw new OpsError('identifier-unsupported', 'A page needs columns.')
-  const select = columns.map((column, i) => `quote(${quoteIdent(column)}) AS c${i}`).join(', ')
+  const select = columns.map((column, i) => `quote(${redactionFor(table, column) || quoteIdent(column)}) AS c${i}`).join(', ')
   const where = afterRid === null ? '' : ` WHERE ${rid} > ${afterRid}`
   return `SELECT CAST(${rid} AS TEXT) AS r, ${select} FROM ${quoteIdent(table)}${where} ORDER BY ${rid} LIMIT ${limit}`
 }
 
 export function probeSql(table) {
   return `SELECT * FROM ${quoteIdent(table)} LIMIT 1`
+}
+
+export function countSql(table) {
+  return `SELECT COUNT(*) AS n FROM ${quoteIdent(table)}`
 }
 
 export function maxRidSql(table, rid = 'rowid') {
@@ -207,17 +253,21 @@ function errorCode(err) {
 export async function exportAll({ query, emit, pause = sleepMs, concurrency = 3, now = () => new Date().toISOString(), runId = 'local', commit = 'unknown' }) {
   const startedAt = now()
   const manifest = {
-    format: FORMAT, kind: MANIFEST_KIND, database: 'business-os', runId, commit, startedAt, finishedAt: null,
-    tables: [], excluded: [], skipped: [], schema: [], sequence: null, issues: [], changedDuringExport: [],
-    totals: { tables: 0, rows: 0, plainBytes: 0, encryptedBytes: 0, files: 0, statements: 0, rowsRead: 0, retries: 0, slowestStatementMs: 0 },
+    format: FORMAT, kind: MANIFEST_KIND, database: 'business-os', runId, commit, startedAt, finishedAt: null, chunkPaddedBytes: LIMITS.chunkBytes,
+    tables: [], omitted: [], redactions: [], excluded: [], skipped: [], schema: [], sequence: null, issues: [], changedDuringExport: [],
+    totals: { tables: 0, rows: 0, plainBytes: 0, encryptedBytes: 0, files: 0, statements: 0, rowsRead: 0, retries: 0, cpuResets: 0, slowestStatementMs: 0 },
   }
   const totals = manifest.totals
   const flag = (table, code) => { manifest.issues.push(table ? { table, code } : { code }) }
+  // Each CPU reset (7429) restarts D1; after a few the export stops for good instead of hammering production.
+  let aborted = false
+  const abortError = () => new OpsError('cpu-resets-exceeded', 'Too many D1 CPU resets in one export.')
 
   // sql: the statement, or a function that builds it afresh for each attempt (a retry may use a smaller page).
   const run = async (sql, tableLabel, onRetry) => {
     let last = null
     for (let attempt = 1; attempt <= LIMITS.attempts; attempt += 1) {
+      if (aborted) throw abortError()
       totals.statements += 1
       last = await query(typeof sql === 'function' ? sql() : sql)
       if (last && last.ok) {
@@ -225,6 +275,13 @@ export async function exportAll({ query, emit, pause = sleepMs, concurrency = 3,
         totals.rowsRead += Number(meta.rows_read || 0)
         totals.slowestStatementMs = Math.max(totals.slowestStatementMs, Number(meta.duration || 0))
         return last
+      }
+      if (last && (last.cpuReset === true || (Array.isArray(last.errorCodes) && last.errorCodes.includes(7429)))) {
+        totals.cpuResets += 1
+        if (totals.cpuResets >= LIMITS.cpuResetsBeforeAbort) {
+          aborted = true
+          throw abortError()
+        }
       }
       if (!last || !last.retryable || attempt === LIMITS.attempts) break
       totals.retries += 1
@@ -292,7 +349,17 @@ export async function exportAll({ query, emit, pause = sleepMs, concurrency = 3,
     manifest.schema = classified.schema
     for (const issue of classified.issues) flag(issue.table, issue.code)
 
-    // 3. Every table.
+    // 3a. Tables whose rows never leave production: the definition stays, the row count is recorded.
+    const omittedNames = new Set(OMITTED_ROW_TABLES)
+    for (const entry of classified.tables.filter((t) => omittedNames.has(t.name))) {
+      const counted = await run(countSql(entry.name), entry.name)
+      const n = counted && counted.rows && counted.rows[0] ? Number(counted.rows[0].n) : null
+      if (!counted || !Number.isSafeInteger(n)) { flag(entry.name, 'omitted-count-failed'); continue }
+      manifest.omitted.push({ name: entry.name, rows: n, reason: 'credentials-and-lockouts' })
+    }
+    const exportable = classified.tables.filter((t) => !omittedNames.has(t.name))
+
+    // 3b. Every other table.
     let seq = 0
     const exportTable = async (entry) => {
       const record = {
@@ -309,6 +376,7 @@ export async function exportAll({ query, emit, pause = sleepMs, concurrency = 3,
         if (!record.columns.every((c) => IDENT.test(c))) { fail('identifier-unsupported'); return }
         record.ridColumn = ridColumnFor(record.columns)
         if (!record.ridColumn) { fail('rowid-shadowed'); return }
+        manifest.redactions.push(...redactionsFor(entry.name, record.columns))
         const hash = crypto.createHash('sha256')
         let rowLines = []
         let lineBytes = 0
@@ -334,12 +402,13 @@ export async function exportAll({ query, emit, pause = sleepMs, concurrency = 3,
               const line = encodeLine(row, record.columns.length)
               if (record.firstRid === null) record.firstRid = row.r
               record.lastRid = row.r
-              rowLines.push(line)
               const size = Buffer.byteLength(line) + 1
+              if (size > LIMITS.chunkBytes) throw new OpsError('row-too-large', 'One row does not fit a chunk.')
+              if (lineBytes + size > LIMITS.chunkBytes) await flush()
+              rowLines.push(line)
               bytes += size
               lineBytes += size
               record.rows += 1
-              if (lineBytes >= LIMITS.chunkBytes) await flush()
             }
             return bytes
           },
@@ -357,7 +426,7 @@ export async function exportAll({ query, emit, pause = sleepMs, concurrency = 3,
       if (grew) manifest.changedDuringExport.push(entry.name)
     }
 
-    const queue = [...classified.tables]
+    const queue = [...exportable]
     const lanes = Array.from({ length: Math.max(1, Math.min(concurrency, queue.length || 1)) }, async () => {
       while (queue.length) {
         const entry = queue.shift()
@@ -372,6 +441,8 @@ export async function exportAll({ query, emit, pause = sleepMs, concurrency = 3,
     })
     await Promise.all(lanes)
     manifest.tables.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
+    manifest.omitted.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
+    manifest.redactions.sort((a, b) => (a.table + a.column < b.table + b.column ? -1 : 1))
 
     // 4. sqlite_sequence, when D1 lets it be read.
     if (classified.sequence) {

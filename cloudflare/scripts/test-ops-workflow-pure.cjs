@@ -243,6 +243,10 @@ function strings(node, at = [], out = []) {
 const TASKS = ['d1-export', 'r2-apac-copy', 'secret-names', 'settings-upsert', 'd1-physical-export']
 const OUT_DIR = '${{ runner.temp }}/ops-out'
 const UPLOAD_PATH = '${{ runner.temp }}/ops-out/*.enc.json'
+// The only job allowed to run from any ref other than main is none: d1-physical-export reads production wholesale, so it
+// runs only from refs/heads/main (its job `if`, repeated by the script).
+const MAIN_ONLY = new Set(['d1-physical-export'])
+const jobCondition = (task) => (MAIN_ONLY.has(task) ? `inputs.task == '${task}' && github.ref == 'refs/heads/main'` : `inputs.task == '${task}'`)
 const AFTER_CHECKOUT = "always() && steps.checkout.outcome == 'success'"
 const SECRET_ENV = {
   CLOUDFLARE_API_TOKEN: '${{ secrets.CLOUDFLARE_API_TOKEN }}',
@@ -504,7 +508,7 @@ async function main() {
       const job = WF.jobs[task]
       assert.strictEqual(job.needs, 'gate', `${task}: needs gate`)
       // No status function in the `if`, so GitHub adds success(): a failed gate skips the job.
-      assert.strictEqual(job.if, `inputs.task == '${task}'`, `${task}: if`)
+      assert.strictEqual(job.if, jobCondition(task), `${task}: if`)
       assert.strictEqual(job.environment, 'production', `${task}: environment`)
       assert.deepStrictEqual(job.defaults, { run: { shell: 'pwsh' } }, `${task}: shell`)
       assert.ok(Array.isArray(job.steps) && job.steps.length, `${task}: steps`)
@@ -876,6 +880,26 @@ async function main() {
     assert.ok(s.includes('  let build = null\n') && s.includes('    build = buildBatch(plan, context)\n'), 'the written SQL is the builder output')
   })
 
+  await check('d1-physical-export: main only (job if and script), and wrangler never writes a debug log of the result pages', () => {
+    for (const task of TASKS) assert.strictEqual(WF.jobs[task].if.includes('github.ref'), MAIN_ONLY.has(task), `${task}: only the main-only tasks may test the ref`)
+    const d = code['ops/scripts/ops-d1-physical-export.mjs']
+    assert.ok(d.includes("if (!isMainRef(process.env.GITHUB_REF)) throw new OpsError('ref-not-main'"), 'main() refuses before any other work')
+    assert.ok(d.indexOf("isMainRef(process.env.GITHUB_REF)") < d.indexOf("requireEnv('OPS_OUT_DIR')"), 'the ref check comes first')
+    assert.strictEqual(count(d, /process\.env\.GITHUB_REF/g), 1)
+    assert.ok(/export function isMainRef\(ref\) \{\n  return ref === 'refs\/heads\/main'\n\}/.test(d))
+    const c = code['ops/scripts/ops-common.mjs']
+    assert.ok(c.includes("WRANGLER_WRITE_LOGS: 'false',") && c.includes('WRANGLER_LOG_PATH: WRANGLER_LOG_DIR,'), 'wrangler logging to disk is off')
+    assert.ok(c.indexOf('...extra,') < c.indexOf("WRANGLER_WRITE_LOGS: 'false'"), 'a caller env cannot switch it back on')
+    assert.ok(c.includes('env: wranglerEnv(env),') && count(c, /env:\s*\{?\s*\.\.\.process\.env/g) === 0, 'the child env is built only by wranglerEnv')
+    assert.ok(c.includes('fs.rmSync(WRANGLER_LOG_DIR, { recursive: true, force: true })'), 'the scratch log folder is deleted after each run')
+    const env = common.wranglerEnv({})
+    assert.strictEqual(env.WRANGLER_WRITE_LOGS, 'false')
+    assert.strictEqual(path.resolve(env.WRANGLER_LOG_PATH), path.resolve(os.tmpdir(), path.basename(env.WRANGLER_LOG_PATH)))
+    // the real child: spawn a probe through the same env builder and read the variables back
+    const probe = spawnSync(process.execPath, ['-e', 'process.stdout.write(process.env.WRANGLER_WRITE_LOGS + "|" + process.env.WRANGLER_LOG_PATH)'], { env, encoding: 'utf8' })
+    assert.strictEqual(probe.stdout, `false|${common.WRANGLER_LOG_DIR}`)
+  })
+
   await check('ops scripts: they import only each other and node built-ins, and read only listed environment variables', () => {
     for (const [file, text] of Object.entries(code)) {
       for (const m of text.matchAll(/\bfrom '([^']+)'/g)) {
@@ -903,7 +927,7 @@ async function main() {
         required.set(file, [...(required.get(file) || []), m[1].slice(1, -1)])
       }
     }
-    assert.deepStrictEqual([...dotted].sort(), ['CLOUDFLARE_API_TOKEN', 'GITHUB_EVENT_PATH', 'GITHUB_RUN_ID', 'GITHUB_SHA', 'GITHUB_STEP_SUMMARY', 'OPS_R2_MODE'])
+    assert.deepStrictEqual([...dotted].sort(), ['CLOUDFLARE_API_TOKEN', 'GITHUB_EVENT_PATH', 'GITHUB_REF', 'GITHUB_RUN_ID', 'GITHUB_SHA', 'GITHUB_STEP_SUMMARY', 'OPS_R2_MODE'])
     assert.strictEqual(indexed, 1, 'process.env[name] only in requireEnv')
     assert.strictEqual(spread, 1, 'the environment is passed on only to wrangler')
     // Every step gives its script what the script requires.

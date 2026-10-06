@@ -226,18 +226,26 @@ The snapshot tool above needs the owner's terminal and pages with `OFFSET`. The 
 `d1-physical-export` (`.github/workflows/ops.yml`, same Production approval and encryption as `d1-export`)
 reads EVERY physical table (`d1_migrations` included; FTS5 virtual tables, their shadow tables, `sqlite_*` and
 `_cf_*` left out) by rowid keyset, one guarded SELECT per page, and uploads encrypted per-table JSONL chunks plus an
-encrypted manifest (kept ONE day). Nothing but verdict, file and byte counts reaches the public log.
+encrypted manifest (kept ONE day). It runs only from `refs/heads/main`. Nothing but verdict, file and byte counts
+reaches the public log. Credentials stay in D1: the session, one-time-code and lock-out tables are exported without rows,
+password / OTP / API-key / token columns and sensitive settings values are replaced inside the SELECT (the list is in
+the encrypted manifest: `redactions`, `omitted`). Every chunk file has the same size.
 
 ```
-gh workflow run ops.yml --ref <branch> -f task=d1-physical-export -f confirm=d1-physical-export
+gh workflow run ops.yml --ref main -f task=d1-physical-export -f confirm=d1-physical-export
 gh run download <run-id> -n ops-d1-physical-export -D <input-folder>
-node ops/scripts/latest-data/load-d1-physical-export.mjs --input <input-folder> --private-key <private-key-file> --out <database.sqlite>
+node ops/scripts/latest-data/load-d1-physical-export.mjs --input <input-folder> --private-key <private-key-file> --run <run-id> --out <database.sqlite>
 ```
 
 `--schema export` (default) rebuilds production's own schema from the DDL in the manifest, then
 `wrangler d1 migrations apply --local` applies only the migrations production has not seen; `--schema migrations
 --migrations cloudflare/migrations` builds the schema from the migration files and loads the rows into it. The
-output must be outside the repository (it holds personal data). The loader verifies every chunk (decrypt, run,
+output must be outside the repository and outside any folder with a `.git` entry (it holds personal data; `*.sqlite` is
+gitignored as a second guard). `--run` must equal the run id in the manifest. After the checks the loader neutralises the
+copy: Telegram chat and topic ids cleared, automation off, pending scheduled sends skipped, mail/bot keys and the
+maintenance flag removed. To use the file with wrangler, keep the local D1 state outside the repo too:
+`wrangler dev --persist-to <folder-outside-the-repo>`, stop it, and copy the file over that folder's
+`v3/d1/miniflare-D1DatabaseObject/<hash>.sqlite` (delete its `-wal`/`-shm`). The loader verifies every chunk (decrypt, run,
 sequence, sha256, row count), then after the load each table's `COUNT(*)` and a re-hash of the table in rowid order
 against the manifest. Tests: `cloudflare/scripts/test-ops-d1-physical-export-pure.cjs` and
 `test-ops-d1-physical-export-scale-workerd.cjs` (`CUTOVER_SCALE=1` for the production-size numbers).

@@ -4,11 +4,13 @@
 //
 //   gh run download <run-id> -n ops-d1-physical-export -D <input-folder>
 //   node ops/scripts/latest-data/load-d1-physical-export.mjs --input <input-folder> --private-key <private-key-file> --out <database.sqlite>
-//        [--schema export|migrations] [--migrations <folder>] [--force] [--allow-incomplete] [--strict-fk]
+//        --run <run-id> [--schema export|migrations] [--migrations <folder>] [--force] [--allow-incomplete] [--strict-fk]
 //
 // The private key never enters the repository; a passphrase-protected key reads its passphrase from
-// OPS_KEY_PASSPHRASE. The database holds the PRODUCTION DATA, personal data included, so it is refused inside
-// this repository: write it to Records/Backups or a scratch folder.
+// OPS_KEY_PASSPHRASE. --run must equal the run id inside the manifest (a manifest from another run is refused).
+// The database holds PRODUCTION DATA, personal data included (credentials, sessions and one-time codes are not in
+// the export: see manifest.redactions / manifest.omitted), so it is refused inside any folder that contains a .git
+// entry: write it to Records/Backups or a scratch folder, and point wrangler's --persist-to at a folder outside the repo.
 //
 // --schema export (default): the tables, indexes and views are created from the production DDL stored in the
 //   manifest, the rows are loaded, then triggers and FTS tables are created and the FTS indexes rebuilt. The result
@@ -30,6 +32,7 @@ import crypto from 'node:crypto'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { DatabaseSync } from 'node:sqlite'
 import { decryptEnvelope, loadPrivateKey } from '../ops-crypto.mjs'
+import { scanSql } from '../ops-sql-guard.mjs'
 import {
   CHUNK_KIND, EMPTY_SHA256, FORMAT, LIMITS, MANIFEST_KIND, decodeLines, encodeLine, pageSql, parseQuoted, quoteIdent, sha256Hex,
 } from '../ops-d1-physical-lib.mjs'
@@ -39,6 +42,58 @@ const MANIFEST_FILE = /^d1phys-([a-z0-9]+)-manifest\.enc\.json$/
 const CHUNK_FILE = /^d1phys-[a-z0-9]+-f\d{4,}\.enc\.json$/
 
 class LoadError extends Error {}
+
+// A manifest is trusted no further than its encryption: anyone holding the public key can write one. Every DDL entry
+// must be exactly one CREATE TABLE / VIRTUAL TABLE (fts5) / INDEX / VIEW / TRIGGER for its own name and type, so a
+// forged manifest cannot ATTACH a file, VACUUM INTO a path, or run a second statement.
+const ENTRY_HEAD = {
+  table: /^CREATE\s+(?:VIRTUAL\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:[\w$]+)?\s*USING\s+fts5\b|TABLE\b)/i,
+  index: /^CREATE\s+(?:UNIQUE\s+)?INDEX\b/i,
+  view: /^CREATE\s+VIEW\b/i,
+  trigger: /^CREATE\s+TRIGGER\b/i,
+}
+const NEVER = new Set(['ATTACH', 'DETACH', 'VACUUM', 'PRAGMA', 'LOAD_EXTENSION', 'DROP', 'ALTER', 'REINDEX', 'ANALYZE', 'SAVEPOINT', 'RELEASE', 'COMMIT', 'ROLLBACK', 'TEMP', 'TEMPORARY'])
+
+export function assertSingleCreate(entry) {
+  if (!entry || typeof entry.sql !== 'string' || typeof entry.type !== 'string' || typeof entry.name !== 'string' || !entry.sql.trim()) throw new LoadError('a schema entry is malformed')
+  const head = ENTRY_HEAD[entry.type]
+  if (!head) throw new LoadError(`a schema entry has the unsupported type ${entry.type}`)
+  let parts
+  try {
+    parts = scanSql(entry.sql)
+  } catch {
+    throw new LoadError(`the DDL of ${entry.type} ${entry.name} cannot be read as SQL`)
+  }
+  const code = parts.map((part) => (part.type === 'code' ? part.text : ' ')).join('')
+  const bad = (why) => new LoadError(`the DDL of ${entry.type} ${entry.name} is refused: ${why}`)
+  if (!head.test(code.trimStart())) throw bad('it is not a single CREATE of its own kind')
+  const words = [...code.matchAll(/[A-Za-z_][A-Za-z0-9_$]*/g)].map((m) => m[0].toUpperCase())
+  for (const word of words) if (NEVER.has(word)) throw bad(`${word} is not allowed`)
+  if (words.filter((w) => w === 'CREATE').length !== 1) throw bad('more than one CREATE')
+  const body = code.trim().replace(/;\s*$/, '')
+  const semicolons = [...body.matchAll(/;/g)].length
+  if (entry.type !== 'trigger') {
+    if (semicolons || words.includes('BEGIN')) throw bad('more than one statement')
+    return
+  }
+  const begins = words.filter((w) => w === 'BEGIN').length
+  const ends = words.filter((w) => w === 'END').length
+  const cases = words.filter((w) => w === 'CASE').length
+  if (begins !== 1 || ends !== cases + 1 || words[words.length - 1] !== 'END') throw bad('a trigger must be one CREATE TRIGGER ... BEGIN ... END')
+  const afterBegin = body.slice(body.search(/\bBEGIN\b/i))
+  if (body.slice(0, body.length - afterBegin.length).includes(';')) throw bad('a semicolon before BEGIN')
+}
+
+// Refused: this repository, and any folder that has a .git entry in it or above it (a clone, a worktree, a scratch repo).
+function insideGitFolder(file) {
+  let dir = path.dirname(path.resolve(file))
+  for (;;) {
+    if (fs.existsSync(path.join(dir, '.git'))) return true
+    const parent = path.dirname(dir)
+    if (parent === dir) return false
+    dir = parent
+  }
+}
 
 function insideRepo(file) {
   const rel = path.relative(REPO_ROOT, path.resolve(file))
@@ -73,10 +128,14 @@ export function readChunk(inputDir, privateKey, manifest, table, chunk) {
   if (!fs.existsSync(file)) throw new LoadError(`chunk ${chunk.seq} (${table.name}) is missing from the input folder`)
   const { plaintext, header } = decryptEnvelope(readEnvelope(file), privateKey)
   const meta = header.meta || {}
-  if (meta.kind !== CHUNK_KIND || String(meta.run) !== String(manifest.runId) || Number(meta.seq) !== chunk.seq) {
+  if (meta.kind !== CHUNK_KIND || String(meta.run) !== String(manifest.runId) || String(meta.seq) !== String(chunk.seq).padStart(6, '0')) {
     throw new LoadError(`chunk ${chunk.seq} (${table.name}) belongs to another run or position`)
   }
-  const text = plaintext.toString('utf8')
+  if (!Number.isInteger(chunk.plainBytes) || plaintext.length !== manifest.chunkPaddedBytes || chunk.plainBytes > plaintext.length) {
+    throw new LoadError(`chunk ${chunk.seq} (${table.name}) has the wrong padded size`)
+  }
+  if (plaintext.subarray(chunk.plainBytes).some((byte) => byte !== 0)) throw new LoadError(`chunk ${chunk.seq} (${table.name}) has data after its text`)
+  const text = plaintext.subarray(0, chunk.plainBytes).toString('utf8')
   if (sha256Hex(text) !== chunk.sha256) throw new LoadError(`chunk ${chunk.seq} (${table.name}) does not match its manifest sha256`)
   const rows = decodeLines(text, table.columns.length)
   if (rows.length !== chunk.rows) throw new LoadError(`chunk ${chunk.seq} (${table.name}) has ${rows.length} rows, the manifest says ${chunk.rows}`)
@@ -167,16 +226,34 @@ function isVirtual(entry) {
   return /^\s*CREATE\s+VIRTUAL\s+TABLE/i.test(entry.sql)
 }
 
+// After the data is verified, the copy is made unable to reach the outside: Telegram chat and topic ids and the
+// automation switch are cleared, pending scheduled sends are skipped, any mail or bot key is dropped, and a
+// production maintenance flag is removed. The Worker's own secrets (bot token, mail key) are never in D1.
+export function neutralise(db) {
+  const has = (name) => db.prepare("SELECT 1 AS x FROM sqlite_master WHERE type = 'table' AND name = ?").get(name)
+  const out = { telegramSettings: 0, scheduledSends: 0, keysDropped: 0, maintenanceFlags: 0 }
+  if (has('settings')) {
+    out.telegramSettings = Number(db.prepare("UPDATE settings SET value = '' WHERE key = 'telegram_chat_id' OR key LIKE 'telegram_topic_%'").run().changes)
+    out.telegramSettings += Number(db.prepare("UPDATE settings SET value = 'false' WHERE key = 'telegram_automation_enabled'").run().changes)
+    out.keysDropped = Number(db.prepare("DELETE FROM settings WHERE lower(key) LIKE '%resend%' OR lower(key) LIKE '%bot_token%' OR lower(key) LIKE 'telegram_bot%' OR lower(key) LIKE '%webhook_secret%'").run().changes)
+  }
+  if (has('telegram_scheduled_sends')) out.scheduledSends = Number(db.prepare("UPDATE telegram_scheduled_sends SET status = 'skipped' WHERE status IN ('pending', 'sending')").run().changes)
+  if (has('system_flags')) out.maintenanceFlags = Number(db.prepare("DELETE FROM system_flags WHERE key = 'maintenance'").run().changes)
+  return out
+}
+
 export function buildDatabase({ manifest, inputDir, privateKey, outPath, schemaMode = 'export', migrationsDir = null, force = false, log = () => {} }) {
   const problems = []
-  if (insideRepo(outPath)) throw new LoadError('refusing to write production data inside this repository; choose a folder outside it')
+  if (insideRepo(outPath) || insideGitFolder(outPath)) throw new LoadError('refusing to write production data inside this repository or any folder under a .git; choose a folder outside it')
+  for (const entry of manifest.schema) assertSingleCreate(entry)
+  if (manifest.omitted === undefined || manifest.redactions === undefined) throw new LoadError('the manifest predates redaction; refusing it')
   if (fs.existsSync(outPath)) {
     if (!force) throw new LoadError(`${outPath} already exists; pass --force to replace it`)
     fs.rmSync(outPath)
   }
   fs.mkdirSync(path.dirname(path.resolve(outPath)), { recursive: true })
   const db = new DatabaseSync(outPath)
-  db.exec('PRAGMA foreign_keys = OFF; PRAGMA journal_mode = MEMORY; PRAGMA synchronous = OFF;')
+  db.exec('PRAGMA foreign_keys = OFF; PRAGMA journal_mode = MEMORY; PRAGMA synchronous = OFF; PRAGMA temp_store = MEMORY;')
   const schemaTables = manifest.schema.filter((e) => e.type === 'table' && !isVirtual(e))
   const deferred = { triggers: [], virtual: [], indexes: [], views: [] }
 
@@ -261,13 +338,14 @@ export function buildDatabase({ manifest, inputDir, privateKey, outPath, schemaM
       inFolderNotApplied: folder ? folder.filter((n) => !applied.includes(n)) : null,
     }
   }
+  checks.neutralised = neutralise(db)
   db.close()
   return { problems, warnings, checks }
 }
 
 function parseArgs(argv) {
   const flags = new Set(['--force', '--allow-incomplete', '--strict-fk'])
-  const valued = new Set(['--input', '--private-key', '--out', '--schema', '--migrations'])
+  const valued = new Set(['--input', '--private-key', '--out', '--schema', '--migrations', '--run'])
   const out = { values: {}, flags: new Set() }
   for (let i = 0; i < argv.length; i += 1) {
     if (flags.has(argv[i])) out.flags.add(argv[i])
@@ -278,12 +356,13 @@ function parseArgs(argv) {
 
 export function main(argv) {
   const { values, flags } = parseArgs(argv)
-  const usage = 'Usage: node ops/scripts/latest-data/load-d1-physical-export.mjs --input <folder> --private-key <private-key-file> --out <database.sqlite> [--schema export|migrations] [--migrations <folder>] [--force] [--allow-incomplete] [--strict-fk]'
-  if (!values['--input'] || !values['--private-key'] || !values['--out']) throw new LoadError(usage)
+  const usage = 'Usage: node ops/scripts/latest-data/load-d1-physical-export.mjs --input <folder> --private-key <private-key-file> --out <database.sqlite> --run <run-id> [--schema export|migrations] [--migrations <folder>] [--force] [--allow-incomplete] [--strict-fk]'
+  if (!values['--input'] || !values['--private-key'] || !values['--out'] || !values['--run']) throw new LoadError(usage)
   const schemaMode = values['--schema'] || 'export'
   if (!['export', 'migrations'].includes(schemaMode)) throw new LoadError('--schema is export or migrations')
   const privateKey = loadPrivateKey(fs.readFileSync(values['--private-key'], 'utf8'), process.env.OPS_KEY_PASSPHRASE || undefined)
   const manifest = readManifest(values['--input'], privateKey)
+  if (String(manifest.runId) !== values['--run']) throw new LoadError(`the manifest is from run ${manifest.runId}, not the run ${values['--run']} you named`)
   const say = (line) => process.stdout.write(`${line}\n`)
   say(`run ${manifest.runId} commit ${manifest.commit}: ${manifest.tables.length} tables, ${manifest.totals.rows} rows, ${manifest.totals.files} chunk files`)
   for (const skipped of manifest.skipped || []) say(`not exported: ${skipped.name} (${skipped.reason}); AUTOINCREMENT counters restart at each table's max id`)
@@ -299,6 +378,8 @@ export function main(argv) {
     migrationsDir: values['--migrations'] || null, force: flags.has('--force'), log: say,
   })
   for (const w of warnings) say(`warning: ${w}`)
+  say(`credential/session tables left empty: ${manifest.omitted.length}; redacted columns: ${manifest.redactions.length}`)
+  say(`neutralised: ${JSON.stringify(checks.neutralised)}`)
   say(`tables re-read and compared: ${checks.tables.length}, matching: ${checks.tables.filter((t) => t.ok).length}`)
   say(`foreign_key_check violations: ${checks.foreignKeyViolations}`)
   if (checks.migrations) {
