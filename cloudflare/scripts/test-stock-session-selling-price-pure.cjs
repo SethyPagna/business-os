@@ -226,4 +226,53 @@ async function run() {
   }
 }
 
-run().catch((error) => { console.error(error); process.exit(1) })
+async function unlockedPricing() {
+  // 6. Coordinator, 6 Oct 2026: the unlocked-pricing block is the same price edit as the single sellingPrice field. A changed
+  // selling or wholesale price, or a changed product discount, needs Edit product and the price action; the prefilled
+  // (unchanged) block, and cost or barcode edits inside it, need only the inventory grant.
+  const STORED = { selling_price_usd: 5, selling_price_khr: 0, wholesale_price_usd: 0, wholesale_price_khr: 0, discount_enabled: 0, discount_type: 'percent', discount_percent: 0, discount_amount_usd: 0, discount_amount_khr: 0 }
+  const unlocked = (pricing) => ({ quantity: 2, unitCostUsd: 3.5, unlockPricing: true, pricing: { ...STORED, ...pricing } })
+  const NO_PRICE = { id: 4, username: 'nop', name: 'NoPrice', permissions: JSON.stringify({ inventory: true, products: true, 'products:price': false, product_cost_edit: true }) }
+  const EDITOR = { id: 5, username: 'ed', name: 'Editor', permissions: JSON.stringify({ inventory: true, products: true, product_cost_edit: true }) }
+  const changes = [
+    ['selling price USD', { selling_price_usd: 7 }], ['selling price KHR', { selling_price_khr: 28000 }],
+    ['wholesale price USD', { wholesale_price_usd: 4 }], ['wholesale price KHR', { wholesale_price_khr: 16000 }],
+    ['discount on', { discount_enabled: true }], ['discount type', { discount_type: 'fixed' }], ['discount percent', { discount_percent: 90 }],
+    ['discount USD', { discount_amount_usd: 2 }], ['discount KHR', { discount_amount_khr: 8000 }],
+    ['the 90 percent cut', { discount_enabled: true, discount_type: 'percent', discount_percent: 90 }],
+  ]
+  // One database for every refusal (a refusal writes nothing, which is asserted each time), one for the allowed cases: migrating a
+  // fresh schema per case made this file take minutes.
+  const refusalDb = freshDb()
+  for (const [who, user] of [['stock clerk with no Products grant', STOCK_CLERK], ['Products edit with the price action off', NO_PRICE]]) {
+    for (const [label, change] of changes) {
+      const db = refusalDb
+      auditCalls = []
+      const { status, json } = await callAs(inventoryMod.runAdjustAction, db, user, { client_request_id: 'fixture_unlock_' + (++adjustProbeSeq) + '_abcdefgh', productId: 1, branchId: 1, type: 'add', reason: 'New arrival', supplierName: 'Bong Long', paymentStatus: 'paid', ...unlocked(change) })
+      assert.equal(status, 403, who + ' / ' + label + ': ' + JSON.stringify(json))
+      assert.equal(json.code, 'price_edit_required', who + ' / ' + label)
+      assert.equal(stock(db), 0, who + ' / ' + label + ': no stock moved')
+      assert.equal(db.prepare('SELECT COUNT(*) AS n FROM products').get().n, 1, who + ' / ' + label + ': no sibling row created')
+      assert.deepEqual(price(db), { selling_price_usd: 5, selling_price_khr: 0 }, who + ' / ' + label + ': price unchanged')
+    }
+  }
+  // The same requests are allowed for the roles that hold the price action, and an unchanged prefill needs nothing beyond inventory.
+  const allowedDb = freshDb()
+  let received = 0
+  for (const [who, user, change] of [
+    ['stock clerk, unchanged prefill', STOCK_CLERK, {}], ['no-price role, unchanged prefill', NO_PRICE, {}],
+    ['stock clerk, cost only', STOCK_CLERK, { cost_usd: 4 }], ['no-price role, same price in another spelling', NO_PRICE, { selling_price_usd: '5.00', discount_enabled: 0, discount_type: 'PERCENT' }],
+    // Last: these change the stored price and discount the cases above compare against.
+    ['admin', ADMIN, { selling_price_usd: 7 }], ['admin', ADMIN, { discount_enabled: true, discount_percent: 10 }],
+    ['Products edit with the default price action', EDITOR, { wholesale_price_usd: 4 }], ['Products edit with the default price action', EDITOR, { discount_enabled: true, discount_percent: 10 }],
+  ]) {
+    const db = allowedDb
+    const { status, json } = await callAs(inventoryMod.runAdjustAction, db, user, { client_request_id: 'fixture_unlock_' + (++adjustProbeSeq) + '_abcdefgh', productId: 1, branchId: 1, type: 'add', reason: 'New arrival', supplierName: 'Bong Long', paymentStatus: 'paid', ...unlocked(change) })
+    assert.equal(status, 200, who + ' ' + JSON.stringify(change) + ': ' + JSON.stringify(json))
+    received += 2
+    assert.equal(db.prepare('SELECT COALESCE(SUM(quantity),0) AS n FROM branch_stock').get().n, received, who + ': the receipt landed')
+  }
+  console.log('PASS the unlocked pricing block needs the price action for a changed price or discount, and nothing extra when unchanged')
+}
+
+run().then(unlockedPricing).catch((error) => { console.error(error); process.exit(1) })

@@ -143,7 +143,9 @@ const conflictControl = loadReal('lib/conflictControl.ts')
 const movementCostSnapshot = loadReal('lib/movementCostSnapshot.ts', { './moneyPrecision': moneyPrecision })
 let capturedRevertMovement = null
 
-const FAKE_USER = { id: 1, username: 'tester', name: 'Test User', permissions: JSON.stringify({ inventory: true, product_cost_edit: true, product_cost_view: true }) }
+const FAKE_USER = { id: 1, username: 'tester', name: 'Test User', permissions: JSON.stringify({ inventory: true, products: true, product_cost_edit: true, product_cost_view: true }) }
+// products: true -- an unlocked-pricing block that changes a price needs Edit product and the price action (coordinator, 6 Oct 2026);
+// these cases test the receipt arithmetic, not that gate (see test-stock-session-selling-price-pure.cjs).
 
 // Only the /adjust path is driven here -- the list/search/dated-count
 // endpoints' dependencies are stubbed inert (never called by these checks).

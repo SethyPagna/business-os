@@ -1843,6 +1843,22 @@ async function runAdjustActionKernel(c: InventoryContext, body: Record<string, u
       costKhr: explicitCostKhr ?? (Number(source.cost_price_khr) || 0),
       barcode: pricing.barcode != null ? (String(pricing.barcode).trim() || null) : source.barcode,
     }
+    // The unlocked block is the same price edit as the single sellingPrice field above: a changed selling or wholesale
+    // price, or a changed product discount (a price too -- lib/productDiscountGate.ts), needs Edit product and the price
+    // action. The form prefills the stored values, so an unchanged block needs neither. Stock, cost and barcode edits
+    // in the block are not price and keep the inventory gate alone.
+    if (getActionTier(user, 'products', 'edit') !== 'full' || getActionTier(user, 'products', 'price') === 'none') {
+      const moneyDiffers = (next: number, stored: number | null) => roundMoney4(next) !== roundMoney4(Number(stored) || 0)
+      const priceChanged = moneyDiffers(overrides.sellingUsd, source.selling_price_usd) || moneyDiffers(overrides.sellingKhr, source.selling_price_khr)
+        || moneyDiffers(overrides.wholesaleUsd, source.wholesale_price_usd) || moneyDiffers(overrides.wholesaleKhr, source.wholesale_price_khr)
+        // The same comparison as lib/productDiscountGate.ts productDiscountChanged (enabled, kind, percent, USD and KHR amount),
+        // inlined because this route is loaded by many harnesses that resolve only the libs they name.
+        || overrides.discountEnabled !== Boolean(source.discount_enabled)
+        || (String(overrides.discountType).trim().toLowerCase() === 'fixed') !== (String(source.discount_type ?? '').trim().toLowerCase() === 'fixed')
+        || moneyDiffers(overrides.discountPercent, source.discount_percent)
+        || moneyDiffers(overrides.discountAmountUsd, source.discount_amount_usd) || moneyDiffers(overrides.discountAmountKhr, source.discount_amount_khr)
+      if (priceChanged) return c.json({ error: 'Price edit permission is required to change the selling price', code: 'price_edit_required' }, 403)
+    }
     let resolved: Awaited<ReturnType<typeof resolveAddStockTarget>>
     try {
       resolved = await resolveAddStockTarget(c.env, source, overrides, async (target) => {
