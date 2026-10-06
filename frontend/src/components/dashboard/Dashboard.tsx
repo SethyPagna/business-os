@@ -8,7 +8,8 @@ import { useMemo } from 'react'
 import { useRef } from 'react'
 import StatsStrip, { statsPresetRange, type StatCardDef, type StatsPresetKey } from '../shared/StatsStrip.tsx'
 import { STATS_PRESETS } from '../shared/statsStripPresets.ts'
-import { fmtTime } from '../../utils/formatters'
+import { fmtDateOnly, fmtTime } from '../../utils/formatters'
+import { formatHourOfDay } from '../../utils/dateLabels'
 import { todayStr } from '../../utils/dateHelpers'
 import { buildEquation, revenueTerms, profitTerms } from '../../utils/statsFormulas'
 import Download from 'lucide-react/dist/esm/icons/download.js'
@@ -520,12 +521,9 @@ function ChartFallback({ className = 'h-52' }: { className?: string }) {
   )
 }
 
-function formatDashboardHourLabel(hourValue: unknown): string {
-  const hour = ((Number(hourValue) % 24) + 24) % 24
-  if (hour === 0) return '12 AM'
-  if (hour === 12) return '12 PM'
-  return hour < 12 ? `${hour} AM` : `${hour - 12} PM`
-}
+// The hour is the business-zone hour the Worker already bucketed; formatHourOfDay
+// writes it as the app's 24-hour clock ("14:00", never "2 PM").
+const formatDashboardHourLabel = formatHourOfDay
 
 function PaymentMethodCard({ analytics, analyticsPending, analyticsUnavailable, analyticsError, translateOr, fmtUSD, onOpen }: {
   analytics: DashboardAnalytics | null
@@ -656,7 +654,7 @@ function ExpiryAlertsCard({ summary, translateOr, onOpen, onViewMore }: {
   const items = summary?.expiring_products || []
   return <div className="card flex flex-col">
     <div className="flex items-center justify-between border-b border-gray-100 px-3 py-2.5 sm:px-4 dark:border-gray-700"><h2 className="font-semibold text-gray-900 dark:text-white">{translateOr('product_expiry_alerts', 'Expiry alerts', 'ការជូនដំណឹងផុតកំណត់')}</h2>{Number(summary?.expiring_count || 0) > 0 ? <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">{summary?.expiring_count}</span> : null}</div>
-    <div className={`divide-y divide-gray-100 dark:divide-gray-700 ${CARD_LIST_BODY}`}>{!items.length ? <p className="p-4 text-center text-sm text-gray-400">{translateOr('no_data', 'No data found', 'រកមិនឃើញទិន្នន័យ')}</p> : items.map((item) => <button key={item.id} type="button" onClick={() => onOpen(item)} className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800/50 sm:px-4"><p className="min-w-0 break-words text-[13px] leading-4 text-gray-700 dark:text-gray-300 sm:text-sm">{item.name}</p><span className={`shrink-0 ${Number(item.days_until_expiry || 0) < 0 ? 'badge-red' : 'badge-yellow'}`}>{item.expiry_date}</span></button>)}</div>
+    <div className={`divide-y divide-gray-100 dark:divide-gray-700 ${CARD_LIST_BODY}`}>{!items.length ? <p className="p-4 text-center text-sm text-gray-400">{translateOr('no_data', 'No data found', 'រកមិនឃើញទិន្នន័យ')}</p> : items.map((item) => <button key={item.id} type="button" onClick={() => onOpen(item)} className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left transition hover:bg-slate-50 dark:hover:bg-slate-800/50 sm:px-4"><p className="min-w-0 break-words text-[13px] leading-4 text-gray-700 dark:text-gray-300 sm:text-sm">{item.name}</p><span className={`shrink-0 ${Number(item.days_until_expiry || 0) < 0 ? 'badge-red' : 'badge-yellow'}`}>{fmtDateOnly(item.expiry_date)}</span></button>)}</div>
     <DashboardViewMoreFooter show={items.length > 5} translateOr={translateOr} onClick={onViewMore} />
   </div>
 }
@@ -1572,7 +1570,7 @@ export default function Dashboard() {
       sub: translateOr('product_expiry_alerts', 'Expiry alerts', 'ការជូនដំណឹងផុតកំណត់'),
       details: [
         { label: t('category') || 'Category', value: item.category || '--' },
-        { label: translateOr('expiry_date', 'Expiry date'), value: item.expiry_date || '--' },
+        { label: translateOr('expiry_date', 'Expiry date'), value: item.expiry_date ? fmtDateOnly(item.expiry_date) : '--' },
         Number.isFinite(days) ? { label: translateOr('days_until_expiry', 'Days until expiry'), value: days < 0 ? `${Math.abs(days)} ${translateOr('days_overdue', 'overdue')}` : days } : null,
       ].filter(Boolean) as Array<{ label: ReactNode; value: ReactNode }>,
     })
@@ -2116,7 +2114,7 @@ ${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} 
             <>
               <div className="flex-1 min-h-[13rem]">
                 <Suspense fallback={<ChartFallback />}>
-                  <LineChart data={chartRenderData} lines={[
+                  <LineChart data={chartRenderData} translate={t} lines={[
                     { key:'gross_sales_usd', color:'#0891b2', label: grossSalesLabel },
                     { key:'refund_usd', color:'#f97316', label: refundsLabel },
                     { key:'revenue_usd', color:'#2563eb', label: netRevenueLabel },
@@ -2133,7 +2131,7 @@ ${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} 
             <>
               <div className="flex-1 min-h-[13rem]">
                 <Suspense fallback={<ChartFallback />}>
-                  <LineChart data={chartRenderData} lines={[{ key:'revenue_usd', color:'#2563eb', label: profitRevenueLabel },{ key:'cost_usd', color:'#dc2626', label: cogsLabel },{ key:'profit_usd', color:'#16a34a', label: estProfitLabel }]} />
+                  <LineChart data={chartRenderData} translate={t} lines={[{ key:'revenue_usd', color:'#2563eb', label: profitRevenueLabel },{ key:'cost_usd', color:'#dc2626', label: cogsLabel },{ key:'profit_usd', color:'#16a34a', label: estProfitLabel }]} />
                 </Suspense>
               </div>
               <div className="compact-analytics-legend mt-1.5 flex flex-nowrap items-center gap-1 overflow-x-auto">
@@ -2146,7 +2144,7 @@ ${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} 
             <>
               <div className="flex-1 min-h-[13rem]">
                 <Suspense fallback={<ChartFallback className="h-48" />}>
-                  <BarChart data={chartRenderData} valueKey="count" labelKey="period" color="#7c3aed" isCount />
+                  <BarChart data={chartRenderData} translate={t} valueKey="count" labelKey="period" color="#7c3aed" isCount />
                 </Suspense>
               </div>
               <div className="mt-1.5 flex items-center gap-1.5"><div className="inline-flex items-center gap-2 rounded-full bg-slate-50 px-2.5 py-1 dark:bg-slate-800/70"><div className="h-3.5 w-3.5 rounded bg-purple-600"/><span className="text-sm font-semibold text-slate-600 dark:text-slate-200">{salesCountLabel}</span></div></div>
@@ -2623,7 +2621,7 @@ ${translateOr('delivery_margin', 'Delivery profit')} ${fmtUSD(aDeliveryMargin)} 
               onClick={() => { setExpiryAlertsListOpen(false); openExpiryDetail(item) }}
             >
               <div className="min-w-0 break-words text-sm text-gray-700 dark:text-gray-300">{item.name}</div>
-              <span className={`shrink-0 ${Number(item.days_until_expiry || 0) < 0 ? 'badge-red' : 'badge-yellow'}`}>{item.expiry_date}</span>
+              <span className={`shrink-0 ${Number(item.days_until_expiry || 0) < 0 ? 'badge-red' : 'badge-yellow'}`}>{fmtDateOnly(item.expiry_date)}</span>
             </button>
           )}
         />

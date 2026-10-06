@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { MouseEvent } from 'react'
 import { fmtShort } from '../../../utils/formatters'
+import { chartLabelsNeedYear, formatChartAxisLabel, formatChartTooltipLabel, type MonthTranslate } from '../../../utils/dateLabels'
 import NoData from './NoData'
 
 type ChartDatum = Record<string, unknown>
@@ -14,6 +15,8 @@ interface LineDefinition {
 interface LineChartProps {
   data?: ChartDatum[]
   lines?: LineDefinition[]
+  /** The app's `t`, so month ticks read in the viewer's language. */
+  translate?: MonthTranslate
 }
 
 interface LineTooltip {
@@ -25,29 +28,7 @@ interface LineTooltip {
 
 const CHART_COLORS = ['#2563eb', '#16a34a', '#ea580c', '#7c3aed', '#dc2626', '#0891b2', '#0f766e']
 
-function chartLabelsNeedYear(labels: string[]): boolean {
-  const years = new Set<string>()
-  labels.forEach((label) => {
-    const match = String(label || '').match(/^(\d{4})(?:-\d{2})?(?:-\d{2})?$/)
-    if (match) years.add(match[1])
-  })
-  return years.size > 1
-}
-
-function formatAxisLabel(value: unknown, includeYear = false): string {
-  const raw = String(value || '')
-  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return includeYear ? `${raw.slice(2, 4)}-${raw.slice(5)}` : raw.slice(5)
-  if (/^\d{4}-\d{2}$/.test(raw)) {
-    const month = Number(raw.slice(5, 7))
-    const names = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-    const monthLabel = names[month - 1] || raw.slice(5)
-    return includeYear ? `${monthLabel} '${raw.slice(2, 4)}` : monthLabel
-  }
-  if (/^\d{4}$/.test(raw)) return raw
-  return raw.length > 5 ? raw.slice(-5) : raw
-}
-
-export default function LineChart({ data, lines }: LineChartProps) {
+export default function LineChart({ data, lines, translate }: LineChartProps) {
   const chartRef = useRef<HTMLDivElement | null>(null)
   const [chartWidth, setChartWidth] = useState(760)
   // P11-15: the card holding this chart stretches to match its tallest row
@@ -160,7 +141,7 @@ export default function LineChart({ data, lines }: LineChartProps) {
           className="pointer-events-none absolute z-20 whitespace-nowrap rounded-xl bg-gray-900 px-3 py-2 text-sm text-white shadow-xl"
           style={{ left: tooltip.x, top: tooltip.y, transform: 'translate(-50%, -110%)' }}
         >
-          <div className="mb-1 font-bold">{String(tooltip.data.period || '')}</div>
+          <div className="mb-1 font-bold">{formatChartTooltipLabel(tooltip.data.period, translate)}</div>
           {safeLines.map((line, index) => (
             <div key={line.key} className="flex items-center gap-1.5">
               <div className="h-2.5 w-2.5 flex-shrink-0 rounded-full" style={{ background: line.color || CHART_COLORS[index] }} />
@@ -255,7 +236,7 @@ export default function LineChart({ data, lines }: LineChartProps) {
         {chartData.map((datum, index) => {
           if (index % stepLbl !== 0) return null
           const raw = String(datum.period || '')
-          const lbl = formatAxisLabel(raw, includeYear)
+          const lbl = formatChartAxisLabel(raw, includeYear, translate)
           return (
             <text key={`${raw}-${index}`} x={xPx(index)} y={PAD_T + plotH + 24} textAnchor="middle" fontSize={xFontSize} fontWeight="700" fill="currentColor" className="text-slate-600 dark:text-slate-300" style={{ color: '#475569' }}>
               {lbl}

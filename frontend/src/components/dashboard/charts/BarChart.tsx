@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { MouseEvent } from 'react'
 import { fmtShort, fmtCount } from '../../../utils/formatters'
+import { chartLabelsNeedYear, formatChartAxisLabel, formatChartTooltipLabel, type MonthTranslate } from '../../../utils/dateLabels'
 import NoData from './NoData'
 
 type ChartDatum = Record<string, unknown>
@@ -11,6 +12,8 @@ interface BarChartProps {
   labelKey: string
   color?: string
   isCount?: boolean
+  /** The app's `t`, so month ticks read in the viewer's language. */
+  translate?: MonthTranslate
 }
 
 interface BarTooltip {
@@ -20,29 +23,7 @@ interface BarTooltip {
   val: number
 }
 
-function chartLabelsNeedYear(labels: string[]): boolean {
-  const years = new Set<string>()
-  labels.forEach((label) => {
-    const match = String(label || '').match(/^(\d{4})(?:-\d{2})?(?:-\d{2})?$/)
-    if (match) years.add(match[1])
-  })
-  return years.size > 1
-}
-
-function formatAxisLabel(value: unknown, includeYear = false): string {
-  const raw = String(value || '')
-  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return includeYear ? `${raw.slice(2, 4)}-${raw.slice(5)}` : raw.slice(5)
-  if (/^\d{4}-\d{2}$/.test(raw)) {
-    const month = Number(raw.slice(5, 7))
-    const names = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-    const monthLabel = names[month - 1] || raw.slice(5)
-    return includeYear ? `${monthLabel} '${raw.slice(2, 4)}` : monthLabel
-  }
-  if (/^\d{4}$/.test(raw)) return raw
-  return raw.length > 5 ? raw.slice(-5) : raw
-}
-
-export default function BarChart({ data, valueKey, labelKey, color = '#9c7a3c', isCount = false }: BarChartProps) {
+export default function BarChart({ data, valueKey, labelKey, color = '#9c7a3c', isCount = false, translate }: BarChartProps) {
   const chartRef = useRef<HTMLDivElement | null>(null)
   const [chartWidth, setChartWidth] = useState(760)
   // P11-15: see LineChart.tsx's identical comment -- the card holding this
@@ -143,7 +124,7 @@ export default function BarChart({ data, valueKey, labelKey, color = '#9c7a3c', 
           const y = PAD_T + plotH - barH
           const showLbl = i % stepLbl === 0
           const raw = String(d[labelKey] || '')
-          const lbl = formatAxisLabel(raw, includeYear)
+          const lbl = formatChartAxisLabel(raw, includeYear, translate)
           return (
             <g
               key={`${raw}-${i}`}
@@ -153,7 +134,7 @@ export default function BarChart({ data, valueKey, labelKey, color = '#9c7a3c', 
                 const rect = svgEl.getBoundingClientRect()
                 const vbW = svgEl.viewBox.baseVal.width || W
                 const scale = rect.width / vbW
-                setTooltip({ x: cx * scale, y: y * scale, label: raw, val })
+                setTooltip({ x: cx * scale, y: y * scale, label: formatChartTooltipLabel(raw, translate), val })
               }}
             >
               <rect
