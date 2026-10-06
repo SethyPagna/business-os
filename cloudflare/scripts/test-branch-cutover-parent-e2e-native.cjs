@@ -39,6 +39,9 @@ const CONTROLS = {
   'free-unknown-apart': [['lib/branchCutoverParent.ts', [["? 'recorded' : 'none'", "? 'recorded' : fact.costClass"]]]],
   'free-unknown-zero': [['lib/branchCutoverParent.ts', [["} else if (members.some(fact => fact.costClass === 'unknown')) costAfter = null",
     "} else if (members.some(fact => fact.costClass === 'unknown')) costAfter = members.some(fact => fact.costClass === 'zero') ? 0 : null"]]]],
+  // owner 6 Oct: the DATE decides, whatever text stored it. Keying a slash date as its own text, or reading it day-first, must fail.
+  'slash-apart': [['lib/branchCutoverParent.ts', [['  if (slash) {', '  if (slash) return text\n  if (slash) {']]]],
+  'slash-day-first': [['lib/branchCutoverParent.ts', [['const [month, day, year] = [Number(slash[1]), Number(slash[2]), Number(slash[3])]', 'const [month, day, year] = [Number(slash[2]), Number(slash[1]), Number(slash[3])]']]]],
   'zero-weighted': [['lib/branchCutoverParent.ts', [["const priced = members.filter(fact => fact.costClass === 'recorded')", "const priced = members.filter(fact => fact.costClass !== 'unknown')"]]]],
   'strict-real-sums': [['lib/branchCutoverParent.ts', [['product_id=b.variant_product_id),0)+1e-9) AS lotExcess', 'product_id=b.variant_product_id),0)) AS lotExcess'],
     ['product_id=@last AND branch_id=@target),0)+1e-9`', 'product_id=@last AND branch_id=@target),0)`'], ['AND branch_id=@target),0)+1e-9)`,', 'AND branch_id=@target),0))`,']]]],
@@ -97,6 +100,9 @@ const NAMED = {
     [17, 'Same date, the warehouse lot has no supplier', 1, 1], [18, 'Same date, blend needs rounding', 2, 1],
     // E3: exact decimals whose REAL lot sum at LC Store is 0.30000000000000004 > 0.3 (sum(0.05, 0.05, 0.2) in SQLite)
     [19, 'Fractional lots whose REAL sum ties above the stock', 0.05, 0.25],
+    // owner 6 Oct: same DATE, any stored text. Slash dates are month-first (the Aug-28 import column batch(mm/dd/yyyy), 0077).
+    [20, 'ISO at the warehouse, slash date at the Shop, same day', 1, 1], [21, 'Ambiguous slash 4/8 follows month-first (8 Apr, not 4 Aug)', 1, 2],
+    [22, 'Slash 24/08 is no month-first date: kept apart', 1, 1], [23, 'Slash date and a timestamp on the same Cambodia day', 1, 1],
   ],
   lots: [
     [101, 1, '2026-09-01', '2027-09-01', 2, { 2: 3 }], [102, 1, '2026-09-05', '2027-09-05', 2.5, { 2: 2 }],
@@ -117,6 +123,10 @@ const NAMED = {
     [1701, 17, '2026-09-23', null, 2, { 1: 1 }], [1702, 17, '2026-09-23', null, 2, { 2: 1 }, 11],
     [1801, 18, '2026-09-24', null, 1.0001, { 1: 1 }], [1802, 18, '2026-09-24', null, 1.0002, { 2: 2 }],
     [1901, 19, '2026-09-25', null, 1, { 1: 0.05 }], [1902, 19, '2026-09-25', null, 1, { 2: 0.05 }], [1903, 19, '2026-09-26', null, 1, { 1: 0.2 }],
+    [2001, 20, '2026-08-24', null, 2, { 1: 1 }], [2002, 20, '08/24/2026', null, 4, { 2: 1 }],
+    [2101, 21, '2026-04-08', null, 1, { 1: 1 }], [2102, 21, '2026-08-04', null, 5, { 1: 1 }], [2103, 21, '4/8/2026', null, 3, { 2: 1 }],
+    [2201, 22, '2026-08-24', null, 1, { 1: 1 }], [2202, 22, '24/08/2026', null, 1, { 2: 1 }],
+    [2301, 23, '2026-09-12T18:00:00Z', null, 2, { 1: 1 }], [2302, 23, ' 9/13/2026 ', null, 2, { 2: 1 }],
   ],
 }
 function generated(count, seed = 7) {
@@ -208,10 +218,16 @@ function world({ control, generatedProducts = 28, duplicate = false } = {}) {
 }
 
 // ---- independent state reads (test side, never the implementation's helpers) ----
-// Cambodia business day, written independently of businessDateWindow: date-only as stored, a timestamp (UTC unless zoned) + 7 h.
+// Cambodia business day, written independently of businessDateWindow: date-only as stored, a timestamp (UTC unless zoned) + 7 h,
+// a slash date month-first (a real calendar day, checked through Date.parse).
 const dateKey = (value) => {
   const text = typeof value === 'string' ? value.trim() : ''
   if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text
+  const slash = text.match(/^(\d\d?)\/(\d\d?)\/(\d{4})$/)
+  if (slash) {
+    const iso = `${slash[3]}-${slash[1].padStart(2, '0')}-${slash[2].padStart(2, '0')}`
+    return !Number.isNaN(Date.parse(iso)) && new Date(Date.parse(iso)).toISOString().slice(0, 10) === iso ? iso : 'none:'
+  }
   if (!/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/.test(text)) return 'none:'
   const iso = text.replace(' ', 'T'); const ms = Date.parse(/(Z|[+-]\d{2}:?\d{2})$/.test(iso) ? iso : iso + 'Z')
   return Number.isNaN(ms) ? 'none:' : new Date(ms + 7 * 3600000).toISOString().slice(0, 10)
@@ -372,6 +388,10 @@ function verifyEndState({ w, base, before, final }) {
   assert.deepEqual({ ...lot(1702) }, { q: 2, c: 2 }); assert.equal(lot(1701).q, 0)                     // no supplier folds into the supplier's lot
   assert.deepEqual({ ...lot(1801) }, { q: 3, c: 1.0002 }); assert.equal(lot(1802).q, 0)               // 3.0005 / 3 at 4 decimals
   assert.deepEqual({ ...lot(1901) }, { q: 0.1, c: 1 }); assert.equal(lot(1902).q, 0); assert.equal(lot(1903).q, 0.2) // REAL tie tolerated, exact values kept
+  assert.deepEqual({ ...lot(2001) }, { q: 2, c: 3 }); assert.equal(lot(2002).q, 0)                     // 08/24/2026 is 2026-08-24: one lot
+  assert.deepEqual({ ...lot(2101) }, { q: 2, c: 2 }); assert.deepEqual({ ...lot(2102) }, { q: 1, c: 5 }); assert.equal(lot(2103).q, 0) // 4/8 = 8 Apr
+  assert.deepEqual({ ...lot(2201) }, { q: 1, c: 1 }); assert.deepEqual({ ...lot(2202) }, { q: 1, c: 1 }) // 24/08 is no month-first date: apart
+  assert.deepEqual({ ...lot(2301) }, { q: 2, c: 2 }); assert.equal(lot(2302).q, 0)                     // 18:00 UTC 12 Sep = 13 Sep = 9/13
   assert.deepEqual({ ...lot(201) }, { q: 10, c: 1.2 })                                                  // shared batch keeps its identity
   assert.deepEqual({ ...lot(1201) }, { q: 4, c: 3 }); assert.deepEqual({ ...lot(1202) }, { q: 2, c: 2 }); assert.equal(lot(1203).q, 0)
   assert.deepEqual({ ...lot(802) }, { q: 4, c: 3 }); assert.equal(lot(801).q, 0)                       // survivor = the lot already at the warehouse
@@ -583,7 +603,7 @@ async function main() {
   // ---- discriminating controls: each plausible wrong implementation must fail this test
   for (const [control, expectation] of [['name-admission', 'refuses'], ['name-finalize', 'red'], ['mean', 'red'], ['double', 'red'], ['no-close', 'refuses'], ['no-rule', 'red'],
     ['utc-slice', 'red'], ['no-round', 'red'], ['supplier-blind', 'red'], ['zero-weighted', 'red'], ['strict-real-sums', 'refuses'],
-    ['free-unknown-apart', 'red'], ['free-unknown-zero', 'red']]) {
+    ['free-unknown-apart', 'red'], ['free-unknown-zero', 'red'], ['slash-apart', 'red'], ['slash-day-first', 'red']]) {
     await check('control RED: ' + control, async () => {
       let red = false, message = ''
       try {
@@ -607,5 +627,5 @@ async function bench(products) {
   for (const row of table) console.log('BENCH ' + JSON.stringify(row))
   run.w.raw.close()
 }
-module.exports = { world, bench, drive, snapshot, scenario, verifyEndState, ACTOR, PARENT_BUDGET, CHILD_BUDGET, IDS, NAMES }
+module.exports = { world, bench, drive, snapshot, scenario, verifyEndState, dateKey, ACTOR, PARENT_BUDGET, CHILD_BUDGET, IDS, NAMES }
 if (require.main === module) (process.env.E2E_BENCH ? bench(Number(process.env.E2E_BENCH)) : main()).catch(e => { console.error(e); process.exitCode = 1 })
