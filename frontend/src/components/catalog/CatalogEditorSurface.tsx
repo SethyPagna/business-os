@@ -482,18 +482,24 @@ function CatalogEditorSurfaceContent() {
                 <span className="text-sm font-medium text-slate-700">{copy('showCatalog', 'Show product catalog')}</span>
                 <input id="portal-show-catalog" name="customer_portal_show_catalog" type="checkbox" checked={!!editorDraft.customer_portal_show_catalog} onChange={(event) => setDraft('customer_portal_show_catalog', event.target.checked)} />
               </label>
-              <div className="flex min-h-11 min-w-0 items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2.5">
-                <div>
-                  <HintLabel title={copy('announcementStrip', 'Announcement strip')} hint={copy('announcementStripHint', 'Small horizontally-scrolling cards at the very top of the page — separate from the Promotions and posts cards below')} />
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setShowAnnouncementStripModal(true)}
-                  className="shrink-0 rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-                >
-                  {copy('manage', 'Manage')}
-                </button>
               </div>
+              {/* Announcement strip (owner, 6 Oct 2026): the Worker admits posts & promos, portal config or Settings
+                  (routes/promotions.ts requireWebsiteEditor), so the button shows for the same grants. */}
+              {canEditConfig || canEditPosts ? (
+                <div className="flex min-h-11 min-w-0 items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2.5">
+                  <div>
+                    <HintLabel title={copy('announcementStrip', 'Announcement strip')} hint={copy('announcementStripHint', 'Small horizontally-scrolling cards at the very top of the page — separate from the Promotions and posts cards below')} />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowAnnouncementStripModal(true)}
+                    className="shrink-0 rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                  >
+                    {copy('manage', 'Manage')}
+                  </button>
+                </div>
+              ) : null}
+              <div className={canEditConfig ? 'contents' : 'hidden'}>
               <label className="flex min-h-11 min-w-0 items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2.5">
                 <span className="text-sm font-medium text-slate-700">{copy('showAbout', 'Show about section')}</span>
                 <input id="portal-show-about" name="customer_portal_show_about" type="checkbox" checked={!!editorDraft.customer_portal_show_about} onChange={(event) => setDraft('customer_portal_show_about', event.target.checked)} />

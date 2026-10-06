@@ -31,6 +31,19 @@ const requireKey = (key: string): MiddlewareHandler<{ Bindings: Env; Variables: 
   if (!hasPermission(c.get('user'), key)) return c.json({ error: 'You do not have permission to perform this action' }, 403)
   return next()
 }
+// The announcement-strip WRITES (POST /, PUT /:id, PUT /reorder/all, DELETE /:id) publish
+// public storefront content, including an outside https link. Holding the Products section is
+// not the right gate (the Employee seed holds it): they need a Website Editor grant -- the
+// posts & promos area, or portal config -- or full Settings, the same "bucket OR settings"
+// superset routes/settings.ts applies to the customer_portal_* keys. Admin passes inside
+// hasPermission. Reads (GET /) keep the products gate. Mirrored in the UI by
+// CatalogEditorSurface's canEditConfig || canEditPosts.
+const WEBSITE_EDITOR_STRIP_KEYS = ['portal_posts', 'customer_portal', 'settings'] as const
+const requireWebsiteEditor: MiddlewareHandler<{ Bindings: Env; Variables: { user: SessionUser } }> = async (c, next) => {
+  const user = c.get('user')
+  if (!WEBSITE_EDITOR_STRIP_KEYS.some((key) => hasPermission(user, key))) return c.json({ error: 'You do not have permission to perform this action' }, 403)
+  return next()
+}
 // 'promotions' is a VIEW_TIER section (Part 557 slice 4): a 'view' grant can
 // READ the full rule list but manage nothing. This admits view OR full (tier
 // != none) for the read route; rule writes use promotions.manage at Full.
@@ -417,7 +430,7 @@ app.get('/', requireKey('products'), async (c) => {
   return c.json(rows)
 })
 
-app.post('/', requireKey('products'), async (c) => {
+app.post('/', requireWebsiteEditor, async (c) => {
   const user = c.get('user')
   const body = await readWriteBody(c) as PromotionInput & Record<string, unknown>
   const requestId = readWriteRequestId(body)
@@ -472,7 +485,7 @@ app.post('/', requireKey('products'), async (c) => {
   return c.json(created)
 })
 
-app.put('/:id', requireKey('products'), async (c) => {
+app.put('/:id', requireWebsiteEditor, async (c) => {
   const user = c.get('user')
   const id = rowId(c.req.param('id'))
   const body = await readWriteBody(c) as PromotionInput & Record<string, unknown>
@@ -536,7 +549,7 @@ app.put('/:id', requireKey('products'), async (c) => {
 })
 
 // Bulk reorder, for a drag-and-drop editor: body = { order: [id, id, id, ...], client_request_id }
-app.put('/reorder/all', requireKey('products'), async (c) => {
+app.put('/reorder/all', requireWebsiteEditor, async (c) => {
   const user = c.get('user')
   const body = await readWriteBody(c) as { order?: unknown[] } & Record<string, unknown>
   const requestId = readWriteRequestId(body)
@@ -589,7 +602,7 @@ app.put('/reorder/all', requireKey('products'), async (c) => {
   return c.json(rows)
 })
 
-app.delete('/:id', requireKey('products'), async (c) => {
+app.delete('/:id', requireWebsiteEditor, async (c) => {
   const user = c.get('user')
   const id = rowId(c.req.param('id'))
   const body = await readWriteBody(c, true)
