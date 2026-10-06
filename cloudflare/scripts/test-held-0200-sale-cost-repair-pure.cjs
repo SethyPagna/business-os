@@ -568,45 +568,83 @@ const HELD_0238_WRITES = Object.freeze({
   returns: Object.freeze(['owed_reduction_usd', 'refund_currency']),
 })
 const HELD_0238_RECOVERY_READ = /^UPDATE return_owed_backfill_0238 SET sale_revision = COALESCE\(\(SELECT w\.revision FROM sale_write_revisions w WHERE w\.sale_id = return_owed_backfill_0238\.sale_id\), 0\) WHERE sale_revision IS NULL$/i
-const SQL_WORDS = new Set(['where', 'on', 'join', 'left', 'inner', 'cross', 'group', 'order', 'limit', 'union', 'as', 'using', 'natural', 'not', 'indexed'])
+// RET-A verify R3 (E3): the column check is STRUCTURAL. SQLite's own resolver
+// reports, through the authorizer, every (table, column) a statement reads or
+// writes -- through stars (SELECT *, t.*, DISTINCT *), derived tables, CTEs,
+// aliases, quoted names and the triggers the statement fires -- so a text
+// pattern can no longer be stepped around. Each statement is prepared against
+// the migrated chain schema, checked, then run there so the next statement
+// sees the backfill's own table. Fail closed: a statement SQLite cannot
+// prepare is refused, and NATURAL / USING joins are refused outright (SQLite
+// builds their join columns without asking the authorizer).
+const { constants: SQLITE } = require('node:sqlite')
+// Writes the backfill's statements may cause through triggers: the revision
+// counters only (each a +1 per write, the same in either order).
+const HELD_0238_TRIGGER_WRITES = Object.freeze(['sale_write_revisions', 'return_write_revisions'])
+const HELD_0238_RECOVERY_COLUMNS = Object.freeze(['sale_id', 'revision'])
 
-// Every reference to an allowlisted-read table goes through an alias bound to
-// that table alone, and every column it reads through the alias is listed. A
-// bare column of those tables outside the list, a star read, or the table
-// named without an alias is refused.
-function held0238ReadsListed(statement, itemColumns) {
-  const aliases = new Map()
-  for (const match of statement.matchAll(/\b(sale_items|return_items)\b(?: (\w+))?/gi)) {
-    const table = match[1].toLowerCase(), alias = (match[2] || '').toLowerCase()
-    if (!alias || SQL_WORDS.has(alias)) return false
-    if (aliases.has(alias) && aliases.get(alias) !== table) return false
-    aliases.set(alias, table)
-  }
-  for (const [alias, table] of aliases) {
-    for (const bound of statement.matchAll(new RegExp(`\\b(\\w+) ${alias}\\b(?!\\.)`, 'gi'))) {
-      const word = bound[1].toLowerCase()
-      if (['from', 'join', 'select', 'and', 'or', 'by', 'then', 'else', 'when', 'case'].includes(word)) continue
-      if (word !== table) return false
+function sqliteActions(db, statement, triggerNames) {
+  const actions = []
+  db.setAuthorizer((code, first, second, _database, source) => {
+    actions.push({ code, table: String(first ?? '').toLowerCase(), column: String(second ?? '').toLowerCase(), trigger: source != null && triggerNames.has(source) })
+    return SQLITE.SQLITE_OK
+  })
+  try { db.prepare(statement) } finally { db.setAuthorizer(null) }
+  return actions
+}
+
+// One statement's actions against the allowlists. `recovery` marks the one
+// carve-out statement, `create` the CREATE TABLE of the backfill's own table,
+// `repairTables` every table the repair writes, directly or through triggers.
+// A read of a guarded table with no column (count(*) over it) or of its rowid
+// is not on the list, so it is refused too.
+function held0238ActionsAllowed(actions, { recovery, create, repairTables, repairText }) {
+  for (const a of actions) {
+    if ([SQLITE.SQLITE_SELECT, SQLITE.SQLITE_FUNCTION, SQLITE.SQLITE_RECURSIVE].includes(a.code)) continue
+    if (a.code === SQLITE.SQLITE_READ) {
+      if (a.table in HELD_0238_READS) { if (!HELD_0238_READS[a.table].includes(a.column)) return false; continue }
+      if (a.table === 'sale_write_revisions' && !a.trigger) { if (!recovery || !HELD_0238_RECOVERY_COLUMNS.includes(a.column)) return false; continue }
+      if (a.table === 'sqlite_master') { if (!create) return false; continue }
+      if (repairTables.has(a.table) && !(a.trigger && HELD_0238_TRIGGER_WRITES.includes(a.table))) return false
+      continue
     }
-    for (const used of statement.matchAll(new RegExp(`\\b${alias}\\.(\\w+|\\*)`, 'gi'))) {
-      if (!HELD_0238_READS[table].includes(used[1].toLowerCase())) return false
+    if (a.trigger) {
+      if ((a.code === SQLITE.SQLITE_INSERT || a.code === SQLITE.SQLITE_UPDATE) && HELD_0238_TRIGGER_WRITES.includes(a.table)) continue
+      return false
     }
-  }
-  if (aliases.size) {
-    const listed = new Set(Object.values(HELD_0238_READS).flat())
-    for (const bare of statement.matchAll(/(?<![.\w])(\w+)\b(?!\s*\()/g)) {
-      const word = bare[1].toLowerCase()
-      if (itemColumns.has(word) && !listed.has(word)) return false
+    if (a.code === SQLITE.SQLITE_UPDATE) {
+      if (a.table === HELD_0238_OWN || (a.table === 'sqlite_master' && create)) continue
+      const allowed = HELD_0238_WRITES[a.table]
+      if (!allowed || !allowed.includes(a.column) || ROWID_OR_KEY.test(a.column) || namedIn(repairText)(a.column)) return false
+      continue
     }
-    if (/\bSELECT \* FROM (?:sale_items|return_items)\b/i.test(statement)) return false
+    if (a.code === SQLITE.SQLITE_INSERT) { if (a.table === HELD_0238_OWN || (a.table === 'sqlite_master' && create)) continue; return false }
+    if (a.code === SQLITE.SQLITE_CREATE_TABLE) { if (create && a.table === HELD_0238_OWN) continue; return false }
+    return false
   }
   return true
 }
 
 function admitHeld0238(name, text, repairText, context) {
   if (name !== HELD_0238_NAME) return false
-  if (!(context?.priorTables instanceof Set) || !(context?.indirectWrites instanceof Set) || !(context?.itemColumns instanceof Set)) return false
+  if (!(context?.priorTables instanceof Set) || !(context?.indirectWrites instanceof Set) || typeof context?.openSchema !== 'function') return false
   const statements = splitStatements(sqlCode(text)).map((s) => s.replace(/\s+/g, ' ').trim()).filter(Boolean)
+  // Structural pass first (RET-A verify R3 E3): what SQLite says each statement reads and writes.
+  const repairTables = new Set([...repairWrites(repairText), ...context.indirectWrites])
+  const schema = context.openSchema()
+  try {
+    const triggerNames = new Set(schema.prepare("SELECT name FROM sqlite_master WHERE type = 'trigger'").all().map((row) => row.name))
+    for (const statement of statements) {
+      if (/\b(?:NATURAL|USING)\b/i.test(statement.replace(/'(?:[^']|'')*'/g, "''"))) return false
+      let actions
+      try { actions = sqliteActions(schema, statement, triggerNames) } catch { return false }
+      const recovery = HELD_0238_RECOVERY_READ.test(statement)
+      const create = /^CREATE TABLE IF NOT EXISTS (\w+) \(/i.test(statement)
+      if (!held0238ActionsAllowed(actions, { recovery, create, repairTables, repairText })) return false
+      schema.exec(statement)
+    }
+  } finally { schema.close() }
+  // Then the shape: one own table, one plan statement, the two listed writes, the one carve-out.
   let created = 0, filled = 0, recovery = 0
   const written = new Set()
   for (const statement of statements) {
@@ -614,7 +652,6 @@ function admitHeld0238(name, text, repairText, context) {
     for (const table of context.indirectWrites) {
       if (!(table in HELD_0238_READS) && new RegExp(`\\b${table}\\b`, 'i').test(statement)) return false
     }
-    if (!held0238ReadsListed(statement, context.itemColumns)) return false
     let match
     if ((match = /^CREATE TABLE IF NOT EXISTS (\w+) \(/i.exec(statement))) {
       if (match[1].toLowerCase() !== HELD_0238_OWN || context.priorTables.has(HELD_0238_OWN) || created) return false
@@ -735,8 +772,8 @@ check('held: outside deploy chain, after dependencies including0195; independent
   const flagOnly = chain.filter(file => flagColumnsUnread(chainText(file), migrationText, { priorTables: flagContext.priorTables.get(file), indirectWrites: flagContext.indirectWrites }))
   // ---- RET-B 0235 call (end) ----
   // ---- RET-A 0238 call: the held backfill, admitted by name and column only.
-  const itemColumns = new Set(['sale_items', 'return_items'].flatMap((t) => fresh.prepare(`PRAGMA table_info(${t})`).all().map((c) => c.name.toLowerCase())))
-  const admitted0238 = chain.filter((f) => admitHeld0238(f, chainText(f), migrationText, { priorTables: flagContext.priorTables.get(f), indirectWrites: flagContext.indirectWrites, itemColumns }))
+  const admitted0238 = chain.filter((f) => admitHeld0238(f, chainText(f), migrationText, { priorTables: flagContext.priorTables.get(f), indirectWrites: flagContext.indirectWrites,
+    openSchema: () => openDb(chain.slice(0, chain.indexOf(f)).map(chainText)).db }))
   const dependencies = chain.filter((f) => !indexOnly(chainText(f)) && !additiveUnread(chainText(f), migrationText) && !mixed.includes(f) && !flagOnly.includes(f) && !admitted0238.includes(f) && touched.some(namedIn(chainText(f))))
   assert.ok(['sale_items', 'return_items', 'catalog_cost_repair_0195_backup'].every((t) => touched.includes(t)), 'control: the scan sees the two tables it writes and the 0195 backup it reads')
   assert.ok(dependencies.includes('0195_catalog_cost_on_hand.sql'), 'control: the scan finds 0195')
@@ -821,8 +858,7 @@ check('RET-A 0238 admission: the held backfill is admitted by name and column, a
   const text0238 = fs.readFileSync(path.join(heldDir, HELD_0238_NAME), 'utf8')
   const fresh = openDb(chain.map(chainText)).db
   const flagContext = flagOnlyContext(chain, chainText, migrationText)
-  const itemColumns = new Set(['sale_items', 'return_items'].flatMap((t) => fresh.prepare(`PRAGMA table_info(${t})`).all().map((c) => c.name.toLowerCase())))
-  const context = { priorTables: flagContext.finalTables, indirectWrites: flagContext.indirectWrites, itemColumns }
+  const context = { priorTables: flagContext.finalTables, indirectWrites: flagContext.indirectWrites, openSchema: () => openDb(chain.map(chainText)).db }
   assert.ok(namedIn(text0238)('sale_items') && namedIn(text0238)('sale_write_revisions'), 'control: 0238 names tables the repair writes')
   assert.equal(flagColumnsUnread(text0238, migrationText, context), false, 'control: the generic mark-only rule still rejects 0238')
   assert.ok(admitHeld0238(HELD_0238_NAME, text0238, migrationText, context), 'the held 0238 backfill is admitted by its explicit allowlist')
@@ -856,6 +892,59 @@ SELECT sale_status FROM sales;`, context), false, 'control: a listed write the r
     ['a delete slipped in before a listed write', text0238.replace(/^UPDATE returns\b/m, 'DELETE FROM sale_items WHERE 0;\nUPDATE returns')],
     ['a second data change inside the plan statement', sub('INSERT OR IGNORE INTO return_owed_backfill_0238 (', 'INSERT OR IGNORE INTO return_owed_backfill_0238 (return_id) SELECT 1 WHERE 0;\nUPDATE sales SET sale_status = sale_status WHERE 0;\nINSERT OR IGNORE INTO return_owed_backfill_0238 (')],
   ]) assert.equal(admitHeld0238(HELD_0238_NAME, wrong, migrationText, context), false, `still refused: ${label}`)
+
+  // RET-A verify R3 (E3): reads that hide the repaired column behind a star, a
+  // derived table, a CTE, a rename or a quoted name. The text rule admitted the
+  // first two (verifier B1, B2). Each mutant is valid SQL -- the whole mutated
+  // file runs on the chain schema -- so the refusal is the guard's, not a parse
+  // error; and the authorizer is shown reporting the hidden read.
+  const anchor = 'WHERE r.refund_currency IS NULL'
+  const changedStatements = (wrong) => {
+    const before = new Set(splitStatements(sqlCode(text0238)).map((s) => s.replace(/\s+/g, ' ').trim()))
+    return splitStatements(sqlCode(wrong)).map((s) => s.replace(/\s+/g, ' ').trim()).filter((s) => s && !before.has(s))
+  }
+  const hiddenReads = (wrong) => {
+    const schema = openDb(chain.map(chainText)).db
+    try {
+      const triggers = new Set()
+      const reads = []
+      for (const statement of splitStatements(sqlCode(wrong)).map((s) => s.replace(/\s+/g, ' ').trim()).filter(Boolean)) {
+        if (changedStatements(wrong).includes(statement)) {
+          reads.push(...sqliteActions(schema, statement, triggers).filter((a) => a.code === SQLITE.SQLITE_READ && a.column === 'cost_price_usd')
+            .map((a) => `${a.table}.${a.column}`))
+        }
+        schema.exec(statement)
+      }
+      return reads
+    } finally { schema.close() }
+  }
+  for (const [label, expression, seen] of [
+    ['B1 a derived table SELECT *, 1 AS k', 'EXISTS (SELECT 1 FROM (SELECT *, 1 AS k FROM sale_items z) zz WHERE zz.cost_price_usd > 0)', true],
+    ['B2 a derived table SELECT DISTINCT *', 'EXISTS (SELECT 1 FROM (SELECT DISTINCT * FROM sale_items z) zz WHERE zz.cost_price_usd > 0)', true],
+    ['a CTE over SELECT *', 'EXISTS (WITH c AS (SELECT * FROM return_items) SELECT 1 FROM c WHERE c.cost_price_usd > 0)', true],
+    ['a t.* read', 'EXISTS (SELECT t.* FROM sale_items t WHERE t.id = 0)', true],
+    ['the repaired column renamed to a listed one', 'EXISTS (SELECT 1 FROM (SELECT z.cost_price_usd AS quantity FROM sale_items z) q WHERE q.quantity > 0)', true],
+    ['quoted table and column names', 'EXISTS (SELECT 1 FROM "sale_items" WHERE "cost_price_usd" > 0)', true],
+    ['an aggregate over the repaired column', '(SELECT MAX(x.cost_price_usd) FROM return_items x) > 0', true],
+    ['a NATURAL JOIN of the two repaired tables', 'EXISTS (SELECT 1 FROM sale_items z NATURAL JOIN return_items q)', false],
+    ['a USING join on the repaired column', 'EXISTS (SELECT 1 FROM sale_items z JOIN return_items q USING (cost_price_usd))', false],
+  ]) {
+    const wrong = sub(anchor, `${anchor} AND ${expression}`)
+    assert.doesNotThrow(() => openDb([...chain.map(chainText), wrong]), `control: the mutant is valid SQL: ${label}`)
+    const reads = hiddenReads(wrong)
+    if (seen) assert.ok(reads.length > 0, `control: SQLite reports the hidden read: ${label}`)
+    else assert.deepEqual(reads, [], `control: the authorizer is blind to ${label}, which is why NATURAL / USING are refused by name`)
+    assert.equal(admitHeld0238(HELD_0238_NAME, wrong, migrationText, context), false, `refused: ${label}`)
+  }
+  for (const [label, extra] of [
+    ['a view over the repaired table', 'CREATE VIEW v_0238 AS SELECT * FROM sale_items;'],
+    ['a trigger that reads the repaired column', 'CREATE TRIGGER t_0238 AFTER UPDATE ON sales BEGIN SELECT cost_price_usd FROM sale_items; END;'],
+  ]) {
+    const wrong = `${text0238}\n${extra}`
+    assert.doesNotThrow(() => openDb([...chain.map(chainText), wrong]), `control: the mutant is valid SQL: ${label}`)
+    assert.equal(admitHeld0238(HELD_0238_NAME, wrong, migrationText, context), false, `refused: ${label}`)
+  }
+  assert.deepEqual(hiddenReads(text0238), [], 'control: the real 0238 reads no repaired column')
 
   // Both orders on populated data: s1 sold Not Paid with its pre-0234 return
   // RT1, whose copied line cost the repair rewrites. Forward results agree;

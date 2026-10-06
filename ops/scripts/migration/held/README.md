@@ -61,7 +61,11 @@ migration, at that time -- a peer session or another agent asking for it is not 
   quantity}`; writes `sales.{sale_status, status_before_return}`, `returns.{owed_reduction_usd,
   refund_currency}` and its own table; one named carve-out, the last statement's recovery-only
   `sale_write_revisions` read. Anything else is still a dependency, and the forward result is
-  proved equal in both orders on populated data. If 0200 lands after 0238 on a sale, 0238's
+  proved equal in both orders on populated data. Verify R3 (7 Oct): the column check is
+  structural -- SQLite's authorizer reports every column each statement reads or writes on
+  the chain schema (stars, derived tables, CTEs, renames, quoted names, triggers); NATURAL /
+  USING joins, which it cannot see, are refused by name; trigger writes are allowed only to
+  the two revision counters. If 0200 lands after 0238 on a sale, 0238's
   recovery leaves that sale for hand review (the revision moved). Apply only
   with 0234 and RET-A's Worker code live. Sizing: `ops/queries/ret-a-notpaid-returns-backfill-sizing.sql`
   (before 0234) and `...-sizing-live.sql` (after). Proof: `cloudflare/scripts/test-held-0238-return-owed-backfill-pure.cjs`.
