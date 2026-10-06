@@ -3997,34 +3997,6 @@ function ProductsFullEditor() {
     (await loadProductWriteHelpers()).buildProductWritePayload(snapshot, { id: user?.id, name: user?.name })
   ), [user?.id, user?.name])
 
-  const restoreProductBranchStock = useCallback(async (productId: EntityId, snapshot: ProductRecord, currentProduct: ProductRecord, reason: string) => {
-    const {
-      buildProductBranchStockAdjustments,
-      buildProductStockAdjustmentPayload,
-    } = await loadProductWriteHelpers()
-    const adjustments = buildProductBranchStockAdjustments(snapshot, currentProduct)
-    const syncRun = await runConcurrentTasks(adjustments, async ({ branchId, type, quantity }: { branchId: EntityId; type: string; quantity: unknown }) => {
-      await runProductStockMutation(
-        () => productApi.adjustStock(buildProductStockAdjustmentPayload(snapshot, {
-          productId,
-          productName: snapshot?.name || currentProduct?.name || '',
-          type,
-          quantity,
-          branchId,
-          reason,
-          // N14-D: a restore puts a branch back to the figure the snapshot
-          // recorded. It is not a new receipt -- there is no supplier and no
-          // cost to state -- so it declares itself a correction instead of
-          // being handed an invented one.
-          attribution: 'correction',
-          user: { id: user?.id, name: user?.name },
-        })),
-        'Restore product branch stock',
-      )
-    })
-    if (syncRun.failures.length) throw (syncRun.failures[0]?.error || new Error('Failed to restore branch stock'))
-  }, [runProductStockMutation, user?.id, user?.name])
-
   // Undo/Redo of a product edit, bulk update or price adjustment: the FIELDS
   // only. None of those actions moves stock (the write payload carries none),
   // so their Undo must not either. REVERT-SET: this used to also put every
@@ -4043,6 +4015,7 @@ function ProductsFullEditor() {
       payload.expectedUpdatedAt = currentProduct.updated_at || undefined
       await runProductWriteMutation(() => productApi.updateProduct(productId, payload), 'Restore product')
     })
+    if (restoreRun.failures.length) throw (restoreRun.failures[0]?.error || new Error('Failed to restore products'))
     await load(true)
   }, [buildProductWritePayload, fetchProductsByIds, load, runProductWriteMutation])
 
