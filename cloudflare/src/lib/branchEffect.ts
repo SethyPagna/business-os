@@ -104,6 +104,31 @@ export function branchEffectGuardPredicate(json: string): string {
       AND a.is_active=0 AND a.successor_branch_id=json_extract(j.value,'$.effect'))))`
 }
 
+// The business day (UTC+7) a lot was received: a plain date as stored, a timestamp without a zone read as UTC, a slash date
+// month-first (the order 0077 rewrote). Null for anything else, so an unreadable date never merges.
+function lotBusinessDay(value: unknown): string | null {
+  const text = typeof value === 'string' ? value.trim() : ''
+  const valid = (year: number, month: number, day: number) => { const d = new Date(Date.UTC(year, month - 1, day)); return d.getUTCFullYear() === year && d.getUTCMonth() === month - 1 && d.getUTCDate() === day }
+  const slash = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(text)
+  if (slash) {
+    const [month, day, year] = [Number(slash[1]), Number(slash[2]), Number(slash[3])]
+    return valid(year, month, day) ? `${slash[3]}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}` : null
+  }
+  const plain = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text)
+  if (plain) return valid(Number(plain[1]), Number(plain[2]), Number(plain[3])) ? text : null
+  const stamp = /^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?)(Z|[+-]\d{2}:\d{2})?$/.exec(text)
+  if (!stamp) return null
+  const ms = Date.parse(`${stamp[1]}T${stamp[2]}${stamp[3] ?? 'Z'}`)
+  return Number.isFinite(ms) ? new Date(ms + 7 * 3_600_000).toISOString().slice(0, 10) : null
+}
+
+// Supplier identity of a lot: the supplier id, else the trimmed lower-case name, else none (the cutover's own key).
+function lotSupplierKey(lot: { supplier_id: number | null; supplier_name: string | null }): string {
+  if (typeof lot.supplier_id === 'number' && Number.isSafeInteger(lot.supplier_id)) return `id:${lot.supplier_id}`
+  const name = typeof lot.supplier_name === 'string' ? lot.supplier_name.trim().toLowerCase() : ''
+  return name ? `name:${name}` : ''
+}
+
 /**
  * Lots the branch consolidation folded into another lot at `branchId`:
  * { folded lot id -> surviving lot id }. The consolidation merges lots received
@@ -134,22 +159,29 @@ export async function foldedLotSurvivors(db: D1Compat, branchId: number, batchId
   }
   const unmapped = ids.filter((id) => !survivors.has(id))
   if (unmapped.length) {
-    const supplierKey = (alias: string) => `CASE WHEN typeof(${alias}.supplier_id) IN ('integer','real') AND ${alias}.supplier_id=CAST(${alias}.supplier_id AS INTEGER) THEN 'id:'||CAST(${alias}.supplier_id AS INTEGER) WHEN trim(coalesce(${alias}.supplier_name,''))<>'' THEN 'name:'||lower(trim(${alias}.supplier_name)) ELSE '' END`
-    // Two reserved parameters (the branch id, twice); the lot ids are chunked under the D1 100-parameter limit.
-    const sameDay = await selectInChunks(unmapped, 2, (chunk) => db.prepare(`SELECT x.id AS lot, MIN(c.id) AS survivor
-      FROM product_batches x
-      JOIN product_batches c ON c.variant_product_id=x.variant_product_id AND c.id<>x.id
-      JOIN branch_batch_stock s ON s.batch_id=c.id AND s.branch_id=? AND s.quantity>0
-      WHERE x.id IN (${chunk.map(() => '?').join(',')})
-        AND NOT EXISTS(SELECT 1 FROM branch_batch_stock h WHERE h.batch_id=x.id AND h.branch_id=? AND h.quantity>0)
-        AND date(x.received_at,'+7 hours') IS NOT NULL AND date(c.received_at,'+7 hours')=date(x.received_at,'+7 hours')
-        AND COALESCE(x.expiry_date,'')=COALESCE(c.expiry_date,'')
-        AND ${supplierKey('x')}=${supplierKey('c')}
-      GROUP BY x.id`).all<{ lot: number; survivor: number }>([branchId, ...chunk, branchId]))
-    for (const row of sameDay) {
-      const lot = Number(row.lot)
-      const survivor = Number(row.survivor)
-      if (Number.isSafeInteger(lot) && Number.isSafeInteger(survivor) && survivor > 0) survivors.set(lot, survivor)
+    type LotFacts = { id: number; product: number; received_at: string | null; expiry_date: string | null; supplier_id: number | null; supplier_name: string | null }
+    const columns = 'b.id, b.variant_product_id AS product, b.received_at, b.expiry_date, b.supplier_id, b.supplier_name'
+    // The lots asked about that hold no stock at the landing branch. The lot ids are chunked under D1's 100-parameter limit
+    // (one parameter is the branch id).
+    const asked = await selectInChunks(unmapped, 1, (chunk) => db.prepare(`SELECT ${columns} FROM product_batches b
+      WHERE b.id IN (${chunk.map(() => '?').join(',')})
+        AND NOT EXISTS(SELECT 1 FROM branch_batch_stock h WHERE h.batch_id=b.id AND h.branch_id=? AND h.quantity>0)`)
+      .all<LotFacts>([...chunk, branchId]))
+    const products = [...new Set(asked.map((row) => Number(row.product)))].filter((id) => Number.isSafeInteger(id) && id > 0)
+    // The lots that hold stock at the landing branch now, for those products. The day is compared in code (UTC+7), not
+    // in SQL, so no date function wraps an indexed column.
+    const holders = await selectInChunks(products, 1, (chunk) => db.prepare(`SELECT ${columns} FROM product_batches b
+      JOIN branch_batch_stock s ON s.batch_id=b.id AND s.branch_id=? AND s.quantity>0
+      WHERE b.variant_product_id IN (${chunk.map(() => '?').join(',')}) ORDER BY b.id`)
+      .all<LotFacts>([branchId, ...chunk]))
+    const sameKind = (a: LotFacts, b: LotFacts): boolean => {
+      const day = lotBusinessDay(a.received_at)
+      return day !== null && day === lotBusinessDay(b.received_at)
+        && (a.expiry_date ?? '') === (b.expiry_date ?? '') && lotSupplierKey(a) === lotSupplierKey(b)
+    }
+    for (const lot of asked) {
+      const match = holders.find((holder) => Number(holder.product) === Number(lot.product) && Number(holder.id) !== Number(lot.id) && sameKind(lot, holder))
+      if (match && Number(match.id) > 0) survivors.set(Number(lot.id), Number(match.id))
     }
   }
   return survivors

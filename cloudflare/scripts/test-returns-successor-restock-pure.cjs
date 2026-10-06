@@ -715,6 +715,14 @@ async function residualChecks() {
       assert.strictEqual(stockOf(4, 1), 3, `${column} differs: the lot keeps its own identity at LC Store`)
       assert.strictEqual(stockOf(1, 1), 10)
     }
+    // The business day is Cambodia's (UTC+7): 18:00Z on 31 Dec is already 1 Jan, 16:00Z is still 31 Dec.
+    for (const [stamp, merges] of [['2025-12-31T18:00:00Z', true], ['2025-12-31T16:00:00Z', false], ['1/1/2026', true]]) {
+      seedWorld('after'); seedLots('after', 1); soldOutLot()
+      rawDb.prepare('UPDATE product_batches SET received_at = ? WHERE id = 4').run([stamp])
+      const day = await req('POST', '/', returnBody({ client_request_id: 'sold-out-day-' + stamp }))
+      assert.strictEqual(day.status, 200, JSON.stringify(day.json))
+      assert.strictEqual(stockOf(4, 1), merges ? null : 3, `${stamp}: ${merges ? 'same business day merges' : 'another business day stays apart'}`)
+    }
     // A lot that HOLDS stock at the landing branch is never remapped.
     seedWorld('after'); seedLots('after', 1); soldOutLot()
     rawDb.prepare('INSERT INTO branch_batch_stock (batch_id, branch_id, quantity) VALUES (4, 1, 2)').run()
