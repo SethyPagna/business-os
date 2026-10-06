@@ -104,7 +104,7 @@ function setup() {
 const base = {
   jobId: 'job-sale',
   saleGroupKey: 'sale',
-  date: '08/27/2026',
+  date: '27/08/2026',
   actor: { id: 52, username: 'stock-importer', name: 'Ignored Full Name' },
   recordedAt: '2026-09-07T13:00:00.000Z',
   lines: [

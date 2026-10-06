@@ -31,11 +31,14 @@ assert.deepEqual(mapUnifiedStockHeaders(['Product Name', 'UPC', 'Shop Qty', 'War
 const tenColumnMap = mapUnifiedStockHeaders(['name', 'barcode', 'shop', 'warehouse', 'date', 'action', 'selling_price', 'wholesale_price', 'cost_price', 'batch'])
 assert.equal(tenColumnMap.supplier, null)
 assert.equal(tenColumnMap.free_goods, null)
-assert.equal(normalizeUnifiedStockDate('08/27/2026'), '2026-08-27')
+// Day-first since Oct 6 2026 (owner: all imports read slash dates day-first).
+assert.equal(normalizeUnifiedStockDate('27/08/2026'), '2026-08-27')
+assert.equal(normalizeUnifiedStockDate('03/04/2026'), '2026-04-03', 'discriminating: both fields <= 12, only the order separates the readings')
+assert.equal(normalizeUnifiedStockDate('08/27/2026'), null, 'month 27 does not exist: the old month-first spelling is refused, not guessed')
 assert.equal(normalizeUnifiedStockDate('2026-02-29'), null)
 
 const unified = parseUnifiedStockRows([
-  { name: 'A', barcode: '1', shop: '2', warehouse: '0', date: '08/27/2026', action: 'add', selling_price: '$12.50', wholesale_price: '10', cost_price: '5', batch: 'B1' },
+  { name: 'A', barcode: '1', shop: '2', warehouse: '0', date: '27/08/2026', action: 'add', selling_price: '$12.50', wholesale_price: '10', cost_price: '5', batch: 'B1' },
   { name: 'A', barcode: '1', shop: '0', warehouse: '1', date: '2026-08-27', action: 'sale1', selling_price: '12.5', wholesale_price: '10', cost_price: '6', batch: 'B2' },
 ])
 assert.equal(unified.issues.length, 0)
@@ -50,8 +53,8 @@ assert.deepEqual([...findUnifiedStockCostBatchConflicts(unified.rows).keys()], [
 // never fired -- while the import that followed treated them as one product
 // and received it at two costs across two lots unannounced.
 const foldedTwins = parseUnifiedStockRows([
-  { name: 'Rose Lip Oil', barcode: '03614274226546', shop: '2', date: '08/27/2026', action: 'add', cost_price: '4', batch: 'LOT-A' },
-  { name: 'Rose Lip Oil', barcode: '3614274226546', shop: '2', date: '08/27/2026', action: 'add', cost_price: '9', batch: 'LOT-B' },
+  { name: 'Rose Lip Oil', barcode: '03614274226546', shop: '2', date: '27/08/2026', action: 'add', cost_price: '4', batch: 'LOT-A' },
+  { name: 'Rose Lip Oil', barcode: '3614274226546', shop: '2', date: '27/08/2026', action: 'add', cost_price: '9', batch: 'LOT-B' },
 ])
 assert.equal(foldedTwins.issues.length, 0)
 assert.deepEqual([...findUnifiedStockCostBatchConflicts(foldedTwins.rows).keys()], [2, 3],
@@ -63,8 +66,8 @@ assert.deepEqual([...findUnifiedStockCostBatchConflicts(foldedTwins.rows).keys()
 // barcode is a wildcard, never a second identity -- so these two rows are
 // now one product and the cost/batch gate must fire for them too.
 const shortCodes = parseUnifiedStockRows([
-  { name: 'Short Code Balm', barcode: '0012', shop: '1', date: '08/27/2026', action: 'add', cost_price: '3', batch: 'LOT-A' },
-  { name: 'Short Code Balm', barcode: '12', shop: '1', date: '08/27/2026', action: 'add', cost_price: '8', batch: 'LOT-B' },
+  { name: 'Short Code Balm', barcode: '0012', shop: '1', date: '27/08/2026', action: 'add', cost_price: '3', batch: 'LOT-A' },
+  { name: 'Short Code Balm', barcode: '12', shop: '1', date: '27/08/2026', action: 'add', cost_price: '8', batch: 'LOT-B' },
 ])
 assert.equal(findUnifiedStockCostBatchConflicts(shortCodes.rows).size, 2)
 // A broken/placeholder barcode ('N/A') is a WILDCARD against a REAL barcode
@@ -77,12 +80,12 @@ assert.equal(findUnifiedStockCostBatchConflicts(shortCodes.rows).size, 2)
 // the cost/batch gate even though the server-side import resolves them to
 // one product at two costs across two lots unannounced.
 const brokenVsReal = parseUnifiedStockRows([
-  { name: 'Face Glow', barcode: 'N/A', shop: '1', date: '08/27/2026', action: 'add', cost_price: '3', batch: 'LOT-A' },
-  { name: 'Face Glow', barcode: '748485110011', shop: '1', date: '08/27/2026', action: 'add', cost_price: '8', batch: 'LOT-B' },
+  { name: 'Face Glow', barcode: 'N/A', shop: '1', date: '27/08/2026', action: 'add', cost_price: '3', batch: 'LOT-A' },
+  { name: 'Face Glow', barcode: '748485110011', shop: '1', date: '27/08/2026', action: 'add', cost_price: '8', batch: 'LOT-B' },
 ])
 assert.deepEqual([...findUnifiedStockCostBatchConflicts(brokenVsReal.rows).keys()].sort(), [2, 3],
   'a broken/placeholder barcode against a real barcode of the same name is one product, so the cost/batch gate must fire')
-const invalidUnified = parseUnifiedStockRows([{ name: '', barcode: '', shop: '-1', warehouse: '', date: '31/12/2026', selling_price: 'nope' }])
+const invalidUnified = parseUnifiedStockRows([{ name: '', barcode: '', shop: '-1', warehouse: '', date: '12/31/2026', selling_price: 'nope' }])
 assert.deepEqual(invalidUnified.issues.map((issue) => issue.code), ['missing_identity', 'invalid_quantity', 'invalid_date', 'invalid_price'])
 assert.equal(invalidUnified.rows.length, 1, 'invalid rows stay visible for review instead of disappearing')
 // ---- N14-D, the fourth wire: the receipt gate, mirrored ---------------------
@@ -91,7 +94,7 @@ assert.equal(invalidUnified.rows.length, 1, 'invalid rows stay visible for revie
 // session do. This screen has to say so BEFORE the upload, or the operator
 // meets the refusal only in the finished report.
 const noCost = parseUnifiedStockRows([
-  { name: 'A', barcode: '1', shop: '2', date: '08/27/2026', action: 'add', supplier: 'Bong Long' },
+  { name: 'A', barcode: '1', shop: '2', date: '27/08/2026', action: 'add', supplier: 'Bong Long' },
 ])
 assert.deepEqual(noCost.issues.map((issue) => issue.code), ['receipt_gate'])
 assert.equal(noCost.issues[0].gateCode, 'cost_required')
@@ -100,13 +103,13 @@ assert.equal(noCost.rows.length, 1, 'a gated row stays visible for review with i
 // $0.00 is the claim "these goods were free". Left undeclared, it is refused
 // rather than recorded as a free receipt...
 const zeroCost = parseUnifiedStockRows([
-  { name: 'A', barcode: '1', warehouse: '3', date: '08/27/2026', action: 'add', cost_price: '0', supplier: 'Bong Long' },
+  { name: 'A', barcode: '1', warehouse: '3', date: '27/08/2026', action: 'add', cost_price: '0', supplier: 'Bong Long' },
 ])
 assert.deepEqual(zeroCost.issues.map((issue) => issue.gateCode), ['free_goods_required'])
 // ...but the free_goods column (N14-D) is exactly the control the refusal's
 // own message points at, so a sheet that ticks it passes clean.
 const zeroCostDeclaredFree = parseUnifiedStockRows([
-  { name: 'A', barcode: '1', warehouse: '3', date: '08/27/2026', action: 'add', cost_price: '0', supplier: 'Bong Long', free_goods: 'yes' },
+  { name: 'A', barcode: '1', warehouse: '3', date: '27/08/2026', action: 'add', cost_price: '0', supplier: 'Bong Long', free_goods: 'yes' },
 ])
 assert.equal(zeroCostDeclaredFree.issues.length, 0, 'a declared-free $0.00 receipt is not gated')
 assert.equal(zeroCostDeclaredFree.rows[0].freeGoods, true)
@@ -116,26 +119,26 @@ assert.equal(zeroCostDeclaredFree.rows[0].freeGoods, true)
 // the finished report, unlike an ordinary add whose supplier may be deferred
 // to an already-attributed lot the sheet cannot see.
 const createNoSupplier = parseUnifiedStockRows([
-  { name: 'Brand New', barcode: '9', shop: '2', date: '08/27/2026', action: 'create', cost_price: '5' },
+  { name: 'Brand New', barcode: '9', shop: '2', date: '27/08/2026', action: 'create', cost_price: '5' },
 ])
 assert.deepEqual(createNoSupplier.issues.map((issue) => issue.gateCode), ['supplier_required'])
 // A CREATE row's supplier cell must actually be read: before this, the gate
 // call never passed supplierName at all, so an explicit CREATE with the
 // supplier column FILLED was still wrongly flagged supplier_required.
 const createWithSupplier = parseUnifiedStockRows([
-  { name: 'Brand New', barcode: '9', shop: '2', date: '08/27/2026', action: 'create', cost_price: '5', supplier: 'Bong Long' },
+  { name: 'Brand New', barcode: '9', shop: '2', date: '27/08/2026', action: 'create', cost_price: '5', supplier: 'Bong Long' },
 ])
 assert.deepEqual(createWithSupplier.issues.map((issue) => issue.gateCode), [], 'a filled supplier column must clear the create-row gate')
 // 'new' is the same action, mirroring the resolver's CREATE_ACTION_RE.
 assert.deepEqual(
-  parseUnifiedStockRows([{ name: 'Brand New', barcode: '9', shop: '2', date: '08/27/2026', action: 'new', cost_price: '5' }])
+  parseUnifiedStockRows([{ name: 'Brand New', barcode: '9', shop: '2', date: '27/08/2026', action: 'new', cost_price: '5' }])
     .issues.map((issue) => issue.gateCode),
   ['supplier_required'],
 )
 // An ordinary add (no explicit create/new) keeps deferring the supplier half:
 // it may be topping up an already-attributed lot this screen cannot see.
 assert.deepEqual(
-  parseUnifiedStockRows([{ name: 'A', barcode: '1', shop: '2', date: '08/27/2026', action: 'add', cost_price: '5' }])
+  parseUnifiedStockRows([{ name: 'A', barcode: '1', shop: '2', date: '27/08/2026', action: 'add', cost_price: '5' }])
     .issues.map((issue) => issue.gateCode),
   [],
   'a plain add defers the supplier question to the server, which can see the lot',
@@ -143,7 +146,7 @@ assert.deepEqual(
 
 // A sale takes stock OUT and carries no receipt facts...
 const saleRow = parseUnifiedStockRows([
-  { name: 'A', barcode: '1', shop: '2', date: '08/27/2026', action: 'sale2' },
+  { name: 'A', barcode: '1', shop: '2', date: '27/08/2026', action: 'sale2' },
 ])
 assert.equal(saleRow.issues.length, 0, 'a sale is not a receipt')
 
@@ -151,12 +154,12 @@ assert.equal(saleRow.issues.length, 0, 'a sale is not a receipt')
 // the server, holding live stock, knows whether it moves stock in at all.
 // Flagging it here would refuse rows the import accepts.
 const reconcileRow = parseUnifiedStockRows([
-  { name: 'A', barcode: '1', shop: '2', date: '08/27/2026', action: '' },
+  { name: 'A', barcode: '1', shop: '2', date: '27/08/2026', action: '' },
 ], 'reconcile')
 assert.equal(reconcileRow.issues.length, 0, 'reconcile totals are gated server-side, never guessed here')
 // The same row in direct mode IS an add, and is gated.
 assert.deepEqual(
-  parseUnifiedStockRows([{ name: 'A', barcode: '1', shop: '2', date: '08/27/2026', action: '' }], 'direct')
+  parseUnifiedStockRows([{ name: 'A', barcode: '1', shop: '2', date: '27/08/2026', action: '' }], 'direct')
     .issues.map((issue) => issue.gateCode),
   ['cost_required'],
   'a blank action in direct mode is an add, so the cost is required',
@@ -164,7 +167,7 @@ assert.deepEqual(
 
 // One unreadable cost cell is one row needing attention, not two.
 assert.deepEqual(
-  parseUnifiedStockRows([{ name: 'A', barcode: '1', shop: '2', date: '08/27/2026', action: 'add', cost_price: 'nope' }])
+  parseUnifiedStockRows([{ name: 'A', barcode: '1', shop: '2', date: '27/08/2026', action: 'add', cost_price: 'nope' }])
     .issues.map((issue) => issue.code),
   ['invalid_price'],
 )

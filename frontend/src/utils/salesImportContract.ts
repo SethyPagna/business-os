@@ -47,11 +47,11 @@ function saleItems(sale: DataRow): DataRow[] {
 function headerFields(sale: DataRow): DataRow {
   return {
     receipt_number: value(sale, 'receipt_number'),
-    // ISO, deliberately, even though the app displays dates day-first: this
-    // cell is read BACK by parseSalesImportDateTime, whose slash branch is
-    // month-first forever (every sheet the shop already has keeps its
-    // present meaning). A day-first cell here would re-import as a
-    // different date without failing. Same instant, same business
+    // ISO, deliberately: this cell is read BACK by parseSalesImportDateTime,
+    // and ISO is the one form that can never be read in the wrong order. (Its
+    // slash branch is day-first since Oct 6 2026 -- owner: every import reads
+    // slash dates day-first -- so a day-first cell would also round-trip, but a
+    // machine-readable cell stays unambiguous.) Same instant, same business
     // timezone, same 24-hour clock -- only the field order is ISO.
     sale_date: sale.created_at ? fmtBusinessIsoDateTime(sale.created_at as string) : '',
     sale_status: value(sale, 'sale_status', 'completed'),

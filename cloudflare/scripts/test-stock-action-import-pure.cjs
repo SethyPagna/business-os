@@ -70,8 +70,8 @@ assert.strictEqual(precisionRows[0].wholesalePriceUsd, 1.24)
 assert.strictEqual(precisionRows[0].costPriceUsd, 1.23)
 
 const direct = subject.resolveUnifiedStockImportRows([
-  { _rowNumber: 2, name: 'Serum', barcode: 'ABC', shop: '2', warehouse: '0', date: '08/27/2026', action: 'add' },
-  { _rowNumber: 3, name: 'Serum', barcode: 'ABC', shop: '0', warehouse: '2', date: '08/27/2026', action: 'sale1' },
+  { _rowNumber: 2, name: 'Serum', barcode: 'ABC', shop: '2', warehouse: '0', date: '27/08/2026', action: 'add' },
+  { _rowNumber: 3, name: 'Serum', barcode: 'ABC', shop: '0', warehouse: '2', date: '27/08/2026', action: 'sale1' },
 ], 'direct', products, branches, current)
 assert.strictEqual(direct[0].plan.kind, 'add')
 assert.deepStrictEqual(direct[0].plan.branchActions, [{ branchId: 1, direction: 'add', quantity: 2 }, { branchId: 2, direction: 'none', quantity: 0 }])
@@ -80,12 +80,22 @@ assert.strictEqual(direct[1].plan.saleGroupKey, '2026-08-27#1')
 assert.strictEqual(direct[1].sellingPriceUsd, 12, 'blank optional prices inherit from the exact product match')
 assert.strictEqual(direct[0].freeGoods, false, 'no free_goods cell reads as not declared free')
 
+// Owner, Oct 6 2026: every import reads slash dates day-first. 03/04/2026 is the
+// discriminating cell -- both fields <= 12, so only the answer separates 3 April
+// from 4 March -- and 08/27/2026 (month 27) is now simply not a date.
+const sheetDates = subject.resolveUnifiedStockImportRows([
+  { _rowNumber: 2, name: 'Serum', barcode: 'ABC', shop: '1', date: '03/04/2026', action: 'add' },
+  { _rowNumber: 3, name: 'Serum', barcode: 'ABC', shop: '1', date: '08/27/2026', action: 'add' },
+], 'direct', products, branches, current)
+assert.strictEqual(sheetDates[0].date, '2026-04-03', 'the sheet date column is day-first: 3 April, not 4 March')
+assert.ok(sheetDates[1].errors.some((message) => /dd\/mm\/yyyy/.test(message)), 'the old month-first spelling is refused with a message naming the order')
+
 // The N14-D declaration column, read with the same truthy-string rule the
 // frontend mirror (unifiedStockImport.ts's parseFreeGoodsFlag) uses.
 const freeGoodsRows = subject.resolveUnifiedStockImportRows([
-  { _rowNumber: 2, name: 'Serum', barcode: 'ABC', shop: '1', date: '08/27/2026', action: 'add', free_goods: 'yes' },
-  { _rowNumber: 3, name: 'Serum', barcode: 'ABC', shop: '1', date: '08/27/2026', action: 'add', free_goods: '' },
-  { _rowNumber: 4, name: 'Serum', barcode: 'ABC', shop: '1', date: '08/27/2026', action: 'add', free_goods: 'no' },
+  { _rowNumber: 2, name: 'Serum', barcode: 'ABC', shop: '1', date: '27/08/2026', action: 'add', free_goods: 'yes' },
+  { _rowNumber: 3, name: 'Serum', barcode: 'ABC', shop: '1', date: '27/08/2026', action: 'add', free_goods: '' },
+  { _rowNumber: 4, name: 'Serum', barcode: 'ABC', shop: '1', date: '27/08/2026', action: 'add', free_goods: 'no' },
 ], 'direct', products, branches, current)
 assert.strictEqual(freeGoodsRows[0].freeGoods, true)
 assert.strictEqual(freeGoodsRows[1].freeGoods, false)
@@ -98,7 +108,7 @@ assert.deepStrictEqual(reconcile[0].plan.branchActions, [{ branchId: 1, directio
 assert.ok(reconcile[0].conflicts.some((message) => /both adds and sells/.test(message)))
 
 const created = subject.resolveUnifiedStockImportRows([
-  { name: 'New Product', barcode: 'NEW', shop: '3', date: '08/27/2026', action: '' },
+  { name: 'New Product', barcode: 'NEW', shop: '3', date: '27/08/2026', action: '' },
 ], 'direct', products, [{ id: 2, name: 'Warehouse' }], current)[0]
 assert.strictEqual(created.plan.kind, 'create')
 assert.deepStrictEqual(created.branchRefs, [{ slot: 'shop', branchId: -1, branchName: 'Shop', pending: true, value: 3 }])
@@ -113,13 +123,13 @@ const variants = [
 // them (and a third cost minted a third row), so this import path was itself a
 // source of the duplicates. It now refuses to guess and says what to do.
 const exactCost = subject.resolveUnifiedStockImportRows([
-  { name: 'Serum', barcode: 'ABC', cost_price: '6', shop: '1', date: '08/28/2026', action: 'add', batch: 'NEW' },
+  { name: 'Serum', barcode: 'ABC', cost_price: '6', shop: '1', date: '28/08/2026', action: 'add', batch: 'NEW' },
 ], 'direct', variants, branches, [])[0]
 assert.strictEqual(exactCost.productId, null, 'a duplicate pair is reviewable, never actionable -- cost no longer picks a row')
 assert.ok(exactCost.conflicts.some((message) => /merge the exact duplicates/.test(message)))
 assert.strictEqual(exactCost.plan, null, 'and it never falls through to an apply')
 const differentCost = subject.resolveUnifiedStockImportRows([
-  { name: 'Serum', barcode: 'ABC', cost_price: '7', shop: '1', date: '08/28/2026', action: 'add', batch: 'NEW' },
+  { name: 'Serum', barcode: 'ABC', cost_price: '7', shop: '1', date: '28/08/2026', action: 'add', batch: 'NEW' },
 ], 'direct', variants, branches, [])[0]
 assert.strictEqual(differentCost.productId, null, 'a third cost does not mint a third product either')
 // 'ABC' is a word, not a real (all-digit, >=6-digit) barcode, so the Sep 15
@@ -129,12 +139,12 @@ assert.strictEqual(differentCost.productId, null, 'a third cost does not mint a 
 assert.strictEqual(differentCost.identityKey, 'new:serum|', 'the identity carries no cost component, and a broken barcode folds to empty')
 assert.ok(differentCost.conflicts.some((message) => /merge the exact duplicates/.test(message)))
 const sameBatch = subject.resolveUnifiedStockImportRows([
-  { name: 'Serum', barcode: 'ABC', cost_price: '7', shop: '1', date: '08/27/2026', action: 'add' },
+  { name: 'Serum', barcode: 'ABC', cost_price: '7', shop: '1', date: '27/08/2026', action: 'add' },
 ], 'direct', variants, branches, [])[0]
 assert.strictEqual(sameBatch.productId, 20, 'same barcode + existing date-derived batch shares the product option despite receipt cost')
 const sameNewBatch = subject.resolveUnifiedStockImportRows([
-  { _rowNumber: 30, name: 'Brand New', barcode: 'BN1', cost_price: '5', shop: '1', date: '08/29/2026', action: 'add', batch: 'SHIP-A' },
-  { _rowNumber: 31, name: 'Brand New', barcode: 'BN1', cost_price: '6', shop: '1', date: '08/29/2026', action: 'add', batch: 'SHIP-A' },
+  { _rowNumber: 30, name: 'Brand New', barcode: 'BN1', cost_price: '5', shop: '1', date: '29/08/2026', action: 'add', batch: 'SHIP-A' },
+  { _rowNumber: 31, name: 'Brand New', barcode: 'BN1', cost_price: '6', shop: '1', date: '29/08/2026', action: 'add', batch: 'SHIP-A' },
 ], 'direct', variants, branches, [])
 assert.strictEqual(sameNewBatch[1].identityKey, sameNewBatch[0].identityKey, 'two new receipts for the same barcode+batch create one option')
 assert.strictEqual(sameNewBatch[0].costPriceUsd, 5)
@@ -145,7 +155,7 @@ assert.strictEqual(invalid.plan, null)
 assert.ok(invalid.errors.length >= 3)
 
 const ambiguous = subject.resolveUnifiedStockImportRows([
-  { name: '', barcode: 'DUP', shop: '1', date: '08/27/2026', action: 'add' },
+  { name: '', barcode: 'DUP', shop: '1', date: '27/08/2026', action: 'add' },
 ], 'direct', [...products, { id: 11, name: 'A', barcode: 'DUP' }, { id: 12, name: 'B', barcode: 'DUP' }], branches, current)[0]
 // No name on the row, so the ONLY question left is the barcode -- and it is
 // shared by two different products. Cost used to appear in this message as a
@@ -161,7 +171,7 @@ assert.strictEqual(ambiguous.plan, null, 'an ambiguous identity must never fall 
 // than being treated as its own separate (and, before the Sep 15 2026
 // ruling, plain-string-unequal) identity.
 const zeroPlaceholder = subject.resolveUnifiedStockImportRows([
-  { name: 'Serum', barcode: '000000', shop: '1', date: '08/27/2026', action: 'add' },
+  { name: 'Serum', barcode: '000000', shop: '1', date: '27/08/2026', action: 'add' },
 ], 'direct', products, branches, current)[0]
 assert.strictEqual(zeroPlaceholder.productId, 10, 'an all-zero placeholder barcode resolves onto the existing same-name product, not a new/ambiguous row')
 assert.strictEqual(zeroPlaceholder.identityKey, 'product:10')
@@ -200,7 +210,7 @@ const fakeDb = {
 
 ;(async () => {
   const classified = await catalog.classifyUnifiedStockActions(fakeDb, [
-    { _rowNumber: 2, name: 'Serum', barcode: 'ABC', shop: '10', warehouse: '4', date: '08/27/2026' },
+    { _rowNumber: 2, name: 'Serum', barcode: 'ABC', shop: '10', warehouse: '4', date: '27/08/2026' },
     { _rowNumber: 3, name: 'Missing', barcode: '', shop: '-1', date: 'bad' },
   ], '{"stock_action_mode":"reconcile"}')
   assert.strictEqual(classified[0].action, 'update')

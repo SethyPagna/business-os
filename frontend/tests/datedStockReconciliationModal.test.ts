@@ -89,14 +89,10 @@ console.log('PASS normalizeHeaderForMatch collapses case/punctuation/whitespace 
 
 // The Count date hint must name the order the backend actually reads.
 //
-// This screen maps a spreadsheet the shop already owns, so its `date` column
-// stays MONTH-first -- the only meaning it has ever had, and re-reading those
-// files day-first would rewrite historical stock counts silently
-// (cloudflare/src/lib/datedStockCountResolve.ts now states that order rather
-// than defaulting into it). The app itself went day-first on Sep 4 2026, so a
-// hint reading only "any common date format" became a promise the parser does
-// not keep: an operator who types 03/09/2026 into a day-first field elsewhere
-// in the app maps a column of those same strings here and gets 9 March.
+// Since Oct 6 2026 (owner: "all imports read slash dates day-first, like the
+// app") this screen's `date` column is read DAY-first, exactly like everything
+// a person types. It was month-first before; a hint reading only "any common
+// date format" promised something the parser does not keep.
 //
 // The assertion is tied to the KERNEL, not to a remembered string: it asks
 // normalizeToIsoDate what its default order really does to 03/09/2026 -- both
@@ -107,11 +103,11 @@ console.log('PASS normalizeHeaderForMatch collapses case/punctuation/whitespace 
 {
   const hint = TARGET_FIELDS.find((f) => f.key === 'date')?.hint || ''
   assert.equal(
-    normalizeToIsoDate('03/09/2026'), '2026-03-09',
-    'the mapped sheet column is still read month-first -- if this moved, the hint below must move with it',
+    normalizeToIsoDate('03/09/2026'), '2026-09-03',
+    'the mapped sheet column is read day-first -- if this moved, the hint below must move with it',
   )
-  assert.ok(hint.includes('mm/dd/yyyy'), `the Count date hint must name the order it is read in, got: ${hint}`)
-  assert.ok(!hint.includes('dd/mm/yyyy'), 'and must not also advertise the day-first order it does NOT accept')
+  assert.ok(hint.includes('dd/mm/yyyy'), `the Count date hint must name the order it is read in, got: ${hint}`)
+  assert.ok(!hint.includes('mm/dd/yyyy'), 'and must not also advertise the month-first order it does NOT accept')
   assert.ok(
     !/any common date format/i.test(hint),
     'the old wording promised every format and delivered one; it must not come back',
@@ -119,9 +115,9 @@ console.log('PASS normalizeHeaderForMatch collapses case/punctuation/whitespace 
   // Positive control on the detector: handed the old string, these same two
   // checks must FAIL. A sweep that cannot report a negative proves nothing.
   const old = 'The date this snapshot was taken (any common date format).'
-  assert.equal(old.includes('mm/dd/yyyy'), false, 'control: the old hint named no order')
+  assert.equal(old.includes('dd/mm/yyyy'), false, 'control: the old hint named no order')
   assert.equal(/any common date format/i.test(old), true, 'control: the old hint is what the pattern catches')
-  console.log('PASS the Count date hint names the month-first order its own parser uses')
+  console.log('PASS the Count date hint names the day-first order its own parser uses')
 }
 
 console.log('datedStockReconciliationModal tests passed')

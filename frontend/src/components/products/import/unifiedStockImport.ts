@@ -125,23 +125,22 @@ function parseOptionalNumber(value: unknown): number | null | 'invalid' {
 }
 
 /**
- * MONTH-FIRST, deliberately, and it must stay that way.
+ * DAY-FIRST, like every import (owner, Oct 6 2026: "all imports read slash
+ * dates day-first, like the app").
  *
- * This reads the sheet's bare `date` column. Per the standing rule, a date
- * cell's reading order comes from its column header: `batch(dd/mm/yyyy)` is
- * day-first, `batch(mm/dd/yyyy)` is month-first, and a bare header that names
- * no format keeps the meaning it has always had -- otherwise every sheet the
- * shop already owns would silently change meaning the day the app went
- * day-first. ISO is accepted here too and is the form that can never be
- * misread. Do NOT "finish the job" by flipping this to match the display
- * convention; see lib/batchCode.ts readBatchDateCell for the same rule.
+ * This reads the sheet's bare `date` column, which names no other order, so
+ * 03/09/2026 is 3 September. ISO is accepted here too and is the form that can
+ * never be misread. The one exception to the rule is a column whose header
+ * SAYS mm/dd/yyyy (`batch(mm/dd/yyyy)` on the products sheet); this sheet has
+ * no such column. The Worker's lib/stockActionImport.ts reads the same cell the
+ * same way, and lib/batchCode.ts readBatchDateCell states the rule.
  */
 export function normalizeUnifiedStockDate(value: unknown): string | null {
   const text = clean(value)
   if (!text) return null
   const iso = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(text)
-  const us = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(text)
-  const parts = iso ? [Number(iso[1]), Number(iso[2]), Number(iso[3])] : us ? [Number(us[3]), Number(us[1]), Number(us[2])] : null
+  const slash = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(text)
+  const parts = iso ? [Number(iso[1]), Number(iso[2]), Number(iso[3])] : slash ? [Number(slash[3]), Number(slash[2]), Number(slash[1])] : null
   if (!parts) return null
   const [year, month, day] = parts
   const date = new Date(Date.UTC(year, month - 1, day))
@@ -180,7 +179,7 @@ export function parseUnifiedStockRows(
     if (shop === 'invalid' || warehouse === 'invalid' || (typeof shop === 'number' && shop < 0) || (typeof warehouse === 'number' && warehouse < 0)) {
       issues.push({ rowNumber, code: 'invalid_quantity', message: 'Shop and warehouse must be non-negative numbers.' })
     }
-    if (!date) issues.push({ rowNumber, code: 'invalid_date', message: 'Date must be mm/dd/yyyy (month first, as this column has always been) or yyyy-mm-dd.' })
+    if (!date) issues.push({ rowNumber, code: 'invalid_date', message: 'Date must be dd/mm/yyyy or yyyy-mm-dd.' })
     const priceInvalid = [sellingPrice, wholesalePrice, costPrice].some((value) => value === 'invalid' || (typeof value === 'number' && value < 0))
     if (priceInvalid) {
       issues.push({ rowNumber, code: 'invalid_price', message: 'Prices must be non-negative numbers.' })

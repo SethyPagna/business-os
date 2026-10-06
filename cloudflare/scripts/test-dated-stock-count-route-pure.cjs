@@ -137,10 +137,17 @@ async function main() {
     assert.ok('error' in result)
     assert.ok(/Too many entries/.test(result.error))
   })
-  test('parseDatedStockCountEntries accepts an mm/dd/yyyy date via normalizeToIsoDate and rewrites it to ISO', () => {
-    const result = parseDatedStockCountEntries({ entries: [{ date: '08/16/2026', productId: 1, branchId: 1, count: 5 }] })
+  test('parseDatedStockCountEntries accepts a dd/mm/yyyy date via normalizeToIsoDate and rewrites it to ISO', () => {
+    const result = parseDatedStockCountEntries({ entries: [{ date: '16/08/2026', productId: 1, branchId: 1, count: 5 }] })
     assert.ok('entries' in result, JSON.stringify(result))
     assert.strictEqual(result.entries[0].date, '2026-08-16')
+  })
+  test('parseDatedStockCountEntries reads 03/04/2026 day-first (3 April) and refuses the month-first spelling of a late-month day', () => {
+    const ok = parseDatedStockCountEntries({ entries: [{ date: '03/04/2026', productId: 1, branchId: 1, count: 5 }] })
+    assert.ok('entries' in ok, JSON.stringify(ok))
+    assert.strictEqual(ok.entries[0].date, '2026-04-03')
+    const bad = parseDatedStockCountEntries({ entries: [{ date: '08/16/2026', productId: 1, branchId: 1, count: 5 }] })
+    assert.ok('error' in bad, 'month 16 does not exist')
   })
   test('parseDatedStockCountEntries rejects a row with a non-positive productId', () => {
     const result = parseDatedStockCountEntries({ entries: [{ date: '2026-08-16', productId: 0, branchId: 1, count: 5 }] })

@@ -86,6 +86,7 @@ import { bumpVersion } from './cache'
 import { broadcast } from '../durable-objects/broadcastHub'
 import { VALID_SALE_STATUSES, RETURN_STATUSES, normalizeSaleStatus } from './salesStatus'
 import { dateToBatchCode, normalizeToIsoDate, readBatchDateCell } from './batchCode'
+import { businessToday, localDateOf } from './businessDateWindow'
 import { normalizeSearchText, compactSearchText } from './searchMatch'
 import { getActionTier, hasPermission, isActionBlocked } from './permissions'
 import type { SessionUser } from './auth'
@@ -667,13 +668,29 @@ export function buildDescriptionFromColumns(row: Record<string, unknown>): strin
   return parts.join('\n\n')
 }
 
-// YYYY-MM-DD for today, matching the frontend's own
-// CreatedDateFilterOptions.tsx todayIso() and the date-only shape every
-// other date column here (expiry_date, discount_starts_at/ends_at) already
-// stores. Used as the default for a new product's received_date when the
-// CSV leaves that column blank (see normalizeProductImportRow below).
+// YYYY-MM-DD for today in the BUSINESS timezone (Cambodia, UTC+7), the
+// date-only shape every other date column here (expiry_date,
+// discount_starts_at/ends_at) already stores. Used as the default for a new
+// product's received_date when the CSV leaves that column blank (see
+// normalizeProductImportRow below). `new Date().toISOString().slice(0, 10)` is
+// the UTC day, which names yesterday from 00:00 to 06:59 Cambodia time.
 function todayIso(): string {
-  return new Date().toISOString().slice(0, 10)
+  return businessToday()
+}
+
+// A CSV date cell that feeds a created_at-style instant (a contact's join date,
+// an inventory receipt's date). Read day-first like every import (owner, Oct 6
+// 2026) through the one kernel, never `new Date(raw)` -- which reads a slash
+// string month-first, so "25/12/2026" was silently dropped and the row fell back
+// to "now". The instant is that date at 00:00 UTC, which is the same calendar
+// day in UTC and in Cambodia (07:00), so a UTC-day reader and a business-day
+// reader agree. A blank cell is simply "no date"; a non-blank unreadable cell
+// is reported as `unreadable` so the caller can say so instead of substituting
+// today silently.
+function readImportDateCell(raw: string): { instant: string | null; unreadable: boolean } {
+  if (!raw) return { instant: null, unreadable: false }
+  const iso = normalizeToIsoDate(raw, 'day-first')
+  return iso ? { instant: `${iso}T00:00:00.000Z`, unreadable: false } : { instant: null, unreadable: true }
 }
 
 // Customer gender -- free-text CSV cell normalized to the same three
@@ -1741,11 +1758,10 @@ export async function classifyProducts(
     // broken by the rename. Either way, a blank cell still means
     // "received now" -- see the comment above on why this can't just be
     // null.
-    // Normalize to ISO before storing: the cell is typed in whatever order
-    // its own column header names -- `batch(mm/dd/yyyy)` month-first,
-    // `batch(dd/mm/yyyy)` day-first, bare `batch`/`date`/`received_date`
-    // month-first because they name no format and must keep the only meaning
-    // they have ever had (readBatchDateCell). received_at is a DATE column every reader
+    // Normalize to ISO before storing: slash dates read day-first like every
+    // import (owner, Oct 6 2026); the one exception is a column whose header
+    // names the other order, `batch(mm/dd/yyyy)` (readBatchDateCell).
+    // received_at is a DATE column every reader
     // compares/sorts/groups with SQL date functions -- storing the raw
     // display string put "08/24/2026" verbatim into 6,031 production lots
     // (Aug-28 catalog import), where date() returns NULL and ordering is
@@ -1755,19 +1771,17 @@ export async function classifyProducts(
     const { raw: rawReceivedDate, order: receivedDateOrder, header: receivedDateHeader } = readBatchDateCell(row as Record<string, unknown>)
     // ONE read of the cell, whose result the unreadable-date warning below
     // is derived from. It used to be read TWICE -- here with the header's
-    // own order and again in the warning guard with normalizeToIsoDate's
-    // bare (month-first) default -- so every readable day-first cell whose
-    // day was > 12 (25/12/2026 under the template's own batch(dd/mm/yyyy)
-    // header) was stored correctly AND reported "unreadable, received as
-    // today". Both halves of that message were false. A single parse cannot
-    // disagree with itself.
+    // own order and again in the warning guard with a different default
+    // order -- so a readable cell could be stored correctly AND reported
+    // "unreadable, received as today". Both halves of that message were
+    // false. A single parse cannot disagree with itself.
     const parsedReceivedDate = normalizeToIsoDate(rawReceivedDate, receivedDateOrder)
     data.received_date = parsedReceivedDate || todayIso()
     // The stored/displayed batch code is always derived from
     // received_date directly above, never from a separately-typed label
     // -- "lot code can be removed... batch column is just a translated
-    // version of received date": 08/22/2026 or 8/22/2026 becomes
-    // 08222026, 08/2/2026 becomes 08022026 (see batchCode.ts's
+    // version of received date": 22/08/2026 or 22/8/2026 becomes
+    // 08222026, 2/08/2026 becomes 08022026 (see batchCode.ts's
     // dateToBatchCode). This is the date that decides which lot a
     // restock row tops up (see materializeImportChunk's
     // batchByProductAndLot matching below, and receiveBatchStock's
@@ -2318,12 +2332,9 @@ export async function classifyContacts(db: D1Compat, table: 'customers' | 'suppl
     // or delivery contact's own imported creation date even though the
     // generic INSERT already knew how to honor `d.created_at` for all
     // three tables.
-    data.created_at = (() => {
-      const raw = str(row.created_date) || str(row.created_at) || str(row.created) || str(row.join_date) || str(row.date_joined)
-      if (!raw) return null
-      const parsed = new Date(raw)
-      return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString()
-    })()
+    const createdDateRaw = str(row.created_date) || str(row.created_at) || str(row.created) || str(row.join_date) || str(row.date_joined)
+    const createdDate = readImportDateCell(createdDateRaw)
+    data.created_at = createdDate.instant
     if (table === 'customers') {
       data.email = contactState.primary.email || str(row.email) || null
       data.phone_normalized = phoneKey
@@ -2577,7 +2588,10 @@ export async function classifyContacts(db: D1Compat, table: 'customers' | 'suppl
     const forcedNote: ImportRowWarning[] = forceCreate && (rawNameMatches.length > 0 || pendingCreateByName.has(lower(name)))
       ? [{ kind: 'other', message: `Created as a separate contact from "${name}" on file/record, per reviewer override.` }]
       : []
-    const createWarnings = [...forcedNote]
+    const createWarnings: ImportRowWarning[] = [...forcedNote]
+    if (createdDate.unreadable) {
+      createWarnings.push({ kind: 'other', message: `Created date "${createdDateRaw}" is not a readable dd/mm/yyyy or yyyy-mm-dd date; the contact was created as of now instead.` })
+    }
     if (!forceCreate) pendingCreateByName.set(lower(name), results.length)
     rememberPendingPhones(results.length, row._rowNumber, data)
     if (table === 'customers' && membershipKey) pendingCreateByMembership.set(membershipKey, { index: results.length, rowNumber: row._rowNumber, name })
@@ -2792,7 +2806,13 @@ export async function planInventoryImportReceiptGroups(
     if (data.inventory_receipt_plan_version !== INVENTORY_RECEIPT_PLAN_VERSION) throw new Error('Analyze this inventory receipt again before applying.')
     const productId = Number(data.product_id)
     const lots = lotsByProduct.get(productId) || []
-    const receivedDate = String(data.created_at).slice(0, 10)
+    // An explicit sheet date is stored as that date at 00:00 UTC, so its first 10
+    // characters ARE the typed date. A defaulted receipt is stamped with the
+    // analyze-time instant, whose UTC day is yesterday from 00:00 to 06:59
+    // Cambodia time -- read the business day of that instant instead.
+    const receivedDate = data.receipt_date_explicit === false
+      ? localDateOf(String(data.created_at))
+      : String(data.created_at).slice(0, 10)
     const cost = data.unit_cost_usd == null ? null : Number(data.unit_cost_usd)
     const refusal = inventoryReceiptCostRefusal(cost, data.free_goods === true)
     if (refusal) throw new Error(refusal)
@@ -3010,12 +3030,9 @@ export async function classifyInventory(db: D1Compat, rows: ParsedCsvRow[], inve
     // backdate movements (e.g. "this was actually received last
     // Tuesday") instead of every imported movement silently landing at
     // today/now regardless of what the file says.
-    const movementDate = (() => {
-      const raw = str(row.date || row.received_date)
-      if (!raw) return null
-      const parsed = new Date(raw)
-      return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString()
-    })()
+    const movementDateRaw = str(row.date || row.received_date)
+    const movementDateCell = readImportDateCell(movementDateRaw)
+    const movementDate = movementDateCell.instant
     const data: Record<string, unknown> = {
       product_id: product.id,
       product_name: product.name,
@@ -3073,6 +3090,9 @@ export async function classifyInventory(db: D1Compat, rows: ParsedCsvRow[], inve
       identifier: sku || barcode,
       existingId: product.id,
       message: null,
+      warnings: movementDateCell.unreadable
+        ? [{ kind: 'unreadable_batch_date', message: `Date "${movementDateRaw}" is not a readable dd/mm/yyyy or yyyy-mm-dd date; the movement was recorded as of now instead.` }]
+        : undefined,
       changes: {},
       data,
     })
@@ -3145,8 +3165,9 @@ function round2(n: number): number {
 // app's canonical business timezone is Asia/Phnom_Penh (UTC+07, no DST),
 // so a compact `2026-08-28 14:30` cell must render back as 14:30 rather
 // than being interpreted differently by whichever Worker/runtime parses
-// it. Explicit ISO offsets/Z remain authoritative. Date-only and US-style
-// spreadsheet dates are accepted too; every component is range checked so
+// it. Explicit ISO offsets/Z remain authoritative. Date-only and slash
+// spreadsheet dates are accepted too (slash dates read DAY-first, dd/mm/yyyy,
+// like every import -- owner, Oct 6 2026); every component is range checked so
 // JavaScript's silent rollover (2026-02-31 -> March) cannot corrupt books.
 export function parseSalesImportDateTime(value: unknown): string | null {
   const raw = str(value)
@@ -3165,13 +3186,13 @@ export function parseSalesImportDateTime(value: unknown): string | null {
 
   const isoFirst = /^\d{4}-/.test(raw)
   const year = Number(isoFirst ? match[1] : match[3])
-  const month = Number(isoFirst ? match[2] : match[1])
-  const day = Number(isoFirst ? match[3] : match[2])
+  const month = Number(match[2])
+  const day = Number(isoFirst ? match[3] : match[1])
   const hour = Number(match[4] || 0)
   const minute = Number(match[5] || 0)
   const second = Number(match[6] || 0)
   const daysInMonth = month >= 1 && month <= 12 ? new Date(Date.UTC(year, month, 0)).getUTCDate() : 0
-  if (year < 1000 || year > 9999 || day < 1 || day > daysInMonth || hour > 23 || minute > 59 || second > 59) {
+  if (year < 1970 || year > 2999 || day < 1 || day > daysInMonth || hour > 23 || minute > 59 || second > 59) {
     throw new Error(`Invalid sale_date "${raw}". Use a real date and 24-hour time from 00:00 to 23:59.`)
   }
   return new Date(Date.UTC(year, month - 1, day, hour - 7, minute, second)).toISOString()

@@ -16,9 +16,10 @@ function compile(name, dependencies = {}, allowUncalledStubs = false) {
 }
 const money = compile('moneyPrecision')
 const sqlBinding = compile('sqlBinding')
+const businessDateWindow = compile('businessDateWindow')
 const batches = compile('productBatches', { './moneyPrecision': money, './sqlBinding': sqlBinding, './batchCode': compile('batchCode'), './receivingBranch': compile('receivingBranch') })
 const catalog = compile('catalogCostRecompute', { './moneyPrecision': money })
-const engine = compile('importEngine', { './productBatches': batches, './catalogCostRecompute': catalog,
+const engine = compile('importEngine', { './businessDateWindow': businessDateWindow, './productBatches': batches, './catalogCostRecompute': catalog,
   './moneyPrecision': money, './sqlBinding': sqlBinding, './stockReceiptGate': compile('stockReceiptGate') }, true)
 const row = (rowNumber, cost, quantity = 1, branch = 1) => ({
   rowNumber, action: 'create', existingId: 1, identifier: 'P', changes: {}, message: null,
@@ -87,6 +88,24 @@ function setup() {
   await fixture.apply([row(4, 3)])
   assert.equal(fixture.sqlite.prepare('SELECT cost_price_usd FROM products').get().cost_price_usd, 7.8, 'U-cost weighted: the override prices the 4 units it covered, (4 x 9 + 1 x 3) / 5')
   assert.equal(fixture.sqlite.prepare('SELECT COUNT(*) n FROM product_cost_entries').get().n, 1)
+
+  // A defaulted receipt (no date in the sheet) is stamped with the analyze-time instant.
+  // 2026-10-05T18:30:00Z is 01:30 on 6 October in Cambodia, so the lot's received date
+  // must be the BUSINESS day (2026-10-06), not the UTC day (2026-10-05).
+  const defaulted = setup()
+  const defaultedRow = row(1, 3)
+  defaultedRow.data.receipt_date_explicit = false
+  defaultedRow.data.created_at = '2026-10-05T18:30:00.000Z'
+  await defaulted.apply([defaultedRow])
+  assert.equal(defaulted.sqlite.prepare('SELECT received_at FROM product_batches').get().received_at, '2026-10-06',
+    'a defaulted receipt lands on the Cambodia day')
+  // Control: an explicit sheet date is stored as that date at 00:00 UTC and must NOT be shifted.
+  const explicit = setup()
+  const explicitRow = row(1, 3)
+  explicitRow.data.created_at = '2026-10-05T00:00:00.000Z'
+  await explicit.apply([explicitRow])
+  assert.equal(explicit.sqlite.prepare('SELECT received_at FROM product_batches').get().received_at, '2026-10-05',
+    'an explicit date is the date the sheet named')
 
   const unknown = setup()
   await assert.rejects(() => unknown.apply([row(1, null)]), /must carry its unit cost/)

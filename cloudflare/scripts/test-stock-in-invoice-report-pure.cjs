@@ -169,7 +169,7 @@ const GROUPS_SQL = (where) => `
     // on this wire too (test-stock-receipt-gate-pure.cjs owns that rule).
     const input = {
       jobId: 'job-1', rowNumber: 2, productId: 10, productName: 'Serum',
-      branchId: 2, branchName: 'Warehouse', quantity: 3, date: '08/19/2026', batchLabel: '',
+      branchId: 2, branchName: 'Warehouse', quantity: 3, date: '19/08/2026', batchLabel: '',
       supplierName: 'Bong Long', costPriceUsd: 5,
     }
     await stockActionCommit.applyUnifiedStockAdd(db, input)
@@ -200,7 +200,7 @@ const GROUPS_SQL = (where) => `
     sqlite.prepare(`INSERT INTO products (id, name, is_active) VALUES (10, 'Serum', 1)`).run()
     const base = {
       jobId: 'job-cost', productId: 10, productName: 'Serum',
-      branchId: 2, branchName: 'Shop', date: '08/19/2026', batchLabel: '',
+      branchId: 2, branchName: 'Shop', date: '19/08/2026', batchLabel: '',
       supplierName: 'Bong Long',
     }
     // 4 units at $10, then 6 more of the SAME product on the SAME day at $30.
@@ -259,6 +259,7 @@ const GROUPS_SQL = (where) => `
     sqlite.prepare(`INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, received_at, is_active, notes, batch_number, received_quantity, unit_cost_usd)
       VALUES (900, 10, '08192026', '08192026', '2026-08-19', 1, 'Unified stock import job-x, row 2', 1, 15, 10)`).run()
     const src = sqlite.prepare('INSERT INTO import_job_source_rows (job_id, sequence, row_number, data_json) VALUES (?, ?, ?, ?)')
+    // Historic stored source rows: the unified sheet was MONTH-first when these were written, and migration 0080 reads them that way.
     const row = (shop, cost) => JSON.stringify({ barcode: 'BC-10', date: '08/19/2026 09:00:00', shop: String(shop), warehouse: '', cost_price: cost === null ? '' : String(cost) })
     src.run('job-x', 1, 2, row(4, 10))
     src.run('job-x', 2, 3, row(6, 30))

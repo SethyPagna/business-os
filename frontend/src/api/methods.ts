@@ -1319,20 +1319,20 @@ export function downloadImportTemplate(type) {
     cost_price_usd: '1.20', cost_price_khr: '',
     stock_quantity: '40', low_stock_threshold: '10',
     // Column consolidation (Aug 24 2026): the old separate `batch` label
-    // column and `date` column are now one column. Since Sep 4 2026 the
-    // template ships it as `batch(dd/mm/yyyy)` -- day-first, like the rest
-    // of the app. The importer still reads a `batch(mm/dd/yyyy)` column
-    // MONTH-first, so every sheet the shop already has keeps its exact
-    // present meaning; the HEADER picks the order, never the app's current
-    // display convention (see lib/batchCode.ts's readBatchDateCell).
+    // column and `date` column are now one column. The template ships it as
+    // `batch(dd/mm/yyyy)` -- day-first, like the rest of the app, and since
+    // Oct 6 2026 every other import date column (bare `batch`, `date`,
+    // `received_date`) reads day-first too. The one exception is a column whose
+    // header SAYS `batch(mm/dd/yyyy)`: it is still read month-first so an old
+    // sheet keeps its meaning (see lib/batchCode.ts's readBatchDateCell).
     //
     // Leave it blank to let the system stamp today's date and auto-derive
     // the batch code from it, or fill in a specific received date. The
-    // example row uses ISO (e.g. "2026-08-24"), the one form neither
-    // reading can get wrong; the system auto-formats whatever it reads into
-    // the stored batch code (e.g. "08242026"), which is an identifier and
-    // stays month-first on purpose.
-    'batch(dd/mm/yyyy)': '2026-08-24', expiry_date: '', expiry_alert_days: '30',
+    // example row is written the way the header says (dd/mm/yyyy); ISO
+    // "2026-08-24" is also accepted. The system auto-formats whatever it reads
+    // into the stored batch code (e.g. "08242026"), which is an identifier and
+    // stays MMDDYYYY on purpose.
+    'batch(dd/mm/yyyy)': '24/08/2026', expiry_date: '', expiry_alert_days: '30',
     branch: 'Main Branch', supplier: '',
     parent_id: '', is_group: '',
     // Naming convention: spaces in the product name stay as real spaces,

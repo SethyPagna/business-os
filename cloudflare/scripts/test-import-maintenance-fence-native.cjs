@@ -17,7 +17,7 @@ async function main() {
     registerInlineImportRunner(async () => {});
     const product = { jobId: 'job-1', identityKey: 'serum', productName: 'Serum' };
     const stockAdd = { jobId: 'job-1', rowNumber: 2, productId: 1, productName: 'Serum',
-      branchId: 1, branchName: 'Shop', quantity: 2, date: '08/27/2026', batchLabel: 'LOT A',
+      branchId: 1, branchName: 'Shop', quantity: 2, date: '27/08/2026', batchLabel: 'LOT A',
       sellingPriceUsd: 12.345, wholesalePriceUsd: 10, costPriceUsd: 5, supplierName: 'Bong Long' };
     async function outcome(operation) {
       try { return { ok: true, value: await operation() }; }

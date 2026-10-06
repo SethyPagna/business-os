@@ -1,6 +1,6 @@
 // Turns a batch's received date into the batch's own operator-facing code
 // -- "lot code can be removed... batch column is just a translated
-// version of received date": 08/22/2026 or 8/22/2026 becomes 08222026.
+// version of received date": 22/08/2026 or 22/8/2026 (day first) becomes 08222026.
 // The ORDER a slash-separated cell is read in is decided by the CSV column
 // header it came from, not by the app's current display convention -- see
 // SlashDateOrder and BATCH_DATE_COLUMNS below. See dateToBatchCode for the
@@ -20,19 +20,19 @@
 /**
  * Which way round a slash/dash-separated date cell is read.
  *
- * The app's DISPLAY convention went day-first on Sep 4 2026, but this is
- * deliberately NOT tied to it. A CSV cell reading "03/09/2026" was written by
- * whoever exported or hand-built that file, and re-reading a historical file
- * under a new order would silently swap day and month for every day <= 12 --
- * writing a wrong `received_date` and a wrong `lot_code` into real stock,
- * with nothing on screen to show it happened.
+ * ONE RULE (owner, Oct 6 2026): every import reads a slash date DAY-FIRST,
+ * dd/mm/yyyy, like the rest of the app -- "we can't have different logics in
+ * the system". The single exception is a column whose header NAMES the other
+ * order: `batch(mm/dd/yyyy)` is month-first, so a sheet the shop already
+ * exported under that header still reads exactly as it was written.
+ * `batch(dd/mm/yyyy)` and every bare header (`batch`, `date`,
+ * `received_date`) are day-first. ISO `yyyy-mm-dd` is accepted under every
+ * header and is what the downloaded template ships, because it is the one
+ * form neither reading can get wrong.
  *
- * So the ORDER comes from the column header, which names its own format:
- * `batch(mm/dd/yyyy)` is month-first forever, `batch(dd/mm/yyyy)` is
- * day-first. The bare fallback headers name no format, so they keep the only
- * meaning they have ever had -- month-first. ISO `yyyy-mm-dd` is accepted
- * under every header and is what the downloaded template now ships, because
- * it is the one form neither reading can get wrong.
+ * Before Oct 6 the bare headers were month-first "because they have always
+ * been". That left two readings of one string in one system; the history is in
+ * git, the rule is this paragraph.
  */
 export type SlashDateOrder = 'month-first' | 'day-first'
 
@@ -42,14 +42,15 @@ export const BATCH_DATE_COLUMN_DAY_FIRST = 'batch(dd/mm/yyyy)'
 /**
  * Accepted received-date columns, in precedence order. The two
  * format-naming headers win over the bare fallbacks, which exist only so an
- * older hand-built CSV still loads.
+ * older hand-built CSV still loads. Only the header that SAYS mm/dd/yyyy is
+ * month-first.
  */
 const BATCH_DATE_COLUMNS: ReadonlyArray<{ header: string; order: SlashDateOrder }> = [
   { header: BATCH_DATE_COLUMN_DAY_FIRST, order: 'day-first' },
   { header: BATCH_DATE_COLUMN_MONTH_FIRST, order: 'month-first' },
-  { header: 'batch', order: 'month-first' },
-  { header: 'date', order: 'month-first' },
-  { header: 'received_date', order: 'month-first' },
+  { header: 'batch', order: 'day-first' },
+  { header: 'date', order: 'day-first' },
+  { header: 'received_date', order: 'day-first' },
 ]
 
 /**
@@ -68,11 +69,19 @@ export function readBatchDateCell(row: Record<string, unknown>): { raw: string; 
     const value = String(row?.[header] ?? '').trim()
     if (value) return { raw: value, order, header }
   }
-  return { raw: '', order: 'month-first', header: '' }
+  return { raw: '', order: 'day-first', header: '' }
 }
+
+// The same window DateEntryInput's parser (frontend/src/utils/dateEntry.ts
+// MIN_YEAR/MAX_YEAR) accepts. A date the field refuses must not be storable by
+// a route that re-reads the same text: '0099-01-01' and '9999-12-31' are typos,
+// not received dates.
+const MIN_DATE_YEAR = 1970
+const MAX_DATE_YEAR = 2999
 
 function isValidCalendarDate(year: number, month: number, day: number): boolean {
   if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) return false
+  if (year < MIN_DATE_YEAR || year > MAX_DATE_YEAR) return false
   if (month < 1 || month > 12 || day < 1 || day > 31) return false
   const date = new Date(Date.UTC(year, month - 1, day))
   return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day
@@ -84,15 +93,18 @@ function isValidCalendarDate(year: number, month: number, day: number): boolean 
 // timestamp) or a slash/dash-separated string a human typed into a CSV cell.
 // Returns null for anything that isn't a real calendar date.
 //
-// `order` defaults to 'month-first' so every pre-existing SPREADSHEET call
-// site keeps the exact meaning it had before Sep 4 2026. A caller that knows
-// its order says so: readBatchDateCell for a column header, and
-// normalizeTypedDate below for anything a person typed into the app itself.
-export function normalizeToIsoDate(value: string | null | undefined, order: SlashDateOrder = 'month-first'): string | null {
+// `order` defaults to 'day-first', the one reading the whole app shares. A
+// caller whose source names the other order says so: readBatchDateCell does for
+// a `batch(mm/dd/yyyy)` column header, and nothing else should.
+export function normalizeToIsoDate(value: string | null | undefined, order: SlashDateOrder = 'day-first'): string | null {
   const raw = String(value ?? '').trim()
   if (!raw) return null
 
-  const iso = raw.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/)
+  // End-anchored: a date followed by anything but a time-of-day ('2026-09-03garbage',
+  // '2026-09-031') is not a date. The tolerated tail is exactly what D1 and
+  // JSON.stringify(Date) emit: ' HH:MM[:SS[.fff]]' or 'THH:MM[:SS[.fff]]' with an
+  // optional Z / +07:00 / +0700 zone.
+  const iso = raw.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:[ T]\d{1,2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}(?::?\d{2})?)?)?$/)
   if (iso) {
     const year = Number(iso[1])
     const month = Number(iso[2])
@@ -105,7 +117,9 @@ export function normalizeToIsoDate(value: string | null | undefined, order: Slas
   // answers "which DATE") so slash-formatted datetime cells from the
   // migration files parse the same way the ISO branch above already
   // tolerates 'YYYY-MM-DD HH:MM:SS'.
-  const slash = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})(?:[ T]\d{1,2}:\d{2}(?::\d{2})?)?$/)
+  // The year is 2 or 4 digits, never 3 ('9/3/026' is a typo; the day-first
+  // field refuses it too).
+  const slash = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2}|\d{4})(?:[ T]\d{1,2}:\d{2}(?::\d{2})?)?$/)
   if (slash) {
     const [month, day] = order === 'day-first'
       ? [Number(slash[2]), Number(slash[1])]

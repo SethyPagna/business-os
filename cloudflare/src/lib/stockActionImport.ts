@@ -209,12 +209,10 @@ export function resolveUnifiedStockImportRows(
     const rowNumber = Number(raw._rowNumber) > 0 ? Number(raw._rowNumber) : index + 2
     const name = text(raw.name)
     const barcode = text(raw.barcode)
-    // The sheet's bare `date` header names no format, so it keeps the only
-    // meaning it has ever had -- month-first -- and says so explicitly rather
-    // than leaning on a default. This is a FILE the shop already owns, not a
-    // field anyone types into the app; see unifiedStockImport.ts for the
-    // client-side mirror of the same ruling.
-    const date = normalizeToIsoDate(text(raw.date), 'month-first') || ''
+    // Owner, Oct 6 2026: every import reads a slash date day-first, like the
+    // app. The sheet's `date` header names no other order, so it is read
+    // dd/mm/yyyy; see unifiedStockImport.ts for the client-side mirror.
+    const date = normalizeToIsoDate(text(raw.date), 'day-first') || ''
     const action = text(raw.action)
     const shop = optionalNumber(raw.shop, 'shop quantity')
     const warehouse = optionalNumber(raw.warehouse, 'warehouse quantity')
@@ -231,7 +229,7 @@ export function resolveUnifiedStockImportRows(
     const cost = optionalMoney(raw.cost_price, 'cost price')
     const errors = [shop.error, warehouse.error, selling.error, wholesale.error, cost.error].filter((value): value is string => !!value)
     if (!name && !barcode) errors.push('Name or barcode is required.')
-    if (!date) errors.push('Date must be mm/dd/yyyy (month first, as this column has always been) or yyyy-mm-dd.')
+    if (!date) errors.push('Date must be dd/mm/yyyy or yyyy-mm-dd.')
     if (shop.value == null && warehouse.value == null) errors.push('Enter a shop or warehouse quantity.')
 
     const batchLabel = text(raw.batch)

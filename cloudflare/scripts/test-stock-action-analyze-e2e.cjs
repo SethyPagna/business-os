@@ -111,14 +111,14 @@ const TOTAL_CSV_ROWS = FILLER_ROWS + 2
 function buildCrossWindowCsv() {
   const header = ['name', 'barcode', 'shop', 'warehouse', 'date', 'action', 'selling_price', 'vip_price', 'cost_price', 'batch']
   const rows = []
-  rows.push(['Anchor Serum', 'ANCHOR', '1', '', '08/27/2026', 'add', '12', '', '4', 'LOT-A'])
+  rows.push(['Anchor Serum', 'ANCHOR', '1', '', '27/08/2026', 'add', '12', '', '4', 'LOT-A'])
   // Distinct, valid rows ensure the other Anchor row lands in the next
   // classification window. They are new products and therefore
   // preview as creates; analyze must not write any of them to products.
   for (let i = 0; i < FILLER_ROWS; i += 1) {
-    rows.push([`Filler ${i}`, `F${i}`, '1', '', '08/27/2026', 'add', '5', '', '2', `FILL-${i}`])
+    rows.push([`Filler ${i}`, `F${i}`, '1', '', '27/08/2026', 'add', '5', '', '2', `FILL-${i}`])
   }
-  rows.push(['Anchor Serum', 'ANCHOR', '1', '', '08/27/2026', 'add', '12', '', '7', 'LOT-B'])
+  rows.push(['Anchor Serum', 'ANCHOR', '1', '', '27/08/2026', 'add', '12', '', '7', 'LOT-B'])
   return [header, ...rows].map((row) => row.map(csvCell).join(',')).join('\n') + '\n'
 }
 
@@ -249,7 +249,7 @@ async function drainAnalyze(env, jobId) {
   const RECONCILE_OVER_ROWS = engine.STOCK_ACTION_MAX_ROWS + 1
   const reconcileOverRegex = new RegExp(`${RECONCILE_OVER_ROWS} rows[\\s\\S]*at most ${engine.STOCK_ACTION_MAX_ROWS} rows`)
   const header = 'name,barcode,shop,warehouse,date,action,selling_price,vip_price,cost_price,batch'
-  const oversizedCsv = `${header}\n${Array.from({ length: RECONCILE_OVER_ROWS }, (_, i) => `Raw ${i},R${i},1,,08/27/2026,add,5,,2,B${i}`).join('\n')}\n`
+  const oversizedCsv = `${header}\n${Array.from({ length: RECONCILE_OVER_ROWS }, (_, i) => `Raw ${i},R${i},1,,27/08/2026,add,5,,2,B${i}`).join('\n')}\n`
   assets.replace(oversizedCsv)
   await seedJob(db, 'analyze-oversized-direct', Buffer.byteLength(oversizedCsv), 0, 'direct')
   await drainAnalyze(env, 'analyze-oversized-direct')

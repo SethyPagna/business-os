@@ -265,10 +265,10 @@ await runTest("IDENTIFIER: migration 0108's ADJ lot codes render verbatim", () =
 // ---------------------------------------------------------------------------
 
 await runTest('the same cell reads two different ways under two headers', () => {
-  // This is the guard against a later session "helpfully" flipping the
-  // importer to match the display convention. 03/09/2026 is the dangerous
-  // shape: both fields <= 12, so a wrong reading produces a real date and
-  // nothing looks broken.
+  // One rule since Oct 6 2026 (owner: "all imports read slash dates
+  // day-first, like the app"): day-first everywhere, except a column whose
+  // header SAYS mm/dd/yyyy. 03/09/2026 is the dangerous shape: both fields
+  // <= 12, so a wrong reading produces a real date and nothing looks broken.
   assert.equal(
     normalizeToIsoDate('03/09/2026', 'month-first'), '2026-03-09',
     'batch(mm/dd/yyyy) is March 9 -- every sheet the shop already has keeps this meaning',
@@ -277,8 +277,8 @@ await runTest('the same cell reads two different ways under two headers', () => 
     normalizeToIsoDate('03/09/2026', 'day-first'), '2026-09-03',
     'batch(dd/mm/yyyy) is September 3',
   )
-  // Month-first is the default, so no existing caller changed meaning.
-  assert.equal(normalizeToIsoDate('03/09/2026'), '2026-03-09')
+  // Day-first is the default: a caller that names no order reads like the app.
+  assert.equal(normalizeToIsoDate('03/09/2026'), '2026-09-03')
   // ISO is read identically under both orders.
   assert.equal(normalizeToIsoDate('2026-09-03', 'month-first'), '2026-09-03')
   assert.equal(normalizeToIsoDate('2026-09-03', 'day-first'), '2026-09-03')
@@ -293,18 +293,21 @@ await runTest('readBatchDateCell picks the order from the header it finds', () =
     readBatchDateCell({ 'batch(mm/dd/yyyy)': '03/09/2026' }),
     { raw: '03/09/2026', order: 'month-first', header: 'batch(mm/dd/yyyy)' },
   )
-  // Bare fallback headers name no format, so they keep the only meaning they
-  // have ever had. An ambiguous header changing meaning is the same defect in
-  // a smaller box.
+  // Bare headers name no format, so they read like the rest of the app:
+  // day-first (they were month-first until Oct 6 2026).
   for (const header of ['batch', 'date', 'received_date']) {
     assert.deepEqual(
       readBatchDateCell({ [header]: '03/09/2026' }),
-      { raw: '03/09/2026', order: 'month-first', header },
-      `bare '${header}' stays month-first`,
+      { raw: '03/09/2026', order: 'day-first', header },
+      `bare '${header}' is day-first`,
     )
   }
   // No date column at all -- callers default this to today.
-  assert.deepEqual(readBatchDateCell({ name: 'Iced Coffee' }), { raw: '', order: 'month-first', header: '' })
+  assert.deepEqual(readBatchDateCell({ name: 'Iced Coffee' }), { raw: '', order: 'day-first', header: '' })
+  // The discriminating pair: the SAME cell under a bare header and under the
+  // explicit month-first header lands on different days.
+  assert.equal(normalizeToIsoDate('03/04/2026', readBatchDateCell({ batch: '03/04/2026' }).order), '2026-04-03')
+  assert.equal(normalizeToIsoDate('03/04/2026', readBatchDateCell({ 'batch(mm/dd/yyyy)': '03/04/2026' }).order), '2026-03-04')
   // End to end: the two headers must land in DIFFERENT lots.
   const dayFirst = readBatchDateCell({ 'batch(dd/mm/yyyy)': '03/09/2026' })
   const monthFirst = readBatchDateCell({ 'batch(mm/dd/yyyy)': '03/09/2026' })
@@ -323,7 +326,7 @@ await runTest('normalizeTypedDate reads what a person typed into the app: day fi
   // field that produced the string. 03/09/2026 is the discriminating input:
   // both readings are real dates, so only the answer tells them apart.
   assert.equal(normalizeTypedDate('03/09/2026'), '2026-09-03', '3 September, as the day-first field wrote it')
-  assert.equal(normalizeToIsoDate('03/09/2026'), '2026-03-09', 'the spreadsheet default is still 9 March -- deliberately unchanged')
+  assert.equal(normalizeToIsoDate('03/09/2026'), '2026-09-03', 'the import default is day-first too, so a typed date and an unheaded cell agree')
   // Unambiguous both ways round: a day past the 12th proves the order
   // instead of assuming it.
   assert.equal(normalizeTypedDate('25/12/2026'), '2026-12-25')

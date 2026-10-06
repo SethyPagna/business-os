@@ -397,12 +397,20 @@ async function main() {
     assert.strictEqual(unresolved[0].reason, 'invalid_date')
   })
 
-  await testAsync('an mm/dd/yyyy date is normalized to ISO, same as datedStockCountRoute.ts\'s own parser', async () => {
+  await testAsync('a dd/mm/yyyy date is normalized to ISO, same as datedStockCountRoute.ts\'s own parser', async () => {
     const { rawDb, db } = freshDb()
     seedBranch(rawDb, 1, 'Shop')
     seedProduct(rawDb, { id: 19, name: 'Widget' })
-    const { resolved } = await resolveDatedStockCountRows(db, [row({ date: '08/16/2026', productName: 'Widget' })])
+    const { resolved } = await resolveDatedStockCountRows(db, [row({ date: '16/08/2026', productName: 'Widget' })])
     assert.strictEqual(resolved[0].date, '2026-08-16')
+  })
+
+  await testAsync('a mapped sheet date is read DAY-first (owner, Oct 6 2026): 03/04/2026 is 3 April, not 4 March', async () => {
+    const { rawDb, db } = freshDb()
+    seedBranch(rawDb, 1, 'Shop')
+    seedProduct(rawDb, { id: 19, name: 'Widget' })
+    const { resolved } = await resolveDatedStockCountRows(db, [row({ date: '03/04/2026', productName: 'Widget' })])
+    assert.strictEqual(resolved[0].date, '2026-04-03')
   })
 
   await testAsync('a negative count is reported invalid_count', async () => {

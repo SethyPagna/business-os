@@ -64,9 +64,16 @@ assert.strictEqual(
   batchCode.normalizeTypedDate('03/09/2026'), '2026-09-03',
   'a date a person typed is 3 September, the way the field that produced it reads',
 )
+// Owner, Oct 6 2026: "all imports read slash dates day-first, like the app".
+// The spreadsheet default moved with it; only a header that SAYS mm/dd/yyyy
+// still reads month-first.
 assert.strictEqual(
-  batchCode.normalizeToIsoDate('03/09/2026'), '2026-03-09',
-  'the spreadsheet default is still 9 March -- deliberately NOT moved, because re-reading a file the shop already owns under a new order rewrites its stock silently',
+  batchCode.normalizeToIsoDate('03/09/2026'), '2026-09-03',
+  'an import cell that names no order is read day-first, like a typed date',
+)
+assert.strictEqual(
+  batchCode.normalizeToIsoDate('03/09/2026', 'month-first'), '2026-03-09',
+  'the explicit month-first order still exists for a column whose header says mm/dd/yyyy',
 )
 // A day past the 12th proves the order rather than assuming it, and exactly
 // ONE order is accepted -- a parser that tried both would turn a typo into a
@@ -85,9 +92,22 @@ assert.deepStrictEqual(
 )
 assert.deepStrictEqual(
   batchCode.readBatchDateCell({ name: 'no date column' }),
-  { raw: '', order: 'month-first', header: '' },
+  { raw: '', order: 'day-first', header: '' },
 )
-console.log('PASS kernel: normalizeTypedDate is day-first, the spreadsheet default is unchanged, and the two carry separate names')
+// Discriminating pair: the SAME cell under a bare header and under the explicit
+// month-first header lands on different days.
+assert.strictEqual(
+  batchCode.normalizeToIsoDate('03/04/2026', batchCode.readBatchDateCell({ batch: '03/04/2026' }).order), '2026-04-03',
+  'an unheaded batch column is day-first: 3 April',
+)
+assert.strictEqual(
+  batchCode.normalizeToIsoDate('03/04/2026', batchCode.readBatchDateCell({ 'batch(mm/dd/yyyy)': '03/04/2026' }).order), '2026-03-04',
+  'batch(mm/dd/yyyy) is month-first: 4 March',
+)
+for (const bare of ['batch', 'date', 'received_date']) {
+  assert.strictEqual(batchCode.readBatchDateCell({ [bare]: '03/04/2026' }).order, 'day-first', 'bare ' + bare + ' is day-first')
+}
+console.log('PASS kernel: typed dates and unheaded import cells are day-first, only an mm/dd/yyyy header is month-first')
 
 // --- 2. every call site says which question it is asking --------------------
 
@@ -204,10 +224,6 @@ const MONTH_FIRST_ALLOWED = new Map([
   ['lib/batchCode.ts', /BATCH_DATE_COLUMN_MONTH_FIRST = 'batch\(mm\/dd\/yyyy\)'/],
   // The warning quotes whichever order the row's own header dictates.
   ['lib/importEngine.ts', /receivedDateOrder === 'day-first' \? 'dd\/mm\/yyyy' : 'mm\/dd\/yyyy'/],
-  // The unified stock sheet's bare `date` column is month-first forever, and
-  // the message says so in those words. Client mirror:
-  // frontend/src/components/products/import/unifiedStockImport.ts.
-  ['lib/stockActionImport.ts', /month first, as this column has always been/],
 ])
 
 const messageOffenders = []
@@ -223,7 +239,7 @@ for (const full of walk(SRC)) {
     if (!allowed || !allowed.test(line)) messageOffenders.push(rel + ': ' + trimmed)
   }
 }
-assert.ok(monthFirstMentions >= 3, 'the message sweep must have found the known month-first strings, saw ' + monthFirstMentions)
+assert.ok(monthFirstMentions >= 2, 'the message sweep must have found the known month-first strings, saw ' + monthFirstMentions)
 assert.deepStrictEqual(
   messageOffenders, [],
   'a live string still tells someone to type month-first:\n' + messageOffenders.join('\n'),

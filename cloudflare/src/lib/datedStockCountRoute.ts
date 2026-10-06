@@ -30,7 +30,11 @@ import {
 export const MAX_DATED_STOCK_COUNT_ENTRIES = 5000
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 
-// received_at comes straight out of D1 as ISO.
+// received_at comes straight out of D1, normally as ISO. A STORED slash value is
+// a legacy row written by the pre-0077 product importer, which read its cell
+// month-first (its lot_code is the proof) -- so this one read stays month-first
+// on purpose. It is not an import cell and is not governed by the day-first
+// import rule.
 const lotDate = (receivedAt: string | null) =>
   normalizeToIsoDate(receivedAt, 'month-first') || String(receivedAt || '').slice(0, 10)
 
@@ -132,8 +136,8 @@ export function parseDatedStockCountEntries(body: Record<string, unknown>): { en
   for (let i = 0; i < raw.length; i += 1) {
     const row = (raw[i] || {}) as Record<string, unknown>
     // Entries arrive already resolved to ISO; a slash form could only come
-    // from the mapped sheet, which is month-first (datedStockCountResolve.ts).
-    const date = normalizeToIsoDate(row.date as string, 'month-first') || (ISO_DATE_RE.test(String(row.date ?? '')) ? String(row.date) : null)
+    // from the mapped sheet, which is day-first (datedStockCountResolve.ts).
+    const date = normalizeToIsoDate(row.date as string, 'day-first') || (ISO_DATE_RE.test(String(row.date ?? '')) ? String(row.date) : null)
     const productId = Number.parseInt(String(row.productId ?? ''), 10)
     const branchId = Number.parseInt(String(row.branchId ?? ''), 10)
     const count = Number(row.count)

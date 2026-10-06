@@ -179,7 +179,7 @@ function seedCatalog(sqlite) {
     const saleRow = (rowNumber, ref, fields) => ({
       _rowNumber: rowNumber,
       order_reference: ref,
-      date: '08/28/2026',
+      date: '28/08/2026',
       quantity: '1',
       selling_price: '10',
       ...fields,
@@ -239,7 +239,7 @@ function seedCatalog(sqlite) {
     assert.strictEqual(inv.get(3).existingId, 2, "'0012' and '12' are both broken -- they wildcard onto Short Code Balm")
 
     const sales = await classifySales(db, [
-      { _rowNumber: 2, order_reference: 'RZ1', date: '08/28/2026', quantity: '1', selling_price: '10', barcode: '03614274226546', name: 'Rose Lip Oil' },
+      { _rowNumber: 2, order_reference: 'RZ1', date: '28/08/2026', quantity: '1', selling_price: '10', barcode: '03614274226546', name: 'Rose Lip Oil' },
     ])
     const sale = sales.find((r) => r.rowNumber === 2)
     assert.notStrictEqual(sale.action, 'error', `a zero-padded sale line must resolve (got: ${sale.message})`)

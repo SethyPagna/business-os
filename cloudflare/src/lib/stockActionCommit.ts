@@ -161,7 +161,7 @@ export function batchIdentity(date: string, label: string | null | undefined): {
   // normalised the sheet cell under its own column's order), so this is a
   // re-read, not a fresh parse -- the order is stated anyway so the call
   // cannot silently change meaning if the default ever moves.
-  const receivedAt = normalizeToIsoDate(date, 'month-first')
+  const receivedAt = normalizeToIsoDate(date, 'day-first')
   if (!receivedAt) throw new Error('Stock action date is invalid')
   const datedCode = dateToBatchCode(receivedAt)
   const explicit = String(label || '').trim().replace(/[\u0000-\u001f]/g, '').slice(0, 120)
@@ -492,7 +492,7 @@ export async function applyUnifiedStockSale(db: D1Compat, input: UnifiedStockSal
   if (!Array.isArray(input.lines) || input.lines.length === 0) throw new Error('Sale group has no lines')
   if (input.lines.length > MAX_SALE_LINES) throw new Error(`Sale group exceeds the ${MAX_SALE_LINES}-line safety limit`)
   // Same: an already-ISO date carried through from the import rows.
-  const soldAt = normalizeToIsoDate(input.date, 'month-first')
+  const soldAt = normalizeToIsoDate(input.date, 'day-first')
   if (!soldAt) throw new Error('Sale date is invalid')
 
   const groupHash = await sha256Hex(saleGroupKey)

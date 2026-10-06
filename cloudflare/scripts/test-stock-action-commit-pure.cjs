@@ -96,7 +96,7 @@ function setup() {
 // unit cost on EVERY wire, and the import is the fourth one.
 const input = {
   jobId: 'job-1', rowNumber: 2, productId: 10, productName: 'Serum',
-  branchId: 1, branchName: 'Shop', quantity: 2, date: '08/27/2026',
+  branchId: 1, branchName: 'Shop', quantity: 2, date: '27/08/2026',
   batchLabel: 'LOT A', sellingPriceUsd: 12.345, wholesalePriceUsd: 10, costPriceUsd: 5,
   supplierName: 'Bong Long',
 }

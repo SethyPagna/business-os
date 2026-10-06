@@ -252,7 +252,7 @@ async function test(name, fn) {
     const { sqlite, db } = makeDb()
     seedProduct(sqlite, { id: 10, name: 'Serum', barcode: 'S10', cost: 4, sell: 12 })
     seedJob(sqlite, 'job-add', [
-      { _rowNumber: 2, name: 'Serum', barcode: 'S10', shop: '5', warehouse: '', date: '08/27/2026', action: 'add', selling_price: '', vip_price: '', cost_price: '4', supplier: 'Bong Long', batch: 'AUG' },
+      { _rowNumber: 2, name: 'Serum', barcode: 'S10', shop: '5', warehouse: '', date: '27/08/2026', action: 'add', selling_price: '', vip_price: '', cost_price: '4', supplier: 'Bong Long', batch: 'AUG' },
     ], { stock_action_mode: 'direct' })
     const { out } = await runJobToCompletion(db, 'job-add', JSON.stringify({ stock_action_mode: 'direct' }))
     assert.deepStrictEqual(out, { applied: 1, failed: 0 })
@@ -284,8 +284,8 @@ async function test(name, fn) {
     seedBatch(sqlite, { id: 201, productId: 20, key: 'early', lot: 'EARLY', expiry: '2026-12-31', received: '2026-01-01', branch: 1, qty: 3 })
     seedBatch(sqlite, { id: 202, productId: 20, key: 'late', lot: 'LATE', expiry: '2027-12-31', received: '2026-02-01', branch: 1, qty: 5 })
     const rows = [
-      { _rowNumber: 2, name: 'Cream', barcode: 'C20', shop: '2', warehouse: '', date: '08/27/2026', action: 'sale2', selling_price: '15', vip_price: '', cost_price: '', batch: '' },
-      { _rowNumber: 3, name: 'Cream', barcode: 'C20', shop: '3', warehouse: '', date: '08/27/2026', action: 'sale2', selling_price: '15', vip_price: '', cost_price: '', batch: '' },
+      { _rowNumber: 2, name: 'Cream', barcode: 'C20', shop: '2', warehouse: '', date: '27/08/2026', action: 'sale2', selling_price: '15', vip_price: '', cost_price: '', batch: '' },
+      { _rowNumber: 3, name: 'Cream', barcode: 'C20', shop: '3', warehouse: '', date: '27/08/2026', action: 'sale2', selling_price: '15', vip_price: '', cost_price: '', batch: '' },
     ]
     seedJob(sqlite, 'job-sale', rows, { stock_action_mode: 'direct' })
     const policy = JSON.stringify({ stock_action_mode: 'direct' })
@@ -317,9 +317,9 @@ async function test(name, fn) {
     seedProduct(sqlite, { id: 31, name: 'Mist', barcode: 'M31', cost: 3, sell: 9, shop: 0 })
     const rows = [
       // sale1: oversell (wants 5, only 1) -> whole group fails
-      { _rowNumber: 2, name: 'Toner', barcode: 'T30', shop: '5', warehouse: '', date: '08/27/2026', action: 'sale1', selling_price: '8', vip_price: '', cost_price: '', batch: '' },
+      { _rowNumber: 2, name: 'Toner', barcode: 'T30', shop: '5', warehouse: '', date: '27/08/2026', action: 'sale1', selling_price: '8', vip_price: '', cost_price: '', batch: '' },
       // an independent add of a different product -> must still apply
-      { _rowNumber: 3, name: 'Mist', barcode: 'M31', shop: '4', warehouse: '', date: '08/27/2026', action: 'add', selling_price: '', vip_price: '', cost_price: '4', supplier: 'Bong Long', batch: '' },
+      { _rowNumber: 3, name: 'Mist', barcode: 'M31', shop: '4', warehouse: '', date: '27/08/2026', action: 'add', selling_price: '', vip_price: '', cost_price: '4', supplier: 'Bong Long', batch: '' },
     ]
     seedJob(sqlite, 'job-mix', rows, { stock_action_mode: 'direct' })
     const { out } = await runJobToCompletion(db, 'job-mix', JSON.stringify({ stock_action_mode: 'direct' }))
@@ -338,9 +338,9 @@ async function test(name, fn) {
     seedProduct(sqlite, { id: 40, name: 'Wax', barcode: 'W40', cost: 2, sell: 10, shop: 20 })
     const rows = [
       // good line of the receipt
-      { _rowNumber: 2, name: 'Wax', barcode: 'W40', shop: '2', warehouse: '', date: '08/27/2026', action: 'sale3', selling_price: '10', vip_price: '', cost_price: '', batch: '' },
+      { _rowNumber: 2, name: 'Wax', barcode: 'W40', shop: '2', warehouse: '', date: '27/08/2026', action: 'sale3', selling_price: '10', vip_price: '', cost_price: '', batch: '' },
       // sibling line of the SAME receipt but unresolved (no product matches) -> blocks
-      { _rowNumber: 3, name: 'Ghost Product That Does Not Exist', barcode: 'ZZZ', shop: '1', warehouse: '', date: '08/27/2026', action: 'sale3', selling_price: '10', vip_price: '', cost_price: '', batch: '' },
+      { _rowNumber: 3, name: 'Ghost Product That Does Not Exist', barcode: 'ZZZ', shop: '1', warehouse: '', date: '27/08/2026', action: 'sale3', selling_price: '10', vip_price: '', cost_price: '', batch: '' },
     ]
     seedJob(sqlite, 'job-poison', rows, { stock_action_mode: 'direct' })
     const { out } = await runJobToCompletion(db, 'job-poison', JSON.stringify({ stock_action_mode: 'direct' }))
@@ -417,7 +417,7 @@ async function test(name, fn) {
     seedProduct(sqlite, { id: 52, name: 'Bounded', barcode: 'B52' })
     const rows = Array.from({ length: STOCK_ACTION_MAX_UNITS + 1 }, (_, index) => ({
       _rowNumber: index + 2, name: 'Bounded', barcode: 'B52', shop: String(index + 1), warehouse: '',
-      date: '08/27/2026', action: 'add', selling_price: '', vip_price: '', cost_price: '4', supplier: 'Bong Long', batch: '',
+      date: '27/08/2026', action: 'add', selling_price: '', vip_price: '', cost_price: '4', supplier: 'Bong Long', batch: '',
     }))
     seedJob(sqlite, 'job-units-bound', rows, { stock_action_mode: 'reconcile' })
     await assert.rejects(
@@ -447,7 +447,7 @@ async function test(name, fn) {
     const { sqlite, db } = makeDb()
     seedProduct(sqlite, { id: 60, name: 'Cancelled', barcode: 'C60' })
     seedJob(sqlite, 'job-cancel', [
-      { _rowNumber: 2, name: 'Cancelled', barcode: 'C60', shop: '5', warehouse: '', date: '08/27/2026', action: 'add', cost_price: '4', supplier: 'Bong Long' },
+      { _rowNumber: 2, name: 'Cancelled', barcode: 'C60', shop: '5', warehouse: '', date: '27/08/2026', action: 'add', cost_price: '4', supplier: 'Bong Long' },
     ], { stock_action_mode: 'direct' })
     sqlite.prepare(`UPDATE import_jobs SET cancel_requested=1, status='applying', phase='applying' WHERE id='job-cancel'`).run()
     const out = await runImportApply({ ...env, DB: db }, 'job-cancel')
@@ -471,9 +471,9 @@ async function test(name, fn) {
     seedProduct(sqlite, { id: 71, name: 'Complete', barcode: 'C71' })
     seedJob(sqlite, 'job-gate', [
       // no supplier column, no cost column -- the receipt every other wire refuses
-      { _rowNumber: 2, name: 'Ungated', barcode: 'U70', shop: '5', warehouse: '', date: '08/27/2026', action: 'add' },
+      { _rowNumber: 2, name: 'Ungated', barcode: 'U70', shop: '5', warehouse: '', date: '27/08/2026', action: 'add' },
       // a complete receipt on the same sheet still lands: one bad row is one bad row
-      { _rowNumber: 3, name: 'Complete', barcode: 'C71', shop: '4', warehouse: '', date: '08/27/2026', action: 'add', cost_price: '6', supplier: 'Bong Long' },
+      { _rowNumber: 3, name: 'Complete', barcode: 'C71', shop: '4', warehouse: '', date: '27/08/2026', action: 'add', cost_price: '6', supplier: 'Bong Long' },
     ], { stock_action_mode: 'direct' })
     const { out } = await runJobToCompletion(db, 'job-gate', JSON.stringify({ stock_action_mode: 'direct' }))
     assert.deepStrictEqual(out, { applied: 1, failed: 1 })
@@ -524,7 +524,7 @@ async function test(name, fn) {
     seedProduct(sqlite, { id: 80, name: 'Counted', barcode: 'CT80', shop: 3 })
     seedJob(sqlite, 'job-reconcile-gate', [
       // Counted total 10 against 3 on hand -- a +7 add, no supplier, no cost.
-      { _rowNumber: 2, name: 'Counted', barcode: 'CT80', shop: '10', warehouse: '', date: '08/27/2026', action: '' },
+      { _rowNumber: 2, name: 'Counted', barcode: 'CT80', shop: '10', warehouse: '', date: '27/08/2026', action: '' },
     ], { stock_action_mode: 'reconcile' })
     const { out } = await runJobToCompletion(db, 'job-reconcile-gate', JSON.stringify({ stock_action_mode: 'reconcile' }))
     assert.deepStrictEqual(out, { applied: 0, failed: 1 })
@@ -564,8 +564,8 @@ async function test(name, fn) {
       // does not. Sequentially this always tops up an already-attributed lot
       // (deferred, so it is complete); concurrently the blank row can read the
       // lot BEFORE row 2's INSERT commits and get refused instead.
-      { _rowNumber: 2, name: 'Raced', barcode: 'RC90', shop: '2', warehouse: '', date: '08/27/2026', action: 'add', cost_price: '4', supplier: 'Bong Long', batch: 'RACE-LOT' },
-      { _rowNumber: 3, name: 'Raced', barcode: 'RC90', shop: '0', warehouse: '3', date: '08/27/2026', action: 'add', cost_price: '4', batch: 'RACE-LOT' },
+      { _rowNumber: 2, name: 'Raced', barcode: 'RC90', shop: '2', warehouse: '', date: '27/08/2026', action: 'add', cost_price: '4', supplier: 'Bong Long', batch: 'RACE-LOT' },
+      { _rowNumber: 3, name: 'Raced', barcode: 'RC90', shop: '0', warehouse: '3', date: '27/08/2026', action: 'add', cost_price: '4', batch: 'RACE-LOT' },
     ]
     const runOnce = async () => {
       const { sqlite, db } = makeDb()
@@ -595,7 +595,7 @@ async function test(name, fn) {
     seedJob(sqlite, 'job-catalog-cost', [
       // No cost_price key at all: the sheet states a supplier but never
       // types a cost for this row.
-      { _rowNumber: 2, name: 'Catalog Serum', barcode: 'CS95', shop: '4', warehouse: '', date: '08/27/2026', action: 'add', supplier: 'Bong Long', batch: 'CATALOG-LOT' },
+      { _rowNumber: 2, name: 'Catalog Serum', barcode: 'CS95', shop: '4', warehouse: '', date: '27/08/2026', action: 'add', supplier: 'Bong Long', batch: 'CATALOG-LOT' },
     ], { stock_action_mode: 'direct' })
     const { out } = await runJobToCompletion(db, 'job-catalog-cost', JSON.stringify({ stock_action_mode: 'direct' }))
     assert.deepStrictEqual(out, { applied: 0, failed: 1 })

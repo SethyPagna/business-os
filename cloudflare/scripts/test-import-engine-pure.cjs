@@ -218,6 +218,16 @@ const batchCodeModuleObj = { exports: {} }
 const batchCodeWrapper = new Function('exports', 'require', 'module', '__filename', '__dirname', batchCodeOutputText)
 batchCodeWrapper(batchCodeModuleObj.exports, require, batchCodeModuleObj, batchCodeSourcePath, path.dirname(batchCodeSourcePath))
 
+// businessDateWindow.ts is pure too -- importEngine.ts's business-day defaults (todayIso, the
+// inventory receipt date) call businessToday/localDateOf from it.
+const businessDateWindowSourcePath = path.join(__dirname, '..', 'src', 'lib', 'businessDateWindow.ts')
+const { outputText: businessDateWindowOutputText } = ts.transpileModule(fs.readFileSync(businessDateWindowSourcePath, 'utf8'), {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
+  fileName: 'businessDateWindow.ts',
+})
+const businessDateWindowModuleObj = { exports: {} }
+new Function('exports', 'require', 'module', '__filename', '__dirname', businessDateWindowOutputText)(businessDateWindowModuleObj.exports, require, businessDateWindowModuleObj, businessDateWindowSourcePath, path.dirname(businessDateWindowSourcePath))
+
 // The REAL productBatches module, so importEngine.ts's lot planners
 // (planReceiveBatchStock, planReconcileBranchSnapshot, resolveReceiptLotTarget) run as shipped.
 const productBatchesSourcePath = path.join(__dirname, '..', 'src', 'lib', 'productBatches.ts')
@@ -280,6 +290,7 @@ function requireForProductBatches(request) {
   if (request === './productDetailRule') return productDetailRuleModuleObj.exports
   if (request === './productDescriptionSections') return productDescriptionSectionsModuleObj.exports
   if (request === './batchCode') return batchCodeModuleObj.exports
+  if (request === './businessDateWindow') return businessDateWindowModuleObj.exports
   if (request === './sqlBinding') return sqlBindingModuleObj.exports
   if (request === './moneyPrecision') return moneyPrecisionModule.exports
   return require(request)
@@ -386,6 +397,7 @@ Module._load = function patchedLoad(request, parent, isMain) {
   if (request === './batchCode') {
     return batchCodeModuleObj.exports // real module -- importEngine.ts's own lot_code derivation calls into it
   }
+  if (request === './businessDateWindow') return businessDateWindowModuleObj.exports // real module -- business-day defaults
   if (request === './productDescriptionSections') {
     return productDescriptionSectionsModuleObj.exports // real module -- owns the import description whitelist
   }
@@ -1273,8 +1285,8 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
   const noImages = new Map()
 
   // dateToBatchCode itself: new month-abbreviation format.
-  assert.strictEqual(dateToBatchCode('08/24/2026'), '08242026', 'dateToBatchCode renders numeric MMDDYYYY again (Part 388 reversal of the Aug-24 month-abbreviation form)')
-  assert.strictEqual(dateToBatchCode('8/2/2026'), '08022026', 'single-digit month/day still zero-pad')
+  assert.strictEqual(dateToBatchCode('24/08/2026'), '08242026', 'dateToBatchCode renders numeric MMDDYYYY again (Part 388 reversal of the Aug-24 month-abbreviation form)')
+  assert.strictEqual(dateToBatchCode('2/8/2026'), '08022026', 'single-digit month/day still zero-pad')
   assert.strictEqual(dateToBatchCode('2026-01-05'), '01052026', 'an ISO-shaped input (e.g. from received_date) resolves to the right numeric month')
 
   // The new consolidated column, `batch(mm/dd/yyyy)`, is read as the
@@ -1295,13 +1307,45 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
   // order) for an existing hand-built or previously-downloaded CSV.
   {
     const db = makeFakeProductsDb([])
-    const results = await classifyProducts(db, [row({ name: 'Old Batch Column', selling_price_usd: '10', batch: '01/15/2026' }, 1)], 'job-old-batch', null, noImages)
+    const results = await classifyProducts(db, [row({ name: 'Old Batch Column', selling_price_usd: '10', batch: '15/01/2026' }, 1)], 'job-old-batch', null, noImages)
     assert.strictEqual(results[0].data.lot_code, '01152026', 'the old `batch` column should still be read as a date fallback')
   }
   {
     const db = makeFakeProductsDb([])
-    const results = await classifyProducts(db, [row({ name: 'Old Date Column', selling_price_usd: '10', date: '03/10/2026' }, 1)], 'job-old-date', null, noImages)
+    const results = await classifyProducts(db, [row({ name: 'Old Date Column', selling_price_usd: '10', date: '10/03/2026' }, 1)], 'job-old-date', null, noImages)
     assert.strictEqual(results[0].data.lot_code, '03102026', 'the old `date` column should still be read as a date fallback')
+  }
+  // Owner, Oct 6 2026: bare columns are DAY-first, only a header that says
+  // mm/dd/yyyy is month-first. 03/04/2026 is the discriminating cell: both
+  // fields <= 12, so each reading is a real date and only the answer differs.
+  {
+    const db = makeFakeProductsDb([])
+    const bare = await classifyProducts(db, [row({ name: 'Bare Ambiguous', selling_price_usd: '10', batch: '03/04/2026' }, 1)], 'job-bare-ambiguous', null, noImages)
+    assert.strictEqual(bare[0].data.received_date, '2026-04-03', 'an unheaded batch cell is day-first: 3 April')
+    assert.strictEqual(bare[0].data.lot_code, '04032026')
+    const bareDate = await classifyProducts(makeFakeProductsDb([]), [row({ name: 'Bare Date Ambiguous', selling_price_usd: '10', date: '03/04/2026' }, 1)], 'job-bare-date', null, noImages)
+    assert.strictEqual(bareDate[0].data.received_date, '2026-04-03', 'an unheaded date cell is day-first too')
+    const explicit = await classifyProducts(makeFakeProductsDb([]), [row({ name: 'Explicit Month First', selling_price_usd: '10', 'batch(mm/dd/yyyy)': '03/04/2026' }, 1)], 'job-explicit-mf', null, noImages)
+    assert.strictEqual(explicit[0].data.received_date, '2026-03-04', 'a header that SAYS mm/dd/yyyy still reads month-first: 4 March')
+    assert.strictEqual(explicit[0].data.lot_code, '03042026')
+    const monthFirstSpelling = await classifyProducts(makeFakeProductsDb([]), [row({ name: 'Old Spelling', selling_price_usd: '10', batch: '01/15/2026' }, 1)], 'job-old-spelling', null, noImages)
+    assert.ok((monthFirstSpelling[0].warnings || []).some((w) => w.kind === 'unreadable_batch_date'), 'a month-first cell under a bare header is unreadable now, and says so')
+  }
+  // The blank default is the BUSINESS day: 2026-10-05T18:30Z is already 6 Oct in Cambodia.
+  {
+    const RealDate = Date
+    const frozen = new RealDate('2026-10-05T18:30:00.000Z').getTime()
+    global.Date = class extends RealDate {
+      constructor(...args) { if (args.length === 0) super(frozen); else super(...args) }
+      static now() { return frozen }
+    }
+    try {
+      const results = await classifyProducts(makeFakeProductsDb([]), [row({ name: 'Blank Date Business Day', selling_price_usd: '10' }, 1)], 'job-blank-date', null, noImages)
+      assert.strictEqual(results[0].data.received_date, '2026-10-06', 'a blank received date defaults to the Cambodia day, not the UTC day')
+      assert.strictEqual(results[0].data.lot_code, '10062026', 'and the lot code is derived from that same day')
+    } finally {
+      global.Date = RealDate
+    }
   }
 
   // Sep 6 2026 (a2 datefmt): the warning guard used to RE-READ the cell with
@@ -1472,6 +1516,18 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
   const [preciseReceipt] = await classifyInventory(makeDb([{ id: 1, name: 'Shop', is_default: 1, is_active: 1 }]),
     [{ ...input(undefined)[0], unit_cost_usd: '3.1234', date: '2026-09-20' }], 'add')
   assert.equal(preciseReceipt.data.unit_cost_usd, 3.1234)
+  // Owner, Oct 6 2026: the movement date reads day-first (it went through new Date(raw), month-first).
+  const [dayFirstReceipt] = await classifyInventory(makeDb([{ id: 1, name: 'Shop', is_default: 1, is_active: 1 }]),
+    [{ ...input(undefined)[0], date: '25/12/2026' }], 'add')
+  assert.equal(dayFirstReceipt.data.created_at, '2026-12-25T00:00:00.000Z', '25/12/2026 is read, not dropped to "now"')
+  assert.equal(dayFirstReceipt.data.receipt_date_explicit, true)
+  const [ambiguousReceipt] = await classifyInventory(makeDb([{ id: 1, name: 'Shop', is_default: 1, is_active: 1 }]),
+    [{ ...input(undefined)[0], date: '03/04/2026' }], 'add')
+  assert.equal(ambiguousReceipt.data.created_at, '2026-04-03T00:00:00.000Z', '03/04/2026 is 3 April')
+  const [unreadableReceipt] = await classifyInventory(makeDb([{ id: 1, name: 'Shop', is_default: 1, is_active: 1 }]),
+    [{ ...input(undefined)[0], date: '31/31/2026' }], 'add')
+  assert.equal(unreadableReceipt.data.receipt_date_explicit, false, 'an unreadable date falls back to now ...')
+  assert.ok((unreadableReceipt.warnings || []).some((w) => w.kind === 'unreadable_batch_date'), '... and says so')
   assert.equal(preciseReceipt.data.total_cost_usd, 6.2468)
   assert.deepEqual(applyAnalyzedInventoryCostSnapshots([preciseReceipt], new Map([[1, preciseReceipt]])), [preciseReceipt])
   const oldPlan = { ...preciseReceipt, data: { ...preciseReceipt.data } }
@@ -1912,6 +1968,20 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
     assert.strictEqual(results[0].data.created_at, new Date('2018-06-01').toISOString(), 'created_date wins over the older created_at column name when both are present on the same row')
   }
 
+  // 9b) Owner, Oct 6 2026: a slash created_date reads DAY-first like every
+  // import. It used to go through `new Date(raw)`, which reads a slash string
+  // month-first, so "25/12/2026" was silently dropped and the contact was
+  // created as of now.
+  {
+    const dayFirst = await classifyContacts(makeFakeDb([]), 'customers', [row({ name: 'Day First Joiner', created_date: '25/12/2026' }, 1)], null)
+    assert.strictEqual(dayFirst[0].data.created_at, '2026-12-25T00:00:00.000Z', '25/12/2026 is read, not dropped')
+    const ambiguous = await classifyContacts(makeFakeDb([]), 'customers', [row({ name: 'Ambiguous Joiner', created_date: '03/04/2026' }, 1)], null)
+    assert.strictEqual(ambiguous[0].data.created_at, '2026-04-03T00:00:00.000Z', '03/04/2026 is 3 April, not 4 March')
+    const unreadable = await classifyContacts(makeFakeDb([]), 'customers', [row({ name: 'Unreadable Joiner', created_date: '31/31/2026' }, 1)], null)
+    assert.strictEqual(unreadable[0].data.created_at, null, 'an unreadable date is not guessed')
+    assert.ok((unreadable[0].warnings || []).some((w) => /31\/31\/2026/.test(w.message)), 'and the substitution is reported, not silent')
+  }
+
   // 10) A matched existing customer's created_date is classified onto
   // data.created_at same as a new row, but then merged against the
   // existing record via resolveContactFieldValue's merge_blank_only rule
@@ -2289,7 +2359,7 @@ assert.strictEqual(isD1CpuLimitError(new Error('Network request failed')), false
   // different date or falling back to import time.
   {
     assert.strictEqual(parseSalesImportDateTime('2026-08-28 14:30'), '2026-08-28T07:30:00.000Z')
-    assert.strictEqual(parseSalesImportDateTime('08/28/2026 23:59:58'), '2026-08-28T16:59:58.000Z')
+    assert.strictEqual(parseSalesImportDateTime('28/08/2026 23:59:58'), '2026-08-28T16:59:58.000Z')
     assert.strictEqual(parseSalesImportDateTime('2026-08-28T14:30:00+07:00'), '2026-08-28T07:30:00.000Z')
     assert.strictEqual(parseSalesImportDateTime(''), null)
     assert.throws(() => parseSalesImportDateTime('2026-02-31 12:00'), /Invalid sale_date/)

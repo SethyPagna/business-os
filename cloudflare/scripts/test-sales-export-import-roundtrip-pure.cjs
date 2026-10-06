@@ -7,10 +7,13 @@
 // yyyy-mm-dd"). `sale_date` LOOKS like one more display cell, and formatting
 // it with the day-first display formatter typechecks, renders plausibly, and
 // passes every frontend test -- while silently breaking the round trip,
-// because parseSalesImportDateTime reads a slash date MONTH-first and must
-// keep doing so (every spreadsheet the shop already owns keeps its meaning).
-// The failure is invisible for any day <= 12: 08/09/2026 exports as the 8th
-// of September and re-imports as the 9th of August. Nothing throws.
+// because it is a machine cell read back by a parser. Since Oct 6 2026 the
+// importer's slash branch is DAY-first too (owner: every import reads slash
+// dates day-first), so a day-first cell would now round-trip -- but a sheet
+// written under the old month-first reading may still be in circulation, so
+// the export keeps the one form no reading can get wrong: ISO. The failure
+// this guards is invisible for any day <= 12 (08/09/2026 is two different
+// days) and nothing throws.
 //
 // So the export ships ISO, and this test is the only place both halves meet.
 //
@@ -95,13 +98,14 @@ async function main() {
     }
   }
 
-  // --- 4. the importer's slash branch is still month-first -------------------
-  // This is the constraint that forced ISO on the export, so it is asserted
-  // here rather than assumed. If a later session ever flips it to day-first,
-  // this file fails and points at the sheets that would silently change
-  // meaning -- do not "fix" it by updating these two lines.
-  assert.equal(parseSalesImportDateTime('09/01/2026 10:00'), '2026-09-01T03:00:00.000Z', 'a slash cell is read MONTH-first: 1 September')
-  assert.equal(parseSalesImportDateTime('01/09/2026 10:00'), '2026-01-09T03:00:00.000Z', 'and its transpose is 9 January, not the same day')
+  // --- 4. the importer's slash branch is day-first --------------------------
+  // Owner, Oct 6 2026: every import reads slash dates day-first, like the app.
+  // 09/01 and 01/09 are the discriminating pair: both fields <= 12, so a
+  // month-first reading still yields a real date and only the answer differs.
+  assert.equal(parseSalesImportDateTime('09/01/2026 10:00'), '2026-01-09T03:00:00.000Z', 'a slash cell is read DAY-first: 9 January')
+  assert.equal(parseSalesImportDateTime('01/09/2026 10:00'), '2026-09-01T03:00:00.000Z', 'and its transpose is 1 September, not the same day')
+  assert.equal(parseSalesImportDateTime('25/12/2026 10:00'), '2026-12-25T03:00:00.000Z', 'a day past the 12th proves the order')
+  assert.throws(() => parseSalesImportDateTime('12/25/2026 10:00'), /Invalid sale_date/, 'the month-first spelling of that day is refused, not guessed')
 
   // --- 5. and the display formatter really is day-first ----------------------
   // Proving the two are genuinely different functions, so that item 1 is a
@@ -110,7 +114,7 @@ async function main() {
   assert.equal(fmtBusinessIsoDateTime('2026-08-28T07:30:00.000Z'), '2026-08-28 14:30', 'the EXPORT formatter is ISO')
   assert.notEqual(fmtDateTime24('2026-08-28T07:30:00.000Z'), fmtBusinessIsoDateTime('2026-08-28T07:30:00.000Z'))
 
-  console.log(`PASS sales export/import round trip: ${checked} dates, ISO cell, importer still month-first on slashes`)
+  console.log(`PASS sales export/import round trip: ${checked} dates, ISO cell, importer day-first on slashes`)
   console.log('test-sales-export-import-roundtrip-pure: ok')
 }
 
