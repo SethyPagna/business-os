@@ -297,6 +297,13 @@ function activeWorld() {
     damaged: w.customerReturn(r, [{ saleItem: r.itemIds[0], product: 2, branch: SHOP, qty: 1, action: 'damaged', lot: L2 }]),
     none: w.customerReturn(r, [{ saleItem: r.itemIds[0], product: 2, branch: SHOP, qty: 1, action: 'none', lot: L2 }]),
   }
+  // a return that records nothing for the returned unit (action none) and hands out a replacement of product 6 from its first lot
+  const L6 = lot(6)
+  w.named.L6 = L6
+  w.named.returns.replace = w.customerReturn(r, [{ saleItem: r.itemIds[0], product: 2, branch: SHOP, qty: 1, action: 'none', lot: L2 }])
+  w.run("INSERT INTO return_replacement_items(return_id,product_id,product_name,branch_id,batch_id,quantity,applied_price_usd,total_usd) VALUES(?,?,?,?,?,?,?,?)", w.named.returns.replace, 6, 'P6', SHOP, L6, 1, 5, 5)
+  w.bump({ product: 6, branch: SHOP, lot: L6, delta: -1 })
+  w.named.replacementOut = w.movement({ product: 6, branch: SHOP, type: 'replacement_out', quantity: -1, reason: 'Replacement for return #RT4', reference: w.named.returns.replace, batch: L6 })
   w.named.transfer = w.transfer(1, WAREHOUSE, SHOP, 5, { lot: w.named.L1 })
   w.named.removed = w.remove(3, WAREHOUSE, 2, { lot: L3 })
   w.named.opTransfer = w.operationTransfer(1, WAREHOUSE, SHOP, 3, { lot: w.named.L1 })

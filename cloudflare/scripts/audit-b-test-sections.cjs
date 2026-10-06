@@ -243,3 +243,167 @@ section('audit-b-transfers: unbalanced events, orphan legs, receipts, members, g
   // ISO timestamps (JS-stamped writers) are read the same way
   await plant('ISO timestamps on both legs', (w) => w.run("UPDATE inventory_movements SET created_at=replace(created_at,' ','T')||'.000Z' WHERE id IN (?,?)", legacyIn(w), legacyOut(w)), {})
 })
+
+// ---------------------------------------------------------------------------------------------------------------------
+// 6. audit-b-sale-deductions
+// ---------------------------------------------------------------------------------------------------------------------
+section('audit-b-sale-deductions: every status transition table row fires its own column, and the exempt classes stay quiet', async () => {
+  const Q = 'audit-b-sale-deductions'
+  const plant = (label, mutate, expected) => planted(Q, label, mutate, expected, { base: activeWorld })
+  // the sale's own sale / cancel-restore movement ids
+  const saleMovement = (w, sale) => w.get("SELECT id FROM inventory_movements WHERE movement_type='sale' AND reference_id=? ORDER BY id LIMIT 1", sale.id).id
+  const restoreMovement = (w, sale) => w.get("SELECT id FROM inventory_movements WHERE movement_type='return' AND reference_id=? AND reason LIKE 'Sale cancelled%'", sale.id).id
+  const w0 = activeWorld()
+  const clean = (await run(w0, Q)).rows[0]
+  // transition table of the clean world: completed / awaiting_payment / awaiting_delivery / partial_return hold, cancelled holds nothing
+  assert.equal(clean.system_lines, 6, 'six system lines: three holding statuses, a cancelled sale, a sold-out sale, a partially returned sale')
+  assert.deepEqual([clean.skipped_lines, clean.import_lines, clean.legacy_lines, clean.replacement_lines], [1, 0, 0, 0])
+  assert.equal(clean.examples_system, '[]')
+  assert.equal(clean.system_mismatch_first_sale_at, null)
+  w0.raw.close()
+
+  const S = (w) => w.named.sales
+  await plant('Not Paid sale whose stock was never taken', (w) => w.run('DELETE FROM inventory_movements WHERE id=?', saleMovement(w, S(w).awaitingPayment)), { deducted_never_deducted: 1 })
+  await plant('completed sale that took 1 of its 3 units', (w) => w.run('UPDATE inventory_movements SET quantity=-1 WHERE id=?', saleMovement(w, S(w).completed)), { deducted_under_deducted: 1 })
+  await plant('awaiting_delivery sale that took 3 for a 1-unit line', (w) => w.run('UPDATE inventory_movements SET quantity=-3 WHERE id=?', saleMovement(w, S(w).awaitingDelivery)), { deducted_over_deducted: 1 })
+  await plant('cancelled sale whose restock row is missing (units still out)', (w) => w.run('DELETE FROM inventory_movements WHERE id=?', restoreMovement(w, S(w).toCancel)), { cancelled_still_out: 1 })
+  await plant('cancelled sale restored twice (phantom stock)', (w) => w.movement({ product: 2, branch: SHOP, type: 'return', quantity: 4, reason: 'Sale cancelled (mistake)', reference: S(w).toCancel.id, batch: w.named.L2 }), { cancelled_over_restored: 1 })
+  await plant('lot allocation that released 1 unit of a held sale', (w) => w.run('UPDATE sale_item_batch_allocations SET released_quantity=1 WHERE sale_item_id=?', S(w).completed.itemIds[0]), { allocation_outstanding_mismatch: 1 })
+  await plant('status flipped to cancelled with no restock (movement AND allocation still say out)', (w) => w.run("UPDATE sales SET sale_status='cancelled' WHERE id=?", S(w).completed.id), { cancelled_still_out: 1, allocation_outstanding_mismatch: 1 })
+  await plant('sale line deleted but its units never given back', (w) => w.run('DELETE FROM sale_items WHERE id=?', S(w).completed.itemIds[0]), { deducted_over_deducted: 1 })
+  // legitimate shapes
+  await plant('a line removed WITH its restock row is balanced', (w) => {
+    w.run('DELETE FROM sale_items WHERE id=?', S(w).completed.itemIds[0])
+    w.run('DELETE FROM sale_item_batch_allocations WHERE sale_item_id=?', S(w).completed.itemIds[0])
+    w.movement({ product: 2, branch: SHOP, type: 'return', quantity: 3, reason: 'Item removed from sale #' + S(w).completed.id, reference: S(w).completed.id, batch: w.named.L2 })
+  }, {})
+  const imp = await plant('an imported sale (not skipped) with no movement is info, not a defect', (w) => w.run('UPDATE sales SET stock_skipped=0 WHERE id=?', S(w).imported.id), {})
+  assert.deepEqual([imp.rows[0].import_lines, imp.rows[0].import_lines_mismatch, imp.rows[0].skipped_lines], [1, 1, 0])
+  const leg = await plant('a legacy-sale: sale with its movement deleted is info, not a defect', (w) => {
+    w.run("UPDATE sales SET client_request_id='legacy-sale:1:1' WHERE id=?", S(w).completed.id)
+    w.run('DELETE FROM inventory_movements WHERE id=?', saleMovement(w, S(w).completed))
+  }, {})
+  assert.deepEqual([leg.rows[0].legacy_lines, leg.rows[0].legacy_lines_mismatch], [1, 1])
+  const rep = await plant('a replacement sale (source_return_id) is left to the returns audit', (w) => {
+    w.run('UPDATE sales SET source_return_id=1 WHERE id=?', S(w).completed.id)
+    w.run('DELETE FROM inventory_movements WHERE id=?', saleMovement(w, S(w).completed))
+  }, {})
+  assert.equal(rep.rows[0].replacement_lines, 1)
+  const dmg = await plant('a damaged-lot line is not a branch line', (w) => {
+    w.run('UPDATE sale_items SET damaged_lot_id=1 WHERE id=?', S(w).completed.itemIds[0])
+    w.run('DELETE FROM inventory_movements WHERE id=?', saleMovement(w, S(w).completed))
+  }, {})
+  assert.equal(dmg.rows[0].damaged_lot_lines, 1)
+  // a sale cancelled AFTER a customer return restocked part of it: the cancel gives back only the units the return did not (q - returned)
+  const cancelAfterReturn = (restored) => (w) => {
+    const sale = w.sale('completed', [{ product: 2, branch: SHOP, qty: 5, lot: w.named.L2 }])
+    w.customerReturn(sale, [{ saleItem: sale.itemIds[0], product: 2, branch: SHOP, qty: 2, action: 'restock', lot: w.named.L2 }])
+    w.run("UPDATE sales SET sale_status='cancelled' WHERE id=?", sale.id)
+    w.bump({ product: 2, branch: SHOP, lot: w.named.L2, delta: restored })
+    w.movement({ product: 2, branch: SHOP, type: 'return', quantity: restored, reason: 'Sale cancelled (mistake)', reference: sale.id, batch: w.named.L2 })
+    w.run('UPDATE sale_item_batch_allocations SET released_quantity=? WHERE sale_item_id=?', restored, sale.itemIds[0])
+  }
+  await plant('cancel after a 2-unit return restores only the other 3 (q - returned)', cancelAfterReturn(3), {})
+  await plant('cancel after a 2-unit return that restores all 5 phantoms 2 units', cancelAfterReturn(5), { cancelled_over_restored: 1, allocation_outstanding_mismatch: 1 })
+  // the era columns and the example list name the offender
+  const era = await plant('examples and era', (w) => w.run('UPDATE inventory_movements SET quantity=-1 WHERE id=?', saleMovement(w, S(w).completed)), { deducted_under_deducted: 1 })
+  assert.deepEqual(JSON.parse(era.rows[0].examples_system), [[1, 2, SHOP, 'completed', 3, 1]])
+  assert.ok(era.rows[0].system_mismatch_first_sale_at && era.rows[0].system_mismatch_first_sale_at === era.rows[0].system_mismatch_last_sale_at)
+})
+
+// ---------------------------------------------------------------------------------------------------------------------
+// 7. audit-b-stock-skipped-sales
+// ---------------------------------------------------------------------------------------------------------------------
+section('audit-b-stock-skipped-sales: a skipped sale that moved stock fires, a customer return that merely shares its number does not', async () => {
+  const Q = 'audit-b-stock-skipped-sales'
+  const plant = (label, mutate, expected) => planted(Q, label, mutate, expected, { base: activeWorld })
+  const w0 = activeWorld()
+  const clean = (await run(w0, Q)).rows[0]
+  assert.deepEqual([clean.skipped_sales, clean.skipped_import, clean.skipped_legacy, clean.skipped_other, clean.import_sales, clean.import_sales_unmarked], [1, 1, 0, 0, 1, 0])
+  assert.equal(clean.examples, '[]')
+  const skipped = w0.named.sales.imported
+  w0.raw.close()
+
+  const r1 = await plant('a sale movement on a skipped sale', (w) => w.movement({ product: 2, branch: SHOP, type: 'sale', quantity: -2, reference: w.named.sales.imported.id, reason: 'plant' }), { skipped_sale_movement_rows: 1 })
+  assert.equal(r1.rows[0].skipped_movement_net_units, -2)
+  assert.deepEqual(JSON.parse(r1.rows[0].examples).map((e) => e.slice(0, 1).concat(e.slice(2))), [[skipped.id, 'sale', -2]])
+  const r2 = await plant('a cancel restock on a skipped sale (units never taken, handed back)', (w) => w.movement({ product: 2, branch: SHOP, type: 'return', quantity: 2, reference: w.named.sales.imported.id, reason: 'Sale cancelled (mistake)' }), { skipped_sale_movement_rows: 1 })
+  assert.equal(r2.rows[0].skipped_movement_net_units, 2)
+  await plant('a damage movement on a skipped sale', (w) => w.movement({ product: 2, branch: SHOP, type: 'damage_out', quantity: -1, reference: w.named.sales.imported.id, reason: 'plant' }), { skipped_sale_movement_rows: 1 })
+  await plant('allocations still holding units on a skipped sale', (w) => w.run('UPDATE sale_item_batch_allocations SET released_quantity=0 WHERE sale_item_id=?', w.named.sales.imported.itemIds[0]), { skipped_sale_allocations_held: 2 })
+  // a REAL customer return against a skipped sale restocks normally and names the return, not the sale
+  const cr = await plant('a customer return on a skipped sale is legitimate (info only)', (w) => {
+    const s = w.named.sales.imported
+    w.customerReturn(s, [{ saleItem: s.itemIds[0], product: 2, branch: SHOP, qty: 1, action: 'restock', lot: w.named.L2 }])
+  }, {})
+  assert.deepEqual([cr.rows[0].skipped_with_customer_returns, cr.rows[0].skipped_return_restock_units], [1, 1])
+  // ... even when the return's id equals the skipped sale's id (two autoincrement sequences collide freely): told apart by the reason
+  await plant('a return whose id equals the skipped sale id is not the sale\'s movement', (w) => {
+    const s = w.named.sales.imported
+    w.customerReturn(w.named.sales.returned, [{ saleItem: w.named.sales.returned.itemIds[0], product: 2, branch: SHOP, qty: 1, action: 'restock', lot: w.named.L2 }], { id: s.id })
+  }, {})
+  const un = await plant('an import sale not marked (pre-0235): info columns, including the phantom cancel restock', (w) => {
+    const s = w.named.sales.imported
+    w.run("UPDATE sales SET stock_skipped=0, sale_status='cancelled' WHERE id=?", s.id)
+    w.movement({ product: 2, branch: SHOP, type: 'return', quantity: 2, reference: s.id, reason: 'Sale cancelled (mistake)' })
+  }, {})
+  assert.deepEqual([un.rows[0].import_sales_unmarked, un.rows[0].import_unmarked_cancelled, un.rows[0].import_unmarked_cancel_restock_units], [1, 1, 2])
+  assert.equal(un.rows[0].skipped_sales, 0)
+})
+
+// ---------------------------------------------------------------------------------------------------------------------
+// 8. audit-b-returns-restock
+// ---------------------------------------------------------------------------------------------------------------------
+section('audit-b-returns-restock: restock / damaged / none / cancel / edit / replace each fire their own column; sale-cancel rows sharing a return id do not', async () => {
+  const Q = 'audit-b-returns-restock'
+  const plant = (label, mutate, expected) => planted(Q, label, mutate, expected, { base: activeWorld })
+  const R = (w) => w.named.returns
+  const moveOf = (w, returnId, type) => w.get('SELECT id FROM inventory_movements WHERE reference_id=? AND movement_type=? ORDER BY id LIMIT 1', returnId, type).id
+  const w0 = activeWorld()
+  const clean = (await run(w0, Q)).rows[0]
+  assert.deepEqual([clean.returns_checked, clean.return_groups, clean.returns_without_any_movement, clean.restock_lines_without_allocation], [4, 4, 0, 0])
+  assert.equal(clean.examples, '[]')
+  w0.raw.close()
+
+  await plant('a restock line whose movement is missing (never restocked)', (w) => w.run('DELETE FROM inventory_movements WHERE id=?', moveOf(w, R(w).restock, 'return')), { restock_short: 1 })
+  await plant('a restock of 0.5 for a 1-unit line', (w) => w.run('UPDATE inventory_movements SET quantity=0.5 WHERE id=?', moveOf(w, R(w).restock, 'return')), { restock_short: 1 })
+  await plant('a restock written twice', (w) => w.movement({ product: 2, branch: SHOP, type: 'return', quantity: 1, reason: 'Return: changed mind', reference: R(w).restock, batch: w.named.L2 }), { restock_excess: 1 })
+  await plant('a DAMAGED line that also moved sellable stock (the double count)', (w) => w.movement({ product: 2, branch: SHOP, type: 'return', quantity: 1, reason: 'Return: changed mind', reference: R(w).damaged, batch: w.named.L2 }), { restock_excess: 1 })
+  await plant('a NONE line that moved sellable stock', (w) => w.movement({ product: 2, branch: SHOP, type: 'return', quantity: 1, reason: 'Return: changed mind', reference: R(w).none, batch: w.named.L2 }), { restock_excess: 1 })
+  await plant('a cancelled return whose restock was not taken back', (w) => w.run("UPDATE returns SET status='cancelled' WHERE id=?", R(w).restock), { cancelled_return_still_in: 1 })
+  await plant('a properly cancelled restock return and a properly cancelled damaged return', (w) => {
+    w.run("UPDATE returns SET status='cancelled' WHERE id IN (?,?)", R(w).restock, R(w).damaged)
+    w.movement({ product: 2, branch: SHOP, type: 'return_reversal', quantity: -1, reason: 'Return #RT1 cancelled', reference: R(w).restock, batch: w.named.L2 })
+    w.movement({ product: 2, branch: SHOP, type: 'damage_reversal', quantity: -1, reason: 'Return #RT2 cancelled', reference: R(w).damaged, batch: w.named.L2 })
+  }, {})
+  await plant('a cancelled return reversed twice', (w) => {
+    w.run("UPDATE returns SET status='cancelled' WHERE id=?", R(w).restock)
+    for (let i = 0; i < 2; i++) w.movement({ product: 2, branch: SHOP, type: 'return_reversal', quantity: -1, reason: 'Return #RT1 cancelled', reference: R(w).restock, batch: w.named.L2 })
+  }, { cancelled_return_over_reversed: 1 })
+  await plant('a damaged line whose damage_in is missing', (w) => w.run('DELETE FROM inventory_movements WHERE id=?', moveOf(w, R(w).damaged, 'damage_in')), { damage_movement_mismatch: 1 })
+  await plant('a damaged line whose tagged lot is another size', (w) => w.run('UPDATE damaged_stock_lots SET quantity=2, quantity_remaining=2 WHERE return_id=?', R(w).damaged), { damaged_lot_mismatch: 1 })
+  await plant('a replacement item whose replacement_out movement is missing', (w) => w.run('DELETE FROM inventory_movements WHERE id=?', w.named.replacementOut), { replacement_mismatch: 1 })
+  await plant('a restock line whose lot rows add up to another figure', (w) => w.run('UPDATE return_item_batch_allocations SET quantity=0.5 WHERE return_item_id=(SELECT id FROM return_items WHERE return_id=?)', R(w).restock), { allocation_sum_mismatch: 1 })
+  await plant('lot rows on a damaged line (it never entered a lot)', (w) => w.run('INSERT INTO return_item_batch_allocations(return_item_id,batch_id,branch_id,quantity) VALUES((SELECT id FROM return_items WHERE return_id=?),?,?,1)', R(w).damaged, w.named.L2, SHOP), { allocation_sum_mismatch: 1 })
+  await plant('a restock lot row that names another product\'s lot', (w) => w.run('UPDATE return_item_batch_allocations SET batch_id=? WHERE return_item_id=(SELECT id FROM return_items WHERE return_id=?)', w.named.L3, R(w).restock), { allocation_lot_other_product: 1 })
+  // legitimate shapes
+  await plant('an edited return: +1, reversal -1, new +2 against a 2-unit line', (w) => {
+    w.run('UPDATE return_items SET quantity=2 WHERE return_id=?', R(w).restock)
+    w.run('UPDATE return_item_batch_allocations SET quantity=2 WHERE return_item_id=(SELECT id FROM return_items WHERE return_id=?)', R(w).restock)
+    w.movement({ product: 2, branch: SHOP, type: 'return_reversal', quantity: -1, reason: 'Return #RT1 updated - reversing previous restock', reference: R(w).restock, batch: w.named.L2 })
+    w.movement({ product: 2, branch: SHOP, type: 'return', quantity: 2, reason: 'Return #RT1 updated: changed mind', reference: R(w).restock, batch: w.named.L2 })
+  }, {})
+  await plant('a SALE cancel restock whose sale id equals a return id is not the return\'s movement', (w) => w.movement({ product: 2, branch: SHOP, type: 'return', quantity: 1, reason: 'Sale cancelled (mistake)', reference: R(w).restock, batch: w.named.L2 }), {})
+  const legacy = await plant('an old-system return: restock line with no movement and no lot row', (w) => {
+    w.run("INSERT INTO returns(id,return_number,sale_id,branch_id,return_scope,status,created_at) VALUES(50,'OLD1',?,?, 'customer','completed','2026-08-30 10:00:00')", w.named.sales.returned.id, SHOP)
+    w.run("INSERT INTO return_items(return_id,sale_item_id,product_id,quantity,return_to_stock,stock_action,branch_id) VALUES(50,?,2,1,1,'restock',?)", w.named.sales.returned.itemIds[0], SHOP)
+  }, { restock_short: 1 })
+  assert.deepEqual([legacy.rows[0].returns_without_any_movement, legacy.rows[0].restock_lines_without_allocation], [1, 1])
+  assert.equal(legacy.rows[0].mismatch_first_return_at, '2026-08-30 10:00:00')
+  assert.deepEqual(JSON.parse(legacy.rows[0].examples), [[50, 2, SHOP, 'completed', 1, 0, 0, 0]])
+  // supplier returns are not customer returns
+  await plant('a supplier-scope return is out of scope', (w) => {
+    w.run("INSERT INTO returns(id,return_number,return_scope,status,branch_id) VALUES(60,'SUP1','supplier','completed',?)", SHOP)
+    w.run("INSERT INTO return_items(return_id,product_id,quantity,return_to_stock,stock_action,branch_id) VALUES(60,2,1,1,'restock',?)", SHOP)
+  }, {})
+})
