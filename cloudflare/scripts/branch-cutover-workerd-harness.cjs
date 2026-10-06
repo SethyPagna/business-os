@@ -128,10 +128,10 @@ async function drive(call, { pageSize = 256, faults = {}, keepValuesAboveMs = 20
     for (const entry of response.log) {
       s.statements++; s.rowsRead += entry.r || 0; s.maxRowsRead = Math.max(s.maxRowsRead, entry.r || 0)
       if (!s.worst || (entry.d ?? 0) > s.worst.d) s.worst = { ...entry, sql: texts[entry.t] }
-      const p = perText[entry.t] ||= { label, count: 0, maxMs: 0, maxRows: 0, totalRows: 0, values: undefined }
+      const p = perText[entry.t] ||= { label, count: 0, maxMs: 0, secondMs: 0, maxRows: 0, totalRows: 0, values: undefined }
       p.count++; p.totalRows += entry.r || 0
       if ((entry.r || 0) >= p.maxRows) { p.maxRows = entry.r || 0; if (entry.v) p.values = entry.v }
-      if ((entry.d || 0) > p.maxMs) { p.maxMs = entry.d || 0; if (entry.v) p.values = entry.v }
+      if ((entry.d || 0) > p.maxMs) { p.secondMs = p.maxMs; p.maxMs = entry.d || 0; if (entry.v) p.values = entry.v } else p.secondMs = Math.max(p.secondMs, entry.d || 0)
     }
   }
   const step = async (label, kind, args, fault) => {
