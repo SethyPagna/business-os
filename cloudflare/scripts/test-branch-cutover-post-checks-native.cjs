@@ -151,6 +151,14 @@ async function main() {
       'a lot code rewritten silently (no updated_at)': [`UPDATE product_batches SET lot_code = lot_code || 'x' WHERE id = ${plain}`, ['batch_checksum']],
       'a plain lot re-costed silently': [`UPDATE product_batches SET unit_cost_usd = COALESCE(unit_cost_usd, 0) + 1 WHERE id = ${lot}`, ['batch_checksum', 'value_lots']],
       'a lot touched since begin that no fold explains': [`UPDATE product_batches SET updated_at = '2999-01-01 00:00:00' WHERE id = ${plain}`, ['batches_changed_off']],
+      // X2: row timestamps are whole seconds, the journal's begin is an ISO instant with milliseconds. A write that landed in
+      // the SAME second as begin (stored at second .000, so before begin's .xyz) is not a change of the run. The only instant
+      // that cannot be told apart is a begin at exactly .000, which the expectation below names.
+      'a lot written in the same second as begin, before it': [`UPDATE product_batches SET updated_at = datetime((SELECT created_at FROM branch_cutovers LIMIT 1)) WHERE id = ${plain}`,
+        /.000Z$/.test(one("SELECT created_at c FROM branch_cutovers LIMIT 1").c) ? ['batches_changed_off'] : []],
+      'a stock transfer written in the same second as begin, before it, outside the run': [`INSERT INTO stock_transfers(product_id, product_name, from_branch_id, to_branch_id, quantity, from_branch_name, to_branch_name, created_at)
+        SELECT product_id, product_name, from_branch_id, to_branch_id, quantity, from_branch_name, to_branch_name, datetime((SELECT created_at FROM branch_cutovers LIMIT 1)) FROM stock_transfers ORDER BY id LIMIT 1`,
+        /.000Z$/.test(one("SELECT created_at c FROM branch_cutovers LIMIT 1").c) ? ['orphans'] : []],
       'a nonblank history label rewritten': [`UPDATE sales SET branch_name = 'Warehouse' WHERE id = 2`, ['sales']],
       'a history label left blank': [`UPDATE sales SET branch_name = NULL WHERE id = 2`, ['blank_labels', 'sales']],
       'Old Shop renamed back': [`UPDATE branches SET name = 'Shop' WHERE id = ${old}`, ['directory_off']],

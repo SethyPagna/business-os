@@ -57,8 +57,8 @@ function withFirst(d1) {
     first: async (column) => { const row = (await statement.all()).results[0] ?? null; return column ? row?.[column] ?? null : row } })
   return { prepare: (sql) => decorate(d1.prepare(sql)), batch: (statements) => d1.batch(statements) }
 }
-function harness(w, app, { token = TOKEN, configured = TOKEN } = {}) {
-  const env = { DB: withFirst(w.db.d1), ...(configured === null ? {} : { BRANCH_CUTOVER_OPERATOR_TOKEN: configured }) }
+function harness(w, app, { token = TOKEN, configured = TOKEN, tier } = {}) {
+  const env = { DB: withFirst(w.db.d1), ...(tier === undefined ? {} : { PLAN_TIER: tier }), ...(configured === null ? {} : { BRANCH_CUTOVER_OPERATOR_TOKEN: configured }) }
   const log = []
   const raw = async (action, text, { header = token, method = 'POST' } = {}) => {
     const headers = { 'content-type': 'application/json', ...(header === null ? {} : { 'x-cutover-operator-token': header }) }
@@ -157,6 +157,25 @@ async function main() {
     const ok = await h.raw('status', body({}))
     assert.deepEqual([ok.status, ok.json.phase], [200, 'none'])
     assert.equal(JSON.stringify(ok.json).includes(TOKEN), false)
+    w.raw.close()
+  })
+
+  await check('X1: begin and resume are refused on the free plan with a coded refusal and no effect; paid, unset and garbage tiers are unchanged', async () => {
+    const w = newWorld(2)
+    const before = stockText(w)
+    for (const tier of ['free', ' FREE ']) {
+      const h = harness(w, app, { tier })
+      for (const action of ['begin', 'resume']) {
+        const refused = await h.raw(action, body({ actorUserId: ACTOR_USER, requestId: 'cutover_free_1', operationId: 'bco_none' }))
+        assert.deepEqual([refused.status, refused.json.code, refused.json.refusal], [409, 'refused', 'plan_tier_free'], action + ' on ' + JSON.stringify(tier))
+      }
+      assert.equal((await h.raw('status', body({}))).status, 200, 'status still answers on free')
+    }
+    assert.equal(stockText(w), before); assert.equal(phases(w).length, 0); assert.equal(flag(w), 0)
+    for (const tier of ['paid', undefined, 'garbage', '']) {
+      const refused = await harness(w, app, { tier }).raw('begin', body({ actorUserId: ACTOR_USER, requestId: 'cutover_paid_1' }))
+      assert.notEqual(refused.json && refused.json.refusal, 'plan_tier_free', 'tier ' + JSON.stringify(tier) + ' is not free')
+    }
     w.raw.close()
   })
 

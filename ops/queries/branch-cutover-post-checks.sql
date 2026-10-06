@@ -96,7 +96,7 @@ SELECT
       OR branch_name IS NOT CASE branch_id WHEN op.src THEN op.src_name ELSE op.tgt_name END) AS movements_off,
   (SELECT count(*) FROM fl LEFT JOIN branch_batch_stock s ON s.batch_id = fl.id_after AND s.branch_id = op.tgt WHERE s.quantity IS NOT fl.qa) AS fold_lots_off,
   (SELECT count(*) FROM fl JOIN product_batches b ON b.id = fl.id WHERE fl.recost = 1 AND b.unit_cost_usd IS NOT fl.ca) AS fold_costs_off,
-  (SELECT count(*) FROM product_batches b WHERE b.updated_at >= op.began_t AND julianday(b.updated_at) >= julianday(op.began_t)
+  (SELECT count(*) FROM product_batches b WHERE b.updated_at >= op.began_t AND julianday(b.updated_at) >= julianday(op.began)
     AND NOT EXISTS (SELECT 1 FROM fl WHERE fl.id = b.id AND fl.recost = 1)) AS batches_changed_off,
   (SELECT count(*) FROM sales x WHERE +x.branch_id IN (op.src, op.tgt) AND (x.branch_name IS NULL OR (x.branch_name NOT IN (op.src_name, op.tgt_name) AND trim(x.branch_name, char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279)) = '')))
     + (SELECT count(*) FROM returns x WHERE x.branch_id IN (op.src, op.tgt) AND (x.branch_name IS NULL OR (x.branch_name NOT IN (op.src_name, op.tgt_name) AND trim(x.branch_name, char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279)) = '')))
@@ -118,6 +118,6 @@ SELECT
   (SELECT count(*) FROM branch_batch_stock s WHERE s.branch_id IN (op.src, op.tgt) AND NOT EXISTS (SELECT 1 FROM product_batches b WHERE b.id = s.batch_id))
     + (SELECT count(*) FROM branch_stock x WHERE x.branch_id IN (op.src, op.tgt) AND NOT EXISTS (SELECT 1 FROM products p WHERE p.id = x.product_id))
     + (SELECT count(*) FROM rc WHERE NOT EXISTS (SELECT 1 FROM transfer_operation_members m WHERE m.receipt_id = rc.id))
-    + (SELECT count(*) FROM stock_transfers t WHERE t.created_at >= op.began_t AND julianday(t.created_at) >= julianday(op.began_t)
+    + (SELECT count(*) FROM stock_transfers t WHERE t.created_at >= op.began_t AND julianday(t.created_at) >= julianday(op.began)
       AND NOT EXISTS (SELECT 1 FROM rc WHERE rc.id = t.receipt_id)) AS orphans
 FROM one LEFT JOIN op

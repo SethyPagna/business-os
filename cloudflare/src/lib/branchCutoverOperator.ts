@@ -193,7 +193,16 @@ async function runStatus(db: D1Compat, body: Record<string, unknown>): Promise<O
 }
 
 /** Executes one operator action. Never throws: every failure is a fixed code (retryable ones are 503). */
-export async function runBranchCutoverOperatorAction(env: { DB: D1Database }, action: BranchCutoverOperatorAction, body: Record<string, unknown>): Promise<OperatorOutcome> {
+/**
+ * The consolidation moves every Shop row in many batches: on the free plan's per-invocation limits it cannot finish, so begin
+ * and resume are refused there (inspect, status, abort and finalize stay available). Tier semantics are lib/planTier.ts's: only an
+ * explicit 'free' is free; unset or anything else is paid.
+ */
+export const BRANCH_CUTOVER_PAID_ONLY_ACTIONS: ReadonlyArray<BranchCutoverOperatorAction> = ['begin', 'resume']
+export const branchCutoverPlanIsFree = (env: { PLAN_TIER?: unknown }): boolean => String(env?.PLAN_TIER ?? '').trim().toLowerCase() === 'free'
+
+export async function runBranchCutoverOperatorAction(env: { DB: D1Database; PLAN_TIER?: string }, action: BranchCutoverOperatorAction, body: Record<string, unknown>): Promise<OperatorOutcome> {
+  if (BRANCH_CUTOVER_PAID_ONLY_ACTIONS.includes(action) && branchCutoverPlanIsFree(env)) return refused('plan_tier_free')
   try {
     const db = getDb(env)
     if (action === 'inspect') return await runInspect(db, body)

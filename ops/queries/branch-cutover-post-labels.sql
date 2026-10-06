@@ -38,7 +38,7 @@ SELECT
       + coalesce(unicode(substr(x.branch_name, 3, 1)), 0) * 7 + coalesce(unicode(substr(x.branch_name, 4, 1)), 0) * 11 + coalesce(unicode(substr(x.branch_name, -1, 1)), 0) * 13
       + coalesce(unicode(substr(x.branch_name, -2, 1)), 0) * 17 + coalesce(unicode(substr(x.branch_name, -3, 1)), 0) * 19 END END) % 2147483647) + 2147483647) % 2147483647) % 2147483647)), 0) % 2147483647
     FROM op, inventory_movements x WHERE +x.branch_id IN (op.src, op.tgt)
-      AND (x.created_at < op.began_t OR x.created_at IS NULL OR julianday(x.created_at) IS NULL OR julianday(x.created_at) < julianday(op.began_t))) AS inventory_movements,
+      AND (x.created_at < op.began_t OR x.created_at IS NULL OR julianday(x.created_at) IS NULL OR julianday(x.created_at) < julianday(op.began))) AS inventory_movements,
   (SELECT COALESCE(SUM((((((x.id * 16 + 3) % 2147483647) + 2147483647) % 2147483647 * 48271 % 2147483647 + 1) * ((((CASE WHEN x.branch_name IS NULL
       OR x.branch_name = CASE x.branch_id WHEN op.src THEN op.src_name ELSE op.tgt_name END OR trim(x.branch_name, char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279)) = '' THEN 0 ELSE CASE WHEN x.branch_name IS NULL THEN 1 ELSE length(x.branch_name) * 1000003 + coalesce(unicode(x.branch_name), 0) * 3 + coalesce(unicode(substr(x.branch_name, 2, 1)), 0) * 5
       + coalesce(unicode(substr(x.branch_name, 3, 1)), 0) * 7 + coalesce(unicode(substr(x.branch_name, 4, 1)), 0) * 11 + coalesce(unicode(substr(x.branch_name, -1, 1)), 0) * 13
@@ -54,13 +54,13 @@ SELECT
       + coalesce(unicode(substr(x.from_branch_name, 3, 1)), 0) * 7 + coalesce(unicode(substr(x.from_branch_name, 4, 1)), 0) * 11 + coalesce(unicode(substr(x.from_branch_name, -1, 1)), 0) * 13
       + coalesce(unicode(substr(x.from_branch_name, -2, 1)), 0) * 17 + coalesce(unicode(substr(x.from_branch_name, -3, 1)), 0) * 19 END END) % 2147483647) + 2147483647) % 2147483647) % 2147483647)), 0) % 2147483647
     FROM op, stock_transfers x WHERE x.from_branch_id IN (op.src, op.tgt)
-      AND (x.created_at < op.began_t OR x.created_at IS NULL OR julianday(x.created_at) IS NULL OR julianday(x.created_at) < julianday(op.began_t))) AS from_stock_transfers,
+      AND (x.created_at < op.began_t OR x.created_at IS NULL OR julianday(x.created_at) IS NULL OR julianday(x.created_at) < julianday(op.began))) AS from_stock_transfers,
   (SELECT COALESCE(SUM((((((x.id * 16 + 6) % 2147483647) + 2147483647) % 2147483647 * 48271 % 2147483647 + 1) * ((((CASE WHEN x.to_branch_name IS NULL
       OR x.to_branch_name = CASE x.to_branch_id WHEN op.src THEN op.src_name ELSE op.tgt_name END OR trim(x.to_branch_name, char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279)) = '' THEN 0 ELSE CASE WHEN x.to_branch_name IS NULL THEN 1 ELSE length(x.to_branch_name) * 1000003 + coalesce(unicode(x.to_branch_name), 0) * 3 + coalesce(unicode(substr(x.to_branch_name, 2, 1)), 0) * 5
       + coalesce(unicode(substr(x.to_branch_name, 3, 1)), 0) * 7 + coalesce(unicode(substr(x.to_branch_name, 4, 1)), 0) * 11 + coalesce(unicode(substr(x.to_branch_name, -1, 1)), 0) * 13
       + coalesce(unicode(substr(x.to_branch_name, -2, 1)), 0) * 17 + coalesce(unicode(substr(x.to_branch_name, -3, 1)), 0) * 19 END END) % 2147483647) + 2147483647) % 2147483647) % 2147483647)), 0) % 2147483647
     FROM op, stock_transfers x WHERE x.to_branch_id IN (op.src, op.tgt)
-      AND (x.created_at < op.began_t OR x.created_at IS NULL OR julianday(x.created_at) IS NULL OR julianday(x.created_at) < julianday(op.began_t))) AS to_stock_transfers,
+      AND (x.created_at < op.began_t OR x.created_at IS NULL OR julianday(x.created_at) IS NULL OR julianday(x.created_at) < julianday(op.began))) AS to_stock_transfers,
   (SELECT COALESCE(SUM((((((x.id * 16 + 7) % 2147483647) + 2147483647) % 2147483647 * 48271 % 2147483647 + 1) * ((((CASE WHEN x.branch_name IS NULL
       OR x.branch_name = CASE x.branch_id WHEN op.src THEN op.src_name ELSE op.tgt_name END OR trim(x.branch_name, char(9, 10, 11, 12, 13, 32, 160, 5760, 8192, 8193, 8194, 8195, 8196, 8197, 8198, 8199, 8200, 8201, 8202, 8232, 8233, 8239, 8287, 12288, 65279)) = '' THEN 0 ELSE CASE WHEN x.branch_name IS NULL THEN 1 ELSE length(x.branch_name) * 1000003 + coalesce(unicode(x.branch_name), 0) * 3 + coalesce(unicode(substr(x.branch_name, 2, 1)), 0) * 5
       + coalesce(unicode(substr(x.branch_name, 3, 1)), 0) * 7 + coalesce(unicode(substr(x.branch_name, 4, 1)), 0) * 11 + coalesce(unicode(substr(x.branch_name, -1, 1)), 0) * 13
