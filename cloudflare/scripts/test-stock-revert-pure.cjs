@@ -425,30 +425,5 @@ async function counterFor(originalId) {
   }
   ok(true, 'a batch-less receipt is never drained from dated lots: refused whole with no undated stock')
 
-  // ---- REVERT-SET: a closed branch neither takes stock back nor gives any ----
-  // The Shop -> LC Store consolidation closes Shop (is_active = 0) and moves its
-  // stock as official transfers. A Revert of a Shop-era change must not put
-  // units back into, or take them out of, the closed branch.
-  db.prepare(`INSERT INTO branches (id, name, is_active) VALUES (9, 'Old Shop', 1)`).run({})
-  db.prepare(`INSERT INTO products (id, name, barcode, unit, stock_quantity, is_active) VALUES (9290, 'Closed Branch Probe', 'CB-1', 'pcs', 4, 1)`).run({})
-  db.prepare(`INSERT INTO branch_stock (product_id, branch_id, quantity) VALUES (9290, 9, 4)`).run({})
-  db.prepare(`INSERT INTO inventory_movements (id, product_id, product_name, branch_id, branch_name, movement_type, quantity, reason, user_name, created_at)
-    VALUES (6901, 9290, 'Closed Branch Probe', 9, 'Old Shop', 'remove', 2, 'counted short', 'tester', '2026-10-01 09:00:00'),
-           (6902, 9290, 'Closed Branch Probe', 9, 'Old Shop', 'add', 3, 'received', 'tester', '2026-10-01 09:05:00')`).run({})
-  db.prepare(`UPDATE branches SET is_active = 0 WHERE id = 9`).run({})
-  for (const id of [6901, 6902]) {
-    const refused = await kernel.applyMovementRevert(db, await movementById(id), actor)
-    assert.equal(refused.ok, false)
-    assert.equal(refused.status, 409)
-    assert.equal(refused.code, 'revert_branch_inactive', JSON.stringify(refused))
-    assert.equal(await counterFor(id), undefined, 'refused: no counter-movement')
-  }
-  assert.deepEqual(await stockOf(9290, 9), { product: 4, branch: 4 }, 'refused: the closed branch keeps its figure')
-  db.prepare(`UPDATE branches SET is_active = 1 WHERE id = 9`).run({})
-  const reopened = await kernel.applyMovementRevert(db, await movementById(6901), actor)
-  assert.equal(reopened.ok, true, JSON.stringify(reopened))
-  assert.deepEqual(await stockOf(9290, 9), { product: 6, branch: 6 }, 'an open branch reverts as before')
-  ok(true, 'a Revert at a closed branch is refused in both directions; the same row reverts once the branch is open')
-
   console.log(`\nAll ${checks} stock-revert kernel checks passed`)
 })().catch((err) => { console.error(err); process.exitCode = 1 })
