@@ -95,7 +95,7 @@ async function main() {
     await db.prepare(`CREATE TABLE product_batches(id INTEGER PRIMARY KEY AUTOINCREMENT,variant_product_id INTEGER,
       batch_key TEXT,lot_code TEXT,received_at TEXT,is_active INTEGER,notes TEXT,batch_number INTEGER,
       supplier_id INTEGER,supplier_name TEXT,unit_cost_usd REAL,payment_status TEXT,credit_due_date TEXT,
-      received_quantity REAL,received_branch_id INTEGER,received_cost_usd REAL,
+      received_quantity REAL,received_branch_id INTEGER, received_branch_name TEXT,received_cost_usd REAL,
       UNIQUE(variant_product_id,batch_key),UNIQUE(variant_product_id,batch_number))`).run()
     await db.prepare('CREATE TABLE branch_batch_stock(batch_id INTEGER,branch_id INTEGER,quantity REAL,updated_at TEXT,UNIQUE(batch_id,branch_id))').run()
     await db.prepare(`CREATE TABLE inventory_movements(id INTEGER PRIMARY KEY AUTOINCREMENT,product_id INTEGER,

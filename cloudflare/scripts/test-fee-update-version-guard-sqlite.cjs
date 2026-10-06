@@ -123,6 +123,7 @@ function reset() {
       fee_date TEXT NOT NULL,
       sale_id INTEGER,
       branch_id INTEGER,
+      branch_name TEXT,
       delivery_contact_id INTEGER,
       notes TEXT,
       created_by INTEGER,
@@ -184,6 +185,18 @@ async function main() {
     assert.equal(result.status, 200)
     assert.equal(result.body.fee.amount_usd, 1.2345)
     assert.equal(result.body.fee.amount_khr, 21)
+  })
+  await check('CUTOVER-LD: an edit keeps the label the fee was recorded under after the rename; a branch change re-stamps it', async () => {
+    sqlite.exec("UPDATE fees SET branch_name='Shop' WHERE id=1; UPDATE branches SET name='Old Shop' WHERE id=2; INSERT INTO branches (id, name, is_active) VALUES (3, 'LC Store', 1)")
+    let result = await update({ label: 'renamed label', expectedUpdatedAt: row().updated_at })
+    assert.equal(result.status, 200, JSON.stringify(result.body))
+    assert.equal(sqlite.prepare('SELECT branch_name FROM fees WHERE id=1').get().branch_name, 'Shop', 'same branch: the recorded label stays')
+    result = await update({ label: 'renamed label', branch_id: 2, expectedUpdatedAt: row().updated_at })
+    assert.equal(result.status, 200, JSON.stringify(result.body))
+    assert.equal(sqlite.prepare('SELECT branch_name FROM fees WHERE id=1').get().branch_name, 'Shop', 'same branch id sent again: still the recorded label')
+    result = await update({ label: 'moved', branch_id: 3, expectedUpdatedAt: row().updated_at })
+    assert.equal(result.status, 200, JSON.stringify(result.body))
+    assert.equal(sqlite.prepare('SELECT branch_name FROM fees WHERE id=1').get().branch_name, 'LC Store', 'a different branch: stamped with that branch\'s name now')
   })
   await check('v1 malformed supplied money and unknown versions produce no writes', async () => {
     const before = row()

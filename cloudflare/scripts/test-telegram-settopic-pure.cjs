@@ -101,7 +101,7 @@ function makeDb(settings) {
     CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT, updated_at TEXT);
     CREATE TABLE branches (id INTEGER PRIMARY KEY, name TEXT);
     CREATE TABLE returns (id INTEGER PRIMARY KEY, return_number TEXT, status TEXT, return_scope TEXT, receipt_number TEXT,
-      customer_name TEXT, supplier_name TEXT, branch_id INTEGER, total_refund_usd REAL, total_refund_khr REAL);
+      customer_name TEXT, supplier_name TEXT, branch_id INTEGER, total_refund_usd REAL, total_refund_khr REAL, branch_name TEXT);
     CREATE TABLE return_items (id INTEGER PRIMARY KEY, return_id INTEGER, product_id INTEGER, branch_id INTEGER, batch_id INTEGER,
       product_name TEXT, quantity REAL, total_usd REAL, stock_action TEXT);
     CREATE TABLE product_batches (id INTEGER PRIMARY KEY, lot_code TEXT, received_at TEXT);
@@ -109,9 +109,9 @@ function makeDb(settings) {
     CREATE TABLE products (id INTEGER PRIMARY KEY, stock_quantity REAL);
     CREATE TABLE return_replacement_items (id INTEGER PRIMARY KEY, return_id INTEGER, product_name TEXT, quantity REAL);
     INSERT INTO branches VALUES (1, 'Store');
-    INSERT INTO returns VALUES (5, 'RET-0005', 'cancelled', 'customer', '20260927-101500', 'Dara', NULL, 1, 12.5, 0);
-    INSERT INTO returns VALUES (6, 'RET-0006', 'completed', 'customer', '20260927-111500', 'Sokha', NULL, 1, 4, 0);
-    INSERT INTO returns VALUES (7, 'SRET-0007', 'cancelled', 'supplier', NULL, NULL, 'Acme', 1, 0, 0);
+    INSERT INTO returns VALUES (5, 'RET-0005', 'cancelled', 'customer', '20260927-101500', 'Dara', NULL, 1, 12.5, 0, NULL);
+    INSERT INTO returns VALUES (6, 'RET-0006', 'completed', 'customer', '20260927-111500', 'Sokha', NULL, 1, 4, 0, NULL);
+    INSERT INTO returns VALUES (7, 'SRET-0007', 'cancelled', 'supplier', NULL, NULL, 'Acme', 1, 0, 0, NULL);
     INSERT INTO products VALUES (1, 9);
     INSERT INTO branch_stock VALUES (1, 1, 1, 9);
     INSERT INTO return_items VALUES (1, 6, 1, 1, NULL, 'Face cream', 1, 4, 'restock');
@@ -422,6 +422,18 @@ globalThis.fetch = async (url, init) => {
     dbHolder.db = makeDb({ ...routed, telegram_language: 'km' }); sent = []
     await telegram.sendReturnStatusTelegramEvents(env, [5], 'za')
     assert.equal(sent[0].text.split('\n')[0], '🚫 បានបោះបង់ការប្រគល់មកវិញ')
+
+    // CUTOVER-LD: old records are never relabelled. The return carries the branch name it was recorded under
+    // (returns.branch_name); after Shop -> "Old Shop" / Warehouse -> "LC Store" the directory says something else, and
+    // the summary must still say Shop. A blank snapshot is the only case that reads the live name.
+    dbHolder.db = makeDb(routed); sent = []
+    dbHolder.db.sql.exec("UPDATE returns SET branch_name='Shop' WHERE id IN (5, 6); UPDATE branches SET name='Old Shop' WHERE id=1")
+    await telegram.sendReturnStatusTelegramEvents(env, [5], 'za')
+    assert.ok(sent[0].text.includes('Shop') && !sent[0].text.includes('Old Shop'), `a return recorded at Shop still says Shop:\n${sent[0].text}`)
+    dbHolder.db.sql.exec("UPDATE returns SET branch_name=NULL WHERE id=5"); sent = []
+    await telegram.sendReturnStatusTelegramEvents(env, [5], 'za')
+    assert.ok(sent[0].text.includes('Old Shop'), `a blank snapshot falls back to the live name:\n${sent[0].text}`)
+    pass('return status summary: the branch is the name AT THE TIME (returns.branch_name); the live name only fills a blank')
     pass(`return cancel/restore: bilingual headings, returns topic ${TOPIC.returns} for customer, stock for supplier; sample:\n${cancelled.text}`)
 
     // ---- 6. wiring ------------------------------------------------------------------

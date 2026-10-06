@@ -1112,11 +1112,23 @@ const REPLAY_MUTATION_ORDER = {
   redo: ['products', 'batches', 'branchStock', 'branchBatchStock'],
 } as const
 
+// Display-only branch labels (0236) that replay neither compares nor restores. A column that arrives
+// after a postimage was captured must not change the postimage's meaning, or every older session
+// refuses Undo with "stock changed" (the same trap members.branch_name hit in 0226). A label is never
+// stock, so replay leaves it out of the compared state and never writes it: the retained lot below keeps
+// its label through Undo and Redo (a later receipt that reuses the lot writes both id and label again).
+const REPLAY_DISPLAY_ONLY_COLUMNS: Readonly<Record<string, readonly string[]>> = {
+  batches: ['received_branch_name'],
+  movements: ['addressed_branch_name'],
+}
+
 async function stockReplayStateSql(env: Env, memberBranchNamesCaptured = true): Promise<string> {
   const fields: string[] = []
   for (const [key, [table, where]] of Object.entries(REPLAY_TABLES)) {
+    const displayOnly = REPLAY_DISPLAY_ONLY_COLUMNS[key] ?? []
     const columns = [...await tableColumns(env, table)]
-      .filter(column => memberBranchNamesCaptured || key !== 'members' || column !== 'branch_name').sort()
+      .filter(column => memberBranchNamesCaptured || key !== 'members' || column !== 'branch_name')
+      .filter(column => !displayOnly.includes(column)).sort()
     // Keep each json_object below SQLite's older function-argument ceiling.
     let row = "json('{}')"
     for (let i = 0; i < columns.length; i += 40) row = `json_set(${row},${columns.slice(i, i + 40).map(c => `'$.${c}',t."${c}"`).join(',')})`

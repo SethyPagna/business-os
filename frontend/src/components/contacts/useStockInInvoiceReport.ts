@@ -13,6 +13,8 @@ export type InvoiceGroup = {
   lines_without_cost: number
   credit_lines: number
   branch_ids?: string | null
+  /** The branch name each lot recorded when it was received (a retired branch keeps its old name). */
+  branch_labels?: Array<{ id: number; name?: string | null }>
 }
 
 export type ReportTotals = {

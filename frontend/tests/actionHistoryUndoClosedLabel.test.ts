@@ -78,5 +78,22 @@ test('CONTROL: the marker on a row that is still undoable is not shown as closed
   assert.doesNotMatch(html, /Undo closed/)
 })
 
+// The branch consolidation closes Undo with its own two markers (cloudflare/src/lib/branchCutoverHistory.ts); each
+// says why in both packs, and a different recorded row still reads plain "Recorded".
+for (const [marker, key] of [
+  ['undo_closed:branch_retired', 'history_undo_closed_branch_retired'],
+  ['undo_closed:branch_cutover_move', 'history_undo_closed_branch_cutover_move'],
+] as const) {
+  test(`${marker}: a recorded row says why Undo is closed, in English and in Khmer from the pack`, () => {
+    assert.ok(en[key] && km[key] && en[key] !== km[key] && /[ក-៿]/.test(km[key]), `${key} is in both packs, and the Khmer is Khmer`)
+    assert.ok(render(en, [row(7, 'Moved stock', { last_error: marker })]).includes(en[key]))
+    assert.ok(render(km, [row(7, 'Moved stock', { last_error: marker })]).includes(km[key]))
+    assert.doesNotMatch(render(en, [row(7, 'Moved stock', { last_error: marker })]), />Recorded</)
+  })
+  test(`CONTROL ${marker}: the marker on a row that is still undoable is not shown as closed`, () => {
+    assert.doesNotMatch(render(en, [row(8, 'Moved stock', { status: 'undoable', last_error: marker })]), /Undo closed/)
+  })
+}
+
 console.log(failed ? `\n${failed} test(s) failed` : '\nall action history undo-closed label tests passed')
 process.exitCode = failed ? 1 : 0

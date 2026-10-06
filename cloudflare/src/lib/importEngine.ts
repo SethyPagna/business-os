@@ -6430,6 +6430,7 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
                           received_quantity = COALESCE(received_quantity, 0) + @qty,
                           received_cost_usd = ROUND(COALESCE(received_cost_usd, 0) + COALESCE(@receiptTotalCostUsd, 0), 4),
                           received_branch_id = COALESCE(received_branch_id, @branchId),
+                          received_branch_name = CASE WHEN received_branch_id IS NULL THEN (SELECT name FROM branches WHERE id = @branchId) ELSE received_branch_name END,
                           updated_at = @updatedAt WHERE id = @id`,
                   params: {
                     id: matchedBatch.id, receivedAt: d.received_date, updatedAt: nowIso,
@@ -6447,8 +6448,8 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
                 // Keep the imported label for display, but use the shared
                 // price/baseline identity for receipt matching.
                 group.push({
-                  sql: `INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, expiry_date, received_at, is_active, notes, batch_number, unit_cost_usd, received_quantity, received_cost_usd, received_branch_id, created_at, updated_at)
-                        VALUES (@batchId, @productId, @batchKey, @lotCode, NULL, @receivedAt, 1, @notes, (SELECT COALESCE(MAX(batch_number), 0) + 1 FROM product_batches WHERE variant_product_id = @productId), @unitCostUsd, @qty, COALESCE(@receiptTotalCostUsd, 0), @branchId, @createdAt, @createdAt)`,
+                  sql: `INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, expiry_date, received_at, is_active, notes, batch_number, unit_cost_usd, received_quantity, received_cost_usd, received_branch_id, received_branch_name, created_at, updated_at)
+                        VALUES (@batchId, @productId, @batchKey, @lotCode, NULL, @receivedAt, 1, @notes, (SELECT COALESCE(MAX(batch_number), 0) + 1 FROM product_batches WHERE variant_product_id = @productId), @unitCostUsd, @qty, COALESCE(@receiptTotalCostUsd, 0), @branchId, (SELECT name FROM branches WHERE id = @branchId), @createdAt, @createdAt)`,
                   params: {
                     batchId,
                     productId: r.existingId,
@@ -6606,8 +6607,8 @@ export async function runImportApply(env: Env, jobId: string, queueLatencyMs?: n
             nextBatchId += 1
             const batchId = nextBatchId
             rowWriteGroup.push({
-                sql: `INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, expiry_date, received_at, is_active, notes, batch_number, unit_cost_usd, received_quantity, received_cost_usd, received_branch_id, created_at, updated_at)
-                      VALUES (@batchId, @productId, @batchKey, @lotCode, NULL, @receivedAt, 1, @notes, 1, @unitCostUsd, @qty, COALESCE(@receiptTotalCostUsd, 0), @branchId, @createdAt, @createdAt)`,
+                sql: `INSERT INTO product_batches (id, variant_product_id, batch_key, lot_code, expiry_date, received_at, is_active, notes, batch_number, unit_cost_usd, received_quantity, received_cost_usd, received_branch_id, received_branch_name, created_at, updated_at)
+                      VALUES (@batchId, @productId, @batchKey, @lotCode, NULL, @receivedAt, 1, @notes, 1, @unitCostUsd, @qty, COALESCE(@receiptTotalCostUsd, 0), @branchId, (SELECT name FROM branches WHERE id = @branchId), @createdAt, @createdAt)`,
                 params: {
                   batchId,
                   productId: newId,

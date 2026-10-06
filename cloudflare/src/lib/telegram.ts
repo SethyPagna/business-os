@@ -22,6 +22,12 @@ import {
 export { shiftExpenses, shiftFilters, summarizeShiftCash }
 import type { Env } from '../index'
 
+// Historical label (owner rule: old records are never relabelled): the row's own branch-name snapshot
+// when it has a non-blank one, else the live directory name. The SAME expression as
+// branchHistoryNameSql in lib/stockInSessionsQuery.ts; test-cutover-ld-historical-readers-native.cjs pins every copy.
+const branchHistoryNameSql = (snapshot: string, fallback: string): string =>
+  `CASE WHEN trim(COALESCE(${snapshot},''),char(9,10,11,12,13,32,160,5760,8192,8193,8194,8195,8196,8197,8198,8199,8200,8201,8202,8232,8233,8239,8287,12288,65279))<>'' THEN ${snapshot} ELSE ${fallback} END`
+
 // `returns` (owner, 27 Sep 2026): customer returns -- recorded, cancelled and
 // restored -- get their own switch and their own forum topic. Until then a
 // customer return was sent as a `sales` event, into the Sale invoices topic.
@@ -3029,7 +3035,7 @@ export async function sendReturnStatusTelegramEvents(env: Env, returnIds: readon
   if (!ids.length) return
   const rows = await getDb(env).prepare(`
     SELECT r.id, r.return_number, r.status, r.return_scope, r.receipt_number, r.customer_name, r.supplier_name,
-      b.name AS branch_name, r.total_refund_usd, r.total_refund_khr
+      ${branchHistoryNameSql('r.branch_name', 'b.name')} AS branch_name, r.total_refund_usd, r.total_refund_khr
     FROM returns r LEFT JOIN branches b ON b.id = r.branch_id
     WHERE r.id IN (SELECT value FROM json_each(@ids)) ORDER BY r.id
   `).all<ReturnStatusDbRow>({ ids: JSON.stringify(ids) })

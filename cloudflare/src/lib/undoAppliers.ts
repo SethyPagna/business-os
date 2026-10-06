@@ -549,6 +549,29 @@ export const STOCK_SESSION_CLOSED_AUDIT_ACTION = 'stock_session_undo_closed'
 export const isUndoClosedByMerge = (row: { reversible?: unknown; last_error?: unknown } | null | undefined): boolean =>
   Boolean(row) && !Number(row?.reversible || 0) && row?.last_error === STOCK_SESSION_UNDO_CLOSED_BY_MERGE
 
+// The branch consolidation closes Undo for entries that could write stock back into the retired
+// branch (marker undo_closed:branch_retired) and for its own ~3,400 move entries (marker
+// undo_closed:branch_cutover_move). Same shape as the merge closure above: a recorded row with
+// reversible = 0; the replay entry points answer 409 with the code instead of a generic
+// "recorded only" 400, and the default History list hides the move entries.
+// The markers, codes and messages are lib/branchCutoverHistory.ts's (the cutover writes the markers); they are
+// restated here, not imported, because this module's test harnesses wire its imports by name.
+// test-cutover-ld-historical-readers-native.cjs pins every string equal to that module's constants.
+const BRANCH_CUTOVER_CLOSURES: Readonly<Record<string, { code: string; message: string }>> = {
+  'undo_closed:branch_retired': {
+    code: 'undo_closed_branch_retired',
+    message: 'Undo closed: this was done at Shop before it was merged into LC Store. Make a new change instead.',
+  },
+  'undo_closed:branch_cutover_move': {
+    code: 'undo_closed_branch_cutover_move',
+    message: 'Undo closed: part of the branch consolidation (Shop → LC Store).',
+  },
+}
+export function branchCutoverClosureRefusal(row: { reversible?: unknown; last_error?: unknown } | null | undefined): { code: string; message: string } | null {
+  if (!row || Number(row.reversible || 0)) return null
+  return Object.hasOwn(BRANCH_CUTOVER_CLOSURES, String(row.last_error)) ? BRANCH_CUTOVER_CLOSURES[String(row.last_error)] : null
+}
+
 export type OpenStockSession = { operationId: string; historyId: number; status: string }
 
 const OPEN_STOCK_SESSION_WHERE = `h.status IN ('undoable', 'redoable')

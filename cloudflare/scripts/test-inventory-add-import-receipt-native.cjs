@@ -33,9 +33,11 @@ function setup() {
     CREATE TABLE products(id INTEGER PRIMARY KEY,stock_quantity REAL DEFAULT 0,cost_price_usd REAL DEFAULT 99,
       purchase_price_usd REAL DEFAULT 99,cost_price_khr REAL DEFAULT 400,purchase_price_khr REAL DEFAULT 400,updated_at TEXT);
     INSERT INTO products(id) VALUES(1);
+    CREATE TABLE branches(id INTEGER PRIMARY KEY,name TEXT);
+    INSERT INTO branches VALUES(1,'Shop'),(2,'Warehouse');
     CREATE TABLE product_batches(id INTEGER PRIMARY KEY AUTOINCREMENT,variant_product_id INTEGER,batch_key TEXT,lot_code TEXT,
       received_at TEXT,expiry_date TEXT,is_active INTEGER,notes TEXT,batch_number INTEGER,supplier_id INTEGER,supplier_name TEXT,
-      unit_cost_usd REAL,payment_status TEXT,credit_due_date TEXT,received_quantity REAL,received_branch_id INTEGER,
+      unit_cost_usd REAL,payment_status TEXT,credit_due_date TEXT,received_quantity REAL,received_branch_id INTEGER, received_branch_name TEXT,
       received_cost_usd REAL,updated_at TEXT,UNIQUE(variant_product_id,batch_key),UNIQUE(variant_product_id,batch_number));
     CREATE TABLE branch_stock(product_id INTEGER,branch_id INTEGER,quantity REAL,UNIQUE(product_id,branch_id));
     CREATE TABLE branch_batch_stock(batch_id INTEGER,branch_id INTEGER,quantity REAL,updated_at TEXT,UNIQUE(batch_id,branch_id));

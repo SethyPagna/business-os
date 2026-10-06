@@ -170,22 +170,33 @@ async function main() {
   })
 
   await check('existing readers unchanged: fees detail as D1 maps it; alias-before-star control discriminates', () => {
+    // CUTOVER-LD: the fees reader is snapshot-first (fees.branch_name, else the live name), so it names fees.branch_name.
+    // The pre-0236 form of the same reader is the live-name one; the new reader must return the identical object for
+    // a row with no label, and prefer the label once there is one.
     const source = fs.readFileSync(path.join(root, 'src/routes/fees.ts'), 'utf8')
-    const detail = [...source.matchAll(/`(\s*SELECT f\.\*, s\.receipt_number AS sale_receipt_number, b\.name AS branch_name,[\s\S]*?)`/g)]
+    const helper = /const branchHistoryNameSql = \(snapshot: string, fallback: string\): string =>\r?\n\s*`([^`]*)`/.exec(source)
+    assert.ok(helper, 'routes/fees.ts carries the snapshot-first expression')
+    const feeExpression = helper[1].replaceAll('${snapshot}', 'f.branch_name').replaceAll('${fallback}', 'b.name')
+    const detailTemplate = [...source.matchAll(/`(\s*SELECT f\.\*, s\.receipt_number AS sale_receipt_number, \$\{FEE_BRANCH_NAME_SQL\} AS branch_name,[\s\S]*?)`/g)]
       .map((m) => m[1]).find((sql) => /WHERE f\.id = @id\s*$/.test(sql))
-    assert.ok(detail, 'found the fees detail reader in routes/fees.ts')
-    const control = detail.replace('SELECT f.*, s.receipt_number AS sale_receipt_number, b.name AS branch_name,', 'SELECT b.name AS branch_name, f.*, s.receipt_number AS sale_receipt_number,')
-    assert.notEqual(control, detail)
+    assert.ok(detailTemplate, 'found the fees detail reader in routes/fees.ts')
+    const detail = detailTemplate.replace('${FEE_BRANCH_NAME_SQL}', feeExpression)
+    const legacy = detailTemplate.replace('${FEE_BRANCH_NAME_SQL}', 'b.name')
+    const control = legacy.replace('SELECT f.*, s.receipt_number AS sale_receipt_number, b.name AS branch_name,', 'SELECT b.name AS branch_name, f.*, s.receipt_number AS sale_receipt_number,')
+    assert.notEqual(control, legacy)
     const raw = populated()
     const id = raw.prepare('SELECT id FROM fees WHERE notes = ?').get('ថ្លៃដឹក').id
-    const [before] = d1All(raw, detail, { id })
+    const [before] = d1All(raw, legacy, { id })
     const [controlBefore] = d1All(raw, control, { id })
     assert.equal(before.branch_name, 'Shop')
     assert.equal(controlBefore.branch_name, 'Shop')
     applyAtomic(raw, labelSql)
     const [afterRow] = d1All(raw, detail, { id })
-    assert.deepEqual(afterRow, before, 'the fees reader returns the same object (same keys, same live branch name)')
+    assert.deepEqual(afterRow, before, 'the fees reader returns the same object (same keys, same live branch name) for a row with no label')
     assert.equal(d1All(raw, control, { id })[0].branch_name, null, 'control: an alias placed before f.* would now read the NULL label')
+    raw.exec("UPDATE fees SET branch_name='Shop (at the time)'")
+    raw.exec("UPDATE branches SET name='Old Shop' WHERE name='Shop'")
+    assert.equal(d1All(raw, detail, { id })[0].branch_name, 'Shop (at the time)', 'a labelled fee keeps its label after the branch is renamed')
     raw.close()
   })
 
