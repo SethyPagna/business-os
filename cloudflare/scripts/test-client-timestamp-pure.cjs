@@ -1,6 +1,7 @@
 // Regression test for lib/clientTimestamp.ts -- bounded trust for an
 // offline replay's client-supplied sale timestamp (the Part-77 "offline
-// sale timestamps recorded at sync time" finding). Behavior + the wiring
+// sale timestamps recorded at sync time" finding), bounded on both sides since
+// N3 (offline retired, so no backdating). Behavior + the wiring
 // source-locks: the sales INSERT COALESCEs the sanitized value, and the
 // explicit legacy recovery preserves the original timestamp without restamping.
 //
@@ -18,7 +19,7 @@ const tsPath = path.join(tmpDir, 'clientTimestamp.ts')
 fs.writeFileSync(tsPath, fs.readFileSync(srcPath, 'utf8'))
 const tscBin = path.join(cloudflareRoot, 'node_modules', 'typescript', 'bin', 'tsc')
 execSync(`node ${tscBin} --module commonjs --target es2020 --outDir ${tmpDir} ${tsPath}`, { cwd: tmpDir, stdio: 'inherit' })
-const { sanitizeClientCreatedAt, CLIENT_TIMESTAMP_MAX_FUTURE_SKEW_MS } = require(path.join(tmpDir, 'clientTimestamp.js'))
+const { sanitizeClientCreatedAt, CLIENT_TIMESTAMP_MAX_FUTURE_SKEW_MS, CLIENT_TIMESTAMP_MAX_PAST_SKEW_MS } = require(path.join(tmpDir, 'clientTimestamp.js'))
 
 let failed = 0
 function check(name, fn) {
@@ -35,20 +36,20 @@ function check(name, fn) {
 const NOW = Date.parse('2026-08-31T10:00:00Z')
 
 check('a valid ISO stamp normalizes to CURRENT_TIMESTAMP shape (space, UTC, no ms)', () => {
-  assert.equal(sanitizeClientCreatedAt('2026-08-30T23:50:12.345Z', NOW), '2026-08-30 23:50:12')
+  assert.equal(sanitizeClientCreatedAt('2026-08-31T09:58:12.345Z', NOW), '2026-08-31 09:58:12')
 })
 
 check('the normalized shape sorts lexicographically with CURRENT_TIMESTAMP rows', () => {
   // "T" (0x54) > " " (0x20): a raw ISO string would pin after every
   // same-day server row. The sanitizer must never emit a "T".
-  const out = sanitizeClientCreatedAt('2026-08-30T01:00:00Z', NOW)
+  const out = sanitizeClientCreatedAt('2026-08-31T09:57:00Z', NOW)
   assert.ok(!out.includes('T'))
-  assert.ok(out < '2026-08-30 02:00:00' && out > '2026-08-30 00:59:59')
+  assert.ok(out < '2026-08-31 09:58:00' && out > '2026-08-31 09:56:59')
 })
 
 check('an offset timestamp converts to UTC', () => {
-  // 23:50 at UTC+7 = 16:50 UTC
-  assert.equal(sanitizeClientCreatedAt('2026-08-30T23:50:00+07:00', NOW), '2026-08-30 16:50:00')
+  // 16:58 at UTC+7 = 09:58 UTC
+  assert.equal(sanitizeClientCreatedAt('2026-08-31T16:58:00+07:00', NOW), '2026-08-31 09:58:00')
 })
 
 check('future beyond the skew allowance falls back to the server clock (null)', () => {
@@ -60,8 +61,16 @@ check('future beyond the skew allowance falls back to the server clock (null)', 
   assert.equal(sanitizeClientCreatedAt(farFuture, NOW), null)
 })
 
-check('no lower bound: a device offline for days keeps its sale moment', () => {
-  assert.equal(sanitizeClientCreatedAt('2026-08-01T09:00:00Z', NOW), '2026-08-01 09:00:00')
+// N3 (loophole review 2026-10-06): offline selling is retired, so an old
+// client moment is a backdating attempt (or a legacy queued sale), not a sale
+// moment to trust. It records at the server clock instead.
+check('past beyond the skew allowance falls back to the server clock (null): no backdating', () => {
+  const nearPast = new Date(NOW - CLIENT_TIMESTAMP_MAX_PAST_SKEW_MS + 1000).toISOString()
+  const farPast = new Date(NOW - CLIENT_TIMESTAMP_MAX_PAST_SKEW_MS - 60_000).toISOString()
+  assert.ok(sanitizeClientCreatedAt(nearPast, NOW))
+  assert.equal(sanitizeClientCreatedAt(farPast, NOW), null)
+  assert.equal(sanitizeClientCreatedAt('2026-08-01T09:00:00Z', NOW), null, 'a month-old moment is not honoured')
+  assert.equal(sanitizeClientCreatedAt('2026-08-30T23:50:00Z', NOW), null, 'yesterday is not honoured')
 })
 
 check('garbage, empty and non-string values fall back to the server clock', () => {
@@ -92,7 +101,8 @@ check('wiring: online-only sales do not mint offline timestamps; explicit recove
   const original = { client_request_id: 'original-request', created_at: '2026-08-01T09:00:00Z', offline_owner: { actor_id: 71 } }
   dispatch(structuredClone(original))
   assert.deepEqual(sent, { method: 'POST', url: '/api/sales', payload: original }, 'recovery sends the exact historical timestamp, not retry time')
-  assert.equal(sanitizeClientCreatedAt(sent.payload.created_at, NOW), '2026-08-01 09:00:00')
+  // N3: the Worker records that legacy sale at its own clock (null = CURRENT_TIMESTAMP).
+  assert.equal(sanitizeClientCreatedAt(sent.payload.created_at, NOW), null)
 })
 
 if (failed > 0) process.exitCode = 1

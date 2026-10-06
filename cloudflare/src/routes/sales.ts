@@ -456,8 +456,8 @@ app.post('/', async (c) => {
     offline_owner?: unknown
     money_precision_version?: unknown
     items: SaleItemInput[]
-    // Offline replays only: the sale's queue-time moment, honored with
-    // bounded trust (lib/clientTimestamp.ts). Online checkouts omit it.
+    // Legacy queued sales only: the sale's queue-time moment, honoured only
+    // within clock skew (lib/clientTimestamp.ts, N3). Online checkouts omit it.
     created_at?: unknown
     branch_id?: number
     cashier_id?: number
@@ -1158,12 +1158,12 @@ app.post('/', async (c) => {
   const receiptNumberTaken = async (candidate: string) =>
     !!(await db.prepare('SELECT 1 AS hit FROM sales WHERE receipt_number = ? LIMIT 1').get([candidate]))
   let receiptNumber = normalizeClientReceiptNumber(body.receipt_number) || await uniqueBusinessDateTimeNumber('', receiptNumberTaken)
-  // An offline replay carries the sale's own queue-time moment (stamped in
-  // saleWriteTransport); honored with bounded trust so day-ranged reports
-  // put the sale on the day it happened, not the day it synced. Online
-  // checkouts send no created_at and keep the server clock. See
-  // lib/clientTimestamp.ts for the bounds and the storage format.
+  // A client moment is honoured only within device-clock skew of the server
+  // (N3: no backdating into an earlier, closed shift or day); anything older
+  // -- including a legacy queued sale's queue-time stamp -- records at the
+  // server clock. See lib/clientTimestamp.ts for the bounds and the format.
   const clientCreatedAt = sanitizeClientCreatedAt(body.created_at)
+  const refusedClientCreatedAt = !clientCreatedAt && typeof body.created_at === 'string' && body.created_at.trim() ? body.created_at.trim().slice(0, 40) : null
 
   // isDelivery / deliveryFeeUsd / deliveryFeeKhr / deliveryFeePaidBy are
   // computed with the totals above, since the customer-paid portion is part
@@ -1398,6 +1398,8 @@ app.post('/', async (c) => {
     totalUsd,
     saleStatus,
     origin: clientCreatedAt ? 'offline_replay' : 'pos',
+    // N3: the moment a request claimed but was not allowed to set, kept for review.
+    ...(refusedClientCreatedAt ? { refusedClientCreatedAt } : {}),
   })
   const saleCreationAuditStatement = {
     sql: `INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details,table_name,record_id,new_value)

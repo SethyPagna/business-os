@@ -347,6 +347,9 @@ async function run() {
   // a distinct origin. A retry returns the one already-created row and cannot
   // regenerate or alter the immutable envelope.
   const offline = fixture()
+  // N3: a client moment is honoured only within clock skew of the server, so
+  // the queue-time moment here is one minute old rather than a fixed past date.
+  const queuedAt = new Date(Date.now() - 60_000)
   const offlinePayload = {
     items: [{ product_id: 1, quantity: 1, applied_price_usd: 5, branch_id: 1 }],
     branch_id: 1,
@@ -356,7 +359,7 @@ async function run() {
     amount_paid_khr: 0,
     exchange_rate: 4200,
     client_request_id: 'offline-create-1',
-    created_at: '2026-09-07T09:30:00.000Z',
+    created_at: queuedAt.toISOString(),
   }
   const first = await offline.call('/', offlinePayload, 'POST')
   assert.equal(first.status, 200, JSON.stringify(first))
@@ -368,7 +371,7 @@ async function run() {
   assert.equal(offline.sql.prepare('SELECT creation_snapshot_json FROM sales WHERE id=?').get(first.body.id).creation_snapshot_json, beforeRetry)
   const offlineCreation = JSON.parse(beforeRetry)
   assert.equal(offlineCreation.origin, 'offline_replay')
-  assert.equal(offlineCreation.sale_at, '2026-09-07 09:30:00')
+  assert.equal(offlineCreation.sale_at, queuedAt.toISOString().slice(0, 19).replace('T', ' '))
   console.log('PASS offline replay keeps one immutable queue-time creation snapshot')
 
   const failed = fixture()
