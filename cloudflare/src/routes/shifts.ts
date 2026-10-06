@@ -1101,15 +1101,17 @@ app.post('/open', async (c) => {
       // above can race a retirement (the cutover only checks that no shift is
       // open at its own commit), and a drawer opened on a branch that retired
       // a moment earlier is exactly the trap this lane removes.
-      { sql: OPEN_BRANCH_ACTIVE_GUARD_SQL, params: { branchId: row.branchId } },
+      // A confirmed redirect is re-proved first, so a landing branch switched off meanwhile answers with the redirect
+      // question (the active branches left to choose from), not the generic inactive refusal.
       ...(landing?.redirected ? [branchRedirectGuard(landing)] : []),
+      { sql: OPEN_BRANCH_ACTIVE_GUARD_SQL, params: { branchId: row.branchId } },
     ])
     if (batchChanges(results[0]) !== 1) throw new Error('Shift open did not write a row.')
   } catch (error) {
+    if (landing?.redirected && isBranchRedirectGuardError(error)) return c.json(await branchRedirectGuardRefusal(db, landing.addressedBranchId, () => branchRedirectTarget(c)), 409)
     if (isOpenBranchInactiveError(error)) return c.json({ error: 'Branch not found or inactive.', code: 'shift_branch_inactive' }, 400)
     const raced = await readCurrent(db, policy, user.id, branchId)
     if (raced) return c.json({ ...currentResponse(user, raced, policy, false), already_registered: true }, 200)
-    if (landing?.redirected && isBranchRedirectGuardError(error)) return c.json(await branchRedirectGuardRefusal(db, landing.addressedBranchId, () => branchRedirectTarget(c)), 409)
     throw error
   }
   const shift = await readCurrent(db, policy, user.id, branchId)

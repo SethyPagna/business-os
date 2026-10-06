@@ -30,7 +30,7 @@ const Database = require('better-sqlite3')
 const { sqliteD1Call } = require('./harness/sqlite_d1_bindings.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')
 
-const ORACLE = 'eb5dd0ba30e82867a4a8b6560085ce87e4137803'
+const ORACLE = 'da2004932b4510df0effee0399bc002b14d97372'
 const ORACLE_FILES = new Set([
   'routes/importJobs.ts', 'lib/importEngine.ts', 'lib/importBranchAuthority.ts', 'lib/stockActionImport.ts',
   'lib/stockActionCatalog.ts', 'lib/stockActionCommit.ts', 'lib/salesImportCommit.ts',
@@ -232,7 +232,7 @@ async function analysed(w, type, jobId) {
 const approveBody = (type) => (type === 'stock_actions' ? { confirm_stock_actions: true } : {})
 
 const BUSINESS = ['products', 'branch_stock', 'product_batches', 'branch_batch_stock', 'inventory_movements', 'sales', 'sale_items', 'sale_item_batch_allocations', 'import_sales_commits', 'import_stock_action_commits']
-const VOLATILE = new Set(['created_at', 'updated_at', 'applied_at', 'received_at', 'recorded_at', 'creation_snapshot_json'])
+const VOLATILE = new Set(['created_at', 'updated_at', 'applied_at', 'received_at', 'recorded_at', 'stock_skipped_at', 'creation_snapshot_json'])
 function businessRows(sql) {
   const out = {}
   for (const table of BUSINESS) {

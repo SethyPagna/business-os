@@ -19,7 +19,7 @@ const { execFileSync } = require('node:child_process')
 const { openDb } = require('./harness/d1compat.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')
 
-const ORACLE = 'eb5dd0ba30e82867a4a8b6560085ce87e4137803'
+const ORACLE = 'da2004932b4510df0effee0399bc002b14d97372'
 const REPO_ROOT = path.join(__dirname, '..', '..')
 
 function loadCommit(oracleSha = null) {

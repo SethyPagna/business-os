@@ -19,7 +19,7 @@ const Database = require('better-sqlite3')
 const { sqliteD1Call } = require('./sqlite_d1_bindings.cjs')
 const { loadAll } = require('./load_migrations.cjs')
 
-const ORACLE = 'eb5dd0ba30e82867a4a8b6560085ce87e4137803'
+const ORACLE = 'da2004932b4510df0effee0399bc002b14d97372'
 const ORACLE_FILES = new Set([
   'routes/inventory.ts', 'routes/batches.ts', 'routes/stockInCommit.ts', 'routes/products.ts', 'routes/reviewQueue.ts', 'routes/shifts.ts',
   'lib/stockLotAdjustment.ts', 'lib/stockSession.ts', 'lib/stockRevert.ts', 'lib/stockInLineEdit.ts', 'lib/productWrites.ts', 'lib/reviewApply.ts',
@@ -104,7 +104,20 @@ function binding(sql, capture = null) {
   }
 }
 
+// The release made client_request_id mandatory on stock-changing writes (N13); the oracle world predates it and ignores
+// the field, so one fresh id per call keeps both worlds answering the same request.
+// The counter is per database, so the oracle and the new world number the same request alike (the statement lists compare equal).
+const requestSerials = new WeakMap()
+const NEEDS_REQUEST_ID = new RegExp('/(adjust|tagged-lots/(dispose|restore))$')
+function withRequestId(db, method, url, body) {
+  if (method !== 'POST' || !NEEDS_REQUEST_ID.test(String(url).split('?')[0]) || !body || typeof body !== 'object' || Array.isArray(body) || body.client_request_id) return body
+  const serial = (requestSerials.get(db) || 0) + 1
+  requestSerials.set(db, serial)
+  return { ...body, client_request_id: `lr_world_${String(serial).padStart(8, '0')}` }
+}
+
 async function call(app, db, method, url, body, { redirect = null, capture = null, headers = {} } = {}) {
+  body = withRequestId(db, method, url, body)
   const response = await app.request(url, {
     method,
     headers: { 'content-type': 'application/json', ...(redirect == null ? {} : { 'x-branch-redirect': String(redirect) }), ...headers },
@@ -201,6 +214,7 @@ function raceBinding(db, onFirstBatch) {
   }
 }
 async function callWith(app, dbBinding, method, url, body, redirect) {
+  body = withRequestId(dbBinding, method, url, body)
   const response = await app.request(url, {
     method, headers: { 'content-type': 'application/json', ...(redirect == null ? {} : { 'x-branch-redirect': String(redirect) }) },
     body: JSON.stringify(body),

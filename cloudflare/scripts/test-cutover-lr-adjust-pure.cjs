@@ -146,7 +146,7 @@ async function main() {
 
   await W.check('fast stock-in: a line addressed to Old Shop carries the redirect detail; the confirmed re-send lands at LC Store', async () => {
     const db = W.build('after')
-    const lines = [{ key: 'a', wire: 'adjust', body: add(2) }, { key: 'b', wire: 'receive', body: { product_id: 20, branch_id: 2, quantity: 2, unit_cost_usd: 3, supplier_id: 5, supplier_name: 'Acme', reason: 'delivery' } }]
+    const lines = [{ key: 'a', wire: 'adjust', body: { ...add(2), client_request_id: 'lr_commit_line_a_00001' } }, { key: 'b', wire: 'receive', body: { product_id: 20, branch_id: 2, quantity: 2, unit_cost_usd: 3, supplier_id: 5, supplier_name: 'Acme', reason: 'delivery', client_request_id: 'lr_commit_line_b_00001' } }]
     const before = W.ledger(db)
     const asked = await W.call(fastStockIn(fresh), db, 'POST', '/commit', { lines })
     assert.equal(asked.status, 200)

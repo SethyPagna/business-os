@@ -18,7 +18,7 @@ const opening = (db) => W.plain(db.prepare(`SELECT bs.branch_id, bs.quantity, (S
 
 function queue(db, branchId) {
   db.prepare(`INSERT INTO pending_actions(id,section,action_type,entity_type,payload_json,summary,status,requested_by,requested_by_name)
-    VALUES(50,'products','create','product',?,'Create product "Toner"','open',71,'Owner')`).run([JSON.stringify(createBody(branchId))])
+    VALUES(50,'products','create','product',?,'Create product "Toner"','open',99,'Requester')`).run([JSON.stringify(createBody(branchId))])
   return db
 }
 
