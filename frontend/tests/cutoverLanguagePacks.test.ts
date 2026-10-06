@@ -28,7 +28,14 @@ const CLOSED_FAMILY = [
   'undo_refused_closed_branch_retired', 'undo_refused_closed_branch_cutover_move',
   'redo_refused_closed_branch_retired', 'redo_refused_closed_branch_cutover_move',
 ]
-const BRANCH_RULES = ['branch_not_sellable', 'transfer_branches_pair_only', 'transfer_single_branch']
+// The branch-rule refusals, including the three legacy keys that no longer have a call site (they carry the neutral text so
+// a stray render can never say Shop or Warehouse) and the sale/expense refusals the Worker now sends by code.
+const BRANCH_RULES = [
+  'branch_not_sellable', 'transfer_branches_pair_only', 'transfer_single_branch', 'canonical_branch_configuration_invalid',
+  'pos_warehouse_not_sellable', 'transfer_source_warehouse_only', 'transfer_canonical_pair_only',
+  'sale_branch_mismatch', 'sale_identity_conflict', 'unrecorded_stock_line_invalid',
+  'fee_branch_invalid', 'fee_sale_invalid', 'fee_sale_branch_mismatch',
+]
 const REFUSALS = ['branch_retired_no_successor', 'canonical_branch_identity_locked']
 const IMPORT_TEXT = ['stock_import_branch_routing', 'stock_import_quantity_required']
 const ALL = [...CLOSED_FAMILY, ...BRANCH_RULES, ...REFUSALS, ...IMPORT_TEXT]
@@ -53,6 +60,12 @@ runTest('no sentence names a branch: the names are data, so the text says "the o
   for (const key of ALL.filter((key) => key !== 'stock_import_quantity_required')) {
     for (const pack of [en, km]) assert.doesNotMatch(pack[key], /\b(Shop|Warehouse|LC Store|Old Shop)\b/, `${key}: ${pack[key]}`)
   }
+})
+
+runTest('the branch-rule sentences are true both before and after the cutover: no count of branches, no "exactly one"', () => {
+  // Before the cutover two branches are active; after it only one is. A sentence that says "the two operating branches" or
+  // "exactly one active Shop and one active Warehouse" is wrong in one of the two states.
+  for (const key of BRANCH_RULES) assert.doesNotMatch(en[key], /\b(?:two operating|exactly one|the two)\b/i, `en.${key}: ${en[key]}`)
 })
 
 runTest('one word for the one event: the closed-by-consolidation family says "consolidation", never "merge"', () => {

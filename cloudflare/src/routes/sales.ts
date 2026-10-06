@@ -30,7 +30,11 @@ import { mergePaymentMethods, parseConfiguredMethods, saleMethodsUsed } from '..
 import { planSaleSettlement, SettlementValidationError } from '../lib/paymentSettlement'
 // Sales are Shop-only. The same predicate runs in the UI and here where an
 // offline replay, direct API caller, or stale client cannot bypass it.
-import { firstUnsellableBranch, sellingBranchConditionSql, sellingBranchGuardStatement } from '../lib/branchRoleGuards'
+import {
+  BRANCH_NOT_SELLABLE_CODE, BRANCH_NOT_SELLABLE_ERROR, SALE_BRANCH_MISMATCH_CODE, SALE_BRANCH_MISMATCH_ERROR,
+  SALE_IDENTITY_CONFLICT_CODE, SALE_IDENTITY_CONFLICT_ERROR, UNRECORDED_STOCK_LINE_CODE, UNRECORDED_STOCK_LINE_ERROR,
+  firstUnsellableBranch, sellingBranchConditionSql, sellingBranchGuardStatement,
+} from '../lib/branchRoleGuards'
 import { branchCanSell } from '../lib/branchRoles'
 import {
   SALE_SETTLEMENT_ACTION_KIND,
@@ -158,7 +162,11 @@ const branchHistoryNameSql = (snapshot: string, fallback: string): string =>
   `CASE WHEN trim(COALESCE(${snapshot},''),char(9,10,11,12,13,32,160,5760,8192,8193,8194,8195,8196,8197,8198,8199,8200,8201,8202,8232,8233,8239,8287,12288,65279))<>'' THEN ${snapshot} ELSE ${fallback} END`
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
-const SHOP_ONLY_SALE_ERROR = 'Sales can only be recorded at the Shop. Transfer Warehouse stock to the Shop first.'
+// Every sale writer's refusal of a branch that is not an active selling branch. Role-neutral (no Shop/Warehouse: the
+// branches are Old Shop and LC Store after the cutover) and coded, so the client restates it from the pack key
+// branch_not_sellable. The English is that key's, word for word.
+const NOT_SELLING_BRANCH_BODY = { error: BRANCH_NOT_SELLABLE_ERROR, code: BRANCH_NOT_SELLABLE_CODE } as const
+const SALE_BRANCH_MISMATCH_BODY = { error: SALE_BRANCH_MISMATCH_ERROR, code: SALE_BRANCH_MISMATCH_CODE } as const
 // POST / re-mints a receipt number this many times after losing an in-batch
 // receipt race before answering receipt_number_conflict. Each retry re-runs
 // the whole atomic batch, so the bound caps the write cost of a burst.
@@ -581,7 +589,7 @@ app.post('/', async (c) => {
   // ---- 1. Normalize + validate input shape (no DB access yet) ----
   const saleHeaderBranchId = Number(body.branch_id)
   if (!Number.isSafeInteger(saleHeaderBranchId) || saleHeaderBranchId <= 0) {
-    return c.json({ error: SHOP_ONLY_SALE_ERROR }, 400)
+    return c.json(NOT_SELLING_BRANCH_BODY, 400)
   }
   const normalized: NormalizedItem[] = []
   for (let index = 0; index < body.items.length; index += 1) {
@@ -599,7 +607,7 @@ app.post('/', async (c) => {
     }
     const lineBranchId = Number(item.branch_id ?? saleHeaderBranchId)
     if (!Number.isSafeInteger(lineBranchId) || lineBranchId <= 0 || lineBranchId !== saleHeaderBranchId) {
-      return c.json({ error: 'The sale header and every line must use the same Shop branch.' }, 400)
+      return c.json(SALE_BRANCH_MISMATCH_BODY, 400)
     }
     normalized.push({
       ...item,
@@ -619,7 +627,7 @@ app.post('/', async (c) => {
   if (saleBranchRows.length !== saleBranchIds.length
     || saleBranchRows.some((branch) => Number(branch.is_active ?? 1) !== 1)
     || firstUnsellableBranch(saleBranchRows)) {
-    return c.json({ error: SHOP_ONLY_SALE_ERROR }, 400)
+    return c.json(NOT_SELLING_BRANCH_BODY, 400)
   }
 
   // ---- 2. Read current prices + stock (plain reads, before any writes) ----
@@ -693,7 +701,7 @@ app.post('/', async (c) => {
   const requestedUnlottedByKey = new Map<string, { productId: number; branchId: number; quantity: number }>()
   for (const item of normalized) {
     if (!item.unlotted_stock) continue
-    if (item.batch_id || item.damaged_lot_id || !item.branch_id) return c.json({ error: 'Unrecorded stock must be a regular Shop sale line.' }, 400)
+    if (item.batch_id || item.damaged_lot_id || !item.branch_id) return c.json({ error: UNRECORDED_STOCK_LINE_ERROR, code: UNRECORDED_STOCK_LINE_CODE }, 400)
     const key = `${item.product_id}:${item.branch_id}`
     const requested = requestedUnlottedByKey.get(key)
     requestedUnlottedByKey.set(key, requested
@@ -1784,8 +1792,8 @@ app.post('/', async (c) => {
       }
       if (/NOT NULL constraint failed:\s*(?:sale_items\.sale_id|sale_item_batch_allocations\.sale_item_id)/i.test(message)) {
         return c.json({
-          error: 'The Shop or batch changed while this sale was being recorded. Refresh the sale and pick the current batch before trying again.',
-          code: 'sale_identity_conflict',
+          error: SALE_IDENTITY_CONFLICT_ERROR,
+          code: SALE_IDENTITY_CONFLICT_CODE,
         }, 409)
       }
       // A CHECK(quantity >= 0) failure means a concurrent sale consumed the
@@ -2503,13 +2511,13 @@ app.patch('/:id/status', async (c) => {
   if (saleStatus === 'cancelled' && (cancelFeeUsd > 0 || cancelFeeKhr > 0)) {
     const cancellationBranchId = Number(sale.branch_id)
     if (!Number.isSafeInteger(cancellationBranchId) || cancellationBranchId <= 0) {
-      return c.json({ error: SHOP_ONLY_SALE_ERROR }, 400)
+      return c.json(NOT_SELLING_BRANCH_BODY, 400)
     }
     const cancellationBranch = await db.prepare(
       'SELECT id,name,role FROM branches WHERE id=@id AND COALESCE(is_active,1)=1 LIMIT 1',
     ).get<{ id: number; name: string | null; role: unknown }>({ id: cancellationBranchId })
     if (!cancellationBranch || !branchCanSell(cancellationBranch)) {
-      return c.json({ error: SHOP_ONLY_SALE_ERROR }, 400)
+      return c.json(NOT_SELLING_BRANCH_BODY, 400)
     }
     statements.push(sellingBranchGuardStatement(cancellationBranchId))
     statements.push({
@@ -3235,7 +3243,7 @@ app.post('/:id/items', async (c) => {
   }> = []
   const saleHeaderBranchId = Number(sale.branch_id)
   if (!Number.isSafeInteger(saleHeaderBranchId) || saleHeaderBranchId <= 0) {
-    return c.json({ error: SHOP_ONLY_SALE_ERROR }, 400)
+    return c.json(NOT_SELLING_BRANCH_BODY, 400)
   }
   for (let index = 0; index < rawItems.length; index += 1) {
     const item = rawItems[index] || {}
@@ -3256,7 +3264,7 @@ app.post('/:id/items', async (c) => {
     const rawPrice = Number(item.applied_price_usd)
     const lineBranchId = Number(item.branch_id ?? saleHeaderBranchId)
     if (!Number.isSafeInteger(lineBranchId) || lineBranchId <= 0 || lineBranchId !== saleHeaderBranchId) {
-      return c.json({ error: 'The sale header and every added line must use the same Shop branch.' }, 400)
+      return c.json(SALE_BRANCH_MISMATCH_BODY, 400)
     }
     requested.push({
       productId,
@@ -3284,7 +3292,7 @@ app.post('/:id/items', async (c) => {
   if (addedBranchRows.length !== addedBranchIds.length
     || addedBranchRows.some((branch) => Number(branch.is_active ?? 1) !== 1)
     || firstUnsellableBranch(addedBranchRows)) {
-    return c.json({ error: SHOP_ONLY_SALE_ERROR }, 400)
+    return c.json(NOT_SELLING_BRANCH_BODY, 400)
   }
 
   // ---- Current prices/costs, chunked for D1's parameter ceiling ----
@@ -4026,14 +4034,14 @@ app.post('/:id/amendments', async (c) => {
 
   const saleHeaderBranchId = Number(sale.branch_id)
   if (!Number.isSafeInteger(saleHeaderBranchId) || saleHeaderBranchId <= 0) {
-    return c.json({ error: SHOP_ONLY_SALE_ERROR }, 400)
+    return c.json(NOT_SELLING_BRANCH_BODY, 400)
   }
   const amendmentBranch = await db.prepare('SELECT id, name, role, is_active FROM branches WHERE id = ?')
     .get<{ id: number; name: string | null; role: unknown; is_active: number | null }>([saleHeaderBranchId])
   if (!amendmentBranch
     || Number(amendmentBranch.is_active ?? 1) !== 1
     || firstUnsellableBranch([amendmentBranch])) {
-    return c.json({ error: SHOP_ONLY_SALE_ERROR }, 400)
+    return c.json(NOT_SELLING_BRANCH_BODY, 400)
   }
 
   try {
@@ -4524,7 +4532,7 @@ app.post('/:id/amendments', async (c) => {
   `).get<{ id: number; product_id: number | null; product_name: string | null; quantity: number; applied_price_usd: number; applied_price_khr: number; cost_price_usd: number; cost_price_khr: number; branch_id: number | null; base_price_usd?: number; base_price_khr?: number; product_discount_usd?: number; product_discount_khr?: number; manual_discount_type?: string | null; manual_discount_value?: number; manual_discount_usd?: number; manual_discount_khr?: number; price_mode?: string | null; total_usd?: number; total_khr?: number }>([lineId, saleId])
   if (!line) return c.json({ error: 'That line is not on this sale.' }, 404)
   if (Number(line.branch_id) !== saleHeaderBranchId) {
-    return c.json({ error: 'The sale header and every amended line must use the same Shop branch.' }, 400)
+    return c.json(SALE_BRANCH_MISMATCH_BODY, 400)
   }
 
   // Draw order (id ASC) -- the decrease walk relies on it to hand units back
@@ -4760,7 +4768,7 @@ app.post('/:id/amendments', async (c) => {
 
     const branchId = Number(replacement.branch_id ?? saleHeaderBranchId)
     if (!Number.isSafeInteger(branchId) || branchId <= 0 || branchId !== saleHeaderBranchId) {
-      return c.json({ error: 'The sale header and replacement line must use the same Shop branch.' }, 400)
+      return c.json(SALE_BRANCH_MISMATCH_BODY, 400)
     }
     if (!replacement.client_line_key || !['selling','wholesale','manual'].includes(replacement.pricing_source || ''))
       throw new SaleMoneyContractError('money_precision_pricing_intent_required')

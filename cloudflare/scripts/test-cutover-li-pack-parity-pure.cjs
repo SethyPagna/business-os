@@ -97,5 +97,52 @@ runTest('the import routing note keeps its pinned English and also carries a cod
   assert.ok(src('lib/importEngine.ts').includes('code?: string; params?: Record<string, string | number>'), 'ImportRowWarning allows them')
 })
 
+runTest('the sale, transfer and expense refusals are role-neutral and equal the pack English of the key named after their code', () => {
+  const guards = 'lib/branchRoleGuards.ts'
+  const pairs = [
+    ['BRANCH_NOT_SELLABLE_CODE', 'BRANCH_NOT_SELLABLE_ERROR'],
+    ['SALE_BRANCH_MISMATCH_CODE', 'SALE_BRANCH_MISMATCH_ERROR'],
+    ['SALE_IDENTITY_CONFLICT_CODE', 'SALE_IDENTITY_CONFLICT_ERROR'],
+    ['UNRECORDED_STOCK_LINE_CODE', 'UNRECORDED_STOCK_LINE_ERROR'],
+  ]
+  for (const [codeName, errorName] of pairs) {
+    const code = constant(guards, codeName)
+    assert.equal(constant(guards, errorName), en[code], `${errorName} is en.${code}`)
+    assert.ok(km[code] && /[ក-៿]/.test(km[code]) && km[code] !== en[code], `km.${code}`)
+    assert.doesNotMatch(en[code], NAMES, code)
+  }
+  // The transfer sentences have no code constant of their own: transfer_direction_invalid -> transfer_branches_pair_only,
+  // canonical_branch_configuration_invalid -> the key of the same name.
+  assert.equal(constant(guards, 'TRANSFER_DIRECTION_ERROR'), en.transfer_branches_pair_only)
+  assert.equal(constant('lib/canonicalBranchIdentity.ts', 'CANONICAL_BRANCH_CONFIGURATION_ERROR'), en.canonical_branch_configuration_invalid)
+  assert.equal(constant('lib/canonicalBranchIdentity.ts', 'CANONICAL_BRANCH_CONFIGURATION_CODE'), 'canonical_branch_configuration_invalid')
+  // True before AND after the cutover: neither says Shop, Warehouse, "two" branches or "exactly one active".
+  for (const key of ['transfer_branches_pair_only', 'canonical_branch_configuration_invalid', 'pos_warehouse_not_sellable', 'transfer_source_warehouse_only', 'transfer_canonical_pair_only']) {
+    assert.doesNotMatch(en[key], /\b(?:Shop|Warehouse|LC Store|Old Shop|two operating|exactly one)\b/, key)
+    assert.ok(km[key] && /[ក-៿]/.test(km[key]), `km.${key}`)
+  }
+  // The expense writers' sentences live in routes/fees.ts (tests load it with its imports wired by name).
+  const fees = src('routes/fees.ts')
+  for (const code of ['fee_branch_invalid', 'fee_sale_invalid', 'fee_sale_branch_mismatch']) {
+    assert.ok(fees.includes(`error: '${en[code]}', code: '${code}'`), `fees.ts sends en.${code} with its code`)
+    assert.ok(km[code] && /[ក-៿]/.test(km[code]), `km.${code}`)
+  }
+})
+
+runTest('no refusal literal in the sale or expense routes names the Shop or the Warehouse', () => {
+  for (const rel of ['routes/sales.ts', 'routes/fees.ts']) {
+    const text = src(rel)
+    const named = []
+    for (const match of text.matchAll(/(?:error|message):\s*(['"`])([^'"`\r\n]*)\1/g)) {
+      if (NAMES.test(match[2])) named.push(match[2])
+    }
+    assert.deepEqual(named, [], `${rel} has refusal sentences that name a branch`)
+  }
+  const sales = src('routes/sales.ts')
+  assert.equal((sales.match(/NOT_SELLING_BRANCH_BODY, 400\)/g) || []).length, 8)
+  assert.equal((sales.match(/SALE_BRANCH_MISMATCH_BODY, 400\)/g) || []).length, 4)
+  assert.doesNotMatch(sales, /SHOP_ONLY_SALE_ERROR/)
+})
+
 if (failed) { console.error(`${failed} test(s) failed`); process.exit(1) }
 console.log('cutover LI pack parity tests passed')

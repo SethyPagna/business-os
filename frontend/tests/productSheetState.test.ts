@@ -458,14 +458,22 @@ const kmPack = JSON.parse(src('lang', 'km.json')) as Record<string, string>
 await runTest('a Worker branch-rule refusal is translated, and nothing else is touched', () => {
   const t = (key: string) => kmPack[key]
   assert.equal(branchRuleMessageKey('Sales can only be recorded at a selling branch.'), 'branch_not_sellable')
+  assert.equal(branchRuleMessageKey('Transfers move stock only between a selling branch and a storage branch.'), 'transfer_branches_pair_only')
+  // the pre-rename and pre-cutover sentences (a Worker still in flight) land on the same neutral keys
   assert.equal(branchRuleMessageKey('Transfers move stock only between the two operating branches.'), 'transfer_branches_pair_only')
-  // the pre-rename sentences (a Worker still in flight) land on the same neutral keys
   assert.equal(branchRuleMessageKey('Only allow Shop sale. Please transfer to Shop first.'), 'branch_not_sellable')
   assert.equal(branchRuleMessageKey('Transfers move stock only between Shop and Warehouse.'), 'transfer_branches_pair_only')
   // and the stable codes win over prose
   assert.equal(branchRuleErrorKey({ code: 'branch_not_sellable', message: 'anything' }), 'branch_not_sellable')
   assert.equal(branchRuleErrorKey({ code: 'transfer_direction_invalid', message: 'anything' }), 'transfer_branches_pair_only')
-  assert.equal(branchRuleMessageKey('Transfers move stock from Warehouse to Shop.'), 'transfer_source_warehouse_only')
+  // The one-way sentence is superseded: its legacy key (transfer_source_warehouse_only) named Shop and Warehouse, which is
+  // wrong after the cutover, so the sentence now lands on the neutral pair key like every other old transfer sentence.
+  assert.equal(branchRuleMessageKey('Transfers move stock from Warehouse to Shop.'), 'transfer_branches_pair_only')
+  assert.equal(
+    branchRuleMessageKey('Stock transfer is unavailable because the branch setup does not have a selling branch and a storage branch that are both active. Ask an administrator to check the branch records before trying again.'),
+    'canonical_branch_configuration_invalid',
+  )
+  // the previous Worker sentence ("exactly one active Shop and one active Warehouse") still lands on the same key
   assert.equal(
     branchRuleMessageKey('Stock transfer is unavailable because the branch setup must contain exactly one active Shop and one active Warehouse. Ask an administrator to repair the branch records before trying again.'),
     'canonical_branch_configuration_invalid',
@@ -480,7 +488,7 @@ await runTest('a Worker branch-rule refusal is translated, and nothing else is t
     kmPack.branch_not_sellable,
     'a Khmer session must read the Khmer sentence, not the English the server sent',
   )
-  assert.equal(localizeBranchRuleError('Transfers move stock from Warehouse to Shop.', t), kmPack.transfer_source_warehouse_only)
+  assert.equal(localizeBranchRuleError('Transfers move stock from Warehouse to Shop.', t), kmPack.transfer_branches_pair_only)
   assert.equal(localizeBranchRuleError('Transfers move stock only between the two operating branches.', t), kmPack.transfer_branches_pair_only)
   assert.equal(localizeBranchRuleError('Transfers move stock only between Shop and Warehouse.', t), kmPack.transfer_branches_pair_only, 'a Worker in flight')
   assert.equal(localizeBranchRuleError('Only allow Shop sale. Please transfer to Shop first.', t), kmPack.branch_not_sellable, 'a Worker in flight')
@@ -518,12 +526,17 @@ await runTest('the mapped sentences are the exact English of the pack keys', () 
   // If either side drifts, the mapping stops matching and the operator is
   // shown an English sentence in a Khmer session -- silently.
   assert.equal(enPack.branch_not_sellable, 'Sales can only be recorded at a selling branch.')
-  assert.equal(enPack.transfer_source_warehouse_only, 'Transfers move stock from Warehouse to Shop.')
-  assert.equal(enPack.transfer_branches_pair_only, 'Transfers move stock only between the two operating branches.')
+  // Cutover (LI follow-up): these three sentences named Shop, Warehouse or "the two operating branches", all of which are
+  // wrong once Shop is Old Shop and only LC Store is active, so the pins moved to wording that is true in both states.
+  assert.equal(enPack.transfer_branches_pair_only, 'Transfers move stock only between a selling branch and a storage branch.')
   assert.equal(
     enPack.canonical_branch_configuration_invalid,
-    'Stock transfer is unavailable because the branch setup must contain exactly one active Shop and one active Warehouse. Ask an administrator to repair the branch records before trying again.',
+    'Stock transfer is unavailable because the branch setup does not have a selling branch and a storage branch that are both active. Ask an administrator to check the branch records before trying again.',
   )
+  // The three legacy pack keys (no call site since the neutral keys replaced them) carry the neutral text, never Shop/Warehouse.
+  assert.equal(enPack.transfer_source_warehouse_only, enPack.transfer_branches_pair_only)
+  assert.equal(enPack.transfer_canonical_pair_only, enPack.transfer_branches_pair_only)
+  assert.equal(enPack.pos_warehouse_not_sellable, enPack.branch_not_sellable)
   for (const [english, key] of BRANCH_RULE_MESSAGE_KEYS) {
     assert.equal(enPack[key], english, `${key} must be the sentence the Worker sends`)
     assert.ok(kmPack[key], `${key} must exist in the Khmer pack`)

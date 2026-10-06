@@ -56,6 +56,14 @@ const branchHistoryNameSql = (snapshot: string, fallback: string): string =>
 // (Roles page), same as every other permission key in this app -- it does
 // NOT silently fall back to any other permission.
 
+// The expense writers' branch refusals: role-neutral (no Shop: the selling branch is LC Store after the cutover) and
+// coded, so the client restates them from the pack keys named after the codes (api/branchRefusalLanguage.ts). Each
+// sentence is the English of that pack key, word for word; scripts/test-cutover-li-pack-parity-pure.cjs pins it. They are
+// defined here, not in lib/branchRoleGuards.ts, because tests load this route with its imports wired by name.
+const FEE_BRANCH_INVALID_BODY = { error: 'Every expense must use an active selling branch.', code: 'fee_branch_invalid' } as const
+const FEE_SALE_INVALID_BODY = { error: 'Choose an existing sale recorded at a selling branch.', code: 'fee_sale_invalid' } as const
+const FEE_SALE_BRANCH_MISMATCH_BODY = { error: 'The linked sale and expense must use the same branch.', code: 'fee_sale_branch_mismatch' } as const
+
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 
 // A fee shows the branch name it was recorded under (fees.branch_name, 0236),
@@ -564,10 +572,10 @@ app.post('/', async (c) => {
     : body.deliveryContactId
   const requestedDeliveryContactId = optionalPositiveId(deliveryContactValue)
   if (body.sale_id !== undefined && body.sale_id !== null && body.sale_id !== '' && requestedSaleId == null) {
-    return c.json({ error: 'Choose an existing sale recorded at the Shop.' }, 400)
+    return c.json(FEE_SALE_INVALID_BODY, 400)
   }
   if (body.branch_id !== undefined && body.branch_id !== null && body.branch_id !== '' && requestedBranchId == null) {
-    return c.json({ error: 'Every expense must use the active Shop branch.' }, 400)
+    return c.json(FEE_BRANCH_INVALID_BODY, 400)
   }
   if ((body.delivery_contact_id !== undefined || body.deliveryContactId !== undefined)
     && deliveryContactValue !== null
@@ -604,9 +612,9 @@ app.post('/', async (c) => {
     ({ saleId, branchId } = await resolveFeeLink(db, requestedSaleId, requestedBranchId))
   } catch (error) {
     const code = (error as Error).message
-    if (code === 'SALE_BRANCH_MISMATCH') return c.json({ error: 'The linked sale and expense must use the same Shop branch.' }, 400)
-    if (code === 'INVALID_SALE') return c.json({ error: 'Choose an existing sale recorded at the Shop.' }, 400)
-    return c.json({ error: 'Every expense must use the active Shop branch.' }, 400)
+    if (code === 'SALE_BRANCH_MISMATCH') return c.json(FEE_SALE_BRANCH_MISMATCH_BODY, 400)
+    if (code === 'INVALID_SALE') return c.json(FEE_SALE_INVALID_BODY, 400)
+    return c.json(FEE_BRANCH_INVALID_BODY, 400)
   }
   let deliveryContactId: number | null
   try {
@@ -724,9 +732,9 @@ app.put('/:id', async (c) => {
     ))
   } catch (error) {
     const code = (error as Error).message
-    if (code === 'SALE_BRANCH_MISMATCH') return c.json({ error: 'The linked sale and expense must use the same Shop branch.' }, 400)
-    if (code === 'INVALID_SALE') return c.json({ error: 'Choose an existing sale recorded at the Shop.' }, 400)
-    return c.json({ error: 'Every expense must use the active Shop branch.' }, 400)
+    if (code === 'SALE_BRANCH_MISMATCH') return c.json(FEE_SALE_BRANCH_MISMATCH_BODY, 400)
+    if (code === 'INVALID_SALE') return c.json(FEE_SALE_INVALID_BODY, 400)
+    return c.json(FEE_BRANCH_INVALID_BODY, 400)
   }
   let deliveryContactId = existing.delivery_contact_id
   if (body.delivery_contact_id !== undefined || body.deliveryContactId !== undefined) {

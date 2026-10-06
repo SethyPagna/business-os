@@ -545,7 +545,7 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
     if (hasCanonicalTransferPair && selectedSourceBranch?.is_active !== false && selectedSourceBranch?.is_active !== 0
       && destinationBranch?.is_active !== false && destinationBranch?.is_active !== 0
       && branchCanTransferBetween(selectedSourceBranch, destinationBranch)) return true
-    notify(t('transfer_branches_pair_only') || 'Transfers move stock only between the two operating branches.', 'error')
+    notify(t('transfer_branches_pair_only') || 'Transfers move stock only between a selling branch and a storage branch.', 'error')
     return false
   }, [branches, canTransferStock, hasCanonicalTransferPair, notify, selectedSourceBranch, t, toBranch])
 
@@ -1427,7 +1427,7 @@ export default function TransferModal({ branches, onClose, onDone, user, notify 
               {onlyOneActiveBranch ? (
                 <p role="status" className="mt-1 text-[11px] font-medium text-amber-700 dark:text-amber-400">{t('transfer_single_branch') || 'Only one active branch, so there is nothing to transfer.'}</p>
               ) : hasCanonicalTransferPair ? (
-                <p className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">{t('transfer_branches_pair_only') || 'Transfers move stock only between the two operating branches.'}</p>
+                <p className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">{t('transfer_branches_pair_only') || 'Transfers move stock only between a selling branch and a storage branch.'}</p>
               ) : null}
             </div>
 
