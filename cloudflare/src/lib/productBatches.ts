@@ -33,7 +33,8 @@
 //   routes/inventory.ts's disclosure comment.
 import type { D1Compat } from './db'
 import { receivingBranchAssertion } from './receivingBranch'
-import { dateToBatchCode, normalizeTypedDate } from './batchCode'
+import { dateToBatchCode, normalizeToIsoDate, normalizeTypedDate } from './batchCode'
+import { businessToday } from './businessDateWindow'
 import { addMoney4, multiplyMoney4, nullableMoney4, roundMoney4, sellingPriceCeilCent } from './moneyPrecision'
 import { buildInClause, selectInChunks } from './sqlBinding'
 
@@ -132,6 +133,53 @@ export type ReceiptCostPreimage = {
   receivedCostUsd: number | null
 }
 
+/**
+ * The calendar date a stored lot was received on, as 'YYYY-MM-DD', or '' when
+ * the value is unreadable. product_batches.received_at holds more than one
+ * shape (M2 of the 6 Oct date sweep): the date-only ISO every typed writer
+ * stores, SQLite's 'YYYY-MM-DD HH:MM:SS' that the old default-batch writer and
+ * migration 0032 stamped, ISO 'T...Z', and -- on rows written by the pre-0077
+ * product importer -- a slash string that importer read MONTH-first (its
+ * lot_code is the proof). A plain slice(0, 10) matched the first three and
+ * made the slash lot a never-matching twin of a same-day receipt.
+ */
+export function lotReceivedDate(receivedAt: string | null | undefined): string {
+  return normalizeToIsoDate(receivedAt, 'month-first') || ''
+}
+
+/**
+ * A receipt's received date: the date the operator typed (read day-first, like
+ * every typed field), or the BUSINESS day (Cambodia, UTC+7) when the field was
+ * left blank -- never the UTC day, which names yesterday from 00:00 to 06:59
+ * local time. A non-blank value that does not read as a date is refused here as
+ * a backstop (the routes answer 400 first); it used to become today silently.
+ */
+export function resolveReceivedDate(input: string | null | undefined): string {
+  if (input == null || String(input).trim() === '') return businessToday()
+  const typed = normalizeTypedDate(input)
+  if (!typed) throw new Error('Received date must be a valid date (dd/mm/yyyy)')
+  return typed
+}
+
+/**
+ * SQL sort key for received_at that orders by the real DATE whatever the stored
+ * shape, so FIFO draws the oldest lot first even where shapes are mixed (M1):
+ * 'YYYY-MM-DD...' (date-only, SQLite datetime, ISO T...Z) sorts by its first 10
+ * characters, a legacy slash 'MM/DD/YYYY' (month-first, see lotReceivedDate)
+ * sorts by the date it spells instead of before every ISO date, and anything
+ * else keeps its raw text. It is evaluated on the handful of lots one
+ * product/branch pair owns (the WHERE clause already narrowed to them), never
+ * over the table, and every caller keeps raw received_at as the next tiebreak.
+ */
+export function receivedDateSortSql(column: string): string {
+  return `CASE
+      WHEN substr(${column}, 5, 1) = '-' THEN substr(${column}, 1, 10)
+      WHEN ${column} LIKE '%/%/%' AND length(${column}) >= 8
+        THEN substr(${column}, length(${column}) - 3, 4) || '-' || substr('0' || substr(${column}, 1, instr(${column}, '/') - 1), -2, 2)
+          || '-' || substr('0' || substr(${column}, instr(${column}, '/') + 1, instr(substr(${column}, instr(${column}, '/') + 1), '/') - 1), -2, 2)
+      ELSE ${column} END`
+}
+
 export type ReceiptLotCandidate = {
   id: number
   batch_key: string
@@ -163,7 +211,7 @@ export function resolveReceiptLotTarget(
     return { batchKey: lot.batch_key, baselineBatchId, existingBatchId: lot.id }
   }
   const eligible = lots.filter(lot => lot.id > baselineBatchId
-    && String(lot.received_at || '').slice(0, 10) === receivedAt && sameCost(lot))
+    && lotReceivedDate(lot.received_at) === receivedAt && sameCost(lot))
     .sort((a, b) => a.id - b.id)[0]
   if (eligible) return { batchKey: eligible.batch_key, baselineBatchId, existingBatchId: eligible.id }
   // Deterministic identity makes competing equal-price receipts collide at
@@ -187,7 +235,7 @@ export async function prepareReceiptLotTarget(db: D1Compat, input: {
     db.prepare('SELECT baseline_batch_id FROM product_cost_entries WHERE product_id=@productId ORDER BY id DESC LIMIT 1')
       .get<{ baseline_batch_id: number }>({ productId: input.productId }),
   ])
-  return resolveReceiptLotTarget(lots, normalizeTypedDate(input.receivedDate) || new Date().toISOString().slice(0, 10),
+  return resolveReceiptLotTarget(lots, resolveReceivedDate(input.receivedDate),
     unitCostForReceipt(input.unitCostUsd, input.preserveHistoricalUnitCost === true), Number(baseline?.baseline_batch_id) || 0, input.batchId)
 }
 
@@ -286,7 +334,7 @@ export function planReceiveBatchStock(input: ReceiveBatchPlanInput): ReceiveBatc
   }
   const branchId = Number(input.branchId)
   if (!Number.isSafeInteger(branchId) || branchId <= 0) throw new Error('A valid branch is required')
-  const receivedAt = normalizeTypedDate(input.receivedDate) || new Date().toISOString().slice(0, 10)
+  const receivedAt = resolveReceivedDate(input.receivedDate)
   const lotCode = dateToBatchCode(receivedAt) as string
   const batchKey = input.provenanceKey ? ` event:${input.provenanceKey}` : input.receiptLotTarget?.batchKey ?? lotCode
   const unitCostUsd = unitCostForReceipt(input.unitCostUsd, input.preserveHistoricalUnitCost === true)
@@ -616,7 +664,7 @@ export async function receiveBatchStock(db: D1Compat, input: {
   // @batchKey), so it can be dropped into a statement's own VALUES list.
   buildBatchStatements?: (ctx: { batchKey: string; lotCode: string; resolvedBatchIdSql: string }) => StockWriteStatement[]
 }): Promise<{ batchId: number; created: boolean; batchNumber: number | null; lotCode: string }> {
-  const receivedAt = normalizeTypedDate(input.receivedDate) || new Date().toISOString().slice(0, 10)
+  const receivedAt = resolveReceivedDate(input.receivedDate)
   let receiptLotTarget: ReceiptLotTarget | undefined
   if (input.historicalReceiptReplay && input.batchId == null) throw new Error('Historical receipt replay requires its recorded batch')
   if (!input.provenanceKey && !input.historicalReceiptReplay) receiptLotTarget = await prepareReceiptLotTarget(db, input)
@@ -1004,7 +1052,7 @@ export async function readFifoLotAvailability(db: D1Compat, productId: number, b
     FROM product_batches pb
     JOIN branch_batch_stock bbs ON bbs.batch_id = pb.id AND bbs.branch_id = @branchId
     WHERE pb.variant_product_id = @productId AND pb.is_active = 1 AND bbs.quantity > 0
-    ORDER BY (pb.received_at IS NULL) ASC, pb.received_at ASC, pb.batch_number ASC, pb.id ASC
+    ORDER BY (pb.received_at IS NULL) ASC, ${receivedDateSortSql('pb.received_at')} ASC, pb.received_at ASC, pb.batch_number ASC, pb.id ASC
   `).all<{ batch_id: number; lot_code: string | null; received_at: string | null; expiry_date: string | null; available: number }>({ productId, branchId })
   return rows.map((row) => ({
     batchId: Number(row.batch_id),
@@ -1040,7 +1088,7 @@ export async function readFifoLotAvailabilityForCart(
       AND bbs.branch_id IN (${branchIds.map(() => '?').join(',')})
       AND pb.is_active = 1 AND bbs.quantity > 0
     ORDER BY pb.variant_product_id ASC, bbs.branch_id ASC,
-             (pb.received_at IS NULL) ASC, pb.received_at ASC, pb.batch_number ASC, pb.id ASC
+             (pb.received_at IS NULL) ASC, ${receivedDateSortSql('pb.received_at')} ASC, pb.received_at ASC, pb.batch_number ASC, pb.id ASC
   `).all<{ product_id: number; branch_id: number; batch_id: number; lot_code: string | null; received_at: string | null; expiry_date: string | null; available: number }>([...chunk, ...branchIds]))
   for (const row of rows) {
     const key = `${Number(row.product_id)}:${Number(row.branch_id)}`

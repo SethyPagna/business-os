@@ -20,8 +20,8 @@
 // routes/products.ts productSearchCacheVersion) -- so a sale, adjustment,
 // receive, transfer, import or product edit makes the cached answer
 // unreachable at once. The low-stock config is part of the key (it is read
-// anyway, and changing it changes every number). The UTC date is part of the
-// key because the expiry window is computed from SQLite's 'now'. The TTL is
+// anyway, and changing it changes every number). The BUSINESS date (Cambodia, UTC+7) is part of the
+// key because the expiry window is computed from the business "today". The TTL is
 // only the ceiling for a writer that forgets to bump: plan-tiered, longer on
 // Free (planTier.ts dashboardStockOverviewCacheSeconds).
 //
@@ -36,6 +36,7 @@ import { getVersionWithFallback } from './cache'
 import { getFamilyStockOverview, type FamilyStockAlertPage, type FamilyStockStats } from './familyStockStats'
 import { loadLowStockConfig, type LowStockConfig } from './lowStockSettings'
 import { getPlanLimits } from './planTier'
+import { BUSINESS_TZ_FORWARD, businessToday, localTodayExpr } from './businessDateWindow'
 
 export const DASHBOARD_STOCK_PREVIEW_SIZE = 10
 
@@ -56,17 +57,27 @@ export interface DashboardStockOverview {
   expiringCount: number
 }
 
-// Byte-for-byte the predicate the Dashboard always used. Migration 0228's
-// index (is_active, date(expiry_date)) WHERE expiry_date IS NOT NULL serves
-// both statements without changing it: is_active equality, then date order.
-export const DASHBOARD_EXPIRY_WHERE_SQL = `p.is_active = 1 AND expiry_date IS NOT NULL AND date(expiry_date) <= date('now', '+' || COALESCE(expiry_alert_days, 30) || ' day')`
+// The predicate the Dashboard always used, with "today" moved from the UTC day to
+// the BUSINESS day: `date('now')` names yesterday from 00:00 to 06:59 Cambodia time, so
+// a product expiring today dropped out of the window for the first seven hours of its
+// own last day. Only the RIGHT-hand bound changed (+7 hours before the alert-days
+// offset); the left side is still exactly date(expiry_date), the expression of
+// migration 0228's index (is_active, date(expiry_date)) WHERE expiry_date IS NOT NULL,
+// so both statements keep seeking it: is_active equality, then date order.
+export const DASHBOARD_EXPIRY_WHERE_SQL = `p.is_active = 1 AND expiry_date IS NOT NULL AND date(expiry_date) <= date('now', '${BUSINESS_TZ_FORWARD}', '+' || COALESCE(expiry_alert_days, 30) || ' day')`
+
+// Whole days from the business "today" to the expiry date (negative = expired). Both
+// operands are calendar dates, so the result is an exact integer; against the old
+// julianday('now') the fractional part was truncated toward zero, which reported a
+// product expiring tomorrow as 0 days in the afternoon.
+export const DASHBOARD_DAYS_UNTIL_EXPIRY_SQL = `CAST(julianday(date(expiry_date)) - julianday(${localTodayExpr()}) AS INTEGER)`
 
 export async function computeDashboardStockOverview(env: Env, lowStock: LowStockConfig): Promise<DashboardStockOverview> {
   const db = getDb(env)
   const [overview, expiring, expiringCount] = await Promise.all([
     getFamilyStockOverview({ db, lowStock, previewSize: DASHBOARD_STOCK_PREVIEW_SIZE }),
     db.prepare(`
-      SELECT id, name, category, unit, expiry_date, CAST(julianday(expiry_date) - julianday('now') AS INTEGER) AS days_until_expiry
+      SELECT id, name, category, unit, expiry_date, ${DASHBOARD_DAYS_UNTIL_EXPIRY_SQL} AS days_until_expiry
       FROM products p
       WHERE ${DASHBOARD_EXPIRY_WHERE_SQL}
       ORDER BY date(expiry_date) ASC
@@ -89,16 +100,17 @@ export async function computeDashboardStockOverview(env: Env, lowStock: LowStock
 
 // Bump when the cached shape changes, so an old entry can never be read back
 // as the new shape.
-const OVERVIEW_CACHE_SCHEMA = 'dso1'
+const OVERVIEW_CACHE_SCHEMA = 'dso2'
 
 export function dashboardStockOverviewKey(parts: {
   productsVersion: string
   stockVersion: string
   lowStock: LowStockConfig
-  utcDate: string
+  /** The business day (Cambodia) the answer was computed on -- see businessToday(). */
+  businessDate: string
 }): string {
   const low = `${parts.lowStock.enabled ? 1 : 0}:${parts.lowStock.mode}:${parts.lowStock.threshold}`
-  return [OVERVIEW_CACHE_SCHEMA, parts.utcDate, `p=${parts.productsVersion}`, `s=${parts.stockVersion}`, `l=${low}`, `n=${DASHBOARD_STOCK_PREVIEW_SIZE}`].join('|')
+  return [OVERVIEW_CACHE_SCHEMA, parts.businessDate, `p=${parts.productsVersion}`, `s=${parts.stockVersion}`, `l=${low}`, `n=${DASHBOARD_STOCK_PREVIEW_SIZE}`].join('|')
 }
 
 type Memo = { key: string; expiresAt: number; promise: Promise<DashboardStockOverview> }
@@ -136,7 +148,7 @@ export async function loadDashboardStockOverview(env: Env, ctx: DashboardStockOv
   }
   const lowStock = await lowStockPromise
   const [productsVersion, stockVersion] = versions
-  const key = dashboardStockOverviewKey({ productsVersion, stockVersion, lowStock, utcDate: new Date(now).toISOString().slice(0, 10) })
+  const key = dashboardStockOverviewKey({ productsVersion, stockVersion, lowStock, businessDate: businessToday(now) })
 
   const current = memo
   if (current && current.key === key && now < current.expiresAt) return current.promise

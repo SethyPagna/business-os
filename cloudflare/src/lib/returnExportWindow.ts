@@ -1,14 +1,12 @@
+import { isIsoCalendarDay } from './businessDateWindow'
+
 /** Export-only admission. Ordinary Returns list/report ranges remain unchanged. */
 export type ReturnExportWindow = { createdFrom: string; createdTo: string }
 const BUSINESS_OFFSET_MS = 7 * 60 * 60 * 1000
 
 function dateMs(value: string): number {
-  const ms = Date.parse(`${value}T00:00:00Z`)
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value) || !Number.isFinite(ms)
-    || new Date(ms).toISOString().slice(0, 10) !== value) {
-    throw new RangeError('A valid start and end date are required for a return statement')
-  }
-  return ms
+  if (!isIsoCalendarDay(value)) throw new RangeError('A valid start and end date are required for a return statement')
+  return Date.parse(`${value}T00:00:00Z`)
 }
 
 function exactMs(value: string): number {

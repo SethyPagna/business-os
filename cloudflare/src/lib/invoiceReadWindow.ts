@@ -1,4 +1,4 @@
-import { localDateAtOrAfter, localDateAtOrBefore, localDateExpr } from './businessDateWindow'
+import { isIsoCalendarDay, localDateAtOrAfter, localDateAtOrBefore, localDateExpr } from './businessDateWindow'
 import { continuousReadWindowSql, parseContinuousReadWindow } from './continuousReadWindow'
 
 export function invoiceReadWindow(column: string, query: Record<string, string | undefined>): { sql: string; params: Record<string, string> } {
@@ -9,11 +9,7 @@ export function invoiceReadWindow(column: string, query: Record<string, string |
   if (from) { dateClauses.push(localDateAtOrAfter(column, '@from')); params.from = from }
   if (to) { dateClauses.push(localDateAtOrBefore(column, '@to')); params.to = to }
   if (!window) return { sql: dateClauses.join(' AND '), params }
-  const validDay = (value: string) => {
-    const date = new Date(`${value}T00:00:00Z`)
-    return /^\d{4}-\d{2}-\d{2}$/.test(value) && Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value
-  }
-  if (!validDay(from) || !validDay(to) || from > to) throw new RangeError('Invoice hours require both valid ordered dates')
+  if (!isIsoCalendarDay(from) || !isIsoCalendarDay(to) || from > to) throw new RangeError('Invoice hours require both valid ordered dates')
   Object.assign(params, window)
   const unknownClock = `length(trim(${column})) = 10 AND ${dateClauses.join(' AND ')}`
   const recordedDay = localDateExpr(column)

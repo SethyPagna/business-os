@@ -126,7 +126,7 @@ const reconciliation = loadReal('lib/shiftReconciliation.ts', {
 let user = { id: 21, username: 'za', name: 'Roune Rath', permissions: JSON.stringify({ pos: true }) }
 let telegramReportsFor = []
 const route = loadReal('routes/shifts.ts', {
-  '../lib/continuousReadWindow': loadReal('lib/continuousReadWindow.ts'),
+  '../lib/continuousReadWindow': loadReal('lib/continuousReadWindow.ts', { './businessDateWindow': loadReal('lib/businessDateWindow.ts') }),
   '../lib/businessDateWindow': businessDateWindow,
   '../lib/clientTimestamp': loadReal('lib/clientTimestamp.ts'),
   '../lib/db': { getDb: () => db },

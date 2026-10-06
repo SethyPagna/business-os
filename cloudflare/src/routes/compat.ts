@@ -17,9 +17,9 @@ import { putObject, getObject, deleteObject } from '../lib/r2'
 import { getGoogleLoginPublicConfig } from '../lib/googleOauth'
 import { CUSTOMER_REFUND_JOIN, getSalesTotals, getSalesTotalsAndPeriodSeries, identifiedCustomerExpr, reportCustomerNameExpr, netRefundExpr, netSaleExpr, previousPeriodFilters, recognizedExpr, shiftWindowBound, shiftWindowWhere } from '../lib/salesAnalytics'
 import { getFamilyStockAlertPage, type FamilyStockAlertState } from '../lib/familyStockStats'
-import { loadDashboardStockOverview, type DashboardStockOverviewContext } from '../lib/dashboardStockOverview'
+import { DASHBOARD_DAYS_UNTIL_EXPIRY_SQL, DASHBOARD_EXPIRY_WHERE_SQL, loadDashboardStockOverview, type DashboardStockOverviewContext } from '../lib/dashboardStockOverview'
 import { loadLowStockConfig } from '../lib/lowStockSettings'
-import { localRangeClockError, isLocalRangeClock, businessToday, localDateAtOrAfter, localDateAtOrBefore, localDateRangeClause, localHourExpr, localTimeRangeClause } from '../lib/businessDateWindow'
+import { isIsoCalendarDay, localRangeClockError, isLocalRangeClock, businessToday, localDateAtOrAfter, localDateAtOrBefore, localDateRangeClause, localHourExpr, localTimeRangeClause } from '../lib/businessDateWindow'
 import { continuousReadWindowSql, parseContinuousReadWindow } from '../lib/continuousReadWindow'
 import { actorSnapshot } from '../lib/actorSnapshot'
 import { branchHistoryNameSql } from '../lib/stockInSessionsQuery'
@@ -120,9 +120,7 @@ function dateRange(query: Record<string, string>): DashboardDateRange {
     range.startDate = ''
     range.endDate = ''
   } else {
-    const validDate = (value: string) => /^\d{4}-\d{2}-\d{2}$/.test(value)
-      && Number.isFinite(Date.parse(`${value}T00:00:00Z`))
-      && new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) === value
+    const validDate = isIsoCalendarDay
     if (Boolean(query.startDate) !== Boolean(query.endDate)
       || !validDate(range.startDate) || !validDate(range.endDate) || range.startDate > range.endDate) {
       throw new Error('startDate and endDate must be valid, ordered YYYY-MM-DD dates supplied together')
@@ -510,9 +508,9 @@ async function dashboardInsightList(env: Env, query: Record<string, string>, kin
     // dashboardSummary's own comment on why the expiry alert is deliberately
     // the exception to the one-range-scopes-everything convention.
     const rows = await db.prepare(`
-      SELECT id, name, category, unit, expiry_date, CAST(julianday(expiry_date) - julianday('now') AS INTEGER) AS days_until_expiry
+      SELECT id, name, category, unit, expiry_date, ${DASHBOARD_DAYS_UNTIL_EXPIRY_SQL} AS days_until_expiry
       FROM products p
-      WHERE p.is_active = 1 AND expiry_date IS NOT NULL AND date(expiry_date) <= date('now', '+' || COALESCE(expiry_alert_days, 30) || ' day')
+      WHERE ${DASHBOARD_EXPIRY_WHERE_SQL}
       ORDER BY date(expiry_date) ASC
       LIMIT ${DASHBOARD_INSIGHT_LIST_LIMIT}
     `).all()
@@ -1246,11 +1244,7 @@ app.get('/transfers', async (c) => {
   const startDate = String(query.startDate || '').trim()
   const endDate = String(query.endDate || '').trim()
   if (continuousWindow) {
-    const validDay = (value: string) => {
-      if (!value) return true
-      const date = new Date(`${value}T00:00:00Z`)
-      return /^\d{4}-\d{2}-\d{2}$/.test(value) && Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value
-    }
+    const validDay = (value: string) => !value || isIsoCalendarDay(value)
     if (!validDay(startDate) || !validDay(endDate) || (startDate && endDate && startDate > endDate)) return c.json({ error: 'Invalid transfer date range' }, 400)
   }
   const fromBranchId = String(query.fromBranchId || query.from_branch_id || '').trim()

@@ -2,6 +2,7 @@ import { Hono } from 'hono'
 import type { Env } from '../index'
 import { getDb } from '../lib/db'
 import { chunkForBinding } from '../lib/sqlBinding'
+import { localTodayExpr } from '../lib/businessDateWindow'
 import { loadLowStockConfig, lowStockThresholdSql, type LowStockConfig } from '../lib/lowStockSettings'
 import { cachedJsonResponse, getVersionWithFallback } from '../lib/cache'
 import { requireAuth, type SessionUser } from '../lib/auth'
@@ -289,12 +290,12 @@ async function buildExpirySection(env: Env, days: number): Promise<NotificationS
   const db = getDb(env)
   const rows = await db.prepare(`
     SELECT id, name, expiry_date,
-      CAST(julianday(expiry_date) - julianday('now') AS INTEGER) AS days_until_expiry
+      CAST(julianday(expiry_date) - julianday(${localTodayExpr()}) AS INTEGER) AS days_until_expiry
     FROM products
     WHERE is_active = 1
       AND expiry_date IS NOT NULL
       AND trim(expiry_date) != ''
-      AND julianday(expiry_date) - julianday('now') <= @days
+      AND julianday(expiry_date) - julianday(${localTodayExpr()}) <= @days
     ORDER BY expiry_date ASC
     LIMIT 50
   `).all<{ id: number; name: string; expiry_date: string; days_until_expiry: number }>({ days })
@@ -343,14 +344,14 @@ async function buildSupplierCreditSection(env: Env, days: number): Promise<Notif
   const rows = await db.prepare(`
     SELECT pb.id, pb.credit_due_date, pb.supplier_name, pb.lot_code, pb.unit_cost_usd,
       p.name AS product_name,
-      CAST(julianday(pb.credit_due_date) - julianday('now') AS INTEGER) AS days_until_due
+      CAST(julianday(pb.credit_due_date) - julianday(${localTodayExpr()}) AS INTEGER) AS days_until_due
     FROM product_batches pb
     JOIN products p ON p.id = pb.variant_product_id
     WHERE pb.is_active = 1
       AND pb.payment_status = 'credit'
       AND (pb.received_quantity IS NULL OR pb.received_quantity > 0 OR COALESCE(pb.received_cost_usd, 0) > 0)
       AND pb.credit_due_date IS NOT NULL AND trim(pb.credit_due_date) != ''
-      AND julianday(pb.credit_due_date) - julianday('now') <= @days
+      AND julianday(pb.credit_due_date) - julianday(${localTodayExpr()}) <= @days
     ORDER BY pb.credit_due_date ASC
     LIMIT 50
   `).all<{ id: number; credit_due_date: string; supplier_name: string | null; lot_code: string | null; unit_cost_usd: number | null; product_name: string; days_until_due: number }>({ days })

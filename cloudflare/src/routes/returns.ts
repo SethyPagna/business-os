@@ -4,7 +4,7 @@ import { fillOmittedReturnCosts } from '../lib/returnCostAccess'
 import { getDb } from '../lib/db'
 import { ordinaryBusinessMaintenanceGuard, runOrdinaryBusinessWrite } from '../lib/businessMaintenanceGuard'
 import { selectInChunks } from '../lib/sqlBinding'
-import { localDateAtOrAfter, localDateAtOrBefore, localDateExpr } from '../lib/businessDateWindow'
+import { isIsoCalendarDay, localDateAtOrAfter, localDateAtOrBefore, localDateExpr } from '../lib/businessDateWindow'
 import { requireAuth, type SessionUser } from '../lib/auth'
 import { audit, changedFields } from '../lib/audit'
 import { sendReturnStatusTelegramEvents, sendReturnTelegramEvent, sendTelegramEvent, formatSaleTelegramLines } from '../lib/telegram'
@@ -764,9 +764,7 @@ const DAMAGED_ITEM_COUNT_SQL = `(
 export function returnRangePredicate(query: Record<string, string>, column: 'r.created_at' | 'created_at'): { sql: string; params: Record<string, unknown> } {
   const startDate = String(query.startDate || '').trim()
   const endDate = String(query.endDate || '').trim()
-  const validDate = (value: string): boolean => /^\d{4}-\d{2}-\d{2}$/.test(value)
-    && Number.isFinite(Date.parse(`${value}T00:00:00Z`))
-    && new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) === value
+  const validDate = isIsoCalendarDay
   if ((startDate && !validDate(startDate)) || (endDate && !validDate(endDate))) throw new RangeError('Return dates must use valid YYYY-MM-DD dates')
   if (startDate && endDate && startDate > endDate) throw new RangeError('Return end date must not precede the start date')
   if (query.startTime || query.endTime) throw new RangeError('Use createdFrom and createdTo together for an exact return time range')

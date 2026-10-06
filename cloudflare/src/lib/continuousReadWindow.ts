@@ -1,3 +1,5 @@
+import { isIsoCalendarDay } from './businessDateWindow'
+
 export type ContinuousReadWindow = { createdFrom: string; createdTo: string }
 
 export function parseContinuousReadWindow(query: Record<string, string | undefined>): ContinuousReadWindow | null {
@@ -9,8 +11,7 @@ export function parseContinuousReadWindow(query: Record<string, string | undefin
   const bound = (value: string): string => {
     const match = /^(\d{4}-\d{2}-\d{2})[T ](?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d{1,3})?([zZ]|[+-](?:[01]\d|2[0-3]):[0-5]\d)?$/.exec(value)
     if (!match) throw new RangeError('createdFrom and createdTo must be valid timestamps')
-    const day = new Date(`${match[1]}T00:00:00Z`)
-    if (!Number.isFinite(day.getTime()) || day.toISOString().slice(0, 10) !== match[1]) throw new RangeError('createdFrom and createdTo must contain valid dates')
+    if (!isIsoCalendarDay(match[1])) throw new RangeError('createdFrom and createdTo must contain valid dates')
     const parsed = new Date(match[2] ? value.replace(' ', 'T') : `${value.replace(' ', 'T')}Z`)
     if (!Number.isFinite(parsed.getTime())) throw new RangeError('createdFrom and createdTo must be valid timestamps')
     return parsed.toISOString().slice(0, 19).replace('T', ' ')

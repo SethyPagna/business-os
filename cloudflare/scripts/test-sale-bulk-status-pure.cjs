@@ -222,6 +222,20 @@ async function run() {
   const feeRows=f.sql.prepare('SELECT f.* FROM fees f JOIN sales s ON s.cancel_fee_id=f.id WHERE s.id IN (1,2) ORDER BY f.sale_id').all()
   assert.equal(feeRows.length,2)
   assert.deepEqual(feeRows.map(row=>[row.sale_id,row.branch_id]),[[1,1],[2,1]])
+  // fee_date is the BUSINESS day (Cambodia, UTC+7) of the stamp, not its UTC day: slice(0, 10) of a 00:00-06:59 local stamp named yesterday.
+  assert.ok(feeRows.every(row=>row.fee_date===new Date(Date.parse(row.created_at)+7*3600*1000).toISOString().slice(0,10)),'fee_date follows the business day of the cancellation stamp')
+  {
+    const RealDate=Date,frozen=Date.parse('2026-10-05T18:30:00.000Z')
+    const g=fixture();seed(g,1)
+    const frozenFee=request(g,'cancelled','request-business-day-fee')
+    delete frozenFee.cancel_reason
+    frozenFee.items=frozenFee.items.map(item=>({...item,cancel:{reason:'buyer_refused',fee_usd:1,fee_khr:0,fee_note:'late night'}}))
+    global.Date=class extends RealDate{constructor(...a){if(a.length===0)super(frozen);else super(...a)}static now(){return frozen}}
+    let late
+    try{late=await g.call(sales,'/bulk-status',frozenFee)}finally{global.Date=RealDate}
+    assert.equal(late.status,200,JSON.stringify(late))
+    assert.equal(g.sql.prepare('SELECT f.fee_date FROM fees f JOIN sales s ON s.cancel_fee_id=f.id WHERE s.id=1').get().fee_date,'2026-10-06','01:30 on 6 Oct in Cambodia (18:30Z on the 5th) books the fee on the 6th, not the UTC 5th')
+  }
   assert.ok(feeRows.every(row=>row.id<0))
   assert.deepEqual(f.sql.prepare('SELECT cancel_fee_id FROM sales ORDER BY id').all().map(row=>row.cancel_fee_id),feeRows.map(row=>row.id))
   assert.equal((await replay(f,withFees.body.actionHistoryId)).status,200)

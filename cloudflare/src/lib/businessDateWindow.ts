@@ -42,6 +42,20 @@ export function localRangeClockError(start: unknown, end: unknown): string | nul
     ? 'Use valid 24-hour HH:MM times; 24:00 is allowed only as the range end.' : null
 }
 
+/**
+ * True for a real calendar day written exactly 'YYYY-MM-DD' ('2026-02-30' and
+ * '2026-2-3' are not). The ONE validator behind every date-range query
+ * parameter -- expenses, returns, shifts, dashboard, transfers, invoices, return
+ * statements, continuous timestamps. It used to be copied into eight files, each
+ * a slightly different spelling of the same two checks; each caller keeps its own
+ * refusal message and calls this for the decision.
+ */
+export function isIsoCalendarDay(value: unknown): value is string {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
+  const ms = Date.parse(`${value}T00:00:00Z`)
+  return Number.isFinite(ms) && new Date(ms).toISOString().slice(0, 10) === value
+}
+
 /** SQLite datetime modifier that shifts a stored UTC timestamp to local time. */
 export const BUSINESS_TZ_FORWARD = '+7 hours'
 /** SQLite datetime modifier that shifts a local wall-clock instant back to UTC. */

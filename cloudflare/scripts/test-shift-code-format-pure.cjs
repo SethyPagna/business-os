@@ -114,7 +114,7 @@ function scenario() {
   let actor = ZA
   const hooks = { afterRead() {} }
   const route = loadReal('routes/shifts.ts', {
-    '../lib/continuousReadWindow': loadReal('lib/continuousReadWindow.ts'),
+    '../lib/continuousReadWindow': loadReal('lib/continuousReadWindow.ts', { './businessDateWindow': loadReal('lib/businessDateWindow.ts') }),
     '../lib/businessDateWindow': loadReal('lib/businessDateWindow.ts'),
     '../lib/clientTimestamp': loadReal('lib/clientTimestamp.ts'),
     '../lib/db': { getDb: () => d1(sqlite, hooks) },

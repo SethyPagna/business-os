@@ -131,7 +131,7 @@ const schemaProbeReal = loadReal('lib/schemaProbe.ts')
   })
   const permissions = loadReal('lib/permissions.ts')
   const route = loadReal('routes/shifts.ts', {
-    '../lib/continuousReadWindow': loadReal('lib/continuousReadWindow.ts'),
+    '../lib/continuousReadWindow': loadReal('lib/continuousReadWindow.ts', { './businessDateWindow': loadReal('lib/businessDateWindow.ts') }),
     '../lib/businessDateWindow': businessDateWindow,
   '../lib/clientTimestamp': loadReal('lib/clientTimestamp.ts'),
     '../lib/db': dbModule,

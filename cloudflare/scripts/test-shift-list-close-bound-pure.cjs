@@ -112,7 +112,7 @@ const ADMIN = { id: 9, name: 'Boss', username: 'boss', role_code: 'admin', permi
 function harness(sqlite, routeSource = source) {
   const state = { user: CASHIER }
   const route = compile(routeSource, routePath, {
-    '../lib/continuousReadWindow': loadReal('lib/continuousReadWindow.ts'),
+    '../lib/continuousReadWindow': loadReal('lib/continuousReadWindow.ts', { './businessDateWindow': loadReal('lib/businessDateWindow.ts') }),
     '../lib/businessDateWindow': loadReal('lib/businessDateWindow.ts'),
     '../lib/clientTimestamp': loadReal('lib/clientTimestamp.ts'),
     '../lib/db': { getDb: () => d1(sqlite) },

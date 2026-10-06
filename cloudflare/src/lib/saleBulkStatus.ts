@@ -12,6 +12,7 @@ import { branchCanSell } from './branchRoles';
 import { assertSaleRecordBatchBounds, buildSaleRecordEventsInsert } from './saleRecordEvents';
 import type { SaleRecordChange, SaleRecordValueState } from './saleRecords';
 import { statusChangeNeedsPayment } from './saleStatusResolution';
+import { businessToday } from './businessDateWindow';
 export const BULK_STATUS_KIND = 'sale.status.bulk';
 export const BULK_STATUS_LIMIT = 25;
 export const BULK_STATUS_MOVEMENT_LIMIT = 256;
@@ -420,7 +421,10 @@ export async function applySaleBulkStatus(env: Env, user: SessionUser, raw: Row)
                 label: `Cancelled sale ${member.receipt} -- lost fee`,
                 amount_usd: Math.round(Math.max(0, Number(itemCancel.fee_usd) || 0) * 100) / 100,
                 amount_khr: Math.max(0, Math.round(Number(itemCancel.fee_khr) || 0)),
-                fee_date: stamp.slice(0, 10),
+                // The business day (Cambodia, UTC+7) the cancellation happened on, exactly
+                // as sales.ts's single cancel stamps its fee -- stamp.slice(0, 10) is the UTC
+                // day, which names yesterday from 00:00 to 06:59 local time.
+                fee_date: businessToday(Date.parse(stamp)),
                 sale_id: expected.id,
                 branch_id: sale.branch_id ?? null,
                 delivery_contact_id: null,

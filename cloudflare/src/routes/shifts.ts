@@ -2,7 +2,7 @@ import { Hono } from 'hono'
 import { getDb, type D1Compat } from '../lib/db'
 import { CLIENT_TIMESTAMP_MAX_FUTURE_SKEW_MS } from '../lib/clientTimestamp'
 import { requireAuth, type SessionUser } from '../lib/auth'
-import { BUSINESS_TZ_FORWARD, BUSINESS_UTC_OFFSET_MINUTES, localTodayExpr } from '../lib/businessDateWindow'
+import { BUSINESS_TZ_FORWARD, BUSINESS_UTC_OFFSET_MINUTES, isIsoCalendarDay, localTodayExpr } from '../lib/businessDateWindow'
 import { parseContinuousReadWindow, continuousReadWindowSql } from '../lib/continuousReadWindow'
 import { hasAnyPermission, isAdminControlUser } from '../lib/permissions'
 import { scheduleTelegramShiftOverview, sendTelegramShiftReport } from '../lib/telegram'
@@ -721,12 +721,7 @@ app.get('/', async (c) => {
   const requestedUserId = parsedUserId
   const from = c.req.query('from') || null
   const to = c.req.query('to') || null
-  const validDate = (value: string | null) => {
-    if (value == null) return true
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
-    const date = new Date(`${value}T00:00:00.000Z`)
-    return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value
-  }
+  const validDate = (value: string | null) => value == null || isIsoCalendarDay(value)
   if (!validDate(from) || !validDate(to) || (from != null && to != null && from > to)) {
     return c.json({ error: 'Invalid shift business date range.' }, 400)
   }
