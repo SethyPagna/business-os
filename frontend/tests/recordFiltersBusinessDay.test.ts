@@ -11,6 +11,8 @@ process.env.TZ = 'America/Los_Angeles'
 
 import assert from 'node:assert/strict'
 import { getTimeParts } from '../src/utils/recordFilters.ts'
+import { getAvailableYears } from '../src/utils/recordFilters.ts'
+import { readFileSync } from 'node:fs'
 import { buildTimeActionSections } from '../src/utils/groupedRecords.ts'
 
 let failed = 0
@@ -68,6 +70,26 @@ check('an unreadable stamp still lands in the Unknown bucket, never a guessed da
   assert.equal(getTimeParts('03/04/2026').dayKey, 'unknown-day', 'a slash value is not read as month-first by the engine')
   assert.equal(getTimeParts('').dayKey, 'unknown-day')
   assert.equal(getTimeParts(null).monthKey, 'unknown-month')
+})
+
+check('the Unknown buckets are named through the packs, and an unknown row never becomes a year filter option', () => {
+  const km = JSON.parse(readFileSync(new URL('../src/lang/km.json', import.meta.url), 'utf8')) as Record<string, string>
+  const en = JSON.parse(readFileSync(new URL('../src/lang/en.json', import.meta.url), 'utf8')) as Record<string, string>
+  for (const key of ['date_unknown_year', 'date_unknown_month', 'date_unknown_day']) {
+    assert.ok(en[key] && km[key], key + ' exists in both packs')
+    assert.notEqual(km[key], en[key], key + ' is translated, not an English placeholder in km.json')
+  }
+  const tKm = (key: string) => km[key] ?? key
+  const unknown = getTimeParts('not-a-date', tKm)
+  assert.equal(unknown.yearLabel, km.date_unknown_year)
+  assert.equal(unknown.monthLabel, km.date_unknown_month)
+  assert.equal(unknown.dayLabel, km.date_unknown_day)
+  // No translator: English, never the raw key.
+  assert.equal(getTimeParts('').dayLabel, 'Unknown day')
+  // The year list must not rely on comparing the (now translated) label.
+  assert.deepEqual(getAvailableYears([{ created_at: 'junk' }, { created_at: '2026-10-05 18:30:00' }, { created_at: '2025-01-01' }]), ['2026', '2025'])
+  const sections = buildTimeActionSections([{ id: 1, created_at: 'junk' }], { getDate: (row: { created_at: string }) => row.created_at, getItemId: (row: { id: number }) => row.id, groupMode: 'time', timeMode: 'year', t: tKm })
+  assert.equal(sections[0].label, km.date_unknown_year)
 })
 
 check('sections split two sales at the business midnight and label the month translated', () => {

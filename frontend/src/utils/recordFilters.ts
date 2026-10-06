@@ -1,6 +1,6 @@
 import { BUSINESS_TIME_ZONE } from '../constants.ts'
 import { parseServerTimestampMs } from './formatters.ts'
-import { monthYearLabel, type MonthTranslate } from './dateLabels.ts'
+import { monthYearLabel, unknownPeriodLabel, type MonthTranslate } from './dateLabels.ts'
 
 type AnyRow = Record<string, any>
 
@@ -55,11 +55,11 @@ export function getTimeParts(value: unknown, t?: MonthTranslate): TimeParts {
       date: null,
       year: '',
       month: '',
-      yearLabel: 'Unknown year',
-      monthLabel: 'Unknown month',
+      yearLabel: unknownPeriodLabel('year', t),
+      monthLabel: unknownPeriodLabel('month', t),
       monthKey: 'unknown-month',
       dayKey: 'unknown-day',
-      dayLabel: 'Unknown day',
+      dayLabel: unknownPeriodLabel('day', t),
     }
   }
 
@@ -136,7 +136,8 @@ export function getAvailableYears<T extends AnyRow = AnyRow>(
   const years = new Set<string>()
   for (const item of Array.isArray(items) ? items : []) {
     const parts = getTimeParts(getDate(item))
-    if (parts.yearLabel && parts.yearLabel !== 'Unknown year') years.add(parts.yearLabel)
+    // A readable stamp has a numeric year; the unknown bucket's label is wording, never a key to compare.
+    if (parts.year !== '') years.add(parts.yearLabel)
   }
   return [...years].sort((left, right) => Number(right) - Number(left))
 }

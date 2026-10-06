@@ -30,6 +30,19 @@ export function monthShortName(month: number, t?: MonthTranslate): string {
   return translated && translated !== key ? translated : ENGLISH_MONTHS[month - 1]
 }
 
+const UNKNOWN_PERIOD_FALLBACK = { year: 'Unknown year', month: 'Unknown month', day: 'Unknown day' } as const
+
+/**
+ * The heading for a record whose date cannot be read, in the viewer's
+ * language (date_unknown_year / _month / _day). English only when no
+ * translator is passed or the pack lacks the key -- never the raw key.
+ */
+export function unknownPeriodLabel(kind: 'year' | 'month' | 'day', t?: MonthTranslate): string {
+  const key = `date_unknown_${kind}`
+  const translated = t?.(key)
+  return translated && translated !== key ? translated : UNKNOWN_PERIOD_FALLBACK[kind]
+}
+
 /** "Sep 2026" / "កញ្ញា 2026" -- a month heading or axis tick that carries its year. */
 export function monthYearLabel(year: number | string, month: number, t?: MonthTranslate): string {
   return `${monthShortName(month, t)} ${year}`

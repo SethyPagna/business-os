@@ -7250,5 +7250,8 @@
   "product_create_approval_unconfirmed": "The approval result could not be confirmed. Refresh the review queue before retrying this same request.",
   "dated_count_date_hint": "The date this snapshot was taken. This column is read DAY first, dd/mm/yyyy (03/09/2026 = 3 September); yyyy-mm-dd also works and can never be misread.",
   "batch_received_required": "Enter the received date.",
-  "batch_unreadable_date_hint": "Stored date \"{value}\" cannot be read as a date. The field is left blank so nothing is guessed: type the correct date, or leave it and it stays as it is."
+  "batch_unreadable_date_hint": "Stored date \"{value}\" cannot be read as a date. The field is left blank so nothing is guessed: type the correct date, or leave it and it stays as it is.",
+  "date_unknown_year": "Unknown year",
+  "date_unknown_month": "Unknown month",
+  "date_unknown_day": "Unknown day"
 }
