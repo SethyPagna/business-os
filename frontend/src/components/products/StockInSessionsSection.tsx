@@ -36,7 +36,8 @@ import { IconField, InsetNumberField } from '../stock-session/StockSessionShared
 import PaginationControls, { clampPage, DEFAULT_PAGE_SIZE } from '../shared/PaginationControls.tsx'
 import InfoHint from '../shared/InfoHint.tsx'
 import { ProductImg, ProductImagePlaceholder } from './shared/primitives.tsx'
-import { batchDisplayLabel } from '../../utils/batchLabel.ts'
+import { batchDisplayLabel, batchReceivedDateText } from '../../utils/batchLabel.ts'
+import { buildSessionHeaderReceivedPatch, seedSessionHeaderDates } from '../../utils/batchDateDraft.ts'
 import CostCalculationFloat from '../shared/CostCalculationFloat.tsx'
 import { useApp } from '../../AppContext'
 import { canEditAcquisitionCosts, canViewAcquisitionCosts } from '../../utils/acquisitionCostAccess.ts'
@@ -252,6 +253,10 @@ export default function StockInSessionsSection({ t, notify, branches, onChanged 
   // refuses the second (H-stock 2); this stops sending it.
   const removeInFlightRef = useRef(false)
   const [editDate, setEditDate] = useState('')
+  // What the received-date field was opened with: only a changed date is sent, and
+  // a stored date the system cannot read seeds blank (see utils/batchDateDraft.ts).
+  const [editDateSeed, setEditDateSeed] = useState('')
+  const [editUnreadableDates, setEditUnreadableDates] = useState<string[]>([])
   const [editSupplier, setEditSupplier] = useState<SupplierChoice>({ supplierId: null, supplierName: '' })
   const [editPayment, setEditPayment] = useState<'paid' | 'credit'>('paid')
   const [editCreditDueDate, setEditCreditDueDate] = useState('')
@@ -337,8 +342,10 @@ export default function StockInSessionsSection({ t, notify, branches, onChanged 
       } satisfies Session
       if (settledAttempt) rememberAttempt(null)
       else setLineRefusal(null)
-      setSelected(session); setSelectedLine(null); setLineEdit(null); setReview(null); setEditing(false); setEditDate(session.receivedDate); setEditSupplier(session.supplier)
-      setEditPayment(session.paymentStatus === 'credit' ? 'credit' : 'paid'); setEditCreditDueDate(session.creditDueDate)
+      setSelected(session); setSelectedLine(null); setLineEdit(null); setReview(null); setEditing(false); setEditSupplier(session.supplier)
+      const dateSeed = seedSessionHeaderDates(session)
+      setEditDate(dateSeed.receivedAt); setEditDateSeed(dateSeed.receivedAt); setEditUnreadableDates(dateSeed.unreadable)
+      setEditPayment(session.paymentStatus === 'credit' ? 'credit' : 'paid'); setEditCreditDueDate(dateSeed.creditDueDate)
       return true
     } catch (error) {
       notify(error instanceof Error ? error.message : tr('load_failed', 'Could not load stock-in session'), 'error')
@@ -380,6 +387,7 @@ export default function StockInSessionsSection({ t, notify, branches, onChanged 
     if (session.hasSharedBatch || session.hasMixedHeader) {
       return tr('shared_batch_session_edit_blocked', 'This session shares a received date with another receipt. Review both receipts before editing it; changing it here could rewrite another session.')
     }
+    if (buildSessionHeaderReceivedPatch(editDate, editDateSeed).receivedBlank) return tr('batch_received_required', 'Enter the received date.')
     if (editPayment === 'credit' && !editCreditDueDate.trim()) return tr('fast_stockin_credit_due', 'Not Yet Paid stock needs a due date')
     return null
   }
@@ -387,12 +395,15 @@ export default function StockInSessionsSection({ t, notify, branches, onChanged 
     if (!selected || busy || pendingAttemptRef.current || lineAttemptBusyRef.current || sessionRemovalBusyRef.current) return
     const refusal = headerSaveRefusal(selected)
     if (refusal) { notify(refusal, 'error'); return }
+    const receivedPatch = buildSessionHeaderReceivedPatch(editDate, editDateSeed)
     setBusy(true)
     try {
       const batches = new Map<number, Row>()
       for (const row of selected.rows) if (Number(row.batch_id)) batches.set(Number(row.batch_id), row)
       for (const [batchId, row] of batches) await updateBatch(batchId, {
-        receivedAt: editDate || null,
+        // Only a changed received date is written back (never a blank, which the
+        // Worker reads as today).
+        ...(receivedPatch.receivedAt !== undefined ? { receivedAt: receivedPatch.receivedAt } : {}),
         supplierId: editSupplier.supplierId,
         supplierName: editSupplier.supplierName,
         paymentStatus: editPayment,
@@ -562,12 +573,12 @@ export default function StockInSessionsSection({ t, notify, branches, onChanged 
       const noSupplier = tr('no_supplier_recorded', 'No supplier')
       return [
         { label: tr('lines', 'Lines'), value: String(session.rows.length) },
-        { label: tr('received_date', 'Received date'), value: change(fmtDate(session.receivedDate || session.createdAt), editDate ? fmtDate(editDate) : '') },
+        { label: tr('received_date', 'Received date'), value: change(session.receivedDate ? batchReceivedDateText(session.receivedDate) : fmtDate(session.createdAt), editDate ? fmtDate(editDate) : '') },
         { label: tr('supplier', 'Supplier'), value: change(session.supplier.supplierName || noSupplier, editSupplier.supplierName || noSupplier) },
         { label: tr('payment', 'Payment'), value: change(paymentLabel(session.paymentStatus), paymentLabel(editPayment)) },
         ...(session.paymentStatus === 'credit' || editPayment === 'credit' ? [{
           label: tr('due_date', 'Due date'),
-          value: change(session.creditDueDate ? fmtDate(session.creditDueDate) : '', editPayment === 'credit' && editCreditDueDate ? fmtDate(editCreditDueDate) : ''),
+          value: change(session.creditDueDate ? batchReceivedDateText(session.creditDueDate) : '', editPayment === 'credit' && editCreditDueDate ? fmtDate(editCreditDueDate) : ''),
         }] : []),
       ]
     }
@@ -629,7 +640,7 @@ export default function StockInSessionsSection({ t, notify, branches, onChanged 
         {editing ? <div className="space-y-1.5 rounded-lg bg-gray-50 p-2.5 dark:bg-gray-800/60">
           <div className="grid grid-cols-2 gap-1.5">
             <IconField icon={CalendarDays} title={receivedDateLabel}>
-              <DateEntryInput className="h-10 w-full pl-8 text-sm" t={t} ariaLabel={receivedDateLabel} placeholder={receivedDateLabel} value={String(editDate || '').slice(0, 10)} onChange={(iso) => setEditDate(iso)} />
+              <DateEntryInput className="h-10 w-full pl-8 text-sm" t={t} ariaLabel={receivedDateLabel} placeholder={receivedDateLabel} value={editDate} onChange={(iso) => setEditDate(iso)} />
             </IconField>
             <CompactSupplierBox idPrefix="stock-session-edit" value={editSupplier} onChange={setEditSupplier} tr={tr} />
           </div>
@@ -642,13 +653,14 @@ export default function StockInSessionsSection({ t, notify, branches, onChanged 
               ))}
             </div>
             <IconField icon={CalendarClock} title={dueDateLabel}>
-              <DateEntryInput className="h-10 w-full pl-8 text-sm" t={t} ariaLabel={dueDateLabel} placeholder={dueDateLabel} disabled={editPayment !== 'credit'} value={editPayment === 'credit' ? String(editCreditDueDate || '').slice(0, 10) : ''} onChange={(iso) => setEditCreditDueDate(iso)} />
+              <DateEntryInput className="h-10 w-full pl-8 text-sm" t={t} ariaLabel={dueDateLabel} placeholder={dueDateLabel} disabled={editPayment !== 'credit'} value={editPayment === 'credit' ? editCreditDueDate : ''} onChange={(iso) => setEditCreditDueDate(iso)} />
             </IconField>
           </div>
+          {editUnreadableDates.length ? <p className="rounded-lg bg-amber-100 px-2 py-1.5 text-[11px] leading-5 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200">{tr('batch_unreadable_date_hint', 'Stored date "{value}" cannot be read as a date. The field is left blank so nothing is guessed: type the correct date, or leave it and it stays as it is.').replace('{value}', editUnreadableDates.join(', '))}</p> : null}
           {selected.hasSharedBatch || selected.hasMixedHeader ? <div className="text-[11px] text-amber-700 dark:text-amber-300">{tr('shared_batch_session_edit_blocked', 'This session contains shared received dates or mixed linked headers. Review its receipts before editing; changing them together could rewrite another session.')}</div> : null}
         </div> : <div className="grid grid-cols-2 gap-x-3 gap-y-1 rounded-lg bg-gray-50 p-2.5 text-xs dark:bg-gray-800/60 sm:grid-cols-4">
           <div className="col-span-2 min-w-0 sm:col-span-1"><div className="detail-scroll-text font-semibold text-gray-900 dark:text-white">{selected.supplier.supplierName || tr('no_supplier_recorded', 'No supplier')}</div><div className="detail-scroll-text text-gray-400">{selected.branchName || '—'}</div></div>
-          <div><div className="text-gray-400">{tr('received_date', 'Received date')}</div><div className="text-gray-700 dark:text-gray-200">{fmtDate(selected.receivedDate || selected.createdAt)}</div></div>
+          <div><div className="text-gray-400">{tr('received_date', 'Received date')}</div><div className="text-gray-700 dark:text-gray-200">{selected.receivedDate ? batchReceivedDateText(selected.receivedDate) : fmtDate(selected.createdAt)}</div></div>
           <div><div className="text-gray-400">{tr('recorded', 'Recorded')}</div><div className="text-gray-700 dark:text-gray-200">{fmtDateTime24(selected.createdAt)}</div></div>
           <div><div className="text-gray-400">{tr('cashier_user', 'User')}</div><div className="detail-scroll-text text-gray-700 dark:text-gray-200">{selected.userName || tr('unknown_user', 'Unknown user')}</div></div>
           {canViewCosts ? <div><div className="text-gray-400">{tr('total_cost', 'Total cost')}</div><div className="font-semibold text-gray-700 dark:text-gray-200">{selected.costUsd == null ? '—' : `$${selected.costUsd.toFixed(2)}`}</div></div> : null}

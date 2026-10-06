@@ -12,7 +12,7 @@
 //     `receivedAt: draft.receivedAt || null` -- a blank -- on every save.
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { buildBatchDatePatch, seedBatchDateDraft } from '../src/utils/batchDateDraft.ts'
+import { buildBatchDatePatch, buildSessionHeaderReceivedPatch, seedBatchDateDraft, seedSessionHeaderDates } from '../src/utils/batchDateDraft.ts'
 import { buildStockInLineEditBody, stockInLineDraft } from '../src/utils/stockInLineEdit.ts'
 
 let failed = 0
@@ -89,6 +89,22 @@ check('the stock-in line editor seeds the same business day, and never a slash v
   const untouched = buildStockInLineEditBody({ ...base, batch_received_at: '03/04/2026' }, stockInLineDraft({ ...base, batch_received_at: '03/04/2026' }), 'req-1', false)
   assert.equal(untouched.ok, true)
   if (untouched.ok) assert.equal('received_date' in untouched.body, false)
+})
+
+check('the stock-in SESSION header edit follows the same seed / no-resend rule', () => {
+  const ok = seedSessionHeaderDates({ receivedDate: '2026-10-05 18:30:00', creditDueDate: '2026-11-01' })
+  assert.deepEqual(ok, { receivedAt: '2026-10-06', creditDueDate: '2026-11-01', unreadable: [] }, 'a UTC timestamp seeds its business day; the due date is literal')
+  const bad = seedSessionHeaderDates({ receivedDate: '03/04/2026', creditDueDate: '2029' })
+  assert.deepEqual(bad, { receivedAt: '', creditDueDate: '', unreadable: ['03/04/2026', '2029'] })
+  // Untouched save on an unreadable date: nothing sent, nothing flagged (the old code sent null = today).
+  assert.deepEqual(buildSessionHeaderReceivedPatch(bad.receivedAt, bad.receivedAt), { receivedBlank: false })
+  assert.deepEqual(buildSessionHeaderReceivedPatch('2026-03-04', bad.receivedAt), { receivedAt: '2026-03-04', receivedBlank: false })
+  assert.deepEqual(buildSessionHeaderReceivedPatch('', ok.receivedAt), { receivedBlank: true }, 'clearing a real date is refused, not sent')
+  const source = readFileSync(new URL('../src/components/products/StockInSessionsSection.tsx', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
+  assert.doesNotMatch(source, /slice\(0, 10\)/, 'no UTC-day slice left in the session editor')
+  assert.doesNotMatch(source, /receivedAt: editDate \|\| null/, 'the unconditional resend is gone')
+  assert.match(source, /seedSessionHeaderDates\(session\)/)
+  assert.match(source, /buildSessionHeaderReceivedPatch\(editDate, editDateSeed\)/)
 })
 
 check('the promotions banner modal sends date-only ISO, never a device-zone instant', () => {

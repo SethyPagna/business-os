@@ -74,3 +74,47 @@ export function buildBatchDatePatch(draft: BatchDateDraft, seed: Pick<BatchDateS
   if (draft.expiryDate !== seed.expiryDateSeed) patch.expiryDate = draft.expiryDate || null
   return { patch, receivedBlank: receivedChanged && !draft.receivedAt }
 }
+
+// ---------------------------------------------------------------------------
+// The stock-in SESSION header edit (StockInSessionsSection) -- same rules, one
+// level up: it PATCHes every lot of the session with the header's received date
+// and due date. It used to seed `String(date).slice(0, 10)` and resend
+// `receivedAt: editDate || null` on every save, so an unreadable stored date was
+// either carried into the day-first field or replaced by "today" (a blank
+// received date means "today" to the Worker).
+// ---------------------------------------------------------------------------
+
+export interface SessionHeaderDateSeed {
+  receivedAt: string
+  creditDueDate: string
+  /** The stored texts that could not be seeded, for the "type the correct date" notice. */
+  unreadable: string[]
+}
+
+export function seedSessionHeaderDates(session: { receivedDate?: string | null; creditDueDate?: string | null }): SessionHeaderDateSeed {
+  const storedReceived = String(session.receivedDate ?? '').trim()
+  const storedDue = String(session.creditDueDate ?? '').trim()
+  const receivedAt = batchReceivedDayIso(storedReceived) || ''
+  const creditDueDate = STORED_ISO_DATE.test(storedDue) ? storedDue.slice(0, 10) : ''
+  return {
+    receivedAt,
+    creditDueDate,
+    unreadable: [
+      storedReceived && !receivedAt ? storedReceived : '',
+      storedDue && !creditDueDate ? storedDue : '',
+    ].filter(Boolean),
+  }
+}
+
+/**
+ * The received date to send for a header save: only when it changed. Emptying a
+ * received date that had a value is flagged (`receivedBlank`) so the caller
+ * refuses it. The due date is not diffed here: a credit session always sends
+ * its due date with the payment status (the Worker requires the pair), and the
+ * existing "credit needs a due date" refusal already blocks a blank one.
+ */
+export function buildSessionHeaderReceivedPatch(editReceivedAt: string, seedReceivedAt: string): { receivedAt?: string; receivedBlank: boolean } {
+  if (editReceivedAt === seedReceivedAt) return { receivedBlank: false }
+  if (!editReceivedAt) return { receivedBlank: true }
+  return { receivedAt: editReceivedAt, receivedBlank: false }
+}
