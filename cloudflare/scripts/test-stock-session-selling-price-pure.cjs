@@ -85,6 +85,7 @@ let auditCalls = []
 const auditStub = { audit: async (...args) => { auditCalls.push(args) }, changedFields: realAudit.changedFields }
 const shared = {
   '../lib/receivingBranch': loadReal('lib/receivingBranch.ts'),
+  '../lib/branchRedirectWrite': require('./harness/branch_redirect_write.cjs'), // CUTOVER-LR
   '../lib/db': dbOverride,
   '../lib/auth': { requireAuth: async (_c, next) => { await next() } },
   '../lib/audit': auditStub,

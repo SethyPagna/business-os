@@ -205,9 +205,11 @@ const stockRevert = loadReal('lib/stockRevert.ts', {
   './stockCondition': stockCondition,
   // Sale/return-made stock is named by its record (revert_from_sale / _from_return).
   './movementReference': movementReferenceKernel,
+  './branchRedirectWrite': require('./harness/branch_redirect_write.cjs'), // CUTOVER-LR
 })
 
 const inventoryRoute = loadReal('routes/inventory.ts', {
+  '../lib/branchRedirectWrite': require('./harness/branch_redirect_write.cjs'), // CUTOVER-LR
   '../lib/receivingBranch': loadReal('lib/receivingBranch.ts'),
   '../lib/continuousReadWindow': loadReal('lib/continuousReadWindow.ts'),
   // p3/reasons: the one shared reason-length cap the route enforces.

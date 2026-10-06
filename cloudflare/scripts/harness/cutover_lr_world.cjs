@@ -160,6 +160,9 @@ const scrub = (text) => text
   .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g, '<uuid>')
   .replace(/\d{4}-\d{2}-\d{2}[ T][\d:.]+Z?/g, '<ts>')
   .replace(/"request_digest":"[0-9a-f]{64}"/g, '"request_digest":"<digest>"')
+  // A shift code carries the opening minute (S-<yyyymmdd>-<HHMM>-<cashier>); the oracle and the current run can
+  // straddle a minute boundary, which is clock noise, not a behaviour change.
+  .replace(/\bS-\d{8}-\d{4}-/g, 'S-<date>-<hhmm>-')
 const normalised = (capture) => scrub(JSON.stringify(capture))
 
 // The redirect refusal for Old Shop (2) with LC Store (1) as its successor and only target.

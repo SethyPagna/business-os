@@ -11,7 +11,7 @@ import {
   loadShiftFigures, loadShiftReconciliation, type ShiftFigures, type ShiftReconciliation,
 } from '../lib/shiftReconciliation'
 import type { Env } from '../index'
-import { branchEffectRefusal, branchRedirectGuard, branchRedirectGuardRefusal, branchRedirectTarget, isBranchRedirectGuardError, requestBranchEffect } from '../lib/branchRedirectWrite'
+import { branchEffectRefusal, branchRedirectGuard, branchRedirectGuardRefusal, branchRedirectTarget, isBranchRedirectGuardError, requestBranchEffect, type BranchEffect } from '../lib/branchRedirectWrite'
 
 const app = new Hono<{ Bindings: Env; Variables: { user: SessionUser } }>()
 app.use('*', requireAuth)
@@ -878,14 +878,19 @@ app.post('/open', async (c) => {
   if (body.branch_id != null && String(body.branch_id).trim() !== '' && addressedBranchId == null) return c.json({ error: 'Invalid branch id.' }, 400)
   const db = getDb(c.env)
   // A shift opened at a branch that has since been disabled opens at the active branch the operator confirmed.
-  let landing
-  try { landing = addressedBranchId == null ? null : await requestBranchEffect(db, addressedBranchId, () => branchRedirectTarget(c)) } catch (error) {
-    const refusal = branchEffectRefusal(error)
-    if (refusal) return c.json(refusal, 409)
-    throw error
+  // An active branch answers from the one read it always had; only a branch that read refuses consults the
+  // branch directory (so while every branch is active the open costs no extra query).
+  let landing: BranchEffect | null = null
+  let branchId = addressedBranchId
+  let branch = await resolveBranch(db, branchId)
+  if (addressedBranchId != null && !branch) {
+    try { landing = await requestBranchEffect(db, addressedBranchId, () => branchRedirectTarget(c)) } catch (error) {
+      const refusal = branchEffectRefusal(error)
+      if (refusal) return c.json(refusal, 409)
+      throw error
+    }
+    if (landing.redirected) { branchId = landing.effectBranchId; branch = await resolveBranch(db, branchId) }
   }
-  const branchId = landing ? landing.effectBranchId : addressedBranchId
-  const branch = await resolveBranch(db, branchId)
   if (branchId != null && !branch) return c.json({ error: 'Branch not found or inactive.' }, 400)
   const policy = await readShiftPolicy(db)
   if (policy.admin_exempt && isAdminControlUser(user)) return c.json({ error: 'This account is exempt from shifts.', exempt: true }, 403)

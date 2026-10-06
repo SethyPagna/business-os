@@ -124,6 +124,7 @@ const productMergeSnapshot = loadReal('lib/productMergeSnapshot.ts', { './db': {
 const schemaProbeReal = loadReal('lib/schemaProbe.ts')
 const productWrites = loadReal('lib/productWrites.ts', { './schemaProbe': schemaProbeReal,
   './receivingBranch': loadReal('lib/receivingBranch.ts'),
+  './branchRedirectWrite': require('./harness/branch_redirect_write.cjs'), // CUTOVER-LR
   './businessMaintenanceGuard': loadReal('lib/businessMaintenanceGuard.ts'),
   './pendingActions': loadReal('lib/pendingActions.ts', { './db': { getDb: () => dbShim } }),
   './audit': loadReal('lib/audit.ts', { './db': { getDb: () => dbShim } }),
@@ -156,6 +157,7 @@ const productsRoute = loadReal('routes/products.ts', {
   // N1 added the plan budget gate to products.ts. This pure module must be
   // loaded from src, not resolved relative to this scripts/ harness.
   '../lib/planTier': loadReal('lib/planTier.ts'),
+  '../lib/branchRedirectWrite': require('./harness/branch_redirect_write.cjs'), // CUTOVER-LR
   '../lib/acquisitionCostAccess': acquisitionCostAccess,
   '../lib/promotionRules': promotionRules,
   '../lib/actorSnapshot': actorSnapshotKernel,
