@@ -10,9 +10,10 @@ import { validateCustomerReturnRestorationCohortV1, validateCustomerReturnRestor
   type CustomerReturnRestorationV1 } from './customerReturnEntitlement'
 import { subtractDecimalSum } from './moneyPrecision'
 import { assertReturnCreateCapacity, ReturnCapacityError, type ReturnCapacityParams } from './returnCreateAction'
-import { roundMoney2, sumMoney4 } from './moneyPrecision'
+import { roundMoney2, roundMoney4, sumMoney4 } from './moneyPrecision'
 import { recordedSaleOutstandingUsd } from './saleStatusResolution'
-import { ReturnRefundSplitError, saleStatusWithReturns, type ReturnDebtSale } from './returnRefundSplit'
+import { PRIOR_RETURN_MONEY_SQL, priorReturnMoney, ReturnRefundSplitError, saleCarriesDebt, saleStatusWithReturns, splitReturnRefund,
+  type PriorReturnMoney, type PriorReturnMoneyRow, type ReturnDebtSale } from './returnRefundSplit'
 
 export const RETURN_BULK_ACTION_KIND = 'return.fields.bulk'
 export const RETURN_BULK_LIMIT = 25
@@ -93,7 +94,15 @@ type Member = {
   reason: 'changed' | 'source_mismatch' | 'scope_mismatch'
   updateSale: boolean
   stock: StockDelta[]
+  /**
+   * RET-A P3: the debt split a restore gives a return cancelled before 0234
+   * (no refund currency, no debt reduction). Absent on every other member and
+   * on snapshots written before this field existed: those write status only.
+   */
+  money?: { before: ReturnMoneyState; after: ReturnMoneyState }
 }
+
+type ReturnMoneyState = { owed_reduction_usd: number; refund_currency: string | null }
 
 type SaleStatusSnapshot = { saleId: number; before: string; after: string }
 type Snapshot = { version: 1; operationId: string; field: ReturnField; members: Member[]; saleStatuses?: SaleStatusSnapshot[] }
@@ -257,11 +266,13 @@ function stockStatements(member: Member, direction: 1 | -1, user: SessionUser, s
 function memberStatements(member: Member, direction: 1 | -1, user: SessionUser, stamp: string): Statement[] {
   if (!member.changed) return []
   const target = direction > 0 ? member.after : member.before
+  const money = member.money ? (direction > 0 ? member.money.after : member.money.before) : null
   return [
     ...stockStatements(member, direction, user, stamp),
     {
-      sql: `UPDATE returns SET status=@status,return_type=@return_type,supplier_settlement=@supplier_settlement,updated_at=@stamp WHERE id=@id`,
-      params: { ...target, stamp, id: member.id },
+      sql: `UPDATE returns SET status=@status,return_type=@return_type,supplier_settlement=@supplier_settlement${money
+        ? ',owed_reduction_usd=@owed_reduction_usd,refund_currency=@refund_currency' : ''},updated_at=@stamp WHERE id=@id`,
+      params: { ...target, ...(money || {}), stamp, id: member.id },
     },
   ]
 }
@@ -348,13 +359,18 @@ async function debtAwareSaleStatuses(db: D1Compat, members: Member[], target: 'b
       AND EXISTS(SELECT 1 FROM json_each(@saleIds) ids WHERE CAST(ids.value AS INTEGER)=returns.sale_id)`)
     .all<{ id: number; sale_id: number; status: string | null; owed_reduction_usd: number | null }>({ saleIds: JSON.stringify(saleIds) })
   const projected = new Map(members.filter((member) => member.changed).map((member) => [member.id, member[target].status]))
+  // A restored pre-0234 return carries the debt reduction its split gives it (attachRestoreSplits).
+  const projectedReduction = new Map(members.filter((member) => member.changed && member.money)
+    .map((member) => [member.id, member.money![target].owed_reduction_usd]))
+  const reductionOfRow = (row: { id: number; owed_reduction_usd: number | null }) =>
+    projectedReduction.get(Number(row.id)) ?? (Number(row.owed_reduction_usd) || 0)
   return quantityStatuses.map((status) => {
     const sale = sales.find((row) => Number(row.id) === status.saleId)
     if (!sale) return status
     const own = returns.filter((row) => Number(row.sale_id) === status.saleId)
     const isActive = (row: typeof own[number], changed: boolean) =>
       (changed ? projected.get(Number(row.id)) ?? normalize(row.status, 'completed') : normalize(row.status, 'completed')) !== 'cancelled'
-    const reductionOf = (rows: typeof own) => sumMoney4(rows.map((row) => Number(row.owed_reduction_usd) || 0))
+    const reductionOf = (rows: typeof own) => sumMoney4(rows.map(reductionOfRow))
     const restored = own.filter((row) => !isActive(row, false) && isActive(row, true))
     const restoredReduction = reductionOf(restored)
     try {
@@ -368,7 +384,7 @@ async function debtAwareSaleStatuses(db: D1Compat, members: Member[], target: 'b
       const after = saleStatusWithReturns({
         sale,
         activeOwedReductionUsd: reductionOf(own.filter((row) => isActive(row, true))),
-        loweredDebt: own.some((row) => Number(row.owed_reduction_usd) > 0),
+        loweredDebt: own.some((row) => reductionOfRow(row) > 0),
         quantityStatus: status.after,
       })
       return { ...status, after }
@@ -377,6 +393,57 @@ async function debtAwareSaleStatuses(db: D1Compat, members: Member[], target: 'b
       throw error
     }
   })
+}
+
+/**
+ * RET-A P3 (verifier, 6 Oct 2026): a return recorded before 0234 has no
+ * refund currency and no debt reduction -- it was counted as cash. Restoring
+ * one that was cancelled, on a sale that carries a debt, puts it through the
+ * split POST / records with: it lowers what is still owed first and only the
+ * rest is cash (owner rule 29 Sep). The split rides on the member, so the
+ * snapshot replays it without the client: undo writes the pre-restore columns
+ * back, redo the same split (the replay guards pin the sale revision).
+ */
+async function attachRestoreSplits(db: D1Compat, members: Member[]): Promise<void> {
+  const restoring = members.filter((member) => member.changed && member.scope === 'customer' && member.saleId
+    && member.before.status === 'cancelled' && member.after.status !== 'cancelled')
+  if (!restoring.length) return
+  const rows = await rowsForIds<{ id: number; total_refund_usd: number | null; refund_currency: string | null; owed_reduction_usd: number | null }>(
+    db, restoring.map((member) => member.id),
+    (marks) => `SELECT id,total_refund_usd,refund_currency,owed_reduction_usd FROM returns WHERE id IN (${marks}) ORDER BY id`)
+  for (const saleId of [...new Set(restoring.map((member) => member.saleId!))]) {
+    const own = rows.filter((row) => row.refund_currency == null && Number(row.total_refund_usd) > 0
+      && restoring.some((member) => member.id === Number(row.id) && member.saleId === saleId))
+    if (!own.length) continue
+    const sale = await db.prepare(`SELECT total_usd,amount_paid_usd,amount_paid_khr,exchange_rate,money_precision_version,
+      calculated_total_usd,sale_status,status_before_return FROM sales WHERE id=?`).get<ReturnDebtSale>([saleId])
+    if (!sale) continue
+    let prior: PriorReturnMoney = priorReturnMoney(await db.prepare(PRIOR_RETURN_MONEY_SQL).get<PriorReturnMoneyRow>({ saleId, excludeReturnId: null }))
+    if (!saleCarriesDebt(sale, prior.loweredDebt)) continue
+    for (const row of own) {
+      const refundUsd = roundMoney4(Number(row.total_refund_usd))
+      let owedReductionUsd: number
+      try {
+        owedReductionUsd = splitReturnRefund({ sale, prior, refundUsd }).owedReductionUsd
+      } catch (error) {
+        if (error instanceof ReturnRefundSplitError) {
+          fail(error.code === 'customer_return_refund_exceeds_paid'
+            ? 'Restoring this return would refund more cash than the customer paid on this Not Paid sale. Record a new return instead.'
+            : 'The sale payment cannot be read. Review the sale before changing its returns.', 409, error.code)
+        }
+        throw error
+      }
+      restoring.find((member) => member.id === Number(row.id))!.money = {
+        before: { owed_reduction_usd: Number(row.owed_reduction_usd) || 0, refund_currency: null },
+        after: { owed_reduction_usd: owedReductionUsd, refund_currency: 'USD' },
+      }
+      prior = {
+        refundUsd: sumMoney4([prior.refundUsd, refundUsd]),
+        owedReductionUsd: sumMoney4([prior.owedReductionUsd, owedReductionUsd]),
+        loweredDebt: prior.loweredDebt || owedReductionUsd > 0,
+      }
+    }
+  }
 }
 
 function returnSaleRecordEvents(snapshot: Snapshot, generation: number, via: 'apply' | 'undo' | 'redo', user: SessionUser, stamp: string) {
@@ -703,6 +770,7 @@ export async function applyReturnBulkActionOutcome(env: Env, user: SessionUser, 
     return { receipt: JSON.parse(String(previous.receipt_json)) as Row, wrote: false }
   }
   const { members, guards } = await buildMembers(db, request)
+  if (request.field === 'status') await attachRestoreSplits(db, members)
   const entitlement = await v1EntitlementGuards(db, members, 'after')
   guards.push(...entitlement.guards)
   const operationId = crypto.randomUUID()
