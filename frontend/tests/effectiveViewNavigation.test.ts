@@ -22,7 +22,7 @@ visit(ast)
 const callbackJs = transformSync(`const callback = ${pageCallback}`, { loader: 'ts' }).code
 const pageAccess = (user: any) => {
   const authority = effectivePermissions(user)
-  return new Function('user', 'can', 'getPermissionTier', 'PAGE_PERMISSIONS', `${callbackJs}; return callback`)(user, authority.can, authority.getPermissionTier, new Function(`return (${pageMap})`)())
+  return new Function('user', 'can', 'getPermissionTier', 'hasPermission', 'PAGE_PERMISSIONS', `${callbackJs}; return callback`)(user, authority.can, authority.getPermissionTier, authority.hasPermission, new Function(`return (${pageMap})`)())
 }
 for (const item of NAV_ITEMS) assert.ok(Object.hasOwn(new Function(`return (${pageMap})`)(), item.id), `current page ${item.id} must be modeled`)
 assert.equal(pageAccess({ permissions: {} })('unknown-page'), false)
@@ -43,6 +43,11 @@ assert.equal(pageAccess({ permissions: { contacts: true, 'contacts:view': false 
 assert.equal(pageAccess({ permissions: { contacts: true, 'contacts:view': false, 'contacts:add': false } })('contacts'), true, 'Edit alone keeps it open')
 assert.equal(pageAccess({ permissions: { contacts: true, 'contacts:view': false, 'contacts:edit': false } })('contacts'), true, 'Add alone keeps it open')
 assert.equal(pageAccess({ permissions: { contacts: true, 'contacts:view': false, 'contacts:add': false, 'contacts:edit': false } })('contacts'), false)
+// Contacts > Members has its own grant: holding only portal_member_links opens the Contacts page,
+// and the same grant switched off (or absent) does not.
+assert.equal(pageAccess({ permissions: { portal_member_links: true } })('contacts'), true, 'Approve member links alone opens Contacts')
+assert.equal(pageAccess({ permissions: { portal_member_links: false } })('contacts'), false, 'no Contacts grant and no member-link grant: closed')
+assert.equal(pageAccess({ permissions: { portal_member_links: true } })('sales'), false, 'the member-link grant opens Contacts and nothing else')
 const downgraded = { role_permissions: { all: true }, permissions: { all: false, products: 'review', products_image_only: true } }
 assert.equal(pageAccess(downgraded)('products'), true)
 assert.equal(pageAccess({ ...downgraded, permissions: { ...downgraded.permissions, 'products:view': false } })('products'), false)

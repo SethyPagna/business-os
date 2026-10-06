@@ -11,6 +11,7 @@ import Gauge from 'lucide-react/dist/esm/icons/gauge.js'
 import Gift from 'lucide-react/dist/esm/icons/gift.js'
 import HardDriveDownload from 'lucide-react/dist/esm/icons/hard-drive-download.js'
 import History from 'lucide-react/dist/esm/icons/history.js'
+import Link2 from 'lucide-react/dist/esm/icons/link-2.js'
 import ListChecks from 'lucide-react/dist/esm/icons/list-checks.js'
 import PackagePlus from 'lucide-react/dist/esm/icons/package-plus.js'
 import PackageSearch from 'lucide-react/dist/esm/icons/package-search.js'
@@ -37,6 +38,7 @@ const ICONS_BY_SECTION: Record<string, LucideIcon> = {
   'contacts:suppliers': Factory,
   'contacts:delivery': Bike,
   'contacts:duplicates': ConflictIcon,
+  'contacts:members': Link2,
   'promotions:rules': ListChecks,
   'promotions:discounts': BadgePercent,
   'promotions:loyalty': Gift,
