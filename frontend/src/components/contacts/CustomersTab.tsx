@@ -139,7 +139,7 @@ interface CustomerRow extends Record<string, unknown> {
   points_deducted?: number | string | null
   // Present when this contact has signed up for a storefront account (§2);
   // null otherwise. Read-only flag joined by the customers list endpoint.
-  portal_account?: { membershipId: string; createdAt: string | null } | null
+  portal_account?: { membershipId: string | null; memberCode?: string | null; createdAt: string | null } | null
 }
 
 // Sort vocabulary (driven by the filter-menu Sort/Group sections). This list
@@ -274,6 +274,12 @@ export function serializeContactOptions(options: ContactOption[]): string {
 function tr(t: TranslateFn, key: string, fallback: string): string {
   const value = typeof t === 'function' ? t(key) : null
   return value && value !== key ? value : fallback
+}
+
+// G38: the badge names the website member (its W- code) so staff can find it in Contacts > Members.
+function portalAccountTitle(t: TranslateFn, account: CustomerRow['portal_account']): string {
+  const title = tr(t, 'portal_account_flag_title', 'Has a storefront account')
+  return account?.memberCode ? `${title}: ${account.memberCode}` : title
 }
 
 const ContactImportModal = lazyRetry(() => import('./ContactImportModal'), 'customers-contact-import')
@@ -1287,7 +1293,7 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
                 <span className="inline-flex items-center gap-1.5">
                   {customerRow.name}
                   {customerRow.portal_account ? (
-                    <span className="inline-flex items-center rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 dark:bg-emerald-400/15 dark:text-emerald-300" title={tr(t, 'portal_account_flag_title', 'Has a storefront account')}>
+                    <span className="inline-flex items-center rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 dark:bg-emerald-400/15 dark:text-emerald-300" title={portalAccountTitle(t, customerRow.portal_account)}>
                       {tr(t, 'portal_account_flag', 'Account')}
                     </span>
                   ) : null}
@@ -1403,7 +1409,7 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
                     </span>
                   ) : null}
                   {customerRow.portal_account ? (
-                    <span className="inline-flex shrink-0 items-center rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 dark:bg-emerald-400/15 dark:text-emerald-300" title={tr(t, 'portal_account_flag_title', 'Has a storefront account')}>
+                    <span className="inline-flex shrink-0 items-center rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 dark:bg-emerald-400/15 dark:text-emerald-300" title={portalAccountTitle(t, customerRow.portal_account)}>
                       {tr(t, 'portal_account_flag', 'Account')}
                     </span>
                   ) : null}

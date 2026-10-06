@@ -173,6 +173,19 @@ try {
     assert.deepEqual(row(byKeeper.rows, 'storefront').choice, { source: '11' })
   })
 
+  await test('a G38 member with no LC id is labelled by its W- code, never blank, and still counts as an account', async () => {
+    const members = RECORDS.map((record) => (record.portal_account
+      ? { ...record, portal_account: { accountId: record.id, memberCode: `W-${record.id}AA-BBBB`, membershipId: null, createdAt: null } }
+      : record))
+    const { rows } = await open(adapterFor(), members)
+    const storefront = row(rows, 'storefront')
+    assert.equal(storefront.kind, 'choice', 'two holders, so the operator chooses')
+    assert.match(storefront.final.text, /^W-1[13]AA-BBBB$/, 'the label is the W- code')
+    // control: an old account keeps its LC id as the label
+    const legacy = await open(adapterFor(), RECORDS)
+    assert.equal(row(legacy.rows, 'storefront').final.text, 'M-1')
+  })
+
   await test('one account or none: nothing to choose', async () => {
     const single = RECORDS.map((record) => (record.id === 13 ? { ...record, portal_account: null, membership_number: null } : record))
     const { rows } = await open(adapterFor(), single)

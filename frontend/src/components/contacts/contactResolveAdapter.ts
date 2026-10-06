@@ -124,7 +124,10 @@ function membershipOf(row: ContactRow | null | undefined): string | null {
 function accountOf(row: ContactRow | null | undefined): string | null {
   const account = row?.portal_account
   if (!account || typeof account !== 'object') return null
-  return String((account as { membershipId?: unknown }).membershipId ?? '').trim()
+  // G38: a website member made after members left the customer list has no LC
+  // id (membershipId is null); its W- code is what staff know it by.
+  const { membershipId, memberCode } = account as { membershipId?: unknown; memberCode?: unknown }
+  return String(membershipId || memberCode || '').trim()
 }
 
 function recordLabel(name: unknown, id: number): string {
