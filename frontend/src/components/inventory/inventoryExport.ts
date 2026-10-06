@@ -1,4 +1,5 @@
 import { formatPriceNumber } from '../../utils/pricing.ts'
+import { fmtDateTime24 } from '../../utils/formatters.ts'
 // N13: the movement CSV names the RECORD a group belongs to, through the same
 // two functions the drill header above it uses. A spreadsheet that carries
 // Branch / Reason / User but not the receipt cannot be matched back to a sale,
@@ -40,7 +41,8 @@ const MOVEMENT_EXPORT_REFERENCE_WORDS = { sale: 'Sale', return: 'Return' }
 
 function buildMovementRows(groups: AnyRecord[]): AnyRecord[] {
   return groups.map((group) => ({
-    Date: group.latest_at || '',
+    // A ledger a person reads: dd/mm/yyyy HH:mm business time, as the page shows it.
+    Date: group.latest_at ? fmtDateTime24(group.latest_at) : '',
     Activity: group.movementLabel || '',
     Products: group.productSummary || '',
     Records: group.items?.length || 0,

@@ -14,7 +14,7 @@ import Undo2 from 'lucide-react/dist/esm/icons/undo-2.js'
 import Plus from 'lucide-react/dist/esm/icons/plus.js'
 import Tags from 'lucide-react/dist/esm/icons/tags.js'
 import { isBrokenLocalizedString as isBrokenLocalizedStringHook, useApp as useAppHook, useSync as useSyncHook } from '../../AppContext.tsx'
-import { fmtClock24, parseServerTimestampMs } from '../../utils/formatters'
+import { fmtClock24, fmtDateTime24, parseServerTimestampMs } from '../../utils/formatters'
 import ExportMenu from '../shared/ExportMenu'
 import FilterMenu from '../shared/FilterMenu'
 import { loadSortSpec, saveSortSpec, sortRecords, type SortField, type SortSpec } from '../../utils/listSort'
@@ -297,7 +297,8 @@ function exportReturnRows(rows: ReturnRow[] = [], tr: TranslateFn): Array<Record
   return rows.map((ret) => ({
     Return_Number: ret.return_number || '',
     Scope: normalizeScope(ret.return_scope),
-    Date: ret.created_at || '',
+    // A history a person reads: dd/mm/yyyy HH:mm business time, as the page shows it.
+    Date: ret.created_at ? fmtDateTime24(ret.created_at) : '',
     Receipt: ret.receipt_number || '',
     Customer: normalizeScope(ret.return_scope) === SUPPLIER_SCOPE ? '' : customerDisplayName(ret, tr('walk_in', 'General')),
     Supplier: ret.supplier_name || '',

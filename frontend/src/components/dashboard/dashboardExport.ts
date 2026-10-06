@@ -4,8 +4,7 @@ import { buildStandaloneReportHtml } from '../../utils/exportReports.tsx'
 import { buildReportManifestRows, buildReportPackageFiles } from '../../utils/exportPackage.ts'
 import { formatPriceNumber } from '../../utils/pricing.ts'
 import { effectiveLowStockThreshold, type LowStockConfig } from '../../utils/lowStockSettings.ts'
-import { fmtDayFirst } from '../../utils/formatters.ts'
-import { BUSINESS_TIME_ZONE } from '../../constants.ts'
+import { fmtDateTime24 } from '../../utils/formatters.ts'
 
 type MetricMap = Record<string, number | undefined>
 type Row = Record<string, unknown>
@@ -174,11 +173,7 @@ function buildDashboardManifestEntries(ctx: DashboardExportContext): Row[] {
   // a plain manifest string a person reads directly, unlike the exportedAt
   // instant handed to buildStandaloneReportHtml below (which runs it through
   // fmtTime itself), so the conversion has to happen here.
-  const generatedAt = fmtDayFirst(new Date(), {
-    year: 'numeric', month: '2-digit', day: '2-digit',
-    hour: '2-digit', minute: '2-digit', second: '2-digit',
-    hourCycle: 'h23', timeZone: BUSINESS_TIME_ZONE,
-  })
+  const generatedAt = fmtDateTime24(new Date())
   return [
     { metric: 'Range Preset', value: ctx.periodShort },
     { metric: 'Date Range', value: ctx.rangeLabel },
@@ -265,7 +260,9 @@ function buildDashboardOutStockRows(ctx: DashboardExportContext): Row[] {
 function buildDashboardRecentRows(ctx: DashboardExportContext): Row[] {
   return (ctx.summary?.recent_sales || []).map((sale) => ({
     Receipt: sale.receipt_number || '',
-    Created_At: sale.created_at || '',
+    // A report a person reads: the same dd/mm/yyyy HH:mm business time the
+    // dashboard card shows, not the raw UTC stamp.
+    Created_At: sale.created_at ? fmtDateTime24(sale.created_at) : '',
     Branch: sale.branch_name || '',
     Customer: sale.customer_name || ctx.translateOr('walk_in', 'General'),
     Total_USD: priceCsv(sale.total_usd || sale.total),

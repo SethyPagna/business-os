@@ -1,4 +1,5 @@
 import { formatPriceNumber } from '../../../utils/pricing.ts'
+import { fmtDateTime24 } from '../../../utils/formatters.ts'
 
 interface BranchStockRecord {
   branch_id?: unknown
@@ -127,7 +128,9 @@ export function buildProductExportRows(products: ProductRecord[] = [], options: 
       Brand: String(product.brand || ''),
       Unit: String(product.unit || ''),
       Description: String(product.description || ''),
-      Created_At: String(product.created_at || ''),
+      // Read by people only (nothing imports a product's creation stamp), so it
+      // is the canonical dd/mm/yyyy HH:mm business time.
+      Created_At: product.created_at ? fmtDateTime24(product.created_at as string) : '',
       Selling_Price_USD: priceCsv(product.selling_price_usd),
       Selling_Price_KHR: priceCsv(product.selling_price_khr),
       // Was VIP_Price_* reading special_price_*. Per the 2026-09-04 ruling that
@@ -142,6 +145,11 @@ export function buildProductExportRows(products: ProductRecord[] = [], options: 
       Discount_Amount_KHR: priceCsv(product.discount_amount_khr || 0),
       Discount_Label: String(product.discount_label || ''),
       Discount_Badge_Color: String(product.discount_badge_color || ''),
+      // Discount_Starts_At / Discount_Ends_At stay EXACTLY as stored: this export
+      // is a re-importable file (see branchId above) and the importer reads
+      // these two cells back as raw text into products.discount_*_at. A
+      // dd/mm/yyyy cell would re-import as an unparsed string no discount
+      // window can read. (Revisit once the importer parses them -- DATE-W.)
       Discount_Starts_At: String(product.discount_starts_at || ''),
       Discount_Ends_At: String(product.discount_ends_at || ''),
       Cost_Price_USD: priceCsv(product.cost_price_usd || 0),
