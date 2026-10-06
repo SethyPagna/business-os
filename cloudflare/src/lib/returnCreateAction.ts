@@ -60,6 +60,9 @@ type CanonicalV1Item = {
 }
 
 function positiveId(value: unknown): number | null {
+  // RET-A P3 (verifier N3): an id is a number or a digit string. Number(true)
+  // is 1, so `sale_id: true` used to record a return against sale #1.
+  if (typeof value !== 'number' && !(typeof value === 'string' && /^\s*\d+\s*$/.test(value))) return null
   const number = Number(value)
   return Number.isSafeInteger(number) && number > 0 ? number : null
 }

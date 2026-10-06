@@ -8,7 +8,9 @@ const REFUND_CURRENCIES: readonly RefundCurrency[] = ['USD', 'KHR']
 
 export function parseRefundCurrency(value: unknown): RefundCurrency {
   if (value == null || value === '') return DEFAULT_REFUND_CURRENCY
-  const currency = String(value).trim().toUpperCase()
+  // RET-A P3 (verifier N8): only a text code; ['khr'] or {} is not a currency.
+  if (typeof value !== 'string') throw new Error('Refund currency must be USD or KHR')
+  const currency = value.trim().toUpperCase()
   if (!(REFUND_CURRENCIES as readonly string[]).includes(currency)) throw new Error('Refund currency must be USD or KHR')
   return currency as RefundCurrency
 }

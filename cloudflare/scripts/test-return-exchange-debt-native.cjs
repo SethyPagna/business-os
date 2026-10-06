@@ -221,6 +221,28 @@ async function main() {
     assert.equal((await db.prepare("SELECT owed_reduction_usd FROM returns WHERE client_request_id='x-12'").first()).owed_reduction_usd, part.body.owed_reduction_usd)
     assert.equal(beforePart.khr - afterPart.khr, part.body.payout_khr, 'the drawer pays out exactly the riel the screen showed')
     console.log('PASS the Return screen preview shows debt lowered and the real payout, and POST records exactly that')
+
+    // -- P3 (verifier N3, N4, N8): loose input is refused, with a code -----------------
+    const countReturns = async () => (await db.prepare('SELECT COUNT(*) AS n FROM returns').first()).n
+    const recordedBefore = await countReturns()
+    const line = (saleItemId) => [{ sale_item_id: saleItemId, product_id: 1, quantity: 1, stock_action: 'restock', branch_id: 1 }]
+    for (const [label, saleId] of [['true', true], ['[101]', [101]], ['{}', {}], ['"101x"', '101x']]) {
+      const loose = await post({ client_request_id: `loose-sale-${label}`, sale_id: saleId, reason: 'loose', items: line(1011) })
+      assert.deepEqual([loose.status, loose.body.code], [400, 'return_sale_required'], `sale_id ${label} is not a sale id (Number(true) is sale #1)`)
+    }
+    const looseV1 = await post({ client_request_id: 'loose-sale-v1', money_precision_version: 1, sale_id: true, reason: 'loose', items: line(1011) })
+    assert.deepEqual([looseV1.status, looseV1.body.code], [400, 'return_sale_required'], 'the v1 shape refuses sale_id true with the same code')
+    for (const [label, currency] of [["['khr']", ['khr']], ['{}', {}], ['1', 1]]) {
+      const loose = await post({ client_request_id: `loose-currency-${label}`, sale_id: 111, reason: 'loose', refund_currency: currency, items: line(1111) })
+      assert.equal(loose.status, 400, `refund_currency ${label} is not a currency: ${JSON.stringify(loose.body)}`)
+      assert.equal((await preview({ sale_id: 111, refund_usd: 4, refund_currency: currency })).status, 400, `the preview refuses refund_currency ${label} too`)
+    }
+    const otherSaleLine = await post({ client_request_id: 'other-sale-line', sale_id: 111, reason: 'loose', items: line(1011) })
+    assert.deepEqual([otherSaleLine.status, otherSaleLine.body.code], [400, 'return_line_not_on_sale'], 'a line from another sale is refused with its code')
+    assert.equal(await countReturns(), recordedBefore, 'no loose request recorded anything')
+    const lowerCase = await preview({ sale_id: 111, refund_usd: 4, refund_currency: ' khr ' })
+    assert.deepEqual([lowerCase.status, lowerCase.body.refund_currency], [200, 'KHR'], 'control: a text code is still read case- and space-insensitively')
+    console.log('PASS loose sale ids and currencies are refused; a line from another sale carries return_line_not_on_sale')
   } finally {
     await mf.dispose()
   }

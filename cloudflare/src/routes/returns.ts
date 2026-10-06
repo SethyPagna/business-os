@@ -801,7 +801,8 @@ async function assertReturnableItems(
     if (item.sale_item_id) {
       const saleItem = await db.prepare(`SELECT id, quantity, product_name, ${IMPORTED_RETURNED_QUANTITY_SQL} AS imported_returned_quantity
         FROM sale_items WHERE id = ? AND sale_id = ?`).get<{ id: number; quantity: number; product_name: string | null; imported_returned_quantity: number | null }>([item.sale_item_id, saleId])
-      if (!saleItem) throw new Error('Sale item not found for this return')
+      // RET-A P3 (verifier N4): the same coded refusal as the stock planner.
+      if (!saleItem) throw Object.assign(new Error('This item is not on the sale being returned.'), { code: 'return_line_not_on_sale' })
 
       const returnedRow = excludeReturnId
         ? await db.prepare(`
@@ -1558,8 +1559,8 @@ app.post('/', async (c) => {
     // RET-A N1: the v1 shape refuses a missing sale while canonicalising; it
     // gets the same code as the v0 shape below. No stored receipt can match a
     // body without a sale, so nothing replayable is skipped.
-    const postedSaleId = Number((body as { sale_id?: unknown }).sale_id)
-    if (!(Number.isSafeInteger(postedSaleId) && postedSaleId > 0)) return c.json(RETURN_SALE_REQUIRED, 400)
+    const postedSaleId = (body as { sale_id?: unknown }).sale_id
+    if (!(typeof postedSaleId === 'number' && Number.isSafeInteger(postedSaleId) && postedSaleId > 0)) return c.json(RETURN_SALE_REQUIRED, 400)
     return c.json({ error: (error as Error).message }, 400)
   }
   const requestJson = JSON.stringify(canonicalIntent)
@@ -3056,7 +3057,8 @@ app.patch('/:id', async (c) => {
       const { body: conflictBody, status } = writeConflictResponse(error)
       return c.json(conflictBody, status)
     }
-    return c.json({ error: (error as Error).message }, 400)
+    const code = (error as { code?: unknown }).code
+    return c.json({ error: (error as Error).message, ...(typeof code === 'string' ? { code } : {}) }, 400)
   }
 
   // RET-A F11 / N1: an edit never moves a return to another branch. A return
