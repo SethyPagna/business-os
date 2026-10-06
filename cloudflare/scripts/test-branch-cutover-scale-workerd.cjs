@@ -8,13 +8,28 @@
 //   - no single statement over STATEMENT_MS, and no statement whose rows_read grows faster than the data
 //     (ROWS_PER_SCALE x scale): the per-product lot sub-queries used to read the whole branch per product;
 //   - the ops fold preview (as guarded and run by the Ops task) is under the same bounds and equals the run;
-//   - 7429 resets injected on real D1 reads and batches at several stages leave the run resumable.
+//   - 7429 resets injected on real D1 reads and batches at several stages leave the run resumable;
+//   - the received-date census (ops) is under the same bounds, and D1's own date()/GLOB/trim() compute the
+//     business day exactly as the run's JS does (owner 6 Oct: slash dates are dates, month-first).
 // It prints the slowest statement per stage (CUTOVER_SCALE=1 is the report's timings table).
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
 const { pathToFileURL } = require('node:url')
+const ts = require('typescript')
 const harness = require('./branch-cutover-workerd-harness.cjs')
+function parentModule() {
+  const cache = new Map()
+  const load = (name) => {
+    name = path.posix.normalize(name.endsWith('.ts') ? name : name + '.ts')
+    if (cache.has(name)) return cache.get(name).exports
+    const module = { exports: {} }; cache.set(name, module)
+    const js = ts.transpileModule(fs.readFileSync(path.join(root, 'cloudflare/src', name), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
+    new Function('require', 'module', 'exports', js)(request => request.startsWith('.') ? load(path.posix.join(path.posix.dirname(name), request)) : {}, module, module.exports)
+    return module.exports
+  }
+  return load('lib/branchCutoverParent')
+}
 const root = path.resolve(__dirname, '../..')
 const SCALE = Number(process.env.CUTOVER_SCALE || 0.25)
 const STATEMENT_MS = 250
@@ -23,6 +38,7 @@ const ROWS_PER_SCALE = 1_000_000
 async function main() {
   const guard = await import(pathToFileURL(path.join(root, 'ops/scripts/ops-sql-guard.mjs')).href)
   const preview = guard.guardSql(fs.readFileSync(path.join(root, 'ops/queries/cutover-fold-preview.sql'), 'utf8')).sql
+  const census = guard.guardSql(fs.readFileSync(path.join(root, 'ops/queries/received-date-format-census.sql'), 'utf8')).sql
   const { mf, call } = await harness.start()
   let checks = 0
   const check = async (name, fn) => { await fn(); checks++; console.log('PASS ' + name) }
@@ -38,6 +54,29 @@ async function main() {
       assert.ok(result.meta.rows_read <= ROWS_PER_SCALE * SCALE, 'preview rows ' + result.meta.rows_read)
       expected = result.rows[0]
       assert.equal(expected.branches_ok, 1); assert.equal(expected.inexact_pairs, 0); assert.ok(expected.same_date_merges > 0)
+      assert.ok(expected.received_slash > 0 && expected.received_slash_ambiguous > 0 && expected.received_other > 0, 'the fixture carries slash dates')
+    })
+    await check('the received-date census is bounded on workerd D1 and reads the slash order', async () => {
+      const result = await call({ op: 'query', sql: census })
+      assert.ok(result.rows && result.rows.length >= 1, JSON.stringify(result).slice(0, 300))
+      console.log('CENSUS ' + JSON.stringify({ ms: result.meta.duration, rowsRead: result.meta.rows_read, rows: result.rows.length }))
+      assert.ok(result.meta.duration <= STATEMENT_MS, 'census ms ' + result.meta.duration)
+      assert.ok(result.meta.rows_read <= ROWS_PER_SCALE * SCALE, 'census rows ' + result.meta.rows_read)
+      const slash = result.rows.find(row => row.shape === 'N/N/YYYY')
+      // the fixture writes month-first slash dates plus a deliberate 24/08/2026: the census must show both
+      assert.ok(slash && slash.second_gt_12 > 0 && slash.first_gt_12 > 0 && slash.sibling_month_first > 0, JSON.stringify(slash))
+    })
+    await check('D1 computes the business day exactly as the run (the SQL twin the preview carries), slash dates included', async () => {
+      const parent = parentModule()
+      const values = ['\t2026-09-12', '2026-09-12\n', '\u00a008/24/2026', ' 08/24/2026 ', '2026-09-12 10:00:00\n', '2026-09-1210:00:00', '2026-09-12T23:30:00+0700',
+        '2026-09-12T23:30:00 Z', '2026-09-12T18:00:00Z', '2026-09-12 17:00:00', '2026-09-12T23:30:00+07:00', 'not a date', '', null]
+      for (const year of ['2024', '2026', '2100', '2000']) for (let m = 0; m <= 13; m++) for (let d = 0; d <= 32; d++) {
+        const [mm, dd] = [String(m).padStart(2, '0'), String(d).padStart(2, '0')]
+        values.push(`${m}/${d}/${year}`, `${mm}/${dd}/${year}`, `${year}-${mm}-${dd}`)
+      }
+      const result = await call({ op: 'query', sql: `SELECT key AS k, ${parent.cutoverLotDaySql('value')} AS d FROM json_each(?1) ORDER BY key`, params: [JSON.stringify(values)] })
+      assert.equal(result.rows.length, values.length, JSON.stringify(result).slice(0, 300))
+      for (const row of result.rows) assert.equal(row.d, parent.cutoverLotBusinessDay(values[row.k]), JSON.stringify(values[row.k]))
     })
     let run
     await check('the whole cutover runs on workerd D1 at scale, every statement bounded, with 7429 resets injected on real reads and batches', async () => {
