@@ -55,7 +55,7 @@ function setup() {
     CREATE TABLE product_batches(id INTEGER PRIMARY KEY, variant_product_id INTEGER,
       batch_key TEXT, lot_code TEXT, expiry_date TEXT, received_at TEXT, is_active INTEGER,
       notes TEXT, batch_number INTEGER, unit_cost_usd REAL, received_quantity REAL,
-      received_cost_usd REAL, received_branch_id INTEGER, created_at TEXT, updated_at TEXT,
+      received_cost_usd REAL, received_branch_id INTEGER, received_branch_name TEXT, created_at TEXT, updated_at TEXT,
       UNIQUE(variant_product_id,batch_key), UNIQUE(variant_product_id,batch_number));
     CREATE TABLE branch_stock(product_id INTEGER, branch_id INTEGER, quantity REAL,
       UNIQUE(product_id,branch_id));

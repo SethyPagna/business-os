@@ -8,6 +8,7 @@ import ArrowRightLeft from 'lucide-react/dist/esm/icons/arrow-right-left.js'
 import ArrowRight from 'lucide-react/dist/esm/icons/arrow-right.js'
 import ChevronDown from 'lucide-react/dist/esm/icons/chevron-down.js'
 import ChevronRight from 'lucide-react/dist/esm/icons/chevron-right.js'
+import GitMerge from 'lucide-react/dist/esm/icons/git-merge.js'
 import Pencil from 'lucide-react/dist/esm/icons/pencil.js'
 // N13: Transfer History is a history surface, so its branch pair, actor and
 // note go through the one shared row model -- the card said "N/A", the table
@@ -549,6 +550,9 @@ export default function Branches({ embedded = false, view, showSectionNavigation
   const [branchStatusFilter, setBranchStatusFilter] = useState<'all' | 'active' | 'inactive'>('all')
   const [transferFromFilter, setTransferFromFilter] = useState<string>('all')
   const [transferToFilter, setTransferToFilter] = useState<string>('all')
+  // The ~3,400 closed consolidation moves (Shop -> LC Store at cutover) are hidden from the default list so a day's real
+  // transfers are not buried; this toggle brings them back.
+  const [showConsolidationTransfers, setShowConsolidationTransfers] = useState(false)
   // One page-level date scope. Current-stock branch cards are intentionally
   // snapshots, while every dated branch surface (transfer history and its
   // export) reads this same range.
@@ -591,7 +595,7 @@ export default function Branches({ embedded = false, view, showSectionNavigation
    */
   const load = useCallback(async (silent = loadedOnceRef.current) => {
     const requestedMode = tab === 'transfers' ? 'transfers' : 'branches'
-    const requestedKey = JSON.stringify([requestedMode, ...(requestedMode === 'transfers' ? [branchDateRange, transferFromFilter, transferToFilter, transferPage, transferPageSize] : [])])
+    const requestedKey = JSON.stringify([requestedMode, ...(requestedMode === 'transfers' ? [branchDateRange, transferFromFilter, transferToFilter, showConsolidationTransfers, transferPage, transferPageSize] : [])])
     if (loadPromiseRef.current && loadPromiseKeyRef.current === requestedKey) return loadPromiseRef.current
     const requestId = beginTrackedRequest(loadRequestRef)
     const promise = (async () => {
@@ -619,6 +623,7 @@ export default function Branches({ embedded = false, view, showSectionNavigation
               ...continuousRangeParams(branchDateRange),
               fromBranchId: transferFromFilter !== 'all' ? transferFromFilter : undefined,
               toBranchId: transferToFilter !== 'all' ? transferToFilter : undefined,
+              includeCutover: showConsolidationTransfers ? '1' : undefined,
               page: transferPage,
               pageSize: transferPageSize,
             }),
@@ -674,7 +679,7 @@ export default function Branches({ embedded = false, view, showSectionNavigation
     loadPromiseRef.current = wrappedPromise
     loadPromiseKeyRef.current = requestedKey
     return wrappedPromise
-  }, [branchApi, branchDateRange.endDate, branchDateRange.startDate, branchDateRange.endTime, branchDateRange.startTime, notify, transferFromFilter, transferPage, transferPageSize, transferToFilter, tr, tab])
+  }, [branchApi, branchDateRange.endDate, branchDateRange.startDate, branchDateRange.endTime, branchDateRange.startTime, notify, showConsolidationTransfers, transferFromFilter, transferPage, transferPageSize, transferToFilter, tr, tab])
 
   useEffect(() => {
     if (!isActive) {
@@ -749,7 +754,7 @@ export default function Branches({ embedded = false, view, showSectionNavigation
 
   const branchFilterActiveCount = tab === 'branches'
     ? (branchStatusFilter !== 'all' ? 1 : 0)
-    : (transferFromFilter !== 'all' ? 1 : 0) + (transferToFilter !== 'all' ? 1 : 0)
+    : (transferFromFilter !== 'all' ? 1 : 0) + (transferToFilter !== 'all' ? 1 : 0) + (showConsolidationTransfers ? 1 : 0)
   const branchFilterSections = useMemo(() => (
     tab === 'branches'
       ? [{
@@ -796,6 +801,7 @@ export default function Branches({ embedded = false, view, showSectionNavigation
     setBranchStatusFilter('all')
     setTransferFromFilter('all')
     setTransferToFilter('all')
+    setShowConsolidationTransfers(false)
     setTransferPage(1)
   }, [])
   const openStatDetail = useCallback((title: ReactNode, value: ReactNode, detail: ReactNode) => {
@@ -1073,6 +1079,7 @@ export default function Branches({ embedded = false, view, showSectionNavigation
             ...continuousRangeParams(branchDateRange),
             fromBranchId: transferFromFilter !== 'all' ? transferFromFilter : undefined,
             toBranchId: transferToFilter !== 'all' ? transferToFilter : undefined,
+            includeCutover: showConsolidationTransfers ? '1' : undefined,
             page: exportPage,
             pageSize: exportPageSize,
           })
@@ -1149,7 +1156,7 @@ export default function Branches({ embedded = false, view, showSectionNavigation
       branchExportInFlightRef.current = false
       setBranchExportLoading(false)
     }
-  }, [branchApi, branchDateRange.endDate, branchDateRange.startDate, branchDateRange.endTime, branchDateRange.startTime, branchExportLoading, branches, notify, tab, transferFromFilter, transferToFilter, tr])
+  }, [branchApi, branchDateRange.endDate, branchDateRange.startDate, branchDateRange.endTime, branchDateRange.startTime, branchExportLoading, branches, notify, showConsolidationTransfers, tab, transferFromFilter, transferToFilter, tr])
 
   const branchExportButton = canExportBranch ? (
     <button
@@ -1267,7 +1274,19 @@ export default function Branches({ embedded = false, view, showSectionNavigation
               <span>{tr('transfer', 'Transfer')}</span>
             </button>
           ) : null}
-          <div className="mb-1 ml-auto shrink-0">
+          <div className="mb-1 ml-auto flex shrink-0 items-center gap-1">
+            {tab === 'transfers' ? (
+              <button
+                type="button"
+                aria-pressed={showConsolidationTransfers}
+                title={showConsolidationTransfers ? tr('transfers_hide_consolidation', 'Hide branch consolidation transfers') : tr('transfers_show_consolidation', 'Show branch consolidation transfers')}
+                aria-label={showConsolidationTransfers ? tr('transfers_hide_consolidation', 'Hide branch consolidation transfers') : tr('transfers_show_consolidation', 'Show branch consolidation transfers')}
+                onClick={() => { setShowConsolidationTransfers((value) => !value); setTransferPage(1) }}
+                className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${showConsolidationTransfers ? 'bg-slate-800 text-white dark:bg-slate-200 dark:text-slate-900' : 'bg-gray-100 text-gray-600 dark:bg-zinc-800 dark:text-gray-300'}`}
+              >
+                <GitMerge className="h-4 w-4" aria-hidden="true" />
+              </button>
+            ) : null}
             <FilterMenu
               label={tr('filters', 'Filters')}
               activeCount={branchFilterActiveCount}

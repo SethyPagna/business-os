@@ -1230,6 +1230,12 @@ function publicTransferRow(row: Record<string, unknown>): Record<string, unknown
   return result
 }
 
+// The branch consolidation (Shop -> LC Store) writes one official transfer per product (~3,400). Closing their
+// Undo marks the history row with this marker (lib/branchCutoverHistory.ts UNDO_CLOSED_BRANCH_CUTOVER_MOVE; the
+// literal is pinned equal by test-cutover-ld-historical-readers-native.cjs). They are hidden from the default
+// transfer list so a day's real transfers are not buried, and `?includeCutover=1` lists them.
+const CUTOVER_MOVE_MARKER = 'undo_closed:branch_cutover_move'
+
 app.get('/transfers', async (c) => {
   const user = c.get('user')
   // Transfer history is a read surface shared by Inventory and Branches.
@@ -1260,6 +1266,11 @@ app.get('/transfers', async (c) => {
   const toBranchId = String(query.toBranchId || query.to_branch_id || '').trim()
   const clauses: string[] = ['1=1']
   const bindings: Record<string, unknown> = {}
+  if (!['1', 'true', 'yes'].includes(String(query.includeCutover || query.include_cutover || '').trim().toLowerCase())) {
+    clauses.push(`NOT EXISTS (SELECT 1 FROM transfer_operation_receipts r JOIN action_history h ON h.id = r.action_history_id
+      WHERE r.id = st.receipt_id AND h.last_error = @cutoverMove)`)
+    bindings.cutoverMove = CUTOVER_MOVE_MARKER
+  }
 
   // Transfer timestamps are stored in UTC. Every other business-day report
   // uses the fixed Cambodia UTC+7 helpers; using raw date(created_at) here
