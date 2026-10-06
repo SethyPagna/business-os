@@ -1518,10 +1518,23 @@ function attachReportDiagnostic<T extends object>(value: T, diagnostic: ReportMo
   return value
 }
 
-/** What a collected sale recorded as payable: an exchange's replacement its own payment, any other sale its total. */
-function reportCollectedPayable(fact: ReportSaleFacts): ReportExactDecimal {
-  return Number(fact.sale.source_return_id || 0) !== 0
-    ? reportMoney(fact.sale, 'amount_paid_usd', fact.version) : reportMoney(fact.sale, 'total_usd', fact.version)
+/**
+ * What a collected sale recorded as payable: any sale its total; an exchange's
+ * replacement its own payment (an old-model replacement recorded only the
+ * top-up) -- its dollars AND its riel at the rate it was recorded at, never
+ * above its total. RET-A verify R3 (E2): reading the dollars alone counted a
+ * riel-funded replacement as $0 collected. The one reading for the totals,
+ * the per-sale rows, the payment-method breakdown and the customer drill.
+ */
+function reportCollectedPayable(fact: Pick<ReportSaleFacts, 'sale' | 'version'>): ReportExactDecimal {
+  const total = reportMoney(fact.sale, 'total_usd', fact.version)
+  if (Number(fact.sale.source_return_id || 0) === 0) return total
+  let paid = reportMoney(fact.sale, 'amount_paid_usd', fact.version)
+  const khr = Number(fact.sale.amount_paid_khr), rate = Number(fact.sale.exchange_rate)
+  if (Number.isFinite(khr) && khr > 0 && Number.isFinite(rate) && rate > 0) {
+    paid = paid.add(ReportExactDecimal.recorded(khr).divide(ReportExactDecimal.recorded(rate)))
+  }
+  return paid.min(total)
 }
 
 /** A credit sale's balance due; an unreadable one keeps its revenue-basis figure. */
@@ -1673,8 +1686,7 @@ export function businessSummarySalesRowsFromSnapshot(snapshot: SalesReportSnapsh
     const cost = rawCost.max(ReportExactDecimal.zero())
     const delivery = fact.recognized ? fact.delivery : ReportExactDecimal.zero()
     const deliveryActual = fact.recognized ? fact.deliveryActual : ReportExactDecimal.zero()
-    const payable = Number(sale.source_return_id || 0) !== 0
-      ? reportMoney(sale, 'amount_paid_usd', version) : reportMoney(sale, 'total_usd', version)
+    const payable = reportCollectedPayable(fact)
     const collected = fact.awaiting || !fact.recognized
       ? ReportExactDecimal.zero() : payable.subtract(fact.refundPaid)
     const raw = String(sale.created_at || '')
@@ -2160,9 +2172,7 @@ export function paymentMethodBreakdownFromSnapshot(snapshot: SalesReportSnapshot
     const sale = fact.sale
     const method = String(sale.payment_method || '').trim() || 'Unknown'
     const found = methods.get(method) || { tx_count: 0, collected: ReportExactDecimal.zero(), total: ReportExactDecimal.zero() }
-    const payable = Number(sale.source_return_id || 0) !== 0
-      ? reportMoney(sale, 'amount_paid_usd', fact.version)
-      : reportMoney(sale, 'total_usd', fact.version)
+    const payable = reportCollectedPayable(fact)
     found.tx_count += 1
     found.total = found.total.add(reportMoney(sale, 'total_usd', fact.version))
     if (fact.recognized && !fact.awaiting) found.collected = found.collected.add(payable.subtract(fact.refundPaid))
@@ -2581,8 +2591,7 @@ export async function getSalesDayReport(
       .slice(0, 1000).map((fact) => {
         const sale = fact.sale
         const discount = reportMoney(sale, 'discount_usd', fact.version).add(reportMoney(sale, 'membership_discount_usd', fact.version))
-        const payable = Number(sale.source_return_id || 0) !== 0
-          ? reportMoney(sale, 'amount_paid_usd', fact.version) : reportMoney(sale, 'total_usd', fact.version)
+        const payable = reportCollectedPayable(fact)
         const collected = fact.recognized && !fact.awaiting ? payable.subtract(fact.refundPaid) : ReportExactDecimal.zero()
         return { id: Number(sale.id), receipt_number: String(sale.receipt_number || ''), created_at: String(sale.created_at || ''),
           customer_name: Number(sale.customer_is_anonymous) !== 0 ? '' : String(sale.customer_name || ''),
