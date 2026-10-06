@@ -29,7 +29,8 @@ type TranslateFn = (key: string) => string | undefined
 
 interface CustomerSalesTotals {
   tx_count: number
-  collected_usd: number
+  /** null: the server could not read this customer's money. */
+  collected_usd: number | null
   /** Owner ruling 6 Oct 2026: what this customer's Not Paid sales still owe (null: unavailable). */
   credit_usd?: number | null
   discount_usd: number
@@ -165,7 +166,7 @@ export default function CustomerPurchasesReportModal({ customerId, customerName,
             <div className={`grid shrink-0 grid-cols-2 gap-2 sm:grid-cols-4${totals.credit_usd !== 0 && totals.credit_usd !== undefined ? ' md:grid-cols-5' : ''}`}>
               {[
                 [tr(t, 'customer_purchases', 'Purchases'), String(totals.tx_count)],
-                [tr(t, 'collected_total', 'Collected total'), money(totals.collected_usd)],
+                [tr(t, 'collected_total', 'Collected total'), totals.collected_usd === null ? '—' : money(totals.collected_usd)],
                 ...(totals.credit_usd !== 0 && totals.credit_usd !== undefined
                   ? [[tr(t, 'rpt_pending_credit', 'Not Paid'), totals.credit_usd === null ? '—' : money(totals.credit_usd)]]
                   : []),

@@ -502,19 +502,6 @@ export function recognizedExpr(p: string): string { return `${saleStatusExpr(p)}
 export function reportingSaleStatusExpr(p: string, retainedStatusExpr = 'NULL'): string {
   return `CASE WHEN ${saleStatusExpr(p)} IN ('partial_return', 'returned') AND ${retainedStatusExpr} = 'awaiting_payment' THEN 'awaiting_payment' ELSE ${saleStatusExpr(p)} END`
 }
-/**
- * The retained-status argument of reportingSaleStatusExpr for `sales`: the
- * sale's status_before_return, except where an active customer return lowered
- * its debt -- RET-A LH-16, the SQL twin of reportAwaiting: the returns code put
- * such a sale in a return status because it owes nothing.
- */
-async function retainedNotPaidExpr(db: ReturnType<typeof getDb>): Promise<string> {
-  if (!(await reportTableColumns(db, 'sales')).has('status_before_return')) return 'NULL'
-  if (!(await reportTableColumns(db, 'returns')).has('owed_reduction_usd')) return 'sales.status_before_return'
-  return `(CASE WHEN EXISTS(SELECT 1 FROM returns lowered WHERE lowered.sale_id=sales.id AND lowered.owed_reduction_usd>0
-    AND COALESCE(lowered.status,'completed')<>'cancelled' AND COALESCE(lowered.return_scope,'customer')='customer')
-    THEN NULL ELSE sales.status_before_return END)`
-}
 export function awaitingExpr(p: string, retainedStatusExpr = 'NULL'): string { return `(${reportingSaleStatusExpr(p, retainedStatusExpr)}) = 'awaiting_payment'` }
 export function collectedSaleExpr(p: string, retainedStatusExpr = 'NULL'): string { return `(${reportingSaleStatusExpr(p, retainedStatusExpr)}) NOT IN ('cancelled', 'awaiting_payment')` }
 // Net sale value (subtotal minus both discounts) -- tax and delivery excluded.
@@ -1263,12 +1250,15 @@ type ReportExactBucket = {
   money: Record<ReportExactKey, ReportExactDecimal>
   tx: number; pendingTx: number; deliveryActualCount: number; deliverySaleCount: number
   cancelledTx: number; unvaluedTx: number; missingCostLines: number; refundPaidKhr: number
+  /** Recognized sales outside the Not Paid cohort: the cashier view's paid transactions. */
+  collectedTx: number
 }
 
 function reportBucket(): ReportExactBucket {
   return {
     money: Object.fromEntries(REPORT_EXACT_KEYS.map((key) => [key, ReportExactDecimal.zero()])) as Record<ReportExactKey, ReportExactDecimal>,
     tx: 0, pendingTx: 0, deliveryActualCount: 0, deliverySaleCount: 0, cancelledTx: 0, unvaluedTx: 0, missingCostLines: 0, refundPaidKhr: 0,
+    collectedTx: 0,
   }
 }
 function reportAdd(bucket: ReportExactBucket, key: ReportExactKey, value: ReportExactDecimal): void {
@@ -1304,24 +1294,28 @@ function reportOwedUsd(row: ReportScalarRow, saleReturns: readonly ReportScalarR
 
 /**
  * The Not Paid (credit) cohort: the Not Paid status, and a sale sold Not Paid
- * that a return moved to a return status -- but only while it still owes.
+ * that a return moved to a return status -- but only while it still OWES,
+ * read by the one owed helper (reportOwedUsd above).
  *
- * RET-A LH-16 (verifier M3: $10 sold Not Paid, $7 paid, $4 back -> $3 lowered
- * the debt, owes $0, Partial return). Since 0234 the returns code decides this
- * itself: a return on a debt sale lowers the debt first, and the sale stays
- * (or goes back to) Not Paid while it still owes, else takes its return status
- * (returnRefundSplit.ts saleStatusWithReturns, on every create, edit, cancel
- * and restore). So a sale in a return status whose active returns lowered any
- * debt was found to owe nothing; it is a collected sale like any other. A
- * return status with no debt lowered is a return recorded before 0234 (cash
- * only): it still reads as owing, as the Sales page reads it, until the held
- * 0238 backfill splits it.
+ * The status history cannot answer "still owes" on its own. The returns code
+ * keeps a debt sale in Not Paid while it owes (returnRefundSplit.ts
+ * saleStatusWithReturns), but a return status with Not Paid before it is
+ * reached on paths where nothing is owed:
+ *   - RET-A LH-16 (verifier M3): $10 sold Not Paid, $7 paid, $4 back ($3
+ *     lowered the debt, $1 cash) -> Partial return, owes $0.
+ *   - RET-A verify R2 L1: a fully paid sale reopened to Not Paid by the
+ *     payment-correction route (sales.ts PATCH /:id/status keeps the recorded
+ *     payment), then a return -> Partial return, owes $0, nothing lowered.
+ * and on one where something still is: a return recorded before 0234 (cash
+ * only, nothing lowered) leaves the whole unpaid total owing until the held
+ * 0238 backfill splits it. Money that cannot be read stays credit, visible.
  */
 function reportAwaiting(row: ReportScalarRow, saleReturns: readonly ReportScalarRow[] = []): boolean {
   const status = reportStatus(row)
   if (status === 'awaiting_payment') return true
   if (!(['partial_return', 'returned'].includes(status) && row.status_before_return === 'awaiting_payment')) return false
-  return !saleReturns.some((returned) => Number(returned.owed_reduction_usd) > 0)
+  const owed = reportOwedUsd(row, saleReturns)
+  return owed == null || owed > 0
 }
 function reportHeaderAdjustment(row: ReportScalarRow, version: 0 | 1): ReportExactDecimal {
   const owns = (key: string) => Object.prototype.hasOwnProperty.call(row, key)
@@ -1509,6 +1503,12 @@ function attachReportDiagnostic<T extends object>(value: T, diagnostic: ReportMo
   return value
 }
 
+/** What a collected sale recorded as payable: an exchange's replacement its own payment, any other sale its total. */
+function reportCollectedPayable(fact: ReportSaleFacts): ReportExactDecimal {
+  return Number(fact.sale.source_return_id || 0) !== 0
+    ? reportMoney(fact.sale, 'amount_paid_usd', fact.version) : reportMoney(fact.sale, 'total_usd', fact.version)
+}
+
 /** A credit sale's balance due; an unreadable one keeps its revenue-basis figure. */
 function reportPendingOwed(fact: ReportSaleFacts): ReportExactDecimal {
   if (fact.owed != null) return ReportExactDecimal.recorded(fact.owed)
@@ -1552,8 +1552,8 @@ function aggregateReportSnapshot(
     if (!fact.valued) bucket.unvaluedTx += 1
     const collected = !fact.awaiting
     if (collected) {
-      const payable = Number(sale.source_return_id || 0) !== 0
-        ? reportMoney(sale, 'amount_paid_usd', version) : reportMoney(sale, 'total_usd', version)
+      bucket.collectedTx += 1
+      const payable = reportCollectedPayable(fact)
       reportAdd(bucket, 'collected', payable.subtract(fact.refundPaid))
       reportAdd(bucket, 'refundPaid', fact.refundPaid)
     }
@@ -2474,7 +2474,8 @@ export async function getDeliveryContactTotals(
 // per-contact drills (suppliers have D5's purchases; couriers have X3).
 export interface CustomerSalesTotalsRow {
   tx_count: number
-  collected_usd: number
+  /** The kernel's collected cohort on the recorded payable basis; null when unreadable. */
+  collected_usd: number | null
   /** Owner ruling 6 Oct: the balance this customer's credit sales still owe; null when unreadable. */
   credit_usd: number | null
   discount_usd: number
@@ -2490,26 +2491,31 @@ export async function getCustomerSalesTotals(
 ): Promise<CustomerSalesTotalsRow> {
   const db = getDb(env)
   // Owner ruling 6 Oct: the drill's Credit is the same balance due as every
-  // other Credit -- the shared kernel over this customer's sales. A snapshot
-  // that cannot be read leaves the figure unavailable (null) rather than
+  // other Credit, and its Collected total the same collected cohort (RET-A
+  // verify R2 L1) -- the shared kernel over this customer's sales, recorded
+  // payable basis (no refund subtraction, as the drill always showed). A
+  // snapshot that cannot be read leaves both unavailable (null) rather than
   // failing the whole drill or printing a number that left a sale out.
   const customerId = Number(f.customerId)
   let credit: number | null = 0
+  let collected: number | null = 0
   if (Number.isSafeInteger(customerId) && customerId > 0) {
     try {
-      credit = salesTotalsFromSnapshot(await readSalesReportSnapshot(env, f, false,
-        (alias) => ({ sql: `${alias}.customer_id = @reportScope_customerId`, params: { reportScope_customerId: customerId } }))).pending_owed_usd
+      const snapshot = await readSalesReportSnapshot(env, f, false,
+        (alias) => ({ sql: `${alias}.customer_id = @reportScope_customerId`, params: { reportScope_customerId: customerId } }))
+      credit = salesTotalsFromSnapshot(snapshot).pending_owed_usd
+      collected = reportSaleFacts(snapshot).filter((fact) => fact.recognized && !fact.awaiting)
+        .reduce((sum, fact) => sum.add(reportCollectedPayable(fact)), ReportExactDecimal.zero()).toNumber()
     } catch (error) {
       if (!(error instanceof ReportMoneyPrecisionError)) throw error
       credit = null
+      collected = null
     }
   }
-  const retainedStatusExpr = await retainedNotPaidExpr(db)
   const { sql: whereSql, params } = whereActiveSales('sales', f)
   params.customerId = f.customerId
   const row = await db.prepare(`
     SELECT COUNT(*) AS tx_count,
-           COALESCE(SUM(CASE WHEN ${collectedSaleExpr('sales.', retainedStatusExpr)} THEN ${collectedExpr('')} ELSE 0 END), 0) AS collected_usd,
            COALESCE(SUM(discount_usd), 0) AS discount_usd,
            COALESCE(SUM(membership_discount_usd), 0) AS membership_discount_usd,
            COALESCE(SUM(membership_points_redeemed), 0) AS points_redeemed,
@@ -2520,7 +2526,7 @@ export async function getCustomerSalesTotals(
   `).get<Record<string, unknown>>(params)
   return {
     tx_count: num(row?.tx_count),
-    collected_usd: round2(num(row?.collected_usd)),
+    collected_usd: collected == null ? null : round2(collected),
     credit_usd: credit == null ? null : round2(credit),
     discount_usd: round2(num(row?.discount_usd)),
     membership_discount_usd: round2(num(row?.membership_discount_usd)),
@@ -2764,19 +2770,17 @@ const FIRST_SALE_CTE = `WITH first_sale AS (
   GROUP BY customer_id
 )`
 
-interface CohortCounts { new_customer_count: number; return_customer_count: number; unregistered_count: number; paid_tx_count: number }
+interface CohortCounts { new_customer_count: number; return_customer_count: number; unregistered_count: number }
 
 async function cohortCountsByGroup(env: Env, f: SalesFilters, keyExpr: string): Promise<Map<string, CohortCounts>> {
   const db = getDb(env)
-  const retainedStatusExpr = await retainedNotPaidExpr(db)
   const { sql: whereSql, params } = whereActiveSales('sales', f)
   const rows = await db.prepare(`
     ${FIRST_SALE_CTE}
     SELECT ${keyExpr} AS grp_key,
            COUNT(DISTINCT CASE WHEN sales.customer_id IS NOT NULL AND datetime(sales.created_at) = fs.first_at THEN sales.customer_id END) AS new_customer_count,
            COUNT(DISTINCT CASE WHEN sales.customer_id IS NOT NULL AND datetime(sales.created_at) > fs.first_at THEN sales.customer_id END) AS return_customer_count,
-           COALESCE(SUM(CASE WHEN ${identifiedCustomerExpr('sales.')} IS NULL THEN 1 ELSE 0 END), 0) AS unregistered_count,
-           COALESCE(SUM(CASE WHEN ${collectedSaleExpr('sales.', retainedStatusExpr)} THEN 1 ELSE 0 END), 0) AS paid_tx_count
+           COALESCE(SUM(CASE WHEN ${identifiedCustomerExpr('sales.')} IS NULL THEN 1 ELSE 0 END), 0) AS unregistered_count
     FROM sales
     LEFT JOIN first_sale fs ON fs.customer_id = sales.customer_id
     WHERE ${whereSql}
@@ -2788,7 +2792,6 @@ async function cohortCountsByGroup(env: Env, f: SalesFilters, keyExpr: string): 
       new_customer_count: num(r.new_customer_count),
       return_customer_count: num(r.return_customer_count),
       unregistered_count: num(r.unregistered_count),
-      paid_tx_count: num(r.paid_tx_count),
     },
   ]))
 }
@@ -2915,8 +2918,10 @@ export async function getSalesGroupedTotals(env: Env, f: SalesFilters, groupBy: 
     const snapshot = await readSalesReportSnapshot(env, f)
     const identity = (row: ReportScalarRow) => reportGroupIdentity(row, groupBy)
     const metadata = new Map([...snapshot.sales, ...snapshot.voidSales].map((row) => [identity(row).key, identity(row)]))
+    const collectedTx = new Map<string, number>()
     const rows = [...aggregateReportSnapshot(snapshot, (sale) => identity(sale).key).entries()].map(([key, bucket]) => {
       const totals = exactReportTotals(bucket, snapshot)
+      collectedTx.set(key, bucket.collectedTx)
       const meta = metadata.get(key) || { key, label: '', entity_id: null }
       const row = { key, label: meta.label, entity_id: meta.entity_id,
         cost_missing_snapshot_lines: bucket.missingCostLines, ...totals } as SalesGroupedRow
@@ -2929,7 +2934,10 @@ export async function getSalesGroupedTotals(env: Env, f: SalesFilters, groupBy: 
       for (const row of rows) { const hit = extra.get(row.key) || { is_new: false, gender: '', phone: '' }; Object.assign(row, hit) }
     } else if (groupBy === 'cashier') {
       const extra = await cohortCountsByGroup(env, f, level.key)
-      for (const row of rows) Object.assign(row, extra.get(row.key) || { new_customer_count: 0, return_customer_count: 0, unregistered_count: 0, paid_tx_count: 0 })
+      // Paid transactions are the kernel's own collected cohort (RET-A verify R2
+      // L1): no SQL restatement of who still owes.
+      for (const row of rows) Object.assign(row, extra.get(row.key) || { new_customer_count: 0, return_customer_count: 0, unregistered_count: 0 },
+        { paid_tx_count: collectedTx.get(row.key) || 0 })
     } else if (groupBy === 'branch') {
       const extra = await branchActivityByGroup(env, f, level.key, joined.key)
       for (const row of rows) Object.assign(row, extra.get(row.key) || { customer_count: 0, items_sold_qty: 0 })
@@ -3016,7 +3024,8 @@ export async function getSalesGroupedTotals(env: Env, f: SalesFilters, groupBy: 
       row.new_customer_count = hit?.new_customer_count || 0
       row.return_customer_count = hit?.return_customer_count || 0
       row.unregistered_count = hit?.unregistered_count || 0
-      row.paid_tx_count = hit?.paid_tx_count || 0
+      // Unreachable behind the snapshot block above; the level rows carry no owed reading.
+      row.paid_tx_count = Math.max(0, num(row.tx_count) - num(row.pending_tx_count))
     }
   } else if (groupBy === 'branch') {
     const activity = await branchActivityByGroup(env, f, level.key, joined.key)

@@ -239,9 +239,15 @@ export function isCreditSale(sale: SaleRevenueRow): boolean {
   const status = saleStatus(sale)
   if (status === 'awaiting_payment') return true
   if (!(['partial_return', 'returned'].includes(status) && sale.status_before_return === 'awaiting_payment')) return false
-  // RET-A LH-16, the kernel's reportAwaiting: a return status whose returns
-  // lowered the debt was set by the returns code because the sale owes nothing.
-  return !(num(sale.return_owed_reduction_usd) > 0)
+  // The kernel's reportAwaiting: a return status with Not Paid before it is
+  // credit only while the sale still OWES, read by the one owed helper -- a
+  // debt cleared by its returns (LH-16) or a paid sale reopened then returned
+  // (verify R2 L1) owes nothing. Money that cannot be read stays credit.
+  try {
+    return recordedSaleOutstandingUsd(sale) > 0
+  } catch {
+    return true
+  }
 }
 
 /**
