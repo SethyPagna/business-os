@@ -631,8 +631,9 @@ function SuppliersTab({ t, notify, active = true, initialSearch }: SuppliersTabP
         timeMode,
         groupMode: 'time',
         sortDirection,
+        t,
       })
-  ), [groupMode, sortDirection, suppliers, timeMode])
+  ), [groupMode, sortDirection, suppliers, t, timeMode])
 
   useEffect(() => {
     setCollapsedSections((current) => new Set([...current].filter((id) => filteredSections.some((section) => section.id === id))))

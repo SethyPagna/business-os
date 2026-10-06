@@ -475,6 +475,7 @@ function CustomersTab({ t, notify, active = true, initialSearch }: CustomersTabP
         timeMode,
         groupMode: 'time',
         sortDirection,
+        t,
       })
   ), [customers, groupMode, sortDirection, timeMode])
 

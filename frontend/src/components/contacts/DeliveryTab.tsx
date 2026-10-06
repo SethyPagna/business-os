@@ -639,8 +639,9 @@ function DeliveryTab({ t, notify, active = true, initialSearch }: DeliveryTabPro
         timeMode,
         groupMode: 'time',
         sortDirection,
+        t,
       })
-  ), [filteredByGender, groupMode, monthFilter, sortDirection, timeMode, yearFilter])
+  ), [filteredByGender, groupMode, monthFilter, sortDirection, t, timeMode, yearFilter])
   useEffect(() => {
     setCollapsedSections((current) => new Set([...current].filter((id) => filteredSections.some((section) => section.id === id))))
   }, [filteredSections])

@@ -1647,6 +1647,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
         timeMode: timeGroupingMode,
         groupMode: salesGroupMode,
         sortDirection: salesSortDirection,
+        t,
       }),
     [buildSortedSection, filtered, salesGroupMode, salesSortDirection, salesSortFields, salesSortSpec, t, timeGroupingMode],
   )
@@ -1685,6 +1686,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
         timeMode: timeGroupingMode,
         groupMode: salesGroupMode,
         sortDirection: salesSortDirection,
+        t,
       }),
     [buildSortedSection, pagedSales, salesGroupMode, salesSortDirection, salesSortSpec.field, t, timeGroupingMode],
   )

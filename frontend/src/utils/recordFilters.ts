@@ -1,3 +1,7 @@
+import { BUSINESS_TIME_ZONE } from '../constants.ts'
+import { parseServerTimestampMs } from './formatters.ts'
+import { monthYearLabel, type MonthTranslate } from './dateLabels.ts'
+
 type AnyRow = Record<string, any>
 
 export interface TimeParts {
@@ -12,26 +16,39 @@ export interface TimeParts {
   dayLabel: string
 }
 
+// A stored stamp as an instant. parseServerTimestampMs reads a timezone-less
+// "YYYY-MM-DD HH:MM:SS" (SQLite CURRENT_TIMESTAMP) as UTC, which is what it is.
+// The old reader here handed that shape to `new Date()`, which V8 treats as
+// DEVICE-local time, so the same row filed under a different day on a device
+// set to another zone (sweep D15/M13). Anything that is not a readable
+// server stamp stays unreadable and falls in the "Unknown" bucket.
 function toDate(value: unknown): Date | null {
-  if (!value) return null
-  const raw = String(value).trim()
-  if (!raw) return null
-  const direct = new Date(raw)
-  if (!Number.isNaN(direct.getTime())) return direct
-  const isoLike = raw.replace(' ', 'T')
-  const normalizedIso = /[+-]\d{2}$/i.test(isoLike)
-    ? `${isoLike}:00`
-    : /[+-]\d{4}$/i.test(isoLike)
-      ? isoLike.replace(/([+-]\d{2})(\d{2})$/i, '$1:$2')
-      : isoLike
-  const parsedIso = new Date(normalizedIso)
-  if (!Number.isNaN(parsedIso.getTime())) return parsedIso
-  const needsUtcSuffix = !/[zZ]$|[+-]\d{2}:\d{2}$|[+-]\d{4}$|[+-]\d{2}$/.test(normalizedIso)
-  const parsedUtc = new Date(needsUtcSuffix ? `${normalizedIso}Z` : normalizedIso)
-  return Number.isNaN(parsedUtc.getTime()) ? null : parsedUtc
+  const ms = parseServerTimestampMs(value as string)
+  return Number.isNaN(ms) ? null : new Date(ms)
 }
 
-export function getTimeParts(value: unknown): TimeParts {
+// The calendar parts of an instant in the BUSINESS zone, not the device zone:
+// a sale at 18:30Z on 5 Oct is a 6 Oct sale in Phnom Penh, whoever is looking.
+const businessDayParts = new Intl.DateTimeFormat('en-US', {
+  timeZone: BUSINESS_TIME_ZONE,
+  year: 'numeric',
+  month: 'numeric',
+  day: 'numeric',
+})
+
+function businessCalendar(date: Date): { year: number; month: number; day: number } {
+  const parts = businessDayParts.formatToParts(date)
+  const read = (type: string) => Number(parts.find((part) => part.type === type)?.value)
+  return { year: read('year'), month: read('month'), day: read('day') }
+}
+
+/**
+ * Day / month / year grouping parts for a stored stamp, in business time.
+ * `t` names the month in the viewer's language for `monthLabel`
+ * (date_month_N keys); without it the label falls back to English short names.
+ * dayKey / monthKey stay ISO: they are sort and grouping keys, not display text.
+ */
+export function getTimeParts(value: unknown, t?: MonthTranslate): TimeParts {
   const parsed = toDate(value)
   if (!parsed) {
     return {
@@ -46,9 +63,7 @@ export function getTimeParts(value: unknown): TimeParts {
     }
   }
 
-  const year = parsed.getFullYear()
-  const month = parsed.getMonth() + 1
-  const day = parsed.getDate()
+  const { year, month, day } = businessCalendar(parsed)
 
   return {
     date: parsed,
@@ -56,7 +71,7 @@ export function getTimeParts(value: unknown): TimeParts {
     month,
     day,
     yearLabel: String(year),
-    monthLabel: parsed.toLocaleString('en-US', { month: 'long', year: 'numeric' }),
+    monthLabel: monthYearLabel(year, month, t),
     monthKey: `${year}-${String(month).padStart(2, '0')}`,
     dayKey: `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`,
     // dd/mm/yyyy day-first (Sep 4 2026). dayKey/monthKey above stay ISO --

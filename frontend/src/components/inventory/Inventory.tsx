@@ -1531,6 +1531,7 @@ export default function Inventory({ hostSection, onHostSectionChange, embedded =
       timeMode: movementTimeMode,
       groupMode: movementGroupMode,
       sortDirection: movementSortDirection,
+      t,
     })
   ), [groupedMovements, movementGroupMode, movementSortDirection, movementTimeMode, t])
 

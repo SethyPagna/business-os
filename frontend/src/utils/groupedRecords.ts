@@ -1,5 +1,6 @@
 import { compareInitialKeys, getInitialKey } from './initials.ts'
 import { getTimeParts } from './recordFilters.ts'
+import type { MonthTranslate } from './dateLabels.ts'
 
 export {
   getAvailableYears,
@@ -52,6 +53,7 @@ export function buildTimeActionSections<T extends AnyRow = AnyRow>(items: T[] = 
   timeMode = 'month',
   groupMode = 'time+action',
   sortDirection = 'desc',
+  t,
 }: {
   getDate?: (item: T) => unknown
   getItemId?: (item: T) => any
@@ -62,6 +64,8 @@ export function buildTimeActionSections<T extends AnyRow = AnyRow>(items: T[] = 
   timeMode?: 'year' | 'month' | 'day' | string
   groupMode?: 'time' | 'time+action' | string
   sortDirection?: SortDirection
+  /** The app's `t`, so a month section heading is named in the viewer's language. */
+  t?: MonthTranslate
 } = {}) {
   const sections = new Map<string, TimeActionSection<T>>()
   const itemMeta = new Map<T, { itemId: any, sortTime: number }>()
@@ -85,7 +89,7 @@ export function buildTimeActionSections<T extends AnyRow = AnyRow>(items: T[] = 
 
   for (const item of Array.isArray(items) ? items : []) {
     const dateValue = getDate(item)
-    const parts = getTimeParts(dateValue)
+    const parts = getTimeParts(dateValue, t)
     if (year !== 'all' && parts.yearLabel !== String(year)) continue
     if (month !== 'all' && String(parts.month || '') !== String(month)) continue
     const itemId = getItemId(item)
