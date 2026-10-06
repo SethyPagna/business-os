@@ -128,7 +128,7 @@ export default function StockInInvoicesSection({ t }: StockInInvoicesSectionProp
           className="min-w-[9rem]"
           options={[
             { value: 'all', label: tr('all_branches', 'All Branches') },
-            ...stockInReportBranchOptions(branches, tr('branch_retired_tag', 'retired')),
+            ...stockInReportBranchOptions(branches, tr('branch_retired_tag', 'inactive')),
           ]}
         />
         <SuggestionTextInput

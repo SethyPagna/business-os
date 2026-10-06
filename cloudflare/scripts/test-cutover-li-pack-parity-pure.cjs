@@ -55,6 +55,16 @@ runTest('the undo-closed sentences: history module, applier table and the pack s
   assert.equal(en.redo_refused_closed_branch_cutover_move, en.undo_refused_closed_branch_cutover_move.replace(/^Undo closed:/, 'Redo closed:'))
 })
 
+runTest('the product-moved Undo refusal (stock session after the cutover): the Worker English is the pack English, name-free', () => {
+  const text = src('lib/stockSession.ts')
+  const match = /export const BRANCH_CUTOVER_PRODUCT_MOVED_MESSAGE = "([^"]*)"/.exec(text)
+  assert.ok(match, 'stockSession.ts exports the message as a plain string')
+  assert.equal(match[1], en.undo_refused_closed_branch_cutover_product_moved)
+  assert.equal(en.redo_refused_closed_branch_cutover_product_moved, en.undo_refused_closed_branch_cutover_product_moved.replace(/^Undo closed:/, 'Redo closed:'))
+  assert.doesNotMatch(match[1], NAMES)
+  assert.ok(text.includes("BRANCH_CUTOVER_PRODUCT_MOVED_CODE = 'undo_closed_branch_cutover_product_moved'"))
+})
+
 runTest('the retired-branch refusal: the Worker English is the pack English and the code is the pack key', () => {
   const code = constant('lib/branchEffect.ts', 'BRANCH_RETIRED_NO_SUCCESSOR_CODE')
   assert.equal(code, 'branch_retired_no_successor')

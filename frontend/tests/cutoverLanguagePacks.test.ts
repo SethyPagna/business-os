@@ -27,6 +27,7 @@ const CLOSED_FAMILY = [
   'history_undo_closed_branch_retired', 'history_undo_closed_branch_cutover_move',
   'undo_refused_closed_branch_retired', 'undo_refused_closed_branch_cutover_move',
   'redo_refused_closed_branch_retired', 'redo_refused_closed_branch_cutover_move',
+  'undo_refused_closed_branch_cutover_product_moved', 'redo_refused_closed_branch_cutover_product_moved',
 ]
 // The branch-rule refusals, including the three legacy keys that no longer have a call site (they carry the neutral text so
 // a stray render can never say Shop or Warehouse) and the sale/expense refusals the Worker now sends by code.
