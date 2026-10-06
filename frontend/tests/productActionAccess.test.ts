@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { canAddProductVariant, canAdjustAllProductPrices } from '../src/utils/productActionAccess.ts'
+import { PRODUCT_BULK_DELETE_JOB_THRESHOLD, canAddProductVariant, canAdjustAllProductPrices, productBulkControlAccess } from '../src/utils/productActionAccess.ts'
 import { getActionTier, getPermissionTier } from '../../cloudflare/src/lib/permissions.ts'
 
 // PROD-PERM (loophole review 6 Oct 2026, N6 and N8). "Apply to ALL products in the system" ignored the Edit product
@@ -89,6 +89,68 @@ runTest('the Products page gates Add variant and Apply to ALL on the helpers, ev
   assert.match(productsPage, /\}, \[canAddVariant, openProductFormTab, tr\]\)/, 'the memoized row menu re-renders when the permission changes')
   assert.match(productsPage, /\{canAdjustAllPrices \? \(\s*<button[^>]*\s[^>]*onClick=\{runBulkPriceAdjustAllProducts\}/s, 'the catalog-wide button is conditional')
   assert.equal(productsPage.match(/setVariantModal\(/g)?.length, 4, 'setVariantModal callers: the two gated entries, the close, and the modal reset')
+})
+
+// ---- the bulk toolbar: every control mirrors the action its first request is checked against ----
+// The Worker's side, from the real kernel: what each route refuses with a 403.
+function serverBulk(user: ReturnType<typeof staff>, count: number) {
+  const bulkDeleteOk = count <= 300 || (getActionTier(user, 'products', 'bulk_delete') === 'full')
+  return {
+    delete: getActionTier(user, 'products', 'delete') !== 'none' && bulkDeleteOk,
+    info: getActionTier(user, 'products', 'edit') !== 'none',
+    pricing: getActionTier(user, 'products', 'edit') !== 'none',
+    stock: getActionTier(user, 'inventory', 'adjust') === 'full',
+    out: getActionTier(user, 'inventory', 'adjust') === 'full',
+    branch: getActionTier(user, 'inventory', 'transfer') === 'full',
+  }
+}
+const BULK_ROLES: Array<[string, Record<string, unknown>]> = [
+  ['Products Full, Inventory Full', { products: true, inventory: true }],
+  ['Products Full, no Inventory', { products: true }],
+  ['Employee-style: edit on, delete/bulk delete off', { products: true, inventory: 'review', 'products:delete': false, 'products:bulk_delete': false }],
+  ['Edit product off', { products: true, inventory: true, 'products:edit': false }],
+  ['Delete off', { products: true, inventory: true, 'products:delete': false }],
+  ['Bulk delete off', { products: true, inventory: true, 'products:bulk_delete': false }],
+  ['Adjust off', { products: true, inventory: true, 'inventory:adjust': false }],
+  ['Transfer off', { products: true, inventory: true, 'inventory:transfer': false }],
+  ['Review Required Products', { products: 'review', inventory: true }],
+  ['Review Required Inventory', { products: true, inventory: 'review' }],
+  ['No grants', {}],
+]
+runTest('the bulk toolbar offers each control exactly when the Worker would accept its request', () => {
+  for (const [label, grants] of BULK_ROLES) {
+    for (const count of [1, 300, 301]) {
+      const user = staff(grants)
+      assert.deepEqual(productBulkControlAccess(user, count), serverBulk(user, count), `${label}, ${count} selected`)
+    }
+  }
+})
+
+runTest('the bulk toolbar answers are the intended ones (a control that is hidden for everyone cannot pass)', () => {
+  const full = staff({ products: true, inventory: true })
+  assert.deepEqual(productBulkControlAccess(full, 5), { delete: true, info: true, pricing: true, stock: true, out: true, branch: true })
+  assert.equal(productBulkControlAccess(full, 301).delete, true)
+  assert.equal(productBulkControlAccess(staff({ products: true, inventory: true, 'products:bulk_delete': false }), 301).delete, false, 'a selection that would start a bulk delete job needs Bulk delete')
+  assert.equal(productBulkControlAccess(staff({ products: true, inventory: true, 'products:bulk_delete': false }), 300).delete, true, 'at the threshold the per-row delete path is used')
+  const noEdit = productBulkControlAccess(staff({ products: true, inventory: true, 'products:edit': false }), 5)
+  assert.equal(noEdit.info || noEdit.pricing, false)
+  assert.equal(noEdit.stock && noEdit.branch && noEdit.out && noEdit.delete, true, 'switching Edit off hides only the edit controls')
+  assert.equal(productBulkControlAccess(staff({ products: true, inventory: true, 'inventory:adjust': false }), 5).stock, false)
+  assert.equal(productBulkControlAccess(staff({ products: true, inventory: true, 'inventory:transfer': false }), 5).branch, false)
+  assert.deepEqual(productBulkControlAccess(admin, 5000), { delete: true, info: true, pricing: true, stock: true, out: true, branch: true })
+  assert.deepEqual(productBulkControlAccess(null, 5), { delete: false, info: false, pricing: false, stock: false, out: false, branch: false })
+  assert.equal(PRODUCT_BULK_DELETE_JOB_THRESHOLD, 300, 'the Worker-facing threshold the page switches to a job at')
+})
+
+runTest('the Products page renders each bulk control only through bulkAccess, and the job threshold is the shared one', () => {
+  assert.ok(productsPage.includes('const bulkAccess = useMemo(() => productBulkControlAccess(user, selectedVisibleCount)'))
+  assert.match(productsPage, /\{hasSelected && bulkAccess\.delete \? \(\s*<button[^>]*onClick=\{handleBulkDelete\}/s)
+  assert.ok(productsPage.includes('].filter((opt) => bulkAccess[opt.id as keyof typeof bulkAccess]).map(opt => ('))
+  for (const panel of ['info', 'pricing', 'stock', 'branch']) {
+    assert.ok(productsPage.includes(`{hasSelected && bulkEditMode === '${panel}' && bulkAccess.${panel} && (`), `the ${panel} panel is gated`)
+  }
+  assert.match(productsPage, /const BULK_DELETE_JOB_THRESHOLD = PRODUCT_BULK_DELETE_JOB_THRESHOLD/)
+  assert.doesNotMatch(productsPage, /grid grid-cols-5 gap-1/, 'the chip row sizes itself to the controls that remain')
 })
 
 if (failed) {

@@ -1,6 +1,6 @@
 import ProductNameRail from '../shared/ProductNameRail'
 import { canViewAcquisitionCosts, canEditAcquisitionCosts, omitUnauthorizedCatalogCosts } from '../../utils/acquisitionCostAccess.ts'
-import { canAddProductVariant, canAdjustAllProductPrices } from '../../utils/productActionAccess.ts'
+import { PRODUCT_BULK_DELETE_JOB_THRESHOLD, canAddProductVariant, canAdjustAllProductPrices, productBulkControlAccess } from '../../utils/productActionAccess.ts'
 // Products
 // Main Products page; all sub-modals are imported from sibling files.
 
@@ -2573,7 +2573,7 @@ function ProductsFullEditor() {
   // in-browser progress and per-item undo/redo are worth keeping; above
   // it, a fire-and-poll job is the only path that stays fast and doesn't
   // risk the tab timing out or the person navigating away mid-delete.
-  const BULK_DELETE_JOB_THRESHOLD = 300
+  const BULK_DELETE_JOB_THRESHOLD = PRODUCT_BULK_DELETE_JOB_THRESHOLD
   const [bulkDeleteJobStatus, setBulkDeleteJobStatus] = useState<BulkDeleteJobStatus | null>(null)
 
   const runBulkDeleteJobConfirmed = async (ids: EntityId[], reason: string) => {
@@ -3789,6 +3789,8 @@ function ProductsFullEditor() {
     out: tr('out_short', 'Out'),
     delete: tr('delete_short', 'Delete'),
   }), [tr])
+  // Each bulk control is offered only to a role the Worker would let through (the same action it checks).
+  const bulkAccess = useMemo(() => productBulkControlAccess(user, selectedVisibleCount), [selectedVisibleCount, user])
   const selectedProducts = useMemo(
     () => buildSelectedProducts(visibleProducts, selectedVisibleIdsSet),
     [selectedVisibleIdsSet, visibleProducts],
@@ -4986,7 +4988,7 @@ function ProductsFullEditor() {
                     <span className="detail-scroll-text whitespace-nowrap">{productSelectedLabel}</span>
                   </span>
                 ) : null}
-                {hasSelected ? (
+                {hasSelected && bulkAccess.delete ? (
                   <button
                     type="button"
                     disabled={bulkActionBusy}
@@ -4998,16 +5000,16 @@ function ProductsFullEditor() {
                 ) : null}
             </div>
           </div>
-          {hasSelected ? (
+          {hasSelected && (bulkAccess.info || bulkAccess.pricing || bulkAccess.stock || bulkAccess.branch || bulkAccess.out) ? (
             <div className="border-t border-primary-100/80 px-3 py-2.5 dark:border-primary-900/40">
-              <div className="grid grid-cols-5 gap-1">
+              <div className="grid gap-1" style={{ gridTemplateColumns: `repeat(${[bulkAccess.info, bulkAccess.pricing, bulkAccess.stock, bulkAccess.branch, bulkAccess.out].filter(Boolean).length}, minmax(0, 1fr))` }}>
                 {[
                   { id: 'info', label: productChipLabels.info },
                   { id: 'pricing', label: productChipLabels.pricing },
                   { id: 'stock', label: productChipLabels.stock },
                   { id: 'branch', label: productChipLabels.branch },
                   { id: 'out', label: productChipLabels.out, onClick: handleBulkOutOfStock },
-                ].map(opt => (
+                ].filter((opt) => bulkAccess[opt.id as keyof typeof bulkAccess]).map(opt => (
                   <button key={opt.id}
                     disabled={bulkActionBusy || !hasSelected}
                     onClick={() => {
@@ -5031,7 +5033,7 @@ function ProductsFullEditor() {
           so they scroll away like any other page content instead of eating
           permanent screen space. Each now gets its own rounded card (was
           previously a border-t continuation of the sticky card above it). */}
-      {hasSelected && bulkEditMode === 'info' && (
+      {hasSelected && bulkEditMode === 'info' && bulkAccess.info && (
         <div className="mb-2 rounded-xl border border-primary-200 bg-white px-4 py-3 dark:border-primary-700 dark:bg-zinc-800">
           <p className="text-xs text-gray-500 mb-2">{(() => {
             const [pre, post] = tr('bulk_edit_update_info_for_count', 'Update basic info for {count} products').split('{count}')
@@ -5092,7 +5094,7 @@ function ProductsFullEditor() {
         </div>
       )}
 
-      {hasSelected && bulkEditMode === 'pricing' && (
+      {hasSelected && bulkEditMode === 'pricing' && bulkAccess.pricing && (
         <div className="mb-2 rounded-xl border border-primary-200 bg-white px-4 py-3 dark:border-primary-700 dark:bg-zinc-800">
           <p className="text-xs text-gray-500 mb-2">{(() => {
             const [pre, post] = tr('bulk_edit_update_pricing_for_count', 'Update pricing for {count} products').split('{count}')
@@ -5230,7 +5232,7 @@ function ProductsFullEditor() {
         </div>
       )}
 
-      {hasSelected && bulkEditMode === 'stock' && (
+      {hasSelected && bulkEditMode === 'stock' && bulkAccess.stock && (
         <div className="mb-2 flex flex-wrap items-center gap-1.5 rounded-xl border border-primary-200 bg-white px-2 py-2 dark:border-primary-700 dark:bg-zinc-800">
           <div role="group" aria-label={tr('bulk_edit_adjust_stock_for_count', 'Adjust stock for {count} products').replace('{count}', String(selectedVisibleCount))} className="grid basis-full grid-cols-3 gap-1 rounded-lg bg-gray-100 p-0.5 dark:bg-zinc-700 sm:basis-auto">
             {(['add', 'remove', 'set'] as const).map((mode) => {
@@ -5265,7 +5267,7 @@ function ProductsFullEditor() {
         </div>
       )}
 
-      {hasSelected && bulkEditMode === 'branch' && (
+      {hasSelected && bulkEditMode === 'branch' && bulkAccess.branch && (
         <div className="mb-2 rounded-xl border border-primary-200 bg-white px-4 py-3 dark:border-primary-700 dark:bg-zinc-800">
           <p className="text-xs text-gray-500 mb-2">{(() => {
             const [pre, post] = tr('bulk_edit_move_stock_to_branch_for_count', 'Move stock to a branch for {count} products').split('{count}')

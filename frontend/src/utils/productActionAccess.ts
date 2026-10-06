@@ -21,3 +21,35 @@ export function canAdjustAllProductPrices(user: PermissionUser): boolean {
   const { isAdmin, getPermissionTier, can } = effectivePermissions(user)
   return isAdmin || (getPermissionTier('products') === 'full' && can('products', 'edit'))
 }
+
+/** The Products bulk toolbar's controls, in the order they appear. */
+export type ProductBulkControl = 'delete' | 'info' | 'pricing' | 'stock' | 'branch' | 'out'
+
+/** Above this many selected rows a bulk delete runs as a server job (Products.tsx BULK_DELETE_JOB_THRESHOLD). */
+export const PRODUCT_BULK_DELETE_JOB_THRESHOLD = 300
+
+/**
+ * Which bulk-toolbar controls a role may use. Each answers with the action the Worker checks for the writes the
+ * control performs, so a role is never offered a control whose first request is a 403:
+ *   delete   DELETE /products/:id (Delete product); past the job threshold POST /bulk-delete-jobs (Bulk delete, Full)
+ *   info     PUT /products/:id (Edit product), once per row
+ *   pricing  PUT /products/:id (Edit product), once per row
+ *   stock    the Stock Session Add / Remove / Set -> POST /inventory/adjust (Adjust / receive stock)
+ *   out      POST /inventory/adjust, one remove per branch (Adjust / receive stock)
+ *   branch   POST /inventory/transfer (Transfer stock)
+ */
+export function productBulkControlAccess(user: PermissionUser, selectedCount: number): Record<ProductBulkControl, boolean> {
+  const { isAdmin, can } = effectivePermissions(user)
+  const everything = isAdmin
+  const edit = everything || can('products', 'edit')
+  const adjust = everything || can('inventory', 'adjust')
+  return {
+    delete: everything || (can('products', 'delete')
+      && (selectedCount <= PRODUCT_BULK_DELETE_JOB_THRESHOLD || can('products', 'bulk_delete'))),
+    info: edit,
+    pricing: edit,
+    stock: adjust,
+    out: adjust,
+    branch: everything || can('inventory', 'transfer'),
+  }
+}

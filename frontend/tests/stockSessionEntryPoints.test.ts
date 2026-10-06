@@ -251,7 +251,7 @@ await runTest('the retired stock forms are gone', () => {
 
 await runTest('the select-mode stock panel keeps Add / Remove / Set on its own row at 360 px', () => {
   // Seen in the browser at 360: with flex-1 + min-w-0 the mode group shrank to one clipped chip beside Qty and a long Apply label.
-  const panel = products.slice(products.indexOf("bulkEditMode === 'stock' && ("), products.indexOf("bulkEditMode === 'branch' && ("))
+  const panel = products.slice(products.indexOf("bulkEditMode === 'stock' && bulkAccess.stock && ("), products.indexOf("bulkEditMode === 'branch' && bulkAccess.branch && ("))
   assert.ok(panel.length > 0, 'panel located')
   assert.match(panel, /role="group"[^]*?className="grid basis-full grid-cols-3[^"]*sm:basis-auto"/, 'the mode group takes a full row on a phone')
   assert.doesNotMatch(panel, /grid min-w-0 flex-1 grid-cols-3/, 'the shrinking flex-1 form is gone')
