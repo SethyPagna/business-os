@@ -145,6 +145,8 @@ for (const relative of ['api/feesTransport.ts', 'api/returnsReadTransport.ts', '
   const closure = sourceClosure(relative)
   assert.equal(closure.has(path.join(frontend, 'src/components/sales/reports/reportModel.ts')), false, `${relative} must not import the Reports model`)
   assert.equal(closure.has(path.join(frontend, 'src/utils/businessTimeBounds.ts')), true, `${relative} uses the shared business-time bound`)
+  // The pending-request store (~10 KB) stays off the boot path; the refusal predicate lives in its own leaf.
+  assert.equal(closure.has(path.join(frontend, 'src/utils/directMutationRequest.ts')), false, `${relative} must not import the direct-mutation request store`)
 }
 console.log('PASS neutral chunk policy, real config ordering, and source dependency boundaries')
 

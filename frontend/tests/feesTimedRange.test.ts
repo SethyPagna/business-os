@@ -36,7 +36,7 @@ new Function('exports', 'require', 'module', ts.transpileModule(source, { compil
   if (id.includes('moneyPrecision')) return require('../src/utils/moneyPrecision.ts')
   if (id.includes('businessTimeBounds')) return require('../src/utils/businessTimeBounds.ts')
   if (id.includes('syncProblemLifecycle')) return {}
-  if (id.includes('directMutationRequest')) return require('../src/utils/directMutationRequest.ts')
+  if (id.includes('directMutationRefusal')) return require('../src/utils/directMutationRefusal.ts')
   throw new Error(id)
 }, module)
 await module.exports.getFees({ ...exact, limit: 25, offset: 0 })

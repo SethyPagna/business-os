@@ -1,7 +1,7 @@
 import { apiFetch, route } from './http.ts'
 import { appendQuery, buildQueryString, type QueryParams } from './query.ts'
 import { dispatchResolvedSyncError } from '../utils/syncProblemLifecycle.ts'
-import { directMutationRefusedBeforeWrite } from '../utils/directMutationRequest.ts'
+import { directMutationRefusedBeforeWrite } from '../utils/directMutationRefusal.ts'
 import { MoneyPrecisionError, nativeChangeAmounts, type DecimalInput } from '../utils/moneyPrecision.ts'
 import { reportUtcBound } from '../utils/businessTimeBounds.ts'
 
