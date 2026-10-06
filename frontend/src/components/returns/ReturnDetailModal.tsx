@@ -10,6 +10,7 @@ import { DetailRow, DetailRowGroup, MoneyRow } from '../shared/DetailRows.tsx'
 import { getReturn as fetchReturnDetail, getReturnRecords as fetchReturnRecords } from '../../api/returnsReadTransport.ts'
 import History from 'lucide-react/dist/esm/icons/history.js'
 import { normalizeStockAction, stockActionOption } from './helpers/returnOptions.ts'
+import { recordedRefundSplit } from './helpers/refundCurrency.ts'
 
 import { customerDisplayName } from '../../utils/customerIdentity.ts'
 
@@ -61,6 +62,9 @@ interface ReturnDetail {
   supplier_loss_khr?: number | string | null
   total_refund_usd?: number | string | null
   total_refund_khr?: number | string | null
+  // RET-A (0234): the currency the refund was paid in and the debt it lowered.
+  refund_currency?: string | null
+  owed_reduction_usd?: number | string | null
   replacement_items?: ReplacementLineItem[] | null
   settlement_mode?: string | null
   settlement_diff_usd?: number | string | null
@@ -325,15 +329,33 @@ export default function ReturnDetailModal({ ret, onClose, onMinimize, onEdit, on
                         sub={isPositiveMoney(ret.supplier_loss_khr) ? fmtKHR(coerceMoney(ret.supplier_loss_khr)) : null}
                       />
                     </>
-                  ) : (
-                    <MoneyRow
-                      labelSpan={2}
-                      strong
-                      label={tr('total_refunded', 'Total Refunded')}
-                      amount={fmtUSD(coerceMoney(ret.total_refund_usd))}
-                      sub={isPositiveMoney(ret.total_refund_khr) ? fmtKHR(coerceMoney(ret.total_refund_khr)) : null}
-                    />
-                  )}
+                  ) : (() => {
+                    // RET-A: a refund recorded since 0234 names what it did with
+                    // the money -- the debt it lowered, then the cash paid out in
+                    // its own currency (riel actually paid, never a dollar refund's
+                    // riel equivalent). One recorded before keeps its old row.
+                    const split = recordedRefundSplit(ret)
+                    return (
+                      <>
+                        <MoneyRow
+                          labelSpan={2}
+                          strong
+                          label={tr('total_refunded', 'Total Refunded')}
+                          amount={fmtUSD(coerceMoney(ret.total_refund_usd))}
+                          sub={split?.currency !== 'USD' && isPositiveMoney(ret.total_refund_khr) ? fmtKHR(coerceMoney(ret.total_refund_khr)) : null}
+                        />
+                        {split && split.loweredUsd > 0 ? (
+                          <MoneyRow labelSpan={2} tone="credit" marker="data-return-debt-lowered"
+                            label={tr('return_debt_lowered', 'Debt lowered')} amount={fmtUSD(split.loweredUsd)} />
+                        ) : null}
+                        {split ? (
+                          <MoneyRow labelSpan={2} marker="data-return-paid-out"
+                            label={tr('return_paid_out', 'Paid out')}
+                            amount={split.currency === 'KHR' ? fmtKHR(split.payoutKhr) : fmtUSD(split.payoutUsd)} />
+                        ) : null}
+                      </>
+                    )
+                  })()}
                 </tfoot>
               </table>
             </div>

@@ -6144,6 +6144,8 @@
   "return_refund_in_usd": "សងប្រាក់វិញជាដុល្លារ",
   "return_refund_in_khr": "សងប្រាក់វិញជារៀល",
   "return_split_lowers_debt": "បន្ថយប្រាក់ជំពាក់",
+  "return_debt_lowered": "បានបន្ថយប្រាក់ជំពាក់",
+  "return_paid_out": "បានសងសាច់ប្រាក់",
   "return_split_pay_out": "សងសាច់ប្រាក់",
   "return_split_replacement_from_refund": "ទំនិញប្តូរ បង់ពីប្រាក់សងវិញ",
   "return_split_replacement_owed": "បូកចូលប្រាក់ជំពាក់",

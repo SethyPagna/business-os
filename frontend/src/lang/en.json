@@ -6148,6 +6148,8 @@
   "return_refund_in_usd": "Refund in dollars",
   "return_refund_in_khr": "Refund in riel",
   "return_split_lowers_debt": "Lowers debt",
+  "return_debt_lowered": "Debt lowered",
+  "return_paid_out": "Paid out",
   "return_split_pay_out": "Pay out",
   "return_split_replacement_from_refund": "Replacement paid from the refund",
   "return_split_replacement_owed": "added to what is owed",
