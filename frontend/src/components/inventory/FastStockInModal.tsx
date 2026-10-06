@@ -21,7 +21,7 @@ import { stockFailureText, stockLineNeedsRemoval } from '../../utils/stockAdjust
 import { activeReceivingDestination, captureReceivingRequest, productCreationRefusal, receivingDestinationRefusal, receivingDetailsLocked, restoreReceivingSubmissions, retainReceivingSubmissions, type ReceivingSubmissions } from '../../utils/receivingDestination.ts'
 import { assertReceivingProductAttemptDispatch, finishReceivingProductAttempt, overlayReceivingProductAttempts, registerReceivingProductAttempt, reserveReceivingProductAttempt } from '../../utils/receivingProductAttempt.ts'
 import { lazyRetry } from '../../utils/lazyImport.ts'
-import { batchDisplayLabel, formatBatchReceivedDate, lotCodeAsDate } from '../../utils/batchLabel.ts'
+import { batchDisplayLabel, formatBatchReceivedDate, lotCodeDisplay } from '../../utils/batchLabel.ts'
 import { todayStr } from '../../utils/dateHelpers.ts'
 import { buildProductGroups, type ProductGroup, type ProductRecord } from '../../utils/productGrouping.ts'
 import { extractHistoryResultId } from '../../utils/historyHelpers.ts'
@@ -843,7 +843,7 @@ export default function FastStockInModal({
       : line.mode === 'set'
         ? tr('stock_line_set', 'Set')
         : result?.lotCode
-          ? `${tr('received_date', 'Received date')} ${lotCodeAsDate(result.lotCode) || result.lotCode}`
+          ? `${tr('received_date', 'Received date')} ${lotCodeDisplay(result.lotCode)}`
           : tr('received', 'Received')
   )
 

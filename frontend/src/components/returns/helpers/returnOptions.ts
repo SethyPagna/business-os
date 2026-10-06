@@ -9,8 +9,8 @@
 // sale the customer pays for. Neither nets against the other, so there is no
 // difference to preview, owe, or settle.
 
-import { BUSINESS_TIME_ZONE } from '../../../constants.ts'
-import { fmtDayFirst } from '../../../utils/formatters.ts'
+import { lotCodeDisplay } from '../../../utils/batchLabel.ts'
+import { fmtDate, fmtDateOnly } from '../../../utils/formatters.ts'
 
 export type ReturnStockAction = 'none' | 'restock' | 'damaged'
 
@@ -69,21 +69,18 @@ export function returnLineNeedsLotPick(input: {
   return !(Number.isFinite(picked) && picked > 0)
 }
 
-// dd/mm/yyyy per the app-wide date convention (day-first since Sep 4 2026:
-// "change the whole app to dd-mm-yyy"); ISO or Date-parseable in. This one
-// assembles the string by hand rather than calling the shared formatter
-// because it must pass an unparseable value through untouched, so it is
-// easy to miss in a sweep for toLocaleDateString -- it was.
+// dd/mm/yyyy through the shared formatters (day-first since Sep 4 2026).
+// A stored DATE (ISO, or a slash value that must not pass for a date) goes to
+// fmtDateOnly; anything else the engine can parse is an INSTANT and is read in
+// the business timezone (Phnom Penh), never the device zone. This used to be a
+// hand-rolled copy of fmtDateOnly that read a slash string as month-first via
+// `new Date()`.
 export function formatBatchDate(value: string | null | undefined): string {
   const text = String(value ?? '').trim()
   if (!text) return ''
-  const isoMatch = text.match(/^(\d{4})-(\d{2})-(\d{2})/)
-  if (isoMatch) return `${isoMatch[3]}/${isoMatch[2]}/${isoMatch[1]}`
+  if (/^\d{4}-\d{2}-\d{2}/.test(text) || text.includes('/')) return fmtDateOnly(text)
   const parsed = new Date(text)
-  if (Number.isNaN(parsed.getTime())) return text
-  // A non-ISO but parseable value is an instant: read its day in the
-  // business timezone (Phnom Penh), not the device zone.
-  return fmtDayFirst(parsed, { year: 'numeric', month: '2-digit', day: '2-digit', timeZone: BUSINESS_TIME_ZONE })
+  return Number.isNaN(parsed.getTime()) ? fmtDateOnly(text) : fmtDate(parsed)
 }
 
 // One line per lot for the replacement batch picker -- lot code, expiry
@@ -95,7 +92,7 @@ export function describeBatchOption(batch: {
   batch_number?: number | null
 }): string {
   const parts: string[] = []
-  const lot = String(batch.lot_code ?? '').trim()
+  const lot = lotCodeDisplay(batch.lot_code)
   parts.push(lot || (batch.batch_number != null ? `#${batch.batch_number}` : 'received date'))
   const expiry = formatBatchDate(batch.expiry_date)
   if (expiry) parts.push(`exp ${expiry}`)

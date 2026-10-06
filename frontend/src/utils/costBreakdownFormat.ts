@@ -26,6 +26,8 @@
 // payload carries the weighted terms, so this module renders
 // "(2 × 12.00 + 8 × 12.50) / 10 = 12.40". Still no arithmetic of its own
 // beyond the reading: every number comes from the Worker.
+import { lotCodeDisplay } from './batchLabel.ts'
+
 export type CostBreakdownExclusionReason = 'zero' | 'duplicate' | 'inactive' | 'superseded' | 'overridden' | 'depleted' | null
 
 const EXCLUSION_REASONS: ReadonlySet<string> = new Set(['zero', 'duplicate', 'inactive', 'superseded', 'overridden', 'depleted'])
@@ -138,7 +140,7 @@ export function costExclusionLabelKey(excluded: CostBreakdownExclusionReason): s
  * always the translated "Override" tag, rendered directly by the caller.
  */
 export function costRowPrimaryText(input: CostBreakdownInput, formattedReceivedDate: string | null): string {
-  if (input.lot_code) return input.lot_code
+  if (input.lot_code) return lotCodeDisplay(input.lot_code)
   if (formattedReceivedDate) return formattedReceivedDate
   if (input.batch_number != null) return `#${input.batch_number}`
   return input.label

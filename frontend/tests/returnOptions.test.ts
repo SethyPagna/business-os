@@ -65,9 +65,12 @@ runTest('K2: batch option lines read dd/mm/yyyy and never carry cost', () => {
   assert.equal(formatBatchDate('2026-09-15'), '15/09/2026')
   assert.equal(formatBatchDate(''), '')
   const label = describeBatchOption({ lot_code: '08152026', expiry_date: '2027-01-31', quantity: 6, batch_number: 2 })
-  // The lot code stays MMDDYYYY verbatim while the expiry date beside it is
-  // day-first: one line carrying both halves of the display/identifier split.
-  assert.equal(label, '08152026 · exp 31/01/2027 · 6 in stock')
+  // The stored MMDDYYYY code decodes to the day-first date it encodes (Z1a),
+  // so the lot and the expiry beside it read in the same order. A genuine
+  // custom code is shown as typed.
+  assert.equal(label, '15/08/2026 · exp 31/01/2027 · 6 in stock')
+  assert.equal(describeBatchOption({ lot_code: 'L-0904', expiry_date: null, quantity: 1, batch_number: 1 }), 'L-0904 · 1 in stock')
+  assert.equal(describeBatchOption({ lot_code: 'ADJ09/02/2026', expiry_date: '03/04/2027', quantity: 2 }), 'ADJ 02/09/2026 · exp ⚠ 03/04/2027 · 2 in stock')
   assert.equal(describeBatchOption({ lot_code: null, expiry_date: null, quantity: 3, batch_number: 4 }), '#4 · 3 in stock')
   assert.doesNotMatch(label, /cost/i)
 })

@@ -1,4 +1,4 @@
-import { lotCodeAsDate } from '../../utils/batchLabel.ts'
+import { lotCodeDisplay } from '../../utils/batchLabel.ts'
 import { isStockInCorrectionRow, revertsMovementId } from '../../utils/stockMovementDetail.ts'
 
 type MovementRecord = Record<string, unknown>
@@ -350,7 +350,7 @@ export function buildMovementGroups(movements: unknown[] = []): MovementGroup[] 
         // Z1a: an 8-digit MMDDYYYY lot code is the received date wearing a
         // code's clothes -- printing it verbatim gave "Lot 08242026" next to
         // real dd/mm/yyyy dates. A genuine custom code still renders as a code.
-        if (lotCode) return `Received date ${lotCodeAsDate(lotCode) || lotCode}`
+        if (lotCode) return `Received date ${lotCodeDisplay(lotCode)}`
         const productId = Number(item.product_id || 0)
         if (Number.isFinite(productId) && productId > 0) return `product #${productId}`
         return 'Inventory movement'
