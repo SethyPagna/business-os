@@ -34,10 +34,12 @@ async function main() {
       db.prepare('ALTER TABLE products ADD COLUMN wholesale_price_usd REAL DEFAULT 0'),
       db.prepare('ALTER TABLE products ADD COLUMN wholesale_price_khr REAL DEFAULT 0'),
       db.prepare('ALTER TABLE products ADD COLUMN auto_merged_count INTEGER DEFAULT 0'),
+      // 0223 (branch lifecycle identity): attachBranchStock reads branches.role for the till's can-sell rule.
+      db.prepare("ALTER TABLE branches ADD COLUMN role TEXT CHECK (role IS NULL OR role IN ('shop', 'warehouse'))"),
       db.prepare('CREATE INDEX idx_products_name_key_pg ON products(name_key)'),
       db.prepare('CREATE UNIQUE INDEX idx_branch_stock_product_branch_unique ON branch_stock(product_id,branch_id)'),
       db.prepare('CREATE TABLE promotion_rules(id INTEGER PRIMARY KEY,is_active INTEGER)'),
-      db.prepare("INSERT INTO branches(id,name,is_active,is_default) VALUES(2,'Shop',1,1),(3,'Warehouse',1,0),(4,'Inactive',0,0)"),
+      db.prepare("INSERT INTO branches(id,name,is_active,is_default,role) VALUES(2,'Shop',1,1,'shop'),(3,'Warehouse',1,0,NULL),(4,'Inactive',0,0,NULL)"),
     ])
     // Stale high, stale low, near threshold, inactive-branch and missing-ledger fixtures.
     const fixtures = [
@@ -74,6 +76,7 @@ async function main() {
       const totals = Object.fromEntries(result.items.map(row=>[row.id,row.stock_quantity]))
       assert.deepEqual(totals, {1:0,2:3,5:6,6:10,7:0})
       assert.deepEqual(result.items.find(row=>row.id===5).branch_stock.map(row=>row.branch_id), [2,3], 'display choices remain active-only while total remains all-branch')
+      assert.deepEqual(result.items.find(row=>row.id===5).branch_stock.map(row=>row.branch_role), ['shop', null], 'each entry carries its branch role (NULL until the identity backfill)')
       const scoped = await read(endpoint, 'ids=6&branchId=2')
       assert.equal(scoped.items[0].stock_quantity, 10, 'response total remains all-branch even with scoped filter')
     }

@@ -4,15 +4,28 @@
 // the rule the pickers enforce in the UI.
 //
 // The two messages are the EXACT English of the pack keys the UI shows
-// (`pos_warehouse_not_sellable`, `transfer_canonical_pair_only` in
+// (`branch_not_sellable`, `transfer_branches_pair_only` in
 // frontend/src/lang/en.json), so a rejection that reaches the client maps
 // back to the same prompt in both languages instead of surfacing a second,
 // server-only wording. That coupling is pinned by
 // scripts/test-selling-branch-guard-pure.cjs.
+//
+// The wording is role-neutral on purpose: after the Warehouse is renamed
+// "LC Store" no sentence may name Shop or Warehouse as if they were the
+// branches. The stable codes below are what a client should prefer; the
+// English stays for callers (and older clients) that only read the message.
+// The previous sentences ("Only allow Shop sale. ...", "... between Shop and
+// Warehouse.") are still recognised by the frontend for a Worker in flight.
 import { branchCanTransferBetween, branchCanSell } from './branchRoles'
 
-export const WAREHOUSE_NOT_SELLABLE_ERROR = 'Only allow Shop sale. Please transfer to Shop first.'
-export const TRANSFER_DIRECTION_ERROR = 'Transfers move stock only between Shop and Warehouse.'
+export const BRANCH_NOT_SELLABLE_CODE = 'branch_not_sellable'
+export const BRANCH_NOT_SELLABLE_ERROR = 'Sales can only be recorded at a selling branch.'
+// Legacy export name, kept so every existing call site (sales, returns,
+// imports, stock actions) sends the neutral sentence without being edited.
+export const WAREHOUSE_NOT_SELLABLE_ERROR = BRANCH_NOT_SELLABLE_ERROR
+// The code the three transfer routes already send with this message.
+export const TRANSFER_DIRECTION_CODE = 'transfer_direction_invalid'
+export const TRANSFER_DIRECTION_ERROR = 'Transfers move stock only between the two operating branches.'
 
 export type BranchNameRow = { id: number; name: string | null; role?: unknown }
 
@@ -35,9 +48,14 @@ export function firstUnsellableBranch(rows: readonly BranchNameRow[]): BranchNam
  * Null only when the source and destination have opposite canonical roles;
  * every same-role, unknown, or historical identity is refused with the same
  * client-facing message.
+ *
+ * Pass the branch ROWS ({ name, role }), not their names: a row answers from
+ * its explicit role, so a renamed branch keeps its identity, and only a row
+ * whose role is NULL falls back to the name. A bare name still works for
+ * callers that only hold one.
  */
-export function transferDirectionError(fromName: unknown, toName: unknown): string | null {
-  return branchCanTransferBetween(fromName, toName) ? null : TRANSFER_DIRECTION_ERROR
+export function transferDirectionError(from: unknown, to: unknown): string | null {
+  return branchCanTransferBetween(from, to) ? null : TRANSFER_DIRECTION_ERROR
 }
 
 export function sellingBranchConditionSql(alias = 'b'): string {
