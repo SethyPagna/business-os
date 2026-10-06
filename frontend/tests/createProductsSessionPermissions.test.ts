@@ -2,7 +2,6 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import ts from 'typescript'
 import { effectivePermissions } from '../src/utils/permissions.ts'
-import { createProductsSessionPermissionRequirements } from '../src/utils/createProductsSession.ts'
 
 // UI-STOCK-3 (30 Sep 2026) deleted CreateProductsSessionModal.tsx; the header
 // Add opens the Stock Session. What stays pinned here: the grants a chip
@@ -10,32 +9,6 @@ import { createProductsSessionPermissionRequirements } from '../src/utils/create
 // on restore, ProductForm's image gate, and Review-tier product creation
 // never bypassing its approval workflow (now refused by the float, and still
 // applied only through the registered review applier on the Worker).
-
-const create = { kind: 'create_receive' as const, status: 'queued' as const, quantity: 0 }
-const createWithStock = { kind: 'create_receive' as const, status: 'queued' as const, quantity: 2 }
-const receive = { kind: 'receive' as const, status: 'queued' as const, quantity: 2 }
-const savedCreate = { kind: 'created_zero' as const, status: 'saved' as const, quantity: 0 }
-
-assert.deepEqual(createProductsSessionPermissionRequirements([create], 'new'), [
-  { permissionKey: 'products', actionKey: 'add' },
-])
-assert.deepEqual(createProductsSessionPermissionRequirements([receive], 'existing'), [
-  { permissionKey: 'inventory', actionKey: 'adjust' },
-])
-assert.deepEqual(createProductsSessionPermissionRequirements([createWithStock], 'new'), [
-  { permissionKey: 'products', actionKey: 'add' },
-  { permissionKey: 'inventory', actionKey: 'adjust' },
-], 'creating a positive-stock row also receives stock, matching the Worker')
-assert.deepEqual(createProductsSessionPermissionRequirements([create, receive], 'existing'), [
-  { permissionKey: 'products', actionKey: 'add' },
-  { permissionKey: 'inventory', actionKey: 'adjust' },
-])
-assert.deepEqual(createProductsSessionPermissionRequirements([savedCreate], 'existing'), [
-  { permissionKey: 'inventory', actionKey: 'adjust' },
-], 'saved rows no longer need write authority; an empty queue follows the exact active mode')
-assert.deepEqual(createProductsSessionPermissionRequirements([], 'new'), [
-  { permissionKey: 'products', actionKey: 'add' },
-])
 
 const productsSource = readFileSync(new URL('../src/components/products/Products.tsx', import.meta.url), 'utf8')
 const floatSource = readFileSync(new URL('../src/components/inventory/FastStockInModal.tsx', import.meta.url), 'utf8')

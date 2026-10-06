@@ -106,18 +106,12 @@ runTest('closing with unsaved work asks through the ONE shared close guard', () 
   assert.doesNotMatch(fastStockIn, /window\.confirm\(/)
 })
 
-runTest('the outcome kernel is pure and documents the commit semantics', () => {
-  assert.doesNotMatch(outcomeUtil, /from 'react'/, 'the reducer must stay testable without React')
-  assert.doesNotMatch(outcomeUtil, /\bdocument\./, 'the reducer must not touch the DOM')
-  assert.match(outcomeUtil, /is a single-row write/)
-  assert.match(
-    outcomeUtil,
-    /migration 0192 it is ALSO server-side idempotent/,
-    "the kernel must not keep claiming the route has no dedup -- it has had one since 0192",
-  )
-  // The server truth this depends on: /adjust commits exactly one product per
-  // call, so "all-or-nothing across rows" does not apply -- each row is its
-  // own transaction and its own outcome.
+runTest('the outcome store is pure and /adjust stays a single-row write', () => {
+  assert.doesNotMatch(outcomeUtil, /from 'react'/, 'the outcome store must stay testable without React')
+  assert.doesNotMatch(outcomeUtil, /\bdocument\./, 'the outcome store must not touch the DOM')
+  // The server truth the failed-attempt store depends on: /adjust commits
+  // exactly one product per call, so "all-or-nothing across rows" does not
+  // apply -- each row is its own transaction and its own outcome.
   assert.match(inventoryRoute, /app\.post\('\/adjust'/)
   assert.match(inventoryRoute, /Cannot remove \$\{quantity\} - only \$\{current\} available/)
 })
