@@ -3,7 +3,9 @@ import Send from 'lucide-react/dist/esm/icons/send.js'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import RefreshCw from 'lucide-react/dist/esm/icons/refresh-cw.js'
 import Check from 'lucide-react/dist/esm/icons/check.js'
+import ShieldAlert from 'lucide-react/dist/esm/icons/shield-alert.js'
 import SignupConsentField from './legal/SignupConsentField.tsx'
+import { PORTAL_LEGAL_CONSENT_VERSION } from './legal/legalContent.ts'
 
 // "Continue with Telegram" (G38 Telegram, owner rules of 6 Oct 2026).
 //
@@ -44,6 +46,7 @@ const POLL_WINDOW_MS = 120_000
 const ERRORS: Record<string, [string, string, string]> = {
   telegram_unavailable: ['portal_telegram_err_unavailable', 'Telegram sign-in is not available right now.', 'ការចូលតាម Telegram មិនទាន់អាចប្រើបានទេពេលនេះ។'],
   consent_required: ['portal_telegram_consent_required', 'Please agree to the Terms & Conditions and the Privacy Policy to continue.', 'សូមយល់ព្រមនឹងលក្ខខណ្ឌប្រើប្រាស់ និងគោលការណ៍ឯកជនភាព ដើម្បីបន្ត។'],
+  portal_consent_version_changed: ['portal_telegram_err_consent_changed', 'Our policies were updated. Please reload the page and agree to the current version.', 'គោលការណ៍របស់យើងត្រូវបានធ្វើបច្ចុប្បន្នភាព។ សូមផ្ទុកទំព័រឡើងវិញ ហើយយល់ព្រមនឹងកំណែបច្ចុប្បន្ន។'],
   rate_limited: ['portal_telegram_err_rate_limited', 'Too many attempts. Please wait a few minutes.', 'ព្យាយាមច្រើនដងពេក។ សូមរង់ចាំប៉ុន្មាននាទី។'],
   telegram_challenge_expired: ['portal_telegram_err_expired', 'This sign-in expired. Please try again.', 'ការចូលគណនីនេះផុតកំណត់ហើយ។ សូមព្យាយាមម្តងទៀត។'],
   telegram_challenge_not_found: ['portal_telegram_err_expired', 'This sign-in expired. Please try again.', 'ការចូលគណនីនេះផុតកំណត់ហើយ។ សូមព្យាយាមម្តងទៀត។'],
@@ -177,7 +180,7 @@ export default function PortalTelegramSignIn({ copy, mode, language, consentLoca
     try {
       const body = mode === 'attach'
         ? { mode: 'attach', password, locale }
-        : { mode: 'signin', consent, consentLocale: consentLocale || locale, locale }
+        : { mode: 'signin', consent, consentVersion: PORTAL_LEGAL_CONSENT_VERSION, consentLocale: consentLocale || locale, locale }
       const { status, json } = await portalJson('/api/portal/auth/telegram/start', 'POST', body)
       if (!aliveRef.current) return
       if (status !== 200 || typeof json.nonce !== 'string' || typeof json.link !== 'string') {
@@ -240,6 +243,12 @@ export default function PortalTelegramSignIn({ copy, mode, language, consentLoca
             <X className="h-4 w-4" aria-hidden="true" />
           </button>
         </div>
+        {/* Owner ruling, 6 Oct 2026: the same words the bot sends before it asks
+            for the phone (cloudflare lib/portalTelegram.ts relayWarning). */}
+        <p data-portal-telegram="warning" className="flex items-start gap-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-900 dark:border-amber-400/30 dark:bg-amber-400/10 dark:text-amber-100">
+          <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+          <span>{copy('portal_telegram_warning', 'Only share your number with our bot if you just pressed Continue with Telegram on leangbeauty.com. We will never ask you to share it for any other reason.', 'សូមចែករំលែកលេខរបស់អ្នកជាមួយបូតរបស់យើង លុះត្រាតែអ្នកទើបតែបានចុច "បន្តជាមួយ Telegram" នៅលើ leangbeauty.com។ យើងនឹងមិនដែលសុំឱ្យអ្នកចែករំលែកវា ដោយហេតុផលផ្សេងទៀតឡើយ។')}</span>
+        </p>
         <a href={link} target="_blank" rel="noopener noreferrer" className={buttonClass}>
           <Send className="h-4 w-4" aria-hidden="true" />
           {copy('portal_telegram_open', 'Open Telegram', 'បើក Telegram')}

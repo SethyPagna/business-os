@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import { getCookie, setCookie } from 'hono/cookie'
 import type { SessionUser } from '../lib/auth'
+import { audit } from '../lib/audit'
 import { checkRateLimit, getClientNetworkKey } from '../lib/rateLimit'
 import { portalAbuseKey } from '../lib/portalAbuseKey'
 import { requireJsonSameOriginCredentialPost } from '../lib/requestBodyGuard'
@@ -116,6 +117,19 @@ app.post('/auth/telegram/start', async (c) => {
     accountId = state.account.id
   } else if (!consentGiven(body.consent)) {
     return c.json({ error: 'Please agree to the Terms & Conditions and the Privacy Policy to continue.', code: 'consent_required' }, 400)
+  } else if (body.consentVersion !== PORTAL_CONSENT_VERSION) {
+    // CONSENT-VERSION BUMP HOOK (owner, 6 Oct: the privacy text naming
+    // Telegram is drafted separately). The page sends the version of the text
+    // it showed (legalContent.ts PORTAL_LEGAL_CONSENT_VERSION); the member's
+    // record is stamped with PORTAL_CONSENT_VERSION. To flip once the text is
+    // approved, in ONE commit: the new text and PORTAL_LEGAL_LAST_UPDATED_ISO
+    // (frontend), the PORTAL_CONSENT_VERSION literal (lib/portalAccounts.ts)
+    // and the old literal added to EARLIER_ACCEPTED_CONSENT_VERSIONS there, so
+    // existing members stay signed in. frontend/tests/portalSignupConsent.test.ts
+    // fails until both sides agree; from the flip on, a tab still showing the
+    // old text cannot start a Telegram sign-in, so nobody is stamped with a
+    // version they never saw.
+    return c.json({ error: 'Our policies were updated. Please reload the page and agree to the current version.', code: 'portal_consent_version_changed', consentVersion: PORTAL_CONSENT_VERSION }, 409)
   }
 
   // One binding per browser, reused across tabs while it lives.
@@ -154,11 +168,22 @@ app.post('/auth/telegram/poll', async (c) => {
   if (!result.ok) return c.json({ error: result.error, code: result.code }, result.status)
   if (result.kind === 'waiting') return c.json({ status: 'waiting', stage: result.stage })
   if (result.kind === 'attached') {
-    return c.json({ status: 'attached', account: await loadPortalMemberView(c.env, result.accountId) })
+    const account = await loadPortalMemberView(c.env, result.accountId)
+    // The account-changing events go to the staff Audit Log (section of
+    // entity portal_member): a member created by Telegram, and Telegram
+    // connected to an existing account (the record staff need if a member
+    // ever disputes who connected it). Never the phone or the Telegram id;
+    // plain sign-ins are not logged, like password sign-ins.
+    await audit(c.env, null, null, 'member_telegram_attach', 'portal_member', result.accountId, { via: 'telegram', memberCode: account?.memberCode ?? null })
+    return c.json({ status: 'attached', account })
   }
   const session = await createPortalSession(c.env, result.accountId)
   setPortalCookie(c, session.token, session.expiresAt)
-  return c.json({ status: 'signed_in', created: result.created, account: await loadPortalMemberView(c.env, result.accountId) })
+  const account = await loadPortalMemberView(c.env, result.accountId)
+  if (result.created) {
+    await audit(c.env, null, null, 'member_telegram_signup', 'portal_member', result.accountId, { via: 'telegram', memberCode: account?.memberCode ?? null })
+  }
+  return c.json({ status: 'signed_in', created: result.created, account })
 })
 
 // The profile's "Sign-in methods": whether Telegram is connected, and whether

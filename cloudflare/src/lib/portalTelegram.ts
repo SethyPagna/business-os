@@ -228,9 +228,18 @@ const BOT_TEXT = {
     km: 'តំណចូលគណនីនេះផុតកំណត់ ឬត្រូវបានប្រើរួចហើយ។ សូមចាប់ផ្តើមម្តងទៀតនៅលើគេហទំព័រ។',
     en: 'This sign-in link has expired or was already used. Please start again on the website.',
   },
+  // Owner ruling, 6 Oct 2026 ("warn + short link", wording revised the same
+  // day to name the button): the relay warning, word for word, in EN and KM,
+  // ahead of every share-phone request. The website shows the SAME text while
+  // it waits (frontend pack key portal_telegram_warning); the signin test
+  // fails if the two ever differ.
+  relayWarning: {
+    km: 'សូមចែករំលែកលេខរបស់អ្នកជាមួយបូតរបស់យើង លុះត្រាតែអ្នកទើបតែបានចុច "បន្តជាមួយ Telegram" នៅលើ leangbeauty.com។ យើងនឹងមិនដែលសុំឱ្យអ្នកចែករំលែកវា ដោយហេតុផលផ្សេងទៀតឡើយ។',
+    en: 'Only share your number with our bot if you just pressed Continue with Telegram on leangbeauty.com. We will never ask you to share it for any other reason.',
+  },
   askContact: {
-    km: 'ការចូលគណនីគេហទំព័រ Leang Cosmetics។\nសូមចុច "ចែករំលែកលេខទូរស័ព្ទរបស់ខ្ញុំ" ខាងក្រោម ដើម្បីបញ្ជាក់ថានេះជាលេខរបស់អ្នក។ យើងប្រើវាសម្រាប់តែគណនីគេហទំព័ររបស់អ្នកប៉ុណ្ណោះ។\nសូមបន្ត លុះត្រាតែអ្នកបានចាប់ផ្តើមដោយខ្លួនឯងនៅលើគេហទំព័រមុននេះបន្តិច។',
-    en: 'Leang Cosmetics website sign-in.\nTap "Share my phone number" below to confirm this is your number. We use it only for your website account.\nOnly continue if you started this yourself on the website just now.',
+    km: 'ការចូលគណនីគេហទំព័រ Leang Cosmetics។\nសូមចុច "ចែករំលែកលេខទូរស័ព្ទរបស់ខ្ញុំ" ខាងក្រោម ដើម្បីបញ្ជាក់ថានេះជាលេខរបស់អ្នក។ យើងប្រើវាសម្រាប់តែគណនីគេហទំព័ររបស់អ្នកប៉ុណ្ណោះ។',
+    en: 'Leang Cosmetics website sign-in.\nTap "Share my phone number" below to confirm this is your number. We use it only for your website account.',
   },
   shareButton: {
     km: 'ចែករំលែកលេខទូរស័ព្ទរបស់ខ្ញុំ',
@@ -270,6 +279,15 @@ function botText(env: unknown, text: BotText, locale: PortalTelegramLocale | 'bo
   const site = siteName(env)
   const pick = locale === 'both' ? `${text.km}\n\n${text.en}` : text[locale]
   return pick.replace(/\{site\}/g, site)
+}
+
+// Every message that carries the share-phone button: the relay warning first,
+// then the request, in both languages (the asked-for one first). No path
+// offers the button without it (test-portal-telegram-signin-pure.cjs).
+function contactPrompt(env: unknown, text: BotText, locale: PortalTelegramLocale): string {
+  const order: PortalTelegramLocale[] = locale === 'en' ? ['en', 'km'] : ['km', 'en']
+  return order.map((language) => `${BOT_TEXT.relayWarning[language]}\n\n${text[language]}`).join('\n\n')
+    .replace(/\{site\}/g, siteName(env))
 }
 
 const REMOVE_KEYBOARD = { remove_keyboard: true }
@@ -339,7 +357,7 @@ async function handleStart(env: Env, tgId: string, payload: string, now: number)
       AND expires_at > @now
   `).run({ id: row.id, tg: tgId, now: stamp })
   if (Number(bound.changes) !== 1) return reply(tgId, botText(env, BOT_TEXT.linkDead, locale))
-  return reply(tgId, botText(env, BOT_TEXT.askContact, locale), contactKeyboard(locale))
+  return reply(tgId, contactPrompt(env, BOT_TEXT.askContact, locale), contactKeyboard(locale))
 }
 
 async function handleContact(env: Env, tgId: string, from: TelegramUser, contact: TelegramContact, now: number): Promise<PortalTelegramReply> {
@@ -355,7 +373,7 @@ async function handleContact(env: Env, tgId: string, from: TelegramUser, contact
   // THE PHONE PROOF (see the file header). Nothing is written on a refusal;
   // the button is offered again.
   if (telegramUserId(contact.user_id) !== tgId) {
-    return reply(tgId, botText(env, BOT_TEXT.ownContactOnly, locale), contactKeyboard(locale))
+    return reply(tgId, contactPrompt(env, BOT_TEXT.ownContactOnly, locale), contactKeyboard(locale))
   }
   const phone = canonicalizePhone(contact.phone_number)
   if (!phone || phone.length < 6 || phone.length > 20) return reply(tgId, botText(env, BOT_TEXT.phoneUnreadable, locale))

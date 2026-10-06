@@ -12,8 +12,10 @@
 // Covers: sign-up end to end (start -> /start -> own contact -> poll -> member
 // + identity + session -> /auth/me), a forwarded contact refused, a replayed
 // poll refused, another browser refused, an existing phone member not taken
-// over, a bad webhook secret refused with nothing written, and the 0232
-// schema has no LIKE/GLOB pattern over 50 bytes.
+// over, a bad webhook secret refused with nothing written, the 0232
+// schema has no LIKE/GLOB pattern over 50 bytes, and a member's close drops its
+// Telegram link and handshakes in the same batch (0232's trigger) so the
+// Telegram account can join again as a new member.
 //
 // Run (from cloudflare/): node scripts/test-portal-telegram-native.cjs
 'use strict'
@@ -124,7 +126,8 @@ async function main() {
       }
       return {
         jar, send,
-        start: (extra = {}) => send('/auth/telegram/start', 'POST', { consent: true, consentLocale: 'km', locale: 'km', ...extra }),
+        // consentVersion: the policy version the storefront shows (legalContent.ts).
+        start: (extra = {}) => send('/auth/telegram/start', 'POST', { consent: true, consentVersion: 'portal-legal-2026-09-30', consentLocale: 'km', locale: 'km', ...extra }),
         poll: (nonce) => send('/auth/telegram/poll', 'POST', { nonce }),
       }
     }
@@ -212,6 +215,37 @@ async function main() {
         assert.equal((await bot(startMsg(5560005, started.body.nonce), secret)).status, 401)
       }
       assert.deepEqual([await count('SELECT COUNT(*) AS n FROM rate_limit_events'), await count("SELECT COUNT(*) AS n FROM portal_telegram_challenges WHERE status = 'started'")], before)
+    })
+
+    await check('native: closing a member drops its Telegram link and open handshakes in the same batch; the account joins again as a NEW member', async () => {
+      const b = browser()
+      const first = await prove(b, 5560006, '012 600 006')
+      assert.equal((await b.poll(first)).body.status, 'signed_in')
+      const old = await db.prepare("SELECT account_id FROM portal_login_identities WHERE subject_key = '5560006'").first()
+      const open = await browser().start()
+      await bot(startMsg(5560006, open.body.nonce))  // a sign-in that Telegram user has open
+      assert.equal(await count("SELECT COUNT(*) AS n FROM portal_telegram_challenges WHERE telegram_user_id = '5560006' AND status = 'started'"), 1)
+      // A close whose batch fails later keeps everything (D1 batch = one transaction).
+      await assert.rejects(db.batch([
+        db.prepare("UPDATE portal_accounts SET status = 'closed', phone = NULL WHERE id = ?").bind(old.account_id),
+        db.prepare("INSERT INTO portal_login_identities (account_id, provider, subject_key) VALUES (?, 'sms', 'x')").bind(old.account_id),
+      ]))
+      assert.equal(await count(`SELECT COUNT(*) AS n FROM portal_login_identities WHERE account_id = ${Number(old.account_id)}`), 1)
+      // The close as the 180-day purge writes it, in a batch with the session delete.
+      await db.batch([
+        db.prepare('DELETE FROM portal_sessions WHERE account_id = ?').bind(old.account_id),
+        db.prepare("UPDATE portal_accounts SET status = 'closed', closed_at = CURRENT_TIMESTAMP, name = '', phone = NULL, password_hash = NULL WHERE id = ?").bind(old.account_id),
+      ])
+      assert.equal(await count(`SELECT COUNT(*) AS n FROM portal_login_identities WHERE account_id = ${Number(old.account_id)}`), 0, 'the link went with the close')
+      assert.equal(await count("SELECT COUNT(*) AS n FROM portal_telegram_challenges WHERE telegram_user_id = '5560006'"), 0, 'and every handshake of that Telegram user')
+      const again = browser()
+      const nonce = await prove(again, 5560006, '012 600 006')
+      const res = await again.poll(nonce)
+      assert.equal(res.status, 200, JSON.stringify(res.body))
+      assert.equal(res.body.created, true, 'a new member')
+      const now = await db.prepare("SELECT account_id FROM portal_login_identities WHERE subject_key = '5560006'").first()
+      assert.notEqual(now.account_id, old.account_id)
+      assert.equal((await db.prepare('SELECT status FROM portal_accounts WHERE id = ?').bind(old.account_id).first()).status, 'closed')
     })
   } finally {
     await mf.dispose()
