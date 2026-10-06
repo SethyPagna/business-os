@@ -467,7 +467,54 @@ async function main() {
     assert.strictEqual(unresolved[0].reason, 'product_not_found')
   })
 
-  console.log(`\n${passed} PASS, ${failed} FAIL`)
+  // ---- CUTOVER-LC G-G: a sheet row's branch is an identity (shop / warehouse), not a display name --------
+  const seedConsolidated = (rawDb) => {
+    rawDb.prepare("INSERT INTO branches (id, name, is_default, is_active, role, canonical_key) VALUES (1, 'LC Store', 1, 1, 'shop', 'warehouse')").run()
+    rawDb.prepare("INSERT INTO branches (id, name, is_default, is_active, role, canonical_key, successor_branch_id) VALUES (2, 'Old Shop', 0, 0, 'shop', 'shop', 1)").run()
+  }
+  await testAsync('after the consolidation shop and warehouse rows of one product and date are ONE count of LC Store: the SUM', async () => {
+    const { rawDb, db } = freshDb()
+    seedConsolidated(rawDb)
+    seedProduct(rawDb, { id: 60, name: 'Widget' })
+    const { resolved, unresolved } = await resolveDatedStockCountRows(db, [
+      row({ rowNumber: 1, branchName: 'Shop', count: 5 }),
+      row({ rowNumber: 2, branchName: 'Warehouse', count: 3 }),
+    ])
+    assert.deepStrictEqual(unresolved, [])
+    assert.strictEqual(resolved.length, 1, 'two columns of one branch are one row; two absolute counts of one branch would overwrite each other')
+    assert.strictEqual(resolved[0].branchId, 1)
+    assert.strictEqual(resolved[0].count, 8, 'Set = shop 5 + warehouse 3 (last-wins would say 3, first-wins 5)')
+    assert.deepStrictEqual(resolved[0].mergedRowNumbers, [2], 'the folded sheet row is named, never silently dropped')
+  })
+
+  await testAsync('after the consolidation: the same column twice is a genuine duplicate and is NOT folded; other dates are not folded', async () => {
+    const { rawDb, db } = freshDb()
+    seedConsolidated(rawDb)
+    seedProduct(rawDb, { id: 61, name: 'Widget' })
+    const { resolved } = await resolveDatedStockCountRows(db, [
+      row({ rowNumber: 1, branchName: 'Shop', count: 5 }),
+      row({ rowNumber: 2, branchName: 'Shop', count: 7 }),
+      row({ rowNumber: 3, branchName: 'Warehouse', count: 2, date: '2026-08-11' }),
+    ])
+    assert.deepStrictEqual(resolved.map((r) => [r.rowNumber, r.branchId, r.count, r.mergedRowNumbers]), [
+      [1, 1, 5, undefined], [2, 1, 7, undefined], [3, 1, 2, undefined],
+    ])
+  })
+
+  await testAsync('before the consolidation (both branches active, NULL roles) rows resolve exactly as before: no fold, two branches', async () => {
+    const { rawDb, db } = freshDb()
+    seedBranch(rawDb, 1, 'Shop', 1)
+    seedBranch(rawDb, 2, 'Warehouse', 0)
+    seedProduct(rawDb, { id: 62, name: 'Widget' })
+    const { resolved, unresolved } = await resolveDatedStockCountRows(db, [
+      row({ rowNumber: 1, branchName: 'Shop', count: 5 }),
+      row({ rowNumber: 2, branchName: 'Warehouse', count: 3 }),
+    ])
+    assert.deepStrictEqual(unresolved, [])
+    assert.deepStrictEqual(resolved.map((r) => [r.rowNumber, r.branchId, r.count, r.mergedRowNumbers]), [[1, 1, 5, undefined], [2, 2, 3, undefined]])
+  })
+
+    console.log(`\n${passed} PASS, ${failed} FAIL`)
   process.exitCode = failed ? 1 : 0
 }
 

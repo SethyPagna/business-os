@@ -4,6 +4,7 @@
 
 import { dateToBatchCode, normalizeToIsoDate } from './batchCode'
 import { parseImportNumericValue, normalizeImportCost4, normalizeImportSellingPrice } from './importNumbers'
+import { indexCanonicalImportBranches, resolveImportBranchRequest, type CanonicalImportBranchRow } from './importBranchAuthority'
 // The ONE fold. Imported from the rule module both packages carry verbatim, so
 // this path cannot reach a different verdict from the create/edit guard, the
 // Conflicts sweep, the merge tool or the client's own sheet review.
@@ -16,7 +17,7 @@ import {
 } from './stockActionResolver'
 
 export const UNIFIED_STOCK_COLUMNS = [
-  'name', 'barcode', 'shop', 'warehouse', 'date', 'action',
+  'name', 'barcode', 'shop', 'warehouse', 'store', 'date', 'action',
   'selling_price', 'wholesale_price', 'cost_price', 'batch',
   // Optional (blank is fine, and files with only the original ten columns
   // still import): which supplier this row's stock was bought from. The
@@ -41,10 +42,10 @@ export interface UnifiedStockCatalogProduct {
   batch_keys?: string[]
 }
 
-export interface UnifiedStockBranch {
-  id: number
-  name: string
-}
+// The branch rows, active AND retired, with the identity columns (role,
+// canonical_key, successor_branch_id): a sheet column names an IDENTITY (shop,
+// warehouse, store), never a display name -- see importBranchAuthority.ts.
+export type UnifiedStockBranch = CanonicalImportBranchRow
 
 export interface UnifiedStockCurrent {
   productId: number
@@ -79,7 +80,11 @@ export interface UnifiedStockResolvedRow {
   supplier: string
   /** The sheet's optional free_goods column, parsed to a boolean (N14-D). */
   freeGoods: boolean
-  branchRefs: Array<{ slot: 'shop' | 'warehouse'; branchId: number; branchName: string; pending: boolean; value: number }>
+  branchRefs: Array<{ slot: 'shop' | 'warehouse' | 'store'; branchId: number; branchName: string; pending: boolean; value: number;
+    /** The label the sheet addressed ("Shop") when its stock was routed to a successor branch. */
+    addressedName?: string }>
+  /** Preview lines for columns that landed on one branch ("Shop 5 + Warehouse 3 -> LC Store 8"). */
+  branchNotes?: string[]
   plan: StockActionPlan | null
   conflicts: string[]
   errors: string[]
@@ -194,8 +199,8 @@ export function resolveUnifiedStockImportRows(
   branches: UnifiedStockBranch[],
   currentStock: UnifiedStockCurrent[],
 ): UnifiedStockResolvedRow[] {
-  const branchByName = new Map(branches.map((branch) => [key(branch.name), branch]))
-  const branchForSlot = (slot: 'shop' | 'warehouse') => branchByName.get(slot) || null
+  const branchIndex = indexCanonicalImportBranches(branches)
+  const branchForSlot = (slot: 'shop' | 'warehouse' | 'store') => resolveImportBranchRequest(branchIndex, slot)
   const stockRows: StockActionRow[] = []
   const provisional: UnifiedStockResolvedRow[] = []
   const newBatchIdentityByKey = new Map<string, string>()
@@ -218,6 +223,7 @@ export function resolveUnifiedStockImportRows(
     const action = text(raw.action)
     const shop = optionalNumber(raw.shop, 'shop quantity')
     const warehouse = optionalNumber(raw.warehouse, 'warehouse quantity')
+    const store = optionalNumber(raw.store, 'store quantity')
     const selling = optionalMoney(raw.selling_price, 'selling price', true)
     // Wholesale price -- the sheet column renamed from vip_price by migration
     // 0111. The legacy vip_price / special_price spellings still resolve here:
@@ -229,10 +235,10 @@ export function resolveUnifiedStockImportRows(
     // unifiedStockImport.ts's HEADER_ALIASES on the frontend side.
     const wholesale = optionalMoney(raw.wholesale_price ?? raw.vip_price ?? raw.special_price, 'Wholesale price', true)
     const cost = optionalMoney(raw.cost_price, 'cost price')
-    const errors = [shop.error, warehouse.error, selling.error, wholesale.error, cost.error].filter((value): value is string => !!value)
+    const errors = [shop.error, warehouse.error, store.error, selling.error, wholesale.error, cost.error].filter((value): value is string => !!value)
     if (!name && !barcode) errors.push('Name or barcode is required.')
     if (!date) errors.push('Date must be mm/dd/yyyy (month first, as this column has always been) or yyyy-mm-dd.')
-    if (shop.value == null && warehouse.value == null) errors.push('Enter a shop or warehouse quantity.')
+    if (shop.value == null && warehouse.value == null && store.value == null) errors.push('Enter a shop, warehouse or store quantity.')
 
     const batchLabel = text(raw.batch)
     const effectiveBatchLabel = batchLabel || (date ? String(dateToBatchCode(date)) : '')
@@ -264,18 +270,33 @@ export function resolveUnifiedStockImportRows(
     }
     const conflicts = matched.conflict ? [matched.conflict] : []
     const branchRefs: UnifiedStockResolvedRow['branchRefs'] = []
-    ;(['shop', 'warehouse'] as const).forEach((slot, slotIndex) => {
-      const parsed = slot === 'shop' ? shop.value : warehouse.value
+    const slotLabel = { shop: 'Shop', warehouse: 'Warehouse', store: 'Store' } as const
+    ;(['shop', 'warehouse', 'store'] as const).forEach((slot, slotIndex) => {
+      const parsed = slot === 'shop' ? shop.value : slot === 'warehouse' ? warehouse.value : store.value
       if (parsed == null) return
-      const branch = branchForSlot(slot)
+      const resolution = branchForSlot(slot)
+      const branch = resolution?.branch ?? null
       branchRefs.push({
         slot,
         branchId: branch?.id ?? -(slotIndex + 1),
-        branchName: branch?.name || (slot === 'shop' ? 'Shop' : 'Warehouse'),
+        branchName: branch?.name || slotLabel[slot],
         pending: !branch,
         value: parsed,
+        ...(resolution?.addressedName ? { addressedName: resolution.addressedName } : {}),
       })
     })
+    // Columns that land on ONE branch (after the consolidation every column does)
+    // are one change to that branch: Add / Remove add up, and a Set (reconcile)
+    // is the SUM of the given columns as the branch's one total. Each branch is
+    // therefore planned once -- two plans against the same current quantity would
+    // overwrite each other.
+    const perBranch = new Map<number, { branchId: number; value: number; refs: typeof branchRefs }>()
+    for (const ref of branchRefs) {
+      const entry = perBranch.get(ref.branchId)
+      if (entry) { entry.value += ref.value; entry.refs.push(ref) } else perBranch.set(ref.branchId, { branchId: ref.branchId, value: ref.value, refs: [ref] })
+    }
+    const branchNotes = [...perBranch.values()].filter((entry) => entry.refs.length > 1 && !entry.refs[0].pending)
+      .map((entry) => `${entry.refs.map((ref) => `${slotLabel[ref.slot]} ${ref.value}`).join(' + ')} -> ${entry.refs[0].branchName} ${entry.value}`)
 
     const resolved: UnifiedStockResolvedRow = {
       rowNumber,
@@ -294,6 +315,7 @@ export function resolveUnifiedStockImportRows(
       supplier: text(raw.supplier).replace(/\s{2,}/g, ' ').slice(0, 120),
       freeGoods: parseFreeGoodsFlag(raw.free_goods),
       branchRefs,
+      ...(branchNotes.length ? { branchNotes } : {}),
       plan: null,
       conflicts,
       errors,
@@ -301,7 +323,7 @@ export function resolveUnifiedStockImportRows(
     provisional.push(resolved)
     stockRows.push({
       rowNumber,
-      branchValues: branchRefs.map((branch) => ({ branchId: branch.branchId, value: branch.value })),
+      branchValues: [...perBranch.values()].map((entry) => ({ branchId: entry.branchId, value: entry.value })),
       date,
       action,
       sellingPriceUsd: resolved.sellingPriceUsd,

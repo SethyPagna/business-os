@@ -409,6 +409,48 @@ function customerMatch(overrides = {}) {
   assert.equal(failed.sqlite.prepare(`SELECT stock_quantity FROM products WHERE id = 10`).get().stock_quantity, 5)
   assert.equal(failed.sqlite.prepare(`SELECT COUNT(*) n FROM import_sales_commits`).get().n, 0)
 
+  // ---- CUTOVER-LC G-G: the selling branch is a ROLE; after the consolidation its name is "LC Store" -------
+  const consolidated = (after) => {
+    const world = setup()
+    world.sqlite.prepare(`UPDATE branches SET name = 'LC Store', role = 'shop' WHERE id = 1`).run()
+    world.sqlite.prepare(`UPDATE branches SET name = 'Old Shop', role = 'shop', is_active = 0, successor_branch_id = 1 WHERE id = 2`).run()
+    if (after) after(world)
+    return world
+  }
+  const lcStore = consolidated()
+  const lcApplied = await subject.applyHistoricalSaleImport(lcStore.db, { jobId: 'job-lc-store', rowNumber: 2, data: saleData(), nowIso: input.nowIso, actor })
+  assert.equal(lcApplied.alreadyApplied, false, 'a sale at the renamed selling branch imports (the old name test refused it)')
+  assert.deepEqual(lcStore.sqlite.prepare(`SELECT branch_id, branch_name FROM sales WHERE client_request_id = 'sales-import:job-lc-store:2'`).get(), { branch_id: 1, branch_name: 'LC Store' })
+  assert.equal(lcStore.sqlite.prepare(`SELECT COUNT(*) n FROM import_sales_commits`).get().n, 1)
+  const retiredShopSale = saleData({ branch_id: 2, items: [{ ...saleData().items[0], branch_id: 2, batch_id: null, batch_label: null }] })
+  const stockRoom = consolidated((world) => world.sqlite.prepare(`UPDATE branches SET name = 'Stock room', role = 'warehouse', is_active = 1, successor_branch_id = NULL WHERE id = 2`).run())
+  for (const [label, world, data] of [['retired Old Shop', consolidated(), retiredShopSale], ['warehouse-role branch with a free name', stockRoom, retiredShopSale]]) {
+    await assert.rejects(
+      () => subject.applyHistoricalSaleImport(world.db, { jobId: 'job-cut-reject', rowNumber: 3, data, nowIso: input.nowIso, actor }),
+      /Sales can only be recorded at a selling branch/, label,
+    )
+    assert.equal(world.sqlite.prepare('SELECT COUNT(*) n FROM sales').get().n, 0, label)
+  }
+  // Between preview and commit: a second active selling branch appears (refused inside the batch), or the
+  // selling branch is merely renamed (still the same role, so the commit stands).
+  for (const [label, mutate, expectRejected] of [
+    ['a second active role-shop branch', (sqlite) => sqlite.prepare(`INSERT INTO branches (id, name, is_active, role) VALUES (3, 'Pop-up', 1, 'shop')`).run(), true],
+    ['the selling branch renamed again', (sqlite) => sqlite.prepare(`UPDATE branches SET name = 'Leang Cosmetics Store' WHERE id = 1`).run(), false],
+  ]) {
+    for (const data of [saleData(), noBatchSale]) {
+      const world = consolidated()
+      world.setBeforeBatch(() => mutate(world.sqlite))
+      const attempt = subject.applyHistoricalSaleImport(world.db, { jobId: 'job-cut-race', rowNumber: 4, data, nowIso: input.nowIso, actor })
+      if (expectRejected) {
+        await assert.rejects(() => attempt, /Shop branch or batch\/lot reference changed before the atomic write/, label)
+        assert.equal(world.sqlite.prepare('SELECT COUNT(*) n FROM sales').get().n, 0, label + ': nothing persists')
+      } else {
+        await attempt
+        assert.equal(world.sqlite.prepare('SELECT COUNT(*) n FROM sales').get().n, 1, label + ': a rename is not an identity change')
+      }
+    }
+  }
+
   const tooMany = Array.from({ length: subject.MAX_HISTORICAL_SALE_LINES + 1 }, () => ({ ...saleData().items[0] }))
   await assert.rejects(
     () => subject.applyHistoricalSaleImport(setup().db, { ...input, data: saleData({ items: tooMany }) }),

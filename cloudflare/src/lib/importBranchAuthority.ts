@@ -1,43 +1,117 @@
 import type { BindParams, D1Compat } from './db'
-import { branchRoleFromName, type BranchRole } from './branchRoles'
+import { branchRole, resolveActiveSuccessor, type BranchRole } from './branchRoles'
+
+// Import branch authority, by IDENTITY and never by the display name.
+//
+// A sheet names a branch in one of four ways, and each one is answered from the
+// branch rows the caller read (every row, active or retired):
+//   - blank          the one active canonical default branch (unchanged);
+//   - "shop" / "warehouse"
+//                    the branch whose stable identity (canonical_key, else role,
+//                    else name) is that word. While both branches are active this
+//                    is exactly the old name test. After the branch consolidation
+//                    "warehouse" is LC Store itself, and "shop" is the retired Old
+//                    Shop, so it follows successor_branch_id to LC Store and the
+//                    result remembers it was ADDRESSED to "Shop" (old sheets keep
+//                    working; the provenance is kept, never relabelled);
+//   - "store"        the one active branch that sells (role shop);
+//   - anything else  an active branch with exactly that name (e.g. "LC Store").
+// Anything ambiguous or unresolvable answers null and the caller refuses.
 
 export type CanonicalImportBranchRow = {
   id: number
   name: string
+  role?: unknown
+  canonical_key?: unknown
+  successor_branch_id?: number | null
   is_default?: number | null
   is_active?: number | null
 }
 
+/** The columns every import caller must read for `resolveImportBranchRequest`. */
+export const IMPORT_BRANCH_COLUMNS_SQL = 'id, name, role, canonical_key, successor_branch_id, is_default, is_active'
+
 export type CanonicalImportBranchIndex = {
+  // ACTIVE branches by their operational role (role, else name).
   byRole: Map<Exclude<BranchRole, 'other'>, CanonicalImportBranchRow[]>
   uniqueDefault: CanonicalImportBranchRow | null
+  // Every branch row read, retired ones included (successor lookups).
+  rows: CanonicalImportBranchRow[]
+}
+
+export type ImportBranchResolution = {
+  branch: CanonicalImportBranchRow
+  // The label the sheet addressed ("Shop") when the stock was routed to a
+  // successor branch; null when the sheet reached the branch directly.
+  addressedName: string | null
+}
+
+const isActiveRow = (row: CanonicalImportBranchRow) => Number(row.is_active ?? 1) === 1
+
+function lowered(value: unknown): string {
+  return typeof value === 'string' ? value.trim().toLowerCase() : ''
+}
+
+// The stable identity word of a row: canonical_key (immutable), else role,
+// else the legacy name. Never the display name once the identity is stored.
+function identityKey(row: CanonicalImportBranchRow): string {
+  if (row.canonical_key != null) return lowered(row.canonical_key)
+  if (row.role != null) return lowered(row.role)
+  return lowered(row.name)
 }
 
 export function indexCanonicalImportBranches(rows: CanonicalImportBranchRow[]): CanonicalImportBranchIndex {
   const byRole = new Map<Exclude<BranchRole, 'other'>, CanonicalImportBranchRow[]>([['shop', []], ['warehouse', []]])
   const defaults: CanonicalImportBranchRow[] = []
   for (const row of rows) {
-    if (Number(row.is_active ?? 1) !== 1) continue
-    const role = branchRoleFromName(row.name)
+    if (!isActiveRow(row)) continue
+    const role = branchRole(row)
     if (role === 'other') continue
     byRole.get(role)!.push(row)
     if (Number(row.is_default ?? 0) === 1) defaults.push(row)
   }
   const defaultCandidate = defaults.length === 1 ? defaults[0] : null
-  const defaultRole = defaultCandidate ? branchRoleFromName(defaultCandidate.name) : 'other'
+  const defaultRole = defaultCandidate ? branchRole(defaultCandidate) : 'other'
   const uniqueDefault = defaultCandidate && defaultRole !== 'other' && byRole.get(defaultRole)!.length === 1
     ? defaultCandidate
     : null
-  return { byRole, uniqueDefault }
+  return { byRole, uniqueDefault, rows }
+}
+
+const ADDRESSED_LABEL: Record<string, string> = { shop: 'Shop', warehouse: 'Warehouse' }
+
+export function resolveImportBranchRequest(index: CanonicalImportBranchIndex, requestedName: unknown): ImportBranchResolution | null {
+  const name = String(requestedName ?? '').trim()
+  if (!name) return index.uniqueDefault ? { branch: index.uniqueDefault, addressedName: null } : null
+  const word = name.toLowerCase()
+  if (word === 'store') {
+    const sellers = index.byRole.get('shop') || []
+    return sellers.length === 1 ? { branch: sellers[0], addressedName: null } : null
+  }
+  if (word === 'shop' || word === 'warehouse') {
+    const keyed = index.rows.filter((row) => identityKey(row) === word)
+    const active = keyed.filter(isActiveRow)
+    if (active.length > 1) return null
+    if (active.length === 1) return branchRole(active[0]) === 'other' ? null : { branch: active[0], addressedName: null }
+    // Nothing active carries this identity: a retired branch routes to its
+    // active successor, provided every retired candidate agrees on ONE target.
+    const targets = new Map<number, CanonicalImportBranchRow>()
+    for (const row of keyed) {
+      const effect = resolveActiveSuccessor(index.rows, row.id)
+      if (!effect || !effect.viaSuccessor) return null
+      const target = index.rows.find((candidate) => Number(candidate.id) === effect.effectBranchId)
+      if (target) targets.set(Number(target.id), target)
+    }
+    if (targets.size !== 1) return null
+    const [target] = [...targets.values()]
+    return branchRole(target) === 'other' ? null : { branch: target, addressedName: ADDRESSED_LABEL[word] }
+  }
+  const named = index.rows.filter((row) => isActiveRow(row) && lowered(row.name) === word)
+  return named.length === 1 && branchRole(named[0]) !== 'other' ? { branch: named[0], addressedName: null } : null
 }
 
 export function resolveCanonicalImportBranch(index: CanonicalImportBranchIndex, requestedName: unknown): CanonicalImportBranchRow | null {
-  const name = String(requestedName ?? '').trim()
-  if (!name) return index.uniqueDefault
-  const role = branchRoleFromName(name)
-  if (role === 'other') return null
-  const matches = index.byRole.get(role) || []
-  return matches.length === 1 ? matches[0] : null
+  return resolveImportBranchRequest(index, requestedName)?.branch ?? null
 }
 
 export async function validateCanonicalImportBranchIds(db: D1Compat, branchIds: number[]): Promise<string | null> {
@@ -46,11 +120,11 @@ export async function validateCanonicalImportBranchIds(db: D1Compat, branchIds: 
   if (requested.some((id) => !Number.isSafeInteger(id) || id <= 0)) {
     return 'Import has no valid canonical branch identity.'
   }
-  const rows = await db.prepare(`SELECT id, name, is_default, is_active FROM branches`).all<CanonicalImportBranchRow>()
+  const rows = await db.prepare(`SELECT ${IMPORT_BRANCH_COLUMNS_SQL} FROM branches`).all<CanonicalImportBranchRow>()
   const index = indexCanonicalImportBranches(rows)
   for (const id of requested) {
     const row = rows.find((candidate) => Number(candidate.id) === id)
-    const role = row ? branchRoleFromName(row.name) : 'other'
+    const role = row ? branchRole(row) : 'other'
     if (!row || Number(row.is_active ?? 0) !== 1 || role === 'other' || index.byRole.get(role)!.length !== 1) {
       return `Branch ${id} is missing, inactive, non-canonical, or ambiguous.`
     }
@@ -70,11 +144,11 @@ function branchAuthorityStatement(branchIds: number[]): { sql: string; params: R
               ON selected_branch.id = CAST(expected.value AS INTEGER)
             WHERE selected_branch.id IS NULL
                OR COALESCE(selected_branch.is_active, 0) != 1
-               OR lower(trim(COALESCE(selected_branch.name, ''))) NOT IN ('shop', 'warehouse')
+               OR lower(trim(COALESCE(selected_branch.role, selected_branch.name, ''))) NOT IN ('shop', 'warehouse')
                OR (SELECT COUNT(*)
                    FROM branches canonical_peer
                    WHERE canonical_peer.is_active = 1
-                     AND lower(trim(canonical_peer.name)) = lower(trim(selected_branch.name))) != 1
+                     AND lower(trim(COALESCE(canonical_peer.role, canonical_peer.name))) = lower(trim(COALESCE(selected_branch.role, selected_branch.name)))) != 1
           ) THEN 1 ELSE abs(-9223372036854775808) END AS canonical_branch_guard`,
     params: { branch_ids_json: JSON.stringify([...new Set(branchIds.map(Number))]) },
   }
