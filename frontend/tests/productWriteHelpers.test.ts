@@ -4,7 +4,6 @@ import {
   buildDeletedProductIdSet,
   buildDefinedProductUpdates,
   buildProductBranchMovePlan,
-  buildProductBranchStockAdjustments,
   buildProductBulkInfoUpdates,
   buildProductBulkPricingUpdates,
   buildProductBulkUpdatePayload,
@@ -74,40 +73,9 @@ assert.equal(variantPayload.purchase_price_usd, 2.5)
 assert.equal(variantPayload.userId, 'admin')
 assert.equal(variantPayload.userName, 'Admin')
 
-assert.deepEqual(
-  buildProductBranchStockAdjustments(
-    {
-      branch_stock: [
-        { branch_id: '1', quantity: '8' },
-        { branch_id: 2, quantity: '0' },
-        { branch_id: 0, quantity: 99 },
-        { branch_id: 'bad', quantity: 99 },
-      ],
-    },
-    {
-      branch_stock: [
-        { branch_id: 1, quantity: 5 },
-        { branch_id: '2', quantity: 4 },
-        { branch_id: 3, quantity: 2 },
-      ],
-    },
-  ),
-  [
-    { branchId: 1, type: 'add', quantity: 3 },
-    { branchId: 2, type: 'remove', quantity: 4 },
-    { branchId: 3, type: 'remove', quantity: 2 },
-  ],
-  'branch stock adjustment planning returns only valid add/remove deltas',
-)
-
-assert.deepEqual(
-  buildProductBranchStockAdjustments(
-    { branch_stock: [{ branch_id: 5, quantity: 'not-a-number' }] },
-    { branch_stock: [{ branch_id: 5, quantity: 0 }] },
-  ),
-  [],
-  'invalid quantities are treated as zero to avoid unsafe stock mutations',
-)
+// buildProductBranchStockAdjustments (snapshot minus current, per branch) was
+// retired with F2 (5 Oct 2026): no Undo writes stock from a snapshot any more.
+// tests/productUndoNeverWritesStock.test.ts pins the replacement.
 
 assert.deepEqual(
   buildProductClearStockAdjustments({

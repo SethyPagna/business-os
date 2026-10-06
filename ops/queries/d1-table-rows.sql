@@ -171,4 +171,8 @@ SELECT
     'user_sessions', (SELECT COUNT(*) FROM user_sessions),
     'users', (SELECT COUNT(*) FROM users),
     'verification_codes', (SELECT COUNT(*) FROM verification_codes)
-  ) AS rows_9;
+  ) AS rows_9,
+  json_object(
+    'imported_sale_stock_skip_0235', (SELECT COUNT(*) FROM imported_sale_stock_skip_0235),
+    'imported_sale_stock_skip_guard_0235', (SELECT COUNT(*) FROM imported_sale_stock_skip_guard_0235)
+  ) AS rows_10;

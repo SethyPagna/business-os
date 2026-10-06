@@ -418,7 +418,8 @@ async function run() {
   f = fixture(); seed(f)
   f.sql.prepare('UPDATE sales SET stock_skipped=1 WHERE id=1').run()
   const skipped = snapshot(f)
-  await assert.rejects(() => helper.applyReturnBulkAction(f.env, user, request(f, [1], 'status', 'completed', 'cancelled', 'skipped-parent-001')), /stock-skipped sale/)
+  await assert.rejects(() => helper.applyReturnBulkAction(f.env, user, request(f, [1], 'status', 'completed', 'cancelled', 'skipped-parent-001')),
+    (error) => /stock-skipped sale/.test(error.message) && /never moved/.test(error.message) && error.code === 'return_stock_skipped_sale' && error.statusCode === 409)
   assert.equal(snapshot(f), skipped)
   console.log('PASS stock-skipped parent sale blocks return status stock inference')
 

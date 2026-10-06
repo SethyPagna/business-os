@@ -28,9 +28,9 @@ function runTest(name: string, fn: () => void): void {
 
 const packs = { en: JSON.parse(read('src/lang/en.json')), km: JSON.parse(read('src/lang/km.json')) } as Record<string, Record<string, string>>
 const trFrom = (pack: Record<string, string>) => (key: string, fallback: string) => pack[key] ?? fallback
-const CODES = ['return_edit_cancelled', 'return_restore_over_capacity', 'return_refund_price_ambiguous', 'return_refund_sale_line_required']
+const CODES = ['return_edit_cancelled', 'return_restore_over_capacity', 'return_refund_price_ambiguous', 'return_refund_sale_line_required', 'return_stock_skipped_sale']
 
-runTest('the mapping covers exactly the four FX-returns refusal codes', () => {
+runTest('the mapping covers exactly the four FX-returns refusal codes plus RET-B E1', () => {
   assert.deepEqual(Object.keys(RETURN_REFUSAL_ERRORS).sort(), [...CODES].sort())
 })
 
@@ -103,6 +103,9 @@ runTest('every mapped code is one the Worker actually sends, and the route forwa
     'the API error carries the refusal\'s params to the helper')
   assert.ok(kernel.includes("throw new RefundSaleLineError('return_refund_price_ambiguous',"), 'the kernel refuses an ambiguous product price')
   assert.ok(route.includes("throw new RefundSaleLineError('return_refund_sale_line_required',"), 'PATCH /:id refuses a line naming neither sale item nor product')
+  // RET-B E1: the bulk status change on a stock-skipped sale's return says why.
+  assert.match(bulk, /Number\(linkedSale\.stock_skipped\) === 1\) fail\(`[^`]*would move stock that never moved[^`]*`, 409, 'return_stock_skipped_sale'\)/,
+    'the stock-skipped refusal fails with return_stock_skipped_sale and says why')
   assert.equal(route.split('if (error instanceof RefundSaleLineError) return c.json({ error: error.message, code: error.code }, 400)').length - 1, 2,
     'POST / and PATCH /:id both forward the refund-price refusal code')
 })
