@@ -74,6 +74,7 @@ const real = new Set([
 const noop = new Proxy(function () {}, { get: () => noop, apply: () => undefined, construct: () => ({}) })
 class ProductImageAssetError extends Error {}
 const services = {
+  branchRedirectWrite: require('./harness/branch_redirect_write.cjs'), // CUTOVER-LR
   auth: { requireAuth: async (c, next) => { c.set('user', c.env.TEST_USER); await next() } },
   permissions: {
     getPermissionTier: (u) => u.tier || 'full', getActionTier: (u) => u.tier || 'full',
@@ -177,7 +178,7 @@ const productLoop = extract(engineSource,
 assert.ok(productLoop.includes(productLoopStart), 'the extracted text contains the product write loop')
 const inventoryLoop = extract(engineSource,
   '      for (const r of actionable) {\n        const d = r.data as Record<string, unknown> & { cost_price_usd?: number; cost_price_khr?: number }',
-  '\n        guardedGroups.push(group)\n      }\n')
+  '\n        guardedGroups.push(labelAddressedMovements(group, d))\n      }\n')
 const composerMod = { exports: {} }
 new Function('require', 'module', 'exports', transpile(`
   import { planReconcileBranchSnapshot, resolveReceiptLotTarget } from './productBatches'
@@ -188,6 +189,8 @@ new Function('require', 'module', 'exports', transpile(`
   // Absent before the fix: the loop then simply never calls it.
   const typedCostEntryBeforeWriteStatement = (catalog as any).typedCostEntryBeforeWriteStatement
   function str(value: unknown): string { return value == null ? '' : String(value).trim() }
+  // CUTOVER-LR: the addressed-branch label is a no-op for rows that were not redirected (these rows never are).
+  const labelAddressedMovements = (group: any[]) => group
   export function composeProducts(ctx: any) {
     let { actionable, receiptCosts, autoMergeRecords, jobId, nowIso, productImportMode, productReplaceColumns,
       appliedRowGuards, rowGuardStatement, receiptLots, receiptBaselines, nextBatchId, productSeedBranchIds, importCostActor } = ctx
