@@ -345,10 +345,18 @@ function childReason(row: BranchCutoverJournalRow, intent: ParentIntent): string
 }
 const receiptByKey = `SELECT r.id,r.status,r.request_json,r.operation_id,CAST(json_extract(r.request_json,'$.transfer.productId') AS INTEGER) AS product
   FROM transfer_operation_receipts r WHERE r.actor_id=@actor AND r.request_id=@key`
+/**
+ * One product's lot rows at one branch. CROSS JOIN fixes the order: the product's batches first (variant index), then
+ * the (batch_id, branch_id) unique index. Without it D1, which has no ANALYZE statistics, reads every lot row of the
+ * branch through the (branch_id, quantity) index for each product: quadratic, ~3.4M rows per 256-row reconcile page
+ * at production scale (production-scale workerd bench, 6 Oct 2026).
+ */
+const productLotsAt = (product: string, branch: string): string =>
+  `FROM product_batches b CROSS JOIN branch_batch_stock s ON s.batch_id=b.id AND s.branch_id=${branch} WHERE b.variant_product_id=${product}`
 /** Previous product fully drained from the source in both ledgers, and both ledgers agree at the target. */
 const drainedSql = `COALESCE((SELECT quantity FROM branch_stock WHERE product_id=@last AND branch_id=@source),0)=0
-  AND NOT EXISTS(SELECT 1 FROM branch_batch_stock s JOIN product_batches b ON b.id=s.batch_id WHERE b.variant_product_id=@last AND s.branch_id=@source AND s.quantity<>0)
-  AND COALESCE((SELECT sum(s.quantity) FROM branch_batch_stock s JOIN product_batches b ON b.id=s.batch_id WHERE b.variant_product_id=@last AND s.branch_id=@target),0)
+  AND NOT EXISTS(SELECT 1 ${productLotsAt('@last', '@source')} AND s.quantity<>0)
+  AND COALESCE((SELECT sum(s.quantity) ${productLotsAt('@last', '@target')}),0)
     <=COALESCE((SELECT quantity FROM branch_stock WHERE product_id=@last AND branch_id=@target),0)+1e-9`
 // The unary plus keeps the planner on the (product_id, branch_id) unique index
 // range after @last, so each child plan reads a handful of rows, not every source row.
@@ -595,15 +603,14 @@ async function verifyStep(db: D1Compat, current: SessionUser, row: BranchCutover
         { sql: `UPDATE product_batches SET unit_cost_usd=(SELECT json_extract(c.value,'$[1]') FROM json_each(@costs) c WHERE CAST(json_extract(c.value,'$[0]') AS INTEGER)=product_batches.id),
             updated_at=CURRENT_TIMESTAMP WHERE id IN (SELECT CAST(json_extract(value,'$[0]') AS INTEGER) FROM json_each(@costs))`, params: { costs } },
         { sql: `UPDATE branch_batch_stock SET quantity=(SELECT json_extract(q.value,'$[1]') FROM json_each(@quantities) q WHERE CAST(json_extract(q.value,'$[0]') AS INTEGER)=branch_batch_stock.batch_id),
-            updated_at=CURRENT_TIMESTAMP WHERE branch_id=@target AND batch_id IN (SELECT CAST(json_extract(value,'$[0]') AS INTEGER) FROM json_each(@quantities))`, params: { quantities, target: intent.targetBranchId } },
+            updated_at=CURRENT_TIMESTAMP WHERE batch_id IN (SELECT CAST(json_extract(value,'$[0]') AS INTEGER) FROM json_each(@quantities)) AND +branch_id=@target`, params: { quantities, target: intent.targetBranchId } },
         { sql: `INSERT INTO audit_logs(user_id,user_name,action,entity,entity_id,details,table_name,record_id)
             SELECT @actor,@actorName,@action,'product_batch',CAST(json_extract(a.value,'$.survivorBatchId') AS TEXT),a.value,'product_batches',CAST(json_extract(a.value,'$.survivorBatchId') AS TEXT)
             FROM json_each(@audits) a`, params: { actor: current.id, actorName: current.username ?? null, action: BRANCH_CUTOVER_FOLD_AUDIT_ACTION, audits } },
         cutoverAssert(`NOT EXISTS(SELECT 1 FROM json_each(@quantities) q LEFT JOIN branch_batch_stock s ON s.batch_id=CAST(json_extract(q.value,'$[0]') AS INTEGER) AND s.branch_id=@target
             WHERE s.quantity IS NOT json_extract(q.value,'$[1]'))
           AND NOT EXISTS(SELECT 1 FROM json_each(@costs) c JOIN product_batches b ON b.id=CAST(json_extract(c.value,'$[0]') AS INTEGER) WHERE b.unit_cost_usd IS NOT json_extract(c.value,'$[1]'))
-          AND NOT EXISTS(SELECT 1 FROM json_each(@products) p WHERE COALESCE((SELECT sum(s.quantity) FROM branch_batch_stock s JOIN product_batches b ON b.id=s.batch_id
-            WHERE b.variant_product_id=CAST(p.value AS INTEGER) AND s.branch_id=@target),0)>COALESCE((SELECT quantity FROM branch_stock WHERE product_id=CAST(p.value AS INTEGER) AND branch_id=@target),0)+1e-9)`,
+          AND NOT EXISTS(SELECT 1 FROM json_each(@products) p WHERE COALESCE((SELECT sum(s.quantity) ${productLotsAt('CAST(p.value AS INTEGER)', '@target')}),0)>COALESCE((SELECT quantity FROM branch_stock WHERE product_id=CAST(p.value AS INTEGER) AND branch_id=@target),0)+1e-9)`,
         { quantities, costs, products: productIds, target: intent.targetBranchId }))
     }
     return checkpoint(next, keys.length)
@@ -613,7 +620,7 @@ async function verifyStep(db: D1Compat, current: SessionUser, row: BranchCutover
     // Raw REAL values for the arithmetic (exact decimals, as captured); printf text only pins the page inside the batch.
     const rowsSql = table === 'branch_stock'
       ? `SELECT bs.rowid AS k,bs.product_id AS id,bs.branch_id AS branch,bs.quantity,printf('%!.17g',bs.quantity) AS text,
-          (SELECT coalesce(sum(s.quantity),0) FROM product_batches b JOIN branch_batch_stock s ON s.batch_id=b.id WHERE b.variant_product_id=bs.product_id AND s.branch_id=bs.branch_id) AS lots
+          (SELECT coalesce(sum(s.quantity),0) ${productLotsAt('bs.product_id', 'bs.branch_id')}) AS lots
           FROM branch_stock bs WHERE +bs.branch_id IN (@source,@target) AND bs.rowid>@after ORDER BY bs.rowid LIMIT @limit`
       : `SELECT rowid AS k,batch_id AS id,branch_id AS branch,quantity,printf('%!.17g',quantity) AS text,0 AS lots
           FROM branch_batch_stock WHERE +branch_id IN (@source,@target) AND rowid>@after ORDER BY rowid LIMIT @limit`

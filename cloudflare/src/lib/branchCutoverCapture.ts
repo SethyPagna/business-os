@@ -98,7 +98,7 @@ const computeRegistryDigest = (): Promise<string> => cutoverDigest(JSON.stringif
 // The unary plus keeps SQLite on the rowid scan (no branch-index seek followed by
 // a temp B-tree sort), so every page reads its rows once (design §5.2 index trap).
 function predicate(table: string): string {
-  const lotsOf = (product: string) => `EXISTS(SELECT 1 FROM product_batches cb JOIN branch_batch_stock cs ON cs.batch_id=cb.id WHERE cb.variant_product_id=${product} AND cs.branch_id IN (@source,@target))`
+  const lotsOf = (product: string) => `EXISTS(SELECT 1 FROM product_batches cb CROSS JOIN branch_batch_stock cs ON cs.batch_id=cb.id AND cs.branch_id IN (@source,@target) WHERE cb.variant_product_id=${product})`
   if (table === 'products') return `EXISTS(SELECT 1 FROM branch_stock cx WHERE cx.product_id="products".id AND cx.branch_id IN (@source,@target)) OR ${lotsOf('"products".id')}`
   if (table === 'branches') return 'id IN (@source,@target) OR successor_branch_id IN (@source,@target)'
   const references = BRANCH_SCALAR_REFERENCES.filter(([name]) => name === table).map(([, column]) => `+${quote(column)} IN (@source,@target)`)
@@ -287,7 +287,7 @@ export async function readCutoverCapturePage(db: D1Compat, schema: CaptureSchema
   }
   if (materialize && rows.length) for (const [field, branchField] of snapshots[table] || []) statements.push({
     sql: `UPDATE ${quote(table)} SET ${quote(field)}=CASE ${quote(branchField)} WHEN @source THEN @sourceName WHEN @target THEN @targetName END
-      WHERE rowid IN (SELECT value FROM json_each(@keys)) AND ${quote(branchField)} IN (@source,@target) AND trim(coalesce(${quote(field)},''),@blankCharacters)=''`,
+      WHERE rowid IN (SELECT value FROM json_each(@keys)) AND +${quote(branchField)} IN (@source,@target) AND trim(coalesce(${quote(field)},''),@blankCharacters)=''`,
     params: { ...params, blankCharacters, sourceName: names[source], targetName: names[target], keys: JSON.stringify(rows.map(([key]) => key)) },
   })
   let records = rows.length
