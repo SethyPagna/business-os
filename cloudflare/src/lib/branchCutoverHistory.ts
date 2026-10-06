@@ -19,9 +19,11 @@ export const UNDO_CLOSED_BRANCH_RETIRED = 'undo_closed:branch_retired'
 export const UNDO_CLOSED_BRANCH_CUTOVER_MOVE = 'undo_closed:branch_cutover_move'
 export const UNDO_CLOSED_BRANCH_RETIRED_CODE = 'undo_closed_branch_retired'
 export const UNDO_CLOSED_BRANCH_CUTOVER_MOVE_CODE = 'undo_closed_branch_cutover_move'
-// English source text for the i18n lane (LI); the packs own the translations.
-export const UNDO_CLOSED_BRANCH_RETIRED_MESSAGE = 'Undo closed: this was done at Shop before it was merged into LC Store. Make a new change instead.'
-export const UNDO_CLOSED_BRANCH_CUTOVER_MOVE_MESSAGE = 'Undo closed: part of the branch consolidation (Shop → LC Store).'
+// The English of the packs' undo_refused_closed_branch_* keys, word for word (pinned by
+// scripts/test-cutover-li-pack-parity-pure.cjs). Name-free on purpose: a branch name is data and can change, so no
+// sentence names Shop or LC Store; the packs own the translations and the frontend restates these by code.
+export const UNDO_CLOSED_BRANCH_RETIRED_MESSAGE = 'Undo closed: this was done at the old branch before the branch consolidation. Make a new change instead. Nothing was changed.'
+export const UNDO_CLOSED_BRANCH_CUTOVER_MOVE_MESSAGE = 'Undo closed: this is part of the branch consolidation. Nothing was changed.'
 export const BRANCH_CUTOVER_CLOSURE_AUDIT_ACTION = 'undo_closed_branch_cutover'
 export const BRANCH_CUTOVER_SUMMARY_ENTITY = 'branch_cutover'
 

@@ -42,12 +42,17 @@ export const BRANCH_RULE_MESSAGE_KEYS: ReadonlyArray<readonly [string, string]> 
 export const LEGACY_BRANCH_RULE_MESSAGE_KEYS: ReadonlyArray<readonly [string, string]> = [
   ['Only allow Shop sale. Please transfer to Shop first.', 'branch_not_sellable'],
   ['Transfers move stock only between Shop and Warehouse.', 'transfer_branches_pair_only'],
+  // CANONICAL_BRANCH_IDENTITY_ERROR (409, code canonical_branch_identity_locked) is still this sentence: the Worker's
+  // constant is pinned by test-undo-appliers-pure.cjs. The pack text it maps to is role-neutral (the branches are Old
+  // Shop and LC Store after the cutover) and is what the operator reads; the code maps there first.
+  ['Branches are fixed to Shop and Warehouse. You can edit their details, but you cannot add, rename, deactivate, or delete a branch.', 'canonical_branch_identity_locked'],
 ]
 
 export const BRANCH_RULE_CODE_KEYS: Readonly<Record<string, string>> = {
   branch_edit_conflict: 'branch_edit_conflict',
   branch_review_schema_required: 'branch_review_schema_required',
   canonical_branch_configuration_invalid: 'canonical_branch_configuration_invalid',
+  canonical_branch_identity_locked: 'canonical_branch_identity_locked',
   branch_not_sellable: 'branch_not_sellable',
   transfer_direction_invalid: 'transfer_branches_pair_only',
   transfer_stock_changed: 'transfer_stock_changed',
