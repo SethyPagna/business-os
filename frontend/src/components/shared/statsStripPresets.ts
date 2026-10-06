@@ -7,6 +7,8 @@
 // DateTimeRangePicker's) rather than imported, since importing the .tsx
 // would drag the picker component into plain-node test runs.
 
+import { businessNow } from '../../utils/dateHelpers.ts'
+
 export interface DateTimeRange {
   startDate: string
   endDate: string
@@ -50,7 +52,7 @@ function presetNow(now?: Date): Date {
   // Real app calls omit `now`, so resolve the wall clock in Cambodia rather
   // than inheriting whatever timezone the user's device happens to use.
   if (now) return new Date(now.getTime())
-  return new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Phnom_Penh' }))
+  return businessNow()
 }
 
 function calendarPeriodRange(current: Date, months: number, previous: boolean): DateTimeRange {

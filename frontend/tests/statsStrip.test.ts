@@ -104,7 +104,13 @@ test('shared stats controls own all-time/today presets and expose time only wher
   const picker = read('src/components/shared/DateTimeRangePicker.tsx')
   const presets = read('src/components/shared/statsStripPresets.ts')
   assert.match(picker, /STATS_PRESETS\.map/, 'the shared ordered presets include All time and Today inside the picker')
-  assert.ok(presets.includes("timeZone: 'Asia/Phnom_Penh'"), 'real quick-range math is anchored to Cambodia business time')
+  // The presets used to carry a private copy of the business-clock reader
+  // (toLocaleString with a literal zone); they now import the one in dateHelpers,
+  // which is the single place that names the business zone.
+  const dateHelpers = read('src/utils/dateHelpers.ts')
+  assert.ok(presets.includes("import { businessNow } from '../../utils/dateHelpers.ts'"), 'quick-range math reads the shared business clock')
+  assert.ok(!presets.includes('toLocaleString'), 'and no longer re-implements it privately')
+  assert.ok(dateHelpers.includes('timeZone: BUSINESS_TIME_ZONE'), 'the shared clock is anchored to Cambodia business time')
   assert.deepEqual(statsPresetRange('all'), { startDate: '', endDate: '', startTime: '', endTime: '' }, 'All time is the blank/unfiltered range')
   assert.equal((picker.match(/<TimeEntryInput /g) || []).length, 2, 'the shared picker uses two shared 24-hour fields')
   assert.ok(picker.includes('Quick range') && picker.includes('quickRanges.map'), 'quick presets are folded into the opened date/time picker')
