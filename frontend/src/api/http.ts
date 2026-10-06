@@ -20,6 +20,7 @@ import {
   getSyncServerUrl,
   getSyncToken,
 } from './httpState.ts'
+import { localizeCodedApiError } from './codedApiMessage.ts'
 
 export {
   getSyncServerUrl,
@@ -959,7 +960,9 @@ export async function apiFetch(method: unknown, path: string, body?: unknown, ti
         throw edgeError
       }
       const msg  = parsed?.error || text
-      const apiError = createApiError(res.status, parsed, text)
+      // A coded refusal (400 invalid_date, ...) is restated in the UI language
+      // once, here, so every surface that shows error.message gets it translated.
+      const apiError = await localizeCodedApiError(createApiError(res.status, parsed, text))
       if (!recoveryRead && isActorReadScopeCurrent(sideEffectScope, false) && typeof window !== 'undefined' && shouldDispatchUnauthorized(path, res.status, parsed)) {
         dispatchUnauthorized({
           code: parsed?.code || 'invalid_session',

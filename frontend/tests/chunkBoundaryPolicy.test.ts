@@ -28,6 +28,7 @@ const boundaries: Array<[string, string]> = [
   ['utils/dirtyWork.ts', 'work-drafts'],
   ['components/shared/hubNavigation.ts', 'hub-navigation'],
   ['utils/publicAssetUrls.ts', 'api-http-core'],
+  ['api/codedApiMessage.ts', 'api-http-core'],
   ['components/catalog/catalogPagination.tsx', 'catalog-public-utils'],
   ['components/catalog/PortalFilterCombobox.tsx', 'catalog-public-controls'],
   ['components/catalog/PortalPromoStrip.tsx', 'catalog-public-controls'],

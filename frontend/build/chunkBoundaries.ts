@@ -21,6 +21,9 @@ const neutralChunks: ReadonlyArray<readonly [string, string]> = [
   ['/src/utils/dirtyWork.ts', 'work-drafts'],
   ['/src/components/shared/hubNavigation.ts', 'hub-navigation'],
   ['/src/utils/publicAssetUrls.ts', 'api-http-core'],
+  // http.ts's coded-refusal translator (invalid_date -> date_entry_invalid). Under
+  // src/api/ the catch-all would put it in app-api-methods, which imports http.ts back.
+  ['/src/api/codedApiMessage.ts', 'api-http-core'],
   ['/src/components/catalog/catalogPagination.tsx', 'catalog-public-utils'],
   ['/src/components/catalog/portalContrast.ts', 'catalog-public-utils'],
   ['/src/components/catalog/PortalFilterCombobox.tsx', 'catalog-public-controls'],
