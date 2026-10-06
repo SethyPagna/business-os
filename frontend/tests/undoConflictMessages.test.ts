@@ -31,11 +31,11 @@ const EN = readPack('en')
 const KM = readPack('km')
 
 // The Worker's codes, read from its source rather than restated here.
-const workerSource = ['undoAppliers.ts', 'branchCutoverHistory.ts']
+const workerSource = ['undoAppliers.ts', 'branchCutoverHistory.ts', 'stockSession.ts']
   .map((file) => fs.readFileSync(path.join(WORKER, 'src', 'lib', file), 'utf8')).join('\n')
 function workerCode(name: string): string {
   const match = workerSource.match(new RegExp(`export const ${name} = '([a-z_]+)'`))
-  assert.ok(match, `cloudflare/src/lib/undoAppliers.ts and branchCutoverHistory.ts no longer export ${name}`)
+  assert.ok(match, `cloudflare/src/lib/undoAppliers.ts, branchCutoverHistory.ts and stockSession.ts no longer export ${name}`)
   return match[1]
 }
 
@@ -52,6 +52,8 @@ const KEYS = {
   // The branch consolidation closed this entry's Undo (done at the retired branch, or one of its own moves).
   closedBranchRetired: { undo: 'undo_refused_closed_branch_retired', redo: 'redo_refused_closed_branch_retired' },
   closedBranchCutoverMove: { undo: 'undo_refused_closed_branch_cutover_move', redo: 'redo_refused_closed_branch_cutover_move' },
+  // A stock session that received a product the consolidation merged into LC Store: still open, refused with this code.
+  closedBranchCutoverProductMoved: { undo: 'undo_refused_closed_branch_cutover_product_moved', redo: 'redo_refused_closed_branch_cutover_product_moved' },
   // Stock moved on a product while a merge redo was being saved; nothing was written.
   mergeConflictRetry: { undo: 'undo_refused_merge_conflict_retry', redo: 'redo_refused_merge_conflict_retry' },
   generic: { undo: 'undo_refused_generic', redo: 'redo_refused_generic' },
@@ -67,6 +69,7 @@ const CODE_KEYS = [
   ['UNDO_CLOSED_BY_MERGE_CODE', KEYS.closedByMerge],
   ['UNDO_CLOSED_BRANCH_RETIRED_CODE', KEYS.closedBranchRetired],
   ['UNDO_CLOSED_BRANCH_CUTOVER_MOVE_CODE', KEYS.closedBranchCutoverMove],
+  ['BRANCH_CUTOVER_PRODUCT_MOVED_CODE', KEYS.closedBranchCutoverProductMoved],
   ['UNDO_MERGE_CONFLICT_RETRY_CODE', KEYS.mergeConflictRetry],
   ['UNDO_REFUSED_CODE', KEYS.generic],
 ] as const

@@ -623,7 +623,7 @@ export default function Branches({ embedded = false, view, showSectionNavigation
               ...continuousRangeParams(branchDateRange),
               fromBranchId: transferFromFilter !== 'all' ? transferFromFilter : undefined,
               toBranchId: transferToFilter !== 'all' ? transferToFilter : undefined,
-              includeCutover: showConsolidationTransfers ? '1' : undefined,
+              ...(showConsolidationTransfers ? { includeCutover: '1' } : {}),
               page: transferPage,
               pageSize: transferPageSize,
             }),
@@ -1079,7 +1079,7 @@ export default function Branches({ embedded = false, view, showSectionNavigation
             ...continuousRangeParams(branchDateRange),
             fromBranchId: transferFromFilter !== 'all' ? transferFromFilter : undefined,
             toBranchId: transferToFilter !== 'all' ? transferToFilter : undefined,
-            includeCutover: showConsolidationTransfers ? '1' : undefined,
+            ...(showConsolidationTransfers ? { includeCutover: '1' } : {}),
             page: exportPage,
             pageSize: exportPageSize,
           })
