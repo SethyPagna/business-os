@@ -32,6 +32,9 @@ export function getHubDestinations(page: string, access: HubAccess): HubDestinat
     ['suppliers', 'suppliers', 'Suppliers', can('contacts') && access.hasPermission('contacts_suppliers')],
     ['delivery', 'pos_delivery', 'Delivery', can('contacts')],
     ['duplicates', 'possible_duplicates', 'Conflicts', can('contacts')],
+    // Its own grant, not Contacts view: "Approve member links" (portal_member_links) opens it
+    // alone, and the Worker withholds every customer fact from a viewer without Contacts view.
+    ['members', 'pm_members', 'Members', access.hasPermission('portal_member_links')],
   ] : page === 'promotions' ? [
     ['rules', 'promo_tab_rules', 'Rules', can('promotions')],
     ['discounts', 'promo_tab_discounts', 'Discounts', can('products')],

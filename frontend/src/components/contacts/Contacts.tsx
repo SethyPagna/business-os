@@ -2,6 +2,7 @@ import { getHubDestinations, useHubSection } from '../shared/hubNavigation.ts'
 import type { ComponentType, SVGProps } from 'react'
 import { lazyRetry } from '../../utils/lazyImport.ts'
 import { Suspense, useEffect, useState } from 'react'
+import Link2 from 'lucide-react/dist/esm/icons/link-2.js'
 import Truck from 'lucide-react/dist/esm/icons/truck.js'
 import Users from 'lucide-react/dist/esm/icons/users.js'
 import Warehouse from 'lucide-react/dist/esm/icons/warehouse.js'
@@ -12,7 +13,7 @@ import HubSectionNav, { type HubSectionDef, readStoredHubSection } from '../shar
 
 type TranslateFn = (key: string) => string | undefined
 type NotifyFn = (message: string, tone?: string) => void
-type ContactTabId = 'customers' | 'suppliers' | 'delivery' | 'duplicates'
+type ContactTabId = 'customers' | 'suppliers' | 'delivery' | 'duplicates' | 'members'
 type ContactTabIcon = ComponentType<SVGProps<SVGSVGElement>>
 
 interface AppContextValue {
@@ -49,6 +50,7 @@ const TABS = (t: TranslateFn): ContactTabDefinition[] => [
   { id: 'suppliers', label: t('suppliers') || 'Suppliers', icon: Warehouse },
   { id: 'delivery', label: t('pos_delivery') || 'Delivery', icon: Truck },
   { id: 'duplicates', label: t('possible_duplicates') || 'Conflicts', icon: ConflictIcon },
+  { id: 'members', label: t('pm_members') || 'Members', icon: Link2 },
 ]
 
 const CONTACTS_HUB_STORAGE_KEY = 'bos:hub:contacts:active'
@@ -57,6 +59,7 @@ const CONTACT_DESC_KEYS: Record<ContactTabId, string> = {
   suppliers: 'hub_desc_contacts_suppliers',
   delivery: 'hub_desc_contacts_delivery',
   duplicates: 'hub_desc_contacts_duplicates',
+  members: 'hub_desc_contacts_members',
 }
 
 const loadCustomersTab = async (): Promise<{ CustomersTab: ComponentType<ContactTabProps> }> => (
@@ -75,10 +78,14 @@ type DuplicatesTabProps = ContactTabProps & {
 const loadDuplicatesTab = async (): Promise<{ default: ComponentType<DuplicatesTabProps> }> => (
   await import('./DuplicatesTab') as unknown as { default: ComponentType<DuplicatesTabProps> }
 )
+const loadMembersTab = async (): Promise<{ default: ComponentType<ContactTabProps> }> => (
+  await import('./members/MembersTab') as unknown as { default: ComponentType<ContactTabProps> }
+)
 const CustomersTab = lazyRetry(() => loadCustomersTab().then((module) => ({ default: module.CustomersTab })), 'contacts-customers-tab')
 const SuppliersTab = lazyRetry(() => loadSuppliersTab().then((module) => ({ default: module.SuppliersTab })), 'contacts-suppliers-tab')
 const DeliveryTab = lazyRetry(() => loadDeliveryTab().then((module) => ({ default: module.DeliveryTab })), 'contacts-delivery-tab')
 const DuplicatesTab = lazyRetry(() => loadDuplicatesTab(), 'contacts-duplicates-tab')
+const MembersTab = lazyRetry(() => loadMembersTab(), 'contacts-members-tab')
 
 function ContactTabFallback({ t, label }: ContactTabFallbackProps) {
   return (
@@ -139,11 +146,15 @@ export default function Contacts() {
   // the same gate on every /suppliers endpoint, so hiding the tab is
   // presentation, not the security boundary.
   const canSeeSuppliers = hasPermission('contacts_suppliers')
+  // Members is gated on its own permission (portal_member_links, "Approve member links"),
+  // not on Contacts view: a viewer with only that grant still reaches it, and the
+  // Worker then withholds every customer fact (customerVisible: false).
+  const destinationIds = getHubDestinations('contacts', { getPermissionTier, hasPermission, can }).map((item) => item.id)
   const [tab, setTab] = useHubSection<ContactTabId>('contacts', () => {
-    const validIds = (['customers', 'suppliers', 'delivery', 'duplicates'] as ContactTabId[]).filter((id) =>
-      id !== 'suppliers' || canSeeSuppliers)
-    return (readStoredHubSection(CONTACTS_HUB_STORAGE_KEY, validIds) as ContactTabId | null) || 'customers'
-  }, getHubDestinations('contacts', { getPermissionTier, hasPermission, can }).map((item) => item.id), navigateTo)
+    const validIds = (['customers', 'suppliers', 'delivery', 'duplicates', 'members'] as ContactTabId[]).filter((id) =>
+      destinationIds.includes(id))
+    return (readStoredHubSection(CONTACTS_HUB_STORAGE_KEY, validIds) as ContactTabId | null) || (validIds[0] ?? 'customers')
+  }, destinationIds, navigateTo)
   // Seeds a tab's own search box when an EntityLink elsewhere in the app
   // opens a contact by name or phone. Keyed per-tab (not a single shared
   // string) so switching tabs manually doesn't leave a stale search behind
@@ -186,7 +197,7 @@ export default function Contacts() {
     id,
     label,
     icon,
-    hidden: !can('contacts', 'view') || (id === 'suppliers' && !canSeeSuppliers),
+    hidden: id === 'members' ? !hasPermission('portal_member_links') : !can('contacts', 'view') || (id === 'suppliers' && !canSeeSuppliers),
     description: t(CONTACT_DESC_KEYS[id]) || undefined,
   }))
 
@@ -222,6 +233,11 @@ export default function Contacts() {
         {tab === 'duplicates' ? (
           <Suspense fallback={<ContactTabFallback t={t} label={t('possible_duplicates') || 'conflicts'} />}>
             <DuplicatesTab t={t} notify={notify} active={isActive} includeSuppliers={canSeeSuppliers} />
+          </Suspense>
+        ) : null}
+        {tab === 'members' && hasPermission('portal_member_links') ? (
+          <Suspense fallback={<ContactTabFallback t={t} label={t('pm_members') || 'members'} />}>
+            <MembersTab t={t} notify={notify} active={isActive} initialSearch={resolveSearch.members} />
           </Suspense>
         ) : null}
       </div>

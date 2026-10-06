@@ -245,6 +245,7 @@ const HUB_DESC_KEYS = [
   'hub_desc_contacts_suppliers',
   'hub_desc_contacts_delivery',
   'hub_desc_contacts_duplicates',
+  'hub_desc_contacts_members',
   'hub_desc_promotions_rules',
   'hub_desc_promotions_discounts',
   'hub_desc_promotions_loyalty',

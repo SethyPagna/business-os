@@ -460,6 +460,11 @@ export const PERMISSION_SECTIONS: PermissionSection[] = [
       // fields=names read stays open) -- this key gates the contact
       // records themselves.
       { key: 'contacts_suppliers', tKey: 'perm_contacts_suppliers', label: 'Suppliers section', sensitivity: 'high' },
+      // G38: Contacts > Members. Every /api/portal-members route needs it (admins hold it
+      // through 'all'). Granted alone it shows members without any customer fact: link, move,
+      // customer search and the customer columns also need Contacts view (the Worker answers
+      // contacts_view_required, and the screen hides them).
+      { key: 'portal_member_links', tKey: 'perm_portal_member_links', label: 'Approve member links', sensitivity: 'high' },
     ],
   },
   // Users & roles management is DELIBERATELY admin-only (Part 557 slice 3):

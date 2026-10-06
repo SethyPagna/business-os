@@ -2453,6 +2453,10 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
     // section still self-gates on its own key inside, so this widens the
     // door, never the controls.
     if (pageId === 'review' && can('audit_log', 'view')) return true
+    // Contacts > Members has its own grant (portal_member_links). Holding it alone opens the
+    // Contacts page; every other section there still gates on Contacts view, and the Worker
+    // withholds each customer fact from a viewer without it.
+    if (pageId === 'contacts' && hasPermission('portal_member_links')) return true
     // Users is admin-only now (Part 557 slice 3) -- it carries no per-role
     // `users` grant, so only the backup section can open Settings for a
     // non-admin here; admins reach it via the tier-aware check above.
@@ -2484,7 +2488,7 @@ export function AppProvider({ children, publicMode = false }: { children: ReactN
       return true
     }
     return false
-  }, [user, getPermissionTier, can])
+  }, [user, getPermissionTier, can, hasPermission])
 
   const committedLocationRef = useRef(typeof window === 'undefined' ? null : {
     href: window.location.href,
