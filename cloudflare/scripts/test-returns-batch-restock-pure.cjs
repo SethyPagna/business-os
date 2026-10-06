@@ -206,6 +206,8 @@ const returnsRoute = loadReal('routes/returns.ts', {
     './moneyPrecision': moneyPrecisionKernel,
     './saleStatusResolution': loadReal('lib/saleStatusResolution.ts', { './financialPrecision': loadReal('lib/financialPrecision.ts') }),
     './salesStatus': loadReal('lib/salesStatus.ts'),
+    // RET-A verify R2: the shared replacement settlement reads the refund's riel cash leg.
+    './refundTender': loadReal('lib/refundTender.ts'),
   }),
   // RET-A P1/P2: the riel a refund records and the riel its cash part hands back.
   '../lib/refundTender': loadReal('lib/refundTender.ts'),

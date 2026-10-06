@@ -51,8 +51,8 @@ import {
 import { canonicalMoney4, SaleMoneyContractError } from '../lib/saleMoneyPrecision'
 import { sumMoney4 } from '../lib/moneyPrecision'
 import {
-  PRIOR_RETURN_MONEY_SQL, priorReturnMoney, ReturnRefundSplitError, saleCarriesDebt, saleRowOwedUsd, saleStatusWithReturns, splitReplacementPayment, splitReturnRefund,
-  type PriorReturnMoney, type PriorReturnMoneyRow, type ReplacementPaymentSplit, type ReturnDebtSale, type ReturnRefundSplit,
+  PRIOR_RETURN_MONEY_SQL, priorReturnMoney, ReturnRefundSplitError, saleCarriesDebt, saleRowOwedUsd, saleStatusWithReturns, settleReplacementTender, splitReturnRefund,
+  type PriorReturnMoney, type PriorReturnMoneyRow, type ReplacementTender, type ReturnDebtSale, type ReturnRefundSplit,
 } from '../lib/returnRefundSplit'
 import { parseRefundCurrency, refundCashKhr, refundRielFigure, type RefundCurrency } from '../lib/refundTender'
 import { ProductMergeLineageError, resolveProductMergeLineage } from '../lib/productMergeLineage'
@@ -1368,15 +1368,18 @@ app.post('/split-preview', async (c) => {
     const riel = refundRielFigure({ currency, refundUsd, refundKhr, exchangeRate: positiveRate(debtState.sale.exchange_rate) ?? SCHEMA_DEFAULT_EXCHANGE_RATE,
       anyLineWithoutRiel: body.any_line_without_riel === true })
     if (riel == null) return c.json({ ...RETURN_REFUND_KHR_UNAVAILABLE }, 400)
-    const replacement = splitReplacementPayment({ carriesDebt: saleCarriesDebt(debtState.sale, debtState.prior.loweredDebt),
-      cashUsd: split.cashUsd, replacementUsd })
+    // The same settlement POST / records (settleReplacementTender): the riel
+    // paid out is the drawer's net to the riel, never a separately rounded share.
+    const replacement = settleReplacementTender({ carriesDebt: saleCarriesDebt(debtState.sale, debtState.prior.loweredDebt),
+      cashUsd: split.cashUsd, replacementUsd, currency, refundUsd, refundKhr: riel,
+      saleRate: positiveRate(debtState.sale.exchange_rate) ?? SCHEMA_DEFAULT_EXCHANGE_RATE })
     // Without a debt the replacement is paid at the counter; the refund's cash goes out in full.
     const payoutUsd = replacement.payoutUsd
     return c.json({
       owed_reduction_usd: split.owedReductionUsd, cash_refund_usd: split.cashUsd,
       replacement_follows_debt: replacement.followsDebt,
       replacement_paid_from_refund_usd: replacement.paidFromRefundUsd, replacement_owed_usd: replacement.owedUsd,
-      payout_usd: payoutUsd, payout_khr: currency === 'KHR' ? refundCashKhr(riel, payoutUsd, refundUsd) : 0,
+      payout_usd: payoutUsd, payout_khr: replacement.payoutKhr,
       refund_currency: currency,
     })
   } catch (error) {
@@ -1936,17 +1939,21 @@ app.post('/', async (c) => {
   // the rest owed (lib/returnRefundSplit.ts splitReplacementPayment). A sale
   // with no debt keeps the counter rule: the customer pays it like any sale.
   const replacementFollowsDebt = !!debtState && saleCarriesDebt(debtState.sale, debtState.prior.loweredDebt)
-  let replacementSplit: ReplacementPaymentSplit | null = null
+  let replacementSplit: ReplacementTender | null = null
+  let replacementRate = returnExchangeRate
   let replacementTender: { status: 'completed' | 'awaiting_payment'; method: string; details: Array<{ method: string; amount_usd: number; amount_khr: number }> } | null = null
   if (replacementLines.length) {
     replacementReceiptNumber = await uniqueBusinessDateTimeNumber('', async (candidate) => !!(await db.prepare('SELECT 1 FROM sales WHERE receipt_number=? LIMIT 1').get([candidate])))
     const subtotalUsd = Number(replacementLines.reduce((sum, line) => sum + line.totalUsd, 0).toFixed(2))
-    const exchangeRate = returnExchangeRate
-    replacementSplit = splitReplacementPayment({ carriesDebt: replacementFollowsDebt, cashUsd: refundSplit.cashUsd, replacementUsd: subtotalUsd })
+    replacementSplit = settleReplacementTender({ carriesDebt: replacementFollowsDebt, cashUsd: refundSplit.cashUsd, replacementUsd: subtotalUsd,
+      currency: refundCurrency, refundUsd: totalRefundUsd, refundKhr: totalRefundKhr, saleRate: returnExchangeRate })
+    // A riel-funded replacement is recorded at the refund's riel basis so its
+    // riel covers what it paid (verify R2 X6-X8); any other at the sale's rate.
+    replacementRate = replacementSplit.replacementRate
+    const exchangeRate = replacementRate
     const fromRefund = replacementSplit.followsDebt
     // The refund's own cash, in the currency it would have left the drawer in.
-    const paidFromRefundKhr = fromRefund && refundCurrency === 'KHR'
-      ? refundCashKhr(totalRefundKhr, replacementSplit.paidFromRefundUsd, totalRefundUsd) : 0
+    const paidFromRefundKhr = fromRefund ? replacementSplit.paidFromRefundKhr : 0
     const paidFromRefundUsd = fromRefund && refundCurrency !== 'KHR' ? replacementSplit.paidFromRefundUsd : 0
     replacementTotals = computeSaleTotals({
       subtotalUsd, discountUsd: 0, membershipDiscountUsd: 0, taxUsd: 0, deliveryFeeUsd: 0,
@@ -2191,7 +2198,7 @@ app.post('/', async (c) => {
 
   if (replacementLines.length && replacementTotals && replacementReceiptNumber && replacementTender) {
     const subtotalUsd = Number(replacementLines.reduce((sum, line) => sum + line.totalUsd, 0).toFixed(2))
-    const exchangeRate = returnExchangeRate
+    const exchangeRate = replacementRate
     const originalReceipt = body.receipt_number || saleMeta?.receipt_number || null
     const note = `Replacement for return ${returnNumber}${originalReceipt ? ` / receipt ${originalReceipt}` : ''}`
     const paymentDetails = replacementTender.details

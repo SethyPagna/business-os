@@ -19,6 +19,14 @@
 //
 // Discriminating: on 32f0c48dc the Not Paid exchange expects +$4 in the drawer
 // and owes $6, and both riel refunds leave neither drawer.
+//
+// Verify R2 X6-X8 and the 1-riel drift: a legacy line whose riel price is NOT
+// USD x the sale rate (Serum $4 at 15,500 riel, rate 4,000), $7 paid, riel
+// refund. The replacement funded from the refund's riel must owe exactly what
+// the screen said (no phantom cents), and the riel the screen says to pay out
+// must be the drawer's net to the riel. On 73c86210f the equal exchange owes
+// 3.03125 instead of 3, the $0.50 one stays Not Paid owing 0.0155, and the
+// screen says 1,938 riel while the drawer pays 1,937.
 // Run: node scripts/test-return-exchange-debt-native.cjs
 const assert = require('node:assert/strict')
 const fs = require('node:fs')
@@ -120,6 +128,8 @@ async function main() {
     await sale(10, { status: 'completed', paidUsd: 10 })
     await sale(11, { status: 'awaiting_payment' })
     await sale(12, { status: 'awaiting_payment', paidUsd: 7 })
+    await sale(13, { status: 'awaiting_payment', paidUsd: 7, serumKhr: 15500 })
+    await sale(14, { status: 'awaiting_payment', paidUsd: 7, serumKhr: 15500 })
     const headers = { 'content-type': 'application/json' }
     const post = async (body) => {
       const response = await mf.dispatchFetch('http://local/api/returns', { method: 'POST', headers, body: JSON.stringify(body) })
@@ -221,6 +231,19 @@ async function main() {
     assert.equal((await db.prepare("SELECT owed_reduction_usd FROM returns WHERE client_request_id='x-12'").first()).owed_reduction_usd, part.body.owed_reduction_usd)
     assert.equal(beforePart.khr - afterPart.khr, part.body.payout_khr, 'the drawer pays out exactly the riel the screen showed')
     console.log('PASS the Return screen preview shows debt lowered and the real payout, and POST records exactly that')
+
+    // -- verify R2 X6-X8 + drift: riel price 15,500 for a $4 line at rate 4,000 ----------
+    for (const [n, replacementUsd, owesAfter, payoutKhr] of [[13, 4, 3, 0], [14, 0.5, 0, 1937]]) {
+      const screen = await preview({ sale_id: 100 + n, refund_usd: 4, refund_khr: 15500, refund_currency: 'KHR', replacement_usd: replacementUsd })
+      assert.equal(screen.status, 200, JSON.stringify(screen.body))
+      assert.deepEqual([screen.body.replacement_owed_usd, screen.body.payout_khr], [owesAfter, payoutKhr], `screen for ${replacementUsd} out`)
+      const done = await exchange(n, replacementUsd, { refund_currency: 'KHR' })
+      assert.equal(done.replacementOwes, screen.body.replacement_owed_usd, `${replacementUsd} out: the replacement owes exactly what the screen said, no phantom cents`)
+      assert.equal(done.replacementStatus, owesAfter > 0 ? 'awaiting_payment' : 'completed', 'a replacement the refund paid in full is Completed')
+      assert.deepEqual([done.drawerUsd, 0 - done.drawerKhr], [0, screen.body.payout_khr], 'the drawer pays out exactly the riel the screen showed')
+      assert.equal(done.originalOwes + done.replacementOwes, owesAfter, 'the original owes nothing more; only the replacement remainder is owed')
+    }
+    console.log('PASS a riel-funded replacement on a legacy riel price owes no phantom cents and the screen riel is the drawer riel')
 
     // -- P3 (verifier N3, N4, N8): loose input is refused, with a code -----------------
     const countReturns = async () => (await db.prepare('SELECT COUNT(*) AS n FROM returns').first()).n
