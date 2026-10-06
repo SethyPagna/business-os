@@ -107,8 +107,12 @@ function toSavePayload(fields: EditableFields): Partial<Promotion> {
     badge_text: fields.badge_text.trim() || null,
     badge_color: fields.badge_color || null,
     is_active: fields.is_active ? 1 : 0,
-    starts_at: fields.starts_at ? new Date(fields.starts_at).toISOString() : null,
-    ends_at: fields.ends_at ? new Date(`${fields.ends_at}T23:59:59`).toISOString() : null,
+    // Date-only ISO, exactly what the promotion RULES page sends. This used to
+    // build an instant from the device zone (new Date(...).toISOString(), the
+    // end as 23:59:59 device-local), so the same "show until 06/10" stored a
+    // different moment depending on which device saved it.
+    starts_at: fields.starts_at || null,
+    ends_at: fields.ends_at || null,
   }
 }
 

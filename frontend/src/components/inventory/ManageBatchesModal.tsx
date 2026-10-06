@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { hasSupplier, supplierDisplay } from '../../utils/supplierDisplay.ts'
 import { createPortal } from 'react-dom'
-import { fmtDateOnly } from '../../utils/formatters'
+import { fmtClock24, fmtDateOnly } from '../../utils/formatters'
 import X from 'lucide-react/dist/esm/icons/x.js'
 import { useCloseGuard } from '../../utils/useCloseGuard.ts'
 import UnsavedChangesPrompt from '../shared/UnsavedChangesPrompt.tsx'
@@ -12,7 +12,8 @@ import SectionCard from '../shared/SectionCard'
 import { deactivateBatch, getProductBatches, updateBatch, updateBatchBranchQuantity, type ProductBatch } from '../../api/batchesTransport.ts'
 import SupplierPickerField from '../shared/SupplierPickerField.tsx'
 import { getInventoryMovements } from '../../api/inventoryTransport.ts'
-import { batchDisplayLabel } from '../../utils/batchLabel.ts'
+import { batchDisplayLabel, batchReceivedDateText, batchReceivedDayIso } from '../../utils/batchLabel.ts'
+import { buildBatchDatePatch, seedBatchDateDraft } from '../../utils/batchDateDraft.ts'
 import { dateToBatchCode } from '../../utils/batchCode.ts'
 import { isDepletedLot, orderLotsOnHandFirst } from '../../utils/productBatches.ts'
 import { beginSingleAction, finishSingleAction } from '../../utils/actionGuards.ts'
@@ -43,8 +44,13 @@ function movementTime(createdAt: string | null | undefined): string | null {
   const match = value.match(/[T ](\d{2}:\d{2})/)
   if (!match) return null
   // A midnight timestamp on an imported historical movement is the date
-  // standing in for an unknown time, not a real 00:00 receipt.
-  return match[1] === '00:00' ? null : match[1]
+  // standing in for an unknown time, not a real 00:00 receipt. (Tested on the
+  // stored stamp, which is UTC.)
+  if (match[1] === '00:00') return null
+  // The clock itself is business time like every other clock in the app; the
+  // stored stamp's own digits are UTC and read 7 hours early.
+  const shown = fmtClock24(value)
+  return shown === '—' ? null : shown
 }
 
 type InventoryId = number | string
@@ -96,7 +102,11 @@ export default function ManageBatchesModal({
   const [loading, setLoading] = useState(false)
   const [loadError, setLoadError] = useState('')
   const [editingId, setEditingId] = useState<InventoryId | null>(null)
-  const [draft, setDraft] = useState<{ expiryDate: string; receivedAt: string; notes: string; quantity: string; supplierId: number | null; supplierName: string }>({ expiryDate: '', receivedAt: '', notes: '', quantity: '', supplierId: null, supplierName: '' })
+  // receivedAtSeed / expiryDateSeed are what the fields were opened with.
+  // Only a field that differs from its seed is sent: an unchanged date is
+  // never written back (an unreadable stored value is seeded blank, and
+  // resending a blank would have stamped today's date over it).
+  const [draft, setDraft] = useState<{ expiryDate: string; receivedAt: string; receivedAtSeed: string; expiryDateSeed: string; unreadableDates: string[]; notes: string; quantity: string; supplierId: number | null; supplierName: string }>({ expiryDate: '', receivedAt: '', receivedAtSeed: '', expiryDateSeed: '', unreadableDates: [], notes: '', quantity: '', supplierId: null, supplierName: '' })
   const [savingId, setSavingId] = useState<InventoryId | null>(null)
   // Synchronous double-submit guard for the batch edit save. State (savingId)
   // updates asynchronously, so two fast clicks can both pass a state check
@@ -170,7 +180,11 @@ export default function ManageBatchesModal({
 
   const startEdit = (batch: ProductBatch) => {
     setEditingId(batch.id)
-    setDraft({ expiryDate: batch.expiry_date || '', receivedAt: (batch.received_at || '').slice(0, 10), notes: batch.notes || '', quantity: String(batch.quantity ?? 0), supplierId: batch.supplier_id ?? null, supplierName: String(batch.supplier_name || '') })
+    // The date fields are seeded and diffed by utils/batchDateDraft.ts (see its
+    // header): an unreadable stored date seeds blank and is named below, and an
+    // unchanged date is never written back.
+    const seed = seedBatchDateDraft(batch)
+    setDraft({ expiryDate: seed.expiryDate, receivedAt: seed.receivedAt, receivedAtSeed: seed.receivedAtSeed, expiryDateSeed: seed.expiryDateSeed, unreadableDates: seed.unreadable, notes: batch.notes || '', quantity: String(batch.quantity ?? 0), supplierId: batch.supplier_id ?? null, supplierName: String(batch.supplier_name || '') })
   }
 
   const cancelEdit = () => setEditingId(null)
@@ -179,6 +193,15 @@ export default function ManageBatchesModal({
     const nextQuantity = Number(draft.quantity)
     const quantityChange = Number.isFinite(nextQuantity) && nextQuantity >= 0 && nextQuantity !== Number(batch.quantity)
     const batchLabel = batchDisplayLabel({ id: batch.id, lot_code: batch.lot_code ?? null, received_at: batch.received_at ?? null, batch_number: batch.batch_number ?? null }, t('batch') || 'Received date')
+    const { patch: datePatch, receivedBlank } = buildBatchDatePatch(draft, draft)
+    const receivedChanged = datePatch.receivedAt !== undefined
+    const expiryChanged = datePatch.expiryDate !== undefined
+    // A blank received date means "today" to the Worker (batches.ts PATCH), so
+    // clearing the field must be refused here rather than sent.
+    if (receivedBlank) {
+      notify(tr('batch_received_required', 'Enter the received date.', 'សូមបញ្ចូលថ្ងៃចូល។'), 'error')
+      return
+    }
     const quantityNote = quantityChange
       ? ` ${tr('batch_quantity_change_note', 'Quantity will change from {from} to {to} at this branch.')
           .replace('{from}', String(batch.quantity))
@@ -193,9 +216,12 @@ export default function ManageBatchesModal({
         .replace('{batch}', batchLabel)
         .replace('{product}', product.name || 'this product')
         .replace('{note}', quantityNote),
-      items: quantityChange
-        ? [{ label: tr('quantity', 'Quantity'), value: `${batch.quantity} → ${nextQuantity}` }]
-        : undefined,
+      // Before -> after for everything that actually changes.
+      items: [
+        quantityChange ? { label: tr('quantity', 'Quantity'), value: `${batch.quantity} → ${nextQuantity}` } : null,
+        receivedChanged ? { label: tr('batch_date', 'Received date'), value: `${batchReceivedDateText(batch.received_at)} → ${fmtDateOnly(draft.receivedAt)}` } : null,
+        expiryChanged ? { label: tr('expiry_date', 'Expiry date'), value: `${batch.expiry_date ? fmtDateOnly(batch.expiry_date) : tr('no_expiry', 'No expiry')} → ${draft.expiryDate ? fmtDateOnly(draft.expiryDate) : tr('no_expiry', 'No expiry')}` } : null,
+      ].filter((item): item is { label: string; value: string } => item !== null),
       confirmLabel: tr('save', 'Save'),
       cancelLabel: tr('cancel', 'Cancel'),
     }))) return
@@ -203,8 +229,7 @@ export default function ManageBatchesModal({
     setSavingId(batch.id)
     try {
       const res = await updateBatch(batch.id, {
-        expiryDate: draft.expiryDate || null,
-        receivedAt: draft.receivedAt || null,
+        ...datePatch,
         notes: draft.notes.trim() || null,
         // Owner (Sep 17): a batch that arrived without a supplier can be
         // given one here, and a wrong one corrected -- the same PATCH the
@@ -418,6 +443,11 @@ export default function ManageBatchesModal({
                         />
                       </label>
                     </div>
+                    {draft.unreadableDates.length ? (
+                      <p className="rounded-lg bg-amber-100 px-2 py-1.5 text-[11px] leading-5 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200">
+                        {tr('batch_unreadable_date_hint', 'Stored date "{value}" cannot be read as a date. The field is left blank so nothing is guessed: type the correct date, or leave it and it stays as it is.', 'កាលបរិច្ឆេទដែលបានរក្សាទុក "{value}" មិនអាចអានជាកាលបរិច្ឆេទបានទេ។ ប្រអប់ត្រូវបានទុកទទេដើម្បីកុំឲ្យទាយ៖ សូមវាយកាលបរិច្ឆេទត្រឹមត្រូវ ឬទុកវាចោល នោះវានៅដដែល។').replace('{value}', draft.unreadableDates.join(', '))}
+                      </p>
+                    ) : null}
                     <label className="block">
                       <span className="mb-1 block text-[11px] font-medium text-gray-600 dark:text-gray-400">
                         {tr('batch_quantity_at_branch', 'Quantity at this branch')}
@@ -470,13 +500,20 @@ export default function ManageBatchesModal({
                       <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px] text-gray-500 dark:text-gray-300">
                         {[
                           batch.received_at ? (
-                            <button
-                              type="button"
-                              className="text-blue-600 hover:underline dark:text-blue-300"
-                              onClick={() => setDayDetail(String(batch.received_at || '').slice(0, 10) || null)}
-                            >
-                              {tr('received_on', 'Received', 'បានទទួល')} {fmtDateOnly(String(batch.received_at || '').slice(0, 10))} ›
-                            </button>
+                            // Drill into the day only for a date the system can
+                            // read; an unreadable stored value is shown flagged
+                            // and is not a link to a day it cannot name.
+                            batchReceivedDayIso(batch.received_at) ? (
+                              <button
+                                type="button"
+                                className="text-blue-600 hover:underline dark:text-blue-300"
+                                onClick={() => setDayDetail(batchReceivedDayIso(batch.received_at))}
+                              >
+                                {tr('received_on', 'Received', 'បានទទួល')} {batchReceivedDateText(batch.received_at)} ›
+                              </button>
+                            ) : (
+                              <span>{tr('received_on', 'Received', 'បានទទួល')} {batchReceivedDateText(batch.received_at)}</span>
+                            )
                           ) : null,
                           <span>{tr('expiry', 'Expiry')} {batch.expiry_date ? fmtDateOnly(batch.expiry_date) : tr('no_expiry', 'No expiry')}</span>,
                           <span className={`max-w-[9rem] detail-scroll-text ${hasSupplier(batch.supplier_name) ? '' : 'text-gray-400'}`} title={supplierDisplay(batch.supplier_name, tr)}>{supplierDisplay(batch.supplier_name, tr)}</span>,

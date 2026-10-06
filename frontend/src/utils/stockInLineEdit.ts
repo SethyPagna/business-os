@@ -7,6 +7,8 @@
 // operator did not change is not sent -- and turns the Worker's refusal codes
 // into sentences in the reader's language.
 
+import { batchReceivedDayIso } from './batchLabel.ts'
+
 export type StockInLineEditRow = {
   id: number | null
   quantity: number
@@ -70,7 +72,11 @@ export function stockInLineDraft(row: StockInLineEditRow): StockInLineEditDraft 
   return {
     quantity: String(Math.abs(Number(row.quantity) || 0)),
     unitCostUsd: cost == null ? '' : String(cost),
-    receivedDate: String(row.batch_received_at || '').slice(0, 10),
+    // The BUSINESS day the list shows for this lot, and blank for a stored value
+    // that is not a readable date (a leftover slash string is never seeded into a
+    // day-first field, and a blank draft is never sent). This used to be a bare
+    // slice(0, 10): the UTC day of a timestamp, or the slash text verbatim.
+    receivedDate: batchReceivedDayIso(row.batch_received_at) || '',
     supplierId: row.batch_supplier_id == null ? null : Number(row.batch_supplier_id),
     supplierName: String(row.batch_supplier_name || ''),
     reason: '',
