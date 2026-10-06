@@ -1328,11 +1328,13 @@ export function downloadImportTemplate(type) {
     //
     // Leave it blank to let the system stamp today's date and auto-derive
     // the batch code from it, or fill in a specific received date. The
-    // example row uses ISO (e.g. "2026-08-24"), the one form neither
-    // reading can get wrong; the system auto-formats whatever it reads into
-    // the stored batch code (e.g. "08242026"), which is an identifier and
-    // stays month-first on purpose.
-    'batch(dd/mm/yyyy)': '2026-08-24', expiry_date: '', expiry_alert_days: '30',
+    // example row is written in the SAME order its header names
+    // (24/08/2026 under batch(dd/mm/yyyy)); it used to carry an ISO value
+    // under that header, which was accepted but made the header read as a
+    // lie. The system auto-formats whatever it reads into the stored batch
+    // code (e.g. "08242026"), which is an identifier and stays month-first
+    // on purpose.
+    'batch(dd/mm/yyyy)': '24/08/2026', expiry_date: '', expiry_alert_days: '30',
     branch: 'Main Branch', supplier: '',
     parent_id: '', is_group: '',
     // Naming convention: spaces in the product name stay as real spaces,

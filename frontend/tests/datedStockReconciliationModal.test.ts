@@ -89,39 +89,32 @@ console.log('PASS normalizeHeaderForMatch collapses case/punctuation/whitespace 
 
 // The Count date hint must name the order the backend actually reads.
 //
-// This screen maps a spreadsheet the shop already owns, so its `date` column
-// stays MONTH-first -- the only meaning it has ever had, and re-reading those
-// files day-first would rewrite historical stock counts silently
-// (cloudflare/src/lib/datedStockCountResolve.ts now states that order rather
-// than defaulting into it). The app itself went day-first on Sep 4 2026, so a
-// hint reading only "any common date format" became a promise the parser does
-// not keep: an operator who types 03/09/2026 into a day-first field elsewhere
-// in the app maps a column of those same strings here and gets 9 March.
-//
-// The assertion is tied to the KERNEL, not to a remembered string: it asks
-// normalizeToIsoDate what its default order really does to 03/09/2026 -- both
-// fields <= 12, so both orders yield a real date and only the answer separates
-// them -- and then requires the hint to advertise that same order. Flip the
-// parser without rewriting the hint, or rewrite the hint without the parser,
-// and this goes red.
+// Owner, 6 Oct 2026: every import reads a slash date DAY-first unless the
+// column's own header says mm/dd/yyyy. This screen maps a column the operator
+// chooses, so its header names no format -- day-first. The assertion is tied to
+// the KERNEL, not to a remembered string: it asks normalizeToIsoDate what
+// day-first does to 03/09/2026 -- both fields <= 12, so both orders yield a real
+// date and only the answer separates them -- and then requires the hint to
+// advertise that same order, in a translated string rather than an English
+// literal. Flip the parser without rewriting the hint, or the hint without the
+// parser, and this goes red.
 {
-  const hint = TARGET_FIELDS.find((f) => f.key === 'date')?.hint || ''
+  const field = TARGET_FIELDS.find((f) => f.key === 'date')
+  const hint = field?.hint || ''
   assert.equal(
-    normalizeToIsoDate('03/09/2026'), '2026-03-09',
-    'the mapped sheet column is still read month-first -- if this moved, the hint below must move with it',
+    normalizeToIsoDate('03/09/2026', 'day-first'), '2026-09-03',
+    'the mapped sheet column is read day-first -- if this moved, the hint below must move with it',
   )
-  assert.ok(hint.includes('mm/dd/yyyy'), `the Count date hint must name the order it is read in, got: ${hint}`)
-  assert.ok(!hint.includes('dd/mm/yyyy'), 'and must not also advertise the day-first order it does NOT accept')
-  assert.ok(
-    !/any common date format/i.test(hint),
-    'the old wording promised every format and delivered one; it must not come back',
-  )
-  // Positive control on the detector: handed the old string, these same two
-  // checks must FAIL. A sweep that cannot report a negative proves nothing.
-  const old = 'The date this snapshot was taken (any common date format).'
-  assert.equal(old.includes('mm/dd/yyyy'), false, 'control: the old hint named no order')
-  assert.equal(/any common date format/i.test(old), true, 'control: the old hint is what the pattern catches')
-  console.log('PASS the Count date hint names the month-first order its own parser uses')
+  assert.ok(hint.includes('dd/mm/yyyy'), `the Count date hint must name the order it is read in, got: ${hint}`)
+  assert.ok(!hint.includes('mm/dd/yyyy'), 'and must not advertise the month-first order it no longer reads')
+  assert.ok(!/MONTH first/.test(hint), 'the old month-first wording must not come back')
+  assert.ok(!/any common date format/i.test(hint), 'the older wording promised every format and delivered one')
+  assert.equal(field?.hintKey, 'dated_count_date_hint', 'the hint is a translated pack string, not an English literal')
+  // Positive control on the detector: handed the old string, the checks must FAIL.
+  const old = 'This column is read MONTH first, mm/dd/yyyy (03/09/2026 = 9 March)'
+  assert.equal(old.includes('dd/mm/yyyy'), false, 'control: the old hint named the other order')
+  assert.equal(/MONTH first/.test(old), true, 'control: the old hint is what the pattern catches')
+  console.log('PASS the Count date hint names the day-first order its own parser uses')
 }
 
 console.log('datedStockReconciliationModal tests passed')

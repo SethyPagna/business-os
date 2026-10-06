@@ -1609,7 +1609,7 @@
   "csv_import_mode_label": "Import mode",
   "csv_info_discounts": "discount_enabled is 1 or 0. discount_type is percent or fixed -- if left blank it is inferred from whether a fixed discount_amount is set. discount_percent/discount_amount_usd/discount_amount_khr should match the chosen type. discount_starts_at/discount_ends_at are optional dates, e.g. 2026-12-31.",
   "csv_info_discounts_label": "Discounts",
-  "csv_info_example": "name=Iced Coffee, sku=BEV-001, category=Beverages, selling_price_usd=2.50, stock_quantity=40, batch(dd/mm/yyyy)=2026-08-24 (blank = today, auto-formatted to a code like 08242026), branch=Main Branch, image_filename_1=iced-coffee.jpg",
+  "csv_info_example": "name=Iced Coffee, sku=BEV-001, category=Beverages, selling_price_usd=2.50, stock_quantity=40, batch(dd/mm/yyyy)=24/08/2026 (blank = today, auto-formatted to a code like 08242026), branch=Main Branch, image_filename_1=iced-coffee.jpg",
   "csv_info_example_label": "Example row",
   "csv_info_grouping": "set is_group to 1 on a row that should act as a parent product, then set parent_id on its variant rows to that parent row's number to group them together.",
   "csv_info_grouping_label": "Variants/grouping",
@@ -7248,6 +7248,7 @@
   "receiving_submission_not_saved": "The request could not be saved on this device. No new request was sent. Check available storage and try again.",
   "product_create_outcome_unknown": "Product creation may have completed. Refresh Products and check pending review before creating again. This saved request will not be resent.",
   "product_create_approval_unconfirmed": "The approval result could not be confirmed. Refresh the review queue before retrying this same request.",
+  "dated_count_date_hint": "The date this snapshot was taken. This column is read DAY first, dd/mm/yyyy (03/09/2026 = 3 September); yyyy-mm-dd also works and can never be misread.",
   "batch_received_required": "Enter the received date.",
   "batch_unreadable_date_hint": "Stored date \"{value}\" cannot be read as a date. The field is left blank so nothing is guessed: type the correct date, or leave it and it stays as it is."
 }

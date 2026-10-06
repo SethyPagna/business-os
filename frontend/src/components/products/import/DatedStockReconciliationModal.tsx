@@ -436,7 +436,7 @@ export default function DatedStockReconciliationModal({ onClose, onDone, t, prod
                   <div className="text-sm font-medium text-slate-800 dark:text-slate-100">
                     {field.label}{field.required ? ' *' : ''}
                   </div>
-                  <div className="text-[11px] text-slate-400 dark:text-slate-500">{field.hint}</div>
+                  <div className="text-[11px] text-slate-400 dark:text-slate-500">{field.hintKey ? T(field.hintKey, field.hint) : field.hint}</div>
                 </div>
                 <AppSelect
                   className="flex-1"

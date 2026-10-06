@@ -11,6 +11,7 @@ import { clusterRowsByBarcodeIdentity } from '../../../utils/productDetailRule.t
 // FastStockInModal, ReceiveBatchModal and the adjust forms run. The Worker's
 // lib/stockActionCommit.ts enforces it on the wire; this only lets the operator
 // see the refusal before the upload instead of in the report afterwards.
+import { normalizeToIsoDate, type SlashDateOrder } from '../../../utils/batchCode.ts'
 import { stockReceiptGateCode, STOCK_RECEIPT_GATE_FALLBACKS, type StockReceiptGateCode } from '../../../utils/stockReceiptFields.ts'
 
 export type UnifiedStockMode = 'direct' | 'reconcile'
@@ -125,28 +126,23 @@ function parseOptionalNumber(value: unknown): number | null | 'invalid' {
 }
 
 /**
- * MONTH-FIRST, deliberately, and it must stay that way.
+ * DAY-FIRST, like every other date the app reads (owner, 6 Oct 2026: every
+ * import reads a slash date day-first except a column whose own HEADER says
+ * mm/dd/yyyy). This sheet's bare `date` header names no format, so it follows
+ * the rule: 03/09/2026 is 3 September. It used to be MONTH-first ("the meaning
+ * it has always had"); the decision changed, and the Worker's stock-sheet
+ * reader (lib/stockActionImport.ts) changes with it, so this preview and the
+ * import that follows agree on every row.
  *
- * This reads the sheet's bare `date` column. Per the standing rule, a date
- * cell's reading order comes from its column header: `batch(dd/mm/yyyy)` is
- * day-first, `batch(mm/dd/yyyy)` is month-first, and a bare header that names
- * no format keeps the meaning it has always had -- otherwise every sheet the
- * shop already owns would silently change meaning the day the app went
- * day-first. ISO is accepted here too and is the form that can never be
- * misread. Do NOT "finish the job" by flipping this to match the display
- * convention; see lib/batchCode.ts readBatchDateCell for the same rule.
+ * It calls the same normalizeToIsoDate the Worker does (the frontend mirror of
+ * lib/batchCode.ts) rather than a private parser of its own, so the two cannot
+ * drift: a hand-rolled copy here is how the preview and the server once read
+ * the same cell two ways. ISO yyyy-mm-dd is accepted too and can never be
+ * misread. `order` exists for a sheet that states mm/dd/yyyy in its header.
  */
-export function normalizeUnifiedStockDate(value: unknown): string | null {
+export function normalizeUnifiedStockDate(value: unknown, order: SlashDateOrder = 'day-first'): string | null {
   const text = clean(value)
-  if (!text) return null
-  const iso = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(text)
-  const us = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(text)
-  const parts = iso ? [Number(iso[1]), Number(iso[2]), Number(iso[3])] : us ? [Number(us[3]), Number(us[1]), Number(us[2])] : null
-  if (!parts) return null
-  const [year, month, day] = parts
-  const date = new Date(Date.UTC(year, month - 1, day))
-  if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return null
-  return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+  return text ? normalizeToIsoDate(text, order) : null
 }
 
 /** Mirrors the resolver's SALE_ACTION_RE: 'sale', 'sale2', 'Sale 3'. */
@@ -180,7 +176,7 @@ export function parseUnifiedStockRows(
     if (shop === 'invalid' || warehouse === 'invalid' || (typeof shop === 'number' && shop < 0) || (typeof warehouse === 'number' && warehouse < 0)) {
       issues.push({ rowNumber, code: 'invalid_quantity', message: 'Shop and warehouse must be non-negative numbers.' })
     }
-    if (!date) issues.push({ rowNumber, code: 'invalid_date', message: 'Date must be mm/dd/yyyy (month first, as this column has always been) or yyyy-mm-dd.' })
+    if (!date) issues.push({ rowNumber, code: 'invalid_date', message: 'Date must be dd/mm/yyyy (day first) or yyyy-mm-dd.' })
     const priceInvalid = [sellingPrice, wholesalePrice, costPrice].some((value) => value === 'invalid' || (typeof value === 'number' && value < 0))
     if (priceInvalid) {
       issues.push({ rowNumber, code: 'invalid_price', message: 'Prices must be non-negative numbers.' })
