@@ -104,7 +104,9 @@ await runTest('destinations retain section permission gates and never expose uns
   assert.deepEqual(ids('contacts', { contacts: 'review' }), ['customers', 'delivery', 'duplicates'])
   assert.deepEqual(ids('contacts', { contacts: 'full' }, ['contacts_suppliers']), ['customers', 'suppliers', 'delivery', 'duplicates'])
   assert.deepEqual(ids('promotions', { customer_portal: 'view' }), ['loyalty'])
-  assert.deepEqual(ids('promotions', { products: 'review' }), ['discounts'])
+  // Owner, 6 Oct 2026: a product discount is a price change, so the Discounts tile needs Edit product and the price
+  // action; a caller that cannot answer for actions is not offered it (asserted with real actions below).
+  assert.deepEqual(ids('promotions', { products: 'review' }), [])
   assert.deepEqual(ids('inventory', { inventory: 'full' }), [])
 
   // Products' four sections are the compact navigation's only route into
@@ -123,6 +125,10 @@ await runTest('destinations retain section permission gates and never expose uns
   })
   const actionIds = (tiers: Record<string, string>, actions: string[]) => getHubDestinations('products', withActions(tiers, actions)).map((item) => item.id)
   assert.deepEqual(ids('products', { products: 'full', inventory: 'full' }), ['products'], 'action-gated sections stay hidden from a caller with no per-action grant')
+  const promoIds = (tiers: Record<string, string>, actions: string[]) => getHubDestinations('promotions', withActions(tiers, actions)).map((item) => item.id)
+  assert.deepEqual(promoIds({ products: 'full' }, ['products:edit', 'products:price']), ['discounts'])
+  assert.deepEqual(promoIds({ products: 'full' }, ['products:edit']), [], 'Edit product without the price action is not offered the discount editor')
+  assert.deepEqual(promoIds({ products: 'full' }, ['products:price']), [], 'the price action without Edit product is not either')
   assert.deepEqual(actionIds({ products: 'full', inventory: 'full' }, ['products:history', 'inventory:adjust', 'products:merge_duplicates']), ['products', 'stock_changes', 'stock_in_sessions', 'duplicates'])
   assert.deepEqual(actionIds({ products: 'full' }, ['products:history', 'products:merge_duplicates']), ['products', 'stock_changes', 'duplicates'])
   assert.deepEqual(actionIds({ products: 'full', inventory: 'full' }, ['inventory:adjust']), ['products'], 'without products:history neither ledger section is offered')

@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import { acquisitionCostResponses, canEditAcquisitionCosts, hasCatalogCostWrite } from '../lib/acquisitionCostAccess'
 import { roundMoney4 } from '../lib/moneyPrecision'
+import { PRODUCT_DISCOUNT_PRICE_FIELDS, PRODUCT_DISCOUNT_PRICE_REFUSAL, PRODUCT_DISCOUNT_SELECT, productDiscountChanged } from '../lib/productDiscountGate'
 import { enqueueImageNormalization } from '../lib/imageAudit'
 import { getDb } from '../lib/db'
 import { collectMergeProductIds, describeMergeFailure } from '../lib/mergeRouteLog'
@@ -2065,6 +2066,8 @@ app.post('/', async (c) => {
     if (error instanceof ProductMoneyWriteError) return c.json({ error: error.message, code: error.code }, error.status as 400 | 409)
     throw error
   }
+  // Owner, 6 Oct 2026: a discount on a NEW product is a price too; a role without the price action creates it with none.
+  if (getActionTier(user, 'products', 'price') === 'none' && productDiscountChanged(null, body)) return c.json(PRODUCT_DISCOUNT_PRICE_REFUSAL, 403)
   const name = String(body.name || '').trim()
   if (!name) return c.json({ error: 'Product name is required' }, 400)
   const createBarcode = String(body.barcode ?? '').trim()
@@ -2318,6 +2321,13 @@ app.put('/:id', async (c) => {
   // that actually differs from the stored one counts; cost keeps its own gate above.
   if (getActionTier(user, 'products', 'price') === 'none' && productPriceChanged(readProductMoneyPlan(body))) {
     return c.json({ error: 'You do not have permission to change product prices', code: 'product_price_edit_required' }, 403)
+  }
+  // Owner, 6 Oct 2026: a product-level discount is a price change too (lib/productDiscountGate.ts). The editors post
+  // the whole discount block back, so the stored row decides whether anything actually changed.
+  if (getActionTier(user, 'products', 'price') === 'none'
+    && PRODUCT_DISCOUNT_PRICE_FIELDS.some((field) => Object.prototype.hasOwnProperty.call(body, field))) {
+    const storedDiscount = await getDb(c.env).prepare(`SELECT ${PRODUCT_DISCOUNT_SELECT} FROM products WHERE id = @id`).get<Record<string, unknown>>({ id })
+    if (productDiscountChanged(storedDiscount, body)) return c.json(PRODUCT_DISCOUNT_PRICE_REFUSAL, 403)
   }
   const imageLimitError = await validateImageGalleryPayload(c.env, user, body, id)
   if (imageLimitError) {
@@ -2815,6 +2825,8 @@ app.post('/variant', async (c) => {
     if (error instanceof ProductMoneyWriteError) return c.json({ error: error.message, code: error.code }, error.status as 400 | 409)
     throw error
   }
+  // Owner, 6 Oct 2026: a discount on a NEW product is a price too; a role without the price action creates it with none.
+  if (getActionTier(user, 'products', 'price') === 'none' && productDiscountChanged(null, body)) return c.json(PRODUCT_DISCOUNT_PRICE_REFUSAL, 403)
   const name = String(body.name || '').trim()
   if (!name) return c.json({ error: 'Product name is required' }, 400)
   try {

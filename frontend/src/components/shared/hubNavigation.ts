@@ -34,7 +34,8 @@ export function getHubDestinations(page: string, access: HubAccess): HubDestinat
     ['duplicates', 'possible_duplicates', 'Conflicts', can('contacts')],
   ] : page === 'promotions' ? [
     ['rules', 'promo_tab_rules', 'Rules', can('promotions')],
-    ['discounts', 'promo_tab_discounts', 'Discounts', can('products')],
+    // A product discount is a price change (owner, 6 Oct 2026): the editor needs Edit product and the price action.
+    ['discounts', 'promo_tab_discounts', 'Discounts', can('products') && act('products', 'edit') && act('products', 'price')],
     ['loyalty', 'loyalty_points', 'Loyalty Points', can('customer_portal')],
   ] : page === 'settings' ? [
     ['settings', 'settings', 'Settings', ['settings', 'business_identity', 'sales_policy', 'drive_credentials'].some(can)],

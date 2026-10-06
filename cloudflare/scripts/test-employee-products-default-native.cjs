@@ -123,6 +123,59 @@ async function main() {
     assert.equal(narrowed.status, 403, JSON.stringify(narrowed.body))
   })
 
+  await check('a product-level discount is a price (owner, 6 Oct 2026): a changed discount is refused for the Employee, the unchanged block the form posts back is not, and a Full Products role may change it', async () => {
+    fresh()
+    const D = 'discount_enabled, discount_type, discount_percent, discount_amount_usd, discount_amount_khr, discount_starts_at, discount_ends_at, discount_label, updated_at'
+    const stored = one('SELECT ' + D + ' FROM products WHERE id = ?', KEEP)
+    state.user = EMPLOYEE_USER
+    const before = dump()
+    // Every price-bearing discount column, one at a time, then the 90 percent cut from the review.
+    const changes = [
+      { discount_enabled: 1 }, { discount_enabled: true }, { discount_type: 'fixed' }, { discount_percent: 90 },
+      { discount_amount_usd: 5 }, { discount_amount_khr: 4000 }, { discount_starts_at: '2026-10-01' }, { discount_ends_at: '2026-12-31' },
+      { discount_enabled: 1, discount_type: 'percent', discount_percent: 90 },
+    ]
+    for (const change of changes) {
+      const refused = await request('PUT', '/api/products/' + KEEP, { name: 'Glow Serum 30ml', ...change, expected_updated_at: stored.updated_at })
+      assert.equal(refused.status, 403, JSON.stringify(change) + ' ' + JSON.stringify(refused.body))
+      assert.equal(refused.body.code, 'product_price_edit_required')
+    }
+    assert.equal(dump(), before, 'a refused discount change writes nothing')
+    // The editors post the WHOLE discount block back: the stored values (null as empty, 0 as false) are not a change,
+    // and the label and badge colour are description, not price.
+    const same = await request('PUT', '/api/products/' + KEEP, {
+      name: 'Glow Serum 30ml Renewed', expected_updated_at: stored.updated_at,
+      discount_enabled: Number(stored.discount_enabled || 0), discount_type: stored.discount_type || 'percent',
+      discount_percent: Number(stored.discount_percent || 0), discount_amount_usd: Number(stored.discount_amount_usd || 0), discount_amount_khr: Number(stored.discount_amount_khr || 0),
+      discount_starts_at: stored.discount_starts_at || null, discount_ends_at: stored.discount_ends_at || null,
+      discount_label: 'New label', discount_badge_color: '#112233',
+    })
+    assert.equal(same.status, 200, JSON.stringify(same.body))
+    // Discriminating: the same 90 percent cut is allowed for a Full Products role, an administrator, and an Employee an admin gave the price action.
+    const cut = { discount_enabled: 1, discount_type: 'percent', discount_percent: 90 }
+    for (const who of [MANAGER_USER, ADMIN, asRole(29, 'employee', { 'products:price': true })]) {
+      state.user = who
+      const row = one('SELECT updated_at FROM products WHERE id = ?', KEEP)
+      const done = await request('PUT', '/api/products/' + KEEP, { ...cut, discount_percent: 90 - (who.id % 7), expected_updated_at: row.updated_at })
+      assert.equal(done.status, 200, who.username + ' ' + JSON.stringify(done.body))
+    }
+    // A role with Edit on but the price action off is refused whatever its source, and a discount on a NEW product is a price too.
+    const noPrice = asRole(27, 'manager', { products: true, 'products:price': false })
+    state.user = noPrice
+    const row = one('SELECT updated_at FROM products WHERE id = ?', KEEP)
+    const narrowed = await request('PUT', '/api/products/' + KEEP, { discount_percent: 12, expected_updated_at: row.updated_at })
+    assert.equal(narrowed.status, 403, JSON.stringify(narrowed.body))
+    for (const [url, extra] of [['/api/products', {}], ['/api/products/variant', {}]]) {
+      const refused = await request('POST', url, { name: 'Discounted newcomer', selling_price_usd: 4, ...cut, ...extra })
+      assert.equal(refused.status, 403, url + ' ' + JSON.stringify(refused.body))
+      assert.equal(refused.body.code, 'product_price_edit_required', url)
+      // The harness stubs the create itself (it may answer with an empty 409/500); only the price gate's answer matters here.
+      const plain = await request('POST', url, { name: 'Plain newcomer', selling_price_usd: 4, discount_enabled: 0, discount_type: 'percent', discount_percent: 0 })
+        .catch((error) => ({ status: Number(String(error.message).split(' ')[2].replace(':', '')), body: null }))
+      assert.ok(plain.status > 0 && plain.status !== 403, url + ' a zero discount is not a price change: ' + plain.status)
+    }
+  })
+
   await check('the Employee reaches ONLY the main Products page: every sub-page read is refused by the Worker, a Full Products role still gets through', async () => {
     fresh()
     state.user = EMPLOYEE_USER

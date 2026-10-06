@@ -2,6 +2,7 @@ import { getDb, type D1Compat } from './db'
 import type { Env } from '../index'
 import type { SessionUser } from './auth'
 import { getActionTier, isAdminControlUser } from './permissions'
+import { productDiscountChanged } from './productDiscountGate'
 import { hasAcquisitionCostInput } from './acquisitionCostAccess'
 import { dateToBatchCode, normalizeTypedDate } from './batchCode'
 import { identityBarcodeKey, barcodeIdentityMatches, isRealBarcode, normalizeLeadingZeroBarcodeForCleanup, normalizeProductGroupName } from './productDetailRule'
@@ -569,6 +570,11 @@ export async function commitStockSession(env: Env, user: SessionUser, raw: unkno
   }
   if (request.items.some((line) => line.kind === 'create_receive') && getActionTier(user, 'products', 'add') !== 'full') {
     fail('create_receive requires full product-add permission.', 403, 'permission_denied')
+  }
+  // Owner, 6 Oct 2026: a discount on a new product is a price, so it needs the price action (lib/productDiscountGate.ts).
+  if (getActionTier(user, 'products', 'price') === 'none'
+    && request.items.some((line) => line.kind === 'create_receive' && line.product && productDiscountChanged(null, line.product as unknown as Row))) {
+    fail('A product discount needs the product price permission.', 403, 'product_price_edit_required')
   }
   if (requiresProductImage && getActionTier(user, 'products', 'image') !== 'full') {
     fail('create_receive with images requires full product-image permission.', 403, 'permission_denied')

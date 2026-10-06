@@ -112,6 +112,7 @@ const products = load('routes/products.ts', {
   '../lib/searchMatch': searchMatch,
   '../lib/sqlBinding': sqlBinding,
   '../lib/moneyPrecision': moneyPrecision,
+  '../lib/productDiscountGate': load('lib/productDiscountGate.ts'),
   '../lib/cache': { bumpVersion: async () => {}, bumpVersions: async () => {}, cachedJsonResponse: async () => null, getVersionWithFallback: async () => '1' },
   '../durable-objects/broadcastHub': broadcastHub,
 }).default

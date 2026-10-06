@@ -195,7 +195,10 @@ export default function PromotionsPage() {
   // editor whose every save 403'd -- a fake control this view-tier slice would
   // otherwise widen to view users. Gate it on its REAL capability instead: the
   // products tier (review or full can write; review queues for approval).
-  const canManageDiscounts = can('products', 'view')
+  // Owner, 6 Oct 2026: a product discount IS a price change, so the editor also needs Edit product and the price
+  // action -- the Worker refuses a changed discount without them (routes/products.ts, lib/productDiscountGate.ts),
+  // and ProductForm's price blocks are gated on the same pair (utils/productMergePriceAccess.ts).
+  const canManageDiscounts = can('products', 'view') && can('products', 'edit') && can('products', 'price')
   const canLoyalty = can('customer_portal', 'view')
   const [activeSection, setActiveSection] = useHubSection<PromotionsSection>('promotions', canPromotions ? 'rules' : 'loyalty', getHubDestinations('promotions', { getPermissionTier, hasPermission, can }).map((item) => item.id), navigateTo)
   const [rules, setRules] = useState<PromotionRuleRow[]>([])
