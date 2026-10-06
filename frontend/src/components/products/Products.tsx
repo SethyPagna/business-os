@@ -189,6 +189,8 @@ const ActionHistoryBar = lazyRetry(() => import('../shared/ActionHistoryBar'), '
 type EntityId = string | number
 type Loader<T = unknown> = () => Promise<T>
 type ProductWriteHelpers = typeof import('./helpers/productWriteHelpers.ts')
+type RecordedStockRemoval = import('./helpers/productWriteHelpers.ts').RecordedStockRemoval
+type RecordedStockTransfer = import('./helpers/productWriteHelpers.ts').RecordedStockTransfer
 type NotificationTone = 'error' | 'info' | 'success' | 'warning' | string
 type SearchMode = 'AND' | 'OR'
 type ProductSortDirection = 'asc' | 'desc' | 'name_asc' | 'name_desc'
@@ -2707,6 +2709,7 @@ function ProductsFullEditor() {
     const failedIds: number[] = []
     let done = 0
     let failed = 0
+    let removed: RecordedStockRemoval[] = []
     try {
       const idsToClear: number[] = []
       for (const id of selectedVisibleIds) {
@@ -2736,16 +2739,18 @@ function ProductsFullEditor() {
             branch_stock: zeroedBranchStock,
           } as ProductRecord)
         }
-        await clearProductStockByIds(idsToClear, 'Bulk set out of stock')
+        removed = await clearProductStockByIds(idsToClear, 'Bulk set out of stock')
       }
       setSelectedIds(new Set(failedIds))
-      const affectedSnapshots = snapshots.filter((snapshot) => !failedIds.includes(Number(snapshot?.id || 0)))
-      if (done > 0 && affectedSnapshots.length) {
-        const affectedIds = normalizePositiveProductIds(affectedSnapshots, (snapshot) => snapshot.id)
+      if (done > 0 && removed.length) {
+        // REVERT-SET: Undo puts back exactly what this removed, per branch;
+        // Redo takes exactly that again -- never "back to the snapshot" (which
+        // erased deliveries received since) nor "whatever is there now".
+        const recorded = removed
         actionHistory.pushAction({
           label: `Set ${done} product${done === 1 ? '' : 's'} out of stock`,
-          undo: () => restoreProductSnapshots(affectedSnapshots, 'Undo out-of-stock action'),
-          redo: () => clearProductStockByIds(affectedIds, 'Redo out-of-stock action'),
+          undo: () => replayRecordedRemovals(recorded, 'undo', 'Undo out-of-stock action'),
+          redo: () => replayRecordedRemovals(recorded, 'redo', 'Redo out-of-stock action'),
         })
       }
       notify(
@@ -2780,17 +2785,18 @@ function ProductsFullEditor() {
       ],
       confirmLabel: tr('bulk_change_branch', 'Change Branch'),
     }))) return
-    const snapshots = snapshotProductsByIds(selectedVisibleIds)
     setBulkActionBusy(true)
     try {
-      const { done, failed, failedIds, updatedIds } = await moveProductsToBranch(selectedVisibleIds, branchId, 'Bulk branch change')
+      const { done, failed, failedIds, transfers } = await moveProductsToBranch(selectedVisibleIds, branchId, 'Bulk branch change')
       setSelectedIds(new Set(failedIds))
-      const restoredSnapshots = snapshots.filter((snapshot) => updatedIds.includes(Number(snapshot?.id || 0)))
-      if (done > 0 && restoredSnapshots.length) {
+      if (done > 0 && transfers.length) {
+        // REVERT-SET: Undo transfers exactly the moved units back; Redo moves
+        // exactly those again -- a transfer both ways, never add/remove
+        // corrections back to the snapshot's per-branch figures.
         actionHistory.pushAction({
           label: `Move ${done} product${done === 1 ? '' : 's'} to ${branch.name}`,
-          undo: () => restoreProductSnapshots(restoredSnapshots, 'Undo branch move'),
-          redo: () => moveProductsToBranch(updatedIds, branchId, 'Redo bulk branch change'),
+          undo: () => replayRecordedTransfers(transfers, 'undo', 'Undo branch move'),
+          redo: () => replayRecordedTransfers(transfers, 'redo', 'Redo bulk branch change'),
         })
       }
       notify(
@@ -4012,7 +4018,12 @@ function ProductsFullEditor() {
     if (syncRun.failures.length) throw (syncRun.failures[0]?.error || new Error('Failed to restore branch stock'))
   }, [runProductStockMutation, user?.id, user?.name])
 
-  const restoreProductSnapshots = useCallback(async (snapshots: ProductRecord[] = [], reason = 'Restore products') => {
+  // Undo/Redo of a product edit, bulk update or price adjustment: the FIELDS
+  // only. None of those actions moves stock (the write payload carries none),
+  // so their Undo must not either. REVERT-SET: this used to also put every
+  // branch back to the snapshot's figure (snapshot - current), which re-added
+  // every unit sold since the edit and removed every unit received since.
+  const restoreProductSnapshots = useCallback(async (snapshots: ProductRecord[] = [], _reason = 'Restore products') => {
     if (!snapshots.length) return
     const latestProducts = await fetchProductsByIds(normalizePositiveProductIds(snapshots, (snapshot) => snapshot?.id))
     const latestMap = new Map((latestProducts || []).map((product) => [Number(product?.id || 0), product]))
@@ -4024,11 +4035,47 @@ function ProductsFullEditor() {
       // Undo/redo writes over whatever is current: the version is the fresh read above.
       payload.expectedUpdatedAt = currentProduct.updated_at || undefined
       await runProductWriteMutation(() => productApi.updateProduct(productId, payload), 'Restore product')
-      await restoreProductBranchStock(productId, snapshot, currentProduct, reason)
     })
     if (restoreRun.failures.length) throw (restoreRun.failures[0]?.error || new Error('Failed to restore products'))
     await load(true)
-  }, [buildProductWritePayload, fetchProductsByIds, load, restoreProductBranchStock, runProductWriteMutation])
+  }, [buildProductWritePayload, fetchProductsByIds, load, runProductWriteMutation])
+
+  // REVERT-SET: the Undo (put back) / Redo (take again) of a recorded
+  // out-of-stock action -- exactly the units it removed, per branch.
+  const replayRecordedRemovals = useCallback(async (removals: RecordedStockRemoval[], direction: 'undo' | 'redo', reason: string) => {
+    const { recordedRemovalReplay, buildProductStockAdjustmentPayload } = await loadProductWriteHelpers()
+    const writes = recordedRemovalReplay(removals, direction)
+    const run = await runConcurrentTasks(writes, async (write: ReturnType<typeof recordedRemovalReplay>[number]) => {
+      await runProductStockMutation(
+        () => productApi.adjustStock(buildProductStockAdjustmentPayload({ id: write.productId }, {
+          productId: write.productId, type: write.type, quantity: write.quantity, branchId: write.branchId, reason,
+          // Putting back what this action removed is a correction, not a receipt.
+          ...(write.type === 'add' ? { attribution: 'correction' } : {}),
+          user: { id: user?.id, name: user?.name },
+        })),
+        direction === 'undo' ? 'Restore product branch stock' : 'Clear product stock',
+      )
+    })
+    if (run.failures.length) throw (run.failures[0]?.error || new Error('Failed to replay the stock change'))
+    await load(true)
+  }, [load, runProductStockMutation, user?.id, user?.name])
+
+  // REVERT-SET: the Undo (move back) / Redo (move again) of a recorded branch
+  // move -- exactly the units it transferred, as a transfer.
+  const replayRecordedTransfers = useCallback(async (transfers: RecordedStockTransfer[], direction: 'undo' | 'redo', reason: string) => {
+    const { recordedTransferReplay, buildProductTransferStockPayload } = await loadProductWriteHelpers()
+    const moves = recordedTransferReplay(transfers, direction)
+    const run = await runConcurrentTasks(moves, async (move: RecordedStockTransfer) => {
+      await runProductStockMutation(
+        () => productApi.transferStock(buildProductTransferStockPayload({ id: move.productId }, move, {
+          productId: move.productId, reason, user: { id: user?.id, name: user?.name },
+        })),
+        'Move product branch stock',
+      )
+    })
+    if (run.failures.length) throw (run.failures[0]?.error || new Error('Failed to replay the branch move'))
+    await load(true)
+  }, [load, runProductStockMutation, user?.id, user?.name])
 
   const restoreDeletedProducts = useCallback(async (snapshots: ProductRecord[] = [], reason = 'Restore deleted products'): Promise<RestoredProductEntry[]> => {
     if (!snapshots.length) return []
@@ -4116,8 +4163,11 @@ function ProductsFullEditor() {
     setModal('form')
   }, [])
 
-  const clearProductStockByIds = useCallback(async (productIds: EntityId[] = [], reason = 'Set products out of stock') => {
-    if (!productIds.length) return
+  // Returns what it actually removed, per product and branch (REVERT-SET: the
+  // action's Undo/Redo replays exactly that, never "whatever is there now").
+  const clearProductStockByIds = useCallback(async (productIds: EntityId[] = [], reason = 'Set products out of stock'): Promise<RecordedStockRemoval[]> => {
+    const removed: RecordedStockRemoval[] = []
+    if (!productIds.length) return removed
     const {
       buildProductClearStockAdjustments,
       buildProductStockAdjustmentPayload,
@@ -4142,17 +4192,19 @@ function ProductsFullEditor() {
           })),
           'Clear product stock',
         )
+        removed.push({ productId: Number(productId), branchId: Number(adjustment.branchId), quantity: Number(adjustment.quantity) || 0 })
       })
       if (branchRun.failures.length) throw (branchRun.failures[0]?.error || new Error('Failed to clear branch stock'))
     })
     if (clearRun.failures.length) throw (clearRun.failures[0]?.error || new Error('Failed to clear product stock'))
     await load(true)
+    return removed
   }, [fetchProductsByIds, load, user?.id, user?.name])
 
   const moveProductsToBranch = useCallback(async (productIds: EntityId[] = [], branchId: unknown, reason = 'Bulk branch change') => {
     const numericBranchId = Number(branchId || 0)
     if (!productIds.length || !Number.isFinite(numericBranchId) || numericBranchId <= 0) {
-      return { done: 0, failed: 0, failedIds: [], updatedIds: [] }
+      return { done: 0, failed: 0, failedIds: [] as number[], updatedIds: [] as number[], transfers: [] as RecordedStockTransfer[] }
     }
     const {
       buildProductBranchMovePlan,
@@ -4162,6 +4214,7 @@ function ProductsFullEditor() {
 
     const latestProducts = await fetchProductsByIds(productIds)
     const latestMap = new Map((latestProducts || []).map((product) => [Number(product?.id || 0), product]))
+    const transfers: RecordedStockTransfer[] = []
 
     const moveRun = await runConcurrentTasks<EntityId, number>(productIds, async (productId: EntityId) => {
       const product = latestMap.get(Number(productId))
@@ -4178,6 +4231,7 @@ function ProductsFullEditor() {
           })),
           'Move product branch stock',
         )
+        transfers.push({ productId: Number(productId), fromBranchId: Number(movePlan.fromBranchId), toBranchId: Number(movePlan.toBranchId), quantity: Number(movePlan.quantity) || 0 })
       } else if (movePlan?.action === 'initialize') {
         await runProductStockMutation(
           () => productApi.adjustStock(buildProductStockAdjustmentPayload(product, {
@@ -4196,7 +4250,7 @@ function ProductsFullEditor() {
     const summary = summarizeProductRun(moveRun)
 
     await load(true)
-    return summary
+    return { ...summary, transfers }
   }, [fetchProductsByIds, load, runProductStockMutation, user?.id, user?.name])
 
   const runBulkProductUpdates = useCallback(async (updates: Record<string, unknown>) => {
