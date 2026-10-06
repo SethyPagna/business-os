@@ -164,32 +164,47 @@ export async function hashPassword(password: string, env: unknown): Promise<stri
 }
 
 export async function verifyPassword(password: string, stored: unknown, env: unknown): Promise<PasswordVerdict> {
+  const { ok, needsRehash, scheme } = await verifySignInPassword(password, stored, env)
+  return { ok, needsRehash, scheme }
+}
+
+// Which hash work one check actually performed. A row refused without any
+// work (plaintext, a stub, empty, a count out of bounds, a pepper whose
+// secret is missing) spent nothing.
+export type PasswordWorkSpent = { pbkdf2: boolean; bcrypt: boolean }
+export type SignInPasswordCheck = PasswordVerdict & { spent: PasswordWorkSpent }
+
+// verifyPassword plus the work it spent, for the two sign-in surfaces
+// (POST /api/auth/login, lib/portalAccounts.ts signinPortalAccount), which
+// top a failure up with spendFailedSignInFloor.
+export async function verifySignInPassword(password: string, stored: unknown, env: unknown): Promise<SignInPasswordCheck> {
   const plain = String(password ?? '')
   const value = String(stored ?? '')
+  const nothing: PasswordWorkSpent = { pbkdf2: false, bcrypt: false }
   const pbkdf2 = PBKDF2_PATTERN.exec(value)
   if (pbkdf2) {
     const iterations = Number(pbkdf2[1])
     if (iterations < MIN_STORED_ITERATIONS || iterations > MAX_STORED_ITERATIONS) {
-      return { ok: false, needsRehash: false, scheme: 'pbkdf2-sha256' }
+      return { ok: false, needsRehash: false, scheme: 'pbkdf2-sha256', spent: nothing }
     }
     const pepperVersion = pbkdf2[2] ? Number(pbkdf2[2]) : 0
     const pepper = pepperVersion ? pepperFor(env, pepperVersion) : null
     if (pepperVersion && !pepper) {
       // A peppered hash whose secret is not configured cannot be checked.
       console.warn(`[password-hash] a hash needs pepper version ${pepperVersion}, whose secret is not configured.`)
-      return { ok: false, needsRehash: false, scheme: 'pbkdf2-sha256' }
+      return { ok: false, needsRehash: false, scheme: 'pbkdf2-sha256', spent: nothing }
     }
     const expected = fromBase64(pbkdf2[4])
     const actual = await deriveKey(plain, pepper, fromBase64(pbkdf2[3]), iterations)
     const ok = constantTimeEqual(actual, expected)
     const current = iterations === PASSWORD_HASH_ITERATIONS && pepperVersion === writePepperVersion(env)
-    return { ok, needsRehash: ok && !current, scheme: 'pbkdf2-sha256' }
+    return { ok, needsRehash: ok && !current, scheme: 'pbkdf2-sha256', spent: { pbkdf2: true, bcrypt: false } }
   }
   if (BCRYPT_PATTERN.test(value)) {
     const ok = bcrypt.compareSync(plain, value)
-    return { ok, needsRehash: ok, scheme: 'bcrypt' }
+    return { ok, needsRehash: ok, scheme: 'bcrypt', spent: { pbkdf2: false, bcrypt: true } }
   }
-  return { ok: false, needsRehash: false, scheme: 'unknown' }
+  return { ok: false, needsRehash: false, scheme: 'unknown', spent: nothing }
 }
 
 // Rewrite a hash that verified but is not current (legacy bcrypt, another
@@ -223,15 +238,43 @@ export async function upgradePasswordHash(
   }
 }
 
-// A sign-in that resolves no usable account spends the same work as a real
-// current-format check (the pepper HMAC when one is configured, one import +
-// one derivation at the current count + one compare), so the answer time
-// does not reveal whether the account exists. The salt and expected key are
-// fixed values nobody's password maps to.
+// The same work as a real current-format check (the pepper HMAC when one is
+// configured, one import + one derivation at the current count + one
+// compare). It is the PBKDF2 half of spendFailedSignInFloor below, which is
+// what the sign-in surfaces call. The salt and expected key are fixed values
+// nobody's password maps to.
 const DUMMY_SALT = fromBase64('c2lnbi1pbi1kdW1teS1zYQ')
 const DUMMY_KEY = fromBase64('ZHVtbXkta2V5LW5vYm9keS1ob2xkcy10aGlzLXZhbCE')
 export async function spendDummyPasswordVerify(password: string, env: unknown): Promise<void> {
   const pepperVersion = writePepperVersion(env)
   const actual = await deriveKey(String(password ?? ''), pepperVersion ? pepperFor(env, pepperVersion) : null, DUMMY_SALT, PASSWORD_HASH_ITERATIONS)
   constantTimeEqual(actual, DUMMY_KEY)
+}
+
+// Account-existence timing (RELEASE-20261006-VERIFY Exception 3). While any
+// legacy bcrypt row can still be checked, a wrong password on it costs a
+// bcrypt-10 compare (~150 ms) and a PBKDF2 check costs ~5 ms, so a cheap
+// failure for an unknown identifier would tell which accounts exist -- and a
+// cheap failure for an upgraded account would tell the same thing the other
+// way round. So every FAILED sign-in is topped up to one fixed set of work:
+//   floor 'pbkdf2-sha256': one PBKDF2 check at the current count;
+//   floor 'bcrypt':        one PBKDF2 check AND one bcrypt-10 compare.
+// Whatever the real check already spent counts towards the set; the rest is
+// spent against fixed dummy values. An unknown identifier spends all of it.
+// The floor (lib/failedSignInCost.ts) is 'bcrypt' while the table can still
+// hold a bcrypt row (or that is not known) on Paid, and 'pbkdf2-sha256' once
+// none remain or on PLAN_TIER=free, where bcrypt must never run as padding.
+// A successful sign-in is never padded: success already reveals the account.
+export type FailedSignInFloor = 'bcrypt' | 'pbkdf2-sha256'
+// A real cost-10 hash (the cost every writer used before E6) of a random
+// string nobody holds -- the old POST /login no-account dummy.
+export const DUMMY_BCRYPT_HASH = '$2b$10$kPCxhXVBKdQbkO41qCeEI./xzCQduQU0aV1E9hdVpUBlxosWlHUzO'
+export async function spendFailedSignInFloor(
+  password: string,
+  env: unknown,
+  spent: PasswordWorkSpent | null,
+  floor: FailedSignInFloor,
+): Promise<void> {
+  if (!spent?.pbkdf2) await spendDummyPasswordVerify(password, env)
+  if (floor === 'bcrypt' && !spent?.bcrypt) bcrypt.compareSync(String(password ?? ''), DUMMY_BCRYPT_HASH)
 }

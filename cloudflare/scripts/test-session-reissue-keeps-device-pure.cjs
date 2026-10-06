@@ -27,7 +27,8 @@ const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
 const ts = require('typescript')
-const { passwordHashStub } = require('./harness/password_hash_stub.cjs')
+const { passwordHashStub, failedSignInCostStub } = require('./harness/password_hash_stub.cjs')
+const { credentialGuardPassThrough } = require('./harness/credential_guard_stub.cjs')
 const { openDb } = require('./harness/d1compat.cjs')
 const { loadAll } = require('./harness/load_migrations.cjs')
 
@@ -69,6 +70,8 @@ const isAdminControlUser = (u) => Number(u?.id) === 1
 const authRoute = load('routes/auth.ts', {
   hono: require('hono'),
   '../lib/passwordHash': passwordHashStub,
+  '../lib/failedSignInCost': failedSignInCostStub,
+  '../lib/requestBodyGuard': credentialGuardPassThrough,
   '../lib/db': libDb,
   '../lib/auth': authLib,
   '../lib/verification': {

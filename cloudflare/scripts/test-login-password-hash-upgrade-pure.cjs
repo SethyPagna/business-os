@@ -10,7 +10,9 @@
 //   - the next sign-in reads the new row: one derivation, no bcrypt, no
 //     second rewrite;
 //   - a wrong password, an inactive account and a right password on an
-//     already-current row never rewrite;
+//     already-current row never rewrite (a failed sign-in is padded to the
+//     failed-sign-in floor -- test-failed-sign-in-cost-pure.cjs -- which is
+//     work, not a rewrite);
 //   - updated_at (the Users-page edit-conflict token) is untouched;
 //   - an OTP account is upgraded at the password step (the password was right);
 //   - tier behaviour: with PLAN_TIER=free a legacy row still signs in and is
@@ -97,7 +99,8 @@ async function check(name, fn) {
     const res = await login(h, 'owner', 'not-the-password')
     assert.equal(res.status, 401)
     assert.equal(h.userRow(801).password, before)
-    assert.deepEqual(derived, [], 'nothing hashed for a wrong password')
+    assert.equal(compared.length, 1, 'the one bcrypt compare is the real check; no bcrypt padding on top')
+    assert.deepEqual(derived, [CURRENT_ITERATIONS], 'one derivation: the PBKDF2 half of the failed-sign-in floor (the row is unchanged above)')
   })
 
   await check('an inactive account with its right password is refused and not rewritten', async () => {
@@ -106,7 +109,11 @@ async function check(name, fn) {
     const res = await login(h, 'away', 'away-pass-1')
     assert.equal(res.status, 401)
     assert.equal(h.userRow(802).password, before)
-    assert.equal(compared.length, 0, 'the inactive path spends the dummy check, not bcrypt')
+    // An active bcrypt row (801) remains, so on Paid the inactive path spends
+    // the bcrypt floor: the dummy bcrypt-10 compare plus the dummy PBKDF2.
+    assert.equal(compared.length, 1, 'the inactive path spends the dummy bcrypt compare')
+    assert.notEqual(compared[0], before, 'never the inactive account\'s own hash')
+    assert.match(compared[0], /^\$2b\$10\$/)
     assert.deepEqual(derived, [CURRENT_ITERATIONS])
   })
 

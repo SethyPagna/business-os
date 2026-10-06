@@ -10,9 +10,12 @@
 //   - a right sign-in on a legacy bcrypt row succeeds and rewrites it; the
 //     next sign-in spends one derivation and no bcrypt, and does not rewrite;
 //   - a wrong password, and a right password with the wrong name or
-//     membership id, fail and never rewrite;
-//   - an unknown phone spends exactly one derivation at the current count and
-//     no bcrypt -- the same work as a real current-format check;
+//     membership id, fail and never rewrite (each failure is padded to the
+//     failed-sign-in floor, which is work, not a rewrite);
+//   - an unknown phone spends the failed-sign-in floor: one derivation at the
+//     current count, plus one bcrypt-10 compare while a bcrypt row remains
+//     (RELEASE-20261006-VERIFY Exception 3; test-failed-sign-in-cost-pure.cjs
+//     covers every state);
 //   - the staff "reset storefront password" action (routes/contacts.ts)
 //     writes through hashPassword with the Worker env (the pepper);
 //   - with PASSWORD_PEPPER set, a sign-in on an unpeppered row rewrites it
@@ -82,6 +85,7 @@ const phone = loadReal('lib/phone.ts')
 const contactOptions = loadReal('lib/contactOptions.ts')
 const sqlBinding = loadReal('lib/sqlBinding.ts')
 const passwordHash = loadReal('lib/passwordHash.ts', { bcryptjs: countingBcrypt })
+const failedSignInCost = loadReal('lib/failedSignInCost.ts', { './planTier': loadReal('lib/planTier.ts') })
 const { signupPortalAccount, signinPortalAccount } = loadReal('lib/portalAccounts.ts', {
   './db': { getDb: () => db },
   './membershipNumber': loadReal('lib/membershipNumber.ts'),
@@ -90,6 +94,7 @@ const { signupPortalAccount, signinPortalAccount } = loadReal('lib/portalAccount
   './contactDuplicates': loadReal('lib/contactDuplicates.ts', { './contactOptions': contactOptions, './phone': phone, './sqlBinding': sqlBinding }),
   './anonymousCustomer': loadReal('lib/anonymousCustomer.ts'),
   './passwordHash': passwordHash,
+  './failedSignInCost': failedSignInCost,
 })
 
 function isCurrentRowFor(row, password) {
@@ -140,15 +145,25 @@ async function run() {
     assert.strictEqual((await signin('Sophea', '097111222', 'wrong-pass-9')).ok, false)
     assert.strictEqual((await signin('Somebody Else', '097111222', 'portal-pass-1')).ok, false, 'right password, wrong identifier')
     assert.strictEqual(rowOf(accountId), legacy)
-    assert.deepStrictEqual(derived, [], 'nothing hashed for a failed sign-in')
+    assert.strictEqual(compared.length, 2, 'two real bcrypt checks; the row already spent the bcrypt half of the floor')
+    assert.deepStrictEqual(derived, [CURRENT_ITERATIONS, CURRENT_ITERATIONS], 'each failure spends only the PBKDF2 half of the floor (the row is unchanged above)')
   })
 
-  await check('an unknown phone spends one current-count derivation and no bcrypt', async () => {
+  await check('an unknown phone spends the bcrypt floor while a bcrypt row remains, the PBKDF2 floor once none does', async () => {
+    failedSignInCost.__resetFailedSignInCostForTests()
     const res = await signin('Nobody', '011 000 999', 'whatever-1')
     assert.strictEqual(res.ok, false)
     assert.strictEqual(res.code, 'invalid_credentials')
     assert.deepStrictEqual(derived, [CURRENT_ITERATIONS])
-    assert.strictEqual(compared.length, 0)
+    assert.deepStrictEqual(compared, [passwordHash.DUMMY_BCRYPT_HASH], 'the dummy bcrypt-10 compare')
+    const legacy = rowOf(accountId)
+    assert.match(legacy, /^\$2[aby]\$/)
+    assert.strictEqual((await signin('Sophea', '097111222', 'portal-pass-1')).ok, true, 'the last bcrypt row upgrades')
+    resetCounts()
+    const after = await signin('Nobody', '011 000 999', 'whatever-1')
+    assert.strictEqual(after.ok, false)
+    assert.deepStrictEqual(derived, [CURRENT_ITERATIONS])
+    assert.strictEqual(compared.length, 0, 'no bcrypt once no bcrypt row remains')
   })
 
   await check('the staff storefront-password reset writes through hashPassword', async () => {

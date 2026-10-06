@@ -147,7 +147,13 @@ async function main() {
   assert.equal(await ph.spendDummyPasswordVerify('anything-at-all'), undefined)
   assert.deepEqual({ importKey: calls.importKey, deriveBits: [...calls.deriveBits] }, realCheck)
   assert.deepEqual(realCheck, { importKey: 1, deriveBits: [ph.PASSWORD_HASH_ITERATIONS] })
-  assert.ok(!/bcrypt\.(compare|hash)/.test(source.slice(source.indexOf('export async function spendDummyPasswordVerify'))), 'the dummy path never runs bcrypt')
+  // The PBKDF2 dummy itself never runs bcrypt; the bcrypt padding of a failed
+  // sign-in lives in spendFailedSignInFloor, behind its floor
+  // (test-failed-sign-in-cost-pure.cjs).
+  const dummyStart = source.indexOf('export async function spendDummyPasswordVerify')
+  const dummyBody = source.slice(dummyStart, source.indexOf('\nexport ', dummyStart + 1))
+  assert.ok(dummyBody.includes('constantTimeEqual(actual, DUMMY_KEY)'), 'the slice is the dummy body')
+  assert.ok(!/bcrypt\.(compare|hash)/.test(dummyBody), 'the dummy path never runs bcrypt')
 
   // Upgrade: exactly once, compare-and-set, updated_at untouched, never throws.
   const sqlite = new DatabaseSync(':memory:')

@@ -22,7 +22,8 @@ const assert = require('node:assert/strict')
 const fs = require('node:fs')
 const path = require('node:path')
 const ts = require('typescript')
-const { passwordHashStub } = require('./harness/password_hash_stub.cjs')
+const { passwordHashStub, failedSignInCostStub } = require('./harness/password_hash_stub.cjs')
+const { credentialGuardPassThrough } = require('./harness/credential_guard_stub.cjs')
 const { openDb } = require('./harness/d1compat.cjs')
 
 function load(rel, overrides = {}) {
@@ -106,6 +107,8 @@ let resetLinkConsumed = 0
 const usersRoute = load('routes/users.ts', {
   hono: require('hono'),
   '../lib/passwordHash': passwordHashStub,
+  '../lib/failedSignInCost': failedSignInCostStub,
+  '../lib/requestBodyGuard': credentialGuardPassThrough,
   '../lib/imageAudit': { enqueueImageNormalization: noop },
   '../lib/db': { getDb: (env) => env.DB },
   '../lib/userIdentity': { buildUserRenameStatements: () => [] },
@@ -128,6 +131,8 @@ const usersRoute = load('routes/users.ts', {
 const authRoute = load('routes/auth.ts', {
   hono: require('hono'),
   '../lib/passwordHash': passwordHashStub,
+  '../lib/failedSignInCost': failedSignInCostStub,
+  '../lib/requestBodyGuard': credentialGuardPassThrough,
   '../lib/db': { getDb: (env) => env.DB },
   '../lib/auth': authLib,
   '../lib/verification': {

@@ -1,4 +1,5 @@
-import { hashPassword, spendDummyPasswordVerify, upgradePasswordHash, verifyPassword } from './passwordHash'
+import { hashPassword, spendFailedSignInFloor, upgradePasswordHash, verifySignInPassword } from './passwordHash'
+import { failedSignInFloor, noteLegacyBcryptSeen, noteLegacyBcryptUpgraded } from './failedSignInCost'
 import { mintMembershipNumber, isMembershipCollision } from './membershipNumber'
 import { getDb } from './db'
 import { canonicalizePhone } from './phone'
@@ -22,9 +23,15 @@ import type { Env } from '../index'
 
 // Passwords are hashed and checked by lib/passwordHash.ts (PBKDF2-SHA256 via
 // WebCrypto; legacy bcrypt rows still verify and are rewritten on the next
-// successful sign-in). When no account matches, signin spends the same work
-// as a real current-format check (spendDummyPasswordVerify), so the answer
-// time does not reveal whether the phone exists.
+// successful sign-in). Every FAILED signin -- no account for the phone, wrong
+// password, wrong name or membership id, ineligible contact -- is topped up to
+// the same hash work (spendFailedSignInFloor): one PBKDF2 check, plus one
+// bcrypt-10 compare while any storefront account still holds a bcrypt hash on
+// Paid (lib/failedSignInCost.ts). Storefront customers cannot be asked to
+// sign in, so on Paid that bcrypt padding is expected to stay. On
+// PLAN_TIER=free bcrypt never runs as padding: there, a wrong password on a
+// not-yet-upgraded bcrypt account answers slower than an unknown phone (a
+// warning is logged), until that customer signs in once.
 
 // The storefront asks a visitor to agree to the Terms and the Privacy Policy
 // before creating an account, and we record WHICH version they agreed to --
@@ -333,6 +340,9 @@ export async function signinPortalAccount(env: Env, input: SigninInput): Promise
     return { ok: false, status: 428, error: 'Please agree to the current Terms & Conditions and Privacy Policy to sign in.', code: 'consent_required' }
   }
 
+  // Resolved before the account lookup, so its (cached) query is spent whether
+  // or not the phone has an account.
+  const failureFloor = await failedSignInFloor(env, db, 'portal_accounts')
   const account = await db.prepare(`
     SELECT a.id, a.name, a.membership_id, a.password_hash, a.consent_version,
            a.contact_id, c.id AS contact_exists, c.is_anonymous
@@ -352,18 +362,24 @@ export async function signinPortalAccount(env: Env, input: SigninInput): Promise
   }>({ p: canonical })
 
   if (!account) {
-    // No account for this phone — still spend one password check so timing
-    // does not reveal whether the phone exists.
-    await spendDummyPasswordVerify(password, env)
+    // No account for this phone: spend the full failed-signin work, the same
+    // as a wrong password on the slowest account that can still exist, so the
+    // answer time does not reveal whether the phone has an account. Only the
+    // hash work is equalised; see the note at the top of this file.
+    await spendFailedSignInFloor(password, env, null, failureFloor)
     return genericFail
   }
 
   const idLower = identifier.toLowerCase()
   const identifierMatches = idLower === account.name.trim().toLowerCase() || idLower === account.membership_id.trim().toLowerCase()
-  const passwordCheck = await verifyPassword(password, account.password_hash, env)
+  const passwordCheck = await verifySignInPassword(password, account.password_hash, env)
+  if (passwordCheck.scheme === 'bcrypt') noteLegacyBcryptSeen('portal_accounts')
   const passwordMatches = passwordCheck.ok
   const contactEligible = account.contact_id == null || (account.contact_exists != null && !isAnonymousCustomer(account))
-  if (!identifierMatches || !passwordMatches || !contactEligible) return genericFail
+  if (!identifierMatches || !passwordMatches || !contactEligible) {
+    await spendFailedSignInFloor(password, env, passwordCheck.spent, failureFloor)
+    return genericFail
+  }
 
   const consentUpdate = await db.prepare(`
     UPDATE portal_accounts
@@ -381,7 +397,10 @@ export async function signinPortalAccount(env: Env, input: SigninInput): Promise
 
   // E6: a successful sign-in on a legacy bcrypt (or other-count) hash rewrites
   // it once in the current format; compare-and-set, never fails the sign-in.
-  if (passwordCheck.needsRehash) await upgradePasswordHash(db, 'portal_accounts', account.id, password, account.password_hash, env)
+  if (passwordCheck.needsRehash) {
+    const upgraded = await upgradePasswordHash(db, 'portal_accounts', account.id, password, account.password_hash, env)
+    if (upgraded && passwordCheck.scheme === 'bcrypt') noteLegacyBcryptUpgraded('portal_accounts')
+  }
 
   return { ok: true, accountId: account.id }
 }

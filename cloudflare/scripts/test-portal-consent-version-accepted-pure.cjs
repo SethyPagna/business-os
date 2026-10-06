@@ -10,7 +10,7 @@
 const fs = require('fs')
 const path = require('path')
 const ts = require('typescript')
-const { loadRealPasswordHash } = require('./harness/password_hash_stub.cjs')
+const { loadRealPasswordHash, loadRealFailedSignInCost } = require('./harness/password_hash_stub.cjs')
 const assert = require('assert')
 const Module = require('module')
 const { openDb } = require('./harness/d1compat.cjs')
@@ -74,6 +74,7 @@ const accounts = loadReal('lib/portalAccounts.ts', {
   './contactDuplicates': loadReal('lib/contactDuplicates.ts', { './contactOptions': contactOptions, './phone': phone, './sqlBinding': sqlBinding }),
   './anonymousCustomer': anonymousCustomer,
   './passwordHash': loadRealPasswordHash(),
+  './failedSignInCost': loadRealFailedSignInCost(),
 })
 
 const jar = { value: null }

@@ -21,8 +21,18 @@ const passwordHashStub = {
   passwordHashScheme: (stored) => (String(stored ?? '').startsWith('hash:') ? 'pbkdf2-sha256' : 'unknown'),
   hashPassword: async (password) => stubHash(String(password ?? '')),
   verifyPassword: async (password, stored) => ({ ok: String(stored ?? '') === stubHash(String(password ?? '')), needsRehash: false, scheme: 'pbkdf2-sha256' }),
+  verifySignInPassword: async (password, stored) => ({ ok: String(stored ?? '') === stubHash(String(password ?? '')), needsRehash: false, scheme: 'pbkdf2-sha256', spent: { pbkdf2: true, bcrypt: false } }),
   spendDummyPasswordVerify: async () => {},
+  spendFailedSignInFloor: async () => {},
   upgradePasswordHash: async () => false,
+}
+
+// lib/failedSignInCost.ts for the same tests: never reads D1, always the
+// PBKDF2 floor. The real module is pinned by test-failed-sign-in-cost-pure.cjs.
+const failedSignInCostStub = {
+  failedSignInFloor: async () => 'pbkdf2-sha256',
+  noteLegacyBcryptSeen: () => {},
+  noteLegacyBcryptUpgraded: () => {},
 }
 
 // The REAL lib/passwordHash.ts (real bcryptjs, real WebCrypto), for tests
@@ -41,4 +51,25 @@ function loadRealPasswordHash() {
   return realModule
 }
 
-module.exports = { passwordHashStub, stubHash, loadRealPasswordHash }
+// The REAL lib/failedSignInCost.ts (and its real lib/planTier.ts), for tests
+// that load the real lib/portalAccounts.ts. One instance per process, like an
+// isolate; __resetFailedSignInCostForTests clears its cache.
+let realFailedSignInCost = null
+function loadRealFailedSignInCost() {
+  if (realFailedSignInCost) return realFailedSignInCost
+  const loadTs = (rel, deps) => {
+    const sourcePath = path.join(__dirname, '..', '..', 'src', 'lib', rel)
+    const output = ts.transpileModule(fs.readFileSync(sourcePath, 'utf8'), {
+      compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true },
+      fileName: sourcePath,
+    }).outputText
+    const mod = { exports: {} }
+    const localRequire = (request) => (Object.prototype.hasOwnProperty.call(deps, request) ? deps[request] : require(request))
+    new Function('require', 'module', 'exports', output)(localRequire, mod, mod.exports)
+    return mod.exports
+  }
+  realFailedSignInCost = loadTs('failedSignInCost.ts', { './planTier': loadTs('planTier.ts', {}) })
+  return realFailedSignInCost
+}
+
+module.exports = { passwordHashStub, failedSignInCostStub, stubHash, loadRealPasswordHash, loadRealFailedSignInCost }

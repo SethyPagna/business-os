@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import { getDb } from '../lib/db'
-import { hashPassword, spendDummyPasswordVerify, upgradePasswordHash, verifyPassword } from '../lib/passwordHash'
+import { hashPassword, spendFailedSignInFloor, upgradePasswordHash, verifyPassword, verifySignInPassword } from '../lib/passwordHash'
+import { failedSignInFloor, noteLegacyBcryptSeen, noteLegacyBcryptUpgraded } from '../lib/failedSignInCost'
 import { createSession, currentSessionReissueSource, setSessionCookie, clearSessionCookie, getSessionUser, hasSessionCookie, revokeSession, revokeUserSessions, requireAuth } from '../lib/auth'
 import type { SessionUser } from '../lib/auth'
 import { issuePasswordResetLink, consumePasswordResetLink, normalizeEmail, isEmailConfigured } from '../lib/verification'
@@ -14,6 +15,7 @@ import { checkRateLimit, getClientIp, peekRateLimit, recordRateLimitEvent, relea
 import { newPasswordProblem, newPasswordProblemError, passwordKnownLeaked, setPasswordMustChange, KNOWN_LEAKED_PASSWORD_CODE, KNOWN_LEAKED_PASSWORD_ERROR } from '../lib/passwordPolicy'
 import { CURRENT_PASSWORD_RATE_LIMITED_ERROR, verifyCurrentPassword } from '../lib/currentPasswordGuard'
 import { stripSensitiveSettings } from '../lib/settingsSensitive'
+import { requireJsonSameOriginCredentialPost } from '../lib/requestBodyGuard'
 // The OTP login-challenge binding -- see lib/otpChallenge.ts's comment for
 // the Part-77 finding it closes.
 import { issueOtpChallenge, isLiveOtpChallenge, consumeOtpChallenge } from '../lib/otpChallenge'
@@ -85,12 +87,17 @@ const LOGIN_USER_LIMIT_WINDOW_MS = 15 * 60 * 1000
 // ceiling is 20), not six from anywhere. Successes never spend it.
 const LOGIN_ACCOUNT_WIDE_MAX = 40
 const LOGIN_ACCOUNT_WIDE_WINDOW_MS = 15 * 60 * 1000
-// SEC1-02: a sign-in that resolves no usable account still spends one
-// password check at the current cost (lib/passwordHash.ts
-// spendDummyPasswordVerify), as lib/portalAccounts.ts does. That narrows the
-// timing gap to a staff identifier but does not close it: a resolved account
-// also spends the per-account limiter and lockout D1 calls, and (until it
-// signs in once) a legacy bcrypt account costs more than a current one.
+// SEC1-02: a sign-in that resolves no usable account still spends password
+// hash work, as lib/portalAccounts.ts does. Since RELEASE-20261006-VERIFY
+// Exception 3, every failed sign-in -- unknown, ambiguous or inactive
+// identifier, wrong password, unusable stored hash -- is topped up to the
+// same work (lib/passwordHash.ts spendFailedSignInFloor): one PBKDF2 check,
+// plus one bcrypt-10 compare while an active staff account still holds a
+// legacy bcrypt hash on Paid (lib/failedSignInCost.ts). That closes the hash
+// part of the gap. It does not close all of it: a resolved account also
+// spends the per-account limiter and lockout D1 calls, and on PLAN_TIER=free
+// bcrypt never runs as padding, so a bcrypt account left over there still
+// answers slower than an unknown one.
 
 type OtpTargetUser = {
   id: number
@@ -176,6 +183,22 @@ function requiresSelfOtpDisablePassword(actor: SessionUser | null | undefined, t
   if (!actorId || !targetId || actorId !== targetId) return false
   return !String(password || '').trim()
 }
+
+// Login CSRF (the staff twin of G38 E5). The global originGuard (F4) lets a
+// write through when it carries NEITHER Origin nor Sec-Fetch-Site, and these
+// handlers read c.req.json(), which parses a text/plain body. A cross-site
+// form or no-preflight text/plain fetch could therefore sign a victim's
+// browser into an attacker's staff account, or drive a reset, wherever a
+// browser omits those headers. Every unauthenticated credential write must be
+// a same-origin JSON request (lib/requestBodyGuard credentialPostRefusal):
+// 415 credential_json_required / 403 credential_origin_refused. The admin app
+// sends every call through apiFetch (frontend/src/api/http.ts) with
+// Content-Type application/json from its own origin, so it passes.
+// Registered before the handlers so Hono runs it first.
+app.use('/login', requireJsonSameOriginCredentialPost)
+app.use('/otp/verify', requireJsonSameOriginCredentialPost)
+app.use('/password-reset/*', requireJsonSameOriginCredentialPost)
+app.use('/oauth/start', requireJsonSameOriginCredentialPost)
 
 app.post('/login', async (c) => {
   const body = await c.req.json<{ username: string; password: string; sessionDuration?: string; deviceName?: string; deviceId?: string; deviceTz?: string }>()
@@ -336,17 +359,27 @@ app.post('/login', async (c) => {
     return c.json({ error: 'Invalid username or password', code: 'invalid_credentials', failedAttempts: typedFailure.failedCount }, 401)
   }
 
+  // Resolved before branching on the account, so its (cached) lookup is spent
+  // on every path alike. See SEC1-02 above.
+  const failureFloor = await failedSignInFloor(c.env, db, 'users')
   if (!user || !user.is_active) {
-    await spendDummyPasswordVerify(body.password, c.env)
+    await spendFailedSignInFloor(body.password, c.env, null, failureFloor)
     return invalidCredentials()
   }
-  const passwordCheck = await verifyPassword(body.password, user.password, c.env)
-  if (!passwordCheck.ok) return invalidCredentials()
+  const passwordCheck = await verifySignInPassword(body.password, user.password, c.env)
+  if (passwordCheck.scheme === 'bcrypt') noteLegacyBcryptSeen('users')
+  if (!passwordCheck.ok) {
+    await spendFailedSignInFloor(body.password, c.env, passwordCheck.spent, failureFloor)
+    return invalidCredentials()
+  }
   // E6: a right password on a legacy bcrypt (or other-count) hash is
   // rewritten once in the current format, so every later sign-in costs one
   // PBKDF2 check -- what keeps sign-in inside the Workers Free CPU limit.
   // Compare-and-set; a failed rewrite never fails the sign-in.
-  if (passwordCheck.needsRehash) await upgradePasswordHash(db, 'users', user.id, body.password, user.password, c.env)
+  if (passwordCheck.needsRehash) {
+    const upgraded = await upgradePasswordHash(db, 'users', user.id, body.password, user.password, c.env)
+    if (upgraded && passwordCheck.scheme === 'bcrypt') noteLegacyBcryptUpgraded('users')
+  }
 
   // S-auth4b: a right password that is publicly known (in git history) still
   // signs in -- refusing it would lock the owner out -- but the account is
