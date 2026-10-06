@@ -105,7 +105,9 @@ async function scenario({ retired, mutate }) {
   out.unknownBranchStatus = (await call('GET', '/current', undefined, { 'X-Branch-Id': '999' })).status
   out.patchStatus = (await call('PATCH', `/${shiftId}`, { expected_revision: 0, reason: 'recount', opening_float_usd: 6 })).status
   out.patchWrote = sqlite.prepare('SELECT opening_float_usd FROM shift_sessions WHERE id=?').get(shiftId).opening_float_usd !== 5
-  out.openStatus = (await call('POST', '/open', { branch_id: 2, opening_float_usd: 1, opening_float_khr: 0 })).status
+  const openResponse = await call('POST', '/open', { branch_id: 2, opening_float_usd: 1, opening_float_khr: 0 })
+  out.openStatus = openResponse.status
+  out.openCode = out.openStatus === 409 ? (await openResponse.json()).code : null
   return out
 }
 
@@ -119,7 +121,10 @@ async function scenario({ retired, mutate }) {
   assert.equal(after.listHasShift, true, 'and still lists the retired branch shift history')
   assert.equal(after.historyStatus, 200, 'the history of a shift at the retired branch stays readable')
   assert.equal(after.unknownBranchStatus, 400, 'an unknown branch id is still refused')
-  assert.equal(after.openStatus, 400, 'opening a shift at a retired branch is still refused')
+  // CUTOVER-LR (owner ruling 6 Oct 2026): opening at the disabled branch is still refused until the operator
+  // confirms the active branch (then it opens there -- test-cutover-lr-shifts-transfer-pure.cjs).
+  assert.equal(after.openStatus, 409, 'opening a shift at a retired branch is still refused')
+  assert.equal(after.openCode, 'branch_redirect_required', 'and the refusal asks for the active branch')
   assert.equal(after.patchStatus, 409, 'amending a retired branch shift is still refused (N7 inactiveBranchRefusal)')
   assert.equal(after.patchWrote, false, 'the refused amend wrote nothing')
 

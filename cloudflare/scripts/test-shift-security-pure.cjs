@@ -50,7 +50,7 @@ function database() {
   const db = new Database(':memory:')
   db.exec(fs.readFileSync(path.join(root, 'migrations', '0116_shift_sessions.sql'), 'utf8'))
   db.exec(`CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT, updated_at TEXT);
-    CREATE TABLE branches (id INTEGER PRIMARY KEY, name TEXT NOT NULL, is_active INTEGER DEFAULT 1);
+    CREATE TABLE branches (id INTEGER PRIMARY KEY, name TEXT NOT NULL, is_active INTEGER DEFAULT 1, role TEXT, successor_branch_id INTEGER);
     CREATE TABLE audit_logs (id INTEGER PRIMARY KEY AUTOINCREMENT,user_id INTEGER,user_name TEXT,action TEXT,
       entity TEXT,entity_id TEXT,details TEXT,table_name TEXT,record_id TEXT,old_value TEXT,new_value TEXT,
       device_name TEXT,device_tz TEXT,client_time TEXT,created_at TEXT DEFAULT CURRENT_TIMESTAMP)`)
@@ -95,7 +95,10 @@ async function main() {
   }
   user = { ...user, permissions: JSON.stringify({ pos: true }) }
   assert.equal((await call('GET', '/current?branch_id=999')).status, 400, 'current rejects an unknown branch')
-  assert.equal((await call('POST', '/open', { branch_id: 2 })).status, 400, 'open rejects an inactive branch')
+  // CUTOVER-LR (owner ruling 6 Oct 2026): a disabled branch with an active one to land at asks for the redirect.
+  const inactiveOpen = await call('POST', '/open', { branch_id: 2 })
+  assert.equal(inactiveOpen.status, 409, 'open rejects an inactive branch')
+  assert.equal((await inactiveOpen.json()).code, 'branch_redirect_required')
   const opened = await call('POST', '/open', { branch_id: 1, branch_name: 'Spoofed', opening_float_usd: 10, opening_float_khr: 0 })
   assert.equal(opened.status, 201)
   const openedBody = await opened.json()
