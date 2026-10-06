@@ -120,12 +120,15 @@ function MemberRow({ member, viewer, t, onOpen, onLink }: {
           type="button"
           data-member-row-link=""
           onClick={onLink}
-          className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-xl border border-blue-700 bg-blue-600 px-3 text-xs font-semibold text-white hover:bg-blue-700 sm:text-sm"
+          className="inline-flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-xl border border-blue-700 bg-blue-600 px-3 text-xs font-semibold text-white hover:bg-blue-700 sm:text-sm md:w-[5.5rem]"
         >
           <LinkIcon className="h-4 w-4 shrink-0" />
           <span>{memberText(t, 'pm_act_link', 'Link')}</span>
         </button>
-      ) : null}
+      ) : (
+        // Keeps the desktop columns aligned from row to row when a member has no Link button.
+        <span aria-hidden="true" className="hidden w-[5.5rem] shrink-0 md:block" />
+      )}
       <ChevronRight className="h-4 w-4 shrink-0 text-gray-300 dark:text-zinc-600" aria-hidden="true" />
     </li>
   )
