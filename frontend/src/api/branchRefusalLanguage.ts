@@ -18,6 +18,31 @@ export const RESTATED_REFUSAL_KEYS: Readonly<Record<string, string>> = {
   fee_branch_invalid: 'fee_branch_invalid',
   fee_sale_invalid: 'fee_sale_invalid',
   fee_sale_branch_mismatch: 'fee_sale_branch_mismatch',
+  // The disabled-branch family (CUTOVER-LR). The redirect pair normally reaches the operator as the redirect float
+  // (api/branchRedirect.ts); a surface without that host still gets the sentence in its language.
+  branch_redirect_required: 'branch_redirect_required',
+  branch_redirect_target_invalid: 'branch_redirect_target_invalid',
+  branch_retired_no_successor: 'branch_retired_no_successor',
+  branch_retired_damaged_stock: 'branch_retired_damaged_stock',
+}
+
+async function kmPackValue(key: string): Promise<string | null> {
+  try {
+    const language = typeof document !== 'undefined' ? String(document.documentElement?.getAttribute('lang') || '').trim().toLowerCase() : ''
+    if (!language.startsWith('km')) return null
+    const pack = (await import('../lang/km.json')).default as Record<string, unknown>
+    const value = pack[key]
+    return typeof value === 'string' && value.trim() ? value : null
+  } catch {
+    return null
+  }
+}
+
+/** The operator went Back from the redirect float: "Nothing was changed. <branch> is disabled." in the UI language. */
+export async function restateRedirectDeclined<T extends Error>(error: T, branchName: string): Promise<T> {
+  const value = await kmPackValue('branch_redirect_declined')
+  if (value) error.message = value.split('{branch}').join(branchName)
+  return error
 }
 
 export async function restateBranchRefusal<T extends Error & { code?: unknown }>(error: T): Promise<T> {

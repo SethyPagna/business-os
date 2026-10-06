@@ -141,10 +141,13 @@ async function replay(kernel, f, receipt, direction, generation) {
   const row = f.sql.prepare('SELECT undo_payload,redo_payload FROM action_history WHERE id=?').get(receipt.actionHistoryId)
   return kernel.replayReturnBulkAction(f.env, admin, direction, receipt.actionHistoryId, generation, JSON.parse(row[direction === 'undo' ? 'undo_payload' : 'redo_payload']))
 }
-const refused = async (kernel, f, req, status, code) => {
+// CUTOVER-LR: `redirect` is the confirmed branch the route reads from X-Branch-Redirect; LC Store is id 1 here.
+const refused = async (kernel, f, req, status, code, redirect = null) => {
   const before = state(f)
-  await assert.rejects(kernel.applyReturnBulkActionOutcome(f.env, admin, req), (error) => error instanceof kernel.ReturnBulkError && error.statusCode === status && (!code || error.code === code || error.message.includes(code)))
+  let caught = null
+  await assert.rejects(kernel.applyReturnBulkActionOutcome(f.env, admin, req, redirect), (error) => { caught = error; return error instanceof kernel.ReturnBulkError && error.statusCode === status && (!code || error.code === code || error.message.includes(code)) })
   assert.equal(state(f), before, 'a refusal writes nothing')
+  return caught
 }
 
 let passed = 0
@@ -168,7 +171,11 @@ async function check(name, fn) { await fn(); passed += 1; console.log(`PASS ${na
     const before = stockOf(f)
     assert.deepEqual(before, { lot1AtStore: 16, lot3AtStore: 0, lot1AtOld: 0, lot3AtOld: 0, store: 16, old: 0, product: 16 })
     const cancelRequest = request(f, 'completed', 'cancelled', 'cancel-1')
-    const cancelled = await fresh.applyReturnBulkActionOutcome(f.env, admin, cancelRequest)
+    const asked = await refused(fresh, f, cancelRequest, 409, 'branch_redirect_required')
+    assert.deepEqual(asked.extra, { redirect: { addressed_branch_id: 2, addressed_branch_name: 'Old Shop', successor_branch_id: 1, successor_branch_name: 'LC Store', targets: [{ id: 1, name: 'LC Store' }], requested_target_id: null } },
+      'the refusal carries what the client asks: the disabled branch, its successor and the valid targets')
+    await refused(fresh, f, cancelRequest, 409, 'branch_redirect_target_invalid', 2)
+    const cancelled = await fresh.applyReturnBulkActionOutcome(f.env, admin, cancelRequest, 1)
     assert.equal(cancelled.wrote, true)
     const cancelledStock = { ...before, lot1AtStore: 14, store: 14, product: 14 }
     assert.deepEqual(stockOf(f), cancelledStock, 'the units come out of LC Store lot 1; Old Shop and lot 3 are untouched')
@@ -177,7 +184,7 @@ async function check(name, fn) { await fn(); passed += 1; console.log(`PASS ${na
     assert.deepEqual({ ...header }, { branch_id: 2, branch_name: 'Shop' }, 'the return keeps its own branch and label')
     assert.deepEqual({ ...f.sql.prepare('SELECT branch_id, batch_id FROM return_items WHERE id=10').get() }, { branch_id: 2, batch_id: 3 }, 'the recorded line is never rewritten')
     const settled = state(f)
-    const again = await fresh.applyReturnBulkActionOutcome(f.env, admin, cancelRequest)
+    const again = await fresh.applyReturnBulkActionOutcome(f.env, admin, cancelRequest, 1)
     assert.equal(again.wrote, false, 'the same request id replays')
     assert.equal(state(f), settled, 'a replay writes nothing')
     await replay(fresh, f, cancelled.receipt, 'undo', 0)
@@ -185,9 +192,10 @@ async function check(name, fn) { await fn(); passed += 1; console.log(`PASS ${na
     await replay(fresh, f, cancelled.receipt, 'redo', 1)
     assert.deepEqual(stockOf(f), cancelledStock, 'redo removes them once more')
     await replay(fresh, f, cancelled.receipt, 'undo', 2)
-    const restored = await fresh.applyReturnBulkActionOutcome(f.env, admin, request(f, 'completed', 'cancelled', 'cancel-2'))
+    const restored = await fresh.applyReturnBulkActionOutcome(f.env, admin, request(f, 'completed', 'cancelled', 'cancel-2'), 1)
     assert.equal(restored.wrote, true)
-    const back = await fresh.applyReturnBulkActionOutcome(f.env, admin, request(f, 'cancelled', 'completed', 'restore-1'))
+    await refused(fresh, f, request(f, 'cancelled', 'completed', 'restore-1'), 409, 'branch_redirect_required')
+    const back = await fresh.applyReturnBulkActionOutcome(f.env, admin, request(f, 'cancelled', 'completed', 'restore-1'), 1)
     assert.equal(back.wrote, true)
     assert.deepEqual(stockOf(f), before, 'cancel then restore nets to zero at LC Store, none at Old Shop')
     assert.deepEqual(movements(f).slice(-1), [{ movement_type: 'return', branch_id: 1, branch_name: 'LC Store', addressed_branch_name: 'Shop', quantity: 2, batch_id: 1 }])
@@ -195,14 +203,19 @@ async function check(name, fn) { await fn(); passed += 1; console.log(`PASS ${na
 
   await check('a retired branch with no successor refuses 409 with nothing written; a damaged line refuses 409', async () => {
     const orphan = fixture('orphan')
-    await refused(fresh, orphan, request(orphan, 'completed', 'cancelled', 'orphan-1'), 409, 'branch_retired_no_successor')
+    const askedOrphan = await refused(fresh, orphan, request(orphan, 'completed', 'cancelled', 'orphan-1'), 409, 'branch_redirect_required')
+    assert.equal(askedOrphan.extra.redirect.successor_branch_id, null, 'no successor: asked with no default')
+    orphan.sql.exec("UPDATE branches SET is_active=0 WHERE id=1")
+    await refused(fresh, orphan, request(orphan, 'completed', 'cancelled', 'orphan-1'), 409, 'branch_retired_no_successor', 1)
     const damaged = fixture('after', { damaged: true })
-    await refused(fresh, damaged, request(damaged, 'completed', 'cancelled', 'damaged-1'), 409, 'branch_retired_damaged_stock')
+    await refused(fresh, damaged, request(damaged, 'completed', 'cancelled', 'damaged-1'), 409, 'branch_retired_damaged_stock', 1)
   })
 
   await check('INERT while both branches are active: the grouped action writes the exact statements and ledgers the old kernel wrote', async () => {
     for (const [name, run] of [
       ['cancel', async (kernel, f) => kernel.applyReturnBulkActionOutcome(f.env, admin, request(f, 'completed', 'cancelled', 'inert-cancel'))],
+      // A stray confirmed branch while every branch is active is never read (the old kernel takes no such argument).
+      ['cancel with a redirect', async (kernel, f) => kernel.applyReturnBulkActionOutcome(f.env, admin, request(f, 'completed', 'cancelled', 'inert-cancel'), 1)],
       ['cancel then restore', async (kernel, f) => {
         await kernel.applyReturnBulkActionOutcome(f.env, admin, request(f, 'completed', 'cancelled', 'inert-cancel'))
         return kernel.applyReturnBulkActionOutcome(f.env, admin, request(f, 'cancelled', 'completed', 'inert-restore'))
@@ -216,7 +229,7 @@ async function check(name, fn) { await fn(); passed += 1; console.log(`PASS ${na
       assert.equal(statementsA === statementsB, true, `${name}: byte-identical statements; first difference near ${statementsA.slice(Math.max(0, at - 120), at + 120)} <> ${statementsB.slice(Math.max(0, at - 120), at + 120)}`)
       assert.equal(scrub(state(a)), scrub(state(b)), `${name}: identical ledgers`)
       assert.equal(a.sql.prepare('SELECT COUNT(*) n FROM inventory_movements WHERE addressed_branch_name IS NOT NULL').get().n, 0, `${name}: no provenance label while both branches are active`)
-      assert.equal(stockOf(a).lot3AtOld, name === 'cancel' ? 4 : 6, `${name}: stock moves at the return's own branch and lot`)
+      assert.equal(stockOf(a).lot3AtOld, name.startsWith('cancel') && !name.includes('restore') ? 4 : 6, `${name}: stock moves at the return's own branch and lot`)
     }
   })
 

@@ -80,18 +80,19 @@ export function branchStockLinesWorthShowing<T extends { quantity?: unknown; bra
   return lines.some((line) => !isActive(line) && Number(line.quantity) !== 0) ? [...lines] : []
 }
 
-// Marks the choices that are not in the active list, so a history-minded
-// picker (Remove / Set may still correct a retired branch's leftover stock)
-// reads "Old Shop (Inactive)" next to "LC Store". With no active list there is
-// nothing to tell apart, so the labels are left alone.
+// Marks the choices that are not in the active list and greys them out, so a
+// write picker reads "Old Shop (Inactive)" next to "LC Store" but can never
+// pick it: a disabled branch is not a new target (owner ruling 6 Oct 2026; a
+// change addressed to it goes through the redirect float instead). With no
+// active list there is nothing to tell apart, so the choices are left alone.
 export function labelInactiveChoices<T extends { value: string | number; label: string }>(
   all: readonly T[],
   active: readonly { value: string | number }[],
   inactiveLabel: string,
-): T[] {
+): Array<T & { disabled?: boolean }> {
   if (active.length === 0) return [...all]
   const activeValues = new Set(active.map((option) => String(option.value)))
-  return all.map((option) => (activeValues.has(String(option.value)) ? option : { ...option, label: `${option.label} (${inactiveLabel})` }))
+  return all.map((option) => (activeValues.has(String(option.value)) ? option : { ...option, label: `${option.label} (${inactiveLabel})`, disabled: true }))
 }
 
 // The till's branch step (and its "Name: qty" summary line) asks only when

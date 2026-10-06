@@ -38,10 +38,9 @@ import {
   SALE_IDENTITY_CONFLICT_CODE, SALE_IDENTITY_CONFLICT_ERROR, UNRECORDED_STOCK_LINE_CODE, UNRECORDED_STOCK_LINE_ERROR,
   firstUnsellableBranch, sellingBranchConditionSql, sellingBranchGuardStatement,
 } from '../lib/branchRoleGuards'
-import { branchCanSell, resolveSellingSuccessor } from '../lib/branchRoles'
+import { branchCanSell } from '../lib/branchRoles'
 import {
-  BRANCH_RETIRED_ADDITION_CODE, BRANCH_RETIRED_ADDITION_ERROR,
-  BranchEffectResolver, BranchRetiredDamagedError, BranchRetiredNoSuccessorError, effectGuardStatement, readBranchDirectory, redirectSaleLine, redirectStockItems,
+  BranchEffectResolver, branchEffectRefusal, branchRedirectTarget, effectGuardStatement, foldedLotSurvivors, readBranchDirectory, redirectSaleLine, redirectStockItems,
 } from '../lib/branchEffect'
 import {
   SALE_SETTLEMENT_ACTION_KIND,
@@ -1930,7 +1929,7 @@ type SaleItemRow = {
 
 app.post('/bulk-status', async (c) => {
   try {
-    const result = await applySaleBulkStatus(c.env, c.get('user'), await c.req.json())
+    const result = await applySaleBulkStatus(c.env, c.get('user'), await c.req.json(), branchRedirectTarget(c))
     c.executionCtx.waitUntil(notifyBulkStatus(c.env))
     return c.json(result)
   } catch (error) {
@@ -2294,7 +2293,7 @@ app.patch('/:id/status', async (c) => {
   // A line recorded at a branch that has since been retired (Old Shop -> LC Store) moves its stock at the
   // ACTIVE successor, in the lot that exists there now; the sale and its lines keep their own branch. While
   // every branch is active nothing is redirected and nothing below changes.
-  const branchResolver = new BranchEffectResolver(await readBranchDirectory(db))
+  const branchResolver = new BranchEffectResolver(await readBranchDirectory(db), branchRedirectTarget(c))
   try {
     await redirectStockItems(db, branchResolver, items as Array<SaleItemRow & { allocations?: SaleItemAllocation[]; effect?: { branchName: string | null; addressedName: string | null } }>, {
       moves: (item) => {
@@ -2306,7 +2305,8 @@ app.patch('/:id/status', async (c) => {
       saleLabel: typeof sale.branch_name === 'string' ? sale.branch_name : null,
     })
   } catch (error) {
-    if (error instanceof BranchRetiredNoSuccessorError || error instanceof BranchRetiredDamagedError) return c.json({ error: error.message, code: error.code }, 409)
+    const refusal = branchEffectRefusal(error)
+    if (refusal) return c.json(refusal, 409)
     throw error
   }
   const damagedTransitionOps: Array<{ lotId: number; productId: number; productName: string | null; branchId: number | null; delta: number }> = []
@@ -2544,16 +2544,23 @@ app.patch('/:id/status', async (c) => {
       return c.json(NOT_SELLING_BRANCH_BODY, 400)
     }
     // The expense is cash that leaves a drawer, and Old Shop has no drawer: it is booked to the branch the sale
-    // was recorded at while that branch is active, and to its ACTIVE selling successor once it is retired (the sale
-    // itself, linked by sale_id, keeps its own branch and label as the provenance).
+    // was recorded at while that branch is active, and to the ACTIVE selling branch the operator confirmed
+    // (X-Branch-Redirect) once it is retired (the sale itself, linked by sale_id, keeps its own branch and label).
     const cancellationBranch = branchResolver.directory.find((row) => Number(row.id) === cancellationBranchId)
     const cancellationBranchActive = !!cancellationBranch && Number(cancellationBranch.is_active ?? 1) === 1
-    if (!cancellationBranch || !branchCanSell(cancellationBranch) || (!cancellationBranchActive && !resolveSellingSuccessor(branchResolver.directory, cancellationBranchId))) {
+    if (!cancellationBranch || !branchCanSell(cancellationBranch)) {
       return c.json(NOT_SELLING_BRANCH_BODY, 400)
     }
-    const cancellationFeeBranchId = cancellationBranchActive
-      ? cancellationBranchId
-      : resolveSellingSuccessor(branchResolver.directory, cancellationBranchId)!.effectBranchId
+    let cancellationFeeBranchId = cancellationBranchId
+    if (!cancellationBranchActive) {
+      try {
+        cancellationFeeBranchId = branchResolver.effect(cancellationBranchId, { sells: true })!.effectBranchId
+      } catch (error) {
+        const refusal = branchEffectRefusal(error)
+        if (refusal) return c.json(refusal, 409)
+        throw error
+      }
+    }
     if (cancellationBranchActive) statements.push(sellingBranchGuardStatement(cancellationBranchId))
     else {
       const retiredFeeGuard = effectGuardStatement([{ addressed: cancellationBranchId, effect: cancellationFeeBranchId, sells: 1 }])
@@ -3330,16 +3337,40 @@ app.post('/:id/items', async (c) => {
   const addedBranchRows = await selectInChunks(addedBranchIds, 0, (chunk) => db
     .prepare(`SELECT id, name, role, is_active FROM branches WHERE id IN (${chunk.map(() => '?').join(',')})`)
     .all<{ id: number; name: string | null; role: unknown; is_active: number | null }>(chunk))
-  if (addedBranchRows.length !== addedBranchIds.length
-    || addedBranchRows.some((branch) => Number(branch.is_active ?? 1) !== 1)
-    || firstUnsellableBranch(addedBranchRows)) {
-    // A sale made at a branch that has since been retired (Old Shop -> LC Store) cannot take new goods: say so,
-    // rather than blaming the branch role. Nothing is written.
-    if (addedBranchRows.length === addedBranchIds.length && !firstUnsellableBranch(addedBranchRows)
-      && resolveSellingSuccessor(await readBranchDirectory(db), saleHeaderBranchId)) {
-      return c.json({ error: BRANCH_RETIRED_ADDITION_ERROR, code: BRANCH_RETIRED_ADDITION_CODE }, 409)
+  // A sale made at a branch that has since been retired (Old Shop -> LC Store) takes new goods only at the active
+  // selling branch the operator confirmed (X-Branch-Redirect): the sale and its new lines keep the sale's branch,
+  // the units come off the confirmed branch, and the movement names both. Without a confirmed branch the request
+  // is refused with branch_redirect_required, carrying the successor. Nothing is written before that.
+  let additionEffect: { effectBranchId: number; branchName: string | null; addressedName: string | null } | null = null
+  let additionResolver: BranchEffectResolver | null = null
+  if (addedBranchRows.length === addedBranchIds.length && !firstUnsellableBranch(addedBranchRows)
+    && addedBranchRows.some((branch) => Number(branch.is_active ?? 1) !== 1)) {
+    additionResolver = new BranchEffectResolver(await readBranchDirectory(db), branchRedirectTarget(c))
+    try {
+      const effect = additionResolver.effect(saleHeaderBranchId, { sells: true })
+      if (effect?.redirected) {
+        const saleLabel = (sale as Record<string, unknown>).branch_name
+        additionEffect = { effectBranchId: effect.effectBranchId, branchName: effect.effectName, addressedName: typeof saleLabel === 'string' && saleLabel ? saleLabel : effect.addressedName }
+      }
+    } catch (error) {
+      const refusal = branchEffectRefusal(error)
+      if (refusal) return c.json(refusal, 409)
+      throw error
     }
+  }
+  if (!additionEffect && (addedBranchRows.length !== addedBranchIds.length
+    || addedBranchRows.some((branch) => Number(branch.is_active ?? 1) !== 1)
+    || firstUnsellableBranch(addedBranchRows))) {
     return c.json(NOT_SELLING_BRANCH_BODY, 400)
+  }
+  if (additionEffect) {
+    // A lot picked from the sale's branch is the lot that holds it at the confirmed branch now (a lot the
+    // consolidation folded is its survivor).
+    const survivors = await foldedLotSurvivors(db, additionEffect.effectBranchId, requested.map((item) => Number(item.batchId)).filter((id) => id > 0))
+    for (const item of requested) {
+      item.branchId = additionEffect.effectBranchId
+      if (item.batchId) item.batchId = survivors.get(Number(item.batchId)) ?? item.batchId
+    }
   }
 
   // ---- Current prices/costs, chunked for D1's parameter ceiling ----
@@ -3413,6 +3444,7 @@ app.post('/:id/items', async (c) => {
       batchLabel: item.batchLabel,
       batchExpiryDate: item.batchExpiryDate,
       unlottedStock: item.unlottedStock,
+      ...(additionEffect ? { recordedBranchId: saleHeaderBranchId, effect: { branchName: additionEffect.branchName, addressedName: additionEffect.addressedName } } : {}),
     }
   })
   const explicitBatchResolution = resolveExplicitSaleLineBatches(candidateLines, lotsByKey)
@@ -3638,7 +3670,9 @@ app.post('/:id/items', async (c) => {
     const atomicStatements: StatementList = [
       { sql: 'DELETE FROM sale_mutation_guards', params: {} },
       { sql: 'DELETE FROM sale_bulk_guards', params: {} },
-      sellingBranchGuardStatement(saleHeaderBranchId),
+      // A redirected addition re-proves inside the commit that the confirmed branch still sells and the sale's
+      // branch is still retired; otherwise the sale's own branch must still be an active selling branch.
+      ...(additionEffect ? [sellingBranchGuardStatement(additionEffect.effectBranchId), effectGuardStatement(additionResolver!.guards())!] : [sellingBranchGuardStatement(saleHeaderBranchId)]),
       amendmentSettingsGuard(moneySettings),
       saleRevisionGuard(saleId, Number(sale.write_revision)),
       precisionBasket.guard,
@@ -4083,24 +4117,21 @@ app.post('/:id/amendments', async (c) => {
   if (!Number.isSafeInteger(saleHeaderBranchId) || saleHeaderBranchId <= 0) {
     return c.json(NOT_SELLING_BRANCH_BODY, 400)
   }
-  // A sale made at a branch that has since been retired (Old Shop -> LC Store) can still be corrected: its
-  // stock effects land at the ACTIVE successor and its money amendments are unchanged. A branch that is active
-  // behaves exactly as before; one retired with no selling successor still refuses.
-  const branchResolver = new BranchEffectResolver(await readBranchDirectory(db))
+  // A sale made at a branch that has since been retired (Old Shop -> LC Store) can still be corrected. Its money
+  // amendments (delivery) move no stock and are unchanged; a line change moves its units at the ACTIVE selling
+  // branch the operator confirmed (X-Branch-Redirect), resolved where the line is read below. A branch that is
+  // active behaves exactly as before.
+  const branchResolver = new BranchEffectResolver(await readBranchDirectory(db), branchRedirectTarget(c))
   const amendmentBranch = branchResolver.directory.find((row) => Number(row.id) === saleHeaderBranchId)
   if (!amendmentBranch || firstUnsellableBranch([amendmentBranch])) {
     return c.json(NOT_SELLING_BRANCH_BODY, 400)
   }
-  let headerRetired = false
-  if (Number(amendmentBranch.is_active ?? 1) !== 1) {
-    try { headerRetired = !!branchResolver.effect(saleHeaderBranchId, { sells: true })?.redirected } catch (error) {
-      if (!(error instanceof BranchRetiredNoSuccessorError)) throw error
-    }
-    if (!headerRetired) return c.json(NOT_SELLING_BRANCH_BODY, 400)
-  }
-  // The header's in-batch guard: the selling branch is active, or the retired one still points at an active
-  // selling successor (re-proved inside the commit).
-  const headerBranchGuard = headerRetired ? effectGuardStatement(branchResolver.guards())! : sellingBranchGuardStatement(saleHeaderBranchId)
+  const headerRetired = Number(amendmentBranch.is_active ?? 1) !== 1
+  // The header's in-batch guard: the selling branch is still active, or the retired one is still retired (a line
+  // change that was redirected adds the redirect's own guard to its batch).
+  const headerBranchGuard = headerRetired
+    ? { sql: 'INSERT INTO sale_bulk_guards(guard_value) SELECT CASE WHEN EXISTS(SELECT 1 FROM branches WHERE id=@retiredSaleBranchId AND is_active=0) THEN 1 ELSE 0 END', params: { retiredSaleBranchId: saleHeaderBranchId } }
+    : sellingBranchGuardStatement(saleHeaderBranchId)
 
   try {
     assertUpdatedAtMatch('sale', sale, getExpectedUpdatedAt(body))
@@ -4599,17 +4630,31 @@ app.post('/:id/amendments', async (c) => {
     SELECT id, batch_id, branch_id, quantity, released_quantity
     FROM sale_item_batch_allocations WHERE sale_item_id = ? ORDER BY id ASC
   `).all<LineAllocation>([lineId])
-  // A sale at a retired branch: units that COME BACK go to the active successor, in the lot that exists there
-  // now. Units that would be taken are a new sale of goods and cannot be recorded at a retired branch.
+  // A sale at a retired branch: units that come back, and units newly taken (an increase or a replacement), move
+  // at the active selling branch the operator confirmed, in the lots that exist there now; the stored line keeps the
+  // sale's branch. A change that moves no units (a price-only edit) needs no redirect.
+  const storedAllocationBranches = allocations.map((allocation) => allocation.branch_id)
   if (headerRetired) {
-    const addsUnits = kind === 'line_quantity_increased' || kind === 'line_replaced'
-      || (kind === 'line_updated' && body.quantity !== undefined && Number(body.quantity) > Number(line.quantity))
-    if (addsUnits) return c.json({ error: BRANCH_RETIRED_ADDITION_ERROR, code: BRANCH_RETIRED_ADDITION_CODE }, 409)
-    const saleBranchLabel = (sale as Record<string, unknown>).branch_name
-    await redirectSaleLine(db, branchResolver, line as Parameters<typeof redirectSaleLine>[2], allocations, {
-      saleBranchId: saleHeaderBranchId, saleLabel: typeof saleBranchLabel === 'string' ? saleBranchLabel : null,
-    })
+    const changesUnits = kind !== 'line_updated' || (body.quantity !== undefined && Number(body.quantity) !== Number(line.quantity))
+    if (changesUnits) {
+      const saleBranchLabel = (sale as Record<string, unknown>).branch_name
+      try {
+        await redirectSaleLine(db, branchResolver, line as Parameters<typeof redirectSaleLine>[2], allocations, {
+          saleBranchId: saleHeaderBranchId, saleLabel: typeof saleBranchLabel === 'string' ? saleBranchLabel : null,
+        })
+      } catch (error) {
+        const refusal = branchEffectRefusal(error)
+        if (refusal) return c.json(refusal, 409)
+        throw error
+      }
+    }
   }
+  const lineEffect = (line as { effect?: { branchName: string | null; addressedName: string | null } }).effect ?? null
+  // Units newly taken at the confirmed branch extend only allocation rows recorded there; a row taken at the retired
+  // branch keeps its own provenance and the new take gets its own row at the confirmed branch.
+  const increaseAllocations = lineEffect
+    ? allocations.filter((_, index) => Number(storedAllocationBranches[index]) === Number(line.branch_id))
+    : allocations
 
   const statements: StatementList = []
   const ledgerEntries: Array<Parameters<typeof amendmentEntryStatement>[0]> = []
@@ -4643,7 +4688,7 @@ app.post('/:id/amendments', async (c) => {
       const workingLine={...line,applied_price_usd:Number(historical.row.applied_price_usd)}
       const quantityPlan=delta>0?planLineQuantityIncrease({moneyPrecisionVersion:1,saleId,sale,line:workingLine,addedQuantity:delta,
         lots:line.branch_id?(await readFifoLotAvailabilityForCart(db,[{productId:Number(line.product_id),branchId:line.branch_id}])).get(`${line.product_id}:${line.branch_id}`)||[]:[],
-        exchangeRate,userId:user?.id??null,userName:actorSnapshot(user),existingAllocations:allocations})
+        exchangeRate,userId:user?.id??null,userName:actorSnapshot(user),existingAllocations:increaseAllocations})
         :planLineQuantityDecrease({moneyPrecisionVersion:1,saleId,sale,line:workingLine,removedQuantity:-delta,allocations,exchangeRate,
           reason:`Quantity changed on sale #${saleId}`,userId:user?.id??null,userName:actorSnapshot(user)})
       statements.push(...quantityPlan.statements);unitsMoved+=quantityPlan.unitsMoved
@@ -4720,7 +4765,7 @@ app.post('/:id/amendments', async (c) => {
         quantityPlan = planLineQuantityIncrease({
           moneyPrecisionVersion: 1,
           saleId, sale, line: workingLine, addedQuantity: quantityDelta, lots, exchangeRate,
-          userId: user?.id ?? null, userName: actorSnapshot(user), existingAllocations: allocations,
+          userId: user?.id ?? null, userName: actorSnapshot(user), existingAllocations: increaseAllocations,
         })
       } else {
         const removed = Math.abs(quantityDelta)
@@ -4778,7 +4823,7 @@ app.post('/:id/amendments', async (c) => {
     const plan = planLineQuantityIncrease({
       moneyPrecisionVersion: 1,
       saleId, sale, line, addedQuantity: requested, lots, exchangeRate,
-      userId: user?.id ?? null, userName: actorSnapshot(user), existingAllocations: allocations,
+      userId: user?.id ?? null, userName: actorSnapshot(user), existingAllocations: increaseAllocations,
     })
     statements.push(...plan.statements)
     subtotalDeltaUsd = sumMoney4([subtotalDeltaUsd,plan.subtotalDeltaUsd])
@@ -4863,8 +4908,11 @@ app.post('/:id/amendments', async (c) => {
     const replacementJson=serializeSaleItemPricing(replacementPool,replacementQuantities,replacement.client_line_key,{version:1,lines:[{line_key:replacement.client_line_key,amount:replacementPricing.total_usd}],discount_usd:0,membership_discount_usd:0,tax_usd:0})
     const unitPriceUsd = replacementPricing.applied_price_usd
 
-    const lotsByKey = branchId
-      ? await readFifoLotAvailabilityForCart(db, [{ productId, branchId }])
+    // A replacement on a sale at a retired branch draws its units at the confirmed branch the replaced line was
+    // redirected to; the new line is stored under the sale's branch.
+    const stockBranchId = lineEffect ? Number(line.branch_id) : branchId
+    const lotsByKey = stockBranchId
+      ? await readFifoLotAvailabilityForCart(db, [{ productId, branchId: stockBranchId }])
       : new Map()
     // The replacement line is planned by S4-24b's own addition kernel --
     // called, not re-implemented -- so a replaced-in product draws its lots by
@@ -4881,14 +4929,15 @@ app.post('/:id/amendments', async (c) => {
     const plannedLines = allocateNewSaleLines([{
       moneyPrecisionVersion: 1,
       pricingSnapshotJson:replacementJson,
-      productId, productName: product.name || `product #${productId}`, quantity, branchId,
+      productId, productName: product.name || `product #${productId}`, quantity, branchId: stockBranchId,
       unitPriceUsd, costPriceUsd: product.cost_price_usd == null ? null : newSaleMoney4(product.cost_price_usd), costPriceKhr: product.cost_price_khr == null ? null : newSaleMoney4(product.cost_price_khr),
       batchId: null, batchLabel: null, batchExpiryDate: null,
+      ...(lineEffect ? { recordedBranchId: branchId, effect: lineEffect } : {}),
     }], lotsByKey, saleStatus, !movesStock)
 
-    if (movesStock && branchId) {
+    if (movesStock && stockBranchId) {
       const have = await db.prepare('SELECT quantity FROM branch_stock WHERE branch_id = ? AND product_id = ?')
-        .get<{ quantity: number }>([branchId, productId])
+        .get<{ quantity: number }>([stockBranchId, productId])
       if (quantity > (Number(have?.quantity) || 0)) {
         return c.json({ error: `Insufficient stock for ${product.name}: requested ${quantity}, available ${Number(have?.quantity) || 0}` }, 409)
       }
@@ -5019,6 +5068,7 @@ app.post('/:id/amendments', async (c) => {
       { sql: 'DELETE FROM sale_mutation_guards', params: {} },
       { sql: 'DELETE FROM sale_bulk_guards', params: {} },
       headerBranchGuard,
+      ...(lineEffect ? [effectGuardStatement(branchResolver.guards())!] : []),
       amendmentSettingsGuard(moneySettings),
       saleRevisionGuard(saleId, Number(sale.write_revision)),
       precisionBasket!.guard,

@@ -153,7 +153,8 @@ assert.equal(closed, 0, 'late old-actor completion cannot close current detail')
 
 let trackedReads = 0
 const trackedEnv: any = {
-  canLoadSaleProducts: true, detailScope: 'actor1:sale1', sale: { branch_id: 2 }, trackedBatchReloadKey: 0,
+  // stockBranchId is the sale's own branch while it is active (CUTOVER-LR: the confirmed branch once it is disabled).
+  canLoadSaleProducts: true, detailScope: 'actor1:sale1', sale: { branch_id: 2 }, stockBranchId: 2, trackedBatchReloadKey: 0,
   getTrackedBatchProductIds: () => { trackedReads++; return Promise.resolve({ productIds: [3263] }) },
   setTrackedBatchLookupState: () => {}, setTrackedBatchLookupError: () => {}, setTrackedBatchProductIds: () => {},
 }
@@ -161,7 +162,7 @@ const trackedEffect = effect('if (!canLoadSaleProducts) return undefined', track
 trackedEffect.render(); await flush()
 for (let i = 0; i < 5; i++) trackedEffect.render()
 assert.equal(trackedReads, 1, 'unchanged capability does not refetch tracked IDs on parent callbacks')
-trackedEnv.sale = { branch_id: 3 }; trackedEffect.render(); await flush()
+trackedEnv.sale = { branch_id: 3 }; trackedEnv.stockBranchId = 3; trackedEffect.render(); await flush()
 assert.equal(trackedReads, 2, 'branch change still revalidates tracking')
 trackedEffect.unmount()
 

@@ -162,7 +162,13 @@ await runTest('the product sheet greys by role: LC Store is selectable on a sale
   assert.equal(sell.displayedStock, 12)
 
   const stock = deriveProductSheetState({ product: afterRename(3, 12) as never, intent: 'stock' })
-  assert.equal(stock.branchOptions.every((option) => option.selectable), true, 'stock surfaces stay unrestricted')
+  // CUTOVER-LR (owner, 6 Oct 2026): a disabled branch is never a new target, on a stock surface either; the role
+  // does not matter there, so LC Store stays selectable whatever it is called.
+  const stockByName = (name: string) => stock.branchOptions.find((option) => option.name === name)!
+  assert.equal(stockByName('LC Store').selectable, true, 'stock surfaces do not restrict by role')
+  assert.equal(stockByName('Old Shop').selectable, false, 'the disabled branch is greyed out on stock surfaces too')
+  assert.equal(stockByName('Old Shop').blockedMessageKey, 'branch_redirect_title', 'and says it is disabled, not that it cannot sell')
+  assert.equal(byName('Old Shop').blockedMessageKey, 'branch_redirect_title', 'on a sale too')
 
   const warehouseRole: Product = { id: 22, branch_stock: [{ branch_id: 1, branch_name: 'Main Store', branch_role: 'warehouse', branch_active: 1, quantity: 8 }] }
   const wh = deriveProductSheetState({ product: warehouseRole as never, intent: 'sell' })

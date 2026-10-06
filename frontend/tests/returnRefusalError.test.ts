@@ -100,7 +100,7 @@ runTest('every mapped code is one the Worker actually sends, and the route forwa
   assert.match(bulk, /409, 'return_restore_over_capacity',\s+error instanceof ReturnCapacityError \? error\.params \?\? undefined : undefined\)/,
     'the legacy restore guard fails with return_restore_over_capacity and the capacity refusal\'s params')
   assert.ok(route.includes('if (error instanceof ReturnBulkError) return c.json({ error: error.message, code: error.code || '), 'POST /bulk forwards a coded bulk refusal before the generic write_conflict')
-  assert.ok(route.includes("'invalid_bulk_action'), ...(error.params ? { params: error.params } : {}) }, error.statusCode)"), 'POST /bulk forwards the refusal\'s params with its code')
+  assert.ok(route.includes("'invalid_bulk_action'), ...(error.params ? { params: error.params } : {}), ...(error.extra || {}) }, error.statusCode)"), 'POST /bulk forwards the refusal\'s params with its code')
   assert.ok(read('src/api/http.ts').includes("error.params = parsed?.params && typeof parsed.params === 'object' && !Array.isArray(parsed.params) ? parsed.params : null"),
     'the API error carries the refusal\'s params to the helper')
   assert.ok(kernel.includes("throw new RefundSaleLineError('return_refund_price_ambiguous',"), 'the kernel refuses an ambiguous product price')
@@ -110,7 +110,8 @@ runTest('every mapped code is one the Worker actually sends, and the route forwa
     'the stock-skipped refusal fails with return_stock_skipped_sale and says why')
   assert.equal(route.split('if (error instanceof RefundSaleLineError) return c.json({ error: error.message, code: error.code }, 400)').length - 1, 2,
     'POST / and PATCH /:id both forward the refund-price refusal code')
-  assert.ok(route.includes('if (error instanceof BranchRetiredNoSuccessorError) return c.json({ error: error.message, code: error.code }, 409)'), 'POST / forwards the retired-branch refusal with its code')
+  // CUTOVER-LR: the whole disabled-branch family (redirect required / invalid target / no successor) goes out as one 409 body.
+  assert.ok(route.includes('const refusal = branchEffectRefusal(error)\n    if (refusal) return c.json(refusal, 409)') || route.includes('const refusal = branchEffectRefusal(error)\r\n    if (refusal) return c.json(refusal, 409)'), 'POST / forwards the retired-branch refusal with its code')
   assert.ok(readWorker('lib/branchEffect.ts').includes("export const BRANCH_RETIRED_NO_SUCCESSOR_CODE = 'branch_retired_no_successor'"), 'the code is the one the Worker defines')
 })
 

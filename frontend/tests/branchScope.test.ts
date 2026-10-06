@@ -91,6 +91,7 @@ await runTest('labelInactiveChoices marks only what the active list lacks', () =
   assert.deepEqual(labelInactiveChoices(all, [{ value: '1' }], 'Inactive').map((o) => o.label), ['LC Store', 'Old Shop (Inactive)'])
   assert.deepEqual(labelInactiveChoices(all, all, 'Inactive').map((o) => o.label), ['LC Store', 'Old Shop'], 'both active: no label')
   assert.deepEqual(labelInactiveChoices(all, [], 'Inactive').map((o) => o.label), ['LC Store', 'Old Shop'], 'no active list: nothing to tell apart')
+  assert.deepEqual(labelInactiveChoices(all, [{ value: '1' }], 'Inactive').map((o) => !!o.disabled), [false, true], 'CUTOVER-LR: the disabled branch is greyed out, never a new target')
 })
 
 await runTest('per-branch stock lines: two active keep every line, one active drops its repeat, retired stock stays visible', () => {
@@ -314,7 +315,7 @@ await runTest('Branches hub: all three transfer entry points are gated, the hist
   assert.match(hub, /className="btn-primary px-3 py-1\.5 text-sm disabled:cursor-not-allowed disabled:opacity-50" disabled=\{transferBlocked\}/, 'New transfer in the detail float')
   assert.equal((hub.match(/\.\.\.transferHistoryBranchOptions\.map/g) || []).length, 2, 'From and To both offer the retired branch')
   assert.doesNotMatch(hub, /\.\.\.transferBranchOptions\.map/, 'the active-only list no longer feeds a HISTORY filter')
-  assert.match(hub, /branchFilterSections\.length > 0 \? \(\s*<div className="mb-1 ml-auto shrink-0">/, 'no empty Filters button')
+  assert.match(hub, /branchFilterSections\.length > 0 \? \(\s*<FilterMenu/, 'no empty Filters button (beside the transfers tab consolidation toggle: CUTOVER-LD and LM composed)')
   assert.match(hub, /const showBranchCountTile = branchSummary\?\.branch_count == null \|\| Number\(branchSummary\.branch_count\) > 1/, 'the Branches count tile needs a count above one (an unknown count keeps today\'s tile)')
 })
 

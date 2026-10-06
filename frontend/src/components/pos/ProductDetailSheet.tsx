@@ -750,7 +750,12 @@ export default function ProductDetailSheet({
                 // able to see that the units are sitting in the warehouse,
                 // and be told what to do about it. Admins included -- this
                 // is a business rule, not a permission.
-                if (blocked) { setBranchNotice(warehouseBlockedMessage); return }
+                if (blocked) {
+                  setBranchNotice(branch.blockedMessageKey === 'branch_redirect_title'
+                    ? (t('branch_redirect_title') || '{branch} is disabled').split('{branch}').join(branch.name)
+                    : warehouseBlockedMessage)
+                  return
+                }
                 setBranchNotice('')
                 setSelectedBranchId(branch.id)
                 setSelectedVariantId(null)

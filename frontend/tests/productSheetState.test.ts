@@ -258,7 +258,8 @@ await runTest('every product picker mounts the shared option sheet', () => {
   assert.match(saleDetail, /stageAddLineFromPick\(picked as unknown as AddProductCandidate, selection as SaleAddSheetSelection\)/, 'the pick reaches the staged line whole')
   assert.match(
     saleDetail,
-    /\.\.\.\(line\.branchId != null \? \{ branch_id: line\.branchId \} : \{\}\)/,
+    // CUTOVER-LR: a sale at a disabled branch keeps its own branch on the line (the shelf is the confirmed redirect).
+    /\.\.\.\(saleBranchDisabled \? \{ branch_id: Number\(sale\.branch_id\) \} : line\.branchId != null \? \{ branch_id: line\.branchId \} : \{\}\)/,
     'and is posted with the added item',
   )
   // ...and the adapter stays an adapter, not a second implementation.
