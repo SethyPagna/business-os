@@ -5,24 +5,16 @@ import Loader2 from 'lucide-react/dist/esm/icons/loader-2.js'
 import InfoHint from '../shared/InfoHint.tsx'
 import Modal from '../shared/Modal.tsx'
 import CancelSaleFields, { EMPTY_CANCEL_FIELDS, cancelFieldsComplete, cancelFieldsDirty, type CancelFieldsValue } from './CancelSaleFields.tsx'
-import { cancelFieldsFeeWithinSale } from '../../utils/cancelFeeRules.ts'
 
 export type BulkSaleCancelDraft = { id: number; receipt: string } & CancelFieldsValue
 type Translate = (key: string, english: string, khmer?: string) => string
 
-type BulkCancelSale = { id: number; receipt: string; total_usd?: unknown; exchange_rate?: unknown }
-
 // N9: each row's lost fee is an expense -- offered only with Expenses -> Add
-// (feeAllowed) and capped at that sale's total (utils/cancelFeeRules.ts).
-export default function BulkSaleCancelModal({ sales, feeAllowed, saving = false, translate, onClose, onConfirm }: { sales: BulkCancelSale[]; feeAllowed: boolean; saving?: boolean; translate: Translate; onClose: () => void; onConfirm: (drafts: BulkSaleCancelDraft[]) => void }) {
+// (feeAllowed, utils/cancelFeeRules.ts).
+export default function BulkSaleCancelModal({ sales, feeAllowed, saving = false, translate, onClose, onConfirm }: { sales: Array<{ id: number; receipt: string }>; feeAllowed: boolean; saving?: boolean; translate: Translate; onClose: () => void; onConfirm: (drafts: BulkSaleCancelDraft[]) => void }) {
   const [drafts, setDrafts] = useState<BulkSaleCancelDraft[]>(() => sales.map((sale) => ({ id: sale.id, receipt: sale.receipt, ...EMPTY_CANCEL_FIELDS })))
   const [openId, setOpenId] = useState<number | null>(sales[0]?.id || null)
-  const saleById = useMemo(() => new Map(sales.map((sale) => [sale.id, sale])), [sales])
-  const feeOverTotal = (draft: BulkSaleCancelDraft) => {
-    const sale = saleById.get(draft.id) || {}
-    return feeAllowed && !cancelFieldsFeeWithinSale(draft, sale)
-  }
-  const valid = drafts.every((draft) => cancelFieldsComplete(draft) && !feeOverTotal(draft))
+  const valid = useMemo(() => drafts.every(cancelFieldsComplete), [drafts])
   const dirty = drafts.some(cancelFieldsDirty)
   const update = (id: number, patch: Partial<CancelFieldsValue>) => setDrafts((current) => current.map((draft) => draft.id === id ? { ...draft, ...patch } : draft))
   const tr = (key: string, fallback: string) => translate(key, fallback)
@@ -46,7 +38,7 @@ export default function BulkSaleCancelModal({ sales, feeAllowed, saving = false,
         <div className="max-h-[calc(65*var(--app-vh))] space-y-2 overflow-y-auto">
           {drafts.map((draft, index) => {
             const open = openId === draft.id
-            const complete = cancelFieldsComplete(draft) && !feeOverTotal(draft)
+            const complete = cancelFieldsComplete(draft)
             return (
               <section key={draft.id} className="rounded-xl border border-gray-200 dark:border-gray-700">
                 <button type="button" className="flex min-h-11 w-full items-center gap-2 px-3 py-2 text-left" aria-expanded={open} disabled={saving} onClick={() => setOpenId(open ? null : draft.id)}>
@@ -56,7 +48,7 @@ export default function BulkSaleCancelModal({ sales, feeAllowed, saving = false,
                 </button>
                 {open ? (
                   <div className="border-t p-3 dark:border-gray-700">
-                    <CancelSaleFields value={draft} onChange={(patch) => update(draft.id, patch)} disabled={saving} withFee={feeAllowed} feeOverTotal={feeOverTotal(draft)} tr={tr} />
+                    <CancelSaleFields value={draft} onChange={(patch) => update(draft.id, patch)} disabled={saving} withFee={feeAllowed} tr={tr} />
                   </div>
                 ) : null}
               </section>

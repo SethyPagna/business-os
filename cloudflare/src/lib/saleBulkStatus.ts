@@ -2,7 +2,7 @@ import { getDb, type D1Compat } from './db';
 import type { Env } from '../index';
 import type { SessionUser } from './auth';
 import { getActionTier, isAdminControlUser } from './permissions';
-import { CANCEL_FEE_ADD_DENIED_CODE, CANCEL_FEE_DELETE_DENIED_CODE, CANCEL_FEE_EXCEEDS_SALE_CODE, CANCEL_FEE_MESSAGES, canRecordCancelFee, canRemoveCancelFee, cancelFeeWithinSaleTotal } from './cancelFeeRules';
+import { CANCEL_FEE_ADD_DENIED_CODE, CANCEL_FEE_DELETE_DENIED_CODE, CANCEL_FEE_MESSAGES, canRecordCancelFee, canRemoveCancelFee } from './cancelFeeRules';
 import { D1_MAX_BOUND_PARAMS } from './sqlBinding';
 import { VALID_SALE_STATUSES } from './salesStatus';
 import { allocateReturnedQuantities, guardSaleStatusTransition, heldQuantity, normalizeCancelReason, planSaleStockTransition, type TransitionItem, type StockStatement } from './saleTransitions';
@@ -394,8 +394,6 @@ export async function applySaleBulkStatus(env: Env, user: SessionUser, raw: Row)
             if (!Number.isSafeInteger(branchId) || branchId <= 0 || Number(sale.branch_active ?? 0) !== 1 || !branchCanSell(sale.branch_name))
                 throw new SaleBulkError('Cancellation expenses require a sale recorded at the active Shop.', 400);
             guards.push(bulkAssertion("EXISTS(SELECT 1 FROM sales s JOIN branches b ON b.id=s.branch_id WHERE s.id=@id AND s.branch_id=@branch AND b.is_active=1 AND lower(trim(b.name))='shop')", { id: expected.id, branch: branchId }));
-            if (!cancelFeeWithinSaleTotal({ feeUsd: Math.round(Math.max(0, Number(itemCancel!.fee_usd) || 0) * 100) / 100, feeKhr: Math.max(0, Math.round(Number(itemCancel!.fee_khr) || 0)), saleTotalUsd: Number(sale.total_usd), exchangeRate: Number(sale.exchange_rate) }))
-                throw new SaleBulkError(CANCEL_FEE_MESSAGES[CANCEL_FEE_EXCEEDS_SALE_CODE], 400, { code: CANCEL_FEE_EXCEEDS_SALE_CODE, sale_id: expected.id });
         }
         const cancelReason = itemCancel?.reason || request.cancel_reason;
         const cancelNote = itemCancel?.note || request.cancel_note;

@@ -212,8 +212,7 @@ async function run() {
   assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM sales WHERE sale_status='completed'").get().n,2)
   console.log('PASS conditional source status skips mismatches, including stale mismatches, and replays only changed members')
 
-  // N9 (SEC-SALES): a lost fee may not exceed the sale total, so these sales carry one.
-  f=fixture();seed(f,2);f.sql.exec('UPDATE sales SET total_usd=10,exchange_rate=4000 WHERE id IN (1,2)')
+  f=fixture();seed(f,2)
   const perSale=request(f,'cancelled','request-per-sale-fees')
   delete perSale.cancel_reason
   perSale.items=perSale.items.map((item,index)=>({...item,cancel:{reason:index?'other':'buyer_refused',...(index?{note:'address wrong'}:{}),fee_usd:index?2.5:1,fee_khr:index?0:4000,fee_note:`fee ${index+1}`}}))
@@ -247,8 +246,7 @@ async function run() {
   assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM fees').get().n,warehouseFeeCount)
   assert.equal(f.sql.prepare('SELECT sale_status FROM sales WHERE id=1').get().sale_status,'awaiting_payment')
 
-  // N9 (SEC-SALES): a lost fee may not exceed the sale total, so these sales carry one.
-  f=fixture();seed(f,1);f.sql.exec('UPDATE sales SET total_usd=10 WHERE id=1')
+  f=fixture();seed(f,1)
   const racedShopFee=request(f,'cancelled','request-shop-fee-race')
   delete racedShopFee.cancel_reason
   racedShopFee.items[0].cancel={reason:'mistake',fee_usd:1}
@@ -260,14 +258,13 @@ async function run() {
   assert.equal(f.sql.prepare('SELECT sale_status FROM sales WHERE id=1').get().sale_status,'awaiting_payment')
   console.log('PASS bulk cancellation expenses require an unchanged active Shop sale link before and inside the atomic batch')
 
-  // N9 (SEC-SALES): a lost fee may not exceed the sale total, so these sales carry one.
-  f=fixture();seed(f,1);f.sql.exec('UPDATE sales SET total_usd=10 WHERE id=1')
+  f=fixture();seed(f,1)
   const beforeSingleFee=snapshot(f)
   f.fail('INSERT INTO fees')
   const failedSingleFee=await f.call(sales,'/1/status',{sale_status:'cancelled',expected_updated_at:'same-second',client_request_id:'single-fee-failure',cancel_reason:'mistake',cancel_fee_usd:3},'PATCH')
   assert.equal(failedSingleFee.status,500)
   assert.equal(snapshot(f),beforeSingleFee)
-  f=fixture();seed(f,1);f.sql.exec('UPDATE sales SET total_usd=10 WHERE id=1')
+  f=fixture();seed(f,1)
   const singleFee=await f.call(sales,'/1/status',{sale_status:'cancelled',expected_updated_at:'same-second',client_request_id:'single-fee-success',cancel_reason:'mistake',cancel_fee_usd:3},'PATCH')
   assert.equal(singleFee.status,200,JSON.stringify(singleFee))
   assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM fees WHERE sale_id=1').get().n,1)

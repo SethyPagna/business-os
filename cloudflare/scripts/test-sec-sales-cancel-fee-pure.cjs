@@ -2,13 +2,15 @@
 // expense with only the Sales status permission and no ceiling, and
 // un-cancelling deleted that expense with no Expenses permission at all.
 // lib/cancelFeeRules.ts now asks the Expenses questions on every writer:
-// Add to record the fee, Delete at Full to remove it, and the fee may not
-// exceed the sale's total. Covers PATCH /:id/status and POST /bulk-status.
+// Add to record the fee and Delete at Full to remove it. Covers PATCH
+// /:id/status and POST /bulk-status. The fee has no ceiling: the owner ruled
+// (6 Oct 2026) that a lost fee may exceed the sale total, and this suite pins
+// that an over-total fee is recorded.
 //
 // Discriminating: on 4ab47676e (SEC_SALES_BASELINE=1) the Sales-only role
 // records the $3 expense, so the first assertion fails there. Controls: the
-// same role still cancels WITHOUT a fee; a role with Expenses records an
-// in-total fee (USD plus riel at the sale's rate) and un-cancels it; a
+// same role still cancels WITHOUT a fee; a role with Expenses records a fee
+// larger than the sale and un-cancels it; a
 // Review-tier Expenses role cannot delete the expense through an un-cancel.
 const assert = require('node:assert/strict')
 const h = require('./harness/sec_sales_route.cjs')
@@ -49,16 +51,12 @@ function setStatus(f, user, saleId, body) {
   assert.equal(feeCount(f, a), 0)
   console.log('PASS control: the same role still cancels without a fee')
 
-  // --- the fee cannot exceed the sale total --------------------------------
+  // --- the fee may exceed the sale total (owner ruling, 6 Oct 2026) -------
   const b = await recordedSale(f, 'n9-b')
-  const tooBig = await setStatus(f, salesAndExpenses, b, { sale_status: 'cancelled', cancel_reason: 'buyer_refused', cancel_fee_usd: 9, cancel_fee_khr: 4000 })
-  assert.equal(tooBig.status, 400, `$9 + 4,000 riel at 4,000 is $10 against a $9.50 sale: ${JSON.stringify(tooBig.body).slice(0, 200)}`)
-  assert.equal(tooBig.body.code, 'cancel_fee_exceeds_sale_total')
-  assert.equal(feeCount(f, b), 0)
-  const inTotal = await setStatus(f, salesAndExpenses, b, { sale_status: 'cancelled', cancel_reason: 'buyer_refused', cancel_fee_usd: 8.5, cancel_fee_khr: 4000 })
-  assert.equal(inTotal.status, 200, `control: $8.50 + 4,000 riel is exactly the $9.50 total: ${JSON.stringify(inTotal.body).slice(0, 200)}`)
+  const overTotal = await setStatus(f, salesAndExpenses, b, { sale_status: 'cancelled', cancel_reason: 'buyer_refused', cancel_fee_usd: 9, cancel_fee_khr: 4000 })
+  assert.equal(overTotal.status, 200, `$9 + 4,000 riel against a $9.50 sale is recorded: ${JSON.stringify(overTotal.body).slice(0, 200)}`)
   assert.equal(feeCount(f, b), 1)
-  console.log('PASS the fee is capped at the sale total, riel counted at the sale rate')
+  console.log('PASS a role with Expenses -> Add records a lost fee larger than the sale')
 
   // --- removing the fee needs Expenses -> Delete at Full -------------------
   const revertReview = await setStatus(f, expensesReview, b, { sale_status: 'completed' })
@@ -91,11 +89,8 @@ function setStatus(f, user, saleId, body) {
   assert.equal(bulkRefused.status, 403, `bulk: a Sales-only role must not book an expense: ${JSON.stringify(bulkRefused.body).slice(0, 200)}`)
   assert.equal(bulkRefused.body.code, 'cancel_fee_requires_expense_add')
   assert.equal(feeCount(f, c), 0)
-  const bulkTooBig = await bulkBody(salesAndExpenses, { reason: 'mistake', fee_usd: 20 })
-  assert.equal(bulkTooBig.status, 400, JSON.stringify(bulkTooBig.body).slice(0, 200))
-  assert.equal(bulkTooBig.body.code, 'cancel_fee_exceeds_sale_total')
-  const bulkOk = await bulkBody(salesAndExpenses, { reason: 'mistake', fee_usd: 3 })
-  assert.equal(bulkOk.status, 200, `control: bulk cancel with an in-total fee: ${JSON.stringify(bulkOk.body).slice(0, 200)}`)
+  const bulkOk = await bulkBody(salesAndExpenses, { reason: 'mistake', fee_usd: 20 })
+  assert.equal(bulkOk.status, 200, `control: bulk cancel with a fee larger than the sale: ${JSON.stringify(bulkOk.body).slice(0, 200)}`)
   assert.equal(feeCount(f, c), 1)
   h.setUser(expensesReview)
   const bulkRevert = await h.call(f.route, 'POST', '/bulk-status', {
@@ -106,7 +101,7 @@ function setStatus(f, user, saleId, body) {
   assert.equal(bulkRevert.status, 403, `bulk un-cancel needs Expenses Delete at Full: ${JSON.stringify(bulkRevert.body).slice(0, 200)}`)
   assert.equal(bulkRevert.body.code, 'uncancel_requires_expense_delete')
   assert.equal(feeCount(f, c), 1)
-  console.log('PASS the grouped status change enforces the same Expenses rule and cap')
+  console.log('PASS the grouped status change enforces the same Expenses rule')
 
   // --- undo/redo of that group re-asks the questions --------------------------
   // Undoing the grouped cancel deletes its fee; redoing it records the fee again.

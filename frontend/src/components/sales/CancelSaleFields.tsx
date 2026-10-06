@@ -37,15 +37,13 @@ export function cancelFieldsDirty(value: CancelFieldsValue): boolean {
     || value.cancel_fee_note.trim().length > 0
 }
 
-export default function CancelSaleFields({ value, onChange, disabled = false, withFee, feeOverTotal = false, tr }: {
+export default function CancelSaleFields({ value, onChange, disabled = false, withFee, tr }: {
   value: CancelFieldsValue
   onChange: (patch: Partial<CancelFieldsValue>) => void
   disabled?: boolean
   /** A lost fee belongs to ONE sale, so the single dialog and each bulk row ask for it
    * -- and only for a role that may add expenses (N9, utils/cancelFeeRules.ts). */
   withFee: boolean
-  /** The typed fee is more than the sale's total; the Worker refuses it (N9). */
-  feeOverTotal?: boolean
   tr: Translate
 }) {
   const noteRequired = value.cancel_reason === 'other'
@@ -92,9 +90,6 @@ export default function CancelSaleFields({ value, onChange, disabled = false, wi
             placeholder={tr('cancel_fee_note_placeholder', 'What this fee was (e.g. delivery to buyer)')}
             aria-label={tr('cancel_fee_note_placeholder', 'What this fee was (e.g. delivery to buyer)')}
           />
-          {feeOverTotal ? (
-            <p role="alert" className="text-xs leading-relaxed text-red-600 dark:text-red-400">{tr('cancel_fee_exceeds_sale_total', 'The lost fee cannot be more than the sale total.')}</p>
-          ) : null}
         </div>
       ) : null}
     </div>

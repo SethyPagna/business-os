@@ -4224,7 +4224,6 @@
   "membership_discount_mismatch": "The membership discount does not match the points redeemed. Refresh the till and redeem the points again. Nothing was recorded.",
   "sale_shift_required": "Register today's opening cash before recording a sale. Nothing was recorded.",
   "sale_shift_closed": "Your shift has ended. Reopen it from Shift history before recording a sale. Nothing was recorded.",
-  "cancel_fee_exceeds_sale_total": "The lost fee cannot be more than the sale total.",
   "cancel_fee_requires_expense_add": "Recording a lost fee adds an expense, and your role cannot add expenses. Cancel without the fee, or ask an administrator.",
   "uncancel_requires_expense_delete": "Un-cancelling removes this sale's lost-fee expense, and your role cannot delete expenses. Ask an administrator.",
   "sale_discount_exceeds_price": "A fixed discount cannot be larger than the item price. Lower the discount or raise the price.",

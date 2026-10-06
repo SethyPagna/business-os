@@ -4,7 +4,6 @@ import Loader2 from 'lucide-react/dist/esm/icons/loader-2.js'
 import InfoHint from '../shared/InfoHint.tsx'
 import Modal from '../shared/Modal.tsx'
 import CancelSaleFields, { EMPTY_CANCEL_FIELDS, cancelFieldsComplete, cancelFieldsDirty, type CancelFieldsValue } from './CancelSaleFields.tsx'
-import { cancelFieldsFeeWithinSale } from '../../utils/cancelFeeRules.ts'
 
 type TranslateFn = (key: string) => string | undefined
 
@@ -24,10 +23,8 @@ type CancelSaleModalProps = {
   // (each fee row links to ONE sale), so it is only offered when
   // cancelling a single sale.
   bulk?: boolean
-  // N9: recording a lost fee adds an expense (Expenses -> Add), and the fee
-  // cannot exceed the cancelled sale's total.
+  // N9: recording a lost fee adds an expense (Expenses -> Add).
   feeAllowed: boolean
-  sale?: { total_usd?: unknown; exchange_rate?: unknown }
   saving?: boolean
   onClose: () => void
   onConfirm: (payload: SaleCancelPayload) => void
@@ -39,15 +36,14 @@ type CancelSaleModalProps = {
 // movement note naming the cancellation, and records the optional lost
 // fee (e.g. a delivery fee already paid out that the buyer refused to
 // cover) as a linked expense row on the Expenses page.
-export default function CancelSaleModal({ label, bulk = false, feeAllowed, sale = {}, saving = false, onClose, onConfirm, t }: CancelSaleModalProps) {
+export default function CancelSaleModal({ label, bulk = false, feeAllowed, saving = false, onClose, onConfirm, t }: CancelSaleModalProps) {
   const [fields, setFields] = useState<CancelFieldsValue>(EMPTY_CANCEL_FIELDS)
 
   useEffect(() => { setFields(EMPTY_CANCEL_FIELDS) }, [label])
 
   const tr = (key: string, fallback: string): string => t(key) || fallback
   const withFee = !bulk && feeAllowed
-  const feeOverTotal = withFee && !cancelFieldsFeeWithinSale(fields, sale)
-  const canConfirm = cancelFieldsComplete(fields) && !feeOverTotal && !saving
+  const canConfirm = cancelFieldsComplete(fields) && !saving
 
   const confirm = () => {
     if (!canConfirm || !fields.cancel_reason) return
@@ -85,7 +81,7 @@ export default function CancelSaleModal({ label, bulk = false, feeAllowed, sale 
       headerExtra={<InfoHint label={tr('cancel_sale_title', 'Cancel sale')} text={hint} />}
     >
       <div className="space-y-3">
-        <CancelSaleFields value={fields} onChange={(patch) => setFields((current) => ({ ...current, ...patch }))} disabled={saving} withFee={withFee} feeOverTotal={feeOverTotal} tr={tr} />
+        <CancelSaleFields value={fields} onChange={(patch) => setFields((current) => ({ ...current, ...patch }))} disabled={saving} withFee={withFee} tr={tr} />
         <div className="flex justify-end border-t border-gray-200 pt-3 dark:border-gray-700">
           <button
             type="button"

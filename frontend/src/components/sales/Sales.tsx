@@ -506,7 +506,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
   // routes -- 'single' feeds handleStatusChange with the collected
   // reason/fee payload, 'bulk' feeds handleBulkStatusUpdate.
   const [cancelPrompt, setCancelPrompt] = useState<
-    | { mode: 'single'; saleId: number; notes: string; recordHistory: boolean; label: string; sale: { total_usd?: unknown; exchange_rate?: unknown } }
+    | { mode: 'single'; saleId: number; notes: string; recordHistory: boolean; label: string }
     | { mode: 'bulk'; sales: SaleRecord[]; requestSales: SaleRecord[]; sourceStatus: string }
     | null
   >(null)
@@ -1173,7 +1173,6 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
         notes,
         recordHistory,
         label: String(previousSale?.receipt_number || `#${numericId}`),
-        sale: { total_usd: previousSale?.total_usd, exchange_rate: previousSale?.exchange_rate },
       })
       return false
     }
@@ -1336,7 +1335,7 @@ export default function Sales({ embedded = false }: { embedded?: boolean }) {
       // S4-41: the Worker will not give a Not Paid sale that still owes money a
       // paid status without a payment. The payment form always sends one, so this
       // is an Undo or Redo (or its retry) asking for it: say why, in the shop's language.
-      // N9: a lost-fee refusal (Expenses rights or the sale-total cap), in the shop's language.
+      // N9: a lost-fee refusal (Expenses rights), in the shop's language.
       const feeRefusal = cancelFeeRefusalKey(problem.code)
       if (feeRefusal) { notify(t(feeRefusal), 'error'); return false }
       notify(problem.code === 'insufficient_payment_for_status'
@@ -2297,7 +2296,7 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
         savePendingBulkRequest(null)
         void loadSales(true)
       }
-      // N9: a lost-fee refusal (Expenses rights or the sale-total cap), in the shop's language.
+      // N9: a lost-fee refusal (Expenses rights), in the shop's language.
       const feeRefusal = cancelFeeRefusalKey((error as { code?: string } | null)?.code)
       if (feeRefusal) { notify(t(feeRefusal), 'error'); return }
       notify(unpaid
@@ -3118,7 +3117,6 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
             <CancelSaleModal
               label={cancelPrompt.label}
               feeAllowed={canRecordCancelFee}
-              sale={cancelPrompt.sale}
               saving={cancelSaving}
               onClose={() => { if (!cancelSaving) setCancelPrompt(null) }}
               onConfirm={async (payload) => {
@@ -3130,7 +3128,7 @@ ${buildEquation({ key: 'gross_profit', fallback: 'Gross profit', usd: profitUsd 
             />
           ) : (
             <BulkSaleCancelModal
-              sales={cancelPrompt.sales.map((sale) => ({ id: Number(sale.id), receipt: String(sale.receipt_number || `#${sale.id}`), total_usd: sale.total_usd, exchange_rate: sale.exchange_rate }))}
+              sales={cancelPrompt.sales.map((sale) => ({ id: Number(sale.id), receipt: String(sale.receipt_number || `#${sale.id}`) }))}
               feeAllowed={canRecordCancelFee}
               saving={cancelSaving}
               onClose={() => { if (!cancelSaving) setCancelPrompt(null) }}
