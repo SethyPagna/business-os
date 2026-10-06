@@ -73,7 +73,7 @@ export type RevertRefusalCode =
   | 'revert_stock_in_line_edited' | 'revert_nothing_to_revert' | 'revert_not_revertible' | 'revert_session_generation'
   | 'revert_lineage_unresolved' | 'revert_insufficient_branch_stock' | 'revert_insufficient_lot_stock'
   | 'revert_lot_moved' | 'revert_no_received_date' | 'revert_from_sale' | 'revert_from_return'
-  | 'revert_session_undone' | 'revert_from_merge'
+  | 'revert_session_undone' | 'revert_from_merge' | 'revert_branch_inactive'
 
 export type RevertRefusalParams = Record<string, string | number>
 
@@ -324,6 +324,7 @@ export async function applyMovementRevert(db: D1Compat, m: RevertMovementRow, ac
   if (!productId || !branchId) {
     return refuse(400, 'revert_not_tied', 'This movement is not tied to a product and branch, so it cannot be reverted here.')
   }
+  if (await branchClosed(db, branchId)) return BRANCH_CLOSED
   // P3-L6. A movement that moved units into or out of a TAGGED held row is
   // half of a two-ledger transition (sellable stock AND
   // damaged_stock_lots.quantity_remaining). The allowlist above is keyed on
@@ -570,6 +571,7 @@ export async function applyMovementRevert(db: D1Compat, m: RevertMovementRow, ac
   try {
     await db.batch([
       { sql: ALREADY_REVERTED_GUARD, params: { ref: counterRef, movementId: Number(m.id) } },
+      { sql: BRANCH_OPEN_GUARD, params: { branchId } },
       receiptRowGuard(m),
       ...statements,
       { sql: 'DELETE FROM stock_session_guards', params: {} },
@@ -580,6 +582,7 @@ export async function applyMovementRevert(db: D1Compat, m: RevertMovementRow, ac
     if (await revertExists(db, counterRef)) return ALREADY_REVERTED
     const message = err instanceof Error ? err.message : String(err)
     if (/CHECK constraint failed/i.test(message)) {
+      if (await branchClosed(db, branchId)) return BRANCH_CLOSED
       // The in-batch receipt guard: an Edit or a session Undo landed after the
       // reads above. Say which, instead of a generic "stock changed".
       const changed = await receiptRowRefusal(db, m)
@@ -604,6 +607,24 @@ const ALREADY_REVERTED_GUARD = `INSERT INTO stock_session_guards (guard_value)
     OR NOT EXISTS (SELECT 1 FROM inventory_movements WHERE id = @movementId) THEN 0 ELSE 1 END`
 
 const ALREADY_REVERTED: RevertResult = refuse(409, 'already_reverted', 'This movement has already been reverted.')
+
+// REVERT-SET (6 Oct 2026): a closed branch (is_active = 0 -- the Shop -> LC
+// Store consolidation retires Shop and moves its stock as official transfers)
+// neither takes stock back nor gives any: reverting a change made there would
+// put units into, or take them out of, a branch that no longer holds them. The
+// consolidation closes the same branch's History entries
+// (undo_closed:branch_retired); this is the Stock Changes half. A NULL flag is
+// a legacy open branch (0001's default is 1). Read first for a clean answer
+// and asserted in the batch, so closing the branch mid-revert aborts it.
+const BRANCH_OPEN_GUARD = `INSERT INTO stock_session_guards (guard_value)
+  SELECT CASE WHEN COALESCE((SELECT is_active FROM branches WHERE id = @branchId), 1) = 0 THEN 0 ELSE 1 END`
+
+const BRANCH_CLOSED: RevertResult = refuse(409, 'revert_branch_inactive', 'This change was made at a branch that is closed now, so it cannot be reverted. Make a new change instead. Nothing was changed.')
+
+async function branchClosed(db: D1Compat, branchId: number): Promise<boolean> {
+  const row = await db.prepare('SELECT is_active FROM branches WHERE id = @branchId').get<{ is_active: number | null }>({ branchId })
+  return row != null && row.is_active != null && Number(row.is_active) === 0
+}
 
 // RET-D (owner, 5 Oct 2026): a short-stock refusal names the movement that
 // took the units since this one -- WHY and WHERE (lib/stockRefusalBlocker.ts).

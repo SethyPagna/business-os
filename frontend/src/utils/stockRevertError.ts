@@ -22,6 +22,7 @@ export const STOCK_REVERT_ERRORS: Record<string, readonly [key: string, fallback
   revert_insufficient_lot_stock: ['revert_err_lot_stock', 'Cannot revert: only {available} left under this received date at this branch, {needed} needed. Nothing was changed.'],
   revert_lot_moved: ['revert_err_lot_moved', 'This received date now belongs to another product (the products were merged), so it cannot be reverted here. Nothing was changed.'],
   revert_no_received_date: ['revert_err_no_received_date', 'This change was saved without a received date, and only {available} of the {needed} units at {branch} have none. Nothing was changed. Use Remove Stock and choose the received date instead.'],
+  revert_branch_inactive: ['revert_err_branch_inactive', 'This change was made at a branch that is closed now, so it cannot be reverted. Make a new change instead. Nothing was changed.'],
   revert_forbidden: ['revert_err_forbidden', 'Reverting a stock change needs Full Access to Inventory.'],
   movement_not_found: ['revert_err_movement_not_found', 'This change no longer exists. Refresh and try again.'],
 }

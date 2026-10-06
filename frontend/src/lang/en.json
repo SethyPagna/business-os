@@ -5285,6 +5285,7 @@
   "revert_err_lot_moved": "This received date now belongs to another product (the products were merged), so it cannot be reverted here. Nothing was changed.",
   "revert_err_no_received_date": "This change was saved without a received date, and only {available} of the {needed} units at {branch} have none. Nothing was changed. Use Remove Stock and choose the received date instead.",
   "revert_err_forbidden": "Reverting a stock change needs Full Access to Inventory.",
+  "revert_err_branch_inactive": "This change was made at a branch that is closed now, so it cannot be reverted. Make a new change instead. Nothing was changed.",
   "revert_err_movement_not_found": "This change no longer exists. Refresh and try again.",
   "revert_err_session_undone": "This row belongs to a stock-in session that was undone, so its stock is already taken back. Redo that session from Stock-in Sessions first. Nothing was changed.",
   "revert_err_from_merge": "This change came from merging duplicate products. Undo the merge from History instead. Nothing was changed.",
