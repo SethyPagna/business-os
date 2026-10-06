@@ -118,9 +118,12 @@ await runTest('a pack without the key, or one that cannot load, keeps the Worker
 
 await runTest('http.ts restates before it throws, so every surface that shows error.message is covered', () => {
   const http = read(FRONTEND, 'src', 'api', 'http.ts')
-  assert.match(http, /import \{ restateBranchRefusal, restateRedirectDeclined \} from '\.\/branchRefusalLanguage\.ts'/)
-  assert.ok(http.indexOf('await restateBranchRefusal(apiError)') > http.indexOf('const apiError = createApiError(res.status, parsed, text)'), 'after the error is built')
-  assert.ok(http.indexOf('await restateBranchRefusal(apiError)') < http.indexOf('throw apiError || new Error('), 'and before it is thrown')
+  // Loaded on the refusal path only (dynamic import) so the storefront catalog closure does not carry it.
+  assert.ok(http.includes("import('./branchRefusalLanguage.ts')"), 'loaded lazily')
+  assert.ok(!/^import .* from './branchRefusalLanguage.ts'/m.test(http), 'never a static import')
+  const call = http.indexOf('.restateBranchRefusal(apiError)')
+  assert.ok(call > http.indexOf('const apiError = createApiError(res.status, parsed, text)'), 'after the error is built')
+  assert.ok(call < http.indexOf('throw apiError || new Error('), 'and before it is thrown')
 })
 
 await runTest('surfaces that localize by t() map the new codes and the old English a Worker in flight still sends', () => {
