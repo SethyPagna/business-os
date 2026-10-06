@@ -13,6 +13,7 @@ import InvoiceLedgerSummary from './InvoiceLedgerSummary.tsx'
 import InvoiceDetailFloat from './InvoiceDetailFloat.tsx'
 import CopyableId from '../shared/CopyableId.tsx'
 import { batchDisplayLabel } from '../../utils/batchLabel.ts'
+import { stockInInvoiceBranchNames } from '../../utils/stockInInvoiceBranches.ts'
 
 type TranslateFn = (key: string) => string | undefined
 
@@ -74,10 +75,8 @@ export default function StockInInvoicesSection({ t }: StockInInvoicesSectionProp
     return String(group.supplier_name || '').trim() || tr('no_supplier_recorded', 'No supplier')
   }
 
-  const groupBranchNames = (group: InvoiceGroup): string => {
-    const ids = String(group.branch_ids || '').split(',').map((id) => id.trim()).filter(Boolean)
-    return ids.map((id) => branchNameById.get(id) || `#${id}`).join(', ')
-  }
+  // A received lot names the branch AS IT WAS when received; the live branch list is only the fallback.
+  const groupBranchNames = (group: InvoiceGroup): string => stockInInvoiceBranchNames(group, branchNameById)
 
   const paymentChip = (line: InvoiceLine) => {
     if (line.payment_status === 'credit') {

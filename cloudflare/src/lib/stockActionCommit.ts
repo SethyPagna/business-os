@@ -338,10 +338,10 @@ export async function applyUnifiedStockAdd(db: D1Compat, input: UnifiedStockAddI
     },
     {
       sql: `INSERT OR IGNORE INTO product_batches
-              (variant_product_id, batch_key, lot_code, received_at, is_active, notes, batch_number, supplier_id, supplier_name, unit_cost_usd, received_branch_id)
+              (variant_product_id, batch_key, lot_code, received_at, is_active, notes, batch_number, supplier_id, supplier_name, unit_cost_usd, received_branch_id, received_branch_name)
             SELECT @productId, @batchKey, @lotCode, @receivedAt, 1, @reason,
               (SELECT COALESCE(MAX(batch_number), 0) + 1 FROM product_batches WHERE variant_product_id=@productId),
-              @supplierId, @supplierName, @costPriceUsd, @branchId
+              @supplierId, @supplierName, @costPriceUsd, @branchId, (SELECT name FROM branches WHERE id=@branchId)
             WHERE ${guard}`,
       params,
     },
@@ -379,7 +379,8 @@ export async function applyUnifiedStockAdd(db: D1Compat, input: UnifiedStockAddI
       // instead of borrowing a sibling receipt's price.
       sql: `UPDATE product_batches SET received_quantity = COALESCE(received_quantity, 0) + @quantity,
               received_cost_usd = ROUND(COALESCE(received_cost_usd, 0) + COALESCE(@totalCostUsd, 0), 4),
-              received_branch_id = CASE WHEN received_quantity = 0 THEN @branchId ELSE COALESCE(received_branch_id, @branchId) END
+              received_branch_id = CASE WHEN received_quantity = 0 THEN @branchId ELSE COALESCE(received_branch_id, @branchId) END,
+              received_branch_name = CASE WHEN received_quantity = 0 OR received_branch_id IS NULL THEN (SELECT name FROM branches WHERE id=@branchId) ELSE received_branch_name END
             WHERE variant_product_id = @productId AND batch_key = @batchKey AND ${guard}`,
       params,
     },

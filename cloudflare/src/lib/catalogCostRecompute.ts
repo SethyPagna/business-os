@@ -2,6 +2,12 @@ import type { D1Compat } from './db'
 import type { MergedCostOutlier } from './productDetailRule'
 import { weightedMeanMoney4 } from './moneyPrecision'
 
+// Historical label (owner rule: old records are never relabelled): the row's own branch-name snapshot
+// when it has a non-blank one, else the live directory name. The SAME expression as
+// branchHistoryNameSql in lib/stockInSessionsQuery.ts; test-cutover-ld-historical-readers-native.cjs pins every copy.
+const branchHistoryNameSql = (snapshot: string, fallback: string): string =>
+  `CASE WHEN trim(COALESCE(${snapshot},''),char(9,10,11,12,13,32,160,5760,8192,8193,8194,8195,8196,8197,8198,8199,8200,8201,8202,8232,8233,8239,8287,12288,65279))<>'' THEN ${snapshot} ELSE ${fallback} END`
+
 // Catalog receipts are observed purchase prices, not an identity-merge
 // heuristic. Owner ruling (2026-09-25, superseding the distinct-cost mean):
 // the catalog cost is the QUANTITY-WEIGHTED mean of what is on the shelf,
@@ -475,7 +481,7 @@ export async function getCatalogCostBreakdown(db: D1Compat, productId: number): 
   if (!product) return null
 
   const lots = await db.prepare(`
-    SELECT pb.id, pb.batch_number, pb.lot_code, pb.received_at, pb.unit_cost_usd, pb.is_active, b.name AS branch_name,
+    SELECT pb.id, pb.batch_number, pb.lot_code, pb.received_at, pb.unit_cost_usd, pb.is_active, ${branchHistoryNameSql('pb.received_branch_name', 'b.name')} AS branch_name,
       (SELECT COALESCE(SUM(bbs.quantity), 0) FROM branch_batch_stock bbs WHERE bbs.batch_id = pb.id) AS remaining_quantity
     FROM product_batches pb
     LEFT JOIN branches b ON b.id = pb.received_branch_id
