@@ -958,6 +958,12 @@ app.get('/system/integration-doctor', requireAuth, async (c) => {
   return c.json({ item: { checks, runtime }, checks, ok })
 })
 
+// Kept for tabs still running an older build: the Bulk Import "Browse" button of
+// those builds posts here, and a plain-text 404 makes the live client mark the
+// server offline and refetch everything. Remove once no deployed build calls it.
+const NOT_APPLICABLE_CLOUD = { error: 'Not applicable when running fully on Cloudflare -- there is no local filesystem or Postgres instance to manage.', code: 'not_applicable_cloud_mode' }
+app.post('/system/pick-folder', requireAuth, (c) => c.json(NOT_APPLICABLE_CLOUD, 410))
+
 // Real Google Drive OAuth + one-way backup push -- see lib/googleDrive.ts
 // for exactly what's implemented (connect/disconnect/status + pushing the
 // existing R2 backup snapshot into Drive) vs. what's explicitly still out
