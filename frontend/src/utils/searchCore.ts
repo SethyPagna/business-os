@@ -292,14 +292,26 @@ function fieldTerms(value: unknown): FieldTerms {
   return { terms: [...terms], joins: [...joins], text: tokens.join(' ') }
 }
 
-// The row's whole search document: every index term, sorted and unique.
-// Phase 2 stores this as products.search_doc; phase 1 uses it for parity.
+// Bump when docTerms output changes shape; products.search_doc_version
+// records the version each stored document was written with.
+export const SEARCH_DOC_VERSION = 1
+
+// Joined terms (sk ii -> skii) are stored in the document behind this mark.
+// The server's FTS5 table is declared with tokenchars '~', so "~skii" is one
+// token that only a joined-prefix query can reach, which is what keeps the
+// server's matching level-for-level equal to the client's (terms and joins
+// are separate postings there).
+export const SEARCH_DOC_JOIN_MARK = '~'
+
+// The row's whole search document: every index term (name and brand), sorted
+// and unique, joined terms behind SEARCH_DOC_JOIN_MARK. Stored as
+// products.search_doc and indexed by products_search_fts (migration 0233).
 export function docTerms(row: SearchCoreRow): string {
   const all = new Set<string>()
   for (const value of [row.name, row.brand]) {
     const field = fieldTerms(value)
     for (const term of field.terms) all.add(term)
-    for (const term of field.joins) all.add(term)
+    for (const term of field.joins) all.add(SEARCH_DOC_JOIN_MARK + term)
   }
   return [...all].sort().join(' ')
 }
